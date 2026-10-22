@@ -78,9 +78,21 @@ pub(crate) fn refused_by(clause: &str) -> EffectSet {
 /// builtin itself, where it runs. A builtin that writes data through the
 /// transaction is refused where its write is made, by the statement that makes
 /// it.
+///
+/// A `LIVE` clause also refuses a builtin that writes to an external system
+/// (`http::post`, `file::put`). It is evaluated at notification time inside the
+/// triggering write's transaction, so such a call would let a subscriber inject
+/// an external side effect into another user's write (GHSA-pvv9-h693-m8r4). The
+/// other clauses leave an external write unrefused here: they are stored by a
+/// definer who may author one through a `DEFINE EVENT`, and a read of an
+/// external system (`http::get`) is left to every clause, so a notification may
+/// still enrich itself without leaving a side effect behind.
 pub(crate) fn refused_builtin_by(clause: &str) -> EffectSet {
 	match clause {
 		"VALUE" | "DEFAULT" => EffectSet::BLOCKING,
+		"LIVE" => {
+			EffectSet::WRITES_EXTERNAL.union(EffectSet::ADVANCES_STATE).union(EffectSet::BLOCKING)
+		}
 		_ => EffectSet::ADVANCES_STATE.union(EffectSet::BLOCKING),
 	}
 }
@@ -93,6 +105,8 @@ pub(crate) fn effect_text(effects: EffectSet) -> &'static str {
 		"runs code whose effects cannot be known where the clause is defined"
 	} else if effects.contains(EffectSet::WRITES_DATA) {
 		"writes data"
+	} else if effects.contains(EffectSet::WRITES_EXTERNAL) {
+		"writes to an external system"
 	} else if effects.contains(EffectSet::CHANGES_CATALOG) {
 		"changes the schema"
 	} else if effects.contains(EffectSet::ADVANCES_STATE) {

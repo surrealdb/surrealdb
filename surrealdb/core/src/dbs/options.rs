@@ -122,6 +122,11 @@ pub(crate) enum NoWriteFrame {
 	/// A field migration's transform. It depends on `$value` alone, so it may
 	/// neither write nor dereference a record.
 	Migration,
+	/// A LIVE query's subscriber-authored projection, condition or FETCH clause.
+	/// It is evaluated at notification time inside the triggering write's
+	/// transaction, so a write reached from it would let a subscriber inject
+	/// side effects into another user's write (GHSA-pvv9-h693-m8r4).
+	LiveClause,
 }
 
 impl NoWriteFrame {
@@ -135,6 +140,7 @@ impl NoWriteFrame {
 			Self::FieldDefault => Some("DEFAULT"),
 			Self::FieldAssert => Some("ASSERT"),
 			Self::Migration => Some("MIGRATE"),
+			Self::LiveClause => Some("LIVE"),
 			Self::SurrealismReadOnly => None,
 		}
 	}
@@ -149,9 +155,12 @@ impl NoWriteFrame {
 	/// A schema clause refuses a builtin that blocks, and one that advances
 	/// state outside the transaction unless the clause is a `VALUE` or
 	/// `DEFAULT` ([`crate::exec::clause_effects::refused_builtin_by`]); a
-	/// builtin that writes data through the transaction is refused where the
-	/// write is made. A read-only Surrealism function refuses every builtin
-	/// that changes state ([`crate::expr::method::mutates_state_builtin`]).
+	/// `LIVE` clause also refuses one that writes to an external system, so a
+	/// subscriber-authored clause cannot exfiltrate another user's write
+	/// (GHSA-pvv9-h693-m8r4); a builtin that writes data through the transaction
+	/// is refused where the write is made. A read-only Surrealism function
+	/// refuses every builtin that changes state
+	/// ([`crate::expr::method::mutates_state_builtin`]).
 	pub(crate) fn refuses_builtin_call(self, name: &str, effects: EffectSet) -> bool {
 		match self.clause() {
 			Some(clause) => {
@@ -579,6 +588,7 @@ mod tests {
 			NoWriteFrame::FieldAssert,
 			NoWriteFrame::SurrealismReadOnly,
 			NoWriteFrame::Migration,
+			NoWriteFrame::LiveClause,
 		];
 		for frame in frames {
 			let expected = match frame {
@@ -590,6 +600,7 @@ mod tests {
 				NoWriteFrame::FieldDefault => Some("DEFAULT"),
 				NoWriteFrame::FieldAssert => Some("ASSERT"),
 				NoWriteFrame::Migration => Some("MIGRATE"),
+				NoWriteFrame::LiveClause => Some("LIVE"),
 				NoWriteFrame::SurrealismReadOnly => None,
 			};
 			let raised = frame.side_effect_error("`CREATE` writes data");
@@ -614,7 +625,8 @@ mod tests {
 	/// A schema clause refuses a call that blocks, and one that advances state
 	/// outside the transaction unless it is a `VALUE` or `DEFAULT`; it leaves
 	/// randomness, the clock and a write through the transaction to be judged
-	/// elsewhere.
+	/// elsewhere. A `LIVE` clause alone also refuses a write to an external
+	/// system, and no clause refuses a read of one.
 	#[test]
 	fn a_clause_frame_refuses_state_advancing_and_blocking_builtins() {
 		let advances = [
@@ -623,6 +635,7 @@ mod tests {
 			(NoWriteFrame::ComputedField, true),
 			(NoWriteFrame::FieldAssert, true),
 			(NoWriteFrame::Migration, true),
+			(NoWriteFrame::LiveClause, true),
 			(NoWriteFrame::FieldValue, false),
 			(NoWriteFrame::FieldDefault, false),
 		];
@@ -641,6 +654,30 @@ mod tests {
 					EffectSet::OPAQUE_BODY.union(EffectSet::WRITES_DATA)
 				),
 				"{frame:?}"
+			);
+			// Only a LIVE clause refuses a builtin that writes to an external
+			// system: it runs inside another user's triggering write, so such a
+			// call would exfiltrate that write (GHSA-pvv9-h693-m8r4). Every
+			// other clause, `VALUE` and `DEFAULT` included, leaves an external
+			// write to be judged elsewhere, and no clause refuses a read of an
+			// external system, which may enrich a value without a side effect.
+			let external = frame == NoWriteFrame::LiveClause;
+			assert_eq!(
+				frame.refuses_builtin_call(
+					"http::post",
+					EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL)
+				),
+				external,
+				"http::post under {frame:?}"
+			);
+			assert_eq!(
+				frame.refuses_builtin_call("file::put", EffectSet::WRITES_EXTERNAL),
+				external,
+				"file::put under {frame:?}"
+			);
+			assert!(
+				!frame.refuses_builtin_call("http::get", EffectSet::READS_EXTERNAL),
+				"http::get under {frame:?}"
 			);
 		}
 	}

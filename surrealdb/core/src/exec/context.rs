@@ -292,10 +292,13 @@ pub struct RootContext {
 	/// free of observable side effects, and a `COMPUTED`
 	/// body runs on every read of the field and under the definer's auth. Both
 	/// are enforced twice, because a write can be reached by either route: the
-	/// write path refuses a statement it runs under the frame, and
-	/// `frame::options_for_frame` mirrors the frame into `Options::no_write`
-	/// for code that reaches the datastore through the options, such as a
-	/// Surrealism module call.
+	/// write path refuses a statement it runs under the frame, and the frame is
+	/// mirrored into `Options::no_write` for code that rebuilds an execution
+	/// frame from the options rather than carrying this context, such as an
+	/// embedded script's `surrealdb.query()` bridge, `api::invoke`, or a
+	/// Surrealism module call. `ExecutionContext::refusing_writes` mirrors it
+	/// for a context derived from this one; `frame::options_for_frame` for a
+	/// frame built from the options directly.
 	///
 	/// This is not [`RootContext::skip_fetch_perms`], and the two move
 	/// independently: a *write* permission predicate sets that and still
@@ -1491,6 +1494,15 @@ impl ExecutionContext {
 	/// A frame already refusing a write is left alone: the two frames refuse
 	/// alike, so which of them a nested one names changes nothing, and the
 	/// outer one is the one the caller entered. See [`RootContext::no_write`].
+	///
+	/// The refusal is set on [`Options::no_write`] as well as on
+	/// [`RootContext::no_write`], the two halves [`RootContext::no_write`]
+	/// describes. A builtin that rebuilds an execution frame from the options
+	/// rather than carrying this context across - an embedded script's
+	/// `surrealdb.query()` bridge, `api::invoke` - seeds the new frame's refusal
+	/// from the options ([`crate::exec::entry::frame`]), so a write reached
+	/// through one of them is refused the same way a write made directly here
+	/// is.
 	pub fn refusing_writes(self, frame: crate::dbs::NoWriteFrame) -> Self {
 		if self.root().no_write.is_some() {
 			return self;
@@ -1502,6 +1514,9 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.no_write = Some(frame);
+		if let Some(options) = root.options.as_mut() {
+			options.no_write = options.no_write.or(Some(frame));
+		}
 		new
 	}
 

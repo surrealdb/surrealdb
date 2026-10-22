@@ -137,7 +137,20 @@ async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value>
 		if !this.context.get_capabilities().allows_function_name(name) {
 			Err(crate::dbs::capabilities::Error::FunctionNotAllowed(name.to_string()).into())
 		} else {
-			fnc::asynchronous(this.context, this.opt, this.doc, name, args).await
+			// The active frame may refuse this builtin before it runs: a LIVE
+			// clause refuses one that writes to an external system, and every
+			// schema-clause frame one that advances state or blocks. The bridge
+			// dispatches a builtin without passing the VM's own guard, so the
+			// refusal is applied here, from the effects the registry declares and
+			// the frame the options carry. Every refusable builtin (`http::post`,
+			// `file::put`, `sequence::nextval`, `sleep`) is async, so the
+			// synchronous bridge has none to refuse.
+			let effects =
+				this.context.function_registry().get(name).map_or(EffectSet::PURE, |f| f.effects());
+			match crate::fnc::script::refuse_builtin_in_frame(this.opt.no_write, name, effects) {
+				Ok(()) => fnc::asynchronous(this.context, this.opt, this.doc, name, args).await,
+				Err(err) => Err(err),
+			}
 		}
 	};
 	// Convert any response error

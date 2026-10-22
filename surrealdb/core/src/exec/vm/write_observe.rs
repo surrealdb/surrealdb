@@ -379,7 +379,14 @@ async fn notify_unit(
 	let frame = subscriber_frame(ctx, subscription, session, images, |_| {
 		(Arc::clone(&before), Arc::clone(&after))
 	});
-	let frame = frame.with_replaced_principal(deriving_frozen(&frame), &auth);
+	// The subscriber's WHERE, projection and FETCH clauses run in this frame at
+	// notification time, inside the triggering write's transaction. Refuse
+	// writes so a subscriber-authored clause cannot run a write subquery there
+	// (GHSA-pvv9-h693-m8r4). The `deriving` frame above keeps writing enabled,
+	// as its only job is the table owner's own reduction of the record.
+	let frame = frame
+		.with_replaced_principal(deriving_frozen(&frame), &auth)
+		.refusing_writes(crate::dbs::NoWriteFrame::LiveClause);
 	state.frames = program.permissions.iter().map(|spec| spec.context(&frame)).collect();
 	state.permissions_bypassed = frame.root().skip_fetch_perms;
 
