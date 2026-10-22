@@ -7,8 +7,6 @@
 //! [`WriteRow::mutated`](super::super::row::WriteRow), and only after a real
 //! write completes — the statement's affected-row total is that flag.
 
-use surrealdb_types::ToSql;
-
 use crate::catalog::{Relation, TableDefinition, TableType};
 use crate::doc::Error as DocError;
 use crate::err::EngineError;
@@ -34,24 +32,46 @@ pub(crate) fn endpoint(
 	}
 }
 
-/// Refuse a write that moved one of an edge's endpoints.
+/// Whether the record's endpoint at `path` in `image` differs from the one the
+/// stored edge was written under.
 ///
-/// The record and the adjacency about to be restamped must keep naming the
-/// same endpoints, or a later rewrite would derive pointer keys from a record
-/// that no longer matches them.
-#[allow(
-	clippy::wildcard_enum_match_arm,
-	reason = "every shape but the endpoint the adjacency was written under is the same refusal"
-)]
-pub(crate) fn unmoved(
-	current: &Value,
+/// The record and the adjacency about to be restamped must keep naming the same
+/// endpoints, or a later rewrite would derive pointer keys from a record that no
+/// longer matches them; a difference is refused by [`endpoint_override`].
+pub(crate) fn endpoint_moved(
+	image: &Value,
 	path: &[crate::expr::Part],
 	expected: &RecordId,
-	refuse: impl FnOnce(String) -> DocError,
-) -> Result<(), ControlFlow> {
-	match current.pick(path) {
-		Value::RecordId(ref id) if id == expected => Ok(()),
-		moved => Err(ControlFlow::Err(anyhow::Error::new(refuse(moved.to_sql())))),
+) -> bool {
+	!matches!(image.pick(path), Value::RecordId(id) if id == *expected)
+}
+
+/// The failure a write that would move one of an edge's endpoints raises, or
+/// `None` when neither endpoint moved.
+///
+/// `in_moved` and `out_moved` say which of the supplied endpoints differs from
+/// the one the stored edge holds; an edge's endpoints are immutable, so either
+/// is a refusal. When the caller's reads are permission-checked (`checked`), the
+/// refusal names neither endpoint ([`DocError::EndpointOverride`]): were the
+/// `in` and `out` cases distinguished, a caller with write but not read access
+/// to the edge could learn a hidden endpoint from which refusal came back - a
+/// wrong `in` guess failing differently from a correct `in` with a wrong `out` -
+/// one query at a time. A caller whose reads are not permission-checked (a
+/// definer frame, a system actor) hides nothing, so it is given the specific
+/// `in`/`out` refusal, `in` taking precedence as the comparisons are ordered.
+pub(crate) fn endpoint_override(
+	checked: bool,
+	in_moved: bool,
+	out_moved: bool,
+) -> Option<DocError> {
+	if !in_moved && !out_moved {
+		None
+	} else if checked {
+		Some(DocError::EndpointOverride)
+	} else if in_moved {
+		Some(DocError::InOverride)
+	} else {
+		Some(DocError::OutOverride)
 	}
 }
 

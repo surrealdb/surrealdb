@@ -48,17 +48,33 @@ pub(crate) enum Error {
 		kind: String,
 	},
 
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the `in` field, which does not match the existing field value")]
-	InOverride {
-		value: String,
-	},
+	/// A `RELATE` onto a stored edge, or another write to one, supplied an `in`
+	/// endpoint that differs from the one the edge already holds. An edge's
+	/// endpoints are immutable. The stored endpoint is not named: a caller with
+	/// write but not read access to the edge must not learn it from this error.
+	///
+	/// Raised only for a caller whose reads are not permission-checked, for whom
+	/// no endpoint is hidden; a permission-checked caller is given
+	/// [`Self::EndpointOverride`], which names neither endpoint, so which one
+	/// differs cannot be told apart from an `out` mismatch and read back one
+	/// query at a time.
+	#[error("Cannot change the `in` endpoint of an existing edge")]
+	InOverride,
 
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the `out` field, which does not match the existing field value")]
-	OutOverride {
-		value: String,
-	},
+	/// As [`Self::InOverride`], for the `out` endpoint.
+	#[error("Cannot change the `out` endpoint of an existing edge")]
+	OutOverride,
+
+	/// A `RELATE` onto a stored edge, or another write to one, supplied an `in`
+	/// or `out` endpoint that differs from the one the edge already holds, for a
+	/// caller whose reads are permission-checked. An edge's endpoints are
+	/// immutable. Which endpoint differs is not named: were the `in` and `out`
+	/// mismatches distinguished, a caller with write but not read access to the
+	/// edge could learn a hidden endpoint from which refusal came back - a wrong
+	/// `in` guess failing differently from a correct `in` with a wrong `out` -
+	/// one query at a time.
+	#[error("Cannot change the `in` or `out` endpoint of an existing edge")]
+	EndpointOverride,
 
 	/// The specified table is not configured for the type of record being added
 	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "" } else { "not " })]
@@ -250,12 +266,8 @@ impl LeafError for Error {
 			| Error::IdFieldGenerateUnsupported {
 				..
 			}
-			| Error::InOverride {
-				..
-			}
-			| Error::OutOverride {
-				..
-			}
+			| Error::InOverride
+			| Error::OutOverride
 			| Error::TableCheck {
 				..
 			}
@@ -295,7 +307,15 @@ impl LeafError for Error {
 			}
 			| Error::IdComponentArity {
 				..
-			} => TypesError::validation(message, ValidationError::InvalidRequest),
+			}
+			// A write that gives an existing edge an endpoint other than the one
+			// it holds. The author of the statement can correct it, so it is a
+			// validation fault. Naming no endpoint, it tells a permission-checked
+			// caller only that an endpoint is immutable, never which one it
+			// guessed.
+			| Error::EndpointOverride => {
+				TypesError::validation(message, ValidationError::InvalidRequest)
+			}
 		}
 	}
 }

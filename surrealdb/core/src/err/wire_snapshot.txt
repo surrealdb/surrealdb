@@ -134,8 +134,9 @@ RecordExists	{ cause: NONE, code: -32000, details: { details: { id: 't:`1`' }, k
 IdNotFound	{ cause: NONE, code: -32000, details: { details: { id: 'sample' }, kind: 'Record' }, kind: 'NotFound', message: "The record 'sample' does not exist" }
 IdMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `id` field, but a specific record has been specified' }
 IdFieldGenerateUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot generate a record id of type `sample` for the `sample` table; specify an explicit record id, or declare the `id` field as `uuid` or `string` to auto-generate one.' }
-InOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `in` field, which does not match the existing field value' }
-OutOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `out` field, which does not match the existing field value' }
+InOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot change the `in` endpoint of an existing edge' }
+OutOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot change the `out` endpoint of an existing edge' }
+EndpointOverride	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot change the `in` or `out` endpoint of an existing edge' }
 TableCheck	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found record: `sample` which is a relation, but expected a sample' }
 TableIsView	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot write to the `sample` table, as it is a view (defined with `AS SELECT`); view tables are read-only and their records are computed from the source query' }
 FieldValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for field `f`, with record `sample`, but field must conform to: sample' }

@@ -33,13 +33,14 @@ use crate::exec::operators::write::stage::{LightweightReason, TableTypeFor};
 use crate::exec::operators::write::stages::guard::{
 	refuse_lightweight, refuse_table_type, table_is_lightweight,
 };
-use crate::exec::operators::write::stages::store::{endpoint, unmoved};
+use crate::exec::operators::write::stages::store::{endpoint, endpoint_moved, endpoint_override};
 use crate::exec::vm::codec;
 use crate::exec::vm::codec::key::KeyField;
 use crate::exec::vm::program::{Label, Program};
 use crate::exec::{Error as ExecError, FlowResult};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{ControlFlow, Dir};
+use crate::iam::Action;
 use crate::idx::docids::TableDocIds;
 use crate::idx::entry::IndexEntryValue;
 use crate::idx::index::{Indexable, recorded_shapes};
@@ -664,12 +665,15 @@ pub(super) async fn step(
 		}
 		StorageInstr::RequireUnmovedEndpoints => {
 			let (l, r) = stored_endpoints(row)?;
-			unmoved(&row.current, &IN, &l, |value| DocError::InOverride {
-				value,
-			})?;
-			unmoved(&row.current, &OUT, &r, |value| DocError::OutOverride {
-				value,
-			})?;
+			let in_moved = endpoint_moved(&row.current, &IN, &l);
+			let out_moved = endpoint_moved(&row.current, &OUT, &r);
+			let checked = ctx
+				.exec()
+				.should_check_perms(Action::View)
+				.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?;
+			if let Some(error) = endpoint_override(checked, in_moved, out_moved) {
+				return Err(ControlFlow::Err(anyhow::Error::new(error)));
+			}
 			Ok(next)
 		}
 		StorageInstr::DeleteRecord => {

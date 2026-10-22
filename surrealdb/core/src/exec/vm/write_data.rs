@@ -554,7 +554,11 @@ pub(super) async fn step(
 			Ok(next)
 		}
 		DataInstr::StampRecordFields => {
-			data::stamp_record_fields(row)?;
+			let as_read = match data::stored_edge_as_read(row, &ctx)? {
+				Some(read) => Some(read.await?),
+				None => None,
+			};
+			data::stamp_record_fields(row, as_read.as_ref())?;
 			Ok(next)
 		}
 		DataInstr::SettleKeyFields => {

@@ -43,6 +43,8 @@
 //! them is applied, which is what makes `SET a = a + 1, b = a + 1` assign `b`
 //! from the value `a` held before the statement.
 
+use std::collections::HashSet;
+
 use surrealdb_types::ToSql;
 
 use crate::catalog::{
@@ -51,13 +53,17 @@ use crate::catalog::{
 };
 use crate::doc::Error as DocError;
 use crate::exec::Error as ExecError;
+use crate::exec::operators::fetch::process_fetched_record_for;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::exec::operators::write::metadata::{edge_variant, is_edge, set_record_type};
 use crate::exec::operators::write::row::{ComputedInput, WriteExtras, WriteRow};
+use crate::exec::operators::write::stages::store::{endpoint_moved, endpoint_override};
+use crate::exec::trampoline::{Nested, nest};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{
 	AssignOperator, ControlFlow, Error as ExprError, Idiom, Kind, KindLiteral, Operation, Part,
 };
+use crate::iam::Action;
 use crate::val::{
 	Array, CoerceError, Number, RecordId, RecordIdKey, TableName, Value, try_encode_component,
 };
@@ -108,9 +114,56 @@ pub(crate) fn check_data_fields(row: &WriteRow) -> Result<(), ControlFlow> {
 	Ok(())
 }
 
+/// The read of the stored edge a `RELATE` is about to update, as a caller
+/// whose reads are permission-checked may read it: the record cut by its
+/// fields' `select` permissions, or `NONE` where the table's `select`
+/// permission denies it.
+///
+/// `None` where the caller's reads are not checked, or where the statement
+/// relates no stored edge. [`stamp_record_fields`] judges the endpoints the
+/// statement names against the image the read yields, so whether a
+/// re-`RELATE` is refused depends only on what the caller may read. The read
+/// owns what it reads, and deriving a computed field a field permission reads
+/// may dereference a record, so it runs as a nested evaluation, as a fetch by
+/// id does.
+pub(crate) fn stored_edge_as_read(
+	row: &WriteRow,
+	ctx: &WriteCtx,
+) -> Result<Option<Nested<Result<Value, ControlFlow>>>, ControlFlow> {
+	if !matches!(row.extras, WriteExtras::Relate(..)) || row.initial.is_none() {
+		return Ok(None);
+	}
+	let exec = ctx.exec();
+	if !exec
+		.should_check_perms(Action::View)
+		.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?
+	{
+		return Ok(None);
+	}
+	let rid = record_id(row)?.clone();
+	let mut image = row.initial.clone();
+	let exec = exec.clone();
+	Ok(Some(nest(async move {
+		let needed = HashSet::from(["in".to_owned(), "out".to_owned()]);
+		let shown = process_fetched_record_for(&exec, &rid, &mut image, Some(&needed)).await?;
+		Ok(if shown {
+			image
+		} else {
+			Value::None
+		})
+	})))
+}
+
 /// The body of [`DefaultRecordData`]: stamp `id`, and an edge's `in`, `out`
 /// and record-type marker, onto the post-image.
-pub(crate) fn stamp_record_fields(row: &mut WriteRow) -> Result<(), ControlFlow> {
+///
+/// `as_read` is the image [`stored_edge_as_read`] yields for the row: the
+/// stored edge as a caller whose reads are checked may read it, or `None` for
+/// any other caller.
+pub(crate) fn stamp_record_fields(
+	row: &mut WriteRow,
+	as_read: Option<&Value>,
+) -> Result<(), ControlFlow> {
 	let rid = record_id(row)?.clone();
 	row.current.def(rid);
 	if let WriteExtras::Relate(from, to, _) = &row.extras {
@@ -128,28 +181,27 @@ pub(crate) fn stamp_record_fields(row: &mut WriteRow) -> Result<(), ControlFlow>
 				},
 			);
 		}
-		// A record this statement is creating has no endpoint to
-		// disagree with; one it is updating must name the same pair.
-		let new = row.initial.is_none();
-		match (row.initial.pick(&IN), new) {
-			(Value::RecordId(id), false) if id == from => {
-				row.current.put(&IN, Value::RecordId(from))
+		// A record this statement is creating has no endpoint to disagree
+		// with; one it is updating must name the same pair. For a caller whose
+		// reads are checked, an endpoint it may not read counts as differing
+		// whatever the statement names, so the outcome - refused or written -
+		// never depends on a hidden endpoint, and the refusal does not name
+		// which one differs ([`endpoint_override`]).
+		if row.initial.is_none() {
+			row.current.put(&IN, Value::RecordId(from));
+			row.current.put(&OUT, Value::RecordId(to));
+		} else {
+			let moved = |path: &[Part], expected: &RecordId| {
+				endpoint_moved(&row.initial, path, expected)
+					|| as_read.is_some_and(|image| endpoint_moved(image, path, expected))
+			};
+			let in_moved = moved(&IN, &from);
+			let out_moved = moved(&OUT, &to);
+			if let Some(error) = endpoint_override(as_read.is_some(), in_moved, out_moved) {
+				return Err(fail(error));
 			}
-			(_, true) => row.current.put(&IN, Value::RecordId(from)),
-			(found, _) => {
-				return Err(fail(DocError::InOverride {
-					value: found.to_sql(),
-				}));
-			}
-		}
-		match (row.initial.pick(&OUT), new) {
-			(Value::RecordId(id), false) if id == to => row.current.put(&OUT, Value::RecordId(to)),
-			(_, true) => row.current.put(&OUT, Value::RecordId(to)),
-			(found, _) => {
-				return Err(fail(DocError::OutOverride {
-					value: found.to_sql(),
-				}));
-			}
+			row.current.put(&IN, Value::RecordId(from));
+			row.current.put(&OUT, Value::RecordId(to));
 		}
 	}
 	// An update of an edge by any other form restores the endpoints the

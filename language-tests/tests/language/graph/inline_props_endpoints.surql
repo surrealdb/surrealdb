@@ -33,7 +33,7 @@ value = "[likes:l1]"
 value = "NONE"
 
 [[test.results]]
-error = "Found person:p9 for the `out` field, which does not match the existing field value"
+error = "Cannot change the `out` endpoint of an existing edge"
 
 [[test.results]]
 value = "[person:p1]"

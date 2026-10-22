@@ -12,7 +12,9 @@ Twin tables, one written with `RETURN NONE` and one with `RETURN AFTER`, run
 every form of write against each such clause as a record user: the creating
 order, the updating order of an UPSERT and of an INSERT that conflicts, an
 edge, and a delete. Both store the same rows, answer the same errors, and the
-`RETURN NONE` write answers no row.
+`RETURN NONE` write answers no row. A re-RELATE onto an edge the caller may not
+select is refused whatever endpoints it names, so the second RELATE of each
+`NONE` twin is an error.
 """
 
 [[test.results]]
@@ -148,7 +150,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Cannot change the `in` or `out` endpoint of an existing edge"
 
 [[test.results]]
 value = "[]"
@@ -193,7 +195,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Cannot change the `in` or `out` endpoint of an existing edge"
 
 [[test.results]]
 value = "[]"

@@ -559,18 +559,9 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 				kind: "sample".to_string(),
 			},
 		),
-		(
-			"InOverride",
-			DocError::InOverride {
-				value: "sample".to_string(),
-			},
-		),
-		(
-			"OutOverride",
-			DocError::OutOverride {
-				value: "sample".to_string(),
-			},
-		),
+		("InOverride", DocError::InOverride),
+		("OutOverride", DocError::OutOverride),
+		("EndpointOverride", DocError::EndpointOverride),
 		(
 			"TableCheck",
 			DocError::TableCheck {
