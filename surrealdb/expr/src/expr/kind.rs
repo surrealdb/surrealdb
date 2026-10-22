@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter};
@@ -368,7 +370,34 @@ impl Kind {
 				kinds.iter().any(|k| k.reference_can_target(table))
 			}
 			Kind::Any => true,
-			_ => false,
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Geometry(_)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Literal(
+				KindLiteral::String(_)
+				| KindLiteral::Integer(_)
+				| KindLiteral::Float(_)
+				| KindLiteral::Decimal(_)
+				| KindLiteral::Duration(_)
+				| KindLiteral::Object(_)
+				| KindLiteral::Bool(_),
+			) => false,
 		}
 	}
 
@@ -409,7 +438,34 @@ impl Kind {
 				unbounded
 			}
 			Kind::Any => true,
-			_ => false,
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Geometry(_)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Literal(
+				KindLiteral::String(_)
+				| KindLiteral::Integer(_)
+				| KindLiteral::Float(_)
+				| KindLiteral::Decimal(_)
+				| KindLiteral::Duration(_)
+				| KindLiteral::Object(_)
+				| KindLiteral::Bool(_),
+			) => false,
 		}
 	}
 
@@ -418,7 +474,28 @@ impl Kind {
 		match self {
 			Kind::None | Kind::Any => true,
 			Kind::Either(x) => x.iter().any(|x| x.can_be_none()),
-			_ => false,
+			Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Set(_, _)
+			| Kind::Array(_, _)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::Literal(_)
+			| Kind::File(_) => false,
 		}
 	}
 
@@ -427,7 +504,29 @@ impl Kind {
 		match self {
 			Kind::Literal(_) => true,
 			Kind::Either(x) => x.iter().any(|x| x.contains_literal()),
-			_ => false,
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Set(_, _)
+			| Kind::Array(_, _)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_) => false,
 		}
 	}
 
@@ -442,7 +541,33 @@ impl Kind {
 			Kind::Either(kinds) => {
 				kinds.iter().all(|k| matches!(k, Kind::None | Kind::Null) || k.allows_sub_fields())
 			}
-			_ => false,
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Literal(
+				KindLiteral::String(_)
+				| KindLiteral::Integer(_)
+				| KindLiteral::Float(_)
+				| KindLiteral::Decimal(_)
+				| KindLiteral::Duration(_)
+				| KindLiteral::Bool(_),
+			) => false,
 		}
 	}
 
@@ -517,27 +642,73 @@ impl Kind {
 						_ => false,
 					};
 				}
-				_ => (),
+				Kind::Any
+				| Kind::None
+				| Kind::Null
+				| Kind::Bool
+				| Kind::Bytes
+				| Kind::Datetime
+				| Kind::Decimal
+				| Kind::Duration
+				| Kind::Float
+				| Kind::Int
+				| Kind::Number
+				| Kind::String
+				| Kind::Uuid
+				| Kind::Regex
+				| Kind::Table(_)
+				| Kind::Record(_)
+				| Kind::Geometry(_)
+				| Kind::Function(_, _)
+				| Kind::Range
+				| Kind::Literal(_)
+				| Kind::File(_) => (),
 			}
 		}
 
+		// Check if the two kinds match when we reach the end of the path
+		if path.is_empty() && self == kind {
+			return true;
+		}
+
 		match self {
-			// Check if the two kinds match when we reach the end of the path
-			_ if path.is_empty() && self == kind => true,
 			// Check if the literal matches the kind
 			Kind::Literal(lit) => lit.allows_nested_kind(path, kind),
 			// Check if any of the kinds in the either match the kind
 			Kind::Either(kinds) => {
 				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_nested_kind(path, kind))
 			}
-			_ => false,
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Set(_, _)
+			| Kind::Array(_, _)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_) => false,
 		}
 	}
 
 	pub fn flatten(self) -> Vec<Kind> {
-		match self {
-			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
-			_ => vec![self],
+		if let Kind::Either(x) = self {
+			x.into_iter().flat_map(|k| k.flatten()).collect()
+		} else {
+			vec![self]
 		}
 	}
 
@@ -1063,102 +1234,78 @@ impl KindLiteral {
 
 	pub fn validate_value(&self, value: &Value) -> bool {
 		match self {
-			Self::String(v) => match value {
-				Value::String(s) => s == v,
-				_ => false,
-			},
-			Self::Integer(v) => match value {
-				Value::Number(n) => *n == Number::Int(*v),
-				_ => false,
-			},
-			Self::Float(v) => match value {
-				Value::Number(n) => *n == Number::Float(*v),
-				_ => false,
-			},
-			Self::Decimal(v) => match value {
-				Value::Number(n) => *n == Number::Decimal(*v),
-				_ => false,
-			},
-			Self::Duration(v) => match value {
-				Value::Duration(n) => n == v,
-				_ => false,
-			},
-			Self::Bool(v) => match value {
-				Value::Bool(b) => b == v,
-				_ => false,
-			},
-			Self::Array(a) => match value {
-				Value::Array(x) => {
-					if a.len() != x.len() {
-						return false;
-					}
+			Self::String(v) => value.is_strand_and(|s| s == v),
+			Self::Integer(v) => value.is_number_and(|n| *n == Number::Int(*v)),
+			Self::Float(v) => value.is_number_and(|n| *n == Number::Float(*v)),
+			Self::Decimal(v) => value.is_number_and(|n| *n == Number::Decimal(*v)),
+			Self::Duration(v) => value.is_duration_and(|n| n == v),
+			Self::Bool(v) => value.is_bool_and(|b| b == v),
+			Self::Array(a) => value.is_array_and(|x| {
+				if a.len() != x.len() {
+					return false;
+				}
 
-					for (i, inner) in a.iter().enumerate() {
-						if let Some(value) = x.get(i) {
-							if !value.can_coerce_to_kind(inner) {
-								return false;
-							}
-						} else {
+				for (i, inner) in a.iter().enumerate() {
+					if let Some(value) = x.get(i) {
+						if !value.can_coerce_to_kind(inner) {
 							return false;
 						}
+					} else {
+						return false;
 					}
-
-					true
 				}
-				_ => false,
-			},
-			Self::Object(lit) => match value {
-				Value::Object(val) => {
-					let mut lit_iter = lit.iter();
-					let mut val_iter = val.iter();
 
-					let mut lit_next = lit_iter.next();
-					let mut val_next = val_iter.next();
+				true
+			}),
+			Self::Object(lit) => value.is_object_and(|val| {
+				let mut lit_iter = lit.iter();
+				let mut val_iter = val.iter();
 
-					while lit_next.is_some() || val_next.is_some() {
-						match (lit_next, val_next) {
-							(Some((lit_k, lit_kind)), Some((val_k, val_v))) => {
-								match lit_k.as_str().cmp(val_k.as_str()) {
-									Ordering::Less => {
-										// Key in type but not in value - check if optional
-										if !lit_kind.can_be_none() {
-											return false;
-										}
-										lit_next = lit_iter.next();
-									}
-									Ordering::Equal => {
-										// Key in both - validate type
-										if !val_v.can_coerce_to_kind(lit_kind) {
-											return false;
-										}
-										lit_next = lit_iter.next();
-										val_next = val_iter.next();
-									}
-									Ordering::Greater => {
-										// Key in value but not in type - extra key!
+				let mut lit_next = lit_iter.next();
+				let mut val_next = val_iter.next();
+
+				while lit_next.is_some() || val_next.is_some() {
+					match (lit_next, val_next) {
+						(Some((lit_k, lit_kind)), Some((val_k, val_v))) => {
+							match lit_k.as_str().cmp(val_k.as_str()) {
+								Ordering::Less => {
+									// Key in type but not in value - check if optional
+									if !lit_kind.can_be_none() {
 										return false;
 									}
+									lit_next = lit_iter.next();
 								}
-							}
-							(Some((_, lit_kind)), None) => {
-								// Remaining keys in type but not in value - check if optional
-								if !lit_kind.can_be_none() {
+								Ordering::Equal => {
+									// Key in both - validate type
+									if !val_v.can_coerce_to_kind(lit_kind) {
+										return false;
+									}
+									lit_next = lit_iter.next();
+									val_next = val_iter.next();
+								}
+								Ordering::Greater => {
+									// Key in value but not in type - extra key!
 									return false;
 								}
-								lit_next = lit_iter.next();
 							}
-							(None, Some(_)) => {
-								// Remaining keys in value but not in type - extra keys!
+						}
+						(Some((_, lit_kind)), None) => {
+							// Remaining keys in type but not in value - check if optional
+							if !lit_kind.can_be_none() {
 								return false;
 							}
-							(None, None) => break,
+							lit_next = lit_iter.next();
 						}
+						(None, Some(_)) => {
+							// Remaining keys in value but not in type - extra keys!
+							return false;
+						}
+						(None, None) => break,
 					}
-
-					true
 				}
-				_ => false,
-			},
+
+				true
+			}),
 			/*
 			Self::DiscriminatedObject(key, discriminants) => match value {
 				Value::Object(x) => {
@@ -1202,9 +1349,10 @@ impl KindLiteral {
 		// We reached the end of the path
 		// Check if the literal is equal to the kind
 		if path.is_empty() {
-			return match kind {
-				Kind::Literal(lit) => self == lit,
-				_ => &self.to_kind() == kind,
+			return if let Kind::Literal(lit) = kind {
+				self == lit
+			} else {
+				&self.to_kind() == kind
 			};
 		}
 
@@ -1244,7 +1392,12 @@ impl KindLiteral {
 				_ => false,
 			},
 			*/
-			_ => false,
+			KindLiteral::String(_)
+			| KindLiteral::Integer(_)
+			| KindLiteral::Float(_)
+			| KindLiteral::Decimal(_)
+			| KindLiteral::Duration(_)
+			| KindLiteral::Bool(_) => false,
 		}
 	}
 }

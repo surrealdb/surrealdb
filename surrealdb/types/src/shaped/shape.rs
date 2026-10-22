@@ -180,7 +180,19 @@ impl Kind {
 			Kind::F32 => Kind::Float,
 			Kind::DatetimeNs => Kind::Datetime,
 			Kind::DurationNs => Kind::Duration,
-			other => other,
+			other @ (Kind::Bool
+			| Kind::Int
+			| Kind::Float
+			| Kind::Datetime
+			| Kind::Duration
+			| Kind::Uuid
+			| Kind::String
+			| Kind::Bytes
+			| Kind::Decimal
+			| Kind::Record
+			| Kind::Dynamic
+			| Kind::Object
+			| Kind::Array) => other,
 		}
 	}
 

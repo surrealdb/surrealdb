@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 
 use common::fmt::{EscapeKwFreeIdent, Fmt};
@@ -46,14 +48,29 @@ impl Part {
 	/// Already marked as deprecated for the full release to remind that this
 	/// behavior should be fixed.
 	pub fn as_old_index(&self) -> Option<usize> {
-		match self {
-			Part::Value(Expr::Literal(l)) => match l {
-				crate::expr::Literal::Integer(i) => Some(*i as usize),
-				crate::expr::Literal::Float(f) => Some(*f as usize),
-				crate::expr::Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
-				_ => None,
-			},
-			_ => None,
+		let Part::Value(Expr::Literal(l)) = self else {
+			return None;
+		};
+		match l {
+			Literal::Integer(i) => Some(*i as usize),
+			Literal::Float(f) => Some(*f as usize),
+			Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::String(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::RecordId(_)
+			| Literal::Array(_)
+			| Literal::Set(_)
+			| Literal::Object(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::Geometry(_)
+			| Literal::File(_) => None,
 		}
 	}
 
@@ -96,9 +113,10 @@ impl Part {
 	}
 	/// Returns a yield if an alias is specified
 	pub fn alias(&self) -> Option<&Idiom> {
-		match self {
-			Part::Lookup(v) => v.alias.as_ref(),
-			_ => None,
+		if let Part::Lookup(v) = self {
+			v.alias.as_ref()
+		} else {
+			None
 		}
 	}
 
@@ -126,7 +144,9 @@ impl Part {
 								)
 							})
 						}
-						_ => None,
+						DestructurePart::All(_)
+						| DestructurePart::Field(_)
+						| DestructurePart::Rest => None,
 					};
 
 					if let Some((field, before, plan, after)) = plan {
@@ -144,7 +164,19 @@ impl Part {
 
 				None
 			}
-			_ => None,
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Method(_, _)
+			| Part::Optional
+			| Part::Recurse(_, _, _)
+			| Part::Doc => None,
 		}
 	}
 
@@ -156,7 +188,19 @@ impl Part {
 				EscapeKwFreeIdent(v.as_str()).fmt_sql(&mut s, SqlFormat::SingleLine);
 				s
 			}
-			_ => self.to_sql(),
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Method(_, _)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(_, _, _)
+			| Part::Doc
+			| Part::RepeatRecurse => self.to_sql(),
 		}
 	}
 
@@ -281,7 +325,7 @@ impl PartialOrd for Part {
 					_ => None,
 				}
 			}
-			ordering => Some(ordering),
+			ordering @ (Ordering::Less | Ordering::Greater) => Some(ordering),
 		}
 	}
 }

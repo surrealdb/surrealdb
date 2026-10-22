@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 
 use crate::expr::part::{Next, Part};
@@ -28,7 +30,20 @@ impl Value {
 			// Current path part is an object
 			(Value::Object(a), Value::Object(b)) => match p {
 				Part::Field(f) => compare_optional(a.get(f), b.get(f), path, collate, numeric),
-				_ => None,
+				Part::All
+				| Part::Flatten
+				| Part::Last
+				| Part::First
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => None,
 			},
 			// Current path part is an array
 			(Value::Array(a), Value::Array(b)) => match p {
@@ -36,7 +51,7 @@ impl Value {
 					for (a, b) in a.iter().zip(b.iter()) {
 						match a.compare(b, path.next(), collate, numeric) {
 							None | Some(Ordering::Equal) => continue,
-							o => return o,
+							Some(o @ (Ordering::Less | Ordering::Greater)) => return Some(o),
 						}
 					}
 					Some(a.len().cmp(&b.len()))
@@ -45,14 +60,25 @@ impl Value {
 				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
 				//FIXME: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1;
 				// a[$b]` for example doesn't as
-				x => {
-					if let Some(idx) = x.as_old_index() {
+				Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if let Some(idx) = p.as_old_index() {
 						compare_optional(a.get(idx), b.get(idx), path, collate, numeric)
 					} else {
 						for (a, b) in a.iter().zip(b.iter()) {
 							match a.compare(b, path, collate, numeric) {
 								None | Some(Ordering::Equal) => continue,
-								o => return o,
+								Some(o @ (Ordering::Less | Ordering::Greater)) => return Some(o),
 							}
 						}
 						Some(a.len().cmp(&b.len()))
@@ -64,7 +90,7 @@ impl Value {
 					for (a, b) in a.iter().zip(b.iter()) {
 						match a.compare(b, path.next(), collate, numeric) {
 							None | Some(Ordering::Equal) => continue,
-							o => return o,
+							Some(o @ (Ordering::Less | Ordering::Greater)) => return Some(o),
 						}
 					}
 
@@ -72,14 +98,25 @@ impl Value {
 				}
 				Part::First => compare_optional(a.first(), b.first(), path, collate, numeric),
 				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
-				x => {
-					if let Some(idx) = x.as_old_index() {
+				Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if let Some(idx) = p.as_old_index() {
 						compare_optional(a.nth(idx), b.nth(idx), path, collate, numeric)
 					} else {
 						for (a, b) in a.iter().zip(b.iter()) {
 							match a.compare(b, path, collate, numeric) {
 								None | Some(Ordering::Equal) => continue,
-								o => return o,
+								Some(o @ (Ordering::Less | Ordering::Greater)) => return Some(o),
 							}
 						}
 						Some(a.len().cmp(&b.len()))
@@ -102,7 +139,20 @@ impl Value {
 					_ => Some(Ordering::Equal),
 				},
 				// For non-field path parts, continue comparing with remaining path
-				_ => a.compare(b, path.next(), collate, numeric),
+				Part::All
+				| Part::Flatten
+				| Part::Last
+				| Part::First
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => a.compare(b, path.next(), collate, numeric),
 			},
 		}
 	}

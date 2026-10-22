@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use revision::optimised::indexed::IndexedSetEncoded;
 use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
@@ -165,7 +167,23 @@ impl Set {
 						out.insert(item);
 					}
 				}
-				_ => {
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => {
 					out.insert(v);
 				}
 			}

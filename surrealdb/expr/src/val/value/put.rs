@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_types::ToSql;
 
 use crate::expr::part::{Next, Part};
@@ -29,8 +31,19 @@ impl Value {
 						let path = path.next();
 						v.iter_mut().for_each(|(_, v)| v.put(path, val.clone()));
 					}
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Where(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							let entry =
 								v.entry(idx.to_string()).or_insert_with(Value::empty_object);
 							entry.put(path.next(), val);
@@ -53,8 +66,19 @@ impl Value {
 							v.put(path.next(), val)
 						}
 					}
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							if let Some(v) = v.get_mut(idx) {
 								v.put(path.next(), val)
 							}
@@ -84,8 +108,19 @@ impl Value {
 							v.put(path.next(), val)
 						}
 					}
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							if let Some(v) = v.nth_mut(idx) {
 								v.put(path.next(), val)
 							}
@@ -110,7 +145,20 @@ impl Value {
 					self.put(path, val)
 				}
 				// Ignore everything else
-				_ => (),
+				Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => (),
 			},
 			// No more parts so put the value
 			None => {

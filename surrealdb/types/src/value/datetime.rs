@@ -98,13 +98,10 @@ impl TryFrom<(i64, u32)> for Datetime {
 	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
 		match Utc.timestamp_opt(v.0, v.1) {
 			LocalResult::Single(v) => Ok(Self(v)),
-			err => match err {
-				LocalResult::Single(v) => Ok(Self(v)),
-				LocalResult::Ambiguous(_, _) => {
-					Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
-				}
-				LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
-			},
+			LocalResult::Ambiguous(_, _) => {
+				Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
+			}
+			LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
 		}
 	}
 }

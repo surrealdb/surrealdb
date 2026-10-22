@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::hash::BuildHasher;
@@ -151,12 +153,13 @@ impl Coerce for SqlNone {
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::None => Ok(SqlNone),
-			x => Err(CoerceError::InvalidKind {
-				from: x,
+		if v.is_none() {
+			Ok(SqlNone)
+		} else {
+			Err(CoerceError::InvalidKind {
+				from: v,
 				into: "none".to_string(),
-			}),
+			})
 		}
 	}
 }
@@ -167,14 +170,15 @@ impl Coerce for Null {
 	}
 
 	fn coerce(v: Value) -> Result<Null, CoerceError> {
-		match v {
+		if v.is_null() {
 			// Allow any null value
-			Value::Null => Ok(Null),
+			Ok(Null)
+		} else {
 			// Anything else raises an error
-			_ => Err(CoerceError::InvalidKind {
+			Err(CoerceError::InvalidKind {
 				from: v,
 				into: "null".into(),
-			}),
+			})
 		}
 	}
 }
@@ -189,22 +193,15 @@ impl Coerce for i64 {
 	}
 
 	fn coerce(val: Value) -> Result<Self, CoerceError> {
-		match val {
-			// Allow any int number
-			Value::Number(Number::Int(v)) => Ok(v),
-			// A float or decimal coerces only when it is a whole number within
-			// the `i64` range. Anything else is refused, never rounded or
-			// clamped to the nearest bound.
-			Value::Number(n) => n.as_int_lossless().ok_or_else(|| CoerceError::InvalidKind {
-				from: val,
+		// Allow any int number, or a float/decimal that is a whole number
+		// within the `i64` range. Anything else is refused, never rounded or
+		// clamped to the nearest bound.
+		val.try_into_number().and_then(|n| n.as_int_lossless().ok_or(Value::Number(n))).map_err(
+			|from| CoerceError::InvalidKind {
+				from,
 				into: "int".into(),
-			}),
-			// Anything else raises an error
-			_ => Err(CoerceError::InvalidKind {
-				from: val,
-				into: "int".into(),
-			}),
-		}
+			},
+		)
 	}
 }
 
@@ -221,27 +218,12 @@ impl Coerce for f64 {
 
 	/// Try to coerce this value to an `f64`
 	fn coerce(val: Value) -> Result<f64, CoerceError> {
-		match val {
-			// Allow any float number
-			Value::Number(Number::Float(v)) => Ok(v),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(v as f64),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) => match v.try_into() {
-				// The Decimal can be represented as a f64
-				Ok(v) => Ok(v),
-				// This Decimal loses precision
-				_ => Err(CoerceError::InvalidKind {
-					from: val,
-					into: "float".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(CoerceError::InvalidKind {
-				from: val,
+		val.try_into_number().and_then(|n| n.as_float_lossless().ok_or(Value::Number(n))).map_err(
+			|from| CoerceError::InvalidKind {
+				from,
 				into: "float".into(),
-			}),
-		}
+			},
+		)
 	}
 }
 
@@ -257,27 +239,12 @@ impl Coerce for Decimal {
 	}
 
 	fn coerce(val: Value) -> Result<Self, CoerceError> {
-		match val {
-			// Allow any decimal number
-			Value::Number(Number::Decimal(x)) => Ok(x),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(v)) => Ok(Decimal::from(v)),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) => match Decimal::try_from(v).ok() {
-				// The Float can be represented as a Decimal
-				Some(v) => Ok(v),
-				// This Float does not convert to a Decimal
-				None => Err(CoerceError::InvalidKind {
-					from: val,
-					into: "decimal".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(CoerceError::InvalidKind {
-				from: val,
+		val.try_into_number().and_then(|n| n.as_decimal_lossless().ok_or(Value::Number(n))).map_err(
+			|from| CoerceError::InvalidKind {
+				from,
 				into: "decimal".into(),
-			}),
-		}
+			},
+		)
 	}
 }
 
@@ -324,9 +291,10 @@ impl<T: Coerce + HasKind> Coerce for Option<T> {
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::None => Ok(None),
-			x => Ok(Some(T::coerce(x)?)),
+		if v.is_none() {
+			Ok(None)
+		} else {
+			Ok(Some(T::coerce(v)?))
 		}
 	}
 }
@@ -490,28 +458,23 @@ impl_direct! {
 /// decoded JSON or an object built from computed parts.
 impl Coerce for Geometry {
 	fn can_coerce(v: &Value) -> bool {
-		match v {
-			Value::Geometry(_) => true,
-			Value::Object(x) => Geometry::try_from_object(x).is_some(),
-			_ => false,
-		}
+		v.is_geometry() || v.is_object_and(|x| Geometry::try_from_object(x).is_some())
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::Geometry(x) => Ok(x),
-			Value::Object(ref x) => match Geometry::try_from_object(x) {
-				Some(x) => Ok(x),
-				None => Err(CoerceError::InvalidKind {
-					from: v,
-					into: Kind::of::<Geometry>().to_sql(),
-				}),
-			},
-			v => Err(CoerceError::InvalidKind {
-				from: v,
-				into: Kind::of::<Geometry>().to_sql(),
-			}),
+		let v = match v.try_into_geometry() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		if let Value::Object(ref x) = v
+			&& let Some(x) = Geometry::try_from_object(x)
+		{
+			return Ok(x);
 		}
+		Err(CoerceError::InvalidKind {
+			from: v,
+			into: Kind::of::<Geometry>().to_sql(),
+		})
 	}
 }
 
@@ -521,14 +484,14 @@ impl Coerce for Set {
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::Set(x) => Ok(x),
-			Value::Array(x) => Ok(Set::from(x.0)),
-			v => Err(CoerceError::InvalidKind {
-				from: v,
-				into: Kind::of::<Set>().to_sql(),
-			}),
-		}
+		let v = match v.try_into_set() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		v.try_into_array().map(|x| Set::from(x.0)).map_err(|from| CoerceError::InvalidKind {
+			from,
+			into: Kind::of::<Set>().to_sql(),
+		})
 	}
 }
 
@@ -540,13 +503,10 @@ impl Coerce for String {
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::String(s) => Ok(s.into_string()),
-			v => Err(CoerceError::InvalidKind {
-				from: v,
-				into: Kind::of::<String>().to_sql(),
-			}),
-		}
+		v.try_into_strand().map(Strand::into_string).map_err(|from| CoerceError::InvalidKind {
+			from,
+			into: Kind::of::<String>().to_sql(),
+		})
 	}
 }
 
@@ -639,43 +599,28 @@ impl Value {
 	}
 
 	fn can_coerce_to_array_len(&self, kind: &Kind, len: u64) -> bool {
-		match self {
-			Value::Array(a) => {
-				a.len() as u64 == len && a.iter().all(|x| x.can_coerce_to_kind(kind))
-			}
-			_ => false,
-		}
+		self.is_array_and(|a| a.len() as u64 == len && a.iter().all(|x| x.can_coerce_to_kind(kind)))
 	}
 
 	fn can_coerce_to_array(&self, kind: &Kind) -> bool {
-		match self {
-			Value::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
-			_ => false,
-		}
+		self.is_array_and(|a| a.iter().all(|x| x.can_coerce_to_kind(kind)))
 	}
 
 	fn can_coerce_to_set_len(&self, kind: &Kind, len: u64) -> bool {
-		match self {
-			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_coerce_to_kind(kind)),
-			// An array becomes a set by deduplicating its converted elements, so
-			// its length says nothing about the set's: the conversion decides.
-			Value::Array(_) => self.clone().coerce_to_set_kind_len(kind, len).is_ok(),
-			_ => false,
-		}
+		// An array becomes a set by deduplicating its converted elements, so
+		// its length says nothing about the set's: the conversion decides.
+		self.is_set_and(|s| s.len() as u64 == len && s.iter().all(|x| x.can_coerce_to_kind(kind)))
+			|| (self.is_array() && self.clone().coerce_to_set_kind_len(kind, len).is_ok())
 	}
 
 	fn can_coerce_to_set(&self, kind: &Kind) -> bool {
-		match self {
-			Value::Set(s) => s.iter().all(|x| x.can_coerce_to_kind(kind)),
-			Value::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
-			_ => false,
-		}
+		self.is_set_and(|s| s.iter().all(|x| x.can_coerce_to_kind(kind)))
+			|| self.is_array_and(|a| a.iter().all(|x| x.can_coerce_to_kind(kind)))
 	}
 
 	fn can_coerce_to_table(&self, val: &[TableName]) -> bool {
-		match self {
-			Value::Table(t) => val.is_empty() || val.contains(t),
-			Value::String(s) => {
+		self.is_table_and(|t| val.is_empty() || val.contains(t))
+			|| self.is_strand_and(|s| {
 				// Allow strings to be coerced to tables
 				if val.is_empty() {
 					true
@@ -683,37 +628,30 @@ impl Value {
 					let s = TableName::from(s.clone());
 					val.contains(&s)
 				}
-			}
-			_ => false,
-		}
+			})
 	}
 
 	fn can_coerce_to_record(&self, val: &[TableName]) -> bool {
-		match self {
-			Value::RecordId(t) => val.is_empty() || val.contains(&t.table),
-			_ => false,
-		}
+		self.is_record_and(|t| val.is_empty() || val.contains(&t.table))
 	}
 
 	fn can_coerce_to_geometry(&self, val: &[GeometryKind]) -> bool {
-		match self {
-			Value::Object(x) => {
-				Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
-			}
-			_ => self.is_geometry_type(val),
+		if let Value::Object(x) = self {
+			Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
+		} else {
+			self.is_geometry_type(val)
 		}
 	}
 
 	fn can_coerce_to_literal(&self, val: &KindLiteral) -> bool {
-		match val {
+		if matches!(val, KindLiteral::Array(_) | KindLiteral::Object(_)) {
 			// The members are converted, so whether they can be is what the
 			// conversion does: a member kind may admit a value by length or
 			// shape that its conversion then refuses (a set deduplicating
 			// below its declared length).
-			KindLiteral::Array(_) | KindLiteral::Object(_) => {
-				self.clone().coerce_to_literal(val).is_ok()
-			}
-			val => val.validate_value(self),
+			self.clone().coerce_to_literal(val).is_ok()
+		} else {
+			val.validate_value(self)
 		}
 	}
 
@@ -862,17 +800,15 @@ impl Value {
 		self,
 		val: &[TableName],
 	) -> Result<surrealdb_strand::TableName, CoerceError> {
-		let this = match self {
-			// Tables are allowed if correct type
-			Value::Table(v) => {
-				if val.is_empty() || val.contains(&v) {
-					return Ok(v);
-				} else {
-					Value::Table(v)
-				}
-			}
-			// Allow strings to be coerced to tables
-			Value::String(s) => {
+		// Tables are allowed if correct type
+		let this = match self.try_into_table() {
+			Ok(v) if val.is_empty() || val.contains(&v) => return Ok(v),
+			Ok(v) => Value::Table(v),
+			Err(v) => v,
+		};
+		// Allow strings to be coerced to tables
+		let this = match this.try_into_strand() {
+			Ok(s) => {
 				if val.is_empty() {
 					return Ok(surrealdb_strand::TableName::new(s));
 				}
@@ -884,7 +820,7 @@ impl Value {
 
 				Value::String(t.into())
 			}
-			x => x,
+			Err(v) => v,
 		};
 
 		let mut kind = "table<".to_string();
@@ -903,16 +839,11 @@ impl Value {
 
 	/// Try to coerce this value to a Record of a certain type
 	pub fn coerce_to_record_kind(self, val: &[TableName]) -> Result<RecordId, CoerceError> {
-		let this = match self {
-			// Records are allowed if correct type
-			Value::RecordId(v) => {
-				if val.is_empty() || val.contains(&v.table) {
-					return Ok(v);
-				} else {
-					Value::RecordId(v)
-				}
-			}
-			x => x,
+		// Records are allowed if correct type
+		let this = match self.try_into_record() {
+			Ok(v) if val.is_empty() || val.contains(&v.table) => return Ok(v),
+			Ok(v) => Value::RecordId(v),
+			Err(v) => v,
 		};
 
 		let mut kind = "record<".to_string();
@@ -931,20 +862,21 @@ impl Value {
 
 	/// Try to coerce this value to a `Geometry` of a certain type
 	pub fn coerce_to_geometry_kind(self, val: &[GeometryKind]) -> Result<Geometry, CoerceError> {
-		match self {
-			Value::Geometry(x) if val.contains(&x.geometry_kind()) => Ok(x),
-			Value::Object(ref x) => match Geometry::try_from_object(x) {
-				Some(x) if val.contains(&x.geometry_kind()) => Ok(x),
-				_ => Err(CoerceError::InvalidKind {
-					from: self,
-					into: "geometry".into(),
-				}),
-			},
-			_ => Err(CoerceError::InvalidKind {
-				from: self,
-				into: "geometry".into(),
-			}),
+		let this = match self.try_into_geometry() {
+			Ok(x) if val.contains(&x.geometry_kind()) => return Ok(x),
+			Ok(x) => Value::Geometry(x),
+			Err(v) => v,
+		};
+		if let Value::Object(ref x) = this
+			&& let Some(x) = Geometry::try_from_object(x)
+			&& val.contains(&x.geometry_kind())
+		{
+			return Ok(x);
 		}
+		Err(CoerceError::InvalidKind {
+			from: this,
+			into: "geometry".into(),
+		})
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type
@@ -1290,9 +1222,12 @@ mod tests {
 			Kind::Array(Box::new(Kind::Either(vec![Kind::Int, Kind::String])), None),
 		];
 		for kind in &unions {
-			let wrap = |v: Value| match kind {
-				Kind::Array(..) => Value::Array(Array(vec![v])),
-				_ => v,
+			let wrap = |v: Value| {
+				if matches!(kind, Kind::Array(..)) {
+					Value::Array(Array(vec![v]))
+				} else {
+					v
+				}
 			};
 			assert!(wrap(fractional.clone()).coerce_to_kind(kind).is_err());
 			assert!(wrap(huge.clone()).coerce_to_kind(kind).is_err());

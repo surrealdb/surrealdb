@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -157,15 +159,23 @@ impl Idiom {
 		for part in self.iter() {
 			match part {
 				Part::Field(_) | Part::All | Part::Flatten | Part::First | Part::Last => {}
-				Part::Value(Expr::Literal(lit)) => match lit {
-					Literal::Integer(_) | Literal::String(_) => {}
-					_ => {
+				Part::Value(Expr::Literal(lit)) => {
+					if !matches!(lit, Literal::Integer(_) | Literal::String(_)) {
 						return Err(anyhow::anyhow!(
 							"Invalid {into}: Field path index must evaluate to an integer or string"
 						));
 					}
-				},
-				_ => {
+				}
+				Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
 					return Err(anyhow::anyhow!(
 						"Invalid {into}: contains a part that is not allowed in a field path"
 					));

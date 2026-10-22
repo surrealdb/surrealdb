@@ -238,9 +238,10 @@ impl Row<'_> {
 		if rest != NO_SLOT {
 			let slice = self.slice(rest)?;
 			if !slice.is_empty() {
-				match decode_dynamic(slice, dynamic)? {
-					Value::Object(entries) => object = entries.0,
-					_ => return Err(ShapedError::new("a remainder that is not an object")),
+				if let Value::Object(entries) = decode_dynamic(slice, dynamic)? {
+					object = entries.0;
+				} else {
+					return Err(ShapedError::new("a remainder that is not an object"));
 				}
 			}
 		}
@@ -390,22 +391,22 @@ fn array_of(slice: &[u8], kind: Kind) -> Result<Value, ShapedError> {
 			let end = u32::from_le_bytes(array(&ends[4 * at..4 * at + 4])) as usize;
 			let element =
 				bytes.get(start..end).ok_or_else(|| bad("an array element out of range"))?;
-			out.push(match kind {
-				Kind::String => Value::String(
+			out.push(if kind == Kind::String {
+				Value::String(
 					std::str::from_utf8(element)
 						.map_err(|_| bad("a string that is not UTF-8"))?
 						.to_owned(),
-				),
-				Kind::Bytes => Value::Bytes(Bytes(::bytes::Bytes::copy_from_slice(element))),
-				_ => {
-					let text = std::str::from_utf8(element)
-						.map_err(|_| bad("a decimal that is not UTF-8"))?;
-					#[allow(clippy::disallowed_methods)]
-					let decimal = <Decimal as std::str::FromStr>::from_str(text)
-						.map_err(|_| bad("an invalid decimal"))?
-						.normalize();
-					Value::Number(Number::Decimal(decimal))
-				}
+				)
+			} else if kind == Kind::Bytes {
+				Value::Bytes(Bytes(::bytes::Bytes::copy_from_slice(element)))
+			} else {
+				let text =
+					std::str::from_utf8(element).map_err(|_| bad("a decimal that is not UTF-8"))?;
+				#[allow(clippy::disallowed_methods)]
+				let decimal = <Decimal as std::str::FromStr>::from_str(text)
+					.map_err(|_| bad("an invalid decimal"))?
+					.normalize();
+				Value::Number(Number::Decimal(decimal))
 			});
 			start = end;
 		}
@@ -414,43 +415,44 @@ fn array_of(slice: &[u8], kind: Kind) -> Result<Value, ShapedError> {
 		}
 		return Ok(Value::Array(out.into()));
 	}
-	let width = match kind {
-		Kind::Bool => 1,
-		Kind::Int | Kind::Float => 8,
-		Kind::Uuid => 16,
-		_ => 12,
+	let width = if kind == Kind::Bool {
+		1
+	} else if matches!(kind, Kind::Int | Kind::Float) {
+		8
+	} else if kind == Kind::Uuid {
+		16
+	} else {
+		12
 	};
 	if r.0.len() != count.checked_mul(width).ok_or_else(|| bad("an array too long"))? {
 		return Err(bad("an array of the wrong length"));
 	}
 	for element in r.0.chunks_exact(width) {
-		out.push(match kind {
-			Kind::Bool => match element[0] {
+		out.push(if kind == Kind::Bool {
+			match element[0] {
 				0 => Value::Bool(false),
 				1 => Value::Bool(true),
 				_ => return Err(bad("a bool that is neither 0 nor 1")),
-			},
-			Kind::Int => int(i64::from_le_bytes(array(element))),
-			Kind::Float => {
-				Value::Number(Number::Float(f64::from_bits(u64::from_le_bytes(array(element)))))
 			}
-			Kind::Uuid => Value::Uuid(Uuid(::uuid::Uuid::from_bytes(array(element)))),
-			Kind::Datetime => {
-				let secs = i64::from_le_bytes(array(&element[..8]));
-				let nanos = u32::from_le_bytes(array(&element[8..]));
-				Value::Datetime(
-					Datetime::try_from((secs, nanos))
-						.map_err(|_| bad("a datetime out of range"))?,
-				)
+		} else if kind == Kind::Int {
+			int(i64::from_le_bytes(array(element)))
+		} else if kind == Kind::Float {
+			Value::Number(Number::Float(f64::from_bits(u64::from_le_bytes(array(element)))))
+		} else if kind == Kind::Uuid {
+			Value::Uuid(Uuid(::uuid::Uuid::from_bytes(array(element))))
+		} else if kind == Kind::Datetime {
+			let secs = i64::from_le_bytes(array(&element[..8]));
+			let nanos = u32::from_le_bytes(array(&element[8..]));
+			Value::Datetime(
+				Datetime::try_from((secs, nanos)).map_err(|_| bad("a datetime out of range"))?,
+			)
+		} else {
+			let secs = u64::from_le_bytes(array(&element[..8]));
+			let nanos = u32::from_le_bytes(array(&element[8..]));
+			if nanos >= 1_000_000_000 {
+				return Err(bad("a duration's nanoseconds out of range"));
 			}
-			_ => {
-				let secs = u64::from_le_bytes(array(&element[..8]));
-				let nanos = u32::from_le_bytes(array(&element[8..]));
-				if nanos >= 1_000_000_000 {
-					return Err(bad("a duration's nanoseconds out of range"));
-				}
-				Value::Duration(Duration(std::time::Duration::new(secs, nanos)))
-			}
+			Value::Duration(Duration(std::time::Duration::new(secs, nanos)))
 		});
 	}
 	Ok(Value::Array(out.into()))
@@ -485,9 +487,10 @@ fn record(
 	let mut r = Reader(slice);
 	let code = r.u8()?;
 	if code == 3 {
-		return match decode_dynamic(r.0, dynamic)? {
-			value @ Value::RecordId(_) => Ok(value),
-			_ => Err(bad("a record held as CBOR that is not a record id")),
+		return if let value @ Value::RecordId(_) = decode_dynamic(r.0, dynamic)? {
+			Ok(value)
+		} else {
+			Err(bad("a record held as CBOR that is not a record id"))
 		};
 	}
 	let table = if column_table.is_empty() {

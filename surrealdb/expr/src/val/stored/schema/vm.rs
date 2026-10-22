@@ -26,30 +26,36 @@ pub fn int(v: i128) -> Result<Value, SchemaError> {
 
 /// The integer a VM value holds: an `Int`, or an integral `Decimal`.
 pub fn integer(value: &Value) -> Result<i128, SchemaError> {
-	match value {
-		Value::Number(Number::Int(v)) => Ok(i128::from(*v)),
-		Value::Number(Number::Decimal(d)) if d.fract().is_zero() => d
-			.mantissa()
+	if let Value::Number(Number::Int(v)) = value {
+		Ok(i128::from(*v))
+	} else if let Value::Number(Number::Decimal(d)) = value
+		&& d.fract().is_zero()
+	{
+		d.mantissa()
 			.checked_div(10i128.pow(d.scale()))
-			.ok_or(SchemaError::vm("int", "an integer decimal")),
-		_ => Err(SchemaError::vm("int", "expected an integer")),
+			.ok_or(SchemaError::vm("int", "an integer decimal"))
+	} else {
+		Err(SchemaError::vm("int", "expected an integer"))
 	}
 }
 
 /// The float a VM value holds.
 pub fn float(value: &Value) -> Result<f64, SchemaError> {
-	match value {
-		Value::Number(Number::Float(v)) => Ok(*v),
-		_ => Err(SchemaError::vm("float", "expected a float")),
+	if let Value::Number(Number::Float(v)) = value {
+		Ok(*v)
+	} else {
+		Err(SchemaError::vm("float", "expected a float"))
 	}
 }
 
 /// A string-like VM value: a string, or a table name.
 pub fn string_of(value: Value, ty: &'static str) -> Result<Strand, SchemaError> {
-	match value {
-		Value::String(s) => Ok(s),
-		Value::Table(t) => Ok(Strand::from(t)),
-		_ => Err(SchemaError::vm(ty, "expected a string")),
+	if let Value::String(s) = value {
+		Ok(s)
+	} else if let Value::Table(t) = value {
+		Ok(Strand::from(t))
+	} else {
+		Err(SchemaError::vm(ty, "expected a string"))
 	}
 }
 
@@ -96,9 +102,10 @@ pub fn tuple<const N: usize>(items: [Value; N]) -> Value {
 
 /// The object a struct's VM value must be.
 pub fn object_of(value: Value, ty: &'static str) -> Result<Object, SchemaError> {
-	match value {
-		Value::Object(object) => Ok(object),
-		_ => Err(SchemaError::vm(ty, "expected an object")),
+	if let Value::Object(object) = value {
+		Ok(object)
+	} else {
+		Err(SchemaError::vm(ty, "expected an object"))
 	}
 }
 
@@ -139,9 +146,12 @@ pub fn tuple_of(
 	n: usize,
 	ty: &'static str,
 ) -> Result<std::vec::IntoIter<Value>, SchemaError> {
-	match value {
-		Value::Array(array) if array.0.len() == n => Ok(array.0.into_iter()),
-		_ => Err(SchemaError::vm(ty, "a tuple has the wrong number of elements")),
+	if let Value::Array(array) = value
+		&& array.0.len() == n
+	{
+		Ok(array.0.into_iter())
+	} else {
+		Err(SchemaError::vm(ty, "a tuple has the wrong number of elements"))
 	}
 }
 
@@ -167,20 +177,20 @@ pub fn option_into<T: StoredField>(value: Option<T>) -> Result<Value, SchemaErro
 
 /// The inverse of [`option_into`].
 pub fn option_from<T: StoredField>(value: Value) -> Result<Option<T>, SchemaError> {
-	match value {
-		Value::None => Ok(None),
-		some if T::NULLABLE => match some {
-			Value::Array(array) if array.0.len() == 1 => {
-				let mut items = array.0.into_iter();
-				let inner = next(&mut items, "option")?;
-				Ok(Some(T::from_vm_value(inner)?))
-			}
-			_ => Err(SchemaError::vm(
-				"option",
-				"an option of a value is NONE or a one-element array",
-			)),
-		},
-		some => Ok(Some(T::from_vm_value(some)?)),
+	if value.is_none() {
+		Ok(None)
+	} else if T::NULLABLE {
+		if let Value::Array(array) = value
+			&& array.0.len() == 1
+		{
+			let mut items = array.0.into_iter();
+			let inner = next(&mut items, "option")?;
+			Ok(Some(T::from_vm_value(inner)?))
+		} else {
+			Err(SchemaError::vm("option", "an option of a value is NONE or a one-element array"))
+		}
+	} else {
+		Ok(Some(T::from_vm_value(value)?))
 	}
 }
 
@@ -192,9 +202,10 @@ pub fn list_into<T: StoredField>(items: Vec<T>) -> Result<Value, SchemaError> {
 
 /// The inverse of [`list_into`].
 pub fn list_from<T: StoredField>(value: Value) -> Result<Vec<T>, SchemaError> {
-	match value {
-		Value::Array(array) => array.0.into_iter().map(T::from_vm_value).collect(),
-		_ => Err(SchemaError::vm("list", "expected an array")),
+	if let Value::Array(array) = value {
+		array.0.into_iter().map(T::from_vm_value).collect()
+	} else {
+		Err(SchemaError::vm("list", "expected an array"))
 	}
 }
 

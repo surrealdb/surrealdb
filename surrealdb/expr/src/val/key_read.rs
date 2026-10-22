@@ -47,7 +47,7 @@ impl<'de> BorrowDecode<'de, ()> for KeyIdRef<'de> {
 			KeyId::Number(n) => Self::Number(n),
 			KeyId::String(text) => Self::String(text.0),
 			KeyId::Uuid(uuid) => Self::Uuid(uuid),
-			_ => Self::Other,
+			KeyId::Array(_) | KeyId::Object(_) | KeyId::Range(_) => Self::Other,
 		})
 	}
 }

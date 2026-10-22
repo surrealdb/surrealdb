@@ -199,7 +199,21 @@ impl SurrealValue for RecordIdKey {
 				let range = RecordIdKeyRange::from_value(value)?;
 				Ok(RecordIdKey::Range(Box::new(range)))
 			}
-			_ => Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value))),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(Number::Float(_) | Number::Decimal(_))
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Set(_) => {
+				Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value)))
+			}
 		}
 	}
 }

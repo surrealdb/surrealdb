@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use anyhow::Result;
 
 use crate::expr::part::Part;
@@ -7,16 +9,51 @@ impl Value {
 	/// Synchronous method for incrementing a field in a `Value`
 	pub fn inc(&mut self, path: &[Part], val: Value) -> Result<()> {
 		match self.pick(path) {
-			Value::Array(v) => match val {
-				Value::Array(x) => self.put(path, Value::from(v.concat(x))),
-				x => self.put(path, Value::from(v.with_push(x))),
-			},
+			Value::Array(v) => {
+				if let Value::Array(x) = val {
+					self.put(path, Value::from(v.concat(x)));
+				} else {
+					self.put(path, Value::from(v.with_push(val)));
+				}
+			}
 			Value::None => match val {
 				Value::Number(x) => self.put(path, Value::Number(Number::Int(0) + x)),
 				Value::Array(x) => self.put(path, Value::from(x)),
-				x => self.put(path, Value::from(vec![x])),
+				x @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_)) => self.put(path, Value::from(vec![x])),
 			},
-			v => {
+			v @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => {
 				let result = v.try_add(val)?;
 				self.put(path, result);
 			}

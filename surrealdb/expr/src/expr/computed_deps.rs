@@ -6,6 +6,8 @@
 //! - Topological ordering of computed field evaluation
 //! - Selective computation (only compute fields needed by the query)
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::expr::function::{Function, FunctionCall};
@@ -61,10 +63,10 @@ pub fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 /// Matches `Part::Field("name")` and `Part::Value(Literal::String("name"))` —
 /// the latter covers bracket access like `["name"]`.
 fn field_name_from_part(part: &Part) -> Option<String> {
-	match part {
-		Part::Field(name) => Some(name.as_str().to_owned()),
-		Part::Value(Expr::Literal(Literal::String(name))) => Some(name.as_str().to_owned()),
-		_ => None,
+	if let Part::Field(name) | Part::Value(Expr::Literal(Literal::String(name))) = part {
+		Some(name.as_str().to_owned())
+	} else {
+		None
 	}
 }
 
@@ -352,13 +354,14 @@ impl FieldDependencyExtractor {
 	/// to the outer document being analysed, so that the rows the `SELECT`
 	/// iterates over are that document itself.
 	fn is_outer_doc_target(&self, expr: &Expr) -> bool {
-		match expr {
-			Expr::Param(p) => match p.as_str() {
+		if let Expr::Param(p) = expr {
+			match p.as_str() {
 				"this" | "self" => self.nested == 0,
 				"parent" => self.nested <= 1,
 				_ => false,
-			},
-			_ => false,
+			}
+		} else {
+			false
 		}
 	}
 
@@ -460,9 +463,10 @@ impl FieldDependencyExtractor {
 /// (e.g. `$this.x`, `[0]`, function-call roots).
 fn parse_idiom_root(s: &str) -> Option<String> {
 	let idi: Idiom = crate::parser::idiom(s).ok()?;
-	match idi.0.first()? {
-		Part::Field(name) => Some(name.as_str().to_owned()),
-		_ => None,
+	if let Part::Field(name) = idi.0.first()? {
+		Some(name.as_str().to_owned())
+	} else {
+		None
 	}
 }
 

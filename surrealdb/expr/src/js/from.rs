@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use chrono::{TimeZone, Utc};
 use js::prelude::This;
 use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
@@ -170,6 +172,13 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 
 			Ok(x.into())
 		}
-		_ => Ok(Value::Null),
+		js::Type::Uninitialized
+		| js::Type::Symbol
+		| js::Type::Constructor
+		| js::Type::Function
+		| js::Type::Promise
+		| js::Type::Proxy
+		| js::Type::Module
+		| js::Type::Unknown => Ok(Value::Null),
 	}
 }

@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 
@@ -243,13 +245,13 @@ impl Array {
 		let mut transposed_vec = vec![vec![Value::None; self.len()]; height];
 
 		for (idx, i) in self.into_iter().enumerate() {
-			match i {
-				Value::Array(j) => {
+			match i.try_into_array() {
+				Ok(j) => {
 					for (jdx, j) in j.into_iter().enumerate() {
 						transposed_vec[jdx][idx] = j;
 					}
 				}
-				x => {
+				Err(x) => {
 					transposed_vec[0][idx] = x;
 				}
 			}
@@ -381,9 +383,9 @@ impl Flatten<Array> for Array {
 	fn flatten(self) -> Array {
 		let mut out = Array::with_capacity(self.len());
 		for v in self {
-			match v {
-				Value::Array(mut a) => out.append(&mut a),
-				_ => out.push(v),
+			match v.try_into_array() {
+				Ok(mut a) => out.append(&mut a),
+				Err(v) => out.push(v),
 			}
 		}
 		out

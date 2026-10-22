@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use anyhow::{Result, bail};
 
 use crate::expr::Error;
@@ -15,9 +17,10 @@ impl Value {
 				value: val,
 			});
 		};
-		match self {
-			Value::Object(target) => merge_objects(target, source),
-			other => other.merge_by_paths(&Value::Object(source)),
+		if let Value::Object(target) = self {
+			merge_objects(target, source);
+		} else {
+			self.merge_by_paths(&Value::Object(source));
 		}
 		Ok(())
 	}
@@ -35,9 +38,10 @@ impl Value {
 				continue;
 			}
 
-			match new {
-				Value::None => self.cut(k),
-				v => self.put(k, v),
+			if new.is_none() {
+				self.cut(k);
+			} else {
+				self.put(k, new);
 			}
 		}
 	}
@@ -46,20 +50,17 @@ impl Value {
 /// Merges `source` into `target` field by field, moving the values of `source`.
 fn merge_objects(target: &mut Object, source: Object) {
 	for (key, value) in source {
-		match value {
-			Value::None => {
-				target.remove(key.as_str());
+		if value.is_none() {
+			target.remove(key.as_str());
+		} else if let Value::Object(mut nested) = value {
+			if let Some(Value::Object(existing)) = target.get_mut(key.as_str()) {
+				merge_objects(existing, nested);
+			} else {
+				remove_none_fields(&mut nested);
+				target.insert(key, Value::Object(nested));
 			}
-			Value::Object(mut nested) => match target.get_mut(key.as_str()) {
-				Some(Value::Object(existing)) => merge_objects(existing, nested),
-				_ => {
-					remove_none_fields(&mut nested);
-					target.insert(key, Value::Object(nested));
-				}
-			},
-			value => {
-				target.insert(key, value);
-			}
+		} else {
+			target.insert(key, value);
 		}
 	}
 }

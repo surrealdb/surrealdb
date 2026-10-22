@@ -261,16 +261,39 @@ pub fn fits<'v, V: ShapedValue<'v>>(shape: &Shape, node: Option<usize>, value: V
 				let ok = match column.kind {
 					Kind::Dynamic => true,
 					Kind::Object => matches!(leaf, Leaf::Object) && fits(shape, Some(at), child),
-					Kind::Record => match leaf {
-						Leaf::Record(_, KeyLeaf::Other) => true,
-						Leaf::Record(table, _) => column.table.is_empty() || column.table == table,
-						_ => false,
-					},
+					Kind::Record => {
+						if let Leaf::Record(_, KeyLeaf::Other) = leaf {
+							true
+						} else if let Leaf::Record(table, _) = leaf {
+							column.table.is_empty() || column.table == table
+						} else {
+							false
+						}
+					}
 					Kind::Array => {
 						matches!(leaf, Leaf::Array)
 							&& column.element.is_some_and(|element| elements_fit(element, child))
 					}
-					kind => leaf_fits(kind, &leaf),
+					kind @ (Kind::Bool
+					| Kind::Int
+					| Kind::Float
+					| Kind::Datetime
+					| Kind::Duration
+					| Kind::Uuid
+					| Kind::String
+					| Kind::Bytes
+					| Kind::Decimal
+					| Kind::Bit
+					| Kind::I8
+					| Kind::I16
+					| Kind::I32
+					| Kind::U8
+					| Kind::U16
+					| Kind::U32
+					| Kind::U64
+					| Kind::F32
+					| Kind::DatetimeNs
+					| Kind::DurationNs) => leaf_fits(kind, &leaf),
 				};
 				if !ok {
 					return false;
@@ -369,7 +392,20 @@ fn derive_column<'v, V: ShapedValue<'v>>(
 			join_node(&mut column.children, &mut column.open, value, depth + 1);
 		}
 		Leaf::Object => column.kind = Kind::Dynamic,
-		_ => {}
+		Leaf::None
+		| Leaf::Null
+		| Leaf::Bool(_)
+		| Leaf::Int(_)
+		| Leaf::Float(_)
+		| Leaf::Decimal(_)
+		| Leaf::String(_)
+		| Leaf::Bytes(_)
+		| Leaf::Datetime(..)
+		| Leaf::Duration(..)
+		| Leaf::Uuid(_)
+		| Leaf::Record(..)
+		| Leaf::Array
+		| Leaf::Other => {}
 	}
 	column
 }
@@ -445,7 +481,19 @@ fn write_column<'v, V: ShapedValue<'v>>(
 	match child.leaf() {
 		Leaf::None => row.set_presence(column, STATE_NONE),
 		Leaf::Null => row.set_presence(column, STATE_NULL),
-		leaf => {
+		leaf @ (Leaf::Bool(_)
+		| Leaf::Int(_)
+		| Leaf::Float(_)
+		| Leaf::Decimal(_)
+		| Leaf::String(_)
+		| Leaf::Bytes(_)
+		| Leaf::Datetime(..)
+		| Leaf::Duration(..)
+		| Leaf::Uuid(_)
+		| Leaf::Record(..)
+		| Leaf::Object
+		| Leaf::Array
+		| Leaf::Other) => {
 			row.set_presence(column, STATE_VALUE);
 			write_leaf(shape, row, at, child, leaf)?;
 		}
@@ -653,7 +701,18 @@ fn write_array<'v, V: ShapedValue<'v>>(
 				Leaf::String(v) => out.extend_from_slice(v.as_bytes()),
 				Leaf::Bytes(v) => out.extend_from_slice(v),
 				Leaf::Decimal(v) => decimal_text(out, &v),
-				_ => return Err(misfit()),
+				Leaf::None
+				| Leaf::Null
+				| Leaf::Bool(_)
+				| Leaf::Int(_)
+				| Leaf::Float(_)
+				| Leaf::Datetime(..)
+				| Leaf::Duration(..)
+				| Leaf::Uuid(_)
+				| Leaf::Record(..)
+				| Leaf::Object
+				| Leaf::Array
+				| Leaf::Other => return Err(misfit()),
 			}
 			let end = u32::try_from(out.len() - base)
 				.map_err(|_| ShapedError::new("an array larger than 4 GiB"))?;
@@ -675,7 +734,15 @@ fn write_array<'v, V: ShapedValue<'v>>(
 				out.extend_from_slice(&secs.to_le_bytes());
 				out.extend_from_slice(&nanos.to_le_bytes());
 			}
-			_ => return Err(misfit()),
+			Leaf::None
+			| Leaf::Null
+			| Leaf::Decimal(_)
+			| Leaf::String(_)
+			| Leaf::Bytes(_)
+			| Leaf::Record(..)
+			| Leaf::Object
+			| Leaf::Array
+			| Leaf::Other => return Err(misfit()),
 		}
 	}
 	Ok(())
@@ -780,36 +847,37 @@ impl<'v> ShapedValue<'v> for PublicShaped<'v> {
 					RecordIdKey::Number(n) => KeyLeaf::Int(*n),
 					RecordIdKey::String(s) => KeyLeaf::String(s),
 					RecordIdKey::Uuid(u) => KeyLeaf::Uuid(*u.0.as_bytes()),
-					_ => KeyLeaf::Other,
+					RecordIdKey::Array(_) | RecordIdKey::Object(_) | RecordIdKey::Range(_) => {
+						KeyLeaf::Other
+					}
 				},
 			),
 			Value::Object(_) => Leaf::Object,
 			Value::Array(_) => Leaf::Array,
-			_ => Leaf::Other,
+			Value::Table(_)
+			| Value::Geometry(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Leaf::Other,
 		}
 	}
 
 	fn get(self, key: &str) -> Option<Self> {
-		match self.value {
-			crate::Value::Object(o) => o.0.get(key).map(|v| self.with(v)),
-			_ => None,
-		}
+		self.value.as_object()?.0.get(key).map(|v| self.with(v))
 	}
 
 	fn entries(self) -> impl Iterator<Item = (&'v str, Self)> {
-		let entries = match self.value {
-			crate::Value::Object(o) => Some(o.0.iter()),
-			_ => None,
-		};
-		entries.into_iter().flatten().map(move |(k, v)| (k.as_str(), self.with(v)))
+		self.value
+			.as_object()
+			.map(|o| o.0.iter())
+			.into_iter()
+			.flatten()
+			.map(move |(k, v)| (k.as_str(), self.with(v)))
 	}
 
 	fn elements(self) -> impl Iterator<Item = Self> {
-		let elements = match self.value {
-			crate::Value::Array(a) => Some(a.0.iter()),
-			_ => None,
-		};
-		elements.into_iter().flatten().map(move |v| self.with(v))
+		self.value.as_array().map(|a| a.0.iter()).into_iter().flatten().map(move |v| self.with(v))
 	}
 
 	fn write_dynamic(self, out: &mut Vec<u8>) -> Result<(), ShapedError> {

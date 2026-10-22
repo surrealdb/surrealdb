@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
@@ -125,7 +127,10 @@ fn record_key_to_string(key: RecordIdKey) -> Result<String, String> {
 	match key {
 		RecordIdKey::String(v) => Ok(v),
 		RecordIdKey::Number(v) => Ok(v.to_string()),
-		other => Err(format!("unsupported record key in test: {other:?}")),
+		other @ (RecordIdKey::Uuid(_)
+		| RecordIdKey::Array(_)
+		| RecordIdKey::Object(_)
+		| RecordIdKey::Range(_)) => Err(format!("unsupported record key in test: {other:?}")),
 	}
 }
 

@@ -125,7 +125,7 @@ impl Ord for RecordIdKeyRange {
 			match a {
 				Bound::Unbounded => match b {
 					Bound::Unbounded => Ordering::Equal,
-					_ => Ordering::Less,
+					Bound::Included(_) | Bound::Excluded(_) => Ordering::Less,
 				},
 				Bound::Included(a) => match b {
 					Bound::Unbounded => Ordering::Greater,
@@ -134,13 +134,13 @@ impl Ord for RecordIdKeyRange {
 				},
 				Bound::Excluded(a) => match b {
 					Bound::Excluded(b) => a.cmp(b),
-					_ => Ordering::Greater,
+					Bound::Unbounded | Bound::Included(_) => Ordering::Greater,
 				},
 			}
 		}
 		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
-			x => x,
+			ordering @ (Ordering::Less | Ordering::Greater) => ordering,
 		}
 	}
 }

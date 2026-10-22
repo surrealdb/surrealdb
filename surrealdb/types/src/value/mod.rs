@@ -513,9 +513,10 @@ impl Value {
 	///
 	/// Returns `None` if the value is not an array or the array is empty.
 	pub fn first(&self) -> Option<Value> {
-		match self {
-			Value::Array(arr) => arr.first().cloned(),
-			_ => None,
+		if let Value::Array(arr) = self {
+			arr.first().cloned()
+		} else {
+			None
 		}
 	}
 
@@ -534,7 +535,17 @@ impl Value {
 			Value::Object(obj) => obj.is_empty(),
 			Value::Array(arr) => arr.is_empty(),
 			Value::Set(set) => set.is_empty(),
-			_ => false,
+			Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_) => false,
 		}
 	}
 
@@ -650,9 +661,10 @@ impl Index<usize> for Value {
 	type Output = Self;
 
 	fn index(&self, index: usize) -> &Self::Output {
-		match &self {
-			Value::Array(map) => map.0.get(index).unwrap_or(&Value::None),
-			_ => &Value::None,
+		if let Value::Array(map) = self {
+			map.0.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 }
@@ -661,9 +673,10 @@ impl Index<&str> for Value {
 	type Output = Self;
 
 	fn index(&self, index: &str) -> &Self::Output {
-		match &self {
-			Value::Object(map) => map.0.get(index).unwrap_or(&Value::None),
-			_ => &Value::None,
+		if let Value::Object(map) = self {
+			map.0.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 }
@@ -690,37 +703,35 @@ pub trait Indexable<Idx> {
 
 impl Indexable<usize> for Value {
 	fn get(&self, index: usize) -> &Value {
-		match self {
-			Value::Array(arr) => arr.index(index),
-			_ => &Value::None,
+		if let Value::Array(arr) = self {
+			arr.index(index)
+		} else {
+			&Value::None
 		}
 	}
 	fn remove(&mut self, index: usize) -> Value {
-		match self {
-			Value::Array(arr) => arr.remove(index),
-			_ => Value::None,
+		if let Value::Array(arr) = self {
+			arr.remove(index)
+		} else {
+			Value::None
 		}
 	}
 }
 
 impl Indexable<&str> for Value {
 	fn get(&self, index: &str) -> &Value {
-		match self {
-			Value::Object(obj) => match obj.get(index) {
-				Some(v) => v,
-				None => &Value::None,
-			},
-			_ => &Value::None,
+		if let Value::Object(obj) = self {
+			obj.get(index).unwrap_or(&Value::None)
+		} else {
+			&Value::None
 		}
 	}
 
 	fn remove(&mut self, index: &str) -> Value {
-		match self {
-			Value::Object(obj) => match obj.remove(index) {
-				Some(v) => v,
-				None => Value::None,
-			},
-			_ => Value::None,
+		if let Value::Object(obj) = self {
+			obj.remove(index).unwrap_or(Value::None)
+		} else {
+			Value::None
 		}
 	}
 }

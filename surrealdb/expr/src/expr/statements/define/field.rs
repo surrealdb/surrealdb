@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -9,12 +11,39 @@ use crate::expr::{CoverStmts, Expr, KeyNames, KeyNamesError, Kind, KindLiteral, 
 /// object types, `array<object>` and `option<object>`).
 pub fn kind_contains_object(kind: &Kind) -> bool {
 	match kind {
-		Kind::Object => true,
-		Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+		Kind::Object | Kind::Literal(KindLiteral::Object(_)) => true,
+		Kind::Either(kinds) | Kind::Literal(KindLiteral::Array(kinds)) => {
+			kinds.iter().any(kind_contains_object)
+		}
 		Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
-		Kind::Literal(KindLiteral::Object(_)) => true,
-		Kind::Literal(KindLiteral::Array(kinds)) => kinds.iter().any(kind_contains_object),
-		_ => false,
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Function(_, _)
+		| Kind::Range
+		| Kind::Literal(
+			KindLiteral::String(_)
+			| KindLiteral::Integer(_)
+			| KindLiteral::Float(_)
+			| KindLiteral::Decimal(_)
+			| KindLiteral::Duration(_)
+			| KindLiteral::Bool(_),
+		)
+		| Kind::File(_) => false,
 	}
 }
 

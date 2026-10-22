@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -61,7 +63,7 @@ impl FromStr for Datetime {
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match syn::datetime(s) {
 			Ok(v) => Ok(v.into()),
-			_ => Err(()),
+			Err(_) => Err(()),
 		}
 	}
 }
@@ -71,7 +73,7 @@ impl TryFrom<(i64, u32)> for Datetime {
 	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
 		match Utc.timestamp_opt(v.0, v.1) {
 			LocalResult::Single(v) => Ok(Self(v)),
-			_ => Err(()),
+			LocalResult::Ambiguous(_, _) | LocalResult::None => Err(()),
 		}
 	}
 }

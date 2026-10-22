@@ -678,7 +678,7 @@ impl<'a> ArrayRef<'a> {
 				4 => IntIter::I32(p.as_chunks::<4>().0.iter()),
 				_ => IntIter::I64(p.as_chunks::<8>().0.iter()),
 			}),
-			_ => None,
+			ArrayRepr::Values(_) | ArrayRepr::F64(_) | ArrayRepr::F32(_) => None,
 		}
 	}
 

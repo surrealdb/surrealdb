@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::hash::{Hash, Hasher};
 use std::iter::once;
 
@@ -147,7 +149,10 @@ impl Literal {
 					RecordIdKeyLit::Number(x) => crate::val::RecordIdKey::Number(*x),
 					RecordIdKeyLit::String(x) => crate::val::RecordIdKey::String(x.clone()),
 					RecordIdKeyLit::Uuid(x) => crate::val::RecordIdKey::Uuid(*x),
-					_ => return None,
+					RecordIdKeyLit::Array(_)
+					| RecordIdKeyLit::Object(_)
+					| RecordIdKeyLit::Generate(_)
+					| RecordIdKeyLit::Range(_) => return None,
 				};
 				Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key))
 			}

@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::expr::{Expr, Literal};
@@ -77,7 +79,23 @@ impl Value {
 				}
 			}
 			// Process every other path
-			_ => {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {
 				if !accum.is_empty() {
 					build.push(Idiom(accum.clone()))
 				}

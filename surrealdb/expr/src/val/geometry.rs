@@ -1,4 +1,5 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
+#![deny(clippy::wildcard_enum_match_arm)]
 use std::cmp::Ordering;
 use std::hash;
 use std::iter::once;
@@ -104,6 +105,74 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
+	}
+
+	/// Check if this Geometry matches one of the specified [`GeometryKind`]s.
+	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
+		types.contains(&self.geometry_kind())
+	}
+
+	/// Extract a `Point<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_point(self) -> Result<Point<f64>, Self> {
+		if let Self::Point(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `LineString<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_line(self) -> Result<LineString<f64>, Self> {
+		if let Self::Line(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `Polygon<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_polygon(self) -> Result<Polygon<f64>, Self> {
+		if let Self::Polygon(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `MultiPoint<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_multipoint(self) -> Result<MultiPoint<f64>, Self> {
+		if let Self::MultiPoint(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `MultiLineString<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_multiline(self) -> Result<MultiLineString<f64>, Self> {
+		if let Self::MultiLine(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `MultiPolygon<f64>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_multipolygon(self) -> Result<MultiPolygon<f64>, Self> {
+		if let Self::MultiPolygon(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
+	}
+
+	/// Extract a `Vec<Geometry>`, returning `Err(self)` if this is a different variant.
+	pub fn try_into_collection(self) -> Result<Vec<Geometry>, Self> {
+		if let Self::Collection(v) = self {
+			Ok(v)
+		} else {
+			Err(self)
+		}
 	}
 
 	/// Check if this has valid latitude and longitude points:
@@ -217,15 +286,16 @@ impl Geometry {
 	pub fn as_object(&self) -> Object {
 		let mut obj = Object::default();
 		obj.insert("type", self.as_type().into());
-		match self {
+		if let Self::Collection(members) = self {
 			// A collection's members are geometry values, not their raw
 			// coordinates, so reading one back yields a geometry.
-			Self::Collection(members) => obj.insert(
+			obj.insert(
 				"geometries",
 				members.iter().cloned().map(Value::Geometry).collect::<Vec<Value>>().into(),
-			),
-			_ => obj.insert("coordinates", self.as_coordinates()),
-		};
+			);
+		} else {
+			obj.insert("coordinates", self.as_coordinates());
+		}
 		obj
 	}
 
@@ -272,11 +342,14 @@ impl Geometry {
 				let mut res = Vec::with_capacity(x.len());
 
 				for x in x.iter() {
-					res.push(match x {
-						Value::Geometry(x) => x.clone(),
-						Value::Object(x) => Geometry::try_from_object(x)?,
-						_ => return None,
-					});
+					let geom = if let Value::Geometry(x) = x {
+						x.clone()
+					} else if let Value::Object(x) = x {
+						Geometry::try_from_object(x)?
+					} else {
+						return None;
+					};
+					res.push(geom);
 				}
 
 				Some(Geometry::Collection(res))
@@ -384,14 +457,16 @@ impl Geometry {
 				Self::Point(w) => v.contains(w),
 				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
+				Self::Line(_) | Self::Polygon(_) | Self::MultiLine(_) | Self::MultiPolygon(_) => {
+					false
+				}
 			},
 			Self::Line(v) => match other {
 				Self::Point(w) => v.contains(w),
 				Self::Line(w) => v.contains(w),
 				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
+				Self::Polygon(_) | Self::MultiPoint(_) | Self::MultiPolygon(_) => false,
 			},
 			Self::Polygon(v) => match other {
 				Self::Point(w) => v.contains(w),
@@ -399,20 +474,22 @@ impl Geometry {
 				Self::Polygon(w) => v.contains(w),
 				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
+				Self::MultiPoint(_) | Self::MultiLine(_) => false,
 			},
 			Self::MultiPoint(v) => match other {
 				Self::Point(w) => v.contains(w),
 				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
+				Self::Line(_) | Self::Polygon(_) | Self::MultiLine(_) | Self::MultiPolygon(_) => {
+					false
+				}
 			},
 			Self::MultiLine(v) => match other {
 				Self::Point(w) => v.contains(w),
 				Self::Line(w) => v.contains(w),
 				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
+				Self::Polygon(_) | Self::MultiPoint(_) | Self::MultiPolygon(_) => false,
 			},
 			Self::MultiPolygon(v) => match other {
 				Self::Point(w) => v.contains(w),
@@ -529,7 +606,7 @@ fn cmp_coords(
 			(Some((ax, ay)), Some((bx, by))) => {
 				match cmp_f64(ax, bx).then_with(|| cmp_f64(ay, by)) {
 					Ordering::Equal => {}
-					ordering => return ordering,
+					ordering @ (Ordering::Less | Ordering::Greater) => return ordering,
 				}
 			}
 		}

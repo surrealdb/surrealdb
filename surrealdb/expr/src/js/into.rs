@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use js::{
 	Array, BigInt, Class, Ctx, Error, Exception, FromIteratorJs as _, IntoJs, Null, Object,
 	TypedArray, Undefined,
@@ -116,7 +118,9 @@ impl<'js> IntoJs<'js> for &Value {
 				},
 			)?
 			.into_value()),
-			_ => Undefined.into_js(ctx),
+			Value::Set(_) | Value::Table(_) | Value::Regex(_) | Value::Closure(_) => {
+				Undefined.into_js(ctx)
+			}
 		}
 	}
 }

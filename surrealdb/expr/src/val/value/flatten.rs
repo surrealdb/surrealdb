@@ -1,25 +1,25 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::val::{Array, Value};
 
 impl Value {
 	pub fn flatten(self) -> Self {
-		match self {
-			Value::Array(v) => {
-				let mut res = Vec::with_capacity(v.len());
+		let Value::Array(v) = self else {
+			return self;
+		};
 
-				for v in v {
-					match v {
-						Value::Array(x) => {
-							for x in x {
-								res.push(x);
-							}
-						}
-						x => res.push(x),
-					}
+		let mut res = Vec::with_capacity(v.len());
+
+		for v in v {
+			if let Value::Array(x) = v {
+				for x in x {
+					res.push(x);
 				}
-
-				Value::Array(Array(res))
+			} else {
+				res.push(v);
 			}
-			v => v,
 		}
+
+		Value::Array(Array(res))
 	}
 }

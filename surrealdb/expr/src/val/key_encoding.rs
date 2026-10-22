@@ -398,10 +398,13 @@ mod key_order {
 		let key = match rng.below(3) {
 			0 => RecordIdKey::String(Strand::new(gen_text(rng))),
 			1 => RecordIdKey::Number(gen_i64(rng)),
-			_ => match gen_uuid(rng) {
-				Value::Uuid(u) => RecordIdKey::Uuid(u),
-				other => unreachable!("gen_uuid produced {other:?}"),
-			},
+			_ => {
+				let other = gen_uuid(rng);
+				let Value::Uuid(u) = other else {
+					unreachable!("gen_uuid produced {other:?}")
+				};
+				RecordIdKey::Uuid(u)
+			}
 		};
 		record(table, key)
 	}
@@ -535,10 +538,13 @@ mod key_order {
 		let exact_decimal = decimal(k as i128 * 5i128.pow(n), n);
 		match rng.below(3) {
 			0 => Number::Float(k as f64 / (1u64 << n) as f64),
-			1 => match exact_decimal {
-				Number::Decimal(d) => Number::Decimal(d.normalize()),
-				other => other,
-			},
+			1 => {
+				if let Number::Decimal(d) = exact_decimal {
+					Number::Decimal(d.normalize())
+				} else {
+					exact_decimal
+				}
+			}
 			_ => exact_decimal,
 		}
 	}
@@ -956,9 +962,10 @@ mod key_order {
 	/// The stored prefix of the number in its normalised form, which every number
 	/// equal to it shares.
 	fn value_prefix(n: &Number) -> Vec<u8> {
-		match n {
-			Number::Decimal(d) => stored_prefix(&Number::Decimal(d.normalize())),
-			other => stored_prefix(other),
+		if let Number::Decimal(d) = n {
+			stored_prefix(&Number::Decimal(d.normalize()))
+		} else {
+			stored_prefix(n)
 		}
 	}
 

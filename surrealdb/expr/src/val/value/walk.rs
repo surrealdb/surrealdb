@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
@@ -22,8 +24,20 @@ impl Value {
 							v._walk(path.next(), prev.clone().push(Part::Field(field.clone())))
 						})
 						.collect::<Vec<_>>(),
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.get(&idx.to_string()) {
 								Some(v) => v._walk(path.next(), prev.push(p.clone())),
 								None => Value::None._walk(path.next(), prev.push(p.clone())),
@@ -43,8 +57,20 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::All
+					| Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.get(idx) {
 								Some(v) => v._walk(path.next(), prev.push(p.clone())),
 								None => vec![],
@@ -72,8 +98,20 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::All
+					| Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.nth(idx) {
 								Some(v) => v._walk(path.next(), prev.push(p.clone())),
 								None => vec![],
@@ -92,10 +130,38 @@ impl Value {
 					}
 				},
 				// Ignore everything else
-				_ => match p {
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => match p {
 					Part::Field(_) => Value::None._walk(path.next(), prev.push(p.clone())),
-					x => {
-						if x.as_old_index().is_some() {
+					Part::All
+					| Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if p.as_old_index().is_some() {
 							Value::None._walk(path.next(), prev.push(p.clone()))
 						} else {
 							vec![]
@@ -135,8 +201,20 @@ impl Value {
 						v.walk_ref(path.next(), visit);
 					}
 				}
-				x => {
-					if let Some(idx) = x.as_old_index() {
+				Part::Flatten
+				| Part::Last
+				| Part::First
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if let Some(idx) = p.as_old_index() {
 						match v.get(&idx.to_string()) {
 							Some(v) => v.walk_ref(path.next(), visit),
 							None => Value::None.walk_ref(path.next(), visit),
@@ -156,7 +234,19 @@ impl Value {
 						v.walk_ref(path.next(), visit);
 					}
 				}
-				x => match x.as_old_index() {
+				Part::All
+				| Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => match p.as_old_index() {
 					Some(idx) => {
 						if let Some(v) = v.get(idx) {
 							v.walk_ref(path.next(), visit);
@@ -181,7 +271,19 @@ impl Value {
 						v.walk_ref(path.next(), visit);
 					}
 				}
-				x => match x.as_old_index() {
+				Part::All
+				| Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => match p.as_old_index() {
 					Some(idx) => {
 						if let Some(v) = v.nth(idx) {
 							v.walk_ref(path.next(), visit);
@@ -195,10 +297,38 @@ impl Value {
 				},
 			},
 			// Ignore everything else
-			_ => match p {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => match p {
 				Part::Field(_) => Value::None.walk_ref(path.next(), visit),
-				x => {
-					if x.as_old_index().is_some() {
+				Part::All
+				| Part::Flatten
+				| Part::Last
+				| Part::First
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if p.as_old_index().is_some() {
 						Value::None.walk_ref(path.next(), visit);
 					}
 				}
@@ -261,7 +391,19 @@ impl Value {
 						v.normalize_sets_at(path.next(), depth);
 					}
 				}
-				x => {
+				x @ (Part::Flatten
+				| Part::First
+				| Part::Last
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse) => {
 					if let Some(v) = x.as_old_index().and_then(|idx| v.get_mut(&idx.to_string())) {
 						v.normalize_sets_at(path.next(), depth);
 					}
@@ -278,7 +420,19 @@ impl Value {
 						v.normalize_sets_at(path.next(), depth);
 					}
 				}
-				x => match x.as_old_index() {
+				x @ (Part::All
+				| Part::Flatten
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Field(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse) => match x.as_old_index() {
 					Some(idx) => {
 						if let Some(v) = v.get_mut(idx) {
 							v.normalize_sets_at(path.next(), depth);
@@ -302,7 +456,19 @@ impl Value {
 						v.normalize_sets_at(path.next(), depth);
 					}
 				}
-				x => match x.as_old_index() {
+				x @ (Part::All
+				| Part::Flatten
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Field(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse) => match x.as_old_index() {
 					Some(idx) => {
 						if let Some(v) = v.nth_mut(idx) {
 							v.normalize_sets_at(path.next(), depth);
@@ -318,7 +484,22 @@ impl Value {
 				},
 			},
 			// A value no path step descends into holds no set.
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 	}
 
@@ -336,7 +517,22 @@ impl Value {
 				}
 				v.0.normalize();
 			}
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 	}
 

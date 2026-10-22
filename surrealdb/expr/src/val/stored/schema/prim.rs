@@ -85,9 +85,10 @@ impl StoredField for bool {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::Bool(b) => Ok(b),
-			_ => Err(SchemaError::vm("bool", "expected a bool")),
+		if let Value::Bool(b) = value {
+			Ok(b)
+		} else {
+			Err(SchemaError::vm("bool", "expected a bool"))
 		}
 	}
 
@@ -143,9 +144,10 @@ impl StoredField for u8 {
 	}
 
 	fn from_vm_list(value: Value) -> Result<Vec<Self>, SchemaError> {
-		match value {
-			Value::Bytes(bytes) => Ok(bytes.0.to_vec()),
-			_ => Err(SchemaError::vm("bytes", "expected bytes")),
+		if let Value::Bytes(bytes) = value {
+			Ok(bytes.0.to_vec())
+		} else {
+			Err(SchemaError::vm("bytes", "expected bytes"))
 		}
 	}
 }
@@ -348,9 +350,10 @@ impl StoredField for uuid::Uuid {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::Uuid(u) => Ok(u.0),
-			_ => Err(SchemaError::vm("uuid", "expected a uuid")),
+		if let Value::Uuid(u) = value {
+			Ok(u.0)
+		} else {
+			Err(SchemaError::vm("uuid", "expected a uuid"))
 		}
 	}
 
@@ -396,9 +399,10 @@ impl StoredField for DateTime<Utc> {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::Datetime(d) => Ok(d.0),
-			_ => Err(SchemaError::vm("datetime", "expected a datetime")),
+		if let Value::Datetime(d) = value {
+			Ok(d.0)
+		} else {
+			Err(SchemaError::vm("datetime", "expected a datetime"))
 		}
 	}
 
@@ -444,9 +448,10 @@ impl StoredField for std::time::Duration {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::Duration(d) => Ok(d.0),
-			_ => Err(SchemaError::vm("duration", "expected a duration")),
+		if let Value::Duration(d) = value {
+			Ok(d.0)
+		} else {
+			Err(SchemaError::vm("duration", "expected a duration"))
 		}
 	}
 
@@ -525,9 +530,10 @@ impl StoredField for Number {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::Number(n) => Ok(n),
-			_ => Err(SchemaError::vm("number", "expected a number")),
+		if let Value::Number(n) = value {
+			Ok(n)
+		} else {
+			Err(SchemaError::vm("number", "expected a number"))
 		}
 	}
 
@@ -574,9 +580,10 @@ impl StoredField for Value {
 	}
 
 	fn decode_list(item: Item<'_>, _depth: u32) -> Result<Vec<Self>, SchemaError> {
-		match decode(item.bytes())? {
-			Value::Array(array) => Ok(array.0),
-			_ => Err(SchemaError::wrong_kind()),
+		if let Value::Array(array) = decode(item.bytes())? {
+			Ok(array.0)
+		} else {
+			Err(SchemaError::wrong_kind())
 		}
 	}
 }
@@ -628,9 +635,10 @@ impl StoredField for RecordId {
 	}
 
 	fn decode_item(item: Item<'_>, _depth: u32) -> Result<Self, SchemaError> {
-		match decode(item.bytes())? {
-			Value::RecordId(r) => Ok(r),
-			_ => Err(SchemaError::wrong_kind()),
+		if let Value::RecordId(r) = decode(item.bytes())? {
+			Ok(r)
+		} else {
+			Err(SchemaError::wrong_kind())
 		}
 	}
 
@@ -639,9 +647,10 @@ impl StoredField for RecordId {
 	}
 
 	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
-		match value {
-			Value::RecordId(r) => Ok(r),
-			_ => Err(SchemaError::vm("record", "expected a record id")),
+		if let Value::RecordId(r) = value {
+			Ok(r)
+		} else {
+			Err(SchemaError::vm("record", "expected a record id"))
 		}
 	}
 
@@ -662,11 +671,10 @@ impl StoredField for BTreeMap<String, Value> {
 	}
 
 	fn decode_item(item: Item<'_>, _depth: u32) -> Result<Self, SchemaError> {
-		match decode(item.bytes())? {
-			Value::Object(object) => {
-				Ok(object.0.into_iter().map(|(k, v)| (k.into_string(), v)).collect())
-			}
-			_ => Err(SchemaError::wrong_kind()),
+		if let Value::Object(object) = decode(item.bytes())? {
+			Ok(object.0.into_iter().map(|(k, v)| (k.into_string(), v)).collect())
+		} else {
+			Err(SchemaError::wrong_kind())
 		}
 	}
 

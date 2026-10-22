@@ -3,6 +3,7 @@
 #![allow(clippy::mutable_key_type)]
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 mod error;
 mod flatbuffers;

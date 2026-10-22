@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use js::JsLifetime;
 use js::class::Trace;
 use surrealdb_types::ToSql;
@@ -23,7 +25,21 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					v => v.into_raw_string().into(),
+					v @ (Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Set(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_)) => v.into_raw_string().into(),
 				},
 			},
 		}

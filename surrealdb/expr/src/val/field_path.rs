@@ -5,6 +5,8 @@
 //! like sorting where we need to extract values synchronously without
 //! database access or expression evaluation.
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::borrow::Cow;
 use std::fmt;
 
@@ -167,9 +169,8 @@ fn step<'v>(value: &'v Value, part: &FieldPathPart) -> Step<'v> {
 		(Value::Array(arr), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
 			Step::Owned(Value::Array(
 				arr.iter()
-					.map(|v| match v {
-						Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-						_ => Value::None,
+					.map(|v| {
+						v.as_object().and_then(|obj| obj.get(name)).cloned().unwrap_or(Value::None)
 					})
 					.collect::<Vec<_>>()
 					.into(),
@@ -179,9 +180,8 @@ fn step<'v>(value: &'v Value, part: &FieldPathPart) -> Step<'v> {
 		(Value::Set(set), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
 			Step::Owned(Value::Set(Set::from(
 				set.iter()
-					.map(|v| match v {
-						Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-						_ => Value::None,
+					.map(|v| {
+						v.as_object().and_then(|obj| obj.get(name)).cloned().unwrap_or(Value::None)
 					})
 					.collect::<Vec<_>>(),
 			)))

@@ -211,7 +211,7 @@ impl Ord for Number {
 					// If the integer parts are equal then we need to compare the mantissa.
 					Ordering::Equal => total_cmp_f64(0.0, w.fract()),
 					// If the integer parts are not equal then we already know the correct ordering.
-					ordering => ordering,
+					ordering @ (Ordering::Less | Ordering::Greater) => ordering,
 				}
 			}
 			(v @ Number::Float(_), w @ Number::Int(_)) => w.cmp(v).reverse(),

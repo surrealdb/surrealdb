@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
 
@@ -28,8 +30,20 @@ impl Value {
 							v.iter_mut().for_each(|(_, v)| v.cut(path));
 						}
 					},
-					x => {
-						if let Some(i) = x.as_old_index() {
+					Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(i) = p.as_old_index() {
 							match path.len() {
 								1 => {
 									v.remove(&i.to_string());
@@ -80,8 +94,19 @@ impl Value {
 							}
 						}
 					},
-					x => {
-						if let Some(i) = x.as_old_index() {
+					Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(i) = p.as_old_index() {
 							match path.len() {
 								1 => {
 									if v.len() > i {
@@ -100,7 +125,23 @@ impl Value {
 					}
 				},
 				// Ignore everything else
-				_ => (),
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => (),
 			}
 		}
 	}

@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -184,9 +186,10 @@ impl ToSql for Closure {
 						write_sql!(f, sql_fmt, ", ");
 					}
 					write_sql!(f, sql_fmt, "{name}: ");
-					match kind {
-						k @ Kind::Either(_) => write_sql!(f, sql_fmt, "<{k}>"),
-						k => write_sql!(f, sql_fmt, "{k}"),
+					if matches!(kind, Kind::Either(_)) {
+						write_sql!(f, sql_fmt, "<{kind}>");
+					} else {
+						write_sql!(f, sql_fmt, "{kind}");
 					}
 				}
 				write_sql!(f, sql_fmt, "|");

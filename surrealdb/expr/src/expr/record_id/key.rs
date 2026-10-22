@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::ops::Bound;
 
 use common::fmt::{EscapeObjectKey, EscapeRidKey, Fmt, QuoteStr};
@@ -39,13 +41,13 @@ pub enum RecordIdKeyLit {
 impl RecordIdKeyLit {
 	pub fn kind_supported(kind: &Kind) -> bool {
 		match kind {
-			Kind::Any => true,
-			Kind::Number => true,
-			Kind::Int => true,
-			Kind::String => true,
-			Kind::Uuid => true,
-			Kind::Array(_, _) => true,
-			Kind::Object => true,
+			Kind::Any
+			| Kind::Number
+			| Kind::Int
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Array(_, _)
+			| Kind::Object => true,
 			Kind::Literal(l) => matches!(
 				l,
 				KindLiteral::Integer(_)
@@ -54,7 +56,22 @@ impl RecordIdKeyLit {
 					| KindLiteral::Object(_)
 			),
 			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
-			_ => false,
+			Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Record(_)
+			| Kind::Geometry(_)
+			| Kind::Set(_, _)
+			| Kind::Function(_, _)
+			| Kind::Range
+			| Kind::File(_) => false,
 		}
 	}
 }

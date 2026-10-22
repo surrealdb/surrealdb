@@ -231,7 +231,22 @@ impl Error {
 				NotFoundError::Method {
 					..
 				} => Some(code::METHOD_NOT_FOUND),
-				_ => None,
+				NotFoundError::Session {
+					..
+				}
+				| NotFoundError::Table {
+					..
+				}
+				| NotFoundError::Record {
+					..
+				}
+				| NotFoundError::Namespace {
+					..
+				}
+				| NotFoundError::Database {
+					..
+				}
+				| NotFoundError::Transaction => None,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -362,7 +377,7 @@ impl Error {
 			ErrorDetails::Context => Self::context(message),
 			// `Internal`, and any kind a newer peer introduces, which the
 			// taxonomy already degrades to it.
-			_ => Self::internal(message),
+			ErrorDetails::Internal => Self::internal(message),
 		}
 	}
 
@@ -462,68 +477,76 @@ impl Error {
 
 	/// Returns structured validation error details, if this is a validation error with specifics.
 	pub fn validation_details(&self) -> Option<&ValidationError> {
-		match &self.details {
-			ErrorDetails::Validation(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Validation(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured not-allowed error details, if this is a not-allowed error with specifics.
 	pub fn not_allowed_details(&self) -> Option<&NotAllowedError> {
-		match &self.details {
-			ErrorDetails::NotAllowed(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::NotAllowed(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured configuration error details, if this is a configuration error with
 	/// specifics.
 	pub fn configuration_details(&self) -> Option<&ConfigurationError> {
-		match &self.details {
-			ErrorDetails::Configuration(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Configuration(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured serialization error details, if this is a serialization error with
 	/// specifics.
 	pub fn serialization_details(&self) -> Option<&SerializationError> {
-		match &self.details {
-			ErrorDetails::Serialization(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Serialization(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured not-found error details, if this is a not-found error with specifics.
 	pub fn not_found_details(&self) -> Option<&NotFoundError> {
-		match &self.details {
-			ErrorDetails::NotFound(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::NotFound(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured query error details, if this is a query error with specifics.
 	pub fn query_details(&self) -> Option<&QueryError> {
-		match &self.details {
-			ErrorDetails::Query(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Query(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured already-exists error details, if this is an already-exists error with
 	/// specifics.
 	pub fn already_exists_details(&self) -> Option<&AlreadyExistsError> {
-		match &self.details {
-			ErrorDetails::AlreadyExists(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::AlreadyExists(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 
 	/// Returns structured connection error details, if this is a connection error with specifics.
 	pub fn connection_details(&self) -> Option<&ConnectionError> {
-		match &self.details {
-			ErrorDetails::Connection(d) => d.as_ref(),
-			_ => None,
+		if let ErrorDetails::Connection(d) = &self.details {
+			d.as_ref()
+		} else {
+			None
 		}
 	}
 }
@@ -1061,34 +1084,48 @@ impl From<std::io::Error> for Error {
 	fn from(error: std::io::Error) -> Self {
 		use std::io::ErrorKind;
 		let msg = error.to_string();
-		match error.kind() {
-			ErrorKind::NotFound => Error::not_found(msg, None),
-			ErrorKind::AlreadyExists => Error::already_exists(msg, None),
+		let kind = error.kind();
+		if kind == ErrorKind::NotFound {
+			Error::not_found(msg, None)
+		} else if kind == ErrorKind::AlreadyExists {
+			Error::already_exists(msg, None)
+		} else if matches!(
+			kind,
 			ErrorKind::PermissionDenied
-			| ErrorKind::ReadOnlyFilesystem
-			| ErrorKind::ResourceBusy
-			| ErrorKind::ExecutableFileBusy => Error::not_allowed(msg, None),
+				| ErrorKind::ReadOnlyFilesystem
+				| ErrorKind::ResourceBusy
+				| ErrorKind::ExecutableFileBusy
+		) {
+			Error::not_allowed(msg, None)
+		} else if matches!(
+			kind,
 			ErrorKind::ConnectionRefused
-			| ErrorKind::ConnectionReset
-			| ErrorKind::ConnectionAborted
-			| ErrorKind::NotConnected
-			| ErrorKind::HostUnreachable
-			| ErrorKind::NetworkUnreachable
-			| ErrorKind::NetworkDown
-			| ErrorKind::TimedOut
-			| ErrorKind::BrokenPipe
-			| ErrorKind::AddrInUse
-			| ErrorKind::AddrNotAvailable
-			| ErrorKind::StaleNetworkFileHandle => Error::connection(msg, ConnectionError::ConnectionFailed),
-			ErrorKind::InvalidData | ErrorKind::UnexpectedEof => {
-				Error::serialization(msg, SerializationError::Deserialization)
-			}
+				| ErrorKind::ConnectionReset
+				| ErrorKind::ConnectionAborted
+				| ErrorKind::NotConnected
+				| ErrorKind::HostUnreachable
+				| ErrorKind::NetworkUnreachable
+				| ErrorKind::NetworkDown
+				| ErrorKind::TimedOut
+				| ErrorKind::BrokenPipe
+				| ErrorKind::AddrInUse
+				| ErrorKind::AddrNotAvailable
+				| ErrorKind::StaleNetworkFileHandle
+		) {
+			Error::connection(msg, ConnectionError::ConnectionFailed)
+		} else if matches!(kind, ErrorKind::InvalidData | ErrorKind::UnexpectedEof) {
+			Error::serialization(msg, SerializationError::Deserialization)
+		} else if matches!(
+			kind,
 			ErrorKind::InvalidInput
-			| ErrorKind::InvalidFilename
-			| ErrorKind::NotADirectory
-			| ErrorKind::IsADirectory
-			| ErrorKind::DirectoryNotEmpty => Error::validation(msg, None),
-			_ => Error::internal(msg),
+				| ErrorKind::InvalidFilename
+				| ErrorKind::NotADirectory
+				| ErrorKind::IsADirectory
+				| ErrorKind::DirectoryNotEmpty
+		) {
+			Error::validation(msg, None)
+		} else {
+			Error::internal(msg)
 		}
 	}
 }

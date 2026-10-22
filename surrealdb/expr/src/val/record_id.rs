@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 use std::ops::Bound;
 
@@ -37,7 +39,7 @@ impl Ord for RecordIdKeyRange {
 			match a {
 				Bound::Unbounded => match b {
 					Bound::Unbounded => Ordering::Equal,
-					_ => Ordering::Less,
+					Bound::Included(_) | Bound::Excluded(_) => Ordering::Less,
 				},
 				Bound::Included(a) => match b {
 					Bound::Unbounded => Ordering::Greater,
@@ -46,13 +48,13 @@ impl Ord for RecordIdKeyRange {
 				},
 				Bound::Excluded(a) => match b {
 					Bound::Excluded(b) => a.cmp(b),
-					_ => Ordering::Greater,
+					Bound::Unbounded | Bound::Included(_) => Ordering::Greater,
 				},
 			}
 		}
 		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
-			x => x,
+			x @ (Ordering::Less | Ordering::Greater) => x,
 		}
 	}
 }
@@ -343,13 +345,25 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 	}
 	match value {
 		Value::Number(Number::Int(_)) => true,
-		Value::Number(_) | Value::Geometry(_) | Value::Closure(_) => false,
+		Value::Number(Number::Float(_) | Number::Decimal(_))
+		| Value::Geometry(_)
+		| Value::Closure(_) => false,
 		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
 		Value::Set(s) => s.iter().all(value_key_encoding_is_exact),
 		Value::Object(o) => o.values().all(value_key_encoding_is_exact),
 		Value::RecordId(id) => id.key.key_encoding_is_exact(),
 		Value::Range(r) => range_bound(&r.start) && range_bound(&r.end),
-		_ => true,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_) => true,
 	}
 }
 
@@ -534,7 +548,20 @@ impl RecordIdKey {
 			Value::Range(range) => {
 				RecordIdKeyRange::from_value_range(*range).map(|x| RecordIdKey::Range(Box::new(x)))
 			}
-			_ => None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(Number::Float(_) | Number::Decimal(_))
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => None,
 		}
 	}
 

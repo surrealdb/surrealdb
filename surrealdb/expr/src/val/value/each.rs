@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::val::Value;
@@ -40,7 +42,19 @@ impl Value {
 						accum.pop();
 					}
 				}
-				_ => {}
+				Part::Flatten
+				| Part::Last
+				| Part::First
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {}
 			},
 			// Current path part is an array
 			Value::Array(v) => match first {
@@ -66,10 +80,21 @@ impl Value {
 						accum.pop();
 					}
 				}
-				x => {
-					if let Some(idx) = x.as_old_index() {
+				Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if let Some(idx) = first.as_old_index() {
 						if let Some(v) = v.get(idx) {
-							accum.push(x.clone());
+							accum.push(first.clone());
 							v._each(rest, accum, build);
 							accum.pop();
 						}
@@ -114,10 +139,21 @@ impl Value {
 						accum.pop();
 					}
 				}
-				x => {
-					if let Some(idx) = x.as_old_index() {
+				Part::Flatten
+				| Part::Field(_)
+				| Part::Where(_)
+				| Part::Lookup(_)
+				| Part::Value(_)
+				| Part::Start(_)
+				| Part::Method(_, _)
+				| Part::Destructure(_)
+				| Part::Optional
+				| Part::Recurse(_, _, _)
+				| Part::Doc
+				| Part::RepeatRecurse => {
+					if let Some(idx) = first.as_old_index() {
 						if let Some(v) = v.nth(idx) {
-							accum.push(x.clone());
+							accum.push(first.clone());
 							v._each(rest, accum, build);
 							accum.pop();
 						}
@@ -133,7 +169,22 @@ impl Value {
 				}
 			},
 			// Ignore everything else
-			_ => {}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 	}
 }

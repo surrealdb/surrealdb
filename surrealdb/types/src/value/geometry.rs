@@ -294,15 +294,16 @@ impl Geometry {
 	/// its `coordinates`, or for a collection its `geometries`, whose members
 	/// are geometry values. [`Geometry::try_from_object`] reads it back.
 	pub fn as_object(&self) -> Object {
-		match self {
-			Self::Collection(members) => object! {
+		if let Self::Collection(members) = self {
+			object! {
 				type: Value::String(self.as_type().to_string()),
 				geometries: members.iter().cloned().map(Value::Geometry).collect::<Vec<Value>>(),
-			},
-			_ => object! {
+			}
+		} else {
+			object! {
 				type: Value::String(self.as_type().to_string()),
 				coordinates: self.as_coordinates(),
-			},
+			}
 		}
 	}
 
@@ -349,11 +350,14 @@ impl Geometry {
 				let mut res = Vec::with_capacity(x.len());
 
 				for x in x.iter() {
-					res.push(match x {
-						Value::Geometry(x) => x.clone(),
-						Value::Object(x) => Geometry::try_from_object(x)?,
-						_ => return None,
-					});
+					let geom = if let Value::Geometry(x) = x {
+						x.clone()
+					} else if let Value::Object(x) = x {
+						Geometry::try_from_object(x)?
+					} else {
+						return None;
+					};
+					res.push(geom);
 				}
 
 				Some(Geometry::Collection(res))
@@ -455,7 +459,7 @@ fn cmp_coords(
 			(Some((ax, ay)), Some((bx, by))) => {
 				match cmp_f64(ax, bx).then_with(|| cmp_f64(ay, by)) {
 					Ordering::Equal => {}
-					ordering => return ordering,
+					ordering @ (Ordering::Less | Ordering::Greater) => return ordering,
 				}
 			}
 		}

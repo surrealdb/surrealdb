@@ -624,9 +624,12 @@ impl Encoder {
 			return Ok(());
 		}
 		if !v.is_empty() && v.iter().all(|v| matches!(v, Value::Number(Number::Float(_)))) {
-			let floats = v.iter().map(|v| match v {
-				Value::Number(Number::Float(f)) => *f,
-				_ => unreachable!("every element is a float"),
+			let floats = v.iter().map(|v| {
+				if let Value::Number(Number::Float(f)) = v {
+					*f
+				} else {
+					unreachable!("every element is a float")
+				}
 			});
 			if floats.clone().all(|f| (f as f32) as f64 == f && !f.is_nan()) {
 				let (out, _) = self.front(v.len() * 4).as_chunks_mut::<4>();
@@ -723,9 +726,10 @@ impl Encoder {
 fn narrowest_int_array_width(v: &[Value]) -> Option<usize> {
 	let mut w = 1;
 	for e in v {
-		match e {
-			Value::Number(Number::Int(i)) => w = w.max(int_width(*i)),
-			_ => return None,
+		if let Value::Number(Number::Int(i)) = e {
+			w = w.max(int_width(*i));
+		} else {
+			return None;
 		}
 	}
 	// An empty array has no width: the first element decides whether the form applies at all.

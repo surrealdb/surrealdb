@@ -325,6 +325,13 @@ impl_surreal_value!(
 		} else {
 			None
 		}
+	},
+	is_ty_and => is_bool_and(self, callback) => {
+		if let Value::Bool(b) = self {
+			callback(b)
+		} else {
+			false
+		}
 	}
 );
 
@@ -799,10 +806,10 @@ impl_surreal_value!(
 	},
 	from_table(self) => Value::Table(self),
 	into_table(value) => {
-		match value {
-			Value::Table(t) => Ok(t),
-			_ => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
-		}
+		let Value::Table(t) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(t)
 	},
 	as_ty => as_table(self) => {
 		if let Value::Table(t) = self {
@@ -829,7 +836,21 @@ impl_surreal_value!(
 			Value::Object(o) => {
 				o.get("id").is_some()
 			}
-			_ => false,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Set(_) => false,
 		}
 	},
 	from_record(self) => Value::RecordId(self),
@@ -845,7 +866,20 @@ impl_surreal_value!(
 				let first = a.first().ok_or_else(|| Error::internal("Invalid record id: array is empty".to_string()))?;
 				first.clone().into_record()
 			}
-			_ => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
 		}
 	},
 	as_ty => as_record(self) => {
@@ -943,9 +977,10 @@ impl_surreal_value!(
 	<T> Option<T> as kind!(none | (T::kind_of())),
 	is_option<T>(value) => matches!(value, Value::None) || T::is_value(value),
 	from_option<T>(self) => self.map(T::into_value).unwrap_or(Value::None),
-	into_option<T>(value) => match value{
-		Value::None => Ok(None),
-		x => T::from_value(x).map(Some).map_err(|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e))),
+	into_option<T>(value) => if let Value::None = value {
+		Ok(None)
+	} else {
+		T::from_value(value).map(Some).map_err(|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e)))
 	}
 );
 
@@ -1531,7 +1566,22 @@ impl SurrealValue for http::HeaderMap {
 						)?,
 					);
 				}
-				unexpected => {
+				unexpected @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => {
 					return Err(ConversionError::from_value(Self::kind_of(), &unexpected).into());
 				}
 			}

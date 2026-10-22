@@ -165,7 +165,20 @@ fn holds(v: &Value, f: &impl Fn(&Value) -> bool) -> bool {
 			Bound::Unbounded => false,
 		}),
 		Value::RecordId(rid) => holds(&rid.key.clone().into_value(), f),
-		_ => false,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => false,
 	}
 }
 
@@ -191,72 +204,82 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 	}
 	assert_eq!(
 		r.as_bool(),
-		match v {
-			Value::Bool(b) => Some(*b),
-			_ => None,
+		if let Value::Bool(b) = v {
+			Some(*b)
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_int().unwrap(),
-		match v {
-			Value::Number(Number::Int(i)) => Some(*i),
-			_ => None,
+		if let Value::Number(Number::Int(i)) = v {
+			Some(*i)
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_float().unwrap().map(f64::to_bits),
-		match v {
-			Value::Number(Number::Float(f)) => Some(f.to_bits()),
-			_ => None,
+		if let Value::Number(Number::Float(f)) = v {
+			Some(f.to_bits())
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_decimal().unwrap().map(|d| d.serialize()),
-		match v {
-			Value::Number(Number::Decimal(d)) => Some(d.serialize()),
-			_ => None,
+		if let Value::Number(Number::Decimal(d)) = v {
+			Some(d.serialize())
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_str().unwrap(),
-		match v {
-			Value::String(s) => Some(s.as_str()),
-			_ => None,
+		if let Value::String(s) = v {
+			Some(s.as_str())
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_bytes(),
-		match v {
-			Value::Bytes(b) => Some(&b.0[..]),
-			_ => None,
+		if let Value::Bytes(b) = v {
+			Some(&b.0[..])
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_duration().unwrap(),
-		match v {
-			Value::Duration(d) => Some(d.0),
-			_ => None,
+		if let Value::Duration(d) = v {
+			Some(d.0)
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_datetime().unwrap(),
-		match v {
-			Value::Datetime(d) => Some(d.0),
-			_ => None,
+		if let Value::Datetime(d) = v {
+			Some(d.0)
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_uuid().unwrap(),
-		match v {
-			Value::Uuid(u) => Some(u.0),
-			_ => None,
+		if let Value::Uuid(u) = v {
+			Some(u.0)
+		} else {
+			None
 		}
 	);
 	assert_eq!(
 		r.as_table().unwrap(),
-		match v {
-			Value::Table(t) => Some(t.as_str()),
-			_ => None,
+		if let Value::Table(t) = v {
+			Some(t.as_str())
+		} else {
+			None
 		}
 	);
 	match (r.as_record_id().unwrap(), v) {
@@ -394,9 +417,12 @@ fn array_in_place(a: ArrayRef<'_>, items: &[Value], canonical: bool) {
 	}
 	let floats: Option<Vec<u64>> = items
 		.iter()
-		.map(|v| match v {
-			Value::Number(Number::Float(f)) => Some(f.to_bits()),
-			_ => None,
+		.map(|v| {
+			if let Value::Number(Number::Float(f)) = v {
+				Some(f.to_bits())
+			} else {
+				None
+			}
 		})
 		.collect();
 	match a.floats() {
@@ -1002,18 +1028,22 @@ fn floats_keep_their_exact_bits() {
 		f64::MAX,
 	] {
 		let b = round_trip(&float(f));
-		match decode(&b).unwrap() {
-			Value::Number(Number::Float(g)) => assert_eq!(g.to_bits(), f.to_bits()),
-			v => panic!("{v:?}"),
+		let v = decode(&b).unwrap();
+		if let Value::Number(Number::Float(g)) = v {
+			assert_eq!(g.to_bits(), f.to_bits());
+		} else {
+			panic!("{v:?}");
 		}
 	}
 	// NaN takes the f64 form, so its payload survives.
 	let nan = f64::from_bits(0x7FF8_0000_0000_0001);
 	let b = encode(&float(nan)).unwrap();
 	assert_eq!(b.len(), 9);
-	match decode(&b).unwrap() {
-		Value::Number(Number::Float(g)) => assert_eq!(g.to_bits(), nan.to_bits()),
-		v => panic!("{v:?}"),
+	let v = decode(&b).unwrap();
+	if let Value::Number(Number::Float(g)) = v {
+		assert_eq!(g.to_bits(), nan.to_bits());
+	} else {
+		panic!("{v:?}");
 	}
 	let b = encode(&array(vec![float(1.0), float(nan)])).unwrap();
 	assert_eq!(b[0], F64_ARRAY);

@@ -24,6 +24,8 @@
 //! shapes. Method calls whose name is *not* a registered builtin can only
 //! resolve to such a closure, so they count as opaque here.
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::collections::BTreeSet;
 
 use crate::expr::operator::PostfixOperator;
@@ -212,11 +214,17 @@ impl Visitor for FactsScanner<'_> {
 			// Builtins, scripts, models, modules and silos: reuse the
 			// transaction-type classification as the single source of truth
 			// for which of them can evaluate arbitrary statements.
-			other => {
-				if !other.read_only() {
+			Function::Normal(_)
+			| Function::Script(_)
+			| Function::Model(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => {
+				if !f.read_only() {
 					self.facts.opaque_effects = true;
 				}
-				if let Function::Normal(name) = other {
+				if let Function::Normal(name) = f {
 					self.facts.builtins.insert(name.clone());
 				}
 			}

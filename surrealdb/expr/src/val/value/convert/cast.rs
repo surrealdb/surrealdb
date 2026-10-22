@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr as _;
@@ -142,12 +144,13 @@ impl Cast for SqlNone {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::None => Ok(SqlNone),
-			x => Err(CastError::InvalidKind {
-				from: x,
+		if v.is_none() {
+			Ok(SqlNone)
+		} else {
+			Err(CastError::InvalidKind {
+				from: v,
 				into: "none".to_string(),
-			}),
+			})
 		}
 	}
 }
@@ -158,41 +161,37 @@ impl Cast for Null {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Null => Ok(Null),
-			x => Err(CastError::InvalidKind {
-				from: x,
+		if v.is_null() {
+			Ok(Null)
+		} else {
+			Err(CastError::InvalidKind {
+				from: v,
 				into: "null".to_string(),
-			}),
+			})
 		}
 	}
 }
 
 impl Cast for bool {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Bool(_) => true,
-			Value::String(x) => matches!(x.as_str(), "true" | "false"),
-			_ => false,
-		}
+		v.is_bool() || v.is_strand_and(|x| matches!(x.as_str(), "true" | "false"))
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Bool(b) => Ok(b),
-			Value::String(x) => match x.as_str() {
-				"true" => Ok(true),
-				"false" => Ok(false),
-				_ => Err(CastError::InvalidKind {
-					from: Value::String(x),
-					into: "bool".to_string(),
-				}),
-			},
-			x => Err(CastError::InvalidKind {
-				from: x,
-				into: "bool".to_string(),
-			}),
+		if let Value::Bool(b) = v {
+			return Ok(b);
 		}
+		if let Value::String(ref x) = v {
+			match x.as_str() {
+				"true" => return Ok(true),
+				"false" => return Ok(false),
+				_ => {}
+			}
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "bool".to_string(),
+		})
 	}
 }
 
@@ -200,156 +199,118 @@ impl Cast for i64 {
 	/// Must agree with `cast`: a union kind casts to the first member
 	/// `can_cast` accepts and then requires `cast` to succeed.
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Number(n) => n.as_int_lossless().is_some(),
-			Value::String(v) => v.parse::<i64>().is_ok(),
-			_ => false,
-		}
+		v.is_number_and(|n| n.as_int_lossless().is_some())
+			|| v.is_strand_and(|v| v.parse::<i64>().is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			// Allow any int number
-			Value::Number(Number::Int(x)) => Ok(x),
-			// A float or decimal casts only when it is a whole number within
-			// the `i64` range. Anything else is refused, never rounded or
-			// clamped to the nearest bound.
-			Value::Number(n) => n.as_int_lossless().ok_or_else(|| CastError::InvalidKind {
+		if let Value::Number(n) = v {
+			// An int, or a float/decimal that is a whole number within the
+			// `i64` range. Anything else is refused, never rounded or clamped
+			// to the nearest bound.
+			return n.as_int_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "int".into(),
-			}),
-			// Attempt to convert a string value
-			Value::String(ref s) => match s.parse::<i64>() {
-				Ok(v) => Ok(v),
-				_ => Err(CastError::InvalidKind {
-					from: v,
-					into: "int".into(),
-				}),
-			},
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "int".into(),
-			}),
+			});
 		}
+		// Attempt to convert a string value
+		if let Value::String(ref s) = v
+			&& let Ok(i) = s.parse::<i64>()
+		{
+			return Ok(i);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "int".into(),
+		})
 	}
 }
 
 impl Cast for f64 {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Number(Number::Int(_) | Number::Float(_)) => true,
-			Value::Number(Number::Decimal(v)) => v.is_integer() || i64::try_from(*v).is_ok(),
-			Value::String(v) => v.parse::<f64>().is_ok(),
-			_ => false,
-		}
+		v.is_number_and(|n| match n {
+			Number::Int(_) | Number::Float(_) => true,
+			Number::Decimal(v) => v.is_integer() || i64::try_from(*v).is_ok(),
+		}) || v.is_strand_and(|v| v.parse::<f64>().is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Number(Number::Float(i)) => Ok(i),
-			Value::Number(Number::Int(f)) => Ok(f as f64),
-			Value::Number(Number::Decimal(d)) => match d.try_into() {
-				// The Decimal can be parsed as a Float
-				Ok(v) => Ok(v),
-				// The Decimal loses precision
-				_ => Err(CastError::InvalidKind {
-					from: v,
-					into: "float".into(),
-				}),
-			},
-			// Attempt to convert a string value
-			Value::String(ref s) => match s.parse::<f64>() {
-				// The string can be parsed as a Float
-				Ok(v) => Ok(v),
-				// This string is not a float
-				_ => Err(CastError::InvalidKind {
-					from: v,
-					into: "float".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
+		if let Value::Number(n) = v {
+			return n.as_float_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "float".into(),
-			}),
+			});
 		}
+		// Attempt to convert a string value
+		if let Value::String(ref s) = v
+			&& let Ok(f) = s.parse::<f64>()
+		{
+			return Ok(f);
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "float".into(),
+		})
 	}
 }
 
 impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Number(_) => true,
-			Value::String(v) => v.parse::<f64>().is_ok(),
-			_ => false,
-		}
+		v.is_number() || v.is_strand_and(|v| v.parse::<f64>().is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Number(Number::Decimal(d)) => Ok(d),
-			// Attempt to convert an int number
-			Value::Number(Number::Int(ref i)) => Ok(Decimal::from(*i)),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(ref f)) => match Decimal::try_from(*f) {
-				// The Float can be represented as a Decimal
-				Ok(d) => Ok(d),
-				// This Float does not convert to a Decimal
-				_ => Err(CastError::InvalidKind {
-					from: v,
-					into: "decimal".into(),
-				}),
-			},
-			// Attempt to convert a string value
-			Value::String(ref s) => match Decimal::from_str_normalized(s) {
-				// The string can be parsed as a Decimal
-				Ok(v) => Ok(v),
-				// This string is not a Decimal
-				_ => Err(CastError::InvalidKind {
-					from: v,
-					into: "decimal".into(),
-				}),
-			},
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
+		if let Value::Number(n) = v {
+			return n.as_decimal_lossless().ok_or_else(|| CastError::InvalidKind {
 				from: v,
 				into: "decimal".into(),
-			}),
+			});
 		}
+		// Attempt to convert a string value
+		if let Value::String(ref s) = v
+			&& let Ok(d) = Decimal::from_str_normalized(s)
+		{
+			return Ok(d);
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "decimal".into(),
+		})
 	}
 }
 
 impl Cast for Number {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Number(_) => true,
-			Value::String(s) => Number::from_str(s).is_ok(),
-			_ => false,
-		}
+		v.is_number() || v.is_strand_and(|s| Number::from_str(s).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Number(v) => Ok(v),
-			Value::String(ref s) => Number::from_str(s).map_err(|_| CastError::InvalidKind {
-				from: v,
-				into: "number".into(),
-			}),
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "number".into(),
-			}),
+		if let Value::Number(v) = v {
+			return Ok(v);
 		}
+		if let Value::String(ref s) = v
+			&& let Ok(n) = Number::from_str(s)
+		{
+			return Ok(n);
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "number".into(),
+		})
 	}
 }
 
 impl Cast for String {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::None | Value::Null => false,
-			Value::Bytes(b) => std::str::from_utf8(b).is_ok(),
-			_ => true,
+		if v.is_nullish() {
+			false
+		} else if let Value::Bytes(b) = v {
+			std::str::from_utf8(b).is_ok()
+		} else {
+			true
 		}
 	}
 
@@ -369,114 +330,117 @@ impl Cast for String {
 			Value::Uuid(x) => Ok(x.to_string()),
 			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
-			x => Ok(x.to_sql()),
+			Value::Bool(_)
+			| Value::Number(Number::Int(_) | Number::Float(_))
+			| Value::Duration(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => Ok(v.to_sql()),
 		}
 	}
 }
 
 impl Cast for Uuid {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Uuid(_) => true,
-			Value::String(s) => Uuid::from_str(s).is_ok(),
-			_ => false,
-		}
+		v.is_uuid() || v.is_strand_and(|s| Uuid::from_str(s).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Uuid(u) => Ok(u),
-			Value::String(ref s) => Uuid::from_str(s).map_err(|_| CastError::InvalidKind {
-				from: v,
-				into: "uuid".into(),
-			}),
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "uuid".into(),
-			}),
+		if let Value::Uuid(u) = v {
+			return Ok(u);
 		}
+		if let Value::String(ref s) = v
+			&& let Ok(u) = Uuid::from_str(s)
+		{
+			return Ok(u);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "uuid".into(),
+		})
 	}
 }
 
 impl Cast for Datetime {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Datetime(_) => true,
-			Value::String(s) => Datetime::from_str(s).is_ok(),
-			_ => false,
-		}
+		v.is_datetime() || v.is_strand_and(|s| Datetime::from_str(s).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			// Datetimes are allowed
-			Value::Datetime(v) => Ok(v),
-			// Attempt to parse a string
-			Value::String(ref s) => Datetime::from_str(s).map_err(|_| CastError::InvalidKind {
-				from: v,
-				into: "datetime".into(),
-			}),
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "datetime".into(),
-			}),
+		// Datetimes are allowed
+		if let Value::Datetime(v) = v {
+			return Ok(v);
 		}
+		// Attempt to parse a string
+		if let Value::String(ref s) = v
+			&& let Ok(d) = Datetime::from_str(s)
+		{
+			return Ok(d);
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "datetime".into(),
+		})
 	}
 }
 
 impl Cast for Duration {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Duration(_) => true,
-			Value::String(s) => Duration::from_str(s).is_ok(),
-			_ => false,
-		}
+		v.is_duration() || v.is_strand_and(|s| Duration::from_str(s).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			// Datetimes are allowed
-			Value::Duration(v) => Ok(v),
-			// Attempt to parse a string
-			Value::String(ref s) => Duration::from_str(s).map_err(|_| CastError::InvalidKind {
-				from: v,
-				into: "duration".into(),
-			}),
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "duration".into(),
-			}),
+		// Durations are allowed
+		if let Value::Duration(v) = v {
+			return Ok(v);
 		}
+		// Attempt to parse a string
+		if let Value::String(ref s) = v
+			&& let Ok(d) = Duration::from_str(s)
+		{
+			return Ok(d);
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "duration".into(),
+		})
 	}
 }
 
 impl Cast for Bytes {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Bytes(_) | Value::String(_) => true,
-			Value::Array(x) => x.iter().all(|v| value_to_byte(v).is_some()),
-			_ => false,
-		}
+		v.is_bytes()
+			|| v.is_strand()
+			|| v.is_array_and(|x| x.iter().all(|v| value_to_byte(v).is_some()))
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Bytes(b) => Ok(b),
-			Value::String(s) => Ok(Bytes::from(s.into_string().into_bytes())),
-			Value::Array(x) => match x.0.iter().map(value_to_byte).collect::<Option<Vec<u8>>>() {
-				Some(bytes) => Ok(Bytes::from(bytes)),
-				None => Err(CastError::InvalidKind {
-					from: Value::Array(x),
-					into: "bytes".to_owned(),
-				}),
-			},
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "bytes".into(),
-			}),
+		let v = match v.try_into_bytes() {
+			Ok(b) => return Ok(b),
+			Err(v) => v,
+		};
+		let v = match v.try_into_strand() {
+			Ok(s) => return Ok(Bytes::from(s.into_string().into_bytes())),
+			Err(v) => v,
+		};
+		if let Value::Array(ref x) = v
+			&& let Some(bytes) = x.0.iter().map(value_to_byte).collect::<Option<Vec<u8>>>()
+		{
+			return Ok(Bytes::from(bytes));
 		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "bytes".into(),
+		})
 	}
 }
 
@@ -484,31 +448,40 @@ impl Cast for Bytes {
 // floats (via `num_traits::ToPrimitive::to_u8`) instead of rejecting them, which
 // would reintroduce the truncation bug this helper is here to prevent.
 fn value_to_byte(v: &Value) -> Option<u8> {
-	match v {
-		Value::Number(Number::Int(x)) => u8::try_from(*x).ok(),
-		Value::Number(Number::Float(f)) if f.fract() == 0.0 => u8::try_from(*f as i64).ok(),
-		Value::Number(Number::Decimal(d)) if d.is_integer() => {
-			u8::try_from(i64::try_from(*d).ok()?).ok()
-		}
-		Value::String(s) => s.parse::<u8>().ok(),
-		_ => None,
+	if let Value::Number(n) = v {
+		return match n {
+			Number::Int(x) => u8::try_from(*x).ok(),
+			Number::Float(f) if f.fract() == 0.0 => u8::try_from(*f as i64).ok(),
+			Number::Float(_) => None,
+			Number::Decimal(d) if d.is_integer() => u8::try_from(i64::try_from(*d).ok()?).ok(),
+			Number::Decimal(_) => None,
+		};
 	}
+	if let Value::String(s) = v {
+		return s.parse::<u8>().ok();
+	}
+	None
 }
 
 impl Cast for Array {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Array(_) | Value::Bytes(_) | Value::Set(_) => true,
-			Value::Range(r) => r.can_coerce_to_typed::<i64>(),
-			_ => false,
-		}
+		v.is_array()
+			|| v.is_bytes()
+			|| v.is_set()
+			|| v.is_range_and(|r| r.can_coerce_to_typed::<i64>())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Array(x) => Ok(x),
-			Value::Set(s) => Ok(s.into_iter().collect()),
-			Value::Range(range) => {
+		let v = match v.try_into_array() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		let v = match v.try_into_set() {
+			Ok(s) => return Ok(s.into_iter().collect()),
+			Err(v) => v,
+		};
+		let v = match v.try_into_range() {
+			Ok(range) => {
 				if !range.can_coerce_to_typed::<i64>() {
 					return Err(CastError::InvalidKind {
 						from: Value::Range(range),
@@ -523,15 +496,18 @@ impl Cast for Array {
 					});
 				}
 
-				Ok(range.cast_to_array())
+				return Ok(range.cast_to_array());
 			}
-
-			Value::Bytes(x) => Ok(Array(x.0.into_iter().map(|x| Value::from(x as i64)).collect())),
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "array".into(),
-			}),
-		}
+			Err(v) => v,
+		};
+		let v = match v.try_into_bytes() {
+			Ok(x) => return Ok(Array(x.0.into_iter().map(|x| Value::from(x as i64)).collect())),
+			Err(v) => v,
+		};
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "array".into(),
+		})
 	}
 }
 
@@ -541,60 +517,52 @@ impl Cast for Set {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Set(x) => Ok(x),
-			Value::Array(x) => {
-				// Convert array to set, automatically deduplicating
-				Ok(Set::from(x.0))
-			}
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "set".into(),
-			}),
-		}
+		let v = match v.try_into_set() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		// Convert array to set, automatically deduplicating
+		v.try_into_array().map(|x| Set::from(x.0)).map_err(|from| CastError::InvalidKind {
+			from,
+			into: "set".into(),
+		})
 	}
 }
 
 impl Cast for Regex {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Regex(_) => true,
-			Value::String(x) => Regex::from_str(x).is_ok(),
-			_ => false,
-		}
+		v.is_regex() || v.is_strand_and(|x| Regex::from_str(x).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Regex(x) => Ok(x),
-			Value::String(x) => match Regex::from_str(&x) {
-				Ok(x) => Ok(x),
-				Err(_) => Err(CastError::InvalidKind {
-					from: Value::String(x),
-					into: "regex".to_string(),
-				}),
-			},
-			x => Err(CastError::InvalidKind {
-				from: x,
-				into: "regex".to_string(),
-			}),
+		let v = match v.try_into_regex() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		if let Value::String(ref x) = v
+			&& let Ok(r) = Regex::from_str(x)
+		{
+			return Ok(r);
 		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "regex".to_string(),
+		})
 	}
 }
 
 impl Cast for Box<Range> {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Range(_) => true,
-			Value::Array(x) => x.len() == 2,
-			_ => false,
-		}
+		v.is_range() || v.is_array_and(|x| x.len() == 2)
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Range(x) => Ok(x),
-			Value::Array(x) => {
+		let v = match v.try_into_range() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		let v = match v.try_into_array() {
+			Ok(x) => {
 				if x.len() != 2 {
 					return Err(CastError::InvalidKind {
 						from: Value::Array(x),
@@ -608,32 +576,31 @@ impl Cast for Box<Range> {
 				// checked above
 				let end = iter.next().expect("array length checked above");
 
-				Ok(Box::new(Range {
+				return Ok(Box::new(Range {
 					start: Bound::Included(beg),
 					end: Bound::Excluded(end),
-				}))
+				}));
 			}
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "range".into(),
-			}),
-		}
+			Err(v) => v,
+		};
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "range".into(),
+		})
 	}
 }
 
 impl Cast for Point<f64> {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Geometry(Geometry::Point(_)) => true,
-			Value::Array(x) => x.len() == 2,
-			_ => false,
-		}
+		v.is_geometry_and(|g| matches!(g, Geometry::Point(_))) || v.is_array_and(|x| x.len() == 2)
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Geometry(Geometry::Point(v)) => Ok(v),
-			Value::Array(x) => {
+		if let Value::Geometry(Geometry::Point(v)) = v {
+			return Ok(v);
+		}
+		let v = match v.try_into_array() {
+			Ok(x) => {
 				if x.len() != 2 {
 					return Err(CastError::InvalidKind {
 						from: Value::Array(x),
@@ -662,40 +629,36 @@ impl Cast for Point<f64> {
 					.cast_to::<f64>()
 					.expect("value type checked above");
 
-				Ok(Point::new(x, y))
+				return Ok(Point::new(x, y));
 			}
-			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "point".into(),
-			}),
-		}
+			Err(v) => v,
+		};
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "point".into(),
+		})
 	}
 }
 
 impl Cast for RecordId {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::RecordId(_) => true,
-			Value::String(x) => syn::record_id(x).is_ok(),
-			_ => false,
-		}
+		v.is_record() || v.is_strand_and(|x| syn::record_id(x).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::RecordId(x) => Ok(x),
-			Value::String(x) => match syn::record_id(&x) {
-				Ok(x) => Ok(x.into()),
-				Err(_) => Err(CastError::InvalidKind {
-					from: Value::String(x),
-					into: "record".to_string(),
-				}),
-			},
-			from => Err(CastError::InvalidKind {
-				from,
-				into: "record".to_string(),
-			}),
+		let v = match v.try_into_record() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		if let Value::String(ref x) = v
+			&& let Ok(r) = syn::record_id(x)
+		{
+			return Ok(r.into());
 		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "record".to_string(),
+		})
 	}
 }
 
@@ -705,14 +668,16 @@ impl Cast for surrealdb_strand::TableName {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Table(x) => Ok(x),
-			Value::String(x) => Ok(surrealdb_strand::TableName::new(x)),
-			from => Err(CastError::InvalidKind {
+		let v = match v.try_into_table() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		v.try_into_strand().map(surrealdb_strand::TableName::new).map_err(|from| {
+			CastError::InvalidKind {
 				from,
 				into: "table".to_string(),
-			}),
-		}
+			}
+		})
 	}
 }
 
@@ -725,9 +690,10 @@ impl<T: Cast> Cast for Option<T> {
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::None => Ok(None),
-			x => T::cast(x).map(Some),
+		if v.is_none() {
+			Ok(None)
+		} else {
+			T::cast(v).map(Some)
 		}
 	}
 }
@@ -774,28 +740,23 @@ impl_direct! {
 /// ([`Geometry::try_from_object`]).
 impl Cast for Geometry {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Geometry(_) => true,
-			Value::Object(x) => Geometry::try_from_object(x).is_some(),
-			_ => false,
-		}
+		v.is_geometry() || v.is_object_and(|x| Geometry::try_from_object(x).is_some())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		match v {
-			Value::Geometry(x) => Ok(x),
-			Value::Object(ref x) => match Geometry::try_from_object(x) {
-				Some(x) => Ok(x),
-				None => Err(CastError::InvalidKind {
-					from: v,
-					into: <Geometry as HasKind>::kind().to_sql(),
-				}),
-			},
-			v => Err(CastError::InvalidKind {
-				from: v,
-				into: <Geometry as HasKind>::kind().to_sql(),
-			}),
+		let v = match v.try_into_geometry() {
+			Ok(x) => return Ok(x),
+			Err(v) => v,
+		};
+		if let Value::Object(ref x) = v
+			&& let Some(x) = Geometry::try_from_object(x)
+		{
+			return Ok(x);
 		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: <Geometry as HasKind>::kind().to_sql(),
+		})
 	}
 }
 
@@ -865,64 +826,44 @@ impl Value {
 	}
 
 	fn can_cast_to_array_len(&self, kind: &Kind, len: u64) -> bool {
-		match self {
-			Value::Array(a) => a.len() as u64 == len && a.iter().all(|x| x.can_cast_to_kind(kind)),
-			_ => false,
-		}
+		self.is_array_and(|a| a.len() as u64 == len && a.iter().all(|x| x.can_cast_to_kind(kind)))
 	}
 
 	fn can_cast_to_array(&self, kind: &Kind) -> bool {
-		match self {
-			Value::Array(a) => a.iter().all(|x| x.can_cast_to_kind(kind)),
-			_ => false,
-		}
+		self.is_array_and(|a| a.iter().all(|x| x.can_cast_to_kind(kind)))
 	}
 
 	fn can_cast_to_set_len(&self, kind: &Kind, len: u64) -> bool {
-		match self {
-			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_cast_to_kind(kind)),
-			_ => false,
-		}
+		self.is_set_and(|s| s.len() as u64 == len && s.iter().all(|x| x.can_cast_to_kind(kind)))
 	}
 
 	fn can_cast_to_set(&self, kind: &Kind) -> bool {
-		match self {
-			Value::Set(s) => s.iter().all(|x| x.can_cast_to_kind(kind)),
-			_ => false,
-		}
+		self.is_set_and(|s| s.iter().all(|x| x.can_cast_to_kind(kind)))
 	}
 
 	fn can_cast_to_table(&self, val: &[TableName]) -> bool {
-		match self {
-			Value::Table(t) => t.is_table_type(val),
-			Value::String(_) => true, // Strings can be cast to tables
-			_ => false,
-		}
+		// Strings can be cast to tables
+		self.is_table_and(|t| t.is_table_type(val)) || self.is_strand()
 	}
 
 	fn can_cast_to_record(&self, val: &[TableName]) -> bool {
-		match self {
-			Value::RecordId(t) => t.is_table_type(val),
-			_ => false,
-		}
+		self.is_record_and(|t| t.is_table_type(val))
 	}
 
 	fn can_cast_to_geometry(&self, val: &[GeometryKind]) -> bool {
-		match self {
-			Value::Object(x) => {
-				Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
-			}
-			_ => self.is_geometry_type(val),
+		if let Value::Object(x) = self {
+			Geometry::try_from_object(x).is_some_and(|g| val.contains(&g.geometry_kind()))
+		} else {
+			self.is_geometry_type(val)
 		}
 	}
 
 	fn can_cast_to_literal(&self, val: &KindLiteral) -> bool {
-		match val {
+		if matches!(val, KindLiteral::Array(_) | KindLiteral::Object(_)) {
 			// The members are cast, so whether they can be is what the cast does.
-			KindLiteral::Array(_) | KindLiteral::Object(_) => {
-				self.clone().cast_to_literal(val).is_ok()
-			}
-			val => val.validate_value(self),
+			self.clone().cast_to_literal(val).is_ok()
+		} else {
+			val.validate_value(self)
 		}
 	}
 
@@ -1053,45 +994,32 @@ impl Value {
 
 	/// Try to convert this value to a Table of a certain type
 	fn cast_to_table(self, val: &[TableName]) -> Result<surrealdb_strand::TableName, CastError> {
-		match self {
-			Value::Table(v) if v.is_table_type(val) => Ok(v),
-			Value::String(v) => {
-				// Check if the string is a valid table name and matches the allowed types
-				let table = surrealdb_strand::TableName::new(v.clone());
-				if table.is_table_type(val) {
-					Ok(table)
-				} else {
-					let mut kind = "table<".to_string();
-					for (idx, t) in val.iter().enumerate() {
-						if idx != 0 {
-							kind.push('|');
-						}
-						kind.push_str(t.as_str())
-					}
-					kind.push('>');
-
-					Err(CastError::InvalidKind {
-						from: Value::String(v),
-						into: kind,
-					})
-				}
-			}
-			x => {
-				let mut kind = "table<".to_string();
-				for (idx, t) in val.iter().enumerate() {
-					if idx != 0 {
-						kind.push('|');
-					}
-					kind.push_str(t.as_str())
-				}
-				kind.push('>');
-
-				Err(CastError::InvalidKind {
-					from: x,
-					into: kind,
-				})
+		let self_val = match self.try_into_table() {
+			Ok(v) if v.is_table_type(val) => return Ok(v),
+			Ok(v) => Value::Table(v),
+			Err(v) => v,
+		};
+		if let Value::String(ref v) = self_val {
+			// Check if the string is a valid table name and matches the allowed types
+			let table = surrealdb_strand::TableName::new(v.clone());
+			if table.is_table_type(val) {
+				return Ok(table);
 			}
 		}
+
+		let mut kind = "table<".to_string();
+		for (idx, t) in val.iter().enumerate() {
+			if idx != 0 {
+				kind.push('|');
+			}
+			kind.push_str(t.as_str())
+		}
+		kind.push('>');
+
+		Err(CastError::InvalidKind {
+			from: self_val,
+			into: kind,
+		})
 	}
 
 	/// Try to convert this value to a Record of a certain type
@@ -1108,66 +1036,52 @@ impl Value {
 			kind
 		};
 
-		match self {
-			Value::RecordId(v) if v.is_table_type(val) => Ok(v),
-			Value::String(v) => {
-				let record_id = match syn::record_id(v.as_str()) {
-					Ok(x) => RecordId::from(x),
-					Err(_) => {
-						return Err(CastError::InvalidKind {
-							from: Value::String(v),
-							into: expected_kind(),
-						});
-					}
-				};
-
-				if !record_id.is_table_type(val) {
-					return Err(CastError::InvalidKind {
-						from: Value::String(v),
-						into: expected_kind(),
-					});
-				}
-
-				Ok(record_id)
+		let self_val = match self.try_into_record() {
+			Ok(v) if v.is_table_type(val) => return Ok(v),
+			Ok(v) => Value::RecordId(v),
+			Err(v) => v,
+		};
+		if let Value::String(ref v) = self_val
+			&& let Ok(x) = syn::record_id(v.as_str())
+		{
+			let record_id = RecordId::from(x);
+			if record_id.is_table_type(val) {
+				return Ok(record_id);
 			}
-			x => Err(CastError::InvalidKind {
-				from: x,
-				into: expected_kind(),
-			}),
 		}
+
+		Err(CastError::InvalidKind {
+			from: self_val,
+			into: expected_kind(),
+		})
 	}
 
 	/// Try to convert this value to a `Geometry` of a certain type
 	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
-		match self {
-			// Geometries are allowed if correct type
-			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
-			Value::Object(ref x) => match Geometry::try_from_object(x) {
-				Some(x) if val.contains(&x.geometry_kind()) => Ok(x),
-				_ => Err(CastError::InvalidKind {
-					from: self,
-					into: "geometry".into(),
-				}),
-			},
-			Value::Array(_) => {
-				// An array of two numbers can be cast into a point
-				if val.contains(&GeometryKind::Point)
-					&& let Some(p) = Geometry::array_to_point(&self)
-				{
-					Ok(Geometry::Point(p))
-				} else {
-					Err(CastError::InvalidKind {
-						from: self,
-						into: "geometry".into(),
-					})
-				}
-			}
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: self,
-				into: "geometry".into(),
-			}),
+		// Geometries are allowed if correct type
+		if self.is_geometry_type(val)
+			&& let Value::Geometry(v) = self
+		{
+			return Ok(v);
 		}
+		if let Value::Object(ref x) = self
+			&& let Some(x) = Geometry::try_from_object(x)
+			&& val.contains(&x.geometry_kind())
+		{
+			return Ok(x);
+		}
+		// An array of two numbers can be cast into a point
+		if self.is_array()
+			&& val.contains(&GeometryKind::Point)
+			&& let Some(p) = Geometry::array_to_point(&self)
+		{
+			return Ok(Geometry::Point(p));
+		}
+		// Anything else raises an error
+		Err(CastError::InvalidKind {
+			from: self,
+			into: "geometry".into(),
+		})
 	}
 
 	/// Try to convert this value to ab `Array` of a certain type

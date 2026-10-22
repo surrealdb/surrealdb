@@ -23,6 +23,8 @@
 //! - Stream-friendly: the numeric encoding contains an in-band terminator and appends a 0x00 byte,
 //!   allowing concatenation in composite keys without ambiguity during decoding.
 
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -413,6 +415,24 @@ impl Number {
 		}
 	}
 
+	/// Convert to an `f64` only when the value can be represented as an `f64`.
+	pub fn as_float_lossless(self) -> Option<f64> {
+		match self {
+			Number::Int(v) => Some(v as f64),
+			Number::Float(v) => Some(v),
+			Number::Decimal(v) => f64::try_from(v).ok(),
+		}
+	}
+
+	/// Convert to a `Decimal` only when the value can be represented as a `Decimal`.
+	pub fn as_decimal_lossless(self) -> Option<Decimal> {
+		match self {
+			Number::Int(v) => Some(Decimal::from(v)),
+			Number::Float(v) => Decimal::try_from(v).ok(),
+			Number::Decimal(v) => Some(v),
+		}
+	}
+
 	/// Convert to a `usize` suitable for array indexing.
 	///
 	/// Returns `None` for any value that does not represent an exact
@@ -621,7 +641,7 @@ impl Number {
 		}
 		let exact = |bound: Self| match bound {
 			Number::Float(f) => Decimal::from_f64(f),
-			other => Some(other.to_decimal()),
+			other @ (Number::Int(_) | Number::Decimal(_)) => Some(other.to_decimal()),
 		};
 		match (self, min, max) {
 			(Number::Int(n), Number::Int(min), Number::Int(max)) if min <= max => {
@@ -1568,7 +1588,7 @@ mod tests {
 		fn key(n: Number) -> Vec<u8> {
 			match n {
 				Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
-				n => n.as_decimal_buf(),
+				n @ (Number::Int(_) | Number::Float(_)) => n.as_decimal_buf(),
 			}
 		}
 		let mut rng = rand::rng();
@@ -1656,12 +1676,12 @@ mod tests {
 						padded.rescale(d.scale() + 2);
 						vec![n, Number::Decimal(padded)]
 					}
-					n => vec![n],
+					n @ (Number::Int(_) | Number::Float(_)) => vec![n],
 				})
 				.map(|n| {
 					let key = match n {
 						Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
-						n => n.as_decimal_buf(),
+						n @ (Number::Int(_) | Number::Float(_)) => n.as_decimal_buf(),
 					};
 					(n, key)
 				})
@@ -1770,7 +1790,9 @@ mod tests {
 	fn assert_decimal(decoded: Number, mantissa: i128, scale: u32) {
 		match decoded {
 			Number::Decimal(d) => assert_eq!((d.mantissa(), d.scale()), (mantissa, scale), "{d}"),
-			other => panic!("decoded as {other:?}, not the decimal {mantissa}e-{scale}"),
+			other @ (Number::Int(_) | Number::Float(_)) => {
+				panic!("decoded as {other:?}, not the decimal {mantissa}e-{scale}")
+			}
 		}
 	}
 
@@ -1792,7 +1814,9 @@ mod tests {
 					Number::Float(g) => {
 						assert_eq!(g.to_bits(), f.to_bits(), "{f:e} decoded as {g:e}")
 					}
-					other => panic!("{f:e} decoded as {other:?}, not a float"),
+					other @ (Number::Int(_) | Number::Decimal(_)) => {
+						panic!("{f:e} decoded as {other:?}, not a float")
+					}
 				}
 			}
 		}
@@ -1847,7 +1871,9 @@ mod tests {
 			let nearest: f64 = float.parse().unwrap();
 			match through_index_key(&Number::Decimal(decimal(text))) {
 				Number::Float(g) => assert_eq!(g.to_bits(), nearest.to_bits(), "{text}: {g:e}"),
-				other => panic!("{text} decoded as {other:?}, not a float"),
+				other @ (Number::Int(_) | Number::Decimal(_)) => {
+					panic!("{text} decoded as {other:?}, not a float")
+				}
 			}
 		}
 		// A float is on one side or the other of 2^96 = 79228162514264337593543950336.
@@ -1933,7 +1959,9 @@ mod tests {
 					Number::Decimal(g) => {
 						assert_eq!(g.serialize(), d.serialize(), "{d} decoded as {g}")
 					}
-					other => panic!("{d} decoded as {other:?}"),
+					other @ (Number::Int(_) | Number::Float(_)) => {
+						panic!("{d} decoded as {other:?}")
+					}
 				}
 			} else {
 				match decoded {
@@ -1941,7 +1969,9 @@ mod tests {
 						let original = LexDecimal::from_decimal(d);
 						assert!(agrees(original, &decoded, 15), "{d} decoded as {g:e}");
 					}
-					other => panic!("{d} decoded as {other:?}, not a float"),
+					other @ (Number::Int(_) | Number::Decimal(_)) => {
+						panic!("{d} decoded as {other:?}, not a float")
+					}
 				}
 			}
 		}
@@ -1980,7 +2010,9 @@ mod tests {
 			checked += 1;
 			match through_index_key(&Number::Float(f)) {
 				Number::Decimal(d) => assert_eq!(d.serialize(), parsed.serialize(), "{text}: {d}"),
-				other => panic!("{f:e} decoded as {other:?}, not the decimal {parsed}"),
+				other @ (Number::Int(_) | Number::Float(_)) => {
+					panic!("{f:e} decoded as {other:?}, not the decimal {parsed}")
+				}
 			}
 		}
 		assert!(checked > 20_000, "only {checked} positional floats were generated");

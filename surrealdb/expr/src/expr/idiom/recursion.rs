@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::Part;
 use crate::expr::part::{RecurseInstruction, RecursionPlan};
 use crate::val::{Array, Value};
@@ -33,10 +35,24 @@ impl<'a> Recursion<'a> {
 // inside a recursed idiom path is final
 pub fn is_final(v: &Value) -> bool {
 	match v {
-		Value::None => true,
-		Value::Null => true,
+		Value::None | Value::Null => true,
 		Value::Array(v) => v.is_empty() || v.is_all_none_or_null(),
-		_ => false,
+		Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => false,
 	}
 }
 
@@ -44,7 +60,23 @@ pub fn get_final(v: &Value) -> Value {
 	match v {
 		Value::Array(_) => Value::Array(Array(vec![])),
 		Value::Null => Value::Null,
-		_ => Value::None,
+		Value::None
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Value::None,
 	}
 }
 

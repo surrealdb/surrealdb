@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{RecordId, SqlFormat, ToSql, write_sql};
 
@@ -379,7 +381,7 @@ impl Expr {
 							})
 							.collect(),
 					),
-					_ => return Expr::Literal(Literal::None), // For unsupported key types
+					surrealdb_types::RecordIdKey::Range(_) => return Expr::Literal(Literal::None), /* For unsupported key types */
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: table.into_table_name(),
@@ -456,9 +458,10 @@ impl Expr {
 	/// that are computable without the environment but still need evaluating
 	/// (arithmetic on literals, say).
 	pub fn as_static_value(&self) -> Option<crate::val::Value> {
-		match self {
-			Expr::Literal(literal) => literal.as_static_value(),
-			_ => None,
+		if let Expr::Literal(literal) = self {
+			literal.as_static_value()
+		} else {
+			None
 		}
 	}
 
@@ -527,17 +530,71 @@ impl Expr {
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.to_string()),
-				x => Idiom::field(x.to_sql()),
+				Literal::None
+				| Literal::Null
+				| Literal::UnboundedRange
+				| Literal::Bool(_)
+				| Literal::Float(_)
+				| Literal::Integer(_)
+				| Literal::Decimal(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::RecordId(_)
+				| Literal::Array(_)
+				| Literal::Set(_)
+				| Literal::Object(_)
+				| Literal::Duration(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_) => Idiom::field(l.to_sql()),
 			},
-			x => Idiom::field(x.to_sql()),
+			Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => Idiom::field(self.to_sql()),
 		}
 	}
 
 	pub fn to_raw_string(&self) -> String {
-		match self {
-			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.as_str().to_string(),
-			_ => self.to_sql(),
+		if let Expr::Idiom(idiom) = self {
+			idiom.to_raw_string()
+		} else if let Expr::Table(ident) = self {
+			ident.as_str().to_string()
+		} else {
+			self.to_sql()
 		}
 	}
 
@@ -604,7 +661,7 @@ impl Expr {
 	/// Required for proper formatting when `NONE` can conflict with a clause.
 	pub fn has_left_none_null(&self) -> bool {
 		match self {
-			Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => true,
+			Expr::Literal(Literal::None | Literal::Null) => true,
 			Expr::Binary {
 				left: expr,
 				..
@@ -620,7 +677,58 @@ impl Expr {
 					false
 				}
 			}
-			_ => false,
+			Expr::Literal(
+				Literal::Bool(_)
+				| Literal::Float(_)
+				| Literal::Integer(_)
+				| Literal::Decimal(_)
+				| Literal::String(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::RecordId(_)
+				| Literal::Array(_)
+				| Literal::Set(_)
+				| Literal::Object(_)
+				| Literal::Duration(_)
+				| Literal::Datetime(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_)
+				| Literal::UnboundedRange,
+			)
+			| Expr::Param(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => false,
 		}
 	}
 
@@ -650,7 +758,63 @@ impl Expr {
 				}
 				false
 			}
-			_ => false,
+			Expr::Literal(
+				Literal::None
+				| Literal::Null
+				| Literal::Bool(_)
+				| Literal::String(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::RecordId(_)
+				| Literal::Array(_)
+				| Literal::Set(_)
+				| Literal::Object(_)
+				| Literal::Duration(_)
+				| Literal::Datetime(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_)
+				| Literal::UnboundedRange,
+			)
+			| Expr::Param(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				op:
+					PrefixOperator::Not
+					| PrefixOperator::Positive
+					| PrefixOperator::Range
+					| PrefixOperator::RangeInclusive
+					| PrefixOperator::Cast(_),
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => false,
 		}
 	}
 
@@ -666,7 +830,40 @@ impl Expr {
 				left: expr,
 				..
 			} => expr.has_left_idiom(),
-			_ => false,
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => false,
 		}
 	}
 }

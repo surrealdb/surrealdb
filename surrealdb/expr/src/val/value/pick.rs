@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
 
@@ -14,8 +16,20 @@ impl Value {
 						None => Value::None,
 					},
 					Part::All => v.values().map(|v| v.pick(path.next())).collect::<Vec<_>>().into(),
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Last
+					| Part::First
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.get(&idx.to_string()) {
 								Some(v) => v.pick(path.next()),
 								None => Value::None,
@@ -36,8 +50,19 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.get(idx) {
 								Some(v) => v.pick(path.next()),
 								None => Value::None,
@@ -58,8 +83,19 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					x => {
-						if let Some(idx) = x.as_old_index() {
+					Part::Flatten
+					| Part::Field(_)
+					| Part::Where(_)
+					| Part::Lookup(_)
+					| Part::Value(_)
+					| Part::Start(_)
+					| Part::Method(_, _)
+					| Part::Destructure(_)
+					| Part::Optional
+					| Part::Recurse(_, _, _)
+					| Part::Doc
+					| Part::RepeatRecurse => {
+						if let Some(idx) = p.as_old_index() {
 							match v.nth(idx) {
 								Some(v) => v.pick(path.next()),
 								None => Value::None,
@@ -70,7 +106,22 @@ impl Value {
 					}
 				},
 				// Ignore everything else
-				_ => Value::None,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => Value::None,
 			},
 			// No more parts so get the value
 			None => self.clone(),

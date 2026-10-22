@@ -46,9 +46,10 @@ macro_rules! deserialize_number {
 		where
 			V: Visitor<'de>,
 		{
-			match self {
-				Value::Number(n) => deserialize_number(&n, visitor),
-				_ => Err(self.invalid_type(&visitor)),
+			if let Value::Number(n) = self {
+				deserialize_number(&n, visitor)
+			} else {
+				Err(self.invalid_type(&visitor))
 			}
 		}
 	};
@@ -182,7 +183,12 @@ impl<'de> serde::Deserializer<'de> for Value {
 				);
 				Value::Object(object).deserialize_any(visitor)
 			}
-			_ => Err(self.invalid_type(&visitor)),
+			Value::Geometry(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Err(self.invalid_type(&visitor)),
 		}
 	}
 
@@ -204,9 +210,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::None => visitor.visit_none(),
-			_ => visitor.visit_some(self),
+		if let Value::None = self {
+			visitor.visit_none()
+		} else {
+			visitor.visit_some(self)
 		}
 	}
 
@@ -226,7 +233,22 @@ impl<'de> serde::Deserializer<'de> for Value {
 				variant,
 				value: None,
 			}),
-			other => Err(serde::de::Error::invalid_type(other.unexpected(), &"string or map")),
+			other @ (Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Set(_)) => Err(serde::de::Error::invalid_type(other.unexpected(), &"string or map")),
 		}
 	}
 
@@ -269,9 +291,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Bool(v) => visitor.visit_bool(v),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Bool(v) = self {
+			visitor.visit_bool(v)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -293,9 +316,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::String(v) => visitor.visit_string(v),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::String(v) = self {
+			visitor.visit_string(v)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -310,9 +334,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Bytes(v) => visitor.visit_bytes(&v),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Bytes(v) = self {
+			visitor.visit_bytes(&v)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -320,9 +345,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Null => visitor.visit_unit(),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Null = self {
+			visitor.visit_unit()
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -337,9 +363,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Array(v) => visit_array(v, visitor),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Array(v) = self {
+			visit_array(v, visitor)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -366,9 +393,10 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		match self {
-			Value::Object(v) => v.deserialize_any(visitor),
-			_ => Err(self.invalid_type(&visitor)),
+		if let Value::Object(v) = self {
+			v.deserialize_any(visitor)
+		} else {
+			Err(self.invalid_type(&visitor))
 		}
 	}
 
@@ -397,7 +425,22 @@ impl<'de> serde::Deserializer<'de> for Value {
 				let value = Value::Object(object);
 				value.deserialize_struct(name, fields, visitor)
 			}
-			_ => Err(self.invalid_type(&visitor)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Set(_) => Err(self.invalid_type(&visitor)),
 		}
 	}
 

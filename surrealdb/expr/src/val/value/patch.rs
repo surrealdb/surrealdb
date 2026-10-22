@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use anyhow::{Result, bail, ensure};
 use surrealdb_types::ToSql;
 
@@ -55,7 +57,22 @@ fn locate<'a>(this: &'a mut Value, path: &[Strand]) -> Located<'a> {
 				None => return Located::Many,
 			},
 			Value::Set(_) => return Located::Many,
-			_ => return Located::Absent,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => return Located::Absent,
 		};
 	}
 	Located::Found(at)
@@ -79,7 +96,22 @@ fn normalize_sets(value: &mut Value) {
 		}
 		Value::Array(a) => a.iter_mut().for_each(normalize_sets),
 		Value::Object(o) => o.iter_mut().for_each(|(_, v)| normalize_sets(v)),
-		_ => (),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => (),
 	}
 }
 

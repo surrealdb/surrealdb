@@ -81,9 +81,10 @@ pub enum Kind {
 impl Kind {
 	/// Recursively flatten a kind into a vector of kinds.
 	pub fn flatten(self) -> Vec<Kind> {
-		match self {
-			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
-			_ => vec![self],
+		if let Kind::Either(x) = self {
+			x.into_iter().flat_map(|k| k.flatten()).collect()
+		} else {
+			vec![self]
 		}
 	}
 

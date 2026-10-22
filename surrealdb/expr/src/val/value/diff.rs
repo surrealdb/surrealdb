@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use crate::expr::operation::Operation;
 use crate::val::{Strand, Value};
 
@@ -167,15 +169,14 @@ mod tests {
 		let now = parse_val!("'text'");
 		let ops = old.diff(&now);
 		assert_eq!(ops.len(), 1);
-		match &ops[0] {
-			Operation::Change {
-				path,
-				value: _,
-			} => {
-				assert!(path.is_empty(), "expected empty path, got {path:?}");
-			}
-			other => panic!("expected Operation::Change, got {other:?}"),
-		}
+		let Operation::Change {
+			path,
+			value: _,
+		} = &ops[0]
+		else {
+			panic!("expected Operation::Change, got {:?}", ops[0]);
+		};
+		assert!(path.is_empty(), "expected empty path, got {path:?}");
 		// Verify the JSON Patch serialization produces path "".
 		let patch = Operation::operations_to_value(ops);
 		let expected =
@@ -191,15 +192,14 @@ mod tests {
 		let now = parse_val!("2");
 		let ops = old.diff(&now);
 		assert_eq!(ops.len(), 1);
-		match &ops[0] {
-			Operation::Replace {
-				path,
-				value: _,
-			} => {
-				assert!(path.is_empty(), "expected empty path, got {path:?}");
-			}
-			other => panic!("expected Operation::Replace, got {other:?}"),
-		}
+		let Operation::Replace {
+			path,
+			value: _,
+		} = &ops[0]
+		else {
+			panic!("expected Operation::Replace, got {:?}", ops[0]);
+		};
+		assert!(path.is_empty(), "expected empty path, got {path:?}");
 		let patch = Operation::operations_to_value(ops);
 		let expected = parse_val!("[{ op: 'replace', path: '', value: 2 }]");
 		assert_eq!(patch, expected);

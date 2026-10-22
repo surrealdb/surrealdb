@@ -1,4 +1,5 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
+#![deny(clippy::wildcard_enum_match_arm)]
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
@@ -400,10 +401,7 @@ impl Value {
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Value::Bool(v) => *v,
-			Value::Uuid(_) => true,
-			Value::RecordId(_) => true,
-			Value::Geometry(_) => true,
-			Value::Datetime(_) => true,
+			Value::Uuid(_) | Value::RecordId(_) | Value::Geometry(_) | Value::Datetime(_) => true,
 			Value::Bytes(v) => !v.is_empty(),
 			Value::Array(v) => !v.is_empty(),
 			Value::Set(v) => !v.is_empty(),
@@ -411,7 +409,13 @@ impl Value {
 			Value::String(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			_ => false,
+			Value::None
+			| Value::Null
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
 		}
 	}
 
@@ -432,18 +436,12 @@ impl Value {
 
 	/// Check if this Value is a RecordId of a specific type
 	pub fn is_record_type(&self, types: &[TableName]) -> bool {
-		match self {
-			Value::RecordId(v) => v.is_table_type(types),
-			_ => false,
-		}
+		self.is_record_and(|v| v.is_table_type(types))
 	}
 
 	/// Check if this Value is a Geometry of a specific type
 	pub fn is_geometry_type(&self, types: &[GeometryKind]) -> bool {
-		match self {
-			Value::Geometry(g) => types.contains(&g.geometry_kind()),
-			_ => false,
-		}
+		self.is_geometry_and(|v| v.is_geometry_type(types))
 	}
 
 	// -----------------------------------
@@ -456,7 +454,22 @@ impl Value {
 			Value::String(v) => v.into_string(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
-			_ => self.to_sql(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.to_sql(),
 		}
 	}
 
@@ -466,7 +479,22 @@ impl Value {
 			Value::String(v) => v.as_str().to_owned(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
-			_ => self.to_sql(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.to_sql(),
 		}
 	}
 
@@ -516,57 +544,29 @@ impl Value {
 		match self {
 			Value::None => other.is_none(),
 			Value::Null => other.is_null(),
-			Value::Bool(v) => match other {
-				Value::Bool(w) => v == w,
-				_ => false,
-			},
-			Value::Uuid(v) => match other {
-				Value::Uuid(w) => v == w,
-				_ => false,
-			},
-			Value::RecordId(v) => match other {
-				Value::RecordId(w) => v == w,
-				_ => false,
-			},
-			Value::String(v) => match other {
-				Value::String(w) => v == w,
-				Value::Regex(w) => w.inner().is_match(v.as_str()),
-				_ => false,
-			},
-			Value::Regex(v) => match other {
-				Value::Regex(w) => v == w,
-				Value::String(w) => v.inner().is_match(w.as_str()),
-				_ => false,
-			},
-			Value::Array(v) => match other {
-				Value::Array(w) => v == w,
-				_ => false,
-			},
-			Value::Set(v) => match other {
-				Value::Set(w) => v == w,
-				_ => false,
-			},
-			Value::Object(v) => match other {
-				Value::Object(w) => v == w,
-				_ => false,
-			},
-			Value::Number(v) => match other {
-				Value::Number(w) => v == w,
-				_ => false,
-			},
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v == w,
-				_ => false,
-			},
-			Value::Duration(v) => match other {
-				Value::Duration(w) => v == w,
-				_ => false,
-			},
-			Value::Datetime(v) => match other {
-				Value::Datetime(w) => v == w,
-				_ => false,
-			},
-			_ => self == other,
+			Value::Bool(v) => other.is_bool_and(|w| v == w),
+			Value::Uuid(v) => other.is_uuid_and(|w| v == w),
+			Value::RecordId(v) => other.is_record_and(|w| v == w),
+			Value::String(v) => {
+				other.is_strand_and(|w| v == w)
+					|| other.is_regex_and(|w| w.inner().is_match(v.as_str()))
+			}
+			Value::Regex(v) => {
+				other.is_regex_and(|w| v == w)
+					|| other.is_strand_and(|w| v.inner().is_match(w.as_str()))
+			}
+			Value::Array(v) => other.is_array_and(|w| v == w),
+			Value::Set(v) => other.is_set_and(|w| v == w),
+			Value::Object(v) => other.is_object_and(|w| v == w),
+			Value::Number(v) => other.is_number_and(|w| v == w),
+			Value::Geometry(v) => other.is_geometry_and(|w| v == w),
+			Value::Duration(v) => other.is_duration_and(|w| v == w),
+			Value::Datetime(v) => other.is_datetime_and(|w| v == w),
+			Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self == other,
 		}
 	}
 
@@ -575,7 +575,23 @@ impl Value {
 		match self {
 			Value::Array(v) => v.iter().all(|v| v.equal(other)),
 			Value::Set(v) => v.iter().all(|v| v.equal(other)),
-			_ => self.equal(other),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.equal(other),
 		}
 	}
 
@@ -584,7 +600,23 @@ impl Value {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Set(v) => v.iter().any(|v| v.equal(other)),
-			_ => self.equal(other),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => self.equal(other),
 		}
 	}
 
@@ -594,23 +626,13 @@ impl Value {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Set(v) => v.contains(other),
-			Value::Uuid(v) => match other {
-				Value::String(w) => v.to_string().contains(w.as_str()),
-				_ => false,
-			},
-			Value::String(v) => match other {
-				Value::String(w) => v.contains(w.as_str()),
-				_ => false,
-			},
+			Value::Uuid(v) => other.is_strand_and(|w| v.to_string().contains(w.as_str())),
+			Value::String(v) => other.is_strand_and(|w| v.contains(w.as_str())),
 			#[cfg(feature = "geo")]
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v.contains(w),
-				_ => false,
-			},
-			Value::Object(v) => match other {
-				Value::String(w) => v.contains_key(w.as_str()),
-				_ => false,
-			},
+			Value::Geometry(v) => other.is_geometry_and(|w| v.contains(w)),
+			#[cfg(not(feature = "geo"))]
+			Value::Geometry(_) => false,
+			Value::Object(v) => other.is_strand_and(|w| v.contains_key(w.as_str())),
 			Value::Range(r) => {
 				let beg = match &r.start {
 					Bound::Unbounded => true,
@@ -624,7 +646,42 @@ impl Value {
 					Bound::Excluded(end) => end.gt(other),
 				}
 			}
-			_ => false,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => false,
+		}
+	}
+
+	fn collection_or_geometry_contains(&self, elem: &Value) -> bool {
+		match self {
+			Value::Array(w) => w.iter().any(|w| elem.equal(w)),
+			Value::Set(w) => w.iter().any(|w| elem.equal(w)),
+			Value::Geometry(_) => self.contains(elem),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
 		}
 	}
 
@@ -655,23 +712,25 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
-			Value::Array(v) => v.iter().all(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Set(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
-				_ => false,
-			}),
-			Value::Set(v) => v.iter().all(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Set(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
-				_ => false,
-			}),
-			Value::String(other_strand) => match self {
-				Value::String(s) => s.contains(&**other_strand),
-				_ => false,
-			},
-			_ => false,
+			Value::Array(v) => v.iter().all(|v| self.collection_or_geometry_contains(v)),
+			Value::Set(v) => v.iter().all(|v| self.collection_or_geometry_contains(v)),
+			Value::String(other_strand) => self.is_strand_and(|s| s.contains(&**other_strand)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
 		}
 	}
 
@@ -702,23 +761,25 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
-			Value::Array(v) => v.iter().any(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Set(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
-				_ => false,
-			}),
-			Value::Set(v) => v.iter().any(|v| match self {
-				Value::Array(w) => w.iter().any(|w| v.equal(w)),
-				Value::Set(w) => w.iter().any(|w| v.equal(w)),
-				Value::Geometry(_) => self.contains(v),
-				_ => false,
-			}),
-			Value::String(other_strand) => match self {
-				Value::String(s) => s.contains(&**other_strand),
-				_ => false,
-			},
-			_ => false,
+			Value::Array(v) => v.iter().any(|v| self.collection_or_geometry_contains(v)),
+			Value::Set(v) => v.iter().any(|v| self.collection_or_geometry_contains(v)),
+			Value::String(other_strand) => self.is_strand_and(|s| s.contains(&**other_strand)),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
 		}
 	}
 
@@ -1091,10 +1152,11 @@ pub trait TryNeg<Rhs = Self> {
 impl TryNeg for Value {
 	type Output = Self;
 	fn try_neg(self) -> Result<Self> {
-		Ok(match self {
-			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => bail!(Error::TryNeg(v.kind_of().to_owned())),
-		})
+		if let Self::Number(n) = self {
+			Ok(Self::Number(n.try_neg()?))
+		} else {
+			bail!(Error::TryNeg(self.kind_of().to_owned()))
+		}
 	}
 }
 
@@ -1102,15 +1164,15 @@ impl TryNeg for Value {
 
 /// Macro implementing conversion methods for the variants of the value enum.
 macro_rules! subtypes {
-	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$as:ident,$into:ident)),*$(,)?) => {
+	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident)),*$(,)?) => {
 		impl Value {
 			$(
-				subtypes!{@method $name $( ($($t)*) )? => $is,$as,$into}
+				subtypes!{@method $name $( ($($t)*) )? => $is,$is_and,$as,$as_mut,$into,$try_into}
 			)*
 		}
 
 			$(
-				subtypes!{@from $name $( ($($t)*) )? => $is,$as,$into}
+				subtypes!{@from $name $( ($($t)*) )? => $is,$is_and,$as,$as_mut,$into,$try_into}
 			)*
 
 	};
@@ -1123,16 +1185,32 @@ macro_rules! subtypes {
 		Value::$name
 	};
 
-	(@method $name:ident($t:ty) => $is:ident,$as:ident,$into:ident) => {
+	(@method $name:ident($t:ty) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
 		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
 		#[allow(dead_code)]
 		pub fn $is(&self) -> bool{
 			matches!(self,Value::$name(_))
 		}
 
+		#[doc = concat!("Check if the value is a [`",stringify!($name),"`] and satisfies the predicate")]
+		#[allow(dead_code)]
+		pub fn $is_and(&self, f: impl FnOnce(&$t) -> bool) -> bool{
+			self.$as().is_some_and(f)
+		}
+
 		#[doc = concat!("Return a reference to [`",stringify!($name),"`] if the value is of that type")]
 		#[allow(dead_code)]
 		pub fn $as(&self) -> Option<&$t>{
+			if let Value::$name(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Return a mutable reference to [`",stringify!($name),"`] if the value is of that type")]
+		#[allow(dead_code)]
+		pub fn $as_mut(&mut self) -> Option<&mut $t>{
 			if let Value::$name(x) = self{
 				Some(x)
 			}else{
@@ -1149,9 +1227,19 @@ macro_rules! subtypes {
 				None
 			}
 		}
+
+		#[doc = concat!("Turns the value into a [`",stringify!($name),"`] returning `Err(self)` if the value is not of that type")]
+		#[allow(dead_code)]
+		pub fn $try_into(self) -> std::result::Result<$t, Value>{
+			if let Value::$name(x) = self{
+				Ok(x)
+			}else{
+				Err(self)
+			}
+		}
 	};
 
-	(@method $name:ident => $is:ident,$as:ident,$into:ident) => {
+	(@method $name:ident => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
 		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
 		#[allow(dead_code)]
 		pub fn $is(&self) -> bool{
@@ -1160,7 +1248,7 @@ macro_rules! subtypes {
 	};
 
 
-	(@from $name:ident(Box<$inner:ident>) => $is:ident,$as:ident,$into:ident) => {
+	(@from $name:ident(Box<$inner:ident>) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
 		impl From<$inner> for Value {
 			fn from(v: $inner) -> Self{
 				Value::$name(Box::new(v))
@@ -1174,7 +1262,7 @@ macro_rules! subtypes {
 		}
 	};
 
-	(@from $name:ident($t:ident) => $is:ident,$as:ident,$into:ident) => {
+	(@from $name:ident($t:ident) => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
 		impl From<$t> for Value {
 			fn from(v: $t) -> Self{
 				Value::$name(v)
@@ -1182,32 +1270,32 @@ macro_rules! subtypes {
 		}
 	};
 
-	(@from $name:ident => $is:ident,$as:ident,$into:ident) => {
+	(@from $name:ident => $is:ident,$is_and:ident,$as:ident,$as_mut:ident,$into:ident,$try_into:ident) => {
 		// skip
 	};
 
 }
 
 subtypes! {
-	None => (is_none,_unused,_unused),
-	Null => (is_null,_unused,_unused),
-	Bool(bool) => (is_bool,as_bool,into_bool),
-	Number(Number) => (is_number,as_number,into_number),
-	String(Strand) => (is_strand,as_strand,into_strand),
-	Table(TableName) => (is_table,as_table,into_table),
-	Duration(Duration) => (is_duration,as_duration,into_duration),
-	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
-	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),
-	Array(Array) => (is_array,as_array,into_array),
-	Set(Set) => (is_set,as_set,into_set),
-	Object(Object) => (is_object,as_object,into_object),
-	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
-	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	RecordId(RecordId) => (is_record,as_record,into_record),
-	Regex(Regex) => (is_regex,as_regex,into_regex),
-	Range(Box<Range>) => (is_range,as_range,into_range),
-	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
-	File(File) => (is_file,as_file,into_file),
+	None => (is_none,_unused,_unused,_unused,_unused,_unused),
+	Null => (is_null,_unused,_unused,_unused,_unused,_unused),
+	Bool(bool) => (is_bool,is_bool_and,as_bool,as_bool_mut,into_bool,try_into_bool),
+	Number(Number) => (is_number,is_number_and,as_number,as_number_mut,into_number,try_into_number),
+	String(Strand) => (is_strand,is_strand_and,as_strand,as_strand_mut,into_strand,try_into_strand),
+	Table(TableName) => (is_table,is_table_and,as_table,as_table_mut,into_table,try_into_table),
+	Duration(Duration) => (is_duration,is_duration_and,as_duration,as_duration_mut,into_duration,try_into_duration),
+	Datetime(Datetime) => (is_datetime,is_datetime_and,as_datetime,as_datetime_mut,into_datetime,try_into_datetime),
+	Uuid(Uuid) => (is_uuid,is_uuid_and,as_uuid,as_uuid_mut,into_uuid,try_into_uuid),
+	Array(Array) => (is_array,is_array_and,as_array,as_array_mut,into_array,try_into_array),
+	Set(Set) => (is_set,is_set_and,as_set,as_set_mut,into_set,try_into_set),
+	Object(Object) => (is_object,is_object_and,as_object,as_object_mut,into_object,try_into_object),
+	Geometry(Geometry) => (is_geometry,is_geometry_and,as_geometry,as_geometry_mut,into_geometry,try_into_geometry),
+	Bytes(Bytes) => (is_bytes,is_bytes_and,as_bytes,as_bytes_mut,into_bytes,try_into_bytes),
+	RecordId(RecordId) => (is_record,is_record_and,as_record,as_record_mut,into_record,try_into_record),
+	Regex(Regex) => (is_regex,is_regex_and,as_regex,as_regex_mut,into_regex,try_into_regex),
+	Range(Box<Range>) => (is_range,is_range_and,as_range,as_range_mut,into_range,try_into_range),
+	Closure(Box<Closure>) => (is_closure,is_closure_and,as_closure,as_closure_mut,into_closure,try_into_closure),
+	File(File) => (is_file,is_file_and,as_file,as_file_mut,into_file,try_into_file),
 }
 
 macro_rules! impl_from_number {

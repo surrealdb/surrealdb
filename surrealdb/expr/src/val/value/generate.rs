@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use anyhow::Result;
 use surrealdb_types::ToSql;
 
@@ -75,7 +77,20 @@ impl Value {
 				}
 			}
 			// Any other value is wrong
-			id => Err(anyhow::Error::new(Error::IdInvalid {
+			id @ (Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_)) => Err(anyhow::Error::new(Error::IdInvalid {
 				value: id.to_sql(),
 			})),
 		}

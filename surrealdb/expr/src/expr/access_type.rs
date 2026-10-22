@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use common::fmt::Fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -43,7 +45,7 @@ impl AccessType {
 		match self {
 			// The JWT access method can only issue tokens if an issuer is set
 			AccessType::Jwt(jwt) => jwt.issue.is_some(),
-			_ => true,
+			AccessType::Record(_) | AccessType::Bearer(_) => true,
 		}
 	}
 }

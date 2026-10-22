@@ -72,22 +72,30 @@ impl SchemaError {
 	/// A refusal of a scalar, which names neither the type nor the field it sits in, located at
 	/// field `n` of `ty`. Every other error already names its own type and is returned as it is.
 	pub fn at(self, ty: &'static str, n: u32) -> Self {
-		match self {
+		if matches!(
+			self,
 			Self::WrongKind {
 				ty: "",
 				n: 0,
-			} => Self::WrongKind {
+			}
+		) {
+			Self::WrongKind {
 				ty,
 				n,
-			},
+			}
+		} else if matches!(
+			self,
 			Self::OutOfRange {
 				ty: "",
 				n: 0,
-			} => Self::OutOfRange {
+			}
+		) {
+			Self::OutOfRange {
 				ty,
 				n,
-			},
-			other => other,
+			}
+		} else {
+			self
 		}
 	}
 

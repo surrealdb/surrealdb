@@ -1,3 +1,5 @@
+#![deny(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_types::{
 	AlreadyExistsError, AuthError, Chain, ConfigurationError, ConnectionError, ConversionError,
 	Error, ErrorDetails, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
@@ -336,11 +338,13 @@ fn test_public_error_details_pattern_matching() {
 	);
 
 	// Users can pattern match on ErrorDetails directly
-	match err.details() {
-		ErrorDetails::NotFound(Some(NotFoundError::Table {
-			name,
-		})) => assert_eq!(name, "users"),
-		_ => panic!("Expected NotFound Table details"),
+	if let ErrorDetails::NotFound(Some(NotFoundError::Table {
+		name,
+	})) = err.details()
+	{
+		assert_eq!(name, "users");
+	} else {
+		panic!("Expected NotFound Table details");
 	}
 }
 
