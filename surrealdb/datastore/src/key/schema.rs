@@ -893,6 +893,36 @@ keyspace! {
 						hnsw_pending_legacy = ["!hp", @, appending_id: u64]
 							=> crate::values::hnsw::VectorPendingUpdate;
 
+						/// Sharded record-keyed HNSW pending updates, written by an
+						/// index stamped at the pending-summary format version or
+						/// later in place of `!hr`. Each shard has its own prefix, and
+						/// its `!hy` guard reads `NonEmpty` whenever it may hold an
+						/// entry.
+						///
+						/// The id keeps the erased spelling, as `!hr`'s does, and the
+						/// value holds every record sharing the key in the same way
+						/// (`HnswRecordPendingUpdate::others`).
+						#[format(IndexFormat)]
+						hnsw_record_pending_shard = ["!hw", @, shard: u16, @, id: Id]
+							=> crate::values::hnsw::HnswRecordPendingUpdate;
+						/// The pending-state guard of one `!hw` shard.
+						hnsw_pending = ["!hy", @, shard: u16]
+							=> crate::values::diskann::DiskAnnPendingState;
+						/// Whether any `!hy` guard of the index may read other than
+						/// `Empty`: `NonEmpty` whenever one does, in every committed
+						/// state. An absent key reads `Empty`. Lookup trusts it only on
+						/// an index stamped with the pending-summary format version or
+						/// later.
+						hnsw_pending_summary = ["!hY"]
+							=> crate::values::diskann::DiskAnnPendingState;
+						/// A node's writer lease on one `!hy` guard shard: while it
+						/// holds, the node's writers commit pending updates into the
+						/// shard without arming its guard, so no node steps the guard.
+						/// Written only where the datastore is not the store's sole
+						/// writer.
+						hnsw_writer_lease = ["!hz", shard: u16, @, nid: Uuid]
+							=> crate::values::diskann::DiskAnnWriterLease;
+
 						/// DiskANN graph storage, compiled only where the backend is
 						/// available. Conflicts are reported against every key
 						/// regardless of configuration, so these cannot collide with
@@ -2636,6 +2666,10 @@ mod tests {
 			"/***+!hr",
 			"/***+!hs",
 			"/***+!hv",
+			"/***+!hw",
+			"/***+!hy",
+			"/***+!hY",
+			"/***+!hz",
 			"/***+!ia",
 			"/***+!ig",
 			"/***+!it",
@@ -2841,6 +2875,20 @@ mod tests {
 			hr(&dec),
 			"the HNSW pending queue shares one key; its value holds each"
 		);
+		let hw = |id: &RecordIdKey| {
+			HnswRecordPendingShardKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				IndexId(3),
+				0,
+				Cow::Borrowed(id),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+		assert_eq!(hw(&int), hw(&dec), "the sharded HNSW pending queue shares one key too");
 		#[cfg(diskann)]
 		{
 			let dw = |id: &RecordIdKey| {

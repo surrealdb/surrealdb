@@ -4246,11 +4246,13 @@ async fn claim_build_for_a_remote_owner(
 	set_durable_build_state(ds, ikb, state).await
 }
 
-/// Number of HNSW pending entries queued for one index.
+/// Number of HNSW record-keyed pending entries queued for one index, in `!hr`
+/// and every `!hw` shard.
 #[cfg(feature = "kv-mem")]
 async fn count_hnsw_pendings(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let count = catch!(tx, tx.count(ikb.new_hr_range()?, None).await);
+	let count = catch!(tx, tx.count(ikb.new_hr_range()?, None).await)
+		+ catch!(tx, tx.count(ikb.new_hw_range()?, None).await);
 	tx.cancel().await?;
 	Ok(count)
 }
@@ -16759,11 +16761,12 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	// compacted this index, so the plan's expected generation is absent — the
 	// value a wipe restores.
 	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
-	let pendings = catch!(tx, tx.scan_raw(ikb.new_hr_range()?, u32::MAX, 0, None).await);
+	let mut pendings = catch!(tx, tx.scan_raw(ikb.new_hr_range()?, u32::MAX, 0, None).await);
+	pendings.extend(catch!(tx, tx.scan_raw(ikb.new_hw_range()?, u32::MAX, 0, None).await));
 	let mut ctx = ds.setup_ctx()?;
 	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
-	let plan = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await?;
+	let plan = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb, ix.format_version).await?;
 	tx.cancel().await?;
 	assert!(plan.has_work(), "the fixture must leave pendings for the plan to capture");
 	assert_eq!(pendings.len(), 2, "one pending per indexed record");
@@ -16794,9 +16797,7 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	assert!(!applied.applied(), "a plan prepared before the wipe must be rejected, not applied");
 
 	// The pendings must survive for whoever compacts next.
-	let tx = ds.transaction(TransactionType::Read).await?;
-	let surviving = catch!(tx, tx.count(ikb.new_hr_range()?, None).await);
-	tx.cancel().await?;
+	let surviving = count_hnsw_pendings(&ds, &ikb).await?;
 	assert_eq!(surviving, pendings.len(), "the rejected plan must leave every pending in place");
 	Ok(())
 }
@@ -21806,6 +21807,34 @@ async fn define_index_refuses_unservable_diskann_parameters() -> Result<()> {
 		"DEFINE INDEX ix ON t FIELDS v DISKANN DIMENSION 33025 DIST EUCLIDEAN TYPE U8 CONCURRENTLY;",
 	)
 	.await?;
+	Ok(())
+}
+
+/// Removing an index drops its pending-deletion counter so the map does not
+/// accumulate entries for dropped indexes and a newly defined index cannot
+/// inherit a retired one's count.
+#[cfg(all(feature = "kv-mem", feature = "vector-index"))]
+#[tokio::test]
+async fn removing_an_index_forgets_its_counted_pending_deletions() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t; DEFINE INDEX hx ON t FIELDS v HNSW DIMENSION 2 DIST EUCLIDEAN;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+
+	let builder = ds.index_builder();
+	builder.note_pending_deleted(&ikb, 1_024);
+
+	execute_all(&ds, &session, "REMOVE INDEX hx ON t;").await?;
+
+	assert!(
+		!builder.take_pending_range_compaction(&ikb),
+		"REMOVE INDEX must drop the index's pending-deletion count"
+	);
 	Ok(())
 }
 

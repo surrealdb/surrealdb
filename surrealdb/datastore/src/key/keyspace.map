@@ -290,6 +290,14 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!hr                                                                      HnswRecordPendingPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hp{appending_id}                                                           HnswPendingLegacyKey ->  crate::values::hnsw::VectorPendingUpdate
 /*{ns}*{db}*{tb}+{ix}!hp                                                                      HnswPendingLegacyPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hw{shard}{id}                                                         HnswRecordPendingShardKey ->  crate::values::hnsw::HnswRecordPendingUpdate
+/*{ns}*{db}*{tb}+{ix}!hw                                                                 HnswRecordPendingShardPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hw{shard}                                                     HnswRecordPendingShardShardPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hy{shard}                                                                        HnswPendingKey ->  crate::values::diskann::DiskAnnPendingState
+/*{ns}*{db}*{tb}+{ix}!hy                                                                            HnswPendingPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hY                                                                        HnswPendingSummaryKey ->  crate::values::diskann::DiskAnnPendingState
+/*{ns}*{db}*{tb}+{ix}!hz{shard}{nid}                                                               HnswWriterLeaseKey ->  crate::values::diskann::DiskAnnWriterLease
+/*{ns}*{db}*{tb}+{ix}!hz{shard}                                                            HnswWriterLeaseShardPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dd                                                                          DiskannDocsStateKey ->  crate::values::diskann::DiskAnnDocsState
 /*{ns}*{db}*{tb}+{ix}!di{id}                                                                      DiskannDocLookupKey ->  DocId
 /*{ns}*{db}*{tb}+{ix}!di                                                                       DiskannDocLookupPrefix ->  (range)

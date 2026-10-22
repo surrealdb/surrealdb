@@ -52,6 +52,10 @@ impl DoublePriorityQueue {
 		self.heap.len()
 	}
 
+	pub(super) fn is_empty(&self) -> bool {
+		self.heap.is_empty()
+	}
+
 	pub(super) fn push(&mut self, dist: f64, id: ElementId) {
 		let seq = self.next_seq;
 		self.next_seq += 1;

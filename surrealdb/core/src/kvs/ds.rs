@@ -153,11 +153,11 @@ pub use config::LiveQueryEngine;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-/// How long a node commits nothing under its DiskANN writer leases on an index
-/// before it releases them ([`Datastore::release_idle_diskann_writer_leases`]).
+/// How long a node commits nothing under its writer leases on an index
+/// before it releases them ([`Datastore::release_idle_writer_leases`]).
 /// Until then no node returns those shards' guards to `Empty`, so lookups keep
 /// scanning them; past it, a write takes the lease again.
-const DISKANN_WRITER_LEASE_IDLE: Duration = Duration::from_secs(10);
+const WRITER_LEASE_IDLE: Duration = Duration::from_secs(10);
 
 /// Whether a feature-level raise consults the other nodes' recorded releases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6834,13 +6834,13 @@ impl Datastore {
 		&self.transaction_factory
 	}
 
-	/// Release the DiskANN writer leases this node holds on indexes it has
-	/// committed nothing under for [`DISKANN_WRITER_LEASE_IDLE`], so other nodes'
+	/// Release the writer leases this node holds on indexes it has
+	/// committed nothing under for [`WRITER_LEASE_IDLE`], so other nodes'
 	/// compaction can return those indexes' drained guards to `Empty`. A lease is
 	/// only ever held on a store this datastore is not the sole writer of.
-	pub(crate) async fn release_idle_diskann_writer_leases(&self) -> Result<()> {
+	pub(crate) async fn release_idle_writer_leases(&self) -> Result<()> {
 		self.transaction_factory
-			.release_idle_diskann_writer_leases(&self.sequences, DISKANN_WRITER_LEASE_IDLE)
+			.release_idle_writer_leases(&self.sequences, WRITER_LEASE_IDLE)
 			.await
 			.map(|_| ())
 	}
@@ -11094,11 +11094,16 @@ pub(crate) mod test {
 		let (first, second) = {
 			let txn = Arc::new(ds.transaction(Read).await?);
 			let ctx = compaction_ctx(&ds, &txn)?;
-			let first = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await;
-			let second = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await;
+			let first =
+				IndexOperation::prepare_hnsw_compaction(&ctx, &ikb, ix.format_version).await;
+			let second =
+				IndexOperation::prepare_hnsw_compaction(&ctx, &ikb, ix.format_version).await;
 			txn.cancel().await?;
 			(first?, second?)
 		};
+		// The pass steps the guards of the shards a plan drained once its
+		// apply has committed.
+		let step = first.guard_step(&ikb);
 
 		let txn = Arc::new(ds.transaction(Write).await?);
 		let ctx = compaction_ctx(&ds, &txn)?;
@@ -11114,6 +11119,7 @@ pub(crate) mod test {
 		let applied = catch!(txn, applied);
 		assert!(applied.applied(), "the first plan must apply: {applied:?}");
 		txn.commit().await?;
+		assert!(step.run(&txn).await?, "the first plan drained its shards");
 		let txn = Arc::new(ds.transaction(Write).await?);
 		let ctx = compaction_ctx(&ds, &txn)?;
 		let applied = IndexOperation::apply_hnsw_compaction(
@@ -11323,11 +11329,12 @@ pub(crate) mod test {
 		Ok(hi)
 	}
 
-	/// The entries an HNSW compaction still has to apply, across both pending
-	/// families.
+	/// The entries an HNSW compaction still has to apply, across every pending
+	/// layout.
 	async fn hnsw_pending_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
 		let txn = ds.transaction(Read).await?;
-		let records = txn.getr(ikb.new_hr_range()?, None).await?.len();
+		let records = txn.getr(ikb.new_hr_range()?, None).await?.len()
+			+ txn.getr(ikb.new_hw_range()?, None).await?.len();
 		let appends = txn.getr_raw(ikb.new_hp_range()?, None).await?.len();
 		txn.cancel().await?;
 		Ok(records + appends)

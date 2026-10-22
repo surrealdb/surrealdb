@@ -325,6 +325,59 @@ impl IndexKey {
 	}
 }
 
+/// How many pending entries an HNSW index's compaction must have deleted since
+/// its pending range was last compacted in storage before a pass that drains
+/// the range compacts it again.
+///
+/// A deleted pending entry stays in the storage engine as a tombstone until the
+/// engine compacts it away, and on RocksDB a tombstone still in the memtable is
+/// invisible to the deletion-triggered compaction it configures. Whenever a kNN
+/// query or guard probe scans a pending range before the engine compacts those
+/// tombstones, it steps over them: about 8 ns apiece, so 50 000 add about
+/// 0.4 ms per scan. Below this many the cost is small, and compacting would
+/// cost more I/O than it saves.
+pub(crate) const PENDING_RANGE_COMPACTION_MIN_DELETES: usize = 10_000;
+
+/// The least time between two compactions of one HNSW index's pending range,
+/// so that ingest which the compactor keeps draining compacts once a minute at
+/// most rather than after every pass.
+pub(crate) const PENDING_RANGE_COMPACTION_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Pending deletions an HNSW index's compaction has made since its pending
+/// range was last compacted in storage.
+#[derive(Default)]
+struct PendingDeletes {
+	deleted: usize,
+	compacted: Option<Instant>,
+}
+
+impl PendingDeletes {
+	/// Whether this entry, at `now`, behaves as a fresh one: no deletions
+	/// counted, and no compaction recent enough to space the next one from.
+	fn is_idle(&self, now: Instant) -> bool {
+		self.deleted == 0
+			&& self.compacted.is_none_or(|at| {
+				now.checked_duration_since(at)
+					.is_none_or(|d| d >= PENDING_RANGE_COMPACTION_INTERVAL)
+			})
+	}
+
+	/// Whether the range is due a compaction at `now`: enough deletions since
+	/// the last one, and that one at least [`PENDING_RANGE_COMPACTION_INTERVAL`]
+	/// ago. A due range starts counting again from `now`.
+	fn take_due(&mut self, now: Instant) -> bool {
+		let recent = self.compacted.is_some_and(|at| {
+			now.checked_duration_since(at).is_some_and(|d| d < PENDING_RANGE_COMPACTION_INTERVAL)
+		});
+		if self.deleted < PENDING_RANGE_COMPACTION_MIN_DELETES || recent {
+			return false;
+		}
+		self.deleted = 0;
+		self.compacted = Some(now);
+		true
+	}
+}
+
 /// Process-local launcher for durable index builds.
 ///
 /// The active-builder map is not the source of truth for build status. It only
@@ -339,6 +392,10 @@ pub(crate) struct IndexBuilder {
 	/// ([`Self::materialise_lock`]). Held weakly: an entry lives only while a
 	/// pass holds or waits for it, and a dead one is replaced on the next ask.
 	materialising: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, Weak<tokio::sync::Mutex<()>>>>>,
+	/// Per HNSW index, the pending entries this process's compaction passes
+	/// have deleted since its pending range was last compacted in storage
+	/// ([`Self::take_pending_range_compaction`]).
+	pending_deletes: Arc<parking_lot::Mutex<HashMap<IndexKeyBase, PendingDeletes>>>,
 	/// Signalled whenever a build in this process commits a transition out of
 	/// `Closing`, so writers that admission holds while a build is `Closing`
 	/// re-read its state at once rather than at their next poll. A build owned
@@ -534,6 +591,7 @@ impl IndexBuilder {
 			tf,
 			indexes: Default::default(),
 			materialising: Default::default(),
+			pending_deletes: Default::default(),
 			closing_settled: Default::default(),
 			#[cfg(test)]
 			closing_poll: Default::default(),
@@ -572,6 +630,34 @@ impl IndexBuilder {
 		let lock = Arc::new(tokio::sync::Mutex::new(()));
 		materialising.insert(ikb.clone(), Arc::downgrade(&lock));
 		lock
+	}
+
+	/// Records that a committed HNSW compaction batch deleted `deleted` pending
+	/// entries of `ikb`'s index.
+	pub(crate) fn note_pending_deleted(&self, ikb: &IndexKeyBase, deleted: usize) {
+		if deleted > 0 {
+			let now = Instant::now();
+			let mut pending = self.pending_deletes.lock();
+			// Entries that hold no count and no recent compaction say nothing a
+			// fresh entry would not, so the map holds no more than the indexes
+			// with deletions to count or a compaction to space out.
+			pending.retain(|_, entry| !entry.is_idle(now));
+			pending.entry(ikb.clone()).or_default().deleted += deleted;
+		}
+	}
+
+	/// Forgets what `ikb`'s passes counted: its index is gone, being removed,
+	/// or no longer HNSW, so an index later created under the same key starts
+	/// from nothing.
+	pub(crate) fn forget_pending_deletes(&self, ikb: &IndexKeyBase) {
+		self.pending_deletes.lock().remove(ikb);
+	}
+
+	/// Whether `ikb`'s pending range, which a pass has just drained, is due a
+	/// compaction in storage, and if so resets its count. See
+	/// [`PENDING_RANGE_COMPACTION_MIN_DELETES`].
+	pub(crate) fn take_pending_range_compaction(&self, ikb: &IndexKeyBase) -> bool {
+		self.pending_deletes.lock().get_mut(ikb).is_some_and(|entry| entry.take_due(Instant::now()))
 	}
 
 	pub(crate) fn transaction_factory(&self) -> TransactionFactory {
@@ -5233,5 +5319,47 @@ impl RollbackAction for CleanUncommittedBuild {
 				}
 			}
 		})
+	}
+}
+
+#[cfg(test)]
+mod pending_range_compaction_tests {
+	use super::*;
+
+	/// A drained range is compacted once enough deletions have built up, then
+	/// counts again from zero, and is not compacted twice within the interval.
+	#[test]
+	fn a_drained_range_is_compacted_after_enough_deletions_at_most_once_per_interval() {
+		let start = Instant::now();
+		let mut pending = PendingDeletes {
+			deleted: PENDING_RANGE_COMPACTION_MIN_DELETES - 1,
+			compacted: None,
+		};
+		assert!(!pending.take_due(start), "below the threshold");
+		pending.deleted += 1;
+		assert!(pending.take_due(start), "at the threshold");
+		assert_eq!(pending.deleted, 0, "the count starts again");
+		pending.deleted = 10 * PENDING_RANGE_COMPACTION_MIN_DELETES;
+		assert!(!pending.take_due(start + Duration::from_secs(1)), "within the interval");
+		assert!(pending.take_due(start + PENDING_RANGE_COMPACTION_INTERVAL), "after the interval");
+	}
+
+	/// An entry with nothing counted is idle once its last compaction is at
+	/// least an interval old, and never while it counts deletions.
+	#[test]
+	fn an_entry_is_idle_only_with_nothing_counted_and_no_recent_compaction() {
+		let start = Instant::now();
+		assert!(PendingDeletes::default().is_idle(start), "a fresh entry");
+		let counting = PendingDeletes {
+			deleted: 1,
+			compacted: None,
+		};
+		assert!(!counting.is_idle(start), "deletions are counted");
+		let compacted = PendingDeletes {
+			deleted: 0,
+			compacted: Some(start),
+		};
+		assert!(!compacted.is_idle(start + Duration::from_secs(1)), "compacted recently");
+		assert!(compacted.is_idle(start + PENDING_RANGE_COMPACTION_INTERVAL), "an interval ago");
 	}
 }

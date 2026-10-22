@@ -440,15 +440,15 @@ impl TransactionFactory {
 		.with_live_write(live_write))
 	}
 
-	/// Release the DiskANN writer leases this datastore holds on indexes it has
+	/// Release the writer leases this datastore holds on indexes it has
 	/// committed nothing under for `idle`, and return how many it released.
-	/// See [`crate::tx::release_idle_diskann_writer_leases`].
-	pub async fn release_idle_diskann_writer_leases(
+	/// See [`crate::tx::release_idle_writer_leases`].
+	pub async fn release_idle_writer_leases(
 		&self,
 		sequences: &Sequences,
 		idle: std::time::Duration,
 	) -> Result<usize> {
-		crate::tx::release_idle_diskann_writer_leases(self, &self.triggers, sequences, idle).await
+		crate::tx::release_idle_writer_leases(self, &self.triggers, sequences, idle).await
 	}
 
 	/// The write transactions open through this datastore

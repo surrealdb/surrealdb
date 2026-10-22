@@ -425,12 +425,14 @@ impl<'a> IndexOperation<'a> {
 		ft.apply_compaction(tx, plan).await
 	}
 
-	/// Creates the read-phase plan for HNSW pending compaction.
+	/// Creates the read-phase plan for HNSW pending compaction of an index
+	/// stamped with `format_version`.
 	pub async fn prepare_hnsw_compaction(
 		env: &dyn IndexEnv,
 		ikb: &IndexKeyBase,
+		format_version: u16,
 	) -> Result<HnswCompactionPlan> {
-		HnswIndex::prepare_compaction(env, ikb).await
+		HnswIndex::prepare_compaction(env, ikb, format_version).await
 	}
 
 	/// Applies a prepared HNSW pending compaction plan.
@@ -448,6 +450,9 @@ impl<'a> IndexOperation<'a> {
 		format_version: u16,
 		plan: HnswCompactionPlan,
 	) -> Result<HnswCompactionOutcome> {
+		if !plan.has_work() {
+			return Ok(HnswCompactionOutcome::Empty);
+		}
 		let tx = env.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
 			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p, format_version).await?;

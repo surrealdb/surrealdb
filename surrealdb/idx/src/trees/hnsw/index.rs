@@ -9,20 +9,24 @@ use anyhow::{Result, bail, ensure};
 use common::EngineError;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
+use surrealdb_datastore::pending_guard::{
+	PENDING_GUARD_SHARDS, PendingGuardFamily, pending_guard_shard,
+};
+use surrealdb_datastore::values::diskann::{DiskAnnPendingState, DiskAnnPendingStateKind};
 use surrealdb_kvs::{Direction, Val};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::debug;
 use web_time::Instant;
 
 use crate::catalog::{
-	Distance, HnswParams, TableId, VectorType, keeps_pending_members, keeps_vector_doc_elements,
-	may_hold_legacy_vector_pending,
+	Distance, HnswParams, TableId, VectorType, guards_hnsw_pending, keeps_pending_members,
+	keeps_vector_doc_elements, may_hold_legacy_vector_pending,
 };
 use crate::config::BuildParallelism;
 use crate::docids::{DocId, LegacyVectorDocIds};
 use crate::env::IndexEnv;
-use crate::key::schema::HnswRecordPendingKey;
-use crate::key::{KVKeyDecode, KVValue, Key, Resumable};
+use crate::key::schema::{HnswRecordPendingKey, HnswRecordPendingShardKey};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Key, Resumable};
 use crate::trees::hnsw::batch::{
 	self, GraphBase, InvalidateResident, PublishBatch, RollBackBatch, Staged, Staging,
 };
@@ -49,14 +53,109 @@ use crate::{
 	read_compaction_generation,
 };
 
+/// Which record-keyed pending layout an entry was read from, which decides how
+/// its key decodes.
+#[derive(Clone, Copy, Debug)]
+enum PendingLayout {
+	/// The unsharded `!hr` range.
+	Legacy,
+	/// One shard of the `!hw` range.
+	Sharded,
+}
+
 /// The record an HNSW pending entry belongs to.
 ///
 /// The rule is [`take_pending_record_id`]; this supplies the key decoder it
-/// falls back to.
-fn pending_record_id(key: &[u8], pending: &mut HnswRecordPendingUpdate) -> Result<RecordIdKey> {
+/// falls back to, for the layout the entry was read from.
+fn pending_record_id(
+	key: &[u8],
+	layout: PendingLayout,
+	pending: &mut HnswRecordPendingUpdate,
+) -> Result<RecordIdKey> {
 	take_pending_record_id(&mut pending.id, || {
-		Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned())
+		Ok(match layout {
+			PendingLayout::Legacy => HnswRecordPendingKey::decode_key(key)?.id.into_owned(),
+			PendingLayout::Sharded => HnswRecordPendingShardKey::decode_key(key)?.id.into_owned(),
+		})
 	})
+}
+
+/// The state of each pending-state guard of an index, by shard: `None` for a
+/// guard never written.
+type PendingStateSnapshot = Vec<Option<DiskAnnPendingState>>;
+
+/// Whether a guard of `state` lets lookup and compaction skip its shard.
+fn guard_unarmed(state: &Option<DiskAnnPendingState>) -> bool {
+	state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty)
+}
+
+/// The record-keyed pending ranges a kNN lookup scans.
+struct PendingRanges {
+	/// Whether it scans the unsharded `!hr` range.
+	legacy: bool,
+	/// The `!hw` shards it scans, a bit per shard.
+	shards: u64,
+}
+
+/// What a scan of the record-keyed pending ranges carries from one range to
+/// the next.
+struct RecordPendingScan<'a, 's> {
+	/// The bounded scan, shared by every range read.
+	scan: &'a mut PendingScan<'s>,
+	/// The doc-IDs of every pending record read, which the graph search
+	/// suppresses.
+	all_existing_docs: &'a mut RoaringTreemap,
+	/// Cancellation checkpoints so far, across every range read.
+	checkpoints: &'a mut usize,
+}
+
+/// The pending entries a write to an index that guards its pending updates
+/// reads for its record: its own `!hw` entry, and the `!hr` entry an unguarded
+/// write at the same stamp may have left. One key type, so that one multi-get
+/// reads both.
+#[derive(Debug)]
+enum WriterPendingKey<'a> {
+	Sharded(HnswRecordPendingShardKey<'a>),
+	Legacy(HnswRecordPendingKey<'a>),
+}
+
+impl KVKey for WriterPendingKey<'_> {
+	type Value = HnswRecordPendingUpdate;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::Sharded(key) => key.encode_buffer(buffer),
+			Self::Legacy(key) => key.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
+}
+
+/// Removes `id`'s state from a pending entry, returning its doc-ID and the
+/// vectors the graph holds for it, or `None` when the entry holds no state of
+/// `id`. A first member left behind becomes the entry's own record, so an entry
+/// whose `id` is `None` and that has no others holds nothing.
+fn take_record_state(
+	entry: &mut HnswRecordPendingUpdate,
+	id: &RecordIdKey,
+) -> Option<(Option<DocId>, Vec<SerializedVector>)> {
+	if entry.id.as_ref().is_none_or(|named| named.addresses_same_record(id)) {
+		let taken = (entry.doc_id.take(), std::mem::take(&mut entry.old_vectors));
+		entry.new_vectors.clear();
+		entry.id = None;
+		if !entry.others.is_empty() {
+			let next = entry.others.remove(0);
+			entry.doc_id = next.doc_id;
+			entry.old_vectors = next.old_vectors;
+			entry.new_vectors = next.new_vectors;
+			entry.id = Some(next.id);
+		}
+		return Some(taken);
+	}
+	let position = entry.others.iter().position(|m| m.id.addresses_same_record(id))?;
+	let member = entry.others.remove(position);
+	Some((member.doc_id, member.old_vectors))
 }
 
 pub use crate::trees::hnsw::HNSW_COMPACTION_MAX_PENDING_KEYS;
@@ -140,6 +239,18 @@ pub struct HnswCompactionPlan {
 	generation: Option<u64>,
 	captured_keys: Vec<CapturedPendingKey>,
 	pending: Vec<PendingOperation>,
+	/// The pending-state guards read before any pending range, on an index
+	/// that guards its pending updates; empty on one that does not.
+	pending_state: PendingStateSnapshot,
+	/// The `!hw` shards whose range this plan drains, or found empty, and whose
+	/// guards the step after its commit may return to `Empty`.
+	cleared_shards: Vec<u16>,
+	/// Whether the pending-state summary read other than `Empty` in the plan's
+	/// snapshot.
+	summary_armed: bool,
+	/// Whether this plan reads the `!hr` range to its end, so that once it
+	/// commits the range holds nothing the plan's snapshot held.
+	legacy_drained: bool,
 	has_more: bool,
 }
 
@@ -149,15 +260,59 @@ impl HnswCompactionPlan {
 		!self.captured_keys.is_empty()
 	}
 
+	/// Returns whether the pass should act on this plan: apply what it
+	/// captured, or step guards.
+	///
+	/// An armed guard or summary calls for a pass even with nothing captured:
+	/// the step returns a drained shard's guard to `Empty`, and the summary
+	/// once every guard is, so lookup stops scanning an index with nothing
+	/// pending. A guard never written holds no entry, and calls for nothing.
+	pub fn requires_apply(&self) -> bool {
+		self.has_work()
+			|| self.summary_armed
+			|| self.pending_state.iter().any(|s| !guard_unarmed(s))
+	}
+
+	/// Whether the guard step after this plan may clear the summary: it read
+	/// armed, `!hr` is drained, and every guard read `Empty` or absent or is one
+	/// the step steps.
+	///
+	/// `!hr` holds what lookup cannot find through a guard, so the summary
+	/// stays armed until it is empty: lookup scans `!hr` only under an armed
+	/// summary.
+	fn summary_clearable(&self) -> bool {
+		self.summary_armed
+			&& self.legacy_drained
+			&& self.pending_state.iter().enumerate().all(|(shard, state)| {
+				guard_unarmed(state) || self.cleared_shards.contains(&(shard as u16))
+			})
+	}
+
+	/// The guard step a compaction pass runs once this plan's transaction has
+	/// committed, or, for a plan that captured nothing, been cancelled.
+	pub fn guard_step(&self, ikb: &IndexKeyBase) -> HnswGuardStep {
+		HnswGuardStep {
+			index: ikb.guarded(PendingGuardFamily::Hnsw),
+			shards: self.cleared_shards.clone(),
+			summary_clearable: self.summary_clearable(),
+		}
+	}
+
 	/// Returns whether the read phase stopped at the configured batch cap.
 	pub fn has_more(&self) -> bool {
 		self.has_more
 	}
 
+	/// Returns the number of exact pending keys captured by the plan, which
+	/// applying it deletes.
+	pub fn captured_len(&self) -> usize {
+		self.captured_keys.len()
+	}
+
 	/// Returns the number of exact pending keys captured by the plan.
 	#[cfg(test)]
 	pub(crate) fn len(&self) -> usize {
-		self.captured_keys.len()
+		self.captured_len()
 	}
 }
 
@@ -232,13 +387,64 @@ impl PendingPlanBuilder {
 	}
 
 	/// Converts the accumulator into an immutable compaction plan.
-	fn into_plan(self) -> HnswCompactionPlan {
+	fn into_plan(self, guards: PlanGuards) -> HnswCompactionPlan {
 		HnswCompactionPlan {
 			generation: self.generation,
 			captured_keys: self.captured_keys,
 			pending: self.pending,
+			pending_state: guards.pending_state,
+			cleared_shards: guards.cleared_shards,
+			summary_armed: guards.summary_armed,
+			legacy_drained: guards.legacy_drained,
 			has_more: self.has_more,
 		}
+	}
+}
+
+/// What a compaction plan's read of one record-keyed pending range found.
+#[derive(Default)]
+struct RangeCapture {
+	/// Whether the range was read to its end within the plan's budget.
+	drained: bool,
+	/// The pending-state shard of the first record read from the range.
+	first_shard: Option<u16>,
+}
+
+/// What a compaction plan read of its index's pending-state guards.
+#[derive(Default)]
+struct PlanGuards {
+	pending_state: PendingStateSnapshot,
+	cleared_shards: Vec<u16>,
+	summary_armed: bool,
+	legacy_drained: bool,
+}
+
+/// Steps the guards of the `!hw` shards a compaction plan drained to `Empty`,
+/// and the summary with them where the plan allows it
+/// ([`HnswCompactionPlan::guard_step`]).
+///
+/// The step runs in a transaction of its own, under the index's guard fence,
+/// after the plan's own transaction has committed: the apply deletes the
+/// entries it captured, and the step re-checks each shard's emptiness in its
+/// own snapshot (`Transaction::step_pending_guards`), so a write committed in
+/// between keeps its guard armed.
+pub struct HnswGuardStep {
+	index: surrealdb_datastore::pending_guard::GuardedIndex,
+	shards: Vec<u16>,
+	summary_clearable: bool,
+}
+
+impl HnswGuardStep {
+	/// Runs the step through `tx`'s datastore, and reports whether it stepped
+	/// a guard or the summary. A step that has nothing to step does nothing.
+	///
+	/// Boxed because the step holds a transaction of its own, which would
+	/// otherwise grow the compaction's future by its size.
+	pub async fn run(&self, tx: &Transaction) -> Result<bool> {
+		if self.shards.is_empty() && !self.summary_clearable {
+			return Ok(false);
+		}
+		Box::pin(tx.step_pending_guards(&self.index, &self.shards, self.summary_clearable)).await
 	}
 }
 
@@ -443,6 +649,9 @@ impl HnswIndex {
 			vec![]
 		};
 		let tx = env.tx();
+		if guards_hnsw_pending(self.format_version) {
+			return self.index_guarded(&tx, id, old_vectors, new_vectors).await;
+		}
 		let key = self.ikb.new_hr_key(id);
 		// The entry's key spells `id` without its numbers' kinds, so it may hold
 		// other records. A write folds into its own record's state: the graph
@@ -485,6 +694,122 @@ impl HnswIndex {
 		Ok(())
 	}
 
+	/// Enqueues a vector update on an index that guards its pending updates
+	/// ([`guards_hnsw_pending`]): into the `!hw` entry of `id`'s shard, whose
+	/// guard the transaction's commit covers ([`Self::mark_pending_non_empty`]).
+	///
+	/// The entry's key spells `id` without its numbers' kinds, so it may hold
+	/// other records: a write folds into its own record's state, kept apart
+	/// from the others', as on `!hr`.
+	///
+	/// A `!hr` entry holding `id`'s state is an earlier write, made unguarded
+	/// at the same stamp. That state moves into `!hw` with this write and keeps
+	/// its graph baseline, so `id` is never pending under both layouts at once;
+	/// any other record the `!hr` entry holds stays there, for its own write or
+	/// compaction to move. Both entries are read in one multi-get.
+	async fn index_guarded(
+		&self,
+		tx: &Transaction,
+		id: &RecordIdKey,
+		old_vectors: Vec<SerializedVector>,
+		new_vectors: Vec<SerializedVector>,
+	) -> Result<()> {
+		let shard = pending_guard_shard(id);
+		let key = self.ikb.new_hw_key(shard, id);
+		let legacy_key = self.ikb.new_hr_key(id);
+		let mut read = tx
+			.get_many_key(
+				vec![
+					WriterPendingKey::Sharded(key.clone()),
+					WriterPendingKey::Legacy(legacy_key.clone()),
+				],
+				None,
+			)
+			.await?
+			.into_iter();
+		let (sharded, legacy) = (read.next().flatten(), read.next().flatten());
+		// The baseline `id` is pending from, when an earlier write left one in
+		// `!hr`: its doc-ID and the vectors the graph holds for it.
+		let baseline = match legacy {
+			Some(mut legacy) => match take_record_state(&mut legacy, id) {
+				Some(baseline) => {
+					if legacy.id.is_none() && legacy.others.is_empty() {
+						tx.del_key(&legacy_key).await?;
+					} else {
+						tx.set_key(&legacy_key, &legacy).await?;
+					}
+					Some(baseline)
+				}
+				None => None,
+			},
+			None => None,
+		};
+		let pending = match sharded {
+			Some(mut pending) => {
+				if pending.id.as_ref().is_none_or(|named| named.addresses_same_record(id)) {
+					pending.new_vectors = new_vectors;
+					pending.id = Some(id.clone());
+				} else if let Some(member) =
+					pending.others.iter_mut().find(|m| m.id.addresses_same_record(id))
+				{
+					member.new_vectors = new_vectors;
+				} else {
+					let (doc_id, old_vectors) = match baseline {
+						Some(baseline) => baseline,
+						None => (
+							HnswDocs::get_doc_id(&self.ikb, self.format_version, tx, id).await?,
+							old_vectors,
+						),
+					};
+					pending.others.push(HnswRecordPendingMember {
+						doc_id,
+						old_vectors,
+						new_vectors,
+						id: id.clone(),
+					});
+				}
+				pending
+			}
+			None => {
+				let (doc_id, old_vectors) = match baseline {
+					Some(baseline) => baseline,
+					None => (
+						HnswDocs::get_doc_id(&self.ikb, self.format_version, tx, id).await?,
+						old_vectors,
+					),
+				};
+				HnswRecordPendingUpdate {
+					doc_id,
+					old_vectors,
+					new_vectors,
+					id: Some(id.clone()),
+					others: Vec::new(),
+				}
+			}
+		};
+		tx.set_key(&key, &pending).await?;
+		Self::mark_pending_non_empty(tx, &self.ikb, shard);
+		Ok(())
+	}
+
+	/// Covers the pending-state guard of `shard`, which this transaction wrote
+	/// a `!hw` entry into.
+	///
+	/// Lookup and compaction skip a shard whose guard is `Empty`, so a `!hw`
+	/// entry must not commit under an `Empty` guard. The writing transaction
+	/// neither reads nor writes the guard, so no guard step can fail its
+	/// commit: it names the shard, and its commit covers the guard under the
+	/// index's guard fence (`Transaction::buffer_pending_guard`).
+	///
+	/// Where this datastore is the store's sole writer
+	/// ([`Transaction::sole_writer`]), the commit arms the guard, and the fence
+	/// orders the arming against every guard step. Elsewhere other nodes step
+	/// guards too, and the commit covers the guard with this datastore's
+	/// writer lease on the shard instead (`!hz`), under which no node steps it.
+	fn mark_pending_non_empty(tx: &Transaction, ikb: &IndexKeyBase, shard: u16) {
+		tx.buffer_pending_guard(&ikb.guarded(PendingGuardFamily::Hnsw), shard);
+	}
+
 	/// Converts an append-keyed pending value into a graph operation.
 	fn append_pending_to_operation(pending: VectorPendingUpdate) -> PendingOperation {
 		PendingOperation {
@@ -518,6 +843,91 @@ impl HnswIndex {
 		}
 	}
 
+	/// Reads the pending-state guard of every shard, in one ordered batch.
+	///
+	/// The read is noted on the transaction
+	/// ([`Transaction::note_pending_guards_read`]): on a store that validates
+	/// every read, a guard this transaction read is covered by its own commit.
+	///
+	/// A shard this transaction wrote a pending update into reads `NonEmpty`
+	/// whatever is stored: on a sole-writer store its guard is armed only when
+	/// the transaction commits ([`Self::mark_pending_non_empty`]), and a lookup
+	/// in the transaction must still see the write.
+	async fn read_pending_state(
+		tx: &Transaction,
+		ikb: &IndexKeyBase,
+	) -> Result<PendingStateSnapshot> {
+		let guarded = ikb.guarded(PendingGuardFamily::Hnsw);
+		let mut states: PendingStateSnapshot = vec![None; usize::from(PENDING_GUARD_SHARDS)];
+		let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
+			tx.scan(guarded.guards()?, PENDING_GUARD_SHARDS.into(), 0, None).await?;
+		for (key, state) in guards {
+			let shard = usize::from(guarded.decode_guard_shard(&key)?);
+			ensure!(shard < states.len(), "HNSW pending-state guard for unknown shard {shard}");
+			states[shard] = Some(state);
+		}
+		tx.note_pending_guards_read(&guarded);
+		let buffered = tx.buffered_pending_guard_shards(&guarded);
+		for (shard, state) in states.iter_mut().enumerate() {
+			if buffered & (1 << shard) != 0 && guard_unarmed(state) {
+				*state = Some(DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: state.as_ref().map_or(0, |s| s.generation),
+				});
+			}
+		}
+		Ok(states)
+	}
+
+	/// The record-keyed pending ranges a lookup in `tx` scans.
+	///
+	/// An index that does not guard its pending updates
+	/// ([`guards_hnsw_pending`]) keeps them all in `!hr`, which is scanned.
+	///
+	/// On one that does, a summary that reads `Empty` or is absent proves in
+	/// this snapshot that every guard does too, so nothing is scanned. The
+	/// summary is armed in the transaction that arms a guard from any other
+	/// state, which commits before the entry the guard covers, so a snapshot
+	/// holding the entry holds the summary armed; and compaction arms it over
+	/// any `!hr` entry it finds, and steps it back only once `!hr` is empty. A
+	/// shard this transaction wrote a pending update into is armed only when it
+	/// commits, so while it has any, the guards are read with them overlaid
+	/// ([`Self::read_pending_state`]). The summary read is noted as a guard read
+	/// ([`Transaction::note_pending_guards_read`]): on a store that validates
+	/// every read, a guard this transaction then writes under, and its summary,
+	/// are covered by its own commit.
+	///
+	/// Otherwise `!hr` and every armed `!hw` shard are scanned.
+	async fn read_lookup_pending_ranges(&self, tx: &Transaction) -> Result<PendingRanges> {
+		if !guards_hnsw_pending(self.format_version) {
+			return Ok(PendingRanges {
+				legacy: true,
+				shards: 0,
+			});
+		}
+		let guarded = self.ikb.guarded(PendingGuardFamily::Hnsw);
+		if tx.buffered_pending_guard_shards(&guarded) == 0 {
+			let summary = tx.get_key(&guarded.summary(), None).await?;
+			tx.note_pending_guards_read(&guarded);
+			if summary.is_none_or(|summary| summary.kind == DiskAnnPendingStateKind::Empty) {
+				return Ok(PendingRanges {
+					legacy: false,
+					shards: 0,
+				});
+			}
+		}
+		let states = Self::read_pending_state(tx, &self.ikb).await?;
+		let shards = states
+			.iter()
+			.enumerate()
+			.filter(|(_, state)| !guard_unarmed(state))
+			.fold(0u64, |bits, (shard, _)| bits | 1 << shard);
+		Ok(PendingRanges {
+			legacy: true,
+			shards,
+		})
+	}
+
 	/// Creates an [`HnswContext`] from the current index state and an environment.
 	pub(super) fn new_hnsw_context<'a>(&'a self, env: &'a dyn IndexEnv) -> HnswContext<'a> {
 		HnswContext::new(env, self.ikb.clone(), &self.vec_docs)
@@ -525,22 +935,128 @@ impl HnswIndex {
 
 	/// Builds a bounded compaction plan for HNSW pending updates.
 	///
-	/// The read phase scans append-keyed `!hp` entries first, then record-keyed
-	/// `!hr` entries. It records exact key/value pairs for conditional deletion
-	/// and coalesces pending work by document identity.
+	/// The read phase records exact key/value pairs for conditional deletion
+	/// and coalesces pending work by document identity. It drains in stages:
+	///
+	///   1. The append-keyed `!hp` range, then the record-keyed `!hr` range. While these are not
+	///      both drained within one plan, the plan stops there and reports more to come.
+	///   2. On an index that guards its pending updates ([`guards_hnsw_pending`]), each `!hw` shard
+	///      whose guard is armed, in shard order, until the batch budget is reached. Every shard
+	///      drained within budget is recorded in the plan's cleared shards, so the guard step after
+	///      it returns that shard's guard to `Empty`.
+	///
+	/// On such an index a guard that reads `Empty` or absent holds no
+	/// committed entry, except where a repair after the fact failed or never
+	/// ran, so the plan probes those shards and repairs the guard of any that
+	/// holds entries (`Transaction::repair_pending_guards`). A `!hr` entry is
+	/// one no guard covers, written unguarded at the same stamp: under a
+	/// summary that reads `Empty`, the plan repairs the guard of that entry's
+	/// shard, which arms the summary, so lookup scans `!hr` until it drains.
 	pub(crate) async fn prepare_compaction(
 		env: &dyn IndexEnv,
 		ikb: &IndexKeyBase,
+		format_version: u16,
 	) -> Result<HnswCompactionPlan> {
 		let tx = env.tx();
 		let generation = read_compaction_generation(&tx, &ikb.new_hg_key()).await?;
+		let guarded = guards_hnsw_pending(format_version);
+		let mut guards = PlanGuards::default();
+		if guarded {
+			guards.pending_state = Self::read_pending_state(&tx, ikb).await?;
+			guards.summary_armed = tx
+				.get_key(&ikb.guarded(PendingGuardFamily::Hnsw).summary(), None)
+				.await?
+				.is_some_and(|summary| summary.kind != DiskAnnPendingStateKind::Empty);
+		}
 		let mut builder = PendingPlanBuilder::new(generation);
 		let mut count = 0;
-		Self::collect_append_pending_for_plan(env, &tx, ikb, &mut builder, &mut count).await?;
-		if !builder.has_more {
-			Self::collect_record_pending_for_plan(env, &tx, ikb, &mut builder, &mut count).await?;
+		if may_hold_legacy_vector_pending(format_version) {
+			Self::collect_append_pending_for_plan(env, &tx, ikb, &mut builder, &mut count).await?;
 		}
-		Ok(builder.into_plan())
+		let mut legacy = RangeCapture::default();
+		if !builder.has_more {
+			legacy = Self::collect_record_pending_for_plan(
+				env,
+				&tx,
+				ikb.new_hr_range()?,
+				PendingLayout::Legacy,
+				&mut builder,
+				&mut count,
+			)
+			.await?;
+		}
+		if !guarded {
+			return Ok(builder.into_plan(guards));
+		}
+		let guarded_index = ikb.guarded(PendingGuardFamily::Hnsw);
+		if let Some(shard) = legacy.first_shard
+			&& !guards.summary_armed
+		{
+			tx.repair_pending_guards(&guarded_index, &[shard]).await?;
+			guards.summary_armed = true;
+			guards.pending_state[usize::from(shard)] = Some(DiskAnnPendingState {
+				kind: DiskAnnPendingStateKind::NonEmpty,
+				generation: 0,
+			});
+		}
+		if !legacy.drained {
+			// The range may hold more than the budget let in. Every pass ends
+			// once a plan reports nothing more, so this one must report more.
+			builder.has_more = true;
+			return Ok(builder.into_plan(guards));
+		}
+		guards.legacy_drained = true;
+		let mut orphaned = Vec::new();
+		let holding = if guards.pending_state.iter().any(guard_unarmed) {
+			let holding = tx.shards_holding_pending_entries(&guarded_index).await?;
+			orphaned = guards
+				.pending_state
+				.iter()
+				.enumerate()
+				.filter(|(shard, state)| holding & (1 << shard) != 0 && guard_unarmed(state))
+				.map(|(shard, _)| shard as u16)
+				.collect();
+			tx.repair_pending_guards(&guarded_index, &orphaned).await?;
+			Some(holding)
+		} else {
+			None
+		};
+		for (shard, state) in guards.pending_state.iter().enumerate() {
+			if guard_unarmed(state) {
+				continue;
+			}
+			let shard = shard as u16;
+			// Read in this snapshot, the probe tells which armed shards hold
+			// nothing: those are cleared without a scan.
+			if holding.is_some_and(|holding| holding & (1 << shard) == 0) {
+				guards.cleared_shards.push(shard);
+				continue;
+			}
+			let captured = Self::collect_record_pending_for_plan(
+				env,
+				&tx,
+				ikb.new_hw_shard_range(shard)?,
+				PendingLayout::Sharded,
+				&mut builder,
+				&mut count,
+			)
+			.await?;
+			if !captured.drained {
+				break;
+			}
+			guards.cleared_shards.push(shard);
+		}
+		if !orphaned.is_empty() {
+			guards.summary_armed = true;
+			for shard in orphaned {
+				guards.pending_state[usize::from(shard)] = Some(DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: 0,
+				});
+			}
+			builder.has_more = true;
+		}
+		Ok(builder.into_plan(guards))
 	}
 
 	/// Adds append-keyed pending entries to a compaction plan.
@@ -583,7 +1099,9 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	/// Adds record-keyed pending entries to a compaction plan.
+	/// Adds the entries of one record-keyed pending range, `!hr` or one `!hw`
+	/// shard as `layout` says, to a compaction plan, and reports whether the
+	/// range was read to its end and the shard of the first record read.
 	///
 	/// The record identity comes from the stored pending value, which keeps it
 	/// exactly. The key spells its id under a codec that omits a number's kind,
@@ -591,16 +1109,18 @@ impl HnswIndex {
 	async fn collect_record_pending_for_plan(
 		env: &dyn IndexEnv,
 		tx: &Transaction,
-		ikb: &IndexKeyBase,
+		rng: crate::key::TypedRange<HnswRecordPendingUpdate>,
+		layout: PendingLayout,
 		builder: &mut PendingPlanBuilder,
 		count: &mut usize,
-	) -> Result<()> {
-		let rng = ikb.new_hr_range()?;
+	) -> Result<RangeCapture> {
+		let mut capture = RangeCapture::default();
 		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
-				break;
+				capture.drained = true;
+				return Ok(capture);
 			}
 			for (key, value) in batch.iter() {
 				if env.is_done(Some(*count)).await? {
@@ -612,21 +1132,23 @@ impl HnswIndex {
 				for mut pending in
 					HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
 				{
-					let id = pending_record_id(key, &mut pending)?;
+					let id = pending_record_id(key, layout, &mut pending)?;
+					if capture.first_shard.is_none() {
+						capture.first_shard = Some(pending_guard_shard(&id));
+					}
 					operations.push(Self::record_pending_to_operation(id, pending));
 				}
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_append_pending_for_plan`.
 				if !builder.add(key.to_vec(), value.to_vec(), operations) {
-					return Ok(());
+					return Ok(capture);
 				}
 				*count += 1;
 				if builder.has_more {
-					return Ok(());
+					return Ok(capture);
 				}
 			}
 		}
-		Ok(())
 	}
 
 	/// Applies a prepared HNSW pending compaction plan.
@@ -655,6 +1177,10 @@ impl HnswIndex {
 			generation,
 			captured_keys,
 			pending,
+			pending_state: _,
+			cleared_shards: _,
+			summary_armed: _,
+			legacy_drained: _,
 			has_more: _,
 		} = plan;
 		let tx = env.tx();
@@ -823,7 +1349,7 @@ impl HnswIndex {
 	/// prepare/apply methods.
 	#[cfg(test)]
 	pub(crate) async fn index_pendings(&self, env: &dyn IndexEnv) -> Result<usize> {
-		let plan = Self::prepare_compaction(env, &self.ikb).await?;
+		let plan = Self::prepare_compaction(env, &self.ikb, self.format_version).await?;
 		let count = plan.len();
 		if self.apply_compaction(env, plan).await?.applied() {
 			Ok(count)
@@ -943,9 +1469,10 @@ impl HnswIndex {
 
 	/// Performs a k-nearest neighbor search, combining pending and committed results.
 	///
-	/// HNSW pending updates remain on the hot write path, so lookup scans them
-	/// conservatively instead of relying on a shared pending-state key that can
-	/// create write contention under concurrent indexing.
+	/// The pending updates scanned are those [`Self::read_lookup_pending_ranges`]
+	/// leaves: on an index that guards them, none while the pending-state
+	/// summary (`!hY`) reads `Empty`, and otherwise `!hr` and the `!hw` shards
+	/// whose guards (`!hy`) are armed; on one that does not, all of `!hr`.
 	///
 	/// `allow_list` restricts candidate admission to the given doc-IDs (over
 	/// the table's shared doc-ID space) without fetching records; graph
@@ -1325,7 +1852,7 @@ impl HnswIndex {
 					for mut pending in
 						HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
 					{
-						let id = pending_record_id(key, &mut pending)?;
+						let id = pending_record_id(key, PendingLayout::Legacy, &mut pending)?;
 						let pending = Self::record_pending_to_operation(id, pending);
 						suppress_legacy_candidate(
 							&pending.id,
@@ -1397,13 +1924,16 @@ impl HnswIndex {
 	/// # Coalescing
 	///
 	/// A pending entry is *live* if no later entry in scan order supersedes or
-	/// deletes it, where scan order is the append-keyed `!hp` range followed by
-	/// the record-keyed `!hr` range. The two layouts coalesce differently:
+	/// deletes it, where scan order is the append-keyed `!hp` range, then the
+	/// record-keyed `!hr` range, then each `!hw` shard the pending-state guards
+	/// leave armed ([`Self::read_lookup_pending_ranges`]). The layouts coalesce
+	/// differently:
 	///
-	/// * `!hr` holds exactly one pending state per record — writes read-modify-write the record's
-	///   key, whose value may hold the states of other records spelled alike — and a state only
-	///   ever supersedes its own record's identity. Every non-deleting `!hr` entry is therefore
-	///   live the moment it is read, and is scored in the same pass that reads it.
+	/// * `!hr` and `!hw` together hold exactly one pending state per record — writes
+	///   read-modify-write the record's key, whose value may hold the states of other records
+	///   spelled alike, and a write to `!hw` moves its record's state out of `!hr` — and a state
+	///   only ever supersedes its own record's identity. Every non-deleting record-keyed entry is
+	///   therefore live the moment it is read, and is scored in the same pass that reads it.
 	/// * `!hp` may hold several entries per identity, and any of them can be superseded by an `!hr`
 	///   entry read afterwards. It is divided into scoring-sized chunks. Within each chunk the last
 	///   entry per identity is retained, then the later `!hp` suffix and `!hr` range are scanned to
@@ -1513,66 +2043,51 @@ impl HnswIndex {
 			.await?;
 		}
 
-		// Read the record-keyed range once for its own suppression and scoring.
-		// The validation scans above already used it to discard legacy candidates.
-		{
+		// Read the record-keyed ranges once each for their own suppression and
+		// scoring: `!hr`, which the validation scans above already used to
+		// discard legacy candidates, and then every `!hw` shard the guards
+		// leave armed.
+		let ranges = self.read_lookup_pending_ranges(tx).await?;
+		if ranges.legacy {
+			let mut records = RecordPendingScan {
+				scan: &mut scan,
+				all_existing_docs: &mut all_existing_docs,
+				checkpoints: &mut checkpoints,
+			};
 			let rng = self.ikb.new_hr_range()?;
-			let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
-			loop {
-				let read = cursor.next_batch(scan.rows()).await?;
-				scan.observe_page(&read);
-				if read.is_empty() {
-					break;
-				}
-				for (key, value) in &read {
-					// The entry's bytes go to the first of its records the batch
-					// keeps; the others it holds add none.
-					let mut entry_bytes = key.len() + value.len();
-					// Charged before the checkpoint — see the legacy pass above.
-					scan.charge_entry(entry_bytes);
-					checkpoints += 1;
-					if env.is_done(Some(checkpoints)).await? {
-						bail!(EngineError::QueryCancelled)
-					}
-					for mut pending in
-						HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
-					{
-						let id = pending_record_id(key, &mut pending)?;
-						let pending = Self::record_pending_to_operation(id, pending);
-						if let VectorId::DocId(doc_id) = &pending.id {
-							all_existing_docs.insert(*doc_id);
-						}
-						if pending.new_vectors.is_empty() {
-							continue;
-						}
-						// A record-keyed pending may carry a doc-ID captured before a
-						// delete → re-create of the record: that id's shared mapping is
-						// gone, so a DocId-keyed hit could not be resolved back to a
-						// record and would be silently dropped. Score the surviving
-						// vectors under the record key — always resolvable — while the
-						// captured id (inserted above) still masks the graph's stale
-						// entries.
-						let record = pending
-							.record
-							.expect("a record-keyed pending always carries its record key");
-						let id = VectorId::RecordKey(record);
-						// Drop candidates outside the allow-list before they take
-						// batch budget, so non-members are never fetched. The
-						// suppression bitmap above is deliberately NOT gated: a
-						// pending doc must mask its stale graph entries whether or
-						// not it is allowed.
-						if !self.allow_list_admits(tx, allow_list, &id).await? {
-							continue;
-						}
-						let bytes = std::mem::take(&mut entry_bytes);
-						if scan.rollover_required(bytes) {
-							self.score_pending_batch(ctx, search, filter, builder, &mut scan)
-								.await?;
-						}
-						scan.push(id, pending.new_vectors, bytes);
-					}
-				}
+			self.scan_record_pending_range(
+				ctx,
+				search,
+				filter,
+				allow_list,
+				builder,
+				&mut records,
+				rng,
+				PendingLayout::Legacy,
+			)
+			.await?;
+		}
+		for shard in 0..PENDING_GUARD_SHARDS {
+			if ranges.shards & (1 << shard) == 0 {
+				continue;
 			}
+			let mut records = RecordPendingScan {
+				scan: &mut scan,
+				all_existing_docs: &mut all_existing_docs,
+				checkpoints: &mut checkpoints,
+			};
+			let rng = self.ikb.new_hw_shard_range(shard)?;
+			self.scan_record_pending_range(
+				ctx,
+				search,
+				filter,
+				allow_list,
+				builder,
+				&mut records,
+				rng,
+				PendingLayout::Sharded,
+			)
+			.await?;
 		}
 		self.score_pending_batch(ctx, search, filter, builder, &mut scan).await?;
 		scan.finish();
@@ -1580,6 +2095,82 @@ impl HnswIndex {
 			return Ok(None);
 		}
 		Ok(Some(all_existing_docs))
+	}
+
+	/// Streams one record-keyed pending range into the scan: `!hr` or one
+	/// `!hw` shard, as `layout` says. Every record an entry holds adds its
+	/// doc-ID to the suppression bitmap, and its new vectors, if it has any and
+	/// the allow-list admits it, to the scoring batch, which is scored whenever
+	/// it fills.
+	#[expect(clippy::too_many_arguments)]
+	async fn scan_record_pending_range(
+		&self,
+		ctx: &HnswContext<'_>,
+		search: &HnswSearch,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
+		builder: &mut KnnResultBuilder,
+		records: &mut RecordPendingScan<'_, '_>,
+		rng: crate::key::TypedRange<HnswRecordPendingUpdate>,
+		layout: PendingLayout,
+	) -> Result<()> {
+		let mut cursor = ctx.tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
+		loop {
+			let read = cursor.next_batch(records.scan.rows()).await?;
+			records.scan.observe_page(&read);
+			if read.is_empty() {
+				break;
+			}
+			for (key, value) in &read {
+				// The entry's bytes go to the first of its records the batch
+				// keeps; the others it holds add none.
+				let mut entry_bytes = key.len() + value.len();
+				// Charged before the checkpoint — see `search_pendings`.
+				records.scan.charge_entry(entry_bytes);
+				*records.checkpoints += 1;
+				if ctx.env.is_done(Some(*records.checkpoints)).await? {
+					bail!(EngineError::QueryCancelled)
+				}
+				for mut pending in
+					HnswRecordPendingUpdate::kv_decode_value(value, ())?.into_records()
+				{
+					let id = pending_record_id(key, layout, &mut pending)?;
+					let pending = Self::record_pending_to_operation(id, pending);
+					if let VectorId::DocId(doc_id) = &pending.id {
+						records.all_existing_docs.insert(*doc_id);
+					}
+					if pending.new_vectors.is_empty() {
+						continue;
+					}
+					// A record-keyed pending may carry a doc-ID captured before a
+					// delete → re-create of the record: that id's shared mapping is
+					// gone, so a DocId-keyed hit could not be resolved back to a
+					// record and would be silently dropped. Score the surviving
+					// vectors under the record key — always resolvable — while the
+					// captured id (inserted above) still masks the graph's stale
+					// entries.
+					let record = pending
+						.record
+						.expect("a record-keyed pending always carries its record key");
+					let id = VectorId::RecordKey(record);
+					// Drop candidates outside the allow-list before they take
+					// batch budget, so non-members are never fetched. The
+					// suppression bitmap above is deliberately NOT gated: a
+					// pending doc must mask its stale graph entries whether or
+					// not it is allowed.
+					if !self.allow_list_admits(&ctx.tx, allow_list, &id).await? {
+						continue;
+					}
+					let bytes = std::mem::take(&mut entry_bytes);
+					if records.scan.rollover_required(bytes) {
+						self.score_pending_batch(ctx, search, filter, builder, records.scan)
+							.await?;
+					}
+					records.scan.push(id, pending.new_vectors, bytes);
+				}
+			}
+		}
+		Ok(())
 	}
 
 	/// Returns whether a pending candidate is admitted by the allow-list.
@@ -1803,6 +2394,13 @@ impl HnswIndex {
 	pub(super) async fn degree_profile(&self) -> Vec<(usize, f64)> {
 		let resident = self.hnsw.read().await;
 		with_hnsw!(&resident.graph, h => h.degree_profile())
+	}
+
+	/// Adds an edge from `from` to `to` in the resident graph's layer 0 only.
+	#[cfg(test)]
+	pub(super) async fn plant_layer0_edge(&self, from: ElementId, to: ElementId) {
+		let mut resident = self.hnsw.write().await;
+		with_hnsw!(&mut resident.graph, h => h.plant_layer0_edge(from, to))
 	}
 
 	/// The resident graph's entry point and every layer's adjacency, layer 0

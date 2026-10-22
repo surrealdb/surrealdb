@@ -711,11 +711,13 @@ impl Materialiser {
 			Some(ix) if !ix.prepare_remove => ix,
 			Some(_) => {
 				trace!(target: TARGET, "Index compaction: Index {ikb:?} is being removed, skipping");
+				self.builder.forget_pending_deletes(ikb);
 				return Ok(CompactionPassOutcome::Empty);
 			}
 			None if !matches!(owner, BuildOwner::Released) => {
 				if lapsed && self.retire_uncommitted_build(ikb).await? {
 					trace!(target: TARGET, "Index compaction: Index {ikb:?} was never defined and its build lapsed, retired it");
+					self.builder.forget_pending_deletes(ikb);
 					return Ok(CompactionPassOutcome::Empty);
 				}
 				trace!(target: TARGET, "Index compaction: Index {ikb:?} is not yet defined, keeping its request");
@@ -723,6 +725,7 @@ impl Materialiser {
 			}
 			None => {
 				trace!(target: TARGET, "Index compaction: Index {ikb:?} not found, skipping");
+				self.builder.forget_pending_deletes(ikb);
 				return Ok(CompactionPassOutcome::Empty);
 			}
 		};
@@ -768,6 +771,9 @@ impl Materialiser {
 			trace!(target: TARGET, "Index compaction: Index {ikb:?} is being built, leaving it to its builder");
 			return Ok(CompactionPassOutcome::Fenced);
 		}
+		if !matches!(&ix.index, Index::Hnsw(_)) {
+			self.builder.forget_pending_deletes(ikb);
+		}
 		match &ix.index {
 			Index::FullText(_) => self.process_fulltext_compaction(ikb, canceller, lease).await,
 			Index::Count(_) => self.process_count_compaction(ikb, canceller, lease).await,
@@ -812,6 +818,103 @@ impl Materialiser {
 		}
 	}
 
+	/// Runs once a pass has found an HNSW index's pending ranges empty and the
+	/// pass's cancellation and lease still hold.
+	async fn after_hnsw_drain(
+		&self,
+		ikb: &IndexKeyBase,
+		format_version: u16,
+		canceller: &CancellationToken,
+		lease: Option<&dyn PassLease>,
+	) {
+		if !canceller.is_cancelled()
+			&& !lease.is_some_and(|lease| lease.is_lost())
+			&& self.builder.take_pending_range_compaction(ikb)
+		{
+			self.compact_pending_range(ikb, format_version).await;
+		}
+	}
+
+	/// Runs a storage-layer compaction over one HNSW index's pending ranges
+	/// (`!hr`, `!hw`, and legacy `!hp`).
+	///
+	/// Every batch of [`Self::process_hnsw_compaction`] scans the pending ranges
+	/// in a read transaction and then deletes the keys it captured. After a
+	/// large backlog has been drained, the keyspace is logically empty while
+	/// the storage engine may still hold the deleted keys' tombstones across
+	/// its immutable memtables and SSTs; every subsequent scan walks past all
+	/// of them to learn there is nothing left. Asking the engine to compact
+	/// these key ranges folds the tombstones into the SSTs they shadow so later
+	/// scans return without traversing them.
+	///
+	/// Best-effort: engines without range compaction (in-memory, browser,
+	/// FoundationDB) treat `compact` as a no-op, and any error is logged and
+	/// ignored because correctness does not depend on tombstone cleanup.
+	async fn compact_pending_range(&self, ikb: &IndexKeyBase, format_version: u16) {
+		let hr_range = match ikb.new_hr_range() {
+			Ok(range) => range,
+			Err(e) => {
+				warn!(target: TARGET, "Failed to build HNSW record-pending range for {ikb}: {e}");
+				return;
+			}
+		};
+		let hw_range = if crate::catalog::guards_hnsw_pending(format_version) {
+			match ikb.new_hw_range() {
+				Ok(range) => Some(range),
+				Err(e) => {
+					warn!(
+						target: TARGET,
+						"Failed to build HNSW sharded record-pending range for {ikb}: {e}"
+					);
+					return;
+				}
+			}
+		} else {
+			None
+		};
+		let hp_range = if crate::catalog::may_hold_legacy_vector_pending(format_version) {
+			match ikb.new_hp_range() {
+				Ok(range) => Some(range),
+				Err(e) => {
+					warn!(
+						target: TARGET,
+						"Failed to build HNSW element-pending range for {ikb}: {e}"
+					);
+					return;
+				}
+			}
+		} else {
+			None
+		};
+		let txn = match self.transaction(Read).await {
+			Ok(txn) => txn,
+			Err(e) => {
+				warn!(
+					target: TARGET,
+					"Failed to open transaction to compact HNSW pending range for {ikb}: {e}"
+				);
+				return;
+			}
+		};
+		if let Err(e) = txn.compact_raw(hr_range).await {
+			warn!(target: TARGET, "Failed to compact HNSW record-pending range for {ikb}: {e}");
+		}
+		if let Some(hw_range) = hw_range
+			&& let Err(e) = txn.compact_raw(hw_range).await
+		{
+			warn!(
+				target: TARGET,
+				"Failed to compact HNSW sharded record-pending range for {ikb}: {e}"
+			);
+		}
+		if let Some(hp_range) = hp_range
+			&& let Err(e) = txn.compact_raw(hp_range).await
+		{
+			warn!(target: TARGET, "Failed to compact HNSW element-pending range for {ikb}: {e}");
+		}
+		let _ = txn.cancel().await;
+	}
+
 	/// Runs HNSW compaction as bounded read-plan/write-apply batches.
 	///
 	/// Pending entries are captured in a read transaction and conditionally
@@ -849,6 +952,7 @@ impl Materialiser {
 					Option<(
 						crate::catalog::TableId,
 						crate::idx::trees::hnsw::index::HnswCompactionPlan,
+						u16,
 					)>,
 				> = async {
 					let Some(tb) = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? else {
@@ -862,8 +966,13 @@ impl Materialiser {
 							let mut ctx = Context::new_child(&self.ctx);
 							ctx.set_transaction(Arc::clone(&txn));
 							let ctx = ctx.freeze();
-							let plan = IndexOperation::prepare_hnsw_compaction(&ctx, ikb).await?;
-							Ok(Some((tb.table_id, plan)))
+							let plan = IndexOperation::prepare_hnsw_compaction(
+								&ctx,
+								ikb,
+								ix.format_version,
+							)
+							.await?;
+							Ok(Some((tb.table_id, plan, ix.format_version)))
 						}
 						_ => Ok(None),
 					}
@@ -872,13 +981,20 @@ impl Materialiser {
 				let _ = txn.cancel().await;
 				res?
 			};
-			let Some((tb, plan)) = prepared else {
+			let Some((tb, plan, format_version)) = prepared else {
+				self.builder.forget_pending_deletes(ikb);
 				return Ok(progress.nothing_to_apply());
 			};
-			if !plan.has_work() {
+			if !plan.requires_apply() {
+				self.after_hnsw_drain(ikb, format_version, canceller, lease).await;
 				return Ok(progress.nothing_to_apply());
 			}
 			let has_more = plan.has_more();
+			let captured = plan.captured_len();
+			// Run once the plan's transaction has finished: the apply does not
+			// commit it, and a staged apply publishes from that commit, so the
+			// guards of the shards it drained are stepped only after it.
+			let guard_step = plan.guard_step(ikb);
 			Datastore::ensure_not_cancelled(canceller)?;
 
 			let txn = Arc::new(self.transaction(Write).await?);
@@ -886,6 +1002,7 @@ impl Materialiser {
 				Ok(CompactionWriteGuard::Live(ix)) => ix,
 				Ok(CompactionWriteGuard::Retired) => {
 					let _ = txn.cancel().await;
+					self.builder.forget_pending_deletes(ikb);
 					return Ok(progress.nothing_to_apply());
 				}
 				Ok(CompactionWriteGuard::Fenced) => {
@@ -910,6 +1027,7 @@ impl Materialiser {
 			};
 			let Index::Hnsw(p) = &ix.index else {
 				let _ = txn.cancel().await;
+				self.builder.forget_pending_deletes(ikb);
 				return Ok(progress.nothing_to_apply());
 			};
 			// The apply mutates the wrapper and cache of the format the guard
@@ -995,6 +1113,16 @@ impl Materialiser {
 						}
 						return Err(e);
 					}
+					self.builder.note_pending_deleted(ikb, captured);
+					// The apply has committed, so a failed step does not undo it: the
+					// guards are left as they were, which may only make lookups scan a
+					// drained shard, and the next pass steps them.
+					if let Err(e) = guard_step.run(&txn).await {
+						warn!(
+							target: TARGET,
+							"Failed to step the HNSW pending-state guards after a compaction of {ikb}: {e}"
+						);
+					}
 				}
 				Ok(HnswCompactionOutcome::LostRace) => {
 					let _ = txn.cancel().await;
@@ -1005,7 +1133,31 @@ impl Materialiser {
 				}
 				Ok(_) => {
 					let _ = txn.cancel().await;
-					return Ok(progress.nothing_to_apply());
+					// The plan captured nothing, but may have drained shards, an
+					// armed summary over guards that all read `Empty`, or repaired
+					// an orphaned shard guard for the next frame, to step.
+					match guard_step.run(&txn).await {
+						Ok(true) => {}
+						Ok(false) if has_more => {}
+						Ok(false) => {
+							self.after_hnsw_drain(ikb, applied_format, canceller, lease).await;
+							return Ok(progress.nothing_to_apply());
+						}
+						Err(e) => {
+							if progress
+								.retry(
+									&e,
+									format!(
+										"Retryable conflict stepping HNSW pending-state guards for {ikb}, retrying"
+									),
+								)
+								.await
+							{
+								continue;
+							}
+							return Err(e);
+						}
+					}
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
@@ -1026,6 +1178,9 @@ impl Materialiser {
 			}
 			Datastore::ensure_not_cancelled(canceller)?;
 			if let Some(outcome) = progress.record_applied(has_more) {
+				if !has_more {
+					self.after_hnsw_drain(ikb, applied_format, canceller, lease).await;
+				}
 				return Ok(outcome);
 			}
 		}
@@ -1248,6 +1403,9 @@ impl Materialiser {
 		match res {
 			Ok(CompactionApply::Applied) => Ok(DiskAnnFrameStep::Applied {
 				has_more,
+			}),
+			Ok(CompactionApply::Empty) if has_more => Ok(DiskAnnFrameStep::Applied {
+				has_more: true,
 			}),
 			Ok(CompactionApply::LostRace) => Ok(DiskAnnFrameStep::LostRace),
 			Ok(CompactionApply::Empty) => Ok(DiskAnnFrameStep::Empty),

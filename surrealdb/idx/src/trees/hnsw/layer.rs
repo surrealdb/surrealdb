@@ -130,6 +130,17 @@ where
 		self.graph.len()
 	}
 
+	/// Whether `node` is a node of this layer.
+	#[cfg(test)]
+	pub(super) fn has_node(&self, node: ElementId) -> bool {
+		self.graph.has_node(node)
+	}
+
+	/// The lowest node ID in the layer, if any.
+	pub(super) fn first_node(&self) -> Option<ElementId> {
+		self.graph.first_node()
+	}
+
 	/// See [`UndirectedGraph::live_edges`].
 	pub(super) fn live_edges(
 		&self,
@@ -176,6 +187,9 @@ where
 		let Some(pending_docs) = pending_docs else {
 			return self.search_nearest(&ctx.tx, elements, pt, ep_dist, ep_id, ef).await;
 		};
+		if !self.graph.has_node(ep_id) {
+			return Ok(DoublePriorityQueue::default());
+		}
 		let pending = PendingDocs {
 			vec_docs: ctx.vec_docs,
 			docs: pending_docs,
@@ -202,6 +216,9 @@ where
 		ep_id: ElementId,
 		ef: usize,
 	) -> Result<DoublePriorityQueue> {
+		if !self.graph.has_node(ep_id) {
+			return Ok(DoublePriorityQueue::default());
+		}
 		let visited = self.visited_set(ef, ep_id);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
@@ -281,27 +298,54 @@ where
 		candidates: DoublePriorityQueue,
 		ef: usize,
 	) -> Result<DoublePriorityQueue> {
-		let w = candidates.clone();
+		let mut live = DoublePriorityQueue::default();
+		for (d, id) in candidates.to_vec() {
+			if self.graph.has_node(id) {
+				live.push(d, id);
+			}
+		}
+		let w = live.clone();
 		let visited = w.to_set();
-		self.search(tx, elements, pt, candidates, visited, w, ef, None).await
+		self.search(tx, elements, pt, live, visited, w, ef, None).await
 	}
 
-	pub(super) async fn search_multi_with_ignore(
+	/// The candidates a removal re-links `q_id` to once `removed`, one of its
+	/// neighbours, has left the layer: a search for `pt`, `q_id`'s vector,
+	/// seeded with `q_id` and with every other node of `neighbourhood`, the
+	/// removed node's former neighbours, which are the nodes the removal cut
+	/// `q_id` off from. Seeded with `q_id` alone, a node whose only edge led to
+	/// `removed` would find nothing and be left without edges, reachable by no
+	/// walk.
+	#[expect(clippy::too_many_arguments)]
+	async fn search_repair(
 		&self,
 		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		pt: &SharedVector,
-		ignore_ids: Vec<ElementId>,
+		q_id: ElementId,
+		removed: ElementId,
+		neighbourhood: &[ElementId],
 		efc: usize,
 	) -> Result<DoublePriorityQueue> {
 		let mut candidates = DoublePriorityQueue::default();
-		for id in &ignore_ids {
-			if let Some(dist) = elements.get_distance(&ctx.tx, pt, id).await? {
-				candidates.push(dist, *id);
+		let mut w = DoublePriorityQueue::default();
+		let mut visited = HashSet::from_iter([q_id, removed]);
+		// Expanded first under every metric: `q_id` is never in `w`, and an
+		// inner-product distance can rank a neighbour ahead of `q_id` itself, so
+		// `q_id` popped at its own distance could end the search unexpanded.
+		candidates.push(f64::NEG_INFINITY, q_id);
+		for &n_id in neighbourhood {
+			if !self.graph.has_node(n_id) || !visited.insert(n_id) {
+				continue;
+			}
+			if let Some(dist) = elements.get_distance(&ctx.tx, pt, &n_id).await? {
+				candidates.push(dist, n_id);
+				w.push(dist, n_id);
+				if w.len() > efc {
+					w.pop_last();
+				}
 			}
 		}
-		let visited = HashSet::from_iter(ignore_ids);
-		let w = DoublePriorityQueue::default();
 		self.search(&ctx.tx, elements, pt, candidates, visited, w, efc, None).await
 	}
 
@@ -677,22 +721,41 @@ where
 		let w;
 		let mut neighbors = self.graph.new_edges();
 		{
-			w = self.search_multi(&ctx.tx, elements, q_pt, eps, efc).await?;
-			eps = w.clone();
+			w = self.search_multi(&ctx.tx, elements, q_pt, eps.clone(), efc).await?;
+			if !w.is_empty() {
+				eps = w.clone();
+			}
 			heuristic.select(&ctx.tx, elements, self, q_id, q_pt, w, None, &mut neighbors).await?;
 		};
 
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
+		self.prune_overfull(&ctx.tx, elements, heuristic, &neighbors).await?;
+		// Save the new node and all its neighbors (which had bidirectional edges added/pruned)
+		let mut changed_nodes = Vec::with_capacity(neighbors.len() + 1);
+		changed_nodes.push(q_id);
+		changed_nodes.extend_from_slice(&neighbors);
+		self.save_nodes(&ctx.tx, st, &changed_nodes).await?;
+		Ok(eps)
+	}
 
-		for e_id in &neighbors {
+	/// Re-selects, with `heuristic`, the list of each of `neighbors` that an
+	/// edge just added took past `m_max`.
+	async fn prune_overfull(
+		&mut self,
+		tx: &Transaction,
+		elements: &HnswElements,
+		heuristic: &Heuristic,
+		neighbors: &[ElementId],
+	) -> Result<()> {
+		for e_id in neighbors {
 			if let Some(e_conn) = self.graph.get_edges(*e_id) {
 				if e_conn.len() > self.m_max
-					&& let Some(e_pt) = elements.get_vector(&ctx.tx, e_id).await?
+					&& let Some(e_pt) = elements.get_vector(tx, e_id).await?
 				{
-					let e_c = self.build_priority_list(&ctx.tx, elements, *e_id, e_conn).await?;
+					let e_c = self.build_priority_list(tx, elements, *e_id, e_conn).await?;
 					let mut e_new_conn = self.graph.new_edges();
 					heuristic
-						.select(&ctx.tx, elements, self, *e_id, &e_pt, e_c, None, &mut e_new_conn)
+						.select(tx, elements, self, *e_id, &e_pt, e_c, None, &mut e_new_conn)
 						.await?;
 					#[cfg(debug_assertions)]
 					assert!(!e_new_conn.contains(e_id));
@@ -703,12 +766,7 @@ where
 				unreachable!("Element: {}", e_id);
 			}
 		}
-		// Save the new node and all its neighbors (which had bidirectional edges added/pruned)
-		let mut changed_nodes = Vec::with_capacity(neighbors.len() + 1);
-		changed_nodes.push(q_id);
-		changed_nodes.extend_from_slice(&neighbors);
-		self.save_nodes(&ctx.tx, st, &changed_nodes).await?;
-		Ok(eps)
+		Ok(())
 	}
 
 	async fn build_priority_list(
@@ -743,15 +801,19 @@ where
 	) -> Result<bool> {
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(e_id) {
 			let mut changed_nodes = Vec::with_capacity(f_ids.len());
+			let neighbourhood: Vec<ElementId> = f_ids.iter().copied().collect();
 			for &q_id in f_ids.iter() {
 				// An edge to an element already removed is dropped with this
 				// node: re-linking it would bring the removed element back.
 				if !self.graph.has_node(q_id) {
 					continue;
 				}
+				// Its list lost the edge to the removed element, whether or not
+				// it is re-linked below.
+				changed_nodes.push(q_id);
 				if let Some(q_pt) = elements.get_vector(&ctx.tx, &q_id).await? {
 					let c = self
-						.search_multi_with_ignore(ctx, elements, &q_pt, vec![q_id, e_id], efc)
+						.search_repair(ctx, elements, &q_pt, q_id, e_id, &neighbourhood, efc)
 						.await?;
 					let mut q_new_conn = self.graph.new_edges();
 					heuristic
@@ -778,10 +840,16 @@ where
 						);
 						assert!(q_new_conn.len() <= self.m_max);
 					}
-					self.graph.set_node(q_id, q_new_conn);
-					changed_nodes.push(q_id);
+					// Linked both ways, as an insert links: a list rewritten
+					// without edges back to it leaves `q` reachable only through
+					// the edges still pointing at it, which later rewrites drop.
+					let linked = self.graph.add_node_and_bidirectional_edges(q_id, q_new_conn);
+					self.prune_overfull(&ctx.tx, elements, heuristic, &linked).await?;
+					changed_nodes.extend(linked);
 				}
 			}
+			changed_nodes.sort_unstable();
+			changed_nodes.dedup();
 			// Delete the removed node's key and save all modified neighbor nodes
 			self.delete_node(&ctx.tx, e_id).await?;
 			self.save_nodes(&ctx.tx, st, &changed_nodes).await?;
@@ -932,6 +1000,39 @@ where
 			.collect();
 		nodes.sort_unstable_by_key(|(node, _)| *node);
 		nodes
+	}
+
+	/// Adds an edge from `from` to `to` in memory only, whether or not `to` is
+	/// a node of the layer, as a list written before `to` was removed holds it.
+	pub(in crate::trees::hnsw) fn plant_edge(&mut self, from: ElementId, to: ElementId) {
+		let mut edges = self.graph.new_edges();
+		if let Some(current) = self.graph.get_edges(from) {
+			for edge in current.iter() {
+				edges.insert(*edge);
+			}
+		}
+		edges.insert(to);
+		self.graph.set_node(from, edges);
+	}
+
+	/// The nodes of the layer a walk from `entry` cannot reach along live edges,
+	/// in id order.
+	pub(in crate::trees::hnsw) fn unreachable_from(&self, entry: ElementId) -> Vec<ElementId> {
+		let mut seen = std::collections::HashSet::from([entry]);
+		let mut stack = vec![entry];
+		while let Some(node) = stack.pop() {
+			if let Some(edges) = self.graph.live_edges(node) {
+				for edge in edges {
+					if seen.insert(edge) {
+						stack.push(edge);
+					}
+				}
+			}
+		}
+		let mut unreachable: Vec<ElementId> =
+			self.graph.nodes().keys().copied().filter(|node| !seen.contains(node)).collect();
+		unreachable.sort_unstable();
+		unreachable
 	}
 
 	pub(in crate::trees::hnsw) async fn check_props(&self, elements: &HnswElements) {
@@ -1176,7 +1277,7 @@ mod tests {
 		// Stage it, then roll the transaction back.
 		{
 			let env = ds.env(TransactionType::Write).await;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, h.format_version()).await?;
 			assert!(plan.has_work(), "the pending must give the apply something to do");
 			assert_eq!(h.apply_compaction(&env, plan).await?, HnswCompactionOutcome::Staged);
 			assert_ne!(
@@ -1252,11 +1353,11 @@ mod tests {
 		// transaction wrote itself, then a rollback.
 		{
 			let env = ds.env(TransactionType::Write).await;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, h.format_version()).await?;
 			assert_eq!(h.apply_compaction(&env, plan).await?, HnswCompactionOutcome::Staged);
 			let id = RecordIdKey::Number((RECORDS + 2).into());
 			h.index(&env, &id, None, Some(diagonal(RECORDS + 2))).await?;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, h.format_version()).await?;
 			assert_eq!(h.apply_compaction(&env, plan).await?, HnswCompactionOutcome::Staged);
 			env.tx().cancel().await?;
 		}
@@ -1321,7 +1422,7 @@ mod tests {
 		// Apply it in place, then roll the transaction back.
 		{
 			let env = ds.env(TransactionType::Write).await;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, h.format_version()).await?;
 			assert!(plan.has_work(), "the pending must give the apply something to do");
 			assert_eq!(h.apply_compaction(&env, plan).await?, HnswCompactionOutcome::InPlace);
 			env.tx().cancel().await?;
@@ -1400,7 +1501,7 @@ mod tests {
 		// which is the state its copy now carries.
 		let staged = {
 			let env = ds.env(TransactionType::Write).await;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, loser.format_version()).await?;
 			assert!(plan.has_work(), "the staged pending must give the apply something to do");
 			assert!(
 				loser.apply_compaction(&env, plan).await?.applied(),
@@ -1417,7 +1518,7 @@ mod tests {
 		// the rollback left in place.
 		{
 			let env = ds.env(TransactionType::Write).await;
-			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb, winner.format_version()).await?;
 			assert!(plan.has_work(), "the rollback must leave the pending for the peer");
 			assert!(
 				winner.apply_compaction(&env, plan).await?.applied(),

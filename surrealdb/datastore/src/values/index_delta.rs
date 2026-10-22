@@ -66,6 +66,7 @@ use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId};
 use surrealdb_expr::val::TableName;
 use uuid::Uuid;
 
+use crate::pending_guard::GuardedIndex;
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::GraphFoldScope;
 
@@ -291,18 +292,18 @@ pub struct IndexDeltaBuffer {
 	/// Adjacency scopes that asked for a fold, and the node id to tag the
 	/// queue entry with.
 	graph_folds: Mutex<Vec<HashMap<GraphFoldScope, Uuid>>>,
-	/// DiskANN pending-state guard shards this transaction wrote a pending
-	/// update into, to be armed when it commits.
-	pending_guards: Mutex<Vec<HashMap<(BufferedIndex, u16), ()>>>,
-	/// DiskANN indexes whose data this transaction wiped, guards included.
-	/// Not save-point scoped: what is known of a wiped index's guards is
-	/// forgotten at commit, and forgetting it needlessly costs only a read.
-	guard_wipes: Mutex<HashSet<BufferedIndex>>,
-	/// DiskANN indexes whose pending-state guards this transaction read, noted
-	/// only on a store that validates every read. Not save-point scoped: a
-	/// rolled-back read may still be validated, and treating an index as read
-	/// needlessly costs only a guard write at commit.
-	guards_read: Mutex<HashSet<BufferedIndex>>,
+	/// Pending-state guard shards this transaction wrote a pending update
+	/// into, to be armed when it commits.
+	pending_guards: Mutex<Vec<HashMap<(GuardedIndex, u16), ()>>>,
+	/// Indexes whose data this transaction wiped, guards included. Not
+	/// save-point scoped: what is known of a wiped index's guards is forgotten
+	/// at commit, and forgetting it needlessly costs only a read.
+	guard_wipes: Mutex<HashSet<GuardedIndex>>,
+	/// Indexes whose pending-state guards this transaction read, noted only on
+	/// a store that validates every read. Not save-point scoped: a rolled-back
+	/// read may still be validated, and treating an index as read needlessly
+	/// costs only a guard write at commit.
+	guards_read: Mutex<HashSet<GuardedIndex>>,
 }
 
 impl Default for IndexDeltaBuffer {
@@ -538,68 +539,58 @@ impl IndexDeltaBuffer {
 		merged.into_iter().collect()
 	}
 
-	/// Record that this transaction wrote a DiskANN pending update into
-	/// `shard` of `index`, so the shard's guard is armed when it commits.
-	pub fn buffer_pending_guard(&self, index: BufferedIndex, shard: u16) {
+	/// Record that this transaction wrote a pending update into `shard` of
+	/// `index`, so the shard's guard is armed when it commits.
+	pub fn buffer_pending_guard(&self, index: GuardedIndex, shard: u16) {
 		let mut frames = self.pending_guards.lock();
 		let frame = frames.last_mut().expect("the transaction frame is always present");
 		frame.insert((index, shard), ());
 	}
 
-	/// The shards of an index this transaction has written a DiskANN pending
-	/// update into that a rollback has not undone, as a bit per shard, so a
-	/// lookup in it scans those shards whatever their stored guards say.
-	pub fn pending_guard_shards(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		ix: IndexId,
-	) -> u64 {
+	/// The shards of an index this transaction has written a pending update
+	/// into that a rollback has not undone, as a bit per shard, so a lookup in
+	/// it scans those shards whatever their stored guards say.
+	pub fn pending_guard_shards(&self, index: &GuardedIndex) -> u64 {
 		self.pending_guards
 			.lock()
 			.iter()
 			.flat_map(|frame| frame.keys())
-			.filter(|(index, _)| {
-				index.ix == ix && index.ns == ns && index.db == db && index.tb == *tb
-			})
+			.filter(|(buffered, _)| buffered == index)
 			.fold(0, |shards, (_, shard)| shards | 1 << shard)
 	}
 
-	/// Record that this transaction wiped the data of a DiskANN index, guards
+	/// Record that this transaction wiped the data of an index, guards
 	/// included.
-	pub fn buffer_guard_wipe(&self, index: BufferedIndex) {
+	pub fn buffer_guard_wipe(&self, index: GuardedIndex) {
 		self.guard_wipes.lock().insert(index);
 	}
 
-	/// Record that this transaction read the DiskANN index's pending-state
-	/// guards.
-	pub fn note_guards_read(&self, index: BufferedIndex) {
+	/// Record that this transaction read the index's pending-state guards.
+	pub fn note_guards_read(&self, index: GuardedIndex) {
 		self.guards_read.lock().insert(index);
 	}
 
-	/// Drain the DiskANN indexes whose pending-state guards this transaction
-	/// read.
-	pub fn take_guards_read(&self) -> HashSet<BufferedIndex> {
+	/// Drain the indexes whose pending-state guards this transaction read.
+	pub fn take_guards_read(&self) -> HashSet<GuardedIndex> {
 		std::mem::take(&mut *self.guards_read.lock())
 	}
 
-	/// Whether any DiskANN pending-state guard shard is waiting to be armed, or
-	/// any DiskANN index's guards were wiped.
+	/// Whether any pending-state guard shard is waiting to be armed, or any
+	/// index's guards were wiped.
 	pub fn has_pending_guards(&self) -> bool {
 		self.pending_guards.lock().iter().any(|frame| !frame.is_empty())
 			|| !self.guard_wipes.lock().is_empty()
 	}
 
-	/// Drain the DiskANN indexes whose guards were wiped.
-	pub fn take_guard_wipes(&self) -> Vec<BufferedIndex> {
+	/// Drain the indexes whose guards were wiped.
+	pub fn take_guard_wipes(&self) -> Vec<GuardedIndex> {
 		self.guard_wipes.lock().drain().collect()
 	}
 
-	/// Drain the DiskANN pending-state guard shards to arm.
-	pub fn take_pending_guards(&self) -> Vec<(BufferedIndex, u16)> {
+	/// Drain the pending-state guard shards to arm.
+	pub fn take_pending_guards(&self) -> Vec<(GuardedIndex, u16)> {
 		let mut frames = self.pending_guards.lock();
-		let mut merged: HashMap<(BufferedIndex, u16), ()> = HashMap::new();
+		let mut merged: HashMap<(GuardedIndex, u16), ()> = HashMap::new();
 		for frame in frames.drain(..) {
 			merged.extend(frame);
 		}
@@ -748,11 +739,14 @@ mod tests {
 	#[test]
 	fn a_rolled_back_save_point_arms_none_of_its_pending_guards() {
 		let buffer = IndexDeltaBuffer::new();
-		let index = term().index;
+		let index = crate::pending_guard::GuardedIndex {
+			family: crate::pending_guard::PendingGuardFamily::Hnsw,
+			index: term().index,
+		};
 		buffer.buffer_pending_guard(index.clone(), 1);
 		buffer.push_save_point();
 		buffer.buffer_pending_guard(index.clone(), 2);
-		let shards = || buffer.pending_guard_shards(index.ns, index.db, &index.tb, index.ix);
+		let shards = || buffer.pending_guard_shards(&index);
 		assert_eq!(shards(), 0b110, "an open save point's write is visible");
 		buffer.rollback_save_point();
 		assert_eq!(shards(), 0b010, "nothing of the rolled-back write remains");

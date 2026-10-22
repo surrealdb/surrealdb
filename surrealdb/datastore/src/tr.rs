@@ -333,10 +333,6 @@ impl Transactor {
 	/// It is not counted among the build-state commits
 	/// ([`crate::triggers::BuildEpoch`]), so a transaction committed through it writes no
 	/// durable index build state.
-	#[cfg_attr(
-		not(diskann),
-		allow(dead_code, reason = "only DiskANN guard coverings and steps commit unsynced")
-	)]
 	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
 		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
 		self.inner.commit_unsynced().await

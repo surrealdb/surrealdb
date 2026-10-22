@@ -89,8 +89,10 @@ is in, and a store may hold both side by side.
   it is opened.
 - An HNSW or DiskANN index defined or rebuilt on a store above Legacy keeps a
   mapping from each graph element to its records, and a KNN query resolves its
-  results through it. On a store held at Legacy, and for an index defined on an
-  earlier release until it is rebuilt, results are resolved as before.
+  results through it. Such an HNSW index also guards its pending records with
+  a summary that a KNN query reads in place of an empty pending range. On a
+  store held at Legacy, and for an index defined on an earlier release until it
+  is rebuilt, results are resolved and pending records kept as before.
 - A DiskANN KNN query reports the distance of a record written since the last
   compaction from the `f32` comparer its graph walk ranks with, rather than in
   `f64`. That distance can differ from an earlier release's in its last digits,
@@ -823,6 +825,17 @@ does. It is armed in the transaction that arms a guard, and cleared only by the
 compaction step that leaves every guard empty. A KNN query reads the summary
 alone while it is clear, rather than every guard and the pending range of each
 armed one.
+
+An HNSW index stamped with format 6 keeps its pending records the same way: in
+32 sharded ranges (`!hw`), each under a pending-state guard (`!hy`), with a
+summary (`!hY`) over the guards, and with writer leases (`!hz`) on a store
+other nodes write to. A KNN query on such an index reads only the summary while
+nothing is pending, rather than scanning a pending range that compaction has
+emptied but the storage engine has not yet reclaimed, and otherwise scans only
+the shards whose guards are armed. A write reads its record's entry in the
+unsharded range (`!hr`) along with its sharded one, in one batched read. An
+HNSW index stamped below format 6 keeps the unsharded range, which every KNN
+query scans.
 
 `DEFINE INDEX` and `REBUILD INDEX` stamp format 6 only on a store above Legacy.
 On a store held at Legacy they stamp format 5, which keeps no element mapping,

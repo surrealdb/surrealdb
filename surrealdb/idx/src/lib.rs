@@ -77,6 +77,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use roaring::RoaringTreemap;
+use surrealdb_datastore::pending_guard::{GuardedIndex, PendingGuardFamily};
 use surrealdb_datastore::values::fulltext::{DocLengthAndCount, PostingBlock, TermDocsResidual};
 use surrealdb_datastore::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
@@ -119,6 +120,7 @@ use crate::key::schema::{
 	DocStatsKey, DocTermsKey, HnswDocElementsKey, HnswElementDocsKey, HnswElementHashedKey,
 	HnswElementKey, HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey,
 	HnswNodeLayerPrefix, HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix,
+	HnswRecordPendingShardKey, HnswRecordPendingShardPrefix, HnswRecordPendingShardShardPrefix,
 	HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey,
 	IndexPrimaryKey, IndexVersionKey, TermBlockKey, TermBlockTermPrefix, TermBlocksKey,
 	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangePostingsKey, TermChangeSetKey,
@@ -264,11 +266,18 @@ pub async fn wipe_index_data(
 	}
 
 	tx.del_prefix_key(&ikb.new_idx_root()).await?;
-	// The wipe removes the DiskANN pending-state guards and writer leases too, so
-	// what this datastore knows of them is forgotten as the wipe commits.
-	#[cfg(diskann)]
-	if matches!(index, catalog::Index::DiskAnn(_)) {
-		tx.buffer_diskann_guard_wipe(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
+	// The wipe removes the pending-state guards and writer leases of an HNSW or
+	// DiskANN index too, so what this datastore knows of them is forgotten as the
+	// wipe commits.
+	match index {
+		catalog::Index::Hnsw(_) => {
+			tx.buffer_pending_guard_wipe(&ikb.guarded(PendingGuardFamily::Hnsw));
+		}
+		#[cfg(diskann)]
+		catalog::Index::DiskAnn(_) => {
+			tx.buffer_pending_guard_wipe(&ikb.guarded(PendingGuardFamily::DiskAnn));
+		}
+		_ => {}
 	}
 
 	if let Some(generation) = hnsw {
@@ -443,6 +452,48 @@ impl IndexKeyBase {
 	/// Range covering record-keyed HNSW pending updates.
 	pub fn new_hr_range(&self) -> Result<TypedRange<crate::trees::hnsw::HnswRecordPendingUpdate>> {
 		HnswRecordPendingPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
+	/// Key storing one shard's pending HNSW update (`!hw{shard}{id}`) for one
+	/// record, on an index that guards its pending updates.
+	///
+	/// `shard` is the record's pending-state shard (`pending_guard_shard`), so
+	/// compaction drains, and lookup scans, one shard at a time.
+	fn new_hw_key<'a>(&'a self, shard: u16, id: &'a RecordIdKey) -> HnswRecordPendingShardKey<'a> {
+		HnswRecordPendingShardKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			shard,
+			id: Cow::Borrowed(id),
+		}
+	}
+
+	/// Range covering one shard's `!hw` pending HNSW updates.
+	pub fn new_hw_shard_range(
+		&self,
+		shard: u16,
+	) -> Result<TypedRange<crate::trees::hnsw::HnswRecordPendingUpdate>> {
+		HnswRecordPendingShardShardPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			shard,
+		}
+		.range()
+	}
+
+	/// Range covering every shard's `!hw` pending HNSW updates.
+	pub fn new_hw_range(&self) -> Result<TypedRange<crate::trees::hnsw::HnswRecordPendingUpdate>> {
+		HnswRecordPendingShardPrefix {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
@@ -766,7 +817,7 @@ impl IndexKeyBase {
 
 	/// Key storing one shard's sharded pending DiskANN update (`!dw{shard}{id}`) for one record.
 	///
-	/// `shard` is the writer's pending-state shard (see `pending_state_shard`); prefixing it lets
+	/// `shard` is the writer's pending-state shard (see `pending_guard_shard`); prefixing it lets
 	/// compaction drain — and lookup scan — one shard at a time. New writes always use this layout.
 	#[cfg(diskann)]
 	fn new_dw_key<'a>(
@@ -1439,5 +1490,10 @@ impl IndexKeyBase {
 
 	pub fn index(&self) -> IndexId {
 		self.0.ix
+	}
+
+	/// This index as its pending-state guards are kept for `family`.
+	pub fn guarded(&self, family: PendingGuardFamily) -> GuardedIndex {
+		GuardedIndex::new(family, self.ns(), self.db(), self.table().clone(), self.index())
 	}
 }

@@ -564,7 +564,7 @@ impl TestIndexStore {
 
 	/// How many DiskANN guards this datastore's compaction has repaired.
 	pub(crate) fn guard_repairs(&self) -> usize {
-		self.tf.triggers().diskann_guard_repairs()
+		self.tf.triggers().pending_guard_repairs()
 	}
 
 	/// This datastore's node id.
@@ -572,16 +572,16 @@ impl TestIndexStore {
 		self.node_id
 	}
 
-	/// Release every DiskANN writer lease this datastore holds, as its idle
+	/// Release every writer lease this datastore holds, as its idle
 	/// release would once nothing has committed under them for long enough.
 	pub(crate) async fn release_writer_leases(&self) -> Result<usize> {
 		self.release_idle_writer_leases(Duration::ZERO).await
 	}
 
-	/// Release the DiskANN writer leases nothing has relied on for `idle`, as the
+	/// Release the writer leases nothing has relied on for `idle`, as the
 	/// idle release does.
 	pub(crate) async fn release_idle_writer_leases(&self, idle: Duration) -> Result<usize> {
-		self.tf.release_idle_diskann_writer_leases(&self.sequences, idle).await
+		self.tf.release_idle_writer_leases(&self.sequences, idle).await
 	}
 
 	/// The process-local index registry, shared by every environment this

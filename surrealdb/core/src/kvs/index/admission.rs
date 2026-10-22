@@ -692,6 +692,8 @@ impl IndexBuilder {
 		if let Some(building) = &building {
 			building.abort();
 		}
+		// An index created later under the same key starts with nothing counted.
+		self.forget_pending_deletes(&IndexKeyBase::new(ns, db, tb.clone(), ix));
 		building
 	}
 

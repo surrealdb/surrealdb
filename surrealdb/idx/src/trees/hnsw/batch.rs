@@ -307,7 +307,7 @@ where
 	L: DynamicSet,
 {
 	let e = &input.elements[i];
-	let top0 = h.layers.len();
+	let top0 = h.active_up_layers();
 	let mut found: Vec<DoublePriorityQueue> = vec![DoublePriorityQueue::default(); e.level + 1];
 	if let Some(ep) = h.state.enter_point {
 		let Some(mut ep_dist) = elements.get_distance(tx, &e.vector, &ep).await? else {
@@ -318,7 +318,7 @@ where
 			}));
 		};
 		let mut ep_id = ep;
-		for layer in h.layers[e.level.min(top0)..].iter().rev() {
+		for layer in h.layers[e.level.min(top0)..top0].iter().rev() {
 			if let Some(nearest) =
 				layer.search_nearest(tx, elements, &e.vector, ep_dist, ep_id, 1).await?.peek_first()
 			{
@@ -327,8 +327,12 @@ where
 		}
 		let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
 		for level in (1..=e.level.min(top0)).rev() {
-			let w = h.layers[level - 1].search_multi(tx, elements, &e.vector, eps, h.efc).await?;
-			eps = w.clone();
+			let w = h.layers[level - 1]
+				.search_multi(tx, elements, &e.vector, eps.clone(), h.efc)
+				.await?;
+			if !w.is_empty() {
+				eps = w.clone();
+			}
 			found[level] = w;
 		}
 		found[0] = h.layer0.search_multi(tx, elements, &e.vector, eps, h.efc).await?;
@@ -508,8 +512,8 @@ impl StagedGraph {
 		L0: DynamicSet,
 		L: DynamicSet,
 	{
-		let top0 = h.layers.len();
-		let top = top0.max(input.top_level());
+		let top0 = h.active_up_layers();
+		let top = h.layers.len().max(input.top_level());
 		let mut changed = vec![false; top + 1];
 		for job in jobs {
 			changed[job.level] = true;
@@ -1096,7 +1100,7 @@ mod tests {
 			env.tx().commit().await?;
 		}
 		let env = ds.env(TransactionType::Write).await;
-		let plan = HnswIndex::prepare_compaction(&env, &ikb()).await?;
+		let plan = HnswIndex::prepare_compaction(&env, &ikb(), h.format_version()).await?;
 		assert_eq!(plan.len(), 100, "the plan carries every new vector");
 		let reads = ds.reads_opened();
 		let outcome = h.apply_compaction(&env, plan).await?;

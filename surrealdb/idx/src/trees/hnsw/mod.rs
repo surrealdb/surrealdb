@@ -281,10 +281,10 @@ where
 	) -> Result<ElementId> {
 		// Attributes an ID to the vector
 		let q_id = self.elements.next_element_id();
-		let top_up_layers = self.layers.len();
+		let top_up_layers = self.active_up_layers();
 
 		// Be sure we have existing (up) layers if required
-		for i in top_up_layers..q_level {
+		for i in self.layers.len()..q_level {
 			self.layers.push(HnswLayer::new(self.ikb.clone(), i + 1, self.m));
 			self.state.layers.push(LayerState::default());
 		}
@@ -303,6 +303,17 @@ where
 
 		self.state.next_element_id = self.elements.inc_next_element_id();
 		Ok(q_id)
+	}
+
+	/// The number of upper layers that currently hold at least one node.
+	///
+	/// Every element belongs to a contiguous prefix of layers from layer 0 up,
+	/// so any empty layers sit at the top of `self.layers`, left behind when the
+	/// elements that reached them were removed. Keeping their slots in
+	/// `self.layers` and `self.state.layers` preserves their monotonic version
+	/// numbers across later insertions.
+	pub(super) fn active_up_layers(&self) -> usize {
+		self.layers.iter().rposition(|l| l.len() > 0).map_or(0, |i| i + 1)
 	}
 
 	/// The base layer's node count and neighbour bound.
@@ -366,9 +377,6 @@ where
 						.peek_first()
 					{
 						(ep_dist, ep_id) = ep_dist_id;
-					} else {
-						#[cfg(debug_assertions)]
-						unreachable!()
 					}
 				}
 			}
@@ -479,6 +487,9 @@ where
 				if layer.remove(ctx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
+				if new_enter_point.is_none() {
+					new_enter_point = layer.first_node();
+				}
 			}
 
 			// Check possible new enter_point at layer0
@@ -503,6 +514,9 @@ where
 				.await?
 			{
 				removed = true;
+			}
+			if new_enter_point.is_none() {
+				new_enter_point = self.layer0.first_node();
 			}
 
 			self.elements.remove(&ctx.tx, e_id).await?;
@@ -656,7 +670,7 @@ where
 				element: ep_id,
 			}));
 		};
-		for layer in self.layers.iter().rev() {
+		for layer in self.layers[..self.active_up_layers()].iter().rev() {
 			// A layer that admits no candidate leaves the entry point as it
 			// stands and descent continues one layer down: every element the
 			// descent has accepted so far had its vector read, so the entry
@@ -702,6 +716,12 @@ where
 		profile
 	}
 
+	/// See [`HnswLayer::plant_edge`], on layer 0.
+	#[cfg(test)]
+	fn plant_layer0_edge(&mut self, from: ElementId, to: ElementId) {
+		self.layer0.plant_edge(from, to);
+	}
+
 	/// The entry point and every layer's adjacency, layer 0 first.
 	#[cfg(test)]
 	fn adjacency(&self) -> Adjacency {
@@ -722,6 +742,22 @@ where
 	for layer in h.layers.iter() {
 		layer.check_props(&h.elements).await;
 	}
+	// A walk enters the graph at the entry point in its highest non-empty
+	// layer and reaches layer 0 from there, so the entry point must belong to
+	// that layer and every layer-0 node must be reachable from it.
+	let top = h.active_up_layers();
+	if let Some(entry) = h.state.enter_point {
+		if top > 0 {
+			assert!(
+				h.layers[top - 1].has_node(entry),
+				"entry point {entry} is not in the highest non-empty layer {top}"
+			);
+		}
+		let unreachable = h.layer0.unreachable_from(entry);
+		assert!(unreachable.is_empty(), "layer 0 nodes unreachable from {entry}: {unreachable:?}");
+	} else {
+		assert_eq!(top, 0, "graph without an entry point has non-empty upper layers");
+	}
 }
 
 #[cfg(test)]
@@ -739,6 +775,9 @@ mod tests {
 	use rand::Rng as _;
 	use rand::rngs::SmallRng;
 	use roaring::RoaringTreemap;
+	use surrealdb_datastore::is_retryable_transaction_conflict;
+	use surrealdb_datastore::pending_guard::{PendingGuardFamily, pending_guard_shard};
+	use surrealdb_datastore::values::diskann::{DiskAnnPendingState, DiskAnnPendingStateKind};
 	use surrealdb_kvs::TransactionType;
 	use test_log::test;
 	use tracing::info;
@@ -759,7 +798,8 @@ mod tests {
 	use crate::trees::hnsw::flavor::HnswFlavor;
 	use crate::trees::hnsw::index::{HnswContext, HnswIndex};
 	use crate::trees::hnsw::{
-		ElementId, HnswRecordPendingUpdate, HnswSearch, VectorCache, VectorId, VectorPendingUpdate,
+		ElementId, HNSW_COMPACTION_MAX_PENDING_KEYS, HnswRecordPendingUpdate, HnswSearch,
+		VectorCache, VectorId, VectorPendingUpdate,
 	};
 	use crate::trees::knn::tests::{
 		RandomItemGenerator, TestCollection, get_seed_rnd, new_random_vec, new_vectors_from_file,
@@ -1324,8 +1364,9 @@ mod tests {
 	/// walked to, even with its vector back in the process-wide cache.
 	///
 	/// Pruning leaves edges one-way, and removing an element clears it only
-	/// from the lists of the elements it points at, so another node can keep
-	/// an edge to it. A read in a snapshot that predates the removal puts the
+	/// from the lists it points at and the lists the removal rewrites, so
+	/// another node can keep an edge to it, as can a list an older binary
+	/// wrote. A read in a snapshot that predates the removal puts the
 	/// element's vector back in the shared cache. A walk following that edge
 	/// would then score an element its own snapshot does not hold, give it a
 	/// search-list slot, and resolve no document from it.
@@ -1385,10 +1426,10 @@ mod tests {
 		}
 		let layer0 = h.adjacency().await.1.remove(0);
 		assert!(!layer0.iter().any(|(node, _)| *node == dead), "the element is removed");
-		assert!(
-			layer0.iter().any(|(node, out)| *node == holder && out.contains(&dead)),
-			"the one-way edge to the removed element survives"
-		);
+		// The removal re-links the nodes around the element and drops their
+		// edges to it, but a list it does not rewrite keeps one; plant it
+		// where the holder's list no longer does.
+		h.plant_layer0_edge(holder, dead).await;
 		// A snapshot from before the removal reads the vector back into the cache.
 		h.resident()
 			.read()
@@ -3457,7 +3498,7 @@ mod tests {
 
 		let plan = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
@@ -3503,7 +3544,7 @@ mod tests {
 
 		let plan = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
@@ -3556,7 +3597,7 @@ mod tests {
 
 		let plan = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
@@ -3613,7 +3654,7 @@ mod tests {
 
 		let plan = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
@@ -3667,13 +3708,13 @@ mod tests {
 
 		let plan_1 = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
 		let plan_2 = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
 			ctx.tx().cancel().await?;
 			plan
 		};
@@ -5153,5 +5194,542 @@ mod tests {
 			values[1] = y as i16;
 		}
 		Vector::I16(Array1::from_vec(values)).into()
+	}
+
+	/// An index stamped `format_version`, over 2-dimension `I16` vectors.
+	async fn new_guard_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		format_version: u16,
+	) -> Result<HnswIndex> {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 40, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			format_version,
+		)
+		.await?;
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// The stored guard of `shard` and the stored summary of `ikb`'s HNSW index.
+	async fn stored_guard(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		shard: u16,
+	) -> Result<(Option<DiskAnnPendingStateKind>, Option<DiskAnnPendingStateKind>)> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let guarded = ikb.guarded(PendingGuardFamily::Hnsw);
+		let guard = ctx.tx().get_key(&guarded.guard(shard), None).await?.map(|s| s.kind);
+		let summary = ctx.tx().get_key(&guarded.summary(), None).await?.map(|s| s.kind);
+		ctx.tx().cancel().await?;
+		Ok((guard, summary))
+	}
+
+	/// Writes `state` to the guard of `shard` or, with `None`, to the summary.
+	async fn plant_guard(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		shard: Option<u16>,
+		kind: DiskAnnPendingStateKind,
+	) -> Result<()> {
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let guarded = ikb.guarded(PendingGuardFamily::Hnsw);
+		let state = DiskAnnPendingState {
+			kind,
+			generation: 100,
+		};
+		match shard {
+			Some(shard) => ctx.tx().set_key(&guarded.guard(shard), &state).await?,
+			None => ctx.tx().set_key(&guarded.summary(), &state).await?,
+		}
+		ctx.tx().commit().await?;
+		Ok(())
+	}
+
+	/// Plants an unguarded `!hr` entry for `id`, as a write at the same stamp
+	/// by a build that wrote that layout leaves it.
+	async fn plant_legacy_pending(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		id: &RecordIdKey,
+		vector: &SharedVector,
+	) -> Result<()> {
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let pending = HnswRecordPendingUpdate {
+			doc_id: None,
+			old_vectors: Vec::new(),
+			new_vectors: vec![serialized(vector)],
+			id: Some(id.clone()),
+			others: Vec::new(),
+		};
+		ctx.tx().set_key(&ikb.new_hr_key(id), &pending).await?;
+		ctx.tx().commit().await?;
+		Ok(())
+	}
+
+	/// One compaction pass as the datastore runs it: a plan read in a
+	/// transaction of its own, applied and committed in another, then the
+	/// guard step. Returns the plan's `has_more`.
+	async fn compact_once(ds: &TestIndexStore, ikb: &IndexKeyBase, h: &HnswIndex) -> Result<bool> {
+		let plan = {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, ikb, h.format_version()).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		let has_more = plan.has_more();
+		let step = plan.guard_step(ikb);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		if plan.has_work() {
+			assert!(h.apply_compaction(&ctx, plan).await?.applied());
+			ctx.tx().commit().await?;
+		} else {
+			ctx.tx().cancel().await?;
+		}
+		step.run(&ctx.tx()).await?;
+		Ok(has_more)
+	}
+
+	async fn knn_len(ds: &TestIndexStore, h: &HnswIndex, x: isize, y: isize) -> Result<usize> {
+		let pt = vec![Number::Int(x as i64), Number::Int(y as i64)];
+		Ok(knn_with_allow(ds, h, &pt, 10, None).await?.len())
+	}
+
+	/// A write to an index that guards its pending updates lands in its
+	/// record's `!hw` shard, never in `!hr`, and its commit arms that shard's
+	/// guard and the summary. The writing transaction sees its own write
+	/// before either is stored.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_guarded_write_lands_in_its_shard_and_arms_its_guard() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let id = RecordIdKey::Number(7);
+		let shard = pending_guard_shard(&id);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(1, 1)))).await?;
+			let tx = ctx.tx();
+			assert!(tx.get_key(&ikb.new_hw_key(shard, &id), None).await?.is_some());
+			assert!(tx.get_key(&ikb.new_hr_key(&id), None).await?.is_none());
+			let res =
+				h.knn_search(&ctx, &[Number::Int(1), Number::Int(1)], 1, 500, None, None).await?;
+			assert_eq!(res.len(), 1, "the writing transaction sees its own pending write");
+			tx.commit().await?;
+		}
+		assert_eq!(
+			stored_guard(&ds, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::NonEmpty), Some(DiskAnnPendingStateKind::NonEmpty))
+		);
+		assert_eq!(knn_len(&ds, &h, 1, 1).await?, 1);
+		Ok(())
+	}
+
+	/// Lookup trusts the summary: while it reads `Empty` nothing pending is
+	/// scanned, and while it is armed only shards whose guard is armed are.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_lookup_scans_pending_only_under_an_armed_summary_and_guard() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let id = RecordIdKey::Number(3);
+		let shard = pending_guard_shard(&id);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(2, 2)))).await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(knn_len(&ds, &h, 2, 2).await?, 1);
+		plant_guard(&ds, &ikb, None, DiskAnnPendingStateKind::Empty).await?;
+		assert_eq!(knn_len(&ds, &h, 2, 2).await?, 0, "an Empty summary skips every shard");
+		plant_guard(&ds, &ikb, None, DiskAnnPendingStateKind::NonEmpty).await?;
+		plant_guard(&ds, &ikb, Some(shard), DiskAnnPendingStateKind::Empty).await?;
+		assert_eq!(knn_len(&ds, &h, 2, 2).await?, 0, "an Empty guard skips its shard");
+		plant_guard(&ds, &ikb, Some(shard), DiskAnnPendingStateKind::MaybeEmpty).await?;
+		assert_eq!(knn_len(&ds, &h, 2, 2).await?, 1, "MaybeEmpty still scans its shard");
+		Ok(())
+	}
+
+	/// Compaction drains a shard, and the step after its commit returns the
+	/// shard's guard and then the summary to `Empty`; the record is then
+	/// answered from the graph.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_steps_the_guard_and_summary_once_drained() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let ids: Vec<RecordIdKey> = (1..=40).map(RecordIdKey::Number).collect();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (i, id) in ids.iter().enumerate() {
+				let v = new_i16_vec(i as isize, i as isize);
+				h.index(&ctx, id, None, Some(vector_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		assert!(!compact_once(&ds, &ikb, &h).await?);
+		for id in &ids {
+			let (guard, summary) = stored_guard(&ds, &ikb, pending_guard_shard(id)).await?;
+			assert_eq!(guard, Some(DiskAnnPendingStateKind::Empty));
+			assert_eq!(summary, Some(DiskAnnPendingStateKind::Empty));
+		}
+		assert_eq!(knn_len(&ds, &h, 5, 5).await?, 10);
+		// Nothing pending: a further pass has nothing to apply or step.
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
+		ctx.tx().cancel().await?;
+		assert!(!plan.requires_apply());
+		Ok(())
+	}
+
+	/// An unguarded `!hr` entry on an index that guards its pending updates
+	/// is under no guard. The compaction pass that finds it under a summary
+	/// reading `Empty` arms a guard, and with it the summary, so lookup finds
+	/// the entry from then on, before any pass drains it; once a pass drains
+	/// `!hr`, its step returns both the repaired guard and the summary to
+	/// `Empty`.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_arms_the_summary_over_unguarded_entries() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let id = RecordIdKey::Number(11);
+		let shard = pending_guard_shard(&id);
+		plant_legacy_pending(&ds, &ikb, &id, &new_i16_vec(6, 6)).await?;
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let plan = HnswIndex::prepare_compaction(&ctx, &ikb, h.format_version()).await?;
+		ctx.tx().cancel().await?;
+		assert!(plan.has_work());
+		let (guard, summary) = stored_guard(&ds, &ikb, shard).await?;
+		assert_eq!(guard, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(summary, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(knn_len(&ds, &h, 6, 6).await?, 1);
+		// Reset the guards to unarmed so the pass that drains `!hr` exercises
+		// the single-pass repair + step path end to end.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let guarded = ikb.guarded(PendingGuardFamily::Hnsw);
+			ctx.tx().del_key(&guarded.guard(shard)).await?;
+			ctx.tx().del_key(&guarded.summary()).await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(!compact_once(&ds, &ikb, &h).await?);
+		assert_eq!(
+			stored_guard(&ds, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::Empty), Some(DiskAnnPendingStateKind::Empty))
+		);
+		assert_eq!(knn_len(&ds, &h, 6, 6).await?, 1);
+		Ok(())
+	}
+
+	/// A `!hw` shard whose guard reads `Empty` or absent over committed entries
+	/// has its guard and the summary repaired by `prepare_compaction`, keeps
+	/// the summary armed across that pass's guard step, reports `has_more`, and
+	/// is drained and stepped to `Empty` on the next pass.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_repairs_an_empty_guard_over_sharded_entries() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let id = RecordIdKey::Number(33);
+		let shard = pending_guard_shard(&id);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(33, 0)))).await?;
+			ctx.tx().commit().await?;
+		}
+		plant_guard(&ds, &ikb, Some(shard), DiskAnnPendingStateKind::Empty).await?;
+		plant_guard(&ds, &ikb, None, DiskAnnPendingStateKind::Empty).await?;
+		assert_eq!(knn_len(&ds, &h, 33, 0).await?, 0);
+		assert!(compact_once(&ds, &ikb, &h).await?, "repair pass reports remaining work");
+		assert_eq!(ds.guard_repairs(), 1);
+		assert_eq!(
+			stored_guard(&ds, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::NonEmpty), Some(DiskAnnPendingStateKind::NonEmpty))
+		);
+		assert_eq!(knn_len(&ds, &h, 33, 0).await?, 1, "repaired guard makes the entry visible");
+		assert!(!compact_once(&ds, &ikb, &h).await?, "second pass drains the repaired shard");
+		assert_eq!(
+			stored_guard(&ds, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::Empty), Some(DiskAnnPendingStateKind::Empty))
+		);
+		assert_eq!(knn_len(&ds, &h, 33, 0).await?, 1);
+		Ok(())
+	}
+
+	/// The summary is stepped back only once `!hr` is empty: a summary armed
+	/// over guards that all read `Empty` — as a step that returned every guard
+	/// to `Empty` but lost the summary's condition leaves it — stays armed
+	/// through every pass that leaves unguarded entries behind.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_summary_stays_armed_until_unguarded_entries_drain() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let backlog = HNSW_COMPACTION_MAX_PENDING_KEYS as i64 + 10;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=backlog {
+				let pending = HnswRecordPendingUpdate {
+					doc_id: None,
+					old_vectors: Vec::new(),
+					new_vectors: vec![serialized(&new_i16_vec(i as isize, 0))],
+					id: Some(RecordIdKey::Number(i)),
+					others: Vec::new(),
+				};
+				ctx.tx().set_key(&ikb.new_hr_key(&RecordIdKey::Number(i)), &pending).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		plant_guard(&ds, &ikb, None, DiskAnnPendingStateKind::NonEmpty).await?;
+		let nearest_last = vec![Number::Int(backlog), Number::Int(0)];
+		// The first pass cannot drain the backlog: the last record is still
+		// pending, under the summary, and lookup finds it.
+		assert!(compact_once(&ds, &ikb, &h).await?);
+		assert_eq!(stored_guard(&ds, &ikb, 0).await?.1, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert_eq!(knn_with_allow(&ds, &h, &nearest_last, 1, None).await?, vec![backlog]);
+		while compact_once(&ds, &ikb, &h).await? {}
+		// `!hr` is empty, so a pass steps the summary back.
+		compact_once(&ds, &ikb, &h).await?;
+		assert_eq!(stored_guard(&ds, &ikb, 0).await?.1, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(knn_with_allow(&ds, &h, &nearest_last, 1, None).await?, vec![backlog]);
+		Ok(())
+	}
+
+	/// A write folds its record's state out of an unguarded `!hr` entry into
+	/// its `!hw` entry, keeping the `!hr` entry's graph baseline, so the
+	/// record is never pending under both layouts; another record's `!hr`
+	/// entry is left for compaction.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_guarded_write_folds_its_records_unguarded_entry() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let (id, other) = (RecordIdKey::Number(1), RecordIdKey::Number(2));
+		plant_legacy_pending(&ds, &ikb, &id, &new_i16_vec(1, 1)).await?;
+		plant_legacy_pending(&ds, &ikb, &other, &new_i16_vec(9, 9)).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let old = vector_content(&new_i16_vec(1, 1));
+			let new = vector_content(&new_i16_vec(3, 3));
+			h.index(&ctx, &id, Some(old), Some(new)).await?;
+			ctx.tx().commit().await?;
+		}
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let tx = ctx.tx();
+		assert!(tx.get_key(&ikb.new_hr_key(&id), None).await?.is_none());
+		assert!(tx.get_key(&ikb.new_hr_key(&other), None).await?.is_some());
+		let folded: HnswRecordPendingUpdate =
+			tx.get_key(&ikb.new_hw_key(pending_guard_shard(&id), &id), None).await?.unwrap();
+		tx.cancel().await?;
+		assert!(folded.old_vectors.is_empty(), "the baseline is the unguarded entry's");
+		assert_eq!(folded.new_vectors, vec![serialized(&new_i16_vec(3, 3))]);
+		// Compacting leaves one element for the record, at its last vector.
+		while compact_once(&ds, &ikb, &h).await? {}
+		compact_once(&ds, &ikb, &h).await?;
+		let pt = vec![Number::Int(3), Number::Int(3)];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 10, None).await?, vec![1, 2]);
+		Ok(())
+	}
+
+	/// An index stamped below the guarded format keeps writing the unguarded
+	/// `!hr` layout, arms no guard, and lookup scans it.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_unguarded_index_keeps_its_unsharded_layout() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION - 1).await?;
+		let id = RecordIdKey::Number(5);
+		let shard = pending_guard_shard(&id);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(4, 4)))).await?;
+			ctx.tx().commit().await?;
+		}
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		assert!(ctx.tx().get_key(&ikb.new_hr_key(&id), None).await?.is_some());
+		assert!(ctx.tx().get_key(&ikb.new_hw_key(shard, &id), None).await?.is_none());
+		ctx.tx().cancel().await?;
+		assert_eq!(stored_guard(&ds, &ikb, shard).await?, (None, None));
+		assert_eq!(knn_len(&ds, &h, 4, 4).await?, 1);
+		Ok(())
+	}
+
+	/// On a store that validates every read, a transaction that read the
+	/// pending-state summary or guards in a lookup covers the guard it writes
+	/// under in its own commit, whichever came first, the lookup or the write:
+	/// another transaction's arming would invalidate the read and fail it. A
+	/// guard covered that way goes with a commit that fails, where one the
+	/// arming transaction covered outlives it. A write with no lookup is still
+	/// covered by the arming transaction.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_guard_read_on_a_validating_store_is_covered_by_its_own_commit() -> Result<()> {
+		let ds = TestIndexStore::new().await.validating_node();
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_guard_fixture(&ds, &ikb, INDEX_FORMAT_VERSION).await?;
+		let shard = pending_guard_shard(&RecordIdKey::Number(33));
+		// Writes record 33 in a transaction whose commit is refused, after or
+		// before a lookup if `lookup` says so, and returns the shard's guard as
+		// it stands afterwards.
+		let refused_write = |lookup: Option<bool>| {
+			let (ds, h, ikb) = (&ds, &h, ikb.clone());
+			async move {
+				let contested = crate::key::Key::from(b"/hnsw-validated".as_slice());
+				let writer = new_ctx(ds, TransactionType::Write).await;
+				let pt = [Number::Int(33), Number::Int(0)];
+				if lookup == Some(true) {
+					h.knn_search(&writer, &pt, 1, 40, None, None).await?;
+				}
+				let content = vector_content(&new_i16_vec(33, 0));
+				h.index(&writer, &RecordIdKey::Number(33), None, Some(content)).await?;
+				if lookup == Some(false) {
+					h.knn_search(&writer, &pt, 1, 40, None, None).await?;
+				}
+				writer.tx().set(contested.clone(), b"writer".to_vec()).await?;
+				{
+					let ctx = new_ctx(ds, TransactionType::Write).await;
+					ctx.tx().set(contested, b"winner".to_vec()).await?;
+					ctx.tx().commit().await?;
+				}
+				let refused = writer.tx().commit().await;
+				assert!(
+					refused.as_ref().is_err_and(is_retryable_transaction_conflict),
+					"the writer's commit must lose the contested key: {refused:?}"
+				);
+				Ok::<_, anyhow::Error>(stored_guard(ds, &ikb, shard).await?.0)
+			}
+		};
+		assert_eq!(refused_write(Some(true)).await?, None, "lookup, then write");
+		assert_eq!(refused_write(Some(false)).await?, None, "write, then lookup");
+		assert_eq!(
+			refused_write(None).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a write with no lookup is armed by a transaction of its own"
+		);
+		// A lookup, then a write, that commits leaves its guard and the summary
+		// `NonEmpty`.
+		let other = pending_guard_shard(&RecordIdKey::Number(2));
+		assert_ne!(other, shard);
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		h.knn_search(&writer, &[Number::Int(2), Number::Int(0)], 1, 40, None, None).await?;
+		h.index(&writer, &RecordIdKey::Number(2), None, Some(vector_content(&new_i16_vec(2, 0))))
+			.await?;
+		writer.tx().commit().await?;
+		assert_eq!(
+			stored_guard(&ds, &ikb, other).await?,
+			(Some(DiskAnnPendingStateKind::NonEmpty), Some(DiskAnnPendingStateKind::NonEmpty))
+		);
+		Ok(())
+	}
+
+	/// A node's writer lease keeps another node's compaction pass, guard step
+	/// included, from returning the shard's guard to `Empty`, whatever the pass
+	/// drains, until the node releases the lease; the record stays found
+	/// throughout. The release queues the pass that then steps the guard and
+	/// the summary.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_lease_blocks_a_foreign_step_until_released() -> Result<()> {
+		let base = TestIndexStore::new().await;
+		let (a, b) = (base.shared_node(), base.shared_node());
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let index_a = new_guard_fixture(&a, &ikb, INDEX_FORMAT_VERSION).await?;
+		let index_b = new_guard_fixture(&b, &ikb, INDEX_FORMAT_VERSION).await?;
+		let id = RecordIdKey::Number(1);
+		let shard = pending_guard_shard(&id);
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			index_a.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(1, 0)))).await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(stored_guard(&b, &ikb, shard).await?.0, Some(DiskAnnPendingStateKind::NonEmpty));
+		let lease = {
+			let ctx = new_ctx(&b, TransactionType::Read).await;
+			let guarded = ikb.guarded(PendingGuardFamily::Hnsw);
+			let lease = ctx.tx().get_key(&guarded.lease(shard, a.node_id()), None).await?;
+			ctx.tx().cancel().await?;
+			lease
+		};
+		assert!(lease.is_some(), "the write takes a lease");
+		for _ in 0..3 {
+			compact_once(&b, &ikb, &index_b).await?;
+		}
+		assert_eq!(
+			stored_guard(&b, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::NonEmpty), Some(DiskAnnPendingStateKind::NonEmpty)),
+			"no node steps a guard under another node's lease"
+		);
+		assert_eq!(knn_len(&b, &index_b, 1, 0).await?, 1);
+		assert_eq!(a.release_writer_leases().await?, 1);
+		compact_once(&b, &ikb, &index_b).await?;
+		assert_eq!(
+			stored_guard(&b, &ikb, shard).await?,
+			(Some(DiskAnnPendingStateKind::Empty), Some(DiskAnnPendingStateKind::Empty))
+		);
+		let pt = vec![Number::Int(1), Number::Int(0)];
+		assert_eq!(knn_with_allow(&b, &index_b, &pt, 1, None).await?, vec![1]);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// Removing the sole node in the top layer leaves an empty `HnswLayer` in
+	/// `layers` (preserving its monotonic state version) and demotes the entry
+	/// point to a lower layer. A subsequent insertion at an upper layer must
+	/// not treat that lower-layer entry point as a member of the empty upper
+	/// layer during candidate selection/extension, and must promote the new
+	/// upper-layer node back to the entry point.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_reinsert_upper_layer_after_sole_entry_point_removal() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let vec_docs = VecDocs::new(
+			ikb.clone(),
+			TableId(3),
+			ds.index_stores().vector_cache().clone(),
+			false,
+			0,
+		);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 4, 32, true, true, false);
+		let mut h = super::Hnsw::<
+			crate::trees::dynamicset::ArraySet<9>,
+			crate::trees::dynamicset::ArraySet<5>,
+		>::new(
+			TableId(3),
+			ikb.clone(),
+			&p,
+			ds.index_stores().vector_cache().clone(),
+			INDEX_FORMAT_VERSION,
+		)?;
+		let env = new_ctx(&ds, TransactionType::Write).await;
+		let ctx = HnswContext::new(&env, ikb, &vec_docs);
+
+		let e0 = h.insert_level(&ctx, new_i16_vec(1, 0).clone_vector(), 0).await?;
+		let e1 = h.insert_level(&ctx, new_i16_vec(2, 0).clone_vector(), 1).await?;
+		assert_eq!(h.state.enter_point, Some(e1));
+		assert_eq!(h.active_up_layers(), 1);
+		super::check_hnsw_props(&h, 2).await;
+
+		assert!(h.remove(&ctx, e1).await?);
+		assert_eq!(h.layers.len(), 1, "the empty upper layer stays allocated for its version");
+		assert_eq!(h.active_up_layers(), 0);
+		assert_eq!(h.state.enter_point, Some(e0));
+		super::check_hnsw_props(&h, 1).await;
+
+		let e2 = h.insert_level(&ctx, new_i16_vec(3, 0).clone_vector(), 1).await?;
+		assert_eq!(h.active_up_layers(), 1);
+		assert_eq!(h.state.enter_point, Some(e2));
+		super::check_hnsw_props(&h, 2).await;
+		env.tx().commit().await?;
+		Ok(())
 	}
 }

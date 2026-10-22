@@ -90,8 +90,8 @@ where
 		}
 	}
 
-	/// Adds `node` with `edges`, and an edge back to it in each neighbour's list.
-	/// Returns the neighbours, whose lists changed.
+	/// Adds `node` with `edges`, or replaces its list with them, and an edge back
+	/// to it in each neighbour's list. Returns the neighbours, whose lists changed.
 	///
 	/// An edge to a node not in the graph is not added, and no node is created
 	/// for it. Each neighbour's list drops its edges to removed nodes as it is
@@ -192,6 +192,11 @@ where
 	/// The number of nodes the graph holds.
 	pub(in crate::trees) fn len(&self) -> usize {
 		self.nodes.len()
+	}
+
+	/// The lowest node ID in the graph, if any.
+	pub(super) fn first_node(&self) -> Option<ElementId> {
+		self.nodes.keys().copied().min()
 	}
 }
 

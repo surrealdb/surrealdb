@@ -17,19 +17,19 @@ use surrealdb_strand::Strand;
 
 use crate::Transaction;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{
+	DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, guards_hnsw_pending,
+};
+#[cfg(diskann)]
+use crate::key::schema::DiskannRecordPendingPrefix;
 use crate::key::schema::{
 	BuildStateKey, DocStatsBatchPrefix, DocStatsKey, HnswPendingLegacyPrefix,
 	HnswRecordPendingPrefix, IndexCountKey, IndexCountPrefix, TermChangeBatchPrefix,
 	TermChangesKey, TermDocsResidualPrefix,
 };
-#[cfg(diskann)]
-use crate::key::schema::{DiskannPendingPrefix, DiskannRecordPendingPrefix};
+use crate::pending_guard::{GuardedIndex, PENDING_GUARD_SHARDS, PendingGuardFamily};
 use crate::val::{Object, TableName, Value};
-#[cfg(diskann)]
-use crate::values::diskann::{
-	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
-};
+use crate::values::diskann::{DiskAnnPendingState, DiskAnnPendingStateKind};
 use crate::values::index_build::{IndexBuildPhase, IndexBuildReportStatus, IndexBuildState};
 
 pub fn report_status_from_phase(phase: IndexBuildPhase) -> IndexBuildReportStatus {
@@ -125,6 +125,25 @@ pub async fn index_has_unmaterialised_updates(
 			}
 			unmaterialised
 		}
+		Index::Hnsw(_) if guards_hnsw_pending(ix.format_version) => {
+			// Writes land in the sharded `!hw` range under the guards, as on
+			// a DiskANN index, so the guards are the question. A `!hr` entry
+			// written unguarded at the same stamp is under none, and lookup
+			// scans that range too until compaction drains it.
+			let guarded = GuardedIndex::new(
+				PendingGuardFamily::Hnsw,
+				ns,
+				db,
+				ix.table_name.clone(),
+				ix.index_id,
+			);
+			if guards_non_empty(tx, &guarded).await? {
+				true
+			} else {
+				let legacy = HnswRecordPendingPrefix::new(ns, db, tb, ix.index_id).range()?;
+				!tx.keys(legacy, 1, 0, None).await?.is_empty()
+			}
+		}
 		Index::Hnsw(_) => {
 			let current = HnswRecordPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
 			if !tx.keys(current, 1, 0, None).await?.is_empty() {
@@ -143,26 +162,14 @@ pub async fn index_has_unmaterialised_updates(
 			// Writes land in the sharded `!dw` range, and lookup decides per
 			// shard whether to merge them by reading that shard's `!dy` guard.
 			// So the guards are the question, not `!dw` itself.
-			//
-			// Only `NonEmpty` counts. A `MaybeEmpty` shard has already had its
-			// updates folded in — the guard has just not been proved empty yet,
-			// so lookup still scans a range it will find nothing in. Treating
-			// that as unsettled would leave the field true on an index that
-			// answers at full speed, until some later pass happened to close
-			// the guard. There are at most `DISKANN_PENDING_STATE_SHARDS` of
-			// these.
-			//
-			// A shard this transaction wrote into counts as `NonEmpty` before
-			// its commit arms the stored guard
-			// ([`Transaction::buffer_diskann_pending_guard`]).
-			if tx.diskann_buffered_pending_guard_shards(ns, db, &ix.table_name, ix.index_id) != 0 {
-				return Ok(true);
-			}
-			let guards = DiskannPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
-			let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
-				tx.scan(guards, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await?;
-			tx.note_diskann_guards_read(ns, db, &ix.table_name, ix.index_id);
-			if guards.iter().any(|(_, state)| state.kind == DiskAnnPendingStateKind::NonEmpty) {
+			let guarded = GuardedIndex::new(
+				PendingGuardFamily::DiskAnn,
+				ns,
+				db,
+				ix.table_name.clone(),
+				ix.index_id,
+			);
+			if guards_non_empty(tx, &guarded).await? {
 				true
 			} else {
 				// Pre-shard data still lands in the unsharded range, which
@@ -174,6 +181,27 @@ pub async fn index_has_unmaterialised_updates(
 		_ => false,
 	};
 	Ok(unmaterialised)
+}
+
+/// Whether any pending-state guard of `index` reads `NonEmpty`.
+///
+/// Only `NonEmpty` counts. A `MaybeEmpty` shard has already had its updates
+/// folded in — the guard has just not been proved empty yet, so lookup still
+/// scans a range it will find nothing in. Treating that as unsettled would
+/// leave the field true on an index that answers at full speed, until some
+/// later pass happened to close the guard. There are at most
+/// [`PENDING_GUARD_SHARDS`] of these.
+///
+/// A shard this transaction wrote into counts as `NonEmpty` before its commit
+/// arms the stored guard ([`Transaction::buffer_pending_guard`]).
+async fn guards_non_empty(tx: &Transaction, index: &GuardedIndex) -> Result<bool> {
+	if tx.buffered_pending_guard_shards(index) != 0 {
+		return Ok(true);
+	}
+	let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
+		tx.scan(index.guards()?, PENDING_GUARD_SHARDS.into(), 0, None).await?;
+	tx.note_pending_guards_read(index);
+	Ok(guards.iter().any(|(_, state)| state.kind == DiskAnnPendingStateKind::NonEmpty))
 }
 
 fn index_building_status_value(

@@ -206,6 +206,15 @@ pub const ELEMENT_CODES_FORMAT_VERSION: u16 = 6;
 /// guards armed by such a release, and a lookup reads its guards.
 pub const PENDING_SUMMARY_FORMAT_VERSION: u16 = 6;
 
+/// Format version from which an HNSW index writes its pending updates into the
+/// sharded `!hw` layout under pending-state guards (`!hy`) and their summary
+/// (`!hY`), as a DiskANN index does: while the summary reads `Empty` or is
+/// absent, a lookup skips every pending scan. An index stamped below it writes
+/// the unsharded, unguarded `!hr` layout, which every lookup scans. An index
+/// stamped with it drains a `!hr` entry left by a build that wrote that layout
+/// at this stamp: compaction arms the summary over one it finds.
+pub const HNSW_PENDING_GUARDS_FORMAT_VERSION: u16 = 6;
+
 /// Format version at which HNSW and DiskANN indexes keep a doc-ID → elements
 /// mapping (`!hk` / `!dk`) alongside their vector → elements + doc-IDs mapping,
 /// so an allow-list of doc-IDs can be scored from the index's own vectors.
@@ -978,6 +987,12 @@ pub fn keeps_element_codes(format_version: u16) -> bool {
 /// trusts its pending-state summary. See [`PENDING_SUMMARY_FORMAT_VERSION`].
 pub fn trusts_pending_summary(format_version: u16) -> bool {
 	format_version >= PENDING_SUMMARY_FORMAT_VERSION
+}
+
+/// Whether an HNSW index with the given stored format version guards its
+/// pending updates. See [`HNSW_PENDING_GUARDS_FORMAT_VERSION`].
+pub fn guards_hnsw_pending(format_version: u16) -> bool {
+	format_version >= HNSW_PENDING_GUARDS_FORMAT_VERSION
 }
 
 /// Whether a vector index with the given stored format version keeps the

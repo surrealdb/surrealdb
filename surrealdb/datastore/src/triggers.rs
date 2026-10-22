@@ -112,7 +112,7 @@ impl Drop for CatalogCommit<'_> {
 /// fences shared from before it arms their guards until its own commit has
 /// returned ([`crate::tx::Transaction::commit`]). A guard step holds the
 /// index's fence exclusively from before its transaction opens until it
-/// commits ([`crate::tx::Transaction::step_diskann_pending_guards`]), and so
+/// commits ([`crate::tx::Transaction::step_pending_guards`]), and so
 /// do a commit that wipes the index's data and the release of this datastore's
 /// writer leases. So no step of this datastore commits between a writer's
 /// arming and its commit, and a step that waited reads a snapshot holding every
@@ -128,10 +128,9 @@ impl Drop for CatalogCommit<'_> {
 /// index's data.
 ///
 /// Elsewhere other datastores write to the store too, and a writer's guard is
-/// covered by a writer lease (`!dz`) its datastore holds instead. The fence then
+/// covered by a writer lease its datastore holds instead. The fence then
 /// records which leases this datastore holds, and when it last committed under
 /// them, so an idle index's leases can be released.
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 pub(crate) struct PendingGuardFences {
 	fences: Mutex<FenceMap>,
 	/// This datastore instance, as its writer leases name it.
@@ -140,7 +139,7 @@ pub(crate) struct PendingGuardFences {
 	/// the sole writer of, as the tests of that protocol need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	assume_shared_store: std::sync::atomic::AtomicBool,
-	/// Whether this datastore covers DiskANN guards as on a store that
+	/// Whether this datastore covers pending-state guards as on a store that
 	/// validates every read, as the tests of that path need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	assume_validated_reads: std::sync::atomic::AtomicBool,
@@ -152,7 +151,6 @@ pub(crate) struct PendingGuardFences {
 
 /// The fences by the encoded `!dy` prefix of their index, and the size at
 /// which they are next pruned.
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 struct FenceMap {
 	fences: HashMap<Vec<u8>, Arc<IndexFence>>,
 	prune_at: usize,
@@ -169,10 +167,9 @@ impl Default for FenceMap {
 
 /// One index's fence, the guards it knows to read `NonEmpty`, and the writer
 /// leases this datastore holds on the index.
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 struct IndexFence {
 	/// The index this fence orders.
-	index: crate::values::index_delta::BufferedIndex,
+	index: crate::pending_guard::GuardedIndex,
 	lock: Arc<RwLock<()>>,
 	/// Bit `shard` is set while the shard's guard is known to read `NonEmpty`.
 	armed: AtomicU64,
@@ -190,18 +187,16 @@ pub(crate) struct HeldLeases {
 }
 
 const _: () = assert!(
-	crate::values::diskann::DISKANN_PENDING_STATE_SHARDS as u32 <= u64::BITS,
+	crate::pending_guard::PENDING_GUARD_SHARDS as u32 <= u64::BITS,
 	"every guard shard needs a bit of `IndexFence::armed`"
 );
 
 /// An index's fence held shared, by a committing writer.
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 pub(crate) struct SharedGuardFence {
 	fence: Arc<IndexFence>,
 	_held: OwnedRwLockReadGuard<()>,
 }
 
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 impl SharedGuardFence {
 	/// Whether the shard's guard is known to read `NonEmpty`.
 	pub(crate) fn armed(&self, shard: u16) -> bool {
@@ -237,10 +232,9 @@ pub(crate) struct ExclusiveGuardFence {
 	_held: OwnedRwLockWriteGuard<()>,
 }
 
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 impl ExclusiveGuardFence {
 	/// The index this fence orders.
-	pub(crate) fn index(&self) -> &crate::values::index_delta::BufferedIndex {
+	pub(crate) fn index(&self) -> &crate::pending_guard::GuardedIndex {
 		&self.fence.index
 	}
 
@@ -291,7 +285,6 @@ impl Default for PendingGuardFences {
 	}
 }
 
-#[cfg_attr(not(diskann), allow(dead_code, reason = "only DiskANN pending-state guards are fenced"))]
 impl PendingGuardFences {
 	/// This datastore instance, as its writer leases name it.
 	pub(crate) fn process(&self) -> uuid::Uuid {
@@ -321,7 +314,7 @@ impl PendingGuardFences {
 	#[cfg(not(any(test, feature = "test-hooks")))]
 	pub(crate) fn count_repairs(&self, _n: usize) {}
 
-	/// Whether this datastore covers DiskANN guards as on a store that
+	/// Whether this datastore covers pending-state guards as on a store that
 	/// validates every read, although the store does not.
 	pub(crate) fn assumes_validated_reads(&self) -> bool {
 		#[cfg(any(test, feature = "test-hooks"))]
@@ -338,7 +331,7 @@ impl PendingGuardFences {
 	fn fence(
 		&self,
 		prefix: &[u8],
-		index: impl FnOnce() -> crate::values::index_delta::BufferedIndex,
+		index: impl FnOnce() -> crate::pending_guard::GuardedIndex,
 	) -> Arc<IndexFence> {
 		let mut map = self.fences.lock();
 		if let Some(fence) = map.fences.get(prefix) {
@@ -366,7 +359,7 @@ impl PendingGuardFences {
 	pub(crate) async fn shared(
 		&self,
 		prefix: &[u8],
-		index: impl FnOnce() -> crate::values::index_delta::BufferedIndex,
+		index: impl FnOnce() -> crate::pending_guard::GuardedIndex,
 	) -> SharedGuardFence {
 		let fence = self.fence(prefix, index);
 		let held = Arc::clone(&fence.lock).read_owned().await;
@@ -381,7 +374,7 @@ impl PendingGuardFences {
 	pub(crate) async fn exclusive(
 		&self,
 		prefix: &[u8],
-		index: impl FnOnce() -> crate::values::index_delta::BufferedIndex,
+		index: impl FnOnce() -> crate::pending_guard::GuardedIndex,
 	) -> ExclusiveGuardFence {
 		let fence = self.fence(prefix, index);
 		let held = Arc::clone(&fence.lock).write_owned().await;
@@ -396,7 +389,7 @@ impl PendingGuardFences {
 	pub(crate) fn idle_lease_fences(
 		&self,
 		idle: std::time::Duration,
-	) -> Vec<(Vec<u8>, crate::values::index_delta::BufferedIndex)> {
+	) -> Vec<(Vec<u8>, crate::pending_guard::GuardedIndex)> {
 		self.fences
 			.lock()
 			.fences
@@ -448,12 +441,12 @@ pub struct CommitTriggers {
 	/// worth packing. In memory because reads cannot write a queue entry;
 	/// the fold task drains this set into the durable queue on its pass.
 	graph_fold_observations: Mutex<HashSet<GraphFoldScope>>,
-	/// Work the next commit through this datastore runs once its DiskANN guards
+	/// Work the next commit through this datastore runs once its pending-state guards
 	/// are covered and before its storage commit, as the tests of a commit that
 	/// stalls there need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	before_commit: Mutex<Option<BeforeCommitHook>>,
-	/// Work the next DiskANN guard step through this datastore runs once it has
+	/// Work the next pending-state guard step through this datastore runs once it has
 	/// read and written what it steps, before its commit, as the tests of a
 	/// covering that lands inside a step need.
 	#[cfg(any(test, feature = "test-hooks"))]
@@ -466,7 +459,7 @@ pub struct CommitTriggers {
 	commit_applied_unknown: Mutex<Option<Option<BeforeCommitHook>>>,
 }
 
-/// Work a test runs inside a commit, between its covering of DiskANN guards and
+/// Work a test runs inside a commit, between its covering of pending-state guards and
 /// its storage commit ([`CommitTriggers::set_before_commit_hook`]).
 #[cfg(any(test, feature = "test-hooks"))]
 pub type BeforeCommitHook =
@@ -486,7 +479,7 @@ impl CommitTriggers {
 		self.pending_guard_fences.assume_shared_store.store(true, Ordering::Release);
 	}
 
-	/// Cover DiskANN guards as on a store that validates every read
+	/// Cover pending-state guards as on a store that validates every read
 	/// ([`surrealdb_kvs::api::Transactable::validates_reads`]), although the
 	/// store does not. For the tests of that path.
 	#[cfg(any(test, feature = "test-hooks"))]
@@ -494,10 +487,10 @@ impl CommitTriggers {
 		self.pending_guard_fences.assume_validated_reads.store(true, Ordering::Release);
 	}
 
-	/// How many DiskANN guards this datastore's compaction has repaired
-	/// (`Transaction::repair_diskann_pending_guards`).
+	/// How many pending-state guards this datastore's compaction has repaired
+	/// (`Transaction::repair_pending_guards`).
 	#[cfg(any(test, feature = "test-hooks"))]
-	pub fn diskann_guard_repairs(&self) -> usize {
+	pub fn pending_guard_repairs(&self) -> usize {
 		self.pending_guard_fences.repairs.load(Ordering::Acquire)
 	}
 
@@ -514,9 +507,9 @@ impl CommitTriggers {
 		self.before_commit.lock().take()
 	}
 
-	/// Have the next DiskANN guard step through this datastore run `hook` once
+	/// Have the next pending-state guard step through this datastore run `hook` once
 	/// it has written its steps, before it commits
-	/// (`Transaction::step_diskann_pending_guards`).
+	/// (`Transaction::step_pending_guards`).
 	#[cfg(any(test, feature = "test-hooks"))]
 	pub fn set_before_guard_step_commit_hook(&self, hook: BeforeCommitHook) {
 		*self.before_guard_step_commit.lock() = Some(hook);
@@ -1859,15 +1852,16 @@ mod tests {
 		live.end_commit(later);
 	}
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-	use crate::values::index_delta::BufferedIndex;
+	use crate::pending_guard::GuardedIndex;
 
-	fn index(ix: u32) -> BufferedIndex {
-		BufferedIndex {
-			ns: NamespaceId(1),
-			db: DatabaseId(2),
-			tb: "t".into(),
-			ix: IndexId(ix),
-		}
+	fn index(ix: u32) -> GuardedIndex {
+		GuardedIndex::new(
+			crate::pending_guard::PendingGuardFamily::DiskAnn,
+			NamespaceId(1),
+			DatabaseId(2),
+			"t".into(),
+			IndexId(ix),
+		)
 	}
 
 	fn prefix(ix: u32) -> Vec<u8> {

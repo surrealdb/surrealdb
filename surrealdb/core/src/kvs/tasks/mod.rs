@@ -562,8 +562,8 @@ enum MaintenanceJob {
 	TikvLockCleanup,
 	/// Refresh the cached process/system utilisation metrics.
 	SystemMetricsRefresh,
-	/// Release the DiskANN writer leases this node no longer writes under.
-	DiskannWriterLeases,
+	/// Release the writer leases this node no longer writes under.
+	WriterLeases,
 }
 
 impl MaintenanceJob {
@@ -581,7 +581,7 @@ impl MaintenanceJob {
 		Self::TikvGc,
 		Self::TikvLockCleanup,
 		Self::SystemMetricsRefresh,
-		Self::DiskannWriterLeases,
+		Self::WriterLeases,
 	];
 
 	/// Description used in the scheduler's log lines.
@@ -596,7 +596,7 @@ impl MaintenanceJob {
 			Self::TikvGc => "TiKV MVCC GC",
 			Self::TikvLockCleanup => "TiKV lock cleanup",
 			Self::SystemMetricsRefresh => "system metrics refresh",
-			Self::DiskannWriterLeases => "idle DiskANN writer lease release",
+			Self::WriterLeases => "idle writer lease release",
 		}
 	}
 }
@@ -616,11 +616,11 @@ struct Slot {
 /// run ahead of it. So they can share one task without delaying a peer by more
 /// than one short pass, and a job with more work than one pass allows continues
 /// on the next tick rather than holding the task.
-/// How often this node releases the DiskANN writer leases it no longer writes
-/// under ([`Datastore::release_idle_diskann_writer_leases`]). A lease is only
+/// How often this node releases the writer leases it no longer writes
+/// under ([`Datastore::release_idle_writer_leases`]). A lease is only
 /// ever held on a store this datastore is not the sole writer of, so elsewhere
 /// the job finds nothing to do.
-const DISKANN_WRITER_LEASE_RELEASE_INTERVAL: Duration = Duration::from_secs(5);
+const WRITER_LEASE_RELEASE_INTERVAL: Duration = Duration::from_secs(5);
 
 fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 	slots(&[
@@ -631,7 +631,7 @@ fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 		(MaintenanceJob::ResumeIndexBuilds, opts.index_build_resume_interval),
 		(MaintenanceJob::TikvGc, opts.tikv_gc_interval),
 		(MaintenanceJob::TikvLockCleanup, opts.tikv_lock_cleanup_interval),
-		(MaintenanceJob::DiskannWriterLeases, DISKANN_WRITER_LEASE_RELEASE_INTERVAL),
+		(MaintenanceJob::WriterLeases, WRITER_LEASE_RELEASE_INTERVAL),
 	])
 }
 
@@ -726,7 +726,7 @@ async fn run_maintenance_job(
 		}
 		MaintenanceJob::TikvGc => dbs.run_mvcc_gc(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::TikvLockCleanup => dbs.run_lock_cleanup(opts.tikv_gc_lifetime).await,
-		MaintenanceJob::DiskannWriterLeases => dbs.release_idle_diskann_writer_leases().await,
+		MaintenanceJob::WriterLeases => dbs.release_idle_writer_leases().await,
 		MaintenanceJob::SystemMetricsRefresh => {
 			// The snapshot is one cache per process, and its CPU percentage is a
 			// delta since the previous refresh of it, so only the datastore

@@ -44,6 +44,31 @@ impl HnswCompactionPlan {
 	pub fn has_more(&self) -> bool {
 		match self.0 {}
 	}
+
+	/// Unreachable, as no value of this type exists.
+	pub fn captured_len(&self) -> usize {
+		match self.0 {}
+	}
+
+	/// Unreachable, as no value of this type exists.
+	pub fn requires_apply(&self) -> bool {
+		match self.0 {}
+	}
+
+	/// Unreachable, as no value of this type exists.
+	pub fn guard_step(&self, _ikb: &IndexKeyBase) -> HnswGuardStep {
+		match self.0 {}
+	}
+}
+
+/// A guard step that cannot be constructed.
+pub struct HnswGuardStep(Infallible);
+
+impl HnswGuardStep {
+	/// Unreachable, as no value of this type exists.
+	pub async fn run(&self, _tx: &Transaction) -> Result<bool> {
+		match self.0 {}
+	}
 }
 
 /// An HNSW index that cannot be constructed.
@@ -82,6 +107,7 @@ impl HnswIndex {
 	pub(crate) async fn prepare_compaction(
 		_env: &dyn IndexEnv,
 		_ikb: &IndexKeyBase,
+		_format_version: u16,
 	) -> Result<HnswCompactionPlan> {
 		bail!(disabled())
 	}
