@@ -56,6 +56,7 @@ use super::perm_where::{
 };
 use super::rehome::{and_chain, can_rehome, copy_tree_bound, rebuild_and_chain_bound};
 use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
 use crate::exec::ir::core::walk::{ancestors, ops_in};
@@ -64,7 +65,7 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
-use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LogOp, LoopKind};
+use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LogOp, LogTag, LoopKind};
 use crate::exec::ir::op_kind::OpKind;
 use crate::expr::logical::{EvalMode, ITERATION_PARAMS, OutputPathPart};
 use crate::expr::{BinaryOperator, PrefixOperator};
@@ -81,6 +82,18 @@ impl LoPass for PushIntoSubquery {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.push_into_subquery
+	}
+
+	/// [`run_push`] offers each op outside stored code to [`push_into`], which returns before any
+	/// fact is read or the container touched unless [`where_filter`] finds a `logical.filter` and
+	/// [`subquery_target`] finds, in order, an enclosing select `logical.loop`, a
+	/// `logical.subquery` that feeds it, an inner select loop and a `logical.project` as the last
+	/// op of its body. The filter stands outside stored code, so the ops around it do too.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Filter)
+			&& census.has(LogTag::Loop)
+			&& census.has(LogTag::Subquery)
+			&& census.has(LogTag::Project)
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

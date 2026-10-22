@@ -18,6 +18,7 @@ use super::rehome::{RehomeMode, and_chain, can_rehome, rehome_tree};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
 use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in};
 use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -80,6 +81,13 @@ impl LoPass for Unswitch {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.unswitch
+	}
+
+	/// [`run_unswitch`] visits the ops of [`live_ops`] that [`is_select_loop`] accepts: a
+	/// `logical.loop` outside stored code. With none it reads no fact, rewrites nothing and
+	/// reports the default.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Loop)
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

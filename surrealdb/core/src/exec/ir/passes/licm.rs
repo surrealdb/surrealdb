@@ -23,6 +23,7 @@ use super::rehome::{and_chain, can_rehome, rebuild_and_chain};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
 use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in, outermost_scope};
 use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
@@ -142,6 +143,13 @@ impl LoPass for Licm {
 		cfg.licm
 	}
 
+	/// [`run_licm`] takes its candidates from [`candidates`], which sweeps the bodies of the loops
+	/// [`loops_in`] returns: the `logical.loop` ops outside stored code. With none, no sweep runs,
+	/// no fact is read, no candidate is counted, and the rewriter it builds is not used.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Loop)
+	}
+
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
 		PassRun::done(run_licm(cx))
 	}
@@ -171,6 +179,15 @@ impl LoPass for HoistLeadingConjuncts {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.hoist_leading
+	}
+
+	/// [`run_hoist`] offers each op outside stored code to [`hoist_at`], which returns before any
+	/// fact is read or the container touched unless [`chain_site`] accepts the op: a
+	/// `logical.filter` or `logical.permission_filter` for which [`enclosing_loop`] finds a
+	/// `logical.loop`. The filter is outside stored code, so the loop that encloses it is too.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Loop)
+			&& (census.has(LogTag::Filter) || census.has(LogTag::PermissionFilter))
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

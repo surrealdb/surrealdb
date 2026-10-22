@@ -29,6 +29,8 @@ mod tests_driver;
 #[cfg(test)]
 mod tests_fold;
 #[cfg(test)]
+mod tests_gates;
+#[cfg(test)]
 mod tests_layers;
 #[cfg(test)]
 mod tests_licm;

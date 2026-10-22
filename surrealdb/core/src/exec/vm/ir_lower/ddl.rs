@@ -731,7 +731,11 @@ impl Ddl<'_, '_> {
 		};
 		let cx = structural_cx(self.cx.registry(), self.ir);
 		let set = match self.facts.get(op, self.ir.generation(op), &cx.memo_key()) {
-			Some(facts) => facts.effects.set,
+			Some(facts) => {
+				#[cfg(test)]
+				super::super::compile::LOWERING_FACT_HITS.with(|hits| hits.set(hits.get() + 1));
+				facts.effects.set
+			}
 			None => effects::summary_with(self.ir, &mut FactCache::new(), &cx, op).set,
 		};
 		Ok(!super::super::speculate::admits(set) || self.holds_opaque_node(op))

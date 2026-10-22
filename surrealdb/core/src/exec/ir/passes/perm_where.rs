@@ -36,6 +36,7 @@ use smallvec::{SmallVec, smallvec};
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{and_chain, can_rehome, rebuild_and_chain, rebuild_and_chain_bound};
 use crate::exec::ir::analysis::{effects, fallibility, frames};
+use crate::exec::ir::core::census::{Census, Flag};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -50,7 +51,7 @@ use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, SnapshotId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LogOp};
+use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LogOp, LogTag};
 use crate::exec::ir::op_kind::OpKind;
 use crate::expr::BinaryOperator;
 use crate::expr::logical::EffectSet;
@@ -77,6 +78,16 @@ impl LoPass for SpecialiseGuards {
 		cfg.specialise_guards
 	}
 
+	/// [`run_specialise`] offers each op outside stored code to [`erase_true_permission`] and
+	/// [`specialise_field_guards`]. The first acts only on a permission filter whose first region
+	/// is a `PermissionFrame`. The second, through [`guarded_fields`], needs at least one
+	/// `PermissionFrame` region among the op's regions. Both answer before touching the container
+	/// or the facts when none stands there, which [`Flag::PermissionFrame`] states: an op outside
+	/// stored code owns such a region.
+	fn needs(&self, census: &Census) -> bool {
+		census.flag(Flag::PermissionFrame)
+	}
+
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
 		PassRun::done(run_specialise(cx))
 	}
@@ -100,6 +111,16 @@ impl LoPass for PushBelowLayer {
 		cfg.push_below_layer
 	}
 
+	/// [`run_push`] with [`Target::Layer`] offers each op outside stored code to
+	/// [`push_below_layer`], which returns before any fact is read or the container touched
+	/// unless [`where_filter`] finds a `logical.filter` and [`layer_stack`], through
+	/// [`target_below`], finds a `logical.project` whose `layer` attribute is set beneath it.
+	/// A filter and a layer projection outside stored code are what the census states: the filter
+	/// is read through `live_ops`, and the layer stands in the filter's own block.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Filter) && census.flag(Flag::ProjectionLayer)
+	}
+
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {
 		PassRun::done(run_push(cx, Target::Layer))
 	}
@@ -120,6 +141,15 @@ impl LoPass for PushBelowPermission {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.push_below_permission
+	}
+
+	/// [`run_push`] with [`Target::Permission`] offers each op outside stored code to
+	/// [`push_below_permission`], which returns before any fact is read or the container touched
+	/// unless [`where_filter`] finds a `logical.filter` and [`target_below`] finds a
+	/// `logical.permission_filter` in the same block beneath it. Both are tags the census
+	/// states for ops outside stored code.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Filter) && census.has(LogTag::PermissionFilter)
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

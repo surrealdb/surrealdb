@@ -17,6 +17,7 @@ use surrealdb_strand::{Strand, TableName};
 use super::convert::{
 	ConversionPattern, ConversionReport, ConversionSet, Converted, convert, convert_logged,
 };
+use super::copy::OutsideRead;
 use super::facts::FactCache;
 use super::ir::{Ir, IrScope, Walk, WalkOrder};
 use super::location::{LocOrigin, Location, Span};
@@ -4788,6 +4789,75 @@ fn a_region_unit_reads_nothing_of_the_container_it_was_copied_from() {
 		let original = unit.map.original_op(op).expect("the op has an original");
 		assert!(f.ir.op(original).is_some());
 	}
+}
+
+/// A request whose statement body defines a literal and an array of it, and holds a region that
+/// reads the literal and, when `computed`, the array too.
+fn reroot_fixture(computed: bool) -> (Ir, RegionId) {
+	let mut ir = request();
+	let top = top_block(&ir);
+	let region = edit(&mut ir, |rw| {
+		let (statement, _) = conform(rw, InsertPoint::End(top), stmt_kind());
+		let (_, body) = rw
+			.create_region(
+				statement,
+				RegionKind::Statement(StatementCommit::Auto),
+				&[TypeKnowledge::Unknown],
+			)
+			.expect("the region is created");
+		let (_, literal_values) = add(rw, InsertPoint::End(body), literal(7), &[], 1);
+		let array = rw
+			.create(
+				InsertPoint::End(body),
+				typed(OpKind::Expr(ExprOp::Array), &[literal_values[0]], vec![int_fact()]),
+			)
+			.expect("the op is created");
+		let array_value = rw.ir().op(array).expect("the op exists").results[0];
+		let (owner, _) = add(
+			rw,
+			InsertPoint::End(body),
+			OpKind::Expr(ExprOp::Subquery(NestedStrategy::Apply)),
+			&[],
+			1,
+		);
+		let (region, inner) = rw
+			.create_region(owner, RegionKind::Subquery, &[int_fact()])
+			.expect("the region is created");
+		let reads = if computed {
+			vec![literal_values[0], array_value]
+		} else {
+			vec![literal_values[0]]
+		};
+		let (_, read) = add(rw, InsertPoint::End(inner), OpKind::Expr(ExprOp::Array), &reads, 1);
+		close_with(rw, inner, &[read[0]]);
+		close_with(rw, body, &[]);
+		region
+	});
+	(ir, region)
+}
+
+#[test]
+fn a_reroot_moves_the_outside_literal_a_region_reads_and_keeps_its_ops() {
+	let (mut ir, region) = reroot_fixture(false);
+	let inside: Vec<OpId> = ops_in(&ir, region).collect();
+	let freed = ir.reroot(region).expect("the region stands beneath the top").expect("it is read");
+	assert_eq!(freed.moved, 1, "the literal moves into the region");
+	assert_eq!(ir.top(), region);
+	let held: Vec<OpId> = ops_in(&ir, region).collect();
+	assert_eq!(held.len(), inside.len() + 1);
+	assert_eq!(literal_int(&ir, held[0]), Some(7), "the moved literal leads the block");
+	assert_eq!(&held[1..], inside.as_slice(), "the ops inside keep their ids");
+	assert!(logical_violation(&ir, VerifyRule::UseList).is_none());
+	assert!(logical_violation(&ir, VerifyRule::Dominance).is_none());
+}
+
+#[test]
+fn a_reroot_answers_outside_read_for_a_computed_value_and_changes_nothing() {
+	let registry = text_registry();
+	let (mut ir, region) = reroot_fixture(true);
+	let before = text_of(&ir, &registry);
+	assert!(matches!(ir.reroot(region), Ok(Err(OutsideRead))));
+	assert_eq!(text_of(&ir, &registry), before);
 }
 
 #[test]

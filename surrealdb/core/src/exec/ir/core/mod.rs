@@ -7,6 +7,7 @@
 
 pub(crate) mod attrs;
 pub(crate) mod block;
+pub(crate) mod census;
 pub(crate) mod convert;
 pub(crate) mod copy;
 pub(crate) mod facts;

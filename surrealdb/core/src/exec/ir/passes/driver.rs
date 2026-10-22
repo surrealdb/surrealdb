@@ -12,6 +12,7 @@ use std::task::{Context, Poll};
 
 use super::reg::lo_passes;
 use crate::exec::ir::analysis::tokens;
+use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::pattern::Limit;
@@ -152,6 +153,17 @@ pub(crate) trait LoPass: Send + Sync {
 	/// Whether `cfg` turns the pass on.
 	fn enabled(&self, cfg: &PassConfig) -> bool;
 
+	/// Whether the pass can find a candidate in a container with this `census`. The driver skips,
+	/// like a disabled pass, a pass that answers `false`.
+	///
+	/// A pass answers `false` only when its candidate search matches on tags and flags the census
+	/// lacks, and a run that finds no candidate leaves the container and the fact cache untouched
+	/// and reports [`PassReport::default`]. The answer is stated with its proof on each override.
+	/// The default is `true`: the pass always runs.
+	fn needs(&self, _census: &Census) -> bool {
+		true
+	}
+
 	/// Runs the pass over every statement of the container.
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a>;
 }
@@ -188,7 +200,9 @@ impl Future for PassRun<'_> {
 /// Runs the loop optimiser over every statement of `ir`, in the order of [`lo_passes`], and
 /// answers one report per pass.
 ///
-/// A pass `cfg` turns off is skipped without touching `ir`, and its report is the default one.
+/// A pass `cfg` turns off, or whose [`LoPass::needs`] the census of `ir` refuses, is skipped
+/// without touching `ir`, and its report is the default one. The census is built before the first
+/// pass that runs and again after each pass that reports a rewrite.
 /// After each pass that ran, the folds it left requested are awaited through `folder`, so the next
 /// pass reads their outcomes, and a debug build verifies the container, naming the pass in the
 /// error. A release build leaves verification to the caller's phase boundary.
@@ -200,7 +214,7 @@ pub(crate) async fn run_lo(
 	cfg: &PassConfig,
 	observer: &mut dyn FoldObserver,
 ) -> Result<Vec<(&'static str, PassReport)>, IrError> {
-	run_passes(&lo_passes(), ir, facts, folder, effects, cfg, observer).await
+	run_passes(lo_passes(), ir, facts, folder, effects, cfg, observer).await
 }
 
 /// [`run_lo`] over the given passes, in the given order.
@@ -214,9 +228,15 @@ pub(super) async fn run_passes(
 	observer: &mut dyn FoldObserver,
 ) -> Result<Vec<(&'static str, PassReport)>, IrError> {
 	let mut reports = Vec::with_capacity(passes.len());
+	let mut census: Option<Census> = None;
 	for pass in passes {
 		let name = pass.name();
 		if !pass.enabled(cfg) {
+			reports.push((name, PassReport::default()));
+			continue;
+		}
+		let held = census.get_or_insert_with(|| Census::of(ir));
+		if !gated_in(pass.as_ref(), held) {
 			reports.push((name, PassReport::default()));
 			continue;
 		}
@@ -240,9 +260,28 @@ pub(super) async fn run_passes(
 			tokens::rethread_changed(ir, facts, effects, marks)?;
 		}
 		verify_after(ir, facts, effects, name)?;
+		// A pass reports every rewrite it applies, so a report of none leaves the census as it
+		// was; a debug build checks that no tag or flag appeared.
+		if report.rewrites > 0 {
+			census = None;
+		} else {
+			debug_assert!(
+				census.as_ref().is_none_or(|held| held.covers(&Census::of(ir))),
+				"pass {name} changed the container and reported no rewrite"
+			);
+		}
 		reports.push((name, report));
 	}
 	Ok(reports)
+}
+
+/// Whether `pass` runs over a container with `census`.
+fn gated_in(pass: &dyn LoPass, census: &Census) -> bool {
+	#[cfg(test)]
+	if ungated::forced() {
+		return true;
+	}
+	pass.needs(census)
 }
 
 /// Awaits every fold a pass left requested and stores its outcome. A request whose value the pass
@@ -285,4 +324,32 @@ fn verify_after(
 			..error
 		})
 	})
+}
+
+/// A switch that runs every enabled pass whatever the census says, so a test compares the gated
+/// run with the ungated one. It holds for the current thread, which runs a test's future.
+#[cfg(test)]
+pub(super) mod ungated {
+	use std::cell::Cell;
+
+	thread_local! {
+		static FORCED: Cell<bool> = const { Cell::new(false) };
+	}
+
+	pub(super) fn forced() -> bool {
+		FORCED.with(Cell::get)
+	}
+
+	/// Forces the passes ungated until the guard drops.
+	pub(in crate::exec::ir) struct Guard(bool);
+
+	pub(in crate::exec::ir) fn force() -> Guard {
+		Guard(FORCED.with(|forced| forced.replace(true)))
+	}
+
+	impl Drop for Guard {
+		fn drop(&mut self) {
+			FORCED.with(|forced| forced.set(self.0));
+		}
+	}
 }

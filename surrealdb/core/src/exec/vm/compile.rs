@@ -31,6 +31,7 @@ use super::program::{Program, UnitFrame, UnitSig};
 use super::{Lowered, NotCovered};
 use crate::dbs::Options;
 use crate::exec::BoxFut;
+#[cfg(test)]
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, IrScope};
 use crate::exec::ir::core::walk::ops_in;
@@ -165,15 +166,51 @@ fn statement_region(ir: &Ir) -> Lowered<RegionId> {
 	}
 }
 
-/// The body of the one statement `planned`, a request container, holds, as a container of its
-/// own whose top region is the statement's region: the program a statement compiles to.
+/// The body of the one statement `planned`, a request container, holds, as the container whose
+/// top region is the statement's region: the program a statement compiles to.
 ///
 /// The request, transaction and statement ops around it are the request driver's, which runs the
-/// statement's transaction and session effects; none of them is lowered. A statement's `TIMEOUT`
-/// stands in its region and is lowered with the body. The body reads no value defined outside its
-/// region but literals, which are copied with it, since a program at the root is handed no
-/// inputs. Facts are recomputed on the copy, whose ids are its own.
-fn statement_body(planned: Planned) -> Lowered<Planned> {
+/// statement's transaction and session effects; none of them is lowered, so they are freed. A
+/// statement's `TIMEOUT` stands in its region and is lowered with the body. The body reads no
+/// value defined outside its region but literals, which move into it, since a program at the root
+/// is handed no inputs. The ops of the body keep their ids and generations, so the facts planning
+/// computed for them stay current; the facts of the freed ops are retired. No lowering reader needs
+/// the facts only the planning phases read ([`FactCache::clear_planning_only`]), and placement
+/// reads them at the physical boundary, before the body is rerooted, so they are dropped.
+fn statement_body(mut planned: Planned) -> Lowered<Planned> {
+	if planned.ir.region(planned.ir.top()).map(|held| held.kind) != Some(RegionKind::Request) {
+		return Ok(planned);
+	}
+	let region = statement_region(&planned.ir)?;
+	let Ok(freed) = planned.ir.reroot(region)? else {
+		return Err(NotCovered::internal(
+			"a statement body reads a value its request container defines",
+		));
+	};
+	#[cfg(test)]
+	MOVED_LITERALS.with(|moved| moved.set(moved.get() + freed.moved));
+	for op in freed.ops {
+		planned.facts.retire(op);
+	}
+	for value in freed.values {
+		planned.facts.invalidate_value(value);
+	}
+	planned.facts.clear_planning_only();
+	Ok(planned)
+}
+
+#[cfg(test)]
+thread_local! {
+	/// The literals [`statement_body`] has moved into a body on this thread.
+	static MOVED_LITERALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// The planning facts the lowering of a schema statement has read on this thread.
+	pub(super) static LOWERING_FACT_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// [`statement_body`] by copying the statement's region out of the container, which drops the
+/// facts: the reference the rerooted body is compared with.
+#[cfg(test)]
+fn statement_body_by_copy(planned: Planned) -> Lowered<Planned> {
 	let ir = &planned.ir;
 	if ir.region(ir.top()).map(|held| held.kind) != Some(RegionKind::Request) {
 		return Ok(planned);
@@ -196,12 +233,21 @@ fn statement_body(planned: Planned) -> Lowered<Planned> {
 /// statements the program serves: each is planned for the catalog its transaction reads when the
 /// list reaches it, served from the compile cache by its text.
 pub(super) async fn compile(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Compiled> {
+	compile_with(planner, op, statement_body).await
+}
+
+/// [`compile`], taking the body of the planned statement by `body`.
+async fn compile_with(
+	planner: &Planner<'_>,
+	op: &LogicalOp,
+	body: fn(Planned) -> Lowered<Planned>,
+) -> Lowered<Compiled> {
 	let session = compile_phase!("bind", session_of(planner));
 	let indexes = SharedIndexes::new();
 	let serves_late = planner.binds_late_after_schema();
 	let (planned, served) =
 		plan_serving(planner, &session, op, UnitKind::Request, &[], &indexes, serves_late).await?;
-	let planned = compile_phase!("lower", statement_body(planned)?);
+	let planned = compile_phase!("lower", body(planned)?);
 	compile_planned(planner, &session, &indexes, planned, served, None).await
 }
 
@@ -1216,8 +1262,15 @@ mod tests {
 	use surrealdb_strand::TableName;
 
 	use super::super::ir_lower::UnitRequest;
-	use super::super::program::UnitFrame;
+	use super::super::plain::ValueData;
+	use super::super::program::{Program, UnitFrame};
+	use super::super::tests_morsel::{bind, planner};
+	use super::{
+		LOWERING_FACT_HITS, MOVED_LITERALS, compile_with, statement_body, statement_body_by_copy,
+	};
+	use crate::exec::operators::test_util::TestDb;
 	use crate::exec::planner::{CycleGuard, UnitKey};
+	use crate::val::{Uuid, Value};
 
 	fn frame(checked: bool) -> UnitFrame {
 		UnitFrame {
@@ -1259,5 +1312,102 @@ mod tests {
 			guard.try_enter_unit(UnitKey::new(table_unit("ring"), frame(true))).is_some(),
 			"a closed unit is entered again"
 		);
+	}
+
+	/// `value` with every uuid it holds replaced by the nil uuid.
+	fn zero_uuids(value: &mut Value) {
+		match value {
+			Value::Uuid(uuid) => *uuid = Uuid::default(),
+			Value::Object(object) => object.values_mut().for_each(zero_uuids),
+			Value::Array(array) => array.iter_mut().for_each(zero_uuids),
+			_ => {}
+		}
+	}
+
+	/// `program` with the uuids of its constants zeroed. A schema statement's table template
+	/// draws fresh cache stamps at every compile, so two compiles of one statement differ by them
+	/// alone; no other part of a program holds a drawn uuid.
+	fn zeroed_stamps(program: &Program) -> Program {
+		let mut zeroed = program.clone();
+		let mut consts = (*zeroed.consts).clone();
+		consts.iter_mut().for_each(zero_uuids);
+		zeroed.consts = ValueData::new(consts, "a test program's constants")
+			.expect("constants that held no closure hold none after zeroing");
+		zeroed
+	}
+
+	/// The statement body taken by rerooting the request container, which keeps the planning
+	/// facts, lowers to the program the body copied out of the container lowers to.
+	#[tokio::test]
+	async fn statement_body_reroot_matches_copy() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS; DEFINE TABLE u SCHEMALESS; DEFINE TABLE pk SCHEMALESS;
+			 DEFINE TABLE prm SCHEMALESS PERMISSIONS FOR select, update WHERE v > 0;
+			 DEFINE EVENT ev ON prm WHEN true THEN (CREATE u SET w = 1);
+			 CREATE t:1 SET v = 1; CREATE u:1 SET w = 2; CREATE pk:1 SET a = 1;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let corpus = [
+			"RETURN 1",
+			"SELECT * FROM []",
+			"SELECT * FROM $id",
+			"SELECT * FROM pk WHERE id = $id",
+			"UPDATE $id SET a = 1",
+			"SELECT * FROM t TIMEOUT 1s",
+			"RETURN $x",
+			"{ LET $x = 1; RETURN $x }",
+			"SELECT *, (SELECT * FROM u) AS s FROM t",
+			"FOR $i IN [1, 2] { CREATE t SET v = $i }",
+			"DEFINE FIELD f ON t VALUE (|$x| $x)(1)",
+			"DEFINE FIELD f ON t DEFAULT (|$x| $x)(1)",
+			"DEFINE FIELD f ON t DEFAULT $x",
+			"DEFINE TABLE $x",
+			"DEFINE TABLE w PERMISSIONS FOR select WHERE v > 1",
+			"DEFINE PARAM $p VALUE (|$x| $x)(1)",
+			"DEFINE PARAM $p VALUE string::uppercase('a')",
+			"DEFINE PARAM $p VALUE $x",
+			"DEFINE TABLE w COMMENT string::uppercase('a')",
+			"SELECT * FROM prm",
+			"UPDATE prm SET v = 2",
+			"{ LET $f = |$x| $x; RETURN $f(1) }",
+		];
+		let (mut moved, mut reroot_hits, mut copy_hits) = (0, 0, 0);
+		for sql in corpus {
+			let op = bind(&ctx, sql).await;
+			let (before, hits_before) = (
+				MOVED_LITERALS.with(|held| held.get()),
+				LOWERING_FACT_HITS.with(|held| held.get()),
+			);
+			let rerooted = Box::pin(compile_with(&planner(&ctx), &op, statement_body)).await;
+			moved += MOVED_LITERALS.with(|held| held.get()) - before;
+			let hits_mid = LOWERING_FACT_HITS.with(|held| held.get());
+			reroot_hits += hits_mid - hits_before;
+			let copied = Box::pin(compile_with(&planner(&ctx), &op, statement_body_by_copy)).await;
+			copy_hits += LOWERING_FACT_HITS.with(|held| held.get()) - hits_mid;
+			match (rerooted, copied) {
+				(Ok(rerooted), Ok(copied)) => {
+					if rerooted.program != copied.program {
+						assert_eq!(
+							zeroed_stamps(&rerooted.program),
+							zeroed_stamps(&copied.program),
+							"the program of `{sql}`, beyond its cache stamps"
+						);
+					}
+					assert_eq!(rerooted.served.len(), copied.served.len(), "`{sql}` serves");
+				}
+				(rerooted, copied) => {
+					assert_eq!(
+						rerooted.err().map(|error| format!("{error:?}")),
+						copied.err().map(|error| format!("{error:?}")),
+						"the refusal of `{sql}`"
+					);
+				}
+			}
+		}
+		assert_eq!(moved, 0, "a bound statement reads no literal its region does not define");
+		eprintln!("fact hits: reroot {reroot_hits}, copy {copy_hits}");
+		assert!(reroot_hits > 0, "the kept planning facts are read while lowering");
+		assert_eq!(copy_hits, 0, "a copied body holds no planning facts");
 	}
 }

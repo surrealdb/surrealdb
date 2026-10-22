@@ -36,6 +36,7 @@ use smallvec::{SmallVec, smallvec};
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::{computing_ops, def_op};
 use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::core::census::{Census, Flag};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::location::{LocOrigin, Location};
@@ -69,6 +70,15 @@ impl LoPass for InlineCalls {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.inline_calls
+	}
+
+	/// Candidates are collected by [`run_inline`]'s walk over every op of the container, stored
+	/// code included, through [`call_with_body`]: a call op that owns a `FunctionBody` region.
+	/// Without one, `sites` is empty and the run answers the default report without touching the
+	/// container or the facts. [`Flag::FunctionBodyCall`] holds exactly when such a call stands
+	/// anywhere in the container.
+	fn needs(&self, census: &Census) -> bool {
+		census.flag(Flag::FunctionBodyCall)
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

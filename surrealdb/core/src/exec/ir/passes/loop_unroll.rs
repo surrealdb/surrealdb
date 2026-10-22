@@ -17,6 +17,7 @@ use smallvec::{SmallVec, smallvec};
 use super::driver::{FoldObserver, LoCx, LoPass, PassConfig, PassReport, PassRun};
 use crate::exec::ir::analysis::loop_legality::{exit_of, of_with};
 use crate::exec::ir::analysis::multiplicity::loop_body;
+use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
@@ -80,6 +81,12 @@ impl LoPass for LoopUnroll {
 
 	fn enabled(&self, cfg: &PassConfig) -> bool {
 		cfg.unroll
+	}
+
+	/// [`run_unroll`] visits the loops [`live_loops`] returns: the `logical.loop` ops outside
+	/// stored code. With none it reads no fact, rewrites nothing and reports the default.
+	fn needs(&self, census: &Census) -> bool {
+		census.has(LogTag::Loop)
 	}
 
 	fn run<'a, 'b>(&'a self, cx: &'a mut LoCx<'b>) -> PassRun<'a> {

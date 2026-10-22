@@ -194,6 +194,25 @@ impl FactCache {
 		}
 	}
 
+	/// Drops every entry held for `op`, a freed op that no later read names, so not even
+	/// [`FactCache::last_under`] answers for it.
+	pub(crate) fn retire(&mut self, op: OpId) {
+		self.entries.remove(op);
+		self.summaries.remove(op);
+		self.retired.remove(&op);
+	}
+
+	/// Drops what only planning reads: the logical-boundary snapshot, the logical plan's
+	/// legalities and the facts of erased ops. What stays is the per-op entries, summaries and
+	/// per-value knowledge, each keyed by an op or value that is still live and the generation it
+	/// was computed at, so a container that keeps its ops' ids answers lowering's reads from it,
+	/// while no reader of the physical boundary finds a snapshot or an erased op's facts.
+	pub(crate) fn clear_planning_only(&mut self) {
+		self.legality_snapshot = None;
+		self.logical_legalities = None;
+		self.retired.clear();
+	}
+
 	/// Drops every entry held for the erased value `v`.
 	pub(crate) fn invalidate_value(&mut self, v: ValueId) {
 		self.types.remove(v);

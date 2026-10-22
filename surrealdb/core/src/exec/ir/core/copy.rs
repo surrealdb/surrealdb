@@ -97,6 +97,31 @@ impl std::ops::Deref for StatementCopy {
 	}
 }
 
+/// The answer of [`Ir::reroot`] for a region whose code reads a value, defined outside it, that
+/// is not a literal. The container is left unchanged.
+#[derive(Debug)]
+pub(crate) struct OutsideRead;
+
+/// The ops and values [`Ir::reroot`] freed, so the owner of a cache keyed by them drops its
+/// entries.
+#[derive(Debug, Default)]
+pub(crate) struct Rerooted {
+	pub(crate) ops: Vec<OpId>,
+	pub(crate) values: Vec<ValueId>,
+	/// How many literals defined outside the region moved into it.
+	pub(crate) moved: usize,
+}
+
+/// What lies outside the region [`Ir::reroot`] keeps.
+#[derive(Default)]
+struct Enclosure {
+	regions: Vec<RegionId>,
+	blocks: HashSet<BlockId>,
+	ops: HashSet<OpId>,
+	/// Whether the region kept stands beneath the top region.
+	found: bool,
+}
+
 /// A container copied from a region, the map from the original to the copy, and the pairs of an
 /// original op and its copy, parents before their children.
 type CopiedTop = (Ir, IdMap, Vec<(OpId, OpId)>);
@@ -290,6 +315,232 @@ impl Ir {
 	#[allow(dead_code, reason = "the compile driver binds the inputs of the units it lowers")]
 	pub(crate) fn region_inputs(&self, region: RegionId) -> Result<Vec<ValueId>, IrError> {
 		self.copy_region(region).map(|unit| unit.inputs)
+	}
+
+	/// Makes `region`, which a single block of ops fills, the top region of this container, in
+	/// place, and frees every op, value, block and region outside it.
+	///
+	/// The result is what [`Ir::copy_region`] leaves for a region that takes no input, without
+	/// the copy: ops, values, blocks and regions inside `region` keep their ids and their
+	/// generations, so the facts held for them stay current, and nothing inside is renumbered or
+	/// bumped. The phase, the frame table and the snapshot table are kept whole; the `matches`,
+	/// `hop_keys` and `placement` entries of the retained ops are kept and the others dropped; the
+	/// eliminated list, the retired error scopes, the effect tokens and the constraint judgement
+	/// are cleared, as a copy holds none of them. A literal that lies outside `region` and is read
+	/// inside, by an operand or by the version snapshot of an op, moves to the front of the
+	/// region's block, first read first, and every read of it keeps its value.
+	///
+	/// Fails, before changing anything, with `Stale` when `region` is dangling or stands beneath
+	/// no op of this container's top region, and with `Refused` when it is the top region or does
+	/// not hold exactly one block. Answers [`OutsideRead`], also before changing anything, when an
+	/// op inside reads a value defined outside that is not a literal.
+	pub(crate) fn reroot(
+		&mut self,
+		region: RegionId,
+	) -> Result<Result<Rerooted, OutsideRead>, IrError> {
+		let held = self.regions.get(region).ok_or(IrError::Stale("region"))?;
+		let owner = held.parent.ok_or(IrError::Refused("unit region"))?;
+		let block = match held.blocks.as_slice() {
+			[block] => *block,
+			_ => return Err(IrError::Refused("statement block")),
+		};
+		let mut enclosure = Enclosure::default();
+		self.collect_enclosure(self.top, region, &mut enclosure);
+		if !enclosure.found {
+			return Err(IrError::Stale("region"));
+		}
+		let mut inside = Vec::new();
+		let mut inside_blocks = Vec::new();
+		self.collect_inside(region, &mut inside, &mut inside_blocks);
+		let Ok(moved) = self.outside_literals(&inside, &enclosure)? else {
+			return Ok(Err(OutsideRead));
+		};
+
+		// Nothing below fails.
+		let mut freed = Rerooted {
+			moved: moved.len(),
+			..Rerooted::default()
+		};
+		for op in &moved {
+			enclosure.ops.remove(op);
+		}
+		for op in inside.iter().chain(&moved) {
+			if let Some(tokens) = self.op_tokens.remove(*op) {
+				for value in tokens.results {
+					self.values.remove(value);
+					freed.values.push(value);
+				}
+			}
+		}
+		for held in &inside_blocks {
+			let tokens =
+				self.blocks.get_mut(*held).map(|data| std::mem::take(&mut data.token_args));
+			for value in tokens.into_iter().flatten() {
+				self.values.remove(value);
+				freed.values.push(value);
+			}
+		}
+		self.untokened.clear();
+		self.threaded = false;
+		for op in &enclosure.ops {
+			self.drop_operand_uses(*op);
+		}
+		for op in &moved {
+			if let Some(data) = self.ops.get_mut(*op) {
+				data.parent = block;
+			}
+		}
+		if let Some(data) = self.blocks.get_mut(block) {
+			data.ops.splice(0..0, moved.iter().copied());
+		}
+		if let Some(data) = self.ops.get_mut(owner) {
+			data.regions.retain(|held| *held != region);
+		}
+		for op in &enclosure.ops {
+			self.free_op(*op, EliminationReason::DeadPure, false, &mut |entity| match entity {
+				Freed::Op(op) => freed.ops.push(op),
+				Freed::Value(value) => freed.values.push(value),
+			});
+		}
+		for old in &enclosure.regions {
+			self.sealed_regions.remove(*old);
+			let Some(data) = self.regions.remove(*old) else {
+				continue;
+			};
+			for held in &data.blocks {
+				let Some(data) = self.blocks.remove(*held) else {
+					continue;
+				};
+				for arg in data.args.iter().chain(&data.token_args) {
+					self.values.remove(*arg);
+					freed.values.push(*arg);
+				}
+			}
+		}
+		if let Some(data) = self.regions.get_mut(region) {
+			data.parent = None;
+		}
+		self.top = region;
+		self.eliminated.clear();
+		self.retired_scope.clear();
+		self.constrained = false;
+		let ops = &self.ops;
+		self.logical_ids.retain(|id| {
+			ops.get(*id).is_some_and(|data| {
+				matches!(data.provenance, Provenance::Bound)
+					&& matches!(data.kind, OpKind::Logical(_))
+			})
+		});
+		let pairs = || inside.iter().chain(&moved).map(|op| (*op, *op));
+		let (values, regions) = (&self.values, &self.regions);
+		let live_value = |value: ValueId| values.contains_key(value).then_some(value);
+		let live_region = |held: RegionId| regions.contains_key(held).then_some(held);
+		let matches = std::mem::take(&mut self.matches);
+		self.matches.carry(&matches, pairs(), &live_value, &live_region);
+		let hop_keys = std::mem::take(&mut self.hop_keys);
+		self.hop_keys.carry(&hop_keys, pairs());
+		let placement = std::mem::take(&mut self.placement);
+		self.placement.carry(&placement, pairs());
+		Ok(Ok(freed))
+	}
+
+	/// Collects what lies outside `target`, a region beneath `region`, into `out`: the regions,
+	/// blocks and ops of `region` and of the regions beneath it, `target`'s subtree excluded. Sets
+	/// `found` when `target` stands beneath `region`.
+	fn collect_enclosure(&self, region: RegionId, target: RegionId, out: &mut Enclosure) {
+		let Some(held) = self.regions.get(region) else {
+			return;
+		};
+		out.regions.push(region);
+		for block in &held.blocks {
+			out.blocks.insert(*block);
+			for op in self.blocks.get(*block).map_or(&[][..], |block| &block.ops) {
+				out.ops.insert(*op);
+				for nested in self.ops.get(*op).map_or(&[][..], |data| &data.regions) {
+					if *nested == target {
+						out.found = true;
+					} else {
+						self.collect_enclosure(*nested, target, out);
+					}
+				}
+			}
+		}
+	}
+
+	/// Appends the ops of `region` and of every region beneath them to `ops`, each op before the
+	/// ops of its own regions, and the blocks of those regions to `blocks`.
+	fn collect_inside(&self, region: RegionId, ops: &mut Vec<OpId>, blocks: &mut Vec<BlockId>) {
+		let Some(held) = self.regions.get(region) else {
+			return;
+		};
+		for block in &held.blocks {
+			blocks.push(*block);
+			for op in self.blocks.get(*block).map_or(&[][..], |block| &block.ops) {
+				ops.push(*op);
+				for nested in self.ops.get(*op).map_or(&[][..], |data| &data.regions) {
+					self.collect_inside(*nested, ops, blocks);
+				}
+			}
+		}
+	}
+
+	/// The literals defined in `enclosure` that the ops `inside` read, in the order
+	/// [`Ir::copy_region`] first meets them: an op's operands in order, then the value its
+	/// snapshot names, each op after the ops before it and the literals met after them.
+	/// Answers [`OutsideRead`] for a read of any other value `enclosure` defines.
+	///
+	/// A bound request defines every value a statement reads inside the statement's region, so
+	/// none moves for one; a container that defines a read literal outside has it moved.
+	fn outside_literals(
+		&self,
+		inside: &[OpId],
+		enclosure: &Enclosure,
+	) -> Result<Result<Vec<OpId>, OutsideRead>, IrError> {
+		let mut moved: Vec<OpId> = Vec::new();
+		let mut order: Vec<OpId> = inside.to_vec();
+		let mut snapshots: SmallVec<[SnapshotId; 4]> = SmallVec::new();
+		let mut at = 0;
+		while at < order.len() {
+			let data = self.ops.get(order[at]).ok_or(IrError::Stale("op"))?;
+			at += 1;
+			let version = if snapshots.contains(&data.snapshot) {
+				None
+			} else {
+				snapshots.push(data.snapshot);
+				match self.snapshot(data.snapshot) {
+					Some(Snapshot::Version(version)) => Some(*version),
+					_ => None,
+				}
+			};
+			for read in data.operands.iter().copied().chain(version) {
+				let definer = match self.values.get(read).ok_or(IrError::Stale("value"))?.def {
+					ValueDef::OpResult {
+						op,
+						..
+					} if enclosure.ops.contains(&op) => op,
+					ValueDef::BlockArg {
+						block,
+						..
+					} if enclosure.blocks.contains(&block) => {
+						return Ok(Err(OutsideRead));
+					}
+					_ => continue,
+				};
+				if moved.contains(&definer) {
+					continue;
+				}
+				let held = self.ops.get(definer).ok_or(IrError::Stale("op"))?;
+				let literal = matches!(held.kind, OpKind::Expr(ExprOp::Literal(_)))
+					&& held.operands.is_empty()
+					&& held.regions.is_empty();
+				if !literal {
+					return Ok(Err(OutsideRead));
+				}
+				moved.push(definer);
+				order.push(definer);
+			}
+		}
+		Ok(Ok(moved))
 	}
 
 	/// A container whose top region is a copy of `region`, with the pairs of an original op and
