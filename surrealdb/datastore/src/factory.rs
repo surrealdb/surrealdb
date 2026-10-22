@@ -60,6 +60,16 @@ pub struct ReadRequest {
 }
 
 impl TransactionFactory {
+	/// A factory over the same store with fresh catalog epoch state: no epoch history and no
+	/// definitions kept for one. Everything else is shared with `self`.
+	#[cfg(test)]
+	pub(crate) fn restarted(&self) -> Self {
+		Self {
+			triggers: Arc::new(CommitTriggers::new()),
+			..self.clone()
+		}
+	}
+
 	pub fn new(
 		triggers: Arc<CommitTriggers>,
 		builder: Box<dyn TransactionBuilder>,

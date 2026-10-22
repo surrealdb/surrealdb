@@ -3840,7 +3840,7 @@ impl Transaction {
 			tb: Cow::Borrowed(tb),
 		};
 		let version = match self.get_key(&key, None).await? {
-			Some(stamped) => stamped.proven(self.table_stored(ns, db, tb).await?.as_deref()),
+			Some(stamped) => stamped.proven(self.table_stored_held(ns, db, tb).await?.as_deref()),
 			None => None,
 		};
 		let held = Arc::new(version);
@@ -4226,6 +4226,34 @@ impl Transaction {
 		}
 		.encode_key()?;
 		Ok(self.tr.get(key, None).await?)
+	}
+
+	/// [`Self::table_stored`], holding the definition it decodes in the
+	/// transaction cache for the reads of [`TableProvider::get_tb`] that follow,
+	/// so the table's key is read once. Nothing is held once this transaction
+	/// has changed the catalog, or for a speculation's view, or for bytes this
+	/// build cannot decode, which `get_tb` then reads and refuses as it would
+	/// have.
+	async fn table_stored_held(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<Val>> {
+		let stored = self.table_stored(ns, db, tb).await?;
+		if let Some(bytes) = &stored
+			&& !self.changed_catalog()
+			&& !self.tr.speculating()
+		{
+			let qey = cache::tx::Lookup::Tb(ns, db, tb.as_str());
+			if self.cache.get(&qey).is_none()
+				&& let Ok(decoded) = StoredTableDefinition::kv_decode_value(bytes, ())
+				&& let Ok(definition) = TableDefinition::from_stored(&decoded)
+			{
+				self.cache.insert(qey, cache::tx::Entry::Any(Arc::new(definition)));
+			}
+		}
+		Ok(stored)
 	}
 
 	/// Stamp `tb`'s catalog entry with a fresh version.
@@ -5794,7 +5822,7 @@ impl Transaction {
 		val: Option<&[u8]>,
 		prior: Option<Option<&[u8]>>,
 	) -> OutOfLine<impl Future<Output = Result<Option<Defined>>>> {
-		if root_definition_at(key) {
+		if root_definition_at(key) || table_scoped_definition_at(key) {
 			self.touches_catalog();
 		}
 		OutOfLine::new(self.changed_definition_body(key, val, prior))
@@ -6278,6 +6306,14 @@ impl Transaction {
 		if let Some(val) = self.cache.get(&qey) {
 			return val.try_into_fds();
 		}
+		if let Some((epoch, shared)) = self.epoch_catalog()
+			&& let Some(held) = shared.get::<Arc<[catalog::FieldDefinition]>>(
+				&crate::cache::epoch::Lookup::Fields(epoch, ns, db, tb),
+			) {
+			let val = Arc::clone(&*held);
+			self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(&val)));
+			return Ok(val);
+		}
 		let range = FieldPrefix {
 			ns,
 			db,
@@ -6289,6 +6325,10 @@ impl Transaction {
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 		let val = catalog::fields_from_stored(&stored)?;
 		self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(&val)));
+		self.keep_for_epoch(
+			|epoch| crate::cache::epoch::Lookup::Fields(epoch, ns, db, tb),
+			&Arc::new(Arc::clone(&val)),
+		);
 		Ok(val)
 	}
 
@@ -6372,23 +6412,32 @@ impl Transaction {
 			return catalog::from_stored_all(&stored);
 		}
 		let qey = cache::tx::Lookup::Tbs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_tbs(),
-			None => {
-				let range = TablePrefix {
-					ns,
-					db,
-				}
-				.range()?;
-				let val = self.tr.getr(range.into_key_range(), None).await?;
-				let stored: Arc<[StoredTableDefinition]> =
-					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-				let val = catalog::from_stored_all(&stored)?;
-				let entry = cache::tx::Entry::Tbs(Arc::clone(&val));
-				self.cache.insert(qey, entry);
-				Ok(val)
-			}
+		if let Some(val) = self.cache.get(&qey) {
+			return val.try_into_tbs();
 		}
+		if let Some((epoch, shared)) = self.epoch_catalog()
+			&& let Some(held) = shared
+				.get::<Arc<[TableDefinition]>>(&crate::cache::epoch::Lookup::Tables(epoch, ns, db))
+		{
+			let val = Arc::clone(&*held);
+			self.cache.insert(qey, cache::tx::Entry::Tbs(Arc::clone(&val)));
+			return Ok(val);
+		}
+		let range = TablePrefix {
+			ns,
+			db,
+		}
+		.range()?;
+		let val = self.tr.getr(range.into_key_range(), None).await?;
+		let stored: Arc<[StoredTableDefinition]> =
+			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+		let val = catalog::from_stored_all(&stored)?;
+		self.cache.insert(qey, cache::tx::Entry::Tbs(Arc::clone(&val)));
+		self.keep_for_epoch(
+			|epoch| crate::cache::epoch::Lookup::Tables(epoch, ns, db),
+			&Arc::new(Arc::clone(&val)),
+		);
+		Ok(val)
 	}
 
 	/// How many writes and save-point rollbacks this transaction has taken.
@@ -6445,11 +6494,29 @@ impl Transaction {
 
 	/// The definitions shared by the transactions of this transaction's
 	/// catalog epoch, with the epoch; `None` where the transaction names no
-	/// epoch ([`Self::catalog_epoch`]). Only a read-only transaction is served
-	/// from them, so a write's own reads of the catalog stay reads of the
-	/// store.
+	/// epoch ([`Self::catalog_epoch`]).
+	///
+	/// A writable transaction is served from them when it names an epoch and
+	/// its backend does not add a plain read to the transaction's conflict
+	/// set ([`Self::plain_reads_tracked`]); on a backend that does, its
+	/// catalog reads stay reads of the store, so a definition committed
+	/// concurrently still conflicts with it.
+	///
+	/// A writer that has changed no definition reads its snapshot's catalog,
+	/// which is the epoch's catalog by [`Self::catalog_epoch`]'s contract. Once
+	/// it stamps a version or touches a definition [`Self::catalog_epoch`]
+	/// answers `None` and every later read goes to the transaction, so it never
+	/// reads an epoch definition in place of one of its own. What a writer
+	/// reads is kept for the epoch only while [`Self::catalog_epoch`] is `Some`
+	/// ([`Self::keep_for_epoch`]), so it never publishes a definition it wrote.
+	///
+	/// A transaction names an epoch only where its engine is the store's sole
+	/// writer: the datastore opens it with [`NO_CATALOG_EPOCH`] unless
+	/// `inner.sole_writer()` holds (`factory.rs`, where each transaction is
+	/// opened), and [`Self::catalog_epoch`] answers `None` for that value
+	/// whatever the settled count is.
 	fn epoch_catalog(&self) -> Option<(u64, &crate::cache::epoch::EpochCatalog)> {
-		if self.writeable() {
+		if self.writeable() && self.plain_reads_tracked() {
 			return None;
 		}
 		self.catalog_epoch().map(|epoch| (epoch, &self.triggers.epoch_catalog))
@@ -12237,6 +12304,10 @@ pub struct ReferenceFields {
 	pub tables: Vec<(TableName, Arc<[catalog::FieldDefinition]>)>,
 }
 
+/// The views reading a table as the epoch keeps them, with the names of every registration
+/// read to find them, whose definitions a read of the listing notes.
+type RegisteredViews = (Arc<[TableDefinition]>, Arc<[TableName]>);
+
 impl TableProvider for Transaction {
 	/// Retrieve all table definitions for a specific database.
 	fn all_tb(
@@ -12272,6 +12343,20 @@ impl TableProvider for Transaction {
 				{
 					return val.try_into_fts();
 				}
+				if version.is_none()
+					&& let Some((epoch, shared)) = self.epoch_catalog()
+					&& let Some(held) = shared.get::<RegisteredViews>(
+						&crate::cache::epoch::Lookup::Views(epoch, ns, db, tb),
+					) {
+					let val = Arc::clone(&held.0);
+					// What reading each registration's view would have noted.
+					for name in held.1.iter() {
+						self.catalog_reads
+							.note(crate::catalog_reads::CatalogRead::Table(ns, db, name));
+					}
+					self.cache.insert(qey, cache::tx::Entry::Fts(Arc::clone(&val)));
+					return Ok(val);
+				}
 				let range = ForeignTablePrefix {
 					ns,
 					db,
@@ -12281,11 +12366,16 @@ impl TableProvider for Transaction {
 				let val = self.tr.getr(range.into_key_range(), version).await?;
 				let stored: Arc<[StoredTableDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-				let val = catalog::from_stored_all(&stored)?;
-				let val = self.views_reading(ns, db, tb, val, version).await?;
+				let registered: Arc<[TableDefinition]> = catalog::from_stored_all(&stored)?;
+				let names: Arc<[TableName]> = registered.iter().map(|r| r.name.clone()).collect();
+				let val = self.views_reading(ns, db, tb, registered, version).await?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Fts(Arc::clone(&val));
 					self.cache.insert(qey, entry);
+					self.keep_for_epoch(
+						|epoch| crate::cache::epoch::Lookup::Views(epoch, ns, db, tb),
+						&Arc::new((Arc::clone(&val), names)),
+					);
 				}
 				Ok(val)
 			}
@@ -12564,6 +12654,15 @@ impl TableProvider for Transaction {
 				{
 					return val.try_into_evs();
 				}
+				if version.is_none()
+					&& let Some((epoch, shared)) = self.epoch_catalog()
+					&& let Some(held) = shared.get::<Arc<[catalog::EventDefinition]>>(
+						&crate::cache::epoch::Lookup::Events(epoch, ns, db, tb),
+					) {
+					let val = Arc::clone(&*held);
+					self.cache.insert(qey, cache::tx::Entry::Evs(Arc::clone(&val)));
+					return Ok(val);
+				}
 				let range = EventPrefix {
 					ns,
 					db,
@@ -12577,6 +12676,10 @@ impl TableProvider for Transaction {
 				if version.is_none() {
 					let entry = cache::tx::Entry::Evs(Arc::clone(&val));
 					self.cache.insert(qey, entry);
+					self.keep_for_epoch(
+						|epoch| crate::cache::epoch::Lookup::Events(epoch, ns, db, tb),
+						&Arc::new(Arc::clone(&val)),
+					);
 				}
 				Ok(val)
 			}
@@ -12709,6 +12812,14 @@ impl TableProvider for Transaction {
 				{
 					return val.try_into_type().map(Some);
 				}
+				if version.is_none()
+					&& let Some((epoch, shared)) = self.epoch_catalog()
+					&& let Some(def) = shared.get::<TableDefinition>(
+						&crate::cache::epoch::Lookup::TableById(epoch, ns, db, tb),
+					) {
+					self.cache.insert(qey, cache::tx::Entry::Any(def.clone()));
+					return Ok(Some(def));
+				}
 				let key = TableKey {
 					ns,
 					db,
@@ -12721,6 +12832,10 @@ impl TableProvider for Transaction {
 				if version.is_none() {
 					let entry = cache::tx::Entry::Any(val.clone());
 					self.cache.insert(qey, entry);
+					self.keep_for_epoch(
+						|epoch| crate::cache::epoch::Lookup::TableById(epoch, ns, db, tb),
+						&val,
+					);
 				}
 				Ok(Some(val))
 			}
@@ -14624,24 +14739,89 @@ fn root_definition_at(key: &[u8]) -> bool {
 
 /// Whether a range deleted from `start` may hold a definition whose removal
 /// moves the catalog epoch: one that starts at a namespace's or a database's
-/// root, at the root keyspace, or at a definition [`root_definition_at`] or
-/// [`table_definition_at`] names. A range of records starts under a table and
-/// is not one.
+/// root, at the root keyspace, at a definition [`root_definition_at`] or
+/// [`table_definition_at`] names, or at a table's root or its field, event or
+/// view-registration prefix ([`table_scoped_range_start`]). A range of records
+/// starts under a table and is not one.
 fn range_may_hold_definitions(start: &[u8]) -> bool {
-	if start.len() <= 1 || root_definition_at(start) {
+	if start.len() <= 1 || root_definition_at(start) || table_scoped_range_start(start) {
 		return true;
 	}
 	if start.first() != Some(&b'/') || start.get(1) != Some(&b'*') {
 		return false;
 	}
-	match start.len() {
+	// The start of the keys beneath a namespace's or a database's root is the root's bound
+	// followed by a zero byte.
+	let bound = match start.len() {
+		7 | 12 if start.last() == Some(&0x00) => &start[..start.len() - 1],
+		_ => start,
+	};
+	match bound.len() {
 		..=6 => true,
-		_ if start.get(6) == Some(&b'*') && start.len() <= 11 => true,
+		_ if bound.get(6) == Some(&b'*') && bound.len() <= 11 => true,
 		_ => {
-			start.get(6) == Some(&b'*')
-				&& start.get(11) == Some(&b'!')
-				&& start.get(11..14) == Some(b"!tb".as_slice())
+			bound.get(6) == Some(&b'*')
+				&& bound.get(11) == Some(&b'!')
+				&& bound.get(11..14) == Some(b"!tb".as_slice())
 		}
+	}
+}
+
+/// The offset just past the name of the table a table-scoped key
+/// (`/*{ns}*{db}*{tb}\0…`) names, or `None` for any other key. A table's name is a string in
+/// the key's encoding: it ends at the first zero byte, and a byte below 2 inside it is written
+/// with a one byte escape before it.
+fn table_scoped_name_end(key: &[u8]) -> Option<usize> {
+	if key.len() < 13
+		|| key.first() != Some(&b'/')
+		|| key.get(1) != Some(&b'*')
+		|| key.get(6) != Some(&b'*')
+		|| key.get(11) != Some(&b'*')
+	{
+		return None;
+	}
+	let mut at = 12usize;
+	loop {
+		match *key.get(at)? {
+			0x00 => return at.checked_add(1),
+			0x01 => at = at.checked_add(2)?,
+			_ => at = at.checked_add(1)?,
+		}
+	}
+}
+
+/// Whether `key` is a definition under a table that moves the catalog epoch when written: a
+/// field (`!fd`), an event (`!ev`) or the registration of a view reading the table (`!ft`).
+/// Every write of one marks the transaction as having changed the catalog, so what it reads
+/// of the table's fields, events and views afterwards is read from the transaction, never from
+/// the epoch.
+fn table_scoped_definition_at(key: &[u8]) -> bool {
+	// A key shorter than the shortest definition under a table (`/*{ns}*{db}*` and a one byte
+	// name, its terminator and a tag), or one with no table header, is rejected on fixed bytes
+	// before the name is walked.
+	if key.len() < 17 || key.get(11) != Some(&b'*') {
+		return false;
+	}
+	let Some(at) = table_scoped_name_end(key) else {
+		return false;
+	};
+	matches!(key.get(at..at.saturating_add(3)), Some(b"!fd" | b"!ev" | b"!ft"))
+}
+
+/// Whether a range starting at `start` may hold definitions under a table: it starts at the
+/// table's root, or at a field, event or view-registration prefix.
+fn table_scoped_range_start(start: &[u8]) -> bool {
+	let Some(at) = table_scoped_name_end(start) else {
+		return false;
+	};
+	match start.get(at..) {
+		// The root itself, or the start of the keys beneath it (`RawRange::prefix_of` begins at
+		// the bound followed by a zero byte).
+		Some([]) | Some([0x00, ..]) => true,
+		Some(tag) if tag.first() == Some(&b'!') => {
+			tag.len() < 3 || matches!(&tag[..3], b"!fd" | b"!ev" | b"!ft")
+		}
+		_ => false,
 	}
 }
 
@@ -16022,10 +16202,12 @@ mod older_build_write_tests {
 		assert_eq!(listed.versions, vec![(tb.clone(), stamped.unwrap())]);
 		tx.cancel().await.unwrap();
 
-		// An older build redefines the table: `!tb` changes, `!cv` stays.
+		// An older build redefines the table: `!tb` changes, `!cv` stays. It writes only while
+		// this build is stopped, so the datastore that reads next starts with no epoch cache.
 		let tx = txn(&tf, &sq).await;
 		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
 		tx.commit().await.unwrap();
+		let tf = tf.restarted();
 		let tx = txn(&tf, &sq).await;
 		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), None);
 		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
@@ -16041,6 +16223,7 @@ mod older_build_write_tests {
 		assert!(tx.catalog_version(NS, DB, &tb).await.unwrap().is_some());
 		tx.tr.del(table_key(&tb)).await.unwrap();
 		tx.commit().await.unwrap();
+		let tf = tf.restarted();
 		let tx = txn(&tf, &sq).await;
 		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), None);
 		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
@@ -16138,5 +16321,183 @@ mod older_build_write_tests {
 		let tx = txn(&tf, &sq).await;
 		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
 		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod table_definition_key_tests {
+	//! The byte predicates that decide whether a write or a range delete under a table moves the
+	//! catalog epoch, over keys and ranges as the key types encode them.
+
+	use std::borrow::Cow;
+
+	use surrealdb_kvs::key::{AnyRange, KVKey, KVSubspace, RawRange};
+
+	use super::{range_may_hold_definitions, table_scoped_definition_at};
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::schema::{
+		DbRoot, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTableKey, ForeignTablePrefix,
+		IndexDefKey, LayoutKey, RecordKey, TableKey, TableMigrationsKey, TblRoot,
+	};
+	use crate::val::{RecordIdKey, TableName};
+
+	const NS: NamespaceId = NamespaceId(3);
+	const DB: DatabaseId = DatabaseId(7);
+
+	/// Table names, among them ones whose encoding escapes a byte.
+	fn names() -> Vec<TableName> {
+		["person", "p", "a\0b", "a\u{1}b", "\0", "\u{1}x\0"].map(TableName::from).into()
+	}
+
+	/// The first key of every range a delete of `bound`'s subtree or children may be made with.
+	fn starts_of(bound: Vec<u8>, ranges: &[RawRange]) -> Vec<Vec<u8>> {
+		let mut starts = vec![bound.clone()];
+		starts.extend(RawRange::prefix_of(bound.into()).map(|range| range.bounds().0.to_vec()));
+		starts.extend(ranges.iter().map(|range| range.bounds().0.to_vec()));
+		starts
+	}
+
+	#[test]
+	fn the_ranges_of_a_table_root_and_of_its_definition_prefixes_may_hold_definitions() {
+		for tb in names() {
+			let tbc = || Cow::Borrowed(&tb);
+			let root = TblRoot {
+				ns: NS,
+				db: DB,
+				tb: tbc(),
+			};
+			let fields = FieldPrefix {
+				ns: NS,
+				db: DB,
+				tb: tbc(),
+			};
+			let events = EventPrefix {
+				ns: NS,
+				db: DB,
+				tb: tbc(),
+			};
+			let views = ForeignTablePrefix {
+				ns: NS,
+				db: DB,
+				tb: tbc(),
+			};
+			let mut starts =
+				starts_of(root.encode_bound().unwrap().to_vec(), &[root.range_subtree().unwrap()]);
+			for (bound, range) in [
+				(fields.encode_bound().unwrap(), fields.range().unwrap().into_key_range()),
+				(events.encode_bound().unwrap(), events.range().unwrap().into_key_range()),
+				(views.encode_bound().unwrap(), views.range().unwrap().into_key_range()),
+			] {
+				starts.push(range.start.to_vec());
+				starts.extend(starts_of(bound.to_vec(), &[]));
+			}
+			for start in starts {
+				assert!(range_may_hold_definitions(&start), "{tb:?}: {start:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn the_ranges_of_a_database_root_may_hold_definitions() {
+		let root = DbRoot {
+			ns: NS,
+			db: DB,
+		};
+		let subtree: RawRange = root.range_subtree().unwrap();
+		for start in starts_of(root.encode_bound().unwrap().to_vec(), &[subtree]) {
+			assert!(range_may_hold_definitions(&start), "{start:?}");
+		}
+	}
+
+	#[test]
+	fn a_field_event_or_view_registration_key_is_a_definition_under_its_table() {
+		for tb in names() {
+			let tbc = || Cow::Borrowed(&tb);
+			let keys = [
+				FieldKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					fd: Cow::Borrowed("f"),
+				}
+				.encode_key()
+				.unwrap(),
+				EventKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					ev: Cow::Borrowed("e"),
+				}
+				.encode_key()
+				.unwrap(),
+				ForeignTableKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					ft: Cow::Borrowed(&tb),
+				}
+				.encode_key()
+				.unwrap(),
+			];
+			for key in keys {
+				assert!(table_scoped_definition_at(&key), "{tb:?}: {key:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn other_keys_are_not_definitions_under_a_table_nor_ranges_that_hold_them() {
+		for tb in names() {
+			let tbc = || Cow::Borrowed(&tb);
+			let id = RecordIdKey::Number(1);
+			let keys = [
+				RecordKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					id: Cow::Borrowed(&id),
+				}
+				.encode_key()
+				.unwrap(),
+				IndexDefKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					ix: Cow::Borrowed("ix"),
+				}
+				.encode_key()
+				.unwrap(),
+				LayoutKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+					generation: 1,
+				}
+				.encode_key()
+				.unwrap(),
+				TableMigrationsKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+				}
+				.encode_key()
+				.unwrap(),
+				TableKey {
+					ns: NS,
+					db: DB,
+					tb: tbc(),
+				}
+				.encode_key()
+				.unwrap(),
+			];
+			for key in &keys {
+				assert!(!table_scoped_definition_at(key), "{tb:?}: {key:?}");
+			}
+			// A range of records, or of the layouts or index definitions, holds none.
+			let records = &keys[0];
+			assert!(!range_may_hold_definitions(records), "{tb:?}: {records:?}");
+			let layouts = &keys[2];
+			assert!(!range_may_hold_definitions(layouts), "{tb:?}: {layouts:?}");
+		}
 	}
 }
