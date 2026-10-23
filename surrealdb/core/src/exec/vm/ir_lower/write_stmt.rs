@@ -1632,6 +1632,7 @@ mod tests {
 		fn scan(b: &mut Builder) -> ValueId {
 			let op = b.create_kind(
 				OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+					probes: None,
 					bounds: None,
 					prefilter: None,
 					table: TableName::from("person"),

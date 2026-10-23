@@ -357,6 +357,7 @@ mod tests {
 
 	fn scan(text: &str, direction: Direction) -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			probes: None,
 			bounds: None,
 			prefilter: None,
 			table: table(text),

@@ -850,8 +850,10 @@ impl Policy {
 
 	/// The gates of a split other than the entries read: splits are on, no reader that takes few
 	/// rows is waiting for the first, the paging does not need fewer rows than the split
-	/// threshold, and the transaction gives workers a read view where the policy needs one.
-	fn may_split_unread(self, signals: &Signals) -> bool {
+	/// threshold, and the transaction gives workers a read view where the policy needs one. A scan
+	/// that learns the share of its passing rows only by asking the storage asks only where these
+	/// hold.
+	pub(crate) fn may_split_unread(self, signals: &Signals) -> bool {
 		if self.split_rows == usize::MAX
 			|| signals.scan_hint.is_some()
 			|| (self.needs_view && signals.no_view)

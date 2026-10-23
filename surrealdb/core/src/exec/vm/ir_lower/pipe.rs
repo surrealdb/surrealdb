@@ -4430,6 +4430,7 @@ pub(super) mod tests {
 	pub(in crate::exec::vm::ir_lower) fn scan(b: &mut Builder) -> ValueId {
 		let op = b.create_kind(
 			OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+				probes: None,
 				bounds: None,
 				prefilter: None,
 				table: TableName::from("t"),
@@ -5104,6 +5105,7 @@ pub(super) mod tests {
 		}]);
 		let op = b.create_kind(
 			OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+				probes: None,
 				bounds: None,
 				prefilter: None,
 				table: TableName::from("t"),
@@ -7352,6 +7354,7 @@ pub(super) mod tests {
 				topk: None,
 				prefilter: None,
 				range: None,
+				probes: None,
 			}
 		);
 		// Each later pipeline reads the rows of its own sort; the sorts are numbered in the order

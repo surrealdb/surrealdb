@@ -34,5 +34,6 @@ pub(crate) mod derived_columns;
 pub(crate) mod id_range;
 pub(crate) mod iterator;
 pub(crate) mod key_range;
+pub(crate) mod probe;
 
 pub use analysis::IndexCandidate;

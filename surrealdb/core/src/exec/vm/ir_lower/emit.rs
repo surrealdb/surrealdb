@@ -974,6 +974,7 @@ mod tests {
 			topk: None,
 			prefilter: None,
 			range: None,
+			probes: None,
 		}
 	}
 

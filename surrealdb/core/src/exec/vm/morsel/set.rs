@@ -1994,16 +1994,17 @@ impl<'p> RangeSet<'p> {
 	}
 
 	/// As the front run opens `own`, before an entry of it is read and with what the run has
-	/// observed in `signals`: ask the storage's metadata what
-	/// the range holds, once, and when the policy cuts on that answer, queue every part but the
-	/// first for workers and narrow `own` to the first. `true` when the range was cut.
+	/// observed in `signals`: ask the storage, once, what the range holds, and when the policy cuts
+	/// on that answer, queue every part but the first for workers and narrow `own` to the first.
+	/// `true` when the range was cut.
 	///
-	/// The storage is asked only where a split could follow: where the share of the range's rows
-	/// its filters pass is known before the scan opens and is within the policy's pass threshold.
-	/// Nothing supplies that share yet outside tests, so no range is cut here and the storage is
-	/// not asked. A failed answer, or none, leaves the
-	/// range whole, as does a split that finds no boundary; the coordinator's measured split still
-	/// judges it once it has read the split threshold's entries.
+	/// A scan whose source holds selectivity probes ([`super::super::program::ScanProbes`]) asks,
+	/// once every gate of a split but the share of passing rows is open, what the range and each
+	/// probe's index range hold, in one call ([`Self::probe_at_open`]); the share it learns is the
+	/// one the policy judges. Any other scan asks the storage's metadata only where a share known
+	/// before the scan opens is within the policy's pass threshold. A failed answer, or none,
+	/// leaves the range whole, as does a split that finds no boundary; the coordinator's measured
+	/// split still judges it once it has read the split threshold's entries.
 	async fn cut_at_open(
 		&mut self,
 		txn: &crate::kvs::Transaction,
@@ -2022,12 +2023,41 @@ impl<'p> RangeSet<'p> {
 			selectivity: super::test_hooks::seeded_selectivity(ctx),
 			..signals
 		};
-		if !self.policy.asks_at_open(&signals) {
-			return Ok(false);
-		}
-		#[cfg(test)]
-		super::test_hooks::note_asked_at_open(ctx);
-		let answer = txn.approximate(own.clone(), self.version).await;
+		let probes = if let super::super::program::Source::Scan {
+			probes: Some(probes),
+			..
+		} = &self.program.pipelines[self.at].source
+			&& signals.selectivity.is_none()
+		{
+			Some(Arc::clone(probes))
+		} else {
+			None
+		};
+		let (answer, signals) = match probes {
+			Some(probes) => {
+				if !self.policy.may_split_unread(&signals) {
+					return Ok(false);
+				}
+				#[cfg(test)]
+				super::test_hooks::note_asked_at_open(ctx);
+				let (answer, selectivity) = self.probe_at_open(txn, own, &probes, ctx).await;
+				(
+					Ok(answer),
+					Signals {
+						selectivity,
+						..signals
+					},
+				)
+			}
+			None => {
+				if !self.policy.asks_at_open(&signals) {
+					return Ok(false);
+				}
+				#[cfg(test)]
+				super::test_hooks::note_asked_at_open(ctx);
+				(txn.approximate(own.clone(), self.version).await, signals)
+			}
+		};
 		#[cfg(test)]
 		let answer = match super::test_hooks::seeded(ctx) {
 			Some(seeded) => Ok(Some(seeded)),
@@ -2077,6 +2107,68 @@ impl<'p> RangeSet<'p> {
 		}
 		gate.gave(parts.donated, self.dir, Origin::Split, false);
 		Ok(true)
+	}
+
+	/// What the range `own` holds, and the most rows in a million of it the scan's filters pass,
+	/// from one call that asks the storage about `own` and each probe's index range.
+	///
+	/// The share is the probes' entry counts combined by [`ProbeBound`] over the keys `own`
+	/// counted: a ratio of key counts, never of bytes, since an index entry and a record differ in
+	/// size. Where every count is exact the share is an upper bound on the rows the filters pass;
+	/// where the storage extrapolated a count from the keys it read, the share is an estimate of
+	/// that bound, which may misjudge where the range is cut and never which rows it yields. The
+	/// share is `None` where the storage counted no keys of `own`, or the counts bound nothing,
+	/// and the range is then judged as one whose share is unknown. A probe whose range cannot be
+	/// built, or that the storage counted no keys of, counts nothing. A failed call answers
+	/// nothing.
+	///
+	/// [`ProbeBound`]: crate::exec::index::probe::ProbeBound
+	async fn probe_at_open(
+		&self,
+		txn: &crate::kvs::Transaction,
+		own: &RawRange,
+		probes: &super::super::program::ScanProbes,
+		ctx: &ExecutionContext,
+	) -> (Option<surrealdb_kvs::Estimate>, Option<crate::exec::ir::iface::Estimate>) {
+		let mut ranges = Vec::with_capacity(probes.probes.len() + 1);
+		ranges.push(own.clone());
+		let mut answered = Vec::with_capacity(probes.probes.len());
+		for (index, access) in probes.probes.iter() {
+			match super::super::entries::entry_range(ctx, index, access) {
+				Ok(range) => {
+					answered.push(Some(ranges.len()));
+					ranges.push(range);
+				}
+				Err(_) => answered.push(None),
+			}
+		}
+		let answers = match txn.estimate_many(ranges, self.version).await {
+			Ok(answers) => answers,
+			Err(failure) => {
+				tracing::debug!(%failure, "a scan could not count its probes as it opened");
+				return (None, None);
+			}
+		};
+		let table = answers.first().copied();
+		let keys: Vec<Option<u64>> = answered
+			.iter()
+			.map(|at| at.and_then(|at| answers.get(at)).and_then(|answer| answer.keys))
+			.collect();
+		let selectivity = table
+			.and_then(|table| table.keys)
+			.and_then(|table_keys| probes.bound.upper_ppm(&keys, table_keys))
+			.map(|ppm| crate::exec::ir::iface::Estimate {
+				rows: None,
+				bytes: None,
+				selectivity_ppm: Some(ppm),
+				exact: false,
+				source: crate::exec::ir::iface::EstimateSource::KvRange,
+			});
+		#[cfg(test)]
+		if selectivity.is_some() {
+			super::test_hooks::note_probed(ctx);
+		}
+		(table, selectivity)
 	}
 
 	/// Publish what the coordinator's morsel has left, for an idle worker choosing whom to ask, and

@@ -64,9 +64,9 @@ use super::ops::{
 	KnnPrefilterShape, KnnScanAttrs, KnnTargetShape, KnnTopKAttrs, LayerAttrs, LookupKeyShape,
 	MatchStepAttrs, MaterializeImage, OmissionShape, PermissionFilterAttrs, PhysOp, PhysTag,
 	PhysWriteAttrs, PipelineAttrs, PipelineEdge, PipelineId, PrefetchKeys, ProjectedFieldShape,
-	ProjectionShape, ReadClauses, RecordScanAttrs, ScoreSum, SortAttrs as PhysSortAttrs,
-	SortKeyReadShape, SortKeySpecShape, TableScanAttrs, WalkActionShape, WalkStepShape,
-	WriteSubjectsShape,
+	ProjectionShape, ReadClauses, RecordScanAttrs, ScanProbes, ScoreSum,
+	SortAttrs as PhysSortAttrs, SortKeyReadShape, SortKeySpecShape, TableScanAttrs,
+	WalkActionShape, WalkStepShape, WriteSubjectsShape,
 };
 use crate::catalog::{Distance, IndexId, KeyOrigin, KeyStructure};
 use crate::doc::Action as DocAction;
@@ -75,6 +75,7 @@ use crate::exec::index::access_path::{
 	BTreeAccess, BoundOperand, ClockBound, ClockSign, OperandRange,
 };
 use crate::exec::index::key_range::DeliveredKeyOrder;
+use crate::exec::index::probe::ProbeBound;
 use crate::exec::ir::core::parse::ParseError;
 use crate::exec::ir::core::print::AttrSyntax;
 use crate::exec::ir::core::text::{get_attr_op_id, put_attr_op_id};
@@ -2632,7 +2633,17 @@ text_struct!(TableScanAttrs {
 	lightweight: bool,
 	id_order: bool,
 	prefilter: Option<PreDecodeShape>,
-	bounds: Option<IdBoundsShape>
+	bounds: Option<IdBoundsShape>,
+	probes: Option<Box<ScanProbes>>
+});
+text_struct!(ScanProbes {
+	probes: Vec<(IndexRef, BTreeAccess)>,
+	bound: ProbeBound
+});
+text_enum!(ProbeBound {
+	unit []
+	tuple [Probe(at: u16), All(parts: Vec<ProbeBound>), Any(parts: Vec<ProbeBound>)]
+	named []
 });
 text_struct!(IdBoundsShape {
 	low: Option<KeyRangeBoundShape>,
@@ -3406,6 +3417,29 @@ mod tests {
 	fn fixture(tag: PhysTag) -> PhysOp {
 		match tag {
 			PhysTag::TableScan => PhysOp::TableScan(Box::new(TableScanAttrs {
+				probes: Some(Box::new(ScanProbes {
+					probes: vec![
+						(
+							index_ref(),
+							BTreeAccess::Equality(BoundOperand::Literal(Value::from(1i64))),
+						),
+						(
+							index_ref(),
+							BTreeAccess::Range {
+								range: OperandRange {
+									start: Bound::Excluded(BoundOperand::Literal(Value::from(
+										2i64,
+									))),
+									end: Bound::Unbounded,
+								},
+							},
+						),
+					],
+					bound: ProbeBound::All(vec![
+						ProbeBound::Probe(0),
+						ProbeBound::Any(vec![ProbeBound::Probe(1), ProbeBound::Probe(0)]),
+					]),
+				})),
 				bounds: Some(IdBoundsShape {
 					low: Some(KeyRangeBoundShape {
 						bound: KeyBoundShape::Operand(0),

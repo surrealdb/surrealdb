@@ -465,6 +465,7 @@ mod tests {
 
 	fn table_scan() -> OpKind {
 		OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+			probes: None,
 			bounds: None,
 			prefilter: None,
 			table: table(),

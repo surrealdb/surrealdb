@@ -933,6 +933,7 @@ mod tests {
 
 	fn scan(name: &str) -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			probes: None,
 			bounds: None,
 			prefilter: None,
 			table: table(name),

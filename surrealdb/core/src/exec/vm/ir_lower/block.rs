@@ -3155,6 +3155,7 @@ mod tests {
 		b.open(op, RegionKind::Pipeline, &[]);
 		let scan = b.create_kind(
 			OpKind::Phys(PhysOp::TableScan(Box::new(TableScanAttrs {
+				probes: None,
 				bounds: None,
 				table: TableName::from("t"),
 				direction: Direction::Forward,

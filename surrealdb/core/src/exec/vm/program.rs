@@ -6282,6 +6282,9 @@ pub(super) enum Source {
 		topk: Option<TopKScan>,
 		prefilter: Option<super::plain::ValueData<crate::exec::pre_decode_filter::PreDecodeShape>>,
 		range: Option<Arc<ScanRange>>,
+		/// The index ranges whose entry counts bound the share of the scan's rows its pipeline's
+		/// filters pass, asked about once as the scan opens to decide whether it fans out.
+		probes: Option<Arc<ScanProbes>>,
 	},
 	/// The records `record` names, evaluated once when the pipeline opens:
 	/// one record for a record id, the records of its range in key order for
@@ -6550,6 +6553,22 @@ pub(super) struct ScanRange {
 }
 
 assert_plain!(ScanRange);
+
+/// The selectivity probes of a table scan ([`crate::exec::index::probe`]): each index and the
+/// access whose range is counted, and how the counts bound the rows the scan's filters pass. Read
+/// only to place the scan; nothing it answers reaches the statement's output.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ScanProbes {
+	pub(super) probes: Box<
+		[(
+			crate::exec::index::access_path::IndexRef,
+			super::plain::ValueData<crate::exec::index::access_path::BTreeAccess>,
+		)],
+	>,
+	pub(super) bound: crate::exec::index::probe::ProbeBound,
+}
+
+assert_plain!(ScanProbes);
 
 /// The top-k threshold pushdown of a table scan: the first `ORDER BY` key of
 /// the sort that feeds on the scan, which the scan reads from a record's

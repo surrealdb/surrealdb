@@ -454,6 +454,7 @@ async fn same_answers_in(
 		combined: after.combined - before.combined,
 		asked_at_open: after.asked_at_open - before.asked_at_open,
 		opened: after.opened - before.opened,
+		probed: after.probed - before.probed,
 	}
 }
 
@@ -735,6 +736,93 @@ async fn a_range_splits_by_the_share_its_filter_passed() {
 		assert_eq!(multiset(&got), multiset(&expected), "{sql}");
 		assert_eq!(after.split > before.split, splits, "{sql}: {after:?}");
 		assert_eq!(after.asked_at_open, before.asked_at_open, "{sql}: no share is known at open");
+	}
+}
+
+/// A table of `rows` rows with an index on `k`, which holds each of the values `0..100` on one
+/// row in a hundred.
+fn indexed_setup(rows: usize) -> String {
+	format!(
+		"DEFINE TABLE t;
+		 DEFINE INDEX by_k ON t FIELDS k;
+		 FOR $i IN 0..{rows} {{
+			CREATE type::record('t', $i) SET n = $i, s = <string> $i, k = $i % 100
+		 }};"
+	)
+}
+
+/// A table scan whose predicate holds a conjunct an index answers asks the storage, once as it
+/// opens, how many entries the index lists under that conjunct and how many records the table
+/// holds. Over a table the storage counts exactly, a conjunct passing about one row in a hundred
+/// (or two, under an `OR`) cuts the range as it opens, and one passing about nine in ten keeps it
+/// whole. Either way the scan answers what the serial run answers.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_indexed_conjunct_that_passes_few_rows_cuts_the_scan_as_it_opens() {
+	let _turn = TURNS.lock().await;
+	// Fewer rows than the storage counts exactly.
+	let rows = surrealdb_kvs::split::ESTIMATE_BUDGET as usize - 24;
+	let serial = TestDb::new_with_config(&indexed_setup(rows), whole()).await;
+	let wide = TestDb::new_with_config(&indexed_setup(rows), cut_only_at_open()).await;
+	let ctx = wide.exec_ctx().await;
+	for (sql, cuts) in [
+		("SELECT n, s FROM t WITH NOINDEX WHERE k = 7", true),
+		("SELECT n, s FROM t WITH NOINDEX WHERE k = 7 AND n > 100", true),
+		("SELECT n, s FROM t WITH NOINDEX WHERE k = 7 OR k = 8", true),
+		("SELECT n, s FROM t WITH NOINDEX WHERE k < 90", false),
+	] {
+		let expected = answered(&serial, sql).await.expect("the serial run answers");
+		assert!(reads_ranges(&*lowered(&ctx, sql).await), "{sql} reads a key range");
+		let before = counts_of(&ctx);
+		let got = answered(&wide, sql).await.expect("the wide run answers");
+		let after = counts_of(&ctx);
+		assert_eq!(multiset(&got), multiset(&expected), "{sql}");
+		assert_eq!(after.asked_at_open - before.asked_at_open, 1, "{sql}: {after:?}");
+		assert_eq!(after.probed - before.probed, 1, "{sql}: {after:?}");
+		if cuts {
+			assert!(after.opened > before.opened, "{sql} is cut as it opens: {after:?}");
+		} else {
+			assert_eq!(after.opened, before.opened, "{sql} stays whole: {after:?}");
+		}
+	}
+	// A predicate no index answers has no probe: nothing is known of its selectivity, so the
+	// storage is not asked and the range is not cut as it opens.
+	let sql = "SELECT n, s FROM t WHERE n % 100 = 7";
+	let before = counts_of(&ctx);
+	answered(&wide, sql).await.expect("the wide run answers");
+	let after = counts_of(&ctx);
+	assert_eq!(after.asked_at_open, before.asked_at_open, "{after:?}");
+	assert_eq!(after.opened, before.opened, "{after:?}");
+}
+
+/// A table larger than the storage counts exactly is judged by the counts it extrapolates from
+/// the keys it reads: a conjunct passing one row in a hundred cuts the range as it opens, and one
+/// passing nine in ten keeps it whole.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_table_counted_by_extrapolation_is_judged_by_its_estimate() {
+	let _turn = TURNS.lock().await;
+	let serial = TestDb::new_with_config(&indexed_setup(ROWS), whole()).await;
+	let wide = TestDb::new_with_config(&indexed_setup(ROWS), cut_only_at_open()).await;
+	let ctx = wide.exec_ctx().await;
+	for (sql, cuts) in [
+		("SELECT n, s FROM t WITH NOINDEX WHERE k = 7", true),
+		("SELECT n, s FROM t WITH NOINDEX WHERE k < 90", false),
+	] {
+		let expected = answered(&serial, sql).await.expect("the serial run answers");
+		let before = counts_of(&ctx);
+		let got = answered(&wide, sql).await.expect("the wide run answers");
+		let after = counts_of(&ctx);
+		assert_eq!(multiset(&got), multiset(&expected), "{sql}");
+		assert_eq!(after.asked_at_open - before.asked_at_open, 1, "{sql}: {after:?}");
+		assert_eq!(after.probed - before.probed, 1, "{sql}: {after:?}");
+		if cuts {
+			assert!(after.opened > before.opened, "{sql} is cut as it opens: {after:?}");
+			assert!(
+				after.opened - before.opened < ROWS / 10,
+				"the parts follow the table's size: {after:?}"
+			);
+		} else {
+			assert_eq!(after.opened, before.opened, "{sql} stays whole: {after:?}");
+		}
 	}
 }
 
@@ -2075,8 +2163,11 @@ async fn a_backward_steal_keeps_the_lower_part() {
 
 /// Settings under which a morsel cuts itself when it will outlast its siblings: no morsel donates
 /// unasked, the first cut is after one entry, and a morsel is a few kilobytes.
+/// Settings under which the first split waits for 64 entries, so the remainder a morsel keeps
+/// accumulates the entries a re-split needs. A split after every entry leaves no morsel to
+/// re-split.
 fn resplitting() -> surrealdb_cnf::ConfigMap {
-	tiny().with_key_value("morsel_target_bytes", "8000")
+	tiny().with_key_value("morsel_target_bytes", "8000").with_key_value("morsel_split_rows", "64")
 }
 
 /// With no view the coordinator runs every morsel, so no worker is idle to ask it for part of its
@@ -4023,7 +4114,8 @@ async fn a_scan_is_cut_by_what_is_left_of_it_under_the_default_settings() {
 			 }};"
 		)
 	};
-	let sql = "SELECT n FROM record WHERE n % 3 = 0";
+	// About one row in a hundred passes, the selectivity the default pass threshold cuts.
+	let sql = "SELECT n FROM record WHERE n % 100 = 0";
 	for (rows, cut) in [(30_000u32, true), (400, false)] {
 		let (serial_dir, wide_dir) = (
 			tempfile::tempdir().expect("temporary directory"),
@@ -4062,9 +4154,8 @@ async fn a_scan_is_cut_by_what_is_left_of_it_under_the_default_settings() {
 	}
 }
 
-/// The statements of the benches that read a table of a hundred thousand records, over a table
-/// that is cut under the node's settings as theirs is: each runs as morsels that workers take, and
-/// answers what the serial run answers.
+/// Selective statements over a table of the benches' shape are cut under the node's settings: each
+/// runs as morsels that workers take, and answers what the serial run answers.
 #[cfg(feature = "kv-rocksdb")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_statements_of_the_scan_benches_hand_morsels_to_workers_under_the_default_settings() {
@@ -4077,12 +4168,12 @@ async fn the_statements_of_the_scan_benches_hand_morsels_to_workers_under_the_de
 				score = ($i * 37 % 10000) * 0.01,
 				number = $i % 5000
 		 };";
+	// About one row in a hundred passes `number < 50`, the selectivity the default threshold cuts.
 	let statements = [
-		"SELECT * FROM record",
-		"SELECT id, score FROM record ORDER BY score",
-		"SELECT math::sum(score) FROM record GROUP ALL",
-		"SELECT city, count() FROM record GROUP BY city",
-		"SELECT count(), math::mean(score), math::min(score), math::max(score), math::sum(number) FROM record GROUP ALL",
+		"SELECT id, score FROM record WHERE number < 50 ORDER BY score",
+		"SELECT math::sum(score) FROM record WHERE number < 50 GROUP ALL",
+		"SELECT city, count() FROM record WHERE number < 50 GROUP BY city",
+		"SELECT count(), math::mean(score), math::min(score), math::max(score), math::sum(number) FROM record WHERE number < 50 GROUP ALL",
 	];
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
@@ -4131,8 +4222,11 @@ async fn running_morsels_stream_their_rows_and_hold_a_window_and_a_chunk_at_most
 	let wide = TestDb::new_on_rocksdb(
 		setup,
 		wide_dir.path(),
+		// The statement is unfiltered, which the default pass threshold keeps serial: the
+		// threshold is raised so that the run exercises running morsels.
 		surrealdb_cnf::ConfigMap::empty()
 			.with_key_value("morsel_target_bytes", "4000000")
+			.with_key_value("morsel_split_pass_ppm", "1000000")
 			.with_key_value("morsel_window_bytes", WINDOW.to_string()),
 	)
 	.await;
@@ -4186,9 +4280,12 @@ async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 			CREATE type::record('record', $i) SET n = $i, text = string::repeat('x', 300), tags = ['a', 'b']
 		 };";
 	let sql = "SELECT * FROM record";
+	// The statement is unfiltered, which the default pass threshold keeps serial: the threshold is
+	// raised so that the runs exercise running morsels.
 	let config = || {
 		surrealdb_cnf::ConfigMap::empty()
 			.with_key_value("morsel_target_bytes", "4000000")
+			.with_key_value("morsel_split_pass_ppm", "1000000")
 			.with_key_value("morsel_window_bytes", (512usize << 10).to_string())
 	};
 	let dirs = [(); 3].map(|()| tempfile::tempdir().expect("temporary directory"));
@@ -4235,12 +4332,13 @@ async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 	assert!(parked > 0, "no morsel parked after the chunk the lease refused");
 }
 
-/// The statement of the bench `select_all_100k`, over a table of its shape under the node's
-/// settings, plans a merge as morsels finish, reads its key range in morsels that run on workers,
-/// and answers the rows the serial run answers.
+/// The statement of the bench `select_all_100k`, which has no filter, stays serial under the node's
+/// settings: a scan that passes every row is not cut, and its rows are answered as the serial run
+/// answers them. The fan-out of the same scan is covered by the tests that raise the pass
+/// threshold.
 #[cfg(feature = "kv-rocksdb")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_select_all_bench_statement_merges_freely_and_fans_out_on_rocksdb() {
+async fn the_select_all_bench_statement_stays_serial_under_the_default_settings() {
 	let _turn = TURNS.lock().await;
 	let setup = "DEFINE TABLE record SCHEMALESS;
 		 FOR $i IN 0..30000 {
@@ -4260,16 +4358,13 @@ async fn the_select_all_bench_statement_merges_freely_and_fans_out_on_rocksdb() 
 	)
 	.await;
 	let sql = "SELECT * FROM record";
-	assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Free]);
 	let (expected, _) = answer(&serial, sql).await;
-	let ctx = wide.exec_ctx().await;
-	for attempt in 0..5 {
-		let before = counts_of(&ctx);
-		assert_equivalent(sql, &answered(&wide, sql).await, &expected);
-		let after = counts_of(&ctx);
-		if after.handed > before.handed && after.split > before.split {
-			break;
-		}
-		assert!(attempt < 4, "no morsel of the scan went to a worker: {before:?} {after:?}");
-	}
+	let before = counts_of(&wide.exec_ctx().await);
+	assert_equivalent(sql, &answered(&wide, sql).await, &expected);
+	let after = counts_of(&wide.exec_ctx().await);
+	assert_eq!(
+		(after.split - before.split, after.handed - before.handed),
+		(0, 0),
+		"an unfiltered scan was cut under the default settings"
+	);
 }

@@ -194,6 +194,12 @@ pub(super) fn lower_source_under(
 						.map(|shape| plain(shape.clone(), "a scan's prefilter"))
 						.transpose()?,
 					range,
+					probes: attrs
+						.probes
+						.as_deref()
+						.map(|set| scan_probes(set, &resolve))
+						.transpose()?
+						.map(std::sync::Arc::new),
 				}
 			};
 			Ok(Leaf {
@@ -303,6 +309,7 @@ pub(super) fn lower_source_under(
 						.map(|shape| plain(shape.clone(), "a scan's prefilter"))
 						.transpose()?,
 					range: Some(std::sync::Arc::new(range)),
+					probes: None,
 				},
 				table: Some(attrs.table.clone()),
 			})
@@ -1388,6 +1395,21 @@ fn plain<T: super::super::plain::Values>(
 	})
 }
 
+/// The selectivity probes of a table scan, over the indexes `resolve` knows.
+fn scan_probes(
+	set: &crate::exec::ir::phys::ops::ScanProbes,
+	resolve: &dyn Fn(&IndexRef) -> Result<access_path::IndexRef, IrError>,
+) -> Result<crate::exec::vm::program::ScanProbes, IrError> {
+	let mut probes = Vec::with_capacity(set.probes.len());
+	for (index, access) in &set.probes {
+		probes.push((resolve(index)?, plain(access.clone(), "a selectivity probe")?));
+	}
+	Ok(crate::exec::vm::program::ScanProbes {
+		probes: probes.into(),
+		bound: set.bound.clone(),
+	})
+}
+
 /// One scan of an index union.
 fn branch(
 	shape: &IndexBranchShape,
@@ -1580,6 +1602,7 @@ pub(super) mod tests {
 
 	fn plain_scan() -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			probes: None,
 			bounds: None,
 			prefilter: None,
 			table: TableName::from("t"),
@@ -1613,6 +1636,7 @@ pub(super) mod tests {
 				topk: None,
 				prefilter: None,
 				range: None,
+				probes: None,
 			}
 		);
 	}
@@ -1632,6 +1656,7 @@ pub(super) mod tests {
 		let table_scan = rows(
 			&mut b,
 			PhysOp::TableScan(Box::new(TableScanAttrs {
+				probes: None,
 				bounds: None,
 				prefilter: Some(shape.clone()),
 				table: TableName::from("t"),

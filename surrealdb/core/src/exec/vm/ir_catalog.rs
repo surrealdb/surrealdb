@@ -731,18 +731,25 @@ pub(super) async fn read_answers(
 		id_order,
 		..base
 	};
-	if matches!(with, Some(With::NoIndex)) {
-		return Ok(base);
-	}
+	// Under `WITH NOINDEX` no index serves the read; the columns are read for the scan's
+	// selectivity probes alone, and a read that fails leaves it with none.
+	let no_index = matches!(with, Some(With::NoIndex));
+	let failed = |base: TableAnswers| {
+		if no_index {
+			base
+		} else {
+			declined(table, base)
+		}
+	};
 	let indexes = match txn.all_tb_indexes(ns, db, table, None).await {
 		Ok(indexes) => indexes,
-		Err(_) => return Ok(declined(table, base)),
+		Err(_) => return Ok(failed(base)),
 	};
 	let indexes = match version {
 		ReadVersion::Stamped(stamp) => {
 			let then = match txn.all_tb_indexes(ns, db, table, Some(*stamp)).await {
 				Ok(then) => then,
-				Err(_) => return Ok(declined(table, base)),
+				Err(_) => return Ok(failed(base)),
 			};
 			let kept: Vec<_> = indexes
 				.iter()
@@ -755,7 +762,7 @@ pub(super) async fn read_answers(
 	};
 	let indexes = match filter_online_indexes(txn, ns, db, indexes).await {
 		Ok(indexes) => indexes,
-		Err(_) => return Ok(declined(table, base)),
+		Err(_) => return Ok(failed(base)),
 	};
 	let admissible =
 		admissible_indexes(Arc::clone(&indexes), &base.restricted.prefixes(), reads_versioned);
@@ -764,6 +771,12 @@ pub(super) async fn read_answers(
 	} else {
 		planner.with_array_columns_as_elements(txn, ns, db, table, admissible).await
 	};
+	if no_index {
+		return Ok(TableAnswers {
+			probe_columns: columns,
+			..base
+		});
+	}
 	Ok(TableAnswers {
 		indexes,
 		columns,

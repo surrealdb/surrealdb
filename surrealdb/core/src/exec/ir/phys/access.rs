@@ -53,7 +53,7 @@ use super::offer::{Offer, offer_across, offer_of};
 use super::ops::{
 	BitmapAttrs, BranchReadShape, FullTextScanAttrs, IdBoundsShape, IndexBranchShape,
 	IndexScanAttrs, IndexUnionAttrs, KeyRangeScanAttrs, KnnFilterShape, KnnPermissionShape,
-	KnnScanAttrs, PhysOp, ReadClauses, RecordScanAttrs, TableScanAttrs,
+	KnnScanAttrs, PhysOp, ReadClauses, RecordScanAttrs, ScanProbes, TableScanAttrs,
 };
 use super::{keyed_record, knn};
 use crate::catalog::{FieldDefinition, Index, IndexDefinition, KeyStructure};
@@ -61,10 +61,11 @@ use crate::exec::field_path::FieldPath;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
 	AccessInputs, AccessPath, BTreeAccess, ElementColumns, access_fans_out, admissible_indexes,
-	decide_access, with_array_columns_as_elements,
+	analysis_condition, decide_access, with_array_columns_as_elements,
 };
 use crate::exec::index::analysis::KnnQueryVectors;
 use crate::exec::index::id_range::plan_id_range;
+use crate::exec::index::probe::probe_set;
 use crate::exec::ir::build::phys::{
 	bitmap_shape, id_bounds_shape, index_ref, key_range_shape, knn_filter_shape,
 };
@@ -198,6 +199,11 @@ pub(crate) struct TableAnswers {
 	/// `None` when the field list or the indexes' recorded shapes could not be read, the case
 	/// where the planner declines its plan-time index path.
 	pub(crate) columns: Option<ElementColumns>,
+	/// Under `WITH NOINDEX`, which leaves [`Self::indexes`] and [`Self::columns`] empty so that no
+	/// index serves the read, the columns those would hold: read only for the selectivity probes
+	/// of the table scan ([`crate::exec::index::probe`]), which decide how the scan is placed and
+	/// never which rows it reads. `None` under any other hint.
+	pub(crate) probe_columns: Option<ElementColumns>,
 	/// The structure of the table's record ids, where they name their components or the table is
 	/// an aggregated view.
 	pub(crate) key: Option<Arc<KeyStructure>>,
@@ -241,6 +247,7 @@ impl TableAnswers {
 			lightweight: false,
 			enforces: false,
 			columns: Some(ElementColumns::unchanged(Arc::clone(&indexes))),
+			probe_columns: None,
 			indexes,
 			fields: Arc::from(Vec::new()),
 			schema: None,
@@ -289,7 +296,7 @@ impl TableAnswers {
 		&self,
 		registry: &FunctionRegistry,
 	) -> Vec<crate::exec::index::access_path::IndexRef> {
-		match &self.columns {
+		match self.probe_columns.as_ref().or(self.columns.as_ref()) {
 			Some(columns) => {
 				columns.analyzer(None, registry).with_key(self.key.clone()).index_refs()
 			}
@@ -543,21 +550,56 @@ pub(crate) fn select_access(
 	// hold, and a read of a table the catalog does not define may find one defined.
 	let id_bounds = cx.id_bounds && table.defined && !source.may_meet_change;
 	match decide(table, source.with.as_ref(), cond.as_ref(), ordering, limited, cx)? {
-		Some((path, direction)) => map_decision(
-			Decision {
-				path,
-				direction,
-				read,
-				order_withheld,
-			},
-			table,
-			predicate,
-			cond.as_ref(),
-			offered,
-			id_bounds.then_some(cx.registry),
-		),
+		Some((path, direction)) => {
+			let mut choice = map_decision(
+				Decision {
+					path,
+					direction,
+					read,
+					order_withheld,
+				},
+				table,
+				predicate,
+				cond.as_ref(),
+				offered,
+				id_bounds.then_some(cx.registry),
+			)?;
+			if let PhysOp::TableScan(attrs) = &mut choice.access
+				&& !attrs.lightweight
+			{
+				attrs.probes = scan_probes(table, cond.as_ref(), cx.registry).map(Box::new);
+			}
+			Ok(choice)
+		}
 		None => Ok(finished(table_scan(table, determine_scan_direction(ordering), read))),
 	}
+}
+
+/// The selectivity probes of a table scan of `table` under the predicate `cond`
+/// ([`crate::exec::index::probe`]), or `None` where no conjunct is one an index answers.
+///
+/// The probes read the indexes the access-path decision reads, whatever the `WITH` hint, since a
+/// hint chooses the read and not what the indexes say of the rows. They read only what the
+/// catalog states: a conjunct over a field the caller may not read is given no probe, and a read
+/// at a `VERSION` none, because an index entry holds the state the last write left rather than
+/// the state at the stamp.
+fn scan_probes(
+	table: &TableAnswers,
+	cond: Option<&LogicalExpr>,
+	registry: &FunctionRegistry,
+) -> Option<ScanProbes> {
+	if table.version != ReadVersion::Current
+		|| matches!(table.restricted, RestrictedSelect::Unresolved)
+	{
+		return None;
+	}
+	let columns = table.probe_columns.as_ref().or(table.columns.as_ref())?;
+	let cond = analysis_condition(cond, registry)?;
+	let prefixes = table.restricted.prefixes();
+	let analyzer =
+		columns.analyzer(None, registry).with_key(table.key.clone()).with_clock(table.allows_clock);
+	let set = probe_set(&analyzer, &cond, &|conjunct| !prefixes.cond_touches(conjunct))?;
+	set.try_map(|index| Ok::<_, std::convert::Infallible>(index_ref(index))).ok()
 }
 
 /// The record-id bounds a table scan of `table` takes from `predicate`, with the expressions of
@@ -712,6 +754,7 @@ fn read_clauses(table: &TableAnswers, with: Option<&With>) -> ReadClauses {
 /// The table scan of `table` along `direction`.
 fn table_scan(table: &TableAnswers, direction: Direction, read: ReadClauses) -> PhysOp {
 	PhysOp::TableScan(Box::new(TableScanAttrs {
+		probes: None,
 		bounds: None,
 		prefilter: None,
 		table: table.table.clone(),
@@ -3364,6 +3407,115 @@ mod tests {
 			panic!("a table scan, got {:?}", choice.access);
 		};
 		assert_eq!(attrs.direction, Direction::Backward);
+	}
+
+	/// The selectivity probes of the table scan `choice` names, if it names one.
+	fn probes(choice: &AccessChoice) -> Option<&ScanProbes> {
+		if let PhysOp::TableScan(attrs) = &choice.access {
+			attrs.probes.as_deref()
+		} else {
+			None
+		}
+	}
+
+	fn probed(set: &ScanProbes) -> Vec<&str> {
+		set.probes.iter().map(|(index, _)| index.index.as_str()).collect()
+	}
+
+	/// A table scan carries a probe for each conjunct an index answers, whether the scan was
+	/// chosen under `WITH NOINDEX` or because no index answers the whole predicate.
+	#[test]
+	fn a_table_scan_carries_probes_for_the_conjuncts_an_index_answers() {
+		use crate::exec::index::probe::ProbeBound;
+		let table = answers(vec![idx(1, "by_a", &["a"]), idx(2, "by_b", &["b"])]);
+		let choice = chosen(&table, "WITH NOINDEX WHERE a = 1").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		let set = probes(&choice).expect("probes");
+		assert_eq!(probed(set), ["by_a"]);
+		assert!(matches!(set.probes[0].1, BTreeAccess::Equality(_)));
+		assert_eq!(set.bound, ProbeBound::Probe(0));
+
+		let choice =
+			chosen(&table, "WITH NOINDEX WHERE a = 1 AND b = 2 AND c = 3").expect("a choice");
+		let set = probes(&choice).expect("probes");
+		assert_eq!(probed(set), ["by_a", "by_b"]);
+		assert!(matches!(&set.bound, ProbeBound::All(parts) if parts.len() == 2));
+
+		let choice = chosen(&table, "WITH NOINDEX WHERE a = 1 OR b = 2").expect("a choice");
+		let set = probes(&choice).expect("probes");
+		assert_eq!(set.bound, ProbeBound::Any(vec![ProbeBound::Probe(0), ProbeBound::Probe(1)]));
+
+		// An OR with an unindexed arm bounds nothing, and its sibling bounds the conjunction.
+		let choice =
+			chosen(&table, "WITH NOINDEX WHERE (a = 1 OR c = 2) AND b = 2").expect("a choice");
+		assert_eq!(probed(probes(&choice).expect("probes")), ["by_b"]);
+		let choice = chosen(&table, "WHERE a = 1 OR c = 2").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert_eq!(probes(&choice), None, "an OR with an unindexed arm bounds nothing");
+	}
+
+	#[test]
+	fn an_index_scan_or_an_unindexed_predicate_carries_no_probes() {
+		let table = answers(vec![idx(1, "by_a", &["a"])]);
+		let choice = chosen(&table, "WHERE a = 1").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::IndexScan);
+		let choice = chosen(&table, "WHERE c = 1").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert_eq!(probes(&choice), None);
+		let choice = chosen(&table, "").expect("a choice");
+		assert_eq!(probes(&choice), None);
+	}
+
+	/// A bound the binder resolved is a literal of the probe, as it is of an index scan; one only
+	/// the run evaluates, which no index access reads, has no probe.
+	#[test]
+	fn a_probe_reads_the_bounds_an_index_access_reads() {
+		let table = answers(vec![idx(1, "ix", &["at"])]);
+		let choice = chosen(&table, "WITH NOINDEX WHERE at = 10").expect("a choice");
+		let set = probes(&choice).expect("probes");
+		assert!(matches!(
+			&set.probes[0].1,
+			BTreeAccess::Equality(crate::exec::index::access_path::BoundOperand::Literal(_))
+		));
+		let operand = LogicalExpr::Binary {
+			left: Box::new(LogicalExpr::Field(Strand::from("at"))),
+			op: BinaryOperator::MoreThan,
+			right: Box::new(LogicalExpr::Param(crate::expr::Param::from(String::from(
+				"__operand0",
+			)))),
+		};
+		let predicate = Reconstructed {
+			conjuncts: vec![(0, operand)],
+			withheld: Vec::new(),
+			operands: vec![ValueId::default()],
+		};
+		let choice = select_access(&table_source(), &table, &predicate, None, &decision())
+			.expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert_eq!(probes(&choice), None);
+	}
+
+	/// A conjunct over a field the caller may not read, and a read at a `VERSION`, are probed
+	/// through no index.
+	#[test]
+	fn no_probe_reads_a_restricted_field_or_an_unstamped_entry() {
+		let mut table = answers(vec![idx(1, "by_x", &["x"]), idx(2, "by_y", &["y"])]);
+		table.restricted = RestrictedSelect::Fields(vec![
+			crate::expr::logical::FieldPath::from_idiom(&Idiom::from_str("x").expect("idiom"))
+				.expect("a field path"),
+		]);
+		let table = refreshed(table);
+		let choice = chosen(&table, "WITH NOINDEX WHERE x = 1 AND y = 2").expect("a choice");
+		assert_eq!(probed(probes(&choice).expect("probes")), ["by_y"]);
+		let choice = chosen(&table, "WITH NOINDEX WHERE x = 1").expect("a choice");
+		assert_eq!(probes(&choice), None);
+
+		let mut table = answers(vec![idx(1, "by_x", &["x"])]);
+		table.version = ReadVersion::Stamped(7);
+		let table = refreshed(table);
+		let choice = chosen(&table, "WITH NOINDEX WHERE x = 1").expect("a choice");
+		assert_eq!(tag(&choice), PhysTag::TableScan);
+		assert_eq!(probes(&choice), None);
 	}
 
 	#[test]

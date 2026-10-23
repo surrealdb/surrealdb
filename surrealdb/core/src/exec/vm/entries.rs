@@ -31,7 +31,7 @@ use crate::val::RecordId;
 /// the instant of the statement `ctx` runs in (the wall clock where none is
 /// installed), so a program that outlives its statement reads the clock of the
 /// statement that runs it.
-pub(super) fn entry_range(
+pub(in crate::exec::vm) fn entry_range(
 	ctx: &ExecutionContext,
 	index: &IndexRef,
 	access: &BTreeAccess,

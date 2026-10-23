@@ -199,6 +199,7 @@ mod tests {
 
 	fn table_scan(direction: Direction) -> PhysOp {
 		PhysOp::TableScan(Box::new(TableScanAttrs {
+			probes: None,
 			bounds: None,
 			prefilter: None,
 			table: TableName::new(Strand::new("t")),

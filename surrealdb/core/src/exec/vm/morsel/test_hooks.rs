@@ -150,6 +150,9 @@ pub(in crate::exec::vm) struct Counts {
 	pub(in crate::exec::vm) asked_at_open: usize,
 	/// Morsels cut off a range as its scan opened, before an entry of it was read.
 	pub(in crate::exec::vm) opened: usize,
+	/// Times a scan learned the share of its rows its filters pass from its selectivity probes as
+	/// it opened.
+	pub(in crate::exec::vm) probed: usize,
 }
 
 static COUNTS: LazyLock<Mutex<HashMap<usize, Counts>>> = LazyLock::new(Default::default);
@@ -319,6 +322,11 @@ pub(super) fn note_held(ctx: &ExecutionContext, held: usize) {
 /// A scan asked the storage what its range holds as it opened.
 pub(super) fn note_asked_at_open(ctx: &ExecutionContext) {
 	bump(ctx, |counts| counts.asked_at_open += 1);
+}
+
+/// A scan learned the share of its rows its filters pass from its selectivity probes as it opened.
+pub(super) fn note_probed(ctx: &ExecutionContext) {
+	bump(ctx, |counts| counts.probed += 1);
 }
 
 /// `parts` morsels were cut off a range as its scan opened.

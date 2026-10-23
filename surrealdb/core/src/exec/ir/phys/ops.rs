@@ -626,7 +626,14 @@ pub(crate) struct TableScanAttrs {
 	/// bounds only narrow the keys read: every row inside them is a row the unbounded scan
 	/// reaches, in the same order, and the predicate stays above the scan.
 	pub(crate) bounds: Option<IdBoundsShape>,
+	/// The index ranges whose entry counts bound the share of the scan's rows its predicate
+	/// passes ([`crate::exec::index::probe`]), when a conjunct of the predicate is one an index
+	/// answers. Read only to decide how the scan is placed as it opens; it never changes the rows.
+	pub(crate) probes: Option<Box<ScanProbes>>,
 }
+
+/// The selectivity probes of a table scan, over the indexes the access-path decision reads.
+pub(crate) type ScanProbes = crate::exec::index::probe::ProbeSet<IndexRef>;
 
 /// The attributes of a read of one record by id.
 #[derive(Clone, Debug, PartialEq)]
