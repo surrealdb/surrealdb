@@ -3778,7 +3778,7 @@ dde4363594dc611d language-tests/tests/reproductions/a_read_by_data_after_a_schem
 664db880d59ca7fa language-tests/tests/reproductions/a_record_read_by_id_hides_the_fields_its_permissions_deny.surql
 b0e4f058b2a0308d language-tests/tests/reproductions/a_record_read_by_id_hides_the_fields_its_permissions_deny_import.surql
 fd7987c1ec684ce2 language-tests/tests/reproductions/a_record_read_follows_a_table_defined_earlier_in_the_block.surql
-ef30322f17169b62 language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth.surql
+7b7d9c64ed705ab8 language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth.surql
 d2163cc4c1412bda language-tests/tests/reproductions/a_record_user_of_an_undefined_table_reads_as_none_through_auth_import.surql
 52e0ebec712d4d92 language-tests/tests/reproductions/a_recursive_event_chain_runs_to_its_base_case.surql
 7e50b5ee44e8d121 language-tests/tests/reproductions/a_redefined_view_stops_reading_its_former_sources.surql
@@ -4544,7 +4544,7 @@ ab507bce321646c8 language-tests/tests/upgrade/define/3.00.00_index_datetime_coll
 23007f39414448b4 language-tests/tests/upgrade/define/3.00.00_index_datetime_nested.surql
 321ce7819b781cf7 language-tests/tests/upgrade/define/3.00.00_index_datetime_nested_import.surql
 fda31259fd7b781a language-tests/tests/upgrade/define/3.00.00_index_fulltext.surql
-49b23dc99d98c418 language-tests/tests/upgrade/define/3.00.00_index_fulltext_current.surql
+2fe9d32bf501ff84 language-tests/tests/upgrade/define/3.00.00_index_fulltext_current.surql
 c2165099425e4f18 language-tests/tests/upgrade/define/3.00.00_index_fulltext_import.surql
 8152d8e76245f111 language-tests/tests/upgrade/define/3.00.00_index_fulltext_rebuild.surql
 66377c604814d2e6 language-tests/tests/upgrade/define/3.00.00_index_hnsw.surql
