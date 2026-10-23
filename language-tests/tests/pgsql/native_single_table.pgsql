@@ -71,7 +71,7 @@ value = "[{ n: 0 }]"
 value = "[{ total: 0 }]"
 
 [[test.results]]
-value = "[{ d: 6, hi: 120.5f, lo: 50, n: 6, total: 680.5f }]"
+value = "[{ d: 4, hi: 120.5f, lo: 50, n: 6, total: 680.5f }]"
 
 [[test.results]]
 value = "[{ dept: 1, n: 2 }, { dept: 2, n: 2 }, { dept: 3, n: 1 }, { dept: 9, n: 1 }, { dept: NONE, n: 1 }, { dept: NULL, n: 1 }]"

@@ -144,13 +144,26 @@ pub fn lower_bound_expr(
 								"COUNT(DISTINCT) requires 1 argument".into(),
 							));
 						};
+						// COUNT(DISTINCT x) counts the distinct values of x other than NULL, as
+						// COUNT(x) counts the rows whose x is not NULL. A missing x reads as NONE,
+						// which array::group keeps apart from NULL, so both are removed.
 						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
 							receiver: Function::Normal("array::group".to_string()),
 							args: vec![lowered_arg],
 						}));
+						let non_null = LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("array::complement".to_string()),
+							args: vec![
+								group_call,
+								LogicalExpr::Array(vec![
+									LogicalExpr::Literal(LogicalLiteral::Null),
+									LogicalExpr::Literal(LogicalLiteral::None),
+								]),
+							],
+						}));
 						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
 							receiver: Function::Normal("array::len".to_string()),
-							args: vec![group_call],
+							args: vec![non_null],
 						})));
 					}
 					"sum" => {
