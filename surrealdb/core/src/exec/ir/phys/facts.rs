@@ -117,7 +117,7 @@ pub(crate) fn facts_reading(
 	let chain = chain_facts(source.map(|(_, kind)| kind), source_rows, &step_kinds);
 
 	let mut scanned: Vec<OpId> = steps.iter().map(|(op, _)| *op).collect();
-	if matches!(cut.sink, SinkKind::Sort { .. } | SinkKind::Aggregate) {
+	if matches!(cut.sink, SinkKind::Sort { .. } | SinkKind::Aggregate | SinkKind::Write) {
 		scanned.extend(cut.consumer);
 	}
 	let nesting = scan_expressions(ir, &scanned);
@@ -1801,5 +1801,161 @@ mod tests {
 		let facts =
 			table_facts_of(&answers(vec![idx(1, "ix", &["x"])]), None, true).expect("an entry");
 		assert!(facts.estimate.is_none());
+	}
+
+	#[test]
+	fn a_write_consumer_is_scanned_for_nested_statements() {
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+		use crate::exec::ir::iface::region_kind::ClauseRole;
+		use crate::exec::ir::iface::statements::{WriteForm, WriteOutput};
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::exec::ir::logical::ops::{
+			LoopSink, WriteAttrs, WriteBody, WriteBranching, WriteStored,
+		};
+		use crate::exec::ir::phys::ops::{
+			PhysWriteAttrs, PipelineAttrs, WriteCut, WriteSubjectsShape,
+		};
+
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let mut facts = FactCache::new();
+		let loc = Location {
+			stmt: 0,
+			span: None,
+			origin: LocOrigin::Synthesized,
+		};
+		let top = ir.region(ir.top()).expect("top").blocks[0];
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let scan = rw
+			.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Phys(table_scan(false)),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("scan");
+		let scan_rows = rw.ir().op(scan).expect("scan").results[0];
+		let pipeline = rw
+			.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Phys(PhysOp::Pipeline(Box::new(PipelineAttrs::default()))),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("pipeline");
+		let pipe_region =
+			rw.create_region(pipeline, RegionKind::Pipeline, &[]).expect("pipe region");
+		let pipe_block = rw.ir().region(pipe_region).expect("pipe region").blocks[0];
+		let loop_op = rw
+			.create(
+				InsertPoint::End(pipe_block),
+				OpSpec {
+					kind: OpKind::Phys(PhysOp::Loop {
+						kind: LoopKind::Write,
+						sink: LoopSink::Write(WriteForm::Update),
+						cut: Some(WriteCut {
+							stage: 1,
+							compute_reads_data: false,
+							encode_at_cut: true,
+						}),
+					}),
+					operands: smallvec![scan_rows],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("loop");
+		rw.create_region(loop_op, RegionKind::Loop, &[TypeKnowledge::Unknown]).expect("loop body");
+		let loop_out = rw.ir().op(loop_op).expect("loop").results[0];
+		rw.create(
+			InsertPoint::End(pipe_block),
+			OpSpec {
+				kind: OpKind::Phys(PhysOp::Yield),
+				operands: smallvec![loop_out],
+				results: SmallVec::new(),
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc,
+			},
+		)
+		.expect("yield");
+		let pipe_out = rw.ir().op(pipeline).expect("pipeline").results[0];
+		let write_op = rw
+			.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Phys(PhysOp::Write(Box::new(PhysWriteAttrs {
+						write: WriteAttrs {
+							form: WriteForm::Update,
+							return_output: WriteOutput::Project,
+							has_data_expr: false,
+							data_patch: false,
+							has_where_cond: false,
+							where_is_truthy_const: false,
+							only: false,
+							retry: false,
+							timeout: false,
+							relation: false,
+							body: WriteBody {
+								branching: WriteBranching::Sole,
+								first: Vec::new(),
+								second: Vec::new(),
+							},
+							stored: WriteStored::default(),
+							statement: None,
+						},
+						subjects: WriteSubjectsShape::Rows,
+					}))),
+					operands: smallvec![pipe_out],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("write");
+		let ret_region = rw
+			.create_region(write_op, RegionKind::Clause(ClauseRole::ReturnClause), &[])
+			.expect("return region");
+		let ret_block = rw.ir().region(ret_region).expect("return region").blocks[0];
+		let subquery = rw
+			.create(
+				InsertPoint::End(ret_block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Subquery(NestedStrategy::Apply)),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("subquery");
+		rw.create_region(subquery, RegionKind::Subquery, &[]).expect("subquery region");
+
+		let registry = crate::exec::ir::analysis::cx::builtin_registry();
+		let got = facts_reading(&ir, &mut facts, registry, pipeline, NestedReading::Strategy)
+			.expect("pipeline facts");
+		assert_eq!(got.sink, SinkKind::Write);
+		assert!(got.writes);
+		assert_eq!(got.nested, NestedUse::PerRowReadOnly);
 	}
 }

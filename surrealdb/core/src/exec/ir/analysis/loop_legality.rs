@@ -43,7 +43,9 @@ use crate::exec::ir::iface::r#loop::{
 	ApplyCut, BarrierCause, Exit, ExitCause, LoopMode, LoopRefusal, SourceDelivery,
 };
 use crate::exec::ir::iface::policy::LoopFacts;
-use crate::exec::ir::iface::region_kind::{LoopRule, RegionKind, RegionProperties, ReturnRule};
+use crate::exec::ir::iface::region_kind::{
+	FieldRole, LoopRule, RegionKind, RegionProperties, ReturnRule,
+};
 use crate::exec::ir::logical::ops::{
 	LogOp, LogTag, LoopKind, LoopSink, SourceRefShape, Stored, WriteMark, WriteStored,
 };
@@ -369,18 +371,27 @@ pub(crate) fn of_with(
 	};
 	let (multiplicity, key_path) = multiplicity::of_stream(ir, loop_op);
 	let held = slice::of(ir, facts, cx, loop_op);
+	let (consumer_ops, consumer_layer_ops) = consuming_write_ops(ir, loop_op);
 	let mut body_ops = Vec::new();
 	if let Some(body) = multiplicity::loop_body(ir, loop_op) {
 		body_order(ir, body, &mut body_ops, 0);
 	}
+	body_ops.extend(consumer_ops.iter().copied());
 
-	let compute = held.compute.iter().fold(EffectSet::PURE, |all, op| {
-		all.union(slice::judged_effects(ir, facts, cx, loop_op, *op))
-	});
-	let residue = transitive_set(ir, facts, cx, held.residue.iter().map(|(op, _)| *op));
+	let consumer_effects = transitive_set(ir, facts, cx, consumer_ops.iter().copied());
+	let compute = held
+		.compute
+		.iter()
+		.fold(EffectSet::PURE, |all, op| {
+			all.union(slice::judged_effects(ir, facts, cx, loop_op, *op))
+		})
+		.union(consumer_effects);
+	let residue = transitive_set(ir, facts, cx, held.residue.iter().map(|(op, _)| *op))
+		.union(consumer_effects);
 	let compute_fallibility = held
 		.compute
 		.iter()
+		.chain(consumer_layer_ops.iter())
 		.fold(Fallibility::INFALLIBLE, |all, op| {
 			all.union(fallibility::of_with(ir, facts, cx, *op))
 		})
@@ -388,8 +399,10 @@ pub(crate) fn of_with(
 	let consumers = consumers_of(ir, loop_op);
 	let compute_reads_data = held.compute.iter().any(|op| {
 		slice::judged_effects(ir, facts, cx, loop_op, *op).contains(EffectSet::READS_DATA)
-	});
-	let cut_at_marks = compute_stages_in_slice(ir, loop_op, &held);
+	}) || transitive_set(ir, facts, cx, consumer_layer_ops.iter().copied())
+		.contains(EffectSet::READS_DATA);
+	let cut_at_marks =
+		compute_stages_in_slice(ir, facts, cx, loop_op, &held, &consumer_layer_ops);
 	let writes_subjects = matches!(sink, LoopSink::Write(_));
 	let carried = if sink == LoopSink::Fold || kind == LoopKind::Recurse {
 		Carried::Accumulator {
@@ -768,7 +781,14 @@ fn delivery_of(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId)
 	if raises || !ADMITTED.contains(read.set) {
 		return SourceDelivery::ReadWhole;
 	}
-	let body_writes = footprint::of_with(ir, facts, cx, loop_op).writes;
+	let mut body_writes = footprint::of_with(ir, facts, cx, loop_op).writes;
+	if let Some(write_op) = consuming_write(ir, loop_op) {
+		for write in footprint::of_with(ir, facts, cx, write_op).writes {
+			if !body_writes.contains(&write) {
+				body_writes.push(write);
+			}
+		}
+	}
 	let disturbed =
 		read.footprint.reads.iter().any(|source_read| {
 			body_writes.iter().any(|write| footprint::overlaps(source_read, write))
@@ -886,13 +906,41 @@ fn static_target(ir: &Ir, value: ValueId) -> bool {
 }
 
 /// Whether every write stage of the loop `loop_op` that the plan marks `Compute` is wholly in the
-/// compute slice `held`: no op of the stage, or of a region it owns, is in the residue.
-fn compute_stages_in_slice(ir: &Ir, loop_op: OpId, held: &Slice) -> bool {
+/// compute slice `held`: no op of the stage, or of a region it owns, is in the residue, and no
+/// record-layer region of the consuming write (`COMPUTED` fields and permissions that a compute
+/// stage snapshots) holds an effect that only the apply half may run.
+fn compute_stages_in_slice(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	loop_op: OpId,
+	held: &Slice,
+	consumer_layer_ops: &[OpId],
+) -> bool {
 	let Some(body) = multiplicity::loop_body(ir, loop_op) else {
 		return true;
 	};
 	let held_back: FxHashSet<OpId> =
 		held.residue.iter().filter_map(|(op, _)| body_child_of(ir, *op, body)).collect();
+	let has_compute_stage = ops_in(ir, body).any(|op| {
+		matches!(
+			ir.op(op).map(|data| &data.kind),
+			Some(OpKind::Logical(LogOp::WriteStage {
+				mark: WriteMark::Compute,
+				..
+			}))
+		)
+	});
+	if has_compute_stage {
+		let layer_effects = transitive_set(ir, facts, cx, consumer_layer_ops.iter().copied());
+		let must_apply = EffectSet::WRITES_DATA
+			.union(EffectSet::WRITES_EXTERNAL)
+			.union(EffectSet::ADVANCES_STATE)
+			.union(EffectSet::ENTROPY);
+		if layer_effects.intersects(must_apply) {
+			return false;
+		}
+	}
 	ops_in(ir, body).all(|op| {
 		!matches!(
 			ir.op(op).map(|data| &data.kind),
@@ -1032,20 +1080,60 @@ fn source_reads_stored(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_o
 	}
 }
 
-/// The stored code the write that consumes the loop `loop_op` states its table holds, or `None`
-/// when no write consumes it, as a loop that is not a write's subject loop.
-fn written_stored(ir: &Ir, loop_op: OpId) -> Option<&WriteStored> {
+/// The `LogOp::Write` op that consumes `loop_op` as its subject loop, when one does.
+fn consuming_write(ir: &Ir, loop_op: OpId) -> Option<OpId> {
 	let data = ir.op(loop_op)?;
 	for result in data.results.iter().copied() {
 		for used in ir.uses(result) {
-			if let Some(OpKind::Logical(LogOp::Write(attrs))) = ir.op(used.user).map(|d| &d.kind)
+			if matches!(ir.op(used.user).map(|d| &d.kind), Some(OpKind::Logical(LogOp::Write(_))))
 				&& types::subject_loop(ir, used.user) == Some(loop_op)
 			{
-				return Some(&attrs.stored);
+				return Some(used.user);
 			}
 		}
 	}
 	None
+}
+
+/// The ops in the running regions of the `LogOp::Write` that consumes `loop_op`, in body order:
+/// first all ops across its `RETURN`, `COMPUTED` field and permission regions, and second the
+/// subset in its `COMPUTED` field and permission regions that compute stages snapshot.
+fn consuming_write_ops(ir: &Ir, loop_op: OpId) -> (Vec<OpId>, Vec<OpId>) {
+	let mut all_ops = Vec::new();
+	let mut layer_ops = Vec::new();
+	let Some(write_op) = consuming_write(ir, loop_op) else {
+		return (all_ops, layer_ops);
+	};
+	let Some(write_data) = ir.op(write_op) else {
+		return (all_ops, layer_ops);
+	};
+	for region in write_data.regions.iter().copied() {
+		let Some(info) = ir.region(region) else {
+			continue;
+		};
+		if !effects::runs(&write_data.kind, info.kind) {
+			continue;
+		}
+		body_order(ir, region, &mut all_ops, 0);
+		if matches!(
+			info.kind,
+			RegionKind::FieldFrame(FieldRole::Computed) | RegionKind::PermissionFrame
+		) {
+			body_order(ir, region, &mut layer_ops, 0);
+		}
+	}
+	(all_ops, layer_ops)
+}
+
+/// The stored code the write that consumes the loop `loop_op` states its table holds, or `None`
+/// when no write consumes it, as a loop that is not a write's subject loop.
+fn written_stored(ir: &Ir, loop_op: OpId) -> Option<&WriteStored> {
+	let write_op = consuming_write(ir, loop_op)?;
+	if let OpKind::Logical(LogOp::Write(attrs)) = &ir.op(write_op)?.kind {
+		Some(&attrs.stored)
+	} else {
+		None
+	}
 }
 
 /// Whether every write of the body of `loop_op` that is keyed along the loop's element is keyed
@@ -1431,5 +1519,163 @@ mod tests {
 			.union(EffectSet::NOTIFY);
 		assert!(!refused.intersects(barriers));
 		assert_eq!(refused.union(barriers), EffectSet::NON_DETERMINISTIC_BUT_FOR_CLOCK);
+	}
+
+	async fn bind_write_loop(sql: &str) -> (Ir, OpId, OpId) {
+		use crate::exec::ir::analysis::cx::NoDefinitions;
+		use crate::exec::ir::build::logical::bind_request;
+		use crate::exec::ir::core::ir::IrScope;
+		use crate::exec::ir::iface::frame::FrameTable;
+		use crate::exec::ir::{RequestInput, RequestStatement};
+
+		let registry = FunctionRegistry::with_builtins();
+		let frames = FrameTable::default();
+		let cx = EffectCx {
+			registry: &registry,
+			catalog: &NoDefinitions,
+			frames: &frames,
+		};
+		let parsed = crate::syn::parse(sql).expect("parses").expressions;
+		let statements = RequestStatement::of(&parsed);
+		let input = RequestInput::request(
+			&statements,
+			IrScope::Request {
+				fragment: None,
+			},
+		);
+		let ir = bind_request(&input, &cx).await.expect("binds");
+		let mut loop_op = None;
+		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if matches!(
+				ir.op(op).map(|d| &d.kind),
+				Some(OpKind::Logical(LogOp::Loop {
+					kind: LoopKind::Write,
+					..
+				}))
+			) {
+				loop_op = Some(op);
+				Walk::Stop
+			} else {
+				Walk::Continue
+			}
+		});
+		let loop_op = loop_op.expect("a write loop");
+		let write_op = consuming_write(&ir, loop_op).expect("a consuming write");
+		(ir, loop_op, write_op)
+	}
+
+	#[tokio::test]
+	async fn consuming_write_regions_govern_write_loop_legality() {
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::expr::Function;
+
+		let (ir, loop_op, _) = bind_write_loop("UPDATE t SET x = 1 RETURN x + 1, time::now()").await;
+		let held = of_with(&ir, &mut FactCache::new(), &default_cx(&ir), loop_op).expect("judged");
+		assert_eq!(held.effects, ChainLegality::RowLocal);
+		assert_eq!(held.apply_effects, ApplyEffects::Admitted);
+		assert_eq!(held.barrier, None);
+		assert!(held.cut_at_marks);
+
+		for (sql, refusal) in [
+			("UPDATE t SET x = 1 RETURN rand()", ChainRefusal::Entropy),
+			("UPDATE t SET x = 1 RETURN sequence::nextval('s')", ChainRefusal::AdvancesState),
+			("UPDATE t SET x = 1 RETURN sleep(1ms)", ChainRefusal::Blocks),
+			("UPDATE t SET x = 1 RETURN fn::f()", ChainRefusal::Opaque),
+			("UPDATE t SET x = 1 RETURN http::get('http://localhost/')", ChainRefusal::External),
+			("UPDATE t SET x = 1 RETURN (CREATE log:1)", ChainRefusal::Writes),
+		] {
+			let (ir, loop_op, _) = bind_write_loop(sql).await;
+			let held =
+				of_with(&ir, &mut FactCache::new(), &default_cx(&ir), loop_op).expect("judged");
+			assert_eq!(held.effects, ChainLegality::Refused(refusal), "{sql}");
+			assert_eq!(held.mode(), LoopMode::Serial(LoopRefusal::Effect(refusal)), "{sql}");
+			assert_eq!(held.legality().chain, ChainLegality::Refused(refusal), "{sql}");
+			assert_eq!(held.legality().sink, SinkCombine::NotSplittable, "{sql}");
+		}
+
+		let (ir, loop_op, _) = bind_write_loop("UPDATE t SET x = 1 RETURN (DEFINE TABLE y)").await;
+		let held = of_with(&ir, &mut FactCache::new(), &default_cx(&ir), loop_op).expect("judged");
+		assert_eq!(held.barrier, Some(BarrierCause::CatalogChange));
+
+		// A `COMPUTED` field region on the consuming `LogOp::Write` runs inside `cx.snapshot()`
+		// during compute stages: a data read in it sets `compute_reads_data`, and an order-dependent
+		// effect in it invalidates `cut_at_marks` and refuses the compute slice.
+		let (mut ir, loop_op, write_op) = bind_write_loop("UPDATE t SET x = 1").await;
+		let mut facts = FactCache::new();
+		let loc = Location {
+			stmt: 0,
+			span: None,
+			origin: LocOrigin::Synthesized,
+		};
+		let computed_region = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let region = rw
+				.create_region(
+					write_op,
+					RegionKind::FieldFrame(FieldRole::Computed),
+					&[TypeKnowledge::Unknown],
+				)
+				.expect("computed region");
+			let block = rw.ir().region(region).expect("region").blocks[0];
+			let doc = rw.ir().block(block).expect("block").args[0];
+			let deref = rw
+				.create(
+					InsertPoint::End(block),
+					OpSpec {
+						kind: OpKind::Expr(ExprOp::Deref {
+							fields: None,
+						}),
+						operands: smallvec::smallvec![doc],
+						results: smallvec::smallvec![TypeKnowledge::Unknown],
+						frame: FrameId::new(0),
+						snapshot: SnapshotId::new(0),
+						loc,
+					},
+				)
+				.expect("deref");
+			let deref_val = rw.ir().op(deref).expect("deref").results[0];
+			rw.create(
+				InsertPoint::End(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Yield),
+					operands: smallvec::smallvec![deref_val],
+					results: SmallVec::new(),
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("yield");
+			region
+		};
+		let held = of_with(&ir, &mut facts, &default_cx(&ir), loop_op).expect("judged");
+		assert!(held.compute_reads_data, "the computed field reads stored data");
+		assert!(held.cut_at_marks, "a data read alone keeps the cut at the marks");
+
+		{
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let block = rw.ir().region(computed_region).expect("region").blocks[0];
+			rw.create(
+				InsertPoint::Start(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Call(Box::new(Function::Normal(
+						"rand".to_owned(),
+					)))),
+					operands: SmallVec::new(),
+					results: smallvec::smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc,
+				},
+			)
+			.expect("rand call");
+		}
+		let held = of_with(&ir, &mut facts, &default_cx(&ir), loop_op).expect("judged");
+		assert!(!held.cut_at_marks, "entropy in a computed field cannot run ahead of the cut");
+		assert_eq!(held.effects, ChainLegality::Refused(ChainRefusal::Entropy));
+		assert_eq!(held.mode(), LoopMode::Serial(LoopRefusal::Effect(ChainRefusal::Entropy)));
 	}
 }
