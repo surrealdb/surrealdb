@@ -14,7 +14,7 @@ arrived in 3.1.0 simply has a shorter walk, not an empty store dragged through
 3.0.x.
 
 ```
-                    3.1.0 ─ 3.1.1 ─ 3.1.2 ─ … ─ 3.2.4 ─ HEAD
+                    3.1.0 ─ 3.1.1 ─ 3.1.2 ─ … ─ 3.3.4 ─ HEAD
                       │        │        │          │       │
                    setup    mutate   mutate     mutate  mutate
                    verify   verify   verify     verify  verify

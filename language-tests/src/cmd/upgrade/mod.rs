@@ -551,7 +551,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					}
 
 					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
-						&& !version_matches(ver_req, from_v)
+						&& !ver_req.version_matches(from_v)
 					{
 						continue;
 					}

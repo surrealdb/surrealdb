@@ -705,6 +705,12 @@ The field expects a string with a version requirement with the semantic
 versioning format. The same format that is used for specifying rust dependency
 versions in `Cargo.toml`.
 
+It also takes an array of such requirements, and then a version any one of
+them admits is accepted. That is for a set of releases that is not one range:
+a fix can reach an older line in a patch that ships after a newer line's early
+releases, which leaves the releases still carrying a defect on both sides of
+the ones that fixed it, as in `["<3.2.5", ">=3.3.0-beta.1, <3.3.0-beta.5"]`.
+
 This field is not that usefull for normal test as the importing datastore and
 the test running datastore are always the same. Instead this field is intended
 for upgrade tests where the upgrading datastore version can differ from the

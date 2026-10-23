@@ -449,7 +449,7 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub version: Option<VersionReq>,
 	#[serde(default)]
-	pub importing_version: Option<VersionReq>,
+	pub importing_version: Option<VersionRanges>,
 
 	/// The release that introduced the feature under test — the earliest binary
 	/// able to *create* the state the test asserts on.
@@ -626,6 +626,62 @@ impl TestDetails {
 			}
 		}
 		res
+	}
+}
+
+/// One or more version requirements, any of which admits a version.
+///
+/// Written as a single requirement string, or as an array of them when the
+/// versions to admit are not one contiguous range. Release order is not version
+/// order: a patch on an older line can ship after a newer line and carry a fix
+/// the newer line's early releases lack, so the releases still carrying a
+/// defect can sit on both sides of those that fixed it. Comparators within one
+/// requirement are ANDed, as semver defines; the requirements are ORed.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum VersionRanges {
+	One(VersionReq),
+	Any(Vec<VersionReq>),
+}
+
+impl VersionRanges {
+	fn requirements(&self) -> &[VersionReq] {
+		match self {
+			VersionRanges::One(req) => std::slice::from_ref(req),
+			VersionRanges::Any(reqs) => reqs,
+		}
+	}
+
+	/// Whether any requirement admits `version` under strict semver matching.
+	pub fn matches(&self, version: &semver::Version) -> bool {
+		self.requirements().iter().any(|req| req.matches(version))
+	}
+
+	/// Whether any requirement admits `version` under
+	/// [`crate::version::version_matches`], which lets a prerelease satisfy a
+	/// requirement that does not name its own release.
+	pub fn version_matches(&self, version: &semver::Version) -> bool {
+		self.requirements().iter().any(|req| crate::version::version_matches(req, version))
+	}
+}
+
+impl<'de> Deserialize<'de> for VersionRanges {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: de::Deserializer<'de>,
+	{
+		let value = toml::Value::deserialize(deserializer)?;
+		if value.is_array() {
+			let reqs: Vec<VersionReq> = Deserialize::deserialize(value).map_err(to_deser_error)?;
+			if reqs.is_empty() {
+				// An empty list would admit no version at all, which silently
+				// removes the test from every run.
+				return Err(to_deser_error("expected at least one version requirement"));
+			}
+			Ok(VersionRanges::Any(reqs))
+		} else {
+			Deserialize::deserialize(value).map_err(to_deser_error).map(VersionRanges::One)
+		}
 	}
 }
 
@@ -1197,5 +1253,49 @@ mod modes_tests {
 	fn modes_is_a_declared_key_not_an_unused_one() {
 		let d = details("[test]\nmodes = [\"request\"]");
 		assert!(d.unused_keys().is_empty());
+	}
+}
+
+#[cfg(test)]
+mod version_ranges_tests {
+	use semver::Version;
+
+	use super::*;
+
+	fn importing(toml: &str) -> Option<VersionRanges> {
+		toml::from_str::<TestConfig>(toml).expect("parses").test.importing_version
+	}
+
+	fn v(s: &str) -> Version {
+		Version::parse(s).unwrap()
+	}
+
+	#[test]
+	fn a_single_string_is_one_range() {
+		let r = importing("[test]\nimporting-version = \">=3.0.1\"").unwrap();
+		assert!(matches!(r, VersionRanges::One(_)));
+		assert!(!r.version_matches(&v("3.0.0")));
+		assert!(r.version_matches(&v("3.3.0-beta.3")));
+	}
+
+	#[test]
+	fn an_array_admits_a_version_any_range_admits() {
+		// A defect fixed on 3.2 in 3.2.5 and on 3.3 before 3.3.0 leaves the
+		// damaged writers on both sides of the fixed 3.2 patches.
+		let r = importing(
+			"[test]\nimporting-version = [\"<3.2.5\", \">=3.3.0-beta.1, <3.3.0-beta.5\"]",
+		)
+		.unwrap();
+		for damaged in ["3.1.0", "3.2.4", "3.3.0-beta.3"] {
+			assert!(r.version_matches(&v(damaged)), "{damaged} should be admitted");
+		}
+		for fixed in ["3.2.5", "3.2.6", "3.3.0", "3.3.4", "3.4.0-nightly"] {
+			assert!(!r.version_matches(&v(fixed)), "{fixed} should be excluded");
+		}
+	}
+
+	#[test]
+	fn an_empty_array_is_refused() {
+		assert!(toml::from_str::<TestConfig>("[test]\nimporting-version = []").is_err());
 	}
 }

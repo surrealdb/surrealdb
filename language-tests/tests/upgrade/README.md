@@ -178,6 +178,19 @@ that has already shipped and cannot be fixed. Same shape, opposite intent.
 
 On an import file `version` flips sides, since the import runs on the source.
 
+`importing-version` also takes an array of requirements, any of which admits a
+writer. A fix that reaches an older line in a patch released after a newer
+line's early releases leaves the defective writers on both sides of the fixed
+ones, which one requirement cannot express: the ANN compound-id repairs admit
+`["<3.2.5", ">=3.3.0-beta.1, <3.3.0-beta.5"]`. Bound a prerelease with an
+anchored comparator such as `<3.3.0-beta.5`; an unanchored `<3.3.0` would also
+exclude 3.3.0's betas.
+
+Adding a release that carries a fix stales the repair declarations for it: a
+store the fixed writer leaves shows none of the declared damage, and the runner
+fails the declaration. Bound the writer side with `importing-version` when the
+release joins the lists.
+
 ## The repair contract
 
 **Never write a repair statement such as `REBUILD INDEX` into a test body.** The

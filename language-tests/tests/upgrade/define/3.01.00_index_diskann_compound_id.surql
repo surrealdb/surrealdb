@@ -26,11 +26,11 @@ in 3.1.0-beta.3, and the record-keyed pending layout that carries the defect
 is present from that line. `version` bounds the target to the checkout
 carrying the fix; a backport must lower it, and the repair's `since`, to its
 own line or neither runs there. `importing-version` bounds the source to the
-releases that still write the damage, for the reason the HNSW sibling gives:
-3.3.0 carries the fix, so a store it wrote shows none.
+releases that still write the damage, in the two ranges the HNSW sibling
+describes: 3.2.5 and 3.3.0 carry the fix, so a store either wrote shows none.
 """
 version = ">=3.4.0-a"
-importing-version = "<3.3.0-beta.5"
+importing-version = ["<3.2.5", ">=3.3.0-beta.1, <3.3.0-beta.5"]
 
 [[test.repair]]
 since = ">=3.4.0-a"

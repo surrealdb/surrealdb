@@ -47,14 +47,16 @@ refused outright rather than degraded. A backport must lower both bounds to its
 own line or the test silently never runs there.
 
 `importing-version` bounds the source to the releases that still write the
-damage. 3.3.0 carries the id in the pending value, so a store it wrote reads
-back whole before any rebuild and the declared damage never appears. The bound
-is the version the 3.3 line carried when that fix landed there; it was never
-published, so it admits every released 3.3 beta, all of which predate the fix,
-and excludes 3.3.0.
+damage. 3.2.5 and 3.3.0 carry the id in the pending value, so a store either
+wrote reads back whole before any rebuild and the declared damage never
+appears. The fix reached the two lines separately, and 3.2.5 shipped after the
+3.3 betas, so the damaged writers form two ranges. The first ends before 3.2.5.
+The second is the 3.3 betas: its upper bound is the version the 3.3 line
+carried when the fix landed there, which was never published, so it admits
+every released 3.3 beta, all of which predate the fix, and excludes 3.3.0.
 """
 version = ">=3.4.0-a"
-importing-version = "<3.3.0-beta.5"
+importing-version = ["<3.2.5", ">=3.3.0-beta.1, <3.3.0-beta.5"]
 
 [[test.repair]]
 since = ">=3.4.0-a"

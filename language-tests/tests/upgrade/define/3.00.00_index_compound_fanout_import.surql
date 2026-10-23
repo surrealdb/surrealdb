@@ -1,9 +1,10 @@
 /**
 [test]
 reason = """
-Setup for 3.00.00_index_compound_fanout.surql and its _current sibling: the old
-binary writes a UNIQUE index over two columns that both fan out, so the new
-binary reads a key set the old writer produced."""
+Setup for 3.00.00_index_compound_fanout.surql, its _current sibling and
+3.03.01_index_compound_fanout_fixed_writer.surql: the old binary writes a UNIQUE
+index over two columns that both fan out, so the new binary reads a key set the
+old writer produced."""
 run = false
 */
 DEFINE TABLE tagged SCHEMALESS;

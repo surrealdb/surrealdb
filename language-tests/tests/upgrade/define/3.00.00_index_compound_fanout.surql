@@ -26,17 +26,25 @@ entries a record owns: the deleter removes the ones it would have written and
 strands the rest. A stranded UNIQUE entry then collides with a later write and
 names the deleted record as the holder, and it does not clear when the upgrade
 completes. Rebuilding is the remedy there too, which is why the step belongs in
-the release note and not only in an upgrade path."""
+the release note and not only in an upgrade path.
+
+`importing-version` bounds the source to the releases that write the partial
+entry set. 3.3.1 records every combination and no 3.2 release does, so every
+release before 3.3.1 is admitted. A store a release from 3.3.1 on writes needs
+no repair, and 3.03.01_index_compound_fanout_fixed_writer.surql reads it."""
+importing-version = "<3.3.1"
 
 [[test.repair]]
-since = ">=3.4.0-a"
+since = ">=3.3.1"
 script = "upgrade/define/3.00.00_index_compound_fanout_rebuild.surql"
 unrepaired = "degraded"
 reason = """
 An index whose columns both fan out and which was written before every element
 combination was recorded holds only some of them. A seek pinning both columns
 addresses a combination that may never have been written, so the row is missing
-from an indexed read until `REBUILD INDEX` restores the entry set."""
+from an indexed read until `REBUILD INDEX` restores the entry set. Every reader
+from 3.3.1 on seeks one combination per pinned pair; a reader before it expands
+a seek the way the writer did, and finds the row without the step."""
 
 [[test.results]]
 value = "[{ id: tagged:base, nums: [1, 2], tags: ['p', 'q'] }, { id: tagged:other, nums: [9], tags: ['z'] }]"
