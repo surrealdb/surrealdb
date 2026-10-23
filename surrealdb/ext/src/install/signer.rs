@@ -120,10 +120,11 @@ impl Signer {
 	/// Reads a `SIGNER` object as `INFO … STRUCTURE` returns it. `NONE` is
 	/// `UNSIGNED`.
 	pub fn from_value(value: &Value) -> Result<Option<Signer>> {
-		let obj = match value {
-			Value::None | Value::Null => return Ok(None),
-			Value::Object(obj) => obj,
-			_ => bail!("expected a SIGNER object"),
+		if value.is_nullish() {
+			return Ok(None);
+		}
+		let Value::Object(obj) = value else {
+			bail!("expected a SIGNER object");
 		};
 		if let Some(Value::String(key)) = obj.get("key") {
 			return Ok(Some(Signer::Key(key.clone())));
@@ -146,9 +147,11 @@ impl Signer {
 				None | Some(Value::None) | Some(Value::Null) => Ok(None),
 				Some(Value::Array(items)) => items
 					.iter()
-					.map(|v| match v {
-						Value::String(c) => Ok(c.clone()),
-						_ => bail!("SIGNER field `{k}` must be an array of strings"),
+					.map(|v| {
+						let Value::String(c) = v else {
+							bail!("SIGNER field `{k}` must be an array of strings");
+						};
+						Ok(c.clone())
 					})
 					.collect::<Result<Vec<_>>>()
 					.map(Some),
@@ -413,7 +416,7 @@ pub fn prompt_rows(signer: Option<&Signer>, label: AnchorLabel) -> Vec<(&'static
 				AnchorLabel::Unchecked => format!(
 					"⚠ not checked online  (ca {ca}, log {log}) — may not be Sigstore's public root"
 				),
-				_ => format!(
+				AnchorLabel::CustomCa | AnchorLabel::Key => format!(
 					"✗ custom CA            (ca {ca}, log {log}) — not Sigstore's public root"
 				),
 			};
@@ -515,13 +518,14 @@ mod tests {
 			(with(|s| s.ca.pop().map(drop).unwrap_or(())), "trust anchor"),
 		];
 		for (b, reason) in cases {
-			match compare(Some(&a), Some(&b)) {
-				SignerMatch::Different(reasons) => assert!(
-					reasons.iter().any(|r| r.contains(reason)),
-					"expected `{reason}` in {reasons:?}"
-				),
-				other => panic!("expected a different signer for `{reason}`, got {other:?}"),
-			}
+			let res = compare(Some(&a), Some(&b));
+			let SignerMatch::Different(reasons) = res else {
+				panic!("expected a different signer for `{reason}`, got {res:?}");
+			};
+			assert!(
+				reasons.iter().any(|r| r.contains(reason)),
+				"expected `{reason}` in {reasons:?}"
+			);
 		}
 	}
 

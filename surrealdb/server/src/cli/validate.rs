@@ -110,9 +110,10 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 		let error = match tokio::fs::read_to_string(&entry).await {
 			Ok(content) => syn::parse(&content).err().map(|error| error.to_string()),
 			Err(error) => {
-				unreadable.get_or_insert(match error.kind() {
-					std::io::ErrorKind::NotFound => json::Kind::NotFound,
-					_ => json::Kind::Unknown,
+				unreadable.get_or_insert(if error.kind() == std::io::ErrorKind::NotFound {
+					json::Kind::NotFound
+				} else {
+					json::Kind::Unknown
 				});
 				Some(format!("Failed to read file '{path}': {error}"))
 			}

@@ -398,22 +398,57 @@ impl<'a> Parser<'a> {
 		let start_tok = self.peek().clone();
 		let mut direction;
 
-		match &start_tok.kind {
-			TokenKind::Operator("->") => {
-				self.bump()?;
+		if start_tok.kind == TokenKind::Operator("->") {
+			self.bump()?;
+			return Ok(GraphEdgePattern {
+				direction: GraphEdgeDirection::Right,
+				variable: None,
+				labels: Vec::new(),
+				quantifier: None,
+				where_clause: None,
+				span: start_tok.span,
+			});
+		} else if start_tok.kind == TokenKind::Operator("<->") {
+			self.bump()?;
+			return Ok(GraphEdgePattern {
+				direction: GraphEdgeDirection::Bidirectional,
+				variable: None,
+				labels: Vec::new(),
+				quantifier: None,
+				where_clause: None,
+				span: start_tok.span,
+			});
+		} else if start_tok.kind == TokenKind::Operator("<-") {
+			self.bump()?;
+			if self.eat(&TokenKind::LBracket)? {
+				direction = GraphEdgeDirection::Left;
+			} else {
+				return Ok(GraphEdgePattern {
+					direction: GraphEdgeDirection::Left,
+					variable: None,
+					labels: Vec::new(),
+					quantifier: None,
+					where_clause: None,
+					span: start_tok.span,
+				});
+			}
+		} else if start_tok.kind == TokenKind::Operator("-") {
+			self.bump()?;
+			if self.eat(&TokenKind::LBracket)? {
+				direction = GraphEdgeDirection::Any;
+			} else if self.peek().kind == TokenKind::Operator(">") {
+				let end = self.bump()?.span;
 				return Ok(GraphEdgePattern {
 					direction: GraphEdgeDirection::Right,
 					variable: None,
 					labels: Vec::new(),
 					quantifier: None,
 					where_clause: None,
-					span: start_tok.span,
+					span: start_tok.span.merge(end),
 				});
-			}
-			TokenKind::Operator("<->") => {
-				self.bump()?;
+			} else {
 				return Ok(GraphEdgePattern {
-					direction: GraphEdgeDirection::Bidirectional,
+					direction: GraphEdgeDirection::Any,
 					variable: None,
 					labels: Vec::new(),
 					quantifier: None,
@@ -421,55 +456,14 @@ impl<'a> Parser<'a> {
 					span: start_tok.span,
 				});
 			}
-			TokenKind::Operator("<-") => {
-				self.bump()?;
-				if self.eat(&TokenKind::LBracket)? {
-					direction = GraphEdgeDirection::Left;
-				} else {
-					return Ok(GraphEdgePattern {
-						direction: GraphEdgeDirection::Left,
-						variable: None,
-						labels: Vec::new(),
-						quantifier: None,
-						where_clause: None,
-						span: start_tok.span,
-					});
-				}
-			}
-			TokenKind::Operator("-") => {
-				self.bump()?;
-				if self.eat(&TokenKind::LBracket)? {
-					direction = GraphEdgeDirection::Any;
-				} else if self.peek().kind == TokenKind::Operator(">") {
-					let end = self.bump()?.span;
-					return Ok(GraphEdgePattern {
-						direction: GraphEdgeDirection::Right,
-						variable: None,
-						labels: Vec::new(),
-						quantifier: None,
-						where_clause: None,
-						span: start_tok.span.merge(end),
-					});
-				} else {
-					return Ok(GraphEdgePattern {
-						direction: GraphEdgeDirection::Any,
-						variable: None,
-						labels: Vec::new(),
-						quantifier: None,
-						where_clause: None,
-						span: start_tok.span,
-					});
-				}
-			}
-			_ => {
-				return Err(ParseError::new(
-					start_tok.span,
-					ErrorKind::UnexpectedToken {
-						expected: "edge pattern ('->', '<-', '-[', '<-[', or '-')",
-						found: start_tok.kind.to_string(),
-					},
-				));
-			}
+		} else {
+			return Err(ParseError::new(
+				start_tok.span,
+				ErrorKind::UnexpectedToken {
+					expected: "edge pattern ('->', '<-', '-[', '<-[', or '-')",
+					found: start_tok.kind.to_string(),
+				},
+			));
 		}
 
 		// Parse bracketed edge content: `[var:Label* WHERE expr]`
@@ -500,38 +494,33 @@ impl<'a> Parser<'a> {
 
 		// Closing edge delimiter: `->`, `-`, or `>`
 		let end_span;
-		match &self.peek().kind {
-			TokenKind::Operator("->") => {
-				let end_tok = self.bump()?;
-				end_span = end_tok.span;
-				if direction == GraphEdgeDirection::Left {
-					direction = GraphEdgeDirection::Bidirectional;
-				} else {
-					direction = GraphEdgeDirection::Right;
-				}
+		if self.peek().kind == TokenKind::Operator("->") {
+			let end_tok = self.bump()?;
+			end_span = end_tok.span;
+			if direction == GraphEdgeDirection::Left {
+				direction = GraphEdgeDirection::Bidirectional;
+			} else {
+				direction = GraphEdgeDirection::Right;
 			}
-			TokenKind::Operator("-") => {
-				let end_tok = self.bump()?;
-				end_span = end_tok.span;
+		} else if self.peek().kind == TokenKind::Operator("-") {
+			let end_tok = self.bump()?;
+			end_span = end_tok.span;
+		} else if self.peek().kind == TokenKind::Operator(">") {
+			let end_tok = self.bump()?;
+			end_span = end_tok.span;
+			if direction == GraphEdgeDirection::Left {
+				direction = GraphEdgeDirection::Bidirectional;
+			} else {
+				direction = GraphEdgeDirection::Right;
 			}
-			TokenKind::Operator(">") => {
-				let end_tok = self.bump()?;
-				end_span = end_tok.span;
-				if direction == GraphEdgeDirection::Left {
-					direction = GraphEdgeDirection::Bidirectional;
-				} else {
-					direction = GraphEdgeDirection::Right;
-				}
-			}
-			_ => {
-				return Err(ParseError::new(
-					self.peek().span,
-					ErrorKind::UnexpectedToken {
-						expected: "closing edge delimiter ('->' or '-')",
-						found: self.peek().kind.to_string(),
-					},
-				));
-			}
+		} else {
+			return Err(ParseError::new(
+				self.peek().span,
+				ErrorKind::UnexpectedToken {
+					expected: "closing edge delimiter ('->' or '-')",
+					found: self.peek().kind.to_string(),
+				},
+			));
 		}
 
 		Ok(GraphEdgePattern {
@@ -546,67 +535,57 @@ impl<'a> Parser<'a> {
 
 	/// Parse an optional graph edge quantifier: `*`, `+`, `?`, `{n}`, `{m,n}`, `{m,}`.
 	fn parse_optional_graph_quantifier(&mut self) -> ParseResult<Option<GraphQuantifier>> {
-		match &self.peek().kind {
-			TokenKind::Operator("*") => {
+		if self.peek().kind == TokenKind::Operator("*") {
+			self.bump()?;
+			Ok(Some(GraphQuantifier::ZeroOrMore))
+		} else if self.peek().kind == TokenKind::Operator("+") {
+			self.bump()?;
+			Ok(Some(GraphQuantifier::OneOrMore))
+		} else if self.peek().kind == TokenKind::Operator("?") {
+			self.bump()?;
+			Ok(Some(GraphQuantifier::ZeroOrOne))
+		} else if self.peek().kind == TokenKind::LBrace {
+			self.bump()?;
+			let min_tok = self.peek().clone();
+			let min = if let TokenKind::Integer(i) = &min_tok.kind {
 				self.bump()?;
-				Ok(Some(GraphQuantifier::ZeroOrMore))
-			}
-			TokenKind::Operator("+") => {
-				self.bump()?;
-				Ok(Some(GraphQuantifier::OneOrMore))
-			}
-			TokenKind::Operator("?") => {
-				self.bump()?;
-				Ok(Some(GraphQuantifier::ZeroOrOne))
-			}
-			TokenKind::LBrace => {
-				self.bump()?;
-				let min_tok = self.peek().clone();
-				let min = match &min_tok.kind {
-					TokenKind::Integer(i) => {
+				*i as u32
+			} else {
+				return Err(ParseError::new(
+					min_tok.span,
+					ErrorKind::UnexpectedToken {
+						expected: "integer quantifier",
+						found: min_tok.kind.to_string(),
+					},
+				));
+			};
+
+			if self.eat(&TokenKind::Comma)? {
+				let max = if self.peek().kind == TokenKind::RBrace {
+					None
+				} else {
+					let max_tok = self.peek().clone();
+					if let TokenKind::Integer(i) = &max_tok.kind {
 						self.bump()?;
-						*i as u32
-					}
-					_ => {
+						Some(*i as u32)
+					} else {
 						return Err(ParseError::new(
-							min_tok.span,
+							max_tok.span,
 							ErrorKind::UnexpectedToken {
-								expected: "integer quantifier",
-								found: min_tok.kind.to_string(),
+								expected: "integer quantifier or '}'",
+								found: max_tok.kind.to_string(),
 							},
 						));
 					}
 				};
-
-				if self.eat(&TokenKind::Comma)? {
-					let max = if self.peek().kind == TokenKind::RBrace {
-						None
-					} else {
-						let max_tok = self.peek().clone();
-						match &max_tok.kind {
-							TokenKind::Integer(i) => {
-								self.bump()?;
-								Some(*i as u32)
-							}
-							_ => {
-								return Err(ParseError::new(
-									max_tok.span,
-									ErrorKind::UnexpectedToken {
-										expected: "integer quantifier or '}'",
-										found: max_tok.kind.to_string(),
-									},
-								));
-							}
-						}
-					};
-					self.expect(&TokenKind::RBrace, "'}'")?;
-					Ok(Some(GraphQuantifier::Range(min, max)))
-				} else {
-					self.expect(&TokenKind::RBrace, "'}'")?;
-					Ok(Some(GraphQuantifier::Exact(min)))
-				}
+				self.expect(&TokenKind::RBrace, "'}'")?;
+				Ok(Some(GraphQuantifier::Range(min, max)))
+			} else {
+				self.expect(&TokenKind::RBrace, "'}'")?;
+				Ok(Some(GraphQuantifier::Exact(min)))
 			}
-			_ => Ok(None),
+		} else {
+			Ok(None)
 		}
 	}
 
@@ -623,10 +602,12 @@ impl<'a> Parser<'a> {
 
 	/// Helper to check if current token can be an identifier or unreserved keyword.
 	pub(crate) fn is_ident_or_unreserved(&self) -> bool {
-		match &self.peek().kind {
-			TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => true,
-			TokenKind::Keyword(kw) => kw.category() != KeywordCategory::Reserved,
-			_ => false,
+		if let TokenKind::Ident(_) | TokenKind::QuotedIdent(_) = &self.peek().kind {
+			true
+		} else if let TokenKind::Keyword(kw) = &self.peek().kind {
+			kw.category() != KeywordCategory::Reserved
+		} else {
+			false
 		}
 	}
 }

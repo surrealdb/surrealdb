@@ -369,22 +369,24 @@ impl ToPgQueryJson for Expr {
 				op,
 				right,
 				..
-			} => match op {
-				BinaryOperator::And => pg_node(
-					"BoolExpr",
-					json!({
-						"boolop": "AND_EXPR",
-						"args": [ left.to_pg_query_json(), right.to_pg_query_json() ]
-					}),
-				),
-				BinaryOperator::Or => pg_node(
-					"BoolExpr",
-					json!({
-						"boolop": "OR_EXPR",
-						"args": [ left.to_pg_query_json(), right.to_pg_query_json() ]
-					}),
-				),
-				_ => {
+			} => {
+				if *op == BinaryOperator::And {
+					pg_node(
+						"BoolExpr",
+						json!({
+							"boolop": "AND_EXPR",
+							"args": [ left.to_pg_query_json(), right.to_pg_query_json() ]
+						}),
+					)
+				} else if *op == BinaryOperator::Or {
+					pg_node(
+						"BoolExpr",
+						json!({
+							"boolop": "OR_EXPR",
+							"args": [ left.to_pg_query_json(), right.to_pg_query_json() ]
+						}),
+					)
+				} else {
 					let op_str = match op {
 						BinaryOperator::Add => "+",
 						BinaryOperator::Sub => "-",
@@ -433,7 +435,7 @@ impl ToPgQueryJson for Expr {
 						}),
 					)
 				}
-			},
+			}
 			Self::TypeCast {
 				expr,
 				data_type,

@@ -45,14 +45,17 @@ const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 	reason = "by-value so it can be passed directly to `Result::map_err`"
 )]
 fn kvs_error(e: surrealkv::Error) -> Error {
-	match e {
-		surrealkv::Error::TransactionWriteConflict | surrealkv::Error::TransactionRetry => {
-			Error::TransactionConflict(e.to_string())
-		}
-		surrealkv::Error::TransactionReadOnly => Error::TransactionReadonly,
-		surrealkv::Error::TransactionClosed => Error::TransactionFinished,
-		surrealkv::Error::BatchTooLarge => Error::TransactionTooLarge,
-		_ => Error::Transaction(e.to_string()),
+	if matches!(e, surrealkv::Error::TransactionWriteConflict | surrealkv::Error::TransactionRetry)
+	{
+		Error::TransactionConflict(e.to_string())
+	} else if let surrealkv::Error::TransactionReadOnly = e {
+		Error::TransactionReadonly
+	} else if let surrealkv::Error::TransactionClosed = e {
+		Error::TransactionFinished
+	} else if let surrealkv::Error::BatchTooLarge = e {
+		Error::TransactionTooLarge
+	} else {
+		Error::Transaction(e.to_string())
 	}
 }
 
@@ -101,13 +104,17 @@ fn holds_rocksdb_files(path: &str) -> bool {
 /// a failed background task both before and after it writes, and the variant does not tell
 /// which, so a commit refused before writing anything is also reported as unknown.
 fn commit_error(e: surrealkv::Error) -> Error {
-	match e {
+	if matches!(
+		e,
 		surrealkv::Error::TransactionWriteConflict
-		| surrealkv::Error::TransactionRetry
-		| surrealkv::Error::TransactionReadOnly
-		| surrealkv::Error::TransactionClosed
-		| surrealkv::Error::BatchTooLarge => kvs_error(e),
-		e => Error::CommitOutcomeUnknown(e.to_string()),
+			| surrealkv::Error::TransactionRetry
+			| surrealkv::Error::TransactionReadOnly
+			| surrealkv::Error::TransactionClosed
+			| surrealkv::Error::BatchTooLarge
+	) {
+		kvs_error(e)
+	} else {
+		Error::CommitOutcomeUnknown(e.to_string())
 	}
 }
 
@@ -203,11 +210,13 @@ impl Transaction {
 		// before anything is written. It is reported as `Error::Shutdown` too, so
 		// that callers treat the commit as interrupted by the shutdown rather
 		// than as failed.
-		inner.commit().await.map_err(|e| match e {
-			surrealkv::Error::PipelineStall if self.shutting_down.load(Ordering::Acquire) => {
-				Error::Shutdown
+		inner.commit().await.map_err(|e| {
+			if let surrealkv::Error::PipelineStall = e
+				&& self.shutting_down.load(Ordering::Acquire)
+			{
+				return Error::Shutdown;
 			}
-			e => commit_error(e),
+			commit_error(e)
 		})?;
 		// Continue
 		Ok(())

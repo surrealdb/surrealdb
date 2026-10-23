@@ -94,7 +94,7 @@ async fn case(ds: &Datastore, session: &Session, label: &str, text: &str, record
 	for i in 0..warmup + iters {
 		let n = match record {
 			Record::Fixed => 1,
-			_ => (i as i64 * 7919) % RECORDS,
+			Record::Id | Record::Key | Record::Literal => (i as i64 * 7919) % RECORDS,
 		};
 		let mut vars = Variables::new();
 		let literal;

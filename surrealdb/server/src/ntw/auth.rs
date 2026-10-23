@@ -432,9 +432,10 @@ pub(super) fn require_allowed_origin(
 	if !policy.enabled {
 		return Err(NetError::NotFound(path.to_string()));
 	}
-	match browser_origin_allowed(headers, &policy.origins) {
-		Gate::Allowed => Ok(()),
-		_ => Err(NetError::ForbiddenOrigin),
+	if browser_origin_allowed(headers, &policy.origins) == Gate::Allowed {
+		Ok(())
+	} else {
+		Err(NetError::ForbiddenOrigin)
 	}
 }
 

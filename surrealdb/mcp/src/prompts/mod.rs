@@ -209,9 +209,12 @@ mod tests {
 		result
 			.messages
 			.iter()
-			.filter_map(|m| match &m.content {
-				ContentBlock::Text(text) => Some(text.text.as_str()),
-				_ => None,
+			.filter_map(|m| {
+				if let ContentBlock::Text(text) = &m.content {
+					Some(text.text.as_str())
+				} else {
+					None
+				}
 			})
 			.collect::<Vec<_>>()
 			.join("\n")

@@ -39,52 +39,37 @@ impl Parser<'_> {
 		let prefix = self.parse_path_pattern_prefix()?;
 
 		let token = self.peek();
-		match token.kind {
-			// A path pattern starting with an edge pattern has no source
-			// node; reject it before node parsing produces a generic error.
-			kind if edge_pattern_starts(kind) => {
-				bail!(
-					"Unexpected edge pattern, path patterns must start with a node pattern",
-					@token.span
-				);
-			}
-			kind if simplified_path_starts(kind) => {
-				bail!(
-					"Simplified path pattern expressions (`-/ … /->`) are not supported yet",
-					@token.span
-				);
-			}
-			_ => {}
+		if edge_pattern_starts(token.kind) {
+			bail!(
+				"Unexpected edge pattern, path patterns must start with a node pattern",
+				@token.span
+			);
+		} else if simplified_path_starts(token.kind) {
+			bail!(
+				"Simplified path pattern expressions (`-/ … /->`) are not supported yet",
+				@token.span
+			);
 		}
 
 		let start = self.parse_node_pattern()?;
 		let mut steps = Vec::new();
 		loop {
 			let token = self.peek();
-			match token.kind {
-				// Quantifiers are grammatically valid on any path factor but
-				// only meaningful on edge patterns; give a targeted error.
-				t!("*") | t!("+") | t!("?") | t!("{") => {
-					bail!(
-						"Quantifiers may only follow an edge pattern",
-						@token.span
-					);
-				}
-				// `(a)(b)` is grammatically a path term of two factors but
-				// never semantically valid.
-				t!("(") => {
-					bail!(
-						"Unexpected node pattern, expected an edge pattern between node patterns",
-						@token.span
-					);
-				}
-				kind if simplified_path_starts(kind) => {
-					bail!(
-						"Simplified path pattern expressions (`-/ … /->`) are not supported yet",
-						@token.span
-					);
-				}
-				_ => {}
+			if matches!(token.kind, t!("*") | t!("+") | t!("?") | t!("{")) {
+				bail!(
+					"Quantifiers may only follow an edge pattern",
+					@token.span
+				);
+			} else if token.kind == t!("(") {
+				bail!(
+					"Unexpected node pattern, expected an edge pattern between node patterns",
+					@token.span
+				);
+			} else if simplified_path_starts(token.kind) {
+				bail!(
+					"Simplified path pattern expressions (`-/ … /->`) are not supported yet",
+					@token.span
+				);
 			}
 			let Some(edge) = self.parse_edge_pattern()? else {
 				break;
@@ -118,67 +103,58 @@ impl Parser<'_> {
 	fn parse_path_pattern_prefix(&mut self) -> ParseResult<Option<PathPatternPrefix>> {
 		let first = self.peek();
 		let start = first.span;
-		let kind = match first.kind {
-			// A bare path mode (no search word) ⇒ every path in that mode.
-			t!("WALK") | t!("TRAIL") | t!("SIMPLE") | t!("ACYCLIC") => {
-				let mode = self.parse_optional_path_mode()?;
-				self.eat_path_or_paths();
-				return Ok(Some(PathPatternPrefix {
-					kind: PathSearchKind::All,
-					mode,
-					span: start.covers(self.last_span()),
-				}));
+		let kind = if matches!(first.kind, t!("WALK") | t!("TRAIL") | t!("SIMPLE") | t!("ACYCLIC"))
+		{
+			let mode = self.parse_optional_path_mode()?;
+			self.eat_path_or_paths();
+			return Ok(Some(PathPatternPrefix {
+				kind: PathSearchKind::All,
+				mode,
+				span: start.covers(self.last_span()),
+			}));
+		} else if first.kind == t!("ALL") {
+			self.pop_peek();
+			if self.eat(t!("SHORTEST")) {
+				PathSearchKind::AllShortest
+			} else {
+				PathSearchKind::All
 			}
-			// `allPathSearch` / `allShortestPathSearch`.
-			t!("ALL") => {
-				self.pop_peek();
-				if self.eat(t!("SHORTEST")) {
-					PathSearchKind::AllShortest
-				} else {
-					PathSearchKind::All
+		} else if first.kind == t!("ANY") {
+			self.pop_peek();
+			if self.eat(t!("SHORTEST")) {
+				PathSearchKind::AnyShortest
+			} else {
+				PathSearchKind::Any {
+					count: self.parse_optional_path_count()?,
 				}
 			}
-			// `anyPathSearch` / `anyShortestPathSearch`.
-			t!("ANY") => {
-				self.pop_peek();
-				if self.eat(t!("SHORTEST")) {
-					PathSearchKind::AnyShortest
-				} else {
-					PathSearchKind::Any {
-						count: self.parse_optional_path_count()?,
-					}
+		} else if first.kind == t!("SHORTEST") {
+			self.pop_peek();
+			let count = self.parse_optional_path_count()?;
+			let mode = self.parse_optional_path_mode()?;
+			self.eat_path_or_paths();
+			let kind = if self.eat(t!("GROUP")) || self.eat(t!("GROUPS")) {
+				PathSearchKind::ShortestGroups {
+					count,
 				}
-			}
-			// `countedShortestPathSearch` / `countedShortestGroupSearch`. The
-			// optional count, mode and `PATH(S)` all precede the optional
-			// `GROUP(S)`; a trailing `GROUP(S)` selects the group form.
-			t!("SHORTEST") => {
-				self.pop_peek();
-				let count = self.parse_optional_path_count()?;
-				let mode = self.parse_optional_path_mode()?;
-				self.eat_path_or_paths();
-				let kind = if self.eat(t!("GROUP")) || self.eat(t!("GROUPS")) {
-					PathSearchKind::ShortestGroups {
+			} else {
+				match count {
+					Some(count) => PathSearchKind::ShortestCounted {
 						count,
-					}
-				} else {
-					match count {
-						Some(count) => PathSearchKind::ShortestCounted {
-							count,
-						},
-						None => bail!(
-							"`SHORTEST` requires a path count (`SHORTEST k`) or `GROUP`",
-							@start.covers(self.last_span())
-						),
-					}
-				};
-				return Ok(Some(PathPatternPrefix {
-					kind,
-					mode,
-					span: start.covers(self.last_span()),
-				}));
-			}
-			_ => return Ok(None),
+					},
+					None => bail!(
+						"`SHORTEST` requires a path count (`SHORTEST k`) or `GROUP`",
+						@start.covers(self.last_span())
+					),
+				}
+			};
+			return Ok(Some(PathPatternPrefix {
+				kind,
+				mode,
+				span: start.covers(self.last_span()),
+			}));
+		} else {
+			return Ok(None);
 		};
 
 		// Shared tail for `ALL` / `ANY` / `ALL SHORTEST` / `ANY SHORTEST`: an
@@ -195,12 +171,17 @@ impl Parser<'_> {
 	/// Parse an optional path mode (`pathMode`, GQL.g4:907-912), consuming the
 	/// keyword when present.
 	fn parse_optional_path_mode(&mut self) -> ParseResult<Option<PathMode>> {
-		let mode = match self.peek_kind() {
-			t!("WALK") => PathMode::Walk,
-			t!("TRAIL") => PathMode::Trail,
-			t!("SIMPLE") => PathMode::Simple,
-			t!("ACYCLIC") => PathMode::Acyclic,
-			_ => return Ok(None),
+		let peek_kind = self.peek_kind();
+		let mode = if peek_kind == t!("WALK") {
+			PathMode::Walk
+		} else if peek_kind == t!("TRAIL") {
+			PathMode::Trail
+		} else if peek_kind == t!("SIMPLE") {
+			PathMode::Simple
+		} else if peek_kind == t!("ACYCLIC") {
+			PathMode::Acyclic
+		} else {
+			return Ok(None);
 		};
 		self.pop_peek();
 		Ok(Some(mode))
@@ -283,15 +264,22 @@ impl Parser<'_> {
 	fn parse_edge_pattern(&mut self) -> ParseResult<Option<EdgePattern>> {
 		let token = self.peek();
 		// Abbreviated forms first: `<-` `~` `->` `<~` `~>` `<->` `-`.
-		let abbreviated = match token.kind {
-			t!("<-") => Some(EdgeDirection::Left),
-			t!("~") => Some(EdgeDirection::Undirected),
-			t!("->") => Some(EdgeDirection::Right),
-			t!("<~") => Some(EdgeDirection::LeftOrUndirected),
-			t!("~>") => Some(EdgeDirection::UndirectedOrRight),
-			t!("<->") => Some(EdgeDirection::LeftOrRight),
-			t!("-") => Some(EdgeDirection::Any),
-			_ => None,
+		let abbreviated = if token.kind == t!("<-") {
+			Some(EdgeDirection::Left)
+		} else if token.kind == t!("~") {
+			Some(EdgeDirection::Undirected)
+		} else if token.kind == t!("->") {
+			Some(EdgeDirection::Right)
+		} else if token.kind == t!("<~") {
+			Some(EdgeDirection::LeftOrUndirected)
+		} else if token.kind == t!("~>") {
+			Some(EdgeDirection::UndirectedOrRight)
+		} else if token.kind == t!("<->") {
+			Some(EdgeDirection::LeftOrRight)
+		} else if token.kind == t!("-") {
+			Some(EdgeDirection::Any)
+		} else {
+			None
 		};
 		if let Some(direction) = abbreviated {
 			self.pop_peek();
@@ -308,51 +296,54 @@ impl Parser<'_> {
 
 		// Full forms: the opening bracket token selects the possible
 		// directions and the closing bracket token decides between them.
-		let direction = match token.kind {
-			t!("-[") => {
-				self.pop_peek();
-				let filler = self.parse_element_filler()?;
-				let close = self.next();
-				let direction = match close.kind {
-					t!("]->") => EdgeDirection::Right,
-					t!("]-") => EdgeDirection::Any,
-					_ => unexpected!(self, close, "`]->` or `]-`"),
-				};
-				(filler, direction)
-			}
-			t!("<-[") => {
-				self.pop_peek();
-				let filler = self.parse_element_filler()?;
-				let close = self.next();
-				let direction = match close.kind {
-					t!("]-") => EdgeDirection::Left,
-					t!("]->") => EdgeDirection::LeftOrRight,
-					_ => unexpected!(self, close, "`]-` or `]->`"),
-				};
-				(filler, direction)
-			}
-			t!("~[") => {
-				self.pop_peek();
-				let filler = self.parse_element_filler()?;
-				let close = self.next();
-				let direction = match close.kind {
-					t!("]~") => EdgeDirection::Undirected,
-					t!("]~>") => EdgeDirection::UndirectedOrRight,
-					_ => unexpected!(self, close, "`]~` or `]~>`"),
-				};
-				(filler, direction)
-			}
-			t!("<~[") => {
-				self.pop_peek();
-				let filler = self.parse_element_filler()?;
-				let close = self.next();
-				let direction = match close.kind {
-					t!("]~") => EdgeDirection::LeftOrUndirected,
-					_ => unexpected!(self, close, "`]~`"),
-				};
-				(filler, direction)
-			}
-			_ => return Ok(None),
+		let direction = if token.kind == t!("-[") {
+			self.pop_peek();
+			let filler = self.parse_element_filler()?;
+			let close = self.next();
+			let direction = if close.kind == t!("]->") {
+				EdgeDirection::Right
+			} else if close.kind == t!("]-") {
+				EdgeDirection::Any
+			} else {
+				unexpected!(self, close, "`]->` or `]-`");
+			};
+			(filler, direction)
+		} else if token.kind == t!("<-[") {
+			self.pop_peek();
+			let filler = self.parse_element_filler()?;
+			let close = self.next();
+			let direction = if close.kind == t!("]-") {
+				EdgeDirection::Left
+			} else if close.kind == t!("]->") {
+				EdgeDirection::LeftOrRight
+			} else {
+				unexpected!(self, close, "`]-` or `]->`");
+			};
+			(filler, direction)
+		} else if token.kind == t!("~[") {
+			self.pop_peek();
+			let filler = self.parse_element_filler()?;
+			let close = self.next();
+			let direction = if close.kind == t!("]~") {
+				EdgeDirection::Undirected
+			} else if close.kind == t!("]~>") {
+				EdgeDirection::UndirectedOrRight
+			} else {
+				unexpected!(self, close, "`]~` or `]~>`");
+			};
+			(filler, direction)
+		} else if token.kind == t!("<~[") {
+			self.pop_peek();
+			let filler = self.parse_element_filler()?;
+			let close = self.next();
+			let direction = if close.kind == t!("]~") {
+				EdgeDirection::LeftOrUndirected
+			} else {
+				unexpected!(self, close, "`]~`");
+			};
+			(filler, direction)
+		} else {
+			return Ok(None);
 		};
 		let ((var, label, predicate), direction) = direction;
 		let quantifier = self.parse_quantifier()?;
@@ -374,18 +365,19 @@ impl Parser<'_> {
 		&mut self,
 	) -> ParseResult<(Option<Ident>, Option<LabelExpr>, Option<ElementPredicate>)> {
 		let token = self.peek();
-		let var = match token.kind {
-			kind if Self::token_can_be_ident(kind) => Some(self.parse_ident()?),
-			// A reserved word cannot be a variable; everything else that may
-			// legitimately appear here is handled below.
-			TokenKind::Keyword(keyword) if !matches!(keyword, Keyword::Is | Keyword::Where) => {
+		let var = if Self::token_can_be_ident(token.kind) {
+			Some(self.parse_ident()?)
+		} else if let TokenKind::Keyword(keyword) = token.kind {
+			if !matches!(keyword, Keyword::Is | Keyword::Where) {
 				bail!(
 					"`{}` is a reserved word and cannot be used as a variable name",
 					self.span_str(token.span),
 					@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
 				);
 			}
-			_ => None,
+			None
+		} else {
+			None
 		};
 
 		// Labels are introduced by `:` or the keyword `IS` (`isOrColon`,
@@ -396,28 +388,27 @@ impl Parser<'_> {
 			None
 		};
 
-		let predicate = match self.peek_kind() {
-			t!("WHERE") => {
-				self.pop_peek();
-				let expr = self.parse_expr()?;
-				Some(ElementPredicate::Where(expr))
-			}
-			t!("{") => {
-				let open = self.pop_peek().span;
-				let mut props = Vec::new();
-				loop {
-					let key = self.parse_ident()?;
-					expected!(self, t!(":"));
-					let value = self.parse_expr()?;
-					props.push((key, value));
-					if !self.eat(t!(",")) {
-						break;
-					}
+		let peek_kind = self.peek_kind();
+		let predicate = if peek_kind == t!("WHERE") {
+			self.pop_peek();
+			let expr = self.parse_expr()?;
+			Some(ElementPredicate::Where(expr))
+		} else if peek_kind == t!("{") {
+			let open = self.pop_peek().span;
+			let mut props = Vec::new();
+			loop {
+				let key = self.parse_ident()?;
+				expected!(self, t!(":"));
+				let value = self.parse_expr()?;
+				props.push((key, value));
+				if !self.eat(t!(",")) {
+					break;
 				}
-				self.expect_closing_delimiter(t!("}"), open)?;
-				Some(ElementPredicate::Props(props))
 			}
-			_ => None,
+			self.expect_closing_delimiter(t!("}"), open)?;
+			Some(ElementPredicate::Props(props))
+		} else {
+			None
 		};
 
 		// `elementPatternPredicate` (GQL.g4:1009) is a single alternative: a
@@ -437,55 +428,48 @@ impl Parser<'_> {
 	/// `{n}`, `{n,m}`, `{n,}`, `{,m}` or `{,}` (GQL.g4:1125-1146).
 	fn parse_quantifier(&mut self) -> ParseResult<Option<Quantifier>> {
 		let token = self.peek();
-		let kind = match token.kind {
-			t!("*") => {
-				self.pop_peek();
-				QuantifierKind::Star
-			}
-			t!("+") => {
-				self.pop_peek();
-				QuantifierKind::Plus
-			}
-			t!("?") => {
-				self.pop_peek();
-				QuantifierKind::Question
-			}
-			t!("{") => {
-				let open = self.pop_peek().span;
-				let lower = match self.peek_kind() {
-					t!(",") => None,
-					// A number token may still be rejected as a bound (a
-					// float, a suffix); the bound parser reports those.
-					TokenKind::Number {
-						..
-					} => Some(self.parse_quantifier_bound()?),
-					_ => {
+		let kind = if token.kind == t!("*") {
+			self.pop_peek();
+			QuantifierKind::Star
+		} else if token.kind == t!("+") {
+			self.pop_peek();
+			QuantifierKind::Plus
+		} else if token.kind == t!("?") {
+			self.pop_peek();
+			QuantifierKind::Question
+		} else if token.kind == t!("{") {
+			let open = self.pop_peek().span;
+			let peek_kind = self.peek_kind();
+			let lower = if peek_kind == t!(",") {
+				None
+			} else if matches!(peek_kind, TokenKind::Number { .. }) {
+				Some(self.parse_quantifier_bound()?)
+			} else {
+				let token = self.peek();
+				unexpected!(self, token, "an unsigned integer or `,`");
+			};
+			let kind = if self.eat(t!(",")) {
+				let upper = if self.peek_kind() == t!("}") {
+					None
+				} else {
+					Some(self.parse_quantifier_bound()?)
+				};
+				QuantifierKind::Range(lower, upper)
+			} else {
+				// Without a comma this is a `fixedQuantifier`, which
+				// requires the bound.
+				match lower {
+					Some(n) => QuantifierKind::Fixed(n),
+					None => {
 						let token = self.peek();
 						unexpected!(self, token, "an unsigned integer or `,`");
 					}
-				};
-				let kind = if self.eat(t!(",")) {
-					let upper = if self.peek_kind() == t!("}") {
-						None
-					} else {
-						Some(self.parse_quantifier_bound()?)
-					};
-					QuantifierKind::Range(lower, upper)
-				} else {
-					// Without a comma this is a `fixedQuantifier`, which
-					// requires the bound.
-					match lower {
-						Some(n) => QuantifierKind::Fixed(n),
-						None => {
-							let token = self.peek();
-							unexpected!(self, token, "an unsigned integer or `,`");
-						}
-					}
-				};
-				self.expect_closing_delimiter(t!("}"), open)?;
-				kind
-			}
-			_ => return Ok(None),
+				}
+			};
+			self.expect_closing_delimiter(t!("}"), open)?;
+			kind
+		} else {
+			return Ok(None);
 		};
 		Ok(Some(Quantifier {
 			kind,
@@ -496,16 +480,15 @@ impl Parser<'_> {
 	/// Parse an unsigned integer quantifier bound.
 	fn parse_quantifier_bound(&mut self) -> ParseResult<u32> {
 		let token = self.next();
-		match token.kind {
-			TokenKind::Number {
-				kind:
-					kind @ (NumberKind::Integer
-					| NumberKind::Hex
-					| NumberKind::Octal
-					| NumberKind::Binary),
-				suffix: None,
-			} => self.parse_u32_token(token, kind),
-			_ => unexpected!(self, token, "an unsigned integer"),
+		if let TokenKind::Number {
+			kind:
+				kind @ (NumberKind::Integer | NumberKind::Hex | NumberKind::Octal | NumberKind::Binary),
+			suffix: None,
+		} = token.kind
+		{
+			self.parse_u32_token(token, kind)
+		} else {
+			unexpected!(self, token, "an unsigned integer");
 		}
 	}
 
@@ -551,25 +534,23 @@ impl Parser<'_> {
 
 	fn parse_label_primary(&mut self) -> ParseResult<LabelExpr> {
 		let token = self.peek();
-		match token.kind {
-			t!("%") => {
-				self.pop_peek();
-				Ok(LabelExpr::Wildcard(token.span))
-			}
-			t!("(") => {
-				enter_object_recursion!(this = self => {
-					let open = this.pop_peek().span;
-					let inner = this.parse_label_expr()?;
-					this.expect_closing_delimiter(t!(")"), open)?;
-					Ok(inner)
-				})
-			}
-			kind if Self::token_can_be_ident(kind) => Ok(LabelExpr::Name(self.parse_ident()?)),
-			TokenKind::Keyword(_) => {
-				// Reserved keyword: produce the reserved word error.
-				self.parse_ident().map(LabelExpr::Name)
-			}
-			_ => unexpected!(self, token, "a label expression"),
+		if token.kind == t!("%") {
+			self.pop_peek();
+			Ok(LabelExpr::Wildcard(token.span))
+		} else if token.kind == t!("(") {
+			enter_object_recursion!(this = self => {
+				let open = this.pop_peek().span;
+				let inner = this.parse_label_expr()?;
+				this.expect_closing_delimiter(t!(")"), open)?;
+				Ok(inner)
+			})
+		} else if Self::token_can_be_ident(token.kind) {
+			Ok(LabelExpr::Name(self.parse_ident()?))
+		} else if matches!(token.kind, TokenKind::Keyword(_)) {
+			// Reserved keyword: produce the reserved word error.
+			self.parse_ident().map(LabelExpr::Name)
+		} else {
+			unexpected!(self, token, "a label expression");
 		}
 	}
 }

@@ -398,18 +398,20 @@ fn array<const N: usize>(bytes: &[u8]) -> Option<[u8; N]> {
 /// The bytes of a fixed slot.
 #[inline]
 fn fixed(index: u32, slot: Slot<'_>) -> Result<&[u8], PackedError> {
-	match slot {
-		Slot::Fixed(bytes) => Ok(bytes),
-		_ => Err(wrong_shape(index)),
+	if let Slot::Fixed(bytes) = slot {
+		Ok(bytes)
+	} else {
+		Err(wrong_shape(index))
 	}
 }
 
 /// The bytes of a variable slice.
 #[inline]
 fn var(index: u32, slot: Slot<'_>) -> Result<&[u8], PackedError> {
-	match slot {
-		Slot::Var(bytes) => Ok(bytes),
-		_ => Err(wrong_shape(index)),
+	if let Slot::Var(bytes) = slot {
+		Ok(bytes)
+	} else {
+		Err(wrong_shape(index))
 	}
 }
 
@@ -420,9 +422,10 @@ fn read_bool<'a>(
 	index: u32,
 	slot: Slot<'a>,
 ) -> Result<FieldRef<'a>, PackedError> {
-	match slot {
-		Slot::Bit(bit) => Ok(FieldRef::Bool(bit)),
-		_ => Err(wrong_shape(index)),
+	if let Slot::Bit(bit) = slot {
+		Ok(FieldRef::Bool(bit))
+	} else {
+		Err(wrong_shape(index))
 	}
 }
 
@@ -432,9 +435,10 @@ fn decode_bool<M: Mode>(
 	slot: Slot<'_>,
 	_depth: usize,
 ) -> Result<M::Out<Value>, PackedError> {
-	match slot {
-		Slot::Bit(bit) => Ok(M::make(|| Value::Bool(bit))),
-		_ => Err(wrong_shape(index)),
+	if let Slot::Bit(bit) = slot {
+		Ok(M::make(|| Value::Bool(bit)))
+	} else {
+		Err(wrong_shape(index))
 	}
 }
 
@@ -739,7 +743,7 @@ fn datetime_of(index: u32, slot: Slot<'_>) -> Result<DateTime<Utc>, PackedError>
 				})
 			}
 		}
-		_ => Err(wrong_shape(index)),
+		Slot::Bit(_) | Slot::Var(_) => Err(wrong_shape(index)),
 	}
 }
 
@@ -811,7 +815,7 @@ fn duration_of(index: u32, slot: Slot<'_>) -> Result<std::time::Duration, Packed
 				})
 			}
 		}
-		_ => Err(wrong_shape(index)),
+		Slot::Bit(_) | Slot::Var(_) => Err(wrong_shape(index)),
 	}
 }
 
@@ -1044,22 +1048,25 @@ fn wrong_dest() -> stored::Error {
 
 /// The fixed slot of a destination.
 fn slot_of(dest: Dest<'_>) -> Result<&mut [u8], stored::Error> {
-	match dest {
-		Dest::Fixed(slot) => Ok(slot),
-		_ => Err(wrong_dest()),
+	if let Dest::Fixed(slot) = dest {
+		Ok(slot)
+	} else {
+		Err(wrong_dest())
 	}
 }
 
 /// The variable region and scratch encoder of a destination, and the depth grammar values are
 /// encoded at.
 fn var_of(dest: Dest<'_>) -> Result<(&mut Vec<u8>, &mut Encoder, usize), stored::Error> {
-	match dest {
-		Dest::Var {
-			out,
-			enc,
-			depth,
-		} => Ok((out, enc, depth)),
-		_ => Err(wrong_dest()),
+	if let Dest::Var {
+		out,
+		enc,
+		depth,
+	} = dest
+	{
+		Ok((out, enc, depth))
+	} else {
+		Err(wrong_dest())
 	}
 }
 
@@ -1085,12 +1092,11 @@ fn write_bool(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written
 	let Dest::Bit(bit) = dest else {
 		return Err(wrong_dest());
 	};
-	match value {
-		Value::Bool(set) => {
-			*bit = *set;
-			Ok(Written::Fits)
-		}
-		_ => Ok(Written::Misfit),
+	if let Value::Bool(set) = value {
+		*bit = *set;
+		Ok(Written::Fits)
+	} else {
+		Ok(Written::Misfit)
 	}
 }
 

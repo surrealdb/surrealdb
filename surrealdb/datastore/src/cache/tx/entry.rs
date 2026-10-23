@@ -74,234 +74,260 @@ impl Entry {
 	/// Converts this cache entry into a single entry of arbitrary type.
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Any`].
 	pub fn try_into_type<T: Send + Sync + 'static>(self: Entry) -> Result<Arc<T>> {
-		match self {
-			Entry::Any(v) => {
-				let Ok(x) = v.downcast::<T>() else {
-					fail!("Unable to convert type into Entry::Any")
-				};
-				Ok(x)
-			}
-			_ => fail!("Unable to convert type into Entry::Any"),
+		if let Entry::Any(v) = self {
+			let Ok(x) = v.downcast::<T>() else {
+				fail!("Unable to convert type into Entry::Any")
+			};
+			Ok(x)
+		} else {
+			fail!("Unable to convert type into Entry::Any")
 		}
 	}
 	/// Converts this cache entry into a slice of [`Node`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Nds`].
 	pub fn try_into_nds(self) -> Result<Arc<[Node]>> {
-		match self {
-			Entry::Nds(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Nds"),
+		if let Entry::Nds(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Nds")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Rus`].
 	pub fn try_into_rus(self) -> Result<Arc<[catalog::UserDefinition]>> {
-		match self {
-			Entry::Rus(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Rus"),
+		if let Entry::Rus(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Rus")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Ras`].
 	pub fn try_into_ras(self) -> Result<Arc<[catalog::AccessDefinition]>> {
-		match self {
-			Entry::Ras(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Ras"),
+		if let Entry::Ras(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Ras")
 		}
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Rag`].
 	pub fn try_into_rag(self) -> Result<Arc<[catalog::AccessGrant]>> {
-		match self {
-			Entry::Rag(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Rag"),
+		if let Entry::Rag(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Rag")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::NamespaceDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Nss`].
 	pub fn try_into_nss(self) -> Result<Arc<[catalog::NamespaceDefinition]>> {
-		match self {
-			Entry::Nss(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Nss"),
+		if let Entry::Nss(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Nss")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Nas`].
 	pub fn try_into_nas(self) -> Result<Arc<[catalog::AccessDefinition]>> {
-		match self {
-			Entry::Nas(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Nas"),
+		if let Entry::Nas(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Nas")
 		}
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Nag`].
 	pub fn try_into_nag(self) -> Result<Arc<[catalog::AccessGrant]>> {
-		match self {
-			Entry::Nag(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Nag"),
+		if let Entry::Nag(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Nag")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Nus`].
 	pub fn try_into_nus(self) -> Result<Arc<[catalog::UserDefinition]>> {
-		match self {
-			Entry::Nus(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Nus"),
+		if let Entry::Nus(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Nus")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::DatabaseDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Dbs`].
 	pub fn try_into_dbs(self) -> Result<Arc<[catalog::DatabaseDefinition]>> {
-		match self {
-			Entry::Dbs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Dbs"),
+		if let Entry::Dbs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Dbs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::AccessDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Das`].
 	pub fn try_into_das(self) -> Result<Arc<[catalog::AccessDefinition]>> {
-		match self {
-			Entry::Das(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Das"),
+		if let Entry::Das(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Das")
 		}
 	}
 	/// Converts this cache entry into a slice of [`AccessGrantStore`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Dag`].
 	pub fn try_into_dag(self) -> Result<Arc<[catalog::AccessGrant]>> {
-		match self {
-			Entry::Dag(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Dag"),
+		if let Entry::Dag(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Dag")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::UserDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Dus`].
 	pub fn try_into_dus(self) -> Result<Arc<[catalog::UserDefinition]>> {
-		match self {
-			Entry::Dus(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Dus"),
+		if let Entry::Dus(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Dus")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::ApiDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Aps`].
 	pub fn try_into_aps(self) -> Result<Arc<[catalog::ApiDefinition]>> {
-		match self {
-			Entry::Aps(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Aps"),
+		if let Entry::Aps(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Aps")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::AnalyzerDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Azs`].
 	pub fn try_into_azs(self) -> Result<Arc<[catalog::AnalyzerDefinition]>> {
-		match self {
-			Entry::Azs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Azs"),
+		if let Entry::Azs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Azs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::BucketDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Bus`].
 	pub fn try_into_bus(self) -> Result<Arc<[catalog::BucketDefinition]>> {
-		match self {
-			Entry::Bus(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Bus"),
+		if let Entry::Bus(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Bus")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::SequenceDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Sqs`].
 	pub fn try_into_sqs(self) -> Result<Arc<[catalog::SequenceDefinition]>> {
-		match self {
-			Entry::Sqs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Sqs"),
+		if let Entry::Sqs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Sqs")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::FunctionDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Fcs`].
 	pub fn try_into_fcs(self) -> Result<Arc<[catalog::FunctionDefinition]>> {
-		match self {
-			Entry::Fcs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fcs"),
+		if let Entry::Fcs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Fcs")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::ModuleDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Mds`].
 	pub fn try_into_mds(self) -> Result<Arc<[catalog::ModuleDefinition]>> {
-		match self {
-			Entry::Mds(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Mds"),
+		if let Entry::Mds(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Mds")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::ParamDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Pas`].
 	pub fn try_into_pas(self) -> Result<Arc<[catalog::ParamDefinition]>> {
-		match self {
-			Entry::Pas(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Pas"),
+		if let Entry::Pas(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Pas")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::MlModelDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Mls`].
 	pub fn try_into_mls(self) -> Result<Arc<[catalog::MlModelDefinition]>> {
-		match self {
-			Entry::Mls(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Mls"),
+		if let Entry::Mls(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Mls")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::ConfigDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Cgs`].
 	pub fn try_into_cgs(self) -> Result<Arc<[catalog::ConfigDefinition]>> {
-		match self {
-			Entry::Cgs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Cgs"),
+		if let Entry::Cgs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Cgs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::TableDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Tbs`].
 	pub fn try_into_tbs(self) -> Result<Arc<[catalog::TableDefinition]>> {
-		match self {
-			Entry::Tbs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Tbs"),
+		if let Entry::Tbs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Tbs")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::EventDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Evs`].
 	pub fn try_into_evs(self) -> Result<Arc<[catalog::EventDefinition]>> {
-		match self {
-			Entry::Evs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Evs"),
+		if let Entry::Evs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Evs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::FieldDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Fds`].
 	pub fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
-		match self {
-			Entry::Fds(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fds"),
+		if let Entry::Fds(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Fds")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::IndexDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Ixs`].
 	pub fn try_into_ixs(self) -> Result<Arc<[catalog::IndexDefinition]>> {
-		match self {
-			Entry::Ixs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Ixs"),
+		if let Entry::Ixs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Ixs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::TableDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Fts`].
 	pub fn try_into_fts(self) -> Result<Arc<[catalog::TableDefinition]>> {
-		match self {
-			Entry::Fts(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fts"),
+		if let Entry::Fts(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Fts")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::SubscriptionDefinition`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Lvs`].
 	pub fn try_into_lvs(self) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
-		match self {
-			Entry::Lvs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Lvs"),
+		if let Entry::Lvs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Lvs")
 		}
 	}
 	/// Converts this cache entry into a single [`Record`].
@@ -313,9 +339,10 @@ impl Entry {
 	/// carry.
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Val`].
 	pub fn try_into_stamped_record(self) -> Result<(Arc<Record>, Option<Generation>)> {
-		match self {
-			Entry::Val(record, generation) => Ok((record, generation)),
-			_ => fail!("Unable to convert type into Entry::Val"),
+		if let Entry::Val(record, generation) = self {
+			Ok((record, generation))
+		} else {
+			fail!("Unable to convert type into Entry::Val")
 		}
 	}
 }

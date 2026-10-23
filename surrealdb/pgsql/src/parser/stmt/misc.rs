@@ -160,19 +160,20 @@ impl<'a> Parser<'a> {
 		if self.eat(&TokenKind::LParen)? {
 			while self.peek().kind != TokenKind::RParen {
 				let tok = self.bump()?;
-				let opt = match tok.kind {
-					TokenKind::Ident(s) => s.to_string(),
-					TokenKind::QuotedIdent(s) => s,
-					TokenKind::Keyword(kw) => kw.as_str().to_lowercase(),
-					_ => {
-						return Err(crate::error::ParseError::new(
-							tok.span,
-							crate::error::ErrorKind::UnexpectedToken {
-								expected: "explain option name",
-								found: tok.kind.to_string(),
-							},
-						));
-					}
+				let opt = if let TokenKind::Ident(s) = tok.kind {
+					s.to_string()
+				} else if let TokenKind::QuotedIdent(s) = tok.kind {
+					s
+				} else if let TokenKind::Keyword(kw) = tok.kind {
+					kw.as_str().to_lowercase()
+				} else {
+					return Err(crate::error::ParseError::new(
+						tok.span,
+						crate::error::ErrorKind::UnexpectedToken {
+							expected: "explain option name",
+							found: tok.kind.to_string(),
+						},
+					));
 				};
 				options.push(opt);
 				if !self.eat(&TokenKind::Comma)? {

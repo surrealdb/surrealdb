@@ -116,7 +116,7 @@ impl TableConfig {
 		match self {
 			Self::Some(v) => Some(v.as_slice()),
 			Self::Exclude(v) => Some(v.exclude.as_slice()),
-			_ => None,
+			Self::All | Self::None => None,
 		}
 	}
 }

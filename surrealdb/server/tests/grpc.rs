@@ -342,12 +342,14 @@ async fn incompressible_records_still_fit_their_frame() {
 	// compress away and the test would pass without touching the headroom.
 	let distinct: std::collections::HashSet<Vec<u8>> = all
 		.iter()
-		.map(|record| match record {
-			Value::Object(fields) => match fields.get("pad") {
-				Some(Value::Bytes(bytes)) => bytes.clone().into_inner().to_vec(),
-				other => panic!("expected bytes, got {other:?}"),
-			},
-			other => panic!("expected a record, got {other:?}"),
+		.map(|record| {
+			let Value::Object(fields) = record else {
+				panic!("expected a record, got {record:?}");
+			};
+			let Some(Value::Bytes(bytes)) = fields.get("pad") else {
+				panic!("expected bytes, got {:?}", fields.get("pad"));
+			};
+			bytes.clone().into_inner().to_vec()
 		})
 		.collect();
 	assert_eq!(distinct.len(), RECORDS, "each record must carry its own bytes");

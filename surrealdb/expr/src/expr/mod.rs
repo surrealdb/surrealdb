@@ -1,7 +1,5 @@
 //! The type definitions for the computation format of the surreaql executor.
 
-#![deny(clippy::wildcard_enum_match_arm)]
-
 use anyhow::Result;
 
 use crate::val::Value;

@@ -156,7 +156,21 @@ impl Router {
 						Ok(Some(R::from_value(Value::Array(array)).map_err(deserialization_error)?))
 					}
 				},
-				value => Ok(Some(R::from_value(value).map_err(deserialization_error)?)),
+				value @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => Ok(Some(R::from_value(value).map_err(deserialization_error)?)),
 			}
 		})
 	}
@@ -178,7 +192,21 @@ impl Router {
 					.into_iter()
 					.map(|value| R::from_value(value).map_err(deserialization_error))
 					.collect(),
-				value => Ok(vec![R::from_value(value).map_err(deserialization_error)?]),
+				value @ (Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => Ok(vec![R::from_value(value).map_err(deserialization_error)?]),
 			}
 		})
 	}

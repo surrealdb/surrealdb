@@ -35,26 +35,44 @@ pub enum StatementKind {
 
 impl StatementKind {
 	pub(super) fn from_tag(tag: Tag) -> Self {
-		match tag {
-			Tag::Select => Self::Select,
-			Tag::Create => Self::Create,
-			Tag::Update => Self::Update,
-			Tag::Upsert => Self::Upsert,
-			Tag::Delete => Self::Delete,
-			Tag::Relate => Self::Relate,
-			Tag::Insert => Self::Insert,
-			Tag::Info => Self::Info,
-			Tag::For => Self::Foreach,
-			Tag::If => Self::IfElse,
-			Tag::Sleep => Self::Sleep,
-			Tag::Explain => Self::Explain,
-			Tag::Let => Self::Let,
-			Tag::Return => Self::Return,
-			Tag::Break => Self::Break,
-			Tag::Continue => Self::Continue,
-			Tag::Throw => Self::Throw,
-			Tag::Block => Self::Block,
-			_ => Self::Other,
+		if tag == Tag::Select {
+			Self::Select
+		} else if tag == Tag::Create {
+			Self::Create
+		} else if tag == Tag::Update {
+			Self::Update
+		} else if tag == Tag::Upsert {
+			Self::Upsert
+		} else if tag == Tag::Delete {
+			Self::Delete
+		} else if tag == Tag::Relate {
+			Self::Relate
+		} else if tag == Tag::Insert {
+			Self::Insert
+		} else if tag == Tag::Info {
+			Self::Info
+		} else if tag == Tag::For {
+			Self::Foreach
+		} else if tag == Tag::If {
+			Self::IfElse
+		} else if tag == Tag::Sleep {
+			Self::Sleep
+		} else if tag == Tag::Explain {
+			Self::Explain
+		} else if tag == Tag::Let {
+			Self::Let
+		} else if tag == Tag::Return {
+			Self::Return
+		} else if tag == Tag::Break {
+			Self::Break
+		} else if tag == Tag::Continue {
+			Self::Continue
+		} else if tag == Tag::Throw {
+			Self::Throw
+		} else if tag == Tag::Block {
+			Self::Block
+		} else {
+			Self::Other
 		}
 	}
 }

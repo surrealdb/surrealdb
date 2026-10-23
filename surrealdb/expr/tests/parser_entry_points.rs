@@ -126,30 +126,30 @@ mod id_components {
 	fn only_expr(text: &str) -> Expr {
 		let mut ast = parser::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
 		assert_eq!(ast.expressions.len(), 1, "{text}");
-		match ast.expressions.remove(0) {
-			TopLevelExpr::Expr(e) => e,
-			_ => panic!("{text}: not an expression statement"),
-		}
+		let TopLevelExpr::Expr(e) = ast.expressions.remove(0) else {
+			panic!("{text}: not an expression statement");
+		};
+		e
 	}
 
 	fn define_field(text: &str) -> DefineFieldStatement {
-		match only_expr(text) {
-			Expr::Define(d) => match *d {
-				DefineStatement::Field(f) => *f,
-				_ => panic!("{text}: not DEFINE FIELD"),
-			},
-			_ => panic!("{text}: not DEFINE"),
-		}
+		let Expr::Define(d) = only_expr(text) else {
+			panic!("{text}: not DEFINE");
+		};
+		let DefineStatement::Field(f) = *d else {
+			panic!("{text}: not DEFINE FIELD");
+		};
+		*f
 	}
 
 	fn alter_field(text: &str) -> AlterFieldStatement {
-		match only_expr(text) {
-			Expr::Alter(a) => match *a {
-				AlterStatement::Field(f) => *f,
-				_ => panic!("{text}: not ALTER FIELD"),
-			},
-			_ => panic!("{text}: not ALTER"),
-		}
+		let Expr::Alter(a) = only_expr(text) else {
+			panic!("{text}: not ALTER");
+		};
+		let AlterStatement::Field(f) = *a else {
+			panic!("{text}: not ALTER FIELD");
+		};
+		*f
 	}
 
 	fn names(s: &DefineFieldStatement) -> Vec<&str> {

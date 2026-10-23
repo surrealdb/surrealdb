@@ -16,26 +16,24 @@ fn test_token_into_value_with_refresh() {
 	let token = create_token_with_refresh("access_token_123", "refresh_token_456");
 	let value = token.into_value();
 
-	match value {
-		Value::Object(obj) => {
-			assert!(obj.get("access").is_some());
-			assert!(obj.get("refresh").is_some());
+	let Value::Object(obj) = value else {
+		panic!("Token should be serialized as an object");
+	};
+	assert!(obj.get("access").is_some());
+	assert!(obj.get("refresh").is_some());
 
-			// Check that access token is serialized as a string
-			if let Some(Value::String(access_str)) = obj.get("access") {
-				assert_eq!(access_str, "access_token_123");
-			} else {
-				panic!("Access token should be serialized as a string");
-			}
+	// Check that access token is serialized as a string
+	if let Some(Value::String(access_str)) = obj.get("access") {
+		assert_eq!(access_str, "access_token_123");
+	} else {
+		panic!("Access token should be serialized as a string");
+	}
 
-			// Check that refresh token is serialized as a string
-			if let Some(Value::String(refresh_str)) = obj.get("refresh") {
-				assert_eq!(refresh_str, "refresh_token_456");
-			} else {
-				panic!("Refresh token should be serialized as a string");
-			}
-		}
-		_ => panic!("Token should be serialized as an object"),
+	// Check that refresh token is serialized as a string
+	if let Some(Value::String(refresh_str)) = obj.get("refresh") {
+		assert_eq!(refresh_str, "refresh_token_456");
+	} else {
+		panic!("Refresh token should be serialized as a string");
 	}
 }
 
@@ -44,12 +42,10 @@ fn test_token_into_value_without_refresh() {
 	let token = create_token_without_refresh("access_token_123");
 	let value = token.into_value();
 
-	match value {
-		Value::String(token) => {
-			assert_eq!(token, "access_token_123");
-		}
-		_ => panic!("Token should be serialized as an object"),
-	}
+	let Value::String(token) = value else {
+		panic!("Token should be serialized as an object");
+	};
+	assert_eq!(token, "access_token_123");
 }
 
 #[test]

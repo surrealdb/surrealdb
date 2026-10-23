@@ -227,21 +227,25 @@ impl Capabilities {
 				"write" => out.write = boolean(key, v)?,
 				"strict_timeout" => out.strict_timeout = boolean(key, v)?,
 				"memory" => {
-					out.memory = match v {
-						Value::None | Value::Null => None,
-						Value::Number(n) => match n.to_int() {
-							Some(i) if i >= 0 => Some(i as u64),
-							_ => bail!("`memory` must be a whole number of bytes"),
-						},
-						_ => bail!("`memory` must be a whole number of bytes"),
-					}
+					out.memory = if v.is_nullish() {
+						None
+					} else if let Value::Number(n) = v
+						&& let Some(i) = n.to_int()
+						&& i >= 0
+					{
+						Some(i as u64)
+					} else {
+						bail!("`memory` must be a whole number of bytes");
+					};
 				}
 				"timeout" => {
-					out.timeout = match v {
-						Value::None | Value::Null => None,
-						Value::Duration(d) => Some(d.into_inner()),
-						_ => bail!("`timeout` must be a duration such as 5s"),
-					}
+					out.timeout = if v.is_nullish() {
+						None
+					} else if let Value::Duration(d) = v {
+						Some(d.into_inner())
+					} else {
+						bail!("`timeout` must be a duration such as 5s");
+					};
 				}
 				other => bail!("unknown capability `{other}`"),
 			}
@@ -607,26 +611,33 @@ fn list_diff(out: &mut Vec<Change>, field: &'static str, old: &[String], new: &[
 /// A `net` or `functions` field: `false` grants nothing, `true` everything the
 /// server allows (read as `["*"]`), and an array lists what it grants.
 fn strings(key: &str, v: &Value) -> Result<Vec<String>> {
-	let items = match v {
-		Value::Bool(false) => return Ok(Vec::new()),
-		Value::Bool(true) => return Ok(vec!["*".into()]),
-		Value::Array(items) => items,
-		_ => bail!("`{key}` must be true, false or an array of strings"),
+	let items = if let Value::Bool(b) = v {
+		return Ok(if *b {
+			vec!["*".into()]
+		} else {
+			Vec::new()
+		});
+	} else if let Value::Array(items) = v {
+		items
+	} else {
+		bail!("`{key}` must be true, false or an array of strings");
 	};
 	items
 		.iter()
-		.map(|item| match item {
-			Value::String(s) => Ok(s.clone()),
-			_ => bail!("`{key}` must be true, false or an array of strings"),
+		.map(|item| {
+			let Value::String(s) = item else {
+				bail!("`{key}` must be true, false or an array of strings");
+			};
+			Ok(s.clone())
 		})
 		.collect()
 }
 
 fn boolean(key: &str, v: &Value) -> Result<bool> {
-	match v {
-		Value::Bool(b) => Ok(*b),
-		_ => bail!("`{key}` must be true or false"),
-	}
+	let Value::Bool(b) = v else {
+		bail!("`{key}` must be true or false");
+	};
+	Ok(*b)
 }
 
 /// `["*"]` is written as `true`, the clause's spelling for "everything the

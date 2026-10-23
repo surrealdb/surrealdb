@@ -65,7 +65,11 @@ impl ModelComputation<'_> {
 				shape,
 				dimension_symbols: _,
 			} => shape,
-			_ => {
+			ValueType::Sequence(_)
+			| ValueType::Map {
+				..
+			}
+			| ValueType::Optional(_) => {
 				return Err(SurrealError {
 					message: "input dims not found".into(),
 					status: SurrealErrorStatus::Unknown,

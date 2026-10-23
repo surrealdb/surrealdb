@@ -611,7 +611,7 @@ impl Websocket {
 		match msg {
 			Message::Text(msg) => msg.len(),
 			Message::Binary(msg) => msg.len(),
-			_ => 0,
+			Message::Ping(_) | Message::Pong(_) | Message::Close(_) => 0,
 		}
 	}
 
@@ -823,7 +823,7 @@ impl Websocket {
 		let len = match msg {
 			Message::Text(ref msg) => msg.len(),
 			Message::Binary(ref msg) => msg.len(),
-			_ => 0,
+			Message::Ping(_) | Message::Pong(_) | Message::Close(_) => 0,
 		};
 		// Record inbound bytes by dispatching a network event through the
 		// fan-out observer. Ping / Pong / Close / Raw frames report 0 and
@@ -2034,9 +2034,12 @@ mod tests {
 			};
 			results
 				.iter()
-				.map(|r| match r {
-					Value::Object(r) => r.get("result").cloned().unwrap_or(Value::None),
-					other => other.clone(),
+				.map(|r| {
+					if let Value::Object(r) = r {
+						r.get("result").cloned().unwrap_or(Value::None)
+					} else {
+						r.clone()
+					}
 				})
 				.collect()
 		};
@@ -2265,12 +2268,14 @@ mod tests {
 			let shaped = surrealdb_core::rpc::format::encoded::decode_shaped(&bytes, &mut reader)
 				.expect("reads");
 			let expected = surrealdb_core::rpc::format::cbor::decode(&cbor, 64).expect("decodes");
-			let row = |v: &Value| match v {
-				Value::Object(o) => match o.get("result") {
-					Some(Value::Object(r)) => r.get("result").cloned(),
-					_ => None,
-				},
-				_ => None,
+			let row = |v: &Value| {
+				if let Value::Object(o) = v
+					&& let Some(Value::Object(r)) = o.get("result")
+				{
+					r.get("result").cloned()
+				} else {
+					None
+				}
 			};
 			assert_eq!(
 				row(&shaped),
@@ -2344,9 +2349,12 @@ mod tests {
 		}
 		let closes: Vec<&CloseFrame> = queued
 			.iter()
-			.filter_map(|msg| match msg {
-				Message::Close(frame) => frame.as_ref(),
-				_ => None,
+			.filter_map(|msg| {
+				if let Message::Close(frame) = msg {
+					frame.as_ref()
+				} else {
+					None
+				}
 			})
 			.collect();
 		let [frame] = closes.as_slice() else {
@@ -3236,10 +3244,10 @@ mod tests {
 			// "client" carries a Cancelled-class error. A normal
 			// successful COMMIT would carry no such error.
 			let response = chn_rx.recv().await.expect("response sent over channel");
-			let response_text = match response {
-				Message::Text(t) => t.to_string(),
-				other => panic!("expected Text response from Json format, got {other:?}"),
+			let Message::Text(t) = response else {
+				panic!("expected Text response from Json format, got {response:?}");
 			};
+			let response_text = t.to_string();
 			assert!(
 				response_text.contains("cancelled"),
 				"expected Cancelled-class error in response (cancel-plumbing fired); \
@@ -3358,10 +3366,10 @@ mod tests {
 			// leak-empty check below would still pass, but the
 			// response-text check would fail, exposing the regression.
 			let response = chn_rx.recv().await.expect("response sent over channel");
-			let response_text = match response {
-				Message::Text(t) => t.to_string(),
-				other => panic!("expected Text response from Json format, got {other:?}"),
+			let Message::Text(t) = response else {
+				panic!("expected Text response from Json format, got {response:?}");
 			};
+			let response_text = t.to_string();
 			assert!(
 				response_text.contains("cancelled"),
 				"expected Cancelled-class error in response (cancel-plumbing fired); \
@@ -3560,10 +3568,10 @@ mod tests {
 			)
 			.await;
 			let message = response.recv().await.expect("response sent over channel");
-			let text = match message {
-				Message::Text(t) => t.to_string(),
-				other => panic!("expected Text response from Json format, got {other:?}"),
+			let Message::Text(t) = message else {
+				panic!("expected Text response from Json format, got {message:?}");
 			};
+			let text = t.to_string();
 			serde_json::from_str(&text).unwrap_or_else(|e| panic!("JSON response ({e}): {text}"))
 		}
 
@@ -3600,10 +3608,10 @@ mod tests {
 				.await
 				.expect("notification dispatched within 10s")
 				.expect("notification channel open");
-			match message {
-				Message::Text(t) => t.to_string(),
-				other => panic!("expected Text notification from Json format, got {other:?}"),
-			}
+			let Message::Text(t) = message else {
+				panic!("expected Text notification from Json format, got {message:?}");
+			};
+			t.to_string()
 		}
 
 		/// Waits for `lqid` to leave the registry, then reports what is left
@@ -4011,7 +4019,9 @@ mod tests {
 				DbResult::Encoded(encoded) => {
 					surrealdb_core::rpc::format::encoded::into_query_results(encoded)
 				}
-				_ => panic!("a query answers with its results"),
+				DbResult::Other(_) | DbResult::Live(_) => {
+					panic!("a query answers with its results")
+				}
 			};
 			let session = Uuid::new_v4();
 			rpc.attach(session).await.expect("attach a session");
@@ -4190,10 +4200,10 @@ mod tests {
 	}
 
 	fn decode_json(msg: Message) -> serde_json::Value {
-		match msg {
-			Message::Text(text) => serde_json::from_str(&text).expect("valid response json"),
-			other => panic!("expected Text response from Json format, got {other:?}"),
-		}
+		let Message::Text(text) = msg else {
+			panic!("expected Text response from Json format, got {msg:?}");
+		};
+		serde_json::from_str(&text).expect("valid response json")
 	}
 
 	/// The frame tag of a message, when it is a stream frame.

@@ -82,7 +82,7 @@ impl WsFormat for Format {
 		let data = match msg {
 			Message::Text(text) => text.as_bytes(),
 			Message::Binary(bytes) => bytes.as_ref(),
-			_ => return None,
+			Message::Ping(_) | Message::Pong(_) | Message::Close(_) => return None,
 		};
 		match self {
 			Format::Json => surrealdb_core::rpc::format::json::request_id(data),

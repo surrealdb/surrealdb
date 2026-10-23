@@ -231,7 +231,7 @@ impl<'a> PackedRow<'a> {
 			}
 			match self.state(column.presence, id_of(from))? {
 				State::Absent => from = self.past(from),
-				state => return Ok(Ok((from, state))),
+				state @ State::Null | state @ State::Present => return Ok(Ok((from, state))),
 			}
 		}
 		Ok(Err(from))

@@ -63,9 +63,10 @@ pub fn bind_select(
 			} else {
 				for (i, t) in bound_query.targets.iter_mut().enumerate() {
 					if t.alias.is_none() {
-						let name = match &t.expr {
-							BoundExpr::Column(c) => c.column.clone(),
-							_ => format!("col_{}", i + 1),
+						let name = if let BoundExpr::Column(c) = &t.expr {
+							c.column.clone()
+						} else {
+							format!("col_{}", i + 1)
 						};
 						t.alias = Some(name);
 					}
@@ -154,28 +155,22 @@ pub fn bind_select(
 	// 5. Bind GROUP BY (window functions forbidden)
 	let mut group_by = Vec::new();
 	for g in &select.group_by {
-		let bound = match g {
-			Expr::Literal(MyLiteral::Integer(pos), _) => {
-				if policy.group_by_ordinal {
-					scope.resolve_group_by_ordinal(*pos as usize)?
-				} else {
-					return Err(PlanError::Custom("GROUP BY ordinal not allowed".into()));
-				}
+		let bound = if let Expr::Literal(MyLiteral::Integer(pos), _) = g {
+			if policy.group_by_ordinal {
+				scope.resolve_group_by_ordinal(*pos as usize)?
+			} else {
+				return Err(PlanError::Custom("GROUP BY ordinal not allowed".into()));
 			}
-			Expr::ColumnRef(ColumnRef {
-				fields,
-				..
-			}) if fields.len() == 1 => {
-				let col_name = &fields[0];
-				if policy.group_by_alias
-					&& let Some(target_expr) = scope.find_target_by_alias(col_name, policy)
-				{
-					target_expr
-				} else {
-					bind_expr(g, &scope, catalog, policy)?
-				}
-			}
-			_ => bind_expr(g, &scope, catalog, policy)?,
+		} else if let Expr::ColumnRef(ColumnRef {
+			fields,
+			..
+		}) = g && fields.len() == 1
+			&& policy.group_by_alias
+			&& let Some(target_expr) = scope.find_target_by_alias(&fields[0], policy)
+		{
+			target_expr
+		} else {
+			bind_expr(g, &scope, catalog, policy)?
 		};
 		if bound.contains_window() {
 			return Err(PlanError::WindowNotAllowed("GROUP BY clause".into()));
@@ -199,26 +194,22 @@ pub fn bind_select(
 	// 7. Bind ORDER BY
 	let mut order_by = Vec::new();
 	for item in &select.order_by {
-		let expr = match &item.expr {
-			Expr::Literal(MyLiteral::Integer(pos), _) => {
-				if policy.order_by_ordinal {
-					scope.resolve_order_by_ordinal(*pos as usize)?
-				} else {
-					return Err(PlanError::Custom("ORDER BY ordinal not allowed".into()));
-				}
+		let expr = if let Expr::Literal(MyLiteral::Integer(pos), _) = &item.expr {
+			if policy.order_by_ordinal {
+				scope.resolve_order_by_ordinal(*pos as usize)?
+			} else {
+				return Err(PlanError::Custom("ORDER BY ordinal not allowed".into()));
 			}
-			Expr::ColumnRef(ColumnRef {
-				fields,
-				..
-			}) if fields.len() == 1 => {
-				let col_name = &fields[0];
-				if let Some(target_expr) = scope.find_target_by_alias(col_name, policy) {
-					target_expr
-				} else {
-					bind_expr(&item.expr, &scope, catalog, policy)?
-				}
-			}
-			_ => bind_expr(&item.expr, &scope, catalog, policy)?,
+		} else if let Expr::ColumnRef(ColumnRef {
+			fields,
+			..
+		}) = &item.expr
+			&& fields.len() == 1
+			&& let Some(target_expr) = scope.find_target_by_alias(&fields[0], policy)
+		{
+			target_expr
+		} else {
+			bind_expr(&item.expr, &scope, catalog, policy)?
 		};
 
 		let direction = if item.asc {
@@ -322,9 +313,12 @@ fn bind_table_ref(
 								.iter()
 								.enumerate()
 								.map(|(i, t)| {
-									t.alias.clone().unwrap_or_else(|| match &t.expr {
-										BoundExpr::Column(c) => c.column.clone(),
-										_ => format!("col_{}", i + 1),
+									t.alias.clone().unwrap_or_else(|| {
+										if let BoundExpr::Column(c) = &t.expr {
+											c.column.clone()
+										} else {
+											format!("col_{}", i + 1)
+										}
 									})
 								})
 								.collect(),
@@ -494,7 +488,9 @@ pub fn bind_expr(
 				UnaryOperator::Not => BoundUnaryOp::Not,
 				UnaryOperator::Plus => BoundUnaryOp::Positive,
 				UnaryOperator::Minus => BoundUnaryOp::Negate,
-				_ => return Err(PlanError::UnsupportedExpression(format!("Unary op {op:?}"))),
+				UnaryOperator::BitNot | UnaryOperator::Binary => {
+					return Err(PlanError::UnsupportedExpression(format!("Unary op {op:?}")));
+				}
 			};
 			Ok(BoundExpr::Unary {
 				op: bound_op,
@@ -528,7 +524,15 @@ pub fn bind_expr(
 				BinaryOperator::IntDiv => BoundBinaryOp::IntDiv,
 				BinaryOperator::Like => BoundBinaryOp::Like,
 				BinaryOperator::Regexp | BinaryOperator::Rlike => BoundBinaryOp::RegexpCi,
-				_ => return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}"))),
+				BinaryOperator::BitAnd
+				| BinaryOperator::BitOr
+				| BinaryOperator::BitXor
+				| BinaryOperator::ShiftLeft
+				| BinaryOperator::ShiftRight
+				| BinaryOperator::Xor
+				| BinaryOperator::Assign => {
+					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
+				}
 			};
 			Ok(BoundExpr::Binary {
 				left: Box::new(l),
@@ -767,7 +771,26 @@ pub fn bind_expr(
 						BinaryOperator::GreaterEqual => BoundBinaryOp::GreaterThanEqual,
 						BinaryOperator::Equal => BoundBinaryOp::Equal,
 						BinaryOperator::NotEqual => BoundBinaryOp::NotEqual,
-						_ => {
+						BinaryOperator::Add
+						| BinaryOperator::Sub
+						| BinaryOperator::Mul
+						| BinaryOperator::Div
+						| BinaryOperator::IntDiv
+						| BinaryOperator::Mod
+						| BinaryOperator::BitAnd
+						| BinaryOperator::BitOr
+						| BinaryOperator::BitXor
+						| BinaryOperator::ShiftLeft
+						| BinaryOperator::ShiftRight
+						| BinaryOperator::NullSafeEqual
+						| BinaryOperator::Like
+						| BinaryOperator::Regexp
+						| BinaryOperator::Rlike
+						| BinaryOperator::And
+						| BinaryOperator::Or
+						| BinaryOperator::Xor
+						| BinaryOperator::Concat
+						| BinaryOperator::Assign => {
 							return Err(PlanError::UnsupportedExpression(format!(
 								"Quantified op {op:?}"
 							)));
@@ -881,7 +904,12 @@ pub fn bind_expr(
 				}
 			}
 		}
-		_ => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
+		Expr::Collate {
+			..
+		}
+		| Expr::Interval {
+			..
+		} => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
 	}
 }
 

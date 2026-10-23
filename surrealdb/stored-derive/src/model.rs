@@ -215,14 +215,14 @@ fn numbers(array: &ExprArray) -> Result<Vec<u32>> {
 	let mut seen = BTreeSet::new();
 	let mut out = Vec::new();
 	for e in &array.elems {
-		let n = match e {
-			Expr::Lit(ExprLit {
-				lit: Lit::Int(lit),
-				..
-			}) => number(lit)?,
-			other => {
-				return Err(Error::new(other.span(), "a reserved number is an integer literal"));
-			}
+		let n = if let Expr::Lit(ExprLit {
+			lit: Lit::Int(lit),
+			..
+		}) = e
+		{
+			number(lit)?
+		} else {
+			return Err(Error::new(e.span(), "a reserved number is an integer literal"));
 		};
 		if !seen.insert(n) {
 			return Err(Error::new(e.span(), format!("the number {n} is reserved twice")));
@@ -307,7 +307,9 @@ fn transparent(fields: &Fields, span: Span) -> Result<Body> {
 			}
 			Ok(Body::Transparent(field.ty.clone()))
 		}
-		_ => Err(Error::new(span, "`transparent` needs a tuple struct with exactly one field")),
+		Fields::Named(_) | Fields::Unnamed(_) | Fields::Unit => {
+			Err(Error::new(span, "`transparent` needs a tuple struct with exactly one field"))
+		}
 	}
 }
 

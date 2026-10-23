@@ -289,7 +289,7 @@ mod test {
 			poll_fn(|cx| {
 				match stream.poll_next_unpin(cx) {
 					Poll::Ready(None) => {}
-					_ => panic!("wrong value"),
+					Poll::Ready(_) | Poll::Pending => panic!("wrong value"),
 				}
 				Poll::Ready(())
 			})

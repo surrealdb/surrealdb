@@ -398,7 +398,40 @@ impl BoundSelect {
 						None,
 						None,
 					),
-					_ => {
+					BoundExpr::Literal(_)
+					| BoundExpr::Access {
+						..
+					}
+					| BoundExpr::Param {
+						..
+					}
+					| BoundExpr::Binary {
+						..
+					}
+					| BoundExpr::Unary {
+						..
+					}
+					| BoundExpr::Case {
+						..
+					}
+					| BoundExpr::Between {
+						..
+					}
+					| BoundExpr::InList {
+						..
+					}
+					| BoundExpr::IsNull {
+						..
+					}
+					| BoundExpr::Cast {
+						..
+					}
+					| BoundExpr::ScalarSubquery(_)
+					| BoundExpr::Exists(_)
+					| BoundExpr::InSubquery {
+						..
+					}
+					| BoundExpr::ArraySubquery(_) => {
 						if dialect.dialect == SqlDialect::Postgres {
 							("?column?".to_string(), None, None)
 						} else {
@@ -821,12 +854,10 @@ impl BoundSelect {
 					self.collect_param_types_from_expr(&o.expr, catalog, params);
 				}
 				if let Some(frame) = &spec.frame {
-					match &frame.start {
-						BoundWindowFrameBound::Preceding(e)
-						| BoundWindowFrameBound::Following(e) => {
-							self.collect_param_types_from_expr(e, catalog, params);
-						}
-						_ => {}
+					if let BoundWindowFrameBound::Preceding(e)
+					| BoundWindowFrameBound::Following(e) = &frame.start
+					{
+						self.collect_param_types_from_expr(e, catalog, params);
 					}
 					if let Some(
 						BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e),
@@ -842,7 +873,18 @@ impl BoundSelect {
 			} => {
 				params.entry(*index).or_insert(SqlType::Unknown);
 			}
-			_ => {}
+			BoundExpr::Literal(_)
+			| BoundExpr::Column(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => {}
 		}
 	}
 }

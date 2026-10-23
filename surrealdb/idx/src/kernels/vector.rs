@@ -44,13 +44,15 @@ pub fn score(
 		// A non-number stops the sequence short of the dimension; only an
 		// array among them sends the record to be read as nested arrays below.
 		let mut nested = false;
-		let numbers = raw.iter().map_while(|v| match v {
-			Value::Number(n) => Some(*n),
-			Value::Array(_) => {
+		let numbers = raw.iter().map_while(|v| {
+			if let Value::Number(n) = v {
+				Some(*n)
+			} else if let Value::Array(_) = v {
 				nested = true;
 				None
+			} else {
+				None
 			}
-			_ => None,
 		});
 		let record = Vector::try_from_numbers(vector_type, numbers);
 		if !nested {
@@ -75,14 +77,19 @@ pub fn score(
 /// order. `false` on any value that is neither a number nor an array, and as
 /// soon as `out` would hold more than `limit` numbers.
 fn flatten_numbers(values: &[Value], out: &mut Vec<Number>, limit: usize) -> bool {
-	values.iter().all(|v| match v {
-		Value::Number(n) if out.len() < limit => {
-			out.push(*n);
-			true
+	values.iter().all(|v| {
+		if let Value::Number(n) = v {
+			if out.len() < limit {
+				out.push(*n);
+				true
+			} else {
+				false
+			}
+		} else if let Value::Array(a) = v {
+			flatten_numbers(&a.0, out, limit)
+		} else {
+			false
 		}
-		Value::Number(_) => false,
-		Value::Array(a) => flatten_numbers(&a.0, out, limit),
-		_ => false,
 	})
 }
 

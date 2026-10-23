@@ -95,7 +95,7 @@ impl PgType {
 				Self::Jsonb => 3807,
 				Self::Uuid => 2951,
 				Self::Regclass => 2210,
-				_ => 2277, // anyarray
+				Self::Record | Self::Array(_) => 2277, // anyarray
 			},
 		}
 	}
@@ -312,9 +312,10 @@ fn column_type(cells: impl Iterator<Item = Option<PgType>>) -> PgType {
 }
 
 fn cell(value: Value) -> Option<Value> {
-	match value {
-		Value::None | Value::Null => None,
-		v => Some(v),
+	if matches!(value, Value::None | Value::Null) {
+		None
+	} else {
+		Some(value)
 	}
 }
 
@@ -329,7 +330,23 @@ fn cell(value: Value) -> Option<Value> {
 pub(super) fn shape_result(value: Value) -> ResultShape {
 	let values = match value {
 		Value::Array(arr) => arr.into_inner(),
-		v => vec![v],
+		v @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Object(_)
+		| Value::Set(_)) => vec![v],
 	};
 	if !values.is_empty() && values.iter().all(|v| matches!(v, Value::Object(_))) {
 		let mut objects = Vec::with_capacity(values.len());
@@ -385,7 +402,23 @@ pub(super) fn shape_result_with_descriptor(
 ) -> ResultShape {
 	let values = match value {
 		Value::Array(arr) => arr.into_inner(),
-		v => vec![v],
+		v @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Object(_)
+		| Value::Set(_)) => vec![v],
 	};
 	let columns: Vec<PgColumn> = descriptor
 		.columns
@@ -437,7 +470,23 @@ pub(super) fn shape_result_with_descriptor(
 pub(super) fn shape_result_jsonb(value: Value) -> ResultShape {
 	let values = match value {
 		Value::Array(arr) => arr.into_inner(),
-		v => vec![v],
+		v @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Object(_)
+		| Value::Set(_)) => vec![v],
 	};
 	let rows = values.into_iter().map(|v| vec![cell(v)]).collect();
 	ResultShape {

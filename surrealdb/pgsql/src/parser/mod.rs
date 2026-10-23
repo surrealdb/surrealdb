@@ -186,15 +186,17 @@ impl<'a> Parser<'a> {
 	pub fn peek_infix_bp(&mut self) -> ParseResult<Option<(u8, u8, precedence::Associativity)>> {
 		if self.peek().kind == TokenKind::Keyword(crate::lexer::keyword::Keyword::Not) {
 			let next_tok = self.peek2()?;
-			match &next_tok.kind {
-				TokenKind::Keyword(
-					crate::lexer::keyword::Keyword::Between
-					| crate::lexer::keyword::Keyword::In
-					| crate::lexer::keyword::Keyword::Like
-					| crate::lexer::keyword::Keyword::Ilike
-					| crate::lexer::keyword::Keyword::Similar,
-				) => Ok(Some((40, 41, precedence::Associativity::None))),
-				_ => Ok(None),
+			if let TokenKind::Keyword(
+				crate::lexer::keyword::Keyword::Between
+				| crate::lexer::keyword::Keyword::In
+				| crate::lexer::keyword::Keyword::Like
+				| crate::lexer::keyword::Keyword::Ilike
+				| crate::lexer::keyword::Keyword::Similar,
+			) = next_tok.kind
+			{
+				Ok(Some((40, 41, precedence::Associativity::None)))
+			} else {
+				Ok(None)
 			}
 		} else {
 			Ok(precedence::infix_binding_power(&self.peek().kind))

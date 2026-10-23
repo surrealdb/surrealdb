@@ -92,7 +92,7 @@ fn depth(value: &Value) -> usize {
 				};
 				1 + bound(&r.start).max(bound(&r.end))
 			}
-			_ => 0,
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => 0,
 		}
 	}
 
@@ -108,7 +108,19 @@ fn depth(value: &Value) -> usize {
 			};
 			1 + bound(&r.start).max(bound(&r.end))
 		}
-		_ => 0,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_) => 0,
 	}
 }
 

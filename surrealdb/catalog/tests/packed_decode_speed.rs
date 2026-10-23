@@ -61,7 +61,27 @@ impl Layout {
 				Location::Var(self.vars - 1)
 			}
 			PhysicalKind::Object => Location::None,
-			_ => Location::Fixed(0),
+			PhysicalKind::I8
+			| PhysicalKind::I16
+			| PhysicalKind::I32
+			| PhysicalKind::I64
+			| PhysicalKind::U8
+			| PhysicalKind::U16
+			| PhysicalKind::U32
+			| PhysicalKind::U64
+			| PhysicalKind::F32
+			| PhysicalKind::F64
+			| PhysicalKind::Decimal16
+			| PhysicalKind::Fixed(_)
+			| PhysicalKind::Uuid
+			| PhysicalKind::Datetime
+			| PhysicalKind::DatetimeWide
+			| PhysicalKind::Duration
+			| PhysicalKind::Point
+			| PhysicalKind::LiteralCode(_)
+			| PhysicalKind::Bytes
+			| PhysicalKind::RecordKey
+			| PhysicalKind::DecimalVar => Location::Fixed(0),
 		};
 		self.columns.push(Column {
 			path: path.iter().map(|segment| (*segment).to_owned()).collect(),

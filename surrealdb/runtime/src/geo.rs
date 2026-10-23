@@ -91,9 +91,10 @@ pub mod hash {
 			}),
 		};
 
-		Ok(match arg {
-			Geometry::Point(v) => geo::encode(v, len).into(),
-			_ => Value::None,
+		Ok(if let Geometry::Point(v) = arg {
+			geo::encode(v, len).into()
+		} else {
+			Value::None
 		})
 	}
 

@@ -223,132 +223,121 @@ fn process_mod_items(prefix: &str, items: Vec<Item>) -> (Vec<Item>, Vec<proc_mac
 	let mut sentinels: Vec<proc_macro2::TokenStream> = Vec::new();
 
 	for mut item in items {
-		match &mut item {
-			Item::Fn(fn_item) => {
-				if let Some(idx) =
-					fn_item.attrs.iter().position(|a| a.path().is_ident("surrealism"))
-				{
-					let attr = fn_item.attrs.remove(idx);
-					let inner_attrs = match parse_surrealism_attr(&attr) {
-						Ok(v) => v,
-						Err(e) => {
-							new_items.push(Item::Verbatim(e.to_compile_error()));
-							continue;
-						}
-					};
-
-					if inner_attrs.is_init {
-						panic!("#[surrealism(init)] cannot be used inside a module");
+		if let Item::Fn(fn_item) = &mut item {
+			if let Some(idx) = fn_item.attrs.iter().position(|a| a.path().is_ident("surrealism")) {
+				let attr = fn_item.attrs.remove(idx);
+				let inner_attrs = match parse_surrealism_attr(&attr) {
+					Ok(v) => v,
+					Err(e) => {
+						new_items.push(Item::Verbatim(e.to_compile_error()));
+						continue;
 					}
+				};
 
-					let export_name = if inner_attrs.is_default {
-						prefix.to_string()
-					} else {
-						let base = inner_attrs
-							.export_name
-							.unwrap_or_else(|| fn_item.sig.ident.to_string());
-						format!("{prefix}::{base}")
-					};
+				if inner_attrs.is_init {
+					panic!("#[surrealism(init)] cannot be used inside a module");
+				}
 
-					if export_name == "default" {
-						panic!(
-							"`default` is reserved for the default export; use \
+				let export_name = if inner_attrs.is_default {
+					prefix.to_string()
+				} else {
+					let base =
+						inner_attrs.export_name.unwrap_or_else(|| fn_item.sig.ident.to_string());
+					format!("{prefix}::{base}")
+				};
+
+				if export_name == "default" {
+					panic!(
+						"`default` is reserved for the default export; use \
 					 #[surrealism(default)] on the function that should be \
 					 the default export instead of naming it \"default\""
-						);
-					}
-
-					let comment =
-						inner_attrs.comment.or_else(|| extract_doc_comment(&fn_item.attrs));
-
-					let parts = match extract_fn_signature(&fn_item.sig) {
-						Ok(v) => v,
-						Err(e) => {
-							new_items.push(Item::Verbatim(e.to_compile_error()));
-							continue;
-						}
-					};
-
-					strip_param_name_attrs(&mut fn_item.sig);
-					let fn_name = &fn_item.sig.ident;
-
-					// A conditional-compilation gate on the function has to
-					// reach everything that names it. This mod's own attribute
-					// macro receives the items with their `#[cfg]` still on
-					// them, so without repeating it the sentinel and the
-					// registration would name a function the later cfg-strip
-					// removes.
-					let gates: Vec<&syn::Attribute> =
-						fn_item.attrs.iter().filter(|a| is_existence_gate(a)).collect();
-
-					sentinels.push(generate_sentinel(Some(&export_name), &gates));
-
-					let registration = generate_registration_body(
-						fn_name,
-						&parts.arg_patterns,
-						&parts.arg_wire_names,
-						&parts.tuple_type,
-						&parts.tuple_pattern,
-						&parts.result_type,
-						parts.is_result,
-						parts.is_async,
-						false,
-						Some(&export_name),
-						parts.tx.as_ref(),
-						comment.as_deref(),
-						&gates,
 					);
-
-					new_items.push(item);
-					new_items.push(Item::Verbatim(registration));
-					continue;
 				}
-			}
-			Item::Mod(inner_mod) => {
-				if let Some(idx) =
-					inner_mod.attrs.iter().position(|a| a.path().is_ident("surrealism"))
-				{
-					let attr = inner_mod.attrs.remove(idx);
-					let inner_attrs = match parse_surrealism_attr(&attr) {
-						Ok(v) => v,
-						Err(e) => {
-							new_items.push(Item::Verbatim(e.to_compile_error()));
-							continue;
-						}
-					};
 
-					if inner_attrs.is_default {
-						panic!("#[surrealism(default)] cannot be used on a module");
-					}
-					if inner_attrs.is_init {
-						panic!("#[surrealism(init)] cannot be used on a module");
-					}
-					let inner_prefix_segment =
-						inner_attrs.export_name.unwrap_or_else(|| inner_mod.ident.to_string());
-					let inner_prefix = format!("{prefix}::{inner_prefix_segment}");
+				let comment = inner_attrs.comment.or_else(|| extract_doc_comment(&fn_item.attrs));
 
-					let Some((brace, inner_items)) = inner_mod.content.take() else {
-						new_items.push(Item::Verbatim(
-							syn::Error::new_spanned(
-								&inner_mod.ident,
-								"#[surrealism] on mod requires an inline module body (mod foo { ... })",
-							)
-							.to_compile_error(),
-						));
+				let parts = match extract_fn_signature(&fn_item.sig) {
+					Ok(v) => v,
+					Err(e) => {
+						new_items.push(Item::Verbatim(e.to_compile_error()));
 						continue;
-					};
+					}
+				};
 
-					let (processed_items, inner_sentinels) =
-						process_mod_items(&inner_prefix, inner_items);
+				strip_param_name_attrs(&mut fn_item.sig);
+				let fn_name = &fn_item.sig.ident;
 
-					inner_mod.content = Some((brace, processed_items));
-					sentinels.extend(inner_sentinels);
+				// A conditional-compilation gate on the function has to
+				// reach everything that names it. This mod's own attribute
+				// macro receives the items with their `#[cfg]` still on
+				// them, so without repeating it the sentinel and the
+				// registration would name a function the later cfg-strip
+				// removes.
+				let gates: Vec<&syn::Attribute> =
+					fn_item.attrs.iter().filter(|a| is_existence_gate(a)).collect();
 
-					new_items.push(item);
+				sentinels.push(generate_sentinel(Some(&export_name), &gates));
+
+				let registration = generate_registration_body(
+					fn_name,
+					&parts.arg_patterns,
+					&parts.arg_wire_names,
+					&parts.tuple_type,
+					&parts.tuple_pattern,
+					&parts.result_type,
+					parts.is_result,
+					parts.is_async,
+					false,
+					Some(&export_name),
+					parts.tx.as_ref(),
+					comment.as_deref(),
+					&gates,
+				);
+
+				new_items.push(item);
+				new_items.push(Item::Verbatim(registration));
+				continue;
+			}
+		} else if let Item::Mod(inner_mod) = &mut item
+			&& let Some(idx) = inner_mod.attrs.iter().position(|a| a.path().is_ident("surrealism"))
+		{
+			let attr = inner_mod.attrs.remove(idx);
+			let inner_attrs = match parse_surrealism_attr(&attr) {
+				Ok(v) => v,
+				Err(e) => {
+					new_items.push(Item::Verbatim(e.to_compile_error()));
 					continue;
 				}
+			};
+
+			if inner_attrs.is_default {
+				panic!("#[surrealism(default)] cannot be used on a module");
 			}
-			_ => {}
+			if inner_attrs.is_init {
+				panic!("#[surrealism(init)] cannot be used on a module");
+			}
+			let inner_prefix_segment =
+				inner_attrs.export_name.unwrap_or_else(|| inner_mod.ident.to_string());
+			let inner_prefix = format!("{prefix}::{inner_prefix_segment}");
+
+			let Some((brace, inner_items)) = inner_mod.content.take() else {
+				new_items.push(Item::Verbatim(
+					syn::Error::new_spanned(
+						&inner_mod.ident,
+						"#[surrealism] on mod requires an inline module body (mod foo { ... })",
+					)
+					.to_compile_error(),
+				));
+				continue;
+			};
+
+			let (processed_items, inner_sentinels) = process_mod_items(&inner_prefix, inner_items);
+
+			inner_mod.content = Some((brace, processed_items));
+			sentinels.extend(inner_sentinels);
+
+			new_items.push(item);
+			continue;
 		}
 		new_items.push(item);
 	}

@@ -223,9 +223,12 @@ pub fn shape_result(schema: &str, table: &str, value: Value) -> ResultShape {
 				let col_types: Vec<u8> = col_names
 					.iter()
 					.map(|col_name| {
-						column_type(items.iter().filter_map(|item| match item {
-							Value::Object(obj) => obj.get(col_name),
-							_ => None,
+						column_type(items.iter().filter_map(|item| {
+							if let Value::Object(obj) = item {
+								obj.get(col_name)
+							} else {
+								None
+							}
 						}))
 					})
 					.collect();
@@ -297,7 +300,20 @@ pub fn shape_result(schema: &str, table: &str, value: Value) -> ResultShape {
 			rows: Vec::new(),
 			raw_rows: Vec::new(),
 		},
-		other => {
+		other @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Set(_)) => {
 			let ty = infer_mysql_type(&other);
 			let columns = vec![ColumnDefinition41::new(schema, table, "result", ty)];
 			let row = vec![value_to_text(&other)];
@@ -338,7 +354,21 @@ pub fn shape_result_with_descriptor(
 	let items = match value {
 		Value::Array(items) => items.into_inner(),
 		Value::None | Value::Null => Vec::new(),
-		v => vec![v],
+		v @ (Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Object(_)
+		| Value::Set(_)) => vec![v],
 	};
 
 	let mut rows = Vec::with_capacity(items.len());
@@ -431,42 +461,143 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 			let byte = match val {
 				Value::Bool(b) => u8::from(*b),
 				Value::Number(Number::Int(i)) => *i as u8,
-				_ => 0u8,
+				Value::None
+				| Value::Null
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0u8,
 			};
 			buf.push(byte);
 		}
 		MYSQL_TYPE_SHORT | MYSQL_TYPE_YEAR => {
 			let n = match val {
 				Value::Number(Number::Int(i)) => *i as i16,
-				_ => 0i16,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0i16,
 			};
 			buf.extend_from_slice(&n.to_le_bytes());
 		}
 		MYSQL_TYPE_LONG | MYSQL_TYPE_INT24 => {
 			let n = match val {
 				Value::Number(Number::Int(i)) => *i as i32,
-				_ => 0i32,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0i32,
 			};
 			buf.extend_from_slice(&n.to_le_bytes());
 		}
 		MYSQL_TYPE_LONGLONG => {
 			let n = match val {
 				Value::Number(Number::Int(i)) => *i,
-				_ => 0i64,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0i64,
 			};
 			buf.extend_from_slice(&n.to_le_bytes());
 		}
 		MYSQL_TYPE_FLOAT => {
 			let f = match val {
 				Value::Number(Number::Float(fl)) => *fl as f32,
-				_ => 0.0f32,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0.0f32,
 			};
 			buf.extend_from_slice(&f.to_le_bytes());
 		}
 		MYSQL_TYPE_DOUBLE => {
 			let f = match val {
 				Value::Number(Number::Float(fl)) => *fl,
-				_ => 0.0f64,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_) => 0.0f64,
 			};
 			buf.extend_from_slice(&f.to_le_bytes());
 		}

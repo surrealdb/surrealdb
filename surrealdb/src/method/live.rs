@@ -138,17 +138,35 @@ where
 			Error::query("LIVE query returned no results".to_string(), QueryError::NotExecuted)
 		})?;
 
-		let id = match result.result? {
+		let value = result.result?;
+		let id = match value {
 			Value::Uuid(id) => *id,
-			Value::Array(mut arr) if arr.len() == 1 => match arr.pop() {
-				Some(Value::Uuid(id)) => *id,
-				_ => {
+			Value::Array(mut arr) if arr.len() == 1 => {
+				if let Some(Value::Uuid(id)) = arr.pop() {
+					*id
+				} else {
 					return Err(Error::internal(
 						"successful live query didn't return a uuid".to_string(),
 					));
 				}
-			},
-			other => {
+			}
+			other @ Value::None
+			| other @ Value::Null
+			| other @ Value::Bool(_)
+			| other @ Value::Number(_)
+			| other @ Value::String(_)
+			| other @ Value::Bytes(_)
+			| other @ Value::Duration(_)
+			| other @ Value::Datetime(_)
+			| other @ Value::Geometry(_)
+			| other @ Value::Table(_)
+			| other @ Value::RecordId(_)
+			| other @ Value::File(_)
+			| other @ Value::Range(_)
+			| other @ Value::Regex(_)
+			| other @ Value::Array(_)
+			| other @ Value::Object(_)
+			| other @ Value::Set(_) => {
 				return Err(Error::internal(format!(
 					"successful live query didn't return a uuid, got: {:?}",
 					other
@@ -274,7 +292,10 @@ impl futures::Stream for Stream<Value> {
 			Ok(notification) => {
 				match notification.action {
 					Action::Killed => Poll::Ready(None),
-					action => Poll::Ready(Some(Ok(Notification {
+					action @ (Action::Create
+					| Action::Update
+					| Action::Delete
+					| Action::Error) => Poll::Ready(Some(Ok(Notification {
 						query_id: notification.id,
 						action,
 						data: notification.result,
@@ -374,17 +395,19 @@ where
 	let action = notification.action;
 	match action {
 		Action::Killed => None,
-		action => match R::from_value(notification.result) {
-			Ok(data) => Some(Ok(Notification {
-				query_id,
-				data,
-				action,
-			})),
-			Err(error) => Some(Err(Error::serialization(
-				error.to_string(),
-				SerializationError::Deserialization,
-			))),
-		},
+		action @ (Action::Create | Action::Update | Action::Delete | Action::Error) => {
+			match R::from_value(notification.result) {
+				Ok(data) => Some(Ok(Notification {
+					query_id,
+					data,
+					action,
+				})),
+				Err(error) => Some(Err(Error::serialization(
+					error.to_string(),
+					SerializationError::Deserialization,
+				))),
+			}
+		}
 	}
 }
 

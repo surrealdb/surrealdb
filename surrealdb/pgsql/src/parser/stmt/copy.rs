@@ -162,86 +162,80 @@ impl<'a> Parser<'a> {
 
 	fn parse_copy_legacy_options(&mut self, options: &mut CopyOptions) -> ParseResult<()> {
 		loop {
-			match self.peek().kind {
-				TokenKind::Keyword(Keyword::Csv) => {
-					self.bump()?;
-					options.format = CopyFormat::Csv;
+			if self.peek().kind == TokenKind::Keyword(Keyword::Csv) {
+				self.bump()?;
+				options.format = CopyFormat::Csv;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Binary) {
+				self.bump()?;
+				options.format = CopyFormat::Binary;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Header) {
+				self.bump()?;
+				options.header = Some(true);
+			} else if let TokenKind::Keyword(Keyword::Delimiter | Keyword::Delimiters) =
+				self.peek().kind
+			{
+				self.bump()?;
+				let _ = self.eat(&TokenKind::Keyword(Keyword::As));
+				let s = self.parse_string_lit()?;
+				if let Some(&b) = s.as_bytes().first() {
+					options.delimiter = Some(b);
 				}
-				TokenKind::Keyword(Keyword::Binary) => {
-					self.bump()?;
-					options.format = CopyFormat::Binary;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Null) {
+				self.bump()?;
+				let _ = self.eat(&TokenKind::Keyword(Keyword::As));
+				let s = self.parse_string_lit()?;
+				options.null = Some(s);
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Quote) {
+				self.bump()?;
+				let _ = self.eat(&TokenKind::Keyword(Keyword::As));
+				let s = self.parse_string_lit()?;
+				if let Some(&b) = s.as_bytes().first() {
+					options.quote = Some(b);
 				}
-				TokenKind::Keyword(Keyword::Header) => {
-					self.bump()?;
-					options.header = Some(true);
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Escape) {
+				self.bump()?;
+				let _ = self.eat(&TokenKind::Keyword(Keyword::As));
+				let s = self.parse_string_lit()?;
+				if let Some(&b) = s.as_bytes().first() {
+					options.escape = Some(b);
 				}
-				TokenKind::Keyword(Keyword::Delimiter | Keyword::Delimiters) => {
-					self.bump()?;
-					let _ = self.eat(&TokenKind::Keyword(Keyword::As));
-					let s = self.parse_string_lit()?;
-					if let Some(&b) = s.as_bytes().first() {
-						options.delimiter = Some(b);
-					}
-				}
-				TokenKind::Keyword(Keyword::Null) => {
-					self.bump()?;
-					let _ = self.eat(&TokenKind::Keyword(Keyword::As));
-					let s = self.parse_string_lit()?;
-					options.null = Some(s);
-				}
-				TokenKind::Keyword(Keyword::Quote) => {
-					self.bump()?;
-					let _ = self.eat(&TokenKind::Keyword(Keyword::As));
-					let s = self.parse_string_lit()?;
-					if let Some(&b) = s.as_bytes().first() {
-						options.quote = Some(b);
-					}
-				}
-				TokenKind::Keyword(Keyword::Escape) => {
-					self.bump()?;
-					let _ = self.eat(&TokenKind::Keyword(Keyword::As));
-					let s = self.parse_string_lit()?;
-					if let Some(&b) = s.as_bytes().first() {
-						options.escape = Some(b);
-					}
-				}
-				_ => break,
+			} else {
+				break;
 			}
 		}
 		Ok(())
 	}
 
 	fn parse_string_lit(&mut self) -> ParseResult<String> {
-		match &self.peek().kind {
-			TokenKind::StringConstant(s) => {
-				let s = s.clone();
-				self.bump()?;
-				Ok(s)
-			}
-			_ => Err(ParseError::new(
+		if let TokenKind::StringConstant(s) = &self.peek().kind {
+			let s = s.clone();
+			self.bump()?;
+			Ok(s)
+		} else {
+			Err(ParseError::new(
 				self.peek().span,
 				ErrorKind::UnexpectedToken {
 					expected: "string literal",
 					found: self.peek().kind.to_string(),
 				},
-			)),
+			))
 		}
 	}
 
 	fn parse_copy_opt_name(&mut self) -> ParseResult<String> {
-		match self.peek().kind {
-			TokenKind::Ident(_) => Ok(self.parse_ident()?.0),
-			TokenKind::Keyword(kw) => {
-				self.bump()?;
-				Ok(kw.as_str().to_string())
-			}
-			_ => Err(ParseError::new(
+		if let TokenKind::Ident(_) = self.peek().kind {
+			Ok(self.parse_ident()?.0)
+		} else if let TokenKind::Keyword(kw) = self.peek().kind {
+			self.bump()?;
+			Ok(kw.as_str().to_string())
+		} else {
+			Err(ParseError::new(
 				self.peek().span,
 				ErrorKind::UnexpectedToken {
 					expected: "option name",
 					found: self.peek().kind.to_string(),
 				},
-			)),
+			))
 		}
 	}
 }

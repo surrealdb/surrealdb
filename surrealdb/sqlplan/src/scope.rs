@@ -428,23 +428,23 @@ impl QueryScope {
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
 			}))
+		} else if let BoundExpr::FunctionCall {
+			name,
+			..
+		} = &target.expr
+		{
+			Ok(BoundExpr::Column(BoundColumnRef {
+				relation_index: 0,
+				relation_name: String::new(),
+				column: name.clone(),
+				correlation_depth: 0,
+				id_table: None,
+				link_table: None,
+				declared_type: crate::SqlType::Unknown,
+				aggregate_output: false,
+			}))
 		} else {
-			match &target.expr {
-				BoundExpr::FunctionCall {
-					name,
-					..
-				} => Ok(BoundExpr::Column(BoundColumnRef {
-					relation_index: 0,
-					relation_name: String::new(),
-					column: name.clone(),
-					correlation_depth: 0,
-					id_table: None,
-					link_table: None,
-					declared_type: crate::SqlType::Unknown,
-					aggregate_output: false,
-				})),
-				_ => Ok(target.expr.clone()),
-			}
+			Ok(target.expr.clone())
 		}
 	}
 

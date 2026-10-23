@@ -1403,7 +1403,12 @@ impl Sequence {
 					}
 				}
 			}
-			_ => (start, batch, timeout, None),
+			SequenceDomain::TableDocIds(..)
+			| SequenceDomain::NameSpacesIds
+			| SequenceDomain::DatabasesIds(_)
+			| SequenceDomain::TablesIds(..)
+			| SequenceDomain::IndexIds(..)
+			| SequenceDomain::LegacyFullTextDocIds(..) => (start, batch, timeout, None),
 		};
 		let mut st: SequenceState = if let Some(st) = durable.clone() {
 			st

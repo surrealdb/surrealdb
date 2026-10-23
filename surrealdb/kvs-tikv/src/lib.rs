@@ -200,7 +200,49 @@ fn kvs_error(e: tikv::Error) -> Error {
 				Error::Transaction(e.to_string())
 			}
 		}
-		_ => Error::Transaction(e.to_string()),
+		tikv::Error::Unimplemented
+		| tikv::Error::ResolveLockError(_)
+		| tikv::Error::InvalidTransactionType
+		| tikv::Error::OperationAfterCommitError
+		| tikv::Error::OnePcFailure
+		| tikv::Error::NoPrimaryKey
+		| tikv::Error::UnsupportedMode
+		| tikv::Error::NoCurrentRegions
+		| tikv::Error::EntryNotFoundInRegionCache
+		| tikv::Error::Io(_)
+		| tikv::Error::Channel(_)
+		| tikv::Error::Url(_)
+		| tikv::Error::Canceled(_)
+		| tikv::Error::UndeterminedError(_)
+		| tikv::Error::ColumnFamilyError(_)
+		| tikv::Error::JoinError(_)
+		| tikv::Error::RegionForKeyNotFound {
+			..
+		}
+		| tikv::Error::RegionForRangeNotFound {
+			..
+		}
+		| tikv::Error::RegionNotFoundInResponse {
+			..
+		}
+		| tikv::Error::LeaderNotFound {
+			..
+		}
+		| tikv::Error::MaxScanLimitExceeded {
+			..
+		}
+		| tikv::Error::InvalidSemver(_)
+		| tikv::Error::KvError {
+			..
+		}
+		| tikv::Error::InternalError {
+			..
+		}
+		| tikv::Error::StringError(_)
+		| tikv::Error::PessimisticLockError {
+			..
+		}
+		| tikv::Error::KeyspaceNotFound(_) => Error::Transaction(e.to_string()),
 	}
 }
 

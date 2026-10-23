@@ -558,64 +558,62 @@ fn strip_export(wasm: &[u8], name: &str) -> Result<Vec<u8>> {
 			bail!("the component is truncated");
 		};
 		offset += consumed;
-		match payload {
-			Payload::Version {
-				..
-			} => continue,
-			Payload::End(_) => break,
-			Payload::CustomSection(_) => {}
+		if matches!(payload, Payload::Version { .. }) {
+			continue;
+		} else if matches!(payload, Payload::End(_)) {
+			break;
+		} else if matches!(payload, Payload::CustomSection(_)) {
+			// Custom sections are allowed after the stripped export.
+		} else if let Payload::ModuleSection {
+			ref unchecked_range,
+			..
+		}
+		| Payload::ComponentSection {
+			ref unchecked_range,
+			..
+		} = payload
+		{
 			// A nested module or component is a single section whose body the
 			// outer parser does not descend into when driven by `parse`.
-			Payload::ModuleSection {
-				ref unchecked_range,
-				..
+			if stripped {
+				return Err(not_last());
 			}
-			| Payload::ComponentSection {
-				ref unchecked_range,
-				..
-			} => {
-				if stripped {
+			let id = if matches!(payload, Payload::ModuleSection { .. }) {
+				ComponentSectionId::CoreModule
+			} else {
+				ComponentSectionId::Component
+			};
+			RawSection {
+				id: id as u8,
+				data: &wasm[unchecked_range.clone()],
+			}
+			.append_to(&mut out);
+			offset += unchecked_range.len();
+			continue;
+		} else if let Payload::ComponentExportSection(ref reader) = payload {
+			if stripped {
+				return Err(not_last());
+			}
+			let entries = reader.clone().into_iter_with_offsets().collect::<Result<Vec<_>, _>>()?;
+			if let Some(pos) = entries.iter().position(|(_, export)| export.name.0 == name) {
+				if pos + 1 != entries.len() {
 					return Err(not_last());
 				}
-				let id = if matches!(payload, Payload::ModuleSection { .. }) {
-					ComponentSectionId::CoreModule
-				} else {
-					ComponentSectionId::Component
-				};
-				RawSection {
-					id: id as u8,
-					data: &wasm[unchecked_range.clone()],
+				if pos > 0 {
+					let mut data = Vec::new();
+					(pos as u32).encode(&mut data);
+					data.extend_from_slice(&wasm[entries[0].0..entries[pos].0]);
+					RawSection {
+						id: ComponentSectionId::Export as u8,
+						data: &data,
+					}
+					.append_to(&mut out);
 				}
-				.append_to(&mut out);
-				offset += unchecked_range.len();
+				stripped = true;
 				continue;
 			}
-			Payload::ComponentExportSection(ref reader) => {
-				if stripped {
-					return Err(not_last());
-				}
-				let entries =
-					reader.clone().into_iter_with_offsets().collect::<Result<Vec<_>, _>>()?;
-				if let Some(pos) = entries.iter().position(|(_, export)| export.name.0 == name) {
-					if pos + 1 != entries.len() {
-						return Err(not_last());
-					}
-					if pos > 0 {
-						let mut data = Vec::new();
-						(pos as u32).encode(&mut data);
-						data.extend_from_slice(&wasm[entries[0].0..entries[pos].0]);
-						RawSection {
-							id: ComponentSectionId::Export as u8,
-							data: &data,
-						}
-						.append_to(&mut out);
-					}
-					stripped = true;
-					continue;
-				}
-			}
-			_ if stripped => return Err(not_last()),
-			_ => {}
+		} else if stripped {
+			return Err(not_last());
 		}
 		if let Some((id, range)) = payload.as_section() {
 			RawSection {

@@ -67,29 +67,26 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		let t = self.bump();
 		let n = self.tok;
-		match n.kw {
-			Kw::NoIndex if n.kind == T::Ident => {
-				self.bump();
-			}
-			Kw::No if n.kind == T::Ident => {
-				self.bump();
-				self.expect_kw(Kw::Index, "INDEX")?;
-			}
-			Kw::Index if n.kind == T::Ident => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let mark = self.vals.len() as u32;
-				loop {
-					let i = self.name()?;
-					self.vals.push(i);
-					if !self.eat(T::Comma) {
-						break;
-					}
+		if n.kw == Kw::NoIndex && n.kind == T::Ident {
+			self.bump();
+		} else if n.kw == Kw::No && n.kind == T::Ident {
+			self.bump();
+			self.expect_kw(Kw::Index, "INDEX")?;
+		} else if n.kw == Kw::Index && n.kind == T::Ident {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let mark = self.vals.len() as u32;
+			loop {
+				let i = self.name()?;
+				self.vals.push(i);
+				if !self.eat(T::Comma) {
+					break;
 				}
-				let list = self.list_from(mark).0;
-				return self.stmt_node(Tag::With, 1, list, 0, t.start, first);
 			}
-			_ => return Err(self.unexpected("`NO`, `NOINDEX` or `INDEX`")),
+			let list = self.list_from(mark).0;
+			return self.stmt_node(Tag::With, 1, list, 0, t.start, first);
+		} else {
+			return Err(self.unexpected("`NO`, `NOINDEX` or `INDEX`"));
 		}
 		Ok(self.leaf_span(Tag::With, 0, 0, 0, t.start, self.prev_end))
 	}

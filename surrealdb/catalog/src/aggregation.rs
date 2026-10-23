@@ -351,7 +351,7 @@ impl SkipCheckRevisioned for AggregationStat {
 fn widen_difference(delta: Number) -> Number {
 	match delta {
 		Number::Int(v) => Number::Float(v as f64),
-		other => other,
+		other @ Number::Float(_) | other @ Number::Decimal(_) => other,
 	}
 }
 
@@ -532,7 +532,36 @@ impl AggregationStat {
 				AggregationStat::Count {
 					count,
 				} => Some(*count),
-				_ => None,
+				AggregationStat::CountValue {
+					..
+				}
+				| AggregationStat::NumberMax {
+					..
+				}
+				| AggregationStat::NumberMin {
+					..
+				}
+				| AggregationStat::Sum {
+					..
+				}
+				| AggregationStat::Mean {
+					..
+				}
+				| AggregationStat::StdDev {
+					..
+				}
+				| AggregationStat::Variance {
+					..
+				}
+				| AggregationStat::TimeMax {
+					..
+				}
+				| AggregationStat::TimeMin {
+					..
+				}
+				| AggregationStat::Accumulate {
+					..
+				} => None,
 			})
 			.or_else(|| {
 				aggregation_stats.iter().find_map(|x| match x {
@@ -548,7 +577,30 @@ impl AggregationStat {
 						count,
 						..
 					} => Some(*count),
-					_ => None,
+					AggregationStat::Count {
+						..
+					}
+					| AggregationStat::CountValue {
+						..
+					}
+					| AggregationStat::NumberMax {
+						..
+					}
+					| AggregationStat::NumberMin {
+						..
+					}
+					| AggregationStat::Sum {
+						..
+					}
+					| AggregationStat::TimeMax {
+						..
+					}
+					| AggregationStat::TimeMin {
+						..
+					}
+					| AggregationStat::Accumulate {
+						..
+					} => None,
 				})
 			})
 	}
@@ -852,7 +904,9 @@ pub fn update_aggregation_stats(
 								.map_err(|_| ExprError::TryAdd(d.to_string(), after.to_sql()))?,
 						)
 					}
-					s => s.try_add(after)?,
+					s @ Number::Int(_) | s @ Number::Float(_) | s @ Number::Decimal(_) => {
+						s.try_add(after)?
+					}
 				};
 			}
 			AggregationStat::Mean {
@@ -969,7 +1023,22 @@ pub fn apply_recalculations(
 				// No record of the group holds a datetime any more: the stat
 				// is the one a group that has seen none starts from.
 				Value::None | Value::Null => *stat = Datetime::MAX_UTC,
-				_ => fail!("Got wrong recalculation value"),
+				Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => fail!("Got wrong recalculation value"),
 			},
 			AggregationStat::TimeMax {
 				max: stat,
@@ -977,7 +1046,22 @@ pub fn apply_recalculations(
 			} => match value {
 				Value::Datetime(d) => *stat = d,
 				Value::None | Value::Null => *stat = Datetime::MIN_UTC,
-				_ => fail!("Got wrong recalculation value"),
+				Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => fail!("Got wrong recalculation value"),
 			},
 			AggregationStat::NumberMin {
 				min: stat,
@@ -992,7 +1076,29 @@ pub fn apply_recalculations(
 				};
 				*stat = n;
 			}
-			_ => fail!("An aggregate recalculation named a stat that holds no extreme"),
+			AggregationStat::Count {
+				..
+			}
+			| AggregationStat::CountValue {
+				..
+			}
+			| AggregationStat::Sum {
+				..
+			}
+			| AggregationStat::Mean {
+				..
+			}
+			| AggregationStat::StdDev {
+				..
+			}
+			| AggregationStat::Variance {
+				..
+			}
+			| AggregationStat::Accumulate {
+				..
+			} => {
+				fail!("An aggregate recalculation named a stat that holds no extreme")
+			}
 		}
 	}
 	Ok(())
@@ -1024,7 +1130,21 @@ fn skips(stat: &AggregationStat, value: &Value) -> bool {
 		| AggregationStat::Variance {
 			..
 		} => !matches!(value, Value::Number(_)),
-		_ => matches!(value, Value::None | Value::Null),
+		AggregationStat::Count {
+			..
+		}
+		| AggregationStat::CountValue {
+			..
+		}
+		| AggregationStat::TimeMax {
+			..
+		}
+		| AggregationStat::TimeMin {
+			..
+		}
+		| AggregationStat::Accumulate {
+			..
+		} => matches!(value, Value::None | Value::Null),
 	}
 }
 
@@ -1063,7 +1183,15 @@ fn skipping_stat(stat: &AggregationStat) -> Option<(usize, &'static str)> {
 			arg,
 			..
 		} => Some((*arg, "time::min")),
-		_ => None,
+		AggregationStat::Count {
+			..
+		}
+		| AggregationStat::CountValue {
+			..
+		}
+		| AggregationStat::Accumulate {
+			..
+		} => None,
 	}
 }
 
@@ -1133,7 +1261,15 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 				*min = d;
 			}
 		}
-		_ => {}
+		AggregationStat::Count {
+			..
+		}
+		| AggregationStat::CountValue {
+			..
+		}
+		| AggregationStat::Accumulate {
+			..
+		} => {}
 	}
 	Ok(())
 }
@@ -1712,7 +1848,44 @@ impl MutVisitor for AggregateExprCollector<'_> {
 					i.visit_mut(self)
 				}
 			}
-			x => x.visit_mut(self),
+			x @ Expr::Literal(_)
+			| x @ Expr::Table(_)
+			| x @ Expr::Mock(_)
+			| x @ Expr::Block(_)
+			| x @ Expr::Constant(_)
+			| x @ Expr::Prefix {
+				..
+			}
+			| x @ Expr::Postfix {
+				..
+			}
+			| x @ Expr::Binary {
+				..
+			}
+			| x @ Expr::Closure(_)
+			| x @ Expr::Break
+			| x @ Expr::Continue
+			| x @ Expr::Return(_)
+			| x @ Expr::Throw(_)
+			| x @ Expr::IfElse(_)
+			| x @ Expr::Select(_)
+			| x @ Expr::Create(_)
+			| x @ Expr::Update(_)
+			| x @ Expr::Upsert(_)
+			| x @ Expr::Delete(_)
+			| x @ Expr::Relate(_)
+			| x @ Expr::Insert(_)
+			| x @ Expr::Define(_)
+			| x @ Expr::Remove(_)
+			| x @ Expr::Rebuild(_)
+			| x @ Expr::Alter(_)
+			| x @ Expr::Info(_)
+			| x @ Expr::Foreach(_)
+			| x @ Expr::Let(_)
+			| x @ Expr::Sleep(_)
+			| x @ Expr::Explain {
+				..
+			} => x.visit_mut(self),
 		}
 	}
 
@@ -2392,7 +2565,9 @@ pub fn backfill_stats(
 					Number::Decimal(d) if d.scale() == 0 => {
 						i64::try_from(d).map(Number::Int).unwrap_or(Number::Decimal(d))
 					}
-					n => Number::Int(0).add_exact(n)?,
+					n @ Number::Int(_) | n @ Number::Float(_) | n @ Number::Decimal(_) => {
+						Number::Int(0).add_exact(n)?
+					}
 				};
 				AggregationStat::Mean {
 					arg,

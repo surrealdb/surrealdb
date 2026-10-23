@@ -135,7 +135,11 @@ impl IntoResponse for Error {
 				);
 				response
 			}
-			_ => ErrorMessage {
+			Error::ServerOverloaded
+			| Error::Request
+			| Error::Remote(_)
+			| Error::CookieUnbounded
+			| Error::InvalidHeader(..) => ErrorMessage {
 				code: StatusCode::BAD_REQUEST,
 				details: Some("Request problems detected".to_string()),
 				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),

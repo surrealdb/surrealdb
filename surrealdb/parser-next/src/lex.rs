@@ -138,7 +138,7 @@ impl Tok {
 	}
 	/// Whether this token can be used where an identifier is expected.
 	pub fn is_ident(&self) -> bool {
-		matches!(self.kind, T::Ident | T::EscIdent)
+		self.kind == T::Ident || self.kind == T::EscIdent
 	}
 }
 

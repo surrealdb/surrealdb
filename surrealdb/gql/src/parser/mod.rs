@@ -145,24 +145,21 @@ impl<'a> Parser<'a> {
 	fn expect_closing_delimiter(&mut self, kind: TokenKind, should_close: Span) -> ParseResult<()> {
 		let peek = self.peek();
 		if peek.kind != kind {
-			match peek.kind {
-				TokenKind::Invalid => {
-					unexpected!(self, peek, "a closing delimiter");
-				}
-				TokenKind::Eof => {
-					bail!(
-						"Unexpected end of file, expected the delimiter `{kind}`",
-						@peek.span,
-						@should_close => "expected this delimiter to close"
-					);
-				}
-				x => {
-					bail!(
-						"Unexpected token `{x}`, expected the delimiter `{kind}`",
-						@peek.span,
-						@should_close => "expected this delimiter to close"
-					);
-				}
+			if peek.kind == TokenKind::Invalid {
+				unexpected!(self, peek, "a closing delimiter");
+			} else if peek.kind == TokenKind::Eof {
+				bail!(
+					"Unexpected end of file, expected the delimiter `{kind}`",
+					@peek.span,
+					@should_close => "expected this delimiter to close"
+				);
+			} else {
+				let x = peek.kind;
+				bail!(
+					"Unexpected token `{x}`, expected the delimiter `{kind}`",
+					@peek.span,
+					@should_close => "expected this delimiter to close"
+				);
 			}
 		}
 		self.pop_peek();
@@ -193,16 +190,15 @@ impl<'a> Parser<'a> {
 	/// (`DOUBLE_QUOTED_CHARACTER_SEQUENCE`); in identifier positions they are
 	/// identifiers, which this check is used for.
 	fn token_can_be_ident(kind: TokenKind) -> bool {
-		match kind {
-			TokenKind::Identifier
-			| TokenKind::DoubleQuoted {
-				..
-			}
-			| TokenKind::AccentQuoted {
-				..
-			} => true,
-			TokenKind::Keyword(keyword) => keyword.is_non_reserved(),
-			_ => false,
+		if matches!(
+			kind,
+			TokenKind::Identifier | TokenKind::DoubleQuoted { .. } | TokenKind::AccentQuoted { .. }
+		) {
+			true
+		} else if let TokenKind::Keyword(keyword) = kind {
+			keyword.is_non_reserved()
+		} else {
+			false
 		}
 	}
 
@@ -216,38 +212,35 @@ impl<'a> Parser<'a> {
 	/// delimited identifiers in this position and are decoded.
 	fn parse_ident(&mut self) -> ParseResult<Ident> {
 		let token = self.next();
-		match token.kind {
-			TokenKind::Identifier => Ok(Ident {
+		if token.kind == TokenKind::Identifier {
+			Ok(Ident {
 				name: self.span_str(token.span).to_owned(),
 				span: token.span,
-			}),
-			TokenKind::Keyword(keyword) => {
-				if keyword.is_non_reserved() {
-					Ok(Ident {
-						name: self.span_str(token.span).to_owned(),
-						span: token.span,
-					})
-				} else {
-					bail!(
-						"`{}` is a reserved word and cannot be used as an identifier",
-						self.span_str(token.span),
-						@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
-					);
-				}
-			}
-			TokenKind::DoubleQuoted {
-				..
-			}
-			| TokenKind::AccentQuoted {
-				..
-			} => {
-				let name = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
+			})
+		} else if let TokenKind::Keyword(keyword) = token.kind {
+			if keyword.is_non_reserved() {
 				Ok(Ident {
-					name,
+					name: self.span_str(token.span).to_owned(),
 					span: token.span,
 				})
+			} else {
+				bail!(
+					"`{}` is a reserved word and cannot be used as an identifier",
+					self.span_str(token.span),
+					@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
+				);
 			}
-			_ => unexpected!(self, token, "an identifier"),
+		} else if matches!(
+			token.kind,
+			TokenKind::DoubleQuoted { .. } | TokenKind::AccentQuoted { .. }
+		) {
+			let name = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
+			Ok(Ident {
+				name,
+				span: token.span,
+			})
+		} else {
+			unexpected!(self, token, "an identifier")
 		}
 	}
 }

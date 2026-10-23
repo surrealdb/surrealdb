@@ -306,7 +306,72 @@ where
 		} => {
 			session_state.live_queries.remove(uuid);
 		}
-		_ => {}
+		Command::Use {
+			..
+		}
+		| Command::Signup {
+			..
+		}
+		| Command::Signin {
+			..
+		}
+		| Command::Authenticate {
+			..
+		}
+		| Command::Refresh {
+			..
+		}
+		| Command::Invalidate
+		| Command::Begin {
+			..
+		}
+		| Command::Rollback {
+			..
+		}
+		| Command::Commit {
+			..
+		}
+		| Command::Revoke {
+			..
+		}
+		| Command::Query {
+			..
+		}
+		| Command::ExportFile {
+			..
+		}
+		| Command::ExportMl {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ExportBytesMl {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::ImportMl {
+			..
+		}
+		| Command::Health
+		| Command::Version
+		| Command::Set {
+			..
+		}
+		| Command::Unset {
+			..
+		}
+		| Command::Attach {
+			..
+		}
+		| Command::Detach {
+			..
+		}
+		| Command::Run {
+			..
+		} => {}
 	}
 
 	// Serialize the request
@@ -556,7 +621,9 @@ where
 		DbResult::Encoded(results) => {
 			DbResult::Query(results.into_iter().map(|result| result.into_query_result()).collect())
 		}
-		other => other,
+		other @ DbResult::Other(_) | other @ DbResult::Query(_) | other @ DbResult::Live(_) => {
+			other
+		}
 	});
 	match result {
 		Ok(DbResult::Query(results)) => {

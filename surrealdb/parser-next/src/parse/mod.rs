@@ -575,13 +575,18 @@ impl<'a, 's> Parser<'a, 's> {
 		if self.at(closer) {
 			return Ok(self.bump());
 		}
-		let msg = match closer {
-			T::RParen => "Unexpected token `{found}` expected delimiter `)`",
-			T::RBracket => "Unexpected token `{found}` expected delimiter `]`",
-			T::RBrace => "Unexpected token `{found}` expected delimiter `}`",
-			T::Gt => "Unexpected token `{found}` expected delimiter `>`",
-			T::Pipe => "Unexpected token `{found}` expected delimiter `|`",
-			_ => unreachable!("not a closing delimiter"),
+		let msg = if closer == T::RParen {
+			"Unexpected token `{found}` expected delimiter `)`"
+		} else if closer == T::RBracket {
+			"Unexpected token `{found}` expected delimiter `]`"
+		} else if closer == T::RBrace {
+			"Unexpected token `{found}` expected delimiter `}`"
+		} else if closer == T::Gt {
+			"Unexpected token `{found}` expected delimiter `>`"
+		} else if closer == T::Pipe {
+			"Unexpected token `{found}` expected delimiter `|`"
+		} else {
+			unreachable!("not a closing delimiter")
 		};
 		let t = self.tok;
 		if t.end + END_SLACK > self.src.len() as u32 {
@@ -634,16 +639,16 @@ impl<'a, 's> Parser<'a, 's> {
 	/// have always seen them: `??` is two `?` tokens and a digits token runs
 	/// on over `_`.
 	fn syn_token_end(&self, t: Tok) -> u32 {
-		match t.kind {
-			T::QQ => t.start + 1,
-			T::Digits => {
-				let mut e = t.end as usize;
-				while self.src.get(e).is_some_and(|&b| b.is_ascii_digit() || b == b'_') {
-					e += 1;
-				}
-				e as u32
+		if t.kind == T::QQ {
+			t.start + 1
+		} else if t.kind == T::Digits {
+			let mut e = t.end as usize;
+			while self.src.get(e).is_some_and(|&b| b.is_ascii_digit() || b == b'_') {
+				e += 1;
 			}
-			_ => t.end,
+			e as u32
+		} else {
+			t.end
 		}
 	}
 
@@ -684,24 +689,35 @@ impl<'a, 's> Parser<'a, 's> {
 	fn statement_end_error(&mut self) -> Stop {
 		let t = self.tok;
 		let starts = t.kind == T::Ident
-			&& matches!(
-				t.kw,
-				Kw::Access
-					| Kw::Alter | Kw::Begin
-					| Kw::Break | Kw::Cancel
-					| Kw::Commit | Kw::Continue
-					| Kw::Create | Kw::Define
-					| Kw::Delete | Kw::For
-					| Kw::If | Kw::Info
-					| Kw::Insert | Kw::Kill
-					| Kw::Live | Kw::Option
-					| Kw::Rebuild | Kw::Return
-					| Kw::Relate | Kw::Remove
-					| Kw::Select | Kw::Let
-					| Kw::Show | Kw::Sleep
-					| Kw::Throw | Kw::Update
-					| Kw::Upsert | Kw::Use
-			);
+			&& (t.kw == Kw::Access
+				|| t.kw == Kw::Alter
+				|| t.kw == Kw::Begin
+				|| t.kw == Kw::Break
+				|| t.kw == Kw::Cancel
+				|| t.kw == Kw::Commit
+				|| t.kw == Kw::Continue
+				|| t.kw == Kw::Create
+				|| t.kw == Kw::Define
+				|| t.kw == Kw::Delete
+				|| t.kw == Kw::For
+				|| t.kw == Kw::If
+				|| t.kw == Kw::Info
+				|| t.kw == Kw::Insert
+				|| t.kw == Kw::Kill
+				|| t.kw == Kw::Live
+				|| t.kw == Kw::Option
+				|| t.kw == Kw::Rebuild
+				|| t.kw == Kw::Return
+				|| t.kw == Kw::Relate
+				|| t.kw == Kw::Remove
+				|| t.kw == Kw::Select
+				|| t.kw == Kw::Let
+				|| t.kw == Kw::Show
+				|| t.kw == Kw::Sleep
+				|| t.kw == Kw::Throw
+				|| t.kw == Kw::Update
+				|| t.kw == Kw::Upsert
+				|| t.kw == Kw::Use);
 		if starts {
 			self.unexpected("the query to end");
 			let d = self.diags.last_mut().expect("just recorded");
@@ -966,7 +982,21 @@ impl<'a, 's> Parser<'a, 's> {
 			| Frame::KindTuple {
 				..
 			} => self.enter_o(),
-			_ => Ok(()),
+			Frame::Atom {
+				..
+			}
+			| Frame::Path {
+				..
+			}
+			| Frame::Idiom {
+				..
+			}
+			| Frame::Closure {
+				..
+			}
+			| Frame::KindAlts {
+				..
+			} => Ok(()),
 		}
 	}
 
@@ -1052,16 +1082,22 @@ impl<'a, 's> Parser<'a, 's> {
 		let mut kinds: u128 = 0;
 		let mut depth: u32 = 0;
 		loop {
-			let kind = match self.tok.kind {
-				T::Eof => return self.prev_end,
-				T::Semi if depth == 0 => return self.prev_end,
-				T::LParen => Some((true, 1)),
-				T::LBracket => Some((true, 2)),
-				T::LBrace => Some((true, 3)),
-				T::RParen => Some((false, 1)),
-				T::RBracket => Some((false, 2)),
-				T::RBrace => Some((false, 3)),
-				_ => None,
+			let kind = if self.tok.kind == T::Eof || (self.tok.kind == T::Semi && depth == 0) {
+				return self.prev_end;
+			} else if self.tok.kind == T::LParen {
+				Some((true, 1))
+			} else if self.tok.kind == T::LBracket {
+				Some((true, 2))
+			} else if self.tok.kind == T::LBrace {
+				Some((true, 3))
+			} else if self.tok.kind == T::RParen {
+				Some((false, 1))
+			} else if self.tok.kind == T::RBracket {
+				Some((false, 2))
+			} else if self.tok.kind == T::RBrace {
+				Some((false, 3))
+			} else {
+				None
 			};
 			match kind {
 				Some((true, k)) => {
@@ -1317,12 +1353,16 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// `NAMESPACE`, `DATABASE` or `ROOT`, as a base code.
 	fn base(&mut self) -> R<u32> {
-		let b = match self.tok.kw {
-			_ if self.tok.kind != T::Ident => 0,
-			Kw::Namespace => ast::BASE_NS,
-			Kw::Database => ast::BASE_DB,
-			Kw::Root => ast::BASE_ROOT,
-			_ => 0,
+		let b = if self.tok.kind != T::Ident {
+			0
+		} else if self.tok.kw == Kw::Namespace {
+			ast::BASE_NS
+		} else if self.tok.kw == Kw::Database {
+			ast::BASE_DB
+		} else if self.tok.kw == Kw::Root {
+			ast::BASE_ROOT
+		} else {
+			0
 		};
 		if b == 0 {
 			return Err(self.unexpected("'NAMESPACE', 'DATABASE' or 'ROOT'"));
@@ -1355,13 +1395,13 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		};
 		let text = self.text_of(t);
-		match t.kind {
-			T::Ident => is(text),
-			T::EscIdent => {
-				let mut name = String::new();
-				crate::decode::unescape(crate::decode::strip_delims(text), &mut name) && is(&name)
-			}
-			_ => false,
+		if t.kind == T::Ident {
+			is(text)
+		} else if t.kind == T::EscIdent {
+			let mut name = String::new();
+			crate::decode::unescape(crate::decode::strip_delims(text), &mut name) && is(&name)
+		} else {
+			false
 		}
 	}
 
@@ -1403,22 +1443,23 @@ const PUSHED: NodeId = NONE - 1;
 /// Whether a token can start a primary value (the current parser's
 /// `kind_starts_prime_value`).
 fn starts_prime(t: &Tok) -> bool {
-	matches!(
-		t.kind,
-		T::Plus
-			| T::Minus
-			| T::Str | T::Digits
-			| T::NaN | T::LParen
-			| T::LBrace
-			| T::LBracket
-			| T::Slash
-			| T::Pipe | T::OrOr
-			| T::Lt | T::Arrow
-			| T::Param
-			| T::DotDot
-			| T::Ident
-			| T::EscIdent
-	)
+	t.kind == T::Plus
+		|| t.kind == T::Minus
+		|| t.kind == T::Str
+		|| t.kind == T::Digits
+		|| t.kind == T::NaN
+		|| t.kind == T::LParen
+		|| t.kind == T::LBrace
+		|| t.kind == T::LBracket
+		|| t.kind == T::Slash
+		|| t.kind == T::Pipe
+		|| t.kind == T::OrOr
+		|| t.kind == T::Lt
+		|| t.kind == T::Arrow
+		|| t.kind == T::Param
+		|| t.kind == T::DotDot
+		|| t.kind == T::Ident
+		|| t.kind == T::EscIdent
 }
 
 /// Whether `t` can start an expression.
@@ -1503,7 +1544,11 @@ mod test {
 				.nodes
 				.iter()
 				.filter(|n| {
-					matches!(n.tag, Tag::Int | Tag::Float | Tag::Decimal | Tag::Duration | Tag::Str)
+					n.tag == Tag::Int
+						|| n.tag == Tag::Float
+						|| n.tag == Tag::Decimal
+						|| n.tag == Tag::Duration
+						|| n.tag == Tag::Str
 				})
 				.map(|n| (n.start, Ast::text(n, src)))
 				.collect();

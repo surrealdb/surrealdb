@@ -134,7 +134,20 @@ impl Analyzer {
 					pending.extend(o.0.into_values());
 					pending[start..].reverse();
 				}
-				_ => {}
+				Value::None
+				| Value::Null
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => {}
 			}
 		}
 		Ok(())

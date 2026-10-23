@@ -402,9 +402,10 @@ pub fn lookup(ident: &[u8]) -> Kw {
 impl Kw {
 	/// The keyword's canonical upper-case spelling.
 	pub fn text(self) -> &'static str {
-		match self {
-			Kw::None => "",
-			k => KW_TEXT[k as usize - 1],
+		if self == Kw::None {
+			""
+		} else {
+			KW_TEXT[self as usize - 1]
 		}
 	}
 }

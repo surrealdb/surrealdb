@@ -75,14 +75,14 @@ pub fn string((val,): (Value,)) -> Result<Value> {
 }
 
 pub fn string_lossy((val,): (Value,)) -> Result<Value> {
-	match val {
+	if let Value::Bytes(x) = val {
 		//TODO: Replace with from_utf8_lossy_owned once stablized.
-		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
-		x => x
-			.cast_to::<String>()
+		Ok(String::from_utf8_lossy(&x).into_owned().into())
+	} else {
+		val.cast_to::<String>()
 			.map(Value::from)
 			.map_err(ExprError::from)
-			.map_err(anyhow::Error::new),
+			.map_err(anyhow::Error::new)
 	}
 }
 
@@ -91,7 +91,22 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		Value::Table(t) => t,
 		Value::RecordId(t) => t.table,
 		Value::String(t) => TableName::new(t),
-		v => bail!(ExprError::TbInvalid {
+		v @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_)) => bail!(ExprError::TbInvalid {
 			value: v.into_raw_string(),
 		}),
 	};
@@ -149,7 +164,19 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					RecordIdKey::Range(Box::new(res))
 				}
 				Value::Uuid(u) => u.into(),
-				ref v => {
+				ref v @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Set(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Closure(_)) => {
 					let s = v.to_raw_string();
 					ensure!(
 						!s.is_empty(),
@@ -160,9 +187,10 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					RecordIdKey::String(s.into())
 				}
 			},
-			table: match arg1 {
-				Value::String(s) => TableName::from(s),
-				other => TableName::new(other.into_raw_string()),
+			table: if let Value::String(s) = arg1 {
+				TableName::from(s)
+			} else {
+				TableName::new(arg1.into_raw_string())
 			},
 		})),
 

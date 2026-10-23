@@ -155,12 +155,11 @@ where
 			let mut variables = Variables::new();
 			let what = what_resource.for_sql_query(&mut variables)?;
 
-			let content_str = match data {
-				Value::None => "",
-				content => {
-					variables.insert("_content".to_string(), content);
-					"CONTENT $_content"
-				}
+			let content_str = if data.is_none() {
+				""
+			} else {
+				variables.insert("_content".to_string(), data);
+				"CONTENT $_content"
 			};
 
 			let query = match what_resource {

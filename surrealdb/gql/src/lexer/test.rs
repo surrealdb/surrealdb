@@ -27,13 +27,11 @@ fn lex_error(source: &str) -> (Token, SyntaxError) {
 	let mut lexer = Lexer::new(source);
 	loop {
 		let token = lexer.next_token();
-		match token.kind {
-			TokenKind::Invalid => {
-				let error = lexer.error.take().expect("invalid token without an error");
-				return (token, error);
-			}
-			TokenKind::Eof => panic!("no invalid token in {source:?}"),
-			_ => {}
+		if token.kind == TokenKind::Invalid {
+			let error = lexer.error.take().expect("invalid token without an error");
+			return (token, error);
+		} else if token.kind == TokenKind::Eof {
+			panic!("no invalid token in {source:?}");
 		}
 	}
 }

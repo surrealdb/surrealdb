@@ -306,7 +306,9 @@ fn verify_checkpoint(
 			&& sig[..4] == hint
 			&& match log {
 				PublicKey::Ed25519(_) => log.verify_ed25519(text.as_bytes(), &sig[4..]),
-				_ => log.verify_ecdsa_message(text.as_bytes(), &sig[4..]),
+				PublicKey::P256(_) | PublicKey::P384(_) => {
+					log.verify_ecdsa_message(text.as_bytes(), &sig[4..])
+				}
 			}
 	});
 	if !signed {
@@ -330,7 +332,7 @@ fn key_hint(name: &str, log: &PublicKey, log_spki: &[u8]) -> [u8; 4] {
 			h.update(key.as_bytes());
 			h.finalize().into()
 		}
-		_ => Sha256::digest(log_spki).into(),
+		PublicKey::P256(_) | PublicKey::P384(_) => Sha256::digest(log_spki).into(),
 	};
 	[id[0], id[1], id[2], id[3]]
 }

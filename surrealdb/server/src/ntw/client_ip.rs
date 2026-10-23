@@ -51,21 +51,6 @@ impl std::fmt::Display for ClientIp {
 	}
 }
 
-impl ClientIp {
-	fn is_header(self) -> bool {
-		match self {
-			ClientIp::None => false,
-			ClientIp::Socket => false,
-			ClientIp::CfConnectingIp => true,
-			ClientIp::FlyClientIp => true,
-			ClientIp::TrueClientIp => true,
-			ClientIp::XRealIp => true,
-			ClientIp::XForwardedFor => true,
-			ClientIp::Forwarded => true,
-		}
-	}
-}
-
 /// Parses an RFC 7239 `Forwarded` header value and returns the `for=`
 /// identifier from the first forwarded element.
 ///
@@ -198,13 +183,23 @@ where
 				}
 			}
 			// Get the IP from the corresponding header
-			var if var.is_header() => {
+			var @ (ClientIp::CfConnectingIp
+			| ClientIp::FlyClientIp
+			| ClientIp::TrueClientIp
+			| ClientIp::XRealIp
+			| ClientIp::XForwardedFor
+			| ClientIp::Forwarded) => {
 				if let Some(ip) = parts.headers.get(var.to_string()) {
 					match ip.to_str() {
 						Ok(s) => {
 							let parsed = match var {
 								ClientIp::Forwarded => parse_forwarded_for(s),
-								_ => Some(s.to_string()),
+								ClientIp::CfConnectingIp
+								| ClientIp::FlyClientIp
+								| ClientIp::TrueClientIp
+								| ClientIp::XRealIp
+								| ClientIp::XForwardedFor => Some(s.to_string()),
+								ClientIp::None | ClientIp::Socket => unreachable!(),
 							};
 							ExtractClientIP(parsed)
 						}
@@ -216,10 +211,6 @@ where
 				} else {
 					ExtractClientIP(None)
 				}
-			}
-			_ => {
-				warn!("Unexpected ClientIp variant: {:?}", app_state.client_ip);
-				ExtractClientIP(None)
 			}
 		};
 

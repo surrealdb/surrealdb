@@ -41,11 +41,11 @@ impl Endpoint {
 
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
-		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => {
-				Err(Error::configuration(format!("Unsupported scheme: {s}"), None))
-			}
-			kind => Ok(kind),
+		let kind = EndpointKind::from(self.url.scheme());
+		if let EndpointKind::Unsupported(s) = kind {
+			Err(Error::configuration(format!("Unsupported scheme: {s}"), None))
+		} else {
+			Ok(kind)
 		}
 	}
 

@@ -148,9 +148,10 @@ where
 				"Tried to upsert non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let data = match data {
-				Value::None => None,
-				content => Some(content),
+			let data = if data.is_none() {
+				None
+			} else {
+				Some(data)
 			};
 
 			let what = self.resource?;

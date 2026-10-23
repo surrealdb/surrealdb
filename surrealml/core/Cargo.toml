@@ -31,3 +31,6 @@ tokio = { workspace = true, features = ["full"] }
 [lib]
 name = "surrealml_core"
 path = "src/lib.rs"
+
+[lints.clippy]
+wildcard_enum_match_arm = "deny"

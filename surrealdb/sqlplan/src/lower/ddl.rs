@@ -196,9 +196,12 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 
 	for col in &create.columns {
 		let is_id = col.name == "id";
-		let is_table_pk = create.constraints.iter().any(|c| match c {
-			PgTableConstraint::PrimaryKey(cols) => cols.iter().any(|c| c == &col.name),
-			_ => false,
+		let is_table_pk = create.constraints.iter().any(|c| {
+			if let PgTableConstraint::PrimaryKey(cols) = c {
+				cols.iter().any(|c| c == &col.name)
+			} else {
+				false
+			}
 		});
 		let serial = is_serial(&col.data_type);
 		let is_not_null = is_id
@@ -382,9 +385,12 @@ pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, Plan
 			let col_names: Vec<String> = idx
 				.columns
 				.iter()
-				.filter_map(|c| match &c.expr {
-					surrealdb_pgsql::ast::expr::Expr::ColumnRef(cr) => cr.fields.last().cloned(),
-					_ => None,
+				.filter_map(|c| {
+					if let surrealdb_pgsql::ast::expr::Expr::ColumnRef(cr) = &c.expr {
+						cr.fields.last().cloned()
+					} else {
+						None
+					}
 				})
 				.collect();
 			let safe_tbl = tbl.replace('.', "_");
@@ -508,7 +514,12 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 						ColumnConstraint::Default(def) => {
 							field_def.default = DefineDefault::Set(lower_pgsql_expr(def)?);
 						}
-						_ => {}
+						ColumnConstraint::PrimaryKey
+						| ColumnConstraint::Null
+						| ColumnConstraint::Unique
+						| ColumnConstraint::References {
+							..
+						} => {}
 					}
 				}
 				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
@@ -625,7 +636,13 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				};
 				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
 			}
-			_ => {}
+			AlterTableAction::AddConstraint(_)
+			| AlterTableAction::RenameColumn {
+				..
+			}
+			| AlterTableAction::RenameTable {
+				..
+			} => {}
 		}
 	}
 
@@ -657,7 +674,7 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 				};
 				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
 			}
-			_ => {
+			DropObjectType::Schema | DropObjectType::Type => {
 				return Err(PlanError::unsupported(format!(
 					"DROP {:?} is not supported for typed lowering",
 					drop.object_type
@@ -677,7 +694,24 @@ pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
 		PgStatement::CreateView(s) => lower_pgsql_create_view(s),
 		PgStatement::AlterTable(s) => lower_pgsql_alter_table(s),
 		PgStatement::Drop(s) => lower_pgsql_drop(s),
-		_ => Err(PlanError::unsupported(format!(
+		PgStatement::Copy(_)
+		| PgStatement::Select(_)
+		| PgStatement::Insert(_)
+		| PgStatement::Update(_)
+		| PgStatement::Delete(_)
+		| PgStatement::Truncate(_)
+		| PgStatement::CreateSchema(_)
+		| PgStatement::Transaction(_)
+		| PgStatement::Set(_)
+		| PgStatement::Show(_)
+		| PgStatement::Reset(_)
+		| PgStatement::Explain(_)
+		| PgStatement::Prepare(_)
+		| PgStatement::Execute(_)
+		| PgStatement::Deallocate(_)
+		| PgStatement::CreatePropertyGraph(_)
+		| PgStatement::DropPropertyGraph(_)
+		| PgStatement::Empty => Err(PlanError::unsupported(format!(
 			"PostgreSQL statement not recognized as DDL: {stmt:?}"
 		))),
 	}
@@ -1228,7 +1262,27 @@ pub fn lower_mysql_ddl(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
 		MyStatement::AlterTable(s) => lower_mysql_alter_table(s),
 		MyStatement::CreateDatabase(s) => lower_mysql_create_database(s),
 		MyStatement::DropDatabase(s) => lower_mysql_drop_database(s),
-		_ => {
+		MyStatement::Select(_)
+		| MyStatement::Insert(_)
+		| MyStatement::Update(_)
+		| MyStatement::Delete(_)
+		| MyStatement::Replace(_)
+		| MyStatement::Truncate(_)
+		| MyStatement::CreateUser(_)
+		| MyStatement::DropUser(_)
+		| MyStatement::Grant(_)
+		| MyStatement::Revoke(_)
+		| MyStatement::LockTables(_)
+		| MyStatement::UnlockTables(_)
+		| MyStatement::Prepare(_)
+		| MyStatement::Execute(_)
+		| MyStatement::Deallocate(_)
+		| MyStatement::Use(_)
+		| MyStatement::Set(_)
+		| MyStatement::Show(_)
+		| MyStatement::Describe(_)
+		| MyStatement::Explain(_)
+		| MyStatement::Transaction(_) => {
 			Err(PlanError::unsupported(format!("MySQL statement not recognized as DDL: {stmt:?}")))
 		}
 	}

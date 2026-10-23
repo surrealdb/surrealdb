@@ -252,9 +252,12 @@ pub fn logical_block(
 
 /// Parses a `{ … }` block.
 pub fn block(src: &str, settings: &Settings, require_all: bool) -> Result<Block, Error> {
-	entry(src, settings, Entry::Block, require_all, |l, root| match l.expr(root)? {
-		Expr::Block(b) => Ok(*b),
-		_ => unreachable!("a block entry lowers to a block"),
+	entry(src, settings, Entry::Block, require_all, |l, root| {
+		if let Expr::Block(b) = l.expr(root)? {
+			Ok(*b)
+		} else {
+			unreachable!("a block entry lowers to a block")
+		}
 	})
 }
 
@@ -320,9 +323,10 @@ pub fn function(src: &str, settings: &Settings) -> Result<Function, Error> {
 /// Parses a datetime written without its `d"…"` delimiters; the whole of
 /// `src` is the datetime.
 pub fn datetime(src: &str) -> Result<surrealdb_types::Datetime, Error> {
-	match super::lit::datetime(src).map_err(Error::Lower)? {
-		Literal::Datetime(d) => Ok(d.into()),
-		_ => unreachable!("a datetime body decodes to a datetime"),
+	if let Literal::Datetime(d) = super::lit::datetime(src).map_err(Error::Lower)? {
+		Ok(d.into())
+	} else {
+		unreachable!("a datetime body decodes to a datetime")
 	}
 }
 
@@ -539,66 +543,61 @@ pub(crate) fn first_escape_error(src: &str, from: u32, before: u32, json: bool) 
 		if t.kind == T::Eof || t.start >= before {
 			return None;
 		}
-		match t.kind {
-			T::Str | T::EscIdent | T::Param => {
-				let text = src.get(t.start as usize..t.end as usize)?;
-				// An escaped parameter's name follows its `$`.
-				let skip = (t.kind == T::Param) as u32;
-				if let Some((s, e, msg, label)) = escape_error(&text[skip as usize..], json) {
-					let (s, e) = (t.start + skip + s, t.start + skip + e);
-					return Some(Reject::new(msg).at(s, e).with_label(label));
+		if matches!(t.kind, T::Str | T::EscIdent | T::Param) {
+			let text = src.get(t.start as usize..t.end as usize)?;
+			// An escaped parameter's name follows its `$`.
+			let skip = (t.kind == T::Param) as u32;
+			if let Some((s, e, msg, label)) = escape_error(&text[skip as usize..], json) {
+				let (s, e) = (t.start + skip + s, t.start + skip + e);
+				return Some(Reject::new(msg).at(s, e).with_label(label));
+			}
+			if t.kind == T::Str
+				&& let Some(r) = super::lit::prefixed_error(text, t.aux(), t.start)
+			{
+				return Some(r);
+			}
+		} else if t.kind == T::Digits {
+			// A number or duration runs on over letters and quotes the
+			// token lexer splits off, so `1d'x'` holds no `d'…'` string.
+			// Where it does not lex as one (a record-id key such as
+			// `01GE6…`, or `10u'`), its letters still belong to it.
+			let mut n = l;
+			if n.numeric(t.start).is_ok() {
+				l = n;
+			} else {
+				let b = src.as_bytes();
+				let mut end = t.end as usize;
+				while b.get(end).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_') {
+					end += 1;
 				}
-				if t.kind == T::Str
-					&& let Some(r) = super::lit::prefixed_error(text, t.aux(), t.start)
-				{
-					return Some(r);
+				l.pos = end as u32;
+			}
+		} else if t.kind == T::Ident && t.kw == Kw::Function {
+			// `function(args) { body }`: skip to the body and over it.
+			let mut depth = 0u32;
+			loop {
+				let a = l.next_token();
+				if a.kind == T::Eof {
+					return None;
+				} else if a.kind == T::LParen {
+					depth += 1;
+				} else if a.kind == T::RParen {
+					depth = depth.saturating_sub(1);
+					if depth == 0 {
+						break;
+					}
+				} else if depth == 0 {
+					break;
 				}
 			}
-			T::Digits => {
-				// A number or duration runs on over letters and quotes the
-				// token lexer splits off, so `1d'x'` holds no `d'…'` string.
-				// Where it does not lex as one (a record-id key such as
-				// `01GE6…`, or `10u'`), its letters still belong to it.
-				let mut n = l;
-				if n.numeric(t.start).is_ok() {
-					l = n;
-				} else {
-					let b = src.as_bytes();
-					let mut end = t.end as usize;
-					while b.get(end).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_') {
-						end += 1;
-					}
-					l.pos = end as u32;
+			let mut peek = l;
+			let open = peek.next_token();
+			if open.kind == T::LBrace {
+				match l.js_body(open.start) {
+					Ok(end) => l.pos = end,
+					Err(_) => return None,
 				}
 			}
-			T::Ident if t.kw == Kw::Function => {
-				// `function(args) { body }`: skip to the body and over it.
-				let mut depth = 0u32;
-				loop {
-					let a = l.next_token();
-					match a.kind {
-						T::Eof => return None,
-						T::LParen => depth += 1,
-						T::RParen => {
-							depth = depth.saturating_sub(1);
-							if depth == 0 {
-								break;
-							}
-						}
-						_ if depth == 0 => break,
-						_ => {}
-					}
-				}
-				let mut peek = l;
-				let open = peek.next_token();
-				if open.kind == T::LBrace {
-					match l.js_body(open.start) {
-						Ok(end) => l.pos = end,
-						Err(_) => return None,
-					}
-				}
-			}
-			_ => {}
 		}
 	}
 }

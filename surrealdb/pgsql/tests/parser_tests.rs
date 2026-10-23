@@ -8,161 +8,156 @@ use surrealdb_pgsql::parse_expr;
 #[test]
 fn test_parse_literals() {
 	let expr = parse_expr("42").expect("parse integer");
-	match expr {
-		Expr::Literal {
-			lit: Literal::Integer(42),
-			..
-		} => {}
-		other => panic!("expected integer 42, got {:?}", other),
-	}
+	let Expr::Literal {
+		lit: Literal::Integer(42),
+		..
+	} = expr
+	else {
+		panic!("expected integer 42, got {:?}", expr);
+	};
 
 	let expr = parse_expr("'hello'").expect("parse string");
-	match expr {
-		Expr::Literal {
-			lit: Literal::String(ref s),
-			..
-		} if s == "hello" => {}
-		other => panic!("expected string 'hello', got {:?}", other),
-	}
+	let Expr::Literal {
+		lit: Literal::String(ref s),
+		..
+	} = expr
+	else {
+		panic!("expected string 'hello', got {:?}", expr);
+	};
+	assert_eq!(s, "hello");
 
 	let expr = parse_expr("TRUE").expect("parse boolean");
-	match expr {
-		Expr::Literal {
-			lit: Literal::Boolean(true),
-			..
-		} => {}
-		other => panic!("expected true, got {:?}", other),
-	}
+	let Expr::Literal {
+		lit: Literal::Boolean(true),
+		..
+	} = expr
+	else {
+		panic!("expected true, got {:?}", expr);
+	};
 }
 
 #[test]
 fn test_parse_arithmetic_precedence() {
 	// `1 + 2 * 3` must parse as `1 + (2 * 3)`
 	let expr = parse_expr("1 + 2 * 3").expect("parse precedence");
-	match expr {
-		Expr::BinaryOp {
-			left,
-			op: BinaryOperator::Add,
-			right,
+	let Expr::BinaryOp {
+		left,
+		op: BinaryOperator::Add,
+		right,
+		..
+	} = expr
+	else {
+		panic!("expected binary add, got {:?}", expr);
+	};
+	assert!(matches!(
+		*left,
+		Expr::Literal {
+			lit: Literal::Integer(1),
 			..
-		} => {
-			assert!(matches!(
-				*left,
-				Expr::Literal {
-					lit: Literal::Integer(1),
-					..
-				}
-			));
-			match *right {
-				Expr::BinaryOp {
-					left: r_left,
-					op: BinaryOperator::Mul,
-					right: r_right,
-					..
-				} => {
-					assert!(matches!(
-						*r_left,
-						Expr::Literal {
-							lit: Literal::Integer(2),
-							..
-						}
-					));
-					assert!(matches!(
-						*r_right,
-						Expr::Literal {
-							lit: Literal::Integer(3),
-							..
-						}
-					));
-				}
-				other => panic!("expected binary mul, got {:?}", other),
-			}
 		}
-		other => panic!("expected binary add, got {:?}", other),
-	}
+	));
+	let Expr::BinaryOp {
+		left: r_left,
+		op: BinaryOperator::Mul,
+		right: r_right,
+		..
+	} = *right
+	else {
+		panic!("expected binary mul, got {:?}", right);
+	};
+	assert!(matches!(
+		*r_left,
+		Expr::Literal {
+			lit: Literal::Integer(2),
+			..
+		}
+	));
+	assert!(matches!(
+		*r_right,
+		Expr::Literal {
+			lit: Literal::Integer(3),
+			..
+		}
+	));
 }
 
 #[test]
 fn test_parse_exponent_left_associativity() {
 	// `2 ^ 3 ^ 4` must parse as `(2 ^ 3) ^ 4` because gram.y declares `%left '^'`
 	let expr = parse_expr("2 ^ 3 ^ 4").expect("parse exponent");
-	match expr {
-		Expr::BinaryOp {
-			left,
-			op: BinaryOperator::Exp,
-			right,
+	let Expr::BinaryOp {
+		left,
+		op: BinaryOperator::Exp,
+		right,
+		..
+	} = expr
+	else {
+		panic!("expected exp, got {:?}", expr);
+	};
+	assert!(matches!(
+		*right,
+		Expr::Literal {
+			lit: Literal::Integer(4),
 			..
-		} => {
-			assert!(matches!(
-				*right,
-				Expr::Literal {
-					lit: Literal::Integer(4),
-					..
-				}
-			));
-			match *left {
-				Expr::BinaryOp {
-					left: l_left,
-					op: BinaryOperator::Exp,
-					right: l_right,
-					..
-				} => {
-					assert!(matches!(
-						*l_left,
-						Expr::Literal {
-							lit: Literal::Integer(2),
-							..
-						}
-					));
-					assert!(matches!(
-						*l_right,
-						Expr::Literal {
-							lit: Literal::Integer(3),
-							..
-						}
-					));
-				}
-				other => panic!("expected left-nested exp, got {:?}", other),
-			}
 		}
-		other => panic!("expected exp, got {:?}", other),
-	}
+	));
+	let Expr::BinaryOp {
+		left: l_left,
+		op: BinaryOperator::Exp,
+		right: l_right,
+		..
+	} = *left
+	else {
+		panic!("expected left-nested exp, got {:?}", left);
+	};
+	assert!(matches!(
+		*l_left,
+		Expr::Literal {
+			lit: Literal::Integer(2),
+			..
+		}
+	));
+	assert!(matches!(
+		*l_right,
+		Expr::Literal {
+			lit: Literal::Integer(3),
+			..
+		}
+	));
 }
 
 #[test]
 fn test_parse_typecast() {
 	let expr = parse_expr("x::INTEGER").expect("parse typecast");
-	match expr {
-		Expr::TypeCast {
-			expr,
-			data_type,
-			..
-		} => {
-			assert_eq!(data_type.name.parts, vec!["integer"]);
-			assert!(matches!(*expr, Expr::ColumnRef(_)));
-		}
-		other => panic!("expected typecast, got {:?}", other),
-	}
+	let Expr::TypeCast {
+		expr: inner_expr,
+		data_type,
+		..
+	} = expr
+	else {
+		panic!("expected typecast, got {:?}", expr);
+	};
+	assert_eq!(data_type.name.parts, vec!["integer"]);
+	assert!(matches!(*inner_expr, Expr::ColumnRef(_)));
 
 	let expr = parse_expr("CAST(123 AS VARCHAR(255))").expect("parse cast func");
-	match expr {
-		Expr::TypeCast {
-			expr,
-			data_type,
+	let Expr::TypeCast {
+		expr: inner_expr,
+		data_type,
+		..
+	} = expr
+	else {
+		panic!("expected cast, got {:?}", expr);
+	};
+	assert_eq!(data_type.name.parts, vec!["varchar"]);
+	assert_eq!(data_type.modifiers, vec!["255"]);
+	assert!(matches!(
+		*inner_expr,
+		Expr::Literal {
+			lit: Literal::Integer(123),
 			..
-		} => {
-			assert_eq!(data_type.name.parts, vec!["varchar"]);
-			assert_eq!(data_type.modifiers, vec!["255"]);
-			assert!(matches!(
-				*expr,
-				Expr::Literal {
-					lit: Literal::Integer(123),
-					..
-				}
-			));
 		}
-		other => panic!("expected cast, got {:?}", other),
-	}
+	));
 }
 
 #[test]
@@ -200,17 +195,16 @@ fn test_parse_predicates() {
 
 	// IN (1, 2, 3)
 	let expr = parse_expr("x IN (1, 2, 3)").expect("parse in list");
-	match expr {
-		Expr::InList {
-			list,
-			negated,
-			..
-		} => {
-			assert!(!negated);
-			assert_eq!(list.len(), 3);
-		}
-		other => panic!("expected in list, got {:?}", other),
-	}
+	let Expr::InList {
+		list,
+		negated,
+		..
+	} = expr
+	else {
+		panic!("expected in list, got {:?}", expr);
+	};
+	assert!(!negated);
+	assert_eq!(list.len(), 3);
 }
 
 #[test]
@@ -225,69 +219,65 @@ fn test_parse_subscript_and_slice() {
 #[test]
 fn test_parse_function_calls() {
 	let expr = parse_expr("count(*)").expect("parse count(*)");
-	match expr {
-		Expr::FunctionCall {
-			name,
-			args,
-			..
-		} => {
-			assert_eq!(name.parts, vec!["count"]);
-			assert_eq!(args.len(), 1);
-		}
-		other => panic!("expected func call, got {:?}", other),
-	}
+	let Expr::FunctionCall {
+		name,
+		args,
+		..
+	} = expr
+	else {
+		panic!("expected func call, got {:?}", expr);
+	};
+	assert_eq!(name.parts, vec!["count"]);
+	assert_eq!(args.len(), 1);
 
 	let expr = parse_expr("substring('hello', 1, 2)").expect("parse substring");
-	match expr {
-		Expr::FunctionCall {
-			name,
-			args,
-			..
-		} => {
-			assert_eq!(name.parts, vec!["substring"]);
-			assert_eq!(args.len(), 3);
-		}
-		other => panic!("expected func call, got {:?}", other),
-	}
+	let Expr::FunctionCall {
+		name,
+		args,
+		..
+	} = expr
+	else {
+		panic!("expected func call, got {:?}", expr);
+	};
+	assert_eq!(name.parts, vec!["substring"]);
+	assert_eq!(args.len(), 3);
 }
 
 #[test]
 fn test_parse_case_expr() {
 	let expr = parse_expr("CASE WHEN x > 0 THEN 'pos' ELSE 'non-pos' END").expect("parse case");
-	match expr {
-		Expr::Case {
-			branches,
-			else_expr,
-			operand,
-			..
-		} => {
-			assert!(operand.is_none());
-			assert_eq!(branches.len(), 1);
-			assert!(else_expr.is_some());
-		}
-		other => panic!("expected case, got {:?}", other),
-	}
+	let Expr::Case {
+		branches,
+		else_expr,
+		operand,
+		..
+	} = expr
+	else {
+		panic!("expected case, got {:?}", expr);
+	};
+	assert!(operand.is_none());
+	assert_eq!(branches.len(), 1);
+	assert!(else_expr.is_some());
 }
 
 #[test]
 fn test_parse_unary_not() {
 	let expr = parse_expr("NOT x AND y").expect("parse not");
-	match expr {
-		Expr::BinaryOp {
-			left,
-			op: BinaryOperator::And,
+	let Expr::BinaryOp {
+		left,
+		op: BinaryOperator::And,
+		..
+	} = expr
+	else {
+		panic!("expected binary and with unary not, got {:?}", expr);
+	};
+	assert!(matches!(
+		*left,
+		Expr::UnaryOp {
+			op: UnaryOperator::Not,
 			..
-		} => {
-			assert!(matches!(
-				*left,
-				Expr::UnaryOp {
-					op: UnaryOperator::Not,
-					..
-				}
-			));
 		}
-		other => panic!("expected binary and with unary not, got {:?}", other),
-	}
+	));
 }
 
 #[test]
@@ -302,23 +292,25 @@ fn test_parse_subqueries() {
 
 	// IN subquery
 	let expr = parse_expr("id IN (SELECT user_id FROM orders)").unwrap();
-	match expr {
-		Expr::InSubquery {
-			negated,
-			..
-		} => assert!(!negated),
-		other => panic!("expected InSubquery, got {other:?}"),
-	}
+	let Expr::InSubquery {
+		negated,
+		..
+	} = expr
+	else {
+		panic!("expected InSubquery, got {expr:?}");
+	};
+	assert!(!negated);
 
 	// NOT IN subquery
 	let expr = parse_expr("id NOT IN (SELECT user_id FROM orders)").unwrap();
-	match expr {
-		Expr::InSubquery {
-			negated,
-			..
-		} => assert!(negated),
-		other => panic!("expected InSubquery negated, got {other:?}"),
-	}
+	let Expr::InSubquery {
+		negated,
+		..
+	} = expr
+	else {
+		panic!("expected InSubquery negated, got {expr:?}");
+	};
+	assert!(negated);
 
 	// ARRAY subquery
 	let expr = parse_expr("ARRAY(SELECT id FROM users)").unwrap();
@@ -326,26 +318,24 @@ fn test_parse_subqueries() {
 
 	// Quantified ANY / ALL
 	let expr = parse_expr("price > ALL (SELECT price FROM items)").unwrap();
-	match expr {
-		Expr::Quantified {
-			quantifier,
-			..
-		} => {
-			assert_eq!(quantifier, surrealdb_pgsql::Quantifier::All);
-		}
-		other => panic!("expected Quantified ALL, got {other:?}"),
-	}
+	let Expr::Quantified {
+		quantifier,
+		..
+	} = expr
+	else {
+		panic!("expected Quantified ALL, got {expr:?}");
+	};
+	assert_eq!(quantifier, surrealdb_pgsql::Quantifier::All);
 
 	let expr = parse_expr("score = ANY (SELECT score FROM benchmarks)").unwrap();
-	match expr {
-		Expr::Quantified {
-			quantifier,
-			..
-		} => {
-			assert_eq!(quantifier, surrealdb_pgsql::Quantifier::Any);
-		}
-		other => panic!("expected Quantified ANY, got {other:?}"),
-	}
+	let Expr::Quantified {
+		quantifier,
+		..
+	} = expr
+	else {
+		panic!("expected Quantified ANY, got {expr:?}");
+	};
+	assert_eq!(quantifier, surrealdb_pgsql::Quantifier::Any);
 }
 
 #[test]

@@ -87,7 +87,7 @@ fn filter_structure_value(f: &Filter) -> Value {
 		Filter::Ascii => Value::String(Strand::new_static("ASCII")),
 		Filter::Lowercase => Value::String(Strand::new_static("LOWERCASE")),
 		Filter::Uppercase => Value::String(Strand::new_static("UPPERCASE")),
-		_ => {
+		Filter::EdgeNgram(..) | Filter::Ngram(..) | Filter::Snowball(..) | Filter::Mapper(..) => {
 			let mut s = String::new();
 			f.fmt_sql(&mut s, SqlFormat::SingleLine);
 			Value::String(Strand::from(s))

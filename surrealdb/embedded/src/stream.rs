@@ -400,7 +400,18 @@ impl<T: FrameSink> Driver<T> {
 				index,
 				..
 			} => Some(*index),
-			_ => None,
+			QueryStreamFrame::Begin {
+				..
+			}
+			| QueryStreamFrame::Rows {
+				..
+			}
+			| QueryStreamFrame::Value {
+				..
+			}
+			| QueryStreamFrame::End {
+				..
+			} => None,
 		};
 		let statement = match &frame {
 			QueryStreamFrame::Rows {
@@ -411,7 +422,15 @@ impl<T: FrameSink> Driver<T> {
 				index,
 				..
 			} => Some(*index),
-			_ => None,
+			QueryStreamFrame::Begin {
+				..
+			}
+			| QueryStreamFrame::Finished {
+				..
+			}
+			| QueryStreamFrame::End {
+				..
+			} => None,
 		};
 		let rendered = match T::render(frame, self.format) {
 			Ok(rendered) => rendered,
@@ -634,7 +653,21 @@ mod tests {
 				error,
 				..
 			} if *i == index => Some(error.is_some()),
-			_ => None,
+			QueryStreamFrame::Begin {
+				..
+			}
+			| QueryStreamFrame::Rows {
+				..
+			}
+			| QueryStreamFrame::Value {
+				..
+			}
+			| QueryStreamFrame::Finished {
+				..
+			}
+			| QueryStreamFrame::End {
+				..
+			} => None,
 		})
 	}
 
@@ -677,7 +710,21 @@ mod tests {
 					index: 1,
 					values,
 				} => Some(values.len()),
-				_ => None,
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Rows {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => None,
 			})
 			.sum();
 		assert_eq!(rows, 2, "a committed held block sends its rows: {frames:?}");
@@ -782,7 +829,21 @@ mod tests {
 					index: 0,
 					values,
 				} => Some(values),
-				_ => None,
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Rows {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => None,
 			})
 			.flatten()
 			.collect();
@@ -1043,7 +1104,21 @@ mod tests {
 					value: Value::Uuid(id),
 					..
 				} => Some(id.into_inner()),
-				_ => None,
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Rows {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => None,
 			})
 			.expect("the statement still produced a live query id");
 
@@ -1111,7 +1186,21 @@ mod tests {
 				error: Some(error),
 				..
 			} => error.message().contains("timeout"),
-			_ => false,
+			QueryStreamFrame::Begin {
+				..
+			}
+			| QueryStreamFrame::Rows {
+				..
+			}
+			| QueryStreamFrame::Value {
+				..
+			}
+			| QueryStreamFrame::Finished {
+				..
+			}
+			| QueryStreamFrame::End {
+				..
+			} => false,
 		});
 		assert!(timed_out, "the timeout is reported rather than silently truncating: {frames:?}");
 		assert!(

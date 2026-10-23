@@ -243,7 +243,23 @@ pub(super) fn lower_predicate(
 		// Any other expression in predicate position is tested against an
 		// explicit boolean, so that a NULL/NONE value excludes the row:
 		// `b.flag` → `b.flag = true`, `NOT b.flag` → `b.flag = false` (§4).
-		other => {
+		other @ (GqlExpr::Literal(..)
+		| GqlExpr::Param {
+			..
+		}
+		| GqlExpr::Variable(_)
+		| GqlExpr::Property(..)
+		| GqlExpr::Unary {
+			..
+		}
+		| GqlExpr::Binary {
+			..
+		}
+		| GqlExpr::FunctionCall {
+			..
+		}
+		| GqlExpr::List(..)
+		| GqlExpr::Map(..)) => {
 			let value = lower_value(other, scope)?;
 			Ok(equality(value, LogicalLiteral::Bool(!negated), false))
 		}
@@ -341,7 +357,16 @@ fn lower_comparison(
 			atoms.extend(nullable_atoms(right, scope));
 			atoms
 		}
-		_ => Vec::new(),
+		BinaryOp::Or
+		| BinaryOp::Xor
+		| BinaryOp::And
+		| BinaryOp::Eq
+		| BinaryOp::Neq
+		| BinaryOp::Concat
+		| BinaryOp::Add
+		| BinaryOp::Sub
+		| BinaryOp::Mul
+		| BinaryOp::Div => Vec::new(),
 	};
 	// Lower and deduplicate the guarded atoms, preserving first-occurrence
 	// order.
@@ -396,31 +421,31 @@ fn lower_truth_test(
 	outer_negated: bool,
 	scope: &Scope<'_>,
 ) -> Result<LogicalExpr, SyntaxError> {
-	match expr {
-		GqlExpr::IsNull {
-			expr: operand,
-			negated,
-			..
-		} => {
-			let value = lower_value(operand, scope)?;
-			Ok(null_test(value, outer_negated != *negated))
+	if let GqlExpr::IsNull {
+		expr: operand,
+		negated,
+		..
+	} = expr
+	{
+		let value = lower_value(operand, scope)?;
+		Ok(null_test(value, outer_negated != *negated))
+	} else if let GqlExpr::IsBool {
+		expr: operand,
+		value,
+		negated,
+		..
+	} = expr
+	{
+		let operand = lower_value(operand, scope)?;
+		let negated = outer_negated != *negated;
+		match value {
+			TruthValue::True => Ok(equality(operand, LogicalLiteral::Bool(true), negated)),
+			TruthValue::False => Ok(equality(operand, LogicalLiteral::Bool(false), negated)),
+			TruthValue::Unknown => Ok(null_test(operand, negated)),
 		}
-		GqlExpr::IsBool {
-			expr: operand,
-			value,
-			negated,
-			..
-		} => {
-			let operand = lower_value(operand, scope)?;
-			let negated = outer_negated != *negated;
-			match value {
-				TruthValue::True => Ok(equality(operand, LogicalLiteral::Bool(true), negated)),
-				TruthValue::False => Ok(equality(operand, LogicalLiteral::Bool(false), negated)),
-				TruthValue::Unknown => Ok(null_test(operand, negated)),
-			}
-		}
+	} else {
 		// Only called with `IsNull`/`IsBool` expressions.
-		other => Err(syntax_error!("Internal error: not a truth test", @other.span())),
+		Err(syntax_error!("Internal error: not a truth test", @expr.span()))
 	}
 }
 
@@ -493,7 +518,25 @@ fn nullable_atoms<'a>(expr: &'a GqlExpr, scope: &Scope<'_>) -> Vec<&'a GqlExpr> 
 				stack.push(right);
 				stack.push(left);
 			}
-			_ => {}
+			GqlExpr::Literal(..)
+			| GqlExpr::Variable(_)
+			| GqlExpr::Unary {
+				..
+			}
+			| GqlExpr::Binary {
+				..
+			}
+			| GqlExpr::IsBool {
+				..
+			}
+			| GqlExpr::IsNull {
+				..
+			}
+			| GqlExpr::FunctionCall {
+				..
+			}
+			| GqlExpr::List(..)
+			| GqlExpr::Map(..) => {}
 		}
 	}
 	out
@@ -527,7 +570,25 @@ fn nullable(expr: &GqlExpr, scope: &Scope<'_>) -> bool {
 				stack.push(right);
 				stack.push(left);
 			}
-			_ => {}
+			GqlExpr::Literal(..)
+			| GqlExpr::Variable(_)
+			| GqlExpr::Unary {
+				..
+			}
+			| GqlExpr::Binary {
+				..
+			}
+			| GqlExpr::IsBool {
+				..
+			}
+			| GqlExpr::IsNull {
+				..
+			}
+			| GqlExpr::FunctionCall {
+				..
+			}
+			| GqlExpr::List(..)
+			| GqlExpr::Map(..) => {}
 		}
 	}
 	false
@@ -542,7 +603,14 @@ fn complement(op: BinaryOp) -> BinaryOp {
 		BinaryOp::Lte => BinaryOp::Gt,
 		BinaryOp::Gt => BinaryOp::Lte,
 		BinaryOp::Gte => BinaryOp::Lt,
-		other => other,
+		other @ (BinaryOp::Or
+		| BinaryOp::Xor
+		| BinaryOp::And
+		| BinaryOp::Concat
+		| BinaryOp::Add
+		| BinaryOp::Sub
+		| BinaryOp::Mul
+		| BinaryOp::Div) => other,
 	}
 }
 
@@ -608,12 +676,11 @@ fn lower_property(expr: &GqlExpr, scope: &Scope<'_>) -> Result<LogicalExpr, Synt
 		base = inner;
 	}
 	names.reverse();
-	match base {
-		GqlExpr::Variable(ident) => scope.binding_expr(ident, &names),
-		other => {
-			let start = lower_value(other, scope)?;
-			Ok(access_chain(start, names.iter().map(|name| name.name.as_str())))
-		}
+	if let GqlExpr::Variable(ident) = base {
+		scope.binding_expr(ident, &names)
+	} else {
+		let start = lower_value(base, scope)?;
+		Ok(access_chain(start, names.iter().map(|name| name.name.as_str())))
 	}
 }
 

@@ -180,14 +180,16 @@ fn write_framed(
 /// alike whichever encoding it would be written in, and alike for a record and a catalog entry.
 #[cold]
 pub fn write_error(error: EntryError) -> anyhow::Error {
-	match error {
-		EntryError::Body {
-			error: SchemaError::Grammar(surrealdb_expr::val::stored::Error::Closure),
-			..
-		} => anyhow::Error::new(revision::Error::Conversion(
+	if let EntryError::Body {
+		error: SchemaError::Grammar(surrealdb_expr::val::stored::Error::Closure),
+		..
+	} = error
+	{
+		anyhow::Error::new(revision::Error::Conversion(
 			"Closures cannot be stored on disk".to_owned(),
-		)),
-		error => Error::Entry(error).into(),
+		))
+	} else {
+		Error::Entry(error).into()
 	}
 }
 

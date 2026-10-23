@@ -83,31 +83,28 @@ pub(crate) fn check_bp(op: Binary) -> u8 {
 
 /// Whether chaining the operator without parentheses is defined.
 pub(crate) fn associative(op: Binary) -> bool {
-	!matches!(
-		op,
-		Binary::Eq
-			| Binary::Ne
-			| Binary::AllEq
-			| Binary::AnyEq
-			| Binary::Lt
-			| Binary::Le
-			| Binary::Gt
-			| Binary::Ge
-			| Binary::Matches
-			| Binary::Contain
-			| Binary::NotContain
-			| Binary::ContainAll
-			| Binary::ContainAny
-			| Binary::ContainNone
-			| Binary::Inside
-			| Binary::NotInside
-			| Binary::AllInside
-			| Binary::AnyInside
-			| Binary::NoneInside
-			| Binary::Outside
-			| Binary::Intersects
-			| Binary::Knn
-	)
+	!(op == Binary::Eq
+		|| op == Binary::Ne
+		|| op == Binary::AllEq
+		|| op == Binary::AnyEq
+		|| op == Binary::Lt
+		|| op == Binary::Le
+		|| op == Binary::Gt
+		|| op == Binary::Ge
+		|| op == Binary::Matches
+		|| op == Binary::Contain
+		|| op == Binary::NotContain
+		|| op == Binary::ContainAll
+		|| op == Binary::ContainAny
+		|| op == Binary::ContainNone
+		|| op == Binary::Inside
+		|| op == Binary::NotInside
+		|| op == Binary::AllInside
+		|| op == Binary::AnyInside
+		|| op == Binary::NoneInside
+		|| op == Binary::Outside
+		|| op == Binary::Intersects
+		|| op == Binary::Knn)
 }
 
 /// Pending work of the expression parser.
@@ -243,8 +240,75 @@ pub(crate) enum Frame {
 	},
 }
 
+impl Frame {
+	pub(crate) const fn is_idiom(&self) -> bool {
+		match self {
+			Self::Idiom {
+				..
+			} => true,
+			Self::Base {
+				..
+			}
+			| Self::Atom {
+				..
+			}
+			| Self::Path {
+				..
+			}
+			| Self::Infix {
+				..
+			}
+			| Self::Prefix {
+				..
+			}
+			| Self::Cast {
+				..
+			}
+			| Self::Paren {
+				..
+			}
+			| Self::Array {
+				..
+			}
+			| Self::Object {
+				..
+			}
+			| Self::Args {
+				..
+			}
+			| Self::Bracket {
+				..
+			}
+			| Self::BlockOrSet {
+				..
+			}
+			| Self::Block {
+				..
+			}
+			| Self::Set {
+				..
+			}
+			| Self::KindAlts {
+				..
+			}
+			| Self::Closure {
+				..
+			}
+			| Self::KindSized {
+				..
+			}
+			| Self::KindObject {
+				..
+			}
+			| Self::KindTuple {
+				..
+			} => false,
+		}
+	}
+}
+
 /// What to build around a finished array or object.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Wrap {
 	None,
 	/// The record-id key of table `table`, which may still become a range.
@@ -373,7 +437,8 @@ impl<'a, 's> Parser<'a, 's> {
 					debug_assert_eq!(self.frames.len(), base);
 					return Ok(v);
 				}
-				if more_parts && !matches!(self.frames.last(), Some(Frame::Idiom { .. })) {
+				let on_idiom = self.frames.last().is_some_and(Frame::is_idiom);
+				if more_parts && !on_idiom {
 					let start = self.ast.nodes[v as usize].start;
 					self.push_frame(Frame::Idiom {
 						start,
@@ -381,15 +446,14 @@ impl<'a, 's> Parser<'a, 's> {
 						head: v,
 					})?;
 				}
-				if let Some(Frame::Idiom {
-					..
-				}) = self.frames.last()
-				{
+				if self.frames.last().is_some_and(Frame::is_idiom) {
 					// Each part costs an expression level until the idiom ends.
-					if matches!(
-						self.tok.kind,
-						T::DotDotDot | T::Dot | T::LBracket | T::Arrow | T::Lt
-					) {
+					if self.tok.kind == T::DotDotDot
+						|| self.tok.kind == T::Dot
+						|| self.tok.kind == T::LBracket
+						|| self.tok.kind == T::Arrow
+						|| self.tok.kind == T::Lt
+					{
 						self.enter_e()?;
 					}
 					match self.idiom_part()? {
@@ -455,7 +519,10 @@ impl<'a, 's> Parser<'a, 's> {
 					})?;
 					continue 'operand;
 				}
-				if matches!(self.tok.kind, T::PlusEq | T::MinusEq | T::PlusQEq) {
+				if self.tok.kind == T::PlusEq
+					|| self.tok.kind == T::MinusEq
+					|| self.tok.kind == T::PlusQEq
+				{
 					return Err(self.diag(Diag {
 						start: self.tok.start,
 						end: self.tok.end,
@@ -496,16 +563,28 @@ impl<'a, 's> Parser<'a, 's> {
 				// Reduce the top frame with `v`.
 				let f = self.pop_frame().expect("the base frame is never popped early");
 				// Closing a collection, a parenthesis or a closure yields a prime.
-				if matches!(
-					f,
-					Frame::Paren { .. }
-						| Frame::Array { .. }
-						| Frame::Object { .. }
-						| Frame::BlockOrSet { .. }
-						| Frame::Block { .. }
-						| Frame::Set { .. }
-						| Frame::Closure { .. }
-				) {
+				if let Frame::Paren {
+					..
+				}
+				| Frame::Array {
+					..
+				}
+				| Frame::Object {
+					..
+				}
+				| Frame::BlockOrSet {
+					..
+				}
+				| Frame::Block {
+					..
+				}
+				| Frame::Set {
+					..
+				}
+				| Frame::Closure {
+					..
+				} = f
+				{
 					prime = true;
 				}
 				match f {
@@ -754,22 +833,28 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// Binding power below which the top frame does not let operators bind.
 	pub(crate) fn frame_bp(&self) -> u8 {
-		match self.frames.last() {
-			Some(Frame::Infix {
-				op,
-				..
-			}) => BINARY_BP[*op as usize],
-			Some(Frame::Prefix {
-				op,
-				..
-			}) => match op {
+		if let Some(Frame::Infix {
+			op,
+			..
+		}) = self.frames.last()
+		{
+			BINARY_BP[*op as usize]
+		} else if let Some(Frame::Prefix {
+			op,
+			..
+		}) = self.frames.last()
+		{
+			match op {
 				Prefix::Range | Prefix::RangeInclusive => BP_RANGE,
-				_ => BP_PREFIX,
-			},
-			Some(Frame::Cast {
-				..
-			}) => BP_PREFIX,
-			_ => BP_BASE,
+				Prefix::Not | Prefix::Neg | Prefix::Pos => BP_PREFIX,
+			}
+		} else if let Some(Frame::Cast {
+			..
+		}) = self.frames.last()
+		{
+			BP_PREFIX
+		} else {
+			BP_BASE
 		}
 	}
 
@@ -779,14 +864,18 @@ impl<'a, 's> Parser<'a, 's> {
 		if n.depth & COVERED != 0 {
 			return BP_PRIME;
 		}
-		match n.tag {
-			Tag::Binary | Tag::BinaryX => check_bp(Binary::from_u8(n.op)),
-			Tag::Prefix if n.op == Prefix::Range as u8 || n.op == Prefix::RangeInclusive as u8 => {
-				BP_RANGE
-			}
-			Tag::Prefix | Tag::Cast => BP_PREFIX,
-			Tag::PostfixRange => BP_RANGE,
-			_ => BP_PRIME,
+		if n.tag == Tag::Binary || n.tag == Tag::BinaryX {
+			check_bp(Binary::from_u8(n.op))
+		} else if n.tag == Tag::Prefix
+			&& (n.op == Prefix::Range as u8 || n.op == Prefix::RangeInclusive as u8)
+		{
+			BP_RANGE
+		} else if n.tag == Tag::Prefix || n.tag == Tag::Cast {
+			BP_PREFIX
+		} else if n.tag == Tag::PostfixRange {
+			BP_RANGE
+		} else {
+			BP_PRIME
 		}
 	}
 
@@ -861,41 +950,40 @@ impl<'a, 's> Parser<'a, 's> {
 		if op == Binary::Matches {
 			// `[rhs, reference Int or NONE, 0 | 1 AND | 2 OR]`
 			let t = self.tok;
-			let (rf, bool_op) = match t.kind {
-				T::Digits => {
-					let rf = self.uint_lit()?;
-					let b = if self.eat(T::Comma) {
-						let o = self.tok;
-						let b = match o.kw {
-							Kw::And if o.kind == T::Ident => 1,
-							Kw::Or if o.kind == T::Ident => 2,
-							_ => return Err(self.unexpected("either `AND` or `OR`")),
-						};
-						self.bump();
-						b
+			let (rf, bool_op) = if t.kind == T::Digits {
+				let rf = self.uint_lit()?;
+				let b = if self.eat(T::Comma) {
+					let o = self.tok;
+					let b = if o.kind == T::Ident && o.kw == Kw::And {
+						1
+					} else if o.kind == T::Ident && o.kw == Kw::Or {
+						2
 					} else {
-						0
+						return Err(self.unexpected("either `AND` or `OR`"));
 					};
-					self.expect(T::At, "@")?;
-					(rf, b)
-				}
-				T::Ident if t.kw == Kw::And || t.kw == Kw::Or => {
 					self.bump();
-					self.expect(T::At, "@")?;
-					(
-						NONE,
-						if t.kw == Kw::And {
-							1
-						} else {
-							2
-						},
-					)
-				}
-				T::At => {
-					self.bump();
-					(NONE, 0)
-				}
-				_ => return Err(self.unexpected("a match reference, operator or `@`")),
+					b
+				} else {
+					0
+				};
+				self.expect(T::At, "@")?;
+				(rf, b)
+			} else if t.kind == T::Ident && (t.kw == Kw::And || t.kw == Kw::Or) {
+				self.bump();
+				self.expect(T::At, "@")?;
+				(
+					NONE,
+					if t.kw == Kw::And {
+						1
+					} else {
+						2
+					},
+				)
+			} else if t.kind == T::At {
+				self.bump();
+				(NONE, 0)
+			} else {
+				return Err(self.unexpected("a match reference, operator or `@`"));
 			};
 			return Ok(self.record(&[NONE, rf, bool_op]));
 		}
@@ -949,24 +1037,27 @@ impl<'a, 's> Parser<'a, 's> {
 	/// Returns a postfix range operator at the cursor: 0 for `..`, 1 for
 	/// `>..`.
 	pub(crate) fn postfix_op(&self) -> Option<u8> {
-		match self.tok.kind {
-			T::DotDot => match self.adjacent1() {
-				Some(t) if t.kind == T::Eq || starts_expression(&t) => None,
-				_ => Some(0),
-			},
-			T::Gt => {
-				let t1 = self.adjacent1()?;
-				if t1.kind != T::DotDot {
-					return None;
-				}
-				let t2 = self.peek2();
-				if !t2.ws() && (t2.kind == T::Eq || starts_expression(&t2)) {
-					None
-				} else {
-					Some(1)
-				}
+		if self.tok.kind == T::DotDot {
+			if let Some(t) = self.adjacent1()
+				&& (t.kind == T::Eq || starts_expression(&t))
+			{
+				None
+			} else {
+				Some(0)
 			}
-			_ => None,
+		} else if self.tok.kind == T::Gt {
+			let t1 = self.adjacent1()?;
+			if t1.kind != T::DotDot {
+				return None;
+			}
+			let t2 = self.peek2();
+			if !t2.ws() && (t2.kind == T::Eq || starts_expression(&t2)) {
+				None
+			} else {
+				Some(1)
+			}
+		} else {
+			None
 		}
 	}
 
@@ -974,94 +1065,137 @@ impl<'a, 's> Parser<'a, 's> {
 	/// first it spans.
 	pub(crate) fn infix_op(&mut self) -> R<Option<(Binary, u8)>> {
 		let t = self.tok;
-		let op = match t.kind {
-			T::OrOr => Binary::Or,
-			T::AndAnd => Binary::And,
-			T::QColon => Binary::Tco,
-			T::QQ => Binary::Nco,
+		let op = if t.kind == T::OrOr {
+			Binary::Or
+		} else if t.kind == T::AndAnd {
+			Binary::And
+		} else if t.kind == T::QColon {
+			Binary::Tco
+		} else if t.kind == T::QQ {
+			Binary::Nco
+		} else if t.kind == T::Question {
 			// A lone `?` binds as the start of `??`, so an expression never
 			// ends at one.
-			T::Question => return Err(self.unexpected("`??`")),
-			T::EqEq => Binary::ExactEq,
-			T::Ne => Binary::Ne,
-			T::AllEq => Binary::AllEq,
-			T::AnyEq => Binary::AnyEq,
-			T::Eq => Binary::Eq,
-			T::Le => Binary::Le,
-			T::Ge => Binary::Ge,
-			T::StarStar => Binary::Pow,
-			T::Plus => Binary::Add,
-			T::Minus => Binary::Sub,
-			T::Star | T::Times => Binary::Mul,
-			T::Slash | T::Divide => Binary::Div,
-			T::Percent => Binary::Rem,
-			T::Contains => Binary::Contain,
-			T::NotContains => Binary::NotContain,
-			T::Inside => Binary::Inside,
-			T::NotInside => Binary::NotInside,
-			T::ContainsAll => Binary::ContainAll,
-			T::ContainsAny => Binary::ContainAny,
-			T::ContainsNone => Binary::ContainNone,
-			T::AllInside => Binary::AllInside,
-			T::AnyInside => Binary::AnyInside,
-			T::NoneInside => Binary::NoneInside,
-			T::At => return Ok(Some((Binary::Matches, OPERATOR_PAYLOAD))),
-			T::KnnOpen => return Ok(Some((Binary::Knn, OPERATOR_PAYLOAD))),
-			T::Lt => {
-				if let Some(n) = self.adjacent1()
-					&& matches!(n.kind, T::Minus | T::Tilde | T::Arrow | T::DotDot)
-				{
-					return Ok(None);
-				}
-				Binary::Lt
+			return Err(self.unexpected("`??`"));
+		} else if t.kind == T::EqEq {
+			Binary::ExactEq
+		} else if t.kind == T::Ne {
+			Binary::Ne
+		} else if t.kind == T::AllEq {
+			Binary::AllEq
+		} else if t.kind == T::AnyEq {
+			Binary::AnyEq
+		} else if t.kind == T::Eq {
+			Binary::Eq
+		} else if t.kind == T::Le {
+			Binary::Le
+		} else if t.kind == T::Ge {
+			Binary::Ge
+		} else if t.kind == T::StarStar {
+			Binary::Pow
+		} else if t.kind == T::Plus {
+			Binary::Add
+		} else if t.kind == T::Minus {
+			Binary::Sub
+		} else if t.kind == T::Star || t.kind == T::Times {
+			Binary::Mul
+		} else if t.kind == T::Slash || t.kind == T::Divide {
+			Binary::Div
+		} else if t.kind == T::Percent {
+			Binary::Rem
+		} else if t.kind == T::Contains {
+			Binary::Contain
+		} else if t.kind == T::NotContains {
+			Binary::NotContain
+		} else if t.kind == T::Inside {
+			Binary::Inside
+		} else if t.kind == T::NotInside {
+			Binary::NotInside
+		} else if t.kind == T::ContainsAll {
+			Binary::ContainAll
+		} else if t.kind == T::ContainsAny {
+			Binary::ContainAny
+		} else if t.kind == T::ContainsNone {
+			Binary::ContainNone
+		} else if t.kind == T::AllInside {
+			Binary::AllInside
+		} else if t.kind == T::AnyInside {
+			Binary::AnyInside
+		} else if t.kind == T::NoneInside {
+			Binary::NoneInside
+		} else if t.kind == T::At {
+			return Ok(Some((Binary::Matches, OPERATOR_PAYLOAD)));
+		} else if t.kind == T::KnnOpen {
+			return Ok(Some((Binary::Knn, OPERATOR_PAYLOAD)));
+		} else if t.kind == T::Lt {
+			if let Some(n) = self.adjacent1()
+				&& (n.kind == T::Minus
+					|| n.kind == T::Tilde
+					|| n.kind == T::Arrow
+					|| n.kind == T::DotDot)
+			{
+				return Ok(None);
 			}
-			T::Gt => {
-				if self.adjacent1().is_some_and(|t| t.kind == T::DotDot) {
-					if self.peek2().kind == T::Eq && !self.peek2().ws() {
-						return Ok(Some((Binary::RangeSkipInclusive, 2)));
-					}
-					return Ok(Some((Binary::RangeSkip, 1)));
+			Binary::Lt
+		} else if t.kind == T::Gt {
+			if self.adjacent1().is_some_and(|t| t.kind == T::DotDot) {
+				if self.peek2().kind == T::Eq && !self.peek2().ws() {
+					return Ok(Some((Binary::RangeSkipInclusive, 2)));
 				}
-				Binary::Gt
+				return Ok(Some((Binary::RangeSkip, 1)));
 			}
-			T::DotDot => {
-				if self.adjacent1().is_some_and(|t| t.kind == T::Eq) {
-					return Ok(Some((Binary::RangeInclusive, 1)));
-				}
-				Binary::Range
+			Binary::Gt
+		} else if t.kind == T::DotDot {
+			if self.adjacent1().is_some_and(|t| t.kind == T::Eq) {
+				return Ok(Some((Binary::RangeInclusive, 1)));
 			}
-			T::Ident => match t.kw {
-				Kw::Or => Binary::Or,
-				Kw::And => Binary::And,
-				Kw::Is => {
-					if self.peek1().is_kw(Kw::Not) {
-						return Ok(Some((Binary::Ne, 1)));
-					}
-					Binary::Eq
+			Binary::Range
+		} else if t.kind == T::Ident {
+			if t.kw == Kw::Or {
+				Binary::Or
+			} else if t.kw == Kw::And {
+				Binary::And
+			} else if t.kw == Kw::Is {
+				if self.peek1().is_kw(Kw::Not) {
+					return Ok(Some((Binary::Ne, 1)));
 				}
-				Kw::Contains => Binary::Contain,
-				Kw::ContainsNot => Binary::NotContain,
-				Kw::ContainsAll => Binary::ContainAll,
-				Kw::ContainsAny => Binary::ContainAny,
-				Kw::ContainsNone => Binary::ContainNone,
-				Kw::Inside | Kw::In => Binary::Inside,
-				Kw::NotInside => Binary::NotInside,
-				Kw::AllInside => Binary::AllInside,
-				Kw::AnyInside => Binary::AnyInside,
-				Kw::NoneInside => Binary::NoneInside,
-				Kw::Outside => Binary::Outside,
-				Kw::Intersects => Binary::Intersects,
-				Kw::Not => {
-					if self.peek1().is_kw(Kw::In) {
-						return Ok(Some((Binary::NotInside, 1)));
-					}
-					// `NOT` must be followed by `IN`.
-					self.bump();
-					return Err(self.unexpected("IN"));
+				Binary::Eq
+			} else if t.kw == Kw::Contains {
+				Binary::Contain
+			} else if t.kw == Kw::ContainsNot {
+				Binary::NotContain
+			} else if t.kw == Kw::ContainsAll {
+				Binary::ContainAll
+			} else if t.kw == Kw::ContainsAny {
+				Binary::ContainAny
+			} else if t.kw == Kw::ContainsNone {
+				Binary::ContainNone
+			} else if t.kw == Kw::Inside || t.kw == Kw::In {
+				Binary::Inside
+			} else if t.kw == Kw::NotInside {
+				Binary::NotInside
+			} else if t.kw == Kw::AllInside {
+				Binary::AllInside
+			} else if t.kw == Kw::AnyInside {
+				Binary::AnyInside
+			} else if t.kw == Kw::NoneInside {
+				Binary::NoneInside
+			} else if t.kw == Kw::Outside {
+				Binary::Outside
+			} else if t.kw == Kw::Intersects {
+				Binary::Intersects
+			} else if t.kw == Kw::Not {
+				if self.peek1().is_kw(Kw::In) {
+					return Ok(Some((Binary::NotInside, 1)));
 				}
-				_ => return Ok(None),
-			},
-			_ => return Ok(None),
+				// `NOT` must be followed by `IN`.
+				self.bump();
+				return Err(self.unexpected("IN"));
+			} else {
+				return Ok(None);
+			}
+		} else {
+			return Ok(None);
 		};
 		Ok(Some((op, 0)))
 	}
@@ -1070,95 +1204,96 @@ impl<'a, 's> Parser<'a, 's> {
 	/// follow whitespace, though a lookup needs it adjacent: `1 < -2` makes
 	/// `1` an idiom with no parts, as earlier releases read it.
 	pub(crate) fn continues_idiom(&self) -> bool {
-		match self.tok.kind {
-			T::Arrow | T::LBracket | T::Dot | T::DotDotDot => true,
-			T::Lt => matches!(self.peek1().kind, T::Minus | T::Tilde | T::Arrow),
-			_ => false,
+		if self.tok.kind == T::Arrow
+			|| self.tok.kind == T::LBracket
+			|| self.tok.kind == T::Dot
+			|| self.tok.kind == T::DotDotDot
+		{
+			true
+		} else if self.tok.kind == T::Lt {
+			let k = self.peek1().kind;
+			k == T::Minus || k == T::Tilde || k == T::Arrow
+		} else {
+			false
 		}
 	}
 
 	/// Whether a lookup arrow `<-`, `<->` or `<~` starts at the cursor.
 	pub(crate) fn at_lookup_arrow(&self) -> bool {
 		self.tok.kind == T::Lt
-			&& self.adjacent1().is_some_and(|t| matches!(t.kind, T::Minus | T::Tilde | T::Arrow))
+			&& self
+				.adjacent1()
+				.is_some_and(|t| t.kind == T::Minus || t.kind == T::Tilde || t.kind == T::Arrow)
 	}
 
 	/// Wants an operand. Pushes prefix frames and returns `None`, or returns
 	/// a finished primary.
 	pub(crate) fn operand(&mut self) -> R<Option<NodeId>> {
 		let t = self.tok;
-		match t.kind {
-			T::Bang => {
+		if t.kind == T::Bang {
+			self.bump();
+			self.push_frame(Frame::Prefix {
+				op: Prefix::Not,
+				start: t.start,
+			})?;
+			Ok(None)
+		} else if t.kind == T::Minus || t.kind == T::Plus {
+			if let Some(n) = self.adjacent1()
+				&& n.kind == T::Digits
+			{
+				self.bump();
+				// The digits are read alone and the sign applied to them.
+				return self.number_in(t.start, true, false, Compound::Numeric, n.start).map(Some);
+			}
+			self.bump();
+			let op = if t.kind == T::Minus {
+				Prefix::Neg
+			} else {
+				Prefix::Pos
+			};
+			self.push_frame(Frame::Prefix {
+				op,
+				start: t.start,
+			})?;
+			Ok(None)
+		} else if t.kind == T::DotDot {
+			self.bump();
+			let n = self.tok;
+			if n.kind == T::Eq && !n.ws() {
 				self.bump();
 				self.push_frame(Frame::Prefix {
-					op: Prefix::Not,
+					op: Prefix::RangeInclusive,
 					start: t.start,
 				})?;
-				Ok(None)
+				return Ok(None);
 			}
-			T::Minus | T::Plus => {
-				if let Some(n) = self.adjacent1()
-					&& n.kind == T::Digits
-				{
-					self.bump();
-					// The digits are read alone and the sign applied to them.
-					return self
-						.number_in(t.start, true, false, Compound::Numeric, n.start)
-						.map(Some);
-				}
-				self.bump();
-				let op = if t.kind == T::Minus {
-					Prefix::Neg
-				} else {
-					Prefix::Pos
-				};
-				self.push_frame(Frame::Prefix {
-					op,
-					start: t.start,
-				})?;
-				Ok(None)
+			if n.ws() || !starts_prime(&n) {
+				return Ok(Some(self.leaf(Tag::UnboundedRange, 0, t)));
 			}
-			T::DotDot => {
-				self.bump();
-				let n = self.tok;
-				if n.kind == T::Eq && !n.ws() {
-					self.bump();
-					self.push_frame(Frame::Prefix {
-						op: Prefix::RangeInclusive,
-						start: t.start,
-					})?;
-					return Ok(None);
-				}
-				if n.ws() || !starts_prime(&n) {
-					return Ok(Some(self.leaf(Tag::UnboundedRange, 0, t)));
-				}
-				self.push_frame(Frame::Prefix {
-					op: Prefix::Range,
-					start: t.start,
-				})?;
-				Ok(None)
+			self.push_frame(Frame::Prefix {
+				op: Prefix::Range,
+				start: t.start,
+			})?;
+			Ok(None)
+		} else if t.kind == T::Lt {
+			// `<-` starts a lookup, except `<-` and digits: a cast to a
+			// negative literal kind, as earlier releases decide it.
+			if let Some(n) = self.adjacent1()
+				&& (n.kind == T::Minus || n.kind == T::Arrow || n.kind == T::Tilde)
+				&& !(n.kind == T::Minus && self.peek2().kind == T::Digits)
+			{
+				return self.graph_start().map(Some);
 			}
-			T::Lt => {
-				// `<-` starts a lookup, except `<-` and digits: a cast to a
-				// negative literal kind, as earlier releases decide it.
-				if let Some(n) = self.adjacent1()
-					&& matches!(n.kind, T::Minus | T::Arrow | T::Tilde)
-					&& !(n.kind == T::Minus && self.peek2().kind == T::Digits)
-				{
-					return self.graph_start().map(Some);
-				}
-				self.bump();
-				let kind = self.cast_kind()?;
-				self.push_frame(Frame::Cast {
-					kind,
-					start: t.start,
-				})?;
-				Ok(None)
-			}
-			_ => {
-				let v = self.primary()?;
-				Ok((v != PUSHED).then_some(v))
-			}
+			self.bump();
+			let kind = self.cast_kind()?;
+			self.push_frame(Frame::Cast {
+				kind,
+				start: t.start,
+			})?;
+			Ok(None)
+		} else {
+			let v = self.primary()?;
+			Ok((v != PUSHED).then_some(v))
 		}
 	}
 
@@ -1173,119 +1308,119 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn primary(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		match t.kind {
-			T::Digits => self.number(t.start, false),
-			T::Str => {
-				if t.aux() == b'f' && self.limits.no_files {
-					return Err(self.files_off(t));
-				}
+		if t.kind == T::Digits {
+			self.number(t.start, false)
+		} else if t.kind == T::Str {
+			if t.aux() == b'f' && self.limits.no_files {
+				return Err(self.files_off(t));
+			}
+			self.bump();
+			Ok(self.leaf(Tag::Str, t.aux(), t))
+		} else if t.kind == T::Param {
+			self.bump();
+			Ok(self.leaf(Tag::Param, 0, t))
+		} else if t.kind == T::NaN {
+			self.bump();
+			Ok(self.leaf(Tag::NaN, 0, t))
+		} else if t.kind == T::Infinity {
+			self.bump();
+			Ok(self.leaf(Tag::Infinity, 0, t))
+		} else if t.kind == T::Slash {
+			let mut l = self.lex;
+			if let Err(e) = l.regex(t.start) {
+				self.lex.pos = l.pos;
+				return Err(self.lex_error(t.start, e));
+			}
+			let end = l.pos;
+			if let Some(compiles) = self.limits.regex
+				&& !compiles(self.text, t.start, end)
+			{
+				return Err(self.error(t.start, end, "{regex_error}"));
+			}
+			self.reset_to(end);
+			self.prev_start = t.start;
+			self.prev_end = end;
+			Ok(self.leaf_span(Tag::Regex, 0, 0, 0, t.start, end))
+		} else if t.kind == T::LBracket {
+			self.bump();
+			if self.at(T::RBracket) {
+				// An empty array costs the level a full one does.
+				let b = self.budgets();
+				self.enter_o()?;
+				self.enter_e()?;
+				self.set_budgets(b);
 				self.bump();
-				Ok(self.leaf(Tag::Str, t.aux(), t))
+				let idx = self.empty_list();
+				return self.node(Tag::Array, 0, idx, 0, t.start, 0);
 			}
-			T::Param => {
-				self.bump();
-				Ok(self.leaf(Tag::Param, 0, t))
+			self.push_frame(Frame::Array {
+				start: t.start,
+				mark: self.vals.len() as u32,
+				wrap: Wrap::None,
+			})?;
+			self.operand_continue()
+		} else if t.kind == T::LBrace {
+			self.object_open(t.start, Wrap::None)
+		} else if t.kind == T::LParen {
+			self.bump();
+			let n = self.tok;
+			if (n.kind == T::Plus
+				|| n.kind == T::Minus
+				|| n.kind == T::NaN
+				|| n.kind == T::Infinity
+				|| n.kind == T::Digits)
+				&& let Some(p) = self.point(t.start)?
+			{
+				return Ok(p);
 			}
-			T::NaN => {
-				self.bump();
-				Ok(self.leaf(Tag::NaN, 0, t))
-			}
-			T::Infinity => {
-				self.bump();
-				Ok(self.leaf(Tag::Infinity, 0, t))
-			}
-			T::Slash => {
-				let mut l = self.lex;
-				if let Err(e) = l.regex(t.start) {
-					self.lex.pos = l.pos;
-					return Err(self.lex_error(t.start, e));
-				}
-				let end = l.pos;
-				if let Some(compiles) = self.limits.regex
-					&& !compiles(self.text, t.start, end)
-				{
-					return Err(self.error(t.start, end, "{regex_error}"));
-				}
-				self.reset_to(end);
-				self.prev_start = t.start;
-				self.prev_end = end;
-				Ok(self.leaf_span(Tag::Regex, 0, 0, 0, t.start, end))
-			}
-			T::LBracket => {
-				self.bump();
-				if self.at(T::RBracket) {
-					// An empty array costs the level a full one does.
-					let b = self.budgets();
-					self.enter_o()?;
-					self.enter_e()?;
-					self.set_budgets(b);
-					self.bump();
-					let idx = self.empty_list();
-					return self.node(Tag::Array, 0, idx, 0, t.start, 0);
-				}
-				self.push_frame(Frame::Array {
-					start: t.start,
-					mark: self.vals.len() as u32,
-					wrap: Wrap::None,
-				})?;
-				self.operand_continue()
-			}
-			T::LBrace => self.object_open(t.start, Wrap::None),
-			T::LParen => {
-				self.bump();
-				let n = self.tok;
-				if matches!(n.kind, T::Plus | T::Minus | T::NaN | T::Infinity | T::Digits)
-					&& let Some(p) = self.point(t.start)?
-				{
-					return Ok(p);
-				}
-				self.push_frame(Frame::Paren {
-					start: t.start,
-				})?;
-				self.operand_continue()
-			}
-			T::Arrow => self.graph_start(),
-			T::Ident => self.ident_primary(t),
-			T::EscIdent => match self.peek1().kind {
-				T::Colon => self.record_id(t, true),
+			self.push_frame(Frame::Paren {
+				start: t.start,
+			})?;
+			self.operand_continue()
+		} else if t.kind == T::Arrow {
+			self.graph_start()
+		} else if t.kind == T::Ident {
+			self.ident_primary(t)
+		} else if t.kind == T::EscIdent {
+			let pk = self.peek1().kind;
+			if pk == T::Colon {
+				self.record_id(t, true)
+			} else if pk == T::PathSep || pk == T::LParen {
 				// As for a plain identifier, `::` or `(` makes a builtin path.
-				T::PathSep | T::LParen => self.path_call(t.start, false),
-				_ => {
-					self.bump();
-					Ok(self.bare_ident(t))
-				}
-			},
-			T::Pipe => {
+				self.path_call(t.start, false)
+			} else {
 				self.bump();
-				if self.at(T::Param) {
-					self.closure(t.start)
-				} else {
-					self.mock(t.start)
-				}
+				Ok(self.bare_ident(t))
 			}
-			T::OrOr => {
-				self.bump();
-				let args = self.empty_list();
-				self.closure_body(t.start, args)
+		} else if t.kind == T::Pipe {
+			self.bump();
+			if self.at(T::Param) {
+				self.closure(t.start)
+			} else {
+				self.mock(t.start)
 			}
-			T::At => {
-				self.bump();
-				let d = self.leaf(Tag::Doc, 0, t);
-				if self.continues_idiom() {
-					return Ok(d);
-				}
-				// `@field`: the first part follows without a `.`.
-				self.push_frame(Frame::Idiom {
-					start: t.start,
-					mark: self.vals.len() as u32,
-					head: d,
-				})?;
-				match self.dot_part()? {
-					PartStep::Pushed => Ok(PUSHED),
-					_ => Ok(d),
-				}
+		} else if t.kind == T::OrOr {
+			self.bump();
+			let args = self.empty_list();
+			self.closure_body(t.start, args)
+		} else if t.kind == T::At {
+			self.bump();
+			let d = self.leaf(Tag::Doc, 0, t);
+			if self.continues_idiom() {
+				return Ok(d);
 			}
-			_ => Err(self.unexpected("an expression")),
+			// `@field`: the first part follows without a `.`.
+			self.push_frame(Frame::Idiom {
+				start: t.start,
+				mark: self.vals.len() as u32,
+				head: d,
+			})?;
+			match self.dot_part()? {
+				PartStep::Pushed => Ok(PUSHED),
+				PartStep::Done | PartStep::Finished => Ok(d),
+			}
+		} else {
+			Err(self.unexpected("an expression"))
 		}
 	}
 
@@ -1432,23 +1567,14 @@ impl<'a, 's> Parser<'a, 's> {
 	fn special_callee(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
 		if self.limits.no_surrealism {
-			match t.kw {
-				Kw::Ext => {
-					return Err(
-						self.surrealism_off(t, "Use of `ext::` requires Surrealism extensions")
-					);
-				}
-				Kw::Mod => {
-					return Err(
-						self.surrealism_off(t, "Use of `mod::` requires Surrealism extensions")
-					);
-				}
-				Kw::Silo => {
-					return Err(
-						self.surrealism_off(t, "Use of `silo::` requires Surrealism extensions")
-					);
-				}
-				_ => {}
+			if t.kw == Kw::Ext {
+				return Err(self.surrealism_off(t, "Use of `ext::` requires Surrealism extensions"));
+			} else if t.kw == Kw::Mod {
+				return Err(self.surrealism_off(t, "Use of `mod::` requires Surrealism extensions"));
+			} else if t.kw == Kw::Silo {
+				return Err(
+					self.surrealism_off(t, "Use of `silo::` requires Surrealism extensions")
+				);
 			}
 		}
 		self.expect(T::PathSep, "::")?;
@@ -1462,43 +1588,39 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		let mark = self.vals.len() as u32;
 		let mut deprecated = 0;
-		let op = match t.kw {
-			Kw::Ext | Kw::Mod => {
-				if t.kw == Kw::Mod {
-					deprecated = crate::ast::ext::MOD_PREFIX;
-				}
-				let name = self.name()?;
-				self.vals.push(name);
-				let sub = if self.eat(T::PathSep) {
-					path(self)?
-				} else {
-					NONE
-				};
-				self.vals.push(sub);
-				2
+		let op = if t.kw == Kw::Ext || t.kw == Kw::Mod {
+			if t.kw == Kw::Mod {
+				deprecated = crate::ast::ext::MOD_PREFIX;
 			}
-			Kw::Silo => {
-				let org = self.name()?;
-				self.vals.push(org);
-				self.expect(T::PathSep, "::")?;
-				let pkg = self.name()?;
-				self.vals.push(pkg);
-				self.silo_version()?;
-				let sub = if self.eat(T::PathSep) {
-					path(self)?
-				} else {
-					NONE
-				};
-				self.vals.push(sub);
-				deprecated = crate::ast::ext::SILO_NAME;
-				3
-			}
-			_ => {
-				let name = path(self)?;
-				self.vals.push(name);
-				self.model_version()?;
-				4
-			}
+			let name = self.name()?;
+			self.vals.push(name);
+			let sub = if self.eat(T::PathSep) {
+				path(self)?
+			} else {
+				NONE
+			};
+			self.vals.push(sub);
+			2
+		} else if t.kw == Kw::Silo {
+			let org = self.name()?;
+			self.vals.push(org);
+			self.expect(T::PathSep, "::")?;
+			let pkg = self.name()?;
+			self.vals.push(pkg);
+			self.silo_version()?;
+			let sub = if self.eat(T::PathSep) {
+				path(self)?
+			} else {
+				NONE
+			};
+			self.vals.push(sub);
+			deprecated = crate::ast::ext::SILO_NAME;
+			3
+		} else {
+			let name = path(self)?;
+			self.vals.push(name);
+			self.model_version()?;
+			4
 		};
 		let parts = self.list_from_raw(mark);
 		Ok(self.leaf_span(Tag::Name, op, parts, deprecated, t.start, self.prev_end))
@@ -1509,17 +1631,18 @@ impl<'a, 's> Parser<'a, 's> {
 	/// the registry), 1 (`fn::…`) or that of [`Self::special_callee`].
 	pub(crate) fn function_name(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		let custom = match t.kw {
-			Kw::Fn => {
-				self.bump();
-				self.expect(T::PathSep, "::")?;
-				true
-			}
-			Kw::Ext | Kw::Mod | Kw::Silo | Kw::Ml if t.is_ident() => {
-				return self.special_callee(t);
-			}
-			_ if t.is_ident() => false,
-			_ => return Err(self.unexpected("a function name")),
+		let custom = if t.kw == Kw::Fn {
+			self.bump();
+			self.expect(T::PathSep, "::")?;
+			true
+		} else if (t.kw == Kw::Ext || t.kw == Kw::Mod || t.kw == Kw::Silo || t.kw == Kw::Ml)
+			&& t.is_ident()
+		{
+			return self.special_callee(t);
+		} else if t.is_ident() {
+			false
+		} else {
+			return Err(self.unexpected("a function name"));
 		};
 		let first = self.ident()?;
 		let mut end = first.end;
@@ -1586,42 +1709,38 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	pub(crate) fn ident_primary(&mut self, t: Tok) -> R<NodeId> {
-		match t.kw {
-			Kw::None_ => {
-				self.bump();
-				return Ok(self.leaf(Tag::None, 0, t));
-			}
-			Kw::Null => {
-				self.bump();
-				return Ok(self.leaf(Tag::Null, 0, t));
-			}
-			Kw::True => {
-				self.bump();
-				return Ok(self.leaf(Tag::True, 0, t));
-			}
-			Kw::False => {
-				self.bump();
-				return Ok(self.leaf(Tag::False, 0, t));
-			}
-			_ if is_statement_keyword(self, t) => return self.nested_statement(t),
-			Kw::Fn if self.peek1().kind == T::PathSep => {
-				self.bump();
-				return self.path_call(t.start, true);
-			}
-			Kw::Ext | Kw::Mod | Kw::Silo | Kw::Ml if self.peek1().kind == T::PathSep => {
-				return self.special_call(t);
-			}
-			Kw::Function => return self.js_function(t),
-			_ => {}
+		if t.kw == Kw::None_ {
+			self.bump();
+			return Ok(self.leaf(Tag::None, 0, t));
+		} else if t.kw == Kw::Null {
+			self.bump();
+			return Ok(self.leaf(Tag::Null, 0, t));
+		} else if t.kw == Kw::True {
+			self.bump();
+			return Ok(self.leaf(Tag::True, 0, t));
+		} else if t.kw == Kw::False {
+			self.bump();
+			return Ok(self.leaf(Tag::False, 0, t));
+		} else if is_statement_keyword(self, t) {
+			return self.nested_statement(t);
+		} else if t.kw == Kw::Fn && self.peek1().kind == T::PathSep {
+			self.bump();
+			return self.path_call(t.start, true);
+		} else if (t.kw == Kw::Ext || t.kw == Kw::Mod || t.kw == Kw::Silo || t.kw == Kw::Ml)
+			&& self.peek1().kind == T::PathSep
+		{
+			return self.special_call(t);
+		} else if t.kw == Kw::Function {
+			return self.js_function(t);
 		}
 		let n = self.peek1();
-		match n.kind {
-			T::PathSep | T::LParen => self.path_call(t.start, false),
-			T::Colon => self.record_id(t, true),
-			_ => {
-				self.bump();
-				Ok(self.bare_ident(t))
-			}
+		if n.kind == T::PathSep || n.kind == T::LParen {
+			self.path_call(t.start, false)
+		} else if n.kind == T::Colon {
+			self.record_id(t, true)
+		} else {
+			self.bump();
+			Ok(self.bare_ident(t))
 		}
 	}
 
@@ -1639,9 +1758,13 @@ impl<'a, 's> Parser<'a, 's> {
 			end = self.ident()?.end;
 		}
 		// Without the hook, the consumer checks the path.
-		let kind = match self.limits.builtin {
-			Some(kind) if !custom && !any_path => Some(kind(self.text, first.start, end)),
-			_ => None,
+		let kind = if let Some(kind) = self.limits.builtin
+			&& !custom
+			&& !any_path
+		{
+			Some(kind(self.text, first.start, end))
+		} else {
+			None
 		};
 		if kind == Some(PathKind::Unknown) {
 			return Err(self.error(first.start, end, "Invalid function/constant path{suggest}"));
@@ -1681,7 +1804,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		// Where only an object can follow, its first key is read as one,
 		// so a key without its `:` fails at the `:`, as it always has.
-		if self.at_object_key() || !matches!(wrap, Wrap::None) {
+		if self.at_object_key() || wrap != Wrap::None {
 			self.push_frame(Frame::Object {
 				start,
 				mark: self.vals.len() as u32,
@@ -1748,28 +1871,29 @@ impl<'a, 's> Parser<'a, 's> {
 	/// Whether an object entry starts here: an object key and then `:`.
 	fn at_object_key(&self) -> bool {
 		let k = self.tok;
-		match k.kind {
-			T::Ident | T::EscIdent => self.peek1().kind == T::Colon,
-			T::Str if k.aux() == 0 => self.peek1().kind == T::Colon,
-			T::Digits => {
-				let mut l = self.lex;
-				match l.numeric(k.start) {
-					Ok(NumKind::Duration) | Err(_) => false,
-					Ok(_) => {
-						let next = l.next_token();
-						self.note(next);
-						next.kind == T::Colon
-					}
+		if k.kind == T::Ident || k.kind == T::EscIdent || (k.kind == T::Str && k.aux() == 0) {
+			self.peek1().kind == T::Colon
+		} else if k.kind == T::Digits {
+			let mut l = self.lex;
+			match l.numeric(k.start) {
+				Ok(NumKind::Duration) | Err(_) => false,
+				Ok(_) => {
+					let next = l.next_token();
+					self.note(next);
+					next.kind == T::Colon
 				}
 			}
-			_ => false,
+		} else {
+			false
 		}
 	}
 
 	/// An object key and its `:`; pushes the key `Name`.
 	pub(crate) fn object_key(&mut self) -> R<()> {
 		let k = self.tok;
-		if !matches!(k.kind, T::Ident | T::EscIdent | T::Str | T::Digits) || k.aux() != 0 {
+		if !(k.kind == T::Ident || k.kind == T::EscIdent || k.kind == T::Str || k.kind == T::Digits)
+			|| k.aux() != 0
+		{
 			return Err(self.unexpected("an object key"));
 		}
 		let n = if k.kind == T::Digits {
@@ -1789,10 +1913,12 @@ impl<'a, 's> Parser<'a, 's> {
 			self.leaf_span(Tag::Name, 0, 0, 0, nn.start, nn.end)
 		} else {
 			self.bump();
-			let op = match k.kind {
-				T::EscIdent => 1,
-				T::Str => 2,
-				_ => 0,
+			let op = if k.kind == T::EscIdent {
+				1
+			} else if k.kind == T::Str {
+				2
+			} else {
+				0
 			};
 			self.leaf(Tag::Name, op, k)
 		};

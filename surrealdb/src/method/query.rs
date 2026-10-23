@@ -63,7 +63,22 @@ impl<T: SurrealValue> IntoVariables for T {
 				}
 				Ok(vars)
 			}
-			unexpected => {
+			unexpected @ Value::None
+			| unexpected @ Value::Null
+			| unexpected @ Value::Bool(_)
+			| unexpected @ Value::Number(_)
+			| unexpected @ Value::String(_)
+			| unexpected @ Value::Bytes(_)
+			| unexpected @ Value::Duration(_)
+			| unexpected @ Value::Datetime(_)
+			| unexpected @ Value::Uuid(_)
+			| unexpected @ Value::Geometry(_)
+			| unexpected @ Value::Table(_)
+			| unexpected @ Value::RecordId(_)
+			| unexpected @ Value::File(_)
+			| unexpected @ Value::Range(_)
+			| unexpected @ Value::Regex(_)
+			| unexpected @ Value::Set(_) => {
 				Err(Error::validation(format!("Invalid variables type: {unexpected:?}"), None))
 			}
 		}

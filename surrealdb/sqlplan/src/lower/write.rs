@@ -667,7 +667,8 @@ fn lower_pgsql_expr_as(
 				surrealdb_pgsql::ast::op::UnaryOperator::Plus => PrefixOperator::Positive,
 				surrealdb_pgsql::ast::op::UnaryOperator::Minus => PrefixOperator::Negate,
 				surrealdb_pgsql::ast::op::UnaryOperator::Not => PrefixOperator::Not,
-				_ => {
+				surrealdb_pgsql::ast::op::UnaryOperator::BitNot
+				| surrealdb_pgsql::ast::op::UnaryOperator::Custom(_) => {
 					return Err(PlanError::UnsupportedExpression(format!("Unary operator {op:?}")));
 				}
 			};
@@ -706,7 +707,30 @@ fn lower_pgsql_expr_as(
 				surrealdb_pgsql::ast::op::BinaryOperator::GtEq => BinaryOperator::MoreThanEqual,
 				surrealdb_pgsql::ast::op::BinaryOperator::And => BinaryOperator::And,
 				surrealdb_pgsql::ast::op::BinaryOperator::Or => BinaryOperator::Or,
-				_ => {
+				surrealdb_pgsql::ast::op::BinaryOperator::Concat
+				| surrealdb_pgsql::ast::op::BinaryOperator::Like
+				| surrealdb_pgsql::ast::op::BinaryOperator::NotLike
+				| surrealdb_pgsql::ast::op::BinaryOperator::ILike
+				| surrealdb_pgsql::ast::op::BinaryOperator::NotILike
+				| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch
+				| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi
+				| surrealdb_pgsql::ast::op::BinaryOperator::Arrow
+				| surrealdb_pgsql::ast::op::BinaryOperator::LongArrow
+				| surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow
+				| surrealdb_pgsql::ast::op::BinaryOperator::Contains
+				| surrealdb_pgsql::ast::op::BinaryOperator::Exp
+				| surrealdb_pgsql::ast::op::BinaryOperator::BitAnd
+				| surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+				| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
+				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
+				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
+				| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
+				| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
+				| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch
+				| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi
+				| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
+				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
+				| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
 					return Err(PlanError::UnsupportedExpression(format!(
 						"Binary operator {op:?}"
 					)));
@@ -833,7 +857,66 @@ fn lower_pgsql_expr_as(
 			})))
 		}
 
-		other => Err(PlanError::UnsupportedExpression(format!("{other:?}"))),
+		other @ (surrealdb_pgsql::ast::expr::Expr::IsDistinctFrom {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArraySubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subscript {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Slice {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsTrue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsFalse {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsUnknown {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArrayConstructor {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Row {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsBound {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonObject {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonArray {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonExists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonValue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonQuery {
+			..
+		}) => Err(PlanError::UnsupportedExpression(format!("{other:?}"))),
 	}
 }
 
@@ -1686,7 +1769,8 @@ fn lower_mysql_expr_as(
 				surrealdb_mysql::ast::operator::UnaryOperator::Plus => PrefixOperator::Positive,
 				surrealdb_mysql::ast::operator::UnaryOperator::Minus => PrefixOperator::Negate,
 				surrealdb_mysql::ast::operator::UnaryOperator::Not => PrefixOperator::Not,
-				_ => {
+				surrealdb_mysql::ast::operator::UnaryOperator::BitNot
+				| surrealdb_mysql::ast::operator::UnaryOperator::Binary => {
 					return Err(PlanError::UnsupportedExpression(format!("Unary operator {op:?}")));
 				}
 			};
@@ -1734,7 +1818,19 @@ fn lower_mysql_expr_as(
 				}
 				surrealdb_mysql::ast::operator::BinaryOperator::And => BinaryOperator::And,
 				surrealdb_mysql::ast::operator::BinaryOperator::Or => BinaryOperator::Or,
-				_ => {
+				surrealdb_mysql::ast::operator::BinaryOperator::Concat
+				| surrealdb_mysql::ast::operator::BinaryOperator::NullSafeEqual
+				| surrealdb_mysql::ast::operator::BinaryOperator::IntDiv
+				| surrealdb_mysql::ast::operator::BinaryOperator::Like
+				| surrealdb_mysql::ast::operator::BinaryOperator::Regexp
+				| surrealdb_mysql::ast::operator::BinaryOperator::Rlike
+				| surrealdb_mysql::ast::operator::BinaryOperator::BitAnd
+				| surrealdb_mysql::ast::operator::BinaryOperator::BitOr
+				| surrealdb_mysql::ast::operator::BinaryOperator::BitXor
+				| surrealdb_mysql::ast::operator::BinaryOperator::ShiftLeft
+				| surrealdb_mysql::ast::operator::BinaryOperator::ShiftRight
+				| surrealdb_mysql::ast::operator::BinaryOperator::Xor
+				| surrealdb_mysql::ast::operator::BinaryOperator::Assign => {
 					return Err(PlanError::UnsupportedExpression(format!(
 						"Binary operator {op:?}"
 					)));
@@ -1897,7 +1993,30 @@ fn lower_mysql_expr_as(
 			})))
 		}
 
-		other => Err(PlanError::UnsupportedExpression(format!("{other:?}"))),
+		other @ (surrealdb_mysql::ast::expr::Expr::SystemVar {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::IsTruthValue {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Interval {
+			..
+		}) => Err(PlanError::UnsupportedExpression(format!("{other:?}"))),
 	}
 }
 

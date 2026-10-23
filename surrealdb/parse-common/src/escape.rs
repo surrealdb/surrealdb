@@ -203,7 +203,18 @@ pub fn unescape<'a>(source: &'a str, buffer: &'a mut String) -> Result<&'a str, 
 				buffer.push(c);
 				pending_span = span.end..span.end;
 			}
-			x => {
+			x @ EscapeTokenKind::EscNewline
+			| x @ EscapeTokenKind::EscCarriageReturn
+			| x @ EscapeTokenKind::EscTab
+			| x @ EscapeTokenKind::EscZeroByte
+			| x @ EscapeTokenKind::EscBackSlash
+			| x @ EscapeTokenKind::EscBackSpace
+			| x @ EscapeTokenKind::EscFormFeed
+			| x @ EscapeTokenKind::EscQuote
+			| x @ EscapeTokenKind::EscDoubleQuote
+			| x @ EscapeTokenKind::EscBackTick
+			| x @ EscapeTokenKind::EscBracketClose
+			| x @ EscapeTokenKind::EscUnicodeBracket => {
 				buffer.push_str(&source[pending_span]);
 				pending_span = span.end..span.end;
 				if !handle_escape(buffer, &source[span.clone()], x) {

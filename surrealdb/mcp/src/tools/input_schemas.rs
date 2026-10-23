@@ -46,7 +46,7 @@ fn normalise(schema: &mut Value) {
 	match schema {
 		Value::Bool(true) => *schema = Value::Object(Map::new()),
 		Value::Object(map) => normalise_object(map),
-		_ => {}
+		Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => {}
 	}
 }
 

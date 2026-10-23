@@ -40,11 +40,14 @@ pub fn sign(key: &Path, manifest: &[u8]) -> Result<Vec<u8>> {
 		.stdout(Stdio::piped())
 		.stderr(Stdio::inherit())
 		.spawn()
-		.map_err(|e| match e.kind() {
-			ErrorKind::NotFound => anyhow::anyhow!(
-				"`ssh-keygen` was not found on PATH. Key signing needs OpenSSH 8.9 or later"
-			),
-			_ => anyhow::Error::new(e).context("Failed to run ssh-keygen"),
+		.map_err(|e| {
+			if e.kind() == ErrorKind::NotFound {
+				anyhow::anyhow!(
+					"`ssh-keygen` was not found on PATH. Key signing needs OpenSSH 8.9 or later"
+				)
+			} else {
+				anyhow::Error::new(e).context("Failed to run ssh-keygen")
+			}
 		})?;
 	{
 		let mut stdin = child.stdin.take().context("ssh-keygen has no stdin")?;

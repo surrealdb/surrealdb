@@ -647,16 +647,18 @@ pub(crate) fn path(text: &str) -> Option<String> {
 	loop {
 		let t = l.next_token();
 		let seg = text.get(t.start as usize..t.end as usize)?;
-		match t.kind {
-			T::Eof => return Some(out),
-			T::PathSep => out.push_str("::"),
-			T::Ident => out.push_str(seg),
-			T::EscIdent => {
-				if !decode::unescape(decode::strip_delims(seg), &mut out) {
-					return None;
-				}
+		if t.kind == T::Eof {
+			return Some(out);
+		} else if t.kind == T::PathSep {
+			out.push_str("::");
+		} else if t.kind == T::Ident {
+			out.push_str(seg);
+		} else if t.kind == T::EscIdent {
+			if !decode::unescape(decode::strip_delims(seg), &mut out) {
+				return None;
 			}
-			_ => return None,
+		} else {
+			return None;
 		}
 	}
 }

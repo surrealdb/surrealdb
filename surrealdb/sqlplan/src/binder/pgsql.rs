@@ -69,9 +69,10 @@ pub fn bind_select(
 			} else {
 				for (i, t) in bound_query.targets.iter_mut().enumerate() {
 					if t.alias.is_none() {
-						let name = match &t.expr {
-							BoundExpr::Column(c) => c.column.clone(),
-							_ => format!("col_{}", i + 1),
+						let name = if let BoundExpr::Column(c) = &t.expr {
+							c.column.clone()
+						} else {
+							format!("col_{}", i + 1)
 						};
 						t.alias = Some(name);
 					}
@@ -170,28 +171,24 @@ pub fn bind_select(
 	// 5. Bind GROUP BY (window functions forbidden)
 	let mut group_by = Vec::new();
 	for g in &select.group_by {
-		let bound = match g {
-			Expr::Literal {
-				lit: PgLiteral::Integer(pos),
-				..
-			} => {
-				if policy.group_by_ordinal {
-					scope.resolve_group_by_ordinal(*pos as usize)?
-				} else {
-					return Err(PlanError::Custom("GROUP BY ordinal not allowed".into()));
-				}
+		let bound = if let Expr::Literal {
+			lit: PgLiteral::Integer(pos),
+			..
+		} = g
+		{
+			if policy.group_by_ordinal {
+				scope.resolve_group_by_ordinal(*pos as usize)?
+			} else {
+				return Err(PlanError::Custom("GROUP BY ordinal not allowed".into()));
 			}
-			Expr::ColumnRef(col) if col.fields.len() == 1 => {
-				let col_name = &col.fields[0];
-				if policy.group_by_alias
-					&& let Some(target_expr) = scope.find_target_by_alias(col_name, policy)
-				{
-					target_expr
-				} else {
-					bind_expr(g, &scope, catalog, policy)?
-				}
-			}
-			_ => bind_expr(g, &scope, catalog, policy)?,
+		} else if let Expr::ColumnRef(col) = g
+			&& col.fields.len() == 1
+			&& policy.group_by_alias
+			&& let Some(target_expr) = scope.find_target_by_alias(&col.fields[0], policy)
+		{
+			target_expr
+		} else {
+			bind_expr(g, &scope, catalog, policy)?
 		};
 		if bound.contains_window() {
 			return Err(PlanError::WindowNotAllowed("GROUP BY clause".into()));
@@ -215,26 +212,23 @@ pub fn bind_select(
 	// 7. Bind ORDER BY
 	let mut order_by = Vec::new();
 	for item in &select.order_by {
-		let expr = match &item.expr {
-			Expr::Literal {
-				lit: PgLiteral::Integer(pos),
-				..
-			} => {
-				if policy.order_by_ordinal {
-					scope.resolve_order_by_ordinal(*pos as usize)?
-				} else {
-					return Err(PlanError::Custom("ORDER BY ordinal not allowed".into()));
-				}
+		let expr = if let Expr::Literal {
+			lit: PgLiteral::Integer(pos),
+			..
+		} = &item.expr
+		{
+			if policy.order_by_ordinal {
+				scope.resolve_order_by_ordinal(*pos as usize)?
+			} else {
+				return Err(PlanError::Custom("ORDER BY ordinal not allowed".into()));
 			}
-			Expr::ColumnRef(col) if col.fields.len() == 1 => {
-				let col_name = &col.fields[0];
-				if let Some(target_expr) = scope.find_target_by_alias(col_name, policy) {
-					target_expr
-				} else {
-					bind_expr(&item.expr, &scope, catalog, policy)?
-				}
-			}
-			_ => bind_expr(&item.expr, &scope, catalog, policy)?,
+		} else if let Expr::ColumnRef(col) = &item.expr
+			&& col.fields.len() == 1
+			&& let Some(target_expr) = scope.find_target_by_alias(&col.fields[0], policy)
+		{
+			target_expr
+		} else {
+			bind_expr(&item.expr, &scope, catalog, policy)?
 		};
 
 		let direction = match item.direction {
@@ -416,9 +410,12 @@ fn bind_table_ref(
 								.iter()
 								.enumerate()
 								.map(|(i, t)| {
-									t.alias.clone().unwrap_or_else(|| match &t.expr {
-										BoundExpr::Column(c) => c.column.clone(),
-										_ => format!("col_{}", i + 1),
+									t.alias.clone().unwrap_or_else(|| {
+										if let BoundExpr::Column(c) = &t.expr {
+											c.column.clone()
+										} else {
+											format!("col_{}", i + 1)
+										}
 									})
 								})
 								.collect(),
@@ -711,7 +708,10 @@ pub fn bind_expr(
 				surrealdb_pgsql::ast::op::UnaryOperator::Not => BoundUnaryOp::Not,
 				surrealdb_pgsql::ast::op::UnaryOperator::Plus => BoundUnaryOp::Positive,
 				surrealdb_pgsql::ast::op::UnaryOperator::Minus => BoundUnaryOp::Negate,
-				_ => return Err(PlanError::UnsupportedExpression(format!("Unary op {op:?}"))),
+				surrealdb_pgsql::ast::op::UnaryOperator::BitNot
+				| surrealdb_pgsql::ast::op::UnaryOperator::Custom(_) => {
+					return Err(PlanError::UnsupportedExpression(format!("Unary op {op:?}")));
+				}
 			};
 			Ok(BoundExpr::Unary {
 				op: bound_op,
@@ -794,7 +794,18 @@ pub fn bind_expr(
 					BoundBinaryOp::JsonPathExtractText
 				}
 				surrealdb_pgsql::ast::op::BinaryOperator::Contains => BoundBinaryOp::JsonContains,
-				_ => return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}"))),
+				surrealdb_pgsql::ast::op::BinaryOperator::BitAnd
+				| surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+				| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
+				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
+				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
+				| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
+				| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
+				| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
+				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
+				| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
+					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));
+				}
 			};
 			Ok(BoundExpr::Binary {
 				left: Box::new(l),
@@ -1099,7 +1110,37 @@ pub fn bind_expr(
 						BinaryOperator::GtEq => BoundBinaryOp::GreaterThanEqual,
 						BinaryOperator::Eq => BoundBinaryOp::Equal,
 						BinaryOperator::NotEq => BoundBinaryOp::NotEqual,
-						_ => {
+						BinaryOperator::Add
+						| BinaryOperator::Sub
+						| BinaryOperator::Mul
+						| BinaryOperator::Div
+						| BinaryOperator::Mod
+						| BinaryOperator::Exp
+						| BinaryOperator::BitAnd
+						| BinaryOperator::BitOr
+						| BinaryOperator::BitXor
+						| BinaryOperator::ShiftLeft
+						| BinaryOperator::ShiftRight
+						| BinaryOperator::And
+						| BinaryOperator::Or
+						| BinaryOperator::Concat
+						| BinaryOperator::Like
+						| BinaryOperator::NotLike
+						| BinaryOperator::ILike
+						| BinaryOperator::NotILike
+						| BinaryOperator::SimilarTo
+						| BinaryOperator::NotSimilarTo
+						| BinaryOperator::RegexMatch
+						| BinaryOperator::RegexMatchCi
+						| BinaryOperator::RegexNotMatch
+						| BinaryOperator::RegexNotMatchCi
+						| BinaryOperator::Arrow
+						| BinaryOperator::LongArrow
+						| BinaryOperator::HashArrow
+						| BinaryOperator::HashLongArrow
+						| BinaryOperator::Contains
+						| BinaryOperator::ContainedBy
+						| BinaryOperator::Custom(_) => {
 							return Err(PlanError::UnsupportedExpression(format!(
 								"Quantified op {op:?}"
 							)));
@@ -1146,7 +1187,48 @@ pub fn bind_expr(
 				}
 			}
 		}
-		_ => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
+		Expr::Subscript {
+			..
+		}
+		| Expr::Slice {
+			..
+		}
+		| Expr::IsTrue {
+			..
+		}
+		| Expr::IsFalse {
+			..
+		}
+		| Expr::IsUnknown {
+			..
+		}
+		| Expr::Collate {
+			..
+		}
+		| Expr::ArrayConstructor {
+			..
+		}
+		| Expr::Row {
+			..
+		}
+		| Expr::IsBound {
+			..
+		}
+		| Expr::JsonObject {
+			..
+		}
+		| Expr::JsonArray {
+			..
+		}
+		| Expr::JsonExists {
+			..
+		}
+		| Expr::JsonValue {
+			..
+		}
+		| Expr::JsonQuery {
+			..
+		} => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
 	}
 }
 
@@ -1179,7 +1261,10 @@ fn table_ref_contains(tr: &TableRef, table_name: &str) -> bool {
 			right,
 			..
 		} => table_ref_contains(left, table_name) || table_ref_contains(right, table_name),
-		_ => false,
+		TableRef::GraphTable {
+			..
+		}
+		| TableRef::JsonTable(_) => false,
 	}
 }
 

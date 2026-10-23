@@ -67,10 +67,12 @@ impl Parser<'_> {
 		// Level 1: `OR` and `XOR`, same level, left associative.
 		let mut left = self.parse_and_expr()?;
 		loop {
-			let op = match self.peek_kind() {
-				t!("OR") => BinaryOp::Or,
-				t!("XOR") => BinaryOp::Xor,
-				_ => break,
+			let op = if self.peek_kind() == t!("OR") {
+				BinaryOp::Or
+			} else if self.peek_kind() == t!("XOR") {
+				BinaryOp::Xor
+			} else {
+				break;
 			};
 			self.pop_peek();
 			self.enter_expr_depth()?;
@@ -113,51 +115,51 @@ impl Parser<'_> {
 			let is_token = self.pop_peek();
 			let negated = self.eat(t!("NOT"));
 			let token = self.next();
-			let value = match token.kind {
-				t!("TRUE") => TruthValue::True,
-				t!("FALSE") => TruthValue::False,
-				t!("UNKNOWN") => TruthValue::Unknown,
+			let value = if token.kind == t!("TRUE") {
+				TruthValue::True
+			} else if token.kind == t!("FALSE") {
+				TruthValue::False
+			} else if token.kind == t!("UNKNOWN") {
+				TruthValue::Unknown
+			} else if token.kind == t!("NULL") {
 				// A primary consumes its own `IS [NOT] NULL` postfix, so
 				// reaching a null test here means the operand was a larger
 				// expression, which the grammar does not allow.
-				t!("NULL") => {
-					bail!(
-						"`IS NULL` may only directly follow a simple expression",
-						@is_token.span.covers(token.span),
-						@expr.span() => "wrap this expression in parentheses: `(…) IS NULL`"
-					);
-				}
-				t!("TYPED") => {
-					bail!(
-						"`IS [NOT] TYPED` type predicates are not supported yet",
-						@is_token.span.covers(token.span)
-					);
-				}
-				t!("NORMALIZED") | t!("NFC") | t!("NFD") | t!("NFKC") | t!("NFKD") => {
-					bail!(
-						"`IS [NOT] NORMALIZED` predicates are not supported yet",
-						@is_token.span.covers(token.span)
-					);
-				}
-				t!("LABELED") => {
-					bail!(
-						"`IS [NOT] LABELED` predicates are not supported yet",
-						@is_token.span.covers(token.span)
-					);
-				}
-				t!("DIRECTED") => {
-					bail!(
-						"`IS [NOT] DIRECTED` predicates are not supported yet",
-						@is_token.span.covers(token.span)
-					);
-				}
-				t!("SOURCE") | t!("DESTINATION") => {
-					bail!(
-						"`IS [NOT] SOURCE/DESTINATION OF` predicates are not supported yet",
-						@is_token.span.covers(token.span)
-					);
-				}
-				_ => unexpected!(self, token, "`TRUE`, `FALSE`, `UNKNOWN` or `NULL`"),
+				bail!(
+					"`IS NULL` may only directly follow a simple expression",
+					@is_token.span.covers(token.span),
+					@expr.span() => "wrap this expression in parentheses: `(…) IS NULL`"
+				);
+			} else if token.kind == t!("TYPED") {
+				bail!(
+					"`IS [NOT] TYPED` type predicates are not supported yet",
+					@is_token.span.covers(token.span)
+				);
+			} else if matches!(
+				token.kind,
+				t!("NORMALIZED") | t!("NFC") | t!("NFD") | t!("NFKC") | t!("NFKD")
+			) {
+				bail!(
+					"`IS [NOT] NORMALIZED` predicates are not supported yet",
+					@is_token.span.covers(token.span)
+				);
+			} else if token.kind == t!("LABELED") {
+				bail!(
+					"`IS [NOT] LABELED` predicates are not supported yet",
+					@is_token.span.covers(token.span)
+				);
+			} else if token.kind == t!("DIRECTED") {
+				bail!(
+					"`IS [NOT] DIRECTED` predicates are not supported yet",
+					@is_token.span.covers(token.span)
+				);
+			} else if matches!(token.kind, t!("SOURCE") | t!("DESTINATION")) {
+				bail!(
+					"`IS [NOT] SOURCE/DESTINATION OF` predicates are not supported yet",
+					@is_token.span.covers(token.span)
+				);
+			} else {
+				unexpected!(self, token, "`TRUE`, `FALSE`, `UNKNOWN` or `NULL`")
 			};
 			let span = expr.span().covers(token.span);
 			expr = GqlExpr::IsBool {
@@ -244,14 +246,21 @@ impl Parser<'_> {
 	/// Returns the comparison operator the next token corresponds to, if
 	/// any, without consuming it.
 	fn peek_comparison_op(&mut self) -> Option<BinaryOp> {
-		match self.peek_kind() {
-			t!("=") => Some(BinaryOp::Eq),
-			t!("<>") => Some(BinaryOp::Neq),
-			t!("<") => Some(BinaryOp::Lt),
-			t!("<=") => Some(BinaryOp::Lte),
-			t!(">") => Some(BinaryOp::Gt),
-			t!(">=") => Some(BinaryOp::Gte),
-			_ => None,
+		let kind = self.peek_kind();
+		if kind == t!("=") {
+			Some(BinaryOp::Eq)
+		} else if kind == t!("<>") {
+			Some(BinaryOp::Neq)
+		} else if kind == t!("<") {
+			Some(BinaryOp::Lt)
+		} else if kind == t!("<=") {
+			Some(BinaryOp::Lte)
+		} else if kind == t!(">") {
+			Some(BinaryOp::Gt)
+		} else if kind == t!(">=") {
+			Some(BinaryOp::Gte)
+		} else {
+			None
 		}
 	}
 
@@ -260,46 +269,40 @@ impl Parser<'_> {
 	/// `STARTS WITH`, `ENDS WITH` and `CONTAINS`.
 	fn check_rejected_operator(&mut self) -> ParseResult<()> {
 		let token = self.peek();
-		match token.kind {
-			t!("!") if self.peek1().kind == t!("=") => {
-				bail!(
-					"GQL uses `<>` for inequality",
-					@token.span.covers(self.peek1().span) => "replace `!=` with `<>`"
-				);
-			}
+		if token.kind == t!("!") && self.peek1().kind == t!("=") {
+			bail!(
+				"GQL uses `<>` for inequality",
+				@token.span.covers(self.peek1().span) => "replace `!=` with `<>`"
+			);
+		} else if token.kind == t!("IN") {
 			// `IN` is reserved but only used by `FOR` and `LET … IN … END`;
 			// there is no membership predicate.
-			t!("IN") => {
+			bail!(
+				"GQL has no `IN` membership operator",
+				@token.span => "compare against the values individually, combined with OR"
+			);
+		} else if token.kind == t!("LIKE") {
+			// `LIKE` is reserved but only used in DDL graph type clauses.
+			bail!("GQL has no `LIKE` operator", @token.span);
+		} else if token.kind == TokenKind::Identifier {
+			let text = self.span_str(token.span);
+			if text.eq_ignore_ascii_case("STARTS") && self.peek1().kind == t!("WITH") {
 				bail!(
-					"GQL has no `IN` membership operator",
-					@token.span => "compare against the values individually, combined with OR"
+					"GQL has no `STARTS WITH` operator",
+					@token.span.covers(self.peek1().span)
 				);
 			}
-			// `LIKE` is reserved but only used in DDL graph type clauses.
-			t!("LIKE") => {
-				bail!("GQL has no `LIKE` operator", @token.span);
+			if text.eq_ignore_ascii_case("ENDS") && self.peek1().kind == t!("WITH") {
+				bail!(
+					"GQL has no `ENDS WITH` operator",
+					@token.span.covers(self.peek1().span)
+				);
 			}
-			TokenKind::Identifier => {
-				let text = self.span_str(token.span);
-				if text.eq_ignore_ascii_case("STARTS") && self.peek1().kind == t!("WITH") {
-					bail!(
-						"GQL has no `STARTS WITH` operator",
-						@token.span.covers(self.peek1().span)
-					);
-				}
-				if text.eq_ignore_ascii_case("ENDS") && self.peek1().kind == t!("WITH") {
-					bail!(
-						"GQL has no `ENDS WITH` operator",
-						@token.span.covers(self.peek1().span)
-					);
-				}
-				if text.eq_ignore_ascii_case("CONTAINS") {
-					bail!("GQL has no `CONTAINS` operator", @token.span);
-				}
-				Ok(())
+			if text.eq_ignore_ascii_case("CONTAINS") {
+				bail!("GQL has no `CONTAINS` operator", @token.span);
 			}
-			_ => Ok(()),
 		}
+		Ok(())
 	}
 
 	/// Level 7: the `||` concatenation operator, left associative.
@@ -325,10 +328,12 @@ impl Parser<'_> {
 	fn parse_additive_expr(&mut self) -> ParseResult<GqlExpr> {
 		let mut left = self.parse_multiplicative_expr()?;
 		loop {
-			let op = match self.peek_kind() {
-				t!("+") => BinaryOp::Add,
-				t!("-") => BinaryOp::Sub,
-				_ => break,
+			let op = if self.peek_kind() == t!("+") {
+				BinaryOp::Add
+			} else if self.peek_kind() == t!("-") {
+				BinaryOp::Sub
+			} else {
+				break;
 			};
 			self.pop_peek();
 			self.enter_expr_depth()?;
@@ -350,10 +355,12 @@ impl Parser<'_> {
 	fn parse_multiplicative_expr(&mut self) -> ParseResult<GqlExpr> {
 		let mut left = self.parse_unary_expr()?;
 		loop {
-			let op = match self.peek_kind() {
-				t!("*") => BinaryOp::Mul,
-				t!("/") => BinaryOp::Div,
-				_ => break,
+			let op = if self.peek_kind() == t!("*") {
+				BinaryOp::Mul
+			} else if self.peek_kind() == t!("/") {
+				BinaryOp::Div
+			} else {
+				break;
 			};
 			self.pop_peek();
 			self.enter_expr_depth()?;
@@ -374,10 +381,12 @@ impl Parser<'_> {
 	/// Level 10: the unary `+` and `-` sign operators.
 	fn parse_unary_expr(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.peek();
-		let op = match token.kind {
-			t!("+") => UnaryOp::Plus,
-			t!("-") => UnaryOp::Neg,
-			_ => return self.parse_primary_expr(),
+		let op = if token.kind == t!("+") {
+			UnaryOp::Plus
+		} else if token.kind == t!("-") {
+			UnaryOp::Neg
+		} else {
+			return self.parse_primary_expr();
 		};
 		self.pop_peek();
 		self.enter_expr_depth()?;
@@ -447,181 +456,162 @@ impl Parser<'_> {
 	/// call, list or record literal, or a parenthesized expression.
 	fn parse_primary_atom(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.peek();
-		match token.kind {
-			t!("(") => {
-				let open = self.pop_peek().span;
-				let expr = self.parse_expr()?;
-				self.expect_closing_delimiter(t!(")"), open)?;
-				Ok(expr)
-			}
-			t!("[") => {
-				let open = self.pop_peek().span;
-				let mut items = Vec::new();
-				if self.peek_kind() != t!("]") {
-					loop {
-						items.push(self.parse_expr()?);
-						if !self.eat(t!(",")) {
-							break;
-						}
+		if token.kind == t!("(") {
+			let open = self.pop_peek().span;
+			let expr = self.parse_expr()?;
+			self.expect_closing_delimiter(t!(")"), open)?;
+			Ok(expr)
+		} else if token.kind == t!("[") {
+			let open = self.pop_peek().span;
+			let mut items = Vec::new();
+			if self.peek_kind() != t!("]") {
+				loop {
+					items.push(self.parse_expr()?);
+					if !self.eat(t!(",")) {
+						break;
 					}
 				}
-				self.expect_closing_delimiter(t!("]"), open)?;
-				Ok(GqlExpr::List(items, open.covers(self.last_span())))
 			}
-			t!("{") => {
-				let open = self.pop_peek().span;
-				let mut fields = Vec::new();
-				if self.peek_kind() != t!("}") {
-					loop {
-						// Field names are identifier positions: a `"…"`
-						// token is a delimited identifier here.
-						let key = self.parse_ident()?;
-						let colon = self.peek();
-						if colon.kind != t!(":") {
-							unexpected!(self, colon, "`:`");
-						}
-						self.pop_peek();
-						let value = self.parse_expr()?;
-						fields.push((key, value));
-						if !self.eat(t!(",")) {
-							break;
-						}
+			self.expect_closing_delimiter(t!("]"), open)?;
+			Ok(GqlExpr::List(items, open.covers(self.last_span())))
+		} else if token.kind == t!("{") {
+			let open = self.pop_peek().span;
+			let mut fields = Vec::new();
+			if self.peek_kind() != t!("}") {
+				loop {
+					// Field names are identifier positions: a `"…"`
+					// token is a delimited identifier here.
+					let key = self.parse_ident()?;
+					let colon = self.peek();
+					if colon.kind != t!(":") {
+						unexpected!(self, colon, "`:`");
+					}
+					self.pop_peek();
+					let value = self.parse_expr()?;
+					fields.push((key, value));
+					if !self.eat(t!(",")) {
+						break;
 					}
 				}
-				self.expect_closing_delimiter(t!("}"), open)?;
-				Ok(GqlExpr::Map(fields, open.covers(self.last_span())))
 			}
-			TokenKind::Parameter => {
-				self.pop_peek();
-				let name = self.parse_parameter_name(token)?;
-				Ok(GqlExpr::Param {
-					name,
-					span: token.span,
-				})
-			}
-			TokenKind::SubstitutedParameter => {
-				bail!(
-					"Substituted parameters (`$$name`) are not supported yet",
-					@token.span => "use a general `$name` parameter"
-				);
-			}
-			TokenKind::Number {
-				kind,
-				suffix,
-			} => {
-				self.pop_peek();
-				let literal = self.parse_number_literal(token, kind, suffix)?;
-				Ok(GqlExpr::Literal(literal, token.span))
-			}
+			self.expect_closing_delimiter(t!("}"), open)?;
+			Ok(GqlExpr::Map(fields, open.covers(self.last_span())))
+		} else if token.kind == TokenKind::Parameter {
+			self.pop_peek();
+			let name = self.parse_parameter_name(token)?;
+			Ok(GqlExpr::Param {
+				name,
+				span: token.span,
+			})
+		} else if token.kind == TokenKind::SubstitutedParameter {
+			bail!(
+				"Substituted parameters (`$$name`) are not supported yet",
+				@token.span => "use a general `$name` parameter"
+			);
+		} else if let TokenKind::Number {
+			kind,
+			suffix,
+		} = token.kind
+		{
+			self.pop_peek();
+			let literal = self.parse_number_literal(token, kind, suffix)?;
+			Ok(GqlExpr::Literal(literal, token.span))
+		} else if matches!(
+			token.kind,
+			TokenKind::SingleQuoted { .. } | TokenKind::DoubleQuoted { .. }
+		) {
 			// In expression position a single- or double-quoted token is a
 			// character string literal; in identifier positions (variable
 			// declarations, label names, property keys, aliases) the
 			// double-quoted token is a delimited identifier instead. See
 			// `Parser::parse_ident`.
-			TokenKind::SingleQuoted {
-				..
-			}
-			| TokenKind::DoubleQuoted {
-				..
-			} => {
-				self.pop_peek();
-				let value = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
-				Ok(GqlExpr::Literal(GqlLiteral::String(value), token.span))
-			}
+			self.pop_peek();
+			let value = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
+			Ok(GqlExpr::Literal(GqlLiteral::String(value), token.span))
+		} else if matches!(token.kind, TokenKind::AccentQuoted { .. }) {
 			// An accent-quoted token is always a delimited identifier: in
 			// expression position it is a variable reference.
-			TokenKind::AccentQuoted {
-				..
-			} => {
-				self.pop_peek();
-				let name = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
-				Ok(GqlExpr::Variable(Ident {
-					name,
-					span: token.span,
-				}))
-			}
-			t!("TRUE") => {
-				self.pop_peek();
-				Ok(GqlExpr::Literal(GqlLiteral::Bool(true), token.span))
-			}
-			t!("FALSE") => {
-				self.pop_peek();
-				Ok(GqlExpr::Literal(GqlLiteral::Bool(false), token.span))
-			}
+			self.pop_peek();
+			let name = Lexer::unescape_quoted_span(self.span_str(token.span), token.span)?;
+			Ok(GqlExpr::Variable(Ident {
+				name,
+				span: token.span,
+			}))
+		} else if token.kind == t!("TRUE") {
+			self.pop_peek();
+			Ok(GqlExpr::Literal(GqlLiteral::Bool(true), token.span))
+		} else if token.kind == t!("FALSE") {
+			self.pop_peek();
+			Ok(GqlExpr::Literal(GqlLiteral::Bool(false), token.span))
+		} else if matches!(token.kind, t!("UNKNOWN") | t!("NULL")) {
 			// The UNKNOWN boolean literal is the null value of the boolean
 			// type (ISO 39075 three-valued logic), so it parses as the null
 			// literal.
-			t!("UNKNOWN") | t!("NULL") => {
+			self.pop_peek();
+			Ok(GqlExpr::Literal(GqlLiteral::Null, token.span))
+		} else if token.kind == t!("EXISTS") {
+			bail!("`EXISTS` predicates are not supported yet", @token.span);
+		} else if token.kind == t!("CASE") {
+			bail!("`CASE` expressions are not supported yet", @token.span);
+		} else if token.kind == t!("CAST") {
+			bail!("`CAST` expressions are not supported yet", @token.span);
+		} else if token.kind == TokenKind::Identifier {
+			if self.peek1().kind == t!("(") {
+				return self.parse_function_call();
+			}
+			self.pop_peek();
+			Ok(GqlExpr::Variable(Ident {
+				name: self.span_str(token.span).to_owned(),
+				span: token.span,
+			}))
+		} else if let TokenKind::Keyword(keyword) = token.kind {
+			// Any keyword directly followed by `(` is accepted as a
+			// function name (`ABS`, `COUNT`, `UPPER`, …, which are all
+			// reserved words); lowering validates the name.
+			if self.peek1().kind == t!("(") {
+				return self.parse_function_call();
+			}
+			if keyword.is_non_reserved() {
 				self.pop_peek();
-				Ok(GqlExpr::Literal(GqlLiteral::Null, token.span))
-			}
-			t!("EXISTS") => {
-				bail!("`EXISTS` predicates are not supported yet", @token.span);
-			}
-			t!("CASE") => {
-				bail!("`CASE` expressions are not supported yet", @token.span);
-			}
-			t!("CAST") => {
-				bail!("`CAST` expressions are not supported yet", @token.span);
-			}
-			TokenKind::Identifier => {
-				if self.peek1().kind == t!("(") {
-					return self.parse_function_call();
-				}
-				self.pop_peek();
-				Ok(GqlExpr::Variable(Ident {
+				return Ok(GqlExpr::Variable(Ident {
 					name: self.span_str(token.span).to_owned(),
 					span: token.span,
-				}))
+				}));
 			}
-			TokenKind::Keyword(keyword) => {
-				// Any keyword directly followed by `(` is accepted as a
-				// function name (`ABS`, `COUNT`, `UPPER`, …, which are all
-				// reserved words); lowering validates the name.
-				if self.peek1().kind == t!("(") {
-					return self.parse_function_call();
-				}
-				if keyword.is_non_reserved() {
-					self.pop_peek();
-					return Ok(GqlExpr::Variable(Ident {
-						name: self.span_str(token.span).to_owned(),
-						span: token.span,
-					}));
-				}
-				// A temporal type keyword followed by a string is a typed
-				// temporal literal (`temporalLiteral`, GQL.g4:3010), not a
-				// misused variable name.
-				if matches!(
-					keyword,
-					Keyword::Date
-						| Keyword::Time | Keyword::Datetime
-						| Keyword::Timestamp
-						| Keyword::Duration
-				) && matches!(
-					self.peek1().kind,
-					TokenKind::SingleQuoted { .. } | TokenKind::DoubleQuoted { .. }
-				) {
-					bail!(
-						"Typed temporal literals (`{} '…'`) are not supported yet",
-						self.span_str(token.span),
-						@token.span.covers(self.peek1().span)
-					);
-				}
-				// `SESSION_USER` is a grammatical primary
-				// (`generalValueSpecification`, GQL.g4:2273).
-				if keyword == Keyword::SessionUser {
-					bail!(
-						"The `SESSION_USER` value specification is not supported yet",
-						@token.span
-					);
-				}
+			// A temporal type keyword followed by a string is a typed
+			// temporal literal (`temporalLiteral`, GQL.g4:3010), not a
+			// misused variable name.
+			if matches!(
+				keyword,
+				Keyword::Date
+					| Keyword::Time | Keyword::Datetime
+					| Keyword::Timestamp
+					| Keyword::Duration
+			) && matches!(
+				self.peek1().kind,
+				TokenKind::SingleQuoted { .. } | TokenKind::DoubleQuoted { .. }
+			) {
 				bail!(
-					"`{}` is a reserved word and cannot be used as a variable name",
+					"Typed temporal literals (`{} '…'`) are not supported yet",
 					self.span_str(token.span),
-					@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
+					@token.span.covers(self.peek1().span)
 				);
 			}
-			_ => unexpected!(self, token, "an expression"),
+			// `SESSION_USER` is a grammatical primary
+			// (`generalValueSpecification`, GQL.g4:2273).
+			if keyword == Keyword::SessionUser {
+				bail!(
+					"The `SESSION_USER` value specification is not supported yet",
+					@token.span
+				);
+			}
+			bail!(
+				"`{}` is a reserved word and cannot be used as a variable name",
+				self.span_str(token.span),
+				@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
+			);
+		} else {
+			unexpected!(self, token, "an expression")
 		}
 	}
 
@@ -735,7 +725,7 @@ impl Parser<'_> {
 			NumberKind::Hex => (16, text.strip_prefix("0x").unwrap_or(text)),
 			NumberKind::Octal => (8, text.strip_prefix("0o").unwrap_or(text)),
 			NumberKind::Binary => (2, text.strip_prefix("0b").unwrap_or(text)),
-			_ => (10, text),
+			NumberKind::Integer | NumberKind::Float | NumberKind::Scientific => (10, text),
 		};
 		(radix, digits.replace('_', ""))
 	}

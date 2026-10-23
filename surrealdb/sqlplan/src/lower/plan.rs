@@ -571,7 +571,48 @@ fn target_output_name(target: &BoundTarget) -> String {
 				name,
 				..
 			} => name.clone(),
-			_ => "col".to_string(),
+			BoundExpr::Literal(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::Binary {
+				..
+			}
+			| BoundExpr::Unary {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Between {
+				..
+			}
+			| BoundExpr::InList {
+				..
+			}
+			| BoundExpr::IsNull {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			}
+			| BoundExpr::Column(_) => "col".to_string(),
 		},
 	}
 }
@@ -668,7 +709,24 @@ fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {
 				collect_aggregate_exprs(el, acc);
 			}
 		}
-		_ => {}
+		BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => {}
 	}
 }
 
@@ -801,7 +859,27 @@ fn rewrite_aggregates_to_columns(
 				.as_ref()
 				.map(|el| Box::new(rewrite_aggregates_to_columns(el, mapping, keep_id))),
 		},
-		_ => expr.clone(),
+		BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => expr.clone(),
 	}
 }
 
@@ -861,7 +939,7 @@ fn lower_table_source(
 			let kind = match join_type {
 				BoundJoinType::Inner | BoundJoinType::Cross => JoinKind::Inner,
 				BoundJoinType::Left => JoinKind::Left,
-				_ => {
+				BoundJoinType::Right | BoundJoinType::Full => {
 					return Err(PlanError::UnsupportedStatement(format!(
 						"Join type {join_type:?} not supported directly in streaming engine"
 					)));
@@ -1140,7 +1218,51 @@ fn extract_equi_conditions(
 		} => {
 			on.push((*left.clone(), *right.clone()));
 		}
-		other => {
+		other @ (BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::Binary {
+			..
+		}
+		| BoundExpr::Unary {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::Cast {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		}) => {
 			residual.push(other.clone());
 		}
 	}
@@ -1162,6 +1284,40 @@ fn expr_max_relation_index(expr: &BoundExpr) -> usize {
 			expr,
 			..
 		} => expr_max_relation_index(expr),
-		_ => 0,
+		BoundExpr::Literal(_)
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::Cast {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => 0,
 	}
 }

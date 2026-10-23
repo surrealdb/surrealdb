@@ -1209,9 +1209,11 @@ mod tests {
 	/// nothing for any other definition.
 	#[test]
 	fn structure_lists_the_components_of_a_named_id() {
-		let get = |v: &Value, key: &str| match v {
-			Value::Object(o) => o.get(key).cloned(),
-			other => panic!("expected an object, got {other:?}"),
+		let get = |v: &Value, key: &str| {
+			let Value::Object(o) = v else {
+				panic!("expected an object, got {v:?}");
+			};
+			o.get(key).cloned()
 		};
 		let named = id_field(
 			tuple(vec![Kind::String, Kind::Datetime]),

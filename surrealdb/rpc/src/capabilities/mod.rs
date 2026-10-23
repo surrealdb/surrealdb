@@ -246,12 +246,19 @@ impl Target for NetTarget {
 			// If self contains a host and port, the elem must match both the host and port
 			Self::Host(host, Some(port)) => match tgt {
 				Self::Host(tgt_host, Some(tgt_port)) => host == tgt_host && port == tgt_port,
-				_ => false,
+				Self::Host(..)
+				| Self::IPNet(_)
+				| Self::Wildcard {
+					..
+				} => false,
 			},
 			// If self contains a host but no port, the elem must match the host only
 			Self::Host(host, None) => match tgt {
 				Self::Host(tgt_host, _) => host == tgt_host,
-				_ => false,
+				Self::IPNet(_)
+				| Self::Wildcard {
+					..
+				} => false,
 			},
 			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
 			// IPAddr
@@ -283,7 +290,7 @@ impl Target for NetTarget {
 					Self::port_covers(*port, *tgt_port)
 						&& common::net::suffix_covers(suffix, tgt_suffix)
 				}
-				_ => false,
+				Self::Host(..) | Self::IPNet(_) => false,
 			},
 		}
 	}
@@ -410,11 +417,13 @@ impl std::str::FromStr for MethodTarget {
 	type Err = ParseMethodTargetError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match Method::parse_case_insensitive(s) {
-			Method::Unknown => Err(ParseMethodTargetError),
-			method => Ok(MethodTarget {
+		let method = Method::parse_case_insensitive(s);
+		if method == Method::Unknown {
+			Err(ParseMethodTargetError)
+		} else {
+			Ok(MethodTarget {
 				method,
-			}),
+			})
 		}
 	}
 }

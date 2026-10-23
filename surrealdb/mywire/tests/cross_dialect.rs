@@ -474,34 +474,33 @@ async fn test_cross_dialect_pg_ddl_and_insert_mysql_query_and_update_pg_verify()
 	)
 	.await;
 
-	match my_res {
-		MyQueryResult::ResultSet {
-			columns,
-			rows,
-		} => {
-			assert_eq!(columns, 4);
-			assert_eq!(rows.len(), 2);
-			assert_eq!(
-				rows[0],
-				vec![
-					Some("SKU-001".to_string()),
-					Some("Ergonomic Keyboard".to_string()),
-					Some("89.99".to_string()),
-					Some("40".to_string()),
-				]
-			);
-			assert_eq!(
-				rows[1],
-				vec![
-					Some("SKU-002".to_string()),
-					Some("Wireless Mouse".to_string()),
-					Some("24.5".to_string()),
-					Some("150".to_string()),
-				]
-			);
-		}
-		other => panic!("Expected ResultSet from MySQL query, got: {other:?}"),
-	}
+	let MyQueryResult::ResultSet {
+		columns,
+		rows,
+	} = my_res
+	else {
+		panic!("Expected ResultSet from MySQL query, got: {my_res:?}");
+	};
+	assert_eq!(columns, 4);
+	assert_eq!(rows.len(), 2);
+	assert_eq!(
+		rows[0],
+		vec![
+			Some("SKU-001".to_string()),
+			Some("Ergonomic Keyboard".to_string()),
+			Some("89.99".to_string()),
+			Some("40".to_string()),
+		]
+	);
+	assert_eq!(
+		rows[1],
+		vec![
+			Some("SKU-002".to_string()),
+			Some("Wireless Mouse".to_string()),
+			Some("24.5".to_string()),
+			Some("150".to_string()),
+		]
+	);
 
 	// 4. MySQL updates one of the rows
 	let update_res = mysql_query(
@@ -577,22 +576,17 @@ async fn test_cross_dialect_null_semantics_and_coalesce() {
 	)
 	.await;
 
-	match my_rows {
-		MyQueryResult::ResultSet {
-			rows,
-			..
-		} => {
-			assert_eq!(
-				rows,
-				vec![vec![
-					Some("ITEM-X".to_string()),
-					Some("4.75".to_string()),
-					Some("12".to_string()),
-				]]
-			);
-		}
-		other => panic!("Expected ResultSet, got: {other:?}"),
-	}
+	let MyQueryResult::ResultSet {
+		rows,
+		..
+	} = my_rows
+	else {
+		panic!("Expected ResultSet, got: {my_rows:?}");
+	};
+	assert_eq!(
+		rows,
+		vec![vec![Some("ITEM-X".to_string()), Some("4.75".to_string()), Some("12".to_string()),]]
+	);
 
 	shutdown.cancel();
 }
@@ -630,15 +624,14 @@ async fn test_cross_dialect_transaction_isolation_and_rollback() {
 	let my_tx_view =
 		mysql_query(&mut my_stream, "SELECT count(*) FROM ledger WHERE entry_id = 'TX-ABORTED';")
 			.await;
-	match my_tx_view {
-		MyQueryResult::ResultSet {
-			rows,
-			..
-		} => {
-			assert_eq!(rows, vec![vec![Some("1".to_string())]]);
-		}
-		other => panic!("Expected row inside tx, got: {other:?}"),
-	}
+	let MyQueryResult::ResultSet {
+		rows,
+		..
+	} = my_tx_view
+	else {
+		panic!("Expected row inside tx, got: {my_tx_view:?}");
+	};
+	assert_eq!(rows, vec![vec![Some("1".to_string())]]);
 
 	// Rollback transaction in MySQL
 	let tx_rollback = mysql_query(&mut my_stream, "ROLLBACK;").await;
@@ -895,15 +888,14 @@ async fn test_cross_dialect_concurrent_reads() {
 			let mut conn = mysql_connect(addr, "test/test", false).await;
 			for _ in 0..5 {
 				let res = mysql_query(&mut conn, "SELECT count(*) FROM logs;").await;
-				match res {
-					MyQueryResult::ResultSet {
-						rows,
-						..
-					} => {
-						assert_eq!(rows, vec![vec![Some("3".to_string())]]);
-					}
-					other => panic!("MySQL worker {worker_id} query failed: {other:?}"),
-				}
+				let MyQueryResult::ResultSet {
+					rows,
+					..
+				} = res
+				else {
+					panic!("MySQL worker {worker_id} query failed: {res:?}");
+				};
+				assert_eq!(rows, vec![vec![Some("3".to_string())]]);
 			}
 		}));
 	}

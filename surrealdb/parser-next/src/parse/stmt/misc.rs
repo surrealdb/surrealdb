@@ -89,29 +89,25 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn use_stmt(&mut self, start: u32) -> R<NodeId> {
 		let first = self.ast.nodes.len();
-		let (op, a, b) = match self.tok.kw {
-			_ if self.tok.kind != T::Ident => {
-				return Err(self.unexpected("either DATABASE or NAMESPACE"));
+		let (op, a, b) = if self.tok.kind != T::Ident {
+			return Err(self.unexpected("either DATABASE or NAMESPACE"));
+		} else if self.tok.kw == Kw::Namespace {
+			self.bump();
+			let ns = self.expr(true)?;
+			if self.eat_kw(Kw::Database) {
+				let db = self.expr(true)?;
+				(2, ns, db)
+			} else {
+				(0, ns, NONE)
 			}
-			Kw::Namespace => {
-				self.bump();
-				let ns = self.expr(true)?;
-				if self.eat_kw(Kw::Database) {
-					let db = self.expr(true)?;
-					(2, ns, db)
-				} else {
-					(0, ns, NONE)
-				}
-			}
-			Kw::Database => {
-				self.bump();
-				(1, self.expr(true)?, NONE)
-			}
-			Kw::Default => {
-				self.bump();
-				(3, NONE, NONE)
-			}
-			_ => return Err(self.unexpected("either DATABASE or NAMESPACE")),
+		} else if self.tok.kw == Kw::Database {
+			self.bump();
+			(1, self.expr(true)?, NONE)
+		} else if self.tok.kw == Kw::Default {
+			self.bump();
+			(3, NONE, NONE)
+		} else {
+			return Err(self.unexpected("either DATABASE or NAMESPACE"));
 		};
 		self.stmt_node(Tag::Use, op, a, b, start, first)
 	}
@@ -120,10 +116,12 @@ impl<'a, 's> Parser<'a, 's> {
 		let name = self.name()?;
 		let mut value = true;
 		if self.eat(T::Eq) {
-			value = match self.tok.kw {
-				Kw::True if self.tok.kind == T::Ident => true,
-				Kw::False if self.tok.kind == T::Ident => false,
-				_ => return Err(self.unexpected("`true` or `false`")),
+			value = if self.tok.kind == T::Ident && self.tok.kw == Kw::True {
+				true
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::False {
+				false
+			} else {
+				return Err(self.unexpected("`true` or `false`"));
 			};
 			self.bump();
 		}
@@ -132,16 +130,14 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn kill_stmt(&mut self, start: u32) -> R<NodeId> {
 		let t = self.tok;
-		let id = match t.kind {
-			T::Str if t.aux() == b'u' => {
-				self.bump();
-				self.leaf(Tag::Str, b'u', t)
-			}
-			T::Param => {
-				self.bump();
-				self.leaf(Tag::Param, 0, t)
-			}
-			_ => return Err(self.unexpected("a UUID or a parameter")),
+		let id = if t.kind == T::Str && t.aux() == b'u' {
+			self.bump();
+			self.leaf(Tag::Str, b'u', t)
+		} else if t.kind == T::Param {
+			self.bump();
+			self.leaf(Tag::Param, 0, t)
+		} else {
+			return Err(self.unexpected("a UUID or a parameter"));
 		};
 		self.node(Tag::Kill, 0, id, 0, start, 1)
 	}
@@ -176,26 +172,25 @@ impl<'a, 's> Parser<'a, 's> {
 		let first = self.ast.nodes.len();
 		self.expect_kw(Kw::Changes, "CHANGES")?;
 		self.expect_kw(Kw::For, "FOR")?;
-		let table = match self.tok.kw {
-			Kw::Table | Kw::Tb if self.tok.kind == T::Ident => {
+		let table =
+			if self.tok.kind == T::Ident && (self.tok.kw == Kw::Table || self.tok.kw == Kw::Tb) {
 				self.bump();
 				self.name()?
-			}
-			Kw::Database if self.tok.kind == T::Ident => {
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Database {
 				self.bump();
 				NONE
-			}
-			_ => return Err(self.unexpected("`TABLE` or `DATABASE`")),
-		};
+			} else {
+				return Err(self.unexpected("`TABLE` or `DATABASE`"));
+			};
 		self.expect_kw(Kw::Since, "SINCE")?;
 		let t = self.tok;
-		let since = match t.kind {
-			T::Digits => self.uint_lit()?,
-			T::Str if t.aux() == b'd' => {
-				self.bump();
-				self.leaf(Tag::Str, b'd', t)
-			}
-			_ => return Err(self.unexpected("a version stamp or a datetime")),
+		let since = if t.kind == T::Digits {
+			self.uint_lit()?
+		} else if t.kind == T::Str && t.aux() == b'd' {
+			self.bump();
+			self.leaf(Tag::Str, b'd', t)
+		} else {
+			return Err(self.unexpected("a version stamp or a datetime"));
 		};
 		let limit = if self.eat_kw(Kw::Limit) {
 			self.uint_lit()?
@@ -223,15 +218,22 @@ impl<'a, 's> Parser<'a, 's> {
 		let mut rec = [NONE; info::LEN];
 		let mut flags = 0;
 		let t = self.tok;
-		let target = match t.kw {
-			_ if t.kind != T::Ident => return Err(self.unexpected("an info target")),
-			Kw::Root => InfoTarget::Root,
-			Kw::Namespace => InfoTarget::Ns,
-			Kw::Database => InfoTarget::Db,
-			Kw::Table | Kw::Tb => InfoTarget::Table,
-			Kw::User => InfoTarget::User,
-			Kw::Index => InfoTarget::Index,
-			_ => return Err(self.unexpected("an info target")),
+		let target = if t.kind != T::Ident {
+			return Err(self.unexpected("an info target"));
+		} else if t.kw == Kw::Root {
+			InfoTarget::Root
+		} else if t.kw == Kw::Namespace {
+			InfoTarget::Ns
+		} else if t.kw == Kw::Database {
+			InfoTarget::Db
+		} else if t.kw == Kw::Table || t.kw == Kw::Tb {
+			InfoTarget::Table
+		} else if t.kw == Kw::User {
+			InfoTarget::User
+		} else if t.kw == Kw::Index {
+			InfoTarget::Index
+		} else {
+			return Err(self.unexpected("an info target"));
 		};
 		self.bump();
 		match target {
@@ -248,9 +250,9 @@ impl<'a, 's> Parser<'a, 's> {
 				self.eat_kw(Kw::Table);
 				rec[info::TABLE] = self.expr(false)?;
 			}
-			_ => {}
+			InfoTarget::Root | InfoTarget::Ns | InfoTarget::Db => {}
 		}
-		if !matches!(target, InfoTarget::User | InfoTarget::Index) && self.eat_kw(Kw::Version) {
+		if target != InfoTarget::User && target != InfoTarget::Index && self.eat_kw(Kw::Version) {
 			rec[info::VERSION] = self.expr(self.table_as_field)?;
 		}
 		if self.eat_kw(Kw::Structure) {
@@ -386,77 +388,68 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		// A bad word after the keyword is reported at the keyword.
 		let t = self.tok;
-		let (op, x, y) = match t.kw {
-			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("one of GRANT, SHOW, REVOKE or PURGE"));
-			}
-			Kw::Grant => {
+		let (op, x, y) = if t.kind != T::Ident {
+			return Err(self.unexpected("one of GRANT, SHOW, REVOKE or PURGE"));
+		} else if t.kw == Kw::Grant {
+			self.bump();
+			self.expect_kw(Kw::For, "FOR")?;
+			if self.tok.kind == T::Ident && self.tok.kw == Kw::User {
 				self.bump();
-				self.expect_kw(Kw::For, "FOR")?;
-				match self.tok.kw {
-					Kw::User if self.tok.kind == T::Ident => {
-						self.bump();
-						(0, self.name()?, 0)
-					}
-					Kw::Record if self.tok.kind == T::Ident => {
-						self.bump();
-						(0, self.record_id_only()?, 1)
-					}
-					_ => return Err(self.unexpected_at(t, "either USER or RECORD")),
-				}
-			}
-			Kw::Show | Kw::Revoke => {
+				(0, self.name()?, 0)
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Record {
 				self.bump();
-				let op = if t.kw == Kw::Show {
+				(0, self.record_id_only()?, 1)
+			} else {
+				return Err(self.unexpected_at(t, "either USER or RECORD"));
+			}
+		} else if t.kw == Kw::Show || t.kw == Kw::Revoke {
+			self.bump();
+			let op = if t.kw == Kw::Show {
+				1
+			} else {
+				2
+			};
+			if self.tok.kind == T::Ident && self.tok.kw == Kw::All {
+				self.bump();
+				(op, NONE, 0)
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Grant {
+				self.bump();
+				(op, self.name()?, 1)
+			} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Where {
+				self.bump();
+				(op, self.expr(true)?, 2)
+			} else {
+				return Err(self.unexpected_at(t, "one of ALL, GRANT or WHERE"));
+			}
+		} else if t.kw == Kw::Purge {
+			self.bump();
+			let mut kinds = 0u32;
+			loop {
+				let bit = if self.tok.kind == T::Ident && self.tok.kw == Kw::Expired {
 					1
-				} else {
+				} else if self.tok.kind == T::Ident && self.tok.kw == Kw::Revoked {
 					2
-				};
-				match self.tok.kw {
-					Kw::All if self.tok.kind == T::Ident => {
-						self.bump();
-						(op, NONE, 0)
-					}
-					Kw::Grant if self.tok.kind == T::Ident => {
-						self.bump();
-						(op, self.name()?, 1)
-					}
-					Kw::Where if self.tok.kind == T::Ident => {
-						self.bump();
-						(op, self.expr(true)?, 2)
-					}
-					_ => return Err(self.unexpected_at(t, "one of ALL, GRANT or WHERE")),
-				}
-			}
-			Kw::Purge => {
-				self.bump();
-				let mut kinds = 0u32;
-				loop {
-					let bit = match self.tok.kw {
-						Kw::Expired if self.tok.kind == T::Ident => 1,
-						Kw::Revoked if self.tok.kind == T::Ident => 2,
-						_ => {
-							if kinds == 0 {
-								return Err(self.unexpected_at(t, "EXPIRED, or REVOKED"));
-							}
-							break;
-						}
-					};
-					if kinds & bit != 0 || kinds == 3 {
-						return Err(self.unexpected_at(t, "ACCESS PURGE statement to end"));
-					}
-					self.bump();
-					kinds |= bit;
-					self.eat(T::Comma);
-				}
-				let grace = if self.eat_kw(Kw::For) {
-					self.duration_lit()?
 				} else {
-					NONE
+					if kinds == 0 {
+						return Err(self.unexpected_at(t, "EXPIRED, or REVOKED"));
+					}
+					break;
 				};
-				(3, grace, kinds)
+				if kinds & bit != 0 || kinds == 3 {
+					return Err(self.unexpected_at(t, "ACCESS PURGE statement to end"));
+				}
+				self.bump();
+				kinds |= bit;
+				self.eat(T::Comma);
 			}
-			_ => return Err(self.unexpected("one of GRANT, SHOW, REVOKE or PURGE")),
+			let grace = if self.eat_kw(Kw::For) {
+				self.duration_lit()?
+			} else {
+				NONE
+			};
+			(3, grace, kinds)
+		} else {
+			return Err(self.unexpected("one of GRANT, SHOW, REVOKE or PURGE"));
 		};
 		let rec = self.record(&[ac, base, x, y]);
 		self.stmt_node(Tag::AccessStmt, op, rec, 0, start, first)

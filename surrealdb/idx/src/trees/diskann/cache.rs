@@ -343,9 +343,10 @@ impl DiskAnnCache {
 
 	/// Returns cached graph state for one index, when `view` is served it.
 	pub(super) fn get_state(&self, index: IndexKey, view: &CacheView) -> Option<DiskAnnState> {
-		match self.0.cache.get(&DiskAnnCacheKey::State(index))? {
-			DiskAnnCacheValue::State(state) => state.served(view),
-			_ => None,
+		if let DiskAnnCacheValue::State(state) = self.0.cache.get(&DiskAnnCacheKey::State(index))? {
+			state.served(view)
+		} else {
+			None
 		}
 	}
 
@@ -372,9 +373,12 @@ impl DiskAnnCache {
 		element_id: ElementId,
 		view: &CacheView,
 	) -> Option<Arc<DiskAnnElement>> {
-		match self.0.cache.get(&DiskAnnCacheKey::Element(Self::element_key(index, element_id)))? {
-			DiskAnnCacheValue::Element(element) => element.served(view),
-			_ => None,
+		if let DiskAnnCacheValue::Element(element) =
+			self.0.cache.get(&DiskAnnCacheKey::Element(Self::element_key(index, element_id)))?
+		{
+			element.served(view)
+		} else {
+			None
 		}
 	}
 
@@ -419,9 +423,12 @@ impl DiskAnnCache {
 		element_id: ElementId,
 		view: &CacheView,
 	) -> Option<Arc<DiskAnnElementCode>> {
-		match self.0.cache.get(&DiskAnnCacheKey::Code(Self::element_key(index, element_id)))? {
-			DiskAnnCacheValue::Code(code) => code.served(view),
-			_ => None,
+		if let DiskAnnCacheValue::Code(code) =
+			self.0.cache.get(&DiskAnnCacheKey::Code(Self::element_key(index, element_id)))?
+		{
+			code.served(view)
+		} else {
+			None
 		}
 	}
 
@@ -456,9 +463,12 @@ impl DiskAnnCache {
 		element_id: ElementId,
 		view: &CacheView,
 	) -> Option<Arc<DiskAnnNode>> {
-		match self.0.cache.get(&DiskAnnCacheKey::Node(Self::element_key(index, element_id)))? {
-			DiskAnnCacheValue::Node(node) => node.served(view),
-			_ => None,
+		if let DiskAnnCacheValue::Node(node) =
+			self.0.cache.get(&DiskAnnCacheKey::Node(Self::element_key(index, element_id)))?
+		{
+			node.served(view)
+		} else {
+			None
 		}
 	}
 
@@ -504,9 +514,12 @@ impl DiskAnnCache {
 		element_id: ElementId,
 		view: &CacheView,
 	) -> Option<Ids64> {
-		match self.0.cache.get(&DiskAnnCacheKey::DocSet(Self::element_key(index, element_id)))? {
-			DiskAnnCacheValue::DocSet(docs) => docs.served(view),
-			_ => None,
+		if let DiskAnnCacheValue::DocSet(docs) =
+			self.0.cache.get(&DiskAnnCacheKey::DocSet(Self::element_key(index, element_id)))?
+		{
+			docs.served(view)
+		} else {
+			None
 		}
 	}
 
@@ -539,9 +552,12 @@ impl DiskAnnCache {
 		doc_id: DocId,
 		generation: Option<u64>,
 	) -> Option<Arc<RecordIdKey>> {
-		match self.0.cache.get(&DiskAnnCacheKey::DocId(Self::doc_id_key(index, doc_id)))? {
-			DiskAnnCacheValue::DocId(id) => id.at(generation),
-			_ => None,
+		if let DiskAnnCacheValue::DocId(id) =
+			self.0.cache.get(&DiskAnnCacheKey::DocId(Self::doc_id_key(index, doc_id)))?
+		{
+			id.at(generation)
+		} else {
+			None
 		}
 	}
 

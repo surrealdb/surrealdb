@@ -239,7 +239,20 @@ impl Portal {
 						Value::Bytes(b) => b.len(),
 						Value::Array(a) => a.len() * 32,
 						Value::Object(o) => o.len() * 64,
-						_ => 16,
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Geometry(_)
+						| Value::Table(_)
+						| Value::RecordId(_)
+						| Value::File(_)
+						| Value::Range(_)
+						| Value::Regex(_)
+						| Value::Set(_) => 16,
 					};
 				}
 			}
@@ -1454,7 +1467,19 @@ impl Connection {
 									}));
 								}
 							}
-							_ => {
+							PgStatement::Copy(_)
+							| PgStatement::CreateSchema(_)
+							| PgStatement::Transaction(_)
+							| PgStatement::Set(_)
+							| PgStatement::Show(_)
+							| PgStatement::Reset(_)
+							| PgStatement::Explain(_)
+							| PgStatement::Prepare(_)
+							| PgStatement::Execute(_)
+							| PgStatement::Deallocate(_)
+							| PgStatement::CreatePropertyGraph(_)
+							| PgStatement::DropPropertyGraph(_)
+							| PgStatement::Empty => {
 								kind = StatementKind::Other;
 								returns_rows = false;
 							}
@@ -2291,7 +2316,22 @@ impl Connection {
 							}
 						}
 					}
-					_ => {}
+					PgStatement::Copy(_)
+					| PgStatement::CreateIndex(_)
+					| PgStatement::CreateView(_)
+					| PgStatement::AlterTable(_)
+					| PgStatement::CreateSchema(_)
+					| PgStatement::Transaction(_)
+					| PgStatement::Set(_)
+					| PgStatement::Show(_)
+					| PgStatement::Reset(_)
+					| PgStatement::Explain(_)
+					| PgStatement::Prepare(_)
+					| PgStatement::Execute(_)
+					| PgStatement::Deallocate(_)
+					| PgStatement::CreatePropertyGraph(_)
+					| PgStatement::DropPropertyGraph(_)
+					| PgStatement::Empty => {}
 				}
 			}
 		}
@@ -2464,7 +2504,26 @@ impl Connection {
 				}
 				Frontend::Sync => {}
 				Frontend::Terminate => return Ok(()),
-				other => {
+				other @ (Frontend::Query(_)
+				| Frontend::Password(_)
+				| Frontend::Parse {
+					..
+				}
+				| Frontend::Bind {
+					..
+				}
+				| Frontend::Describe {
+					..
+				}
+				| Frontend::Execute {
+					..
+				}
+				| Frontend::Close {
+					..
+				}
+				| Frontend::Flush
+				| Frontend::FunctionCall
+				| Frontend::Unknown(_)) => {
 					if !failed {
 						self.note_simple_error(
 							&PgError::protocol(format!("unexpected message {other:?} during COPY")),
@@ -3660,7 +3719,11 @@ impl Connection {
 			if let Some(sub_val) = sub_val {
 				let sub_str = match sub_val {
 					serde_json::Value::String(s) => s.clone(),
-					other => other.to_string(),
+					other @ (serde_json::Value::Null
+					| serde_json::Value::Bool(_)
+					| serde_json::Value::Number(_)
+					| serde_json::Value::Array(_)
+					| serde_json::Value::Object(_)) => other.to_string(),
 				};
 				if matches!(self.session.au.level(), Level::No)
 					|| matches!(base_au.level(), Level::No)
@@ -4043,7 +4106,7 @@ fn subject_names_record(rd: &Value, claimed: &str) -> bool {
 		RecordIdKey::String(key) => claimed == key,
 		RecordIdKey::Number(key) => claimed == key.to_string(),
 		RecordIdKey::Uuid(key) => claimed == key.to_string(),
-		_ => false,
+		RecordIdKey::Array(_) | RecordIdKey::Object(_) | RecordIdKey::Range(_) => false,
 	}
 }
 

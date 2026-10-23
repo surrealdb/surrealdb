@@ -148,12 +148,11 @@ where
 			let mut variables = Variables::new();
 			let what = what.for_sql_query(&mut variables)?;
 
-			let query = match content {
-				Value::None => Cow::Owned(format!("CREATE {what}")),
-				content => {
-					variables.insert("_content".to_string(), content);
-					Cow::Owned(format!("CREATE {what} CONTENT $_content"))
-				}
+			let query = if content.is_none() {
+				Cow::Owned(format!("CREATE {what}"))
+			} else {
+				variables.insert("_content".to_string(), content);
+				Cow::Owned(format!("CREATE {what} CONTENT $_content"))
 			};
 
 			Ok(QueryRequest {

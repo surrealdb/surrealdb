@@ -57,78 +57,87 @@ impl Entry {
 	/// This panics if called on a cache entry that is not an [`Entry::Jwk`].
 	#[cfg(feature = "jwks")]
 	pub fn try_into_jwk(self) -> Result<Arc<CachedJwks>> {
-		match self {
-			Entry::Jwk(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Jwk"),
+		if let Entry::Jwk(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Jwk")
 		}
 	}
 	/// Converts this cache entry into a [`TableSnapshot`].
 	/// Fails with a typed internal error if called on a cache entry that is not an
 	/// [`Entry::Catalog`].
 	pub fn try_into_catalog(self) -> Result<Arc<TableSnapshot>> {
-		match self {
-			Entry::Catalog(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Catalog"),
+		if let Entry::Catalog(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Catalog")
 		}
 	}
 	/// Converts this cache entry into a [`FunctionSnapshot`].
 	/// Fails with a typed internal error if called on a cache entry that is not an
 	/// [`Entry::Function`].
 	pub fn try_into_function(self) -> Result<Arc<FunctionSnapshot>> {
-		match self {
-			Entry::Function(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Function"),
+		if let Entry::Function(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Function")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::FieldDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
 	pub fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
-		match self {
-			Entry::Fds(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fds"),
+		if let Entry::Fds(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Fds")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::EventDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub fn try_into_evs(self) -> Result<Arc<[catalog::EventDefinition]>> {
-		match self {
-			Entry::Evs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Evs"),
+		if let Entry::Evs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Evs")
 		}
 	}
 
 	/// Converts this cache entry into a slice of [`catalog::IndexDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
 	pub fn try_into_ixs(self) -> Result<Arc<[catalog::IndexDefinition]>> {
-		match self {
-			Entry::Ixs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Ixs"),
+		if let Entry::Ixs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Ixs")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::TableDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Fts`].
 	pub fn try_into_fts(self) -> Result<Arc<[catalog::TableDefinition]>> {
-		match self {
-			Entry::Fts(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fts"),
+		if let Entry::Fts(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Fts")
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::SubscriptionDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Lvs`].
 	pub fn try_into_lvs(self) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
-		match self {
-			Entry::Lvs(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Lvs"),
+		if let Entry::Lvs(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Lvs")
 		}
 	}
 	/// Converts this cache entry into a [`TableIndexShapes`].
 	/// Fails with a typed internal error if called on a cache entry that is not an
 	/// [`Entry::Ish`].
 	pub fn try_into_ish(self) -> Result<TableIndexShapes> {
-		match self {
-			Entry::Ish(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Ish"),
+		if let Entry::Ish(v) = self {
+			Ok(v)
+		} else {
+			fail!("Unable to convert type into Entry::Ish")
 		}
 	}
 }

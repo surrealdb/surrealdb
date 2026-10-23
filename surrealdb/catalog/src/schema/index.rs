@@ -264,9 +264,10 @@ impl IndexDefinition {
 	/// comes from the compiled `count_cond`; every other kind is plain data
 	/// and lowers via [`Index::to_runtime_definition`].
 	fn index_to_runtime_definition(&self) -> runtime::index_kind::Index {
-		match &self.index {
-			Index::Count(_) => runtime::index_kind::Index::Count(self.count_cond.clone()),
-			other => other.to_runtime_definition(),
+		if let Index::Count(_) = &self.index {
+			runtime::index_kind::Index::Count(self.count_cond.clone())
+		} else {
+			self.index.to_runtime_definition()
 		}
 	}
 
@@ -1012,9 +1013,10 @@ impl FromStored for IndexDefinition {
 				table_name: TableName::from(stored.table_name.clone()),
 				cols: stored.cols.iter().map(|t| t.compile()).collect::<anyhow::Result<_>>()?,
 				index: stored.index.clone(),
-				count_cond: match &stored.index {
-					Index::Count(Some(cond)) => Some(cond.0.compile()?),
-					_ => None,
+				count_cond: if let Index::Count(Some(cond)) = &stored.index {
+					Some(cond.0.compile()?)
+				} else {
+					None
 				},
 				prepare_remove: stored.prepare_remove,
 				format_version: stored.format_version,
@@ -1039,11 +1041,10 @@ impl IndexDefinition {
 			cols: self.cols.iter().map(IdiomText::new).collect(),
 			// The stored-form clone in `index` may hold a stale guard text if
 			// the compiled `count_cond` was mutated, so re-render it.
-			index: match &self.index {
-				Index::Count(_) => {
-					Index::Count(self.count_cond.as_ref().map(|c| CondText(SurqlText::new(c))))
-				}
-				other => other.clone(),
+			index: if let Index::Count(_) = &self.index {
+				Index::Count(self.count_cond.as_ref().map(|c| CondText(SurqlText::new(c))))
+			} else {
+				self.index.clone()
 			},
 			comment: self.comment.clone(),
 			prepare_remove: self.prepare_remove,

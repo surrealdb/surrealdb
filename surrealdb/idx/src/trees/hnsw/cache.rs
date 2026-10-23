@@ -417,9 +417,8 @@ impl VectorCache {
 		generation: Option<u64>,
 	) -> Option<Arc<RecordIdKey>> {
 		let key = HnswCacheKey::DocId((index.0, index.1, index.2, index.3, index.4, doc_id));
-		let cached = match self.0.cache.get(&key)? {
-			HnswCacheValue::DocId(cached) => cached,
-			_ => return None,
+		let HnswCacheValue::DocId(cached) = self.0.cache.get(&key)? else {
+			return None;
 		};
 		(cached.generation == generation).then_some(cached.id)
 	}

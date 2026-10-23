@@ -276,10 +276,12 @@ impl HttpCallMetricTracker {
 	fn outcome(&self) -> Outcome {
 		match self.state.replace(ResultState::None) {
 			ResultState::Failed => Outcome::Error,
-			_ => match self.status_code {
-				Some(s) if s.is_server_error() || s.is_client_error() => Outcome::Error,
-				_ => Outcome::Success,
-			},
+			ResultState::None | ResultState::Started | ResultState::Result(..) => {
+				match self.status_code {
+					Some(s) if s.is_server_error() || s.is_client_error() => Outcome::Error,
+					_ => Outcome::Success,
+				}
+			}
 		}
 	}
 }

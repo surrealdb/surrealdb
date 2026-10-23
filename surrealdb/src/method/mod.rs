@@ -1443,9 +1443,9 @@ where
 }
 
 fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
-	match data {
-		Value::Object(_) => Ok(()),
-		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
-		_ => Err(crate::Error::validation(error_message.to_owned(), None)),
+	if data.is_object() || data.as_array().is_some_and(|v| v.iter().all(Value::is_object)) {
+		Ok(())
+	} else {
+		Err(crate::Error::validation(error_message.to_owned(), None))
 	}
 }

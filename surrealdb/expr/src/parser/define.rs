@@ -74,9 +74,10 @@ impl Lower<'_> {
 	}
 
 	fn string(&self, id: NodeId) -> R<String> {
-		match self.expr(id)? {
-			Expr::Literal(Literal::String(s)) => Ok(s.into_string()),
-			_ => Err(Reject::new("not a string")),
+		if let Expr::Literal(Literal::String(s)) = self.expr(id)? {
+			Ok(s.into_string())
+		} else {
+			Err(Reject::new("not a string"))
 		}
 	}
 
@@ -86,21 +87,28 @@ impl Lower<'_> {
 
 	fn float(&self, id: NodeId) -> f64 {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Int => Ast::int(n) as f64,
-			Tag::NaN => f64::NAN,
-			Tag::Infinity => f64::INFINITY,
-			_ => Ast::float(n),
+		if n.tag == Tag::Int {
+			Ast::int(n) as f64
+		} else if n.tag == Tag::NaN {
+			f64::NAN
+		} else if n.tag == Tag::Infinity {
+			f64::INFINITY
+		} else {
+			Ast::float(n)
 		}
 	}
 
 	fn number(&self, id: NodeId) -> R<surrealdb_types::Number> {
-		Ok(match self.expr(id)? {
-			Expr::Literal(Literal::Integer(i)) => surrealdb_types::Number::Int(i),
-			Expr::Literal(Literal::Float(f)) => surrealdb_types::Number::Float(f),
-			Expr::Literal(Literal::Decimal(d)) => surrealdb_types::Number::Decimal(d),
-			_ => return Err(Reject::new("not a number")),
-		})
+		if let Expr::Literal(lit) = self.expr(id)? {
+			if let Literal::Integer(i) = lit {
+				return Ok(surrealdb_types::Number::Int(i));
+			} else if let Literal::Float(f) = lit {
+				return Ok(surrealdb_types::Number::Float(f));
+			} else if let Literal::Decimal(d) = lit {
+				return Ok(surrealdb_types::Number::Decimal(d));
+			}
+		}
+		Err(Reject::new("not a number"))
 	}
 
 	fn duration(&self, id: NodeId) -> R<Duration> {
@@ -234,11 +242,15 @@ impl Lower<'_> {
 					..Default::default()
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::Changefeed => s.changefeed = Some(self.changefeed(c)?),
-						Cl::Compatibility => s.compatibility = Some(self.compatibility(c)?),
-						_ => s.strict = true,
+					let kind = cl(c);
+					if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::Changefeed {
+						s.changefeed = Some(self.changefeed(c)?);
+					} else if kind == Cl::Compatibility {
+						s.compatibility = Some(self.compatibility(c)?);
+					} else {
+						s.strict = true;
 					}
 				}
 				DefineStatement::Database(s)
@@ -249,10 +261,10 @@ impl Lower<'_> {
 					.chunks(2)
 					.map(|pk| Ok((self.param_name(pk[0])?, self.kind(pk[1])?)))
 					.collect::<R<_>>()?;
-				let block = match self.expr(rec[define::X3])? {
-					Expr::Block(b) => *b,
-					_ => return Err(Reject::new("not a block")),
+				let Expr::Block(block) = self.expr(rec[define::X3])? else {
+					return Err(Reject::new("not a block"));
 				};
+				let block = *block;
 				let mut s = DefineFunctionStatement {
 					name: Strand::new(self.path(rec[define::NAME])?),
 					args,
@@ -269,11 +281,15 @@ impl Lower<'_> {
 					graphql_deprecated: None,
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::PermValue => s.permissions = self.perm(c.a)?,
-						Cl::GraphqlAlias => s.graphql_alias = Some(self.string(c.a)?),
-						_ => s.graphql_deprecated = Some(self.string(c.a)?),
+					let kind = cl(c);
+					if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::PermValue {
+						s.permissions = self.perm(c.a)?;
+					} else if kind == Cl::GraphqlAlias {
+						s.graphql_alias = Some(self.string(c.a)?);
+					} else {
+						s.graphql_deprecated = Some(self.string(c.a)?);
 					}
 				}
 				DefineStatement::Function(s)
@@ -289,42 +305,41 @@ impl Lower<'_> {
 				};
 				let mut pass_kind = 0;
 				for c in clauses {
-					match cl(c) {
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::Password => {
-							if pass_kind == 2 {
-								return Err(Reject::new("both a passhash and a password"));
+					let kind = cl(c);
+					if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::Password {
+						if pass_kind == 2 {
+							return Err(Reject::new("both a passhash and a password"));
+						}
+						pass_kind = 1;
+						s.pending_password = Some(PendingPassword(self.string(c.a)?));
+					} else if kind == Cl::Passhash {
+						if pass_kind == 1 {
+							return Err(Reject::new("both a passhash and a password"));
+						}
+						pass_kind = 2;
+						s.hash = self.string(c.a)?;
+						s.hash_is_set = true;
+					} else if kind == Cl::Passscram {
+						s.scram = Some(self.scram_credential(&self.string(c.a)?, c.start)?)
+					} else if kind == Cl::Roles {
+						let mut roles = Vec::new();
+						for &r in self.list(c.a) {
+							let role = self.name(r)?;
+							if !matches!(
+								role.to_lowercase().as_str(),
+								"viewer" | "editor" | "owner"
+							) {
+								return Err(Reject::new("not an existent role"));
 							}
-							pass_kind = 1;
-							s.pending_password = Some(PendingPassword(self.string(c.a)?));
+							roles.push(role);
 						}
-						Cl::Passhash => {
-							if pass_kind == 1 {
-								return Err(Reject::new("both a passhash and a password"));
-							}
-							pass_kind = 2;
-							s.hash = self.string(c.a)?;
-							s.hash_is_set = true;
-						}
-						Cl::Passscram => {
-							s.scram = Some(self.scram_credential(&self.string(c.a)?, c.start)?)
-						}
-						Cl::Roles => {
-							let mut roles = Vec::new();
-							for &r in self.list(c.a) {
-								let role = self.name(r)?;
-								if !matches!(
-									role.to_lowercase().as_str(),
-									"viewer" | "editor" | "owner"
-								) {
-									return Err(Reject::new("not an existent role"));
-								}
-								roles.push(role);
-							}
-							s.roles = roles;
-						}
-						Cl::DurToken => s.duration.token = self.expr(c.a)?,
-						_ => s.duration.session = self.expr(c.a)?,
+						s.roles = roles;
+					} else if kind == Cl::DurToken {
+						s.duration.token = self.expr(c.a)?;
+					} else {
+						s.duration.session = self.expr(c.a)?;
 					}
 				}
 				DefineStatement::User(s)
@@ -339,10 +354,13 @@ impl Lower<'_> {
 					permissions: Permission::default(),
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Value => s.value = self.expr(c.a)?,
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						_ => s.permissions = self.perm(c.a)?,
+					let kind = cl(c);
+					if kind == Cl::Value {
+						s.value = self.expr(c.a)?;
+					} else if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else {
+						s.permissions = self.perm(c.a)?;
 					}
 				}
 				DefineStatement::Param(s)
@@ -361,47 +379,53 @@ impl Lower<'_> {
 				};
 				let mut set_type = false;
 				for c in clauses {
-					match cl(c) {
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::Drop => s.drop = true,
-						Cl::TypeNormal => {
-							s.table_type = TableType::Normal;
-							set_type = true;
-						}
-						Cl::TypeAny => {
-							s.table_type = TableType::Any;
-							set_type = true;
-						}
-						Cl::TypeRelation => {
-							let r = self.rec(c.a, 3);
-							let names = |l: u32| -> R<Vec<TableName>> {
-								if l == NONE {
-									return Ok(Vec::new());
-								}
-								self.list(l).iter().map(|&t| self.name(t).map(table)).collect()
-							};
-							s.table_type = TableType::Relation(table_type::Relation {
-								from: names(r[0])?,
-								to: names(r[1])?,
-								enforced: r[2] & 1 != 0,
-								lightweight: r[2] & 2 != 0,
-							});
-							set_type = true;
-						}
-						Cl::Schemaless => s.full = false,
-						Cl::Schemafull => {
-							s.full = true;
-							if !set_type {
-								s.table_type = TableType::Normal;
+					let kind = cl(c);
+					if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::Drop {
+						s.drop = true;
+					} else if kind == Cl::TypeNormal {
+						s.table_type = TableType::Normal;
+						set_type = true;
+					} else if kind == Cl::TypeAny {
+						s.table_type = TableType::Any;
+						set_type = true;
+					} else if kind == Cl::TypeRelation {
+						let r = self.rec(c.a, 3);
+						let names = |l: u32| -> R<Vec<TableName>> {
+							if l == NONE {
+								return Ok(Vec::new());
 							}
+							self.list(l).iter().map(|&t| self.name(t).map(table)).collect()
+						};
+						s.table_type = TableType::Relation(table_type::Relation {
+							from: names(r[0])?,
+							to: names(r[1])?,
+							enforced: r[2] & 1 != 0,
+							lightweight: r[2] & 2 != 0,
+						});
+						set_type = true;
+					} else if kind == Cl::Schemaless {
+						s.full = false;
+					} else if kind == Cl::Schemafull {
+						s.full = true;
+						if !set_type {
+							s.table_type = TableType::Normal;
 						}
-						Cl::Permissions => s.permissions = self.permissions(c)?,
-						Cl::Changefeed => s.changefeed = Some(self.changefeed(c)?),
-						Cl::View => s.view = Some(self.view(c.a)?),
-						Cl::GraphqlAlias => s.graphql_alias = Some(self.string(c.a)?),
-						Cl::GraphqlDeprecated => s.graphql_deprecated = Some(self.string(c.a)?),
-						Cl::InlineEdges => s.inline_edges_cap = Some(self.uint(c.a)?),
-						_ => s.inline_refs_cap = Some(self.uint(c.a)?),
+					} else if kind == Cl::Permissions {
+						s.permissions = self.permissions(c)?;
+					} else if kind == Cl::Changefeed {
+						s.changefeed = Some(self.changefeed(c)?);
+					} else if kind == Cl::View {
+						s.view = Some(self.view(c.a)?);
+					} else if kind == Cl::GraphqlAlias {
+						s.graphql_alias = Some(self.string(c.a)?);
+					} else if kind == Cl::GraphqlDeprecated {
+						s.graphql_deprecated = Some(self.string(c.a)?);
+					} else if kind == Cl::InlineEdges {
+						s.inline_edges_cap = Some(self.uint(c.a)?);
+					} else {
+						s.inline_refs_cap = Some(self.uint(c.a)?);
 					}
 				}
 				DefineStatement::Table(s)
@@ -420,41 +444,39 @@ impl Lower<'_> {
 					comment: Expr::Literal(Literal::None),
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::ApiSecurity => {
-							s.security = if c.a == 1 {
-								ApiSecurity::Invoker
-							} else {
-								ApiSecurity::Definer
-							}
+					let kind = cl(c);
+					if kind == Cl::ApiSecurity {
+						s.security = if c.a == 1 {
+							ApiSecurity::Invoker
+						} else {
+							ApiSecurity::Definer
+						};
+					} else if kind == Cl::ApiAny {
+						s.config = self.api_config(c.a)?;
+						if c.b != NONE {
+							s.fallback = Some(self.expr(c.b)?);
 						}
-						Cl::ApiAny => {
-							s.config = self.api_config(c.a)?;
-							if c.b != NONE {
-								s.fallback = Some(self.expr(c.b)?);
-							}
-						}
-						Cl::ApiMethods => {
-							let r = self.rec(c.a, 3);
-							let methods = self
-								.list(r[0])
-								.iter()
-								.map(|&m| match self.text(m).to_ascii_uppercase().as_str() {
-									"DELETE" => ApiMethod::Delete,
-									"GET" => ApiMethod::Get,
-									"PATCH" => ApiMethod::Patch,
-									"POST" => ApiMethod::Post,
-									"PUT" => ApiMethod::Put,
-									_ => ApiMethod::Trace,
-								})
-								.collect();
-							s.actions.push(ApiAction {
-								methods,
-								config: self.api_config(r[1])?,
-								action: self.expr(r[2])?,
-							});
-						}
-						_ => s.comment = self.expr(c.a)?,
+					} else if kind == Cl::ApiMethods {
+						let r = self.rec(c.a, 3);
+						let methods = self
+							.list(r[0])
+							.iter()
+							.map(|&m| match self.text(m).to_ascii_uppercase().as_str() {
+								"DELETE" => ApiMethod::Delete,
+								"GET" => ApiMethod::Get,
+								"PATCH" => ApiMethod::Patch,
+								"POST" => ApiMethod::Post,
+								"PUT" => ApiMethod::Put,
+								_ => ApiMethod::Trace,
+							})
+							.collect();
+						s.actions.push(ApiAction {
+							methods,
+							config: self.api_config(r[1])?,
+							action: self.expr(r[2])?,
+						});
+					} else {
+						s.comment = self.expr(c.a)?;
 					}
 				}
 				DefineStatement::Api(s)
@@ -470,30 +492,36 @@ impl Lower<'_> {
 					event_kind: EventKind::Sync,
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::When => s.when = self.expr(c.a)?,
-						Cl::Then => s.then = self.exprs(c.a)?,
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::Async => {
-							s.event_kind = EventKind::Async {
-								retry: EventKind::DEFAULT_RETRY,
-								max_depth: EventKind::DEFAULT_MAX_DEPTH,
-							}
+					let kind = cl(c);
+					if kind == Cl::When {
+						s.when = self.expr(c.a)?;
+					} else if kind == Cl::Then {
+						s.then = self.exprs(c.a)?;
+					} else if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::Async {
+						s.event_kind = EventKind::Async {
+							retry: EventKind::DEFAULT_RETRY,
+							max_depth: EventKind::DEFAULT_MAX_DEPTH,
+						};
+					} else if kind == Cl::Retry {
+						if let EventKind::Async {
+							retry,
+							..
+						} = &mut s.event_kind
+						{
+							*retry = self.uint(c.a)?;
+						} else {
+							return Err(after_async(c, "RETRY"));
 						}
-						Cl::Retry => match &mut s.event_kind {
-							EventKind::Async {
-								retry,
-								..
-							} => *retry = self.uint(c.a)?,
-							_ => return Err(after_async(c, "RETRY")),
-						},
-						_ => match &mut s.event_kind {
-							EventKind::Async {
-								max_depth,
-								..
-							} => *max_depth = self.uint(c.a)?,
-							_ => return Err(after_async(c, "MAXDEPTH")),
-						},
+					} else if let EventKind::Async {
+						max_depth,
+						..
+					} = &mut s.event_kind
+					{
+						*max_depth = self.uint(c.a)?;
+					} else {
+						return Err(after_async(c, "MAXDEPTH"));
 					}
 				}
 				DefineStatement::Event(s)
@@ -509,66 +537,74 @@ impl Lower<'_> {
 				let is_id = matches!(&s.name, Expr::Idiom(i) if i.is_id());
 				let mut materialize: Option<(Materialize, &Node)> = None;
 				for c in clauses {
-					match cl(c) {
-						Cl::FieldType => {
-							let (k, names) = self.field_type(c.a, is_id)?;
-							if c.b == 1 {
-								if !kind_contains_object(&k) {
-									let (a, b) = self.last_tok(c.start, c.end);
-									return Err(Reject::new(
-										"FLEXIBLE can only be used with types containing object",
-									)
-									.at(a, b));
-								}
-								s.flexible = true;
+					let kind = cl(c);
+					if kind == Cl::FieldType {
+						let (k, names) = self.field_type(c.a, is_id)?;
+						if c.b == 1 {
+							if !kind_contains_object(&k) {
+								let (a, b) = self.last_tok(c.start, c.end);
+								return Err(Reject::new(
+									"FLEXIBLE can only be used with types containing object",
+								)
+								.at(a, b));
 							}
-							// Each `TYPE` clause replaces the names along with the kind.
-							s.set_type(Some(k), names)
-								.map_err(|e| Reject::new(e.to_string()).at(c.start, c.end))?;
+							s.flexible = true;
 						}
-						Cl::Readonly => s.readonly = true,
-						Cl::Inline => s.inline = true,
-						Cl::Value => s.value = Some(self.expr(c.a)?),
-						Cl::Assert => s.assert = Some(self.expr(c.a)?),
-						Cl::Default => {
-							let e = self.expr(c.a)?;
-							s.default = if c.b == 1 {
-								DefineDefault::Always(e)
-							} else {
-								DefineDefault::Set(e)
-							};
-						}
-						Cl::Permissions => s.permissions = self.permissions(c)?,
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						Cl::Reference => {
-							s.reference = Some(Reference {
-								on_delete: match c.a {
-									0 => ReferenceDeleteStrategy::Reject,
-									1 => ReferenceDeleteStrategy::Cascade,
-									3 => ReferenceDeleteStrategy::Unset,
-									4 => ReferenceDeleteStrategy::Custom(self.expr(c.b)?),
-									_ => ReferenceDeleteStrategy::Ignore,
-								},
-								materialize: None,
-							})
-						}
-						Cl::Materialize if materialize.is_some() => {
+						// Each `TYPE` clause replaces the names along with the kind.
+						s.set_type(Some(k), names)
+							.map_err(|e| Reject::new(e.to_string()).at(c.start, c.end))?;
+					} else if kind == Cl::Readonly {
+						s.readonly = true;
+					} else if kind == Cl::Inline {
+						s.inline = true;
+					} else if kind == Cl::Value {
+						s.value = Some(self.expr(c.a)?);
+					} else if kind == Cl::Assert {
+						s.assert = Some(self.expr(c.a)?);
+					} else if kind == Cl::Default {
+						let e = self.expr(c.a)?;
+						s.default = if c.b == 1 {
+							DefineDefault::Always(e)
+						} else {
+							DefineDefault::Set(e)
+						};
+					} else if kind == Cl::Permissions {
+						s.permissions = self.permissions(c)?;
+					} else if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else if kind == Cl::Reference {
+						s.reference = Some(Reference {
+							on_delete: match c.a {
+								0 => ReferenceDeleteStrategy::Reject,
+								1 => ReferenceDeleteStrategy::Cascade,
+								3 => ReferenceDeleteStrategy::Unset,
+								4 => ReferenceDeleteStrategy::Custom(self.expr(c.b)?),
+								_ => ReferenceDeleteStrategy::Ignore,
+							},
+							materialize: None,
+						});
+					} else if kind == Cl::Materialize {
+						if materialize.is_some() {
 							return Err(Reject::new(
 								"a field definition takes one MATERIALIZE clause",
 							)
 							.at(c.start, c.end));
 						}
-						Cl::Materialize => materialize = Some((self.materialize(c)?, c)),
-						Cl::Computed => s.computed = Some(self.expr(c.a)?),
-						Cl::GraphqlAlias => s.graphql_alias = Some(self.string(c.a)?),
-						Cl::Migrate if s.migrate.is_some() => {
+						materialize = Some((self.materialize(c)?, c));
+					} else if kind == Cl::Computed {
+						s.computed = Some(self.expr(c.a)?);
+					} else if kind == Cl::GraphqlAlias {
+						s.graphql_alias = Some(self.string(c.a)?);
+					} else if kind == Cl::Migrate {
+						if s.migrate.is_some() {
 							return Err(second_migrate(
 								c,
 								"a field definition takes one MIGRATE clause",
 							));
 						}
-						Cl::Migrate => s.migrate = Some(self.migrate(c)?),
-						_ => s.graphql_deprecated = Some(self.string(c.a)?),
+						s.migrate = Some(self.migrate(c)?);
+					} else {
+						s.graphql_deprecated = Some(self.string(c.a)?);
 					}
 				}
 				if let Some((m, c)) = materialize {
@@ -590,11 +626,15 @@ impl Lower<'_> {
 					..Default::default()
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Filters => s.filters = Some(self.filters(c)?),
-						Cl::Tokenizers => s.tokenizers = Some(self.tokenizers(c)),
-						Cl::Function => s.function = Some(Strand::new(self.analyzer_function(c)?)),
-						_ => s.comment = self.expr(c.a)?,
+					let kind = cl(c);
+					if kind == Cl::Filters {
+						s.filters = Some(self.filters(c)?);
+					} else if kind == Cl::Tokenizers {
+						s.tokenizers = Some(self.tokenizers(c));
+					} else if kind == Cl::Function {
+						s.function = Some(Strand::new(self.analyzer_function(c)?));
+					} else {
+						s.comment = self.expr(c.a)?;
 					}
 				}
 				DefineStatement::Analyzer(s)
@@ -606,9 +646,11 @@ impl Lower<'_> {
 					_ => {
 						let mut d = DefaultConfig::default();
 						for c in clauses {
-							match cl(c) {
-								Cl::DefaultNs => d.namespace = self.expr(c.a)?,
-								_ => d.database = self.expr(c.a)?,
+							let kind = cl(c);
+							if kind == Cl::DefaultNs {
+								d.namespace = self.expr(c.a)?;
+							} else {
+								d.database = self.expr(c.a)?;
 							}
 						}
 						ConfigInner::Default(d)
@@ -626,11 +668,15 @@ impl Lower<'_> {
 					..Default::default()
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Backend => s.backend = Some(self.expr(c.a)?),
-						Cl::PermValue => s.permissions = self.perm(c.a)?,
-						Cl::Readonly => s.readonly = true,
-						_ => s.comment = self.expr(c.a)?,
+					let kind = cl(c);
+					if kind == Cl::Backend {
+						s.backend = Some(self.expr(c.a)?);
+					} else if kind == Cl::PermValue {
+						s.permissions = self.perm(c.a)?;
+					} else if kind == Cl::Readonly {
+						s.readonly = true;
+					} else {
+						s.comment = self.expr(c.a)?;
 					}
 				}
 				DefineStatement::Bucket(s)
@@ -644,10 +690,13 @@ impl Lower<'_> {
 					timeout: Expr::Literal(Literal::None),
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Batch => s.batch = self.expr(c.a)?,
-						Cl::Start => s.start = self.expr(c.a)?,
-						_ => s.timeout = self.expr(c.a)?,
+					let kind = cl(c);
+					if kind == Cl::Batch {
+						s.batch = self.expr(c.a)?;
+					} else if kind == Cl::Start {
+						s.start = self.expr(c.a)?;
+					} else {
+						s.timeout = self.expr(c.a)?;
 					}
 				}
 				DefineStatement::Sequence(s)
@@ -657,11 +706,10 @@ impl Lower<'_> {
 				let exe = rec[define::X1];
 				// `X1` is a list index for a silo package, a node otherwise.
 				let executable = if rec[define::X2] != 1 {
-					match self.expr(exe)? {
-						Expr::Literal(Literal::File(f)) => {
-							ModuleExecutable::Surrealism(SurrealismExecutable(f))
-						}
-						_ => return Err(Reject::new("not a file")),
+					if let Expr::Literal(Literal::File(f)) = self.expr(exe)? {
+						ModuleExecutable::Surrealism(SurrealismExecutable(f))
+					} else {
+						return Err(Reject::new("not a file"));
 					}
 				} else {
 					let l = self.list(exe);
@@ -690,13 +738,19 @@ impl Lower<'_> {
 					permissions: Permission::default(),
 				};
 				for c in clauses {
-					match cl(c) {
-						Cl::Unsigned => s.unsigned = true,
-						Cl::Signer => s.signer = Some(self.signer(c.a)?),
-						Cl::Digest => s.digest = Some(self.digest(c.a)?),
-						Cl::Capabilities => s.capabilities = Some(self.capabilities(c.a)?),
-						Cl::Comment => s.comment = self.expr(c.a)?,
-						_ => s.permissions = self.perm(c.a)?,
+					let kind = cl(c);
+					if kind == Cl::Unsigned {
+						s.unsigned = true;
+					} else if kind == Cl::Signer {
+						s.signer = Some(self.signer(c.a)?);
+					} else if kind == Cl::Digest {
+						s.digest = Some(self.digest(c.a)?);
+					} else if kind == Cl::Capabilities {
+						s.capabilities = Some(self.capabilities(c.a)?);
+					} else if kind == Cl::Comment {
+						s.comment = self.expr(c.a)?;
+					} else {
+						s.permissions = self.perm(c.a)?;
 					}
 				}
 				DefineStatement::Module(s)
@@ -760,47 +814,45 @@ impl Lower<'_> {
 		let mut complexity = None;
 		let mut introspection = None;
 		for c in clauses {
-			match unsafe_cl(c.op) {
-				Cl::GqlBoth => {
-					if c.a == 1 {
-						tables = Some(TablesConfig::Auto);
-						fncs = Some(FunctionsConfig::Auto);
-					} else {
-						tables = Some(TablesConfig::None);
-						fncs = Some(FunctionsConfig::None);
-					}
+			let kind = unsafe_cl(c.op);
+			if kind == Cl::GqlBoth {
+				if c.a == 1 {
+					tables = Some(TablesConfig::Auto);
+					fncs = Some(FunctionsConfig::Auto);
+				} else {
+					tables = Some(TablesConfig::None);
+					fncs = Some(FunctionsConfig::None);
 				}
-				Cl::GqlTables => {
-					let names = || -> R<Vec<TableName>> {
-						self.list(c.b).iter().map(|&t| Ok(table(self.name(t)?))).collect()
-					};
-					tables = Some(match c.a {
-						0 => TablesConfig::None,
-						1 => TablesConfig::Auto,
-						2 => TablesConfig::Include(names()?),
-						_ => TablesConfig::Exclude(names()?),
-					});
-				}
-				Cl::GqlFunctions => {
-					let names = || -> R<Vec<Strand>> {
-						self.list(c.b).iter().map(|&t| Ok(Strand::new(self.path(t)?))).collect()
-					};
-					fncs = Some(match c.a {
-						0 => FunctionsConfig::None,
-						1 => FunctionsConfig::Auto,
-						2 => FunctionsConfig::Include(names()?),
-						_ => FunctionsConfig::Exclude(names()?),
-					});
-				}
-				Cl::GqlDepth => depth = Some(self.uint(c.a)?),
-				Cl::GqlComplexity => complexity = Some(self.uint(c.a)?),
-				_ => {
-					introspection = Some(if c.a == 1 {
-						IntrospectionConfig::Auto
-					} else {
-						IntrospectionConfig::None
-					})
-				}
+			} else if kind == Cl::GqlTables {
+				let names = || -> R<Vec<TableName>> {
+					self.list(c.b).iter().map(|&t| Ok(table(self.name(t)?))).collect()
+				};
+				tables = Some(match c.a {
+					0 => TablesConfig::None,
+					1 => TablesConfig::Auto,
+					2 => TablesConfig::Include(names()?),
+					_ => TablesConfig::Exclude(names()?),
+				});
+			} else if kind == Cl::GqlFunctions {
+				let names = || -> R<Vec<Strand>> {
+					self.list(c.b).iter().map(|&t| Ok(Strand::new(self.path(t)?))).collect()
+				};
+				fncs = Some(match c.a {
+					0 => FunctionsConfig::None,
+					1 => FunctionsConfig::Auto,
+					2 => FunctionsConfig::Include(names()?),
+					_ => FunctionsConfig::Exclude(names()?),
+				});
+			} else if kind == Cl::GqlDepth {
+				depth = Some(self.uint(c.a)?);
+			} else if kind == Cl::GqlComplexity {
+				complexity = Some(self.uint(c.a)?);
+			} else {
+				introspection = Some(if c.a == 1 {
+					IntrospectionConfig::Auto
+				} else {
+					IntrospectionConfig::None
+				});
 			}
 		}
 		Ok(GraphQLConfig {
@@ -826,42 +878,45 @@ impl Lower<'_> {
 		// not fit the index is reported.
 		let mut fields = None;
 		for c in clauses {
-			match unsafe_cl(c.op) {
-				Cl::Fields => {
-					s.cols = self.exprs(c.a)?;
-					fields = Some(self.last_tok(c.start, c.end));
-				}
-				Cl::Unique => s.index = Index::Uniq,
-				Cl::Count => s.index = Index::Count(self.opt(c.a)?.map(Cond)),
-				Cl::Fulltext => {
-					let sc = if c.b == NONE || c.b == NONE - 1 {
-						Scoring::default()
-					} else {
-						let r = self.rec(c.b, 2);
-						Scoring::Bm {
-							k1: self.float(r[0]) as f32,
-							b: self.float(r[1]) as f32,
-						}
-					};
-					s.index = Index::FullText(FullTextParams {
-						az: Strand::new(if c.a == NONE {
-							"like".to_owned()
-						} else {
-							self.name(c.a)?
-						}),
-						sc,
-						hl: false,
-					});
-				}
-				Cl::Highlights => {
-					if let Index::FullText(p) = &mut s.index {
-						p.hl = true;
+			let kind = unsafe_cl(c.op);
+			if kind == Cl::Fields {
+				s.cols = self.exprs(c.a)?;
+				fields = Some(self.last_tok(c.start, c.end));
+			} else if kind == Cl::Unique {
+				s.index = Index::Uniq;
+			} else if kind == Cl::Count {
+				s.index = Index::Count(self.opt(c.a)?.map(Cond));
+			} else if kind == Cl::Fulltext {
+				let sc = if c.b == NONE || c.b == NONE - 1 {
+					Scoring::default()
+				} else {
+					let r = self.rec(c.b, 2);
+					Scoring::Bm {
+						k1: self.float(r[0]) as f32,
+						b: self.float(r[1]) as f32,
 					}
+				};
+				s.index = Index::FullText(FullTextParams {
+					az: Strand::new(if c.a == NONE {
+						"like".to_owned()
+					} else {
+						self.name(c.a)?
+					}),
+					sc,
+					hl: false,
+				});
+			} else if kind == Cl::Highlights {
+				if let Index::FullText(p) = &mut s.index {
+					p.hl = true;
 				}
-				Cl::Hnsw => s.index = Index::Hnsw(self.hnsw(c.a)?),
-				Cl::Diskann => s.index = Index::DiskAnn(self.diskann(c.a)?),
-				Cl::Concurrently => s.concurrently = true,
-				_ => s.comment = self.expr(c.a)?,
+			} else if kind == Cl::Hnsw {
+				s.index = Index::Hnsw(self.hnsw(c.a)?);
+			} else if kind == Cl::Diskann {
+				s.index = Index::DiskAnn(self.diskann(c.a)?);
+			} else if kind == Cl::Concurrently {
+				s.concurrently = true;
+			} else {
+				s.comment = self.expr(c.a)?;
 			}
 		}
 		// An index without a `FIELDS` clause that needs columns is rejected
@@ -1086,62 +1141,67 @@ impl Lower<'_> {
 			comment: Expr::Literal(Literal::None),
 		};
 		for c in clauses {
-			match unsafe_cl(c.op) {
-				Cl::Comment => s.comment = self.expr(c.a)?,
-				Cl::AccessJwt => s.access_type = AccessType::Jwt(self.jwt(c.a)?),
-				Cl::AccessRecord => {
-					if !matches!(s.base, Base::Db) {
-						return Err(Reject::new("record access is only valid on a database"));
-					}
-					let mut ac = RecordAccess::default();
-					for &rc in self.list(c.a) {
-						let rc = self.n(rc);
-						match unsafe_cl(rc.op) {
-							Cl::Signup => ac.signup = Some(self.expr(rc.a)?),
-							Cl::Signin => ac.signin = Some(self.expr(rc.a)?),
-							Cl::WithJwt => {
-								let jwt = self.jwt(rc.a)?;
-								ac.jwt = jwt.clone();
-								if let Some(mut bearer) = ac.bearer {
-									bearer.jwt = jwt;
-									ac.bearer = Some(bearer);
-								}
-							}
-							_ => {
-								ac.bearer = Some(BearerAccess {
-									kind: BearerAccessType::Refresh,
-									subject: BearerAccessSubject::Record,
-									jwt: ac.jwt.clone(),
-								})
-							}
-						}
-					}
-					s.access_type = AccessType::Record(Box::new(ac));
+			let kind = unsafe_cl(c.op);
+			if kind == Cl::Comment {
+				s.comment = self.expr(c.a)?;
+			} else if kind == Cl::AccessJwt {
+				s.access_type = AccessType::Jwt(self.jwt(c.a)?);
+			} else if kind == Cl::AccessRecord {
+				if !matches!(s.base, Base::Db) {
+					return Err(Reject::new("record access is only valid on a database"));
 				}
-				Cl::AccessBearer => {
-					let mut ac = BearerAccess {
-						..Default::default()
-					};
-					if c.a == 1 {
-						if !matches!(s.base, Base::Db) {
-							return Err(Reject::new(
-								"`RECORD` bearer can only be defined on a database",
-							));
+				let mut ac = RecordAccess::default();
+				for &rc in self.list(c.a) {
+					let rc = self.n(rc);
+					let rckind = unsafe_cl(rc.op);
+					if rckind == Cl::Signup {
+						ac.signup = Some(self.expr(rc.a)?);
+					} else if rckind == Cl::Signin {
+						ac.signin = Some(self.expr(rc.a)?);
+					} else if rckind == Cl::WithJwt {
+						let jwt = self.jwt(rc.a)?;
+						ac.jwt = jwt.clone();
+						if let Some(mut bearer) = ac.bearer {
+							bearer.jwt = jwt;
+							ac.bearer = Some(bearer);
 						}
-						ac.subject = BearerAccessSubject::Record;
 					} else {
-						ac.subject = BearerAccessSubject::User;
+						ac.bearer = Some(BearerAccess {
+							kind: BearerAccessType::Refresh,
+							subject: BearerAccessSubject::Record,
+							jwt: ac.jwt.clone(),
+						});
 					}
-					if c.b != NONE {
-						ac.jwt = self.jwt(c.b)?;
-					}
-					s.access_type = AccessType::Bearer(ac);
 				}
-				Cl::Authenticate => s.authenticate = Some(self.expr(c.a)?),
-				Cl::Context => s.context = Some(self.expr(c.a)?),
-				Cl::DurGrant => s.duration.grant = self.expr(c.a)?,
-				Cl::DurToken => s.duration.token = self.expr(c.a)?,
-				_ => s.duration.session = self.expr(c.a)?,
+				s.access_type = AccessType::Record(Box::new(ac));
+			} else if kind == Cl::AccessBearer {
+				let mut ac = BearerAccess {
+					..Default::default()
+				};
+				if c.a == 1 {
+					if !matches!(s.base, Base::Db) {
+						return Err(Reject::new(
+							"`RECORD` bearer can only be defined on a database",
+						));
+					}
+					ac.subject = BearerAccessSubject::Record;
+				} else {
+					ac.subject = BearerAccessSubject::User;
+				}
+				if c.b != NONE {
+					ac.jwt = self.jwt(c.b)?;
+				}
+				s.access_type = AccessType::Bearer(ac);
+			} else if kind == Cl::Authenticate {
+				s.authenticate = Some(self.expr(c.a)?);
+			} else if kind == Cl::Context {
+				s.context = Some(self.expr(c.a)?);
+			} else if kind == Cl::DurGrant {
+				s.duration.grant = self.expr(c.a)?;
+			} else if kind == Cl::DurToken {
+				s.duration.token = self.expr(c.a)?;
+			} else {
+				s.duration.session = self.expr(c.a)?;
 			}
 		}
 		if !matches!(s.base, Base::Db) && matches!(s.access_type, AccessType::Record(_)) {
@@ -1438,9 +1498,11 @@ impl Lower<'_> {
 					..Default::default()
 				};
 				for c in clauses {
-					match unsafe_cl(c.op) {
-						Cl::Compact => s.compact = true,
-						_ => s.compatibility = Some(self.compatibility(c)?),
+					let kind = unsafe_cl(c.op);
+					if kind == Cl::Compact {
+						s.compact = true;
+					} else {
+						s.compatibility = Some(self.compatibility(c)?);
 					}
 				}
 				AlterStatement::Database(s)
@@ -1522,20 +1584,28 @@ impl Lower<'_> {
 								max_depth: EventKind::DEFAULT_MAX_DEPTH,
 							})
 						}
-						(Cl::Retry, _) => match &mut s.kind {
-							AlterKind::Set(EventKind::Async {
+						(Cl::Retry, _) => {
+							if let AlterKind::Set(EventKind::Async {
 								retry,
 								..
-							}) => *retry = self.uint(c.a)?,
-							_ => return Err(after_async(c, "RETRY")),
-						},
-						_ => match &mut s.kind {
-							AlterKind::Set(EventKind::Async {
+							}) = &mut s.kind
+							{
+								*retry = self.uint(c.a)?;
+							} else {
+								return Err(after_async(c, "RETRY"));
+							}
+						}
+						_ => {
+							if let AlterKind::Set(EventKind::Async {
 								max_depth,
 								..
-							}) => *max_depth = self.uint(c.a)?,
-							_ => return Err(after_async(c, "MAXDEPTH")),
-						},
+							}) = &mut s.kind
+							{
+								*max_depth = self.uint(c.a)?;
+							} else {
+								return Err(after_async(c, "MAXDEPTH"));
+							}
+						}
 					}
 				}
 				AlterStatement::Event(s)
@@ -1740,10 +1810,10 @@ impl Lower<'_> {
 							if r[1] != NONE {
 								s.returns = AlterKind::Set(self.kind(r[1])?);
 							}
-							s.block = AlterKind::Set(match self.expr(r[2])? {
-								Expr::Block(b) => *b,
-								_ => return Err(Reject::new("not a block")),
-							});
+							let Expr::Block(b) = self.expr(r[2])? else {
+								return Err(Reject::new("not a block"));
+							};
+							s.block = AlterKind::Set(*b);
 						}
 						(Cl::Comment, _) => s.comment = self.str_alter(c)?,
 						_ => s.permissions = Some(self.perm(c.a)?),
@@ -1836,9 +1906,11 @@ impl Lower<'_> {
 					_ => {
 						let mut d = DefaultConfig::default();
 						for c in rest {
-							match unsafe_cl(c.op) {
-								Cl::DefaultNs => d.namespace = self.expr(c.a)?,
-								_ => d.database = self.expr(c.a)?,
+							let kind = unsafe_cl(c.op);
+							if kind == Cl::DefaultNs {
+								d.namespace = self.expr(c.a)?;
+							} else {
+								d.database = self.expr(c.a)?;
 							}
 						}
 						ConfigInner::Default(d)

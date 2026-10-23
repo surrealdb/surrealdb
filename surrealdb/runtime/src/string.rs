@@ -165,48 +165,45 @@ pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
 }
 
 pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value> {
-	match search {
-		Value::String(search) => {
-			if replace.len() > search.len() {
-				let increase = replace.len() - search.len();
-				limit(
-					"string::replace",
-					val.len().saturating_add(
-						val.matches(search.as_str()).count().saturating_mul(increase),
-					),
-				)?;
-			}
-			Ok(val.replace(search.as_str(), &replace).into())
+	if let Value::String(search) = search {
+		if replace.len() > search.len() {
+			let increase = replace.len() - search.len();
+			limit(
+				"string::replace",
+				val.len()
+					.saturating_add(val.matches(search.as_str()).count().saturating_mul(increase)),
+			)?;
 		}
-		Value::Regex(search) => {
-			let mut new_val = String::with_capacity(val.len());
-			let mut last = 0;
+		Ok(val.replace(search.as_str(), &replace).into())
+	} else if let Value::Regex(search) = search {
+		let mut new_val = String::with_capacity(val.len());
+		let mut last = 0;
 
-			for m in search.0.find_iter(&val) {
-				// Push everything until the match
-				new_val.push_str(&val[last..m.start()]);
+		for m in search.0.find_iter(&val) {
+			// Push everything until the match
+			new_val.push_str(&val[last..m.start()]);
 
-				// Push replacement
-				new_val.push_str(&replace);
+			// Push replacement
+			new_val.push_str(&replace);
 
-				// Abort early if we'd exceed the allowed limit
-				limit("string::replace", new_val.len())?;
-
-				last = m.end();
-			}
-
-			// Finally, push anything after the last match
-			new_val.push_str(&val[last..]);
+			// Abort early if we'd exceed the allowed limit
 			limit("string::replace", new_val.len())?;
-			Ok(new_val.into())
+
+			last = m.end();
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+
+		// Finally, push anything after the last match
+		new_val.push_str(&val[last..]);
+		limit("string::replace", new_val.len())?;
+		Ok(new_val.into())
+	} else {
+		Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
 				search.to_sql()
 			),
-		})),
+		}))
 	}
 }
 pub fn reverse((string,): (String,)) -> Result<Value> {

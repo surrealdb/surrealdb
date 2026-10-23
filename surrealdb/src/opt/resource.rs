@@ -67,9 +67,10 @@ impl Resource {
 	}
 
 	pub fn is_single_recordid(&self) -> bool {
-		match self {
-			Resource::RecordId(rid) => !matches!(rid.key, RecordIdKey::Range(_)),
-			_ => false,
+		if let Resource::RecordId(rid) = self {
+			!matches!(rid.key, RecordIdKey::Range(_))
+		} else {
+			false
 		}
 	}
 

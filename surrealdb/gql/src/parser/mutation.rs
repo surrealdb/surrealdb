@@ -32,41 +32,35 @@ impl Parser<'_> {
 			let item_start = self.peek().span;
 			let var = self.parse_ident()?;
 			let token = self.peek();
-			let item = match token.kind {
-				// setPropertyItem: `a.p = v`
-				t!(".") => {
-					self.pop_peek();
-					let prop = self.parse_ident()?;
-					expected!(self, t!("="));
-					let value = self.parse_expr()?;
-					SetItem::Property {
-						var,
-						prop,
-						value,
-						span: item_start.covers(self.last_span()),
-					}
+			let item = if token.kind == t!(".") {
+				self.pop_peek();
+				let prop = self.parse_ident()?;
+				expected!(self, t!("="));
+				let value = self.parse_expr()?;
+				SetItem::Property {
+					var,
+					prop,
+					value,
+					span: item_start.covers(self.last_span()),
 				}
-				// setAllPropertiesItem: `a = { k: v, … }`
-				t!("=") => {
-					self.pop_peek();
-					let props = self.parse_property_map()?;
-					SetItem::AllProperties {
-						var,
-						props,
-						span: item_start.covers(self.last_span()),
-					}
+			} else if token.kind == t!("=") {
+				self.pop_peek();
+				let props = self.parse_property_map()?;
+				SetItem::AllProperties {
+					var,
+					props,
+					span: item_start.covers(self.last_span()),
 				}
-				// setLabelItem: `a:Label` / `a IS Label` (rejected in lowering).
-				t!(":") | t!("IS") => {
-					self.pop_peek();
-					let label = self.parse_ident()?;
-					SetItem::Label {
-						var,
-						label,
-						span: item_start.covers(self.last_span()),
-					}
+			} else if matches!(token.kind, t!(":") | t!("IS")) {
+				self.pop_peek();
+				let label = self.parse_ident()?;
+				SetItem::Label {
+					var,
+					label,
+					span: item_start.covers(self.last_span()),
 				}
-				_ => unexpected!(self, token, "`.`, `=`, `:` or `IS`"),
+			} else {
+				unexpected!(self, token, "`.`, `=`, `:` or `IS`")
 			};
 			items.push(item);
 			if !self.eat(t!(",")) {
@@ -87,28 +81,24 @@ impl Parser<'_> {
 			let item_start = self.peek().span;
 			let var = self.parse_ident()?;
 			let token = self.peek();
-			let item = match token.kind {
-				// removePropertyItem: `a.p`
-				t!(".") => {
-					self.pop_peek();
-					let prop = self.parse_ident()?;
-					RemoveItem::Property {
-						var,
-						prop,
-						span: item_start.covers(self.last_span()),
-					}
+			let item = if token.kind == t!(".") {
+				self.pop_peek();
+				let prop = self.parse_ident()?;
+				RemoveItem::Property {
+					var,
+					prop,
+					span: item_start.covers(self.last_span()),
 				}
-				// removeLabelItem: `a:Label` / `a IS Label` (rejected in lowering).
-				t!(":") | t!("IS") => {
-					self.pop_peek();
-					let label = self.parse_ident()?;
-					RemoveItem::Label {
-						var,
-						label,
-						span: item_start.covers(self.last_span()),
-					}
+			} else if matches!(token.kind, t!(":") | t!("IS")) {
+				self.pop_peek();
+				let label = self.parse_ident()?;
+				RemoveItem::Label {
+					var,
+					label,
+					span: item_start.covers(self.last_span()),
 				}
-				_ => unexpected!(self, token, "`.`, `:` or `IS`"),
+			} else {
+				unexpected!(self, token, "`.`, `:` or `IS`")
 			};
 			items.push(item);
 			if !self.eat(t!(",")) {
@@ -198,13 +188,14 @@ impl Parser<'_> {
 	/// forms are rejected.
 	fn parse_insert_edge(&mut self) -> ParseResult<Option<InsertEdge>> {
 		let token = self.peek();
-		let direction = match token.kind {
-			t!("-[") => InsertEdgeDir::Right,
-			t!("<-[") => InsertEdgeDir::Left,
-			t!("~[") | t!("<~[") => {
-				bail!("Undirected INSERT edges are not supported", @token.span);
-			}
-			_ => return Ok(None),
+		let direction = if token.kind == t!("-[") {
+			InsertEdgeDir::Right
+		} else if token.kind == t!("<-[") {
+			InsertEdgeDir::Left
+		} else if matches!(token.kind, t!("~[") | t!("<~[")) {
+			bail!("Undirected INSERT edges are not supported", @token.span);
+		} else {
+			return Ok(None);
 		};
 		let open = token.span;
 		self.pop_peek();
@@ -235,18 +226,22 @@ impl Parser<'_> {
 	fn parse_insert_filler(&mut self) -> ParseResult<InsertFiller> {
 		// Optional variable declaration.
 		let token = self.peek();
-		let var = match token.kind {
-			kind if Self::token_can_be_ident(kind) => Some(self.parse_ident()?),
+		let var = if Self::token_can_be_ident(token.kind) {
+			Some(self.parse_ident()?)
+		} else if let TokenKind::Keyword(keyword) = token.kind {
 			// A reserved word cannot be a variable; `IS` introduces a label and
 			// is handled below.
-			TokenKind::Keyword(keyword) if !matches!(keyword, Keyword::Is) => {
+			if keyword != Keyword::Is {
 				bail!(
 					"`{}` is a reserved word and cannot be used as a variable name",
 					self.span_str(token.span),
 					@token.span => "use a `\"…\"` or `` `…` `` delimited identifier instead"
 				);
+			} else {
+				None
 			}
-			_ => None,
+		} else {
+			None
 		};
 		// Optional label (introduced by `:` or `IS`, `isOrColon` GQL.g4:1024).
 		let label = if self.eat(t!(":")) || self.eat(t!("IS")) {

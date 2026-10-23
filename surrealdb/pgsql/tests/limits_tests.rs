@@ -235,14 +235,12 @@ fn test_transaction_modes_rejected() {
 #[test]
 fn test_set_local_and_session() {
 	let stmt = parse_statement("SET LOCAL timezone = 'UTC';").expect("SET LOCAL must succeed");
-	match stmt {
-		Statement::Set(s) => {
-			assert!(s.is_local);
-			assert_eq!(s.name, "timezone");
-			assert_eq!(s.value, "'UTC'");
-		}
-		_ => panic!("expected Set statement"),
-	}
+	let Statement::Set(s) = stmt else {
+		panic!("expected Set statement");
+	};
+	assert!(s.is_local);
+	assert_eq!(s.name, "timezone");
+	assert_eq!(s.value, "'UTC'");
 
 	// Normal SET succeeds
 	assert!(parse_statement("SET timezone = 'UTC';").is_ok());

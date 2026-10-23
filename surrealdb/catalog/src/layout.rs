@@ -428,14 +428,14 @@ impl Column {
 		if self.role == ColumnRole::Field && self.path.is_empty() {
 			return Err(out_of_range::<Self>(2));
 		}
-		match self.kind {
-			PhysicalKind::Fixed(width) if !(1..=MAX_FIXED_SLOT).contains(&width) => {
-				return Err(out_of_range::<Self>(4));
-			}
-			PhysicalKind::LiteralCode(width) if !(1..=2).contains(&width) => {
-				return Err(out_of_range::<Self>(4));
-			}
-			_ => {}
+		if let PhysicalKind::Fixed(width) = self.kind
+			&& !(1..=MAX_FIXED_SLOT).contains(&width)
+		{
+			return Err(out_of_range::<Self>(4));
+		} else if let PhysicalKind::LiteralCode(width) = self.kind
+			&& !(1..=2).contains(&width)
+		{
+			return Err(out_of_range::<Self>(4));
 		}
 		if self.role == ColumnRole::Remainder && self.kind != PhysicalKind::Value {
 			return Err(out_of_range::<Self>(4));
@@ -455,19 +455,14 @@ impl Column {
 		if !agrees {
 			return Err(out_of_range::<Self>(8));
 		}
-		match self.kind {
-			PhysicalKind::LiteralCode(width) => {
-				// `width` is 1 or 2, so the capacity is 256 or 65536.
-				let capacity = 1usize << (8 * width);
-				if self.literals.is_empty() || self.literals.len() > capacity {
-					return Err(out_of_range::<Self>(12));
-				}
+		if let PhysicalKind::LiteralCode(width) = self.kind {
+			// `width` is 1 or 2, so the capacity is 256 or 65536.
+			let capacity = 1usize << (8 * width);
+			if self.literals.is_empty() || self.literals.len() > capacity {
+				return Err(out_of_range::<Self>(12));
 			}
-			_ => {
-				if !self.literals.is_empty() {
-					return Err(out_of_range::<Self>(12));
-				}
-			}
+		} else if !self.literals.is_empty() {
+			return Err(out_of_range::<Self>(12));
 		}
 		if self.kind == PhysicalKind::RecordKey {
 			if self.tables.is_empty() || self.tables.len() > MAX_KEY_TABLES {

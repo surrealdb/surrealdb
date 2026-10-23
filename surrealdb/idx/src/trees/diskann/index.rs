@@ -527,36 +527,40 @@ trait TypedVector: Sized {
 
 impl TypedVector for f32 {
 	fn slice_of(vector: &Vector) -> Option<&[Self]> {
-		match vector {
-			Vector::F32(v) => v.as_slice(),
-			_ => None,
+		if let Vector::F32(v) = vector {
+			v.as_slice()
+		} else {
+			None
 		}
 	}
 }
 
 impl TypedVector for Half {
 	fn slice_of(vector: &Vector) -> Option<&[Self]> {
-		match vector {
-			Vector::F16(v) => v.as_slice(),
-			_ => None,
+		if let Vector::F16(v) = vector {
+			v.as_slice()
+		} else {
+			None
 		}
 	}
 }
 
 impl TypedVector for i8 {
 	fn slice_of(vector: &Vector) -> Option<&[Self]> {
-		match vector {
-			Vector::I8(v) => v.as_slice(),
-			_ => None,
+		if let Vector::I8(v) = vector {
+			v.as_slice()
+		} else {
+			None
 		}
 	}
 }
 
 impl TypedVector for u8 {
 	fn slice_of(vector: &Vector) -> Option<&[Self]> {
-		match vector {
-			Vector::U8(v) => v.as_slice(),
-			_ => None,
+		if let Vector::U8(v) = vector {
+			v.as_slice()
+		} else {
+			None
 		}
 	}
 }
@@ -932,7 +936,10 @@ impl DiskAnnGraph {
 			SerializedVector::U8(_) => {
 				self.index.prune_range(&DiskAnnStrategy::<u8>::default(), context, ids).await?
 			}
-			_ => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
+			SerializedVector::F64(_)
+			| SerializedVector::I64(_)
+			| SerializedVector::I32(_)
+			| SerializedVector::I16(_) => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
 		}
 		Ok(())
 	}
@@ -1604,7 +1611,12 @@ fn distance_to_metric(distance: &Distance) -> Result<Metric> {
 		Distance::Cosine => Ok(Metric::Cosine),
 		Distance::InnerProduct => Ok(Metric::InnerProduct),
 		Distance::CosineNormalized => Ok(Metric::CosineNormalized),
-		_ => bail!(
+		Distance::Chebyshev
+		| Distance::Hamming
+		| Distance::Jaccard
+		| Distance::Manhattan
+		| Distance::Minkowski(_)
+		| Distance::Pearson => bail!(
 			"DISKANN supports EUCLIDEAN, COSINE, INNER_PRODUCT, and COSINE_NORMALIZED distances"
 		),
 	}
@@ -1641,7 +1653,9 @@ impl DiskAnnSearch {
 			Vector::F16(values) => DiskAnnQuery::F16(values.to_vec()),
 			Vector::I8(values) => DiskAnnQuery::I8(values.to_vec()),
 			Vector::U8(values) => DiskAnnQuery::U8(values.to_vec()),
-			_ => bail!("DISKANN supports TYPE F32, F16, I8, and U8"),
+			Vector::F64(_) | Vector::I64(_) | Vector::I32(_) | Vector::I16(_) => {
+				bail!("DISKANN supports TYPE F32, F16, I8, and U8")
+			}
 		};
 		Ok(Self {
 			query,
@@ -1999,11 +2013,12 @@ impl DiskAnnIndex {
 
 	/// Converts upstream DiskANN scores to SurrealDB's public distance semantics.
 	fn graph_distance(&self, distance: f64) -> f64 {
-		match self.distance {
-			// DiskANN's L2 scorer returns squared L2. SurrealDB's EUCLIDEAN distance is the true
-			// Euclidean distance, and pending vectors are scored with that public value.
-			Distance::Euclidean => distance.sqrt(),
-			_ => distance,
+		// DiskANN's L2 scorer returns squared L2. SurrealDB's EUCLIDEAN distance is the true
+		// Euclidean distance, and pending vectors are scored with that public value.
+		if let Distance::Euclidean = self.distance {
+			distance.sqrt()
+		} else {
+			distance
 		}
 	}
 
@@ -4309,9 +4324,12 @@ mod tests {
 		ctx.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		keys.sort();
@@ -4474,9 +4492,12 @@ mod tests {
 		query.tx().cancel().await?;
 		let keys: Vec<i64> = res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		assert_eq!(keys, vec![0, 1, 2, 3, 4], "every record, nearest first: {res:?}");
@@ -6289,9 +6310,12 @@ mod tests {
 		writer.tx().cancel().await?;
 		let mut keys: Vec<i64> = found
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		keys.sort_unstable();
@@ -7932,9 +7956,12 @@ mod tests {
 			(VectorType::U8, Distance::Cosine),
 			(VectorType::U8, Distance::InnerProduct),
 		];
-		let value = |vector_type: &VectorType, v: f64| match vector_type {
-			VectorType::I8 | VectorType::U8 => Value::from(v.abs() as i64),
-			_ => Value::from(v),
+		let value = |vector_type: &VectorType, v: f64| {
+			if matches!(vector_type, VectorType::I8 | VectorType::U8) {
+				Value::from(v.abs() as i64)
+			} else {
+				Value::from(v)
+			}
 		};
 		for quantized in [true, false] {
 			for (vector_type, distance) in &cases {
@@ -7953,9 +7980,12 @@ mod tests {
 				}
 				let query: Vec<Number> = query
 					.iter()
-					.map(|v| match vector_type {
-						VectorType::I8 | VectorType::U8 => Number::from(*v as i64),
-						_ => Number::from(*v),
+					.map(|v| {
+						if matches!(vector_type, VectorType::I8 | VectorType::U8) {
+							Number::from(*v as i64)
+						} else {
+							Number::from(*v)
+						}
 					})
 					.collect();
 				let distances = |ds: &TestIndexStore| {
@@ -9101,9 +9131,12 @@ mod tests {
 		ctx.tx().cancel().await?;
 		Ok(res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect())
 	}
@@ -9704,9 +9737,12 @@ mod tests {
 		let res = index.knn_search(ctx, &query, k, 8, None, None).await?;
 		let mut keys: Vec<i64> = res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		keys.sort();

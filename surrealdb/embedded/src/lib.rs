@@ -578,9 +578,11 @@ mod tests {
 
 		let listed: Vec<Uuid> = listed
 			.into_iter()
-			.map(|value| match value {
-				Value::Uuid(id) => id.into_inner(),
-				other => panic!("expected a uuid, got {other:?}"),
+			.map(|value| {
+				let Value::Uuid(id) = value else {
+					panic!("expected a uuid, got {value:?}");
+				};
+				id.into_inner()
 			})
 			.collect();
 		assert_eq!(listed, vec![attached], "only the attached session is listed");

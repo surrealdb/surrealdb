@@ -239,17 +239,19 @@ impl<'a> Parser<'a> {
 
 	#[inline]
 	pub fn peek_keyword(&self) -> Option<Keyword> {
-		match &self.peek().kind {
-			TokenKind::Keyword(kw) => Some(*kw),
-			_ => None,
+		if let TokenKind::Keyword(kw) = &self.peek().kind {
+			Some(*kw)
+		} else {
+			None
 		}
 	}
 
 	#[inline]
 	pub fn peek_nth_keyword(&self, n: usize) -> Option<Keyword> {
-		match &self.peek_nth(n).kind {
-			TokenKind::Keyword(kw) => Some(*kw),
-			_ => None,
+		if let TokenKind::Keyword(kw) = &self.peek_nth(n).kind {
+			Some(*kw)
+		} else {
+			None
 		}
 	}
 
@@ -319,25 +321,23 @@ impl<'a> Parser<'a> {
 
 	pub fn parse_ident(&mut self) -> ParseResult<(String, Span)> {
 		let tok = self.peek();
-		match &tok.kind {
-			TokenKind::Ident(s) => {
-				let s = s.clone();
-				let span = self.bump().span;
-				Ok((s, span))
-			}
-			TokenKind::Keyword(kw) => {
-				// MySQL allows many keywords as unquoted identifiers (e.g. status, value, etc.)
-				let s = kw.as_str().to_string();
-				let span = self.bump().span;
-				Ok((s, span))
-			}
-			_ => Err(ParseError::new(
+		if let TokenKind::Ident(s) = &tok.kind {
+			let s = s.clone();
+			let span = self.bump().span;
+			Ok((s, span))
+		} else if let TokenKind::Keyword(kw) = &tok.kind {
+			// MySQL allows many keywords as unquoted identifiers (e.g. status, value, etc.)
+			let s = kw.as_str().to_string();
+			let span = self.bump().span;
+			Ok((s, span))
+		} else {
+			Err(ParseError::new(
 				tok.span,
 				ErrorKind::UnexpectedToken {
 					expected: "identifier",
 					found: tok.kind.to_string(),
 				},
-			)),
+			))
 		}
 	}
 

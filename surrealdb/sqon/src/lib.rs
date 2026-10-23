@@ -358,7 +358,33 @@ impl<'a> Common<'a> {
 					v.finish_range(Bound::Unbounded, Bound::Included(ValueAccess(this)))
 				});
 			}
-			_ => {}
+			Token::OpenBrace
+			| Token::CloseBrace
+			| Token::OpenBracket
+			| Token::CloseBracket
+			| Token::Comma
+			| Token::Colon
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual
+			| Token::Ident
+			| Token::String
+			| Token::RecordIdString
+			| Token::UuidString
+			| Token::DateTimeString
+			| Token::FileString
+			| Token::ByteString
+			| Token::NaN
+			| Token::Infinity
+			| Token::PosInfinity
+			| Token::NegInfinity
+			| Token::Float
+			| Token::Decimal
+			| Token::Int
+			| Token::Duration
+			| Token::KwNull
+			| Token::KwNone
+			| Token::KwTrue
+			| Token::KwFalse => {}
 		}
 
 		let bound = self.parse_token_value(token, slice, v.visitor())?;
@@ -531,7 +557,14 @@ impl<'a> Common<'a> {
 			Token::KwNone => visitor.visit_none(),
 			Token::KwTrue => visitor.visit_bool(true),
 			Token::KwFalse => visitor.visit_bool(false),
-			_ => Err(Error::InvalidSqon {
+			Token::CloseBrace
+			| Token::CloseBracket
+			| Token::Comma
+			| Token::Colon
+			| Token::DotDot
+			| Token::DotDotEqual
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual => Err(Error::InvalidSqon {
 				message: format!("Unexpected token `{slice}`"),
 			}),
 		}
@@ -690,7 +723,24 @@ impl<'a> Common<'a> {
 						})
 					}
 				}
-				_ => visitor.visit_set(SetAccess {
+				Token::OpenBrace
+				| Token::OpenBracket
+				| Token::CloseBracket
+				| Token::Colon
+				| Token::DotDot
+				| Token::DotDotEqual
+				| Token::ShevronDotDot
+				| Token::ShevronDotDotEqual
+				| Token::RecordIdString
+				| Token::UuidString
+				| Token::DateTimeString
+				| Token::FileString
+				| Token::ByteString
+				| Token::PosInfinity
+				| Token::NegInfinity
+				| Token::Float
+				| Token::Decimal
+				| Token::Duration => visitor.visit_set(SetAccess {
 					parser: this,
 					done: false,
 				}),
@@ -716,7 +766,26 @@ impl<'a> Common<'a> {
 			| Token::KwNone
 			| Token::KwTrue
 			| Token::KwFalse => Ok(slice.to_string()),
-			_ => Err(Error::InvalidSqon {
+			Token::OpenBrace
+			| Token::CloseBrace
+			| Token::OpenBracket
+			| Token::CloseBracket
+			| Token::Comma
+			| Token::Colon
+			| Token::DotDot
+			| Token::DotDotEqual
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual
+			| Token::RecordIdString
+			| Token::UuidString
+			| Token::DateTimeString
+			| Token::FileString
+			| Token::ByteString
+			| Token::PosInfinity
+			| Token::NegInfinity
+			| Token::Float
+			| Token::Decimal
+			| Token::Duration => Err(Error::InvalidSqon {
 				message: format!("Unexpected token `{slice}`, expected an object key"),
 			}),
 		}
@@ -747,7 +816,33 @@ impl<'p, 'src> ArrayAccess<'p, 'src> {
 				self.done = true;
 			}
 			Token::Comma => {}
-			_ => {
+			Token::OpenBrace
+			| Token::CloseBrace
+			| Token::OpenBracket
+			| Token::Colon
+			| Token::DotDot
+			| Token::DotDotEqual
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual
+			| Token::Ident
+			| Token::String
+			| Token::RecordIdString
+			| Token::UuidString
+			| Token::DateTimeString
+			| Token::FileString
+			| Token::ByteString
+			| Token::NaN
+			| Token::Infinity
+			| Token::PosInfinity
+			| Token::NegInfinity
+			| Token::Float
+			| Token::Decimal
+			| Token::Int
+			| Token::Duration
+			| Token::KwNull
+			| Token::KwNone
+			| Token::KwTrue
+			| Token::KwFalse => {
 				return Some(Err(self.parser.unexpected()));
 			}
 		}
@@ -787,7 +882,33 @@ impl<'p, 'src> ObjectAccess<'p, 'src> {
 				self.done = true;
 			}
 			Token::Comma => {}
-			_ => {
+			Token::OpenBrace
+			| Token::OpenBracket
+			| Token::CloseBracket
+			| Token::Colon
+			| Token::DotDot
+			| Token::DotDotEqual
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual
+			| Token::Ident
+			| Token::String
+			| Token::RecordIdString
+			| Token::UuidString
+			| Token::DateTimeString
+			| Token::FileString
+			| Token::ByteString
+			| Token::NaN
+			| Token::Infinity
+			| Token::PosInfinity
+			| Token::NegInfinity
+			| Token::Float
+			| Token::Decimal
+			| Token::Int
+			| Token::Duration
+			| Token::KwNull
+			| Token::KwNone
+			| Token::KwTrue
+			| Token::KwFalse => {
 				return Some(Err(self.parser.unexpected()));
 			}
 		};
@@ -818,7 +939,33 @@ impl<'p, 'src> SetAccess<'p, 'src> {
 		match try_some!(self.parser.next_expect()) {
 			Token::Comma => {}
 			Token::CloseBrace => self.done = true,
-			_ => {
+			Token::OpenBrace
+			| Token::OpenBracket
+			| Token::CloseBracket
+			| Token::Colon
+			| Token::DotDot
+			| Token::DotDotEqual
+			| Token::ShevronDotDot
+			| Token::ShevronDotDotEqual
+			| Token::Ident
+			| Token::String
+			| Token::RecordIdString
+			| Token::UuidString
+			| Token::DateTimeString
+			| Token::FileString
+			| Token::ByteString
+			| Token::NaN
+			| Token::Infinity
+			| Token::PosInfinity
+			| Token::NegInfinity
+			| Token::Float
+			| Token::Decimal
+			| Token::Int
+			| Token::Duration
+			| Token::KwNull
+			| Token::KwNone
+			| Token::KwTrue
+			| Token::KwFalse => {
 				return Some(Err(self.parser.unexpected()));
 			}
 		};

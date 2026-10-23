@@ -344,13 +344,15 @@ async fn read_bucket_file(db: &Surreal<Any>, file: &BucketFile) -> Result<Vec<u8
 		.with_context(|| format!("failed to read {file}"))?
 		.take(0)
 		.with_context(|| format!("failed to read {file}"))?;
-	match head {
-		Value::None | Value::Null => bail!("{file} does not exist"),
-		Value::Number(n) => match n.to_int() {
+	if head.is_nullish() {
+		bail!("{file} does not exist");
+	} else if let Value::Number(n) = head {
+		match n.to_int() {
 			Some(size) if size >= 0 && size as u64 <= MAX_PACKAGE_BYTES => {}
 			_ => bail!("{file} is larger than {MAX_PACKAGE_BYTES} bytes, which the server accepts"),
-		},
-		other => bail!("{file} has no size: file::head returned {}", other.kind()),
+		}
+	} else {
+		bail!("{file} has no size: file::head returned {}", head.kind());
 	}
 	let value: Value = db
 		.query("RETURN file::get($file)")
@@ -361,11 +363,16 @@ async fn read_bucket_file(db: &Surreal<Any>, file: &BucketFile) -> Result<Vec<u8
 		.with_context(|| format!("failed to read {file}"))?
 		.take(0)
 		.with_context(|| format!("failed to read {file}"))?;
-	match value {
-		Value::Bytes(b) if b.len() as u64 <= MAX_PACKAGE_BYTES => Ok(b.into_inner().to_vec()),
-		Value::Bytes(_) => bail!("{file} is larger than {MAX_PACKAGE_BYTES} bytes"),
-		Value::None | Value::Null => bail!("{file} does not exist"),
-		other => bail!("{file} returned {} instead of bytes", other.kind()),
+	if value.is_nullish() {
+		bail!("{file} does not exist")
+	} else if let Value::Bytes(b) = value {
+		if b.len() as u64 <= MAX_PACKAGE_BYTES {
+			Ok(b.into_inner().to_vec())
+		} else {
+			bail!("{file} is larger than {MAX_PACKAGE_BYTES} bytes")
+		}
+	} else {
+		bail!("{file} returned {} instead of bytes", value.kind())
 	}
 }
 

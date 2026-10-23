@@ -41,9 +41,8 @@ pub fn json(src: &str, settings: &Settings) -> Result<Value, Error> {
 /// string that only begins with a record id never names that record.
 pub fn record_id(src: &str, settings: &Settings) -> Result<RecordId, Error> {
 	let mut p = Parser::new(src, settings, false, false);
-	let r = match p.run_record_id()? {
-		Value::RecordId(r) => r,
-		_ => unreachable!("a record-id parse yields a record id"),
+	let Value::RecordId(r) = p.run_record_id()? else {
+		unreachable!("a record-id parse yields a record id");
 	};
 	if p.tok.kind != T::Eof {
 		return Err(p.unexpected("the end of the record id"));
@@ -175,10 +174,12 @@ impl<'a> Parser<'a> {
 	/// Where the token at `t` ends for error spans, as clients have always
 	/// seen them: `??` is two `?` tokens and a digits token runs on over `_`.
 	fn syn_token_end(&self, t: Tok) -> u32 {
-		match t.kind {
-			T::QQ => t.start + 1,
-			T::Digits => self.digits_end(t.start),
-			_ => t.end,
+		if t.kind == T::QQ {
+			t.start + 1
+		} else if t.kind == T::Digits {
+			self.digits_end(t.start)
+		} else {
+			t.end
 		}
 	}
 
@@ -231,10 +232,12 @@ impl<'a> Parser<'a> {
 		if self.eat(k) {
 			return Ok(());
 		}
-		let closer = match k {
-			T::RBracket => "]",
-			T::RBrace => "}",
-			_ => ")",
+		let closer = if k == T::RBracket {
+			"]"
+		} else if k == T::RBrace {
+			"}"
+		} else {
+			")"
 		};
 		Err(self.unclosed(closer, open))
 	}
@@ -482,24 +485,24 @@ impl<'a> Parser<'a> {
 
 	/// A range after a value: `>..`, `..`, `..=`, each directly after it.
 	fn postfix_range(&mut self, v: &mut Value) -> R<Option<Start>> {
-		let excluded = match self.tok.kind {
-			T::Gt if !self.tok.ws() => {
-				self.bump();
-				if self.tok.ws() {
-					let gt = self.prev;
-					return Err(Error::Lower(
-						Reject::new("Unexpected whitespace")
-							.at(gt.start, gt.end)
-							.with_label("No whitespace allowed after this token"),
-					));
-				}
-				if self.tok.kind != T::DotDot {
-					return Err(self.unexpected(".."));
-				}
-				true
+		let excluded = if self.tok.kind == T::Gt && !self.tok.ws() {
+			self.bump();
+			if self.tok.ws() {
+				let gt = self.prev;
+				return Err(Error::Lower(
+					Reject::new("Unexpected whitespace")
+						.at(gt.start, gt.end)
+						.with_label("No whitespace allowed after this token"),
+				));
 			}
-			T::DotDot if !self.tok.ws() => false,
-			_ => return Ok(None),
+			if self.tok.kind != T::DotDot {
+				return Err(self.unexpected(".."));
+			}
+			true
+		} else if self.tok.kind == T::DotDot && !self.tok.ws() {
+			false
+		} else {
+			return Ok(None);
 		};
 		self.bump();
 		let start = std::mem::replace(v, Value::None);
@@ -547,50 +550,43 @@ impl<'a> Parser<'a> {
 	/// An object key.
 	fn object_key(&mut self) -> R<String> {
 		let t = self.tok;
-		match t.kind {
-			T::Ident => {
-				self.bump();
-				Ok(self.text(t).to_owned())
-			}
-			T::EscIdent => {
-				self.bump();
-				self.string(t)
-			}
-			T::Str if matches!(t.aux(), 0 | b's') => {
-				self.bump();
-				self.string(t)
-			}
-			T::Digits => {
-				let mut l = self.lex;
-				match l.numeric(t.start) {
-					Ok(NumKind::Duration) | Err(_) => {
-						Err(self.number_err(t.start, Compound::Number))
-					}
-					Ok(kind) => {
-						let end = l.pos;
-						self.reset_to(end);
-						let text = &self.src[t.start as usize..end as usize];
-						// The key is spelled as written, but must be a valid
-						// number.
-						match kind {
-							NumKind::Int => {
-								// A key's magnitude is bounded by `i64::MIN`'s.
-								let digits: String = text.chars().filter(|&c| c != '_').collect();
-								match digits.parse::<u64>() {
-									Ok(u) if u <= i64::MAX as u64 + 1 => {}
-									_ => return Err(self.number_err(t.start, Compound::Number)),
-								}
+		if t.kind == T::Ident {
+			self.bump();
+			Ok(self.text(t).to_owned())
+		} else if t.kind == T::EscIdent || (t.kind == T::Str && matches!(t.aux(), 0 | b's')) {
+			self.bump();
+			self.string(t)
+		} else if t.kind == T::Digits {
+			let mut l = self.lex;
+			match l.numeric(t.start) {
+				Ok(NumKind::Duration) | Err(_) => Err(self.number_err(t.start, Compound::Number)),
+				Ok(kind) => {
+					let end = l.pos;
+					self.reset_to(end);
+					let text = &self.src[t.start as usize..end as usize];
+					// The key is spelled as written, but must be a valid
+					// number.
+					match kind {
+						NumKind::Int => {
+							// A key's magnitude is bounded by `i64::MIN`'s.
+							let digits: String = text.chars().filter(|&c| c != '_').collect();
+							if let Ok(u) = digits.parse::<u64>()
+								&& u <= i64::MAX as u64 + 1
+							{
+							} else {
+								return Err(self.number_err(t.start, Compound::Number));
 							}
-							NumKind::Decimal => {
-								lit::decimal(text).map_err(Error::Lower)?;
-							}
-							_ => {}
 						}
-						Ok(text.to_owned())
+						NumKind::Decimal => {
+							lit::decimal(text).map_err(Error::Lower)?;
+						}
+						NumKind::Float | NumKind::Duration => {}
 					}
+					Ok(text.to_owned())
 				}
 			}
-			_ => Err(self.unexpected("an object key")),
+		} else {
+			Err(self.unexpected("an object key"))
 		}
 	}
 
@@ -636,10 +632,12 @@ impl<'a> Parser<'a> {
 		Ok(match kind {
 			NumKind::Int => Value::Number(Number::Int(int(text)?)),
 			NumKind::Float => Value::Number(Number::Float(float(text))),
-			NumKind::Decimal => match lit::decimal(text).map_err(Error::Lower)? {
-				Literal::Decimal(d) => Value::Number(Number::Decimal(d)),
-				_ => unreachable!("a decimal literal"),
-			},
+			NumKind::Decimal => {
+				let Literal::Decimal(d) = lit::decimal(text).map_err(Error::Lower)? else {
+					unreachable!("a decimal literal");
+				};
+				Value::Number(Number::Decimal(d))
+			}
 			NumKind::Duration => {
 				let (s, ns) = decode_duration(text.as_bytes())
 					.ok_or_else(|| self.number_err(t.start, Compound::Numeric))?;
@@ -652,71 +650,63 @@ impl<'a> Parser<'a> {
 	fn start(&mut self) -> R<Start> {
 		let t = self.tok;
 		let done = |v| Ok(Start::Done(v, true));
-		match t.kind {
-			T::Ident if t.kw == Kw::None_ => {
-				self.bump();
-				done(Value::None)
+		if t.kind == T::Ident && t.kw == Kw::None_ {
+			self.bump();
+			done(Value::None)
+		} else if t.kind == T::Ident && t.kw == Kw::Null {
+			self.bump();
+			done(Value::Null)
+		} else if t.kind == T::Ident && t.kw == Kw::True {
+			self.bump();
+			done(Value::Bool(true))
+		} else if t.kind == T::Ident && t.kw == Kw::False {
+			self.bump();
+			done(Value::Bool(false))
+		} else if t.kind == T::NaN {
+			self.bump();
+			done(Value::Number(Number::Float(f64::NAN)))
+		} else if t.kind == T::Infinity {
+			self.bump();
+			done(Value::Number(Number::Float(f64::INFINITY)))
+		} else if t.kind == T::LBrace {
+			self.bump();
+			if self.eat(T::RBrace) {
+				return Ok(Start::Done(Value::Object(Object::new()), false));
 			}
-			T::Ident if t.kw == Kw::Null => {
-				self.bump();
-				done(Value::Null)
+			if self.eat(T::Comma) {
+				self.expect_close(T::RBrace, t.start)?;
+				return Ok(Start::Done(Value::Set(Set::new()), false));
 			}
-			T::Ident if t.kw == Kw::True => {
-				self.bump();
-				done(Value::Bool(true))
-			}
-			T::Ident if t.kw == Kw::False => {
-				self.bump();
-				done(Value::Bool(false))
-			}
-			T::NaN => {
-				self.bump();
-				done(Value::Number(Number::Float(f64::NAN)))
-			}
-			T::Infinity => {
-				self.bump();
-				done(Value::Number(Number::Float(f64::INFINITY)))
-			}
-			T::LBrace => {
-				self.bump();
-				if self.eat(T::RBrace) {
-					return Ok(Start::Done(Value::Object(Object::new()), false));
+			self.enter()?;
+			let keyish = matches!(self.tok.kind, T::Ident | T::EscIdent | T::Digits)
+				|| (self.tok.kind == T::Str && matches!(self.tok.aux(), 0 | b's'));
+			if keyish {
+				let (pos, tok, prev) = (self.lex.pos, self.tok, self.prev);
+				let key = self.object_key()?;
+				if self.eat(T::Colon) {
+					return self.push(Frame::Object(BTreeMap::new(), key, t.start));
 				}
-				if self.eat(T::Comma) {
-					self.expect_close(T::RBrace, t.start)?;
-					return Ok(Start::Done(Value::Set(Set::new()), false));
-				}
-				self.enter()?;
-				let keyish = matches!(self.tok.kind, T::Ident | T::EscIdent | T::Digits)
-					|| (self.tok.kind == T::Str && matches!(self.tok.aux(), 0 | b's'));
-				if keyish {
-					let (pos, tok, prev) = (self.lex.pos, self.tok, self.prev);
-					let key = self.object_key()?;
-					if self.eat(T::Colon) {
-						return self.push(Frame::Object(BTreeMap::new(), key, t.start));
-					}
-					self.lex.pos = pos;
-					self.tok = tok;
-					self.prev = prev;
-				}
-				if self.eat(T::RBrace) {
-					self.leave();
-					return done(Value::Set(Set::new()));
-				}
-				self.push(Frame::Set(Set::new(), t.start))?;
-				self.start()
+				self.lex.pos = pos;
+				self.tok = tok;
+				self.prev = prev;
 			}
-			T::LBracket => {
-				self.bump();
-				self.enter()?;
-				if self.eat(T::RBracket) {
-					self.leave();
-					return done(Value::Array(Array::new()));
-				}
-				self.push(Frame::Array(Vec::new(), t.start))?;
-				self.start()
+			if self.eat(T::RBrace) {
+				self.leave();
+				return done(Value::Set(Set::new()));
 			}
-			T::Str => match t.aux() {
+			self.push(Frame::Set(Set::new(), t.start))?;
+			self.start()
+		} else if t.kind == T::LBracket {
+			self.bump();
+			self.enter()?;
+			if self.eat(T::RBracket) {
+				self.leave();
+				return done(Value::Array(Array::new()));
+			}
+			self.push(Frame::Array(Vec::new(), t.start))?;
+			self.start()
+		} else if t.kind == T::Str {
+			match t.aux() {
 				0 | b's' => {
 					self.bump();
 					let s = self.string(t)?;
@@ -742,79 +732,86 @@ impl<'a> Parser<'a> {
 							}
 							Value::File(lit::file(&body).map_err(at)?)
 						}
-						b'd' => match lit::datetime(&body).map_err(at)? {
-							Literal::Datetime(d) => Value::Datetime(d.into()),
-							_ => unreachable!("a datetime literal"),
-						},
-						b'u' => match lit::uuid(&body).map_err(at)? {
-							Literal::Uuid(u) => Value::Uuid(u.into()),
-							_ => unreachable!("a uuid literal"),
-						},
-						_ => match lit::bytes(&body).map_err(at)? {
-							Literal::Bytes(b) => Value::Bytes(b.into()),
-							_ => unreachable!("a bytes literal"),
-						},
+						b'd' => {
+							let Literal::Datetime(d) = lit::datetime(&body).map_err(at)? else {
+								unreachable!("a datetime literal");
+							};
+							Value::Datetime(d.into())
+						}
+						b'u' => {
+							let Literal::Uuid(u) = lit::uuid(&body).map_err(at)? else {
+								unreachable!("a uuid literal");
+							};
+							Value::Uuid(u.into())
+						}
+						_ => {
+							let Literal::Bytes(b) = lit::bytes(&body).map_err(at)? else {
+								unreachable!("a bytes literal");
+							};
+							Value::Bytes(b.into())
+						}
 					};
 					done(v)
 				}
 				_ => self.record_id_start(),
-			},
-			T::Slash => {
-				let mut l = self.lex;
-				if l.regex(t.start).is_err() {
-					let end = self.src.len() as u32;
-					return Err(self.err_at(t.start, end, "Failed to lex regex, unexpected eof"));
-				}
-				let end = l.pos;
-				self.reset_to(end);
-				match lit::regex_at(&self.src[t.start as usize..end as usize], t.start, end)
+			}
+		} else if t.kind == T::Slash {
+			let mut l = self.lex;
+			if l.regex(t.start).is_err() {
+				let end = self.src.len() as u32;
+				return Err(self.err_at(t.start, end, "Failed to lex regex, unexpected eof"));
+			}
+			let end = l.pos;
+			self.reset_to(end);
+			let Literal::Regex(r) =
+				lit::regex_at(&self.src[t.start as usize..end as usize], t.start, end)
 					.map_err(Error::Lower)?
-				{
-					Literal::Regex(r) => done(Value::Regex(Regex::from(r))),
-					_ => unreachable!("a regex literal"),
-				}
-			}
-			T::LParen => {
-				self.bump();
-				if matches!(self.tok.kind, T::Plus | T::Minus | T::Digits) {
-					let num_start = self.tok.start;
-					let n = self.number()?;
-					let num_end = self.prev_end();
-					if self.eat(T::Comma) {
-						let x = match n {
-							Value::Number(Number::Int(i)) => i as f64,
-							Value::Number(Number::Float(f)) if !f.is_nan() => f,
-							_ => {
-								return Err(Error::Lower(
-									Reject::new(
-										"Unexpected token, expected a non-decimal, non-NaN, number",
-									)
-									.at(num_start, num_end)
-									.with_label("Coordinate numbers can't be NaN or a decimal"),
-								));
-							}
-						};
-						let y = self.float()?;
-						self.expect_close(T::RParen, t.start)?;
-						return done(Value::Geometry(Geometry::Point((x, y).into())));
-					}
+			else {
+				unreachable!("a regex literal");
+			};
+			done(Value::Regex(Regex::from(r)))
+		} else if t.kind == T::LParen {
+			self.bump();
+			if matches!(self.tok.kind, T::Plus | T::Minus | T::Digits) {
+				let num_start = self.tok.start;
+				let n = self.number()?;
+				let num_end = self.prev_end();
+				if self.eat(T::Comma) {
+					let x = if let Value::Number(Number::Int(i)) = n {
+						i as f64
+					} else if let Value::Number(Number::Float(f)) = n
+						&& !f.is_nan()
+					{
+						f
+					} else {
+						return Err(Error::Lower(
+							Reject::new(
+								"Unexpected token, expected a non-decimal, non-NaN, number",
+							)
+							.at(num_start, num_end)
+							.with_label("Coordinate numbers can't be NaN or a decimal"),
+						));
+					};
+					let y = self.float()?;
 					self.expect_close(T::RParen, t.start)?;
-					return done(n);
+					return done(Value::Geometry(Geometry::Point((x, y).into())));
 				}
-				self.enter()?;
-				self.push(Frame::Paren(t.start))?;
-				self.start()
+				self.expect_close(T::RParen, t.start)?;
+				return done(n);
 			}
-			T::DotDot => {
-				self.bump();
-				self.range_end(Bound::Unbounded, false)
-			}
-			T::Plus | T::Minus | T::Digits => {
-				let v = self.number()?;
-				done(v)
-			}
-			_ if self.record_only => self.record_id_start(),
-			_ => self.record_or_table(),
+			self.enter()?;
+			self.push(Frame::Paren(t.start))?;
+			self.start()
+		} else if t.kind == T::DotDot {
+			self.bump();
+			self.range_end(Bound::Unbounded, false)
+		} else if matches!(t.kind, T::Plus | T::Minus | T::Digits) {
+			let v = self.number()?;
+			done(v)
+		} else if self.record_only {
+			self.record_id_start()
+		} else {
+			self.record_or_table()
 		}
 	}
 
@@ -826,10 +823,12 @@ impl<'a> Parser<'a> {
 	/// id, as the key grammar has it.
 	fn record_or_table(&mut self) -> R<Start> {
 		let table = self.take_ident()?;
-		let ends_value = match self.tok.kind {
-			T::Eof => true,
-			T::Comma | T::RBracket | T::RBrace | T::RParen => !self.frames.is_empty(),
-			_ => false,
+		let ends_value = if self.tok.kind == T::Eof {
+			true
+		} else if matches!(self.tok.kind, T::Comma | T::RBracket | T::RBrace | T::RParen) {
+			!self.frames.is_empty()
+		} else {
+			false
 		};
 		let in_key =
 			self.frames.iter().any(|f| matches!(f, Frame::KeyArray(..) | Frame::KeyObject(..)));
@@ -844,32 +843,33 @@ impl<'a> Parser<'a> {
 	/// `NaN` or `Infinity`.
 	fn float(&mut self) -> R<f64> {
 		let t = self.tok;
-		match t.kind {
-			T::NaN => {
-				self.bump();
-				Ok(f64::NAN)
+		if t.kind == T::NaN {
+			self.bump();
+			Ok(f64::NAN)
+		} else if t.kind == T::Infinity {
+			self.bump();
+			Ok(f64::INFINITY)
+		} else if matches!(t.kind, T::Plus | T::Minus | T::Digits) {
+			// A float reads on over a `.`, which must start a
+			// fraction.
+			if compound_error(self.src.as_bytes(), t.start, Compound::Float).is_some() {
+				return Err(self.number_err(t.start, Compound::Float));
 			}
-			T::Infinity => {
-				self.bump();
-				Ok(f64::INFINITY)
-			}
-			T::Plus | T::Minus | T::Digits => {
-				// A float reads on over a `.`, which must start a
-				// fraction.
-				if compound_error(self.src.as_bytes(), t.start, Compound::Float).is_some() {
-					return Err(self.number_err(t.start, Compound::Float));
+			let mut l = self.lex;
+			if let Ok(NumKind::Int | NumKind::Float) = l.numeric(t.start) {
+				let val = self.number()?;
+				if let Value::Number(Number::Int(i)) = val {
+					Ok(i as f64)
+				} else if let Value::Number(Number::Float(f)) = val {
+					Ok(f)
+				} else {
+					Err(self.number_err(t.start, Compound::Float))
 				}
-				let mut l = self.lex;
-				match l.numeric(t.start) {
-					Ok(NumKind::Int | NumKind::Float) => match self.number()? {
-						Value::Number(Number::Int(i)) => Ok(i as f64),
-						Value::Number(Number::Float(f)) => Ok(f),
-						_ => Err(self.number_err(t.start, Compound::Float)),
-					},
-					_ => Err(self.number_err(t.start, Compound::Float)),
-				}
+			} else {
+				Err(self.number_err(t.start, Compound::Float))
 			}
-			_ => Err(self.unexpected("a floating point number")),
+		} else {
+			Err(self.unexpected("a floating point number"))
 		}
 	}
 
@@ -877,57 +877,50 @@ impl<'a> Parser<'a> {
 	fn start_json(&mut self) -> R<Start> {
 		let t = self.tok;
 		let done = |v| Ok(Start::Done(v, false));
-		match t.kind {
-			T::Ident if t.kw == Kw::Null => {
-				self.bump();
-				done(Value::Null)
+		if t.kind == T::Ident && t.kw == Kw::Null {
+			self.bump();
+			done(Value::Null)
+		} else if t.kind == T::Ident && t.kw == Kw::True {
+			self.bump();
+			done(Value::Bool(true))
+		} else if t.kind == T::Ident && t.kw == Kw::False {
+			self.bump();
+			done(Value::Bool(false))
+		} else if t.kind == T::LBrace {
+			self.bump();
+			if self.eat(T::RBrace) {
+				return done(Value::Object(Object::new()));
 			}
-			T::Ident if t.kw == Kw::True => {
-				self.bump();
-				done(Value::Bool(true))
+			self.enter()?;
+			if self.eat(T::RBrace) {
+				self.leave();
+				return done(Value::Object(Object::new()));
 			}
-			T::Ident if t.kw == Kw::False => {
-				self.bump();
-				done(Value::Bool(false))
+			let key = self.object_key()?;
+			self.expect(T::Colon, ":")?;
+			self.push(Frame::Object(BTreeMap::new(), key, t.start))?;
+			self.start_json()
+		} else if t.kind == T::LBracket {
+			self.bump();
+			self.enter()?;
+			if self.eat(T::RBracket) {
+				self.leave();
+				return done(Value::Array(Array::new()));
 			}
-			T::LBrace => {
-				self.bump();
-				if self.eat(T::RBrace) {
-					return done(Value::Object(Object::new()));
-				}
-				self.enter()?;
-				if self.eat(T::RBrace) {
-					self.leave();
-					return done(Value::Object(Object::new()));
-				}
-				let key = self.object_key()?;
-				self.expect(T::Colon, ":")?;
-				self.push(Frame::Object(BTreeMap::new(), key, t.start))?;
-				self.start_json()
+			self.push(Frame::Array(Vec::new(), t.start))?;
+			self.start_json()
+		} else if t.kind == T::Str && matches!(t.aux(), 0 | b's') {
+			self.bump();
+			let s = self.string(t)?;
+			if self.settings.opts.legacy_strands {
+				return done(legacy_strand(s));
 			}
-			T::LBracket => {
-				self.bump();
-				self.enter()?;
-				if self.eat(T::RBracket) {
-					self.leave();
-					return done(Value::Array(Array::new()));
-				}
-				self.push(Frame::Array(Vec::new(), t.start))?;
-				self.start_json()
-			}
-			T::Str if matches!(t.aux(), 0 | b's') => {
-				self.bump();
-				let s = self.string(t)?;
-				if self.settings.opts.legacy_strands {
-					return done(legacy_strand(s));
-				}
-				done(Value::String(s))
-			}
-			T::Plus | T::Minus | T::Digits => {
-				let v = self.number()?;
-				done(v)
-			}
-			_ => self.json_record_or_table(),
+			done(Value::String(s))
+		} else if matches!(t.kind, T::Plus | T::Minus | T::Digits) {
+			let v = self.number()?;
+			done(v)
+		} else {
+			self.json_record_or_table()
 		}
 	}
 
@@ -954,10 +947,12 @@ impl<'a> Parser<'a> {
 
 	/// An identifier's name: the text of a word, unescaped when quoted.
 	fn ident(&self, t: Tok) -> R<String> {
-		match t.kind {
-			T::Ident => Ok(self.text(t).to_owned()),
-			T::EscIdent => self.string(t),
-			_ => Err(self.unexpected("an identifier")),
+		if t.kind == T::Ident {
+			Ok(self.text(t).to_owned())
+		} else if t.kind == T::EscIdent {
+			self.string(t)
+		} else {
+			Err(self.unexpected("an identifier"))
 		}
 	}
 
@@ -971,136 +966,136 @@ impl<'a> Parser<'a> {
 	/// A record id's key after its `:`.
 	fn record_key(&mut self, table: String) -> R<Start> {
 		let k = self.tok;
-		let key = match k.kind {
-			T::Str if k.aux() == b'u' => {
-				self.bump();
-				let body = self.string(k)?;
-				let token = &self.src[k.start as usize..k.end as usize];
-				match lit::uuid(&body)
-					.map_err(|r| Error::Lower(lit::in_token(r, token, k.start)))?
-				{
-					Literal::Uuid(u) => RecordIdKey::Uuid(u.into()),
-					_ => unreachable!("a uuid literal"),
-				}
+		let key = if k.kind == T::Str && k.aux() == b'u' {
+			self.bump();
+			let body = self.string(k)?;
+			let token = &self.src[k.start as usize..k.end as usize];
+			let Literal::Uuid(u) =
+				lit::uuid(&body).map_err(|r| Error::Lower(lit::in_token(r, token, k.start)))?
+			else {
+				unreachable!("a uuid literal");
+			};
+			RecordIdKey::Uuid(u.into())
+		} else if k.kind == T::LBrace {
+			self.bump();
+			self.enter()?;
+			if self.eat(T::RBrace) {
+				self.leave();
+				RecordIdKey::Object(Object::new())
+			} else {
+				let key = self.object_key()?;
+				self.expect(T::Colon, ":")?;
+				self.push(Frame::KeyObject(table, BTreeMap::new(), key, k.start))?;
+				return self.element();
 			}
-			T::LBrace => {
-				self.bump();
-				self.enter()?;
-				if self.eat(T::RBrace) {
-					self.leave();
-					RecordIdKey::Object(Object::new())
+		} else if k.kind == T::LBracket {
+			self.bump();
+			self.enter()?;
+			if self.eat(T::RBracket) {
+				self.leave();
+				RecordIdKey::Array(Array::new())
+			} else {
+				self.push(Frame::KeyArray(table, Vec::new(), k.start))?;
+				return self.element();
+			}
+		} else if k.kind == T::Plus {
+			self.bump();
+			let d = self.tok;
+			if d.ws() {
+				return Err(Error::Lower(
+					Reject::new("Unexpected whitespace")
+						.at(k.start, k.end)
+						.with_label("No whitespace allowed after this token"),
+				));
+			}
+			if d.kind != T::Digits {
+				return Err(self.unexpected("an integer"));
+			}
+			// The digits are read but stay the next token.
+			let end = self.digits_end(d.start);
+			let after = self.token_at(end);
+			if !after.ws() && after.kind == T::Dot {
+				let msg = format!(
+					"Unexpected token `{}`, expected an integer",
+					render::token_name(self.src, d.start)
+				);
+				return Err(Error::Lower(
+					Reject::new(msg)
+						.at(d.start, end)
+						.with_label("Numeric Record-id keys can only be integers"),
+				));
+			}
+			if !after.ws() && after.is_ident() {
+				let msg = format!(
+					"Unexpected token `{}` expected an integer",
+					render::token_name(self.src, after.start)
+				);
+				return Err(self.err_at(k.start, after.end, msg));
+			}
+			let text = &self.src[d.start as usize..end as usize];
+			match text.parse::<i64>() {
+				Ok(n) => RecordIdKey::Number(n),
+				Err(_) => RecordIdKey::String(text.to_owned()),
+			}
+		} else if k.kind == T::Minus {
+			self.bump();
+			let d = self.tok;
+			if d.kind != T::Digits {
+				let e = self.unexpected("a number");
+				self.consume_failed();
+				return Err(e);
+			}
+			let end = self.digits_end(d.start);
+			let text = &self.src[d.start as usize..end as usize];
+			let next = self.src.as_bytes().get(end as usize).copied();
+			if next.is_some_and(|b| b.is_ascii_alphabetic()) {
+				// The letter ends a failed integer and is dropped, as
+				// earlier releases read it.
+				self.reset_to(end + 1);
+				RecordIdKey::String(format!("-{text}"))
+			} else if next == Some(b'.')
+				&& self.src.as_bytes().get(end as usize + 1).is_some_and(u8::is_ascii_digit)
+			{
+				self.reset_to(end);
+				RecordIdKey::String(format!("-{text}"))
+			} else {
+				self.reset_to(end);
+				let digits: String = text.chars().filter(|&c| c != '_').collect();
+				if let Ok(u) = digits.parse::<u64>() {
+					if u <= i64::MAX as u64 {
+						RecordIdKey::Number(-(u as i64))
+					} else if u == i64::MAX as u64 + 1 {
+						RecordIdKey::Number(i64::MIN)
+					} else {
+						RecordIdKey::String(format!("-{text}"))
+					}
 				} else {
-					let key = self.object_key()?;
-					self.expect(T::Colon, ":")?;
-					self.push(Frame::KeyObject(table, BTreeMap::new(), key, k.start))?;
-					return self.element();
+					RecordIdKey::String(format!("-{text}"))
 				}
 			}
-			T::LBracket => {
-				self.bump();
-				self.enter()?;
-				if self.eat(T::RBracket) {
-					self.leave();
-					RecordIdKey::Array(Array::new())
-				} else {
-					self.push(Frame::KeyArray(table, Vec::new(), k.start))?;
-					return self.element();
-				}
-			}
-			T::Plus => {
-				self.bump();
-				let d = self.tok;
-				if d.ws() {
-					return Err(Error::Lower(
-						Reject::new("Unexpected whitespace")
-							.at(k.start, k.end)
-							.with_label("No whitespace allowed after this token"),
-					));
-				}
-				if d.kind != T::Digits {
-					return Err(self.unexpected("an integer"));
-				}
-				// The digits are read but stay the next token.
-				let end = self.digits_end(d.start);
-				let after = self.token_at(end);
-				if !after.ws() && after.kind == T::Dot {
-					let msg = format!(
-						"Unexpected token `{}`, expected an integer",
-						render::token_name(self.src, d.start)
-					);
-					return Err(Error::Lower(
-						Reject::new(msg)
-							.at(d.start, end)
-							.with_label("Numeric Record-id keys can only be integers"),
-					));
-				}
-				if !after.ws() && after.is_ident() {
-					let msg = format!(
-						"Unexpected token `{}` expected an integer",
-						render::token_name(self.src, after.start)
-					);
-					return Err(self.err_at(k.start, after.end, msg));
-				}
-				let text = &self.src[d.start as usize..end as usize];
+		} else if k.kind == T::Digits {
+			let end = self.digits_end(k.start);
+			let after = self.token_at(end);
+			let flexible = !self.settings.limits.strict_record_ids;
+			// Unlike in a query, `NaN` or `Infinity` after the digits ends
+			// the key rather than joining it, as earlier releases read values.
+			if flexible && !after.ws() && matches!(after.kind, T::Ident | T::EscIdent) {
+				self.reset_to(after.end);
+				RecordIdKey::String(self.src[k.start as usize..after.end as usize].to_owned())
+			} else {
+				self.reset_to(end);
+				let text = &self.src[k.start as usize..end as usize];
 				match text.parse::<i64>() {
 					Ok(n) => RecordIdKey::Number(n),
 					Err(_) => RecordIdKey::String(text.to_owned()),
 				}
 			}
-			T::Minus => {
-				self.bump();
-				let d = self.tok;
-				if d.kind != T::Digits {
-					let e = self.unexpected("a number");
-					self.consume_failed();
-					return Err(e);
-				}
-				let end = self.digits_end(d.start);
-				let text = &self.src[d.start as usize..end as usize];
-				let next = self.src.as_bytes().get(end as usize).copied();
-				if next.is_some_and(|b| b.is_ascii_alphabetic()) {
-					// The letter ends a failed integer and is dropped, as
-					// earlier releases read it.
-					self.reset_to(end + 1);
-					RecordIdKey::String(format!("-{text}"))
-				} else if next == Some(b'.')
-					&& self.src.as_bytes().get(end as usize + 1).is_some_and(u8::is_ascii_digit)
-				{
-					self.reset_to(end);
-					RecordIdKey::String(format!("-{text}"))
-				} else {
-					self.reset_to(end);
-					let digits: String = text.chars().filter(|&c| c != '_').collect();
-					match digits.parse::<u64>() {
-						Ok(u) if u <= i64::MAX as u64 => RecordIdKey::Number(-(u as i64)),
-						Ok(u) if u == i64::MAX as u64 + 1 => RecordIdKey::Number(i64::MIN),
-						_ => RecordIdKey::String(format!("-{text}")),
-					}
-				}
-			}
-			T::Digits => {
-				let end = self.digits_end(k.start);
-				let after = self.token_at(end);
-				let flexible = !self.settings.limits.strict_record_ids;
-				// Unlike in a query, `NaN` or `Infinity` after the digits ends
-				// the key rather than joining it, as earlier releases read values.
-				if flexible && !after.ws() && matches!(after.kind, T::Ident | T::EscIdent) {
-					self.reset_to(after.end);
-					RecordIdKey::String(self.src[k.start as usize..after.end as usize].to_owned())
-				} else {
-					self.reset_to(end);
-					let text = &self.src[k.start as usize..end as usize];
-					match text.parse::<i64>() {
-						Ok(n) => RecordIdKey::Number(n),
-						Err(_) => RecordIdKey::String(text.to_owned()),
-					}
-				}
-			}
-			T::NaN | T::Infinity if !self.settings.limits.strict_record_ids => {
-				self.bump();
-				RecordIdKey::String(self.text(k).to_owned())
-			}
-			_ => RecordIdKey::String(self.take_ident()?),
+		} else if matches!(k.kind, T::NaN | T::Infinity) && !self.settings.limits.strict_record_ids
+		{
+			self.bump();
+			RecordIdKey::String(self.text(k).to_owned())
+		} else {
+			RecordIdKey::String(self.take_ident()?)
 		};
 		let rangeable = !(self.record_only && self.frames.is_empty());
 		Ok(Start::Done(Value::RecordId(RecordId::new(table, key)), rangeable))

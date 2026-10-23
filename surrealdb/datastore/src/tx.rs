@@ -5871,7 +5871,12 @@ impl Transaction {
 			CatalogObjectKind::Param => {
 				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Param(ns, db, name))
 			}
-			_ => {}
+			CatalogObjectKind::Access
+			| CatalogObjectKind::Model
+			| CatalogObjectKind::Module
+			| CatalogObjectKind::Analyzer
+			| CatalogObjectKind::Sequence
+			| CatalogObjectKind::Api => {}
 		}
 		let qey = cache::tx::Lookup::Ov(ns, db, kind, name, sub);
 		if let Some(entry) = self.cache.get(&qey) {

@@ -37,20 +37,20 @@ impl Level {
 			Level::Namespace(a) => match other {
 				Level::Root => true,
 				Level::Namespace(b) => a == b,
-				_ => false,
+				Level::No | Level::Database(..) | Level::Record(..) => false,
 			},
 			Level::Database(ns0, db0) => match other {
 				Level::Root => true,
 				Level::Namespace(ns1) => ns0 == ns1,
 				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
-				_ => false,
+				Level::No | Level::Record(..) => false,
 			},
 			Level::Record(ns0, db0, ac0) => match other {
 				Level::Root => true,
 				Level::Namespace(ns1) => ns0 == ns1,
 				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
 				Level::Record(ns1, db1, ac1) => ns0 == ns1 && db0 == db1 && ac0 == ac1,
-				_ => false,
+				Level::No => false,
 			},
 		}
 	}
@@ -60,7 +60,7 @@ impl Level {
 			Level::Namespace(ns) => Some(ns),
 			Level::Database(ns, _) => Some(ns),
 			Level::Record(ns, _, _) => Some(ns),
-			_ => None,
+			Level::No | Level::Root => None,
 		}
 	}
 
@@ -68,7 +68,7 @@ impl Level {
 		match self {
 			Level::Database(_, db) => Some(db),
 			Level::Record(_, db, _) => Some(db),
-			_ => None,
+			Level::No | Level::Root | Level::Namespace(_) => None,
 		}
 	}
 
@@ -83,7 +83,7 @@ impl Level {
 	pub fn id(&self) -> Option<&str> {
 		match self {
 			Level::Record(_, _, id) => Some(id),
-			_ => None,
+			Level::No | Level::Root | Level::Namespace(_) | Level::Database(..) => None,
 		}
 	}
 }

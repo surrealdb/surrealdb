@@ -30,123 +30,108 @@ impl<'a> Parser<'a> {
 			return Ok(Statement::Empty);
 		}
 
-		match &self.peek().kind {
-			TokenKind::Keyword(Keyword::With) => {
-				let with = self.parse_with_clause()?;
-				match &self.peek().kind {
-					TokenKind::Keyword(Keyword::Select) => {
-						let mut s = self.parse_select_stmt()?;
-						s.span = with.span.merge(s.span);
-						s.with = Some(with);
-						Ok(Statement::Select(Box::new(s)))
-					}
-					TokenKind::Keyword(Keyword::Insert) => {
-						let mut s = self.parse_insert_stmt()?;
-						s.span = with.span.merge(s.span);
-						s.with = Some(with);
-						Ok(Statement::Insert(Box::new(s)))
-					}
-					TokenKind::Keyword(Keyword::Update) => {
-						let mut s = self.parse_update_stmt()?;
-						s.span = with.span.merge(s.span);
-						s.with = Some(with);
-						Ok(Statement::Update(Box::new(s)))
-					}
-					TokenKind::Keyword(Keyword::Delete) => {
-						let mut s = self.parse_delete_stmt()?;
-						s.span = with.span.merge(s.span);
-						s.with = Some(with);
-						Ok(Statement::Delete(Box::new(s)))
-					}
-					_ => Err(ParseError::new(
-						self.peek().span,
-						ErrorKind::UnexpectedToken {
-							expected: "SELECT, INSERT, UPDATE, or DELETE after WITH clause",
-							found: self.peek().kind.to_string(),
-						},
-					)),
-				}
-			}
-			TokenKind::Keyword(Keyword::Select)
-			| TokenKind::LParen
-			| TokenKind::Keyword(Keyword::Values) => {
-				let s = self.parse_select_stmt()?;
+		if self.peek().kind == TokenKind::Keyword(Keyword::With) {
+			let with = self.parse_with_clause()?;
+			if self.peek().kind == TokenKind::Keyword(Keyword::Select) {
+				let mut s = self.parse_select_stmt()?;
+				s.span = with.span.merge(s.span);
+				s.with = Some(with);
 				Ok(Statement::Select(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Insert) => {
-				let s = self.parse_insert_stmt()?;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Insert) {
+				let mut s = self.parse_insert_stmt()?;
+				s.span = with.span.merge(s.span);
+				s.with = Some(with);
 				Ok(Statement::Insert(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Update) => {
-				let s = self.parse_update_stmt()?;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Update) {
+				let mut s = self.parse_update_stmt()?;
+				s.span = with.span.merge(s.span);
+				s.with = Some(with);
 				Ok(Statement::Update(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Delete) => {
-				let s = self.parse_delete_stmt()?;
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Delete) {
+				let mut s = self.parse_delete_stmt()?;
+				s.span = with.span.merge(s.span);
+				s.with = Some(with);
 				Ok(Statement::Delete(Box::new(s)))
+			} else {
+				Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "SELECT, INSERT, UPDATE, or DELETE after WITH clause",
+						found: self.peek().kind.to_string(),
+					},
+				))
 			}
-			TokenKind::Keyword(Keyword::Truncate) => {
-				let s = self.parse_truncate_stmt()?;
-				Ok(Statement::Truncate(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Create) => self.parse_create_stmt(),
-			TokenKind::Keyword(Keyword::Alter) => {
-				let s = self.parse_alter_table_stmt()?;
-				Ok(Statement::AlterTable(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Drop) => self.parse_drop_stmt(),
-			TokenKind::Keyword(Keyword::Prepare) => {
-				let s = self.parse_prepare_stmt()?;
-				Ok(Statement::Prepare(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Execute) => {
-				let s = self.parse_execute_stmt()?;
-				Ok(Statement::Execute(s))
-			}
-			TokenKind::Keyword(Keyword::Deallocate) => {
-				let s = self.parse_deallocate_stmt()?;
-				Ok(Statement::Deallocate(s))
-			}
+		} else if matches!(
+			self.peek().kind,
+			TokenKind::Keyword(Keyword::Select | Keyword::Values) | TokenKind::LParen
+		) {
+			let s = self.parse_select_stmt()?;
+			Ok(Statement::Select(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Insert) {
+			let s = self.parse_insert_stmt()?;
+			Ok(Statement::Insert(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Update) {
+			let s = self.parse_update_stmt()?;
+			Ok(Statement::Update(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Delete) {
+			let s = self.parse_delete_stmt()?;
+			Ok(Statement::Delete(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Truncate) {
+			let s = self.parse_truncate_stmt()?;
+			Ok(Statement::Truncate(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Create) {
+			self.parse_create_stmt()
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Alter) {
+			let s = self.parse_alter_table_stmt()?;
+			Ok(Statement::AlterTable(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Drop) {
+			self.parse_drop_stmt()
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Prepare) {
+			let s = self.parse_prepare_stmt()?;
+			Ok(Statement::Prepare(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Execute) {
+			let s = self.parse_execute_stmt()?;
+			Ok(Statement::Execute(s))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Deallocate) {
+			let s = self.parse_deallocate_stmt()?;
+			Ok(Statement::Deallocate(s))
+		} else if matches!(
+			self.peek().kind,
 			TokenKind::Keyword(
 				Keyword::Begin
-				| Keyword::Start
-				| Keyword::Commit
-				| Keyword::End
-				| Keyword::Rollback
-				| Keyword::Abort
-				| Keyword::Savepoint
-				| Keyword::Release,
-			) => {
-				let s = self.parse_transaction_stmt()?;
-				Ok(Statement::Transaction(s))
-			}
-			TokenKind::Keyword(Keyword::Set) => {
-				let s = self.parse_set_stmt()?;
-				Ok(Statement::Set(s))
-			}
-			TokenKind::Keyword(Keyword::Show) => {
-				let s = self.parse_show_stmt()?;
-				Ok(Statement::Show(s))
-			}
-			TokenKind::Keyword(Keyword::Reset) => {
-				let s = self.parse_reset_stmt()?;
-				Ok(Statement::Reset(s))
-			}
-			TokenKind::Keyword(Keyword::Explain) => {
-				let s = self.parse_explain_stmt()?;
-				Ok(Statement::Explain(Box::new(s)))
-			}
-			TokenKind::Keyword(Keyword::Copy) => {
-				let s = self.parse_copy_stmt()?;
-				Ok(Statement::Copy(Box::new(s)))
-			}
-			_ => Err(ParseError::new(
+					| Keyword::Start
+					| Keyword::Commit
+					| Keyword::End | Keyword::Rollback
+					| Keyword::Abort
+					| Keyword::Savepoint
+					| Keyword::Release,
+			)
+		) {
+			let s = self.parse_transaction_stmt()?;
+			Ok(Statement::Transaction(s))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Set) {
+			let s = self.parse_set_stmt()?;
+			Ok(Statement::Set(s))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Show) {
+			let s = self.parse_show_stmt()?;
+			Ok(Statement::Show(s))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Reset) {
+			let s = self.parse_reset_stmt()?;
+			Ok(Statement::Reset(s))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Explain) {
+			let s = self.parse_explain_stmt()?;
+			Ok(Statement::Explain(Box::new(s)))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Copy) {
+			let s = self.parse_copy_stmt()?;
+			Ok(Statement::Copy(Box::new(s)))
+		} else {
+			Err(ParseError::new(
 				self.peek().span,
 				ErrorKind::UnexpectedToken {
 					expected: "SQL statement starting keyword",
 					found: self.peek().kind.to_string(),
 				},
-			)),
+			))
 		}
 	}
 

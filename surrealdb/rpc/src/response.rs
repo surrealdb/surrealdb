@@ -135,7 +135,22 @@ impl SurrealValue for DbResult {
 					Ok(DbResult::Other(PublicValue::Object(obj)))
 				}
 			}
-			other => Ok(DbResult::Other(other)),
+			other @ PublicValue::None
+			| other @ PublicValue::Null
+			| other @ PublicValue::Bool(_)
+			| other @ PublicValue::Number(_)
+			| other @ PublicValue::String(_)
+			| other @ PublicValue::Bytes(_)
+			| other @ PublicValue::Duration(_)
+			| other @ PublicValue::Datetime(_)
+			| other @ PublicValue::Uuid(_)
+			| other @ PublicValue::Geometry(_)
+			| other @ PublicValue::Table(_)
+			| other @ PublicValue::RecordId(_)
+			| other @ PublicValue::File(_)
+			| other @ PublicValue::Range(_)
+			| other @ PublicValue::Regex(_)
+			| other @ PublicValue::Set(_) => Ok(DbResult::Other(other)),
 		}
 	}
 }

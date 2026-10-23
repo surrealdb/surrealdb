@@ -172,11 +172,13 @@ impl SurrealWasmEngine {
 		// `from_value` on `undefined` does not. That path runs a wasm-bindgen
 		// closure that panics with "Unreachable code" under `panic = "abort"`,
 		// so absent options never reach serde at all.
-		let opts = match opts.map(JsValue::from) {
-			Some(value) if !value.is_undefined() && !value.is_null() => {
-				from_value::<Options>(value)?
-			}
-			_ => Options::default(),
+		let opts = if let Some(value) = opts.map(JsValue::from)
+			&& !value.is_undefined()
+			&& !value.is_null()
+		{
+			from_value::<Options>(value)?
+		} else {
+			Options::default()
 		};
 
 		// A database in the origin private file system needs the synchronous

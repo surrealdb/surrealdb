@@ -72,7 +72,9 @@ pub fn vertex_adjacency_of(tb: Option<&TableDefinition>) -> VertexAdjacency {
 			crate::catalog::TableType::Relation(rel) if rel.lightweight => {
 				VertexAdjacency::Lightweight
 			}
-			_ => VertexAdjacency::Normal {
+			crate::catalog::TableType::Any
+			| crate::catalog::TableType::Normal
+			| crate::catalog::TableType::Relation(_) => VertexAdjacency::Normal {
 				folded: tb.graph_folded,
 			},
 		},

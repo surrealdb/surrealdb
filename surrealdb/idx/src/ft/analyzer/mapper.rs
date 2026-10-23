@@ -152,7 +152,9 @@ mod tests {
 				assert_eq!(replacement, "better");
 				assert_eq!(pos, 0);
 			}
-			_ => panic!("expected term replacement"),
+			FilterResult::Ignore | FilterResult::Term(_) | FilterResult::Terms(_) => {
+				panic!("expected term replacement")
+			}
 		}
 		assert!(matches!(mapper.map("unknown"), FilterResult::Term(Term::Unchanged)));
 	}

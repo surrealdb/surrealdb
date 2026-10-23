@@ -19,16 +19,14 @@ fn assert_roundtrip(sql: &str) {
 fn test_create_property_graph_simple() {
 	let sql = "CREATE PROPERTY GRAPH social_network VERTEX TABLES ( users )";
 	let ast = parse_statement(sql).unwrap();
-	match ast {
-		Statement::CreatePropertyGraph(stmt) => {
-			assert_eq!(stmt.name.to_string(), "social_network");
-			assert!(!stmt.if_not_exists);
-			assert_eq!(stmt.vertex_tables.len(), 1);
-			assert_eq!(stmt.vertex_tables[0].table_name.to_string(), "users");
-			assert!(stmt.edge_tables.is_empty());
-		}
-		_ => panic!("Expected CreatePropertyGraph"),
-	}
+	let Statement::CreatePropertyGraph(stmt) = ast else {
+		panic!("Expected CreatePropertyGraph");
+	};
+	assert_eq!(stmt.name.to_string(), "social_network");
+	assert!(!stmt.if_not_exists);
+	assert_eq!(stmt.vertex_tables.len(), 1);
+	assert_eq!(stmt.vertex_tables[0].table_name.to_string(), "users");
+	assert!(stmt.edge_tables.is_empty());
 	assert_roundtrip(sql);
 }
 
@@ -36,30 +34,28 @@ fn test_create_property_graph_simple() {
 fn test_create_property_graph_full() {
 	let sql = "CREATE PROPERTY GRAPH IF NOT EXISTS social_graph VERTEX TABLES ( users KEY ( id ) LABEL person PROPERTIES ( name , email ) , companies KEY ( id ) LABEL org ) EDGE TABLES ( knows KEY ( id ) SOURCE KEY ( user_id ) REFERENCES users ( id ) TARGET KEY ( friend_id ) REFERENCES users ( id ) LABEL friend PROPERTIES ( since ) )";
 	let ast = parse_statement(sql).unwrap();
-	match ast {
-		Statement::CreatePropertyGraph(stmt) => {
-			assert_eq!(stmt.name.to_string(), "social_graph");
-			assert!(stmt.if_not_exists);
-			assert_eq!(stmt.vertex_tables.len(), 2);
-			assert_eq!(stmt.vertex_tables[0].table_name.to_string(), "users");
-			assert_eq!(stmt.vertex_tables[0].key_columns[0].as_str(), "id");
-			assert_eq!(stmt.vertex_tables[0].label.as_deref(), Some("person"));
-			assert_eq!(stmt.vertex_tables[0].properties[0].as_str(), "name");
-			assert_eq!(stmt.vertex_tables[0].properties[1].as_str(), "email");
+	let Statement::CreatePropertyGraph(stmt) = ast else {
+		panic!("Expected CreatePropertyGraph");
+	};
+	assert_eq!(stmt.name.to_string(), "social_graph");
+	assert!(stmt.if_not_exists);
+	assert_eq!(stmt.vertex_tables.len(), 2);
+	assert_eq!(stmt.vertex_tables[0].table_name.to_string(), "users");
+	assert_eq!(stmt.vertex_tables[0].key_columns[0].as_str(), "id");
+	assert_eq!(stmt.vertex_tables[0].label.as_deref(), Some("person"));
+	assert_eq!(stmt.vertex_tables[0].properties[0].as_str(), "name");
+	assert_eq!(stmt.vertex_tables[0].properties[1].as_str(), "email");
 
-			assert_eq!(stmt.edge_tables.len(), 1);
-			assert_eq!(stmt.edge_tables[0].table_name.to_string(), "knows");
-			assert_eq!(stmt.edge_tables[0].source_table.to_string(), "users");
-			assert_eq!(stmt.edge_tables[0].source_key[0].as_str(), "user_id");
-			assert_eq!(stmt.edge_tables[0].source_references[0].as_str(), "id");
-			assert_eq!(stmt.edge_tables[0].target_table.to_string(), "users");
-			assert_eq!(stmt.edge_tables[0].target_key[0].as_str(), "friend_id");
-			assert_eq!(stmt.edge_tables[0].target_references[0].as_str(), "id");
-			assert_eq!(stmt.edge_tables[0].label.as_deref(), Some("friend"));
-			assert_eq!(stmt.edge_tables[0].properties[0].as_str(), "since");
-		}
-		_ => panic!("Expected CreatePropertyGraph"),
-	}
+	assert_eq!(stmt.edge_tables.len(), 1);
+	assert_eq!(stmt.edge_tables[0].table_name.to_string(), "knows");
+	assert_eq!(stmt.edge_tables[0].source_table.to_string(), "users");
+	assert_eq!(stmt.edge_tables[0].source_key[0].as_str(), "user_id");
+	assert_eq!(stmt.edge_tables[0].source_references[0].as_str(), "id");
+	assert_eq!(stmt.edge_tables[0].target_table.to_string(), "users");
+	assert_eq!(stmt.edge_tables[0].target_key[0].as_str(), "friend_id");
+	assert_eq!(stmt.edge_tables[0].target_references[0].as_str(), "id");
+	assert_eq!(stmt.edge_tables[0].label.as_deref(), Some("friend"));
+	assert_eq!(stmt.edge_tables[0].properties[0].as_str(), "since");
 	assert_roundtrip(sql);
 }
 
@@ -73,27 +69,26 @@ fn test_drop_property_graph() {
 fn test_graph_table_simple() {
 	let sql = "SELECT * FROM GRAPH_TABLE ( social_network , MATCH ( a : Person ) -[ e : knows ]-> ( b : Person ) COLUMNS ( a . name AS person1 , b . name AS person2 ) ) AS g";
 	let ast = parse_statement(sql).unwrap();
-	match ast {
-		Statement::Select(select) => match &select.from[0] {
-			TableRef::GraphTable {
-				graph_name,
-				pattern,
-				columns,
-				alias,
-				..
-			} => {
-				assert_eq!(graph_name.to_string(), "social_network");
-				assert_eq!(alias.as_ref().unwrap().name, "g");
-				assert_eq!(pattern.paths.len(), 1);
-				assert_eq!(pattern.paths[0].elements.len(), 3);
-				assert_eq!(columns.len(), 2);
-				assert_eq!(columns[0].alias.as_deref(), Some("person1"));
-				assert_eq!(columns[1].alias.as_deref(), Some("person2"));
-			}
-			_ => panic!("Expected GraphTable"),
-		},
-		_ => panic!("Expected Select"),
-	}
+	let Statement::Select(select) = ast else {
+		panic!("Expected Select");
+	};
+	let TableRef::GraphTable {
+		graph_name,
+		pattern,
+		columns,
+		alias,
+		..
+	} = &select.from[0]
+	else {
+		panic!("Expected GraphTable");
+	};
+	assert_eq!(graph_name.to_string(), "social_network");
+	assert_eq!(alias.as_ref().unwrap().name, "g");
+	assert_eq!(pattern.paths.len(), 1);
+	assert_eq!(pattern.paths[0].elements.len(), 3);
+	assert_eq!(columns.len(), 2);
+	assert_eq!(columns[0].alias.as_deref(), Some("person1"));
+	assert_eq!(columns[1].alias.as_deref(), Some("person2"));
 	assert_roundtrip(sql);
 }
 
@@ -133,35 +128,31 @@ fn test_graph_table_edge_directions_and_quantifiers() {
 fn test_graph_table_path_variables_and_filters() {
 	let sql = "SELECT * FROM GRAPH_TABLE ( g , MATCH p = ( a : Person WHERE a . age > 21 ) -[ e : knows WHERE e . weight > 0.5 ]-> ( b : Person ) WHERE a . id != b . id COLUMNS ( a . name AS src , b . name AS dst ) )";
 	let ast = parse_statement(sql).unwrap();
-	match ast {
-		Statement::Select(select) => match &select.from[0] {
-			TableRef::GraphTable {
-				pattern,
-				..
-			} => {
-				assert_eq!(pattern.paths[0].path_variable.as_deref(), Some("p"));
-				assert!(pattern.where_clause.is_some());
-				match &pattern.paths[0].elements[0] {
-					GraphElementPattern::Vertex(v) => {
-						assert_eq!(v.variable.as_deref(), Some("a"));
-						assert_eq!(v.labels, vec!["person"]);
-						assert!(v.where_clause.is_some());
-					}
-					_ => panic!("Expected vertex"),
-				}
-				match &pattern.paths[0].elements[1] {
-					GraphElementPattern::Edge(e) => {
-						assert_eq!(e.variable.as_deref(), Some("e"));
-						assert_eq!(e.labels, vec!["knows"]);
-						assert!(e.where_clause.is_some());
-					}
-					_ => panic!("Expected edge"),
-				}
-			}
-			_ => panic!("Expected GraphTable"),
-		},
-		_ => panic!("Expected Select"),
-	}
+	let Statement::Select(select) = ast else {
+		panic!("Expected Select");
+	};
+	let TableRef::GraphTable {
+		pattern,
+		..
+	} = &select.from[0]
+	else {
+		panic!("Expected GraphTable");
+	};
+	assert_eq!(pattern.paths[0].path_variable.as_deref(), Some("p"));
+	assert!(pattern.where_clause.is_some());
+	let GraphElementPattern::Vertex(v) = &pattern.paths[0].elements[0] else {
+		panic!("Expected vertex");
+	};
+	assert_eq!(v.variable.as_deref(), Some("a"));
+	assert_eq!(v.labels, vec!["person"]);
+	assert!(v.where_clause.is_some());
+
+	let GraphElementPattern::Edge(e) = &pattern.paths[0].elements[1] else {
+		panic!("Expected edge");
+	};
+	assert_eq!(e.variable.as_deref(), Some("e"));
+	assert_eq!(e.labels, vec!["knows"]);
+	assert!(e.where_clause.is_some());
 	assert_roundtrip(sql);
 }
 
@@ -169,23 +160,21 @@ fn test_graph_table_path_variables_and_filters() {
 fn test_json_table() {
 	let sql = "SELECT * FROM JSON_TABLE ( doc , '$.items[*]' COLUMNS ( id INT PATH '$.id' , name TEXT PATH '$.name' ) ) AS jt";
 	let ast = parse_statement(sql).unwrap();
-	match ast {
-		Statement::Select(select) => match &select.from[0] {
-			TableRef::JsonTable(jt) => {
-				assert_eq!(jt.path, "$.items[*]");
-				assert_eq!(jt.columns.len(), 2);
-				assert_eq!(jt.columns[0].name, "id");
-				assert_eq!(jt.columns[0].data_type.name.to_string(), "int");
-				assert_eq!(jt.columns[0].path.as_deref(), Some("$.id"));
-				assert_eq!(jt.columns[1].name, "name");
-				assert_eq!(jt.columns[1].data_type.name.to_string(), "text");
-				assert_eq!(jt.columns[1].path.as_deref(), Some("$.name"));
-				assert_eq!(jt.alias.as_ref().unwrap().name, "jt");
-			}
-			_ => panic!("Expected JsonTable"),
-		},
-		_ => panic!("Expected Select"),
-	}
+	let Statement::Select(select) = ast else {
+		panic!("Expected Select");
+	};
+	let TableRef::JsonTable(jt) = &select.from[0] else {
+		panic!("Expected JsonTable");
+	};
+	assert_eq!(jt.path, "$.items[*]");
+	assert_eq!(jt.columns.len(), 2);
+	assert_eq!(jt.columns[0].name, "id");
+	assert_eq!(jt.columns[0].data_type.name.to_string(), "int");
+	assert_eq!(jt.columns[0].path.as_deref(), Some("$.id"));
+	assert_eq!(jt.columns[1].name, "name");
+	assert_eq!(jt.columns[1].data_type.name.to_string(), "text");
+	assert_eq!(jt.columns[1].path.as_deref(), Some("$.name"));
+	assert_eq!(jt.alias.as_ref().unwrap().name, "jt");
 	assert_roundtrip(sql);
 }
 

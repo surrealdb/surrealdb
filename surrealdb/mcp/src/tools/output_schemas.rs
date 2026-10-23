@@ -172,7 +172,9 @@ fn graphql_schema() -> JsonObject {
 fn to_object(value: Value) -> JsonObject {
 	match value {
 		Value::Object(map) => map,
-		_ => Map::new(),
+		Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => {
+			Map::new()
+		}
 	}
 }
 

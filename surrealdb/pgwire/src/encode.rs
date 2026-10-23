@@ -81,124 +81,212 @@ const PG_EPOCH_UNIX_MICROS: i64 = 946_684_800_000_000;
 /// invariant failure, not a user error.
 pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
 	match ty {
-		PgType::Bool => match value {
-			Value::Bool(true) => Ok(b"t".to_vec()),
-			Value::Bool(false) => Ok(b"f".to_vec()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int2 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as i16).to_string().into_bytes()),
-			Value::String(s) if s.parse::<i16>().is_ok() => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int4 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as i32).to_string().into_bytes()),
-			Value::String(s) if s.parse::<i32>().is_ok() => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int8 => match value {
-			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
-			Value::String(s) if s.parse::<i64>().is_ok() => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Oid | PgType::Regclass => match value {
-			Value::Number(Number::Int(i)) => Ok((i as u32).to_string().into_bytes()),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Float4 => match value {
-			Value::Number(Number::Int(i)) => Ok(float_text(i as f64)),
-			Value::Number(Number::Float(f)) => Ok(float_text(f)),
-			Value::String(s) if s.parse::<f32>().is_ok() => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Float8 => match value {
-			Value::Number(Number::Int(i)) => Ok(float_text(i as f64)),
-			Value::Number(Number::Float(f)) => Ok(float_text(f)),
-			Value::String(s) if s.parse::<f64>().is_ok() => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Numeric => match value {
-			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
-			Value::Number(Number::Decimal(d)) => Ok(d.to_string().into_bytes()),
-			Value::Number(Number::Float(f)) => Ok(numeric_float_text(f)),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Char => match value {
-			Value::String(s) => {
+		PgType::Bool => {
+			if let Value::Bool(b) = value {
+				Ok(if b {
+					b"t".to_vec()
+				} else {
+					b"f".to_vec()
+				})
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int2 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as i16).to_string().into_bytes())
+			} else if let Value::String(ref s) = value
+				&& s.parse::<i16>().is_ok()
+			{
+				Ok(s.clone().into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int4 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as i32).to_string().into_bytes())
+			} else if let Value::String(ref s) = value
+				&& s.parse::<i32>().is_ok()
+			{
+				Ok(s.clone().into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int8 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok(i.to_string().into_bytes())
+			} else if let Value::String(ref s) = value
+				&& s.parse::<i64>().is_ok()
+			{
+				Ok(s.clone().into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Oid | PgType::Regclass => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as u32).to_string().into_bytes())
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Float4 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok(float_text(i as f64))
+			} else if let Value::Number(Number::Float(f)) = value {
+				Ok(float_text(f))
+			} else if let Value::String(ref s) = value
+				&& s.parse::<f32>().is_ok()
+			{
+				Ok(s.clone().into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Float8 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok(float_text(i as f64))
+			} else if let Value::Number(Number::Float(f)) = value {
+				Ok(float_text(f))
+			} else if let Value::String(ref s) = value
+				&& s.parse::<f64>().is_ok()
+			{
+				Ok(s.clone().into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Numeric => {
+			if let Value::Number(n) = value {
+				match n {
+					Number::Int(i) => Ok(i.to_string().into_bytes()),
+					Number::Decimal(d) => Ok(d.to_string().into_bytes()),
+					Number::Float(f) => Ok(numeric_float_text(f)),
+				}
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Char => {
+			if let Value::String(s) = value {
 				let first = s.chars().next().unwrap_or('\0');
 				Ok(first.to_string().into_bytes())
+			} else if let Value::Number(Number::Int(i)) = value {
+				Ok(vec![i as u8])
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			Value::Number(Number::Int(i)) => Ok(vec![i as u8]),
-			v => Err(mismatch(&v, ty)),
-		},
+		}
 		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => text_form(value, ty),
-		PgType::Date => match value {
-			Value::Datetime(dt) => Ok(date_text(dt.into_inner().date_naive())),
-			Value::String(s) => {
+		PgType::Date => {
+			if let Value::Datetime(dt) = value {
+				Ok(date_text(dt.into_inner().date_naive()))
+			} else if let Value::String(s) = value {
 				if let Some(nd) = parse_date(&s) {
 					Ok(date_text(nd))
 				} else {
 					Ok(s.into_bytes())
 				}
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Time => match value {
-			Value::Datetime(dt) => Ok(time_text(dt.into_inner().time())),
-			Value::Duration(d) => Ok(interval_text(d.into_inner())),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timetz => match value {
-			Value::Datetime(dt) => Ok(timetz_text(dt.into_inner())),
-			Value::Duration(d) => {
+		}
+		PgType::Time => {
+			if let Value::Datetime(dt) = value {
+				Ok(time_text(dt.into_inner().time()))
+			} else if let Value::Duration(d) = value {
+				Ok(interval_text(d.into_inner()))
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Timetz => {
+			if let Value::Datetime(dt) = value {
+				Ok(timetz_text(dt.into_inner()))
+			} else if let Value::Duration(d) = value {
 				let mut out = interval_text(d.into_inner());
 				out.extend_from_slice(b"+00");
 				Ok(out)
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timestamp => match value {
-			Value::Datetime(dt) => Ok(timestamp_text(dt.into_inner())),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timestamptz => match value {
-			Value::Datetime(dt) => Ok(timestamptz_text(dt.into_inner())),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Interval => match value {
-			Value::Duration(d) => Ok(interval_text(d.into_inner())),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Uuid => match value {
-			Value::Uuid(u) => Ok(u.to_string().into_bytes()),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Bytea => match value {
-			Value::Bytes(b) => Ok(bytea_hex(&b.into_inner()).into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
+		}
+		PgType::Timestamp => {
+			if let Value::Datetime(dt) = value {
+				Ok(timestamp_text(dt.into_inner()))
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Timestamptz => {
+			if let Value::Datetime(dt) = value {
+				Ok(timestamptz_text(dt.into_inner()))
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Interval => {
+			if let Value::Duration(d) = value {
+				Ok(interval_text(d.into_inner()))
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Uuid => {
+			if let Value::Uuid(u) = value {
+				Ok(u.to_string().into_bytes())
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Bytea => {
+			if let Value::Bytes(b) = value {
+				Ok(bytea_hex(&b.into_inner()).into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
 		PgType::Json | PgType::Jsonb => serde_json::to_vec(&value.into_json_value())
 			.map_err(|e| PgError::internal(format!("failed to encode value as json: {e}"))),
-		PgType::Inet | PgType::Cidr | PgType::MacAddr => match value {
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Record => match value {
-			Value::Object(obj) => record_text(&obj),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Array(elem_ty) => match value {
-			Value::Array(arr) => array_text(arr.as_slice(), elem_ty),
-			Value::String(s) => Ok(s.into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
+		PgType::Inet | PgType::Cidr | PgType::MacAddr => {
+			if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Record => {
+			if let Value::Object(obj) = value {
+				record_text(&obj)
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Array(elem_ty) => {
+			if let Value::Array(arr) = value {
+				array_text(arr.as_slice(), elem_ty)
+			} else if let Value::String(s) = value {
+				Ok(s.into_bytes())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
 	}
 }
 
@@ -217,7 +305,18 @@ fn text_form(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
 		| Value::Regex(_)
 		| Value::File(_)
 		| Value::Table(_)) => Ok(v.to_sql().into_bytes()),
-		v => match base_type(&v) {
+		v @ (Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_)) => match base_type(&v) {
 			Some(own) => encode_text(v, &own),
 			None => Err(mismatch(&v, ty)),
 		},
@@ -557,30 +656,27 @@ fn array_text(arr: &[Value], elem_ty: &PgType) -> Result<Vec<u8>, PgError> {
 		if i > 0 {
 			out.push(b',');
 		}
-		match elem {
-			Value::None | Value::Null => {
-				out.extend_from_slice(b"NULL");
-			}
-			v => {
-				let text = encode_text(v.clone(), elem_ty)?;
-				let s = std::str::from_utf8(&text)
-					.map_err(|_| PgError::internal("invalid utf8 in array element"))?;
-				let needs_quotes = s.is_empty()
-					|| s.eq_ignore_ascii_case("NULL")
-					|| s.chars()
-						.any(|c| matches!(c, '{' | '}' | ',' | '"' | '\\') || is_array_space(c));
-				if needs_quotes {
-					out.push(b'"');
-					for b in s.bytes() {
-						if b == b'"' || b == b'\\' {
-							out.push(b'\\');
-						}
-						out.push(b);
+		if elem.is_nullish() {
+			out.extend_from_slice(b"NULL");
+		} else {
+			let text = encode_text(elem.clone(), elem_ty)?;
+			let s = std::str::from_utf8(&text)
+				.map_err(|_| PgError::internal("invalid utf8 in array element"))?;
+			let needs_quotes = s.is_empty()
+				|| s.eq_ignore_ascii_case("NULL")
+				|| s.chars()
+					.any(|c| matches!(c, '{' | '}' | ',' | '"' | '\\') || is_array_space(c));
+			if needs_quotes {
+				out.push(b'"');
+				for b in s.bytes() {
+					if b == b'"' || b == b'\\' {
+						out.push(b'\\');
 					}
-					out.push(b'"');
-				} else {
-					out.extend_from_slice(s.as_bytes());
+					out.push(b);
 				}
+				out.push(b'"');
+			} else {
+				out.extend_from_slice(s.as_bytes());
 			}
 		}
 	}
@@ -596,7 +692,7 @@ fn array_binary(arr: &[Value], elem_ty: &PgType) -> Result<Vec<u8>, PgError> {
 		out.extend_from_slice(&elem_ty.oid().to_be_bytes());
 		return Ok(out);
 	}
-	let has_null = arr.iter().any(|v| matches!(v, Value::None | Value::Null));
+	let has_null = arr.iter().any(Value::is_nullish);
 	out.extend_from_slice(&1i32.to_be_bytes()); // ndim = 1
 	out.extend_from_slice(
 		&(if has_null {
@@ -611,15 +707,12 @@ fn array_binary(arr: &[Value], elem_ty: &PgType) -> Result<Vec<u8>, PgError> {
 	out.extend_from_slice(&1i32.to_be_bytes()); // lower_bound = 1
 
 	for elem in arr {
-		match elem {
-			Value::None | Value::Null => {
-				out.extend_from_slice(&(-1i32).to_be_bytes());
-			}
-			v => {
-				let bytes = encode_binary(v.clone(), elem_ty)?;
-				out.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
-				out.extend_from_slice(&bytes);
-			}
+		if elem.is_nullish() {
+			out.extend_from_slice(&(-1i32).to_be_bytes());
+		} else {
+			let bytes = encode_binary(elem.clone(), elem_ty)?;
+			out.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
+			out.extend_from_slice(&bytes);
 		}
 	}
 	Ok(out)
@@ -632,26 +725,22 @@ fn record_text(obj: &surrealdb_types::Object) -> Result<Vec<u8>, PgError> {
 		if i > 0 {
 			out.push(b',');
 		}
-		match v {
-			Value::None | Value::Null => {} // empty in record text represents NULL
-			val => {
-				let text = encode_text(val.clone(), &PgType::Text)?;
-				let s = std::str::from_utf8(&text)
-					.map_err(|_| PgError::internal("invalid utf8 in record field"))?;
-				let needs_quotes =
-					s.is_empty() || s.contains(['(', ')', ',', '"', '\\', ' ', '\t']);
-				if needs_quotes {
-					out.push(b'"');
-					for b in s.bytes() {
-						if b == b'"' || b == b'\\' {
-							out.push(b'\\');
-						}
-						out.push(b);
+		if !v.is_nullish() {
+			let text = encode_text(v.clone(), &PgType::Text)?;
+			let s = std::str::from_utf8(&text)
+				.map_err(|_| PgError::internal("invalid utf8 in record field"))?;
+			let needs_quotes = s.is_empty() || s.contains(['(', ')', ',', '"', '\\', ' ', '\t']);
+			if needs_quotes {
+				out.push(b'"');
+				for b in s.bytes() {
+					if b == b'"' || b == b'\\' {
+						out.push(b'\\');
 					}
-					out.push(b'"');
-				} else {
-					out.extend_from_slice(s.as_bytes());
+					out.push(b);
 				}
+				out.push(b'"');
+			} else {
+				out.extend_from_slice(s.as_bytes());
 			}
 		}
 	}
@@ -664,15 +753,12 @@ fn record_binary(obj: &surrealdb_types::Object) -> Result<Vec<u8>, PgError> {
 	out.extend_from_slice(&(obj.len() as i32).to_be_bytes()); // nfields
 	for (_k, v) in obj.iter() {
 		out.extend_from_slice(&OID_TEXT.to_be_bytes()); // field_oid
-		match v {
-			Value::None | Value::Null => {
-				out.extend_from_slice(&(-1i32).to_be_bytes());
-			}
-			val => {
-				let bytes = encode_binary(val.clone(), &PgType::Text)?;
-				out.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
-				out.extend_from_slice(&bytes);
-			}
+		if v.is_nullish() {
+			out.extend_from_slice(&(-1i32).to_be_bytes());
+		} else {
+			let bytes = encode_binary(v.clone(), &PgType::Text)?;
+			out.extend_from_slice(&(bytes.len() as i32).to_be_bytes());
+			out.extend_from_slice(&bytes);
 		}
 	}
 	Ok(out)
@@ -682,74 +768,110 @@ fn record_binary(obj: &surrealdb_types::Object) -> Result<Vec<u8>, PgError> {
 /// [`encode_text`], a type mismatch is an internal invariant failure.
 pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
 	match ty {
-		PgType::Bool => match value {
-			Value::Bool(b) => Ok(vec![u8::from(b)]),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int2 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as i16).to_be_bytes().to_vec()),
-			Value::String(s) => match s.parse::<i16>() {
-				Ok(i) => Ok(i.to_be_bytes().to_vec()),
-				Err(_) => Err(mismatch(&Value::String(s), ty)),
-			},
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int4 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as i32).to_be_bytes().to_vec()),
-			Value::String(s) => match s.parse::<i32>() {
-				Ok(i) => Ok(i.to_be_bytes().to_vec()),
-				Err(_) => Err(mismatch(&Value::String(s), ty)),
-			},
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Int8 => match value {
-			Value::Number(Number::Int(i)) => Ok(i.to_be_bytes().to_vec()),
-			Value::String(s) => match s.parse::<i64>() {
-				Ok(i) => Ok(i.to_be_bytes().to_vec()),
-				Err(_) => Err(mismatch(&Value::String(s), ty)),
-			},
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Oid | PgType::Regclass => match value {
-			Value::Number(Number::Int(i)) => Ok((i as u32).to_be_bytes().to_vec()),
-			Value::String(s) => match s.parse::<u32>() {
-				Ok(u) => Ok(u.to_be_bytes().to_vec()),
-				Err(_) => Err(mismatch(&Value::String(s), ty)),
-			},
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Float4 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as f32).to_be_bytes().to_vec()),
-			Value::Number(Number::Float(f)) => Ok((f as f32).to_be_bytes().to_vec()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Float8 => match value {
-			Value::Number(Number::Int(i)) => Ok((i as f64).to_be_bytes().to_vec()),
-			Value::Number(Number::Float(f)) => Ok(f.to_be_bytes().to_vec()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Numeric => match value {
-			Value::Number(Number::Decimal(d)) => Ok(encode_numeric_binary(&d.to_string())),
-			Value::Number(Number::Int(i)) => Ok(encode_numeric_binary(&i.to_string())),
-			Value::Number(Number::Float(f)) => Ok(encode_numeric_binary(&float_display(f))),
-			Value::String(s) => Ok(encode_numeric_binary(&s)),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Char => match value {
-			Value::String(s) => Ok(vec![s.bytes().next().unwrap_or(0)]),
-			Value::Number(Number::Int(i)) => Ok(vec![i as u8]),
-			v => Err(mismatch(&v, ty)),
-		},
+		PgType::Bool => {
+			if let Value::Bool(b) = value {
+				Ok(vec![u8::from(b)])
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int2 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as i16).to_be_bytes().to_vec())
+			} else if let Value::String(s) = value {
+				match s.parse::<i16>() {
+					Ok(i) => Ok(i.to_be_bytes().to_vec()),
+					Err(_) => Err(mismatch(&Value::String(s), ty)),
+				}
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int4 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as i32).to_be_bytes().to_vec())
+			} else if let Value::String(s) = value {
+				match s.parse::<i32>() {
+					Ok(i) => Ok(i.to_be_bytes().to_vec()),
+					Err(_) => Err(mismatch(&Value::String(s), ty)),
+				}
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Int8 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok(i.to_be_bytes().to_vec())
+			} else if let Value::String(s) = value {
+				match s.parse::<i64>() {
+					Ok(i) => Ok(i.to_be_bytes().to_vec()),
+					Err(_) => Err(mismatch(&Value::String(s), ty)),
+				}
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Oid | PgType::Regclass => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as u32).to_be_bytes().to_vec())
+			} else if let Value::String(s) = value {
+				match s.parse::<u32>() {
+					Ok(u) => Ok(u.to_be_bytes().to_vec()),
+					Err(_) => Err(mismatch(&Value::String(s), ty)),
+				}
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Float4 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as f32).to_be_bytes().to_vec())
+			} else if let Value::Number(Number::Float(f)) = value {
+				Ok((f as f32).to_be_bytes().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Float8 => {
+			if let Value::Number(Number::Int(i)) = value {
+				Ok((i as f64).to_be_bytes().to_vec())
+			} else if let Value::Number(Number::Float(f)) = value {
+				Ok(f.to_be_bytes().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Numeric => {
+			if let Value::Number(n) = value {
+				match n {
+					Number::Decimal(d) => Ok(encode_numeric_binary(&d.to_string())),
+					Number::Int(i) => Ok(encode_numeric_binary(&i.to_string())),
+					Number::Float(f) => Ok(encode_numeric_binary(&float_display(f))),
+				}
+			} else if let Value::String(s) = value {
+				Ok(encode_numeric_binary(&s))
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Char => {
+			if let Value::String(s) = value {
+				Ok(vec![s.bytes().next().unwrap_or(0)])
+			} else if let Value::Number(Number::Int(i)) = value {
+				Ok(vec![i as u8])
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
 		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => text_form(value, ty),
-		PgType::Date => match value {
-			Value::Datetime(dt) => {
+		PgType::Date => {
+			if let Value::Datetime(dt) = value {
 				let nd = dt.into_inner().date_naive();
 				let pg_epoch_date =
 					chrono::NaiveDate::from_ymd_opt(2000, 1, 1).expect("valid epoch date");
 				let days = (nd - pg_epoch_date).num_days() as i32;
 				Ok(days.to_be_bytes().to_vec())
-			}
-			Value::String(s) => {
+			} else if let Value::String(s) = value {
 				if let Some(nd) = parse_date(&s) {
 					let pg_epoch_date =
 						chrono::NaiveDate::from_ymd_opt(2000, 1, 1).expect("valid epoch date");
@@ -758,22 +880,21 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				} else {
 					Err(mismatch(&Value::String(s), ty))
 				}
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Time => match value {
-			Value::Datetime(dt) => {
+		}
+		PgType::Time => {
+			if let Value::Datetime(dt) = value {
 				let t = dt.into_inner().time();
 				let micros = i64::from(t.num_seconds_from_midnight()) * 1_000_000
 					+ i64::from(t.nanosecond() / 1_000);
 				Ok(micros.to_be_bytes().to_vec())
-			}
-			Value::Duration(d) => {
+			} else if let Value::Duration(d) = value {
 				let micros = i64::try_from(d.into_inner().as_micros())
 					.map_err(|_| PgError::feature_not_supported("duration too large for time"))?;
 				Ok(micros.to_be_bytes().to_vec())
-			}
-			Value::String(s) => {
+			} else if let Value::String(s) = value {
 				if let Some(t) = parse_time(&s) {
 					let micros = i64::from(t.num_seconds_from_midnight()) * 1_000_000
 						+ i64::from(t.nanosecond() / 1_000);
@@ -781,11 +902,12 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				} else {
 					Err(mismatch(&Value::String(s), ty))
 				}
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timetz => match value {
-			Value::Datetime(dt) => {
+		}
+		PgType::Timetz => {
+			if let Value::Datetime(dt) = value {
 				let t = dt.into_inner().time();
 				let micros = i64::from(t.num_seconds_from_midnight()) * 1_000_000
 					+ i64::from(t.nanosecond() / 1_000);
@@ -793,16 +915,14 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				out.extend_from_slice(&micros.to_be_bytes());
 				out.extend_from_slice(&0i32.to_be_bytes()); // UTC offset 0
 				Ok(out)
-			}
-			Value::Duration(d) => {
+			} else if let Value::Duration(d) = value {
 				let micros = i64::try_from(d.into_inner().as_micros())
 					.map_err(|_| PgError::feature_not_supported("duration too large for timetz"))?;
 				let mut out = Vec::with_capacity(12);
 				out.extend_from_slice(&micros.to_be_bytes());
 				out.extend_from_slice(&0i32.to_be_bytes());
 				Ok(out)
-			}
-			Value::String(s) => {
+			} else if let Value::String(s) = value {
 				if let Some((t, offset_secs)) = parse_timetz(&s) {
 					let micros = i64::from(t.num_seconds_from_midnight()) * 1_000_000
 						+ i64::from(t.nanosecond() / 1_000);
@@ -813,41 +933,48 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				} else {
 					Err(mismatch(&Value::String(s), ty))
 				}
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timestamp => match value {
-			Value::Datetime(dt) => {
+		}
+		PgType::Timestamp => {
+			if let Value::Datetime(dt) = value {
 				let dt = dt.into_inner();
 				let unix_micros =
 					dt.timestamp() * 1_000_000 + i64::from(dt.timestamp_subsec_micros());
 				Ok((unix_micros - PG_EPOCH_UNIX_MICROS).to_be_bytes().to_vec())
-			}
-			Value::String(s) if s.eq_ignore_ascii_case("infinity") => {
+			} else if let Value::String(ref s) = value
+				&& s.eq_ignore_ascii_case("infinity")
+			{
 				Ok(i64::MAX.to_be_bytes().to_vec())
-			}
-			Value::String(s) if s.eq_ignore_ascii_case("-infinity") => {
+			} else if let Value::String(ref s) = value
+				&& s.eq_ignore_ascii_case("-infinity")
+			{
 				Ok(i64::MIN.to_be_bytes().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Timestamptz => match value {
-			Value::Datetime(dt) => {
+		}
+		PgType::Timestamptz => {
+			if let Value::Datetime(dt) = value {
 				let dt = dt.into_inner();
 				let unix_micros =
 					dt.timestamp() * 1_000_000 + i64::from(dt.timestamp_subsec_micros());
 				Ok((unix_micros - PG_EPOCH_UNIX_MICROS).to_be_bytes().to_vec())
-			}
-			Value::String(s) if s.eq_ignore_ascii_case("infinity") => {
+			} else if let Value::String(ref s) = value
+				&& s.eq_ignore_ascii_case("infinity")
+			{
 				Ok(i64::MAX.to_be_bytes().to_vec())
-			}
-			Value::String(s) if s.eq_ignore_ascii_case("-infinity") => {
+			} else if let Value::String(ref s) = value
+				&& s.eq_ignore_ascii_case("-infinity")
+			{
 				Ok(i64::MIN.to_be_bytes().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Interval => match value {
-			Value::Duration(d) => {
+		}
+		PgType::Interval => {
+			if let Value::Duration(d) = value {
 				let d = d.into_inner();
 				let micros = i64::try_from(d.as_micros()).map_err(|_| {
 					PgError::feature_not_supported("duration is too large to encode as an interval")
@@ -857,17 +984,24 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				out.extend_from_slice(&0i32.to_be_bytes());
 				out.extend_from_slice(&0i32.to_be_bytes());
 				Ok(out)
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Uuid => match value {
-			Value::Uuid(u) => Ok(u.into_inner().into_bytes().to_vec()),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Bytea => match value {
-			Value::Bytes(b) => Ok(b.into_inner().to_vec()),
-			v => Err(mismatch(&v, ty)),
-		},
+		}
+		PgType::Uuid => {
+			if let Value::Uuid(u) = value {
+				Ok(u.into_inner().into_bytes().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Bytea => {
+			if let Value::Bytes(b) = value {
+				Ok(b.into_inner().to_vec())
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
 		PgType::Json => {
 			let json = serde_json::to_vec(&value.into_json_value())
 				.map_err(|e| PgError::internal(format!("failed to encode value as json: {e}")))?;
@@ -881,38 +1015,47 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			out.extend_from_slice(&json);
 			Ok(out)
 		}
-		PgType::Inet => match value {
-			Value::String(s) => {
+		PgType::Inet => {
+			if let Value::String(s) = value {
 				let (ip, prefix) = parse_ip_network(&s)
 					.ok_or_else(|| PgError::invalid_text(format!("invalid inet address: {s}")))?;
 				Ok(encode_inet_binary(ip, prefix, false))
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Cidr => match value {
-			Value::String(s) => {
+		}
+		PgType::Cidr => {
+			if let Value::String(s) = value {
 				let (ip, prefix) = parse_ip_network(&s)
 					.ok_or_else(|| PgError::invalid_text(format!("invalid cidr address: {s}")))?;
 				Ok(encode_inet_binary(ip, prefix, true))
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::MacAddr => match value {
-			Value::String(s) => {
+		}
+		PgType::MacAddr => {
+			if let Value::String(s) = value {
 				let bytes = parse_macaddr(&s)
 					.ok_or_else(|| PgError::invalid_text(format!("invalid macaddr: {s}")))?;
 				Ok(bytes.to_vec())
+			} else {
+				Err(mismatch(&value, ty))
 			}
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Record => match value {
-			Value::Object(obj) => record_binary(&obj),
-			v => Err(mismatch(&v, ty)),
-		},
-		PgType::Array(elem_ty) => match value {
-			Value::Array(arr) => array_binary(arr.as_slice(), elem_ty),
-			v => Err(mismatch(&v, ty)),
-		},
+		}
+		PgType::Record => {
+			if let Value::Object(obj) = value {
+				record_binary(&obj)
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
+		PgType::Array(elem_ty) => {
+			if let Value::Array(arr) = value {
+				array_binary(arr.as_slice(), elem_ty)
+			} else {
+				Err(mismatch(&value, ty))
+			}
+		}
 	}
 }
 

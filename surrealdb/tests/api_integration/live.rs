@@ -241,9 +241,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create);
 
 		// Delete the record
-		let thing = match created_value.get("id").unwrap() {
-			Value::RecordId(thing) => thing,
-			_ => panic!("Expected a thing"),
+		let Value::RecordId(thing) = created_value.get("id").unwrap() else {
+			panic!("Expected a thing");
 		};
 		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
 
@@ -253,9 +252,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
-		let notification = match notification.data {
-			Value::Object(notification) => notification,
-			_ => panic!("Expected an object"),
+		let Value::Object(notification) = notification.data else {
+			panic!("Expected an object");
 		};
 		assert_eq!(notification, created_value);
 	}

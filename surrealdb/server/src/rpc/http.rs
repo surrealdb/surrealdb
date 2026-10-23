@@ -669,9 +669,10 @@ fn session_changed(id: Uuid) -> TypesError {
 ///   actor id and [`Level`]. Roles are intentionally excluded so role grants/revocations for the
 ///   same identity do not lock the legitimate owner out.
 fn caller_may_use_session(session_au: &Auth, caller_au: &Auth) -> bool {
-	match session_au.level() {
-		Level::No => true,
-		_ => session_au.id() == caller_au.id() && session_au.level() == caller_au.level(),
+	if *session_au.level() == Level::No {
+		true
+	} else {
+		session_au.id() == caller_au.id() && session_au.level() == caller_au.level()
 	}
 }
 

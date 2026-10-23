@@ -1131,7 +1131,7 @@ fn cmp_path<'p>(path: &[String], mut segments: impl Iterator<Item = &'p str>) ->
 			(Some(_), None) => return Ordering::Greater,
 			(Some(a), Some(b)) => match a.as_str().cmp(b) {
 				Ordering::Equal => {}
-				other => return other,
+				other @ Ordering::Less | other @ Ordering::Greater => return other,
 			},
 		}
 	}
@@ -1263,7 +1263,20 @@ impl<'a> CheckedPackedRow<'a> {
 					value,
 					depth,
 				},
-				_ => PathRead::NotAnObject,
+				FieldRef::Null
+				| FieldRef::Object
+				| FieldRef::Bool(_)
+				| FieldRef::Int(_)
+				| FieldRef::Float(_)
+				| FieldRef::Decimal(_)
+				| FieldRef::Uuid(_)
+				| FieldRef::Datetime(_)
+				| FieldRef::Duration(_)
+				| FieldRef::Point(..)
+				| FieldRef::String(_)
+				| FieldRef::Bytes(_)
+				| FieldRef::Literal(_)
+				| FieldRef::RecordId(..) => PathRead::NotAnObject,
 			});
 		}
 		Err(PackedError::NoColumn {

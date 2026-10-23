@@ -67,9 +67,10 @@ fn has_tx_attr(attrs: &[syn::Attribute]) -> bool {
 /// transaction handle does not shift the names of everything after it: the same
 /// argument is `_0` whether or not the function declared a handle.
 fn wire_name_from_pat(pat: &Pat, index: usize) -> String {
-	match pat {
-		Pat::Ident(ident) => ident.ident.to_string(),
-		_ => format!("_{index}"),
+	if let Pat::Ident(ident) = pat {
+		ident.ident.to_string()
+	} else {
+		format!("_{index}")
 	}
 }
 

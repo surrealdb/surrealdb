@@ -583,7 +583,7 @@ fn decode_set(
 fn decode_type(f: &Field) -> Type {
 	match &f.presence {
 		Presence::Opt(inner) => inner.clone(),
-		_ => f.ty.clone(),
+		Presence::Required | Presence::Default(_) => f.ty.clone(),
 	}
 }
 
@@ -670,7 +670,7 @@ fn unrev_set(set: &FieldSet) -> TokenStream {
 					}
 				}
 			}
-			_ => quote! {
+			Presence::Required | Presence::Default(_) => quote! {
 				__r = #s::rt::max_release(__r, #s::StoredField::unrevisioned_floor(#v));
 			},
 		};
@@ -721,7 +721,9 @@ fn vm_from_set(
 			Presence::Default(path) => {
 				quote!(let #r: #fty = #s::vm::field_or(&mut __object, #name, #path)?;)
 			}
-			_ => quote!(let #r: #fty = #s::vm::field(&mut __object, #name)?;),
+			Presence::Required | Presence::Opt(_) => {
+				quote!(let #r: #fty = #s::vm::field(&mut __object, #name)?;)
+			}
 		}
 	});
 	let results: Vec<Ident> = (0..set.fields.len()).map(|i| format_ident!("__r{i}")).collect();

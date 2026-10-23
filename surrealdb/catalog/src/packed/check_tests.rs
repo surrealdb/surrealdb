@@ -244,10 +244,11 @@ fn packed_row(layout: &LayoutDescriptor, data: &Object) -> Vec<u8> {
 
 /// The index in a row's bytes of the fixed slot of `column`.
 fn slot_at(layout: &LayoutDescriptor, column: usize) -> usize {
-	match packed_of(layout).columns[column].location {
-		Location::Fixed(offset) => BODY + offset as usize,
-		location => panic!("column {column} is at {location:?}"),
-	}
+	let location = packed_of(layout).columns[column].location;
+	let Location::Fixed(offset) = location else {
+		panic!("column {column} is at {location:?}");
+	};
+	BODY + offset as usize
 }
 
 fn presence_bit(layout: &LayoutDescriptor, column: usize) -> u32 {

@@ -21,7 +21,7 @@ impl<T: PartialOrd> PartialOrd for TypedRange<T> {
 			match a {
 				Bound::Unbounded => match b {
 					Bound::Unbounded => Some(Ordering::Equal),
-					_ => Some(Ordering::Less),
+					Bound::Included(_) | Bound::Excluded(_) => Some(Ordering::Less),
 				},
 				Bound::Included(a) => match b {
 					Bound::Unbounded => Some(Ordering::Greater),
@@ -30,7 +30,7 @@ impl<T: PartialOrd> PartialOrd for TypedRange<T> {
 				},
 				Bound::Excluded(a) => match b {
 					Bound::Excluded(b) => a.partial_cmp(b),
-					_ => Some(Ordering::Greater),
+					Bound::Included(_) | Bound::Unbounded => Some(Ordering::Greater),
 				},
 			}
 		}
@@ -95,13 +95,13 @@ impl TypedRange<i64> {
 			Bound::Included(x) if x >= 0 => x,
 			Bound::Excluded(x) if x >= 0 => x.saturating_add(1),
 			Bound::Unbounded => 0,
-			_ => return None,
+			Bound::Included(_) | Bound::Excluded(_) => return None,
 		};
 		let end = match self.end {
 			Bound::Included(x) if x >= 0 => x.saturating_add(1),
 			Bound::Excluded(x) if x >= 0 => x,
 			Bound::Unbounded => i64::MAX,
-			_ => return None,
+			Bound::Included(_) | Bound::Excluded(_) => return None,
 		};
 		if start > end {
 			return None;

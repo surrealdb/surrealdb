@@ -87,9 +87,10 @@ async fn distinct_of(values: Vec<Value>) -> Vec<Value> {
 async fn flattened(values: Vec<Value>) -> Vec<Value> {
 	let mut out = Vec::with_capacity(values.len());
 	for value in values {
-		match value {
-			Value::Array(inner) => fuel::extend(&mut out, inner.0).await,
-			value => out.push(value),
+		if let Value::Array(inner) = value {
+			fuel::extend(&mut out, inner.0).await;
+		} else {
+			out.push(value);
 		}
 		fuel::tick(1).await;
 	}
@@ -114,9 +115,10 @@ fn limit(name: &str, n: usize) -> Result<(), Error> {
 }
 
 pub async fn add_walk((mut array, value): (Array, Value)) -> Result<Value> {
-	let values = match value {
-		Value::Array(values) => values.0,
-		value => vec![value],
+	let values = if let Value::Array(values) = value {
+		values.0
+	} else {
+		vec![value]
 	};
 	for value in values {
 		if !fuel::any(array.iter(), |held| *held == value).await {
@@ -449,106 +451,94 @@ pub async fn filter(
 	ev: Option<&dyn ClosureEvaluator>,
 	(array, check): (Array, Value),
 ) -> Result<Value> {
-	Ok(match check {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				let mut res = Vec::with_capacity(array.len());
-				for arg in array {
-					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
-						res.push(arg)
-					}
+	if let Value::Closure(closure) = check {
+		if let Some(ev) = ev {
+			let mut res = Vec::with_capacity(array.len());
+			for arg in array {
+				if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
+					res.push(arg)
 				}
-				Value::from(res)
-			} else {
-				Value::None
 			}
+			Ok(Value::from(res))
+		} else {
+			Ok(Value::None)
 		}
-		value => {
-			let mut out = Vec::new();
-			fuel::walk(array, |v| {
-				if v == value {
-					out.push(v);
-				}
-				ON
-			})
-			.await;
-			out.into()
-		}
-	})
+	} else {
+		let mut out = Vec::new();
+		fuel::walk(array, |v| {
+			if v == check {
+				out.push(v);
+			}
+			ON
+		})
+		.await;
+		Ok(out.into())
+	}
 }
 
 pub async fn filter_index(
 	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
-	Ok(match value {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				let mut res = Vec::with_capacity(array.len());
-				for (i, arg) in array.into_iter().enumerate() {
-					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
-						res.push(Value::from(i as i64));
-					}
+	if let Value::Closure(closure) = value {
+		if let Some(ev) = ev {
+			let mut res = Vec::with_capacity(array.len());
+			for (i, arg) in array.into_iter().enumerate() {
+				if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
+					res.push(Value::from(i as i64));
 				}
-				Value::from(res)
-			} else {
-				Value::None
 			}
+			Ok(Value::from(res))
+		} else {
+			Ok(Value::None)
 		}
-		value => {
-			let mut out = Vec::new();
-			fuel::walk(array.iter().enumerate(), |(i, v)| {
-				if *v == value {
-					out.push(Value::from(i));
-				}
-				ON
-			})
-			.await;
-			out.into()
-		}
-	})
+	} else {
+		let mut out = Vec::new();
+		fuel::walk(array.iter().enumerate(), |(i, v)| {
+			if *v == value {
+				out.push(Value::from(i));
+			}
+			ON
+		})
+		.await;
+		Ok(out.into())
+	}
 }
 
 pub async fn find(
 	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
-	Ok(match value {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				for arg in array {
-					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
-						return Ok(arg);
-					}
+	if let Value::Closure(closure) = value {
+		if let Some(ev) = ev {
+			for arg in array {
+				if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
+					return Ok(arg);
 				}
-				Value::None
-			} else {
-				Value::None
 			}
 		}
-		value => fuel::find(array, |v| *v == value).await.unwrap_or(Value::None),
-	})
+		Ok(Value::None)
+	} else {
+		Ok(fuel::find(array, |v| *v == value).await.unwrap_or(Value::None))
+	}
 }
 
 pub async fn find_index(
 	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
-	Ok(match value {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				for (i, arg) in array.into_iter().enumerate() {
-					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
-						return Ok(i.into());
-					}
+	if let Value::Closure(closure) = value {
+		if let Some(ev) = ev {
+			for (i, arg) in array.into_iter().enumerate() {
+				if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
+					return Ok(i.into());
 				}
-				Value::None
-			} else {
-				Value::None
 			}
 		}
-		value => position(array.iter(), &value).await.map(Value::from).unwrap_or(Value::None),
-	})
+		Ok(Value::None)
+	} else {
+		Ok(position(array.iter(), &value).await.map(Value::from).unwrap_or(Value::None))
+	}
 }
 
 pub fn first((array,): (Array,)) -> Result<Value> {
@@ -1163,16 +1153,13 @@ pub async fn transpose_walk((array,): (Array,)) -> Result<Value> {
 		fuel::tick(units(width)).await;
 	}
 	for (idx, item) in array.into_iter().enumerate() {
-		match item {
-			Value::Array(inner) => {
-				fuel::tick(units(inner.len())).await;
-				for (jdx, value) in inner.into_iter().enumerate() {
-					rows[jdx][idx] = value;
-				}
+		if let Value::Array(inner) = item {
+			fuel::tick(units(inner.len())).await;
+			for (jdx, value) in inner.into_iter().enumerate() {
+				rows[jdx][idx] = value;
 			}
-			value => {
-				rows[0][idx] = value;
-			}
+		} else {
+			rows[0][idx] = item;
 		}
 		fuel::tick(1).await;
 	}

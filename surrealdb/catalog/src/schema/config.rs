@@ -41,7 +41,9 @@ impl StoredConfigDefinition {
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			StoredConfigDefinition::GraphQL(g) => Ok(g),
-			c => fail!("found {} when a graphql config was expected", c.to_sql()),
+			c @ (StoredConfigDefinition::Default(_) | StoredConfigDefinition::Api(_)) => {
+				fail!("found {} when a graphql config was expected", c.to_sql())
+			}
 		}
 	}
 }
@@ -166,7 +168,7 @@ impl ConfigDefinition {
 	pub fn try_into_graphql(self) -> anyhow::Result<GraphQLConfig> {
 		match self {
 			ConfigDefinition::GraphQL(g) => Ok(g),
-			c => fail!(
+			c @ (ConfigDefinition::Default(_) | ConfigDefinition::Api(_)) => fail!(
 				"found {} when a graphql config was expected",
 				surrealdb_types::ToSql::to_sql(&c.to_stored())
 			),
@@ -178,7 +180,7 @@ impl ConfigDefinition {
 	pub fn try_as_api(&self) -> anyhow::Result<&ApiConfig> {
 		match self {
 			ConfigDefinition::Api(a) => Ok(a),
-			c => fail!(
+			c @ (ConfigDefinition::Default(_) | ConfigDefinition::GraphQL(_)) => fail!(
 				"found {} when a api config was expected",
 				surrealdb_types::ToSql::to_sql(&c.to_stored())
 			),

@@ -525,7 +525,7 @@ pub fn keyspace_map(model: &Model) -> String {
 			Some(v) => quote!(#v).to_string().replace(' ', ""),
 			None => match def.role {
 				crate::model::Role::Prefix => "(range)".to_owned(),
-				_ => "(subtree)".to_owned(),
+				crate::model::Role::Key | crate::model::Role::Root => "(subtree)".to_owned(),
 			},
 		};
 		rows.push((def.route.clone(), value, def.name.to_string()));

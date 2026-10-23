@@ -648,7 +648,12 @@ async fn resolve_denied_hosts(deny: &NetDeny) -> DeniedAddrs {
 				host,
 				port,
 			} => Some((host.clone(), *port)),
-			_ => None,
+			NetRule::Net(_)
+			| NetRule::IpPort(..)
+			| NetRule::HostSuffix {
+				..
+			}
+			| NetRule::Any => None,
 		})
 		.collect();
 	if hosts.is_empty() {

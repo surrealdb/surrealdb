@@ -252,7 +252,18 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 		| NonRetryableErrorSite::ConcurrentIndexOnlineCommitAppliedUnknown => {
 			Err(surrealdb_kvs::Error::CommitOutcomeUnknown(format!("injected at {site:?}")).into())
 		}
-		_ => {
+		NonRetryableErrorSite::ConcurrentIndexAfterReservationRegistration
+		| NonRetryableErrorSite::ConcurrentIndexReservationRelease
+		| NonRetryableErrorSite::ConcurrentIndexCountTailCommitted
+		| NonRetryableErrorSite::ConcurrentIndexInitialBatchCommit
+		| NonRetryableErrorSite::ConcurrentIndexOwnershipReleaseCommit
+		| NonRetryableErrorSite::ConcurrentIndexBuildStateCancel
+		| NonRetryableErrorSite::VersionBootstrapBegin
+		| NonRetryableErrorSite::VersionBootstrapStamp
+		| NonRetryableErrorSite::IndexCompactionRequeue
+		| NonRetryableErrorSite::FullTextCompaction
+		| NonRetryableErrorSite::HnswCompaction
+		| NonRetryableErrorSite::DiskAnnCompaction => {
 			Err(surrealdb_kvs::Error::Internal(format!("injected non-retryable error at {site:?}"))
 				.into())
 		}

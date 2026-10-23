@@ -1854,7 +1854,7 @@ mod tests {
 				let span = match metric {
 					Metric::L2 => norm(&query).powi(2) + norm(other).powi(2),
 					Metric::InnerProduct => norm(&query) * norm(other),
-					_ => 1.0,
+					Metric::Cosine | Metric::CosineNormalized => 1.0,
 				};
 				let tolerance = 0.005 * span;
 				assert!(

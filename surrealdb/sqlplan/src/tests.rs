@@ -11,9 +11,8 @@ use crate::*;
 fn test_single_table_alias_binding() {
 	let sql = "SELECT u.id, u.name FROM users AS u;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -24,53 +23,48 @@ fn test_single_table_alias_binding() {
 	assert_eq!(bound.targets.len(), 2);
 
 	// First target: u.id -> relation 0, column "id"
-	match &bound.targets[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.relation_index, 0);
-			assert_eq!(col.column, "id");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.targets[0].expr else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(col.relation_index, 0);
+	assert_eq!(col.column, "id");
 
 	// Lower to LogicalOp
 	let op = lower_bound_select(&bound, &policy).expect("lower failed");
-	match op {
-		LogicalOp::Project(proj) => {
-			let surrealdb_expr::expr::logical::LogicalFields::Select(fields) = &proj.fields else {
-				panic!("expected Select fields");
-			};
-			assert_eq!(fields.len(), 2);
-			// Under relation 0, lowering emits the key of the direct `id` field, not
-			// Access(Field("u"), "id")
-			let surrealdb_expr::expr::logical::LogicalField::Single {
-				expr: expr0,
-				..
-			} = &fields[0]
-			else {
-				panic!("expected Single field");
-			};
-			assert_eq!(expr0.to_string(), "record::id(id)");
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected LogicalOp::Project, got {op:?}");
+	};
+	let surrealdb_expr::expr::logical::LogicalFields::Select(fields) = &proj.fields else {
+		panic!("expected Select fields");
+	};
+	assert_eq!(fields.len(), 2);
+	// Under relation 0, lowering emits the key of the direct `id` field, not
+	// Access(Field("u"), "id")
+	let surrealdb_expr::expr::logical::LogicalField::Single {
+		expr: expr0,
+		..
+	} = &fields[0]
+	else {
+		panic!("expected Single field");
+	};
+	assert_eq!(expr0.to_string(), "record::id(id)");
 
-			let surrealdb_expr::expr::logical::LogicalField::Single {
-				expr: expr1,
-				..
-			} = &fields[1]
-			else {
-				panic!("expected Single field");
-			};
-			assert_eq!(expr1, &LogicalExpr::Field("name".into()));
-		}
-		other => panic!("expected LogicalOp::Project, got {other:?}"),
-	}
+	let surrealdb_expr::expr::logical::LogicalField::Single {
+		expr: expr1,
+		..
+	} = &fields[1]
+	else {
+		panic!("expected Single field");
+	};
+	assert_eq!(expr1, &LogicalExpr::Field("name".into()));
 }
 
 #[test]
 fn test_join_table_alias_binding() {
 	let sql = "SELECT u.id, o.total FROM users u JOIN orders o ON u.id = o.user_id;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -81,84 +75,74 @@ fn test_join_table_alias_binding() {
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
 
 	// Verify target 0 (u.id) binds to relation 0
-	match &bound.targets[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.relation_index, 0);
-			assert_eq!(col.column, "id");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.targets[0].expr else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(col.relation_index, 0);
+	assert_eq!(col.column, "id");
 
 	// Verify target 1 (o.total) binds to relation 1
-	match &bound.targets[1].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.relation_index, 1);
-			assert_eq!(col.column, "total");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.targets[1].expr else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.targets[1].expr);
+	};
+	assert_eq!(col.relation_index, 1);
+	assert_eq!(col.column, "total");
 
 	// Lower to LogicalOp
 	let op = lower_bound_select(&bound, &policy).expect("lower failed");
-	match op {
-		LogicalOp::Project(proj) => {
-			let surrealdb_expr::expr::logical::LogicalFields::Select(fields) = &proj.fields else {
-				panic!("expected Select fields");
-			};
-			let surrealdb_expr::expr::logical::LogicalField::Single {
-				expr: expr0,
-				..
-			} = &fields[0]
-			else {
-				panic!("expected Single field");
-			};
-			assert_eq!(expr0.to_string(), "record::id(id)");
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected LogicalOp::Project, got {op:?}");
+	};
+	let surrealdb_expr::expr::logical::LogicalFields::Select(fields) = &proj.fields else {
+		panic!("expected Select fields");
+	};
+	let surrealdb_expr::expr::logical::LogicalField::Single {
+		expr: expr0,
+		..
+	} = &fields[0]
+	else {
+		panic!("expected Single field");
+	};
+	assert_eq!(expr0.to_string(), "record::id(id)");
 
-			let surrealdb_expr::expr::logical::LogicalField::Single {
-				expr: expr1,
-				..
-			} = &fields[1]
-			else {
-				panic!("expected Single field");
-			};
-			match expr1 {
-				LogicalExpr::Access {
-					base,
-					field,
-				} => {
-					assert_eq!(base.as_ref(), &LogicalExpr::Field("_join0".into()));
-					assert_eq!(field.as_str(), "total");
-				}
-				other => panic!("expected LogicalExpr::Access to _join0, got {other:?}"),
-			}
+	let surrealdb_expr::expr::logical::LogicalField::Single {
+		expr: expr1,
+		..
+	} = &fields[1]
+	else {
+		panic!("expected Single field");
+	};
+	let LogicalExpr::Access {
+		base,
+		field,
+	} = expr1
+	else {
+		panic!("expected LogicalExpr::Access to _join0, got {expr1:?}");
+	};
+	assert_eq!(base.as_ref(), &LogicalExpr::Field("_join0".into()));
+	assert_eq!(field.as_str(), "total");
 
-			// Verify join condition
-			match &*proj.input {
-				LogicalOp::Join(join) => {
-					assert_eq!(join.on.len(), 1);
-					let (left, right) = &join.on[0];
-					// The stored id is compared with the record of `users` the foreign key names,
-					// whether it holds a key or a link.
-					assert_eq!(left, &LogicalExpr::Field("id".into()));
-					assert_eq!(
-						right.to_string(),
-						"IF _join0.user_id = '' OR !(type::is_int(_join0.user_id) OR type::is_string(_join0.user_id) OR type::is_uuid(_join0.user_id) OR type::is_array(_join0.user_id) OR type::is_object(_join0.user_id) OR type::is_record(_join0.user_id)) THEN NULL ELSE type::record('users', _join0.user_id) END"
-					);
-				}
-				other => panic!("expected LogicalOp::Join, got {other:?}"),
-			}
-		}
-		other => panic!("expected LogicalOp::Project, got {other:?}"),
-	}
+	// Verify join condition
+	let LogicalOp::Join(join) = &*proj.input else {
+		panic!("expected LogicalOp::Join, got {:?}", proj.input);
+	};
+	assert_eq!(join.on.len(), 1);
+	let (left, right) = &join.on[0];
+	// The stored id is compared with the record of `users` the foreign key names,
+	// whether it holds a key or a link.
+	assert_eq!(left, &LogicalExpr::Field("id".into()));
+	assert_eq!(
+		right.to_string(),
+		"IF _join0.user_id = '' OR !(type::is_int(_join0.user_id) OR type::is_string(_join0.user_id) OR type::is_uuid(_join0.user_id) OR type::is_array(_join0.user_id) OR type::is_object(_join0.user_id) OR type::is_record(_join0.user_id)) THEN NULL ELSE type::record('users', _join0.user_id) END"
+	);
 }
 
 #[test]
 fn test_positional_group_by_and_order_by() {
 	let sql = "SELECT category, count(id) FROM products GROUP BY 1 ORDER BY 2 DESC;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -168,47 +152,40 @@ fn test_positional_group_by_and_order_by() {
 	assert_eq!(bound.group_by.len(), 1);
 
 	// GROUP BY 1 should resolve to category (target 1 expr)
-	match &bound.group_by[0] {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.column, "category");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.group_by[0] else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.group_by[0]);
+	};
+	assert_eq!(col.column, "category");
 
 	// ORDER BY 2 DESC should resolve to count(id) output column
 	assert_eq!(bound.order_by.len(), 1);
-	match &bound.order_by[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.column, "count");
-		}
-		other => panic!("expected count column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.order_by[0].expr else {
+		panic!("expected count column, got {:?}", &bound.order_by[0].expr);
+	};
+	assert_eq!(col.column, "count");
 	assert_eq!(bound.order_by[0].direction, BoundOrderDirection::Desc);
 
 	// Lowering should produce an Aggregate node rather than failing or creating array literal
 	let op = lower_bound_select(&bound, &policy).expect("lower failed");
-	match op {
-		LogicalOp::Project(proj) => match &*proj.input {
-			LogicalOp::Sort(sort) => match &*sort.input {
-				LogicalOp::Aggregate(agg) => {
-					assert_eq!(agg.group.len(), 1);
-					assert_eq!(agg.group[0], LogicalExpr::Field("category".into()));
-				}
-				other => panic!("expected LogicalOp::Aggregate inside sort, got {other:?}"),
-			},
-			other => panic!("expected LogicalOp::Sort inside project, got {other:?}"),
-		},
-		other => panic!("expected LogicalOp::Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected LogicalOp::Project, got {op:?}");
+	};
+	let LogicalOp::Sort(sort) = &*proj.input else {
+		panic!("expected LogicalOp::Sort inside project, got {:?}", proj.input);
+	};
+	let LogicalOp::Aggregate(agg) = &*sort.input else {
+		panic!("expected LogicalOp::Aggregate inside sort, got {:?}", sort.input);
+	};
+	assert_eq!(agg.group.len(), 1);
+	assert_eq!(agg.group[0], LogicalExpr::Field("category".into()));
 }
 
 #[test]
 fn test_order_by_target_alias() {
 	let sql = "SELECT id AS user_id FROM users ORDER BY user_id DESC;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -216,65 +193,56 @@ fn test_order_by_target_alias() {
 
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
 	assert_eq!(bound.order_by.len(), 1);
-	match &bound.order_by[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.column, "user_id");
-		}
-		other => panic!("expected user_id column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.order_by[0].expr else {
+		panic!("expected user_id column, got {:?}", &bound.order_by[0].expr);
+	};
+	assert_eq!(col.column, "user_id");
 }
 
 #[test]
 fn test_schema_qualified_table_and_column() {
 	let sql = "SELECT public.users.id FROM public.users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
 	let policy = DialectPolicy::postgres();
 
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
-	match &bound.targets[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.relation_index, 0);
-			assert_eq!(col.column, "id");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.targets[0].expr else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(col.relation_index, 0);
+	assert_eq!(col.column, "id");
 }
 
 #[test]
 fn test_case_folding_pg() {
 	let sql = "SELECT U.ID FROM USERS AS U;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
 	let policy = DialectPolicy::postgres();
 
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
-	match &bound.targets[0].expr {
-		BoundExpr::Column(col) => {
-			assert_eq!(col.relation_index, 0);
-			assert_eq!(col.column, "id");
-		}
-		other => panic!("expected BoundExpr::Column, got {other:?}"),
-	}
+	let BoundExpr::Column(col) = &bound.targets[0].expr else {
+		panic!("expected BoundExpr::Column, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(col.relation_index, 0);
+	assert_eq!(col.column, "id");
 }
 
 #[test]
 fn test_wildcard_expansion_with_catalog() {
 	let sql = "SELECT * FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -292,48 +260,44 @@ fn test_wildcard_expansion_with_catalog() {
 fn test_mysql_binding_with_param() {
 	let sql = "SELECT u.id FROM users u WHERE u.id = ?;";
 	let stmts = surrealdb_mysql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
 	let policy = DialectPolicy::mysql();
 
 	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).expect("bind failed");
-	match &bound.where_clause {
-		Some(BoundExpr::Binary {
-			left,
-			op,
-			right,
-		}) => {
-			assert_eq!(*op, BoundBinaryOp::Equal);
-			match &**left {
-				BoundExpr::Column(col) => assert_eq!(col.column, "id"),
-				other => panic!("expected column, got {other:?}"),
-			}
-			match &**right {
-				BoundExpr::Param {
-					index,
-					name,
-				} => {
-					assert_eq!(*index, 1);
-					assert_eq!(name, "_1");
-				}
-				other => panic!("expected param, got {other:?}"),
-			}
-		}
-		other => panic!("expected binary where clause, got {other:?}"),
-	}
+	let Some(BoundExpr::Binary {
+		left,
+		op,
+		right,
+	}) = &bound.where_clause
+	else {
+		panic!("expected binary where clause, got {:?}", bound.where_clause);
+	};
+	assert_eq!(*op, BoundBinaryOp::Equal);
+	let BoundExpr::Column(col) = &**left else {
+		panic!("expected column, got {:?}", &**left);
+	};
+	assert_eq!(col.column, "id");
+	let BoundExpr::Param {
+		index,
+		name,
+	} = &**right
+	else {
+		panic!("expected param, got {:?}", &**right);
+	};
+	assert_eq!(*index, 1);
+	assert_eq!(name, "_1");
 }
 
 #[test]
 fn test_result_descriptor_basic_select() {
 	let sql = "SELECT id, name, 42, count(id) AS total_count FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -372,9 +336,8 @@ fn test_result_descriptor_basic_select() {
 fn test_result_descriptor_duplicate_columns() {
 	let sql = "SELECT 1 AS a, 2 AS a, 'hello' AS a;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -398,9 +361,8 @@ fn test_result_descriptor_duplicate_columns() {
 fn test_parameter_type_inference() {
 	let sql = "SELECT name FROM users WHERE id = $1 AND name = $2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -434,9 +396,8 @@ fn test_3vl_constant_folding() {
 	// false AND NULL -> false
 	let sql = "SELECT false AND NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -445,9 +406,8 @@ fn test_3vl_constant_folding() {
 	// true AND NULL -> NULL
 	let sql = "SELECT true AND NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -456,9 +416,8 @@ fn test_3vl_constant_folding() {
 	// true OR NULL -> true
 	let sql = "SELECT true OR NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -467,9 +426,8 @@ fn test_3vl_constant_folding() {
 	// false OR NULL -> NULL
 	let sql = "SELECT false OR NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -478,9 +436,8 @@ fn test_3vl_constant_folding() {
 	// NOT NULL -> NULL
 	let sql = "SELECT NOT NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -495,9 +452,8 @@ fn test_null_comparisons_and_distinct_from() {
 	// 1 = NULL -> NULL
 	let sql = "SELECT 1 = NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -506,9 +462,8 @@ fn test_null_comparisons_and_distinct_from() {
 	// NULL IS NOT DISTINCT FROM NULL -> true
 	let sql = "SELECT NULL IS NOT DISTINCT FROM NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -517,9 +472,8 @@ fn test_null_comparisons_and_distinct_from() {
 	// 1 IS NOT DISTINCT FROM NULL -> false
 	let sql = "SELECT 1 IS NOT DISTINCT FROM NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -528,9 +482,8 @@ fn test_null_comparisons_and_distinct_from() {
 	// NULL IS DISTINCT FROM NULL -> false
 	let sql = "SELECT NULL IS DISTINCT FROM NULL;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -551,16 +504,17 @@ fn test_union_branches_answer_under_the_names_of_the_first_branch() {
 	let policy = DialectPolicy::postgres();
 	let lower = |sql: &str| {
 		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 		lower_bound_select(&bound, &policy).unwrap()
 	};
-	let later_branch = |op: LogicalOp| match op {
-		LogicalOp::UnionAll(union) => format!("{:?}", union.inputs[1]),
-		other => panic!("expected UnionAll, got {other:?}"),
+	let later_branch = |op: LogicalOp| {
+		let LogicalOp::UnionAll(union) = op else {
+			panic!("expected UnionAll, got {op:?}");
+		};
+		format!("{:?}", union.inputs[1])
 	};
 
 	// A later branch that names its column differently is renamed to the first branch's name.
@@ -586,20 +540,23 @@ fn test_a_chain_of_set_operations() {
 	let policy = DialectPolicy::postgres();
 	let lower = |sql: &str| {
 		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 		lower_bound_select(&bound, &policy)
 	};
-	let inputs = |op: LogicalOp| match op {
-		LogicalOp::UnionAll(union) => union.inputs.len(),
-		LogicalOp::Distinct(distinct) => match *distinct.input {
-			LogicalOp::UnionAll(union) => union.inputs.len(),
-			other => panic!("expected UnionAll under Distinct, got {other:?}"),
-		},
-		other => panic!("expected a union, got {other:?}"),
+	let inputs = |op: LogicalOp| {
+		if let LogicalOp::UnionAll(union) = op {
+			union.inputs.len()
+		} else if let LogicalOp::Distinct(distinct) = op {
+			let LogicalOp::UnionAll(union) = *distinct.input else {
+				panic!("expected UnionAll under Distinct, got {:?}", distinct.input);
+			};
+			union.inputs.len()
+		} else {
+			panic!("expected a union, got {op:?}");
+		}
 	};
 
 	// A chain of UNION ALL, or of UNION, is one union of all its queries.
@@ -658,9 +615,8 @@ fn test_division_semantics() {
 	// PG: 1 / 0 -> DivisionByZero
 	let sql = "SELECT 1 / 0;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let err = fold_select(&mut bound, &pg_policy).unwrap_err();
@@ -669,9 +625,8 @@ fn test_division_semantics() {
 	// PG: 5 / 2 -> integer division 2
 	let sql = "SELECT 5 / 2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	fold_select(&mut bound, &pg_policy).unwrap();
@@ -680,9 +635,8 @@ fn test_division_semantics() {
 	// MySQL: 1 / 0 -> NULL
 	let sql = "SELECT 1 / 0;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	fold_select(&mut bound, &my_policy).unwrap();
@@ -691,9 +645,8 @@ fn test_division_semantics() {
 	// MySQL: 5 / 2 -> 2.5
 	let sql = "SELECT 5 / 2;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	fold_select(&mut bound, &my_policy).unwrap();
@@ -702,9 +655,8 @@ fn test_division_semantics() {
 	// MySQL: 5 DIV 2 -> 2
 	let sql = "SELECT 5 DIV 2;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	fold_select(&mut bound, &my_policy).unwrap();
@@ -869,9 +821,8 @@ fn test_mysql_string_coercion() {
 	// '100abc' + 20 -> 120
 	let sql = "SELECT '100abc' + 20;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -880,9 +831,8 @@ fn test_mysql_string_coercion() {
 	// '2.5' * 2 -> 5.0
 	let sql = "SELECT '2.5' * 2;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
 	fold_select(&mut bound, &policy).unwrap();
@@ -899,9 +849,8 @@ fn test_mysql_sql_mode_pipes_as_concat_and_introduced_strings() {
 		.with_sql_mode(surrealdb_mysql::SqlMode::empty().with_pipes_as_concat(true));
 	let sql = "SELECT 'hello ' || 'world';";
 	let stmts = surrealdb_mysql::parse_statements_with_settings(sql, settings).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
 	assert_eq!(
@@ -916,9 +865,8 @@ fn test_mysql_sql_mode_pipes_as_concat_and_introduced_strings() {
 	// Introduced strings
 	let sql = "SELECT _utf8mb4'hello', _binary 0x6162;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
 	assert_eq!(
@@ -936,9 +884,8 @@ fn test_string_collation() {
 	let my_policy = DialectPolicy::mysql();
 	let sql = "SELECT 'abc' = 'ABC';";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	fold_select(&mut bound, &my_policy).unwrap();
@@ -948,9 +895,8 @@ fn test_string_collation() {
 	let pg_policy = DialectPolicy::postgres();
 	let sql = "SELECT 'abc' = 'ABC';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	fold_select(&mut bound, &pg_policy).unwrap();
@@ -966,9 +912,8 @@ fn test_pattern_matching_like() {
 	// PG LIKE (case sensitive): 'hello' LIKE 'hel%' -> true, 'hello' LIKE 'HEL%' -> false
 	let sql = "SELECT 'hello' LIKE 'hel%', 'hello' LIKE 'HEL%';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	fold_select(&mut bound, &pg_policy).unwrap();
@@ -978,9 +923,8 @@ fn test_pattern_matching_like() {
 	// PG ILIKE (case insensitive): 'hello' ILIKE 'HEL%' -> true
 	let sql = "SELECT 'hello' ILIKE 'HEL%';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	fold_select(&mut bound, &pg_policy).unwrap();
@@ -989,9 +933,8 @@ fn test_pattern_matching_like() {
 	// MySQL LIKE (case insensitive): 'hello' LIKE 'HEL%' -> true
 	let sql = "SELECT 'hello' LIKE 'HEL%';";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	fold_select(&mut bound, &my_policy).unwrap();
@@ -1004,9 +947,8 @@ fn test_regex_operators_fold_and_an_invalid_pattern_is_an_error() {
 	let policy = DialectPolicy::postgres();
 	let fold = |sql: &str| {
 		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 		fold_select(&mut bound, &policy).map(|()| bound.targets[0].expr.clone())
@@ -1031,9 +973,8 @@ fn test_type_casts() {
 	// PG: CAST('123' AS integer) -> 123
 	let sql = "SELECT CAST('123' AS integer);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	fold_select(&mut bound, &pg_policy).unwrap();
@@ -1042,9 +983,8 @@ fn test_type_casts() {
 	// PG: CAST('abc' AS integer) -> 22P02 error
 	let sql = "SELECT CAST('abc' AS integer);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let mut bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let err = fold_select(&mut bound, &pg_policy).unwrap_err();
@@ -1068,9 +1008,8 @@ fn test_a_column_alias_list_names_the_columns_of_a_derived_table() {
 	let policy = DialectPolicy::postgres();
 	let bind = |sql: &str| {
 		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		binder::pgsql::bind_select(select, &catalog, &policy, None)
 	};
@@ -1127,52 +1066,44 @@ fn test_null_ordering_lowering() {
 	let pg_policy = DialectPolicy::postgres();
 	let sql = "SELECT score FROM users ORDER BY score ASC;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match &*proj.input {
-			LogicalOp::Sort(sort) => {
-				let surrealdb_expr::expr::logical::LogicalOrdering::Order(orders) = &sort.ordering
-				else {
-					panic!("expected Order");
-				};
-				assert_eq!(orders.len(), 2, "PG ASC should emit (score IS NULL) ASC and score ASC");
-				assert!(orders[0].direction);
-				assert!(orders[1].direction);
-			}
-			other => panic!("expected Sort, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Sort(sort) = &*proj.input else {
+		panic!("expected Sort, got {:?}", proj.input);
+	};
+	let surrealdb_expr::expr::logical::LogicalOrdering::Order(orders) = &sort.ordering else {
+		panic!("expected Order");
+	};
+	assert_eq!(orders.len(), 2, "PG ASC should emit (score IS NULL) ASC and score ASC");
+	assert!(orders[0].direction);
+	assert!(orders[1].direction);
 
 	// MySQL: ORDER BY score ASC (NULLS FIRST by default) -> emits 1 order: [score ASC]
 	let my_policy = DialectPolicy::mysql();
 	let sql = "SELECT score FROM users ORDER BY score ASC;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &my_policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match &*proj.input {
-			LogicalOp::Sort(sort) => {
-				let surrealdb_expr::expr::logical::LogicalOrdering::Order(orders) = &sort.ordering
-				else {
-					panic!("expected Order");
-				};
-				assert_eq!(orders.len(), 1, "MySQL ASC should emit single score ASC");
-				assert!(orders[0].direction);
-			}
-			other => panic!("expected Sort, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Sort(sort) = &*proj.input else {
+		panic!("expected Sort, got {:?}", proj.input);
+	};
+	let surrealdb_expr::expr::logical::LogicalOrdering::Order(orders) = &sort.ordering else {
+		panic!("expected Order");
+	};
+	assert_eq!(orders.len(), 1, "MySQL ASC should emit single score ASC");
+	assert!(orders[0].direction);
 }
 
 #[test]
@@ -1191,9 +1122,8 @@ fn test_set_operations_union_all_and_distinct() {
 	// 1. UNION ALL
 	let sql = "SELECT a FROM t1 UNION ALL SELECT a FROM t2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
@@ -1202,9 +1132,8 @@ fn test_set_operations_union_all_and_distinct() {
 	// 2. UNION (distinct)
 	let sql = "SELECT a FROM t1 UNION SELECT a FROM t2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
@@ -1213,57 +1142,53 @@ fn test_set_operations_union_all_and_distinct() {
 	// 3. INTERSECT
 	let sql = "SELECT a FROM t1 INTERSECT SELECT a FROM t2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
-	match op {
-		LogicalOp::Distinct(d) => match *d.input {
-			LogicalOp::Join(j) => assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Semi),
-			other => panic!("expected Join under Distinct, got {other:?}"),
-		},
-		other => panic!("expected Distinct, got {other:?}"),
-	}
+	let LogicalOp::Distinct(d) = op else {
+		panic!("expected Distinct, got {op:?}");
+	};
+	let LogicalOp::Join(j) = *d.input else {
+		panic!("expected Join under Distinct, got {:?}", d.input);
+	};
+	assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Semi);
 
 	// 4. EXCEPT
 	let sql = "SELECT a FROM t1 EXCEPT SELECT a FROM t2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
-	match op {
-		LogicalOp::Distinct(d) => match *d.input {
-			LogicalOp::Join(j) => assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Anti),
-			other => panic!("expected Join under Distinct, got {other:?}"),
-		},
-		other => panic!("expected Distinct, got {other:?}"),
-	}
+	let LogicalOp::Distinct(d) = op else {
+		panic!("expected Distinct, got {op:?}");
+	};
+	let LogicalOp::Join(j) = *d.input else {
+		panic!("expected Join under Distinct, got {:?}", d.input);
+	};
+	assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Anti);
 
 	// 5. MySQL UNION with outer ORDER BY & LIMIT
 	let my_policy = DialectPolicy::mysql();
 	let sql = "SELECT a FROM t1 UNION ALL SELECT a FROM t2 ORDER BY a DESC LIMIT 5;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &my_policy).unwrap();
-	match op {
-		LogicalOp::Limit(lim) => match *lim.input {
-			LogicalOp::Sort(sort) => match *sort.input {
-				LogicalOp::UnionAll(_) => {}
-				other => panic!("expected UnionAll under Sort, got {other:?}"),
-			},
-			other => panic!("expected Sort under Limit, got {other:?}"),
-		},
-		other => panic!("expected Limit, got {other:?}"),
-	}
+	let LogicalOp::Limit(lim) = op else {
+		panic!("expected Limit, got {op:?}");
+	};
+	let LogicalOp::Sort(sort) = *lim.input else {
+		panic!("expected Sort under Limit, got {:?}", lim.input);
+	};
+	let LogicalOp::UnionAll(_) = *sort.input else {
+		panic!("expected UnionAll under Sort, got {:?}", sort.input);
+	};
 }
 
 #[test]
@@ -1271,9 +1196,8 @@ fn test_aggregate_subquery_keeps_bare_rows_unless_it_has_having_or_order_by() {
 	let policy = DialectPolicy::postgres();
 	let lower = |sql: &str| {
 		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let bound = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None)
 			.expect("bind failed");
@@ -1336,65 +1260,53 @@ fn test_joins_multi_table_using_and_right() {
 	// 1. USING join
 	let sql = "SELECT users.id, departments.name FROM users JOIN departments USING (dept_id);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match *proj.input {
-			LogicalOp::Join(j) => {
-				assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Inner);
-				assert_eq!(j.on.len(), 1);
-			}
-			other => panic!("expected Join under Project, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Join(j) = *proj.input else {
+		panic!("expected Join under Project, got {:?}", proj.input);
+	};
+	assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Inner);
+	assert_eq!(j.on.len(), 1);
 
 	// 2. RIGHT JOIN rewrite
 	let sql =
 		"SELECT users.id FROM users RIGHT JOIN departments ON users.dept_id = departments.dept_id;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	// Confirm bound source is inverted to Left join
-	match &bound.from {
-		Some(crate::ir::BoundTableSource::Join {
-			join_type,
-			..
-		}) => {
-			assert_eq!(*join_type, crate::ir::BoundJoinType::Left);
-		}
-		other => panic!("expected Left join in bound IR, got {other:?}"),
-	}
+	let Some(crate::ir::BoundTableSource::Join {
+		join_type,
+		..
+	}) = &bound.from
+	else {
+		panic!("expected Left join in bound IR, got {:?}", bound.from);
+	};
+	assert_eq!(*join_type, crate::ir::BoundJoinType::Left);
 
 	// 3. Multi-condition ON
 	let sql = "SELECT users.id FROM users JOIN departments ON users.id = departments.id AND users.dept_id = departments.dept_id;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	let op = lower_bound_select(&bound, &pg_policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match *proj.input {
-			LogicalOp::Join(j) => {
-				assert_eq!(
-					j.on.len(),
-					2,
-					"Expected 2 equi-join pairs extracted from AND condition"
-				);
-			}
-			other => panic!("expected Join under Project, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Join(j) = *proj.input else {
+		panic!("expected Join under Project, got {:?}", proj.input);
+	};
+	assert_eq!(j.on.len(), 2, "Expected 2 equi-join pairs extracted from AND condition");
 }
 
 #[test]
@@ -1426,9 +1338,8 @@ fn test_subqueries_pgsql() {
 	// 1. Scalar correlated subquery in target
 	let sql = "SELECT id, (SELECT name FROM departments WHERE departments.id = users.dept_id) FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert_eq!(bound.targets.len(), 2);
@@ -1439,9 +1350,8 @@ fn test_subqueries_pgsql() {
 	// 2. EXISTS subquery in WHERE
 	let sql = "SELECT id FROM users WHERE EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(matches!(bound.where_clause, Some(BoundExpr::Exists(_))));
@@ -1451,9 +1361,8 @@ fn test_subqueries_pgsql() {
 	// 3. IN subquery in WHERE
 	let sql = "SELECT id FROM users WHERE dept_id IN (SELECT id FROM departments);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(matches!(
@@ -1469,9 +1378,8 @@ fn test_subqueries_pgsql() {
 	// 4. Quantified = ANY -> IN subquery
 	let sql = "SELECT id FROM users WHERE dept_id = ANY (SELECT id FROM departments);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(matches!(
@@ -1485,9 +1393,8 @@ fn test_subqueries_pgsql() {
 	// 5. Quantified > ALL -> > (SELECT max(id) FROM departments)
 	let sql = "SELECT id FROM users WHERE dept_id > ALL (SELECT id FROM departments);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(matches!(
@@ -1522,9 +1429,8 @@ fn test_subqueries_mysql() {
 	// 1. Scalar correlated subquery in target
 	let sql = "SELECT id, (SELECT name FROM departments WHERE departments.id = users.dept_id) FROM users;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert_eq!(bound.targets.len(), 2);
@@ -1535,9 +1441,8 @@ fn test_subqueries_mysql() {
 	// 2. EXISTS subquery
 	let sql = "SELECT id FROM users WHERE EXISTS (SELECT 1 FROM departments WHERE departments.id = users.dept_id);";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert!(matches!(bound.where_clause, Some(BoundExpr::Exists(_))));
@@ -1547,9 +1452,8 @@ fn test_subqueries_mysql() {
 	// 3. IN subquery
 	let sql = "SELECT id FROM users WHERE dept_id IN (SELECT id FROM departments);";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert!(matches!(
@@ -1582,9 +1486,8 @@ fn test_cte_pgsql() {
 	// 1. Basic CTE
 	let sql = "WITH cte AS (SELECT id, name FROM users) SELECT id, name FROM cte;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(bound.with.is_some());
@@ -1597,9 +1500,8 @@ fn test_cte_pgsql() {
 	let sql =
 		"WITH cte(u_id, u_name) AS (SELECT id, name FROM users) SELECT u_id, u_name FROM cte;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(bound.with.is_some());
@@ -1610,9 +1512,8 @@ fn test_cte_pgsql() {
 	// 3. Multiple CTEs referencing each other
 	let sql = "WITH c1 AS (SELECT id FROM users), c2 AS (SELECT id FROM c1) SELECT id FROM c2;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert_eq!(bound.with.as_ref().unwrap().ctes.len(), 2);
@@ -1622,9 +1523,8 @@ fn test_cte_pgsql() {
 	// 4. Recursive CTE without self-reference passes
 	let sql = "WITH RECURSIVE c AS (SELECT 1 AS a) SELECT a FROM c;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert!(bound.with.as_ref().unwrap().recursive);
@@ -1634,9 +1534,8 @@ fn test_cte_pgsql() {
 	// 5. Recursive CTE with self-reference fails closed
 	let sql = "WITH RECURSIVE c AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM c WHERE n < 5) SELECT n FROM c;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::UnsupportedStatement(_)));
@@ -1658,9 +1557,8 @@ fn test_cte_mysql() {
 	// 1. Basic CTE
 	let sql = "WITH cte AS (SELECT id, name FROM users) SELECT id, name FROM cte;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert!(bound.with.is_some());
@@ -1673,9 +1571,8 @@ fn test_cte_mysql() {
 	let sql =
 		"WITH cte(u_id, u_name) AS (SELECT id, name FROM users) SELECT u_id, u_name FROM cte;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert!(bound.with.is_some());
@@ -1686,9 +1583,8 @@ fn test_cte_mysql() {
 	// 3. Multiple CTEs referencing each other
 	let sql = "WITH c1 AS (SELECT id FROM users), c2 AS (SELECT id FROM c1) SELECT id FROM c2;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert_eq!(bound.with.as_ref().unwrap().ctes.len(), 2);
@@ -1698,9 +1594,8 @@ fn test_cte_mysql() {
 	// 4. Recursive CTE with self-reference fails closed
 	let sql = "WITH RECURSIVE c AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM c WHERE n < 5) SELECT n FROM c;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::UnsupportedStatement(_)));
@@ -1723,28 +1618,26 @@ fn test_window_functions_pgsql() {
 	// 1. Basic OVER ()
 	let sql = "SELECT row_number() OVER () FROM emp;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert_eq!(bound.targets.len(), 1);
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			name,
-			args,
-			distinct,
-			spec,
-		} => {
-			assert_eq!(name, "row_number");
-			assert!(args.is_empty());
-			assert!(!distinct);
-			assert!(spec.partition_by.is_empty());
-			assert!(spec.order_by.is_empty());
-			assert!(spec.frame.is_none());
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		name,
+		args,
+		distinct,
+		spec,
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(name, "row_number");
+	assert!(args.is_empty());
+	assert!(!distinct);
+	assert!(spec.partition_by.is_empty());
+	assert!(spec.order_by.is_empty());
+	assert!(spec.frame.is_none());
 	let desc = bound.describe(&catalog, &pg_policy);
 	assert_eq!(desc.columns[0].ty, SqlType::Int8);
 	// Lowering fails closed
@@ -1754,75 +1647,68 @@ fn test_window_functions_pgsql() {
 	// 2. Window function with PARTITION BY and ORDER BY
 	let sql = "SELECT rank() OVER (PARTITION BY dept ORDER BY salary DESC) FROM emp;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			name,
-			spec,
-			..
-		} => {
-			assert_eq!(name, "rank");
-			assert_eq!(spec.partition_by.len(), 1);
-			assert_eq!(spec.order_by.len(), 1);
-			assert_eq!(spec.order_by[0].direction, BoundOrderDirection::Desc);
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		name,
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(name, "rank");
+	assert_eq!(spec.partition_by.len(), 1);
+	assert_eq!(spec.order_by.len(), 1);
+	assert_eq!(spec.order_by[0].direction, BoundOrderDirection::Desc);
 
 	// 3. Named window definition and reference
 	let sql = "SELECT rank() OVER w FROM emp WINDOW w AS (PARTITION BY dept ORDER BY salary DESC);";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert_eq!(bound.windows.len(), 1);
 	assert_eq!(bound.windows[0].name, "w");
 	assert_eq!(bound.windows[0].spec.partition_by.len(), 1);
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			spec,
-			..
-		} => {
-			assert_eq!(spec.window_name.as_deref(), Some("w"));
-			assert_eq!(spec.partition_by.len(), 1);
-			assert_eq!(spec.order_by.len(), 1);
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(spec.window_name.as_deref(), Some("w"));
+	assert_eq!(spec.partition_by.len(), 1);
+	assert_eq!(spec.order_by.len(), 1);
 
 	// 4. ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
 	let sql = "SELECT sum(salary) OVER (PARTITION BY dept ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM emp;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			spec,
-			..
-		} => {
-			let frame = spec.frame.as_ref().unwrap();
-			assert_eq!(frame.units, BoundWindowFrameUnits::Rows);
-			assert!(matches!(frame.start, BoundWindowFrameBound::Preceding(_)));
-			assert!(matches!(frame.end, Some(BoundWindowFrameBound::Following(_))));
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	let frame = spec.frame.as_ref().unwrap();
+	assert_eq!(frame.units, BoundWindowFrameUnits::Rows);
+	assert!(matches!(frame.start, BoundWindowFrameBound::Preceding(_)));
+	assert!(matches!(frame.end, Some(BoundWindowFrameBound::Following(_))));
 
 	// 5. Semantic rejection in WHERE
 	let sql = "SELECT id FROM emp WHERE rank() OVER () > 1;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("WHERE")));
@@ -1830,9 +1716,8 @@ fn test_window_functions_pgsql() {
 	// 6. Semantic rejection in GROUP BY
 	let sql = "SELECT dept FROM emp GROUP BY rank() OVER ();";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("GROUP BY")));
@@ -1840,9 +1725,8 @@ fn test_window_functions_pgsql() {
 	// 7. Semantic rejection in HAVING
 	let sql = "SELECT dept FROM emp HAVING rank() OVER () > 1;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("HAVING")));
@@ -1850,9 +1734,8 @@ fn test_window_functions_pgsql() {
 	// 8. Semantic rejection of nested window calls
 	let sql = "SELECT sum(rank() OVER ()) OVER () FROM emp;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("arguments")));
@@ -1875,28 +1758,26 @@ fn test_window_functions_mysql() {
 	// 1. Basic OVER ()
 	let sql = "SELECT ROW_NUMBER() OVER () FROM emp;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert_eq!(bound.targets.len(), 1);
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			name,
-			args,
-			distinct,
-			spec,
-		} => {
-			assert_eq!(name, "row_number");
-			assert!(args.is_empty());
-			assert!(!distinct);
-			assert!(spec.partition_by.is_empty());
-			assert!(spec.order_by.is_empty());
-			assert!(spec.frame.is_none());
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		name,
+		args,
+		distinct,
+		spec,
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(name, "row_number");
+	assert!(args.is_empty());
+	assert!(!distinct);
+	assert!(spec.partition_by.is_empty());
+	assert!(spec.order_by.is_empty());
+	assert!(spec.frame.is_none());
 	let desc = bound.describe(&catalog, &my_policy);
 	assert_eq!(desc.columns[0].ty, SqlType::Int8);
 	// Lowering fails closed
@@ -1906,75 +1787,68 @@ fn test_window_functions_mysql() {
 	// 2. Window function with PARTITION BY and ORDER BY
 	let sql = "SELECT RANK() OVER (PARTITION BY dept ORDER BY salary DESC) FROM emp;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			name,
-			spec,
-			..
-		} => {
-			assert_eq!(name, "rank");
-			assert_eq!(spec.partition_by.len(), 1);
-			assert_eq!(spec.order_by.len(), 1);
-			assert_eq!(spec.order_by[0].direction, BoundOrderDirection::Desc);
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		name,
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(name, "rank");
+	assert_eq!(spec.partition_by.len(), 1);
+	assert_eq!(spec.order_by.len(), 1);
+	assert_eq!(spec.order_by[0].direction, BoundOrderDirection::Desc);
 
 	// 3. Named window definition and reference
 	let sql = "SELECT RANK() OVER w FROM emp WINDOW w AS (PARTITION BY dept ORDER BY salary DESC);";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
 	assert_eq!(bound.windows.len(), 1);
 	assert_eq!(bound.windows[0].name, "w");
 	assert_eq!(bound.windows[0].spec.partition_by.len(), 1);
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			spec,
-			..
-		} => {
-			assert_eq!(spec.window_name.as_deref(), Some("w"));
-			assert_eq!(spec.partition_by.len(), 1);
-			assert_eq!(spec.order_by.len(), 1);
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	assert_eq!(spec.window_name.as_deref(), Some("w"));
+	assert_eq!(spec.partition_by.len(), 1);
+	assert_eq!(spec.order_by.len(), 1);
 
 	// 4. ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
 	let sql = "SELECT SUM(salary) OVER (PARTITION BY dept ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM emp;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
-	match &bound.targets[0].expr {
-		BoundExpr::WindowFunction {
-			spec,
-			..
-		} => {
-			let frame = spec.frame.as_ref().unwrap();
-			assert_eq!(frame.units, BoundWindowFrameUnits::Rows);
-			assert!(matches!(frame.start, BoundWindowFrameBound::Preceding(_)));
-			assert!(matches!(frame.end, Some(BoundWindowFrameBound::Following(_))));
-		}
-		other => panic!("expected WindowFunction, got {other:?}"),
-	}
+	let BoundExpr::WindowFunction {
+		spec,
+		..
+	} = &bound.targets[0].expr
+	else {
+		panic!("expected WindowFunction, got {:?}", &bound.targets[0].expr);
+	};
+	let frame = spec.frame.as_ref().unwrap();
+	assert_eq!(frame.units, BoundWindowFrameUnits::Rows);
+	assert!(matches!(frame.start, BoundWindowFrameBound::Preceding(_)));
+	assert!(matches!(frame.end, Some(BoundWindowFrameBound::Following(_))));
 
 	// 5. Semantic rejection in WHERE
 	let sql = "SELECT id FROM emp WHERE RANK() OVER () > 1;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("WHERE")));
@@ -1982,9 +1856,8 @@ fn test_window_functions_mysql() {
 	// 6. Semantic rejection in GROUP BY
 	let sql = "SELECT dept FROM emp GROUP BY RANK() OVER ();";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("GROUP BY")));
@@ -1992,9 +1865,8 @@ fn test_window_functions_mysql() {
 	// 7. Semantic rejection in HAVING
 	let sql = "SELECT dept FROM emp HAVING RANK() OVER () > 1;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("HAVING")));
@@ -2002,9 +1874,8 @@ fn test_window_functions_mysql() {
 	// 8. Semantic rejection of nested window calls
 	let sql = "SELECT SUM(RANK() OVER ()) OVER () FROM emp;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(clause) if clause.contains("arguments")));
@@ -2055,9 +1926,8 @@ fn test_functions_and_security_isolation() {
 	// 4. PG binding: reject undefined function with SQLSTATE 42883
 	let sql = "SELECT sleep(5) FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::UndefinedFunction(ref f) if f == "sleep"));
@@ -2066,9 +1936,8 @@ fn test_functions_and_security_isolation() {
 	// 5. MySQL binding: reject undefined function with error code 1305
 	let sql = "SELECT sleep(5) FROM users;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::UndefinedFunction(ref f) if f == "sleep"));
@@ -2077,9 +1946,8 @@ fn test_functions_and_security_isolation() {
 	// 6. Arity mismatch: min_args check
 	let sql = "SELECT round() FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(
@@ -2090,9 +1958,8 @@ fn test_functions_and_security_isolation() {
 	// 7. Arity mismatch: max_args check
 	let sql = "SELECT lower('a', 'b', 'c') FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(
@@ -2102,9 +1969,8 @@ fn test_functions_and_security_isolation() {
 	// 8. Window function without OVER: SQLSTATE 42809 / MySQL 3593
 	let sql = "SELECT rank() FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowFunctionWithoutOver(ref f) if f == "rank"));
@@ -2112,9 +1978,8 @@ fn test_functions_and_security_isolation() {
 
 	let sql = "SELECT rank() FROM users;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowFunctionWithoutOver(ref f) if f == "rank"));
@@ -2123,9 +1988,8 @@ fn test_functions_and_security_isolation() {
 	// 9. Scalar function with OVER rejected
 	let sql = "SELECT lower(name) OVER () FROM users;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let err = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap_err();
 	assert!(matches!(err, PlanError::WindowNotAllowed(_)));
@@ -2189,9 +2053,8 @@ fn test_functions_and_security_isolation() {
 	// 13. PG JSON binary operators
 	let sql = "SELECT id FROM users WHERE id = 1;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
 	assert_eq!(bound.targets.len(), 1);
@@ -2201,9 +2064,8 @@ fn test_functions_and_security_isolation() {
 fn test_pg_catalog_table_resolution_and_lowering() {
 	let sql = "SELECT relname, relkind FROM pg_class WHERE relkind = 'r';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let mut catalog = MemoryCatalog::new();
@@ -2214,44 +2076,41 @@ fn test_pg_catalog_table_resolution_and_lowering() {
 	assert_eq!(bound.targets.len(), 2);
 
 	let op = lower_bound_select(&bound, &policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match *proj.input {
-			LogicalOp::Filter(filter) => match *filter.input {
-				LogicalOp::Values(values) => {
-					let LogicalExpr::Array(rows) = values.expr else {
-						panic!("expected Array of rows");
-					};
-					// Should contain system tables plus the dynamic 'orders' table
-					assert!(rows.iter().any(|r| {
-						if let LogicalExpr::Object(fields) = r {
-							fields.iter().any(|(k, v)| {
-								k == "relname"
-									&& v == &LogicalExpr::Literal(
-										surrealdb_expr::expr::logical::LogicalLiteral::String(
-											surrealdb_strand::Strand::from("orders"),
-										),
-									)
-							})
-						} else {
-							false
-						}
-					}));
-				}
-				other => panic!("expected Values input to Filter, got {other:?}"),
-			},
-			other => panic!("expected Filter input to Project, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Filter(filter) = *proj.input else {
+		panic!("expected Filter input to Project, got {:?}", proj.input);
+	};
+	let LogicalOp::Values(values) = *filter.input else {
+		panic!("expected Values input to Filter, got {:?}", filter.input);
+	};
+	let LogicalExpr::Array(rows) = values.expr else {
+		panic!("expected Array of rows");
+	};
+	// Should contain system tables plus the dynamic 'orders' table
+	assert!(rows.iter().any(|r| {
+		if let LogicalExpr::Object(fields) = r {
+			fields.iter().any(|(k, v)| {
+				k == "relname"
+					&& v == &LogicalExpr::Literal(
+						surrealdb_expr::expr::logical::LogicalLiteral::String(
+							surrealdb_strand::Strand::from("orders"),
+						),
+					)
+			})
+		} else {
+			false
+		}
+	}));
 }
 
 #[test]
 fn test_pg_type_query_and_columns() {
 	let sql = "SELECT typname, typlen FROM pg_catalog.pg_type WHERE oid = 23;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2268,9 +2127,8 @@ fn test_pg_type_query_and_columns() {
 fn test_pg_namespace_and_settings() {
 	let sql = "SELECT nspname FROM pg_namespace;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2278,24 +2136,21 @@ fn test_pg_namespace_and_settings() {
 
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match *proj.input {
-			LogicalOp::Values(v) => {
-				let LogicalExpr::Array(rows) = v.expr else {
-					panic!("expected Array of rows");
-				};
-				assert_eq!(rows.len(), 4); // pg_catalog, public, information_schema, pg_toast
-			}
-			other => panic!("expected Values, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Values(v) = *proj.input else {
+		panic!("expected Values, got {:?}", proj.input);
+	};
+	let LogicalExpr::Array(rows) = v.expr else {
+		panic!("expected Array of rows");
+	};
+	assert_eq!(rows.len(), 4); // pg_catalog, public, information_schema, pg_toast
 
 	let sql_settings = "SELECT name, setting FROM pg_settings;";
 	let stmts = surrealdb_pgsql::parse_statements(sql_settings).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
@@ -2310,9 +2165,8 @@ fn test_information_schema_tables_and_columns() {
 
 	let sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
@@ -2321,9 +2175,8 @@ fn test_information_schema_tables_and_columns() {
 	let sql_cols =
 		"SELECT column_name FROM information_schema.columns WHERE table_name = 'products';";
 	let stmts = surrealdb_pgsql::parse_statements(sql_cols).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
@@ -2334,9 +2187,8 @@ fn test_information_schema_tables_and_columns() {
 fn test_catalog_introspection_functions() {
 	let sql = "SELECT version(), current_schema(), current_schemas(true), current_user, session_user, user, pg_backend_pid(), pg_is_in_recovery(), format_type(23, -1), pg_table_is_visible(1259), has_table_privilege('users', 'SELECT');";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2353,9 +2205,8 @@ fn test_catalog_introspection_functions() {
 fn test_pg_class_join_pg_namespace() {
 	let sql = "SELECT c.relname, n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'pg_type';";
 	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2363,19 +2214,17 @@ fn test_pg_class_join_pg_namespace() {
 
 	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
-	match op {
-		LogicalOp::Project(proj) => match *proj.input {
-			LogicalOp::Filter(filter) => match *filter.input {
-				LogicalOp::Join(join) => {
-					assert!(matches!(*join.left(), LogicalOp::Values(_)));
-					assert!(matches!(*join.right(), LogicalOp::Values(_)));
-				}
-				other => panic!("expected Join, got {other:?}"),
-			},
-			other => panic!("expected Filter, got {other:?}"),
-		},
-		other => panic!("expected Project, got {other:?}"),
-	}
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected Project, got {op:?}");
+	};
+	let LogicalOp::Filter(filter) = *proj.input else {
+		panic!("expected Filter, got {:?}", proj.input);
+	};
+	let LogicalOp::Join(join) = *filter.input else {
+		panic!("expected Join, got {:?}", filter.input);
+	};
+	assert!(matches!(*join.left(), LogicalOp::Values(_)));
+	assert!(matches!(*join.right(), LogicalOp::Values(_)));
 }
 
 #[test]
@@ -2383,9 +2232,8 @@ fn test_mysql_user_and_system_variables() {
 	let sql =
 		"SELECT @@version_comment, @@sql_mode, @@autocommit, @@global.time_zone, @session_var;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2417,9 +2265,8 @@ fn test_mysql_operators_null_safe_and_int_div() {
 	// Query binding, constant folding, and lowering
 	let sql = "SELECT 1 <=> 1, NULL <=> NULL, 1 <=> NULL, 10 DIV 3, 10 DIV 0;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let catalog = MemoryCatalog::new();
 	let mut bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
@@ -2438,9 +2285,8 @@ fn test_mysql_operators_null_safe_and_int_div() {
 fn test_mysql_is_truth_values() {
 	let sql = "SELECT 1 IS TRUE, 0 IS FALSE, NULL IS UNKNOWN, 1 IS NOT FALSE;";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2462,9 +2308,8 @@ fn test_mysql_quantified_subqueries() {
 
 	let sql = "SELECT id FROM t WHERE id > ALL (SELECT val FROM s);";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
 	let op = lower_bound_select(&bound, &policy).unwrap();
@@ -2472,9 +2317,8 @@ fn test_mysql_quantified_subqueries() {
 
 	let sql_any = "SELECT id FROM t WHERE id = ANY (SELECT val FROM s);";
 	let stmts_any = surrealdb_mysql::parse_statements(sql_any).unwrap();
-	let select_any = match &stmts_any[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select_any) = &stmts_any[0] else {
+		panic!("expected SELECT");
 	};
 	let bound_any = binder::mysql::bind_select(select_any, &catalog, &policy, None).unwrap();
 	let op_any = lower_bound_select(&bound_any, &policy).unwrap();
@@ -2485,9 +2329,8 @@ fn test_mysql_quantified_subqueries() {
 fn test_mysql_builtin_functions() {
 	let sql = "SELECT version(), found_rows(), row_count(), connection_id(), last_insert_id(), curdate(), curtime(), utc_timestamp(), unix_timestamp(), format(1234.5, 2), truncate(12.345, 1), regexp_like('abc', '^a');";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
-	let select = match &stmts[0] {
-		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-		_ => panic!("expected SELECT"),
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
 	};
 
 	let catalog = MemoryCatalog::new();
@@ -2509,9 +2352,8 @@ fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
 		"SELECT string_agg(DISTINCT x, ',') FROM t;",
 	] {
 		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let bound = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None)
 			.expect("bind failed");
@@ -2528,9 +2370,8 @@ fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
 		"SELECT jsonb_agg(x) FILTER (WHERE y > 1) FROM t;",
 	] {
 		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
-		let select = match &stmts[0] {
-			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let refused = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None);
 		assert!(
@@ -2543,9 +2384,8 @@ fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
 	let policy = DialectPolicy::mysql();
 	for sql in ["SELECT GROUP_CONCAT(a, b) FROM t;", "SELECT GROUP_CONCAT(DISTINCT a) FROM t;"] {
 		let stmts = surrealdb_mysql::parse_statements(sql).expect("parse failed");
-		let select = match &stmts[0] {
-			surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
-			_ => panic!("expected SELECT"),
+		let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
 		};
 		let bound = binder::mysql::bind_select(select, &MemoryCatalog::new(), &policy, None)
 			.expect("bind failed");

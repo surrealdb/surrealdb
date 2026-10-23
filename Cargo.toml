@@ -643,6 +643,10 @@ unwrap_used = "warn"
 # https://rust-lang.github.io/rust-clippy/master/index.html#used_underscore_binding
 used_underscore_binding = "warn"
 
+# Checks for wildcard enum matches using `_`.
+# https://rust-lang.github.io/rust-clippy/master/index.html#wildcard_enum_match_arm
+wildcard_enum_match_arm = "deny"
+
 # Profiles
 
 # Plain `cargo build`/`cargo test` (the default dev profile) emitted full

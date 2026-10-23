@@ -2299,7 +2299,9 @@ fn status_to_error(status: tonic::Status) -> Error {
 		Code::NotFound => Error::not_found(message, None),
 		Code::AlreadyExists => Error::already_exists(message, None),
 		Code::Unavailable | Code::Cancelled | Code::Unknown => Error::connection(message, None),
-		_ => Error::internal(message),
+		Code::Ok | Code::ResourceExhausted | Code::Internal | Code::DataLoss => {
+			Error::internal(message)
+		}
 	}
 }
 

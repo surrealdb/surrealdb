@@ -584,10 +584,12 @@ pub(super) mod tests {
 
 	impl RandomItemGenerator {
 		pub(in crate::trees) fn new(dist: &Distance, dim: usize) -> Self {
-			match dist {
-				Distance::Jaccard => Self::Int(0, (dim / 2) as i64),
-				Distance::Hamming => Self::Int(0, 2),
-				_ => Self::Float(-20.0, 20.0),
+			if let Distance::Jaccard = dist {
+				Self::Int(0, (dim / 2) as i64)
+			} else if let Distance::Hamming = dist {
+				Self::Int(0, 2)
+			} else {
+				Self::Float(-20.0, 20.0)
 			}
 		}
 		fn generate(&self, rng: &mut SmallRng) -> Number {
@@ -600,24 +602,26 @@ pub(super) mod tests {
 		}
 
 		fn generate_for(&self, rng: &mut SmallRng, vector_type: VectorType) -> Number {
-			match vector_type {
-				VectorType::U8 => match self {
+			if let VectorType::U8 = vector_type {
+				match self {
 					RandomItemGenerator::Int(from, to) => {
 						let from = (*from).max(0);
 						let to = (*to).max(from + 1).min(u8::MAX as i64 + 1);
 						Number::Int(rng.random_range(from..to))
 					}
 					RandomItemGenerator::Float(_, _) => Number::Int(rng.random_range(0..20)),
-				},
-				VectorType::I8 => match self {
+				}
+			} else if let VectorType::I8 = vector_type {
+				match self {
 					RandomItemGenerator::Int(from, to) => {
 						let from = (*from).max(i8::MIN as i64);
 						let to = (*to).max(from + 1).min(i8::MAX as i64 + 1);
 						Number::Int(rng.random_range(from..to))
 					}
 					RandomItemGenerator::Float(_, _) => Number::Int(rng.random_range(-20..20)),
-				},
-				_ => self.generate(rng),
+				}
+			} else {
+				self.generate(rng)
 			}
 		}
 	}

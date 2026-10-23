@@ -338,16 +338,17 @@ fn union_with_an_any_member(input: &str) -> Option<Kind> {
 	let mut start = 0;
 	loop {
 		let token = lexer.next_token();
-		match token.kind {
-			T::Eof => break,
-			T::Invalid => return None,
-			T::Lt | T::LParen | T::LBracket | T::LBrace => depth += 1,
-			T::Gt | T::RParen | T::RBracket | T::RBrace => depth = depth.checked_sub(1)?,
-			T::Pipe if depth == 0 => {
-				members.push(&input[start..token.start as usize]);
-				start = token.end as usize;
-			}
-			_ => {}
+		if token.kind == T::Eof {
+			break;
+		} else if token.kind == T::Invalid {
+			return None;
+		} else if matches!(token.kind, T::Lt | T::LParen | T::LBracket | T::LBrace) {
+			depth += 1;
+		} else if matches!(token.kind, T::Gt | T::RParen | T::RBracket | T::RBrace) {
+			depth = depth.checked_sub(1)?;
+		} else if token.kind == T::Pipe && depth == 0 {
+			members.push(&input[start..token.start as usize]);
+			start = token.end as usize;
 		}
 	}
 	members.push(&input[start..]);

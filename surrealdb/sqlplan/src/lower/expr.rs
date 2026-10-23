@@ -73,12 +73,13 @@ pub fn lower_bound_expr(
 			left,
 			op,
 			right,
-		} => match op {
-			BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi => {
+		} => {
+			if matches!(op, BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi) {
 				lower_regex_match(left, right, *op == BoundBinaryOp::RegexpCi, false, policy)
+			} else {
+				lower_binary_op(left, *op, right, policy)
 			}
-			_ => lower_binary_op(left, *op, right, policy),
-		},
+		}
 		BoundExpr::Unary {
 			op,
 			expr,
@@ -463,14 +464,12 @@ pub fn lower_bound_expr(
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Integer(0)));
 				}
 				"current_setting" => {
-					let name_str = match &args[0] {
-						BoundExpr::Literal(BoundLiteral::String(s)) => s.as_str(),
-						_ => {
-							return Err(PlanError::UnsupportedExpression(
-								"current_setting requires a string literal argument".into(),
-							));
-						}
+					let BoundExpr::Literal(BoundLiteral::String(s)) = &args[0] else {
+						return Err(PlanError::UnsupportedExpression(
+							"current_setting requires a string literal argument".into(),
+						));
 					};
+					let name_str = s.as_str();
 					let val = match name_str.to_ascii_lowercase().as_str() {
 						"timezone" | "time zone" => "UTC",
 						"server_version" => "16.0-surrealdb",
@@ -502,12 +501,11 @@ pub fn lower_bound_expr(
 				"jsonb_build_object" | "json_build_object" | "json_object" => {
 					let mut obj = Vec::new();
 					for chunk in args.chunks(2) {
-						let key = match &chunk[0] {
-							BoundExpr::Literal(BoundLiteral::String(s)) => s.clone(),
-							other => {
-								let k_low = lower_bound_expr(other, policy)?;
-								format!("{k_low}")
-							}
+						let key = if let BoundExpr::Literal(BoundLiteral::String(s)) = &chunk[0] {
+							s.clone()
+						} else {
+							let k_low = lower_bound_expr(&chunk[0], policy)?;
+							format!("{k_low}")
 						};
 						let val = if chunk.len() > 1 {
 							lower_bound_expr(&chunk[1], policy)?
@@ -909,71 +907,71 @@ pub(crate) fn lower_lookup_predicate(
 	expr: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<Option<LogicalExpr>, PlanError> {
-	match expr {
-		BoundExpr::Binary {
-			left,
-			op: BoundBinaryOp::Equal,
-			right,
-		} => {
-			if same_table_pair(left, right).is_some() {
-				return Ok(None);
-			}
-			let (col, table, other) = match (id_column(left), id_column(right)) {
-				(Some((col, table)), None) => (col, table, right.as_ref()),
-				(None, Some((col, table))) => (col, table, left.as_ref()),
-				(Some(_), Some(_)) => return Ok(None),
-				(None, None) => return lower_link_lookup(left, right, policy),
-			};
+	if let BoundExpr::Binary {
+		left,
+		op: BoundBinaryOp::Equal,
+		right,
+	} = expr
+	{
+		if same_table_pair(left, right).is_some() {
+			return Ok(None);
+		}
+		let (col, table, other) = match (id_column(left), id_column(right)) {
+			(Some((col, table)), None) => (col, table, right.as_ref()),
+			(None, Some((col, table))) => (col, table, left.as_ref()),
+			(Some(_), Some(_)) => return Ok(None),
+			(None, None) => return lower_link_lookup(left, right, policy),
+		};
+		if !names_scanned_record(col) {
+			return Ok(None);
+		}
+		if let Some(key) = key_operand(other) {
+			Ok(Some(equal(lower_column_raw(col), record_of_operand(table, &key))))
+		} else if is_key_or_link(other) {
+			let record = record_of(table, lower_stored(other, policy)?);
+			Ok(Some(equal(lower_column_raw(col), record)))
+		} else {
+			Ok(None)
+		}
+	} else if let BoundExpr::InList {
+		expr,
+		list,
+		negated: false,
+	} = expr
+	{
+		if let Some((col, table)) = link_column(expr) {
 			if !names_scanned_record(col) {
 				return Ok(None);
 			}
-			if let Some(key) = key_operand(other) {
-				Ok(Some(equal(lower_column_raw(col), record_of_operand(table, &key))))
-			} else if is_key_or_link(other) {
-				let record = record_of(table, lower_stored(other, policy)?);
-				Ok(Some(equal(lower_column_raw(col), record)))
-			} else {
-				Ok(None)
-			}
-		}
-		BoundExpr::InList {
-			expr,
-			list,
-			negated: false,
-		} => {
-			if let Some((col, table)) = link_column(expr) {
-				if !names_scanned_record(col) {
+			let mut records = Vec::with_capacity(list.len());
+			for member in list {
+				let LinkOperand::Record(record) = link_operand(table, member, policy)? else {
 					return Ok(None);
-				}
-				let mut records = Vec::with_capacity(list.len());
-				for member in list {
-					let LinkOperand::Record(record) = link_operand(table, member, policy)? else {
-						return Ok(None);
-					};
-					records.push(record);
-				}
-				let dynamic =
-					records.iter().any(|record| !matches!(record, LogicalExpr::RecordId(_)));
-				return Ok(one_or_inside(col, records).map(|predicate| {
-					if dynamic {
-						predicate.and(is_not_null_expr(lower_column_raw(col)))
-					} else {
-						predicate
-					}
-				}));
+				};
+				records.push(record);
 			}
-			let Some((col, table)) = id_column(expr) else {
-				return Ok(None);
-			};
-			if !names_scanned_record(col) {
-				return Ok(None);
-			}
-			let Some((records, _)) = id_member_records(table, list, policy, false)? else {
-				return Ok(None);
-			};
-			Ok(one_or_inside(col, records))
+			let dynamic =
+				records.iter().any(|record| !matches!(record, LogicalExpr::RecordId(_)));
+			return Ok(one_or_inside(col, records).map(|predicate| {
+				if dynamic {
+					predicate.and(is_not_null_expr(lower_column_raw(col)))
+				} else {
+					predicate
+				}
+			}));
 		}
-		_ => Ok(None),
+		let Some((col, table)) = id_column(expr) else {
+			return Ok(None);
+		};
+		if !names_scanned_record(col) {
+			return Ok(None);
+		}
+		let Some((records, _)) = id_member_records(table, list, policy, false)? else {
+			return Ok(None);
+		};
+		Ok(one_or_inside(col, records))
+	} else {
+		Ok(None)
 	}
 }
 
@@ -1240,23 +1238,22 @@ fn lower_binary_op(
 		BoundBinaryOp::Like => {
 			let case_insensitive = policy.dialect == SqlDialect::MySql;
 			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let match_call = match right {
-				BoundExpr::Literal(BoundLiteral::String(pat)) => {
-					let regex_str = sql_like_to_regex(pat, case_insensitive);
-					LogicalExpr::Call(Box::new(LogicalCall {
-						receiver: Function::Normal("string::matches".to_string()),
-						args: vec![
-							l,
-							LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
-								regex_str.as_str(),
-							))),
-						],
-					}))
-				}
-				_ => LogicalExpr::Call(Box::new(LogicalCall {
+			let match_call = if let BoundExpr::Literal(BoundLiteral::String(pat)) = right {
+				let regex_str = sql_like_to_regex(pat, case_insensitive);
+				LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("string::matches".to_string()),
+					args: vec![
+						l,
+						LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+							regex_str.as_str(),
+						))),
+					],
+				}))
+			} else {
+				LogicalExpr::Call(Box::new(LogicalCall {
 					receiver: Function::Normal("string::matches".to_string()),
 					args: vec![l, r],
-				})),
+				}))
 			};
 			Ok(LogicalExpr::If(Box::new(LogicalIf {
 				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
@@ -1265,23 +1262,22 @@ fn lower_binary_op(
 		}
 		BoundBinaryOp::ILike => {
 			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let match_call = match right {
-				BoundExpr::Literal(BoundLiteral::String(pat)) => {
-					let regex_str = sql_like_to_regex(pat, true);
-					LogicalExpr::Call(Box::new(LogicalCall {
-						receiver: Function::Normal("string::matches".to_string()),
-						args: vec![
-							l,
-							LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
-								regex_str.as_str(),
-							))),
-						],
-					}))
-				}
-				_ => LogicalExpr::Call(Box::new(LogicalCall {
+			let match_call = if let BoundExpr::Literal(BoundLiteral::String(pat)) = right {
+				let regex_str = sql_like_to_regex(pat, true);
+				LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("string::matches".to_string()),
+					args: vec![
+						l,
+						LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+							regex_str.as_str(),
+						))),
+					],
+				}))
+			} else {
+				LogicalExpr::Call(Box::new(LogicalCall {
 					receiver: Function::Normal("string::matches".to_string()),
 					args: vec![l, r],
-				})),
+				}))
 			};
 			Ok(LogicalExpr::If(Box::new(LogicalIf {
 				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
@@ -1374,31 +1370,39 @@ fn lower_binary_op(
 				})))
 			}
 		}
-		_ => {
-			let bin_op = match op {
-				BoundBinaryOp::Add => BinaryOperator::Add,
-				BoundBinaryOp::Subtract => BinaryOperator::Subtract,
-				BoundBinaryOp::Multiply => BinaryOperator::Multiply,
-				BoundBinaryOp::Remainder => BinaryOperator::Remainder,
-				BoundBinaryOp::Equal => BinaryOperator::Equal,
-				BoundBinaryOp::NotEqual => BinaryOperator::NotEqual,
-				BoundBinaryOp::LessThan => BinaryOperator::LessThan,
-				BoundBinaryOp::LessThanEqual => BinaryOperator::LessThanEqual,
-				BoundBinaryOp::GreaterThan => BinaryOperator::MoreThan,
-				BoundBinaryOp::GreaterThanEqual => BinaryOperator::MoreThanEqual,
-				_ => unreachable!(),
-			};
-			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			Ok(LogicalExpr::If(Box::new(LogicalIf {
-				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(LogicalExpr::Binary {
-					left: Box::new(l),
-					op: bin_op,
-					right: Box::new(r),
-				}),
-			})))
+		BoundBinaryOp::Add => Ok(null_propagating_binary(l, r, BinaryOperator::Add)),
+		BoundBinaryOp::Subtract => Ok(null_propagating_binary(l, r, BinaryOperator::Subtract)),
+		BoundBinaryOp::Multiply => Ok(null_propagating_binary(l, r, BinaryOperator::Multiply)),
+		BoundBinaryOp::Remainder => Ok(null_propagating_binary(l, r, BinaryOperator::Remainder)),
+		BoundBinaryOp::Equal => Ok(null_propagating_binary(l, r, BinaryOperator::Equal)),
+		BoundBinaryOp::NotEqual => Ok(null_propagating_binary(l, r, BinaryOperator::NotEqual)),
+		BoundBinaryOp::LessThan => Ok(null_propagating_binary(l, r, BinaryOperator::LessThan)),
+		BoundBinaryOp::LessThanEqual => {
+			Ok(null_propagating_binary(l, r, BinaryOperator::LessThanEqual))
 		}
+		BoundBinaryOp::GreaterThan => Ok(null_propagating_binary(l, r, BinaryOperator::MoreThan)),
+		BoundBinaryOp::GreaterThanEqual => {
+			Ok(null_propagating_binary(l, r, BinaryOperator::MoreThanEqual))
+		}
+		BoundBinaryOp::JsonExtract
+		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtractText
+		| BoundBinaryOp::JsonContains
+		| BoundBinaryOp::Regexp
+		| BoundBinaryOp::RegexpCi => unreachable!(),
 	}
+}
+
+fn null_propagating_binary(l: LogicalExpr, r: LogicalExpr, op: BinaryOperator) -> LogicalExpr {
+	let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+	LogicalExpr::If(Box::new(LogicalIf {
+		branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+		otherwise: Some(LogicalExpr::Binary {
+			left: Box::new(l),
+			op,
+			right: Box::new(r),
+		}),
+	}))
 }
 
 /// The most steps a `#>>` path may take: each step is one level of the lowered expression, so a
@@ -1422,9 +1426,10 @@ fn lower_json_op(
 	let Some(place) = lower_json_place(left, op, right, policy)? else {
 		return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 	};
-	Ok(match op {
-		BoundBinaryOp::JsonExtract => absent_as_null(place),
-		_ => json_text(place),
+	Ok(if op == BoundBinaryOp::JsonExtract {
+		absent_as_null(place)
+	} else {
+		json_text(place)
 	})
 }
 
@@ -1522,13 +1527,15 @@ fn lower_json_base(
 	left: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<Option<LogicalExpr>, PlanError> {
-	match left {
-		BoundExpr::Binary {
-			left,
-			op: BoundBinaryOp::JsonExtract,
-			right,
-		} => lower_json_place(left, BoundBinaryOp::JsonExtract, right, policy),
-		_ => lower_bound_expr(left, policy).map(Some),
+	if let BoundExpr::Binary {
+		left,
+		op: BoundBinaryOp::JsonExtract,
+		right,
+	} = left
+	{
+		lower_json_place(left, BoundBinaryOp::JsonExtract, right, policy)
+	} else {
+		lower_bound_expr(left, policy).map(Some)
 	}
 }
 
@@ -1552,16 +1559,17 @@ enum JsonOperand {
 /// other type, which is an integer that does not fit 32 bits, a number with a fraction or a
 /// boolean, has no operator and is refused.
 fn json_operand(op: BoundBinaryOp, operand: &BoundExpr) -> Result<JsonOperand, PlanError> {
-	let (negated, literal) = match operand {
-		BoundExpr::Literal(literal) => (false, literal),
-		BoundExpr::Unary {
-			op: BoundUnaryOp::Negate,
-			expr,
-		} => match &**expr {
-			BoundExpr::Literal(literal) => (true, literal),
-			_ => return Ok(JsonOperand::Dynamic),
-		},
-		_ => return Ok(JsonOperand::Dynamic),
+	let (negated, literal) = if let BoundExpr::Literal(literal) = operand {
+		(false, literal)
+	} else if let BoundExpr::Unary {
+		op: BoundUnaryOp::Negate,
+		expr,
+	} = operand
+		&& let BoundExpr::Literal(literal) = &**expr
+	{
+		(true, literal)
+	} else {
+		return Ok(JsonOperand::Dynamic);
 	};
 	let undefined = |operand_type: &str| {
 		let operator = if op == BoundBinaryOp::JsonExtract {
@@ -1696,37 +1704,47 @@ pub(crate) const MAX_TWO_SIDED_STEPS: usize = 3;
 /// cost of the reads alone, so a step may read it twice. A call, a subquery or any other
 /// expression may be neither deterministic nor cheap, and is evaluated once.
 fn is_json_place(expr: &LogicalExpr) -> bool {
-	match expr {
-		LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Param(_) => true,
-		LogicalExpr::Access {
-			base,
-			..
-		}
-		| LogicalExpr::Last(base) => is_json_place(base),
-		LogicalExpr::Index {
-			base,
-			index,
-		} => is_json_place(base) && is_literal_index(index),
+	if matches!(expr, LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Param(_)) {
+		true
+	} else if let LogicalExpr::Access {
+		base,
+		..
+	}
+	| LogicalExpr::Last(base) = expr
+	{
+		is_json_place(base)
+	} else if let LogicalExpr::Index {
+		base,
+		index,
+	} = expr
+	{
+		is_json_place(base) && is_literal_index(index)
+	} else if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::NullCoalescing,
+		right,
+	} = expr
+	{
 		// The value of a step that reads both an object and an array.
-		LogicalExpr::Binary {
-			left,
-			op: BinaryOperator::NullCoalescing,
-			right,
-		} => is_json_place(left) && is_json_place(right),
-		_ => false,
+		is_json_place(left) && is_json_place(right)
+	} else {
+		false
 	}
 }
 
 /// Whether `index` is a literal or a range of literals.
 fn is_literal_index(index: &LogicalExpr) -> bool {
-	match index {
-		LogicalExpr::Literal(_) => true,
-		LogicalExpr::Binary {
-			left,
-			op: BinaryOperator::Range,
-			right,
-		} => matches!(**left, LogicalExpr::Literal(_)) && matches!(**right, LogicalExpr::Literal(_)),
-		_ => false,
+	if matches!(index, LogicalExpr::Literal(_)) {
+		true
+	} else if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::Range,
+		right,
+	} = index
+	{
+		matches!(**left, LogicalExpr::Literal(_)) && matches!(**right, LogicalExpr::Literal(_))
+	} else {
+		false
 	}
 }
 
@@ -1781,7 +1799,6 @@ fn json_text(value: LogicalExpr) -> LogicalExpr {
 		}))),
 	})
 }
-
 /// Helper to create `(expr == NULL || expr == NONE)`.
 pub fn is_null_expr(expr: LogicalExpr) -> LogicalExpr {
 	LogicalExpr::Binary {
@@ -1895,44 +1912,39 @@ fn lower_regex_match(
 			call
 		}
 	};
-	match right {
-		BoundExpr::Literal(BoundLiteral::Null) => Ok(LogicalExpr::Literal(LogicalLiteral::Null)),
-		BoundExpr::Literal(BoundLiteral::String(pattern)) => {
-			let pattern = if case_insensitive {
-				Strand::from(format!("(?i){pattern}").as_str())
-			} else {
-				Strand::from(pattern.as_str())
-			};
-			Ok(LogicalExpr::Binary {
-				left: Box::new(LogicalExpr::Optional {
-					base: Box::new(l),
-					then: Box::new(matches(
-						LogicalExpr::Current,
-						LogicalExpr::Literal(LogicalLiteral::String(pattern)),
-					)),
-				}),
-				op: BinaryOperator::NullCoalescing,
-				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
-			})
-		}
-		_ => {
-			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let pattern = if case_insensitive {
-				LogicalExpr::Call(Box::new(LogicalCall {
-					receiver: Function::Normal("string::concat".to_string()),
-					args: vec![
-						LogicalExpr::Literal(LogicalLiteral::String(Strand::from("(?i)"))),
-						r,
-					],
-				}))
-			} else {
-				r
-			};
-			Ok(LogicalExpr::If(Box::new(LogicalIf {
-				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(matches(l, pattern)),
-			})))
-		}
+	if matches!(right, BoundExpr::Literal(BoundLiteral::Null)) {
+		Ok(LogicalExpr::Literal(LogicalLiteral::Null))
+	} else if let BoundExpr::Literal(BoundLiteral::String(pattern)) = right {
+		let pattern = if case_insensitive {
+			Strand::from(format!("(?i){pattern}").as_str())
+		} else {
+			Strand::from(pattern.as_str())
+		};
+		Ok(LogicalExpr::Binary {
+			left: Box::new(LogicalExpr::Optional {
+				base: Box::new(l),
+				then: Box::new(matches(
+					LogicalExpr::Current,
+					LogicalExpr::Literal(LogicalLiteral::String(pattern)),
+				)),
+			}),
+			op: BinaryOperator::NullCoalescing,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+		})
+	} else {
+		let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+		let pattern = if case_insensitive {
+			LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("string::concat".to_string()),
+				args: vec![LogicalExpr::Literal(LogicalLiteral::String(Strand::from("(?i)"))), r],
+			}))
+		} else {
+			r
+		};
+		Ok(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+			otherwise: Some(matches(l, pattern)),
+		})))
 	}
 }
 
@@ -1967,7 +1979,44 @@ pub fn lower_bound_target(
 				};
 				Some(OutputPath::field(format!("{prefix}{name}")))
 			}
-			_ => None,
+			BoundExpr::Literal(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::Binary {
+				..
+			}
+			| BoundExpr::Unary {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Between {
+				..
+			}
+			| BoundExpr::InList {
+				..
+			}
+			| BoundExpr::IsNull {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::Column(_) => None,
 		},
 	};
 	Ok(LogicalField::user(expr, alias))

@@ -7,22 +7,21 @@ impl<'a, 's> Parser<'a, 's> {
 	/// An unsigned integer: digits, optionally after an adjacent `+`.
 	pub(crate) fn uint_lit(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		let signed = match t.kind {
-			T::Digits => false,
-			T::Plus => {
-				self.bump();
-				if self.tok.kind != T::Digits || self.tok.ws() {
-					return Err(self.unexpected("an unsigned integer"));
-				}
-				true
+		let signed = if t.kind == T::Digits {
+			false
+		} else if t.kind == T::Plus {
+			self.bump();
+			if self.tok.kind != T::Digits || self.tok.ws() {
+				return Err(self.unexpected("an unsigned integer"));
 			}
-			T::Minus => {
-				return Err(self.diag(
-					Diag::message(t.start, t.end, "Unexpected token `-`")
-						.with_label("Only positive integers allowed here"),
-				));
-			}
-			_ => return Err(self.unexpected("an unsigned integer")),
+			true
+		} else if t.kind == T::Minus {
+			return Err(self.diag(
+				Diag::message(t.start, t.end, "Unexpected token `-`")
+					.with_label("Only positive integers allowed here"),
+			));
+		} else {
+			return Err(self.unexpected("an unsigned integer"));
 		};
 		let n = self.number_with(t.start, signed, true)?;
 		self.only_int(n, t.start)
@@ -31,16 +30,16 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A signed integer: digits, optionally after an adjacent sign.
 	pub(crate) fn int_lit(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		let signed = match t.kind {
-			T::Digits => false,
-			T::Plus | T::Minus => {
-				self.bump();
-				if self.tok.kind != T::Digits || self.tok.ws() {
-					return Err(self.unexpected("an integer"));
-				}
-				true
+		let signed = if t.kind == T::Digits {
+			false
+		} else if t.kind == T::Plus || t.kind == T::Minus {
+			self.bump();
+			if self.tok.kind != T::Digits || self.tok.ws() {
+				return Err(self.unexpected("an integer"));
 			}
-			_ => return Err(self.unexpected("an signed integer")),
+			true
+		} else {
+			return Err(self.unexpected("an signed integer"));
 		};
 		let n = self.number_in(t.start, signed, false, Compound::Integer, t.start)?;
 		self.only_int(n, t.start)
@@ -73,31 +72,31 @@ impl<'a, 's> Parser<'a, 's> {
 
 	fn numeric_lit(&mut self, decimal: bool) -> R<NodeId> {
 		let t = self.tok;
-		let signed = match t.kind {
-			T::NaN | T::Infinity => {
-				self.bump();
-				let tag = if t.kind == T::NaN {
-					Tag::NaN
+		let signed = if t.kind == T::NaN || t.kind == T::Infinity {
+			self.bump();
+			let tag = if t.kind == T::NaN {
+				Tag::NaN
+			} else {
+				Tag::Infinity
+			};
+			return Ok(self.leaf(tag, 0, t));
+		} else if t.kind == T::Digits {
+			false
+		} else if t.kind == T::Plus || t.kind == T::Minus {
+			self.bump();
+			if self.tok.kind != T::Digits || self.tok.ws() {
+				let mode = if decimal {
+					Compound::Number
 				} else {
-					Tag::Infinity
+					Compound::Float
 				};
-				return Ok(self.leaf(tag, 0, t));
+				return Err(self.number_error(t.start, LexError::InvalidNumber, mode, t.start));
 			}
-			T::Digits => false,
-			T::Plus | T::Minus => {
-				self.bump();
-				if self.tok.kind != T::Digits || self.tok.ws() {
-					let mode = if decimal {
-						Compound::Number
-					} else {
-						Compound::Float
-					};
-					return Err(self.number_error(t.start, LexError::InvalidNumber, mode, t.start));
-				}
-				true
-			}
-			_ if decimal => return Err(self.unexpected("a number")),
-			_ => return Err(self.unexpected("a floating point number")),
+			true
+		} else if decimal {
+			return Err(self.unexpected("a number"));
+		} else {
+			return Err(self.unexpected("a floating point number"));
 		};
 		let mode = if decimal {
 			Compound::Number
@@ -111,10 +110,12 @@ impl<'a, 's> Parser<'a, 's> {
 		{
 			return Err(self.diag(d));
 		}
-		let ok = match node.tag {
-			Tag::Int | Tag::Float => true,
-			Tag::Decimal => decimal,
-			_ => false,
+		let ok = if node.tag == Tag::Int || node.tag == Tag::Float {
+			true
+		} else if node.tag == Tag::Decimal {
+			decimal
+		} else {
+			false
 		};
 		if !ok {
 			return Err(self.error(node.start, node.end, "expected a number"));

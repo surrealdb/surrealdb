@@ -21,9 +21,10 @@ fn catalog_public_literals_keep_canonical_sets_and_ranges() {
 	];
 	let keys = [
 		surrealdb_types::RecordIdKey::Array(Array::from(vec![set])),
-		surrealdb_types::RecordIdKey::Object(match object {
-			Value::Object(object) => object,
-			_ => unreachable!(),
+		surrealdb_types::RecordIdKey::Object(if let Value::Object(object) = object {
+			object
+		} else {
+			unreachable!()
 		}),
 	];
 	for key in keys {

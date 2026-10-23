@@ -591,36 +591,29 @@ impl<'a> Parser<'a> {
 			return Ok(Statement::DropPropertyGraph(Box::new(s)));
 		}
 
-		let object_type = match &self.peek().kind {
-			TokenKind::Keyword(Keyword::Table) => {
-				self.bump()?;
-				DropObjectType::Table
-			}
-			TokenKind::Keyword(Keyword::Index) => {
-				self.bump()?;
-				DropObjectType::Index
-			}
-			TokenKind::Keyword(Keyword::View) => {
-				self.bump()?;
-				DropObjectType::View
-			}
-			TokenKind::Keyword(Keyword::Schema) => {
-				self.bump()?;
-				DropObjectType::Schema
-			}
-			TokenKind::Keyword(Keyword::Type) => {
-				self.bump()?;
-				DropObjectType::Type
-			}
-			_ => {
-				return Err(ParseError::new(
-					self.peek().span,
-					ErrorKind::UnexpectedToken {
-						expected: "TABLE, INDEX, VIEW, SCHEMA, TYPE, or PROPERTY GRAPH",
-						found: self.peek().kind.to_string(),
-					},
-				));
-			}
+		let object_type = if self.peek().kind == TokenKind::Keyword(Keyword::Table) {
+			self.bump()?;
+			DropObjectType::Table
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Index) {
+			self.bump()?;
+			DropObjectType::Index
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::View) {
+			self.bump()?;
+			DropObjectType::View
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Schema) {
+			self.bump()?;
+			DropObjectType::Schema
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Type) {
+			self.bump()?;
+			DropObjectType::Type
+		} else {
+			return Err(ParseError::new(
+				self.peek().span,
+				ErrorKind::UnexpectedToken {
+					expected: "TABLE, INDEX, VIEW, SCHEMA, TYPE, or PROPERTY GRAPH",
+					found: self.peek().kind.to_string(),
+				},
+			));
 		};
 
 		// Optional IF EXISTS

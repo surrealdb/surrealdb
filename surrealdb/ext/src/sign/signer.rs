@@ -52,7 +52,10 @@ pub fn ensure_token_matches(claims: &serde_json::Value, signer: &PackageSigner) 
 	let text = |value: &serde_json::Value| match value {
 		serde_json::Value::String(s) => Some(s.clone()),
 		serde_json::Value::Number(n) => Some(n.to_string()),
-		_ => None,
+		serde_json::Value::Null
+		| serde_json::Value::Bool(_)
+		| serde_json::Value::Array(_)
+		| serde_json::Value::Object(_) => None,
 	};
 	let issuer = claims["iss"].as_str().unwrap_or_default();
 	let (identity, repository_id, owner_id) = if let Some(workflow) =

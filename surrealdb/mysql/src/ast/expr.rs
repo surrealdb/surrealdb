@@ -458,11 +458,10 @@ impl WindowSpec {
 		}
 		if let Some(frame) = &mut self.frame {
 			frame.span = zero;
-			match &mut frame.start {
-				WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e) => {
-					e.normalize_spans();
-				}
-				_ => {}
+			if let WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e) =
+				&mut frame.start
+			{
+				e.normalize_spans();
 			}
 			if let Some(WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e)) =
 				&mut frame.end

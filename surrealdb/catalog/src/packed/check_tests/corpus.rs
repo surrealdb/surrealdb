@@ -128,7 +128,28 @@ fn gen_leaf(rng: &mut Rng, presence: Pres) -> Spec {
 				}
 			}
 		}
-		_ => {}
+		PhysicalKind::Bool
+		| PhysicalKind::I8
+		| PhysicalKind::I16
+		| PhysicalKind::I32
+		| PhysicalKind::I64
+		| PhysicalKind::U8
+		| PhysicalKind::U16
+		| PhysicalKind::U32
+		| PhysicalKind::U64
+		| PhysicalKind::F32
+		| PhysicalKind::F64
+		| PhysicalKind::Decimal16
+		| PhysicalKind::Uuid
+		| PhysicalKind::Datetime
+		| PhysicalKind::DatetimeWide
+		| PhysicalKind::Duration
+		| PhysicalKind::Point
+		| PhysicalKind::String
+		| PhysicalKind::Bytes
+		| PhysicalKind::DecimalVar
+		| PhysicalKind::Value
+		| PhysicalKind::Object => {}
 	}
 	Spec::Leaf {
 		kind,
@@ -295,7 +316,20 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 			PhysicalKind::LiteralCode(_) => string("not a literal"),
 			PhysicalKind::RecordKey => record("elsewhere", RecordIdKey::Number(1)),
 			PhysicalKind::Value => Value::None,
-			_ => Value::Bool(true),
+			PhysicalKind::I16
+			| PhysicalKind::I32
+			| PhysicalKind::I64
+			| PhysicalKind::F64
+			| PhysicalKind::Decimal16
+			| PhysicalKind::Fixed(_)
+			| PhysicalKind::Uuid
+			| PhysicalKind::DatetimeWide
+			| PhysicalKind::Duration
+			| PhysicalKind::Point
+			| PhysicalKind::String
+			| PhysicalKind::Bytes
+			| PhysicalKind::DecimalVar
+			| PhysicalKind::Object => Value::Bool(true),
 		};
 	}
 	match kind {

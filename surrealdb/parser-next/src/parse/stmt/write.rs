@@ -40,15 +40,22 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `SET`, `UNSET`, `CONTENT`, `MERGE`, `PATCH` or `REPLACE`, if present.
 	pub(crate) fn data_clause(&mut self, rec: &mut [u32]) -> R<()> {
 		let t = self.tok;
-		let kind = match t.kw {
-			_ if t.kind != T::Ident => DataKind::None,
-			Kw::Set => DataKind::Set,
-			Kw::Unset => DataKind::Unset,
-			Kw::Content => DataKind::Content,
-			Kw::Merge => DataKind::Merge,
-			Kw::Patch => DataKind::Patch,
-			Kw::Replace => DataKind::Replace,
-			_ => DataKind::None,
+		let kind = if t.kind != T::Ident {
+			DataKind::None
+		} else if t.kw == Kw::Set {
+			DataKind::Set
+		} else if t.kw == Kw::Unset {
+			DataKind::Unset
+		} else if t.kw == Kw::Content {
+			DataKind::Content
+		} else if t.kw == Kw::Merge {
+			DataKind::Merge
+		} else if t.kw == Kw::Patch {
+			DataKind::Patch
+		} else if t.kw == Kw::Replace {
+			DataKind::Replace
+		} else {
+			DataKind::None
 		};
 		rec[crate::ast::write::DATA_KIND] = kind as u32;
 		match kind {
@@ -69,7 +76,7 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				rec[crate::ast::write::DATA] = self.list_from(mark).0;
 			}
-			_ => {
+			DataKind::Content | DataKind::Merge | DataKind::Patch | DataKind::Replace => {
 				self.bump();
 				rec[crate::ast::write::DATA] = self.expr(true)?;
 			}
@@ -83,12 +90,16 @@ impl<'a, 's> Parser<'a, 's> {
 		loop {
 			let s = self.tok.start;
 			let place = self.plain_idiom()?;
-			let op = match self.tok.kind {
-				T::Eq => Assign::Set,
-				T::PlusEq => Assign::Add,
-				T::MinusEq => Assign::Sub,
-				T::PlusQEq => Assign::Ext,
-				_ => return Err(self.unexpected("an assign operator")),
+			let op = if self.tok.kind == T::Eq {
+				Assign::Set
+			} else if self.tok.kind == T::PlusEq {
+				Assign::Add
+			} else if self.tok.kind == T::MinusEq {
+				Assign::Sub
+			} else if self.tok.kind == T::PlusQEq {
+				Assign::Ext
+			} else {
+				return Err(self.unexpected("an assign operator"));
 			};
 			self.bump();
 			let v = self.expr(true)?;
@@ -107,14 +118,20 @@ impl<'a, 's> Parser<'a, 's> {
 		rec[crate::ast::write::OUTPUT_KIND] = 0;
 		if self.eat_kw(Kw::Return) {
 			let t = self.tok;
-			let k = match t.kw {
-				_ if t.kind != T::Ident => 6,
-				Kw::None_ => 1,
-				Kw::Null => 2,
-				Kw::Diff => 3,
-				Kw::After => 4,
-				Kw::Before => 5,
-				_ => 6,
+			let k = if t.kind != T::Ident {
+				6
+			} else if t.kw == Kw::None_ {
+				1
+			} else if t.kw == Kw::Null {
+				2
+			} else if t.kw == Kw::Diff {
+				3
+			} else if t.kw == Kw::After {
+				4
+			} else if t.kw == Kw::Before {
+				5
+			} else {
+				6
 			};
 			if k == 6 && self.at_kw(Kw::Value) {
 				self.bump();
@@ -179,13 +196,13 @@ impl<'a, 's> Parser<'a, 's> {
 			flags |= 4;
 		}
 		let a = self.relate_end()?;
-		let out = match self.tok.kind {
-			T::Arrow => true,
-			T::Lt => {
-				self.relate_in_arrow()?;
-				false
-			}
-			_ => return Err(self.unexpected("a relation arrow")),
+		let out = if self.tok.kind == T::Arrow {
+			true
+		} else if self.tok.kind == T::Lt {
+			self.relate_in_arrow()?;
+			false
+		} else {
+			return Err(self.unexpected("a relation arrow"));
 		};
 		if out {
 			self.bump();
@@ -229,34 +246,35 @@ impl<'a, 's> Parser<'a, 's> {
 	/// The `from` or `to` of a relation.
 	fn relate_end(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		match t.kind {
-			T::LBracket => self.atom(true),
-			T::Param => {
-				self.bump();
-				Ok(self.leaf(Tag::Param, 0, t))
-			}
-			T::LParen => {
-				let open = self.bump();
-				let e = self.expr(true)?;
-				self.close(T::RParen, open.start)?;
-				self.ast.nodes[e as usize].depth |= COVERED;
-				Ok(e)
-			}
-			T::Ident
-				if matches!(
-					t.kw,
-					Kw::Return
-						| Kw::Select | Kw::Create
-						| Kw::Upsert | Kw::Update
-						| Kw::Delete | Kw::Relate
-						| Kw::Define | Kw::Alter
-						| Kw::Remove | Kw::Rebuild
-						| Kw::Info | Kw::If
-				) =>
-			{
-				self.expr(true)
-			}
-			_ => self.record_id_only(),
+		if t.kind == T::LBracket {
+			self.atom(true)
+		} else if t.kind == T::Param {
+			self.bump();
+			Ok(self.leaf(Tag::Param, 0, t))
+		} else if t.kind == T::LParen {
+			let open = self.bump();
+			let e = self.expr(true)?;
+			self.close(T::RParen, open.start)?;
+			self.ast.nodes[e as usize].depth |= COVERED;
+			Ok(e)
+		} else if t.kind == T::Ident
+			&& (t.kw == Kw::Return
+				|| t.kw == Kw::Select
+				|| t.kw == Kw::Create
+				|| t.kw == Kw::Upsert
+				|| t.kw == Kw::Update
+				|| t.kw == Kw::Delete
+				|| t.kw == Kw::Relate
+				|| t.kw == Kw::Define
+				|| t.kw == Kw::Alter
+				|| t.kw == Kw::Remove
+				|| t.kw == Kw::Rebuild
+				|| t.kw == Kw::Info
+				|| t.kw == Kw::If)
+		{
+			self.expr(true)
+		} else {
+			self.record_id_only()
 		}
 	}
 
@@ -280,25 +298,21 @@ impl<'a, 's> Parser<'a, 's> {
 	/// The edge table of a relation.
 	fn relate_through(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		match t.kind {
-			T::Param => {
-				self.bump();
-				Ok(self.leaf(Tag::Param, 0, t))
+		if t.kind == T::Param {
+			self.bump();
+			Ok(self.leaf(Tag::Param, 0, t))
+		} else if t.kind == T::LParen {
+			let open = self.bump();
+			let e = self.expr(self.table_as_field)?;
+			self.close(T::RParen, open.start)?;
+			self.ast.nodes[e as usize].depth |= COVERED;
+			Ok(e)
+		} else {
+			if self.adjacent1().is_some_and(|n| n.kind == T::Colon) {
+				return self.record_id_only();
 			}
-			T::LParen => {
-				let open = self.bump();
-				let e = self.expr(self.table_as_field)?;
-				self.close(T::RParen, open.start)?;
-				self.ast.nodes[e as usize].depth |= COVERED;
-				Ok(e)
-			}
-			_ => {
-				if self.adjacent1().is_some_and(|n| n.kind == T::Colon) {
-					return self.record_id_only();
-				}
-				let n = self.ident()?;
-				Ok(self.leaf(Tag::Table, 0, n))
-			}
+			let n = self.ident()?;
+			Ok(self.leaf(Tag::Table, 0, n))
 		}
 	}
 
@@ -431,23 +445,33 @@ impl<'a, 's> Parser<'a, 's> {
 /// Whether `t` starts a statement.
 fn is_statement_start(t: Tok) -> bool {
 	t.kind == T::Ident
-		&& matches!(
-			t.kw,
-			Kw::Access
-				| Kw::Alter | Kw::Begin
-				| Kw::Break | Kw::Cancel
-				| Kw::Commit | Kw::Continue
-				| Kw::Create | Kw::Define
-				| Kw::Delete | Kw::For
-				| Kw::If | Kw::Info
-				| Kw::Insert | Kw::Kill
-				| Kw::Live | Kw::Option
-				| Kw::Rebuild
-				| Kw::Return | Kw::Relate
-				| Kw::Remove | Kw::Select
-				| Kw::Let | Kw::Show
-				| Kw::Sleep | Kw::Throw
-				| Kw::Update | Kw::Upsert
-				| Kw::Use
-		)
+		&& (t.kw == Kw::Access
+			|| t.kw == Kw::Alter
+			|| t.kw == Kw::Begin
+			|| t.kw == Kw::Break
+			|| t.kw == Kw::Cancel
+			|| t.kw == Kw::Commit
+			|| t.kw == Kw::Continue
+			|| t.kw == Kw::Create
+			|| t.kw == Kw::Define
+			|| t.kw == Kw::Delete
+			|| t.kw == Kw::For
+			|| t.kw == Kw::If
+			|| t.kw == Kw::Info
+			|| t.kw == Kw::Insert
+			|| t.kw == Kw::Kill
+			|| t.kw == Kw::Live
+			|| t.kw == Kw::Option
+			|| t.kw == Kw::Rebuild
+			|| t.kw == Kw::Return
+			|| t.kw == Kw::Relate
+			|| t.kw == Kw::Remove
+			|| t.kw == Kw::Select
+			|| t.kw == Kw::Let
+			|| t.kw == Kw::Show
+			|| t.kw == Kw::Sleep
+			|| t.kw == Kw::Throw
+			|| t.kw == Kw::Update
+			|| t.kw == Kw::Upsert
+			|| t.kw == Kw::Use)
 }

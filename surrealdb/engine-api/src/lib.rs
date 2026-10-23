@@ -204,7 +204,24 @@ impl OpenedTransaction {
 					options_acknowledged: true,
 				})
 			}
-			other => Err(Error::internal(format!("Begin returned an unexpected value: {other:?}"))),
+			other @ Value::None
+			| other @ Value::Null
+			| other @ Value::Bool(_)
+			| other @ Value::Number(_)
+			| other @ Value::String(_)
+			| other @ Value::Bytes(_)
+			| other @ Value::Duration(_)
+			| other @ Value::Datetime(_)
+			| other @ Value::Geometry(_)
+			| other @ Value::Table(_)
+			| other @ Value::RecordId(_)
+			| other @ Value::File(_)
+			| other @ Value::Range(_)
+			| other @ Value::Regex(_)
+			| other @ Value::Array(_)
+			| other @ Value::Set(_) => {
+				Err(Error::internal(format!("Begin returned an unexpected value: {other:?}")))
+			}
 		}
 	}
 }
@@ -742,7 +759,22 @@ impl RouteChannelEngine {
 		match self.value(command, session).await? {
 			Value::None | Value::Null => Ok(()),
 			Value::Array(array) if array.is_empty() => Ok(()),
-			_ => Err(Error::internal("expected the database to return nothing".to_string())),
+			Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Bytes(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Array(_)
+			| Value::Object(_)
+			| Value::Set(_) => Err(Error::internal("expected the database to return nothing".to_string())),
 		}
 	}
 }
@@ -760,7 +792,24 @@ fn value_to_token(value: Value) -> Result<Token, Error> {
 		Value::Array(array) if array.len() == 1 => {
 			array.into_iter().next().expect("array has exactly one element")
 		}
-		value => value,
+		value @ Value::None
+		| value @ Value::Null
+		| value @ Value::Bool(_)
+		| value @ Value::Number(_)
+		| value @ Value::String(_)
+		| value @ Value::Bytes(_)
+		| value @ Value::Duration(_)
+		| value @ Value::Datetime(_)
+		| value @ Value::Uuid(_)
+		| value @ Value::Geometry(_)
+		| value @ Value::Table(_)
+		| value @ Value::RecordId(_)
+		| value @ Value::File(_)
+		| value @ Value::Range(_)
+		| value @ Value::Regex(_)
+		| value @ Value::Array(_)
+		| value @ Value::Object(_)
+		| value @ Value::Set(_) => value,
 	};
 	Token::from_value(value)
 }

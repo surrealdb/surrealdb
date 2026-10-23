@@ -272,23 +272,23 @@ pub(crate) trait RemainderView {
 
 impl RemainderView for Value {
 	fn facts(&self) -> Result<Facts, stored::Error> {
-		Ok(match self {
-			Value::Object(object) => Facts {
+		Ok(if let Value::Object(object) = self {
+			Facts {
 				object: true,
 				empty: object.is_empty(),
 				id: object.contains_key("id"),
 				none: object.values().any(|value| matches!(value, Value::None)),
-			},
-			_ => Facts::NOT_AN_OBJECT,
+			}
+		} else {
+			Facts::NOT_AN_OBJECT
 		})
 	}
 
 	fn key(&self, at: usize) -> Result<Option<&[u8]>, stored::Error> {
-		Ok(match self {
-			Value::Object(object) => {
-				object.0.as_slice().get(at).map(|(key, _)| key.as_str().as_bytes())
-			}
-			_ => None,
+		Ok(if let Value::Object(object) = self {
+			object.0.as_slice().get(at).map(|(key, _)| key.as_str().as_bytes())
+		} else {
+			None
 		})
 	}
 }

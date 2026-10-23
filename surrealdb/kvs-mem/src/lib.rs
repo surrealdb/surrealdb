@@ -51,7 +51,11 @@ fn kvs_error(e: surrealmx::Error) -> Error {
 		surrealmx::Error::KeyReadConflict => Error::TransactionConflict(e.to_string()),
 		surrealmx::Error::KeyWriteConflict => Error::TransactionConflict(e.to_string()),
 		surrealmx::Error::NoSavepoint => Error::NoSavepoint,
-		_ => Error::Transaction(e.to_string()),
+		surrealmx::Error::TxCommitNotPersisted(_)
+		| surrealmx::Error::DatabasePoisoned(_)
+		| surrealmx::Error::TxTooOld
+		| surrealmx::Error::MemoryLimit
+		| surrealmx::Error::AsyncQueueFull => Error::Transaction(e.to_string()),
 	}
 }
 

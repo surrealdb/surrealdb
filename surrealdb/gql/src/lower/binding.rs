@@ -176,7 +176,9 @@ impl Registry {
 		let id = self.resolve(ident)?;
 		match self.kind(id) {
 			BindingKind::Node => Ok(id),
-			other => Err(kind_mismatch(ident, other, BindingKind::Node)),
+			other @ (BindingKind::Edge | BindingKind::EdgeGroup | BindingKind::Path) => {
+				Err(kind_mismatch(ident, other, BindingKind::Node))
+			}
 		}
 	}
 

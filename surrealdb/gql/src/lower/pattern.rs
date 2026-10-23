@@ -432,7 +432,29 @@ fn split_conjuncts<'a>(expr: &'a GqlExpr, out: &mut Vec<Conjunct<'a>>) {
 				stack.push((right, negated));
 				stack.push((left, negated));
 			}
-			_ => out.push(Conjunct::Expr {
+			GqlExpr::Literal(..)
+			| GqlExpr::Param {
+				..
+			}
+			| GqlExpr::Variable(_)
+			| GqlExpr::Property(..)
+			| GqlExpr::Unary {
+				..
+			}
+			| GqlExpr::Binary {
+				..
+			}
+			| GqlExpr::IsBool {
+				..
+			}
+			| GqlExpr::IsNull {
+				..
+			}
+			| GqlExpr::FunctionCall {
+				..
+			}
+			| GqlExpr::List(..)
+			| GqlExpr::Map(..) => out.push(Conjunct::Expr {
 				expr,
 				negated,
 			}),

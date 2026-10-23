@@ -1043,13 +1043,14 @@ impl Statement {
 					col.span = zero;
 					col.data_type.span = zero;
 					for c in &mut col.constraints {
-						match c {
-							ColumnConstraint::Default(e) => e.normalize_spans(),
-							ColumnConstraint::References {
-								table,
-								..
-							} => table.span = zero,
-							_ => {}
+						if let ColumnConstraint::Default(e) = c {
+							e.normalize_spans();
+						} else if let ColumnConstraint::References {
+							table,
+							..
+						} = c
+						{
+							table.span = zero;
 						}
 					}
 				}
@@ -1083,32 +1084,30 @@ impl Statement {
 				s.span = zero;
 				s.name.span = zero;
 				for a in &mut s.actions {
-					match a {
-						AlterTableAction::AddColumn {
-							column,
-							..
-						} => {
-							column.span = zero;
-							column.data_type.span = zero;
-							for c in &mut column.constraints {
-								if let ColumnConstraint::Default(e) = c {
-									e.normalize_spans();
-								}
+					if let AlterTableAction::AddColumn {
+						column,
+						..
+					} = a
+					{
+						column.span = zero;
+						column.data_type.span = zero;
+						for c in &mut column.constraints {
+							if let ColumnConstraint::Default(e) = c {
+								e.normalize_spans();
 							}
 						}
-						AlterTableAction::AlterColumnType {
-							data_type,
-							..
-						} => {
-							data_type.span = zero;
-						}
-						AlterTableAction::SetDefault {
-							default,
-							..
-						} => {
-							default.normalize_spans();
-						}
-						_ => {}
+					} else if let AlterTableAction::AlterColumnType {
+						data_type,
+						..
+					} = a
+					{
+						data_type.span = zero;
+					} else if let AlterTableAction::SetDefault {
+						default,
+						..
+					} = a
+					{
+						default.normalize_spans();
 					}
 				}
 			}

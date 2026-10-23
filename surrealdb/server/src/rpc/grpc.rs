@@ -531,7 +531,9 @@ impl Grpc {
 				),
 				frame_payload_budget(),
 			)),
-			action => match to_proto_notification(notification, action) {
+			action @ (surrealdb_types::Action::Create
+			| surrealdb_types::Action::Update
+			| surrealdb_types::Action::Delete) => match to_proto_notification(notification, action) {
 				Ok(notification) => {
 					if let Some(observer) = self.metrics_observer.as_ref() {
 						observer.record_live_query_notification(
@@ -1190,11 +1192,8 @@ impl SurrealDbService for GrpcService {
 		let result = self.execute(request.context.as_ref(), Method::Use, params).await?;
 		// `yuse` answers with the resulting selection so a client can sync its
 		// own view; the wire spells "nothing selected" as an empty string.
-		let selection = match result {
-			DbResult::Other(Value::Object(object)) => object,
-			_ => {
-				return Err(Status::internal("Use did not report the resulting selection"));
-			}
+		let DbResult::Other(Value::Object(selection)) = result else {
+			return Err(Status::internal("Use did not report the resulting selection"));
 		};
 		let field = |key: &str| match selection.get(key) {
 			Some(Value::String(value)) => value.clone(),
@@ -1651,10 +1650,10 @@ impl GrpcService {
 			None => Value::None,
 		};
 		let params = Array::from(vec![Value::String(query), variables]);
-		match self.execute(context, Method::Query, params).await? {
-			DbResult::Query(results) => Ok(results),
-			_ => Err(Status::internal("Query did not return statement results")),
-		}
+		let DbResult::Query(results) = self.execute(context, Method::Query, params).await? else {
+			return Err(Status::internal("Query did not return statement results"));
+		};
+		Ok(results)
 	}
 
 	/// Runs a query, framing each statement's results as they are produced.
@@ -2635,9 +2634,10 @@ impl QueryFrames {
 				// a uuid is worth keeping: retaining every single statement's
 				// value would double the peak memory of the path built to bound
 				// it.
-				let live_query = match &value {
-					Value::Uuid(id) => Some(id.into_inner()),
-					_ => None,
+				let live_query = if let Value::Uuid(id) = &value {
+					Some(id.into_inner())
+				} else {
+					None
 				};
 				match proto::Value::try_from(value).map_err(types_error_from_anyhow).and_then(
 					|value| match record_cost(&value) {
@@ -3055,10 +3055,10 @@ fn single_live_query(mut results: Vec<QueryResult>) -> Result<Uuid, Status> {
 	if result.query_type != QueryType::Live {
 		return Err(Status::invalid_argument("Expected a LIVE SELECT statement"));
 	}
-	match result.result.map_err(|err| to_status(&err))? {
-		Value::Uuid(id) => Ok(id.into_inner()),
-		_ => Err(Status::internal("LIVE SELECT did not return a live query id")),
-	}
+	let Value::Uuid(id) = result.result.map_err(|err| to_status(&err))? else {
+		return Err(Status::internal("LIVE SELECT did not return a live query id"));
+	};
+	Ok(id.into_inner())
 }
 
 /// Checks a byte stream's trailer against what actually arrived.
@@ -3119,11 +3119,10 @@ fn to_proto_notification(
 			rpc::Action::Unspecified
 		}
 	};
-	let record_id = match &notification.record {
-		Value::RecordId(record) => {
-			Some(proto::RecordId::try_from(record.clone()).map_err(types_error_from_anyhow)?)
-		}
-		_ => None,
+	let record_id = if let Value::RecordId(record) = &notification.record {
+		Some(proto::RecordId::try_from(record.clone()).map_err(types_error_from_anyhow)?)
+	} else {
+		None
 	};
 	Ok(rpc::Notification {
 		live_query_id: Some(proto::Uuid::from_uuid(notification.id.into_inner())),
@@ -3218,10 +3217,13 @@ fn access_credentials(access: rpc::AccessMethod) -> Result<surrealdb_types::Obje
 /// method's own variables alongside the scope fields.
 fn record_credentials(record: rpc::RecordCredentials) -> Result<surrealdb_types::Object, Status> {
 	let mut object = match record.variables {
-		Some(variables) => match from_proto_variables(variables)? {
-			Value::Object(object) => object,
-			_ => surrealdb_types::Object::new(),
-		},
+		Some(variables) => {
+			if let Value::Object(object) = from_proto_variables(variables)? {
+				object
+			} else {
+				surrealdb_types::Object::new()
+			}
+		}
 		None => surrealdb_types::Object::new(),
 	};
 	let mut set = |key: &str, value: String| {
@@ -4174,10 +4176,11 @@ mod tests {
 			.execute("LIVE SELECT * FROM thing", &session, None)
 			.await
 			.expect("the live query runs");
-		match results.remove(0).result.expect("the live query succeeds") {
-			Value::Uuid(id) => id.into_inner(),
-			value => panic!("a live query answers with its id, got {value:?}"),
-		}
+		let value = results.remove(0).result.expect("the live query succeeds");
+		let Value::Uuid(id) = value else {
+			panic!("a live query answers with its id, got {value:?}");
+		};
+		id.into_inner()
 	}
 
 	/// How many live queries the datastore still holds against the watched
@@ -4194,9 +4197,9 @@ mod tests {
 			.execute("INFO FOR TABLE thing", &session, None)
 			.await
 			.expect("the table info runs");
-		let info = match results.remove(0).result.expect("the table info succeeds") {
-			Value::Object(info) => info,
-			value => panic!("table info answers with an object, got {value:?}"),
+		let value = results.remove(0).result.expect("the table info succeeds");
+		let Value::Object(info) = value else {
+			panic!("table info answers with an object, got {value:?}");
 		};
 		match info.get("lives") {
 			Some(Value::Object(lives)) => lives.len(),
@@ -4979,16 +4982,17 @@ mod tests {
 			config(Some(rpc::export_config::Tables::from(false))),
 			export::TableConfig::None
 		));
-		match config(Some(rpc::export_config::Tables {
+		let cfg = config(Some(rpc::export_config::Tables {
 			selection: Some(rpc::export_config::tables::Selection::Selected(
 				rpc::export_config::SelectedTables {
 					tables: vec!["person".to_string()],
 				},
 			)),
-		})) {
-			export::TableConfig::Some(tables) => assert_eq!(tables, vec!["person".to_string()]),
-			other => panic!("expected a table selection, got {other:?}"),
-		}
+		}));
+		let export::TableConfig::Some(tables) = cfg else {
+			panic!("expected a table selection, got {cfg:?}");
+		};
+		assert_eq!(tables, vec!["person".to_string()]);
 	}
 
 	/// Every error kind maps to the status code the SDK's engine maps back

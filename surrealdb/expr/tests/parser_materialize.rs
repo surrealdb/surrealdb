@@ -12,13 +12,14 @@ fn parse(text: &str) -> Result<Expr, parser::ParseError> {
 }
 
 fn define(text: &str) -> Box<DefineFieldStatement> {
-	match parse(text).expect(text) {
-		Expr::Define(define) => match *define {
-			DefineStatement::Field(field) => field,
-			other => panic!("not a field definition: {other:?}"),
-		},
-		other => panic!("not a definition: {other:?}"),
-	}
+	let expr = parse(text).expect(text);
+	let Expr::Define(define) = expr else {
+		panic!("not a definition: {expr:?}");
+	};
+	let DefineStatement::Field(field) = *define else {
+		panic!("not a field definition: {define:?}");
+	};
+	field
 }
 
 #[test]

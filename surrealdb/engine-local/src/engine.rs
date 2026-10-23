@@ -535,10 +535,11 @@ impl SurrealEngine for LocalEngine {
 				.map_err(|e| Error::internal(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
-			match value {
-				Value::None => state.vars.write().await.remove(&key),
-				v => state.vars.write().await.insert(key, v),
-			};
+			if let Value::None = value {
+				state.vars.write().await.remove(&key);
+			} else {
+				state.vars.write().await.insert(key, value);
+			}
 			Ok(())
 		})
 	}
@@ -1108,9 +1109,11 @@ mod live_query_tests {
 
 		/// Registers a live query on `person` and returns its id.
 		async fn live(&self) -> Uuid {
-			match self.query("LIVE SELECT * FROM person").await {
-				Value::Uuid(id) => id.into_inner(),
-				other => panic!("LIVE SELECT should return a uuid, got {other:?}"),
+			let res = self.query("LIVE SELECT * FROM person").await;
+			if let Value::Uuid(id) = res {
+				id.into_inner()
+			} else {
+				panic!("LIVE SELECT should return a uuid, got {res:?}")
 			}
 		}
 	}

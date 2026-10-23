@@ -43,9 +43,12 @@ pub fn type_contains_ident(ty: &syn::Type, ident: &syn::Ident) -> bool {
 			// `Box<MyType>` or `some_mod::Container<MyType>` should still be
 			// detected via their type parameters.
 			segments.iter().any(|seg| match &seg.arguments {
-				syn::PathArguments::AngleBracketed(args) => args.args.iter().any(|arg| match arg {
-					syn::GenericArgument::Type(inner) => type_contains_ident(inner, ident),
-					_ => false,
+				syn::PathArguments::AngleBracketed(args) => args.args.iter().any(|arg| {
+					if let syn::GenericArgument::Type(inner) = arg {
+						type_contains_ident(inner, ident)
+					} else {
+						false
+					}
 				}),
 				syn::PathArguments::Parenthesized(args) => {
 					args.inputs.iter().any(|inner| type_contains_ident(inner, ident))
@@ -60,6 +63,14 @@ pub fn type_contains_ident(ty: &syn::Type, ident: &syn::Ident) -> bool {
 		syn::Type::Tuple(t) => t.elems.iter().any(|el| type_contains_ident(el, ident)),
 		syn::Type::Paren(p) => type_contains_ident(&p.elem, ident),
 		syn::Type::Group(g) => type_contains_ident(&g.elem, ident),
-		_ => false,
+		syn::Type::BareFn(_)
+		| syn::Type::ImplTrait(_)
+		| syn::Type::Infer(_)
+		| syn::Type::Macro(_)
+		| syn::Type::Never(_)
+		| syn::Type::Ptr(_)
+		| syn::Type::TraitObject(_)
+		| syn::Type::Verbatim(_)
+		| _ => false,
 	}
 }

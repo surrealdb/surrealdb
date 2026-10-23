@@ -659,10 +659,13 @@ pub fn stored_shapes<'v>(
 	ix: &'v IndexDefinition,
 ) -> impl Iterator<Item = (u16, ValueShape)> + 'v {
 	vals.iter().zip(ix.cols.iter()).zip(0u16..).filter_map(|((v, col), i)| {
-		let shape = match v {
-			Value::None | Value::Null => return None,
-			Value::Array(_) if !stores_arrays_whole(col) => ValueShape::Array,
-			_ => ValueShape::Whole,
+		if v.is_nullish() {
+			return None;
+		}
+		let shape = if matches!(v, Value::Array(_)) && !stores_arrays_whole(col) {
+			ValueShape::Array
+		} else {
+			ValueShape::Whole
 		};
 		Some((i, shape))
 	})

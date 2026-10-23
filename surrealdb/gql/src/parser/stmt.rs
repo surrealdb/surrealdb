@@ -30,87 +30,79 @@ impl Parser<'_> {
 		let mut steps = Vec::new();
 		loop {
 			let token = self.peek();
-			match token.kind {
-				t!("MATCH") => {
-					self.pop_peek();
-					let clause = self.parse_match_clause(token.span)?;
-					steps.push(GqlStep::Read(MatchItem::Match(clause)));
-				}
-				t!("OPTIONAL") => {
-					self.pop_peek();
-					let block = self.parse_optional_operand(token.span)?;
-					steps.push(GqlStep::Read(MatchItem::Optional(block)));
-				}
-				t!("INSERT") => {
-					self.pop_peek();
-					let stmt = self.parse_insert_statement(token.span)?;
-					steps.push(GqlStep::Mutate(MutationStatement::Insert(stmt)));
-				}
-				t!("SET") => {
-					self.pop_peek();
-					let stmt = self.parse_set_statement(token.span)?;
-					steps.push(GqlStep::Mutate(MutationStatement::Set(stmt)));
-				}
-				t!("REMOVE") => {
-					self.pop_peek();
-					let stmt = self.parse_remove_statement(token.span)?;
-					steps.push(GqlStep::Mutate(MutationStatement::Remove(stmt)));
-				}
-				t!("DELETE") => {
-					self.pop_peek();
-					let stmt = self.parse_delete_statement(DetachMode::NoDetach, token.span)?;
-					steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
-				}
-				t!("DETACH") | t!("NODETACH") => {
-					let detach = if matches!(token.kind, t!("DETACH")) {
-						DetachMode::Detach
-					} else {
-						DetachMode::NoDetach
-					};
-					self.pop_peek();
-					expected!(self, t!("DELETE"));
-					let stmt = self.parse_delete_statement(detach, token.span)?;
-					steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
-				}
-				_ => break,
+			if token.kind == t!("MATCH") {
+				self.pop_peek();
+				let clause = self.parse_match_clause(token.span)?;
+				steps.push(GqlStep::Read(MatchItem::Match(clause)));
+			} else if token.kind == t!("OPTIONAL") {
+				self.pop_peek();
+				let block = self.parse_optional_operand(token.span)?;
+				steps.push(GqlStep::Read(MatchItem::Optional(block)));
+			} else if token.kind == t!("INSERT") {
+				self.pop_peek();
+				let stmt = self.parse_insert_statement(token.span)?;
+				steps.push(GqlStep::Mutate(MutationStatement::Insert(stmt)));
+			} else if token.kind == t!("SET") {
+				self.pop_peek();
+				let stmt = self.parse_set_statement(token.span)?;
+				steps.push(GqlStep::Mutate(MutationStatement::Set(stmt)));
+			} else if token.kind == t!("REMOVE") {
+				self.pop_peek();
+				let stmt = self.parse_remove_statement(token.span)?;
+				steps.push(GqlStep::Mutate(MutationStatement::Remove(stmt)));
+			} else if token.kind == t!("DELETE") {
+				self.pop_peek();
+				let stmt = self.parse_delete_statement(DetachMode::NoDetach, token.span)?;
+				steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
+			} else if matches!(token.kind, t!("DETACH") | t!("NODETACH")) {
+				let detach = if matches!(token.kind, t!("DETACH")) {
+					DetachMode::Detach
+				} else {
+					DetachMode::NoDetach
+				};
+				self.pop_peek();
+				expected!(self, t!("DELETE"));
+				let stmt = self.parse_delete_statement(detach, token.span)?;
+				steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
+			} else {
+				break;
 			}
 		}
 
 		// --- Optional trailing RETURN, or a precise rejection. ---
 		let token = self.peek();
-		let ret = match token.kind {
-			t!("RETURN") => Some(self.parse_return_clause()?),
-			_ if token.is_eof() => None,
-			t!("FINISH") => {
-				bail!(
-					"FINISH statements are not supported yet",
-					@token.span => "queries must end with a RETURN clause"
-				);
-			}
-			t!("LET") | t!("FOR") | t!("FILTER") | t!("USE") | t!("SELECT") | t!("CALL") => {
-				bail!(
-					"`{}` statements are not supported yet",
-					token.kind,
-					@token.span
-				);
-			}
-			t!("ORDER") | t!("OFFSET") | t!("SKIP") | t!("LIMIT") => {
-				bail!(
-					"Standalone `{}` statements are not supported yet",
-					token.kind,
-					@token.span => "ORDER BY, OFFSET/SKIP and LIMIT may only follow the RETURN clause"
-				);
-			}
-			t!("CREATE") | t!("DROP") => {
-				bail!(
-					"`{}` statements are not supported yet",
-					token.kind,
-					@token.span
-				);
-			}
-			_ => {
-				unexpected!(self, token, "a MATCH, INSERT, SET, REMOVE, DELETE or RETURN statement")
-			}
+		let ret = if token.kind == t!("RETURN") {
+			Some(self.parse_return_clause()?)
+		} else if token.is_eof() {
+			None
+		} else if token.kind == t!("FINISH") {
+			bail!(
+				"FINISH statements are not supported yet",
+				@token.span => "queries must end with a RETURN clause"
+			);
+		} else if matches!(
+			token.kind,
+			t!("LET") | t!("FOR") | t!("FILTER") | t!("USE") | t!("SELECT") | t!("CALL")
+		) {
+			bail!(
+				"`{}` statements are not supported yet",
+				token.kind,
+				@token.span
+			);
+		} else if matches!(token.kind, t!("ORDER") | t!("OFFSET") | t!("SKIP") | t!("LIMIT")) {
+			bail!(
+				"Standalone `{}` statements are not supported yet",
+				token.kind,
+				@token.span => "ORDER BY, OFFSET/SKIP and LIMIT may only follow the RETURN clause"
+			);
+		} else if matches!(token.kind, t!("CREATE") | t!("DROP")) {
+			bail!(
+				"`{}` statements are not supported yet",
+				token.kind,
+				@token.span
+			);
+		} else {
+			unexpected!(self, token, "a MATCH, INSERT, SET, REMOVE, DELETE or RETURN statement")
 		};
 		self.check_trailing_clauses()?;
 		Ok(LinearQuery {
@@ -134,40 +126,35 @@ impl Parser<'_> {
 	/// `OPTIONAL { OPTIONAL { … } }` cannot overflow the machine stack.
 	fn parse_optional_operand(&mut self, start: Span) -> ParseResult<OptionalBlock> {
 		let token = self.peek();
-		match token.kind {
-			t!("MATCH") => {
-				self.pop_peek();
-				let clause = self.parse_match_clause(token.span)?;
+		if token.kind == t!("MATCH") {
+			self.pop_peek();
+			let clause = self.parse_match_clause(token.span)?;
+			Ok(OptionalBlock {
+				span: start.covers(self.last_span()),
+				items: vec![MatchItem::Match(clause)],
+			})
+		} else if token.kind == t!("{") {
+			enter_object_recursion!(this = self => {
+				let open = this.pop_peek().span;
+				let items = this.parse_match_statement_block()?;
+				this.expect_closing_delimiter(t!("}"), open)?;
 				Ok(OptionalBlock {
-					span: start.covers(self.last_span()),
-					items: vec![MatchItem::Match(clause)],
+					span: start.covers(this.last_span()),
+					items,
 				})
-			}
-			// The `{`/`(` block forms (GQL.g4:593-594). `expect_closing_delimiter`
-			// pairs the close with the recorded open span on a mismatch.
-			t!("{") => {
-				enter_object_recursion!(this = self => {
-					let open = this.pop_peek().span;
-					let items = this.parse_match_statement_block()?;
-					this.expect_closing_delimiter(t!("}"), open)?;
-					Ok(OptionalBlock {
-						span: start.covers(this.last_span()),
-						items,
-					})
+			})
+		} else if token.kind == t!("(") {
+			enter_object_recursion!(this = self => {
+				let open = this.pop_peek().span;
+				let items = this.parse_match_statement_block()?;
+				this.expect_closing_delimiter(t!(")"), open)?;
+				Ok(OptionalBlock {
+					span: start.covers(this.last_span()),
+					items,
 				})
-			}
-			t!("(") => {
-				enter_object_recursion!(this = self => {
-					let open = this.pop_peek().span;
-					let items = this.parse_match_statement_block()?;
-					this.expect_closing_delimiter(t!(")"), open)?;
-					Ok(OptionalBlock {
-						span: start.covers(this.last_span()),
-						items,
-					})
-				})
-			}
-			_ => unexpected!(self, token, "`MATCH`, `{` or `(`"),
+			})
+		} else {
+			unexpected!(self, token, "`MATCH`, `{` or `(`")
 		}
 	}
 
@@ -178,19 +165,18 @@ impl Parser<'_> {
 		let mut items = Vec::new();
 		loop {
 			let token = self.peek();
-			match token.kind {
-				t!("MATCH") => {
-					self.pop_peek();
-					let clause = self.parse_match_clause(token.span)?;
-					items.push(MatchItem::Match(clause));
-				}
-				t!("OPTIONAL") => {
-					self.pop_peek();
-					let block = self.parse_optional_operand(token.span)?;
-					items.push(MatchItem::Optional(block));
-				}
-				_ if items.is_empty() => unexpected!(self, token, "`MATCH` or `OPTIONAL`"),
-				_ => break,
+			if token.kind == t!("MATCH") {
+				self.pop_peek();
+				let clause = self.parse_match_clause(token.span)?;
+				items.push(MatchItem::Match(clause));
+			} else if token.kind == t!("OPTIONAL") {
+				self.pop_peek();
+				let block = self.parse_optional_operand(token.span)?;
+				items.push(MatchItem::Optional(block));
+			} else if items.is_empty() {
+				unexpected!(self, token, "`MATCH` or `OPTIONAL`");
+			} else {
+				break;
 			}
 		}
 		Ok(items)
@@ -228,25 +214,20 @@ impl Parser<'_> {
 			let pattern = self.parse_path_pattern()?;
 			patterns.push(pattern);
 			let token = self.peek();
-			match token.kind {
-				t!(",") => {
-					self.pop_peek();
-				}
-				// `pathTerm |+| pathTerm` and `pathTerm | pathTerm`
-				// alternations (GQL.g4:966-970).
-				t!("|+|") => {
-					bail!(
-						"Multiset alternation (`|+|`) between path patterns is not supported yet",
-						@token.span
-					);
-				}
-				t!("|") => {
-					bail!(
-						"Pattern unions (`|`) between path patterns are not supported yet",
-						@token.span
-					);
-				}
-				_ => break,
+			if token.kind == t!(",") {
+				self.pop_peek();
+			} else if token.kind == t!("|+|") {
+				bail!(
+					"Multiset alternation (`|+|`) between path patterns is not supported yet",
+					@token.span
+				);
+			} else if token.kind == t!("|") {
+				bail!(
+					"Pattern unions (`|`) between path patterns are not supported yet",
+					@token.span
+				);
+			} else {
+				break;
 			}
 		}
 
@@ -399,10 +380,12 @@ impl Parser<'_> {
 		};
 		let nulls_first = if self.eat(t!("NULLS")) {
 			let token = self.next();
-			match token.kind {
-				t!("FIRST") => Some(true),
-				t!("LAST") => Some(false),
-				_ => unexpected!(self, token, "`FIRST` or `LAST`"),
+			if token.kind == t!("FIRST") {
+				Some(true)
+			} else if token.kind == t!("LAST") {
+				Some(false)
+			} else {
+				unexpected!(self, token, "`FIRST` or `LAST`");
 			}
 		} else {
 			None
@@ -419,32 +402,27 @@ impl Parser<'_> {
 	/// (`nonNegativeIntegerSpecification`, GQL.g4:2268).
 	fn parse_count_specification(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.next();
-		match token.kind {
-			TokenKind::Number {
-				kind:
-					kind @ (NumberKind::Integer
-					| NumberKind::Hex
-					| NumberKind::Octal
-					| NumberKind::Binary),
-				suffix: None,
-			} => {
-				let value = self.parse_integer_token(token, kind)?;
-				Ok(GqlExpr::Literal(GqlLiteral::Integer(value), token.span))
-			}
-			TokenKind::Parameter => {
-				let name = self.parse_parameter_name(token)?;
-				Ok(GqlExpr::Param {
-					name,
-					span: token.span,
-				})
-			}
-			TokenKind::SubstitutedParameter => {
-				bail!(
-					"Substituted parameters (`$$name`) are not supported yet",
-					@token.span => "use a general `$name` parameter"
-				);
-			}
-			_ => unexpected!(self, token, "an unsigned integer or a parameter"),
+		if let TokenKind::Number {
+			kind:
+				kind @ (NumberKind::Integer | NumberKind::Hex | NumberKind::Octal | NumberKind::Binary),
+			suffix: None,
+		} = token.kind
+		{
+			let value = self.parse_integer_token(token, kind)?;
+			Ok(GqlExpr::Literal(GqlLiteral::Integer(value), token.span))
+		} else if token.kind == TokenKind::Parameter {
+			let name = self.parse_parameter_name(token)?;
+			Ok(GqlExpr::Param {
+				name,
+				span: token.span,
+			})
+		} else if token.kind == TokenKind::SubstitutedParameter {
+			bail!(
+				"Substituted parameters (`$$name`) are not supported yet",
+				@token.span => "use a general `$name` parameter"
+			);
+		} else {
+			unexpected!(self, token, "an unsigned integer or a parameter")
 		}
 	}
 
@@ -452,27 +430,27 @@ impl Parser<'_> {
 	/// targeted error before the generic end-of-query check runs.
 	fn check_trailing_clauses(&mut self) -> ParseResult<()> {
 		let token = self.peek();
-		match token.kind {
-			t!("ORDER") | t!("OFFSET") | t!("SKIP") | t!("LIMIT") => {
-				bail!(
-					"Unexpected `{}` clause",
-					token.kind,
-					@token.span => "ORDER BY, OFFSET/SKIP and LIMIT may appear at most once each, in that order"
-				);
-			}
-			t!("UNION") | t!("EXCEPT") | t!("INTERSECT") | t!("OTHERWISE") => {
-				bail!(
-					"Composite queries (`UNION`, `EXCEPT`, `INTERSECT`, `OTHERWISE`) are not supported yet",
-					@token.span
-				);
-			}
-			t!("GROUP") => {
-				bail!(
-					"Unexpected `GROUP` clause",
-					@token.span => "GROUP BY must directly follow the RETURN items, before ORDER BY"
-				);
-			}
-			_ => Ok(()),
+		if matches!(token.kind, t!("ORDER") | t!("OFFSET") | t!("SKIP") | t!("LIMIT")) {
+			bail!(
+				"Unexpected `{}` clause",
+				token.kind,
+				@token.span => "ORDER BY, OFFSET/SKIP and LIMIT may appear at most once each, in that order"
+			);
+		} else if matches!(
+			token.kind,
+			t!("UNION") | t!("EXCEPT") | t!("INTERSECT") | t!("OTHERWISE")
+		) {
+			bail!(
+				"Composite queries (`UNION`, `EXCEPT`, `INTERSECT`, `OTHERWISE`) are not supported yet",
+				@token.span
+			);
+		} else if token.kind == t!("GROUP") {
+			bail!(
+				"Unexpected `GROUP` clause",
+				@token.span => "GROUP BY must directly follow the RETURN items, before ORDER BY"
+			);
+		} else {
+			Ok(())
 		}
 	}
 }

@@ -266,11 +266,10 @@ impl Query {
 		let mut units = Vec::new();
 		let mut block: Option<Vec<TopLevelExpr>> = None;
 		for expr in self.expressions {
-			match expr {
-				TopLevelExpr::Begin(_) => {
-					block.get_or_insert_with(Vec::new).push(expr);
-				}
-				TopLevelExpr::Commit | TopLevelExpr::Cancel => match block.take() {
+			if matches!(expr, TopLevelExpr::Begin(_)) {
+				block.get_or_insert_with(Vec::new).push(expr);
+			} else if matches!(expr, TopLevelExpr::Commit | TopLevelExpr::Cancel) {
+				match block.take() {
 					Some(mut statements) => {
 						statements.push(expr);
 						units.push(Query {
@@ -280,13 +279,14 @@ impl Query {
 					None => units.push(Query {
 						expressions: vec![expr],
 					}),
-				},
-				other => match block.as_mut() {
-					Some(statements) => statements.push(other),
+				}
+			} else {
+				match block.as_mut() {
+					Some(statements) => statements.push(expr),
 					None => units.push(Query {
-						expressions: vec![other],
+						expressions: vec![expr],
 					}),
-				},
+				}
 			}
 		}
 		if let Some(statements) = block {
@@ -299,10 +299,12 @@ impl Query {
 }
 
 fn is_value_expr(expr: &Expr) -> bool {
-	match expr {
-		Expr::Param(_) | Expr::Constant(_) => true,
-		Expr::Literal(lit) => is_value_literal(lit),
-		_ => false,
+	if matches!(expr, Expr::Param(_) | Expr::Constant(_)) {
+		true
+	} else if let Expr::Literal(lit) = expr {
+		is_value_literal(lit)
+	} else {
+		false
 	}
 }
 

@@ -480,7 +480,9 @@ impl BoundExpr {
 						let start_has = match &f.start {
 							BoundWindowFrameBound::Preceding(e)
 							| BoundWindowFrameBound::Following(e) => e.has_params(),
-							_ => false,
+							BoundWindowFrameBound::CurrentRow
+							| BoundWindowFrameBound::UnboundedPreceding
+							| BoundWindowFrameBound::UnboundedFollowing => false,
 						};
 						let end_has = match &f.end {
 							Some(
@@ -492,7 +494,18 @@ impl BoundExpr {
 						start_has || end_has
 					})
 			}
-			_ => false,
+			BoundExpr::Literal(_)
+			| BoundExpr::Column(_)
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => false,
 		}
 	}
 
@@ -548,7 +561,21 @@ impl BoundExpr {
 					|| branches.iter().any(|(w, t)| w.contains_window() || t.contains_window())
 					|| else_expr.as_ref().is_some_and(|el| el.contains_window())
 			}
-			_ => false,
+			BoundExpr::Literal(_)
+			| BoundExpr::Column(_)
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => false,
 		}
 	}
 }

@@ -47,9 +47,10 @@ impl WsMessage for Message {
 	}
 
 	fn as_binary(&self) -> Option<&[u8]> {
-		match self {
-			Message::Binary(data) => Some(data),
-			_ => None,
+		if let Message::Binary(data) = self {
+			Some(data)
+		} else {
+			None
 		}
 	}
 
@@ -310,13 +311,10 @@ pub(crate) async fn run_router(
 						}
 						Err(error) => {
 							reset_sessions(&state.sessions).await;
-							match error {
-								WsError::ConnectionClosed => {
-									trace!("Connection successfully closed on the server");
-								}
-								error => {
-									trace!("{error}");
-								}
+							if matches!(error, WsError::ConnectionClosed) {
+								trace!("Connection successfully closed on the server");
+							} else {
+								trace!("{error}");
 							}
 							router_reconnect(&maybe_connector, &config, &state, &endpoint).await;
 							continue 'router;

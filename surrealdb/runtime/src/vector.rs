@@ -36,18 +36,21 @@ impl FromArg for NumberArray {
 			name: name.to_owned(),
 			message: "Missing an argument".to_string(),
 		})?;
-		match value {
-			Value::Array(array) if array.iter().all(|v| matches!(v, Value::Number(_))) => {
-				Ok(Self(array.0))
+		if let Value::Array(ref array) = value
+			&& array.iter().all(Value::is_number)
+		{
+			let Value::Array(array) = value else {
+				unreachable!()
+			};
+			return Ok(Self(array.0));
+		}
+		match value.coerce_to::<Vec<Number>>() {
+			Ok(numbers) => Ok(Self(numbers.into_iter().map(Value::Number).collect())),
+			Err(e) => Err(Error::InvalidFunctionArguments {
+				name: name.to_owned(),
+				message: format!("Argument {idx} was the wrong type. {e}"),
 			}
-			other => match other.coerce_to::<Vec<Number>>() {
-				Ok(numbers) => Ok(Self(numbers.into_iter().map(Value::Number).collect())),
-				Err(e) => Err(Error::InvalidFunctionArguments {
-					name: name.to_owned(),
-					message: format!("Argument {idx} was the wrong type. {e}"),
-				}
-				.into()),
-			},
+			.into()),
 		}
 	}
 }
@@ -346,10 +349,7 @@ mod tests {
 	}
 
 	fn number(v: Value) -> Number {
-		match v {
-			Value::Number(n) => n,
-			other => panic!("not a number: {other:?}"),
-		}
+		v.into_number().unwrap_or_else(|| panic!("not a number"))
 	}
 
 	/// A vector argument that is not an array of numbers fails with the error

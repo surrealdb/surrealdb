@@ -111,18 +111,26 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 		T::Invalid => "Invalid",
 		T::Ident => {
 			if t.kw != Kw::None {
-				match t.kw {
-					// The keywords errors spell in lower case, and `SC`, which
-					// errors name after the keyword it abbreviates.
-					Kw::True => "true",
-					Kw::False => "false",
-					Kw::Fn => "fn",
-					Kw::Silo => "silo",
-					Kw::Mod => "mod",
-					Kw::Ext => "ext",
-					Kw::Ml => "ml",
-					Kw::Scope => "SCOPE",
-					k => k.text(),
+				// The keywords errors spell in lower case, and `SC`, which
+				// errors name after the keyword it abbreviates.
+				if t.kw == Kw::True {
+					"true"
+				} else if t.kw == Kw::False {
+					"false"
+				} else if t.kw == Kw::Fn {
+					"fn"
+				} else if t.kw == Kw::Silo {
+					"silo"
+				} else if t.kw == Kw::Mod {
+					"mod"
+				} else if t.kw == Kw::Ext {
+					"ext"
+				} else if t.kw == Kw::Ml {
+					"ml"
+				} else if t.kw == Kw::Scope {
+					"SCOPE"
+				} else {
+					t.kw.text()
 				}
 			} else if let Some(&(_, name)) =
 				WORD_TOKENS.iter().find(|(w, _)| w.eq_ignore_ascii_case(text))

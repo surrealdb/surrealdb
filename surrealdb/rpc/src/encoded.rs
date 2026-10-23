@@ -37,7 +37,8 @@ impl RowFormat {
 	pub fn envelope(self) -> RowFormat {
 		match self {
 			RowFormat::Shaped => RowFormat::Cbor,
-			other => other,
+			RowFormat::Cbor => RowFormat::Cbor,
+			RowFormat::Json => RowFormat::Json,
 		}
 	}
 }

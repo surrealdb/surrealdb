@@ -46,7 +46,7 @@ impl AccessType {
 		match self {
 			// The JWT access method can only issue tokens if an issuer is set
 			AccessType::Jwt(jwt) => jwt.issue.is_some(),
-			_ => true,
+			AccessType::Record(_) | AccessType::Bearer(_) => true,
 		}
 	}
 	/// Whether any JWT component of the access method uses ES512: a
@@ -561,11 +561,12 @@ impl From<crate::expr::JwtAccess> for JwtAccess {
 			issue: v.issue.map(|i| i.into()),
 			audience: v.audience.map(|a| {
 				a.into_iter()
-					.map(|e| match e {
-						crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => {
+					.map(|e| {
+						if let crate::expr::Expr::Literal(crate::expr::Literal::String(s)) = e {
 							s.into_string()
+						} else {
+							e.to_sql()
 						}
-						e => e.to_sql(),
 					})
 					.collect()
 			}),
@@ -604,9 +605,10 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 	fn from(v: crate::expr::access_type::JwtAccessVerifyKey) -> Self {
 		Self {
 			alg: v.alg.into(),
-			key: match v.key {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
-				_ => v.key.to_sql(),
+			key: if let crate::expr::Expr::Literal(crate::expr::Literal::String(s)) = v.key {
+				s.into_string()
+			} else {
+				v.key.to_sql()
 			},
 		}
 	}
@@ -623,9 +625,10 @@ impl From<JwtAccessVerifyJwks> for crate::expr::access_type::JwtAccessVerifyJwks
 impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks {
 	fn from(v: crate::expr::access_type::JwtAccessVerifyJwks) -> Self {
 		Self {
-			url: match v.url {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
-				_ => v.url.to_sql(),
+			url: if let crate::expr::Expr::Literal(crate::expr::Literal::String(s)) = v.url {
+				s.into_string()
+			} else {
+				v.url.to_sql()
 			},
 		}
 	}
@@ -644,9 +647,10 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 	fn from(v: crate::expr::access_type::JwtAccessIssue) -> Self {
 		Self {
 			alg: v.alg.into(),
-			key: match v.key {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
-				_ => v.key.to_sql(),
+			key: if let crate::expr::Expr::Literal(crate::expr::Literal::String(s)) = v.key {
+				s.into_string()
+			} else {
+				v.key.to_sql()
 			},
 		}
 	}
@@ -817,7 +821,7 @@ impl FromStored for AccessDefinition {
 					record.signup.as_ref().map(|t| t.compile()).transpose()?,
 					record.signin.as_ref().map(|t| t.compile()).transpose()?,
 				),
-				_ => (None, None),
+				AccessType::Jwt(_) | AccessType::Bearer(_) => (None, None),
 			};
 			Ok(AccessDefinition {
 				name: stored.name.clone(),

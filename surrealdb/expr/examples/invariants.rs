@@ -515,9 +515,10 @@ fn logical_check(files: &[PathBuf], verbose: bool) {
 								|| mask(format!("{surface:?}")) == mask(format!("{native:?}"))
 						}
 						ExecutionStatement::Logical(statement) => {
-							let expected = match native {
-								parser::TopLevelExpr::Expr(expr) => lower(expr.clone()).ok(),
-								_ => None,
+							let expected = if let parser::TopLevelExpr::Expr(expr) = native {
+								lower(expr.clone()).ok()
+							} else {
+								None
 							};
 							request_checked += 1;
 							{

@@ -584,34 +584,31 @@ fn test_sql_mode_ansi_quotes_statements() {
 	// Default mode: "id" in SELECT projection is parsed as string literal
 	let stmt = parse_statement_with_settings(r#"SELECT "id""#, ParserSettings::default()).unwrap();
 	if let Statement::Select(sel) = stmt {
-		match &sel.projection[0] {
-			SelectItem::Expr {
-				expr,
-				..
-			} => {
-				assert!(matches!(expr, Expr::Literal(Literal::String(s), _) if s == "id"));
-			}
-			_ => panic!("expected SelectItem::Expr"),
-		}
+		let SelectItem::Expr {
+			expr,
+			..
+		} = &sel.projection[0]
+		else {
+			panic!("expected SelectItem::Expr");
+		};
+		assert!(matches!(expr, Expr::Literal(Literal::String(s), _) if s == "id"));
 	}
 
 	// ANSI_QUOTES mode: "id" and "users" are identifiers
 	let settings = ParserSettings::default().with_sql_mode(SqlMode::empty().with_ansi_quotes(true));
 	let stmt_ansi = parse_statement_with_settings(r#"SELECT "id" FROM "users""#, settings).unwrap();
 	if let Statement::Select(sel) = stmt_ansi {
-		match &sel.projection[0] {
-			SelectItem::Expr {
-				expr,
-				..
-			} => {
-				if let Expr::ColumnRef(col) = expr {
-					assert_eq!(col.fields, vec!["id"]);
-				} else {
-					panic!("expected ColumnRef for projection");
-				}
-			}
-			_ => panic!("expected SelectItem::Expr"),
-		}
+		let SelectItem::Expr {
+			expr,
+			..
+		} = &sel.projection[0]
+		else {
+			panic!("expected SelectItem::Expr");
+		};
+		let Expr::ColumnRef(col) = expr else {
+			panic!("expected ColumnRef for projection");
+		};
+		assert_eq!(col.fields, vec!["id"]);
 	}
 }
 
@@ -658,45 +655,45 @@ fn test_parse_charset_introduced_literals() {
 
 	let stmt = parse_statement("SELECT _utf8mb4'hello', _binary 0x01AF").unwrap();
 	if let Statement::Select(sel) = stmt {
-		match &sel.projection[0] {
-			SelectItem::Expr {
-				expr,
-				..
-			} => match expr {
-				Expr::Literal(
-					Literal::IntroducedString {
-						charset,
-						value,
-					},
-					_,
-				) => {
-					assert_eq!(charset, "utf8mb4");
-					assert_eq!(value, "hello");
-				}
-				other => panic!("expected IntroducedString, got {other:?}"),
+		let SelectItem::Expr {
+			expr,
+			..
+		} = &sel.projection[0]
+		else {
+			panic!("expected SelectItem::Expr");
+		};
+		let Expr::Literal(
+			Literal::IntroducedString {
+				charset,
+				value,
 			},
-			_ => panic!("expected SelectItem::Expr"),
-		}
+			_,
+		) = expr
+		else {
+			panic!("expected IntroducedString, got {expr:?}");
+		};
+		assert_eq!(charset, "utf8mb4");
+		assert_eq!(value, "hello");
 
-		match &sel.projection[1] {
-			SelectItem::Expr {
-				expr,
-				..
-			} => match expr {
-				Expr::Literal(
-					Literal::IntroducedHexString {
-						charset,
-						value,
-					},
-					_,
-				) => {
-					assert_eq!(charset, "binary");
-					assert_eq!(value.as_slice(), &[0x01, 0xAF]);
-				}
-				other => panic!("expected IntroducedHexString, got {other:?}"),
+		let SelectItem::Expr {
+			expr,
+			..
+		} = &sel.projection[1]
+		else {
+			panic!("expected SelectItem::Expr");
+		};
+		let Expr::Literal(
+			Literal::IntroducedHexString {
+				charset,
+				value,
 			},
-			_ => panic!("expected SelectItem::Expr"),
-		}
+			_,
+		) = expr
+		else {
+			panic!("expected IntroducedHexString, got {expr:?}");
+		};
+		assert_eq!(charset, "binary");
+		assert_eq!(value.as_slice(), &[0x01, 0xAF]);
 	}
 }
 

@@ -490,9 +490,10 @@ impl Packer<'_, '_> {
 	/// variable column is ended once, in variable-index order, whatever it holds. Any other column
 	/// has nothing to end.
 	fn end_of(&mut self, column: &Column) -> Walk<()> {
-		match column.location {
-			Location::Var(var) => self.set_end(var),
-			_ => Ok(()),
+		if let Location::Var(var) = column.location {
+			self.set_end(var)
+		} else {
+			Ok(())
 		}
 	}
 

@@ -156,7 +156,11 @@ async fn enrich_tables(
 			Ok(per_table) => {
 				let mut obj = match per_table {
 					serde_json::Value::Object(map) => map,
-					_ => serde_json::Map::new(),
+					serde_json::Value::Null
+					| serde_json::Value::Bool(_)
+					| serde_json::Value::Number(_)
+					| serde_json::Value::String(_)
+					| serde_json::Value::Array(_) => serde_json::Map::new(),
 				};
 				obj.insert("definition".to_string(), serde_json::Value::String(definition));
 				serde_json::Value::Object(obj)

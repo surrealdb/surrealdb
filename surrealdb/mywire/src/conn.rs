@@ -1056,7 +1056,28 @@ impl Connection {
 								}
 							}
 						}
-						_ => {}
+						MyStatement::CreateDatabase(_)
+						| MyStatement::DropDatabase(_)
+						| MyStatement::CreateIndex(_)
+						| MyStatement::DropIndex(_)
+						| MyStatement::CreateView(_)
+						| MyStatement::DropView(_)
+						| MyStatement::AlterTable(_)
+						| MyStatement::CreateUser(_)
+						| MyStatement::DropUser(_)
+						| MyStatement::Grant(_)
+						| MyStatement::Revoke(_)
+						| MyStatement::LockTables(_)
+						| MyStatement::UnlockTables(_)
+						| MyStatement::Prepare(_)
+						| MyStatement::Execute(_)
+						| MyStatement::Deallocate(_)
+						| MyStatement::Use(_)
+						| MyStatement::Set(_)
+						| MyStatement::Show(_)
+						| MyStatement::Describe(_)
+						| MyStatement::Explain(_)
+						| MyStatement::Transaction(_) => {}
 					}
 				}
 			}
@@ -1086,7 +1107,7 @@ impl Connection {
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
 			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
-			_ => {}
+			Dialect::SurrealQl | Dialect::Gql => {}
 		}
 
 		// In MySQL, DDL statements cause an implicit commit of any active interactive transaction
@@ -1760,7 +1781,7 @@ impl Connection {
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
 			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
-			_ => {}
+			Dialect::SurrealQl | Dialect::Gql => {}
 		}
 
 		if is_ddl_statement(trimmed) && !self.commit_open_transaction(seq).await? {
@@ -2119,49 +2140,46 @@ fn is_ddl_statement(sql: &str) -> bool {
 }
 
 fn extract_id_u64(id_val: &surrealdb_types::Value) -> Option<u64> {
-	match id_val {
-		surrealdb_types::Value::Number(n) => {
-			let int_val = n.to_int()?;
-			if int_val >= 0 {
-				Some(int_val as u64)
+	if let surrealdb_types::Value::Number(n) = id_val {
+		let int_val = n.to_int()?;
+		if int_val >= 0 {
+			Some(int_val as u64)
+		} else {
+			None
+		}
+	} else if let surrealdb_types::Value::RecordId(r) = id_val {
+		if let surrealdb_types::RecordIdKey::Number(n) = &r.key {
+			if *n >= 0 {
+				Some(*n as u64)
 			} else {
 				None
 			}
+		} else {
+			None
 		}
-		surrealdb_types::Value::RecordId(r) => match &r.key {
-			surrealdb_types::RecordIdKey::Number(n) => {
-				if *n >= 0 {
-					Some(*n as u64)
-				} else {
-					None
-				}
-			}
-			_ => None,
-		},
-		_ => None,
+	} else {
+		None
 	}
 }
 
 fn extract_dml_counts(val: &surrealdb_types::Value) -> (u64, u64) {
-	match val {
-		surrealdb_types::Value::Array(items) => {
-			let affected = items.len() as u64;
-			let mut last_id = 0;
-			if let Some(surrealdb_types::Value::Object(obj)) = items.first()
-				&& let Some(id_val) = obj.get("id")
-			{
-				last_id = extract_id_u64(id_val).unwrap_or(0);
-			}
-			(affected, last_id)
+	if let surrealdb_types::Value::Array(items) = val {
+		let affected = items.len() as u64;
+		let mut last_id = 0;
+		if let Some(surrealdb_types::Value::Object(obj)) = items.first()
+			&& let Some(id_val) = obj.get("id")
+		{
+			last_id = extract_id_u64(id_val).unwrap_or(0);
 		}
-		surrealdb_types::Value::Object(obj) => {
-			let mut last_id = 0;
-			if let Some(id_val) = obj.get("id") {
-				last_id = extract_id_u64(id_val).unwrap_or(0);
-			}
-			(1, last_id)
+		(affected, last_id)
+	} else if let surrealdb_types::Value::Object(obj) = val {
+		let mut last_id = 0;
+		if let Some(id_val) = obj.get("id") {
+			last_id = extract_id_u64(id_val).unwrap_or(0);
 		}
-		_ => (0, 0),
+		(1, last_id)
+	} else {
+		(0, 0)
 	}
 }
 

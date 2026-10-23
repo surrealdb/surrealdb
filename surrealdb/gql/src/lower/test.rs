@@ -31,10 +31,10 @@ fn lower_plan(source: &str) -> MatchPlan {
 		Ok(prepared) => prepared,
 		Err(e) => panic!("failed to lower {source:?}: {:?}", e.render_on(source)),
 	};
-	match prepared.0 {
-		crate::expr::logical::LogicalOp::Match(m) => *m.plan,
-		other => panic!("expected a MATCH plan for {source:?}, got {other:?}"),
-	}
+	let crate::expr::logical::LogicalOp::Match(m) = prepared.0 else {
+		panic!("expected a MATCH plan for {source:?}, got {:?}", prepared.0);
+	};
+	*m.plan
 }
 
 /// Parses and lowers, returning the compact rendering of the lowered plan.

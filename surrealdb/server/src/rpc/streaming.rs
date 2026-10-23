@@ -503,7 +503,23 @@ impl StreamDriver<'_> {
 				index,
 				..
 			}) => Some(*index),
-			_ => None,
+			OutgoingFrame::Frame(
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Rows {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				},
+			)
+			| OutgoingFrame::Rows {
+				..
+			} => None,
 		};
 		let message = match self.encode(frame) {
 			Ok((_len, message)) => message,
@@ -617,7 +633,7 @@ impl StreamDriver<'_> {
 	fn encode(&mut self, frame: OutgoingFrame) -> Result<(usize, Message), TypesError> {
 		let frame = match self.rpc.format {
 			Format::Shaped => shaped_outgoing(frame, &mut self.shaper)?,
-			_ => frame,
+			Format::Json | Format::Cbor | Format::Flatbuffers | Format::Unsupported => frame,
 		};
 		let frame = match frame {
 			OutgoingFrame::Frame(frame) => frame,

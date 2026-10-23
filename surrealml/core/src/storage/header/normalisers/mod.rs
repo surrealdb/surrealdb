@@ -252,7 +252,9 @@ pub mod tests {
 				assert_eq!(z_score.mean, 0.0);
 				assert_eq!(z_score.std_dev, 1.0);
 			}
-			_ => panic!("Wrong normaliser type"),
+			NormaliserType::LinearScaling(_)
+			| NormaliserType::Clipping(_)
+			| NormaliserType::LogScaling(_) => panic!("Wrong normaliser type"),
 		}
 	}
 }

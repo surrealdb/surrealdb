@@ -28,9 +28,10 @@ static NOT_A_NUMBER: Number = Number::Int(0);
 impl AsNumber for Value {
 	#[inline(always)]
 	fn as_number(&self) -> &Number {
-		match self {
-			Value::Number(n) => n,
-			_ => &NOT_A_NUMBER,
+		if let Value::Number(n) = self {
+			n
+		} else {
+			&NOT_A_NUMBER
 		}
 	}
 }
@@ -157,9 +158,10 @@ fn from_integer_zero(sum: f64) -> f64 {
 /// The float a [`Number::Float`] holds; `None` for any other number.
 #[inline(always)]
 fn float_of<T: AsNumber>(n: &T) -> Option<f64> {
-	match n.as_number() {
-		Number::Float(f) => Some(*f),
-		_ => None,
+	if let Number::Float(f) = n.as_number() {
+		Some(*f)
+	} else {
+		None
 	}
 }
 

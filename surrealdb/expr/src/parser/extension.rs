@@ -238,35 +238,35 @@ impl Lower<'_> {
 
 	fn lit_bool(&self, id: NodeId, what: &'static str) -> R<bool> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::True => Ok(true),
-			Tag::False => Ok(false),
-			_ => Err(reject(n, format!("Expected `true` or `false` for {what}"))),
+		if n.tag == Tag::True {
+			Ok(true)
+		} else if n.tag == Tag::False {
+			Ok(false)
+		} else {
+			Err(reject(n, format!("Expected `true` or `false` for {what}")))
 		}
 	}
 
 	/// `true`, `false`, or an array of non-empty strings.
 	fn targets(&self, id: NodeId, what: &'static str) -> R<CapabilityTargets> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::True => Ok(CapabilityTargets::All),
-			Tag::False => Ok(CapabilityTargets::None),
-			Tag::Array => {
-				let list = self
-					.list(n.a)
-					.iter()
-					.map(|&e| self.non_empty_str(e, what))
-					.collect::<R<Vec<_>>>()?;
-				Ok(if list.is_empty() {
-					CapabilityTargets::None
-				} else {
-					CapabilityTargets::Some(list)
-				})
-			}
-			_ => Err(reject(
-				n,
-				format!("Expected `true`, `false` or an array of strings for {what}"),
-			)),
+		if n.tag == Tag::True {
+			Ok(CapabilityTargets::All)
+		} else if n.tag == Tag::False {
+			Ok(CapabilityTargets::None)
+		} else if n.tag == Tag::Array {
+			let list = self
+				.list(n.a)
+				.iter()
+				.map(|&e| self.non_empty_str(e, what))
+				.collect::<R<Vec<_>>>()?;
+			Ok(if list.is_empty() {
+				CapabilityTargets::None
+			} else {
+				CapabilityTargets::Some(list)
+			})
+		} else {
+			Err(reject(n, format!("Expected `true`, `false` or an array of strings for {what}")))
 		}
 	}
 }

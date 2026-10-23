@@ -38,10 +38,14 @@ impl Range {
 		start_inclusive: Opt<bool>,
 		end_inclusive: Opt<bool>,
 	) -> Self {
-		let bound = |v: Value, inclusive: bool| match v {
-			Value::None => Bound::Unbounded,
-			v if inclusive => Bound::Included(v),
-			v => Bound::Excluded(v),
+		let bound = |v: Value, inclusive: bool| {
+			if let Value::None = v {
+				Bound::Unbounded
+			} else if inclusive {
+				Bound::Included(v)
+			} else {
+				Bound::Excluded(v)
+			}
 		};
 		Self {
 			value: val::Range {

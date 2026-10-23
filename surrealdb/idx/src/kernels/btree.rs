@@ -337,15 +337,19 @@ impl<'a> IndexKeyspace<'a> {
 					fd.push(value.clone());
 					self.open(&fd)
 				};
-				let start = match lower.0 {
-					BinaryOperator::MoreThan => key(lower.1)?.next_neighbour_expect(),
-					BinaryOperator::MoreThanEqual => key(lower.1)?,
-					op => anyhow::bail!("`{op:?}` is no lower bound a compound index range has"),
+				let start = if let BinaryOperator::MoreThan = lower.0 {
+					key(lower.1)?.next_neighbour_expect()
+				} else if let BinaryOperator::MoreThanEqual = lower.0 {
+					key(lower.1)?
+				} else {
+					anyhow::bail!("`{:?}` is no lower bound a compound index range has", lower.0)
 				};
-				let end = match upper.0 {
-					BinaryOperator::LessThan => key(upper.1)?,
-					BinaryOperator::LessThanEqual => key(upper.1)?.next_neighbour_expect(),
-					op => anyhow::bail!("`{op:?}` is no upper bound a compound index range has"),
+				let end = if let BinaryOperator::LessThan = upper.0 {
+					key(upper.1)?
+				} else if let BinaryOperator::LessThanEqual = upper.0 {
+					key(upper.1)?.next_neighbour_expect()
+				} else {
+					anyhow::bail!("`{:?}` is no upper bound a compound index range has", upper.0)
 				};
 				return Ok(self.typed((start..end).into()));
 			}
@@ -370,7 +374,39 @@ impl<'a> IndexKeyspace<'a> {
 			BinaryOperator::MoreThanEqual => (with()?..without()?.next_neighbour_expect()).into(),
 			BinaryOperator::LessThan => (without()?..with()?).into(),
 			BinaryOperator::LessThanEqual => (without()?..with()?.next_neighbour_expect()).into(),
-			op => anyhow::bail!("`{op:?}` is no comparison a compound index range answers"),
+			op @ (BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::Or
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_)) => {
+				anyhow::bail!("`{op:?}` is no comparison a compound index range answers")
+			}
 		};
 		Ok(self.typed(range))
 	}
@@ -439,7 +475,20 @@ fn holds_untidy_decimal(value: &Value) -> bool {
 		Value::Object(o) => o.values().any(holds_untidy_decimal),
 		Value::RecordId(r) => key_holds_untidy_decimal(&r.key),
 		Value::Range(r) => bound(&r.start) || bound(&r.end),
-		_ => false,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => false,
 	}
 }
 
@@ -495,7 +544,21 @@ fn normalise_decimals(value: &mut Value) {
 			bound(start);
 			bound(end);
 		}
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => {}
 	}
 }
 

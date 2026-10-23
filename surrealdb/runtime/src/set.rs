@@ -40,10 +40,12 @@ now! {
 
 /// The elements of `value`: those of an array or a set, or the value itself.
 fn elements(value: Value) -> Vec<Value> {
-	match value {
-		Value::Array(values) => values.0,
-		Value::Set(values) => values.into_iter().collect(),
-		value => vec![value],
+	if let Value::Array(values) = value {
+		values.0
+	} else if let Value::Set(values) = value {
+		values.into_iter().collect()
+	} else {
+		vec![value]
 	}
 }
 
@@ -205,51 +207,45 @@ pub async fn filter(
 	ev: Option<&dyn ClosureEvaluator>,
 	(set, check): (Set, Value),
 ) -> Result<Value> {
-	Ok(match check {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				let mut res = Set::new();
-				for arg in set {
-					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
-						res.insert(arg);
-					}
+	if let Value::Closure(closure) = check {
+		if let Some(ev) = ev {
+			let mut res = Set::new();
+			for arg in set {
+				if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
+					res.insert(arg);
 				}
-				res.into()
-			} else {
-				Value::None
 			}
+			Ok(res.into())
+		} else {
+			Ok(Value::None)
 		}
-		value => {
-			let mut out = Set::new();
-			fuel::walk(set, |v| {
-				if v == value {
-					out.insert(v);
-				}
-				ON
-			})
-			.await;
-			out.into()
-		}
-	})
+	} else {
+		let mut out = Set::new();
+		fuel::walk(set, |v| {
+			if v == check {
+				out.insert(v);
+			}
+			ON
+		})
+		.await;
+		Ok(out.into())
+	}
 }
 
 /// Find the first element in the set matching a condition (in BTree order)
 pub async fn find(ev: Option<&dyn ClosureEvaluator>, (set, value): (Set, Value)) -> Result<Value> {
-	Ok(match value {
-		Value::Closure(closure) => {
-			if let Some(ev) = ev {
-				for arg in set {
-					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
-						return Ok(arg);
-					}
+	if let Value::Closure(closure) = value {
+		if let Some(ev) = ev {
+			for arg in set {
+				if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
+					return Ok(arg);
 				}
-				Value::None
-			} else {
-				Value::None
 			}
 		}
-		value => fuel::find(set, |v| *v == value).await.unwrap_or(Value::None),
-	})
+		Ok(Value::None)
+	} else {
+		Ok(fuel::find(set, |v| *v == value).await.unwrap_or(Value::None))
+	}
 }
 
 /// Get the first element in the set (minimum in BTree order)
@@ -261,18 +257,15 @@ pub fn first((set,): (Set,)) -> Result<Value> {
 pub async fn flatten_walk((set,): (Set,)) -> Result<Value> {
 	let mut out = Set::new();
 	for value in set {
-		match value {
-			Value::Array(_) | Value::Set(_) => {
-				let inner = elements(value);
-				fuel::walk(inner, |item| {
-					out.insert(item);
-					ON
-				})
-				.await;
-			}
-			value => {
-				out.insert(value);
-			}
+		if matches!(value, Value::Array(_) | Value::Set(_)) {
+			let inner = elements(value);
+			fuel::walk(inner, |item| {
+				out.insert(item);
+				ON
+			})
+			.await;
+		} else {
+			out.insert(value);
 		}
 		fuel::tick(1).await;
 	}

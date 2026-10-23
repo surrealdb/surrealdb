@@ -34,12 +34,15 @@ fn parse(armored: &[u8]) -> Result<SshSig, Error> {
 fn recorded_key(key: &str) -> Result<PublicKey, Error> {
 	let public = PublicKey::from_openssh(key)
 		.map_err(|e| Error::InvalidSigner(format!("key is not an OpenSSH public key: {e}")))?;
-	match public.algorithm() {
-		Algorithm::Ed25519
-		| Algorithm::Ecdsa {
-			curve: EcdsaCurve::NistP256,
-		} => Ok(public),
-		other => Err(Error::InvalidSigner(format!("unsupported SSH key type {other}"))),
+	let alg = public.algorithm();
+	if alg == Algorithm::Ed25519
+		|| alg
+			== (Algorithm::Ecdsa {
+				curve: EcdsaCurve::NistP256,
+			}) {
+		Ok(public)
+	} else {
+		Err(Error::InvalidSigner(format!("unsupported SSH key type {alg}")))
 	}
 }
 

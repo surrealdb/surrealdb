@@ -82,10 +82,14 @@ pub(crate) fn collect_geometry(map: &[ObjectEntry]) -> Option<Geometry> {
 				return None;
 			}
 
-			let geom = collect_array(&other.value, |x| match x {
-				Expr::Literal(Literal::Object(x)) => collect_geometry(x),
-				Expr::Literal(Literal::Geometry(x)) => Some(x.clone()),
-				_ => None,
+			let geom = collect_array(&other.value, |x| {
+				if let Expr::Literal(Literal::Object(x)) = x {
+					collect_geometry(x)
+				} else if let Expr::Literal(Literal::Geometry(x)) = x {
+					Some(x.clone())
+				} else {
+					None
+				}
 			})?;
 
 			Some(Geometry::Collection(geom))
@@ -131,11 +135,12 @@ fn collect_number(expr: &Expr) -> Option<f64> {
 	let Expr::Literal(l) = expr else {
 		return None;
 	};
-	match l {
-		Literal::Integer(x) => Some(*x as f64),
-		Literal::Float(f) => Some(*f),
-		Literal::Decimal(_) => None,
-		_ => None,
+	if let Literal::Integer(x) = l {
+		Some(*x as f64)
+	} else if let Literal::Float(f) = l {
+		Some(*f)
+	} else {
+		None
 	}
 }
 

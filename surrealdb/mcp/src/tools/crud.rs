@@ -425,7 +425,12 @@ mod tests {
 			.expect("value");
 		match value {
 			serde_json::Value::Array(mut arr) if !arr.is_empty() => arr.remove(0),
-			other => other,
+			other @ serde_json::Value::Null
+			| other @ serde_json::Value::Bool(_)
+			| other @ serde_json::Value::Number(_)
+			| other @ serde_json::Value::String(_)
+			| other @ serde_json::Value::Array(_)
+			| other @ serde_json::Value::Object(_) => other,
 		}
 	}
 

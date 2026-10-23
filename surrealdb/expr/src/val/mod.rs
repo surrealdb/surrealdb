@@ -1,5 +1,4 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
-#![deny(clippy::wildcard_enum_match_arm)]
 
 #[cfg(feature = "geo")]
 use std::borrow::Cow;

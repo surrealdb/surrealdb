@@ -107,12 +107,16 @@ fn resource_text(result: &rmcp::model::ReadResourceResult) -> String {
 	result
 		.contents
 		.iter()
-		.filter_map(|c| match c {
-			ResourceContents::TextResourceContents {
+		.filter_map(|c| {
+			if let ResourceContents::TextResourceContents {
 				text,
 				..
-			} => Some(text.as_str()),
-			_ => None,
+			} = c
+			{
+				Some(text.as_str())
+			} else {
+				None
+			}
 		})
 		.collect::<Vec<_>>()
 		.join("\n")
@@ -201,7 +205,11 @@ async fn stdio_tool_input_schemas_have_no_boolean_subschemas() {
 						visit(format!("{path}[{i}]"), sub, found);
 					}
 				}
-				other => boolean_subschemas(&path, other, found),
+				other @ Value::Null
+				| other @ Value::Bool(_)
+				| other @ Value::Number(_)
+				| other @ Value::String(_)
+				| other @ Value::Object(_) => boolean_subschemas(&path, other, found),
 			}
 		}
 		let Some(map) = schema.as_object() else {
@@ -656,9 +664,12 @@ async fn stdio_prompts_list_and_get() {
 	let combined: String = result
 		.messages
 		.iter()
-		.filter_map(|m| match &m.content {
-			ContentBlock::Text(text) => Some(text.text.as_str()),
-			_ => None,
+		.filter_map(|m| {
+			if let ContentBlock::Text(text) = &m.content {
+				Some(text.text.as_str())
+			} else {
+				None
+			}
 		})
 		.collect::<Vec<_>>()
 		.join("\n");

@@ -289,19 +289,21 @@ impl Surreal<Db> {
 /// TiKV addresses the cluster by URL; every other backend is a path the scheme
 /// prefix already carries.
 pub(crate) fn local_config(address: Endpoint) -> LocalConfig {
-	let path = match EndpointKind::from(address.url.scheme()) {
-		EndpointKind::TiKv => address.url.as_str().to_owned(),
-		_ => address.path,
+	let path = if matches!(EndpointKind::from(address.url.scheme()), EndpointKind::TiKv) {
+		address.url.as_str().to_owned()
+	} else {
+		address.path
 	};
 	let config = address.config;
 	// `Level::No` means no credentials were configured, and the datastore then
 	// starts with authentication disabled.
-	let root = match config.auth {
-		surrealdb_iam::Level::Root => Some(Root {
+	let root = if let surrealdb_iam::Level::Root = config.auth {
+		Some(Root {
 			username: config.username,
 			password: config.password,
-		}),
-		_ => None,
+		})
+	} else {
+		None
 	};
 	#[cfg(storage)]
 	let temporary_directory = config.temporary_directory;

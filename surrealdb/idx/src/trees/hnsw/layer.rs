@@ -1196,9 +1196,12 @@ mod tests {
 		env.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		keys.sort();
@@ -1213,9 +1216,12 @@ mod tests {
 		env.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
-			.map(|(rid, _, _)| match &rid.key {
-				RecordIdKey::Number(n) => *n,
-				other => panic!("unexpected record key: {other:?}"),
+			.map(|(rid, _, _)| {
+				if let RecordIdKey::Number(n) = &rid.key {
+					*n
+				} else {
+					panic!("unexpected record key: {:?}", rid.key)
+				}
 			})
 			.collect();
 		keys.sort();

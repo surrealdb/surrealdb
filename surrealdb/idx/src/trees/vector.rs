@@ -184,19 +184,17 @@ pub(super) fn serialized_vector_from_value(
 }
 
 fn check_vector_value_f16(value: Value, vec: &mut Vec<u16>) -> Result<()> {
-	match value {
-		Value::Array(a) => {
-			for v in a.0 {
-				check_vector_value_f16(v, vec)?;
-			}
-			Ok(())
+	if let Value::Array(a) = value {
+		for v in a.0 {
+			check_vector_value_f16(v, vec)?;
 		}
-		Value::Number(n) => {
-			let n: f32 = n.try_into()?;
-			vec.push(f16::from_f32(n).to_bits());
-			Ok(())
-		}
-		_ => Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string()))),
+		Ok(())
+	} else if let Value::Number(n) = value {
+		let n: f32 = n.try_into()?;
+		vec.push(f16::from_f32(n).to_bits());
+		Ok(())
+	} else {
+		Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string())))
 	}
 }
 
@@ -204,18 +202,16 @@ fn check_vector_value<T>(value: Value, vec: &mut Vec<T>) -> Result<()>
 where
 	T: TryFrom<Number, Error = Error>,
 {
-	match value {
-		Value::Array(a) => {
-			for v in a.0 {
-				check_vector_value(v, vec)?;
-			}
-			Ok(())
+	if let Value::Array(a) = value {
+		for v in a.0 {
+			check_vector_value(v, vec)?;
 		}
-		Value::Number(n) => {
-			vec.push(n.try_into()?);
-			Ok(())
-		}
-		_ => Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string()))),
+		Ok(())
+	} else if let Value::Number(n) = value {
+		vec.push(n.try_into()?);
+		Ok(())
+	} else {
+		Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string())))
 	}
 }
 
@@ -1085,9 +1081,10 @@ impl DistanceExt for Distance {
 		if !comparable(a, b) {
 			return f64::INFINITY;
 		}
-		match self {
-			Distance::Cosine => a.cosine_distance_with_norms(b, a.norm(), b.norm()),
-			_ => calculate_comparable(self, a, b),
+		if let Distance::Cosine = self {
+			a.cosine_distance_with_norms(b, a.norm(), b.norm())
+		} else {
+			calculate_comparable(self, a, b)
 		}
 	}
 
@@ -1103,9 +1100,10 @@ impl DistanceExt for Distance {
 		if !comparable(query, v) {
 			return f64::INFINITY;
 		}
-		match self {
-			Distance::Cosine => query.cosine_distance_with_norms(v, query.norm(), v.l2_norm()),
-			_ => calculate_comparable(self, query, v),
+		if let Distance::Cosine = self {
+			query.cosine_distance_with_norms(v, query.norm(), v.l2_norm())
+		} else {
+			calculate_comparable(self, query, v)
 		}
 	}
 
@@ -1131,7 +1129,12 @@ impl DistanceExt for Distance {
 			Distance::InnerProduct => {
 				a.approximate_dot(b).map_or_else(|| calculate_comparable(self, a, b), |dot| -dot)
 			}
-			_ => calculate_comparable(self, a, b),
+			Distance::Chebyshev
+			| Distance::Hamming
+			| Distance::Jaccard
+			| Distance::Manhattan
+			| Distance::Minkowski(_)
+			| Distance::Pearson => calculate_comparable(self, a, b),
 		}
 	}
 
@@ -1147,9 +1150,10 @@ impl DistanceExt for Distance {
 	}
 
 	fn distance_from_ranking(&self, ranking: f64) -> f64 {
-		match self {
-			Distance::Euclidean => ranking.sqrt(),
-			_ => ranking,
+		if let Distance::Euclidean = self {
+			ranking.sqrt()
+		} else {
+			ranking
 		}
 	}
 }

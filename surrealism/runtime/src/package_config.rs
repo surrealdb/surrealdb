@@ -175,7 +175,11 @@ impl PackageConfig {
 				});
 				toml::to_string(&nested).prefix_err(|| format!("Failed to render {key}"))?
 			}
-			other => other.to_string(),
+			other @ (toml::Value::Integer(_)
+			| toml::Value::Float(_)
+			| toml::Value::Boolean(_)
+			| toml::Value::Datetime(_)
+			| toml::Value::Array(_)) => other.to_string(),
 		}))
 	}
 
@@ -520,7 +524,7 @@ impl CapabilitiesMut<'_> {
 				}
 				removed
 			}
-			_ => false,
+			FunctionTargets::None | FunctionTargets::All => false,
 		}
 	}
 

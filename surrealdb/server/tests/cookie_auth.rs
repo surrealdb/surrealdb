@@ -493,7 +493,9 @@ async fn ws_query(ws: &mut Ws) -> serde_json::Value {
 		let text = match msg {
 			Message::Text(t) => t.to_string(),
 			Message::Binary(b) => String::from_utf8(b.to_vec()).expect("utf8"),
-			_ => continue,
+			Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => {
+				continue;
+			}
 		};
 		return serde_json::from_str(&text).expect("json reply");
 	}

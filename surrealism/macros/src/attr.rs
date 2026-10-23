@@ -64,7 +64,7 @@ pub(crate) fn parse_surrealism_attrs(args: &Punctuated<Meta, Comma>) -> Surreali
 			Meta::Path(path) if path.is_ident("init") => {
 				is_init = true;
 			}
-			_ => panic!(
+			Meta::Path(_) | Meta::List(_) | Meta::NameValue(_) => panic!(
 				"Unsupported attribute: expected #[surrealism], #[surrealism(default)], \
 				 #[surrealism(init)], #[surrealism(comment = \"...\")], \
 				 or #[surrealism(name = \"...\")]"

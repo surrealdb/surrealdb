@@ -381,7 +381,9 @@ fn reject_floats(ty: &Type, errors: &mut Errors) -> bool {
 					found = true;
 				}
 				proc_macro2::TokenTree::Group(g) => found |= scan(g.stream(), span, errors),
-				_ => {}
+				proc_macro2::TokenTree::Ident(_)
+				| proc_macro2::TokenTree::Punct(_)
+				| proc_macro2::TokenTree::Literal(_) => {}
 			}
 		}
 		found
@@ -1066,12 +1068,20 @@ fn strip_cow(ty: &Type) -> Type {
 /// Lookup key for the type registry: the final path segment, or a synthetic name
 /// for the shapes a schema may spell inline.
 fn type_key(ty: &Type) -> Option<String> {
-	match ty {
-		Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
-		Type::Slice(s) => type_key(&s.elem).map(|inner| format!("[{inner}]")),
-		Type::Array(a) => type_key(&a.elem).map(|inner| format!("[{inner};N]")),
-		Type::Tuple(t) if t.elems.is_empty() => Some("()".to_owned()),
-		_ => None,
+	if let Type::Path(p) = ty {
+		p.path.segments.last().map(|s| s.ident.to_string())
+	} else if let Type::Slice(s) = ty {
+		type_key(&s.elem).map(|inner| format!("[{inner}]"))
+	} else if let Type::Array(a) = ty {
+		type_key(&a.elem).map(|inner| format!("[{inner};N]"))
+	} else if let Type::Tuple(t) = ty {
+		if t.elems.is_empty() {
+			Some("()".to_owned())
+		} else {
+			None
+		}
+	} else {
+		None
 	}
 }
 
@@ -1089,7 +1099,10 @@ fn mentions_key_lifetime(ty: &Type) -> bool {
 						return true;
 					}
 				}
-				_ => {}
+				TokenTree::Group(_)
+				| TokenTree::Ident(_)
+				| TokenTree::Punct(_)
+				| TokenTree::Literal(_) => {}
 			}
 		}
 		false
@@ -1123,7 +1136,9 @@ fn substitute_key_lifetime(ty: &Type) -> TokenStream {
 						out.extend([TokenTree::Punct(p)]);
 					}
 				}
-				other => out.extend([other]),
+				other @ TokenTree::Ident(_)
+				| other @ TokenTree::Punct(_)
+				| other @ TokenTree::Literal(_) => out.extend([other]),
 			}
 		}
 		out

@@ -417,7 +417,13 @@ pub fn json_to_variables(
 			}
 			Ok(vars)
 		}
-		_ => Err(crate::error::invalid_params("Parameters must be a JSON object")),
+		serde_json::Value::Null
+		| serde_json::Value::Bool(_)
+		| serde_json::Value::Number(_)
+		| serde_json::Value::String(_)
+		| serde_json::Value::Array(_) => {
+			Err(crate::error::invalid_params("Parameters must be a JSON object"))
+		}
 	}
 }
 
@@ -575,19 +581,16 @@ mod cap_tests {
 		});
 		let value =
 			json_to_surreal_value(&payload, &mcp, &core).expect("nested $ql must round-trip");
-		let outer = match &value {
-			Value::Object(o) => o,
-			other => panic!("expected object, got {other:?}"),
+		let Value::Object(outer) = &value else {
+			panic!("expected object, got {value:?}");
 		};
-		let items = match outer.get("items") {
-			Some(Value::Array(a)) => a,
-			other => panic!("expected array, got {other:?}"),
+		let Some(Value::Array(items)) = outer.get("items") else {
+			panic!("expected array, got {:?}", outer.get("items"));
 		};
 		assert_eq!(items.len(), 2);
 		for item in items.iter() {
-			let obj = match item {
-				Value::Object(o) => o,
-				other => panic!("expected item object, got {other:?}"),
+			let Value::Object(obj) = item else {
+				panic!("expected item object, got {item:?}");
 			};
 			assert!(matches!(obj.get("product"), Some(Value::RecordId(_))));
 		}
@@ -602,11 +605,9 @@ mod cap_tests {
 		let (mcp, core) = default_configs();
 		let payload = json!(u64::MAX);
 		let value = json_to_surreal_value(&payload, &mcp, &core).expect("u64::MAX must convert");
-		match value {
-			Value::Number(Number::Decimal(d)) => {
-				assert_eq!(d.to_string(), u64::MAX.to_string());
-			}
-			other => panic!("expected Decimal for u64::MAX, got: {other:?}"),
-		}
+		let Value::Number(Number::Decimal(d)) = value else {
+			panic!("expected Decimal for u64::MAX, got: {value:?}");
+		};
+		assert_eq!(d.to_string(), u64::MAX.to_string());
 	}
 }

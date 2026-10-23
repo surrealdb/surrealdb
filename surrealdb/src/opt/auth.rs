@@ -225,14 +225,13 @@ impl SurrealValue for Token {
 	}
 
 	fn from_value(value: Value) -> Result<Self, crate::Error> {
-		match value {
-			Value::String(string) => Ok(Token::from(string)),
-			value => {
-				let mut obj = Object::from_value(value)?;
-				let access = AccessToken::from_value(obj.remove("access").unwrap_or_default())?;
-				let refresh = RefreshToken::from_value(obj.remove("refresh").unwrap_or_default())?;
-				Ok(Token::from((access, refresh)))
-			}
+		if let Value::String(string) = value {
+			Ok(Token::from(string))
+		} else {
+			let mut obj = Object::from_value(value)?;
+			let access = AccessToken::from_value(obj.remove("access").unwrap_or_default())?;
+			let refresh = RefreshToken::from_value(obj.remove("refresh").unwrap_or_default())?;
+			Ok(Token::from((access, refresh)))
 		}
 	}
 }

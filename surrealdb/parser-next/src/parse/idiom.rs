@@ -4,21 +4,19 @@ impl<'a, 's> Parser<'a, 's> {
 	/// An idiom that starts with a field name or a lookup: `a.b[0]`,
 	/// `->edge->node`. Takes every idiom part, but no operator after it.
 	pub(crate) fn plain_idiom(&mut self) -> R<NodeId> {
-		let head = match self.tok.kind {
-			T::Arrow => self.graph_start()?,
-			T::Lt => {
-				if !self
-					.adjacent1()
-					.is_some_and(|n| matches!(n.kind, T::Minus | T::Arrow | T::Tilde))
-				{
-					return Err(self.unexpected("either `<-` `<->` or `->`"));
-				}
-				self.graph_start()?
+		let head = if self.tok.kind == T::Arrow {
+			self.graph_start()?
+		} else if self.tok.kind == T::Lt {
+			if !self
+				.adjacent1()
+				.is_some_and(|n| n.kind == T::Minus || n.kind == T::Arrow || n.kind == T::Tilde)
+			{
+				return Err(self.unexpected("either `<-` `<->` or `->`"));
 			}
-			_ => {
-				let t = self.ident()?;
-				self.leaf(Tag::Field, 0, t)
-			}
+			self.graph_start()?
+		} else {
+			let t = self.ident()?;
+			self.leaf(Tag::Field, 0, t)
 		};
 		self.path_from(head)
 	}
@@ -48,63 +46,57 @@ impl<'a, 's> Parser<'a, 's> {
 		let mark = self.vals.len() as u32;
 		let e = self.e;
 		loop {
-			if matches!(self.tok.kind, T::Dot | T::LBracket) {
+			if self.tok.kind == T::Dot || self.tok.kind == T::LBracket {
 				self.enter_e()?;
 			}
-			match self.tok.kind {
-				T::Dot => {
+			if self.tok.kind == T::Dot {
+				self.bump();
+				let p = if self.at(T::Star) {
+					let t = self.bump();
+					self.leaf(Tag::PartAll, 0, t)
+				} else if self.tok.is_ident() {
+					let t = self.bump();
+					self.leaf(Tag::PartField, 0, t)
+				} else {
+					return Err(self.unexpected("an identifier"));
+				};
+				self.vals.push(p);
+			} else if self.tok.kind == T::LBracket {
+				let open = self.bump();
+				let p = if self.tok.kind == T::Star {
 					self.bump();
-					let p = if self.at(T::Star) {
-						let t = self.bump();
-						self.leaf(Tag::PartAll, 0, t)
-					} else if self.tok.is_ident() {
-						let t = self.bump();
-						self.leaf(Tag::PartField, 0, t)
-					} else {
-						return Err(self.unexpected("an identifier"));
-					};
-					self.vals.push(p);
-				}
-				T::LBracket => {
-					let open = self.bump();
-					let p = match self.tok.kind {
-						T::Star => {
-							self.bump();
-							self.leaf_span(Tag::PartAll, 0, 0, 0, open.start, self.tok.end)
-						}
-						T::Dollar => {
-							self.bump();
-							self.leaf_span(Tag::PartLast, 0, 0, 0, open.start, self.tok.end)
-						}
-						T::Digits | T::Plus => {
-							let v = self.number_lit()?;
-							if self.ast.nodes[v as usize].tag == Tag::NaN {
-								return Err(self.unexpected("$, * or a number"));
-							}
-							self.node(Tag::PartIndex, 0, v, 0, open.start, 1)?
-						}
-						T::Minus => {
-							let t = self.tok;
-							if let Some(d) = self.adjacent1()
-								&& d.kind == T::Digits
-							{
-								return Err(self.diag(
-									Diag::message(
-										t.start,
-										d.end,
-										"Unexpected token `-` expected $, *, or a number",
-									)
-									.with_label("an index in a basic idiom can't be negative"),
-								));
-							}
-							return Err(self.unexpected("$, * or a number"));
-						}
-						_ => return Err(self.unexpected("$, * or a number")),
-					};
-					self.close(T::RBracket, open.start)?;
-					self.vals.push(p);
-				}
-				_ => break,
+					self.leaf_span(Tag::PartAll, 0, 0, 0, open.start, self.tok.end)
+				} else if self.tok.kind == T::Dollar {
+					self.bump();
+					self.leaf_span(Tag::PartLast, 0, 0, 0, open.start, self.tok.end)
+				} else if self.tok.kind == T::Digits || self.tok.kind == T::Plus {
+					let v = self.number_lit()?;
+					if self.ast.nodes[v as usize].tag == Tag::NaN {
+						return Err(self.unexpected("$, * or a number"));
+					}
+					self.node(Tag::PartIndex, 0, v, 0, open.start, 1)?
+				} else if self.tok.kind == T::Minus {
+					let t = self.tok;
+					if let Some(d) = self.adjacent1()
+						&& d.kind == T::Digits
+					{
+						return Err(self.diag(
+							Diag::message(
+								t.start,
+								d.end,
+								"Unexpected token `-` expected $, *, or a number",
+							)
+							.with_label("an index in a basic idiom can't be negative"),
+						));
+					}
+					return Err(self.unexpected("$, * or a number"));
+				} else {
+					return Err(self.unexpected("$, * or a number"));
+				};
+				self.close(T::RBracket, open.start)?;
+				self.vals.push(p);
+			} else {
+				break;
 			}
 		}
 		self.e = e;
@@ -119,67 +111,61 @@ impl<'a, 's> Parser<'a, 's> {
 	/// One step of the idiom part loop, with an `Idiom` frame on top.
 	pub(crate) fn idiom_part(&mut self) -> R<PartStep> {
 		let t = self.tok;
-		match t.kind {
-			T::DotDotDot => {
+		if t.kind == T::DotDotDot {
+			self.bump();
+			let p = self.leaf(Tag::PartFlatten, 0, t);
+			self.vals.push(p);
+		} else if t.kind == T::Dot {
+			self.bump();
+			return self.dot_part();
+		} else if t.kind == T::LBracket {
+			self.bump();
+			let n = self.tok;
+			if n.kind == T::Star || n.kind == T::Dollar {
 				self.bump();
-				let p = self.leaf(Tag::PartFlatten, 0, t);
-				self.vals.push(p);
-			}
-			T::Dot => {
-				self.bump();
-				return self.dot_part();
-			}
-			T::LBracket => {
-				self.bump();
-				let n = self.tok;
-				match n.kind {
-					T::Star | T::Dollar => {
-						self.bump();
-						self.close(T::RBracket, t.start)?;
-						let tag = if n.kind == T::Star {
-							Tag::PartAll
-						} else {
-							Tag::PartLast
-						};
-						let p = self.leaf_span(tag, 0, 0, 0, t.start, self.prev_end);
-						self.vals.push(p);
-					}
-					_ => {
-						let tag = if n.kind == T::Question || n.is_kw(Kw::Where) {
-							self.bump();
-							Tag::PartWhere
-						} else {
-							Tag::PartIndex
-						};
-						self.push_frame(Frame::Bracket {
-							start: t.start,
-							tag,
-							table_as_field: self.table_as_field,
-						})?;
-						if tag == Tag::PartWhere {
-							self.table_as_field = true;
-						}
-						return Ok(PartStep::Pushed);
-					}
-				}
-			}
-			T::Arrow => {
-				self.bump();
-				let p = self.graph(0, t.start)?;
-				self.vals.push(p);
-			}
-			T::Lt if self.at_lookup_arrow() => {
-				self.bump();
-				let dir = match self.tok.kind {
-					T::Minus => 1,
-					T::Arrow => 2,
-					_ => 3,
+				self.close(T::RBracket, t.start)?;
+				let tag = if n.kind == T::Star {
+					Tag::PartAll
+				} else {
+					Tag::PartLast
 				};
-				self.bump();
-				let p = self.graph(dir, t.start)?;
+				let p = self.leaf_span(tag, 0, 0, 0, t.start, self.prev_end);
 				self.vals.push(p);
+			} else {
+				let tag = if n.kind == T::Question || n.is_kw(Kw::Where) {
+					self.bump();
+					Tag::PartWhere
+				} else {
+					Tag::PartIndex
+				};
+				self.push_frame(Frame::Bracket {
+					start: t.start,
+					tag,
+					table_as_field: self.table_as_field,
+				})?;
+				if tag == Tag::PartWhere {
+					self.table_as_field = true;
+				}
+				return Ok(PartStep::Pushed);
 			}
-			_ => return Ok(PartStep::Finished),
+		} else if t.kind == T::Arrow {
+			self.bump();
+			let p = self.graph(0, t.start)?;
+			self.vals.push(p);
+		} else if t.kind == T::Lt && self.at_lookup_arrow() {
+			self.bump();
+			let dir = if self.tok.kind == T::Minus {
+				1
+			} else if self.tok.kind == T::Arrow {
+				2
+			} else {
+				3
+			};
+			self.bump();
+			let p = self.graph(dir, t.start)?;
+			self.vals.push(p);
+		} else {
+			return Ok(PartStep::Finished);
 		}
 		Ok(PartStep::Done)
 	}
@@ -187,65 +173,63 @@ impl<'a, 's> Parser<'a, 's> {
 	/// The part after a `.` (consumed), with an `Idiom` frame on top.
 	pub(crate) fn dot_part(&mut self) -> R<PartStep> {
 		let n = self.tok;
-		match n.kind {
-			T::Star => {
+		if n.kind == T::Star {
+			self.bump();
+			let p = self.leaf(Tag::PartAll, 0, n);
+			self.vals.push(p);
+		} else if n.kind == T::Question {
+			self.bump();
+			let p = self.leaf(Tag::PartOptional, 0, n);
+			self.vals.push(p);
+		} else if n.kind == T::QQ {
+			// Here `??` is two tokens, as it has always read: the first
+			// `?` is the part and the second is the next token.
+			let at = n.start + 1;
+			let p = self.leaf_span(Tag::PartOptional, 0, 0, 0, n.start, at);
+			self.reset_to(at);
+			self.prev_start = n.start;
+			self.prev_end = at;
+			self.vals.push(p);
+		} else if n.kind == T::Ident || n.kind == T::EscIdent {
+			self.bump();
+			if self.at(T::LParen) {
 				self.bump();
-				let p = self.leaf(Tag::PartAll, 0, n);
-				self.vals.push(p);
-			}
-			T::Question => {
-				self.bump();
-				let p = self.leaf(Tag::PartOptional, 0, n);
-				self.vals.push(p);
-			}
-			T::QQ => {
-				// Here `??` is two tokens, as it has always read: the first
-				// `?` is the part and the second is the next token.
-				let at = n.start + 1;
-				let p = self.leaf_span(Tag::PartOptional, 0, 0, 0, n.start, at);
-				self.reset_to(at);
-				self.prev_start = n.start;
-				self.prev_end = at;
-				self.vals.push(p);
-			}
-			T::Ident | T::EscIdent => {
-				self.bump();
-				if self.at(T::LParen) {
-					self.bump();
-					let name = self.leaf(Tag::Name, 0, n);
-					if self.eat(T::RParen) {
-						let idx = self.empty_list();
-						let p = self.node(Tag::PartMethod, 0, name, idx, n.start, 1)?;
-						self.vals.push(p);
-					} else {
-						self.push_frame(Frame::Args {
-							start: n.start,
-							open: self.prev_end - 1,
-							mark: self.vals.len() as u32,
-							callee: name,
-							tag: Tag::PartMethod,
-						})?;
-						return Ok(PartStep::Pushed);
-					}
-				} else {
-					let p = self.leaf(Tag::PartField, 0, n);
+				let name = self.leaf(Tag::Name, 0, n);
+				if self.eat(T::RParen) {
+					let idx = self.empty_list();
+					let p = self.node(Tag::PartMethod, 0, name, idx, n.start, 1)?;
 					self.vals.push(p);
+				} else {
+					self.push_frame(Frame::Args {
+						start: n.start,
+						open: self.prev_end - 1,
+						mark: self.vals.len() as u32,
+						callee: name,
+						tag: Tag::PartMethod,
+					})?;
+					return Ok(PartStep::Pushed);
 				}
-			}
-			T::At => {
-				self.bump();
-				let p = self.leaf(Tag::PartRepeat, 0, n);
+			} else {
+				let p = self.leaf(Tag::PartField, 0, n);
 				self.vals.push(p);
 			}
-			T::LBrace => {
-				self.bump();
-				let p = match self.tok.kind {
-					T::Star | T::DotDot | T::Digits => self.recurse_part(n.start)?,
-					_ => self.nested(|p| p.destructure(n.start))?,
-				};
-				self.vals.push(p);
-			}
-			_ => return Err(self.unexpected("an identifier")),
+		} else if n.kind == T::At {
+			self.bump();
+			let p = self.leaf(Tag::PartRepeat, 0, n);
+			self.vals.push(p);
+		} else if n.kind == T::LBrace {
+			self.bump();
+			let p = if self.tok.kind == T::Star
+				|| self.tok.kind == T::DotDot
+				|| self.tok.kind == T::Digits
+			{
+				self.recurse_part(n.start)?
+			} else {
+				self.nested(|p| p.destructure(n.start))?
+			};
+			self.vals.push(p);
+		} else {
+			return Err(self.unexpected("an identifier"));
 		}
 		Ok(PartStep::Done)
 	}
@@ -293,13 +277,13 @@ impl<'a, 's> Parser<'a, 's> {
 			if rec[3] == 3 {
 				self.expect(T::Eq, "=")?;
 				let t = self.tok;
-				rec[4] = match t.kind {
-					T::Param => {
-						self.bump();
-						self.leaf(Tag::Param, 0, t)
-					}
-					_ if t.is_ident() => self.record_id_only()?,
-					_ => return Err(self.unexpected("a param or record-id")),
+				rec[4] = if t.kind == T::Param {
+					self.bump();
+					self.leaf(Tag::Param, 0, t)
+				} else if t.is_ident() {
+					self.record_id_only()?
+				} else {
+					return Err(self.unexpected("a param or record-id"));
 				};
 			}
 			while self.eat(T::Plus) {
@@ -347,51 +331,52 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			let f = self.ast.nodes.len();
 			let name = self.name()?;
-			let (op, b) = match self.tok.kind {
-				T::Colon => {
+			let (op, b) = if self.tok.kind == T::Colon {
+				self.bump();
+				(1, self.expr(true)?)
+			} else if self.tok.kind == T::Dot {
+				self.bump();
+				if self.tok.kind == T::Star {
 					self.bump();
-					(1, self.expr(true)?)
+					(2, NONE)
+				} else if self.tok.kind == T::LBrace
+					&& (self.peek1().kind == T::Star
+						|| self.peek1().kind == T::DotDot
+						|| self.peek1().kind == T::Digits)
+				{
+					// A recursion is read here, then rejected.
+					let s = self.bump().start;
+					self.recurse_part(s)?;
+					return Err(self.error(
+						self.prev_start,
+						self.prev_end,
+						"Unexpected token `{` expected a `*` or a destructuring",
+					));
+				} else if self.tok.kind == T::LBrace {
+					let s = self.bump().start;
+					(3, self.nested(|p| p.destructure(s))?)
+				} else if self.tok.kind == T::Invalid {
+					// Any idiom part is read here and all but `*` and a
+					// destructuring rejected once read; what starts no
+					// part fails as the part would.
+					return Err(self.invalid_token(self.tok));
+				} else if self.tok.kind == T::Question
+					|| self.tok.kind == T::At
+					|| self.tok.kind == T::Ident
+					|| self.tok.kind == T::EscIdent
+				{
+					let t = self.tok;
+					let end = self.syn_token_end(t);
+					return Err(self.diag(Diag::message(
+						t.start,
+						end,
+						"Unexpected token `{found}` expected a `*` or a destructuring",
+					)));
+				} else {
+					return Err(self.unexpected("an identifier"));
 				}
-				T::Dot => {
-					self.bump();
-					match self.tok.kind {
-						T::Star => {
-							self.bump();
-							(2, NONE)
-						}
-						T::LBrace
-							if matches!(self.peek1().kind, T::Star | T::DotDot | T::Digits) =>
-						{
-							// A recursion is read here, then rejected.
-							let s = self.bump().start;
-							self.recurse_part(s)?;
-							return Err(self.error(
-								self.prev_start,
-								self.prev_end,
-								"Unexpected token `{` expected a `*` or a destructuring",
-							));
-						}
-						T::LBrace => {
-							let s = self.bump().start;
-							(3, self.nested(|p| p.destructure(s))?)
-						}
-						// Any idiom part is read here and all but `*` and a
-						// destructuring rejected once read; what starts no
-						// part fails as the part would.
-						T::Invalid => return Err(self.invalid_token(self.tok)),
-						T::Question | T::At | T::Ident | T::EscIdent => {
-							let t = self.tok;
-							let end = self.syn_token_end(t);
-							return Err(self.diag(Diag::message(
-								t.start,
-								end,
-								"Unexpected token `{found}` expected a `*` or a destructuring",
-							)));
-						}
-						_ => return Err(self.unexpected("an identifier")),
-					}
-				}
-				_ => (0, NONE),
+			} else {
+				(0, NONE)
 			};
 			let e = self.stmt_node(Tag::DestructEntry, op, name, b, t.start, f)?;
 			self.vals.push(e);
@@ -414,30 +399,26 @@ impl<'a, 's> Parser<'a, 's> {
 		let mut rec = [NONE; crate::ast::select::LEN];
 		let mut flags = 0;
 		let t = self.tok;
-		match t.kind {
-			T::Question => {
-				self.bump();
-				rec[crate::ast::select::WHAT] = self.empty_list();
-			}
-			T::QQ => {
-				// The first `?` of `??` is the subject; the second is the next
-				// token, as it has always read.
-				let at = t.start + 1;
-				self.reset_to(at);
-				self.prev_start = t.start;
-				self.prev_end = at;
-				rec[crate::ast::select::WHAT] = self.empty_list();
-			}
-			T::LParen => {
-				self.nested(|p| p.lookup_clauses(&mut rec, &mut flags))?;
-			}
-			_ if t.is_ident() => {
-				let s = self.subject(false)?;
-				let mark = self.vals.len() as u32;
-				self.vals.push(s);
-				rec[crate::ast::select::WHAT] = self.list_from(mark).0;
-			}
-			_ => return Err(self.unexpected("`?`, `(` or an identifier")),
+		if t.kind == T::Question {
+			self.bump();
+			rec[crate::ast::select::WHAT] = self.empty_list();
+		} else if t.kind == T::QQ {
+			// The first `?` of `??` is the subject; the second is the next
+			// token, as it has always read.
+			let at = t.start + 1;
+			self.reset_to(at);
+			self.prev_start = t.start;
+			self.prev_end = at;
+			rec[crate::ast::select::WHAT] = self.empty_list();
+		} else if t.kind == T::LParen {
+			self.nested(|p| p.lookup_clauses(&mut rec, &mut flags))?;
+		} else if t.is_ident() {
+			let s = self.subject(false)?;
+			let mark = self.vals.len() as u32;
+			self.vals.push(s);
+			rec[crate::ast::select::WHAT] = self.list_from(mark).0;
+		} else {
+			return Err(self.unexpected("`?`, `(` or an identifier"));
 		}
 		rec[crate::ast::select::FLAGS] = flags;
 		let idx = self.record(&rec);
@@ -546,38 +527,43 @@ impl<'a, 's> Parser<'a, 's> {
 		if self.tok.ws() {
 			return Err(self.key_after_whitespace());
 		}
-		match self.tok.kind {
-			T::LBracket | T::LBrace => {
-				let open = self.tok.kind;
-				if open == T::LBrace {
-					// Only an object can follow, so what is neither a key
-					// nor its end is reported as an object reads it.
-					let n = self.peek1();
-					if !matches!(n.kind, T::RBrace | T::Ident | T::EscIdent | T::Str | T::Digits) {
-						self.bump();
-						return Err(self.unexpected("an object key"));
-					}
-					if matches!(n.kind, T::Ident | T::EscIdent | T::Str)
-						&& self.peek2().kind != T::Colon
-					{
-						self.bump();
-						self.bump();
-						return Err(self.unexpected(":"));
-					}
+		if self.tok.kind == T::LBracket || self.tok.kind == T::LBrace {
+			let open = self.tok.kind;
+			if open == T::LBrace {
+				// Only an object can follow, so what is neither a key
+				// nor its end is reported as an object reads it.
+				let n = self.peek1();
+				if !(n.kind == T::RBrace
+					|| n.kind == T::Ident
+					|| n.kind == T::EscIdent
+					|| n.kind == T::Str
+					|| n.kind == T::Digits)
+				{
+					self.bump();
+					return Err(self.unexpected("an object key"));
 				}
-				let k = self.atom(self.table_as_field)?;
-				let tag = self.ast.nodes[k as usize].tag;
-				let ok = match open {
-					T::LBracket => tag == Tag::Array,
-					_ => tag == Tag::Object,
-				};
-				if !ok {
-					let n = self.ast.nodes[k as usize];
-					return Err(self.error(n.start, n.end, "expected an object"));
+				if (n.kind == T::Ident || n.kind == T::EscIdent || n.kind == T::Str)
+					&& self.peek2().kind != T::Colon
+				{
+					self.bump();
+					self.bump();
+					return Err(self.unexpected(":"));
 				}
-				Ok(k)
 			}
-			_ => self.simple_key(),
+			let k = self.atom(self.table_as_field)?;
+			let tag = self.ast.nodes[k as usize].tag;
+			let ok = if open == T::LBracket {
+				tag == Tag::Array
+			} else {
+				tag == Tag::Object
+			};
+			if !ok {
+				let n = self.ast.nodes[k as usize];
+				return Err(self.error(n.start, n.end, "expected an object"));
+			}
+			Ok(k)
+		} else {
+			self.simple_key()
 		}
 	}
 
@@ -596,6 +582,10 @@ impl<'a, 's> Parser<'a, 's> {
 /// Whether `t` can start a record-id key.
 fn starts_record_key(t: Tok) -> bool {
 	t.is_ident()
-		|| matches!(t.kind, T::Digits | T::LBrace | T::LBracket | T::Plus | T::Minus)
-		|| (t.kind == T::Str && matches!(t.aux(), 0 | b'u'))
+		|| (t.kind == T::Digits
+			|| t.kind == T::LBrace
+			|| t.kind == T::LBracket
+			|| t.kind == T::Plus
+			|| t.kind == T::Minus)
+		|| (t.kind == T::Str && (t.aux() == 0 || t.aux() == b'u'))
 }

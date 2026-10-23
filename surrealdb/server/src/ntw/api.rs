@@ -130,7 +130,21 @@ async fn handler(
 		Value::None => Vec::new(),
 		Value::Bytes(x) => x.into_inner().to_vec(),
 		Value::String(s) => s.into_bytes(),
-		_ => {
+		Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_) => {
 			return Err(ApiHandlerError(
 				ApiError::InvalidApiResponse(
 					"HTTP API response body must be None, bytes, or string; other values are not supported".into(),

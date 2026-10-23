@@ -240,131 +240,131 @@ impl<'a> Lower<'a> {
 	/// A top-level statement.
 	pub fn top(&self, id: NodeId) -> R<TopLevelExpr> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Begin => TopLevelExpr::Begin(self.begin_options(n)?),
-			Tag::Cancel => TopLevelExpr::Cancel,
-			Tag::Commit => TopLevelExpr::Commit,
-			Tag::Use => TopLevelExpr::Use(match n.op {
+		let res = if n.tag == Tag::Begin {
+			TopLevelExpr::Begin(self.begin_options(n)?)
+		} else if n.tag == Tag::Cancel {
+			TopLevelExpr::Cancel
+		} else if n.tag == Tag::Commit {
+			TopLevelExpr::Commit
+		} else if n.tag == Tag::Use {
+			TopLevelExpr::Use(match n.op {
 				0 => UseStatement::Ns(self.expr(n.a)?),
 				1 => UseStatement::Db(self.expr(n.a)?),
 				2 => UseStatement::NsDb(self.expr(n.a)?, self.expr(n.b)?),
 				_ => UseStatement::Default,
-			}),
-			Tag::OptionStmt => TopLevelExpr::Option(OptionStatement {
+			})
+		} else if n.tag == Tag::OptionStmt {
+			TopLevelExpr::Option(OptionStatement {
 				name: Strand::new(self.name(n.a)?),
 				what: n.op != 0,
-			}),
-			Tag::Kill => TopLevelExpr::Kill(KillStatement {
+			})
+		} else if n.tag == Tag::Kill {
+			TopLevelExpr::Kill(KillStatement {
 				id: self.expr(n.a)?,
-			}),
-			Tag::Live => {
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 5];
-				TopLevelExpr::Live(Box::new(LiveStatement {
-					id: uuid::Uuid::nil(),
-					node: uuid::Uuid::nil(),
-					fields: match rec[4] {
-						1 => LiveFields::Diff,
-						2 => LiveFields::Select(Fields::Value(Box::new(
-							self.selector(self.n(rec[0]))?,
-						))),
-						_ => LiveFields::Select(self.fields(rec[0])?),
-					},
-					what: self.expr(rec[1])?,
-					cond: self.opt(rec[2])?.map(Cond),
-					fetch: self.fetchs(rec[3])?,
-				}))
-			}
-			Tag::Show => {
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				let since = if self.n(rec[1]).tag == Tag::Int {
-					ShowSince::Versionstamp(Ast::uint(self.n(rec[1])))
-				} else {
-					match self.expr(rec[1])? {
-						Expr::Literal(Literal::Datetime(d)) => ShowSince::Timestamp(d),
-						_ => return Err(Reject::new("not a datetime")),
+			})
+		} else if n.tag == Tag::Live {
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 5];
+			TopLevelExpr::Live(Box::new(LiveStatement {
+				id: uuid::Uuid::nil(),
+				node: uuid::Uuid::nil(),
+				fields: match rec[4] {
+					1 => LiveFields::Diff,
+					2 => {
+						LiveFields::Select(Fields::Value(Box::new(self.selector(self.n(rec[0]))?)))
 					}
-				};
-				TopLevelExpr::Show(ShowStatement {
-					table: if rec[0] == NONE {
-						None
-					} else {
-						Some(TableName::new(Strand::new(self.name(rec[0])?)))
-					},
-					since,
-					limit: if rec[2] == NONE {
-						None
-					} else {
-						Some(
-							u32::try_from(Ast::int(self.n(rec[2])))
-								.map_err(|_| Reject::new("u32"))?,
-						)
-					},
+					_ => LiveFields::Select(self.fields(rec[0])?),
+				},
+				what: self.expr(rec[1])?,
+				cond: self.opt(rec[2])?.map(Cond),
+				fetch: self.fetchs(rec[3])?,
+			}))
+		} else if n.tag == Tag::Show {
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			let since = if self.n(rec[1]).tag == Tag::Int {
+				ShowSince::Versionstamp(Ast::uint(self.n(rec[1])))
+			} else if let Expr::Literal(Literal::Datetime(d)) = self.expr(rec[1])? {
+				ShowSince::Timestamp(d)
+			} else {
+				return Err(Reject::new("not a datetime"));
+			};
+			TopLevelExpr::Show(ShowStatement {
+				table: if rec[0] == NONE {
+					None
+				} else {
+					Some(TableName::new(Strand::new(self.name(rec[0])?)))
+				},
+				since,
+				limit: if rec[2] == NONE {
+					None
+				} else {
+					Some(u32::try_from(Ast::int(self.n(rec[2]))).map_err(|_| Reject::new("u32"))?)
+				},
+			})
+		} else if n.tag == Tag::AccessStmt {
+			use crate::expr::statements::access::{
+				AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow, PurgeKind, Subject,
+			};
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 4];
+			let ac = Strand::new(self.name(rec[0])?);
+			let base = (rec[1] != 0).then(|| Self::base(rec[1]));
+			let gr = || -> R<Option<Strand>> {
+				Ok(if rec[3] == 1 {
+					Some(Strand::new(self.name(rec[2])?))
+				} else {
+					None
 				})
-			}
-			Tag::AccessStmt => {
-				use crate::expr::statements::access::{
-					AccessStatement, AccessStatementGrant, AccessStatementPurge,
-					AccessStatementRevoke, AccessStatementShow, PurgeKind, Subject,
-				};
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 4];
-				let ac = Strand::new(self.name(rec[0])?);
-				let base = (rec[1] != 0).then(|| Self::base(rec[1]));
-				let gr = || -> R<Option<Strand>> {
-					Ok(if rec[3] == 1 {
-						Some(Strand::new(self.name(rec[2])?))
+			};
+			let cond = || -> R<Option<Cond>> {
+				Ok(if rec[3] == 2 {
+					Some(Cond(self.expr(rec[2])?))
+				} else {
+					None
+				})
+			};
+			TopLevelExpr::Access(Box::new(match n.op {
+				0 => AccessStatement::Grant(AccessStatementGrant {
+					ac,
+					base,
+					subject: if rec[3] == 1 {
+						Subject::Record(self.record_id(rec[2])?)
 					} else {
-						None
-					})
-				};
-				let cond = || -> R<Option<Cond>> {
-					Ok(if rec[3] == 2 {
-						Some(Cond(self.expr(rec[2])?))
+						Subject::User(Strand::new(self.name(rec[2])?))
+					},
+				}),
+				1 => AccessStatement::Show(AccessStatementShow {
+					ac,
+					base,
+					gr: gr()?,
+					cond: cond()?,
+				}),
+				2 => AccessStatement::Revoke(AccessStatementRevoke {
+					ac,
+					base,
+					gr: gr()?,
+					cond: cond()?,
+				}),
+				_ => AccessStatement::Purge(AccessStatementPurge {
+					ac,
+					base,
+					kind: match rec[3] {
+						1 => PurgeKind::Expired,
+						2 => PurgeKind::Revoked,
+						_ => PurgeKind::Both,
+					},
+					grace: if rec[2] == NONE {
+						Duration::default().into()
 					} else {
-						None
-					})
-				};
-				TopLevelExpr::Access(Box::new(match n.op {
-					0 => AccessStatement::Grant(AccessStatementGrant {
-						ac,
-						base,
-						subject: if rec[3] == 1 {
-							Subject::Record(self.record_id(rec[2])?)
-						} else {
-							Subject::User(Strand::new(self.name(rec[2])?))
-						},
-					}),
-					1 => AccessStatement::Show(AccessStatementShow {
-						ac,
-						base,
-						gr: gr()?,
-						cond: cond()?,
-					}),
-					2 => AccessStatement::Revoke(AccessStatementRevoke {
-						ac,
-						base,
-						gr: gr()?,
-						cond: cond()?,
-					}),
-					_ => AccessStatement::Purge(AccessStatementPurge {
-						ac,
-						base,
-						kind: match rec[3] {
-							1 => PurgeKind::Expired,
-							2 => PurgeKind::Revoked,
-							_ => PurgeKind::Both,
-						},
-						grace: if rec[2] == NONE {
-							Duration::default().into()
-						} else {
-							let (s, ns) = decode_duration(self.text(rec[2]).as_bytes())
-								.ok_or(Reject::new("duration overflow"))?;
-							Duration::new(s, ns).into()
-						},
-					}),
-				}))
-			}
-			_ => TopLevelExpr::Expr(self.expr(id)?),
-		})
+						let (s, ns) = decode_duration(self.text(rec[2]).as_bytes())
+							.ok_or(Reject::new("duration overflow"))?;
+						Duration::new(s, ns).into()
+					},
+				}),
+			}))
+		} else {
+			TopLevelExpr::Expr(self.expr(id)?)
+		};
+		Ok(res)
 	}
 
 	fn opt(&self, id: NodeId) -> R<Option<Expr>> {
@@ -391,82 +391,99 @@ impl<'a> Lower<'a> {
 	/// full depth the storage layer accepts.
 	pub fn expr(&self, id: NodeId) -> R<Expr> {
 		let n = self.n(id);
-		match n.tag {
+		if matches!(
+			n.tag,
 			Tag::Array
-			| Tag::Object
-			| Tag::Prefix
-			| Tag::Cast
-			| Tag::Binary
-			| Tag::Block
-			| Tag::Set => self.nesting(n),
-			_ => self.other(id),
+				| Tag::Object
+				| Tag::Prefix
+				| Tag::Cast | Tag::Binary
+				| Tag::Block | Tag::Set
+		) {
+			self.nesting(n)
+		} else {
+			self.other(id)
 		}
 	}
 
 	/// [`Self::expr`] for the constructs that nest.
 	#[inline(never)]
 	fn nesting(&self, n: &Node) -> R<Expr> {
-		Ok(match n.tag {
-			Tag::Array => Expr::Literal(Literal::Array(
+		let expr = if n.tag == Tag::Array {
+			Expr::Literal(Literal::Array(
 				self.list(n.a).iter().map(|&e| self.expr(e)).collect::<R<_>>()?,
-			)),
-			Tag::Object => Expr::Literal(Literal::Object(self.entries(n)?)),
-			Tag::Prefix => {
-				let op = match n.op {
-					x if x == Prefix::Not as u8 => PrefixOperator::Not,
-					x if x == Prefix::Neg as u8 => PrefixOperator::Negate,
-					x if x == Prefix::Pos as u8 => PrefixOperator::Positive,
-					x if x == Prefix::Range as u8 => PrefixOperator::Range,
-					_ => PrefixOperator::RangeInclusive,
-				};
-				Expr::Prefix {
-					op,
-					expr: Box::new(self.expr(n.a)?),
-				}
+			))
+		} else if n.tag == Tag::Object {
+			Expr::Literal(Literal::Object(self.entries(n)?))
+		} else if n.tag == Tag::Prefix {
+			let op = match n.op {
+				x if x == Prefix::Not as u8 => PrefixOperator::Not,
+				x if x == Prefix::Neg as u8 => PrefixOperator::Negate,
+				x if x == Prefix::Pos as u8 => PrefixOperator::Positive,
+				x if x == Prefix::Range as u8 => PrefixOperator::Range,
+				_ => PrefixOperator::RangeInclusive,
+			};
+			Expr::Prefix {
+				op,
+				expr: Box::new(self.expr(n.a)?),
 			}
-			Tag::Cast => Expr::Prefix {
+		} else if n.tag == Tag::Cast {
+			Expr::Prefix {
 				op: PrefixOperator::Cast(self.kind(n.a)?),
 				expr: Box::new(self.expr(n.b)?),
-			},
-			Tag::Binary => Expr::Binary {
+			}
+		} else if n.tag == Tag::Binary {
+			Expr::Binary {
 				left: Box::new(self.expr(n.a)?),
 				op: binary(Binary::from_u8(n.op)),
 				right: Box::new(self.expr(n.b)?),
-			},
-			Tag::Block => Expr::Block(Box::new(Block(self.exprs(n.a)?))),
-			Tag::Set => Expr::Literal(Literal::Set(self.exprs(n.a)?)),
-			_ => unreachable!("only nesting constructs are lowered here"),
-		})
+			}
+		} else if n.tag == Tag::Block {
+			Expr::Block(Box::new(Block(self.exprs(n.a)?)))
+		} else if n.tag == Tag::Set {
+			Expr::Literal(Literal::Set(self.exprs(n.a)?))
+		} else {
+			unreachable!("only nesting constructs are lowered here")
+		};
+		Ok(expr)
 	}
 
 	/// [`Self::expr`] for everything else.
 	#[inline(never)]
 	fn other(&self, id: NodeId) -> R<Expr> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::None => Expr::Literal(Literal::None),
-			Tag::Null => Expr::Literal(Literal::Null),
-			Tag::True => Expr::Literal(Literal::Bool(true)),
-			Tag::False => Expr::Literal(Literal::Bool(false)),
-			Tag::Int => Expr::Literal(Literal::Integer(Ast::int(n))),
-			Tag::Float => Expr::Literal(Literal::Float(Ast::float(n))),
-			Tag::NaN => Expr::Literal(Literal::Float(f64::NAN)),
-			Tag::Infinity => Expr::Literal(Literal::Float(f64::INFINITY)),
-			Tag::UnboundedRange => Expr::Literal(Literal::UnboundedRange),
-			Tag::Decimal => {
-				Expr::Literal(lit::decimal(self.text(id)).map_err(|r| r.at(n.start, n.end))?)
-			}
-			Tag::Regex => Expr::Literal(lit::regex_at(self.text(id), n.start, n.end)?),
-			Tag::Path => match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
+		let expr = if n.tag == Tag::None {
+			Expr::Literal(Literal::None)
+		} else if n.tag == Tag::Null {
+			Expr::Literal(Literal::Null)
+		} else if n.tag == Tag::True {
+			Expr::Literal(Literal::Bool(true))
+		} else if n.tag == Tag::False {
+			Expr::Literal(Literal::Bool(false))
+		} else if n.tag == Tag::Int {
+			Expr::Literal(Literal::Integer(Ast::int(n)))
+		} else if n.tag == Tag::Float {
+			Expr::Literal(Literal::Float(Ast::float(n)))
+		} else if n.tag == Tag::NaN {
+			Expr::Literal(Literal::Float(f64::NAN))
+		} else if n.tag == Tag::Infinity {
+			Expr::Literal(Literal::Float(f64::INFINITY))
+		} else if n.tag == Tag::UnboundedRange {
+			Expr::Literal(Literal::UnboundedRange)
+		} else if n.tag == Tag::Decimal {
+			Expr::Literal(lit::decimal(self.text(id)).map_err(|r| r.at(n.start, n.end))?)
+		} else if n.tag == Tag::Regex {
+			Expr::Literal(lit::regex_at(self.text(id), n.start, n.end)?)
+		} else if n.tag == Tag::Path {
+			match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
 				lit::Builtin::Constant(c) => Expr::Constant(c),
 				lit::Builtin::Function(_) => return Err(self.unexpected_after(n.end, "(")),
-			},
-			Tag::Duration => {
-				let (s, ns) = decode_duration(self.text(id).as_bytes())
-					.ok_or(Reject::new("duration overflow"))?;
-				Expr::Literal(Literal::Duration(Duration::new(s, ns).into()))
 			}
-			Tag::Str => match n.op {
+		} else if n.tag == Tag::Duration {
+			let (s, ns) = decode_duration(self.text(id).as_bytes())
+				.ok_or(Reject::new("duration overflow"))?;
+			Expr::Literal(Literal::Duration(Duration::new(s, ns).into()))
+		} else if n.tag == Tag::Str {
+			match n.op {
 				0 | b's' => {
 					let mut s = String::new();
 					if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
@@ -489,141 +506,152 @@ impl<'a> Lower<'a> {
 					Expr::Literal(Literal::File(f.into()))
 				}
 				_ => self.prefixed(id)?,
-			},
-			Tag::Param => Expr::Param(Param::from(Strand::new(self.param_name(id)?))),
-			Tag::Field => Expr::Idiom(Idiom(vec![Part::Field(Strand::new(self.name(id)?))])),
-			Tag::Table => Expr::Table(TableName::new(Strand::new(self.name(id)?))),
-			Tag::RecordId => Expr::Literal(Literal::RecordId(self.record_id(id)?)),
-			Tag::BinaryX => {
-				let r = &self.ast.extra[n.b as usize..];
-				Expr::Binary {
-					left: Box::new(self.expr(n.a)?),
-					op: self.binary_extended(n)?,
-					right: Box::new(self.expr(r[0])?),
-				}
 			}
-			Tag::PostfixRange => Expr::Postfix {
+		} else if n.tag == Tag::Param {
+			Expr::Param(Param::from(Strand::new(self.param_name(id)?)))
+		} else if n.tag == Tag::Field {
+			Expr::Idiom(Idiom(vec![Part::Field(Strand::new(self.name(id)?))]))
+		} else if n.tag == Tag::Table {
+			Expr::Table(TableName::new(Strand::new(self.name(id)?)))
+		} else if n.tag == Tag::RecordId {
+			Expr::Literal(Literal::RecordId(self.record_id(id)?))
+		} else if n.tag == Tag::BinaryX {
+			let r = &self.ast.extra[n.b as usize..];
+			Expr::Binary {
+				left: Box::new(self.expr(n.a)?),
+				op: self.binary_extended(n)?,
+				right: Box::new(self.expr(r[0])?),
+			}
+		} else if n.tag == Tag::PostfixRange {
+			Expr::Postfix {
 				expr: Box::new(self.expr(n.a)?),
 				op: if n.op == 0 {
 					PostfixOperator::Range
 				} else {
 					PostfixOperator::RangeSkip
 				},
-			},
-			Tag::Call => {
-				let callee = self.n(n.a);
-				let receiver = match callee.op {
-					0 => {
-						// Builtin names are resolved against the function
-						// registry when the tree is lowered, not while parsing.
-						let path = self.path_name(n.a)?;
-						if !CHECK_NAMES.with(|c| c.get()) {
-							Function::Normal(path.to_lowercase())
-						} else {
-							match lit::builtin(&path, callee.start, callee.end)? {
-								lit::Builtin::Function(f) => Function::Normal(f),
-								// A constant followed by arguments is a call of
-								// its value.
-								lit::Builtin::Constant(c) => {
-									return Ok(Expr::Postfix {
-										expr: Box::new(Expr::Constant(c)),
-										op: PostfixOperator::Call(self.exprs(n.b)?),
-									});
-								}
+			}
+		} else if n.tag == Tag::Call {
+			let callee = self.n(n.a);
+			let receiver = match callee.op {
+				0 => {
+					// Builtin names are resolved against the function
+					// registry when the tree is lowered, not while parsing.
+					let path = self.path_name(n.a)?;
+					if !CHECK_NAMES.with(|c| c.get()) {
+						Function::Normal(path.to_lowercase())
+					} else {
+						match lit::builtin(&path, callee.start, callee.end)? {
+							lit::Builtin::Function(f) => Function::Normal(f),
+							// A constant followed by arguments is a call of
+							// its value.
+							lit::Builtin::Constant(c) => {
+								return Ok(Expr::Postfix {
+									expr: Box::new(Expr::Constant(c)),
+									op: PostfixOperator::Call(self.exprs(n.b)?),
+								});
 							}
 						}
 					}
-					_ => self.function_ref(n.a)?,
-				};
-				Expr::FunctionCall(Box::new(FunctionCall {
-					receiver,
-					arguments: self.exprs(n.b)?,
-				}))
-			}
-			Tag::Script => Expr::FunctionCall(Box::new(FunctionCall {
+				}
+				_ => self.function_ref(n.a)?,
+			};
+			Expr::FunctionCall(Box::new(FunctionCall {
+				receiver,
+				arguments: self.exprs(n.b)?,
+			}))
+		} else if n.tag == Tag::Script {
+			Expr::FunctionCall(Box::new(FunctionCall {
 				receiver: Function::Script(Script(self.text(n.a).to_owned())),
 				arguments: self.exprs(n.b)?,
-			})),
-			Tag::Point => Expr::Literal(Literal::Geometry(
+			}))
+		} else if n.tag == Tag::Point {
+			Expr::Literal(Literal::Geometry(
 				surrealdb_types::Geometry::Point(
 					(self.coordinate(n.a), self.coordinate(n.b)).into(),
 				)
 				.into(),
-			)),
-			Tag::CallExpr => Expr::Postfix {
+			))
+		} else if n.tag == Tag::CallExpr {
+			Expr::Postfix {
 				expr: Box::new(self.expr(n.a)?),
 				op: PostfixOperator::Call(self.exprs(n.b)?),
-			},
-			Tag::Idiom => Expr::Idiom(self.idiom(id)?),
-			Tag::Select => Expr::Select(Box::new(self.select(n)?)),
-			Tag::Create => Expr::Create(Box::new(self.create(n)?)),
-			Tag::Update => Expr::Update(Box::new(self.update(n)?)),
-			Tag::Upsert => {
-				let u = self.update(n)?;
-				Expr::Upsert(Box::new(UpsertStatement {
-					only: u.only,
-					what: u.what,
-					with: u.with,
-					data: u.data,
-					cond: u.cond,
-					output: u.output,
-					timeout: u.timeout,
-					explain: u.explain,
-				}))
 			}
-			Tag::Delete => {
-				let u = self.update(n)?;
-				Expr::Delete(Box::new(DeleteStatement {
-					only: u.only,
-					what: u.what,
-					with: u.with,
-					cond: u.cond,
-					output: u.output,
-					timeout: u.timeout,
-					explain: u.explain,
-				}))
-			}
-			Tag::Return => Expr::Return(Box::new(OutputStatement {
+		} else if n.tag == Tag::Idiom {
+			Expr::Idiom(self.idiom(id)?)
+		} else if n.tag == Tag::Select {
+			Expr::Select(Box::new(self.select(n)?))
+		} else if n.tag == Tag::Create {
+			Expr::Create(Box::new(self.create(n)?))
+		} else if n.tag == Tag::Update {
+			Expr::Update(Box::new(self.update(n)?))
+		} else if n.tag == Tag::Upsert {
+			let u = self.update(n)?;
+			Expr::Upsert(Box::new(UpsertStatement {
+				only: u.only,
+				what: u.what,
+				with: u.with,
+				data: u.data,
+				cond: u.cond,
+				output: u.output,
+				timeout: u.timeout,
+				explain: u.explain,
+			}))
+		} else if n.tag == Tag::Delete {
+			let u = self.update(n)?;
+			Expr::Delete(Box::new(DeleteStatement {
+				only: u.only,
+				what: u.what,
+				with: u.with,
+				cond: u.cond,
+				output: u.output,
+				timeout: u.timeout,
+				explain: u.explain,
+			}))
+		} else if n.tag == Tag::Return {
+			Expr::Return(Box::new(OutputStatement {
 				what: self.expr(n.a)?,
 				fetch: self.fetchs(n.b)?,
-			})),
-			Tag::Let => {
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				let kind = if rec[1] == NONE {
-					None
-				} else {
-					Some(self.kind(rec[1])?)
-				};
-				Expr::Let(Box::new(SetStatement {
-					name: Strand::new(self.param_name(rec[0])?),
-					what: self.expr(rec[2])?,
-					kind,
-				}))
-			}
-			Tag::If => {
-				let l = self.list(n.a);
-				Expr::IfElse(Box::new(IfelseStatement {
-					exprs: l
-						.chunks(2)
-						.map(|cb| Ok((self.expr(cb[0])?, self.expr(cb[1])?)))
-						.collect::<R<_>>()?,
-					close: self.opt(n.b)?,
-				}))
-			}
-			Tag::For => {
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				Expr::Foreach(Box::new(ForeachStatement {
-					param: Param::from(Strand::new(self.param_name(rec[0])?)),
-					range: self.expr(rec[1])?,
-					block: match self.expr(rec[2])? {
-						Expr::Block(b) => *b,
-						_ => return Err(Reject::new("not a block")),
-					},
-				}))
-			}
-			Tag::Relate => Expr::Relate(Box::new(self.relate(n)?)),
-			Tag::Insert => Expr::Insert(Box::new(self.insert(n)?)),
-			Tag::Explain => Expr::Explain {
+			}))
+		} else if n.tag == Tag::Let {
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			let kind = if rec[1] == NONE {
+				None
+			} else {
+				Some(self.kind(rec[1])?)
+			};
+			Expr::Let(Box::new(SetStatement {
+				name: Strand::new(self.param_name(rec[0])?),
+				what: self.expr(rec[2])?,
+				kind,
+			}))
+		} else if n.tag == Tag::If {
+			let l = self.list(n.a);
+			Expr::IfElse(Box::new(IfelseStatement {
+				exprs: l
+					.chunks(2)
+					.map(|cb| Ok((self.expr(cb[0])?, self.expr(cb[1])?)))
+					.collect::<R<_>>()?,
+				close: self.opt(n.b)?,
+			}))
+		} else if n.tag == Tag::For {
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			let block = if let Expr::Block(b) = self.expr(rec[2])? {
+				*b
+			} else {
+				return Err(Reject::new("not a block"));
+			};
+			Expr::Foreach(Box::new(ForeachStatement {
+				param: Param::from(Strand::new(self.param_name(rec[0])?)),
+				range: self.expr(rec[1])?,
+				block,
+			}))
+		} else if n.tag == Tag::Relate {
+			Expr::Relate(Box::new(self.relate(n)?))
+		} else if n.tag == Tag::Insert {
+			Expr::Insert(Box::new(self.insert(n)?))
+		} else if n.tag == Tag::Explain {
+			Expr::Explain {
 				format: if n.op & 2 != 0 {
 					ExplainFormat::Json
 				} else {
@@ -631,107 +659,106 @@ impl<'a> Lower<'a> {
 				},
 				analyze: n.op & 1 != 0,
 				statement: Box::new(self.expr(n.a)?),
-			},
-			Tag::Alter => Expr::Alter(Box::new(self.alter(n)?)),
-			Tag::Remove => Expr::Remove(Box::new(self.remove(n)?)),
-			Tag::Define => Expr::Define(Box::new(self.define(n)?)),
-			Tag::Closure => {
-				let r = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				let args = self
-					.list(r[0])
-					.chunks(2)
-					.map(|pk| {
-						Ok((
-							Param::from(Strand::new(self.param_name(pk[0])?)),
-							if pk[1] == NONE {
-								Kind::Any
-							} else {
-								self.kind(pk[1])?
-							},
-						))
-					})
-					.collect::<R<_>>()?;
-				Expr::Closure(Box::new(Closure {
-					args,
-					returns: if r[1] == NONE {
-						None
-					} else {
-						Some(self.kind(r[1])?)
-					},
-					body: self.expr(r[2])?,
-				}))
 			}
-			Tag::Mock => {
-				let r = &self.ast.extra[n.b as usize..n.b as usize + 3];
-				let table = TableName::new(Strand::new(self.name(n.a)?));
-				let int = |id: u32| Ast::int(self.n(id));
-				Expr::Mock(if r[2] & 1 == 0 {
-					Mock::Count(table, int(r[0]))
-				} else {
-					Mock::Range(
-						table,
-						TypedRange {
-							start: if r[0] == NONE {
-								Bound::Unbounded
-							} else if r[2] & 2 != 0 {
-								Bound::Excluded(int(r[0]))
-							} else {
-								Bound::Included(int(r[0]))
-							},
-							end: if r[1] == NONE {
-								Bound::Unbounded
-							} else if r[2] & 4 != 0 {
-								Bound::Included(int(r[1]))
-							} else {
-								Bound::Excluded(int(r[1]))
-							},
+		} else if n.tag == Tag::Alter {
+			Expr::Alter(Box::new(self.alter(n)?))
+		} else if n.tag == Tag::Remove {
+			Expr::Remove(Box::new(self.remove(n)?))
+		} else if n.tag == Tag::Define {
+			Expr::Define(Box::new(self.define(n)?))
+		} else if n.tag == Tag::Closure {
+			let r = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			let args = self
+				.list(r[0])
+				.chunks(2)
+				.map(|pk| {
+					Ok((
+						Param::from(Strand::new(self.param_name(pk[0])?)),
+						if pk[1] == NONE {
+							Kind::Any
+						} else {
+							self.kind(pk[1])?
 						},
-					)
+					))
 				})
-			}
-			Tag::Sleep => {
-				let (s, ns) = decode_duration(self.text(n.a).as_bytes())
-					.ok_or(Reject::new("duration overflow"))?;
-				Expr::Sleep(Box::new(SleepStatement {
-					duration: Duration::new(s, ns).into(),
-				}))
-			}
-			Tag::Throw => Expr::Throw(Box::new(self.expr(n.a)?)),
-			Tag::Break => Expr::Break,
-			Tag::Continue => Expr::Continue,
-			Tag::Info => {
-				use surrealdb_parser_next::ast::{InfoTarget as I, info};
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + info::LEN];
-				let structure = rec[info::FLAGS] & 1 != 0;
-				let version = self.opt(rec[info::VERSION])?;
-				let what = || self.expr(rec[info::WHAT]);
-				Expr::Info(Box::new(match n.op {
-					x if x == I::Root as u8 => InfoStatement::Root(structure, version),
-					x if x == I::Ns as u8 => InfoStatement::Ns(structure, version),
-					x if x == I::Db as u8 => InfoStatement::Db(structure, version),
-					x if x == I::Table as u8 => InfoStatement::Tb(what()?, structure, version),
-					x if x == I::User as u8 => {
-						let base = rec[info::FLAGS] >> 1;
-						InfoStatement::User(
-							what()?,
-							(base != 0).then(|| Self::base(base)),
-							structure,
-						)
-					}
-					_ => InfoStatement::Index(what()?, self.expr(rec[info::TABLE])?, structure),
-				}))
-			}
-			Tag::Rebuild => {
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				Expr::Rebuild(Box::new(RebuildStatement::Index(RebuildIndexStatement {
-					name: Strand::new(self.name(rec[0])?),
-					table: TableName::new(Strand::new(self.name(rec[1])?)),
-					if_exists: rec[2] & 1 != 0,
-					concurrently: rec[2] & 2 != 0,
-				})))
-			}
-			t => panic!("not an expression: {t:?}"),
-		})
+				.collect::<R<_>>()?;
+			Expr::Closure(Box::new(Closure {
+				args,
+				returns: if r[1] == NONE {
+					None
+				} else {
+					Some(self.kind(r[1])?)
+				},
+				body: self.expr(r[2])?,
+			}))
+		} else if n.tag == Tag::Mock {
+			let r = &self.ast.extra[n.b as usize..n.b as usize + 3];
+			let table = TableName::new(Strand::new(self.name(n.a)?));
+			let int = |id: u32| Ast::int(self.n(id));
+			Expr::Mock(if r[2] & 1 == 0 {
+				Mock::Count(table, int(r[0]))
+			} else {
+				Mock::Range(
+					table,
+					TypedRange {
+						start: if r[0] == NONE {
+							Bound::Unbounded
+						} else if r[2] & 2 != 0 {
+							Bound::Excluded(int(r[0]))
+						} else {
+							Bound::Included(int(r[0]))
+						},
+						end: if r[1] == NONE {
+							Bound::Unbounded
+						} else if r[2] & 4 != 0 {
+							Bound::Included(int(r[1]))
+						} else {
+							Bound::Excluded(int(r[1]))
+						},
+					},
+				)
+			})
+		} else if n.tag == Tag::Sleep {
+			let (s, ns) = decode_duration(self.text(n.a).as_bytes())
+				.ok_or(Reject::new("duration overflow"))?;
+			Expr::Sleep(Box::new(SleepStatement {
+				duration: Duration::new(s, ns).into(),
+			}))
+		} else if n.tag == Tag::Throw {
+			Expr::Throw(Box::new(self.expr(n.a)?))
+		} else if n.tag == Tag::Break {
+			Expr::Break
+		} else if n.tag == Tag::Continue {
+			Expr::Continue
+		} else if n.tag == Tag::Info {
+			use surrealdb_parser_next::ast::{InfoTarget as I, info};
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + info::LEN];
+			let structure = rec[info::FLAGS] & 1 != 0;
+			let version = self.opt(rec[info::VERSION])?;
+			let what = || self.expr(rec[info::WHAT]);
+			Expr::Info(Box::new(match n.op {
+				x if x == I::Root as u8 => InfoStatement::Root(structure, version),
+				x if x == I::Ns as u8 => InfoStatement::Ns(structure, version),
+				x if x == I::Db as u8 => InfoStatement::Db(structure, version),
+				x if x == I::Table as u8 => InfoStatement::Tb(what()?, structure, version),
+				x if x == I::User as u8 => {
+					let base = rec[info::FLAGS] >> 1;
+					InfoStatement::User(what()?, (base != 0).then(|| Self::base(base)), structure)
+				}
+				_ => InfoStatement::Index(what()?, self.expr(rec[info::TABLE])?, structure),
+			}))
+		} else if n.tag == Tag::Rebuild {
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			Expr::Rebuild(Box::new(RebuildStatement::Index(RebuildIndexStatement {
+				name: Strand::new(self.name(rec[0])?),
+				table: TableName::new(Strand::new(self.name(rec[1])?)),
+				if_exists: rec[2] & 1 != 0,
+				concurrently: rec[2] & 2 != 0,
+			})))
+		} else {
+			panic!("not an expression: {:?}", n.tag)
+		};
+		Ok(expr)
 	}
 
 	pub fn kind(&self, id: NodeId) -> R<Kind> {
@@ -813,13 +840,22 @@ impl<'a> Lower<'a> {
 				}
 				Kind::Literal(KindLiteral::String(Strand::new(s)))
 			}
-			k::LITERAL => Kind::Literal(match self.expr(n.a)? {
-				Expr::Literal(Literal::Integer(i)) => KindLiteral::Integer(i),
-				Expr::Literal(Literal::Float(f)) => KindLiteral::Float(f),
-				Expr::Literal(Literal::Decimal(d)) => KindLiteral::Decimal(d),
-				Expr::Literal(Literal::Duration(d)) => KindLiteral::Duration(d),
-				Expr::Literal(Literal::Bool(b)) => KindLiteral::Bool(b),
-				_ => return Err(Reject::new("not a literal kind")),
+			k::LITERAL => Kind::Literal(if let Expr::Literal(lit) = self.expr(n.a)? {
+				if let Literal::Integer(i) = lit {
+					KindLiteral::Integer(i)
+				} else if let Literal::Float(f) = lit {
+					KindLiteral::Float(f)
+				} else if let Literal::Decimal(d) = lit {
+					KindLiteral::Decimal(d)
+				} else if let Literal::Duration(d) = lit {
+					KindLiteral::Duration(d)
+				} else if let Literal::Bool(b) = lit {
+					KindLiteral::Bool(b)
+				} else {
+					return Err(Reject::new("not a literal kind"));
+				}
+			} else {
+				return Err(Reject::new("not a literal kind"));
 			}),
 			k::LIT_OBJECT => Kind::Literal(KindLiteral::Object(
 				self.list(n.a)
@@ -1030,11 +1066,14 @@ impl<'a> Lower<'a> {
 	/// A point coordinate: a float, integer, `NaN` or `Infinity` node.
 	fn coordinate(&self, id: NodeId) -> f64 {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Int => Ast::int(n) as f64,
-			Tag::NaN => f64::NAN,
-			Tag::Infinity => f64::INFINITY,
-			_ => Ast::float(n),
+		if n.tag == Tag::Int {
+			Ast::int(n) as f64
+		} else if n.tag == Tag::NaN {
+			f64::NAN
+		} else if n.tag == Tag::Infinity {
+			f64::INFINITY
+		} else {
+			Ast::float(n)
 		}
 	}
 
@@ -1093,48 +1132,57 @@ impl<'a> Lower<'a> {
 
 	fn key(&self, id: NodeId) -> R<RecordIdKeyLit> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::KeyInt => RecordIdKeyLit::Number(Ast::int(n)),
-			Tag::KeyStr if n.op == 2 => {
+		let res = if n.tag == Tag::KeyInt {
+			RecordIdKeyLit::Number(Ast::int(n))
+		} else if n.tag == Tag::KeyStr {
+			if n.op == 2 {
 				RecordIdKeyLit::String(Strand::new(format!("-{}", self.text(id))))
+			} else if n.op == 3 {
+				RecordIdKeyLit::String(Strand::new(self.text(id)))
+			} else {
+				RecordIdKeyLit::String(Strand::new(self.name(id)?))
 			}
-			Tag::KeyStr if n.op == 3 => RecordIdKeyLit::String(Strand::new(self.text(id))),
-			Tag::KeyStr => RecordIdKeyLit::String(Strand::new(self.name(id)?)),
-			Tag::KeyUuid => match lit::uuid(&lit::string_body(self.text(id))?)
-				.map_err(|r| lit::in_token(r, self.text(id), self.n(id).start))?
-			{
-				Literal::Uuid(u) => RecordIdKeyLit::Uuid(u),
-				_ => return Err(Reject::new("not a uuid")),
-			},
-			Tag::KeyGen => RecordIdKeyLit::Generate(match n.op {
+		} else if n.tag == Tag::KeyUuid {
+			let lit = lit::uuid(&lit::string_body(self.text(id))?)
+				.map_err(|r| lit::in_token(r, self.text(id), self.n(id).start))?;
+			if let Literal::Uuid(u) = lit {
+				RecordIdKeyLit::Uuid(u)
+			} else {
+				return Err(Reject::new("not a uuid"));
+			}
+		} else if n.tag == Tag::KeyGen {
+			RecordIdKeyLit::Generate(match n.op {
 				0 => RecordIdKeyGen::Ulid,
 				1 => RecordIdKeyGen::Uuid,
 				_ => RecordIdKeyGen::Rand,
-			}),
-			Tag::Array => RecordIdKeyLit::Array(self.exprs(n.a)?),
-			Tag::Object => RecordIdKeyLit::Object(self.entries(n)?),
-			Tag::KeyRange => {
-				let start = if n.a == NONE {
-					Bound::Unbounded
-				} else if n.op & 1 != 0 {
-					Bound::Excluded(self.key(n.a)?)
-				} else {
-					Bound::Included(self.key(n.a)?)
-				};
-				let end = if n.b == NONE {
-					Bound::Unbounded
-				} else if n.op & 2 != 0 {
-					Bound::Included(self.key(n.b)?)
-				} else {
-					Bound::Excluded(self.key(n.b)?)
-				};
-				RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
-					start,
-					end,
-				}))
-			}
-			t => panic!("not a key: {t:?}"),
-		})
+			})
+		} else if n.tag == Tag::Array {
+			RecordIdKeyLit::Array(self.exprs(n.a)?)
+		} else if n.tag == Tag::Object {
+			RecordIdKeyLit::Object(self.entries(n)?)
+		} else if n.tag == Tag::KeyRange {
+			let start = if n.a == NONE {
+				Bound::Unbounded
+			} else if n.op & 1 != 0 {
+				Bound::Excluded(self.key(n.a)?)
+			} else {
+				Bound::Included(self.key(n.a)?)
+			};
+			let end = if n.b == NONE {
+				Bound::Unbounded
+			} else if n.op & 2 != 0 {
+				Bound::Included(self.key(n.b)?)
+			} else {
+				Bound::Excluded(self.key(n.b)?)
+			};
+			RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+				start,
+				end,
+			}))
+		} else {
+			panic!("not a key: {:?}", n.tag);
+		};
+		Ok(res)
 	}
 
 	/// A `Field` leaf or an `Idiom` node, as an idiom.
@@ -1150,69 +1198,87 @@ impl<'a> Lower<'a> {
 		assert_eq!(n.tag, Tag::Idiom);
 		let mut parts = Vec::new();
 		let head = self.n(n.a);
-		match head.tag {
-			Tag::Field if head.op == 1 => {}
-			Tag::Doc => parts.push(Part::Doc),
-			Tag::Field | Tag::Table if head.depth & ast::COVERED == 0 => {
-				parts.push(Part::Field(Strand::new(self.name(n.a)?)))
+		if head.tag == Tag::Field && head.op == 1 {
+			// empty head
+		} else if head.tag == Tag::Doc {
+			parts.push(Part::Doc);
+		} else if (head.tag == Tag::Field || head.tag == Tag::Table)
+			&& head.depth & ast::COVERED == 0
+		{
+			parts.push(Part::Field(Strand::new(self.name(n.a)?)));
+		} else {
+			let expr = self.expr(n.a)?;
+			if head.depth & ast::COVERED == 0 {
+				if let Expr::Idiom(Idiom(p)) = expr {
+					parts.extend(p);
+				} else {
+					parts.push(Part::Start(expr));
+				}
+			} else {
+				parts.push(Part::Start(expr));
 			}
-			_ => match self.expr(n.a)? {
-				Expr::Idiom(Idiom(p)) if head.depth & ast::COVERED == 0 => parts.extend(p),
-				e => parts.push(Part::Start(e)),
-			},
 		}
 		for &p in self.list(n.b) {
 			let pn = self.n(p);
-			parts.push(match pn.tag {
-				Tag::PartField => Part::Field(Strand::new(self.name(p)?)),
-				Tag::PartAll => Part::All,
-				Tag::PartLast => Part::Last,
-				Tag::PartFlatten => Part::Flatten,
-				Tag::PartOptional => Part::Optional,
-				Tag::PartIndex => Part::Value(self.expr(pn.a)?),
-				Tag::PartWhere => Part::Where(self.expr(pn.a)?),
-				Tag::PartMethod => Part::Method(Strand::new(self.name(pn.a)?), self.exprs(pn.b)?),
-				Tag::PartGraph => Part::Lookup(Box::new(self.lookup(pn)?)),
-				Tag::PartRepeat => Part::RepeatRecurse,
-				Tag::PartRecurse => {
-					let r = &self.ast.extra[pn.a as usize..pn.a as usize + 7];
-					let num = |id: u32| -> R<Option<u32>> {
-						if id == NONE {
-							return Ok(None);
-						}
-						u32::try_from(Ast::int(self.n(id)))
-							.map(Some)
-							.map_err(|_| Reject::new("u32"))
-					};
-					let recurse = if r[0] == 0 {
-						Recurse::Fixed(num(r[1])?.expect("fixed recursion has a count"))
-					} else {
-						Recurse::Range(num(r[1])?, num(r[2])?)
-					};
-					let inclusive = r[5] == 1;
-					let instruction = match r[3] {
-						0 => None,
-						1 => Some(RecurseInstruction::Path {
-							inclusive,
-						}),
-						2 => Some(RecurseInstruction::Collect {
-							inclusive,
-						}),
-						_ => Some(RecurseInstruction::Shortest {
-							expects: self.expr(r[4])?,
-							inclusive,
-						}),
-					};
-					let nest = if r[6] == NONE {
-						None
-					} else {
-						Some(self.idiom(r[6])?)
-					};
-					Part::Recurse(recurse, nest, instruction)
-				}
-				Tag::PartDestructure => Part::Destructure(self.destructure(pn)?),
-				t => panic!("not a part: {t:?}"),
-			});
+			let part = if pn.tag == Tag::PartField {
+				Part::Field(Strand::new(self.name(p)?))
+			} else if pn.tag == Tag::PartAll {
+				Part::All
+			} else if pn.tag == Tag::PartLast {
+				Part::Last
+			} else if pn.tag == Tag::PartFlatten {
+				Part::Flatten
+			} else if pn.tag == Tag::PartOptional {
+				Part::Optional
+			} else if pn.tag == Tag::PartIndex {
+				Part::Value(self.expr(pn.a)?)
+			} else if pn.tag == Tag::PartWhere {
+				Part::Where(self.expr(pn.a)?)
+			} else if pn.tag == Tag::PartMethod {
+				Part::Method(Strand::new(self.name(pn.a)?), self.exprs(pn.b)?)
+			} else if pn.tag == Tag::PartGraph {
+				Part::Lookup(Box::new(self.lookup(pn)?))
+			} else if pn.tag == Tag::PartRepeat {
+				Part::RepeatRecurse
+			} else if pn.tag == Tag::PartRecurse {
+				let r = &self.ast.extra[pn.a as usize..pn.a as usize + 7];
+				let num = |id: u32| -> R<Option<u32>> {
+					if id == NONE {
+						return Ok(None);
+					}
+					u32::try_from(Ast::int(self.n(id))).map(Some).map_err(|_| Reject::new("u32"))
+				};
+				let recurse = if r[0] == 0 {
+					Recurse::Fixed(num(r[1])?.expect("fixed recursion has a count"))
+				} else {
+					Recurse::Range(num(r[1])?, num(r[2])?)
+				};
+				let inclusive = r[5] == 1;
+				let instruction = match r[3] {
+					0 => None,
+					1 => Some(RecurseInstruction::Path {
+						inclusive,
+					}),
+					2 => Some(RecurseInstruction::Collect {
+						inclusive,
+					}),
+					_ => Some(RecurseInstruction::Shortest {
+						expects: self.expr(r[4])?,
+						inclusive,
+					}),
+				};
+				let nest = if r[6] == NONE {
+					None
+				} else {
+					Some(self.idiom(r[6])?)
+				};
+				Part::Recurse(recurse, nest, instruction)
+			} else if pn.tag == Tag::PartDestructure {
+				Part::Destructure(self.destructure(pn)?)
+			} else {
+				panic!("not a part: {:?}", pn.tag);
+			};
+			parts.push(part);
 		}
 		Ok(Idiom(parts))
 	}
@@ -1315,13 +1381,14 @@ impl<'a> Lower<'a> {
 			let name = || -> R<Strand> { Ok(Strand::new(self.name(en.a)?)) };
 			out.push(match en.op {
 				0 => DestructurePart::Field(name()?),
-				1 => DestructurePart::Aliased(
-					name()?,
-					match self.expr(en.b)? {
-						Expr::Idiom(i) => i,
-						v => Idiom(vec![Part::Start(v)]),
-					},
-				),
+				1 => DestructurePart::Aliased(name()?, {
+					let expr = self.expr(en.b)?;
+					if let Expr::Idiom(i) = expr {
+						i
+					} else {
+						Idiom(vec![Part::Start(expr)])
+					}
+				}),
 				2 => DestructurePart::All(name()?),
 				3 => DestructurePart::Destructure(name()?, self.destructure(self.n(en.b))?),
 				_ => DestructurePart::Rest,
@@ -1343,9 +1410,10 @@ impl<'a> Lower<'a> {
 		let mut out = Vec::new();
 		for &f in self.list(list) {
 			let n = self.n(f);
-			out.push(match n.tag {
-				Tag::FieldAll => Field::All,
-				_ => Field::Single(self.selector(n)?),
+			out.push(if n.tag == Tag::FieldAll {
+				Field::All
+			} else {
+				Field::Single(self.selector(n)?)
 			});
 		}
 		Ok(Fields::Select(out))
@@ -1735,10 +1803,13 @@ fn binary(op: Binary) -> BinaryOperator {
 fn names_projected(fields: &Fields, g: &Idiom) -> bool {
 	let named = |sel: &Selector| match &sel.alias {
 		Some(alias) => alias == g,
-		None => match &sel.expr {
-			Expr::Idiom(x) => x == g,
-			v => &v.to_idiom() == g,
-		},
+		None => {
+			if let Expr::Idiom(x) = &sel.expr {
+				x == g
+			} else {
+				&sel.expr.to_idiom() == g
+			}
+		}
 	};
 	match fields {
 		Fields::Value(sel) => named(sel),
@@ -1757,9 +1828,10 @@ fn projected(fields: &Fields, g: &Idiom, group: bool) -> bool {
 			return true;
 		}
 		let same = |vi: &Idiom| g == vi || (group && prefix(g, vi));
-		match &sel.expr {
-			Expr::Idiom(x) => same(x),
-			v => same(&v.to_idiom()),
+		if let Expr::Idiom(x) = &sel.expr {
+			same(x)
+		} else {
+			same(&sel.expr.to_idiom())
 		}
 	};
 	match fields {

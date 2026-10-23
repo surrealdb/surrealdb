@@ -163,7 +163,11 @@ fn socket_addr_allowed(reason: SocketAddrUse, addr: &SocketAddr, policy: &NetPol
 	match reason {
 		SocketAddrUse::TcpBind => addr.ip().is_unspecified() && addr.port() == 0,
 		SocketAddrUse::TcpConnect => policy.allows_socket_addr(addr),
-		_ => false,
+		SocketAddrUse::TcpListen
+		| SocketAddrUse::TcpAccept
+		| SocketAddrUse::UdpBind
+		| SocketAddrUse::UdpSend
+		| SocketAddrUse::UdpReceive => false,
 	}
 }
 
@@ -282,7 +286,9 @@ mod tests {
 		let mut cx = Context::from_waker(&waker);
 		match std::pin::Pin::new(writer).poll_write(&mut cx, chunk) {
 			Poll::Ready(Ok(n)) => assert_eq!(n, chunk.len()),
-			other => panic!("poll_write did not accept the chunk: {other:?}"),
+			other @ Poll::Ready(_) | other @ Poll::Pending => {
+				panic!("poll_write did not accept the chunk: {other:?}")
+			}
 		}
 	}
 

@@ -428,7 +428,7 @@ fn decode_impl(def: &TypeDef) -> TokenStream {
 	let (_, fmt) = format_generics(def);
 	let generics = match &def.format {
 		Format::Generic => quote!(<'de, __F>),
-		_ => quote!(<'de>),
+		Format::Default | Format::Pinned(_) => quote!(<'de>),
 	};
 	// A borrowed type decodes from the very bytes it borrows.
 	let self_lt = def.lifetime.then(|| quote!(<'de>));
@@ -788,7 +788,10 @@ fn mentions_lifetime_a(tokens: &TokenStream) -> bool {
 						return true;
 					}
 				}
-				_ => {}
+				TokenTree::Group(_)
+				| TokenTree::Ident(_)
+				| TokenTree::Punct(_)
+				| TokenTree::Literal(_) => {}
 			}
 		}
 		false

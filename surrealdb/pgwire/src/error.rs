@@ -550,7 +550,7 @@ impl From<&TypesError> for PgError {
 			ErrorDetails::Thrown => "P0001",
 			ErrorDetails::Configuration(_) => "0A000",
 			ErrorDetails::Serialization(_) => "40001",
-			_ => {
+			ErrorDetails::Connection(_) | ErrorDetails::Internal | ErrorDetails::Context | _ => {
 				let lower = msg.to_ascii_lowercase();
 				if lower.contains("division by zero") || lower.contains("divide by zero") {
 					"22012"

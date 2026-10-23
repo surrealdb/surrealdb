@@ -8,28 +8,45 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn alter(&mut self, start: u32) -> R<NodeId> {
 		let first = self.ast.nodes.len();
 		let t = self.tok;
-		let kind = match t.kw {
-			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("a alter statement keyword"));
-			}
-			Kw::System => ALTER_SYSTEM,
-			Kw::Namespace => DefineKind::Namespace as u8,
-			Kw::Database => DefineKind::Database as u8,
-			Kw::Table | Kw::Tb => DefineKind::Table as u8,
-			Kw::Event => DefineKind::Event as u8,
-			Kw::Index => DefineKind::Index as u8,
-			Kw::Field => DefineKind::Field as u8,
-			Kw::Param => DefineKind::Param as u8,
-			Kw::Sequence => DefineKind::Sequence as u8,
-			Kw::Bucket => DefineKind::Bucket as u8,
-			Kw::Analyzer => DefineKind::Analyzer as u8,
-			Kw::Function => DefineKind::Function as u8,
-			Kw::User => DefineKind::User as u8,
-			Kw::Access => DefineKind::Access as u8,
-			Kw::Config => DefineKind::Config as u8,
-			Kw::Api => DefineKind::Api as u8,
-			Kw::Extension | Kw::Module => DefineKind::Module as u8,
-			_ => return Err(self.unexpected("a alter statement keyword")),
+		if t.kind != T::Ident {
+			return Err(self.unexpected("a alter statement keyword"));
+		}
+		let kind = if t.kw == Kw::System {
+			ALTER_SYSTEM
+		} else if t.kw == Kw::Namespace {
+			DefineKind::Namespace as u8
+		} else if t.kw == Kw::Database {
+			DefineKind::Database as u8
+		} else if t.kw == Kw::Table || t.kw == Kw::Tb {
+			DefineKind::Table as u8
+		} else if t.kw == Kw::Event {
+			DefineKind::Event as u8
+		} else if t.kw == Kw::Index {
+			DefineKind::Index as u8
+		} else if t.kw == Kw::Field {
+			DefineKind::Field as u8
+		} else if t.kw == Kw::Param {
+			DefineKind::Param as u8
+		} else if t.kw == Kw::Sequence {
+			DefineKind::Sequence as u8
+		} else if t.kw == Kw::Bucket {
+			DefineKind::Bucket as u8
+		} else if t.kw == Kw::Analyzer {
+			DefineKind::Analyzer as u8
+		} else if t.kw == Kw::Function {
+			DefineKind::Function as u8
+		} else if t.kw == Kw::User {
+			DefineKind::User as u8
+		} else if t.kw == Kw::Access {
+			DefineKind::Access as u8
+		} else if t.kw == Kw::Config {
+			DefineKind::Config as u8
+		} else if t.kw == Kw::Api {
+			DefineKind::Api as u8
+		} else if t.kw == Kw::Extension || t.kw == Kw::Module {
+			DefineKind::Module as u8
+		} else {
+			return Err(self.unexpected("a alter statement keyword"));
 		};
 		if self.limits.no_files && kind == DefineKind::Bucket as u8 {
 			return Err(self.files_off(t));
@@ -92,32 +109,32 @@ impl<'a, 's> Parser<'a, 's> {
 		let mut any = false;
 		loop {
 			let t = self.tok;
-			match t.kw {
-				Kw::Drop => {
-					self.bump();
-					let n = self.tok;
-					if n.kw != Kw::None || !self.ident_is(n, "QUERY_TIMEOUT", false) {
-						return Err(self.unexpected("`QUERY_TIMEOUT`"));
-					}
-					self.bump();
-					self.push_clause(
-						Cl::AlterDrop,
-						Cl::QueryTimeout as u32,
-						0,
-						t.start,
-						self.ast.nodes.len(),
-					)?;
+			if t.kw == Kw::Drop {
+				self.bump();
+				let n = self.tok;
+				if n.kw != Kw::None || !self.ident_is(n, "QUERY_TIMEOUT", false) {
+					return Err(self.unexpected("`QUERY_TIMEOUT`"));
 				}
-				Kw::Compact => self.flag_clause(Cl::Compact)?,
-				Kw::Compatibility => self.uint_clause(Cl::Compatibility)?,
-				Kw::None if t.kind == T::Ident || t.kind == T::EscIdent => {
-					if self.ident_is(t, "QUERY_TIMEOUT", false) {
-						self.expr_clause(Cl::QueryTimeout)?;
-					} else {
-						return Err(self.unexpected("`QUERY_TIMEOUT`"));
-					}
+				self.bump();
+				self.push_clause(
+					Cl::AlterDrop,
+					Cl::QueryTimeout as u32,
+					0,
+					t.start,
+					self.ast.nodes.len(),
+				)?;
+			} else if t.kw == Kw::Compact {
+				self.flag_clause(Cl::Compact)?;
+			} else if t.kw == Kw::Compatibility {
+				self.uint_clause(Cl::Compatibility)?;
+			} else if t.kw == Kw::None && (t.kind == T::Ident || t.kind == T::EscIdent) {
+				if self.ident_is(t, "QUERY_TIMEOUT", false) {
+					self.expr_clause(Cl::QueryTimeout)?;
+				} else {
+					return Err(self.unexpected("`QUERY_TIMEOUT`"));
 				}
-				_ => break,
+			} else {
+				break;
 			}
 			any = true;
 		}
@@ -136,10 +153,12 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		let clauses = self.vals.len();
 		loop {
-			match self.tok.kw {
-				Kw::Compact => self.flag_clause(Cl::Compact)?,
-				Kw::Compatibility => self.uint_clause(Cl::Compatibility)?,
-				_ => break,
+			if self.tok.kw == Kw::Compact {
+				self.flag_clause(Cl::Compact)?;
+			} else if self.tok.kw == Kw::Compatibility {
+				self.uint_clause(Cl::Compatibility)?;
+			} else {
+				break;
 			}
 		}
 		if self.vals.len() == clauses {
@@ -181,37 +200,36 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			CONFIG => {
 				let c = self.tok;
-				match c.kw {
-					Kw::Api if c.kind == T::Ident => {
-						self.bump();
-						rec[2] = 0;
-						let cfg = self.api_config()?;
-						self.vals.push(cfg);
+				if c.kw == Kw::Api && c.kind == T::Ident {
+					self.bump();
+					rec[2] = 0;
+					let cfg = self.api_config()?;
+					self.vals.push(cfg);
+				} else if c.kw == Kw::Graphql && c.kind == T::Ident {
+					self.bump();
+					rec[2] = 1;
+					let first = self.ast.nodes.len();
+					let mark = self.vals.len() as u32;
+					self.graphql_config()?;
+					let list = self.list_from(mark).0;
+					self.push_clause(Cl::GraphqlConfig, list, 0, c.start, first)?;
+				} else if c.kw == Kw::Default && c.kind == T::Ident {
+					self.bump();
+					rec[2] = 2;
+					if !(self.at_kw(Kw::Namespace) || self.at_kw(Kw::Database)) {
+						return Err(self.unexpected("a namespace or database name"));
 					}
-					Kw::Graphql if c.kind == T::Ident => {
-						self.bump();
-						rec[2] = 1;
-						let first = self.ast.nodes.len();
-						let mark = self.vals.len() as u32;
-						self.graphql_config()?;
-						let list = self.list_from(mark).0;
-						self.push_clause(Cl::GraphqlConfig, list, 0, c.start, first)?;
-					}
-					Kw::Default if c.kind == T::Ident => {
-						self.bump();
-						rec[2] = 2;
-						if !(self.at_kw(Kw::Namespace) || self.at_kw(Kw::Database)) {
-							return Err(self.unexpected("a namespace or database name"));
-						}
-						loop {
-							match self.tok.kw {
-								Kw::Namespace => self.expr_clause(Cl::DefaultNs)?,
-								Kw::Database => self.expr_clause(Cl::DefaultDb)?,
-								_ => break,
-							}
+					loop {
+						if self.tok.kw == Kw::Namespace {
+							self.expr_clause(Cl::DefaultNs)?;
+						} else if self.tok.kw == Kw::Database {
+							self.expr_clause(Cl::DefaultDb)?;
+						} else {
+							break;
 						}
 					}
-					_ => return Err(self.unexpected("a type of config")),
+				} else {
+					return Err(self.unexpected("a type of config"));
 				}
 			}
 			MODULE => {
@@ -237,16 +255,14 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		self.bump();
 		let cl = if cl == Cl::InlineEdges {
-			match self.tok.kw {
-				Kw::Edges if self.tok.kind == T::Ident => {
-					self.bump();
-					Cl::InlineEdges
-				}
-				Kw::References if self.tok.kind == T::Ident => {
-					self.bump();
-					Cl::InlineRefs
-				}
-				_ => return Err(self.unexpected("`EDGES` or `REFERENCES`")),
+			if self.tok.kw == Kw::Edges && self.tok.kind == T::Ident {
+				self.bump();
+				Cl::InlineEdges
+			} else if self.tok.kw == Kw::References && self.tok.kind == T::Ident {
+				self.bump();
+				Cl::InlineRefs
+			} else {
+				return Err(self.unexpected("`EDGES` or `REFERENCES`"));
 			}
 		} else {
 			cl
@@ -304,76 +320,74 @@ impl<'a, 's> Parser<'a, 's> {
 			if t.kind != T::Ident {
 				return Ok(());
 			}
-			match t.kw {
-				Kw::Comment => self.string_clause(Cl::Comment)?,
-				Kw::Drop => {
-					let (allowed, expected): (&[(Kw, Cl)], &str) = match kind {
-						x if x == k(D::Table) => (
-							&[
-								(Kw::Comment, Cl::Comment),
-								(Kw::ChangeFeed, Cl::Changefeed),
-								(Kw::Inline, Cl::InlineEdges),
-							],
-							"`COMMENT`, `CHANGEFEED` or `INLINE`",
-						),
-						x if x == k(D::Event) => (
-							&[
-								(Kw::When, Cl::When),
-								(Kw::Then, Cl::Then),
-								(Kw::Comment, Cl::Comment),
-								(Kw::Async, Cl::Async),
-							],
-							"`WHEN`, `THEN`, `COMMENT`, or `ASYNC`",
-						),
-						x if x == k(D::Field) => (
-							&[
-								(Kw::Type, Cl::FieldType),
-								(Kw::Flexible, Cl::Flexible),
-								(Kw::Readonly, Cl::Readonly),
-								(Kw::Inline, Cl::Inline),
-								(Kw::Value, Cl::Value),
-								(Kw::Assert, Cl::Assert),
-								(Kw::Default, Cl::Default),
-								(Kw::Comment, Cl::Comment),
-								(Kw::Reference, Cl::Reference),
-							],
-							"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`",
-						),
-						x if x == k(D::Bucket) => (
-							&[
-								(Kw::Readonly, Cl::Readonly),
-								(Kw::Backend, Cl::Backend),
-								(Kw::Comment, Cl::Comment),
-							],
-							"`READONLY`, `BACKEND`, or `COMMENT`",
-						),
-						x if x == k(D::Analyzer) => (
-							&[
-								(Kw::Function, Cl::Function),
-								(Kw::Tokenizers, Cl::Tokenizers),
-								(Kw::Filters, Cl::Filters),
-								(Kw::Comment, Cl::Comment),
-							],
-							"`FUNCTION`, `TOKENIZERS`, `FILTERS`, or `COMMENT`",
-						),
-						x if x == k(D::Access) => (
-							&[
-								(Kw::Authenticate, Cl::Authenticate),
-								(Kw::Context, Cl::Context),
-								(Kw::Comment, Cl::Comment),
-							],
-							"`AUTHENTICATE`, `CONTEXT` or `COMMENT`",
-						),
-						x if x == k(D::Sequence) => return Ok(()),
-						x if x == k(D::Api) => (&[(Kw::Comment, Cl::Comment)], "COMMENT"),
-						_ => (&[(Kw::Comment, Cl::Comment)], "`COMMENT`"),
-					};
-					self.alter_drop(allowed, expected)?;
-				}
-				_ => {
-					if !self.alter_clause(kind, field_is_id, t)? {
-						return Ok(());
-					}
+			if t.kw == Kw::Comment {
+				self.string_clause(Cl::Comment)?;
+			} else if t.kw == Kw::Drop {
+				let (allowed, expected): (&[(Kw, Cl)], &str) = match kind {
+					x if x == k(D::Table) => (
+						&[
+							(Kw::Comment, Cl::Comment),
+							(Kw::ChangeFeed, Cl::Changefeed),
+							(Kw::Inline, Cl::InlineEdges),
+						],
+						"`COMMENT`, `CHANGEFEED` or `INLINE`",
+					),
+					x if x == k(D::Event) => (
+						&[
+							(Kw::When, Cl::When),
+							(Kw::Then, Cl::Then),
+							(Kw::Comment, Cl::Comment),
+							(Kw::Async, Cl::Async),
+						],
+						"`WHEN`, `THEN`, `COMMENT`, or `ASYNC`",
+					),
+					x if x == k(D::Field) => (
+						&[
+							(Kw::Type, Cl::FieldType),
+							(Kw::Flexible, Cl::Flexible),
+							(Kw::Readonly, Cl::Readonly),
+							(Kw::Inline, Cl::Inline),
+							(Kw::Value, Cl::Value),
+							(Kw::Assert, Cl::Assert),
+							(Kw::Default, Cl::Default),
+							(Kw::Comment, Cl::Comment),
+							(Kw::Reference, Cl::Reference),
+						],
+						"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`",
+					),
+					x if x == k(D::Bucket) => (
+						&[
+							(Kw::Readonly, Cl::Readonly),
+							(Kw::Backend, Cl::Backend),
+							(Kw::Comment, Cl::Comment),
+						],
+						"`READONLY`, `BACKEND`, or `COMMENT`",
+					),
+					x if x == k(D::Analyzer) => (
+						&[
+							(Kw::Function, Cl::Function),
+							(Kw::Tokenizers, Cl::Tokenizers),
+							(Kw::Filters, Cl::Filters),
+							(Kw::Comment, Cl::Comment),
+						],
+						"`FUNCTION`, `TOKENIZERS`, `FILTERS`, or `COMMENT`",
+					),
+					x if x == k(D::Access) => (
+						&[
+							(Kw::Authenticate, Cl::Authenticate),
+							(Kw::Context, Cl::Context),
+							(Kw::Comment, Cl::Comment),
+						],
+						"`AUTHENTICATE`, `CONTEXT` or `COMMENT`",
+					),
+					x if x == k(D::Sequence) => return Ok(()),
+					x if x == k(D::Api) => (&[(Kw::Comment, Cl::Comment)], "COMMENT"),
+					_ => (&[(Kw::Comment, Cl::Comment)], "`COMMENT`"),
+				};
+				self.alter_drop(allowed, expected)?;
+			} else {
+				if !self.alter_clause(kind, field_is_id, t)? {
+					return Ok(());
 				}
 			}
 		}
@@ -383,117 +397,139 @@ impl<'a, 's> Parser<'a, 's> {
 	fn alter_clause(&mut self, kind: u8, field_is_id: bool, t: Tok) -> R<bool> {
 		use DefineKind as D;
 		let is = |d: D| kind == d as u8;
-		match t.kw {
-			Kw::Compact if is(D::Table) => self.flag_clause(Cl::Compact)?,
-			Kw::Migrate if is(D::Table) => self.migrate_clause(true)?,
-			Kw::Inline if is(D::Table) => {
-				self.bump();
-				match self.tok.kw {
-					Kw::Edges if self.tok.kind == T::Ident => self.uint_clause(Cl::InlineEdges)?,
-					Kw::References if self.tok.kind == T::Ident => {
-						self.uint_clause(Cl::InlineRefs)?
-					}
-					_ => return Err(self.unexpected("`EDGES` or `REFERENCES`")),
+		if t.kw == Kw::Compact && is(D::Table) {
+			self.flag_clause(Cl::Compact)?;
+		} else if t.kw == Kw::Migrate && is(D::Table) {
+			self.migrate_clause(true)?;
+		} else if t.kw == Kw::Inline && is(D::Table) {
+			self.bump();
+			if self.tok.kw == Kw::Edges && self.tok.kind == T::Ident {
+				self.uint_clause(Cl::InlineEdges)?;
+			} else if self.tok.kw == Kw::References && self.tok.kind == T::Ident {
+				self.uint_clause(Cl::InlineRefs)?;
+			} else {
+				return Err(self.unexpected("`EDGES` or `REFERENCES`"));
+			}
+		} else if t.kw == Kw::Type && is(D::Table) {
+			self.table_type_clause()?;
+		} else if t.kw == Kw::Schemaless && is(D::Table) {
+			self.flag_clause(Cl::Schemaless)?;
+		} else if t.kw == Kw::Schemafull && is(D::Table) {
+			self.flag_clause(Cl::Schemafull)?;
+		} else if t.kw == Kw::Permissions && (is(D::Table) || is(D::Field)) {
+			self.permissions(false)?;
+		} else if t.kw == Kw::ChangeFeed && is(D::Table) {
+			self.changefeed()?;
+		} else if t.kw == Kw::When && is(D::Event) {
+			self.expr_clause(Cl::When)?;
+		} else if t.kw == Kw::Then && is(D::Event) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let list = self.expr_list(true)?;
+			self.push_clause(Cl::Then, list, 0, t.start, first)?;
+		} else if t.kw == Kw::Async && is(D::Event) {
+			self.flag_clause(Cl::Async)?;
+		} else if t.kw == Kw::Retry && is(D::Event) {
+			self.uint_clause(Cl::Retry)?;
+		} else if t.kw == Kw::MaxDepth && is(D::Event) {
+			self.uint_clause(Cl::MaxDepth)?;
+		} else if t.kw == Kw::Prepare && is(D::Index) {
+			self.bump();
+			self.eat_kw(Kw::Remove);
+			self.push_clause(Cl::PrepareRemove, 0, 0, t.start, self.ast.nodes.len())?;
+		} else if t.kw == Kw::Type && is(D::Field) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let k = if field_is_id {
+				self.id_kind()?
+			} else {
+				self.kind()?
+			};
+			let flexible = self.eat_kw(Kw::Flexible) as u32;
+			self.push_clause(Cl::FieldType, k, flexible, t.start, first)?;
+		} else if t.kw == Kw::Flexible && is(D::Field) {
+			self.flag_clause(Cl::Flexible)?;
+		} else if t.kw == Kw::Readonly && (is(D::Field) || is(D::Bucket)) {
+			self.flag_clause(Cl::Readonly)?;
+		} else if t.kw == Kw::Inline && is(D::Field) {
+			self.flag_clause(Cl::Inline)?;
+		} else if t.kw == Kw::Value && (is(D::Field) || is(D::Param)) {
+			self.expr_clause(Cl::Value)?;
+		} else if t.kw == Kw::Assert && is(D::Field) {
+			self.expr_clause(Cl::Assert)?;
+		} else if t.kw == Kw::Default && is(D::Field) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let always = self.eat_kw(Kw::Always) as u32;
+			let e = self.expr(true)?;
+			self.push_clause(Cl::Default, e, always, t.start, first)?;
+		} else if t.kw == Kw::Reference && is(D::Field) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let (a, b) = self.reference_strategy()?;
+			self.push_clause(Cl::Reference, a, b, t.start, first)?;
+		} else if t.kw == Kw::Materialize && is(D::Field) {
+			self.materialize_clause()?;
+		} else if t.kw == Kw::Migrate && is(D::Field) {
+			self.migrate_clause(false)?;
+		} else if t.kw == Kw::Permissions
+			&& (is(D::Param) || is(D::Bucket) || is(D::Function) || is(D::Module))
+		{
+			self.perm_value_clause()?;
+		} else if t.kw == Kw::Backend && is(D::Bucket) {
+			self.string_clause(Cl::Backend)?;
+		} else if t.kw == Kw::Function && is(D::Analyzer) {
+			self.analyzer_function_clause()?;
+		} else if t.kw == Kw::Tokenizers && is(D::Analyzer) {
+			self.tokenizers_clause()?;
+		} else if t.kw == Kw::Filters && is(D::Analyzer) {
+			self.filters_clause()?;
+		} else if t.kw == Kw::Password && is(D::User) {
+			self.string_clause(Cl::Password)?;
+		} else if t.kw == Kw::Passhash && is(D::User) {
+			self.string_clause(Cl::Passhash)?;
+		} else if t.kw == Kw::Passscram && is(D::User) {
+			self.string_clause(Cl::Passscram)?;
+		} else if t.kw == Kw::Roles && is(D::User) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			let mark = self.vals.len() as u32;
+			loop {
+				let n = self.name()?;
+				self.vals.push(n);
+				if !self.eat(T::Comma) {
+					break;
 				}
 			}
-			Kw::Type if is(D::Table) => self.table_type_clause()?,
-			Kw::Schemaless if is(D::Table) => self.flag_clause(Cl::Schemaless)?,
-			Kw::Schemafull if is(D::Table) => self.flag_clause(Cl::Schemafull)?,
-			Kw::Permissions if is(D::Table) || is(D::Field) => self.permissions(false)?,
-			Kw::ChangeFeed if is(D::Table) => self.changefeed()?,
-			Kw::When if is(D::Event) => self.expr_clause(Cl::When)?,
-			Kw::Then if is(D::Event) => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let list = self.expr_list(true)?;
-				self.push_clause(Cl::Then, list, 0, t.start, first)?;
-			}
-			Kw::Async if is(D::Event) => self.flag_clause(Cl::Async)?,
-			Kw::Retry if is(D::Event) => self.uint_clause(Cl::Retry)?,
-			Kw::MaxDepth if is(D::Event) => self.uint_clause(Cl::MaxDepth)?,
-			Kw::Prepare if is(D::Index) => {
-				self.bump();
-				self.eat_kw(Kw::Remove);
-				self.push_clause(Cl::PrepareRemove, 0, 0, t.start, self.ast.nodes.len())?;
-			}
-			Kw::Type if is(D::Field) => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let k = if field_is_id {
-					self.id_kind()?
-				} else {
-					self.kind()?
-				};
-				let flexible = self.eat_kw(Kw::Flexible) as u32;
-				self.push_clause(Cl::FieldType, k, flexible, t.start, first)?;
-			}
-			Kw::Flexible if is(D::Field) => self.flag_clause(Cl::Flexible)?,
-			Kw::Readonly if is(D::Field) || is(D::Bucket) => self.flag_clause(Cl::Readonly)?,
-			Kw::Inline if is(D::Field) => self.flag_clause(Cl::Inline)?,
-			Kw::Value if is(D::Field) || is(D::Param) => self.expr_clause(Cl::Value)?,
-			Kw::Assert if is(D::Field) => self.expr_clause(Cl::Assert)?,
-			Kw::Default if is(D::Field) => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let always = self.eat_kw(Kw::Always) as u32;
-				let e = self.expr(true)?;
-				self.push_clause(Cl::Default, e, always, t.start, first)?;
-			}
-			Kw::Reference if is(D::Field) => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let (a, b) = self.reference_strategy()?;
-				self.push_clause(Cl::Reference, a, b, t.start, first)?;
-			}
-			Kw::Materialize if is(D::Field) => self.materialize_clause()?,
-			Kw::Migrate if is(D::Field) => self.migrate_clause(false)?,
-			Kw::Permissions
-				if is(D::Param) || is(D::Bucket) || is(D::Function) || is(D::Module) =>
-			{
-				self.perm_value_clause()?
-			}
-			Kw::Backend if is(D::Bucket) => self.string_clause(Cl::Backend)?,
-			Kw::Function if is(D::Analyzer) => self.analyzer_function_clause()?,
-			Kw::Tokenizers if is(D::Analyzer) => self.tokenizers_clause()?,
-			Kw::Filters if is(D::Analyzer) => self.filters_clause()?,
-			Kw::Password if is(D::User) => self.string_clause(Cl::Password)?,
-			Kw::Passhash if is(D::User) => self.string_clause(Cl::Passhash)?,
-			Kw::Passscram if is(D::User) => self.string_clause(Cl::Passscram)?,
-			Kw::Roles if is(D::User) => {
-				self.bump();
-				let first = self.ast.nodes.len();
-				let mark = self.vals.len() as u32;
-				loop {
-					let n = self.name()?;
-					self.vals.push(n);
-					if !self.eat(T::Comma) {
-						break;
-					}
-				}
-				let list = self.list_from(mark).0;
-				self.push_clause(Cl::Roles, list, 0, t.start, first)?;
-			}
-			Kw::Duration if is(D::User) => self.alter_durations(
+			let list = self.list_from(mark).0;
+			self.push_clause(Cl::Roles, list, 0, t.start, first)?;
+		} else if t.kw == Kw::Duration && is(D::User) {
+			self.alter_durations(
 				&[(Kw::Token, Cl::DurToken), (Kw::Session, Cl::DurSession)],
 				"`TOKEN` or `SESSION`",
-			)?,
-			Kw::Duration if is(D::Access) => self.alter_durations(
+			)?;
+		} else if t.kw == Kw::Duration && is(D::Access) {
+			self.alter_durations(
 				&[
 					(Kw::Grant, Cl::DurGrant),
 					(Kw::Token, Cl::DurToken),
 					(Kw::Session, Cl::DurSession),
 				],
 				"`GRANT`, `TOKEN`, or `SESSION`",
-			)?,
-			Kw::Authenticate if is(D::Access) => self.expr_clause(Cl::Authenticate)?,
-			Kw::Context if is(D::Access) => self.expr_clause(Cl::Context)?,
-			Kw::Timeout if is(D::Sequence) => {
-				self.expr_clause(Cl::Timeout)?;
-				return Ok(false);
-			}
-			Kw::For if is(D::Api) => self.alter_api_for()?,
-			Kw::Security if is(D::Api) => self.api_security_clause()?,
-			_ => return Ok(false),
+			)?;
+		} else if t.kw == Kw::Authenticate && is(D::Access) {
+			self.expr_clause(Cl::Authenticate)?;
+		} else if t.kw == Kw::Context && is(D::Access) {
+			self.expr_clause(Cl::Context)?;
+		} else if t.kw == Kw::Timeout && is(D::Sequence) {
+			self.expr_clause(Cl::Timeout)?;
+			return Ok(false);
+		} else if t.kw == Kw::For && is(D::Api) {
+			self.alter_api_for()?;
+		} else if t.kw == Kw::Security && is(D::Api) {
+			self.api_security_clause()?;
+		} else {
+			return Ok(false);
 		}
 		Ok(true)
 	}
@@ -547,11 +583,12 @@ impl<'a, 's> Parser<'a, 's> {
 		let mark = self.vals.len() as u32;
 		loop {
 			let n = self.tok;
-			let ok = n.kind == T::Ident
-				&& matches!(
-					n.kw,
-					Kw::Delete | Kw::Get | Kw::Patch | Kw::Post | Kw::Put | Kw::Trace
-				);
+			let ok =
+				n.kind == T::Ident
+					&& (n.kw == Kw::Delete
+						|| n.kw == Kw::Get || n.kw == Kw::Patch
+						|| n.kw == Kw::Post
+						|| n.kw == Kw::Put || n.kw == Kw::Trace);
 			if !ok {
 				return Err(self.unexpected_at(
 					m,

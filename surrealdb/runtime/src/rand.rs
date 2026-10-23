@@ -22,11 +22,15 @@ pub fn bool(_: ()) -> Result<Value> {
 pub fn r#enum(Any(mut args): Any) -> Result<Value> {
 	Ok(match args.len() {
 		0 => Value::None,
-		1 => match args.remove(0) {
-			Value::Array(v) => surrealdb_expr::val::rnd::with_rng(|rng| v.into_iter().choose(rng))
-				.unwrap_or(Value::None),
-			v => v,
-		},
+		1 => {
+			let v = args.remove(0);
+			if let Value::Array(v) = v {
+				surrealdb_expr::val::rnd::with_rng(|rng| v.into_iter().choose(rng))
+					.unwrap_or(Value::None)
+			} else {
+				v
+			}
+		}
 		_ => surrealdb_expr::val::rnd::with_rng(|rng| args.into_iter().choose(rng))
 			.expect("non-empty args"),
 	})

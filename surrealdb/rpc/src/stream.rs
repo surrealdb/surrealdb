@@ -105,7 +105,15 @@ impl QueryStreamItem {
 				index,
 				values: rows.to_values()?,
 			}),
-			other => Ok(other),
+			other @ Self::Rows {
+				..
+			}
+			| other @ Self::Value {
+				..
+			}
+			| other @ Self::Finished {
+				..
+			} => Ok(other),
 		}
 	}
 }

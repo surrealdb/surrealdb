@@ -769,13 +769,12 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_user_host(&mut self) -> ParseResult<(String, Option<String>)> {
-		let user = match &self.peek().kind {
-			TokenKind::StringLiteral(s) => {
-				let u = s.clone();
-				self.bump();
-				u
-			}
-			_ => self.parse_ident()?.0,
+		let user = if let TokenKind::StringLiteral(s) = &self.peek().kind {
+			let u = s.clone();
+			self.bump();
+			u
+		} else {
+			self.parse_ident()?.0
 		};
 
 		let host = if let TokenKind::UserVar(ref h) = self.peek().kind {
@@ -784,13 +783,12 @@ impl<'a> Parser<'a> {
 			Some(host_str)
 		} else if self.peek().kind == TokenKind::At {
 			self.bump();
-			let h = match &self.peek().kind {
-				TokenKind::StringLiteral(s) => {
-					let h_str = s.clone();
-					self.bump();
-					h_str
-				}
-				_ => self.parse_ident()?.0,
+			let h = if let TokenKind::StringLiteral(s) = &self.peek().kind {
+				let h_str = s.clone();
+				self.bump();
+				h_str
+			} else {
+				self.parse_ident()?.0
 			};
 			Some(h)
 		} else {
@@ -824,13 +822,12 @@ impl<'a> Parser<'a> {
 			if self.peek_keyword() == Some(Keyword::By) {
 				self.bump();
 			}
-			match &self.peek().kind {
-				TokenKind::StringLiteral(s) => {
-					let pass = s.clone();
-					self.bump();
-					Some(pass)
-				}
-				_ => Some(self.parse_ident()?.0),
+			if let TokenKind::StringLiteral(s) = &self.peek().kind {
+				let pass = s.clone();
+				self.bump();
+				Some(pass)
+			} else {
+				Some(self.parse_ident()?.0)
 			}
 		} else {
 			None
@@ -1045,18 +1042,16 @@ impl<'a> Parser<'a> {
 		let start = self.expect_keyword(Keyword::Prepare, "PREPARE")?.span;
 		let (name, _) = self.parse_ident()?;
 		self.expect_keyword(Keyword::From, "FROM in PREPARE")?;
-		let query = match &self.peek().kind {
-			TokenKind::StringLiteral(s) => {
-				let q = s.clone();
-				self.bump();
-				q
-			}
-			TokenKind::UserVar(v) => {
-				let q = format!("@{v}");
-				self.bump();
-				q
-			}
-			_ => self.parse_ident()?.0,
+		let query = if let TokenKind::StringLiteral(s) = &self.peek().kind {
+			let q = s.clone();
+			self.bump();
+			q
+		} else if let TokenKind::UserVar(v) = &self.peek().kind {
+			let q = format!("@{v}");
+			self.bump();
+			q
+		} else {
+			self.parse_ident()?.0
 		};
 		let end = self.peek().span;
 		Ok(PrepareStmt {

@@ -71,7 +71,24 @@ impl ComponentKind {
 			Kind::Duration => Self::Duration,
 			Kind::Bool => Self::Bool,
 			Kind::Record(tables) => Self::Record(tables.clone().into_boxed_slice()),
-			_ => return None,
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Float
+			| Kind::Decimal
+			| Kind::Number
+			| Kind::Object
+			| Kind::Array(..)
+			| Kind::Geometry(..)
+			| Kind::Bytes
+			| Kind::Regex
+			| Kind::Table(..)
+			| Kind::Range
+			| Kind::Set(..)
+			| Kind::Either(..)
+			| Kind::Function(..)
+			| Kind::Literal(..)
+			| Kind::File(..) => return None,
 		})
 	}
 
@@ -100,12 +117,16 @@ impl ComponentKind {
 			(Self::Unknown, _) => None,
 			(Self::String, Value::String(_)) => None,
 			(Self::String, _) => Some("is not a string"),
-			(Self::Int, Value::Number(Number::Int(_))) => None,
-			(Self::Int, Value::Number(n)) => Some(match (n, n.as_int_lossless()) {
-				(Number::Float(_), Some(_)) => "is a float; an int component holds only ints",
-				(Number::Decimal(_), Some(_)) => "is a decimal; an int component holds only ints",
-				_ => "is not an int",
-			}),
+			(Self::Int, Value::Number(n)) => match n {
+				Number::Int(_) => None,
+				Number::Float(_) if n.as_int_lossless().is_some() => {
+					Some("is a float; an int component holds only ints")
+				}
+				Number::Decimal(_) if n.as_int_lossless().is_some() => {
+					Some("is a decimal; an int component holds only ints")
+				}
+				Number::Float(_) | Number::Decimal(_) => Some("is not an int"),
+			},
 			(Self::Int, _) => Some("is not an int"),
 			(Self::Datetime, Value::Datetime(d)) => {
 				if d.is_leap_second() {
@@ -277,17 +298,19 @@ impl Display for Nonconformance {
 
 /// The elements of a tuple type.
 fn tuple_kinds(kind: &Kind) -> Option<&[Kind]> {
-	match kind {
-		Kind::Literal(KindLiteral::Array(kinds)) => Some(kinds),
-		_ => None,
+	if let Kind::Literal(KindLiteral::Array(kinds)) = kind {
+		Some(kinds)
+	} else {
+		None
 	}
 }
 
 /// The name of the first part of an idiom, when that part is a field.
 fn root_name(idiom: &Idiom) -> Option<&str> {
-	match idiom.0.first() {
-		Some(Part::Field(name)) => Some(name.as_str()),
-		_ => None,
+	if let Some(Part::Field(name)) = idiom.0.first() {
+		Some(name.as_str())
+	} else {
+		None
 	}
 }
 
@@ -506,10 +529,12 @@ impl KeyStructure {
 		if root.as_str() != "id" {
 			return None;
 		}
-		let position = match index {
-			Part::First => 0,
-			Part::Value(Expr::Literal(Literal::Integer(i))) => u32::try_from(*i).ok()?,
-			_ => return None,
+		let position = if let Part::First = index {
+			0
+		} else if let Part::Value(Expr::Literal(Literal::Integer(i))) = index {
+			u32::try_from(*i).ok()?
+		} else {
+			return None;
 		};
 		((position as usize) < self.arity()).then_some(position)
 	}
@@ -627,7 +652,26 @@ fn group_component_kind(expr: &Expr) -> ComponentKind {
 		Kind::Uuid => ComponentKind::Uuid,
 		Kind::Duration => ComponentKind::Duration,
 		Kind::Bool => ComponentKind::Bool,
-		_ => ComponentKind::Unknown,
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Datetime
+		| Kind::Float
+		| Kind::Decimal
+		| Kind::Number
+		| Kind::Object
+		| Kind::Array(..)
+		| Kind::Geometry(..)
+		| Kind::Bytes
+		| Kind::Regex
+		| Kind::Table(..)
+		| Kind::Range
+		| Kind::Record(..)
+		| Kind::Set(..)
+		| Kind::Either(..)
+		| Kind::Function(..)
+		| Kind::Literal(..)
+		| Kind::File(..) => ComponentKind::Unknown,
 	}
 }
 

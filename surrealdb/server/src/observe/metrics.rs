@@ -1153,7 +1153,9 @@ mod tests {
 							}
 						}
 					}
-					_ => {}
+					AggregatedMetrics::F64(_)
+					| AggregatedMetrics::U64(_)
+					| AggregatedMetrics::I64(_) => {}
 				}
 			}
 		}

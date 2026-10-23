@@ -295,51 +295,44 @@ fn optimize_component(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	for payload in wasmparser::Parser::new(0).parse_all(wasm_bytes) {
 		let payload = payload.prefix_err(|| "Failed to parse WASM component")?;
 
-		#[allow(clippy::collapsible_match)]
-		match &payload {
-			wasmparser::Payload::Version {
-				encoding,
-				..
-			} => {
-				output.extend_from_slice(match encoding {
-					wasmparser::Encoding::Component => &wasm_encoder::Component::HEADER,
-					wasmparser::Encoding::Module => &wasm_encoder::Module::HEADER,
-				});
-				continue;
+		if let wasmparser::Payload::Version {
+			encoding,
+			..
+		} = &payload
+		{
+			output.extend_from_slice(match encoding {
+				wasmparser::Encoding::Component => &wasm_encoder::Component::HEADER,
+				wasmparser::Encoding::Module => &wasm_encoder::Module::HEADER,
+			});
+			continue;
+		} else if matches!(
+			&payload,
+			wasmparser::Payload::ModuleSection { .. }
+				| wasmparser::Payload::ComponentSection { .. }
+		) {
+			stack.push(mem::take(&mut output));
+			continue;
+		} else if matches!(&payload, wasmparser::Payload::End(_)) {
+			let mut parent = match stack.pop() {
+				Some(p) => p,
+				None => break,
+			};
+			let is_component = output.starts_with(&wasm_encoder::Component::HEADER);
+			if !is_component {
+				output = apply_wasm_opt(&output)?;
 			}
-			wasmparser::Payload::ModuleSection {
-				..
+			if is_component {
+				parent.push(ComponentSectionId::Component as u8);
+			} else {
+				parent.push(ComponentSectionId::CoreModule as u8);
 			}
-			| wasmparser::Payload::ComponentSection {
-				..
-			} => {
-				stack.push(mem::take(&mut output));
-				continue;
-			}
-			wasmparser::Payload::End(_) => {
-				let mut parent = match stack.pop() {
-					Some(p) => p,
-					None => break,
-				};
-				let is_component = output.starts_with(&wasm_encoder::Component::HEADER);
-				if !is_component {
-					output = apply_wasm_opt(&output)?;
-				}
-				if is_component {
-					parent.push(ComponentSectionId::Component as u8);
-				} else {
-					parent.push(ComponentSectionId::CoreModule as u8);
-				}
-				output.encode(&mut parent);
-				output = parent;
-				continue;
-			}
-			wasmparser::Payload::CustomSection(c) => {
-				if should_strip_section(c.name()) {
-					continue;
-				}
-			}
-			_ => {}
+			output.encode(&mut parent);
+			output = parent;
+			continue;
+		} else if let wasmparser::Payload::CustomSection(c) = &payload
+			&& should_strip_section(c.name())
+		{
+			continue;
 		}
 
 		if let Some((id, range)) = payload.as_section() {

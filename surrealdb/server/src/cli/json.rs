@@ -83,7 +83,7 @@ impl Kind {
 	pub(crate) fn exit_code(self) -> u8 {
 		match self {
 			Kind::Usage => USAGE_EXIT,
-			_ => FAILURE_EXIT,
+			Kind::Network | Kind::Invalid | Kind::NotFound | Kind::Unknown => FAILURE_EXIT,
 		}
 	}
 }

@@ -60,7 +60,16 @@ impl Parse for KindExpr {
 					variants.push(right);
 					KindExpr::Union(variants)
 				}
-				_ => KindExpr::Union(vec![expr, right]),
+				KindExpr::Ident(_)
+				| KindExpr::Parameterized {
+					..
+				}
+				| KindExpr::Literal(_)
+				| KindExpr::KindPrefix(_)
+				| KindExpr::LiteralPrefix(_)
+				| KindExpr::Parenthesized(_)
+				| KindExpr::Object(_)
+				| KindExpr::Array(_) => KindExpr::Union(vec![expr, right]),
 			};
 		}
 
@@ -322,7 +331,10 @@ pub fn kind_in(input: TokenStream) -> TokenStream {
 		match &tree {
 			proc_macro2::TokenTree::Punct(p) if !closed && p.as_char() == ';' => closed = true,
 			_ if closed => rest.extend([tree]),
-			_ => base.extend([tree]),
+			proc_macro2::TokenTree::Group(_)
+			| proc_macro2::TokenTree::Ident(_)
+			| proc_macro2::TokenTree::Punct(_)
+			| proc_macro2::TokenTree::Literal(_) => base.extend([tree]),
 		}
 	}
 	if !closed || base.is_empty() {
@@ -347,7 +359,9 @@ fn rebase(tokens: TokenStream2, base: &TokenStream2) -> TokenStream2 {
 				rebuilt.set_span(group.span());
 				TokenStream2::from(TokenTree::Group(rebuilt))
 			}
-			other => TokenStream2::from(other),
+			other @ TokenTree::Ident(_)
+			| other @ TokenTree::Punct(_)
+			| other @ TokenTree::Literal(_) => TokenStream2::from(other),
 		})
 		.collect()
 }
@@ -446,7 +460,12 @@ fn generate_literal_kind(lit: &syn::Lit) -> TokenStream2 {
 				surrealdb_types::Kind::Literal(surrealdb_types::KindLiteral::String(#value.to_string()))
 			}
 		}
-		_ => quote! { compile_error!("Unsupported literal type") },
+		syn::Lit::ByteStr(_)
+		| syn::Lit::CStr(_)
+		| syn::Lit::Byte(_)
+		| syn::Lit::Char(_)
+		| syn::Lit::Verbatim(_)
+		| _ => quote! { compile_error!("Unsupported literal type") },
 	}
 }
 
@@ -513,7 +532,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -536,7 +555,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -640,7 +659,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 
@@ -663,7 +682,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 							}
 						}
 					}
-					_ => {} // Ignore other parameter types
+					KindParam::Literal(_) | KindParam::Kind(_) => {} // Ignore other parameter types
 				}
 			}
 

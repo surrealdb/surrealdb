@@ -52,7 +52,22 @@ where
 			let args = match args.into_value() {
 				Value::None => Array::new(),
 				Value::Array(array) => array,
-				value => Array::from(vec![value]),
+				value @ (Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Object(_)
+				| Value::Set(_)) => Array::from(vec![value]),
 			};
 
 			let value = router.engine.run(ctx(client.session_id), name, version, args).await?;
@@ -64,7 +79,24 @@ where
 				Value::Array(array) if array.len() == 1 => {
 					array.into_iter().next().expect("array has exactly one element")
 				}
-				value => value,
+				value @ (Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Bytes(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Geometry(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Set(_)) => value,
 			};
 			R::from_value(value).map_err(|e| {
 				crate::Error::serialization(

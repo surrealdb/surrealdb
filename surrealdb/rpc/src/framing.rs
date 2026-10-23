@@ -616,7 +616,18 @@ mod tests {
 					values,
 					..
 				} => Some(values.len()),
-				_ => None,
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => None,
 			})
 			.collect();
 		assert_eq!(sizes[..5], [16, 32, 64, 128, 256], "the ramp doubles to the cap");
@@ -908,7 +919,18 @@ mod tests {
 						values,
 						..
 					} => Some(values.len()),
-					_ => None,
+					QueryStreamFrame::Begin {
+						..
+					}
+					| QueryStreamFrame::Value {
+						..
+					}
+					| QueryStreamFrame::Finished {
+						..
+					}
+					| QueryStreamFrame::End {
+						..
+					} => None,
 				})
 				.sum();
 			assert_eq!(rows, 16, "statement {index} delivers every row exactly once");
@@ -1038,7 +1060,18 @@ mod tests {
 					values,
 					..
 				} => values,
-				_ => Vec::new(),
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => Vec::new(),
 			})
 			.collect();
 		assert_eq!(values, (0..15).map(int).collect::<Vec<_>>());
@@ -1097,7 +1130,21 @@ mod tests {
 					index: 1,
 					values,
 				} => Some(values.len()),
-				_ => None,
+				QueryStreamFrame::Begin {
+					..
+				}
+				| QueryStreamFrame::Rows {
+					..
+				}
+				| QueryStreamFrame::Value {
+					..
+				}
+				| QueryStreamFrame::Finished {
+					..
+				}
+				| QueryStreamFrame::End {
+					..
+				} => None,
 			})
 			.sum();
 		assert_eq!(rows, 40, "every row of the committed statement goes out");

@@ -278,12 +278,12 @@ impl FieldCandidate {
 /// Whether `kind` is exactly `object` or `option<object>`: the kinds under which a named part
 /// descends into an object and nothing else.
 fn is_object_kind(kind: &Kind) -> bool {
-	match kind {
-		Kind::Object => true,
-		Kind::Either(kinds) => {
-			kinds.len() == 2 && kinds.contains(&Kind::None) && kinds.contains(&Kind::Object)
-		}
-		_ => false,
+	if let Kind::Object = kind {
+		true
+	} else if let Kind::Either(kinds) = kind {
+		kinds.len() == 2 && kinds.contains(&Kind::None) && kinds.contains(&Kind::Object)
+	} else {
+		false
 	}
 }
 

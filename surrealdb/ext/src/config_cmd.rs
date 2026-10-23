@@ -172,7 +172,15 @@ async fn run(dir: &Path, command: ConfigCommand) -> Result<String> {
 		ConfigCommand::Signer(signer) => {
 			let signer = match signer {
 				SignerCommand::Remove => None,
-				signer => Some(signer_from(signer).await?),
+				signer @ (SignerCommand::Github {
+					..
+				}
+				| SignerCommand::Gitlab {
+					..
+				}
+				| SignerCommand::Ssh {
+					..
+				}) => Some(signer_from(signer).await?),
 			};
 			let described = match &signer {
 				Some(PackageSigner::Sigstore(s)) => {

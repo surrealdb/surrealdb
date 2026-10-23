@@ -50,17 +50,15 @@ fn test_parse_simple_cte() {
 	let sql = "WITH regional_sales AS (SELECT region, sum(amount) AS total_sales FROM orders GROUP BY region) SELECT region, total_sales FROM regional_sales";
 	let stmt = parse_statement(sql).expect("parse simple CTE");
 
-	match stmt {
-		Statement::Select(select) => {
-			let with = select.with.expect("WITH clause expected");
-			assert!(!with.recursive);
-			assert_eq!(with.ctes.len(), 1);
-			assert_eq!(with.ctes[0].name, "regional_sales");
-			assert!(with.ctes[0].columns.is_empty());
-			assert_eq!(with.ctes[0].materialized, None);
-		}
-		other => panic!("expected Select statement, got {:?}", other),
-	}
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select statement, got {:?}", stmt);
+	};
+	let with = select.with.expect("WITH clause expected");
+	assert!(!with.recursive);
+	assert_eq!(with.ctes.len(), 1);
+	assert_eq!(with.ctes[0].name, "regional_sales");
+	assert!(with.ctes[0].columns.is_empty());
+	assert_eq!(with.ctes[0].materialized, None);
 
 	assert_stmt_roundtrip(sql);
 }
@@ -70,17 +68,15 @@ fn test_parse_multi_cte_with_column_aliases() {
 	let sql = "WITH t1(a, b) AS (SELECT 1, 2), t2(c) AS (SELECT 3) SELECT a, b, c FROM t1, t2";
 	let stmt = parse_statement(sql).expect("parse multi CTE");
 
-	match stmt {
-		Statement::Select(select) => {
-			let with = select.with.expect("WITH clause expected");
-			assert_eq!(with.ctes.len(), 2);
-			assert_eq!(with.ctes[0].name, "t1");
-			assert_eq!(with.ctes[0].columns, vec!["a", "b"]);
-			assert_eq!(with.ctes[1].name, "t2");
-			assert_eq!(with.ctes[1].columns, vec!["c"]);
-		}
-		other => panic!("expected Select statement, got {:?}", other),
-	}
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select statement, got {:?}", stmt);
+	};
+	let with = select.with.expect("WITH clause expected");
+	assert_eq!(with.ctes.len(), 2);
+	assert_eq!(with.ctes[0].name, "t1");
+	assert_eq!(with.ctes[0].columns, vec!["a", "b"]);
+	assert_eq!(with.ctes[1].name, "t2");
+	assert_eq!(with.ctes[1].columns, vec!["c"]);
 
 	assert_stmt_roundtrip(sql);
 }
@@ -90,15 +86,13 @@ fn test_parse_recursive_cte() {
 	let sql = "WITH RECURSIVE countdown(val) AS (SELECT 10 UNION ALL SELECT val - 1 FROM countdown WHERE val > 0) SELECT val FROM countdown";
 	let stmt = parse_statement(sql).expect("parse recursive CTE");
 
-	match stmt {
-		Statement::Select(select) => {
-			let with = select.with.expect("WITH clause expected");
-			assert!(with.recursive);
-			assert_eq!(with.ctes.len(), 1);
-			assert_eq!(with.ctes[0].name, "countdown");
-		}
-		other => panic!("expected Select statement, got {:?}", other),
-	}
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select statement, got {:?}", stmt);
+	};
+	let with = select.with.expect("WITH clause expected");
+	assert!(with.recursive);
+	assert_eq!(with.ctes.len(), 1);
+	assert_eq!(with.ctes[0].name, "countdown");
 
 	assert_stmt_roundtrip(sql);
 }
@@ -178,15 +172,13 @@ fn test_parse_window_clause() {
 	let sql = "SELECT avg(salary) OVER w, sum(salary) OVER w FROM employees WINDOW w AS (PARTITION BY dept_id ORDER BY salary DESC)";
 	let stmt = parse_statement(sql).expect("parse WINDOW clause");
 
-	match stmt {
-		Statement::Select(select) => {
-			assert_eq!(select.window.len(), 1);
-			assert_eq!(select.window[0].name, "w");
-			assert_eq!(select.window[0].spec.partition_by.len(), 1);
-			assert_eq!(select.window[0].spec.order_by.len(), 1);
-		}
-		other => panic!("expected Select, got {:?}", other),
-	}
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select, got {:?}", stmt);
+	};
+	assert_eq!(select.window.len(), 1);
+	assert_eq!(select.window[0].name, "w");
+	assert_eq!(select.window[0].spec.partition_by.len(), 1);
+	assert_eq!(select.window[0].spec.order_by.len(), 1);
 
 	assert_stmt_roundtrip(sql);
 }
@@ -244,22 +236,20 @@ fn test_parse_create_index() {
 
 	let sql2 = "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_full ON orders USING btree (created_at DESC NULLS LAST, total ASC NULLS FIRST) WHERE total > 100";
 	let stmt2 = parse_statement(sql2).expect("parse complex create index");
-	match stmt2 {
-		Statement::CreateIndex(idx) => {
-			assert!(idx.unique);
-			assert!(idx.concurrently);
-			assert!(idx.if_not_exists);
-			assert_eq!(idx.name.as_deref(), Some("idx_full"));
-			assert_eq!(idx.method.as_deref(), Some("btree"));
-			assert_eq!(idx.columns.len(), 2);
-			assert_eq!(idx.columns[0].direction, Some(OrderDirection::Desc));
-			assert_eq!(idx.columns[0].nulls, Some(NullsOrder::Last));
-			assert_eq!(idx.columns[1].direction, Some(OrderDirection::Asc));
-			assert_eq!(idx.columns[1].nulls, Some(NullsOrder::First));
-			assert!(idx.predicate.is_some());
-		}
-		other => panic!("expected CreateIndex, got {:?}", other),
-	}
+	let Statement::CreateIndex(idx) = stmt2 else {
+		panic!("expected CreateIndex, got {:?}", stmt2);
+	};
+	assert!(idx.unique);
+	assert!(idx.concurrently);
+	assert!(idx.if_not_exists);
+	assert_eq!(idx.name.as_deref(), Some("idx_full"));
+	assert_eq!(idx.method.as_deref(), Some("btree"));
+	assert_eq!(idx.columns.len(), 2);
+	assert_eq!(idx.columns[0].direction, Some(OrderDirection::Desc));
+	assert_eq!(idx.columns[0].nulls, Some(NullsOrder::Last));
+	assert_eq!(idx.columns[1].direction, Some(OrderDirection::Asc));
+	assert_eq!(idx.columns[1].nulls, Some(NullsOrder::First));
+	assert!(idx.predicate.is_some());
 	assert_stmt_roundtrip(sql2);
 }
 
@@ -272,15 +262,13 @@ fn test_parse_create_view() {
 
 	let sql2 = "CREATE OR REPLACE TEMPORARY VIEW v_summary (dept, total) AS SELECT dept, sum(salary) FROM emp GROUP BY dept";
 	let stmt2 = parse_statement(sql2).expect("parse create or replace temp view");
-	match stmt2 {
-		Statement::CreateView(v) => {
-			assert!(v.or_replace);
-			assert!(v.temporary);
-			assert!(!v.recursive);
-			assert_eq!(v.columns, vec!["dept", "total"]);
-		}
-		other => panic!("expected CreateView, got {:?}", other),
-	}
+	let Statement::CreateView(v) = stmt2 else {
+		panic!("expected CreateView, got {:?}", stmt2);
+	};
+	assert!(v.or_replace);
+	assert!(v.temporary);
+	assert!(!v.recursive);
+	assert_eq!(v.columns, vec!["dept", "total"]);
 	assert_stmt_roundtrip(sql2);
 }
 
@@ -293,13 +281,11 @@ fn test_parse_create_schema() {
 
 	let sql2 = "CREATE SCHEMA IF NOT EXISTS tenant_123";
 	let stmt2 = parse_statement(sql2).expect("parse create schema if not exists");
-	match stmt2 {
-		Statement::CreateSchema(s) => {
-			assert!(s.if_not_exists);
-			assert_eq!(s.name, "tenant_123");
-		}
-		other => panic!("expected CreateSchema, got {:?}", other),
-	}
+	let Statement::CreateSchema(s) = stmt2 else {
+		panic!("expected CreateSchema, got {:?}", stmt2);
+	};
+	assert!(s.if_not_exists);
+	assert_eq!(s.name, "tenant_123");
 	assert_stmt_roundtrip(sql2);
 }
 
@@ -308,19 +294,17 @@ fn test_parse_alter_table() {
 	let sql = "ALTER TABLE users ADD COLUMN bio TEXT, DROP COLUMN IF EXISTS temp_token CASCADE, ALTER COLUMN age SET DEFAULT 18, ALTER COLUMN email SET NOT NULL, RENAME COLUMN fullname TO full_name";
 	let stmt = parse_statement(sql).expect("parse multi-action alter table");
 
-	match stmt {
-		Statement::AlterTable(alter) => {
-			assert!(!alter.if_exists);
-			assert_eq!(alter.name.to_pgsql_string(), "users");
-			assert_eq!(alter.actions.len(), 5);
-			assert!(matches!(alter.actions[0], AlterTableAction::AddColumn { .. }));
-			assert!(matches!(alter.actions[1], AlterTableAction::DropColumn { .. }));
-			assert!(matches!(alter.actions[2], AlterTableAction::SetDefault { .. }));
-			assert!(matches!(alter.actions[3], AlterTableAction::SetNotNull { .. }));
-			assert!(matches!(alter.actions[4], AlterTableAction::RenameColumn { .. }));
-		}
-		other => panic!("expected AlterTable, got {:?}", other),
-	}
+	let Statement::AlterTable(alter) = stmt else {
+		panic!("expected AlterTable, got {:?}", stmt);
+	};
+	assert!(!alter.if_exists);
+	assert_eq!(alter.name.to_pgsql_string(), "users");
+	assert_eq!(alter.actions.len(), 5);
+	assert!(matches!(alter.actions[0], AlterTableAction::AddColumn { .. }));
+	assert!(matches!(alter.actions[1], AlterTableAction::DropColumn { .. }));
+	assert!(matches!(alter.actions[2], AlterTableAction::SetDefault { .. }));
+	assert!(matches!(alter.actions[3], AlterTableAction::SetNotNull { .. }));
+	assert!(matches!(alter.actions[4], AlterTableAction::RenameColumn { .. }));
 
 	assert_stmt_roundtrip(sql);
 }
@@ -334,24 +318,20 @@ fn test_parse_prepared_statements() {
 	let sql_prep =
 		"PREPARE get_user (INT, TEXT) AS SELECT * FROM users WHERE id = $1 AND role = $2";
 	let stmt_prep = parse_statement(sql_prep).expect("parse prepare");
-	match stmt_prep {
-		Statement::Prepare(prep) => {
-			assert_eq!(prep.name, "get_user");
-			assert_eq!(prep.param_types.len(), 2);
-		}
-		other => panic!("expected Prepare, got {:?}", other),
-	}
+	let Statement::Prepare(prep) = stmt_prep else {
+		panic!("expected Prepare, got {:?}", stmt_prep);
+	};
+	assert_eq!(prep.name, "get_user");
+	assert_eq!(prep.param_types.len(), 2);
 	assert_stmt_roundtrip(sql_prep);
 
 	let sql_exec1 = "EXECUTE get_user (42, 'admin')";
 	let stmt_exec1 = parse_statement(sql_exec1).expect("parse execute with params");
-	match stmt_exec1 {
-		Statement::Execute(exec) => {
-			assert_eq!(exec.name, "get_user");
-			assert_eq!(exec.params.len(), 2);
-		}
-		other => panic!("expected Execute, got {:?}", other),
-	}
+	let Statement::Execute(exec) = stmt_exec1 else {
+		panic!("expected Execute, got {:?}", stmt_exec1);
+	};
+	assert_eq!(exec.name, "get_user");
+	assert_eq!(exec.params.len(), 2);
 	assert_stmt_roundtrip(sql_exec1);
 
 	let sql_exec2 = "EXECUTE reset_all";
@@ -370,11 +350,9 @@ fn test_parse_prepared_statements() {
 
 	let sql_deal3 = "DEALLOCATE ALL";
 	let stmt_deal3 = parse_statement(sql_deal3).expect("parse deallocate all");
-	match stmt_deal3 {
-		Statement::Deallocate(deal) => {
-			assert_eq!(deal.name, None);
-		}
-		other => panic!("expected Deallocate, got {:?}", other),
-	}
+	let Statement::Deallocate(deal) = stmt_deal3 else {
+		panic!("expected Deallocate, got {:?}", stmt_deal3);
+	};
+	assert_eq!(deal.name, None);
 	assert_stmt_roundtrip(sql_deal3);
 }

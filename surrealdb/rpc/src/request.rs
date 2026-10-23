@@ -60,11 +60,8 @@ impl Request {
 		// Fetch the 'version' argument
 		let version = match obj.remove(VERSION) {
 			None | Some(PublicValue::None | PublicValue::Null) => None,
-			Some(PublicValue::Number(v)) => match v {
-				PublicNumber::Int(1) => Some(1),
-				PublicNumber::Int(2) => Some(2),
-				_ => return Err(invalid_request()),
-			},
+			Some(PublicValue::Number(PublicNumber::Int(1))) => Some(1),
+			Some(PublicValue::Number(PublicNumber::Int(2))) => Some(2),
 			_ => return Err(invalid_request()),
 		};
 
@@ -115,9 +112,12 @@ impl Request {
 				let map: HashMap<String, String> = o
 					.into_inner()
 					.into_iter()
-					.filter_map(|(k, v)| match v {
-						PublicValue::String(s) => Some((k, s)),
-						_ => None,
+					.filter_map(|(k, v)| {
+						if let PublicValue::String(s) = v {
+							Some((k, s))
+						} else {
+							None
+						}
 					})
 					.collect();
 				if map.is_empty() {

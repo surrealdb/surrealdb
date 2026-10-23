@@ -505,7 +505,51 @@ fn column_is_grouped(expr: &LogicalExpr, keys: &[LogicalExpr]) -> bool {
 			} => stack.push(expr),
 			// Anything else (function calls, subqueries, tables, …) is not a value
 			// determined by the grouping keys.
-			_ => return false,
+			LogicalExpr::Set(_)
+			| LogicalExpr::RecordId(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Flatten {
+				..
+			}
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Recurse(_)
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Broadcast {
+				..
+			}
+			| LogicalExpr::SetField {
+				..
+			}
+			| LogicalExpr::Call(_)
+			| LogicalExpr::Closure(_)
+			| LogicalExpr::If(_)
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue
+			| LogicalExpr::Subquery(_) => return false,
 		}
 	}
 	true
@@ -531,21 +575,20 @@ fn order_key_name(expr: &GqlExpr) -> Option<String> {
 /// Lowers a SKIP/LIMIT count: an unsigned integer literal or a parameter. The
 /// parser only produces these two forms.
 fn lower_count(expr: &GqlExpr) -> Result<LogicalExpr, SyntaxError> {
-	match expr {
-		GqlExpr::Literal(GqlLiteral::Integer(i), _) => {
-			Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*i)))
-		}
-		GqlExpr::Param {
-			name,
-			span,
-		} => {
-			naming::validate_param_name(name, *span)?;
-			Ok(LogicalExpr::Param(Param::from(name.clone())))
-		}
-		other => Err(syntax_error!(
+	if let GqlExpr::Literal(GqlLiteral::Integer(i), _) = expr {
+		Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*i)))
+	} else if let GqlExpr::Param {
+		name,
+		span,
+	} = expr
+	{
+		naming::validate_param_name(name, *span)?;
+		Ok(LogicalExpr::Param(Param::from(name.clone())))
+	} else {
+		Err(syntax_error!(
 			"Expected an unsigned integer or a parameter",
-			@other.span()
-		)),
+			@expr.span()
+		))
 	}
 }
 
@@ -575,11 +618,13 @@ impl ToSql for PreparedGqlQuery {
 		// keeps the GQL-ish rendering. A `PreparedGqlQuery` is only ever a
 		// `LogicalOp::Match` by construction; any other operator renders as
 		// the plan it is so the method never panics.
-		match &self.0 {
-			LogicalOp::Match(LogicalMatch {
-				plan,
-			}) => plan.fmt_sql(f, fmt),
-			other => other.fmt_sql(f, fmt),
+		if let LogicalOp::Match(LogicalMatch {
+			plan,
+		}) = &self.0
+		{
+			plan.fmt_sql(f, fmt)
+		} else {
+			self.0.fmt_sql(f, fmt)
 		}
 	}
 }

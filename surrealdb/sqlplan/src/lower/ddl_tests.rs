@@ -106,93 +106,70 @@ fn test_lower_pgsql_create_table_simple() {
 	// 1 DefineTable + 4 DefineField + 2 DefineIndex (id PK + email UNIQUE) = 7
 	assert_eq!(exprs.len(), 7);
 
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(t) => {
-				assert_eq!(t.full, true);
-				assert_eq!(t.kind, DefineKind::Default);
-			}
-			_ => panic!("Expected DefineTable"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(t) = &**d else {
+		panic!("Expected DefineTable");
+	};
+	assert_eq!(t.full, true);
+	assert_eq!(t.kind, DefineKind::Default);
 
 	// Field id
-	match &exprs[1] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Field(f) => {
-				assert_eq!(f.field_kind, Some(Kind::Int));
-			}
-			_ => panic!("Expected DefineField id"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[1] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Field(f) = &**d else {
+		panic!("Expected DefineField id");
+	};
+	assert_eq!(f.field_kind, Some(Kind::Int));
 
 	// Field name (NOT NULL)
-	match &exprs[2] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Field(f) => {
-				assert_eq!(f.field_kind, Some(Kind::String));
-				assert!(f.assert.is_some());
-			}
-			_ => panic!("Expected DefineField name"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[2] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Field(f) = &**d else {
+		panic!("Expected DefineField name");
+	};
+	assert_eq!(f.field_kind, Some(Kind::String));
+	assert!(f.assert.is_some());
 
 	// Field email
-	match &exprs[3] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Field(f) => {
-				assert_eq!(
-					f.field_kind,
-					Some(Kind::either(vec![Kind::None, Kind::Null, Kind::String]))
-				);
-			}
-			_ => panic!("Expected DefineField email"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[3] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Field(f) = &**d else {
+		panic!("Expected DefineField email");
+	};
+	assert_eq!(f.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::String])));
 
 	// Field age with default 18
-	match &exprs[4] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Field(f) => {
-				assert_eq!(
-					f.field_kind,
-					Some(Kind::either(vec![Kind::None, Kind::Null, Kind::Int]))
-				);
-				assert!(matches!(
-					f.default,
-					surrealdb_expr::expr::statements::define::DefineDefault::Set(_)
-				));
-			}
-			_ => panic!("Expected DefineField age"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[4] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Field(f) = &**d else {
+		panic!("Expected DefineField age");
+	};
+	assert_eq!(f.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::Int])));
+	assert!(matches!(f.default, surrealdb_expr::expr::statements::define::DefineDefault::Set(_)));
 
 	// Index 1: id primary key index
-	match &exprs[5] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
-			}
-			_ => panic!("Expected DefineIndex for primary key"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[5] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex for primary key");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
 
 	// Index 2: email unique index
-	match &exprs[6] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
-			}
-			_ => panic!("Expected DefineIndex for unique"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[6] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex for unique");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
 }
 
 #[test]
@@ -213,15 +190,13 @@ fn test_lower_pgsql_create_table_composite_keys() {
 	assert_eq!(exprs.len(), 6);
 
 	// DefineTable with IF NOT EXISTS
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(t) => {
-				assert_eq!(t.kind, DefineKind::IfNotExists);
-			}
-			_ => panic!("Expected DefineTable"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(t) = &**d else {
+		panic!("Expected DefineTable");
+	};
+	assert_eq!(t.kind, DefineKind::IfNotExists);
 }
 
 #[test]
@@ -234,17 +209,15 @@ fn test_lower_pgsql_create_index() {
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
-				assert_eq!(idx.kind, DefineKind::IfNotExists);
-				assert_eq!(idx.cols.len(), 1);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(idx.kind, DefineKind::IfNotExists);
+	assert_eq!(idx.cols.len(), 1);
 
 	let multi_idx = surrealdb_pgsql::parse_statement(
 		"CREATE INDEX idx_orders_customer_status ON orders (customer_id, status);",
@@ -253,16 +226,14 @@ fn test_lower_pgsql_create_index() {
 
 	let exprs_multi = lower_pgsql_ddl(&multi_idx).expect("lower");
 	assert_eq!(exprs_multi.len(), 1);
-	match &exprs_multi[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Idx);
-				assert_eq!(idx.cols.len(), 2);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs_multi[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Idx);
+	assert_eq!(idx.cols.len(), 2);
 }
 
 #[test]
@@ -275,19 +246,17 @@ fn test_lower_pgsql_create_view() {
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(t) => {
-				assert_eq!(t.kind, DefineKind::Overwrite);
-				assert!(t.view.is_some());
-				let v = t.view.as_ref().unwrap();
-				assert_eq!(v.what.len(), 1);
-				assert!(v.cond.is_some());
-			}
-			_ => panic!("Expected DefineTable for view"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(t) = &**d else {
+		panic!("Expected DefineTable for view");
+	};
+	assert_eq!(t.kind, DefineKind::Overwrite);
+	assert!(t.view.is_some());
+	let v = t.view.as_ref().unwrap();
+	assert_eq!(v.what.len(), 1);
+	assert!(v.cond.is_some());
 }
 
 #[test]
@@ -381,16 +350,14 @@ fn test_lower_mysql_create_table() {
 	// 1 DefineTable + 1 DefineSequence (id) + 7 DefineField + 2 DefineIndex (id PK + sku UNIQUE)
 	assert_eq!(exprs.len(), 11);
 
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(t) => {
-				assert_eq!(t.full, true);
-				assert_eq!(t.kind, DefineKind::IfNotExists);
-			}
-			_ => panic!("Expected DefineTable"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(t) = &**d else {
+		panic!("Expected DefineTable");
+	};
+	assert_eq!(t.full, true);
+	assert_eq!(t.kind, DefineKind::IfNotExists);
 }
 
 #[test]
@@ -443,12 +410,14 @@ fn test_lower_pgsql_foreign_key_column_constraint() {
 	// Find the author_id field
 	let author_field = exprs
 		.iter()
-		.find(|e| match e {
-			Expr::Define(d) => match &**d {
-				DefineStatement::Field(f) => f.name.to_sql() == "author_id",
-				_ => false,
-			},
-			_ => false,
+		.find(|e| {
+			if let Expr::Define(d) = e
+				&& let DefineStatement::Field(f) = &**d
+			{
+				f.name.to_sql() == "author_id"
+			} else {
+				false
+			}
 		})
 		.expect("found author_id field");
 
@@ -516,13 +485,13 @@ fn test_lower_pgsql_add_column_is_nullable_unless_not_null() {
 	let field_kind = |sql: &str| {
 		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
 		let exprs = lower_pgsql_ddl(&stmt).expect("lower");
-		match &exprs[0] {
-			Expr::Define(d) => match &**d {
-				DefineStatement::Field(f) => f.field_kind.clone(),
-				_ => panic!("Expected DefineField"),
-			},
-			_ => panic!("Expected Expr::Define"),
-		}
+		let Expr::Define(d) = &exprs[0] else {
+			panic!("Expected Expr::Define");
+		};
+		let DefineStatement::Field(f) = &**d else {
+			panic!("Expected DefineField");
+		};
+		f.field_kind.clone()
 	};
 	assert_eq!(
 		field_kind("ALTER TABLE users ADD COLUMN phone TEXT;"),
@@ -566,32 +535,28 @@ fn test_lower_pgsql_alter_table_constraints() {
 	.expect("parse");
 	let exprs_pk = lower_pgsql_ddl(&add_pk).expect("lower");
 	assert_eq!(exprs_pk.len(), 1);
-	match &exprs_pk[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
-				assert_eq!(idx.cols.len(), 2);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs_pk[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(idx.cols.len(), 2);
 
 	let add_uq =
 		surrealdb_pgsql::parse_statement("ALTER TABLE memberships ADD UNIQUE (user_id, role);")
 			.expect("parse");
 	let exprs_uq = lower_pgsql_ddl(&add_uq).expect("lower");
 	assert_eq!(exprs_uq.len(), 1);
-	match &exprs_uq[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
-				assert_eq!(idx.cols.len(), 2);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs_uq[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(idx.cols.len(), 2);
 
 	let drop_con = surrealdb_pgsql::parse_statement(
 		"ALTER TABLE memberships DROP CONSTRAINT IF EXISTS uq_user_role;",
@@ -613,16 +578,14 @@ fn test_lower_pgsql_create_index_concurrently() {
 
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert!(idx.concurrently);
-				assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Idx);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert!(idx.concurrently);
+	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Idx);
 }
 
 #[test]
@@ -632,17 +595,15 @@ fn test_lower_pgsql_create_view_wildcard() {
 
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(t) => {
-				assert!(t.view.is_some());
-				let v = t.view.as_ref().unwrap();
-				assert_eq!(v.expr, surrealdb_expr::expr::Fields::all());
-			}
-			_ => panic!("Expected DefineTable"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(t) = &**d else {
+		panic!("Expected DefineTable");
+	};
+	assert!(t.view.is_some());
+	let v = t.view.as_ref().unwrap();
+	assert_eq!(v.expr, surrealdb_expr::expr::Fields::all());
 }
 
 #[test]
@@ -707,16 +668,14 @@ fn test_lower_mysql_drop_multiple_tables() {
 	let exprs = lower_mysql_ddl(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 4);
 	for (i, expr) in exprs.iter().enumerate() {
-		match expr {
-			Expr::Remove(r) => match &**r {
-				RemoveStatement::Table(t) => {
-					assert!(t.if_exists);
-					assert_eq!(t.name.to_sql(), format!("t{}", i + 1));
-				}
-				_ => panic!("Expected RemoveTable"),
-			},
-			_ => panic!("Expected Expr::Remove"),
-		}
+		let Expr::Remove(r) = expr else {
+			panic!("Expected Expr::Remove");
+		};
+		let RemoveStatement::Table(t) = &**r else {
+			panic!("Expected RemoveTable");
+		};
+		assert!(t.if_exists);
+		assert_eq!(t.name.to_sql(), format!("t{}", i + 1));
 	}
 }
 
@@ -726,31 +685,27 @@ fn test_lower_mysql_database_ddl() {
 		surrealdb_mysql::parse_statement("CREATE DATABASE IF NOT EXISTS my_db;").expect("parse");
 	let exprs = lower_mysql_ddl(&create_stmt).expect("lower create db");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Database(db) => {
-				assert_eq!(db.name.to_sql(), "my_db");
-				assert_eq!(db.kind, DefineKind::IfNotExists);
-			}
-			_ => panic!("Expected DefineDatabase"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Database(db) = &**d else {
+		panic!("Expected DefineDatabase");
+	};
+	assert_eq!(db.name.to_sql(), "my_db");
+	assert_eq!(db.kind, DefineKind::IfNotExists);
 
 	let drop_stmt =
 		surrealdb_mysql::parse_statement("DROP DATABASE IF EXISTS my_db;").expect("parse");
 	let exprs = lower_mysql_ddl(&drop_stmt).expect("lower drop db");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Remove(r) => match &**r {
-			RemoveStatement::Database(db) => {
-				assert_eq!(db.name.to_sql(), "my_db");
-				assert!(db.if_exists);
-			}
-			_ => panic!("Expected RemoveDatabase"),
-		},
-		_ => panic!("Expected Expr::Remove"),
-	}
+	let Expr::Remove(r) = &exprs[0] else {
+		panic!("Expected Expr::Remove");
+	};
+	let RemoveStatement::Database(db) = &**r else {
+		panic!("Expected RemoveDatabase");
+	};
+	assert_eq!(db.name.to_sql(), "my_db");
+	assert!(db.if_exists);
 }
 
 #[test]
@@ -760,32 +715,28 @@ fn test_lower_mysql_index_ddl() {
 			.expect("parse");
 	let exprs = lower_mysql_ddl(&create_idx).expect("lower create index");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Index(idx) => {
-				assert_eq!(idx.name.to_sql(), "idx_email");
-				assert_eq!(idx.what.to_sql(), "users");
-				assert_eq!(idx.cols.len(), 1);
-			}
-			_ => panic!("Expected DefineIndex"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Index(idx) = &**d else {
+		panic!("Expected DefineIndex");
+	};
+	assert_eq!(idx.name.to_sql(), "idx_email");
+	assert_eq!(idx.what.to_sql(), "users");
+	assert_eq!(idx.cols.len(), 1);
 
 	let drop_idx =
 		surrealdb_mysql::parse_statement("DROP INDEX idx_email ON users;").expect("parse");
 	let exprs = lower_mysql_ddl(&drop_idx).expect("lower drop index");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Remove(r) => match &**r {
-			RemoveStatement::Index(idx) => {
-				assert_eq!(idx.name.to_sql(), "idx_email");
-				assert_eq!(idx.what.to_sql(), "users");
-			}
-			_ => panic!("Expected RemoveIndex"),
-		},
-		_ => panic!("Expected Expr::Remove"),
-	}
+	let Expr::Remove(r) = &exprs[0] else {
+		panic!("Expected Expr::Remove");
+	};
+	let RemoveStatement::Index(idx) = &**r else {
+		panic!("Expected RemoveIndex");
+	};
+	assert_eq!(idx.name.to_sql(), "idx_email");
+	assert_eq!(idx.what.to_sql(), "users");
 }
 
 #[test]
@@ -796,33 +747,29 @@ fn test_lower_mysql_view_ddl() {
 	.expect("parse");
 	let exprs = lower_mysql_ddl(&create_view).expect("lower create view");
 	assert_eq!(exprs.len(), 1);
-	match &exprs[0] {
-		Expr::Define(d) => match &**d {
-			DefineStatement::Table(tbl) => {
-				assert_eq!(tbl.name.to_sql(), "active_users");
-				assert_eq!(tbl.kind, DefineKind::Overwrite);
-				assert!(tbl.view.is_some());
-			}
-			_ => panic!("Expected DefineTable for view"),
-		},
-		_ => panic!("Expected Expr::Define"),
-	}
+	let Expr::Define(d) = &exprs[0] else {
+		panic!("Expected Expr::Define");
+	};
+	let DefineStatement::Table(tbl) = &**d else {
+		panic!("Expected DefineTable for view");
+	};
+	assert_eq!(tbl.name.to_sql(), "active_users");
+	assert_eq!(tbl.kind, DefineKind::Overwrite);
+	assert!(tbl.view.is_some());
 
 	let drop_view =
 		surrealdb_mysql::parse_statement("DROP VIEW IF EXISTS active_users, old_users;")
 			.expect("parse");
 	let exprs = lower_mysql_ddl(&drop_view).expect("lower drop view");
 	assert_eq!(exprs.len(), 2);
-	match &exprs[0] {
-		Expr::Remove(r) => match &**r {
-			RemoveStatement::Table(tbl) => {
-				assert_eq!(tbl.name.to_sql(), "active_users");
-				assert!(tbl.if_exists);
-			}
-			_ => panic!("Expected RemoveTable"),
-		},
-		_ => panic!("Expected Expr::Remove"),
-	}
+	let Expr::Remove(r) = &exprs[0] else {
+		panic!("Expected Expr::Remove");
+	};
+	let RemoveStatement::Table(tbl) = &**r else {
+		panic!("Expected RemoveTable");
+	};
+	assert_eq!(tbl.name.to_sql(), "active_users");
+	assert!(tbl.if_exists);
 }
 
 #[test]

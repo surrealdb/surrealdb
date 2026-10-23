@@ -611,22 +611,21 @@ mod tests {
 	#[test]
 	fn parses_startup_params() {
 		let payload = startup_payload(&[("user", "root"), ("database", "ns/db")]);
-		match parse_startup(&payload).unwrap() {
-			StartupMessage::Startup {
-				version,
-				params,
-			} => {
-				assert_eq!(version, PROTOCOL_VERSION_3_0);
-				assert_eq!(
-					params,
-					vec![
-						("user".to_string(), "root".to_string()),
-						("database".to_string(), "ns/db".to_string()),
-					]
-				);
-			}
-			other => panic!("unexpected message: {other:?}"),
-		}
+		let StartupMessage::Startup {
+			version,
+			params,
+		} = parse_startup(&payload).unwrap()
+		else {
+			panic!("unexpected message");
+		};
+		assert_eq!(version, PROTOCOL_VERSION_3_0);
+		assert_eq!(
+			params,
+			vec![
+				("user".to_string(), "root".to_string()),
+				("database".to_string(), "ns/db".to_string()),
+			]
+		);
 	}
 
 	#[test]
@@ -658,10 +657,10 @@ mod tests {
 	fn parses_query_message() {
 		let mut payload = b"SELECT 1".to_vec();
 		payload.push(0);
-		match parse_frontend(b'Q', &payload).unwrap() {
-			Frontend::Query(sql) => assert_eq!(sql, "SELECT 1"),
-			other => panic!("unexpected message: {other:?}"),
-		}
+		let Frontend::Query(sql) = parse_frontend(b'Q', &payload).unwrap() else {
+			panic!("unexpected message");
+		};
+		assert_eq!(sql, "SELECT 1");
 	}
 
 	#[test]

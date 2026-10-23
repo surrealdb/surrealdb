@@ -180,9 +180,12 @@ impl<'a> Placed<'a> {
 		let parts = &candidate.idiom().0;
 		let run: Vec<&'a str> = parts
 			.iter()
-			.map_while(|part| match part {
-				Part::Field(name) => Some(name.as_str()),
-				_ => None,
+			.map_while(|part| {
+				if let Part::Field(name) = part {
+					Some(name.as_str())
+				} else {
+					None
+				}
 			})
 			.collect();
 		let full = run.len() == parts.len();
@@ -254,7 +257,27 @@ impl<'k> Flat<'k> {
 				Kind::None => flat.none = true,
 				Kind::Null => flat.null = true,
 				Kind::Either(kinds) => stack.extend(kinds.iter().rev()),
-				other => flat.members.push(other),
+				other @ Kind::Bool
+				| other @ Kind::Bytes
+				| other @ Kind::Datetime
+				| other @ Kind::Decimal
+				| other @ Kind::Duration
+				| other @ Kind::Float
+				| other @ Kind::Int
+				| other @ Kind::Number
+				| other @ Kind::Object
+				| other @ Kind::String
+				| other @ Kind::Uuid
+				| other @ Kind::Regex
+				| other @ Kind::Table(_)
+				| other @ Kind::Record(_)
+				| other @ Kind::Geometry(_)
+				| other @ Kind::Set(..)
+				| other @ Kind::Array(..)
+				| other @ Kind::Function(..)
+				| other @ Kind::Range
+				| other @ Kind::Literal(_)
+				| other @ Kind::File(_) => flat.members.push(other),
 			}
 		}
 		flat

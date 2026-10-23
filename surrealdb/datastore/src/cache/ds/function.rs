@@ -206,12 +206,16 @@ fn return_expr(body: &LogicalOp) -> Option<&LogicalExpr> {
 				what,
 				fetch,
 			}),
-		] if fetch.is_empty() => match what.as_ref() {
-			LogicalOp::Eval(LogicalEval {
+		] if fetch.is_empty() => {
+			if let LogicalOp::Eval(LogicalEval {
 				expr,
-			}) => Some(expr),
-			_ => None,
-		},
+			}) = what.as_ref()
+			{
+				Some(expr)
+			} else {
+				None
+			}
+		}
 		[
 			LogicalOp::Eval(LogicalEval {
 				expr,

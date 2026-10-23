@@ -265,11 +265,15 @@ impl<'a> Parser<'a> {
 				self.recursion_depth += 1;
 				*loop_depth += 1;
 				self.bump(); // NOT
-				let op = match self.bump().kind {
-					TokenKind::Keyword(Keyword::Like) => BinaryOperator::Like,
-					TokenKind::Keyword(Keyword::Regexp) => BinaryOperator::Regexp,
-					TokenKind::Keyword(Keyword::Rlike) => BinaryOperator::Rlike,
-					_ => unreachable!(),
+				let bumped = &self.bump().kind;
+				let op = if *bumped == TokenKind::Keyword(Keyword::Like) {
+					BinaryOperator::Like
+				} else if *bumped == TokenKind::Keyword(Keyword::Regexp) {
+					BinaryOperator::Regexp
+				} else if *bumped == TokenKind::Keyword(Keyword::Rlike) {
+					BinaryOperator::Rlike
+				} else {
+					unreachable!()
 				};
 				let rhs = self.parse_expr_bp(PREC_CMP + 1)?;
 				let span = lhs.span().merge(rhs.span());
@@ -334,334 +338,281 @@ impl<'a> Parser<'a> {
 
 	fn parse_prefix(&mut self) -> ParseResult<Expr> {
 		let tok = self.peek().clone();
-		match tok.kind {
-			// Unary operators
-			TokenKind::Plus => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_UNARY)?;
-				let span = tok.span.merge(operand.span());
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::Plus,
-					expr: Box::new(operand),
-					span,
-				})
+		// Unary operators
+		if tok.kind == TokenKind::Plus {
+			self.bump();
+			let operand = self.parse_expr_bp(PREC_UNARY)?;
+			let span = tok.span.merge(operand.span());
+			Ok(Expr::UnaryOp {
+				op: UnaryOperator::Plus,
+				expr: Box::new(operand),
+				span,
+			})
+		} else if tok.kind == TokenKind::Minus {
+			self.bump();
+			let operand = self.parse_expr_bp(PREC_UNARY)?;
+			let span = tok.span.merge(operand.span());
+			// A minus applied to the literal 9223372036854775808 alone is the minimum 64-bit
+			// integer; the literal is a number beyond 64 bits until it is negated.
+			if self.is_int8_minimum_magnitude(&operand) {
+				return Ok(Expr::Literal(Literal::Integer(i64::MIN), span));
 			}
-			TokenKind::Minus => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_UNARY)?;
-				let span = tok.span.merge(operand.span());
-				// A minus applied to the literal 9223372036854775808 alone is the minimum 64-bit
-				// integer; the literal is a number beyond 64 bits until it is negated.
-				if self.is_int8_minimum_magnitude(&operand) {
-					return Ok(Expr::Literal(Literal::Integer(i64::MIN), span));
-				}
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::Minus,
-					expr: Box::new(operand),
-					span,
-				})
-			}
-			TokenKind::Tilde => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_UNARY)?;
-				let span = tok.span.merge(operand.span());
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::BitNot,
-					expr: Box::new(operand),
-					span,
-				})
-			}
-			TokenKind::Bang => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_NOT)?;
-				let span = tok.span.merge(operand.span());
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::Not,
-					expr: Box::new(operand),
-					span,
-				})
-			}
-			TokenKind::Keyword(Keyword::Not) => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_NOT)?;
-				let span = tok.span.merge(operand.span());
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::Not,
-					expr: Box::new(operand),
-					span,
-				})
-			}
-			TokenKind::Keyword(Keyword::Binary) => {
-				self.bump();
-				let operand = self.parse_expr_bp(PREC_UNARY)?;
-				let span = tok.span.merge(operand.span());
-				Ok(Expr::UnaryOp {
-					op: UnaryOperator::Binary,
-					expr: Box::new(operand),
-					span,
-				})
-			}
-			TokenKind::Keyword(Keyword::Interval) => {
-				self.bump();
-				let expr = self.parse_expr_bp(PREC_INTERVAL)?;
-				let (unit, unit_span) = self.parse_ident()?;
-				let span = tok.span.merge(unit_span);
-				Ok(Expr::Interval {
-					expr: Box::new(expr),
-					unit,
-					span,
-				})
-			}
-			_ => self.parse_primary(),
+			Ok(Expr::UnaryOp {
+				op: UnaryOperator::Minus,
+				expr: Box::new(operand),
+				span,
+			})
+		} else if tok.kind == TokenKind::Tilde {
+			self.bump();
+			let operand = self.parse_expr_bp(PREC_UNARY)?;
+			let span = tok.span.merge(operand.span());
+			Ok(Expr::UnaryOp {
+				op: UnaryOperator::BitNot,
+				expr: Box::new(operand),
+				span,
+			})
+		} else if tok.kind == TokenKind::Bang || tok.kind == TokenKind::Keyword(Keyword::Not) {
+			self.bump();
+			let operand = self.parse_expr_bp(PREC_NOT)?;
+			let span = tok.span.merge(operand.span());
+			Ok(Expr::UnaryOp {
+				op: UnaryOperator::Not,
+				expr: Box::new(operand),
+				span,
+			})
+		} else if tok.kind == TokenKind::Keyword(Keyword::Binary) {
+			self.bump();
+			let operand = self.parse_expr_bp(PREC_UNARY)?;
+			let span = tok.span.merge(operand.span());
+			Ok(Expr::UnaryOp {
+				op: UnaryOperator::Binary,
+				expr: Box::new(operand),
+				span,
+			})
+		} else if tok.kind == TokenKind::Keyword(Keyword::Interval) {
+			self.bump();
+			let expr = self.parse_expr_bp(PREC_INTERVAL)?;
+			let (unit, unit_span) = self.parse_ident()?;
+			let span = tok.span.merge(unit_span);
+			Ok(Expr::Interval {
+				expr: Box::new(expr),
+				unit,
+				span,
+			})
+		} else {
+			self.parse_primary()
 		}
 	}
 
 	#[inline(never)]
 	fn parse_primary(&mut self) -> ParseResult<Expr> {
 		let tok = self.peek().clone();
-		match tok.kind {
-			// Literals
-			TokenKind::IntLiteral(n) => {
+		if let TokenKind::IntLiteral(n) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::Integer(n), tok.span))
+		} else if let TokenKind::WideIntLiteral {
+			value,
+			..
+		} = tok.kind
+		{
+			self.bump();
+			Ok(Expr::Literal(Literal::Float(value), tok.span))
+		} else if let TokenKind::FloatLiteral(fl) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::Float(fl), tok.span))
+		} else if let TokenKind::StringLiteral(s) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::String(s), tok.span))
+		} else if let TokenKind::CharsetIntro(charset) = tok.kind {
+			self.bump();
+			let lit_tok = self.peek().clone();
+			if let TokenKind::StringLiteral(s) = lit_tok.kind {
 				self.bump();
-				Ok(Expr::Literal(Literal::Integer(n), tok.span))
-			}
-			TokenKind::WideIntLiteral {
-				value,
-				..
-			} => {
+				Ok(Expr::Literal(
+					Literal::IntroducedString {
+						charset,
+						value: s,
+					},
+					tok.span.merge(lit_tok.span),
+				))
+			} else if let TokenKind::HexLiteral(bytes) = lit_tok.kind {
 				self.bump();
-				Ok(Expr::Literal(Literal::Float(value), tok.span))
+				Ok(Expr::Literal(
+					Literal::IntroducedHexString {
+						charset,
+						value: bytes,
+					},
+					tok.span.merge(lit_tok.span),
+				))
+			} else {
+				Err(ParseError::new(
+					lit_tok.span,
+					ErrorKind::UnexpectedToken {
+						expected: "string or hex literal after character set introducer",
+						found: lit_tok.kind.to_string(),
+					},
+				))
 			}
-			TokenKind::FloatLiteral(fl) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::Float(fl), tok.span))
-			}
-			TokenKind::StringLiteral(s) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::String(s), tok.span))
-			}
-			TokenKind::CharsetIntro(charset) => {
-				self.bump();
-				let lit_tok = self.peek().clone();
-				match lit_tok.kind {
-					TokenKind::StringLiteral(s) => {
-						self.bump();
-						Ok(Expr::Literal(
-							Literal::IntroducedString {
-								charset,
-								value: s,
-							},
-							tok.span.merge(lit_tok.span),
-						))
-					}
-					TokenKind::HexLiteral(bytes) => {
-						self.bump();
-						Ok(Expr::Literal(
-							Literal::IntroducedHexString {
-								charset,
-								value: bytes,
-							},
-							tok.span.merge(lit_tok.span),
-						))
-					}
-					_ => Err(ParseError::new(
-						lit_tok.span,
-						ErrorKind::UnexpectedToken {
-							expected: "string or hex literal after character set introducer",
-							found: lit_tok.kind.to_string(),
-						},
-					)),
-				}
-			}
-			TokenKind::HexLiteral(bytes) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::HexString(bytes), tok.span))
-			}
-			TokenKind::BitLiteral(bits) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::BitString(bits), tok.span))
-			}
-			TokenKind::Keyword(Keyword::Null) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::Null, tok.span))
-			}
-			TokenKind::Keyword(Keyword::True) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::Boolean(true), tok.span))
-			}
-			TokenKind::Keyword(Keyword::False) => {
-				self.bump();
-				Ok(Expr::Literal(Literal::Boolean(false), tok.span))
-			}
-
-			// Positional Parameter '?'
-			TokenKind::Param(idx) => {
-				self.bump();
-				Ok(Expr::Param(idx, tok.span))
-			}
-
-			// User Variable '@var'
-			TokenKind::UserVar(v) => {
-				self.bump();
-				Ok(Expr::UserVar(v, tok.span))
-			}
-
-			// System Variable '@@var' or '@@global.var'
-			TokenKind::SystemVar {
+		} else if let TokenKind::HexLiteral(bytes) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::HexString(bytes), tok.span))
+		} else if let TokenKind::BitLiteral(bits) = tok.kind {
+			self.bump();
+			Ok(Expr::Literal(Literal::BitString(bits), tok.span))
+		} else if tok.kind == TokenKind::Keyword(Keyword::Null) {
+			self.bump();
+			Ok(Expr::Literal(Literal::Null, tok.span))
+		} else if tok.kind == TokenKind::Keyword(Keyword::True) {
+			self.bump();
+			Ok(Expr::Literal(Literal::Boolean(true), tok.span))
+		} else if tok.kind == TokenKind::Keyword(Keyword::False) {
+			self.bump();
+			Ok(Expr::Literal(Literal::Boolean(false), tok.span))
+		} else if let TokenKind::Param(idx) = tok.kind {
+			self.bump();
+			Ok(Expr::Param(idx, tok.span))
+		} else if let TokenKind::UserVar(v) = tok.kind {
+			self.bump();
+			Ok(Expr::UserVar(v, tok.span))
+		} else if let TokenKind::SystemVar {
+			name,
+			is_global,
+		} = tok.kind
+		{
+			self.bump();
+			Ok(Expr::SystemVar {
 				name,
 				is_global,
-			} => {
-				self.bump();
-				Ok(Expr::SystemVar {
-					name,
-					is_global,
-					span: tok.span,
-				})
-			}
-
-			// Parenthesized expression or Subquery
-			TokenKind::LParen => {
-				self.bump(); // '('
-				if self.peek_keyword() == Some(Keyword::Select) {
-					let sub = self.parse_select_stmt()?;
-					let end = self.expect(&TokenKind::RParen, "')' closing subquery")?.span;
-					Ok(Expr::Subquery {
-						subquery: Box::new(sub),
-						span: tok.span.merge(end),
-					})
-				} else {
-					let inner = self.parse_expr()?;
-					self.expect(&TokenKind::RParen, "')' closing expression")?;
-					Ok(inner)
-				}
-			}
-
-			// EXISTS (SELECT ...)
-			TokenKind::Keyword(Keyword::Exists) => {
-				self.bump(); // EXISTS
-				self.expect(&TokenKind::LParen, "'(' after EXISTS")?;
+				span: tok.span,
+			})
+		} else if tok.kind == TokenKind::LParen {
+			self.bump(); // '('
+			if self.peek_keyword() == Some(Keyword::Select) {
 				let sub = self.parse_select_stmt()?;
-				let end = self.expect(&TokenKind::RParen, "')' closing EXISTS subquery")?.span;
-				Ok(Expr::Exists {
+				let end = self.expect(&TokenKind::RParen, "')' closing subquery")?.span;
+				Ok(Expr::Subquery {
 					subquery: Box::new(sub),
 					span: tok.span.merge(end),
 				})
+			} else {
+				let inner = self.parse_expr()?;
+				self.expect(&TokenKind::RParen, "')' closing expression")?;
+				Ok(inner)
 			}
+		} else if tok.kind == TokenKind::Keyword(Keyword::Exists) {
+			self.bump(); // EXISTS
+			self.expect(&TokenKind::LParen, "'(' after EXISTS")?;
+			let sub = self.parse_select_stmt()?;
+			let end = self.expect(&TokenKind::RParen, "')' closing EXISTS subquery")?.span;
+			Ok(Expr::Exists {
+				subquery: Box::new(sub),
+				span: tok.span.merge(end),
+			})
+		} else if tok.kind == TokenKind::Keyword(Keyword::Case) {
+			self.parse_case_expr()
+		} else if tok.kind == TokenKind::Keyword(Keyword::Cast) {
+			self.parse_cast_expr()
+		} else if tok.kind == TokenKind::Keyword(Keyword::Convert) {
+			self.parse_convert_expr()
+		} else if tok.kind == TokenKind::Keyword(Keyword::Default) {
+			self.bump();
+			Ok(Expr::ColumnRef(ColumnRef {
+				fields: vec!["DEFAULT".to_string()],
+				span: tok.span,
+			}))
+		} else if matches!(
+			tok.kind,
+			TokenKind::Ident(_)
+				| TokenKind::Keyword(
+					Keyword::If
+						| Keyword::Ifnull | Keyword::Nullif
+						| Keyword::Coalesce
+						| Keyword::Values
+				)
+		) || (matches!(tok.kind, TokenKind::Keyword(_))
+			&& self.peek_nth(1).kind == TokenKind::LParen)
+		{
+			let (name, name_span) = self.parse_ident()?;
 
-			// CASE [expr] WHEN ... THEN ... [ELSE ...] END
-			TokenKind::Keyword(Keyword::Case) => self.parse_case_expr(),
-
-			// CAST(x AS type) or CONVERT(x, type)
-			TokenKind::Keyword(Keyword::Cast) => self.parse_cast_expr(),
-			TokenKind::Keyword(Keyword::Convert) => self.parse_convert_expr(),
-
-			// DEFAULT keyword
-			TokenKind::Keyword(Keyword::Default) => {
-				self.bump();
-				Ok(Expr::ColumnRef(ColumnRef {
-					fields: vec!["DEFAULT".to_string()],
-					span: tok.span,
-				}))
-			}
-
-			// Identifiers, Functions, or Column References
-			tok if matches!(
-				tok,
-				TokenKind::Ident(_)
-					| TokenKind::Keyword(
-						Keyword::If
-							| Keyword::Ifnull | Keyword::Nullif
-							| Keyword::Coalesce | Keyword::Values
-					)
-			) || (matches!(tok, TokenKind::Keyword(_))
-				&& self.peek_nth(1).kind == TokenKind::LParen) =>
-			{
-				let (name, name_span) = self.parse_ident()?;
-
-				// Check for function call: name(...)
-				if self.peek().kind == TokenKind::LParen {
-					self.bump(); // '('
-					let distinct = if self.peek_keyword() == Some(Keyword::Distinct) {
-						self.bump();
-						true
+			// Check for function call: name(...)
+			if self.peek().kind == TokenKind::LParen {
+				self.bump(); // '('
+				let distinct = if self.peek_keyword() == Some(Keyword::Distinct) {
+					self.bump();
+					true
+				} else {
+					false
+				};
+				let mut args = Vec::new();
+				if self.peek().kind != TokenKind::RParen {
+					if self.peek().kind == TokenKind::Star {
+						let star_span = self.bump().span;
+						args.push(Expr::ColumnRef(ColumnRef {
+							fields: vec!["*".to_string()],
+							span: star_span,
+						}));
 					} else {
-						false
-					};
-					let mut args = Vec::new();
-					if self.peek().kind != TokenKind::RParen {
-						if self.peek().kind == TokenKind::Star {
-							let star_span = self.bump().span;
-							args.push(Expr::ColumnRef(ColumnRef {
-								fields: vec!["*".to_string()],
-								span: star_span,
-							}));
-						} else {
-							loop {
-								args.push(self.parse_expr()?);
-								if self.peek().kind == TokenKind::Comma {
-									self.bump();
-								} else {
-									break;
-								}
+						loop {
+							args.push(self.parse_expr()?);
+							if self.peek().kind == TokenKind::Comma {
+								self.bump();
+							} else {
+								break;
 							}
 						}
 					}
-					let end =
-						self.expect(&TokenKind::RParen, "')' closing function arguments")?.span;
-					let (over, span) = if self.eat_keyword(Keyword::Over) {
-						let spec = self.parse_window_spec()?;
-						let span = name_span.merge(spec.span);
-						(Some(Box::new(spec)), span)
-					} else {
-						(None, name_span.merge(end))
-					};
-					return Ok(Expr::FunctionCall {
-						name,
-						distinct,
-						args,
-						over,
-						span,
-					});
 				}
-
-				// Otherwise, it's a column reference `name` or `name.field...`
-				let mut fields = vec![name];
-				let mut span = name_span;
-				while self.peek().kind == TokenKind::Dot {
-					self.bump(); // '.'
-					if self.peek().kind == TokenKind::Star {
-						let star_span = self.bump().span;
-						fields.push("*".to_string());
-						span = span.merge(star_span);
-						break;
-					}
-					let (field, field_span) = self.parse_ident()?;
-					fields.push(field);
-					span = span.merge(field_span);
-				}
-
-				Ok(Expr::ColumnRef(ColumnRef {
-					fields,
+				let end = self.expect(&TokenKind::RParen, "')' closing function arguments")?.span;
+				let (over, span) = if self.eat_keyword(Keyword::Over) {
+					let spec = self.parse_window_spec()?;
+					let span = name_span.merge(spec.span);
+					(Some(Box::new(spec)), span)
+				} else {
+					(None, name_span.merge(end))
+				};
+				return Ok(Expr::FunctionCall {
+					name,
+					distinct,
+					args,
+					over,
 					span,
-				}))
+				});
 			}
 
-			// Wildcard '*'
-			TokenKind::Star => {
-				self.bump();
-				Ok(Expr::ColumnRef(ColumnRef {
-					fields: vec!["*".to_string()],
-					span: tok.span,
-				}))
+			// Otherwise, it's a column reference `name` or `name.field...`
+			let mut fields = vec![name];
+			let mut span = name_span;
+			while self.peek().kind == TokenKind::Dot {
+				self.bump(); // '.'
+				if self.peek().kind == TokenKind::Star {
+					let star_span = self.bump().span;
+					fields.push("*".to_string());
+					span = span.merge(star_span);
+					break;
+				}
+				let (field, field_span) = self.parse_ident()?;
+				fields.push(field);
+				span = span.merge(field_span);
 			}
 
-			_ => Err(ParseError::new(
+			Ok(Expr::ColumnRef(ColumnRef {
+				fields,
+				span,
+			}))
+		} else if tok.kind == TokenKind::Star {
+			self.bump();
+			Ok(Expr::ColumnRef(ColumnRef {
+				fields: vec!["*".to_string()],
+				span: tok.span,
+			}))
+		} else {
+			Err(ParseError::new(
 				tok.span,
 				ErrorKind::UnexpectedToken {
 					expected: "expression",
 					found: tok.kind.to_string(),
 				},
-			)),
+			))
 		}
 	}
 
@@ -739,42 +690,69 @@ impl<'a> Parser<'a> {
 	}
 
 	fn peek_binary_op(&self) -> Option<BinaryOperator> {
-		match &self.peek().kind {
-			TokenKind::ColonEqual => Some(BinaryOperator::Assign),
-			TokenKind::DoublePipe => {
-				if self.settings.sql_mode.pipes_as_concat {
-					Some(BinaryOperator::Concat)
-				} else {
-					Some(BinaryOperator::Or)
-				}
+		let kind = &self.peek().kind;
+		if kind == &TokenKind::ColonEqual {
+			Some(BinaryOperator::Assign)
+		} else if kind == &TokenKind::DoublePipe {
+			if self.settings.sql_mode.pipes_as_concat {
+				Some(BinaryOperator::Concat)
+			} else {
+				Some(BinaryOperator::Or)
 			}
-			TokenKind::DoubleAmpersand => Some(BinaryOperator::And),
-			TokenKind::Equal => Some(BinaryOperator::Equal),
-			TokenKind::NullSafeEqual => Some(BinaryOperator::NullSafeEqual),
-			TokenKind::NotEqual => Some(BinaryOperator::NotEqual),
-			TokenKind::Less => Some(BinaryOperator::Less),
-			TokenKind::LessEqual => Some(BinaryOperator::LessEqual),
-			TokenKind::Greater => Some(BinaryOperator::Greater),
-			TokenKind::GreaterEqual => Some(BinaryOperator::GreaterEqual),
-			TokenKind::Plus => Some(BinaryOperator::Add),
-			TokenKind::Minus => Some(BinaryOperator::Sub),
-			TokenKind::Star => Some(BinaryOperator::Mul),
-			TokenKind::Slash => Some(BinaryOperator::Div),
-			TokenKind::Percent => Some(BinaryOperator::Mod),
-			TokenKind::ShiftLeft => Some(BinaryOperator::ShiftLeft),
-			TokenKind::ShiftRight => Some(BinaryOperator::ShiftRight),
-			TokenKind::Ampersand => Some(BinaryOperator::BitAnd),
-			TokenKind::Pipe => Some(BinaryOperator::BitOr),
-			TokenKind::Caret => Some(BinaryOperator::BitXor),
-			TokenKind::Keyword(Keyword::Or) => Some(BinaryOperator::Or),
-			TokenKind::Keyword(Keyword::Xor) => Some(BinaryOperator::Xor),
-			TokenKind::Keyword(Keyword::And) => Some(BinaryOperator::And),
-			TokenKind::Keyword(Keyword::Div) => Some(BinaryOperator::IntDiv),
-			TokenKind::Keyword(Keyword::Mod) => Some(BinaryOperator::Mod),
-			TokenKind::Keyword(Keyword::Like) => Some(BinaryOperator::Like),
-			TokenKind::Keyword(Keyword::Regexp) => Some(BinaryOperator::Regexp),
-			TokenKind::Keyword(Keyword::Rlike) => Some(BinaryOperator::Rlike),
-			_ => None,
+		} else if kind == &TokenKind::DoubleAmpersand {
+			Some(BinaryOperator::And)
+		} else if kind == &TokenKind::Equal {
+			Some(BinaryOperator::Equal)
+		} else if kind == &TokenKind::NullSafeEqual {
+			Some(BinaryOperator::NullSafeEqual)
+		} else if kind == &TokenKind::NotEqual {
+			Some(BinaryOperator::NotEqual)
+		} else if kind == &TokenKind::Less {
+			Some(BinaryOperator::Less)
+		} else if kind == &TokenKind::LessEqual {
+			Some(BinaryOperator::LessEqual)
+		} else if kind == &TokenKind::Greater {
+			Some(BinaryOperator::Greater)
+		} else if kind == &TokenKind::GreaterEqual {
+			Some(BinaryOperator::GreaterEqual)
+		} else if kind == &TokenKind::Plus {
+			Some(BinaryOperator::Add)
+		} else if kind == &TokenKind::Minus {
+			Some(BinaryOperator::Sub)
+		} else if kind == &TokenKind::Star {
+			Some(BinaryOperator::Mul)
+		} else if kind == &TokenKind::Slash {
+			Some(BinaryOperator::Div)
+		} else if kind == &TokenKind::Percent {
+			Some(BinaryOperator::Mod)
+		} else if kind == &TokenKind::ShiftLeft {
+			Some(BinaryOperator::ShiftLeft)
+		} else if kind == &TokenKind::ShiftRight {
+			Some(BinaryOperator::ShiftRight)
+		} else if kind == &TokenKind::Ampersand {
+			Some(BinaryOperator::BitAnd)
+		} else if kind == &TokenKind::Pipe {
+			Some(BinaryOperator::BitOr)
+		} else if kind == &TokenKind::Caret {
+			Some(BinaryOperator::BitXor)
+		} else if kind == &TokenKind::Keyword(Keyword::Or) {
+			Some(BinaryOperator::Or)
+		} else if kind == &TokenKind::Keyword(Keyword::Xor) {
+			Some(BinaryOperator::Xor)
+		} else if kind == &TokenKind::Keyword(Keyword::And) {
+			Some(BinaryOperator::And)
+		} else if kind == &TokenKind::Keyword(Keyword::Div) {
+			Some(BinaryOperator::IntDiv)
+		} else if kind == &TokenKind::Keyword(Keyword::Mod) {
+			Some(BinaryOperator::Mod)
+		} else if kind == &TokenKind::Keyword(Keyword::Like) {
+			Some(BinaryOperator::Like)
+		} else if kind == &TokenKind::Keyword(Keyword::Regexp) {
+			Some(BinaryOperator::Regexp)
+		} else if kind == &TokenKind::Keyword(Keyword::Rlike) {
+			Some(BinaryOperator::Rlike)
+		} else {
+			None
 		}
 	}
 

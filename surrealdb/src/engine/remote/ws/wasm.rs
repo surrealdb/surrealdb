@@ -36,9 +36,10 @@ impl WsMessage for Message {
 	}
 
 	fn as_binary(&self) -> Option<&[u8]> {
-		match self {
-			Message::Binary(data) => Some(data),
-			_ => None,
+		if let Message::Binary(data) = self {
+			Some(data)
+		} else {
+			None
 		}
 	}
 

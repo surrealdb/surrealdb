@@ -27,40 +27,41 @@ impl Lower<'_> {
 	}
 
 	pub(crate) fn logical_expr(&self, id: NodeId, stored: bool) -> R<LogicalExpr> {
-		match self.n(id).tag {
-			Tag::Array | Tag::Set | Tag::Object | Tag::Prefix | Tag::Cast | Tag::Binary => {
-				self.logical_nesting(id, stored)
-			}
-			_ => self.logical_other(id, stored),
+		if matches!(
+			self.n(id).tag,
+			Tag::Array | Tag::Set | Tag::Object | Tag::Prefix | Tag::Cast | Tag::Binary
+		) {
+			self.logical_nesting(id, stored)
+		} else {
+			self.logical_other(id, stored)
 		}
 	}
 
 	#[inline(never)]
 	fn logical_nesting(&self, id: NodeId, stored: bool) -> R<LogicalExpr> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Array => LogicalExpr::Array(self.logical_exprs(n.a, stored)?),
-			Tag::Set => LogicalExpr::Set(self.logical_exprs(n.a, stored)?),
-			Tag::Object => {
-				let pairs = self.list(n.a);
-				// GeoJSON normalization uses the same literal classifier as
-				// static values; objects with arbitrary expressions stay objects.
-				let geometry = pairs.len() == 4
-					&& pairs
-						.chunks_exact(2)
-						.any(|kv| self.name(kv[0]).is_ok_and(|key| key == "type"));
-				if geometry {
-					return lower_expr(self.logical_native(id, stored)?)
-						.map_err(|e| Reject::new(e.to_string()));
-				}
-				LogicalExpr::Object(
-					pairs
-						.chunks_exact(2)
-						.map(|kv| Ok((self.name(kv[0])?, self.logical_expr(kv[1], stored)?)))
-						.collect::<R<_>>()?,
-				)
+		let expr = if n.tag == Tag::Array {
+			LogicalExpr::Array(self.logical_exprs(n.a, stored)?)
+		} else if n.tag == Tag::Set {
+			LogicalExpr::Set(self.logical_exprs(n.a, stored)?)
+		} else if n.tag == Tag::Object {
+			let pairs = self.list(n.a);
+			// GeoJSON normalization uses the same literal classifier as
+			// static values; objects with arbitrary expressions stay objects.
+			let geometry = pairs.len() == 4
+				&& pairs.chunks_exact(2).any(|kv| self.name(kv[0]).is_ok_and(|key| key == "type"));
+			if geometry {
+				return lower_expr(self.logical_native(id, stored)?)
+					.map_err(|e| Reject::new(e.to_string()));
 			}
-			Tag::Prefix => LogicalExpr::Prefix {
+			LogicalExpr::Object(
+				pairs
+					.chunks_exact(2)
+					.map(|kv| Ok((self.name(kv[0])?, self.logical_expr(kv[1], stored)?)))
+					.collect::<R<_>>()?,
+			)
+		} else if n.tag == Tag::Prefix {
+			LogicalExpr::Prefix {
 				op: match n.op {
 					x if x == Prefix::Not as u8 => PrefixOperator::Not,
 					x if x == Prefix::Neg as u8 => PrefixOperator::Negate,
@@ -69,118 +70,120 @@ impl Lower<'_> {
 					_ => PrefixOperator::RangeInclusive,
 				},
 				expr: Box::new(self.logical_expr(n.a, stored)?),
-			},
-			Tag::Cast => LogicalExpr::Prefix {
+			}
+		} else if n.tag == Tag::Cast {
+			LogicalExpr::Prefix {
 				op: PrefixOperator::Cast(self.kind(n.a)?),
 				expr: Box::new(self.logical_expr(n.b, stored)?),
-			},
-			Tag::Binary => LogicalExpr::Binary {
+			}
+		} else if n.tag == Tag::Binary {
+			LogicalExpr::Binary {
 				left: Box::new(self.logical_expr(n.a, stored)?),
 				op: binary(Binary::from_u8(n.op)),
 				right: Box::new(self.logical_expr(n.b, stored)?),
-			},
-			_ => unreachable!("only nesting constructs are lowered here"),
-		})
+			}
+		} else {
+			unreachable!("only nesting constructs are lowered here")
+		};
+		Ok(expr)
 	}
 
 	#[inline(never)]
 	fn logical_other(&self, id: NodeId, stored: bool) -> R<LogicalExpr> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Field => {
-				if n.op == 1 {
-					LogicalExpr::Current
-				} else {
-					LogicalExpr::Field(Strand::new(self.name(id)?))
-				}
+		let expr = if n.tag == Tag::Field {
+			if n.op == 1 {
+				LogicalExpr::Current
+			} else {
+				LogicalExpr::Field(Strand::new(self.name(id)?))
 			}
-			Tag::Idiom => {
-				let (base, steps) = self.logical_path(id, stored)?;
-				fold_steps(base, steps, PathMode::Continuation)
-			}
-			Tag::BinaryX => LogicalExpr::Binary {
+		} else if n.tag == Tag::Idiom {
+			let (base, steps) = self.logical_path(id, stored)?;
+			fold_steps(base, steps, PathMode::Continuation)
+		} else if n.tag == Tag::BinaryX {
+			LogicalExpr::Binary {
 				left: Box::new(self.logical_expr(n.a, stored)?),
 				op: self.binary_extended(n)?,
 				right: Box::new(self.logical_expr(self.ast.extra[n.b as usize], stored)?),
-			},
-			Tag::RecordId => {
-				LogicalExpr::RecordId(Box::new(crate::expr::logical::LogicalRecordIdLit {
-					table: surrealdb_strand::TableName::new(Strand::new(self.name(n.a)?)),
-					key: self.logical_key(n.b, stored)?,
-				}))
 			}
-
-			Tag::Param => LogicalExpr::Param(Param::from(Strand::new(self.param_name(id)?))),
-			Tag::PostfixRange => LogicalExpr::Postfix {
+		} else if n.tag == Tag::RecordId {
+			LogicalExpr::RecordId(Box::new(crate::expr::logical::LogicalRecordIdLit {
+				table: surrealdb_strand::TableName::new(Strand::new(self.name(n.a)?)),
+				key: self.logical_key(n.b, stored)?,
+			}))
+		} else if n.tag == Tag::Param {
+			LogicalExpr::Param(Param::from(Strand::new(self.param_name(id)?)))
+		} else if n.tag == Tag::PostfixRange {
+			LogicalExpr::Postfix {
 				expr: Box::new(self.logical_expr(n.a, stored)?),
 				op: if n.op == 0 {
 					LogicalPostfixOperator::Range
 				} else {
 					LogicalPostfixOperator::RangeSkip
 				},
-			},
-			Tag::CallExpr => LogicalExpr::Invoke {
+			}
+		} else if n.tag == Tag::CallExpr {
+			LogicalExpr::Invoke {
 				target: Box::new(self.logical_expr(n.a, stored)?),
 				args: self.logical_exprs(n.b, stored)?,
-			},
-			Tag::Call => {
-				let callee = self.n(n.a);
-				let receiver = if callee.op == 0 {
-					let path = self.path_name(n.a)?;
-					if !super::CHECK_NAMES.with(|c| c.get()) {
-						Function::Normal(path.to_lowercase())
-					} else {
-						match super::lit::builtin(&path, callee.start, callee.end)? {
-							super::lit::Builtin::Function(f) => Function::Normal(f),
-							super::lit::Builtin::Constant(c) => {
-								return Ok(LogicalExpr::Invoke {
-									target: Box::new(LogicalExpr::Constant(c)),
-									args: self.logical_exprs(n.b, stored)?,
-								});
-							}
+			}
+		} else if n.tag == Tag::Call {
+			let callee = self.n(n.a);
+			let receiver = if callee.op == 0 {
+				let path = self.path_name(n.a)?;
+				if !super::CHECK_NAMES.with(|c| c.get()) {
+					Function::Normal(path.to_lowercase())
+				} else {
+					match super::lit::builtin(&path, callee.start, callee.end)? {
+						super::lit::Builtin::Function(f) => Function::Normal(f),
+						super::lit::Builtin::Constant(c) => {
+							return Ok(LogicalExpr::Invoke {
+								target: Box::new(LogicalExpr::Constant(c)),
+								args: self.logical_exprs(n.b, stored)?,
+							});
 						}
 					}
-				} else {
-					self.function_ref(n.a)?
-				};
-				LogicalExpr::Call(Box::new(LogicalCall {
-					receiver,
-					args: self.logical_exprs(n.b, stored)?,
-				}))
-			}
-			Tag::Script => LogicalExpr::Call(Box::new(LogicalCall {
+				}
+			} else {
+				self.function_ref(n.a)?
+			};
+			LogicalExpr::Call(Box::new(LogicalCall {
+				receiver,
+				args: self.logical_exprs(n.b, stored)?,
+			}))
+		} else if n.tag == Tag::Script {
+			LogicalExpr::Call(Box::new(LogicalCall {
 				receiver: Function::Script(crate::expr::Script(self.text(n.a).to_owned())),
 				args: self.logical_exprs(n.b, stored)?,
-			})),
-			Tag::Closure => {
-				use surrealdb_types::ToSql;
-				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
-				LogicalExpr::Closure(Box::new(crate::expr::logical::LogicalClosure {
-					args: self
-						.list(rec[0])
-						.chunks_exact(2)
-						.map(|pk| {
-							Ok((
-								Param::from(Strand::new(self.param_name(pk[0])?)),
-								if pk[1] == NONE {
-									crate::expr::Kind::Any
-								} else {
-									self.kind(pk[1])?
-								},
-							))
-						})
-						.collect::<R<_>>()?,
-					returns: if rec[1] == NONE {
-						None
-					} else {
-						Some(self.kind(rec[1])?)
-					},
-					body: self.logical_expr(rec[2], stored)?,
-					body_sql: std::sync::Arc::from(self.expr(rec[2])?.to_sql()),
-				}))
-			}
-
-			Tag::If => LogicalExpr::If(Box::new(LogicalIf {
+			}))
+		} else if n.tag == Tag::Closure {
+			use surrealdb_types::ToSql;
+			let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
+			LogicalExpr::Closure(Box::new(crate::expr::logical::LogicalClosure {
+				args: self
+					.list(rec[0])
+					.chunks_exact(2)
+					.map(|pk| {
+						Ok((
+							Param::from(Strand::new(self.param_name(pk[0])?)),
+							if pk[1] == NONE {
+								crate::expr::Kind::Any
+							} else {
+								self.kind(pk[1])?
+							},
+						))
+					})
+					.collect::<R<_>>()?,
+				returns: if rec[1] == NONE {
+					None
+				} else {
+					Some(self.kind(rec[1])?)
+				},
+				body: self.logical_expr(rec[2], stored)?,
+				body_sql: std::sync::Arc::from(self.expr(rec[2])?.to_sql()),
+			}))
+		} else if n.tag == Tag::If {
+			LogicalExpr::If(Box::new(LogicalIf {
 				branches: self
 					.list(n.a)
 					.chunks_exact(2)
@@ -189,21 +192,27 @@ impl Lower<'_> {
 					})
 					.collect::<R<_>>()?,
 				otherwise: self.logical_opt(n.b, stored)?,
-			})),
-			Tag::Throw => LogicalExpr::Throw(Box::new(self.logical_expr(n.a, stored)?)),
-			Tag::Break => LogicalExpr::Break,
-			Tag::Continue => LogicalExpr::Continue,
+			}))
+		} else if n.tag == Tag::Throw {
+			LogicalExpr::Throw(Box::new(self.logical_expr(n.a, stored)?))
+		} else if n.tag == Tag::Break {
+			LogicalExpr::Break
+		} else if n.tag == Tag::Continue {
+			LogicalExpr::Continue
+		} else if matches!(
+			n.tag,
 			Tag::Block
-			| Tag::Return
-			| Tag::Let
-			| Tag::For
-			| Tag::Info
-			| Tag::Explain
-			| Tag::Select
-			| Tag::Sleep => LogicalExpr::Subquery(Box::new(self.logical_statement(id, stored)?)),
-			_ => lower_expr(self.logical_native(id, stored)?)
-				.map_err(|e| Reject::new(e.to_string()))?,
-		})
+				| Tag::Return
+				| Tag::Let | Tag::For
+				| Tag::Info | Tag::Explain
+				| Tag::Select
+				| Tag::Sleep
+		) {
+			LogicalExpr::Subquery(Box::new(self.logical_statement(id, stored)?))
+		} else {
+			lower_expr(self.logical_native(id, stored)?).map_err(|e| Reject::new(e.to_string()))?
+		};
+		Ok(expr)
 	}
 
 	fn logical_key(&self, id: NodeId, stored: bool) -> R<crate::expr::logical::LogicalRecordIdKey> {
@@ -211,15 +220,17 @@ impl Lower<'_> {
 
 		use crate::expr::logical::{LogicalRecordIdKey as Key, LogicalRecordIdKeyRange};
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Array => Key::Array(self.logical_exprs(n.a, stored)?),
-			Tag::Object => Key::Object(
+		let key = if n.tag == Tag::Array {
+			Key::Array(self.logical_exprs(n.a, stored)?)
+		} else if n.tag == Tag::Object {
+			Key::Object(
 				self.list(n.a)
 					.chunks_exact(2)
 					.map(|kv| Ok((self.name(kv[0])?, self.logical_expr(kv[1], stored)?)))
 					.collect::<R<_>>()?,
-			),
-			Tag::KeyRange => Key::Range(Box::new(LogicalRecordIdKeyRange {
+			)
+		} else if n.tag == Tag::KeyRange {
+			Key::Range(Box::new(LogicalRecordIdKeyRange {
 				start: if n.a == NONE {
 					Bound::Unbounded
 				} else if n.op & 1 != 0 {
@@ -234,15 +245,21 @@ impl Lower<'_> {
 				} else {
 					Bound::Excluded(self.logical_key(n.b, stored)?)
 				},
-			})),
-			_ => match self.key(id)? {
+			}))
+		} else {
+			match self.key(id)? {
 				crate::expr::RecordIdKeyLit::Number(v) => Key::Number(v),
 				crate::expr::RecordIdKeyLit::String(v) => Key::String(v),
 				crate::expr::RecordIdKeyLit::Uuid(v) => Key::Uuid(v),
 				crate::expr::RecordIdKeyLit::Generate(v) => Key::Generate(v),
-				_ => unreachable!("compound keys are decoded directly"),
-			},
-		})
+				crate::expr::RecordIdKeyLit::Array(_)
+				| crate::expr::RecordIdKeyLit::Object(_)
+				| crate::expr::RecordIdKeyLit::Range(_) => {
+					unreachable!("compound keys are decoded directly")
+				}
+			}
+		};
+		Ok(key)
 	}
 
 	fn logical_destructure(
@@ -380,74 +397,84 @@ impl Lower<'_> {
 			));
 		}
 		let head = self.n(n.a);
-		let (base, mut steps) = match head.tag {
-			Tag::Field if head.op == 1 => (LogicalExpr::Current, VecDeque::new()),
-			Tag::Doc => (LogicalExpr::Doc, VecDeque::new()),
-			Tag::Field | Tag::Table if head.depth & super::ast::COVERED == 0 => {
-				(LogicalExpr::Field(Strand::new(self.name(n.a)?)), VecDeque::new())
-			}
-			Tag::Idiom if head.depth & super::ast::COVERED == 0 => {
-				self.logical_path(n.a, stored)?
-			}
-			_ => (self.logical_expr(n.a, stored)?, VecDeque::new()),
+		let (base, mut steps) = if head.tag == Tag::Field && head.op == 1 {
+			(LogicalExpr::Current, VecDeque::new())
+		} else if head.tag == Tag::Doc {
+			(LogicalExpr::Doc, VecDeque::new())
+		} else if matches!(head.tag, Tag::Field | Tag::Table)
+			&& head.depth & super::ast::COVERED == 0
+		{
+			(LogicalExpr::Field(Strand::new(self.name(n.a)?)), VecDeque::new())
+		} else if head.tag == Tag::Idiom && head.depth & super::ast::COVERED == 0 {
+			self.logical_path(n.a, stored)?
+		} else {
+			(self.logical_expr(n.a, stored)?, VecDeque::new())
 		};
 		for &id in self.list(n.b) {
 			let part = self.n(id);
-			steps.push_back(match part.tag {
-				Tag::PartField => Step::Access(Strand::new(self.name(id)?)),
-				Tag::PartAll => Step::Each,
-				Tag::PartLast => Step::Last,
-				Tag::PartFlatten => Step::Flatten,
-				Tag::PartOptional => Step::Optional,
-				Tag::PartIndex => Step::Index(self.logical_expr(part.a, stored)?),
-				Tag::PartWhere => Step::Filter(self.logical_expr(part.a, stored)?),
-				Tag::PartMethod => Step::Method(
-					Strand::new(self.name(part.a)?),
-					self.logical_exprs(part.b, stored)?,
-				),
-				Tag::PartGraph => Step::Lookup(Box::new(self.logical_lookup(id, stored)?)),
-				Tag::PartDestructure => Step::Destructure(self.logical_destructure(id, stored)?),
-				Tag::PartRepeat => Step::RepeatRecurse,
-				Tag::PartRecurse => {
-					let r = &self.ast.extra[part.a as usize..part.a as usize + 7];
-					let num = |id: u32| -> R<Option<u32>> {
-						if id == NONE {
-							return Ok(None);
-						}
-						u32::try_from(super::Ast::int(self.n(id)))
-							.map(Some)
-							.map_err(|_| Reject::new("u32"))
-					};
-					let recurse = if r[0] == 0 {
-						crate::expr::part::Recurse::Fixed(
-							num(r[1])?.expect("fixed recursion has a count"),
-						)
-					} else {
-						crate::expr::part::Recurse::Range(num(r[1])?, num(r[2])?)
-					};
-					let inclusive = r[5] == 1;
-					let instruction = match r[3] {
-						0 => None,
-						1 => Some(crate::expr::logical::LogicalRecurseInstruction::Path {
-							inclusive,
-						}),
-						2 => Some(crate::expr::logical::LogicalRecurseInstruction::Collect {
-							inclusive,
-						}),
-						_ => Some(crate::expr::logical::LogicalRecurseInstruction::Shortest {
-							expects: self.logical_expr(r[4], stored)?,
-							inclusive,
-						}),
-					};
-					let body = if r[6] == NONE {
-						None
-					} else {
-						Some(self.logical_body(r[6], stored)?)
-					};
-					Step::Recurse(recurse, body, instruction)
-				}
-				tag => panic!("not a path part: {tag:?}"),
-			});
+			let step = if part.tag == Tag::PartField {
+				Step::Access(Strand::new(self.name(id)?))
+			} else if part.tag == Tag::PartAll {
+				Step::Each
+			} else if part.tag == Tag::PartLast {
+				Step::Last
+			} else if part.tag == Tag::PartFlatten {
+				Step::Flatten
+			} else if part.tag == Tag::PartOptional {
+				Step::Optional
+			} else if part.tag == Tag::PartIndex {
+				Step::Index(self.logical_expr(part.a, stored)?)
+			} else if part.tag == Tag::PartWhere {
+				Step::Filter(self.logical_expr(part.a, stored)?)
+			} else if part.tag == Tag::PartMethod {
+				Step::Method(Strand::new(self.name(part.a)?), self.logical_exprs(part.b, stored)?)
+			} else if part.tag == Tag::PartGraph {
+				Step::Lookup(Box::new(self.logical_lookup(id, stored)?))
+			} else if part.tag == Tag::PartDestructure {
+				Step::Destructure(self.logical_destructure(id, stored)?)
+			} else if part.tag == Tag::PartRepeat {
+				Step::RepeatRecurse
+			} else if part.tag == Tag::PartRecurse {
+				let r = &self.ast.extra[part.a as usize..part.a as usize + 7];
+				let num = |id: u32| -> R<Option<u32>> {
+					if id == NONE {
+						return Ok(None);
+					}
+					u32::try_from(super::Ast::int(self.n(id)))
+						.map(Some)
+						.map_err(|_| Reject::new("u32"))
+				};
+				let recurse = if r[0] == 0 {
+					crate::expr::part::Recurse::Fixed(
+						num(r[1])?.expect("fixed recursion has a count"),
+					)
+				} else {
+					crate::expr::part::Recurse::Range(num(r[1])?, num(r[2])?)
+				};
+				let inclusive = r[5] == 1;
+				let instruction = match r[3] {
+					0 => None,
+					1 => Some(crate::expr::logical::LogicalRecurseInstruction::Path {
+						inclusive,
+					}),
+					2 => Some(crate::expr::logical::LogicalRecurseInstruction::Collect {
+						inclusive,
+					}),
+					_ => Some(crate::expr::logical::LogicalRecurseInstruction::Shortest {
+						expects: self.logical_expr(r[4], stored)?,
+						inclusive,
+					}),
+				};
+				let body = if r[6] == NONE {
+					None
+				} else {
+					Some(self.logical_body(r[6], stored)?)
+				};
+				Step::Recurse(recurse, body, instruction)
+			} else {
+				panic!("not a path part: {:?}", part.tag)
+			};
+			steps.push_back(step);
 		}
 		Ok((base, steps))
 	}
@@ -641,28 +668,30 @@ impl Lower<'_> {
 
 	fn if_arm_is_a_let(&self, id: NodeId) -> bool {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Let => true,
-			Tag::If => {
-				self.list(n.a).chunks_exact(2).any(|cb| self.if_arm_is_a_let(cb[1]))
-					|| (n.b != NONE && self.if_arm_is_a_let(n.b))
-			}
-			_ => false,
+		if n.tag == Tag::Let {
+			true
+		} else if n.tag == Tag::If {
+			self.list(n.a).chunks_exact(2).any(|cb| self.if_arm_is_a_let(cb[1]))
+				|| (n.b != NONE && self.if_arm_is_a_let(n.b))
+		} else {
+			false
 		}
 	}
 
 	pub(crate) fn logical_statement(&self, id: NodeId, stored: bool) -> R<LogicalOp> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Select => self.logical_select(id, stored)?,
-			Tag::Block => LogicalOp::Sequence(LogicalSequence {
-				stmts: self
-					.list(n.a)
-					.iter()
-					.map(|&id| self.logical_statement(id, stored))
-					.collect::<R<_>>()?,
-			}),
-			Tag::Let => {
+		let op =
+			if n.tag == Tag::Select {
+				self.logical_select(id, stored)?
+			} else if n.tag == Tag::Block {
+				LogicalOp::Sequence(LogicalSequence {
+					stmts: self
+						.list(n.a)
+						.iter()
+						.map(|&id| self.logical_statement(id, stored))
+						.collect::<R<_>>()?,
+				})
+			} else if n.tag == Tag::Let {
 				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
 				LogicalOp::Let(LogicalLet {
 					name: self.param_name(rec[0])?,
@@ -674,16 +703,16 @@ impl Lower<'_> {
 					value: Box::new(self.logical_statement(rec[2], stored)?),
 					synthetic: false,
 				})
-			}
-			Tag::Return => LogicalOp::Return(LogicalReturn {
-				what: Box::new(self.logical_value_statement(n.a, stored)?),
-				fetch: if n.b == NONE {
-					Vec::new()
-				} else {
-					self.logical_exprs(n.b, stored)?
-				},
-			}),
-			Tag::For => {
+			} else if n.tag == Tag::Return {
+				LogicalOp::Return(LogicalReturn {
+					what: Box::new(self.logical_value_statement(n.a, stored)?),
+					fetch: if n.b == NONE {
+						Vec::new()
+					} else {
+						self.logical_exprs(n.b, stored)?
+					},
+				})
+			} else if n.tag == Tag::For {
 				let rec = &self.ast.extra[n.a as usize..n.a as usize + 3];
 				if self.n(rec[2]).tag != Tag::Block {
 					return Err(Reject::new("not a block"));
@@ -693,41 +722,46 @@ impl Lower<'_> {
 					range: self.logical_expr(rec[1], stored)?,
 					body: Box::new(self.logical_statement(rec[2], stored)?),
 				})
-			}
-			Tag::If if self.if_arm_is_a_let(id) => LogicalOp::Eval(LogicalEval {
-				expr: self.logical_expr(id, stored)?,
-			}),
-			Tag::If => LogicalOp::If(LogicalIfOp::new(
-				self.list(n.a)
-					.chunks_exact(2)
-					.map(|cb| {
-						Ok((
-							self.logical_expr(cb[0], stored)?,
-							self.logical_statement(cb[1], stored)?,
-						))
-					})
-					.collect::<R<_>>()?,
-				if n.b == NONE {
-					None
-				} else {
-					Some(self.logical_statement(n.b, stored)?)
-				},
-			)),
-			Tag::Throw => LogicalOp::Throw(LogicalThrow {
-				value: self.logical_expr(n.a, stored)?,
-			}),
-			Tag::Break => LogicalOp::Break(LogicalBreak),
-			Tag::Continue => LogicalOp::Continue(LogicalContinue),
-			Tag::Explain => LogicalOp::Explain(LogicalExplain {
-				input: Box::new(self.logical_value_statement(n.a, stored)?),
-				analyze: n.op & 1 != 0,
-				format: if n.op & 2 != 0 {
-					ExplainFormat::Json
-				} else {
-					ExplainFormat::Text
-				},
-			}),
-			Tag::Info => {
+			} else if n.tag == Tag::If && self.if_arm_is_a_let(id) {
+				LogicalOp::Eval(LogicalEval {
+					expr: self.logical_expr(id, stored)?,
+				})
+			} else if n.tag == Tag::If {
+				LogicalOp::If(LogicalIfOp::new(
+					self.list(n.a)
+						.chunks_exact(2)
+						.map(|cb| {
+							Ok((
+								self.logical_expr(cb[0], stored)?,
+								self.logical_statement(cb[1], stored)?,
+							))
+						})
+						.collect::<R<_>>()?,
+					if n.b == NONE {
+						None
+					} else {
+						Some(self.logical_statement(n.b, stored)?)
+					},
+				))
+			} else if n.tag == Tag::Throw {
+				LogicalOp::Throw(LogicalThrow {
+					value: self.logical_expr(n.a, stored)?,
+				})
+			} else if n.tag == Tag::Break {
+				LogicalOp::Break(LogicalBreak)
+			} else if n.tag == Tag::Continue {
+				LogicalOp::Continue(LogicalContinue)
+			} else if n.tag == Tag::Explain {
+				LogicalOp::Explain(LogicalExplain {
+					input: Box::new(self.logical_value_statement(n.a, stored)?),
+					analyze: n.op & 1 != 0,
+					format: if n.op & 2 != 0 {
+						ExplainFormat::Json
+					} else {
+						ExplainFormat::Text
+					},
+				})
+			} else if n.tag == Tag::Info {
 				let rec = &self.ast.extra[n.a as usize..n.a as usize + info::LEN];
 				let structure = rec[info::FLAGS] & 1 != 0;
 				let version = self.logical_opt(rec[info::VERSION], stored)?;
@@ -764,8 +798,7 @@ impl Lower<'_> {
 						structure,
 					},
 				}))
-			}
-			Tag::Sleep => {
+			} else if n.tag == Tag::Sleep {
 				let (seconds, nanos) =
 					surrealdb_parser_next::lex::decode_duration(self.text(n.a).as_bytes())
 						.ok_or(Reject::new("duration overflow"))?;
@@ -774,23 +807,21 @@ impl Lower<'_> {
 						std::time::Duration::new(seconds, nanos).into(),
 					)),
 				})
-			}
-
-			Tag::Create
-			| Tag::Update
-			| Tag::Upsert
-			| Tag::Delete
-			| Tag::Insert
-			| Tag::Relate
-			| Tag::Define
-			| Tag::Remove
-			| Tag::Alter
-			| Tag::Rebuild => {
+			} else if matches!(
+				n.tag,
+				Tag::Create
+					| Tag::Update | Tag::Upsert
+					| Tag::Delete | Tag::Insert
+					| Tag::Relate | Tag::Define
+					| Tag::Remove | Tag::Alter
+					| Tag::Rebuild
+			) {
 				lower(self.logical_native(id, stored)?).map_err(|e| Reject::new(e.to_string()))?
-			}
-			_ => LogicalOp::Eval(LogicalEval {
-				expr: self.logical_expr(id, stored)?,
-			}),
-		})
+			} else {
+				LogicalOp::Eval(LogicalEval {
+					expr: self.logical_expr(id, stored)?,
+				})
+			};
+		Ok(op)
 	}
 }

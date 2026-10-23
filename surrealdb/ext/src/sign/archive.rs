@@ -54,18 +54,18 @@ fn read_entries(path: &Path) -> Result<Vec<Entry>> {
 			header,
 			data,
 		};
-		match record.header.entry_type() {
-			EntryType::GNULongName | EntryType::GNULongLink | EntryType::XHeader => {
-				pending.push(record);
-			}
-			_ => {
-				let path = effective_path(&pending, &record.header)?;
-				pending.push(record);
-				entries.push(Entry {
-					records: std::mem::take(&mut pending),
-					path,
-				});
-			}
+		if matches!(
+			record.header.entry_type(),
+			EntryType::GNULongName | EntryType::GNULongLink | EntryType::XHeader
+		) {
+			pending.push(record);
+		} else {
+			let path = effective_path(&pending, &record.header)?;
+			pending.push(record);
+			entries.push(Entry {
+				records: std::mem::take(&mut pending),
+				path,
+			});
 		}
 	}
 	ensure!(pending.is_empty(), "Archive ends with a dangling extension header");
@@ -77,20 +77,17 @@ fn read_entries(path: &Path) -> Result<Vec<Entry>> {
 fn effective_path(extensions: &[Record], header: &Header) -> Result<Vec<u8>> {
 	let mut path = header.path_bytes().into_owned();
 	for ext in extensions {
-		match ext.header.entry_type() {
-			EntryType::GNULongName => {
-				let name = ext.data.split(|b| *b == 0).next().unwrap_or_default();
-				path = name.to_vec();
-			}
-			EntryType::XHeader => {
-				for pax in PaxExtensions::new(&ext.data) {
-					let pax = pax.context("Malformed PAX extension header")?;
-					if pax.key_bytes() == b"path" {
-						path = pax.value_bytes().to_vec();
-					}
+		let entry_type = ext.header.entry_type();
+		if entry_type == EntryType::GNULongName {
+			let name = ext.data.split(|b| *b == 0).next().unwrap_or_default();
+			path = name.to_vec();
+		} else if entry_type == EntryType::XHeader {
+			for pax in PaxExtensions::new(&ext.data) {
+				let pax = pax.context("Malformed PAX extension header")?;
+				if pax.key_bytes() == b"path" {
+					path = pax.value_bytes().to_vec();
 				}
 			}
-			_ => {}
 		}
 	}
 	Ok(path)

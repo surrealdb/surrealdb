@@ -18,85 +18,54 @@ pub enum Associativity {
 
 /// Return the (left_binding_power, right_binding_power, associativity) for an infix operator token.
 pub fn infix_binding_power(token: &TokenKind<'_>) -> Option<(u8, u8, Associativity)> {
-	match token {
-		// Precedence 1: OR
-		TokenKind::Keyword(Keyword::Or) => Some((10, 11, Associativity::Left)),
-
-		// Precedence 2: AND
-		TokenKind::Keyword(Keyword::And) => Some((20, 21, Associativity::Left)),
-
-		// Precedence 3: IS, ISNULL, NOTNULL
-		TokenKind::Keyword(Keyword::Is)
-		| TokenKind::Keyword(Keyword::Isnull)
-		| TokenKind::Keyword(Keyword::Notnull) => Some((30, 31, Associativity::None)),
-
-		// Precedence 4: Comparison & Membership
-		TokenKind::Keyword(Keyword::Between)
-		| TokenKind::Keyword(Keyword::In)
-		| TokenKind::Keyword(Keyword::Like)
-		| TokenKind::Keyword(Keyword::Ilike)
-		| TokenKind::Keyword(Keyword::Similar) => Some((40, 41, Associativity::None)),
-
-		// Comparison operators
-		TokenKind::Operator("=")
-		| TokenKind::Operator("<>")
-		| TokenKind::Operator("!=")
-		| TokenKind::Operator("<")
-		| TokenKind::Operator("<=")
-		| TokenKind::Operator(">")
-		| TokenKind::Operator(">=") => Some((40, 41, Associativity::None)),
-
-		// JSON & Containment operators
-		TokenKind::Operator("->")
-		| TokenKind::Operator("->>")
-		| TokenKind::Operator("#>")
-		| TokenKind::Operator("#>>")
-		| TokenKind::Operator("@>")
-		| TokenKind::Operator("<@") => Some((50, 51, Associativity::Left)),
-
-		// Bitwise shift & XOR
-		TokenKind::Operator("<<") | TokenKind::Operator(">>") | TokenKind::Operator("#") => {
-			Some((55, 56, Associativity::Left))
-		}
-
-		// String concatenation and bitwise OR/AND
-		TokenKind::Operator("||") | TokenKind::Operator("|") | TokenKind::Operator("&") => {
-			Some((60, 61, Associativity::Left))
-		}
-
-		// Precedence 5: Binary addition and subtraction
-		TokenKind::Operator("+") | TokenKind::Operator("-") => Some((70, 71, Associativity::Left)),
-
-		// Precedence 6: Multiplication, division, modulo
-		TokenKind::Operator("*") | TokenKind::Operator("/") | TokenKind::Operator("%") => {
-			Some((80, 81, Associativity::Left))
-		}
-
+	if token == &TokenKind::Keyword(Keyword::Or) {
+		Some((10, 11, Associativity::Left))
+	} else if token == &TokenKind::Keyword(Keyword::And) {
+		Some((20, 21, Associativity::Left))
+	} else if let TokenKind::Keyword(Keyword::Is | Keyword::Isnull | Keyword::Notnull) = token {
+		Some((30, 31, Associativity::None))
+	} else if let TokenKind::Keyword(
+		Keyword::Between | Keyword::In | Keyword::Like | Keyword::Ilike | Keyword::Similar,
+	) = token
+	{
+		Some((40, 41, Associativity::None))
+	} else if let TokenKind::Operator("=" | "<>" | "!=" | "<" | "<=" | ">" | ">=") = token {
+		Some((40, 41, Associativity::None))
+	} else if let TokenKind::Operator("->" | "->>" | "#>" | "#>>" | "@>" | "<@") = token {
+		Some((50, 51, Associativity::Left))
+	} else if let TokenKind::Operator("<<" | ">>" | "#") = token {
+		Some((55, 56, Associativity::Left))
+	} else if let TokenKind::Operator("||" | "|" | "&") = token {
+		Some((60, 61, Associativity::Left))
+	} else if let TokenKind::Operator("+" | "-") = token {
+		Some((70, 71, Associativity::Left))
+	} else if let TokenKind::Operator("*" | "/" | "%") = token {
+		Some((80, 81, Associativity::Left))
+	} else if token == &TokenKind::Operator("^") {
 		// Precedence 7: Exponentiation (`%left '^'` in gram.y): `a ^ b ^ c` is `(a ^ b) ^ c`.
-		TokenKind::Operator("^") => Some((90, 91, Associativity::Left)),
-
-		// Precedence 8: COLLATE
-		TokenKind::Keyword(Keyword::Collate) => Some((100, 101, Associativity::Left)),
-
-		// Precedence 9: Typecast `::`
-		TokenKind::DoubleColon => Some((120, 121, Associativity::Left)),
-
-		// Precedence 10: Array subscripting `[`
-		TokenKind::LBracket => Some((130, 131, Associativity::Left)),
-
-		// General / custom infix operator
-		TokenKind::Operator(_) => Some((65, 66, Associativity::Left)),
-
-		_ => None,
+		Some((90, 91, Associativity::Left))
+	} else if token == &TokenKind::Keyword(Keyword::Collate) {
+		Some((100, 101, Associativity::Left))
+	} else if token == &TokenKind::DoubleColon {
+		Some((120, 121, Associativity::Left))
+	} else if token == &TokenKind::LBracket {
+		Some((130, 131, Associativity::Left))
+	} else if let TokenKind::Operator(_) = token {
+		Some((65, 66, Associativity::Left))
+	} else {
+		None
 	}
 }
 
 /// Prefix binding power for unary operators.
 pub fn prefix_binding_power(token: &TokenKind<'_>) -> Option<u8> {
-	match token {
-		TokenKind::Keyword(Keyword::Not) => Some(25),
-		TokenKind::Operator("+") | TokenKind::Operator("-") | TokenKind::Operator("~") => Some(110),
-		TokenKind::Operator(_) => Some(110),
-		_ => None,
+	if token == &TokenKind::Keyword(Keyword::Not) {
+		Some(25)
+	} else if let TokenKind::Operator("+" | "-" | "~") = token {
+		Some(110)
+	} else if let TokenKind::Operator(_) = token {
+		Some(110)
+	} else {
+		None
 	}
 }

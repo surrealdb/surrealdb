@@ -42,40 +42,42 @@ pub async fn from_entries_walk((array,): (Array,)) -> Result<Value> {
 
 	for v in array.iter() {
 		fuel::tick(1).await;
-		match v {
-			Value::Array(Array(entry)) if entry.len() == 2 => {
-				let key: Strand = match entry.first() {
-					Some(v) => match v {
-						Value::String(v) => v.clone(),
-						v => v.to_sql().into(),
-					},
-					_ => {
-						bail!(Error::InvalidFunctionArguments {
-							name: "object::from_entries".to_string(),
-							message: "Expected entries, found invalid entry".to_string(),
-						})
+		if let Value::Array(Array(entry)) = v
+			&& entry.len() == 2
+		{
+			let key: Strand = match entry.first() {
+				Some(v) => {
+					if let Value::String(v) = v {
+						v.clone()
+					} else {
+						v.to_sql().into()
 					}
-				};
+				}
+				_ => {
+					bail!(Error::InvalidFunctionArguments {
+						name: "object::from_entries".to_string(),
+						message: "Expected entries, found invalid entry".to_string(),
+					})
+				}
+			};
 
-				let value = match entry.get(1) {
-					Some(v) => v,
-					_ => {
-						bail!(Error::InvalidFunctionArguments {
-							name: "object::from_entries".to_string(),
-							message: "Expected entries, found invalid entry".to_string(),
-						})
-					}
-				};
+			let value = match entry.get(1) {
+				Some(v) => v,
+				_ => {
+					bail!(Error::InvalidFunctionArguments {
+						name: "object::from_entries".to_string(),
+						message: "Expected entries, found invalid entry".to_string(),
+					})
+				}
+			};
 
-				obj.insert(key, value.to_owned());
-			}
-			_ => {
-				bail!(Error::InvalidFunctionArguments {
-					name: "object::from_entries".to_string(),
-					message: format!("Expected entries, found {}", v.kind_of()),
-				})
-			}
+			obj.insert(key, value.to_owned());
+			continue;
 		}
+		bail!(Error::InvalidFunctionArguments {
+			name: "object::from_entries".to_string(),
+			message: format!("Expected entries, found {}", v.kind_of()),
+		})
 	}
 
 	Ok(Value::Object(Object::from(obj)))
@@ -103,34 +105,30 @@ pub async fn keys_walk((object,): (Object,)) -> Result<Value> {
 }
 
 pub async fn remove_walk((mut object, targets): (Object, Value)) -> Result<Value> {
-	match targets {
-		Value::String(target) => {
-			object.remove(target.as_str());
+	if let Value::String(target) = targets {
+		object.remove(target.as_str());
+	} else if let Value::Array(targets) = targets {
+		for target in targets {
+			fuel::tick(1).await;
+			let Value::String(s) = target else {
+				bail!(Error::InvalidFunctionArguments {
+					name: "object::remove".to_string(),
+					message: format!(
+						"'{}' cannot be used as a key. Please use a string instead.",
+						target.to_sql()
+					),
+				});
+			};
+			object.remove(s.as_str());
 		}
-		Value::Array(targets) => {
-			for target in targets {
-				fuel::tick(1).await;
-				let Value::String(s) = target else {
-					bail!(Error::InvalidFunctionArguments {
-						name: "object::remove".to_string(),
-						message: format!(
-							"'{}' cannot be used as a key. Please use a string instead.",
-							target.to_sql()
-						),
-					});
-				};
-				object.remove(s.as_str());
-			}
-		}
-		other => {
-			bail!(Error::InvalidFunctionArguments {
-				name: "object::remove".to_string(),
-				message: format!(
-					"'{}' cannot be used as a key. Please use a string instead.",
-					other.to_sql()
-				),
-			})
-		}
+	} else {
+		bail!(Error::InvalidFunctionArguments {
+			name: "object::remove".to_string(),
+			message: format!(
+				"'{}' cannot be used as a key. Please use a string instead.",
+				targets.to_sql()
+			),
+		})
 	}
 	Ok(Value::Object(object))
 }

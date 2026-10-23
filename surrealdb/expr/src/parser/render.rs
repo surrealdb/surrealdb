@@ -102,15 +102,20 @@ enum Shape {
 impl Shape {
 	/// `BindingPower::for_expr` of the lowered expression.
 	fn bp(self) -> BindingPower {
-		match self {
-			Shape::Prefix {
-				bp,
-				..
+		if let Shape::Prefix {
+			bp,
+			..
+		}
+		| Shape::Binary(bp) = self
+		{
+			bp
+		} else if let Shape::Postfix(kind) = self {
+			match kind {
+				PostfixKind::Range => BindingPower::Range,
+				PostfixKind::Call => BindingPower::Call,
 			}
-			| Shape::Binary(bp) => bp,
-			Shape::Postfix(PostfixKind::Range) => BindingPower::Range,
-			Shape::Postfix(PostfixKind::Call) => BindingPower::Call,
-			_ => BindingPower::Prime,
+		} else {
+			BindingPower::Prime
 		}
 	}
 
@@ -177,15 +182,17 @@ impl Lower<'_> {
 	/// (escape, duration overflow, unknown builtin, disabled grammar).
 	pub fn render_expr(&self, id: NodeId, out: &mut String) -> R<()> {
 		let n = self.n(id);
-		match n.tag {
+		if matches!(
+			n.tag,
 			Tag::Array
-			| Tag::Object
-			| Tag::Prefix
-			| Tag::Cast
-			| Tag::Binary
-			| Tag::Block
-			| Tag::Set => self.render_nesting(n, out),
-			_ => self.render_other(id, out),
+				| Tag::Object
+				| Tag::Prefix
+				| Tag::Cast | Tag::Binary
+				| Tag::Block | Tag::Set
+		) {
+			self.render_nesting(n, out)
+		} else {
+			self.render_other(id, out)
 		}
 	}
 
@@ -212,57 +219,55 @@ impl Lower<'_> {
 	/// tag through `render_expr`, with the parentheses that keep a bare
 	/// `$p = x` from reading as the deprecated `LET`.
 	pub fn render_top(&self, id: NodeId, out: &mut String) -> R<()> {
-		match self.n(id).tag {
+		let tag = self.n(id).tag;
+		if matches!(
+			tag,
 			Tag::Begin
-			| Tag::Cancel
-			| Tag::Commit
-			| Tag::Use
-			| Tag::OptionStmt
-			| Tag::Kill
-			| Tag::Live
-			| Tag::Show
-			| Tag::AccessStmt => {
-				put(out, &self.top(id)?);
-				Ok(())
-			}
-			_ if self.is_param_equality(id) => {
-				out.push('(');
-				self.render_expr(id, out)?;
-				out.push(')');
-				Ok(())
-			}
-			_ => self.render_expr(id, out),
+				| Tag::Cancel
+				| Tag::Commit
+				| Tag::Use | Tag::OptionStmt
+				| Tag::Kill | Tag::Live
+				| Tag::Show | Tag::AccessStmt
+		) {
+			put(out, &self.top(id)?);
+			Ok(())
+		} else if self.is_param_equality(id) {
+			out.push('(');
+			self.render_expr(id, out)?;
+			out.push(')');
+			Ok(())
+		} else {
+			self.render_expr(id, out)
 		}
 	}
 
 	/// [`Self::render_expr`] for the constructs that nest.
 	#[inline(never)]
 	fn render_nesting(&self, n: &Node, out: &mut String) -> R<()> {
-		match n.tag {
-			Tag::Array => {
-				out.push('[');
-				self.render_covered_list(self.list(n.a), out)?;
-				out.push(']');
-			}
-			Tag::Object => self.render_object(n, out)?,
-			Tag::Prefix => {
-				let (text, bp, neg) = prefix_op(n.op);
-				out.push_str(text);
-				self.render_operand(bp, neg, n.a, out)?;
-			}
-			Tag::Cast => {
-				out.push('<');
-				put(out, &self.kind(n.a)?);
-				out.push_str("> ");
-				self.render_operand(BindingPower::Prefix, false, n.b, out)?;
-			}
-			Tag::Binary => {
-				let op = binary(Binary::from_u8(n.op));
-				self.render_binary(&op, n.a, n.b, out)?;
-			}
-			Tag::Block => self.render_block(self.list(n.a), out)?,
-			Tag::Set => self.render_set(self.list(n.a), out)?,
-			t => return Err(Reject::new(format!("not a nesting expression: {t:?}"))),
+		if n.tag == Tag::Array {
+			out.push('[');
+			self.render_covered_list(self.list(n.a), out)?;
+			out.push(']');
+		} else if n.tag == Tag::Object {
+			self.render_object(n, out)?;
+		} else if n.tag == Tag::Prefix {
+			let (text, bp, neg) = prefix_op(n.op);
+			out.push_str(text);
+			self.render_operand(bp, neg, n.a, out)?;
+		} else if n.tag == Tag::Cast {
+			out.push('<');
+			put(out, &self.kind(n.a)?);
+			out.push_str("> ");
+			self.render_operand(BindingPower::Prefix, false, n.b, out)?;
+		} else if n.tag == Tag::Binary {
+			let op = binary(Binary::from_u8(n.op));
+			self.render_binary(&op, n.a, n.b, out)?;
+		} else if n.tag == Tag::Block {
+			self.render_block(self.list(n.a), out)?;
+		} else if n.tag == Tag::Set {
+			self.render_set(self.list(n.a), out)?;
+		} else {
+			return Err(Reject::new(format!("not a nesting expression: {:?}", n.tag)));
 		}
 		Ok(())
 	}
@@ -271,163 +276,181 @@ impl Lower<'_> {
 	#[inline(never)]
 	fn render_other(&self, id: NodeId, out: &mut String) -> R<()> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::None => out.push_str("NONE"),
-			Tag::Null => out.push_str("NULL"),
-			Tag::True => out.push_str("true"),
-			Tag::False => out.push_str("false"),
-			Tag::Int => out.push_str(&Ast::int(n).to_string()),
-			Tag::Float => put(out, &Float(Ast::float(n))),
-			Tag::NaN => put(out, &Float(f64::NAN)),
-			Tag::Infinity => put(out, &Float(f64::INFINITY)),
-			Tag::UnboundedRange => out.push_str(".."),
-			Tag::Decimal => put(out, &lit::decimal(self.text(id))?),
-			Tag::Regex => put(out, &lit::regex_at(self.text(id), n.start, n.end)?),
-			Tag::Path => match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
+		let tag = n.tag;
+		if tag == Tag::None {
+			out.push_str("NONE");
+		} else if tag == Tag::Null {
+			out.push_str("NULL");
+		} else if tag == Tag::True {
+			out.push_str("true");
+		} else if tag == Tag::False {
+			out.push_str("false");
+		} else if tag == Tag::Int {
+			out.push_str(&Ast::int(n).to_string());
+		} else if tag == Tag::Float {
+			put(out, &Float(Ast::float(n)));
+		} else if tag == Tag::NaN {
+			put(out, &Float(f64::NAN));
+		} else if tag == Tag::Infinity {
+			put(out, &Float(f64::INFINITY));
+		} else if tag == Tag::UnboundedRange {
+			out.push_str("..");
+		} else if tag == Tag::Decimal {
+			put(out, &lit::decimal(self.text(id))?);
+		} else if tag == Tag::Regex {
+			put(out, &lit::regex_at(self.text(id), n.start, n.end)?);
+		} else if tag == Tag::Path {
+			match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
 				lit::Builtin::Constant(c) => put(out, &c),
 				lit::Builtin::Function(_) => return Err(self.unexpected_after(n.end, "(")),
-			},
-			Tag::Duration => {
-				let (s, ns) = decode_duration(self.text(id).as_bytes())
-					.ok_or(Reject::new("duration overflow"))?;
-				put(out, &SqlDuration(std::time::Duration::new(s, ns)));
 			}
-			Tag::Str => self.render_str(id, out)?,
-			Tag::Param => {
-				out.push('$');
-				put(out, &EscapeKwFreeIdent(&self.param_name(id)?));
+		} else if tag == Tag::Duration {
+			let (s, ns) = decode_duration(self.text(id).as_bytes())
+				.ok_or(Reject::new("duration overflow"))?;
+			put(out, &SqlDuration(std::time::Duration::new(s, ns)));
+		} else if tag == Tag::Str {
+			self.render_str(id, out)?;
+		} else if tag == Tag::Param {
+			out.push('$');
+			put(out, &EscapeKwFreeIdent(&self.param_name(id)?));
+		} else if tag == Tag::Field || tag == Tag::Table {
+			put(out, &EscapeIdent(self.name(id)?));
+		} else if tag == Tag::RecordId {
+			put(out, &EscapeIdent(self.name(n.a)?));
+			out.push(':');
+			self.render_key(n.b, out)?;
+		} else if tag == Tag::BinaryX {
+			let op = self.binary_extended(n)?;
+			let right = self.ast.extra[n.b as usize];
+			self.render_binary(&op, n.a, right, out)?;
+		} else if tag == Tag::PostfixRange {
+			let s = self.shape(n.a)?;
+			self.render_parenthesised(
+				s.needs_parentheses() || s.bp() <= BindingPower::Range,
+				n.a,
+				out,
+			)?;
+			out.push_str(if n.op == 0 {
+				".."
+			} else {
+				">.."
+			});
+		} else if tag == Tag::Call {
+			self.render_call(n, out)?;
+		} else if tag == Tag::Script {
+			out.push_str("function(");
+			self.render_covered_list(self.list(n.b), out)?;
+			out.push_str(") {");
+			out.push_str(self.text(n.a));
+			out.push('}');
+		} else if tag == Tag::Point {
+			out.push('(');
+			put(out, &Float(self.coordinate(n.a)));
+			out.push_str(", ");
+			put(out, &Float(self.coordinate(n.b)));
+			out.push(')');
+		} else if tag == Tag::CallExpr {
+			out.push('(');
+			self.render_expr(n.a, out)?;
+			out.push_str(")(");
+			self.render_covered_list(self.list(n.b), out)?;
+			out.push(')');
+		} else if tag == Tag::Idiom {
+			self.render_idiom(id, out)?;
+		} else if tag == Tag::Select {
+			self.render_select(n, out)?;
+		} else if tag == Tag::Create {
+			self.render_create(n, out)?;
+		} else if tag == Tag::Update {
+			self.render_update(n, "UPDATE", true, out)?;
+		} else if tag == Tag::Upsert {
+			self.render_update(n, "UPSERT", true, out)?;
+		} else if tag == Tag::Delete {
+			self.render_update(n, "DELETE", false, out)?;
+		} else if tag == Tag::Relate {
+			self.render_relate(n, out)?;
+		} else if tag == Tag::Insert {
+			self.render_insert(n, out)?;
+		} else if tag == Tag::Return {
+			out.push_str("RETURN ");
+			self.render_covered(n.a, out)?;
+			if n.b != NONE {
+				out.push_str(" FETCH ");
+				self.render_list(self.list(n.b), out)?;
 			}
-			Tag::Field | Tag::Table => put(out, &EscapeIdent(self.name(id)?)),
-			Tag::RecordId => {
-				put(out, &EscapeIdent(self.name(n.a)?));
-				out.push(':');
-				self.render_key(n.b, out)?;
+		} else if tag == Tag::Let {
+			let rec = slots(self.ast, n.a, 3);
+			out.push_str("LET $");
+			put(out, &EscapeKwFreeIdent(&self.param_name(rec[0])?));
+			if rec[1] != NONE {
+				out.push_str(": ");
+				put(out, &self.kind(rec[1])?);
 			}
-			Tag::BinaryX => {
-				let op = self.binary_extended(n)?;
-				let right = self.ast.extra[n.b as usize];
-				self.render_binary(&op, n.a, right, out)?;
+			out.push_str(" = ");
+			self.render_covered(rec[2], out)?;
+		} else if tag == Tag::If {
+			self.render_if(n, out)?;
+		} else if tag == Tag::For {
+			let rec = slots(self.ast, n.a, 3);
+			if self.n(rec[2]).tag != Tag::Block {
+				return Err(Reject::new("not a block"));
 			}
-			Tag::PostfixRange => {
-				let s = self.shape(n.a)?;
-				self.render_parenthesised(
-					s.needs_parentheses() || s.bp() <= BindingPower::Range,
-					n.a,
-					out,
-				)?;
-				out.push_str(if n.op == 0 {
-					".."
-				} else {
-					">.."
-				});
+			out.push_str("FOR $");
+			put(out, &EscapeKwFreeIdent(&self.param_name(rec[0])?));
+			out.push_str(" IN ");
+			self.render_covered(rec[1], out)?;
+			out.push(' ');
+			self.render_expr(rec[2], out)?;
+		} else if tag == Tag::Explain {
+			out.push_str("EXPLAIN");
+			if n.op & 1 != 0 {
+				out.push_str(" ANALYZE");
 			}
-			Tag::Call => self.render_call(n, out)?,
-			Tag::Script => {
-				out.push_str("function(");
-				self.render_covered_list(self.list(n.b), out)?;
-				out.push_str(") {");
-				out.push_str(self.text(n.a));
-				out.push('}');
+			out.push_str(if n.op & 2 != 0 {
+				" FORMAT JSON "
+			} else {
+				" FORMAT TEXT "
+			});
+			self.render_expr(n.a, out)?;
+		} else if tag == Tag::Alter {
+			put(out, &self.alter(n)?);
+		} else if tag == Tag::Remove {
+			put(out, &self.remove(n)?);
+		} else if tag == Tag::Define {
+			put(out, &self.define(n)?);
+		} else if tag == Tag::Closure {
+			self.render_closure(n, out)?;
+		} else if tag == Tag::Mock {
+			self.render_mock(n, out)?;
+		} else if tag == Tag::Sleep {
+			let (s, ns) = decode_duration(self.text(n.a).as_bytes())
+				.ok_or(Reject::new("duration overflow"))?;
+			out.push_str("SLEEP ");
+			put(out, &SqlDuration(std::time::Duration::new(s, ns)));
+		} else if tag == Tag::Throw {
+			out.push_str("THROW ");
+			self.render_covered(n.a, out)?;
+		} else if tag == Tag::Break {
+			out.push_str("BREAK");
+		} else if tag == Tag::Continue {
+			out.push_str("CONTINUE");
+		} else if tag == Tag::Info {
+			self.render_info(n, out)?;
+		} else if tag == Tag::Rebuild {
+			let rec = slots(self.ast, n.a, 3);
+			out.push_str("REBUILD INDEX");
+			if rec[2] & 1 != 0 {
+				out.push_str(" IF EXISTS");
 			}
-			Tag::Point => {
-				out.push('(');
-				put(out, &Float(self.coordinate(n.a)));
-				out.push_str(", ");
-				put(out, &Float(self.coordinate(n.b)));
-				out.push(')');
+			out.push(' ');
+			put(out, &EscapeKwIdent(&self.name(rec[0])?, &["IF"]));
+			out.push_str(" ON ");
+			put(out, &EscapeKwFreeIdent(&self.name(rec[1])?));
+			if rec[2] & 2 != 0 {
+				out.push_str(" CONCURRENTLY");
 			}
-			Tag::CallExpr => {
-				out.push('(');
-				self.render_expr(n.a, out)?;
-				out.push_str(")(");
-				self.render_covered_list(self.list(n.b), out)?;
-				out.push(')');
-			}
-			Tag::Idiom => self.render_idiom(id, out)?,
-			Tag::Select => self.render_select(n, out)?,
-			Tag::Create => self.render_create(n, out)?,
-			Tag::Update => self.render_update(n, "UPDATE", true, out)?,
-			Tag::Upsert => self.render_update(n, "UPSERT", true, out)?,
-			Tag::Delete => self.render_update(n, "DELETE", false, out)?,
-			Tag::Relate => self.render_relate(n, out)?,
-			Tag::Insert => self.render_insert(n, out)?,
-			Tag::Return => {
-				out.push_str("RETURN ");
-				self.render_covered(n.a, out)?;
-				if n.b != NONE {
-					out.push_str(" FETCH ");
-					self.render_list(self.list(n.b), out)?;
-				}
-			}
-			Tag::Let => {
-				let rec = slots(self.ast, n.a, 3);
-				out.push_str("LET $");
-				put(out, &EscapeKwFreeIdent(&self.param_name(rec[0])?));
-				if rec[1] != NONE {
-					out.push_str(": ");
-					put(out, &self.kind(rec[1])?);
-				}
-				out.push_str(" = ");
-				self.render_covered(rec[2], out)?;
-			}
-			Tag::If => self.render_if(n, out)?,
-			Tag::For => {
-				let rec = slots(self.ast, n.a, 3);
-				if self.n(rec[2]).tag != Tag::Block {
-					return Err(Reject::new("not a block"));
-				}
-				out.push_str("FOR $");
-				put(out, &EscapeKwFreeIdent(&self.param_name(rec[0])?));
-				out.push_str(" IN ");
-				self.render_covered(rec[1], out)?;
-				out.push(' ');
-				self.render_expr(rec[2], out)?;
-			}
-			Tag::Explain => {
-				out.push_str("EXPLAIN");
-				if n.op & 1 != 0 {
-					out.push_str(" ANALYZE");
-				}
-				out.push_str(if n.op & 2 != 0 {
-					" FORMAT JSON "
-				} else {
-					" FORMAT TEXT "
-				});
-				self.render_expr(n.a, out)?;
-			}
-			Tag::Alter => put(out, &self.alter(n)?),
-			Tag::Remove => put(out, &self.remove(n)?),
-			Tag::Define => put(out, &self.define(n)?),
-			Tag::Closure => self.render_closure(n, out)?,
-			Tag::Mock => self.render_mock(n, out)?,
-			Tag::Sleep => {
-				let (s, ns) = decode_duration(self.text(n.a).as_bytes())
-					.ok_or(Reject::new("duration overflow"))?;
-				out.push_str("SLEEP ");
-				put(out, &SqlDuration(std::time::Duration::new(s, ns)));
-			}
-			Tag::Throw => {
-				out.push_str("THROW ");
-				self.render_covered(n.a, out)?;
-			}
-			Tag::Break => out.push_str("BREAK"),
-			Tag::Continue => out.push_str("CONTINUE"),
-			Tag::Info => self.render_info(n, out)?,
-			Tag::Rebuild => {
-				let rec = slots(self.ast, n.a, 3);
-				out.push_str("REBUILD INDEX");
-				if rec[2] & 1 != 0 {
-					out.push_str(" IF EXISTS");
-				}
-				out.push(' ');
-				put(out, &EscapeKwIdent(&self.name(rec[0])?, &["IF"]));
-				out.push_str(" ON ");
-				put(out, &EscapeKwFreeIdent(&self.name(rec[1])?));
-				if rec[2] & 2 != 0 {
-					out.push_str(" CONCURRENTLY");
-				}
-			}
-			t => return Err(Reject::new(format!("not an expression: {t:?}"))),
+		} else {
+			return Err(Reject::new(format!("not an expression: {tag:?}")));
 		}
 		Ok(())
 	}
@@ -438,93 +461,120 @@ impl Lower<'_> {
 	/// spine and an idiom's head.
 	fn shape(&self, id: NodeId) -> R<Shape> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::None => Shape::Lit(LitShape::None),
-			Tag::Null => Shape::Lit(LitShape::Null),
-			Tag::Int => Shape::Lit(LitShape::Int {
-				neg: Ast::int(n) < 0,
-			}),
-			Tag::Float => Shape::Lit(LitShape::Float {
-				neg: Ast::float(n).is_sign_negative(),
-			}),
-			Tag::NaN | Tag::Infinity => Shape::Lit(LitShape::Float {
-				neg: false,
-			}),
-			Tag::Decimal => Shape::Lit(match lit::decimal(self.text(id))? {
-				Literal::Decimal(d) => LitShape::Decimal {
-					neg: d.is_sign_negative(),
-				},
-				_ => LitShape::Other,
-			}),
-			Tag::Str => Shape::Lit(self.str_shape(id)?),
-			Tag::RecordId => Shape::Lit(LitShape::RecordId),
-			Tag::UnboundedRange => Shape::Lit(LitShape::UnboundedRange),
-			Tag::True
-			| Tag::False
-			| Tag::Array
-			| Tag::Object
-			| Tag::Set
-			| Tag::Point
-			| Tag::Regex
-			| Tag::Duration => Shape::Lit(LitShape::Other),
-			Tag::Path => Shape::Constant,
-			Tag::Call => {
+		let tag = n.tag;
+		let sh =
+			if tag == Tag::None {
+				Shape::Lit(LitShape::None)
+			} else if tag == Tag::Null {
+				Shape::Lit(LitShape::Null)
+			} else if tag == Tag::Int {
+				Shape::Lit(LitShape::Int {
+					neg: Ast::int(n) < 0,
+				})
+			} else if tag == Tag::Float {
+				Shape::Lit(LitShape::Float {
+					neg: Ast::float(n).is_sign_negative(),
+				})
+			} else if tag == Tag::NaN || tag == Tag::Infinity {
+				Shape::Lit(LitShape::Float {
+					neg: false,
+				})
+			} else if tag == Tag::Decimal {
+				Shape::Lit({
+					let lit = lit::decimal(self.text(id))?;
+					if let Literal::Decimal(d) = lit {
+						LitShape::Decimal {
+							neg: d.is_sign_negative(),
+						}
+					} else {
+						LitShape::Other
+					}
+				})
+			} else if tag == Tag::Str {
+				Shape::Lit(self.str_shape(id)?)
+			} else if tag == Tag::RecordId {
+				Shape::Lit(LitShape::RecordId)
+			} else if tag == Tag::UnboundedRange {
+				Shape::Lit(LitShape::UnboundedRange)
+			} else if matches!(
+				tag,
+				Tag::True
+					| Tag::False | Tag::Array
+					| Tag::Object | Tag::Set
+					| Tag::Point | Tag::Regex
+					| Tag::Duration
+			) {
+				Shape::Lit(LitShape::Other)
+			} else if tag == Tag::Path {
+				Shape::Constant
+			} else if tag == Tag::Call {
 				if self.is_constant_call(n)? {
 					Shape::Postfix(PostfixKind::Call)
 				} else {
 					Shape::FunctionCall
 				}
-			}
-			Tag::Script => Shape::FunctionCall,
-			Tag::CallExpr => Shape::Postfix(PostfixKind::Call),
-			Tag::PostfixRange => Shape::Postfix(PostfixKind::Range),
-			Tag::Cast => Shape::Prefix {
-				bp: BindingPower::Prefix,
-				neg: false,
-			},
-			Tag::Prefix => {
+			} else if tag == Tag::Script {
+				Shape::FunctionCall
+			} else if tag == Tag::CallExpr {
+				Shape::Postfix(PostfixKind::Call)
+			} else if tag == Tag::PostfixRange {
+				Shape::Postfix(PostfixKind::Range)
+			} else if tag == Tag::Cast {
+				Shape::Prefix {
+					bp: BindingPower::Prefix,
+					neg: false,
+				}
+			} else if tag == Tag::Prefix {
 				let (_, bp, neg) = prefix_op(n.op);
 				Shape::Prefix {
 					bp,
 					neg,
 				}
-			}
-			Tag::Binary => {
+			} else if tag == Tag::Binary {
 				Shape::Binary(BindingPower::for_binary_operator(&binary(Binary::from_u8(n.op))))
-			}
-			Tag::BinaryX => Shape::Binary(BindingPower::Relation),
-			Tag::Field => Shape::Idiom(FirstPart::Field),
-			Tag::Idiom => Shape::Idiom(self.first_part(id)?),
-			Tag::Param => Shape::Param,
-			Tag::Table => Shape::Table,
-			Tag::Mock => Shape::Mock,
-			Tag::Block => Shape::Block,
-			Tag::Closure => Shape::Closure,
-			Tag::Break => Shape::Break,
-			Tag::Continue => Shape::Continue,
-			Tag::Throw => Shape::Throw,
-			Tag::Return => Shape::Return {
-				fetch: n.b != NONE,
-			},
-			Tag::If
-			| Tag::Select
-			| Tag::Create
-			| Tag::Update
-			| Tag::Upsert
-			| Tag::Delete
-			| Tag::Relate
-			| Tag::Insert
-			| Tag::Define
-			| Tag::Remove
-			| Tag::Alter
-			| Tag::Rebuild
-			| Tag::Info
-			| Tag::For
-			| Tag::Let
-			| Tag::Sleep
-			| Tag::Explain => Shape::Stmt,
-			t => return Err(Reject::new(format!("not an expression: {t:?}"))),
-		})
+			} else if tag == Tag::BinaryX {
+				Shape::Binary(BindingPower::Relation)
+			} else if tag == Tag::Field {
+				Shape::Idiom(FirstPart::Field)
+			} else if tag == Tag::Idiom {
+				Shape::Idiom(self.first_part(id)?)
+			} else if tag == Tag::Param {
+				Shape::Param
+			} else if tag == Tag::Table {
+				Shape::Table
+			} else if tag == Tag::Mock {
+				Shape::Mock
+			} else if tag == Tag::Block {
+				Shape::Block
+			} else if tag == Tag::Closure {
+				Shape::Closure
+			} else if tag == Tag::Break {
+				Shape::Break
+			} else if tag == Tag::Continue {
+				Shape::Continue
+			} else if tag == Tag::Throw {
+				Shape::Throw
+			} else if tag == Tag::Return {
+				Shape::Return {
+					fetch: n.b != NONE,
+				}
+			} else if matches!(
+				tag,
+				Tag::If
+					| Tag::Select | Tag::Create
+					| Tag::Update | Tag::Upsert
+					| Tag::Delete | Tag::Relate
+					| Tag::Insert | Tag::Define
+					| Tag::Remove | Tag::Alter
+					| Tag::Rebuild | Tag::Info
+					| Tag::For | Tag::Let
+					| Tag::Sleep | Tag::Explain
+			) {
+				Shape::Stmt
+			} else {
+				return Err(Reject::new(format!("not an expression: {tag:?}")));
+			};
+		Ok(sh)
 	}
 
 	/// The shape of a string leaf: a record id only when its text is one.
@@ -537,9 +587,10 @@ impl Lower<'_> {
 				if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
 					return Err(Reject::new("invalid escape"));
 				}
-				match lit::legacy_strand(s) {
-					Literal::RecordId(_) => LitShape::RecordId,
-					_ => LitShape::Other,
+				if let Literal::RecordId(_) = lit::legacy_strand(s) {
+					LitShape::RecordId
+				} else {
+					LitShape::Other
 				}
 			}
 			_ => LitShape::Other,
@@ -564,47 +615,64 @@ impl Lower<'_> {
 		let uncovered = head.depth & ast::COVERED == 0;
 		let listed = || match self.list(n.b).first() {
 			None => FirstPart::Empty,
-			Some(&p) => match self.n(p).tag {
-				Tag::PartField => FirstPart::Field,
-				Tag::PartGraph => FirstPart::Lookup {
-					out: self.n(p).op == 0,
-				},
-				_ => FirstPart::Other,
-			},
+			Some(&p) => {
+				let tag = self.n(p).tag;
+				if tag == Tag::PartField {
+					FirstPart::Field
+				} else if tag == Tag::PartGraph {
+					FirstPart::Lookup {
+						out: self.n(p).op == 0,
+					}
+				} else {
+					FirstPart::Other
+				}
+			}
 		};
-		Ok(match head.tag {
-			Tag::Field if head.op == 1 => listed(),
-			Tag::Doc => FirstPart::Doc,
-			Tag::Field | Tag::Table if uncovered => FirstPart::Field,
-			Tag::Idiom if uncovered => match self.first_part(n.a)? {
-				FirstPart::Empty => listed(),
-				first => first,
-			},
-			_ => FirstPart::Start(n.a),
-		})
+		let res = if head.tag == Tag::Field && head.op == 1 {
+			listed()
+		} else if head.tag == Tag::Doc {
+			FirstPart::Doc
+		} else if (head.tag == Tag::Field || head.tag == Tag::Table) && uncovered {
+			FirstPart::Field
+		} else if head.tag == Tag::Idiom && uncovered {
+			let first = self.first_part(n.a)?;
+			if first == FirstPart::Empty {
+				listed()
+			} else {
+				first
+			}
+		} else {
+			FirstPart::Start(n.a)
+		};
+		Ok(res)
 	}
 
 	/// The left operand of an operator or postfix node, whose own shape
 	/// decides the predicates that read the leftmost spot.
 	fn left_operand(&self, id: NodeId) -> Option<NodeId> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Binary | Tag::BinaryX | Tag::PostfixRange | Tag::CallExpr => Some(n.a),
-			_ => None,
+		if matches!(n.tag, Tag::Binary | Tag::BinaryX | Tag::PostfixRange | Tag::CallExpr) {
+			Some(n.a)
+		} else {
+			None
 		}
 	}
 
 	/// `Expr::has_left_none_null`.
 	fn has_left_none_null(&self, mut id: NodeId) -> R<bool> {
 		loop {
-			match self.shape(id)? {
-				Shape::Lit(LitShape::None | LitShape::Null) => return Ok(true),
-				Shape::Binary(_) | Shape::Postfix(_) => match self.left_operand(id) {
+			let shape = self.shape(id)?;
+			if matches!(shape, Shape::Lit(LitShape::None | LitShape::Null)) {
+				return Ok(true);
+			} else if matches!(shape, Shape::Binary(_) | Shape::Postfix(_)) {
+				match self.left_operand(id) {
 					Some(left) => id = left,
 					None => return Ok(false),
-				},
-				Shape::Idiom(FirstPart::Start(head)) => id = head,
-				_ => return Ok(false),
+				}
+			} else if let Shape::Idiom(FirstPart::Start(head)) = shape {
+				id = head;
+			} else {
+				return Ok(false);
 			}
 		}
 	}
@@ -612,30 +680,38 @@ impl Lower<'_> {
 	/// `Expr::has_left_minus`.
 	fn has_left_minus(&self, mut id: NodeId) -> R<bool> {
 		loop {
-			match self.shape(id)? {
-				Shape::Prefix {
+			let shape = self.shape(id)?;
+			if let Shape::Prefix {
+				neg,
+				..
+			} = shape
+			{
+				return Ok(neg);
+			} else if let Shape::Lit(
+				LitShape::Int {
 					neg,
-					..
-				} => return Ok(neg),
-				Shape::Lit(
-					LitShape::Int {
-						neg,
-					}
-					| LitShape::Float {
-						neg,
-					}
-					| LitShape::Decimal {
-						neg,
-					},
-				) => return Ok(neg),
-				Shape::Idiom(FirstPart::Lookup {
-					out,
-				}) => return Ok(out),
-				Shape::Binary(_) | Shape::Postfix(_) => match self.left_operand(id) {
+				}
+				| LitShape::Float {
+					neg,
+				}
+				| LitShape::Decimal {
+					neg,
+				},
+			) = shape
+			{
+				return Ok(neg);
+			} else if let Shape::Idiom(FirstPart::Lookup {
+				out,
+			}) = shape
+			{
+				return Ok(out);
+			} else if matches!(shape, Shape::Binary(_) | Shape::Postfix(_)) {
+				match self.left_operand(id) {
 					Some(left) => id = left,
 					None => return Ok(false),
-				},
-				_ => return Ok(false),
+				}
+			} else {
+				return Ok(false);
 			}
 		}
 	}
@@ -643,13 +719,16 @@ impl Lower<'_> {
 	/// `Expr::has_left_idiom`.
 	fn has_left_idiom(&self, mut id: NodeId) -> R<bool> {
 		loop {
-			match self.shape(id)? {
-				Shape::Idiom(_) => return Ok(true),
-				Shape::Binary(_) | Shape::Postfix(_) => match self.left_operand(id) {
+			let shape = self.shape(id)?;
+			if matches!(shape, Shape::Idiom(_)) {
+				return Ok(true);
+			} else if matches!(shape, Shape::Binary(_) | Shape::Postfix(_)) {
+				match self.left_operand(id) {
 					Some(left) => id = left,
 					None => return Ok(false),
-				},
-				_ => return Ok(false),
+				}
+			} else {
+				return Ok(false);
 			}
 		}
 	}
@@ -873,32 +952,31 @@ impl Lower<'_> {
 	/// A record-id key at `id`: a scalar key, an array or object, or a range.
 	fn render_key(&self, id: NodeId, out: &mut String) -> R<()> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Array | Tag::Object => self.render_expr(id, out),
-			Tag::KeyRange => {
-				if n.a != NONE {
-					self.render_key(n.a, out)?;
-					if n.op & 1 != 0 {
-						out.push('>');
-					}
+		if matches!(n.tag, Tag::Array | Tag::Object) {
+			self.render_expr(id, out)
+		} else if n.tag == Tag::KeyRange {
+			if n.a != NONE {
+				self.render_key(n.a, out)?;
+				if n.op & 1 != 0 {
+					out.push('>');
 				}
-				if n.b == NONE {
-					out.push_str("..");
+			}
+			if n.b == NONE {
+				out.push_str("..");
+			} else {
+				out.push_str(if n.op & 2 != 0 {
+					"..="
 				} else {
-					out.push_str(if n.op & 2 != 0 {
-						"..="
-					} else {
-						".."
-					});
-					self.render_key(n.b, out)?;
-				}
-				Ok(())
+					".."
+				});
+				self.render_key(n.b, out)?;
 			}
-			Tag::KeyInt | Tag::KeyStr | Tag::KeyUuid | Tag::KeyGen => {
-				put(out, &self.key(id)?);
-				Ok(())
-			}
-			t => Err(Reject::new(format!("not a key: {t:?}"))),
+			Ok(())
+		} else if matches!(n.tag, Tag::KeyInt | Tag::KeyStr | Tag::KeyUuid | Tag::KeyGen) {
+			put(out, &self.key(id)?);
+			Ok(())
+		} else {
+			Err(Reject::new(format!("not a key: {:?}", n.tag)))
 		}
 	}
 
@@ -1069,24 +1147,28 @@ impl Lower<'_> {
 
 	fn collect_parts(&self, id: NodeId, parts: &mut Vec<PartRef>) -> R<()> {
 		let n = self.n(id);
-		match n.tag {
-			Tag::Field => {
-				if n.op != 1 {
-					parts.push(PartRef::Name(id));
-				}
-				return Ok(());
+		if n.tag == Tag::Field {
+			if n.op != 1 {
+				parts.push(PartRef::Name(id));
 			}
-			Tag::Idiom => {}
-			t => return Err(Reject::new(format!("not an idiom: {t:?}"))),
+			return Ok(());
+		} else if n.tag == Tag::Idiom {
+			// pass
+		} else {
+			return Err(Reject::new(format!("not an idiom: {:?}", n.tag)));
 		}
 		let head = self.n(n.a);
 		let uncovered = head.depth & ast::COVERED == 0;
-		match head.tag {
-			Tag::Field if head.op == 1 => {}
-			Tag::Doc => parts.push(PartRef::Doc),
-			Tag::Field | Tag::Table if uncovered => parts.push(PartRef::Name(n.a)),
-			Tag::Idiom if uncovered => self.collect_parts(n.a, parts)?,
-			_ => parts.push(PartRef::Start(n.a)),
+		if head.tag == Tag::Field && head.op == 1 {
+			// empty head
+		} else if head.tag == Tag::Doc {
+			parts.push(PartRef::Doc);
+		} else if (head.tag == Tag::Field || head.tag == Tag::Table) && uncovered {
+			parts.push(PartRef::Name(n.a));
+		} else if head.tag == Tag::Idiom && uncovered {
+			self.collect_parts(n.a, parts)?;
+		} else {
+			parts.push(PartRef::Start(n.a));
 		}
 		parts.extend(self.list(n.b).iter().map(|&p| PartRef::Listed(p)));
 		Ok(())
@@ -1146,34 +1228,40 @@ impl Lower<'_> {
 
 	fn render_listed_part(&self, id: NodeId, first: bool, out: &mut String) -> R<()> {
 		let pn = self.n(id);
-		match pn.tag {
-			Tag::PartField => self.render_field_part(id, first, out)?,
-			Tag::PartAll => out.push_str(".*"),
-			Tag::PartLast => out.push_str("[$]"),
-			Tag::PartFlatten => out.push('…'),
-			Tag::PartOptional => out.push_str(".?"),
-			Tag::PartIndex => {
-				out.push('[');
-				self.render_expr(pn.a, out)?;
-				out.push(']');
-			}
-			Tag::PartWhere => {
-				out.push_str("[WHERE ");
-				self.render_expr(pn.a, out)?;
-				out.push(']');
-			}
-			Tag::PartMethod => {
-				out.push('.');
-				put(out, &EscapeKwFreeIdent(&self.name(pn.a)?));
-				out.push('(');
-				self.render_covered_list(self.list(pn.b), out)?;
-				out.push(')');
-			}
-			Tag::PartGraph => self.render_lookup(pn, out)?,
-			Tag::PartRepeat => out.push_str(".@"),
-			Tag::PartRecurse => self.render_recurse(pn, out)?,
-			Tag::PartDestructure => self.render_destructure(pn, out)?,
-			t => return Err(Reject::new(format!("not a part: {t:?}"))),
+		if pn.tag == Tag::PartField {
+			self.render_field_part(id, first, out)?;
+		} else if pn.tag == Tag::PartAll {
+			out.push_str(".*");
+		} else if pn.tag == Tag::PartLast {
+			out.push_str("[$]");
+		} else if pn.tag == Tag::PartFlatten {
+			out.push('…');
+		} else if pn.tag == Tag::PartOptional {
+			out.push_str(".?");
+		} else if pn.tag == Tag::PartIndex {
+			out.push('[');
+			self.render_expr(pn.a, out)?;
+			out.push(']');
+		} else if pn.tag == Tag::PartWhere {
+			out.push_str("[WHERE ");
+			self.render_expr(pn.a, out)?;
+			out.push(']');
+		} else if pn.tag == Tag::PartMethod {
+			out.push('.');
+			put(out, &EscapeKwFreeIdent(&self.name(pn.a)?));
+			out.push('(');
+			self.render_covered_list(self.list(pn.b), out)?;
+			out.push(')');
+		} else if pn.tag == Tag::PartGraph {
+			self.render_lookup(pn, out)?;
+		} else if pn.tag == Tag::PartRepeat {
+			out.push_str(".@");
+		} else if pn.tag == Tag::PartRecurse {
+			self.render_recurse(pn, out)?;
+		} else if pn.tag == Tag::PartDestructure {
+			self.render_destructure(pn, out)?;
+		} else {
+			return Err(Reject::new(format!("not a part: {:?}", pn.tag)));
 		}
 		Ok(())
 	}
@@ -1242,10 +1330,13 @@ impl Lower<'_> {
 					out.push_str(": ");
 					// An alias that lowers to an idiom is that idiom; any other
 					// expression is the start of a one-part idiom.
-					match self.n(en.b).tag {
-						Tag::Idiom => self.render_idiom(en.b, out)?,
-						Tag::Field => put(out, &EscapeIdent(self.name(en.b)?)),
-						_ => self.render_start(en.b, out)?,
+					let tag = self.n(en.b).tag;
+					if tag == Tag::Idiom {
+						self.render_idiom(en.b, out)?;
+					} else if tag == Tag::Field {
+						put(out, &EscapeIdent(self.name(en.b)?));
+					} else {
+						self.render_start(en.b, out)?;
 					}
 				}
 				2 => out.push_str(".*"),
@@ -1644,16 +1735,20 @@ impl Lower<'_> {
 	/// parameter, or a record id that is not a range.
 	fn is_bare_endpoint(&self, id: NodeId) -> R<bool> {
 		let n = self.n(id);
-		Ok(match n.tag {
-			Tag::Array | Tag::Param => true,
-			Tag::RecordId => self.n(n.b).tag != Tag::KeyRange,
-			Tag::Str => matches!(
+		let res = if matches!(n.tag, Tag::Array | Tag::Param) {
+			true
+		} else if n.tag == Tag::RecordId {
+			self.n(n.b).tag != Tag::KeyRange
+		} else if n.tag == Tag::Str {
+			matches!(
 				self.expr(id)?,
 				crate::expr::Expr::Literal(Literal::RecordId(r))
 					if !matches!(r.key, crate::expr::RecordIdKeyLit::Range(_))
-			),
-			_ => false,
-		})
+			)
+		} else {
+			false
+		};
+		Ok(res)
 	}
 
 	fn render_relate(&self, n: &Node, out: &mut String) -> R<()> {
@@ -1977,13 +2072,16 @@ mod tests {
 			let mut failures = Vec::new();
 			let mut same = |what: &str, id: NodeId, want: String, got: Result<String, String>| {
 				compared += 1;
-				match got {
-					Ok(got) if mask(&got) == mask(&want) => {}
-					got => failures.push(format!(
+				if let Ok(ref got) = got
+					&& mask(got) == mask(&want)
+				{
+					// ok
+				} else {
+					failures.push(format!(
 						"{what} differs under option set {set}\n  fixture: {src}\n  node:    {:?} {}\n  want:    {want}\n  got:     {got:?}",
 						ast.node(id).tag,
 						lower.text(id)
-					)),
+					));
 				}
 			};
 			for &s in &ast.stmts {

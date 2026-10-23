@@ -182,7 +182,7 @@ impl PublicKey {
 			Self::Ed25519(key) => <&[u8; 64]>::try_from(signature).is_ok_and(|sig| {
 				key.verify_strict(message, &Ed25519Signature::from_bytes(sig)).is_ok()
 			}),
-			_ => false,
+			Self::P256(_) | Self::P384(_) => false,
 		}
 	}
 

@@ -71,11 +71,10 @@ pub fn fold_select(select: &mut BoundSelect, policy: &DialectPolicy) -> Result<(
 			o.expr = fold_expr(&o.expr, policy)?;
 		}
 		if let Some(frame) = &mut win.spec.frame {
-			match &mut frame.start {
-				BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e) => {
-					**e = fold_expr(e, policy)?;
-				}
-				_ => {}
+			if let BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e) =
+				&mut frame.start
+			{
+				**e = fold_expr(e, policy)?;
 			}
 			if let Some(BoundWindowFrameBound::Preceding(e) | BoundWindowFrameBound::Following(e)) =
 				&mut frame.end
@@ -110,7 +109,10 @@ fn fold_table_source(
 			}
 			Ok(())
 		}
-		_ => Ok(()),
+		BoundTableSource::Table {
+			..
+		}
+		| BoundTableSource::Values => Ok(()),
 	}
 }
 
@@ -167,24 +169,20 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 				Ok(BoundExpr::Literal(result))
 			} else {
 				// Short-circuit / simplify partially constant logical expressions
-				match op {
-					BoundBinaryOp::And => {
-						if let BoundExpr::Literal(BoundLiteral::Boolean(false)) = folded_left {
-							return Ok(BoundExpr::Literal(BoundLiteral::Boolean(false)));
-						}
-						if let BoundExpr::Literal(BoundLiteral::Boolean(false)) = folded_right {
-							return Ok(BoundExpr::Literal(BoundLiteral::Boolean(false)));
-						}
+				if *op == BoundBinaryOp::And {
+					if let BoundExpr::Literal(BoundLiteral::Boolean(false)) = folded_left {
+						return Ok(BoundExpr::Literal(BoundLiteral::Boolean(false)));
 					}
-					BoundBinaryOp::Or => {
-						if let BoundExpr::Literal(BoundLiteral::Boolean(true)) = folded_left {
-							return Ok(BoundExpr::Literal(BoundLiteral::Boolean(true)));
-						}
-						if let BoundExpr::Literal(BoundLiteral::Boolean(true)) = folded_right {
-							return Ok(BoundExpr::Literal(BoundLiteral::Boolean(true)));
-						}
+					if let BoundExpr::Literal(BoundLiteral::Boolean(false)) = folded_right {
+						return Ok(BoundExpr::Literal(BoundLiteral::Boolean(false)));
 					}
-					_ => {}
+				} else if *op == BoundBinaryOp::Or {
+					if let BoundExpr::Literal(BoundLiteral::Boolean(true)) = folded_left {
+						return Ok(BoundExpr::Literal(BoundLiteral::Boolean(true)));
+					}
+					if let BoundExpr::Literal(BoundLiteral::Boolean(true)) = folded_right {
+						return Ok(BoundExpr::Literal(BoundLiteral::Boolean(true)));
+					}
 				}
 
 				Ok(BoundExpr::Binary {
@@ -270,9 +268,11 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 			{
 				let lits = folded_list
 					.iter()
-					.map(|item| match item {
-						BoundExpr::Literal(l) => l.clone(),
-						_ => unreachable!(),
+					.map(|item| {
+						let BoundExpr::Literal(l) = item else {
+							unreachable!()
+						};
+						l.clone()
 					})
 					.collect::<Vec<_>>();
 				let result = eval_in_list(v, &lits, *negated, policy)?;
@@ -375,7 +375,9 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 					BoundWindowFrameBound::Following(e) => {
 						BoundWindowFrameBound::Following(Box::new(fold_expr(e, policy)?))
 					}
-					other => other.clone(),
+					BoundWindowFrameBound::CurrentRow
+					| BoundWindowFrameBound::UnboundedPreceding
+					| BoundWindowFrameBound::UnboundedFollowing => frame.start.clone(),
 				};
 				let end = match &frame.end {
 					Some(BoundWindowFrameBound::Preceding(e)) => {
@@ -384,7 +386,12 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 					Some(BoundWindowFrameBound::Following(e)) => {
 						Some(BoundWindowFrameBound::Following(Box::new(fold_expr(e, policy)?)))
 					}
-					other => other.clone(),
+					Some(
+						BoundWindowFrameBound::CurrentRow
+						| BoundWindowFrameBound::UnboundedPreceding
+						| BoundWindowFrameBound::UnboundedFollowing,
+					)
+					| None => frame.end.clone(),
 				};
 				Some(crate::ir::BoundWindowFrame {
 					units: frame.units,
@@ -439,7 +446,7 @@ pub fn eval_unary_op(
 					Ok(BoundLiteral::Float(num))
 				}
 			}
-			_ => Ok(BoundLiteral::Null),
+			BoundLiteral::String(_) | BoundLiteral::Boolean(_) => Ok(BoundLiteral::Null),
 		},
 		BoundUnaryOp::Negate => match lit {
 			BoundLiteral::Null => Ok(BoundLiteral::Null),
@@ -453,7 +460,7 @@ pub fn eval_unary_op(
 					Ok(BoundLiteral::Float(-num))
 				}
 			}
-			_ => Ok(BoundLiteral::Null),
+			BoundLiteral::String(_) | BoundLiteral::Boolean(_) => Ok(BoundLiteral::Null),
 		},
 	}
 }
@@ -546,27 +553,22 @@ pub fn eval_binary_op(
 		let text = literal_to_string(left);
 		let pattern = literal_to_string(right);
 
-		let matched = match op {
-			BoundBinaryOp::Like => {
-				let case_insensitive = policy.dialect == SqlDialect::MySql;
-				let regex_str = sql_like_to_regex(&pattern, case_insensitive);
-				Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
-			}
-			BoundBinaryOp::ILike => {
-				let regex_str = sql_like_to_regex(&pattern, true);
-				Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
-			}
-			BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi => {
-				let pattern = if op == BoundBinaryOp::RegexpCi {
-					format!("(?i){pattern}")
-				} else {
-					pattern
-				};
-				Regex::new(&pattern)
-					.map(|r| r.is_match(&text))
-					.map_err(|e| PlanError::Custom(format!("invalid regular expression: {e}")))?
-			}
-			_ => unreachable!(),
+		let matched = if op == BoundBinaryOp::Like {
+			let case_insensitive = policy.dialect == SqlDialect::MySql;
+			let regex_str = sql_like_to_regex(&pattern, case_insensitive);
+			Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
+		} else if op == BoundBinaryOp::ILike {
+			let regex_str = sql_like_to_regex(&pattern, true);
+			Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
+		} else {
+			let pattern = if op == BoundBinaryOp::RegexpCi {
+				format!("(?i){pattern}")
+			} else {
+				pattern
+			};
+			Regex::new(&pattern)
+				.map(|r| r.is_match(&text))
+				.map_err(|e| PlanError::Custom(format!("invalid regular expression: {e}")))?
 		};
 		return Ok(BoundLiteral::Boolean(matched));
 	}
@@ -603,7 +605,9 @@ fn eval_power(left: &BoundLiteral, right: &BoundLiteral) -> Result<BoundLiteral,
 		BoundLiteral::String(s) => s
 			.parse::<f64>()
 			.map_err(|_| PlanError::InvalidTextRepresentation(format!("numeric: \"{s}\""))),
-		other => Err(PlanError::unsupported(format!("the ^ operator on {other:?}"))),
+		other @ (BoundLiteral::Boolean(_) | BoundLiteral::Null) => {
+			Err(PlanError::unsupported(format!("the ^ operator on {other:?}")))
+		}
 	};
 	let power = operand(left)?.powf(operand(right)?);
 	Ok(if power.is_finite() {
@@ -632,7 +636,26 @@ fn eval_comparison(
 		BoundBinaryOp::GreaterThanEqual => {
 			ord == Some(std::cmp::Ordering::Greater) || ord == Some(std::cmp::Ordering::Equal)
 		}
-		_ => unreachable!(),
+		BoundBinaryOp::Add
+		| BoundBinaryOp::Subtract
+		| BoundBinaryOp::Multiply
+		| BoundBinaryOp::Divide
+		| BoundBinaryOp::Remainder
+		| BoundBinaryOp::Power
+		| BoundBinaryOp::And
+		| BoundBinaryOp::Or
+		| BoundBinaryOp::Concat
+		| BoundBinaryOp::NullSafeEqual
+		| BoundBinaryOp::DistinctFrom
+		| BoundBinaryOp::Like
+		| BoundBinaryOp::ILike
+		| BoundBinaryOp::Regexp
+		| BoundBinaryOp::RegexpCi
+		| BoundBinaryOp::IntDiv
+		| BoundBinaryOp::JsonExtract
+		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtractText
+		| BoundBinaryOp::JsonContains => unreachable!(),
 	};
 	Ok(BoundLiteral::Boolean(result))
 }
@@ -809,7 +832,28 @@ fn eval_arithmetic(
 				_ => Ok(BoundLiteral::Float(l.as_f64() % r.as_f64())),
 			}
 		}
-		_ => Err(PlanError::unsupported(format!("Arithmetic operation {op:?}"))),
+		BoundBinaryOp::Equal
+		| BoundBinaryOp::NotEqual
+		| BoundBinaryOp::LessThan
+		| BoundBinaryOp::LessThanEqual
+		| BoundBinaryOp::GreaterThan
+		| BoundBinaryOp::GreaterThanEqual
+		| BoundBinaryOp::Power
+		| BoundBinaryOp::And
+		| BoundBinaryOp::Or
+		| BoundBinaryOp::Concat
+		| BoundBinaryOp::NullSafeEqual
+		| BoundBinaryOp::DistinctFrom
+		| BoundBinaryOp::Like
+		| BoundBinaryOp::ILike
+		| BoundBinaryOp::Regexp
+		| BoundBinaryOp::RegexpCi
+		| BoundBinaryOp::JsonExtract
+		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtractText
+		| BoundBinaryOp::JsonContains => {
+			Err(PlanError::unsupported(format!("Arithmetic operation {op:?}")))
+		}
 	}
 }
 

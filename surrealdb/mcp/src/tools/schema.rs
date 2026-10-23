@@ -248,7 +248,11 @@ fn subtree_result(
 			map.remove(key).unwrap_or(serde_json::Value::Array(Vec::new()))
 		}
 		// The INFO statement always returns an object, but guard against it.
-		_ => serde_json::Value::Array(Vec::new()),
+		serde_json::Value::Null
+		| serde_json::Value::Bool(_)
+		| serde_json::Value::Number(_)
+		| serde_json::Value::String(_)
+		| serde_json::Value::Array(_) => serde_json::Value::Array(Vec::new()),
 	};
 	let (items, truncated) = cap_value(subtree, max_bytes);
 	Ok(structured_success(json!({

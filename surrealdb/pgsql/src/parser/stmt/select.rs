@@ -25,11 +25,14 @@ impl<'a> Parser<'a> {
 		// Iterative loop over set operations: UNION, INTERSECT, EXCEPT
 		let mut current = &mut root;
 		loop {
-			let set_op_kind = match &self.peek().kind {
-				TokenKind::Keyword(Keyword::Union) => Some(SetOpKind::Union),
-				TokenKind::Keyword(Keyword::Intersect) => Some(SetOpKind::Intersect),
-				TokenKind::Keyword(Keyword::Except) => Some(SetOpKind::Except),
-				_ => None,
+			let set_op_kind = if self.peek().kind == TokenKind::Keyword(Keyword::Union) {
+				Some(SetOpKind::Union)
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Intersect) {
+				Some(SetOpKind::Intersect)
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Except) {
+				Some(SetOpKind::Except)
+			} else {
+				None
 			};
 
 			let Some(op) = set_op_kind else {
@@ -704,15 +707,18 @@ impl<'a> Parser<'a> {
 
 	/// Check if next token is a join keyword.
 	fn peek_join_type(&self) -> ParseResult<Option<JoinType>> {
-		match &self.peek().kind {
-			TokenKind::Keyword(Keyword::Join) | TokenKind::Keyword(Keyword::Inner) => {
-				Ok(Some(JoinType::Inner))
-			}
-			TokenKind::Keyword(Keyword::Left) => Ok(Some(JoinType::Left)),
-			TokenKind::Keyword(Keyword::Right) => Ok(Some(JoinType::Right)),
-			TokenKind::Keyword(Keyword::Full) => Ok(Some(JoinType::Full)),
-			TokenKind::Keyword(Keyword::Cross) => Ok(Some(JoinType::Cross)),
-			_ => Ok(None),
+		if matches!(self.peek().kind, TokenKind::Keyword(Keyword::Join | Keyword::Inner)) {
+			Ok(Some(JoinType::Inner))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Left) {
+			Ok(Some(JoinType::Left))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Right) {
+			Ok(Some(JoinType::Right))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Full) {
+			Ok(Some(JoinType::Full))
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::Cross) {
+			Ok(Some(JoinType::Cross))
+		} else {
+			Ok(None)
 		}
 	}
 
@@ -748,31 +754,36 @@ impl<'a> Parser<'a> {
 
 	/// Determine if current token can be an unquoted/quoted identifier alias.
 	fn is_table_or_col_alias_start(&self) -> bool {
-		match &self.peek().kind {
-			TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => true,
-			TokenKind::Keyword(kw) => {
-				if kw.category() == KeywordCategory::Reserved {
-					return false;
-				}
-				// Reject keywords that start other clauses
-				!matches!(
-					kw,
-					Keyword::From
-						| Keyword::Where | Keyword::Group
-						| Keyword::Having | Keyword::Window
-						| Keyword::Order | Keyword::Limit
-						| Keyword::Offset | Keyword::Union
-						| Keyword::Intersect
-						| Keyword::Except | Keyword::Join
-						| Keyword::Inner | Keyword::Left
-						| Keyword::Right | Keyword::Full
-						| Keyword::Cross | Keyword::On
-						| Keyword::Using | Keyword::Set
-						| Keyword::Values | Keyword::Returning
-						| Keyword::For
-				)
+		if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::QuotedIdent(_)) {
+			true
+		} else if let TokenKind::Keyword(kw) = &self.peek().kind {
+			if kw.category() == KeywordCategory::Reserved {
+				return false;
 			}
-			_ => false,
+			// Reject keywords that start other clauses
+			!matches!(
+				kw,
+				Keyword::From
+					| Keyword::Where
+					| Keyword::Group
+					| Keyword::Having
+					| Keyword::Window
+					| Keyword::Order
+					| Keyword::Limit
+					| Keyword::Offset
+					| Keyword::Union
+					| Keyword::Intersect
+					| Keyword::Except
+					| Keyword::Join | Keyword::Inner
+					| Keyword::Left | Keyword::Right
+					| Keyword::Full | Keyword::Cross
+					| Keyword::On | Keyword::Using
+					| Keyword::Set | Keyword::Values
+					| Keyword::Returning
+					| Keyword::For
+			)
+		} else {
+			false
 		}
 	}
 }

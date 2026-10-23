@@ -151,7 +151,9 @@ impl WsClient {
 				Message::Binary(bytes) => {
 					return serde_json::from_slice(&bytes).expect("valid response json");
 				}
-				_ => continue,
+				Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => {
+					continue;
+				}
 			}
 		}
 	}

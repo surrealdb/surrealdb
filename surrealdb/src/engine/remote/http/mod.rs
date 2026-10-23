@@ -742,7 +742,68 @@ fn auth_after(command: &Command, results: &[QueryResult], auth: Option<Auth>) ->
 			Err(_) => auth,
 		},
 		Command::Invalidate => None,
-		_ => auth,
+		Command::Use {
+			..
+		}
+		| Command::Refresh {
+			..
+		}
+		| Command::Begin {
+			..
+		}
+		| Command::Rollback {
+			..
+		}
+		| Command::Commit {
+			..
+		}
+		| Command::Revoke {
+			..
+		}
+		| Command::Query {
+			..
+		}
+		| Command::ExportFile {
+			..
+		}
+		| Command::ExportMl {
+			..
+		}
+		| Command::ExportBytes {
+			..
+		}
+		| Command::ExportBytesMl {
+			..
+		}
+		| Command::ImportFile {
+			..
+		}
+		| Command::ImportMl {
+			..
+		}
+		| Command::Health
+		| Command::Version
+		| Command::Set {
+			..
+		}
+		| Command::Unset {
+			..
+		}
+		| Command::SubscribeLive {
+			..
+		}
+		| Command::Kill {
+			..
+		}
+		| Command::Attach {
+			..
+		}
+		| Command::Detach {
+			..
+		}
+		| Command::Run {
+			..
+		} => auth,
 	}
 }
 

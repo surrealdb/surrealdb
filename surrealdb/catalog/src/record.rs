@@ -563,11 +563,12 @@ fn encode_document(
 /// written in.
 #[cold]
 fn stored_write_error(error: stored::Error) -> anyhow::Error {
-	match error {
-		stored::Error::Closure => anyhow::Error::new(RevisionError::Conversion(
+	if let stored::Error::Closure = error {
+		anyhow::Error::new(RevisionError::Conversion(
 			"Closures cannot be stored on disk".to_owned(),
-		)),
-		error => anyhow::Error::new(error),
+		))
+	} else {
+		anyhow::Error::new(error)
 	}
 }
 
@@ -1782,10 +1783,10 @@ mod tests {
 		assert!(!StoredRecord::parse(&bytes).unwrap().unwrap().is_keyed());
 		assert_eq!(Record::decode_as_written(&bytes, None, || unreachable!()).unwrap(), record);
 		let read = read(&bytes, view_key.clone()).unwrap();
-		match &read.data {
-			Value::Object(o) => assert_eq!(o.0.get("id"), Some(&Value::RecordId(view_key))),
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &read.data else {
+			panic!("expected Value::Object");
+		};
+		assert_eq!(o.0.get("id"), Some(&Value::RecordId(view_key)));
 		// A view row with no id at all is read with none.
 		let bare = Record::new(Value::Object(Object::default()));
 		let bytes = encode_record(DOC0, None, &bare.data, Some(&make_rid("v", "1"))).unwrap();
@@ -1866,10 +1867,10 @@ mod tests {
 		let bytes = v1(&original);
 		let decoded = read(&bytes, rid.clone()).unwrap();
 		assert_eq!(decoded, original);
-		match &decoded.data {
-			Value::Object(o) => assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid))),
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid)));
 	}
 
 	#[test]
@@ -1884,40 +1885,34 @@ mod tests {
 		middle.0.insert(Strand::new("age"), Value::from(30i64));
 		middle.0.insert(Strand::new("name"), Value::String(Strand::new("Alice")));
 		let decoded = read(&legacy_stripped_bytes(middle), rid.clone()).unwrap();
-		match &decoded.data {
-			Value::Object(o) => {
-				let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
-				assert_eq!(keys, vec!["age", "id", "name"]);
-				assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid.clone())));
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
+		assert_eq!(keys, vec!["age", "id", "name"]);
+		assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid.clone())));
 
 		// All keys sort before "id" → appended at the end.
 		let mut tail = Object::default();
 		tail.0.insert(Strand::new("address"), Value::String(Strand::new("123 main")));
 		tail.0.insert(Strand::new("age"), Value::from(30i64));
 		let decoded = read(&legacy_stripped_bytes(tail), rid.clone()).unwrap();
-		match &decoded.data {
-			Value::Object(o) => {
-				let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
-				assert_eq!(keys, vec!["address", "age", "id"]);
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
+		assert_eq!(keys, vec!["address", "age", "id"]);
 
 		// All keys sort after "id" → prepended at the front.
 		let mut head = Object::default();
 		head.0.insert(Strand::new("name"), Value::String(Strand::new("Alice")));
 		head.0.insert(Strand::new("zip"), Value::from(12345i64));
 		let decoded = read(&legacy_stripped_bytes(head), rid).unwrap();
-		match &decoded.data {
-			Value::Object(o) => {
-				let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
-				assert_eq!(keys, vec!["id", "name", "zip"]);
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
+		assert_eq!(keys, vec!["id", "name", "zip"]);
 	}
 
 	#[test]
@@ -1954,12 +1949,10 @@ mod tests {
 
 		let bytes = revision::to_vec(&stored).unwrap();
 		let decoded = read(&bytes, view_key.clone()).unwrap();
-		match &decoded.data {
-			Value::Object(o) => {
-				assert_eq!(o.0.get("id"), Some(&Value::RecordId(view_key)));
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		assert_eq!(o.0.get("id"), Some(&Value::RecordId(view_key)));
 	}
 
 	#[test]
@@ -1989,42 +1982,27 @@ mod tests {
 		let bytes = v1(&record);
 		let decoded = read(&bytes, rid.clone()).unwrap();
 
-		match &decoded.data {
-			Value::Object(o) => {
-				assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid)));
-				match o.0.get("profile") {
-					Some(Value::Object(p)) => {
-						assert_eq!(p.0.get("id"), Some(&Value::String(Strand::new("profile:7"))));
-					}
-					_ => panic!("expected nested profile object"),
-				}
-				match o.0.get("friends") {
-					Some(Value::Array(arr)) => {
-						let v: Vec<_> = arr.iter().collect();
-						match v[0] {
-							Value::Object(f) => {
-								assert_eq!(
-									f.0.get("id"),
-									Some(&Value::String(Strand::new("user:bob")))
-								);
-							}
-							_ => panic!("expected nested friend object"),
-						}
-						match v[1] {
-							Value::Object(f) => {
-								assert_eq!(
-									f.0.get("id"),
-									Some(&Value::String(Strand::new("user:carol")))
-								);
-							}
-							_ => panic!("expected nested friend object"),
-						}
-					}
-					_ => panic!("expected friends array"),
-				}
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = &decoded.data else {
+			panic!("expected Value::Object");
+		};
+		assert_eq!(o.0.get("id"), Some(&Value::RecordId(rid)));
+		let Some(Value::Object(p)) = o.0.get("profile") else {
+			panic!("expected nested profile object");
+		};
+		assert_eq!(p.0.get("id"), Some(&Value::String(Strand::new("profile:7"))));
+
+		let Some(Value::Array(arr)) = o.0.get("friends") else {
+			panic!("expected friends array");
+		};
+		let v: Vec<_> = arr.iter().collect();
+		let Value::Object(f0) = v[0] else {
+			panic!("expected nested friend object");
+		};
+		assert_eq!(f0.0.get("id"), Some(&Value::String(Strand::new("user:bob"))));
+		let Value::Object(f1) = v[1] else {
+			panic!("expected nested friend object");
+		};
+		assert_eq!(f1.0.get("id"), Some(&Value::String(Strand::new("user:carol"))));
 	}
 
 	#[test]
@@ -2045,12 +2023,10 @@ mod tests {
 		let bytes = v1(&original);
 		let decoded = read(&bytes, rid).unwrap();
 		assert_eq!(decoded, original);
-		match decoded.data {
-			Value::Object(o) => {
-				let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
-				assert_eq!(keys, vec!["id", "name", "zip"]);
-			}
-			_ => panic!("expected Value::Object"),
-		}
+		let Value::Object(o) = decoded.data else {
+			panic!("expected Value::Object");
+		};
+		let keys: Vec<&str> = o.0.iter().map(|(k, _)| k.as_str()).collect();
+		assert_eq!(keys, vec!["id", "name", "zip"]);
 	}
 }
