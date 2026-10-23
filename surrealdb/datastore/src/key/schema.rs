@@ -409,6 +409,13 @@ keyspace! {
 						key: k.id.clone().into_owned(),
 					}));
 
+					/// The running statistics of one group of an aggregated view,
+					/// beside the group's row under `*`. Only a view table holds
+					/// them, and the group's key is the array of its group values.
+					/// A query never returns one; the view's maintenance reads and
+					/// writes it together with the row.
+					view_state = ["!as", @, id: Id] => surrealdb_catalog::ViewState;
+
 					/// Graph edges.
 					///
 					/// The inner key records one endpoint of an edge; the pointer key

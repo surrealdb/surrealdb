@@ -87,6 +87,7 @@ mod table;
 mod task;
 mod text;
 pub mod view;
+pub mod view_state;
 
 pub use access::*;
 pub use compiled::*;
@@ -117,6 +118,7 @@ pub use table::*;
 pub use task::*;
 pub use text::*;
 pub use view::*;
+pub use view_state::{StoredStat, ViewState};
 
 impl From<Error> for crate::expr::ControlFlow {
 	/// Boxes the catalog failure directly, so it stays the concrete type in the

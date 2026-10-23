@@ -827,6 +827,60 @@ pub trait Transactable: Send + Sync {
 		Box::pin(async move { self.set(key, val).await })
 	}
 
+	/// Insert or update many keys in the datastore.
+	///
+	/// Every entry is written as [`Self::set`] writes it, in input order, so a
+	/// key repeated in `entries` ends up holding its last value. The default
+	/// implementation issues one sequential `set` per entry, which is correct
+	/// for every engine; a backend where each write costs a round trip, or
+	/// where a savepoint needs a read of each key's prior value, overrides it
+	/// with a batched form. Like a run of individual `set` calls, the batch is
+	/// not atomic on its own: an error leaves the entries before the failing
+	/// one written in the transaction, and the transaction's own rollback and
+	/// savepoint rules decide what becomes of them.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(entries = entries.len())))]
+	fn setm<'a>(&'a self, entries: Vec<(Key<'a>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			for (key, val) in entries {
+				self.set(key, val).await?;
+			}
+			Ok(())
+		})
+	}
+
+	/// Delete many keys from the datastore.
+	///
+	/// Every key is deleted as [`Self::del`] deletes it, in input order, with
+	/// the same batching latitude and the same non-atomicity as
+	/// [`Self::setm`].
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(keys = keys.len())))]
+	fn delm<'a>(&'a self, keys: Vec<Key<'a>>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Continue with function logic
+			for key in keys {
+				self.del(key).await?;
+			}
+			Ok(())
+		})
+	}
+
 	/// Delete all versions of a key from the datastore.
 	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {

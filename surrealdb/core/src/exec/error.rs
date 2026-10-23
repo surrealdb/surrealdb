@@ -125,6 +125,18 @@ pub(crate) enum Error {
 	#[error("Invalid statement: {0}")]
 	InvalidStatement(String),
 
+	/// What an aggregated view's storage holds for one of its groups is not
+	/// what the view's maintenance writes.
+	///
+	/// A group is a row and a state, and a row in the current record format
+	/// carries no statistics, so a row without its state cannot be read as an
+	/// empty group: the write is refused rather than starting the group over.
+	#[error("The view `{table}` is corrupt: {reason}")]
+	CorruptView {
+		table: String,
+		reason: &'static str,
+	},
+
 	/// Cannot execute statement using the specified value
 	#[error("Cannot execute statement using value: {value}")]
 	InvalidStatementTarget {
@@ -832,6 +844,10 @@ impl LeafError for Error {
 			// A gap in the engine rather than a fault in the query: there is
 			// nothing for a client to correct, so it stays internal.
 			Error::Unimplemented(_) => TypesError::internal(message),
+			// Storage that is not what the maintenance wrote is no fault of the statement.
+			Error::CorruptView {
+				..
+			} => TypesError::internal(message),
 
 			// A cross-tenant namespace/database refusal: the authenticated auth
 			// level is not permitted to reach the selected ns/db. This is an

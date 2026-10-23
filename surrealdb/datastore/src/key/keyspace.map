@@ -144,6 +144,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*                                                                                                TblPrefix ->  (range)
 /*{ns}*{db}*{tb}*{id}                                                                                       RecordKey ->  Record
 /*{ns}*{db}*{tb}*                                                                                        RecordPrefix ->  (range)
+/*{ns}*{db}*{tb}!as{id}                                                                                  ViewStateKey ->  surrealdb_catalog::ViewState
+/*{ns}*{db}*{tb}!as                                                                                   ViewStatePrefix ->  (range)
 /*{ns}*{db}*{tb}~{id}{dir}{foreign_table}{foreign_key}                                                       GraphKey ->  ()
 /*{ns}*{db}*{tb}~                                                                                         GraphPrefix ->  (range)
 /*{ns}*{db}*{tb}~{id}                                                                                   GraphIdPrefix ->  (range)

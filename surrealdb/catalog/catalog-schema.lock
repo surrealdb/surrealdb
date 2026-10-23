@@ -551,6 +551,46 @@ type StoredReferenceDeleteStrategy enum since=4.0 reserved=[]
   3 Cascade unit since=4.0
   4 Unset unit since=4.0
   5 Custom item:text:expr since=4.0
+type StoredStat enum since=4.0 reserved=[]
+  1 Count fields since=4.0
+    2 count int:i64 critical since=4.0 absent=required
+  2 CountValue fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 count int:i64 critical since=4.0 absent=required
+  3 NumberMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max number critical since=4.0 absent=required
+  4 NumberMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min number critical since=4.0 absent=required
+  5 Sum fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 sum number critical since=4.0 absent=required
+  6 Mean fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 sum number critical since=4.0 absent=required
+    6 count int:i64 critical since=4.0 absent=required
+  7 StdDev fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 shift number critical since=4.0 absent=required
+    6 sum number critical since=4.0 absent=required
+    8 sum_of_squares number critical since=4.0 absent=required
+    10 count int:i64 critical since=4.0 absent=required
+  8 Variance fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 shift number critical since=4.0 absent=required
+    6 sum number critical since=4.0 absent=required
+    8 sum_of_squares number critical since=4.0 absent=required
+    10 count int:i64 critical since=4.0 absent=required
+  9 TimeMax fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 max datetime critical since=4.0 absent=required
+  10 TimeMin fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 min datetime critical since=4.0 absent=required
+  11 Accumulate fields since=4.0
+    2 arg int:u32 critical since=4.0 absent=required
+    4 values list<value> critical since=4.0 absent=required
 type StoredSubscriptionDefinition struct since=4.0 reserved=[]
   2 id uuid critical since=4.0 absent=required
   4 node uuid critical since=4.0 absent=required
@@ -643,3 +683,5 @@ type VectorType enum since=4.0 reserved=[]
   6 F16 unit since=4.0
   7 I8 unit since=4.0
   8 U8 unit since=4.0
+type ViewState struct since=4.0 reserved=[]
+  2 stats list<StoredStat> critical since=4.0 absent=required

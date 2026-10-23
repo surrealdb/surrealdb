@@ -7168,6 +7168,50 @@ impl Transaction {
 		self.cache.remove(&qey);
 	}
 
+	/// Write `batch` with one multi-delete and one multi-write, then do for each
+	/// record in it what [`TableProvider::set_record`] and
+	/// [`TableProvider::del_record`] do once a record is written: drop it from
+	/// this transaction's cache, and note a created one for the creation
+	/// watches open on its table ([`Self::note_creation`]).
+	///
+	/// The deletes are issued before the writes, so a key the batch both
+	/// deletes and writes ends up holding what is written.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn write_batch(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		batch: WriteBatch,
+	) -> Result<()> {
+		let WriteBatch {
+			dels,
+			sets,
+			records,
+			created,
+		} = batch;
+		let created: Vec<(TableName, Vec<u8>)> = created
+			.into_iter()
+			.filter(|(tb, _)| self.creations_watched(ns, db, tb))
+			.map(|(tb, at)| (tb, sets[at].0.to_vec()))
+			.collect();
+		if !dels.is_empty() {
+			self.delm(dels).await?;
+		}
+		if !sets.is_empty() {
+			self.setm(sets).await?;
+		}
+		for (tb, key) in created {
+			self.note_creation(ns, db, &tb, key);
+		}
+		for (tb, id) in records {
+			self.forget_record(ns, db, &tb, &id);
+		}
+		Ok(())
+	}
+
 	/// Insert or update a key in the datastore.
 	#[cfg_attr(
 		feature = "observability",
@@ -7222,6 +7266,86 @@ impl Transaction {
 		let changed = self.reserve_write_slot()?;
 		let val = val.into_vec();
 		self.write_encoded(changed, WriteOp::Set, key, val, None).await
+	}
+
+	/// Insert or update many keys in the datastore, in order.
+	///
+	/// Each entry is charged against the write-cardinality guard and notes a
+	/// definition it changes exactly as [`Self::set`] does; the engine then
+	/// receives the whole batch at once, so a backend that can write or
+	/// snapshot many keys in one round trip does. A key repeated in `entries`
+	/// ends up holding its last value.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn setm(&self, entries: Vec<(Key<'_>, Val)>) -> Result<()> {
+		self.setm_encoded(entries).await
+	}
+
+	#[inline(never)]
+	fn setm_encoded<'a>(
+		&'a self,
+		entries: Vec<(Key<'a>, Val)>,
+	) -> OutOfLine<impl Future<Output = Result<()>> + 'a> {
+		OutOfLine::new(self.setm_body(entries))
+	}
+
+	async fn setm_body(&self, entries: Vec<(Key<'_>, Val)>) -> Result<()> {
+		let mut changed = Vec::with_capacity(entries.len());
+		let mut defined = Vec::with_capacity(entries.len());
+		let mut sizes = Vec::with_capacity(entries.len());
+		for (key, val) in &entries {
+			changed.push(self.reserve_write_slot()?);
+			sizes.push((key.len() as u64, val.len() as u64));
+			defined.push(self.changed_definition(key, Some(val), None).await?);
+		}
+		self.tr.setm(entries).await?;
+		for (key_bytes, value_bytes) in sizes {
+			self.metrics.record_set(key_bytes, value_bytes);
+		}
+		for defined in defined {
+			self.restamp_defined(defined).await?;
+		}
+		drop(changed);
+		Ok(())
+	}
+
+	/// Delete many keys from the datastore, in order. See [`Self::setm`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn delm(&self, keys: Vec<Key<'_>>) -> Result<()> {
+		self.delm_encoded(keys).await
+	}
+
+	#[inline(never)]
+	fn delm_encoded<'a>(
+		&'a self,
+		keys: Vec<Key<'a>>,
+	) -> OutOfLine<impl Future<Output = Result<()>> + 'a> {
+		OutOfLine::new(self.delm_body(keys))
+	}
+
+	async fn delm_body(&self, keys: Vec<Key<'_>>) -> Result<()> {
+		let mut changed = Vec::with_capacity(keys.len());
+		let mut defined = Vec::with_capacity(keys.len());
+		let mut key_bytes = Vec::with_capacity(keys.len());
+		for key in &keys {
+			changed.push(self.reserve_write_slot()?);
+			key_bytes.push(key.len() as u64);
+			defined.push(self.changed_definition(key, None, None).await?);
+		}
+		self.tr.delm(keys).await?;
+		for key_bytes in key_bytes {
+			self.metrics.record_del(1, key_bytes);
+		}
+		for defined in defined {
+			self.restamp_defined(defined).await?;
+		}
+		drop(changed);
+		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -7410,9 +7534,10 @@ impl Transaction {
 		Ok(found)
 	}
 
-	/// Fetch encoded keys in one call, recording the read. The values answer in
-	/// the order of `keys`.
-	async fn getm_encoded(
+	/// Fetch encoded keys in one call, recording the read, without decoding. The
+	/// values answer in the order of `keys`, with `None` for a key that holds
+	/// nothing.
+	pub async fn getm_encoded(
 		&self,
 		keys: &[Key<'static>],
 		version: Option<u64>,
@@ -8932,6 +9057,38 @@ impl Transaction {
 	/// levelled value that meets one reads the store's level first.
 	pub fn write_level(&self) -> FeatureLevel {
 		self.feature.level().capped(Release::CURRENT)
+	}
+
+	/// Whether an aggregated view's group state is kept at its own key.
+	///
+	/// This is the switch the view maintenance reads before it touches a group,
+	/// and the only place it is decided. Before it, a view row carries its
+	/// running statistics inline in the `revision` encoding, exactly as the
+	/// releases that share the store write it. After it, the statistics live in
+	/// a [`ViewState`](surrealdb_catalog::ViewState) under `!as`, and the row is
+	/// an ordinary record.
+	///
+	/// A state is a stored-grammar entry, which only a store above the
+	/// `Legacy` level may hold, so the switch is the level's own predicate.
+	pub fn keyed_view_state(&self) -> bool {
+		!self.write_level().is_legacy()
+	}
+
+	/// `val` encoded for a raw write that replaces `prior`, with the floor it
+	/// carries admitted: for a writer that encodes keys itself and batches its
+	/// writes, and holds the bytes the key held from a read it already made.
+	///
+	/// `prior` is `None` for a key that held nothing. An unlevelled value
+	/// encodes as it always has and ignores `prior`.
+	pub async fn encode_for_write<V: KVValue>(
+		&self,
+		val: &V,
+		prior: Option<&[u8]>,
+	) -> Result<Vec<u8>> {
+		if !V::LEVELLED {
+			return val.kv_encode_value();
+		}
+		self.encode_with_prior(val, prior).await
 	}
 
 	/// Admits a write that uses the features of release `floor`, and records
@@ -16755,6 +16912,59 @@ mod older_build_write_tests {
 		let tx = txn(&tf, &sq).await;
 		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
 		tx.cancel().await.unwrap();
+	}
+}
+
+/// Keys and values a writer encoded itself, written together by
+/// [`Transaction::write_batch`]. A record written or removed through the batch
+/// is named with its table and key, so that the batch keeps the transaction's
+/// record cache and creation watches as the record API does.
+#[derive(Debug, Default)]
+pub struct WriteBatch {
+	dels: Vec<Key<'static>>,
+	sets: Vec<(Key<'static>, Val)>,
+	records: Vec<(TableName, RecordIdKey)>,
+	/// Each created record's table, and where its write is in `sets`.
+	created: Vec<(TableName, usize)>,
+}
+
+impl WriteBatch {
+	/// Whether the batch writes nothing.
+	pub fn is_empty(&self) -> bool {
+		self.dels.is_empty() && self.sets.is_empty()
+	}
+
+	/// Write `val` at `key`, a key that holds no record.
+	pub fn set(&mut self, key: Key<'static>, val: Val) {
+		self.sets.push((key, val));
+	}
+
+	/// Remove `key`, a key that holds no record.
+	pub fn del(&mut self, key: Key<'static>) {
+		self.dels.push(key);
+	}
+
+	/// Write the record `id` of table `tb`, encoded as `val` at `key`.
+	/// `created` says nothing was stored at `key`.
+	pub fn set_record(
+		&mut self,
+		tb: TableName,
+		id: RecordIdKey,
+		key: Key<'static>,
+		val: Val,
+		created: bool,
+	) {
+		if created {
+			self.created.push((tb.clone(), self.sets.len()));
+		}
+		self.sets.push((key, val));
+		self.records.push((tb, id));
+	}
+
+	/// Remove the record `id` of table `tb`, stored at `key`.
+	pub fn del_record(&mut self, tb: TableName, id: RecordIdKey, key: Key<'static>) {
+		self.dels.push(key);
+		self.records.push((tb, id));
 	}
 }
 

@@ -1579,58 +1579,6 @@ pub(in crate::exec::vm) fn note_created(
 	Ok(())
 }
 
-/// Store `record` as the row of view table `table` under `key`, as a view's
-/// maintenance stores the row it computed: the key overwritten whole, and the
-/// row dropped from the transaction's record cache, as a record set through
-/// the record API is. `created` says the view held no row under `key`, so the
-/// row is noted as created ([`crate::kvs::creations`]).
-pub(super) async fn set_view_row(
-	ctx: &crate::exec::operators::write::ctx::WriteCtx,
-	table: &crate::val::TableName,
-	key: &crate::val::RecordIdKey,
-	record: &crate::catalog::Record,
-	created: bool,
-) -> FlowResult<()> {
-	let ns = ctx.ns.namespace_id;
-	let db = ctx.db.database_id;
-	let bytes = table_record_key(ns, db, table, key)?;
-	let txn = ctx.txn();
-	// The view table is not the statement's table, so its writer is resolved from the
-	// transaction for each row; the transaction answers from its per-transaction memo.
-	let writer = txn.record_writer(ns, db, table).await.map_err(ControlFlow::Err)?;
-	// A view row's data is stored whole: no `id` is left out for its key to
-	// restore, so the row names no key and is never packed. A row with aggregation stats is
-	// written in the `revision` encoding without cloning it. The record's encoding refuses a
-	// value nested past the cap.
-	let value = writer.encode_whole(record, None).map_err(ControlFlow::Err)?;
-	// A row the view did not hold is noted as `store` notes a record it
-	// creates, for a write reading the view table to pass over it.
-	let noted = (created && txn.creations_watched(ns, db, table)).then(|| bytes.clone());
-	txn.set(bytes.into(), value).await.map_err(ControlFlow::Err)?;
-	if let Some(key) = noted {
-		txn.note_creation(ns, db, table, key);
-	}
-	txn.forget_record(ns, db, table, key);
-	Ok(())
-}
-
-/// Remove the row of view table `table` under `key`, as a view's maintenance
-/// removes a row its record no longer makes, dropping it from the
-/// transaction's record cache.
-pub(super) async fn del_view_row(
-	ctx: &crate::exec::operators::write::ctx::WriteCtx,
-	table: &crate::val::TableName,
-	key: &crate::val::RecordIdKey,
-) -> FlowResult<()> {
-	let ns = ctx.ns.namespace_id;
-	let db = ctx.db.database_id;
-	let bytes = table_record_key(ns, db, table, key)?;
-	let txn = ctx.txn();
-	txn.del(bytes.into()).await.map_err(ControlFlow::Err)?;
-	txn.forget_record(ns, db, table, key);
-	Ok(())
-}
-
 /// The key the record of `table` under `key` is stored at.
 fn table_record_key(
 	ns: crate::catalog::NamespaceId,

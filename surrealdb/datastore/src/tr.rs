@@ -125,6 +125,17 @@ impl Transactor {
 		}
 	}
 
+	/// [`Self::end_write`] for a batch, `docs` being how many of its keys recording them
+	/// answered `true` for.
+	fn end_writes(&self, docs: usize) {
+		if docs > 0 {
+			let mut written = self.written.lock();
+			for _ in 0..docs {
+				written.end_doc_lookup_write();
+			}
+		}
+	}
+
 	/// End the speculation, answering the writes it holds. The view refuses
 	/// every write after, so a task still holding it once the speculation has
 	/// ended reaches neither the overlay nor the storage.
@@ -156,10 +167,16 @@ impl Transactor {
 	/// Take a write into the speculation's overlay, refused once the
 	/// speculation has ended.
 	fn overlay_mut(&self, f: impl FnOnce(&mut Overlay)) -> Result<()> {
+		self.overlay_mut_n(1, f)
+	}
+
+	/// Take `writes` writes into the speculation's overlay at once, refused
+	/// once the speculation has ended.
+	fn overlay_mut_n(&self, writes: u64, f: impl FnOnce(&mut Overlay)) -> Result<()> {
 		match self.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut() {
 			Some(overlay) => {
 				f(overlay);
-				self.writes.fetch_add(1, std::sync::atomic::Ordering::Release);
+				self.writes.fetch_add(writes, std::sync::atomic::Ordering::Release);
 				Ok(())
 			}
 			None => Err(crate::Error::TransactionFinished),
@@ -464,6 +481,50 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = self.inner.set(key, val).await;
 		self.end_write(doc);
+		written
+	}
+
+	/// Insert or update many keys in the datastore, in order.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn setm(&self, entries: Vec<(Key<'_>, Val)>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut_n(entries.len() as u64, |overlay| {
+				for (key, val) in entries {
+					overlay.set(&key, val);
+				}
+			});
+		}
+		let docs = {
+			let mut written = self.written.lock();
+			entries.iter().filter(|(key, _)| written.note_key(key.as_slice())).count()
+		};
+		let written = self.inner.setm(entries).await;
+		self.end_writes(docs);
+		written
+	}
+
+	/// Delete many keys from the datastore, in order.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn delm(&self, keys: Vec<Key<'_>>) -> Result<()> {
+		if self.speculating() {
+			return self.overlay_mut_n(keys.len() as u64, |overlay| {
+				for key in &keys {
+					overlay.delete(key);
+				}
+			});
+		}
+		let docs = {
+			let mut written = self.written.lock();
+			keys.iter().filter(|key| written.note_key(key.as_slice())).count()
+		};
+		let written = self.inner.delm(keys).await;
+		self.end_writes(docs);
 		written
 	}
 
@@ -1405,6 +1466,90 @@ mod tests {
 			.unwrap();
 		let (tx, _) = builder.new_transaction(TransactionType::Read).await.unwrap();
 		Box::new(Viewing(tx))
+	}
+
+	async fn writing_storage() -> Box<dyn Transactable> {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let (tx, _) = builder.new_transaction(TransactionType::Write).await.unwrap();
+		tx
+	}
+
+	/// The key of record `id` of table `tb` in namespace 1, database 2.
+	fn record_key(tb: &str, id: i64) -> Key<'static> {
+		use surrealdb_kvs::key::KVKey;
+		crate::key::schema::RecordKey {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(2),
+			tb: std::borrow::Cow::Owned(tb.into()),
+			id: std::borrow::Cow::Owned(surrealdb_expr::val::RecordIdKey::Number(id)),
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	fn fenced(tb: &str) -> crate::triggers::FencedTable {
+		(crate::catalog::NamespaceId(1), crate::catalog::DatabaseId(2), tb.into())
+	}
+
+	/// A batched write and a batched delete record every table they write a key of, as single
+	/// writes do, so that a fence on one of those tables sees the transaction.
+	#[tokio::test]
+	async fn a_batched_write_notes_every_table_it_writes() {
+		let tr = Transactor::new(writing_storage().await);
+		tr.setm(vec![(record_key("a", 1), b"1".to_vec()), (record_key("b", 1), b"1".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![record_key("c", 1)]).await.unwrap();
+		let written = tr.written.lock();
+		for table in ["a", "b", "c"] {
+			assert!(written.writes_table(&fenced(table)), "table {table} is noted");
+		}
+		assert!(!written.writes_table(&fenced("d")));
+	}
+
+	/// A batch that writes or deletes a record id's doc-ID forward mapping ends each such write
+	/// once the batch returns, as a single write does, so no forward-mapping write is left open.
+	#[tokio::test]
+	async fn a_batched_write_ends_every_forward_mapping_write() {
+		use surrealdb_kvs::key::KVSubspace;
+		let root = crate::key::schema::TblRoot {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(2),
+			tb: std::borrow::Cow::Owned("a".into()),
+		}
+		.encode_bound()
+		.unwrap();
+		let mapping = |id: u8| {
+			let mut key = root.as_slice().to_vec();
+			key.extend_from_slice(crate::triggers::DOC_LOOKUP_TAG);
+			key.push(id);
+			Key::from(key)
+		};
+		let tr = Transactor::new(writing_storage().await);
+		let before = tr.doc_lookup_writes().expect("no write is open");
+		tr.setm(vec![(mapping(1), b"1".to_vec()), (record_key("a", 1), b"1".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![mapping(2)]).await.unwrap();
+		let after = tr.doc_lookup_writes().expect("every forward-mapping write has ended");
+		assert!(after > before, "the batches wrote forward mappings: {before} -> {after}");
+	}
+
+	/// A speculation counts every key a batch writes or deletes, as it counts single writes.
+	#[tokio::test]
+	async fn a_speculated_batch_counts_each_key() {
+		let tr = Transactor::speculative(
+			writing_storage().await,
+			Arc::new(Mutex::new(Some(Overlay::default()))),
+		);
+		tr.setm(vec![(record_key("a", 1), b"1".to_vec()), (record_key("a", 2), b"2".to_vec())])
+			.await
+			.unwrap();
+		tr.delm(vec![record_key("a", 3)]).await.unwrap();
+		assert_eq!(tr.writes.load(std::sync::atomic::Ordering::Acquire), 3);
 	}
 
 	/// A speculation's reads pass through an overlay the storage's view does not hold, so its

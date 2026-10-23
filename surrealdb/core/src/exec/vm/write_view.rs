@@ -43,7 +43,6 @@ use std::sync::Arc;
 use surrealdb_types::ToSql as _;
 
 use super::data::PlaceRun;
-use super::storage::{del_view_row, set_view_row};
 use super::{State, WriteState, internal, run_image_in_frame};
 use crate::catalog::aggregation::{
 	self, AggregationAnalysis, AggregationStat, Recalculation, add_to_aggregation_stats,
@@ -57,7 +56,8 @@ use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
 use crate::exec::operators::write::stages::observe::is_observed;
 use crate::exec::operators::write::stages::view::{
-	changed_no_row, group_values, left_no_row, new_group, no_record_count, read_view_row, stats_of,
+	Group, GroupSlots, Slot, ViewBatch, changed_no_row, group_values, left_no_row, new_stats,
+	no_record_count, row_of,
 };
 use crate::exec::permission::view_frame;
 use crate::exec::vm::depth::STATEMENT_DEPTH;
@@ -96,6 +96,8 @@ pub(in crate::exec::vm) enum LoweredView {
 		/// otherwise under the source record's key.
 		keyed: bool,
 		rows: ViewRows,
+		/// Whether a clause of the view may read stored data.
+		reads_data: bool,
 	},
 	/// One row per group.
 	Aggregated {
@@ -113,7 +115,28 @@ pub(in crate::exec::vm) enum LoweredView {
 		/// for a view that keeps none.
 		recalc: Option<Recalc>,
 		rows: ViewRows,
+		/// Whether a clause of the view may read stored data.
+		reads_data: bool,
 	},
+}
+
+impl LoweredView {
+	/// Whether a clause of the view may read stored data, such as a row
+	/// another view of the same table holds, so that what the views maintained
+	/// before it made of the record is written before it is evaluated.
+	pub(in crate::exec::vm) fn reads_data(&self) -> bool {
+		match self {
+			LoweredView::Unmaintained => false,
+			LoweredView::Materialized {
+				reads_data,
+				..
+			}
+			| LoweredView::Aggregated {
+				reads_data,
+				..
+			} => *reads_data,
+		}
+	}
 }
 
 assert_plain!(LoweredViews);
@@ -218,6 +241,57 @@ pub(super) async fn views(
 	maintained
 }
 
+/// A row of a view table the maintenance wrote or removed, which the view
+/// table's order runs over once everything the record touched is written.
+struct RowChange<'a> {
+	rows: &'a ViewRows,
+	id: RecordId,
+	action: Action,
+	before: Option<Record>,
+	after: Option<Record>,
+	/// Whether the group's statistics moved. A row holding no statistics
+	/// still counts as modified when they did.
+	state_moved: bool,
+}
+
+/// One view's part of a record's maintenance, planned before storage is
+/// read.
+enum Planned<'a> {
+	Materialized {
+		view: Materialized<'a>,
+		/// The row the record made before the write, which is removed: the
+		/// record left the view or its row moved to another key.
+		removal: Option<(RecordIdKey, Slot)>,
+		/// The row the write makes, with its data.
+		write: Option<(RecordIdKey, Value, Slot)>,
+	},
+	Aggregated {
+		view: Aggregated<'a>,
+		moves: Moves,
+	},
+}
+
+/// A group of an aggregated view, with the keys its row and state are read
+/// from.
+struct Located {
+	key: RecordIdKey,
+	slots: GroupSlots,
+}
+
+/// How a record's change moves it between the groups of one aggregated view.
+enum Moves {
+	/// The record is in no group before or after.
+	Nothing,
+	/// The record joined the group.
+	Joined(Located),
+	/// The record left the group.
+	Left(Located),
+	/// The record changed within the group.
+	Within(Located),
+	/// The record left the first group and joined the second.
+	Moved(Located, Located),
+}
+
 /// The image `image` of the record `id`, with its `id` field set when it is an
 /// object that holds none.
 fn with_id(mut image: Value, id: &RecordId) -> Value {
@@ -233,6 +307,15 @@ fn with_id(mut image: Value, id: &RecordId) -> Value {
 /// `initial` and `current`. A view whose row is already in flight beneath the
 /// record's write fails it before anything of it is evaluated
 /// ([`refuse_reentry`]).
+///
+/// The views are maintained in runs. Within a run, the keys every view will
+/// read are named first, from the images alone, and read with one multi-get;
+/// each view's change is then applied in memory, what it wrote is stored with
+/// one multi-write, and last each row written or removed runs through its view
+/// table's order, as a write of its own. A view whose clauses may read stored
+/// data ([`LoweredView::reads_data`]) starts a run of its own, so that it reads
+/// what the views before it made of the record, as it would were each view
+/// maintained on its own.
 async fn maintain(
 	m: &Maintain<'_>,
 	lowered: &LoweredViews,
@@ -242,26 +325,53 @@ async fn maintain(
 	current: &Value,
 	action: Action,
 ) -> FlowResult<()> {
+	let mut batch = ViewBatch::new(&m.ctx);
+	let mut planned = Vec::with_capacity(lowered.views.len());
 	for (definition, view) in lowered.definitions.iter().zip(&lowered.views) {
-		if !matches!(view, LoweredView::Unmaintained) {
-			refuse_reentry(&m.maintaining, &definition.name)?;
+		if matches!(view, LoweredView::Unmaintained) {
+			continue;
 		}
-		match view {
-			LoweredView::Unmaintained => {}
+		refuse_reentry(&m.maintaining, &definition.name)?;
+		if view.reads_data() && !planned.is_empty() {
+			let run = std::mem::take(&mut planned);
+			settle(m, state, &mut batch, run, initial, current).await?;
+		}
+		planned.push(match view {
+			LoweredView::Unmaintained => continue,
 			LoweredView::Materialized {
 				condition,
 				projection,
 				keyed,
 				rows,
+				..
 			} => {
-				let row = Materialized {
+				let view = Materialized {
 					table: &definition.name,
 					condition: *condition,
 					projection: *projection,
 					keyed: *keyed,
 					rows,
 				};
-				materialized(m, state, &row, id, initial, current, action).await?;
+				let plan = plan_materialized(m, state, &view, id, initial, current, action).await?;
+				let removal = match plan.removal {
+					Some(key) => {
+						let slot = batch.want_row(view.table, &key)?;
+						Some((key, slot))
+					}
+					None => None,
+				};
+				let write = match plan.write {
+					Some((key, data)) => {
+						let slot = batch.want_row(view.table, &key)?;
+						Some((key, data, slot))
+					}
+					None => None,
+				};
+				Planned::Materialized {
+					view,
+					removal,
+					write,
+				}
 			}
 			LoweredView::Aggregated {
 				condition,
@@ -270,6 +380,7 @@ async fn maintain(
 				fields,
 				recalc,
 				rows,
+				..
 			} => {
 				let Some(ViewDefinition::Aggregated {
 					analysis,
@@ -278,7 +389,7 @@ async fn maintain(
 				else {
 					return Err(internal("an aggregated view whose definition is not one"));
 				};
-				let target = Aggregated {
+				let view = Aggregated {
 					analysis,
 					table: &definition.name,
 					condition: *condition,
@@ -288,9 +399,63 @@ async fn maintain(
 					recalc: recalc.as_ref(),
 					rows,
 				};
-				aggregated(m, state, &target, initial, current, action).await?;
+				let moves = moves_of(m, state, &view, &mut batch, initial, current, action).await?;
+				Planned::Aggregated {
+					view,
+					moves,
+				}
+			}
+		});
+	}
+	settle(m, state, &mut batch, planned, initial, current).await
+}
+
+/// Maintain one run of views planned over `batch`: read the keys they named,
+/// apply each view's change, write what they staged, and run each row written
+/// or removed through its view table's order.
+async fn settle<'a>(
+	m: &Maintain<'_>,
+	state: &mut State,
+	batch: &mut ViewBatch,
+	planned: Vec<Planned<'a>>,
+	initial: &Value,
+	current: &Value,
+) -> FlowResult<()> {
+	if planned.is_empty() {
+		return Ok(());
+	}
+	batch.fetch(&m.ctx).await?;
+	let mut changes = Vec::new();
+	for planned in planned {
+		match planned {
+			Planned::Materialized {
+				view,
+				removal,
+				write,
+			} => {
+				materialized(m, batch, &mut changes, &view, removal, write).await?;
+			}
+			Planned::Aggregated {
+				view,
+				moves,
+			} => {
+				aggregated(m, state, batch, &mut changes, &view, moves, initial, current).await?;
 			}
 		}
+	}
+	batch.flush(&m.ctx).await?;
+	for change in changes {
+		run_view_row(
+			m,
+			state,
+			change.rows,
+			change.id,
+			change.action,
+			change.before.as_ref(),
+			change.after.as_ref(),
+			change.state_moved,
+		)
+		.await?;
 	}
 	Ok(())
 }
@@ -304,11 +469,21 @@ struct Materialized<'a> {
 	rows: &'a ViewRows,
 }
 
-/// Maintain a materialized view: the record's row is written when the view's
-/// condition admits the record's post-image — every record the write did not
-/// delete, for a view with none — and removed otherwise. The view row's own
-/// action is what the view table held: a record the condition newly admits
-/// creates its row whatever the statement did.
+/// What a record's change does to a materialized view, decided from the
+/// images alone before storage is read.
+struct MaterializedPlan {
+	/// The key of the row the record made before the write, when that row is
+	/// to go.
+	removal: Option<RecordIdKey>,
+	/// The key and data of the row the write makes.
+	write: Option<(RecordIdKey, Value)>,
+}
+
+/// Decide a materialized view's maintenance: the record's row is written when
+/// the view's condition admits the record's post-image — every record the
+/// write did not delete, for a view with none — and removed otherwise. The
+/// view row's own action is what the view table held: a record the condition
+/// newly admits creates its row whatever the statement did.
 ///
 /// The row is held under the source record's key, or, for a view whose
 /// projection sets the row's `id`, under the key that `id` gives. Such a
@@ -318,7 +493,7 @@ struct Materialized<'a> {
 /// key removes it from the old one. Records that make the same key share one
 /// row: the record written last holds it, and any of them leaving the view or
 /// moving to another key removes it.
-async fn materialized(
+async fn plan_materialized(
 	m: &Maintain<'_>,
 	state: &mut State,
 	view: &Materialized<'_>,
@@ -326,7 +501,7 @@ async fn materialized(
 	initial: &Value,
 	current: &Value,
 	action: Action,
-) -> FlowResult<()> {
+) -> FlowResult<MaterializedPlan> {
 	let admitted = match view.condition {
 		Some(condition) => clause(m, condition, current, state).await?.is_truthy(),
 		None => action != Action::Delete,
@@ -349,10 +524,10 @@ async fn materialized(
 		}
 	};
 	if !admitted {
-		return match held {
-			Some(key) => remove_view_row(m, state, view, key).await,
-			None => Ok(()),
-		};
+		return Ok(MaterializedPlan {
+			removal: held,
+			write: None,
+		});
 	}
 	let mut data = clause(m, view.projection, current, state).await?;
 	let key = if view.keyed {
@@ -365,46 +540,63 @@ async fn materialized(
 	if let Value::Object(object) = &mut data {
 		object.remove("id");
 	}
-	if let Some(held) = held
-		&& held != key
-	{
-		remove_view_row(m, state, view, held).await?;
-	}
-	// Read before it is overwritten: it is the view row's before-image, and
-	// whether it was there decides whether the write creates or updates it.
-	let before = read_view_row(&m.ctx, view.table, &key).await?;
-	let record = Record::new(data);
-	set_view_row(&m.ctx, view.table, &key, &record, before.is_none()).await?;
-	let view_action = match before {
-		Some(_) => Action::Update,
-		None => Action::Create,
-	};
-	let row = RecordId {
-		table: view.table.clone(),
-		key,
-	};
-	run_view_row(m, state, view.rows, row, view_action, before.as_deref(), Some(&record)).await
+	Ok(MaterializedPlan {
+		removal: held.filter(|held| *held != key),
+		write: Some((key, data)),
+	})
 }
 
-/// Remove the row of materialized view `view` under `key`, running the view
-/// table's order for a deleted row. Removing a row the view never held changes
-/// nothing.
-async fn remove_view_row(
+/// Apply a materialized view's plan to the rows read: remove the row that
+/// goes, then write the row the record makes. Removing a row the view never
+/// held changes nothing.
+async fn materialized<'a>(
 	m: &Maintain<'_>,
-	state: &mut State,
-	view: &Materialized<'_>,
-	key: RecordIdKey,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Materialized<'a>,
+	removal: Option<(RecordIdKey, Slot)>,
+	write: Option<(RecordIdKey, Value, Slot)>,
 ) -> FlowResult<()> {
-	let before = read_view_row(&m.ctx, view.table, &key).await?;
-	if before.is_none() {
-		return Ok(());
+	let txn = m.ctx.txn();
+	if let Some((key, slot)) = removal {
+		let before = batch.read_row(&txn, slot, view.table, &key).await?;
+		if before.is_some() {
+			batch.delete_row(slot, view.table, &key);
+			changes.push(RowChange {
+				rows: view.rows,
+				id: RecordId {
+					table: view.table.clone(),
+					key,
+				},
+				action: Action::Delete,
+				before,
+				after: None,
+				state_moved: false,
+			});
+		}
 	}
-	del_view_row(&m.ctx, view.table, &key).await?;
-	let row = RecordId {
-		table: view.table.clone(),
-		key,
-	};
-	run_view_row(m, state, view.rows, row, Action::Delete, before.as_deref(), None).await
+	if let Some((key, data, slot)) = write {
+		// The row's before-image, read before it is overwritten.
+		let before = batch.read_row(&txn, slot, view.table, &key).await?;
+		let record = Record::new(data);
+		batch.write_row(&txn, slot, view.table, &key, &record, before.is_none()).await?;
+		let action = match before {
+			Some(_) => Action::Update,
+			None => Action::Create,
+		};
+		changes.push(RowChange {
+			rows: view.rows,
+			id: RecordId {
+				table: view.table.clone(),
+				key,
+			},
+			action,
+			before,
+			after: Some(record),
+			state_moved: false,
+		});
+	}
+	Ok(())
 }
 
 /// The key a materialized view's row is held under, from the `id` of the row
@@ -444,10 +636,8 @@ struct Aggregated<'a> {
 	rows: &'a ViewRows,
 }
 
-/// Maintain an aggregated view: the record's group under each image, and the
-/// stats of the groups it joined, left or changed within adjusted by what it
-/// contributes. A record that moved between groups leaves one and joins the
-/// other.
+/// The groups the record is in under each image, and the keys of them to
+/// read. A record that moved between groups leaves one and joins the other.
 ///
 /// The group a record leaves is derived from its before-image under the
 /// definitions in force, and the view holds a row for it only if the same
@@ -455,42 +645,91 @@ struct Aggregated<'a> {
 /// clause of the view derives from a record the table holds, such as redefining
 /// a `COMPUTED` field the view depends on, is therefore refused
 /// (`ddl::define_field_statement_validate_computed_views`).
-async fn aggregated(
+async fn moves_of(
 	m: &Maintain<'_>,
 	state: &mut State,
 	view: &Aggregated<'_>,
+	batch: &mut ViewBatch,
 	initial: &Value,
 	current: &Value,
 	action: Action,
-) -> FlowResult<()> {
-	match action {
-		Action::Create => {
-			let Some(group) = group_of(m, view, current, state).await? else {
-				return Ok(());
-			};
-			group_create(m, state, view, current, group).await
-		}
-		Action::Delete => {
-			let Some(group) = group_of(m, view, initial, state).await? else {
-				return Ok(());
-			};
-			group_delete(m, state, view, initial, group).await
-		}
+) -> FlowResult<Moves> {
+	let table = view.table;
+	Ok(match action {
+		Action::Create => match group_of(m, view, current, state).await? {
+			Some(group) => Moves::Joined(locate(batch, table, group)?),
+			None => Moves::Nothing,
+		},
+		Action::Delete => match group_of(m, view, initial, state).await? {
+			Some(group) => Moves::Left(locate(batch, table, group)?),
+			None => Moves::Nothing,
+		},
 		Action::Update => {
 			let before = group_of(m, view, initial, state).await?;
 			let after = group_of(m, view, current, state).await?;
 			match (before, after) {
-				(None, None) => Ok(()),
+				(None, None) => Moves::Nothing,
 				(Some(before), Some(after)) if before == after => {
-					group_update(m, state, view, initial, current, before).await
+					Moves::Within(locate(batch, table, before)?)
 				}
 				(Some(before), Some(after)) => {
-					group_delete(m, state, view, initial, before).await?;
-					group_create(m, state, view, current, after).await
+					let from = locate(batch, table, before)?;
+					let key = RecordIdKey::Array(Array(after));
+					// Group values that differ but encode to one key are one group.
+					if batch.is_group(from.slots, table, &key)? {
+						Moves::Within(from)
+					} else {
+						let slots = batch.want_group(table, &key)?;
+						Moves::Moved(
+							from,
+							Located {
+								key,
+								slots,
+							},
+						)
+					}
 				}
-				(Some(before), None) => group_delete(m, state, view, initial, before).await,
-				(None, Some(after)) => group_create(m, state, view, current, after).await,
+				(Some(before), None) => Moves::Left(locate(batch, table, before)?),
+				(None, Some(after)) => Moves::Joined(locate(batch, table, after)?),
 			}
+		}
+	})
+}
+
+/// The group of `table` whose values are `group`, with its keys named in
+/// `batch` to read.
+fn locate(batch: &mut ViewBatch, table: &TableName, group: Vec<Value>) -> FlowResult<Located> {
+	let key = RecordIdKey::Array(Array(group));
+	let slots = batch.want_group(table, &key)?;
+	Ok(Located {
+		key,
+		slots,
+	})
+}
+
+/// Maintain an aggregated view: the stats of the groups the record joined,
+/// left or changed within adjusted by what it contributes.
+#[expect(clippy::too_many_arguments, reason = "the batch, the changes and the record's images")]
+async fn aggregated<'a>(
+	m: &Maintain<'_>,
+	state: &mut State,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Aggregated<'a>,
+	moves: Moves,
+	initial: &Value,
+	current: &Value,
+) -> FlowResult<()> {
+	match moves {
+		Moves::Nothing => Ok(()),
+		Moves::Joined(at) => group_create(m, state, batch, changes, view, current, at).await,
+		Moves::Left(at) => group_delete(m, state, batch, changes, view, initial, at).await,
+		Moves::Within(at) => {
+			group_update(m, state, batch, changes, view, initial, current, at).await
+		}
+		Moves::Moved(from, to) => {
+			group_delete(m, state, batch, changes, view, initial, from).await?;
+			group_create(m, state, batch, changes, view, current, to).await
 		}
 	}
 }
@@ -529,109 +768,167 @@ async fn arguments_of(
 	Ok(arguments)
 }
 
-/// A record joined `group`: its arguments added to the group's stats, from
-/// the analysis's own for a group no row was in yet.
-async fn group_create(
+/// A record joined the group `at`: its arguments added to the group's stats,
+/// from the analysis's own for a group no row was in yet.
+async fn group_create<'a>(
 	m: &Maintain<'_>,
 	state: &mut State,
-	view: &Aggregated<'_>,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Aggregated<'a>,
 	current: &Value,
-	group: Vec<Value>,
+	at: Located,
 ) -> FlowResult<()> {
-	let key = RecordIdKey::Array(Array(group));
-	let (mut record, action) = match read_view_row(&m.ctx, view.table, &key).await? {
-		Some(record) => ((*record).clone(), Action::Update),
-		None => (new_group(view.analysis), Action::Create),
-	};
-	let before = record.clone();
-	let stats = stats_of(&mut record)?;
+	let (before, mut stats, action) =
+		match batch.read_group(&m.ctx.txn(), at.slots, view.table, &at.key).await? {
+			Some(group) => (Some(group.row), group.stats, Action::Update),
+			None => (None, new_stats(view.analysis), Action::Create),
+		};
+	let prior = (action == Action::Update && batch.keyed(at.slots)).then(|| stats.clone());
 	let arguments = arguments_of(m, view, current, state).await?;
-	add_to_aggregation_stats(&arguments, stats).map_err(ControlFlow::Err)?;
-	store_group(m, state, view, key, record, before, action).await
+	add_to_aggregation_stats(&arguments, &mut stats).map_err(ControlFlow::Err)?;
+	let stored = Stored {
+		at,
+		before,
+		prior,
+		action,
+	};
+	store_group(m, state, batch, changes, view, stored, stats).await
 }
 
-/// A record left `group`: its arguments taken back out of the group's stats,
-/// an extreme it held recomputed over the group's other records, and the row
-/// removed when it was the group's last record.
-async fn group_delete(
+/// A record left the group `at`: its arguments taken back out of the group's
+/// stats, an extreme it held recomputed over the group's other records, and
+/// the row removed when it was the group's last record, except a `GROUP ALL`
+/// row, which is emptied instead.
+async fn group_delete<'a>(
 	m: &Maintain<'_>,
 	state: &mut State,
-	view: &Aggregated<'_>,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Aggregated<'a>,
 	initial: &Value,
-	group: Vec<Value>,
+	at: Located,
 ) -> FlowResult<()> {
 	let table = view.table;
-	let key = RecordIdKey::Array(Array(group.clone()));
-	let Some(stored) = read_view_row(&m.ctx, table, &key).await? else {
-		return Err(left_no_row(&group, table));
+	let Some(group) = batch.read_group(&m.ctx.txn(), at.slots, table, &at.key).await? else {
+		return Err(left_no_row(&group_values(&at.key), table));
 	};
-	let mut record = (*stored).clone();
-	let before = record.clone();
-	let stats = stats_of(&mut record)?;
-	let Some(count) = AggregationStat::get_count(stats) else {
+	let Group {
+		row: before,
+		mut stats,
+	} = group;
+	let Some(count) = AggregationStat::get_count(&stats) else {
 		return Err(no_record_count(table));
 	};
 	if count == 1 && view.group.is_empty() {
 		// The `GROUP ALL` row outlives its last record: it is emptied to the stats of
 		// a group no record is in.
-		record.metadata = new_group(view.analysis).metadata;
-		return store_group(m, state, view, key, record, before, Action::Update).await;
+		let prior = batch.keyed(at.slots).then(|| stats.clone());
+		let stored = Stored {
+			at,
+			before: Some(before),
+			prior,
+			action: Action::Update,
+		};
+		return store_group(m, state, batch, changes, view, stored, new_stats(view.analysis)).await;
 	}
 	if count == 1 {
-		del_view_row(&m.ctx, table, &key).await?;
-		let row = RecordId {
-			table: table.clone(),
-			key,
-		};
-		return run_view_row(m, state, view.rows, row, Action::Delete, Some(&before), None).await;
+		batch.delete_group(at.slots, table, &at.key);
+		changes.push(RowChange {
+			rows: view.rows,
+			id: RecordId {
+				table: table.clone(),
+				key: at.key,
+			},
+			action: Action::Delete,
+			before: Some(before),
+			after: None,
+			state_moved: false,
+		});
+		return Ok(());
 	}
+	let prior = batch.keyed(at.slots).then(|| stats.clone());
 	let arguments = arguments_of(m, view, initial, state).await?;
 	let recalculations =
-		remove_from_aggregation_stats(&arguments, stats).map_err(ControlFlow::Err)?;
-	recalculate(m, state, view, &group, stats, &recalculations).await?;
-	store_group(m, state, view, key, record, before, Action::Update).await
+		remove_from_aggregation_stats(&arguments, &mut stats).map_err(ControlFlow::Err)?;
+	let group = group_values(&at.key);
+	recalculate(m, state, view, &group, &mut stats, &recalculations).await?;
+	let stored = Stored {
+		at,
+		before: Some(before),
+		prior,
+		action: Action::Update,
+	};
+	store_group(m, state, batch, changes, view, stored, stats).await
 }
 
-/// A record changed within `group`: the change between what it contributed
-/// and what it contributes under the current image applied to the group's stats.
-async fn group_update(
+/// A record changed within the group `at`: the change between what it
+/// contributed and what it contributes now applied to the group's stats.
+#[expect(clippy::too_many_arguments, reason = "the batch, the changes and the record's images")]
+async fn group_update<'a>(
 	m: &Maintain<'_>,
 	state: &mut State,
-	view: &Aggregated<'_>,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Aggregated<'a>,
 	initial: &Value,
 	current: &Value,
-	group: Vec<Value>,
+	at: Located,
 ) -> FlowResult<()> {
-	let key = RecordIdKey::Array(Array(group.clone()));
-	let Some(stored) = read_view_row(&m.ctx, view.table, &key).await? else {
-		return Err(changed_no_row(&group, view.table));
+	let Some(group) = batch.read_group(&m.ctx.txn(), at.slots, view.table, &at.key).await? else {
+		return Err(changed_no_row(&group_values(&at.key), view.table));
 	};
-	let mut record = (*stored).clone();
-	let before = record.clone();
-	let stats = stats_of(&mut record)?;
+	let Group {
+		row: before,
+		mut stats,
+	} = group;
+	let prior = batch.keyed(at.slots).then(|| stats.clone());
 	let was = arguments_of(m, view, initial, state).await?;
 	let now = arguments_of(m, view, current, state).await?;
-	let recalculations = update_aggregation_stats(&was, &now, stats).map_err(ControlFlow::Err)?;
-	recalculate(m, state, view, &group, stats, &recalculations).await?;
-	store_group(m, state, view, key, record, before, Action::Update).await
+	let recalculations =
+		update_aggregation_stats(&was, &now, &mut stats).map_err(ControlFlow::Err)?;
+	let group = group_values(&at.key);
+	recalculate(m, state, view, &group, &mut stats, &recalculations).await?;
+	let stored = Stored {
+		at,
+		before: Some(before),
+		prior,
+		action: Action::Update,
+	};
+	store_group(m, state, batch, changes, view, stored, stats).await
+}
+
+/// What a group held before a change, and the row action the change is.
+struct Stored {
+	at: Located,
+	/// The group's row as it was, `None` for a group created by the change.
+	before: Option<Record>,
+	/// The group's statistics as they were, kept only where the row does not
+	/// carry them to compare against.
+	prior: Option<Vec<AggregationStat>>,
+	action: Action,
 }
 
 /// Render a group's stats into its row — each field evaluated against the
-/// document the group key and stats make, and written to its place — store
-/// the row, and run it through the view table's order.
-async fn store_group(
+/// document the group key and stats make, and written to its place — stage
+/// the row and its state, and note the row for the view table's order.
+async fn store_group<'a>(
 	m: &Maintain<'_>,
 	state: &mut State,
-	view: &Aggregated<'_>,
-	key: RecordIdKey,
-	mut record: Record,
-	before: Record,
-	action: Action,
+	batch: &mut ViewBatch,
+	changes: &mut Vec<RowChange<'a>>,
+	view: &Aggregated<'a>,
+	stored: Stored,
+	stats: Vec<AggregationStat>,
 ) -> FlowResult<()> {
-	let document = Value::Object(aggregation::create_field_document(
-		&group_values(&key),
-		stats_of(&mut record)?,
-	));
+	let Stored {
+		at,
+		before,
+		prior,
+		action,
+	} = stored;
+	let document =
+		Value::Object(aggregation::create_field_document(&group_values(&at.key), &stats));
 	let mut data = Value::empty_object();
 	for (steps, pipeline) in view.fields {
 		let value = clause(m, *pipeline, &document, state).await?;
@@ -642,17 +939,37 @@ async fn store_group(
 		};
 		apply::set_with(&mut data, steps, value, &mut run).await?;
 	}
-	record.data = data;
-	set_view_row(&m.ctx, view.table, &key, &record, action == Action::Create).await?;
-	let row = RecordId {
-		table: view.table.clone(),
-		key,
-	};
-	let before = match action {
-		Action::Create => None,
-		Action::Update | Action::Delete => Some(&before),
-	};
-	run_view_row(m, state, view.rows, row, action, before, Some(&record)).await
+	let keyed = batch.keyed(at.slots);
+	let after = row_of(keyed, data, &stats);
+	batch
+		.write_group(
+			&m.ctx.txn(),
+			at.slots,
+			view.table,
+			&at.key,
+			&after,
+			&stats,
+			action == Action::Create,
+		)
+		.await?;
+	// A row that keeps its statistics inline moves with them; one that does
+	// not is told whether they moved.
+	let state_moved = keyed && (action == Action::Create || prior.as_deref() != Some(&stats[..]));
+	changes.push(RowChange {
+		rows: view.rows,
+		id: RecordId {
+			table: view.table.clone(),
+			key: at.key,
+		},
+		action,
+		before: match action {
+			Action::Create => None,
+			Action::Update | Action::Delete => before,
+		},
+		after: Some(after),
+		state_moved,
+	});
+	Ok(())
 }
 
 /// Recompute the extremes of `recalculations`, which the stats of `group` of
@@ -808,12 +1125,14 @@ pub(in crate::exec::vm) fn view_row_exec(
 }
 
 /// Run a row the maintenance wrote or removed on its view table through the
-/// view table's order for `action`: a write of its own, over a write state
-/// stacked on the writer's, in the view table's view-maintenance context, with
-/// the row's table added to the view tables in flight beneath it and the
+/// view table's order for `action`, `state_moved` saying whether the statistics
+/// the row is computed from changed with it: a write of its own, over a write
+/// state stacked on the writer's, in the view table's view-maintenance context,
+/// with the row's table added to the view tables in flight beneath it and the
 /// budget spent for each of them ([`view_row_exec`]). The row is not one of the
 /// statement's records, so nothing it does is counted towards what the
 /// statement affected.
+#[expect(clippy::too_many_arguments, reason = "a row's id, action and both images")]
 async fn run_view_row(
 	m: &Maintain<'_>,
 	state: &mut State,
@@ -822,12 +1141,13 @@ async fn run_view_row(
 	action: Action,
 	initial: Option<&Record>,
 	current: Option<&Record>,
+	state_moved: bool,
 ) -> FlowResult<()> {
 	let ctx = m.scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
 	let maintaining: Arc<[TableName]> =
 		m.maintaining.iter().cloned().chain(std::iter::once(id.table.clone())).collect();
 	let exec = view_row_exec(ctx.exec().clone(), maintaining.len())?;
-	let row = WriteRow::for_view_row(id, initial, current);
+	let row = WriteRow::for_view_row(id, initial, current, state_moved);
 	let units = unit_table(m.program, state, &exec)?;
 	let program = Arc::clone(admitted_unit(&units, rows.unit, &exec)?);
 	let program = &program;

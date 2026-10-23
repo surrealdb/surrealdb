@@ -53,11 +53,14 @@
 //!
 //! ### Edges
 //!
-//! EDGE says the record is an edge on one fixed adjacency layout, [`V1_EDGE_VARIANT`]; no variant
-//! bytes follow it. A generation-0 row, and a row whose generation's descriptor names no
-//! adjacency layout, is on that layout for good: the bits never change meaning. Reading a v1 EDGE
-//! row yields `Metadata { record_type: Edge { variant: V1_EDGE_VARIANT }, aggregation_stats: [] }`;
-//! a v1 row without EDGE has no metadata.
+//! EDGE says the record is an edge, per row: a table of type `ANY` holds edges made by `RELATE`
+//! and plain records that merely have `in` and `out` fields, and a table's definition can change
+//! after its rows are written. No variant bytes follow it: the adjacency layout comes from
+//! [`edge_layout`], which a generation's descriptor answers. A row whose generation has no
+//! descriptor naming a layout, generation 0 above all, keeps [`V1_EDGE_VARIANT`] for good: the bits
+//! never change meaning. Reading a v1 EDGE row yields
+//! `Metadata { record_type: Edge { variant: V1_EDGE_VARIANT }, aggregation_stats: [] }`; a v1 row
+//! without EDGE has no metadata.
 //!
 //! ### Keyed documents
 //!
@@ -72,10 +75,15 @@
 //! [`RecordFormat::Document`] a record is written in the v1 envelope, stamped with the format's
 //! generation, when its metadata is none, or an edge on [`V1_EDGE_VARIANT`] with no aggregation
 //! stats. Every other record is written in the `revision` encoding: records with aggregation stats
-//! (materialised view rows), edges on an earlier adjacency layout, and a table record with
-//! metadata. Their metadata is kept exactly as it is. [`RecordFormat::Revision`] writes every
-//! record in the `revision` encoding. Reading takes the first byte: `0xFF` is the v1 envelope and
-//! anything else is a `revision` record, so a store may hold both.
+//! (view rows that keep their stats inline), edges on an earlier adjacency layout, and a table
+//! record with metadata. Their metadata is kept exactly as it is. [`RecordFormat::Revision`]
+//! writes every record in the `revision` encoding. Reading takes the first byte: `0xFF` is the v1
+//! envelope and anything else is a `revision` record, so a store may hold both.
+//!
+//! A store keeps a group's stats inline only until it switches to keeping them under their own key
+//! ([`ViewState`](crate::ViewState)); from then on the view maintenance writes the group's row as a
+//! record with no metadata, so the v1 envelope never holds stats. A `revision` row read after the
+//! switch is converted by the write that next touches it.
 //!
 //! [`RecordFormat::Packed`] writes a record whose metadata the envelope holds as a packed row of
 //! the generation's descriptor when the record's `"id"` is its key and every value fits its
@@ -1011,11 +1019,11 @@ impl<'a> StoredRecord<'a> {
 		self.header & Self::EDGE != 0
 	}
 
-	/// The adjacency-key variant of an edge: always [`V1_EDGE_VARIANT`].
+	/// The adjacency-key variant of an edge, which [`edge_layout`] names for the row's generation.
 	#[inline]
 	pub const fn edge_variant(&self) -> Option<u16> {
 		if self.is_edge() {
-			Some(V1_EDGE_VARIANT)
+			Some(edge_layout(self.generation))
 		} else {
 			None
 		}
@@ -1408,6 +1416,19 @@ const _: () = assert!(
 	"LATEST_EDGE_VARIANT differs from V1_EDGE_VARIANT, which the record envelope's EDGE bit names \
 	 for good; decide how the envelope writes the new layout before changing it"
 );
+
+/// The adjacency-key layout the descriptor of `generation` names for a v1 EDGE row.
+///
+/// A generation whose descriptor names no layout, generation 0 above all, is on
+/// [`V1_EDGE_VARIANT`] for good. No descriptor names one yet, so every generation answers that
+/// layout; a descriptor that does answers its own here, and nothing else about how an edge is
+/// stored or purged changes. The answer is a function of the generation alone, so a row never
+/// carries a variant of its own.
+#[inline]
+pub const fn edge_layout(generation: u64) -> u16 {
+	let _ = generation;
+	V1_EDGE_VARIANT
+}
 
 /// Types of records that can be stored in the database
 ///

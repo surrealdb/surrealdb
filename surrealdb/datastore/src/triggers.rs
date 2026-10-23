@@ -842,6 +842,12 @@ impl WrittenTables {
 		}
 	}
 
+	/// Whether a key of `table` was recorded as written.
+	#[cfg(test)]
+	pub(crate) fn writes_table(&self, table: &FencedTable) -> bool {
+		self.every || encoded_root(table).is_some_and(|root| self.roots.contains(&root))
+	}
+
 	/// Count the beginning of a write that may reach a doc-ID forward mapping, if `may`.
 	fn begin_doc_lookup_write(&mut self, may: bool) -> bool {
 		if may {
@@ -934,7 +940,7 @@ impl WrittenTables {
 
 /// The key under a table's root that holds a record id's doc-ID forward mapping: the tag, then
 /// the record id's identity.
-const DOC_LOOKUP_TAG: &[u8] = b"!dj";
+pub(crate) const DOC_LOOKUP_TAG: &[u8] = b"!dj";
 
 /// Whether `tail`, the bytes of a key after its table's root, begins a doc-ID forward mapping.
 fn is_doc_lookup_tail(tail: &[u8]) -> bool {

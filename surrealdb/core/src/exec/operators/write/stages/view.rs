@@ -26,12 +26,17 @@
 //! [`view_frame`](crate::exec::permission::view_frame).
 
 use std::borrow::Cow;
-use std::sync::Arc;
 
+use surrealdb_datastore::WriteBatch;
+use surrealdb_kvs::Key;
+use surrealdb_kvs::key::KVKey;
+use surrealdb_kvs::value::KVValue;
 use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{AggregationAnalysis, AggregationStat, Recalculation};
-use crate::catalog::{Metadata, Record, RecordType};
+use crate::catalog::{
+	DatabaseId, Metadata, NamespaceId, Record, RecordType, RecordWriter, StoredRecord, ViewState,
+};
 use crate::exec::Error as ExecError;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::expr::field::Selector;
@@ -40,7 +45,8 @@ use crate::expr::statements::SelectStatement;
 use crate::expr::{
 	BinaryOperator, Cond, ControlFlow, Expr, Fields, Function, FunctionCall, Groups, Literal, Param,
 };
-use crate::key::schema::RecordKey;
+use crate::key::schema::{RecordKey, ViewStateKey};
+use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 #[cfg(test)]
@@ -210,30 +216,203 @@ fn conjoin(left: Option<Expr>, right: Expr) -> Expr {
 // Shared
 // ===========================================================================
 
-/// A view row as it is stored.
+/// The statistics a group no record was in yet starts from: the analysis's
+/// own.
+pub(crate) fn new_stats(analysis: &AggregationAnalysis) -> Vec<AggregationStat> {
+	analysis.aggregations.iter().map(|aggregation| aggregation.to_stat()).collect()
+}
+
+/// A view row holding `data` and, where the store keeps a group's statistics
+/// inline, `stats`.
+pub(crate) fn row_of(keyed: bool, data: Value, stats: &[AggregationStat]) -> Record {
+	Record {
+		data,
+		metadata: (!keyed).then(|| Metadata {
+			record_type: RecordType::Table,
+			aggregation_stats: stats.to_vec(),
+		}),
+	}
+}
+
+// ===========================================================================
+// One record's reads and writes
+// ===========================================================================
+
+/// Where a key a [`ViewBatch`] reads sits in its answer.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Slot(usize);
+
+/// The two keys of an aggregated view's group: its row, and its state.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GroupSlots {
+	row: Slot,
+	state: Slot,
+}
+
+/// An aggregated view's group as storage holds it.
+pub(crate) struct Group {
+	/// The row as stored. Its metadata is there only for a row that keeps the
+	/// group's statistics inline and is written back the same way.
+	pub(crate) row: Record,
+	/// The group's running statistics.
+	pub(crate) stats: Vec<AggregationStat>,
+}
+
+/// The storage one record's view maintenance reads and writes.
 ///
-/// Decoded as written rather than through the record decoder, because a view
-/// row's `data` carries no `id`: the row's identity is its key, and splicing it
-/// in would change what the view table's own events and subscribers are shown.
-pub(crate) async fn read_view_row(
-	ctx: &WriteCtx,
-	table: &TableName,
-	key: &RecordIdKey,
-) -> Result<Option<Arc<Record>>, ControlFlow> {
-	let record_key = RecordKey {
-		ns: ctx.ns.namespace_id,
-		db: ctx.db.database_id,
-		tb: Cow::Borrowed(table),
-		id: Cow::Borrowed(key),
-	};
-	match ctx.txn().get_key_raw(&record_key, None).await.map_err(ControlFlow::Err)? {
-		Some(bytes) => Ok(Some(Arc::new(
-			ctx.txn()
-				.decode_record_as_written(
-					ctx.ns.namespace_id,
-					ctx.db.database_id,
+/// Maintenance first names every key it will read, then reads them all with
+/// one multi-get ([`Self::fetch`]), applies the record's change to each view
+/// in memory, staging what it writes, and issues the staged writes as one
+/// multi-delete and one multi-write ([`Self::flush`]): a record feeding `V`
+/// views costs one round trip to read and one to write where reading and
+/// writing each group on its own costs up to `2V` of each. Keys named after a
+/// flush are read by the next fetch.
+///
+/// A key is written at most once per batch: a group is touched by one view's
+/// one change (a record that moves between two groups whose keys encode alike
+/// is a change within one group, [`Self::is_group`]), and the rows of different
+/// views are under different tables. Staging a key takes it from the batch.
+pub(crate) struct ViewBatch {
+	ns: NamespaceId,
+	db: DatabaseId,
+	/// Whether a group new to the view keeps its statistics at its own key
+	/// ([`Transaction::keyed_view_state`]), decided once for the batch. A group
+	/// that already has a state keeps it whatever this says.
+	keyed: bool,
+	wanted: Vec<Key<'static>>,
+	found: Vec<Option<Vec<u8>>>,
+	staged: WriteBatch,
+	/// The writer of each view table the batch wrote a row of.
+	writers: Vec<(TableName, RecordWriter)>,
+}
+
+impl ViewBatch {
+	pub(crate) fn new(ctx: &WriteCtx) -> Self {
+		Self::of(ctx.ns.namespace_id, ctx.db.database_id, ctx.txn().keyed_view_state())
+	}
+
+	/// A batch over the database `db` of `ns`, whose new groups keep their
+	/// statistics at their own key when `keyed`.
+	pub(crate) fn of(ns: NamespaceId, db: DatabaseId, keyed: bool) -> Self {
+		Self {
+			ns,
+			db,
+			keyed,
+			wanted: Vec::new(),
+			found: Vec::new(),
+			staged: WriteBatch::default(),
+			writers: Vec::new(),
+		}
+	}
+
+	/// Whether the group read at `slots` keeps its statistics at their own
+	/// key: it holds a state, or it is new to the view and the store keeps
+	/// states.
+	pub(crate) fn keyed(&self, slots: GroupSlots) -> bool {
+		self.keyed || self.bytes(slots.state).is_some()
+	}
+
+	fn want(&mut self, key: Key<'static>) -> Slot {
+		let slot = Slot(self.wanted.len());
+		self.wanted.push(key);
+		slot
+	}
+
+	fn row_key(&self, table: &TableName, key: &RecordIdKey) -> Result<Key<'static>, ControlFlow> {
+		RecordKey {
+			ns: self.ns,
+			db: self.db,
+			tb: Cow::Borrowed(table),
+			id: Cow::Borrowed(key),
+		}
+		.encode_key()
+		.map_err(ControlFlow::Err)
+	}
+
+	fn state_key(&self, table: &TableName, key: &RecordIdKey) -> Result<Key<'static>, ControlFlow> {
+		ViewStateKey {
+			ns: self.ns,
+			db: self.db,
+			tb: Cow::Borrowed(table),
+			id: Cow::Borrowed(key),
+		}
+		.encode_key()
+		.map_err(ControlFlow::Err)
+	}
+
+	/// Name the row of `table` under `key` as a key to read.
+	pub(crate) fn want_row(
+		&mut self,
+		table: &TableName,
+		key: &RecordIdKey,
+	) -> Result<Slot, ControlFlow> {
+		let key = self.row_key(table, key)?;
+		Ok(self.want(key))
+	}
+
+	/// Name the row of `table` under `key`, and its state, as keys to read.
+	///
+	/// The state is read whatever the store's feature level says, so that a
+	/// node whose view of the level lags behind the node that wrote a group's
+	/// state still reads the group as stored.
+	pub(crate) fn want_group(
+		&mut self,
+		table: &TableName,
+		key: &RecordIdKey,
+	) -> Result<GroupSlots, ControlFlow> {
+		let row = self.want_row(table, key)?;
+		let state = self.state_key(table, key)?;
+		Ok(GroupSlots {
+			row,
+			state: self.want(state),
+		})
+	}
+
+	/// Whether the group read at `slots` is the group of `table` under `key`:
+	/// two group values that differ may still encode to one key.
+	pub(crate) fn is_group(
+		&self,
+		slots: GroupSlots,
+		table: &TableName,
+		key: &RecordIdKey,
+	) -> Result<bool, ControlFlow> {
+		Ok(self.wanted[slots.row.0] == self.row_key(table, key)?)
+	}
+
+	/// Read every key named since the last fetch with one multi-get.
+	pub(crate) async fn fetch(&mut self, ctx: &WriteCtx) -> Result<(), ControlFlow> {
+		let unread = &self.wanted[self.found.len()..];
+		if !unread.is_empty() {
+			let found = ctx.txn().getm_encoded(unread, None).await.map_err(ControlFlow::Err)?;
+			self.found.extend(found);
+		}
+		Ok(())
+	}
+
+	fn bytes(&self, slot: Slot) -> Option<&[u8]> {
+		self.found.get(slot.0).and_then(|found| found.as_deref())
+	}
+
+	/// The key read at `slot`, taken from the batch to be written.
+	fn take_key(&mut self, slot: Slot) -> Key<'static> {
+		std::mem::replace(&mut self.wanted[slot.0], Key::from(Vec::new()))
+	}
+
+	/// The row under `key` of `table`, decoded as it was written.
+	pub(crate) async fn read_row(
+		&self,
+		txn: &Transaction,
+		slot: Slot,
+		table: &TableName,
+		key: &RecordIdKey,
+	) -> Result<Option<Record>, ControlFlow> {
+		match self.bytes(slot) {
+			Some(bytes) => Ok(Some(
+				txn.decode_record_as_written(
+					self.ns,
+					self.db,
 					table,
-					&bytes,
+					bytes,
 					RecordId {
 						table: table.clone(),
 						key: key.clone(),
@@ -242,24 +421,166 @@ pub(crate) async fn read_view_row(
 				)
 				.await
 				.map_err(ControlFlow::Err)?,
-		))),
-		None => Ok(None),
+			)),
+			None => Ok(None),
+		}
 	}
-}
 
-/// The row a group no record was in yet starts from: no data, and the
-/// analysis's own stats.
-pub(crate) fn new_group(analysis: &AggregationAnalysis) -> Record {
-	Record {
-		data: Value::None,
-		metadata: Some(Metadata {
-			record_type: RecordType::Table,
-			aggregation_stats: analysis
-				.aggregations
-				.iter()
-				.map(|aggregation| aggregation.to_stat())
-				.collect(),
-		}),
+	/// The group under `key` of the aggregated view `table`, or `None` for a
+	/// group nothing holds.
+	///
+	/// A group's state, where it has one, is authoritative, and the row is
+	/// read without metadata. A group with no state keeps its statistics
+	/// inline: its row must be in the `revision` encoding with them. When the
+	/// store keeps states, the write that touches such a group stores its
+	/// state and the row without them ([`Self::write_group`]). A row in the
+	/// current record format with no state, and a state with no row, are
+	/// refused as corrupt: neither is a group that starts over.
+	pub(crate) async fn read_group(
+		&self,
+		txn: &Transaction,
+		slots: GroupSlots,
+		table: &TableName,
+		key: &RecordIdKey,
+	) -> Result<Option<Group>, ControlFlow> {
+		let corrupt = |reason: &'static str| {
+			ControlFlow::Err(anyhow::Error::new(ExecError::CorruptView {
+				table: table.to_string(),
+				reason,
+			}))
+		};
+		let row = self.read_row(txn, slots.row, table, key).await?;
+		match (row, self.bytes(slots.state)) {
+			(None, None) => Ok(None),
+			(None, Some(_)) => Err(corrupt("a group holds a state but no row")),
+			(Some(mut row), Some(state)) => {
+				let stats =
+					ViewState::kv_decode_value(state, ()).map_err(ControlFlow::Err)?.into_stats();
+				row.metadata = None;
+				Ok(Some(Group {
+					row,
+					stats,
+				}))
+			}
+			(Some(mut row), None) => {
+				let inline = !self.is_envelope(slots.row);
+				let stats = match row.metadata.as_ref() {
+					Some(metadata) if inline && !metadata.aggregation_stats.is_empty() => {
+						metadata.aggregation_stats.clone()
+					}
+					_ if self.keyed => return Err(corrupt("a group holds a row but no state")),
+					_ => return Err(corrupt("a row of an aggregated view carries no stats")),
+				};
+				// A group moving its statistics to their own key holds a row
+				// without them from this write on.
+				if self.keyed {
+					row.metadata = None;
+				}
+				Ok(Some(Group {
+					row,
+					stats,
+				}))
+			}
+		}
+	}
+
+	/// Whether the bytes read for `slot` are a record in the current format,
+	/// which holds no statistics.
+	fn is_envelope(&self, slot: Slot) -> bool {
+		self.bytes(slot).is_some_and(|bytes| matches!(StoredRecord::parse(bytes), Ok(Some(_))))
+	}
+
+	/// Stage `record` as the row of `table` under `key`, read at `slot`, as
+	/// the view's maintenance stores the row it computed. `created` says the
+	/// view held no row under `key`, so a write reading the view passes over
+	/// it ([`Transaction::note_creation`]).
+	pub(crate) async fn write_row(
+		&mut self,
+		txn: &Transaction,
+		slot: Slot,
+		table: &TableName,
+		key: &RecordIdKey,
+		record: &Record,
+		created: bool,
+	) -> Result<(), ControlFlow> {
+		let at = match self.writers.iter().position(|(t, _)| t == table) {
+			Some(at) => at,
+			None => {
+				// The view table is not the statement's table, so its writer is
+				// resolved from the transaction, which answers from its memo.
+				let writer =
+					txn.record_writer(self.ns, self.db, table).await.map_err(ControlFlow::Err)?;
+				self.writers.push((table.clone(), writer));
+				self.writers.len() - 1
+			}
+		};
+		// A view row's data is stored whole: no `id` is left out for its key to
+		// restore, so the row names no key and is never packed. The record's
+		// encoding refuses a value nested past the cap.
+		let value = self.writers[at].1.encode_whole(record, None).map_err(ControlFlow::Err)?;
+		let key_bytes = self.take_key(slot);
+		self.staged.set_record(table.clone(), key.clone(), key_bytes, value, created);
+		Ok(())
+	}
+
+	/// Stage the group of an aggregated view read at `slots`: its `row`
+	/// (built by [`row_of`] for [`Self::keyed`]), and its statistics at their
+	/// own key where the group keeps them there; otherwise the row carries
+	/// them inline.
+	#[expect(clippy::too_many_arguments, reason = "the group's place, its row and its stats")]
+	pub(crate) async fn write_group(
+		&mut self,
+		txn: &Transaction,
+		slots: GroupSlots,
+		table: &TableName,
+		key: &RecordIdKey,
+		row: &Record,
+		stats: &[AggregationStat],
+		created: bool,
+	) -> Result<(), ControlFlow> {
+		let keyed = self.keyed(slots);
+		self.write_row(txn, slots.row, table, key, row, created).await?;
+		if keyed {
+			let state = ViewState::of(stats).map_err(ControlFlow::Err)?;
+			let value = txn
+				.encode_for_write(&state, self.bytes(slots.state))
+				.await
+				.map_err(ControlFlow::Err)?;
+			let key_bytes = self.take_key(slots.state);
+			self.staged.set(key_bytes, value);
+		}
+		Ok(())
+	}
+
+	/// Stage the removal of the row of `table` under `key`, read at `slot`.
+	pub(crate) fn delete_row(&mut self, slot: Slot, table: &TableName, key: &RecordIdKey) {
+		let key_bytes = self.take_key(slot);
+		self.staged.del_record(table.clone(), key.clone(), key_bytes);
+	}
+
+	/// Stage the removal of a group's row and of its state, where it has one.
+	pub(crate) fn delete_group(&mut self, slots: GroupSlots, table: &TableName, key: &RecordIdKey) {
+		let stated = self.bytes(slots.state).is_some();
+		self.delete_row(slots.row, table, key);
+		if stated {
+			let key_bytes = self.take_key(slots.state);
+			self.staged.del(key_bytes);
+		}
+	}
+
+	/// Write everything staged since the last flush
+	/// ([`Transaction::write_batch`]).
+	pub(crate) async fn flush(&mut self, ctx: &WriteCtx) -> Result<(), ControlFlow> {
+		self.flush_to(&ctx.txn()).await
+	}
+
+	/// [`Self::flush`] into `txn`.
+	pub(crate) async fn flush_to(&mut self, txn: &Transaction) -> Result<(), ControlFlow> {
+		let staged = std::mem::take(&mut self.staged);
+		if staged.is_empty() {
+			return Ok(());
+		}
+		txn.write_batch(self.ns, self.db, staged).await.map_err(ControlFlow::Err)
 	}
 }
 
@@ -288,16 +609,6 @@ pub(crate) fn no_record_count(table: &TableName) -> ControlFlow {
 	ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatement(format!(
 		"the view {table} holds a row with no record count"
 	))))
-}
-
-/// The stored stats of a view row, which every aggregated row carries.
-pub(crate) fn stats_of(record: &mut Record) -> Result<&mut [AggregationStat], ControlFlow> {
-	match record.metadata.as_mut() {
-		Some(metadata) => Ok(&mut metadata.aggregation_stats),
-		None => Err(ControlFlow::Err(anyhow::anyhow!(crate::err::EngineError::unreachable(
-			"a row of an aggregated view carries no stats"
-		)))),
-	}
 }
 
 /// The group values a view row's key is made of.

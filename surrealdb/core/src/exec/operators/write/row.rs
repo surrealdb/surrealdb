@@ -150,6 +150,10 @@ pub(crate) struct WriteRow {
 	/// whose value arrives as that source read it, or one already replayed —
 	/// and the inner `None` a record with no generation.
 	pub(crate) stored_stamp: Option<Option<Generation>>,
+	/// Whether the running statistics an aggregated view row is computed from
+	/// moved with this write, for a row that does not carry them
+	/// ([`WriteRow::for_view_row`]). Always false for any other row.
+	pub(crate) state_moved: bool,
 
 	/// Whether `current` currently carries its `COMPUTED` field values.
 	///
@@ -337,16 +341,22 @@ impl WriteRow {
 	/// carries no `id` — the row's identity is its key, and splicing it back in
 	/// would change what the view table's own observers are shown — so the id
 	/// comes from the caller and the metadata from the records.
+	///
+	/// `state_moved` says the statistics an aggregated view row is computed
+	/// from changed, which a row that holds none of them cannot show by its
+	/// images: the row then counts as modified though its images are equal.
 	pub(crate) fn for_view_row(
 		id: RecordId,
 		initial: Option<&Record>,
 		current: Option<&Record>,
+		state_moved: bool,
 	) -> Self {
 		Self {
 			initial: initial.map(|record| record.data.clone()).unwrap_or(Value::None),
 			current: current.map(|record| record.data.clone()).unwrap_or(Value::None),
 			initial_metadata: initial.and_then(|record| record.metadata.clone()),
 			metadata: current.and_then(|record| record.metadata.clone()),
+			state_moved,
 			..Self::empty(Some(id), None)
 		}
 	}
@@ -363,6 +373,7 @@ impl WriteRow {
 			metadata: None,
 			initial_metadata: None,
 			stored_stamp: None,
+			state_moved: false,
 			fields_computed: false,
 			initial_fields_computed: false,
 			input: None,
@@ -424,9 +435,11 @@ impl WriteRow {
 	/// leave both looking untouched, and every stage keyed on this answer
 	/// would stand down over a record that did change.
 	pub(crate) fn is_modified(&self) -> bool {
-		*self
-			.modified
-			.get_or_init(|| self.initial != self.current || self.initial_metadata != self.metadata)
+		*self.modified.get_or_init(|| {
+			self.state_moved
+				|| self.initial != self.current
+				|| self.initial_metadata != self.metadata
+		})
 	}
 
 	/// Fill both record-type markers from storage, for a row a row source

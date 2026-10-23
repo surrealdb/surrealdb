@@ -2306,6 +2306,35 @@ fn view_bodies(definition: &TableDefinition, out: &mut Vec<ViewBody>) -> Option<
 	Some(())
 }
 
+/// Whether evaluating a clause of the view table `definition` may read stored data: a clause that
+/// reads records, runs a body it does not show, or writes, as `registry` declares its calls. A view
+/// whose clauses cannot be read back is answered as one that may.
+pub(crate) fn view_reads_data(definition: &TableDefinition, registry: &FunctionRegistry) -> bool {
+	use crate::expr::logical::{EffectSet, LogicalField};
+	let mut bodies = Vec::new();
+	if view_bodies(definition, &mut bodies).is_none() {
+		return true;
+	}
+	let reading = EffectSet::READS_DATA.union(EffectSet::OPAQUE_BODY).union(EffectSet::WRITES_DATA);
+	let reads = |expr: &LogicalExpr| {
+		crate::exec::logical::effects::effects_of_body(expr, registry).intersects(reading)
+	};
+	bodies.iter().any(|body| match body {
+		ViewBody::Expr(expr)
+		| ViewBody::Fields(LogicalFields::Value {
+			expr,
+			..
+		}) => reads(expr),
+		ViewBody::Fields(LogicalFields::Select(fields)) => fields.iter().any(|field| match field {
+			LogicalField::All => false,
+			LogicalField::Single {
+				expr,
+				..
+			} => reads(expr),
+		}),
+	})
+}
+
 /// What a write's table declares for the stage that purges a deleted record. It holds the facts the
 /// write states, and the `THEN` expressions `PurgeRecordData` hosts as regions, in the order
 /// [`WriteRepairs`] lists them.

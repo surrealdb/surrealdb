@@ -2112,7 +2112,7 @@ impl Datastore {
 	/// The cell holding the feature level this datastore last read, shared by
 	/// every transaction of the store and by every datastore forked from this
 	/// one.
-	fn feature_cell(&self) -> &Arc<FeatureLevelCell> {
+	pub(crate) fn feature_cell(&self) -> &Arc<FeatureLevelCell> {
 		self.transaction_factory.feature_level()
 	}
 

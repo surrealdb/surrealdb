@@ -534,6 +534,44 @@ async fn visit_key_ranges_after_the_transaction_finished(b: &TestBackend) {
 
 kvs_test!(visit_key_ranges_after_the_transaction_finished);
 
+/// `setm` writes every entry in input order: a repeated key ends up holding
+/// its last value, and an empty batch changes nothing.
+async fn setm(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.setm(Vec::new()).await.unwrap();
+	tx.setm(vec![
+		(b"a".into(), b"1".to_vec()),
+		(b"b".into(), b"2".to_vec()),
+		(b"a".into(), b"3".to_vec()),
+	])
+	.await
+	.unwrap();
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_eq!(tx.get(b"a".into(), None).await.unwrap().as_deref(), Some(&b"3"[..]));
+	assert_eq!(tx.get(b"b".into(), None).await.unwrap().as_deref(), Some(&b"2"[..]));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(setm);
+
+/// `delm` deletes every key, an absent one included.
+async fn delm(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.delm(vec![b"k1".into(), b"missing".into(), b"k3".into()]).await.unwrap();
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_eq!(tx.get(b"k1".into(), None).await.unwrap(), None);
+	assert_eq!(tx.get(b"k3".into(), None).await.unwrap(), None);
+	assert!(tx.get(b"k2".into(), None).await.unwrap().is_some());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(delm);
+
 /// A small deterministic generator, so a failing case reproduces.
 struct Lcg(u64);
 

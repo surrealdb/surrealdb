@@ -3,8 +3,8 @@
 //!
 //! A view's backfill is a program: a select over the view's sources computes
 //! the rows (or the groups) the view holds, and these instructions turn each
-//! into the view table's record. A view's rows are metadata no statement can
-//! express — an aggregated row's stats — so they are written to storage
+//! into the view table's record. A view's rows carry state no statement can
+//! express — an aggregated group's stats — so they are written to storage
 //! directly, and then run through the view table's own order (its indexes, its
 //! second-order views, events, live queries and change feed), as the
 //! incremental path runs the order for a created row. A materialized row is
@@ -34,13 +34,13 @@ use super::scalar::Scalar;
 use super::store::{read, table_name_of, write};
 use super::write::{WriteState, action_pipeline, view_row_exec, view_row_key};
 use crate::catalog::aggregation::{self, backfill_stats};
-use crate::catalog::providers::TableProvider as _;
-use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
+use crate::catalog::{Record, encode_whole_record_with};
 use crate::doc::Action;
 use crate::exec::operators::write::ctx::{RecordFormatSlot, ResolvedFormat, TableExistence};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
 use crate::exec::operators::write::stages::observe::view_row_reaches_nothing;
+use crate::exec::operators::write::stages::view::{ViewBatch, row_of};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::key::schema::{RecordKey, RecordPrefix};
@@ -185,20 +185,18 @@ pub(super) async fn step(
 			for (path, value) in fields {
 				data.put(path.as_ref(), read(regs, *value));
 			}
-			let record = Arc::new(Record {
-				metadata: Some(Metadata {
-					record_type: RecordType::Table,
-					aggregation_stats: stats,
-				}),
-				data,
-			});
 			let key = RecordIdKey::Array(Array(group));
 			let (ns, db) = ids(ctx).await?;
 			let txn = ctx.txn();
-			txn.put_record(ns, db, &table, &key, Arc::clone(&record))
-				.await
-				.map_err(ControlFlow::Err)?;
-			super::write::note_created(&txn, ns, db, &table, &key)?;
+			// Each group is written as the view's maintenance writes it: its
+			// statistics at their own key where the store keeps them there. Nothing
+			// is read first: the statement cleared the view table's whole root, so
+			// no group has a row or a state yet.
+			let mut batch = ViewBatch::of(ns, db, txn.keyed_view_state());
+			let slots = batch.want_group(&table, &key)?;
+			let record = row_of(batch.keyed(slots), data, &stats);
+			batch.write_group(&txn, slots, &table, &key, &record, &stats, true).await?;
+			batch.flush_to(&txn).await?;
 			maintain(state, ctx, &table, key, Action::Create, None, Some(&record)).await?;
 		}
 		StoreInstr::RetireViewRows {
@@ -672,7 +670,7 @@ async fn maintain(
 	};
 	let write_ctx = scope.write_ctx_for(&id.table, WritePurpose::ViewMaintenance).await?;
 	let exec = view_row_exec(write_ctx.exec().clone(), 1)?;
-	let row = WriteRow::for_view_row(id, initial, current);
+	let row = WriteRow::for_view_row(id, initial, current, false);
 	let pipeline = rows
 		.pipelines
 		.get(action_pipeline(action))

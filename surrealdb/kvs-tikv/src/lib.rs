@@ -271,6 +271,24 @@ impl Transaction {
 			.try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
 	}
 
+	/// The values `keys` hold in the transaction, read with one batched get.
+	///
+	/// Every requested key is present in the answer: as `None` when it holds
+	/// nothing, which is what a savepoint's undo log needs to tell a key to
+	/// delete from a key to restore.
+	async fn priors(
+		tx: &mut tikv::Transaction,
+		keys: Vec<Vec<u8>>,
+	) -> Result<HashMap<Vec<u8>, Option<Val>>> {
+		let mut priors: HashMap<Vec<u8>, Option<Val>> =
+			keys.iter().map(|key| (key.clone(), None)).collect();
+		for pair in tx.batch_get(keys).await.map_err(kvs_error)? {
+			let key: Vec<u8> = pair.0.into();
+			priors.insert(key, Some(pair.1));
+		}
+		Ok(priors)
+	}
+
 	/// Shared scan-delete loop for [`Self::delr`] and [`Self::clrr`].
 	///
 	/// On TiKV `clr` and `del` collapse to the same in-transaction
@@ -1229,6 +1247,53 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Insert or update many keys in the database.
+	///
+	/// While a savepoint is tracking, the values the keys held are read with
+	/// one batched get instead of one get per key.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(entries = entries.len()))]
+	fn setm<'a>(&'a self, entries: Vec<(Key<'a>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			if entries.is_empty() {
+				return Ok(());
+			}
+			// Take ownership of the key bytes for the client calls below
+			let entries: Vec<(Vec<u8>, Val)> =
+				entries.into_iter().map(|(key, val)| (key.to_vec(), val)).collect();
+			// Load the inner transaction
+			let mut inner = self.inner.write().await;
+			// The values the keys held before the batch, when a savepoint
+			// could roll it back. A key absent from the map was absent.
+			let mut priors = if inner.undo.is_tracking() {
+				let keys: Vec<Vec<u8>> = entries.iter().map(|(key, _)| key.clone()).collect();
+				Some(Self::priors(&mut inner.tx, keys).await?)
+			} else {
+				None
+			};
+			for (key, val) in entries {
+				inner.tx.put(key.clone(), val).await.map_err(kvs_error)?;
+				// Only the first write of a key records an operation: undoing
+				// in reverse restores the value held before the batch last.
+				if let Some(old_val) = priors.as_mut().and_then(|priors| priors.remove(&key)) {
+					inner.undo.record(match old_val {
+						Some(existing_val) => Operation::RestoreValue(key, existing_val),
+						None => Operation::DeleteKey(key),
+					});
+				}
+			}
+			// Return result
+			Ok(())
+		})
+	}
+
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
 	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
@@ -1259,6 +1324,50 @@ impl Transactable for Transaction {
 			if let Some(existing_val) = current {
 				// Key existed, record operation to restore it
 				inner.undo.record(Operation::RestoreValue(key, existing_val));
+			}
+			// Return result
+			Ok(())
+		})
+	}
+
+	/// Delete many keys from the database.
+	///
+	/// While a savepoint is tracking, the values the keys held are read with
+	/// one batched get instead of one get per key.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all, fields(keys = keys.len()))]
+	fn delm<'a>(&'a self, keys: Vec<Key<'a>>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			if keys.is_empty() {
+				return Ok(());
+			}
+			// Take ownership of the key bytes for the client calls below
+			let keys: Vec<Vec<u8>> = keys.into_iter().map(|key| key.to_vec()).collect();
+			// Load the inner transaction
+			let mut inner = self.inner.write().await;
+			// The values the keys held before the batch, when a savepoint
+			// could roll it back.
+			let mut priors = if inner.undo.is_tracking() {
+				Some(Self::priors(&mut inner.tx, keys.clone()).await?)
+			} else {
+				None
+			};
+			for key in keys {
+				inner.tx.delete(key.clone()).await.map_err(kvs_error)?;
+				// A key that held nothing records nothing, and only the first
+				// delete of a key records an operation.
+				if let Some(Some(existing_val)) =
+					priors.as_mut().and_then(|priors| priors.remove(&key))
+				{
+					inner.undo.record(Operation::RestoreValue(key, existing_val));
+				}
 			}
 			// Return result
 			Ok(())

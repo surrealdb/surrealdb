@@ -22,7 +22,7 @@ use crate::{
 	SequenceDefinition, StoredAccessDefinition, StoredApiDefinition, StoredBucketDefinition,
 	StoredConfigDefinition, StoredEventDefinition, StoredFieldDefinition, StoredFunctionDefinition,
 	StoredIndexDefinition, StoredMlModelDefinition, StoredModuleDefinition, StoredParamDefinition,
-	StoredSubscriptionDefinition, StoredTableDefinition, TaskLease, UserDefinition,
+	StoredSubscriptionDefinition, StoredTableDefinition, TaskLease, UserDefinition, ViewState,
 };
 
 /// The VM's view of one catalog type.
@@ -121,6 +121,7 @@ mod rows {
 	pub(super) const TASK_LEASE: CatalogVTable = catalog_vtable!(TaskLease);
 	pub(super) const NODE_LIVE_QUERY: CatalogVTable = catalog_vtable!(NodeLiveQuery);
 	pub(super) const ACCESS_GRANT: CatalogVTable = catalog_vtable!(AccessGrant);
+	pub(super) const VIEW_STATE: CatalogVTable = catalog_vtable!(stored ViewState);
 }
 
 /// The catalog types a VM program reads or writes through a key route, by Rust type name.
@@ -152,6 +153,7 @@ pub static CATALOG_TYPES: &[CatalogVTable] = &[
 	rows::TASK_LEASE,
 	rows::NODE_LIVE_QUERY,
 	rows::ACCESS_GRANT,
+	rows::VIEW_STATE,
 ];
 
 /// The catalog types an edge entry reads through a key route: [`CATALOG_TYPES`] with the rows of

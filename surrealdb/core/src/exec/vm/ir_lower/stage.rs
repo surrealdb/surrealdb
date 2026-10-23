@@ -132,7 +132,7 @@ use crate::exec::ir::logical::ops::{
 	RepairKind, SchemaRegions, Stored, SubscriberLayer, WriteDerived, WriteGates, WriteImage,
 	WriteStageKind, WriteStored,
 };
-use crate::exec::ir::logical::stages::write_stage_ops;
+use crate::exec::ir::logical::stages::{view_reads_data, write_stage_ops};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::{PhysOp, ProjectionShape};
 use crate::exec::operators::write::stage::RecordImage;
@@ -2779,6 +2779,7 @@ fn lower_views(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<Arc<LoweredV
 					},
 					keyed: projects_id(fields),
 					rows,
+					reads_data: view_reads_data(definition, cx.registry),
 				}
 			}
 			crate::catalog::ViewDefinition::Aggregated {
@@ -2831,6 +2832,7 @@ fn lower_views(em: &mut Emitter, cx: &mut Stages<'_, '_>) -> Result<Arc<LoweredV
 					fields,
 					recalc,
 					rows,
+					reads_data: view_reads_data(definition, cx.registry),
 				}
 			}
 			crate::catalog::ViewDefinition::Select {
@@ -7247,6 +7249,7 @@ mod tests {
 				projection,
 				keyed: false,
 				rows,
+				reads_data: false,
 			},
 		] = lowered.views.as_slice()
 		else {
@@ -7366,6 +7369,7 @@ mod tests {
 				fields,
 				recalc: Some(recalc),
 				rows,
+				reads_data: false,
 			},
 		] = lowered.views.as_slice()
 		else {

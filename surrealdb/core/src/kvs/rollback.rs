@@ -43,9 +43,10 @@ use anyhow::Result;
 use surrealdb_catalog::stored::{CATALOG_MARKER, EntryError, StoredType, parse_header};
 use surrealdb_catalog::{
 	DatabaseDefinition, Generation, LayoutDescriptor, NamespaceDefinition, StoredFeatureLevel,
-	TableConformance, TableMigrations,
+	TableConformance, TableMigrations, ViewState,
 };
 use surrealdb_strand::TableName;
+use surrealdb_types::ToSql;
 
 use crate::key::schema::{
 	AnalyzerKey, AnalyzerPrefix, AnyKey, ApiKey, ApiPrefix, BucketKey, BucketPrefix, DatabaseKey,
@@ -60,7 +61,7 @@ use crate::key::schema::{
 	RootAccessMethodPrefix, RootAccessPrefix, RootConfigKey, RootConfigPrefix, RootGrantKey,
 	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionKey, SubscriptionPrefix,
 	TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix, TaskLeaseKey, TaskLeasePrefix,
-	TblPrefix, TblRoot,
+	TblPrefix, TblRoot, ViewStateKey, ViewStatePrefix,
 };
 use crate::key::{
 	AnyRange, KVKeyDecode, KVSubspace, KVValue, Key, RawRange, Resumable, TypedRange,
@@ -154,7 +155,8 @@ pub struct EntryFinding {
 	/// The release the entry needs.
 	pub needs: Release,
 	/// Whether a write to the entry's table has to consult the entry, so the target refuses writes
-	/// to the table: a field, an index, an event or a foreign table.
+	/// to the table: a field, an index, an event or a foreign table. A view's group state is
+	/// consulted by every write that maintains the view, and blocks those writes.
 	pub blocks_writes: bool,
 }
 
@@ -1019,7 +1021,8 @@ impl Audit {
 	/// One table's definitions, conformance record and layout descriptors.
 	///
 	/// A field, an index, an event and a foreign table are consulted by every write to the table,
-	/// so an entry of one of those the target cannot read makes the target refuse writes to it.
+	/// and a view's group state by every write that maintains the view, so an entry of one of
+	/// those the target cannot read makes the target refuse those writes.
 	async fn table(
 		&mut self,
 		txn: &Transaction,
@@ -1100,6 +1103,20 @@ impl Audit {
 			false,
 			&scope,
 			namer!(SubscriptionKey, k => k.lq.to_string()),
+			|_| {},
+		)
+		.await?;
+		self.family::<ViewState>(
+			txn,
+			ViewStatePrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(table),
+			}
+			.range()?,
+			true,
+			&scope,
+			namer!(ViewStateKey, k => k.id.to_sql()),
 			|_| {},
 		)
 		.await?;
@@ -1247,21 +1264,21 @@ impl Audit {
 mod tests {
 	use std::borrow::Cow;
 
-	use surrealdb_catalog::StoredFieldDefinition;
-	use surrealdb_catalog::stored::CATALOG_MARKER;
+	use surrealdb_catalog::stored::{CATALOG_MARKER, StoredType};
+	use surrealdb_catalog::{StoredFieldDefinition, ViewState};
 	use uuid::Uuid;
 
 	use crate::catalog::providers::DatabaseProvider;
 	use crate::dbs::Session;
 	use crate::key::schema::{
 		DbRoot, FieldKey, GenerationMarkKey, LayoutKey, NamespaceKey, NodeKey, NsRoot,
-		TableMigrationsKey,
+		TableMigrationsKey, ViewStateKey,
 	};
 	use crate::key::{KVKey, KVSubspace, KVValue, Key};
 	use crate::kvs::compat::v3_3_0;
 	use crate::kvs::ds::Datastore;
 	use crate::kvs::{Release, TransactionType};
-	use crate::val::TableName;
+	use crate::val::{Array, RecordIdKey, TableName, Value};
 
 	/// A datastore holding table `person` with field `name`, and its namespace and database ids.
 	async fn with_person()
@@ -1530,6 +1547,53 @@ mod tests {
 		let mut bytes = level.as_slice().to_vec();
 		bytes.extend_from_slice(b"!zz");
 		Key::from(bytes)
+	}
+
+	/// A view's group state is judged under its view table: one the target reads is no finding,
+	/// and one whose floor is above the target is a finding that blocks writes, since every write
+	/// that maintains the view reads it.
+	#[tokio::test]
+	async fn a_view_state_with_a_future_floor_is_one_finding() {
+		let (ds, ns, db) = with_person().await;
+		let session = Session::owner().with_ns("test").with_db("test");
+		for response in ds
+			.execute(
+				"DEFINE TABLE by_name AS SELECT name, count() AS n FROM person GROUP BY name; \
+				 CREATE person:2 SET name = 'a';",
+				&session,
+				None,
+			)
+			.await
+			.unwrap()
+		{
+			response.result.unwrap();
+		}
+		let state = ViewStateKey {
+			ns,
+			db,
+			tb: Cow::Owned(TableName::new("by_name")),
+			id: Cow::Owned(RecordIdKey::Array(Array(vec![Value::from("a")]))),
+		}
+		.encode_key()
+		.unwrap();
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
+		let written = txn.get(state.clone(), None).await.unwrap().expect("the group has a state");
+		txn.cancel().await.unwrap();
+		let check = ds.rollback_check(Release::CURRENT).await.unwrap();
+		assert!(check.entries.is_empty(), "{check:?}");
+		assert_eq!(check.unreadable, 0, "{check:?}");
+		assert_eq!(check.unknown, 0, "{check:?}");
+
+		let (_, body) = surrealdb_catalog::stored::parse_header("any", &written).unwrap();
+		put(&ds, state, &with_future_floor(body)).await;
+		let check = ds.rollback_check(Release::CURRENT).await.unwrap();
+		let [finding] = check.entries.as_slice() else {
+			panic!("the state is one finding: {check:?}");
+		};
+		assert_eq!(finding.kind, <ViewState as StoredType>::SCHEMA.name);
+		assert_eq!(finding.table, Some(TableName::new("by_name")));
+		assert!(finding.blocks_writes, "{finding:?}");
+		assert_eq!(check.unreadable, 0, "{check:?}");
 	}
 
 	#[tokio::test]
