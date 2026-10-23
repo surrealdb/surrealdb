@@ -5,12 +5,11 @@
 //! pipeline. Everything outside reads it through the getters. Placement is never part of an op's
 //! identity.
 
-use std::collections::HashMap;
-
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
 use super::write_cut::WriteCut;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::logical::pipelines::{Legality, StatementLegality};
@@ -315,7 +314,7 @@ impl PlacementTable {
 		pairs: impl IntoIterator<Item = (OpId, OpId)>,
 	) {
 		let pairs: Vec<(OpId, OpId)> = pairs.into_iter().collect();
-		let copies: HashMap<OpId, OpId> = pairs.iter().copied().collect();
+		let copies: FxHashMap<OpId, OpId> = pairs.iter().copied().collect();
 		let map = |original: OpId| copies.get(&original).copied();
 		for &(from, to) in &pairs {
 			if let Some(attr) = source.0.get(from) {
@@ -341,7 +340,6 @@ impl PlacementTable {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashMap;
 
 	use super::*;
 
@@ -354,7 +352,7 @@ mod tests {
 	fn the_ops_a_placement_names_follow_the_copy_of_their_pipeline() {
 		let all = ops(8);
 		let (before, after) = all.split_at(4);
-		let copies: HashMap<OpId, OpId> =
+		let copies: FxHashMap<OpId, OpId> =
 			before.iter().copied().zip(after.iter().copied()).collect();
 		let map = |op: OpId| copies.get(&op).copied();
 		let io = PipelineIo {
@@ -384,7 +382,7 @@ mod tests {
 		let all = ops(6);
 		let (before, after) = all.split_at(3);
 		// Only the first two hops are copied.
-		let copies: HashMap<OpId, OpId> =
+		let copies: FxHashMap<OpId, OpId> =
 			before.iter().copied().zip(after.iter().copied()).take(2).collect();
 		let map = |op: OpId| copies.get(&op).copied();
 		let io = PipelineIo {

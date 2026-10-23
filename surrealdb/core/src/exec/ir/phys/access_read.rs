@@ -36,7 +36,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
 use std::ops::Bound;
 
 use slotmap::Key;
@@ -45,6 +44,7 @@ use surrealdb_strand::Strand;
 use super::access_expr::{
 	expr_def, is_row, is_statement_argument, operand_param, strip_truthy, yielded,
 };
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
@@ -80,7 +80,7 @@ pub(super) fn owes_index_operator(ir: &Ir, leaf: ValueId) -> bool {
 /// Whether a `MATCHES` operator stands in the chain of `Binary`, `Prefix` and `Call` argument
 /// forms that `value` starts: the walk of the planner's `expr_contains_matches`.
 fn matches_in_chain(ir: &Ir, value: ValueId) -> bool {
-	let mut seen: HashSet<ValueId> = HashSet::new();
+	let mut seen: FxHashSet<ValueId> = FxHashSet::default();
 	let mut pending = vec![value];
 	while let Some(value) = pending.pop() {
 		let value = strip_truthy(ir, value);
@@ -220,7 +220,7 @@ fn knn_in_cone(ir: &Ir, value: ValueId, first_only: bool) -> Vec<ValueId> {
 /// at the first `KNN` operator.
 fn cone_of(ir: &Ir, pending: Vec<OpId>, first_only: bool) -> Cone {
 	let mut cone = Cone::default();
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending: Vec<(OpId, bool)> = pending.into_iter().map(|op| (op, false)).collect();
 	while let Some((op, in_closure)) = pending.pop() {
 		if !seen.insert(op) {

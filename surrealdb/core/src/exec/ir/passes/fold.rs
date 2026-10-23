@@ -16,8 +16,6 @@
 //! the rewriter refuses is no rewrite.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::{SmallVec, smallvec};
 
 use super::dce::layer_column_names;
@@ -26,6 +24,7 @@ use super::rehome::{and_chain, rebuild_and_chain};
 use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility, types};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::location::{LocOrigin, Location};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit, Pattern, PatternSet, apply_greedy};
@@ -106,7 +105,7 @@ async fn run_fold(cx: &mut LoCx<'_>) -> Result<PassReport, IrError> {
 	let rules = rule_set();
 	let mut report = PassReport::default();
 	// The filters a plan-time fold decided a conjunct of, which stay filters.
-	let mut folded: HashSet<OpId> = HashSet::new();
+	let mut folded: FxHashSet<OpId> = FxHashSet::default();
 	for round in 0..MAX_ROUNDS {
 		let sites = sweep(cx.ir, cx.cfg.unroll);
 		fold_requests(cx, requests(cx.ir, &sites)).await;
@@ -568,7 +567,7 @@ fn is_scalar_kind(kind: &Kind) -> bool {
 /// twice is asked once, for the consumer that requested it first.
 async fn fold_requests(cx: &mut LoCx<'_>, wanted: Vec<(ValueId, FoldConsumer)>) {
 	let mut batch: Vec<FoldRequest> = Vec::new();
-	let mut held: HashSet<ValueId> = HashSet::new();
+	let mut held: FxHashSet<ValueId> = FxHashSet::default();
 	for (value, consumer) in wanted {
 		if cx.ir.value(value).is_none()
 			|| literal_of(cx.ir, value).is_some()
@@ -846,7 +845,7 @@ fn control_stays_inside(ir: &Ir, op: OpId, arm: RegionId) -> bool {
 fn apply_clauses(
 	cx: &mut LoCx<'_>,
 	clauses: &[(OpId, RegionId)],
-	folded: &mut HashSet<OpId>,
+	folded: &mut FxHashSet<OpId>,
 ) -> Result<u32, IrError> {
 	let mut rewrites = 0;
 	for (op, region) in clauses {

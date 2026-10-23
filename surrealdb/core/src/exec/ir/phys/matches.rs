@@ -30,11 +30,11 @@
 //! loops before the conversion rewrites their stages, so a conjunct an access later answers is
 //! registered all the same.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::knn::{is_select_loop, stages_of_loop, yields_its_rows};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::core::value::ValueDef;
@@ -306,13 +306,13 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 	});
 	let mut table = MatchesTable::new();
 	// The select loops that shape the rows of a loop before them, decided with that loop.
-	let mut shaping: HashSet<OpId> = HashSet::new();
+	let mut shaping: FxHashSet<OpId> = FxHashSet::default();
 	for looped in loops {
 		if shaping.contains(&looped) {
 			continue;
 		}
 		let stages = stages_of_loop(ir, looped);
-		let mut registered = HashSet::new();
+		let mut registered = FxHashSet::default();
 		let mut written = Vec::new();
 		let mut searched = false;
 		for op in &stages.ops {
@@ -341,7 +341,7 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 		// The clauses that shape the loop's rows after it — a projection over sorted rows, a
 		// grouping — stand after it in its region, up to the next select loop that does not read
 		// those rows. A select loop over them is the statement's projection over its sorted rows.
-		let mut rows: HashSet<ValueId> =
+		let mut rows: FxHashSet<ValueId> =
 			ir.op(looped).map(|data| data.results.iter().copied().collect()).unwrap_or_default();
 		for after in ops_in(ir, ir.enclosing_region(looped)).skip_while(|op| *op != looped).skip(1)
 		{
@@ -467,7 +467,7 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 				Walk::Continue
 			});
 		}
-		let mut registered = HashSet::new();
+		let mut registered = FxHashSet::default();
 		let mut written = Vec::new();
 		let mut searched = false;
 		for region in &conds {
@@ -582,7 +582,7 @@ fn expr_def(ir: &Ir, value: ValueId) -> Option<(OpId, &ExprOp)> {
 fn collect(
 	ir: &Ir,
 	value: ValueId,
-	out: &mut HashSet<OpId>,
+	out: &mut FxHashSet<OpId>,
 	written: &mut Vec<OpId>,
 	depth: usize,
 ) {

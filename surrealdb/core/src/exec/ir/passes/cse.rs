@@ -25,12 +25,11 @@
 //! Ops outside every statement are left alone.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
-
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::analysis::identity::key_with;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Rewriter;
 use crate::exec::ir::core::value::ValueDef;
@@ -300,7 +299,7 @@ fn is_candidate(
 /// the order their first op is met. An op outside every statement is not listed.
 fn by_statement(ir: &Ir) -> Vec<(OpId, Vec<OpId>)> {
 	let mut groups: Vec<(OpId, Vec<OpId>)> = Vec::new();
-	let mut index: HashMap<OpId, usize> = HashMap::new();
+	let mut index: FxHashMap<OpId, usize> = FxHashMap::default();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
 		if let Some(statement) = enclosing_statement(ir, op) {
 			let at = *index.entry(statement).or_insert_with(|| {

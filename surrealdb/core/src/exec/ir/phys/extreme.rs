@@ -56,7 +56,6 @@
 //! A statement under an `EXPLAIN` is left as written, so that the plan it renders is the plan of
 //! the statement.
 
-use std::collections::HashSet;
 use std::ops::Deref;
 
 use surrealdb_strand::Strand;
@@ -71,6 +70,7 @@ use super::existence::under_explain;
 use crate::catalog::Index;
 use crate::exec::ir::analysis::existence::{Extreme, ExtremeHome, ExtremeShape, extreme_shape};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -240,7 +240,7 @@ fn rewrite(ir: &mut Ir, facts: &mut FactCache, shape: &ExtremeShape) -> Result<b
 		.ok_or(IrError::Stale("extreme: the value the conditional replaces"))?;
 	let ty = ir.value(result).ok_or(IrError::Stale("extreme: the value"))?.ty.clone();
 	let block = ir.op(replaced).ok_or(IrError::Stale("extreme: the replaced op"))?.parent;
-	let held: HashSet<OpId> = ir
+	let held: FxHashSet<OpId> = ir
 		.block(block)
 		.ok_or(IrError::Stale("extreme: the block of the statement"))?
 		.ops
@@ -279,7 +279,7 @@ fn rewrite(ir: &mut Ir, facts: &mut FactCache, shape: &ExtremeShape) -> Result<b
 /// Erases the ops a refused edit made in `block`, the ops it holds that `held` does not name, last
 /// made first. The ops made inside regions go with the op that owns them, and nothing reads a
 /// made op but another, so the container is as it was before the edit.
-fn discard(rw: &mut Rewriter<'_>, block: BlockId, held: &HashSet<OpId>) -> Result<(), IrError> {
+fn discard(rw: &mut Rewriter<'_>, block: BlockId, held: &FxHashSet<OpId>) -> Result<(), IrError> {
 	let made: Vec<OpId> = rw
 		.ir()
 		.block(block)
@@ -674,7 +674,7 @@ mod tests {
 			first_result(rw, op).expect("the literal has a result")
 		};
 		let held_value = literal(&mut rw, at, 1);
-		let held: HashSet<OpId> =
+		let held: FxHashSet<OpId> =
 			rw.ir().block(block).expect("the block").ops.iter().copied().collect();
 
 		let made = literal(&mut rw, at, 2);
@@ -699,7 +699,7 @@ mod tests {
 		rw.create(at, spec(ExprOp::Index, &[nested_value, made], 1)).expect("the index is created");
 
 		discard(&mut rw, block, &held).expect("the made ops are erased");
-		let after: HashSet<OpId> =
+		let after: FxHashSet<OpId> =
 			rw.ir().block(block).expect("the block").ops.iter().copied().collect();
 		assert_eq!(after, held);
 		assert!(rw.ir().uses(held_value).is_empty(), "no erased op still reads a held value");

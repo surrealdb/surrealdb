@@ -17,7 +17,7 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, HashMap};
+use std::collections::{BTreeSet, BinaryHeap};
 
 use smallvec::{SmallVec, smallvec};
 
@@ -27,6 +27,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::footprint;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::{FxHashMap, map_with_capacity};
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::location::Location;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Provenance, Rewriter};
@@ -156,7 +157,7 @@ impl PipelineDag {
 			}
 			return Ok((0..self.nodes.len()).collect());
 		}
-		let mut at_id: HashMap<PipelineId, usize> = HashMap::with_capacity(self.nodes.len());
+		let mut at_id: FxHashMap<PipelineId, usize> = map_with_capacity(self.nodes.len());
 		for (at, (id, op)) in self.nodes.iter().enumerate() {
 			if at_id.insert(*id, at).is_some() {
 				return Err(fault(Some(*op), format!("pipeline id {} is held twice", id.0)));

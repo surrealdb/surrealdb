@@ -5,10 +5,9 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use super::{effects, fallibility, loop_legality, multiplicity, slice};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::iface::catalog::EffectCx;
@@ -128,7 +127,7 @@ fn later_where(ir: &Ir, owner: OpId, region: RegionId, kind: RegionKind) -> bool
 /// hand each row on as soon as they have it, so that the loop stops being pulled once the limit
 /// is met.
 fn consumed_by_limit(ir: &Ir, loop_op: OpId) -> bool {
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending = vec![loop_op];
 	let mut visited = 0;
 	while let Some(op) = pending.pop() {

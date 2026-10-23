@@ -13,8 +13,6 @@
 //! region kinds; the verifier does, so a container that breaks those rules can be built and
 //! reported. A call that fails changes nothing.
 
-use std::collections::HashSet;
-
 use smallvec::SmallVec;
 
 use super::block::BlockData;
@@ -28,6 +26,7 @@ use super::value::{TOKEN_SLOT_BASE, Use, ValueData, ValueDef};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::effects;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::conversion::{EliminationReason, Phase};
@@ -718,7 +717,7 @@ impl<'a> Rewriter<'a> {
 		if let Some(pinned) = self.version_read_outside(&members, None) {
 			return Err(IrError::HasUses(pinned));
 		}
-		let held: HashSet<OpId> = members.iter().copied().collect();
+		let held: FxHashSet<OpId> = members.iter().copied().collect();
 		for member in &members {
 			let used_outside = self.ir.ops.get(*member).is_some_and(|data| {
 				data.results.iter().any(|result| {
@@ -1165,7 +1164,7 @@ impl<'a> Rewriter<'a> {
 		if let Some(pinned) = self.version_read_outside(&subtree, replaced.then_some(op)) {
 			return Err(IrError::HasUses(pinned));
 		}
-		let members: HashSet<OpId> = subtree.iter().copied().collect();
+		let members: FxHashSet<OpId> = subtree.iter().copied().collect();
 		for member in &subtree {
 			if replaced && *member == op {
 				continue;

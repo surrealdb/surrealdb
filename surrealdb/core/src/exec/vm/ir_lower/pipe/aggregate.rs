@@ -35,10 +35,9 @@
 //! is selected, and each call's first argument or each first value is folded or set. An error
 //! about the shape of the data in a key or an argument leaves its value `NONE`.
 
-use std::collections::HashMap;
-
 use super::{Body, Needs, row_arg, yielded_value};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
@@ -190,14 +189,14 @@ fn written_key(
 struct Congruence<'i> {
 	ir: &'i Ir,
 	/// The value of the second side each value of the first side corresponds to.
-	map: HashMap<ValueId, ValueId>,
+	map: FxHashMap<ValueId, ValueId>,
 }
 
 impl<'i> Congruence<'i> {
 	fn new(ir: &'i Ir) -> Self {
 		Self {
 			ir,
-			map: HashMap::new(),
+			map: FxHashMap::default(),
 		}
 	}
 
@@ -565,19 +564,19 @@ fn reads_row(
 	row: ValueId,
 	value: ValueId,
 ) -> bool {
-	let mut inside = std::collections::HashSet::new();
+	let mut inside = FxHashSet::default();
 	visit_ops(ir, region, &mut |_, data| {
 		inside.extend(data.results.iter().copied());
 	});
-	let mut seen = std::collections::HashSet::new();
+	let mut seen = FxHashSet::default();
 	depends(ir, registry, &inside, &mut seen, row, value)
 }
 
 fn depends(
 	ir: &Ir,
 	registry: &FunctionRegistry,
-	inside: &std::collections::HashSet<ValueId>,
-	seen: &mut std::collections::HashSet<ValueId>,
+	inside: &FxHashSet<ValueId>,
+	seen: &mut FxHashSet<ValueId>,
 	row: ValueId,
 	value: ValueId,
 ) -> bool {
@@ -604,7 +603,7 @@ fn depends(
 	let OpKind::Expr(kind) = &data.kind else {
 		return true;
 	};
-	let operands_depend = |seen: &mut std::collections::HashSet<ValueId>| {
+	let operands_depend = |seen: &mut FxHashSet<ValueId>| {
 		data.operands.iter().any(|operand| depends(ir, registry, inside, seen, row, *operand))
 	};
 	match kind {

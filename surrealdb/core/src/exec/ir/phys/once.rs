@@ -31,8 +31,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::{SmallVec, smallvec};
 use surrealdb_types::ToSql;
 
@@ -40,6 +38,7 @@ use super::conjunct::{self, Site, def_op};
 use super::ops::PhysOp;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -134,7 +133,7 @@ fn row_independent(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, value: Value
 	if tree.len() == 1 && written_literal(ir, root) {
 		return false;
 	}
-	let inside: HashSet<OpId> = tree.iter().copied().collect();
+	let inside: FxHashSet<OpId> = tree.iter().copied().collect();
 	for op in &tree {
 		let Some(data) = ir.op(*op) else {
 			return false;
@@ -193,7 +192,7 @@ fn written_literal(ir: &Ir, op: OpId) -> bool {
 /// operands, transitively, and every op inside their regions. `None` past [`TREE_BUDGET`].
 fn tree_of(ir: &Ir, root: OpId) -> Option<Vec<OpId>> {
 	let block = ir.op(root)?.parent;
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut out = Vec::new();
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {

@@ -29,8 +29,6 @@
 //! never rewritten.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, HashSet};
-
 use smallvec::{SmallVec, smallvec};
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
@@ -38,6 +36,7 @@ use super::rehome::{and_chain, can_rehome, rebuild_and_chain, rebuild_and_chain_
 use crate::exec::ir::analysis::{effects, fallibility, frames};
 use crate::exec::ir::core::census::{Census, Flag};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -527,7 +526,7 @@ pub(super) fn computing_ops(ir: &Ir, value: ValueId) -> Vec<OpId> {
 	let Some(block) = ir.op(root).map(|data| data.parent) else {
 		return Vec::new();
 	};
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {
 		if !seen.insert(op) {
@@ -963,7 +962,8 @@ pub(super) fn localize_row_reads(
 	}
 	for (read, readers) in shared {
 		let data = cx.ir.op(read).ok_or(IrError::Stale("op"))?.clone();
-		let mut copies: HashMap<crate::exec::ir::iface::ids::BlockId, ValueId> = HashMap::new();
+		let mut copies: FxHashMap<crate::exec::ir::iface::ids::BlockId, ValueId> =
+			FxHashMap::default();
 		for (reader, operand) in readers {
 			let block = cx.ir.op(reader).ok_or(IrError::Stale("op"))?.parent;
 			let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);
@@ -1240,8 +1240,8 @@ fn copy_ops(
 	(from, to): (ValueId, ValueId),
 	frame: FrameId,
 	snapshot: SnapshotId,
-) -> Result<HashMap<ValueId, ValueId>, IrError> {
-	let mut renamed: HashMap<ValueId, ValueId> = HashMap::from([(from, to)]);
+) -> Result<FxHashMap<ValueId, ValueId>, IrError> {
+	let mut renamed: FxHashMap<ValueId, ValueId> = FxHashMap::from_iter([(from, to)]);
 	for old in tree {
 		let data = rw.ir().op(*old).ok_or(IrError::Stale("op"))?.clone();
 		if !data.regions.is_empty() {

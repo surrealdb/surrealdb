@@ -20,7 +20,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use smallvec::SmallVec;
@@ -37,6 +36,7 @@ use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::ir::cache::deps::{ValueDep, ValueDeps, ValueRef, ValueUse};
 use crate::exec::ir::core::convert::{ConversionPattern, Converted};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::location::Location;
 use crate::exec::ir::core::op::OpData;
@@ -1721,7 +1721,7 @@ fn fold_consumer(kind: &PhysOp) -> Option<FoldConsumer> {
 /// which may resolve through the client's bindings and whose slot is not assigned here.
 fn leaf_values(ir: &Ir, value: ValueId, named: &mut Vec<ValueRef>) -> bool {
 	let mut complete = true;
-	let mut seen = HashSet::new();
+	let mut seen = FxHashSet::default();
 	let mut pending = vec![value];
 	while let Some(at) = pending.pop() {
 		if !seen.insert(at) {

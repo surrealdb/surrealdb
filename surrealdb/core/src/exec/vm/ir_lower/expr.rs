@@ -55,7 +55,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -86,6 +85,7 @@ use crate::exec::function::FunctionRegistry;
 #[cfg(test)]
 use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
@@ -216,8 +216,8 @@ pub(super) enum Dispatched {
 /// The values lowered so far on the path being lowered.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Scope {
-	values: HashMap<ValueId, Operand>,
-	resolved: HashMap<ValueId, Dispatched>,
+	values: FxHashMap<ValueId, Operand>,
+	resolved: FxHashMap<ValueId, Dispatched>,
 }
 
 /// The state of a [`Lowerer`] set aside while a pipeline is built beside the one it lowers.
@@ -225,7 +225,7 @@ pub(super) struct Beside {
 	program_frame: Option<u16>,
 	aside: bool,
 	scope: Scope,
-	rows: HashMap<ValueId, bool>,
+	rows: FxHashMap<ValueId, bool>,
 	claims: Vec<Claim>,
 	region: Option<RegionId>,
 	catch: Option<ReturnScope>,
@@ -287,7 +287,7 @@ pub(super) struct Lowerer<'a> {
 	pub(super) scope: Scope,
 	/// The block arguments that are the row of the pipeline being lowered, each with whether the
 	/// rows are objects.
-	rows: HashMap<ValueId, bool>,
+	rows: FxHashMap<ValueId, bool>,
 	/// The region whose block is being lowered, inside a lazy operator's region. `None` outside
 	/// every region the lowerer entered.
 	pub(super) region: Option<RegionId>,
@@ -308,10 +308,10 @@ pub(super) struct Lowerer<'a> {
 	/// `NotYet` for an op that runs a unit.
 	units: Option<&'a mut dyn UnitSink>,
 	/// Where each value a block binds is read from: a `LET`'s value and a `FOR`'s element.
-	slots: HashMap<ValueId, BoundSlot>,
+	slots: FxHashMap<ValueId, BoundSlot>,
 	/// The block arguments a unit's top region binds to names of the frame the unit runs in, each
 	/// read by the name through the frame in every pipeline.
-	named_args: HashMap<ValueId, Strand>,
+	named_args: FxHashMap<ValueId, Strand>,
 	/// Whether the expression being lowered is a schema statement's evaluated value, whose method
 	/// calls name their argument errors as code a write reaches does
 	/// ([`MethodSpec::writing`](super::super::program::MethodSpec)).
@@ -794,7 +794,7 @@ impl<'a> Lowerer<'a> {
 			limits: LowerLimits::default(),
 			frame: Frame::OWN,
 			scope: Scope::default(),
-			rows: HashMap::new(),
+			rows: FxHashMap::default(),
 			region: None,
 			owners: Vec::new(),
 			claims: Vec::new(),
@@ -806,7 +806,7 @@ impl<'a> Lowerer<'a> {
 			each_guard: None,
 			units: None,
 			slots,
-			named_args: HashMap::new(),
+			named_args: FxHashMap::default(),
 			writing_labels: false,
 			closure_row: false,
 			closure_root: None,

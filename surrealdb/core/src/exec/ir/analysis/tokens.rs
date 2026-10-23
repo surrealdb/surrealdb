@@ -37,13 +37,12 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
-
 use smallvec::SmallVec;
 
 use super::effects;
 use super::multiplicity::is_loop_body;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::rewriter::Rewriter;
 use crate::exec::ir::core::walk::ops_in;
@@ -59,7 +58,7 @@ use crate::exec::ir::logical::seam::invariant;
 /// memo is used.
 #[derive(Default)]
 pub(crate) struct Uses {
-	memo: HashMap<OpId, TokenUse>,
+	memo: FxHashMap<OpId, TokenUse>,
 }
 
 impl Uses {

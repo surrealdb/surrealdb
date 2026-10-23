@@ -53,6 +53,7 @@ use super::access_regions::{cone_is_expr, conjunct_region, defined_in, rowless_v
 use super::ops::{KnnTargetShape, KnnTopKAttrs, PhysOp};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -716,7 +717,7 @@ fn first_input_op(ir: &Ir, looped: OpId) -> OpId {
 	let mut first = (position(looped).unwrap_or(usize::MAX), looped);
 	let mut pending: Vec<ValueId> =
 		ir.op(looped).map(|data| data.operands.to_vec()).unwrap_or_default();
-	let mut seen = std::collections::HashSet::new();
+	let mut seen = FxHashSet::default();
 	while let Some(value) = pending.pop() {
 		if !seen.insert(value) {
 			continue;

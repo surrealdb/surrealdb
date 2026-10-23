@@ -41,8 +41,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, HashSet};
-
 use smallvec::smallvec;
 use surrealdb_strand::{Strand, TableName};
 
@@ -54,6 +52,7 @@ use crate::exec::index::access_path::{AccessPath, BTreeAccess};
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::build::phys::index_ref;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -230,7 +229,7 @@ fn decide(
 		return None;
 	}
 	let tree = Subtree::of(ir, subquery);
-	let none = HashSet::new();
+	let none = FxHashSet::default();
 	let correlated = tree.correlated(ir, &none);
 	// Only `Once` reads `repeatable` of an uncorrelated statement, and it runs the statement
 	// whole, the search included.
@@ -470,14 +469,14 @@ struct Subtree {
 	/// Every op in the regions of the subquery, in pre-order.
 	ops: Vec<OpId>,
 	/// The regions of the subquery and every region inside them.
-	regions: HashSet<RegionId>,
+	regions: FxHashSet<RegionId>,
 }
 
 impl Subtree {
 	fn of(ir: &Ir, subquery: OpId) -> Self {
 		let mut tree = Self {
 			ops: Vec::new(),
-			regions: HashSet::new(),
+			regions: FxHashSet::default(),
 		};
 		let Some(data) = ir.op(subquery) else {
 			return tree;
@@ -513,7 +512,7 @@ impl Subtree {
 
 	/// Whether the statement, less the ops of `exclude`, reads a value defined outside it that
 	/// varies with a row, or names a row parameter as a free name.
-	fn correlated(&self, ir: &Ir, exclude: &HashSet<OpId>) -> bool {
+	fn correlated(&self, ir: &Ir, exclude: &FxHashSet<OpId>) -> bool {
 		self.ops.iter().filter(|op| !exclude.contains(*op)).any(|op| {
 			let Some(data) = ir.op(*op) else {
 				return true;
@@ -527,7 +526,7 @@ impl Subtree {
 			}
 			data.operands.iter().any(|operand| {
 				!self.defines(ir, *operand)
-					&& row_dependent(ir, *operand, &mut HashSet::new(), MAX_DEPTH)
+					&& row_dependent(ir, *operand, &mut FxHashSet::default(), MAX_DEPTH)
 			})
 		})
 	}
@@ -541,7 +540,7 @@ impl Subtree {
 		ir: &Ir,
 		facts: &mut FactCache,
 		cx: &PhysCx<'_>,
-		exclude: &HashSet<OpId>,
+		exclude: &FxHashSet<OpId>,
 		search: Search,
 	) -> bool {
 		self.ops.iter().filter(|op| !exclude.contains(*op)).all(|op| {
@@ -628,7 +627,7 @@ fn reads_deterministically(op: &PhysOp) -> bool {
 /// parameter or an argument. The arguments of a request, a transaction, a statement and a catalog
 /// unit are the statement's own context and do not vary with a row. A chain longer than `depth`
 /// is taken to depend.
-fn row_dependent(ir: &Ir, value: ValueId, seen: &mut HashSet<ValueId>, depth: usize) -> bool {
+fn row_dependent(ir: &Ir, value: ValueId, seen: &mut FxHashSet<ValueId>, depth: usize) -> bool {
 	if depth == 0 {
 		return true;
 	}
@@ -890,7 +889,7 @@ fn join_site(
 	};
 	let (field, outer) = field_and_outer(ir, tree, *left, *right)
 		.or_else(|| field_and_outer(ir, tree, *right, *left))?;
-	let exclude: HashSet<OpId> = outer.tree.iter().copied().collect();
+	let exclude: FxHashSet<OpId> = outer.tree.iter().copied().collect();
 	if tree.correlated(ir, &exclude) || !tree.repeatable(ir, facts, cx, &exclude, Search::Varies) {
 		return None;
 	}
@@ -1136,7 +1135,7 @@ fn install(
 /// Copies the ops that compute `outer` to `at` and answers the copy's value. The copy reads what
 /// the original reads, which stands outside the statement.
 fn copy_outer(rw: &mut Rewriter<'_>, at: InsertPoint, outer: &Outer) -> Result<ValueId, IrError> {
-	let mut renamed: HashMap<ValueId, ValueId> = HashMap::new();
+	let mut renamed: FxHashMap<ValueId, ValueId> = FxHashMap::default();
 	for op in &outer.tree {
 		let data = rw.ir().op(*op).ok_or(IrError::Stale("op"))?.clone();
 		let spec = OpSpec {

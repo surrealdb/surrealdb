@@ -16,7 +16,6 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::cmp::Reverse;
-use std::collections::HashSet;
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::rehome::{and_chain, can_rehome, rebuild_and_chain};
@@ -25,6 +24,7 @@ use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in, outermost_sco
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -89,7 +89,7 @@ pub(crate) fn candidates(
 	cx: &EffectCx<'_>,
 	stmt: OpId,
 ) -> Vec<MemoCandidate> {
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut found: Vec<MemoCandidate> = Vec::new();
 	for scope_loop in loops_in(ir, stmt) {
 		let mut sweep = Sweep {
@@ -469,7 +469,7 @@ fn moved_tree_size(ir: &Ir, root: OpId) -> usize {
 	let Some(block) = ir.op(root).map(|data| data.parent) else {
 		return 0;
 	};
-	let mut members: HashSet<OpId> = HashSet::new();
+	let mut members: FxHashSet<OpId> = FxHashSet::default();
 	members.insert(root);
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {
@@ -502,7 +502,7 @@ fn moved_tree_size(ir: &Ir, root: OpId) -> usize {
 }
 
 /// Whether a result of `op` is read by an op that is neither a member nor inside one.
-fn read_outside(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
+fn read_outside(ir: &Ir, op: OpId, members: &FxHashSet<OpId>) -> bool {
 	let Some(data) = ir.op(op) else {
 		return false;
 	};
@@ -620,7 +620,7 @@ fn computing_ops(ir: &Ir, value: ValueId) -> Vec<OpId> {
 	let Some(block) = ir.op(root).map(|data| data.parent) else {
 		return Vec::new();
 	};
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {
 		if !seen.insert(op) {

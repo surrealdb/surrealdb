@@ -11,8 +11,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
-
 use super::facts::{NestedReading, chain_pipelines, facts_reading, phys_of, pipeline_entries};
 use super::ops::{Batch, PhysOp};
 use super::pipeline::PipelineDag;
@@ -23,6 +21,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::build::phys::UNBATCHED;
 use crate::exec::ir::core::Provenance;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::{FxHashMap, map_with_capacity};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::verify::{VerifyError, VerifyRule};
 use crate::exec::ir::error::IrError;
@@ -622,7 +621,7 @@ pub(crate) fn place_all_reading(
 ) -> Result<Vec<(OpId, PlacementAttr)>, IrError> {
 	let dag = PipelineDag::of(ir);
 	let order = dag.topological_order().map_err(IrError::Verify)?;
-	let mut judged: HashMap<OpId, Judged> = HashMap::with_capacity(order.len());
+	let mut judged: FxHashMap<OpId, Judged> = map_with_capacity(order.len());
 	for (_, op) in &order {
 		let (legality, statement, loop_facts) = legality_inputs(ir, facts, *op);
 		let physical = facts_reading(ir, facts, registry, *op, reading)?;

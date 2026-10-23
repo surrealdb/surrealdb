@@ -13,13 +13,12 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::SmallVec;
 use surrealdb_strand::Strand;
 
 use super::multiplicity;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::effects::FieldSet;
@@ -107,7 +106,7 @@ pub(crate) fn pipeline_demand(ir: &Ir, rows: ValueId, runs: &[(ValueId, &[OpId])
 	use crate::exec::field_path::FieldPathPart;
 	use crate::exec::ir::phys::ops::{PhysOp, ProjectionShape, SortKeyReadShape};
 	let mut state = State {
-		rows: HashSet::from([rows]),
+		rows: FxHashSet::from_iter([rows]),
 		names: SmallVec::new(),
 		computed: SmallVec::new(),
 		all: false,
@@ -283,7 +282,7 @@ fn role_of(kind: &OpKind) -> Role {
 
 /// The rows found so far and what has been read of them.
 struct State {
-	rows: HashSet<ValueId>,
+	rows: FxHashSet<ValueId>,
 	names: SmallVec<[Strand; 4]>,
 	computed: SmallVec<[Strand; 4]>,
 	all: bool,

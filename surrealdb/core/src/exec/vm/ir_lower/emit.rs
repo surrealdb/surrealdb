@@ -39,6 +39,7 @@ use super::super::program::{
 };
 use super::super::row::FieldName;
 use crate::exec::field_path::FieldPath;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::{OpId, ValueId};
 use crate::exec::ir::phys::placement_attr::FrontierHops;
@@ -118,12 +119,12 @@ pub(crate) struct Emitter {
 	probe_owner: Option<Option<u16>>,
 	/// The values a block binds in a slot of the running state, which every lowerer of the program
 	/// reads them from: the pipelines of a block's statements run over the same state.
-	bound: HashMap<ValueId, BoundSlot>,
+	bound: FxHashMap<ValueId, BoundSlot>,
 	/// The hops of the pipeline being lowered whose sources the physical plan has read in
 	/// windows. A pipeline built beside the one in flight has none.
 	frontier_hops: FrontierHops,
 	/// The lookup that ends at each hop, by the graph-step op that states the hop.
-	hop_lookups: HashMap<OpId, HopLookup>,
+	hop_lookups: FxHashMap<OpId, HopLookup>,
 	/// The lookups the pipeline in flight has emitted.
 	pipeline_lookups: Vec<u32>,
 }
@@ -245,9 +246,9 @@ impl Emitter {
 			group: None,
 			permission_floor: 0,
 			probe_owner: None,
-			bound: HashMap::new(),
+			bound: FxHashMap::default(),
 			frontier_hops: FrontierHops::default(),
-			hop_lookups: HashMap::new(),
+			hop_lookups: FxHashMap::default(),
 			pipeline_lookups: Vec::new(),
 		}
 	}
@@ -259,7 +260,7 @@ impl Emitter {
 	}
 
 	/// The values the program's block binds in slots.
-	pub(super) fn bound_slots(&self) -> &HashMap<ValueId, BoundSlot> {
+	pub(super) fn bound_slots(&self) -> &FxHashMap<ValueId, BoundSlot> {
 		&self.bound
 	}
 

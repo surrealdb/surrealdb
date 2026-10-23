@@ -7,11 +7,10 @@
 //! broken container invariant, and the caller's verification reports those.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, HashSet};
-
 use smallvec::{SmallVec, smallvec};
 
 use crate::exec::ir::core::copy::StatementCopy;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -85,7 +84,7 @@ pub(crate) fn rehome_tree_bound(
 	bound: &[(ValueId, ValueId)],
 ) -> Result<SmallVec<[ValueId; 2]>, IrError> {
 	let tree = collect_tree(rw.ir(), root)?;
-	let members: HashSet<OpId> = tree.iter().copied().collect();
+	let members: FxHashSet<OpId> = tree.iter().copied().collect();
 	let (block, index) = resolve(rw.ir(), at)?;
 	check_placement(rw.ir(), &tree, &members, block, index, bound)?;
 	let clones = match mode {
@@ -94,7 +93,7 @@ pub(crate) fn rehome_tree_bound(
 	};
 
 	let point = anchored(rw.ir(), at)?;
-	let mut renamed: HashMap<ValueId, ValueId> = bound.iter().copied().collect();
+	let mut renamed: FxHashMap<ValueId, ValueId> = bound.iter().copied().collect();
 	let mut created: Vec<OpId> = Vec::with_capacity(tree.len());
 	for old in &tree {
 		let data = rw.ir().op(*old).ok_or(IrError::Stale("op"))?.clone();
@@ -154,11 +153,11 @@ pub(crate) fn copy_tree_bound(
 	bound: &[(ValueId, ValueId)],
 ) -> Result<ValueId, IrError> {
 	let tree = collect_tree(rw.ir(), root)?;
-	let members: HashSet<OpId> = tree.iter().copied().collect();
+	let members: FxHashSet<OpId> = tree.iter().copied().collect();
 	let (block, index) = resolve(rw.ir(), at)?;
 	check_placement(rw.ir(), &tree, &members, block, index, bound)?;
 	let point = anchored(rw.ir(), at)?;
-	let mut renamed: HashMap<ValueId, ValueId> = bound.iter().copied().collect();
+	let mut renamed: FxHashMap<ValueId, ValueId> = bound.iter().copied().collect();
 	let mut copy_of_root = None;
 	for old in &tree {
 		let new = copy_op(rw, *old, point, &mut renamed)?;
@@ -179,7 +178,7 @@ fn copy_op(
 	rw: &mut Rewriter<'_>,
 	old: OpId,
 	point: InsertPoint,
-	renamed: &mut HashMap<ValueId, ValueId>,
+	renamed: &mut FxHashMap<ValueId, ValueId>,
 ) -> Result<OpId, IrError> {
 	let data = rw.ir().op(old).ok_or(IrError::Stale("op"))?.clone();
 	let spec = respec(rw.ir(), &data, renamed)?;
@@ -200,7 +199,7 @@ fn copy_region(
 	rw: &mut Rewriter<'_>,
 	region: RegionId,
 	owner: OpId,
-	renamed: &mut HashMap<ValueId, ValueId>,
+	renamed: &mut FxHashMap<ValueId, ValueId>,
 ) -> Result<(), IrError> {
 	let held = rw.ir().region(region).ok_or(IrError::Stale("region"))?;
 	let kind = held.kind;
@@ -235,7 +234,7 @@ pub(crate) fn can_rehome(
 	let Ok(tree) = collect_tree(ir, root) else {
 		return false;
 	};
-	let members: HashSet<OpId> = tree.iter().copied().collect();
+	let members: FxHashSet<OpId> = tree.iter().copied().collect();
 	let Ok((block, index)) = resolve(ir, at) else {
 		return false;
 	};
@@ -252,7 +251,7 @@ fn rebind_nested(
 	if bound.is_empty() {
 		return Ok(());
 	}
-	let members: HashSet<OpId> = created.iter().copied().collect();
+	let members: FxHashSet<OpId> = created.iter().copied().collect();
 	for (from, to) in bound {
 		let readers: Vec<(OpId, u16)> = rw
 			.ir()
@@ -493,7 +492,7 @@ fn lazily(rw: &mut Rewriter<'_>, at: InsertPoint, value: ValueId) -> Result<Valu
 /// The ops of the tree rooted at `root`, in definition order.
 fn collect_tree(ir: &Ir, root: OpId) -> Result<Vec<OpId>, IrError> {
 	let block = ir.op(root).ok_or(IrError::Stale("op"))?.parent;
-	let mut members: HashSet<OpId> = HashSet::new();
+	let mut members: FxHashSet<OpId> = FxHashSet::default();
 	members.insert(root);
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {
@@ -532,7 +531,7 @@ fn collect_tree(ir: &Ir, root: OpId) -> Result<Vec<OpId>, IrError> {
 }
 
 /// Whether a result of `op` is read by an op that is neither a member nor inside one.
-fn read_outside(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
+fn read_outside(ir: &Ir, op: OpId, members: &FxHashSet<OpId>) -> bool {
 	let Some(data) = ir.op(op) else {
 		return false;
 	};
@@ -542,14 +541,14 @@ fn read_outside(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
 }
 
 /// Whether `op` is a member or stands inside the regions of one.
-fn within(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
+fn within(ir: &Ir, op: OpId, members: &FxHashSet<OpId>) -> bool {
 	members.contains(&op)
 		|| ancestors(ir, op).any(|(_, owner)| owner.is_some_and(|held| members.contains(&held)))
 }
 
 /// Whether the value is defined by an op of the tree, an op inside one, or a block argument of a
 /// region one owns.
-fn defined_within(ir: &Ir, value: ValueId, members: &HashSet<OpId>) -> bool {
+fn defined_within(ir: &Ir, value: ValueId, members: &FxHashSet<OpId>) -> bool {
 	match ir.value(value).map(|data| data.def) {
 		Some(ValueDef::OpResult {
 			op,
@@ -615,7 +614,11 @@ fn neighbour(ir: &Ir, at: InsertPoint) -> Result<OpId, IrError> {
 }
 
 /// The description of a re-created `data`, reading the renamed values where `renamed` has them.
-fn respec(ir: &Ir, data: &OpData, renamed: &HashMap<ValueId, ValueId>) -> Result<OpSpec, IrError> {
+fn respec(
+	ir: &Ir,
+	data: &OpData,
+	renamed: &FxHashMap<ValueId, ValueId>,
+) -> Result<OpSpec, IrError> {
 	let operands = data
 		.operands
 		.iter()
@@ -640,7 +643,7 @@ fn respec(ir: &Ir, data: &OpData, renamed: &HashMap<ValueId, ValueId>) -> Result
 fn check_placement(
 	ir: &Ir,
 	tree: &[OpId],
-	members: &HashSet<OpId>,
+	members: &FxHashSet<OpId>,
 	block: BlockId,
 	index: usize,
 	bound: &[(ValueId, ValueId)],
@@ -693,7 +696,7 @@ fn is_terminator(kind: &OpKind) -> bool {
 }
 
 /// Whether `block` is a region of a member, or lies inside one.
-fn block_inside(ir: &Ir, block: BlockId, members: &HashSet<OpId>) -> bool {
+fn block_inside(ir: &Ir, block: BlockId, members: &FxHashSet<OpId>) -> bool {
 	let mut current = block;
 	loop {
 		let Some(owner) = ir.block(current).and_then(|held| ir.parent_op(held.parent)) else {

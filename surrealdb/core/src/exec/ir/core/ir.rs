@@ -9,8 +9,6 @@
 //! how many live ops hold each logical id, every logical op ever created, the error scope an op
 //! was bound in, and the generation at which each stored-clause op was sealed.
 
-use std::collections::{HashMap, HashSet};
-
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 
@@ -22,6 +20,7 @@ use super::side_map::SideMap;
 use super::token::OpTokens;
 use super::value::{Use, ValueData, ValueDef};
 use super::walk::ops_in;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::conversion::{EliminationReason, Phase};
 use crate::exec::ir::iface::frame::{AuthorityFrame, FrameTable, Snapshot};
@@ -111,7 +110,7 @@ pub(crate) struct Ir {
 	pub(super) hop_keys: HopKeyTable,
 	/// For each op id, the number of live ops whose provenance holds it. `Bound` holds the op's
 	/// own id. An id no live op holds has no entry.
-	pub(super) holders: HashMap<OpId, u32>,
+	pub(super) holders: FxHashMap<OpId, u32>,
 	/// Every op created `Bound` with an [`OpKind::Logical`](super::op::OpKind) kind, in creation
 	/// order: the logical ids the container must keep covered.
 	pub(super) logical_ids: Vec<OpId>,
@@ -119,7 +118,7 @@ pub(crate) struct Ir {
 	/// or `None` outside every error scope.
 	pub(super) bind_scope: SideMap<OpId, Option<OpId>>,
 	/// The entries of `bind_scope` of erased ops.
-	pub(super) retired_scope: HashMap<OpId, Option<OpId>>,
+	pub(super) retired_scope: FxHashMap<OpId, Option<OpId>>,
 	/// The generation of each op inside a stored-clause region at the moment the container left
 	/// [`Phase::Bound`].
 	pub(super) sealed: SideMap<OpId, u32>,
@@ -204,10 +203,10 @@ impl Ir {
 			placement: PlacementTable::new(),
 			matches: MatchesTable::new(),
 			hop_keys: HopKeyTable::new(),
-			holders: HashMap::new(),
+			holders: FxHashMap::default(),
 			logical_ids: Vec::new(),
 			bind_scope: SideMap::new(),
-			retired_scope: HashMap::new(),
+			retired_scope: FxHashMap::default(),
 			sealed: SideMap::new(),
 			sealed_regions: SideMap::new(),
 			constrained: false,
@@ -705,7 +704,7 @@ impl Ir {
 
 	/// Drops every id of `ids` from the eliminated list, in one pass over it: an op that stands
 	/// for each exists again.
-	pub(super) fn remove_from_eliminated(&mut self, ids: &HashSet<OpId>) {
+	pub(super) fn remove_from_eliminated(&mut self, ids: &FxHashSet<OpId>) {
 		self.eliminated.retain(|(eliminated, _)| !ids.contains(eliminated));
 	}
 

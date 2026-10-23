@@ -12,12 +12,11 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
-
 use smallvec::SmallVec;
 
 use super::ops::{PhysOp, PipelineId};
 use super::pipeline::{PipelineDag, PipelineIds};
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::error::IrError;
@@ -30,16 +29,16 @@ pub(super) struct Copied {
 	/// The new region, owned by the op the copy was made for.
 	pub(super) region: RegionId,
 	/// Each op of the original region, and of the regions it owns, with the op that copies it.
-	pub(super) ops: HashMap<OpId, OpId>,
+	pub(super) ops: FxHashMap<OpId, OpId>,
 }
 
 /// State one copy threads through its ops: new ids for the values, ops and pipelines copied so far.
 struct Copy {
 	/// The copy of each value defined inside the original region.
-	values: HashMap<ValueId, ValueId>,
-	ops: HashMap<OpId, OpId>,
+	values: FxHashMap<ValueId, ValueId>,
+	ops: FxHashMap<OpId, OpId>,
 	/// The id of the copy of each pipeline of the original region.
-	pipelines: HashMap<PipelineId, PipelineId>,
+	pipelines: FxHashMap<PipelineId, PipelineId>,
 }
 
 /// Copies `region` as a region of the same kind owned by `owner`, after the regions `owner`
@@ -54,9 +53,9 @@ pub(super) fn region(
 	owner: OpId,
 ) -> Result<Copied, IrError> {
 	let mut copy = Copy {
-		values: HashMap::new(),
-		ops: HashMap::new(),
-		pipelines: HashMap::new(),
+		values: FxHashMap::default(),
+		ops: FxHashMap::default(),
+		pipelines: FxHashMap::default(),
 	};
 	let mut ids = PipelineIds::following(&PipelineDag::of(rw.ir()))?;
 	for old in pipelines_in(rw.ir(), region) {
@@ -72,9 +71,9 @@ pub(super) fn region(
 /// The copy of a run of ops and the correspondence of its values and ops with the original's.
 pub(super) struct CopiedOps {
 	/// Each op of the original, and of the regions it owns, with the op that copies it.
-	pub(super) ops: HashMap<OpId, OpId>,
+	pub(super) ops: FxHashMap<OpId, OpId>,
 	/// Each value an op of the original defines, with the value its copy defines.
-	pub(super) values: HashMap<ValueId, ValueId>,
+	pub(super) values: FxHashMap<ValueId, ValueId>,
 }
 
 /// Copies `ops`, which stand in one block in definition order, to the end of `block`.
@@ -90,9 +89,9 @@ pub(super) fn ops_into(
 	block: BlockId,
 ) -> Result<CopiedOps, IrError> {
 	let mut copy = Copy {
-		values: HashMap::new(),
-		ops: HashMap::new(),
-		pipelines: HashMap::new(),
+		values: FxHashMap::default(),
+		ops: FxHashMap::default(),
+		pipelines: FxHashMap::default(),
 	};
 	let mut ids = PipelineIds::following(&PipelineDag::of(rw.ir()))?;
 	for op in ops {

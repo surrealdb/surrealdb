@@ -46,6 +46,7 @@ use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::reads_row_opaquely;
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, IrScope, OpList, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -286,7 +287,7 @@ fn lands_within(ir: &Ir, control: OpId, target: RegionId, owner: OpId) -> bool {
 /// Erases the ops that follow a terminator in their block, and answers how many went.
 fn erase_unreachable(cx: &mut LoCx<'_>) -> Result<u32, IrError> {
 	let mut tails: Vec<Vec<OpId>> = Vec::new();
-	let mut seen = HashSet::new();
+	let mut seen = FxHashSet::default();
 	for op in live_ops(cx.ir) {
 		let Some(data) = cx.ir.op(op) else {
 			continue;
@@ -939,7 +940,7 @@ fn control_cannot_skip(ir: &Ir, raise: OpId, cancel: RegionId) -> bool {
 /// The ops of `cancel` that run before `raise`, in program order, without the ops whose regions
 /// hold `raise`.
 fn predecessors(ir: &Ir, raise: OpId, cancel: RegionId) -> Vec<OpId> {
-	let owners: HashSet<OpId> = ancestors(ir, raise).filter_map(|(_, owner)| owner).collect();
+	let owners: FxHashSet<OpId> = ancestors(ir, raise).filter_map(|(_, owner)| owner).collect();
 	let mut before = Vec::new();
 	ir.walk(cancel, WalkOrder::PreOrder, &mut |op| {
 		if op == raise {

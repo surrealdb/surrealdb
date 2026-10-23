@@ -11,12 +11,11 @@
 //! A container that is not in the physical phase is left as it is.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use super::cse::{READS, Scope, in_physical_region, in_stored_clause, merge_equal_values};
 use super::driver::PassReport;
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit};
 use crate::exec::ir::core::rewriter::Rewriter;
@@ -76,7 +75,7 @@ fn physical_expressions(ir: &Ir) -> Vec<OpId> {
 /// it is judged, and answers how many went.
 fn erase_dead_pure(ir: &mut Ir, facts: &mut FactCache, cx: &EffectCx<'_>) -> Result<u32, IrError> {
 	let mut erased = 0;
-	let mut gone: HashSet<OpId> = HashSet::new();
+	let mut gone: FxHashSet<OpId> = FxHashSet::default();
 	for op in physical_expressions(ir).into_iter().rev() {
 		if gone.contains(&op) || !is_dead_pure(ir, facts, cx, op) {
 			continue;

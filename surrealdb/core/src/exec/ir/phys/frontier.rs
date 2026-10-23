@@ -19,12 +19,12 @@
 //!   from the row, and the lookups that each read the answer of the one before it, every one of
 //!   them run whenever the projection runs.
 
-use std::collections::HashMap;
 use std::ops::Bound;
 
 use super::io::{Rows, kind_of};
 use super::ops::PhysOp;
 use super::placement_attr::{FrontierHops, FrontierRows};
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
@@ -305,7 +305,7 @@ struct Hop {
 struct Hops {
 	list: Vec<Hop>,
 	/// A value a pipeline yields from the answer of a hop, by the value the pipeline answers.
-	answers: HashMap<ValueId, ValueId>,
+	answers: FxHashMap<ValueId, ValueId>,
 }
 
 impl Hops {

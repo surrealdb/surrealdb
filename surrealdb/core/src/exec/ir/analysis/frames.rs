@@ -14,8 +14,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::SmallVec;
 use surrealdb_strand::TableName;
 
@@ -24,6 +22,7 @@ use super::cx::default_cx;
 use super::liveness::{demand_over, field_read_name};
 use super::{effects, fallibility, footprint, multiplicity, write_epoch};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
@@ -296,7 +295,7 @@ pub(crate) fn row_view(ir: &Ir, _facts: &mut FactCache, conjunct: OpId, layer: O
 	}
 	let masked: SmallVec<[ValueId; 2]> = layer_data.results.iter().copied().collect();
 	let home = ir.enclosing_region(conjunct);
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut work = vec![conjunct];
 	while let Some(op) = work.pop() {
 		if !seen.insert(op) {

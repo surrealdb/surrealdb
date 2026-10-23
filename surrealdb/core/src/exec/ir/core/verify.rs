@@ -11,7 +11,7 @@
 //! walk order, and answers the violation of the rule declared first in [`VerifyRule`], so the
 //! answer does not depend on which check the walk reaches first.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ::core::fmt;
 use slotmap::{Key, SecondaryMap};
@@ -25,6 +25,7 @@ use super::value::{TOKEN_SLOT_BASE, Use, ValueDef};
 use super::walk::{ControlTarget, control_target};
 use crate::exec::ir::analysis::cx::structural_cx;
 use crate::exec::ir::analysis::{effects, fallibility, tokens};
+use crate::exec::ir::core::fxhash::{FxHashSet, set_with_capacity};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::choose::{
 	ArmBody, ChooseOrigin, ChooseSpec, GenericArm, Guard, MAX_CHOOSE_ARMS,
@@ -273,7 +274,7 @@ fn groups_fit(count: usize, sizes: &[u16]) -> bool {
 
 /// Whether two entries of `uses` name the same operand of the same op. A list longer than a
 /// handful is checked through `scratch`, which is empty before and after the call.
-fn has_duplicate_use(uses: &[Use], scratch: &mut HashSet<(OpId, u16)>) -> bool {
+fn has_duplicate_use(uses: &[Use], scratch: &mut FxHashSet<(OpId, u16)>) -> bool {
 	if uses.len() <= 8 {
 		return uses
 			.iter()
@@ -291,12 +292,12 @@ fn has_duplicate_use(uses: &[Use], scratch: &mut HashSet<(OpId, u16)>) -> bool {
 /// restores the set it had on entry.
 #[derive(Default)]
 struct Scope {
-	visible: HashSet<ValueId>,
+	visible: FxHashSet<ValueId>,
 	/// The values added, in order. Each frame owns the entries from its recorded length on.
 	log: Vec<ValueId>,
 	/// Per open block: the log length at entry, and the set that was visible outside when the
 	/// block's region is isolated from above.
-	frames: Vec<(usize, Option<HashSet<ValueId>>)>,
+	frames: Vec<(usize, Option<FxHashSet<ValueId>>)>,
 }
 
 impl Scope {
@@ -369,7 +370,7 @@ struct Walk<'a> {
 	regions: Vec<RegionCx>,
 	tally: HashMap<ValueId, Tally>,
 	/// Working space for the duplicate-use check; empty between values.
-	scratch: HashSet<(OpId, u16)>,
+	scratch: FxHashSet<(OpId, u16)>,
 	/// The ops the walk has reached. An op met a second time means an op or region is reachable
 	/// twice; a live op missing from it after the walk is listed by no block.
 	seen: SecondaryMap<OpId, ()>,
@@ -394,13 +395,13 @@ impl<'a> Walk<'a> {
 			physical_boundary: matches!(at, VerifyAt::PhaseBoundary(Phase::Physical)),
 			first: ::core::array::from_fn(|_| None),
 			scope: Scope {
-				visible: HashSet::with_capacity(ir.values.len()),
+				visible: set_with_capacity(ir.values.len()),
 				log: Vec::with_capacity(ir.values.len()),
 				frames: Vec::with_capacity(ir.blocks.len()),
 			},
 			regions: Vec::with_capacity(ir.regions.len()),
 			tally: HashMap::with_capacity(ir.values.len()),
-			scratch: HashSet::new(),
+			scratch: FxHashSet::default(),
 			seen: SecondaryMap::with_capacity(ir.ops.len()),
 			stopped: false,
 			closure_free: effects::closure_free(ir),
@@ -1028,7 +1029,7 @@ impl<'a> Walk<'a> {
 			return;
 		}
 		let ir = self.ir;
-		let eliminated: HashSet<OpId> = ir.eliminated().iter().map(|(id, _)| *id).collect();
+		let eliminated: FxHashSet<OpId> = ir.eliminated().iter().map(|(id, _)| *id).collect();
 		let covered = |id: OpId| {
 			ir.holders.get(&id).is_some_and(|held| *held > 0) || eliminated.contains(&id)
 		};

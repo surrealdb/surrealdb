@@ -32,11 +32,10 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, HashSet};
-
 use smallvec::SmallVec;
 
 use super::{effects, multiplicity};
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
@@ -90,7 +89,7 @@ pub(crate) fn invariant_in(ir: &Ir, value: ValueId, scope: OpId) -> Invariance {
 		ir,
 		scope,
 		body,
-		memo: HashMap::new(),
+		memo: FxHashMap::default(),
 	};
 	query.value(value, 0)
 }
@@ -209,7 +208,7 @@ fn crossable(kind: RegionKind) -> bool {
 /// The ops of the subtree of `root`, `root` first, and the regions those ops own.
 ///
 /// A closure body is not entered: what runs in it runs where the closure is invoked.
-fn collect(ir: &Ir, root: OpId, ops: &mut Vec<OpId>, regions: &mut HashSet<RegionId>) {
+fn collect(ir: &Ir, root: OpId, ops: &mut Vec<OpId>, regions: &mut FxHashSet<RegionId>) {
 	let Some(data) = ir.op(root) else {
 		return;
 	};
@@ -233,7 +232,7 @@ fn collect(ir: &Ir, root: OpId, ops: &mut Vec<OpId>, regions: &mut HashSet<Regio
 /// A `Return` is caught by the nearest region that catches it, a `Break` or `Next` by the nearest
 /// loop body; a region a loop-control walk may not leave, and the top of the container, are
 /// outside.
-fn escapes(ir: &Ir, op: OpId, inside: &HashSet<RegionId>) -> bool {
+fn escapes(ir: &Ir, op: OpId, inside: &FxHashSet<RegionId>) -> bool {
 	let Some(data) = ir.op(op) else {
 		return true;
 	};
@@ -275,8 +274,8 @@ fn is_control_terminator(tag: OpTag) -> bool {
 fn defined_within(
 	ir: &Ir,
 	value: ValueId,
-	ops: &HashSet<OpId>,
-	regions: &HashSet<RegionId>,
+	ops: &FxHashSet<OpId>,
+	regions: &FxHashSet<RegionId>,
 ) -> bool {
 	let Some(data) = ir.value(value) else {
 		return false;
@@ -298,7 +297,7 @@ struct Query<'a> {
 	ir: &'a Ir,
 	scope: OpId,
 	body: SmallVec<[RegionId; 2]>,
-	memo: HashMap<OpId, Invariance>,
+	memo: FxHashMap<OpId, Invariance>,
 }
 
 impl Query<'_> {
@@ -375,9 +374,9 @@ impl Query<'_> {
 			return Invariance::Dependent(DepCause::Barrier(kind));
 		}
 		let mut ops = Vec::new();
-		let mut regions = HashSet::new();
+		let mut regions = FxHashSet::default();
 		collect(ir, op, &mut ops, &mut regions);
-		let inside: HashSet<OpId> = ops.iter().copied().collect();
+		let inside: FxHashSet<OpId> = ops.iter().copied().collect();
 		for inner in ops.iter().copied() {
 			let Some(data) = ir.op(inner) else {
 				return Invariance::Dependent(DepCause::Opaque(inner));

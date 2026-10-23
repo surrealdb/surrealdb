@@ -11,12 +11,11 @@
 //! around the statement, so every shared value is visible where the scan stands; one that is not
 //! is an [`IrError::Invariant`].
 
-use std::collections::HashMap;
-
 use smallvec::{SmallVec, smallvec};
 use surrealdb_strand::Strand;
 
 use super::access_expr::conjunct_values;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -38,7 +37,7 @@ struct Copy {
 	/// The region the copy stands in, which a shared value must be visible from.
 	into: RegionId,
 	/// The value each copied value became.
-	values: HashMap<ValueId, ValueId>,
+	values: FxHashMap<ValueId, ValueId>,
 	/// The rows of `from` a rowless copy stands with no value for ([`rowless_value_copy`]): its
 	/// block arguments. Empty for any other copy.
 	rowless: SmallVec<[ValueId; 2]>,
@@ -133,7 +132,7 @@ pub(super) fn conjunct_region_across(
 		let mut copy = Copy {
 			from: *src,
 			into,
-			values: HashMap::new(),
+			values: FxHashMap::default(),
 			rowless: SmallVec::new(),
 		};
 		for (old, new) in old_args.iter().zip(args.iter()) {
@@ -242,7 +241,7 @@ pub(super) fn value_region(
 	let mut copy = Copy {
 		from: src,
 		into,
-		values: HashMap::new(),
+		values: FxHashMap::default(),
 		rowless: SmallVec::new(),
 	};
 	for old in stands.document {
@@ -291,7 +290,7 @@ pub(super) fn region_copy(
 	let mut copy = Copy {
 		from: src,
 		into: rw.ir().enclosing_region(visible_at),
-		values: HashMap::new(),
+		values: FxHashMap::default(),
 		rowless: SmallVec::new(),
 	};
 	copy_region(rw, &mut copy, src, owner)
@@ -325,7 +324,7 @@ pub(super) fn rowless_value_copy(
 	let mut copy = Copy {
 		from: src,
 		into: rw.ir().enclosing_region(at),
-		values: HashMap::new(),
+		values: FxHashMap::default(),
 		rowless: args.iter().copied().collect(),
 	};
 	if args.is_empty() || !reads_region_args(rw.ir(), src, value) {
@@ -375,7 +374,7 @@ pub(super) fn value_copy(
 	let mut copy = Copy {
 		from: src,
 		into: rw.ir().enclosing_region(at),
-		values: HashMap::new(),
+		values: FxHashMap::default(),
 		rowless: SmallVec::new(),
 	};
 	copy_value(rw, &mut copy, value, InsertPoint::Before(at))
@@ -391,7 +390,7 @@ pub(super) fn reads_region_args(ir: &Ir, src: RegionId, value: ValueId) -> bool 
 		.and_then(|block| ir.block(*block))
 		.map(|block| block.args.to_vec())
 		.unwrap_or_default();
-	let mut seen = std::collections::HashSet::new();
+	let mut seen = FxHashSet::default();
 	let mut pending = vec![value];
 	while let Some(at) = pending.pop() {
 		if !seen.insert(at) {
@@ -429,7 +428,7 @@ pub(super) fn reads_region_args(ir: &Ir, src: RegionId, value: ValueId) -> bool 
 /// regions they own at any depth, is an expression op: a cone a conversion can copy, which holds
 /// no op the conversion has yet to convert.
 pub(super) fn cone_is_expr(ir: &Ir, src: RegionId, value: ValueId) -> bool {
-	let mut seen = std::collections::HashSet::new();
+	let mut seen = FxHashSet::default();
 	let mut pending = vec![value];
 	while let Some(at) = pending.pop() {
 		if !seen.insert(at) {

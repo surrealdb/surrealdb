@@ -9,8 +9,6 @@
 //! holds no row; only a condition that cannot raise and has no effect beyond reads qualifies.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::{SmallVec, smallvec};
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
@@ -20,6 +18,7 @@ use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
@@ -231,7 +230,7 @@ fn copy_tree(ir: &Ir, root: OpId) -> Vec<OpId> {
 	let Some(block) = ir.op(root).map(|data| data.parent) else {
 		return Vec::new();
 	};
-	let mut members: HashSet<OpId> = HashSet::new();
+	let mut members: FxHashSet<OpId> = FxHashSet::default();
 	members.insert(root);
 	let mut pending = vec![root];
 	while let Some(op) = pending.pop() {
@@ -267,13 +266,13 @@ fn copy_tree(ir: &Ir, root: OpId) -> Vec<OpId> {
 }
 
 /// Whether `op` is a member or stands inside the regions of one.
-fn within(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
+fn within(ir: &Ir, op: OpId, members: &FxHashSet<OpId>) -> bool {
 	members.contains(&op)
 		|| ancestors(ir, op).any(|(_, owner)| owner.is_some_and(|held| members.contains(&held)))
 }
 
 /// Whether a result of `op` is read by an op that is neither a member nor inside one.
-fn read_outside(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
+fn read_outside(ir: &Ir, op: OpId, members: &FxHashSet<OpId>) -> bool {
 	let Some(data) = ir.op(op) else {
 		return false;
 	};
@@ -284,7 +283,7 @@ fn read_outside(ir: &Ir, op: OpId, members: &HashSet<OpId>) -> bool {
 
 /// Whether `value` is defined by an op of the tree, an op inside one, or a block argument of a
 /// region one owns.
-fn defined_within(ir: &Ir, value: ValueId, members: &HashSet<OpId>) -> bool {
+fn defined_within(ir: &Ir, value: ValueId, members: &FxHashSet<OpId>) -> bool {
 	match ir.value(value).map(|data| data.def) {
 		Some(ValueDef::OpResult {
 			op,
@@ -374,7 +373,7 @@ fn regions_closed(ir: &Ir, tree: &[OpId]) -> bool {
 /// Whether every value the ops of `tree` read from outside the tree, those inside their regions
 /// included, is defined outside every loop body.
 fn inputs_outside_loops(ir: &Ir, tree: &[OpId]) -> bool {
-	let members: HashSet<OpId> = tree.iter().copied().collect();
+	let members: FxHashSet<OpId> = tree.iter().copied().collect();
 	let mut reads: Vec<ValueId> = Vec::new();
 	for op in tree {
 		let Some(data) = ir.op(*op) else {

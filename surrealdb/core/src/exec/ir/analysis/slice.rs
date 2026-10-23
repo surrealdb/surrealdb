@@ -26,12 +26,13 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 
 use super::{effects, footprint, loop_legality, multiplicity, types};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
@@ -318,7 +319,7 @@ struct Body {
 	ops: Vec<OpId>,
 	/// The index one past the last op of the subtree of the op at the same index.
 	end: Vec<usize>,
-	index: HashMap<OpId, usize>,
+	index: FxHashMap<OpId, usize>,
 }
 
 impl Body {

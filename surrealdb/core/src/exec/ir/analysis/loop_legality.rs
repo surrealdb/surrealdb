@@ -17,7 +17,7 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 
@@ -28,6 +28,7 @@ use super::slice::{self, OnFailure, Slice};
 use super::{effects, fallibility, footprint, multiplicity, types};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::{FactCache, LegalitySnapshotSlot};
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Provenance;
 use crate::exec::ir::core::value::ValueDef;
@@ -608,7 +609,7 @@ fn apply_refusal_of(set: EffectSet) -> Option<ChainRefusal> {
 /// [`OpEffects::top`].
 fn value_effects(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, value: ValueId) -> OpEffects {
 	let mut out = effects::bottom();
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending = vec![value];
 	while let Some(next) = pending.pop() {
 		let Some(ValueDef::OpResult {
@@ -890,7 +891,7 @@ fn compute_stages_in_slice(ir: &Ir, loop_op: OpId, held: &Slice) -> bool {
 	let Some(body) = multiplicity::loop_body(ir, loop_op) else {
 		return true;
 	};
-	let held_back: HashSet<OpId> =
+	let held_back: FxHashSet<OpId> =
 		held.residue.iter().filter_map(|(op, _)| body_child_of(ir, *op, body)).collect();
 	ops_in(ir, body).all(|op| {
 		!matches!(
@@ -1085,7 +1086,7 @@ fn consumers_of(ir: &Ir, start: OpId) -> Consumers {
 		limits: 0,
 		breaker: None,
 	};
-	let mut seen: HashSet<OpId> = HashSet::new();
+	let mut seen: FxHashSet<OpId> = FxHashSet::default();
 	let mut pending: VecDeque<OpId> = VecDeque::from([start]);
 	let mut visited = 0usize;
 	while let Some(op) = pending.pop_front() {

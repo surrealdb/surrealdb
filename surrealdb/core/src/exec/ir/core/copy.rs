@@ -17,8 +17,6 @@
 //! copy created to the fresh id of its adopted op, and drops the id of an op the copy created and
 //! erased, which never existed in the container adopted into.
 
-use std::collections::{HashMap, HashSet};
-
 use smallvec::SmallVec;
 
 use super::block::BlockData;
@@ -28,6 +26,7 @@ use super::op::OpData;
 use super::region::RegionData;
 use super::rewriter::Provenance;
 use super::value::{Use, ValueData, ValueDef};
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet, map_with_capacity};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::conversion::{EliminationReason, Phase};
@@ -63,14 +62,14 @@ pub(crate) struct RegionUnit {
 /// op of the copy.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct IdMap {
-	ops: HashMap<OpId, OpId>,
-	ops_back: HashMap<OpId, OpId>,
-	values: HashMap<ValueId, ValueId>,
-	values_back: HashMap<ValueId, ValueId>,
-	regions: HashMap<RegionId, RegionId>,
-	regions_back: HashMap<RegionId, RegionId>,
+	ops: FxHashMap<OpId, OpId>,
+	ops_back: FxHashMap<OpId, OpId>,
+	values: FxHashMap<ValueId, ValueId>,
+	values_back: FxHashMap<ValueId, ValueId>,
+	regions: FxHashMap<RegionId, RegionId>,
+	regions_back: FxHashMap<RegionId, RegionId>,
 	/// The ops of the copy that copy a definition lying outside the statement.
-	outside: HashSet<OpId>,
+	outside: FxHashSet<OpId>,
 }
 
 /// The token of one statement copy: the statement [`Ir::copy_statement`] copied and its map of
@@ -116,8 +115,8 @@ pub(crate) struct Rerooted {
 #[derive(Default)]
 struct Enclosure {
 	regions: Vec<RegionId>,
-	blocks: HashSet<BlockId>,
-	ops: HashSet<OpId>,
+	blocks: FxHashSet<BlockId>,
+	ops: FxHashSet<OpId>,
 	/// Whether the region kept stands beneath the top region.
 	found: bool,
 }
@@ -130,13 +129,13 @@ impl IdMap {
 	/// An empty map sized for `ops` ops, `values` values and `regions` regions.
 	fn with_capacity(ops: usize, values: usize, regions: usize) -> Self {
 		Self {
-			ops: HashMap::with_capacity(ops),
-			ops_back: HashMap::with_capacity(ops),
-			values: HashMap::with_capacity(values),
-			values_back: HashMap::with_capacity(values),
-			regions: HashMap::with_capacity(regions),
-			regions_back: HashMap::with_capacity(regions),
-			outside: HashSet::new(),
+			ops: map_with_capacity(ops),
+			ops_back: map_with_capacity(ops),
+			values: map_with_capacity(values),
+			values_back: map_with_capacity(values),
+			regions: map_with_capacity(regions),
+			regions_back: map_with_capacity(regions),
+			outside: FxHashSet::default(),
 		}
 	}
 
@@ -643,7 +642,7 @@ impl Ir {
 		}
 		let mut old = Vec::new();
 		self.collect_region_post_order(region, &mut old);
-		let members: HashSet<OpId> = old.iter().copied().collect();
+		let members: FxHashSet<OpId> = old.iter().copied().collect();
 		for op in &old {
 			let used_outside = self.ops.get(*op).is_some_and(|data| {
 				data.results.iter().any(|result| {
@@ -815,8 +814,8 @@ struct Transplant<'s, 'd> {
 	stored: Vec<OpId>,
 	/// The new regions that are, or lie inside, a stored-clause region.
 	stored_regions: Vec<RegionId>,
-	frames: HashMap<FrameId, FrameId>,
-	snapshots: HashMap<SnapshotId, SnapshotId>,
+	frames: FxHashMap<FrameId, FrameId>,
+	snapshots: FxHashMap<SnapshotId, SnapshotId>,
 	/// The lengths of `dst`'s frame and snapshot tables before the move, which an abandoned move
 	/// truncates them back to.
 	frames_len: usize,
@@ -838,16 +837,16 @@ impl<'s, 'd> Transplant<'s, 'd> {
 			dst,
 			mode,
 			map: IdMap::with_capacity(src.ops.len(), src.values.len(), src.regions.len()),
-			ops: Vec::new(),
-			values: Vec::new(),
-			blocks: Vec::new(),
-			regions: Vec::new(),
+			ops: Vec::with_capacity(src.ops.len()),
+			values: Vec::with_capacity(src.values.len()),
+			blocks: Vec::with_capacity(src.blocks.len()),
+			regions: Vec::with_capacity(src.regions.len()),
 			top_ops: Vec::new(),
 			lead_ops: Vec::new(),
 			stored: Vec::new(),
 			stored_regions: Vec::new(),
-			frames: HashMap::new(),
-			snapshots: HashMap::new(),
+			frames: FxHashMap::default(),
+			snapshots: FxHashMap::default(),
 			frames_len,
 			snapshots_len,
 		}
@@ -1325,8 +1324,8 @@ impl<'s, 'd> Transplant<'s, 'd> {
 		if self.dst.eliminated.is_empty() {
 			return;
 		}
-		let mut present: HashSet<OpId> = self.dst.eliminated.iter().map(|(id, _)| *id).collect();
-		let mut stale: HashSet<OpId> = HashSet::new();
+		let mut present: FxHashSet<OpId> = self.dst.eliminated.iter().map(|(id, _)| *id).collect();
+		let mut stale: FxHashSet<OpId> = FxHashSet::default();
 		for (_, new) in &self.ops {
 			let ids: SmallVec<[OpId; 2]> = match self.dst.ops.get(*new) {
 				Some(data) => held_ids(&data.provenance, *new).collect(),
@@ -1353,7 +1352,7 @@ impl<'s, 'd> Transplant<'s, 'd> {
 		if self.dst.eliminated.len() <= mark || self.src.eliminated.is_empty() {
 			return;
 		}
-		let mut reasons: HashMap<OpId, EliminationReason> = HashMap::new();
+		let mut reasons: FxHashMap<OpId, EliminationReason> = FxHashMap::default();
 		for (id, reason) in &self.src.eliminated {
 			let Some(id) = original.original_op(*id) else {
 				continue;

@@ -11,6 +11,7 @@ pub(crate) mod census;
 pub(crate) mod convert;
 pub(crate) mod copy;
 pub(crate) mod facts;
+pub(crate) mod fxhash;
 pub(crate) mod ir;
 pub(crate) mod location;
 pub(crate) mod op;

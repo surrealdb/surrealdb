@@ -40,7 +40,7 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::access::ReadVersion;
@@ -48,6 +48,7 @@ use super::conjunct::{def_op, strip_truthy};
 use super::ops::PhysOp;
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::side_map::SideMap;
 use crate::exec::ir::core::value::ValueDef;
@@ -237,7 +238,7 @@ fn roots_of(
 		ops.push(op);
 		Walk::Continue
 	});
-	let inside: HashSet<OpId> = ops.iter().copied().collect();
+	let inside: FxHashSet<OpId> = ops.iter().copied().collect();
 	let mut roots = BTreeSet::new();
 	for op in &ops {
 		let data = ir.op(*op)?;

@@ -8,11 +8,12 @@
 //! entry of its previous occupant; only [`FactCache::last_under`] still answers for an erased op,
 //! and only to the context the entry was computed under.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use smallvec::SmallVec;
 
 use super::side_map::SideMap;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::iface::catalog::CxKey;
 use crate::exec::ir::iface::effects::{EffectSummary, OpEffects};
 use crate::exec::ir::iface::fold::{FoldOutcome, FoldRequest};
@@ -85,7 +86,7 @@ pub(crate) struct FactCache {
 	/// context, held apart from `entries` so that it is computed without the footprint.
 	summaries: SideMap<OpId, ContextSummaries>,
 	/// The facts of erased ops, as they stood when the op was erased, one entry per context.
-	retired: HashMap<OpId, ContextFacts>,
+	retired: FxHashMap<OpId, ContextFacts>,
 	/// Per value: the generation of its defining op when the knowledge was computed, and it.
 	types: SideMap<ValueId, (u32, TypeKnowledge)>,
 	/// Per value: the invariance class computed against an op, with the generation of that op.
@@ -106,7 +107,7 @@ impl FactCache {
 			top: OpFacts::top(),
 			entries: SideMap::new(),
 			summaries: SideMap::new(),
-			retired: HashMap::new(),
+			retired: FxHashMap::default(),
 			types: SideMap::new(),
 			invariance: SideMap::new(),
 			folds: SideMap::new(),

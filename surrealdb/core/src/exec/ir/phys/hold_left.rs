@@ -26,7 +26,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::{HashMap, HashSet};
 use std::slice;
 
 use surrealdb_strand::TableName;
@@ -42,6 +41,7 @@ use super::rewrite::literal_count;
 use crate::catalog::{Index, Permission};
 use crate::exec::index::access_path::{BTreeAccess, BoundOperand};
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet};
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::Rewriter;
@@ -77,7 +77,7 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		}
 		Walk::Continue
 	});
-	let mut writes = HashMap::new();
+	let mut writes = FxHashMap::default();
 	let mut held = Vec::new();
 	for join in joins {
 		if holds_one_row(ir, facts, cx, join, &mut writes) {
@@ -110,7 +110,7 @@ fn holds_one_row(
 	facts: &mut FactCache,
 	cx: &PhysCx<'_>,
 	join: OpId,
-	writes: &mut HashMap<OpId, bool>,
+	writes: &mut FxHashMap<OpId, bool>,
 ) -> bool {
 	let Some(data) = ir.op(join) else {
 		return false;
@@ -407,7 +407,7 @@ fn enforcement_is_total(cx: &PhysCx<'_>, table: &TableName) -> bool {
 /// what [`judge`] admits, a field read of a row held under an alias, and an `IF` whose conditions
 /// and values are such.
 fn paired_total(ir: &Ir, value: ValueId, aliases: &[&str]) -> bool {
-	let mut seen = HashSet::new();
+	let mut seen = FxHashSet::default();
 	let mut budget = NODE_BUDGET;
 	paired_value(ir, value, aliases, &mut seen, &mut budget)
 }
@@ -416,7 +416,7 @@ fn paired_value(
 	ir: &Ir,
 	value: ValueId,
 	aliases: &[&str],
-	seen: &mut HashSet<OpId>,
+	seen: &mut FxHashSet<OpId>,
 	budget: &mut usize,
 ) -> bool {
 	def_op(ir, value).is_none_or(|op| paired_op(ir, op, aliases, seen, budget))
@@ -426,7 +426,7 @@ fn paired_op(
 	ir: &Ir,
 	op: OpId,
 	aliases: &[&str],
-	seen: &mut HashSet<OpId>,
+	seen: &mut FxHashSet<OpId>,
 	budget: &mut usize,
 ) -> bool {
 	if !seen.insert(op) {

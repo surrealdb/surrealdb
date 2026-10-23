@@ -10,8 +10,6 @@
 //! iteration that raises still raises when it runs, because no body is evaluated here.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashMap;
-
 use smallvec::{SmallVec, smallvec};
 
 use super::driver::{FoldObserver, LoCx, LoPass, PassConfig, PassReport, PassRun};
@@ -19,6 +17,7 @@ use crate::exec::ir::analysis::loop_legality::{exit_of, of_with};
 use crate::exec::ir::analysis::multiplicity::loop_body;
 use crate::exec::ir::core::census::Census;
 use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::fxhash::FxHashMap;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -375,7 +374,7 @@ fn copy_ops(
 	rw: &mut Rewriter<'_>,
 	ops: &[OpId],
 	into: BlockId,
-	renamed: &mut HashMap<ValueId, ValueId>,
+	renamed: &mut FxHashMap<ValueId, ValueId>,
 	depth: usize,
 ) -> Result<(), IrError> {
 	if depth > MAX_DEPTH {
@@ -407,7 +406,7 @@ fn copy_region(
 	rw: &mut Rewriter<'_>,
 	region: RegionId,
 	owner: OpId,
-	renamed: &mut HashMap<ValueId, ValueId>,
+	renamed: &mut FxHashMap<ValueId, ValueId>,
 	depth: usize,
 ) -> Result<(), IrError> {
 	let info = rw.ir().region(region).ok_or(IrError::Stale("region"))?;
@@ -449,7 +448,7 @@ fn iteration(
 	let (_, inner) = rw.create_region(block_op, plan.arms, &[])?;
 	let at = InsertPoint::End(inner);
 	let position = i64::try_from(index).map_err(|_| IrError::Capacity("unroll position"))?;
-	let mut renamed: HashMap<ValueId, ValueId> = HashMap::new();
+	let mut renamed: FxHashMap<ValueId, ValueId> = FxHashMap::default();
 	let [element_arg, position_arg] = plan.body.args;
 	if !rw.ir().uses(element_arg).is_empty() {
 		let made = make_literal(rw, at, template, loop_op, element.clone())?;

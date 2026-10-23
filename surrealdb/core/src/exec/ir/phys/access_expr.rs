@@ -27,6 +27,7 @@
 use surrealdb_strand::Strand;
 
 use super::access_read::{owes_index_operator, read_conjunct, read_conjunct_whole};
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
@@ -151,7 +152,7 @@ pub(super) fn value_rebuilt_as(
 	expr: &LogicalExpr,
 ) -> Option<ValueId> {
 	let mut pending = vec![leaf];
-	let mut seen = std::collections::HashSet::new();
+	let mut seen = FxHashSet::default();
 	while let Some(value) = pending.pop() {
 		if !seen.insert(value) {
 			continue;

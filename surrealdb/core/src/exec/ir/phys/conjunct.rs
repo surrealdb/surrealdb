@@ -30,11 +30,10 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::HashSet;
-
 use smallvec::{SmallVec, smallvec};
 
 use super::ops::PhysOp;
+use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
@@ -81,7 +80,7 @@ pub(super) struct Judgement {
 /// The ops that compute `value`, walked once each.
 struct Judging<'a> {
 	ir: &'a Ir,
-	seen: HashSet<OpId>,
+	seen: FxHashSet<OpId>,
 	budget: usize,
 	total: bool,
 	class: CostClass,
@@ -309,7 +308,7 @@ fn classify(ir: &Ir, data: &OpData) -> (bool, CostClass) {
 pub(super) fn judge(ir: &Ir, value: ValueId) -> Judgement {
 	let mut judging = Judging {
 		ir,
-		seen: HashSet::new(),
+		seen: FxHashSet::default(),
 		budget: NODE_BUDGET,
 		total: true,
 		class: CostClass::Field,
