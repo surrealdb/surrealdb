@@ -411,3 +411,99 @@ async fn a_closure_unit_reads_the_callers_auth() {
 	)
 	.await;
 }
+
+/// An edge table whose `SELECT` permission hides one of the two edges `person:1` has. The edges
+/// have keys of their own, which order what a hop reaches.
+const GRAPH: &str = "
+	DEFINE ACCESS user ON DATABASE TYPE RECORD;
+	DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+	DEFINE TABLE person SCHEMALESS PERMISSIONS FULL;
+	DEFINE TABLE knows TYPE RELATION SCHEMALESS PERMISSIONS FOR select WHERE shown = true;
+	CREATE user:alice;
+	CREATE person:1, person:2, person:3;
+	RELATE person:1->knows:1->person:2 SET shown = true;
+	RELATE person:1->knows:2->person:3 SET shown = false;
+	DEFINE FUNCTION fn::friends() { RETURN person:1->knows->person; };
+	DEFINE FUNCTION fn::degree() { RETURN count(person:1->knows); };
+";
+
+/// Whether `program`, or a program among its units, holds an instruction `found` admits.
+fn holds(
+	program: &super::program::Program,
+	found: &dyn Fn(&super::program::Instr) -> bool,
+) -> bool {
+	program.pipelines.iter().any(|pipeline| pipeline.code.iter().any(found))
+		|| program.host_code.iter().any(|pipeline| pipeline.code.iter().any(found))
+		|| program.units.iter().any(|unit| holds(unit, found))
+}
+
+/// Whether a lookup of `program` reaches vertices through edges in one hop.
+fn reads_through_edges(program: &super::program::Program) -> bool {
+	program.lookups.iter().flat_map(|spec| &spec.hops).any(|hop| {
+		matches!(
+			&*hop.read,
+			super::program::HopRead::Graph {
+				targets: Some(_),
+				..
+			}
+		)
+	}) || program.units.iter().any(|unit| reads_through_edges(unit))
+}
+
+/// The edge to the vertex beyond it, and the count of a record's edges, are read off the
+/// adjacency keys only for a caller whose reads go unchecked: an owner's code takes both, a
+/// record user's code reads each edge and is judged by the edge table's permission.
+#[tokio::test]
+async fn only_an_unchecked_callers_code_reads_the_graph_off_its_adjacency_keys() {
+	use crate::kvs::TransactionType::Read;
+	let db = TestDb::new_with_auth(GRAPH).await;
+	let degree =
+		|instr: &super::program::Instr| matches!(instr, super::program::Instr::Degree { .. });
+	let owner = db.exec_ctx_as(&TestDb::owner(), Read).await;
+	let user = db.exec_ctx_as(&record_user("alice"), Read).await;
+	let counted = "SELECT count(->knows) AS degree FROM person";
+	let walked = "SELECT VALUE ->knows->person FROM person";
+	let program = super::tests_placement::program_of(&owner, counted).await;
+	assert!(holds(&program, &degree), "an owner counts off the adjacency");
+	let program = super::tests_placement::program_of(&owner, walked).await;
+	assert!(reads_through_edges(&program), "an owner reads through the edges");
+	let program = super::tests_placement::program_of(&user, counted).await;
+	assert!(!holds(&program, &degree), "a record user's count reads each edge");
+	let program = super::tests_placement::program_of(&user, walked).await;
+	assert!(!reads_through_edges(&program), "a record user reads each edge");
+}
+
+/// The same statements and the same function bodies answer an owner every edge and a record
+/// user the edges the edge table's permission shows, whichever of them ran the code first.
+#[tokio::test]
+async fn graph_reads_off_the_adjacency_keys_are_never_served_to_a_checked_caller() {
+	let db = TestDb::new_with_auth(GRAPH).await;
+	let owner = TestDb::owner();
+	let alice = record_user("alice");
+	let parse = |text: &str| Value::from(crate::syn::value(text).expect("parses"));
+	let cases = [
+		("RETURN person:1->knows->person", "[person:2, person:3]", "[person:2]"),
+		("RETURN count(person:1->knows)", "2", "1"),
+		("RETURN fn::friends()", "[person:2, person:3]", "[person:2]"),
+		("RETURN fn::degree()", "2", "1"),
+		("SELECT VALUE count(->knows) FROM person:1..=3", "[2, 0, 0]", "[1, 0, 0]"),
+		(
+			"SELECT VALUE ->knows->person FROM person:1..=3",
+			"[[person:2, person:3], [], []]",
+			"[[person:2], [], []]",
+		),
+	];
+	for (sql, owner_sees, alice_sees) in cases {
+		for (first, second) in [(&owner, &alice), (&alice, &owner)] {
+			let one = last(&db, first, sql).await;
+			let two = last(&db, second, sql).await;
+			let (owner_got, alice_got) = if std::ptr::eq(first, &owner) {
+				(one, two)
+			} else {
+				(two, one)
+			};
+			assert_eq!(owner_got, parse(owner_sees), "the owner ran `{sql}`");
+			assert_eq!(alice_got, parse(alice_sees), "alice ran `{sql}`");
+		}
+	}
+}

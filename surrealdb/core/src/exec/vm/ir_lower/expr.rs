@@ -527,6 +527,14 @@ impl<'a> Lowerer<'a> {
 		self.scope = scope;
 	}
 
+	/// Whether the reads of the principal the code is lowered for go unchecked by permissions in
+	/// every frame ([`UnitSink::reads_checked`]), unlike [`Lowerer::reads_unchecked`], which is
+	/// about the frame being lowered. Code lowered with no unit context is lowered for checked
+	/// reads.
+	pub(super) fn caller_reads_unchecked(&self) -> bool {
+		self.units.as_deref().is_some_and(|units| !units.reads_checked())
+	}
+
 	/// Whether the value `v` has been lowered in the scope being lowered.
 	pub(super) fn is_lowered(&self, v: ValueId) -> bool {
 		self.scope.values.contains_key(&v)
@@ -3014,6 +3022,9 @@ impl<'a> Lowerer<'a> {
 				if crate::expr::method::is_writer_builtin(name) {
 					self.refuse_in_fold("ir_lower::fold: expr.call of a builtin that writes")?;
 				}
+				if let Some(counted) = self.degree_count(name, args)? {
+					return Ok(counted);
+				}
 				if let Some(measured) = self.measure_call(name, args)? {
 					return Ok(measured);
 				}
@@ -3134,6 +3145,31 @@ impl<'a> Lowerer<'a> {
 		Ok(Operand::Reg(dst))
 	}
 
+	/// A call of the builtin `name`: the capability check, the arguments in turn, then the call by
+	/// name through the function registry.
+	pub(super) fn builtin_call(
+		&mut self,
+		name: &str,
+		args: &[ValueId],
+	) -> Result<Operand, IrError> {
+		let call = self.allowed_builtin(name)?;
+		let args = self.values(args)?;
+		let dst = self.em.reg()?;
+		self.emit_builtin_call(call, args, dst);
+		Ok(Operand::Reg(dst))
+	}
+
+	/// The call site of the builtin `name` ([`Lowerer::call_site`]), after the check that the
+	/// capabilities admit the call: what [`Lowerer::builtin_call`] emits before the arguments.
+	pub(super) fn allowed_builtin(&mut self, name: &str) -> Result<u32, IrError> {
+		let call = self.call_site(name)?;
+		self.emit(Instr::CallAllowed {
+			call,
+			frame: self.frame.program,
+		});
+		Ok(call)
+	}
+
 	/// The call site of builtin `name`, with what calling it asks of the program: the context
 	/// level it requires, the row order its answers keep and a write transaction where it runs
 	/// statements.
@@ -3162,20 +3198,9 @@ impl<'a> Lowerer<'a> {
 		})
 	}
 
-	/// A call of the builtin `name`: the capability check, the arguments in turn, then the call by
-	/// name through the function registry.
-	pub(super) fn builtin_call(
-		&mut self,
-		name: &str,
-		args: &[ValueId],
-	) -> Result<Operand, IrError> {
-		let call = self.call_site(name)?;
-		self.emit(Instr::CallAllowed {
-			call,
-			frame: self.frame.program,
-		});
-		let args = self.values(args)?;
-		let dst = self.em.reg()?;
+	/// The call of the builtin at call site `call` over `args` into `dst`, after
+	/// [`Lowerer::allowed_builtin`].
+	pub(super) fn emit_builtin_call(&mut self, call: u32, args: Vec<Operand>, dst: Reg) {
 		self.emit(Instr::Call {
 			call,
 			args,
@@ -3183,7 +3208,6 @@ impl<'a> Lowerer<'a> {
 			frame: self.frame.program,
 			elem: self.element,
 		});
-		Ok(Operand::Reg(dst))
 	}
 
 	/// The call of the two-argument `vector::*` builtin `name` over `args` as a vector measure

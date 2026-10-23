@@ -7,13 +7,14 @@
 //! merge without materializing values (see
 //! [`crate::idx::adjacency::scope_degree`]).
 //!
-//! The planner builds this expression only when the count's answer is
-//! provably the raw adjacency cardinality — an owner session (permission
-//! filtering off, where today's path takes the id-only resolve that never
-//! fetches records either), reading current data, over a pure graph
-//! lookup. Every value shape or storage state the fast path does not
-//! cover delegates to `fallback`, which is the exact expression the
-//! planner would otherwise have produced.
+//! The count stands in for `count` of a bare graph lookup only where its
+//! answer is the raw adjacency cardinality: the lowering emits
+//! [`Instr::Degree`](super::program::Instr::Degree) only for a caller whose
+//! reads go unchecked, and the host counts only for a run whose reads go
+//! unchecked and read the current state. There the lookup answers the record
+//! id of each adjacency entry without reading its edge, so the number of
+//! entries is its count. Every value shape or storage state the counter does
+//! not cover falls through to the call over the lookup.
 
 use surrealdb_datastore::values::inline_cache::CacheValue;
 
@@ -69,7 +70,9 @@ impl crate::catalog::providers::CancellationProbe for DegreeCancel<'_> {
 
 impl DegreeCounter {
 	/// The fast path counting `edge_tables` (every table when empty) along
-	/// `direction`, deriving the per-table prefixes and scan specs once.
+	/// `direction`, deriving the per-table prefixes and scan specs once. A
+	/// table named more than once is counted once for each time it is named,
+	/// as a lookup of the same tables reads it.
 	pub(crate) fn new(
 		direction: LookupDirection,
 		edge_tables: &[TableName],
@@ -167,13 +170,18 @@ impl DegreeCounter {
 					dir,
 				};
 				if let Some(CacheValue::Live(entries)) = txn.get_key(&key, None).await? {
-					degree += entries
-						.iter()
-						.filter(|e| {
-							self.prefixes.is_empty()
-								|| self.prefixes.iter().any(|p| e.edge.starts_with(p))
-						})
-						.count() as u64;
+					// Table by table, as the ranges below are: a table named twice counts its
+					// entries twice.
+					degree += if self.prefixes.is_empty() {
+						entries.len() as u64
+					} else {
+						self.prefixes
+							.iter()
+							.map(|p| {
+								entries.iter().filter(|e| e.edge.starts_with(p)).count() as u64
+							})
+							.sum()
+					};
 					continue;
 				}
 			}

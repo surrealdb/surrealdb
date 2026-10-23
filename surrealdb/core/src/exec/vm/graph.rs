@@ -1716,8 +1716,10 @@ fn take_key(
 /// Push onto `out` what a hop reaches through adjacency entry `edge`, read
 /// along `dir`, whose key names vertex `far` beyond it and whose value holds
 /// inline-property section `props`: the edge, or for a hop to the vertices
-/// of `targets` beyond it, that vertex. Answer the edge when the hop reaches
-/// the vertex beyond it and the key names none.
+/// of `targets` beyond it, that vertex, once for each time `targets` names
+/// its table, as a hop to the vertices of each named table in turn reaches it.
+/// Answer the edge when the hop reaches the vertex beyond it and the key names
+/// none.
 fn reach(
 	targets: Option<&[TableName]>,
 	dir: Dir,
@@ -1728,7 +1730,20 @@ fn reach(
 ) -> Option<RecordId> {
 	match (targets, far) {
 		(Some(targets), Some(target)) => {
-			if targets.is_empty() || targets.contains(&target.table) {
+			let named = if targets.is_empty() {
+				1
+			} else {
+				targets.iter().filter(|table| **table == target.table).count()
+			};
+			for _ in 1..named {
+				out.push(Entry {
+					id: target.clone(),
+					far: None,
+					dir,
+					props: None,
+				});
+			}
+			if named > 0 {
 				out.push(Entry {
 					id: target,
 					far: None,

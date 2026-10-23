@@ -6295,7 +6295,21 @@ async fn run_body(
 								};
 								let current = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
-								let counted = match DegreeCounter::source(Some(&current)) {
+								// The adjacency's storage answers for a run whose reads go
+								// unchecked, may read the database and read the current state;
+								// any other run takes the call, which reads what the run may see
+								// as it stood or refuses the read as the lookup does.
+								let counts = ctx.version_stamp().is_none()
+									&& !ctx
+										.should_check_perms(crate::iam::Action::View)
+										.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?
+									&& ctx.database().is_ok_and(|db_ctx| {
+										crate::exec::permission::validate_record_user_access(db_ctx)
+											.is_ok()
+									});
+								let source =
+									DegreeCounter::source(Some(&current)).filter(|_| counts);
+								let counted = match source {
 									Some(rid) => {
 										let counter = state
 											.degree_counter(

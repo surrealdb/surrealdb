@@ -32,10 +32,10 @@ use std::ops::Range;
 use surrealdb_strand::Strand;
 
 use super::super::program::{
-	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, ExternalSpec, FetchPlan,
-	FetchStepSpec, FunctionSpec, Instr, KnnQuery, Label, LookupSpec, MatchesSpec, MethodSpec,
-	NestedSpec, ParamSpec, PermissionSpec, Pipeline, Program, ROW, RecordIdSpec, Reg, Source,
-	SubquerySpec, reads_row,
+	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, DegreeSpec, ExternalSpec,
+	FetchPlan, FetchStepSpec, FunctionSpec, Instr, KnnQuery, Label, LookupSpec, MatchesSpec,
+	MethodSpec, NestedSpec, ParamSpec, PermissionSpec, Pipeline, Program, ROW, RecordIdSpec, Reg,
+	Source, SubquerySpec, reads_row,
 };
 use super::super::row::FieldName;
 use crate::exec::field_path::FieldPath;
@@ -106,6 +106,8 @@ pub(crate) struct Emitter {
 	functions: Vec<FunctionSpec>,
 	/// The calls of code the host runs, one entry per site.
 	externals: Vec<ExternalSpec>,
+	/// The degree counts of `count(->edge)` calls, one entry per site.
+	degrees: Vec<DegreeSpec>,
 	/// How many call frames the program's calls of user-defined functions have taken.
 	call_frames: u16,
 	/// The block statement being lowered as a group of its own, `None` for the program's own code.
@@ -242,6 +244,7 @@ impl Emitter {
 			knn_searches: Vec::new(),
 			functions: Vec::new(),
 			externals: Vec::new(),
+			degrees: Vec::new(),
 			call_frames: 0,
 			group: None,
 			permission_floor: 0,
@@ -589,6 +592,12 @@ impl Emitter {
 		self.hop_lookups.insert(hop, answer);
 	}
 
+	/// Forgets the lookup that ends at the hop the graph-step op `hop` states, so no window of the
+	/// pipeline's rows reads ahead for it: the lookup runs on one path of the code alone.
+	pub(super) fn forget_hop_lookup(&mut self, hop: OpId) {
+		self.hop_lookups.remove(&hop);
+	}
+
 	/// The lookup that ends at the hop the graph-step op `hop` states, when one does.
 	pub(super) fn hop_lookup(&self, hop: OpId) -> Option<HopLookup> {
 		self.hop_lookups.get(&hop).copied()
@@ -605,6 +614,11 @@ impl Emitter {
 		let index = push(&mut self.lookups, spec, "vm lookups")?;
 		self.pipeline_lookups.push(index);
 		Ok(index)
+	}
+
+	/// The index of the degree count `spec`, appended to the program's degree counts.
+	pub(super) fn degree(&mut self, spec: DegreeSpec) -> Result<u32, IrError> {
+		push(&mut self.degrees, spec, "vm degree counts")
 	}
 
 	/// The index of `pipeline` in the host pipelines of the program: code the host runs over a
@@ -829,7 +843,7 @@ impl Emitter {
 			calls: self.calls,
 			matches: self.matches,
 			externals: self.externals,
-			degrees: Vec::new(),
+			degrees: self.degrees,
 			methods: self.methods,
 			record_ids: self.record_ids,
 			subqueries: self.subqueries,

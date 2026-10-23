@@ -297,7 +297,8 @@ async fn a_hop_with_one_source_reads_it_as_it_always_did() {
 #[tokio::test]
 async fn a_range_with_more_keys_than_a_fill_reads_goes_on_from_a_cursor() {
 	// A hub of 1200 edges stands among the people the second hop reaches, so a window of several
-	// sources holds the first 500 keys of the hub's range and the cursor reads the rest.
+	// sources holds the first 500 keys of the hub's range and the cursor reads the rest. From the
+	// hub itself, the 1200 people it reaches are the origins of the next lookup.
 	let setup = format!(
 		"{} FOR $i IN 1..=1200 {{ CREATE type::record('person', 1000 + $i) SET n = $i; }};
 		 FOR $i IN 1..=1200 {{
@@ -310,7 +311,7 @@ async fn a_range_with_more_keys_than_a_fill_reads_goes_on_from_a_cursor() {
 	for sql in [
 		"SELECT VALUE ->knows->person->knows->person FROM person:2",
 		"SELECT VALUE array::len(->knows->person->knows->person) FROM person:2, person:7, person:2",
-		"SELECT VALUE array::len(->knows->person) FROM person:1",
+		"SELECT VALUE array::len(->knows->person->knows->person) FROM person:1",
 	] {
 		let on = same(&[], &setup, sql, true).await;
 		no_errors(&on);
@@ -354,10 +355,12 @@ async fn a_fill_builds_the_ranges_of_a_group_of_sources_at_a_time() {
 	use super::graph::frontier::SOURCES_PER_FILL;
 	let n = 2 * SOURCES_PER_FILL + 100;
 	let setup = people(n, "");
-	// The origins of one hop are an array of more than two groups, each with a range to read.
+	// The origins of one hop are an array of more than two groups, each with a range to read. A
+	// path of several hops from the array is a broadcast over its elements, each a lookup of one
+	// origin, so the array is handed whole to a lookup of one hop.
 	for sql in [
-		"SELECT VALUE (SELECT VALUE id FROM person)->knows->person FROM person:1..=2;",
-		"SELECT VALUE array::len((SELECT VALUE id FROM person)->knows->person.n) FROM person:1..=2;",
+		"SELECT VALUE (SELECT VALUE id FROM person)->knows FROM person:1..=2;",
+		"SELECT VALUE array::len((SELECT VALUE id FROM person)<-knows) FROM person:1..=2;",
 	] {
 		let on = same(&[], &setup, sql, true).await;
 		no_errors(&on);
@@ -387,7 +390,9 @@ async fn a_window_that_runs_out_of_budget_leaves_the_rest_to_the_reads() {
 
 #[tokio::test]
 async fn the_inline_caches_a_window_holds_count_toward_its_budget() {
-	let setup = people(60, "INLINE EDGES 16");
+	// Every source of the window is a person, probed once whatever the levels that reach it, and
+	// a narrow window holds the probes of fewer than half of them.
+	let setup = people(200, "INLINE EDGES 16");
 	let sql = "SELECT ->knows->person AS f FROM person";
 	let wide = run_on(Backend::Memory, Pins::ROWS, SERIAL, &setup, sql).await;
 	let narrow = run_on(
@@ -400,7 +405,7 @@ async fn the_inline_caches_a_window_holds_count_toward_its_budget() {
 	.await;
 	no_errors(&wide);
 	assert_eq!(narrow.answers, wide.answers);
-	assert!(wide.filled.1 >= 60, "a wide window holds a probe of each source: {:?}", wide.filled);
+	assert!(wide.filled.1 >= 200, "a wide window holds a probe of each source: {:?}", wide.filled);
 	assert!(
 		narrow.filled.1 * 2 < wide.filled.1,
 		"the probes of a narrow window are charged to it: {:?} against {:?}",
@@ -436,8 +441,9 @@ async fn a_read_a_window_holds_a_range_for_builds_no_range() {
 	assert!(off.built >= 60, "{sql}: the reads of a run without windows build {}", off.built);
 	assert_eq!(rows.built, 0, "{sql}: no read of the run with the window builds a range");
 	// The sources of a later hop are read from the window of the hop, whose reads build none of
-	// the ranges it holds.
-	let sql = "SELECT ->knows->person AS f FROM person";
+	// the ranges it holds. An owner reads `->knows->person` as one hop, so the path takes it twice:
+	// the people the first reaches are the sources of the second.
+	let sql = "SELECT ->knows->person->knows->person AS f FROM person";
 	let off = run_on(Backend::Memory, Pins::OFF, UNSPENT, &setup, sql).await;
 	let hops = run_on(Backend::Memory, Pins::HOPS, UNSPENT, &setup, sql).await;
 	assert_eq!(hops.answers, off.answers);
@@ -866,16 +872,28 @@ async fn run_folded(windowed: bool, setup: &str, sql: &str) -> Run {
 #[tokio::test]
 async fn folded_and_unfolded_adjacencies_in_one_window_read_as_they_always_did() {
 	let setup = people(40, "");
-	for sql in [
-		"SELECT ->knows->person->knows->person AS f FROM person",
-		"SELECT <-knows<-person<-knows<-person AS f FROM person",
-		"SELECT <->knows<->person AS f FROM person",
+	// The edges are the unfolded sources: a hop from an edge back to a person, or both ways, reads
+	// the edge's adjacency. An edge and the person beyond it are one hop from the person, whose
+	// table is folded and whose keys no window reads, so such a path answers alike and is served
+	// nothing.
+	for (sql, served) in [
+		("SELECT ->knows<-person->knows<-person AS f FROM person", true),
+		("SELECT <-knows->person<-knows->person AS f FROM person", true),
+		("SELECT <->knows<->person AS f FROM person", true),
+		("SELECT ->knows->person->knows->person AS f FROM person", false),
+		("SELECT <-knows<-person<-knows<-person AS f FROM person", false),
 	] {
 		let off = run_folded(false, &setup, sql).await;
 		let on = run_folded(true, &setup, sql).await;
 		no_errors(&on);
 		assert_eq!(on.answers, off.answers, "{sql}");
-		assert!(on.served.0 > 0, "the unfolded sources are served from a window: {:?}", on.served);
+		if served {
+			assert!(
+				on.served.0 > 0,
+				"{sql}: the unfolded sources are served from a window: {:?}",
+				on.served
+			);
+		}
 	}
 }
 
@@ -966,13 +984,15 @@ async fn the_rows_of_a_batch_read_the_first_hop_of_their_lookups_in_one_window()
 #[tokio::test]
 async fn the_rows_window_holds_each_level_of_a_path_for_the_whole_batch() {
 	let setup = people(60, "");
-	let sql = "SELECT ->knows->person->knows->person AS f FROM person";
+	// One batch, four lookups, each an edge and the person beyond it: the window holds the first
+	// hop of every lookup of the path.
+	let sql =
+		"SELECT ->knows->person->knows->person->knows->person->knows->person AS f FROM person";
 	let on = same_with_rows(SERIAL, &setup, sql, true).await;
 	no_errors(&on);
-	// One batch, four lookups: the window holds the first hop of every lookup of the path.
 	assert!(on.levels >= 4, "{} levels", on.levels);
-	// A lookup of two hops stops the path after its first.
-	let sql = "SELECT ->knows->person AS f, <-knows<-person AS g FROM person";
+	// Two paths, each of two lookups: each path is a chain of its own.
+	let sql = "SELECT ->knows->person->knows->person AS f, <-knows<-person<-knows<-person AS g FROM person";
 	let on = same_with_rows(SERIAL, &setup, sql, true).await;
 	assert!(on.levels >= 4, "{} levels", on.levels);
 	// Few levels of a deep path where the window runs out of budget.
@@ -1258,8 +1278,9 @@ async fn a_lookup_under_a_condition_is_never_keyed_for_the_batch() {
 #[tokio::test]
 async fn a_fill_seeks_no_more_ranges_than_the_fuel_left() {
 	use super::graph::frontier::SOURCES_PER_FILL;
-	// A hub of twice a group of edges: the lookup that follows `->knows` has an array of origins
-	// whose ranges one call of a fill seeks together under the default quantum.
+	// A hub of twice a group of edges: the lookup after the hub's has the people the hub reaches
+	// as an array of origins, whose ranges one call of a fill seeks together under the default
+	// quantum.
 	let setup = format!(
 		"DEFINE TABLE person SCHEMALESS; DEFINE TABLE knows TYPE RELATION;
 		 FOR $i IN 1..={n} {{ CREATE type::record('person', $i); }};
@@ -1269,7 +1290,7 @@ async fn a_fill_seeks_no_more_ranges_than_the_fuel_left() {
 		 }};",
 		n = 2 * SOURCES_PER_FILL
 	);
-	let sql = "SELECT VALUE array::len(->knows->person) FROM person:1;";
+	let sql = "SELECT VALUE array::len(->knows->person->knows->person) FROM person:1;";
 	let wide = same(&[], &setup, sql, true).await;
 	no_errors(&wide);
 	assert!(

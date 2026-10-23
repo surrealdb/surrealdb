@@ -540,6 +540,22 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   context, such as a lightweight relation's edge scan, refuses the plan
   instead.
   Verified end to end by `reproductions/planned_source_enforced_once.surql`.
+- A graph read that reads no edge record is taken only where no permission is
+  judged. Code lowered for a caller whose reads go unchecked
+  (`LowerCx::reads_checked` is `false`) reads a bare `->edge->vertex` or
+  `<-edge<-vertex` pair as one hop over the adjacency keys (`through_hop`,
+  a `HopRead::Graph` with `targets`) and `count(->edge)` as `Instr::Degree`
+  (`Lowerer::degree_count`), both in `exec/vm/ir_lower/graph.rs`. Neither reads
+  an edge, so neither judges an edge table's `SELECT` permission. Such code
+  runs only for its principal's class and permission contract
+  (`frame_admits` in `exec/vm/host.rs`), and the host's `Degree` step counts
+  only where the run's reads go unchecked, record-user access holds and no
+  `VERSION` stamp applies; anywhere else the call over the lookup runs. Code
+  lowered for a checked caller reads every edge. Verified by the `step_tests`
+  of `exec/vm/ir_lower/graph.rs` and, end to end for an owner and a record
+  user sharing one datastore, by
+  `graph_reads_off_the_adjacency_keys_are_never_served_to_a_checked_caller`
+  in `exec/vm/tests_principal.rs`.
 - A `PERMISSIONS` predicate that reads a COMPUTED field of the row it judges —
   a table `select`, `create`, `update` or `delete` clause, or a field `select`,
   `create` or `update` clause — reads the value that field computes to: never

@@ -1301,7 +1301,7 @@ fn serial_throughout(program: &Program) -> bool {
 }
 
 /// The program `sql` compiles to over `ctx`, panicking where the VM declines it.
-async fn program_of(ctx: &ExecutionContext, sql: &str) -> Program {
+pub(super) async fn program_of(ctx: &ExecutionContext, sql: &str) -> Program {
 	let bound = bind(ctx, sql).await;
 	compiled(ctx, &bound).await.unwrap_or_else(|| panic!("the VM declines `{sql}`"))
 }
