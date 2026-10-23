@@ -141,25 +141,87 @@ fn descend<'a>(
 			}
 			WalkStep::Nowhere => {}
 			WalkStep::Destructure(fields) => {
-				if let Value::Object(obj) = value {
-					for field in fields {
-						let name = match field {
-							LogicalDestructureField::Field(name)
-							| LogicalDestructureField::All(name)
-							| LogicalDestructureField::Destructure(name, _) => name,
-							// An aliased entry names an expression and a rest entry names no single
-							// field, so neither is a location to walk to.
-							LogicalDestructureField::Aliased(..)
-							| LogicalDestructureField::Rest => {
-								continue;
+				descend_destructure(program, fields, rest, action, value, state, ctx).await?;
+			}
+		}
+		Ok(())
+	})
+}
+
+/// Applies a destructure step across an object or an array of elements.
+fn descend_destructure<'a>(
+	program: &'a Program,
+	fields: &'a [LogicalDestructureField],
+	rest: &'a [WalkStep<u16>],
+	action: &'a WalkAction<u16>,
+	value: &'a mut Value,
+	state: &'a mut State,
+	ctx: &'a ExecutionContext,
+) -> Walked<'a> {
+	Box::pin(async move {
+		match value {
+			Value::Array(arr) => {
+				for element in arr.iter_mut() {
+					descend_destructure(program, fields, rest, action, element, state, ctx).await?;
+				}
+			}
+			Value::Object(obj) => {
+				for field in fields {
+					match field {
+						LogicalDestructureField::Field(name)
+						| LogicalDestructureField::All(name) => {
+							if let Some(nested) = obj.get_mut(name.as_str()) {
+								descend(program, rest, action, nested, state, ctx).await?;
 							}
-						};
-						if let Some(nested) = obj.get_mut(name.as_str()) {
-							descend(program, rest, action, nested, state, ctx).await?;
+						}
+						LogicalDestructureField::Destructure(name, nested_fields) => {
+							if let Some(nested) = obj.get_mut(name.as_str()) {
+								descend_destructure(
+									program,
+									nested_fields,
+									rest,
+									action,
+									nested,
+									state,
+									ctx,
+								)
+								.await?;
+							}
+						}
+						LogicalDestructureField::Aliased(..) => {
+							return Err(ControlFlow::Err(anyhow::Error::new(
+								crate::expr::Error::UnsupportedDestructure {
+									variant: "An aliased".into(),
+								},
+							)));
+						}
+						LogicalDestructureField::Rest => {
+							return Err(ControlFlow::Err(anyhow::Error::new(
+								crate::expr::Error::UnsupportedDestructure {
+									variant: "A rest".into(),
+								},
+							)));
 						}
 					}
 				}
 			}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => {}
 		}
 		Ok(())
 	})
@@ -291,13 +353,41 @@ fn perform<'a>(
 				| Value::Closure(_) => {}
 			},
 			WalkAction::Destructure(fields) => {
-				if let Value::Object(obj) = value {
-					remove_fields(obj, fields)?;
-				}
+				apply_destructure(value, fields)?;
 			}
 		}
 		Ok(())
 	})
+}
+
+/// Applies destructure field removal to an object or each element of an array.
+fn apply_destructure(value: &mut Value, fields: &[LogicalDestructureField]) -> FlowResult<()> {
+	match value {
+		Value::Object(obj) => remove_fields(obj, fields),
+		Value::Array(arr) => {
+			for item in arr.iter_mut() {
+				apply_destructure(item, fields)?;
+			}
+			Ok(())
+		}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Set(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Range(_)
+		| Value::Closure(_) => Ok(()),
+	}
 }
 
 /// Removes the element an index numbers from an array, closing the gap, or the
@@ -351,8 +441,8 @@ fn remove_fields(obj: &mut Object, fields: &[LogicalDestructureField]) -> FlowRe
 				_ => {}
 			},
 			LogicalDestructureField::Destructure(name, nested) => {
-				if let Some(Value::Object(inner)) = obj.get_mut(name.as_str()) {
-					remove_fields(inner, nested)?;
+				if let Some(inner) = obj.get_mut(name.as_str()) {
+					apply_destructure(inner, nested)?;
 				}
 			}
 			LogicalDestructureField::Aliased(..) => {

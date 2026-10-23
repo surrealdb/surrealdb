@@ -2623,7 +2623,7 @@ fn emit_pipeline(
 		*needed = enforced_demand(ir, runs, sink)?;
 	}
 	body.finish(sink)?;
-	let objects = body.objects;
+	let (objects, ids) = (body.objects, body.ids);
 
 	let Body {
 		em,
@@ -2751,7 +2751,7 @@ fn emit_pipeline(
 	reads.claims.push(claims);
 	reads.feeders.push(feeder);
 	reads.pipelines.push(pipeline);
-	reads.fed_ids = rows_may_be_ids;
+	reads.fed_ids = ids;
 	reads.needs = needs;
 	Ok(objects)
 }
@@ -3383,15 +3383,41 @@ impl Body<'_, '_, '_> {
 			});
 			self.jumps.other += 1;
 			self.current = dst;
+			self.ids = false;
 			if matches!(shape, ProjectionShape::All) {
 				return Ok(());
 			}
 			self.fetched = Some(dst);
 		}
 		let ir = self.ir;
-		let projected = projection::project(self, ir, shape, step_data.regions.as_slice());
+		let regions = step_data.regions.as_slice();
+		let projected = projection::project(self, ir, shape, regions);
 		self.fetched = None;
 		self.current = projected?;
+		match shape {
+			ProjectionShape::All => {}
+			ProjectionShape::Value
+			| ProjectionShape::OmittedValue {
+				..
+			}
+			| ProjectionShape::SortedValue(_) => {
+				self.objects = false;
+				self.ids = false;
+			}
+			ProjectionShape::Fields {
+				fields,
+				..
+			}
+			| ProjectionShape::Star {
+				fields,
+				..
+			} => {
+				if !self.objects && projection::fields_make_an_object(self, ir, fields, regions)? {
+					self.objects = true;
+				}
+				self.ids = false;
+			}
+		}
 		Ok(())
 	}
 
@@ -3709,7 +3735,11 @@ impl projection::ProjectionSite for Body<'_, '_, '_> {
 		let mut lowerer =
 			Lowerer::in_context(&mut *self.em, ir, self.cx).with_reads(&mut *self.reads);
 		if let Some(arg) = first_arg(ir, region) {
-			lowerer.bind_arg(arg, Operand::Reg(ROW));
+			let row = self.fetched.unwrap_or(ROW);
+			lowerer.bind_arg(arg, Operand::Reg(row));
+			if row == ROW {
+				lowerer.bind_row(arg, self.objects);
+			}
 		}
 		let mut operands = Vec::with_capacity(args.len());
 		for arg in args {

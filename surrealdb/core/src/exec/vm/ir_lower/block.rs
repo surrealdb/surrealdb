@@ -269,6 +269,37 @@ impl Groups {
 	}
 }
 
+/// Whether `region` ends where it stands rather than running as a group: it holds the raise of an
+/// error, or ends in a `BREAK`, `CONTINUE` or `RETURN` its statement diverges to before it reads
+/// a row.
+fn region_raises(ir: &Ir, region: RegionId) -> Result<bool, IrError> {
+	let mut last = None;
+	for op in ops_in(ir, region) {
+		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::block: op"))?;
+		match &data.kind {
+			OpKind::Expr(ExprOp::Raise(_) | ExprOp::Throw) => return Ok(true),
+			OpKind::Phys(
+				PhysOp::Timeout
+				| PhysOp::Statement {
+					served: None,
+					..
+				},
+			) => {
+				if let Some(inner) = data.regions.first()
+					&& region_raises(ir, *inner)?
+				{
+					return Ok(true);
+				}
+			}
+			OpKind::Expr(_) | OpKind::Phys(_) | OpKind::Logical(_) => {}
+		}
+		last = Some(data);
+	}
+	Ok(last.is_some_and(|data| {
+		matches!(&data.kind, OpKind::Phys(PhysOp::Break | PhysOp::Next | PhysOp::Return))
+	}))
+}
+
 /// Whether the top region of `ir` holds control flow, so that its program is a statement program
 /// of this module: a block, an `IF`, a `FOR` loop, `SLEEP`, a `RETURN`, `BREAK` or `CONTINUE`, a
 /// `THROW`, an error raised where the statement stands, a statement that runs as a group, or a
@@ -278,6 +309,10 @@ pub(super) fn holds_control(ir: &Ir) -> Result<bool, IrError> {
 		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::block: op"))?;
 		let control = match &data.kind {
 			OpKind::Phys(PhysOp::Pipeline(_)) => is_for_pipeline(ir, op),
+			OpKind::Phys(PhysOp::Timeout) => match data.regions.first() {
+				Some(region) => region_raises(ir, *region)?,
+				None => false,
+			},
 			OpKind::Phys(PhysOp::Block | PhysOp::Sleep | PhysOp::Return)
 			| OpKind::Phys(PhysOp::Statement {
 				..
@@ -685,7 +720,10 @@ impl<'a> Blocks<'a> {
 					.and_then(|last| ops.get(last))
 					.and_then(|last| ir.op(*last))
 					.is_some_and(|last| {
-						matches!(last.kind, OpKind::Phys(PhysOp::Statement { .. }))
+						matches!(
+							last.kind,
+							OpKind::Phys(PhysOp::Statement { .. } | PhysOp::Timeout)
+						)
 					});
 				if raised {
 					break;
@@ -917,6 +955,12 @@ impl<'a> Blocks<'a> {
 			}) => Err(IrError::Invariant {
 				what: "a USE is a statement of a request, never of a list",
 			}),
+			OpKind::Phys(PhysOp::Timeout) => {
+				let [duration] = Self::operands::<1>(data)?;
+				let [deadline] = Self::regions::<1>(data)?;
+				let _ = self.lw.value(duration)?;
+				self.statements(deadline, false).map(Some)
+			}
 			OpKind::Phys(_) => match coverage_of(&data.kind).1 {
 				Coverage::ViaRequest => Err(invariant(
 					"a request step is driven from its attributes and never lowered as a program",
@@ -1390,17 +1434,7 @@ impl<'a> Blocks<'a> {
 	/// group: it holds the raise of an error, or ends in a `BREAK`, `CONTINUE` or `RETURN` its
 	/// statement diverges to before it reads a row (a source that is the loop control itself).
 	fn raises(&self, region: RegionId) -> Result<bool, IrError> {
-		let mut last = None;
-		for op in ops_in(self.ir, region) {
-			let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::block: op"))?;
-			if matches!(&data.kind, OpKind::Expr(ExprOp::Raise(_) | ExprOp::Throw)) {
-				return Ok(true);
-			}
-			last = Some(data);
-		}
-		Ok(last.is_some_and(|data| {
-			matches!(&data.kind, OpKind::Phys(PhysOp::Break | PhysOp::Next | PhysOp::Return))
-		}))
+		region_raises(self.ir, region)
 	}
 
 	/// How the run of the statement `op` gathers its value: as the `LET` or the `RETURN` that
@@ -1981,8 +2015,13 @@ impl<'a> Blocks<'a> {
 			self.returns.pop();
 		}
 		let exit = exit?;
-		if let Exit::Yields(Some(value)) = exit {
-			self.load(dst, value);
+		match exit {
+			Exit::Yields(Some(value)) => self.load(dst, value),
+			Exit::Yields(None) => {
+				let none = self.none()?;
+				self.load(dst, none);
+			}
+			Exit::Diverges => {}
 		}
 		self.bind(end)?;
 		self.saved -= 1;
@@ -2016,8 +2055,13 @@ impl<'a> Blocks<'a> {
 	/// An arm of an `IF`, its value left in `dst`.
 	fn arm(&mut self, region: RegionId, dst: Reg) -> Result<(), IrError> {
 		if self.is_plain_arm(region)? {
-			if let Exit::Yields(Some(value)) = self.statements(region, false)? {
-				self.load(dst, value);
+			match self.statements(region, false)? {
+				Exit::Yields(Some(value)) => self.load(dst, value),
+				Exit::Yields(None) => {
+					let none = self.none()?;
+					self.load(dst, none);
+				}
+				Exit::Diverges => {}
 			}
 			return Ok(());
 		}

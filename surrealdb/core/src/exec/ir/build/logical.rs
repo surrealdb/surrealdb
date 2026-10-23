@@ -135,8 +135,8 @@ use crate::expr::logical::{
 	LogicalRecordIdKeyRange, LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath,
 	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
 	LogicalSubquery, LogicalThrow, LogicalValues, LogicalWrite, LogicalWriteSource,
-	LogicalWriteStatement, OutputPath, RequestStatementKind, Schema, SourceRef, lower, lower_expr,
-	lower_fields, lower_request,
+	LogicalWriteStatement, OutputPath, OutputPathPart, RequestStatementKind, Schema, SourceRef,
+	lower, lower_expr, lower_fields, lower_request,
 };
 use crate::expr::{BinaryOperator, Function, Idiom, Kind, Output, Part};
 
@@ -559,6 +559,8 @@ fn bind_logical_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<(), IrE
 	}
 	if let Some(value) = value_of(cx, flow)? {
 		cx.yield_logical(&[value])?;
+	} else if !cx.ends_in_terminator()? {
+		cx.yield_logical(&[])?;
 	}
 	Ok(())
 }
@@ -567,6 +569,8 @@ fn bind_logical_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<(), IrE
 fn close_statement(cx: &mut BindCx<'_>, flow: Flow) -> Result<(), IrError> {
 	if let Some(value) = value_of(cx, flow)? {
 		cx.yield_logical(&[value])?;
+	} else if !cx.ends_in_terminator()? {
+		cx.yield_logical(&[])?;
 	}
 	Ok(())
 }
@@ -812,6 +816,8 @@ fn bind_subquery(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Built, IrError> 
 		let flow = bind_op(cx, op, Pos::Value)?;
 		if let Some(value) = value_of(cx, flow)? {
 			cx.yield_expr(&[value])?;
+		} else if !cx.ends_in_terminator()? {
+			cx.yield_expr(&[])?;
 		}
 		Ok(())
 	})?;
@@ -1373,6 +1379,8 @@ fn bind_if_chain(
 			let flow = bind_if_chain(cx, &conditions[1..], &arms[1..], pos, listed)?;
 			if let Some(value) = value_of(cx, flow)? {
 				cx.yield_logical(&[value])?;
+			} else if !cx.ends_in_terminator()? {
+				cx.yield_logical(&[])?;
 			}
 			Ok(None)
 		} else if let Some(otherwise) = arms.get(conditions.len()) {
@@ -1681,6 +1689,8 @@ fn bind_relational(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError>
 			cx.within(owner, RegionKind::Deadline, &[], |cx, _| {
 				if let Some(value) = bind_value(cx, &timeout.input)? {
 					cx.yield_logical(&[value])?;
+				} else if !cx.ends_in_terminator()? {
+					cx.yield_logical(&[])?;
 				}
 				Ok(())
 			})?;
@@ -1823,22 +1833,59 @@ fn split_after_projection(project: &LogicalProject) -> Option<LogicalOp> {
 /// the projection or a fetch over it. `None` when no split stands beneath the projection's
 /// ordering and paging, or when `op` is not such a projection.
 fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
-	fn rebuild(node: &LogicalOp, expr: &LogicalExpr) -> Option<LogicalOp> {
+	fn output_path_expr(path: &OutputPath) -> LogicalExpr {
+		let mut parts = path.parts().iter();
+		let Some(first) = parts.next() else {
+			return LogicalExpr::Current;
+		};
+		let first_name = match first {
+			OutputPathPart::Field(name) | OutputPathPart::Lookup(name) => Strand::new(name),
+		};
+		let mut expr = LogicalExpr::Field(first_name);
+		for part in parts {
+			let field = match part {
+				OutputPathPart::Field(name) | OutputPathPart::Lookup(name) => Strand::new(name),
+			};
+			expr = LogicalExpr::Access {
+				base: Box::new(expr),
+				field,
+			};
+		}
+		expr
+	}
+	fn rebuild(
+		node: &LogicalOp,
+		split_expr: &LogicalExpr,
+		pre_project: Option<(&LogicalExpr, &OutputPath)>,
+	) -> Option<LogicalOp> {
 		match node {
 			LogicalOp::Sort(sort) => Some(LogicalOp::Sort(LogicalSort {
-				input: Box::new(rebuild(&sort.input, expr)?),
+				input: Box::new(rebuild(&sort.input, split_expr, pre_project)?),
 				ordering: sort.ordering.clone(),
 				tempfiles: sort.tempfiles,
 			})),
 			LogicalOp::Limit(limit) => Some(LogicalOp::Limit(LogicalLimit {
-				input: Box::new(rebuild(&limit.input, expr)?),
+				input: Box::new(rebuild(&limit.input, split_expr, pre_project)?),
 				limit: limit.limit.clone(),
 				start: limit.start.clone(),
 			})),
-			LogicalOp::Split(split) => Some(LogicalOp::Split(LogicalSplit {
-				input: split.input.clone(),
-				exprs: vec![expr.clone()],
-			})),
+			LogicalOp::Split(split) => {
+				let input = match pre_project {
+					Some((expr, path)) => Box::new(LogicalOp::Project(LogicalProject {
+						input: split.input.clone(),
+						fields: LogicalFields::Select(vec![LogicalField::user(
+							expr.clone(),
+							Some(path.clone()),
+						)]),
+						omit: Vec::new(),
+					})),
+					None => split.input.clone(),
+				};
+				Some(LogicalOp::Split(LogicalSplit {
+					input,
+					exprs: vec![split_expr.clone()],
+				}))
+			}
 			LogicalOp::Project(_)
 			| LogicalOp::Fetch(_)
 			| LogicalOp::Source(_)
@@ -1873,16 +1920,37 @@ fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
 	let project_over = |project: &LogicalProject| {
 		let LogicalFields::Value {
 			expr,
-			..
+			alias,
 		} = &project.fields
 		else {
 			return None;
 		};
-		Some(LogicalProject {
-			input: Box::new(rebuild(&project.input, expr)?),
-			fields: project.fields.clone(),
-			omit: project.omit.clone(),
-		})
+		if matches!(split_target(expr), Some(SplitTarget::At(_))) {
+			Some(LogicalProject {
+				input: Box::new(rebuild(&project.input, expr, None)?),
+				fields: project.fields.clone(),
+				omit: project.omit.clone(),
+			})
+		} else {
+			let raw_parts = alias
+				.as_ref()
+				.map(|path| path.parts.clone())
+				.unwrap_or_else(|| named_after_gates(expr).output_path().parts);
+			let target_path = if raw_parts.is_empty() {
+				OutputPath::field("value")
+			} else {
+				OutputPath::keys(raw_parts)
+			};
+			let target_expr = output_path_expr(&target_path);
+			Some(LogicalProject {
+				input: Box::new(rebuild(&project.input, &target_expr, Some((expr, &target_path)))?),
+				fields: LogicalFields::Value {
+					expr: target_expr,
+					alias: alias.clone(),
+				},
+				omit: project.omit.clone(),
+			})
+		}
 	};
 	match op {
 		LogicalOp::Project(project) => project_over(project).map(LogicalOp::Project),
@@ -3421,6 +3489,8 @@ fn bind_relational_subquery(
 	cx.within(op, RegionKind::Subquery, &[], |cx, _| {
 		if let Some(value) = bind_value(cx, &subquery.input)? {
 			cx.yield_logical(&[value])?;
+		} else if !cx.ends_in_terminator()? {
+			cx.yield_logical(&[])?;
 		}
 		Ok(())
 	})?;

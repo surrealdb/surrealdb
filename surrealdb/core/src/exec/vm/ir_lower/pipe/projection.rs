@@ -121,6 +121,7 @@ impl ProjectionSite for ImageSite<'_, '_> {
 		let held = self.lowerer.scope();
 		if let Some(arg) = first_arg(self.lowerer.ir, region) {
 			self.lowerer.bind_arg(arg, Operand::Reg(ROW));
+			self.lowerer.bind_row(arg, self.objects);
 		}
 		let operands = args.iter().map(|arg| self.lowerer.value(*arg)).collect();
 		self.lowerer.restore_scope(held);
@@ -310,15 +311,15 @@ fn field_effects(
 
 /// Whether `fields` make an object of any row: a field that computes a value or builds an output
 /// path does, and fields that only read the row do for an object, a geometry or `NONE`.
-fn fields_make_an_object(
-	site: &mut dyn ProjectionSite,
-	ir: &Ir,
-	fields: &[ProjectedFieldShape],
-	regions: &[RegionId],
-) -> Result<bool, IrError> {
-	let (builds, computes) = field_effects(site, ir, fields, regions)?;
-	Ok(builds || computes)
-}
+	pub(super) fn fields_make_an_object(
+		site: &mut dyn ProjectionSite,
+		ir: &Ir,
+		fields: &[ProjectedFieldShape],
+		regions: &[RegionId],
+	) -> Result<bool, IrError> {
+		let (builds, computes) = field_effects(site, ir, fields, regions)?;
+		Ok(builds || computes)
+	}
 
 /// `fields` that only read their row, over the row loaded into `object`, which may not be an
 /// object.
