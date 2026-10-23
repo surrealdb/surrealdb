@@ -182,7 +182,15 @@ impl<'a> Parser<'a> {
 		// FROM clause
 		let from = if self.peek_keyword() == Some(Keyword::From) {
 			self.bump(); // FROM
-			Some(self.parse_table_references()?)
+			if self.peek_keyword() == Some(Keyword::Dual) && self.peek_nth(1).kind != TokenKind::Dot
+			{
+				// The unquoted keyword DUAL names no table: `FROM DUAL` is a SELECT with no
+				// FROM clause. A quoted or schema-qualified `dual` stays an ordinary table.
+				self.bump();
+				None
+			} else {
+				Some(self.parse_table_references()?)
+			}
 		} else {
 			None
 		};

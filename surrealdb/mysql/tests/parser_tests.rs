@@ -101,6 +101,27 @@ fn test_parse_select_statements() {
 }
 
 #[test]
+fn test_parse_from_dual_is_a_select_without_from() {
+	for sql in ["SELECT 1 FROM DUAL", "SELECT 1 FROM dual WHERE 1 = 1"] {
+		let Statement::Select(sel) = parse_statement(sql).unwrap() else {
+			panic!("Expected Select statement for {sql}");
+		};
+		assert!(sel.from.is_none(), "{sql} reads no table");
+	}
+	for sql in ["SELECT 1 FROM `dual`", "SELECT 1 FROM db.dual", "SELECT 1 FROM `db`.`dual`"] {
+		let Statement::Select(sel) = parse_statement(sql).unwrap() else {
+			panic!("Expected Select statement for {sql}");
+		};
+		assert!(sel.from.is_some(), "{sql} reads a table");
+	}
+	for sql in
+		["SELECT 1 FROM DUAL AS d", "SELECT 1 FROM DUAL, t", "SELECT 1 FROM DUAL JOIN t ON 1 = 1"]
+	{
+		assert!(parse_statement(sql).is_err(), "{sql} is not valid MySQL");
+	}
+}
+
+#[test]
 fn test_parse_insert_on_duplicate_key_update() {
 	let s = parse_statement("INSERT INTO `users` (id, name, visits) VALUES (1, 'Alice', 1) ON DUPLICATE KEY UPDATE visits = visits + 1").unwrap();
 	if let Statement::Insert(ins) = s {

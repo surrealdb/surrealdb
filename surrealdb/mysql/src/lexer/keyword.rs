@@ -178,6 +178,7 @@ pub enum Keyword {
 	Collation,
 	Character,
 	Full,
+	Dual,
 
 	// Window Functions
 	Window,
@@ -374,6 +375,7 @@ impl Keyword {
 			Self::Collation => "COLLATION",
 			Self::Character => "CHARACTER",
 			Self::Full => "FULL",
+			Self::Dual => "DUAL",
 		}
 	}
 
@@ -436,6 +438,8 @@ impl Keyword {
 					Some(Self::Desc)
 				} else if s.eq_ignore_ascii_case("drop") {
 					Some(Self::Drop)
+				} else if s.eq_ignore_ascii_case("dual") {
+					Some(Self::Dual)
 				} else if s.eq_ignore_ascii_case("else") {
 					Some(Self::Else)
 				} else if s.eq_ignore_ascii_case("from") {

@@ -1,0 +1,38 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_dual_table.surql"]
+
+[test]
+reason = "the unquoted keyword DUAL is the one-row source of a SELECT that names no table, with or without a WHERE; a quoted `dual` is an ordinary table"
+
+[[test.results]]
+value = "[{ two: 2 }]"
+
+[[test.results]]
+value = "[{ lower: 1 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ kept: 'x' }]"
+
+[[test.results]]
+value = "[{ n: 1 }]"
+
+[[test.results]]
+value = "[{ sub: 5 }]"
+
+[[test.results]]
+value = "[{ label: 'real' }]"
+*/
+
+SELECT 1 + 1 AS two FROM DUAL;
+SELECT 1 AS lower FROM dual;
+SELECT 'x' AS never FROM DUAL WHERE 1 = 0;
+SELECT 'x' AS kept FROM DUAL WHERE 1 = 1;
+SELECT count(*) AS n FROM DUAL;
+SELECT (SELECT 5 FROM DUAL) AS sub;
+SELECT label FROM `dual`;
