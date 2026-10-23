@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A statement that creates a record (CREATE with SET or CONTENT, an UPSERT of a new id, a RELATE with SET) or deletes one reads its own document as NONE, which is a row: an index or a method argument in a closure written in it is read against that NONE, as the same argument written without a closure is, and does not fall back to the receiver the way a frame with no row does. The closure-free twin of each statement is the control. A closure in an UPDATE of an existing record reads the record."
+reason = "A statement that creates a record (CREATE with SET or CONTENT, an UPSERT of a new id, a RELATE with SET) or deletes one reads its own document as it stands before the write: NONE, or an object holding only the record's `id` where that id is known before the data clause runs. Either is a row: an index or a method argument in a closure written in it is read against that row, as the same argument written without a closure is, and does not fall back to the receiver the way a frame with no row does. The closure-free twin of each statement is the control. A closure in an UPDATE of an existing record reads the record."
 
 [[test.results]]
 value = "[{ id: cn:1, lim: 1 }]"
@@ -13,16 +13,16 @@ value = "[{ id: cn:1, lim: 1 }]"
 value = "[{ id: cn:2, lim: 2 }]"
 
 [[test.results]]
-value = "[[[0, NONE]]]"
+value = "[[[0, cn:10]]]"
 
 [[test.results]]
-value = "[[0, NONE]]"
+value = "[[0, cn:11]]"
 
 [[test.results]]
-value = "[[[0, NONE]]]"
+value = "[[[0, { id: cn:12 }]]]"
 
 [[test.results]]
-value = "[[0, NONE]]"
+value = "[[0, { id: cn:13 }]]"
 
 [[test.results]]
 value = "[[[0, NONE], [0, NONE]]]"
@@ -37,10 +37,10 @@ value = "[[1, 5, 10]]"
 value = "[[1, 5, 10]]"
 
 [[test.results]]
-value = "[[[0, NONE]]]"
+value = "[[[0, cn:18]]]"
 
 [[test.results]]
-value = "[[0, NONE]]"
+value = "[[0, cn:19]]"
 
 [[test.results]]
 value = "[[[0, NONE, NONE]]]"
@@ -59,6 +59,12 @@ value = '[{ "[1]": [[0, NONE]] }]'
 
 [[test.results]]
 value = '[{ "[0]": [0, NONE] }]'
+
+[[test.results]]
+value = "[[[0, NONE]]]"
+
+[[test.results]]
+value = "[[0, NONE]]"
 
 */
 
@@ -80,3 +86,5 @@ UPDATE cn:2 SET p = [1, 5].map(|$e| [0].concat([lim])) RETURN VALUE p;
 UPDATE cn:2 SET p = [0].concat([lim]) RETURN VALUE p;
 DELETE cn:2 RETURN [1].map(|$e| [0].concat([lim]));
 DELETE cn:1 RETURN [0].concat([lim]);
+CREATE cn SET p = [1].map(|$e| [0].concat([$this])) RETURN VALUE p;
+CREATE cn SET p = [0].concat([$this]) RETURN VALUE p;

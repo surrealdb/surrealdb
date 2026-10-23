@@ -129,7 +129,9 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	/// Open field `field` of the table: its frame — the caller's authority
 	/// narrowed to the field's `AUTH LIMIT` — whether its `PERMISSIONS`, `write`,
 	/// are enforced under that frame, and every place its path names in the
-	/// post-image.
+	/// post-image. A field inside `id` names no place: it is a part of the
+	/// record-id key, and only its `ASSERT` is deferred, for a record being
+	/// created, against each place of the key its path names.
 	Field {
 		field: u16,
 		write: FieldWrite,
@@ -515,7 +517,29 @@ pub(super) async fn step(
 			let ctx = write.in_flight()?.1;
 			let fields = Arc::clone(&record(write)?.fields);
 			let fd = &fields[*field as usize];
-			let places = write.row()?.current.walk(&fd.name);
+			let places = if fd.name.is_id_subpath() {
+				// A place inside `id` is a part of the record-id key, which the
+				// post-image holds as a record id the walk does not enter. Its
+				// `TYPE` is held to the key where the id is settled, and a
+				// `VALUE`, `DEFAULT` or `PERMISSIONS` has nothing to act on, since
+				// the key is fixed once settled: the field produces no place.
+				// Only its `ASSERT` applies, judged once against the key of a
+				// record being created.
+				let schema = record(write)?;
+				if schema.creating && fd.assert.is_some() {
+					let key = schema.rid.key.clone().into_value();
+					for (path, _) in key.walk(&fd.name.0[1..]) {
+						let path = Idiom([&fd.name.0[..1], path.0.as_slice()].concat());
+						schema.deferred.push(Deferred {
+							index: *field as usize,
+							path,
+						});
+					}
+				}
+				Vec::new()
+			} else {
+				write.row()?.current.walk(&fd.name)
+			};
 			// Every clause of the field, and whether its `PERMISSIONS` are
 			// enforced, is answered under the field's own authority, in a
 			// privileged frame that holds none of the caller's own bindings.
@@ -744,10 +768,19 @@ pub(super) async fn step(
 			// field rewrote within it. It is read before the sets are rebuilt,
 			// while every path still names the element its field wrote, and
 			// with every set within it in the order it is stored.
+			let key = if deferred.iter().any(|place| place.path.is_id_subpath()) {
+				schema.rid.key.clone().into_value()
+			} else {
+				Value::None
+			};
 			let current = &write.row()?.current;
 			let values: Vec<Value> = deferred
 				.iter()
 				.map(|place| {
+					// A place inside `id` is a part of the record-id key.
+					if place.path.is_id_subpath() {
+						return key.pick(&place.path.0[1..]);
+					}
 					let mut val = current.pick(&place.path);
 					if pending {
 						val.normalize_all_sets();

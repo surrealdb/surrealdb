@@ -48,8 +48,8 @@ use std::collections::HashSet;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{
-	ComponentKind, DefineDefault, KeyComponent, KeyStructure, LATEST_EDGE_VARIANT, RecordType,
-	TableDefinition, TableType,
+	ComponentKind, DefineDefault, FieldDefinition, KeyComponent, KeyStructure, LATEST_EDGE_VARIANT,
+	RecordType, TableDefinition, TableType,
 };
 use crate::doc::Error as DocError;
 use crate::exec::Error as ExecError;
@@ -284,6 +284,9 @@ pub(crate) fn settle_record_id(
 		{
 			row.id = Some(coerce_id_key(existing, kind, ctx.key.as_deref())?);
 		}
+		if let Some(id) = &row.id {
+			check_id_subfields(id, &ctx.fields, &ctx.id_subfields)?;
+		}
 		return Ok(IdSettling::Settled);
 	};
 	// The record's own `id` answers first and the evaluated data clause
@@ -360,7 +363,9 @@ pub(crate) fn finish_record_id(
 			value: id.to_sql(),
 		}));
 	}
-	row.id = Some(coerce_id_key(id, id_kind(ctx), ctx.key.as_deref())?);
+	let id = coerce_id_key(id, id_kind(ctx), ctx.key.as_deref())?;
+	check_id_subfields(&id, &ctx.fields, &ctx.id_subfields)?;
+	row.id = Some(id);
 	Ok(())
 }
 
@@ -594,6 +599,45 @@ fn coerce_id_key(
 		},
 	};
 	coerce_whole_key(id, kind)
+}
+
+/// Hold the key of `id` to the `TYPE` of every field defined inside the `id`
+/// field (`DEFINE FIELD id.name`, `DEFINE FIELD id[0]`), each at the places of
+/// the key its path names. `subfields` are the indexes in `fields` of those
+/// definitions ([`WriteCtx::id_subfields`]).
+///
+/// The key is the record's storage key, and the field schema stage never
+/// produces or coerces a place inside it, so this is where those definitions'
+/// types apply. The key is checked and left as written, as a literal kind on
+/// `id` itself leaves it: a part that only coerces to the definition's kind,
+/// such as an `int` held to `float`, stays the value the key holds. A path that
+/// names no place in the key, such as an index past the end of an array key,
+/// checks nothing, as it does for an ordinary field; a field path the key does
+/// not hold is a `NONE` there, which a kind without `NONE` refuses.
+fn check_id_subfields(
+	id: &RecordId,
+	fields: &[FieldDefinition],
+	subfields: &[usize],
+) -> Result<(), ControlFlow> {
+	if subfields.is_empty() {
+		return Ok(());
+	}
+	let key = id.key.clone().into_value();
+	for fd in subfields.iter().filter_map(|&index| fields.get(index)) {
+		let Some(kind) = fd.field_kind.as_ref() else {
+			continue;
+		};
+		for (_, part) in key.walk(&fd.name.0[1..]) {
+			if let Err(error) = part.coerce_to_kind(kind) {
+				return Err(fail(DocError::FieldCoerce {
+					record: id.to_sql(),
+					field_name: fd.name.to_sql(),
+					error: Box::new(error),
+				}));
+			}
+		}
+	}
+	Ok(())
 }
 
 /// Whether `kind` admits `key` through a literal kind: `kind` itself, or the
@@ -1447,5 +1491,65 @@ mod tests {
 		let cut =
 			settle_components(&key, &rid, &removed, Some(&other), &removed).expect("another field");
 		assert!(cut.is_empty());
+	}
+
+	/// A definition of `name` on `reading` with `kind`.
+	fn defined(name: &str, kind: Kind) -> FieldDefinition {
+		FieldDefinition {
+			name: name.parse().expect("a valid path"),
+			table: TableName::from("reading"),
+			field_kind: Some(kind),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn a_key_is_held_to_the_types_defined_inside_id() {
+		let fields = vec![
+			defined("id", Kind::Object),
+			defined("id.city", Kind::String),
+			defined("id.n", Kind::Int),
+		];
+		let subfields = [1, 2];
+		let rid = |key: Value| RecordId {
+			table: TableName::from("reading"),
+			key: RecordIdKey::Object(match key {
+				Value::Object(object) => object,
+				other => panic!("not an object: {other:?}"),
+			}),
+		};
+		let fits = rid(object(vec![("city", text("London")), ("n", int(1))]));
+		check_id_subfields(&fits, &fields, &subfields).expect("a key that fits");
+
+		let wrong = rid(object(vec![("city", int(1)), ("n", int(1))]));
+		let refused = refusal(check_id_subfields(&wrong, &fields, &subfields));
+		assert!(
+			matches!(&refused, DocError::FieldCoerce { field_name, .. } if field_name == "id.city"),
+			"{refused:?}"
+		);
+		// A path the key does not hold is `NONE`, which `int` refuses.
+		let short = rid(object(vec![("city", text("London"))]));
+		let refused = refusal(check_id_subfields(&short, &fields, &subfields));
+		assert!(
+			matches!(&refused, DocError::FieldCoerce { field_name, .. } if field_name == "id.n"),
+			"{refused:?}"
+		);
+	}
+
+	#[test]
+	fn an_index_past_the_end_of_a_key_checks_nothing() {
+		let fields = vec![
+			defined("id", Kind::Array(Box::new(Kind::Any), None)),
+			defined("id[0]", Kind::Int),
+			defined("id[1000000000]", Kind::String),
+		];
+		let fits = record(vec![int(1), text("a")]);
+		check_id_subfields(&fits, &fields, &[1, 2]).expect("no place past the end");
+		let wrong = record(vec![text("b"), text("a")]);
+		let refused = refusal(check_id_subfields(&wrong, &fields, &[1, 2]));
+		assert!(
+			matches!(&refused, DocError::FieldCoerce { field_name, .. } if field_name == "id[0]"),
+			"{refused:?}"
+		);
 	}
 }

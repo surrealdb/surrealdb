@@ -276,6 +276,33 @@ fn snapshot(row: &WriteRow) -> &Value {
 	row.current_reduced.as_ref().unwrap_or(&row.current)
 }
 
+/// The image the data clause reads: the [`snapshot`], with the record's id at
+/// `id` when the record is being created under an id already known.
+///
+/// A created record's id is stamped onto its post-image only after the data
+/// clause is applied, but an id the statement named, or one a range target
+/// expanded to, is known before the clause runs, so `SET name = id.id()` reads
+/// it, and `$this` is an object holding that `id` alone. An id still to be
+/// generated is not known: `id` reads `NONE`, and so does `$this`. Only the
+/// record's own `id` is given: a path reaching an `id` nested in a field, such
+/// as `child.id`, reads the image as it is. No other image is touched, so the
+/// field clauses, permissions and `$before` of the record are unaffected.
+fn data_clause_image(row: &WriteRow) -> Value {
+	let image = snapshot(row).clone();
+	let Some(rid) = row.id.as_ref().filter(|_| row.initial.is_none()) else {
+		return image;
+	};
+	let mut object = match image {
+		Value::Object(object) => object,
+		Value::None => Object::default(),
+		image => return image,
+	};
+	if object.get("id").is_none_or(Value::is_none) {
+		object.insert("id", Value::RecordId(rid.clone()));
+	}
+	Value::Object(object)
+}
+
 /// The value the statement supplied for the record, which `$input` names.
 fn supplied_value(extras: &WriteExtras) -> Option<&Value> {
 	match extras {
@@ -455,7 +482,7 @@ pub(super) async fn step(
 			row.content_from_id();
 			let value = match pipeline {
 				Some(pipeline) => {
-					let image = snapshot(row).clone();
+					let image = data_clause_image(row);
 					let input = if *binds_input {
 						supplied_value(&row.extras).cloned()
 					} else {
@@ -625,5 +652,52 @@ pub(super) async fn step(
 			row.fields_computed = false;
 			Ok(next)
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::val::{RecordId, RecordIdKey, TableName};
+
+	fn earth() -> RecordId {
+		RecordId::new(TableName::from("planet"), RecordIdKey::String("earth".into()))
+	}
+
+	fn object(fields: Vec<(&str, Value)>) -> Value {
+		Value::Object(Object::from_iter(fields))
+	}
+
+	#[test]
+	fn a_record_created_under_a_named_id_reads_it() {
+		let row = WriteRow::for_target(Value::RecordId(earth())).expect("a record target");
+		assert_eq!(data_clause_image(&row), object(vec![("id", Value::RecordId(earth()))]));
+	}
+
+	#[test]
+	fn a_record_whose_id_is_still_to_be_generated_reads_none() {
+		let row =
+			WriteRow::for_target(Value::Table(TableName::from("planet"))).expect("a table target");
+		assert_eq!(data_clause_image(&row), Value::None);
+	}
+
+	#[test]
+	fn an_existing_record_reads_its_image_as_it_is() {
+		let mut row = WriteRow::for_target(Value::RecordId(earth())).expect("a record target");
+		let stored = object(vec![("name", Value::from("earth"))]);
+		row.initial = stored.clone();
+		row.current = stored.clone();
+		assert_eq!(data_clause_image(&row), stored);
+	}
+
+	#[test]
+	fn an_id_the_image_holds_is_kept() {
+		let mut row = WriteRow::for_target(Value::RecordId(earth())).expect("a record target");
+		let mars = Value::RecordId(RecordId::new(
+			TableName::from("planet"),
+			RecordIdKey::String("mars".into()),
+		));
+		row.current = object(vec![("id", mars.clone())]);
+		assert_eq!(data_clause_image(&row), object(vec![("id", mars)]));
 	}
 }

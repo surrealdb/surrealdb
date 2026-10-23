@@ -81,6 +81,11 @@ impl Idiom {
 	pub fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
+	/// Check if this Idiom names a place inside the `id` field (`id.foo`,
+	/// `id[0]`) rather than `id` itself: a part of the record-id key.
+	pub fn is_id_subpath(&self) -> bool {
+		self.0.len() > 1 && self.0[0].eq(&ID[0])
+	}
 	/// Check if this Idiom is a special field such as `id`, `in` or `out`.
 	pub fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
@@ -500,6 +505,20 @@ mod tests {
 		let idiom = Idiom::from_str(text).unwrap();
 		assert_eq!(idiom.field_name(), name);
 		assert_eq!(idiom.to_raw_string(), raw_string);
+	}
+
+	/// A place inside the record-id key is a path that starts at `id` and goes
+	/// further; `id` itself and a field merely named like it are not.
+	#[rstest]
+	#[case("id.name", true)]
+	#[case("id[0]", true)]
+	#[case("id.parent.name", true)]
+	#[case("id.*", true)]
+	#[case("id", false)]
+	#[case("name.id", false)]
+	#[case("ids.name", false)]
+	fn test_idiom_is_id_subpath(#[case] text: &str, #[case] expected: bool) {
+		assert_eq!(Idiom::from_str(text).unwrap().is_id_subpath(), expected);
 	}
 
 	#[rstest]

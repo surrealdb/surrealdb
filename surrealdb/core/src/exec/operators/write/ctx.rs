@@ -233,6 +233,18 @@ impl RecordFormatSlot {
 	}
 }
 
+/// The indexes in `fields` of the definitions of places inside the `id` field
+/// (`id.name`, `id[0]`), in field order. A named record id component is a
+/// derived field rather than a place in `id`, so it is never among them.
+pub(crate) fn id_subfield_indexes(fields: &[FieldDefinition]) -> Arc<[usize]> {
+	fields
+		.iter()
+		.enumerate()
+		.filter(|(_, fd)| fd.name.is_id_subpath() && !fd.is_key_part())
+		.map(|(index, _)| index)
+		.collect()
+}
+
 /// Resolved once per statement per table, shared by every record.
 #[derive(Debug)]
 pub(crate) struct WriteCtx {
@@ -278,6 +290,11 @@ pub(crate) struct WriteCtx {
 	/// Index of the `id` field in `fields`, so id coercion reads its kind and
 	/// default without rescanning the list per record.
 	pub(crate) id_field: Option<usize>,
+	/// Indexes into `fields` of the definitions of places inside the `id` field
+	/// (`id.name`, `id[0]`), which describe parts of the record-id key. Their
+	/// `TYPE` is held against the key where the record id is settled, so the
+	/// list is found once rather than per record. See [`id_subfield_indexes`].
+	pub(crate) id_subfields: Arc<[usize]>,
 	/// What the array keys of the table are made of, when the `id` field's type
 	/// names their components (`TYPE [city: string, time: datetime]`); `None`
 	/// for every other table. The record id stages consult it to build the key
@@ -404,6 +421,7 @@ impl WriteCtx {
 			.map_err(ControlFlow::Err)?;
 		let views_observe =
 			views_can_observe(&catalog.tables, &catalog.fields, exec.function_registry());
+		let id_subfields = id_subfield_indexes(&catalog.fields);
 		Ok(Self {
 			ns: catalog.ns,
 			db: catalog.db,
@@ -419,6 +437,7 @@ impl WriteCtx {
 			field_order: catalog.field_order,
 			computed_deps: catalog.computed_deps,
 			id_field: catalog.id_field_idx,
+			id_subfields,
 			key,
 			exec: exec.clone(),
 			scope: Weak::new(),
@@ -450,6 +469,7 @@ impl WriteCtx {
 			field_order: Arc::clone(&self.field_order),
 			computed_deps: self.computed_deps.clone(),
 			id_field: self.id_field,
+			id_subfields: Arc::clone(&self.id_subfields),
 			key: self.key.clone(),
 			exec: exec.clone(),
 			scope: Weak::new(),
