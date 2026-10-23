@@ -562,6 +562,104 @@ pub(crate) fn unplannable_write_in_expr(expr: &LogicalExpr) -> Option<String> {
 	found
 }
 
+/// The error raised for a `LET` written as an expression.
+pub(crate) const LET_IN_AN_EXPRESSION: &str =
+	"LET statements can only appear at the top level of a query or inside a block expression";
+
+/// The error of the first `LET` in `op` that no statement may hold: a `LET`
+/// of a protected name (`$access`, `$auth`, `$token`, `$session`) or of a name
+/// the system binds (`$this`, `$value`, ...; [`crate::expr::logical::LogicalLet::is_refused`]), or
+/// a `LET` written as an expression — in a clause, an array, an operand or an `IF`
+/// arm's value, rather than a statement of a block or the value of a `RETURN`
+/// or another `LET`.
+///
+/// Either is a property of the text written, not of what runs, so it is asked
+/// of the statement as lowered, before binding folds anything: it is refused
+/// wherever it stands — in an `IF` arm that never runs, a loop body that runs
+/// no times, a statement after a `RETURN` — and whatever a later pass removes.
+///
+/// "First" is the order of one deterministic walk of the plan: a node, then
+/// each of its expressions with every statement nested in it, in turn, then
+/// its child nodes — for a statement `IF`, each condition then its arm. That is
+/// the written order within an expression and across a block's statements and
+/// an `IF`'s arms; across a relational statement's clauses it is the plan's
+/// order, which need not be the order the clauses are written in. A closure
+/// body is entered where the closure is written: the closure is refused with
+/// the statement that writes it, whether or not it is ever called.
+pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
+	use std::ops::ControlFlow;
+
+	use crate::exec::Error as ExecError;
+
+	fn let_in_an_expression() -> ControlFlow<ExecError> {
+		ControlFlow::Break(ExecError::InvalidStatement(LET_IN_AN_EXPRESSION.to_owned()))
+	}
+
+	fn in_op(op: &LogicalOp) -> ControlFlow<ExecError> {
+		if let LogicalOp::Let(stmt) = op
+			&& stmt.is_refused()
+		{
+			return ControlFlow::Break(ExecError::InvalidParam {
+				name: stmt.name.clone(),
+			});
+		}
+		// A statement `IF` is walked a condition and its arm at a time, then
+		// its `ELSE`, as they are written. An arm written as a `LET`, rather
+		// than as a block holding one, is the arm's value: a `LET` written as
+		// an expression.
+		if let LogicalOp::If(ifs) = op {
+			fn arm(arm: &LogicalOp) -> ControlFlow<ExecError> {
+				if matches!(arm, LogicalOp::Let(_)) {
+					return let_in_an_expression();
+				}
+				in_op(arm)
+			}
+			for (condition, then) in ifs.branches() {
+				in_expr(condition)?;
+				arm(then)?;
+			}
+			return ifs.otherwise().map_or(ControlFlow::Continue(()), arm);
+		}
+		// Every expression a node holds is an expression position, a `FOR`'s
+		// range and a `SLEEP`'s duration among them; a statement taken as a
+		// statement — a block's, a `LET`'s value, a `RETURN`'s, a loop's body
+		// — is a child node.
+		let mut flow = ControlFlow::Continue(());
+		op.for_each_scalar(&mut |scalar| {
+			if flow.is_continue() {
+				flow = in_expr(scalar);
+			}
+		});
+		flow?;
+		op.children().iter().try_for_each(in_op)
+	}
+
+	/// `expr` and the statements nested in it.
+	fn in_expr(expr: &LogicalExpr) -> ControlFlow<ExecError> {
+		if let LogicalExpr::Subquery(op) = expr {
+			if matches!(op.as_ref(), LogicalOp::Let(_)) {
+				return let_in_an_expression();
+			}
+			return in_op(op);
+		}
+		if let LogicalExpr::Closure(closure) = expr {
+			return in_expr(&closure.body);
+		}
+		let mut flow = ControlFlow::Continue(());
+		expr.for_each_child(&mut |child| {
+			if flow.is_continue() {
+				flow = in_expr(child);
+			}
+		});
+		flow
+	}
+
+	match in_op(op) {
+		ControlFlow::Break(error) => Some(Error::Exec(error)),
+		ControlFlow::Continue(()) => None,
+	}
+}
+
 /// Whether a schema statement changes what the session's namespace and
 /// database resolve to. Every other one leaves name resolution where it was
 /// and changes only the catalog inside it.

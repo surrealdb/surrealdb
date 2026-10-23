@@ -1015,6 +1015,13 @@ impl<'ctx> Planner<'ctx> {
 		}
 		row_scoped.extend(unbound);
 
+		// A `LET` no statement may hold is refused from the stored text,
+		// before binding folds away an arm that never runs. `DEFINE FUNCTION`
+		// refuses such a body; a definition an earlier release stored may
+		// still hold one.
+		if let Some(error) = crate::exec::logical::invalid_let(&body) {
+			return Err(PrepareError::Bind(error.into()));
+		}
 		let bound = planner.bind_scoped(body, &row_scoped).await.map_err(|e| {
 			tracing::debug!("fn::{name} body did not bind: {e:#}");
 			PrepareError::Bind(e.into())
@@ -1753,6 +1760,9 @@ pub(crate) async fn plan_request_statement(
 	binds_rows: bool,
 	request: &mut crate::exec::vm::RequestBuilder,
 ) -> Result<crate::exec::vm::RequestEntry, Error> {
+	if let Some(error) = crate::exec::logical::invalid_let(&op) {
+		return Err(error);
+	}
 	if let Some(why) = crate::exec::logical::unplannable_write(&op) {
 		return Err(Error::Exec(ExecError::PlannerUnsupported {
 			reason: why,
@@ -1836,6 +1846,13 @@ async fn plan_statement_with(
 	request_root: bool,
 	binds_rows: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
+	// A `LET` no statement may hold is refused from the text written, before
+	// binding folds any of it away and before a write is declined, so the
+	// refusal never depends on what the planner can compile. See
+	// `exec::logical::invalid_let`.
+	if let Some(error) = crate::exec::logical::invalid_let(&op) {
+		return Err(error);
+	}
 	// Before anything is bound or planned, so a write the planner cannot
 	// compile is refused as `PlannerUnsupported` rather than after a sibling
 	// branch has raised a planning error. Every caller reaches the VM through
@@ -1941,7 +1958,11 @@ pub(crate) async fn bind_statement(
 	planner: &Planner<'_>,
 	op: LogicalOp,
 ) -> Result<LogicalOp, Error> {
-	// As `plan_statement_inner` declines them, and for the same reasons.
+	// As `plan_statement_inner` refuses and declines them, and for the same
+	// reasons.
+	if let Some(error) = crate::exec::logical::invalid_let(&op) {
+		return Err(error);
+	}
 	if let Some(why) = crate::exec::logical::unplannable_write(&op) {
 		return Err(Error::Exec(ExecError::PlannerUnsupported {
 			reason: why,

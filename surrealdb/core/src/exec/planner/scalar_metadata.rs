@@ -73,6 +73,12 @@ impl Planner<'_> {
 							"LET statements can only appear at the top level of a query or inside a block expression".to_owned(),
 						).into());
 						}
+						// A `LET` no statement may hold is refused from the text
+						// written, before binding folds an arm that never runs.
+						// See `exec::logical::invalid_let`.
+						if let Some(error) = crate::exec::logical::invalid_let(op) {
+							return Err(error);
+						}
 						if self.txn.is_some() {
 							if let Some(reason) = crate::exec::logical::unplannable_write(op) {
 								return Err(crate::exec::Error::PlannerUnsupported {

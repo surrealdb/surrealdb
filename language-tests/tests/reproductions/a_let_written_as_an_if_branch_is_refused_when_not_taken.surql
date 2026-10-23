@@ -10,10 +10,9 @@ An `IF` branch or condition written as a `LET`, rather than as a block holding
 one, is a `LET` written as an expression. It is refused as the statement
 holding the `IF` is planned, whether or not the branch is taken: in a `THEN`,
 `ELSE` or `ELSE IF` branch, in a condition, in an `IF` nested in a branch, under
-`RETURN` or `LET`, inside an array or a `WHERE`, and in a block. In a block
-after a schema statement the `IF` is planned when the block reaches it, and the
-refusal is raised only when the branch is taken. A branch that is a block
-holding a `LET` runs it. Expected values are main's.
+`RETURN` or `LET`, inside an array or a `WHERE`, and in a block, including
+one after a schema statement: the refusal is decided from the text written.
+A branch that is a block holding a `LET` runs it.
 """
 
 [[test.results]]
@@ -59,10 +58,10 @@ error = "Invalid statement: LET statements can only appear at the top level of a
 error = "Invalid statement: LET statements can only appear at the top level of a query or inside a block expression"
 
 [[test.results]]
-value = "3"
+error = "Invalid statement: LET statements can only appear at the top level of a query or inside a block expression"
 
 [[test.results]]
-value = "5"
+error = "Invalid statement: LET statements can only appear at the top level of a query or inside a block expression"
 
 [[test.results]]
 error = "Invalid statement: LET statements can only appear at the top level of a query or inside a block expression"
