@@ -174,8 +174,12 @@ pub enum BoundBinaryOp {
 	Like,
 	/// Case-insensitive SQL pattern matching (`ILIKE`).
 	ILike,
-	/// Regular expression match (`REGEXP` / `~`).
+	/// Regular expression match (`~`).
 	Regexp,
+	/// Regular expression match that ignores case (`REGEXP` in MySQL, `~*` in PostgreSQL).
+	RegexpCi,
+	/// Exponentiation (`^` in PostgreSQL).
+	Power,
 	/// Integer division (`DIV` in MySQL).
 	IntDiv,
 	/// JSON object field or array element extraction (`->`).

@@ -79,11 +79,31 @@ pub fn lower_bound_expr(
 			left,
 			op,
 			right,
-		} => lower_binary_op(left, *op, right, policy),
+		} => match op {
+			BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi => {
+				lower_regex_match(left, right, *op == BoundBinaryOp::RegexpCi, false, policy)
+			}
+			_ => lower_binary_op(left, *op, right, policy),
+		},
 		BoundExpr::Unary {
 			op,
 			expr,
 		} => {
+			if *op == BoundUnaryOp::Not
+				&& let BoundExpr::Binary {
+					left,
+					op: regex_op @ (BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi),
+					right,
+				} = &**expr
+			{
+				return lower_regex_match(
+					left,
+					right,
+					*regex_op == BoundBinaryOp::RegexpCi,
+					true,
+					policy,
+				);
+			}
 			let inner = lower_bound_expr(expr, policy)?;
 			match op {
 				BoundUnaryOp::Not => Ok(LogicalExpr::If(Box::new(LogicalIf {
@@ -288,17 +308,35 @@ pub fn lower_bound_expr(
 					})));
 				}
 				"regexp" | "regexp_like" if args.len() >= 2 => {
-					let l = lower_bound_expr(&args[0], policy)?;
-					let r = lower_bound_expr(&args[1], policy)?;
-					let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-					let match_call = LogicalExpr::Call(Box::new(LogicalCall {
-						receiver: Function::Normal("string::matches".to_string()),
-						args: vec![l, r],
-					}));
-					return Ok(LogicalExpr::If(Box::new(LogicalIf {
-						branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-						otherwise: Some(match_call),
-					})));
+					// MySQL matches without regard to case unless a third argument says `c`.
+					let case_insensitive = match args.get(2) {
+						None => true,
+						// A NULL argument makes the whole match NULL.
+						Some(BoundExpr::Literal(BoundLiteral::Null)) => {
+							return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+						}
+						Some(BoundExpr::Literal(BoundLiteral::String(flags))) => {
+							let mut ignore_case = true;
+							for flag in flags.chars() {
+								match flag {
+									'c' => ignore_case = false,
+									'i' => ignore_case = true,
+									_ => {
+										return Err(PlanError::UnsupportedExpression(format!(
+											"match type '{flag}' of {name}"
+										)));
+									}
+								}
+							}
+							ignore_case
+						}
+						Some(_) => {
+							return Err(PlanError::UnsupportedExpression(format!(
+								"a match type of {name} that is not a string literal"
+							)));
+						}
+					};
+					return lower_regex_match(&args[0], &args[1], case_insensitive, false, policy);
 				}
 				"current_database" | "database" | "schema" => {
 					let db = policy.default_schema.unwrap_or("test");
@@ -843,15 +881,38 @@ fn lower_binary_op(
 				otherwise: Some(match_call),
 			})))
 		}
-		BoundBinaryOp::Regexp => {
+		BoundBinaryOp::Power => {
+			// PostgreSQL's `^` is a double-precision power. A power with no real result (an
+			// overflow, a negative base to a fractional power, zero to a negative power) is
+			// NULL: the result is kept when `c - c = 0` holds, which NaN and the infinities fail.
 			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let match_call = LogicalExpr::Call(Box::new(LogicalCall {
-				receiver: Function::Normal("string::matches".to_string()),
-				args: vec![l, r],
+			let as_float = |operand: LogicalExpr| LogicalExpr::Prefix {
+				op: PrefixOperator::Cast(Kind::Float),
+				expr: Box::new(operand),
+			};
+			let power = LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("math::pow".to_string()),
+				args: vec![as_float(l), as_float(r)],
 			}));
+			let is_finite = LogicalExpr::Binary {
+				left: Box::new(LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Current),
+					op: BinaryOperator::Subtract,
+					right: Box::new(LogicalExpr::Current),
+				}),
+				op: BinaryOperator::Equal,
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Float(0.0))),
+			};
+			let finite_power = LogicalExpr::Optional {
+				base: Box::new(power),
+				then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+					branches: vec![(is_finite, LogicalExpr::Current)],
+					otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+				}))),
+			};
 			Ok(LogicalExpr::If(Box::new(LogicalIf {
 				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(match_call),
+				otherwise: Some(finite_power),
 			})))
 		}
 		BoundBinaryOp::IntDiv => {
@@ -1061,6 +1122,77 @@ impl LogicalExprCombine for LogicalExpr {
 			left: Box::new(self),
 			op: BinaryOperator::Or,
 			right: Box::new(other),
+		}
+	}
+}
+
+/// Lowers `left ~ right`, `left ~* right` and their negations (`!~`, `!~*`, `NOT REGEXP`): NULL
+/// when either operand is NULL, otherwise whether `left` matches the pattern `right`, ignoring
+/// case when `case_insensitive`.
+///
+/// The `i` flag leads the pattern. A pattern written as a string literal gets it at plan time, and
+/// then only `left` can be NULL, so it is evaluated once and matched as the current value. A
+/// pattern known only at run time gets the flag by concatenation.
+fn lower_regex_match(
+	left: &BoundExpr,
+	right: &BoundExpr,
+	case_insensitive: bool,
+	negate: bool,
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	let l = lower_bound_expr(left, policy)?;
+	let r = lower_bound_expr(right, policy)?;
+	let matches = |subject: LogicalExpr, pattern: LogicalExpr| {
+		let call = LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("string::matches".to_string()),
+			args: vec![subject, pattern],
+		}));
+		if negate {
+			LogicalExpr::Prefix {
+				op: PrefixOperator::Not,
+				expr: Box::new(call),
+			}
+		} else {
+			call
+		}
+	};
+	match right {
+		BoundExpr::Literal(BoundLiteral::Null) => Ok(LogicalExpr::Literal(LogicalLiteral::Null)),
+		BoundExpr::Literal(BoundLiteral::String(pattern)) => {
+			let pattern = if case_insensitive {
+				Strand::from(format!("(?i){pattern}").as_str())
+			} else {
+				Strand::from(pattern.as_str())
+			};
+			Ok(LogicalExpr::Binary {
+				left: Box::new(LogicalExpr::Optional {
+					base: Box::new(l),
+					then: Box::new(matches(
+						LogicalExpr::Current,
+						LogicalExpr::Literal(LogicalLiteral::String(pattern)),
+					)),
+				}),
+				op: BinaryOperator::NullCoalescing,
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+			})
+		}
+		_ => {
+			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
+			let pattern = if case_insensitive {
+				LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("string::concat".to_string()),
+					args: vec![
+						LogicalExpr::Literal(LogicalLiteral::String(Strand::from("(?i)"))),
+						r,
+					],
+				}))
+			} else {
+				r
+			};
+			Ok(LogicalExpr::If(Box::new(LogicalIf {
+				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
+				otherwise: Some(matches(l, pattern)),
+			})))
 		}
 	}
 }

@@ -10,7 +10,7 @@ use crate::lexer::token::TokenKind;
 pub enum Associativity {
 	/// Left-to-right associative (`a + b + c` -> `(a + b) + c`).
 	Left,
-	/// Right-to-left associative (`a ^ b ^ c` -> `a ^ (b ^ c)`).
+	/// Right-to-left associative (`a op b op c` -> `a op (b op c)`).
 	Right,
 	/// Non-associative (`a < b < c` is a syntax error).
 	None,
@@ -72,8 +72,8 @@ pub fn infix_binding_power(token: &TokenKind<'_>) -> Option<(u8, u8, Associativi
 			Some((80, 81, Associativity::Left))
 		}
 
-		// Precedence 7: Exponentiation (right-associative!)
-		TokenKind::Operator("^") => Some((91, 90, Associativity::Right)),
+		// Precedence 7: Exponentiation (`%left '^'` in gram.y): `a ^ b ^ c` is `(a ^ b) ^ c`.
+		TokenKind::Operator("^") => Some((90, 91, Associativity::Left)),
 
 		// Precedence 8: COLLATE
 		TokenKind::Keyword(Keyword::Collate) => Some((100, 101, Associativity::Left)),

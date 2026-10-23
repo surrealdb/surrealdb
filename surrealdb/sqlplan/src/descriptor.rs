@@ -319,7 +319,9 @@ impl BoundSelect {
 				| BoundBinaryOp::DistinctFrom
 				| BoundBinaryOp::Like
 				| BoundBinaryOp::ILike
-				| BoundBinaryOp::Regexp => SqlType::Bool,
+				| BoundBinaryOp::Regexp
+				| BoundBinaryOp::RegexpCi => SqlType::Bool,
+				BoundBinaryOp::Power => SqlType::Float8,
 				BoundBinaryOp::Concat => SqlType::Text,
 				BoundBinaryOp::IntDiv => SqlType::Int8,
 				BoundBinaryOp::JsonExtract => SqlType::Json,

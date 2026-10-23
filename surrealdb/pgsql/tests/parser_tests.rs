@@ -83,8 +83,8 @@ fn test_parse_arithmetic_precedence() {
 }
 
 #[test]
-fn test_parse_exponent_right_associativity() {
-	// `2 ^ 3 ^ 4` must parse as `2 ^ (3 ^ 4)` because ^ is right-associative in PG
+fn test_parse_exponent_left_associativity() {
+	// `2 ^ 3 ^ 4` must parse as `(2 ^ 3) ^ 4` because gram.y declares `%left '^'`
 	let expr = parse_expr("2 ^ 3 ^ 4").expect("parse exponent");
 	match expr {
 		Expr::BinaryOp {
@@ -94,35 +94,35 @@ fn test_parse_exponent_right_associativity() {
 			..
 		} => {
 			assert!(matches!(
-				*left,
+				*right,
 				Expr::Literal {
-					lit: Literal::Integer(2),
+					lit: Literal::Integer(4),
 					..
 				}
 			));
-			match *right {
+			match *left {
 				Expr::BinaryOp {
-					left: r_left,
+					left: l_left,
 					op: BinaryOperator::Exp,
-					right: r_right,
+					right: l_right,
 					..
 				} => {
 					assert!(matches!(
-						*r_left,
+						*l_left,
+						Expr::Literal {
+							lit: Literal::Integer(2),
+							..
+						}
+					));
+					assert!(matches!(
+						*l_right,
 						Expr::Literal {
 							lit: Literal::Integer(3),
 							..
 						}
 					));
-					assert!(matches!(
-						*r_right,
-						Expr::Literal {
-							lit: Literal::Integer(4),
-							..
-						}
-					));
 				}
-				other => panic!("expected right-nested exp, got {:?}", other),
+				other => panic!("expected left-nested exp, got {:?}", other),
 			}
 		}
 		other => panic!("expected exp, got {:?}", other),

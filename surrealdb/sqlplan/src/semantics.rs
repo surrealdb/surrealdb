@@ -536,7 +536,13 @@ pub fn eval_binary_op(
 	}
 
 	// 7. Pattern matching (LIKE, ILIKE, REGEXP)
-	if matches!(op, BoundBinaryOp::Like | BoundBinaryOp::ILike | BoundBinaryOp::Regexp) {
+	if matches!(
+		op,
+		BoundBinaryOp::Like
+			| BoundBinaryOp::ILike
+			| BoundBinaryOp::Regexp
+			| BoundBinaryOp::RegexpCi
+	) {
 		let text = literal_to_string(left);
 		let pattern = literal_to_string(right);
 
@@ -550,8 +556,15 @@ pub fn eval_binary_op(
 				let regex_str = sql_like_to_regex(&pattern, true);
 				Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
 			}
-			BoundBinaryOp::Regexp => {
-				Regex::new(&pattern).map(|r| r.is_match(&text)).unwrap_or(false)
+			BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi => {
+				let pattern = if op == BoundBinaryOp::RegexpCi {
+					format!("(?i){pattern}")
+				} else {
+					pattern
+				};
+				Regex::new(&pattern)
+					.map(|r| r.is_match(&text))
+					.map_err(|e| PlanError::Custom(format!("invalid regular expression: {e}")))?
 			}
 			_ => unreachable!(),
 		};
@@ -571,8 +584,33 @@ pub fn eval_binary_op(
 		return eval_comparison(left, op, right, policy);
 	}
 
-	// 9. Arithmetic operations (`+`, `-`, `*`, `/`, `%`, `DIV`)
+	// 9. Power (`^`)
+	if op == BoundBinaryOp::Power {
+		return eval_power(left, right);
+	}
+
+	// 10. Arithmetic operations (`+`, `-`, `*`, `/`, `%`, `DIV`)
 	eval_arithmetic(left, op, right, policy)
+}
+
+/// Evaluate `left ^ right` on constants as the lowering does at run time: on double precision,
+/// and NULL for a result that is not a finite number (a negative base to a fractional power, zero
+/// to a negative power, overflow).
+fn eval_power(left: &BoundLiteral, right: &BoundLiteral) -> Result<BoundLiteral, PlanError> {
+	let operand = |lit: &BoundLiteral| match lit {
+		BoundLiteral::Integer(i) => Ok(*i as f64),
+		BoundLiteral::Float(f) => Ok(*f),
+		BoundLiteral::String(s) => s
+			.parse::<f64>()
+			.map_err(|_| PlanError::InvalidTextRepresentation(format!("numeric: \"{s}\""))),
+		other => Err(PlanError::unsupported(format!("the ^ operator on {other:?}"))),
+	};
+	let power = operand(left)?.powf(operand(right)?);
+	Ok(if power.is_finite() {
+		BoundLiteral::Float(power)
+	} else {
+		BoundLiteral::Null
+	})
 }
 
 /// Comparison evaluation between non-null literals.

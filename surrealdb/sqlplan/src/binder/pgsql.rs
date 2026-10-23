@@ -572,8 +572,29 @@ pub fn bind_expr(
 						}),
 					});
 				}
-				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch
-				| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi => BoundBinaryOp::Regexp,
+				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch => BoundBinaryOp::Regexp,
+				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi => BoundBinaryOp::RegexpCi,
+				surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch => {
+					return Ok(BoundExpr::Unary {
+						op: BoundUnaryOp::Not,
+						expr: Box::new(BoundExpr::Binary {
+							left: Box::new(l),
+							op: BoundBinaryOp::Regexp,
+							right: Box::new(r),
+						}),
+					});
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi => {
+					return Ok(BoundExpr::Unary {
+						op: BoundUnaryOp::Not,
+						expr: Box::new(BoundExpr::Binary {
+							left: Box::new(l),
+							op: BoundBinaryOp::RegexpCi,
+							right: Box::new(r),
+						}),
+					});
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::Exp => BoundBinaryOp::Power,
 				surrealdb_pgsql::ast::op::BinaryOperator::Arrow => BoundBinaryOp::JsonExtract,
 				surrealdb_pgsql::ast::op::BinaryOperator::LongArrow => {
 					BoundBinaryOp::JsonExtractText

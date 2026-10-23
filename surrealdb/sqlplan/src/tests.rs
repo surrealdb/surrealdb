@@ -740,6 +740,31 @@ fn test_pattern_matching_like() {
 }
 
 #[test]
+fn test_regex_operators_fold_and_an_invalid_pattern_is_an_error() {
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let fold = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let mut bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		fold_select(&mut bound, &policy).map(|()| bound.targets[0].expr.clone())
+	};
+	let boolean = |value| Ok(BoundExpr::Literal(BoundLiteral::Boolean(value)));
+
+	assert_eq!(fold("SELECT 'ABC' ~ 'b'"), boolean(false));
+	assert_eq!(fold("SELECT 'ABC' ~* 'b'"), boolean(true));
+	assert_eq!(fold("SELECT 'ABC' !~ 'b'"), boolean(true));
+	assert_eq!(fold("SELECT 'ABC' !~* 'b'"), boolean(false));
+	assert_eq!(fold("SELECT 'ABC' ~* '^(a|x)b'"), boolean(true));
+	assert!(fold("SELECT 'a' ~ '['").is_err());
+	assert!(fold("SELECT 'a' ~* '['").is_err());
+	assert!(fold("SELECT 'a' !~ '['").is_err());
+}
+
+#[test]
 fn test_type_casts() {
 	let catalog = MemoryCatalog::new();
 	let pg_policy = DialectPolicy::postgres();

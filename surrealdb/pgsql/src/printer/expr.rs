@@ -269,21 +269,18 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 	}
 }
 
-/// Format a sub-expression, adding parentheses if its precedence is lower than `parent_prec`.
+/// Format a sub-expression, adding parentheses if its precedence is lower than `parent_prec`. The
+/// right operand of a binary operator also gets them at equal precedence, as every binary operator
+/// is left-associative.
 fn print_sub_expr(
 	f: &mut fmt::Formatter<'_>,
 	sub: &Expr,
 	parent_prec: u8,
 	is_right: bool,
-	is_right_assoc: bool,
 ) -> fmt::Result {
 	let sub_prec = expr_precedence(sub);
 	let needs_parens = if is_right {
-		if is_right_assoc {
-			sub_prec < parent_prec
-		} else {
-			sub_prec <= parent_prec
-		}
+		sub_prec <= parent_prec
 	} else {
 		sub_prec < parent_prec
 	};
@@ -326,7 +323,7 @@ impl ToPgSql for Expr {
 			} => {
 				op.to_pgsql(f)?;
 				let parent_prec = expr_precedence(self);
-				print_sub_expr(f, expr, parent_prec, true, false)
+				print_sub_expr(f, expr, parent_prec, true)
 			}
 
 			Self::BinaryOp {
@@ -336,13 +333,12 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = expr_precedence(self);
-				let is_right_assoc = matches!(op, BinaryOperator::Exp);
 
-				print_sub_expr(f, left, parent_prec, false, is_right_assoc)?;
+				print_sub_expr(f, left, parent_prec, false)?;
 				f.write_str(" ")?;
 				op.to_pgsql(f)?;
 				f.write_str(" ")?;
-				print_sub_expr(f, right, parent_prec, true, is_right_assoc)
+				print_sub_expr(f, right, parent_prec, true)
 			}
 
 			Self::TypeCast {
@@ -351,7 +347,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = 120;
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				f.write_str("::")?;
 				data_type.to_pgsql(f)
 			}
@@ -362,7 +358,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = 130;
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				f.write_str("[")?;
 				index.to_pgsql(f)?;
 				f.write_str("]")
@@ -375,7 +371,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = 130;
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				f.write_str("[")?;
 				if let Some(l) = lower {
 					l.to_pgsql(f)?;
@@ -392,7 +388,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 30, false, false)?;
+				print_sub_expr(f, expr, 30, false)?;
 				if *negated {
 					f.write_str(" IS NOT NULL")
 				} else {
@@ -404,7 +400,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 30, false, false)?;
+				print_sub_expr(f, expr, 30, false)?;
 				if *negated {
 					f.write_str(" IS NOT TRUE")
 				} else {
@@ -416,7 +412,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 30, false, false)?;
+				print_sub_expr(f, expr, 30, false)?;
 				if *negated {
 					f.write_str(" IS NOT FALSE")
 				} else {
@@ -428,7 +424,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 30, false, false)?;
+				print_sub_expr(f, expr, 30, false)?;
 				if *negated {
 					f.write_str(" IS NOT UNKNOWN")
 				} else {
@@ -442,13 +438,13 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, left, 30, false, false)?;
+				print_sub_expr(f, left, 30, false)?;
 				if *negated {
 					f.write_str(" IS NOT DISTINCT FROM ")?;
 				} else {
 					f.write_str(" IS DISTINCT FROM ")?;
 				}
-				print_sub_expr(f, right, 30, true, false)
+				print_sub_expr(f, right, 30, true)
 			}
 
 			Self::Between {
@@ -459,7 +455,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 40, false, false)?;
+				print_sub_expr(f, expr, 40, false)?;
 				if *negated {
 					f.write_str(" NOT BETWEEN ")?;
 				} else {
@@ -468,9 +464,9 @@ impl ToPgSql for Expr {
 				if *symmetric {
 					f.write_str("SYMMETRIC ")?;
 				}
-				print_sub_expr(f, low, 40, false, false)?;
+				print_sub_expr(f, low, 40, false)?;
 				f.write_str(" AND ")?;
-				print_sub_expr(f, high, 40, true, false)
+				print_sub_expr(f, high, 40, true)
 			}
 
 			Self::InList {
@@ -479,7 +475,7 @@ impl ToPgSql for Expr {
 				negated,
 				..
 			} => {
-				print_sub_expr(f, expr, 40, false, false)?;
+				print_sub_expr(f, expr, 40, false)?;
 				if *negated {
 					f.write_str(" NOT IN (")?;
 				} else {
@@ -554,7 +550,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = 100;
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				f.write_str(" COLLATE ")?;
 				collation.to_pgsql(f)
 			}
@@ -706,7 +702,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = expr_precedence(self);
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				if *negated {
 					f.write_str(" NOT IN (")?;
 				} else {
@@ -733,7 +729,7 @@ impl ToPgSql for Expr {
 				..
 			} => {
 				let parent_prec = expr_precedence(self);
-				print_sub_expr(f, expr, parent_prec, false, false)?;
+				print_sub_expr(f, expr, parent_prec, false)?;
 				f.write_str(" ")?;
 				op.to_pgsql(f)?;
 				match quantifier {

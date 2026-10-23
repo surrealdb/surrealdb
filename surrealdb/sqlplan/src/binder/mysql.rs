@@ -522,7 +522,7 @@ pub fn bind_expr(
 				BinaryOperator::NullSafeEqual => BoundBinaryOp::NullSafeEqual,
 				BinaryOperator::IntDiv => BoundBinaryOp::IntDiv,
 				BinaryOperator::Like => BoundBinaryOp::Like,
-				BinaryOperator::Regexp | BinaryOperator::Rlike => BoundBinaryOp::Regexp,
+				BinaryOperator::Regexp | BinaryOperator::Rlike => BoundBinaryOp::RegexpCi,
 				_ => return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}"))),
 			};
 			Ok(BoundExpr::Binary {

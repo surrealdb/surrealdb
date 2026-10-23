@@ -1,0 +1,49 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "REGEXP, RLIKE and REGEXP_LIKE match without regard to case under MySQL's default collation, as LIKE does, unless the match type says c; NOT REGEXP negates them and NULL operands give NULL"
+
+[[test.results]]
+value = "[{ anchored: true, ignores_case: true, negated: false, no_pattern: NULL, nothing: NULL, rlike: true }]"
+
+[[test.results]]
+value = "[{ case_blind_again: true, case_sensitive: false, ignores_case: true, nothing: NULL, null_match_type: NULL }]"
+
+[[test.results]]
+value = "[{ name: 'Alice' }, { name: 'Charlie' }]"
+
+[[test.results]]
+value = "[{ name: 'Alice' }]"
+
+[[test.results]]
+value = "[{ name: 'Charlie' }]"
+
+[[test.results]]
+value = "[{ name: 'Alice' }, { name: 'Bob' }, { name: 'Charlie' }]"
+
+[[test.results]]
+value = "[]"
+*/
+
+SELECT
+	'abc' REGEXP '^a.c$' AS anchored,
+	'ABC' REGEXP 'b' AS ignores_case,
+	'ABC' NOT REGEXP 'b' AS negated,
+	NULL REGEXP 'b' AS nothing,
+	'a' NOT REGEXP NULL AS no_pattern,
+	'ABC' RLIKE '^abc$' AS rlike;
+SELECT
+	REGEXP_LIKE('ABC', 'b') AS ignores_case,
+	REGEXP_LIKE('ABC', 'b', 'c') AS case_sensitive,
+	REGEXP_LIKE('ABC', 'b', 'ci') AS case_blind_again,
+	REGEXP_LIKE(NULL, 'b') AS nothing,
+	REGEXP_LIKE('ABC', 'b', NULL) AS null_match_type;
+SELECT name FROM users WHERE name REGEXP '^[ac]' ORDER BY name;
+SELECT name FROM users WHERE name REGEXP '^a' ORDER BY name;
+SELECT name FROM users WHERE name NOT REGEXP '^[ab]' ORDER BY name;
+SELECT name FROM users WHERE name REGEXP lower(name) ORDER BY name;
+SELECT name FROM users WHERE name NOT REGEXP lower(name) ORDER BY name;

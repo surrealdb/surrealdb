@@ -55,10 +55,10 @@ fn test_print_precedence_and_associativity() {
 	assert_expr_roundtrip("(1 + 2) * 3");
 	// Higher precedence inside lower precedence does not require parens
 	assert_expr_roundtrip("1 + 2 * 3");
-	// Right associativity of exponent: 2 ^ (3 ^ 4)
+	// Left associativity of exponent: 2 ^ 3 ^ 4 is (2 ^ 3) ^ 4
 	assert_expr_roundtrip("2 ^ 3 ^ 4");
-	// Left grouping of exponent requires parens: (2 ^ 3) ^ 4
-	assert_expr_roundtrip("(2 ^ 3) ^ 4");
+	// Right grouping of exponent requires parens: 2 ^ (3 ^ 4)
+	assert_expr_roundtrip("2 ^ (3 ^ 4)");
 }
 
 #[test]
