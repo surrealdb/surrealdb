@@ -155,6 +155,57 @@ mod cli_integration {
 		);
 	}
 
+	/// A record can hold a value nested deeper than a query may write as a
+	/// literal. Its export is read back by `import` in full, and an import that
+	/// does not apply says so in its exit status rather than reporting success.
+	#[test(tokio::test)]
+	async fn export_of_a_deeply_nested_value_imports_back() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let db2 = Ulid::new();
+
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --hide-welcome");
+		common::run(&args)
+			.input(
+				"DEFINE TABLE a SCHEMALESS; CREATE a:1; DEFINE TABLE t SCHEMALESS; \
+				 CREATE t:deep SET content = {leaf: true}; \
+				 FOR $i IN 0..110 { UPDATE t:deep SET content = {children: [content]} RETURN NONE; }; \
+				 DEFINE TABLE b SCHEMALESS; CREATE b:1;\n",
+			)
+			.output()
+			.unwrap();
+
+		let dump = common::tmp_file("deep.surql");
+		let args = format!("export --endpoint http://{addr} {creds} --ns {ns} --db {db} {dump}");
+		common::run(&args).output().unwrap_or_else(|err| panic!("{args}: {err:?}"));
+		let args = format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {dump}");
+		common::run(&args).output().unwrap_or_else(|err| panic!("{args}: {err:?}"));
+
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db2} --hide-welcome");
+		let output = common::run(&args)
+			.input(
+				"SELECT count() FROM a GROUP ALL; SELECT count() FROM t GROUP ALL; \
+				 SELECT count() FROM b GROUP ALL;\n",
+			)
+			.output()
+			.unwrap();
+		assert_eq!(output.matches("count: 1").count(), 3, "{output}");
+
+		// A dump with a statement that cannot apply fails the command.
+		let bad = common::tmp_file("bad.surql");
+		std::fs::write(
+			&bad,
+			"OPTION IMPORT;\nDEFINE TABLE x SCHEMALESS;\nINSERT [ { id: x:1 } ];\nCREATE x:1;\n",
+		)
+		.unwrap();
+		let args = format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {bad}");
+		assert!(common::run(&args).output().is_err(), "a failed statement must fail the import");
+	}
+
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
