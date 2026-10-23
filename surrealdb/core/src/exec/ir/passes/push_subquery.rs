@@ -28,7 +28,11 @@
 //!   another frame, or projected as any other expression stays above, as does a name the projection
 //!   does not supply. No conjunct moves through a projection any of whose fields can write or
 //!   raise, whatever the conjunct reads: a filter beneath the projection is applied first, so a
-//!   write or an error would reach fewer rows than the projection as written.
+//!   write or an error would reach fewer rows than the projection as written. A conjunct holding a
+//!   `MATCHES` moves only when every name it reads is the stored field of that name (passed
+//!   through, or projected as a read of that same field): beneath the projection it is answered
+//!   from the full-text index entry of the record, which holds none of what any other expression
+//!   projects, so above the projection the row is judged on its own content.
 //!
 //! A subquery whose rows pass through a `SPLIT`, `FETCH`, `GROUP BY` or any other op after the
 //! projection takes no conjunct: the rows the filter judges are not the rows beneath the
@@ -107,6 +111,9 @@ impl LoPass for PushIntoSubquery {
 struct Source {
 	root: OpId,
 	row: ValueId,
+	/// Whether the expression is a read of the projected name directly off the row: the same
+	/// stored field on both sides.
+	same_field: bool,
 }
 
 /// What a projection says about each name a conjunct over its rows may read.
@@ -175,6 +182,8 @@ struct Reads {
 	row_scoped: bool,
 	/// Whether it runs code its expression does not hold, or reads the plan around it.
 	opaque: bool,
+	/// Whether it holds a `MATCHES` operator.
+	matches: bool,
 }
 
 /// Moves the conjuncts of the filter `op` that its subquery admits, and answers whether any moved.
@@ -232,10 +241,10 @@ fn admitted(
 			}
 			Shape::Named(projection) => {
 				!read.row_scoped
-					&& !read.opaque && read
-					.names
-					.iter()
-					.all(|name| projection.admits(cx.ir, name, target))
+					&& !read.opaque && read.names.iter().all(|name| {
+					projection.admits(cx.ir, name, target)
+						&& (!read.matches || projection.reads_stored(name))
+				})
 			}
 		};
 		if fits
@@ -249,6 +258,15 @@ fn admitted(
 }
 
 impl Projection {
+	/// Whether the field `name` of the projected row is the stored field of that name, which a
+	/// full-text index over the source answers for. A `MATCHES` beneath the projection is answered
+	/// from the index entry of the record the row came from, so a conjunct holding one moves only
+	/// when every name it reads is that stored field: a name projected as any other expression
+	/// holds content the index entry does not, and is judged on that content above.
+	fn reads_stored(&self, name: &str) -> bool {
+		self.substitutable.get(name).is_none_or(|source| source.same_field)
+	}
+
 	/// Whether a read of the field `name` off the projected row is answered beneath the
 	/// projection: by the same field, or by the copy of the expression it is projected as.
 	fn admits(&self, ir: &Ir, name: &str, target: &Target) -> bool {
@@ -275,6 +293,7 @@ fn reads_of(cx: &mut LoCx<'_>, filter: &WhereFilter, value: ValueId) -> Reads {
 		names: Vec::new(),
 		row_scoped: false,
 		opaque: false,
+		matches: false,
 	};
 	if computing.is_empty() {
 		out.row_scoped = true;
@@ -318,6 +337,14 @@ fn reads_of(cx: &mut LoCx<'_>, filter: &WhereFilter, value: ValueId) -> Reads {
 		}
 	}
 	out.opaque = tree.iter().any(|op| reads_row_opaquely(ir, &mut *cx.facts, cx.effects, *op));
+	out.matches = tree.iter().any(|op| {
+		matches!(
+			ir.op(*op).map(|data| &data.kind),
+			Some(OpKind::Expr(ExprOp::Binary {
+				op: BinaryOperator::Matches(_),
+			}))
+		)
+	});
 	out
 }
 
@@ -608,10 +635,22 @@ fn projection_of(cx: &mut LoCx<'_>, project: OpId) -> Option<Projection> {
 			continue;
 		};
 		let ir: &Ir = &*cx.ir;
-		let source = def_op(ir, field.value).map(|root| Source {
-			root,
-			row: field.row,
-		});
+		let source =
+			def_op(ir, field.value).and_then(|op| Some((op, ir.op(op)?))).map(|(op, data)| {
+				Source {
+					root: op,
+					row: field.row,
+					same_field: match &data.kind {
+						OpKind::Expr(ExprOp::Field {
+							name,
+						}) => {
+							name.as_str() == root.as_str()
+								&& data.operands.as_slice() == [field.row]
+						}
+						OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => false,
+					},
+				}
+			});
 		let plain = field.path.as_field().is_some()
 			&& !field.coerced
 			&& runs_as_caller(ir, &field.ops)

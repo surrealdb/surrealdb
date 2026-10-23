@@ -181,3 +181,31 @@ async fn a_filter_splits_between_the_subquery_and_its_statement() {
 	let env = Env::new();
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 }
+
+/// A conjunct holding a `MATCHES` moves only when every name it reads is the stored field of that
+/// name: a name projected as a literal, or under another name, holds content the full-text index
+/// entry of the record does not, so the conjunct stays above and judges the row's own content.
+#[tokio::test]
+async fn a_matches_conjunct_moves_only_over_stored_fields() {
+	for sql in [
+		"SELECT * FROM (SELECT id, text FROM t) WHERE text @@ 'quick'",
+		"SELECT * FROM (SELECT *, 1 AS n FROM t) WHERE text @@ 'quick'",
+	] {
+		let mut ir = bind(sql).await;
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 1, "`{sql}`");
+		let env = Env::new();
+		verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+	}
+	for sql in [
+		"SELECT * FROM (SELECT id, 'unrelated' AS text FROM t) WHERE text @@ 'quick'",
+		"SELECT * FROM (SELECT id, body AS text FROM t) WHERE text @@ 'quick'",
+		"SELECT * FROM (SELECT *, 'unrelated' AS text FROM t) WHERE text @@ 'quick'",
+	] {
+		let mut ir = bind(sql).await;
+		let before = filters(&ir);
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 0, "`{sql}`");
+		assert_eq!(filters(&ir), before, "`{sql}`");
+	}
+}
