@@ -266,6 +266,51 @@ async fn field_clauses_survive() -> Result<()> {
 	round_trip.assert_all().await
 }
 
+/// A `MATERIALIZE INTO` clause, with and without a condition, is exported and restored with the
+/// lists it keeps.
+///
+/// The lists are stored on the referenced records, so an export carries them as data, and the
+/// restore must not add the referencing records to them again as it writes those: the restored
+/// lists equal the source's, in the same order, and the clause keeps them in step afterwards.
+#[tokio::test]
+async fn materialize_clauses_survive() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE author SCHEMAFULL;
+		 DEFINE FIELD posts ON author TYPE array<record<post>> DEFAULT [] READONLY;
+		 DEFINE FIELD published ON author TYPE array<record<post>> DEFAULT [] READONLY;
+		 DEFINE TABLE post SCHEMAFULL;
+		 DEFINE FIELD archived ON post TYPE bool DEFAULT false;
+		 DEFINE FIELD author ON post TYPE record<author> REFERENCE ON DELETE CASCADE
+			MATERIALIZE INTO author.posts;
+		 DEFINE FIELD editor ON post TYPE option<record<author>> REFERENCE
+			MATERIALIZE INTO author.published WHERE archived != true;
+		 CREATE author:a, author:b;
+		 CREATE post:3 SET author = author:a, editor = author:b;
+		 CREATE post:1 SET author = author:a, editor = author:a, archived = true;
+		 CREATE post:2 SET author = author:b, editor = author:a;",
+	)
+	.await?;
+
+	assert_table_info_carries(
+		&round_trip,
+		"post",
+		&[
+			"REFERENCE ON DELETE CASCADE MATERIALIZE INTO author.posts",
+			"MATERIALIZE INTO author.published WHERE archived != true",
+		],
+	)
+	.await?;
+	round_trip.assert_query_equal("SELECT id, posts, published FROM author ORDER BY id").await?;
+	let restored = round_trip.target_query("SELECT VALUE [posts, published] FROM author:a").await?;
+	assert_eq!(restored[0].to_sql(), "[[[post:1, post:3], [post:2]]]");
+
+	// The restored clause keeps the lists in step.
+	round_trip.source_query("CREATE post:0 SET author = author:a, editor = author:a").await?;
+	round_trip.target_query("CREATE post:0 SET author = author:a, editor = author:a").await?;
+	round_trip.assert_query_equal("SELECT id, posts, published FROM author ORDER BY id").await?;
+	round_trip.assert_all().await
+}
+
 /// A `COMPUTED` field whose name has to be backticked when written is exported
 /// and restored under its own name, and derives under it afterwards.
 ///

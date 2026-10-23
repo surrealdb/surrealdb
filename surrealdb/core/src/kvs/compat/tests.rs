@@ -681,6 +681,13 @@ compat_test!(
 	fixtures::field_record_type(),
 	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
+compat_test!(
+	field_with_materialize,
+	StoredFieldDefinition,
+	FIELD_WITH_MATERIALIZE,
+	fixtures::field_with_materialize(),
+	[v3_4_0]
+);
 
 // StoredFunctionDefinition
 compat_test!(
@@ -1441,5 +1448,5 @@ fn test_v3_4_0_remains_unchanged() {
 	let v3_4_0 = include_bytes!("v3_4_0.rs");
 	let hash = Sha256::digest(v3_4_0);
 	let hash_str = hex::encode(hash);
-	assert_eq!(hash_str, "60b5b2601949817ab30558e45ed41ab2b263f524f7ef5234f24d84f28bce7415");
+	assert_eq!(hash_str, "8f892299e863b4318aec1627109b46fbafedf76b7ad8b5cf07e7ebb5b4da05b6");
 }

@@ -53,6 +53,11 @@ pub(crate) async fn remove_field_statement_apply(
 			}
 		}
 	};
+	// A field a `MATERIALIZE INTO` clause fills is not removed.
+	if !opt.import {
+		crate::ddl::materialize::refuse_changing_destination(&txn, ns, db, &table_name, &fd.name)
+			.await?;
+	}
 	// Removing a `COMPUTED` field changes the value it derives to none.
 	if !opt.import && fd.computed.is_some() {
 		let removed = catalog::FieldDefinition {

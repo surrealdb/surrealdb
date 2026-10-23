@@ -717,6 +717,10 @@ pub(crate) struct WriteStored {
 	/// The `REFERENCE` fields, by the idiom the catalog names each by, in the order the field
 	/// declarations hold them. Empty unless `references` is [`Stored::Declared`].
 	pub(crate) reference_fields: Box<[Idiom]>,
+	/// The `REFERENCE` fields that keep a stored list of their referencing records
+	/// (`MATERIALIZE INTO`), in the order the field declarations hold them. Empty unless
+	/// `references` is [`Stored::Declared`].
+	pub(crate) materialized: Box<[WriteMaterialized]>,
 	/// What the stage that maintains the indexes runs. Empty unless `indexes` is
 	/// [`Stored::Declared`].
 	pub(crate) index_set: WriteIndexes,
@@ -730,6 +734,21 @@ pub(crate) struct WriteStored {
 	/// for a table whose [`WriteImage::view`] is [`ImageView::Cut`] or [`ImageView::Derived`]:
 	/// [`ImageLayers::Unstated`] for every other write.
 	pub(crate) image_layers: ImageLayers,
+}
+
+/// A `REFERENCE` field with a `MATERIALIZE INTO` clause: the list of the records that reference
+/// each record of `table` through `field`, kept in `dest`. The `WHERE` condition is read from the
+/// field's definition when the unit that judges it is planned.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct WriteMaterialized {
+	/// The referencing field of the written table, by the idiom a reference key names it by.
+	pub(crate) field: Idiom,
+	/// The referenced table that holds the list.
+	pub(crate) table: TableName,
+	/// The top-level field of `table` that holds the list.
+	pub(crate) dest: Idiom,
+	/// Whether the clause has a `WHERE` condition.
+	pub(crate) filtered: bool,
 }
 
 /// How the field view of the table a write names is applied to the images of a record the write

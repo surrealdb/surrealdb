@@ -2155,6 +2155,49 @@ async fn step_inner(
 					.await
 					.map_err(ControlFlow::Err)?;
 				}
+				FieldCheck::Materialize {
+					field: reg,
+					ns,
+					db,
+				} => {
+					let definition = field(*reg)?;
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let txn = ctx.txn();
+					super::schema_host::validate_materialize(&txn, ns, db, &definition)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+				FieldCheck::TableFilled {
+					ns,
+					db,
+					table,
+				} => {
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let table = table_named(&read(regs, *table))?;
+					let txn = ctx.txn();
+					super::schema_host::refuse_removing_filled_table(&txn, ns, db, &table)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+				FieldCheck::Destination {
+					old,
+					ns,
+					db,
+				} => {
+					if !read(regs, *old).is_none() {
+						let old = field(*old)?;
+						let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+						let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+						let txn = ctx.txn();
+						super::schema_host::refuse_changing_destination(
+							&txn, ns, db, &old.table, &old.name,
+						)
+						.await
+						.map_err(ControlFlow::Err)?;
+					}
+				}
 				FieldCheck::IdUnread {
 					ns,
 					db,
@@ -2176,6 +2219,7 @@ async fn step_inner(
 			table,
 			old,
 			new,
+			rebuild,
 		} => {
 			use crate::catalog::FromStored as _;
 			let field = |value: Value| -> FlowResult<crate::catalog::FieldDefinition> {
@@ -2207,6 +2251,14 @@ async fn step_inner(
 							new,
 						),
 					)
+					.await
+					.map_err(ControlFlow::Err)?;
+					crate::exec::vm::descriptor::schema(crate::exec::materialize::backfill(
+						ctx,
+						old.as_ref(),
+						new,
+						*rebuild,
+					))
 					.await
 					.map_err(ControlFlow::Err)?;
 				}

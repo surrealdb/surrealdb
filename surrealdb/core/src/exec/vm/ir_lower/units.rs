@@ -89,6 +89,18 @@ pub(crate) enum CascadeKind {
 		table: TableName,
 		field: crate::expr::Idiom,
 	},
+	/// Adding a referencing record to the list `dest` of a record of `table`, or taking it out
+	/// (`MATERIALIZE INTO table.dest`).
+	MaterializeWrite {
+		table: TableName,
+		dest: crate::expr::Idiom,
+	},
+	/// Judging the `WHERE` condition of the `MATERIALIZE INTO` clause of `field` of `table`, the
+	/// referencing table, on an image of one of its records.
+	MaterializeFilter {
+		table: TableName,
+		field: crate::expr::Idiom,
+	},
 }
 
 /// What a lowering asks the compile driver to plan and lower into the program being compiled.

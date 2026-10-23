@@ -801,6 +801,7 @@ fn what_a_table_stores_is_never_read_from_what_the_catalog_does_not_answer() {
 		referenced: kind,
 		schema: WriteSchema::default(),
 		reference_fields: Box::default(),
+		materialized: Box::default(),
 		index_set: Default::default(),
 		view_set: Default::default(),
 		repair_set: Default::default(),
@@ -900,6 +901,7 @@ fn the_repairs_of_a_table_follow_the_clause_of_each_reference_field() {
 		table: table("author"),
 		reference: on_delete.map(|on_delete| Reference {
 			on_delete,
+			materialize: None,
 		}),
 		..FieldDefinition::default()
 	};

@@ -1165,10 +1165,17 @@ pub(crate) async fn first_reader(
 		// A `REFERENCE ON DELETE THEN` repair runs with the referencing record,
 		// one of this table's, as `$this`.
 		if let Some(Reference {
-			on_delete: ReferenceDeleteStrategy::Custom(expr),
+			on_delete,
+			materialize,
 		}) = &field.reference
 		{
-			read.extend(record_reads(expr, ReadContext::Record));
+			if let ReferenceDeleteStrategy::Custom(expr) = on_delete {
+				read.extend(record_reads(expr, ReadContext::Record));
+			}
+			// A `MATERIALIZE INTO … WHERE` filter is judged on this table's record.
+			if let Some(expr) = materialize.as_ref().and_then(|m| m.filter.as_ref()) {
+				read.extend(record_reads(expr, ReadContext::Record));
+			}
 		}
 		for permission in
 			[&field.select_permission, &field.create_permission, &field.update_permission]

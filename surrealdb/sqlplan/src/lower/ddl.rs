@@ -183,6 +183,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				} => {
 					field_def.reference = Some(Reference {
 						on_delete: ReferenceDeleteStrategy::Reject,
+						materialize: None,
 					});
 				}
 				ColumnConstraint::PrimaryKey => {
@@ -286,6 +287,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 						what: Expr::Table(TableName::from(tbl_name)),
 						reference: Some(Reference {
 							on_delete: ReferenceDeleteStrategy::Reject,
+							materialize: None,
 						}),
 						kind: DefineKind::Overwrite,
 						..Default::default()
@@ -768,6 +770,7 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 						what: Expr::Table(TableName::from(tbl_name)),
 						reference: Some(Reference {
 							on_delete: ReferenceDeleteStrategy::Reject,
+							materialize: None,
 						}),
 						kind: DefineKind::Overwrite,
 						..Default::default()

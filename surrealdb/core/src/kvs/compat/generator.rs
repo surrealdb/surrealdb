@@ -371,6 +371,11 @@ fn field_fixtures() -> TypeFixtures {
 				description: "field with record type kind and custom reference delete",
 				bytes: fix::field_record_type().kv_encode_value().unwrap(),
 			},
+			Fixture {
+				name: "FIELD_WITH_MATERIALIZE",
+				description: "field whose reference keeps a filtered list of its referencing records",
+				bytes: fix::field_with_materialize().kv_encode_value().unwrap(),
+			},
 		],
 	}
 }
@@ -1145,7 +1150,9 @@ fn generator_v3_3_0() {
 ///
 /// 3.4.0 is the snapshot the byte-exact wire-stability assertion compares the
 /// current encoder against, so it is the one version whose fixtures must
-/// re-encode to exactly these bytes. It bumps three definitions, which store
+/// re-encode to exactly these bytes. `FIELD_WITH_MATERIALIZE` freezes the bytes of a field whose
+/// `StoredReference` carries the `MATERIALIZE INTO` clause, at revision 2 of the reference. It
+/// bumps three definitions, which store
 /// their expression-bearing clauses as canonical SurrealQL text rather than
 /// structurally: `StoredFieldDefinition`, `StoredFunctionDefinition` and
 /// `StoredSubscriptionDefinition`. A table's view moved the same way but kept

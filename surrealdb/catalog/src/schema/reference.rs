@@ -1,11 +1,11 @@
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{ExprText, FromStored};
+use crate::catalog::{ExprText, FromStored, IdiomText};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
 use crate::stored::Stored;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 /// Stored form of a field's `REFERENCE` clause.
 ///
@@ -13,12 +13,35 @@ use crate::val::Value;
 /// [`crate::expr::reference::Reference`] (same struct/enum shapes, same
 /// variant order), with the `ON DELETE THEN` expression held as canonical
 /// SurrealQL text instead of an embedded AST.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredReference {
 	#[stored(n = 2)]
 	pub on_delete: StoredReferenceDeleteStrategy,
+	/// The `MATERIALIZE INTO` clause. A reader that does not know it would stop
+	/// maintaining the list it names, so the field is one an older reader refuses.
+	#[revision(start = 2)]
+	#[stored(n = 4)]
+	pub materialize: Option<StoredMaterialize>,
+}
+
+/// Stored form of a reference's `MATERIALIZE INTO` clause.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
+pub struct StoredMaterialize {
+	/// The referenced table that holds the list.
+	#[stored(n = 2)]
+	pub table: TableName,
+	/// Canonical SurrealQL text of the top-level field of `table` that holds the
+	/// list.
+	#[stored(n = 4)]
+	pub field: IdiomText,
+	/// Canonical SurrealQL text of the `WHERE` condition, judged on the
+	/// referencing record.
+	#[stored(n = 6)]
+	pub filter: Option<ExprText>,
 }
 
 /// Stored form of a reference's `ON DELETE` strategy.
@@ -47,6 +70,7 @@ impl From<crate::expr::reference::Reference> for StoredReference {
 	fn from(v: crate::expr::reference::Reference) -> Self {
 		Self {
 			on_delete: v.on_delete.into(),
+			materialize: v.materialize.as_ref().map(materialize_to_stored),
 		}
 	}
 }
@@ -68,6 +92,16 @@ impl ToSql for StoredReference {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("ON DELETE ");
 		self.on_delete.fmt_sql(f, fmt);
+		if let Some(materialize) = &self.materialize {
+			f.push_str(" MATERIALIZE INTO ");
+			f.push_str(&common::fmt::EscapeKwFreeIdent(materialize.table.as_str()).to_sql());
+			f.push('.');
+			f.push_str(materialize.field.as_str());
+			if let Some(filter) = &materialize.filter {
+				f.push_str(" WHERE ");
+				f.push_str(filter.as_str());
+			}
+		}
 	}
 }
 
@@ -90,8 +124,16 @@ impl ToSql for StoredReferenceDeleteStrategy {
 
 impl InfoStructure for StoredReference {
 	fn structure(self) -> Value {
+		let materialize = self.materialize.map(|m| {
+			Value::from(map! {
+				"table" => Value::String(m.table.into()),
+				"field" => Value::String(m.field.as_str().into()),
+				"filter", if let Some(filter) = m.filter => Value::from(filter.as_str()),
+			})
+		});
 		map! {
 			"on_delete" => self.on_delete.structure(),
+			"materialize", if let Some(m) = materialize => m,
 		}
 		.into()
 	}
@@ -119,6 +161,17 @@ impl FromStored for ExprReference {
 				StoredReferenceDeleteStrategy::Unset => ExprStrategy::Unset,
 				StoredReferenceDeleteStrategy::Custom(t) => ExprStrategy::Custom(t.compile()?),
 			},
+			materialize: stored
+				.materialize
+				.as_ref()
+				.map(|m| {
+					Ok::<_, anyhow::Error>(crate::expr::reference::Materialize {
+						table: m.table.clone(),
+						field: m.field.compile()?,
+						filter: m.filter.as_ref().map(|f| f.compile()).transpose()?,
+					})
+				})
+				.transpose()?,
 		})
 	}
 }
@@ -135,5 +188,14 @@ pub fn reference_to_stored(r: &ExprReference) -> StoredReference {
 			ExprStrategy::Unset => StoredReferenceDeleteStrategy::Unset,
 			ExprStrategy::Custom(e) => StoredReferenceDeleteStrategy::Custom(ExprText::new(e)),
 		},
+		materialize: r.materialize.as_ref().map(materialize_to_stored),
+	}
+}
+
+fn materialize_to_stored(m: &crate::expr::reference::Materialize) -> StoredMaterialize {
+	StoredMaterialize {
+		table: m.table.clone(),
+		field: IdiomText::new(&m.field),
+		filter: m.filter.as_ref().map(ExprText::new),
 	}
 }

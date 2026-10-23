@@ -1061,6 +1061,38 @@ impl StatementPlanner<'_> {
 		})
 	}
 
+	/// The `WHERE` condition of the `MATERIALIZE INTO` clause of `field` of `table`, as the catalog
+	/// holds it.
+	async fn materialize_filter(
+		&self,
+		table: &TableName,
+		field: &crate::expr::Idiom,
+	) -> Lowered<crate::expr::Expr> {
+		use crate::catalog::providers::TableProvider;
+
+		let (Some(txn), Some((ns, db))) = (self.planner.txn(), self.planner.ns_db_ids().await)
+		else {
+			return Err(NotCovered::internal(format!(
+				"the condition of a materialized field of {table} asked for outside a database"
+			)));
+		};
+		let fields = txn.all_tb_fields(ns, db, table, None).await.map_err(|e| {
+			NotCovered::internal(format!("the fields of {table} could not be read: {e}"))
+		})?;
+		fields
+			.iter()
+			.find(|definition| definition.name == *field)
+			.and_then(|definition| definition.reference.as_ref())
+			.and_then(|reference| reference.materialize.as_ref())
+			.and_then(|materialize| materialize.filter.clone())
+			.ok_or_else(|| {
+				NotCovered::internal(format!(
+					"the materialized field {} of {table} holds no condition",
+					surrealdb_types::ToSql::to_sql(field)
+				))
+			})
+	}
+
 	/// The unit of the statement a deletion performs on its own behalf, `kind`: the delete of the
 	/// edges joined to the deleted record, or the delete, read, `UNSET` or subtraction of a record
 	/// that references it. The statement is built from the engine's own AST
@@ -1088,6 +1120,28 @@ impl StatementPlanner<'_> {
 		use crate::expr::{Expr, Param};
 
 		let referencing = || Expr::Param(Param::from(PURGE_REFERENCING.to_owned()));
+		let filter = match kind {
+			CascadeKind::MaterializeFilter {
+				table,
+				field,
+			} => Some(self.materialize_filter(table, field).await?),
+			CascadeKind::Edges
+			| CascadeKind::Delete {
+				..
+			}
+			| CascadeKind::Read {
+				..
+			}
+			| CascadeKind::Unset {
+				..
+			}
+			| CascadeKind::Subtract {
+				..
+			}
+			| CascadeKind::MaterializeWrite {
+				..
+			} => None,
+		};
 		let (op, names) = match kind {
 			CascadeKind::Edges => (purge::purge_edges_statement(), vec![PURGE_VERTEX]),
 			CascadeKind::Delete {
@@ -1142,6 +1196,30 @@ impl StatementPlanner<'_> {
 			} => (
 				purge::update_of(referencing(), purge::subtract_data(field)),
 				vec![PURGE_REFERENCING, PURGE_DELETED],
+			),
+			CascadeKind::MaterializeWrite {
+				dest,
+				..
+			} => (
+				crate::exec::materialize::write_statement(dest),
+				vec![
+					crate::exec::materialize::PARENT,
+					crate::exec::materialize::CHILD,
+					crate::exec::materialize::ADD,
+				],
+			),
+			CascadeKind::MaterializeFilter {
+				..
+			} => (
+				match &filter {
+					Some(filter) => crate::exec::materialize::filter_statement(filter),
+					None => {
+						return Err(NotCovered::internal(
+							"a materialize filter statement with no condition",
+						));
+					}
+				},
+				vec![crate::exec::materialize::IMAGE],
 			),
 		};
 		let op = op.map_err(|_| NotCovered::internal("a cascade statement has no logical form"))?;

@@ -78,6 +78,7 @@ pub(crate) mod index;
 #[allow(dead_code)]
 pub(crate) mod ir;
 pub(crate) mod logical;
+pub(crate) mod materialize;
 pub mod memory;
 pub(crate) mod metrics;
 pub(crate) mod migrate;

@@ -328,6 +328,24 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"schema_host.rs",
+		"validate_materialize",
+		"declared schema service: what DEFINE FIELD and ALTER FIELD refuse of a field's \
+		 MATERIALIZE INTO clause, judged as their bodies judge it",
+	),
+	(
+		"schema_host.rs",
+		"refuse_changing_destination",
+		"declared schema service: what DEFINE FIELD, ALTER FIELD and REMOVE FIELD refuse of a \
+		 field a MATERIALIZE INTO clause fills, judged as their bodies judge it",
+	),
+	(
+		"schema_host.rs",
+		"refuse_removing_filled_table",
+		"declared schema service: what REMOVE TABLE refuses of a table whose field a MATERIALIZE \
+		 INTO clause fills, judged as its body judges it",
+	),
+	(
+		"schema_host.rs",
 		"clear_view_table",
 		"declared schema service: the keys beneath a view table DEFINE TABLE ... AS SELECT clears \
 		 before it fills the view, cleared by the code that body clears them with",

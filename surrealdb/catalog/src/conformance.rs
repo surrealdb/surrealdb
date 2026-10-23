@@ -526,6 +526,7 @@ pub(crate) mod tests {
 		let mut referenced = definition("e", Some("record<u>"));
 		referenced.reference = Some(crate::schema::StoredReference {
 			on_delete: crate::schema::StoredReferenceDeleteStrategy::Ignore,
+			materialize: None,
 		});
 		let fields = vec![
 			readonly,

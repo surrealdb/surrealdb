@@ -23,7 +23,7 @@ use uuid::Uuid as UuidExt;
 use crate::catalog::auth::{AuthLevel, AuthLimit};
 use crate::catalog::record::{Record, RecordType};
 use crate::catalog::schema::base::Base;
-use crate::catalog::schema::{StoredReference, StoredReferenceDeleteStrategy};
+use crate::catalog::schema::{StoredMaterialize, StoredReference, StoredReferenceDeleteStrategy};
 use crate::catalog::{
 	ApiMethod, DatabaseId, IndexId, ModuleExecutable, NamespaceId, NodeLiveQuery, SiloExecutable,
 	StoredApiActionDefinition, StoredApiConfigDefinition, StoredModuleDefinition,
@@ -962,6 +962,7 @@ pub fn field_flexible_with_reference() -> StoredFieldDefinition {
 		comment: Some("Calculated total price".to_string()),
 		reference: Some(StoredReference {
 			on_delete: StoredReferenceDeleteStrategy::Cascade,
+			materialize: None,
 		}),
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
@@ -990,6 +991,38 @@ pub fn field_with_default_set() -> StoredFieldDefinition {
 		comment: None,
 		reference: Some(StoredReference {
 			on_delete: StoredReferenceDeleteStrategy::Reject,
+			materialize: None,
+		}),
+		auth_limit: AuthLimit::new_no_limit(),
+		graphql_alias: None,
+		graphql_deprecated: None,
+	}
+}
+
+/// Field with a reference that keeps a filtered list of its referencing records
+pub fn field_with_materialize() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("author"),
+		table: TableName::from("posts"),
+		field_kind: Some(KindText::new(&Kind::Record(vec![TableName::from("authors")]))),
+		readonly: false,
+		inline: false,
+		flexible: false,
+		value: None,
+		assert: None,
+		computed: None,
+		default: StoredDefineDefault::None,
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::Full,
+		comment: None,
+		reference: Some(StoredReference {
+			on_delete: StoredReferenceDeleteStrategy::Cascade,
+			materialize: Some(StoredMaterialize {
+				table: TableName::from("authors"),
+				field: IdiomText::from_raw("published"),
+				filter: Some(ExprText::from_raw("archived != true")),
+			}),
 		}),
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
@@ -1018,6 +1051,7 @@ pub fn field_record_type() -> StoredFieldDefinition {
 			on_delete: StoredReferenceDeleteStrategy::Custom(ExprText::from_raw(
 				"'DELETE $parent'",
 			)),
+			materialize: None,
 		}),
 		auth_limit: AuthLimit::new(
 			AuthLevel::Database("test_ns".to_string(), "test_db".to_string()),

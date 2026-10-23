@@ -104,9 +104,9 @@ use super::super::program::{
 };
 use super::super::write::{
 	DataInstr, FieldPermission, FieldPlan, FieldWrite, GateInstr, IndexPlan, LoweredIndexes,
-	LoweredView, LoweredViews, NativeIndexKind, ObserveInstr, Recalc, ReferenceInstr,
-	RepairStrategy, SchemaInstr, SchemaPlan, StorageFact, StorageInstr, TableRepairs, ViewClause,
-	ViewRows,
+	LoweredView, LoweredViews, MaterializeStep, NativeIndexKind, ObserveInstr, Recalc,
+	ReferenceInstr, RepairStrategy, SchemaInstr, SchemaPlan, StorageFact, StorageInstr,
+	TableRepairs, ViewClause, ViewRows,
 };
 use super::emit::Emitter;
 use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope, invariant};
@@ -1615,17 +1615,32 @@ pub(super) fn emit_stage(
 							what: "ir_lower::stage: a table that declares references states no field",
 						});
 					}
+					let release = stage == WriteStageKind::CleanupTableReferences;
+					let references = |instr| storage(StorageInstr::References(instr));
 					let sync = storage(StorageInstr::SyncReferences {
 						fields: run.stored.reference_fields.iter().cloned().collect(),
-						release: stage == WriteStageKind::CleanupTableReferences,
+						release,
 					});
+					let materialize = materialize_steps(cx, run)?;
 					if discards_dropped_records(run) {
 						let synced = em.label()?;
 						jump_if(em, StorageFact::TableDropped, true, synced);
 						em.emit(sync);
+						if let Some(steps) = materialize {
+							em.emit(references(ReferenceInstr::Materialize {
+								steps,
+								release,
+							}));
+						}
 						em.bind(synced)?;
 					} else {
 						em.emit(sync);
+						if let Some(steps) = materialize {
+							em.emit(references(ReferenceInstr::Materialize {
+								steps,
+								release,
+							}));
+						}
 					}
 				}
 				Stored::Nothing | Stored::Dynamic | Stored::LateBound => {
@@ -1982,6 +1997,12 @@ fn cascade_unit(cx: &mut Stages<'_, '_>, kind: CascadeKind) -> Result<UnitId, Ir
 		}
 		| CascadeKind::Subtract {
 			..
+		}
+		| CascadeKind::MaterializeWrite {
+			..
+		}
+		| CascadeKind::MaterializeFilter {
+			..
 		} => (true, true),
 	};
 	units.unit_for(UnitRequest::Cascade {
@@ -1989,6 +2010,48 @@ fn cascade_unit(cx: &mut Stages<'_, '_>, kind: CascadeKind) -> Result<UnitId, Ir
 		suppressed,
 		caller,
 	})
+}
+
+/// The steps that keep the lists of the written table's `MATERIALIZE INTO` fields: for each, the
+/// units that add a record to a list, take one out, and judge the clause's `WHERE` condition.
+/// `None` for a table with no such field.
+fn materialize_steps(
+	cx: &mut Stages<'_, '_>,
+	run: &StageRun,
+) -> Result<Option<Arc<[MaterializeStep]>>, IrError> {
+	if run.stored.materialized.is_empty() {
+		return Ok(None);
+	}
+	let table = run.stored.table.clone().ok_or(IrError::Invariant {
+		what: "ir_lower::stage: a stated table fact with no table",
+	})?;
+	let mut steps = Vec::with_capacity(run.stored.materialized.len());
+	for materialized in run.stored.materialized.iter() {
+		let filter = if materialized.filtered {
+			Some(cascade_unit(
+				cx,
+				CascadeKind::MaterializeFilter {
+					table: table.clone(),
+					field: materialized.field.clone(),
+				},
+			)?)
+		} else {
+			None
+		};
+		steps.push(MaterializeStep {
+			field: materialized.field.clone(),
+			table: materialized.table.clone(),
+			filter,
+			write: cascade_unit(
+				cx,
+				CascadeKind::MaterializeWrite {
+					table: materialized.table.clone(),
+					dest: materialized.dest.clone(),
+				},
+			)?,
+		});
+	}
+	Ok(Some(steps.into()))
 }
 
 /// The repairs of every table that defines a `REFERENCE` field which can name a record of the
@@ -3489,6 +3552,7 @@ mod tests {
 			referenced: kind,
 			schema: WriteSchema::default(),
 			reference_fields: Box::default(),
+			materialized: Box::default(),
 			index_set: WriteIndexes::default(),
 			view_set: WriteViews::default(),
 			repair_set: WriteRepairs::default(),
@@ -6738,6 +6802,7 @@ mod tests {
 				stages,
 				..stored_run(WriteStored {
 					reference_fields: fields.clone(),
+					materialized: Box::default(),
 					..storing(Stored::Declared)
 				})
 			};

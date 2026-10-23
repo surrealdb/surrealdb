@@ -54,7 +54,7 @@ mod storage;
 #[path = "write_view.rs"]
 mod view;
 
-pub(super) use cascade::{ReferenceInstr, RepairStrategy, TableRepairs};
+pub(super) use cascade::{MaterializeStep, ReferenceInstr, RepairStrategy, TableRepairs};
 pub(super) use data::DataInstr;
 pub(super) use gate::GateInstr;
 pub(crate) use observe::notify_at;

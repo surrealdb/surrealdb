@@ -188,6 +188,7 @@ keywords! {
 	M = "M",
 	M0 = "M0",
 	Mapper = "MAPPER",
+	Materialize = "MATERIALIZE",
 	MaxDepth = "MAXDEPTH",
 	Merge = "MERGE",
 	Middleware = "MIDDLEWARE",

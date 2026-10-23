@@ -83,6 +83,24 @@ impl<'a, 's> Parser<'a, 's> {
 		self.push_clause(Cl::Migrate, name, idx, t.start, first)
 	}
 
+	/// `MATERIALIZE INTO table.field [WHERE cond]` after `REFERENCE`, as a
+	/// [`Cl::Materialize`] clause.
+	pub(crate) fn materialize_clause(&mut self) -> R<()> {
+		let t = self.bump();
+		let first = self.ast.nodes.len();
+		self.expect_kw(Kw::Into, "INTO")?;
+		let table = self.name()?;
+		self.expect(T::Dot, ".")?;
+		let field = self.name()?;
+		let cond = if self.eat_kw(Kw::Where) {
+			self.expr(true)?
+		} else {
+			NONE
+		};
+		let idx = self.record(&[table, field, cond]);
+		self.push_clause(Cl::Materialize, idx, 0, t.start, first)
+	}
+
 	/// `DEFINE …` after `DEFINE`.
 	pub(crate) fn define(&mut self, start: u32) -> R<NodeId> {
 		let first = self.ast.nodes.len();
@@ -1158,6 +1176,7 @@ impl<'a, 's> Parser<'a, 's> {
 					let (a, b) = self.reference_strategy()?;
 					self.push_clause(Cl::Reference, a, b, t.start, first)?;
 				}
+				Kw::Materialize => self.materialize_clause()?,
 				Kw::Computed => self.expr_clause(Cl::Computed)?,
 				Kw::GraphqlAlias => self.string_clause(Cl::GraphqlAlias)?,
 				Kw::GraphqlDeprecated => self.string_clause(Cl::GraphqlDeprecated)?,

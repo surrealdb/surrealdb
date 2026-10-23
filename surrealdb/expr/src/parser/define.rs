@@ -27,7 +27,7 @@ use crate::expr::index_kind::Index;
 use crate::expr::language::Language;
 use crate::expr::module::ModuleName;
 use crate::expr::permission::{Permission, Permissions};
-use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
+use crate::expr::reference::{Materialize, Reference, ReferenceDeleteStrategy};
 use crate::expr::statements::alter::field::AlterDefault;
 use crate::expr::statements::alter::table::{TableMigrateAction, TableMigrateClause};
 use crate::expr::statements::alter::{
@@ -178,6 +178,15 @@ impl Lower<'_> {
 	}
 
 	/// The migration of a [`Cl::Migrate`] clause.
+	fn materialize(&self, c: &Node) -> R<Materialize> {
+		let r = self.rec(c.a, 3);
+		Ok(Materialize {
+			table: TableName::new(self.name(r[0])?),
+			field: crate::expr::Idiom::field(Strand::new(self.name(r[1])?)),
+			filter: self.opt(r[2])?,
+		})
+	}
+
 	fn migrate(&self, c: &Node) -> R<MigrateClause> {
 		let r = self.rec(c.b, 2);
 		Ok(MigrateClause {
@@ -498,6 +507,7 @@ impl Lower<'_> {
 				};
 				// Only the field `id` may name the components of its tuple type.
 				let is_id = matches!(&s.name, Expr::Idiom(i) if i.is_id());
+				let mut materialize: Option<(Materialize, &Node)> = None;
 				for c in clauses {
 					match cl(c) {
 						Cl::FieldType => {
@@ -539,8 +549,16 @@ impl Lower<'_> {
 									4 => ReferenceDeleteStrategy::Custom(self.expr(c.b)?),
 									_ => ReferenceDeleteStrategy::Ignore,
 								},
+								materialize: None,
 							})
 						}
+						Cl::Materialize if materialize.is_some() => {
+							return Err(Reject::new(
+								"a field definition takes one MATERIALIZE clause",
+							)
+							.at(c.start, c.end));
+						}
+						Cl::Materialize => materialize = Some((self.materialize(c)?, c)),
 						Cl::Computed => s.computed = Some(self.expr(c.a)?),
 						Cl::GraphqlAlias => s.graphql_alias = Some(self.string(c.a)?),
 						Cl::Migrate if s.migrate.is_some() => {
@@ -551,6 +569,15 @@ impl Lower<'_> {
 						}
 						Cl::Migrate => s.migrate = Some(self.migrate(c)?),
 						_ => s.graphql_deprecated = Some(self.string(c.a)?),
+					}
+				}
+				if let Some((m, c)) = materialize {
+					match s.reference.as_mut() {
+						Some(reference) => reference.materialize = Some(m),
+						None => {
+							return Err(Reject::new("MATERIALIZE requires a REFERENCE clause")
+								.at(c.start, c.end));
+						}
 					}
 				}
 				DefineStatement::Field(Box::new(s))
@@ -1540,6 +1567,7 @@ impl Lower<'_> {
 					..Default::default()
 				};
 				let is_id = matches!(&s.name, Expr::Idiom(i) if i.is_id());
+				let mut materialize: Option<(Materialize, &Node)> = None;
 				for c in clauses {
 					match (unsafe_cl(c.op), drop(c)) {
 						(_, Some(Cl::FieldType)) => {
@@ -1592,6 +1620,13 @@ impl Lower<'_> {
 							));
 						}
 						(Cl::Migrate, _) => s.migrate = Some(self.migrate(c)?),
+						(Cl::Materialize, _) if materialize.is_some() => {
+							return Err(Reject::new(
+								"a field alteration takes one MATERIALIZE clause",
+							)
+							.at(c.start, c.end));
+						}
+						(Cl::Materialize, _) => materialize = Some((self.materialize(c)?, c)),
 						_ => {
 							s.reference = AlterKind::Set(Reference {
 								on_delete: match c.a {
@@ -1601,7 +1636,17 @@ impl Lower<'_> {
 									4 => ReferenceDeleteStrategy::Custom(self.expr(c.b)?),
 									_ => ReferenceDeleteStrategy::Ignore,
 								},
+								materialize: None,
 							})
+						}
+					}
+				}
+				if let Some((m, c)) = materialize {
+					match &mut s.reference {
+						AlterKind::Set(reference) => reference.materialize = Some(m),
+						AlterKind::None | AlterKind::Drop => {
+							return Err(Reject::new("MATERIALIZE requires a REFERENCE clause")
+								.at(c.start, c.end));
 						}
 					}
 				}

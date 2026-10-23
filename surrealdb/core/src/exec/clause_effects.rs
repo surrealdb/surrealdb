@@ -650,7 +650,15 @@ impl ClauseCheck<'_> {
 			DefineDefault::Set(expr) | DefineDefault::Always(expr) => Some(expr.clone()),
 			DefineDefault::None => None,
 		};
+		let materialized = |field: &FieldDefinition| {
+			field
+				.reference
+				.as_ref()
+				.and_then(|reference| reference.materialize.as_ref())
+				.and_then(|materialize| materialize.filter.clone())
+		};
 		let clauses = [
+			("MATERIALIZE INTO", materialized(field), previous.map(materialized)),
 			("COMPUTED", field.computed.clone(), previous.map(|p| p.computed.clone())),
 			("VALUE", field.value.clone(), previous.map(|p| p.value.clone())),
 			("DEFAULT", default(field), previous.map(default)),

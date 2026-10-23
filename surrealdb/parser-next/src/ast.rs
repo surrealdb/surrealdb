@@ -529,6 +529,9 @@ pub enum Cl {
 	/// `SECURITY DEFINER | INVOKER` on an API: `a` 0 for `DEFINER`, 1 for
 	/// `INVOKER`.
 	ApiSecurity,
+	/// `MATERIALIZE INTO table.field [WHERE cond]` on a field: `a` index into
+	/// `extra` of `[table Name, field Name, cond or NONE]`.
+	Materialize,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.

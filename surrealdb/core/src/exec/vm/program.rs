@@ -1787,6 +1787,9 @@ pub(crate) enum StoreInstr {
 		table: Reg,
 		old: Reg,
 		new: Option<Reg>,
+		/// Whether a `MATERIALIZE INTO` clause `new` holds fills its lists again even when
+		/// `old` held the same clause.
+		rebuild: bool,
 	},
 	/// Refuse the table defined in `table` when it is a LIGHTWEIGHT relation,
 	/// whose edges store no records for a definition over it to apply to,
@@ -3142,6 +3145,30 @@ pub(crate) enum FieldCheck {
 	/// the rows its views hold, so `REMOVE FIELD id` may remove its `id`
 	/// (`ddl::key_scan::refuse_removing_field`).
 	IdUnread {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+	},
+	/// The `MATERIALIZE INTO` clause of the definition in `field`, if it has one, names a
+	/// destination that admits it, judged against the catalog of the database `ns`, `db`
+	/// (`ddl::materialize::validate`).
+	Materialize {
+		field: Reg,
+		ns: Reg,
+		db: Reg,
+	},
+	/// The field the stored definition in `old` (`NONE` when the field is new) defines is no
+	/// destination a `MATERIALIZE INTO` clause fills, judged against the catalog of the database
+	/// `ns`, `db` (`ddl::materialize::refuse_changing_destination`).
+	Destination {
+		old: Reg,
+		ns: Reg,
+		db: Reg,
+	},
+	/// The table named in `table`, which `REMOVE TABLE` removes, holds no field a
+	/// `MATERIALIZE INTO` clause fills, judged against the catalog of the database `ns`, `db`
+	/// (`ddl::materialize::refuse_removing_table`).
+	TableFilled {
 		ns: Reg,
 		db: Reg,
 		table: Reg,

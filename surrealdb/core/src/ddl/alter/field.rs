@@ -317,6 +317,21 @@ async fn alter_field_write(
 		crate::exec::field_rules::define_field_statement_validate_reference_options(&df)?;
 	}
 
+	// A field a `MATERIALIZE INTO` clause fills is not altered, and the clause the merged
+	// definition holds is judged against its destination. Import restores definitions as they
+	// were written.
+	if !opt.import {
+		crate::ddl::materialize::refuse_changing_destination(
+			&txn,
+			ns,
+			db,
+			what,
+			&old_definition.name,
+		)
+		.await?;
+		crate::ddl::materialize::validate(&txn, ns, db, &df).await?;
+	}
+
 	// The record id components that the merged definition names are checked as
 	// `DEFINE FIELD OVERWRITE` checks them. Only a statement that sets or drops the type of
 	// `id` can change them. A field under a component's name is refused above.
@@ -484,6 +499,7 @@ async fn alter_field_write(
 			&df,
 		)
 		.await?;
+		crate::exec::materialize::backfill(&exec, Some(&old_definition), &df, false).await?;
 	}
 	// Refresh the table cache
 	let Some(tb) = txn.get_tb(ns, db, what, None).await? else {

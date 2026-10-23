@@ -220,6 +220,46 @@ pub(super) async fn check_computed_views(
 	.await
 }
 
+/// What refuses the `MATERIALIZE INTO` clause of the field `field`, as `DEFINE FIELD` and
+/// `ALTER FIELD` judge it against the catalog of the database `ns`, `db`.
+pub(super) async fn validate_materialize(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	field: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::materialize::validate(txn, ns, db, field)).await
+}
+
+/// What refuses a change to the field `name` of the table `table` of the database `ns`, `db`
+/// while a `MATERIALIZE INTO` clause fills it.
+pub(super) async fn refuse_changing_destination(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	name: &Idiom,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::materialize::refuse_changing_destination(
+		txn, ns, db, table, name,
+	))
+	.await
+}
+
+/// What refuses the removal of the table `table` of the database `ns`, `db` while a
+/// `MATERIALIZE INTO` clause fills one of its fields.
+pub(super) async fn refuse_removing_filled_table(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::materialize::refuse_removing_table(
+		txn, ns, db, table,
+	))
+	.await
+}
+
 /// What refuses `REMOVE FIELD id` on the table `table` of the database `ns`,
 /// `db`: a definition of the table that reads a component of its record id,
 /// as `txn` holds the catalog and the rows of the table's views.

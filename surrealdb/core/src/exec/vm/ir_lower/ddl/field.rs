@@ -367,6 +367,27 @@ impl Ddl<'_, '_> {
 			},
 		});
 		self.bind(import)?;
+		// A `MATERIALIZE INTO` clause fills a destination its table declares, and a definition
+		// that replaces a destination is refused; an import restores definitions as they were.
+		let import = self.label()?;
+		self.store(StoreInstr::JumpIfImport {
+			target: import,
+		});
+		self.store(StoreInstr::FieldCheck {
+			check: FieldCheck::Destination {
+				old: existing,
+				ns,
+				db,
+			},
+		});
+		self.store(StoreInstr::FieldCheck {
+			check: FieldCheck::Materialize {
+				field: stored_field,
+				ns,
+				db,
+			},
+		});
+		self.bind(import)?;
 		// The rules of a table that enforces migrations, and the migration, are judged once every
 		// other check of the definition has passed: either can mint a step, and a refusal leaves
 		// no step behind for a transaction its caller goes on to commit.
@@ -404,6 +425,7 @@ impl Ddl<'_, '_> {
 			table: table_reg,
 			old: existing,
 			new: Some(stored_field),
+			rebuild: true,
 		});
 		self.bind(import)?;
 		self.stamp(ns, db, table_name)?;
@@ -595,6 +617,13 @@ impl Ddl<'_, '_> {
 				db,
 			},
 		});
+		self.store(StoreInstr::FieldCheck {
+			check: FieldCheck::Destination {
+				old: field,
+				ns,
+				db,
+			},
+		});
 		self.bind(import)?;
 		// On a table that enforces migrations the field's stored values go with it; an import
 		// restores definitions as they were.
@@ -624,6 +653,7 @@ impl Ddl<'_, '_> {
 			table: table_reg,
 			old: field,
 			new: None,
+			rebuild: false,
 		});
 		self.stamp(ns, db, tb)?;
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
@@ -786,6 +816,29 @@ impl Ddl<'_, '_> {
 			});
 			self.bind(import)?;
 		}
+		// A field a `MATERIALIZE INTO` clause fills is not altered, and the clause an altered
+		// field holds is judged against its destination.
+		{
+			let import = self.label()?;
+			self.store(StoreInstr::JumpIfImport {
+				target: import,
+			});
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::Destination {
+					old: before,
+					ns,
+					db,
+				},
+			});
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::Materialize {
+					field: stored,
+					ns,
+					db,
+				},
+			});
+			self.bind(import)?;
+		}
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
 		let tb_name = self.load(tb)?;
 		let table_def = self.expect_table(tb_key, tb_name)?;
@@ -857,6 +910,7 @@ impl Ddl<'_, '_> {
 			table: table_reg,
 			old: before,
 			new: Some(stored),
+			rebuild: false,
 		});
 		self.bind(import)?;
 		self.stamp(ns, db, tb)?;

@@ -57,8 +57,8 @@ use super::ops::{
 	SortShape, SourceAttrs, SourceOrder, SourceRefShape, StepAttrs, Stored, SubscriberAdmission,
 	SubscriberAttrs, SubscriberLayer, SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd,
 	TxnRegionMode, TxnStart, UseTarget, WriteAttrs, WriteBody, WriteBranching, WriteDerived,
-	WriteGates, WriteImage, WriteIndexes, WriteMark, WriteRepairs, WriteRetry, WriteSchema,
-	WriteStageKind, WriteStages, WriteStored, WriteViews,
+	WriteGates, WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs, WriteRetry,
+	WriteSchema, WriteStageKind, WriteStages, WriteStored, WriteViews,
 };
 use crate::doc::Action as DocAction;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -2822,6 +2822,7 @@ text_struct!(WriteStored {
 	referenced: Stored,
 	schema: WriteSchema,
 	reference_fields: Box<[Idiom]>,
+	materialized: Box<[WriteMaterialized]>,
 	index_set: WriteIndexes,
 	view_set: WriteViews,
 	repair_set: WriteRepairs,
@@ -2831,6 +2832,12 @@ text_enum!(ImageLayers {
 	unit [Unstated, Enforced]
 	tuple [Stack(layers: Vec<SubscriberLayer>)]
 	named []
+});
+text_struct!(WriteMaterialized {
+	field: Idiom,
+	table: TableName,
+	dest: Idiom,
+	filtered: bool
 });
 text_struct!(WriteIndexes {
 	defs: IndexDefs,

@@ -23,6 +23,7 @@ pub(crate) mod alter;
 pub(crate) mod define;
 pub(crate) mod grant;
 pub(crate) mod key_scan;
+pub(crate) mod materialize;
 
 /// The general route into the engine, named here because a schema
 /// statement is its most frequent caller. See [`crate::exec::entry`].

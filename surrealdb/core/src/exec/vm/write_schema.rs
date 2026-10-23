@@ -542,6 +542,9 @@ pub(super) async fn step(
 			let content = matches!(spec_of(program, state)?.shape.data, Some(DataShape::Content));
 			loop {
 				let write = write_state(state)?;
+				// A write that maintains a `MATERIALIZE INTO` list may change its `READONLY`
+				// destination.
+				let maintaining = crate::exec::materialize::is_marked(write.in_flight()?.1.exec());
 				let schema = record(write)?;
 				let creating = schema.creating;
 				let table = Arc::clone(&schema.table);
@@ -576,7 +579,7 @@ pub(super) async fn step(
 				// A `READONLY` field may not change once the record exists; a
 				// place a `CONTENT` clause left empty is the clause restating the
 				// record, and is restored.
-				if fd.readonly && !creating {
+				if fd.readonly && !creating && !maintaining {
 					if val == old {
 						continue;
 					}

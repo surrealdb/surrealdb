@@ -24,8 +24,8 @@ use super::ops::{
 	DerivedField, EventClause, EventDefs, EventShape, EventsAttrs, FieldClause, FieldClauses,
 	FieldGate, FieldStep, GateClause, ImageLayers, ImageView, IndexDefs, LogOp, LoopKind,
 	RepairField, RepairKind, RepairTable, Stored, TableDefs, WriteBody, WriteBranching,
-	WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark, WriteRepairs, WriteRetry,
-	WriteSchema, WriteStageKind, WriteStored, WriteViews,
+	WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs,
+	WriteRetry, WriteSchema, WriteStageKind, WriteStored, WriteViews,
 };
 use super::seam::invariant;
 use crate::catalog::aggregation::AggregateFields;
@@ -1678,6 +1678,7 @@ pub(crate) fn stored_of(
 		referenced: kind,
 		schema: WriteSchema::default(),
 		reference_fields: Box::default(),
+		materialized: Box::default(),
 		index_set: WriteIndexes::default(),
 		view_set: WriteViews::default(),
 		repair_set: WriteRepairs::default(),
@@ -1724,6 +1725,19 @@ pub(crate) fn stored_of(
 			.iter()
 			.filter(|field| field.reference.is_some())
 			.map(|field| field.name.clone())
+			.collect(),
+		materialized: snapshot
+			.fields
+			.iter()
+			.filter_map(|field| {
+				let materialize = field.reference.as_ref()?.materialize.as_ref()?;
+				Some(WriteMaterialized {
+					field: field.name.clone(),
+					table: materialize.table.clone(),
+					dest: materialize.field.clone(),
+					filtered: materialize.filter.is_some(),
+				})
+			})
 			.collect(),
 		index_set: WriteIndexes::default(),
 		view_set: WriteViews::default(),

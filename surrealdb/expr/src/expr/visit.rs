@@ -1152,8 +1152,11 @@ implement_visitor! {
 	}
 
 	fn visit_reference(this, d: &Reference){
-		this.visit_delete_strategy(&d.on_delete)
-
+		this.visit_delete_strategy(&d.on_delete)?;
+		if let Some(filter) = d.materialize.as_ref().and_then(|m| m.filter.as_ref()){
+			this.visit_expr(filter)?;
+		}
+		Ok(())
 	}
 
 	fn visit_delete_strategy(this, d: &ReferenceDeleteStrategy){
@@ -2704,8 +2707,11 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_reference(this, d: &mut Reference){
-		this.visit_mut_delete_strategy(&mut d.on_delete)
-
+		this.visit_mut_delete_strategy(&mut d.on_delete)?;
+		if let Some(filter) = d.materialize.as_mut().and_then(|m| m.filter.as_mut()){
+			this.visit_mut_expr(filter)?;
+		}
+		Ok(())
 	}
 
 	fn visit_mut_delete_strategy(this, d: &mut ReferenceDeleteStrategy){

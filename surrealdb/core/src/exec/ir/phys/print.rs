@@ -106,7 +106,8 @@ use crate::exec::ir::logical::ops::{
 	SourceRefShape, StepAttrs, Stored, SubscriberAdmission, SubscriberAttrs, SubscriberLayer,
 	SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget,
 	WriteAttrs, WriteBody, WriteBranching, WriteDerived, WriteGates, WriteImage, WriteIndexes,
-	WriteMark, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind, WriteStored, WriteViews,
+	WriteMark, WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind,
+	WriteStored, WriteViews,
 };
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::object_extract::PathSegment;
@@ -1959,6 +1960,7 @@ text_struct!(WriteStored {
 	referenced: Stored,
 	schema: WriteSchema,
 	reference_fields: Box<[Idiom]>,
+	materialized: Box<[WriteMaterialized]>,
 	index_set: WriteIndexes,
 	view_set: WriteViews,
 	repair_set: WriteRepairs,
@@ -1968,6 +1970,12 @@ text_enum!(ImageLayers {
 	unit [Unstated, Enforced]
 	tuple [Stack(layers: Vec<SubscriberLayer>)]
 	named []
+});
+text_struct!(WriteMaterialized {
+	field: Idiom,
+	table: TableName,
+	dest: Idiom,
+	filtered: bool
 });
 text_struct!(WriteIndexes {
 	defs: IndexDefs,
@@ -4278,6 +4286,7 @@ mod tests {
 				referenced: Stored::Declared,
 				schema: Default::default(),
 				reference_fields: Box::default(),
+				materialized: Box::default(),
 				index_set: Default::default(),
 				view_set: crate::exec::ir::logical::ops::WriteViews::default(),
 				repair_set: crate::exec::ir::logical::ops::WriteRepairs {

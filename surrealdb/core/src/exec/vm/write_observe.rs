@@ -507,7 +507,10 @@ async fn events(program: &Program, unit: UnitId, depth: u32, state: &mut State) 
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
 	let levels = write.maintaining.len();
 	let (row, ctx) = write.in_flight()?;
-	if !is_observed(row, &ctx) || ctx.events.is_empty() {
+	if !is_observed(row, &ctx)
+		|| ctx.events.is_empty()
+		|| crate::exec::materialize::is_marked(ctx.exec())
+	{
 		return Ok(());
 	}
 	// A write evaluated one expression at a time has spent its way to the

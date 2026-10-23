@@ -1123,7 +1123,7 @@ impl Visitor for ArrivalVisitor {
 			migrate: _,
 			key_names: _,
 		} []
-		visit_reference(Reference) { on_delete: _ } []
+		visit_reference(Reference) { on_delete: _, materialize: _ } []
 		visit_define_event(DefineEventStatement) {
 			kind: _,
 			name: _,

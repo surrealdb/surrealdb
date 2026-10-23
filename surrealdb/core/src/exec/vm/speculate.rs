@@ -320,12 +320,14 @@ async fn reached(
 						// A custom action runs its expression.
 						Some(Reference {
 							on_delete: ReferenceDeleteStrategy::Custom(then),
+							..
 						}) => reach.expr(then),
 						// A cascade deletes the referencing record and an
 						// unset updates it: either is a write of its table.
 						Some(Reference {
 							on_delete:
 								ReferenceDeleteStrategy::Cascade | ReferenceDeleteStrategy::Unset,
+							..
 						}) => {
 							reach.written.insert(tb.name.clone());
 						}
@@ -351,6 +353,14 @@ async fn reached(
 			event.then.iter().for_each(|then| reach.expr(then));
 		}
 		for field in fields.iter() {
+			// A materialized list is written onto the referenced table, and its condition is
+			// judged on this table's record.
+			if let Some(materialize) =
+				field.reference.as_ref().and_then(|reference| reference.materialize.as_ref())
+			{
+				reach.written.insert(materialize.table.clone());
+				materialize.filter.iter().for_each(|clause| reach.expr(clause));
+			}
 			field.value.iter().chain(&field.assert).for_each(|clause| reach.expr(clause));
 			if let crate::catalog::DefineDefault::Always(clause)
 			| crate::catalog::DefineDefault::Set(clause) = &field.default

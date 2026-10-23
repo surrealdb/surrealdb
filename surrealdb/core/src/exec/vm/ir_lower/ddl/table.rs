@@ -583,6 +583,14 @@ impl Ddl<'_, '_> {
 			db,
 			tb,
 		});
+		// A table whose field a `MATERIALIZE INTO` clause fills is not removed.
+		self.store(StoreInstr::FieldCheck {
+			check: crate::exec::vm::program::FieldCheck::TableFilled {
+				ns,
+				db,
+				table: tb,
+			},
+		});
 		// Each edge the table holds is also a pointer on each of its endpoints, outside the
 		// table's keyspace, so those go while the edges are still there to name them.
 		self.store(StoreInstr::PurgeEdgePointers {

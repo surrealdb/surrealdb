@@ -71,9 +71,32 @@ pub(in crate::exec::vm) enum ReferenceInstr {
 	},
 	/// Remove the drained reference keys.
 	Release,
+	/// Keep the lists of the written table's `MATERIALIZE INTO` fields in step with the record in
+	/// flight: with the change from its before-image to its after-image, or, when `release`,
+	/// with its removal.
+	Materialize {
+		steps: Arc<[MaterializeStep]>,
+		release: bool,
+	},
 }
 
 assert_plain!(ReferenceInstr);
+
+/// The maintenance of the list one `MATERIALIZE INTO` field keeps.
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::exec::vm) struct MaterializeStep {
+	/// The referencing field of the written table.
+	pub(in crate::exec::vm) field: Idiom,
+	/// The referenced table that holds the list.
+	pub(in crate::exec::vm) table: TableName,
+	/// The statement that judges the clause's `WHERE` condition on an image of the record, when
+	/// the clause has one.
+	pub(in crate::exec::vm) filter: Option<UnitId>,
+	/// The statement that adds the record to a list, or takes it out.
+	pub(in crate::exec::vm) write: UnitId,
+}
+
+assert_plain!(MaterializeStep);
 
 /// The repairs of one referencing table: for each of its `REFERENCE` fields
 /// that can name a record of the table being deleted from, by the name a
@@ -145,6 +168,9 @@ impl ReferenceInstr {
 			| ReferenceInstr::Repair {
 				..
 			}
+			| ReferenceInstr::Materialize {
+				..
+			}
 			| ReferenceInstr::Release => None,
 		}
 	}
@@ -177,6 +203,13 @@ pub(super) async fn step(
 			tables,
 		} => {
 			repair(program, tables, state).await?;
+			return Ok(next);
+		}
+		ReferenceInstr::Materialize {
+			steps,
+			release,
+		} => {
+			materialize(program, steps, *release, state).await?;
 			return Ok(next);
 		}
 		ReferenceInstr::Drain {
@@ -223,6 +256,9 @@ pub(super) async fn step(
 			..
 		}
 		| ReferenceInstr::Repair {
+			..
+		}
+		| ReferenceInstr::Materialize {
 			..
 		} => return Err(internal("a cascade step taken out of order")),
 	}
@@ -338,10 +374,10 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 		RepairStrategy::Cascade {
 			unit,
 		} => {
-			let frame = ctx
-				.exec()
-				.for_reference_cascade()
-				.with_params([(purge::PURGE_REFERENCING, Value::from(referencing))]);
+			let frame = ctx.exec().for_reference_cascade().with_params([
+				(purge::PURGE_REFERENCING, Value::from(referencing)),
+				(purge::PURGE_DELETED, Value::from(rid.clone())),
+			]);
 			run_statement(program, *unit, frame, state)
 				.await
 				.map(|_| ())
@@ -607,4 +643,147 @@ async fn custom(
 		)),
 		Err(failure) => Err(purge::wrap(rid, super::hide_conflict_record(failure, hide))),
 	}
+}
+
+/// What one `MATERIALIZE INTO` field of the record in flight needs done, read off the record before
+/// the statements that do it run.
+struct Pending {
+	step: usize,
+	previous: Value,
+	current: Value,
+	/// The images the clause's condition is judged on, when it has one: the record as it was and
+	/// as it is, each absent where the record was not or is no longer there.
+	before: Option<Value>,
+	after: Option<Value>,
+}
+
+/// Keep the lists of the `MATERIALIZE INTO` fields of the record in flight in step with it.
+///
+/// A record is in the list of the record it references while its condition holds, so a field's
+/// list changes by the difference between the records the before-image listed itself with and
+/// the ones the after-image does. That is one-sided in each direction: a record leaves the lists
+/// it was in and no longer belongs to, and joins the ones it was not in. A deleted record
+/// (`release`) leaves every list it was in. An import restores the lists with the records they
+/// belong to, and a record deleted by the cascade of the delete of the record whose list it is in
+/// leaves nothing to keep.
+async fn materialize(
+	program: &Program,
+	steps: &[MaterializeStep],
+	release: bool,
+	state: &mut State,
+) -> FlowResult<()> {
+	let write =
+		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
+	let (row, ctx) = write.in_flight()?;
+	let exec = ctx.exec().clone();
+	if exec.options().is_some_and(|options| options.import) {
+		return Ok(());
+	}
+	let child = deleted(row)?;
+	let creating = row.initial.is_none();
+	if !release && row.initial == row.current {
+		return Ok(());
+	}
+	let mut pending = Vec::new();
+	for (at, step) in steps.iter().enumerate() {
+		let (previous, current) = if release {
+			(row.current.pick(&step.field), Value::None)
+		} else {
+			(row.initial.pick(&step.field), row.current.pick(&step.field))
+		};
+		if step.filter.is_none() && previous == current {
+			continue;
+		}
+		let (before, after) = match (step.filter, release) {
+			(None, _) => (None, None),
+			(Some(_), true) => (Some(row.current.clone()), None),
+			(Some(_), false) => {
+				((!creating).then(|| row.initial.clone()), Some(row.current.clone()))
+			}
+		};
+		pending.push(Pending {
+			step: at,
+			previous,
+			current,
+			before,
+			after,
+		});
+	}
+	let deleting = exec.ctx().value(purge::PURGE_DELETED).cloned();
+	for work in pending {
+		let step = &steps[work.step];
+		let listed = |value: &Value| -> Vec<RecordId> {
+			let mut ids: Vec<&RecordId> = if let Value::RecordId(id) = value {
+				vec![id]
+			} else if let Value::Array(items) = value {
+				items.iter().filter_map(|v| v.as_record()).collect()
+			} else if let Value::Set(items) = value {
+				items.iter().filter_map(|v| v.as_record()).collect()
+			} else {
+				Vec::new()
+			};
+			ids.retain(|id| id.table == step.table);
+			ids.sort();
+			ids.dedup();
+			ids.into_iter().cloned().collect()
+		};
+		let was = match (step.filter, work.before) {
+			(Some(unit), Some(image)) => {
+				if judged(program, unit, &exec, image, state).await? {
+					listed(&work.previous)
+				} else {
+					Vec::new()
+				}
+			}
+			(Some(_), None) => Vec::new(),
+			(None, _) => listed(&work.previous),
+		};
+		let now = match (step.filter, work.after) {
+			(Some(unit), Some(image)) => {
+				if judged(program, unit, &exec, image, state).await? {
+					listed(&work.current)
+				} else {
+					Vec::new()
+				}
+			}
+			(Some(_), None) => Vec::new(),
+			(None, _) => listed(&work.current),
+		};
+		let left: Vec<&RecordId> = was.iter().filter(|id| !now.contains(id)).collect();
+		let joined: Vec<&RecordId> = now.iter().filter(|id| !was.contains(id)).collect();
+		for (adding, ids) in [(false, left), (true, joined)] {
+			for parent in ids {
+				if deleting.as_ref().is_some_and(|deleted| deleted == &Value::from(parent.clone()))
+				{
+					continue;
+				}
+				let frame = exec.with_perms_suppressed(true).with_params([
+					(crate::exec::materialize::PARENT, Value::from(parent.clone())),
+					(crate::exec::materialize::CHILD, Value::from(child.clone())),
+					(crate::exec::materialize::ADD, Value::Bool(adding)),
+					crate::exec::materialize::mark(),
+				]);
+				run_statement(program, step.write, frame, state).await?;
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Whether the condition of a `MATERIALIZE INTO` clause, statement `unit`, holds for `image`.
+async fn judged(
+	program: &Program,
+	unit: UnitId,
+	exec: &ExecutionContext,
+	image: Value,
+	state: &mut State,
+) -> FlowResult<bool> {
+	let frame =
+		exec.with_perms_suppressed(true).with_params([(crate::exec::materialize::IMAGE, image)]);
+	let rows = run_statement(program, unit, frame, state).await?;
+	Ok(if let Value::Array(rows) = &rows {
+		rows.0.first().is_some_and(Value::is_truthy)
+	} else {
+		rows.is_truthy()
+	})
 }

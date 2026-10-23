@@ -445,6 +445,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let (a, b) = self.reference_strategy()?;
 				self.push_clause(Cl::Reference, a, b, t.start, first)?;
 			}
+			Kw::Materialize if is(D::Field) => self.materialize_clause()?,
 			Kw::Migrate if is(D::Field) => self.migrate_clause(false)?,
 			Kw::Permissions
 				if is(D::Param) || is(D::Bucket) || is(D::Function) || is(D::Module) =>

@@ -193,6 +193,23 @@ pub(crate) async fn define_field_definition_apply(
 		}
 	}
 
+	// A `MATERIALIZE INTO` clause fills a destination its table declares, and a
+	// definition that replaces a destination is refused. An import restores
+	// definitions as they were.
+	if !opt.import {
+		if existing.is_some() {
+			crate::ddl::materialize::refuse_changing_destination(
+				&txn,
+				ns,
+				db,
+				&tb_name,
+				&definition.name,
+			)
+			.await?;
+		}
+		crate::ddl::materialize::validate(&txn, ns, db, definition).await?;
+	}
+
 	// Refuse a field nested in something that cannot hold it, from either
 	// end. An import skips this check, so exported definitions still replay.
 	if !opt.import {
@@ -262,6 +279,8 @@ pub(crate) async fn define_field_definition_apply(
 			definition,
 		)
 		.await?;
+		let frame = crate::ddl::frame(ctx, opt, None).await;
+		crate::exec::materialize::backfill(&frame, existing.as_deref(), definition, true).await?;
 	}
 
 	// Refresh the table cache
