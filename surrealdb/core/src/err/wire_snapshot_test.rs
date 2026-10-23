@@ -627,8 +627,12 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 			DocError::DeleteRejectedByReference("sample".to_string(), "sample".to_string()),
 		),
 		(
+			"DeleteRejectedByHiddenReference",
+			DocError::DeleteRejectedByHiddenReference(Some("sample".to_string())),
+		),
+		(
 			"RefsUpdateFailure",
-			DocError::RefsUpdateFailure("sample".to_string(), "sample".to_string()),
+			DocError::RefsUpdateFailure(Some("sample".to_string()), "sample".to_string()),
 		),
 		(
 			"EvNamespaceMismatch",

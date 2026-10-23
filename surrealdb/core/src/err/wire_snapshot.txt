@@ -147,6 +147,7 @@ FieldDependencyCycle	{ cause: NONE, code: -32000, kind: 'Configuration', message
 FieldCoerce	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: "Couldn't coerce value for field `sample` of `sample`: Expected `sample` but found `NONE`" }
 PatchPointerNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "Cannot read `sample` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it" }
 DeleteRejectedByReference	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot delete `sample` as it is referenced by `sample` with an ON DELETE REJECT clause' }
+DeleteRejectedByHiddenReference	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot delete `sample` as it is referenced by another record with an ON DELETE REJECT clause' }
 RefsUpdateFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An error occurred while updating references for `sample`: sample' }
 EvNamespaceMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the namespace `sample` does not match the namespace this event has been generated from.' }
 EvDatabaseMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the database `sample` does not match the database this event has been generated from.' }

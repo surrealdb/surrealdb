@@ -18,8 +18,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use surrealdb_types::ToSql;
-
 use super::store::table_is_lightweight;
 use crate::doc::Error as DocError;
 use crate::exec::operators::write::ctx::WriteCtx;
@@ -192,15 +190,14 @@ pub(crate) fn subtract_data(field: &Idiom) -> Data {
 	}])
 }
 
-/// Report a failed repair as the referential failure it is, naming the record
-/// whose deletion triggered it.
-pub(crate) fn wrap(rid: &RecordId, err: ControlFlow) -> ControlFlow {
-	err.map_err(|err| anyhow::anyhow!(DocError::RefsUpdateFailure(rid.to_sql(), err.to_string())))
+/// Report a failed repair as the referential failure it is. The record whose
+/// deletion triggered it is named by `rid`, already reduced to the display the
+/// caller is owed: `Some(id)` when the caller may read that record, and `None`
+/// to withhold it so a record a permission-checked caller cannot read is not
+/// disclosed in the wrapped message.
+pub(crate) fn wrap(rid: Option<String>, err: ControlFlow) -> ControlFlow {
+	err.map_err(|err| anyhow::anyhow!(DocError::RefsUpdateFailure(rid, err.to_string())))
 }
-
-// ===========================================================================
-// The statements, built rather than parsed
-// ===========================================================================
 
 // ===========================================================================
 // The statements, built rather than parsed

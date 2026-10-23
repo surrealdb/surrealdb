@@ -149,9 +149,30 @@ pub(crate) enum Error {
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
 
-	/// Something went wrong while updating references
-	#[error("An error occurred while updating references for `{0}`: {1}")]
-	RefsUpdateFailure(String, String),
+	/// The referential rejection with the records withheld from a caller whose
+	/// SELECT is permission checked and may not include them. The rejection still
+	/// signals that a reference exists (the integrity behaviour), but naming the
+	/// referencing record discloses a row the caller cannot read, and naming the
+	/// deleted record does the same when a cascade reached one the caller never
+	/// selected. The deleted id is carried only when it is the caller's own
+	/// target (`Some`); a cascade reached target is withheld (`None`).
+	#[error(
+		"Cannot delete {} as it is referenced by another record with an ON DELETE REJECT clause",
+		.0.as_deref().map_or_else(|| "the record".to_owned(), |id| format!("`{id}`"))
+	)]
+	DeleteRejectedByHiddenReference(Option<String>),
+
+	/// Something went wrong while updating references. The record whose
+	/// references were being updated is named only when a permission-checked
+	/// caller may read it (`Some`); otherwise it is withheld (`None`), so a
+	/// record reached through a cascade that the caller cannot read is not
+	/// disclosed in the wrapped message.
+	#[error(
+		"An error occurred while updating references{location}: {cause}",
+		location = .0.as_deref().map_or_else(String::new, |id| format!(" for `{id}`")),
+		cause = .1,
+	)]
+	RefsUpdateFailure(Option<String>, String),
 
 	#[error(
 		"Error with the event {0}. The ID of the namespace `{1}` does not match the namespace this event has been generated from."
@@ -288,6 +309,15 @@ impl LeafError for Error {
 			| Error::EvNamespaceMismatch(..)
 			| Error::EvDatabaseMismatch(..)
 			| Error::EvReachMaxDepth(..) => internal_todo(message),
+			// An ON DELETE REJECT refusal with the referencing record redacted
+			// for a permission-checked caller. The delete cannot proceed while
+			// the reference exists, which the caller resolves by removing it, so
+			// it is a validation fault rather than an engine one. The released
+			// sibling `DeleteRejectedByReference` stays untyped above: a shipped
+			// error keeps its public kind, so only this new variant is typed.
+			Error::DeleteRejectedByHiddenReference(..) => {
+				TypesError::validation(message, ValidationError::InvalidRequest)
+			}
 			// A write that gives a record in a table with named record id
 			// components an id that does not fit them, or restates one of them
 			// differently. The author of the statement can correct it, so it is

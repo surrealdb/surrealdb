@@ -32,14 +32,16 @@ use std::sync::Arc;
 use surrealdb_types::ToSql;
 
 use super::{PooledState, State, internal, run_image};
-use crate::catalog::Error as CatalogError;
+use crate::catalog::{Error as CatalogError, Permission};
 use crate::doc::Error as DocError;
 use crate::err::EngineError;
 use crate::exec::operators::write::scope::KeptContexts;
 use crate::exec::operators::write::stages::purge;
+use crate::exec::permission::action_is_checked;
 use crate::exec::vm::program::{Label, Program, UnitId};
 use crate::exec::{Error as ExecError, ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, Idiom};
+use crate::iam::Action;
 use crate::key::schema::ReferenceKey;
 use crate::val::{RecordId, TableName, Value};
 
@@ -357,6 +359,21 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 				name: field.clone(),
 			}))
 		})?;
+	// The id to name in any error this repair raises is the caller's to see. A
+	// caller whose reads are permission checked is shown an id only for a record
+	// it can read, taken here as one whose table grants `SELECT` in full: a table
+	// that hides rows (`FOR select NONE`, or a row predicate) may hide this
+	// record, and a bare-table delete or a cascade can reach a record the caller
+	// never selected, so its id is withheld rather than crossing the SELECT
+	// boundary. A caller whose reads are not checked (a system or root actor) is
+	// shown every id. The gate is the principal's role and level alone
+	// ([`principal_reads_checked`]), never the frame's enforcement state.
+	let checked = principal_reads_checked(ctx.exec())?;
+	let shown = if checked {
+		table_grants_full_select(ctx.exec(), &rid.table).await?.then(|| rid.to_sql())
+	} else {
+		Some(rid.to_sql())
+	};
 	// A UNIQUE-index conflict a repair's write raises is redacted before
 	// `purge::wrap` stringifies it into the referential failure: the wrapper
 	// embeds the inner error's text and drops the typed `IndexExists`, so the
@@ -368,9 +385,18 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 	let hide = ctx.exec().caller_view_checked();
 	match strategy {
 		RepairStrategy::Ignore => Ok(()),
-		RepairStrategy::Reject => Err(ControlFlow::Err(anyhow::anyhow!(
-			DocError::DeleteRejectedByReference(rid.to_sql(), referencing.to_sql())
-		))),
+		RepairStrategy::Reject => {
+			// The referencing record is always withheld from a permission-checked
+			// caller: its existence is the integrity signal, its id is not. The
+			// deleted record is named only when `shown` carries it. A caller whose
+			// reads are not checked sees both specific ids.
+			let err = if checked {
+				DocError::DeleteRejectedByHiddenReference(shown)
+			} else {
+				DocError::DeleteRejectedByReference(rid.to_sql(), referencing.to_sql())
+			};
+			Err(ControlFlow::Err(anyhow::anyhow!(err)))
+		}
 		RepairStrategy::Cascade {
 			unit,
 		} => {
@@ -381,7 +407,7 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 			run_statement(program, *unit, frame, state)
 				.await
 				.map(|_| ())
-				.map_err(|err| purge::wrap(&rid, super::hide_conflict_record(err, hide)))
+				.map_err(|err| purge::wrap(shown, super::hide_conflict_record(err, hide)))
 		}
 		RepairStrategy::Unset {
 			field,
@@ -390,11 +416,44 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 			subtract,
 		} => unset_link(program, [*read, *unset, *subtract], field, &rid, &referencing, state)
 			.await
-			.map_err(|err| purge::wrap(&rid, super::hide_conflict_record(err, hide))),
+			.map_err(|err| purge::wrap(shown, super::hide_conflict_record(err, hide))),
 		RepairStrategy::Custom {
 			clause,
-		} => custom(program, *clause, &rid, referencing, state).await,
+		} => custom(program, *clause, &rid, referencing, shown, state).await,
 	}
+}
+
+/// Whether the principal a repair's error reaches has its reads permission
+/// checked, by its role and actor level alone ([`action_is_checked`]).
+///
+/// The frame's enforcement state is deliberately not consulted. A repair can
+/// run beneath a frame that suppresses enforcement for the definer's own work —
+/// an ON DELETE CASCADE, an ON DELETE THEN clause, a `DEFINE EVENT` body — and
+/// the error it raises still propagates to the session's principal, so whether
+/// that principal may see an id is a property of the principal, not of the
+/// frame. An `AUTH LIMIT` on the way can only narrow the principal, and so can
+/// only withhold more.
+fn principal_reads_checked(exec: &ExecutionContext) -> FlowResult<bool> {
+	let db = exec.database().map_err(|e| ControlFlow::Err(e.into()))?;
+	Ok(action_is_checked(
+		exec.auth_enabled(),
+		exec.auth(),
+		Action::View,
+		Some(db.ns_name()),
+		Some(db.db_name()),
+	))
+}
+
+/// Whether `table` grants `SELECT` in full, so a permission-checked caller may
+/// read every record it holds and naming one in an error discloses nothing it
+/// could not already see. A table that hides rows (`FOR select NONE`, or a row
+/// predicate) does not qualify: this is a table-level test, so a record a row
+/// predicate might admit is treated conservatively as unreadable rather than
+/// evaluated here, and its id is withheld.
+async fn table_grants_full_select(exec: &ExecutionContext, table: &TableName) -> FlowResult<bool> {
+	let db = exec.database().map_err(|e| ControlFlow::Err(e.into()))?;
+	let def = db.get_table_def(table, None).await.map_err(ControlFlow::Err)?;
+	Ok(def.is_some_and(|def| matches!(def.permissions.select, Permission::Full)))
 }
 
 /// Take the deleted record `rid` out of `field` of `referencing`.
@@ -620,6 +679,7 @@ async fn custom(
 	clause: u16,
 	rid: &RecordId,
 	referencing: RecordId,
+	shown: Option<String>,
 	state: &mut State,
 ) -> FlowResult<()> {
 	let exec = held_exec(state)?;
@@ -633,15 +693,15 @@ async fn custom(
 		.with_caller_perms()
 		.with_params([(purge::REFERENCE, Value::from(rid.clone()))])
 		.dive()
-		.map_err(|err| purge::wrap(rid, ControlFlow::Err(err)))?;
+		.map_err(|err| purge::wrap(shown.clone(), ControlFlow::Err(err)))?;
 	let ran = run_image(program, clause, Value::from(referencing), Some(frame), state, &exec).await;
 	match ran {
 		Ok(_) | Err(ControlFlow::Return(_)) => Ok(()),
 		Err(ControlFlow::Break | ControlFlow::Continue) => Err(purge::wrap(
-			rid,
+			shown,
 			ControlFlow::Err(anyhow::Error::new(ExecError::InvalidControlFlow)),
 		)),
-		Err(failure) => Err(purge::wrap(rid, super::hide_conflict_record(failure, hide))),
+		Err(failure) => Err(purge::wrap(shown, super::hide_conflict_record(failure, hide))),
 	}
 }
 
