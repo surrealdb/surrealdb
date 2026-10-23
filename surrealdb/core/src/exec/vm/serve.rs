@@ -407,6 +407,11 @@ pub(crate) async fn request_statement(
 			"a statement of a request is planned in a transaction".to_owned()
 		));
 	};
+	let shadowed: Vec<String> = crate::exec::planner::UNIT_RUNTIME_PARAMS
+		.iter()
+		.filter(|name| !folded.contains(name))
+		.map(|name| (*name).to_owned())
+		.collect();
 	let op = Arc::new(op);
 	let compile = || async {
 		Ok(super::out_of_line(|| {
@@ -418,7 +423,7 @@ pub(crate) async fn request_statement(
 				principal.clone(),
 				0,
 				exec.root().perms_suppressed,
-				&[],
+				&shadowed,
 				binds_rows,
 			)
 		})
@@ -429,12 +434,13 @@ pub(crate) async fn request_statement(
 		UnitObject::SessionStatement {
 			op: Arc::clone(&op),
 			session,
-			shadowed: Vec::new(),
+			shadowed: shadowed.clone(),
 			binds_rows,
 			sources: Vec::new(),
 		},
 		principal.as_deref(),
 	);
+	let params = params.into_iter().filter(|name| !shadowed.contains(name)).collect();
 	served(exec, units.session_statements(), keyed, params, compile).await
 }
 
@@ -503,6 +509,12 @@ pub(crate) async fn kept_request_statement(
 			"a statement of a request is planned in a transaction".to_owned()
 		));
 	};
+	let mut shadowed = bound;
+	for name in crate::exec::planner::UNIT_RUNTIME_PARAMS {
+		if !folded.contains(&name) && !shadowed.iter().any(|shadow| shadow == name) {
+			shadowed.push((*name).to_owned());
+		}
+	}
 	let op = Arc::new(op);
 	let compile = || async {
 		Ok(super::out_of_line(|| {
@@ -513,7 +525,7 @@ pub(crate) async fn kept_request_statement(
 				Arc::clone(&txn),
 				principal.clone(),
 				exec.root().perms_suppressed,
-				&bound,
+				&shadowed,
 				false,
 			)
 		})
@@ -524,13 +536,13 @@ pub(crate) async fn kept_request_statement(
 		UnitObject::SessionStatement {
 			op: Arc::clone(&op),
 			session,
-			shadowed: bound.clone(),
+			shadowed: shadowed.clone(),
 			binds_rows: false,
 			sources,
 		},
 		principal.as_deref(),
 	);
-	let params = params.into_iter().filter(|name| !bound.contains(name)).collect();
+	let params = params.into_iter().filter(|name| !shadowed.contains(name)).collect();
 	served(exec, units.session_statements(), keyed, params, compile).await
 }
 
@@ -973,6 +985,74 @@ mod tests {
 				crate::val::RecordIdKey::String(user.into()),
 			));
 			assert_eq!(value, expected, "{user}");
+			ctx.txn().cancel().await.expect("cancel");
+		}
+	}
+
+	/// A statement cached in `session_statements()` because its surface text
+	/// names `$auth` is keyed only by `$auth`; any other session parameter a
+	/// table permission clause reads (`$session`, `$token`, `$access`) must be
+	/// read at run time rather than folded from the first session that
+	/// compiled the plan.
+	#[tokio::test]
+	async fn a_session_statement_does_not_fold_unmentioned_session_params() {
+		let db = TestDb::new_with_auth(
+			"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD;
+			DEFINE TABLE doc SCHEMALESS
+				PERMISSIONS FOR select WHERE ip = $session.ip;
+			CREATE doc:1 SET owner = user:alice, ip = '10.0.0.1';
+			CREATE doc:2 SET owner = user:alice, ip = '10.0.0.2';
+			",
+		)
+		.await;
+		let parse_op = |sql: &str| {
+			let expr = crate::exec::operators::test_util::parse_expr(sql);
+			let crate::expr::logical::LogicalExpr::Subquery(op) = expr else {
+				panic!("not a statement: {expr:?}");
+			};
+			(*op).clone()
+		};
+
+		for (ip, sees) in [("10.0.0.1", 1), ("10.0.0.2", 2)] {
+			let mut session = record_user("alice");
+			session.ip = Some(ip.to_owned());
+			let ctx = db.exec_ctx_as(&session, crate::kvs::TransactionType::Read).await;
+			let principal = Some(Arc::clone(&ctx.root().auth));
+			let op = parse_op("(SELECT VALUE id FROM doc WHERE owner = $auth)");
+			let plan = super::request_statement(&ctx, op, principal, false).await.expect("plans");
+			let rows = crate::exec::operators::test_util::collect(&plan, &ctx).await;
+			let expected = crate::val::Value::RecordId(crate::val::RecordId::new(
+				"doc".into(),
+				crate::val::RecordIdKey::Number(sees),
+			));
+			assert_eq!(rows, vec![expected], "request_statement for ip {ip}");
+			ctx.txn().cancel().await.expect("cancel");
+		}
+
+		for (ip, key, sees) in
+			[("10.0.0.1", 1, vec![1]), ("10.0.0.2", 1, vec![]), ("10.0.0.2", 2, vec![2])]
+		{
+			let mut session = record_user("alice");
+			session.ip = Some(ip.to_owned());
+			let ctx = db
+				.exec_ctx_as(&session, crate::kvs::TransactionType::Read)
+				.await
+				.with_params([("k", crate::val::Value::from(key))]);
+			let principal = Some(Arc::clone(&ctx.root().auth));
+			let op = parse_op("(SELECT VALUE id FROM type::record('doc', $k) WHERE owner = $auth)");
+			let plan = super::kept_request_statement(&ctx, op, principal).await.expect("plans");
+			let rows = crate::exec::operators::test_util::collect(&plan, &ctx).await;
+			let expected: Vec<crate::val::Value> = sees
+				.into_iter()
+				.map(|n| {
+					crate::val::Value::RecordId(crate::val::RecordId::new(
+						"doc".into(),
+						crate::val::RecordIdKey::Number(n),
+					))
+				})
+				.collect();
+			assert_eq!(rows, expected, "kept_request_statement for ip {ip}, key {key}");
 			ctx.txn().cancel().await.expect("cancel");
 		}
 	}
