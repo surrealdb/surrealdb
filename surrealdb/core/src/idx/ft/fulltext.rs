@@ -11,7 +11,7 @@ use roaring::treemap::IntoIter;
 use uuid::Uuid;
 
 use crate::catalog;
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{FullTextParams, Scoring};
 /// This module implements a concurrent full-text search index.
 ///
@@ -39,7 +39,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::index::tt::Tt;
 use crate::kvs::{COUNT_BATCH_SIZE, Key, Transaction, impl_kv_value_revisioned};
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, TableName, Value};
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
@@ -531,6 +531,64 @@ impl FullTextIndex {
 			BooleanOperator::And => qt.matches_and(&tks),
 			BooleanOperator::Or => qt.matches_or(&tks),
 		}
+	}
+
+	/// Evaluates a full-text match against a document value without a
+	/// query-planner built executor.
+	///
+	/// The planner normally evaluates `@@` while iterating a full-text index and
+	/// the result is read back through the executor. Conditions evaluated
+	/// outside such an iteration (LIVE SELECT `WHERE` clauses, `PERMISSIONS`
+	/// and `EVENT` predicates) have no executor, so the match is resolved here
+	/// against the value of the indexed field.
+	///
+	/// Returns `None` when the table has no full-text index for `idiom`, in
+	/// which case the caller decides how to handle the unmatched operator.
+	#[expect(clippy::too_many_arguments, reason = "resolve a match from the document context")]
+	pub(crate) async fn matches_field_value(
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		table: &TableName,
+		idiom: &Idiom,
+		bo: BooleanOperator,
+		query: String,
+		value: Value,
+	) -> Result<Option<bool>> {
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let txn = ctx.tx();
+		for ix in txn.all_tb_indexes(ns, db, table, None).await?.iter() {
+			if ix.prepare_remove {
+				continue;
+			}
+			let catalog::Index::FullText(p) = &ix.index else {
+				continue;
+			};
+			// A full-text index only supports matching on its first column
+			if ix.cols.first() != Some(idiom) {
+				continue;
+			}
+			let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
+			let fti = FullTextIndex::new(
+				ctx.get_index_stores(),
+				&txn,
+				ikb,
+				p,
+				&ctx.config.file_allowlist,
+			)
+			.await?;
+			let tokens = fti
+				.analyzer
+				.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query.into())
+				.await?;
+			let qt = QueryTerms {
+				tokens,
+				docs: vec![],
+				has_unknown_terms: false,
+			};
+			return fti.matches_value(stk, ctx, opt, &qt, bo, value).await.map(Some);
+		}
+		Ok(None)
 	}
 
 	async fn append_term_docs_delta(

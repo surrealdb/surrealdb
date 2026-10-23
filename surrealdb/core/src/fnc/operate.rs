@@ -5,6 +5,8 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Expr;
+use crate::expr::operator::BinaryOperator;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
 
@@ -178,7 +180,38 @@ pub(crate) async fn matches(
 ) -> Result<Value> {
 	let res = match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => true,
-		ExecutorOption::None => false,
+		ExecutorOption::None => {
+			// This condition is not evaluated while iterating an index, which
+			// happens for LIVE SELECT WHERE clauses, PERMISSIONS and EVENT
+			// predicates. Resolve the match against the document value using
+			// the table's full-text index definition instead of reporting a
+			// silent non-match.
+			match (doc, exp) {
+				(
+					Some(doc),
+					Expr::Binary {
+						left,
+						op: BinaryOperator::Matches(mo),
+						..
+					},
+				) => match (left.as_ref(), doc.rid.as_ref()) {
+					(Expr::Idiom(idiom), Some(rid)) => FullTextIndex::matches_field_value(
+						stk,
+						ctx,
+						opt,
+						&rid.table,
+						idiom,
+						mo.operator,
+						r.to_raw_string(),
+						l,
+					)
+					.await?
+					.unwrap_or(false),
+					_ => false,
+				},
+				_ => false,
+			}
+		}
 		ExecutorOption::Execute(exe, thg) => exe.matches(stk, ctx, opt, thg, exp, l, r).await?,
 	};
 	Ok(res.into())
