@@ -15,13 +15,6 @@ pub async fn exists(
 		// A record exists for the caller when a read of it by id finds
 		// one under the caller's permissions, so a record the caller may
 		// not select does not exist for it. No computed field is derived.
-		// A key that is an object with an `id` component answers from the
-		// key, as a path read of `id` does, without reading the record.
-		if let crate::val::RecordIdKey::Object(key) = &rid.key
-			&& let Some(id) = key.get("id")
-		{
-			return Ok(Value::Bool(!id.is_none()));
-		}
 		let exec = crate::exec::entry::frame(ctx, opt, doc).await;
 		let exec_ctx = exec.dive()?;
 		let found = crate::exec::operators::fetch::record_exists(&exec_ctx, &rid, opt.perms)

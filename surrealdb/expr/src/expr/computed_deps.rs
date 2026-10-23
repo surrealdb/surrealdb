@@ -383,8 +383,17 @@ impl Visitor for FieldDependencyExtractor<'_> {
 				self.is_complete = false;
 			}
 
+			// Inside `[WHERE ...]`, bare fields and `$this` refer to the element
+			// being filtered, while `$parent.<field>` (at `nested == 1`) refers
+			// to the outer document.
+			Part::Where(_) => {
+				self.nested += 1;
+				part.visit(self)?;
+				self.nested -= 1;
+			}
+
 			// Walk children — any embedded expression contributes deps.
-			Part::Where(_) | Part::Value(_) | Part::Destructure(_) | Part::Recurse(_, _, _) => {
+			Part::Value(_) | Part::Destructure(_) | Part::Recurse(_, _, _) => {
 				part.visit(self)?;
 			}
 
@@ -1141,9 +1150,33 @@ mod tests {
 
 	#[test]
 	fn closure_marks_incomplete() {
-		// `|$x| $x + a` -- closure flips incompleteness.
+		// `|$x| $x + a` -- closure flips incompleteness and extracts `a`.
 		let expr = parse("|$x: any| $x + a");
 		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+		assert_eq!(deps.fields, vec!["a"]);
+
+		let deps = extract(&parse("[1].map(|$x| $x + b)"));
+		assert!(!deps.is_complete);
+		assert_eq!(deps.fields, vec!["b"]);
+
+		let deps = extract(&parse("[1].map(|$x| $x + $this.b)"));
+		assert!(!deps.is_complete);
+		assert_eq!(deps.fields, vec!["b"]);
+	}
+
+	#[test]
+	fn where_part_scopes_element_fields_and_extracts_parent_deps() {
+		let deps = extract(&parse("items[WHERE x > 0]"));
+		assert_eq!(deps.fields, vec!["items"]);
+		assert!(deps.is_complete);
+
+		let deps = extract(&parse("items[WHERE $this.x > 0]"));
+		assert_eq!(deps.fields, vec!["items"]);
+		assert!(deps.is_complete);
+
+		let deps = extract(&parse("items[WHERE x = $parent.b]"));
+		assert_eq!(deps.fields, vec!["b", "items"]);
 		assert!(!deps.is_complete);
 	}
 

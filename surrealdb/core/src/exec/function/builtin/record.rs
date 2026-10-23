@@ -69,13 +69,6 @@ impl ScalarFunction for RecordExists {
 			// A record exists for the caller when a read of it by id finds
 			// one under the caller's permissions, so a record the caller may
 			// not select does not exist for it. No computed field is derived.
-			// A key that is an object with an `id` component answers from the
-			// key, as a path read of `id` does, without reading the record.
-			if let crate::val::RecordIdKey::Object(key) = &rid.key
-				&& let Some(id) = key.get("id")
-			{
-				return Ok(Value::Bool(!id.is_none()));
-			}
 			let exec_ctx = ctx.exec_ctx.dive()?;
 			let found = crate::exec::operators::fetch::record_exists(
 				&exec_ctx,
@@ -161,3 +154,36 @@ impl ScalarFunction for RecordIsEdge {
 /// The `record::*` scalar builtins.
 pub(super) const SCALARS: &[&dyn ScalarFunction] =
 	&[&RecordId, &RecordTb, &RecordTable, &RecordExists, &RecordIsEdge];
+
+#[cfg(test)]
+mod tests {
+	use super::{RecordExists, ScalarFunction};
+	use crate::exec::EvalContext;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::val::Value;
+
+	#[tokio::test]
+	async fn record_exists_checks_storage_for_object_key_with_id_field() {
+		let db = TestDb::new("CREATE tb:{ id: 1 };").await;
+		let exec = db.exec_ctx().await;
+		let eval = EvalContext::from_exec_ctx(&exec);
+
+		let existing = Value::from(crate::syn::value("tb:{ id: 1 }").expect("parses"));
+		let missing_row = Value::from(crate::syn::value("tb:{ id: 2 }").expect("parses"));
+		let missing_tb = Value::from(crate::syn::value("nowhere:{ id: 123 }").expect("parses"));
+
+		assert_eq!(
+			RecordExists.invoke_async(&eval, vec![existing]).await.expect("runs"),
+			Value::Bool(true)
+		);
+		assert_eq!(
+			RecordExists.invoke_async(&eval, vec![missing_row]).await.expect("runs"),
+			Value::Bool(false)
+		);
+		assert_eq!(
+			RecordExists.invoke_async(&eval, vec![missing_tb]).await.expect("runs"),
+			Value::Bool(false)
+		);
+		exec.txn().cancel().await.expect("cancel");
+	}
+}

@@ -1255,7 +1255,7 @@ fn reads_row_unaccounted(expr: &Expr) -> bool {
 		}
 
 		fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
-			if matches!(part, Part::Doc) {
+			if matches!(part, Part::Doc | Part::Lookup(_)) {
 				self.found = true;
 			}
 			part.visit(self)
@@ -1902,6 +1902,12 @@ mod tests {
 	fn a_guard_reading_the_row_through_a_doc_part_is_opaque() {
 		assert_eq!(guard_shape(&specific("@.c = NONE"), true), GuardShape::Opaque);
 		assert_eq!(guard_shape(&specific("owner = $auth.id AND @.c"), true), GuardShape::Opaque);
+	}
+
+	#[test]
+	fn a_guard_reading_the_row_through_a_lookup_is_opaque() {
+		assert_eq!(guard_shape(&specific("->friends"), true), GuardShape::Opaque);
+		assert_eq!(guard_shape(&specific("<~doc"), true), GuardShape::Opaque);
 	}
 
 	#[test]
