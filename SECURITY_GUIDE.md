@@ -778,6 +778,22 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   pins that a permissioned offer pushes literals alone, which deferred bounds
   are pushed, or the `<computed>` text of a component's column for a checked
   caller.
+- **A `MATCHES` row judged on its own value reads the catalog of the table its
+  `id` names only for a caller who may select the record it names.** A row of a
+  table the statement does not read whole (a record-id source, a hop, or a row
+  a source builds as a value, whose `id` names whatever the caller wrote) is
+  never answered from an index entry; it is analyzed with the analyzer of the
+  full-text index that resolves for the table its `id` names. Resolving that
+  index reads the table's fields, indexes and online-index state, so for a
+  checked caller it is gated on the record as stored
+  (`may_select_named_record` in `exec/vm/matches.rs`): a `FULL` table admits, a
+  denying or undefined table refuses, and a conditional permission admits only
+  where the record exists and the permission admits it, as a read by id does.
+  A refused row evaluates to `false`, as an unindexed one does, so the answer
+  is the same whatever the table declares.
+  Verified by: `language/indexes/full_text/matches_value_rows_record_user.surql`,
+  `language/indexes/full_text/matches_value_rows_catalog_record_user.surql` and
+  `language/indexes/full_text/matches_value_rows_conditional_record_user.surql`.
 
 ### Review Triggers
 

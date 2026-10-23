@@ -9,8 +9,9 @@
 //!    them, so each is judged on its own value: the operand is read off the row and analyzed with
 //!    the analyzer of the full-text index that resolves for the row's table as in rule 4, then
 //!    compared against the query terms (`FullTextIndex::matches_value`). A row for which no index
-//!    resolves, or whose expression names no index probe, evaluates to `false`. See
-//!    [`MatchesScope`].
+//!    resolves, or whose expression names no index probe, evaluates to `false`. So does a row whose
+//!    `id` names a record the caller may not select, before any catalog read for its table
+//!    ([`may_select_named_record`]). See [`MatchesScope`].
 //! 3. On executor-table rows, an expression that was **not** registered from the SELECT's WHERE
 //!    condition (projection position, function arguments, a different expression than the one in
 //!    WHERE, or no WHERE at all) raises [`Error::NoIndexFoundForMatch`]. A WHERE condition carrying
@@ -484,12 +485,23 @@ impl MatchesEval {
 		// arrays of records, graph/link hops — are judged on the operand's
 		// value, analyzed as the table's full-text index analyzes it.
 		if !self.executor_tables.has_executor(&rid.table) {
-			let target = match &self.probe {
+			if matches!(
+				&self.probe,
 				Some(MatchProbe {
 					field: None,
 					..
-				})
-				| None => return Ok(Value::Bool(false)),
+				}) | None
+			) {
+				return Ok(Value::Bool(false));
+			}
+			// SECURITY: the row's `id` is whatever the source built, so the
+			// catalog of the table it names is read only for a caller who may
+			// select the record it names (see `may_select_named_record`).
+			if !may_select_named_record(ctx, &rid).await? {
+				return Ok(Value::Bool(false));
+			}
+			let target = match &self.probe {
+				None => return Ok(Value::Bool(false)),
 				Some(
 					probe @ MatchProbe {
 						query: Some(query),
@@ -607,6 +619,51 @@ fn index_columns_touch_restricted(cols: &[Idiom], fields: &[FieldDefinition]) ->
 			col.starts_with(&field.name.0) && !matches!(field.select_permission, Permission::Full)
 		})
 	})
+}
+
+/// Whether a row judged on its own value may be judged against the catalog of
+/// the table its `id` names: the caller may select the record `rid` names.
+///
+/// A source can build a row as a value whose `id` names any record, and rows
+/// carry no mark of the source that produced them, so the row itself vouches
+/// for nothing. Resolving an index reads the table's fields, indexes and
+/// online-index state and analyzes the row with the index's analyzer, and the
+/// answer reports what it found; for a caller the table's `select` permission
+/// denies, that would disclose schema the caller cannot read. The gate is
+/// therefore judged on the record as stored, never on the row:
+///
+/// - where permissions are not checked for the session, it admits;
+/// - a table whose `select` permission is `FULL` admits, since the caller may read every record of
+///   it and so reach its indexes through a table source;
+/// - a table that denies, or is not defined, refuses, so the answer is `false` whatever the table
+///   declares;
+/// - a conditional permission admits only where the record `rid` names exists and the permission
+///   admits it as stored, as a read of the record by id would
+///   ([`record_exists`](crate::exec::operators::fetch::record_exists)).
+///
+/// A refusal makes the row evaluate to `false`, as a row for which no index
+/// resolves does, so a refused row and an unindexed one answer alike. What the
+/// gate itself discloses — whether a record the caller may select exists — a
+/// read of that record by id discloses too.
+async fn may_select_named_record(
+	ctx: &EvalContext<'_>,
+	rid: &crate::val::RecordId,
+) -> FlowResult<bool> {
+	use crate::exec::operators::fetch::{record_exists, table_select_permission};
+	use crate::exec::permission::PhysicalPermission;
+
+	let exec = ctx.exec_ctx;
+	let db_ctx = exec
+		.database()
+		.map_err(|e| anyhow::anyhow!("MatchesOp requires database context: {}", e))?;
+	if !crate::exec::permission::should_check_perms(db_ctx, Action::View)? {
+		return Ok(true);
+	}
+	match table_select_permission(exec, &rid.table).await? {
+		PhysicalPermission::Deny => Ok(false),
+		PhysicalPermission::Allow => Ok(true),
+		PhysicalPermission::Conditional(_) => record_exists(exec, rid, true).await,
+	}
 }
 
 /// Extract the RecordId from the current row value, if it has one.

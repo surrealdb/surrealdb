@@ -8,6 +8,8 @@ reason = """
 	A row a source builds as a value is judged on its own content, never on the
 	full-text index entry of the record its `id` names: a caller denied `select`
 	on that record learns nothing of what it stores, whichever word it probes for.
+	Nor is it judged against that table's index at all, so even a row whose own
+	content holds the word does not match.
 """
 
 [[test.results]]
@@ -17,7 +19,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ id: doc:1 }]"
+value = "[]"
 
 [[test.results]]
 value = "[]"
@@ -32,7 +34,7 @@ value = "[[]]"
 value = "[[[false]]]"
 
 [[test.results]]
-value = "[{ id: doc:1 }]"
+value = "[]"
 
 [[test.results]]
 value = "[]"
