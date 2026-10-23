@@ -1234,3 +1234,12 @@ reports those once, for the run.
 Keep the declaration to tests that need it. Each one is a point where the run
 stops and waits for every job to drain, so it is the one part of the suite that
 does not get faster with `--jobs`.
+
+## Markdown tests.
+
+The language test suite is able to extract tests from markdown files when compiled
+with the `docs` feature. When this feature is enabled the language test suite will
+also search files with the extension `.md` and `.mdx`, looking for code blocks 
+marked with `surql` as it's language. The suite will run all tests in these files
+resulting in possibly multiple test per files. Codeblocks can be excluded from 
+running as a test by adding `notest` after the `surql` code block header.

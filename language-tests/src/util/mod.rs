@@ -13,7 +13,7 @@ pub use temp_dir::TempDir;
 /// Entries are visited in lexicographic order of their path, depth first, so
 /// the traversal order is determined by the tree alone and is identical on
 /// every host. Callers depend on that ordering: a test case's `CaseId` is its
-/// discovery index (`tests::case::CaseSet::load_surrealql_files`), and the
+/// discovery index (`tests::case::CaseSet::load_test_files`), and the
 /// bench runner executes dataset groups in the order of their first member's
 /// id (`cmd/bench::run`), which puts every bench in a fixed position in the
 /// measuring process.

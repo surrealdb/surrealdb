@@ -1,17 +1,64 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use surrealdb_types::{ToSql, Value as SurValue};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use super::TestReport;
-use crate::tests::report::TestOutputs;
+use crate::tests::report::{TestGrade, TestOutputs};
 
 impl TestReport {
-	pub async fn update_config_results(&self, root_path: &str) -> Result<()> {
+	pub async fn update_result_set(root_path: &str, overwrite: bool, set: &[Self]) -> Result<()> {
+		let mut subset: Vec<&_> = if overwrite {
+			set.iter()
+				.filter(|x| {
+					matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
+				})
+				.collect()
+		} else {
+			set.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()).collect()
+		};
+
+		subset.sort_by(|a, b| {
+			let a_origin = &a.case.test.origin;
+			let b_origin = &b.case.test.origin;
+
+			a_origin
+				.path
+				.cmp(&b_origin.path)
+				// Make tests later in the file are sorted first to ensure
+				// that when modifying the test later modifications will still have the correct
+				// offset.
+				.then_with(|| {
+					a_origin
+						.subset
+						.as_ref()
+						.map(|x| x.end)
+						.cmp(&b_origin.subset.as_ref().map(|x| x.end))
+						.reverse()
+				})
+		});
+
+		// The same test should have the same result,
+		// so no need to write multiple time per test origin.
+		subset.dedup_by(|a, b| {
+			let a_origin = &a.case.test.origin;
+			let b_origin = &b.case.test.origin;
+
+			a_origin.path == b_origin.path && a_origin.subset == b_origin.subset
+		});
+
+		for s in subset {
+			s.update_config_results(root_path).await?;
+		}
+
+		Ok(())
+	}
+
+	async fn update_config_results(&self, root_path: &str) -> Result<()> {
 		//TODO: Improve for multiple test cases in a single file.
 		let Some(values) = self.outputs.as_ref() else {
 			println!("tried to update test {} without results", self.case.test.origin.path);
@@ -20,7 +67,8 @@ impl TestReport {
 
 		let mut doc = self.case.test.config.toml.clone().unwrap_or_default();
 
-		println!("Updating test `{}`", self.case.test.origin.path);
+		println!("Updating for test `{}`", self.name);
+
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),
 			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
@@ -43,14 +91,31 @@ impl TestReport {
 			format!("{}/{}", root_path, self.case.test.origin.path)
 		};
 
+		if let Some(range) = self.case.test.origin.subset.as_ref() {
+			let mut full_source = tokio::fs::read(&full_path)
+				.await
+				.context("Could not read file to insert modified test")?;
+
+			assert_eq!(
+				&full_source[range.clone()],
+				self.case.test.source.as_bytes(),
+				"Source changed while trying to update the file"
+			);
+
+			insert_slice(&mut full_source, range.clone(), &existing);
+		}
+
 		let mut f = fs::OpenOptions::new()
 			.write(true)
-			.create(false)
 			.truncate(true)
+			.create(false)
 			.open(&full_path)
-			.await?;
-
+			.await
+			.with_context(|| {
+				format!("Could not open test file `{full_path}` to insert modified test")
+			})?;
 		f.write_all(&existing).await?;
+		f.flush().await?;
 		Ok(())
 	}
 }

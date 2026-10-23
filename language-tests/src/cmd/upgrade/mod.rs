@@ -311,7 +311,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.await
 		.context("Failed to create temporary directory for datastore")?;
 
-	let case_set = CaseSet::load_surrealql_files(path.as_str(), &mut load_errors).await?;
+	let case_set = CaseSet::load_test_files(path.as_str(), &mut load_errors).await?;
 
 	let chain_mode = !chain_versions.is_empty();
 
@@ -633,18 +633,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	match *results_mode {
 		ResultsMode::Default => {}
-		ResultsMode::Accept => {
-			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
-				report.update_config_results(path).await?;
-			}
-		}
-		ResultsMode::Overwrite => {
-			for report in reports.iter().filter(|x| {
-				matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
-			}) {
-				report.update_config_results(path).await?;
-			}
-		}
+		ResultsMode::Accept => TestReport::update_result_set(path, false, &reports).await?,
+		ResultsMode::Overwrite => TestReport::update_result_set(path, true, &reports).await?,
 	}
 
 	if !load_errors.is_empty() {

@@ -17,7 +17,7 @@ pub async fn run(matches: &ArgMatches) -> Result<()> {
 
 	let path: &String = matches.get_one("path").unwrap();
 
-	let set = CaseSet::load_surrealql_files(path, &mut load_errors).await?;
+	let set = CaseSet::load_test_files(path, &mut load_errors).await?;
 
 	let runs = {
 		let set_builder =

@@ -14,6 +14,7 @@ backend-tikv = ["surrealdb-core/kv-tikv"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 bench = ["sha2","oorandom","clap/env", "surrealdb-core/kv-surrealkv", "dep:sysinfo", "dep:num_cpus"]
 bench-remote-store = ["bench","tokio-tungstenite", "tokio-tungstenite/native-tls"]
+docs = ["pulldown-cmark"]
 # In-process sampling profiler for `bench run` (SIGPROF-based, so it works
 # where kernel perf events are locked down). See the `pprof` module.
 bench-pprof = ["bench", "dep:pprof"]
@@ -89,6 +90,9 @@ serde_json = "1.0.149"
 # Use for caching in benches
 sha2 = { version = "0.10.9", optional = true }
 oorandom = { version = "11", optional = true }
+
+# Uses for extracting tests out of the document markdown files
+pulldown-cmark = { version = "0.13.4", optional = true }
 
 # Host metadata embedded in uploaded benchmark results (already in the build
 # graph transitively, so promoting them to direct deps adds no compile cost).

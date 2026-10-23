@@ -384,7 +384,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 			"--config cannot be combined with --save: a run under a datastore configuration of its own would replace the stored baseline. Use --json to compare runs"
 		);
 	}
-	let set = CaseSet::load_surrealql_files(cfg.path, &mut load_errors).await?;
+	let set = CaseSet::load_test_files(cfg.path, &mut load_errors).await?;
 
 	// Resolve the backend. The in-memory engine needs no storage; file-backed
 	// engines (surrealkv) build into a temporary directory (a fresh

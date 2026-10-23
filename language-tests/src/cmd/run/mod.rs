@@ -45,9 +45,15 @@ impl RunConfig for TestRunConfig {
 	}
 
 	fn name(&self, case: &CaseImports) -> String {
-		match self.mode {
-			RunMode::Request => format!("{} on {}", case.test.origin.path, self.backend),
-			RunMode::Fragments => {
+		match (case.test.origin.line_offset, self.mode) {
+			(Some(line), RunMode::Request) => {
+				format!("{} line {line} on {}", case.test.origin.path, self.backend)
+			}
+			(Some(line), RunMode::Fragments) => {
+				format!("{} line {line} on {} ({})", case.test.origin.path, self.backend, self.mode)
+			}
+			(None, RunMode::Request) => format!("{} on {}", case.test.origin.path, self.backend),
+			(None, RunMode::Fragments) => {
 				format!("{} on {} ({})", case.test.origin.path, self.backend, self.mode)
 			}
 		}
@@ -64,7 +70,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let mut load_errors = Vec::new();
 
 	let path: &String = matches.get_one("path").unwrap();
-	let set = CaseSet::load_surrealql_files(path, &mut load_errors).await?;
+	let defined = matches.get_flag("defined");
+	let set = CaseSet::load_test_files(path, &mut load_errors).await?;
 
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 	let mode = *matches.get_one::<RunMode>("mode").unwrap();
@@ -156,6 +163,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config_backend = &x.test.config.parsed.env.backend;
 			config_backend.is_empty() || config_backend.contains(&backend)
 		})
+		.with_filter(|x| !defined || x.test.config.toml.is_some())
 		// A versioned (MVCC time-travel) test can only run where the provisioner
 		// can open the store with versioning; elsewhere the engine rejects the
 		// statement rather than answering it.
@@ -509,16 +517,10 @@ async fn finish(
 	match failure_mode {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
-			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
-				report.update_config_results(path).await?;
-			}
+			TestReport::update_result_set(path, false, &reports).await?;
 		}
 		ResultsMode::Overwrite => {
-			for report in reports.iter().filter(|x| {
-				matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
-			}) {
-				report.update_config_results(path).await?;
-			}
+			TestReport::update_result_set(path, true, &reports).await?;
 		}
 	}
 

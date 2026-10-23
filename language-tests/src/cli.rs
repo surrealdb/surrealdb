@@ -313,6 +313,9 @@ pub fn parse() -> ArgMatches {
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 			)
 			.arg(
+				arg!(--"defined" "Skips files that have no test config.")
+			)
+			.arg(
 				arg!(--"report-declines" <FILE> "Write every statement the engine declined to run to FILE as JSON lines, and print their count. Grading is unchanged.")
 			)
 			.arg(

@@ -83,7 +83,7 @@ pub struct GraphQlDetails {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestEnv {
 	/// Should the test be run sequentially
@@ -168,32 +168,6 @@ pub struct TestEnv {
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
-}
-
-impl Default for TestEnv {
-	fn default() -> Self {
-		Self {
-			sequential: Default::default(),
-			clean: Default::default(),
-			readonly: Default::default(),
-			namespace: Default::default(),
-			database: Default::default(),
-			auth: Default::default(),
-			signup: None,
-			signin: None,
-			imports: Default::default(),
-			timeout: Default::default(),
-			capabilities: Default::default(),
-			backend: Default::default(),
-			versioned: Default::default(),
-			compatibility: None,
-			config: Default::default(),
-			redact_volatile_explain_attrs: Default::default(),
-			remote_skip: None,
-			remote_exclusive: Default::default(),
-			_unused_keys: Default::default(),
-		}
-	}
 }
 
 impl TestEnv {

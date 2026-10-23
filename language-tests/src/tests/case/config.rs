@@ -8,7 +8,7 @@ use toml_edit::DocumentMut;
 
 use crate::tests::schema::TestConfig;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CaseConfig {
 	/// The toml document from which the config is serialized,
 	/// Is non if no config was found.
@@ -111,11 +111,10 @@ impl CaseConfig {
 				parsed: config,
 			})
 		} else {
-			let parsed = TestConfig::default();
 			Ok(Self {
 				range: None,
 				toml: None,
-				parsed,
+				parsed: Default::default(),
 			})
 		}
 	}
