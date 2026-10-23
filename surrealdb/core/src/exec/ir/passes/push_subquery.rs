@@ -54,9 +54,9 @@ use smallvec::SmallVec;
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
 use super::perm_where::{
-	WhereFilter, can_move, chain_spine, computing_ops, def_op, in_stored_clause, live_ops,
-	localize_row_reads, move_selected, reads_row_opaquely, reads_through_operands, where_filter,
-	yielded_value,
+	WhereFilter, can_move, chain_spine, computing_ops, def_op, in_stored_clause,
+	infallible_over_row, live_ops, localize_row_reads, move_selected, reads_row_opaquely,
+	reads_through_operands, where_filter, yielded_value,
 };
 use super::rehome::{and_chain, can_rehome, copy_tree_bound, rebuild_and_chain_bound};
 use crate::exec::ir::analysis::{effects, fallibility};
@@ -227,8 +227,12 @@ fn admitted(
 ) -> Vec<usize> {
 	let reads: Vec<Reads> = chain.iter().map(|value| reads_of(cx, filter, *value)).collect();
 	let mut moved = Vec::new();
+	let mut raising_stands = false;
+	let mut stays = 0usize;
 	for (at, value) in chain.iter().enumerate() {
 		let read = &reads[at];
+		let computing = computing_ops(cx.ir, *value);
+		let infallible = !computing.is_empty() && infallible_over_row(cx, &computing, filter.row);
 		let fits = match &target.shape {
 			// A name of the row is the same name on both sides of a projection that returns its
 			// rows unchanged, but `$this` denotes the row of the statement it is written in, so one
@@ -248,10 +252,15 @@ fn admitted(
 			}
 		};
 		if fits
+			&& !raising_stands
+			&& (stays == 0 || infallible)
 			&& writes_no_state(cx, *value)
 			&& can_move(cx.ir, filter, *value, target.project, target.beneath)
 		{
 			moved.push(at);
+		} else {
+			stays += 1;
+			raising_stands |= !infallible;
 		}
 	}
 	moved
@@ -447,7 +456,7 @@ fn merge_into(
 /// Where the conjuncts of `filter` land, when its rows come from a subquery whose rows leave
 /// through a projection.
 fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
-	let (project, beneath, inner, identity) = {
+	let (project, beneath, inner, identity, inner_loop_op) = {
 		let ir: &Ir = &*cx.ir;
 		if in_stored_clause(ir, filter.op) {
 			return None;
@@ -498,10 +507,7 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 		};
 		let inner_loop_op = def_op(ir, *rows)?;
 		let inner_loop = ir.op(inner_loop_op)?;
-		if !is_select_loop(&inner_loop.kind)
-			|| ir.uses(*rows).len() != 1
-			|| reads_past_row_set_change(ir, inner_loop_op)
-		{
+		if !is_select_loop(&inner_loop.kind) || ir.uses(*rows).len() != 1 {
 			return None;
 		}
 		let [body] = inner_loop.regions.as_slice() else {
@@ -532,8 +538,11 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 				ir.uses(beneath).len() == 1
 					&& ir.op(held.op).map(|data| data.parent) == Some(projection.parent)
 			});
-		(project, beneath, inner, identity)
+		(project, beneath, inner, identity, inner_loop_op)
 	};
+	if reads_past_row_set_change(cx, inner_loop_op) {
+		return None;
+	}
 	let shape = if identity {
 		Shape::Identity
 	} else {
@@ -896,13 +905,18 @@ fn is_comparison_or_logical(op: &BinaryOperator) -> bool {
 /// take, and ends at any other op: a read of storage, a subquery or loop whose rows its own body
 /// has already paged, or an op that holds no rows. Every logical op is classified by name, so a
 /// new one is placed in one of the three before the pass compiles.
-fn reads_past_row_set_change(ir: &Ir, loop_op: OpId) -> bool {
-	let mut next = ir.op(loop_op).and_then(|data| data.operands.first().copied());
+fn reads_past_row_set_change(cx: &mut LoCx<'_>, loop_op: OpId) -> bool {
+	let mut next = cx.ir.op(loop_op).and_then(|data| data.operands.first().copied());
 	while let Some(value) = next {
-		let Some(op) = def_op(ir, value).and_then(|op| ir.op(op)) else {
+		let Some(op_id) = def_op(cx.ir, value) else {
 			return false;
 		};
-		match &op.kind {
+		let Some((kind, first_operand)) =
+			cx.ir.op(op_id).map(|op| (op.kind.clone(), op.operands.first().copied()))
+		else {
+			return false;
+		};
+		match &kind {
 			OpKind::Logical(
 				LogOp::Limit {
 					..
@@ -913,9 +927,13 @@ fn reads_past_row_set_change(ir: &Ir, loop_op: OpId) -> bool {
 					..
 				},
 			) => return true,
+			OpKind::Logical(LogOp::Sort(_)) => {
+				if !inert_sort(cx, op_id) {
+					return true;
+				}
+			}
 			OpKind::Logical(
-				LogOp::Sort(_)
-				| LogOp::Filter
+				LogOp::Filter
 				| LogOp::PermissionFilter {
 					..
 				}
@@ -1013,9 +1031,36 @@ fn reads_past_row_set_change(ir: &Ir, loop_op: OpId) -> bool {
 			| OpKind::Expr(_)
 			| OpKind::Phys(_) => return false,
 		}
-		next = op.operands.first().copied();
+		next = first_operand;
 	}
 	false
+}
+
+/// Whether every sort key of the `LogOp::Sort` `sort` evaluates read-only and cannot raise.
+fn inert_sort(cx: &mut LoCx<'_>, sort: OpId) -> bool {
+	let Some(regions) = cx.ir.op(sort).map(|data| data.regions.clone()) else {
+		return false;
+	};
+	for region in regions {
+		let Some(blocks) = cx.ir.region(region).map(|held| held.blocks.as_slice()) else {
+			return false;
+		};
+		let [block] = blocks else {
+			return false;
+		};
+		let Some(args) = cx.ir.block(*block).map(|held| held.args.as_slice()) else {
+			return false;
+		};
+		let [row] = args else {
+			return false;
+		};
+		let row = *row;
+		let ops: Vec<OpId> = ops_in(cx.ir, region).collect();
+		if !inert_ops(cx, &ops, row) {
+			return false;
+		}
+	}
+	true
 }
 
 /// Whether `kind` is a `SELECT` loop.

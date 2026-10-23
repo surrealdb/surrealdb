@@ -136,7 +136,7 @@ async fn a_filter_that_cannot_move_stays() {
 		"SELECT * FROM (SELECT a AS z, a.b AS y FROM t) WHERE z = 1",
 		"SELECT * FROM (SELECT a AS z, b AS z FROM t) WHERE z = 1",
 		"SELECT * FROM (SELECT <int> a AS z FROM t) WHERE z = 1",
-		"SELECT * FROM (SELECT a AS z FROM t SPLIT a) WHERE z = 1",
+		"SELECT * FROM (SELECT a AS z FROM t SPLIT z) WHERE z = 1",
 		"SELECT * FROM (SELECT a, count() AS n FROM t GROUP BY a) WHERE a = 1",
 		"SELECT * FROM (SELECT VALUE a FROM t) WHERE $this = 1",
 		"SELECT * FROM (SELECT * FROM [{ b: 1 }, { b: 2 }]) WHERE b = 2",
@@ -160,6 +160,8 @@ async fn a_filter_stays_above_a_limit_or_start() {
 		"SELECT * FROM (SELECT * FROM t LIMIT 2 START 1) WHERE a = 1",
 		"SELECT * FROM (SELECT * FROM t ORDER BY a LIMIT 2) WHERE a = 1",
 		"SELECT * FROM (SELECT a AS z, id FROM t LIMIT 2) WHERE z = 1",
+		"SELECT * FROM (SELECT * FROM t ORDER BY b[0]) WHERE a = 1",
+		"SELECT * FROM (SELECT * FROM t ORDER BY b[$c]) WHERE a = 1",
 	] {
 		let mut ir = bind(sql).await;
 		let report = push(&mut ir).await;
@@ -167,6 +169,32 @@ async fn a_filter_stays_above_a_limit_or_start() {
 	}
 	let mut ir = bind("SELECT * FROM (SELECT * FROM t ORDER BY a) WHERE a = 1").await;
 	assert_eq!(push(&mut ir).await.rewrites, 1);
+}
+
+/// A conjunct that may raise does not move past an earlier conjunct that stays above the
+/// subquery, and no conjunct moves past an earlier conjunct that stays and may raise.
+#[tokio::test]
+async fn a_filter_respects_short_circuit_fallibility_when_splitting() {
+	for sql in [
+		"SELECT * FROM (SELECT a AS z FROM t) WHERE b = 1 AND <int> z > 0",
+		"SELECT * FROM (SELECT a AS z FROM t) WHERE <int> b > 0 AND z = 1",
+	] {
+		let mut ir = bind(sql).await;
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 0, "`{sql}`");
+		assert_eq!(filters(&ir), 1, "`{sql}`");
+	}
+	for sql in [
+		"SELECT * FROM (SELECT a AS z FROM t) WHERE b = 1 AND z = 1",
+		"SELECT * FROM (SELECT a AS z FROM t) WHERE <int> z > 0 AND b = 1",
+	] {
+		let mut ir = bind(sql).await;
+		let report = push(&mut ir).await;
+		assert_eq!(report.rewrites, 1, "`{sql}`");
+		assert_eq!(filters(&ir), 2, "`{sql}`");
+		let env = Env::new();
+		verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
+	}
 }
 
 /// Conjuncts the projection admits move and the rest stay above the subquery.

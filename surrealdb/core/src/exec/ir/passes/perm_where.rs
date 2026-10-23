@@ -542,6 +542,20 @@ pub(super) fn computing_ops(ir: &Ir, value: ValueId) -> Vec<OpId> {
 				pending.push(def);
 			}
 		}
+		for region in &data.regions {
+			ir.walk(*region, WalkOrder::PreOrder, &mut |nested| {
+				if let Some(nested_data) = ir.op(nested) {
+					for operand in &nested_data.operands {
+						if let Some(def) = def_op(ir, *operand)
+							&& ir.op(def).is_some_and(|held| held.parent == block)
+						{
+							pending.push(def);
+						}
+					}
+				}
+				Walk::Continue
+			});
+		}
 	}
 	ir.block(block)
 		.map(|held| held.ops.iter().copied().filter(|op| seen.contains(op)).collect())
@@ -564,12 +578,19 @@ pub(super) fn pure_and_infallible(cx: &mut LoCx<'_>, ops: &[OpId]) -> bool {
 /// row.
 pub(super) fn infallible_over_row(cx: &mut LoCx<'_>, ops: &[OpId], row: ValueId) -> bool {
 	ops.iter().all(|op| {
-		let plain_read = cx.ir.op(*op).is_some_and(|data| {
+		let Some(data) = cx.ir.op(*op) else {
+			return false;
+		};
+		let plain_read =
 			matches!(data.kind, OpKind::Expr(ExprOp::Field { .. } | ExprOp::Access { .. }))
-				&& data.operands.as_slice() == [row]
-		});
+				&& data.operands.as_slice() == [row];
 		if plain_read {
 			return true;
+		}
+		if matches!(data.kind, OpKind::Expr(ExprOp::ShortCircuit { .. } | ExprOp::If)) {
+			let nested: Vec<OpId> =
+				data.regions.iter().flat_map(|region| ops_in(cx.ir, *region)).collect();
+			return infallible_over_row(cx, &nested, row);
 		}
 		let answer = effects::of_with(&*cx.ir, &mut *cx.facts, cx.effects, *op);
 		let class = answer.fallibility.union(fallibility::floor(answer.set));
@@ -1081,17 +1102,18 @@ fn push_below_layer(cx: &mut LoCx<'_>, op: OpId, report: &mut PassReport) -> Res
 			falses.push(at);
 			continue;
 		}
+		let computing = computing_ops(cx.ir, *value);
+		let infallible = !computing.is_empty() && infallible_over_row(cx, &computing, filter.row);
 		let movable = match reads_of(cx, &filter, &columns, *value) {
 			Reads::Free => can_move(cx.ir, &filter, *value, layer, source),
 			Reads::Keys(_) => can_move(cx.ir, &filter, *value, layer, source),
 			Reads::Held => false,
 		};
-		if movable && !raising_stands {
+		if movable && !raising_stands && (stays == 0 && falses.is_empty() || infallible) {
 			moved.push(at);
 		} else {
 			stays += 1;
-			let computing = computing_ops(cx.ir, *value);
-			raising_stands |= !infallible_over_row(cx, &computing, filter.row);
+			raising_stands |= !infallible;
 		}
 	}
 	if stays == 0 {

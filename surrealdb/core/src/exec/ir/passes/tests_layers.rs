@@ -12,7 +12,7 @@ use super::tests_support::{Env, create, empty_ir, literal, ops_of_tag, spec};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
-use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
+use crate::exec::ir::expr::ops::{ExprOp, ExprTag, ShortCircuitOp};
 use crate::exec::ir::iface::fold::NotYetFolder;
 use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
@@ -251,10 +251,78 @@ async fn a_conjunct_after_one_that_may_raise_stays() {
 	assert_eq!(report.rewrites, 0);
 	assert_eq!(ir.op(layer).expect("the layer stays").operands[0], row);
 
-	// A conjunct that stays and cannot raise holds nothing back.
+	// A conjunct that stays and cannot raise holds nothing back when the later conjunct cannot
+	// raise either.
 	let mut ir = empty_ir();
 	let (layer, _, row) = layered_filter(&mut ir, &[plain("a")], &|rw, at, row| {
 		vec![compares(rw, at, row, "a"), compares(rw, at, row, "b")]
+	});
+	let report = run(&PushBelowLayer, &mut ir).await;
+	assert_eq!(report.rewrites, 1);
+	assert_ne!(ir.op(layer).expect("the layer stays").operands[0], row);
+
+	// A conjunct that may raise stays above the layer once an earlier conjunct stays, since moving
+	// it below the layer would evaluate it before the earlier conjunct.
+	let mut ir = empty_ir();
+	let (layer, _, row) = layered_filter(&mut ir, &[plain("a")], &|rw, at, row| {
+		vec![compares(rw, at, row, "a"), may_raise(rw, at, row, "b")]
+	});
+	let report = run(&PushBelowLayer, &mut ir).await;
+	assert_eq!(report.rewrites, 0);
+	assert_eq!(ir.op(layer).expect("the layer stays").operands[0], row);
+
+	// A leading conjunct that may raise still moves when nothing before it stays.
+	let mut ir = empty_ir();
+	let (layer, _, row) = layered_filter(&mut ir, &[plain("a")], &|rw, at, row| {
+		vec![may_raise(rw, at, row, "b"), compares(rw, at, row, "a")]
+	});
+	let report = run(&PushBelowLayer, &mut ir).await;
+	assert_eq!(report.rewrites, 1);
+	assert_ne!(ir.op(layer).expect("the layer stays").operands[0], row);
+
+	// A short-circuit conjunct whose lazy arm references a fallible op in the outer block is
+	// recognized as fallible, keeping later conjuncts above the layer.
+	let mut ir = empty_ir();
+	let (layer, _, row) = layered_filter(&mut ir, &[plain("a")], &|rw, at, row| {
+		let lhs = compares(rw, at, row, "a");
+		let rhs_outer = may_raise(rw, at, row, "a");
+		let (or_op, or_out) = create(
+			rw,
+			at,
+			OpKind::Expr(ExprOp::ShortCircuit {
+				op: ShortCircuitOp::Or,
+			}),
+			&[lhs],
+			1,
+		);
+		let (_, lazy_block) =
+			rw.create_region(or_op, RegionKind::LazyOperand, &[]).expect("the lazy region");
+		create(rw, InsertPoint::End(lazy_block), yield_op(), &[rhs_outer], 0);
+		vec![or_out[0], compares(rw, at, row, "b")]
+	});
+	let report = run(&PushBelowLayer, &mut ir).await;
+	assert_eq!(report.rewrites, 0);
+	assert_eq!(ir.op(layer).expect("the layer stays").operands[0], row);
+
+	// A short-circuit conjunct whose lazy arm only performs a plain field read off the row is
+	// recognized as infallible over the row, allowing a later infallible conjunct to move.
+	let mut ir = empty_ir();
+	let (layer, _, row) = layered_filter(&mut ir, &[plain("a")], &|rw, at, row| {
+		let lhs = compares(rw, at, row, "a");
+		let (or_op, or_out) = create(
+			rw,
+			at,
+			OpKind::Expr(ExprOp::ShortCircuit {
+				op: ShortCircuitOp::Or,
+			}),
+			&[lhs],
+			1,
+		);
+		let (_, lazy_block) =
+			rw.create_region(or_op, RegionKind::LazyOperand, &[]).expect("the lazy region");
+		let rhs = compares(rw, InsertPoint::End(lazy_block), row, "a");
+		create(rw, InsertPoint::End(lazy_block), yield_op(), &[rhs], 0);
+		vec![or_out[0], compares(rw, at, row, "b")]
 	});
 	let report = run(&PushBelowLayer, &mut ir).await;
 	assert_eq!(report.rewrites, 1);
