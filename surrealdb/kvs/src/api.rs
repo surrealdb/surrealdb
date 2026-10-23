@@ -881,6 +881,46 @@ pub trait Transactable: Send + Sync {
 		})
 	}
 
+	/// The position in `keys` of the first key the transaction's current view holds a value for,
+	/// or `None` when it holds none of them.
+	///
+	/// This is the existence check [`Self::put`] makes before it writes, made for many keys at
+	/// once: each key is read as `put` reads the key it is about to write, so the view includes the
+	/// transaction's own writes and deletes, and the read joins the transaction's conflict
+	/// tracking exactly as `put`'s read does. Nothing is written. "First" is the smallest position
+	/// in `keys`, whatever order a backend reads them in. A key may appear more than once.
+	///
+	/// The default reads one key at a time, in order, and stops at the first present one. A
+	/// backend where each read is a round trip, or that can read sorted keys with one iterator,
+	/// overrides it.
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			for (at, key) in keys.iter().enumerate() {
+				if self.exists(key.as_borrowed(), None).await? {
+					return Ok(Some(at));
+				}
+			}
+			Ok(None)
+		})
+	}
+
+	/// Insert or update many keys, in order, as [`Self::set`] does each.
+	///
+	/// The default sets one key at a time. A backend whose `set` takes a lock or a dispatch per
+	/// call overrides it to take one for all of them.
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			for (key, val) in entries {
+				self.set(Key::from(key), val).await?;
+			}
+			Ok(())
+		})
+	}
+
 	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying

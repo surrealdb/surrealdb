@@ -7965,6 +7965,16 @@ async fn call_builtin(
 	invoke_builtin(func, args, &ctx).await?.map_err(ControlFlow::Err)
 }
 
+/// The effects of a builtin that reach past the transaction: a call making one runs only once the
+/// creates held before it are checked.
+const HELD_CREATES_FLUSHED_BY: crate::expr::logical::EffectSet =
+	crate::expr::logical::EffectSet::WRITES_EXTERNAL
+		.union(crate::expr::logical::EffectSet::READS_EXTERNAL)
+		.union(crate::expr::logical::EffectSet::ADVANCES_STATE)
+		.union(crate::expr::logical::EffectSet::BLOCKING)
+		.union(crate::expr::logical::EffectSet::OPAQUE_BODY)
+		.union(crate::expr::logical::EffectSet::DEFERS);
+
 /// Invoke builtin `func` on `args`, its work drawing on the thread's fuel.
 ///
 /// The arguments, read and converted whole before the function runs, are
@@ -7989,6 +7999,11 @@ async fn invoke_builtin(
 		super::fuel::charge(cost);
 	}
 	if !func.is_pure() || func.is_async() {
+		// A call that reaches past the transaction runs only once every create held before it
+		// is checked, so none runs after a create that fails.
+		if func.effects().intersects(HELD_CREATES_FLUSHED_BY) {
+			exec.txn().flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
+		}
 		return super::fuel::metered(exec, func.invoke_async(ctx, args)).await;
 	}
 	if let Some(walk) = func.metered() {

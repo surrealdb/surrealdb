@@ -306,6 +306,8 @@ fn held(prior: &Option<Option<Val>>) -> Option<Option<&[u8]>> {
 enum WriteOp {
 	Set,
 	Put,
+	/// A [`WriteOp::Put`] whose check that the key is absent may be held ([`crate::absence`]).
+	PutHeld,
 	Replace,
 }
 
@@ -7235,6 +7237,27 @@ impl Transaction {
 		self.write_encoded(changed, WriteOp::Put, key, val, None).await
 	}
 
+	/// Insert a key that must not exist, as [`Self::put`] does, holding the check that it is absent
+	/// for one check of many keys ([`crate::absence`]).
+	///
+	/// The check is made immediately while a save point is open: a scope that may be rolled back
+	/// is one whose failures are answered inside it. A held create's failure is
+	/// [`crate::Error::DeferredKeyExists`], raised by whichever operation of the transaction
+	/// flushes the held creates, and taken by [`Transactor::take_absence_violation`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn put_held(&self, key: Key<'_>, val: Vec<u8>) -> Result<()> {
+		let changed = self.reserve_write_slot()?;
+		let op = if self.save_point_marks.lock().await.is_empty() {
+			WriteOp::PutHeld
+		} else {
+			WriteOp::Put
+		};
+		self.write_encoded(changed, op, key, val, None).await
+	}
+
 	/// Update a key in the datastore if the current value matches a condition.
 	#[cfg_attr(
 		feature = "observability",
@@ -7417,6 +7440,10 @@ impl Transaction {
 			}
 			WriteOp::Put => {
 				self.tr.put(key, val).await?;
+				self.metrics.record_put(key_bytes, value_bytes);
+			}
+			WriteOp::PutHeld => {
+				self.tr.put_held(key, val).await?;
 				self.metrics.record_put(key_bytes, value_bytes);
 			}
 			WriteOp::Replace => {
@@ -9475,6 +9502,8 @@ impl Transaction {
 	/// the notes of the records it created ([`crate::creations`]) and the
 	/// provisional sequences — see [`Self::provisional_save_points`].
 	pub async fn new_save_point(&self) -> Result<()> {
+		// The held creates are written below the save point, which no rollback of it undoes.
+		self.tr.flush_held().await?;
 		// The storage save point opens first: the buffer's frames mirror its
 		// stack, so a failed open must not leave a frame behind for some outer
 		// save point's release to pop instead of its own.
@@ -9503,6 +9532,7 @@ impl Transaction {
 
 	/// Release the last save point.
 	pub async fn release_last_save_point(&self) -> Result<()> {
+		self.tr.flush_held().await?;
 		if let Err(e) = self.inner.release_last_save_point().await {
 			Self::poison_unless_inert(&e, &self.save_point_poisoned);
 			return Err(e.into());
@@ -9523,6 +9553,7 @@ impl Transaction {
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
+		self.tr.flush_held().await?;
 		let _changed = self.state_change();
 		if let Err(e) = self.inner.rollback_to_save_point().await {
 			Self::poison_unless_inert(&e, &self.save_point_poisoned);

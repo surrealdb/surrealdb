@@ -1101,6 +1101,28 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Check many keys with one `batch_get`, which reads through the transaction's buffered
+	/// writes as `put`'s `key_exists` does, in one round trip rather than one per key.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self, keys))]
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			if keys.is_empty() {
+				return Ok(None);
+			}
+			// Load the inner transaction
+			let mut inner = self.inner.write().await;
+			let owned: Vec<Vec<u8>> = keys.iter().map(|x| x.as_slice().to_vec()).collect();
+			let pairs = inner.tx.batch_get(owned).await.map_err(kvs_error)?;
+			let present: std::collections::HashSet<Vec<u8>> =
+				pairs.map(|kv| Vec::<u8>::from(kv.0)).collect();
+			Ok(keys.iter().position(|key| present.contains(key.as_slice())))
+		})
+	}
+
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
 	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {

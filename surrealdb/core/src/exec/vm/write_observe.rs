@@ -531,6 +531,9 @@ async fn events(program: &Program, unit: UnitId, depth: u32, state: &mut State) 
 	if !write.events_hold(&ctx.events, lowered) {
 		return Err(internal("the events of the table changed after the write was lowered"));
 	}
+	// An event may do anything, so it runs only once every create held before it is checked:
+	// none runs after a create that fails.
+	exec.txn().flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
 	let input = statement_input(program, &exec, state).await?;
 	let input = Value::clone(&input);
 	let (mut nested, group) = super::enter_unit(&held, units, state, &exec)?;

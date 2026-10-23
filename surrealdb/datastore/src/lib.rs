@@ -50,6 +50,7 @@ pub(crate) mod obs {
 	impl<T> Instrument for T {}
 }
 
+pub mod absence;
 pub mod cache;
 pub mod catalog_reads;
 pub mod close;

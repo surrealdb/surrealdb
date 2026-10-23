@@ -2526,6 +2526,39 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Check many keys in one blocking dispatch, each read as `put` reads its key (a pinned read
+	/// through the transaction's write batch with the same read options), visited in key order so
+	/// that consecutive reads share the blocks they touch.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self, keys))]
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut order: Vec<usize> = (0..keys.len()).collect();
+			order.sort_unstable_by(|a, b| keys[*a].as_slice().cmp(keys[*b].as_slice()));
+			self.run_blocking(move |guard| {
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+				let mut first: Option<usize> = None;
+				for at in order {
+					if first.is_some_and(|first| first < at) {
+						continue;
+					}
+					if inner
+						.get_pinned_opt(keys[at].as_slice(), &self.read_options)
+						.map_err(kvs_error)?
+						.is_some()
+					{
+						first = Some(at);
+					}
+				}
+				Ok(first)
+			})
+			.await
+		})
+	}
+
 	/// Insert or update a key in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
@@ -2552,6 +2585,33 @@ impl Transactable for Transaction {
 			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			inner.put(key, val).map_err(kvs_error)?;
 			self.store_writes();
+			Ok(())
+		})
+	}
+
+	/// Insert or update many keys under one acquisition of the transaction; each only buffers into
+	/// the write batch, as [`Self::set`] does.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Check if we are in read-and-deletion-only mode
+			if self.is_restricted(false) {
+				return Err(Error::ReadAndDeleteOnly);
+			}
+			let guard = self.inner.lock().await;
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+			for (key, val) in entries {
+				inner.put(key, val).map_err(kvs_error)?;
+				self.store_writes();
+			}
 			Ok(())
 		})
 	}

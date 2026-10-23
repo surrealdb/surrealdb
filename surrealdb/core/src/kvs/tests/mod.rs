@@ -46,6 +46,8 @@ mod graph_migration_test;
 mod graph_ordered_limit_test;
 #[cfg(feature = "kv-mem")]
 mod graph_semijoin_test;
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
+mod held_creates_bench;
 #[cfg(feature = "kv-mem")]
 mod index_format_level_test;
 #[cfg(feature = "kv-mem")]

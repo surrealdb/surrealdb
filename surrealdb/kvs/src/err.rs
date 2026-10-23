@@ -114,6 +114,13 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TransactionKeyAlreadyExists,
 
+	/// A create whose check that its key is absent was held for a batch found the key present
+	/// when the batch was checked. `key` is the earliest such create's key.
+	#[error("The key being inserted already exists")]
+	DeferredKeyExists {
+		key: Vec<u8>,
+	},
+
 	/// The underlying datastore does not support versioned queries
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,

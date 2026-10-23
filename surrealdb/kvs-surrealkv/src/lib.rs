@@ -490,6 +490,70 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Check many keys under one acquisition of the transaction, merging them in key order against
+	/// one iterator over their span.
+	///
+	/// The iterator and `get`, the read `put` makes, see the same thing: the newest live version of
+	/// each key with the transaction's own writes over it, and neither joins the conflict check.
+	/// The walk steps over the keys the span holds between two checked keys; once it has stepped
+	/// over more than twice as many as it was given (a span much fuller than the keys checked),
+	/// the keys left are read one at a time, so a sparse set costs no more than reading each.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self, keys))]
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut order: Vec<usize> = (0..keys.len()).collect();
+			order.sort_unstable_by(|a, b| keys[*a].as_slice().cmp(keys[*b].as_slice()));
+			let (Some(lo), Some(hi)) = (order.first(), order.last()) else {
+				return Ok(None);
+			};
+			// The span ends just past the greatest key.
+			let mut end = keys[*hi].as_slice().to_vec();
+			end.push(0);
+			// Load the inner transaction once for every key
+			let inner = self.inner.read().await;
+			let mut first: Option<usize> = None;
+			let note = |first: &mut Option<usize>, at: usize| {
+				if first.is_none_or(|held| at < held) {
+					*first = Some(at);
+				}
+			};
+			let mut iter = inner.range(keys[*lo].as_slice(), end.as_slice()).map_err(kvs_error)?;
+			iter.seek_first().map_err(kvs_error)?;
+			let mut steps = keys.len().saturating_mul(2).saturating_add(64);
+			let mut pos = 0;
+			'walk: while pos < order.len() {
+				let at = order[pos];
+				let want = keys[at].as_slice();
+				while iter.valid() && iter.key().user_key() < want {
+					if steps == 0 {
+						break 'walk;
+					}
+					steps -= 1;
+					iter.next().map_err(kvs_error)?;
+				}
+				if !iter.valid() {
+					// The span holds nothing at or past this key.
+					return Ok(first);
+				}
+				if iter.key().user_key() == want {
+					note(&mut first, at);
+				}
+				pos += 1;
+			}
+			drop(iter);
+			for &at in &order[pos..] {
+				if inner.get(keys[at].as_slice()).map_err(kvs_error)?.is_some() {
+					note(&mut first, at);
+				}
+			}
+			Ok(first)
+		})
+	}
+
 	/// Fetch a key from the database, registering the key for
 	/// commit-time conflict detection.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
@@ -538,6 +602,27 @@ impl Transactable for Transaction {
 			// Set the key
 			inner.set(key.as_slice(), &val).map_err(kvs_error)?;
 			// Return result
+			Ok(())
+		})
+	}
+
+	/// Insert or update many keys under one acquisition of the transaction.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)]
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Load the inner transaction once for every key
+			let mut inner = self.inner.write().await;
+			for (key, val) in entries {
+				inner.set(key.as_slice(), &val).map_err(kvs_error)?;
+			}
 			Ok(())
 		})
 	}

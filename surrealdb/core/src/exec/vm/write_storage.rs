@@ -1524,7 +1524,12 @@ async fn store(
 		// A record created while a write reads its table is noted, so that
 		// write's read passes over it (`kvs::creations`).
 		let noted = txn.creations_watched(ns, db, &rid.table).then(|| key.clone());
-		txn.put(key.into(), bytes).await.map_err(|err| {
+		// The check that the key is absent is held for one check of many keys
+		// (`surrealdb_datastore::absence`), made by the statement's end at the latest and before
+		// anything reads the key. A held create's failure is raised by whichever operation
+		// flushes it, and the statement reports it as that create's duplicate.
+		let put = txn.put_held(key.into(), bytes).await;
+		put.map_err(|err| {
 			if matches!(storage_error(&err), Some(crate::kvs::Error::TransactionKeyAlreadyExists)) {
 				ControlFlow::Err(anyhow::Error::new(DocError::RecordExists {
 					record: rid.clone(),

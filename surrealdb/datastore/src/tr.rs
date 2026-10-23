@@ -38,6 +38,8 @@ pub struct Transactor {
 	/// ([`crate::triggers::LiveWrites::fence_tables_through`]). A speculation's writes reach no
 	/// storage, so it records none.
 	pub(crate) written: parking_lot::Mutex<crate::triggers::WrittenTables>,
+	/// The creates held for one check of their keys ([`crate::absence`]), and the cursors open.
+	pub(crate) absence: crate::absence::Absence,
 }
 
 impl fmt::Display for Transactor {
@@ -69,6 +71,7 @@ impl Transactor {
 			overlay: Arc::new(Mutex::new(None)),
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
 			written: Default::default(),
+			absence: Default::default(),
 		}
 	}
 
@@ -84,6 +87,7 @@ impl Transactor {
 			overlay,
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
 			written: Default::default(),
+			absence: Default::default(),
 		}
 	}
 
@@ -305,6 +309,7 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn cancel(&self) -> Result<()> {
+		self.absence.discard().await;
 		self.inner.cancel().await
 	}
 
@@ -321,6 +326,7 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub(crate) async fn commit(&self) -> Result<()> {
+		self.absence.flush_all(self.inner.as_ref()).await?;
 		self.inner.commit().await
 	}
 
@@ -335,6 +341,7 @@ impl Transactor {
 	/// durable index build state.
 	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
 		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
+		self.absence.flush_all(self.inner.as_ref()).await?;
 		self.inner.commit_unsynced().await
 	}
 
@@ -344,6 +351,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn exists(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
 				Held::Value(_) => return Ok(true),
@@ -360,6 +370,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
 				Held::Value(value) => return Ok(Some(value)),
@@ -377,6 +390,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn getu(&self, key: Key<'_>) -> Result<Option<Val>> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if self.speculating() {
 			match self.held(key.as_slice()) {
 				Held::Value(value) => return Ok(Some(value)),
@@ -393,6 +409,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
+		if self.absence.holds() {
+			self.absence.guard_keys(self.inner.as_ref(), keys).await?;
+		}
 		if version.is_none() && self.speculating() {
 			let mut result = GetMultiResult::default();
 			for key in keys {
@@ -417,6 +436,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn getr(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			return Ok(scan_result(self.speculative_pairs(&rng, true).await?));
 		}
@@ -432,6 +454,9 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		let val = val.into_vec();
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
@@ -451,6 +476,9 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		let val = val.into_vec();
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
@@ -470,6 +498,9 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		let val = val.into_vec();
 		if self.speculating() {
 			if self.speculative_value(&key).await?.is_some() {
@@ -483,6 +514,52 @@ impl Transactor {
 		written
 	}
 
+	/// Insert a key that must not exist, holding the check that it is absent for one check of
+	/// many keys ([`crate::absence`]).
+	///
+	/// The create fails as [`Self::put`] fails when the key is one the transaction may already
+	/// hold, or while a cursor is open, since it is then made immediately. A held create's failure
+	/// is [`crate::Error::DeferredKeyExists`], raised by whichever operation of the transaction
+	/// flushes it. A speculation's view makes every create immediately.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub(crate) async fn put_held(&self, key: Key<'_>, val: Val) -> Result<()> {
+		if self.speculating() || !crate::absence::enabled() {
+			return self.put(key, val).await;
+		}
+		let doc = self.written.lock().note_key(key.as_slice());
+		let written = match self
+			.absence
+			.hold(self.inner.as_ref(), key.into_inner().into_owned(), val)
+			.await
+		{
+			Ok(None) => Ok(()),
+			Ok(Some((key, val))) => self.inner.put(Key::from(key), val).await,
+			Err(e) => Err(e),
+		};
+		self.end_write(doc);
+		written
+	}
+
+	/// Flush the held creates and take the earliest one that found its key present
+	/// ([`crate::absence`]): its key, or `None` when every held key was absent and is written.
+	pub async fn take_absence_violation(&self) -> Result<Option<Vec<u8>>> {
+		if !self.absence.holds() {
+			return Ok(None);
+		}
+		self.absence.take_violation(self.inner.as_ref()).await
+	}
+
+	/// Flush the held creates, failing with the earliest one that found its key present.
+	pub async fn flush_held(&self) -> Result<()> {
+		if !self.absence.holds() {
+			return Ok(());
+		}
+		self.absence.flush_all(self.inner.as_ref()).await
+	}
+
 	/// Update a key in the datastore if the current value matches a condition.
 	#[cfg_attr(
 		feature = "observability",
@@ -492,6 +569,9 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		let val = val.into_vec();
 		let chk = chk.map(|v| v.into_vec());
 		if self.speculating() {
@@ -512,6 +592,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
@@ -528,6 +611,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if self.speculating() {
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
@@ -549,6 +635,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
@@ -564,6 +653,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
@@ -580,6 +672,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+		}
 		if self.speculating() {
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
@@ -601,6 +696,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
@@ -631,6 +729,9 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<KeysResult> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if rng.is_empty() {
 			return Ok(KeysResult::default());
 		}
@@ -658,6 +759,9 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<KeysResult> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if rng.is_empty() {
 			return Ok(KeysResult::default());
 		}
@@ -687,6 +791,9 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if rng.is_empty() {
 			return Ok(ScanResult::default());
 		}
@@ -714,6 +821,9 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<ScanResult> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if rng.is_empty() {
 			return Ok(ScanResult::default());
 		}
@@ -735,6 +845,9 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			return Ok(self.speculative_pairs(&rng, false).await?.len());
 		}
@@ -758,6 +871,9 @@ impl Transactor {
 		version: Option<u64>,
 		budget: u32,
 	) -> Result<(usize, Option<Key<'static>>)> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			return Ok((self.speculative_pairs(&rng, false).await?.len(), None));
 		}
@@ -771,7 +887,8 @@ impl Transactor {
 	///
 	/// See [`surrealdb_kvs::api::Transactable::snapshot`].
 	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
-		if self.speculating() {
+		// A view is taken of the store, which holds none of the held creates.
+		if self.speculating() || self.absence.holds() {
 			return None;
 		}
 		self.inner.snapshot()
@@ -884,11 +1001,22 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Box<dyn ScanCursorKeys + 'a>> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, false).await?;
 			return Ok(Box::new(HeldCursor::new(ordered(pairs, dir, skip))));
 		}
-		self.inner.open_keys_cursor(rng, dir, skip, version).await
+		self.absence.cursor_opened(rng.start.as_slice(), rng.end.as_slice());
+		let cursor = match self.inner.open_keys_cursor(rng, dir, skip, version).await {
+			Ok(cursor) => cursor,
+			Err(e) => {
+				self.absence.cursor_closed();
+				return Err(e);
+			}
+		};
+		Ok(Box::new(Counted::new(cursor, &self.absence)))
 	}
 
 	/// Visit the keys of several ranges, in range order, at most `limit` keys from each. See
@@ -905,6 +1033,11 @@ impl Transactor {
 		version: Option<u64>,
 		f: &'a mut dyn RangeKeyVisitor,
 	) -> Result<ScanChunkStats> {
+		if self.absence.holds() {
+			for rng in ranges {
+				self.absence.guard_range(self.inner.as_ref(), rng).await?;
+			}
+		}
 		if !self.speculating() {
 			return self.inner.visit_key_ranges(ranges, limit, version, f).await;
 		}
@@ -945,11 +1078,22 @@ impl Transactor {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Box<dyn ScanCursorVals + 'a>> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, true).await?;
 			return Ok(Box::new(HeldCursor::new(ordered(pairs, dir, skip))));
 		}
-		self.inner.open_vals_cursor(rng, dir, skip, version).await
+		self.absence.cursor_opened(rng.start.as_slice(), rng.end.as_slice());
+		let cursor = match self.inner.open_vals_cursor(rng, dir, skip, version).await {
+			Ok(cursor) => cursor,
+			Err(e) => {
+				self.absence.cursor_closed();
+				return Err(e);
+			}
+		};
+		Ok(Box::new(Counted::new(cursor, &self.absence)))
 	}
 
 	// --------------------------------------------------
@@ -970,6 +1114,9 @@ impl Transactor {
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<Vec<u8>>> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, false).await?;
 			return Ok(Batch::new(None, pairs.into_iter().map(|(key, _)| key).collect()));
@@ -991,6 +1138,9 @@ impl Transactor {
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<(Vec<u8>, Val)>> {
+		if self.absence.holds() {
+			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+		}
 		if self.speculated(&rng, version) {
 			return Ok(Batch::new(None, self.speculative_pairs(&rng, true).await?));
 		}
@@ -1069,6 +1219,62 @@ fn ordered(mut pairs: Vec<(Vec<u8>, Val)>, dir: Direction, skip: u32) -> Vec<(Ve
 	}
 	pairs.drain(..(skip as usize).min(pairs.len()));
 	pairs
+}
+
+/// A cursor counted open on the transaction for as long as it lives ([`crate::absence`]).
+struct Counted<'a, C: ?Sized> {
+	inner: Box<C>,
+	absence: &'a crate::absence::Absence,
+}
+
+impl<'a, C: ?Sized> Counted<'a, C> {
+	/// Wraps `inner`, a cursor [`crate::absence::Absence::cursor_opened`] has counted open.
+	fn new(inner: Box<C>, absence: &'a crate::absence::Absence) -> Self {
+		Self {
+			inner,
+			absence,
+		}
+	}
+}
+
+impl<C: ?Sized> Drop for Counted<'_, C> {
+	fn drop(&mut self) {
+		self.absence.cursor_closed();
+	}
+}
+
+impl<'a> ScanCursorKeys for Counted<'a, dyn ScanCursorKeys + 'a> {
+	fn next_batch<'s>(
+		&'s mut self,
+		limit: u32,
+	) -> common::future::BoxFut<'s, Result<surrealdb_kvs::api::KeysBatch<'s>>> {
+		self.inner.next_batch(limit)
+	}
+
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn surrealdb_kvs::api::KeyVisitor,
+	) -> common::future::BoxFut<'s, Result<ScanChunkStats>> {
+		self.inner.for_each(limit, f)
+	}
+}
+
+impl<'a> ScanCursorVals for Counted<'a, dyn ScanCursorVals + 'a> {
+	fn next_batch<'s>(
+		&'s mut self,
+		limit: u32,
+	) -> common::future::BoxFut<'s, Result<surrealdb_kvs::api::ValsBatch<'s>>> {
+		self.inner.next_batch(limit)
+	}
+
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn surrealdb_kvs::api::ValVisitor,
+	) -> common::future::BoxFut<'s, Result<ScanChunkStats>> {
+		self.inner.for_each(limit, f)
+	}
 }
 
 #[cfg(test)]

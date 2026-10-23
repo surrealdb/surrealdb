@@ -83,7 +83,10 @@ fn into_types_error_inner(error: Error, message: String) -> TypesError {
 			KvsError::ConnectionFailed(_) => {
 				TypesError::connection(message, ConnectionError::ConnectionFailed)
 			}
-			KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
+			KvsError::TransactionKeyAlreadyExists
+			| KvsError::DeferredKeyExists {
+				..
+			} => TypesError::already_exists(message, None),
 			KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
 			// The server is shutting down. Connection-class because the
 			// common case is a commit refused before it applied, which is

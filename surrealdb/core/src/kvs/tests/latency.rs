@@ -643,6 +643,23 @@ impl Transactable for LatencyTx {
 		})
 	}
 
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, KvsResult<()>> {
+		Box::pin(async move {
+			let keys: Vec<Vec<u8>> = entries.iter().map(|(k, _)| k.clone()).collect();
+			let first = keys.first().cloned().unwrap_or_default();
+			let out = self
+				.stats
+				.round(Class::BlindWrite, &first, self.inner.set_many(entries), |_| None)
+				.await;
+			if out.is_ok() {
+				for k in keys {
+					self.mark_written(k);
+				}
+			}
+			out
+		})
+	}
+
 	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
 		Box::pin(async move {
 			let k = key.as_slice().to_vec();
@@ -856,6 +873,21 @@ impl Transactable for LatencyTx {
 			let key = keys.first().map(|k| k.as_slice().to_vec()).unwrap_or_default();
 			let op = self.inner.getm(keys, version);
 			self.stats.round(Class::Getm, &key, op, |r| Some(r.values.len() as u64)).await
+		})
+	}
+
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, KvsResult<Option<usize>>> {
+		Box::pin(async move {
+			let all_written = {
+				let written = self.written.lock().unwrap();
+				keys.iter().all(|k| written.contains(k.as_slice()))
+			};
+			if all_written {
+				return self.inner.assert_absent(keys).await;
+			}
+			let key = keys.first().map(|k| k.as_slice().to_vec()).unwrap_or_default();
+			let op = self.inner.assert_absent(keys);
+			self.stats.round(Class::Getm, &key, op, |_| Some(keys.len() as u64)).await
 		})
 	}
 

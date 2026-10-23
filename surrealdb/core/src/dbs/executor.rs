@@ -980,6 +980,34 @@ struct RequestPlan {
 	taken: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+/// The result of a statement once the creates it held are checked ([`Transaction::put_held`]):
+/// `result` when every held key was absent, and otherwise the duplicate the earliest failing
+/// create would have raised had its check been immediate, whatever the statement went on to do.
+async fn settle_held_creates(txn: &Transaction, result: FlowResult<Value>) -> FlowResult<Value> {
+	match txn.take_absence_violation().await {
+		Ok(None) => result,
+		Ok(Some(key)) => Err(ControlFlow::Err(held_create_exists(&key))),
+		Err(e) => match result {
+			Ok(_) => Err(ControlFlow::Err(e.into())),
+			Err(prior) => Err(prior),
+		},
+	}
+}
+
+/// The error a create of the record at `key` raises when the record exists.
+pub(crate) fn held_create_exists(key: &[u8]) -> anyhow::Error {
+	use crate::key::KVKeyDecode as _;
+	match crate::key::schema::RecordKey::decode_key(key) {
+		Ok(key) => anyhow::Error::new(crate::doc::Error::RecordExists {
+			record: crate::val::RecordId {
+				table: key.tb.into_owned(),
+				key: key.id.into_owned(),
+			},
+		}),
+		Err(e) => e,
+	}
+}
+
 #[cfg(test)]
 thread_local! {
 	/// A future a test runs between a bare `LIVE` statement's arrival and the
@@ -1908,7 +1936,8 @@ impl Executor {
 		txn: Arc<Transaction>,
 		stream_rows: bool,
 	) -> FlowResult<Value> {
-		let result = self.execute_planned(plan, txn, stream_rows).await;
+		let result = self.execute_planned(plan, Arc::clone(&txn), stream_rows).await;
+		let result = settle_held_creates(&txn, result).await;
 		// The drain runs whether the program returned or raised, before the statement's result is
 		// recorded or sent and before the next step runs. An error it raises replaces the result.
 		self.apply_session_effects(result.is_ok())?;
@@ -2159,6 +2188,9 @@ impl Executor {
 								}
 							}
 						};
+						// A row leaves only once the creates held before it are checked, so
+						// no row follows a create that fails.
+						txn.flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
 						sink.send(item).await;
 						// A consumer that stopped reading wants no more rows, and
 						// the statement is about to be abandoned anyway.
@@ -2366,10 +2398,16 @@ impl Executor {
 		// here and never carried over from the one before.
 		self.result_shape = OutputShape::Scalar;
 		let res = match stmt {
-			TopLevelStatement::Ast(stmt) => self.run_surface_statement(stmt, txn, start).await,
-			TopLevelStatement::Plan(op) => self.run_logical_plan(op, txn, start).await,
-			TopLevelStatement::Surreal(stmt) => self.run_flat_statement(*stmt, txn, start).await,
+			TopLevelStatement::Ast(stmt) => {
+				self.run_surface_statement(stmt, Arc::clone(&txn), start).await
+			}
+			TopLevelStatement::Plan(op) => self.run_logical_plan(op, Arc::clone(&txn), start).await,
+			TopLevelStatement::Surreal(stmt) => {
+				self.run_flat_statement(*stmt, Arc::clone(&txn), start).await
+			}
 		};
+		// Every create the statement held is checked before its result stands.
+		let res = settle_held_creates(&txn, res).await;
 
 		// Catch cancellation during running.
 		self.bail_if_done()?;

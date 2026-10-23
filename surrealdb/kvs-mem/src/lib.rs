@@ -475,6 +475,35 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Check many keys under one acquisition of the transaction, each read as `put` reads its key:
+	/// with `get`, which answers a key deleted in the write set as absent (the write set's own
+	/// `exists` answers any key it holds, a deletion too), joining the read set as `put`'s read
+	/// does.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::api",
+			skip(self, keys)
+		)
+	)]
+	fn assert_absent<'a>(&'a self, keys: &'a [Key<'a>]) -> BoxFut<'a, Result<Option<usize>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Load the inner transaction once for every key
+			let inner = self.inner.read().await;
+			for (at, key) in keys.iter().enumerate() {
+				if inner.get(key.as_slice()).map_err(kvs_error)?.is_some() {
+					return Ok(Some(at));
+				}
+			}
+			Ok(None)
+		})
+	}
+
 	/// Insert or update a key in the database.
 	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
@@ -492,6 +521,30 @@ impl Transactable for Transaction {
 			// Set the key
 			inner.set(key.into_inner(), val).map_err(kvs_error)?;
 			// Return result
+			Ok(())
+		})
+	}
+
+	/// Insert or update many keys under one acquisition of the transaction.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip_all)
+	)]
+	fn set_many<'a>(&'a self, entries: Vec<(Vec<u8>, Val)>) -> BoxFut<'a, Result<()>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Load the inner transaction once for every key
+			let mut inner = self.inner.write().await;
+			for (key, val) in entries {
+				inner.set(key, val).map_err(kvs_error)?;
+			}
 			Ok(())
 		})
 	}

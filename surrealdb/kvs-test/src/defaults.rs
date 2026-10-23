@@ -1,5 +1,5 @@
 //! Contract tests for the `Transactable` methods that have shared default
-//! implementations (`getm`, `getr`, `delr`, `clrr`, `count`, `count_bounded`,
+//! implementations (`getm`, `assert_absent`, `getr`, `delr`, `clrr`, `count`, `count_bounded`,
 //! `replace`, `clr`, `clrc`). Backends may override any of these, so the contract is
 //! asserted against every backend regardless.
 
@@ -70,6 +70,68 @@ async fn getm_sees_buffered_writes(b: &TestBackend) {
 }
 
 kvs_test!(getm_sees_buffered_writes);
+
+/// `assert_absent` answers the smallest position whose key holds a value, whatever order the
+/// backend reads the keys in, and `None` when none does.
+async fn assert_absent(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_eq!(tx.assert_absent(&[]).await.unwrap(), None, "no keys hold nothing");
+	let missing = [b"m1".into(), b"k0".into(), b"k6".into()];
+	assert_eq!(tx.assert_absent(&missing).await.unwrap(), None);
+	// `k5` sorts after `k1` but stands first in the input.
+	let keys = [b"m1".into(), b"k5".into(), b"m2".into(), b"k1".into()];
+	assert_eq!(tx.assert_absent(&keys).await.unwrap(), Some(1), "the smallest position answers");
+	let repeated = [b"m1".into(), b"m1".into(), b"k3".into(), b"k3".into()];
+	assert_eq!(tx.assert_absent(&repeated).await.unwrap(), Some(2));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(assert_absent);
+
+/// `assert_absent` in a writable transaction judges its own buffered writes and deletes, as the
+/// read `put` makes does.
+async fn assert_absent_sees_buffered_writes(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed(&ds).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.del(b"k4".into()).await.unwrap();
+	tx.set(b"k9".into(), b"new".to_vec()).await.unwrap();
+	let deleted = [b"k4".into(), b"k8".into()];
+	assert_eq!(tx.assert_absent(&deleted).await.unwrap(), None, "a deleted key is absent");
+	let written = [b"k8".into(), b"k9".into()];
+	assert_eq!(tx.assert_absent(&written).await.unwrap(), Some(1), "a written key is present");
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(assert_absent_sees_buffered_writes);
+
+/// `assert_absent` over a few keys spread across a span the store fills densely answers as it does
+/// for keys read one at a time.
+async fn assert_absent_across_a_full_span(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..2000u32 {
+		let key = format!("s{i:05}");
+		tx.set(key.as_bytes().into(), b"v".to_vec()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	let sparse =
+		[b"s00010x".into(), b"s01990x".into(), b"r".into(), b"t".into(), b"s00500x".into()];
+	assert_eq!(tx.assert_absent(&sparse).await.unwrap(), None);
+	let late =
+		[b"s00010x".into(), b"s01990x".into(), b"r".into(), b"s01999".into(), b"s00000".into()];
+	assert_eq!(
+		tx.assert_absent(&late).await.unwrap(),
+		Some(3),
+		"a present key past the walk is found"
+	);
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(assert_absent_across_a_full_span);
 
 /// `getm` answers each key as `get` does, and a version on a store that keeps none is refused.
 async fn getm_refuses_a_version_without_versioning(b: &TestBackend) {
