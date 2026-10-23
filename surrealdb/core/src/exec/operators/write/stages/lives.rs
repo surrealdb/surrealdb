@@ -91,6 +91,7 @@ pub(crate) enum Notify {
 
 /// The record's two images and what happened to it, owned so nothing borrows
 /// the row across an await.
+#[derive(Clone)]
 pub(crate) struct Images {
 	/// The record before the write.
 	pub(crate) initial: Arc<Value>,

@@ -7,6 +7,7 @@
 mod broker;
 mod capture;
 pub mod executor;
+pub(crate) mod live_recheck;
 mod observe_ctx;
 mod options;
 mod session;

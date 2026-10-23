@@ -433,6 +433,9 @@ pub struct CommitTriggers {
 	/// The write transactions open through the datastore, by the epoch they
 	/// opened in; see [`LiveWrites`].
 	pub(crate) live_writes: LiveWrites,
+	/// The live-query registrations a write transaction open through the
+	/// datastore may have missed; see [`LiveRegistrations`].
+	pub live_registrations: LiveRegistrations,
 	/// When this datastore last recorded its heartbeat, for the fence that stops a datastore
 	/// whose heartbeat has lapsed from committing writes to a store it shares; see
 	/// [`WriteFence`].
@@ -1414,9 +1417,288 @@ impl LiveWrites {
 	}
 }
 
+/// The live-query registrations through one datastore that a write transaction
+/// open through it may not have seen, so that a write that committed unseen by
+/// one can still notify it.
+///
+/// A write computes its live-query notifications from the subscriptions its
+/// snapshot holds. A registration that commits after that snapshot is taken and
+/// before the write commits is in neither, and nothing conflicts. Each
+/// registration is entered here before its transaction commits ([`Self::begin`])
+/// and dated once it has committed ([`Self::settle`]) with an epoch of
+/// [`LiveWrites`] moved on after the commit: a write counted into an epoch no
+/// later than that one may have taken its snapshot before the registration
+/// committed. A write asks, after it commits, for the registrations of a table
+/// it wrote that are still undated or dated no earlier than its own epoch
+/// ([`Self::candidates`]); one undated then may already have committed. Both
+/// questions over-answer: the writer reads the table's subscriptions afresh and
+/// serves only those it did not see, so an entry that never committed, or that
+/// committed before the write's snapshot, costs a read and nothing else. An
+/// entry that committed after the write did, before the write asked, is
+/// answered too: epochs order a registration against a write's opening, not
+/// against its commit, and ordering the two commits would serialise every
+/// write commit against every registration.
+///
+/// A write stops being counted among [`LiveWrites`] as soon as its commit
+/// returns, before it has asked, so it pins its epoch while it writes
+/// ([`Self::pin`]) and unpins it once it has asked ([`Self::unpin`]). A write
+/// set aside while it awaits a build is not counted, and is counted back into a
+/// later epoch than its snapshot's, so it pins the epoch it first opened in from
+/// when it is first set aside until it is dropped
+/// ([`crate::tx::Transaction::park_live_write`]). An entry
+/// is dropped once every write transaction counted into an epoch no later than
+/// its date has ended and no such epoch is pinned, as no write can still miss
+/// it, and when its transaction does not commit ([`Self::abandon`]).
+///
+/// The registry holds this datastore's registrations only, and answers only its
+/// writes: a registration made through another datastore on the same store is
+/// not entered here, so a write through this one cannot learn it missed it.
+/// That suffices while a node's writes notify only that node's own subscribers,
+/// as core's `LocalMessageBroker` does; a broker that
+/// routes notifications to other nodes needs the question answered across
+/// nodes.
+#[derive(Default)]
+pub struct LiveRegistrations {
+	/// The entries, oldest first.
+	entries: Mutex<Vec<LiveRegistration>>,
+	/// How many entries there are, so a write asks without the lock when none.
+	count: AtomicUsize,
+	/// The token the next entry takes.
+	next: AtomicU64,
+	/// The epochs pinned by writes that have yet to ask, with how many pin each.
+	pins: Mutex<std::collections::BTreeMap<u64, usize>>,
+}
+
+/// One registration entered in [`LiveRegistrations`].
+struct LiveRegistration {
+	token: u64,
+	ns: surrealdb_catalog::NamespaceId,
+	db: surrealdb_catalog::DatabaseId,
+	tb: surrealdb_expr::val::TableName,
+	live: uuid::Uuid,
+	/// The [`Transaction::serial`](crate::tx::Transaction::serial) of the
+	/// transaction registering it, whose own writes are not owed to it.
+	owner: u64,
+	/// The [`LiveWrites`] epoch the registration's commit was dated with, or
+	/// `None` while it has not committed.
+	settled: Option<u64>,
+}
+
+impl LiveRegistrations {
+	/// Enter a registration of `live` on table `tb` by the transaction
+	/// numbered `owner`, which has not yet committed, answering the token that
+	/// settles or abandons it.
+	pub fn begin(
+		&self,
+		ns: surrealdb_catalog::NamespaceId,
+		db: surrealdb_catalog::DatabaseId,
+		tb: &surrealdb_expr::val::TableName,
+		live: uuid::Uuid,
+		owner: u64,
+	) -> u64 {
+		let token = self.next.fetch_add(1, Ordering::Relaxed);
+		let mut entries = self.entries.lock();
+		entries.push(LiveRegistration {
+			token,
+			ns,
+			db,
+			tb: tb.clone(),
+			live,
+			owner,
+			settled: None,
+		});
+		self.count.store(entries.len(), Ordering::Release);
+		token
+	}
+
+	/// Date the registration `token` names, whose transaction has committed,
+	/// with an epoch of `writes` moved on after that commit.
+	pub fn settle(&self, token: u64, writes: &LiveWrites) {
+		let epoch = writes.advance();
+		let mut entries = self.entries.lock();
+		if let Some(entry) = entries.iter_mut().find(|entry| entry.token == token) {
+			entry.settled = Some(epoch);
+		}
+		self.prune(&mut entries, writes);
+		self.count.store(entries.len(), Ordering::Release);
+	}
+
+	/// Drop the registration `token` names, whose transaction did not commit.
+	pub fn abandon(&self, token: u64) {
+		let mut entries = self.entries.lock();
+		entries.retain(|entry| entry.token != token);
+		self.count.store(entries.len(), Ordering::Release);
+	}
+
+	/// The registrations on `tb` that a write counted into `epoch` by the
+	/// transaction numbered `writer` may not have seen: those not yet
+	/// committed, and those dated with `epoch` or later, other than its own.
+	pub fn candidates(
+		&self,
+		ns: surrealdb_catalog::NamespaceId,
+		db: surrealdb_catalog::DatabaseId,
+		tb: &surrealdb_expr::val::TableName,
+		epoch: u64,
+		writer: u64,
+		writes: &LiveWrites,
+	) -> Vec<uuid::Uuid> {
+		if self.count.load(Ordering::Acquire) == 0 {
+			return Vec::new();
+		}
+		let mut entries = self.entries.lock();
+		self.prune(&mut entries, writes);
+		self.count.store(entries.len(), Ordering::Release);
+		entries
+			.iter()
+			.filter(|entry| {
+				entry.ns == ns && entry.db == db && entry.tb == *tb && entry.owner != writer
+			})
+			.filter(|entry| entry.settled.is_none_or(|settled| settled >= epoch))
+			.map(|entry| entry.live)
+			.collect()
+	}
+
+	/// Whether any registration on `tb` other than the transaction numbered
+	/// `writer`'s own is one a write counted into `epoch` may not see: what
+	/// [`Self::candidates`] would answer, without the list. Answered without the
+	/// lock while no registration is entered.
+	pub fn any_candidate(
+		&self,
+		ns: surrealdb_catalog::NamespaceId,
+		db: surrealdb_catalog::DatabaseId,
+		tb: &surrealdb_expr::val::TableName,
+		epoch: u64,
+		writer: u64,
+	) -> bool {
+		if self.count.load(Ordering::Acquire) == 0 {
+			return false;
+		}
+		self.entries.lock().iter().any(|entry| {
+			entry.ns == ns
+				&& entry.db == db
+				&& entry.tb == *tb
+				&& entry.owner != writer
+				&& entry.settled.is_none_or(|settled| settled >= epoch)
+		})
+	}
+
+	/// Keep the entries dated with `epoch` or later until the write counted
+	/// into `epoch` has asked ([`Self::unpin`]). Taken while the write is still
+	/// counted into `epoch`, so no such entry has been dropped yet.
+	pub fn pin(&self, epoch: u64) {
+		*self.pins.lock().entry(epoch).or_default() += 1;
+	}
+
+	/// Release a pin of `epoch` ([`Self::pin`]).
+	pub fn unpin(&self, epoch: u64) {
+		let mut pins = self.pins.lock();
+		if let std::collections::btree_map::Entry::Occupied(mut pinned) = pins.entry(epoch) {
+			*pinned.get_mut() -= 1;
+			if *pinned.get() == 0 {
+				pinned.remove();
+			}
+		}
+	}
+
+	/// Drop every dated entry no write can still miss: every write counted
+	/// into an epoch no later than its date has ended, and none pins one.
+	fn prune(&self, entries: &mut Vec<LiveRegistration>, writes: &LiveWrites) {
+		let oldest_pin = self.pins.lock().keys().next().copied();
+		entries.retain(|entry| {
+			entry.settled.is_none_or(|settled| {
+				oldest_pin.is_some_and(|pin| pin <= settled) || !writes.ended_since(settled)
+			})
+		});
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	fn named(name: &str) -> surrealdb_expr::val::TableName {
+		surrealdb_expr::val::TableName::from(name)
+	}
+
+	const OWNER: u64 = 1;
+	const WRITER: u64 = 2;
+	const NS: surrealdb_catalog::NamespaceId = surrealdb_catalog::NamespaceId(1);
+	const DB: surrealdb_catalog::DatabaseId = surrealdb_catalog::DatabaseId(2);
+
+	#[test]
+	fn a_write_that_opened_before_a_registration_settled_is_answered_it() {
+		let writes = LiveWrites::default();
+		let registrations = LiveRegistrations::default();
+		let live = uuid::Uuid::from_u128(7);
+		let older = writes.open();
+		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
+		assert_eq!(
+			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes),
+			vec![live],
+			"an undated registration may already have committed"
+		);
+		registrations.settle(token, &writes);
+		let newer = writes.open();
+		assert_eq!(
+			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes),
+			vec![live]
+		);
+		assert!(
+			registrations.candidates(NS, DB, &named("tb"), newer, WRITER, &writes).is_empty(),
+			"a write that opened after the registration settled saw it"
+		);
+		assert!(
+			registrations.candidates(NS, DB, &named("other"), older, WRITER, &writes).is_empty(),
+			"another table's registration is not owed"
+		);
+		writes.close(newer);
+		writes.close(older);
+		assert!(
+			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes).is_empty(),
+			"once every write that could have missed it has ended, it is dropped"
+		);
+		assert_eq!(registrations.count.load(Ordering::Acquire), 0);
+	}
+
+	#[test]
+	fn a_pinned_epoch_keeps_its_registrations_after_its_write_ends() {
+		let writes = LiveWrites::default();
+		let registrations = LiveRegistrations::default();
+		let live = uuid::Uuid::from_u128(7);
+		let write = writes.open();
+		registrations.pin(write);
+		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
+		registrations.settle(token, &writes);
+		writes.close(write);
+		assert_eq!(
+			registrations.candidates(NS, DB, &named("tb"), write, WRITER, &writes),
+			vec![live],
+			"a write that committed and has not asked is still answered"
+		);
+		registrations.unpin(write);
+		assert!(registrations.candidates(NS, DB, &named("tb"), write, WRITER, &writes).is_empty());
+	}
+
+	#[test]
+	fn a_transaction_is_not_answered_its_own_registration() {
+		let writes = LiveWrites::default();
+		let registrations = LiveRegistrations::default();
+		let epoch = writes.open();
+		registrations.begin(NS, DB, &named("tb"), uuid::Uuid::from_u128(7), WRITER);
+		assert!(registrations.candidates(NS, DB, &named("tb"), epoch, WRITER, &writes).is_empty());
+		writes.close(epoch);
+	}
+
+	#[test]
+	fn an_abandoned_registration_is_dropped() {
+		let writes = LiveWrites::default();
+		let registrations = LiveRegistrations::default();
+		let epoch = writes.open();
+		let token = registrations.begin(NS, DB, &named("tb"), uuid::Uuid::from_u128(7), OWNER);
+		registrations.abandon(token);
+		assert!(registrations.candidates(NS, DB, &named("tb"), epoch, WRITER, &writes).is_empty());
+		writes.close(epoch);
+	}
 
 	#[test]
 	fn a_write_fence_refuses_a_lapse_and_what_opened_before_its_end() {

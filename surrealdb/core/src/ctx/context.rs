@@ -234,6 +234,9 @@ pub struct Context {
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
+	/// Where the writes of the transaction the broker buffers for are noted,
+	/// installed and cleared with it ([`crate::dbs::live_recheck`]).
+	live_recheck: Option<Arc<crate::dbs::live_recheck::LiveRecheck>>,
 	/// The host-provided `SHOW CHANGES` source, when the datastore has one.
 	changefeed_source: Option<Arc<dyn crate::lq::external::ChangeFeedSource>>,
 	/// How a running program gives up its thread once it has spent its
@@ -335,6 +338,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
@@ -408,6 +412,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
@@ -470,6 +475,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
@@ -558,6 +564,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			live_recheck: from.live_recheck.clone(),
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: from.memory.clone(),
@@ -599,6 +606,10 @@ impl Context {
 	/// A closure invoked beneath this context links its unit into a table
 	/// installed beneath it, as each build batch's context installs one, or
 	/// into a table of the invocation's own.
+	///
+	/// `live_recheck` is not carried either: it notes the writes of the
+	/// transaction `from` runs in, and holds what that transaction wrote until
+	/// it has committed, while this context runs transactions of its own.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: Arc::default(),
@@ -648,6 +659,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			live_recheck: None,
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: None,
@@ -728,6 +740,7 @@ impl Context {
 			dynamic_configuration,
 			live: false,
 			broker: None,
+			live_recheck: None,
 			changefeed_source: None,
 			scheduler: None,
 			memory: None,
@@ -803,6 +816,7 @@ impl Context {
 			dynamic_configuration: DynamicConfiguration::default(),
 			live: false,
 			broker: None,
+			live_recheck: None,
 			changefeed_source: None,
 			scheduler: None,
 			memory: None,
@@ -938,8 +952,25 @@ impl Context {
 		self.broker.as_ref()
 	}
 
+	/// Install `broker`, or clear the broker with `None`. Either way the context
+	/// no longer notes writes for a recheck ([`Self::set_live_recheck`]).
 	pub(crate) fn set_broker(&mut self, broker: Option<Arc<dyn MessageBroker>>) {
 		self.broker = broker;
+		self.live_recheck = None;
+	}
+
+	/// Where a write notes what it wrote, for the subscriptions its snapshot
+	/// did not hold to be told once it commits.
+	pub(crate) fn live_recheck(&self) -> Option<&Arc<crate::dbs::live_recheck::LiveRecheck>> {
+		self.live_recheck.as_ref()
+	}
+
+	/// Note this context's writes in `recheck`, until the broker is next set.
+	pub(crate) fn set_live_recheck(
+		&mut self,
+		recheck: Option<Arc<crate::dbs::live_recheck::LiveRecheck>>,
+	) {
+		self.live_recheck = recheck;
 	}
 
 	/// The host-provided `SHOW CHANGES` source, if one was installed.

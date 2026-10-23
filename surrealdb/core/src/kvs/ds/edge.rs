@@ -250,9 +250,13 @@ impl Datastore {
 				.with_write_keys_limit(self.transaction_max_write_keys()),
 		);
 		let receiver = match transaction_type {
-			TransactionType::Write => {
-				self.live_query_broker().and_then(|delivery| install_broker(ctx, delivery))
-			}
+			TransactionType::Write => self.live_query_broker().and_then(|delivery| {
+				let source = crate::dbs::live_recheck::RecheckSource {
+					tf: self.transaction_factory().clone(),
+					sequences: self.sequences().clone(),
+				};
+				install_broker(ctx, delivery, source)
+			}),
 			TransactionType::Read => None,
 		};
 		let owns_broker = receiver.is_some();

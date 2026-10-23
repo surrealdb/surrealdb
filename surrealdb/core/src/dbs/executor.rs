@@ -511,6 +511,12 @@ impl StreamSink {
 pub(crate) struct PreparedBroker {
 	receiver: async_channel::Receiver<RoutedNotification>,
 	delivery: Arc<OrderedBroker>,
+	/// What the transaction wrote, for the subscriptions its snapshot did not
+	/// hold, and where to read them once it commits.
+	recheck: Option<(
+		Arc<crate::dbs::live_recheck::LiveRecheck>,
+		crate::dbs::live_recheck::RecheckSource,
+	)>,
 }
 
 /// Flush a batch's buffered live-query notifications once the caller-owned
@@ -1038,9 +1044,14 @@ pub(crate) fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow
 /// runs next for `delivery`, and answer the handle that delivers them once its transaction has
 /// committed. Answers `None` where a higher layer already provided a broker, or where `ctx` is
 /// shared and cannot be changed.
+///
+/// Under the inline live-query engine the broker also collects what the transaction writes, so
+/// that the subscriptions registered while it ran, which its snapshot does not hold, are told
+/// once it commits, read through `source` ([`crate::dbs::live_recheck`]).
 pub(crate) fn install_broker(
 	ctx: &mut FrozenContext,
 	delivery: Arc<OrderedBroker>,
+	source: crate::dbs::live_recheck::RecheckSource,
 ) -> Option<PreparedBroker> {
 	// If a broker is already provided by a higher layer, don't override it here.
 	if ctx.broker().is_some() {
@@ -1060,10 +1071,14 @@ pub(crate) fn install_broker(
 		}
 		return None;
 	};
+	let recheck = (ctx.config.datastore.live_query_engine == crate::kvs::LiveQueryEngine::Inline)
+		.then(|| Arc::new(crate::dbs::live_recheck::LiveRecheck::default()));
 	ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery) as Arc<dyn MessageBroker>)));
+	ctx.set_live_recheck(recheck.clone());
 	Some(PreparedBroker {
 		receiver: recv,
 		delivery,
+		recheck: recheck.map(|recheck| (recheck, source)),
 	})
 }
 
@@ -1079,7 +1094,15 @@ pub(crate) fn flush_live_query_notifications(prepared: PreparedBroker) {
 	let PreparedBroker {
 		receiver,
 		delivery,
+		recheck,
 	} = prepared;
+	if let Some((recheck, source)) = recheck {
+		crate::dbs::live_recheck::spawn(
+			recheck,
+			source,
+			Arc::clone(&delivery) as Arc<dyn MessageBroker>,
+		);
+	}
 	// Read before draining: once every sender is gone nothing more can arrive,
 	// so the drain below takes everything there will ever be.
 	let closed = receiver.is_closed();
@@ -1310,6 +1333,7 @@ impl Executor {
 	#[inline]
 	fn prepare_broker(
 		&mut self,
+		kvs: &Datastore,
 		writable: bool,
 		delivery: Option<Arc<OrderedBroker>>,
 	) -> Option<PreparedBroker> {
@@ -1317,7 +1341,11 @@ impl Executor {
 			return None;
 		}
 		let delivery = delivery?;
-		let prepared = install_broker(&mut self.ctx, delivery)?;
+		let source = crate::dbs::live_recheck::RecheckSource {
+			tf: kvs.transaction_factory().clone(),
+			sequences: kvs.sequences().clone(),
+		};
+		let prepared = install_broker(&mut self.ctx, delivery, source)?;
 		self.broker_owned_by_executor = true;
 		Some(prepared)
 	}
@@ -3174,6 +3202,7 @@ impl Executor {
 			None => txn,
 		});
 		let receiver = self.prepare_broker(
+			kvs,
 			matches!(transaction_type, TransactionType::Write),
 			kvs.live_query_broker(),
 		);
@@ -3768,7 +3797,7 @@ impl Executor {
 	{
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
-		let receiver = self.prepare_broker(true, kvs.live_query_broker());
+		let receiver = self.prepare_broker(kvs, true, kvs.live_query_broker());
 		let start_results = self.results.len();
 
 		// loop over the statements until we hit a cancel or a commit statement.
@@ -4376,7 +4405,7 @@ impl Executor {
 		// commit action rather than when the batch ends. The broker stays installed for the
 		// whole batch: every statement runs through `execute_plan_in_transaction`, which
 		// never clears it, and the context dies with this executor.
-		if let Some(prepared) = self.prepare_broker(tx.writeable(), kvs.live_query_broker()) {
+		if let Some(prepared) = self.prepare_broker(kvs, tx.writeable(), kvs.live_query_broker()) {
 			tx.on_commit(Box::new(FlushOnCommit(prepared))).await;
 		}
 		let batch_start = Instant::now();

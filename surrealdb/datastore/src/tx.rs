@@ -765,6 +765,18 @@ pub struct Transaction {
 	/// back once the transaction's outcome is known ([`Self::end_live_write`]); [`NO_LIVE_EPOCH`]
 	/// for a read transaction and once counted out.
 	live_write_epoch: AtomicU64,
+	/// The epoch a write transaction first counted itself into, before its snapshot was taken,
+	/// which a transaction set aside and counted back in ([`Self::park_live_write`]) keeps:
+	/// its snapshot is no later for being counted into a later epoch. [`NO_LIVE_EPOCH`] for a read
+	/// transaction.
+	snapshot_live_epoch: u64,
+	/// Whether the transaction pins [`Self::snapshot_live_epoch`] among its datastore's live-query
+	/// registrations, from when it was first set aside until it is dropped
+	/// ([`Self::park_live_write`]).
+	pins_snapshot_epoch: AtomicBool,
+	/// This transaction's number, unique among the transactions of the process
+	/// ([`Self::serial`]).
+	serial: u64,
 	/// When the transaction opened, taken before its snapshot, for the heartbeat fence
 	/// ([`crate::triggers::WriteFence`]).
 	opened_at: Option<web_time::Instant>,
@@ -1317,6 +1329,12 @@ impl IndexBuildReservationRelease {
 /// The epoch of a transaction not counted among the write transactions a build waits for.
 const NO_LIVE_EPOCH: u64 = u64::MAX;
 
+/// The number the next transaction takes ([`Transaction::serial`]).
+fn next_serial() -> u64 {
+	static NEXT: AtomicU64 = AtomicU64::new(0);
+	NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 /// A commit counted as under way by [`crate::triggers::LiveWrites`] until dropped.
 struct LiveCommit<'a> {
 	live: &'a crate::triggers::LiveWrites,
@@ -1365,6 +1383,9 @@ impl Drop for Transaction {
 			self.triggers.live.close(self.live_bucket);
 		}
 		self.end_live_write();
+		if self.pins_snapshot_epoch.load(Ordering::SeqCst) {
+			self.triggers.live_registrations.unpin(self.snapshot_live_epoch);
+		}
 	}
 }
 
@@ -1815,6 +1836,9 @@ impl Transaction {
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			snapshot_live_epoch: NO_LIVE_EPOCH,
+			pins_snapshot_epoch: AtomicBool::new(false),
+			serial: next_serial(),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
 			passed_waits: Default::default(),
@@ -8246,6 +8270,7 @@ impl Transaction {
 	pub(crate) fn with_live_write(mut self, live: Option<(u64, web_time::Instant)>) -> Self {
 		if let Some((epoch, opened)) = live {
 			self.live_write_epoch.store(epoch, Ordering::SeqCst);
+			self.snapshot_live_epoch = epoch;
 			self.opened_at = Some(opened);
 		}
 		self
@@ -8265,6 +8290,32 @@ impl Transaction {
 			live,
 			epoch,
 		})
+	}
+
+	/// The epoch of [`crate::triggers::LiveWrites`] this write transaction counted itself into
+	/// before its snapshot was taken, while it is still counted; `None` for a read transaction,
+	/// while it is set aside ([`Self::park_live_write`]) and once its outcome is known. A
+	/// transaction counted back in after being set aside answers the epoch it first opened in,
+	/// which dates its snapshot.
+	pub fn live_write_epoch(&self) -> Option<u64> {
+		let epoch = self.live_write_epoch.load(Ordering::SeqCst);
+		(epoch != NO_LIVE_EPOCH).then_some(self.snapshot_live_epoch)
+	}
+
+	/// This transaction's number, which no other transaction of the process
+	/// takes, however long after this one ends.
+	pub fn serial(&self) -> u64 {
+		self.serial
+	}
+
+	/// The live-query registrations of this transaction's datastore.
+	pub fn live_registrations(&self) -> &crate::triggers::LiveRegistrations {
+		&self.triggers.live_registrations
+	}
+
+	/// The post-commit wake-ups and counts shared by this transaction's datastore.
+	pub fn commit_triggers(&self) -> Arc<CommitTriggers> {
+		Arc::clone(&self.triggers)
 	}
 
 	/// Let this transaction commit whatever the heartbeat fence finds
@@ -8297,6 +8348,13 @@ impl Transaction {
 		// Set aside before the transaction leaves its epoch: a wait that reads the epoch after the
 		// transaction may have left is recorded as one that may pass it.
 		let parked = self.triggers.live_writes.park();
+		// A registration that settles while the transaction is set aside, or after it is counted
+		// back into a later epoch, is one its snapshot may miss, and nothing else keeps it: pinned
+		// while the transaction is still counted, so none has been dropped yet, and until it is
+		// dropped, after it has asked for them ([`crate::triggers::LiveRegistrations::pin`]).
+		if !self.pins_snapshot_epoch.swap(true, Ordering::SeqCst) {
+			self.triggers.live_registrations.pin(self.snapshot_live_epoch);
+		}
 		self.end_live_write();
 		Some(ParkedWrite {
 			txn: Arc::clone(self),
@@ -9586,6 +9644,9 @@ impl Transaction {
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			snapshot_live_epoch: NO_LIVE_EPOCH,
+			pins_snapshot_epoch: AtomicBool::new(false),
+			serial: next_serial(),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
 			passed_waits: Default::default(),
@@ -15740,6 +15801,38 @@ mod speculation_tests {
 		assert!(!live.ended_since(since), "nor before its settle has elapsed");
 		tokio::time::sleep(Duration::from_millis(500)).await;
 		assert!(live.ended_since(since), "it has landed, or never will, once it has");
+	}
+
+	/// A write set aside for a build and counted back in answers the epoch its snapshot was taken
+	/// in, and keeps the registrations that settled meanwhile, which its snapshot predates, until
+	/// it is dropped.
+	#[tokio::test]
+	async fn a_parked_write_is_answered_what_settled_while_it_was_parked() {
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::val::TableName;
+
+		let (tf, sequences) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sequences).await.unwrap());
+		let opened = tx.live_write_epoch().expect("a write transaction is counted");
+		let registrations = &tf.commit_triggers().live_registrations;
+		let live = tf.live_writes();
+		let (ns, db, tb) = (NamespaceId(1), DatabaseId(2), TableName::new("tb"));
+		let id = uuid::Uuid::from_u128(7);
+		let parked = tx.park_live_write().expect("a counted write can be set aside");
+		let token = registrations.begin(ns, db, &tb, id, u64::MAX);
+		registrations.settle(token, live);
+		drop(parked);
+		assert_eq!(tx.live_write_epoch(), Some(opened), "its snapshot is no later for rejoining");
+		assert_eq!(registrations.candidates(ns, db, &tb, opened, tx.serial(), live), vec![id]);
+		tx.cancel_bare().await.unwrap();
+		assert_eq!(
+			registrations.candidates(ns, db, &tb, opened, tx.serial(), live),
+			vec![id],
+			"kept until the transaction is dropped, after it has asked"
+		);
+		let serial = tx.serial();
+		drop(tx);
+		assert!(registrations.candidates(ns, db, &tb, opened, serial, live).is_empty());
 	}
 
 	/// A speculation that writes caches apart once it has, so what it caches

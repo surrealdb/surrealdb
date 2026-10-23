@@ -467,6 +467,11 @@ impl TransactionFactory {
 		WriteWait(Arc::clone(&self.triggers), id)
 	}
 
+	/// The post-commit wake-ups and counts shared by this datastore's transactions.
+	pub fn commit_triggers(&self) -> &Arc<CommitTriggers> {
+		&self.triggers
+	}
+
 	/// The heartbeat fence on this datastore's writes ([`crate::triggers::WriteFence`]).
 	pub fn write_fence(&self) -> &crate::triggers::WriteFence {
 		self.triggers.write_fence()

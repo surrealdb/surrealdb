@@ -229,15 +229,18 @@ pub(super) async fn step(
 /// record, each by the unit its context holds for it (`vm::live`).
 ///
 /// Nothing runs under the router engine, which delivers off the write path, or
-/// the external engine, whose host delivers; for a write no observer sees; for a table with no
-/// subscription; or where no broker takes notifications. A record with no id is a broken order,
-/// failed once rather than per subscription.
+/// the external engine, whose host delivers; for a write no observer sees; or
+/// where no broker takes notifications. A record with no id on a table with
+/// subscriptions is a broken order, failed once rather than per subscription.
+///
+/// The record is noted with the broker whatever the table's subscriptions, so
+/// that a subscription registered after the write's snapshot is told of it once
+/// the write commits ([`crate::dbs::live_recheck`]).
 async fn lives(action: Action, state: &mut State) -> FlowResult<()> {
 	let write =
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
 	let (row, ctx) = write.in_flight()?;
 	if !ctx.exec().root().ctx.config.datastore.live_query_engine.notifies_inline()
-		|| ctx.lives.is_empty()
 		|| !is_observed(row, &ctx)
 	{
 		return Ok(());
@@ -246,15 +249,33 @@ async fn lives(action: Action, state: &mut State) -> FlowResult<()> {
 		return Ok(());
 	};
 	let Some(rid) = row.id.clone() else {
+		// A record no subscription is told of needs no id.
+		if ctx.lives.is_empty() {
+			return Ok(());
+		}
 		return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::EngineError::unreachable(
 			"notifying a subscription of a record with no record id"
 		))));
 	};
+	let recheck = ctx.exec().ctx().live_recheck();
+	let keep = recheck.is_some_and(|recheck| recheck.keeps_images(&ctx));
+	if ctx.lives.is_empty() && !keep {
+		if let Some(recheck) = recheck {
+			recheck.record(&ctx, rid, action, None);
+		}
+		return Ok(());
+	}
 	let images = Images {
 		initial: Arc::new(row.initial.clone()),
 		current: Arc::new(row.current.clone()),
 		action,
 	};
+	if let Some(recheck) = recheck {
+		recheck.record(&ctx, rid.clone(), action, keep.then(|| images.clone()));
+	}
+	if ctx.lives.is_empty() {
+		return Ok(());
+	}
 	#[cfg(test)]
 	LIVES_RUN.with(|runs| runs.set(runs.get() + 1));
 	for at in 0..ctx.lives.len() {

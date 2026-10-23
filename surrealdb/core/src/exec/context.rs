@@ -869,6 +869,13 @@ impl ExecutionContext {
 		self
 	}
 
+	/// This context cancelled through `cancellation` alone, rather than the token of the request
+	/// it was made in: for work that outlives that request.
+	pub(crate) fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
+		self.root_mut().cancellation = Arc::new(cancellation);
+		self
+	}
+
 	/// Get namespace-level access (may fail if only root context).
 	///
 	/// Returns an error if no namespace has been selected.

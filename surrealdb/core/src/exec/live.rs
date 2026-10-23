@@ -246,6 +246,20 @@ pub(crate) async fn live_register(
 	// new subscription. A concurrent writer with a pre-commit snapshot
 	// reads the OLD timestamp and cannot poison the cache.
 	txn.bump_table_lives_cache(ns, db, &tb).await?;
+	// A write whose snapshot predates this registration's commit does
+	// not notify it; entered here, it is found by such a write once
+	// that commits, and told then ([`crate::dbs::live_recheck`]). Only
+	// the inline engine notifies on the write path; the router engine
+	// replays committed changes, and no write asks.
+	if ctx.config.datastore.live_query_engine == crate::kvs::LiveQueryEngine::Inline {
+		let triggers = txn.commit_triggers();
+		let token = triggers.live_registrations.begin(ns, db, &tb, live_query_id, txn.serial());
+		txn.on_commit(Box::new(crate::dbs::live_recheck::SettleRegistration {
+			triggers,
+			token: Some(token),
+		}))
+		.await;
+	}
 	// Clear the cache
 	txn.clear_cache();
 	// Hold the unit compiled as the statement arrived; nothing is

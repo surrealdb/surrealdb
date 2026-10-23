@@ -290,18 +290,24 @@ impl AsyncEventContext {
 			// The body's writes are the event's own: their live-query
 			// notifications are buffered and released with this attempt's
 			// commit, so a rolled-back or re-run attempt notifies nobody.
-			let ctx =
-				{
-					let mut ctx = ctx;
-					if let Some(prepared) = self.broker.clone().and_then(|delivery| {
-						crate::dbs::executor::install_broker(&mut ctx, delivery)
-					}) {
-						ctx.tx()
-							.on_commit(Box::new(crate::dbs::executor::FlushOnCommit(prepared)))
-							.await;
-					}
-					ctx
-				};
+			let ctx = {
+				let mut ctx = ctx;
+				if let Some(prepared) = self.broker.clone().and_then(|delivery| {
+					crate::dbs::executor::install_broker(
+						&mut ctx,
+						delivery,
+						crate::dbs::live_recheck::RecheckSource {
+							tf: self.tf.clone(),
+							sequences: self.sequences.clone(),
+						},
+					)
+				}) {
+					ctx.tx()
+						.on_commit(Box::new(crate::dbs::executor::FlushOnCommit(prepared)))
+						.await;
+				}
+				ctx
+			};
 			let Err(e) = self.run_event_once(&ctx, &eq, &ev).await else {
 				return Ok(());
 			};

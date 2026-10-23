@@ -1210,6 +1210,334 @@ async fn live_diff_notifications_carry_value_diff_operations() -> Result<()> {
 	Ok(())
 }
 
+/// Run `block`, a transaction block that sleeps before it commits, and
+/// register `live` while it sleeps; answer the block's responses and the live
+/// query's id.
+async fn register_during(
+	dbs: &std::sync::Arc<surrealdb_core::kvs::Datastore>,
+	ses: &Session,
+	block: &str,
+	live: &str,
+) -> Result<(Vec<surrealdb_rpc::QueryResult>, Value)> {
+	let running = tokio::spawn({
+		let dbs = dbs.clone();
+		let ses = ses.clone();
+		let block = block.to_owned();
+		async move { dbs.execute(&block, &ses, None).await }
+	});
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	let id = dbs.execute(live, ses, None).await?.remove(0).result?;
+	assert_eq!(id.kind(), Kind::Uuid);
+	let responses = running.await??;
+	let failed: Vec<String> =
+		responses.iter().filter_map(|r| r.result.as_ref().err().map(ToString::to_string)).collect();
+	if !failed.is_empty() {
+		return Err(anyhow::anyhow!("the block failed: {failed:?}"));
+	}
+	Ok((responses, id))
+}
+
+/// The next notification, failing after two seconds.
+async fn next_notification(
+	channel: &surrealdb_core::channel::Receiver<surrealdb_types::Notification>,
+	what: &str,
+) -> Result<surrealdb_types::Notification> {
+	tokio::time::timeout(Duration::from_secs(2), channel.recv())
+		.await
+		.map_err(|_| anyhow::anyhow!("{what} was never delivered"))?
+		.map_err(Into::into)
+}
+
+// A write whose snapshot predates a `LIVE`'s commit, and that commits after
+// it, does not see the subscription while it writes. Once it commits it finds
+// the registration it missed and tells the subscriber of the record as it now
+// stands. The write is not refused for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_in_flight_while_a_live_registers_is_delivered() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	let (_, id) = register_during(
+		&dbs,
+		&ses,
+		"BEGIN; CREATE tb:1 SET n = 1; SLEEP 500ms; COMMIT;",
+		"LIVE SELECT * FROM tb",
+	)
+	.await?;
+	let notification = next_notification(&channel, "the committed CREATE").await?;
+	assert_eq!(notification.action, Action::Create);
+	assert_eq!(Value::Uuid(notification.id), id);
+	assert_eq!(notification.result, syn::value("{ id: tb:1, n: 1 }")?);
+	Ok(())
+}
+
+// Every CLOCK read a missed subscription makes answers one instant, as it
+// does for a subscription the write saw.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missed_subscription_reads_one_statement_clock() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	register_during(
+		&dbs,
+		&ses,
+		"BEGIN; CREATE tb:1; SLEEP 500ms; COMMIT;",
+		"LIVE SELECT time::now() AS a, time::now() AS b FROM tb",
+	)
+	.await?;
+	let notification = next_notification(&channel, "the committed CREATE").await?;
+	let Value::Object(result) = notification.result else {
+		panic!("expected an object, got {:?}", notification.result);
+	};
+	assert_eq!(result.get("a"), result.get("b"));
+	Ok(())
+}
+
+// A write made while a registration on its table is in flight keeps its
+// images, so a missed subscriber's `$before` is the record before the write.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missed_subscription_judges_before_by_the_write() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(
+		&mut dbs
+			.execute("DEFINE TABLE tb; CREATE tb:1 SET status = 'pending';", &ses, None)
+			.await?,
+		2,
+	)?;
+
+	register_during(
+		&dbs,
+		&ses,
+		"BEGIN; SLEEP 300ms; UPDATE tb:1 SET status = 'done'; SLEEP 200ms; COMMIT;",
+		"LIVE SELECT * FROM tb WHERE $before.status = 'pending'",
+	)
+	.await?;
+	let notification = next_notification(&channel, "the committed UPDATE").await?;
+	assert_eq!(notification.action, Action::Update);
+	assert_eq!(notification.result, syn::value("{ id: tb:1, status: 'done' }")?);
+	Ok(())
+}
+
+// A missed `DIFF` subscriber is told the operations from the record before
+// the write to the record after it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missed_diff_subscription_is_told_the_writes_operations() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb; CREATE tb:1 SET n = 1;", &ses, None).await?, 2)?;
+
+	register_during(
+		&dbs,
+		&ses,
+		"BEGIN; SLEEP 300ms; UPDATE tb:1 SET n = 2; SLEEP 200ms; COMMIT;",
+		"LIVE SELECT DIFF FROM tb",
+	)
+	.await?;
+	let notification = next_notification(&channel, "the committed UPDATE").await?;
+	assert_eq!(notification.action, Action::Update);
+	assert_eq!(notification.result, syn::value("[{ op: 'replace', path: '/n', value: 2 }]")?);
+	Ok(())
+}
+
+// A write that a seen subscription observes derives the table's `COMPUTED`
+// fields onto its images, which no stored record holds. The record still
+// stands as the write left it, so a missed subscriber is told the write's
+// images, `$before` among them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missed_subscription_judges_before_by_the_write_beside_computed_fields() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(
+		&mut dbs
+			.execute(
+				"DEFINE TABLE tb; DEFINE FIELD c ON tb COMPUTED 42; CREATE tb:1 SET status = 'pending';",
+				&ses,
+				None,
+			)
+			.await?,
+		3,
+	)?;
+	dbs.execute("LIVE SELECT * FROM tb", &ses, None).await?.remove(0).result?;
+
+	let (_, missed) = register_during(
+		&dbs,
+		&ses,
+		"BEGIN; SLEEP 300ms; UPDATE tb:1 SET status = 'done'; SLEEP 200ms; COMMIT;",
+		"LIVE SELECT * FROM tb WHERE $before.status = 'pending'",
+	)
+	.await?;
+	let mut told = Vec::new();
+	for _ in 0..2 {
+		told.push(next_notification(&channel, "the committed UPDATE").await?);
+	}
+	let notification = told
+		.into_iter()
+		.find(|notification| Value::Uuid(notification.id) == missed)
+		.ok_or_else(|| anyhow::anyhow!("the missed subscriber was not told"))?;
+	assert_eq!(notification.action, Action::Update);
+	assert_eq!(notification.result, syn::value("{ c: 42, id: tb:1, status: 'done' }")?);
+	Ok(())
+}
+
+// The subscription's own clauses decide what a missed subscriber is told, as
+// they do for one the write saw: a `WHERE` that rejects the record sends
+// nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missed_subscription_is_judged_by_its_where() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	register_during(
+		&dbs,
+		&ses,
+		"BEGIN; CREATE tb:1 SET n = 1; CREATE tb:2 SET n = 2; SLEEP 500ms; COMMIT;",
+		"LIVE SELECT * FROM tb WHERE n = 2",
+	)
+	.await?;
+	let notification = next_notification(&channel, "the matching CREATE").await?;
+	assert_eq!(notification.record, syn::value("tb:2")?);
+	tokio::time::sleep(Duration::from_millis(300)).await;
+	assert!(channel.try_recv().is_err(), "the rejected record must not be sent");
+	Ok(())
+}
+
+// A transaction that registers a live query is not owed its own earlier
+// writes: they were made before the subscription existed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_is_not_owed_its_own_writes_before_its_live() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	let responses =
+		dbs.execute("BEGIN; CREATE tb:1; LIVE SELECT * FROM tb; COMMIT;", &ses, None).await?;
+	for response in responses {
+		response.result?;
+	}
+	tokio::time::sleep(Duration::from_millis(300)).await;
+	assert!(channel.try_recv().is_err(), "a write before the LIVE is not owed to it");
+	Ok(())
+}
+
+// The same holds for a transaction its owner drives across several requests:
+// the request that registers the live query is not the one that wrote.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_caller_owned_transaction_is_not_owed_its_writes_before_its_live() -> Result<()> {
+	use std::sync::Arc;
+
+	use surrealdb_core::kvs::QueryRequest;
+	use surrealdb_kvs::TransactionType;
+
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	let tx = Arc::new(dbs.transaction(TransactionType::Write).await?);
+	for query in ["CREATE tb:1", "LIVE SELECT * FROM tb"] {
+		for response in
+			dbs.run(QueryRequest::new(query, &ses).with_transaction(Arc::clone(&tx))).await?
+		{
+			response.result?;
+		}
+	}
+	tx.commit().await?;
+	tokio::time::sleep(Duration::from_millis(300)).await;
+	assert!(channel.try_recv().is_err(), "a write before the LIVE is not owed to it");
+	Ok(())
+}
+
+// A subscriber the write saw is told once, not twice.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_seen_subscription_is_told_once() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+	let first = dbs.execute("LIVE SELECT * FROM tb", &ses, None).await?.remove(0).result?;
+
+	let (_, second) = register_during(
+		&dbs,
+		&ses,
+		"BEGIN; CREATE tb:1; SLEEP 500ms; COMMIT;",
+		"LIVE SELECT * FROM tb",
+	)
+	.await?;
+	let mut told = Vec::new();
+	for _ in 0..2 {
+		told.push(Value::Uuid(next_notification(&channel, "a CREATE").await?.id));
+	}
+	tokio::time::sleep(Duration::from_millis(300)).await;
+	assert!(channel.try_recv().is_err(), "each subscriber is told once");
+	assert!(told.contains(&first) && told.contains(&second), "{told:?}");
+	Ok(())
+}
+
+// Writers and registrations overlapping at random: every write that commits
+// after a `LIVE` has answered reaches that live query.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_write_committed_after_a_live_answers_reaches_it() -> Result<()> {
+	use std::collections::{HashMap, HashSet};
+
+	const WRITERS: usize = 40;
+	const LIVES: usize = 6;
+
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	let writers: Vec<_> = (0..WRITERS)
+		.map(|n| {
+			let dbs = dbs.clone();
+			let ses = ses.clone();
+			tokio::spawn(async move {
+				tokio::time::sleep(Duration::from_millis((n * 7 % 200) as u64)).await;
+				let sleep = 20 + n * 13 % 120;
+				let sql = format!("BEGIN; CREATE tb:{n}; SLEEP {sleep}ms; COMMIT;");
+				// The block commits once its SLEEP has run, so no earlier than this.
+				let commits_from =
+					tokio::time::Instant::now() + Duration::from_millis(sleep as u64);
+				let responses = dbs.execute(&sql, &ses, None).await?;
+				for response in responses {
+					response.result?;
+				}
+				Ok::<_, anyhow::Error>((n, commits_from))
+			})
+		})
+		.collect();
+	let mut lives = Vec::new();
+	for n in 0..LIVES {
+		tokio::time::sleep(Duration::from_millis(30 + (n * 11 % 20) as u64)).await;
+		let id = dbs.execute("LIVE SELECT * FROM tb", &ses, None).await?.remove(0).result?;
+		let Value::Uuid(id) = id else {
+			anyhow::bail!("LIVE answered {id:?}");
+		};
+		lives.push((id, tokio::time::Instant::now()));
+	}
+	let mut committed = Vec::new();
+	for writer in writers {
+		committed.push(writer.await??);
+	}
+	let mut told: HashMap<surrealdb_types::Uuid, HashSet<String>> = HashMap::new();
+	while let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(500), channel.recv()).await {
+		told.entry(n.id).or_default().insert(format!("{:?}", n.record));
+	}
+	for (id, answered) in &lives {
+		for (n, commits_from) in &committed {
+			if commits_from > answered {
+				let record = format!("{:?}", syn::value(&format!("tb:{n}"))?);
+				assert!(
+					told.get(id).is_some_and(|records| records.contains(&record)),
+					"tb:{n}, committed after live query {id} answered, never reached it"
+				);
+			}
+		}
+	}
+	Ok(())
+}
+
 /// A broker that holds the delivery of the first notification it is handed until its gate opens,
 /// and records every delivery in the order it completes.
 #[derive(Debug)]
