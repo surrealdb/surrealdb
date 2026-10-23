@@ -53,6 +53,14 @@ pub(crate) async fn create_client(
 	let mut last_error = None;
 
 	for addr in addrs {
+		// TODO: raise the HTTP/2 connection window with
+		// `http2_initial_connection_window_size` (e.g. 8 MiB). h2 budgets small
+		// buffered DATA frames (under 256 bytes) at half the connection window
+		// (hyper's 5 MiB default gives 2.5 MiB) and closes the connection with
+		// ENHANCE_YOUR_CALM once a peer exhausts it, which a slow reader of a
+		// server sending many tiny export frames can hit. The method requires
+		// reqwest's `http2` feature, which this crate does not enable; enabling it
+		// adds `h2` and makes standalone builds negotiate HTTP/2 over TLS.
 		#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
 		let mut builder = ClientBuilder::new().default_headers(headers.clone()).resolve(hostname, addr);
 

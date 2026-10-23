@@ -22,6 +22,13 @@ use super::error::ResponseError;
 use super::headers::ContentType;
 use crate::ntw::error::Error as NetError;
 
+/// Export chunks buffered between the exporter and the body task.
+const EXPORT_QUEUE_CHUNKS: usize = 2;
+
+/// Upper bound of one coalesced body chunk. An export chunk larger than this is
+/// sent on its own, unsplit.
+const EXPORT_COALESCE_BYTES: usize = 64 * 1024;
+
 pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
@@ -70,6 +77,41 @@ async fn post_handler(
 	handle_inner(state, session, cfg).await
 }
 
+/// Receives the next body chunk by merging export chunks until the next one
+/// would push the total past [`EXPORT_COALESCE_BYTES`] or the export closes the
+/// channel. Returns `None` once the channel is closed and drained. The chunk
+/// that does not fit is held in `pending` and starts the next body chunk, so a
+/// body chunk never exceeds the threshold unless a single export chunk does,
+/// and such a chunk is returned as-is. The exporter emits one chunk per line, and
+/// each body chunk becomes its own HTTP/2 DATA frame; a peer that budgets small
+/// frames (h2's `data_frame_budget`) closes the connection with
+/// ENHANCE_YOUR_CALM. Waits for input, so the first body bytes are delayed until
+/// the threshold is reached or the export ends.
+async fn recv_coalesced(
+	rcv: &surrealdb::channel::Receiver<Vec<u8>>,
+	pending: &mut Option<Vec<u8>>,
+) -> Option<Vec<u8>> {
+	let mut buf = match pending.take() {
+		Some(v) => v,
+		None => rcv.recv().await.ok()?,
+	};
+	if buf.len() >= EXPORT_COALESCE_BYTES {
+		return Some(buf);
+	}
+	buf.reserve(EXPORT_COALESCE_BYTES - buf.len());
+	while buf.len() < EXPORT_COALESCE_BYTES {
+		let Ok(next) = rcv.recv().await else {
+			break;
+		};
+		if buf.len() + next.len() > EXPORT_COALESCE_BYTES {
+			*pending = Some(next);
+			break;
+		}
+		buf.extend_from_slice(&next);
+	}
+	Some(buf)
+}
+
 async fn handle_inner(
 	state: AppState,
 	session: Session,
@@ -89,8 +131,9 @@ async fn handle_inner(
 	let (nsv, dbv) = check_ns_db(&session).map_err(ResponseError)?;
 	// Check the permissions level
 	db.check(&session, View, Any.on_db(&nsv, &dbv)).map_err(ResponseError)?;
-	// Create a new bounded channel
-	let (snd, rcv) = surrealdb::channel::bounded(1);
+	// Bounded channel between the exporter and the body task. It caps how far
+	// the exporter can run ahead of the body task.
+	let (snd, rcv) = surrealdb::channel::bounded(EXPORT_QUEUE_CHUNKS);
 	// Start the export task
 	let task = db.export_with_config(&session, snd, cfg).await.map_err(ResponseError)?;
 	// Spawn a new database export job
@@ -98,7 +141,8 @@ async fn handle_inner(
 	// Process all chunk values, stopping if the client disconnects
 	tokio::spawn(async move {
 		let mut client_disconnected = false;
-		while let Ok(v) = rcv.recv().await {
+		let mut pending = None;
+		while let Some(v) = recv_coalesced(&rcv, &mut pending).await {
 			if let Err(err) = chn.send(Ok(Bytes::from(v))).await {
 				// The client disconnected; dropping `rcv` here will cause the
 				// export task's channel sends to fail, aborting it promptly.
@@ -107,16 +151,69 @@ async fn handle_inner(
 				break;
 			}
 		}
-		// In the non-cancellation path, surface any error from the export task
-		// that would otherwise be silently dropped.
+		// In the non-cancellation path, a failed export aborts the body rather
+		// than ending it cleanly, so the client cannot mistake a partial export
+		// for a complete one.
 		if !client_disconnected {
-			match export_handle.await {
-				Ok(Ok(())) => {}
-				Ok(Err(err)) => tracing::error!("Export task failed: {err}"),
-				Err(join_err) => tracing::error!("Export task panicked: {join_err}"),
-			}
+			let err = match export_handle.await {
+				Ok(Ok(())) => return,
+				Ok(Err(err)) => {
+					tracing::error!("Export task failed: {err}");
+					err
+				}
+				Err(join_err) => {
+					tracing::error!("Export task panicked: {join_err}");
+					join_err.into()
+				}
+			};
+			let _ = chn.send(Err(err)).await;
 		}
 	});
 	// Return the chunked body
 	Ok(Response::builder().status(StatusCode::OK).body(body)?)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn recv_coalesced_merges_small_chunks_until_close() {
+		let (snd, rcv) = surrealdb::channel::bounded::<Vec<u8>>(10);
+		for _ in 0..3 {
+			snd.send(b"ab".to_vec()).await.unwrap();
+		}
+		drop(snd);
+		let mut pending = None;
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), b"ababab");
+		assert!(recv_coalesced(&rcv, &mut pending).await.is_none());
+	}
+
+	#[tokio::test]
+	async fn recv_coalesced_stops_at_the_cap() {
+		let (snd, rcv) = surrealdb::channel::bounded::<Vec<u8>>(10);
+		let big = vec![0u8; EXPORT_COALESCE_BYTES];
+		snd.send(b"h".to_vec()).await.unwrap();
+		snd.send(big.clone()).await.unwrap();
+		snd.send(b"a".to_vec()).await.unwrap();
+		drop(snd);
+		let mut pending = None;
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), b"h");
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), big);
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), b"a");
+		assert!(recv_coalesced(&rcv, &mut pending).await.is_none());
+	}
+
+	#[tokio::test]
+	async fn recv_coalesced_never_exceeds_the_cap() {
+		let (snd, rcv) = surrealdb::channel::bounded::<Vec<u8>>(10);
+		let near = vec![0u8; EXPORT_COALESCE_BYTES - 1];
+		snd.send(near.clone()).await.unwrap();
+		snd.send(b"ab".to_vec()).await.unwrap();
+		drop(snd);
+		let mut pending = None;
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), near);
+		assert_eq!(recv_coalesced(&rcv, &mut pending).await.unwrap(), b"ab");
+		assert!(recv_coalesced(&rcv, &mut pending).await.is_none());
+	}
 }

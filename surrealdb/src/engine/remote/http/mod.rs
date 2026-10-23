@@ -581,8 +581,16 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 	let future = async move {
 		let mut response = response.bytes_stream();
-		while let Ok(Some(b)) = response.try_next().await {
-			if bytes.send(Ok(b.to_vec())).await.is_err() {
+		loop {
+			let item = match response.try_next().await {
+				Ok(Some(b)) => Ok(b.to_vec()),
+				Ok(None) => break,
+				// A stream that ends in an error is a truncated export, which
+				// the receiver must not mistake for a complete one.
+				Err(error) => Err(crate::std_error_to_types_error(error)),
+			};
+			let failed = item.is_err();
+			if bytes.send(item).await.is_err() || failed {
 				break;
 			}
 		}
