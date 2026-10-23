@@ -99,6 +99,40 @@ fn test_parse_select_subquery() {
 }
 
 #[test]
+fn test_parse_select_values_in_from() {
+	let sql = "SELECT n FROM (VALUES (1, 'a'), (2, 'b')) AS v(n, l)";
+	let stmt = parse_statement(sql).expect("parse VALUES in FROM");
+
+	match stmt {
+		Statement::Select(select) => match &select.from[0] {
+			TableRef::Subquery {
+				query,
+				alias,
+				..
+			} => {
+				assert_eq!(alias.name, "v");
+				assert_eq!(alias.columns, vec!["n".to_string(), "l".to_string()]);
+				assert!(query.set_op.is_some());
+			}
+			other => panic!("expected Subquery in from, got {:?}", other),
+		},
+		other => panic!("expected Select statement, got {:?}", other),
+	}
+}
+
+#[test]
+fn test_values_rows_must_have_the_same_number_of_columns() {
+	for sql in [
+		"SELECT * FROM (VALUES (1), (2, 3)) AS v",
+		"SELECT * FROM (VALUES (1, 2), (3)) AS v",
+		"SELECT * FROM (VALUES ()) AS v",
+		"SELECT * FROM (VALUES (1), ()) AS v",
+	] {
+		assert!(parse_statement(sql).is_err(), "{sql}");
+	}
+}
+
+#[test]
 fn test_parse_select_union() {
 	let sql = "SELECT 1 UNION ALL SELECT 2";
 	let stmt = parse_statement(sql).expect("parse union");

@@ -906,6 +906,71 @@ fn test_type_casts() {
 }
 
 #[test]
+fn test_a_column_alias_list_names_the_columns_of_a_derived_table() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"t",
+			vec![
+				ColumnInfo::new("a", 0).with_type("int4"),
+				ColumnInfo::new("b", 1).with_type("int4"),
+			],
+		)
+		.with_schema("public"),
+	);
+	let policy = DialectPolicy::postgres();
+	let bind = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		binder::pgsql::bind_select(select, &catalog, &policy, None)
+	};
+
+	// The first columns are renamed in order and the rest keep their names.
+	let bound = bind("SELECT x FROM (SELECT a, b FROM t) AS v(x)").unwrap();
+	match bound.from.as_ref() {
+		Some(BoundTableSource::Subquery {
+			query,
+			..
+		}) => {
+			assert_eq!(query.targets[0].alias.as_deref(), Some("x"));
+			assert_eq!(query.targets[1].alias, None);
+		}
+		other => panic!("expected a derived table, got {other:?}"),
+	}
+
+	// The names are folded as every other identifier is.
+	let bound = bind("SELECT x FROM (SELECT a FROM t) AS v(\"X\")").unwrap();
+	match bound.from.as_ref() {
+		Some(BoundTableSource::Subquery {
+			query,
+			..
+		}) => assert_eq!(query.targets[0].alias.as_deref(), Some("x")),
+		other => panic!("expected a derived table, got {other:?}"),
+	}
+
+	// A list on a common table expression names its columns like a list on a derived table.
+	let bound = bind("WITH c AS (SELECT a, b FROM t) SELECT x FROM c AS v(x)").unwrap();
+	match bound.from.as_ref() {
+		Some(BoundTableSource::Subquery {
+			query,
+			..
+		}) => assert_eq!(query.targets[0].alias.as_deref(), Some("x")),
+		other => panic!("expected a derived table, got {other:?}"),
+	}
+
+	// More names than columns, a list over `*`, a name used twice, a name that a column the list
+	// does not reach already has, and a list on a table are refused rather than ignored.
+	assert!(bind("SELECT x FROM (SELECT a FROM t) AS v(x, y)").is_err());
+	assert!(bind("SELECT x FROM (SELECT * FROM t) AS v(x)").is_err());
+	assert!(bind("SELECT x FROM (SELECT a, b FROM t) AS v(x, x)").is_err());
+	assert!(bind("SELECT x FROM (SELECT a, b FROM t) AS v(b)").is_err());
+	assert!(bind("SELECT x FROM t AS v(x)").is_err());
+}
+
+#[test]
 fn test_null_ordering_lowering() {
 	let mut catalog = MemoryCatalog::new();
 	catalog.define_table(None, "users", &["id", "score"]);

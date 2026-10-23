@@ -316,6 +316,69 @@ pub fn bind_select(
 	})
 }
 
+/// The name `target` gives its column: its alias, or the column it reads.
+fn output_name(target: &BoundTarget) -> Option<&str> {
+	match (&target.alias, &target.expr) {
+		(Some(alias), _) => Some(alias),
+		(
+			None,
+			BoundExpr::Column(BoundColumnRef {
+				column,
+				..
+			}),
+		) if column != "*" => Some(column),
+		_ => None,
+	}
+}
+
+/// Names the columns of a derived table as its alias lists them, `(SELECT ...) AS v(a, b)`: the
+/// first columns are renamed in order, and a column the list does not reach keeps its name.
+///
+/// Fails where the list cannot be applied unambiguously: the query selects `*`, the list names
+/// more columns than the query has, or a name is used by two columns.
+fn name_derived_columns(
+	query: &mut BoundSelect,
+	table: &str,
+	columns: &[String],
+	policy: &DialectPolicy,
+) -> Result<(), PlanError> {
+	if columns.is_empty() {
+		return Ok(());
+	}
+	if query.targets.iter().any(|t| t.is_wildcard || t.table_wildcard.is_some()) {
+		return Err(PlanError::UnsupportedStatement(format!(
+			"a column alias list on \"{table}\", whose query selects `*`"
+		)));
+	}
+	if columns.len() > query.targets.len() {
+		return Err(PlanError::Custom(format!(
+			"table \"{table}\" has {} columns available but {} columns specified",
+			query.targets.len(),
+			columns.len()
+		)));
+	}
+	let names: Vec<String> =
+		columns.iter().map(|name| policy.fold_identifier(name).into_owned()).collect();
+	let mut seen = std::collections::HashSet::new();
+	let unreached = query.targets[names.len()..].iter().filter_map(output_name);
+	for name in names.iter().map(String::as_str).chain(unreached) {
+		if !seen.insert(name) {
+			return Err(PlanError::Custom(format!(
+				"column name \"{name}\" is used by more than one column of table \"{table}\""
+			)));
+		}
+	}
+	for (target, name) in query.targets.iter_mut().zip(&names) {
+		target.alias = Some(name.clone());
+	}
+	Ok(())
+}
+
+/// The names of the columns `query` answers, where each is known.
+fn derived_column_names(query: &BoundSelect) -> Option<Vec<String>> {
+	query.targets.iter().map(|t| output_name(t).map(str::to_owned)).collect()
+}
+
 fn bind_table_ref(
 	table: &TableRef,
 	scope: &mut QueryScope,
@@ -335,11 +398,17 @@ fn bind_table_ref(
 				let exposed_name =
 					alias.as_ref().map(|a| a.name.clone()).unwrap_or_else(|| cte.name.clone());
 
-				let columns = if !cte.columns.is_empty() {
-					Some(cte.columns.clone())
+				let mut cte_query = cte.query;
+				let alias_list = alias.as_ref().map(|a| a.columns.as_slice()).unwrap_or_default();
+				name_derived_columns(&mut cte_query, &exposed_name, alias_list, policy)?;
+
+				let columns = if !alias_list.is_empty() {
+					derived_column_names(&cte_query)
+				} else if !cte.columns.is_empty() {
+					Some(cte.columns)
 				} else {
 					Some(
-						cte.query
+						cte_query
 							.targets
 							.iter()
 							.enumerate()
@@ -357,10 +426,16 @@ fn bind_table_ref(
 					scope.register_subquery_with_columns(&exposed_name, columns, policy);
 
 				return Ok(BoundTableSource::Subquery {
-					query: cte.query,
+					query: cte_query,
 					relation_index,
 					alias: exposed_name,
 				});
+			}
+			if alias.as_ref().is_some_and(|a| !a.columns.is_empty()) {
+				return Err(PlanError::UnsupportedStatement(
+					"a column alias list on a table: the table's columns have no declared order"
+						.into(),
+				));
 			}
 
 			let (schema, table_name) = resolve_table_qualified_name(name, policy, Some(catalog))?;
@@ -389,8 +464,17 @@ fn bind_table_ref(
 			..
 		} => {
 			let sub_alias = alias.name.clone();
-			let bound_sub = bind_select(query, catalog, policy, scope.parent.clone())?;
-			let relation_index = scope.register_subquery(&sub_alias, policy);
+			let mut bound_sub = bind_select(query, catalog, policy, scope.parent.clone())?;
+			name_derived_columns(&mut bound_sub, &sub_alias, &alias.columns, policy)?;
+			let relation_index = if alias.columns.is_empty() {
+				scope.register_subquery(&sub_alias, policy)
+			} else {
+				scope.register_subquery_with_columns(
+					&sub_alias,
+					derived_column_names(&bound_sub),
+					policy,
+				)
+			};
 
 			Ok(BoundTableSource::Subquery {
 				query: Box::new(bound_sub),

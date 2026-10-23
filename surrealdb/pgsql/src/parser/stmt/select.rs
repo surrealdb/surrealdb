@@ -137,13 +137,32 @@ impl<'a> Parser<'a> {
 					}
 				}
 				self.expect(&TokenKind::RParen, "')'")?;
+				if row.is_empty() {
+					return Err(ParseError::new(
+						self.peek().span,
+						ErrorKind::InvalidStatement("a VALUES row must have at least one column"),
+					));
+				}
+				if rows.first().is_some_and(|first: &Vec<Expr>| first.len() != row.len()) {
+					return Err(ParseError::new(
+						self.peek().span,
+						ErrorKind::InvalidStatement("VALUES lists must all be the same length"),
+					));
+				}
 				rows.push(row);
 				if !self.eat(&TokenKind::Comma)? {
 					break;
 				}
 			}
+			// The rows become a chain of UNION ALL that every later stage walks one level per row,
+			// so the number of rows is held to the recursion limit.
+			let chained = rows.len().saturating_sub(1);
+			for _ in 0..chained {
+				self.enter_recursion(self.peek().span)?;
+			}
+			self.leave_recursion_by(u32::try_from(chained).unwrap_or(u32::MAX));
 			let mut root: Option<SelectStmt> = None;
-			for (row_idx, row) in rows.into_iter().enumerate() {
+			for (row_idx, row) in rows.into_iter().enumerate().rev() {
 				let targets = row
 					.into_iter()
 					.enumerate()
@@ -157,7 +176,14 @@ impl<'a> Parser<'a> {
 						span: Span::empty(0),
 					})
 					.collect();
-				let stmt = SelectStmt {
+				// Built from the last row back, so each row takes the rest of the chain as its
+				// right operand without walking it.
+				let set_op = root.take().map(|rest| SetOperation {
+					op: SetOpKind::Union,
+					all: true,
+					right: Box::new(rest),
+				});
+				root = Some(SelectStmt {
 					distinct: None,
 					targets,
 					from: vec![],
@@ -169,24 +195,10 @@ impl<'a> Parser<'a> {
 					limit: None,
 					offset: None,
 					locking: vec![],
-					set_op: None,
+					set_op,
 					with: None,
 					span: Span::empty(0),
-				};
-				if let Some(mut prev) = root {
-					let mut curr = &mut prev;
-					while let Some(ref mut so) = curr.set_op {
-						curr = so.right.as_mut();
-					}
-					curr.set_op = Some(SetOperation {
-						op: SetOpKind::Union,
-						all: true,
-						right: Box::new(stmt),
-					});
-					root = Some(prev);
-				} else {
-					root = Some(stmt);
-				}
+				});
 			}
 			return Ok(root.unwrap_or_else(|| SelectStmt {
 				distinct: None,
@@ -468,8 +480,9 @@ impl<'a> Parser<'a> {
 	/// parenthesized join).
 	pub fn parse_table_factor(&mut self) -> ParseResult<TableRef> {
 		if self.eat(&TokenKind::LParen)? {
-			if self.peek().kind == TokenKind::Keyword(Keyword::Select) {
-				// Subquery: `(SELECT ...) AS alias`
+			if matches!(self.peek().kind, TokenKind::Keyword(Keyword::Select | Keyword::Values)) {
+				// Subquery: `(SELECT ...) AS alias`, or a list of rows: `(VALUES (...), ...) AS
+				// alias`
 				let query = self.parse_select_stmt()?;
 				self.expect(&TokenKind::RParen, "')'")?;
 				let alias = self.parse_table_alias()?.ok_or_else(|| {

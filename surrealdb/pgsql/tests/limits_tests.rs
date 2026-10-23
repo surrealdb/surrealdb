@@ -88,6 +88,19 @@ fn test_deep_subquery_recursion_limit() {
 }
 
 #[test]
+fn test_values_rows_recursion_limit() {
+	// The rows of a VALUES list become a chain of UNION ALL, so their number is bounded like one.
+	let rows = |n: usize| (0..n).map(|i| format!("({i})")).collect::<Vec<_>>().join(", ");
+	assert!(parse_statement(&format!("SELECT * FROM (VALUES {}) AS v", rows(100))).is_ok());
+
+	run_on_2mib_stack(move || {
+		let sql = format!("SELECT * FROM (VALUES {}) AS v", rows(5000));
+		let err = parse_statement(&sql).expect_err("5000 rows must hit the recursion limit");
+		assert_eq!(err.kind, ErrorKind::RecursionLimitExceeded);
+	});
+}
+
+#[test]
 fn test_flat_chains_on_2mib_stack() {
 	run_on_2mib_stack(|| {
 		println!("Testing add chain...");
