@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use common::time::timeout;
+use surrealdb_datastore::unseen_indexes::Unseen;
 use surrealdb_strand::TableName;
 use web_time::Instant;
 
@@ -129,7 +130,32 @@ impl IndexBuilder {
 	/// transaction of their own. It is reused while the transaction stamps no
 	/// catalog version and starts or removes no build. A decision to queue is
 	/// never cached as such: it revalidates on every reuse.
+	///
+	/// A mutation that is queued, or skipped for a retired index, leaves the
+	/// index entries of the user transaction's snapshot without it. The index is
+	/// then recorded on the transaction as one it cannot read
+	/// ([`Unseen::Queued`]), so its later reads do not answer from that index.
 	pub(crate) async fn consume(
+		&self,
+		db: &DatabaseDefinition,
+		ctx: &FrozenContext,
+		ix: &IndexDefinition,
+		mutation: IndexMutation<'_>,
+	) -> Result<ConsumeResult> {
+		let result = self.admit(db, ctx, ix, mutation).await?;
+		if matches!(result, ConsumeResult::Enqueued | ConsumeResult::Retired) {
+			let tx = ctx.tx();
+			let (ns, db) = (db.namespace_id, db.database_id);
+			// An index already recorded keeps what was recorded of it.
+			if !tx.index_unseen(ns, db, &ix.table_name, ix.index_id) {
+				tx.mark_index_unseen(ns, db, &ix.table_name, ix.index_id, Unseen::Queued);
+			}
+		}
+		Ok(result)
+	}
+
+	/// The decision [`Self::consume`] reaches for one mutation.
+	async fn admit(
 		&self,
 		db: &DatabaseDefinition,
 		ctx: &FrozenContext,

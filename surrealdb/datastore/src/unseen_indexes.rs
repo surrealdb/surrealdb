@@ -1,4 +1,4 @@
-//! The indexes a transaction defined and cannot read.
+//! The indexes a transaction cannot read.
 //!
 //! A `DEFINE INDEX` builds in transactions of its own. A blocking build reads
 //! the table as committed and commits the entries it writes before the
@@ -14,6 +14,13 @@
 //! transaction that ran the statement. It records the index here, and the
 //! readers that choose indexes ([`crate::index_state::filter_online_indexes`])
 //! and the writers that maintain them ask.
+//!
+//! A transaction that writes to an index it did not define can be in the same
+//! place. Its snapshot may show the index online while the decision how to
+//! maintain it, taken on the store as it is now, finds a build running or the
+//! index retired: the write is then queued for the build, or skipped, and the
+//! entries the snapshot holds lack it. That transaction records the index here
+//! as [`Unseen::Queued`] too.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -37,7 +44,9 @@ pub(crate) struct IndexAt {
 pub enum Unseen {
 	/// The build waits for the transaction to close. The index holds nothing
 	/// yet, and the transaction's own writes are queued for the build, so
-	/// nothing it writes conflicts with an entry.
+	/// nothing it writes conflicts with an entry. Also an index the
+	/// transaction did not define whose entries in its snapshot lack a write
+	/// it made, as the write was queued for a build or the index was retired.
 	Queued,
 	/// The build ran in transactions of its own and indexed records. Its
 	/// entries are committed past the transaction's snapshot.
@@ -106,8 +115,8 @@ impl UnseenIndexes {
 }
 
 impl Transaction {
-	/// Record that this transaction cannot read index `ix` of `tb`, which it
-	/// defined, for the reason `unseen` gives.
+	/// Record that this transaction cannot read index `ix` of `tb`, for the
+	/// reason `unseen` gives.
 	pub fn mark_index_unseen(
 		&self,
 		ns: NamespaceId,
@@ -156,7 +165,7 @@ impl Transaction {
 		}
 	}
 
-	/// Whether this transaction has defined an index it cannot read.
+	/// Whether this transaction has recorded an index it cannot read.
 	///
 	/// A transaction that defined none answers without taking a lock, which is
 	/// every transaction but the one that ran a `DEFINE INDEX`.
@@ -164,7 +173,7 @@ impl Transaction {
 		self.unseen_indexes.get().is_some()
 	}
 
-	/// Forget the indexes this transaction defined and cannot read, and close
+	/// Forget the indexes this transaction cannot read, and close
 	/// the views it holds of what their builds wrote.
 	///
 	/// Run when the transaction closes, by commit or cancel: nothing it reads
@@ -188,7 +197,7 @@ impl Transaction {
 		}
 	}
 
-	/// Whether this transaction defined index `ix` of `tb` and cannot read it.
+	/// Whether this transaction recorded index `ix` of `tb` as one it cannot read.
 	pub fn index_unseen(
 		&self,
 		ns: NamespaceId,

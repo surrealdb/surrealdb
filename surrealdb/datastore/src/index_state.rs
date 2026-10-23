@@ -349,8 +349,11 @@ pub async fn filter_online_indexes(
 		return Ok(indexes);
 	}
 	let from_known = tx.plans_from_known_online();
+	let defined_unseen = tx.defined_unseen_indexes();
 	let known_online = |ix: &IndexDefinition| {
-		from_known && tx.index_known_online(ns, db, &ix.table_name, ix.index_id)
+		from_known
+			&& !(defined_unseen && tx.index_unseen(ns, db, &ix.table_name, ix.index_id))
+			&& tx.index_known_online(ns, db, &ix.table_name, ix.index_id)
 	};
 	// Every index known online answers without allocating; the set of those
 	// that are not is built only once one is not.
@@ -370,7 +373,6 @@ pub async fn filter_online_indexes(
 		})
 		.collect();
 	let mut states = tx.get_many_key(state_keys, None).await?.into_iter();
-	let defined_unseen = tx.defined_unseen_indexes();
 	let mut filtered = Vec::new();
 	let mut filtered_any = false;
 	for (ix, known) in indexes.iter().zip(&known) {
@@ -381,9 +383,10 @@ pub async fn filter_online_indexes(
 		let Some(state) = states.next() else {
 			fail!("build state read answered fewer values than keys");
 		};
-		// An index the transaction defined and cannot read answers nothing,
-		// whatever its durable state says: the entries it holds are committed
-		// past the transaction's snapshot, or not written yet. What is compiled
+		// An index the transaction cannot read answers nothing, whatever its
+		// durable state says: the entries it holds are committed past the
+		// transaction's snapshot, or not written yet, or lack a write of the
+		// transaction's that was queued for a build or skipped. What is compiled
 		// from this answer is right for this transaction alone, and no catalog
 		// version names that, so nothing compiled from it is kept for another.
 		let (online, settled) =

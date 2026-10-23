@@ -21949,3 +21949,50 @@ async fn index_format_stamp_is_admitted_to_the_feature_level() -> Result<()> {
 	);
 	Ok(())
 }
+
+/// The number of rows `sql` returns, run on the caller's transaction `tx`.
+async fn rows_in_transaction(
+	ds: &Datastore,
+	session: &Session,
+	tx: &Arc<crate::kvs::Transaction>,
+	sql: &str,
+) -> Result<usize> {
+	let mut results =
+		ds.run(QueryRequest::new(sql, session).with_transaction(Arc::clone(tx))).await?;
+	let value = results.pop().expect("one result").result?.into_json_value();
+	Ok(value.as_array().map_or(0, Vec::len))
+}
+
+/// A transaction whose snapshot shows an index online reads its own writes
+/// through it, even when a build that started after the transaction began
+/// queued those writes instead of indexing them, or when the index was
+/// removed in between.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transaction_reads_its_own_write_through_an_index_changed_after_it_began() -> Result<()> {
+	for change in ["REBUILD INDEX ix ON t CONCURRENTLY", "REMOVE INDEX ix ON t"] {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS k UNIQUE; CREATE t:1 SET k = 'a';",
+		)
+		.await?;
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+		let read = "SELECT * FROM t WHERE k = 'b'";
+		assert_eq!(rows_in_transaction(&ds, &session, &tx, read).await?, 0, "{change}");
+		execute_all(&ds, &session, change).await?;
+		rows_in_transaction(&ds, &session, &tx, "CREATE t:2 SET k = 'b'").await?;
+		assert_eq!(
+			rows_in_transaction(&ds, &session, &tx, "SELECT * FROM t:2").await?,
+			1,
+			"{change}: the record"
+		);
+		assert_eq!(
+			rows_in_transaction(&ds, &session, &tx, read).await?,
+			1,
+			"{change}: the record by its indexed field"
+		);
+		tx.cancel().await?;
+	}
+	Ok(())
+}
