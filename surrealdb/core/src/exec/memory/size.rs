@@ -46,6 +46,51 @@ pub(crate) fn values_bytes(values: &[Value]) -> usize {
 	values.iter().map(value_bytes).sum()
 }
 
+fn bound_heap_bytes(bound: &std::ops::Bound<Value>, depth: usize) -> usize {
+	match bound {
+		std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => {
+			if depth == 0 {
+				0
+			} else {
+				heap_bytes(v, depth - 1)
+			}
+		}
+		std::ops::Bound::Unbounded => 0,
+	}
+}
+
+fn key_bound_heap_bytes(bound: &std::ops::Bound<RecordIdKey>, depth: usize) -> usize {
+	match bound {
+		std::ops::Bound::Included(k) | std::ops::Bound::Excluded(k) => {
+			if depth == 0 {
+				0
+			} else {
+				key_heap_bytes(k, depth - 1)
+			}
+		}
+		std::ops::Bound::Unbounded => 0,
+	}
+}
+
+fn key_heap_bytes(key: &RecordIdKey, depth: usize) -> usize {
+	const SLOT: usize = std::mem::size_of::<Value>();
+	match key {
+		RecordIdKey::String(s) => s.len(),
+		RecordIdKey::Array(a) if depth == 0 => a.len() * SLOT,
+		RecordIdKey::Array(a) => a.iter().map(|v| SLOT + heap_bytes(v, depth - 1)).sum(),
+		RecordIdKey::Object(o) if depth == 0 => o.len() * (SLOT + 32),
+		RecordIdKey::Object(o) => {
+			o.iter().map(|(k, v)| SLOT + 24 + k.len() + heap_bytes(v, depth - 1)).sum()
+		}
+		RecordIdKey::Range(r) => {
+			std::mem::size_of::<crate::val::RecordIdKeyRange>()
+				+ key_bound_heap_bytes(&r.start, depth)
+				+ key_bound_heap_bytes(&r.end, depth)
+		}
+		RecordIdKey::Number(_) | RecordIdKey::Uuid(_) => 0,
+	}
+}
+
 fn heap_bytes(value: &Value, depth: usize) -> usize {
 	const SLOT: usize = std::mem::size_of::<Value>();
 	match value {
@@ -53,49 +98,51 @@ fn heap_bytes(value: &Value, depth: usize) -> usize {
 		Value::Bytes(b) => b.len(),
 		Value::Array(array) if depth == 0 => array.len() * SLOT,
 		Value::Array(array) => array.iter().map(|v| SLOT + heap_bytes(v, depth - 1)).sum(),
-		Value::Set(set) => set.len() * SLOT * 2,
+		Value::Set(set) if depth == 0 => set.len() * SLOT * 2,
+		Value::Set(set) => set.iter().map(|v| SLOT * 2 + heap_bytes(v, depth - 1)).sum(),
 		Value::Object(object) if depth == 0 => object.len() * (SLOT + 32),
 		Value::Object(object) => {
 			object.iter().map(|(k, v)| SLOT + 24 + k.len() + heap_bytes(v, depth - 1)).sum()
 		}
-		Value::RecordId(rid) => {
-			rid.table.as_str().len()
-				+ match &rid.key {
-					RecordIdKey::String(s) => s.len(),
-					RecordIdKey::Array(a) => a.len() * SLOT,
-					RecordIdKey::Object(o) => o.len() * (SLOT + 32),
-					RecordIdKey::Number(_) | RecordIdKey::Uuid(_) | RecordIdKey::Range(_) => 0,
+		Value::RecordId(rid) => rid.table.as_str().len() + key_heap_bytes(&rid.key, depth),
+		Value::Geometry(_) => 64,
+		Value::Table(t) => t.as_str().len(),
+		Value::File(f) => f.bucket.capacity() + f.key.capacity(),
+		Value::Regex(r) => r.0.as_str().len(),
+		Value::Range(r) => {
+			std::mem::size_of::<crate::val::Range>()
+				+ bound_heap_bytes(&r.start, depth)
+				+ bound_heap_bytes(&r.end, depth)
+		}
+		Value::Closure(closure) => {
+			std::mem::size_of::<Closure>()
+				+ match &**closure {
+					Closure::Expr {
+						captures,
+						..
+					} if depth == 0 => captures.0.len() * (SLOT + 32),
+					Closure::Expr {
+						captures,
+						..
+					} => captures
+						.0
+						.iter()
+						.map(|(k, v)| SLOT + 24 + k.len() + heap_bytes(v, depth - 1))
+						.sum(),
+					Closure::Builtin(object) => object
+						.captured_values()
+						.into_iter()
+						.map(|v| SLOT + heap_bytes(v, depth.saturating_sub(1)))
+						.sum(),
 				}
 		}
-		Value::Geometry(_) => 64,
-		Value::Closure(closure) => match &**closure {
-			Closure::Expr {
-				captures,
-				..
-			} if depth == 0 => captures.0.len() * (SLOT + 32),
-			Closure::Expr {
-				captures,
-				..
-			} => {
-				captures.0.iter().map(|(k, v)| SLOT + 24 + k.len() + heap_bytes(v, depth - 1)).sum()
-			}
-			Closure::Builtin(object) => object
-				.captured_values()
-				.into_iter()
-				.map(|v| SLOT + heap_bytes(v, depth.saturating_sub(1)))
-				.sum(),
-		},
 		Value::None
 		| Value::Null
 		| Value::Bool(_)
 		| Value::Number(_)
 		| Value::Duration(_)
 		| Value::Datetime(_)
-		| Value::Uuid(_)
-		| Value::Table(_)
-		| Value::File(_)
-		| Value::Regex(_)
-		| Value::Range(_) => 0,
+		| Value::Uuid(_) => 0,
 	}
 }
 
@@ -133,5 +180,23 @@ mod tests {
 		}));
 		assert!(value_bytes(&closure) >= value_bytes(&large));
 		assert!(value_bytes(&closure) > value_bytes(&empty));
+	}
+
+	#[test]
+	fn set_range_file_and_regex_account_for_heap_bytes() {
+		let big_str = Value::from("x".repeat(4096));
+		let mut set = crate::val::Set::new();
+		set.insert(big_str.clone());
+		let set_val = Value::Set(set);
+		assert!(value_bytes(&set_val) > 4096);
+
+		let range_val = Value::Range(Box::new(crate::val::Range {
+			start: std::ops::Bound::Included(big_str.clone()),
+			end: std::ops::Bound::Unbounded,
+		}));
+		assert!(value_bytes(&range_val) > 4096);
+
+		let file_val = Value::File(crate::val::File::new("bucket_name".into(), "a".repeat(1024)));
+		assert!(value_bytes(&file_val) > 1024);
 	}
 }

@@ -422,7 +422,13 @@ impl QueryMemory {
 			}
 			want
 		};
+		let mut guard = UnspillableGuard {
+			memory: self,
+			bytes,
+			armed: true,
+		};
 		self.insist(want, ctx).await?;
+		guard.armed = false;
 		self.unspillable.lock().unwrap_or_else(|e| e.into_inner()).1 += want;
 		Ok(())
 	}
@@ -466,14 +472,16 @@ impl QueryMemory {
 			if last.0 != txn {
 				*last = (txn, 0);
 			}
-			let grown = written.saturating_sub(last.1);
-			last.1 = last.1.max(written);
-			grown
+			written.saturating_sub(last.1)
 		};
-		match grown {
-			0 => Ok(()),
-			grown => self.hold_unspillable(grown as usize, ctx).await,
+		if grown > 0 {
+			self.hold_unspillable(grown as usize, ctx).await?;
+			let mut last = self.writes.lock().unwrap_or_else(|e| e.into_inner());
+			if last.0 == txn {
+				last.1 = last.1.max(written);
+			}
 		}
+		Ok(())
 	}
 
 	/// Give back `bytes` of what [`Self::hold_unspillable`] counted, which a
@@ -524,6 +532,7 @@ impl QueryMemory {
 			let mut held = self.creations.lock().unwrap_or_else(|e| e.into_inner());
 			if held.0 != txn {
 				self.release_unspillable(std::mem::replace(&mut *held, (txn, 0)).1);
+				self.creations_held.store(0, Ordering::Release);
 			}
 			if bytes <= held.1 {
 				self.release_unspillable(held.1 - bytes);
@@ -872,6 +881,26 @@ impl Reservation {
 impl Drop for Reservation {
 	fn drop(&mut self) {
 		self.clear();
+	}
+}
+
+/// Rolls back the unspillable and counted bytes added before a wait in
+/// [`QueryMemory::hold_unspillable`] if [`QueryMemory::insist`] fails or is
+/// cancelled before completing.
+struct UnspillableGuard<'a> {
+	memory: &'a QueryMemory,
+	bytes: usize,
+	armed: bool,
+}
+
+impl Drop for UnspillableGuard<'_> {
+	fn drop(&mut self) {
+		if self.armed {
+			let mut held = self.memory.unspillable.lock().unwrap_or_else(|e| e.into_inner());
+			held.0 = held.0.saturating_sub(self.bytes);
+			drop(held);
+			self.memory.uncount(self.bytes);
+		}
 	}
 }
 
@@ -1268,5 +1297,31 @@ mod tests {
 		drop(keeper);
 		assert_eq!(memory.lease().pinned(), 0);
 		assert_eq!(governor.overcommitted(), 0);
+	}
+
+	/// A failed or cancelled `hold_unspillable`, `hold_writes` or
+	/// `hold_creations` leaves `unspillable`, `counted`, `writes` and
+	/// `creations` consistent rather than leaking unreserved counts.
+	#[tokio::test]
+	async fn failed_unspillable_writes_and_creations_roll_back_cleanly() {
+		let (_governor, host) = host(10_000, Duration::ZERO, 500);
+		let ctx = root_ctx();
+		let memory = host.query();
+
+		memory.hold_writes(1, 300, &ctx).await.expect("within ceiling");
+		assert_eq!(memory.pinned(), 300);
+		assert!(is_ceiling(&memory.hold_writes(1, 600, &ctx).await));
+		assert_eq!(memory.pinned(), 300);
+		assert_eq!(*memory.writes.lock().unwrap(), (1, 300));
+		memory.transaction_ended();
+
+		memory.hold_creations(1, 300, &ctx).await.expect("within ceiling");
+		assert_eq!((memory.pinned(), memory.creations_held().0), (300, 300));
+		assert!(is_ceiling(&memory.hold_creations(2, 600, &ctx).await));
+		assert_eq!(
+			(memory.pinned(), memory.creations_held().0),
+			(0, 0),
+			"switching to a new transaction whose initial charge fails leaves creations_held at 0"
+		);
 	}
 }

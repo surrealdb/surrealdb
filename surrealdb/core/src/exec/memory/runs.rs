@@ -789,7 +789,9 @@ impl RunSource {
 fn encode_value(out: &mut Vec<u8>, value: &Value) -> anyhow::Result<()> {
 	let at = out.len();
 	out.extend_from_slice(&[0u8; 8]);
-	SerializeRevisioned::serialize_revisioned(value, out)?;
+	crate::val::closure::with_spill_serialization(|| {
+		SerializeRevisioned::serialize_revisioned(value, out)
+	})?;
 	let len = (out.len() - at - 8) as u64;
 	out[at..at + 8].copy_from_slice(&len.to_be_bytes());
 	Ok(())
@@ -823,7 +825,9 @@ fn decode_value(bytes: &[u8], at: usize) -> anyhow::Result<Option<(Value, usize)
 	let Some(mut frame) = bytes.get(start..end) else {
 		return Ok(None);
 	};
-	let value = DeserializeRevisioned::deserialize_revisioned(&mut frame)?;
+	let value = crate::val::closure::with_spill_serialization(|| {
+		DeserializeRevisioned::deserialize_revisioned(&mut frame)
+	})?;
 	Ok(Some((value, end)))
 }
 
@@ -1163,5 +1167,25 @@ mod tests {
 		let store = MemTempStore::new(64, None);
 		assert!(!store.shares());
 		assert!(store.write_run(Sharing::Shared).await.is_err());
+	}
+
+	#[tokio::test]
+	async fn a_run_round_trips_records_containing_closures() {
+		let store = Arc::new(MemTempStore::new(64, None));
+		let memory = memory_over(Arc::clone(&store) as Arc<dyn TempStore>, 4);
+		let closure = Value::Closure(Box::new(crate::val::Closure::Expr {
+			args: vec![(crate::expr::Param::from("x".to_string()), crate::expr::Kind::Any)],
+			returns: None,
+			body: crate::expr::Expr::Literal(crate::expr::Literal::Integer(42)),
+			captures: crate::expr::variables::Variables::new(),
+		}));
+		let records = vec![
+			(vec![Value::from(1), closure.clone()], closure.clone()),
+			(vec![Value::from(2), Value::from("k")], Value::Array(vec![closure].into())),
+		];
+		let run = write(&memory, spec(BreakerKind::Sort), Sharing::Private, records.clone()).await;
+		let (got, error) = drain(run.read().await.expect("a reader")).await;
+		assert!(error.is_none());
+		assert_eq!(got, records);
 	}
 }
