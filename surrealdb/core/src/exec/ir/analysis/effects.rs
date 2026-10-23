@@ -73,14 +73,27 @@ pub(crate) fn of_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpI
 	let mut out = regional(ir, facts, cx, op);
 	let mut invoked: SmallVec<[OpId; 2]> = SmallVec::new();
 	collect_invoked(ir, op, &mut invoked);
+	let has_invoked = !invoked.is_empty();
 	for creator in invoked {
 		out = join(&out, &closure_body(ir, facts, cx, creator));
 	}
-	if hides_stage_code(ir, op) {
+	let hides_stage = hides_stage_code(ir, op);
+	if hides_stage {
 		out.footprint.reads = smallvec![IrResource::Unknown];
 		out.footprint.writes = smallvec![IrResource::Unknown];
 	}
-	settle(out)
+	let settled = settle(out);
+	if has_invoked || hides_stage {
+		facts.insert(
+			op,
+			ir.generation(op),
+			cx.memo_key(),
+			OpFacts {
+				effects: settled.clone(),
+			},
+		);
+	}
+	settled
 }
 
 /// The set, failure classes and determinism of [`of_with`]'s answer for `op`, equal to those of
@@ -135,10 +148,14 @@ fn regional_summary(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 	};
 	let generation = ir.generation(op);
 	let key = cx.memo_key();
-	if let Some(held) = facts.summary(op, generation, &key) {
+	if let Some(held) = facts.summary(op, generation, &key)
+		&& !reads_outside_subtree(ir, op)
+	{
 		return held;
 	}
-	if let Some(held) = facts.get(op, generation, &key) {
+	if let Some(held) = facts.get(op, generation, &key)
+		&& !reads_outside_subtree(ir, op)
+	{
 		let summary = EffectSummary::of(&held.effects);
 		facts.insert_summary(op, generation, key, summary);
 		return summary;
@@ -151,7 +168,7 @@ fn regional_summary(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 		};
 		if !runs(&data.kind, info.kind) {
 			continue;
-		}
+		};
 		for child in ops_in(ir, region) {
 			out = join_summary(out, regional_summary(ir, facts, cx, child));
 		}
@@ -373,7 +390,7 @@ fn ensure_regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) 
 	};
 	let generation = ir.generation(op);
 	let key = cx.memo_key();
-	if facts.get(op, generation, &key).is_some() {
+	if facts.get(op, generation, &key).is_some() && !reads_outside_subtree(ir, op) {
 		return true;
 	}
 	let mut out = local(ir, facts, cx, op);
@@ -416,6 +433,30 @@ fn ensure_regional(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId) 
 		},
 	);
 	true
+}
+
+/// Whether the answer of `root` reads ops outside `root`'s running subtree: an op that takes a
+/// closure (whose target may resolve through outer bindings to an `expr.closure_create`) or a
+/// logical write (whose stage ops may stand in an outer subject loop).
+fn reads_outside_subtree(ir: &Ir, root: OpId) -> bool {
+	let Some(data) = ir.op(root) else {
+		return false;
+	};
+	if takes_closures(&data.kind) || is_logical_write(&data.kind) {
+		return true;
+	}
+	for region in data.regions.iter().copied() {
+		let Some(info) = ir.region(region) else {
+			continue;
+		};
+		if !runs(&data.kind, info.kind) {
+			continue;
+		}
+		if ops_in(ir, region).any(|child| reads_outside_subtree(ir, child)) {
+			return true;
+		}
+	}
+	false
 }
 
 /// The effects of the body of the closure `creator` creates: the transitive answers of the ops of
@@ -833,5 +874,152 @@ mod tests {
 				},
 			]
 		);
+	}
+
+	#[test]
+	fn invoke_reflects_outer_closure_rebinding_and_preserves_closure_effects_on_replacement() {
+		use crate::exec::ir::core::ir::IrScope;
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::expr::ops::{ClosureAttrs, ClosureLiteral};
+		use crate::exec::ir::iface::conversion::EliminationReason;
+		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::exec::ir::logical::ops::{LetAttrs, LetBinding};
+		use crate::exec::ir::phys::ops::PhysOp;
+
+		fn spec(kind: OpKind, operands: &[ValueId], results: usize) -> OpSpec {
+			OpSpec {
+				kind,
+				operands: operands.iter().copied().collect(),
+				results: (0..results).map(|_| TypeKnowledge::Unknown).collect(),
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc: Location {
+					stmt: 0,
+					span: None,
+					origin: LocOrigin::Synthesized,
+				},
+			}
+		}
+
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let top_block = ir.region(ir.top()).expect("top region exists").blocks[0];
+		let mut facts = FactCache::default();
+
+		let (let_op, invoke_op, unknown_val) = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts)
+				.with_registry(super::super::cx::builtin_registry());
+			let closure_op = rw
+				.create(
+					InsertPoint::End(top_block),
+					spec(
+						OpKind::Expr(ExprOp::ClosureCreate(Box::new(ClosureAttrs {
+							params: Box::new([]),
+							returns: None,
+							body_sql: "".into(),
+							captures: Box::new([]),
+							reads_row: false,
+							reads_root: false,
+							literal: ClosureLiteral::default(),
+						}))),
+						&[],
+						1,
+					),
+				)
+				.expect("closure op created");
+			let (_, closure_block) = rw
+				.create_region(closure_op, RegionKind::ClosureBody, &[TypeKnowledge::Unknown])
+				.expect("closure body region added");
+			rw.create(InsertPoint::End(closure_block), spec(OpKind::Logical(LogOp::Fetch), &[], 0))
+				.expect("fetch in closure created");
+			let closure_val = rw.ir().op(closure_op).expect("op exists").results[0];
+
+			let unknown_op = rw
+				.create(
+					InsertPoint::End(top_block),
+					spec(
+						OpKind::Expr(ExprOp::FreeParam {
+							name: Strand::new("fn"),
+						}),
+						&[],
+						1,
+					),
+				)
+				.expect("param op created");
+			let unknown_val = rw.ir().op(unknown_op).expect("op exists").results[0];
+
+			let let_op = rw
+				.create(
+					InsertPoint::End(top_block),
+					spec(
+						OpKind::Logical(LogOp::Let(Box::new(LetAttrs {
+							name: Strand::new("f"),
+							binding: LetBinding::Local,
+							ty: None,
+						}))),
+						&[closure_val],
+						1,
+					),
+				)
+				.expect("let op created");
+			let let_val = rw.ir().op(let_op).expect("op exists").results[0];
+
+			let invoke_op = rw
+				.create(
+					InsertPoint::End(top_block),
+					spec(OpKind::Expr(ExprOp::Invoke), &[let_val], 1),
+				)
+				.expect("invoke op created");
+			(let_op, invoke_op, unknown_val)
+		};
+
+		{
+			let cx = default_cx(&ir);
+			let initial = of_with(&ir, &mut facts, &cx, invoke_op);
+			assert_eq!(initial.set, EffectSet::READS_DATA);
+			assert_eq!(summary_with(&ir, &mut facts, &cx, invoke_op).set, EffectSet::READS_DATA);
+		}
+
+		// Rebinding `let_op` outside `invoke_op` without touching `invoke_op` must update both
+		// `of_with` and `summary_with` on `invoke_op`.
+		let closure_val = ir.op(let_op).expect("let op exists").operands[0];
+		{
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			rw.set_operand(let_op, 0, unknown_val).expect("operand updated");
+		}
+		{
+			let cx = default_cx(&ir);
+			let rebound = of_with(&ir, &mut facts, &cx, invoke_op);
+			assert!(rebound.set.contains(EffectSet::OPAQUE_BODY));
+			assert!(
+				summary_with(&ir, &mut facts, &cx, invoke_op)
+					.set
+					.contains(EffectSet::OPAQUE_BODY)
+			);
+		}
+
+		// Rebinding back to `closure_val`, recording facts on `invoke_op`, and replacing it with a
+		// physical op preserves the closure body's `READS_DATA` effect via `last_under`.
+		let replacing_phys = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts)
+				.with_registry(super::super::cx::builtin_registry());
+			rw.set_operand(let_op, 0, closure_val).expect("operand restored");
+			let stated = rw.facts(invoke_op).effects;
+			assert_eq!(stated.set, EffectSet::READS_DATA);
+			rw.erase(invoke_op, EliminationReason::DeadPure).expect("invoke erased");
+			rw.derived(&[invoke_op], |rw| {
+				rw.create(InsertPoint::End(top_block), spec(OpKind::Phys(PhysOp::Eval), &[], 0))
+					.expect("phys op created")
+			})
+		};
+		let cx = default_cx(&ir);
+		let phys_eff = phys_effects::of_op(&ir, &mut facts, &cx, replacing_phys);
+		assert_eq!(phys_eff.set, EffectSet::READS_DATA);
 	}
 }

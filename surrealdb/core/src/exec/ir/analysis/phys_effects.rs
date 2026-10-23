@@ -41,6 +41,10 @@ pub(crate) fn of(op: &PhysOp, _cx: &EffectCx<'_>) -> OpEffects {
 		PhysOp::Loop {
 			kind: LoopKind::GraphStep,
 			..
+		}
+		| PhysOp::Statement {
+			served: Some(_),
+			..
 		} => OpEffects::top(),
 		PhysOp::Pipeline(..)
 		| PhysOp::Block
@@ -61,6 +65,7 @@ pub(crate) fn of(op: &PhysOp, _cx: &EffectCx<'_>) -> OpEffects {
 			..
 		}
 		| PhysOp::Statement {
+			served: None,
 			..
 		}
 		| PhysOp::Yield
@@ -202,6 +207,9 @@ pub(crate) fn of_op(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 		return data.kind.local_effects(cx);
 	};
 	let fixed = of(kind, cx);
+	if is_container_or_control(kind) {
+		return fixed;
+	}
 	let ids = match &data.provenance {
 		Provenance::From(ids) if !ids.is_empty() => ids,
 		Provenance::Bound | Provenance::From(_) => return fixed,
@@ -226,6 +234,141 @@ pub(crate) fn of_op(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 		out = join(&out, &named);
 	}
 	out
+}
+
+/// Whether `kind` is a region container or control terminator whose own local effect is [`bottom`]:
+/// the regions it owns are walked directly by [`super::effects`] and [`super::footprint`], so a
+/// provenance that names the logical container it replaced does not contribute to its local effect.
+fn is_container_or_control(kind: &PhysOp) -> bool {
+	match kind {
+		PhysOp::Pipeline(..)
+		| PhysOp::Block
+		| PhysOp::If {
+			..
+		}
+		| PhysOp::Choose(..)
+		| PhysOp::Request {
+			..
+		}
+		| PhysOp::Txn {
+			..
+		}
+		| PhysOp::Stmt {
+			..
+		}
+		| PhysOp::Statement {
+			served: None,
+			..
+		}
+		| PhysOp::Yield
+		| PhysOp::Return
+		| PhysOp::Break
+		| PhysOp::Next => true,
+		PhysOp::Loop {
+			kind: LoopKind::GraphStep,
+			..
+		} => false,
+		PhysOp::Loop {
+			..
+		} => true,
+		PhysOp::Statement {
+			served: Some(_),
+			..
+		}
+		| PhysOp::Materialize {
+			..
+		}
+		| PhysOp::Prefetch(..)
+		| PhysOp::LoadUnit(..)
+		| PhysOp::TableScan(..)
+		| PhysOp::IndexScan(..)
+		| PhysOp::IndexUnion(..)
+		| PhysOp::Bitmap(..)
+		| PhysOp::IndexLookup(..)
+		| PhysOp::FullTextScan(..)
+		| PhysOp::KeyRangeScan(..)
+		| PhysOp::KnnScan(..)
+		| PhysOp::KnnTopK(..)
+		| PhysOp::Count(..)
+		| PhysOp::RecordScan(..)
+		| PhysOp::Vacant {
+			..
+		}
+		| PhysOp::Enforced {
+			..
+		}
+		| PhysOp::Values {
+			..
+		}
+		| PhysOp::Subquery
+		| PhysOp::Probe {
+			..
+		}
+		| PhysOp::Union
+		| PhysOp::Join(..)
+		| PhysOp::Distinct {
+			..
+		}
+		| PhysOp::PermissionFilter(..)
+		| PhysOp::Layer(..)
+		| PhysOp::Filter
+		| PhysOp::Fetch
+		| PhysOp::Split {
+			..
+		}
+		| PhysOp::Sort(..)
+		| PhysOp::Aggregate(..)
+		| PhysOp::Limit {
+			..
+		}
+		| PhysOp::Project(..)
+		| PhysOp::Eval
+		| PhysOp::Match {
+			..
+		}
+		| PhysOp::MatchStep(..)
+		| PhysOp::DdlGuard {
+			..
+		}
+		| PhysOp::Define(..)
+		| PhysOp::Remove(..)
+		| PhysOp::Alter(..)
+		| PhysOp::Rebuild(..)
+		| PhysOp::Info {
+			..
+		}
+		| PhysOp::Use {
+			..
+		}
+		| PhysOp::Option {
+			..
+		}
+		| PhysOp::Access(..)
+		| PhysOp::Kill
+		| PhysOp::Live(..)
+		| PhysOp::Subscriber(..)
+		| PhysOp::Show(..)
+		| PhysOp::Write(..)
+		| PhysOp::WriteStage {
+			..
+		}
+		| PhysOp::Events(..)
+		| PhysOp::Let(..)
+		| PhysOp::Timeout
+		| PhysOp::VersionScope
+		| PhysOp::Only
+		| PhysOp::Explain {
+			..
+		}
+		| PhysOp::Assign(..)
+		| PhysOp::Unset {
+			..
+		}
+		| PhysOp::Content {
+			..
+		}
+		| PhysOp::Sleep => false,
+	}
 }
 
 /// Whether the variant's own effects are not among those of the logical ops it stands for.
@@ -422,5 +565,107 @@ mod tests {
 		with_cx(|cx| {
 			assert_eq!(of_op(&ir, &mut facts, cx, OpId::default()), OpEffects::top());
 		});
+	}
+
+	#[test]
+	fn container_and_control_ops_answer_bottom_locally_and_served_statement_answers_top() {
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::iface::conversion::EliminationReason;
+		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::exec::ir::logical::ops::LogOp;
+		use crate::exec::planner::CatalogWithin;
+
+		fn spec(kind: OpKind) -> OpSpec {
+			OpSpec {
+				kind,
+				operands: Default::default(),
+				results: std::iter::empty::<TypeKnowledge>().collect(),
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc: Location {
+					stmt: 0,
+					span: None,
+					origin: LocOrigin::Synthesized,
+				},
+			}
+		}
+
+		with_cx(|cx| {
+			assert_eq!(
+				of(
+					&PhysOp::Statement {
+						changes_catalog: false,
+						served: None,
+						within: CatalogWithin::default(),
+						raises_when_reached: false,
+					},
+					cx,
+				),
+				bottom(),
+			);
+			assert_eq!(
+				of(
+					&PhysOp::Statement {
+						changes_catalog: false,
+						served: Some(0),
+						within: CatalogWithin::default(),
+						raises_when_reached: false,
+					},
+					cx,
+				),
+				OpEffects::top(),
+			);
+		});
+
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let block = ir.region(ir.top()).expect("the top region exists").blocks[0];
+		let mut facts = FactCache::default();
+		let (logical_stmt, phys_stmt, phys_served) = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let logical_stmt = rw
+				.create(
+					InsertPoint::End(block),
+					spec(OpKind::Logical(LogOp::Stmt {
+						commit: StatementCommit::Auto,
+						control: None,
+					})),
+				)
+				.expect("the op is created");
+			rw.erase(logical_stmt, EliminationReason::DeadPure).expect("the op is erased");
+			let phys_stmt = rw.derived(&[logical_stmt], |rw| {
+				rw.create(
+					InsertPoint::End(block),
+					spec(OpKind::Phys(PhysOp::Stmt {
+						commit: StatementCommit::Auto,
+						control: None,
+					})),
+				)
+				.expect("the op is created")
+			});
+			let phys_served = rw.derived(&[logical_stmt], |rw| {
+				rw.create(
+					InsertPoint::End(block),
+					spec(OpKind::Phys(PhysOp::Statement {
+						changes_catalog: false,
+						served: Some(0),
+						within: CatalogWithin::default(),
+						raises_when_reached: false,
+					})),
+				)
+				.expect("the op is created")
+			});
+			(logical_stmt, phys_stmt, phys_served)
+		};
+		assert!(ir.op(logical_stmt).is_none());
+		let cx = super::super::cx::default_cx(&ir);
+		assert_eq!(of_op(&ir, &mut facts, &cx, phys_stmt), bottom());
+		assert_eq!(of_op(&ir, &mut facts, &cx, phys_served), OpEffects::top());
 	}
 }

@@ -145,6 +145,10 @@ impl FactCache {
 		key: CxKey,
 		summary: EffectSummary,
 	) {
+		if let Some(held) = self.entries.get_mut(op) {
+			held.retain(|(computed_at, _, _)| *computed_at == generation);
+		}
+		self.retired.remove(&op);
 		match self.summaries.get_mut(op) {
 			Some(held) => {
 				held.retain(|(computed_at, other, _)| *computed_at == generation && *other != key);
@@ -165,6 +169,10 @@ impl FactCache {
 	/// Records `facts` of `op` computed at `generation` under the context `key` names. Entries of
 	/// an older generation are dropped.
 	pub(crate) fn insert(&mut self, op: OpId, generation: u32, key: CxKey, facts: OpFacts) {
+		if let Some(held) = self.summaries.get_mut(op) {
+			held.retain(|(computed_at, _, _)| *computed_at == generation);
+		}
+		self.retired.remove(&op);
 		if self.entries.get(op).is_none() {
 			self.entries.insert(op, Vec::new());
 		}
@@ -181,6 +189,11 @@ impl FactCache {
 		fn under<'a>(held: &'a ContextFacts, key: &CxKey) -> Option<&'a OpFacts> {
 			held.iter().rev().find(|(_, other, _)| other == key).map(|(_, _, facts)| facts)
 		}
+		let is_live = self.entries.get(op).is_some_and(|held| !held.is_empty())
+			|| self.summaries.get(op).is_some_and(|held| !held.is_empty());
+		if is_live {
+			return self.entries.get(op).and_then(|held| under(held, key));
+		}
 		self.entries
 			.get(op)
 			.and_then(|held| under(held, key))
@@ -190,8 +203,13 @@ impl FactCache {
 	/// Drops the entry of `op`, which keeps answering [`FactCache::last_under`].
 	pub(crate) fn invalidate(&mut self, op: OpId) {
 		self.summaries.remove(op);
-		if let Some(held) = self.entries.remove(op) {
-			self.retired.insert(op, held);
+		match self.entries.remove(op) {
+			Some(held) if !held.is_empty() => {
+				self.retired.insert(op, held);
+			}
+			Some(_) | None => {
+				self.retired.remove(&op);
+			}
 		}
 	}
 
@@ -311,5 +329,90 @@ impl FactCache {
 impl Default for FactCache {
 	fn default() -> Self {
 		Self::new()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use slotmap::SlotMap;
+
+	use super::*;
+	use crate::exec::ir::iface::effects::{Determinism, IrFootprint, Rollback};
+	use crate::exec::ir::iface::fallibility::Fallibility;
+	use crate::expr::logical::EffectSet;
+
+	fn sample_key(seed: usize) -> CxKey {
+		CxKey {
+			registry: seed,
+			catalog: (seed as u64, "test"),
+			frames: (seed as u64, seed),
+		}
+	}
+
+	fn sample_facts(set: EffectSet) -> OpFacts {
+		OpFacts {
+			effects: OpEffects {
+				set,
+				fallibility: Fallibility::INFALLIBLE,
+				context_deps: Default::default(),
+				footprint: IrFootprint {
+					reads: Default::default(),
+					writes: Default::default(),
+				},
+				rollback: Rollback::NoEffects,
+				determinism: Determinism::Deterministic,
+			},
+		}
+	}
+
+	#[test]
+	fn insert_summary_at_newer_generation_prunes_stale_entries_and_retired() {
+		let mut ops: SlotMap<OpId, ()> = SlotMap::with_key();
+		let op = ops.insert(());
+		let mut cache = FactCache::new();
+		let key = sample_key(1);
+		let old_facts = sample_facts(EffectSet::READS_DATA);
+		cache.insert(op, 0, key, old_facts);
+		assert!(cache.last_under(op, &key).is_some());
+
+		let new_summary = EffectSummary {
+			set: EffectSet::PURE,
+			fallibility: Fallibility::INFALLIBLE,
+			determinism: Determinism::Deterministic,
+		};
+		cache.insert_summary(op, 1, key, new_summary);
+		assert!(cache.get(op, 0, &key).is_none());
+		assert!(cache.last_under(op, &key).is_none());
+
+		cache.invalidate(op);
+		assert!(cache.last_under(op, &key).is_none());
+	}
+
+	#[test]
+	fn insert_at_newer_generation_prunes_stale_summaries_and_retired() {
+		let mut ops: SlotMap<OpId, ()> = SlotMap::with_key();
+		let op = ops.insert(());
+		let mut cache = FactCache::new();
+		let key = sample_key(2);
+		let old_facts = sample_facts(EffectSet::READS_DATA);
+		cache.insert(op, 0, key, old_facts);
+		cache.invalidate(op);
+		assert!(cache.last_under(op, &key).is_some());
+
+		let summary = EffectSummary {
+			set: EffectSet::CLOCK,
+			fallibility: Fallibility::INFALLIBLE,
+			determinism: Determinism::PerStatement,
+		};
+		cache.insert_summary(op, 1, key, summary);
+		assert!(cache.last_under(op, &key).is_none());
+
+		let new_facts = sample_facts(EffectSet::PURE);
+		cache.insert(op, 2, key, new_facts.clone());
+		assert_eq!(cache.summary(op, 1, &key), None);
+		assert_eq!(
+			cache.last_under(op, &key).map(|held| &held.effects),
+			Some(&new_facts.effects)
+		);
 	}
 }
