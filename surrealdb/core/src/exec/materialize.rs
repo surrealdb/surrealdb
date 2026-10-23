@@ -191,20 +191,123 @@ pub(crate) async fn backfill(
 		EscapeKwFreeIdent(definition.table.as_str()).to_sql(),
 		definition.name.to_sql()
 	);
-	let list = match &materialize.filter {
-		Some(filter) => format!(
-			"(SELECT VALUE id FROM ({source}) WHERE ({}))",
-			crate::expr::CoverStmts(filter).to_sql()
-		),
-		None => source,
-	};
-	let text = format!(
-		"UPDATE {} SET {} = array::sort({list})",
-		EscapeKwFreeIdent(materialize.table.as_str()).to_sql(),
-		materialize.field.to_sql()
-	);
-	let statement = crate::syn::expr(&text)?;
-	let frame = exec.with_perms_suppressed(true).with_params([mark()]);
-	crate::exec::entry::statement(&frame, &statement).await?;
+	let dest_table = EscapeKwFreeIdent(materialize.table.as_str()).to_sql();
+	let dest_field = materialize.field.to_sql();
+	match &materialize.filter {
+		Some(filter) => {
+			let select_text = format!(
+				"SELECT VALUE id FROM (array::distinct(array::flatten(SELECT VALUE {source} FROM {dest_table}))) WHERE ({})",
+				crate::expr::CoverStmts(filter).to_sql()
+			);
+			let select_stmt = crate::syn::expr(&select_text)?;
+			let select_frame = exec
+				.with_perms_suppressed(true)
+				.refusing_writes(crate::dbs::NoWriteFrame::ComputedField);
+			let matching = crate::exec::entry::statement(&select_frame, &select_stmt)
+				.await
+				.map_err(|err| match err.downcast::<crate::exec::Error>() {
+					Ok(err) => {
+						if let crate::exec::Error::SchemaClauseEffect {
+							construct,
+							..
+						} = err
+						{
+							crate::exec::Error::SchemaClauseEffect {
+								clause: "MATERIALIZE INTO".to_owned(),
+								construct,
+							}
+							.into()
+						} else {
+							err.into()
+						}
+					}
+					Err(err) => err,
+				})?;
+			let update_text = format!(
+				"UPDATE {dest_table} SET {dest_field} = array::sort(array::intersect({source}, $__materialize_matching))"
+			);
+			let update_stmt = crate::syn::expr(&update_text)?;
+			let update_frame = exec
+				.with_perms_suppressed(true)
+				.with_params([mark(), ("__materialize_matching", matching)]);
+			crate::exec::entry::statement(&update_frame, &update_stmt).await?;
+		}
+		None => {
+			let text = format!("UPDATE {dest_table} SET {dest_field} = array::sort({source})");
+			let statement = crate::syn::expr(&text)?;
+			let frame = exec.with_perms_suppressed(true).with_params([mark()]);
+			crate::exec::entry::statement(&frame, &statement).await?;
+		}
+	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::ToSql;
+
+	use crate::dbs::Session;
+	use crate::kvs::Datastore;
+
+	#[tokio::test]
+	async fn materialize_into_where_filter_refuses_effects_at_runtime() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().with_ns("test").with_db("test");
+
+		ds.execute(
+			"DEFINE FUNCTION fn::check($v: bool) -> bool { RETURN $v; };
+			 DEFINE TABLE author SCHEMALESS;
+			 DEFINE TABLE post SCHEMALESS;
+			 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author FIELD posts WHERE fn::check(published = true);
+			 DEFINE FUNCTION OVERWRITE fn::check($v: bool) -> bool { CREATE audit:1 SET seen = $v; RETURN $v; };",
+			&ses,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let res = ds
+			.execute(
+				"CREATE author:a; CREATE post:1 SET author = author:a, published = true;",
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		let err = res.into_iter().nth(1).unwrap().result.unwrap_err().to_string();
+		assert!(
+			err.contains("The MATERIALIZE INTO clause must not have effects"),
+			"unexpected error: {err}"
+		);
+
+		let check = ds.execute("SELECT * FROM audit;", &ses, None).await.unwrap();
+		let val = check.into_iter().next().unwrap().result.unwrap();
+		assert_eq!(val.to_sql(), "[]");
+	}
+
+	#[tokio::test]
+	async fn replace_preserves_readonly_materialized_destination() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().with_ns("test").with_db("test");
+
+		let res = ds
+			.execute(
+				"DEFINE TABLE author SCHEMALESS;
+				 DEFINE TABLE post SCHEMALESS;
+				 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author FIELD posts;
+				 CREATE author:a SET name = 'Alice';
+				 CREATE post:1 SET author = author:a;
+				 UPDATE author:a REPLACE { name: 'Alicia' };
+				 SELECT name, posts FROM author:a;",
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		for r in &res {
+			assert!(r.result.is_ok(), "unexpected error: {:?}", r.result);
+		}
+		let last = res.into_iter().last().unwrap().result.unwrap();
+		assert_eq!(last.to_sql(), "[{ name: 'Alicia', posts: [post:1] }]");
+	}
 }

@@ -563,7 +563,10 @@ pub(super) async fn step(
 		SchemaInstr::NextPlace {
 			done,
 		} => {
-			let content = matches!(spec_of(program, state)?.shape.data, Some(DataShape::Content));
+			let content = matches!(
+				spec_of(program, state)?.shape.data,
+				Some(DataShape::Content | DataShape::Replace)
+			);
 			loop {
 				let write = write_state(state)?;
 				// A write that maintains a `MATERIALIZE INTO` list may change its `READONLY`

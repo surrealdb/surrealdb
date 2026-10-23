@@ -838,9 +838,34 @@ async fn judged(
 	image: Value,
 	state: &mut State,
 ) -> FlowResult<bool> {
-	let frame =
-		exec.with_perms_suppressed(true).with_params([(crate::exec::materialize::IMAGE, image)]);
-	let rows = run_statement(program, unit, frame, state).await?;
+	let frame = exec
+		.with_perms_suppressed(true)
+		.with_params([(crate::exec::materialize::IMAGE, image)])
+		.refusing_writes(crate::dbs::NoWriteFrame::ComputedField);
+	let rows = run_statement(program, unit, frame, state).await.map_err(|err| {
+		if let ControlFlow::Err(err) = err {
+			ControlFlow::Err(match err.downcast::<ExecError>() {
+				Ok(err) => {
+					if let ExecError::SchemaClauseEffect {
+						construct,
+						..
+					} = err
+					{
+						ExecError::SchemaClauseEffect {
+							clause: "MATERIALIZE INTO".to_owned(),
+							construct,
+						}
+						.into()
+					} else {
+						err.into()
+					}
+				}
+				Err(err) => err,
+			})
+		} else {
+			err
+		}
+	})?;
 	Ok(if let Value::Array(rows) = &rows {
 		rows.0.first().is_some_and(Value::is_truthy)
 	} else {
