@@ -272,12 +272,14 @@ pub async fn init<
 	};
 	// Check if we are running the server
 	let server = matches!(args.command, Commands::Start(_));
-	// Under `--json`, stdout is the command's one document, and an export to
-	// stdout, or a model exported to it, is the data itself, so every log line
-	// goes to stderr and, for `--json`, a failure is reported as the JSON envelope
+	// Under `--json`, stdout is the command's one document, an export to
+	// stdout, or a model exported to it, is the data itself, and `mcp` speaks
+	// JSON-RPC over stdout, so every log line goes to stderr and, for `--json`,
+	// a failure is reported as the JSON envelope
 	let stdout_is_data = json.is_some()
 		|| matches!(&args.command, Commands::Export(export) if export.writes_to_stdout())
-		|| matches!(&args.command, Commands::Ml(ml) if ml.writes_to_stdout());
+		|| matches!(&args.command, Commands::Ml(ml) if ml.writes_to_stdout())
+		|| is_mcp(&args.command);
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder()
 		.with_log_level("info")
@@ -432,6 +434,18 @@ fn command(bin_name: String) -> clap::Command {
 /// command under it: the variables hold credentials and keys.
 fn hide_env_values(command: clap::Command) -> clap::Command {
 	command.mut_args(|arg| arg.hide_env_values(true)).mut_subcommands(hide_env_values)
+}
+
+/// Whether the command is the MCP server, whose stdout is its JSON-RPC
+/// transport.
+#[cfg(feature = "mcp")]
+fn is_mcp(command: &Commands) -> bool {
+	matches!(command, Commands::Mcp(_))
+}
+
+#[cfg(not(feature = "mcp"))]
+fn is_mcp(_command: &Commands) -> bool {
+	false
 }
 
 #[cfg(test)]

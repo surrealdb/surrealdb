@@ -696,6 +696,38 @@ mod cli_integration {
 		assert!(output.contains("count: 2"), "{output}");
 	}
 
+	/// `mcp` speaks JSON-RPC over stdout, so at the default log level its INFO
+	/// lines go to stderr and every line on stdout is a JSON-RPC message. A log
+	/// line on stdout (with ANSI colour codes under a terminal) breaks the client
+	/// (surrealdb/surrealdb#6740).
+	#[cfg(feature = "mcp")]
+	#[test(tokio::test)]
+	async fn mcp_stdout_is_json_rpc_alone() {
+		let request = json!({
+			"jsonrpc": "2.0",
+			"id": 1,
+			"method": "initialize",
+			"params": {
+				"protocolVersion": "2025-06-18",
+				"capabilities": {},
+				"clientInfo": { "name": "cli-test", "version": "0.0.0" }
+			}
+		});
+		let mut child = common::run("mcp memory --log info").input(&format!("{request}\n"));
+		let deadline = time::Instant::now() + time::Duration::from_secs(30);
+		while !child.stdout().contains("\"id\":1") && time::Instant::now() < deadline {
+			tokio::time::sleep(time::Duration::from_millis(100)).await;
+		}
+		let child = child.kill();
+		let stdout = remove_debug_info(child.stdout());
+		assert!(stdout.contains("\"id\":1"), "no reply to initialize on stdout:\n{stdout}");
+		for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+			serde_json::from_str::<serde_json::Value>(line)
+				.unwrap_or_else(|_| panic!("a line on stdout is not JSON-RPC: {line:?}"));
+		}
+		assert!(child.stderr().contains(" INFO "), "the log lines belong on stderr");
+	}
+
 	/// A record can hold a value nested deeper than a query may write as a
 	/// literal. Its export is read back by `import` in full, and an import that
 	/// does not apply says so in its exit status rather than reporting success.

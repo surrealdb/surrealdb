@@ -785,7 +785,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks,cli",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,mcp",
     "--workspace",
     "--test",
     "cli_integration",
