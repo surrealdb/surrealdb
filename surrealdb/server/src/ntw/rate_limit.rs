@@ -239,9 +239,11 @@ pub(super) async fn auth_rate_limit_middleware(request: Request, next: Next) -> 
 
 /// The throttled authentication endpoint a path belongs to. The cookie
 /// variants share their token counterparts' endpoint, so both spend one budget.
+/// Refreshing and signing out verify a refresh key, so they spend the sign-in
+/// budget too.
 fn auth_endpoint(path: &str) -> Option<&'static str> {
 	match path {
-		"/signin" | "/signin/cookie" => Some("signin"),
+		"/signin" | "/signin/cookie" | "/refresh/cookie" | "/signout" => Some("signin"),
 		"/signup" | "/signup/cookie" => Some("signup"),
 		_ => None,
 	}
@@ -275,7 +277,8 @@ mod tests {
 		assert_eq!(auth_endpoint("/signin/cookie"), auth_endpoint("/signin"));
 		assert_eq!(auth_endpoint("/signup/cookie"), auth_endpoint("/signup"));
 		assert!(auth_endpoint("/signin/cookie").is_some());
-		assert_eq!(auth_endpoint("/signout"), None);
+		assert_eq!(auth_endpoint("/refresh/cookie"), auth_endpoint("/signin"));
+		assert_eq!(auth_endpoint("/signout"), auth_endpoint("/signin"));
 		assert_eq!(auth_endpoint("/signin/other"), None);
 	}
 

@@ -986,7 +986,17 @@ GraphQL, error formatting
   after the origin gate allows the request and before any credential is checked.
   The token is carried only in the cookie (`HttpOnly; Secure; SameSite=Strict;
   Path=/`, `Max-Age` bounded by the token `exp` and the session expiry), never in
-  the body, and no refresh token is issued. `/signin` and `/signup` never set it.
+  the body. `/signin` and `/signup` never set it.
+- A record access defined `WITH REFRESH` also gets a refresh cookie (`surreal_refresh`,
+  same attributes, `Max-Age` the access definition's grant duration read from the
+  catalog; none is issued when grants do not expire). Its value is client-controlled
+  input on the way back, so it is read only by `POST /refresh/cookie` and
+  `POST /signout`, never by the auth layer, and only after the origin gate allows
+  the request. Core verifies the key against the stored grant before it is rotated or
+  revoked; a grant id alone never revokes. Both routes spend the sign-in rate limit.
+- A failed `POST /refresh/cookie` is a 401 with no `Set-Cookie`: rotation is single
+  use, so a losing concurrent refresh must not clear the winner's fresh cookies. Only
+  `/signout` clears the cookies, and always clears both.
 - Credential cookies (`CREDENTIAL_COOKIES` in `ntw/auth.rs`) are removed from the
   request headers handed to user-defined API code (`ntw/api.rs`), so an `HttpOnly`
   credential can never be returned in a response body.

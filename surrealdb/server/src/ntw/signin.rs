@@ -5,7 +5,6 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::HeaderMap;
-use http::header::SET_COOKIE;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::signin::signin;
@@ -16,7 +15,9 @@ use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
-use super::auth::{CookiePolicy, cookie_output, require_allowed_origin, session_cookie};
+use super::auth::{
+	CookiePolicy, cookie_output, require_allowed_origin, session_scope, token_cookies,
+};
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
@@ -145,9 +146,7 @@ async fn cookie_handler(
 			match signin(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
 				Ok(token) => {
-					let cookie = session_cookie(&token, &session)?;
-					let mut out = HeaderMap::new();
-					out.insert(SET_COOKIE, cookie);
+					let out = token_cookies(kvs, &token, &session, session_scope(&session)).await?;
 					Ok((out, cookie_output(accept.as_deref())?))
 				}
 				// There was an error with authentication

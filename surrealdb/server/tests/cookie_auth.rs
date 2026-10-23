@@ -565,21 +565,7 @@ fn websocket_seeded_by_a_cookie_stops_when_the_session_expires() {
 fn api_handlers_never_see_the_session_cookie() {
 	with_big_stack(|| async {
 		let server = TestServer::cookies().await;
-		let res = server
-			.request(Method::POST, "/sql")
-			.basic_auth(USER, Some(PASS))
-			.header("Surreal-NS", "t")
-			.header("Surreal-DB", "t")
-			.header("Accept", "application/json")
-			.body(
-				"DEFINE API \"/echo\" FOR get PERMISSIONS FULL THEN { \
-				 { status: 200, body: <string> $request.headers[\"cookie\"] } };",
-			)
-			.send()
-			.await
-			.unwrap();
-		assert_eq!(res.status(), StatusCode::OK);
-		assert!(!res.text().await.unwrap().contains("\"ERR\""));
+		server.define_echo().await;
 		let cookie = server.cookie().await;
 		let token = cookie.trim_start_matches("surreal_token=").to_string();
 		let res = server
@@ -595,5 +581,356 @@ fn api_handlers_never_see_the_session_cookie() {
 		assert_eq!(status, StatusCode::OK, "{body}");
 		assert!(!body.contains(&token), "the session cookie reached user code: {body}");
 		assert!(body.contains("theme=dark"), "other cookies are kept: {body}");
+	});
+}
+
+#[test]
+fn api_handlers_never_see_either_credential_cookie() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_echo().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (access, refresh) = server.signup().await;
+		let token = access.trim_start_matches("surreal_token=").to_string();
+		let key = refresh.trim_start_matches("surreal_refresh=").to_string();
+		let res = server
+			.request(Method::GET, "/api/t/t/echo")
+			.header("Origin", APP)
+			.header("Accept", "application/json")
+			.header("Cookie", format!("theme=dark; {access}; {refresh}"))
+			.send()
+			.await
+			.unwrap();
+		let status = res.status();
+		let body = res.text().await.unwrap();
+		assert_eq!(status, StatusCode::OK, "{body}");
+		assert!(!body.contains(&token), "the session cookie reached user code: {body}");
+		assert!(!body.contains(&key), "the refresh cookie reached user code: {body}");
+		assert!(body.contains("theme=dark"), "other cookies are kept: {body}");
+	});
+}
+
+fn set_cookies(res: &Response) -> Vec<String> {
+	res.headers()
+		.get_all("set-cookie")
+		.iter()
+		.map(|v| v.to_str().expect("ascii cookie").to_string())
+		.collect()
+}
+
+fn pair(cookie: &str) -> String {
+	cookie.split(';').next().expect("a cookie pair").to_string()
+}
+
+fn attr(cookie: &str, name: &str) -> bool {
+	cookie.split(';').any(|p| p.trim() == name)
+}
+
+fn is_cleared(cookie: &str, name: &str) -> bool {
+	cookie.starts_with(&format!("{name}=;")) && max_age(cookie) == 0
+}
+
+impl TestServer {
+	async fn define_echo(&self) {
+		let res = self
+			.request(Method::POST, "/sql")
+			.basic_auth(USER, Some(PASS))
+			.header("Surreal-NS", "t")
+			.header("Surreal-DB", "t")
+			.header("Accept", "application/json")
+			.body(
+				"DEFINE API \"/echo\" FOR get PERMISSIONS FULL THEN { \
+				 { status: 200, body: <string> $request.headers[\"cookie\"] } };",
+			)
+			.send()
+			.await
+			.expect("a response");
+		assert_eq!(res.status(), StatusCode::OK);
+		assert!(!res.text().await.expect("a body").contains("\"ERR\""));
+	}
+
+	/// Defines `acc` on `t/t` with refresh tokens, and `plain` without.
+	async fn define_refresh_access(&self, grant: &str, token: &str) {
+		let res = self
+			.request(Method::POST, "/sql")
+			.header("Content-Type", "text/plain")
+			.header("Accept", "application/json")
+			.basic_auth(USER, Some(PASS))
+			.body(format!(
+				"DEFINE NAMESPACE IF NOT EXISTS t; USE NS t; DEFINE DATABASE IF NOT EXISTS t; \
+				 USE DB t; \
+				 DEFINE ACCESS acc ON DATABASE TYPE RECORD \
+				 SIGNUP (CREATE user SET email = $email) WITH REFRESH \
+				 DURATION FOR GRANT {grant}, FOR TOKEN {token}, FOR SESSION 1h; \
+				 DEFINE ACCESS plain ON DATABASE TYPE RECORD \
+				 SIGNUP (CREATE user SET email = $email) \
+				 DURATION FOR TOKEN 1h, FOR SESSION 1h;"
+			))
+			.send()
+			.await
+			.expect("a response");
+		assert_eq!(res.status(), StatusCode::OK);
+		assert!(!res.text().await.expect("a body").contains("\"ERR\""));
+	}
+
+	async fn signup_as(&self, ac: &str) -> Response {
+		self.request(Method::POST, "/signup/cookie")
+			.header("Origin", APP)
+			.header("Accept", "application/json")
+			.body(format!(r#"{{"ns":"t","db":"t","ac":"{ac}","email":"a@b.test"}}"#))
+			.send()
+			.await
+			.expect("a response")
+	}
+
+	/// Signs up against the refresh access; returns the access and refresh cookie pairs.
+	async fn signup(&self) -> (String, String) {
+		let res = self.signup_as("acc").await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let set = set_cookies(&res);
+		assert_eq!(set.len(), 2, "{set:?}");
+		(pair(&set[0]), pair(&set[1]))
+	}
+
+	async fn refresh(&self, origin: &str, cookie: Option<&str>) -> Response {
+		let mut req = self
+			.request(Method::POST, "/refresh/cookie")
+			.header("Origin", origin)
+			.header("Accept", "application/json");
+		if let Some(cookie) = cookie {
+			req = req.header("Cookie", cookie);
+		}
+		req.send().await.expect("a response")
+	}
+
+	async fn signout(&self, cookie: &str) -> Response {
+		self.request(Method::POST, "/signout")
+			.header("Origin", APP)
+			.header("Cookie", cookie)
+			.send()
+			.await
+			.expect("a response")
+	}
+
+	/// Whether `cookie` authenticates as a record user (INFO FOR DB succeeds).
+	async fn authenticates(&self, access: &str) -> bool {
+		let res = self
+			.request(Method::POST, "/sql")
+			.header("Origin", APP)
+			.header("Content-Type", "text/plain")
+			.header("Accept", "application/json")
+			.header("Surreal-NS", "t")
+			.header("Surreal-DB", "t")
+			.header("Cookie", access)
+			.body("SELECT * FROM user;")
+			.send()
+			.await
+			.expect("a response");
+		let body: serde_json::Value = res.json().await.expect("json body");
+		body[0]["status"] == "OK"
+	}
+}
+
+fn tamper_key(refresh: &str) -> String {
+	let value = refresh.trim_start_matches("surreal_refresh=");
+	let json = decode_cookie(value);
+	let rt = json["rt"].as_str().expect("a key");
+	let mut parts: Vec<String> = rt.split('-').map(str::to_string).collect();
+	parts[3] = "x".repeat(parts[3].len());
+	let mut json = json;
+	json["rt"] = serde_json::Value::String(parts.join("-"));
+	format!("surreal_refresh={}", encode_cookie(&json))
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn decode_cookie(value: &str) -> serde_json::Value {
+	let (mut acc, mut bits, mut bytes) = (0u32, 0u32, Vec::new());
+	for c in value.bytes() {
+		acc = (acc << 6) | B64.iter().position(|b| *b == c).expect("base64url") as u32;
+		bits += 6;
+		if bits >= 8 {
+			bits -= 8;
+			bytes.push((acc >> bits) as u8);
+			acc &= (1 << bits) - 1;
+		}
+	}
+	serde_json::from_slice(&bytes).expect("json")
+}
+
+fn encode_cookie(value: &serde_json::Value) -> String {
+	let text = value.to_string();
+	let mut out = String::new();
+	for chunk in text.as_bytes().chunks(3) {
+		let n =
+			chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+		for i in 0..=chunk.len() {
+			out.push(B64[((n >> (18 - 6 * i)) & 63) as usize] as char);
+		}
+	}
+	out
+}
+
+#[test]
+fn signup_issues_a_refresh_cookie_beside_the_access_cookie() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let res = server.signup_as("acc").await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let set = set_cookies(&res);
+		assert_eq!(set.len(), 2, "{set:?}");
+		assert!(set[0].starts_with("surreal_token="), "{}", set[0]);
+		let refresh = &set[1];
+		assert!(refresh.starts_with("surreal_refresh="), "{refresh}");
+		for a in ["HttpOnly", "Secure", "SameSite=Strict", "Path=/"] {
+			assert!(attr(refresh, a), "{a} missing in {refresh}");
+		}
+		let age = max_age(refresh);
+		assert!((3590..=3600).contains(&age), "Max-Age {age} follows the grant duration");
+		let body = res.text().await.unwrap();
+		let value = pair(refresh).trim_start_matches("surreal_refresh=").to_string();
+		let key = decode_cookie(&value)["rt"].as_str().unwrap().to_string();
+		assert!(!body.contains(&key) && !body.contains(&value), "no token in the body: {body}");
+		assert!(!body.contains(pair(&set[0]).trim_start_matches("surreal_token=")), "{body}");
+	});
+}
+
+#[test]
+fn access_without_refresh_issues_only_the_access_cookie() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let res = server.signup_as("plain").await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let set = set_cookies(&res);
+		assert_eq!(set.len(), 1, "{set:?}");
+		assert!(set[0].starts_with("surreal_token="));
+	});
+}
+
+#[test]
+fn refresh_rotates_both_cookies_and_the_new_access_cookie_works() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (_, refresh) = server.signup().await;
+		let res = server.refresh(APP, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let set = set_cookies(&res);
+		assert_eq!(set.len(), 2, "{set:?}");
+		assert!(set[0].starts_with("surreal_token="));
+		assert!(set[1].starts_with("surreal_refresh="));
+		assert_ne!(pair(&set[1]), refresh, "the refresh cookie is rotated");
+		assert!(!res.text().await.unwrap().contains("surreal_"), "no token in the body");
+		assert!(server.authenticates(&pair(&set[0])).await);
+	});
+}
+
+#[test]
+fn a_used_refresh_cookie_is_refused_without_clearing_anything() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (_, old) = server.signup().await;
+		let res = server.refresh(APP, Some(&old)).await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let res = server.refresh(APP, Some(&old)).await;
+		assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+		assert!(set_cookies(&res).is_empty(), "a failed refresh never clears cookies");
+	});
+}
+
+#[test]
+fn refresh_from_a_foreign_origin_is_refused_and_does_not_rotate() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (_, refresh) = server.signup().await;
+		let res = server.refresh(EVIL, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::FORBIDDEN);
+		assert!(set_cookies(&res).is_empty());
+		let res = server.refresh(APP, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::OK, "the old refresh cookie still works");
+	});
+}
+
+#[test]
+fn refresh_without_a_usable_cookie_is_refused() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		for cookie in [None, Some("surreal_refresh=%%%"), Some("surreal_refresh=bm90IGpzb24")] {
+			let res = server.refresh(APP, cookie).await;
+			assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{cookie:?}");
+			assert!(set_cookies(&res).is_empty(), "{cookie:?}");
+		}
+	});
+}
+
+#[test]
+fn a_tampered_refresh_cookie_is_refused_and_revokes_nothing() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (_, refresh) = server.signup().await;
+		let tampered = tamper_key(&refresh);
+		let res = server.refresh(APP, Some(&tampered)).await;
+		assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+		assert!(set_cookies(&res).is_empty());
+		let res = server.signout(&tampered).await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let res = server.refresh(APP, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::OK, "the real grant is still valid");
+	});
+}
+
+#[test]
+fn signout_clears_both_cookies_and_revokes_the_refresh_grant() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (access, refresh) = server.signup().await;
+		let res = server.signout(&format!("{access}; {refresh}")).await;
+		assert_eq!(res.status(), StatusCode::OK);
+		let set = set_cookies(&res);
+		assert_eq!(set.len(), 2, "{set:?}");
+		assert!(is_cleared(&set[0], "surreal_token"), "{}", set[0]);
+		assert!(is_cleared(&set[1], "surreal_refresh"), "{}", set[1]);
+		let res = server.refresh(APP, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "the grant was revoked");
+	});
+}
+
+#[test]
+fn signout_from_a_foreign_origin_is_refused_and_revokes_nothing() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1h").await;
+		let (access, refresh) = server.signup().await;
+		let res = server
+			.request(Method::POST, "/signout")
+			.header("Origin", EVIL)
+			.header("Cookie", format!("{access}; {refresh}"))
+			.send()
+			.await
+			.expect("a response");
+		assert_eq!(res.status(), StatusCode::FORBIDDEN);
+		assert!(set_cookies(&res).is_empty(), "a refused signout clears nothing");
+		let res = server.refresh(APP, Some(&refresh)).await;
+		assert_eq!(res.status(), StatusCode::OK, "the grant was not revoked");
+	});
+}
+
+#[test]
+fn an_expired_access_cookie_does_not_block_a_refresh() {
+	with_big_stack(|| async {
+		let server = TestServer::cookies().await;
+		server.define_refresh_access("1h", "1s").await;
+		let (access, refresh) = server.signup().await;
+		tokio::time::sleep(Duration::from_millis(2200)).await;
+		let res = server.refresh(APP, Some(&format!("{access}; {refresh}"))).await;
+		assert_eq!(res.status(), StatusCode::OK);
+		assert_eq!(set_cookies(&res).len(), 2);
 	});
 }

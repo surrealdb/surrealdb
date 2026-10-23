@@ -22,6 +22,7 @@ pub(crate) mod output;
 mod params;
 mod rate_limit;
 mod ready;
+pub mod refresh;
 pub mod rpc;
 mod signals;
 pub mod signin;
@@ -188,6 +189,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(sync::router())
 		.merge(sql::router())
 		.merge(signin::router())
+		.merge(refresh::router())
 		.merge(signout::router())
 		.merge(signup::router())
 		.merge(key::router())
@@ -286,8 +288,11 @@ pub struct RouterOptions {
 	/// in-memory only.
 	pub durable_session_ttl: Option<Duration>,
 	/// When `true`, `/signin/cookie` and `/signup/cookie` issue the access token
-	/// as an `HttpOnly` cookie, and the cookie is accepted as a credential
-	/// from allowed browser origins (see `ntw::auth::browser_origin_allowed`).
+	/// as an `HttpOnly` cookie (plus an `HttpOnly` refresh cookie for record
+	/// access methods with `WITH REFRESH`), `/refresh/cookie` rotates them,
+	/// `/signout` clears them, and the access cookie is accepted as a
+	/// credential from allowed browser origins (see
+	/// `ntw::auth::browser_origin_allowed`).
 	/// Requires a non-empty `allow_origin`; [`SurrealRouter::build`] refuses the
 	/// combination otherwise.
 	pub cookie_auth: bool,

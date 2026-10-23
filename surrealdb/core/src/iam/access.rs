@@ -373,6 +373,31 @@ pub async fn verify_and_revoke_refresh_token_record(
 	revoke_refresh_token_record(kvs, gr, ac, ns, db).await
 }
 
+/// Revokes the refresh token `key` of the record access `ac` in `ns`/`db`, once
+/// the key itself has been verified.
+///
+/// The grant is named by the identifier embedded in `key`, which is untrusted
+/// input: it must be a well-formed refresh key, and the key must match the
+/// stored grant (via [`verify_and_revoke_refresh_token_record`]) before
+/// anything is revoked. Knowing a grant id is never enough. Every failure
+/// (malformed key, unknown or expired grant, wrong key) is `InvalidAuth`.
+pub async fn revoke_refresh_token(
+	kvs: &Datastore,
+	ns: &str,
+	db: &str,
+	ac: &str,
+	key: &str,
+) -> Result<()> {
+	let gr = crate::iam::signin::validate_grant_bearer(key)
+		.map_err(|_| anyhow::Error::new(AuthError::InvalidAuth))?;
+	// Only refresh keys name refresh grants; `validate_grant_bearer` has already
+	// established that the key has four dash-separated parts.
+	if key.split('-').nth(1) != Some("refresh") {
+		bail!(AuthError::InvalidAuth);
+	}
+	verify_and_revoke_refresh_token_record(kvs, gr, ac.to_string(), key.to_string(), ns, db).await
+}
+
 /// Revokes the refresh-token grant named by `gr`, as owner and without
 /// verifying possession of its key.
 ///
@@ -513,5 +538,81 @@ mod read_only_backstop_tests {
 		.unwrap()
 		.expect("a read-only clause produces a payload");
 		assert_eq!(data.public(), &PublicValue::String("granted".to_owned()));
+	}
+}
+
+#[cfg(test)]
+mod revoke_refresh_token_tests {
+	use surrealdb_rpc::Token;
+
+	use super::*;
+	use crate::iam::signin::signin;
+	use crate::types::PublicVariables;
+
+	async fn issue(ds: &Datastore) -> String {
+		let mut sess = Session::default();
+		let mut vars = PublicVariables::new();
+		vars.insert("ns", "test");
+		vars.insert("db", "test");
+		vars.insert("ac", "user");
+		vars.insert("user", "user");
+		vars.insert("pass", "pass");
+		match signin(ds, &mut sess, vars).await.unwrap() {
+			Token::WithRefresh {
+				refresh,
+				..
+			} => refresh,
+			_ => panic!("expected a refresh token"),
+		}
+	}
+
+	async fn renews(ds: &Datastore, refresh: &str) -> bool {
+		let mut sess = Session::default();
+		let mut vars = PublicVariables::new();
+		vars.insert("ns", "test");
+		vars.insert("db", "test");
+		vars.insert("ac", "user");
+		vars.insert("refresh", refresh.to_string());
+		signin(ds, &mut sess, vars).await.is_ok()
+	}
+
+	#[tokio::test]
+	async fn revokes_only_with_the_right_key() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN (
+					SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+				)
+				WITH REFRESH
+				DURATION FOR GRANT 1w, FOR SESSION 2h
+			;
+			CREATE user:test CONTENT {
+				name: 'user',
+				pass: crypto::argon2::generate('pass')
+			}
+			"#,
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+		let key = issue(&ds).await;
+		// Same grant id, wrong secret: nothing is revoked.
+		let mut parts: Vec<&str> = key.split('-').collect();
+		let wrong_secret = "x".repeat(parts[3].len());
+		parts[3] = &wrong_secret;
+		let tampered = parts.join("-");
+		assert!(revoke_refresh_token(&ds, "test", "test", "user", &tampered).await.is_err());
+		assert!(revoke_refresh_token(&ds, "test", "test", "user", "garbage").await.is_err());
+		// Right key, wrong access method: nothing is revoked.
+		assert!(revoke_refresh_token(&ds, "test", "test", "other", &key).await.is_err());
+		// None of the failures above revoked the grant: the real key still does.
+		revoke_refresh_token(&ds, "test", "test", "user", &key).await.unwrap();
+		assert!(!renews(&ds, &key).await, "a revoked key must not renew");
+		// Revoking twice fails: the grant is already revoked.
+		assert!(revoke_refresh_token(&ds, "test", "test", "user", &key).await.is_err());
 	}
 }

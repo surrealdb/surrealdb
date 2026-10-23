@@ -12,9 +12,12 @@ use http::header::{AUTHORIZATION, COOKIE, ORIGIN, SET_COOKIE};
 use http::request::Parts;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use hyper::{Request, Response};
+use surrealdb_catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::is_expired_token_error;
 use surrealdb_core::iam::verify::{basic, token};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_datastore::TransactionType;
 use surrealdb_observe::HttpRequestEventCtx;
 use surrealdb_rpc::Token;
 use surrealdb_types::SurrealValue;
@@ -136,7 +139,10 @@ where
 /// Whether the request is to a route that exchanges credentials for a token.
 fn is_credential_exchange(parts: &Parts) -> bool {
 	parts.method == http::Method::POST
-		&& matches!(parts.uri.path(), "/signin" | "/signup" | "/signin/cookie" | "/signup/cookie")
+		&& matches!(
+			parts.uri.path(),
+			"/signin" | "/signup" | "/signin/cookie" | "/signup/cookie" | "/refresh/cookie"
+		)
 }
 
 /// Whether the request is to the route that ends a cookie session.
@@ -295,6 +301,9 @@ async fn check_auth(parts: &mut Parts, use_credentials: bool) -> Result<(Session
 /// The name of the cookie carrying the access token.
 const SESSION_COOKIE: &str = "surreal_token";
 
+/// The name of the cookie carrying the refresh token.
+const REFRESH_COOKIE: &str = "surreal_refresh";
+
 /// The cookie attributes shared by issuing and clearing the session cookie.
 const COOKIE_ATTRIBUTES: &str = "HttpOnly; Secure; SameSite=Strict; Path=/";
 
@@ -355,7 +364,7 @@ static SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 /// The cookies that carry server-issued credentials. They are removed from any
 /// request headers handed to user-defined code, so an `HttpOnly` credential
 /// can never be echoed back into a response body a script can read.
-const CREDENTIAL_COOKIES: &[&str] = &[SESSION_COOKIE];
+const CREDENTIAL_COOKIES: &[&str] = &[SESSION_COOKIE, REFRESH_COOKIE];
 
 /// Removes the credential cookies from the request's `Cookie` headers, keeping
 /// every other cookie in its original order. A `Cookie` header left with no
@@ -478,11 +487,135 @@ fn sets_session_cookie(headers: &HeaderMap) -> bool {
 	})
 }
 
+/// The refresh cookie's payload: which record access the refresh key belongs
+/// to, and the key itself. Carried as unpadded base64url of its compact JSON so
+/// renewal and revocation need no request body.
+///
+/// Every field is client-controlled when the cookie comes back in, so it is
+/// untrusted input: core verifies the key against the stored grant before
+/// anything is rotated or revoked, and a decoded value proves nothing.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct RefreshCookie {
+	pub ns: String,
+	pub db: String,
+	pub ac: String,
+	pub rt: String,
+}
+
+impl RefreshCookie {
+	fn encode(&self) -> Option<String> {
+		serde_json::to_vec(self).ok().map(|json| base64url_encode(&json))
+	}
+
+	fn decode(value: &str) -> Option<Self> {
+		serde_json::from_slice(&base64url_decode(value)?).ok()
+	}
+
+	/// The refresh cookie of the request, if it carries one that decodes.
+	pub(super) fn from_headers(headers: &HeaderMap) -> Option<Self> {
+		Self::decode(cookie_value(headers, REFRESH_COOKIE)?)
+	}
+}
+
+/// The `Set-Cookie` value that stores a refresh token.
+///
+/// `Max-Age` is the lifetime of the refresh grant, so the cookie never outlives
+/// the key it carries. The value is only ever read by `POST /refresh/cookie`
+/// and `POST /signout`; the auth layer does not read it.
+pub(super) fn refresh_cookie(scope: &RefreshCookie, max_age: u64) -> Result<HeaderValue, NetError> {
+	let value = scope.encode().ok_or(NetError::CookieUnbounded)?;
+	HeaderValue::try_from(format!(
+		"{REFRESH_COOKIE}={value}; {COOKIE_ATTRIBUTES}; Max-Age={max_age}"
+	))
+	.map_err(|_| NetError::CookieUnbounded)
+}
+
+/// The `Set-Cookie` value that removes the refresh cookie.
+pub(super) fn clear_refresh_cookie() -> HeaderValue {
+	HeaderValue::from_static(
+		"surreal_refresh=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
+	)
+}
+
+/// The lifetime of the refresh grants a record access issues, in seconds,
+/// read from the catalog definition.
+///
+/// This is the duration `create_refresh_token_record` gives each grant, so it
+/// is the `Max-Age` of the refresh cookie. `None` when the access method is
+/// not defined or its grants do not expire; no refresh cookie is issued then,
+/// because a refresh cookie is never issued without a bound.
+async fn refresh_grant_lifetime(kvs: &Datastore, ns: &str, db: &str, ac: &str) -> Option<u64> {
+	let tx = kvs.transaction(TransactionType::Read).await.ok()?;
+	let def = async {
+		let db_def = tx.get_db_by_name(ns, db, None).await.ok().flatten()?;
+		tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await.ok().flatten()
+	}
+	.await;
+	let _ = tx.cancel().await;
+	let secs = def?.grant_duration?.as_secs();
+	(secs > 0).then_some(secs)
+}
+
+/// The `Set-Cookie` headers for a successful sign-in, sign-up or refresh: the
+/// access cookie, plus the refresh cookie when the token carries a refresh
+/// token and the access method's grants expire.
+///
+/// Both are appended, never inserted, so both survive. `scope` names the
+/// record access the refresh token was issued for.
+pub(super) async fn token_cookies(
+	kvs: &Datastore,
+	token: &Token,
+	session: &Session,
+	scope: Option<(&str, &str, &str)>,
+) -> Result<HeaderMap, NetError> {
+	let mut out = HeaderMap::new();
+	out.append(SET_COOKIE, session_cookie(token, session)?);
+	if let Token::WithRefresh {
+		refresh,
+		..
+	} = token
+		&& let Some((ns, db, ac)) = scope
+	{
+		if let Some(max_age) = refresh_grant_lifetime(kvs, ns, db, ac).await {
+			let cookie = RefreshCookie {
+				ns: ns.to_string(),
+				db: db.to_string(),
+				ac: ac.to_string(),
+				rt: refresh.clone(),
+			};
+			out.append(SET_COOKIE, refresh_cookie(&cookie, max_age)?);
+		} else {
+			debug!("Not issuing a refresh cookie: the access method's grants do not expire");
+		}
+	}
+	Ok(out)
+}
+
+/// The `(ns, db, ac)` a session was authenticated into, when it names all three.
+pub(super) fn session_scope(session: &Session) -> Option<(&str, &str, &str)> {
+	Some((session.ns.as_deref()?, session.db.as_deref()?, session.ac.as_deref()?))
+}
+
 /// The `exp` claim of a server-issued token, read without verification.
 fn token_exp(token: &str) -> Option<i64> {
 	let payload = token.split('.').nth(1)?;
 	let bytes = base64url_decode(payload)?;
 	serde_json::from_slice::<serde_json::Value>(&bytes).ok()?.get("exp")?.as_i64()
+}
+
+/// Encodes unpadded base64url.
+fn base64url_encode(input: &[u8]) -> String {
+	const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+	let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+	for chunk in input.chunks(3) {
+		let n =
+			chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+		let chars = chunk.len() + 1;
+		for i in 0..chars {
+			out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+		}
+	}
+	out
 }
 
 /// Decodes unpadded base64url.
@@ -519,7 +652,7 @@ struct CookieSuccess {
 
 /// The response body for a successful sign-in or sign-up whose token went into
 /// the session cookie. JSON, CBOR and flatbuffers carry `{code, details}` only;
-/// plain text is empty. No refresh token is issued in this mode.
+/// plain text is empty. A refresh token travels only in its own cookie.
 pub(super) fn cookie_output(
 	accept: Option<&super::headers::Accept>,
 ) -> Result<super::output::Output, NetError> {
@@ -686,5 +819,65 @@ mod tests {
 		// An unbounded token on an unbounded session is refused.
 		let unbounded = Token::Access("eyJhbGciOiJIUzI1NiJ9.e30.sig".to_string());
 		assert!(session_cookie(&unbounded, &Session::default()).is_err());
+	}
+
+	#[test]
+	fn base64url_round_trips() {
+		for input in
+			[&b""[..], b"f", b"fo", b"foo", b"foob", b"fooba", b"foobar", &[0xfb, 0xff, 0xfe]]
+		{
+			let encoded = base64url_encode(input);
+			assert!(!encoded.contains('='), "{encoded}");
+			assert_eq!(base64url_decode(&encoded).unwrap(), input);
+		}
+		assert_eq!(base64url_encode(b"foobar"), "Zm9vYmFy");
+		assert_eq!(base64url_encode(&[0xfb, 0xff, 0xfe]), "-__-");
+	}
+
+	#[test]
+	fn refresh_cookie_value_round_trips() {
+		let cookie = RefreshCookie {
+			ns: "n".into(),
+			db: "d".into(),
+			ac: "a".into(),
+			rt: "sdb-refresh-id-key".into(),
+		};
+		let value = cookie.encode().unwrap();
+		let h = cookie_headers(&[&format!("x=1; {REFRESH_COOKIE}={value}")]);
+		let back = RefreshCookie::from_headers(&h).unwrap();
+		assert_eq!((back.ns.as_str(), back.db.as_str()), ("n", "d"));
+		assert_eq!((back.ac.as_str(), back.rt.as_str()), ("a", "sdb-refresh-id-key"));
+		// Not base64url, or not the expected JSON, is absent rather than an error.
+		assert!(RefreshCookie::decode("!!!").is_none());
+		assert!(RefreshCookie::decode(&base64url_encode(b"{\"ns\":\"n\"}")).is_none());
+		assert!(RefreshCookie::decode(&base64url_encode(b"not json")).is_none());
+	}
+
+	#[test]
+	fn refresh_cookie_carries_every_attribute() {
+		let scope = RefreshCookie {
+			ns: "n".into(),
+			db: "d".into(),
+			ac: "a".into(),
+			rt: "k".into(),
+		};
+		let cookie = refresh_cookie(&scope, 3600).unwrap();
+		let cookie = cookie.to_str().unwrap();
+		assert!(cookie.starts_with("surreal_refresh="), "{cookie}");
+		for attr in ["HttpOnly", "Secure", "SameSite=Strict", "Path=/", "Max-Age=3600"] {
+			assert!(cookie.split(';').any(|p| p.trim() == attr), "{attr} missing in {cookie}");
+		}
+		assert_eq!(
+			clear_refresh_cookie().to_str().unwrap(),
+			"surreal_refresh=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0"
+		);
+	}
+
+	#[test]
+	fn strip_credential_cookies_removes_the_refresh_cookie() {
+		let mut h = headers(&[("cookie", "a=1; surreal_refresh=secret; surreal_token=t")]);
+		strip_credential_cookies(&mut h);
+		let cookies: Vec<_> = h.get_all(COOKIE).iter().map(|v| v.to_str().unwrap()).collect();
+		assert_eq!(cookies, ["a=1"]);
 	}
 }
