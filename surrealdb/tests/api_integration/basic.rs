@@ -223,7 +223,10 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signup)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -250,7 +253,10 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signin)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -301,7 +307,10 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signup)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
@@ -329,7 +338,10 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	} else if err.message().contains("HTTP") {
 		assert_eq!(
 			err.message(),
-			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+			format!(
+				"HTTP status client error (400 Bad Request) for url (http://{}/signin)",
+				super::server_address()
+			)
 		);
 	} else {
 		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());

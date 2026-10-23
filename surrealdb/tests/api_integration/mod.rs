@@ -57,6 +57,16 @@ mod version;
 const ROOT_USER: &str = "root";
 const ROOT_PASS: &str = "root";
 
+/// The `host:port` of the server the remote-engine tests connect to:
+/// `SURREAL_TEST_ADDRESS`, or `127.0.0.1:8000` when it is unset. Any `surreal`
+/// binary or container listening there serves, not only one built from this
+/// checkout; see `cargo make ci-api-integration-http` and the variables it
+/// reads.
+#[allow(dead_code)]
+fn server_address() -> String {
+	std::env::var("SURREAL_TEST_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8000".to_string())
+}
+
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 	std::sync::LazyLock::new(|| temp_dir::TempDir::new().unwrap().child("sdb-test"));
@@ -130,7 +140,12 @@ mod any {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Any>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = surrealdb::engine::any::connect(("http://127.0.0.1:8000", config)).await.unwrap();
+		let db = surrealdb::engine::any::connect((
+			format!("http://{}", super::server_address()),
+			config,
+		))
+		.await
+		.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -162,7 +177,7 @@ mod http {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Http>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Http>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -175,7 +190,9 @@ mod http {
 	#[test_log::test(tokio::test)]
 	async fn any_engine_can_connect() {
 		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		surrealdb::engine::any::connect(format!("http://{}", super::server_address()))
+			.await
+			.unwrap();
 		drop(permit);
 	}
 
@@ -206,7 +223,7 @@ mod ws {
 
 	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -219,7 +236,7 @@ mod ws {
 	#[test_log::test(tokio::test)]
 	async fn any_engine_can_connect() {
 		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("ws://127.0.0.1:8000").await.unwrap();
+		surrealdb::engine::any::connect(format!("ws://{}", super::server_address())).await.unwrap();
 		drop(permit);
 	}
 
@@ -240,7 +257,7 @@ mod ws {
 		// The connection event should fire and allow wait_for to return immediately
 		// when waiting for a connection. When waiting for a database to be selected,
 		// it should continue waiting.
-		db.connect::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.connect::<Ws>(super::server_address()).await.unwrap();
 		assert_eq!(poll!(pin!(db.wait_for(Connection))), Poll::Ready(()));
 		assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Pending);
 
@@ -315,7 +332,7 @@ mod ws {
 		// Configure WebSocket with custom size limits for testing
 		let ws_config = WebsocketConfig::default().max_message_size(max_size);
 		let config = Config::new().websocket(ws_config).unwrap();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -365,7 +382,7 @@ mod ws {
 
 		let permit = PERMITS.acquire().await.unwrap();
 		let config = Config::new();
-		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		let db = Surreal::new::<Ws>((super::server_address(), config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),

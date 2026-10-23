@@ -1867,11 +1867,27 @@ script = """
 # Services
 # --------------------------------------------------
 
+# The server the remote-engine tests (`ci-api-integration-{http,ws,any}`) and
+# `ci-workspace-*-with-server` run against. By default it is built from this
+# checkout and listens on 127.0.0.1:8000. Three variables point the tests at
+# any other `surreal`, such as a released binary or a docker image, without
+# building one:
+#
+# - `SURREAL_BIN`: a `surreal` binary to start instead of `target/debug/surreal`.
+# - `SURREAL_DOCKER_IMAGE`: an image to run instead, e.g.
+#   `surrealdb/surrealdb:v3.0.0`. Takes precedence over `SURREAL_BIN`.
+# - `SURREAL_TEST_ADDRESS`: the `host:port` the server listens on and the tests
+#   connect to (default `127.0.0.1:8000`).
+#
+# For example:
+#   SURREAL_DOCKER_IMAGE=surrealdb/surrealdb:latest SURREAL_TEST_ADDRESS=127.0.0.1:18000 \
+#     cargo make ci-api-integration-ws
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 private = true
-# `_PREBUILT_SURREAL` set means `target/debug/surreal` was supplied by the caller.
-condition = { env_not_set = ["_PREBUILT_SURREAL"] }
+# `_PREBUILT_SURREAL` set means `target/debug/surreal` was supplied by the
+# caller; `SURREAL_BIN` or `SURREAL_DOCKER_IMAGE` set means no server is built.
+condition = { env_not_set = ["_PREBUILT_SURREAL", "SURREAL_BIN", "SURREAL_DOCKER_IMAGE"] }
 command = "cargo"
 args = [
     "build",
@@ -1888,16 +1904,28 @@ dependencies = ["build-surrealdb"]
 script = """
     #!/bin/bash -ex
 
-    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all --deny-guests &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    addr="${SURREAL_TEST_ADDRESS:-127.0.0.1:8000}"
+    name="surreal-test-${_TEST_API_ENGINE}"
+    rm -f /tmp/${name}.pid /tmp/${name}.container
 
-    echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
+    if [[ -n "${SURREAL_DOCKER_IMAGE:-}" ]]; then
+        # A local binary inherits the root credentials (`SURREAL_USER`,
+        # `SURREAL_PASS`) from the environment; a container has to be handed them.
+        docker run --detach --rm --name "$name" --publish "${addr}:8000" \
+            --env SURREAL_USER --env SURREAL_PASS --env SURREAL_LOG "$SURREAL_DOCKER_IMAGE" \
+            start ${_START_SURREALDB_PATH} --allow-all --deny-guests --bind 0.0.0.0:8000 \
+            > /tmp/${name}.container
+    else
+        "${SURREAL_BIN:-target/debug/surreal}" start ${_START_SURREALDB_PATH} --allow-all --deny-guests \
+            --bind "$addr" &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+        echo $! > /tmp/${name}.pid
+    fi
 
     set +e
-    echo "Waiting for surreal to be ready..."
-    tries=0
-    while [[ $tries < 5 ]]; do
-            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
-            tries=$((tries + 1))
+    echo "Waiting for surreal to be ready on ${addr}..."
+    for _ in $(seq 1 30); do
+        curl --silent --fail "http://${addr}/health" >/dev/null && echo "Ready!" && exit 0
+        sleep 1
     done
 
     echo "ERROR: Surreal is unhealthy!"
@@ -1909,9 +1937,14 @@ category = "CI - SERVICES"
 description = "Stop the local SurrealDB server"
 script = """
     #!/bin/bash -ex
-    kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
-    sleep 5
-    kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
+    name="surreal-test-${_TEST_API_ENGINE}"
+    if [[ -f /tmp/${name}.container ]]; then
+        docker stop "$(cat /tmp/${name}.container)" || true
+    else
+        kill $(cat /tmp/${name}.pid) || true
+        sleep 5
+        kill -9 $(cat /tmp/${name}.pid) || true
+    fi
 """
 
 [tasks.start-tikv]
