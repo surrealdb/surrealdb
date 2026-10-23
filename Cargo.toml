@@ -646,6 +646,29 @@ opt-level = 3
 [profile.dev.package.base64ct]
 opt-level = 3
 
+# `dev` with optimised workspace code, for binaries CI builds only to execute
+# queries against, such as the `surreal` server the SDK lanes share. Debug
+# assertions, overflow checks and unwinding stay on, so a failure reads as it
+# does under `dev`.
+#
+# It is a separate profile, not a change to `dev`, because `opt-level` is part
+# of every compile unit's cache key. Setting it on `dev` would rebuild each job
+# that only checks, lints or builds test archives, for no gain in any of them.
+# Builds in this profile land in `target/devopt`, apart from `target/debug`.
+#
+# RocksDB's C++ is compiled by a build script, which takes its `-O` level from
+# the profile of the package that runs it: `-O0` under `dev`. A storage-backed
+# test spends most of its time inside RocksDB, so this profile raises it.
+# kache does not cache that compile, so the level is a build-time cost paid on
+# every job that builds RocksDB in this profile; lower it before raising the
+# workspace's own level.
+[profile.devopt]
+inherits = "dev"
+opt-level = 1
+
+[profile.devopt.package.surrealdb-librocksdb-sys]
+opt-level = 2
+
 [profile.release]
 codegen-units = 1
 lto = true

@@ -50,14 +50,20 @@ jobs:
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
+      # The SDK suites time individual queries against this server; the
+      # Python suite gives each one 30 seconds, which an unoptimised build
+      # seeding 20,000 rows can exceed on a slow runner.
       - name: Build binary
-        run: cargo build --locked --target x86_64-unknown-linux-gnu
+        run: |
+          cargo build --locked --profile devopt --target x86_64-unknown-linux-gnu
+          mkdir -p artifacts
+          cp target/x86_64-unknown-linux-gnu/devopt/surreal artifacts/surreal
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: surreal-amd64
-          path: target/x86_64-unknown-linux-gnu/debug/surreal
+          path: artifacts/surreal
 
   sdk-javascript:
     name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
