@@ -20,6 +20,7 @@
 //! a `CONCURRENTLY` build queues the transaction's writes for itself, so
 //! neither is restricted.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -29,11 +30,13 @@ use surrealdb_datastore::unseen_indexes::Unseen;
 
 use super::{IndexBuilder, IndexMutation};
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId,
+	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId,
 };
+use crate::ctx::FrozenContext;
+use crate::dbs::Options;
 use crate::idx::Error as IdxError;
 use crate::kvs::{Transaction, TransactionType};
-use crate::val::TableName;
+use crate::val::{RecordId, TableName, Value};
 
 impl IndexBuilder {
 	/// Record, on `txn`, what it cannot read of the index `ix` of `table` that
@@ -42,88 +45,180 @@ impl IndexBuilder {
 	/// A `CONCURRENTLY` build has not read anything: it waits for `txn` to
 	/// close, so `txn` reads the index empty however much the table holds. A
 	/// blocking build wrote entries `txn`'s snapshot predates, unless the
-	/// store held no record of the table for it to index; `txn` then reads the
-	/// index as its snapshot has it. That index lists the records `txn` writes
-	/// after the definition and no other: a record `txn` wrote before it, or one
-	/// its snapshot holds that another transaction has since deleted, has no
-	/// entry, as no build indexed it. `txn`'s own view of the table is not
-	/// probed for such a record, because it shows the records `txn` wrote
-	/// together with its snapshot's, and only a record of what `txn` wrote
-	/// tells the two apart.
+	/// store held no record of the table and no entry of the index for it to
+	/// touch; `txn` then reads the index as its snapshot has it. For a fresh
+	/// blocking definition, any records `txn` created before `DEFINE INDEX`
+	/// (absent from the committed store) are indexed directly into `txn` here
+	/// and recorded in [`Unseen::Built::created`] so later writes in `txn` can
+	/// update or delete them.
 	///
 	/// The store is read through a view opened after the build, which says
-	/// whether it held a record and is kept only for a `unique` index, whose
-	/// writes check their keys through it ([`Unseen::Built`]).
+	/// whether it held a record or index entry and is kept only for a `unique`
+	/// index, whose writes check their keys through it ([`Unseen::Built`]).
 	///
 	/// The future is built here and returned boxed, so that a caller on a deep
 	/// path holds a pointer to it, not its size.
 	#[inline(never)]
 	pub(crate) fn note_unseen_definition<'a>(
 		&'a self,
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
 		txn: &'a Transaction,
-		at: (NamespaceId, DatabaseId),
-		table: &'a TableName,
-		ix: IndexId,
-		unique: bool,
+		at: (NamespaceId, DatabaseId, TableId),
+		ix: &'a Arc<IndexDefinition>,
+		fresh: bool,
 		blocking: bool,
 	) -> Pin<Box<impl Future<Output = Result<()>> + 'a>> {
-		Box::pin(self.note_unseen_definition_body(txn, at, table, ix, unique, blocking))
+		Box::pin(self.note_unseen_definition_body(ctx, opt, txn, at, ix, fresh, blocking))
 	}
 
 	async fn note_unseen_definition_body(
 		&self,
+		ctx: &FrozenContext,
+		opt: &Options,
 		txn: &Transaction,
-		(ns, db): (NamespaceId, DatabaseId),
-		table: &TableName,
-		ix: IndexId,
-		unique: bool,
+		(ns, db, tb): (NamespaceId, DatabaseId, TableId),
+		ix: &Arc<IndexDefinition>,
+		fresh: bool,
 		blocking: bool,
 	) -> Result<()> {
+		let table = &ix.table_name;
+		let ix_id = ix.index_id;
+		let unique = matches!(ix.index, Index::Uniq);
 		// An id this transaction drew again, after a save point rolled back the
 		// definition that held it, is judged afresh.
-		if let Some(stale) = txn.forget_index_unseen(ns, db, table, ix) {
+		if let Some(stale) = txn.forget_index_unseen(ns, db, table, ix_id) {
 			stale.cancel_bare().await?;
 		}
 		if !blocking {
-			txn.mark_index_unseen(ns, db, table, ix, Unseen::Queued);
+			txn.mark_index_unseen(ns, db, table, ix_id, Unseen::Queued);
 			return Ok(());
 		}
 		let view = Arc::new(self.tf.transaction(TransactionType::Read, txn.sequences()).await?);
-		match view.holds_record(ns, db, table).await {
-			Ok(true) => {}
+		let res: Result<bool> = async {
+			let mut created_set = HashSet::new();
+			let written_ids = txn.written_record_ids(ns, db, table)?;
+			if fresh && !written_ids.is_empty() {
+				crate::kvs::catalog_reads::sealed(false, async {
+					let ix_key = Arc::new(super::IndexKey::new(ns, db, table, ix_id));
+					let mut building = super::builder::Building::new(
+						ctx,
+						self.tf.clone(),
+						opt.clone(),
+						tb,
+						Arc::clone(ix),
+						ix_key,
+					)?;
+					building.analyzer = building.statement_analyzer(ctx).await?;
+					building.read_key_structure_in(ctx).await?;
+					let exec = building.exec_ctx(ctx).await?;
+					let entry = building.compiled_index(&exec).await?;
+					let az_fn = crate::exec::analyzer_function::StreamingAnalyzerFunction::new(&exec);
+					let batch = building.batch_context(ctx, None).await?;
+					let mut rc = super::replay::BatchReplayCounters::default();
+					for rid_key in &written_ids {
+						if !view.record_exists(ns, db, table, rid_key).await? {
+							let rid = RecordId {
+								table: table.clone(),
+								key: rid_key.clone(),
+							};
+							created_set.insert(rid.clone());
+							let rec = txn.get_record(ns, db, table, rid_key, None).await?;
+							if rec.exists() {
+								let image = crate::idx::index::RecordImage::from_data(
+									&rid,
+									rec.data.as_ref(),
+								)?;
+								let opt_values = entry.values(&image, &exec).await?;
+								let count_cond_match =
+									entry.guard_matches(&image, &exec).await?.map(|m| (false, m));
+								if unique {
+									let values = opt_values.clone().unwrap_or_default();
+									let indexable = crate::idx::index::Indexable::new(values, ix);
+									let keyspace = crate::idx::kernels::btree::IndexKeyspace::of(
+										ns, db, ix,
+									);
+									for n in indexable {
+										let key = keyspace.stored_key(true, &n, &rid.key)?;
+										if key.unique
+											&& let Some(held) = view.get_key(&key, None).await?
+											&& held.rid != rid
+										{
+											let value = match n.into_iter().next() {
+												Some(Some(val)) => val.to_raw_string(),
+												_ => Value::Null.to_raw_string(),
+											};
+											return Err(IdxError::IndexExists {
+												record: held.rid,
+												index: ix.name.to_string(),
+												value,
+											}
+											.into());
+										}
+									}
+								}
+								building
+									.index_initial_values(
+										ctx,
+										&az_fn,
+										&batch.fulltext,
+										super::replay::InitialIndexValue {
+											rid: &rid,
+											opt_values,
+											count_cond_match,
+										},
+										&mut rc,
+									)
+									.await?;
+								building.check_index_compaction(txn, &mut rc).await?;
+							}
+						}
+					}
+					Ok::<_, anyhow::Error>(())
+				})
+				.await?;
+			}
+			let holds_record = view.holds_record(ns, db, table).await?;
+			let holds_index = view.holds_index(ns, db, table, ix_id).await?;
+			if !holds_record && !holds_index {
+				return Ok(false);
+			}
+			let kept_view = if unique {
+				Some(Arc::clone(&view))
+			} else {
+				None
+			};
+			txn.mark_index_unseen(
+				ns,
+				db,
+				table,
+				ix_id,
+				Unseen::Built {
+					created: Arc::new(created_set),
+					view: kept_view,
+				},
+			);
+			Ok(unique)
+		}
+		.await;
+		match res {
+			Ok(true) => Ok(()),
 			Ok(false) => {
 				view.cancel_bare().await?;
-				return Ok(());
+				Ok(())
 			}
-			Err(probe) => {
-				// The statement fails with the probe's error, and the view is not
+			Err(err) => {
+				// The statement fails with the error, and the view is not
 				// left open behind it.
-				if let Err(err) = view.cancel_bare().await {
+				if let Err(close_err) = view.cancel_bare().await {
 					tracing::warn!(
 						target: "surrealdb::core::kvs::index",
-						"closing the view of an index failed after its probe failed; preserving the probe's error {probe}: {err}"
+						"closing the view of an index failed after its probe failed; preserving the probe's error {err}: {close_err}"
 					);
 				}
-				return Err(probe);
+				Err(err)
 			}
 		}
-		let view = if unique {
-			Some(view)
-		} else {
-			view.cancel_bare().await?;
-			None
-		};
-		txn.mark_index_unseen(
-			ns,
-			db,
-			table,
-			ix,
-			Unseen::Built {
-				created: Arc::default(),
-				view,
-			},
-		);
-		Ok(())
 	}
 }
 

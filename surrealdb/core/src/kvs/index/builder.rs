@@ -1784,7 +1784,7 @@ pub(super) struct Building {
 	/// that started it resolved it ([`Building::statement_analyzer`]). `None`
 	/// for every other build, which reads the analyzer its index names in each
 	/// transaction it opens.
-	analyzer: Option<Arc<AnalyzerDefinition>>,
+	pub(super) analyzer: Option<Arc<AnalyzerDefinition>>,
 	/// The structure of the record ids of the table this index is over, where
 	/// its `id` field names their components; read once for the whole build
 	/// ([`Self::table_key_structure`]).
@@ -2043,7 +2043,7 @@ impl Building {
 	/// `None` for an index that is not full-text, for a context with no
 	/// transaction, and for an analyzer the statement cannot see either: the
 	/// build then reads its own and fails as it would without this.
-	async fn statement_analyzer(
+	pub(super) async fn statement_analyzer(
 		&self,
 		ctx: &FrozenContext,
 	) -> Result<Option<Arc<AnalyzerDefinition>>> {

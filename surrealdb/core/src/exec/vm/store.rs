@@ -2534,6 +2534,7 @@ async fn step_inner(
 			})?;
 			let index = std::sync::Arc::new(index);
 			let txn = ctx.txn();
+			txn.flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
 			// A rebuild that moves the index's format stages the generation it builds in this
 			// transaction, and its build starts once the transaction commits
 			// (`IndexBuilder::stage_rebuild`).
@@ -2586,8 +2587,7 @@ async fn step_inner(
 				_ => None,
 			};
 			let built_inside = after_commit.is_none();
-			let index_id = index.index_id;
-			let unique = matches!(index.index, crate::catalog::Index::Uniq);
+			let unstaged = staged.is_none();
 			let materialise =
 				(blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())
 					.then(|| {
@@ -2606,11 +2606,11 @@ async fn step_inner(
 					let rebuild = crate::kvs::index::StagedRebuild::new(
 						builder.clone(),
 						std::sync::Arc::clone(frozen),
-						options,
+						options.clone(),
 						table.namespace_id,
 						table.database_id,
 						table.table_id,
-						index,
+						std::sync::Arc::clone(&index),
 						generation,
 					);
 					// A staged build starts only once the transaction has committed, wherever the
@@ -2633,27 +2633,38 @@ async fn step_inner(
 					builder
 						.run_awaited_after_commit(
 							frozen,
-							options,
+							options.clone(),
 							table.table_id,
-							index,
+							std::sync::Arc::clone(&index),
 							&txn,
 							undo,
 						)
 						.await
 				}
-				(None, None) => builder.run(frozen, options, table.table_id, index, blocking).await,
+				(None, None) => {
+					builder
+						.run(
+							frozen,
+							options.clone(),
+							table.table_id,
+							std::sync::Arc::clone(&index),
+							blocking,
+						)
+						.await
+				}
 			}
 			.map_err(ControlFlow::Err)?;
 			// A build that ran inside this transaction wrote its entries in
 			// transactions of its own, which this one's snapshot predates.
-			if *fresh && built_inside {
+			if unstaged && built_inside {
 				builder
 					.note_unseen_definition(
+						frozen,
+						&options,
 						&txn,
-						(table.namespace_id, table.database_id),
-						&table.name,
-						index_id,
-						unique,
+						(table.namespace_id, table.database_id, table.table_id),
+						&index,
+						*fresh,
 						blocking,
 					)
 					.await

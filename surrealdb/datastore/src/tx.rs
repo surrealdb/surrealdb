@@ -506,6 +506,10 @@ struct SavePointMark {
 	/// The tables already written; a rollback returns to them, so a write it undid no longer
 	/// counts against a fence of its table ([`crate::triggers::WrittenTables`]).
 	written: crate::triggers::WrittenMark,
+	/// How many record writes had been noted; a rollback drops those noted after it.
+	written_records: usize,
+	/// The unseen-index registry as it stood when the save point opened.
+	unseen_indexes: Option<crate::unseen_indexes::UnseenIndexes>,
 }
 
 /// A record as a read answers it, with the generation its stored bytes carry: `None` for a
@@ -743,6 +747,8 @@ pub struct Transaction {
 	/// The records created in the tables a write of this transaction is
 	/// reading ([`Self::watch_creations`]).
 	creations: crate::creations::Creations,
+	/// The encoded record keys written or deleted by this transaction, in order.
+	written_records: parking_lot::Mutex<Vec<Vec<u8>>>,
 	/// The changefeed buffer.
 	changefeed: OnceLock<Changefeed>,
 	/// The live-query event buffer (dedicated keyspace, Router engine).
@@ -1831,6 +1837,7 @@ impl Transaction {
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
 			creations: Default::default(),
+			written_records: Default::default(),
 			shaped_indexes: Default::default(),
 			doc_lookups: Default::default(),
 			catalog_epoch,
@@ -4936,6 +4943,81 @@ impl Transaction {
 		Ok(!self.keys_raw(records, 1, 0, None).await?.is_empty())
 	}
 
+	/// Whether `ix` of `tb` holds any index data key, as this transaction sees it.
+	/// Build-state, shape, and compaction bookkeeping keys are ignored so an empty
+	/// index whose build only stamped metadata does not count as holding entries.
+	pub async fn holds_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<bool> {
+		let root = IdxRoot {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix,
+		};
+		let prefix = root.encode_bound()?;
+		let keys = self.keys_raw(root.range()?, 16, 0, None).await?;
+		Ok(keys.iter().any(|k| {
+			!matches!(
+				k.strip_prefix(prefix.as_slice()),
+				None | Some(
+					b"!ia"
+						| b"!ir"
+						| b"!it"
+						| b"!iv"
+						| b"!tv"
+						| b"!hs"
+						| b"!hg"
+						| b"!hY"
+						| b"!ds"
+						| b"!dg"
+						| b"!dY"
+				)
+			)
+		}))
+	}
+
+	fn note_written_key(&self, key: &[u8]) {
+		// RecordKey format: `/*{ns:4}*{db:4}*{tb}\0*{id}`
+		if key.len() > 13
+			&& key.starts_with(b"/*")
+			&& key.get(6) == Some(&b'*')
+			&& key.get(11) == Some(&b'*')
+			&& let Some(nul) = key[12..].iter().position(|&b| b == 0)
+			&& key.get(12 + nul + 1) == Some(&b'*')
+		{
+			self.written_records.lock().push(key.to_vec());
+		}
+	}
+
+	/// Returns the distinct record IDs written or deleted on `tb` by this transaction,
+	/// in order of first write.
+	pub fn written_record_ids(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Vec<RecordIdKey>> {
+		let raw = self.written_records.lock();
+		let mut seen = HashSet::new();
+		let mut out = Vec::new();
+		for encoded in raw.iter() {
+			if let Ok(decoded) = RecordKey::decode_key(encoded)
+				&& decoded.ns == ns
+				&& decoded.db == db
+				&& decoded.tb.as_ref() == tb
+				&& seen.insert(decoded.id.clone())
+			{
+				out.push(decoded.id.into_owned());
+			}
+		}
+		Ok(out)
+	}
+
 	/// Moves the floor of `tb` to `floor`, the oldest generation a row may still carry, and
 	/// retires the descriptors of every generation before it.
 	///
@@ -7434,6 +7516,7 @@ impl Transaction {
 		for (key, val) in &entries {
 			changed.push(self.reserve_write_slot()?);
 			sizes.push((key.len() as u64, val.len() as u64));
+			self.note_written_key(key);
 			defined.push(self.changed_definition(key, Some(val), None).await?);
 		}
 		self.tr.setm(entries).await?;
@@ -7471,6 +7554,7 @@ impl Transaction {
 		for key in &keys {
 			changed.push(self.reserve_write_slot()?);
 			key_bytes.push(key.len() as u64);
+			self.note_written_key(key);
 			defined.push(self.changed_definition(key, None, None).await?);
 		}
 		self.tr.delm(keys).await?;
@@ -7709,6 +7793,7 @@ impl Transaction {
 	) -> Result<()> {
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		self.note_written_key(&key);
 		let defined = self.changed_definition(&key, Some(&val), prior).await?;
 		match op {
 			WriteOp::Set => {
@@ -7751,6 +7836,7 @@ impl Transaction {
 		all_versions: bool,
 	) -> Result<()> {
 		let key_bytes = key.len() as u64;
+		self.note_written_key(&key);
 		let defined = self.changed_definition(&key, None, None).await?;
 		if all_versions {
 			self.tr.clr(key).await?;
@@ -9741,6 +9827,7 @@ impl Transaction {
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
 			creations: Default::default(),
+			written_records: parking_lot::Mutex::new(self.written_records.lock().clone()),
 			shaped_indexes: Default::default(),
 			doc_lookups: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
@@ -9878,6 +9965,8 @@ impl Transaction {
 			range_deletes: self.range_deletes.load(Ordering::Acquire),
 			stored_format_admitted: self.stored_format_admitted.load(Ordering::Acquire),
 			written: self.tr.written.lock().mark(),
+			written_records: self.written_records.lock().len(),
+			unseen_indexes: self.unseen_indexes.get().map(|u| u.lock().clone()),
 		});
 		Ok(())
 	}
@@ -9905,7 +9994,16 @@ impl Transaction {
 		self.provisional_save_points.lock().await.pop();
 		// The scope's commit actions, and whatever it did to the layouts, belong to the enclosing
 		// scope.
-		self.save_point_marks.lock().await.pop();
+		if let Some(mut mark) = self.save_point_marks.lock().await.pop()
+			&& let Some(mut unseen) = mark.unseen_indexes.take()
+			&& !self.tr.speculating()
+		{
+			for view in unseen.drain_views() {
+				if Arc::strong_count(&view) == 1 {
+					let _ = view.cancel_bare().await;
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -9957,6 +10055,20 @@ impl Transaction {
 		let mark = self.save_point_marks.lock().await.pop();
 		if let Some(mark) = mark {
 			self.tr.written.lock().restore(mark.written);
+			self.written_records.lock().truncate(mark.written_records);
+			if let Some(registry) = self.unseen_indexes.get() {
+				let mut old = std::mem::replace(
+					&mut *registry.lock(),
+					mark.unseen_indexes.unwrap_or_default(),
+				);
+				if !self.tr.speculating() {
+					for view in old.drain_views() {
+						if Arc::strong_count(&view) == 1 {
+							let _ = view.cancel_bare().await;
+						}
+					}
+				}
+			}
 			// An effect queued in the scope answers to writes the rollback undid, unless it
 			// answers to the end of the transaction instead.
 			let mut actions = self.commit_actions.lock().await;
