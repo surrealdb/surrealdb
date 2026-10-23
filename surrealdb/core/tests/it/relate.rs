@@ -275,13 +275,13 @@ async fn schemafull_relate() -> Result<()> {
 
 	// reason is bool not string
 	t.expect_error_func(|e| {
-		e.is_internal()
+		e.is_validation()
 			&& e.message()
 				== "Couldn't coerce value for field `reason` of `likes:2`: Expected `string` but found `true`"
 	})?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| e.is_internal() && e.message() == "Couldn't coerce value for field `in` of `likes:3`: Expected `record<person>` but found `dog:1`")?;
+	t.expect_error_func(|e| e.is_validation() && e.message() == "Couldn't coerce value for field `in` of `likes:3`: Expected `record<person>` but found `dog:1`")?;
 
 	Ok(())
 }

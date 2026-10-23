@@ -1002,8 +1002,8 @@ impl Ddl<'_, '_> {
 
 	/// Judges the field definition in `field`, about to replace the one in `previous`, against
 	/// the rules of a table that enforces migrations (`crate::exec::migrate::enforces_migrations`),
-	/// and the clause checks a changed type makes when `migrating`; an import, which restores
-	/// definitions as they were, is not judged.
+	/// and the clause checks a changed type makes when `migrating`. The instruction reads the
+	/// run-time import flag, so an import checks the same clauses and mints no step.
 	fn check_field_change(
 		&mut self,
 		(ns, db): (Reg, Reg),
@@ -1012,10 +1012,6 @@ impl Ddl<'_, '_> {
 		migrating: bool,
 		kept: crate::exec::migrate::KeptClauses,
 	) -> Result<(), IrError> {
-		let import = self.label()?;
-		self.store(StoreInstr::JumpIfImport {
-			target: import,
-		});
 		let table = self.load(table)?;
 		self.store(StoreInstr::CheckFieldChange {
 			ns,
@@ -1026,7 +1022,7 @@ impl Ddl<'_, '_> {
 			migrating,
 			kept,
 		});
-		self.bind(import)
+		Ok(())
 	}
 
 	/// The `MIGRATE EXISTING ROWS` clause `clause` of a field definition, over the stored

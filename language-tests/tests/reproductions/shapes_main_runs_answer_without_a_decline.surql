@@ -92,7 +92,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Expected `table name` but found `v2`"
+error = "Expected `table name` but found `type::table('v2')`"
 
 [[test.results]]
 value = "NONE"

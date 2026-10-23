@@ -283,9 +283,6 @@ impl LeafError for Error {
 			| Error::FieldUndefined {
 				..
 			}
-			| Error::FieldCoerce {
-				..
-			}
 			| Error::DeleteRejectedByReference(..)
 			| Error::RefsUpdateFailure(..)
 			| Error::EvNamespaceMismatch(..)
@@ -313,9 +310,12 @@ impl LeafError for Error {
 			// validation fault. Naming no endpoint, it tells a permission-checked
 			// caller only that an endpoint is immutable, never which one it
 			// guessed.
-			| Error::EndpointOverride => {
-				TypesError::validation(message, ValidationError::InvalidRequest)
-			}
+			| Error::EndpointOverride
+			// A write whose value does not coerce to the TYPE of its field. The author of the
+			// statement can correct the value, so it is a validation fault, not an internal one.
+			| Error::FieldCoerce {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 		}
 	}
 }

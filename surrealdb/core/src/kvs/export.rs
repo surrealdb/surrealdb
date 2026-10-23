@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
+use common::fmt::EscapeIdent;
 use surrealdb_rpc::export::Config;
 use surrealdb_types::ToSql;
 
@@ -1145,7 +1146,7 @@ async fn export_table_data(
 				statements.push_str(&format!(
 					"RELATE {} -> {} -> {};\n",
 					l.to_sql(),
-					surrealdb_types::ToSql::to_sql(&crate::val::Value::Table(tb_name.clone())),
+					EscapeIdent(tb_name.as_str()).to_sql(),
 					r.to_sql()
 				));
 			}

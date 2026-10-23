@@ -85,6 +85,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_lit_datetime(Expr::Literal(Literal::Datetime("1970-01-01T00:00:00Z".parse().unwrap())), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::expr_lit_duration(Expr::Literal(Literal::Duration(Duration::from_secs(1))), "1s", "1s")]
 #[case::expr_lit_file(Expr::Literal(Literal::File(File::new("bucket".to_string(), "path/to/file.txt".to_string()))), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
+#[case::expr_lit_file_outside_file_string(Expr::Literal(Literal::File(File::new("bucket".to_string(), "path/with space.txt".to_string()))), "type::file('bucket', '/path/with space.txt')", "type::file('bucket', '/path/with space.txt')")]
 #[case::expr_lit_record_id(Expr::Literal(Literal::RecordId(RecordIdLit {
     table: "table".into(),
     key: RecordIdKeyLit::Number(123)

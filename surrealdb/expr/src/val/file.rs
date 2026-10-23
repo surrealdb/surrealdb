@@ -1,3 +1,4 @@
+use common::fmt::QuoteStr;
 use revision::{DeserializeRevisioned, Error, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::bounded;
@@ -93,6 +94,54 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 
 impl ToSql for File {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "f\"{}\"", self.display_inner())
+		// A file string has no escapes, so it can hold only the characters its grammar admits. A
+		// file outside them is written as the function that builds it, which takes any string.
+		if file_string_admits(&self.bucket, &self.key) {
+			write_sql!(f, sql_fmt, "f\"{}:{}\"", self.bucket, self.key)
+		} else {
+			write_sql!(
+				f,
+				sql_fmt,
+				"type::file({}, {})",
+				QuoteStr(&self.bucket),
+				QuoteStr(&self.key)
+			)
+		}
+	}
+}
+
+/// Whether the file string `f"bucket:key"` reads back as `bucket` and `key`: the bucket is
+/// non-empty and holds only alphanumerics, `_`, `-` and `.`, and the key starts with `/`, names
+/// at least one character after it, and holds those characters and `/`.
+fn file_string_admits(bucket: &str, key: &str) -> bool {
+	let word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.');
+	!bucket.is_empty()
+		&& bucket.chars().all(word)
+		&& key
+			.strip_prefix('/')
+			.is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| word(c) || c == '/'))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn file_string_admits_only_a_named_bucket_and_key() {
+		assert!(file_string_admits("bucket", "/a/b.txt"));
+		assert!(!file_string_admits("", "/a"));
+		assert!(!file_string_admits("bucket", "/"));
+		assert!(!file_string_admits("bucket", ""));
+		assert!(!file_string_admits("bucket", "a"));
+		assert!(!file_string_admits("bu cket", "/a"));
+	}
+
+	#[test]
+	fn an_unadmitted_file_is_written_as_the_function_that_builds_it() {
+		let file = File {
+			bucket: String::new(),
+			key: "/path".to_string(),
+		};
+		assert_eq!(file.to_sql(), "type::file('', '/path')");
 	}
 }

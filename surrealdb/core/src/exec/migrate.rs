@@ -2545,7 +2545,7 @@ impl FieldMigration<'_> {
 	/// rules of a table that enforces migrations ([`check_field_change`]),
 	/// then commit the migration the statement carries ([`define`]). Either
 	/// can mint a step, so nothing that can refuse the statement follows. An
-	/// import, which restores definitions as they were, is not judged.
+	/// import judges the clauses of the definition but mints no step.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn before_store(
 		self,
@@ -2557,20 +2557,19 @@ impl FieldMigration<'_> {
 		field: &FieldDefinition,
 		previous: Option<&FieldDefinition>,
 	) -> anyhow::Result<FieldStore> {
-		if !import {
-			check_field_change(
-				ctx,
-				ns,
-				db,
-				table,
-				field,
-				previous,
-				self.request.is_some(),
-				self.kept,
-			)
-			.await
-			.map_err(into_error)?;
-		}
+		check_field_change(
+			ctx,
+			ns,
+			db,
+			table,
+			field,
+			previous,
+			self.request.is_some(),
+			self.kept,
+			import,
+		)
+		.await
+		.map_err(into_error)?;
 		let Some(request) = self.request else {
 			return Ok(FieldStore::Write {
 				migrated: false,
@@ -2790,7 +2789,9 @@ async fn mint_removal(
 /// When the type changes, a constant `DEFAULT` must coerce to it and a kept
 /// `VALUE` or `ASSERT` must not read `$value`; that is also checked on a
 /// table that does not enforce migrations when the statement carries
-/// `MIGRATE`, and nothing else is checked there.
+/// `MIGRATE`, and nothing else is checked there. An import checks the same
+/// clauses under the same gates, so a restored definition is held to the rules
+/// an interactive `DEFINE FIELD` is, and the rest below is skipped for it.
 ///
 /// The empty-table exemption judges the rows the statement's transaction
 /// reads. Writers take no lock against it: a row a concurrent transaction
@@ -2808,6 +2809,7 @@ pub(crate) async fn check_field_change(
 	previous: Option<&FieldDefinition>,
 	migrating: bool,
 	kept: KeptClauses,
+	import: bool,
 ) -> FlowResult<()> {
 	let refuse = |reason: String| {
 		ControlFlow::Err(anyhow::Error::new(MigrationError::Required {
@@ -2829,7 +2831,9 @@ pub(crate) async fn check_field_change(
 		return Ok(());
 	}
 	check_clauses(field, previous, kept).map_err(refuse)?;
-	if !required || migrating {
+	// An import judges the clauses above as an interactive statement does, and no more: the
+	// rows, the nesting and the migration steps it would mint are not its to judge.
+	if import || !required || migrating {
 		return Ok(());
 	}
 	let computed_before = previous.is_some_and(|previous| previous.computed.is_some());

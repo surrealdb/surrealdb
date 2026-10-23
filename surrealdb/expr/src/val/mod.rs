@@ -8,7 +8,7 @@ use std::time::Duration as StdDuration;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use common::fmt::{EscapeIdent, QuoteStr};
+use common::fmt::QuoteStr;
 use geo_types::Point;
 use revision::optimised::tag::{SizeClass, read_tag};
 use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
@@ -879,11 +879,10 @@ impl ToSql for Value {
 			Value::Object(v) => v.fmt_sql(f, sql_fmt),
 			Value::Geometry(v) => v.fmt_sql(f, sql_fmt),
 			Value::Bytes(v) => v.fmt_sql(f, sql_fmt),
-			// Escaped explicitly rather than through the name's own `ToSql`: the
-			// engine's `TableName` deliberately has none, and it derefs to `str`,
-			// so a bare `fmt_sql` here would silently resolve to the unescaped
-			// string impl and emit a name that cannot be read back.
-			Value::Table(v) => EscapeIdent(v.as_str()).fmt_sql(f, sql_fmt),
+			// SurrealQL has no literal for a table value: a bare name parses as a
+			// field or identifier, so the value is written as the function that builds
+			// it, which reads back as the same table.
+			Value::Table(v) => write_sql!(f, sql_fmt, "type::table({})", QuoteStr(v.as_str())),
 			Value::RecordId(v) => v.fmt_sql(f, sql_fmt),
 			Value::File(v) => v.fmt_sql(f, sql_fmt),
 			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
@@ -2455,14 +2454,14 @@ mod tests {
 	}
 
 	#[test]
-	fn table_value_renders_escaped() {
+	fn table_value_renders_as_the_function_that_builds_it() {
 		use surrealdb_types::ToSql;
 
 		use crate::val::{TableName, Value};
 
-		assert_eq!(Value::Table(TableName::from("users")).to_sql(), "users");
-		assert_eq!(Value::Table(TableName::from("table")).to_sql(), "`table`");
-		assert_eq!(Value::Table(TableName::from("a b")).to_sql(), "`a b`");
+		assert_eq!(Value::Table(TableName::from("users")).to_sql(), "type::table('users')");
+		assert_eq!(Value::Table(TableName::from("table")).to_sql(), "type::table('table')");
+		assert_eq!(Value::Table(TableName::from("a b")).to_sql(), "type::table('a b')");
 	}
 	use chrono::{TimeZone, Utc};
 	use geo_types::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};

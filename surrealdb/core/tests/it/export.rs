@@ -11,7 +11,7 @@ use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_iam::{Actor, Auth, Level, Role};
-use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_rpc::capabilities::{Capabilities, ExperimentalTarget, Targets};
 use surrealdb_types::Value;
 
 use crate::helpers::new_ns_db;
@@ -26,6 +26,16 @@ async fn ds_with_batch_size(batch: Option<usize>) -> Result<Arc<Datastore>> {
 		);
 	}
 	let ds = builder.build_with_path("memory").await?;
+	new_ns_db(&ds, "test", "test").await?;
+	Ok(ds)
+}
+
+/// Builds a memory datastore with the experimental `files` feature enabled, for a
+/// fixture that stores a file value.
+async fn ds_with_files() -> Result<Arc<Datastore>> {
+	let caps =
+		Capabilities::all().with_experimental(Targets::Some([ExperimentalTarget::Files].into()));
+	let ds = Datastore::builder().with_capabilities(caps).build_with_path("memory").await?;
 	new_ns_db(&ds, "test", "test").await?;
 	Ok(ds)
 }
@@ -772,5 +782,166 @@ async fn export_refuses_a_permission_checked_principal() -> Result<()> {
 		Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), Role::Owner);
 	let (tx, _rx) = surrealdb_core::channel::bounded::<Vec<u8>>(16);
 	assert!(ds.export(&owner, tx).await.is_ok(), "a database owner must still be able to export",);
+	Ok(())
+}
+
+/// One record holding a value of every kind a record can store, each under a field
+/// named for it, so a value that is lost or reshaped on the way back is reported
+/// by the field that held it.
+const EVERY_VALUE_KIND: &str = r#"CREATE kinds:1 SET
+	tbl = type::table('s'),
+	tbls = [type::table('select'), type::table('a b'), type::table('1x'), type::table('dog-1')],
+	none_arr = [NONE, NULL],
+	obj_none = { a: NONE, b: NULL },
+	nul = NULL,
+	b = true,
+	i = 42,
+	i_min = -9223372036854775808,
+	f = 1.5,
+	f_tiny = 2.2250738585072014e-308f,
+	nz = -0f,
+	inf = 1f / 0f,
+	ninf = -1f / 0f,
+	nan = 0f / 0f,
+	dec = 1.25dec,
+	dec_big = 1.23456789012345678901234567890dec,
+	dec_zero = 0dec,
+	dur = 1h2m3s4ms5us6ns,
+	dur0 = 0ns,
+	dt = d'2024-01-02T03:04:05.123456789Z',
+	uu = u'018f0d8e-0000-7000-8000-000000000000',
+	str = "quote \" and 'single' and \\ backslash\nnewline\ttab é 😀",
+	str_empty = '',
+	arr = [1, 'a', [2]],
+	arr_empty = [],
+	obj = { a: 1, 'k-d': 2, nested: { deep: [{ x: 'y' }] } },
+	obj_empty = {},
+	st = type::set(['a', 'b']),
+	st_empty = type::set([]),
+	geo = (1.5, -2.5),
+	geo_poly = <geometry>{ type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+	by = type::bytes('abc'),
+	by_empty = type::bytes(''),
+	rid = kinds:[1, { a: 2 }],
+	rid_str = kinds:`a b'c"d`,
+	rid_kw = `select`:1,
+	rid_range = kinds:1..5,
+	rid_uuid = kinds:u'018f0d8e-0000-7000-8000-000000000000',
+	rid_neg = kinds:-5,
+	rid_nested = kinds:[kinds:2],
+	rng1 = 1..10,
+	rng2 = ..5,
+	rng3 = 'a'..='z',
+	rng4 = 1>..=10,
+	rng5 = 1..,
+	rng6 = ..,
+	rx = /a\/b.*/,
+	fl = type::file('bucket', '/key/with space.txt');"#;
+
+/// Reads the record in `sql` back as its object, so a field can be compared by name.
+async fn read_record_object(
+	ds: &Datastore,
+	ses: &Session,
+	sql: &str,
+) -> Result<surrealdb_types::Object> {
+	match ds.execute(sql, ses, None).await?.remove(0).result? {
+		Value::Object(object) => Ok(object),
+		other => anyhow::bail!("expected the record as an object, got {other:?}"),
+	}
+}
+
+/// Whether two values are the same after a round trip. Every kind compares with
+/// `=` except a float, which compares by its bits so `-0` and `0` are told apart,
+/// and a NaN, which equals another NaN.
+fn same_round_trip_value(before: &Value, after: &Value) -> bool {
+	match (before, after) {
+		(
+			Value::Number(surrealdb_types::Number::Float(a)),
+			Value::Number(surrealdb_types::Number::Float(b)),
+		) => (a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits(),
+		_ => before == after,
+	}
+}
+
+/// Every value kind a record stores must come back equal after an export and an
+/// import, under the field that holds it: a value that is dropped, reshaped or
+/// turned into a different kind is reported by name.
+#[tokio::test]
+async fn every_value_kind_round_trips_through_export() -> Result<()> {
+	let source = ds_with_files().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	source.execute(EVERY_VALUE_KIND, &ses, None).await?.remove(0).result?;
+	let sql = export_text(&source, &ses).await?;
+
+	let target = ds_with_files().await?;
+	for r in target.execute(&sql, &ses, None).await? {
+		r.result?;
+	}
+
+	const READ: &str = "SELECT * FROM ONLY kinds:1";
+	let before = read_record_object(&source, &ses, READ).await?;
+	let after = read_record_object(&target, &ses, READ).await?;
+	for (field, value) in before.iter() {
+		let restored = after.get(field).cloned().unwrap_or(Value::None);
+		assert!(
+			same_round_trip_value(value, &restored),
+			"field `{field}` changed across export and import: {value:?} became {restored:?}\n{sql}"
+		);
+	}
+	assert_eq!(before.len(), after.len(), "a field was added or dropped\n{sql}");
+	Ok(())
+}
+
+/// Runs `sql` and returns the error of its last statement, or `None` when that
+/// statement succeeded.
+async fn last_statement_error(
+	ds: &Datastore,
+	ses: &Session,
+	sql: &str,
+) -> Result<Option<surrealdb_types::Error>> {
+	let mut res = ds.execute(sql, ses, None).await?;
+	let last = res.pop().expect("the statement must produce a result");
+	Ok(last.result.err())
+}
+
+/// An import runs the DEFINE validation an interactive statement runs. A DEFAULT
+/// that does not coerce to its field's TYPE is refused with the same error either
+/// way, and the refused field is not stored, so later writes are not held to it.
+#[tokio::test]
+async fn import_refuses_a_default_that_does_not_coerce_to_its_type() -> Result<()> {
+	const DEFINE: &str = "DEFINE TABLE item SCHEMAFULL; \
+		DEFINE FIELD ops ON item TYPE set<string> DEFAULT {};";
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let interactive = ds_with_batch_size(None).await?;
+	let interactive_err = last_statement_error(&interactive, &ses, DEFINE)
+		.await?
+		.expect("an interactive DEFINE must refuse the DEFAULT");
+	assert!(interactive_err.message().contains("does not coerce"), "{interactive_err:?}");
+
+	let imported = ds_with_batch_size(None).await?;
+	let import_err = last_statement_error(&imported, &ses, &format!("OPTION IMPORT; {DEFINE}"))
+		.await?
+		.expect("an import must refuse the DEFAULT as an interactive DEFINE does");
+	assert_eq!(import_err.message(), interactive_err.message());
+
+	let write = imported.execute("CREATE item:1", &ses, None).await?.remove(0);
+	assert!(write.result.is_ok(), "a refused field must not be stored: {:?}", write.result);
+	Ok(())
+}
+
+/// A write whose value does not coerce to its field's TYPE is a validation error,
+/// not an internal one.
+#[tokio::test]
+async fn a_field_coercion_failure_is_a_validation_error() -> Result<()> {
+	let ds = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE TABLE item SCHEMAFULL; DEFINE FIELD n ON item TYPE int;", &ses, None)
+		.await?;
+	let err = last_statement_error(&ds, &ses, "CREATE item:1 SET n = 'x'")
+		.await?
+		.expect("a string must not coerce to int");
+	assert!(err.message().contains("Couldn't coerce value for field `n`"), "{err:?}");
+	assert!(err.is_validation(), "a coercion failure must be a validation error: {err:?}");
 	Ok(())
 }

@@ -3120,6 +3120,7 @@ async fn step_inner(
 					previous.as_ref(),
 					*migrating,
 					*kept,
+					ctx.options().is_some_and(|options| options.import),
 				))
 				.await?;
 			}
