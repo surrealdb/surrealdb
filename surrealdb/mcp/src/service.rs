@@ -498,12 +498,8 @@ impl McpService {
 				return Ok(());
 			}
 			// No handshake and not a sessionless request: return a
-			// protocol-level error so the caller knows to send `initialize`
-			// first.
-			return Err(McpError::internal_error(
-				"MCP session not initialized: send `initialize` first",
-				None,
-			));
+			// protocol-level error naming what the caller has to do about it.
+			return Err(Self::no_handshake_error());
 		};
 		// Stdio is single-tenant: no per-request credential channel and
 		// no session-hijack vector. The bound subject captured at
@@ -561,8 +557,44 @@ impl McpService {
 	/// This is the request's *claim* about its era, which on its own says
 	/// nothing about whether a handshake exists; see [`Self::is_stateless`] for
 	/// why the two questions must not be conflated.
+	///
+	/// Membership in [`SUPPORTED_PROTOCOL_VERSIONS`] is required as well as the
+	/// ordering. `ProtocolVersion` wraps a string with a derived `PartialOrd`
+	/// and deserializes any value, so the comparison on its own is a byte-wise
+	/// test that an arbitrary revision passes — `"9999-99-99"` sorts above every
+	/// revision that exists. rmcp's streamable-HTTP transport rejects unknown
+	/// revisions before dispatch today, so the membership test changes no
+	/// observable behaviour there; it is what lets this predicate answer from
+	/// the server's own list instead of resting on a transport-layer check it
+	/// does not control.
 	fn claims_sessionless_revision(ctx: &RequestContext<RoleServer>) -> bool {
-		ctx.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+		ctx.protocol_version().is_some_and(|version| {
+			SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
+				&& version >= ProtocolVersion::V_2026_07_28
+		})
+	}
+
+	/// The identity a sessionless request runs under when nothing attached one.
+	///
+	/// Only stdio may fall back to the configured `base_session`: it is the one
+	/// transport with no per-request credential channel, so an embedder naming a
+	/// privileged identity there is naming it for the single trusted process
+	/// driving the pipe. Every other transport is treated as networked, where a
+	/// missing session is a missing credential and must resolve to an anonymous
+	/// one — the datastore's capability rules then decide whether guest access
+	/// is allowed.
+	fn sessionless_base_session(&self) -> Session {
+		if self.is_stdio_transport() {
+			self.base_session.clone()
+		} else {
+			Session::default()
+		}
+	}
+
+	/// The error for a request that reached a handler with no handshake behind
+	/// it and no sessionless revision to be served under.
+	fn no_handshake_error() -> McpError {
+		McpError::internal_error("MCP session not initialized: send `initialize` first", None)
 	}
 
 	/// Namespace and database carried by the request's `surreal-ns` /
@@ -625,11 +657,21 @@ impl McpService {
 				// their scope come from this request. Networked transports get
 				// the session the auth middleware attached; in-process ones
 				// fall back to the configured base session.
+				//
+				// The fallback is transport-gated for the same reason the
+				// subject check is: `base_session` is a pre-authenticated
+				// identity the embedder chose (`surreal mcp` passes
+				// `Session::owner()`), so it may only stand in where there was
+				// no per-request credential channel to supply one. On a
+				// networked transport a missing session means the auth
+				// middleware attached none, and answering under a configured
+				// identity there would serve an unauthenticated request as
+				// whoever the embedder named. See [`Self::is_stdio_transport`].
 				let base = ctx
 					.extensions
 					.get::<http::request::Parts>()
 					.and_then(auth::extract_session_from_parts)
-					.unwrap_or_else(|| self.base_session.clone());
+					.unwrap_or_else(|| self.sessionless_base_session());
 				Ok(ResolvedSession::PerRequest(Box::new(McpSession::from_request(
 					Arc::clone(&self.datastore),
 					base,
@@ -638,10 +680,7 @@ impl McpService {
 					Arc::clone(&self.config),
 				))))
 			}
-			None => Err(McpError::internal_error(
-				"MCP session not initialized: send `initialize` first",
-				None,
-			)),
+			None => Err(Self::no_handshake_error()),
 		}
 	}
 
@@ -979,15 +1018,22 @@ impl McpService {
 		let scope = ToolScope::default();
 		// Dispatch even when the call cannot succeed, so the rejection is
 		// audited and counted like any other invocation rather than vanishing.
-		// The test runs inside the closure so it observes the same handshake
-		// state `dispatch_tool` resolved `s` from; reading it beforehand would
-		// let a handshake bound in between refuse a `use` that has somewhere to
-		// apply.
-		self.dispatch_tool("use", &ctx, &scope, async |s| {
-			if self.is_stateless(&ctx) {
+		self.dispatch_tool("use", &ctx, &scope, async |_| {
+			// `use` is the one tool that mutates connection state, so it runs
+			// against the handshake session itself rather than the session
+			// `dispatch_tool` resolved. Resolution layers a per-call scope over
+			// the connection's — including from the `surreal-ns` /
+			// `surreal-db` headers, which `use` never names but a client may
+			// send on every request — and that layer produces a derived copy.
+			// Switching a copy reports success and is then dropped with it.
+			//
+			// No handshake means there is nothing to switch. Verification has
+			// already turned away a caller that skipped `initialize`, so the
+			// only way to arrive here without one is a sessionless request.
+			let Some(bound) = self.handshake.get() else {
 				return Ok(connection::use_unsupported_when_stateless());
-			}
-			connection::r#use(s, p).await
+			};
+			connection::r#use(&bound.session, p).await
 		})
 		.await
 	}
@@ -1171,7 +1217,15 @@ impl ServerHandler for McpService {
 		ctx: RequestContext<RoleServer>,
 	) -> Result<ReadResourceResponse, McpError> {
 		self.verify_request_subject(&ctx)?;
-		Ok(resources::read_resource(self.session()?, &request.uri).await?.into())
+		// Resolved the way a tool call is, not read straight off the handshake.
+		// A sessionless request has no handshake to read, so `self.session()`
+		// would fail it with "send `initialize` first" — advice it cannot take,
+		// since the revision it speaks allocates no session id. Going through
+		// resolution also gives legacy callers the `surreal-ns` / `surreal-db`
+		// header scope every tool honours, rather than only the connection's
+		// `use` state.
+		let session = self.resolve_session(&ctx, &ToolScope::default()).await?;
+		Ok(resources::read_resource(session.get(), &request.uri).await?.into())
 	}
 
 	async fn list_prompts(
@@ -1209,7 +1263,12 @@ impl ServerHandler for McpService {
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CompleteResult, McpError> {
 		self.verify_request_subject(&ctx)?;
-		Ok(completions::handle_completion(self.session()?, &request).await)
+		// Resolved rather than read off the handshake, for the reasons in
+		// [`Self::read_resource`]: completions are offered under the sessionless
+		// revision too, and they should suggest names from the scope the request
+		// names rather than from the connection's `use` state.
+		let session = self.resolve_session(&ctx, &ToolScope::default()).await?;
+		Ok(completions::handle_completion(session.get(), &request).await)
 	}
 }
 
@@ -1426,6 +1485,31 @@ mod tests {
 		let svc =
 			McpService::new(ds, None, None, Session::default()).with_transport_label("custom-bus");
 		assert!(!svc.is_stdio_transport());
+	}
+
+	/// `base_session` is an identity the embedder pre-authenticated, so a
+	/// sessionless request may only run under it where no per-request credential
+	/// channel could have supplied one. Same secure-by-default posture as
+	/// [`custom_transport_label_is_not_treated_as_stdio`]: anything that is not
+	/// literally stdio is a networked transport, and a missing session there is
+	/// a missing credential rather than an invitation to use the configured one.
+	#[tokio::test]
+	async fn sessionless_base_session_is_stdio_only() {
+		let ds = fresh_datastore().await;
+		let stdio = McpService::new(Arc::clone(&ds), None, None, Session::owner());
+		assert!(
+			!stdio.sessionless_base_session().au.is_anon(),
+			"stdio must keep the identity the embedder configured"
+		);
+
+		for label in ["http", "custom-bus"] {
+			let svc = McpService::new(Arc::clone(&ds), None, None, Session::owner())
+				.with_transport_label(label);
+			assert!(
+				svc.sessionless_base_session().au.is_anon(),
+				"`{label}` is a networked transport and must not fall back to a configured identity"
+			);
+		}
 	}
 
 	/// `initialize` publishes the session and the subject in one write, so no

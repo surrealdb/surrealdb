@@ -96,14 +96,21 @@ impl BoundSubject {
 	}
 
 	/// Stable identity string suitable for audit logs. For non-anonymous
-	/// subjects this is `"<level>::<id>"` so both the actor and its scope
-	/// are visible at a glance; anonymous subjects render as
-	/// `"anonymous"`.
+	/// subjects this is `"<level>::<id>"`, suffixed with `"[<privilege>]"` when
+	/// the subject holds a role, so the actor, its scope and its authority are
+	/// all visible at a glance; anonymous subjects render as `"anonymous"`.
+	///
+	/// The privilege is part of the label because it is part of the
+	/// fingerprint: without it the mismatch warning emitted when two tokens for
+	/// one subject disagree only in privilege would print the same string for
+	/// both sides.
 	pub(crate) fn audit_label(&self) -> String {
 		if self.is_anonymous() {
-			"anonymous".to_string()
-		} else {
-			format!("{}::{}", self.level, self.identity)
+			return "anonymous".to_string();
+		}
+		match self.privilege {
+			Some(role) => format!("{}::{}[{role}]", self.level, self.identity),
+			None => format!("{}::{}", self.level, self.identity),
 		}
 	}
 }
@@ -182,7 +189,7 @@ pub(crate) fn check_subject(
 #[cfg(test)]
 mod tests {
 	use http::Request;
-	use surrealdb_iam::{Auth, Role};
+	use surrealdb_iam::{Actor, Auth, Role};
 
 	use super::*;
 
@@ -288,6 +295,32 @@ mod tests {
 	// The bound session runs with the privilege captured at handshake, so a
 	// token for the same subject at a different privilege is a different
 	// subject and must re-initialize.
+	/// Two tokens from one `DEFINE ACCESS ... TYPE JWT` that resolve to the same
+	/// `Auth::id()` differ only in the roles they grant. Built through
+	/// [`BoundSubject::from_session`] so the privilege is taken from `Auth`, not
+	/// written into the fixture: a Viewer token must not match an Owner's
+	/// session and then run under the Owner's `Auth`.
+	#[test]
+	fn same_access_method_with_different_roles_is_rejected() {
+		let access_method = |role: Role| {
+			BoundSubject::from_session(&Session {
+				au: std::sync::Arc::new(Auth::new(Actor::new(
+					"api".to_string(),
+					vec![role],
+					Level::Database("ns".into(), "db".into()),
+				))),
+				..Session::default()
+			})
+		};
+		let owner = access_method(Role::Owner);
+		let viewer = access_method(Role::Viewer);
+		assert_eq!(owner.identity, viewer.identity, "fixture requires a shared identity");
+		assert!(check_subject(&owner, Some(viewer.clone())).is_err());
+		assert!(check_subject(&viewer, Some(owner)).is_err());
+		// Re-presenting the same token still works.
+		assert!(check_subject(&viewer, Some(access_method(Role::Viewer))).is_ok());
+	}
+
 	#[test]
 	fn same_subject_different_privilege_is_rejected() {
 		let level = Level::Database("ns".into(), "db".into());
@@ -358,5 +391,23 @@ mod tests {
 			data: None,
 		};
 		assert!(auth.audit_label().contains("root"));
+	}
+
+	/// The privilege reaches the label, so the mismatch warning that
+	/// [`same_access_method_with_different_roles_is_rejected`] triggers does not
+	/// print the same string for both sides.
+	#[test]
+	fn audit_label_carries_privilege() {
+		let subject = |privilege| BoundSubject {
+			level: Level::Database("ns".into(), "db".into()),
+			identity: "api".into(),
+			privilege: Some(privilege),
+			data: None,
+		};
+		let owner = subject(Role::Owner).audit_label();
+		let viewer = subject(Role::Viewer).audit_label();
+		assert!(owner.contains("api"), "label must name the subject, got: {owner}");
+		assert!(owner.contains("Owner"), "label must name the privilege, got: {owner}");
+		assert_ne!(owner, viewer);
 	}
 }

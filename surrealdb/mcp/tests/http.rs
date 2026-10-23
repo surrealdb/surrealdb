@@ -27,7 +27,7 @@ use surrealdb_mcp::service::{
 };
 
 mod common;
-use common::test_datastore;
+use common::{root_session, test_datastore};
 
 /// Build a POST /mcp request carrying a JSON-RPC body.
 fn post_request(
@@ -586,6 +586,146 @@ async fn credentialless_replay_on_a_negotiation_fallback_session_is_rejected() {
 		scope,
 		&json!(["test", "test"]),
 		"matching credentials must resolve the handshake scope; body: {body}"
+	);
+}
+
+/// The `_meta` and headers that make rmcp route a request sessionlessly.
+///
+/// `method`/`name` are the SEP-2243 `Mcp-Method` / `Mcp-Name` pair, which rmcp
+/// requires from this revision on and rejects the request without.
+fn sessionless_request(
+	body: &Value,
+	method: &str,
+	name: &str,
+	session_id: Option<&str>,
+) -> Request<Full<Bytes>> {
+	let mut body = body.clone();
+	body["params"]["_meta"] = json!({
+		// Fully-qualified keys: rmcp ignores a bare `protocolVersion`, which
+		// would leave the request legacy.
+		"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+		"io.modelcontextprotocol/clientCapabilities": {},
+	});
+	post_request_with_headers(
+		&body,
+		session_id,
+		None,
+		&[("mcp-protocol-version", "2026-07-28"), ("mcp-method", method), ("mcp-name", name)],
+	)
+}
+
+/// `resources/read` and `completion/complete` are advertised under the revision
+/// this server advertises by default, which allocates no session id. Reading the
+/// handshake session directly would fail both with "send `initialize` first" —
+/// advice a sessionless caller cannot act on, since there is no session to
+/// initialize.
+#[tokio::test]
+async fn resources_and_completions_are_served_without_a_handshake() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+
+	let read = json!({
+		"jsonrpc": "2.0",
+		"id": 20,
+		"method": "resources/read",
+		"params": { "uri": "surrealdb://info" },
+	});
+	let resp = service
+		.handle(sessionless_request(&read, "resources/read", "surrealdb://info", None))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	assert!(
+		parsed.pointer("/result/contents").and_then(Value::as_array).is_some_and(|c| !c.is_empty()),
+		"a sessionless resources/read must return contents; body: {body}"
+	);
+
+	let complete = json!({
+		"jsonrpc": "2.0",
+		"id": 21,
+		"method": "completion/complete",
+		"params": {
+			"ref": { "type": "ref/prompt", "name": "query_builder" },
+			"argument": { "name": "namespace", "value": "" },
+		},
+	});
+	let resp = service
+		.handle(sessionless_request(&complete, "completion/complete", "query_builder", None))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let values = parsed
+		.pointer("/result/completion/values")
+		.and_then(Value::as_array)
+		.unwrap_or_else(|| panic!("a sessionless completion must return values; body: {body}"));
+	assert!(
+		values.iter().any(|v| v.as_str() == Some("test")),
+		"completion should suggest the bootstrapped namespace; body: {body}"
+	);
+}
+
+/// `use` switches connection state, so it has to run against the handshake
+/// session itself. Scope resolution layers the `surreal-ns` / `surreal-db`
+/// headers over the connection's scope and hands back a derived copy when it
+/// does, and a switch applied to that copy is reported as successful and then
+/// dropped with it — leaving the caller believing it changed database while
+/// every later call still runs in the old one.
+#[tokio::test]
+async fn use_switches_the_connection_even_when_the_request_carries_a_scope_header() {
+	let ds = test_datastore().await;
+	ds.execute("DEFINE DATABASE other;", &root_session(), None).await.expect("bootstrap other db");
+	let service = setup_service(Arc::clone(&ds));
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let switch = json!({
+		"jsonrpc": "2.0",
+		"id": 30,
+		"method": "tools/call",
+		"params": { "name": "use", "arguments": { "database": "other" } },
+	});
+	let resp = service
+		.handle(post_request_with_headers(
+			&switch,
+			Some(&session_id),
+			Some(owner_session()),
+			// The scope header a client may send on every request. `use` never
+			// names a scope of its own, so this is the only layer in play.
+			&[("surreal-ns", "test")],
+		))
+		.await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	assert_eq!(
+		parsed.pointer("/result/isError").and_then(Value::as_bool),
+		Some(false),
+		"use should report success; body: {body}"
+	);
+
+	// The switch must survive the call it was made in.
+	let probe = json!({
+		"jsonrpc": "2.0",
+		"id": 31,
+		"method": "tools/call",
+		"params": {
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	let resp = service.handle(post_request(&probe, Some(&session_id), Some(owner_session()))).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("probe should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!(["test", "other"]),
+		"the connection must still be on the database `use` switched to; body: {body}"
 	);
 }
 
