@@ -278,7 +278,9 @@ fn star_over_any_row(
 		});
 		write_fields(site, ir, object, fields, omit, regions)?;
 	} else {
-		let omissions = &regions[fields.len()..];
+		let omissions = regions
+			.get(fields.len()..)
+			.ok_or_else(|| invariant("a projection with fewer regions than fields"))?;
 		omit_all(site, object, omit, omissions, false)?;
 	}
 	site.emitter().bind(done)
@@ -348,7 +350,9 @@ fn fields_over_any_row(
 		target: done,
 	});
 	site.emitter().bind(opaque)?;
-	let omissions = &regions[fields.len()..];
+	let omissions = regions
+		.get(fields.len()..)
+		.ok_or_else(|| invariant("a projection with fewer regions than fields"))?;
 	omit_all(site, object, omit, omissions, false)?;
 	site.emitter().bind(done)
 }

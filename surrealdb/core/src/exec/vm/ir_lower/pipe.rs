@@ -1939,11 +1939,15 @@ fn open_source(
 	// The rows of a sort are those its feeder handed it, record ids where the feeder's may be.
 	let ids = matches!(source, Source::Sorted { .. }) && reads.fed_ids;
 	// A split rewrites the fields it splits on, so its rows are records when the rows it splits
-	// are and they are no `VALUE` projection; the rows of a sort, a search or a group are records.
+	// are and they are no `VALUE` projection. A sort's rows are the rows its feeder handed it, so
+	// they are records when the feeder's are; the rows of a search or a group are records.
 	let objects = match &source {
 		Source::Split {
 			..
 		} => fed && !data.operands.first().is_some_and(|rows| projects_value(ir, *rows)),
+		Source::Sorted {
+			..
+		} => fed,
 		Source::Scan {
 			..
 		}
@@ -1979,9 +1983,6 @@ fn open_source(
 			..
 		}
 		| Source::Probe {
-			..
-		}
-		| Source::Sorted {
 			..
 		}
 		| Source::Groups {
