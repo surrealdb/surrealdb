@@ -343,8 +343,39 @@ fn inline_at(cx: &mut LoCx<'_>, op: OpId, region: RegionId, site: &Site) -> Resu
 			};
 			rw.set_location(def, loc)?;
 		}
-		rw.replace_op(op, &yielded)
+		if yielded.iter().all(|value| same_error_scope(rw.ir(), op, *value)) {
+			return rw.replace_op(op, &yielded);
+		}
+		let results: SmallVec<[ValueId; 2]> = rw
+			.ir()
+			.op(op)
+			.ok_or(IrError::Stale("op"))?
+			.results
+			.iter()
+			.copied()
+			.collect();
+		for (result, value) in results.iter().zip(&yielded) {
+			rw.replace_all_uses(*result, *value)?;
+		}
+		let reason = yielded
+			.iter()
+			.find_map(|value| def_op(rw.ir(), *value))
+			.map_or(EliminationReason::DeadPure, EliminationReason::MergedInto);
+		rw.erase(op, reason)
 	})
+}
+
+/// Whether `value` is defined in the same error scope as `op`, or is not defined by an op.
+fn same_error_scope(ir: &Ir, op: OpId, value: ValueId) -> bool {
+	let Some(def) = def_op(ir, value) else {
+		return true;
+	};
+	let (Some(op_block), Some(def_block)) =
+		(ir.op(op).map(|data| data.parent), ir.op(def).map(|data| data.parent))
+	else {
+		return false;
+	};
+	ir.error_scope_owner(op_block) == ir.error_scope_owner(def_block)
 }
 
 /// The most ops a body inlined may have: past it, a call is the smaller program.

@@ -702,10 +702,7 @@ fn collapse_if(cx: &mut LoCx<'_>, op: OpId) -> Result<u32, IrError> {
 			)
 		})?;
 		let (_, body) = rw.create_region(block, RegionKind::Block, &[])?;
-		let Ok(yielded) = rw.inline_region(taken, InsertPoint::End(body), &[]) else {
-			rw.erase(block, EliminationReason::DeadPure)?;
-			return Ok(0);
-		};
+		let yielded = rw.inline_region(taken, InsertPoint::End(body), &[])?;
 		rw.derived(&[op], |rw| {
 			rw.create(
 				InsertPoint::End(body),
@@ -794,6 +791,9 @@ fn collapsible(ir: &Ir, region: RegionId, args: usize, arity: usize) -> bool {
 	let Some(held) = ir.region(region) else {
 		return false;
 	};
+	let Some(owner) = held.parent else {
+		return false;
+	};
 	let [block] = held.blocks.as_slice() else {
 		return false;
 	};
@@ -804,7 +804,12 @@ fn collapsible(ir: &Ir, region: RegionId, args: usize, arity: usize) -> bool {
 		return false;
 	};
 	let yields = matches!(last.kind, OpKind::Expr(ExprOp::Yield) | OpKind::Logical(LogOp::Yield));
-	if block.args.len() != args || !yields || last.operands.len() != arity {
+	if block.args.len() != args
+		|| !yields
+		|| last.operands.len() != arity
+		|| last.results.iter().any(|result| !ir.uses(*result).is_empty())
+		|| !tokens_collapsible(ir, owner, &block.token_args)
+	{
 		return false;
 	}
 	let mut stays = true;
@@ -818,6 +823,24 @@ fn collapsible(ir: &Ir, region: RegionId, args: usize, arity: usize) -> bool {
 		}
 	});
 	stays
+}
+
+/// Whether every token argument of `token_args` that is read can be replaced by a token of its
+/// class when inlining before `owner`.
+fn tokens_collapsible(ir: &Ir, owner: OpId, token_args: &[ValueId]) -> bool {
+	let follows = ir.op(owner).is_some_and(|data| effects::follows_effect(&data.kind));
+	token_args.iter().all(|formal| {
+		if ir.uses(*formal).is_empty() {
+			return true;
+		}
+		let Some(class) = ir.token_class(*formal) else {
+			return false;
+		};
+		if follows && ir.token_of_class(ir.token_results(owner), class).is_some() {
+			return false;
+		}
+		ir.token_of_class(ir.token_operands(owner), class).is_some()
+	})
 }
 
 /// Whether the control-flow op `op`, inside `arm`, lands strictly inside `arm`. An op that is not
@@ -1082,6 +1105,42 @@ fn replace_with(
 		.ok_or(IrError::Stale("op"))?;
 	rw.replace_op(def, &[result])?;
 	Ok(result)
+}
+
+/// Replaces the single-result op `op` by the existing value `value`.
+///
+/// When `value` is defined by an op in the same error scope as `op` (or is a block argument),
+/// [`Rewriter::replace_op`] merges `op`'s provenance into that defining op. When `value` is defined
+/// by an op in a different error scope, merging `op`'s provenance into it would move `op`'s bound
+/// provenance across an [`RegionKind::ErrorScope`] boundary, so `op`'s uses are replaced by `value`
+/// and `op` is erased as [`EliminationReason::FoldedConstant`].
+fn replace_with_existing(rw: &mut Rewriter<'_>, op: OpId, value: ValueId) -> Result<(), IrError> {
+	if same_error_scope(rw.ir(), op, value) {
+		return rw.replace_op(op, &[value]);
+	}
+	let result = single_result(rw.ir(), op)?;
+	rw.replace_all_uses(result, value)?;
+	rw.erase(op, EliminationReason::FoldedConstant)
+}
+
+/// Whether `value` is defined in the same error scope as `op`, or is not defined by an op.
+fn same_error_scope(ir: &Ir, op: OpId, value: ValueId) -> bool {
+	let def = match ir.value(value).map(|data| data.def) {
+		Some(ValueDef::OpResult {
+			op: def,
+			..
+		}) => def,
+		Some(ValueDef::BlockArg {
+			..
+		})
+		| None => return true,
+	};
+	let (Some(op_block), Some(def_block)) =
+		(ir.op(op).map(|data| data.parent), ir.op(def).map(|data| data.parent))
+	else {
+		return false;
+	};
+	ir.error_scope_owner(op_block) == ir.error_scope_owner(def_block)
 }
 
 /// Rebuilds the `AND` chain of the predicate in `region` without the conjuncts in `dropped`, and
@@ -1619,7 +1678,7 @@ impl Pattern<ExprDialect> for LiteralLeft {
 		if !decided {
 			return Ok(false);
 		}
-		rw.replace_op(op, &[left])?;
+		replace_with_existing(rw, op, left)?;
 		Ok(true)
 	}
 }
@@ -1673,7 +1732,7 @@ impl Pattern<ExprDialect> for NeutralLeft {
 		let [value] = yielded.as_slice() else {
 			return Err(IrError::Stale("value"));
 		};
-		rw.replace_op(op, &[*value])?;
+		replace_with_existing(rw, op, *value)?;
 		Ok(true)
 	}
 }
@@ -1724,7 +1783,7 @@ impl Pattern<ExprDialect> for NeutralRight {
 		if !(consumed_as_boolean(rw.ir(), result, 0) || is_bool_fact(rw, x)) {
 			return Ok(false);
 		}
-		rw.replace_op(op, &[x])?;
+		replace_with_existing(rw, op, x)?;
 		Ok(true)
 	}
 }
@@ -1880,7 +1939,7 @@ impl Pattern<ExprDialect> for ConvertOfFact {
 		if kind != attrs.kind {
 			return Ok(false);
 		}
-		rw.replace_op(op, &[operand])?;
+		replace_with_existing(rw, op, operand)?;
 		Ok(true)
 	}
 }
@@ -1912,7 +1971,7 @@ impl Pattern<ExprDialect> for TruthyOfFact {
 		if !is_bool_fact(rw, operand) {
 			return Ok(false);
 		}
-		rw.replace_op(op, &[operand])?;
+		replace_with_existing(rw, op, operand)?;
 		Ok(true)
 	}
 }

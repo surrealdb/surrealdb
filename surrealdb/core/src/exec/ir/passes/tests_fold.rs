@@ -583,3 +583,250 @@ async fn a_param_operand_folded_to_a_record_id_is_left_in_place() {
 	let env = Env::new();
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 }
+
+/// Replacing an op inside an `ErrorScope` with a value defined outside that `ErrorScope` across
+/// `LiteralLeft`, `NeutralLeft`, `NeutralRight`, `ConvertOfFact` and `TruthyOfFact` erases the op
+/// without recording a cross-`ErrorScope` `MergedInto` provenance link, so `verify_logical` passes.
+#[tokio::test]
+async fn cross_error_scope_fold_rules_preserve_provenance() {
+	use crate::exec::ir::expr::ops::{
+		ConvertAttrs, ConvertMode, ConvertSite, OnFail, ShortCircuitOp,
+	};
+	use crate::exec::ir::iface::conversion::EliminationReason;
+	use crate::exec::ir::iface::ids::ValueId;
+	use crate::exec::ir::iface::region_kind::RegionKind;
+
+	let mut ir = bind("SELECT count(1) FROM [1] GROUP ALL").await;
+	let agg = ops_of_tag(&ir, OpTag::Expr(ExprTag::Agg))[0];
+	let scope_region = ir.op(agg).expect("the agg exists").regions[0];
+	let scope_block = ir.region(scope_region).expect("the error scope exists").blocks[0];
+	let yield_op = *ir.block(scope_block).expect("the block exists").ops.last().expect("a yield");
+	let old_val = ir.op(yield_op).expect("the yield exists").operands[0];
+	let old_lit = match ir.value(old_val).expect("the value exists").def {
+		crate::exec::ir::core::value::ValueDef::OpResult {
+			op,
+			..
+		} => op,
+		crate::exec::ir::core::value::ValueDef::BlockArg {
+			..
+		} => panic!("expected an op result"),
+	};
+
+	let bool_fact = TypeKnowledge::Fact {
+		kind: Kind::Bool,
+		source: FactSource::Literal,
+	};
+	let make_bool = |rw: &mut Rewriter<'_>, at: InsertPoint, b: bool| -> ValueId {
+		let mut s = spec(OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(b)))), &[], 1);
+		s.results[0] = bool_fact.clone();
+		let op = rw.create(at, s).expect("the bool literal is created");
+		rw.ir().op(op).expect("the op exists").results[0]
+	};
+	let make_and = |rw: &mut Rewriter<'_>, at: InsertPoint, left: ValueId, right: ValueId| {
+		let mut s = spec(
+			OpKind::Expr(ExprOp::ShortCircuit {
+				op: ShortCircuitOp::And,
+			}),
+			&[left],
+			1,
+		);
+		s.results[0] = bool_fact.clone();
+		let gate = rw.create(at, s).expect("the short-circuit op is created");
+		let (_, lazy_block) =
+			rw.create_region(gate, RegionKind::LazyOperand, &[]).expect("the lazy region");
+		create(rw, InsertPoint::End(lazy_block), OpKind::Expr(ExprOp::Yield), &[right], 0);
+		rw.ir().op(gate).expect("the op exists").results[0]
+	};
+
+	let mut facts = FactCache::new();
+	{
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let outer_at = InsertPoint::Before(agg);
+		let inner_at = InsertPoint::Before(yield_op);
+		let outer_false = make_bool(&mut rw, outer_at, false);
+		let outer_true = make_bool(&mut rw, outer_at, true);
+		let inner_true_a = make_bool(&mut rw, inner_at, true);
+		let inner_true_b = make_bool(&mut rw, inner_at, true);
+
+		// 1. LiteralLeft (`false_and_lazy`): left is defined outside the ErrorScope.
+		let r1 = make_and(&mut rw, inner_at, outer_false, inner_true_a);
+		// 2. NeutralLeft (`true_and_lazy`): yielded right is defined outside the ErrorScope.
+		let r2 = make_and(&mut rw, inner_at, inner_true_a, outer_true);
+		// 3. NeutralRight (`and_true`): left is defined outside the ErrorScope.
+		let r3 = make_and(&mut rw, inner_at, outer_true, inner_true_b);
+		// 4. ConvertOfFact (`convert_of_fact`): operand is defined outside the ErrorScope.
+		let convert_kind = OpKind::Expr(ExprOp::Convert(Box::new(ConvertAttrs {
+			mode: ConvertMode::Cast,
+			kind: Kind::Bool,
+			site: ConvertSite(0),
+			on_fail: OnFail::Error,
+		})));
+		let (_, r4) = create(&mut rw, inner_at, convert_kind, &[outer_true], 1);
+		// 5. TruthyOfFact (`truthy_of_fact`): operand is defined outside the ErrorScope.
+		let (_, r5) = create(&mut rw, inner_at, OpKind::Expr(ExprOp::Truthy), &[outer_true], 1);
+
+		let (_, arr) = create(
+			&mut rw,
+			inner_at,
+			OpKind::Expr(ExprOp::Array),
+			&[r1, r2, r3, r4[0], r5[0]],
+			1,
+		);
+		rw.replace_all_uses(old_val, arr[0]).expect("the yield reads the array");
+		rw.erase(old_lit, EliminationReason::DeadPure).expect("the old literal is erased");
+	}
+
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the initial container verifies");
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert!(ops_of_tag(&ir, SHORT_CIRCUIT).is_empty());
+	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Convert)).is_empty());
+	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Truthy)).is_empty());
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the folded container verifies");
+}
+
+/// A statement `IF` whose taken arm has a token block argument that cannot be spliced by
+/// `inline_region` is refused before any block op is created or erased.
+#[tokio::test]
+async fn non_collapsible_statement_if_leaves_container_untouched() {
+	use crate::exec::ir::iface::types::TokenClass;
+
+	let mut ir = bind("IF true { 'yes' };").await;
+	let if_op = ops_of_tag(&ir, OpTag::Logical(LogTag::If))[0];
+	let taken = ir.op(if_op).expect("the if exists").regions[0];
+	let taken_block = ir.region(taken).expect("the taken region exists").blocks[0];
+	let eval_op = *ir.block(taken_block).expect("the block exists").ops.last().expect("an eval");
+
+	let mut facts = FactCache::new();
+	{
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let tok =
+			rw.add_token_arg(taken_block, TokenClass::Store).expect("the token arg is added");
+		// `eval_op` reads `tok`, while the enclosing `IF` holds no `Store` token operand of its
+		// own, so `tokens_collapsible` refuses the arm upfront without failing the pass.
+		rw.add_token_operand(eval_op, tok).expect("the token operand is added");
+	}
+
+	let blocks_before = ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len();
+	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	assert_eq!(ifs(&ir), 1, "the non-collapsible IF stays in place");
+	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len(), blocks_before);
+}
+
+/// Inlining an identity function call `fn::id($x) { $x }` inside an `ErrorScope` when its argument
+/// is defined outside that `ErrorScope` replaces uses without violating `VerifyRule::ErrorScope`.
+#[tokio::test]
+async fn cross_error_scope_inline_calls_preserves_provenance() {
+	use std::sync::Arc;
+
+	use surrealdb_expr::parser::TopLevelExpr;
+
+	use super::driver::NoObserver;
+	use super::inline::InlineCalls;
+	use super::tests_support::literal;
+	use crate::catalog::{FunctionDefinition, LogicalBlockBody, LogicalPermissionBody};
+	use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, SemanticCatalog};
+	use crate::exec::ir::iface::conversion::EliminationReason;
+	use crate::exec::ir::iface::region_kind::RegionKind;
+	use crate::exec::ir::logical::verify::timestamp_arg;
+	use crate::expr::Function;
+	use crate::expr::statements::DefineStatement;
+
+	struct IdCatalog(Arc<FunctionDefinition>);
+
+	impl SemanticCatalog for IdCatalog {
+		fn function(&self, name: &str) -> CatalogAnswer<Arc<FunctionDefinition>> {
+			if name == "id" {
+				CatalogAnswer::Found(Arc::clone(&self.0))
+			} else {
+				CatalogAnswer::Unknown
+			}
+		}
+	}
+
+	let parsed = crate::syn::parse("DEFINE FUNCTION fn::id($x: any) { RETURN $x }")
+		.expect("the definition parses");
+	let Some(TopLevelExpr::Expr(crate::expr::Expr::Define(define))) =
+		parsed.expressions.into_iter().next()
+	else {
+		panic!("expected a DEFINE FUNCTION");
+	};
+	let DefineStatement::Function(stmt) = *define else {
+		panic!("expected a function definition");
+	};
+	let def = Arc::new(FunctionDefinition {
+		name: stmt.name,
+		args: stmt.args,
+		block: stmt.block.clone(),
+		body: LogicalBlockBody::of(&stmt.block),
+		permissions: stmt.permissions.clone(),
+		permissions_body: LogicalPermissionBody::of(&stmt.permissions),
+		returns: stmt.returns,
+		comment: None,
+		auth_limit: crate::catalog::auth::AuthLimit::default(),
+		graphql_alias: None,
+		graphql_deprecated: None,
+	});
+
+	let mut ir = bind("SELECT count(1) FROM [1] GROUP ALL").await;
+	let agg = ops_of_tag(&ir, OpTag::Expr(ExprTag::Agg))[0];
+	let scope_region = ir.op(agg).expect("the agg exists").regions[0];
+	let scope_block = ir.region(scope_region).expect("the error scope exists").blocks[0];
+	let yield_op = *ir.block(scope_block).expect("the block exists").ops.last().expect("a yield");
+	let old_val = ir.op(yield_op).expect("the yield exists").operands[0];
+	let old_lit = match ir.value(old_val).expect("the value exists").def {
+		crate::exec::ir::core::value::ValueDef::OpResult {
+			op,
+			..
+		} => op,
+		crate::exec::ir::core::value::ValueDef::BlockArg {
+			..
+		} => panic!("expected an op result"),
+	};
+
+	let mut facts = FactCache::new();
+	{
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let (_, outer_val) = create(&mut rw, InsertPoint::Before(agg), literal(42), &[], 1);
+		let call_kind = OpKind::Expr(ExprOp::call(Function::Custom("id".to_owned())));
+		let (call_op, call_res) =
+			create(&mut rw, InsertPoint::Before(yield_op), call_kind, &[outer_val[0]], 1);
+		let (_, fn_block) = rw
+			.create_region(
+				call_op,
+				RegionKind::FunctionBody,
+				&[timestamp_arg(), TypeKnowledge::Unknown],
+			)
+			.expect("the function body region is created");
+		let param = rw.ir().block(fn_block).expect("the block exists").args[1];
+		create(&mut rw, InsertPoint::End(fn_block), OpKind::Expr(ExprOp::Yield), &[param], 0);
+		rw.replace_all_uses(old_val, call_res[0]).expect("the yield reads the call");
+		rw.erase(old_lit, EliminationReason::DeadPure).expect("the old literal is erased");
+	}
+
+	let env = Env::new();
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the initial container verifies");
+	let catalog = IdCatalog(def);
+	let base_cx = env.cx();
+	let cx = EffectCx {
+		registry: base_cx.registry,
+		catalog: &catalog,
+		frames: base_cx.frames,
+	};
+	let passes: Vec<Box<dyn LoPass>> = vec![Box::new(InlineCalls)];
+	let reports = run_passes(
+		&passes,
+		&mut ir,
+		&mut facts,
+		&NotYetFolder,
+		&cx,
+		&PassConfig::ALL_ON,
+		&mut NoObserver,
+	)
+	.await
+	.expect("InlineCalls runs");
+	assert_eq!(reports[0].1.rewrites, 1);
+	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Call)).is_empty());
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the inlined container verifies");
+}
+
