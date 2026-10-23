@@ -266,6 +266,14 @@ mod tests {
 		assert!(c.surrealism_allow_unbounded_execution);
 		let c: SurrealismConfig = map_with("surrealism_log_level", "trace").load();
 		assert_eq!(c.surrealism_log_level, "trace");
+		// Read as milliseconds, and only by a build with debug assertions.
+		let c: SurrealismConfig = map_with("surrealism_refetch_after_refusal", "7").load();
+		let expected = if cfg!(debug_assertions) {
+			std::time::Duration::from_millis(7)
+		} else {
+			crate::extension::trust::REFETCH_AFTER_REFUSAL
+		};
+		assert_eq!(c.surrealism_refetch_after_refusal, expected);
 	}
 
 	/// Every layer carried by the aggregate is actually loaded.

@@ -13,6 +13,8 @@
 //! is built, and grants are cached, so a grant already in the cache keeps the
 //! ceilings it was built with until it is evicted.
 
+use std::time::Duration;
+
 use surrealdb_cnf as cnf;
 
 /// Server-side limits applied to Surrealism WASM modules.
@@ -61,6 +63,13 @@ pub(crate) struct SurrealismConfig {
 	/// `SURREAL_SURREALISM_SILO_ENDPOINT`, so the integration tests can serve packages from a
 	/// local registry; a trailing slash is stripped before the path is appended.
 	pub surrealism_silo_endpoint: String,
+	/// How long a definition that failed to load answers with that failure
+	/// before its source is fetched again:
+	/// [`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL). A release build
+	/// cannot change it. A build with debug assertions reads
+	/// `SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL`, in milliseconds, so the integration tests can
+	/// see each load-time refusal without waiting out the window; `0` repeats no refusal.
+	pub surrealism_refetch_after_refusal: Duration,
 }
 
 /// The Silo package host, the one registry `silo::` executables resolve against.
@@ -77,6 +86,7 @@ impl Default for SurrealismConfig {
 			surrealism_allow_unbounded_execution: false,
 			surrealism_log_level: "debug".to_string(),
 			surrealism_silo_endpoint: SILO_ENDPOINT.to_string(),
+			surrealism_refetch_after_refusal: crate::extension::trust::REFETCH_AFTER_REFUSAL,
 		}
 	}
 }
@@ -104,6 +114,11 @@ impl cnf::Config for SurrealismConfig {
 		#[cfg(debug_assertions)]
 		map.parse_key_with("surrealism_silo_endpoint", &mut self.surrealism_silo_endpoint, |s| {
 			Some(s.trim_end_matches('/').to_string())
-		});
+		})
+		.parse_key_with(
+			"surrealism_refetch_after_refusal",
+			&mut self.surrealism_refetch_after_refusal,
+			|s| s.parse().map(Duration::from_millis).ok(),
+		);
 	}
 }

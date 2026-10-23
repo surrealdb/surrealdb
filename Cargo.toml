@@ -748,6 +748,46 @@ opt-level = 3
 [profile.dev.package.ed25519-dalek]
 opt-level = 3
 
+# Surrealism extensions are compiled to native code by Cranelift when they are
+# defined or first loaded. In a `dev` build the compiler runs one to two orders
+# of magnitude slower, so every test that defines an extension would spend most
+# of its time compiling, and many such tests at once starve their servers of
+# CPU. Two settings account for it: `opt-level = 0`, and `debug_assertions`,
+# under which `cranelift-codegen` compiles in its per-instruction `trace!`
+# logging (otherwise gated on its `trace-log` feature). A server logging at
+# `trace` hands each of those records to the `log` bridge and its filters even
+# though the filters drop them. Only the compiler is changed; the code it emits,
+# and so what the tests observe, is the same.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.cranelift-codegen-shared]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+[profile.dev.package.cranelift-control]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-native]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.gimli]
+opt-level = 3
+
 # `dev` with optimised workspace code, for binaries CI builds only to execute
 # queries against: the `surreal` server the integration lanes share and the
 # language-test runner. Debug assertions, overflow checks and unwinding stay

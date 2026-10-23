@@ -1939,7 +1939,8 @@ impl Context {
 	///
 	/// A failure to load the definition is recorded per database, source,
 	/// `DIGEST` and signer, and repeated without refetching for
-	/// [`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL),
+	/// `surrealism_refetch_after_refusal`
+	/// ([`REFETCH_AFTER_REFUSAL`](crate::extension::trust::REFETCH_AFTER_REFUSAL)),
 	/// so a failing definition does not fetch, unpack and verify its archive on
 	/// every call.
 	#[cfg(feature = "surrealism")]
@@ -1994,7 +1995,9 @@ impl Context {
 		};
 
 		let refusal = crate::extension::trust::RefusalKey::new(ns, db, source, pinned, &trust);
-		cache.trust().check_refusal(&refusal)?;
+		cache
+			.trust()
+			.check_refusal(&refusal, self.config.surrealism.surrealism_refetch_after_refusal)?;
 
 		// Nothing is prepared until the archive is the pinned one and, with a
 		// SIGNER, a signature proves it. Only MANIFEST and SIGNATURE are read

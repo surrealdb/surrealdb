@@ -2758,54 +2758,74 @@ mod surrealism_integration {
 		check_trust_at_define(&DEMO_DIR.canonical).await
 	}
 
-	/// A definition whose archive cannot be fetched is accepted when it gives
-	/// DIGEST, as an import does, and the archive is checked when it loads:
-	/// whatever the source holds by then must be the pinned code, signed by
-	/// the recorded signer. A refusal is repeated without fetching for
-	/// `REFETCH_AFTER_REFUSAL`, and the source is read again after it.
-	async fn check_trust_at_load(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-		let Some(demo) = sign_demo(bucket_dir) else {
-			eprintln!("skipping: needs ssh-keygen on PATH");
-			return Ok(());
-		};
-		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+	/// A server whose refusals are held for `window` before a definition's
+	/// source is fetched again (`SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL`,
+	/// read by a build with debug assertions).
+	async fn start_server_holding_refusals_for(
+		bucket_dir: &Path,
+		window: Duration,
+	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
+		let vars = HashMap::from([(
+			"SURREAL_SURREALISM_REFETCH_AFTER_REFUSAL".to_string(),
+			window.as_millis().to_string(),
+		)]);
+		start_surrealism_server_with(bucket_dir, vars).await
+	}
+
+	/// Define `ext::late` in a new database, pinned to the signed demo's DIGEST
+	/// and SIGNER, from `late`, an archive that does not exist yet. Returns
+	/// the namespace and database.
+	async fn define_late(
+		addr: &str,
+		bucket_dir: &Path,
+		demo: &SignedDemo,
+		late: &str,
+	) -> (String, String) {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 		let dir = bucket_dir.to_string_lossy();
-		let late = format!("late-{}.surli", Ulid::new());
 		let define = format!(
 			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
 			 DEFINE EXTENSION ext::late FROM f\"test:/{late}\" DIGEST \"{}\" SIGNER {{ key: \"{}\" }};",
 			demo.digest, demo.key
 		);
-		for (i, r) in sql_query(&addr, &ns, &db, &define).await.iter().enumerate() {
+		for (i, r) in sql_query(addr, &ns, &db, &define).await.iter().enumerate() {
 			assert_eq!(r.status, "OK", "statement {i}: {:?}", r.result);
 		}
-		let call = "RETURN ext::late::math(5);";
-		// A failure to load is repeated without fetching the archive again
-		// until `REFETCH_AFTER_REFUSAL` (10 s) has passed, so each change to the
-		// archive is first met with the previous refusal.
-		let after_refusal = || tokio::time::sleep(Duration::from_secs(11));
+		(ns, db)
+	}
 
-		// The eager load after DEFINE found no archive, and that refusal holds.
-		std::fs::copy(bucket_dir.join("restricted.surli"), bucket_dir.join(&late))?;
+	/// A definition whose archive cannot be fetched is accepted when it gives
+	/// DIGEST, as an import does, and the archive is checked when it loads:
+	/// whatever the source holds by then must be the pinned code, signed by
+	/// the recorded signer. The server holds no refusal, so every call reads
+	/// the source as it is.
+	async fn check_trust_at_load(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let Some(demo) = sign_demo(bucket_dir) else {
+			eprintln!("skipping: needs ssh-keygen on PATH");
+			return Ok(());
+		};
+		let (addr, _server) = start_server_holding_refusals_for(bucket_dir, Duration::ZERO).await?;
+		let late = format!("late-{}.surli", Ulid::new());
+		let (ns, db) = define_late(&addr, bucket_dir, &demo, &late).await;
+		let call = "RETURN ext::late::math(5);";
+
+		// Still no archive.
 		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
 		assert!(error.contains("not found"), "{error}");
 
 		// Other code under the pinned name.
-		after_refusal().await;
+		std::fs::copy(bucket_dir.join("restricted.surli"), bucket_dir.join(&late))?;
 		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
 		assert!(error.contains("MANIFEST digest is"), "{error}");
 
 		// The pinned code, but unsigned.
 		std::fs::copy(bucket_dir.join(&demo.unsigned), bucket_dir.join(&late))?;
-		after_refusal().await;
 		let error = first_error(&sql_query(&addr, &ns, &db, call).await);
 		assert!(error.contains("carries no SIGNATURE"), "{error}");
 
 		// The pinned code, signed by the recorded key.
 		std::fs::copy(bucket_dir.join(&demo.signed), bucket_dir.join(&late))?;
-		after_refusal().await;
 		let results = sql_query(&addr, &ns, &db, call).await;
 		assert_eq!(results[0].status, "OK", "signed call: {:?}", results[0].result);
 		assert_eq!(results[0].result, serde_json::json!(10));
@@ -2815,6 +2835,38 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_trust_at_load() -> Result<(), Box<dyn std::error::Error>> {
 		check_trust_at_load(&DEMO_DIR.canonical).await
+	}
+
+	/// A failure to load is repeated without fetching the archive again until
+	/// the server's refusal window has passed, even once the source holds an
+	/// archive that would load. The window here is far longer than the test,
+	/// so the refusal is still held however slowly the test runs.
+	async fn check_a_refusal_is_held(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let Some(demo) = sign_demo(bucket_dir) else {
+			eprintln!("skipping: needs ssh-keygen on PATH");
+			return Ok(());
+		};
+		let (addr, _server) =
+			start_server_holding_refusals_for(bucket_dir, Duration::from_secs(3600)).await?;
+		let late = format!("late-{}.surli", Ulid::new());
+		// The eager load after DEFINE finds no archive, and that refusal holds.
+		let (ns, db) = define_late(&addr, bucket_dir, &demo, &late).await;
+		std::fs::copy(bucket_dir.join(&demo.signed), bucket_dir.join(&late))?;
+		let error = first_error(&sql_query(&addr, &ns, &db, "RETURN ext::late::math(5);").await);
+		assert!(error.contains("not found"), "{error}");
+
+		// The refusal belongs to that database's definition: the same
+		// definition in another database fetches the archive now there.
+		let (ns, db) = define_late(&addr, bucket_dir, &demo, &late).await;
+		let results = sql_query(&addr, &ns, &db, "RETURN ext::late::math(5);").await;
+		assert_eq!(results[0].status, "OK", "signed call: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(10));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_a_refusal_is_held() -> Result<(), Box<dyn std::error::Error>> {
+		check_a_refusal_is_held(&DEMO_DIR.canonical).await
 	}
 
 	/// A module cached from a copy without a signature does not serve a

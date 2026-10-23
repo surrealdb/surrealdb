@@ -233,10 +233,11 @@ impl Default for TrustStore {
 
 impl TrustStore {
 	/// Fails with the reason `key` was refused, when that was less than
-	/// [`REFETCH_AFTER_REFUSAL`] ago.
-	pub(crate) fn check_refusal(&self, key: &RefusalKey) -> Result<()> {
+	/// `window` ago. The server's window is `surrealism_refetch_after_refusal`,
+	/// [`REFETCH_AFTER_REFUSAL`] unless a debug build overrides it.
+	pub(crate) fn check_refusal(&self, key: &RefusalKey, window: Duration) -> Result<()> {
 		if let Some(refusal) = self.refused.get(key)
-			&& refusal.at.elapsed() < REFETCH_AFTER_REFUSAL
+			&& refusal.at.elapsed() < window
 		{
 			bail!("{}", refusal.reason);
 		}
@@ -349,7 +350,7 @@ impl TrustStore {
 		}
 		let refusal = source.map(|source| RefusalKey::new(ns, db, source, pinned, &trust));
 		if let Some(key) = &refusal {
-			self.check_refusal(key)?;
+			self.check_refusal(key, ctx.config.surrealism.surrealism_refetch_after_refusal)?;
 		}
 		let held = self.prove_keyed(&pinned, signer, signature);
 		let (Err(_), Some(source), Some(key)) = (&held, source, refusal) else {
@@ -501,7 +502,7 @@ b51y/HTpFN02c1FcBADVKJ5DHqZwEH
 		let refused = RefusalKey::new(NamespaceId(1), DatabaseId(1), source("a"), digest(), &trust);
 		store.record::<()>(refused.clone(), &Err(anyhow!("bucket `mods` is gone")));
 
-		let err = store.check_refusal(&refused).unwrap_err().to_string();
+		let err = store.check_refusal(&refused, REFETCH_AFTER_REFUSAL).unwrap_err().to_string();
 		assert!(err.contains("bucket `mods` is gone"), "{err}");
 		for other in [
 			RefusalKey::new(NamespaceId(2), DatabaseId(1), source("a"), digest(), &trust),
@@ -509,11 +510,14 @@ b51y/HTpFN02c1FcBADVKJ5DHqZwEH
 			RefusalKey::new(NamespaceId(1), DatabaseId(1), source("b"), digest(), &trust),
 			RefusalKey::new(NamespaceId(1), DatabaseId(1), source("a"), [0; 32], &trust),
 		] {
-			store.check_refusal(&other).unwrap();
+			store.check_refusal(&other, REFETCH_AFTER_REFUSAL).unwrap();
 		}
 
+		// A zero window repeats no refusal.
+		store.check_refusal(&refused, Duration::ZERO).unwrap();
+
 		store.record(refused.clone(), &Ok(()));
-		store.check_refusal(&refused).unwrap();
+		store.check_refusal(&refused, REFETCH_AFTER_REFUSAL).unwrap();
 	}
 
 	/// Without a `SIGNER`, only `UNSIGNED` lets an archive run.
