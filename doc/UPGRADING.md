@@ -684,12 +684,12 @@ it would read an index in the new format as holding no documents.
   store that stays at Legacy (TiKV, IndxDB), none does until an operator
   raises the store's level.
 - An index in the new format stores a few bytes more per document and term.
-  Each write to it also records, beside every term it adds a document to, the
+  Each write to it also records, with every term it adds a document to, the
   document's frequency of the term and its length, which background compaction
   folds into the blocks without reading the document. Indexing a document
-  costs somewhat more in exchange, and a transaction writes one more key per
-  term it adds documents to, which counts against
-  `SURREAL_TRANSACTION_MAX_WRITE_KEYS` where that guard is set.
+  costs somewhat more in exchange. The values travel in the term's existing
+  change entry, so a transaction writes no more keys than it does for an index
+  in the old format.
 - An existing full-text index keeps its format, and is read and written in it,
   until `REBUILD INDEX`, or a `DEFINE INDEX OVERWRITE` of it, moves it to the
   new one. Nothing is rewritten at startup. An unchanged `DEFINE INDEX

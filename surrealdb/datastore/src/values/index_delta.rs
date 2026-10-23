@@ -383,8 +383,8 @@ impl IndexDeltaBuffer {
 	/// Returns how many keys the flush will write that it would not have
 	/// written before this change, *within the frame it lands in*, which is
 	/// what the caller charges the write-cardinality guard on: the flush emits
-	/// one key per (term, direction) whose set is non-empty, and one more per
-	/// term whose additions carry postings.
+	/// one key per (term, direction) whose set is non-empty. An addition's
+	/// postings travel in its own key.
 	///
 	/// Per frame rather than per term, so a term first touched inside a save point
 	/// that already has it in an enclosing scope is charged twice, and a charge for
@@ -416,11 +416,8 @@ impl IndexDeltaBuffer {
 					(Ok(frequency), Ok(length)) => (frequency, length),
 					_ => (0, 0),
 				};
-				// Charged once the frame holds a posting for the term, as the flush
-				// writes a `!tf` entry only for a term with one.
-				let first_posting = u32::from(frequency > 0 && delta.postings.is_empty());
 				delta.set_posting(doc_id, frequency, length);
-				first + first_posting
+				first
 			}
 			// A change carrying no posting on an index that keeps them: an
 			// earlier posting of the document no longer holds.
@@ -760,7 +757,7 @@ mod tests {
 		assert!(buffer.is_empty());
 	}
 
-	/// The postings a flush writes beside a term's additions are those of the
+	/// The postings a flush writes with a term's additions are those of the
 	/// changes recorded last, on an index that keeps its postings: a document's
 	/// last addition, none after a later removal (even one that sums its changes
 	/// to nothing), none after a removal in a save point released into the
@@ -770,7 +767,8 @@ mod tests {
 		let buffer = IndexDeltaBuffer::new();
 		let nid = Uuid::nil();
 		let removed = Some((0, 0));
-		assert_eq!(buffer.buffer_term_change(term(), 7, true, Some((1, 10)), nid), 2);
+		// One key for the term's additions, which carry their postings.
+		assert_eq!(buffer.buffer_term_change(term(), 7, true, Some((1, 10)), nid), 1);
 		assert_eq!(buffer.buffer_term_change(term(), 9, true, Some((2, 20)), nid), 0);
 		let _ = buffer.buffer_term_change(term(), 5, true, Some((3, 30)), nid);
 		let _ = buffer.buffer_term_change(term(), 7, true, Some((4, 40)), nid);

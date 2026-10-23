@@ -92,6 +92,36 @@ impl TermPostings {
 		Some((frequency, length))
 	}
 
+	/// [`Self::entry`] of `doc_id`, found by a cursor `at` over the entries
+	/// that a caller asking in ascending doc-id order moves forward: the search
+	/// gallops from `at`, and leaves it at the first entry not below `doc_id`.
+	/// A doc id below the cursor's entry is searched for from the start.
+	pub fn entry_at(&self, at: &mut usize, doc_id: DocId) -> Option<Entry> {
+		let from = match self.entries.get(*at) {
+			Some((first, ..)) if *first <= doc_id => *at,
+			Some(_) => 0,
+			None if self.entries.last().is_some_and(|(last, ..)| *last < doc_id) => {
+				*at = self.entries.len();
+				return None;
+			}
+			None => 0,
+		};
+		// The first window past `from`, doubling, whose last entry is not below
+		// `doc_id` holds it, if any entry does.
+		let mut end = from + 1;
+		let mut step = 1;
+		while end < self.entries.len() && self.entries[end - 1].0 < doc_id {
+			step *= 2;
+			end = (end + step).min(self.entries.len());
+		}
+		let end = end.min(self.entries.len());
+		*at = from + self.entries[from..end].partition_point(|(id, ..)| *id < doc_id);
+		match self.entries.get(*at) {
+			Some((id, frequency, length)) if *id == doc_id => Some((*frequency, *length)),
+			Some(_) | None => None,
+		}
+	}
+
 	/// Each block, in order, as its first document and its impacts. A score that
 	/// rises with frequency and does not rise with length is highest, over a
 	/// block's documents, at one of its impacts.
@@ -588,6 +618,41 @@ mod tests {
 		assert_eq!(postings.docs().iter().collect::<Vec<_>>(), [0, 7, 300]);
 		assert_eq!(postings.entry(7), Some((2, 6)));
 		assert_eq!(postings.entry(8), None);
+	}
+
+	/// A cursor finds every entry [`TermPostings::entry`] finds, whether the doc
+	/// ids it is asked for ascend, skip ahead, repeat or go back.
+	#[test]
+	fn a_cursor_finds_what_a_search_finds() {
+		let entries: Vec<_> =
+			(0..3000u64).filter(|d| d % 3 != 1).map(|d| (d * 2, d + 1, 9)).collect();
+		let postings = TermPostings::from_blocks(&[
+			PostingBlock::from_entries(entries[..700].iter().copied()),
+			PostingBlock::from_entries(entries[700..].iter().copied()),
+		])
+		.unwrap();
+		let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+		let mut next = |bound: u64| {
+			seed ^= seed << 13;
+			seed ^= seed >> 7;
+			seed ^= seed << 17;
+			seed % bound
+		};
+		for _ in 0..50 {
+			let mut at = 0;
+			let mut doc_id = 0;
+			for _ in 0..400 {
+				doc_id = match next(10) {
+					0 => next(7000),
+					1 => doc_id,
+					2 => doc_id + next(2000),
+					_ => doc_id + next(4),
+				};
+				assert_eq!(postings.entry_at(&mut at, doc_id), postings.entry(doc_id), "{doc_id}");
+			}
+		}
+		let empty = TermPostings::default();
+		assert_eq!(empty.entry_at(&mut 0, 5), None);
 	}
 
 	#[test]

@@ -29,7 +29,8 @@ use crate::IndexKeyBase;
 use crate::docids::DocId;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
-use crate::ft::fulltext::{PostingBlock, TermDocsResidual};
+use crate::ft::TermFrequency;
+use crate::ft::fulltext::{ChangeBatch, PostingBlock, TermDocsResidual};
 use crate::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::ft::offset::Offset;
 use crate::key::schema::{TermChangeBatchKey, TermChangeKey};
@@ -41,8 +42,8 @@ use crate::val::Value;
 pub struct TermReads {
 	/// The per-document change keys; their values are not read.
 	pub changes: TypedRange<String>,
-	/// The batched change bitmaps.
-	pub batches: TypedRange<RoaringTreemap>,
+	/// The batched changes, of which a query uses the documents.
+	pub batches: TypedRange<ChangeBatch>,
 	/// The residual's key, holding a [`TermDocsResidual`].
 	pub residual: Key<'static>,
 	/// Where the term's compacted documents are kept.
@@ -81,8 +82,9 @@ pub fn term_reads(ikb: &IndexKeyBase, term: &str, blocks: bool) -> Result<TermRe
 pub struct TermChanges<'a> {
 	/// The keys of [`TermReads::changes`].
 	pub change_keys: &'a [Vec<u8>],
-	/// The keys and bitmaps of [`TermReads::batches`].
-	pub batches: &'a [(Vec<u8>, RoaringTreemap)],
+	/// The keys and changes of [`TermReads::batches`], of which a query uses
+	/// the documents.
+	pub batches: &'a [(Vec<u8>, ChangeBatch)],
 	/// The documents the transaction added to the term.
 	pub pending_added: &'a RoaringTreemap,
 	/// The documents the transaction removed from the term.
@@ -100,14 +102,13 @@ pub fn term_deltas(changes: &TermChanges<'_>) -> Result<HashMap<DocId, i64>> {
 			-1
 		};
 	}
-	for (k, docs) in changes.batches {
-		let batch = TermChangeBatchKey::decode_key(k)?;
-		let step = if batch.add {
+	for (k, batch) in changes.batches {
+		let step = if TermChangeBatchKey::decode_key(k)?.add {
 			1
 		} else {
 			-1
 		};
-		for doc_id in docs {
+		for doc_id in &batch.docs {
 			*deltas.entry(doc_id).or_default() += step;
 		}
 	}
@@ -249,15 +250,61 @@ impl Bm25 {
 		if term_freq <= 0.0 {
 			return 0.0;
 		}
+		self.weigh(self.idf(term_doc_count), 1.0 + term_freq.ln(), doc_length)
+	}
+
+	/// The inverse document frequency of a term `term_doc_count` documents
+	/// carry, as [`Self::score`] weighs it. It depends on the term alone, so a
+	/// caller scoring one term in many documents works it out once.
+	pub fn idf(&self, term_doc_count: f64) -> f64 {
 		// A count outside `0..=N` (more documents carrying the term than the
 		// index counts, say) would make the ratio negative or undefined, so
 		// the count is clamped into that range.
 		let doc_count = self.doc_count.max(0.0);
 		let n = term_doc_count.max(0.0).min(doc_count);
-		let idf = ((doc_count - n + 0.5) / (n + 0.5)).ln_1p();
-		let tf_prime = 1.0 + term_freq.ln();
+		((doc_count - n + 0.5) / (n + 0.5)).ln_1p()
+	}
+
+	/// [`Self::score`] of a term of inverse document frequency `idf`
+	/// ([`Self::idf`]) occurring `term_freq` times in a document of
+	/// `doc_length` tokens: bit for bit the value `score` gives from the
+	/// term's document count.
+	pub fn score_with_idf(&self, idf: f64, term_freq: TermFrequency, doc_length: f64) -> f64 {
+		if term_freq == 0 {
+			return 0.0;
+		}
+		self.weigh(idf, tf_prime(term_freq), doc_length)
+	}
+
+	/// The score of a term of inverse document frequency `idf` at the
+	/// lower-bounded frequency `tf_prime`, in a document of `doc_length`
+	/// tokens.
+	fn weigh(&self, idf: f64, tf_prime: f64, doc_length: f64) -> f64 {
 		let length_norm = self.one_minus_b + self.b_over_avg_len * doc_length;
 		idf * self.k1_plus_1 * tf_prime / (tf_prime + self.k1 * length_norm)
+	}
+}
+
+/// The highest frequency [`TF_PRIME`] holds `1 + ln(tf)` for.
+const TF_PRIME_TABLE: usize = 256;
+
+/// `1 + ln(tf)` for every frequency `tf` up to [`TF_PRIME_TABLE`], computed by
+/// the expression [`tf_prime`] evaluates past it, so a lookup gives the same
+/// value bit for bit. The entry for zero is never read.
+static TF_PRIME: std::sync::LazyLock<[f64; TF_PRIME_TABLE + 1]> = std::sync::LazyLock::new(|| {
+	let mut table = [0.0; TF_PRIME_TABLE + 1];
+	for (tf, prime) in table.iter_mut().enumerate() {
+		*prime = 1.0 + (tf as f64).ln();
+	}
+	table
+});
+
+/// `1 + ln(tf)`, the lower-bounded frequency [`Bm25::score`] weighs a term
+/// occurring `tf` times by, as the `f64` expression `score` evaluates.
+fn tf_prime(tf: TermFrequency) -> f64 {
+	match usize::try_from(tf) {
+		Ok(at) if at <= TF_PRIME_TABLE => TF_PRIME[at],
+		Ok(_) | Err(_) => 1.0 + (tf as f64).ln(),
 	}
 }
 
@@ -377,6 +424,37 @@ mod tests {
 					"{doc_count} documents of {total_docs_length} tokens, length {doc_length}"
 				);
 			}
+		}
+	}
+
+	/// A score from a term's idf worked out once, with the frequency's
+	/// `1 + ln(tf)` from the table or past it, is the score [`Bm25::score`]
+	/// computes from the term's document count, bit for bit.
+	#[test]
+	fn a_score_from_a_precomputed_idf_is_the_direct_score() {
+		for (k1, b, doc_count, total) in [
+			(1.2, 0.75, 100_000, 2_800_000),
+			(1.2, 0.0, 7, 40),
+			(2.0, 1.0, 1, 1),
+			(0.0, 0.5, 3, 0),
+			(1.2, 0.75, 0, 0),
+		] {
+			let bm25 = Bm25::new(k1, b, doc_count, total);
+			for n in [0u64, 1, 2, 3, 17, 999, 20_757, 99_999, 100_000, 250_000] {
+				let idf = bm25.idf(n as f64);
+				for tf in (0..=600u64).chain([1 << 20, u32::MAX as u64, u64::MAX]) {
+					for length in [0u64, 1, 8, 28, 48, 1000, 1 << 40] {
+						assert_eq!(
+							bm25.score_with_idf(idf, tf, length as f64).to_bits(),
+							bm25.score(tf as f64, n as f64, length as f64).to_bits(),
+							"BM25({k1}, {b}) over {doc_count}: tf {tf}, n {n}, length {length}"
+						);
+					}
+				}
+			}
+		}
+		for tf in 1..=TF_PRIME_TABLE as u64 + 4 {
+			assert_eq!(tf_prime(tf).to_bits(), (1.0 + (tf as f64).ln()).to_bits(), "tf {tf}");
 		}
 	}
 

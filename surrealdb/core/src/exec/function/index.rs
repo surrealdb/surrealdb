@@ -38,7 +38,9 @@ use crate::expr::idiom::Idiom;
 use crate::expr::logical::{FieldPath, LogicalExpr};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
-use crate::idx::ft::fulltext::{BlockBounds, FullTextIndex, QueryTerms, Scorer};
+use crate::idx::ft::fulltext::{
+	BlockBounds, FullTextHitsIterator, FullTextIndex, QueryTerms, Scorer,
+};
 use crate::kvs::index::filter_online_indexes;
 use crate::val::{Number, RecordId, RecordIdentity, TableName, Value};
 
@@ -222,6 +224,9 @@ pub struct MatchContext {
 	/// ([`QueryTerms::block_bounds`]), `None` where they bound nothing. Built
 	/// with the scorer, once, by a scan rejecting hits by the clause's score.
 	bounds: std::sync::OnceLock<Option<BlockBounds>>,
+	/// The documents carrying any of the terms ([`Self::carriers`]), built once,
+	/// by the first branch of an index union to pass hits over by them.
+	carriers: std::sync::OnceLock<roaring::RoaringTreemap>,
 	/// The doc ids, and the scores where the scan scored them, of the hits the
 	/// scan answering the clause listed last, so a call on a row the scan
 	/// produced finds its document without reading the record's id mapping
@@ -314,6 +319,7 @@ impl MatchContext {
 			ft_cache: tokio::sync::OnceCell::new(),
 			scorer: tokio::sync::OnceCell::new(),
 			bounds: std::sync::OnceLock::new(),
+			carriers: std::sync::OnceLock::new(),
 			recent: parking_lot::Mutex::new(RecentDocIds::default()),
 			read_only,
 		}
@@ -557,33 +563,69 @@ impl MatchContext {
 		))
 	}
 
-	/// Those of `doc_ids` whose score may still beat `threshold`, the first key
-	/// of the worst row a sort ordering by the clause's score in descending
-	/// order keeps, for a scan of index `index_id`: every one but those the
-	/// terms hold no uncompacted state for whose block bound cannot beat it
-	/// ([`QueryTerms::block_bounds`]). All of them where the context's
-	/// resources read another index, the index scores nothing, or its blocks
-	/// bound nothing.
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(level = "trace", target = "surrealdb::core::exec::fulltext", skip_all, fields(docs = doc_ids.len()))
-	)]
-	pub async fn within_bounds(
+	/// The highest score the clause gives a document its terms hold no
+	/// uncompacted state for, for a scan of index `index_id`, from its terms'
+	/// posting blocks ([`BlockBounds::ceiling`]): zero where no such document
+	/// carries a term. `None` where the context bounds no score, as for
+	/// [`Self::score_bounds`].
+	pub async fn score_ceiling(
 		&self,
 		exec_ctx: &crate::exec::ExecutionContext,
 		index_id: crate::catalog::IndexId,
-		doc_ids: Vec<crate::idx::docids::DocId>,
-		threshold: &crate::val::Value,
-		single_key: bool,
-	) -> Result<Vec<crate::idx::docids::DocId>> {
+	) -> Result<Option<f32>> {
 		let Some(ft) = self.answering(index_id) else {
-			return Ok(doc_ids);
+			return Ok(None);
 		};
 		let Some(scorer) = self.scorer_in(exec_ctx, ft).await? else {
-			return Ok(doc_ids);
+			return Ok(None);
 		};
 		let Some(bounds) = self.bounds.get_or_init(|| ft.terms.block_bounds(scorer)) else {
-			return Ok(doc_ids);
+			return Ok(None);
+		};
+		Ok(Some(bounds.ceiling().unwrap_or(0.0)))
+	}
+
+	/// The documents carrying any of the clause's terms, which it scores above
+	/// zero, and those its terms hold uncompacted state for, which no bound
+	/// covers, where the context's resources read index `index_id`.
+	pub fn carriers(
+		&self,
+		index_id: crate::catalog::IndexId,
+	) -> Option<(&roaring::RoaringTreemap, &roaring::RoaringTreemap)> {
+		let ft = self.answering(index_id)?;
+		Some((self.carriers.get_or_init(|| ft.terms.carriers()), ft.terms.uncompacted()))
+	}
+
+	/// The doc ids of up to `limit` of the hits `hits` has not yet taken whose
+	/// score may still beat `threshold`, the first key of the worst row a sort
+	/// ordering by the clause's score in descending order keeps, for a scan of
+	/// index `index_id`, with how many hits were passed over on the way
+	/// ([`FullTextHitsIterator::take_doc_ids_within`]): every hit but those the
+	/// terms hold no uncompacted state for whose block bound cannot beat it
+	/// ([`QueryTerms::block_bounds`]), passed over a range of blocks at a time.
+	/// `None`, with no hit taken, where the context's resources read another
+	/// index, the index scores nothing, or its blocks bound nothing.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::exec::fulltext", skip_all)
+	)]
+	pub async fn take_within_bounds(
+		&self,
+		exec_ctx: &crate::exec::ExecutionContext,
+		index_id: crate::catalog::IndexId,
+		hits: &mut FullTextHitsIterator,
+		limit: usize,
+		threshold: &crate::val::Value,
+		single_key: bool,
+	) -> Result<Option<(Vec<crate::idx::docids::DocId>, u64)>> {
+		let Some(ft) = self.answering(index_id) else {
+			return Ok(None);
+		};
+		let Some(scorer) = self.scorer_in(exec_ctx, ft).await? else {
+			return Ok(None);
+		};
+		let Some(bounds) = self.bounds.get_or_init(|| ft.terms.block_bounds(scorer)) else {
+			return Ok(None);
 		};
 		// A score's threshold is a float, compared as the sort compares it: a bound
 		// below it cannot beat it, nor can one equal to it where the order has a
@@ -602,12 +644,7 @@ impl MatchContext {
 				)
 			}
 		};
-		Ok(doc_ids
-			.into_iter()
-			.filter(|doc_id| {
-				ft.terms.is_uncompacted(*doc_id) || bounds.bound(*doc_id).is_none_or(beats)
-			})
-			.collect())
+		Ok(Some(hits.take_doc_ids_within(limit, &ft.terms, bounds, beats)))
 	}
 
 	/// Records what a scan of index `index_id` resolved for the hits it hands

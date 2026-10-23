@@ -27,12 +27,16 @@ pub(crate) const FULL_TEXT_BATCH_SIZE: usize = 100;
 /// batch of record IDs at a time.
 pub(crate) struct FullTextHits {
 	iter: FullTextHitsIterator,
+	/// How many of the clauses of a sum an index union's branch ranks by the
+	/// hits are no longer listed for alone.
+	pub(crate) passed_clauses: usize,
 }
 
 impl FullTextHits {
 	pub(crate) fn new(iter: FullTextHitsIterator) -> Self {
 		Self {
 			iter,
+			passed_clauses: 0,
 		}
 	}
 
@@ -40,6 +44,12 @@ impl FullTextHits {
 	/// once the hits have run out.
 	pub(crate) fn take_doc_ids(&mut self, limit: usize) -> Vec<DocId> {
 		self.iter.take_doc_ids(limit)
+	}
+
+	/// The index's iterator over the hits, for a take that passes hits over by
+	/// their bounds.
+	pub(crate) fn hits_mut(&mut self) -> &mut FullTextHitsIterator {
+		&mut self.iter
 	}
 
 	/// The record each of `doc_ids` maps to, in order, in one batched read;

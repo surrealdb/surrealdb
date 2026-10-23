@@ -31,7 +31,7 @@ use crate::expr::operator::{MatchRef, MatchesOperator};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::{
-	Compacted, FullTextIndex, PostingBlock, QueryTerms, TermDocsResidual, TermState,
+	ChangeBatch, Compacted, FullTextIndex, PostingBlock, QueryTerms, TermDocsResidual, TermState,
 };
 use crate::idx::kernels::fulltext::CompactedReads;
 use crate::key::{KVValue, RawRange};
@@ -115,7 +115,7 @@ async fn query_terms(
 			let batches = read_all(ctx, services, reads.batches.clone().into())
 				.await?
 				.into_iter()
-				.map(|(key, value)| Ok((key, decode::<RoaringTreemap>(&value)?)))
+				.map(|(key, value)| Ok((key, decode::<ChangeBatch>(&value)?)))
 				.collect::<FlowResult<Vec<_>>>()?;
 			let blocks = match (&reads.compacted, cached) {
 				(CompactedReads::Blocks(range), None) => Some(
@@ -183,6 +183,9 @@ thread_local! {
 	/// blocks' bounds before scoring them, for tests that must know the bounds
 	/// were used.
 	pub(super) static BLOCK_SKIPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// How many full-text hits this thread's index union branches cut by the
+	/// ceilings of a sum's clauses, for tests that must know the cut was made.
+	pub(super) static UNION_CUTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// What a full-text listing rejects a hit by before reading its record, with the
@@ -193,8 +196,8 @@ pub(super) enum Threshold<'a> {
 	/// [`Source::FullText`]: super::program::Source::FullText
 	Clause(&'a TopKScan, Arc<Value>),
 	/// A sum of clause scores an index union's branches compare
-	/// ([`UnionScores`]).
-	Sum(&'a UnionScores, Arc<Value>),
+	/// ([`UnionScores`]), with the clause the listing's branch answers.
+	Sum(&'a UnionScores, Arc<Value>, Option<MatchRef>),
 }
 
 /// What the full-text branches of an index union reject hits by
@@ -316,6 +319,104 @@ impl UnionScores {
 	}
 }
 
+impl UnionScores {
+	/// Cuts the hits not yet listed by the branch answering clause `clause` to
+	/// those a sort keeping the highest sums may still keep by the clauses'
+	/// ceilings alone, and answers how many were cut.
+	///
+	/// A clause scores a document its terms hold no uncompacted state for at
+	/// most its ceiling ([`MatchContext::score_ceiling`]), and zero where the
+	/// document carries none of its terms. The most clauses, taken lowest
+	/// ceiling first, whose ceilings, added as the sum adds the clauses'
+	/// scores with zero for every other clause, cannot beat `threshold`, bound
+	/// the sum of every such document carrying none of the other clauses'
+	/// terms. Where the branch's own clause is among them, only the hits
+	/// carrying another clause's terms, and those any clause holds uncompacted
+	/// state for, may still be kept; as the threshold only tightens, the rest
+	/// are cut for good. Nothing is cut for a branch whose clause the sum does
+	/// not add, or where a clause bounds nothing.
+	async fn cut(
+		&self,
+		ctx: &ExecutionContext,
+		listing: &mut FullTextHits,
+		clause: MatchRef,
+		threshold: &Value,
+	) -> FlowResult<u64> {
+		// Each clause once, however many times the sum adds it.
+		let mut clauses: Vec<&UnionClause> = Vec::with_capacity(self.clauses.len());
+		for held in &self.clauses {
+			if !clauses.iter().any(|seen| seen.clause == held.clause) {
+				clauses.push(held);
+			}
+		}
+		let Some(own) = clauses.iter().position(|held| held.clause == clause) else {
+			return Ok(0);
+		};
+		if self.direction != SortDirection::Desc || clauses.len() < 2 {
+			return Ok(0);
+		}
+		let mut ceilings = Vec::with_capacity(clauses.len());
+		for held in &clauses {
+			let index_id = held.index.definition().index_id;
+			let Some(ceiling) = held.context.score_ceiling(ctx, index_id).await? else {
+				return Ok(0);
+			};
+			ceilings.push(ceiling);
+		}
+		let mut order: Vec<usize> = (0..ceilings.len()).collect();
+		order.sort_by(|a, b| ceilings[*a].total_cmp(&ceilings[*b]));
+		let mut passed = vec![false; ceilings.len()];
+		for at in order {
+			passed[at] = true;
+			let bounded: Vec<(MatchRef, Vec<f32>)> = clauses
+				.iter()
+				.zip(&ceilings)
+				.zip(&passed)
+				.map(|((held, ceiling), passed)| {
+					(
+						held.clause,
+						vec![if *passed {
+							*ceiling
+						} else {
+							0.0
+						}],
+					)
+				})
+				.collect();
+			let beats = sum_of(&self.sum, &bounded, 0).is_none_or(|bound| {
+				!crate::exec::topk_pushdown::cannot_beat(
+					threshold,
+					&bound,
+					self.direction,
+					self.single_key,
+				)
+			});
+			if beats {
+				passed[at] = false;
+				break;
+			}
+		}
+		let count = passed.iter().filter(|passed| **passed).count();
+		if !passed[own] || count <= listing.passed_clauses {
+			return Ok(0);
+		}
+		let mut kept = RoaringTreemap::new();
+		for (held, passed) in clauses.iter().zip(&passed) {
+			let Some((carriers, uncompacted)) =
+				held.context.carriers(held.index.definition().index_id)
+			else {
+				return Ok(0);
+			};
+			kept |= uncompacted;
+			if !passed {
+				kept |= carriers;
+			}
+		}
+		listing.passed_clauses = count;
+		Ok(listing.hits_mut().retain(&kept))
+	}
+}
+
 /// The value `sum` comes to for the hit at `at`, its clauses' scores taken from
 /// `scored`; `None` where a clause has no score or an addition is refused.
 fn sum_of(sum: &ScoreSum, scored: &[(MatchRef, Vec<f32>)], at: usize) -> Option<Value> {
@@ -350,30 +451,60 @@ pub(super) async fn next_records(
 	index_id: IndexId,
 	threshold: Option<Threshold<'_>>,
 ) -> FlowResult<Option<Vec<RecordId>>> {
-	let doc_ids = listing.take_doc_ids(limit);
+	// Where the sort keeps the best sums of clause scores, the hits carrying only
+	// the terms of clauses whose ceilings together cannot beat its threshold are
+	// cut before any is taken.
+	if let Some(Threshold::Sum(union, threshold, Some(clause))) = &threshold {
+		let cut = union.cut(ctx, listing, *clause, threshold).await?;
+		#[cfg(test)]
+		{
+			BLOCK_SKIPS.with(|skips| skips.set(skips.get() + cut as usize));
+			UNION_CUTS.with(|cuts| cuts.set(cuts.get() + cut as usize));
+		}
+		#[cfg(not(test))]
+		let _ = cut;
+	}
+	// Where the sort keeps the best scores of the clause the scan answers, the
+	// hits whose posting blocks bound their score below its threshold are
+	// passed over a range of blocks at a time, before they are taken.
+	let bounded = match (&threshold, shared) {
+		(Some(Threshold::Clause(topk, threshold)), Some(shared))
+			if shared.scored && topk.direction == SortDirection::Desc =>
+		{
+			shared
+				.context
+				.take_within_bounds(
+					ctx,
+					index_id,
+					listing.hits_mut(),
+					limit,
+					threshold,
+					topk.single_key,
+				)
+				.await?
+		}
+		(Some(Threshold::Clause(..) | Threshold::Sum(..)) | None, Some(_) | None) => None,
+	};
+	let doc_ids = match bounded {
+		Some((doc_ids, passed)) => {
+			#[cfg(test)]
+			BLOCK_SKIPS.with(|skips| skips.set(skips.get() + passed as usize));
+			#[cfg(not(test))]
+			let _ = passed;
+			doc_ids
+		}
+		None => listing.take_doc_ids(limit),
+	};
 	if doc_ids.is_empty() {
 		return Ok(None);
 	}
 	super::fuel::tick(ctx, super::fuel::units(doc_ids.len())).await?;
-	// Where the sort keeps the best scores, the hits whose posting blocks bound
-	// their score below its threshold are passed over before they are scored:
-	// the clause's blocks for its own score, and every clause's for a sum.
-	let doc_ids = match (&threshold, shared) {
-		(Some(Threshold::Clause(topk, threshold)), Some(shared))
-			if shared.scored && topk.direction == SortDirection::Desc =>
-		{
-			#[cfg(test)]
-			let taken = doc_ids.len();
-			let kept = shared
-				.context
-				.within_bounds(ctx, index_id, doc_ids, threshold, topk.single_key)
-				.await?;
-			#[cfg(test)]
-			BLOCK_SKIPS.with(|skips| skips.set(skips.get() + taken - kept.len()));
-			kept
-		}
+	// Where the sort keeps the best sums of clause scores, the hits whose sum
+	// every clause's posting blocks bound below its threshold are passed over
+	// before they are scored.
+	let doc_ids = match &threshold {
 		// A sum over several clauses is bounded by every clause's blocks at once.
-		(Some(Threshold::Sum(union, threshold)), _) if union.direction == SortDirection::Desc => {
+		Some(Threshold::Sum(union, threshold, _)) if union.direction == SortDirection::Desc => {
 			#[cfg(test)]
 			let taken = doc_ids.len();
 			let kept = union.within_bounds(ctx, doc_ids, threshold).await?;
@@ -381,7 +512,7 @@ pub(super) async fn next_records(
 			BLOCK_SKIPS.with(|skips| skips.set(skips.get() + taken - kept.len()));
 			kept
 		}
-		_ => doc_ids,
+		Some(Threshold::Sum(..) | Threshold::Clause(..)) | None => doc_ids,
 	};
 	if doc_ids.is_empty() {
 		return Ok(Some(Vec::new()));
@@ -396,7 +527,7 @@ pub(super) async fn next_records(
 				admitted(doc_ids, scores, &threshold, topk.direction, topk.single_key);
 			(doc_ids, Some(scores))
 		}
-		(Some(Threshold::Sum(union, threshold)), scores) => {
+		(Some(Threshold::Sum(union, threshold, _)), scores) => {
 			match union.sums(ctx, &doc_ids).await? {
 				Some(sums) => {
 					let keep: Vec<bool> = sums
@@ -1319,6 +1450,190 @@ mod tests {
 				assert!(skipped > 0, "BM25({k1}, {b}): no hit of `{condition}` was passed over");
 			}
 		}
+	}
+
+	/// Ranked full-text queries answer exactly as exhaustive scoring does, over
+	/// random corpora whose terms span several posting blocks: the rows and
+	/// scores of a query with no index, for one term, an `AND` of terms, an `OR`
+	/// of terms (one a rare term, one repeated), and a sum of clauses combined
+	/// with `OR`, for `k` of 1, 10 and 100, BM25 `b` of 0, 0.75 and 1, single-
+	/// and multi-key orders, with documents tied on their score, documents
+	/// rewritten and indexed since the compaction among the best, and a share of
+	/// the index left uncompacted. Hits are passed over in each corpus.
+	#[tokio::test]
+	async fn ranked_queries_answer_as_exhaustive_scoring() {
+		for (round, (k1, b)) in [("1.2", "0"), ("1.2", "0.75"), ("2", "1")].into_iter().enumerate()
+		{
+			let mut setup = format!(
+				"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase; \
+				 DEFINE TABLE d SCHEMALESS; \
+				 DEFINE INDEX d_body ON d FIELDS body FULLTEXT ANALYZER simple BM25({k1}, {b});"
+			);
+			let mut seed: u64 =
+				0x9e37_79b9_7f4a_7c15 ^ (round as u64 + 1).wrapping_mul(0x2545_f491);
+			let mut next = |bound: u64| {
+				seed ^= seed << 13;
+				seed ^= seed >> 7;
+				seed ^= seed << 17;
+				seed % bound
+			};
+			let text = |next: &mut dyn FnMut(u64) -> u64| {
+				let mut text = Vec::new();
+				for _ in 0..1 + next(30) {
+					text.push(match next(40) {
+						0..=11 => "common",
+						12..=16 => "mid",
+						17 => "rare",
+						_ => "filler",
+					});
+				}
+				text.join(" ")
+			};
+			let mut last = String::new();
+			for i in 0..2400 {
+				// Every so often a document repeats the one before it, so the two tie.
+				if i % 37 != 0 {
+					last = text(&mut next);
+				}
+				setup.push_str(&format!(" CREATE d:{i} SET body = '{last}';"));
+			}
+			let db = TestDb::quiescent(&setup, false).await;
+			crate::kvs::Datastore::index_compaction(
+				std::sync::Arc::clone(db.datastore()),
+				std::time::Duration::from_secs(1),
+				tokio_util::sync::CancellationToken::new(),
+			)
+			.await
+			.expect("compaction runs");
+			let run = |sql: String| {
+				let db = &db;
+				async move {
+					let mut responses =
+						db.datastore().execute(&sql, &TestDb::owner(), None).await.expect("runs");
+					responses.remove(0).result.expect("rows")
+				}
+			};
+			// Documents written since the compaction: a share of the index left
+			// uncompacted, and rewritten and new documents carrying the terms far
+			// more often than any compacted one, which are the best.
+			let mut writes = String::new();
+			for i in 2400..2700 {
+				writes.push_str(&format!(" CREATE d:{i} SET body = '{}';", text(&mut next)));
+			}
+			let many = |word: &str| vec![word; 40].join(" ");
+			writes.push_str(&format!(
+				" UPDATE d:2390 SET body = '{} rare'; UPDATE d:5 SET body = '{} mid'; \
+				 CREATE d:5000 SET body = '{} common'; CREATE d:5001 SET body = '{} common';",
+				many("common"),
+				many("rare"),
+				many("mid"),
+				many("mid"),
+			));
+			run(writes).await;
+			let (mut skipped, mut cut) = (0, 0);
+			for (score, condition) in [
+				("search::score(1)", "body @1@ 'common'"),
+				("search::score(1)", "body @1@ 'rare'"),
+				("search::score(1)", "body @1@ 'common mid'"),
+				("search::score(1)", "body @1,OR@ 'common rare'"),
+				("search::score(1)", "body @1,OR@ 'mid common mid rare'"),
+				("search::score(1) + search::score(2)", "body @1@ 'common' OR body @2@ 'rare'"),
+				(
+					"search::score(1) + search::score(2) + search::score(3)",
+					"body @1@ 'mid' OR body @2@ 'common rare' OR body @3@ 'rare'",
+				),
+			] {
+				for order in ["s DESC", "s DESC, id ASC"] {
+					for k in [1, 10, 100] {
+						let indexed = format!(
+							"SELECT id, {score} AS s FROM d WHERE {condition} \
+							 ORDER BY {order} LIMIT {k}"
+						);
+						let unindexed = format!(
+							"SELECT id, {score} AS s FROM d WITH NOINDEX WHERE {condition} \
+							 ORDER BY {order} LIMIT {k}"
+						);
+						BLOCK_SKIPS.with(|skips| skips.set(0));
+						UNION_CUTS.with(|cuts| cuts.set(0));
+						let indexed_rows = run(indexed.clone()).await;
+						skipped += BLOCK_SKIPS.with(|skips| skips.get());
+						cut += UNION_CUTS.with(|cuts| cuts.get());
+						let unindexed_rows = run(unindexed).await;
+						if order == "s DESC" {
+							// Rows tied on the only key may come in either order.
+							assert_eq!(
+								scores(indexed_rows),
+								scores(unindexed_rows),
+								"BM25({k1}, {b}): {indexed}"
+							);
+						} else {
+							assert_eq!(indexed_rows, unindexed_rows, "BM25({k1}, {b}): {indexed}");
+						}
+					}
+				}
+			}
+			assert!(skipped > 0, "BM25({k1}, {b}): no hit was passed over");
+			assert!(cut > 0, "BM25({k1}, {b}): no union branch was cut by its clauses' ceilings");
+		}
+	}
+
+	/// A branch of an index union cut to the hits carrying another clause's
+	/// terms, once its own clause's ceiling cannot beat the threshold, still
+	/// lists the documents written since the compaction: one carrying only the
+	/// cut clause's term, far more often than any compacted document does, is
+	/// among the best, as it is with no index.
+	#[tokio::test]
+	async fn a_cut_union_branch_keeps_its_uncompacted_documents() {
+		let mut setup = String::from(
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase; \
+			 DEFINE TABLE d SCHEMALESS; \
+			 DEFINE INDEX d_body ON d FIELDS body FULLTEXT ANALYZER simple BM25(1.2, 0);",
+		);
+		// `apple` and `berry` each in a tenth of the documents, never together,
+		// once each but for one `berry` document.
+		for i in 0..2000 {
+			let body = match i % 10 {
+				0 => "apple filler",
+				5 if i == 1005 => "berry berry berry berry berry",
+				5 => "berry filler",
+				_ => "filler",
+			};
+			setup.push_str(&format!(" CREATE d:{i} SET body = '{body}';"));
+		}
+		let db = TestDb::quiescent(&setup, false).await;
+		crate::kvs::Datastore::index_compaction(
+			std::sync::Arc::clone(db.datastore()),
+			std::time::Duration::from_secs(1),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await
+		.expect("compaction runs");
+		let run = |sql: String| {
+			let db = &db;
+			async move {
+				let mut responses =
+					db.datastore().execute(&sql, &TestDb::owner(), None).await.expect("runs");
+				responses.remove(0).result.expect("rows")
+			}
+		};
+		// Early documents that raise the threshold above `apple`'s ceiling, and a
+		// later one that beats them.
+		run("UPDATE d:0 SET body = 'apple apple apple'; UPDATE d:10 SET body = 'apple apple apple'; \
+			 UPDATE d:1990 SET body = 'apple apple apple apple apple apple'"
+			.to_owned())
+		.await;
+		let sql = |noindex: &str| {
+			format!(
+				"SELECT id, search::score(1) + search::score(2) AS s FROM d {noindex} \
+				 WHERE body @1@ 'apple' OR body @2@ 'berry' ORDER BY s DESC LIMIT 3"
+			)
+		};
+		UNION_CUTS.with(|cuts| cuts.set(0));
+		let indexed = run(sql("")).await;
+		assert!(UNION_CUTS.with(|cuts| cuts.get()) > 0, "the `apple` branch is cut");
+		let unindexed = run(sql("WITH NOINDEX")).await;
+		assert!(format!("{indexed:?}").contains("1990"), "{indexed:?}");
+		assert_eq!(scores(indexed), scores(unindexed));
 	}
 
 	/// Where scores tie, the threshold passes over no tie of a multi-key order,

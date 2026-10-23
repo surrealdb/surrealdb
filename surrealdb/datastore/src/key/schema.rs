@@ -765,19 +765,14 @@ keyspace! {
 						/// document that transaction moved for the term. A reader that
 						/// bounds work by key count therefore bounds nothing — see how
 						/// full-text compaction spends its limit as a document budget.
+						///
+						/// On an index that keeps its postings in blocks, an addition
+						/// also carries each document's frequency of the term and
+						/// length, so compaction fills a block entry from the change
+						/// that placed it rather than by reading the document's `!dt`
+						/// and `!dl` ([`crate::values::fulltext::ChangeBatch`]).
 						term_change_batch = ["!tx", @, term: Str, @, nid: Uuid, uid: Uuid, add: bool]
-							=> roaring::RoaringTreemap;
-
-						/// The frequency and length of each document one transaction
-						/// added to a term, beside the `!tx` entry (same `nid` and
-						/// `uid`) that adds it, in the order of that entry's bitmap,
-						/// which names the documents. Written only for an index that
-						/// keeps its postings in blocks, so compaction fills a block
-						/// entry from the change that placed it rather than by
-						/// reading the document's `!dt` and `!dl`. Removed with that
-						/// `!tx` entry.
-						term_change_postings = ["!tf", @, term: Str, @, nid: Uuid, uid: Uuid]
-							=> crate::values::fulltext::ChangePostings;
+							=> crate::values::fulltext::ChangeBatch;
 
 						/// Document length and count, compacted at the bound and
 						/// accumulated in deltas beneath it.

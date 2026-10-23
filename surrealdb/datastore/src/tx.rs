@@ -90,7 +90,7 @@ use crate::key::schema::{
 	RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
 	StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationKey,
 	TableMigrationRequestKey, TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix,
-	TermChangeBatchKey, TermChangePostingsKey, VersionKey,
+	TermChangeBatchKey, VersionKey,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
@@ -107,7 +107,7 @@ use crate::triggers::{CommitTriggers, FencedTable};
 use crate::values::catalog_version::{CatalogObject, CatalogObjectKind, CatalogVersion};
 use crate::values::changefeed::Changefeed;
 use crate::values::diskann::{DiskAnnPendingState, DiskAnnPendingStateKind, DiskAnnWriterLease};
-use crate::values::fulltext::{ChangePostings, DocLengthAndCount};
+use crate::values::fulltext::{ChangeBatch, ChangePostings, DocLengthAndCount};
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
 use crate::values::ids::DocId;
 use crate::values::index_build::{
@@ -10651,7 +10651,7 @@ impl Transaction {
 	///
 	/// `posting` is the term's frequency in the document and the document's
 	/// length, given for an addition to an index that keeps its postings in
-	/// blocks: the flush writes them beside the addition (`!tf`).
+	/// blocks: the flush writes them with the addition (`!tx`).
 	#[expect(clippy::too_many_arguments, reason = "the index identity is four fields")]
 	pub fn buffer_term_change(
 		&self,
@@ -10838,18 +10838,20 @@ impl Transaction {
 			let index = &term.index;
 			// One posting per added document, in the order the addition's bitmap
 			// iterates in, so the two pair one for one. A document whose last
-			// change carried no posting takes a frequency of zero.
-			let postings = (!delta.postings.is_empty()).then(|| {
+			// change carried no posting takes a frequency of zero. An addition
+			// none of whose documents holds a posting carries none: compaction
+			// reads every document of such an addition from what it stores.
+			let mut postings = {
 				let mut current = delta.current_postings().peekable();
-				delta
-					.added
-					.iter()
-					.map(|doc_id| match current.next_if(|(posted, ..)| *posted == doc_id) {
-						Some((_, frequency, length)) => (frequency, length),
-						None => (0, 0),
-					})
-					.collect::<Vec<_>>()
-			});
+				current.peek().is_some().then(|| {
+					ChangePostings::from_postings(delta.added.iter().map(|doc_id| {
+						match current.next_if(|(posted, ..)| *posted == doc_id) {
+							Some((_, frequency, length)) => (frequency, length),
+							None => (0, 0),
+						}
+					}))
+				})
+			};
 			for (add, docs) in [(true, delta.added), (false, delta.removed)] {
 				if docs.is_empty() {
 					continue;
@@ -10864,19 +10866,15 @@ impl Transaction {
 					uid,
 					add,
 				};
-				self.set_key_prereserved(&key, &docs).await?;
-			}
-			if let Some(postings) = postings.filter(|postings| !postings.is_empty()) {
-				let key = TermChangePostingsKey {
-					ns: index.ns,
-					db: index.db,
-					tb: Cow::Borrowed(&index.tb),
-					ix: index.ix,
-					term: Cow::Borrowed(&term.term),
-					nid: delta.nid,
-					uid,
-				};
-				self.set_key_prereserved(&key, &ChangePostings::from_postings(postings)).await?;
+				let postings = postings.take().filter(|_| add);
+				self.set_key_prereserved(
+					&key,
+					&ChangeBatch {
+						docs,
+						postings,
+					},
+				)
+				.await?;
 			}
 		}
 		for (index, stats, nid) in doc_stats {

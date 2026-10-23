@@ -6,13 +6,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use roaring::RoaringTreemap;
-use roaring::treemap::IntoIter;
 use surrealdb_datastore::Transaction;
 // A posting and the index's document statistics are stored values, so both are
 // declared below this layer; the indexing and scoring code here maintains them.
 pub use surrealdb_datastore::values::fulltext::{
-	BlockSummary, ChangePostings, DocLengthAndCount, DocumentTerms, PostingBlock, TermBlocks,
-	TermDocsResidual, TermDocument,
+	BlockSummary, ChangeBatch, ChangePostings, DocLengthAndCount, DocumentTerms, PostingBlock,
+	TermBlocks, TermDocsResidual, TermDocument,
 };
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
@@ -94,6 +93,70 @@ pub struct QueryTerms {
 	/// The scope the terms were read at, when the node's cache may serve
 	/// this query.
 	scope: Option<crate::ft::cache::TermScope>,
+	/// The terms a document's score sums, in the order it sums them
+	/// ([`SummedTerms`]).
+	summed: SummedTerms,
+}
+
+/// The terms a document's score sums, in the order it sums them: positions in
+/// a query's terms, each with the first position whose token is the same
+/// string.
+///
+/// A score takes each string once, at the first position, in query order,
+/// that carries the document. Where the query's terms are its tokens one to
+/// one, two positions holding one string read the same state, so they carry
+/// the same documents and the score takes the first of them for every
+/// document: only those positions are listed, and no document is told apart.
+/// Otherwise a position may stand for another token than its term
+/// ([`FullTextIndex::plan_query`] drops a token equal to an earlier one,
+/// offsets included), every position is listed, and a document drops a
+/// position whose string an earlier position carrying it already took.
+struct SummedTerms {
+	/// `(position, first position of its string)`, in query order.
+	positions: Vec<(usize, usize)>,
+	/// Whether a document drops the positions whose string an earlier position
+	/// carrying it took.
+	per_document: bool,
+}
+
+impl SummedTerms {
+	/// The terms a score sums, of a query reading `terms` terms whose tokens
+	/// are `tokens`.
+	fn of(tokens: &Tokens, terms: usize) -> Result<Self> {
+		let tl = tokens.list();
+		let mut first: HashMap<&str, usize> = HashMap::with_capacity(terms);
+		let mut positions = Vec::with_capacity(terms);
+		let mut repeats = false;
+		for (at, token) in tl.iter().enumerate().take(terms) {
+			let key = *first.entry(tokens.get_token_string(token)?).or_insert(at);
+			repeats |= key != at;
+			positions.push((at, key));
+		}
+		let aligned = tl.len() == terms;
+		if aligned {
+			positions.retain(|(at, key)| at == key);
+		}
+		Ok(Self {
+			positions,
+			per_document: repeats && !aligned,
+		})
+	}
+
+	/// What a document records of the strings it has taken, where it tells
+	/// them apart.
+	fn taken(&self, terms: usize) -> Option<Vec<bool>> {
+		self.per_document.then(|| vec![false; terms])
+	}
+}
+
+/// Whether a document that `taken` records the strings of, `None` where none
+/// is told apart, takes the position whose string's first position is
+/// `key`; recorded as taken.
+fn takes(taken: &mut Option<Vec<bool>>, key: usize) -> bool {
+	match taken {
+		Some(taken) => !std::mem::replace(&mut taken[key], true),
+		None => true,
+	}
 }
 
 /// A query's terms, analyzed, and what each reads of the index
@@ -109,8 +172,8 @@ pub struct QueryPlan {
 pub struct TermState {
 	/// The keys of [`kernels::fulltext::TermReads::changes`].
 	pub change_keys: Vec<Vec<u8>>,
-	/// The keys and bitmaps of [`kernels::fulltext::TermReads::batches`].
-	pub batches: Vec<(Vec<u8>, RoaringTreemap)>,
+	/// The keys and changes of [`kernels::fulltext::TermReads::batches`].
+	pub batches: Vec<(Vec<u8>, ChangeBatch)>,
 	pub pending_added: RoaringTreemap,
 	pub pending_removed: RoaringTreemap,
 	/// The value at [`kernels::fulltext::TermReads::residual`].
@@ -210,6 +273,7 @@ impl QueryPlan {
 			));
 		}
 		let has_unknown_terms = docs.iter().any(Option::is_none);
+		let summed = SummedTerms::of(&self.tokens, docs.len())?;
 		Ok(QueryTerms {
 			tokens: self.tokens,
 			docs,
@@ -218,6 +282,7 @@ impl QueryPlan {
 			bitmaps,
 			uncompacted,
 			scope: None,
+			summed,
 		})
 	}
 }
@@ -259,8 +324,9 @@ impl QueryTerms {
 	/// Upper bounds on the score `scorer` gives these terms in a document,
 	/// over ranges of doc ids, from the impacts of the terms' posting blocks;
 	/// `None` where no bound holds: a term's compacted documents were read
-	/// from a bitmap, or the scorer's parameters do not make its score rise
-	/// with frequency and fall with length
+	/// from a bitmap, a document tells repeated tokens apart by which term
+	/// carries it ([`SummedTerms`]), or the scorer's parameters do not make
+	/// its score rise with frequency and fall with length
 	/// ([`kernels::fulltext::Bm25::bounded_by_extremes`]).
 	///
 	/// A range starts at the first document of any term's block and ends at
@@ -271,31 +337,29 @@ impl QueryTerms {
 	/// a document carries a term only where that term's blocks hold it, at a
 	/// frequency and length one of the block's impacts dominates. It says nothing of an uncompacted
 	/// document ([`Self::is_uncompacted`]).
+	///
+	/// Each such term's ceiling, the best score over all of its blocks, is kept
+	/// beside the ranges: a document carrying only some of the terms scores no
+	/// more than the sum of their ceilings ([`BlockBounds::passed_terms`]).
 	pub fn block_bounds(&self, scorer: &Scorer) -> Option<BlockBounds> {
-		if self.bitmaps || !scorer.bm25.bounded_by_extremes() {
+		if self.bitmaps || self.summed.per_document || !scorer.bm25.bounded_by_extremes() {
 			return None;
 		}
 		// Each distinct term once, as a document's score takes it.
-		let tl = self.tokens.list();
-		let mut taken = HashSet::new();
 		let mut terms = Vec::new();
-		for (i, docs) in self.docs.iter().enumerate() {
-			let (Some(docs), Some(token)) = (docs, tl.get(i)) else {
+		for (at, _) in &self.summed.positions {
+			let Some(docs) = &self.docs[*at] else {
 				continue;
 			};
-			let term = self.tokens.get_token_string(token).ok()?;
-			if !taken.insert(term) {
-				continue;
-			}
-			if let Some(postings) = self.postings.get(i).and_then(Option::as_ref) {
-				terms.push((postings, docs.len() as f64));
+			if let Some(postings) = &self.postings[*at] {
+				terms.push((*at, postings, docs.len() as f64));
 			}
 		}
 		// Each term's blocks, scored once: a block's first document and the best score
 		// among its impacts.
 		let scored: Vec<Vec<(DocId, f64)>> = terms
 			.iter()
-			.map(|(postings, n)| {
+			.map(|(_, postings, n)| {
 				postings
 					.block_impacts()
 					.map(|(first, impacts)| {
@@ -331,9 +395,17 @@ impl QueryTerms {
 				round_up(bound)
 			})
 			.collect();
+		let terms = terms
+			.iter()
+			.zip(&scored)
+			.map(|((at, ..), blocks)| {
+				(*at, blocks.iter().fold(0.0f64, |best, (_, b)| best.max(*b)))
+			})
+			.collect();
 		Some(BlockBounds {
 			starts,
 			bounds,
+			terms,
 		})
 	}
 
@@ -353,6 +425,18 @@ impl QueryTerms {
 	/// Whether document `doc_id` carries any of the query's terms.
 	pub fn carries_any(&self, doc_id: DocId) -> bool {
 		self.docs.iter().flatten().any(|d| d.contains(doc_id))
+	}
+
+	/// The documents carrying any of the query's terms
+	/// ([`Self::carries_any`]).
+	pub fn carriers(&self) -> RoaringTreemap {
+		kernels::fulltext::combine(&self.docs, BooleanOperator::Or).unwrap_or_default()
+	}
+
+	/// The documents the terms hold uncompacted state for
+	/// ([`Self::is_uncompacted`]).
+	pub fn uncompacted(&self) -> &RoaringTreemap {
+		&self.uncompacted
 	}
 
 	pub(in crate::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
@@ -624,11 +708,11 @@ struct TermDocsCompactionPlan {
 	tt_keys: Vec<TermChangeKey<'static>>,
 	/// The per-transaction `!tx` deltas this snapshot saw.
 	tx_keys: Vec<TermChangeBatchKey<'static>>,
-	/// The documents of each `!tx` entry in `tx_keys`, in the same order, for
-	/// an index that keeps its postings in blocks: an addition's are the
-	/// documents its `!tf` postings pair with, and a removal's tell which
-	/// documents a transaction also removed ([`FullTextIndex::changed_postings`]).
-	batch_docs: Vec<RoaringTreemap>,
+	/// Each `!tx` entry in `tx_keys`, in the same order, for an index that
+	/// keeps its postings in blocks: an addition carries its documents'
+	/// postings, and a removal tells which documents a transaction also removed
+	/// ([`FullTextIndex::changed_postings`]).
+	batches: Vec<ChangeBatch>,
 	/// The first term either scan stopped inside, before which every term's
 	/// deltas were captured whole. `None` where both scans reached the end of
 	/// their range, so every term this snapshot names was captured whole.
@@ -1347,7 +1431,7 @@ impl FullTextIndex {
 		let limit = limit.max(1);
 		let mut tt_keys = Vec::new();
 		let mut tx_keys = Vec::new();
-		let mut batch_docs = Vec::new();
+		let mut batches = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
 		// Both delta shapes are drained in one pass, so an index carrying entries in
 		// either shape compacts to the same document set. Either family having more
@@ -1420,7 +1504,8 @@ impl FullTextIndex {
 			let page_full = page.len() as u32 == rows;
 			let resume_after = page.last().map(|(k, _)| k.clone());
 			let page_len = page.len();
-			for (index, (k, docs)) in page.into_iter().enumerate() {
+			for (index, (k, batch)) in page.into_iter().enumerate() {
+				let docs = &batch.docs;
 				// One rule for every entry: the one that takes the round past a limit is
 				// folded, and is the round's last. So a round holds at most `limit`
 				// entries and one more, and `tx_budget` documents and that entry's width,
@@ -1456,11 +1541,11 @@ impl FullTextIndex {
 					-1
 				};
 				let by_doc = deltas_by_term.entry(tx_key.term.to_string()).or_default();
-				for doc_id in &docs {
+				for doc_id in docs {
 					*by_doc.entry(doc_id).or_default() += step;
 				}
 				if self.blocks {
-					batch_docs.push(docs);
+					batches.push(batch);
 				}
 				tx_keys.push(tx_key.into_owned());
 				if last {
@@ -1548,7 +1633,7 @@ impl FullTextIndex {
 			deltas_by_term,
 			tt_keys,
 			tx_keys,
-			batch_docs,
+			batches,
 			captured_below,
 			standalone_residuals,
 			has_more,
@@ -1613,7 +1698,7 @@ impl FullTextIndex {
 		let keys: Vec<_> = folded.iter().map(|(term, ..)| self.ikb.new_tr_root(term)).collect();
 		let residuals: Vec<Option<TermDocsResidual>> = tx.get_many_key(keys, None).await?;
 		if self.blocks {
-			let changed = self.changed_postings(tx, &plan, &folded).await?;
+			let changed = self.changed_postings(&plan, &folded);
 			let terms: HashSet<String> = folded.iter().map(|(term, ..)| term.clone()).collect();
 			let stored = self.stored_postings(tx, &folded, &residuals, &changed, &terms).await?;
 			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
@@ -1629,9 +1714,6 @@ impl FullTextIndex {
 				)
 				.await?;
 			}
-			for key in plan.tx_keys.iter().filter(|key| key.add) {
-				tx.del_key(&self.ikb.new_tf(&key.term, key.nid, key.uid)).await?;
-			}
 		} else {
 			for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
 				self.fold_term_docs(tx, &term, deltas, residual, captured_whole).await?;
@@ -1646,13 +1728,13 @@ impl FullTextIndex {
 		Ok(())
 	}
 
-	/// The postings the round's additions carry (`!tf`), by term, for each
+	/// The postings the round's additions carry (`!tx`), by term, for each
 	/// document whose only changes to the term in the round are one such
 	/// addition and, at most, a removal by the same transaction: its total is
 	/// one, or zero for a transaction that kept the term (removed it and gave it
 	/// back), and no other change or per-document change (`!tt`) names it.
 	/// Every addition to an index that keeps its postings in blocks carries its
-	/// posting, so such a document's current posting is that addition's.
+	/// postings, so such a document's current posting is that addition's.
 	///
 	/// Additions to a term are ordered by node rather than by time, but a
 	/// snapshot that sees an addition sees every earlier one, so an addition is
@@ -1662,38 +1744,24 @@ impl FullTextIndex {
 	/// holding a residual, it is only where the term's blocks do not hold the
 	/// document yet, so no later addition has placed it
 	/// ([`Self::fold_term_blocks`]).
-	async fn changed_postings(
+	fn changed_postings(
 		&self,
-		tx: &Transaction,
 		plan: &TermDocsCompactionPlan,
 		folded: &[(String, HashMap<DocId, i64>, bool)],
-	) -> Result<HashMap<String, HashMap<DocId, Posting>>> {
-		let batches = || plan.tx_keys.iter().zip(&plan.batch_docs);
-		let additions: Vec<(&TermChangeBatchKey<'static>, &RoaringTreemap)> =
-			batches().filter(|(key, _)| key.add).collect();
-		if additions.is_empty() {
-			return Ok(HashMap::new());
-		}
-		let postings: Vec<Option<ChangePostings>> = tx
-			.get_many_key(
-				additions
-					.iter()
-					.map(|(key, _)| self.ikb.new_tf(&key.term, key.nid, key.uid))
-					.collect(),
-				None,
-			)
-			.await?;
+	) -> HashMap<String, HashMap<DocId, Posting>> {
+		let batches = || plan.tx_keys.iter().zip(&plan.batches);
 		// The posting and transaction of each document's one addition, `None`
 		// for a document more than one addition names.
 		let mut found: HashMap<&str, OneChange<(Posting, ChangeTags)>> = HashMap::new();
-		for ((key, docs), batch) in additions.into_iter().zip(postings) {
+		for (key, batch) in batches().filter(|(key, _)| key.add) {
+			let docs = &batch.docs;
 			let by_doc = found.entry(key.term.as_ref()).or_default();
-			// An addition whose postings are missing or do not pair one for one
-			// with its documents tells nothing of them, and it is still one of the
-			// additions that name them: they are read from what they store.
-			let postings = match batch {
-				Some(batch) => {
-					let postings = batch.postings();
+			// An addition that carries no postings, or postings that do not pair one
+			// for one with its documents, tells nothing of them, and it is still one
+			// of the additions that name them: they are read from what they store.
+			let postings = match &batch.postings {
+				Some(carried) => {
+					let postings = carried.postings();
 					if postings.as_ref().is_none_or(|postings| postings.len() as u64 != docs.len())
 					{
 						tracing::warn!(
@@ -1703,7 +1771,7 @@ impl FullTextIndex {
 							self.ikb.index().0,
 							self.ikb.table(),
 							docs.len(),
-							batch.len(),
+							carried.len(),
 						);
 						None
 					} else {
@@ -1728,9 +1796,9 @@ impl FullTextIndex {
 		// The transaction of each document's one removal, `None` for a document
 		// more than one removal names.
 		let mut removed: HashMap<&str, OneChange<ChangeTags>> = HashMap::new();
-		for (key, docs) in batches().filter(|(key, _)| !key.add) {
+		for (key, batch) in batches().filter(|(key, _)| !key.add) {
 			let by_doc = removed.entry(key.term.as_ref()).or_default();
-			for doc_id in docs {
+			for doc_id in &batch.docs {
 				by_doc
 					.entry(doc_id)
 					.and_modify(|tags| *tags = None)
@@ -1746,7 +1814,7 @@ impl FullTextIndex {
 		}
 		let totals_by_term: HashMap<&str, &HashMap<DocId, i64>> =
 			folded.iter().map(|(term, totals, _)| (term.as_str(), totals)).collect();
-		Ok(found
+		found
 			.into_iter()
 			.map(|(term, by_doc)| {
 				let totals = totals_by_term.get(term);
@@ -1767,7 +1835,7 @@ impl FullTextIndex {
 					.collect();
 				(term.to_owned(), by_doc)
 			})
-			.collect())
+			.collect()
 	}
 
 	/// The stored postings and length of every document `folded` or
@@ -1852,7 +1920,12 @@ impl FullTextIndex {
 		if let Some(hits) = hits
 			&& !hits.is_empty()
 		{
-			return Some(FullTextHitsIterator::new(self.ikb.clone(), self.doc_ids, hits));
+			return Some(FullTextHitsIterator::new(
+				self.ikb.clone(),
+				self.doc_ids,
+				hits,
+				matches!(bo, BooleanOperator::Or),
+			));
 		}
 
 		// No documents match the terms
@@ -2205,8 +2278,34 @@ pub struct FullTextHitsIterator {
 	ikb: IndexKeyBase,
 	/// The doc-ID mapping this index was created with
 	doc_ids: FullTextDocIds,
-	/// Iterator over the document IDs in the search results
-	iter: IntoIter,
+	/// The document IDs in the search results.
+	hits: RoaringTreemap,
+	/// The lowest doc id not yet taken or passed over; `None` once the hits
+	/// have run out.
+	next: Option<DocId>,
+	/// Where [`Self::take_doc_ids_within`] stands in the ranges of the bounds
+	/// it is given: the range the last hit it looked at falls in, and the end
+	/// of the ranges from there on known to hold no bound that beats the
+	/// threshold.
+	ranges: BoundsCursor,
+	/// Whether the hits are those of an `OR` of the query's terms, any of which
+	/// a hit may carry alone.
+	or: bool,
+	/// How many of the terms the hits are no longer listed for alone
+	/// ([`BlockBounds::passed_terms`]).
+	passed_terms: usize,
+}
+
+/// A position in a [`BlockBounds`]'s ranges, moved forward by hits taken in
+/// ascending doc-id order.
+#[derive(Default)]
+struct BoundsCursor {
+	/// The range the last hit looked at falls in.
+	at: usize,
+	/// The first range at or after `at` whose bound may beat the threshold, as
+	/// far as known: the ranges from `at` up to it beat none, and as the
+	/// threshold only tightens, never will.
+	beats_from: usize,
 }
 
 impl FullTextHitsIterator {
@@ -2214,12 +2313,24 @@ impl FullTextHitsIterator {
 	///
 	/// This method initializes an iterator with the index key base and a bitmap
 	/// of matching document IDs.
-	fn new(ikb: IndexKeyBase, doc_ids: FullTextDocIds, hits: RoaringTreemap) -> Self {
+	fn new(ikb: IndexKeyBase, doc_ids: FullTextDocIds, hits: RoaringTreemap, or: bool) -> Self {
 		Self {
 			ikb,
 			doc_ids,
-			iter: hits.into_iter(),
+			next: hits.min(),
+			hits,
+			ranges: BoundsCursor::default(),
+			or,
+			passed_terms: 0,
 		}
+	}
+
+	/// The hits not yet taken, from the lowest.
+	fn remaining(&self) -> Option<roaring::treemap::Iter<'_>> {
+		let next = self.next?;
+		let mut iter = self.hits.iter();
+		iter.advance_to(next);
+		Some(iter)
 	}
 }
 
@@ -2227,7 +2338,137 @@ impl FullTextHitsIterator {
 	/// The doc ids of up to `limit` hits not yet taken, in doc-id order; empty
 	/// once the hits have run out.
 	pub fn take_doc_ids(&mut self, limit: usize) -> Vec<DocId> {
-		self.iter.by_ref().take(limit).collect()
+		if limit == 0 {
+			return Vec::new();
+		}
+		let Some(iter) = self.remaining() else {
+			return Vec::new();
+		};
+		let taken: Vec<DocId> = iter.take(limit).collect();
+		self.next = if taken.len() < limit {
+			None
+		} else {
+			taken.last().and_then(|last| last.checked_add(1))
+		};
+		taken
+	}
+
+	/// The doc ids of up to `limit` hits not yet taken whose score under
+	/// `terms` may beat a threshold, in doc-id order, with how many hits were
+	/// passed over on the way; no doc id once the hits have run out.
+	///
+	/// A hit `terms` hold uncompacted state for ([`QueryTerms::is_uncompacted`])
+	/// is always taken, and so is one before every range of `bounds`, the
+	/// bounds of `terms` ([`QueryTerms::block_bounds`]). Any other hit falls in
+	/// a range whose bound is at or above its score, so a hit whose range's
+	/// bound `beats` does not accept cannot beat the threshold. Such a range,
+	/// and every range after it that `beats` does not accept either, is passed
+	/// over whole, but for the uncompacted hits in it, which are taken in
+	/// their place in doc-id order.
+	///
+	/// The hits of an `OR` of terms are also cut, once and for good, to those
+	/// carrying a term other than those whose ceilings together cannot beat
+	/// the threshold ([`BlockBounds::passed_terms`]), and those `terms` hold
+	/// uncompacted state for; the hits cut count as passed over.
+	///
+	/// The threshold `beats` tests a bound against must only tighten from one
+	/// call to the next: a range passed over, or known to beat nothing, is not
+	/// looked at again.
+	pub fn take_doc_ids_within(
+		&mut self,
+		limit: usize,
+		terms: &QueryTerms,
+		bounds: &BlockBounds,
+		beats: impl Fn(f32) -> bool,
+	) -> (Vec<DocId>, u64) {
+		let mut taken = Vec::with_capacity(limit.min(1024));
+		let mut passed = 0;
+		if limit == 0 {
+			return (taken, passed);
+		}
+		// Of an `OR` of terms, a hit carrying only terms whose ceilings together
+		// cannot beat the threshold cannot either, unless the terms hold
+		// uncompacted state for it: the hits are cut to those carrying another
+		// term, or uncompacted.
+		if self.or && bounds.terms.len() > 1 {
+			let passed_terms = bounds.passed_terms(&beats);
+			let count = passed_terms.iter().filter(|passed| **passed).count();
+			if count > self.passed_terms {
+				let mut kept = terms.uncompacted.clone();
+				for ((at, _), passed) in bounds.terms.iter().zip(&passed_terms) {
+					if let (false, Some(docs)) = (passed, &terms.docs[*at]) {
+						kept |= docs;
+					}
+				}
+				passed += self.retain(&kept);
+				self.passed_terms = count;
+			}
+		}
+		let Some(next) = self.next else {
+			return (taken, passed);
+		};
+		let mut iter = self.hits.iter();
+		iter.advance_to(next);
+		while taken.len() < limit {
+			let Some(doc_id) = iter.next() else {
+				self.next = None;
+				return (taken, passed);
+			};
+			if terms.is_uncompacted(doc_id) {
+				taken.push(doc_id);
+				continue;
+			}
+			let Some(at) = bounds.range_at(&mut self.ranges, doc_id) else {
+				taken.push(doc_id);
+				continue;
+			};
+			let beats_from = bounds.beats_from(&mut self.ranges, at, &beats);
+			if beats_from == at {
+				taken.push(doc_id);
+				continue;
+			}
+			// No hit from here up to the start of the next range that may beat the
+			// threshold can, but for an uncompacted one: the scan resumes at the
+			// first of either.
+			let end = bounds.starts.get(beats_from).copied();
+			let uncompacted = doc_id.checked_add(1).and_then(|after| {
+				let mut uncompacted = terms.uncompacted.iter();
+				uncompacted.advance_to(after);
+				uncompacted.next()
+			});
+			let resume = match (end, uncompacted) {
+				(Some(end), Some(uncompacted)) => Some(end.min(uncompacted)),
+				(end, uncompacted) => end.or(uncompacted),
+			};
+			match resume {
+				Some(resume) => {
+					passed += self.hits.range_cardinality(doc_id..resume);
+					iter.advance_to(resume);
+				}
+				None => {
+					passed += self.hits.range_cardinality(doc_id..);
+					self.next = None;
+					return (taken, passed);
+				}
+			}
+		}
+		self.next = taken.last().and_then(|last| last.checked_add(1));
+		(taken, passed)
+	}
+
+	/// Keeps of the hits not yet taken only those `kept` holds, and answers
+	/// how many were dropped.
+	pub fn retain(&mut self, kept: &RoaringTreemap) -> u64 {
+		let Some(next) = self.next else {
+			return 0;
+		};
+		let before = self.hits.range_cardinality(next..);
+		self.hits &= kept;
+		let after = self.hits.range_cardinality(next..);
+		if after == 0 {
+			self.next = None;
+		}
+		before - after
 	}
 
 	/// The record each of `doc_ids` maps to, in order, in one batched read;
@@ -2255,13 +2496,10 @@ impl FullTextHitsIterator {
 }
 
 impl MatchesHitsIterator for FullTextHitsIterator {
-	#[cfg(target_pointer_width = "64")]
 	fn len(&self) -> usize {
-		self.iter.len()
-	}
-	#[cfg(not(target_pointer_width = "64"))]
-	fn len(&self) -> usize {
-		self.iter.size_hint().0
+		self.next.map_or(0, |next| {
+			usize::try_from(self.hits.range_cardinality(next..)).unwrap_or(usize::MAX)
+		})
 	}
 
 	/// Returns the next search hit in the iterator
@@ -2269,7 +2507,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	/// This method retrieves the next document ID from the bitmap and resolves
 	/// it to a Thing. It returns None when there are no more hits.
 	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
-		for doc_id in self.iter.by_ref() {
+		while let Some(doc_id) = self.take_doc_ids(1).first().copied() {
 			if let Some(key) = self.doc_ids.get_record_id(&self.ikb, tx, doc_id).await? {
 				let rid = RecordId {
 					table: self.ikb.table().clone(),
@@ -2289,6 +2527,10 @@ pub struct BlockBounds {
 	starts: Vec<DocId>,
 	/// Each range's bound.
 	bounds: Vec<f32>,
+	/// Each distinct term whose blocks bound its score, in the order a score
+	/// sums them: its position in the query's terms, and its ceiling, the best
+	/// score among the impacts of all of its blocks.
+	terms: Vec<(usize, f64)>,
 }
 
 impl BlockBounds {
@@ -2298,6 +2540,78 @@ impl BlockBounds {
 	pub fn bound(&self, doc_id: DocId) -> Option<f32> {
 		let at = self.starts.partition_point(|start| *start <= doc_id);
 		at.checked_sub(1).map(|at| self.bounds[at])
+	}
+
+	/// The range `doc_id` falls in, found from `cursor`, which it leaves on
+	/// that range; `None` before every range.
+	fn range_at(&self, cursor: &mut BoundsCursor, doc_id: DocId) -> Option<usize> {
+		if self.starts.get(cursor.at).is_none_or(|start| *start > doc_id) {
+			// Behind the cursor, or no range at all: searched for from the start.
+			let at = self.starts.partition_point(|start| *start <= doc_id).checked_sub(1)?;
+			*cursor = BoundsCursor {
+				at,
+				beats_from: at,
+			};
+			return Some(at);
+		}
+		while self.starts.get(cursor.at + 1).is_some_and(|start| *start <= doc_id) {
+			cursor.at += 1;
+		}
+		cursor.beats_from = cursor.beats_from.max(cursor.at);
+		Some(cursor.at)
+	}
+
+	/// The highest bound of any range, at or above the score of every
+	/// document the terms hold no uncompacted state for; `None` where no range
+	/// is bounded, as no such document carries a term.
+	pub fn ceiling(&self) -> Option<f32> {
+		self.bounds.iter().copied().reduce(f32::max)
+	}
+
+	/// Which of [`Self::terms`] a document may carry alone, in their order, and
+	/// still not score above a threshold `beats` tests a bound against: the
+	/// most terms, taken lowest ceiling first, whose ceilings sum, as a score
+	/// sums its terms in `f64` and rounded up to the `f32` it is compared in
+	/// ([`round_up`]), to a bound `beats` does not accept.
+	///
+	/// A document the query's terms hold no uncompacted state for scores each
+	/// term it carries at most that term's ceiling, and a sum in one order of
+	/// fewer non-negative values, each no larger, is no larger: carrying none
+	/// but these terms, it cannot beat the threshold.
+	fn passed_terms(&self, beats: impl Fn(f32) -> bool) -> Vec<bool> {
+		let mut order: Vec<usize> = (0..self.terms.len()).collect();
+		order.sort_by(|a, b| self.terms[*a].1.total_cmp(&self.terms[*b].1));
+		let mut passed = vec![false; self.terms.len()];
+		for at in order {
+			passed[at] = true;
+			let sum = self
+				.terms
+				.iter()
+				.zip(&passed)
+				.filter(|(_, passed)| **passed)
+				.fold(0.0f64, |sum, ((_, ceiling), _)| sum + ceiling);
+			if beats(round_up(sum)) {
+				passed[at] = false;
+				break;
+			}
+		}
+		passed
+	}
+
+	/// The first range at or after range `at`, the one `cursor` stands on,
+	/// whose bound `beats` accepts; the number of ranges where none does.
+	fn beats_from(
+		&self,
+		cursor: &mut BoundsCursor,
+		at: usize,
+		beats: impl Fn(f32) -> bool,
+	) -> usize {
+		let mut from = cursor.beats_from.max(at);
+		while self.bounds.get(from).is_some_and(|bound| !beats(*bound)) {
+			from += 1;
+		}
+		cursor.beats_from = from;
+		from
 	}
 }
 
@@ -2357,14 +2671,30 @@ impl Scorer {
 		if !qt.carries_any(doc_id) {
 			return Ok(0.0);
 		}
-		if let Some(score) = self.score_from_postings(qt, doc_id)? {
+		let idfs = self.idfs(qt);
+		let mut cursors = vec![0; qt.summed.positions.len()];
+		if let Some(score) = self.score_from_postings(qt, &idfs, &mut cursors, doc_id) {
 			return Ok(score);
 		}
 		let documents = Self::stored_documents(fti, tx, qt, &[doc_id]).await?;
 		let document = documents
 			.first()
 			.ok_or_else(|| anyhow::anyhow!("a document the read did not answer"))?;
-		self.score_loaded(fti, tx, qt, doc_id, document.length, document.terms.as_ref()).await
+		self.score_loaded(fti, tx, qt, &idfs, doc_id, document.length, document.terms.as_ref())
+			.await
+	}
+
+	/// The inverse document frequency of each term a score sums
+	/// ([`SummedTerms`]), in order; zero for a term no document carries, which
+	/// no score takes.
+	fn idfs(&self, qt: &QueryTerms) -> Vec<f64> {
+		qt.summed
+			.positions
+			.iter()
+			.map(|(at, _)| {
+				qt.docs[*at].as_ref().map_or(0.0, |docs| self.bm25.idf(docs.len() as f64))
+			})
+			.collect()
 	}
 
 	/// [`Self::score`] of each of `doc_ids`, in input order, reading the
@@ -2382,30 +2712,31 @@ impl Scorer {
 		qt: &QueryTerms,
 		doc_ids: &[DocId],
 	) -> Result<Vec<Score>> {
-		let mut scored = HashMap::with_capacity(doc_ids.len());
-		let mut carriers = Vec::new();
-		for doc_id in doc_ids.iter().copied().filter(|doc_id| qt.carries_any(*doc_id)) {
-			match self.score_from_postings(qt, doc_id)? {
-				Some(score) => {
-					scored.insert(doc_id, score);
-				}
-				None => carriers.push(doc_id),
+		let idfs = self.idfs(qt);
+		// A cursor per term into its postings, moved forward by doc ids that
+		// ascend, as a scan lists them.
+		let mut cursors = vec![0; qt.summed.positions.len()];
+		let mut scores = vec![0.0; doc_ids.len()];
+		// The positions in `doc_ids` of the documents scored from what they store.
+		let mut stored = Vec::new();
+		for (at, doc_id) in doc_ids.iter().enumerate() {
+			match self.score_from_postings(qt, &idfs, &mut cursors, *doc_id) {
+				Some(score) => scores[at] = score,
+				None if qt.carries_any(*doc_id) => stored.push(at),
+				None => {}
 			}
 		}
-		if carriers.is_empty() {
-			return Ok(doc_ids
-				.iter()
-				.map(|doc_id| scored.get(doc_id).copied().unwrap_or(0.0))
-				.collect());
+		if stored.is_empty() {
+			return Ok(scores);
 		}
+		let carriers: Vec<DocId> = stored.iter().map(|at| doc_ids[*at]).collect();
 		let documents = Self::stored_documents(fti, tx, qt, &carriers).await?;
-		for (doc_id, document) in carriers.into_iter().zip(documents) {
-			let score = self
-				.score_loaded(fti, tx, qt, doc_id, document.length, document.terms.as_ref())
+		for ((at, doc_id), document) in stored.into_iter().zip(carriers).zip(documents) {
+			scores[at] = self
+				.score_loaded(fti, tx, qt, &idfs, doc_id, document.length, document.terms.as_ref())
 				.await?;
-			scored.insert(doc_id, score);
 		}
-		Ok(doc_ids.iter().map(|doc_id| scored.get(doc_id).copied().unwrap_or(0.0)).collect())
+		Ok(scores)
 	}
 
 	/// The length and postings of each of `doc_ids`, in order: from the node's
@@ -2458,7 +2789,107 @@ impl Scorer {
 	/// document rewritten since holds uncompacted state for every term it
 	/// carries, so the score equals [`Self::score_loaded`]'s, term for term and
 	/// in the same order.
-	fn score_from_postings(&self, qt: &QueryTerms, doc_id: DocId) -> Result<Option<Score>> {
+	///
+	/// A document the terms hold no uncompacted state for carries a term
+	/// exactly where the term's blocks hold an entry for it, so the entry is
+	/// all a term is asked for: through `cursors`, one per term a score sums
+	/// ([`SummedTerms`]), which calls for doc ids in ascending order move
+	/// forward. `idfs` holds each such term's idf ([`Self::idfs`]). A document
+	/// of an index whose terms keep no blocks, or that a statement scores from
+	/// what it stores ([`QueryTerms::scored_as_stored`]), must carry a term.
+	fn score_from_postings(
+		&self,
+		qt: &QueryTerms,
+		idfs: &[f64],
+		cursors: &mut [usize],
+		doc_id: DocId,
+	) -> Option<Score> {
+		if qt.bitmaps || qt.uncompacted.contains(doc_id) {
+			return None;
+		}
+		let mut sc = 0.0;
+		let mut taken = qt.summed.taken(qt.docs.len());
+		for (((at, key), idf), cursor) in qt.summed.positions.iter().zip(idfs).zip(cursors) {
+			let Some((frequency, length)) =
+				qt.postings[*at].as_ref().and_then(|postings| postings.entry_at(cursor, doc_id))
+			else {
+				continue;
+			};
+			if frequency == 0 {
+				return None;
+			}
+			if takes(&mut taken, *key) {
+				sc += self.bm25.score_with_idf(*idf, frequency, length as f64);
+			}
+		}
+		Some(sc as f32)
+	}
+
+	/// The score of document `doc_id`, of length `doc_length`, from its
+	/// postings entry `loaded`; `None` for a document whose postings predate
+	/// the per-document entry, which are read per term. `idfs` holds the idf
+	/// of each term a score sums ([`Self::idfs`]).
+	///
+	/// A term the query repeats is taken from the entry once, as a posting
+	/// moved out of it would be; a per-term read answers it each time.
+	#[allow(clippy::too_many_arguments)]
+	async fn score_loaded(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		idfs: &[f64],
+		doc_id: DocId,
+		doc_length: Option<DocLength>,
+		loaded: Option<&DocumentTerms>,
+	) -> Result<Score> {
+		let mut sc = 0.0;
+		let tl = qt.tokens.list();
+		let doc_length = doc_length.unwrap_or(0) as f64;
+		let Some(doc) = loaded else {
+			for (i, d) in qt.docs.iter().enumerate() {
+				if let Some(docs) = d
+					&& docs.contains(doc_id)
+					&& let Some(token) = tl.get(i)
+				{
+					let term = qt.tokens.get_token_string(token)?;
+					let frequency = tx
+						.get_key(&fti.ikb.new_td(term, doc_id), None)
+						.await?
+						.map(|td: TermDocument| td.f);
+					if let Some(frequency) = frequency {
+						sc += self.bm25.score(frequency as f64, docs.len() as f64, doc_length)
+					}
+				}
+			}
+			return Ok(sc as f32);
+		};
+		let mut taken = qt.summed.taken(qt.docs.len());
+		for ((at, key), idf) in qt.summed.positions.iter().zip(idfs) {
+			if !qt.docs[*at].as_ref().is_some_and(|docs| docs.contains(doc_id)) {
+				continue;
+			}
+			if !takes(&mut taken, *key) {
+				continue;
+			}
+			let term = qt.tokens.get_token_string(&tl[*at])?;
+			if let Some(td) = doc.terms.get(term) {
+				sc += self.bm25.score_with_idf(*idf, td.f, doc_length);
+			}
+		}
+		Ok(sc as f32)
+	}
+}
+
+/// Scoring as it was computed term by term with a set of the strings taken,
+/// kept to check the scoring above against, bit for bit.
+#[cfg(test)]
+impl Scorer {
+	fn reference_score_from_postings(
+		&self,
+		qt: &QueryTerms,
+		doc_id: DocId,
+	) -> Result<Option<Score>> {
 		if qt.uncompacted.contains(doc_id) {
 			return Ok(None);
 		}
@@ -2487,13 +2918,7 @@ impl Scorer {
 		Ok(Some(sc as f32))
 	}
 
-	/// The score of document `doc_id`, of length `doc_length`, from its
-	/// postings entry `loaded`; `None` for a document whose postings predate
-	/// the per-document entry, which are read per term.
-	///
-	/// A term the query repeats is taken from the entry once, as a posting
-	/// moved out of it would be; a per-term read answers it each time.
-	async fn score_loaded(
+	async fn reference_score_loaded(
 		&self,
 		fti: &FullTextIndex,
 		tx: &Transaction,
@@ -2615,8 +3040,8 @@ mod tests {
 	use uuid::Uuid;
 
 	use super::{
-		DocId, DocumentTerms, FullTextIndex, TermChangeBatchKey, TermChangeKey, TermDocsResidual,
-		TermDocument,
+		DocId, DocumentTerms, FullTextIndex, Scorer, TermChangeBatchKey, TermChangeKey,
+		TermDocsResidual, TermDocument,
 	};
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
@@ -2889,7 +3314,38 @@ mod tests {
 				uid: Uuid::from_u128(9),
 				add,
 			};
-			tx.set_key(&key, docs).await.unwrap();
+			let batch = super::ChangeBatch {
+				docs: docs.clone(),
+				postings: None,
+			};
+			tx.set_key(&key, &batch).await.unwrap();
+		}
+
+		/// [`Self::write_tx_delta`] for an addition carrying `postings`, one per
+		/// document of `docs` in its order.
+		async fn write_tx_addition(
+			&self,
+			tx: &Transaction,
+			term: &str,
+			nid: u128,
+			docs: &RoaringTreemap,
+			postings: impl IntoIterator<Item = (u64, u64)>,
+		) {
+			let key = TermChangeBatchKey {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
+				tb: Cow::Borrowed(self.ikb.table()),
+				ix: self.ikb.index(),
+				term: Cow::Borrowed(term),
+				nid: Uuid::from_u128(nid),
+				uid: Uuid::from_u128(9),
+				add: true,
+			};
+			let batch = super::ChangeBatch {
+				docs: docs.clone(),
+				postings: Some(super::ChangePostings::from_postings(postings)),
+			};
+			tx.set_key(&key, &batch).await.unwrap();
 		}
 
 		/// The same, in the per-document `!tt` shape an upgraded database carries.
@@ -3084,10 +3540,172 @@ mod tests {
 		}
 	}
 
+	/// Every document's score, one at a time and in batches of doc ids ascending
+	/// or not, is bit for bit the score of the reference scoring that takes
+	/// each term once per document through a set of the strings taken. Over the
+	/// legacy, bitmap and block formats, queries repeating a term, documents
+	/// compacted, partly compacted and rewritten since, documents whose
+	/// per-document postings entry is gone, and terms read as a statement that
+	/// writes reads them.
+	#[test(tokio::test)]
+	async fn scores_are_the_reference_scores_bit_for_bit() {
+		let words = ["alpha", "beta", "gamma", "delta", "omega", "zeta", "theta", "kappa"];
+		let queries = [
+			"alpha",
+			"beta gamma",
+			"alpha beta alpha",
+			"kappa theta delta kappa theta",
+			"omega unknown zeta",
+		];
+		for format in [
+			0,
+			crate::catalog::DOC_IDS_FORMAT_VERSION,
+			crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		] {
+			let test = TestContext::at_format(format).await;
+			let mut seed = 0x2545_f491_4f6c_dd1du64;
+			let mut next = move |bound: u64| {
+				seed ^= seed << 13;
+				seed ^= seed >> 7;
+				seed ^= seed << 17;
+				seed % bound
+			};
+			let rids: Vec<RecordId> =
+				(0..300).map(|i| RecordId::new("t".into(), format!("d{i}"))).collect();
+			let mut held: Vec<Option<String>> = vec![None; rids.len()];
+			for step in 0..6 {
+				for _ in 0..if step == 0 {
+					600
+				} else {
+					40
+				} {
+					let at = next(rids.len() as u64) as usize;
+					let new = (next(6) > 0).then(|| {
+						(0..1 + next(30))
+							.map(|_| words[next(words.len() as u64).min(next(9)) as usize])
+							.collect::<Vec<_>>()
+							.join(" ")
+					});
+					test.rewrite(&rids[at], held[at].as_deref(), new.as_deref()).await;
+					held[at] = new;
+				}
+				if step % 2 == 0 {
+					test.drain_term_docs(1024).await;
+				} else {
+					let tx = test.new_tx(TransactionType::Write).await;
+					let plan =
+						test.fti.prepare_term_docs_compaction_with_limit(&tx, 7).await.unwrap();
+					test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+					tx.commit().await.unwrap();
+				}
+				for query in queries {
+					test.check_reference_scores(query, &rids, format, step).await;
+				}
+			}
+		}
+	}
+
+	impl TestContext {
+		/// Checks every document's score for `query` against the reference
+		/// scoring, in a transaction that drops some documents' per-document
+		/// postings entry and is cancelled after.
+		async fn check_reference_scores(
+			&self,
+			query: &str,
+			rids: &[RecordId],
+			format: u16,
+			step: usize,
+		) {
+			let ctx = self.ds.env(TransactionType::Write).await;
+			let tx = ctx.tx();
+			let mut doc_ids = Vec::new();
+			for rid in rids {
+				if let Some(doc_id) = self.fti.get_doc_id(&tx, rid).await.unwrap() {
+					doc_ids.push(doc_id);
+				}
+			}
+			doc_ids.sort_unstable();
+			doc_ids.dedup();
+			for doc_id in doc_ids.iter().step_by(11) {
+				tx.del_key(&self.ikb.new_dt(*doc_id)).await.unwrap();
+			}
+			let az_fn = NoAnalyzerFunction;
+			let scorer = self.fti.new_scorer(&ctx).await.unwrap().expect("a BM25 index");
+			for mode in 0..3 {
+				let mut qt =
+					self.fti.extract_querying_terms(&ctx, &az_fn, query.to_owned()).await.unwrap();
+				match mode {
+					1 => qt = qt.scored_as_stored(),
+					2 if qt.docs.len() > 2 => {
+						qt.docs.remove(1);
+						qt.postings.remove(1);
+						qt.summed = super::SummedTerms::of(&qt.tokens, qt.docs.len()).unwrap();
+					}
+					2 => continue,
+					_ => {}
+				}
+				if qt.summed.per_document {
+					assert!(qt.block_bounds(&scorer).is_none());
+				}
+				let mut expected = Vec::new();
+				for doc_id in &doc_ids {
+					let reference = if !qt.carries_any(*doc_id) {
+						0.0
+					} else if let Some(score) =
+						scorer.reference_score_from_postings(&qt, *doc_id).unwrap()
+					{
+						score
+					} else {
+						let documents = Scorer::stored_documents(&self.fti, &tx, &qt, &[*doc_id])
+							.await
+							.unwrap();
+						scorer
+							.reference_score_loaded(
+								&self.fti,
+								&tx,
+								&qt,
+								*doc_id,
+								documents[0].length,
+								documents[0].terms.as_ref(),
+							)
+							.await
+							.unwrap()
+					};
+					let score = scorer.score(&self.fti, &tx, &qt, *doc_id).await.unwrap();
+					assert_eq!(
+						score.to_bits(),
+						reference.to_bits(),
+						"format {format}, step {step}, `{query}`, mode {mode}, doc {doc_id}"
+					);
+					expected.push(reference.to_bits());
+				}
+				let batch = scorer.score_batch(&self.fti, &tx, &qt, &doc_ids).await.unwrap();
+				assert_eq!(
+					batch.iter().map(|score| score.to_bits()).collect::<Vec<_>>(),
+					expected,
+					"format {format}, step {step}, `{query}`, mode {mode}: ascending batch"
+				);
+				// Doc ids out of order, and repeated, score as they do in order.
+				let shuffled: Vec<DocId> =
+					doc_ids.iter().rev().chain(doc_ids.iter().step_by(3)).copied().collect();
+				let batch = scorer.score_batch(&self.fti, &tx, &qt, &shuffled).await.unwrap();
+				let expected_shuffled: Vec<u32> = shuffled
+					.iter()
+					.map(|doc_id| expected[doc_ids.binary_search(doc_id).unwrap()])
+					.collect();
+				assert_eq!(
+					batch.iter().map(|score| score.to_bits()).collect::<Vec<_>>(),
+					expected_shuffled,
+					"format {format}, step {step}, `{query}`, mode {mode}: shuffled batch"
+				);
+			}
+			tx.cancel().await.unwrap();
+		}
+	}
+
 	/// Compaction fills a block entry from the change that placed the document,
-	/// which carries its frequency and length (`!tf`), not by reading the
-	/// document: an entry is right with the document's `!dt` and `!dl` gone, and
-	/// no change's postings outlive the round that folds it.
+	/// which carries its frequency and length (`!tx`), not by reading the
+	/// document: an entry is right with the document's `!dt` and `!dl` gone.
 	#[test(tokio::test)]
 	async fn a_block_entry_is_filled_from_the_change_that_placed_it() {
 		let test =
@@ -3107,15 +3725,6 @@ mod tests {
 		let block: super::PostingBlock =
 			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
 		assert_eq!(block.entries(), Some(vec![(doc_id, 2, 3)]));
-		let range = crate::key::schema::TermChangePostingsPrefix {
-			ns: test.ikb.ns(),
-			db: test.ikb.db(),
-			tb: Cow::Borrowed(test.ikb.table()),
-			ix: test.ikb.index(),
-		}
-		.range()
-		.unwrap();
-		assert_eq!(tx.count(range, None).await.unwrap(), 0, "a change's postings were left");
 		tx.cancel().await.unwrap();
 	}
 
@@ -3147,19 +3756,16 @@ mod tests {
 	}
 
 	/// A change's postings pair one for one with the documents of the addition
-	/// beside it. Postings that hold another number pair with none of them: the
-	/// round still folds, reading each document's entry from what it stores, and
-	/// removes the change and its postings, so no later round meets them again.
+	/// that carries them. Postings that hold another number pair with none of
+	/// them: the round still folds, reading each document's entry from what it
+	/// stores, and removes the change, so no later round meets it again.
 	#[test(tokio::test)]
 	async fn change_postings_that_miss_a_document_are_read_around() {
 		let test =
 			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
 		let tx = test.new_tx(TransactionType::Write).await;
-		test.write_tx_delta(&tx, "hello", 1, true, &RoaringTreemap::from_iter([3u64, 7])).await;
-		let posting = super::ChangePostings::from_postings([(2, 10)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &posting)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 1, &RoaringTreemap::from_iter([3u64, 7]), [(2, 10)])
+			.await;
 		for (doc_id, frequency, length) in [(3u64, 4, 40), (7, 5, 50)] {
 			let stored = DocumentTerms {
 				terms: [(
@@ -3185,17 +3791,8 @@ mod tests {
 			tx.get_key(&test.ikb.new_tp("hello", start), None).await.unwrap().expect("the block");
 		assert_eq!(block.entries(), Some(vec![(3, 4, 40), (7, 5, 50)]));
 		let changes = tx.count(test.ikb.new_tx_terms_range().unwrap(), None).await.unwrap();
-		let range = crate::key::schema::TermChangePostingsPrefix {
-			ns: test.ikb.ns(),
-			db: test.ikb.db(),
-			tb: Cow::Borrowed(test.ikb.table()),
-			ix: test.ikb.index(),
-		}
-		.range()
-		.unwrap();
-		let postings = tx.count(range, None).await.unwrap();
 		tx.cancel().await.unwrap();
-		assert_eq!((changes, postings), (0, 0), "the change and its postings were left");
+		assert_eq!(changes, 0, "the change was left");
 	}
 
 	#[test(tokio::test)]
@@ -3206,18 +3803,10 @@ mod tests {
 		let docs = RoaringTreemap::from_iter([doc_id]);
 		let tx = test.new_tx(TransactionType::Write).await;
 		// The oldest change: an addition on node 2.
-		test.write_tx_delta(&tx, "hello", 2, true, &docs).await;
-		let older = super::ChangePostings::from_postings([(1, 10)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(2), Uuid::from_u128(9)), &older)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 2, &docs, [(1, 10)]).await;
 		// The newer changes, on node 1: a removal, then a re-addition.
 		test.write_tx_delta(&tx, "hello", 1, false, &docs).await;
-		test.write_tx_delta(&tx, "hello", 1, true, &docs).await;
-		let newer = super::ChangePostings::from_postings([(3, 30)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &newer)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 1, &docs, [(3, 30)]).await;
 		let current = DocumentTerms {
 			terms: [(
 				"hello".into(),
@@ -3271,22 +3860,14 @@ mod tests {
 		};
 		// The document placed in the term's blocks.
 		let tx = test.new_tx(TransactionType::Write).await;
-		test.write_tx_delta(&tx, "hello", 3, true, &docs).await;
-		let placed = super::ChangePostings::from_postings([(1, 10)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(3), Uuid::from_u128(9)), &placed)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 3, &docs, [(1, 10)]).await;
 		tx.commit().await.unwrap();
 		test.drain_term_docs(1024).await;
 		// A removal on node 1 and an addition on node 2, and the document as it
 		// is now.
 		let tx = test.new_tx(TransactionType::Write).await;
 		test.write_tx_delta(&tx, "hello", 1, false, &docs).await;
-		test.write_tx_delta(&tx, "hello", 2, true, &docs).await;
-		let added = super::ChangePostings::from_postings([(2, 20)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(2), Uuid::from_u128(9)), &added)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 2, &docs, [(2, 20)]).await;
 		tx.set_key(&test.ikb.new_dt(doc_id), &current(3)).await.unwrap();
 		tx.set_key(&test.ikb.new_dl(doc_id), &30).await.unwrap();
 		tx.commit().await.unwrap();
@@ -3310,11 +3891,8 @@ mod tests {
 			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
 		let doc_id: DocId = 5;
 		let tx = test.new_tx(TransactionType::Write).await;
-		test.write_tx_delta(&tx, "hello", 1, true, &RoaringTreemap::from_iter([doc_id])).await;
-		let none = super::ChangePostings::from_postings([(0, 0)]);
-		tx.set_key(&test.ikb.new_tf("hello", Uuid::from_u128(1), Uuid::from_u128(9)), &none)
-			.await
-			.unwrap();
+		test.write_tx_addition(&tx, "hello", 1, &RoaringTreemap::from_iter([doc_id]), [(0, 0)])
+			.await;
 		let current = DocumentTerms {
 			terms: [(
 				"hello".into(),
@@ -3353,14 +3931,7 @@ mod tests {
 		let docs = RoaringTreemap::from_iter([doc_id]);
 		// The newer addition sorts first (node 1), the older second (node 2).
 		for (nid, frequency, length) in [(1u128, 3, 30), (2, 1, 10)] {
-			test.write_tx_delta(&tx, "hello", nid, true, &docs).await;
-			let posting = super::ChangePostings::from_postings([(frequency, length)]);
-			tx.set_key(
-				&test.ikb.new_tf("hello", Uuid::from_u128(nid), Uuid::from_u128(9)),
-				&posting,
-			)
-			.await
-			.unwrap();
+			test.write_tx_addition(&tx, "hello", nid, &docs, [(frequency, length)]).await;
 		}
 		let current = DocumentTerms {
 			terms: [(
@@ -4733,6 +5304,153 @@ mod tests {
 		);
 		let doc_ids: Vec<DocId> = batches.iter().flat_map(|(ids, _)| ids.clone()).collect();
 		assert!(doc_ids.windows(2).all(|w| w[0] < w[1]), "in doc-id order: {doc_ids:?}");
+	}
+
+	/// A take passing hits over by their block bounds takes exactly the hits a
+	/// check of each hit's bound keeps, and of an `OR`, that carry a term
+	/// whose ceiling is not passed over, in order, with the others counted as
+	/// passed over, for thresholds from none passed over to all, and batch sizes
+	/// from one hit up; under a threshold tightening from one take to the next
+	/// it takes only hits the threshold of their take keeps and every hit the
+	/// last one does. Every hit whose score beats the threshold is taken.
+	/// Uncompacted documents are taken wherever their ranges are passed over,
+	/// and the hits not looked at are still counted.
+	#[test(tokio::test)]
+	async fn a_bounded_take_keeps_the_hits_a_check_of_each_bound_keeps() {
+		let test =
+			TestContext::at_format(crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION).await;
+		let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+		let mut next = move |bound: u64| {
+			seed ^= seed << 13;
+			seed ^= seed >> 7;
+			seed ^= seed << 17;
+			seed % bound
+		};
+		let words = ["apple", "apple", "berry", "filler", "filler", "filler", "filler", "filler"];
+		let rids: Vec<RecordId> =
+			(0..3000).map(|i| RecordId::new("t".into(), format!("d{i:05}"))).collect();
+		let body = |next: &mut dyn FnMut(u64) -> u64| {
+			(0..1 + next(30))
+				.map(|_| match next(words.len() as u64 * 25) {
+					0 => "cherry",
+					n => words[(n / 25) as usize],
+				})
+				.collect::<Vec<_>>()
+				.join(" ")
+		};
+		for chunk in rids.chunks(250) {
+			for rid in chunk {
+				test.rewrite(rid, None, Some(&body(&mut next))).await;
+			}
+		}
+		test.drain_term_docs(100_000).await;
+		// Documents rewritten and indexed since, scattered over the doc ids.
+		for at in (0..rids.len()).step_by(97) {
+			test.rewrite(&rids[at], None, Some(&body(&mut next))).await;
+		}
+		let (ctx, tx) = test.new_read_env().await;
+		let scorer = test.fti.new_scorer(&ctx).await.unwrap().expect("a BM25 index");
+		let mut cut = 0;
+		for (query, op) in [
+			("apple", crate::expr::operator::BooleanOperator::And),
+			("apple berry", crate::expr::operator::BooleanOperator::And),
+			("apple berry", crate::expr::operator::BooleanOperator::Or),
+			("apple cherry", crate::expr::operator::BooleanOperator::Or),
+			("cherry berry apple cherry", crate::expr::operator::BooleanOperator::Or),
+		] {
+			let or = matches!(op, crate::expr::operator::BooleanOperator::Or);
+			let qt = test
+				.fti
+				.extract_querying_terms(&ctx, &NoAnalyzerFunction, query.to_owned())
+				.await
+				.unwrap();
+			let bounds = qt.block_bounds(&scorer).expect("posting blocks bound the score");
+			assert!(bounds.starts.len() > 3, "`{query}` spans several blocks");
+			let all = test.fti.new_hits_iterator(&qt, op).unwrap().take_doc_ids(usize::MAX);
+			assert!(all.iter().any(|doc_id| qt.is_uncompacted(*doc_id)));
+			let scores = scorer.score_batch(&test.fti, &tx, &qt, &all).await.unwrap();
+			let mut levels: Vec<f32> = bounds.bounds.clone();
+			levels.extend(bounds.terms.iter().map(|(_, ceiling)| super::round_up(*ceiling)));
+			levels.sort_by(f32::total_cmp);
+			levels.dedup();
+			let keeps = |threshold: f32, doc_id: DocId| {
+				if qt.is_uncompacted(doc_id) {
+					return true;
+				}
+				let passed = bounds.passed_terms(|b| b > threshold);
+				let essential = !or
+					|| bounds.terms.len() < 2
+					|| bounds.terms.iter().zip(&passed).any(|((at, _), passed)| {
+						!passed && qt.docs[*at].as_ref().is_some_and(|docs| docs.contains(doc_id))
+					});
+				essential && bounds.bound(doc_id).is_none_or(|b| b > threshold)
+			};
+			for threshold in levels.iter().copied().chain([-1.0, f32::MAX]) {
+				let beating: Vec<DocId> = all
+					.iter()
+					.zip(&scores)
+					.filter(|(_, score)| **score > threshold)
+					.map(|(doc_id, _)| *doc_id)
+					.collect();
+				let expected: Vec<DocId> =
+					all.iter().copied().filter(|doc_id| keeps(threshold, *doc_id)).collect();
+				for limit in [1, 7, 100, usize::MAX] {
+					let mut hits = test.fti.new_hits_iterator(&qt, op).unwrap();
+					let (mut taken, mut passed) = (Vec::new(), 0);
+					loop {
+						let (batch, skipped) =
+							hits.take_doc_ids_within(limit, &qt, &bounds, |b| b > threshold);
+						passed += skipped;
+						if batch.is_empty() {
+							break;
+						}
+						assert!(batch.len() <= limit);
+						taken.extend(batch);
+					}
+					assert_eq!(taken, expected, "`{query}` above {threshold}, by {limit}");
+					assert_eq!(
+						passed as usize,
+						all.len() - expected.len(),
+						"`{query}` above {threshold}, by {limit}"
+					);
+					assert!(
+						beating.iter().all(|doc_id| taken.contains(doc_id)),
+						"`{query}` above {threshold}, by {limit}: a hit that beats it is passed over"
+					);
+					assert_eq!(crate::ft::MatchesHitsIterator::len(&hits), 0);
+				}
+				let by_bound = all
+					.iter()
+					.filter(|doc_id| {
+						qt.is_uncompacted(**doc_id)
+							|| bounds.bound(**doc_id).is_none_or(|b| b > threshold)
+					})
+					.count();
+				cut += by_bound - expected.len();
+			}
+			// A threshold rising over the takes.
+			let mut hits = test.fti.new_hits_iterator(&qt, op).unwrap();
+			let mut taken = Vec::new();
+			for threshold in levels.iter().copied() {
+				let (batch, _) = hits.take_doc_ids_within(5, &qt, &bounds, |b| b > threshold);
+				assert!(batch.iter().all(|doc_id| keeps(threshold, *doc_id)), "`{query}`");
+				taken.extend(batch);
+			}
+			let last = levels.last().copied().unwrap_or_default();
+			loop {
+				let (batch, _) = hits.take_doc_ids_within(5, &qt, &bounds, |b| b > last);
+				if batch.is_empty() {
+					break;
+				}
+				taken.extend(batch);
+			}
+			let kept_last: Vec<DocId> =
+				all.iter().copied().filter(|doc_id| keeps(last, *doc_id)).collect();
+			assert!(kept_last.iter().all(|doc_id| taken.contains(doc_id)), "`{query}`");
+			assert!(taken.windows(2).all(|w| w[0] < w[1]), "`{query}`: in doc-id order");
+		}
+		assert!(cut > 0, "no hit of an `OR` was cut by the terms' ceilings alone");
+		tx.cancel().await.unwrap();
 	}
 
 	/// A document carrying none of the query's terms scores zero and has no

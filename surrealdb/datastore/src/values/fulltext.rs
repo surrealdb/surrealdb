@@ -10,6 +10,7 @@
 //! transaction and the analyzer definitions.
 
 use revision::revisioned;
+use roaring::RoaringTreemap;
 use surrealdb_collections::VecMap;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::value::KVValue;
@@ -264,7 +265,8 @@ impl PostingBlock {
 impl_kv_value_revisioned!(PostingBlock);
 
 /// The frequency of a term in, and the length of, each document one transaction
-/// added to the term, beside the `!tx` addition that names those documents.
+/// added to the term, carried by the `!tx` addition that names those documents
+/// ([`ChangeBatch`]).
 ///
 /// The documents are not repeated: the postings are in ascending document order,
 /// the order the addition's bitmap iterates in, and pair with its documents one
@@ -316,16 +318,27 @@ impl ChangePostings {
 	pub fn is_empty(&self) -> bool {
 		self.count == 0
 	}
+
+	/// At most how many bytes [`Self::encode_into`] appends: the encoding
+	/// byte, the count's varint and the postings.
+	fn encoded_len(&self) -> usize {
+		1 + 10 + self.columns.len()
+	}
+
+	/// Appends the value's encoding to `bytes`.
+	fn encode_into(&self, bytes: &mut Vec<u8>) {
+		bytes.push(CHANGE_POSTINGS_V1);
+		put_varint(bytes, self.count);
+		bytes.extend_from_slice(&self.columns);
+	}
 }
 
 impl KVValue for ChangePostings {
 	type KeyContext = ();
 
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-		let mut bytes = Vec::with_capacity(self.columns.len() + 11);
-		bytes.push(CHANGE_POSTINGS_V1);
-		put_varint(&mut bytes, self.count);
-		bytes.extend_from_slice(&self.columns);
+		let mut bytes = Vec::with_capacity(self.encoded_len());
+		self.encode_into(&mut bytes);
 		Ok(bytes)
 	}
 
@@ -343,6 +356,66 @@ impl KVValue for ChangePostings {
 			Some(version) => anyhow::bail!("change postings in unknown encoding {version}"),
 			None => anyhow::bail!("change postings with no bytes"),
 		}
+	}
+}
+
+/// One transaction's change to a term in one direction (`!tx`): the documents it
+/// added to or removed from the term, and, for an addition to an index that keeps
+/// its postings in blocks, each document's posting.
+///
+/// The value is the documents' bitmap in its own serialization, followed by the
+/// postings ([`ChangePostings`]) where there are any. A bitmap with nothing after
+/// it carries no postings: every change of an index without posting blocks,
+/// every removal, and an addition none of whose documents holds a posting.
+/// Compaction reads each document of a change without postings from what it
+/// stores, and so it does for postings that do not decode, which the value
+/// reads as none rather than failing every reader of the term.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChangeBatch {
+	/// The documents the change adds or removes.
+	pub docs: RoaringTreemap,
+	/// Each added document's posting, in the order `docs` iterates in.
+	pub postings: Option<ChangePostings>,
+}
+
+impl KVValue for ChangeBatch {
+	type KeyContext = ();
+
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut bytes = Vec::with_capacity(
+			self.docs.serialized_size()
+				+ self.postings.as_ref().map_or(0, ChangePostings::encoded_len),
+		);
+		self.docs.serialize_into(&mut bytes)?;
+		if let Some(postings) = &self.postings {
+			postings.encode_into(&mut bytes);
+		}
+		Ok(bytes)
+	}
+
+	fn kv_decode_value(bytes: &[u8], _: ()) -> anyhow::Result<Self> {
+		let mut rest = bytes;
+		// The bitmap reads exactly its own serialization, leaving the postings.
+		let docs = RoaringTreemap::deserialize_from(&mut rest)?;
+		let postings = if rest.is_empty() {
+			None
+		} else {
+			match ChangePostings::kv_decode_value(rest, ()) {
+				Ok(postings) => Some(postings),
+				Err(error) => {
+					tracing::warn!(
+						target: "surrealdb::datastore::fulltext",
+						"A full-text change carries postings that do not decode ({error}); its \
+						 documents are read from what they store"
+					);
+					None
+				}
+			}
+		};
+		Ok(Self {
+			docs,
+			postings,
+		})
 	}
 }
 
@@ -416,6 +489,36 @@ mod tests {
 		assert_eq!(value.postings(), None, "the bytes hold more than the count");
 		assert!(ChangePostings::kv_decode_value(&[], ()).is_err(), "no bytes");
 		assert!(ChangePostings::kv_decode_value(&[2, 0], ()).is_err(), "an unknown encoding");
+	}
+
+	#[test]
+	fn a_change_batch_carries_its_postings_after_its_documents() {
+		let docs: RoaringTreemap = [3, 70_000, u64::from(u32::MAX) + 5].into_iter().collect();
+		let bare = ChangeBatch {
+			docs: docs.clone(),
+			postings: None,
+		};
+		let bytes = bare.kv_encode_value().unwrap();
+		// A change with no postings is the bitmap alone, and each reads as the
+		// other.
+		let mut bitmap = Vec::new();
+		docs.serialize_into(&mut bitmap).unwrap();
+		assert_eq!(bytes, bitmap);
+		assert_eq!(ChangeBatch::kv_decode_value(&bitmap, ()).unwrap(), bare);
+		let carried = ChangeBatch {
+			docs,
+			postings: Some(ChangePostings::from_postings([(1, 12), (2, 7), (5, 300)])),
+		};
+		let bytes = carried.kv_encode_value().unwrap();
+		assert_eq!(ChangeBatch::kv_decode_value(&bytes, ()).unwrap(), carried);
+		// Postings that do not decode read as none, with the documents intact.
+		for trailer in [&[2u8, 0][..], &[0], &[1]] {
+			assert_eq!(
+				ChangeBatch::kv_decode_value(&[&bitmap[..], trailer].concat(), ()).unwrap(),
+				bare,
+				"trailer {trailer:?}"
+			);
+		}
 	}
 
 	#[test]

@@ -78,7 +78,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::pending_guard::{GuardedIndex, PendingGuardFamily};
-use surrealdb_datastore::values::fulltext::{DocLengthAndCount, PostingBlock, TermDocsResidual};
+use surrealdb_datastore::values::fulltext::{
+	ChangeBatch, DocLengthAndCount, PostingBlock, TermDocsResidual,
+};
 use surrealdb_datastore::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildReservation, PrimaryAppendingTicket,
@@ -123,9 +125,8 @@ use crate::key::schema::{
 	HnswRecordPendingShardKey, HnswRecordPendingShardPrefix, HnswRecordPendingShardShardPrefix,
 	HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey,
 	IndexPrimaryKey, IndexVersionKey, TermBlockKey, TermBlockTermPrefix, TermBlocksKey,
-	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangePostingsKey, TermChangeSetKey,
-	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix, TermGenerationKey,
-	TermPostingKey,
+	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey,
+	TermDocsKey, TermDocsResidualKey, TermDocsResidualPrefix, TermGenerationKey, TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -1350,7 +1351,7 @@ impl IndexKeyBase {
 		.range()
 	}
 
-	fn new_tx_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<RoaringTreemap>> {
+	fn new_tx_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<ChangeBatch>> {
 		TermChangeBatchTermPrefix {
 			ns: self.0.ns,
 			db: self.0.db,
@@ -1361,20 +1362,7 @@ impl IndexKeyBase {
 		.range()
 	}
 
-	/// The postings beside the `!tx` addition of `term` tagged `nid`, `uid`.
-	fn new_tf<'a>(&'a self, term: &'a str, nid: Uuid, uid: Uuid) -> TermChangePostingsKey<'a> {
-		TermChangePostingsKey {
-			ns: self.0.ns,
-			db: self.0.db,
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			term: Cow::Borrowed(term),
-			nid,
-			uid,
-		}
-	}
-
-	fn new_tx_terms_range(&self) -> Result<TypedRange<RoaringTreemap>> {
+	fn new_tx_terms_range(&self) -> Result<TypedRange<ChangeBatch>> {
 		TermChangeBatchPrefix {
 			ns: self.0.ns,
 			db: self.0.db,
@@ -1385,9 +1373,9 @@ impl IndexKeyBase {
 	}
 
 	/// Buffers this index's contribution to one term until the transaction
-	/// commits, where it becomes one `!tx` entry per term and direction, and
-	/// one `!tf` entry per term whose additions carry a `posting`: the term's
-	/// frequency in the document and the document's length.
+	/// commits, where it becomes one `!tx` entry per term and direction. An
+	/// addition's entry also carries each document's `posting`, where given:
+	/// the term's frequency in the document and the document's length.
 	fn buffer_tt(
 		&self,
 		tx: &Transaction,

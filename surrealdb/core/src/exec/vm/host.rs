@@ -2913,7 +2913,11 @@ impl IndexRecords {
 					// A branch rejecting by the sum reads the sort's threshold each batch,
 					// with batches doubling from the sort's size once it has one.
 					let threshold = union.as_deref().and_then(|union| {
-						Some(super::fulltext::Threshold::Sum(union, union.cell.snapshot()?))
+						Some(super::fulltext::Threshold::Sum(
+							union,
+							union.cell.snapshot()?,
+							operator.rf,
+						))
 					});
 					let batch = *limit;
 					if threshold.is_some() {
