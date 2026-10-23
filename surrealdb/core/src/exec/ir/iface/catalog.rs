@@ -121,6 +121,17 @@ pub(crate) trait SemanticCatalog: Send + Sync {
 		CatalogAnswer::Unknown
 	}
 
+	/// Whether a table of the database that can hold edges stores code a delete of one of its
+	/// records runs: an event, a view, a `REFERENCE` field of its own, or a `REFERENCE` field of
+	/// any table that can name one of its records. A purge deletes the edges of the record it
+	/// deletes, which may be records of any such table. A table that can hold edges is one not
+	/// declared `TYPE NORMAL`: a table holds no edge while it is `NORMAL`, because a change of its
+	/// type to `NORMAL` is refused while it holds one. A database-wide read, so a consumer asks
+	/// only when it deletes.
+	fn edge_code(&self) -> CatalogAnswer<bool> {
+		CatalogAnswer::Unknown
+	}
+
 	/// The field view of the table `table` for the principal the request is planned for: the
 	/// layers the planner binds over `SELECT * FROM t`. A consumer asks only for a table whose
 	/// field declarations derive a value or cut a field. `Absent` for a table the catalog does not

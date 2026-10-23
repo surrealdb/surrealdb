@@ -31,7 +31,7 @@ use super::seam::invariant;
 use crate::catalog::aggregation::AggregateFields;
 use crate::catalog::{
 	DefineDefault, EventDefinition, FieldDefinition, IndexDefinition, KeyOrigin, KeyStructure,
-	Permission, PermissionKind, TableDefinition, ViewDefinition,
+	Permission, PermissionKind, TableDefinition, TableType, ViewDefinition,
 };
 use crate::doc::Action;
 use crate::exec::catalog_deps::Referencing;
@@ -1676,6 +1676,7 @@ pub(crate) fn stored_of(
 		events: kind,
 		views: kind,
 		referenced: kind,
+		edges: kind,
 		schema: WriteSchema::default(),
 		reference_fields: Box::default(),
 		materialized: Box::default(),
@@ -1719,6 +1720,7 @@ pub(crate) fn stored_of(
 		events,
 		views,
 		referenced: Stored::Nothing,
+		edges: Stored::Nothing,
 		schema: WriteSchema::default(),
 		reference_fields: snapshot
 			.fields
@@ -2359,6 +2361,44 @@ pub(crate) fn repairs_of(
 		CatalogAnswer::Found(referencing) => repairs_over(&referencing),
 		CatalogAnswer::Absent => TableRepairs::default(),
 		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => late(),
+	}
+}
+
+/// The code the purge of a record of the table `table` runs through the edges it deletes, from the
+/// catalog's answers at the version the request is bound to ([`WriteStored::edges`]).
+///
+/// A write that names no one table states nothing ([`Stored::Dynamic`]). A table the catalog does
+/// not define is one a write defines on demand as `TYPE ANY`, so it can hold edges. An answer the
+/// catalog cannot give (it changed before the statement, or the database-wide answer is not loaded)
+/// states [`Stored::LateBound`]. A write whose order does not purge a record (`purges` is `false`)
+/// states nothing and does not ask the catalog, because whether the tables that can hold edges
+/// store code is a database-wide read.
+pub(crate) fn edges_of(
+	catalog: &dyn SemanticCatalog,
+	table: Option<&TableName>,
+	purges: bool,
+) -> Stored {
+	let Some(table) = table else {
+		return Stored::Dynamic;
+	};
+	if !purges {
+		return Stored::Nothing;
+	}
+	match catalog.table(table) {
+		CatalogAnswer::Found(snapshot) => match &snapshot.definition {
+			Some(definition) if definition.table_type != TableType::Normal => {
+				return Stored::Declared;
+			}
+			Some(_) => {}
+			None => return Stored::Declared,
+		},
+		CatalogAnswer::Absent => return Stored::Declared,
+		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => return Stored::LateBound,
+	}
+	match catalog.edge_code() {
+		CatalogAnswer::Found(true) => Stored::Declared,
+		CatalogAnswer::Found(false) | CatalogAnswer::Absent => Stored::Nothing,
+		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => Stored::LateBound,
 	}
 }
 

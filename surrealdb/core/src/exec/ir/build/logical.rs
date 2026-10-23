@@ -106,8 +106,8 @@ use crate::exec::ir::logical::seam::{
 };
 use crate::exec::ir::logical::stages::{
 	CondVerdict, Derivation, SchemaRegion, TableGates, TableIndexes, TableRepairs, TableSchema,
-	TableViews, ViewBody, catalog_fixed_of, cond_verdict, derivations_of, gates_of, image_of,
-	indexes_of, into_text_of, observed_of, repairs_of, schema_of, stage_run, static_mark,
+	TableViews, ViewBody, catalog_fixed_of, cond_verdict, derivations_of, edges_of, gates_of,
+	image_of, indexes_of, into_text_of, observed_of, repairs_of, schema_of, stage_run, static_mark,
 	stored_of, views_of, write_body, written_table,
 };
 use crate::exec::ir::logical::txn::{StatementBody, StatementSlot, TopRegion, regions_of};
@@ -3399,6 +3399,8 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 	let repairs =
 		repairs_of(cx.catalog(), table.as_ref(), run.contains(&WriteStageKind::PurgeRecordData));
 	attrs.stored.referenced = repairs.referenced;
+	attrs.stored.edges =
+		edges_of(cx.catalog(), table.as_ref(), run.contains(&WriteStageKind::PurgeRecordData));
 	attrs.stored.repair_set = repairs.facts.clone();
 	// The layers of the table's field view are asked for only by a write whose own facts say the
 	// view derives a value or cuts a field, so the facts and the regions never come from two

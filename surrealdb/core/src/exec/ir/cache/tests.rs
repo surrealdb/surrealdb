@@ -1095,6 +1095,48 @@ mod datastore {
 		assert!(matches!(memo.referencing(&author), CatalogAnswer::Unknown));
 	}
 
+	/// Whether a table that can hold edges stores code a delete runs is a database-wide read: a
+	/// delete loads it with the statement, any other lookup of it is pending until `load_pending`
+	/// reads it, and after a catalog change it is unknown. An answer is noted as a read of the
+	/// database's listing of tables, so code planned from it is not reused once a table is defined,
+	/// removed or changed. A table declared `TYPE NORMAL` holds no edge, so its code does not
+	/// count.
+	#[tokio::test]
+	async fn the_edge_code_loads_with_the_delete_and_reads_the_listing() {
+		const BASE: &str = "
+			DEFINE TABLE t TYPE NORMAL;
+			DEFINE TABLE knows TYPE RELATION FROM t TO t;
+			DEFINE TABLE log TYPE NORMAL;
+			DEFINE EVENT logged ON t WHEN true THEN { CREATE log };
+		";
+		let db = TestDb::new(BASE).await;
+		let (memo, txn) = loaded(&db, SessionValues::Fold, &[], "DELETE t").await;
+		let (ns, dbid) = ids(&txn).await;
+		let recording = txn.record_catalog_reads();
+		assert!(matches!(memo.edge_code(), CatalogAnswer::Found(false)));
+		assert!(recording.finish().listings.contains(&(ns, dbid)), "the listing is not read");
+
+		for code in [
+			"DEFINE EVENT e ON knows WHEN true THEN { CREATE log };",
+			"DEFINE TABLE by_in AS SELECT count() FROM knows GROUP ALL;",
+			"DEFINE FIELD r ON knows TYPE option<record<t>> REFERENCE;",
+			"DEFINE FIELD k ON log TYPE option<record<knows>> REFERENCE;",
+			"DEFINE TABLE other; DEFINE EVENT e ON other WHEN true THEN { CREATE log };",
+		] {
+			let db = TestDb::new(&format!("{BASE} {code}")).await;
+			let (memo, _txn) = loaded(&db, SessionValues::Fold, &[], "DELETE t").await;
+			assert!(matches!(memo.edge_code(), CatalogAnswer::Found(true)), "{code}");
+		}
+
+		let (memo, _txn) = loaded(&db, SessionValues::Fold, &[], "SELECT * FROM t").await;
+		assert!(matches!(memo.edge_code(), CatalogAnswer::NotLoaded));
+		assert!(memo.load_pending().await.expect("the edge code loads"));
+		assert!(matches!(memo.edge_code(), CatalogAnswer::Found(false)));
+		assert!(!memo.load_pending().await.expect("nothing is pending"));
+		memo.mark_catalog_change();
+		assert!(matches!(memo.edge_code(), CatalogAnswer::Unknown));
+	}
+
 	/// A field view is bound by the planner, which the memo does not hold: the first question is
 	/// `NotLoaded` and leaves the table pending, the owner of the planner gives the view, and the
 	/// view is unknown after a catalog change.

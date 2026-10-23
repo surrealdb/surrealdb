@@ -3715,6 +3715,54 @@ async fn the_rows_a_let_binds_keep_the_serial_order_whatever_order_batches_finis
 	);
 }
 
+/// A statement evaluated as a value outside the request's own plan hands its rows to a caller that
+/// reads them in order: `eval::surql` returns them to the expression that called it, and an access
+/// method's `SIGNIN` takes the first. Its merge takes the morsels in the order of the serial run
+/// however late the first ones are, as a `LET`'s value does.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order() {
+	let _turn = TURNS.lock().await;
+	let (serial_dir, wide_dir) = (
+		tempfile::tempdir().expect("temporary directory"),
+		tempfile::tempdir().expect("temporary directory"),
+	);
+	let serial = evaluating(&format!("rocksdb:{}", serial_dir.path().display()), whole()).await;
+	let wide = evaluating(&format!("rocksdb:{}", wide_dir.path().display()), tiny()).await;
+	let statements = [
+		"RETURN eval::surql('SELECT n, s FROM t WHERE n % 3 = 0')",
+		"RETURN eval::surql('SELECT * FROM t')",
+	];
+	assert!(
+		bound_rows_keep_the_order(&serial, &wide, &statements).await > 0,
+		"no morsel went to a worker"
+	);
+}
+
+/// The same over batches the coordinator read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order_over_batches() {
+	let _turn = TURNS.lock().await;
+	let serial = evaluating("memory", whole()).await;
+	let wide = evaluating("memory", tiny()).await;
+	let statements = [
+		"RETURN eval::surql('SELECT n FROM t WHERE math::abs(n) >= 0')",
+		"RETURN eval::surql('SELECT n, s FROM t WHERE math::abs(n) % 3 = 0')",
+	];
+	assert!(
+		bound_rows_keep_the_order(&serial, &wide, &statements).await > 0,
+		"no batch went to a worker"
+	);
+}
+
+/// The database of [`setup`] at `path`, configured with `config`, that allows `eval::surql`.
+async fn evaluating(path: &str, config: surrealdb_cnf::ConfigMap) -> TestDb {
+	let capabilities =
+		crate::dbs::Capabilities::all().with_eval_query(crate::dbs::capabilities::Targets::All);
+	TestDb::build_at(crate::kvs::Datastore::builder(), path, &setup(), false, config, capabilities)
+		.await
+}
+
 /// Counts of one group over a key range, whose first morsels finish last.
 #[cfg(feature = "kv-rocksdb")]
 const COUNTS: &[&str] = &[

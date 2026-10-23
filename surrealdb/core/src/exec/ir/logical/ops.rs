@@ -711,6 +711,14 @@ pub(crate) struct WriteStored {
 	/// Stated only by a write whose order purges a record, which repairs each of them: `Nothing`
 	/// for every other write.
 	pub(crate) referenced: Stored,
+	/// The code the purge of a record runs through the edges it deletes: `Declared` when the
+	/// table can hold edges itself (it is not `TYPE NORMAL`, which a table holding an edge cannot
+	/// become), so the purge deletes records of the table, or when a table of the database that
+	/// can hold edges stores code a delete runs
+	/// ([`SemanticCatalog::edge_code`](crate::exec::ir::iface::catalog::SemanticCatalog::edge_code)).
+	/// Stated only by a write whose order purges a record:
+	/// `Nothing` for every other write.
+	pub(crate) edges: Stored,
 	/// What the stage that applies the field declarations runs. Empty unless `fields` is
 	/// [`Stored::Declared`].
 	pub(crate) schema: WriteSchema,

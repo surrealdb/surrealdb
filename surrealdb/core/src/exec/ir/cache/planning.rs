@@ -49,10 +49,10 @@ use super::deps::{
 };
 use super::names::{self, NameSet};
 use super::slots::SlotTable;
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Error as CatalogError, EventDefinition, FunctionDefinition,
-	IndexDefinition, NamespaceId, ParamDefinition, Permission, TableDefinition,
+	IndexDefinition, NamespaceId, ParamDefinition, Permission, TableDefinition, TableType,
 };
 use crate::ctx::FrozenContext;
 use crate::exec::catalog_deps::Referencing;
@@ -120,6 +120,9 @@ struct MemoState {
 	/// The `REFERENCE` fields that can name a record of each table asked for, by the table that
 	/// defines them. Loaded on demand and never reached from a statement's names.
 	referencing: HashMap<TableName, Referencing>,
+	/// Whether a table of the database that can hold edges stores code a delete of one of its
+	/// records runs ([`PlanningCatalog::edge_code`]). Loaded on demand, like `referencing`.
+	edge_code: Option<bool>,
 	/// The field view of each table asked for, as the planner binds it for the principal the
 	/// compile is for. Loaded on demand by the planner's owner
 	/// ([`PlanningCatalog::insert_field_view`]).
@@ -134,6 +137,8 @@ struct MemoState {
 	pending: NameSet,
 	/// The tables whose references were answered `NotLoaded` since the last load.
 	pending_referencing: BTreeSet<TableName>,
+	/// Whether the edge code was answered `NotLoaded` since the last load.
+	pending_edge_code: bool,
 	/// The tables whose field views were answered `NotLoaded` since the last take.
 	pending_field_views: BTreeSet<TableName>,
 	/// What an access-path decision reads about each table read the compile names, filled by the
@@ -246,12 +251,14 @@ impl PlanningCatalog {
 				events: HashMap::new(),
 				views: HashMap::new(),
 				referencing: HashMap::new(),
+				edge_code: None,
 				field_views: HashMap::new(),
 				functions: HashMap::new(),
 				params: HashMap::new(),
 				database: None,
 				pending: NameSet::default(),
 				pending_referencing: BTreeSet::new(),
+				pending_edge_code: false,
 				pending_field_views: BTreeSet::new(),
 				sources: HashMap::new(),
 				pending_sources: HashSet::new(),
@@ -355,6 +362,7 @@ impl PlanningCatalog {
 		names.params.retain(|name| self.may_read_param(name));
 		if !deleted.is_empty() {
 			self.load_referencing(&deleted).await?;
+			self.load_edge_code().await?;
 		}
 		self.load_reaching(names).await
 	}
@@ -369,15 +377,22 @@ impl PlanningCatalog {
 		tracing::instrument(level = "trace", target = "surrealdb::core::exec::ir", skip_all)
 	)]
 	pub(crate) async fn load_pending(&self) -> anyhow::Result<bool> {
-		let (pending, references) = {
+		let (pending, references, edge_code) = {
 			let mut state = self.lock();
-			(std::mem::take(&mut state.pending), std::mem::take(&mut state.pending_referencing))
+			(
+				std::mem::take(&mut state.pending),
+				std::mem::take(&mut state.pending_referencing),
+				std::mem::take(&mut state.pending_edge_code),
+			)
 		};
-		if pending.is_empty() && references.is_empty() {
+		if pending.is_empty() && references.is_empty() && !edge_code {
 			return Ok(false);
 		}
 		if !references.is_empty() {
 			self.load_referencing(&references).await?;
+		}
+		if edge_code {
+			self.load_edge_code().await?;
 		}
 		if !pending.is_empty() {
 			self.load_reaching(pending).await?;
@@ -514,6 +529,35 @@ impl PlanningCatalog {
 		for (defining, _) in held.iter() {
 			self.txn.note_table_read(ns, db, defining);
 		}
+		CatalogAnswer::Found(held)
+	}
+
+	/// Whether a table of the database that can hold edges stores code a delete of one of its
+	/// records runs ([`SemanticCatalog::edge_code`]). `NotLoaded` until it is loaded, and then
+	/// pending: the answer is a database-wide read. `Unknown` after a catalog change and in a
+	/// statement that reads at a `VERSION` stamp, as for every definition lookup.
+	///
+	/// A held answer notes in the transaction's recordings the read of the database's listing of
+	/// tables, whose state holds the state of every table it lists: the code lowered from it
+	/// depends on which tables are defined and on the catalog of each.
+	pub(crate) fn edge_code(&self) -> CatalogAnswer<bool> {
+		let Some((ns, db)) = self.ns_db else {
+			return CatalogAnswer::Absent;
+		};
+		let held = {
+			let mut state = self.lock();
+			if state.definitions_unknown() {
+				return CatalogAnswer::Unknown;
+			}
+			match state.edge_code {
+				Some(held) => held,
+				None => {
+					state.pending_edge_code = true;
+					return CatalogAnswer::NotLoaded;
+				}
+			}
+		};
+		self.txn.note_listing_read(ns, db);
 		CatalogAnswer::Found(held)
 	}
 
@@ -967,6 +1011,41 @@ impl PlanningCatalog {
 		Ok(())
 	}
 
+	/// Reads whether a table of the database that can hold edges stores code a delete of one of
+	/// its records runs, once: from every table the database defines, the events, views and
+	/// `REFERENCE` fields of each that is not `TYPE NORMAL`, and the `REFERENCE` fields of the
+	/// database that can name one of its records.
+	async fn load_edge_code(&self) -> anyhow::Result<()> {
+		let Some((ns, db)) = self.ns_db else {
+			return Ok(());
+		};
+		if self.lock().edge_code.is_some() {
+			return Ok(());
+		}
+		self.reads.add(2);
+		let tables = self.txn.all_tb_each(ns, db).await?;
+		let references = self.txn.reference_fields(ns, db, None).await?;
+		let mut held = false;
+		for table in tables.iter().filter(|table| table.table_type != TableType::Normal) {
+			self.reads.add(3);
+			held =
+				!crate::exec::catalog_deps::references_to(&references, Some(&table.name))
+					.is_empty() || !self.txn.all_tb_events(ns, db, &table.name, None).await?.is_empty()
+					|| !self.txn.all_tb_views(ns, db, &table.name, None).await?.is_empty()
+					|| self
+						.txn
+						.all_tb_fields(ns, db, &table.name, None)
+						.await?
+						.iter()
+						.any(|field| field.reference.is_some());
+			if held {
+				break;
+			}
+		}
+		self.lock().edge_code = Some(held);
+		Ok(())
+	}
+
 	/// Reads the database definition once, when the names it is read by are known.
 	pub(crate) async fn load_database(&self) -> anyhow::Result<()> {
 		let (Some(_), Some((ns, db))) = (self.ns_db, &self.ns_db_names) else {
@@ -1226,6 +1305,10 @@ impl SemanticCatalog for PlanningCatalog {
 
 	fn referencing(&self, table: &TableName) -> CatalogAnswer<Referencing> {
 		PlanningCatalog::referencing(self, table)
+	}
+
+	fn edge_code(&self) -> CatalogAnswer<bool> {
+		PlanningCatalog::edge_code(self)
 	}
 
 	fn field_view(&self, table: &TableName) -> CatalogAnswer<Arc<FieldView>> {

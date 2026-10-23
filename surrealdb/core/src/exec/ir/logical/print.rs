@@ -2820,6 +2820,7 @@ text_struct!(WriteStored {
 	events: Stored,
 	views: Stored,
 	referenced: Stored,
+	edges: Stored,
 	schema: WriteSchema,
 	reference_fields: Box<[Idiom]>,
 	materialized: Box<[WriteMaterialized]>,

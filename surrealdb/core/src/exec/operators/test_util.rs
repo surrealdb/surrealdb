@@ -354,7 +354,9 @@ impl TestDb {
 		.await
 	}
 
-	async fn build_at(
+	/// A test database on the datastore at `path` (`"memory"`, or a backend's address), configured
+	/// with `config` and allowed `capabilities`.
+	pub(crate) async fn build_at(
 		builder: crate::kvs::ds::Builder,
 		path: &str,
 		setup: &str,

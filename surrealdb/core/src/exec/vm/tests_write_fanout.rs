@@ -53,7 +53,7 @@ const ROWS: usize = 1_200;
 /// A table of [`ROWS`] rows.
 fn setup() -> String {
 	format!(
-		"DEFINE TABLE t;
+		"DEFINE TABLE t TYPE NORMAL;
 		 FOR $i IN 0..{ROWS} {{
 			CREATE type::record('t', $i) SET n = $i, name = 'n' + <string> $i, s = <string> $i
 		 }};"
@@ -381,7 +381,7 @@ async fn cut_and_refusals(db: &TestDb, sql: &str) -> (Option<u16>, Vec<String>) 
 async fn a_write_is_cut_at_its_first_apply_stage() {
 	let db = TestDb::new_with_config(
 		&format!(
-			"{} DEFINE TABLE ix; DEFINE INDEX ix_n ON ix FIELDS n; DEFINE TABLE ev; \
+			"{} DEFINE TABLE ix; DEFINE INDEX ix_n ON ix FIELDS n; DEFINE TABLE ev TYPE NORMAL; \
 			 DEFINE EVENT bump ON ev WHEN true THEN {{ UPDATE type::record('ev', $after.id.id() + 1) \
 			 SET z = 1 }}; CREATE ix:1 SET n = 1; CREATE ev:1 SET n = 1;",
 			setup()
@@ -457,7 +457,10 @@ async fn a_second_write_in_an_explicit_transaction_answers_as_serial() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_change_feed_holds_the_records_in_serial_order() {
 	let _turn = TURNS.lock().await;
-	let feed = setup().replace("DEFINE TABLE t;", "DEFINE TABLE t CHANGEFEED 1d INCLUDE ORIGINAL;");
+	let feed = setup().replace(
+		"DEFINE TABLE t TYPE NORMAL;",
+		"DEFINE TABLE t TYPE NORMAL CHANGEFEED 1d INCLUDE ORIGINAL;",
+	);
 	let serial = TestDb::new_with_config(&feed, whole()).await;
 	let wide = TestDb::new_with_config(&feed, tiny()).await;
 	let sql = "UPDATE t SET name = name + '!' WHERE n >= 1100";
@@ -510,7 +513,7 @@ async fn a_record_users_permissions_are_judged_in_the_compute_half() {
 	let setup = format!(
 		"DEFINE ACCESS user ON DATABASE TYPE RECORD;
 		 DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
-		 DEFINE TABLE t SCHEMALESS PERMISSIONS FOR select FULL, FOR update WHERE n % 3 = 0, \
+		 DEFINE TABLE t SCHEMALESS TYPE NORMAL PERMISSIONS FOR select FULL, FOR update WHERE n % 3 = 0, \
 			FOR delete WHERE n % 5 = 0, FOR create NONE;
 		 CREATE user:alice;
 		 FOR $i IN 0..{ROWS} {{ CREATE type::record('t', $i) SET n = $i, name = 'n' + <string> $i }};"
@@ -997,6 +1000,67 @@ async fn a_table_whose_stored_code_writes_runs_serially() {
 		answers(&wide, &[sql], &["SELECT * FROM by_s ORDER BY s"]).await,
 		answers(&serial, &[sql], &["SELECT * FROM by_s ORDER BY s"]).await
 	);
+}
+
+/// A delete purges the edges of every record it deletes, and the purge deletes the edge records,
+/// running the events, views and references of their tables: an event that writes the table the
+/// delete reads changes rows the delete has still to judge. So a delete fans out only while no
+/// table that can hold edges stores such code: once one does, the delete runs serially and judges
+/// each row as the serial run leaves it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_delete_fans_out_only_while_no_edge_table_stores_code() {
+	let _turn = TURNS.lock().await;
+	let setup = format!(
+		"DEFINE TABLE t TYPE NORMAL;
+		 DEFINE TABLE knows TYPE RELATION FROM t TO t;
+		 FOR $i IN 0..{ROWS} {{ CREATE type::record('t', $i) SET n = $i, friends = 1, gone = false }};
+		 RELATE t:100->knows->t:1100;"
+	);
+	let serial = TestDb::new_with_config(&setup, whole()).await;
+	let wide = TestDb::new_with_config(&setup, tiny()).await;
+	let sql = "DELETE t WHERE gone OR friends = 0 RETURN VALUE $before.id";
+	assert!(
+		fans_out(&verdicts(&wide, sql).await),
+		"`{sql}` fans out while no edge table stores code"
+	);
+	let mark = Mark::of(&wide).await;
+	assert_eq!(answered(&wide, sql).await, Ok(Vec::new()));
+	mark.fanned_out(&wide, sql).await;
+	let likes = "DEFINE TABLE likes TYPE RELATION FROM t TO t;
+		DEFINE EVENT unlike ON likes WHEN $event = 'DELETE' THEN { UPDATE $before.out SET friends -= 1 };
+		RELATE t:100->likes->t:1100;
+		UPDATE t:100 SET gone = true;";
+	serial.run(likes).await;
+	wide.run(likes).await;
+	assert!(
+		!fans_out(&verdicts(&wide, sql).await),
+		"`{sql}` stays serial once an edge table stores code"
+	);
+	let handed = counts_of(&wide.exec_ctx().await).handed;
+	let expected = answered(&serial, sql).await;
+	assert_eq!(
+		expected,
+		answered(&serial, "RETURN [t:100, t:1100]").await,
+		"the serial run deletes the record the event emptied"
+	);
+	assert_eq!(answered(&wide, sql).await, expected);
+	assert_eq!(counts_of(&wide.exec_ctx().await).handed, handed, "`{sql}` handed a batch on");
+}
+
+/// A table not declared `TYPE NORMAL` can hold edges, which a purge of the records they join
+/// deletes: a delete of it may delete records it has still to read, so it runs serially though no
+/// table stores code.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_delete_of_a_table_that_can_hold_edges_runs_serially() {
+	let _turn = TURNS.lock().await;
+	let wide = TestDb::new_with_config(
+		&setup().replace("DEFINE TABLE t TYPE NORMAL;", "DEFINE TABLE t;"),
+		tiny(),
+	)
+	.await;
+	for sql in ["DELETE t WHERE n % 2 = 0", "DELETE t RETURN NONE"] {
+		assert!(!fans_out(&verdicts(&wide, sql).await), "`{sql}` stays serial");
+	}
 }
 
 /// A grant of the fan-out lease that is refused leaves the batch to the coordinator, which runs

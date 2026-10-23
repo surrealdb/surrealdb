@@ -3550,6 +3550,7 @@ mod tests {
 			events: kind,
 			views: kind,
 			referenced: kind,
+			edges: kind,
 			schema: WriteSchema::default(),
 			reference_fields: Box::default(),
 			materialized: Box::default(),

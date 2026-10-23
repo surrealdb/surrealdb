@@ -799,6 +799,7 @@ fn what_a_table_stores_is_never_read_from_what_the_catalog_does_not_answer() {
 		events: kind,
 		views: kind,
 		referenced: kind,
+		edges: kind,
 		schema: WriteSchema::default(),
 		reference_fields: Box::default(),
 		materialized: Box::default(),

@@ -227,6 +227,11 @@ async fn compile_expr(
 /// for `principal`, with the names `shadowed`, and the session's own values,
 /// read when it runs rather than folded, served from the compile cache; see
 /// the module. A planner that declines the statement fails it.
+///
+/// The statement's value is handed to the caller whole, and every caller reads it as a value: an
+/// access method's `SIGNIN` or `AUTHENTICATE` clause takes its first record, `eval::surql` returns
+/// it to the expression that called it, and an API handler answers it. Its rows therefore keep the
+/// order they are bound in, as a top-level `LET`'s value does.
 pub(crate) async fn statement(
 	exec: &ExecutionContext,
 	op: LogicalOp,
@@ -242,7 +247,7 @@ pub(crate) async fn statement(
 		principal,
 		depth,
 		shadowed,
-		false,
+		true,
 		Vec::new(),
 	)
 	.await

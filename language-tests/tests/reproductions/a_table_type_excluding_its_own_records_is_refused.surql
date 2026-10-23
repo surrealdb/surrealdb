@@ -49,6 +49,9 @@ error = "Cannot make `e` TYPE NORMAL: it holds the edge e:1. Delete the edge fir
 error = "Cannot make `e` TYPE NORMAL: it holds the edge e:1. Delete the edge first, or define the table TYPE ANY"
 
 [[test.results]]
+error = "Cannot make `e` TYPE NORMAL: it holds the edge e:1. Delete the edge first, or define the table TYPE ANY"
+
+[[test.results]]
 value = "'DEFINE TABLE e TYPE RELATION SCHEMALESS PERMISSIONS NONE'"
 
 [[test.results]]
@@ -157,6 +160,8 @@ DEFINE TABLE e TYPE RELATION SCHEMALESS;
 RELATE a:1->e:1->b:1 RETURN NONE;
 ALTER TABLE e TYPE NORMAL;
 DEFINE TABLE OVERWRITE e TYPE NORMAL;
+-- `SCHEMAFULL` with no `TYPE` is `TYPE NORMAL`.
+DEFINE TABLE OVERWRITE e SCHEMAFULL;
 (INFO FOR DB).tables.e;
 RELATE a:1->e:2->b:1 RETURN NONE;
 

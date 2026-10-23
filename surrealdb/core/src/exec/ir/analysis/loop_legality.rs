@@ -924,10 +924,11 @@ fn body_child_of(ir: &Ir, op: OpId, body: RegionId) -> Option<OpId> {
 /// Two things write at another key. An op of the body that is a write of its own: its table, when
 /// pinned, is compared with the source's, and a write whose table is not pinned or whose footprint
 /// is unknown may reach it. And the stored code the write's stages run, which the plan states
-/// ([`WriteStored`]): the events, views and references of the written table, and the references
-/// that name it, write at keys the plan does not show, so any that is not [`Stored::Nothing`]
-/// counts. The stages' own writes, and the edits of the record in flight, are to the record the
-/// element names. A source that names no one table is read as if it named every one.
+/// ([`WriteStored`]): the events, views and references of the written table, the references that
+/// name it, and what a purge reaches through the edges it deletes, write at keys the plan does not
+/// show, so any that is not [`Stored::Nothing`] counts. The stages' own writes, and the edits of
+/// the record in flight, are to the record the element names. A source that names no one table is
+/// read as if it named every one.
 fn source_written(
 	ir: &Ir,
 	facts: &mut FactCache,
@@ -939,9 +940,15 @@ fn source_written(
 ) -> bool {
 	match written_stored(ir, loop_op) {
 		Some(stored)
-			if [stored.events, stored.views, stored.references, stored.referenced]
-				.iter()
-				.any(|held| *held != Stored::Nothing) =>
+			if [
+				stored.events,
+				stored.views,
+				stored.references,
+				stored.referenced,
+				stored.edges,
+			]
+			.iter()
+			.any(|held| *held != Stored::Nothing) =>
 		{
 			return true;
 		}

@@ -39,7 +39,7 @@ value = "[{ count: 0 }]"
 
 */
 
-DEFINE TABLE t;
+DEFINE TABLE t TYPE NORMAL;
 FOR $i IN 0..900 { CREATE type::record('t', $i) SET n = $i, k = $i % 5 };
 DELETE t WHERE k = 0 AND n < 20 RETURN BEFORE;
 DELETE t WHERE n % 2 = 1 RETURN NONE;
