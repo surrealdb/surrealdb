@@ -4,7 +4,7 @@ reason = "An exponent-form decimal literal whose scale exceeds the decimal preci
 
 [test.results]
 parsing-error = """
-Failed to parser decimal: Scale exceeds the maximum precision allowed: 29 > 28
+Failed to parse decimal: Scale exceeds the maximum precision allowed: 29 > 28
   --> [15:8]
    |
 15 | RETURN 1.5e-28dec;

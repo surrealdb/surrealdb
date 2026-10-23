@@ -4,7 +4,7 @@ reason = "A plain-notation decimal literal with significant digits beyond the de
 
 [test.results]
 parsing-error = """
-Failed to parser decimal: Scale exceeds the maximum precision allowed: 31 > 28
+Failed to parse decimal: Scale exceeds the maximum precision allowed: 31 > 28
   --> [15:8]
    |
 15 | RETURN 0.0000000000000000000000000000001dec;

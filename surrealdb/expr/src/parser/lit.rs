@@ -61,8 +61,12 @@ fn scale_error(scale: u64) -> String {
 	format!("Scale exceeds the maximum precision allowed: {scale} > {MAX_SCALE}")
 }
 
-/// The largest exponent magnitude expanded to digits; beyond it the scale
-/// alone exceeds any decimal's precision.
+fn magnitude_error(exp: i64) -> String {
+	format!("Magnitude exceeds the maximum value allowed: exponent {exp} > {MAX_EXPANDED_EXPONENT}")
+}
+
+/// The largest exponent magnitude expanded to digits; beyond it a negative
+/// exponent's scale, or a positive exponent's magnitude, exceeds any decimal.
 const MAX_EXPANDED_EXPONENT: i64 = 1024;
 
 /// The decimal's maximum scale, as its error message reports it.
@@ -85,13 +89,16 @@ pub fn string_body(text: &str) -> R<String> {
 /// cannot hold exactly (a scale or magnitude out of range) is an error, in
 /// plain and exponent notation alike.
 pub fn decimal(text: &str) -> R<Literal> {
-	let fail = |e: String| Reject::new(format!("Failed to parser decimal: {e}"));
+	let fail = |e: String| Reject::new(format!("Failed to parse decimal: {e}"));
 	let s: String = text.trim_end_matches("dec").chars().filter(|c| *c != '_').collect();
 	let d = if let Some(i) = s.find(['e', 'E']) {
 		// Scientific notation: the exponent shifts the decimal point.
 		let (mantissa, exp) = (&s[..i], &s[i + 1..]);
 		let exp: i64 = exp.parse().map_err(|_| Reject::new("invalid decimal exponent"))?;
-		if exp.unsigned_abs() > MAX_EXPANDED_EXPONENT as u64 {
+		if exp > MAX_EXPANDED_EXPONENT {
+			return Err(fail(magnitude_error(exp)));
+		}
+		if exp < -MAX_EXPANDED_EXPONENT {
 			return Err(fail(scale_error(exp.unsigned_abs())));
 		}
 		let neg = mantissa.starts_with('-');
@@ -882,7 +889,7 @@ mod decimal_tests {
 			assert_eq!(
 				shown(text).unwrap_err(),
 				format!(
-					"Failed to parser decimal: Scale exceeds the maximum precision allowed: {scale} > 28"
+					"Failed to parse decimal: Scale exceeds the maximum precision allowed: {scale} > 28"
 				),
 				"{text}"
 			);
@@ -893,5 +900,9 @@ mod decimal_tests {
 	fn magnitude_out_of_range_is_an_error() {
 		assert!(shown("79228162514264337593543950336dec").is_err());
 		assert!(shown("1e30dec").is_err());
+		assert_eq!(
+			shown("1e2000dec").unwrap_err(),
+			"Failed to parse decimal: Magnitude exceeds the maximum value allowed: exponent 2000 > 1024"
+		);
 	}
 }
