@@ -347,13 +347,9 @@ pub(crate) async fn run_indexing_with_builder(
 	ix: Arc<IndexDefinition>,
 	blocking: bool,
 ) -> Result<()> {
-	let rcv = index_builder.build(ctx, opt.clone(), tb, ix, blocking).await?;
-	if let Some(rcv) = rcv {
-		rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
-			reason: "Channel shutdown".to_string(),
-		})?
-	} else {
-		Ok(())
+	match index_builder.build(ctx, opt.clone(), tb, ix, blocking).await? {
+		Some(rcv) => crate::kvs::index::await_build_result(rcv).await,
+		None => Ok(()),
 	}
 }
 

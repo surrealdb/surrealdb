@@ -144,6 +144,13 @@ fn both_forms_answer_a_statement_the_same_way() {
 			"read_only differs between the two forms in {context}"
 		);
 
+		// The predicate that leaves a blocking build for after the commit.
+		assert_eq!(
+			surface.awaits_its_build_after_commit(),
+			lowered.awaits_its_build_after_commit(),
+			"awaits_its_build_after_commit differs between the two forms in {context}"
+		);
+
 		// `PASSWORD` is excluded because lowering it is not a function: each
 		// conversion salts the hash afresh, so two conversions of one
 		// statement cannot produce the same text. That case is covered by
@@ -164,6 +171,31 @@ fn both_forms_answer_a_statement_the_same_way() {
 		visited.is_none_or(|visited| rendered * 100 / visited.max(1) > 95),
 		"only {rendered} of {visited:?} statements had their text compared"
 	);
+}
+
+/// Only a bare, blocking `REBUILD INDEX` awaits its build after the commit, in
+/// either form: not a `CONCURRENTLY` one, not one nested in a block, and not
+/// any other statement.
+#[test]
+fn only_a_bare_blocking_rebuild_awaits_its_build_after_commit() {
+	for (sql, expected) in [
+		("REBUILD INDEX ix ON t", true),
+		("REBUILD INDEX IF EXISTS ix ON t", true),
+		("REBUILD INDEX ix ON t CONCURRENTLY", false),
+		("{ REBUILD INDEX ix ON t; }", false),
+		("IF true { REBUILD INDEX ix ON t; }", false),
+		("DEFINE INDEX ix ON t FIELDS v", false),
+		("BEGIN", false),
+	] {
+		let ast = crate::syn::parse(sql).unwrap();
+		let [expr] = ast.expressions.as_slice() else {
+			panic!("`{sql}` is not one statement");
+		};
+		let surface = TopLevelStatement::Ast(expr.clone());
+		let lowered = TopLevelStatement::Plan(expr.clone().into());
+		assert_eq!(surface.awaits_its_build_after_commit(), expected, "surface form of `{sql}`");
+		assert_eq!(lowered.awaits_its_build_after_commit(), expected, "lowered form of `{sql}`");
+	}
 }
 
 /// SECURITY: statement text must never carry a plaintext credential.

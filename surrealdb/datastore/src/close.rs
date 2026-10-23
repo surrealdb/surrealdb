@@ -13,8 +13,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Weak};
 
 use anyhow::Result;
+use tokio::sync::Mutex;
 use web_time::Instant;
 
 /// Work owed once a transaction has committed.
@@ -48,4 +50,51 @@ pub trait RollbackAction: Send + Sync + 'static {
 		self: Box<Self>,
 		drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+}
+
+/// Work a statement leaves for the owner of its transaction to await once the
+/// transaction has committed.
+///
+/// For a statement whose result depends on work that must not run inside its
+/// transaction: a blocking index build commits writes of its own in unbounded
+/// number, and a transaction held open across them ages past what an
+/// optimistic storage engine can still validate at commit. Queued only on a
+/// transaction whose owner promised to await it (see
+/// [`crate::tx::Transaction::with_after_commit_waits`]); a statement on any
+/// other transaction does the work inline.
+///
+/// Fallible, unlike [`CommitAction`]: the failure is the statement's result,
+/// reported to the client in place of success. Discarded when the transaction
+/// is cancelled or its commit fails, as a commit action is.
+pub trait AfterCommitWait: Send + 'static {
+	fn wait(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+}
+
+/// The queue of [`AfterCommitWait`]s for one transaction, held by the owner
+/// that commits it.
+///
+/// The transaction holds the queue only weakly. What is queued may itself hold
+/// the transaction, so a transaction that owned its queue would keep itself
+/// alive whenever an owner abandoned it with work still queued. Dropping the
+/// owner's handle drops the queue and everything in it.
+#[derive(Clone, Default)]
+pub struct AfterCommitWaits(Arc<AfterCommitQueue>);
+
+/// The queue an [`AfterCommitWaits`] shares with its transaction.
+pub(crate) type AfterCommitQueue = Mutex<Vec<Box<dyn AfterCommitWait>>>;
+
+impl AfterCommitWaits {
+	/// Take what is queued, in the order it was queued.
+	///
+	/// Called by the owner after a successful commit. Empty once the
+	/// transaction was cancelled or its commit failed, because both discard the
+	/// queue.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn take(&self) -> Vec<Box<dyn AfterCommitWait>> {
+		std::mem::take(&mut *self.0.lock().await)
+	}
+
+	pub(crate) fn downgrade(&self) -> Weak<AfterCommitQueue> {
+		Arc::downgrade(&self.0)
+	}
 }

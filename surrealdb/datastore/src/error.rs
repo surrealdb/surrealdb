@@ -36,6 +36,29 @@ pub enum DatastoreError {
 	#[error("The transaction was not completed because it exceeded the timeout: {0}")]
 	TransactionTimedout(Duration),
 
+	/// A blocking index build outlasted the time its statement had left to
+	/// wait for it.
+	///
+	/// Raised only once the statement has committed: its change is durable and
+	/// the build carries on in the background, so the statement merely stopped
+	/// waiting. Running it again while the build runs fails with
+	/// [`DatastoreError::IndexAlreadyBuilding`].
+	#[error(
+		"The index rebuild was committed, but its build did not finish within the timeout of {0}. The build continues in the background: follow it with `INFO FOR INDEX` rather than running the statement again"
+	)]
+	IndexBuildOutlastedTimeout(Duration),
+
+	/// The query was cancelled while a blocking index build its statement
+	/// started was still running.
+	///
+	/// Raised only once the statement has committed, as
+	/// [`DatastoreError::IndexBuildOutlastedTimeout`] is: the build carries on
+	/// in the background, and only the statement stopped waiting for it.
+	#[error(
+		"The index rebuild was committed, but the query was cancelled before its build finished. The build continues in the background: follow it with `INFO FOR INDEX` rather than running the statement again"
+	)]
+	IndexBuildWaitCancelled,
+
 	/// The query did not execute, because the memory threshold has been reached
 	#[error("The query was not executed due to the memory threshold being reached")]
 	QueryBeyondMemoryThreshold,
@@ -134,12 +157,16 @@ impl LeafError for DatastoreError {
 			DatastoreError::RealtimeDisabled => {
 				TypesError::configuration(message, ConfigurationError::LiveQueryNotSupported)
 			}
-			DatastoreError::TransactionTimedout(duration) => TypesError::query(
+			DatastoreError::TransactionTimedout(duration)
+			| DatastoreError::IndexBuildOutlastedTimeout(duration) => TypesError::query(
 				message,
 				QueryError::TimedOut {
 					duration: duration.0,
 				},
 			),
+			DatastoreError::IndexBuildWaitCancelled => {
+				TypesError::query(message, QueryError::Cancelled)
+			}
 			// Shadows `message` deliberately: the payload string is what reaches
 			// the client, not this error's own `Display` output.
 			DatastoreError::TransactionWriteKeysExceeded {

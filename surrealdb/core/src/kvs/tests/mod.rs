@@ -14,6 +14,8 @@
 	feature = "kv-surrealkv",
 ))]
 
+#[cfg(feature = "kv-rocksdb")]
+mod blocking_rebuild_index_test;
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]

@@ -8,6 +8,7 @@ use crate::catalog::{Error, INDEX_FORMAT_VERSION};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::err::EngineError;
 use crate::expr::Base;
 use crate::expr::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::iam::{Action, ResourceKind};
@@ -96,8 +97,18 @@ pub(crate) async fn rebuild_index_statement_compute(
 		ix
 	};
 
-	// Rebuild the index
-	run_indexing(ctx, opt, tb.table_id, ix, !this.concurrently).await?;
+	// Rebuild the index. A blocking rebuild's index is already defined, so its
+	// build is awaited after the commit wherever the transaction's owner offers
+	// that, and inline otherwise.
+	if this.concurrently {
+		run_indexing(ctx, opt, tb.table_id, ix, false).await?;
+	} else {
+		let index_builder =
+			ctx.get_index_builder().ok_or_else(|| EngineError::unreachable("No Index Builder"))?;
+		index_builder
+			.run_awaited_after_commit(ctx, opt.clone(), tb.table_id, ix, &ctx.tx())
+			.await?;
+	}
 	// Ok all good
 	Ok(Value::None)
 }

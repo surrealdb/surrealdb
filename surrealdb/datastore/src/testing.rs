@@ -46,6 +46,11 @@ pub enum RetryableConflictSite {
 	/// Raised in place of that commit, and leaving the transaction finished as
 	/// a real commit failure does.
 	AsyncEventCommit,
+	/// A conflict on the commit of a statement that left a blocking index
+	/// build to await after it (a standalone, blocking `REBUILD INDEX`).
+	/// Raised in place of that commit, once the build has started, discarding
+	/// the statement's writes as a real lost commit does.
+	AwaitedBuildCommit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

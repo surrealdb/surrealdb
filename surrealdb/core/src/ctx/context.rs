@@ -826,6 +826,12 @@ impl Context {
 		self.deadline.map(|(v, _)| v.saturating_duration_since(Instant::now()))
 	}
 
+	/// The timeout this context's deadline was set from, if it has one: what a
+	/// caller reports once [`Self::timeout`] has run out.
+	pub(crate) fn deadline_timeout(&self) -> Option<Duration> {
+		self.deadline.map(|(_, timeout)| timeout)
+	}
+
 	/// Returns the slow log configuration, if any, attached to this context.
 	/// The executor consults this to decide whether to emit slow-query log lines.
 	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {

@@ -74,6 +74,35 @@ impl TopLevelStatement {
 		}
 	}
 
+	/// Whether this statement is a blocking `REBUILD INDEX`, whose build the
+	/// transaction of its own awaits after committing.
+	///
+	/// A blocking build commits writes of its own in unbounded number, and a
+	/// transaction held open across them ages past what an optimistic storage
+	/// engine can still validate at commit. The statement alone qualifies, not
+	/// one nested in a block, a function or an `IF`, nor one inside `BEGIN ...
+	/// COMMIT`: awaiting after the commit means the rest of the transaction
+	/// runs, and commits, before the build's outcome is known, so a build that
+	/// then fails could no longer take back what those statements wrote. Only a
+	/// transaction with nothing else in it stays atomic. This is decided here,
+	/// from the statement, rather than by offering every transaction a queue:
+	/// the code that queues a build cannot tell whether anything follows it.
+	/// Both forms of the statement qualify alike. A `REBUILD INDEX` evaluates
+	/// nothing — its index and table are names — and has no definition to take
+	/// back should the build fail: the index is left in `Error` for the next
+	/// `REBUILD INDEX` to retry, as a failed `CONCURRENTLY` build leaves it.
+	pub(crate) fn awaits_its_build_after_commit(&self) -> bool {
+		match self {
+			TopLevelStatement::Ast(sql::TopLevelExpr::Expr(sql::Expr::Rebuild(stmt))) => {
+				matches!(&**stmt, sql::statements::RebuildStatement::Index(ix) if !ix.concurrently)
+			}
+			TopLevelStatement::Plan(expr::TopLevelExpr::Expr(expr::Expr::Rebuild(stmt))) => {
+				matches!(&**stmt, expr::statements::RebuildStatement::Index(ix) if !ix.concurrently)
+			}
+			_ => false,
+		}
+	}
+
 	/// Whether this statement can run inside a read-only transaction. See
 	/// [`sql::read_only`](crate::sql::read_only) for the one-sided contract
 	/// the predicate upholds.

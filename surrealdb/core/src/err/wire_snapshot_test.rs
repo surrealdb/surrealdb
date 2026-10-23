@@ -322,6 +322,11 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			"TransactionTimedout",
 			DatastoreError::TransactionTimedout(Duration(std::time::Duration::from_secs(1))),
 		),
+		(
+			"IndexBuildOutlastedTimeout",
+			DatastoreError::IndexBuildOutlastedTimeout(Duration(std::time::Duration::from_secs(1))),
+		),
+		("IndexBuildWaitCancelled", DatastoreError::IndexBuildWaitCancelled),
 		("QueryBeyondMemoryThreshold", DatastoreError::QueryBeyondMemoryThreshold),
 		(
 			"TransactionWriteKeysExceeded",

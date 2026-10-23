@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_datastore::close::CommitAction;
+use surrealdb_datastore::close::{AfterCommitWait, AfterCommitWaits, CommitAction};
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -233,6 +233,12 @@ pub struct Executor {
 	/// statement in `execute_plan_in_transaction` and set in
 	/// `execute_operator_plan`; statements that never reach a plan stay `Scalar`.
 	result_shape: OutputShape,
+	/// A statement whose slow-log check waits for the work its transaction
+	/// leaves for after the commit: its caller waits for that work too, so the
+	/// time it takes is part of the statement's. Set by
+	/// `execute_plan_in_transaction` and taken by `execute_plan_impl` once that
+	/// work has settled.
+	slow_log_after_commit: Option<Expr>,
 }
 
 impl Executor {
@@ -324,6 +330,7 @@ impl Executor {
 			broker_owned_by_executor: false,
 			stream: None,
 			result_shape: OutputShape::Scalar,
+			slow_log_after_commit: None,
 		}
 	}
 
@@ -510,6 +517,24 @@ impl Executor {
 	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
+		}
+	}
+
+	/// [`Self::check_slow_log`] for `stm` now, or, with `after_commit`, once the
+	/// work its transaction leaves for after the commit has settled (see
+	/// `slow_log_after_commit`).
+	fn check_slow_log_unless_after_commit(
+		&mut self,
+		start: &Instant,
+		stm: Expr,
+		after_commit: bool,
+	) {
+		if after_commit {
+			if self.ctx.slow_log().is_some() {
+				self.slow_log_after_commit = Some(stm);
+			}
+		} else {
+			self.check_slow_log(start, &stm);
 		}
 	}
 
@@ -1415,6 +1440,10 @@ impl Executor {
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
+				// A statement whose transaction accepts work for after its
+				// commit is slow-logged once that work has settled, by
+				// `execute_plan_impl`.
+				let log_after_commit = txn.accepts_after_commit_waits();
 				// Try the new streaming execution path first
 				match try_plan_expr!(
 					&e,
@@ -1435,7 +1464,7 @@ impl Executor {
 						let exec_result =
 							self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
 
-						self.check_slow_log(start, &e);
+						self.check_slow_log_unless_after_commit(start, e, log_after_commit);
 
 						// exec_result is now FlowResult<Value>, propagate directly
 						exec_result
@@ -1462,7 +1491,7 @@ impl Executor {
 							})
 							.finish()
 							.await;
-						self.check_slow_log(start, &e);
+						self.check_slow_log_unless_after_commit(start, e, log_after_commit);
 						res
 					}
 					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
@@ -1514,6 +1543,11 @@ impl Executor {
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
+		// Whichever way the statement ended, the work it left for after its
+		// commit has settled by now.
+		if let Some(stm) = self.slow_log_after_commit.take() {
+			self.check_slow_log(start, &stm);
+		}
 		result
 	}
 
@@ -1531,17 +1565,29 @@ impl Executor {
 		} else {
 			TransactionType::Write
 		};
-		let txn = Arc::new(
-			kvs.transaction(transaction_type)
-				.await?
-				.with_tenant_identity(self.ctx.tenant_identity().cloned())
-				.with_write_keys_limit(kvs.transaction_max_write_keys()),
-		);
+		let txn = kvs
+			.transaction(transaction_type)
+			.await?
+			.with_tenant_identity(self.ctx.tenant_identity().cloned())
+			.with_write_keys_limit(kvs.transaction_max_write_keys());
+		// A blocking `REBUILD INDEX` commits its catalog change first and its
+		// build is awaited below, once the commit has applied: the build commits
+		// far more writes than a transaction can stay open across on an
+		// optimistic storage engine. Any other statement leaves nothing for after
+		// its commit, and pays nothing for the queue.
+		let after_commit = stmt.awaits_its_build_after_commit().then(AfterCommitWaits::default);
+		let txn = Arc::new(match &after_commit {
+			Some(waits) => txn.with_after_commit_waits(waits),
+			None => txn,
+		});
 		let receiver = self.prepare_broker(
 			matches!(transaction_type, TransactionType::Write),
 			kvs.live_query_broker(),
 		);
 
+		// The transaction timeout bounds the statement as a whole, including
+		// any wait it leaves for after its commit.
+		let started = Instant::now();
 		let exec_result = match kvs.transaction_timeout() {
 			Some(timeout) => {
 				match common::time::timeout(
@@ -1568,6 +1614,18 @@ impl Executor {
 				if let TransactionType::Read = transaction_type {
 					let _ = txn.cancel().await;
 					return Ok(value);
+				}
+
+				// Stands in for a lost commit of a statement whose build has
+				// started and is queued for after the commit.
+				#[cfg(test)]
+				if after_commit.is_some()
+					&& let Err(e) = crate::kvs::testing::maybe_inject_retryable_conflict(
+						crate::kvs::testing::RetryableConflictSite::AwaitedBuildCommit,
+						self.ctx.node_id(),
+					) {
+					let _ = txn.cancel().await;
+					return Err(e);
 				}
 
 				if let Err(e) = txn.commit().await {
@@ -1599,6 +1657,15 @@ impl Executor {
 					Self::flush_live_query_notifications(prepared);
 				}
 
+				// The statement's result is not settled until the work it left for
+				// after the commit is: a blocking build that fails fails the
+				// statement.
+				if let Some(waits) = after_commit {
+					for wait in waits.take().await {
+						self.await_after_commit(kvs, wait, started).await?;
+					}
+				}
+
 				Ok(value)
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
@@ -1609,6 +1676,59 @@ impl Executor {
 				let _ = txn.cancel().await;
 				Err(e)
 			}
+		}
+	}
+
+	/// Await `wait`, work a statement left for after its commit, for no longer
+	/// than what remains of the transaction timeout of the statement that
+	/// started at `started`, nor than what remains of the query's deadline, and
+	/// only while the query is not cancelled.
+	///
+	/// The statement has committed by the time this runs, and the work carries
+	/// on in the background once nothing waits for it. Running out of time is
+	/// therefore reported as [`DatastoreError::IndexBuildOutlastedTimeout`],
+	/// naming the timeout that ran out, and cancellation as
+	/// [`DatastoreError::IndexBuildWaitCancelled`]: never as a transaction or
+	/// query that did not complete.
+	async fn await_after_commit(
+		&self,
+		kvs: &Datastore,
+		wait: Box<dyn AfterCommitWait>,
+		started: Instant,
+	) -> Result<()> {
+		// The sooner of the two bounds applies, paired with the timeout to
+		// report should it run out: the configured transaction timeout for what
+		// the statement has left of it, the query's own timeout for its
+		// deadline. Settled here rather than read back from the clock once the
+		// timer fires, which cannot tell two bounds apart that end close
+		// together.
+		let transaction = kvs
+			.transaction_timeout()
+			.map(|timeout| (timeout.saturating_sub(started.elapsed()), timeout));
+		let query = self.ctx.timeout().zip(self.ctx.deadline_timeout());
+		let bound = match (transaction, query) {
+			(Some(transaction), Some(query)) if transaction.0 <= query.0 => Some(transaction),
+			(_, Some(query)) => Some(query),
+			(transaction, None) => transaction,
+		};
+		let waited = async {
+			match bound {
+				Some((after, timeout)) => {
+					common::time::timeout(after, wait.wait()).await.map_err(|_| timeout)
+				}
+				None => Ok(wait.wait().await),
+			}
+		};
+		let outcome = match self.ctx.cancel_token() {
+			Some(token) => tokio::select! {
+				outcome = waited => outcome,
+				_ = token.cancelled() => bail!(DatastoreError::IndexBuildWaitCancelled),
+			},
+			None => waited.await,
+		};
+		match outcome {
+			Ok(result) => result,
+			Err(timeout) => bail!(DatastoreError::IndexBuildOutlastedTimeout(timeout.into())),
 		}
 	}
 
