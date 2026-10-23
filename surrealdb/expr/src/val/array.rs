@@ -487,3 +487,41 @@ impl Windows<Array> for Array {
 			.into())
 	}
 }
+
+#[cfg(test)]
+mod encoding_tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
+
+	use crate::val::{Array, Number, Value};
+
+	fn float_array(dims: usize) -> Value {
+		Value::Array(Array(
+			(0..dims).map(|i| Value::Number(Number::Float(i as f64 * 0.5))).collect(),
+		))
+	}
+
+	#[test]
+	fn float_arrays_round_trip_across_the_indexed_threshold() {
+		// `revision` switches an array's body shape at its indexed threshold,
+		// and may switch it again for uniform-width elements, so the sizes
+		// here straddle that boundary rather than sampling one side of it.
+		// Vector-shaped arrays are the case that matters in practice: an
+		// embedding is thousands of same-width floats.
+		for dims in [0usize, 1, 7, 8, 9, 128, 768] {
+			let original = float_array(dims);
+			let mut bytes = Vec::new();
+			original.serialize_revisioned(&mut bytes).unwrap();
+
+			let mut reader: &[u8] = &bytes;
+			let decoded = Value::deserialize_revisioned(&mut reader)
+				.unwrap_or_else(|e| panic!("{dims}-dim array failed to decode: {e}"));
+			assert_eq!(decoded, original, "{dims}-dim array did not round trip");
+			assert!(
+				reader.is_empty(),
+				"{dims}-dim array left {} trailing bytes, so a sibling field would decode from \
+				 the wrong offset",
+				reader.len()
+			);
+		}
+	}
+}

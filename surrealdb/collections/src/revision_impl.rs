@@ -294,25 +294,14 @@ where
 		revision::optimised::indexed::serialize_indexed_set_iter(self.iter(), w)
 	}
 	fn deserialize_indexed_set<R: std::io::Read>(r: &mut R) -> Result<Self, Error> {
-		let mut flag_buf = [0u8; 1];
-		r.read_exact(&mut flag_buf).map_err(Error::Io)?;
-		let indexed = (flag_buf[0] & INDEXED_FLAG_BIT) != 0;
-		let len = bounded::read_len(r)?;
-
-		if indexed {
-			// Indexed seq/set body: `[elem_off; len]` table (4 bytes
-			// each), then dense elements.
-			let table_bytes = len.checked_mul(4).ok_or_else(|| {
-				Error::Deserialize("indexed-set offset table size overflow".into())
-			})?;
-			revision::slice_reader::advance_read(r, table_bytes)?;
-		}
-		// Equal elements merge: a payload holding them decodes to the set they
-		// describe rather than failing, so a record carrying one stays
-		// readable, and therefore updatable and deletable, by every statement
-		// that touches it. The encoder never writes equal elements from a
-		// well-formed set.
-		let entries = bounded::read_vec_with(r, len, T::deserialize_revisioned)?;
+		// Prologue parsing belongs to `revision`, which owns the set of body
+		// shapes an indexed set can take (legacy, offset-table, strided). A
+		// local copy of that parsing decodes whatever shape it was written
+		// against and silently misreads the rest, so read the element list
+		// through the crate and layer `VecSet`'s own contract on top: equal
+		// elements merge so a payload holding them decodes to the set they
+		// describe rather than failing.
+		let entries: Vec<T> = revision::optimised::indexed::deserialize_indexed_seq(r)?;
 		set_from_decoded(entries)
 	}
 	/// Skip a serialised indexed-set without materialising any elements.
@@ -722,6 +711,28 @@ mod tests {
 		let mut reader: &[u8] = &bytes;
 		VecSet::<String>::skip_indexed_set(&mut reader).unwrap();
 		assert_eq!(reader, &[0xEF]);
+	}
+
+	#[test]
+	fn deserialize_indexed_set_round_trips_every_shape() {
+		// Whichever body shape the encoder picks for a given length and
+		// element type, the decoder must recover the same set.
+		use revision::optimised::indexed::IndexedSetEncoded;
+		for n in [0usize, 1, 7, 8, 16, 64] {
+			let uniform: VecSet<u32> = (0..n as u32).collect();
+			let mut bytes = Vec::new();
+			uniform.serialize_indexed_set(&mut bytes).unwrap();
+			let mut reader: &[u8] = &bytes;
+			assert_eq!(VecSet::<u32>::deserialize_indexed_set(&mut reader).unwrap(), uniform);
+			assert!(reader.is_empty(), "n={n}: uniform decode left {} bytes", reader.len());
+
+			let varying: VecSet<String> = (0..n).map(|i| "ab".repeat(i + 1)).collect();
+			let mut bytes = Vec::new();
+			varying.serialize_indexed_set(&mut bytes).unwrap();
+			let mut reader: &[u8] = &bytes;
+			assert_eq!(VecSet::<String>::deserialize_indexed_set(&mut reader).unwrap(), varying);
+			assert!(reader.is_empty(), "n={n}: varying decode left {} bytes", reader.len());
+		}
 	}
 
 	#[test]
