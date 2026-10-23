@@ -100,6 +100,20 @@ impl IntoResponse for Error {
 					description: Some("The memory guard has refused every request for longer than SURREAL_MEMORY_THRESHOLD_UNHEALTHY_AFTER. The instance needs restarting to release memory.".to_string()),
 					information: Some(self.to_string()),
 				}.into_response(),
+			Error::ServerOverloaded => {
+				let mut response = ErrorMessage {
+					code: StatusCode::SERVICE_UNAVAILABLE,
+					details: Some("Service unavailable".to_string()),
+					description: Some("The server is under memory pressure and refused this request. Retry shortly.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response();
+				// The refusal is transient: hint clients to retry once memory is released.
+				response.headers_mut().insert(
+					http::header::RETRY_AFTER,
+					HeaderValue::from_static("1"),
+				);
+				response
+			}
 			Error::NotReady =>
 				ErrorMessage {
 					code: StatusCode::SERVICE_UNAVAILABLE,
@@ -315,5 +329,13 @@ mod tests {
 		let res = Error::TooManyRequests(2).into_response();
 		assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
 		assert_eq!(res.headers().get(http::header::RETRY_AFTER).unwrap(), "2");
+	}
+
+	#[test]
+	fn server_overloaded_renders_503_with_retry_after() {
+		// Exercise the path the RPC handler takes: `NetError` wrapped in `ResponseError`.
+		let res = ResponseError::from(Error::ServerOverloaded).into_response();
+		assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+		assert_eq!(res.headers().get(http::header::RETRY_AFTER).unwrap(), "1");
 	}
 }
