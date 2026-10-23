@@ -1189,15 +1189,42 @@ impl<'a, 's> Parser<'a, 's> {
 	/// The clauses of `DEFINE INDEX`. Without a `FIELDS` clause, an index
 	/// that needs columns is an error at the token after the clauses, as
 	/// earlier releases report it; a column count that does not fit the index is left
-	/// to the lowering, which knows the count.
+	/// to the lowering, which knows the count. An index has at most one kind, so a
+	/// second `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW` or `DISKANN` clause is an error
+	/// rather than a replacement of the first.
 	pub(crate) fn index_clauses(&mut self) -> R<()> {
 		// Whether the index kind in force needs exactly one column, and
 		// whether it needs any.
 		let mut one_column = false;
 		let mut needs_columns = true;
 		let mut fields = false;
+		// The index kind clause given so far, as its token and its row in
+		// `INDEX_KIND_CONFLICTS`.
+		let mut kind: Option<(Tok, usize)> = None;
 		loop {
 			let t = self.tok;
+			let this_kind = match t.kw {
+				Kw::Unique => Some(0),
+				Kw::Count => Some(1),
+				Kw::Fulltext => Some(2),
+				Kw::Hnsw => Some(3),
+				Kw::None
+					if t.kind == T::Ident && self.text_of(t).eq_ignore_ascii_case("DISKANN") =>
+				{
+					Some(4)
+				}
+				_ => None,
+			};
+			if let Some(k) = this_kind
+				&& let Some((first, f)) = kind.replace((t, k))
+			{
+				let d = Diag::message(t.start, t.end, INDEX_KIND_CONFLICTS[k][f])
+					.with_label(
+						"an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN",
+					)
+					.with_extra(first.start, first.end, "First given here");
+				return Err(self.diag(d));
+			}
 			match t.kw {
 				Kw::Fields => {
 					self.bump();
@@ -1754,6 +1781,47 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 }
+
+/// The error for an index kind clause given after another, indexed by the
+/// later kind and then the earlier one, in the order `UNIQUE`, `COUNT`,
+/// `FULLTEXT`, `HNSW`, `DISKANN`.
+const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
+	[
+		"UNIQUE is given twice",
+		"Cannot combine UNIQUE with COUNT",
+		"Cannot combine UNIQUE with FULLTEXT",
+		"Cannot combine UNIQUE with HNSW",
+		"Cannot combine UNIQUE with DISKANN",
+	],
+	[
+		"Cannot combine COUNT with UNIQUE",
+		"COUNT is given twice",
+		"Cannot combine COUNT with FULLTEXT",
+		"Cannot combine COUNT with HNSW",
+		"Cannot combine COUNT with DISKANN",
+	],
+	[
+		"Cannot combine FULLTEXT with UNIQUE",
+		"Cannot combine FULLTEXT with COUNT",
+		"FULLTEXT is given twice",
+		"Cannot combine FULLTEXT with HNSW",
+		"Cannot combine FULLTEXT with DISKANN",
+	],
+	[
+		"Cannot combine HNSW with UNIQUE",
+		"Cannot combine HNSW with COUNT",
+		"Cannot combine HNSW with FULLTEXT",
+		"HNSW is given twice",
+		"Cannot combine HNSW with DISKANN",
+	],
+	[
+		"Cannot combine DISKANN with UNIQUE",
+		"Cannot combine DISKANN with COUNT",
+		"Cannot combine DISKANN with FULLTEXT",
+		"Cannot combine DISKANN with HNSW",
+		"DISKANN is given twice",
+	],
+];
 
 fn is_algorithm(text: &str) -> bool {
 	const ALGS: &[&str] = &[

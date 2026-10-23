@@ -2619,6 +2619,9 @@ e39196ae9bc1bb56 language-tests/tests/language/statements/define/index/empty_arr
 d2bbe0f8ad10cdbb language-tests/tests/language/statements/define/index/id_components_index_build.surql
 8eedeb0351db92e6 language-tests/tests/language/statements/define/index/id_components_index_defined_with_the_names.surql
 3c06f1977f47455a language-tests/tests/language/statements/define/index/id_components_index_replay.surql
+43450f97c5b3d72d language-tests/tests/language/statements/define/index/kind_after_fulltext.surql
+d49f1d966b68a101 language-tests/tests/language/statements/define/index/kind_after_vector.surql
+94abaab217fc5d74 language-tests/tests/language/statements/define/index/kind_twice.surql
 dfed0a4fc923b786 language-tests/tests/language/statements/define/index/mixed_numbers_range.surql
 fd4cb924dd80286d language-tests/tests/language/statements/define/index/mixed_numbers_range_new_executor.surql
 971674cf977abb70 language-tests/tests/language/statements/define/index/mixed_numbers_range_no_index.surql
@@ -2645,6 +2648,7 @@ f2b1badd0eae7801 language-tests/tests/language/statements/define/index/on_schema
 4f72a035bc7ee3bf language-tests/tests/language/statements/define/index/single_unique.surql
 3c5745f88e90aa87 language-tests/tests/language/statements/define/index/single_unique_embedded_multiple.surql
 86acb166299844c1 language-tests/tests/language/statements/define/index/single_unique_existing.surql
+4f53ec962226030d language-tests/tests/language/statements/define/index/unique_and_fulltext_on_one_field.surql
 4aac6b00da04f229 language-tests/tests/language/statements/define/index/unique_constraint_index.surql
 40f5006e3eaf8c6d language-tests/tests/language/statements/define/index/unique_index.surql
 b7ae5983bddc255f language-tests/tests/language/statements/define/index/with_non_boolean_expression.surql
@@ -3495,6 +3499,7 @@ c3a8bcca4cba2af1 language-tests/tests/reproductions/4957_version_subquery_inheri
 17e1a0facd343066 language-tests/tests/reproductions/5677_array_index_field_constraints.surql
 1e26e2f8edcd9954 language-tests/tests/reproductions/5945_create_permission.surql
 a3f4da684ddb0294 language-tests/tests/reproductions/5945_create_permission_import.surql
+9f844deee429b60f language-tests/tests/reproductions/6002_unique_ignored_with_fulltext_analyzer.surql
 c1ef8438025f93bb language-tests/tests/reproductions/6075_relation_table_export_field_conflict.surql
 099a87fd08776d69 language-tests/tests/reproductions/6242_create_visibility_issue.surql
 e92a984841fe6f5c language-tests/tests/reproductions/6297_field_already_exists_reimport.surql
@@ -4701,6 +4706,7 @@ cbf29ce484222325 surrealdb/parser-next/tests/corpus/empty_statements.surql
 a92a30c4d3f7f06c surrealdb/parser-next/tests/corpus/errors/alter_database_without_clause.surql
 f596818238530060 surrealdb/parser-next/tests/corpus/errors/compatibility_level.surql
 3d323572e15370b8 surrealdb/parser-next/tests/corpus/errors/define_api_security_twice.surql
+74ef16441172501f surrealdb/parser-next/tests/corpus/errors/define_index_two_kinds.surql
 a6dc56284d6f6cd5 surrealdb/parser-next/tests/corpus/errors/insert_has_no_only.surql
 377573ca7cdc8693 surrealdb/parser-next/tests/corpus/errors/invalid_clause.surql
 4b96cde4bdd7855a surrealdb/parser-next/tests/corpus/errors/migrate_incomplete.surql
