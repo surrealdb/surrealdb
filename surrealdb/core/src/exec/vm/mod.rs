@@ -200,6 +200,8 @@ mod tests_shaped;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_view_reentry;
 #[cfg(all(test, feature = "kv-mem"))]
+mod tests_write_prefilter;
+#[cfg(all(test, feature = "kv-mem"))]
 mod tests_write_scan;
 pub(crate) mod units;
 mod write;

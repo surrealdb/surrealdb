@@ -13,6 +13,14 @@
 //!   once, or a `phys.loop` of kind `Select` whose body's first op is such a filter over the loop's
 //!   row. A table's enforcement, a permission or a layer between the scan and the filter puts an op
 //!   there that is not a filter, so the scan has none.
+//! - Or its rows have one reader, a `phys.loop` of kind `Write` whose stages hold one `WHERE`
+//!   (`Clause(WriteCond)`), no gate of the write judges a predicate, and the catalog answers the
+//!   table's fields. A gate's predicate runs ahead of the `WHERE` and the `WHERE` must not judge a
+//!   record before it, so only a write whose permission checks judge nothing takes the shape. The
+//!   `WHERE` judges the record as the caller sees it, so the shape reads no field that is
+//!   `COMPUTED` or has a select permission: every other field the caller sees as it is stored. The
+//!   write's stages still judge every record the shape keeps; a record it refuses is one the
+//!   `WHERE` skips.
 //! - The filter's predicate is a conjunction, disjunction or negation of comparisons of a stored
 //!   field path with a literal. A path through a dereference, an index, a method or a computed
 //!   field is not stored, and a path that opens with `id` is not in the stored bytes either.
@@ -39,7 +47,7 @@ use std::sync::Arc;
 use super::access::ReadVersion;
 use super::conjunct::{self, def_op, strip_truthy};
 use super::ops::PhysOp;
-use crate::catalog::FieldDefinition;
+use crate::catalog::{FieldDefinition, Permission};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Rewriter;
@@ -49,7 +57,8 @@ use crate::exec::ir::expr::ops::{ExprOp, ShortCircuitOp};
 use crate::exec::ir::iface::catalog::{CatalogAnswer, PhysCx, SourceKey};
 use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
-use crate::exec::ir::logical::ops::LoopKind;
+use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
+use crate::exec::ir::logical::ops::{GateClause, LoopKind};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::object_extract::PathSegment;
 use crate::exec::pre_decode_filter::PreDecodeShape;
@@ -101,7 +110,7 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 /// The prefilter of the scan `scan`, or `None` where the conditions of the module do not hold.
 fn prefilter_of(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> Option<PreDecodeShape> {
 	let data = ir.op(scan)?;
-	let (key, fields) = match &data.kind {
+	let (key, fields, catalogued) = match &data.kind {
 		OpKind::Phys(PhysOp::TableScan(attrs)) => {
 			if attrs.lightweight {
 				return None;
@@ -114,7 +123,7 @@ fn prefilter_of(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> Option<PreDecodeShape> 
 			};
 			let answers: SourceKey = (attrs.table.clone(), attrs.read.with.clone(), version);
 			match cx.physical.table_answers(&answers) {
-				CatalogAnswer::Found(found) => (found.key.clone(), Arc::clone(&found.fields)),
+				CatalogAnswer::Found(found) => (found.key.clone(), Arc::clone(&found.fields), true),
 				CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => {
 					return None;
 				}
@@ -123,22 +132,33 @@ fn prefilter_of(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> Option<PreDecodeShape> 
 		OpKind::Phys(PhysOp::KeyRangeScan(attrs)) => {
 			let answers: SourceKey =
 				(attrs.table.clone(), attrs.read.with.clone(), ReadVersion::Current);
-			let fields = match cx.physical.table_answers(&answers) {
-				CatalogAnswer::Found(found) => Arc::clone(&found.fields),
+			let (fields, catalogued) = match cx.physical.table_answers(&answers) {
+				CatalogAnswer::Found(found) => (Arc::clone(&found.fields), true),
 				CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => {
-					Arc::from(Vec::new())
+					(Arc::from(Vec::new()), false)
 				}
 			};
-			(Some(Arc::clone(&attrs.access.key)), fields)
+			(Some(Arc::clone(&attrs.access.key)), fields, catalogued)
 		}
 		OpKind::Phys(_) | OpKind::Expr(_) | OpKind::Logical(_) => return None,
 	};
-	let (filter, row) = predicate_region(ir, scan)?;
-	let site = conjunct::site(ir, filter)?;
-	if site.once {
-		return None;
-	}
-	let shape = shape_of(ir, row, site.root)?;
+	let shape = match predicate_region(ir, scan) {
+		Some((filter, row)) => {
+			let site = conjunct::site(ir, filter)?;
+			if site.once {
+				return None;
+			}
+			shape_of(ir, row, site.root)?
+		}
+		None => {
+			let (row, root) = write_condition(ir, scan)?;
+			let shape = shape_of(ir, row, root)?;
+			if !catalogued || !reads_stored_fields(&shape, &fields) {
+				return None;
+			}
+			shape
+		}
+	};
 	if key.as_deref().is_some_and(|key| shape.reads_key_component(key)) {
 		return None;
 	}
@@ -383,6 +403,113 @@ fn filter_row(ir: &Ir, filter: OpId) -> Option<ValueId> {
 	let region = *ir.op(filter)?.regions.first()?;
 	let block = *ir.region(region)?.blocks.first()?;
 	ir.block(block)?.args.first().copied()
+}
+
+/// The row and the predicate of the one `WHERE` of the write loop that is the only reader of the
+/// rows of the scan `scan`, or `None` where the reader is no write loop or its stages hold no
+/// `WHERE`, or more than one.
+fn write_condition(ir: &Ir, scan: OpId) -> Option<(ValueId, ValueId)> {
+	let [rows] = ir.op(scan)?.results.as_slice() else {
+		return None;
+	};
+	let [read] = ir.uses(*rows) else {
+		return None;
+	};
+	let writer = ir.op(read.user)?;
+	if read.operand != 0
+		|| !matches!(
+			writer.kind,
+			OpKind::Phys(PhysOp::Loop {
+				kind: LoopKind::Write,
+				..
+			})
+		) {
+		return None;
+	}
+	if !gates_judge_nothing(ir, read.user) {
+		return None;
+	}
+	// Only the stages of the loop itself: a write nested in a stage's expression owns a `WHERE`
+	// that does not judge these subjects.
+	let body = *writer.regions.first()?;
+	let mut conds = Vec::new();
+	for stage in ops_in(ir, body) {
+		let Some(held) = ir.op(stage) else {
+			continue;
+		};
+		conds.extend(held.regions.iter().copied().filter(|inner| {
+			ir.region(*inner)
+				.is_some_and(|held| held.kind == RegionKind::Clause(ClauseRole::WriteCond))
+		}));
+	}
+	let [cond] = conds.as_slice() else {
+		return None;
+	};
+	let [block] = ir.region(*cond)?.blocks.as_slice() else {
+		return None;
+	};
+	let block = ir.block(*block)?;
+	let row = *block.args.first()?;
+	let closing = ir.op(*block.ops.last()?)?;
+	let (OpKind::Expr(ExprOp::Yield), [predicate]) = (&closing.kind, closing.operands.as_slice())
+	else {
+		return None;
+	};
+	Some((row, *predicate))
+}
+
+/// Whether no gate of the write whose subject loop is `looped` judges a predicate: each
+/// `PERMISSIONS FOR` clause it states is `FULL`, `NONE`, or that of a table the write defines.
+/// A gate that judges a predicate runs ahead of the `WHERE`, which must not judge a record first.
+///
+/// The write op reads the rows of the loop, or of the op whose region holds it, such as the
+/// pipeline the loop runs in.
+fn gates_judge_nothing(ir: &Ir, looped: OpId) -> bool {
+	let reader = |op: OpId| {
+		ir.op(op)?.results.iter().flat_map(|result| ir.uses(*result)).find_map(|held| {
+			match ir.op(held.user).map(|user| &user.kind) {
+				Some(OpKind::Phys(PhysOp::Write(attrs))) => Some(attrs),
+				_ => None,
+			}
+		})
+	};
+	let write =
+		reader(looped).or_else(|| ir.parent_op(ir.enclosing_region(looped)).and_then(reader));
+	let Some(write) = write else {
+		return false;
+	};
+	let gates = &write.write.gates;
+	[gates.create, gates.update, gates.delete, gates.select]
+		.into_iter()
+		.all(|clause| matches!(clause, GateClause::Full | GateClause::None | GateClause::Absent))
+}
+
+/// Whether every field the leaves of `shape` read is one the caller of a write sees as it is
+/// stored, of a table whose fields are `fields`: no field under the same top-level name is
+/// `COMPUTED` or has a select permission.
+fn reads_stored_fields(shape: &PreDecodeShape, fields: &[FieldDefinition]) -> bool {
+	match shape {
+		PreDecodeShape::And(parts) | PreDecodeShape::Or(parts) => {
+			parts.iter().all(|part| reads_stored_fields(part, fields))
+		}
+		PreDecodeShape::Not(inner) | PreDecodeShape::Selective(inner) => {
+			reads_stored_fields(inner, fields)
+		}
+		PreDecodeShape::Leaf {
+			path,
+			..
+		} => {
+			let Some(first) = path.first() else {
+				return false;
+			};
+			fields.iter().all(|field| match field.name.0.first() {
+				Some(Part::Field(name)) if name.as_str() == first.as_str() => {
+					field.computed.is_none() && matches!(field.select_permission, Permission::Full)
+				}
+				_ => true,
+			})
+		}
+	}
 }
 
 /// The shape of the predicate `value`, read from a row `row`: a conjunction, a disjunction or a

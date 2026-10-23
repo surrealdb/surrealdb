@@ -1851,6 +1851,8 @@ async fn run_write_pipelines(
 		// The host begins each read of a table as the source opens it
 		// ([`WriteState::read_table`]); the targets say per subject.
 		write_state(state)?.reads_subjects(reads_stored_records(&pipeline.source));
+		#[cfg(test)]
+		super::row_packed::observed::note_pipeline(pipeline, state);
 		match &pipeline.source {
 			Source::WriteTargets {
 				targets,
