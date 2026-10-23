@@ -51,17 +51,22 @@
 use smallvec::smallvec;
 use surrealdb_strand::{Strand, TableName};
 
-use super::conjunct::{def_op, is_row};
+use super::access::ReadVersion;
+use super::conjunct::{def_op, is_row, is_total_form};
 use super::duplicate;
-use super::nested::{holds_version, in_stored_clause, index_for, yielded};
+use super::nested::{
+	enclosing_statement, holds_version, impure, in_stored_clause, index_for, index_operator,
+	runs_once, statement_writes, yielded,
+};
 use super::ops::{IndexLookupAttrs, JoinAttrs, LookupKeyShape, PhysOp, TableScanAttrs};
 use super::rewrite::{beneath, keeps_order};
+use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, OpData, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
-use crate::exec::ir::iface::catalog::PhysCx;
+use crate::exec::ir::iface::catalog::{CatalogAnswer, PhysCx};
 use crate::exec::ir::iface::choose::IndexRef;
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionKind;
@@ -104,7 +109,8 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		}
 		Walk::Continue
 	});
-	let sites: Vec<Site> = joins.into_iter().filter_map(|join| site_of(ir, cx, join)).collect();
+	let sites: Vec<Site> =
+		joins.into_iter().filter_map(|join| site_of(ir, facts, cx, join)).collect();
 	let changed = u32::try_from(sites.len()).unwrap_or(u32::MAX);
 	let mut rw = Rewriter::new(ir, facts);
 	for site in &sites {
@@ -164,8 +170,12 @@ pub(super) fn right_table(ir: &Ir, right: ValueId) -> Option<TableName> {
 }
 
 /// Where the join `join` reads its right input through an index, when it does.
-fn site_of(ir: &Ir, cx: &PhysCx<'_>, join: OpId) -> Option<Site> {
+fn site_of(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, join: OpId) -> Option<Site> {
 	if in_stored_clause(ir, join) || holds_version(ir, join) {
+		return None;
+	}
+	let (_, owner) = enclosing_statement(ir, join)?;
+	if statement_writes(ir, facts, &cx.effects, owner) {
 		return None;
 	}
 	let data = ir.op(join)?;
@@ -176,12 +186,17 @@ fn site_of(ir: &Ir, cx: &PhysCx<'_>, join: OpId) -> Option<Site> {
 		return None;
 	};
 	let (scan, attributes, below) = scan_beneath(ir, *right)?;
+	if !chain_is_repeatable(ir, facts, cx, &below) {
+		return None;
+	}
 	for pair in 0..attrs.keys {
+		let probe_region = data.regions.get(usize::from(pair) * 2)?;
 		let region = data.regions.get(usize::from(pair) * 2 + 1)?;
 		let Some(field) = build_key_field(ir, *region, &attrs.alias) else {
 			continue;
 		};
-		let Some(index) = index_for(cx, &attributes.table, &field) else {
+		let key_ty = yielded(ir, *probe_region).and_then(|value| ir.value(value)).map(|v| &v.ty);
+		let Some(index) = index_for(cx, &attributes.table, &field, key_ty) else {
 			continue;
 		};
 		return Some(Site {
@@ -195,6 +210,88 @@ fn site_of(ir: &Ir, cx: &PhysCx<'_>, join: OpId) -> Option<Site> {
 		});
 	}
 	None
+}
+
+/// Whether every op in `chain` is repeatable and total, so evaluating the chain per lookup and
+/// reading only the rows matched by the index cannot observe side effects, non-determinism or
+/// deferred errors.
+fn chain_is_repeatable(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, chain: &[OpId]) -> bool {
+	chain.iter().all(|op| {
+		let Some(data) = ir.op(*op) else {
+			return false;
+		};
+		let OpKind::Phys(kind) = &data.kind else {
+			return false;
+		};
+		#[allow(clippy::wildcard_enum_match_arm)]
+		match kind {
+			PhysOp::TableScan(_) => true,
+			PhysOp::Enforced {
+				table,
+			} => matches!(
+				cx.physical.table_answers(&(table.clone(), None, ReadVersion::Current)),
+				CatalogAnswer::Found(answers) if !answers.enforces
+			),
+			PhysOp::PermissionFilter(attrs) => {
+				attrs.computed.is_none() && regions_are_repeatable(ir, facts, cx, &data.regions)
+			}
+			PhysOp::Layer(attrs) => {
+				attrs.computed.is_empty()
+					&& attrs.judged.is_none()
+					&& regions_are_repeatable(ir, facts, cx, &data.regions)
+			}
+			PhysOp::Filter => regions_are_repeatable(ir, facts, cx, &data.regions),
+			_ => false,
+		}
+	})
+}
+
+/// Whether every op in `regions` is deterministic, side-effect-free and total.
+fn regions_are_repeatable(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &PhysCx<'_>,
+	regions: &[RegionId],
+) -> bool {
+	let mut ok = true;
+	for region in regions {
+		ir.walk(*region, WalkOrder::PreOrder, &mut |op| {
+			let Some(data) = ir.op(op) else {
+				ok = false;
+				return Walk::Stop;
+			};
+			let OpKind::Expr(kind) = &data.kind else {
+				ok = false;
+				return Walk::Stop;
+			};
+			let repeatable = (!impure(kind) || runs_once(kind))
+				&& !index_operator(kind)
+				&& effects::local(ir, facts, &cx.effects, op).set.is_deterministic()
+				&& is_total_region_op(ir, data, kind);
+			if !repeatable {
+				ok = false;
+				return Walk::Stop;
+			}
+			Walk::Continue
+		});
+		if !ok {
+			return false;
+		}
+	}
+	true
+}
+
+/// Whether `data` is a total expression op within a right-chain region.
+fn is_total_region_op(ir: &Ir, data: &OpData, kind: &ExprOp) -> bool {
+	is_total_form(ir, data)
+		|| matches!(
+			kind,
+			ExprOp::If
+				| ExprOp::Doc
+				| ExprOp::SetField {
+					..
+				}
+		)
 }
 
 /// The ops of `block` that stand for the ops `chain` names, each once, in the order the block

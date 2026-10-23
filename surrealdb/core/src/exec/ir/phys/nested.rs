@@ -659,7 +659,7 @@ fn row_dependent(ir: &Ir, value: ValueId, seen: &mut FxHashSet<ValueId>, depth: 
 
 /// Whether two evaluations of `op` may answer differently, or evaluating it fewer times than
 /// written may change what a statement does, whatever its effects say.
-fn impure(op: &ExprOp) -> bool {
+pub(super) fn impure(op: &ExprOp) -> bool {
 	match op {
 		ExprOp::Literal(_)
 		| ExprOp::Array
@@ -753,7 +753,7 @@ fn impure(op: &ExprOp) -> bool {
 /// innermost first, so a statement nested in the one being judged has its strategy already: one
 /// that runs once reads nothing of a row around it, writes nothing and answers the same each time,
 /// and its value is a constant of the statement it stands in, however often that runs.
-fn runs_once(op: &ExprOp) -> bool {
+pub(super) fn runs_once(op: &ExprOp) -> bool {
 	matches!(op, ExprOp::Subquery(NestedStrategy::Once))
 }
 
@@ -778,7 +778,7 @@ fn searches(op: &PhysOp) -> bool {
 
 /// Whether `op` is a `MATCHES` or a nearest-neighbour operator, which an access path answers and
 /// evaluation does not.
-fn index_operator(op: &ExprOp) -> bool {
+pub(super) fn index_operator(op: &ExprOp) -> bool {
 	matches!(
 		op,
 		ExprOp::Binary {
@@ -1029,7 +1029,8 @@ fn lookup_site(ir: &Ir, cx: &PhysCx<'_>, join: &JoinSite) -> Option<(OpId, Index
 	if holds_version(ir, join.filter) {
 		return None;
 	}
-	let index = index_for(cx, &attrs.table, &join.field)?;
+	let key_ty = ir.value(join.outer.root).map(|value| &value.ty);
+	let index = index_for(cx, &attrs.table, &join.field, key_ty)?;
 	Some((scan, index))
 }
 
@@ -1047,9 +1048,60 @@ pub(super) fn holds_version(ir: &Ir, filter: OpId) -> bool {
 	found
 }
 
+/// The stand-in literal for `ty` in an access-path equality probe, or `None` when `ty` states a
+/// kind no B-tree equality lookup serves.
+fn stand_in_literal(ty: Option<&TypeKnowledge>) -> Option<LogicalLiteral> {
+	match ty {
+		Some(
+			TypeKnowledge::Fact {
+				kind,
+				..
+			}
+			| TypeKnowledge::Hint {
+				kind,
+				..
+			},
+		) => stand_in_literal_for_kind(kind),
+		Some(TypeKnowledge::Token(_)) => None,
+		Some(TypeKnowledge::Unknown) | None => Some(LogicalLiteral::Integer(0)),
+	}
+}
+
+fn stand_in_literal_for_kind(kind: &crate::expr::Kind) -> Option<LogicalLiteral> {
+	use crate::expr::Kind;
+	match kind {
+		Kind::None | Kind::Regex | Kind::Function(..) => None,
+		Kind::Null => Some(LogicalLiteral::Null),
+		Kind::Bool => Some(LogicalLiteral::Bool(false)),
+		Kind::Int | Kind::Number | Kind::Any => Some(LogicalLiteral::Integer(0)),
+		Kind::Float => Some(LogicalLiteral::Float(0.0)),
+		Kind::Decimal => Some(LogicalLiteral::Decimal(rust_decimal::Decimal::ZERO)),
+		Kind::String => Some(LogicalLiteral::String(Strand::new())),
+		Kind::Bytes => Some(LogicalLiteral::Bytes(crate::val::Bytes::default())),
+		Kind::Datetime => Some(LogicalLiteral::Datetime(crate::val::Datetime::default())),
+		Kind::Duration => Some(LogicalLiteral::Duration(crate::val::Duration::default())),
+		Kind::Uuid => Some(LogicalLiteral::Uuid(crate::val::Uuid::default())),
+		Kind::Either(kinds) => kinds.iter().find_map(stand_in_literal_for_kind),
+		Kind::Array(..)
+		| Kind::Set(..)
+		| Kind::Object
+		| Kind::Record(_)
+		| Kind::Table(_)
+		| Kind::Geometry(_)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => Some(LogicalLiteral::Integer(0)),
+	}
+}
+
 /// The B-tree index of `table` over the plain field `field` alone that the access-path decision
 /// reads an equality on `field` through.
-pub(super) fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> Option<IndexRef> {
+pub(super) fn index_for(
+	cx: &PhysCx<'_>,
+	table: &TableName,
+	field: &Strand,
+	key_ty: Option<&TypeKnowledge>,
+) -> Option<IndexRef> {
 	let key: SourceKey = (table.clone(), None, ReadVersion::Current);
 	let CatalogAnswer::Found(answers) = cx.physical.table_answers(&key) else {
 		return None;
@@ -1057,11 +1109,12 @@ pub(super) fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> O
 	if !answers.defined {
 		return None;
 	}
+	let literal = stand_in_literal(key_ty)?;
 	// The value is a stand-in: the decision reads only the conjunct's shape.
 	let probe = LogicalExpr::Binary {
 		left: Box::new(LogicalExpr::Field(field.clone())),
 		op: BinaryOperator::Equal,
-		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+		right: Box::new(LogicalExpr::Literal(literal)),
 	};
 	let no_vectors = crate::exec::index::analysis::KnnQueryVectors::new();
 	let decision_cx = DecisionCx {

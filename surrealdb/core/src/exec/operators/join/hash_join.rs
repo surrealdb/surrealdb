@@ -225,10 +225,10 @@ pub(crate) fn keys_equal(left: &[Value], right: &[Value]) -> bool {
 	left.len() == right.len() && left.iter().zip(right).all(|(l, r)| l.equal(r))
 }
 
-/// Whether a key holds a regex in any column, which `=` matches against
-/// strings rather than by identity.
+/// Whether any column of `key` has an order that does not agree with `=`,
+/// so it must be compared with [`Value::equal`].
 pub(crate) fn key_has_regex(key: &[Value]) -> bool {
-	key.iter().any(|v| matches!(v, Value::Regex(_)))
+	key.iter().any(|v| !v.ord_agrees_with_equal() || !v.equal(v))
 }
 
 /// Build table keyed by `JoinKey: Ord`, with the rows sharing a key accumulating
@@ -240,10 +240,10 @@ pub(crate) fn key_has_regex(key: &[Value]) -> bool {
 /// a compound record id (`t:[1.5f]` against `t:[1.5dec]`). Ordering also makes
 /// iteration deterministic, which is what [`Self::all_rows`] needs.
 ///
-/// A key holding a regex is kept apart: `=` matches a regex against a string
-/// it satisfies, which no ordering expresses, so such keys are compared one
-/// by one with [`Value::equal`] — on the build side against every probe key,
-/// and a regex probe key against every build row.
+/// A key whose ordering does not agree with `=` (such as one holding a regex,
+/// `NaN`, or a closure at any nesting depth) is kept apart: such keys are
+/// compared one by one with [`Value::equal`] — on the build side against every
+/// probe key, and on the probe side against every build row.
 pub(crate) struct BuildTable {
 	keyed: BTreeMap<JoinKey, Vec<Value>>,
 	/// Build rows whose key holds a regex, with their keys.
@@ -286,12 +286,13 @@ impl BuildTable {
 	}
 
 	/// The build rows whose key equals `key` by `=`: those stored under it,
-	/// then those a regex on either side matches.
+	/// then those a regex or non-order-equivalent column on either side matches.
 	pub(crate) fn matches<'a>(&'a self, key: &'a JoinKey) -> impl Iterator<Item = &'a Value> + 'a {
-		let exact = self.get(key).unwrap_or(&[]).iter();
+		let loose = key_has_regex(key);
+		let exact = (!loose).then(|| self.get(key)).flatten().unwrap_or(&[]).iter();
 		let build_regex =
 			self.regex_keyed.iter().filter(move |(k, _)| keys_equal(k, key)).map(|(_, row)| row);
-		let probe_regex = key_has_regex(key)
+		let probe_regex = loose
 			.then(|| {
 				self.keyed
 					.iter()
@@ -405,6 +406,50 @@ mod tests {
 	fn join_key_returns_none_on_any_null_slot() {
 		let row = raw_row(&[("a", Value::RecordId(rid("t", "1"))), ("b", Value::Null)]);
 		assert_eq!(join_key(&row, &["a".to_string(), "b".to_string()]), None);
+	}
+
+	#[test]
+	fn build_table_nan_and_closure_keys_do_not_match() {
+		let mut table = BuildTable::new();
+		let nan = Value::from(f64::NAN);
+		let nested_nan = Value::Array(vec![nan.clone()].into());
+		let closure = Value::Closure(Box::new(crate::val::Closure::Expr {
+			args: vec![],
+			returns: None,
+			body: crate::expr::Expr::Literal(crate::expr::Literal::None),
+			captures: Default::default(),
+		}));
+		assert!(table.insert(vec![nan.clone()], Value::from(1), 10).is_ok());
+		assert!(table.insert(vec![nested_nan.clone()], Value::from(2), 10).is_ok());
+		assert!(table.insert(vec![closure.clone()], Value::from(3), 10).is_ok());
+
+		assert_eq!(table.matches(&vec![nan]).count(), 0);
+		assert_eq!(table.matches(&vec![nested_nan]).count(), 0);
+		assert_eq!(table.matches(&vec![closure]).count(), 0);
+	}
+
+	#[test]
+	fn build_table_nested_regex_matches_either_side() {
+		let re = Value::Regex("a.*".parse().unwrap());
+		let nested_re = vec![Value::Array(vec![re].into())];
+		let nested_match = vec![Value::Array(vec![Value::from("abc")].into())];
+		let nested_miss = vec![Value::Array(vec![Value::from("xyz")].into())];
+
+		let mut build_re = BuildTable::new();
+		assert!(build_re.insert(nested_re.clone(), Value::from(10), 10).is_ok());
+		assert_eq!(
+			build_re.matches(&nested_match).cloned().collect::<Vec<_>>(),
+			vec![Value::from(10)]
+		);
+		assert_eq!(build_re.matches(&nested_miss).count(), 0);
+
+		let mut probe_re = BuildTable::new();
+		assert!(probe_re.insert(nested_match, Value::from(20), 10).is_ok());
+		assert!(probe_re.insert(nested_miss, Value::from(30), 10).is_ok());
+		assert_eq!(
+			probe_re.matches(&nested_re).cloned().collect::<Vec<_>>(),
+			vec![Value::from(20)]
+		);
 	}
 
 	// ---- document rows -------------------------------------------------
