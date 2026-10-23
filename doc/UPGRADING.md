@@ -23,12 +23,12 @@ is in, and a store may hold both side by side.
 
 **Impact**:
 
-- A store on an engine with a single writer (memory, RocksDB, SurrealKV) that
+- A store on an engine with a single writer (memory, SurrealKV) that
   is at Legacy is raised to release 4.0 when this release starts. From then
   on, records and catalog entries are written in the new formats, and a 3.x
   release can no longer open the store.
 - A store on an engine that does not report a single writer (TiKV, for one) or
-  on IndxDB stays at Legacy until an operator raises it. A new store of any
+  stays at Legacy until an operator raises it. A new store of any
   kind starts at this build's release.
 - A store raised to 4.0 or above is refused at startup by 3.3, and cannot go
   back to 3.0 through 3.2.
@@ -98,6 +98,65 @@ is in, and a store may hold both side by side.
   `f64`. That distance can differ from an earlier release's in its last digits,
   and two such records at nearly equal distances can swap places. See below.
 
+### SurrealKV is the only embedded engine
+
+SurrealKV is the embedded engine on every target, and in a browser it keeps its
+files in the origin private file system. The storage engines that earlier
+releases offered besides it are gone. A path written with the scheme of one of
+them still starts: it is opened with SurrealKV, SurrealDB logs a warning that the
+scheme is deprecated, and `surrealkv://` is the scheme to use from now on.
+
+**Impact**:
+
+- **Existing data is migrated automatically the first time the path is opened.**
+  The migration reads the files of the earlier engine and writes a SurrealKV
+  database beside them. It takes time proportional to the size of the data, needs
+  room on the disk for both copies, and cannot be undone by SurrealDB. The
+  original files move to a backup directory inside the data directory, and stay
+  until an operator deletes them. A store that held versions
+  (`datastore_versioned`) keeps them with their timestamps only when it is opened
+  with `?versioned=true`; any other keeps the newest value of each key. The
+  earlier engine must not have the store open while this runs.
+- **The datastore is not ready until the migration finishes.** The listener binds
+  after the datastore opens, so `/health`, `/ready` and `surreal isready` do not
+  answer for the whole migration, and SurrealDB logs a warning when it starts.
+  Give an orchestrator probe a start-up allowance that covers it, or migrate
+  offline first with `skv migrate <old_dir> <new_dir>` and start from the new
+  directory. A process killed mid-migration starts the migration again on the
+  next open.
+- **Going back to an earlier release needs the backup.** After the migration, an
+  earlier release started on the same path finds no database of its own and
+  creates an empty one beside the SurrealKV files. To go back, stop SurrealDB,
+  remove the SurrealKV files, and move the contents of the backup directory back
+  into the data directory. Data written after the migration is not in them.
+- **Settings of the earlier engine are ignored.** SurrealDB logs a warning at
+  start-up naming the ones it finds. The SurrealKV counterparts are
+  `SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY` and `SURREAL_SURREALKV_MAX_MEMTABLE_SIZE`
+  (cache and write buffers), `SURREAL_SURREALKV_BLOCK_SIZE`, and
+  `SURREAL_DATASTORE_SYNC` (durability). A SurrealKV block cache defaults to half
+  of system memory less 1 GiB, and its memtable to up to 4 GiB on a large host:
+  if `SURREAL_MEMORY_THRESHOLD` was sized above the earlier engine's cache, size
+  it above the SurrealKV cache and memtable instead, or queries are refused once
+  the cache warms.
+- **Many concurrent `LIVE` and `KILL` statements on one table can report a
+  retryable conflict.** Each reads and then writes the table's live-query stamp,
+  and a statement that loses a commit conflict is run again up to ten times.
+  With SurrealKV's default fsync per commit, around thirty concurrent pairs on
+  one table can use up that budget on a slow disk. The conflict is retryable, so
+  a client retries it, and `?sync=` with an interval or `never` shortens commits
+  at the cost of durability.
+- **A browser store moves into the origin private file system.** The first
+  `surrealkv://<name>` connect copies the rows of a database of the same name
+  from the browser's earlier storage into the origin private file system, and
+  leaves the earlier database in place for the application to delete. It must run
+  in a dedicated worker, one tab at a time, in Chrome, and without encryption or
+  checkpoints. `@surrealdb/wasm-native/worker` hosts the engine in such a worker.
+
+**What to do**: change the scheme of every storage path to `surrealkv://`, keep
+the path, check the disk has room for a second copy, take a backup of the
+directory first, add `?versioned=true` where the store held versions, and allow
+the first start to take as long as the migration needs.
+
 ### The switch
 
 The feature level decides the encoding of everything a node writes. A node
@@ -111,9 +170,8 @@ follows the store's record.
   4.x line, and logs the release. The raise commits together with the ledger
   entry described below. A store already above Legacy is not touched, and a
   second start opens no write transaction for it.
-- **Other engines and IndxDB wait for an operator.** More than one process,
-  possibly of different releases, can write to such a store, and a browser
-  store may be open in several tabs. The store stays at Legacy, and every
+- **Other engines wait for an operator.** More than one process,
+  possibly of different releases, can write to such a store. The store stays at Legacy, and every
   record keeps being written in `revision`, until an operator calls
   `Datastore::raise_feature_level`. The raise is refused with
   `FeatureLevelNodeBehind` while a node whose heartbeat is inside the liveness
@@ -381,8 +439,8 @@ time. Run it before lowering the level or starting the earlier release.
 A `DEFINE INDEX` or `REBUILD INDEX` without `CONCURRENTLY`, run as a statement
 of its own, commits its transaction and then waits for the build, instead of
 holding the transaction open across the build's writes. It still returns only
-once its index is ready. On RocksDB, a transaction held open across a large
-build could no longer be validated at commit, and the statement failed with
+once its index is ready. A transaction held open across a large build could no
+longer be validated at commit, and the statement failed with
 `Transaction could not check for conflicts`.
 
 For such a statement:
@@ -415,8 +473,8 @@ index, and commits before its build as a plain `DEFINE INDEX` does.
 **What to do**: nothing, unless a deployment relies on a failed blocking
 `DEFINE INDEX` leaving no trace, or on its definition staying invisible until
 the build is done. Such a deployment can wrap the statement in
-`BEGIN … COMMIT`, which keeps it atomic but also keeps the RocksDB limit on how
-large a build its transaction can outlast.
+`BEGIN … COMMIT`, which keeps it atomic but also keeps the limit on how large a
+build its transaction can outlast.
 
 ### A `REBUILD INDEX` that moves an index's format builds once it has committed
 
@@ -1003,7 +1061,7 @@ precedes its data, which is the order `surreal export` writes, could finish
 with rows missing.
 
 Writes no longer touch the guard. On a store that one node opens alone
-(RocksDB, SurrealKV, memory) nothing else changes. On a store several nodes
+(SurrealKV, memory) nothing else changes. On a store several nodes
 share, each node now holds a writer lease (`!dz`) on the guard shards it writes
 into, and no node returns a leased shard's guard to empty. A node releases its
 leases once it has written nothing to the index for ten seconds, so a drained
@@ -1021,7 +1079,7 @@ upgraded nodes have written to has the same effect.
 
 **What to do**: on a store several nodes share, upgrade every node before
 writing to a DiskANN index again: stop writes to DiskANN indexes, or stop the
-whole cluster, while the nodes are replaced. On RocksDB, SurrealKV or an
+whole cluster, while the nodes are replaced. On SurrealKV or an
 in-memory store there is nothing to do.
 
 ### `--versions` is refused rather than ignored

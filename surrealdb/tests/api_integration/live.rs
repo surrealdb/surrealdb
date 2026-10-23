@@ -2,7 +2,6 @@
 #![cfg(any(
 	feature = "protocol-ws",
 	feature = "kv-mem",
-	feature = "kv-rocksdb",
 	feature = "kv-tikv",
 	feature = "kv-surrealkv",
 ))]

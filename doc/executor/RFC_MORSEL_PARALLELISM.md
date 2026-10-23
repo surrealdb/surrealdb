@@ -5,8 +5,8 @@
 are the plan of §16. A read statement runs on several cores of one node: its input is cut into
 morsels, workers take morsels from the statement, and the statement merges what the morsels
 produce into exactly the answer the serial run gives. Morsels are the one unit of intra-query
-parallelism. The first target is single-node RocksDB;
-SurrealKV and kv-mem implement the same read-view capability next, and surrealds is the backend
+parallelism. The first target is single-node SurrealKV;
+kv-mem implements the same read-view capability next, and surrealds is the backend
 the KV contract is written for. The unit is shaped so that a morsel later ships to an edge leaf
 running on surrealds without changing what it means.
 
@@ -86,10 +86,7 @@ themselves; the two share `MorselResult`, the paging replay and the absorption o
 `Transactable::parallel_count` (the backend counts off the calling thread), `count_cost` (linear,
 or logarithmic for a backend that keeps subtree counts) and `split_range` in the `kvs` crate
 (`kvs/src/split.rs`: divide `[lo, hi)` into disjoint extents on the bytes that distinguish the bounds)
-already count one range as several in-flight parts against one snapshot. The RocksDB backend's
-read-only `count` shards a range the same way (`kvs-rocksdb/src/range_shard.rs`), taking one
-`ReadOptions` and one `OwnedTx::handle` per shard under the inner lock so every shard reads the
-same snapshot. That is the morsel pattern restricted to counting; §15 names how it joins this design.
+already count one range as several in-flight parts against one snapshot. That is the morsel pattern restricted to counting; §15 names how it joins this design.
 
 The `range_shape` tests of `split_range` pin a fact the splitter in §5 depends on: dividing a table's
 full key bounds balances badly, because generated ids occupy a narrow band of the byte space;
@@ -99,8 +96,7 @@ dividing the band the keys occupy, found by a two-seek probe, balances well.
 
 | backend | concurrent reads of one transaction | owned read view (`Transactable::snapshot`) |
 |---|---|---|
-| RocksDB | Cursors build their iterator under the inner `tokio::sync::Mutex`, then advance without it on a read-only transaction; a writable transaction's cursor holds the inner lock across each chunk. | Yes, for a read-only transaction: `OwnedTx::handle` plus a snapshot-bearing `ReadOptions`; the view's cursors run each chunk on the affinity pool, and the transaction's commit or cancel waits for them. A writable transaction answers `None`. |
-| SurrealKV | Scans take the inner `RwLock<Tx>` for read, so cursors of one transaction read concurrently. | `None` today; the decision record asks for the same capability next. |
+| SurrealKV | Scans take the inner `RwLock<Tx>` for read, so cursors of one transaction read concurrently. | Yes, for a read-only transaction; a writable transaction answers `None`. |
 | kv-mem | Scans take the inner lock for read; cursors resume by bound. | `None` today; same. |
 | TiKV | Every read takes the inner `RwLock` for write, so reads of one transaction are serial. | `None`; not a priority. |
 | surrealds | No range-scan or cursor API yet. | To be designed: §4 is the contract it implements. |
@@ -177,8 +173,8 @@ Contract:
   the writes the transaction had buffered then. A commit by another transaction, and a write the
   transaction makes later, are invisible to it. A backend that cannot overlay buffered writes
   answers `None` whenever any are buffered, so a read-only statement inside a writable transaction
-  parallelises once a backend can freeze its overlay, and sees its own earlier writes. Today only
-  RocksDB gives a view, and only for a read-only transaction.
+  parallelises once a backend can freeze its overlay, and sees its own earlier writes. Today a view
+  is given only for a read-only transaction.
 - **Statements that write stay serial.** The engine plans a pipeline as morsels only when its
   statement may not write (§7), so what the transaction has buffered cannot change while morsels
   run.
@@ -188,11 +184,11 @@ Contract:
   is bounded by one chunk.
 - **Concurrent.** Cursors opened from one view advance concurrently on different threads with no
   lock shared between them on the read path. Where a backend's blocking iterator belongs is the
-  backend's to say: RocksDB runs every chunk of a view's cursor on the affinity pool, off the tokio
-  workers, so point reads and I/O keep their inline permits.
+  backend's to say: a backend with blocking I/O runs every chunk of a view's cursor on the affinity pool, off the
+  tokio workers.
 
-Per backend: RocksDB builds the view from `OwnedTx::handle` and the snapshot `ReadOptions`.
-SurrealKV and kv-mem implement the same capability next. surrealds implements the trait natively.
+Per backend: SurrealKV builds the view for a read-only transaction. kv-mem implements the same
+capability next. surrealds implements the trait natively.
 TiKV uses the defaults and is not a priority: no region-aligned splitting and no client change.
 
 ### 4.2 A cursor that is re-aimed and fills caller-owned pages
@@ -246,8 +242,7 @@ pub enum SplitTarget { Parts(u32), Bytes(u64) }
   shapes morsel sizes and never decides an answer.
 - **`split(range, target)`** answers boundary keys strictly inside `range`, strictly ascending,
   dividing it into about `target` parts or parts of about `target` bytes, at most
-  `MAX_SPLIT_PARTS`. Boundaries align with the storage's own units where it has them — SST blocks
-  on RocksDB, page files on surrealds — so a morsel reads whole storage units.
+  `MAX_SPLIT_PARTS`. Boundaries align with the storage's own units where it has them — page files on surrealds — so a morsel reads whole storage units.
 - **Record-aligned.** Every boundary is a key at which a reader can start without reading part of
   a record before it. Today a record is one key, so every key qualifies; a layout that stores one
   record under several keys (chunked, PAX, columnar segments) must answer only boundaries between
@@ -258,8 +253,8 @@ pub enum SplitTarget { Parts(u32), Bytes(u64) }
 
 The default `split` is two seeks — the first key at or after `lo` and the last key before `hi` —
 followed by `split_range` over that occupied band, which the `range_shape` tests show balances
-generated ids. RocksDB uses the defaults today; answering `estimate` from approximate sizes and
-`split` from the live SST files' key ranges is a follow-up.
+generated ids. Backends use the defaults today; answering `estimate` from approximate sizes and
+`split` from the storage's own key ranges is a follow-up.
 
 ## 5. Splitting
 
@@ -381,7 +376,7 @@ The coordinator always runs morsels too, on the statement's own task and without
 statement therefore makes progress when the node has no free place, and its width is
 `1 + places held`. Width is decided automatically; there is no syntax to ask for it.
 
-Where a worker's reads run is a backend property (§4.1): RocksDB's view runs every chunk on the
+Where a worker's reads run is a backend property (§4.1): a backend with blocking I/O runs every chunk of a view's cursor on the
 affinity pool; a backend with no blocking I/O may run chunks on the worker's own task.
 
 ### 6.2 Per-statement queues, node-wide fairness
@@ -573,7 +568,7 @@ effects that must be ordered (events, live notifications, change feeds, unique c
 output), are serial, so observable behaviour matches `main`, including the first failing row's
 error. A bounded ordered window charged to the lease carries computed rows to the apply step, and a
 bulk write may stage through a host-chosen target with an atomic `commit_staged` (R2 parts on
-Cloudflare, the transaction directly on RocksDB). That is outside this RFC's phases.
+Cloudflare, the transaction directly on a local engine). That is outside this RFC's phases.
 
 ## 8. Combining results
 
@@ -763,7 +758,7 @@ All Range morsels of a statement read through one `Snapshot` (§4.1) taken when 
 has a morsel to hand a worker, under the statement's transaction, as of the statement's version.
 The coordinator never reads through the view: it reads through the transaction's own cursor. No morsel opens a
 transaction, and no morsel reads committed data the coordinator would not. On TiKV the snapshot is
-the transaction's start timestamp; on RocksDB, the transaction's snapshot sequence number; on
+the transaction's start timestamp; on
 surrealds, the snapshot version the transaction pinned.
 
 A compiled program never outlives the snapshot it was planned against, and the morsels of a
@@ -913,7 +908,7 @@ coordinator sees one result stream.
   Batches morsels, not range morsels, until a later phase reads them in parts.
 - **Counts.** A count of a range is a morsel run whose body counts. `Source::Count` over a record
   range runs through the morsel scheduler with `count_bounded` as the morsel's read, and the
-  RocksDB backend's internal sharded `count` becomes the backend's `count_bounded` over a view;
+  backends' internal sharded `count` becomes the backend's `count_bounded` over a view;
   `split_range` (now in `kvs`) serves both. One splitter, one pool, one place to tune.
 - **The read frontier** (`RFC_LOGICAL_CONTROL_FLOW.md` §5.5) names the ranges a request reads.
   The first split of a morsel pipeline can use the frontier's `estimate`s, issued when the
@@ -932,23 +927,23 @@ the bounded-memory components nor the shipped-program format.
 
 - **Width parity.** The language suite runs with the default configuration, with
   `morsel_split_rows = 1` and `morsel_target_bytes = 1` (the "tiny morsels" lane of `EDGE_PLAN.md`
-  item 10), and with `morsel_places = 0` (coordinator only), on kv-mem and on RocksDB, and every
+  item 10), and with `morsel_places = 0` (coordinator only), on kv-mem and on SurrealKV, and every
   answer must equal the default run's. From phase 3 the tiny lane also forces a steal at every
   chunk boundary (`morsel_steal_always`). `morsels_answer_what_the_serial_run_answers` and the
   tests of `exec::vm::tests_morsel` assert it for the VM.
 - **Read view.** A KV conformance test in `kvs-test` per backend that gives a view: morsels of a
   range tile it exactly; concurrent commits during a morsel run are invisible; commit and cancel
   wait for outstanding cursors.
-- **Benchmarks.** On RocksDB with a 10M-row table: `SELECT count() FROM t WHERE <selective>`;
+- **Benchmarks.** On SurrealKV with a 10M-row table: `SELECT count() FROM t WHERE <selective>`;
   `SELECT math::max(n), count() FROM t GROUP ALL`; a selective filter with a projection streamed
   to the client; `ORDER BY n LIMIT 100`; `GROUP BY` a low- and a high-cardinality key; and two
   analytic statements concurrent with a point-read workload, reporting the point reads' p99. No
   phase promises a speed-up; each reports the numbers.
 
-**Phase 1 — RocksDB, in-place scans, no paging. Implemented.**
+**Phase 1 — in-place scans, no paging. Implemented.**
 
-1. `kvs`: the `Snapshot` and `RangeCursor` traits with `None` defaults; the RocksDB implementation
-   over `OwnedTx::handle`; conformance tests.
+1. `kvs`: the `Snapshot` and `RangeCursor` traits with `None` defaults; the first backend implementation;
+   conformance tests.
 2. `kvs`: `estimate` and `split` with the two-seek default; `split_range` in the `kvs` crate with
    its tests.
 3. `vm/morsel/`: the morsel table, the coordinator-first split (§5.1), workers on the shared pool,
@@ -979,11 +974,11 @@ order, spilled partials merge by key, a float fold stays serial, a distinct set 
 occurrences and fails past its budget at the serial row.
 
 **Phase 6 — More sources.** Non-repeating `Source::Index` ranges and unions of ranges as Range
-morsels; `Source::Count` over morsels and the RocksDB sharded count folded in (§15).
+morsels; `Source::Count` over morsels and the backends' sharded counts folded in (§15).
 
-**Phase 7 — Other backends.** SurrealKV and kv-mem: the owned read view, with the transaction's
+**Phase 7 — Other backends.** kv-mem: the owned read view. SurrealKV and kv-mem: the transaction's
 pending writes frozen at statement start, so read-only statements inside a writable transaction
-parallelise and see their own earlier writes. RocksDB the same for a writable transaction.
+parallelise and see their own earlier writes.
 
 **Phase 8 — Leaves.** The encodable work item and partial state, the leaf result stream, placement
 with ISA negotiation and coordinator fallback (§14), on top of the shipped-program format and its
@@ -1007,8 +1002,7 @@ Each decision below is stated in the sections above, as built or as planned.
 2. **Float folds** are decomposable and eligible in principle; results may differ from the serial
    run in the low bits (summation order), as they already can across architectures. The policy
    keeps them serial until the pinned results allow the difference (§7).
-3. **Where workers run is a backend property.** RocksDB: the affinity pool, so point reads and I/O
-   keep their inline permits. A backend with no blocking I/O (kv-mem) may run chunks on tokio tasks.
+3. **Where workers run is a backend property.** A backend with blocking I/O: the affinity pool. A backend with no blocking I/O (kv-mem) may run chunks on tokio tasks.
 4. **Default width** is `available_parallelism − 1` places, shared node-wide, with a per-query cap
    (`morsel_places`) and an OLTP reserve (`morsel_oltp_reserve`).
 5. **Fully automatic.** `morsel_places = 0` is the operator's escape hatch, not the way parallelism
@@ -1016,17 +1010,16 @@ Each decision below is stated in the sections above, as built or as planned.
 6. **Through the transaction, via a backend capability**: an owned read view (a snapshot plus the
    transaction's pending writes frozen at statement start, `Send + Sync`, lock-free to hand to
    workers). Read-only statements inside a writable transaction then parallelise and still see
-   their own earlier writes; statements that read and write stay serial. RocksDB's read-only view
-   first; SurrealKV and kv-mem next; writable RocksDB transactions after. Writes use parallel
+   their own earlier writes; statements that read and write stay serial. The read-only view
+   first; kv-mem next; writable transactions after. Writes use parallel
    compute with ordered apply, and bulk writes stage through a host-chosen target (§7); both are
    outside the phases above.
 7. **TiKV is not a priority**: no region-aligned splitting, no client fork.
 8. **Cooperative stealing** at chunk boundaries (§5.3).
 9. **The KV interface is decided** (§4): `snapshot()`, a re-aimable `RangeCursor`, `estimate`, a
    record-aligned `split`, an opaque resume position, pages in the rule-7 batch format; generic
-   trait methods with defaults, so every backend is correct from day one. RocksDB overrides
-   natively first; SurrealKV and kv-mem add an owned view and cursor re-seek; IndexedDB stays
-   serial; surrealds implements it natively with page-file-aligned splits. A staged write set
+   trait methods with defaults, so every backend is correct from day one. SurrealKV overrides
+   natively first; kv-mem adds an owned view and cursor re-seek; surrealds implements it natively with page-file-aligned splits. A staged write set
    (`stage` / `commit_staged`) joins the contract with the write phase.
 10. **`EXPLAIN ANALYZE` shows ordinals only**, never key positions (§13).
 11. **One parallelism unit.** Morsels are the only one. KNN, full-text and bitmap sources run as

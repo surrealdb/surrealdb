@@ -1,13 +1,7 @@
 //! Different embedded and remote database engines
 
 pub mod any;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-indxdb",
-	feature = "kv-surrealkv",
-))]
+#[cfg(any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",))]
 pub mod local;
 #[cfg(any(http_engine, ws_engine, feature = "protocol-grpc"))]
 pub mod remote;
@@ -16,13 +10,7 @@ pub mod remote;
 /// semver guarantees.
 #[cfg(all(
 	feature = "unstable",
-	any(
-		feature = "kv-mem",
-		feature = "kv-tikv",
-		feature = "kv-rocksdb",
-		feature = "kv-indxdb",
-		feature = "kv-surrealkv",
-	)
+	any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",)
 ))]
 #[doc(hidden)]
 pub use surrealdb_engine_local::tasks;

@@ -336,9 +336,8 @@ Access-path choice today uses fixed scores (`exec/index/analysis.rs:2130-2190`),
 The VM fans out to threads. What the transaction layer allows today:
 
 - `Transaction` is `Send + Sync` and shared as `Arc` (`exec/context.rs`).
-- Concurrent reads on one transaction share a read lock on mem and surrealkv. rocksdb holds a mutex
-  across every operation and tikv takes a write lock even for `get`, so one transaction serialises
-  there (`surrealdb/kvs-rocksdb/src/lib.rs:1070`, `surrealdb/kvs-tikv/src/lib.rs:920`).
+- Concurrent reads on one transaction share a read lock on mem and surrealkv. tikv takes a write lock
+  even for `get`, so one transaction serialises there (`surrealdb/kvs-tikv/src/lib.rs:920`).
 - No backend offers reads of one transaction's snapshot from several tasks. Such an interface
   must refuse a transaction that holds buffered writes or tracks a read set for commit-time
   conflict detection, since reads outside the transaction see neither.
@@ -366,8 +365,8 @@ The VM fans out to threads. What the transaction layer allows today:
   around it. A unit a running program loads from the compile cache is placed in a scope of its
   own.
 - **Parallel reads need a snapshot-read interface.** Without one, fan-out runs extents
-  concurrently on one transaction and serialises on rocksdb and tikv. Implementing it for
-  rocksdb and surrealkv is a prerequisite for fan-out to speed anything up.
+  concurrently on one transaction and serialises on tikv. Implementing it for
+  surrealkv is a prerequisite for fan-out to speed anything up.
 - **Order is preserved where it is specified** (§4): extents are delivered in key order under an
   `ORDER BY` the scan satisfies or a record-id range source, and in any order otherwise.
 - **Errors are deterministic** (§5.1): the lowest-index failure wins.

@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
+use surrealdb_core::syn::runtime::ParserSettings;
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget,
 };
-use surrealdb_core::syn::runtime::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::{Backend, RunMode};
@@ -115,7 +115,7 @@ pub struct TestEnv {
 	/// Specifies which backends this test should run on.
 	/// If empty, the test runs on all backends.
 	/// If specified, the test only runs when the selected backend is in this list.
-	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
+	/// Valid values: "mem", "surrealkv", "tikv"
 	#[serde(default)]
 	pub backend: Vec<Backend>,
 
@@ -444,6 +444,14 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub upgrade: bool,
 
+	/// Marks an upgrade test written for the RocksDB-to-SurrealKV migration
+	/// axis (`upgrade --backend rocksdb-migration`), where the source binary
+	/// writes a `rocksdb://` store and the target opens it as `surrealkv://`.
+	/// Such a test runs on that axis only; every other axis skips it. With
+	/// `[env] versioned = true` it runs only when the axis is versioned.
+	#[serde(default)]
+	pub migration: bool,
+
 	/// The run modes this test is valid in. Absent means every mode; a present
 	/// list restricts the file to the modes it names, so an empty list runs
 	/// the file in none. See [`TestDetails::runs_in_mode`].
@@ -505,6 +513,7 @@ impl Default for TestDetails {
 			issue: Default::default(),
 			wip: false,
 			upgrade: Default::default(),
+			migration: Default::default(),
 			modes: Default::default(),
 			legacy_syntax: Default::default(),
 			version: Default::default(),
@@ -1040,7 +1049,7 @@ pub struct BenchDetails {
 	#[serde(default)]
 	pub rebuild: bool,
 	/// Lets a `rebuild = true` bench also run on the file-backed engines
-	/// (`--backend rocksdb`, `--backend surrealkv`), not just on `mem`.
+	/// (`--backend surrealkv`), not just on `mem`.
 	///
 	/// Rebuilding re-imports the dataset before every measured iteration, and on
 	/// a file backend that writes the whole dataset to disk each time — so

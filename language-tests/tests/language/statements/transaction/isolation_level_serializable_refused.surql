@@ -3,7 +3,7 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-backend = ["rocksdb", "surrealkv"]
+backend = ["surrealkv"]
 
 [test]
 reason = "A backend that offers only SNAPSHOT refuses SERIALIZABLE, naming the level it offers, rather than quietly giving a weaker one."

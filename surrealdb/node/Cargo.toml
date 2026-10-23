@@ -12,7 +12,6 @@ description = "Embedded SurrealDB engine for Node.js, Bun, and Deno"
 [features]
 default = ["kv-mem"]
 kv-mem = ["surrealdb-embedded/kv-mem"]
-kv-rocksdb = ["surrealdb-embedded/kv-rocksdb"]
 kv-surrealkv = ["surrealdb-embedded/kv-surrealkv"]
 
 [lib]

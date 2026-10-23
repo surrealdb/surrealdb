@@ -132,10 +132,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		match backend {
 			// backend memory is always enabled as we needs it to run match expressions.
 			Backend::Memory => {}
-			#[cfg(feature = "backend-rocksdb")]
-			Backend::RocksDb => {}
-			#[cfg(not(feature = "backend-rocksdb"))]
-			Backend::RocksDb => bail!("RocksDb backend feature is not enabled"),
 			#[cfg(feature = "backend-surrealkv")]
 			Backend::SurrealKv => {}
 			#[cfg(not(feature = "backend-surrealkv"))]

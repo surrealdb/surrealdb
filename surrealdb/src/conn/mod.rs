@@ -98,8 +98,6 @@ impl Router {
 			feature = "protocol-grpc",
 			feature = "kv-mem",
 			feature = "kv-tikv",
-			feature = "kv-rocksdb",
-			feature = "kv-indxdb",
 			feature = "kv-surrealkv",
 		)),
 		allow(dead_code)

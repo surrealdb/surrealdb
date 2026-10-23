@@ -271,12 +271,12 @@ Read as a set they answer three different questions:
   sustained ratio near `1` is the signal that preceded a `ServerOverloaded` refusal; alert on it.
   When the threshold gauge reads `0` the guard is disabled and no refusal will ever happen.
 - `memory_bytes − memory_allocated` — resident memory the tracker cannot see (allocator overhead,
-  RocksDB memory outside its caches, mapped WebAssembly memory, thread stacks). This is the
+  storage-engine memory outside its caches, mapped WebAssembly memory, thread stacks). This is the
   headroom a memory threshold must leave below a container memory limit, and measuring it is how
   that headroom should be chosen rather than guessed.
 - `memory_reserved − memory_requested` — internal fragmentation, the space the allocator reserved
   beyond what was asked for. Use the reserved figure, not `memory_allocated`: that one also carries
-  the external reporters, so subtracting requested from it would report the whole RocksDB cache as
+  the external reporters, so subtracting requested from it would report the whole storage-engine cache as
   fragmentation.
 
 ### Authenticated-only — pipeline self-metrics

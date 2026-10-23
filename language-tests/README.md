@@ -30,14 +30,13 @@ The `--backend` flag allows you to specify which storage engine to use for runni
 the tests. By default, tests run using the in-memory storage engine (`mem` or `memory`).
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
-- `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
 - `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
 ```bash
-# Example: Running tests with RocksDB backend
-cargo run --features backend-rocksdb run --backend rocksdb
+# Example: Running tests with SurrealKV backend
+cargo run --features backend-surrealkv run --backend surrealkv
 
 # Example: Running tests with TiKV backend (requires running TiKV cluster at 127.0.0.1:2379)
 cargo run --features backend-tikv run --backend tikv
@@ -265,9 +264,9 @@ baseline is full-quality, measured on the same runner pool, and refreshes whenev
 nightly re-runs (or nightly is dispatched manually after a notable change). Remove
 the label to stop.
 
-By default benches run on the in-memory engine. `--backend surrealkv` (always
-available) or `--backend rocksdb` (build with `--features backend-rocksdb`) run
-them on the file-backed engines instead, in a temporary directory that's removed
+By default benches run on the in-memory engine. `--backend surrealkv` (build with
+`--features backend-surrealkv`) runs
+them on the file-backed engine instead, in a temporary directory that's removed
 afterwards. TiKV is unsupported (it needs an external cluster). Mutating
 (`rebuild = true`) benches run on `mem` only — on a file backend they'd re-import
 the dataset to disk every iteration — and are skipped (with a notice) otherwise,
@@ -303,7 +302,7 @@ measurement-time = "20s"      # target total measurement window
   the workload drifts.
 
 `rebuild-file-backend = true` lets a `rebuild = true` bench also run under
-`--backend rocksdb` / `--backend surrealkv`, where rebuild benches are otherwise
+`--backend surrealkv`, where rebuild benches are otherwise
 skipped. Set it when the bench's subject is the storage layer — an index build,
 say, whose cost is dominated by KV reads and which therefore measures the wrong
 thing on `mem`. Each iteration builds a fresh datastore in a directory of its
@@ -940,7 +939,6 @@ backend-specific features like compaction.
 
 The value should be an array of strings with valid backend identifiers:
 - `"mem"`: In-memory storage engine
-- `"rocksdb"`: RocksDB embedded storage engine
 - `"surrealkv"`: SurrealKV file-based storage engine
 - `"tikv"`: TiKV distributed storage engine
 
@@ -952,15 +950,15 @@ The value should be an array of strings with valid backend identifiers:
 **Examples:**
 
 ```toml
-# Test that only runs on RocksDB
+# Test that only runs on SurrealKV
 [env]
-backend = ["rocksdb"]
+backend = ["surrealkv"]
 ```
 
 ```toml
-# Test that runs on both memory and RocksDB backends
+# Test that runs on both memory and SurrealKV backends
 [env]
-backend = ["mem", "rocksdb"]
+backend = ["mem", "surrealkv"]
 ```
 
 ```toml
@@ -978,7 +976,7 @@ namespace = "test"
 
 This feature is particularly useful for testing backend-specific operations. For 
 example, the `ALTER TABLE COMPACT` statement behaves differently on different 
-backends: it succeeds on RocksDB but returns an error on the memory backend.
+backends: it returns an error on both the memory and SurrealKV backends, which do not support compaction.
 
 Defaults to `[]` (runs on all backends)
 
@@ -991,10 +989,10 @@ temporal queries using the `VERSION` clause.
 Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
 shared datastore pool) since they require different datastore configuration.
 
-Versioning is available only on the `rocksdb` and `surrealkv` backends, which the
+Versioning is available only on the `surrealkv` backend, which the
 runner opens with `?versioned=true`. `mem` and `tikv` are opened without it and
 reject a versioned statement, so versioned tests are skipped on those two and a
-test that names neither of the supported backends runs nowhere.
+test that does not name `surrealkv` runs nowhere.
 
 **Examples:**
 
@@ -1039,7 +1037,7 @@ takes longer than the given duration it will be considered an error and it will
 cause a test run to fail. This key can also be set to `false` to disable the 
 timeout altogether or `true` to default to 5 seconds. Defaults to `5000` (5 seconds).
 
-#### `[env.timeout-tikv]`, `[env.timeout-rocksdb]`, `[env.timeout-surrealkv]`
+#### `[env.timeout-tikv]`, `[env.timeout-surrealkv]`
 
 Backend-specific timeout overrides in milliseconds. When running tests against a 
 specific backend, these values take precedence over the base `timeout`. This is 
@@ -1051,7 +1049,7 @@ to network latency).
 [env]
 timeout = 5000           # Timeout for memory backend
 timeout-tikv = 10000     # TiKV needs 2x more time due to network latency
-timeout-rocksdb = 6000   # RocksDB may need slightly more time for disk I/O
+timeout-surrealkv = 6000 # SurrealKV may need slightly more time for disk I/O
 ```
 
 #### `[env.context_timeout]`
@@ -1062,7 +1060,7 @@ query takes longer than the given duration, it will be terminated. This key can
 also be set to `false` to disable the context timeout altogether or `true` to 
 default to 5 seconds. Defaults to `5000` (5 seconds).
 
-#### `[env.context-timeout-tikv]`, `[env.context-timeout-rocksdb]`, `[env.context-timeout-surrealkv]`
+#### `[env.context-timeout-tikv]`, `[env.context-timeout-surrealkv]`
 
 Backend-specific context timeout overrides in milliseconds. Similar to the timeout 
 overrides, these allow setting different query execution limits per backend.

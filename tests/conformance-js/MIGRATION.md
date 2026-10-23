@@ -217,7 +217,7 @@ KEEP-RUST:
 ### `surrealdb/tests/api_integration/basic.rs` + `backup.rs`
 
 The whole `api_integration` suite is compiled against **`engine::local`**
-backends (Mem, RocksDb, SurrealKv, TiKV) and asserts typed Rust SDK values. The
+backends (Mem, SurrealKv, TiKV) and asserts typed Rust SDK values. The
 JS port re-pins the **wire-observable** behavior for regression convenience, but
 the Rust tests **must remain** — they are the only coverage of the embedded
 engine and the typed SDK API. **Deletion-eligible from this file: 0.**

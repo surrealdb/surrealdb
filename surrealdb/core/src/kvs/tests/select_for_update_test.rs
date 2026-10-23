@@ -19,14 +19,14 @@ use crate::catalog::providers::CatalogProvider;
 use crate::dbs::Session;
 use crate::kvs::{Datastore, QueryRequest, Transaction, is_retryable_transaction_conflict};
 
-/// A RocksDB datastore with the `test`/`test` namespace and database
+/// A SurrealKV datastore with the `test`/`test` namespace and database
 /// created, plus an owner session scoped to them.
 ///
 /// The returned [`TempDir`] owns the store's directory: hold it for as
 /// long as the datastore is used, and drop it to delete the store.
-async fn rocksdb_ds() -> (TempDir, Arc<Datastore>, Session) {
+async fn surrealkv_ds() -> (TempDir, Arc<Datastore>, Session) {
 	let dir = TempDir::new().unwrap();
-	let path = format!("rocksdb:{}", dir.path().to_string_lossy());
+	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
 	let ds =
 		Datastore::builder().build_with_factory_path(&path, CommunityComposer()).await.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -58,8 +58,8 @@ async fn run(ds: &Datastore, ses: &Session, sql: &str) {
 /// with a retryable transaction conflict, even though its own writes touch
 /// a different record.
 #[tokio::test]
-async fn rocksdb_select_for_update_conflicts_with_concurrent_write() {
-	let (_dir, ds, ses) = rocksdb_ds().await;
+async fn surrealkv_select_for_update_conflicts_with_concurrent_write() {
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run(&ds, &ses, "CREATE item:one SET value = 1;").await;
 
 	// tx1 takes a locked read of the record.
@@ -84,8 +84,8 @@ async fn rocksdb_select_for_update_conflicts_with_concurrent_write() {
 /// Without a concurrent writer the locked read is inert: the locking
 /// transaction commits normally and its writes are visible afterwards.
 #[tokio::test]
-async fn rocksdb_select_for_update_commits_without_concurrent_write() {
-	let (_dir, ds, ses) = rocksdb_ds().await;
+async fn surrealkv_select_for_update_commits_without_concurrent_write() {
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run(&ds, &ses, "CREATE item:one SET value = 1;").await;
 
 	let tx1 = Arc::new(ds.transaction(Write).await.unwrap());
@@ -107,8 +107,8 @@ async fn rocksdb_select_for_update_commits_without_concurrent_write() {
 /// transaction commits successfully despite a concurrent committed write
 /// to the record it read.
 #[tokio::test]
-async fn rocksdb_plain_select_does_not_conflict_with_concurrent_write() {
-	let (_dir, ds, ses) = rocksdb_ds().await;
+async fn surrealkv_plain_select_does_not_conflict_with_concurrent_write() {
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run(&ds, &ses, "CREATE item:one SET value = 1;").await;
 
 	let tx1 = Arc::new(ds.transaction(Write).await.unwrap());
@@ -131,13 +131,13 @@ async fn rocksdb_plain_select_does_not_conflict_with_concurrent_write() {
 /// as a RecordIdScan below a Limit operator — every plan must register the
 /// key.
 #[tokio::test]
-async fn rocksdb_select_for_update_limit_zero_still_locks() {
+async fn surrealkv_select_for_update_limit_zero_still_locks() {
 	for (label, lock_stmt) in [
 		("dynamic", "LET $a = SELECT * FROM fn::dynamic_rid() LIMIT 0 FOR UPDATE;"),
 		("inlined", "LET $a = SELECT * FROM fn::rid() LIMIT 0 FOR UPDATE;"),
 		("literal", "LET $a = SELECT * FROM item:one LIMIT 0 FOR UPDATE;"),
 	] {
-		let (_dir, ds, ses) = rocksdb_ds().await;
+		let (_dir, ds, ses) = surrealkv_ds().await;
 		run(&ds, &ses, "CREATE item:one SET value = 1;").await;
 		run(&ds, &ses, "DEFINE FUNCTION fn::rid() { RETURN item:one };").await;
 		run(&ds, &ses, "DEFINE FUNCTION fn::dynamic_rid() { LET $rid = item:one; RETURN $rid; };")

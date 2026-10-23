@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 /// Everything a provider needs to construct a backend.
 pub struct ConnectContext<'a> {
 	/// The scheme that matched one of the provider's [`BackendProvider::schemes`],
-	/// as written by the user (e.g. `mem`, `rocksdb`).
+	/// as written by the user (e.g. `mem`, `surrealkv`).
 	pub scheme: &'a str,
 	/// The path component after the scheme, with the query string stripped and
 	/// absolute paths normalised to a single leading slash. Empty when the

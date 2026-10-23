@@ -45,8 +45,8 @@ enum AnnIndex {
 #[derive(Clone, Copy)]
 enum BenchStore {
 	Memory,
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDb,
+	#[cfg(feature = "kv-surrealkv")]
+	SurrealKv,
 }
 
 /// Datastore handle plus any temporary storage that must live for the benchmark duration.
@@ -60,10 +60,10 @@ impl AnnIndex {
 		let group = match (self, store) {
 			(Self::Hnsw, BenchStore::Memory) => "hnsw_with_db",
 			(Self::DiskAnn, BenchStore::Memory) => "diskann_with_db",
-			#[cfg(feature = "kv-rocksdb")]
-			(Self::Hnsw, BenchStore::RocksDb) => "hnsw_with_rocksdb",
-			#[cfg(feature = "kv-rocksdb")]
-			(Self::DiskAnn, BenchStore::RocksDb) => "diskann_with_rocksdb",
+			#[cfg(feature = "kv-surrealkv")]
+			(Self::Hnsw, BenchStore::SurrealKv) => "hnsw_with_surrealkv",
+			#[cfg(feature = "kv-surrealkv")]
+			(Self::DiskAnn, BenchStore::SurrealKv) => "diskann_with_surrealkv",
 		};
 		group.to_owned()
 	}
@@ -91,10 +91,10 @@ impl BenchStore {
 				let _ = temp_dir;
 				"memory".to_owned()
 			}
-			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDb => {
-				let path = temp_dir.expect("RocksDB benchmark requires a temp dir").child("db");
-				format!("rocksdb:{}", path.display())
+			#[cfg(feature = "kv-surrealkv")]
+			Self::SurrealKv => {
+				let path = temp_dir.expect("SurrealKV benchmark requires a temp dir").child("db");
+				format!("surrealkv:{}", path.display())
 			}
 		}
 	}
@@ -116,14 +116,14 @@ const HNSW_BUILD_SEED: u64 = 0x5EED_11A5;
 fn bench_hnsw_with_db(c: &mut Criterion) {
 	surrealdb_cnf::set_default_hnsw_build_seed(HNSW_BUILD_SEED);
 	bench_ann_with_db(c, AnnIndex::Hnsw, BenchStore::Memory);
-	#[cfg(feature = "kv-rocksdb")]
-	bench_ann_with_db(c, AnnIndex::Hnsw, BenchStore::RocksDb);
+	#[cfg(feature = "kv-surrealkv")]
+	bench_ann_with_db(c, AnnIndex::Hnsw, BenchStore::SurrealKv);
 }
 
 fn bench_diskann_with_db(c: &mut Criterion) {
 	bench_ann_with_db(c, AnnIndex::DiskAnn, BenchStore::Memory);
-	#[cfg(feature = "kv-rocksdb")]
-	bench_ann_with_db(c, AnnIndex::DiskAnn, BenchStore::RocksDb);
+	#[cfg(feature = "kv-surrealkv")]
+	bench_ann_with_db(c, AnnIndex::DiskAnn, BenchStore::SurrealKv);
 }
 
 fn bench_ann_with_db(c: &mut Criterion, index: AnnIndex, store: BenchStore) {
@@ -279,8 +279,8 @@ fn new_vectors_from_file(path: &str) -> Vec<(RecordId, String)> {
 async fn init_datastore(session: &Session, index: Option<AnnIndex>, store: BenchStore) -> BenchDb {
 	let temp_dir = match store {
 		BenchStore::Memory => None,
-		#[cfg(feature = "kv-rocksdb")]
-		BenchStore::RocksDb => Some(TempDir::new().unwrap()),
+		#[cfg(feature = "kv-surrealkv")]
+		BenchStore::SurrealKv => Some(TempDir::new().unwrap()),
 	};
 	let endpoint = store.endpoint(temp_dir.as_ref());
 	let ds = Datastore::new(&endpoint).await.unwrap();

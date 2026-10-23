@@ -12,8 +12,7 @@
 //! Rows that dereference a record link have little to gain: they share one
 //! transaction and every backend guards it, so they queue on the guard rather
 //! than overlap their reads. `kv-mem` and `kv-surrealkv` take a read lock and
-//! then do synchronous work under it, and `kv-rocksdb` takes an exclusive
-//! `Mutex` for every operation.
+//! then do synchronous work under it.
 //!
 //! Rows that each run an operator plan are a different case: those plans buffer
 //! through spawned tasks of their own, so overlapping the rows reaches more than
@@ -29,7 +28,7 @@
 //! cargo bench -p surrealdb-core --bench fan_out
 //!
 //! # another backend
-//! cargo bench -p surrealdb-core --no-default-features --features kv-rocksdb --bench fan_out
+//! cargo bench -p surrealdb-core --no-default-features --features kv-surrealkv --bench fan_out
 //!
 //! # narrow to one shape
 //! cargo bench -p surrealdb-core --bench fan_out -- field_dereference
@@ -62,13 +61,13 @@ const NEVER: &str = "1000000";
 /// A threshold every batch reaches, so everything overlaps.
 const ALWAYS: &str = "2";
 
-#[cfg(not(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv")))]
-compile_error!("benches/fan_out.rs needs one of kv-mem, kv-rocksdb or kv-surrealkv");
+#[cfg(not(any(feature = "kv-mem", feature = "kv-surrealkv")))]
+compile_error!("benches/fan_out.rs needs one of kv-mem or kv-surrealkv");
 
 /// The datastore path for the backend this bench was built against.
 ///
 /// Only the selected `kv-*` feature's backend is compiled in, so the path has
-/// to match it: `memory` is not loadable by a build that has only RocksDB. The
+/// to match it: `memory` is not loadable by a build that has only SurrealKV. The
 /// on-disk backends take a subdirectory of `dir` named after the arm, since the
 /// two datastores are live at the same time and must not share storage.
 #[cfg(feature = "kv-mem")]
@@ -76,12 +75,7 @@ fn datastore_path(_dir: &TempDir, _arm: &str) -> String {
 	"memory".to_owned()
 }
 
-#[cfg(all(feature = "kv-rocksdb", not(feature = "kv-mem")))]
-fn datastore_path(dir: &TempDir, arm: &str) -> String {
-	format!("rocksdb:{}", dir.path().join(arm).display())
-}
-
-#[cfg(all(feature = "kv-surrealkv", not(any(feature = "kv-mem", feature = "kv-rocksdb"))))]
+#[cfg(all(feature = "kv-surrealkv", not(feature = "kv-mem")))]
 fn datastore_path(dir: &TempDir, arm: &str) -> String {
 	format!("surrealkv:{}", dir.path().join(arm).display())
 }

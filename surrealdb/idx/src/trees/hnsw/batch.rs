@@ -1000,12 +1000,12 @@ mod tests {
 		Ok(())
 	}
 
-	/// A store opened on a fresh RocksDB directory, which gives read views.
-	#[cfg(feature = "kv-rocksdb")]
-	async fn rocksdb_store() -> (temp_dir::TempDir, TestIndexStore) {
+	/// A store opened on a fresh SurrealKV directory, which gives read views.
+	#[cfg(feature = "kv-surrealkv")]
+	async fn surrealkv_store() -> (temp_dir::TempDir, TestIndexStore) {
 		let dir = temp_dir::TempDir::new().unwrap();
 		let ds =
-			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await;
+			TestIndexStore::with_path(&format!("surrealkv:{}", dir.path().to_string_lossy())).await;
 		(dir, ds)
 	}
 
@@ -1032,10 +1032,10 @@ mod tests {
 	/// one, taken from one read-only transaction opened for them whatever the
 	/// batch's task count, run on that task count, and read nothing through
 	/// the batch's own transaction.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn a_staged_batch_reads_through_one_view_whatever_its_task_count() -> Result<()> {
-		let (_dir, ds) = rocksdb_store().await;
+		let (_dir, ds) = surrealkv_store().await;
 		let h = seed(&ds, &params(false, false), 150).await?;
 		for tasks in [1, 4, 16] {
 			let env = ds.env(TransactionType::Write).await;
@@ -1162,10 +1162,10 @@ mod tests {
 		one_plan_writes_one_graph(&TestIndexStore::new_viewless().await).await
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	async fn one_plan_writes_one_graph_with_a_view_or_without() -> Result<()> {
-		let (_dir, ds) = rocksdb_store().await;
+		let (_dir, ds) = surrealkv_store().await;
 		one_plan_writes_one_graph(&ds).await
 	}
 

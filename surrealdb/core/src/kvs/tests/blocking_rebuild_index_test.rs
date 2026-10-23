@@ -1,17 +1,12 @@
-//! Blocking `REBUILD INDEX` on RocksDB, whose optimistic transactions validate
-//! a commit against the write history the memtables still retain.
+//! Blocking `REBUILD INDEX` on SurrealKV.
 //!
-//! A blocking build commits far more writes of its own than that history
-//! holds. The statement that started the build must therefore not keep its
-//! own transaction open across the build: RocksDB would refuse to validate its
-//! commit, because it could no longer tell whether anything conflicted. The
-//! datastores here retain a few tens of KiB of history, so a build over a few
-//! thousand rows outlasts it many times over.
+//! A blocking build commits far more writes of its own than one transaction
+//! should carry. The statement that started the build therefore commits its own
+//! transaction before the build, and returns only once the index is ready again.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::TransactionType::Write;
 use temp_dir::TempDir;
 use web_time::Instant;
@@ -34,14 +29,14 @@ const ROWS: usize = 2_000;
 /// Dimension of the indexed vectors.
 const DIMENSION: usize = 16;
 
-/// A RocksDB datastore whose memtables retain a few tens of KiB of write
-/// history, with the `test`/`test` namespace and database defined.
+/// A SurrealKV datastore with the `test`/`test` namespace and database
+/// defined.
 ///
 /// The returned [`TempDir`] owns the store's files: hold it for as long as the
 /// datastore is used, and shut the datastore down before it drops.
-async fn small_history_ds() -> (TempDir, Arc<Datastore>, Session) {
+async fn surrealkv_ds() -> (TempDir, Arc<Datastore>, Session) {
 	let dir = TempDir::new().unwrap();
-	let ds = open_small_history_ds(&dir, None, None).await;
+	let ds = open_surrealkv_ds(&dir, None, None).await;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let txn = ds.transaction(Write).await.unwrap();
 	txn.ensure_ns_db(None, "test", "test").await.unwrap();
@@ -49,21 +44,16 @@ async fn small_history_ds() -> (TempDir, Arc<Datastore>, Session) {
 	(dir, ds, ses)
 }
 
-/// Open the small-history RocksDB datastore stored in `dir`, with statements
+/// Open the SurrealKV datastore stored in `dir`, with statements
 /// bounded by `transaction_timeout` and queries by `query_timeout`.
-async fn open_small_history_ds(
+async fn open_surrealkv_ds(
 	dir: &TempDir,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 ) -> Arc<Datastore> {
-	let path = format!("rocksdb:{}", dir.path().to_string_lossy());
-	let config = ConfigMap::empty()
-		.with_key_value("rocksdb_write_buffer_size", "65536")
-		.with_key_value("rocksdb_max_write_buffer_number", "2")
-		.with_key_value("rocksdb_min_write_buffer_number_to_merge", "1");
+	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
 	Datastore::builder()
 		.without_maintenance_tasks()
-		.with_config(config)
 		.with_transaction_timeout(transaction_timeout)
 		.with_query_timeout(query_timeout)
 		.build_with_factory_path(&path, CommunityComposer())
@@ -135,11 +125,11 @@ async fn assert_ready_and_answers_knn(ds: &Datastore, ses: &Session, ix: &str, r
 	assert!(explain.to_string().contains(ix), "the KNN query does not use {ix}: {explain}");
 }
 
-/// A blocking `REBUILD INDEX` of a DiskANN index larger than the retained
-/// write history commits, and returns only once the index is ready again.
+/// A blocking `REBUILD INDEX` of a DiskANN index commits, and returns only
+/// once the index is ready again.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_blocking_diskann_rebuild_outlasting_the_retained_history_commits() {
-	let (_dir, ds, ses) = small_history_ds().await;
+async fn a_blocking_diskann_rebuild_commits() {
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(
 		&ds,
 		&ses,
@@ -154,35 +144,16 @@ async fn a_blocking_diskann_rebuild_outlasting_the_retained_history_commits() {
 	ds.shutdown().await.unwrap();
 }
 
-/// A blocking `REBUILD INDEX` of a b-tree index larger than the retained write
-/// history commits too: the failure is the statement's transaction, not the
-/// index kind.
+/// A blocking `REBUILD INDEX` of a b-tree index commits too.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_blocking_btree_rebuild_outlasting_the_retained_history_commits() {
-	let (_dir, ds, ses) = small_history_ds().await;
+async fn a_blocking_btree_rebuild_commits() {
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
 	seed_rows(&ds, &ses).await;
 	run_one(&ds, &ses, "REBUILD INDEX ix ON t").await;
 	let building = building(&ds, &ses, "ix").await;
 	assert_eq!(building["status"], "ready", "ix is not ready: {building}");
 	assert_eq!(building["initial"], ROWS, "ix did not index every row: {building}");
-	ds.shutdown().await.unwrap();
-}
-
-/// A blocking `REBUILD INDEX` inside `BEGIN ... COMMIT` still waits inside its
-/// transaction, so the whole transaction commits or fails as one: a build that
-/// outlasts the retained history fails the commit.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_blocking_rebuild_inside_a_transaction_waits_inside_it() {
-	let (_dir, ds, ses) = small_history_ds().await;
-	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
-	seed_rows(&ds, &ses).await;
-	let results = run(&ds, &ses, "BEGIN; REBUILD INDEX ix ON t; COMMIT;").await;
-	let commit = results.last().expect("COMMIT reports a result");
-	assert!(
-		commit.as_ref().is_err_and(|err| err.contains("could not check for conflicts")),
-		"a rebuild awaited inside its transaction cannot outlast the history: {results:?}"
-	);
 	ds.shutdown().await.unwrap();
 }
 
@@ -225,12 +196,12 @@ async fn assert_outlasted_rebuild_reports_its_commit(
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 ) {
-	let (dir, ds, ses) = small_history_ds().await;
+	let (dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
 	seed_row_count(&ds, &ses, MANY_ROWS).await;
 	ds.shutdown().await.unwrap();
 	drop(ds);
-	let ds = open_small_history_ds(&dir, transaction_timeout, query_timeout).await;
+	let ds = open_surrealkv_ds(&dir, transaction_timeout, query_timeout).await;
 	let results = run(&ds, &ses, "REBUILD INDEX ix ON t").await;
 	let [Err(err)] = results.as_slice() else {
 		panic!("the rebuild did not outlast its timeout: {results:?}");
@@ -266,7 +237,7 @@ async fn a_blocking_rebuild_outlasting_the_query_timeout_reports_its_commit() {
 /// to does not describe, and the next `REBUILD INDEX` succeeds.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blocking_rebuild_whose_commit_fails_aborts_its_build() {
-	let (_dir, ds, ses) = small_history_ds().await;
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
 	seed_rows(&ds, &ses).await;
 	let lost_commit = inject_retryable_conflict(RetryableConflictSite::AwaitedBuildCommit, ds.id());
@@ -290,7 +261,7 @@ async fn a_blocking_rebuild_whose_commit_fails_aborts_its_build() {
 /// `REBUILD INDEX` retries it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blocking_rebuild_whose_build_fails_reports_it_and_can_be_retried() {
-	let (_dir, ds, ses) = small_history_ds().await;
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "CREATE t:1 SET v = 1").await;
 	run_one(&ds, &ses, "CREATE t:2 SET v = 1").await;
 	// A UNIQUE index over a duplicate: the concurrent build fails without
@@ -318,7 +289,7 @@ async fn a_blocking_rebuild_whose_build_fails_reports_it_and_can_be_retried() {
 /// finish.
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelling_a_blocking_rebuild_after_its_commit_leaves_its_build_running() {
-	let (_dir, ds, ses) = small_history_ds().await;
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
 	seed_row_count(&ds, &ses, MANY_ROWS).await;
 	let cancel = CancelHandle::new();
@@ -359,7 +330,7 @@ async fn cancelling_a_blocking_rebuild_after_its_commit_leaves_its_build_running
 /// the commit and keep the statement atomic.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blocking_rebuild_nested_in_a_block_keeps_the_block_atomic() {
-	let (_dir, ds, ses) = small_history_ds().await;
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "CREATE t:1 SET v = 1").await;
 	run_one(&ds, &ses, "CREATE t:2 SET v = 1").await;
 	run_one(&ds, &ses, "DEFINE INDEX u_ix ON t FIELDS v UNIQUE CONCURRENTLY").await;
@@ -428,17 +399,15 @@ async fn knn_rows(ds: &Datastore, ses: &Session) -> Result<serde_json::Value, St
 }
 
 /// Run `sql`, a blocking `REBUILD INDEX` of a DiskANN index on the legacy
-/// doc-ID layout inside a transaction, over more rows than the retained write
-/// history holds.
+/// doc-ID layout inside a transaction.
 ///
 /// A rebuild that moves the index's format stages its generation in the
 /// transaction and builds once the transaction has committed, so the build
-/// never holds the transaction open past the retained history. The commit
-/// succeeds and stamps the definition at the current format; once the build
-/// settles, the index is `ready` with every row and answers KNN through the
+/// never holds the transaction open. The commit succeeds and stamps the definition at the current
+/// format; once the build settles, the index is `ready` with every row and answers KNN through the
 /// index.
 async fn assert_legacy_rebuild_commits_and_answers_through_the_index(sql: &str) {
-	let (_dir, ds, ses) = small_history_ds().await;
+	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(
 		&ds,
 		&ses,
@@ -489,31 +458,4 @@ async fn a_legacy_rebuild_in_a_transaction_commits_and_answers_through_the_index
 async fn a_legacy_rebuild_nested_in_a_block_commits_and_answers_through_the_index() {
 	assert_legacy_rebuild_commits_and_answers_through_the_index("{ REBUILD INDEX knn_ix ON t; };")
 		.await;
-}
-
-/// A blocking `REBUILD INDEX` of an index already at the current format whose
-/// transaction cannot commit leaves the index `ready`: the definition the
-/// rollback keeps describes the layout the build wrote, so the published
-/// generation still serves it, and KNN goes through the index.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_uncommitted_current_format_rebuild_keeps_its_index_ready() {
-	let (_dir, ds, ses) = small_history_ds().await;
-	run_one(
-		&ds,
-		&ses,
-		&format!(
-			"DEFINE INDEX knn_ix ON t FIELDS v DISKANN DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE I8"
-		),
-	)
-	.await;
-	seed_rows(&ds, &ses).await;
-	let results = run(&ds, &ses, "BEGIN; REBUILD INDEX knn_ix ON t; COMMIT;").await;
-	assert!(
-		results
-			.iter()
-			.any(|r| r.as_ref().is_err_and(|err| err.contains("could not check for conflicts"))),
-		"the rebuild's transaction did not fail to commit: {results:?}"
-	);
-	assert_ready_and_answers_knn(&ds, &ses, "knn_ix", ROWS).await;
-	ds.shutdown().await.unwrap();
 }

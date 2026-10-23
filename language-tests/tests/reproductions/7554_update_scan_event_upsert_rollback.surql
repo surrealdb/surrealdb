@@ -2,10 +2,10 @@
 [env]
 namespace = true
 database = true
-backend = ["mem", "rocksdb"]
+backend = ["mem", "surrealkv"]
 
 [test]
-reason = "An UPSERT inside an event rolls back its savepoint when the record already exists, while the outer UPDATE's scan cursor is open. On RocksDB that rolled back under a live cursor and panicked the server; the scan must carry on and update every row."
+reason = "An UPSERT inside an event rolls back its savepoint when the record already exists, while the outer UPDATE's scan cursor is open. On a file-backed engine that rolled back under a live cursor and panicked the server; the scan must carry on and update every row."
 issue = 7554
 
 [[test.results]]

@@ -637,7 +637,7 @@ mod tests {
 
 	/// A remainder of one entry has no boundary: the owner declines the thief's ask and reads on,
 	/// and a remainder of several is cut with the first part kept.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_one_row_remainder_declines_a_steal() {
 		use std::borrow::Cow;
@@ -649,9 +649,10 @@ mod tests {
 		let dir = tempfile::tempdir().expect("temporary directory");
 		let setup =
 			"DEFINE TABLE t; CREATE t:1 SET n = 1; CREATE t:2 SET n = 2; CREATE t:3 SET n = 3;";
-		let db = TestDb::new_on_rocksdb(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
+		let db =
+			TestDb::new_on_surrealkv(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
 		let ctx = db.exec_ctx().await;
-		let view = ctx.txn().snapshot().expect("a read-only transaction on RocksDB gives a view");
+		let view = ctx.txn().snapshot().expect("a read-only transaction on SurrealKV gives a view");
 		let db_ctx = ctx.database().expect("a database context");
 		let table = crate::val::TableName::from("t".to_owned());
 		let span = RecordPrefix {
@@ -709,7 +710,7 @@ mod tests {
 	/// A morsel cuts its own remainder when nobody asked, while no morsel waits and the remainder
 	/// and what it has read since it was last cut are large enough; a morsel that waits, or a read
 	/// too short, leaves the remainder whole.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_hot_morsel_cuts_its_own_remainder_while_none_waits() {
 		use std::borrow::Cow;
@@ -720,9 +721,10 @@ mod tests {
 
 		let dir = tempfile::tempdir().expect("temporary directory");
 		let setup = "DEFINE TABLE t; FOR $i IN 0..300 { CREATE type::record('t', $i) SET n = $i };";
-		let db = TestDb::new_on_rocksdb(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
+		let db =
+			TestDb::new_on_surrealkv(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
 		let ctx = db.exec_ctx().await;
-		let view = ctx.txn().snapshot().expect("a read-only transaction on RocksDB gives a view");
+		let view = ctx.txn().snapshot().expect("a read-only transaction on SurrealKV gives a view");
 		let db_ctx = ctx.database().expect("a database context");
 		let table = crate::val::TableName::from("t".to_owned());
 		let span = RecordPrefix {
@@ -794,7 +796,7 @@ mod tests {
 	/// A cursor that refuses to narrow leaves the owner with the whole of its remainder: nothing is
 	/// queued, the owner's range is as it was, the thief's ask is declined, and a later boundary
 	/// that narrows donates as it would have.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_failed_narrow_gives_nothing_away() {
 		use std::borrow::Cow;
@@ -807,9 +809,10 @@ mod tests {
 		let dir = tempfile::tempdir().expect("temporary directory");
 		let setup =
 			"DEFINE TABLE t; CREATE t:1 SET n = 1; CREATE t:2 SET n = 2; CREATE t:3 SET n = 3;";
-		let db = TestDb::new_on_rocksdb(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
+		let db =
+			TestDb::new_on_surrealkv(setup, dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
 		let ctx = db.exec_ctx().await;
-		let view = ctx.txn().snapshot().expect("a read-only transaction on RocksDB gives a view");
+		let view = ctx.txn().snapshot().expect("a read-only transaction on SurrealKV gives a view");
 		let db_ctx = ctx.database().expect("a database context");
 		let table = crate::val::TableName::from("t".to_owned());
 		let span = RecordPrefix {

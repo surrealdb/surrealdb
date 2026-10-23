@@ -1,7 +1,7 @@
 # surrealdb-kvs-any
 
 Facade over every SurrealDB key-value store backend: constructs the right
-datastore from a connection path string (`memory`, `rocksdb://path`,
+datastore from a connection path string (`memory`, `surrealkv://path`,
 `tikv://...`), with each backend gated behind a matching `kv-*` cargo feature.
 
 > [!WARNING]

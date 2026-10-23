@@ -24,10 +24,10 @@ $ cargo make bench-lib-mem
 $ cargo make bench-sdk-mem
 ```
 
-* RocksDB datastore using the lib or the SDK
+* SurrealKV datastore using the lib or the SDK
 ```console
-$ cargo make bench-lib-rocksdb
-$ cargo make bench-sdk-rocksdb
+$ cargo make bench-lib-surrealkv
+$ cargo make bench-sdk-surrealkv
 ```
 
 * WebSocket remote server using the SDK

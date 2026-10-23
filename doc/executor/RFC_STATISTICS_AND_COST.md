@@ -406,8 +406,7 @@ test would pass, the silent failure `CLAUDE.md` warns of.
    of the one it was compiled with. Plan on the average estimate always, or key the cache by
    whether the value is a most-common value?
 6. **Sampling large indexes.** A keys-only scan of a very large index is still `O(entries)`.
-   Backends offer approximate range sizes and split keys (RocksDB's approximate sizes, TiKV's
-   regions); a refresh could sample ranges from them. Is the resulting error acceptable for
+   Backends offer approximate range sizes and split keys (TiKV's regions); a refresh could sample ranges from them. Is the resulting error acceptable for
    histograms?
 7. **Conditional permissions.** Under §5 a record user on a table with a `WHERE` select permission
    always gets the no-statistics plan. Is that acceptable, or should statistics be kept per
@@ -421,7 +420,7 @@ test would pass, the silent failure `CLAUDE.md` warns of.
    a value; *S* with row and entry counts by deltas, its fold on the compaction queue, and the
    backfill; §6.3's costing of access paths only. Measured on the bench suite — first
    `select_table_index_noindex` in `benches/executor.rs`, whose `field > 4999` returns half of
-   10,000 records and is the case §1 plans with the index — on the memory, RocksDB and TiKV
+   10,000 records and is the case §1 plans with the index — on the memory and TiKV
    backends. The language suite runs with statistics absent and with
    statistics replaced by random values, and each answer must equal the run without statistics,
    which is §2 checked rather than trusted. The permission rule of §5 and its tests; the upgrade

@@ -2,7 +2,7 @@
 //!
 //! The single entry point for constructing a SurrealDB key-value store
 //! backend: a [`Backends`] registry selects and constructs the right
-//! datastore from a connection path string (e.g. `memory`, `rocksdb://path`,
+//! datastore from a connection path string (e.g. `memory`, `surrealkv://path`,
 //! `tikv://...`), exposing it behind the [`TransactionBuilder`] abstraction.
 //! Each first-party backend is gated behind a matching `kv-*` cargo feature
 //! and pre-registered by [`Backends::community`]; embedders can plug in
@@ -20,12 +20,8 @@ mod community;
 pub mod provider;
 mod registry;
 
-#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
-pub use surrealdb_kvs_indxdb as indxdb;
 #[cfg(feature = "kv-mem")]
 pub use surrealdb_kvs_mem as mem;
-#[cfg(feature = "kv-rocksdb")]
-pub use surrealdb_kvs_rocksdb as rocksdb;
 #[cfg(feature = "kv-surrealkv")]
 pub use surrealdb_kvs_surrealkv as surrealkv;
 #[cfg(feature = "kv-tikv")]

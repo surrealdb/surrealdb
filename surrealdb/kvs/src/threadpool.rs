@@ -2,8 +2,8 @@
 //! run synchronous storage work off the async runtime.
 
 /// Number of worker threads in the shared KVS blocking threadpool
-/// (`surrealdb-threadpool`) used by the `kv-mem`, `kv-rocksdb`, and
-/// `kv-surrealkv` storage backends to run synchronous storage work off the
+/// (`surrealdb-threadpool`) used by the `kv-mem` and `kv-surrealkv`
+/// storage backends to run synchronous storage work off the
 /// tokio runtime.
 ///
 /// Default: `num_cpus::get()` on hosts with at least 16 logical cores (one
@@ -15,12 +15,6 @@
 ///
 /// Workers are never pinned to cores; placement is left to the OS
 /// scheduler.
-///
-/// `kv-rocksdb` also bounds the commits it runs on tokio's blocking pool —
-/// those past its inline-blocking cap, and every commit polled on a
-/// current-thread runtime — to this many at once across the datastores
-/// committing on each runtime, and to at most half of that runtime's
-/// blocking threads.
 ///
 /// **Minimum: 4.** Some kvs operations always run on this pool — read-only
 /// `count` with sharded fan-out, `compact`, writable scans — and below ~4

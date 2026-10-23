@@ -14,7 +14,7 @@ use crate::err::Result;
 ///
 /// This structure is used to expose datastore-specific metrics to the telemetry system.
 pub struct Metrics {
-	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
+	/// The name of the metrics group (e.g., "surrealdb.surrealkv").
 	pub name: &'static str,
 	/// A list of u64-based metrics.
 	pub u64_metrics: Vec<Metric>,
@@ -31,7 +31,7 @@ pub struct Metric {
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling the datastore from concrete KV engines (memory,
-/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
+/// TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
 /// generic transaction parameters into a backend-specific transaction and
 /// report whether the transaction is considered "local" (used internally to
 /// enable some optimizations).

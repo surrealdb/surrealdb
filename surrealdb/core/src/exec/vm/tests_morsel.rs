@@ -18,7 +18,7 @@ use super::morsel::{
 	Counts, counts_of, delay_morsels, effective_input, fail_splits, forget_ends, metrics_of,
 	seed_opened,
 };
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 use super::morsel::{fail_grants, fail_narrows, waiting_statement};
 use super::plan_checked;
 use super::program::Program;
@@ -382,10 +382,10 @@ pub(super) async fn bounded_on(
 	db
 }
 
-/// [`bounded_on`] over a RocksDB datastore in `dir`, whose read-only transactions give the
+/// [`bounded_on`] over a SurrealKV datastore in `dir`, whose read-only transactions give the
 /// morsels of a scan a read view.
-#[cfg(feature = "kv-rocksdb")]
-pub(super) async fn bounded_on_rocksdb(
+#[cfg(feature = "kv-surrealkv")]
+pub(super) async fn bounded_on_surrealkv(
 	governor: Arc<impl MemoryGovernor>,
 	store: Arc<impl TempStore>,
 	setup: &str,
@@ -393,7 +393,7 @@ pub(super) async fn bounded_on_rocksdb(
 	config: surrealdb_cnf::ConfigMap,
 ) -> TestDb {
 	let (builder, freely) = bounded_builder(governor, store);
-	let db = TestDb::new_on_rocksdb_over(builder, setup, dir, config).await;
+	let db = TestDb::new_on_surrealkv_over(builder, setup, dir, config).await;
 	freely.setting_up.store(false, Ordering::Relaxed);
 	db
 }
@@ -632,9 +632,9 @@ const SCANS: &[&str] = &[
 	"SELECT n FROM t WHERE n % 5 = 1 ORDER BY n DESC",
 ];
 
-/// A scan on RocksDB, whose read-only transactions give a view, tiles into morsels that workers
+/// A scan on SurrealKV, whose read-only transactions give a view, tiles into morsels that workers
 /// read, and answers what the whole scan answers, forward and backward.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn range_morsels_tile_an_in_place_scan() {
 	let _turn = TURNS.lock().await;
@@ -642,8 +642,8 @@ async fn range_morsels_tile_an_in_place_scan() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let counts = same_answers(&serial, &wide, SCANS).await;
 	assert!(counts.split > 1, "{counts:?}");
 	assert!(counts.handed > 0, "{counts:?}");
@@ -827,12 +827,12 @@ async fn a_table_counted_by_extrapolation_is_judged_by_its_estimate() {
 }
 
 /// The backward scan of a table reads its key range in morsels too.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backward_scan_reads_its_key_range_in_morsels() {
 	let _turn = TURNS.lock().await;
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let wide = TestDb::new_on_rocksdb(&setup(), dir.path(), tiny()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), dir.path(), tiny()).await;
 	assert!(answer(&wide, "SELECT n, s FROM t ORDER BY id DESC").await.1);
 }
 
@@ -1078,18 +1078,18 @@ async fn a_brute_force_knn_in_memory_is_read_by_workers() {
 	assert!(after.handed > before.handed, "{before:?}, {after:?}");
 }
 
-/// On RocksDB, whose read-only transactions give a view, the morsels of a brute-force KNN are read
-/// by workers, and the statement answers what the serial run answers.
-#[cfg(feature = "kv-rocksdb")]
+/// On SurrealKV, whose read-only transactions give a view, the morsels of a brute-force KNN are
+/// read by workers, and the statement answers what the serial run answers.
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn a_brute_force_knn_on_rocksdb_is_read_by_workers() {
+async fn a_brute_force_knn_on_surrealkv_is_read_by_workers() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&vectors(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&vectors(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&vectors(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&vectors(), wide_dir.path(), tiny()).await;
 	let before = counts_of(&wide.exec_ctx().await);
 	knn_scans_answer_as_the_serial_run(&serial, &wide).await;
 	let after = counts_of(&wide.exec_ctx().await);
@@ -1115,9 +1115,9 @@ async fn range_morsels_run_on_the_coordinator_without_a_view() {
 }
 
 /// A plain `SELECT`, whose pipeline holds no loop op, is placed by the datastore's morsel
-/// settings when it runs as a request: on RocksDB with morsels on, its key range is split and
+/// settings when it runs as a request: on SurrealKV with morsels on, its key range is split and
 /// workers read the parts, and the rows are the serial run's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plain_select_fans_out_under_the_datastores_morsel_settings() {
 	let _turn = TURNS.lock().await;
@@ -1125,8 +1125,8 @@ async fn a_plain_select_fans_out_under_the_datastores_morsel_settings() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let sql = "SELECT * FROM t";
 	assert_eq!(fan_out_of(&serial, sql).await, FanOut::No);
 	let expected = answered(&serial, sql).await;
@@ -1169,15 +1169,15 @@ async fn a_plain_select_reads_ranges_without_a_view_only_where_the_settings_allo
 }
 
 /// A statement that may take no place answers as one that takes every place.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn coordinator_only_answers_as_wide() {
 	let (serial_dir, narrow_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let narrow = TestDb::new_on_rocksdb(
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let narrow = TestDb::new_on_surrealkv(
 		&setup(),
 		narrow_dir.path(),
 		tiny().with_key_value("morsel_places", "0"),
@@ -1190,7 +1190,7 @@ async fn coordinator_only_answers_as_wide() {
 
 /// Morsels whose windows hold a byte park at every chunk, leaving the rest of their range to
 /// another morsel, and the answers stay those of the whole scan.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn range_morsels_park_when_their_window_is_full() {
 	let _turn = TURNS.lock().await;
@@ -1198,8 +1198,8 @@ async fn range_morsels_park_when_their_window_is_full() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(
 		&setup(),
 		wide_dir.path(),
 		// Morsels of a few hundred entries read in chunks of at most a quantum.
@@ -1248,15 +1248,15 @@ async fn a_failing_scan_raises_one_of_its_failures_on_the_coordinator() {
 	a_failing_scan_fails(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failing_scan_raises_one_of_its_failures() {
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&failing_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&failing_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&failing_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&failing_setup(), wide_dir.path(), tiny()).await;
 	a_failing_scan_fails(&serial, &wide).await;
 }
 
@@ -1291,11 +1291,11 @@ async fn a_scan_at_width_one_raises_its_first_failure_and_judges_nothing_past_it
 
 /// A statement that fails while workers hold cursors on the transaction's view returns only once
 /// they have dropped them: the transaction cancels at once.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn workers_are_awaited_before_the_statement_returns() {
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let wide = TestDb::new_on_rocksdb(&failing_setup(), dir.path(), tiny()).await;
+	let wide = TestDb::new_on_surrealkv(&failing_setup(), dir.path(), tiny()).await;
 	for sql in ["SELECT <int> s AS i FROM t", "SELECT * FROM t"] {
 		let ctx = wide.exec_ctx().await;
 		let vm = statement(&ctx, sql).await;
@@ -1310,11 +1310,11 @@ async fn workers_are_awaited_before_the_statement_returns() {
 }
 
 /// A statement dropped half way, as a client that goes away drops it, leaves no cursor behind.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dropped_statement_leaves_no_cursor_behind() {
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let wide = TestDb::new_on_rocksdb(&setup(), dir.path(), tiny()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), dir.path(), tiny()).await;
 	let ctx = wide.exec_ctx().await;
 	let vm = statement(&ctx, "SELECT * FROM t").await;
 	let started =
@@ -1476,7 +1476,7 @@ fn float_setup() -> String {
 }
 
 /// Float folds of one group whose morsels keep their terms.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 const FLOAT_FOLDS: &[&str] = &[
 	"SELECT math::sum(f) AS s, math::mean(f) AS m, math::stddev(f) AS d, math::variance(f) AS v FROM t GROUP ALL",
 	"SELECT math::sum(x) AS s, math::mean(x) AS m, math::stddev(x) AS d, math::variance(x) AS v, count() AS c FROM t GROUP ALL",
@@ -1560,16 +1560,16 @@ fn window_settings() -> [surrealdb_cnf::ConfigMap; 3] {
 	]
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn float_folds_over_key_ranges_answer_the_serial_fold() {
 	let _turn = TURNS.lock().await;
 	let serial_dir = tempfile::tempdir().expect("temporary directory");
-	let serial = TestDb::new_on_rocksdb(&float_setup(), serial_dir.path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(&float_setup(), serial_dir.path(), whole()).await;
 	let mut parked = Vec::new();
 	for config in window_settings() {
 		let dir = tempfile::tempdir().expect("temporary directory");
-		let wide = TestDb::new_on_rocksdb(&float_setup(), dir.path(), config).await;
+		let wide = TestDb::new_on_surrealkv(&float_setup(), dir.path(), config).await;
 		float_folds_answer_the_serial_fold(&serial, &wide, FLOAT_FOLDS, true).await;
 		let before = counts_of(&wide.exec_ctx().await);
 		let counts = float_folds_answer_the_serial_fold(&serial, &wide, FLOAT_FOLDS, true).await;
@@ -1624,14 +1624,14 @@ async fn the_terms_of_batches_the_coordinator_runs_are_charged_too() {
 /// A grant of the lease that a morsel asks for the blocks of its terms and the query's memory
 /// refuses revokes the lease as any refused grant does: the morsel parks after its chunk, the
 /// coordinator runs what is left of its range, and the fold is the serial fold, bit for bit.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_float_fold_whose_terms_are_refused_a_grant_answers_the_serial_fold() {
 	let _turn = TURNS.lock().await;
 	let serial_dir = tempfile::tempdir().expect("temporary directory");
-	let serial = TestDb::new_on_rocksdb(&float_setup(), serial_dir.path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(&float_setup(), serial_dir.path(), whole()).await;
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let wide = TestDb::new_on_rocksdb(&float_setup(), dir.path(), tiny()).await;
+	let wide = TestDb::new_on_surrealkv(&float_setup(), dir.path(), tiny()).await;
 	// The first grant, a worker's copy of the slots, is made; the grants for its terms are refused.
 	let failing = fail_grants(&wide.exec_ctx().await, 1);
 	for _ in 0..5 {
@@ -1704,26 +1704,26 @@ async fn a_failure_past_a_spent_limit_is_never_raised_on_the_coordinator() {
 	paged_answers(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_past_a_spent_limit_is_never_raised() {
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&overflow_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&overflow_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&overflow_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&overflow_setup(), wide_dir.path(), tiny()).await;
 	paged_answers(&serial, &wide).await;
 }
 
 /// A spent limit cancels the morsels still out and reads no further: a limit that the first rows
 /// of a scan spend reads about a window of the table, not the table.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_spent_limit_reads_no_further() {
 	let _turn = TURNS.lock().await;
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let wide = TestDb::new_on_rocksdb(&setup(), dir.path(), tiny()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), dir.path(), tiny()).await;
 	for (sql, needs) in [
 		("SELECT * FROM t LIMIT 1", 1),
 		("SELECT * FROM t WHERE n >= 100 LIMIT 1", 101),
@@ -1807,15 +1807,15 @@ async fn explain_analyze_row_counts_are_width_invariant_on_the_coordinator() {
 	analyses_match(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn explain_analyze_row_counts_are_width_invariant() {
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	analyses_match(&serial, &wide).await;
 }
 
@@ -1894,7 +1894,7 @@ async fn a_selective_start_keeps_its_row_ends_bounded_on_the_coordinator() {
 	row_ends_stay_bounded(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_selective_start_keeps_its_row_ends_bounded() {
 	let _turn = TURNS.lock().await;
@@ -1902,8 +1902,8 @@ async fn a_selective_start_keeps_its_row_ends_bounded() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&sparse_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&sparse_setup(), wide_dir.path(), sparse()).await;
+	let serial = TestDb::new_on_surrealkv(&sparse_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&sparse_setup(), wide_dir.path(), sparse()).await;
 	row_ends_stay_bounded(&serial, &wide).await;
 }
 
@@ -1945,7 +1945,7 @@ async fn a_failed_split_runs_the_range_whole_on_the_coordinator() {
 	failed_splits_read_whole(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_split_runs_the_range_whole() {
 	let _turn = TURNS.lock().await;
@@ -1953,14 +1953,14 @@ async fn a_failed_split_runs_the_range_whole() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), stealing()).await;
 	failed_splits_read_whole(&serial, &wide).await;
 }
 
 /// A cursor that refuses to narrow keeps the range it has: the morsel that was to give part of it
 /// away reads all of it, and the answers are the serial run's rows.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_narrow_keeps_the_morsel() {
 	let _turn = TURNS.lock().await;
@@ -1968,8 +1968,8 @@ async fn a_failed_narrow_keeps_the_morsel() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), stealing()).await;
 	let failing = fail_narrows(&wide.exec_ctx().await);
 	// Other tests of the process may hold the node's places while workers should donate.
 	for _ in 0..5 {
@@ -1984,7 +1984,7 @@ async fn a_failed_narrow_keeps_the_morsel() {
 
 /// What the transaction `sql` runs on counted as read keys, and what the morsels of its datastore
 /// read and handed to workers meanwhile.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn keys_read_by(db: &TestDb, sql: &str) -> (u64, Counts) {
 	let ctx = db.exec_ctx().await;
 	let vm = statement(&ctx, sql).await;
@@ -2008,7 +2008,7 @@ async fn keys_read_by(db: &TestDb, sql: &str) -> (u64, Counts) {
 /// reads each entry once. A morsel that ends at a cut reads the entry at the cut before it finds it
 /// is past its range, and the morsel that follows reads it again, so the wide run reads no fewer
 /// keys than the serial one and may read a few more.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn worker_reads_count_in_the_transactions_scan_metrics() {
 	let _turn = TURNS.lock().await;
@@ -2016,8 +2016,8 @@ async fn worker_reads_count_in_the_transactions_scan_metrics() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let sql = "SELECT * FROM t";
 	let (expected, _) = keys_read_by(&serial, sql).await;
 	assert!(expected >= ROWS as u64, "{expected}");
@@ -2037,7 +2037,7 @@ async fn worker_reads_count_in_the_transactions_scan_metrics() {
 
 /// A statement that times out while its morsels run answers the serial run's error and leaves no
 /// worker holding a cursor on the transaction.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_timed_out_statement_releases_its_workers() {
 	let _turn = TURNS.lock().await;
@@ -2045,8 +2045,8 @@ async fn a_timed_out_statement_releases_its_workers() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let sql = "SELECT * FROM t WHERE string::len(string::repeat(s, 20000)) > 0 TIMEOUT 5ms";
 	let (expected, _) = answer(&serial, sql).await;
 	let failure = expected.as_ref().expect_err("the serial run times out");
@@ -2124,7 +2124,7 @@ async fn a_steal_never_reorders_output_on_the_coordinator() {
 }
 
 /// Workers read through the view and are asked, and the coordinator's own morsel donates too.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_steal_never_reorders_output() {
 	let _turn = TURNS.lock().await;
@@ -2132,8 +2132,8 @@ async fn a_steal_never_reorders_output() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), stealing()).await;
 	steals_keep_the_order(&serial, &wide, STEALS).await;
 	assert!(counts_of(&wide.exec_ctx().await).handed > 0);
 }
@@ -2147,7 +2147,7 @@ async fn a_backward_steal_keeps_the_lower_part_on_the_coordinator() {
 
 /// A backward scan keeps the part it reads first, and donates the part below it, which the merge
 /// takes after.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_backward_steal_keeps_the_lower_part() {
 	let _turn = TURNS.lock().await;
@@ -2155,8 +2155,8 @@ async fn a_backward_steal_keeps_the_lower_part() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), stealing()).await;
 	steals_keep_the_order(&serial, &wide, BACKWARD_STEALS).await;
 	assert!(answer(&wide, "SELECT n, s FROM t ORDER BY id DESC").await.1);
 }
@@ -2182,7 +2182,7 @@ async fn a_coordinator_alone_has_nobody_to_take_what_it_gives() {
 
 /// The first cut puts nearly the whole table in one morsel; once the queue of the others is
 /// drained that morsel cuts itself, and the answers are the whole scan's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn resplit_divides_a_hot_morsel() {
 	let _turn = TURNS.lock().await;
@@ -2190,8 +2190,8 @@ async fn resplit_divides_a_hot_morsel() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), resplitting()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), resplitting()).await;
 	let mut resplit = 0;
 	// Other tests of the process may hold the node's places while the queue should drain.
 	for _ in 0..25 {
@@ -2207,7 +2207,7 @@ async fn resplit_divides_a_hot_morsel() {
 
 /// A worker that has drained the cheap morsels asks the hot one to donate, without being forced
 /// to: the hot morsel's remainder is as large as two morsels, and it gives part of it away.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_idle_worker_asks_the_hot_morsel_for_part_of_its_range() {
 	let _turn = TURNS.lock().await;
@@ -2215,8 +2215,8 @@ async fn an_idle_worker_asks_the_hot_morsel_for_part_of_its_range() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&skewed_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&skewed_setup(), wide_dir.path(), resplitting()).await;
+	let serial = TestDb::new_on_surrealkv(&skewed_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&skewed_setup(), wide_dir.path(), resplitting()).await;
 	let mut shared = 0;
 	// Other tests of the process may hold the node's places while workers should be idle.
 	for _ in 0..5 {
@@ -2245,15 +2245,15 @@ async fn explain_analyze_is_unchanged_by_default_on_the_coordinator() {
 	analyses_match_under_stealing(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn explain_analyze_is_unchanged_by_default() {
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), stealing()).await;
 	analyses_match_under_stealing(&serial, &wide).await;
 }
 
@@ -2290,7 +2290,7 @@ async fn explain_analyze_reports_morsels_when_asked() {
 
 /// The rows `EXPLAIN ANALYZE` reports workers read in the `Morsels:` block of `sql`, or `None`
 /// where the statement renders no block.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn worker_rows_of(db: &TestDb, sql: &str) -> Option<u64> {
 	let ctx = db.exec_ctx().await;
 	let vm = statement(&ctx, &format!("EXPLAIN ANALYZE {sql}")).await;
@@ -2309,12 +2309,12 @@ async fn worker_rows_of(db: &TestDb, sql: &str) -> Option<u64> {
 /// `Morsels:` block in which workers read rows: a projection, a sort, a top-k, a grouping, a paged
 /// scan, a backward scan and a record range among them. A shape whose body does not run in the
 /// cursor hands decoded batches to workers, which the hand-off counter shows.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn read_shapes_run_on_workers_on_a_backend_with_a_view() {
 	let _turn = TURNS.lock().await;
 	let dir = tempfile::tempdir().expect("temporary directory");
-	let db = TestDb::new_on_rocksdb(
+	let db = TestDb::new_on_surrealkv(
 		&merge_setup(),
 		dir.path(),
 		stealing().with_key_value("morsel_explain_analyze", "true"),
@@ -2358,7 +2358,7 @@ async fn read_shapes_run_on_workers_on_a_backend_with_a_view() {
 
 /// A worker that has held its place for a quantum while another statement waits for one stops at
 /// its chunk boundary and queues what is left of its morsel, and the answers are the whole scan's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_worker_yields_its_place_while_another_statement_waits() {
 	let _turn = TURNS.lock().await;
@@ -2366,8 +2366,8 @@ async fn a_worker_yields_its_place_while_another_statement_waits() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(
 		&setup(),
 		wide_dir.path(),
 		// Morsels of a few hundred entries, read in chunks of a quantum of fuel.
@@ -2462,7 +2462,7 @@ async fn sorted_runs_merge_to_the_serial_order_on_the_coordinator() {
 	runs_merge_in_serial_order(&serial, &wide, false).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn sorted_runs_merge_to_the_serial_order() {
 	let _turn = TURNS.lock().await;
@@ -2470,8 +2470,8 @@ async fn sorted_runs_merge_to_the_serial_order() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), stealing()).await;
 	runs_merge_in_serial_order(&serial, &wide, true).await;
 }
 
@@ -2525,7 +2525,7 @@ async fn top_k_prunes_with_one_shared_threshold_on_the_coordinator() {
 	one_threshold_serves_every_morsel(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn top_k_prunes_with_one_shared_threshold() {
 	let _turn = TURNS.lock().await;
@@ -2533,8 +2533,8 @@ async fn top_k_prunes_with_one_shared_threshold() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), few_dozen()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), few_dozen()).await;
 	one_threshold_serves_every_morsel(&serial, &wide).await;
 }
 
@@ -2619,13 +2619,13 @@ async fn top_k_failures_are_the_serial_scans_on_the_coordinator() {
 	}
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn top_k_failures_are_the_serial_scans() {
 	let _turn = TURNS.lock().await;
 	for config in [few_dozen(), stealing()] {
 		let dir = tempfile::tempdir().expect("temporary directory");
-		let wide = TestDb::new_on_rocksdb(&failing_merge_setup(), dir.path(), config).await;
+		let wide = TestDb::new_on_surrealkv(&failing_merge_setup(), dir.path(), config).await;
 		a_top_k_scan_is_the_serial_scan(&wide).await;
 	}
 }
@@ -2665,13 +2665,13 @@ async fn top_k_overflows_and_type_errors_are_the_serial_scans_on_the_coordinator
 	}
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn top_k_overflows_and_type_errors_are_the_serial_scans() {
 	let _turn = TURNS.lock().await;
 	for config in [few_dozen(), stealing()] {
 		let dir = tempfile::tempdir().expect("temporary directory");
-		let wide = TestDb::new_on_rocksdb(&raising_merge_setup(), dir.path(), config).await;
+		let wide = TestDb::new_on_surrealkv(&raising_merge_setup(), dir.path(), config).await;
 		a_raising_top_k_scan_is_the_serial_scan(&wide).await;
 	}
 }
@@ -2747,7 +2747,7 @@ async fn spilled_morsel_runs_merge_as_in_memory_for_batches() {
 		.await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spilled_morsel_runs_merge_as_in_memory() {
 	use crate::exec::memory::runs::BreakerKind;
@@ -2757,7 +2757,7 @@ async fn spilled_morsel_runs_merge_as_in_memory() {
 	let dir = tempfile::tempdir().expect("temporary directory");
 	let store = std::sync::Arc::new(MemTempStore::new(1024, None));
 	let governor = std::sync::Arc::new(FairGovernor::new(48 << 10));
-	let db = bounded_on_rocksdb(
+	let db = bounded_on_surrealkv(
 		governor,
 		std::sync::Arc::clone(&store),
 		&merge_setup(),
@@ -2770,10 +2770,10 @@ async fn spilled_morsel_runs_merge_as_in_memory() {
 }
 
 /// A governor that grants no growth: every charge past a lease's minimum finds it short.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 struct Refusing;
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 impl MemoryGovernor for Refusing {
 	fn opened(&self, _lease: &Arc<Lease>) {}
 
@@ -2790,7 +2790,7 @@ impl MemoryGovernor for Refusing {
 /// `run_range` ends at a due spill only where the query can write a run. A chunk that ended at
 /// every refused charge would read tens of entries at most. The statement answers what it
 /// answers serially.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_range_morsel_of_a_query_that_cannot_spill_reads_many_entries_in_a_chunk() {
 	let _turn = TURNS.lock().await;
@@ -2804,7 +2804,7 @@ async fn a_range_morsel_of_a_query_that_cannot_spill_reads_many_entries_in_a_chu
 	let builder = crate::kvs::Datastore::builder()
 		.with_memory_governor(Arc::clone(&freely) as Arc<dyn MemoryGovernor>)
 		.without_temp_store();
-	let db = TestDb::new_on_rocksdb_over(builder, &merge_setup(), dir.path(), spilling()).await;
+	let db = TestDb::new_on_surrealkv_over(builder, &merge_setup(), dir.path(), spilling()).await;
 	freely.setting_up.store(false, Ordering::Relaxed);
 	let before = counts_of(&db.exec_ctx().await);
 	assert_equivalent(sql, &answered(&db, sql).await, &expected[0]);
@@ -2881,7 +2881,7 @@ async fn partitioned_groups_answer_in_group_key_order_over_batches() {
 	groups_merge_by_partitions(&serial, &wide, GROUP_BATCHES, false, true).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn partitioned_groups_answer_in_group_key_order() {
 	let _turn = TURNS.lock().await;
@@ -2889,8 +2889,8 @@ async fn partitioned_groups_answer_in_group_key_order() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), few_hundred()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), few_hundred()).await;
 	groups_merge_by_partitions(&serial, &wide, GROUP_PARTITIONS, false, true).await;
 }
 
@@ -2927,7 +2927,7 @@ async fn spilled_partials_merge_by_key_over_batches() {
 		.await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spilled_partials_merge_by_key() {
 	use crate::exec::memory::runs::BreakerKind;
@@ -2937,7 +2937,7 @@ async fn spilled_partials_merge_by_key() {
 	let dir = tempfile::tempdir().expect("temporary directory");
 	let store = std::sync::Arc::new(MemTempStore::new(1024, None));
 	let governor = std::sync::Arc::new(FairGovernor::new(48 << 10));
-	let db = bounded_on_rocksdb(
+	let db = bounded_on_surrealkv(
 		governor,
 		std::sync::Arc::clone(&store),
 		&merge_setup(),
@@ -2960,7 +2960,7 @@ async fn spilled_partials_merge_by_key() {
 /// claim delayed so that those after them finish first, and assert each answers as `expected`, that
 /// a morsel was held for the morsels before it while morsels spilled partials of the breaker
 /// `kind`, and that nothing a query spilled outlives it.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn spilled_partials_wait_for_the_morsels_before_them(
 	db: &TestDb,
 	store: &std::sync::Arc<crate::exec::memory::MemTempStore>,
@@ -3002,7 +3002,7 @@ async fn spilled_partials_wait_for_the_morsels_before_them(
 /// The runs a sort's morsels spill and the groups an aggregate's morsels spill, which finish ahead
 /// of the morsels before them, are absorbed when the morsels before them have been: the rows and
 /// the groups are the in-memory merge's, ties and appends included.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spilled_partials_held_for_earlier_morsels_merge_as_in_memory() {
 	use crate::exec::memory::runs::BreakerKind;
@@ -3016,7 +3016,7 @@ async fn spilled_partials_held_for_earlier_morsels_merge_as_in_memory() {
 		let dir = tempfile::tempdir().expect("temporary directory");
 		let store = std::sync::Arc::new(MemTempStore::new(1024, None));
 		let governor = std::sync::Arc::new(FairGovernor::new(48 << 10));
-		let db = bounded_on_rocksdb(
+		let db = bounded_on_surrealkv(
 			governor,
 			std::sync::Arc::clone(&store),
 			&merge_setup(),
@@ -3089,7 +3089,7 @@ async fn a_failing_batch_held_for_the_batches_before_it_fails_the_statement() {
 	.await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failing_morsel_held_for_the_morsels_before_it_fails_the_statement_over_ranges() {
 	let _turn = TURNS.lock().await;
@@ -3097,8 +3097,8 @@ async fn a_failing_morsel_held_for_the_morsels_before_it_fails_the_statement_ove
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&failing_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&failing_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&failing_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&failing_setup(), wide_dir.path(), tiny()).await;
 	a_failing_morsel_held_for_the_morsels_before_it_fails_the_statement(
 		&serial,
 		&wide,
@@ -3208,7 +3208,7 @@ async fn merge_side_distinct_keeps_first_occurrences_over_batches() {
 	distinct_keeps_first_occurrences(&serial, &wide, FAILING_DISTINCTS, &cast_failures()).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn merge_side_distinct_keeps_first_occurrences() {
 	let _turn = TURNS.lock().await;
@@ -3216,8 +3216,8 @@ async fn merge_side_distinct_keeps_first_occurrences() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&failing_merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&failing_merge_setup(), wide_dir.path(), stealing()).await;
+	let serial = TestDb::new_on_surrealkv(&failing_merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&failing_merge_setup(), wide_dir.path(), stealing()).await;
 	distinct_keeps_first_occurrences(&serial, &wide, DISTINCTS, &[]).await;
 	distinct_keeps_first_occurrences(&serial, &wide, FAILING_DISTINCTS, &cast_failures()).await;
 }
@@ -3562,7 +3562,7 @@ async fn only_the_unordered_output_of_a_statement_merges_as_morsels_finish() {
 const REVERSED: [u64; 4] = [400, 300, 200, 100];
 
 /// Statements whose rows no clause orders, over `t`.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 const UNORDERED: &[&str] = &[
 	"SELECT n, s FROM t WHERE n % 3 = 0",
 	"SELECT * FROM t",
@@ -3602,7 +3602,7 @@ async fn reversed_completions(
 
 /// A key range read by workers whose first morsels finish last is merged as the morsels finish,
 /// and answers what the serial run answers, in any order where no clause orders the rows.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_slow_morsel_does_not_hold_back_the_morsels_after_it() {
 	let _turn = TURNS.lock().await;
@@ -3610,8 +3610,8 @@ async fn a_slow_morsel_does_not_hold_back_the_morsels_after_it() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	for sql in UNORDERED {
 		assert!(
 			merges_of(&wide, sql).await.contains(&MergeOrder::Free),
@@ -3674,7 +3674,7 @@ async fn bound_rows_keep_the_order(serial: &TestDb, wide: &TestDb, statements: &
 /// The rows a `LET` binds are read by the statements after it in the order they were bound, so
 /// their merge takes the morsels in the order of the serial run however late the first ones are,
 /// where the same statement written as a result merges as the morsels finish.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_rows_a_let_binds_keep_the_serial_order_whatever_order_morsels_finish_in() {
 	let _turn = TURNS.lock().await;
@@ -3682,8 +3682,8 @@ async fn the_rows_a_let_binds_keep_the_serial_order_whatever_order_morsels_finis
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let statements = [
 		"LET $s = SELECT n, s FROM t WHERE n % 3 = 0; RETURN $s",
 		"LET $s = SELECT * FROM t; RETURN $s",
@@ -3764,7 +3764,7 @@ async fn evaluating(path: &str, config: surrealdb_cnf::ConfigMap) -> TestDb {
 }
 
 /// Counts of one group over a key range, whose first morsels finish last.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 const COUNTS: &[&str] = &[
 	"SELECT count() AS c FROM t WHERE n % 3 = 0 GROUP ALL",
 	"SELECT count(n % 2 = 0) AS c, count() AS d FROM t WHERE n > 100 GROUP ALL",
@@ -3772,7 +3772,7 @@ const COUNTS: &[&str] = &[
 
 /// The counts of the morsels of a key range add up as the morsels finish, and answer what the
 /// serial run answers, however late the first morsels are.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn counts_do_not_wait_for_a_slow_morsel() {
 	let _turn = TURNS.lock().await;
@@ -3780,8 +3780,8 @@ async fn counts_do_not_wait_for_a_slow_morsel() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	for sql in COUNTS {
 		assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Free], "`{sql}`");
 	}
@@ -3810,7 +3810,7 @@ async fn counts_do_not_wait_for_a_slow_batch() {
 
 /// Where an `ORDER BY` orders the rows, no morsel is merged ahead of an earlier one, whatever
 /// order the morsels finish in: the rows are the serial run's in order, ties included.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn order_by_keeps_the_serial_order_whatever_order_morsels_finish_in() {
 	let _turn = TURNS.lock().await;
@@ -3818,8 +3818,8 @@ async fn order_by_keeps_the_serial_order_whatever_order_morsels_finish_in() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), tiny()).await;
 	let statements = [
 		"SELECT n, s FROM t ORDER BY id",
 		"SELECT n, s FROM t ORDER BY id DESC",
@@ -3851,7 +3851,7 @@ async fn order_by_keeps_the_serial_order_whatever_order_morsels_finish_in() {
 /// holds them without holding their places: more morsels finish ahead of the slow morsel than the
 /// policy lets be in flight, which a merge that counted the held runs against it would not allow,
 /// and the rows, ties included, are the serial run's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_sort_run_held_ahead_of_a_slow_morsel_frees_the_place_of_its_morsel() {
 	let _turn = TURNS.lock().await;
@@ -3859,8 +3859,8 @@ async fn a_sort_run_held_ahead_of_a_slow_morsel_frees_the_place_of_its_morsel() 
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), tiny()).await;
 	let sql = "SELECT n, k FROM t ORDER BY k, n DESC";
 	assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Positioned]);
 	let expected = answered(&serial, sql).await;
@@ -3891,7 +3891,7 @@ async fn a_sort_run_held_ahead_of_a_slow_morsel_frees_the_place_of_its_morsel() 
 /// morsels behind a slow one in places: no morsel charges its entries to the query's lease there,
 /// so a run the coordinator holds is memory nothing bounds but the places, and no more runs are
 /// held than the policy lets be in flight. The rows, ties included, are the serial run's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_sort_run_of_a_query_that_cannot_spill_keeps_the_place_of_its_morsel() {
 	let _turn = TURNS.lock().await;
@@ -3899,9 +3899,10 @@ async fn a_sort_run_of_a_query_that_cannot_spill_keeps_the_place_of_its_morsel()
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
 	let builder = crate::kvs::Datastore::builder().without_temp_store();
-	let wide = TestDb::new_on_rocksdb_over(builder, &merge_setup(), wide_dir.path(), tiny()).await;
+	let wide =
+		TestDb::new_on_surrealkv_over(builder, &merge_setup(), wide_dir.path(), tiny()).await;
 	let sql = "SELECT n, k FROM t ORDER BY k, n DESC";
 	assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Positioned]);
 	let expected = answered(&serial, sql).await;
@@ -3932,7 +3933,7 @@ async fn a_sort_run_of_a_query_that_cannot_spill_keeps_the_place_of_its_morsel()
 /// empty runs of the morsels behind a slow first morsel in places, with or without a store to
 /// spill to: an empty run charges nothing to the query's lease, so the results the coordinator
 /// holds stay within the policy's read-ahead however many morsels finish ahead of the slow one.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn empty_sort_runs_held_ahead_of_a_slow_morsel_keep_their_places() {
 	let _turn = TURNS.lock().await;
@@ -3942,7 +3943,7 @@ async fn empty_sort_runs_held_ahead_of_a_slow_morsel_keep_their_places() {
 	)
 	.read_ahead();
 	let serial_dir = tempfile::tempdir().expect("temporary directory");
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
 	let expected = answered(&serial, sql).await;
 	for spills in [true, false] {
 		let wide_dir = tempfile::tempdir().expect("temporary directory");
@@ -3951,7 +3952,7 @@ async fn empty_sort_runs_held_ahead_of_a_slow_morsel_keep_their_places() {
 			false => crate::kvs::Datastore::builder().without_temp_store(),
 		};
 		let wide =
-			TestDb::new_on_rocksdb_over(builder, &merge_setup(), wide_dir.path(), tiny()).await;
+			TestDb::new_on_surrealkv_over(builder, &merge_setup(), wide_dir.path(), tiny()).await;
 		assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Positioned]);
 		let ctx = wide.exec_ctx().await;
 		let before = counts_of(&ctx);
@@ -3996,7 +3997,7 @@ async fn order_by_keeps_the_serial_order_over_batches_whatever_order_they_finish
 
 /// Aggregates whose answers depend on the order the morsels are merged in: appends, a joined
 /// string, a minimum, and the columns that take the first value their group sees.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 const ORDER_SENSITIVE_GROUPS: &[&str] = &[
 	"SELECT g, count() AS c, array::group(n) AS ns, array::join(s, ',') AS j, math::min(f) AS lo FROM t GROUP BY g",
 	"SELECT m, array::distinct(k) AS ks, s, math::max(n) AS hi FROM t GROUP BY m",
@@ -4013,7 +4014,7 @@ const ORDER_SENSITIVE_BATCHES: &[&str] = &[
 /// An aggregate folds its morsels in the order of the serial run, whatever order they finish in:
 /// what it appends, joins and keeps first is the serial run's, and no morsel is merged ahead of
 /// an earlier one.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn group_by_keeps_the_serial_fold_whatever_order_morsels_finish_in() {
 	let _turn = TURNS.lock().await;
@@ -4021,8 +4022,8 @@ async fn group_by_keeps_the_serial_fold_whatever_order_morsels_finish_in() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&merge_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), tiny()).await;
 	plans_combine(&wide, ORDER_SENSITIVE_GROUPS, Combine::Aggregate).await;
 	for sql in ORDER_SENSITIVE_GROUPS {
 		assert_eq!(merges_of(&wide, sql).await, [MergeOrder::Adjacent], "`{sql}`");
@@ -4052,7 +4053,7 @@ async fn group_by_keeps_the_serial_fold_over_batches_whatever_order_they_finish_
 
 /// A float fold of one group takes the terms of its morsels in the order of the serial run,
 /// whatever order the morsels finish in: its bits are the serial fold's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_ordered_float_fold_keeps_the_serial_bits_whatever_order_morsels_finish_in() {
 	let _turn = TURNS.lock().await;
@@ -4060,8 +4061,8 @@ async fn an_ordered_float_fold_keeps_the_serial_bits_whatever_order_morsels_fini
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&float_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&float_setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&float_setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&float_setup(), wide_dir.path(), tiny()).await;
 	let (early, handed) = reversed_completions(&serial, &wide, FLOAT_FOLDS).await;
 	assert!(handed > 0, "no morsel went to a worker");
 	assert_eq!(early, 0);
@@ -4108,7 +4109,7 @@ async fn a_free_merge_raises_one_of_the_failures_of_its_rows() {
 
 /// A morsel holds no more output than a window and the chunk that took it past the window before
 /// it parks, so what unmerged morsels hold stays bounded whatever order they are merged in.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_free_merge_holds_each_morsel_to_its_window_and_a_chunk() {
 	const QUANTUM: usize = 64;
@@ -4124,7 +4125,7 @@ async fn a_free_merge_holds_each_morsel_to_its_window_and_a_chunk() {
 	let mut row_bytes = 0;
 	for window in ["1", &(1usize << 30).to_string()] {
 		let dir = tempfile::tempdir().expect("temporary directory");
-		let db = TestDb::new_on_rocksdb(&setup(), dir.path(), config(window)).await;
+		let db = TestDb::new_on_surrealkv(&setup(), dir.path(), config(window)).await;
 		assert_eq!(merges_of(&db, sql).await, [MergeOrder::Free], "window {window}");
 		let ctx = db.exec_ctx().await;
 		for _ in 0..5 {
@@ -4150,7 +4151,7 @@ async fn a_free_merge_holds_each_morsel_to_its_window_and_a_chunk() {
 /// morsels' worth is cut at once, into about as many morsels as the rest of it fills, and one that
 /// ends within a morsel of where the coordinator stands is never cut. The answers are the serial
 /// run's either way.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_scan_is_cut_by_what_is_left_of_it_under_the_default_settings() {
 	let _turn = TURNS.lock().await;
@@ -4169,8 +4170,8 @@ async fn a_scan_is_cut_by_what_is_left_of_it_under_the_default_settings() {
 			tempfile::tempdir().expect("temporary directory"),
 			tempfile::tempdir().expect("temporary directory"),
 		);
-		let serial = TestDb::new_on_rocksdb(&setup(rows), serial_dir.path(), whole()).await;
-		let wide = TestDb::new_on_rocksdb(
+		let serial = TestDb::new_on_surrealkv(&setup(rows), serial_dir.path(), whole()).await;
+		let wide = TestDb::new_on_surrealkv(
 			&setup(rows),
 			wide_dir.path(),
 			surrealdb_cnf::ConfigMap::empty(),
@@ -4204,7 +4205,7 @@ async fn a_scan_is_cut_by_what_is_left_of_it_under_the_default_settings() {
 
 /// Selective statements over a table of the benches' shape are cut under the node's settings: each
 /// runs as morsels that workers take, and answers what the serial run answers.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_statements_of_the_scan_benches_hand_morsels_to_workers_under_the_default_settings() {
 	let _turn = TURNS.lock().await;
@@ -4227,9 +4228,9 @@ async fn the_statements_of_the_scan_benches_hand_morsels_to_workers_under_the_de
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(setup, serial_dir.path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(setup, serial_dir.path(), whole()).await;
 	let wide =
-		TestDb::new_on_rocksdb(setup, wide_dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
+		TestDb::new_on_surrealkv(setup, wide_dir.path(), surrealdb_cnf::ConfigMap::empty()).await;
 	let ctx = wide.exec_ctx().await;
 	for sql in statements {
 		let (expected, _) = answer(&serial, sql).await;
@@ -4252,7 +4253,7 @@ async fn the_statements_of_the_scan_benches_hand_morsels_to_workers_under_the_de
 /// rows before the morsels that produced them end, in the order of the serial run when the rows
 /// are read in order and as the morsels produce them otherwise, and no morsel holds more than its
 /// window and the chunk that took it past the window before it parks.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn running_morsels_stream_their_rows_and_hold_a_window_and_a_chunk_at_most() {
 	const WINDOW: usize = 512 << 10;
@@ -4266,8 +4267,8 @@ async fn running_morsels_stream_their_rows_and_hold_a_window_and_a_chunk_at_most
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(setup, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(
+	let serial = TestDb::new_on_surrealkv(setup, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(
 		setup,
 		wide_dir.path(),
 		// The statement is unfiltered, which the default pass threshold keeps serial: the
@@ -4319,7 +4320,7 @@ async fn running_morsels_stream_their_rows_and_hold_a_window_and_a_chunk_at_most
 /// The rows a running morsel queues in its outbox are charged to the fan-out lease, and a refusal
 /// of a queued chunk's grant parks the morsel right after that chunk, in a run that completes with
 /// the serial run's answer.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 	let _turn = TURNS.lock().await;
@@ -4337,11 +4338,11 @@ async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 			.with_key_value("morsel_window_bytes", (512usize << 10).to_string())
 	};
 	let dirs = [(); 3].map(|()| tempfile::tempdir().expect("temporary directory"));
-	let serial = TestDb::new_on_rocksdb(setup, dirs[0].path(), whole()).await;
+	let serial = TestDb::new_on_surrealkv(setup, dirs[0].path(), whole()).await;
 	let (expected, _) = answer(&serial, sql).await;
 
 	// With the lease granting, the chunks running morsels queue are charged.
-	let wide = TestDb::new_on_rocksdb(setup, dirs[1].path(), config()).await;
+	let wide = TestDb::new_on_surrealkv(setup, dirs[1].path(), config()).await;
 	let ctx = wide.exec_ctx().await;
 	let mut charged = 0;
 	for attempt in 0..5 {
@@ -4358,7 +4359,7 @@ async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 	// With the lease refusing after its first few grants, the run is revoked and still completes,
 	// the refused chunk reaching the coordinator without a grant. Which grant the refusal falls
 	// on depends on how many the run asks for first, so a few counts are tried.
-	let tight = TestDb::new_on_rocksdb(setup, dirs[2].path(), config()).await;
+	let tight = TestDb::new_on_surrealkv(setup, dirs[2].path(), config()).await;
 	let ctx = tight.exec_ctx().await;
 	let (mut refused, mut parked) = (0, 0);
 	for granted in [1, 2, 3, 5, 8] {
@@ -4384,7 +4385,7 @@ async fn queued_output_is_charged_and_a_refusal_parks_the_morsel() {
 /// settings: a scan that passes every row is not cut, and its rows are answered as the serial run
 /// answers them. The fan-out of the same scan is covered by the tests that raise the pass
 /// threshold.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_select_all_bench_statement_stays_serial_under_the_default_settings() {
 	let _turn = TURNS.lock().await;
@@ -4396,10 +4397,10 @@ async fn the_select_all_bench_statement_stays_serial_under_the_default_settings(
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(setup, serial_dir.path(), whole()).await;
-	// The node's settings but for morsels of tens of kilobytes: RocksDB finds the boundaries of a
+	let serial = TestDb::new_on_surrealkv(setup, serial_dir.path(), whole()).await;
+	// The node's settings but for morsels of tens of kilobytes: SurrealKV finds the boundaries of a
 	// range it has not yet flushed to files only at that granularity.
-	let wide = TestDb::new_on_rocksdb(
+	let wide = TestDb::new_on_surrealkv(
 		setup,
 		wide_dir.path(),
 		surrealdb_cnf::ConfigMap::empty().with_key_value("morsel_target_bytes", "20000"),

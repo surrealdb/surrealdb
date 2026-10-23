@@ -61,8 +61,7 @@ companion governs.
 - **One read view per batch.** A batch's workers read committed state through one
   `kvs::Snapshot`, taken from one read transaction opened for them — never from the apply
   transaction, which has buffered writes by then: point reads through `get_many`, ranges through
-  cursors. On RocksDB, `get_many` must read under a keep-alive so that callers of one view do not
-  serialise. Where the engine gives no view (mem, SurrealKV, TiKV), the batch runs on the same
+  cursors. `get_many` through one view must not serialise its callers. Where the engine gives no view (mem, TiKV, or a SurrealKV writable transaction), the batch runs on the same
   tasks, every one reading through the batch's own transaction, with the same result. A DiskANN
   frame is such a batch (§3.3.2), with "the same result" as §4.5 states it.
 - **One build protocol with kind hooks.** Kind-specific build behaviour lives in hooks inside the
@@ -90,9 +89,8 @@ The build is single-threaded end to end [V]:
    (`index.rs:1264-1266`), each through the upstream **single-vector** `insert`
    (`index.rs:458` → `upstream/graph/index.rs:226-341`).
 3. Every graph read in that loop goes through the one writable `Arc<Transaction>` held by
-   `DiskAnnProviderContext` (`provider.rs:59-65`). On RocksDB every operation on one
-   `Transaction` serialises on a `tokio::sync::Mutex` (`surrealdb/kvs-rocksdb/src/lib.rs:143`,
-   `run_blocking` at `:1027-1034`), and a writable transaction never publishes what it reads into
+   `DiskAnnProviderContext` (`provider.rs:59-65`). On an engine whose transaction runs its operations one at a time, every operation on one
+   `Transaction` queues, and a writable transaction never publishes what it reads into
    the shared `DiskAnnCache` (`provider.rs:259,297`), so once the graph outgrows the 256 MiB cache
    nearly every read is a serialised KV round trip.
 
@@ -107,7 +105,7 @@ Reference workload and hardware assumption (used for every target below):
 - 200 000 rows × 768-dim `F32`, `DISKANN DIMENSION 768 DIST COSINE TYPE F32` at the DDL defaults
   for `DEGREE` / `L_BUILD` / `ALPHA` (parser: `surrealdb/parser/src/parse/stmt/define.rs:1443-1445`;
   the bench file added in PR 1 records the resolved values).
-- RocksDB backend, 8 physical cores / 16 hardware threads, NVMe, 32 GiB RAM, default
+- Persistent file-backed backend, 8 physical cores / 16 hardware threads, NVMe, 32 GiB RAM, default
   configuration (`SURREAL_DISKANN_CACHE_SIZE` = 256 MiB) — i.e. the graph is **well past** the
   cache-miss regime (which starts around 80k rows at this dimension [V, brief §C]).
 
@@ -115,7 +113,7 @@ Targets (all [M] until PR 1's benches produce the baseline):
 
 | Criterion | Target | How it is measured |
 |---|---|---|
-| Build wall-clock, reference workload | ≤ 15 min end to end (≥ 4× vs the > 65 min kill); stretch ≤ 8 min with Layer 3 | `diag_diskann_build_rocksdb_200k` (§7.3) — **the only instrument that reaches the cache-miss regime; the §7.2 benches do not (see §7's preamble)** |
+| Build wall-clock, reference workload | ≤ 15 min end to end (≥ 4× vs the > 65 min kill); stretch ≤ 8 min with Layer 3 | `diag_diskann_build_200k` (§7.3) — **the only instrument that reaches the cache-miss regime; the §7.2 benches do not (see §7's preamble)** |
 | Recall, batched vs serial build | Recall@10 of the batched/parallel build ≥ serial build − 0.02 at equal `ef`, on every harness dataset; absolute floor pinned per dataset by PR 1 | DiskANN recall harness (§7.1) |
 | Independence from parallelism | Given identical batches, across a frame granted 0 places (the sequential path, nothing spawned), one granted 1, one granted 4, and one on the no-view path: `!de`, `!dq`/`!dh`, `!dk`, `!di`/`!dd` and `!ds` byte-identical; `!dn` (adjacency) structurally valid for every inserted element; the recall of the batched builds (1 place, 4 places, no view) within 0.02 of each other, and each at least the sequential build's − 0.02; every build at or above the floor. The bound against the sequential build is one-sided: it builds the serial graph, which a batched build may beat. Adjacency bytes are not required to match: upstream's bootstrap step can break equal-distance ties differently across task counts (§4.5) | exact-structure and recall test (§7.1, T-3) |
 | Read routing | Inside a frame with a read view, the writable tx serves **zero** `!de`/`!dn` point reads — only the rare entry-point repair cursor reads `!de` through it, counted in `reads_tx` — and the frame opens exactly one read transaction for its workers | exact-count accounting on `FrameStats` (§7.1, T-5) |
@@ -142,7 +140,7 @@ Targets (all [M] until PR 1's benches produce the baseline):
 | `DiskAnnCache` | `cache.rs:97-111` | one weighted `quick_cache` budget shared by every family and every index in the process; bulk invalidation `remove_index` `:283-300` |
 | Value types | `surrealdb/datastore/src/values/diskann.rs:38-45` (`DiskAnnState { enter_point, next_element_id }`), `:120-122` (`DiskAnnNode { neighbors }`), `:164-173` (pending update) | `ElementId = u64` (`values/vector.rs:31`) |
 | `IndexEnv` | `surrealdb/idx/src/env.rs:45-76` | what the engines may ask of the query: `tx()`, `is_done()`, `index_stores()`, `node_id()`, `sequences()`, `config()`. Implemented by `Context` (`surrealdb/core/src/ctx/context.rs:1397-1421`) and `TestIndexEnv` (`surrealdb/idx/src/test_env.rs:144-176`) |
-| Read transaction and read view | `surrealdb/datastore/src/tx.rs:1977-1990` (`Transaction::open_read_snapshot`), `:6160-6164` (`Transaction::snapshot`) | any transaction opens a read-only transaction on the same datastore, which sees none of the opener's uncommitted writes; a transaction's `snapshot()` is its owned `kvs::Snapshot` view, or `None` where the engine gives none. Only RocksDB gives one, and only for a transaction that has buffered no write |
+| Read transaction and read view | `surrealdb/datastore/src/tx.rs:1977-1990` (`Transaction::open_read_snapshot`), `:6160-6164` (`Transaction::snapshot`) | any transaction opens a read-only transaction on the same datastore, which sees none of the opener's uncommitted writes; a transaction's `snapshot()` is its owned `kvs::Snapshot` view, or `None` where the engine gives none. An engine that gives one does so only for a transaction that has buffered no write |
 | Compaction driver | `surrealdb/core/src/kvs/index/materialise.rs` (`Materialiser::process_diskann_compaction`) | one prepare → apply → commit loop per plan, bounded by the pass's plan budget, run by background compaction and by a blocking statement's phase-2 wait. The builder stops at `Online` and folds nothing (§3.5) |
 | Background scheduler | `ds.rs` (`index_compaction_loop`, `run_compaction_passes`) | passes of a queue batch run side by side under a compaction ticket, so places bound how many indexes compact at once. A pass leaves a vector index whose build owner is live (`fenced_by_build_owner`), and the per-index materialiser lock keeps two passes in one process off the same index |
 | Parallel substrate | `surrealdb/idx/src/parallel.rs`; `surrealdb/core/src/exec/vm/morsel/places.rs` | the index crate bounds its parallel jobs with a process-wide semaphore of its own (`parallel.rs:47-52`); the query engine schedules morsel workers from a node-wide place pool with an OLTP reserve (`places.rs:111-168`). §3.3.6 puts DiskANN frames on the latter |
@@ -179,7 +177,7 @@ one `getm` for candidate vectors. The insert search uses the default beam width 
 expansions ⇒ ≈ `2L` `getm` round trips; the prune fill adds one `getm` of up to
 750 vectors (`upstream/graph/config/defaults.rs:14`); `set_neighbors` one `set`; back-edges up to `D`
 × (`get_neighbors` getm + optional prune fill + `set`/`append`). Total ≈ 300–450 serialised KV
-round trips per vector. In the cache-miss regime each round trip is a RocksDB multi-get of up to
+round trips per vector. In the cache-miss regime each round trip is a multi-get of up to
 `D` values of 3 KiB — 0.1–0.5 ms — so 30–200 ms per vector, i.e. hours for 200k vectors. This
 matches the reported kill by order of magnitude but has not been profiled; PR 1 measures it.
 
@@ -190,7 +188,7 @@ matches the reported kill by order of magnitude but has not been profiled; PR 1 
 | One task for the whole build | `builder.rs:227` | structural |
 | One pending at a time under `graph.write()` | `index.rs:1259-1266` | structural |
 | Upstream single-vector `insert` | `index.rs:458` | algorithmic (no intra-batch parallelism exists to exploit) |
-| One `Arc<Transaction>` for all reads and writes | `provider.rs:59-65`, `index.rs:1262` | on RocksDB, every op takes `inner: Mutex<Option<TransactionInner>>` and holds it for the whole blocking op (`kvs-rocksdb/src/lib.rs:1027-1034`, `get` `:1899`, `getm` `:1962`) |
+| One `Arc<Transaction>` for all reads and writes | `provider.rs:59-65`, `index.rs:1262` | on an engine that guards the transaction with an exclusive lock, every op holds it for the whole blocking op |
 | `!ds` read-modify-write per vector | `provider.rs:312-321` | one buffered `set` + one cache insert per vector |
 | Build reads never warm the cache | `provider.rs:259,297` (`cache_misses = !context.tx.writeable()`) | every miss is re-fetched from KV on the next search |
 
@@ -198,14 +196,13 @@ Per-backend behaviour of one shared transaction [V]:
 
 | Backend | Guard | Effect |
 |---|---|---|
-| RocksDB | `tokio::sync::Mutex<Option<TransactionInner>>` (`kvs-rocksdb/src/lib.rs:143`) | all ops serialise, reads included |
 | SurrealKV | `RwLock<Tx>`, `get` takes `.read()` (`kvs-surrealkv/src/lib.rs:62,328`) | concurrent reads |
 | mem | `RwLock<Tx>` (`kvs-mem/src/lib.rs:59`) | concurrent reads |
 | TiKV | `RwLock<TransactionInner>` (`kvs-tikv/src/lib.rs:216`) | concurrent reads (network-bound) |
 
 Separate transactions are bounded only by the shared KVS blocking pool
-(`surrealdb/kvs/src/threadpool.rs:26-57`, `SURREAL_KVS_THREADPOOL_SIZE`, default `max(16, cores)`)
-and, on RocksDB, by the inline-permit budget (`kvs-rocksdb/src/inline_guard.rs:106-126`).
+(`surrealdb/kvs/src/threadpool.rs:26-57`, `SURREAL_KVS_THREADPOOL_SIZE`, default `max(16, cores)`).
+
 
 ### 2.5 The cache coherency invariant today [V]
 
@@ -245,8 +242,8 @@ Four independently landable layers. Each has its own value, its own risk, and it
 | Layer | What changes | What it parallelises | Where the remaining floor is | Risk |
 |---|---|---|---|---|
 | **L0 — measurement** | recall harness, build benches, exact-count hooks | nothing | — | none (tests only) |
-| **L1 — batched mutation** | the apply frame inserts a plan's fresh vectors through upstream `multi_insert` on `granted` tasks, where `granted` is the frame's up-front place grant, or one at a time on the calling task when `granted` is 0; element ids allocated once per batch | CPU (distance, prune) and cache hits; KV reads only where the engine's transaction allows concurrent reads (SurrealKV, mem, TiKV) (§3.2.4) | on RocksDB: the single write tx's mutex — reads still serialise; expected 1.1–1.5× there [M] | graph shape changes (batched ≠ serial); upstream error suppression |
-| **L2 — read concurrency** | per-frame `DiskAnnBuildFrame`: a dirty overlay of this frame's writes + one read view, a `kvs::Snapshot` from a read transaction opened for the frame's workers; reads of clean keys go to the view through `get_many` | KV reads on engines that give a view (RocksDB); build reads now warm the shared cache. On mem, SurrealKV and TiKV, which give none, the frame's tasks read through its write transaction | per-frame serialised writes + commit (≈ 1 s per 1024-vector frame [M]); the backfill scan; the `!dw` detour | cache coherency (§4.1); read-your-own-writes (§4.2) |
+| **L1 — batched mutation** | the apply frame inserts a plan's fresh vectors through upstream `multi_insert` on `granted` tasks, where `granted` is the frame's up-front place grant, or one at a time on the calling task when `granted` is 0; element ids allocated once per batch | CPU (distance, prune) and cache hits; KV reads only where the engine's transaction allows concurrent reads (SurrealKV, mem, TiKV) (§3.2.4) | on an engine whose write tx serialises its operations: reads still serialise; expected 1.1–1.5× there [M] | graph shape changes (batched ≠ serial); upstream error suppression |
+| **L2 — read concurrency** | per-frame `DiskAnnBuildFrame`: a dirty overlay of this frame's writes + one read view, a `kvs::Snapshot` from a read transaction opened for the frame's workers; reads of clean keys go to the view through `get_many` | KV reads on engines that give a view; build reads now warm the shared cache. On mem, SurrealKV and TiKV, which give none, the frame's tasks read through its write transaction | per-frame serialised writes + commit (≈ 1 s per 1024-vector frame [M]); the backfill scan; the `!dw` detour | cache coherency (§4.1); read-your-own-writes (§4.2) |
 | **L3 — direct backfill** | DiskANN's initial-batch sink: each scan batch is inserted straight into the graph as a frame during `Building`, skipping `!dw` for the backfill; the materialiser folds the rest | nothing new; removes ~614 MB of pending writes + re-reads + deletes at 200k×768 [V for the volume, M for the time] | scan itself (left serial) | a hook inside the build protocol |
 
 Evaluated and folded in or rejected (details in §3.6): batching element-id allocation (**in**, L1);
@@ -288,7 +285,7 @@ Contract we rely on (`:748-750`): "Each `multi_insert` makes at most one update 
 `append`) per id to the `DataProvider`."
 
 Every spawned task receives `context.clone()`; our context clones the same `Arc<Transaction>`, so
-L1 alone does not add read concurrency on RocksDB (§2.4).
+L1 alone does not add read concurrency on an engine whose transaction serialises its operations (§2.4).
 
 #### 3.2.2 What the `Overlay` removes, and what it does not [V]
 
@@ -699,14 +696,14 @@ Sizing `max_minibatch_par` at `1 + granted` instead would spawn `1 + granted` ta
 and 4, one more than the grant — and one task even at a grant of 0.
 
 - CPU (distance evaluation, prune) and cache hits: `P` tasks.
-- KV reads: `P`-way on SurrealKV/mem/TiKV (RwLock read side); **1-way on RocksDB** (§2.4).
+- KV reads: `P`-way on SurrealKV/mem/TiKV (RwLock read side); **1-way on an engine whose transaction serialises its operations** (§2.4).
 - KV writes: always 1-way (buffered `set` under the tx lock; cheap).
 
-Expected [M]: on RocksDB in the miss regime, 1.1–1.5× (IO/CPU overlap only). L1 is therefore
+Expected [M]: on such an engine in the miss regime, 1.1–1.5× (IO/CPU overlap only). L1 is therefore
 *necessary* (it is the only way to have more than one search in flight) but not sufficient for the
 reported case. On SurrealKV/mem the read phase scales close to `P` under L1 alone, and still does
 under L2, where a frame on an engine that gives no read view reads through its write transaction
-on the tasks it was granted (§3.3.2). A mem bench is still no evidence for the RocksDB miss regime
+on the tasks it was granted (§3.3.2). A mem bench is still no evidence for the miss regime
 the design targets.
 
 Algorithmic side effect: every vector in a batch searches the pre-batch graph and only sees other
@@ -867,27 +864,20 @@ The next pass retries the same pendings.
 
 ### 3.3 Layer 2 — real read concurrency: the build frame
 
-#### 3.3.1 The model: RocksDB's sharded `count()` — model *and* warning [V]
+#### 3.3.1 The constraint: reads that must see buffered writes [V]
 
-`kvs-rocksdb/src/lib.rs:2148-2270` builds one `ReadOptions` per shard under the inner lock, all
-pointing at **the same snapshot**, then drops the lock and dispatches shards to `affinitypool`,
-iterating `db.raw_iterator_opt` directly — no per-op mutex. It **falls back to a serial scan for
-writable transactions** (`:2158-2177`) "so that pending writes are visible".
-
-- As a model: it shows the repo already accepts "fan out reads over a shared snapshot outside the
-  tx lock" as a production pattern, and caps the fan-out (`COUNT_PARALLEL_MAX_SHARDS = 16`,
-  `range_shard.rs:16`) below `available_parallelism`.
-- As a warning: the writable fallback exists for the exact reason that dominates this design —
-  reads that must observe the transaction's own buffered writes cannot be served from a snapshot.
-  A build frame **writes** the graph it is reading. Any fan-out must therefore be paired with a
-  precise rule for which keys are "dirty" (written in this frame) and must be served from the
-  frame's own view. That rule is the core of L2.
+Fanning reads out over a shared snapshot outside the transaction's lock is a pattern the repo
+already uses for read-only transactions, with the fan-out capped below `available_parallelism`. It
+does not extend to writable transactions, because reads that must observe the transaction's own
+buffered writes cannot be served from a snapshot. A build frame **writes** the graph it is reading.
+Any fan-out must therefore be paired with a precise rule for which keys are "dirty" (written in
+this frame) and must be served from the frame's own view. That rule is the core of L2.
 
 Three ways to get concurrent clean reads were considered:
 
 - (a) a kvs-level `snapshot_getm` on the writable tx that reads the tx snapshot lock-free while
-  ignoring buffered writes — a `Transactable` trait change across five backends, RocksDB-only
-  benefit, and the kvs layer cannot know which keys are dirty. **Rejected.**
+  ignoring buffered writes — a `Transactable` trait change across every backend, benefiting
+  only engines with lock-free snapshots, and the kvs layer cannot know which keys are dirty. **Rejected.**
 - (b) a pool of `P` ordinary read-only transactions opened per frame, one per worker. It reads
   concurrently on every backend, but it is a second read model beside the one the query engine
   and the HNSW staged batch use, and it opens `P` transactions per frame. **Rejected.**
@@ -913,7 +903,7 @@ the read-only transaction and its view, and answers `None` when the frame must r
 own transaction:
 
 - **Whether.** `ReadView::open` reads `view_capabilities().read_only` first. Where it is `false`
-  (mem, SurrealKV, TiKV), it opens nothing and answers `None`, so such a frame opens **zero** read
+  (mem, TiKV, or a SurrealKV writable transaction), it opens nothing and answers `None`, so such a frame opens **zero** read
   transactions. Where it is `true`, it opens one with `open_read_snapshot` and takes its
   `snapshot()`; should that still answer `None`, it cancels the read transaction and answers
   `None`.
@@ -921,15 +911,14 @@ own transaction:
 - **When.** After the frame's `!dg` bump and `del_compare` fence are buffered, the graph write
   lock is taken and the span is opened (§3.3.5), so the view's publications carry the span the
   frame holds. The view cannot be taken from the write transaction itself: by then it has
-  buffered writes, and RocksDB gives no view over buffered writes.
+  buffered writes, and no engine gives a view over buffered writes.
 - **Reads.** `get_many` for `!de`/`!dn` point reads; a cursor for any range read. Neither sees the
   frame's own writes, which the overlay serves (§3.3.4).
 - **Concurrency.** The view parallelises point reads only if `get_many` through one view does not
-  serialise its callers. [V] On RocksDB it holds the transaction's slot lock for the whole read
-  (`surrealdb/kvs-rocksdb/src/snapshot.rs:80-132`), where a cursor takes the lock only to attach
-  the snapshot and a keep-alive. L2 depends on `get_many` reading under a keep-alive as cursors
-  do; until then one view serialises point reads exactly as the shared transaction does.
-- **No view, the write transaction.** Where the engine gives no view (mem, SurrealKV, TiKV), the
+  serialise its callers. L2 depends on `get_many` reading under a keep-alive, as cursors do, rather
+  than holding the transaction's lock for the whole read; otherwise one view serialises point reads
+  exactly as the shared transaction does.
+- **No view, the write transaction.** Where the engine gives no view (mem, TiKV, or a SurrealKV writable transaction), the
   frame opens no read transaction. It still takes its places and runs the same batched path, with
   the same element, mapping and state bytes and an equivalent graph (§4.5), every task reading
   clean keys through the frame's write transaction and publishing nothing it read. On mem and
@@ -945,20 +934,16 @@ own transaction:
   from a spawned task when `Drop` runs — which cancels the read transaction.
 - **A handle outlives the close** [V]. A worker may still hold a cloned `Arc<ReadView>` when the
   view is closed, and reading through it then is safe on every engine:
-  - **RocksDB.** The view shares the transaction's slot (`RocksSnapshot::inner`,
-    `surrealdb/kvs-rocksdb/src/snapshot.rs:35-42`).
+  - **Engines that give a view.** The view shares the transaction's slot.
     - A read that starts after the cancel finds the slot empty and fails with
-      `TransactionFinished` (`snapshot.rs:59-61`). It touches nothing that was freed.
-    - A read already in flight either holds a keep-alive on the transaction, taken under the
-      slot's lock (a cursor, `snapshot.rs:55-74`, and `get_many` in the batch-view seam), or, for
-      today's `get_many`, holds the slot's lock for the whole read (`snapshot.rs:80-132`), which
-      the cancel must take first.
-    - The cancel's `OwnedTx::into_inner` waits for every keep-alive before the transaction, and
-      with it the snapshot, is destroyed (`surrealdb/kvs-rocksdb/src/owned_tx.rs:198-210`).
+      `TransactionFinished`. It touches nothing that was freed.
+    - A read already in flight holds a keep-alive on the transaction, taken under the slot's lock,
+      or holds the slot's lock for the whole read, which the cancel must take first.
+    - The cancel waits for every keep-alive before the transaction, and with it the snapshot, is
+      destroyed.
     - So the close may wait for in-flight reads, and never frees state a read is using.
-  - **Every other engine.** mem, SurrealKV and TiKV give no view, because `Transactable::snapshot`
-    answers `None` by default (`surrealdb/kvs/src/api.rs:996-998`) and only RocksDB overrides it
-    (`kvs-rocksdb/src/lib.rs:2113-2125`). So there is no handle to outlive anything.
+  - **Engines that give no view.** `Transactable::snapshot` answers `None` by default
+    (`surrealdb/kvs/src/api.rs`), so there is no handle to outlive anything.
   - **Errors.** A worker whose read fails this way, or whose next provider call finds the frame
     closed, gets a cancellation error. The frame is already closed, so nothing it would have
     written is published.
@@ -1481,11 +1466,9 @@ Draining cannot deadlock, and it terminates:
 - **On the success path** upstream has joined every task, so the drain before the commit returns
   at once.
 
-**Why ending a transaction must not be interruptible** [V]. Both engines mark a transaction
+**Why ending a transaction must not be interruptible** [V]. Engines mark a transaction
 finished *before* they await its rollback:
 
-- RocksDB swaps `done`, and only then takes and rolls back the inner transaction
-  (`surrealdb/kvs-rocksdb/src/lib.rs:2148-2166`).
 - TiKV swaps `done`, releases its in-flight reservation, then awaits the inner lock and
   `rollback()` (`surrealdb/kvs-tikv/src/lib.rs:852-871`). TiKV's `commit` marks the transaction
   done the same way before it awaits the engine.
@@ -1497,7 +1480,6 @@ not rolled back and the rollback actions not run. A second `cancel()` only answe
 `TransactionFinished` (`kvs-tikv/src/lib.rs:855-857`) and finishes neither. What happens next
 depends on the engine:
 
-- On RocksDB, the left-over inner transaction rolls back when it is dropped.
 - On TiKV, the unfinished `tikv::Transaction` is dropped unfinished, which panics on debug builds
   (`CheckLevel::Panic`, `kvs-tikv/src/lib.rs:563-570`). Its `Drop` at `:368-389` only releases the
   in-flight count.
@@ -1606,7 +1588,7 @@ frames hold `K` read transactions, whatever their task counts.
 #### 3.3.7 What L2 parallelises, and the floor
 
 - Every clean `!de`/`!dn` read: `P`-way through the frame's view, where `P = granted`, on
-  engines that give a view (RocksDB), and now **cache-warming** (§4.1 rule 1'). On mem, SurrealKV and
+  engines that give a view, and now **cache-warming** (§4.1 rule 1'). On mem, SurrealKV and
   TiKV the frame's tasks read through its write transaction (§3.3.2): side by side on mem and
   SurrealKV, which take its lock shared for a read, and one at a time on an engine that does not.
 - Remaining serialised per frame: phase-1 `set_element` writes (`n` buffered puts), phase-B/C
@@ -1729,7 +1711,7 @@ its tasks read through the build transaction. The grant never waits, so the fram
 write transaction, and its places go back once the guard has ended (`finish`, `abort` or `Drop`)
 and every task the frame spawned has exited (§3.3.3). Its places come through the
 build's ticket: the one the builder registers, or the waiting statement's registration when a
-blocking statement waits on the build (§10.6).
+blocking statement waits on the build (§10.5).
 
 **Why a guard and not `Result<()>`.** The two obvious shapes are both wrong. Returning `()` and
 dropping the lock leaves a window in which the graph cache holds write-throughs for a transaction
@@ -1831,7 +1813,7 @@ insert/delete workloads (§7.1, T-2).
 | A DiskANN parallelism setting, or a DiskANN gate across frames | **Rejected** | a frame's task count is `granted` from the node's place pool (§3.3.6), which already bounds workers against queries with an OLTP reserve; a second budget would compete with it rather than respect it. |
 | A pool of read transactions per frame | **Rejected** | one view per frame is the read model every materialiser batch uses (§3.3.1); a pool is a second read model and `P` transactions per frame. |
 | DDL knob in `DiskAnnParams` | **Rejected** | parallelism is a deployment resource, not an index property; adding a field bumps a `#[revisioned]` catalog type (`catalog/src/schema/index.rs:641-658`, `revision.lock:39`) and costs a rolling-upgrade compatibility story. `intra_batch_candidates` is the only quality-affecting setting and it is a build heuristic, also deployment-level; kept as a constant with an open question (§10). |
-| kvs-level lock-free snapshot reads on the writable tx | **Rejected** | trait change across five backends; kvs cannot know which keys are dirty; RocksDB-only. |
+| kvs-level lock-free snapshot reads on the writable tx | **Rejected** | trait change across every backend; kvs cannot know which keys are dirty; only engines with lock-free snapshots benefit. |
 | Bigger compaction batches (`DISKANN_COMPACTION_MAX_PENDING_KEYS`, `_BYTES`, `_VECTORS`) | **Not now** | larger frames hold the graph lock longer, blocking KNN; and the plan cap is also the scheduling quantum, because a frame cannot yield its places mid-way (§3.3.6), so a larger plan makes a waiting statement wait longer. 1024 is a good `multi_insert` batch already. Tunable later. |
 
 ---
@@ -1885,7 +1867,7 @@ prior-writer case that rule 5' names.
 Why a frame's view may serve clean keys at all: the only committed writers of `!de`/`!dn`/`!ds`
 are compaction frames (this design's, and the wipe path in `idx/src/lib.rs:138-162`), every one of
 which writes `!dg`. A frame's write transaction also writes `!dg` (`putc`, `index.rs:1237`;
-RocksDB `putc` = `get_pinned_opt` + `put`, `kvs-rocksdb/src/lib.rs:2074-2075`, so the key is in the
+so the key is in the
 write set validated at commit). Hence if any other writer commits graph keys between the write
 transaction's snapshot and the frame's view, the frame's commit fails on `!dg` and 3' applies —
 so a frame can never commit a graph derived from a clean-key view that differed from its own
@@ -2145,7 +2127,7 @@ Handled in §3.2.5, with one stated exception:
   the materialiser's pass a transient failure requeues the index, and the index stays `Online`:
   no failure after `Online` records a durable `phase = Error`. In a sink frame during `Building`,
   the build resumes from its checkpoint. A `JoinError` with no recorded provider error (runtime
-  teardown) is reported as an internal error — open question §10.7.
+  teardown) is reported as an internal error — open question §10.6.
 - Tasks are `tokio::spawn`ed. Upstream does not join all of them on every path —
   `set_elements` detaches the rest on its first error (§3.3.5) — so the frame counts them itself
   and drains them before it commits or aborts. A frame runs in a task no caller can drop
@@ -2171,8 +2153,7 @@ Handled in §3.2.5, with one stated exception:
   statement in phase 2 and each `Building` run with a sink runs at most one frame on its own task,
   so foreground frames scale with the number of concurrent blocking statements and builds on
   distinct indexes, each running serially on its own task when the pool grants nothing.
-- Blocking KV work is additionally bounded by the KVS pool (`SURREAL_KVS_THREADPOOL_SIZE`) and
-  RocksDB's inline permits.
+- Blocking KV work is additionally bounded by the KVS pool (`SURREAL_KVS_THREADPOOL_SIZE`).
 
 ### 5.4 Memory budget per frame [M]
 
@@ -2189,7 +2170,7 @@ holds, by the vector cap (§3.2.3):
 | Overlay container overhead (`HashMap`/`Arc`/`Vec`/allocator) | +30–50% of the above |
 | **Transaction write batch — the same adjacency and element bytes, buffered again** | ≈ 58 MiB |
 | Back-edge aggregation map | ≤ few MiB |
-| Read view | negligible (one RocksDB snapshot handle and its read transaction; pinned SST versions for the frame's seconds) |
+| Read view | negligible (one snapshot handle and its read transaction, held for the frame's seconds) |
 | **Frame-local total** | **≈ 180–200 MiB worst case**, ≈ 60–70 MiB typical |
 | Shared `DiskAnnCache` growth — *not frame-local, see below* | up to `diskann_cache_size` (256 MiB default) |
 
@@ -2244,7 +2225,7 @@ prune working sets linearly. `P` itself is the place pool's answer and has no Di
   (`surrealdb/core/src/ctx/context.rs:1190-1198`), so frames stop rather than grow past it when
   a threshold is set.
 
-Whether foreground frames need a node-wide bound of their own is open (§10.12). It belongs with
+Whether foreground frames need a node-wide bound of their own is open (§10.11). It belongs with
 the decision §5.4 leaves open on the per-frame bound — a maximum dimension or a dimension-scaled
 cap — because both decide what "bounded" means for an operator sizing a node.
 
@@ -2290,8 +2271,6 @@ sensitivity (§10.3).
 >   (`DEGREE 8` / `L_BUILD 24`), whose recall spans 0.60 → 0.97 across `ef`.
 > * **Members per cluster must stay below `k`**, or recall pins at 1.0000 because the top-`k` is one
 >   cluster's interior. This is what made the first 768-dim diagnostic useless.
-> * **The predicted pre-existing breakage does not exist.** `diskann_rocksdb_clear_race_keeps_concurrent_writer_visible`
->   passes on its first ever CI run; all 233 idx tests pass under `kv-rocksdb`.
 > * Three specification errors in the bench plumbing: `run = false` makes a bench *unreachable*
 >   rather than manual; `[env] backend = [...]` is an allow-list and would have removed the bench
 >   from every other backend; and `metrics_snapshot_for_test` reads one `Transaction`, so it cannot
@@ -2303,8 +2282,8 @@ sensitivity (§10.3).
 >
 > **No affordable bench reaches the regime this design's speedups are claimed in.** At 768 dims a
 > row costs ~3.6 KiB of graph, so the 256 MiB cache stops holding it above ~70 000 rows — and the
-> largest bench here is 20 000. Measured: 59.5 s on mem versus 66.0 s on RocksDB, an 11% gap. If
-> reads were reaching KV, RocksDB would be far worse; that near-parity is direct evidence the graph
+> largest bench here is 20 000. Measured: 59.5 s on mem versus 66.0 s on a file-backed engine, an 11% gap. If
+> reads were reaching KV, the file-backed engine would be far worse; that near-parity is direct evidence the graph
 > is cache-resident and the per-transaction mutex is **not being exercised at all**.
 >
 > Everything in §3.2.4 and §3.3.7 — Layer 1 at 1.1–1.5× against Layer 2 at 6–12× — is a claim about
@@ -2313,7 +2292,7 @@ sensitivity (§10.3).
 > can. It has been validated end to end at 1 500 and 3 000 rows but never run at scale (tens of
 > minutes, tens of GiB). Until it is, Layer 2's justification rests on the reasoning in §2.4 alone.
 
-### 7.1 Rust tests (`surrealdb/idx/src/trees/diskann/index.rs` tests module, mem backend via `TestIndexStore`; RocksDB variants gated `#[cfg(feature = "kv-rocksdb")]` like `index.rs:3661-3663`)
+### 7.1 Rust tests (`surrealdb/idx/src/trees/diskann/index.rs` tests module, mem backend via `TestIndexStore`)
 
 Helpers to add next to `compact_once` (`index.rs:2301-2317`):
 
@@ -2339,7 +2318,7 @@ one-vector path — and batched with 4 places granted, both through the counting
 (inserts, updates, deletes across several compaction rounds) with the same assertion.
 
 **T-3 — parallelism independence**: build from identical input (same `!dw` content, same plan
-caps) with 0 places granted (sequential), 1 and 4, and, on RocksDB, with the read view disabled by
+caps) with 0 places granted (sequential), 1 and 4, and, on an engine that gives a view, with the read view disabled by
 a test hook so the frame takes the no-view path. Assert:
 - at 0 places `wrap_spawn` is called 0 times; at `g` places, no phase has more than `g` wrapped
   tasks alive at once;
@@ -2355,7 +2334,7 @@ The `!dn` bytes are not compared (§4.5). Exact structure and recall, no timing.
 **T-4 — exact-count accounting, element ids**: after a frame inserting `n ≥ 2` fresh vectors
 into a non-empty graph, `frame.stats.state_writes == 1`.
 
-**T-5 — exact-count accounting, routing**: on RocksDB with 1 place granted, after a frame that
+**T-5 — exact-count accounting, routing**: on an engine that gives a view, with 1 place granted, after a frame that
 inserts fresh vectors into a graph whose stored entry point is live: `reads_tx == 0`,
 `reads_view > 0`, `read_txs_opened == 1`. With the entry point tombstoned instead, the repair
 cursor runs, and its batches are counted: `reads_tx` equals the number of `next_batch` calls it
@@ -2536,12 +2515,6 @@ one. On an index that keeps `!dk`:
   none twice.
 Counted on the frame's insert calls and the plan's `new_vectors`, never by RSS.
 
-RocksDB coverage: T-3, T-5, T-6 also run under `#[cfg(feature = "kv-rocksdb")]` with
-`TestIndexStore::with_path("rocksdb:…")`. **Check which CI lane compiles `surrealdb-idx` with
-`kv-rocksdb`** — `ci-kvs-rocksdb` (`Makefile.ci.toml:919-928`) runs `surrealdb-core`'s
-`kvs::tests`, `surrealdb-kvs-any`, the kvs crate and `test-datastore`; if no lane runs
-`-p surrealdb-idx --features kv-rocksdb`, PR 1 adds it there (§10.4).
-
 ### 7.2 Benchmarks (language-tests)
 
 Existing build-time precedent [V]: `language-tests/tests/bench/vector/build_hnsw_cosine.surql`
@@ -2552,21 +2525,21 @@ Existing build-time precedent [V]: `language-tests/tests/bench/vector/build_hnsw
   `rebuild = true`, `run = true`. Runs on `mem` in CI — useful for CPU-side regressions and for
   the L1 speedup, **not** for the KV-read-bound problem.
 - `bench/util/embeddings-data-768d-20000.surql` (`run = false`) and
-  `bench/vector/build_diskann_768_20k.surql` (`run = false`, manual) for a RocksDB run that is
+  `bench/vector/build_diskann_768_20k.surql` (`run = false`, manual) for a file-backed run that is
   still within a 256 MiB cache but exercises the frame machinery at scale.
 - Runner change: `rebuild = true` benches are skipped on file backends
   (`language-tests/src/cmd/bench/run.rs:639-648`, README `:142-150`). Allow them when the bench
-  opts in via `[env] backend = ["rocksdb"]` (existing per-test backend list, README `:714-762`),
-  rebuilding into a fresh temp dir per iteration. Then `cargo make bench -- vector/build_diskann_768 --backend rocksdb`
+  opts in via `[env] backend = ["surrealkv"]` (existing per-test backend list, README `:714-762`),
+  rebuilding into a fresh temp dir per iteration. Then `cargo make bench -- vector/build_diskann_768 --backend surrealkv`
   measures the right backend. Compare **branches within a backend**, and use the untouched
   `build_hnsw_cosine` / `knn_hnsw*` rows as the noise floor.
 - `knn_diskann*.surql` before/after on the same backend to guard KNN latency.
 
 ### 7.3 Full-scale diagnostic
 
-`#[ignore]` test `diag_diskann_build_rocksdb_200k` in `surrealdb/core/src/idx/tests/diskann_query_test.rs`
+`#[ignore]` test `diag_diskann_build_200k` in `surrealdb/core/src/idx/tests/diskann_query_test.rs`
 (the existing `Datastore`-level DiskANN test, `:26-78`, shows the setup and
-`metrics_snapshot_for_test`): generates 200k × 768 clustered vectors into a RocksDB temp dir,
+`metrics_snapshot_for_test`): generates 200k × 768 clustered vectors into a file-backed temp dir,
 runs `DEFINE INDEX`, logs wall-clock per phase (scan, then the statement's materialisation wait), RSS samples, and Recall@10 on 500
 queries. Logs only; no assertions. This is what turns the [M] numbers in §1.2 into measurements.
 
@@ -2576,16 +2549,16 @@ queries. Logs only; no assertions. This is what turns the [M] numbers in §1.2 i
 
 | # | PR title | Scope | Size | Unblocks | Validation |
 |---|---|---|---|---|---|
-| 1 | **DiskANN recall harness and build-time benches** | T-1 (+ `diag_*`), `compact_all`, `build_diskann_768*.surql`, 20k util dataset, runner opt-in for file-backend rebuild benches, CI lane check for idx `kv-rocksdb`, baseline numbers in the PR description | M | everything | harness green on the current serial build; floors recorded |
+| 1 | **DiskANN recall harness and build-time benches** | T-1 (+ `diag_*`), `compact_all`, `build_diskann_768*.surql`, 20k util dataset, runner opt-in for file-backend rebuild benches, baseline numbers in the PR description | M | everything | harness green on the current serial build; floors recorded |
 | 2 | **Foreign-generation cache protection** [V, on `main`] | the stamp (wrapper, generation) on every graph entry, `CacheView`, the `Continuity` span and its lifecycle under the graph lock, and `read_state_for_update` for allocation (§2.5, §4.1.1), against the serial build. PRs 3–5 extend it as §4.1.1 states and replace none of it | — | PR 3 | its own multi-node tests on `main`; §4.1.1's frame acceptance in PRs 3–4 |
-| 3 | **Batch DiskANN compaction inserts through `multi_insert`** | L1: `MultiInsertStrategy` impl, `frame_index`, the plan builder's vector cap (`DISKANN_COMPACTION_MAX_PENDING_VECTORS`) and sub-batching of a record over it, `max_minibatch_par = granted` and the sequential `insert_with_id` path at a grant of 0, `allocate_element_ids`, `stage_inserts`/`commit_fresh`, `apply_pending_batch`, `DiskAnnBuildFrame` skeleton (no view: side-channel, post-condition, watchdog, `wrap_spawn`), the frame's up-front place grant through the materialiser's place seam, T-2/T-3/T-4/T-7/T-7a/T-7b/T-7c/T-8/T-9/T-9a/T-10/T-11 (compaction and phase-2 cases)/T-13/T-14 | M/L | PR 4 | T-* green; language-tests DiskANN suite green; RocksDB build bench faster; recall floors hold; no DiskANN semaphore or setting |
-| 4 | **Serve DiskANN build reads from one view per frame** | L2: the frame's read view through the materialiser's batch-view seam, overlay + view routing in the provider, the no-view path through the write transaction, T-5/T-6/T-12 (mem + rocksdb) | M | the RocksDB speedup | T-5 shows `reads_tx == 0` and one read transaction per frame; T-6 coherency; `build_diskann_768 --backend rocksdb` faster; §7.3 diag numbers vs PR 1 baseline |
+| 3 | **Batch DiskANN compaction inserts through `multi_insert`** | L1: `MultiInsertStrategy` impl, `frame_index`, the plan builder's vector cap (`DISKANN_COMPACTION_MAX_PENDING_VECTORS`) and sub-batching of a record over it, `max_minibatch_par = granted` and the sequential `insert_with_id` path at a grant of 0, `allocate_element_ids`, `stage_inserts`/`commit_fresh`, `apply_pending_batch`, `DiskAnnBuildFrame` skeleton (no view: side-channel, post-condition, watchdog, `wrap_spawn`), the frame's up-front place grant through the materialiser's place seam, T-2/T-3/T-4/T-7/T-7a/T-7b/T-7c/T-8/T-9/T-9a/T-10/T-11 (compaction and phase-2 cases)/T-13/T-14 | M/L | PR 4 | T-* green; language-tests DiskANN suite green; file-backed build bench faster; recall floors hold; no DiskANN semaphore or setting |
+| 4 | **Serve DiskANN build reads from one view per frame** | L2: the frame's read view through the materialiser's batch-view seam, overlay + view routing in the provider, the no-view path through the write transaction, T-5/T-6/T-12 (mem + file-backed) | M | the build speedup on engines that give a view | T-5 shows `reads_tx == 0` and one read transaction per frame; T-6 coherency; `build_diskann_768` faster on a file-backed backend; §7.3 diag numbers vs PR 1 baseline |
 | 5 | **DiskANN's initial-batch sink** (optional) | L3: `apply_direct` + `DirectApplyGuard` behind the build protocol's initial-batch sink hook, tests that a build with concurrent writes yields the same recall and no `!dw` residue, that two disjoint ranges tiling a table give the same document mappings, no `!dw` residue and recall equivalent to one range (not the same graph bytes, §4.5), **plus T-11** | M | — | diag numbers; pending-scan bytes during `CONCURRENTLY` builds drop; T-11 green |
 
 PRs 3–5 build on the materialisation design (`index-build-and-materialisation.md`): PR 3 and PR 4
 need the single driver, with the DiskANN pass retrying a retryable conflict and the builder
 stopped at `Online`; PR 3 needs the place pool's up-front grant; PR 4 needs one read view per batch,
-with RocksDB `get_many` reading under a keep-alive; PR 5 needs the build protocol's initial-batch
+with `get_many` reading under a keep-alive; PR 5 needs the build protocol's initial-batch
 sink and the single driver.
 
 PR 1 is independently useful (it is the first recall coverage DiskANN has) and touches no
@@ -2613,7 +2586,7 @@ of its own, and every frame publisher keeps to them (§4.1.1).
   design promises identity only for the element, mapping and state families, and recall
   equivalence for adjacency; a debugging comparison of two builds must compare those, not `!dn`
   bytes.
-- *The frame's read view pins RocksDB versions* for a frame's duration (seconds); negligible
+- *The frame's read view pins engine versions* for a frame's duration (seconds); negligible
   churn but worth watching in the diag run.
 - *No view, the shared transaction.* mem, SurrealKV and TiKV give no read view, so their frames'
   tasks read through the write transaction. On an engine that runs one transaction's operations
@@ -2654,7 +2627,7 @@ of its own, and every frame publisher keeps to them (§4.1.1).
 
 ## 10. Open questions
 
-1. **Actual speedup on RocksDB** at the reference workload — every number in §1.2, §2.3, §3.2.4,
+1. **Actual speedup on a file-backed engine** at the reference workload — every number in §1.2, §2.3, §3.2.4,
    §3.3.7 is a model; PR 1 + §7.3 replace them with measurements before PR 3 ships batching.
 2. **Adjacency identity across `P`.** §4.5 shows the element, mapping and state families are
    identical across task counts and adjacency is not, because of the bootstrap order. Whether to
@@ -2663,20 +2636,9 @@ of its own, and every frame publisher keeps to them (§4.1.1).
    graph is worth having for debugging; recall does not need it.
 3. **`DISKANN_INTRA_BATCH_CANDIDATES = 32`**: right value for 1024-vector batches at 768-dim?
    The harness decides; promote to `IdxConfig` only if sensitivity is shown.
-4. ~~**CI lane for `surrealdb-idx --features kv-rocksdb`**~~ — **confirmed absent** [V].
-   `ci-kvs-rocksdb` (`Makefile.ci.toml:919-928`) runs `test-kvs` (`surrealdb-core --lib --
-   kvs::tests`), `test-kvs-any`, `test-kvs-crate` (`surrealdb-kvs-rocksdb`) and `test-datastore`
-   — never `surrealdb-idx`. The only lane naming the crate is `ci-feature-check-idx`
-   (`:399-415`), a `cargo hack check --each-feature`, which does not build test targets. So
-   `surrealdb/idx/src/trees/diskann/index.rs:3661` `diskann_rocksdb_clear_race_keeps_concurrent_writer_visible`
-   is neither compiled nor run today, despite `surrealdb/idx/Cargo.toml:17-22` stating the feature
-   exists "so the matching KVS CI lane runs the race tests against its own store". Closed by
-   #1203, which adds a `test-idx` task to `ci-kvs-rocksdb`. The predicted pre-existing breakage
-   **did not exist**: the race test passes on its first ever CI run, and all 233 idx tests pass
-   under `kv-rocksdb`.
-5. **Trait bounds**: `Half: Debug` for `Overlay::from_batch`; whether `Vector` needs a small
+4. **Trait bounds**: `Half: Debug` for `Overlay::from_batch`; whether `Vector` needs a small
    `typed_slice::<T>()` helper or the existing per-variant `as_slice()` matches suffice.
-6. **How many places a frame asks for, and on whose ticket.** A frame asks for at most
+5. **How many places a frame asks for, and on whose ticket.** A frame asks for at most
    `min(n, DISKANN_COMPACTION_MAX_PENDING_VECTORS)` places for `n` fresh vectors and the pool's cap does the rest; whether a background frame should
    ask for fewer than a foreground one is a question for the place policy, not a DiskANN constant,
    and needs a workload measurement. Whose ticket is settled: a phase-2 pass uses the waiting
@@ -2684,24 +2646,24 @@ of its own, and every frame publisher keeps to them (§4.1.1).
    parallel work during `Building` — a sink frame included — a build ticket the builder
    registers, or the waiting statement's registration when a blocking `DEFINE INDEX` /
    `REBUILD INDEX` waits on the build.
-7. **Classifying a task panic once `TaskGuard` has recorded one** (§3.2.5). The panic itself is no
+6. **Classifying a task panic once `TaskGuard` has recorded one** (§3.2.5). The panic itself is no
    longer invisible, but a frame that fails only because a task unwound during runtime teardown is
    still reported as an internal error. In the materialiser's pass that is a failed apply that
    requeues; in a sink frame during `Building` the builder records it durably. Treating "task panic and
    `tx.closed()`" as shutdown-class is the likely answer; it needs a reproduction before it is
    worth encoding.
-8. **Layer 3 gain** (skipping `!dw`) is estimated at 5–15 %; measure after PR 3 before investing.
-9. **The serial oracle.** With no deployment switch (§6), the one-vector build survives as the
+7. **Layer 3 gain** (skipping `!dw`) is estimated at 5–15 %; measure after PR 3 before investing.
+8. **The serial oracle.** With no deployment switch (§6), the one-vector build survives as the
    path of a frame with one fresh vector or no place, and T-2 reaches it by granting 0 places. Whether the recall harness should keep comparing against it
    once the batched build has its own recorded floors is a judgement for after PR 3.
-10. **Narrowing foreign-generation invalidation below whole-index granularity.** A foreign commit
+9. **Narrowing foreign-generation invalidation below whole-index granularity.** A foreign commit
     reopens the span, which makes every older entry of the wrapper unusable (§4.1.1), because the
     process cannot know which keys a foreign commit moved without reading them. A
     writer-published change manifest would narrow it; whether replica read-through is costly
     enough to justify one is a measurement, not a guess.
-11. **Medoid entry point and second pass** (brief §C deviations from the paper) are recall
+10. **Medoid entry point and second pass** (brief §C deviations from the paper) are recall
     follow-ups the harness will quantify; deliberately outside this design.
-12. **A node-wide bound on foreground frames.** Each blocking statement in phase 2 and each build
+11. **A node-wide bound on foreground frames.** Each blocking statement in phase 2 and each build
     runs at most one frame on its own unplaced task (§3.3.6), so concurrent DDL on distinct
     DiskANN indexes multiplies the per-frame memory of §5.4, with only the memory threshold as a
     backstop. Whether that needs a bound of its own — and in what form, given that the calling

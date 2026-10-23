@@ -19,7 +19,8 @@ use super::cmp::{RoughlyEq, RoughlyEqConfig};
 /// A transaction's `BEGIN`, `COMMIT` and `CANCEL` each answer a result, `NONE`, like any other
 /// statement, and their rows are never graded out of order.
 pub fn unordered_statements(source: &str) -> Option<Vec<bool>> {
-	let ast = surrealdb_expr::parser::query_with_settings(source, ParserSettings::default()).ok()?;
+	let ast =
+		surrealdb_expr::parser::query_with_settings(source, ParserSettings::default()).ok()?;
 	Some(
 		ast.expressions
 			.iter()

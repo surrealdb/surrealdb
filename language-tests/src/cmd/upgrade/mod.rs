@@ -20,7 +20,6 @@ use surrealdb_types::{Array, Number, Value as SurValue, Variables};
 use tokio::task::JoinSet;
 
 use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
-use crate::version::version_matches;
 use crate::format::Progress;
 use crate::tests::report::{ChainHopResult, TestGrade, TestReport, TestTaskResult};
 use crate::tests::run::{CaseImports, RunConfig};
@@ -29,6 +28,7 @@ use crate::tests::schema::{
 };
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 use crate::util::TempDir;
+use crate::version::version_matches;
 
 pub struct UpgradeTestConfig {
 	from: DsVersion,
@@ -104,6 +104,8 @@ pub struct Config {
 	jobs: u32,
 	download_permission: bool,
 	backend: UpgradeBackend,
+	/// Both stores are opened with `?versioned=true`.
+	versioned: bool,
 	keep_files: bool,
 	/// Canonical directory holding the built Surrealism module, when a selected
 	/// test asked for one. Spawned binaries get it on their bucket allowlist and
@@ -115,6 +117,7 @@ impl Config {
 	pub fn from_matches(matches: &ArgMatches) -> Self {
 		Config {
 			backend: *matches.get_one::<UpgradeBackend>("backend").unwrap(),
+			versioned: matches.get_flag("versioned"),
 			download_permission: matches.get_one("allow-download").copied().unwrap_or(false),
 			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
 				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
@@ -144,6 +147,10 @@ struct FilterContext<'a> {
 	/// False when the Surrealism fixture could not be built, in which case the
 	/// tests that need it cannot run.
 	have_module_fixture: bool,
+	/// Whether this is the RocksDB-to-SurrealKV migration axis, and whether it
+	/// opens both stores versioned.
+	migration: bool,
+	versioned: bool,
 }
 
 fn base_builder<'set, 'error, 'a, T: RunConfig>(
@@ -159,6 +166,8 @@ fn base_builder<'set, 'error, 'a, T: RunConfig>(
 		scan,
 		versions,
 		have_module_fixture,
+		migration,
+		versioned,
 	} = ctx;
 	RunSetBuilder::new(case_set, load_errors)
 		.with_filter(|x| x.test.config.parsed.test.run)
@@ -181,6 +190,12 @@ fn base_builder<'set, 'error, 'a, T: RunConfig>(
 		// never written to assert.
 		.with_filter(move |x| x.test.config.parsed.test.chain.is_some() == chain_mode)
 		.with_filter(move |x| have_module_fixture || !needs_module_fixture(x))
+		// The migration axis runs its own tests and nothing else runs them; a
+		// test that needs a versioned store runs only when the axis is versioned.
+		.with_filter(move |x| {
+			let parsed = &x.test.config.parsed;
+			parsed.test.migration == migration && (!parsed.env.versioned || versioned)
+		})
 		// Cases that failed validation were already recorded as load errors,
 		// which fail the whole run; dropping them here only stops them from
 		// being executed as well.
@@ -226,17 +241,33 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	// Check if the backend is supported by the enabled features.
 	match config.backend {
-		#[cfg(feature = "backend-rocksdb")]
-		UpgradeBackend::RocksDb => {}
-		#[cfg(not(feature = "backend-rocksdb"))]
-		UpgradeBackend::RocksDb => bail!("RocksDb backend feature is not enabled"),
 		#[cfg(feature = "backend-surrealkv")]
 		UpgradeBackend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
+		UpgradeBackend::RocksDbMigration => {}
 	}
 
-	if UpgradeBackend::SurrealKv == config.backend
+	let migration = config.backend == UpgradeBackend::RocksDbMigration;
+	if config.versioned && !migration {
+		bail!("--versioned is only valid with --backend rocksdb-migration")
+	}
+	// The store is written as `rocksdb://` by a released binary and opened as
+	// `surrealkv://` by the checkout, so each side has to be the kind that does it.
+	if migration {
+		if let Some(version) = to_versions.iter().find(|v| matches!(v, DsVersion::Version(_))) {
+			bail!(
+				"The rocksdb-migration backend opens the store with the checkout, so --to has to be `..`, not {version}"
+			)
+		}
+		if let Some(path) = from_versions.iter().find(|v| matches!(v, DsVersion::Path(_))) {
+			bail!(
+				"The rocksdb-migration backend needs released versions in --from, which write the store as rocksdb://, not {path}"
+			)
+		}
+	}
+
+	if config.backend != UpgradeBackend::RocksDbMigration
 		&& let Some(DsVersion::Version(v)) =
 			all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
 	{
@@ -311,9 +342,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					 fixture could not be built.\n{e:#}\n"
 				);
 			}
-			Err(e) => return Err(e.context(
-				"LANG_UPGRADE_REQUIRE_MODULES is set, so a missing module fixture is a failure",
-			)),
+			Err(e) => {
+				return Err(e.context(
+					"LANG_UPGRADE_REQUIRE_MODULES is set, so a missing module fixture is a failure",
+				));
+			}
 		}
 	}
 
@@ -388,95 +421,94 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				scan: &repair_scan,
 				versions: &all_resolved,
 				have_module_fixture: config.module_fixture.is_some(),
+				migration,
+				versioned: config.versioned,
 			},
 		)
-			.with_expander(|x| {
-				let chain = x
-					.test
-					.config
-					.parsed
-					.test
-					.chain
-					.as_ref()
-					.expect("filtered to chain tests above");
+		.with_expander(|x| {
+			let chain =
+				x.test.config.parsed.test.chain.as_ref().expect("filtered to chain tests above");
 
-				// The feature does not exist before this version, so the walk
-				// starts where it does. A chain containing no such version
-				// cannot test the feature at all and is not scheduled.
-				// `since` is the walk-specific override; otherwise the feature's
-				// introducing release is exactly when setup can first run.
-				let since = chain
-					.since
-					.as_ref()
-					.or(x.test.config.parsed.test.introduced.as_ref());
-				let Some(setup_at) = since
-					.map(|req| chain_actual.iter().position(|v| version_matches(req, v)))
-					.unwrap_or(Some(0))
-				else {
-					let req = since.expect("position() is only consulted when `since` is set");
-					// Nothing in the walk can create the feature, so the test
-					// would contribute no runs at all. Recorded rather than
-					// dropped: a green job that quietly tested less is the
-					// failure this suite exists to remove.
-					chain_conflicts.borrow_mut().push((
-						x.test.origin.clone(),
-						format!(
-							"no version in the walk satisfies `{req}`, so its setup could never \
+			// The feature does not exist before this version, so the walk
+			// starts where it does. A chain containing no such version
+			// cannot test the feature at all and is not scheduled.
+			// `since` is the walk-specific override; otherwise the feature's
+			// introducing release is exactly when setup can first run.
+			let since = chain.since.as_ref().or(x.test.config.parsed.test.introduced.as_ref());
+			let Some(setup_at) = since
+				.map(|req| chain_actual.iter().position(|v| version_matches(req, v)))
+				.unwrap_or(Some(0))
+			else {
+				let req = since.expect("position() is only consulted when `since` is set");
+				// Nothing in the walk can create the feature, so the test
+				// would contribute no runs at all. Recorded rather than
+				// dropped: a green job that quietly tested less is the
+				// failure this suite exists to remove.
+				chain_conflicts.borrow_mut().push((
+					x.test.origin.clone(),
+					format!(
+						"no version in the walk satisfies `{req}`, so its setup could never \
 							 run. Narrow the walk with the positional path filter if this is a \
 							 deliberately short local chain rather than the full CI list"
-						),
-					));
-					return Vec::new();
-				};
+					),
+				));
+				return Vec::new();
+			};
 
-				// A walk must not cross a version that demands a manual repair.
-				// The repair replaces the structure the walk is measuring, so
-				// every later version would read what the repair wrote rather
-				// than what the original writer left — and `REBUILD INDEX` on an
-				// index first written before 3.2.1 never returns, so the walk
-				// would hang to its timeout rather than fail. Repairs belong to
-				// the pairwise axis, which brackets them properly.
-				if let Some(repair) = x.test.config.parsed.test.repair.iter().find(|r| {
-					chain_actual[setup_at..].iter().any(|v| version_matches(&r.since, v))
-				}) {
-					chain_conflicts.borrow_mut().push((
-						x.test.origin.clone(),
-						format!(
-							"declares `[[test.repair]] since = \"{}\"`, which the walked \
+			// A walk must not cross a version that demands a manual repair.
+			// The repair replaces the structure the walk is measuring, so
+			// every later version would read what the repair wrote rather
+			// than what the original writer left — and `REBUILD INDEX` on an
+			// index first written before 3.2.1 never returns, so the walk
+			// would hang to its timeout rather than fail. Repairs belong to
+			// the pairwise axis, which brackets them properly.
+			if let Some(repair) = x
+				.test
+				.config
+				.parsed
+				.test
+				.repair
+				.iter()
+				.find(|r| chain_actual[setup_at..].iter().any(|v| version_matches(&r.since, v)))
+			{
+				chain_conflicts.borrow_mut().push((
+					x.test.origin.clone(),
+					format!(
+						"declares `[[test.repair]] since = \"{}\"`, which the walked \
 							 versions satisfy; a repair mid-walk replaces the structure the \
 							 chain follows. Cover the repair with a pairwise test, or keep the \
 							 repairing release out of LANG_UPGRADE_CHAIN",
-							repair.since
-						),
-					));
-					return Vec::new();
-				}
+						repair.since
+					),
+				));
+				return Vec::new();
+			}
 
-				// A single-version "walk" spawns one binary and hands nothing
-				// over, yet every hop-relative matcher holds trivially at
-				// $hop == $hops == 1. It would report a cross-version property
-				// that was never crossed.
-				if chain_actual.len() - setup_at < 2 {
-					chain_conflicts.borrow_mut().push((
-						x.test.origin.clone(),
-						format!(
-							"the walk reaches it only at its last version ({}), so setup, \
+			// A single-version "walk" spawns one binary and hands nothing
+			// over, yet every hop-relative matcher holds trivially at
+			// $hop == $hops == 1. It would report a cross-version property
+			// that was never crossed.
+			if chain_actual.len() - setup_at < 2 {
+				chain_conflicts.borrow_mut().push((
+					x.test.origin.clone(),
+					format!(
+						"the walk reaches it only at its last version ({}), so setup, \
 							 mutate and the body would all run on one binary with no handover",
-							chain_actual[setup_at]
-						),
-					));
-					return Vec::new();
-				}
+						chain_actual[setup_at]
+					),
+				));
+				return Vec::new();
+			}
 
-				vec![ChainTestConfig {
-					versions: versions.clone(),
-					setup_at,
-					// Set later.
-					port: 0,
-					path: store_dir(),
-				}]
-			})
-			.build();
+			vec![ChainTestConfig {
+				versions: versions.clone(),
+				setup_at,
+				// Set later.
+				port: 0,
+				path: store_dir(),
+			}]
+		})
+		.build();
 
 		let count = run_set.len();
 		println!("Using directory '{}' as a store directory", temp_dir.path().display());
@@ -486,8 +518,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			case_set.len(),
 			versions.len()
 		);
-		let reports =
-			execute_runs(run_set, config.clone(), color, &ds, run_chain_task).await;
+		let reports = execute_runs(run_set, config.clone(), color, &ds, run_chain_task).await;
 		(reports, count)
 	} else {
 		let run_set = base_builder(
@@ -501,67 +532,68 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				scan: &repair_scan,
 				versions: &all_resolved,
 				have_module_fixture: config.module_fixture.is_some(),
+				migration,
+				versioned: config.versioned,
 			},
 		)
-			.with_expander(|x| {
-				let mut res = Vec::new();
+		.with_expander(|x| {
+			let mut res = Vec::new();
 
-				for from in from_versions.iter() {
-					for to in to_versions.iter() {
-						let from_v = actual_version.get(from).unwrap();
-						let to_v = actual_version.get(to).unwrap();
+			for from in from_versions.iter() {
+				for to in to_versions.iter() {
+					let from_v = actual_version.get(from).unwrap();
+					let to_v = actual_version.get(to).unwrap();
 
-						if let Some(ver_req) = x.test.config.parsed.test.version.as_ref()
-							&& !version_matches(ver_req, to_v)
-						{
-							continue;
-						}
-
-						if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
-							&& !version_matches(ver_req, from_v)
-						{
-							continue;
-						}
-
-						// The writing binary has to be able to create the state in
-						// the first place.
-						if let Some(ver_req) = x.test.config.parsed.test.introduced.as_ref()
-							&& !version_matches(ver_req, from_v)
-						{
-							continue;
-						}
-
-						if x.imports.iter().any(|imp| {
-							imp.config
-								.parsed
-								.test
-								.version
-								.as_ref()
-								.map(|req| !version_matches(req, from_v))
-								.unwrap_or(false)
-						}) {
-							continue;
-						}
-
-						res.push(UpgradeTestConfig {
-							from: from.clone(),
-							to: to.clone(),
-							to_version: to_v.clone(),
-							// Set later.
-							port: 0,
-							path: store_dir(),
-						})
+					if let Some(ver_req) = x.test.config.parsed.test.version.as_ref()
+						&& !version_matches(ver_req, to_v)
+					{
+						continue;
 					}
+
+					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
+						&& !version_matches(ver_req, from_v)
+					{
+						continue;
+					}
+
+					// The writing binary has to be able to create the state in
+					// the first place.
+					if let Some(ver_req) = x.test.config.parsed.test.introduced.as_ref()
+						&& !version_matches(ver_req, from_v)
+					{
+						continue;
+					}
+
+					if x.imports.iter().any(|imp| {
+						imp.config
+							.parsed
+							.test
+							.version
+							.as_ref()
+							.map(|req| !version_matches(req, from_v))
+							.unwrap_or(false)
+					}) {
+						continue;
+					}
+
+					res.push(UpgradeTestConfig {
+						from: from.clone(),
+						to: to.clone(),
+						to_version: to_v.clone(),
+						// Set later.
+						port: 0,
+						path: store_dir(),
+					})
 				}
-				res
-			})
-			.build();
+			}
+			res
+		})
+		.build();
 
 		let count = run_set.len();
 		println!("Using directory '{}' as a store directory", temp_dir.path().display());
 		println!("Running {} test runs for {} test cases", count, case_set.len());
-		let reports =
-			execute_runs(run_set, config.clone(), color, &ds, run_task).await;
+		let reports = execute_runs(run_set, config.clone(), color, &ds, run_task).await;
 		(reports, count)
 	};
 
@@ -656,12 +688,8 @@ async fn run_with_repairs(
 ) -> anyhow::Result<TestTaskResult> {
 	let cfg = &case.test.config.parsed;
 
-	let applicable = cfg
-		.test
-		.repair
-		.iter()
-		.enumerate()
-		.find(|(_, r)| version_matches(&r.since, target));
+	let applicable =
+		cfg.test.repair.iter().enumerate().find(|(_, r)| version_matches(&r.since, target));
 
 	let Some((index, repair)) = applicable else {
 		return connection.query(&case.test.source).await;
@@ -705,7 +733,10 @@ fn repair_windows_overlap(a: &VersionReq, b: &VersionReq, versions: &[Version]) 
 /// and the `deny-*` lists to `Bool(false)` — so "did the author set this?" can
 /// only be answered against the default. Every default is a `Bool`, so any
 /// explicit list of targets differs by construction.
-fn differs<T>(field: &BoolOr<Vec<SchemaTarget<T>>>, default: &BoolOr<Vec<SchemaTarget<T>>>) -> bool {
+fn differs<T>(
+	field: &BoolOr<Vec<SchemaTarget<T>>>,
+	default: &BoolOr<Vec<SchemaTarget<T>>>,
+) -> bool {
 	match (field, default) {
 		(BoolOr::Bool(a), BoolOr::Bool(b)) => a != b,
 		_ => true,
@@ -892,8 +923,14 @@ fn validate_upgrade_case(
 			("allow-http", differs(&caps.allow_http, &defaults.allow_http)),
 			("deny-http", differs(&caps.deny_http, &defaults.deny_http)),
 			("deny-experimental", differs(&caps.deny_experimental, &defaults.deny_experimental)),
-			("allow-arbitrary-query", differs(&caps.allow_arbitrary_query, &defaults.allow_arbitrary_query)),
-			("deny-arbitrary-query", differs(&caps.deny_arbitrary_query, &defaults.deny_arbitrary_query)),
+			(
+				"allow-arbitrary-query",
+				differs(&caps.allow_arbitrary_query, &defaults.allow_arbitrary_query),
+			),
+			(
+				"deny-arbitrary-query",
+				differs(&caps.deny_arbitrary_query, &defaults.deny_arbitrary_query),
+			),
 			("allow-eval-query", differs(&caps.allow_eval_query, &defaults.allow_eval_query)),
 			("deny-eval-query", differs(&caps.deny_eval_query, &defaults.deny_eval_query)),
 		]
@@ -944,7 +981,7 @@ fn validate_upgrade_case(
 	if cfg.env.signup.is_some() {
 		ignored.push("env.signup");
 	}
-	if cfg.env.versioned {
+	if cfg.env.versioned && !cfg.test.migration {
 		ignored.push("env.versioned");
 	}
 	if !cfg.env.config.is_empty() {
@@ -988,7 +1025,9 @@ fn validate_upgrade_case(
 	}
 
 	if cfg.test.chain.is_some() && cfg.test.results.is_none() {
-		bail!("A `[test.chain]` test must declare `[[test.results]]`: the body is the per-hop check")
+		bail!(
+			"A `[test.chain]` test must declare `[[test.results]]`: the body is the per-hop check"
+		)
 	}
 
 	Ok(())
@@ -1009,16 +1048,13 @@ fn validate_upgrade_case(
 /// by `[[test.repair]]` are skipped by identity, and a repair statement anywhere
 /// else is still refused.
 fn undeclared_repair(case: &CaseImports) -> Option<String> {
-	let declared: Vec<&str> = case
-		.repairs
-		.iter()
-		.flatten()
-		.map(|script| script.origin.path.as_str())
-		.collect();
+	let declared: Vec<&str> =
+		case.repairs.iter().flatten().map(|script| script.origin.path.as_str()).collect();
 
 	let mut sources: Vec<(String, &str, &str)> =
 		vec![("Test body".to_owned(), case.test.origin.path.as_str(), body_of(&case.test))];
-	for (label, scripts) in [("Chain setup", &case.chain_setup), ("Chain mutate", &case.chain_mutate)]
+	for (label, scripts) in
+		[("Chain setup", &case.chain_setup), ("Chain mutate", &case.chain_mutate)]
 	{
 		for script in scripts {
 			sources.push((
@@ -1410,7 +1446,8 @@ async fn run_chain_task_inner(
 	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
 
 	let cfg = &run.case.test.config.parsed;
-	let namespace = cfg.env.namespace.as_ref().map(|x| x.as_ref()).into_value(ENV_DEFAULT_NAMESPACE);
+	let namespace =
+		cfg.env.namespace.as_ref().map(|x| x.as_ref()).into_value(ENV_DEFAULT_NAMESPACE);
 	let database = cfg.env.database.as_ref().map(|x| x.as_ref()).into_value(ENV_DEFAULT_DATABASE);
 	if database.is_some() && namespace.is_none() {
 		bail!("Cannot have a database set but not a namespace.")
@@ -1425,8 +1462,7 @@ async fn run_chain_task_inner(
 	let hops = walked.len();
 
 	if config.keep_files {
-		let listing =
-			walked.iter().map(|(v, _)| v.to_string()).collect::<Vec<_>>().join(" -> ");
+		let listing = walked.iter().map(|(v, _)| v.to_string()).collect::<Vec<_>>().join(" -> ");
 		tokio::fs::write(Path::new(dir).join("test.info"), format!("chain {listing}")).await?;
 	}
 
@@ -1458,9 +1494,9 @@ async fn run_chain_task_inner(
 					let output = process.quit_with_output().await?;
 					if retried {
 						let e = match output {
-							Some(out) => e.context(format!(
-								"Failed to open connection at {phase}\n\n{out}"
-							)),
+							Some(out) => {
+								e.context(format!("Failed to open connection at {phase}\n\n{out}"))
+							}
 							None => e.context(format!("Failed to open connection at {phase}")),
 						};
 						return Err(e);
@@ -1500,13 +1536,15 @@ async fn run_chain_task_inner(
 				// the feature; it creates it, and everything after inherits it.
 				if offset == 0
 					&& let Some(failure) =
-						run_scripts(&mut connection, &run.case.chain_setup, "chain setup", &prelude).await
+						run_scripts(&mut connection, &run.case.chain_setup, "chain setup", &prelude)
+							.await
 				{
 					return Ok(Err(failure));
 				}
 
 				if let Some(failure) =
-					run_scripts(&mut connection, &run.case.chain_mutate, "chain mutate", &prelude).await
+					run_scripts(&mut connection, &run.case.chain_mutate, "chain mutate", &prelude)
+						.await
 				{
 					return Ok(Err(failure));
 				}
@@ -1620,16 +1658,15 @@ async fn run_task_inner(
 	let prelude = module_prelude(module_dir);
 
 	// run imports
-	let mut process =
-		process::SurrealProcess::new(
-			&config,
-			&run.config.from,
-			dir,
-			run.config.port,
-			&experimental,
-			module_dir,
-		)
-			.await?;
+	let mut process = process::SurrealProcess::new(
+		&config,
+		&run.config.from,
+		dir,
+		run.config.port,
+		&experimental,
+		module_dir,
+	)
+	.await?;
 	match run_imports(run, &mut process, namespace, database, &prelude).await {
 		Ok(Some(x)) => return Ok(x),
 		Ok(None) => {}
@@ -1649,8 +1686,7 @@ async fn run_task_inner(
 	// excessivly slow, so we just retry once in this case.
 	let mut retried = false;
 	let result = loop {
-		let process =
-			process::SurrealProcess::new(
+		let process = process::SurrealProcess::new(
 			&config,
 			&run.config.to,
 			dir,
@@ -1658,7 +1694,7 @@ async fn run_task_inner(
 			&experimental,
 			module_dir,
 		)
-			.await?;
+		.await?;
 		match run_upgrade_test(run, process, namespace, database).await {
 			Ok(x) => break x,
 			Err(e) => {
@@ -1762,8 +1798,10 @@ mod filename_prefix_tests {
 			matches!(
 				c.op,
 				semver::Op::GreaterEq
-					| semver::Op::Greater | semver::Op::Caret
-					| semver::Op::Tilde | semver::Op::Exact
+					| semver::Op::Greater
+					| semver::Op::Caret
+					| semver::Op::Tilde
+					| semver::Op::Exact
 			)
 		})?;
 		Some(format!("{}.{:02}.{:02}", c.major, c.minor.unwrap_or(0), c.patch.unwrap_or(0)))

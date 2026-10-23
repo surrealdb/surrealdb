@@ -42,26 +42,6 @@ impl conn::Sealed for Any {
 
 			let endpoint_kind = EndpointKind::from(address.url.scheme());
 			match endpoint_kind {
-				EndpointKind::IndxDb => {
-					#[cfg(feature = "kv-indxdb")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						let engine = surrealdb_engine_local::connect(
-							engine::local::local_config(address),
-							session_clone.receiver.clone(),
-						)
-						.await?;
-						let router = Router::from_engine(engine, features, config);
-						let waiter = watch::channel(Some(WaitFor::Connection));
-						return Ok((router, waiter, session_clone).into());
-					}
-
-					#[cfg(not(feature = "kv-indxdb"))]
-				return Err(
-					Error::internal("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-				);
-				}
-
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
@@ -80,24 +60,6 @@ impl conn::Sealed for Any {
 				return Err(
 					Error::internal("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 				);
-				}
-
-				EndpointKind::RocksDb => {
-					#[cfg(feature = "kv-rocksdb")]
-					{
-						features.insert(ExtraFeatures::LiveQueries);
-						let engine = surrealdb_engine_local::connect(
-							engine::local::local_config(address),
-							session_clone.receiver.clone(),
-						)
-						.await?;
-						let router = Router::from_engine(engine, features, config);
-						let waiter = watch::channel(Some(WaitFor::Connection));
-						return Ok((router, waiter, session_clone).into());
-					}
-
-					#[cfg(not(feature = "kv-rocksdb"))]
-			return Err(Error::internal("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 				}
 
 				EndpointKind::SurrealKv => {

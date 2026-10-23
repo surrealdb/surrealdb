@@ -50,13 +50,6 @@ kv-mem = [
     "dep:tempfile",
     "dep:ext-sort",
 ]
-kv-indxdb = ["surrealdb-kvs-any/kv-indxdb"]
-kv-rocksdb = [
-    "surrealdb-kvs-any/kv-rocksdb",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
 kv-tikv = [
     "surrealdb-kvs-any/kv-tikv",
     "tokio/time",
@@ -213,7 +206,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # `-j4` bounds the peak memory of the C++ build scripts, as the sandbox kills the
 # build at 6 GiB.
 cargo-args = ["-j4", "--config", 'build.rustflags=["-Znext-solver=no"]']
-features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql", "postgres", "mysql"]
+features = ["kv-mem", "kv-surrealkv", "http", "scripting", "graphql", "gql", "postgres", "mysql"]
 targets = []
 
 [dependencies]
@@ -416,11 +409,6 @@ harness = false
 [[bench]]
 name = "functions"
 harness = false
-
-[[bench]]
-name = "rocksdb_cursor"
-harness = false
-required-features = ["kv-rocksdb"]
 
 [[bench]]
 name = "parser"

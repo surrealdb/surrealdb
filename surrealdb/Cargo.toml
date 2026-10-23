@@ -37,8 +37,6 @@ protocol-grpc = [
 # The `kv-*` features select a storage backend for the embedded engine. The
 # engine crate is the only route from the SDK to the database core.
 kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "tokio/time"]
-kv-indxdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-indxdb"]
-kv-rocksdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-rocksdb", "tokio/time"]
 kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "tokio/time"]
 kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-engine-local/scripting"]
@@ -71,10 +69,8 @@ unstable = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-# The docs.rs sandbox caps build memory, so the persistent local-engine API
-# (`engine::local::SurrealKv`, versioned storage) is documented through the
-# pure-Rust SurrealKV backend; a C++ backend such as `kv-rocksdb` exceeds the
-# cap.
+# The persistent local-engine API (`engine::local::SurrealKv`, versioned
+# storage) is documented through the pure-Rust SurrealKV backend.
 # docs.rs builds with the latest nightly, whose trait solver rejects the `diskann`
 # crate (`Arc<B>: Batch` not satisfied); `-Znext-solver=no` keeps it compiling there.
 # `-j4` bounds the peak memory of the C++ build scripts, as the sandbox kills the

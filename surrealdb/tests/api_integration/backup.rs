@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used)]
 #![cfg(any(
 	feature = "kv-mem",
-	feature = "kv-rocksdb",
 	feature = "kv-tikv",
 	feature = "kv-surrealkv",
 	feature = "protocol-http",

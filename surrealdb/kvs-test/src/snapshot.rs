@@ -100,9 +100,7 @@ kvs_test!(read_your_own_writes_scan);
 /// write their own disjoint key both commit (write skew is permitted).
 ///
 /// Backends that reject the anomaly are excluded and assert prevention in
-/// their own tests: the enterprise distributed store (serializable) and
-/// IndexedDB (OCC read-set validation fails any transaction whose read keys
-/// were concurrently modified).
+/// their own tests: the enterprise distributed store (serializable).
 async fn write_skew_permitted(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Write).await.unwrap();
@@ -125,4 +123,4 @@ async fn write_skew_permitted(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(write_skew_permitted, except = [surrealds, indxdb]);
+kvs_test!(write_skew_permitted, except = [surrealds]);

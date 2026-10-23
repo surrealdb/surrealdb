@@ -55,7 +55,7 @@ the level; pgwire also honours `default_transaction_isolation` and refuses those
 levels there. The memory engine (SurrealMX) publishes an
 `IsolationLevels` handle that opens read-write transactions under serializable
 snapshot isolation for `SERIALIZABLE`, and reports their plain reads as tracked;
-SurrealKV, RocksDB and TiKV offer `SNAPSHOT` alone and refuse `SERIALIZABLE`,
+SurrealKV and TiKV offer `SNAPSHOT` alone and refuse `SERIALIZABLE`,
 since their commits validate only written keys and locked reads.
 
 Not yet implemented: gRPC (its `begin` and `query` messages carry no options;

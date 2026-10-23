@@ -13,7 +13,7 @@ a current read does, although a B-tree index that flattens a set field holds one
 entry per stored set and so cannot serve an element lookup at any version. This
 holds whether the table is named in the statement or resolved at run time
 (`type::table($tb)`, with `$tb` bound in the block). Versioning needs a backend
-that keeps history, so this test runs on RocksDB and SurrealKV only.
+that keeps history, so this test runs on SurrealKV only.
 """
 
 [[test.results]]

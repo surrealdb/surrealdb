@@ -16,7 +16,7 @@
 //! # Name sanitisation
 //!
 //! Storage engines report hierarchical names with dots (e.g.
-//! `rocksdb.block_cache_usage`). We prepend `surrealdb.storage.` and pass
+//! `<engine>.<metric>`). We prepend `surrealdb.storage.` and pass
 //! the rest through unchanged; the Prometheus text exporter handles the
 //! dot-to-underscore conversion at render time.
 
@@ -47,8 +47,8 @@ pub fn register_storage_metrics(
 		let ds = Arc::clone(ds);
 		let name = metric.name;
 		// Build the OTel name. The exporter sanitises `.` to `_` so
-		// `surrealdb.storage.rocksdb.block_cache_usage` becomes
-		// `surrealdb_storage_rocksdb_block_cache_usage`.
+		// `surrealdb.storage.<engine>.<metric>` becomes
+		// `surrealdb_storage_<engine>_<metric>`.
 		let otel_name = format!("surrealdb.storage.{name}");
 		let _gauge = meter
 			.u64_observable_gauge(otel_name)

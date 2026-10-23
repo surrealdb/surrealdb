@@ -595,8 +595,8 @@ impl Context {
 	/// background index `Building` task, which lives inside the
 	/// `IndexBuilder`'s HashMap. Cloning the back-reference would form an
 	/// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pins the
-	/// `Datastore` (and its storage handles, ~7 file descriptors per RocksDB
-	/// instance, ~3 per SurrealKV) until process exit.
+	/// `Datastore` (and its storage handles, ~3 file descriptors per SurrealKV
+	/// instance) until process exit.
 	///
 	/// `vm_closures` is cleared too. That table belongs to the run of the
 	/// program `from` was made in, and a unit linked into it keeps a handle on

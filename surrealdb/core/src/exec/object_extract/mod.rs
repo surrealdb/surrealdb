@@ -425,7 +425,7 @@ fn extract_stored_field(
 /// [`Error::OptimisedOffsetOutOfRange`] and `entries` clamps to an empty
 /// slice instead of panicking. So the unvalidated walker preserves the
 /// graceful-recovery contract (corruption → `Err` → caller falls through to
-/// full decode) without the per-record O(fields) tax. RocksDB block
+/// full decode) without the per-record O(fields) tax. Storage-engine block
 /// checksums already detect storage corruption upstream, so the only
 /// residual difference from the validating path — a corrupt *non-ascending*
 /// key region making a lookup report a present key as absent — is both

@@ -5,8 +5,8 @@ mod cmd;
 mod format;
 mod runner;
 mod tests;
-mod version;
 mod util;
+mod version;
 
 use anyhow::{self, Result};
 use cli::ColorMode;

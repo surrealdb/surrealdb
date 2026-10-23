@@ -24,14 +24,14 @@ async fn ds_from_path(path: &str) -> TestDs {
 
 /// Construct an on-disk backend in a fresh temporary directory, kept alive
 /// for the lifetime of the datastore.
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-surrealkv")]
 async fn ds_on_disk(scheme: &str) -> TestDs {
 	ds_on_disk_with(scheme, "").await
 }
 
 /// [`ds_on_disk`] with the connection string's `query`, such as
 /// `?versioned=true`.
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-surrealkv")]
 async fn ds_on_disk_with(scheme: &str, query: &str) -> TestDs {
 	let dir = temp_dir::TempDir::new().unwrap();
 	let path = dir.path().to_string_lossy().to_string();
@@ -57,9 +57,6 @@ fn main() -> ExitCode {
 	// memory backend is registered.
 	#[cfg(feature = "kv-mem")]
 	backends.push(TestBackend::new("mem", || ds_from_path("memory")));
-
-	#[cfg(feature = "kv-rocksdb")]
-	backends.push(TestBackend::new("rocksdb", || ds_on_disk("rocksdb")));
 
 	#[cfg(feature = "kv-surrealkv")]
 	backends.push(TestBackend::new("surrealkv", || ds_on_disk("surrealkv")));

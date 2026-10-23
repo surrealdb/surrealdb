@@ -48,10 +48,11 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 			},
 		}
 	}
-	// Validate the scheme
+	// Validate the scheme. The removed `rocksdb` and `indxdb` schemes stay valid at
+	// this layer so that connecting names `surrealkv://` as their replacement.
 	match split_endpoint(v).0 {
-		"http" | "https" | "ws" | "wss" | "grpc" | "grpcs" | "mem" | "rocksdb" | "surrealkv"
-		| "tikv" => Ok(v.to_string()),
+		"http" | "https" | "ws" | "wss" | "grpc" | "grpcs" | "mem" | "surrealkv" | "tikv"
+		| "rocksdb" | "indxdb" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -230,6 +231,14 @@ pub(crate) fn retired_planner_strategy(v: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn test_endpoint_valid_passes_removed_schemes_to_their_message() {
+		assert!(endpoint_valid("rocksdb:/data").is_ok());
+		assert!(endpoint_valid("indxdb://name").is_ok());
+		assert!(endpoint_valid("surrealkv://data").is_ok());
+		assert!(endpoint_valid("nothing://data").is_err());
+	}
 
 	#[test]
 	fn test_func_targets() {

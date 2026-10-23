@@ -1018,8 +1018,7 @@ pub async fn init<C: TransactionBuilderFactory>(
 		.with_config(config)
 		// Mirror the tokio runtime worker count the server built itself
 		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore
-		// config so the RocksDB engine sizes its inline-blocking permit
-		// cap from the actual executor width.
+		// config so storage engines see the actual executor width.
 		.with_runtime_worker_threads(*crate::cnf::RUNTIME_WORKER_THREADS)
 		// Likewise its blocking-thread cap (see
 		// `cnf::RUNTIME_MAX_BLOCKING_THREADS`), which bounds the commits the
@@ -1372,7 +1371,7 @@ mod tests {
 	use serial_test::serial;
 	// Named here rather than inside each test because the shared helpers below
 	// carry them in their signatures.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	use surrealdb_datastore::key::schema::{NodeKey, NodeLiveQueryKey};
 	use surrealdb_types::ToSql;
 	use test_log::test;
@@ -2282,7 +2281,7 @@ mod tests {
 	/// The heartbeat sits at the epoch, so no reading of the clock makes the row
 	/// look live, and the seeding datastore runs no maintenance tasks, so nothing
 	/// reaps the rows before the caller reopens the path.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	async fn seed_archived_peer(path: &str) -> Result<(NodeKey, NodeLiveQueryKey)> {
 		use surrealdb_core::dbs::node::{Node, Timestamp};
 		use surrealdb_datastore::TransactionType;
@@ -2329,7 +2328,7 @@ mod tests {
 	/// datastore crate; what matters here is that `init` recovers the state, and
 	/// the core tests are what pin that the state is the one the bootstrap
 	/// actually produces.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	async fn seed_interrupted_bootstrap(path: &str) -> Result<()> {
 		use surrealdb_core::dbs::node::{Node, Timestamp};
 		use surrealdb_datastore::TransactionType;
@@ -2356,7 +2355,7 @@ mod tests {
 
 	/// A server config for `path` with both node-maintenance intervals set to
 	/// `interval`, which is what decides whether the node jobs run at all.
-	#[cfg(any(feature = "storage-rocksdb", feature = "storage-mem"))]
+	#[cfg(any(feature = "storage-surrealkv", feature = "storage-mem"))]
 	fn node_maintenance_config(path: String, interval: Duration) -> Result<Config> {
 		use surrealdb_core::options::EngineOptions;
 
@@ -2384,7 +2383,7 @@ mod tests {
 
 	/// Whether the seeded node row and its live-query row are still present,
 	/// read in one transaction so the pair is observed at a single snapshot.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	async fn seeded_rows_present(
 		dbs: &Datastore,
 		node_key: &NodeKey,
@@ -2408,7 +2407,7 @@ mod tests {
 	/// jobs. That leaves the schedule without them *and* skips the first pass
 	/// `initialise_datastore` spawns, so nothing but the startup steps themselves
 	/// could have touched the seeded rows by the time they return.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[serial]
 	async fn init_leaves_archived_nodes_for_the_maintenance_scheduler() -> Result<()> {
@@ -2416,7 +2415,7 @@ mod tests {
 		use surrealdb_observe::NoopObserver;
 
 		let dir = tempfile::tempdir()?;
-		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
 		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
 
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
@@ -2457,7 +2456,7 @@ mod tests {
 	/// Both intervals are an hour, so the periodic jobs cannot reach their first
 	/// deadline inside the test: the only thing that can reap the seeded rows is
 	/// the pass `initialise_datastore` spawns.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[serial]
 	async fn init_spawns_the_first_cleanup_pass_after_registration() -> Result<()> {
@@ -2465,7 +2464,7 @@ mod tests {
 		use surrealdb_observe::NoopObserver;
 
 		let dir = tempfile::tempdir()?;
-		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
 		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
 
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
@@ -2979,7 +2978,7 @@ mod tests {
 	/// those bytes read as storage from before `!v` existed, and the version
 	/// gate commits `!v = 1` and refuses — permanently, since the refusal is a
 	/// permanent error and the stamp it read is now on disk.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[test(tokio::test(flavor = "multi_thread"))]
 	#[serial]
 	async fn init_completes_a_bootstrap_a_previous_boot_left_unfinished() -> Result<()> {
@@ -2988,7 +2987,7 @@ mod tests {
 		use surrealdb_observe::NoopObserver;
 
 		let dir = tempfile::tempdir()?;
-		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		let path = format!("surrealkv:{}", dir.path().join("store").display());
 		seed_interrupted_bootstrap(&path).await?;
 
 		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;

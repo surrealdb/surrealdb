@@ -66,7 +66,7 @@ pub struct Root {
 #[derive(Debug, Clone, Default)]
 pub struct LocalConfig {
 	/// The datastore to open, as a scheme-prefixed path (`mem://`,
-	/// `rocksdb://path`, `surrealkv://path`) or, for TiKV, the cluster URL.
+	/// `surrealkv://path`) or, for TiKV, the cluster URL.
 	pub path: String,
 	/// The root user to create when the datastore has no credentials yet.
 	/// `None` starts the datastore with authentication disabled.
@@ -221,22 +221,33 @@ pub async fn connect(
 		.build_with_path(&config.path)
 		.await
 		.map_err(std_error_to_types_error)?;
-	kvs.check_version().await.map_err(std_error_to_types_error)?;
-	kvs.bootstrap().await.map_err(std_error_to_types_error)?;
-	kvs.start_maintenance_tasks_checked().await.map_err(std_error_to_types_error)?;
-	// If a root user is specified, setup the initial datastore credentials. A datastore that is
-	// open read-only refuses the write, so the step is skipped and the store serves what it
-	// already holds.
-	if let Some(root) = &config.root {
-		if kvs.is_read_only() {
-			tracing::warn!(
-				"The datastore is open read-only, so the root credentials were not initialised"
-			);
-		} else {
-			kvs.initialise_credentials(&root.username, &root.password)
-				.await
-				.map_err(std_error_to_types_error)?;
+	// A failure past this point must close the datastore: the caller never
+	// receives a handle to close, and an engine that holds an exclusive lock on
+	// its storage would otherwise keep it until the process ends.
+	let started = async {
+		kvs.check_version().await.map_err(std_error_to_types_error)?;
+		kvs.bootstrap().await.map_err(std_error_to_types_error)?;
+		kvs.start_maintenance_tasks_checked().await.map_err(std_error_to_types_error)?;
+		// If a root user is specified, setup the initial datastore credentials. A datastore
+		// that is open read-only refuses the write, so the step is skipped and the store
+		// serves what it already holds.
+		if let Some(root) = &config.root {
+			if kvs.is_read_only() {
+				tracing::warn!(
+					"The datastore is open read-only, so the root credentials were not initialised"
+				);
+			} else {
+				kvs.initialise_credentials(&root.username, &root.password)
+					.await
+					.map_err(std_error_to_types_error)?;
+			}
 		}
+		Ok(())
+	}
+	.await;
+	if let Err(e) = started {
+		kvs.shutdown().await.ok();
+		return Err(e);
 	}
 
 	Ok(serve(kvs, notifications, session_rx))

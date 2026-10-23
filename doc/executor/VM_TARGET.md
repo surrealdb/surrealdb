@@ -139,14 +139,14 @@ body again. Lookup and compilation happen only while a query is planned.
   transaction) and a lookup serves it only while every one reads the same
   (`exec::catalog_deps`). A schema change invalidates exactly the units whose
   dependencies it touched. A recording naming what it cannot identify keeps
-  no unit. Where the datastore is the store's sole writer (memory, RocksDB,
+  no unit. Where the datastore is the store's sole writer (memory,
   SurrealKV), it counts the commits of transactions that stamped a catalog
   version, and a transaction opened with none under way and none started
   since names the catalog it sees by that count
   (`Transaction::catalog_epoch`); a listed database read under one count is
   not read again by a transaction under the same count, so a listing premise
   costs nothing per table until a catalog commit. On a store other
-  processes write (TiKV, IndexedDB) no count names the catalog, and a
+  processes write (TiKV) no count names the catalog, and a
   transaction that links a unit kept under a listing — a stage set, a
   delete's edge cascade, the `REFERENCE` fields its repairs are lowered
   from — reads the listing once: two scans over the keys of the database's
@@ -248,8 +248,7 @@ body again. Lookup and compilation happen only while a query is planned.
   lowered again after a change to any table that defines one. A member's
   repairs run the stages of each table whose `REFERENCE` fields name its
   table, so a change to such a table lowers again the members of every
-  table it references. On a store that names no catalog epoch (TiKV,
-  IndexedDB) each transaction that links a unit depending on `REFERENCE`
+  table it references. On a store that names no catalog epoch (TiKV) each transaction that links a unit depending on `REFERENCE`
   fields reads the listing once to find them.
 - **Reads of tables only the data names**: a program holds the read units
   of the tables its sites name by analysis — record ids and tables written

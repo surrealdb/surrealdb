@@ -9,7 +9,7 @@ use futures::FutureExt;
 #[cfg(feature = "kv-mem")]
 use surrealdb_datastore::values::fulltext::TermDocsResidual;
 use surrealdb_kvs::TransactionType;
-#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+#[cfg(feature = "kv-surrealkv")]
 use temp_dir::TempDir;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -8235,7 +8235,7 @@ struct StorageEngine {
 	label: &'static str,
 	/// The path the datastore is opened at.
 	path: String,
-	#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+	#[cfg(feature = "kv-surrealkv")]
 	_dir: Option<TempDir>,
 }
 
@@ -8248,18 +8248,9 @@ fn storage_engines() -> Result<Vec<StorageEngine>> {
 	let mut engines = vec![StorageEngine {
 		label: "memory",
 		path: "memory".to_owned(),
-		#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+		#[cfg(feature = "kv-surrealkv")]
 		_dir: None,
 	}];
-	#[cfg(feature = "kv-rocksdb")]
-	{
-		let dir = TempDir::new()?;
-		engines.push(StorageEngine {
-			label: "rocksdb",
-			path: format!("rocksdb://{}", dir.path().to_string_lossy()),
-			_dir: Some(dir),
-		});
-	}
 	#[cfg(feature = "kv-surrealkv")]
 	{
 		let dir = TempDir::new()?;
@@ -13734,8 +13725,8 @@ async fn concurrent_indexing_retries_initial_batch_stops_after_abort() -> Result
 /// The background `Building` task's `FrozenContext` used to clone the
 /// owning `IndexBuilder` back into itself, forming an
 /// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pinned the
-/// `Datastore` (and its storage handles, leaking ~7 fds per RocksDB and
-/// ~3 per SurrealKV instance) for the lifetime of the process.
+/// `Datastore` (and its storage handles, leaking file descriptors per
+/// SurrealKV instance) for the lifetime of the process.
 ///
 /// After the fix, dropping the `Datastore` must let the inner
 /// `IndexBuilder::indexes` `Arc` reach zero strong references once any
@@ -18859,11 +18850,11 @@ async fn unique_collision_across_transactions_mem() -> Result<()> {
 	unique_collision_across_transactions(ds, session).await
 }
 
-#[cfg(feature = "kv-rocksdb")]
-async fn new_rocksdb_index_test_ds(dir: &TempDir) -> Result<(Arc<Datastore>, Session)> {
+#[cfg(feature = "kv-surrealkv")]
+async fn new_surrealkv_index_test_ds(dir: &TempDir) -> Result<(Arc<Datastore>, Session)> {
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
-		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.build_with_path(&format!("surrealkv://{}", dir.path().to_string_lossy()))
 		.await?;
 	let session = Session::owner().with_ns("test").with_db("test");
 	let tx = ds.transaction(TransactionType::Write).await?;
@@ -18872,19 +18863,19 @@ async fn new_rocksdb_index_test_ds(dir: &TempDir) -> Result<(Arc<Datastore>, Ses
 	Ok((ds, session))
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn unique_collision_in_one_transaction_rocksdb() -> Result<()> {
+async fn unique_collision_in_one_transaction_surrealkv() -> Result<()> {
 	let dir = TempDir::new()?;
-	let (ds, session) = new_rocksdb_index_test_ds(&dir).await?;
+	let (ds, session) = new_surrealkv_index_test_ds(&dir).await?;
 	unique_collision_in_one_transaction(&ds, &session).await
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn unique_collision_across_transactions_rocksdb() -> Result<()> {
+async fn unique_collision_across_transactions_surrealkv() -> Result<()> {
 	let dir = TempDir::new()?;
-	let (ds, session) = new_rocksdb_index_test_ds(&dir).await?;
+	let (ds, session) = new_surrealkv_index_test_ds(&dir).await?;
 	unique_collision_across_transactions(ds, session).await
 }
 
@@ -20659,15 +20650,15 @@ async fn clearing_a_lapsed_owner_fences_its_statement() -> Result<()> {
 	assert_clearing_a_lapsed_owner_fences_its_statement(ds).await
 }
 
-/// RocksDB counterpart of [`clearing_a_lapsed_owner_fences_its_statement`],
+/// SurrealKV counterpart of [`clearing_a_lapsed_owner_fences_its_statement`],
 /// on a backend that validates a transaction's locked reads at commit.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn clearing_a_lapsed_owner_fences_its_statement_on_rocksdb() -> Result<()> {
+async fn clearing_a_lapsed_owner_fences_its_statement_on_surrealkv() -> Result<()> {
 	let dir = TempDir::new()?;
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
-		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.build_with_path(&format!("surrealkv://{}", dir.path().to_string_lossy()))
 		.await?;
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.ensure_ns_db(None, "test", "test").await?;
@@ -20677,13 +20668,13 @@ async fn clearing_a_lapsed_owner_fences_its_statement_on_rocksdb() -> Result<()>
 
 /// The keeper's heartbeats, committed beside an open statement, do not
 /// conflict that statement: held open across one, it still commits.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_keepers_heartbeat_leaves_its_statement_able_to_commit() -> Result<()> {
 	let dir = TempDir::new()?;
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
-		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.build_with_path(&format!("surrealkv://{}", dir.path().to_string_lossy()))
 		.await?;
 	let session = Session::owner().with_ns("test").with_db("test");
 	let tx = ds.transaction(TransactionType::Write).await?;
@@ -20839,14 +20830,14 @@ async fn a_block_that_rebuilds_its_own_index_commits() -> Result<()> {
 	assert_a_block_that_rebuilds_its_own_index_commits(&ds).await
 }
 
-/// RocksDB counterpart of [`a_block_that_rebuilds_its_own_index_commits`].
-#[cfg(feature = "kv-rocksdb")]
+/// SurrealKV counterpart of [`a_block_that_rebuilds_its_own_index_commits`].
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn a_block_that_rebuilds_its_own_index_commits_on_rocksdb() -> Result<()> {
+async fn a_block_that_rebuilds_its_own_index_commits_on_surrealkv() -> Result<()> {
 	let dir = TempDir::new()?;
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
-		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.build_with_path(&format!("surrealkv://{}", dir.path().to_string_lossy()))
 		.await?;
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.ensure_ns_db(None, "test", "test").await?;
@@ -21252,8 +21243,8 @@ async fn sync_unique_after_concurrent_definitions_timing() -> Result<()> {
 		DEFINE INDEX OVERWRITE idx_out ON has_attribute FIELDS out CONCURRENTLY;";
 	const UNIQUE: &str =
 		"DEFINE INDEX OVERWRITE idx_sr_in_out ON has_attribute FIELDS source_rel, in, out UNIQUE;";
-	// The datastore path, `memory` unless `SURREAL_TIMING_PATH` names another (a `rocksdb://`
-	// path needs the `kv-rocksdb` feature).
+	// The datastore path, `memory` unless `SURREAL_TIMING_PATH` names another (a `surrealkv://`
+	// path needs the `kv-surrealkv` feature).
 	let path = std::env::var("SURREAL_TIMING_PATH").unwrap_or_else(|_| "memory".to_owned());
 	let ds = Datastore::builder().build_with_path(&path).await?;
 	let summary = |name: &str, mut times: Vec<Duration>| {

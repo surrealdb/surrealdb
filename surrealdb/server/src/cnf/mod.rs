@@ -411,12 +411,8 @@ pub static GRAPHQL_SUBSCRIPTION_CHANNEL_CAPACITY: LazyLock<usize> =
 /// cores, minimum 4).
 ///
 /// `dbs::init` injects this resolved value into the datastore config via
-/// `Datastore::builder().with_runtime_worker_threads(...)`, so the rocksdb
-/// inline-blocking permit cap is sized from the actual runtime worker
-/// count. The same default lives in
-/// `surrealdb_core::kvs::rocksdb::cnf::default_runtime_worker_threads` as
-/// a safety net for embedded callers that don't go through the server.
-/// Keep the two definitions in lockstep — if one moves, move the other.
+/// `Datastore::builder().with_runtime_worker_threads(...)`, so storage
+/// engines see the actual runtime worker count.
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_WORKER_THREADS", usize, || {
 		std::cmp::max(4, num_cpus::get())
@@ -437,11 +433,7 @@ pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
 ///
 /// `dbs::init` injects this resolved value into the datastore config via
 /// `Datastore::builder().with_runtime_max_blocking_threads(...)`, so the
-/// rocksdb engine keeps the commits it runs on the blocking pool to at most
-/// half of it. The same default lives in `default_runtime_max_blocking_threads`
-/// at `surrealdb/kvs-rocksdb/src/cnf.rs`, for embedded callers that don't go
-/// through the server. Keep the two definitions in lockstep — if one moves,
-/// move the other.
+/// storage engine can size its blocking work against it.
 pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
 

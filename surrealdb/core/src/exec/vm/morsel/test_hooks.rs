@@ -556,7 +556,7 @@ pub(in crate::exec::vm) fn fail_splits(ctx: &ExecutionContext) -> Failing {
 
 /// Every narrowing of a cursor the morsels of the datastore `ctx` runs under ask for fails, until
 /// the answer is dropped.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
 pub(in crate::exec::vm) fn fail_narrows(ctx: &ExecutionContext) -> Failing {
 	failing(ctx, |faults, on| faults.narrows = on)
 }
@@ -564,7 +564,7 @@ pub(in crate::exec::vm) fn fail_narrows(ctx: &ExecutionContext) -> Failing {
 /// Every grant of the fan-out lease the morsels of the datastore `ctx` runs under ask for, past the
 /// first `after`, is refused, until the answer is dropped. The refusal revokes the lease as a
 /// grant the query's memory cannot admit does, whatever the grant's bytes.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
 pub(in crate::exec::vm) fn fail_grants(ctx: &ExecutionContext, after: usize) -> Failing {
 	let failing = failing(ctx, |faults, on| faults.grants = on);
 	FAULTS
@@ -616,13 +616,13 @@ pub(super) fn grant_fails(ctx: &ExecutionContext) -> bool {
 
 /// A statement that waits for a place it is never given, which the scans running while it lives see
 /// as another statement waiting.
-#[cfg(all(feature = "kv-mem", feature = "kv-rocksdb"))]
+#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
 pub(in crate::exec::vm) struct Waiter(
 	#[expect(dead_code, reason = "held for its registration")] super::places::Statement,
 );
 
 /// Register a statement with the node's places and leave it waiting for one.
-#[cfg(all(feature = "kv-mem", feature = "kv-rocksdb"))]
+#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
 pub(in crate::exec::vm) fn waiting_statement() -> Waiter {
 	let statement = super::places::register();
 	let config = crate::exec::config::ExecConfig {

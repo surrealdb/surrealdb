@@ -7,7 +7,7 @@
 //! keyspace level rather than merely hidden from a typed read, and whether a
 //! reclaim interrupted mid-prefix resumes after the store is closed and
 //! reopened.
-#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 
 use std::sync::Arc;
 
@@ -144,16 +144,6 @@ async fn mem_reclaim_destroys_prefix() {
 	reclaim_destroys_prefix("memory", false).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test]
-async fn rocksdb_reclaim_destroys_prefix() {
-	use temp_dir::TempDir;
-
-	let dir = TempDir::new().unwrap();
-	let path = format!("rocksdb:{}", dir.path().to_string_lossy());
-	reclaim_destroys_prefix(&path, true).await;
-}
-
 #[cfg(feature = "kv-surrealkv")]
 #[tokio::test]
 async fn surrealkv_reclaim_destroys_prefix() {
@@ -172,7 +162,7 @@ async fn surrealkv_reclaim_destroys_prefix() {
 /// remainder. Only meaningful on a store that pages — a backend with an
 /// out-of-transaction range destroy empties the prefix in one call and has no
 /// cursor to resume from.
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-surrealkv")]
 async fn reclaim_resumes_across_a_restart(path: &str) {
 	use crate::key::KVKeyDecode;
 	use crate::key::schema::ReclaimKey;
@@ -239,16 +229,6 @@ async fn reclaim_resumes_across_a_restart(path: &str) {
 	assert_eq!(count_range(&ds, range).await, 0, "the prefix must end up empty");
 	assert_eq!(reclaim_queue_len(&ds).await, 0, "an emptied prefix must retire its queue entry");
 	close(ds).await;
-}
-
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test]
-async fn rocksdb_reclaim_resumes_across_a_restart() {
-	use temp_dir::TempDir;
-
-	let dir = TempDir::new().unwrap();
-	let path = format!("rocksdb:{}", dir.path().to_string_lossy());
-	reclaim_resumes_across_a_restart(&path).await;
 }
 
 #[cfg(feature = "kv-surrealkv")]

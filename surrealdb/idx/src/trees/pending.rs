@@ -29,7 +29,7 @@
 //! retained for the rest of the scan.
 //!
 //! No per-engine mechanism can make that byte target absolute. A single
-//! pending value can itself be arbitrarily large, and a TiKV or IndexedDB scan
+//! pending value can itself be arbitrarily large, and a TiKV scan
 //! decodes its response before this code can inspect a row. The fixed
 //! [`PENDING_MAX_ROWS`] cap still matters, though: without it, one narrow page
 //! could size the next at the engine-wide 500-row default and multiply an

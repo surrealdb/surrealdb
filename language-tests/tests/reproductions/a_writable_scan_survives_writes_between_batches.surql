@@ -5,7 +5,7 @@ database = true
 timeout = 30000
 
 [test]
-reason = "A statement that writes while its own table scan is still open must read the rest of the scan intact. Every row of `t` is a pending write of the open transaction, so each scan batch ends with the iterator parked on an entry held in the transaction's write batch; the writes made between batches (the UPDATE itself, an event body, or a subquery's CREATE) grow and reallocate that buffer. The RocksDB iterator caches the value of its current entry as a slice into the buffer, so without re-reading it the next batch copied freed memory (heap-use-after-free under ASAN)."
+reason = "A statement that writes while its own table scan is still open must read the rest of the scan intact. Every row of `t` is a pending write of the open transaction, so each scan batch ends with the iterator parked on an entry held in the transaction's write batch; the writes made between batches (the UPDATE itself, an event body, or a subquery's CREATE) grow and reallocate that buffer. An iterator can cache the value of its current entry as a slice into the buffer, so without re-reading it the next batch copied freed memory (heap-use-after-free under ASAN)."
 
 [[test.results]]
 value = "NONE"

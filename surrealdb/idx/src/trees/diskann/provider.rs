@@ -3,7 +3,7 @@
 //! The upstream DiskANN graph owns search and mutation algorithms, but delegates persistence and
 //! distance/computer access through provider traits. This module maps those trait calls onto
 //! SurrealDB transactions, keeps the persisted `!de`/`!da`/`!dn`/`!ds` keys authoritative, and
-//! batches cache misses so RocksDB-backed lookups avoid long chains of individual point reads.
+//! batches cache misses so storage-backed lookups avoid long chains of individual point reads.
 //!
 //! # Cache coherency invariant
 //!

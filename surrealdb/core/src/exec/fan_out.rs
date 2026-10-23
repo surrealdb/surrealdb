@@ -333,19 +333,19 @@ mod tests {
 		assert_eq!(later.load(Ordering::Relaxed), 0, "a row after the failure ran");
 	}
 
-	/// Records read through a fan-out of record ids on RocksDB with no inline storage calls, so
+	/// Records read through a fan-out of record ids on SurrealKV with no inline storage calls, so
 	/// that each read holds the transaction while it waits for the thread that reads. Each read
 	/// derives its record as a nested evaluation; every statement ends.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-	async fn records_read_through_a_fan_out_on_offloaded_rocksdb_reads_end() {
+	async fn records_read_through_a_fan_out_on_offloaded_surrealkv_reads_end() {
 		use surrealdb_cnf::ConfigMap;
 
 		use crate::exec::operators::test_util::TestDb;
 
 		for round in 0..10 {
 			let dir = temp_dir::TempDir::new().expect("a directory");
-			let db = TestDb::new_on_rocksdb(
+			let db = TestDb::new_on_surrealkv(
 				"CREATE item:1, item:2, item:3, item:4, item:5;",
 				dir.path(),
 				ConfigMap::empty().with_key_value("runtime_worker_threads", "1"),

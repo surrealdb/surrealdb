@@ -10,12 +10,12 @@ version.workspace = true
 description = "Embedded SurrealDB engine for browsers, as WebAssembly"
 
 [features]
-# Empty, and it has to stay that way: `kv-indxdb` reaches IndexedDB and exists
-# only on wasm targets, so a default that named a backend would break every
+# Empty, and it has to stay that way: `kv-surrealkv` reaches the origin private
+# file system on wasm targets, so a default that named a backend would break every
 # native build that resolves this crate's features.
 default = []
 kv-mem = ["surrealdb-embedded/kv-mem"]
-kv-indxdb = ["surrealdb-embedded/kv-indxdb"]
+kv-surrealkv = ["surrealdb-embedded/kv-surrealkv", "dep:surrealdb-kvs-surrealkv"]
 # Reports panics to the browser console. Off in a release build, where the
 # hook's message strings are dead weight.
 debug = ["dep:web-sys"]
@@ -29,19 +29,15 @@ futures = { workspace = true }
 js-sys = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 surrealdb-embedded = { workspace = true }
+# Only for asking whether the browser keeps the origin's storage.
+surrealdb-kvs-surrealkv = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true }
-# Not named in the source: the `#[wasm_bindgen]` macro expands every `async fn`
-# into a call through this crate.
+# Also reached by the `#[wasm_bindgen]` macro's expansion of every `async fn`.
 wasm-bindgen-futures = { workspace = true }
 wasm-streams = { workspace = true }
 # Only the `debug` panic hook writes to the console, so this is not compiled
 # into a release build at all.
 web-sys = { workspace = true, features = ["console"], optional = true }
-
-[package.metadata.cargo-machete]
-# Reached only through the `#[wasm_bindgen]` macro's expansion of `async fn`,
-# so it is never named in the source.
-ignored = ["wasm-bindgen-futures"]
 
 [lints]
 workspace = true

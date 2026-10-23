@@ -917,7 +917,7 @@ async fn live_field_select_permission_reads_computed_fields() -> Result<()> {
 // share one task's cooperative budget, which runs out within a round, so a
 // registration can yield inside its write transaction and lose its commit to
 // a later one; the server runs the loser again, and none reports a conflict.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
 	use futures::StreamExt;
@@ -933,7 +933,7 @@ async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
 		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.with_notify(send)
-		.build_with_path(&format!("rocksdb://{}", dir.path().display()))
+		.build_with_path(&format!("surrealkv://{}", dir.path().display()))
 		.await?;
 	crate::helpers::new_ns_db(&ds, "test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
@@ -962,7 +962,7 @@ async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
 }
 
 /// The ids `INFO FOR TABLE` lists as live queries on `table`.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn lives(
 	ds: &surrealdb_core::kvs::Datastore,
 	ses: &Session,
@@ -978,26 +978,38 @@ async fn lives(
 	Ok(lives.keys().cloned().collect())
 }
 
-/// Open a RocksDB datastore in `dir` with a `test`/`test` database.
-#[cfg(feature = "kv-rocksdb")]
-async fn rocksdb_ds(
+/// Open a SurrealKV datastore in `dir` with a `test`/`test` database, with
+/// commits fsynced (the default) or not.
+///
+/// A grouped fsync stretches every commit, which serialises the contenders on one
+/// live-query stamp for longer than a statement's bounded re-runs cover on a
+/// slow disk. The tests that pin the re-run behaviour itself run without it;
+/// the ones that run with it are ignored, and show where the budget runs out.
+#[cfg(feature = "kv-surrealkv")]
+async fn surrealkv_ds_with(
 	dir: &temp_dir::TempDir,
+	fsync: bool,
 ) -> Result<std::sync::Arc<surrealdb_core::kvs::Datastore>> {
 	use surrealdb_rpc::capabilities::Capabilities;
 
 	let (send, _recv) = surrealdb_core::channel::bounded(1000);
+	let query = if fsync {
+		""
+	} else {
+		"?sync=never"
+	};
 	let ds = surrealdb_core::kvs::Datastore::builder()
 		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.with_notify(send)
-		.build_with_path(&format!("rocksdb://{}", dir.path().display()))
+		.build_with_path(&format!("surrealkv://{}{query}", dir.path().display()))
 		.await?;
 	crate::helpers::new_ns_db(&ds, "test", "test").await?;
 	Ok(ds)
 }
 
 /// Register a live query on `table` and kill it, failing on any error.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn live_then_kill(
 	ds: &surrealdb_core::kvs::Datastore,
 	ses: &Session,
@@ -1018,16 +1030,15 @@ async fn live_then_kill(
 // conflict. The server re-runs the loser, so whatever order a connection's
 // concurrent registrations and aborts fall in, every `LIVE` it answered is
 // gone once its `KILL` answered, and neither statement reports a conflict.
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread")]
-async fn concurrent_live_and_kill_on_one_task_leave_no_live_query() -> Result<()> {
+#[cfg(feature = "kv-surrealkv")]
+async fn live_and_kill_on_one_task(fsync: bool) -> Result<()> {
 	use futures::StreamExt;
 
 	const ROUNDS: usize = 20;
 	const PER_ROUND: usize = 30;
 
 	let dir = temp_dir::TempDir::new()?;
-	let ds = rocksdb_ds(&dir).await?;
+	let ds = surrealkv_ds_with(&dir, fsync).await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 	for round in 0..ROUNDS {
@@ -1054,14 +1065,13 @@ async fn concurrent_live_and_kill_on_one_task_leave_no_live_query() -> Result<()
 // The same as connections of their own: each pair runs on its own task, so
 // the statements overlap on every worker thread at once rather than taking
 // turns on one task, and more of them lose to one winner together.
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_live_and_kill_across_connections_leave_no_live_query() -> Result<()> {
+#[cfg(feature = "kv-surrealkv")]
+async fn live_and_kill_across_connections(fsync: bool) -> Result<()> {
 	const ROUNDS: usize = 20;
 	const PER_ROUND: usize = 30;
 
 	let dir = temp_dir::TempDir::new()?;
-	let ds = rocksdb_ds(&dir).await?;
+	let ds = surrealkv_ds_with(&dir, fsync).await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 	for round in 0..ROUNDS {
@@ -1086,19 +1096,48 @@ async fn concurrent_live_and_kill_across_connections_leave_no_live_query() -> Re
 	Ok(())
 }
 
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_live_and_kill_on_one_task_leave_no_live_query() -> Result<()> {
+	live_and_kill_on_one_task(false).await
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_live_and_kill_across_connections_leave_no_live_query() -> Result<()> {
+	live_and_kill_across_connections(false).await
+}
+
+// The same with commits fsynced, as by default: 30 contenders on one table's
+// live-query stamp use up the statement's bounded re-runs and a conflict
+// reaches the caller.
+#[cfg(feature = "kv-surrealkv")]
+#[ignore = "30 concurrent pairs exhaust the bounded re-runs when commits are fsynced"]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_live_and_kill_on_one_task_with_fsync() -> Result<()> {
+	live_and_kill_on_one_task(true).await
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[ignore = "30 concurrent pairs exhaust the bounded re-runs when commits are fsynced"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_live_and_kill_across_connections_with_fsync() -> Result<()> {
+	live_and_kill_across_connections(true).await
+}
+
 // A `LIVE` that overlaps a `KILL` inside a transaction block the caller owns
 // is not re-run on its behalf: the block's conflict surfaces to the caller,
 // and its `KILL` does not apply. The overlap is arranged by time alone: the
 // `LIVE` is sent while the block sleeps, and it may still commit before the
 // block's `KILL` has read the table, in which case nothing conflicts and the
 // scenario is tried again on a fresh table.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_conflict_inside_a_transaction_block_surfaces() -> Result<()> {
 	const TRIES: usize = 10;
 
 	let dir = temp_dir::TempDir::new()?;
-	let ds = rocksdb_ds(&dir).await?;
+	let ds = surrealkv_ds_with(&dir, false).await?;
 	let ses_a = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let ses_b = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
@@ -1147,7 +1186,7 @@ async fn a_conflict_inside_a_transaction_block_surfaces() -> Result<()> {
 	Err(anyhow::anyhow!("no try of {TRIES} overlapped the block with the LIVE"))
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 fn id_string(id: &Value) -> Result<String> {
 	let Value::Uuid(id) = id else {
 		return Err(anyhow::anyhow!("LIVE answered {id:?}, not a uuid"));

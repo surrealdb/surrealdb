@@ -6,7 +6,7 @@ run-name: "Remote language tests '${{ github.ref_name }}' (${{ inputs.engine }})
 # it (it creates and drops namespaces and owns the root configs), so it is not
 # worth running on every push/PR. Trigger it on demand from the Actions tab or
 # with
-# `gh workflow run lang-tests-remote.yml --ref <branch> -f engine=<both|mem|rocksdb>`.
+# `gh workflow run lang-tests-remote.yml --ref <branch> -f engine=<both|mem|surrealkv>`.
 on:
   workflow_dispatch:
     inputs:
@@ -16,7 +16,7 @@ on:
         options:
           - both
           - mem
-          - rocksdb
+          - surrealkv
         default: both
 
 concurrency:
@@ -37,8 +37,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `both` runs mem + rocksdb; otherwise the single chosen backend.
-        engine: ${{ (inputs.engine == 'both') && fromJSON('["mem","rocksdb"]') || fromJSON(format('["{0}"]', inputs.engine)) }}
+        # `both` runs mem + surrealkv; otherwise the single chosen backend.
+        engine: ${{ (inputs.engine == 'both') && fromJSON('["mem","surrealkv"]') || fromJSON(format('["{0}"]', inputs.engine)) }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1

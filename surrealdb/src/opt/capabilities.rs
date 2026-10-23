@@ -103,25 +103,25 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// # Examples
 ///
 /// Create a new instance, and allow all capabilities
-#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
-#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
+#[cfg_attr(feature = "kv-surrealkv", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-surrealkv"), doc = "```ignore")]
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
-/// # use surrealdb::engine::local::RocksDb;
+/// # use surrealdb::engine::local::SurrealKv;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// let capabilities = Capabilities::all();
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
 /// Create a new instance, and allow certain functions
-#[cfg_attr(feature = "kv-rocksdb", doc = "```no_run")]
-#[cfg_attr(not(feature = "kv-rocksdb"), doc = "```ignore")]
+#[cfg_attr(feature = "kv-surrealkv", doc = "```no_run")]
+#[cfg_attr(not(feature = "kv-surrealkv"), doc = "```ignore")]
 /// # use std::str::FromStr;
-/// # use surrealdb::engine::local::RocksDb;
+/// # use surrealdb::engine::local::SurrealKv;
 /// # use surrealdb::opt::capabilities::Capabilities;
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
@@ -130,7 +130,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// let capabilities = Capabilities::default()
 ///     .with_function_denied("http::*")?;
 /// let config = Config::default().capabilities(capabilities);
-/// let db = Surreal::new::<RocksDb>(("temp.db", config)).await?;
+/// let db = Surreal::new::<SurrealKv>(("temp.db", config)).await?;
 /// # Ok(())
 /// # }
 /// ```

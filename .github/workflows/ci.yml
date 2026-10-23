@@ -124,7 +124,7 @@ jobs:
       - name: Build binary
         # `devopt` rather than `dev`: this binary is what the SDK, upgrade,
         # conformance and MCP lanes execute, so it is built with optimised
-        # workspace code and RocksDB (see `[profile.devopt]` in Cargo.toml).
+        # workspace code (see `[profile.devopt]` in Cargo.toml).
         # Consumers download the single file to `target/debug` and are
         # indifferent to the profile it was built in.
         run: cargo build --locked --profile devopt --target ${{ env.TARGET }}
@@ -485,12 +485,17 @@ jobs:
         run: cargo make ci-wasm-size-budget -- --toolchain nightly --variant edge
 
   test-wasm:
-    name: Test Wasm (IndexedDB)
+    name: Test Wasm (SurrealKV OPFS)
     needs: changes
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
     # the wasm-bindgen-test browser harness needs.
     runs-on: ubuntu-latest
+    env:
+      # SurrealKV's compression dependency compiles C for wasm32, which needs
+      # a clang that targets it and an archiver that writes wasm objects.
+      CC_wasm32_unknown_unknown: clang
+      AR_wasm32_unknown_unknown: llvm-ar
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -510,11 +515,14 @@ jobs:
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install the wasm C toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang llvm
+
       - name: Install wasm-pack
         run: cargo install --locked wasm-pack@=0.15.0
 
-      - name: Test the IndexedDB backend in headless Chrome
-        working-directory: surrealdb/kvs-indxdb
+      - name: Test the SurrealKV backend over OPFS in headless Chrome
+        working-directory: surrealdb/kvs-surrealkv
         run: wasm-pack test --headless --chrome
 
   check-revision:
@@ -1060,10 +1068,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        # RocksDB is three legs: each of its test suites resolves a different
-        # feature set for the C++ library, which cargo rebuilds for every one, so
-        # one leg running them in turn takes ~3x the others. See `ci-kvs-rocksdb-*`.
-        engine: [mem, rocksdb-core, rocksdb-store, rocksdb-idx, surrealkv, tikv]
+        engine: [mem, surrealkv, tikv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1143,7 +1148,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [mem, rocksdb, surrealkv, tikv]
+        engine: [mem, surrealkv, tikv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1254,8 +1259,8 @@ jobs:
       matrix:
         arch: ${{ github.event_name == 'push' && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
         # Pull requests and the merge queue run the mem engine on arm;
-        # surrealkv, rocksdb, tikv and amd64 run post-merge.
-        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem"]') }}
+        # surrealkv, tikv and amd64 run post-merge.
+        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "tikv"]') || fromJSON('["mem"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1312,7 +1317,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [mem, rocksdb]
+        engine: [mem, surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1366,7 +1371,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [surrealkv, rocksdb]
+        engine: [surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1418,7 +1423,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [surrealkv, rocksdb]
+        engine: [surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1510,6 +1515,13 @@ jobs:
         env:
           LANG_UPGRADE_PREBUILT_CURRENT: "1"
         run: cargo make ci-lang-upgrade-run-${{ matrix.engine }}
+
+      # Existing RocksDB users: the released binary writes `rocksdb://DIR` and
+      # this checkout opens the same DIR as `surrealkv://DIR`.
+      - name: Run RocksDB migration tests
+        env:
+          LANG_UPGRADE_PREBUILT_CURRENT: "1"
+        run: cargo make ci-lang-upgrade-run-rocksdb-migration
 
   # ----------------------------------------
   # Tokio-console feature check

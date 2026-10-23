@@ -11,7 +11,7 @@ use surrealdb_cnf::Config;
 ///   used by any TiKV-specific keys today, so this is currently a no-op for TiKV).
 ///
 /// Replaces the previous module of `lazy_env_parse!` statics so the
-/// TiKV backend matches the rest of the workspace (mem, rocksdb, …):
+/// TiKV backend matches the rest of the workspace (mem, surrealkv, …):
 /// each datastore instance carries its own typed config rather than
 /// reading process-wide environment globals at first use.
 #[derive(Clone, Debug)]

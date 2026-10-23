@@ -1403,11 +1403,11 @@ impl Deref for Transaction {
 /// Returned by [`Transaction::open_keys_cursor`]. Holds a borrow into the
 /// parent transaction's metrics counter, so it cannot outlive the
 /// transaction at the type level. Each call to `next_batch` advances the
-/// underlying RocksDB-or-default cursor and records the batch's keys/bytes
+/// underlying cursor and records the batch's keys/bytes
 /// against the transaction's scan metrics.
 pub struct MeteredKeysCursor<'a> {
-	/// The underlying backend-provided cursor (RocksDB-specialised, or the
-	/// default impl that wraps single-shot `keys`/`keysr`).
+	/// The underlying backend-provided cursor (a stateful engine cursor, or
+	/// the default impl that wraps single-shot `keys`/`keysr`).
 	inner: Box<dyn ScanCursorKeys + 'a>,
 	/// Borrow into the parent transaction's metrics counter; updated on
 	/// each batch.
@@ -11195,7 +11195,7 @@ impl Transaction {
 	/// to ensure the timestamp reflects the actual commit time.
 	///
 	/// The changefeed versionstamp is taken from [`Self::timestamp`] (the backend timestamp
-	/// oracle). It is process-local-monotonic on mem/rocksdb/surrealkv and globally monotonic
+	/// oracle). It is process-local-monotonic on mem/surrealkv and globally monotonic
 	/// only on backends with a coordinated oracle (TiKV TSO) — so cross-node changefeed ordering
 	/// is a property of the backend, not of this engine.
 	pub async fn store_changes(&self) -> Result<()> {

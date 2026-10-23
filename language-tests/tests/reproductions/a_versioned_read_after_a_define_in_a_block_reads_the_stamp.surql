@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["rocksdb", "surrealkv"]
+backend = ["surrealkv"]
 versioned = true
 timeout = 5000
 
@@ -22,8 +22,7 @@ reason = """
 
 	The same read is asked outside a block and inside one, after a `DEFINE` of
 	an unrelated table, and the pair is the assertion: both see the record as it
-	stood at the stamp, with the field computed from it. RocksDB versions its
-	reads in the feed's unit, so it is the control.
+	stood at the stamp, with the field computed from it.
 """
 
 [[test.results]]

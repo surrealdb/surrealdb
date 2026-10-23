@@ -2,11 +2,10 @@
 //!
 //! `split` and `estimate` are answered by every backend, natively or from the defaults, and the
 //! tests of them run against all of them. A view is offered only by a backend with a native one,
-//! and only for a read-only transaction; RocksDB also gives one to a writable transaction until
-//! its first buffered write. The tests of the cursors a view opens run against the memory backend,
-//! RocksDB and SurrealKV. The test of batched point reads runs against every backend: through the
-//! view where there is one, and through the transaction, as a caller falls back to, where there is
-//! none.
+//! and only for a read-only transaction. The tests of the cursors a view opens run against the
+//! memory backend and SurrealKV. The test of batched point reads runs against every backend:
+//! through the view where there is one, and through the transaction, as a caller falls back to,
+//! where there is none.
 
 #[cfg(not(target_family = "wasm"))]
 use std::collections::BTreeMap;
@@ -324,7 +323,7 @@ async fn a_view_does_not_see_later_commits(b: &TestBackend) {
 	fresh.cancel().await.unwrap();
 }
 
-kvs_test!(a_view_does_not_see_later_commits, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(a_view_does_not_see_later_commits, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A cursor stopped part-way, re-aimed at what it says remains, reads the rest and nothing twice.
 async fn a_cursor_resumes_where_it_stopped(b: &TestBackend) {
@@ -361,7 +360,7 @@ async fn a_cursor_resumes_where_it_stopped(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_cursor_resumes_where_it_stopped, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(a_cursor_resumes_where_it_stopped, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// The entry a visitor answers `Break` for is spent: the cursor goes on after it.
 async fn a_break_consumes_the_entry_it_stops_on(b: &TestBackend) {
@@ -399,10 +398,7 @@ async fn a_break_consumes_the_entry_it_stops_on(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(
-	a_break_consumes_the_entry_it_stops_on,
-	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
-);
+kvs_test!(a_break_consumes_the_entry_it_stops_on, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// Narrowing a cursor ends its read at the new bound, without a seek, and only inside what is left.
 async fn narrow_stops_a_cursor_without_reseeking(b: &TestBackend) {
@@ -444,10 +440,7 @@ async fn narrow_stops_a_cursor_without_reseeking(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(
-	narrow_stops_a_cursor_without_reseeking,
-	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
-);
+kvs_test!(narrow_stops_a_cursor_without_reseeking, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A page takes what it can hold; an entry too large for any page arrives alone.
 async fn fill_copies_into_a_caller_page(b: &TestBackend) {
@@ -504,7 +497,7 @@ async fn fill_copies_into_a_caller_page(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(fill_copies_into_a_caller_page, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(fill_copies_into_a_caller_page, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A read-only transaction refuses commit where a writable one would wait for open cursors.
 /// The refusal leaves any open cursor alive and readable.
@@ -526,7 +519,7 @@ async fn commit_waits_for_an_open_cursor(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(commit_waits_for_an_open_cursor, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(commit_waits_for_an_open_cursor, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// Cancelling does not finish while a cursor is alive, and finishes once it is dropped.
 #[cfg(not(target_family = "wasm"))]
@@ -559,7 +552,7 @@ async fn cancel_waits_for_an_open_cursor(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(cancel_waits_for_an_open_cursor, only = [mem, rocksdb, surrealkv, surrealkv_versioned]);
+kvs_test!(cancel_waits_for_an_open_cursor, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// Once the transaction has finished, its view opens nothing.
 async fn a_finished_transaction_opens_no_cursor(b: &TestBackend) {
@@ -577,34 +570,17 @@ async fn a_finished_transaction_opens_no_cursor(b: &TestBackend) {
 	assert!(tx.snapshot().is_none(), "a finished transaction gives no view");
 }
 
-kvs_test!(
-	a_finished_transaction_opens_no_cursor,
-	only = [mem, rocksdb, surrealkv, surrealkv_versioned]
-);
-
-/// A writable transaction has a view while it holds no buffered write, since its reads are then
-/// the snapshot's. Once it buffers a put its reads merge that write, which a view over the
-/// snapshot would not, so it has none.
-async fn a_writable_rocksdb_transaction_gives_a_view_until_its_first_write(b: &TestBackend) {
-	let ds = b.create_ds().await;
-	let tx = ds.transaction(Write).await.unwrap();
-	assert!(tx.snapshot().is_some(), "a writable transaction with no write gives a view");
-	tx.set(b"first/write".to_vec().into(), value()).await.unwrap();
-	assert!(tx.snapshot().is_none(), "a writable transaction with a buffered put gives no view");
-	tx.cancel().await.unwrap();
-}
-
-kvs_test!(a_writable_rocksdb_transaction_gives_a_view_until_its_first_write, only = [rocksdb]);
+kvs_test!(a_finished_transaction_opens_no_cursor, only = [mem, surrealkv, surrealkv_versioned]);
 
 /// A read-only transaction has nothing buffered, so its reads are the snapshot's.
-async fn a_read_only_rocksdb_transaction_gives_a_view(b: &TestBackend) {
+async fn a_read_only_transaction_gives_a_view(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Read).await.unwrap();
 	assert!(tx.snapshot().is_some());
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_read_only_rocksdb_transaction_gives_a_view, only = [rocksdb]);
+kvs_test!(a_read_only_transaction_gives_a_view, only = [surrealkv, surrealkv_versioned]);
 
 /// Batched point reads at the moment a read-only transaction's view is taken: through the view
 /// where the backend gives one, and through the transaction itself, a caller's fallback, where it

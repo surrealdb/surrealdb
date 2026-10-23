@@ -51,7 +51,7 @@ jobs:
         # TiKV is absent: it is the one backend whose reads are round trips and
         # so the one that might justify overlapping, but it needs a cluster to
         # measure against. #860 tracks that half.
-        backend: [kv-mem, kv-rocksdb, kv-surrealkv]
+        backend: [kv-mem, kv-surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1

@@ -295,8 +295,7 @@ jobs:
 
       # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
       # with its `cloud`+`aws` cargo features — from the downstream's own
-      # dependency graph, not this engine (this engine's rocksdb is the crates.io
-      # `surrealdb-rocksdb` with only lz4+snappy). Those features compile RocksDB's
+      # dependency graph, not this engine. Those features compile RocksDB's
       # cloud glue against the AWS C++ SDK (`#include <aws/core/Aws.h>`), and the
       # fork's build.rs expects a prebuilt SDK at $AWS_SDK_INSTALL_DIR. The runner
       # image ships none, so without this the downstream `cargo check` aborts at

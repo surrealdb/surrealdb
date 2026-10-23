@@ -2,7 +2,7 @@
 [env]
 namespace = true
 database = true
-backend = ["mem", "rocksdb", "surrealkv"]
+backend = ["mem", "surrealkv"]
 
 [test]
 reason = """

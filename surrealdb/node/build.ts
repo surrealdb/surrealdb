@@ -72,7 +72,7 @@ const buildCmd = [
 	"--platform",
 	"--release",
 	"--features",
-	"kv-rocksdb,kv-mem,kv-surrealkv",
+	"kv-mem,kv-surrealkv",
 	"-o",
 	"napi",
 ];

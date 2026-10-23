@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 
 //! Export and import of records that have accumulated many versions.
 //!

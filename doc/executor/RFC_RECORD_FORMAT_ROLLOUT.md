@@ -62,8 +62,8 @@ The store records that as a feature level, and every node reads the level it wri
 
 | engine | how the level rises |
 |---|---|
-| memory, RocksDB, SurrealKV | the engine reports that one process owns the store; `check_version` raises a store at Legacy to 4.0 at startup |
-| TiKV, IndxDB | the operator calls `Datastore::raise_feature_level`; it is refused while a live node records an older release, or none |
+| memory, SurrealKV | the engine reports that one process owns the store; `check_version` raises a store at Legacy to 4.0 at startup |
+| TiKV | the operator calls `Datastore::raise_feature_level`; it is refused while a live node records an older release, or none |
 | any | `SURREAL_FEATURE_LEVEL` (or `Builder::with_feature_level`) names a release the store is created at or raised to at least; `legacy` holds a store at Legacy |
 
 Once any v1 record or stored-grammar catalog entry exists, the ledger holds the incompatible entry

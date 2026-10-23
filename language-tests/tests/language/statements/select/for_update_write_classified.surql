@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["mem", "rocksdb", "surrealkv"]
+backend = ["mem", "surrealkv"]
 
 [test]
 reason = "A SELECT ... FOR UPDATE nested inside a value literal makes the enclosing statement write-classified, so it runs on a committing write transaction and the locked read succeeds with its conflict registration armed"

@@ -3,7 +3,7 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-backend = ["mem", "rocksdb", "surrealkv"]
+backend = ["mem", "surrealkv"]
 versioned = true
 
 [test]

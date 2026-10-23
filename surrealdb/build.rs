@@ -24,7 +24,7 @@ fn main() {
 	if feature("PROTOCOL_HTTP") && (!wasm || browser) {
 		println!("cargo:rustc-cfg=http_engine");
 	}
-	if ["KV_MEM", "KV_TIKV", "KV_ROCKSDB", "KV_SURREALKV"].iter().any(|name| feature(name)) {
+	if ["KV_MEM", "KV_TIKV", "KV_SURREALKV"].iter().any(|name| feature(name)) {
 		println!("cargo:rustc-cfg=storage");
 	}
 }

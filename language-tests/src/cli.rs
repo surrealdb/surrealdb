@@ -39,7 +39,6 @@ impl ValueEnum for ResultsMode {
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Backend {
 	Memory,
-	RocksDb,
 	SurrealKv,
 	TikV,
 }
@@ -55,7 +54,7 @@ impl Backend {
 	/// tests to a store that cannot serve them.
 	pub fn supports_versioning(self) -> bool {
 		match self {
-			Backend::RocksDb | Backend::SurrealKv => true,
+			Backend::SurrealKv => true,
 			Backend::Memory | Backend::TikV => false,
 		}
 	}
@@ -70,7 +69,6 @@ impl SurrealValue for Backend {
 	fn into_value(self) -> surrealdb_types::Value {
 		match self {
 			Backend::Memory => "Memory".into_value(),
-			Backend::RocksDb => "RocksDb".into_value(),
 			Backend::SurrealKv => "SurrealKv".into_value(),
 			Backend::TikV => "TikV".into_value(),
 		}
@@ -83,7 +81,6 @@ impl SurrealValue for Backend {
 		let str = String::from_value(value)?;
 		match str.as_str() {
 			"Memory" => Ok(Backend::Memory),
-			"RocksDb" => Ok(Backend::RocksDb),
 			"SurrealKv" => Ok(Backend::SurrealKv),
 			"TikV" => Ok(Backend::TikV),
 			_ => {
@@ -95,13 +92,12 @@ impl SurrealValue for Backend {
 
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV]
+		&[Backend::Memory, Backend::SurrealKv, Backend::TikV]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
 			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
-			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
 		}
@@ -112,7 +108,6 @@ impl Display for Backend {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Memory => f.write_str("mem"),
-			Self::RocksDb => f.write_str("rocksdb"),
 			Self::SurrealKv => f.write_str("surrealkv"),
 			Self::TikV => f.write_str("tikv"),
 		}
@@ -127,7 +122,6 @@ impl<'de> Deserialize<'de> for Backend {
 		let s = String::deserialize(deserializer)?;
 		match s.as_str() {
 			"mem" => Ok(Backend::Memory),
-			"rocksdb" => Ok(Backend::RocksDb),
 			"surrealkv" => Ok(Backend::SurrealKv),
 			"tikv" => Ok(Backend::TikV),
 			_ => Err(<D::Error as serde::de::Error>::custom(format_args!("Invalid backend kind"))),
@@ -142,7 +136,6 @@ impl Serialize for Backend {
 	{
 		match self {
 			Backend::Memory => serializer.serialize_str("mem"),
-			Backend::RocksDb => serializer.serialize_str("rocksdb"),
 			Backend::SurrealKv => serializer.serialize_str("surrealkv"),
 			Backend::TikV => serializer.serialize_str("tikv"),
 		}
@@ -214,19 +207,21 @@ impl Serialize for RunMode {
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum UpgradeBackend {
-	RocksDb,
 	SurrealKv,
+	/// The source binary writes `rocksdb://<dir>` and the target opens the same
+	/// directory as `surrealkv://<dir>`, which migrates the data in place.
+	RocksDbMigration,
 }
 
 impl ValueEnum for UpgradeBackend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv]
+		&[UpgradeBackend::SurrealKv, UpgradeBackend::RocksDbMigration]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
-			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv")),
+			UpgradeBackend::RocksDbMigration => Some(PossibleValue::new("rocksdb-migration")),
 		}
 	}
 }
@@ -353,6 +348,9 @@ pub fn parse() -> ArgMatches {
 			.arg(
 				arg!(--backend <BACKEND> "Specify the storage backend to use for the upgrade test")
 				.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
+			)
+			.arg(
+				arg!(--versioned "Open both stores with `?versioned=true`. Only valid with `--backend rocksdb-migration`")
 			)
 			.arg(
 				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").value_delimiter(',').value_parser(DsVersion::from_str)

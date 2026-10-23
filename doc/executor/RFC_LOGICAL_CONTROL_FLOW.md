@@ -769,7 +769,7 @@ all of these hold:
   the before-image, which the write has replaced.
 - **A store that supports versioned reads.** Reading at the commit version keeps another
   client's later write out of the yield. The KV trait takes `version: Option<u64>`, but the
-  memory and IndexedDB backends reject versioned reads, so on those stores every `Hold` statement
+  memory backend rejects versioned reads, so on that store every `Hold` statement
   buffers.
 
 A statement that fails any condition buffers its rows, spilling to the temp store past the

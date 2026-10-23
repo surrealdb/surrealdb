@@ -23,10 +23,10 @@
 //! shares, and reports gzip/zstd ratio and throughput for the generated corpus.
 //!
 //! ```bash
-//! cargo bench -p surrealdb-core --bench import_ablation --features kv-rocksdb
+//! cargo bench -p surrealdb-core --bench import_ablation --features kv-surrealkv
 //!
-//! ABL_RECORDS=200000 ABL_BACKEND=rocksdb \
-//!   cargo bench -p surrealdb-core --bench import_ablation --features kv-rocksdb
+//! ABL_RECORDS=200000 ABL_BACKEND=surrealkv \
+//!   cargo bench -p surrealdb-core --bench import_ablation --features kv-surrealkv
 //! ```
 
 use std::fmt::Write as _;
@@ -249,9 +249,9 @@ fn builder() -> surrealdb_core::kvs::Builder {
 async fn open(backend: &str) -> (Arc<Datastore>, Option<temp_dir::TempDir>) {
 	match backend {
 		"memory" => (builder().build_with_path("memory").await.unwrap(), None),
-		"rocksdb" => {
+		"surrealkv" => {
 			let dir = temp_dir::TempDir::new().unwrap();
-			let path = format!("rocksdb:{}", dir.path().display());
+			let path = format!("surrealkv:{}", dir.path().display());
 			let ds = builder().build_with_path(&path).await.unwrap();
 			(ds, Some(dir))
 		}

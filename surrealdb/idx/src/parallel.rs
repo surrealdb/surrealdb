@@ -317,7 +317,7 @@ impl ReadView {
 
 	/// The read-only transaction the view was taken from, for the assertions
 	/// on what it recorded.
-	#[cfg(all(test, feature = "kv-rocksdb"))]
+	#[cfg(all(test, feature = "kv-surrealkv"))]
 	pub(crate) fn tx(&self) -> &Arc<Transaction> {
 		&self.tx
 	}
@@ -808,7 +808,7 @@ mod tests {
 	/// one get, the keys found, the bytes of every key asked for and of every
 	/// value found. Those counters are what the transaction's completion event
 	/// carries when the view is closed.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
 	async fn reads_through_a_view_are_recorded_on_its_transaction() -> Result<()> {
 		use surrealdb_kvs::{Key, TransactionType};
@@ -818,7 +818,7 @@ mod tests {
 
 		let dir = temp_dir::TempDir::new()?;
 		let ds =
-			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await;
+			TestIndexStore::with_path(&format!("surrealkv:{}", dir.path().to_string_lossy())).await;
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set(Key::from(b"view/a".to_vec()), b"one".to_vec()).await?;
@@ -827,7 +827,7 @@ mod tests {
 		}
 		let origin = ds.transaction(TransactionType::Write).await?;
 		let view =
-			ReadView::open(&origin).await?.expect("RocksDB gives a read-only transaction a view");
+			ReadView::open(&origin).await?.expect("SurrealKV gives a read-only transaction a view");
 		let keys: Vec<Key<'static>> =
 			[&b"view/a"[..], b"view/b", b"view/c"].iter().map(|k| Key::from(k.to_vec())).collect();
 		let values = view.get_many(&keys).await?;

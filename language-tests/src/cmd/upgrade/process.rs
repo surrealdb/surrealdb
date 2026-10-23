@@ -60,10 +60,19 @@ impl SurrealProcess {
 			}
 		};
 
-		let endpoint = match config.backend {
-			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
-			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
+		// A released binary writes RocksDB on the migration backend and the
+		// checkout under test opens it as SurrealKV, so every hop but the last
+		// of a chain runs on RocksDB.
+		let scheme = match (config.backend, version) {
+			(UpgradeBackend::RocksDbMigration, DsVersion::Version(_)) => "rocksdb",
+			_ => "surrealkv",
 		};
+		let query = if config.versioned {
+			"?versioned=true"
+		} else {
+			""
+		};
+		let endpoint = format!("{scheme}://{tmp_dir}/ds{query}");
 
 		let bind = format!("127.0.0.1:{port}");
 		let common_args =

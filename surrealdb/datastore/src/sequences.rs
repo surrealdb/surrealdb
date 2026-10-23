@@ -1959,7 +1959,7 @@ impl Sequence {
 			// read the commit would have to notice, so only the first committer
 			// wins. `find_batch_allocation` then retries, re-scans, and claims
 			// the next free range.
-			// Conflict-serializing backends (mem/rocksdb/surrealkv) already reject
+			// Conflict-serializing backends (mem/surrealkv) already reject
 			// the second writer either way.
 			tx.put_key(&batch_key, &bv).await?;
 			// For a gap-tolerant domain, persist the window's end in the very

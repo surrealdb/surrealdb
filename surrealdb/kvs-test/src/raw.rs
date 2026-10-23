@@ -555,18 +555,15 @@ async fn batch(b: &TestBackend) {
 
 /// Regression test for the default cursor's forward successor logic.
 ///
-/// `DefaultKeysCursor::next_batch` (used by mem/surrealkv/tikv/indxdb)
-/// previously did `rng.start = last; rng.start.push(0xff)` to resume past
-/// the batch's last key. That jumps from `last` to `last\xff`, skipping
-/// every key in between — including `last\0` if it exists. Under the
-/// migrated scan operators which consume the cursor batch-by-batch, this
-/// silently dropped rows at batch boundaries.
-///
-/// The fix appends `\x00` to `last` — the minimal key strictly greater
-/// than `last` — so no key in `(last, ...]` is skipped. This test
-/// inserts prefix-sharing keys (`a`, `a\0`, `a\x01`, `ab`, `b`) and
-/// pumps a cursor with `Count(1)` so every adjacent pair is a batch
-/// boundary; without the fix the cursor would return only `a` and `b`.
+/// `DefaultKeysCursor::next_batch` (used by mem/surrealkv/tikv) resumes
+/// past a batch's last key by appending `\x00` to `last` — the minimal key
+/// strictly greater than `last` — so no key in `(last, ...]` is skipped.
+/// Appending `\xff` instead would jump from `last` to `last\xff`, skipping
+/// every key in between, including `last\0`, and silently drop rows at
+/// batch boundaries. This test inserts prefix-sharing keys (`a`, `a\0`,
+/// `a\x01`, `ab`, `b`) and pumps a cursor with `Count(1)` so every adjacent
+/// pair is a batch boundary; a cursor that skipped keys would return only
+/// `a` and `b`.
 async fn cursor_keys_resume_past_prefix(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let keys: Vec<Vec<u8>> =
@@ -604,7 +601,7 @@ async fn cursor_keys_resume_past_prefix(b: &TestBackend) {
 		}
 	}
 	// Drop the cursor before cancelling: backends that drain live cursors
-	// during cancel (rocksdb) wait forever for `cursors_alive == 0`.
+	// during cancel wait forever for `cursors_alive == 0`.
 	drop(cursor);
 	tx.cancel().await.unwrap();
 
@@ -646,7 +643,7 @@ async fn cursor_vals_resume_past_prefix(b: &TestBackend) {
 		}
 	}
 	// Drop the cursor before cancelling: backends that drain live cursors
-	// during cancel (rocksdb) wait forever for `cursors_alive == 0`.
+	// during cancel wait forever for `cursors_alive == 0`.
 	drop(cursor);
 	tx.cancel().await.unwrap();
 
@@ -658,8 +655,8 @@ async fn cursor_vals_resume_past_prefix(b: &TestBackend) {
 
 /// `for_each` must yield the exact same `(key, value)` sequence as draining
 /// `next_batch` — across batch boundaries (including prefix-shared keys) and
-/// for every backend (resume-by-bound default cursors and the stateful rocksdb
-/// cursor). Also checks `stats.rows` equals the number of rows visited.
+/// for every backend (resume-by-bound default cursors and any stateful
+/// engine cursor). Also checks `stats.rows` equals the number of rows visited.
 async fn cursor_for_each_vals_matches_next_batch(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
@@ -882,8 +879,8 @@ async fn cursor_for_each_break_resumes(b: &TestBackend) {
 
 /// `for_each` must drain a byte-identical `(key, value)` sequence — and report
 /// the same total stats — as draining `next_batch`, for a spread of chunk
-/// sizes, across every engine (resume-by-bound default cursors + the stateful
-/// rocksdb cursor). For limits smaller than the row count, both paths must
+/// sizes, across every engine (resume-by-bound default cursors and any
+/// stateful engine cursor). For limits smaller than the row count, both paths must
 /// also split into more than one chunk — so a backend that ignored the limit
 /// and returned the whole range in one page would fail here rather than
 /// trivially match itself.
@@ -1079,8 +1076,8 @@ async fn cursor_for_each_keys_matches_next_batch_reverse(b: &TestBackend) {
 }
 
 /// `for_each` must apply the leading `skip` exactly like `next_batch` in BOTH
-/// directions — backward skip exercises the reverse arm of the shared
-/// rocksdb `seek_and_skip` helper and the resume-by-bound cursors' skip burn,
+/// directions — backward skip exercises the reverse arm of any
+/// stateful cursor's skip helper and the resume-by-bound cursors' skip burn,
 /// for the vals and keys cursors alike (production-reachable via
 /// `ORDER BY id DESC` + `START`).
 async fn cursor_for_each_respects_skip_both_directions(b: &TestBackend) {

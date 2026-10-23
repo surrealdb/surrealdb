@@ -6,17 +6,9 @@
 //! A module gated on `kv-mem` asserts behaviour every backend shares, so the
 //! in-memory store is enough to cover it. An ungated module carries per-backend
 //! tests, each gated on its own `kv-*` feature.
-#![cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-))]
+#![cfg(any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",))]
 
-#[cfg(feature = "kv-rocksdb")]
-mod blocking_index_build_test;
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 mod blocking_rebuild_index_test;
 #[cfg(feature = "kv-mem")]
 mod caller_owned_transaction_test;
@@ -77,7 +69,7 @@ mod reclaim_test;
 mod roundtrips_test;
 #[cfg(feature = "kv-mem")]
 mod rpc_session_test;
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 mod select_for_update_test;
 #[cfg(feature = "kv-tikv")]
 mod sequences_tikv_test;

@@ -275,19 +275,18 @@ read through one view per batch (`parallel::ReadView`): one read-only
 transaction is opened for the batch's tasks, whatever their number, its view
 is shared by all of them, and the transaction is cancelled when the batch has
 been built. The tasks read through the view's batched point reads (`get_many`),
-which run side by side: on RocksDB a point read holds the transaction's slot
-lock only to take a keep-alive, as a cursor does. That matters because an
-engine that runs one transaction's operations one at a time — RocksDB — would
+which run side by side. That matters because an
+engine that runs one transaction's operations one at a time would
 otherwise queue every task's misses behind the write transaction, and an index
 larger than the vector cache misses on most reads. The view cannot come from
 the batch's write transaction: by the time the tasks start, that transaction
 has buffered the `!hg` bump, its conditional deletes and the new elements'
-vectors, and RocksDB gives no view over buffered writes. A view taken after
+vectors, and a transaction gives no view over its own buffered writes. A view taken after
 another compactor committed can only belong to a batch that will fail on the
 `!hg` generation, so what it reads never publishes.
 
 Where the datastore gives no read view to a read-only transaction — mem,
-SurrealKV, TiKV, and IndexedDB on targets without worker threads — the batch
+SurrealKV and TiKV — the batch
 opens no other transaction. It still takes the staged path, never the in-place
 one, on the same tasks, and every task reads through the batch's write
 transaction. That transaction reads the same vectors as a view would: what it

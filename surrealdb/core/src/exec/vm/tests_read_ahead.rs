@@ -54,11 +54,9 @@ fn config(pairs: &[(&str, &str)]) -> ConfigMap {
 	)
 }
 
-/// The datastore a test runs on when it is not in memory: a directory of RocksDB or of SurrealKV.
+/// The datastore a test runs on when it is not in memory: a directory of SurrealKV.
 #[derive(Clone, Copy)]
 enum Disk<'a> {
-	#[cfg_attr(not(feature = "kv-rocksdb"), allow(dead_code))]
-	Rocks(&'a std::path::Path),
 	#[cfg_attr(not(feature = "kv-surrealkv"), allow(dead_code))]
 	SurrealKv(&'a std::path::Path),
 }
@@ -68,10 +66,6 @@ enum Disk<'a> {
 async fn open(setup: &str, disk: Option<Disk<'_>>, pairs: &[(&str, &str)]) -> TestDb {
 	match disk {
 		None => TestDb::new_viewless(setup, config(pairs)).await,
-		#[cfg(feature = "kv-rocksdb")]
-		Some(Disk::Rocks(dir)) => TestDb::new_on_rocksdb(setup, dir, config(pairs)).await,
-		#[cfg(not(feature = "kv-rocksdb"))]
-		Some(Disk::Rocks(_)) => unreachable!("a RocksDB datastore needs the `kv-rocksdb` feature"),
 		#[cfg(feature = "kv-surrealkv")]
 		Some(Disk::SurrealKv(dir)) => {
 			let path = format!("surrealkv://{}", dir.display());
@@ -395,47 +389,6 @@ async fn a_scan_dropped_mid_run_leaves_the_transaction_usable() {
 	dropped_mid_run(None).await;
 }
 
-/// The datastore's own answer, with nothing pinned, reads ahead on RocksDB: the capability reaches
-/// the plan through the datastore, and the answers are those of a run that does not.
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_offers_the_read_ahead_to_the_plan() {
-	let setup = rows(3000);
-	for placement in [SERIAL, MORSELS] {
-		let pairs = [placement, SMALL_PAGES];
-		for sql in [
-			"SELECT * FROM t;",
-			"SELECT * FROM t WHERE n % 3 = 0;",
-			"SELECT * FROM t ORDER BY id DESC;",
-		] {
-			let (dir, off_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-			let on = run_on(None, Some(Disk::Rocks(dir.path())), &pairs, &setup, sql).await;
-			let off =
-				run_on(Some(false), Some(Disk::Rocks(off_dir.path())), &pairs, &setup, sql).await;
-			assert!(on.producers.0 > 0, "RocksDB reads {sql} ahead: {:?}", on.producers);
-			assert_eq!(on.producers.0, on.producers.1);
-			assert_eq!(off.producers, (0, 0));
-			assert_eq!(on.answers, off.answers, "the answers of {sql}");
-			assert_eq!(on.scanned, off.scanned, "the records read by {sql}");
-		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_scans_in_a_transaction_read_what_the_transaction_wrote() {
-	let (on, off) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-	reads_what_the_transaction_wrote(Some(Disk::Rocks(on.path())), Some(Disk::Rocks(off.path())))
-		.await;
-}
-
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_scan_dropped_mid_run_leaves_the_transaction_usable() {
-	let dir = tempfile::tempdir().unwrap();
-	dropped_mid_run(Some(Disk::Rocks(dir.path()))).await;
-}
-
 /// The datastore's own answer, with nothing pinned, reads ahead on SurrealKV, and the answers are
 /// those of a run that does not.
 #[cfg(feature = "kv-surrealkv")]
@@ -563,15 +516,16 @@ async fn a_front_run_cut_while_reading_ahead_runs_no_entry_twice() {
 
 /// As above where workers run the morsels the front run gives away, so a cut is published while the
 /// coordinator reads on and the part past it is read elsewhere at the same time.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_front_run_cut_while_reading_ahead_runs_no_entry_twice() {
+async fn surrealkv_front_run_cut_while_reading_ahead_runs_no_entry_twice() {
 	let setup = rows(3000);
 	let pairs = [MORSELS, SMALL_PAGES, SMALL_MORSELS, DONATING];
 	for sql in ["SELECT * FROM t;", "SELECT * FROM t WHERE n % 5 < 4;"] {
 		let (dir, off_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-		let on = run_morsels(true, Some(Disk::Rocks(dir.path())), &pairs, &setup, sql).await;
-		let off = run_morsels(false, Some(Disk::Rocks(off_dir.path())), &pairs, &setup, sql).await;
+		let on = run_morsels(true, Some(Disk::SurrealKv(dir.path())), &pairs, &setup, sql).await;
+		let off =
+			run_morsels(false, Some(Disk::SurrealKv(off_dir.path())), &pairs, &setup, sql).await;
 		assert!(on.cuts_ahead > 0, "the front run cuts its range while it reads ahead: {sql}");
 		assert!(on.producers.0 > 0, "and the scan reads ahead: {sql}");
 		// Without `ORDER BY` the rows of a statement whose morsels run on workers arrive in no
@@ -582,7 +536,7 @@ async fn rocksdb_front_run_cut_while_reading_ahead_runs_no_entry_twice() {
 }
 
 /// The rows of each answer, an array of flat objects, in sorted order.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 fn rows_of(answers: &[String]) -> Vec<Vec<String>> {
 	answers
 		.iter()

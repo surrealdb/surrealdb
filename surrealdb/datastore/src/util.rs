@@ -71,7 +71,7 @@ where
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
-	// Avoids costly iterator creation on rocksdb.
+	// Avoids costly iterator creation.
 	//
 	// FIXME: The kvs themselves should probably be the one to implement this optimisation
 	if range_is_single_key(&bytes) {
@@ -106,7 +106,7 @@ where
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
-	// Avoids costly iterator creation on rocksdb.
+	// Avoids costly iterator creation.
 	if range_is_single_key(&bytes) {
 		let res = if tx.exists(bytes.start.as_borrowed(), None).await? {
 			vec![bytes.start.as_slice().to_vec()]
@@ -143,7 +143,7 @@ where
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
-	// Avoids costly iterator creation on rocksdb.
+	// Avoids costly iterator creation.
 	if range_is_single_key(&bytes) {
 		let res = if let Some(res) = tx.get(bytes.start.as_borrowed(), None).await? {
 			vec![(bytes.start.as_slice().to_vec(), res)]
@@ -176,7 +176,7 @@ where
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
-	// Avoids costly iterator creation on rocksdb.
+	// Avoids costly iterator creation.
 	if range_is_single_key(&bytes) {
 		let res = if tx.exists(bytes.start.as_borrowed(), None).await? {
 			vec![bytes.start.as_slice().to_vec()]

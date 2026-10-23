@@ -186,7 +186,7 @@ EXPLAIN ANALYZE SELECT id, age, score FROM entry
 -- on the no-LIMIT variant, because the per-operator `{rows: N}`
 -- accounting on the union scan is timing-dependent when an outer
 -- Limit cancels mid-stream (sub-scans buffer-fetch differently across
--- mem vs rocksdb vs surrealkv).
+-- mem vs surrealkv).
 -- ============================================================================
 
 SELECT id, age FROM record

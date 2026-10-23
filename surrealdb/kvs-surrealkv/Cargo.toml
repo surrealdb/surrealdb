@@ -24,5 +24,9 @@ surrealkv = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
+[dev-dependencies]
+surrealdb-kvs-test = { workspace = true }
+wasm-bindgen-test = { workspace = true }
+
 [lints]
 workspace = true

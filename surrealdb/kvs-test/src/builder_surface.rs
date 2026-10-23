@@ -21,20 +21,39 @@ async fn shutdown_ok(b: &TestBackend) {
 }
 kvs_test!(shutdown_ok);
 
-/// Backends with a compaction primitive accept the hint.
+/// Backends with a compaction primitive compact the whole store, or a range of
+/// it, and keep serving what is live.
 async fn compact_supported(b: &TestBackend) {
 	let ds = b.create_ds().await;
 
 	let tx = ds.transaction(Write).await.unwrap();
-	tx.set(b"test".into(), b"value".to_vec()).await.unwrap();
+	for i in 0..50u8 {
+		tx.set(vec![b'c', i].into(), b"value".to_vec()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..25u8 {
+		tx.del(vec![b'c', i].into()).await.unwrap();
+	}
 	tx.commit().await.unwrap();
 
 	let tx = ds.transaction(Read).await.unwrap();
 	tx.compact(None).await.unwrap();
+	tx.compact(Some(KeyRange::from(vec![b'c', 0]..vec![b'c', 10]))).await.unwrap();
+	tx.cancel().await.unwrap();
+
+	let tx = ds.transaction(Read).await.unwrap();
+	let live = tx
+		.scan(KeyRange::from(vec![b'c']..vec![b'd']), u32::MAX, 0, None)
+		.await
+		.unwrap()
+		.values
+		.len();
+	assert_eq!(live, 25, "compaction changed what the store holds");
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(compact_supported, only = [rocksdb]);
+kvs_test!(compact_supported, only = [surrealkv, surrealkv_versioned]);
 
 /// Backends without a compaction primitive report
 /// [`Error::CompactionNotSupported`].
@@ -48,7 +67,7 @@ async fn compact_unsupported(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(compact_unsupported, except = [rocksdb]);
+kvs_test!(compact_unsupported, except = [surrealkv, surrealkv_versioned]);
 
 /// Keys the range-destroy tests below seed inside [`destroy_test_range`].
 const DESTROY_SEED_KEYS: u8 = 5;
@@ -155,7 +174,7 @@ async fn metrics_collectable(b: &TestBackend) {
 	}
 }
 
-kvs_test!(metrics_collectable, only = [rocksdb, surrealds, surrealos, surrealos_s3]);
+kvs_test!(metrics_collectable, only = [surrealds, surrealos, surrealos_s3]);
 
 /// Backends without metrics return `None` from both metric hooks.
 async fn metrics_none(b: &TestBackend) {
@@ -164,7 +183,7 @@ async fn metrics_none(b: &TestBackend) {
 	assert!(ds.builder().collect_u64_metric("anything").is_none());
 }
 
-kvs_test!(metrics_none, except = [rocksdb, surrealds, surrealos, surrealos_s3]);
+kvs_test!(metrics_none, except = [surrealds, surrealos, surrealos_s3]);
 
 /// Process-local backends report their transactions as local.
 ///

@@ -85,13 +85,7 @@ audit-as-crates-io = false
 [policy.surrealdb-kvs-any]
 audit-as-crates-io = false
 
-[policy.surrealdb-kvs-indxdb]
-audit-as-crates-io = false
-
 [policy.surrealdb-kvs-mem]
-audit-as-crates-io = false
-
-[policy.surrealdb-kvs-rocksdb]
 audit-as-crates-io = false
 
 [policy.surrealdb-kvs-surrealkv]
@@ -166,6 +160,18 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealism-verify]
+audit-as-crates-io = false
+
+[policy.surrealkv]
+audit-as-crates-io = false
+
+[policy.surrealkv-compat-indxdb]
+audit-as-crates-io = false
+
+[policy.surrealkv-compat-rocksdb]
+audit-as-crates-io = false
+
+[policy.surrealkv-compat-v1]
 audit-as-crates-io = false
 
 [policy.surrealml-core]

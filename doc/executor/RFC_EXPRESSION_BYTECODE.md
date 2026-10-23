@@ -208,7 +208,7 @@ coherent. Readahead into a cold tier (an object-store-backed engine) stays the s
 concern.
 
 The transaction API has most of this: the zero-copy `for_each` visitor for scans, native `getm` on
-RocksDB, TiKV and the memory engine, and `count`. What it lacks: a visitor form of `getm` that
+TiKV and the memory engine, and `count`. What it lacks: a visitor form of `getm` that
 borrows instead of copying each value; a native `getm` on SurrealKV; and chunk sizes chosen by the
 caller. Every primitive reads through the transaction's own writes; where that merge happens for
 each engine is to be confirmed before the VM reads below it.

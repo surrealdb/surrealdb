@@ -7,7 +7,7 @@
 //!
 //! This library can be used to start an [embedded](crate::engine::local)
 //! in-memory datastore, an embedded datastore persisted to disk, a
-//! browser-based embedded datastore backed by IndexedDB, or for connecting to a distributed [TiKV](https://tikv.org) key-value store.
+//! browser-based embedded datastore backed by the origin private file system, or for connecting to a distributed [TiKV](https://tikv.org) key-value store.
 //!
 //! It also enables simple and advanced querying of a
 //! [remote](crate::engine::remote) SurrealDB server from server-side or
@@ -426,8 +426,8 @@ where
 	/// nothing can await. This ends the sessions of **every** handle onto the
 	/// same connection, so they fail afterwards, and resolves once the embedded
 	/// datastore has shut down and no background task still holds it. Storage
-	/// that keeps its directory locked until the datastore is dropped, such as
-	/// RocksDB, is released when the last handle is then dropped. A remote
+	/// that keeps its directory locked until the datastore is dropped is released
+	/// when the last handle is then dropped. A remote
 	/// connection detaches its server sessions. A failure to shut the datastore
 	/// down is returned.
 	///

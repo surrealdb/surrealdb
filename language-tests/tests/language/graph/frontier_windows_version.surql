@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["rocksdb"]
+backend = ["surrealkv"]
 versioned = true
 timeout = 5000
 

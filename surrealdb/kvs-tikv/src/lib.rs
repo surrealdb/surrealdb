@@ -1034,7 +1034,7 @@ impl Transactable for Transaction {
 			// returned pair, so a key repeated in `keys` (common when several
 			// graph rows fetch a shared endpoint/target node in one batch) must
 			// fan its one result out to all of its positions — mirroring the
-			// per-position semantics of the mem/rocksdb engines. Mapping to a
+			// per-position semantics of the mem/surrealkv engines. Mapping to a
 			// single position would leave the other slots `None`, silently
 			// dropping records.
 			let mut key_index: HashMap<&[u8], Vec<usize>> = HashMap::with_capacity(keys.len());

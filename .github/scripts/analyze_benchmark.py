@@ -85,7 +85,7 @@ class BenchmarkAnalyzer:
 		Extract configuration name from benchmark result filename.
 
 		Expected format: result-<config>.json (e.g., result-memory.json)
-		Returns: <config> (e.g., 'memory', 'rocksdb', 'embedded')
+		Returns: <config> (e.g., 'memory', 'surrealkv', 'embedded')
 		"""
 		return json_path.stem.replace('result-', '')
 

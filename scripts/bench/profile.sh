@@ -68,8 +68,8 @@ mkdir -p "$OUT_DIR"
 SLUG="$(echo "$FILTER" | tr '/ ' '__')"
 PROFILE="$(cd "$OUT_DIR" && pwd)/$SLUG.json.gz"
 
-# rocksdb needs its cargo feature; surrealkv is already in `bench`.
-FEATURES="bench"; [ "$BACKEND" = "rocksdb" ] && FEATURES="bench,backend-rocksdb"
+# surrealkv is already in `bench`.
+FEATURES="bench"
 
 echo ">> building (profile=profiling, features=$FEATURES)"
 cargo build --profile profiling --features "$FEATURES"

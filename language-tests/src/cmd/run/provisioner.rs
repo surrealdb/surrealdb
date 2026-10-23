@@ -122,18 +122,6 @@ impl CreateInfo {
 				// runner filters versioned tests off it (see cmd/run).
 				builder.build_with_path("mem://").await?
 			}
-			Backend::RocksDb => {
-				let p = self.produce_path();
-				let ds = if versioned {
-					builder
-						.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h"))
-						.await?
-				} else {
-					builder.build_with_path(&format!("rocksdb://{p}")).await?
-				};
-				path = Some(p);
-				ds
-			}
 			Backend::SurrealKv => {
 				let p = self.produce_path();
 				let ds = if versioned {
@@ -329,14 +317,15 @@ impl Permit {
 		}
 
 		// Shutdown the datastore before removing its directory to ensure all file descriptors
-		// are closed This is critical for RocksDB which can have many open file handles
+		// are closed. This is critical for file-backed engines, which can have many open file
+		// handles
 		if let Err(e) = store.store.shutdown().await {
 			println!("Failed to shutdown datastore before cleanup: {e}");
 		}
 
 		if let Some(remove_path) = &store.path {
 			// Remove the directory synchronously to ensure cleanup completes before next test
-			// This prevents file descriptor exhaustion on backends like RocksDB
+			// This prevents file descriptor exhaustion on file-backed backends
 			if let Err(e) = tokio::fs::remove_dir_all(&remove_path).await {
 				println!("Failed to remove temporary directory {remove_path}: {e}");
 			}

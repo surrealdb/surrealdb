@@ -7,13 +7,12 @@ same transaction that scan reads from. The strategies run with no scan open:
 the whole range is drained and the cursor closed before any strategy is
 applied.
 
-A backend's cursor may hold an iterator borrowed from the transaction itself —
-RocksDB gives a writable transaction an iterator over its own pending write
-batch — and writing through the transaction while one is alive is outside what
-that iterator promises. The UPSERT here rolls back to a savepoint from its
-second run onwards, which RocksDB refuses outright while a cursor is alive
-rather than let the iterator read freed state, so a strategy reached from
-inside an open scan takes down the whole statement.
+A backend's cursor may hold an iterator borrowed from the transaction itself,
+and writing through the transaction while one is alive is outside what that
+iterator promises. The UPSERT here rolls back to a savepoint from its second run
+onwards, which an engine may refuse while a cursor is alive rather than let the
+iterator read freed state, so a strategy reached from inside an open scan would
+take down the whole statement.
 
 The tally counts strategy runs, so it holds one per reference key. The 600
 references that follow the first two span more than one cursor batch, so the

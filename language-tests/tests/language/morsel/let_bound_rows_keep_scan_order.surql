@@ -3,7 +3,7 @@
 namespace = true
 database = true
 # Extra timeout: every scan below reads 3000 records, which splits into one morsel per record when
-# the suite forces the smallest morsels, and RocksDB does not finish that in the default timeout
+# the suite forces the smallest morsels, and SurrealKV does not finish that in the default timeout
 # while the suite runs in parallel.
 timeout = 30000
 

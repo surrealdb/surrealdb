@@ -270,7 +270,7 @@ so the second is not available without a format change. Every `DEFINE INDEX`
 and `REBUILD INDEX` takes a locked read of the table's definition and
 rewrites it (`replace_table`), and so does the clear, unchanged. Of the clear
 and a statement still open on the index, whichever commits second fails:
-plain blind writes would not do, because TiKV, IndexedDB and the TAPIR store
+plain blind writes would not do, because TiKV and the TAPIR store
 let two writers of one key both commit, while a locked read arms commit-time
 validation on every backend the shared KV suite pins it on
 (`getu_write_conflict`, `surrealdb/kvs-test/src/multi.rs`). The TAPIR store is
@@ -456,7 +456,7 @@ A pass's parallel stages share the node with queries, so they draw on the
 same workers and the same read model the query engine uses. Short names in
 this section: `parallel.rs` is `surrealdb/idx/src/parallel.rs`; `places.rs`
 and `steal.rs` are in `surrealdb/core/src/exec/vm/morsel/`; `snapshot.rs` is
-`surrealdb/kvs/src/snapshot.rs`; `rocks/` is `surrealdb/kvs-rocksdb/src/`.
+`surrealdb/kvs/src/snapshot.rs`.
 
 [V] HNSW's staged batch is the only parallel stage
 (`idx/trees/hnsw/batch.rs:748-812`), and background compaction runs the
@@ -471,9 +471,10 @@ statement that holds the fewest. A worker gives its place up at a quantum
 boundary when another statement waits (`places.rs:162-171`,
 `steal.rs:317-320`). The query engine reads through a `kvs::Snapshot`: one
 transaction's read view, with range cursors that run concurrently and batched
-point reads (`get_many`, `snapshot.rs:109-151`). Only RocksDB gives one, and
-only for a transaction that has buffered no put or delete
-(`rocks/lib.rs:2170-2195`); every other engine answers `None`.
+point reads (`get_many`, `snapshot.rs:109-151`). Whether an engine gives one is
+a property of the engine (`view_capabilities()`); one that does gives it only
+for a transaction that has buffered no put or delete, and an engine that gives
+none answers `None`.
 
 **[V] One place budget.** Every materialiser worker runs in a place from the
 node's pool, the one morsel workers use, under the same OLTP reserve and the
@@ -532,12 +533,12 @@ parallel.
   the batch is built (`ReadView::open`). It cannot come from the apply
   transaction. By the time workers start, the apply transaction has buffered
   the generation bump, its conditional deletes and its allocations, and
-  RocksDB, the one engine with views, gives none over buffered writes. A view
+  no engine gives a view over buffered writes. A view
   opened after another compactor committed belongs to a batch that will fail
   on the compaction generation, so nothing it reads is published.
-- **Point reads must not serialise.** [V] On RocksDB, `get_many` holds the
-  transaction's slot lock at most to take a keep-alive and reads under it, as
-  a cursor does (`rocks/snapshot.rs:67-201`, `rocks/owned_tx.rs:87-101`), so point
+- **Point reads must not serialise.** [V] On an engine that gives a view,
+  `get_many` holds the transaction's slot lock at most to take a keep-alive
+  and reads under it, as a cursor does, so point
   reads from many workers through one view run side by side.
 - **No view, the calling transaction.** [V] Where the engine gives no view,
   the batch takes the staged path on the same workers, every one reading
@@ -903,7 +904,7 @@ a count is a scan as long as the backlog it counts.
   yielded mid-run or never granted produces the same graph.
 - **Registered reads, on a backend that validates them.** The write-guard
   tests commit a retirement between the guard's read and the apply's commit,
-  on RocksDB, for every queued kind
+  on an engine that validates registered reads, for every queued kind
   (`assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it`,
   `ds.rs`).
 - **Language tests.** A deterministic reproduction that a blocking

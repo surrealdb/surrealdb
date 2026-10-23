@@ -22,9 +22,7 @@ members = [
     "surrealdb/keyspace-macro",
     "surrealdb/kvs",
     "surrealdb/kvs-any",
-    "surrealdb/kvs-indxdb",
     "surrealdb/kvs-mem",
-    "surrealdb/kvs-rocksdb",
     "surrealdb/kvs-surrealkv",
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
@@ -114,14 +112,12 @@ surrealdb-keyspace-macro = { version = "3.4.0-nightly", path = "surrealdb/keyspa
 surrealdb-stored-derive = { version = "3.4.0-nightly", path = "surrealdb/stored-derive" }
 surrealdb-kvs = { version = "3.4.0-nightly", path = "surrealdb/kvs" }
 surrealdb-kvs-any = { version = "3.4.0-nightly", path = "surrealdb/kvs-any", default-features = false }
-surrealdb-kvs-indxdb = { version = "3.4.0-nightly", path = "surrealdb/kvs-indxdb" }
 surrealdb-kvs-mem = { version = "3.4.0-nightly", path = "surrealdb/kvs-mem" }
-surrealdb-kvs-rocksdb = { version = "3.4.0-nightly", path = "surrealdb/kvs-rocksdb" }
 surrealdb-kvs-surrealkv = { version = "3.4.0-nightly", path = "surrealdb/kvs-surrealkv" }
 # Dev-only, `publish = false`: declared WITHOUT a version so cargo strips it
 # from published manifests. A version here would make cargo package/publish
 # demand it from crates.io, where a publish=false crate can never appear -
-# breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
+# breaking every crate that dev-depends on it (surrealdb-kvs-any).
 surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
 surrealdb-mysql = { version = "3.4.0-nightly", path = "surrealdb/mysql" }
 surrealdb-pgsql = { version = "3.4.0-nightly", path = "surrealdb/pgsql" }
@@ -156,14 +152,13 @@ revision = { version = "0.30.0", features = [
 ] }
 
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "1.0.0"
+surrealkv = { version = "1.0.0", git = "https://github.com/surrealdb/surrealkv", rev = "2005bee" }
 surrealmx = "1.0.0"
 web-time = "1.1.0"
 ## Maintained by @Delskayn
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 
 # External KV stores
-rocksdb = { version = "0.24.0-surreal.4", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
@@ -390,9 +385,7 @@ scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
-storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
-storage-indxdb = ["surrealdb-server/storage-indxdb"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]
 # GQL (ISO/IEC 39075) API support
@@ -798,18 +791,9 @@ opt-level = 3
 # that only checks, lints or builds test archives, for no gain in any of them.
 # Builds in this profile land in `target/devopt`, apart from `target/debug`.
 #
-# RocksDB's C++ is compiled by a build script, which takes its `-O` level from
-# the profile of the package that runs it: `-O0` under `dev`. A storage-backed
-# test spends most of its time inside RocksDB, so this profile raises it.
-# kache does not cache that compile, so the level is a build-time cost paid on
-# every job that builds RocksDB in this profile; lower it before raising the
-# workspace's own level.
 [profile.devopt]
 inherits = "dev"
 opt-level = 1
-
-[profile.devopt.package.surrealdb-librocksdb-sys]
-opt-level = 2
 
 [profile.release]
 codegen-units = 1

@@ -1048,7 +1048,7 @@ impl Transactor {
 	/// The cursor lives for the duration of one logical scan (e.g. an
 	/// outer table walk or one prefix of a graph-edge traversal). Each
 	/// `next_batch` call advances the same underlying iterator instead of
-	/// re-seeking from scratch, which is the primary cost on RocksDB
+	/// re-seeking from scratch, which is the primary cost on
 	/// paged scans. `skip` is applied once on the first batch. See
 	/// [`ScanCursorKeys`].
 	#[cfg_attr(

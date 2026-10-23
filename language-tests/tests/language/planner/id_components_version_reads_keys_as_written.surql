@@ -2,7 +2,7 @@
 [env]
 namespace = true
 database = true
-backend = ["rocksdb", "surrealkv"]
+backend = ["surrealkv"]
 versioned = true
 timeout = 5000
 

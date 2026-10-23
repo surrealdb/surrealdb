@@ -24,27 +24,6 @@ async fn mem_cursor_for_each_metrics_match_next_batch() {
 	cursor_for_each_metrics_match_next_batch(ds).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test]
-async fn rocksdb_cursor_for_each_metrics_match_next_batch() {
-	use temp_dir::TempDir;
-
-	let node_id = Uuid::parse_str("af71d2c0-5e6f-4a1b-8c2d-3e4f5a6b7c8d").unwrap();
-
-	// Setup the temporary data storage path
-	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-	let path = format!("rocksdb:{path}");
-
-	// Setup the in-memory datastore
-	let ds = Datastore::builder()
-		.with_id(node_id)
-		.build_with_factory_path(&path, CommunityComposer())
-		.await
-		.unwrap();
-
-	cursor_for_each_metrics_match_next_batch(ds).await;
-}
-
 #[cfg(feature = "kv-surrealkv")]
 #[tokio::test]
 async fn surrealkv_cursor_for_each_metrics_match_next_batch() {

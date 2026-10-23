@@ -62,7 +62,7 @@ await engine.free();
 | `NotificationReceiver` | Live-query notifications, drained one at a time with `recv` |
 | `ConnectionOptions` | Capabilities, timeouts, and the namespace/database created on new storage |
 
-Storage backends are selected by the endpoint: `mem://`, `rocksdb://path` and `surrealkv://path`.
+Storage backends are selected by the endpoint: `mem://` and `surrealkv://path`.
 SurrealKV's MVCC versioning is a query parameter on that endpoint —
 `surrealkv://path?versioned=true` — not a scheme of its own; the `surrealkv+versioned://` spelling
 was removed engine-wide and now reports what to use instead.

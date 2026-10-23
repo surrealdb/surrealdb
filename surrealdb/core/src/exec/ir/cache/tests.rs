@@ -1932,15 +1932,6 @@ mod datastore {
 		catalog_change_between_requests_on(&db).await;
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
-	#[tokio::test]
-	async fn catalog_change_between_requests_on_rocksdb() {
-		let dir = tempfile::tempdir().expect("a temporary directory");
-		let db = TestDb::new_on_rocksdb(FIELD_SETUP, dir.path(), surrealdb_cnf::ConfigMap::empty())
-			.await;
-		catalog_change_between_requests_on(&db).await;
-	}
-
 	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
 	async fn catalog_change_between_requests_on_surrealkv() {

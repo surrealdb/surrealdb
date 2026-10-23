@@ -16,7 +16,7 @@ version = ">=3.4.0-a"
 # once per nesting level through the derived `DeserializeRevisioned` impls for
 # `Value` and `Array`, which apply no limit, so how deep a stored value may be
 # read is set by whichever thread stack the decode lands on rather than by any
-# bound. The KVS pool that a rocksdb scan visitor can be dispatched to takes the
+# bound. The KVS pool that a scan visitor can be dispatched to takes the
 # default stack, several times smaller than a runtime worker's, and a debug
 # build spends enough stack per level to exhaust it well inside the write bound.
 #

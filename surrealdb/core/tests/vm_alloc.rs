@@ -1665,7 +1665,7 @@ async fn breakers_over_a_small_budget_hold_a_bounded_heap() {
 
 /// The rows a statement's `EXPLAIN ANALYZE` reports workers read in its `Morsels:` block, or
 /// `None` where it renders none.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn worker_rows(ds: &Datastore, session: &Session, sql: &str) -> Option<u64> {
 	let responses =
 		ds.execute(&format!("EXPLAIN ANALYZE {sql}"), session, None).await.expect("explains");
@@ -1678,19 +1678,19 @@ async fn worker_rows(ds: &Datastore, session: &Session, sql: &str) -> Option<u64
 	Some(digits.parse().unwrap_or_else(|_| panic!("`{sql}` renders {block}")))
 }
 
-/// Over RocksDB, whose workers read through a view, the sort over fields runs its key ranges on
+/// Over SurrealKV, whose workers read through a view, the sort over fields runs its key ranges on
 /// workers under the 1 MiB budget, and the heap the statements hold at once still stays under half
 /// of what they hold unbounded. Workers read rows, so the bound is not the bound of a serial run.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn breakers_over_a_small_budget_hold_a_bounded_heap_with_workers_on_rocksdb() {
+async fn breakers_over_a_small_budget_hold_a_bounded_heap_with_workers_on_surrealkv() {
 	let _measuring = MEASURING.lock().await;
 	let (free_dir, bounded_dir, observed_dir) = (
 		temp_dir::TempDir::new().unwrap(),
 		temp_dir::TempDir::new().unwrap(),
 		temp_dir::TempDir::new().unwrap(),
 	);
-	let path = |dir: &temp_dir::TempDir| format!("rocksdb://{}", dir.path().display());
+	let path = |dir: &temp_dir::TempDir| format!("surrealkv://{}", dir.path().display());
 	let (free, session) = ceiling_datastore_over(false, &path(&free_dir), &[]).await;
 	let (bounded, _) = ceiling_datastore_over(true, &path(&bounded_dir), &[]).await;
 	assert_breakers_stay_bounded(&free, &bounded, &session).await;

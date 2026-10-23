@@ -2,9 +2,9 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use parse_common::error::RenderedError;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use parse_common::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
@@ -432,7 +432,9 @@ fn unordered_results<T: RunConfig>(run: &TestRun<T>, job_result: &TestTaskResult
 	else {
 		return Vec::new();
 	};
-	unordered_statements(&run.case.test.source).filter(|bits| bits.len() == res.len()).unwrap_or_default()
+	unordered_statements(&run.case.test.source)
+		.filter(|bits| bits.len() == res.len())
+		.unwrap_or_default()
 }
 
 /// The output `--results accept` writes for a refused request: the error text, and only when the
@@ -446,8 +448,7 @@ fn request_error_output(config: &TestConfig, error: &anyhow::Error) -> Option<Te
 /// only against a `request-error` expectation that names no text or names this error's text;
 /// without that expectation the refusal is an ungradable running error.
 fn grade_running_error(config: &TestConfig, error: &anyhow::Error) -> TestReportKind {
-	let Some(TestExpectation::Request(expected)) = TestExpectation::from_test_config(config)
-	else {
+	let Some(TestExpectation::Request(expected)) = TestExpectation::from_test_config(config) else {
 		return TestReportKind::Error(TestError::Running(format!("{error:?}")));
 	};
 	let got = error.to_string();
@@ -602,7 +603,9 @@ impl TestReport {
 			TestTaskResult::SigninError(e) => {
 				(false, Some(TestOutputs::SigninError(e.to_string())))
 			}
-			TestTaskResult::RunningError(e) => (false, request_error_output(&run.case.test.config.parsed, e)),
+			TestTaskResult::RunningError(e) => {
+				(false, request_error_output(&run.case.test.config.parsed, e))
+			}
 			TestTaskResult::Import(_, _) => (false, None),
 			TestTaskResult::BadCleanup(_) => (false, None),
 			TestTaskResult::LeakedRootState(_) => (false, None),
@@ -895,8 +898,7 @@ impl TestReport {
 						} => Some(TestOutputs::Values(res.clone())),
 						_ => None,
 					};
-					let kind =
-						Box::pin(Self::grade_result(config, hop.result, &hop_ctx)).await;
+					let kind = Box::pin(Self::grade_result(config, hop.result, &hop_ctx)).await;
 					if !matches!(kind, TestReportKind::Valid) {
 						return TestReportKind::ChainHop {
 							version: hop.version,
@@ -1040,7 +1042,8 @@ impl TestReport {
 					}
 
 					// The rows of a result nothing orders match in any order.
-					if unordered && same_rows(&expected.expected, &x_normalized, &expected.equality) {
+					if unordered && same_rows(&expected.expected, &x_normalized, &expected.equality)
+					{
 						return None;
 					}
 
@@ -1052,9 +1055,7 @@ impl TestReport {
 				}
 			},
 			TestValueExpectation::Matcher(x) => {
-				Self::match_value_to_matcher(value, x, match_ctx)
-					.await
-					.map(MismatchKind::Matcher)
+				Self::match_value_to_matcher(value, x, match_ctx).await.map(MismatchKind::Matcher)
 			}
 		}
 	}
@@ -1202,7 +1203,8 @@ mod request_error_tests {
 
 	#[test]
 	fn running_error_without_a_request_error_expectation_stays_ungradable() {
-		for results in ["", "[test.results]\nparsing-error = true", "[[test.results]]\nvalue = \"1\""]
+		for results in
+			["", "[test.results]\nparsing-error = true", "[[test.results]]\nvalue = \"1\""]
 		{
 			let cfg = config(results);
 			assert!(matches!(

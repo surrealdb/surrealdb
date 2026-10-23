@@ -14,15 +14,16 @@ The failure they exist to catch is silent. A structure that stops being readable
 usually does not error — an index that cannot be read falls back to a table scan
 and returns the same rows; a dropped adjacency entry just returns a shorter list.
 
-## The three axes
+## The axes
 
-Each proves something the other two cannot, so none is redundant.
+Each proves something the others cannot, so none is redundant.
 
 | Axis | Invocation | Property |
 |---|---|---|
 | Adjacent pairs | `upgrade --from A --to B` | release B reads what release A wrote |
 | Seeds | `upgrade --from A,B,C --to ..` | the current checkout reads what an *old* release wrote, with no binary in between to migrate it |
 | Cumulative walk | `upgrade --chain A,B,C,..` | a structure created once stays correct while every release in turn maintains it |
+| RocksDB migration | `upgrade --backend rocksdb-migration [--versioned] --from A,B --to ..` | the current checkout opens, as `surrealkv://`, a directory a release wrote as `rocksdb://`, migrating it in place |
 
 The pair axis is the widest but shallowest: the oldest writer HEAD ever sees is
 the release immediately before it. The seed axis is the only one that sends a
@@ -34,6 +35,15 @@ four runs per test. `--chain` conflicts with both: one invocation runs one axis.
 
 CI drives all three from `Makefile.ci.toml` (`tasks.test-lang-upgrade`) over the
 version lists defined at the top of that file.
+
+The migration axis is the one that changes the storage scheme between the two
+sides: the source binary starts on `rocksdb://<dir>/ds` and the target on
+`surrealkv://<dir>/ds`. It runs only the tests marked `[test] migration = true`
+(in `migration/`), and no other axis runs them. `--versioned` opens both stores
+with `?versioned=true`; a test with `[env] versioned = true` runs only then, and
+the rest run in both modes. It takes pairwise `--from`/`--to` only, with sources
+that still ship `rocksdb://` (`LANG_UPGRADE_MIGRATION_SOURCES`), and has no chain
+walk. CI runs it with `ci-lang-upgrade-run-rocksdb-migration`.
 
 The harness is built apart from the axes: `tasks.lang-upgrade-harness` compiles
 `surrealql-test` and runs its unit tests, `tasks.test-lang-upgrade` runs the axes
@@ -237,8 +247,7 @@ cd language-tests && cargo run --locked --features upgrade -- --color always upg
 - Narrow with the **positional** filter, a plain substring match on the test path.
   There is no `--filter` flag, and `--path` re-roots every import and breaks the
   run.
-- `--backend` accepts `surrealkv` (default) and `rocksdb` only. `rocksdb` needs
-  the `backend-rocksdb` feature as well; `upgrade` already implies surrealkv.
+- `--backend` accepts `surrealkv` (the default) and `rocksdb-migration`; `upgrade` implies the feature.
 - The first `..` hop is a full debug build of the server.
 - Any run over the default tree builds the Surrealism wasm fixture, because one
   import references it; the positional filter does not prevent this. Without a

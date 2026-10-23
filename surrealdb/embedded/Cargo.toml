@@ -13,9 +13,7 @@ description = "Shared embedded SurrealDB engine for the JavaScript FFI shims"
 [features]
 default = []
 kv-mem = ["surrealdb-core/kv-mem"]
-kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
-kv-indxdb = ["surrealdb-core/kv-indxdb"]
 
 [lib]
 path = "src/lib.rs"

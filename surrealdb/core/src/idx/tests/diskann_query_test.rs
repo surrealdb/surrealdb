@@ -241,7 +241,7 @@ async fn test_diskann_filtered_knn_skips_missing_record() -> Result<()> {
 
 /// One completed transaction: when it finished relative to the window, whether
 /// it was writable, and what it cost.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 struct TxRecord {
 	at: std::time::Duration,
 	write: bool,
@@ -256,14 +256,14 @@ struct TxRecord {
 /// shape of the sequence is what says where one phase ended and the next began.
 /// No phase marker is observable from the driver, so the timeline stands in for
 /// one.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[derive(Default)]
 struct BuildTxTimeline {
 	start: std::sync::Mutex<Option<web_time::Instant>>,
 	entries: std::sync::Mutex<Vec<TxRecord>>,
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 impl crate::observe::ExecutionObserver for BuildTxTimeline {
 	fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
 		// Transactions completing outside an open window belong to the test's
@@ -279,7 +279,7 @@ impl crate::observe::ExecutionObserver for BuildTxTimeline {
 	}
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 impl BuildTxTimeline {
 	/// Opens a recording window, discarding anything recorded before it.
 	fn open(&self) {
@@ -304,7 +304,7 @@ impl BuildTxTimeline {
 /// look empty rather than busy. And the datastore's background maintenance runs
 /// throughout: the node heartbeat and the other periodic jobs commit small
 /// transactions of their own, which are the small constant term in every slice.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 fn print_tx_timeline(window: std::time::Duration, entries: &[TxRecord]) {
 	let slice = (window / 10).max(std::time::Duration::from_millis(1));
 	eprintln!("timeline       ten slices of {slice:?}");
@@ -339,7 +339,7 @@ fn print_tx_timeline(window: std::time::Duration, entries: &[TxRecord]) {
 
 /// Diagnostic: the whole reference workload — 200 000 × 768-dim `F32` vectors
 /// indexed by `DEFINE INDEX … DISKANN DIMENSION 768 DIST COSINE TYPE F32` at the
-/// DDL defaults (`DEGREE 64`, `L_BUILD 100`, `ALPHA 1.2`) — on RocksDB, end to
+/// DDL defaults (`DEGREE 64`, `L_BUILD 100`, `ALPHA 1.2`) — on SurrealKV, end to
 /// end.
 ///
 /// Reports; asserts nothing. What it prints is the baseline a change to the
@@ -362,39 +362,39 @@ fn print_tx_timeline(window: std::time::Duration, entries: &[TxRecord]) {
 /// top-`k` one cluster's interior and the query trivial. Neither says anything
 /// about how well the graph connects.
 ///
-/// Ignored: tens of minutes and tens of gigabytes of RocksDB. Run it as
+/// Ignored: tens of minutes and tens of gigabytes of SurrealKV. Run it as
 ///
 /// ```text
-/// cargo test --release -p surrealdb-core --lib --features kv-rocksdb \
-///     diag_diskann_build_rocksdb_200k -- --ignored --nocapture
+/// cargo test --release -p surrealdb-core --lib --features kv-surrealkv \
+///     diag_diskann_build_surrealkv_200k -- --ignored --nocapture
 /// ```
 ///
 /// `--lib` is required, not tidiness: without it cargo also builds this package's integration
 /// test targets, and `count_index_backlog_repro` exceeds rustc's query depth limit in release,
 /// so the run fails to compile before reaching this test. This diagnostic lives in the lib's
 /// `cfg(test)` tree, so restricting the target set costs nothing.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "diagnostic (tens of minutes, tens of GiB): the 200k x 768 DiskANN build on RocksDB"]
-async fn diag_diskann_build_rocksdb_200k() -> Result<()> {
+#[ignore = "diagnostic (tens of minutes, tens of GiB): the 200k x 768 DiskANN build on SurrealKV"]
+async fn diag_diskann_build_surrealkv_200k() -> Result<()> {
 	let dir = tempfile::tempdir()?;
-	let path = format!("rocksdb:{}", dir.path().display());
+	let path = format!("surrealkv:{}", dir.path().display());
 	let timeline = Arc::new(BuildTxTimeline::default());
 	let ds = Datastore::builder()
 		.with_observer(Arc::clone(&timeline) as Arc<dyn crate::observe::ExecutionObserver>)
 		.build_with_path(&path)
 		.await?;
 	let measured = measure_reference_build(&ds, &timeline, &path).await;
-	// A datastore that is only dropped keeps RocksDB open for the rest of the
+	// A datastore that is only dropped keeps SurrealKV open for the rest of the
 	// process, so it is closed — whether or not the measurement succeeded —
 	// before `dir` drops and removes the directory under it.
 	let closed = ds.shutdown().await;
 	measured.and(closed)
 }
 
-/// The body of [`diag_diskann_build_rocksdb_200k`], run against the datastore
+/// The body of [`diag_diskann_build_surrealkv_200k`], run against the datastore
 /// that test owns and closes.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 async fn measure_reference_build(
 	ds: &Datastore,
 	timeline: &BuildTxTimeline,
@@ -552,8 +552,10 @@ async fn measure_reference_build(
 			+ u64::from(tx.metrics.ops_del);
 	}
 
-	eprintln!("=== diag_diskann_build_rocksdb_200k ===");
-	eprintln!("workload       {ROWS} x {DIM} DEGREE=64 L_BUILD=100 ALPHA=1.2 DIST=COSINE rocksdb");
+	eprintln!("=== diag_diskann_build_surrealkv_200k ===");
+	eprintln!(
+		"workload       {ROWS} x {DIM} DEGREE=64 L_BUILD=100 ALPHA=1.2 DIST=COSINE surrealkv"
+	);
 	eprintln!("load           {load_elapsed:?}");
 	eprintln!("DEFINE INDEX   {build_elapsed:?}");
 	eprintln!("transactions   {write_txs} write, {read_txs} read");
@@ -629,7 +631,7 @@ async fn measure_reference_build(
 /// divides in `f64`. The ground truth and the index can therefore rank two candidates
 /// differently only when their distances agree to within `f32` rounding: a near-tie at the
 /// `k`th neighbour, which continuous random draws make rare.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 	let mut dot = 0.0f32;
 	let mut norm_a = 0.0f32;

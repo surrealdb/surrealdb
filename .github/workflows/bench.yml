@@ -108,14 +108,10 @@ jobs:
         include:
           - target: "lib-mem"
             features: "kv-mem"
-          - target: "lib-rocksdb"
-            features: "kv-rocksdb"
           - target: "lib-surrealkv"
             features: "kv-surrealkv"
           - target: "sdk-mem"
             features: "kv-mem"
-          - target: "sdk-rocksdb"
-            features: "kv-rocksdb"
           - target: "sdk-surrealkv"
             features: "kv-surrealkv"
           # This one fails because the server consumes too much memory and the kernel kills it. I tried with instances up to 16GB of RAM.

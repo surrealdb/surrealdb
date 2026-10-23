@@ -11,7 +11,7 @@ BENCH_DURATION = { value = "30", condition = { env_not_set = [
 BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = [
     "BENCH_SAMPLE_SIZE",
 ] } }
-BENCH_FEATURES = { value = "allocator,protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = [
+BENCH_FEATURES = { value = "allocator,protocol-ws,kv-mem,kv-surrealkv", condition = { env_not_set = [
     "BENCH_FEATURES",
 ] } }
 # Configure LLVM profiling output to go to target directory instead of repo root
@@ -107,6 +107,13 @@ LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3
     "LANG_UPGRADE_SEEDS",
 ] } }
 
+# Releases whose RocksDB store the current checkout must open as SurrealKV: the
+# latest stable release of each line that still ships `rocksdb://`. Each must
+# also be listed in LANG_UPGRADE_SEEDS, so the binaries are already cached.
+LANG_UPGRADE_MIGRATION_SOURCES = { value = "3.2.4,3.3.0", condition = { env_not_set = [
+    "LANG_UPGRADE_MIGRATION_SOURCES",
+] } }
+
 # --------------------------------------------------
 # Quality checks
 # --------------------------------------------------
@@ -122,7 +129,7 @@ args = [
     "--package",
     "surrealdb",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,kv-tikv,http,scripting,jwks",
 ]
 
 # Doctests need their own task: every other test task here runs under
@@ -143,7 +150,7 @@ args = [
     "surrealdb",
     "--doc",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-surrealkv,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,kv-tikv,http,scripting,jwks",
 ]
 
 [tasks.ci-fmt]
@@ -306,8 +313,6 @@ args = [
     "--package",
     "surrealdb",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
     "--exclude-no-default-features",
 ]
 
@@ -324,8 +329,6 @@ args = [
     "--package",
     "surrealdb-engine-local",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
 ]
 
 [tasks.ci-feature-check-core]
@@ -341,8 +344,6 @@ args = [
     "--package",
     "surrealdb-core",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
 ]
 
 [tasks.ci-feature-check-kvs]
@@ -373,8 +374,6 @@ args = [
     "--package",
     "surrealdb-kvs-any",
     "--each-feature",
-    "--exclude-features",
-    "kv-indxdb",
 ]
 
 [tasks.ci-feature-check-datastore]
@@ -469,7 +468,7 @@ args = [
     "surrealdb-server",
     "--each-feature",
     "--exclude-features",
-    "storage-indxdb,tokio-console",
+    "tokio-console",
     "--include-features",
     "storage-mem",
     "--exclude-no-default-features",
@@ -607,7 +606,7 @@ script = '''
 
     # The Rust SDK, compiled for the browser.
     cargo clippy --locked --package surrealdb \
-        --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks \
+        --features protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,jwks \
         --target wasm32-unknown-unknown \
         -- -D warnings
 
@@ -623,7 +622,7 @@ script = '''
     # The browser engine, which pulls in `surrealdb-embedded` behind it. Neither
     # is reachable from `surrealdb`, so the check above covers neither. Both
     # feature sets are built and published, so both are checked.
-    for features in kv-mem,kv-indxdb kv-mem,kv-indxdb,debug; do
+    for features in kv-mem,kv-surrealkv kv-mem,kv-surrealkv,debug; do
         cargo clippy --locked --package surrealdb-wasm \
             --features "$features" \
             --target wasm32-unknown-unknown \
@@ -977,7 +976,6 @@ category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
 dependencies = [
     "ci-api-integration-mem",
-    "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",
     "ci-api-integration-http",
@@ -1015,14 +1013,6 @@ run_task = "ci-api-integration"
 category = "CI - INTEGRATION TESTS"
 description = "Run API integration tests with the in-memory engine"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
-[tasks.ci-api-integration-rocksdb]
-category = "CI - INTEGRATION TESTS"
-description = "Run API integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = true }
@@ -1144,48 +1134,6 @@ run_task = { name = [
     "test-kvs-crate",
 ], fork = true, parallel = false }
 
-[tasks.ci-kvs-rocksdb]
-# Each leaf runs Cargo/nextest against the same target directory. Order the
-# builds; nextest parallelizes the tests within each suite.
-category = "CI - INTEGRATION TESTS"
-description = "Run KVS integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
-run_task = { name = [
-    "test-kvs",
-    "test-kvs-any",
-    "test-kvs-crate",
-    "test-datastore",
-    "test-idx",
-], fork = true, parallel = false }
-
-# The RocksDB lane split into parts that CI runs on separate machines. Each leaf
-# above resolves a different feature set for `surrealdb-librocksdb-sys`, so cargo
-# compiles the C++ library again for every one, and kache cannot cache that build
-# script's output. Run back to back the lane is dominated by those rebuilds;
-# split, each part pays for the library once or twice instead of four times.
-# Together the parts run exactly the leaves of `ci-kvs-rocksdb`.
-[tasks.ci-kvs-rocksdb-core]
-category = "CI - INTEGRATION TESTS"
-description = "Run the RocksDB engine's tests inside surrealdb-core"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
-run_task = "test-kvs"
-
-[tasks.ci-kvs-rocksdb-store]
-category = "CI - INTEGRATION TESTS"
-description = "Run the RocksDB engine's own, kvs-any and datastore tests"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
-run_task = { name = [
-    "test-kvs-any",
-    "test-kvs-crate",
-    "test-datastore",
-], fork = true, parallel = false }
-
-[tasks.ci-kvs-rocksdb-idx]
-category = "CI - INTEGRATION TESTS"
-description = "Run the surrealdb-idx tests against the RocksDB engine"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
-run_task = "test-idx"
-
 [tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the SurrealKV engine"
@@ -1195,6 +1143,7 @@ run_task = { name = [
     "test-kvs-any",
     "test-kvs-crate",
     "test-datastore",
+    "test-idx",
 ], fork = true, parallel = false }
 
 [tasks.ci-kvs-tikv]
@@ -1240,7 +1189,6 @@ category = "CI - LANGUAGE TESTS"
 description = "Run all language tests"
 dependencies = [
     "ci-lang-test-mem",
-    "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
     "ci-lang-test-tikv",
 ]
@@ -1249,14 +1197,6 @@ dependencies = [
 category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with the in-memory engine"
 env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = true }
-
-[tasks.ci-lang-test-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
 run_task = { name = [
     "test-lang",
 ], fork = true, parallel = true }
@@ -1302,20 +1242,20 @@ run_task = { name = [
     "test-lang-decline-report",
 ], fork = true, parallel = true }
 
-[tasks.ci-lang-decline-report-rocksdb]
+[tasks.ci-lang-decline-report-surrealkv]
 category = "CI - LANGUAGE TESTS"
-description = "Report declined statements with the RocksDB engine"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
+description = "Report declined statements with the SurrealKV engine"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
 run_task = { name = [
     "test-lang-decline-report",
 ], fork = true, parallel = true }
 
 [tasks.ci-lang-decline-report]
 category = "CI - LANGUAGE TESTS"
-description = "Report the statements the engine declines to run on mem and rocksdb"
+description = "Report the statements the engine declines to run on mem and surrealkv"
 dependencies = [
     "ci-lang-decline-report-mem",
-    "ci-lang-decline-report-rocksdb",
+    "ci-lang-decline-report-surrealkv",
 ]
 
 [tasks.ci-parser]
@@ -1354,7 +1294,7 @@ run_task = { name = [
 # are covered in CI. The server is started to match the embedded harness's
 # datastore exactly (see language-tests/README.md) — otherwise scripting / file
 # functions / OpenGQL / TEMPFILES / `INFO FOR ROOT` diverge. `_TEST_API_ENGINE`
-# selects the *server's* backend (memory or rocksdb); the harness itself is
+# selects the *server's* backend (memory or surrealkv); the harness itself is
 # backend-agnostic over the API.
 #
 # Tests run concurrently, each in a namespace of its own, so the one server is
@@ -1393,7 +1333,7 @@ HOST="127.0.0.1:18283"
 
 case "${_TEST_API_ENGINE}" in
     memory|mem) DATA="memory" ;;
-    rocksdb)    DATA="rocksdb:${WORK}/data" ;;
+    surrealkv)  DATA="surrealkv:${WORK}/data" ;;
     *) echo "test-lang-remote: unsupported _TEST_API_ENGINE='${_TEST_API_ENGINE}'"; exit 1 ;;
 esac
 
@@ -1418,9 +1358,9 @@ if [ "${READY:-0}" != "1" ]; then echo "test-lang-remote: server did not become 
 
 # `--backend` is what filters the corpus by `[env] backend`, so it has to name
 # the *server's* engine even though the harness opens no store of its own. Left
-# at its `memory` default the rocksdb leg would skip `alter_compact_rocksdb` and
-# instead run `alter_compact_mem`, which asserts compaction is unsupported —
-# against a server where it works.
+# at its `memory` default the surrealkv leg would skip the tests only a
+# file-backed engine answers, and run the ones only the in-memory engine
+# answers, against a server that is not one.
 "${HARNESS}" --color always run --no-wip --backend "${_TEST_API_ENGINE}" --endpoint "ws://${HOST}"
 """
 
@@ -1430,10 +1370,10 @@ description = "Run SurrealQL language tests over --endpoint against an in-memory
 env = { _TEST_API_ENGINE = "memory" }
 run_task = "test-lang-remote"
 
-[tasks.ci-lang-test-remote-rocksdb]
+[tasks.ci-lang-test-remote-surrealkv]
 category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests over --endpoint against a RocksDB server"
-env = { _TEST_API_ENGINE = "rocksdb" }
+description = "Run SurrealQL language tests over --endpoint against a SurrealKV server"
+env = { _TEST_API_ENGINE = "surrealkv" }
 run_task = "test-lang-remote"
 
 # --------------------------------------------------
@@ -1518,28 +1458,54 @@ echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}
     --chain "${LANG_UPGRADE_CHAIN//;/,}"
 """
 
+[tasks.test-lang-upgrade-rocksdb-migration]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis with a built harness"
+script = """
+#!/bin/bash -ex
+# Needs language-tests/target/debug/surrealql-test, built with the `upgrade`
+# feature by `lang-upgrade-harness`. The released binary writes `rocksdb://DIR`
+# and the current checkout then opens the same DIR as `surrealkv://DIR`, once
+# unversioned and once with `?versioned=true`.
+cd language-tests
+JOBS="${_TEST_LANG_UPGRADE_JOBS:-12}"
+OPTS=(--backend rocksdb-migration --allow-download --no-wip --jobs "${JOBS}")
+export LANG_UPGRADE_REQUIRE_MODULES=1
+
+echo "=== RocksDB migration: ${LANG_UPGRADE_MIGRATION_SOURCES} -> .. (unversioned) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --from "${LANG_UPGRADE_MIGRATION_SOURCES}" --to ..
+
+echo "=== RocksDB migration: ${LANG_UPGRADE_MIGRATION_SOURCES} -> .. (versioned) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" --versioned \
+    --from "${LANG_UPGRADE_MIGRATION_SOURCES}" --to ..
+"""
+
+[tasks.ci-lang-upgrade-run-rocksdb-migration]
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis, using a built harness"
+run_task = "test-lang-upgrade-rocksdb-migration"
+
+[tasks.ci-lang-upgrade-test-rocksdb-migration]
+category = "CI - LANGUAGE TESTS"
+description = "Run the RocksDB-to-SurrealKV migration axis"
+env = { _TEST_LANG_FEATURES = "upgrade" }
+run_task = { name = [
+    "lang-upgrade-harness",
+    "test-lang-upgrade-rocksdb-migration",
+], fork = true, parallel = false }
+
 [tasks.ci-lang-upgrade-harness-surrealkv]
 category = "CI - LANGUAGE TESTS"
 description = "Build the language upgrade harness for the SurrealKV backend"
 env = { _TEST_LANG_FEATURES = "upgrade" }
 run_task = "lang-upgrade-harness"
 
-[tasks.ci-lang-upgrade-harness-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Build the language upgrade harness for the RocksDB backend"
-env = { _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
-run_task = "lang-upgrade-harness"
-
 [tasks.ci-lang-upgrade-run-surrealkv]
 category = "CI - LANGUAGE TESTS"
 description = "Run the language upgrade axes with the SurrealKV backend, using a built harness"
 env = { _TEST_API_ENGINE = "surrealkv" }
-run_task = "test-lang-upgrade"
-
-[tasks.ci-lang-upgrade-run-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Run the language upgrade axes with the RocksDB backend, using a built harness"
-env = { _TEST_API_ENGINE = "rocksdb" }
 run_task = "test-lang-upgrade"
 
 [tasks.ci-lang-upgrade-test-surrealkv]
@@ -1551,21 +1517,12 @@ run_task = { name = [
     "test-lang-upgrade",
 ], fork = true, parallel = false }
 
-[tasks.ci-lang-upgrade-test-rocksdb]
-category = "CI - LANGUAGE TESTS"
-description = "Run language upgrade tests with the RocksDB backend"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
-run_task = { name = [
-    "lang-upgrade-harness",
-    "test-lang-upgrade",
-], fork = true, parallel = false }
-
 [tasks.ci-lang-upgrade-test-all]
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests on all supported backends"
 dependencies = [
     "ci-lang-upgrade-test-surrealkv",
-    "ci-lang-upgrade-test-rocksdb",
+    "ci-lang-upgrade-test-rocksdb-migration",
 ]
 
 # --------------------------------------------------
@@ -1613,7 +1570,7 @@ args = [
     # datastore is gated on it, tests included. `surreal-ext/sign` likewise:
     # `--no-default-features` drops it, and without it `surreal-ext` has no
     # `sign` command for the module trust tests to sign with.
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
     "--workspace",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",
@@ -1625,7 +1582,6 @@ args = [
     "--skip", "ml_integration",
     "--skip", "graphql_integration",
     "--skip", "gql_integration",
-    "--skip", "database_upgrade",
 ]
 
 [tasks.ci-workspace-test-archive]
@@ -1638,7 +1594,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem,surreal-ext/sign",
     "--workspace",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",
@@ -1665,7 +1621,6 @@ args = [
     "--skip", "ml_integration",
     "--skip", "graphql_integration",
     "--skip", "gql_integration",
-    "--skip", "database_upgrade",
 ]
 
 # Defaults apply only when the caller has not set the shard variables, so a
@@ -2079,12 +2034,6 @@ description = "Run library benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "lib-mem", BENCH_LIB_FEATURES = "allocator,kv-mem" }
 run_task = { name = ["bench-lib-target"] }
 
-[tasks.bench-lib-rocksdb]
-category = "CI - BENCHMARK"
-description = "Run library benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "lib-rocksdb", BENCH_LIB_FEATURES = "allocator,kv-rocksdb" }
-run_task = { name = ["bench-lib-target"] }
-
 [tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the SurrealKV engine"
@@ -2095,12 +2044,6 @@ run_task = { name = ["bench-lib-target"] }
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
-run_task = { name = ["bench-sdk-target"] }
-
-[tasks.bench-sdk-rocksdb]
-category = "CI - BENCHMARK"
-description = "Run SDK benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-surrealkv]
@@ -2158,19 +2101,16 @@ dependencies = [
     "ci-ml-integration",
     # KVS tests
     "ci-kvs-mem",
-    "ci-kvs-rocksdb",
     "ci-kvs-surrealkv",
     # SDK build tests
     "ci-sdk-build",
     # SDK tests
     "ci-api-integration-mem",
-    "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-http",
     "ci-api-integration-ws",
     "ci-api-integration-any",
     # Language tests
     "ci-lang-test-mem",
-    "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
 ]

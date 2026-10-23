@@ -651,29 +651,29 @@ async fn a_timed_out_write_releases_its_workers() {
 	assert_eq!(rows, vec![Value::from("n3")], "the timed out statement wrote nothing");
 }
 
-/// The same statements on RocksDB, whose workers share the node's pool with the transaction they
+/// The same statements on SurrealKV, whose workers share the node's pool with the transaction they
 /// write through.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn writes_over_a_scan_fan_out_on_rocksdb() {
+async fn writes_over_a_scan_fan_out_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
 	let indexed = format!("{} DEFINE INDEX by_n ON t FIELDS n;", setup());
-	let serial = TestDb::new_on_rocksdb(&indexed, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&indexed, wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&indexed, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&indexed, wide_dir.path(), tiny()).await;
 	let handed =
 		same_answers_over(&serial, &wide, PLAIN, &["SELECT n FROM t WITH INDEX by_n WHERE n >= 0"])
 			.await;
 	assert!(handed > 0, "no batch went to a worker");
 }
 
-/// A failure of the compute half, and of the apply half, on RocksDB.
-#[cfg(feature = "kv-rocksdb")]
+/// A failure of the compute half, and of the apply half, on SurrealKV.
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn failures_are_raised_in_order_on_rocksdb() {
+async fn failures_are_raised_in_order_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
@@ -683,8 +683,8 @@ async fn failures_are_raised_in_order_on_rocksdb() {
 		"{} DEFINE INDEX uniq ON t FIELDS u UNIQUE; UPDATE t:300 SET s = 'x'; UPDATE t:900 SET s = 'y';",
 		setup()
 	);
-	let serial = TestDb::new_on_rocksdb(&failing, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&failing, wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&failing, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&failing, wide_dir.path(), tiny()).await;
 	let mark = Mark::of(&wide).await;
 	for sql in ["UPDATE t SET i = <int> s", "UPDATE t SET u = 1 WHERE n >= 299"] {
 		let expected = answers(&serial, &[sql], &[]).await;
@@ -692,11 +692,11 @@ async fn failures_are_raised_in_order_on_rocksdb() {
 		assert!(fans_out(&verdicts(&wide, sql).await), "`{sql}` fans out");
 		assert_eq!(answers(&wide, &[sql], &[]).await, expected, "`{sql}`");
 	}
-	mark.fanned_out(&wide, "failing writes on RocksDB").await;
+	mark.fanned_out(&wide, "failing writes on SurrealKV").await;
 }
 
 /// The statements of the write benches over a table of the shape of their datasets: each fans out,
-/// on the in-memory backend and on RocksDB, and answers what the serial run answers. The benches'
+/// on the in-memory backend and on SurrealKV, and answers what the serial run answers. The benches'
 /// numbers are those of a statement that fanned out.
 const BENCH_SETUP: &str = "
 	DEFINE TABLE record SCHEMAFULL;
@@ -730,20 +730,6 @@ async fn the_bench_statements_fan_out_on_the_in_memory_backend() {
 	let _turn = TURNS.lock().await;
 	let serial = TestDb::new_with_config(BENCH_SETUP, whole()).await;
 	let wide = TestDb::new_with_config(BENCH_SETUP, tiny()).await;
-	let handed = same_answers_over_table(&serial, &wide, "record", BENCH_STATEMENTS, &[]).await;
-	assert!(handed > 0, "no batch went to a worker");
-}
-
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_bench_statements_fan_out_on_rocksdb() {
-	let _turn = TURNS.lock().await;
-	let (serial_dir, wide_dir) = (
-		tempfile::tempdir().expect("temporary directory"),
-		tempfile::tempdir().expect("temporary directory"),
-	);
-	let serial = TestDb::new_on_rocksdb(BENCH_SETUP, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(BENCH_SETUP, wide_dir.path(), tiny()).await;
 	let handed = same_answers_over_table(&serial, &wide, "record", BENCH_STATEMENTS, &[]).await;
 	assert!(handed > 0, "no batch went to a worker");
 }
@@ -788,23 +774,6 @@ async fn the_create_bench_statements_fan_out_on_the_in_memory_backend() {
 	for setup in CREATE_BENCH_SETUPS {
 		let serial = TestDb::new_with_config(setup, whole()).await;
 		let wide = TestDb::new_with_config(setup, tiny()).await;
-		let handed =
-			same_answers_over_table(&serial, &wide, "record", CREATE_BENCH_STATEMENTS, &[]).await;
-		assert!(handed > 0, "no batch went to a worker");
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_create_bench_statements_fan_out_on_rocksdb() {
-	let _turn = TURNS.lock().await;
-	for setup in CREATE_BENCH_SETUPS {
-		let (serial_dir, wide_dir) = (
-			tempfile::tempdir().expect("temporary directory"),
-			tempfile::tempdir().expect("temporary directory"),
-		);
-		let serial = TestDb::new_on_rocksdb(setup, serial_dir.path(), whole()).await;
-		let wide = TestDb::new_on_rocksdb(setup, wide_dir.path(), tiny()).await;
 		let handed =
 			same_answers_over_table(&serial, &wide, "record", CREATE_BENCH_STATEMENTS, &[]).await;
 		assert!(handed > 0, "no batch went to a worker");
@@ -1065,7 +1034,7 @@ async fn a_delete_of_a_table_that_can_hold_edges_runs_serially() {
 
 /// A grant of the fan-out lease that is refused leaves the batch to the coordinator, which runs
 /// the whole body once every batch before it is applied, and the answers are the serial run's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refused_grant_runs_the_rest_of_the_write_on_the_coordinator() {
 	let _turn = TURNS.lock().await;
@@ -1073,8 +1042,8 @@ async fn a_refused_grant_runs_the_rest_of_the_write_on_the_coordinator() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(&setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&setup(), wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&setup(), wide_dir.path(), tiny()).await;
 	let failing = super::morsel::fail_grants(&wide.exec_ctx().await, 3);
 	let before = counts_of(&wide.exec_ctx().await);
 	let sqls = ["UPDATE t SET name = name + '!'", "DELETE t WHERE n % 3 = 0"];
@@ -1482,19 +1451,19 @@ async fn a_create_that_may_name_one_id_twice_runs_serially() {
 	}
 }
 
-/// A `CREATE` over a range of ids on RocksDB, whose workers share the node's pool with the
+/// A `CREATE` over a range of ids on SurrealKV, whose workers share the node's pool with the
 /// transaction they write through.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_create_over_a_range_of_ids_fans_out_on_rocksdb() {
+async fn a_create_over_a_range_of_ids_fans_out_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
 	let indexed = format!("{CREATES} DEFINE INDEX by_n ON c FIELDS n;");
-	let serial = TestDb::new_on_rocksdb(&indexed, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&indexed, wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&indexed, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&indexed, wide_dir.path(), tiny()).await;
 	let handed = same_answers_over_table(
 		&serial,
 		&wide,
@@ -1506,10 +1475,10 @@ async fn a_create_over_a_range_of_ids_fans_out_on_rocksdb() {
 	assert!(handed > 0, "no batch went to a worker");
 }
 
-/// A record that exists and a failed assert on RocksDB.
-#[cfg(feature = "kv-rocksdb")]
+/// A record that exists and a failed assert on SurrealKV.
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_failures_of_a_create_are_raised_in_order_on_rocksdb() {
+async fn the_failures_of_a_create_are_raised_in_order_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
@@ -1518,8 +1487,8 @@ async fn the_failures_of_a_create_are_raised_in_order_on_rocksdb() {
 	let failing = "DEFINE TABLE c;
 		DEFINE FIELD n ON c TYPE int VALUE record::id(id) ASSERT $value != 2600;
 		CREATE c:900 SET m = 0;";
-	let serial = TestDb::new_on_rocksdb(failing, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(failing, wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(failing, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(failing, wide_dir.path(), tiny()).await;
 	let mark = Mark::of(&wide).await;
 	for sql in ["CREATE |c:1..3000| RETURN NONE", "CREATE |c:1000..3000| RETURN NONE"] {
 		let expected = answers_of(&serial, "c", &[sql], &[]).await;
@@ -1527,7 +1496,7 @@ async fn the_failures_of_a_create_are_raised_in_order_on_rocksdb() {
 		assert!(fans_out(&verdicts(&wide, sql).await), "`{sql}` fans out");
 		assert_eq!(answers_of(&wide, "c", &[sql], &[]).await, expected, "`{sql}`");
 	}
-	mark.fanned_out(&wide, "failing creates on RocksDB").await;
+	mark.fanned_out(&wide, "failing creates on SurrealKV").await;
 }
 
 /// The schema of the tables a count of ids creates: a field that holds what the id is, and an
@@ -1581,16 +1550,16 @@ async fn a_count_of_ids_runs_serially() {
 	a_count_of_ids_runs_as_the_serial_run(&serial, &wide).await;
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_count_of_ids_runs_serially_on_rocksdb() {
+async fn a_count_of_ids_runs_serially_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let (serial_dir, wide_dir) = (
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = TestDb::new_on_rocksdb(COUNTED, serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(COUNTED, wide_dir.path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(COUNTED, serial_dir.path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(COUNTED, wide_dir.path(), tiny()).await;
 	a_count_of_ids_runs_as_the_serial_run(&serial, &wide).await;
 }
 
@@ -1785,15 +1754,15 @@ async fn a_failed_create_leaves_no_id_past_its_failure_in_its_transaction() {
 	.await;
 }
 
-/// The same on RocksDB.
-#[cfg(feature = "kv-rocksdb")]
+/// The same on SurrealKV.
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_failed_create_leaves_no_id_past_its_failure_in_its_transaction_on_rocksdb() {
+async fn a_failed_create_leaves_no_id_past_its_failure_in_its_transaction_on_surrealkv() {
 	let _turn = TURNS.lock().await;
 	let dirs: Vec<_> = (0..4).map(|_| tempfile::tempdir().expect("temporary directory")).collect();
 	let existing = format!("{CREATES} CREATE c:900 SET m = 0; CREATE c:2400 SET m = 0;");
-	let serial = TestDb::new_on_rocksdb(&existing, dirs[0].path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(&existing, dirs[1].path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(&existing, dirs[0].path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(&existing, dirs[1].path(), tiny()).await;
 	failed_create_holds_no_id_past_its_failure(
 		&serial,
 		&wide,
@@ -1804,8 +1773,8 @@ async fn a_failed_create_leaves_no_id_past_its_failure_in_its_transaction_on_roc
 	.await;
 	let asserted = "DEFINE TABLE c;
 		DEFINE FIELD n ON c TYPE int VALUE record::id(id) ASSERT $value != 1300 AND $value != 2600;";
-	let serial = TestDb::new_on_rocksdb(asserted, dirs[2].path(), whole()).await;
-	let wide = TestDb::new_on_rocksdb(asserted, dirs[3].path(), tiny()).await;
+	let serial = TestDb::new_on_surrealkv(asserted, dirs[2].path(), whole()).await;
+	let wide = TestDb::new_on_surrealkv(asserted, dirs[3].path(), tiny()).await;
 	failed_create_holds_no_id_past_its_failure(
 		&serial,
 		&wide,

@@ -5,18 +5,14 @@ mod http;
 #[cfg(ws_engine)]
 mod ws;
 
-#[cfg(feature = "kv-indxdb")]
-mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 mod local;
 
 use url::Url;
@@ -54,11 +50,8 @@ impl Endpoint {
 	}
 
 	/// Append a query parameter to the endpoint path string.
-	/// Only used when a local engine (e.g. `kv-mem`, `kv-rocksdb`) is enabled.
-	#[cfg_attr(
-		not(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb")),
-		allow(dead_code)
-	)]
+	/// Only used when a local engine (e.g. `kv-mem`, `kv-surrealkv`) is enabled.
+	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-surrealkv")), allow(dead_code))]
 	pub(crate) fn append_query_param(&mut self, key: &str, value: &str) {
 		if self.path.contains('?') {
 			self.path = format!("{}&{key}={value}", self.path);
@@ -140,6 +133,17 @@ mod tests {
 			assert_eq!(converted, format!("{scheme}{path}"), "failed to convert `{path}`");
 		}
 	}
+
+	#[test]
+	fn test_deprecated_schemes_map_to_surrealkv() {
+		// The deprecated spellings still open the SurrealKV datastore
+		for scheme in ["surrealkv", "rocksdb", "indxdb"] {
+			assert!(
+				matches!(EndpointKind::from(scheme), EndpointKind::SurrealKv),
+				"`{scheme}` should map to SurrealKv"
+			);
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -153,10 +157,7 @@ pub enum EndpointKind {
 	Grpc,
 	#[cfg(not(target_family = "wasm"))]
 	Grpcs,
-	#[cfg(target_family = "wasm")]
-	IndxDb,
 	Memory,
-	RocksDb,
 	TiKv,
 	Unsupported(String),
 	SurrealKv,
@@ -173,12 +174,19 @@ impl From<&str> for EndpointKind {
 			"grpc" => Self::Grpc,
 			#[cfg(not(target_family = "wasm"))]
 			"grpcs" => Self::Grpcs,
-			#[cfg(target_family = "wasm")]
-			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
-			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
+			// `rocksdb` and `indxdb` are deprecated spellings of `surrealkv`. They still open
+			// the SurrealKV datastore, and are logged so that the connection string can change.
+			// Only the scheme is named, never the path.
+			"rocksdb" | "indxdb" => {
+				tracing::warn!(
+					"The `{s}://` scheme is deprecated and will be removed. Use `surrealkv://` \
+					 instead: the database is opened as SurrealKV"
+				);
+				Self::SurrealKv
+			}
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

@@ -59,7 +59,7 @@ pub struct Information {
 	/// up into. [`Self::memory_allocated`] is this plus the external memory
 	/// reporters, so internal fragmentation is this figure less
 	/// [`Self::memory_requested`] — not the allocated figure less requested,
-	/// which would fold in the whole RocksDB cache.
+	/// which would fold in the external reporters' memory.
 	pub memory_reserved: usize,
 	/// Resident set size of the process, as the operating system reports it.
 	/// Sits above [`Self::memory_allocated`]; the gap is memory the tracker

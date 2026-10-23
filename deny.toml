@@ -45,6 +45,8 @@ unknown-registry = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# List of URLs for allowed Git repositories.
+allow-git = ["https://github.com/surrealdb/surrealkv"]
 
 # --------------------------------------------------
 # ADVISORIES
@@ -158,15 +160,7 @@ name = "surrealdb-kvs-tikv"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-kvs-indxdb"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
 name = "surrealdb-kvs-mem"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
-name = "surrealdb-kvs-rocksdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -417,16 +411,6 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-kvs-mem"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-kvs-indxdb"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-kvs-rocksdb"
 expression = "BUSL-1.1"
 license-files = []
 

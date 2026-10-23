@@ -29,7 +29,7 @@ jobs:
   # ----------------------------------------
 
   # `ci.yml` builds amd64 only on push and merge_group, so every run compiles
-  # the binary here. The compile includes RocksDB's C++ sources and fills the
+  # the binary here. The compile fills the
   # disk of a standard hosted runner, so pull requests use a 32-core runner.
   build:
     name: Build binary (amd64)

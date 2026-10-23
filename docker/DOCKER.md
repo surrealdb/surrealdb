@@ -118,7 +118,7 @@ services:
   surrealdb:
     image: surrealdb/surrealdb:latest # Consider using a specific version
     pull_policy: always
-    command: start rocksdb:/mydata/mydatabase.db
+    command: start surrealkv:/mydata/mydatabase.db
     user: "1000"
     ports:
       - 8000:8000

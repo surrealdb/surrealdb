@@ -1,10 +1,10 @@
 //! The default resume-by-bound scan cursor.
 //!
 //! Backends that cannot keep a native iterator alive across batches (surrealkv,
-//! tikv, indxdb — plus the mem cursor's materialising `next_batch` path) drive
+//! tikv — plus the mem cursor's materialising `next_batch` path) drive
 //! scans through [`DefaultKeysCursor`] / [`DefaultValsCursor`]. These re-issue a
 //! single-shot `scan`/`keys` per page and advance a resume bound (range + skip)
-//! between pages, instead of holding a live iterator like RocksDB's cursor.
+//! between pages, instead of holding a live iterator across pages.
 //!
 //! The page-fetch + resume/exhaustion bookkeeping lives in [`fetch_vals_page`] /
 //! [`fetch_keys_page`] (also used directly by the zero-copy `for_each` path);
@@ -189,8 +189,8 @@ async fn fill_keys_batch<T: Transactable + ?Sized>(
 /// [`Transactable::keys`]/[`Transactable::keysr`], copies each returned
 /// key into a cursor-owned buffer, and hands out borrowed slices into
 /// that buffer. Backends without a stateful iterator (mem, surrealkv,
-/// tikv, indxdb) inherit this. RocksDB overrides with a path that drives
-/// `DBRawIterator` directly without re-seeking.
+/// tikv) inherit this; a backend with a stateful iterator overrides it with a
+/// path that drives that iterator directly without re-seeking.
 ///
 /// # Re-seek cost (default impl only)
 ///
@@ -199,7 +199,7 @@ async fn fill_keys_batch<T: Transactable + ?Sized>(
 /// engines (mem, surrealkv) this is a B-tree lookup; for tikv it is a
 /// network round-trip. Backends that can do better should override the
 /// `open_keys_cursor` method on `Transactable` to return a stateful
-/// cursor (as rocksdb does), keeping the iterator pinned across batches.
+/// cursor, keeping the iterator pinned across batches.
 ///
 /// # Exhaustion heuristic
 ///
@@ -207,9 +207,8 @@ async fn fill_keys_batch<T: Transactable + ?Sized>(
 /// cursor without an extra round-trip.
 ///
 /// **Backend-specific overrides must implement an equivalent termination
-/// signal.** The rocksdb cursor uses iterator exhaustion (`iter.valid()
-/// == false`) directly rather than the short-batch heuristic, which is
-/// safe because the iterator is pinned across batches. Any new override
+/// signal.** A stateful cursor may use iterator exhaustion directly rather than the short-batch
+/// heuristic, which is safe because the iterator is pinned across batches. Any new override
 /// must either preserve the short-batch heuristic (when wrapping a
 /// single-shot scan) or substitute an equivalent — never both, never
 /// neither, since `exhausted` is the only thing that prevents an
@@ -454,8 +453,8 @@ where
 	/// `next_batch` pays: fetch one `scan`/`scanr` page (the backend's single
 	/// owned copy) and hand each `(key, value)` straight to `f`, instead of
 	/// concatenating the page into the cursor's flat buffers. Backends whose
-	/// scan already returns owned data (mem via `Bytes`, surrealkv, tikv,
-	/// indxdb) thus drop from two copies to one on the streaming path.
+	/// scan already returns owned data (mem via `Bytes`, surrealkv, tikv) thus drop from two copies
+	/// to one on the streaming path.
 	fn for_each<'s>(
 		&'s mut self,
 		limit: u32,

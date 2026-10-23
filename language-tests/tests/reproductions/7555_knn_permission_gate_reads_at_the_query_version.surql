@@ -2,7 +2,7 @@
 [env]
 namespace = true
 database = true
-backend = ["rocksdb", "surrealkv"]
+backend = ["surrealkv"]
 versioned = true
 imports = ["reproductions/7555_knn_permission_gate_reads_at_the_query_version_import.surql"]
 

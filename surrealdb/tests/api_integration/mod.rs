@@ -44,14 +44,14 @@ macro_rules! include_tests {
 mod backup;
 // The versioned suites run only on backends that still support native
 // versioning; the memory backend dropped it in the surrealmx 0.23 upgrade.
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
+#[cfg(feature = "kv-surrealkv")]
 mod backup_version;
 mod basic;
 mod live;
 mod run;
 mod serialisation;
 mod session_isolation;
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
+#[cfg(feature = "kv-surrealkv")]
 mod version;
 
 const ROOT_USER: &str = "root";
@@ -67,7 +67,7 @@ fn server_address() -> String {
 	std::env::var("SURREAL_TEST_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8000".to_string())
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
+#[cfg(feature = "kv-surrealkv")]
 static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 	std::sync::LazyLock::new(|| temp_dir::TempDir::new().unwrap().child("sdb-test"));
 
@@ -672,136 +672,6 @@ mod mem {
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, RocksDb};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-	use ulid::Ulid;
-
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		// Create a database directory using an absolute path
-		surrealdb::engine::any::connect(format!(
-			"rocksdb://{}",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		// Switch to the temporary directory, if possible, to test relative paths
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}")).await.unwrap();
-		}
-	}
-
-	/// Dropping the last connection handle shuts the datastore down.
-	///
-	/// Nothing calls `shutdown()` explicitly -- the engine takes the handles
-	/// going away as the signal -- so without this an embedded connection would
-	/// hold its storage for the lifetime of the process. RocksDB is where that
-	/// is observable: it takes an exclusive lock on its directory, so the same
-	/// path can only be reopened once the lock has been released.
-	#[test_log::test(tokio::test)]
-	async fn dropping_the_last_handle_releases_the_datastore() {
-		let _permit = PERMITS.acquire().await.unwrap();
-		let endpoint = format!("rocksdb://{}", TEMP_DIR.join(Ulid::new().to_string()).display());
-
-		let db = surrealdb::engine::any::connect(&endpoint).await.unwrap();
-		// Establishes the premise the rest of the test rests on: while the
-		// datastore is open, its directory cannot be opened again.
-		surrealdb::engine::any::connect(&endpoint)
-			.await
-			.expect_err("an open RocksDB datastore holds its directory");
-		drop(db);
-
-		// Shutdown runs on the engine's own task, so it has not necessarily
-		// finished by the time the handle is dropped.
-		let mut last = None;
-		for _ in 0..100 {
-			match surrealdb::engine::any::connect(&endpoint).await {
-				// Dropped here rather than left to the end of the test: the
-				// runtime stops with the test, and an engine still holding the
-				// directory when that happens never gets to release it.
-				Ok(reopened) => {
-					drop(reopened);
-					return;
-				}
-				Err(error) => last = Some(error),
-			}
-			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-		}
-		panic!("the datastore was never released: {last:?}");
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
-}
-
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb_versioned {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, RocksDb};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-	use ulid::Ulid;
-
-	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let path = TEMP_DIR.join(Ulid::new().to_string());
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<RocksDb>((path, config)).versioned().await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let db_dir = Ulid::new().to_string();
-		surrealdb::engine::any::connect(format!(
-			"rocksdb://{}?versioned=true",
-			TEMP_DIR.join("absolute").join(&db_dir).display()
-		))
-		.await
-		.unwrap();
-		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
-			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}?versioned=true"))
-				.await
-				.unwrap();
-		}
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
-}
-
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 	use surrealdb::Surreal;
@@ -847,6 +717,45 @@ mod surrealkv {
 		}
 	}
 
+	/// Dropping the last connection handle shuts the datastore down.
+	///
+	/// Nothing calls `shutdown()` explicitly -- the engine takes the handles
+	/// going away as the signal -- so without this an embedded connection would
+	/// hold its storage for the lifetime of the process. SurrealKV takes an
+	/// exclusive lock on its directory, so the same path can only be reopened
+	/// once the lock has been released.
+	#[test_log::test(tokio::test)]
+	async fn dropping_the_last_handle_releases_the_datastore() {
+		let _permit = PERMITS.acquire().await.unwrap();
+		let endpoint = format!("surrealkv://{}", TEMP_DIR.join(Ulid::new().to_string()).display());
+
+		let db = surrealdb::engine::any::connect(&endpoint).await.unwrap();
+		// Establishes the premise the rest of the test rests on: while the
+		// datastore is open, its directory cannot be opened again.
+		surrealdb::engine::any::connect(&endpoint)
+			.await
+			.expect_err("an open SurrealKV datastore holds its directory");
+		drop(db);
+
+		// Shutdown runs on the engine's own task, so it has not necessarily
+		// finished by the time the handle is dropped.
+		let mut last = None;
+		for _ in 0..100 {
+			match surrealdb::engine::any::connect(&endpoint).await {
+				// Dropped here rather than left to the end of the test: the
+				// runtime stops with the test, and an engine still holding the
+				// directory when that happens never gets to release it.
+				Ok(reopened) => {
+					drop(reopened);
+					return;
+				}
+				Err(error) => last = Some(error),
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		}
+		panic!("the datastore was never released: {last:?}");
+	}
+
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
@@ -889,8 +798,7 @@ mod tikv {
 // --------------------------------------------------
 
 // The memory backend no longer supports versioning after the surrealmx 0.23
-// upgrade; versioned coverage runs on the surrealkv backend below (rocksdb also
-// retains native versioning).
+// upgrade; versioned coverage runs on the surrealkv backend below.
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
 	use surrealdb::Surreal;

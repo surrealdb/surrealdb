@@ -145,7 +145,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// metadata, slab-level fragmentation, and pages the allocator has kept
 	/// rather than returned to the operating system. External reporters cover
 	/// memory allocated outside Rust's global allocator, which the heap terms
-	/// cannot see at all — currently RocksDB's caches. Memory that no term
+	/// cannot see at all. Memory that no term
 	/// covers, notably WebAssembly linear memory, is absent entirely.
 	pub fn memory_allocated(&self) -> usize {
 		// Get the reserved heap memory
@@ -172,9 +172,9 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// guard is disabled or the total is within it.
 	///
 	/// Reporting a refusal needs both figures, and computing the total is not
-	/// cheap — it walks the reporter registry and sums the RocksDB cache across
-	/// its shards. Returning them from the check keeps a refusal to one
-	/// computation rather than one per caller that wants to name the numbers.
+	/// cheap — it walks the reporter registry and sums the memory each reporter holds. Returning
+	/// them from the check keeps a refusal to one computation rather than one per caller that
+	/// wants to name the numbers.
 	pub fn beyond_threshold_by(&self) -> Option<(usize, usize)> {
 		match *surrealdb_cnf::MEMORY_THRESHOLD {
 			0 => None,

@@ -25,7 +25,6 @@ jwks = ["dep:jsonwebtoken"]
 # in-memory one is always available as a dev-dependency, and these add the
 # on-disk ones so each KVS CI lane runs the contention test against its own
 # store. Nothing in the library reads them.
-kv-rocksdb = ["surrealdb-kvs-any/kv-rocksdb"]
 kv-surrealkv = ["surrealdb-kvs-any/kv-surrealkv"]
 # The fault-injection registry in `testing`. Off in a normal build; the crate
 # above turns it on as a dev-dependency so its tests and the code under test

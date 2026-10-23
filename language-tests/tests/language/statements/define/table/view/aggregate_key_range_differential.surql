@@ -2,7 +2,7 @@
 [env]
 namespace = true
 database = true
-# Extra timeout: the test runs a few thousand nested queries, which RocksDB does not finish in 30
+# Extra timeout: the test runs a few thousand nested queries, which SurrealKV does not finish in 30
 # seconds when the suite forces the smallest morsels.
 timeout = 120000
 

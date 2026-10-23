@@ -61,12 +61,80 @@ engine.free();
 | Export | Description |
 | --- | --- |
 | `init` | Instantiates the module; must resolve before anything else is called |
-| `SurrealWasmEngine` | One embedded instance: `connect`, `execute`, `notifications`, `export`, `import`, `version`, `free` |
+| `SurrealWasmEngine` | One embedded instance: `connect`, `execute`, `notifications`, `export`, `import`, `version`, `close`, `persisted`, `free` |
 | `ConnectionOptions` | Capabilities, timeouts, and the namespace/database created on new storage |
+| `./worker` | `connect(endpoint, options)`: starts a dedicated worker, hosts the engine in it and returns a `WorkerEngine` with the same methods, for `surrealkv://` |
 | `./module` | The `.wasm` file itself, for a caller that resolves the module source itself |
 
-Storage backends are selected by the endpoint: `mem://` and `indxdb://name`, the latter backed by
-the browser's IndexedDB.
+Storage backends are selected by the endpoint: `mem://` and `surrealkv://name`, the latter backed by
+SurrealKV over the browser's Origin Private File System (OPFS). The two are covered in
+[Persistent storage in the browser](#persistent-storage-in-the-browser).
+
+### Persistent storage in the browser
+
+`surrealkv://name` keeps the database in the origin private file system, in a database called
+`name` that belongs to the origin. `mem://` keeps nothing and works on any thread.
+
+**The module must run in a dedicated worker.** The synchronous file handles that SurrealKV needs
+exist only in dedicated workers, so a `surrealkv://` database cannot be opened from the main
+thread of a page, from a shared worker or from a service worker. `SurrealWasmEngine.connect`
+rejects such a call before it touches storage. The `./worker` export is the bridge: `connect` starts a dedicated worker, loads this module in it
+(`dist/worker.js` beside the loader), connects the engine there and returns a `WorkerEngine` whose
+`execute`, `queryStream`, `notifications`, `export`, `import`, `version`, `persisted` and `close`
+mirror the engine's. Byte payloads are copied or transferred and `ReadableStream`s are transferred,
+so a reader that stops reading still stops the engine's producer.
+
+```ts
+import { connect } from "@surrealdb/wasm-native/worker";
+
+const engine = await connect("surrealkv://my-database");
+// ... engine.execute(request) ...
+await engine.close(); // before the application ends
+```
+
+A caller that hosts the module in its own worker uses `SurrealWasmEngine` directly: it calls `init`
+and `connect` there and carries requests, replies and notifications by message itself. The module needs no threads, no async runtime and no `SharedArrayBuffer`.
+
+**One tab per database.** SurrealKV takes an exclusive lock on the database. A second tab (or
+worker) that connects to the same name waits a few seconds for a holder that is closing and then
+`connect` rejects with a message that says the database is open in another tab or worker. The engine does not retry or take the lock over: the
+page decides, for example by telling the user to close the other tab, or by connecting again later.
+After a reload without a `close()` the browser can take longer than the wait to release the lock,
+so the same rejection can appear for a short time.
+
+**Close the engine when the application ends.** A worker cannot wait for an asynchronous close
+inside a page-unload handler. Call `await engine.close()` as early as the application knows it is
+ending, for example when the page sends a message to the worker. On a `WorkerEngine`, `close()`
+closes the datastore, frees the engine and ends the worker. On a `SurrealWasmEngine`, call
+`await engine.close()` and then `engine.free()`. `close()` closes the SurrealKV tree and then
+releases its files and the lock; it takes longer the more files the database has. A
+`SurrealWasmEngine` that is freed without `close()` closes its datastore on a task of its own, so the
+lock is released shortly after `free()` returns rather than before. A database that was not closed is recovered the next time it is
+opened. Nothing may use the engine after `close()` resolves, other than `free()`.
+
+**Ask for persistent storage from the page.** Unless the origin has been granted persistent
+storage, the browser may evict its data when the disk fills. Only a page can ask: call
+`navigator.storage.persist()` there. Inside the worker, `await SurrealWasmEngine.persisted()`
+reports whether the request was granted; it resolves to `false` until then.
+
+**Data from the browser's earlier storage moves over by itself.** At every `surrealkv://name` connect,
+before the database is opened, the module copies the rows of an earlier browser database called
+`name` into the origin private file system, unless a database `name` exists there already. The
+earlier database is only read: it is never changed or deleted, and the application removes it with
+`indexedDB.deleteDatabase(name)` once it has checked the copy. The copy is verified, and one that
+was interrupted is made again at the next connect, which then opens no database until the copy
+completes. A copy that fails makes `connect` reject, and the database is not opened.
+
+Limits: Chrome is the only browser that is tested. Encryption, checkpoints and the migrators of
+earlier engines are not available in the browser. `Durability` in a browser is an ordering guarantee of
+the file handle's `flush()` and not a promise about a power cut or an operating-system crash. A
+worker has an address space of at most 4 GiB, and the default memtable and block cache sizes
+assume the 1 GiB that is assumed when the memory of the host cannot be read.
+
+The `browser/` directory holds two pages that exercise this in a browser: `smoke.html` drives the
+`./worker` bridge (persistence across close and reopen, the second-tab rejection) and `drop.html`
+frees an engine without closing it and reconnects. Build, serve this directory with any static
+server, and open them in Chrome; each leaves its outcome in `window.__results` or `window.__drop`.
 
 ### Where `init` reads the module from
 
@@ -110,7 +178,7 @@ tick, which a browser does not notice but which keeps a Node or Bun process from
 ## Requirements
 
 - ES modules (`import`) — CommonJS (`require`) is not supported
-- A browser, or any host with `WebAssembly`; `indxdb://` additionally needs IndexedDB
+- A browser, or any host with `WebAssembly`; `surrealkv://` additionally needs a dedicated worker with the origin private file system
 
 ## Contributing
 
@@ -130,6 +198,17 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-opt --version 0.116.1
 ```
 
+SurrealKV links zstd, which is C code, so the build needs a C compiler and an archiver that target
+WebAssembly. On macOS the compiler and archiver that ship with the system do not, so use LLVM's:
+
+```sh
+brew install llvm
+export CC_wasm32_unknown_unknown="$(brew --prefix llvm)/bin/clang"
+export AR_wasm32_unknown_unknown="$(brew --prefix llvm)/bin/llvm-ar"
+```
+
+On Linux, `clang` and `llvm-ar` serve the same purpose.
+
 `wasm-bindgen-cli` has to match the `wasm-bindgen` version in the workspace lockfile exactly —
 the two share a schema that changes between patch releases. `bun run build` checks this before
 it does anything and prints the `cargo install` line to run, so there is no version to copy from
@@ -147,5 +226,5 @@ The Rust half is a normal member of the Cargo workspace, but it compiles to noth
 the target explicitly:
 
 ```sh
-cargo clippy -p surrealdb-wasm --features kv-mem,kv-indxdb --target wasm32-unknown-unknown
+cargo clippy -p surrealdb-wasm --features kv-mem,kv-surrealkv --target wasm32-unknown-unknown
 ```

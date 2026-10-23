@@ -1,0 +1,61 @@
+<!doctype html><meta charset=utf-8><title>smoke</title><pre id=out></pre>
+<script type=module>
+import { connect } from "../dist/client.js";
+const out = document.getElementById("out");
+const log = (m) => { out.textContent += m + "\n"; };
+const name = "smoke-" + Math.random().toString(36).slice(2);
+const enc = new TextEncoder();
+const t = (str) => { const b = enc.encode(str); return [0x60 + b.length, ...b]; };
+const useReq = () => new Uint8Array([0xA3, ...t("id"), 0x01, ...t("method"), ...t("use"), ...t("params"), 0x82, ...t("main"), ...t("main")]);
+const results = {};
+try {
+  const e1 = await connect("surrealkv://" + name, { module: new URL("../dist/index_bg.wasm", location.href).href });
+  results.version = await e1.version();
+  results.persisted = await e1.persisted();
+  results.notificationsIsStream = e1.notifications() instanceof ReadableStream;
+  await e1.execute(useReq()); await e1.import("USE NS main DB main; CREATE person:one SET name = 'tobie';");
+  // second connect while open: must fail with the lock message
+  try { const e2 = await connect("surrealkv://" + name, { module: new URL("../dist/index_bg.wasm", location.href).href }); results.second = "OPENED"; await e2.close(); }
+  catch (err) { results.second = String(err.message).slice(0, 120); }
+  results.exportHasPerson = (await e1.export()).includes("person:one");
+  await e1.close();
+  try { await e1.version(); results.afterClose = "NO ERROR"; } catch (err) { results.afterClose = err.message; }
+  // reopen: data must have persisted and lock must be free
+  const e3 = await connect("surrealkv://" + name, { module: new URL("../dist/index_bg.wasm", location.href).href });
+  await e3.execute(useReq()); results.reopenedHasPerson = (await e3.export()).includes("person:one");
+  await e3.close();
+  // a module given as a URL object, and two closes at once
+  const u = await connect("mem://", { module: new URL("../dist/index_bg.wasm", location.href) });
+  const closes = await Promise.allSettled([u.close(), u.close()]);
+  results.concurrentCloses = closes.map((c) => c.status).join(",");
+  // close while a request is still running: the request settles and close succeeds
+  const c = await connect("mem://", { module: new URL("../dist/index_bg.wasm", location.href).href });
+  const queryReq = new Uint8Array([0xA3, ...t("id"), 0x01, ...t("method"), ...t("query"), ...t("params"), 0x81, ...t("SLEEP 400ms")]);
+  const running = c.execute(queryReq).then(() => "settled", (err) => "rejected: " + String(err.message).slice(0, 60));
+  await new Promise((r) => setTimeout(r, 50));
+  const closeResult = await c.close().then(() => "closed", (err) => "close failed: " + err.message);
+  results.closeDuringRequest = closeResult + " / request " + (await running);
+  // interval sync mode: the flusher runs, and the data survives a close and reopen
+  const iname = "interval-" + Math.random().toString(36).slice(2);
+  const i1 = await connect("surrealkv://" + iname + "?sync=200ms", { module: new URL("../dist/index_bg.wasm", location.href).href });
+  await i1.execute(useReq()); await i1.import("USE NS main DB main; CREATE person:two SET name = 'interval';");
+  await new Promise((r) => setTimeout(r, 700));
+  await i1.close();
+  const i2 = await connect("surrealkv://" + iname, { module: new URL("../dist/index_bg.wasm", location.href).href });
+  await i2.execute(useReq()); results.intervalPersisted = (await i2.export()).includes("person:two");
+  await i2.close();
+  // a worker that cannot be loaded rejects the connect instead of hanging
+  const bad = await Promise.race([
+    connect("mem://", { workerUrl: new URL("./missing-worker.js", location.href) }).then(() => "CONNECTED", (err) => "rejected: " + String(err.message).slice(0, 60)),
+    new Promise((r) => setTimeout(() => r("HUNG"), 10000)),
+  ]);
+  results.badWorker = bad;
+  // mem works too
+  const m = await connect("mem://", { module: new URL("../dist/index_bg.wasm", location.href).href });
+  results.mem = await m.version();
+  await m.close();
+  results.done = true;
+} catch (err) { results.error = String(err && err.stack || err); }
+window.__results = results;
+log(JSON.stringify(results, null, 1));
+</script>

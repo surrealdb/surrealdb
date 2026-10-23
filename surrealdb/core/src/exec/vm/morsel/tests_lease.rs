@@ -87,10 +87,11 @@ async fn bounded_empty(config: surrealdb_cnf::ConfigMap) -> TestDb {
 	bounded_on(governor, store, "DEFINE TABLE t;", config).await
 }
 
-/// A RocksDB datastore in `dir` that holds the table `t` and its rows, set up as [`bounded`] does.
-#[cfg(feature = "kv-rocksdb")]
-async fn rocksdb_with_rows(dir: &std::path::Path, config: surrealdb_cnf::ConfigMap) -> TestDb {
-	let db = TestDb::new_on_rocksdb("", dir, config).await;
+/// A SurrealKV datastore in `dir` that holds the table `t` and its rows, set up as [`bounded`]
+/// does.
+#[cfg(feature = "kv-surrealkv")]
+async fn surrealkv_with_rows(dir: &std::path::Path, config: surrealdb_cnf::ConfigMap) -> TestDb {
+	let db = TestDb::new_on_surrealkv("", dir, config).await;
 	for statement in setup() {
 		db.run(&statement).await;
 	}
@@ -235,7 +236,7 @@ async fn grants_never_make_a_serial_charge_raise() {
 /// A lease revoked while a Range morsel runs on a worker parks the morsel at its next chunk
 /// boundary, and the coordinator runs what is left of its range: the answers equal the serial
 /// run's.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn revoked_range_parks_and_coordinator_finishes() {
 	use super::super::tests_morsel::assert_equivalent;
@@ -246,8 +247,8 @@ async fn revoked_range_parks_and_coordinator_finishes() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = rocksdb_with_rows(serial_dir.path(), whole(usize::MAX)).await;
-	let wide = rocksdb_with_rows(wide_dir.path(), fanning(usize::MAX)).await;
+	let serial = surrealkv_with_rows(serial_dir.path(), whole(usize::MAX)).await;
+	let wide = surrealkv_with_rows(wide_dir.path(), fanning(usize::MAX)).await;
 	// The first worker is granted; the next grant is refused while it runs.
 	let failing = fail_grants(&wide.exec_ctx().await, 1);
 	let scans =

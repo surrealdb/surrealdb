@@ -33,7 +33,7 @@ use crate::err::{Error, Result};
 /// go away for any engine that gains a native pop-without-restore:
 ///
 /// - A released savepoint is left on the engine's stack for the rest of the transaction. What that
-///   retains is engine-specific: a counter on surrealkv, a lock-tracker allocation on RocksDB.
+///   retains is engine-specific: a counter on surrealkv.
 /// - Unwinding a scope that absorbed `n` releases costs `n + 1` engine rollbacks, and each one
 ///   restores whole-transaction state rather than one scope's worth.
 #[derive(Debug, Default)]

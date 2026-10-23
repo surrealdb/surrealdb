@@ -4137,7 +4137,7 @@ mod tests {
 	use rand::{Rng, SeedableRng};
 	use surrealdb_datastore::is_retryable_transaction_conflict;
 	use surrealdb_kvs::TransactionType;
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	use temp_dir::TempDir;
 	use tracing::info;
 	use uuid::Uuid;
@@ -6003,11 +6003,11 @@ mod tests {
 		Ok(())
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
-	async fn diskann_rocksdb_clear_race_keeps_concurrent_writer_visible() -> Result<()> {
+	async fn diskann_surrealkv_clear_race_keeps_concurrent_writer_visible() -> Result<()> {
 		let dir = TempDir::new()?;
-		let path = format!("rocksdb:{}", dir.path().to_string_lossy());
+		let path = format!("surrealkv:{}", dir.path().to_string_lossy());
 		let ds = TestIndexStore::with_path(&path).await;
 		let ikb = ikb();
 		let index = new_index(
@@ -10102,13 +10102,13 @@ mod tests {
 		Ok(())
 	}
 
-	/// Every scenario above against one on-disk RocksDB store, so none of them depends on the
+	/// Every scenario above against one on-disk SurrealKV store, so none of them depends on the
 	/// in-memory backend's visibility rules: what they pin lives in the process-local cache.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
-	async fn diskann_foreign_generation_rocksdb() -> Result<()> {
+	async fn diskann_foreign_generation_surrealkv() -> Result<()> {
 		async fn store(dir: &TempDir) -> TestIndexStore {
-			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await
+			TestIndexStore::with_path(&format!("surrealkv:{}", dir.path().to_string_lossy())).await
 		}
 
 		let compaction_dir = TempDir::new()?;
@@ -10209,12 +10209,12 @@ mod tests {
 		.await
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
-	async fn diskann_frames_keep_foreign_edges_and_invalidate_nothing_on_one_node_rocksdb()
+	async fn diskann_frames_keep_foreign_edges_and_invalidate_nothing_on_one_node_surrealkv()
 	-> Result<()> {
 		async fn store(dir: &TempDir) -> TestIndexStore {
-			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await
+			TestIndexStore::with_path(&format!("surrealkv:{}", dir.path().to_string_lossy())).await
 		}
 		let (two, one) = (TempDir::new()?, TempDir::new()?);
 		frames_keep_foreign_edges_and_invalidate_nothing_on_one_node(
@@ -12505,7 +12505,7 @@ mod tests {
 		}
 
 		/// `seed` indexed and compacted into a fresh index on `ds`.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn seeded_on(
 			ds: TestIndexStore,
 			params: &DiskAnnParams,
@@ -12515,7 +12515,7 @@ mod tests {
 		}
 
 		/// [`seeded_on`] for an index stamped with `format_version`.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn seeded_at(
 			ds: TestIndexStore,
 			params: &DiskAnnParams,
@@ -12530,17 +12530,17 @@ mod tests {
 			Ok((ds, index, cache))
 		}
 
-		/// A RocksDB store, whose read-only transactions get a view, with `places` places.
-		#[cfg(feature = "kv-rocksdb")]
-		async fn rocksdb_store(dir: &TempDir, places: usize) -> TestIndexStore {
-			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy()))
+		/// A SurrealKV store, whose read-only transactions get a view, with `places` places.
+		#[cfg(feature = "kv-surrealkv")]
+		async fn surrealkv_store(dir: &TempDir, places: usize) -> TestIndexStore {
+			TestIndexStore::with_path(&format!("surrealkv:{}", dir.path().to_string_lossy()))
 				.await
 				.with_places(places)
 		}
 
 		/// The record whose vector the graph's stored entry point holds, for a seed built by
 		/// [`line`], whose `i`th vector starts at `i`.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn entry_point_record(ds: &TestIndexStore) -> Result<i64> {
 			let tx = ds.transaction(TransactionType::Read).await?;
 			let state: DiskAnnState =
@@ -12557,7 +12557,7 @@ mod tests {
 
 		/// Asserts every entry the cache holds for the index equals what a fresh read
 		/// transaction reads from KV, family by family. Returns how many entries it compared.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn assert_cache_matches_kv(
 			ds: &TestIndexStore,
 			cache: &DiskAnnCache,
@@ -12640,7 +12640,7 @@ mod tests {
 
 		/// A read-only query over every vector of `seed`, so the state, elements, adjacency
 		/// lists, doc sets and doc-IDs it touches are cached.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn prewarm(
 			index: &DiskAnnIndex,
 			ds: &TestIndexStore,
@@ -12652,15 +12652,15 @@ mod tests {
 			Ok(())
 		}
 
-		/// T-5: on RocksDB a frame with a place reads every clean graph key through its one read
+		/// T-5: on SurrealKV a frame with a place reads every clean graph key through its one read
 		/// view, none through its write transaction, answers the keys it wrote from its overlay,
 		/// publishes what the view read, and ends its read transaction once, with no task alive.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_reads_clean_keys_through_its_view() -> Result<()> {
 			let dir = TempDir::new()?;
 			let (ds, index, _) =
-				seeded_on(rocksdb_store(&dir, 1).await, &small_params(4), &line(4, 0.0, 1.0, 20))
+				seeded_on(surrealkv_store(&dir, 1).await, &small_params(4), &line(4, 0.0, 1.0, 20))
 					.await?;
 			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
 			// The seeding frames wrote the whole graph through; a cold cache sends the frame's
@@ -12691,13 +12691,13 @@ mod tests {
 
 		/// T-5: with the stored entry point tombstoned, the repair cursor reads `!de` through the
 		/// write transaction, and those batches are the only reads the transaction serves.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_repair_scan_is_its_only_transaction_read() -> Result<()> {
 			let dir = TempDir::new()?;
 			let seed = line(4, 0.0, 1.0, 20);
 			let (ds, index, _) =
-				seeded_on(rocksdb_store(&dir, 1).await, &small_params(4), &seed).await?;
+				seeded_on(surrealkv_store(&dir, 1).await, &small_params(4), &seed).await?;
 			let entry = entry_point_record(&ds).await?;
 			// Without start points beside it, a deleted entry point leaves nothing to start from
 			// but a scan for a live element.
@@ -12730,7 +12730,7 @@ mod tests {
 		/// T-5 / T-3: a frame with no view opens no read transaction, reads nothing through a view
 		/// and publishes nothing it read, yet takes the places that are free and inserts its batch
 		/// on them, reading through its write transaction. On mem, which gives no view, and on
-		/// RocksDB with its view refused by a test hook.
+		/// SurrealKV with its view refused by a test hook.
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_without_a_view_batches_through_its_transaction() -> Result<()> {
 			async fn check(ds: TestIndexStore, faults: FrameFaults) -> Result<()> {
@@ -12758,14 +12758,14 @@ mod tests {
 			}
 			check(TestIndexStore::new_viewless().await.with_places(4), FrameFaults::default())
 				.await?;
-			#[cfg(feature = "kv-rocksdb")]
+			#[cfg(feature = "kv-surrealkv")]
 			{
 				let dir = TempDir::new()?;
 				let faults = FrameFaults {
 					no_view: true,
 					..FrameFaults::default()
 				};
-				check(rocksdb_store(&dir, 4).await, faults).await?;
+				check(surrealkv_store(&dir, 4).await, faults).await?;
 			}
 			Ok(())
 		}
@@ -12774,7 +12774,7 @@ mod tests {
 		/// elements, adjacency lists, doc sets and doc-IDs, prewarmed by a read-only query before
 		/// the frame — equals its KV value; after a frame that fails, the cache holds nothing of
 		/// the index.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_with_a_view_keeps_the_cache_coherent() -> Result<()> {
 			// Format 6 also keeps element codes, which a coded walk caches.
@@ -12784,12 +12784,12 @@ mod tests {
 			Ok(())
 		}
 
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		async fn frame_with_a_view_keeps_the_cache_coherent(format_version: u16) -> Result<()> {
 			let dir = TempDir::new()?;
 			let seed = line(4, 0.0, 1.0, 20);
 			let (ds, index, cache) =
-				seeded_at(rocksdb_store(&dir, 2).await, &small_params(4), &seed, format_version)
+				seeded_at(surrealkv_store(&dir, 2).await, &small_params(4), &seed, format_version)
 					.await?;
 			let entry = entry_point_record(&ds).await?;
 			// A cold cache, then a read-only query over part of the graph: the frame is served
@@ -12855,14 +12855,14 @@ mod tests {
 		/// T-12: a failure while the frame opens its read view — before the read transaction
 		/// opens, or once it has — cancels the write transaction, which holds the `!dg` bump and
 		/// the conditional deletes, and any read transaction it opened, and commits nothing.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_view_failure_ends_both_transactions() -> Result<()> {
 			use crate::trees::diskann::frame::ViewOpenFault;
 			for fault in [ViewOpenFault::BeforeOpen, ViewOpenFault::AfterOpen] {
 				let dir = TempDir::new()?;
 				let (ds, index, cache) = seeded_on(
-					rocksdb_store(&dir, 1).await,
+					surrealkv_store(&dir, 1).await,
 					&small_params(4),
 					&line(4, 0.0, 1.0, 20),
 				)
@@ -12909,12 +12909,12 @@ mod tests {
 		/// spawned tasks are parked. Neither transaction ends — the read transaction its lock's
 		/// backstop cancels, nor the write transaction its guard's backstop cancels — until the
 		/// tasks are released and have exited, and each ends once.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
 		async fn diskann_frame_panic_with_a_view_drains_before_either_end() -> Result<()> {
 			let dir = TempDir::new()?;
 			let (ds, index, cache) =
-				seeded_on(rocksdb_store(&dir, 4).await, &small_params(4), &line(4, 0.0, 1.0, 20))
+				seeded_on(surrealkv_store(&dir, 4).await, &small_params(4), &line(4, 0.0, 1.0, 20))
 					.await?;
 			ingest(&index, &ds, 100, &line(4, 0.5, 1.0, 30)).await?;
 			let before = captured(&ds, &ikb()).await?;
@@ -12980,12 +12980,12 @@ mod tests {
 			sink_frame_commits_with_its_build_transaction(TestIndexStore::new().await).await
 		}
 
-		/// The same on RocksDB, whose sink frame reads through a view and batches on places.
-		#[cfg(feature = "kv-rocksdb")]
+		/// The same on SurrealKV, whose sink frame reads through a view and batches on places.
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
-		async fn diskann_sink_frame_commits_with_its_build_transaction_rocksdb() -> Result<()> {
+		async fn diskann_sink_frame_commits_with_its_build_transaction_surrealkv() -> Result<()> {
 			let dir = TempDir::new()?;
-			sink_frame_commits_with_its_build_transaction(rocksdb_store(&dir, 4).await).await
+			sink_frame_commits_with_its_build_transaction(surrealkv_store(&dir, 4).await).await
 		}
 
 		async fn sink_frame_commits_with_its_build_transaction(ds: TestIndexStore) -> Result<()> {
@@ -13089,13 +13089,13 @@ mod tests {
 				.await
 		}
 
-		/// The same on RocksDB: the frame's read transaction and the build transaction both end
+		/// The same on SurrealKV: the frame's read transaction and the build transaction both end
 		/// after the frame's tasks have drained.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		#[tokio::test(flavor = "multi_thread")]
-		async fn diskann_sink_frame_dropped_on_a_panic_commits_nothing_rocksdb() -> Result<()> {
+		async fn diskann_sink_frame_dropped_on_a_panic_commits_nothing_surrealkv() -> Result<()> {
 			let dir = TempDir::new()?;
-			sink_frame_dropped_on_a_panic_commits_nothing(rocksdb_store(&dir, 4).await, 2).await
+			sink_frame_dropped_on_a_panic_commits_nothing(surrealkv_store(&dir, 4).await, 2).await
 		}
 
 		/// `ends` is how many transactions the frame has: its build transaction, and a read

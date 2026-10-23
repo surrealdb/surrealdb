@@ -3,10 +3,8 @@
 reason = """
 A blocking DEFINE INDEX run as its own statement commits its definition before
 it waits for the build, so its transaction is never held open across the
-build's writes. That is what RocksDB rejected at commit once a large build had
-aged the transaction past the write history it retains; the storage-level
-reproduction, which needs a RocksDB store with a shrunken memtable, is
-`kvs::tests::blocking_index_build_test`. This pins the contract the statement
+build's writes, where a transaction aged past the history an engine retains
+could no longer be validated at commit. This pins the contract the statement
 keeps across that change: it returns with the index ready and populated, an
 OVERWRITE returns with its replacement ready, a build that fails leaves no
 index behind, and inside BEGIN ... CANCEL the definition rolls back with the

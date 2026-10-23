@@ -208,7 +208,7 @@ impl HlcTimeStamp {
 	///
 	/// Note: the atomic counter is **process-local**, so this monotonicity holds only within a
 	/// single process. Distributed/cross-node changefeed ordering must come from the storage
-	/// backend's timestamp oracle (see `TiKVStampImpl`); the mem/rocksdb/surrealkv HLC is
+	/// backend's timestamp oracle (see `TiKVStampImpl`); the mem/surrealkv HLC is
 	/// single-node for changefeed-ordering purposes.
 	pub fn next() -> Self {
 		use std::sync::atomic::{AtomicU64, Ordering};

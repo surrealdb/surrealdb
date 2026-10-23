@@ -34,7 +34,7 @@ cuts between them with `split_range`. A backend that knows its own layout
 **`snapshot()`** answers an owned, shareable `Snapshot`: a read view of what
 the transaction reads at that moment, for code that does not hold the
 transaction. A backend answers `None` whenever it cannot overlay the writes the
-transaction has buffered, as RocksDB does for a writable transaction. A view
+transaction has buffered. A view
 upholds:
 
 - *Same view.* Commits made after the view was taken, and writes the

@@ -5,7 +5,7 @@
 //! remotely via WebSockets or HTTP. All storage engines are supported but you
 //! have to activate their feature flags first.
 //!
-//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust
+//! **NB**: Some storage engines like `TiKV` depend on non-Rust
 //! libraries so you need to install those libraries before you can build this
 //! crate when you activate their feature flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
 //! for more details on how to install them. If you are on Linux and you use
@@ -45,7 +45,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! surrealdb = { version = "2", features = ["allocator", "storage-rocksdb"] }
+//! surrealdb = { version = "3", features = ["allocator", "kv-surrealkv"] }
 //! ```
 //!
 //! When running SurrealDB within your Rust code, ensure that the asynchronous
@@ -76,7 +76,7 @@
 //! use serde_json::json;
 //! use surrealdb::{Error, Surreal};
 //! use surrealdb::opt::auth::Root;
-//! use surrealdb::engine::local::RocksDb;
+//! use surrealdb::engine::local::SurrealKv;
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Person {
@@ -96,7 +96,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Error> {
-//!     let db = Surreal::new::<RocksDb>("path/to/database/folder").await?;
+//!     let db = Surreal::new::<SurrealKv>("path/to/database/folder").await?;
 //!
 //!     // Select a specific namespace / database
 //!     db.use_ns("namespace").use_db("database").await?;
@@ -199,48 +199,6 @@ use crate::{Connect, Surreal};
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-mem")))]
 #[derive(Debug)]
 pub struct Mem;
-
-/// RocksDB database
-///
-/// # Examples
-///
-/// Instantiating a RocksDB-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::RocksDb;
-///
-/// let db = Surreal::new::<RocksDb>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-rocksdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
-#[derive(Debug)]
-pub struct RocksDb;
-
-/// IndxDB database
-///
-/// # Examples
-///
-/// Instantiating a IndxDB-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::IndxDb;
-///
-/// let db = Surreal::new::<IndxDb>("DatabaseName").await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-indxdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-indxdb")))]
-#[derive(Debug)]
-pub struct IndxDb;
 
 /// TiKV database
 ///

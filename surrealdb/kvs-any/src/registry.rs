@@ -12,7 +12,7 @@ use crate::provider::{BackendProvider, ConnectContext};
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 /// A registry of storage backend providers, dispatching datastore connection
-/// paths (e.g. `memory`, `rocksdb://path`, `tikv://...`) to the provider that
+/// paths (e.g. `memory`, `surrealkv://path`, `tikv://...`) to the provider that
 /// claims the scheme.
 ///
 /// [`Backends::community`] returns the first-party engines enabled by `kv-*`
@@ -47,7 +47,7 @@ impl<'a> Backends<'a> {
 		self.providers.iter().find(|p| p.schemes().contains(&scheme)).map(|p| &**p)
 	}
 
-	/// Parse a datastore connection path (e.g. `memory`, `rocksdb://path`,
+	/// Parse a datastore connection path (e.g. `memory`, `surrealkv://path`,
 	/// optionally with `?key=value` configuration parameters) and construct
 	/// the matching storage backend through its registered provider.
 	pub async fn new_transaction_builder(
@@ -88,8 +88,7 @@ impl<'a> Backends<'a> {
 		// below.
 		if scheme == "file" {
 			return Err(Error::Datastore(
-				"The `file://` scheme is no longer supported; use `rocksdb://` or `surrealkv://` instead"
-					.into(),
+				"The `file://` scheme is no longer supported; use `surrealkv://` instead".into(),
 			));
 		}
 
@@ -175,8 +174,8 @@ impl<'a> Backends<'a> {
 		}
 		// First-party schemes stay valid even when their feature is compiled
 		// out, so construction can report the targeted "not enabled" error.
-		// The removed `file:` and `surrealkv+versioned:` schemes are accepted
-		// here for the same reason: construction names their replacement.
+		// The removed `file:` and `surrealkv+versioned:` schemes are accepted here for the
+		// same reason: construction names their replacement.
 		let (scheme, bare) =
 			match scheme_part.split_once("://").or_else(|| scheme_part.split_once(':')) {
 				Some((scheme, _)) => (scheme, false),
@@ -247,7 +246,7 @@ mod tests {
 	fn empty_registry_rejects_all_paths() {
 		let backends = Backends::empty();
 		assert!(backends.path_valid("memory").is_err());
-		assert!(backends.path_valid("rocksdb:/tmp/db").is_err());
+		assert!(backends.path_valid("surrealkv:/tmp/db").is_err());
 	}
 
 	#[test]

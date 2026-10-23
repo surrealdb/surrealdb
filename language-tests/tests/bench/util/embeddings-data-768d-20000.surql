@@ -13,7 +13,7 @@
 # graph costs roughly 3.6 KiB per row at this dimension (a 768-dim F32 element
 # plus a DEGREE 64 adjacency list), so the cache stops holding it somewhere
 # above 70000 rows. The cache-miss regime the epic is about is past that, and
-# measuring it is what the `diag_diskann_build_rocksdb_200k` diagnostic is for —
+# measuring it needs a much larger dataset than this one —
 # a build that size takes far too long to re-run per bench iteration.
 #
 # `run = false`.

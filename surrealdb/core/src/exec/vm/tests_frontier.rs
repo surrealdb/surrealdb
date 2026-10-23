@@ -87,8 +87,6 @@ impl Pins {
 #[derive(Clone, Copy)]
 enum Backend {
 	Memory,
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDb,
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKv,
 }
@@ -97,12 +95,6 @@ enum Backend {
 async fn database(backend: Backend, config: ConfigMap, setup: &str) -> (TestDb, Option<Directory>) {
 	match backend {
 		Backend::Memory => (TestDb::new_with_config(setup, config).await, None),
-		#[cfg(feature = "kv-rocksdb")]
-		Backend::RocksDb => {
-			let dir = temp_dir::TempDir::new().unwrap();
-			let db = TestDb::new_on_rocksdb(setup, dir.path(), config).await;
-			(db, Some(Directory(dir)))
-		}
 		#[cfg(feature = "kv-surrealkv")]
 		Backend::SurrealKv => {
 			let dir = temp_dir::TempDir::new().unwrap();
@@ -113,9 +105,9 @@ async fn database(backend: Backend, config: ConfigMap, setup: &str) -> (TestDb, 
 }
 
 /// A directory the datastore under test stands in, removed when the run is done.
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-surrealkv")]
 struct Directory(#[allow(dead_code)] temp_dir::TempDir);
-#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-surrealkv")))]
+#[cfg(not(feature = "kv-surrealkv"))]
 struct Directory;
 
 /// Runs `setup` and then `sql` on a fresh datastore with the hop windows pinned to `windowed`.
@@ -620,14 +612,14 @@ async fn a_window_reads_what_the_transaction_wrote() {
 fn backends() -> Vec<Backend> {
 	vec![
 		Backend::Memory,
-		#[cfg(feature = "kv-rocksdb")]
-		Backend::RocksDb,
+		#[cfg(feature = "kv-surrealkv")]
+		Backend::SurrealKv,
 	]
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_reads_the_ranges_of_a_window_with_one_iterator() {
+async fn surrealkv_reads_the_ranges_of_a_window_with_one_iterator() {
 	let setup = format!(
 		"{} FOR $i IN 1..=1200 {{ CREATE type::record('person', 1000 + $i) SET n = $i; }};
 		 FOR $i IN 1..=1200 {{
@@ -645,8 +637,8 @@ async fn rocksdb_reads_the_ranges_of_a_window_with_one_iterator() {
 	] {
 		// Rows that no `ORDER BY` orders come back in the order of the scan only where the scan
 		// runs serially.
-		let off = run_on(Backend::RocksDb, Pins::OFF, SERIAL, &setup, sql).await;
-		let on = run_on(Backend::RocksDb, Pins::ALL, SERIAL, &setup, sql).await;
+		let off = run_on(Backend::SurrealKv, Pins::OFF, SERIAL, &setup, sql).await;
+		let on = run_on(Backend::SurrealKv, Pins::ALL, SERIAL, &setup, sql).await;
 		assert_eq!(off.filled, (0, 0));
 		assert!(on.served.0 > 0, "{sql}: {:?}", on.served);
 		if sql.starts_with("EXPLAIN") {
@@ -1099,9 +1091,9 @@ async fn a_statement_that_writes_keys_no_rows() {
 	no_errors(&on);
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
-async fn rocksdb_reads_the_first_hop_of_a_batch_of_rows_with_one_iterator() {
+async fn surrealkv_reads_the_first_hop_of_a_batch_of_rows_with_one_iterator() {
 	let setup = people(300, "");
 	for sql in [
 		"SELECT ->knows->person AS f FROM person",
@@ -1109,8 +1101,8 @@ async fn rocksdb_reads_the_first_hop_of_a_batch_of_rows_with_one_iterator() {
 		"SELECT <-knows AS e FROM person",
 		"EXPLAIN ANALYZE SELECT ->knows->person AS f FROM person",
 	] {
-		let off = run_on(Backend::RocksDb, Pins::OFF, SERIAL, &setup, sql).await;
-		let on = run_on(Backend::RocksDb, Pins::ALL, SERIAL, &setup, sql).await;
+		let off = run_on(Backend::SurrealKv, Pins::OFF, SERIAL, &setup, sql).await;
+		let on = run_on(Backend::SurrealKv, Pins::ALL, SERIAL, &setup, sql).await;
 		assert_eq!(off.filled, (0, 0));
 		assert!(on.rows > 0 && on.served.0 > 0, "{sql}: {:?} {}", on.served, on.rows);
 		if sql.starts_with("EXPLAIN") {
@@ -1218,7 +1210,7 @@ async fn a_key_that_does_not_decode_fails_a_run_with_windows_as_it_fails_one_wit
 /// A statement that holds a nested statement, read at a version or not, reads no window of its
 /// rows, and answers as it does without windows: the version a nested read names is never served
 /// the current keys a window holds.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_nested_statement_in_a_projection_reads_no_window_of_the_rows() {
 	let setup = people(30, "");
@@ -1233,8 +1225,8 @@ async fn a_nested_statement_in_a_projection_reads_no_window_of_the_rows() {
 			 SELECT id, {nested} AS then, ->knows AS e FROM person;"
 		);
 		for config in [SERIAL, MORSELS] {
-			let off = run_on(Backend::RocksDb, Pins::OFF, config, &setup, &sql).await;
-			let on = run_on(Backend::RocksDb, Pins::ALL, config, &setup, &sql).await;
+			let off = run_on(Backend::SurrealKv, Pins::OFF, config, &setup, &sql).await;
+			let on = run_on(Backend::SurrealKv, Pins::ALL, config, &setup, &sql).await;
 			assert_eq!(on.rows, 0, "the rows of {nested} fill no window");
 			assert_eq!(on.answers, off.answers, "{nested}");
 		}
@@ -1328,7 +1320,7 @@ async fn each_array_of_origins_fills_a_window_whatever_the_arrays_before_it_held
 	assert!(on.peak_group <= SOURCES_PER_FILL, "{}", on.peak_group);
 }
 
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_record_user_reads_through_windows_what_the_reads_one_at_a_time_give() {
 	let setup = "
@@ -1369,8 +1361,8 @@ async fn a_record_user_reads_through_windows_what_the_reads_one_at_a_time_give()
 		"SELECT VALUE (SELECT VALUE id FROM person)->knows->person FROM ONLY person:1",
 		"SELECT id, ->knows->person AS f FROM person LIMIT 6 START 3",
 	] {
-		let off = run_as(&session, Backend::RocksDb, Pins::OFF, &[], setup, sql).await;
-		let on = run_as(&session, Backend::RocksDb, Pins::ALL, &[], setup, sql).await;
+		let off = run_as(&session, Backend::SurrealKv, Pins::OFF, &[], setup, sql).await;
+		let on = run_as(&session, Backend::SurrealKv, Pins::ALL, &[], setup, sql).await;
 		no_errors(&on);
 		assert_eq!(on.answers, off.answers, "{sql}");
 		assert_eq!(off.filled, (0, 0));

@@ -2,8 +2,8 @@
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For
 //! storing data we support a number of key value stores. These are SurrealKV,
-//! RocksDB, TiKV and an in-memory store. We call these local engines. SurrealKV
-//! and RocksDB are file-based, single node key value stores. TiKV is a
+//! TiKV and an in-memory store. We call these local engines. SurrealKV is a
+//! file-based, single node key value store. TiKV is a
 //! distributed store that can scale horizontally across multiple nodes. The
 //! in-memory store does not persist your data, it only stores it in memory. All
 //! these can be embedded in your application, so you don't need to spin up a
@@ -36,17 +36,11 @@
 //! Cargo features you enable when compiling. This enables some cool workflows.
 //!
 //! One of the common use cases we see is using SurrealDB as an embedded
-//! database using RocksDB as the local engine. This is a nice way to boost the
-//! performance of your application when all you need is a single node. The
-//! downside of this approach is that RocksDB is not written in Rust so you will
-//! need to install some external dependencies on your development machine in
-//! order to successfully compile it. Some of our users have reported that
-//! this is not exactly straight-forward on Windows. Another issue is that
-//! RocksDB is very resource intensive to compile and it takes a long time. Both
-//! of these issues can be easily avoided by using `Surreal<Any>`. You can
-//! develop using an in-memory engine but deploy using RocksDB. If you develop
-//! on Windows but deploy to Linux then you completely avoid having to build
-//! RocksDB on Windows at all.
+//! database using SurrealKV as the local engine. This is a nice way to boost
+//! the performance of your application when all you need is a single node.
+//! SurrealKV is written in pure Rust so it needs no external dependencies, but
+//! `Surreal<Any>` still lets you develop using an in-memory engine and deploy
+//! using SurrealKV without changing your code.
 //!
 //! # Getting Started
 //!
@@ -114,30 +108,24 @@
 //! By doing something like this, you can use an in-memory database on your
 //! development machine and you can just run `cargo run` without having to
 //! specify the environment variable first or spinning up an external server
-//! remotely to avoid RocksDB's compilation cost. You also don't need to install
-//! any `C` or `C++` dependencies on your Windows machine. For the production
-//! binary you simply need to build it using something like
+//! remotely. For the production binary you simply need to build it using
+//! something like
 //!
 //! ```bash
-//! cargo build --features surrealdb/kv-rocksdb --release
+//! cargo build --features surrealdb/kv-surrealkv --release
 //! ```
 //!
 //! and export the `SURREALDB_ENDPOINT` environment variable when starting it.
 //!
 //! ```bash
-//! export SURREALDB_ENDPOINT="rocksdb:/path/to/database/folder"
+//! export SURREALDB_ENDPOINT="surrealkv:/path/to/database/folder"
 //! /path/to/binary
 //! ```
 //!
-//! The example above shows how you can avoid compiling RocksDB on your
-//! development machine, thereby avoiding dependency hell and paying the
-//! compilation cost during development. This is not the only benefit you can
-//! derive from using `Surreal<Any>` though. It's still useful even when your
-//! engine isn't expensive to compile. For example, the remote engines use pure
-//! Rust dependencies but you can still benefit from using `Surreal<Any>` by
-//! using the in-memory engine for development and deploy using a remote engine
-//! like the WebSocket engine. This way you avoid having to spin up a SurrealDB
-//! server first when developing and testing your application.
+//! The example above shows one benefit of using `Surreal<Any>`: the engine is
+//! chosen at runtime. For example, you can use the in-memory engine for
+//! development and deploy using a remote engine like the WebSocket engine. This way you avoid
+//! having to spin up a SurrealDB server first when developing and testing your application.
 //!
 //! For some applications where you allow users to determine the engine they
 //! want to use, you can enable multiple engines for them when building, or even
@@ -145,11 +133,11 @@
 //! features.
 //!
 //! ```bash
-//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-rocksdb,surrealdb/kv-tikv --release
+//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-surrealkv,surrealdb/kv-tikv --release
 //! ```
 //!
 //! In this case, the binary you build will have support for accessing an
-//! external server via WebSockets, embedding the database using RocksDB or
+//! external server via WebSockets, embedding the database using SurrealKV or
 //! using a distributed TiKV cluster.
 
 use std::sync::Arc;
@@ -374,14 +362,8 @@ impl Surreal<Any> {
 /// // In-memory with persistence to disk (e.g. mem:///tmp/data?versioned=true)
 /// let db = connect("mem:///tmp/data").await?;
 ///
-/// // Instantiate a RocksDB-backed instance
-/// let db = connect("rocksdb://path/to/database-folder").await?;
-///
 /// // Instantiate a SurrealKV-backed instance
 /// let db = connect("surrealkv://path/to/database-folder").await?;
-///
-/// // Instantiate an IndxDB-backed instance
-/// let db = connect("indxdb://DatabaseName").await?;
 ///
 /// // Instantiate a TiKV-backed instance
 /// let db = connect("tikv://localhost:2379").await?;
@@ -416,12 +398,29 @@ mod endpoint_tests {
 		}
 	}
 
+	/// The schemes of earlier storage engines are deprecated spellings of
+	/// `surrealkv` and open the same path with it.
+	#[test]
+	fn deprecated_schemes_open_with_surrealkv() {
+		for url in ["rocksdb://some/folder", "indxdb://name"] {
+			let endpoint = __into_endpoint(url).unwrap();
+			assert!(
+				matches!(
+					crate::opt::endpoint::EndpointKind::from(endpoint.url.scheme()),
+					crate::opt::endpoint::EndpointKind::SurrealKv
+				),
+				"{url} is not opened with surrealkv"
+			);
+			assert_eq!(endpoint.path, url);
+		}
+	}
+
 	#[test]
 	fn local_schemes_carry_a_path() {
-		let endpoint = __into_endpoint("rocksdb://some/folder").unwrap();
-		assert_eq!(endpoint.url.scheme(), "rocksdb");
+		let endpoint = __into_endpoint("surrealkv://some/folder").unwrap();
+		assert_eq!(endpoint.url.scheme(), "surrealkv");
 		assert_eq!(endpoint.url.host_str(), None);
-		assert_eq!(endpoint.path, "rocksdb://some/folder");
+		assert_eq!(endpoint.path, "surrealkv://some/folder");
 	}
 
 	/// A local endpoint string is a URL, so its path is percent-decoded before

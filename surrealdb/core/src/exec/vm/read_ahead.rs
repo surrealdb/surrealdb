@@ -50,7 +50,7 @@
 //! of the scan is in flight once it returns. A source dropped without it aborts the producer. An
 //! abort does not stop a chunk the storage engine is already reading on a thread of its own: that
 //! chunk finishes, holding its `Arc<Transaction>`, so the transaction outlives it, and a writable
-//! RocksDB chunk holds the transaction's lock for its own length, so a write or a rollback after
+//! chunk can hold the transaction's lock for its own length, so a write or a rollback after
 //! the scan waits for it.
 
 #[cfg(not(target_family = "wasm"))]

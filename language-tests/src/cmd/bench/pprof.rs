@@ -19,17 +19,16 @@ pub(crate) struct RegionProfiler {
 impl RegionProfiler {
 	#[cfg(feature = "bench-pprof")]
 	pub(crate) fn start() -> Self {
-		let guard = std::env::var("BENCH_PPROF")
-			.ok()
-			.filter(|prefix| !prefix.is_empty())
-			.and_then(|prefix| {
+		let guard = std::env::var("BENCH_PPROF").ok().filter(|prefix| !prefix.is_empty()).and_then(
+			|prefix| {
 				pprof::ProfilerGuardBuilder::default()
 					.frequency(997)
 					.blocklist(&["libc", "libgcc", "pthread", "vdso"])
 					.build()
 					.ok()
 					.map(|guard| (guard, prefix))
-			});
+			},
+		);
 		Self {
 			guard,
 		}

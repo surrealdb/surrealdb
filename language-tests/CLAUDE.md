@@ -135,7 +135,7 @@ like coverage while proving nothing. And a test written without a
 nothing here, because unspecified tests are filtered out before it runs; pass
 `--no-results` alongside it to bootstrap.
 
-Three axes run over the same tree, driven by `LANG_UPGRADE_VERSIONS` and
+Three axes run over the same tree, and a fourth over its own `migration/` tests, driven by `LANG_UPGRADE_VERSIONS` and
 `LANG_UPGRADE_SEEDS` in `Makefile.ci.toml`. Each proves something the others
 cannot, so none of them is redundant:
 
@@ -144,6 +144,7 @@ cannot, so none of them is redundant:
 | Adjacent pairs | `upgrade --from A --to B` | release B reads what release A wrote |
 | Seeds | `upgrade --from A,B,C --to ..` | the current checkout reads what an *old* release wrote, with nothing in between |
 | Cumulative walk | `upgrade --chain A,B,C,..` | a structure created once stays correct while every release in turn maintains it |
+| RocksDB migration | `upgrade --backend rocksdb-migration [--versioned] --from A,B --to ..` | the current checkout opens as `surrealkv://` a directory a release wrote as `rocksdb://`; runs only `[test] migration = true` tests (see `tests/upgrade/README.md`) |
 
 The spawned servers run with maintenance tasks live, and graph adjacency folding
 is on by default: a traversal over a vertex with enough edges can fold its scope

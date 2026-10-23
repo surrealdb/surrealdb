@@ -1050,10 +1050,10 @@ mod tests {
 	/// A datastore on disk that keeps every version of a key, which is what a copy
 	/// of its latest values drops. Backends that keep no history, the memory one
 	/// among them, refuse to be opened as one.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	async fn versioned() -> Result<(tempfile::TempDir, Arc<Datastore>)> {
 		let dir = tempfile::tempdir()?;
-		let path = format!("rocksdb://{}?versioned=true", dir.path().display());
+		let path = format!("surrealkv://{}?versioned=true", dir.path().display());
 		let ds = Datastore::builder()
 			.without_maintenance_tasks()
 			.with_capabilities(kvexport_allowed())
@@ -1063,7 +1063,7 @@ mod tests {
 		Ok((dir, ds))
 	}
 
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[tokio::test]
 	async fn a_store_that_keeps_history_is_refused_unless_the_caller_accepts_its_loss() -> Result<()>
 	{
@@ -1080,7 +1080,7 @@ mod tests {
 	/// With `latest_only` the stream is what a store that keeps no history would
 	/// serve for the same latest values: one frame per live key, holding its
 	/// newest value, and none for a key that was written and then deleted.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[tokio::test]
 	async fn latest_only_carries_each_keys_newest_value_and_nothing_older() -> Result<()> {
 		let (_dir, ds) = versioned().await?;
@@ -1097,8 +1097,8 @@ mod tests {
 
 		// The history is there for the stream to drop: at a moment before the
 		// last write, the deleted key is still stored, and so is the older value.
-		// A version is the millisecond in the upper 48 bits of a 64-bit stamp.
-		let version = u64::try_from(before.as_millis())? << 16;
+		// A version is a count of nanoseconds since the Unix epoch.
+		let version = u64::try_from(before.as_nanos())?;
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let past_gone = tx.get(Key::from(b"/zz-gone".to_vec()), Some(version)).await;
 		let past_kept = tx.get(Key::from(b"/zz-kept".to_vec()), Some(version)).await;
@@ -1124,7 +1124,7 @@ mod tests {
 		Ok(())
 	}
 
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(feature = "storage-surrealkv")]
 	#[tokio::test]
 	async fn the_route_answers_a_store_that_keeps_history_with_a_conflict_unless_latest_only()
 	-> Result<()> {

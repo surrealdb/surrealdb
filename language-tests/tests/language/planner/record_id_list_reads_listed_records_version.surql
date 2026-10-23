@@ -2,9 +2,9 @@
 [env]
 namespace = true
 database = true
-# The TiKV backend does not support versioned reads, and surrealkv / rocksdb
-# refuse them unless the datastore is opened versioned.
-backend = ["mem", "rocksdb", "surrealkv"]
+# The TiKV backend does not support versioned reads, and surrealkv
+# refuses them unless the datastore is opened versioned.
+backend = ["mem", "surrealkv"]
 versioned = true
 timeout = 5000
 

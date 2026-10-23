@@ -1,13 +1,7 @@
 //! [`BackendProvider`] implementations for the first-party storage engines,
 //! one per enabled `kv-*` cargo feature.
 #![cfg_attr(
-	not(any(
-		feature = "kv-mem",
-		feature = "kv-rocksdb",
-		feature = "kv-indxdb",
-		feature = "kv-tikv",
-		feature = "kv-surrealkv",
-	)),
+	not(any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",)),
 	allow(unused_imports, dead_code)
 )]
 
@@ -15,6 +9,8 @@ use surrealdb_kvs::TransactionBuilder;
 use surrealdb_kvs::api::BoxFut;
 use surrealdb_kvs::err::Result;
 use tracing::info;
+#[cfg(feature = "kv-surrealkv")]
+use tracing::warn;
 
 use crate::provider::{BackendProvider, ConnectContext};
 use crate::registry::Backends;
@@ -29,12 +25,8 @@ impl Backends<'static> {
 		let mut backends = Self::empty();
 		#[cfg(feature = "kv-mem")]
 		backends.register(MemProvider);
-		#[cfg(feature = "kv-rocksdb")]
-		backends.register(RocksDbProvider);
 		#[cfg(feature = "kv-surrealkv")]
 		backends.register(SurrealKvProvider);
-		#[cfg(feature = "kv-indxdb")]
-		backends.register(IndxDbProvider);
 		#[cfg(feature = "kv-tikv")]
 		backends.register(TikvProvider);
 		backends
@@ -77,39 +69,18 @@ impl BackendProvider for MemProvider {
 	}
 }
 
-/// Provider for the RocksDB storage engine.
-#[cfg(feature = "kv-rocksdb")]
-struct RocksDbProvider;
-
-#[cfg(feature = "kv-rocksdb")]
-impl BackendProvider for RocksDbProvider {
-	fn schemes(&self) -> &[&'static str] {
-		&["rocksdb"]
-	}
-
-	fn connect<'a>(
-		&'a self,
-		ctx: ConnectContext<'a>,
-	) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
-		Box::pin(async move {
-			// Parse RocksDB-specific configuration from query parameters
-			let config = ctx.config.load();
-			// Initialise the storage engine
-			let v = crate::rocksdb::Datastore::new(ctx.path, config).await?;
-			info!(target: TARGET, "Started rocksdb kvs store");
-			Ok(Box::new(v) as Box<dyn TransactionBuilder>)
-		})
-	}
-}
-
 /// Provider for the SurrealKV storage engine.
+///
+/// The `rocksdb` and `indxdb` schemes of earlier storage engines are claimed
+/// too and open the same path with SurrealKV, which migrates what an earlier
+/// engine left there; they are deprecated spellings of `surrealkv`.
 #[cfg(feature = "kv-surrealkv")]
 struct SurrealKvProvider;
 
 #[cfg(feature = "kv-surrealkv")]
 impl BackendProvider for SurrealKvProvider {
 	fn schemes(&self) -> &[&'static str] {
-		&["surrealkv"]
+		&["surrealkv", "rocksdb", "indxdb"]
 	}
 
 	fn connect<'a>(
@@ -117,33 +88,19 @@ impl BackendProvider for SurrealKvProvider {
 		ctx: ConnectContext<'a>,
 	) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
 		Box::pin(async move {
+			if matches!(ctx.scheme, "rocksdb" | "indxdb") {
+				warn!(
+					target: TARGET,
+					"The `{}` scheme is deprecated: the path is opened with SurrealKV, which \
+					 migrates any existing data automatically. Use `surrealkv://` instead",
+					ctx.scheme
+				);
+			}
 			// Parse SurrealKV-specific configuration from query parameters
 			let config = ctx.config.load();
 			// Initialise the storage engine
 			let v = crate::surrealkv::Datastore::new(ctx.path, config).await?;
 			info!(target: TARGET, "Started surrealkv kvs store");
-			Ok(Box::new(v) as Box<dyn TransactionBuilder>)
-		})
-	}
-}
-
-/// Provider for the IndexedDB (browser) storage engine.
-#[cfg(feature = "kv-indxdb")]
-struct IndxDbProvider;
-
-#[cfg(feature = "kv-indxdb")]
-impl BackendProvider for IndxDbProvider {
-	fn schemes(&self) -> &[&'static str] {
-		&["indxdb"]
-	}
-
-	fn connect<'a>(
-		&'a self,
-		ctx: ConnectContext<'a>,
-	) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
-		Box::pin(async move {
-			let v = crate::indxdb::Datastore::new(ctx.path).await?;
-			info!(target: TARGET, "Started indxdb kvs store");
 			Ok(Box::new(v) as Box<dyn TransactionBuilder>)
 		})
 	}

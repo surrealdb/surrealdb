@@ -102,7 +102,6 @@ fn calc_group_key(
 	// Backend engine/layout — never share a populated store across backends.
 	let backend_tag = match backend {
 		Backend::Memory => "mem",
-		Backend::RocksDb => "rocksdb",
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => "tikv",
 	};
@@ -142,7 +141,7 @@ struct BenchConfig {
 	backend: Backend,
 	/// The datastore configuration keys given with `--config`.
 	config: Vec<(String, String)>,
-	/// Temp directory under which file-backed datastores (rocksdb/surrealkv) are
+	/// Temp directory under which file-backed datastores (surrealkv) are
 	/// built; `None` for the in-memory backend. Removed when `run()` returns.
 	bench_root: Option<PathBuf>,
 }
@@ -155,7 +154,6 @@ static DS_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn datastore_conn(config: &BenchConfig) -> String {
 	let scheme = match config.backend {
 		Backend::Memory => return "mem://".to_string(),
-		Backend::RocksDb => "rocksdb",
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => unreachable!("TiKV is rejected before prepare()"),
 	};
@@ -177,7 +175,7 @@ impl Drop for CleanupDir {
 /// was built in.
 ///
 /// Dropping the last `Arc<Datastore>` does not close a file-backed engine: its
-/// own background threads — RocksDB's commit coordinator among them — hold a
+/// own background threads hold a
 /// handle to the store until `shutdown` stops them. A store that is only
 /// dropped stays open for the rest of the process, its memory resident, its
 /// background work still running and its files still held, and removing its
@@ -389,16 +387,10 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	let set = CaseSet::load_surrealql_files(cfg.path, &mut load_errors).await?;
 
 	// Resolve the backend. The in-memory engine needs no storage; file-backed
-	// engines (rocksdb/surrealkv) build into a temporary directory (a fresh
+	// engines (surrealkv) build into a temporary directory (a fresh
 	// subdir per datastore). TiKV needs an external cluster, so it's unsupported.
 	let bench_root = match cfg.backend {
 		Backend::Memory => None,
-		#[cfg(feature = "backend-rocksdb")]
-		Backend::RocksDb => Some(make_bench_root()?),
-		#[cfg(not(feature = "backend-rocksdb"))]
-		Backend::RocksDb => {
-			bail!("RocksDb benchmarking requires building with `--features backend-rocksdb`")
-		}
 		// surrealkv is always available under the `bench` feature (kv-surrealkv).
 		Backend::SurrealKv => Some(make_bench_root()?),
 		Backend::TikV => {
@@ -697,8 +689,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	// unless the bench sets `rebuild-file-backend` — the opt-in for a bench whose
 	// subject is the storage layer, where `mem` measures the wrong thing.
 	for run in rebuild.into_iter() {
-		if cfg.backend != Backend::Memory
-			&& !run.case.test.config.parsed.bench.rebuild_file_backend
+		if cfg.backend != Backend::Memory && !run.case.test.config.parsed.bench.rebuild_file_backend
 		{
 			println!(
 				"Skipping {} (`rebuild = true` benches run on the `mem` backend unless they set `rebuild-file-backend`)",
@@ -1118,10 +1109,7 @@ impl BenchStatement {
 			}
 			Self::PgSql => {
 				let results = dbs
-					.run(QueryRequest::new(
-						QuerySource::pgsql(&run.case.test.source),
-						session,
-					))
+					.run(QueryRequest::new(QuerySource::pgsql(&run.case.test.source), session))
 					.await?;
 				let mut rows = 0i64;
 				for (idx, result) in results.iter().enumerate() {
@@ -1136,10 +1124,7 @@ impl BenchStatement {
 			}
 			Self::MySql => {
 				let results = dbs
-					.run(QueryRequest::new(
-						QuerySource::mysql(&run.case.test.source),
-						session,
-					))
+					.run(QueryRequest::new(QuerySource::mysql(&run.case.test.source), session))
 					.await?;
 				let mut rows = 0i64;
 				for (idx, result) in results.iter().enumerate() {
@@ -1157,8 +1142,9 @@ impl BenchStatement {
 			} => {
 				// Submitting the plan takes it by value, so each iteration
 				// executes a fresh clone of the once-lowered plan.
-				let _ =
-					dbs.run(QueryRequest::new(QuerySource::Plan(vec![plan.clone().0]), session)).await?;
+				let _ = dbs
+					.run(QueryRequest::new(QuerySource::Plan(vec![plan.clone().0]), session))
+					.await?;
 			}
 			Self::GraphQl {
 				schema,
@@ -1310,8 +1296,7 @@ async fn populate(
 		let mut residual = usize::MAX;
 		for _ in 0..MAX_FOLD_DRAIN_PASSES {
 			let (iterations, errors) =
-				Datastore::graph_fold(dbs.clone(), Duration::from_secs(1), token.clone())
-					.await?;
+				Datastore::graph_fold(dbs.clone(), Duration::from_secs(1), token.clone()).await?;
 			if errors > 0 {
 				bail!("the graph-fold pass reported {errors} scope errors");
 			}
@@ -1697,9 +1682,8 @@ mod tests {
 	#[test]
 	fn the_group_key_holds_the_keys_of_the_run() {
 		let config = TestConfig::default();
-		let key = |run: &[(&str, &str)]| {
-			calc_group_key(&[], &config, Backend::Memory, "", &pairs(run))
-		};
+		let key =
+			|run: &[(&str, &str)]| calc_group_key(&[], &config, Backend::Memory, "", &pairs(run));
 		assert_eq!(key(&[]), key(&[]));
 		assert_ne!(key(&[]), key(&[("morsel_split_rows", "1")]));
 		assert_ne!(key(&[("morsel_split_rows", "1")]), key(&[("morsel_split_rows", "2")]));

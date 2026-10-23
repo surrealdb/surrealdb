@@ -3,7 +3,7 @@
 namespace = true
 database = true
 # Every statement below writes hundreds of records, which the suite's forced configuration cuts into
-# a batch for each record, and RocksDB does not finish that in the default timeout while the suite
+# a batch for each record, and SurrealKV does not finish that in the default timeout while the suite
 # runs in parallel.
 timeout = 30000
 

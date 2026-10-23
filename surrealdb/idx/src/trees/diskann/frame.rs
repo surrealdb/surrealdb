@@ -47,7 +47,7 @@
 //! read of such a key is answered from it. Every other key is clean: the frame has not changed it,
 //! so its committed value is the value the frame's transaction holds.
 //!
-//! Where the engine gives a read-only transaction a view (RocksDB), the frame opens one
+//! Where the engine gives a read-only transaction a view, the frame opens one
 //! ([`crate::parallel::ReadView`]) once its write lock is held, and every clean `!de`/`!dn` point
 //! read goes through that view's batched read, which does not queue behind the write transaction.
 //! What the view reads is committed, so it is published into the shared cache under the view's own

@@ -113,7 +113,7 @@ use crate::kvs::index::materialise::INDEX_COMPACTION_PASS_PLAN_BUDGET;
 use crate::kvs::index::materialise::{
 	CompactionPassOutcome, CompactionPassReport, Materialiser, PassLease,
 };
-#[cfg(all(test, feature = "kv-rocksdb"))]
+#[cfg(all(test, feature = "kv-surrealkv"))]
 use crate::kvs::index::materialise::{CompactionWriteGuard, compaction_write_guard};
 use crate::kvs::index::{IndexBuilder, ResumeScope};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
@@ -606,7 +606,7 @@ impl TransactionBuilderParts<()> {
 /// Factory that parses a datastore path and returns a concrete `TransactionBuilder`.
 ///
 /// Implementations can decide how to interpret connection strings (e.g. "memory",
-/// "rocksdb:...", "tikv:...") and which clock to use. This lets the CLI and
+/// "surrealkv:...", "tikv:...") and which clock to use. This lets the CLI and
 /// server be generic over different storage backends without hard-coding them.
 ///
 /// The `path_valid` helper is used by the CLI to validate the path early and
@@ -5283,10 +5283,7 @@ impl Datastore {
 	/// test can drive a pass that stops mid-prefix and inspect what it left
 	/// behind.
 	#[cfg(test)]
-	#[cfg_attr(
-		not(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv")),
-		allow(dead_code)
-	)]
+	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-surrealkv")), allow(dead_code))]
 	pub(crate) async fn reclaim_tombstones_with_budget(
 		dbs: Arc<Datastore>,
 		interval: Duration,
@@ -6807,7 +6804,7 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("rocksdb://database.db").await?;
+	///     let ds = Datastore::new("surrealkv://database.db").await?;
 	///     let mut tx = ds.transaction(Write).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
@@ -11287,7 +11284,7 @@ pub(crate) mod test {
 	/// under a prefix the catalog no longer names, and only the queued reclaim
 	/// would sweep it, if it had not already finished. The guard's reads are
 	/// registered reads, so this needs a backend that validates them.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	async fn assert_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it(
 		sql: &str,
 		table: &str,
@@ -11296,7 +11293,7 @@ pub(crate) mod test {
 		let dir = temp_dir::TempDir::new()?;
 		let ds = Datastore::builder()
 			.without_maintenance_tasks()
-			.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+			.build_with_path(&format!("surrealkv://{}", dir.path().to_string_lossy()))
 			.await?;
 		let session = Session::owner().with_ns("test").with_db("test");
 		let txn = ds.transaction(Write).await?;
@@ -11339,7 +11336,7 @@ pub(crate) mod test {
 		Ok(())
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn fulltext_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
 	-> Result<()> {
@@ -11351,7 +11348,7 @@ pub(crate) mod test {
 		.await
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn count_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
 	-> Result<()> {
@@ -11363,7 +11360,7 @@ pub(crate) mod test {
 		.await
 	}
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn hnsw_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
 	-> Result<()> {
@@ -11375,7 +11372,7 @@ pub(crate) mod test {
 		.await
 	}
 
-	#[cfg(all(feature = "kv-rocksdb", diskann))]
+	#[cfg(all(feature = "kv-surrealkv", diskann))]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn diskann_compaction_write_guard_conflicts_with_a_retirement_that_commits_after_it()
 	-> Result<()> {

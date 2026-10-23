@@ -1,10 +1,11 @@
 /**
  * Build the `@surrealdb/wasm-native` package.
  *
- * This package is the WebAssembly module and nothing else: the engine that
- * implements the SDK's interface lives in the surrealdb.js repository and
- * depends on this. So there is no TypeScript of ours to bundle — wasm-bindgen
- * already emits the loader and its typings, and they are what gets published.
+ * This package is the WebAssembly module plus the bridge that runs it in a
+ * dedicated worker: the engine that implements the SDK's interface lives in the
+ * surrealdb.js repository and depends on this. wasm-bindgen emits the loader
+ * and its typings; the worker host and the page's client for it are the small
+ * TypeScript under `ts/`, bundled beside them.
  *
  * `--debug` builds the unstripped, unwinding profile with the crate's `debug`
  * feature, which reports panics to the browser console. It also skips
@@ -20,7 +21,7 @@ const [, , ...flags] = Bun.argv;
 const isDebug = flags.includes("--debug") || !!process.env.DEBUG_WASM;
 
 const profile = isDebug ? "wasm-release-debug" : "wasm-release";
-const features = isDebug ? "kv-indxdb,kv-mem,debug" : "kv-indxdb,kv-mem";
+const features = isDebug ? "kv-surrealkv,kv-mem,debug" : "kv-surrealkv,kv-mem";
 
 /** The workspace target directory, since this crate is a workspace member. */
 const wasmModule = `../../target/wasm32-unknown-unknown/${profile}/surrealdb_wasm.wasm`;
@@ -136,6 +137,24 @@ if (isDebug) {
 		"dist/index_bg.wasm",
 	]);
 }
+
+// The worker host and the page's client for it. Both import the engine module
+// only by URL or as a type, so they bundle to single files that sit beside it.
+await run("Bundling the worker bridge", [
+	"bun",
+	"build",
+	"ts/worker.ts",
+	"ts/client.ts",
+	"--outdir",
+	"dist",
+	"--target",
+	"browser",
+	"--format",
+	"esm",
+	"--entry-naming",
+	"[name].js",
+]);
+await Bun.write("dist/client.d.ts", Bun.file("ts/client.d.ts"));
 
 const { size } = await Bun.file("dist/index_bg.wasm").stat();
 console.log(`📦 dist/index_bg.wasm — ${(size / 1024 / 1024).toFixed(2)} MiB`);

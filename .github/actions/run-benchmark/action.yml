@@ -3,7 +3,7 @@ description: 'Download binaries, prepare environment, run benchmark'
 
 inputs:
   config:
-    description: 'Configuration name (e.g., memory, rocksdb, embedded-memory)'
+    description: 'Configuration name (e.g., memory, surrealkv, embedded-memory)'
     required: true
   database:
     description: 'Database identifier for crud-bench'
@@ -118,9 +118,9 @@ runs:
             echo "Starting SurrealDB with in-memory storage..."
             surreal start --log error --user root --pass root memory &
             ;;
-          surrealdb-rocksdb)
-            echo "Starting SurrealDB with RocksDB storage..."
-            surreal start --log error --user root --pass root rocksdb:~/surrealdb-data &
+          surrealdb-surrealkv)
+            echo "Starting SurrealDB with SurrealKV storage..."
+            surreal start --log error --user root --pass root surrealkv:~/surrealdb-data &
             ;;
         esac
         

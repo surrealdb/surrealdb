@@ -31,14 +31,14 @@ test target.
 ## Running on wasm
 
 The libtest harness needs threads and a blockable executor, neither of
-which exist in a browser — and backends like IndexedDB only make progress
-when control returns to the JavaScript event loop. Wasm consumers instead
+which exist in a browser — and a browser backend only makes progress when
+control returns to the JavaScript event loop. Wasm consumers instead
 await `run_all` from a single `#[wasm_bindgen_test]`:
 
 ```rust
 #[wasm_bindgen_test]
 async fn kvs_suite() {
-    let backends = [TestBackend::new("indxdb", || async { /* ... */ })];
+    let backends = [TestBackend::new("surrealkv", || async { /* ... */ })];
     let ran = surrealdb_kvs_test::run_all(&backends, |line| console_log!("{line}")).await;
     assert!(ran > 0);
 }
@@ -46,8 +46,7 @@ async fn kvs_suite() {
 
 Per-test progress goes through the logging callback; a failing test panics
 and ends the run (wasm has no unwinding), identified by the `running` line
-logged immediately before it. The first-party IndexedDB backend runs the
-suite this way from `surrealdb-kvs-indxdb`'s `suite` test target.
+logged immediately before it.
 
 ## Test modules
 

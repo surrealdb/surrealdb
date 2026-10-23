@@ -15,8 +15,9 @@
  * one the SDK uses — so these exercise the wire shape a real caller sends
  * rather than a hand-rolled approximation. Run `bun run build` first.
  *
- * Only `mem://` is exercised. `indxdb://` needs IndexedDB, which Bun does not
- * provide; that backend is covered by the browser suite instead.
+ * Only `mem://` is exercised. `surrealkv://` needs the origin private file
+ * system in a dedicated worker, which Bun does not provide; that backend is
+ * covered by the browser suite instead.
  */
 
 import { expect, test } from "bun:test";

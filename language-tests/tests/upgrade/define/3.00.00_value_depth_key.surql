@@ -16,14 +16,6 @@ version = ">=3.4.0-a"
 # recurses once per level through the derived `DeserializeRevisioned` impls for
 # `Value` and `Array`, which carry no depth limit, so a row an older release
 # wrote can exhaust the stack instead of being rejected.
-#
-# It aborts on rocksdb because that backend can dispatch a scan visitor, record
-# decode included, onto the shared KVS pool, whose threads take the default
-# stack rather than the larger one a runtime worker gets. Which of the two a
-# given read uses is decided by whether an inline permit is free, so this is a
-# property of the dispatch and the stack sizes, not of the backend: surrealkv
-# passes because it keeps the scan visitor off that pool.
-wip = true
 reason = """
 A compound record id nests through arrays and objects just as a field value
 does, but it is stored in the key rather than in the value. That makes it a

@@ -12,7 +12,8 @@ pub struct SurrealKvConfig {
 	pub versioned: bool,
 	/// Version retention period in nanoseconds (0 = unlimited).
 	pub retention: Duration,
-	/// Disk sync mode.
+	/// Disk sync mode. The default is `every` on native targets, and a one-second
+	/// interval in the browser (`wasm32`), where `every` would wait on each commit's flush.
 	pub sync_mode: SyncMode,
 	/// Whether to enable value log separation (default: true)
 	pub enable_vlog: bool,
@@ -65,8 +66,25 @@ fn default_max_memtable_size() -> usize {
 	} else if mem < 64 * GIB {
 		GIB as usize
 	} else {
-		4 * GIB as usize
+		// Falls back to 1 GiB on a target whose address space is smaller than 4 GiB
+		usize::try_from(4 * GIB).unwrap_or(GIB as usize)
 	}
+}
+
+/// The sync mode of a target. On native a commit is durable before it returns. In the browser
+/// that flush would wait on the origin private file system for every commit, so the browser
+/// flushes the log once a second instead.
+fn default_sync_mode_for(wasm: bool) -> SyncMode {
+	if wasm {
+		SyncMode::Interval(Duration::from_secs(1))
+	} else {
+		SyncMode::Every
+	}
+}
+
+/// The sync mode when none is set, for the target this is compiled for.
+fn default_sync_mode() -> SyncMode {
+	default_sync_mode_for(cfg!(target_family = "wasm"))
 }
 
 impl Default for SurrealKvConfig {
@@ -74,7 +92,7 @@ impl Default for SurrealKvConfig {
 		Self {
 			versioned: false,
 			retention: Duration::ZERO,
-			sync_mode: SyncMode::Every,
+			sync_mode: default_sync_mode(),
 			enable_vlog: true,
 			block_size: (64 * KIB) as usize,
 			vlog_max_file_size: default_log_file_size(),
@@ -84,6 +102,63 @@ impl Default for SurrealKvConfig {
 		}
 	}
 }
+
+/// The settings of the removed RocksDB engine. Nothing reads them, so an
+/// operator who still sets one is told.
+const REMOVED_ROCKSDB_KEYS: &[&str] = &[
+	"rocksdb_blob_compaction_readahead_size",
+	"rocksdb_blob_compression_type",
+	"rocksdb_blob_file_size",
+	"rocksdb_blob_gc_age_cutoff",
+	"rocksdb_blob_gc_force_threshold",
+	"rocksdb_block_cache_size",
+	"rocksdb_block_size",
+	"rocksdb_compact_on_shutdown",
+	"rocksdb_compaction_readahead_size",
+	"rocksdb_compaction_style",
+	"rocksdb_deletion_factory_delete_count",
+	"rocksdb_deletion_factory_ratio",
+	"rocksdb_deletion_factory_window_size",
+	"rocksdb_enable_blob_files",
+	"rocksdb_enable_blob_gc",
+	"rocksdb_enable_pipelined_writes",
+	"rocksdb_file_compaction_trigger",
+	"rocksdb_file_reads_for_auto_readahead",
+	"rocksdb_grouped_commit_max_batch_size",
+	"rocksdb_grouped_commit_timeout",
+	"rocksdb_grouped_commit_wait_threshold",
+	"rocksdb_initial_auto_readahead_size",
+	"rocksdb_jobs_count",
+	"rocksdb_keep_log_file_num",
+	"rocksdb_level0_slowdown_writes_trigger",
+	"rocksdb_level0_stop_writes_trigger",
+	"rocksdb_max_auto_readahead_size",
+	"rocksdb_max_concurrent_subcompactions",
+	"rocksdb_max_open_files",
+	"rocksdb_max_write_buffer_number",
+	"rocksdb_memtable_prefix_bloom_ratio",
+	"rocksdb_min_blob_size",
+	"rocksdb_min_write_buffer_number_to_merge",
+	"rocksdb_periodic_compaction_seconds",
+	"rocksdb_prefix_extractor_enabled",
+	"rocksdb_runtime_reserve",
+	"rocksdb_scan_verify_checksums",
+	"rocksdb_shutdown_wait_for_compact_seconds",
+	"rocksdb_sst_max_allowed_space_usage",
+	"rocksdb_storage_log_level",
+	"rocksdb_target_file_size_base",
+	"rocksdb_target_file_size_multiplier",
+	"rocksdb_thread_count",
+	"rocksdb_universal_compression_size_percent",
+	"rocksdb_universal_max_merge_width",
+	"rocksdb_universal_max_size_amplification_percent",
+	"rocksdb_universal_min_merge_width",
+	"rocksdb_universal_size_ratio",
+	"rocksdb_universal_stop_style",
+	"rocksdb_wal_size_limit",
+	"rocksdb_whole_key_filtering",
+	"rocksdb_write_buffer_size",
+];
 
 impl Config for SurrealKvConfig {
 	fn parse(&mut self, map: &surrealdb_cnf::ConfigMap) {
@@ -100,6 +175,18 @@ impl Config for SurrealKvConfig {
 			map.parse_key("datastore_sync", &mut self.sync_mode);
 		} else {
 			map.parse_key("datastore_sync_data", &mut self.sync_mode);
+		}
+
+		let removed: Vec<&str> =
+			REMOVED_ROCKSDB_KEYS.iter().copied().filter(|key| map.has_key(key)).collect();
+		if !removed.is_empty() {
+			warn!(
+				target: "surrealdb::core::kvs::surrealkv",
+				"The RocksDB engine has been removed and its settings are ignored: {}. \
+				 The SurrealKV equivalents are surrealkv_block_cache_capacity, \
+				 surrealkv_max_memtable_size, surrealkv_block_size and datastore_sync",
+				removed.join(", ")
+			);
 		}
 
 		// The engine has no separate index of versions, so the setting has no effect. It is
@@ -132,18 +219,59 @@ impl Config for SurrealKvConfig {
 mod test {
 	use std::time::Duration;
 
-	use surrealdb_cnf::ConfigMap;
+	use surrealdb_cnf::{Config, ConfigMap};
 	use surrealdb_kvs::config::SyncMode;
 
-	use crate::cnf::SurrealKvConfig;
+	use crate::cnf::{SurrealKvConfig, default_sync_mode, default_sync_mode_for};
 
 	#[test]
+	#[cfg(not(target_family = "wasm"))]
 	fn test_surrealkv_config_defaults() {
 		let map = ConfigMap::empty();
 
 		let config = map.load::<SurrealKvConfig>();
 		assert!(!config.versioned);
 		assert_eq!(config.retention, Duration::ZERO);
+		assert_eq!(config.sync_mode, SyncMode::Every);
+	}
+
+	/// Compiled only for the browser: the default there is a one-second interval, so that no
+	/// commit waits for a durable flush on the origin private file system.
+	#[test]
+	#[cfg(target_family = "wasm")]
+	fn test_surrealkv_config_defaults_wasm() {
+		let map = ConfigMap::empty();
+
+		let config = map.load::<SurrealKvConfig>();
+		assert!(!config.versioned);
+		assert_eq!(config.retention, Duration::ZERO);
+		assert_eq!(config.sync_mode, SyncMode::Interval(Duration::from_secs(1)));
+	}
+
+	/// Runs on every target: the default for each target is chosen by a helper that takes the
+	/// target as an argument, so the browser's default is checked on the native test run too.
+	#[test]
+	fn test_default_sync_mode_by_target() {
+		assert_eq!(default_sync_mode_for(false), SyncMode::Every);
+		assert_eq!(default_sync_mode_for(true), SyncMode::Interval(Duration::from_secs(1)));
+		assert_eq!(
+			default_sync_mode(),
+			default_sync_mode_for(cfg!(target_family = "wasm")),
+			"the default of this target must be the one for its target family"
+		);
+		assert_eq!(SurrealKvConfig::default().sync_mode, default_sync_mode());
+	}
+
+	/// An explicit `sync=every` wins over a default that is not `every`, as the browser's is.
+	#[test]
+	fn test_explicit_sync_overrides_default() {
+		let mut config = SurrealKvConfig {
+			sync_mode: SyncMode::Interval(Duration::from_secs(1)),
+			..SurrealKvConfig::default()
+		};
+		let map =
+			ConfigMap::from_config_string("sync=every").map_keys(|x| format!("datastore_{x}"));
+		config.parse(&map);
 		assert_eq!(config.sync_mode, SyncMode::Every);
 	}
 
@@ -164,7 +292,7 @@ mod test {
 			.with_key_value("datastore_versioned", "true");
 		let config = map.load::<SurrealKvConfig>();
 		assert!(config.versioned);
-		assert_eq!(config.sync_mode, SyncMode::Every);
+		assert_eq!(config.sync_mode, default_sync_mode());
 	}
 
 	#[test]

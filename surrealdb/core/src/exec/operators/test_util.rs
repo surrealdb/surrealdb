@@ -258,16 +258,6 @@ impl TestDb {
 		Self::build_from(Datastore::builder(), setup, auth_enabled, config).await
 	}
 
-	/// As [`Self::new_with_config`], on a RocksDB datastore in `dir`.
-	#[cfg(feature = "kv-rocksdb")]
-	pub(crate) async fn new_on_rocksdb(
-		setup: &str,
-		dir: &std::path::Path,
-		config: surrealdb_cnf::ConfigMap,
-	) -> Self {
-		Self::new_on_rocksdb_over(Datastore::builder(), setup, dir, config).await
-	}
-
 	/// As [`Self::new_with_config`], on a SurrealKV datastore in `dir`.
 	#[cfg(feature = "kv-surrealkv")]
 	pub(crate) async fn new_on_surrealkv(
@@ -275,16 +265,7 @@ impl TestDb {
 		dir: &std::path::Path,
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
-		let path = format!("surrealkv://{}", dir.display());
-		Self::build_at(
-			Datastore::builder(),
-			&path,
-			setup,
-			false,
-			config,
-			crate::dbs::Capabilities::all(),
-		)
-		.await
+		Self::new_on_surrealkv_over(Datastore::builder(), setup, dir, config).await
 	}
 
 	/// As [`Self::new_on_surrealkv`], on a datastore that enforces permissions.
@@ -306,16 +287,16 @@ impl TestDb {
 		.await
 	}
 
-	/// As [`Self::new_on_rocksdb`], over a datastore that `builder` prepares, such as one with a
+	/// As [`Self::new_on_surrealkv`], over a datastore that `builder` prepares, such as one with a
 	/// test-owned memory governor or temporary store.
-	#[cfg(feature = "kv-rocksdb")]
-	pub(crate) async fn new_on_rocksdb_over(
+	#[cfg(feature = "kv-surrealkv")]
+	pub(crate) async fn new_on_surrealkv_over(
 		builder: crate::kvs::ds::Builder,
 		setup: &str,
 		dir: &std::path::Path,
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
-		let path = format!("rocksdb:{}", dir.display());
+		let path = format!("surrealkv://{}", dir.display());
 		Self::build_at(builder, &path, setup, false, config, crate::dbs::Capabilities::all()).await
 	}
 

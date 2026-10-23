@@ -1,7 +1,7 @@
 //! Benchmarks the datastore driven directly, without the SDK in the way.
 //!
 //! The backend is selected at runtime from `BENCH_DATASTORE_TARGET` (one of
-//! `lib-mem`, `lib-rocksdb`, `lib-surrealkv`); the matching `kv-*` feature must
+//! `lib-mem`, `lib-surrealkv`); the matching `kv-*` feature must
 //! be enabled for that target to be available. The SDK-facing half of the same
 //! comparison lives in the `surrealdb` crate's `sdb` benchmark.
 
@@ -14,7 +14,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use tokio::runtime::Runtime;
@@ -52,30 +52,6 @@ async fn init(target: &str) {
 			let ds = Datastore::builder()
 				.without_maintenance_tasks()
 				.build_with_path("memory")
-				.await
-				.unwrap();
-			// Define namespace and database for benchmarks
-			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
-				.await
-				.expect("Unable to define namespace");
-			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
-				.await
-				.expect("Unable to define database");
-			let _ = DB.set(ds);
-		}
-		#[cfg(feature = "kv-rocksdb")]
-		"lib-rocksdb" => {
-			let path = format!(
-				"rocksdb://lib-rocksdb-{}.db",
-				web_time::SystemTime::now()
-					.duration_since(web_time::UNIX_EPOCH)
-					.unwrap()
-					.as_millis()
-			);
-			println!("\n### Using path: {} ###\n", path);
-			let ds = Datastore::builder()
-				.without_maintenance_tasks()
-				.build_with_path(&path)
 				.await
 				.unwrap();
 			// Define namespace and database for benchmarks

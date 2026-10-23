@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["mem", "rocksdb"]
+backend = ["mem", "surrealkv"]
 namespace = true
 database = true
 auth = { level = "owner" }

@@ -247,13 +247,10 @@ impl Builder {
 	/// Inject the tokio runtime's worker thread count into the config map
 	/// under the shared `runtime_worker_threads` key.
 	///
-	/// The RocksDB engine reads this key to size the inline-blocking
-	/// `InlineGuard` permit cap from the actual runtime width, keeping the
-	/// cap in lockstep with the executor that runs the storage ops.
-	/// Embedders building a custom tokio runtime should call this with the
-	/// `worker_threads` value they passed to `tokio::runtime::Builder`.
-	/// When unset, the engine falls back to a `max(4, num_cpus::get())`
-	/// default.
+	/// Storage engines that size internal concurrency from the executor width
+	/// read this key. Embedders building a custom tokio runtime should call
+	/// this with the `worker_threads` value they passed to
+	/// `tokio::runtime::Builder`.
 	pub fn with_runtime_worker_threads(mut self, count: usize) -> Self {
 		self.config = std::mem::take(&mut self.config)
 			.with_key_value("runtime_worker_threads", count.to_string());
@@ -263,14 +260,11 @@ impl Builder {
 	/// Inject the tokio runtime's cap on blocking threads into the config
 	/// map under the shared `runtime_max_blocking_threads` key.
 	///
-	/// The RocksDB engine reads this key to bound the commits it runs on
-	/// the runtime's blocking pool to at most half of it, leaving the rest
-	/// to the runtime's other blocking work. Embedders building a custom
-	/// tokio runtime should call this with the `max_blocking_threads` value
-	/// they passed to `tokio::runtime::Builder`. When unset, the engine
-	/// assumes tokio's default of 512. The datastores committing on one
-	/// runtime share its bound, which the first datastore opened on it
-	/// sizes.
+	/// A storage engine may read this key to size its blocking work against
+	/// the runtime's blocking pool. Embedders building a custom tokio
+	/// runtime should call this with the `max_blocking_threads` value they
+	/// passed to `tokio::runtime::Builder`. When unset, tokio's default of
+	/// 512 applies.
 	pub fn with_runtime_max_blocking_threads(mut self, count: usize) -> Self {
 		self.config = std::mem::take(&mut self.config)
 			.with_key_value("runtime_max_blocking_threads", count.to_string());
@@ -418,7 +412,7 @@ impl Builder {
 	}
 
 	/// Make queries spill nowhere, even where the platform has a default store to spill to.
-	#[cfg(all(test, feature = "kv-rocksdb"))]
+	#[cfg(all(test, feature = "kv-surrealkv"))]
 	pub(crate) fn without_temp_store(mut self) -> Self {
 		self.no_temp_store = true;
 		self

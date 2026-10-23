@@ -226,7 +226,7 @@ enum DiskAnnCacheValue {
 }
 
 /// One cached entry of an index, as [`DiskAnnCache::entries_of`] lists it.
-#[cfg(all(test, feature = "kv-rocksdb"))]
+#[cfg(all(test, feature = "kv-surrealkv"))]
 pub(super) enum CachedEntry {
 	State(DiskAnnState),
 	Element(ElementId, Arc<DiskAnnElement>),
@@ -623,7 +623,7 @@ impl DiskAnnCache {
 
 	/// Every entry this cache holds for one index, whatever its stamp, for the tests that compare
 	/// the cache against KV.
-	#[cfg(all(test, feature = "kv-rocksdb"))]
+	#[cfg(all(test, feature = "kv-surrealkv"))]
 	pub(super) fn entries_of(
 		&self,
 		namespace_id: NamespaceId,
@@ -813,7 +813,7 @@ mod tests {
 		assert_eq!(*first_code, code());
 		assert!(Arc::ptr_eq(&first_code, &cache.get_code(index, 7, &view).unwrap()));
 		// The listing the KV coherence checks read exists only for them.
-		#[cfg(feature = "kv-rocksdb")]
+		#[cfg(feature = "kv-surrealkv")]
 		{
 			let held = cache.entries_of(index.0, index.1, index.2, index.3, index.4);
 			assert!(

@@ -1,6 +1,7 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
+#[cfg(not(target_family = "wasm"))]
 mod background_flusher;
 mod cnf;
 mod snapshot;
@@ -9,6 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+#[cfg(not(target_family = "wasm"))]
 use background_flusher::BackgroundFlusher;
 use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
@@ -27,10 +29,13 @@ use surrealdb_kvs::{
 	TransactionType, Val,
 };
 use surrealkv::{
-	Durability, HistoryOptions, LSMIterator, Mode, Transaction as Tx, Tree, TreeBuilder,
+	CompactRangeOptions, Durability, HistoryOptions, LSMIterator, Mode, Options, Transaction as Tx,
+	Tree, TreeBuilder,
 };
+#[cfg(target_family = "wasm")]
+use surrealkv::{FileSystem, IndexedDbMigration, migrate_from_indexeddb};
 use tokio::sync::RwLock;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -49,6 +54,43 @@ fn kvs_error(e: surrealkv::Error) -> Error {
 		surrealkv::Error::BatchTooLarge => Error::TransactionTooLarge,
 		_ => Error::Transaction(e.to_string()),
 	}
+}
+
+/// Convert a SurrealKV engine error raised while mounting or opening the
+/// database into the generic KVS error type, naming the one condition a
+/// caller can act on: another tab or worker holds the database.
+#[cfg(target_family = "wasm")]
+#[expect(
+	clippy::needless_pass_by_value,
+	reason = "by-value so it can be passed directly to `Result::map_err`"
+)]
+fn open_error(name: &str, e: surrealkv::Error) -> Error {
+	if e.is_database_locked() {
+		Error::ConnectionFailed(format!(
+			"The SurrealKV database `{name}` is open in another tab or worker. A database in the \
+			 browser's origin private file system can be open in one tab at a time; close the \
+			 other tab, or retry once it has released the database"
+		))
+	} else {
+		Error::Datastore(e.to_string())
+	}
+}
+
+/// Whether `path` holds the files of a RocksDB database: its `CURRENT` file and
+/// a `MANIFEST-` file.
+#[cfg(not(target_family = "wasm"))]
+fn holds_rocksdb_files(path: &str) -> bool {
+	let Ok(entries) = std::fs::read_dir(path) else {
+		return false;
+	};
+	let (mut current, mut manifest) = (false, false);
+	for entry in entries.flatten() {
+		let name = entry.file_name();
+		let name = name.to_string_lossy();
+		current |= name == "CURRENT";
+		manifest |= name.starts_with("MANIFEST-");
+	}
+	current && manifest
 }
 
 /// The error of a failed commit. Only the errors SurrealKV raises before it writes anything are
@@ -70,14 +112,24 @@ fn commit_error(e: surrealkv::Error) -> Error {
 }
 
 pub struct Datastore {
-	db: Tree,
+	/// Shared with the transactions that compact it: a `Tree` closes the database when
+	/// it is dropped, so a handle must only drop once nothing else uses the database.
+	db: Arc<Tree>,
 	/// Whether the datastore supports transaction versioning
 	versioned: bool,
 	/// Whether a commit is durable before it returns (sync=every)
 	sync: bool,
 	/// Set once shutdown has begun, after which no commit is applied
 	shutting_down: Arc<AtomicBool>,
+	/// The mounted origin private file system, released after the tree is
+	/// closed
+	#[cfg(target_family = "wasm")]
+	fs: FileSystem,
+	/// Ends the interval flusher of a browser database when set
+	#[cfg(target_family = "wasm")]
+	flusher_stopped: Arc<AtomicBool>,
 	/// Background flusher for periodically flushing WAL when sync=<interval>
+	#[cfg(not(target_family = "wasm"))]
 	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
 
@@ -88,6 +140,8 @@ pub struct Transaction {
 	write: bool,
 	/// Whether the datastore supports transaction versioning
 	versioned: bool,
+	/// The tree the transaction belongs to, which a manual compaction runs on.
+	db: Arc<Tree>,
 	/// The underlying datastore transaction, shared with the read view and its cursors.
 	inner: Arc<RwLock<Tx>>,
 	/// Engine savepoints backing each open savepoint.
@@ -161,46 +215,68 @@ impl Transaction {
 }
 
 impl Datastore {
-	/// Open a new database
-	pub async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
-		// Create the shared blocking threadpool (idempotent)
-		surrealdb_kvs::threadpool::initialise();
-		// Configure custom options
-		let builder = TreeBuilder::new();
+	/// Whether the browser keeps the storage of this origin until the user
+	/// clears it. The page must have asked with
+	/// `navigator.storage.persist()`, which a worker cannot call; until it is
+	/// granted the browser may evict the database when the disk fills.
+	#[cfg(target_family = "wasm")]
+	pub async fn persisted() -> Result<bool> {
+		FileSystem::persisted().await.map_err(|e| Error::Datastore(e.to_string()))
+	}
 
+	/// The options that the database is created with and opened with.
+	fn options(config: &SurrealKvConfig) -> Options {
 		// Enable separated keys and values
 		// Determine if vlog should be enabled
 		// - Required when versioning is enabled
 		// - Can be explicitly enabled via env var even without versioning
 		info!(target: TARGET, "Enabling value log separation: {}", config.enable_vlog);
-		let builder = builder.with_enable_vlog(config.enable_vlog);
+		let opts = Options::default().with_enable_vlog(config.enable_vlog);
 
 		// Configure the maximum value log file size
 		info!(target: TARGET, "Setting value log max file size: {}", config.vlog_max_file_size);
-		let builder = builder.with_vlog_max_file_size(config.vlog_max_file_size);
+		let opts = opts.with_vlog_max_file_size(config.vlog_max_file_size);
 
 		// Configure value log threshold
 		info!(target: TARGET, "Setting value log threshold: {}", config.vlog_threshold);
-		let builder = builder.with_vlog_value_threshold(config.vlog_threshold);
+		let opts = opts.with_vlog_value_threshold(config.vlog_threshold);
 
 		// Configure versioned queries with retention period
 		let retention_ns = config.retention.as_nanos().try_into().unwrap_or(u64::MAX);
 		info!(target: TARGET, "Versioning enabled: {} with retention period: {}ns", config.versioned, retention_ns);
-		let builder = builder.with_versioning(config.versioned, retention_ns);
+		let opts = opts.with_versioning(config.versioned, retention_ns);
 
 		// Configure the maximum memtable size
 		info!(target: TARGET, "Setting max memtable size: {}", config.max_memtable_size);
-		let builder = builder.with_max_memtable_size(config.max_memtable_size);
+		let opts = opts.with_max_memtable_size(config.max_memtable_size);
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", config.block_cache_capacity);
-		let builder = builder.with_block_cache_capacity(config.block_cache_capacity);
+		let opts = opts.with_block_cache_capacity(config.block_cache_capacity);
 		// Set the block size
 		info!(target: TARGET, "Setting block size: {}", config.block_size);
-		let builder = builder.with_block_size(config.block_size);
-		// Set the data storage directory
-		let builder = builder.with_path(path.to_string().into());
+		opts.with_block_size(config.block_size)
+	}
+
+	/// Open a new database
+	#[cfg(not(target_family = "wasm"))]
+	pub async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
+		// Create the shared blocking threadpool (idempotent)
+		surrealdb_kvs::threadpool::initialise();
+		// Configure custom options and set the data storage directory
+		let opts = Self::options(&config).with_path(path.to_string().into());
+		// A RocksDB directory is converted in place by the build below
+		if holds_rocksdb_files(path) {
+			warn!(
+				target: TARGET,
+				"The directory {path} holds a RocksDB database, which is now being migrated to \
+				 SurrealKV in place. This takes time proportional to its size, needs room for both \
+				 copies, and the datastore is not ready until it finishes; the original files are \
+				 kept in _rocksdb_backup/"
+			);
+		}
 		// Build the database
-		let db = builder.build().map_err(|e| Error::Datastore(e.to_string()))?;
+		let db =
+			TreeBuilder::with_options(opts).build().map_err(|e| Error::Datastore(e.to_string()))?;
 
 		// Create sync components based on sync mode
 		let background_flusher = match config.sync_mode {
@@ -220,7 +296,7 @@ impl Datastore {
 
 		// Create and return the datastore
 		Ok(Datastore {
-			db,
+			db: Arc::new(db),
 			versioned: config.versioned,
 			sync: matches!(config.sync_mode, SyncMode::Every),
 			shutting_down: Arc::new(AtomicBool::new(false)),
@@ -228,11 +304,126 @@ impl Datastore {
 		})
 	}
 
+	/// Open a new database in the browser's origin private file system.
+	///
+	/// `name` names the database within the origin. It must run in a
+	/// dedicated worker, as only a dedicated worker has the synchronous file
+	/// handles that the engine needs, and the database can be open in one
+	/// tab at a time: a second open fails with a connection error. Data in a
+	/// legacy IndexedDB database of the same name is copied in the first time
+	/// the database is opened; IndexedDB itself is only read.
+	///
+	/// There are no threads, so no commit coordinator and no background
+	/// thread. A sync mode of `every` makes each commit flush the log. The
+	/// interval mode, which is the default in a browser, runs a task on the
+	/// browser's event loop that flushes the log on each tick. `never` leaves
+	/// flushing to the browser.
+	#[cfg(target_family = "wasm")]
+	pub async fn new(name: &str, config: SurrealKvConfig) -> Result<Datastore> {
+		// The futures of the browser's file handles are not `Send`, which is sound to
+		// assert as the browser build is single-threaded
+		common::future::assert_send(async move {
+			// The path of the database within the mounted file system
+			const DB_PATH: &str = "db";
+			// Configure custom options and set the data storage directory
+			let opts = Self::options(&config).with_path(DB_PATH.into());
+			// Move a legacy IndexedDB database of the same name into the origin
+			// private file system. This precedes the open, as the copy is made
+			// only into a database that does not exist yet.
+			match migrate_from_indexeddb(name, name, opts.clone()).await {
+				Ok(IndexedDbMigration::Imported {
+					entries,
+					bytes,
+					skipped,
+					..
+				}) => {
+					info!(target: TARGET, "Imported {entries} rows ({bytes} bytes) from the IndexedDB database `{name}`, skipping {skipped}");
+				}
+				Ok(IndexedDbMigration::Existing) => {
+					info!(target: TARGET, "The database `{name}` exists, so IndexedDB was not read");
+				}
+				Ok(IndexedDbMigration::NoSource) => {
+					info!(target: TARGET, "No IndexedDB database `{name}` to import");
+				}
+				Ok(_) => {}
+				Err(e) if e.is_database_locked() => return Err(open_error(name, e)),
+				Err(e) => {
+					return Err(Error::Datastore(format!(
+						"Importing the IndexedDB database `{name}` failed: {e}"
+					)));
+				}
+			}
+			// Mount the files of the database
+			let fs = FileSystem::opfs(name).await.map_err(|e| open_error(name, e))?;
+			// Build the database
+			let db = match TreeBuilder::with_options(opts.with_file_system(fs.clone()))
+				.build_async()
+				.await
+			{
+				Ok(db) => db,
+				Err(e) => {
+					// Release the lock so that the database can be opened again
+					let _ = fs.close().await;
+					return Err(open_error(name, e));
+				}
+			};
+			// A browser has no commit pipeline of its own to group syncs, so a commit is
+			// made durable per transaction (sync=every) or by the interval flusher
+			let db = Arc::new(db);
+			let flusher_stopped = Arc::new(AtomicBool::new(false));
+			match config.sync_mode {
+				SyncMode::Every => {
+					info!(target: TARGET, "Sync mode: flush the log on every transaction commit");
+				}
+				SyncMode::Interval(interval) => {
+					info!(target: TARGET, "Sync mode: flush the log on an interval ({}ms)", interval.as_millis());
+					// The task holds the tree weakly, so that dropping the datastore without
+					// `shutdown` is not kept open by the flusher: the task ends on its next tick
+					let (db, stopped) = (Arc::downgrade(&db), Arc::clone(&flusher_stopped));
+					common::rt::spawn_detached(async move {
+						loop {
+							common::time::sleep(interval).await;
+							if stopped.load(Ordering::Acquire) {
+								break;
+							}
+							let Some(db) = db.upgrade() else {
+								break;
+							};
+							if let Err(e) = db.flush_wal(true) {
+								error!(target: TARGET, "An error occurred flushing the WAL buffer: {e}");
+							}
+						}
+					});
+				}
+				SyncMode::Never => {
+					info!(target: TARGET, "Sync mode: handled by the browser");
+				}
+			}
+			// Create and return the datastore
+			Ok(Datastore {
+				db,
+				versioned: config.versioned,
+				sync: matches!(config.sync_mode, SyncMode::Every),
+				shutting_down: Arc::new(AtomicBool::new(false)),
+				fs,
+				flusher_stopped,
+			})
+		})
+		.await
+	}
+
 	/// Shutdown the database
+	///
+	/// The tree is closed first and then the file system, which releases the
+	/// database's lock on the origin private file system in a browser.
 	pub async fn shutdown(&self) -> Result<()> {
 		// Refuse every commit that has not applied yet
 		self.shutting_down.store(true, Ordering::Release);
+		// Stop the interval flusher of a browser database
+		#[cfg(target_family = "wasm")]
+		self.flusher_stopped.store(true, Ordering::Release);
 		// Wait for the background flusher to finish
+		#[cfg(not(target_family = "wasm"))]
 		if let Some(background_flusher) = &self.background_flusher {
 			background_flusher.shutdown()?;
 		}
@@ -243,6 +434,15 @@ impl Datastore {
 		// Close the database
 		if let Err(e) = self.db.close().await {
 			error!(target: TARGET, "An error occurred closing the database: {e}");
+		}
+		// Release the files of the database
+		// A failure to release them leaves the database locked, which the caller must know
+		#[cfg(target_family = "wasm")]
+		if let Err(e) = self.fs.close().await {
+			error!(target: TARGET, "An error occurred closing the file system: {e}");
+			return Err(Error::Datastore(format!(
+				"The files of the database could not be released, so it stays locked: {e}"
+			)));
 		}
 		// Nothing to do here
 		Ok(())
@@ -261,6 +461,7 @@ impl Datastore {
 			done: Arc::new(AtomicBool::new(false)),
 			write: matches!(write, TransactionType::Write),
 			versioned: self.versioned,
+			db: Arc::clone(&self.db),
 			inner: Arc::new(RwLock::new(txn)),
 			savepoints: RwLock::new(SavepointStack::default()),
 			sync: self.sync,
@@ -370,6 +571,39 @@ impl Transactable for Transaction {
 			read_only: true,
 			writable: false,
 		}
+	}
+
+	/// Compacts the keys of `range`, or of the whole tree, down to the last level.
+	///
+	/// The log is flushed and the memtables are written out first, then every table
+	/// overlapping the range is merged down the tree, and the last level is rewritten
+	/// to drop the tombstones and the versions no reader can see, which frees the
+	/// space of deleted data. The call returns once the compaction is done; reads and
+	/// writes carry on meanwhile.
+	fn compact<'a>(&'a self, range: Option<KeyRange<'a>>) -> BoxFut<'a, Result<()>> {
+		// The range is owned up front so the work does not borrow from the caller
+		let bounds = range.map(|r| (r.start.to_vec(), r.end.to_vec()));
+		let db = Arc::clone(&self.db);
+		Box::pin(async move {
+			let compact = move || -> Result<()> {
+				// Make everything committed so far durable before it is compacted
+				db.flush_wal(true).map_err(kvs_error)?;
+				let (start, end) = match &bounds {
+					Some((start, end)) => (Some(start.as_slice()), Some(end.as_slice())),
+					None => (None, None),
+				};
+				db.compact_range(start, end, &CompactRangeOptions::default()).map_err(kvs_error)
+			};
+			#[cfg(not(target_family = "wasm"))]
+			{
+				// Blocking file I/O, so it runs off the async workers
+				affinitypool::spawn(compact).await
+			}
+			#[cfg(target_family = "wasm")]
+			{
+				compact()
+			}
+		})
 	}
 
 	/// Cancels the transaction.

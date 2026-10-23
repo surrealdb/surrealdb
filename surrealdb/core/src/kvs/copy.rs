@@ -378,13 +378,13 @@ mod tests {
 	/// A store keeps history exactly when it was opened to: on the same backend,
 	/// the probe tells a versioned store from one that is not. The memory backend
 	/// refuses to be versioned, so this runs on disk.
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
 	async fn a_store_keeps_history_only_when_it_is_versioned() -> Result<()> {
 		let plain_dir = temp_dir::TempDir::new()?;
 		let plain = Datastore::builder()
 			.without_maintenance_tasks()
-			.build_with_path(&format!("rocksdb://{}", plain_dir.path().to_string_lossy()))
+			.build_with_path(&format!("surrealkv://{}", plain_dir.path().to_string_lossy()))
 			.await?;
 		assert!(!keeps_history(&plain).await?);
 
@@ -392,7 +392,7 @@ mod tests {
 		let versioned = Datastore::builder()
 			.without_maintenance_tasks()
 			.build_with_path(&format!(
-				"rocksdb://{}?versioned=true",
+				"surrealkv://{}?versioned=true",
 				versioned_dir.path().to_string_lossy()
 			))
 			.await?;

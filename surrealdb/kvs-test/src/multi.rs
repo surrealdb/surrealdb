@@ -107,7 +107,7 @@ async fn multiwriter_same_keys_conflict(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(multiwriter_same_keys_conflict, except = [tikv, indxdb, surrealds]);
+kvs_test!(multiwriter_same_keys_conflict, except = [tikv, surrealds]);
 
 /// Of many transactions racing to create one absent key — each reads the key,
 /// finds nothing, and writes it — at most one commits, on the backends with
@@ -176,12 +176,11 @@ async fn concurrent_creators_of_absent_key_commit_once(b: &TestBackend) {
 }
 
 #[cfg(not(target_family = "wasm"))]
-kvs_test!(concurrent_creators_of_absent_key_commit_once, except = [tikv, indxdb, surrealds]);
+kvs_test!(concurrent_creators_of_absent_key_commit_once, except = [tikv, surrealds]);
 
 /// Last-writer-wins backends allow overlapping same-key writers: every commit
 /// succeeds and the last committer's value wins. This holds for TiKV's
-/// optimistic model, for IndexedDB, whose OCC validation only inspects the
-/// read set — blind writes never conflict — and for the TAPIR-based
+/// optimistic model and for the TAPIR-based
 /// distributed store, whose write-set validation retries a blind write at a
 /// higher timestamp instead of aborting it, so overlapping blind writes
 /// serialize in timestamp order.
@@ -221,7 +220,7 @@ async fn multiwriter_same_keys_allow(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(multiwriter_same_keys_allow, only = [tikv, indxdb, surrealds]);
+kvs_test!(multiwriter_same_keys_allow, only = [tikv, surrealds]);
 
 /// A conditional create (`putc` with no expected value) is atomic on **every**
 /// backend — including last-writer-wins TiKV, where a blind `set` is not (see

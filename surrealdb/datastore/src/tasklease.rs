@@ -556,8 +556,6 @@ mod tests {
 	use chrono::Utc;
 	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::TransactionBuilder;
-	#[cfg(feature = "kv-rocksdb")]
-	use temp_dir::TempDir;
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
@@ -640,7 +638,7 @@ mod tests {
 	/// 3. No errors occur during the lease acquisition process
 	///
 	/// # Parameters
-	/// * `flavor` - The type of datastore to use for the test (memory or RocksDB)
+	/// * `flavor` - The type of datastore to use for the test (memory or SurrealKV)
 	async fn task_lease_concurrency(builder: Box<dyn TransactionBuilder>) {
 		// Async event trigger
 		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
@@ -694,32 +692,6 @@ mod tests {
 			.await
 			.unwrap();
 		// Run the concurrency test with the in-memory datastore
-		task_lease_concurrency(builder).await;
-	}
-
-	/// Tests the task lease concurrency mechanism using a RocksDB datastore.
-	///
-	/// This test creates a temporary RocksDB datastore and runs the task lease
-	/// concurrency test to verify that the lease mechanism works correctly in
-	/// a multi-threaded environment with a persistent storage backend.
-	///
-	/// The test is only compiled and run when the "kv-rocksdb" feature is
-	/// enabled.
-	#[cfg(feature = "kv-rocksdb")]
-	#[tokio::test(flavor = "multi_thread")]
-	async fn task_lease_concurrency_rocksdb() {
-		// Create a temporary directory for the RocksDB datastore
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-
-		let builder = surrealdb_kvs_any::Backends::community()
-			.new_transaction_builder(
-				&format!("rocksdb://{path}"),
-				Default::default(),
-				ConfigMap::default(),
-			)
-			.await
-			.unwrap();
-		// Run the concurrency test with the RocksDB datastore
 		task_lease_concurrency(builder).await;
 	}
 

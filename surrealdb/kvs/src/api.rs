@@ -107,7 +107,7 @@ pub struct GetMultiResult {
 /// Offsets and lengths are `usize`, matching the buffer's natural
 /// addressing. Using `u32` would silently truncate batches whose
 /// concatenated bytes exceed 4 GB — possible for batches containing
-/// multi-GB RocksDB values, and a defense-in-depth concern even when the
+/// multi-GB values, and a defense-in-depth concern even when the
 /// numbers are typically small.
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
@@ -379,7 +379,7 @@ impl<T: FnMut(usize, &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> RangeKe
 /// against by the default cursor.
 ///
 /// Backends that can keep an underlying iterator alive across batches (e.g.
-/// RocksDB's `DBRawIterator`) hold it inside the cursor — the caller's
+/// a native database iterator) hold it inside the cursor — the caller's
 /// `Drop` is what frees the iterator, **not** an LRU. This avoids the
 /// thrashing failure mode of a bounded cache when there are more concurrent
 /// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
@@ -429,7 +429,7 @@ pub trait ScanCursorKeys: Send + Sync {
 /// against by the default cursor.
 ///
 /// Backends that can keep an underlying iterator alive across batches (e.g.
-/// RocksDB's `DBRawIterator`) hold it inside the cursor — the caller's
+/// a native database iterator) hold it inside the cursor — the caller's
 /// `Drop` is what frees the iterator, **not** an LRU. This avoids the
 /// thrashing failure mode of a bounded cache when there are more concurrent
 /// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
@@ -1501,7 +1501,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// The default returns [`Self::timestamp`], which is correct for any backend
 	/// with a single monotonic oracle and synchronous local visibility (mem,
-	/// rocksdb, surrealkv): everything below a freshly minted stamp is already
+	/// surrealkv): everything below a freshly minted stamp is already
 	/// committed and visible. A distributed backend whose commit log is
 	/// non-linear (e.g. SurrealDS, where the highest committed timestamp can
 	/// float above an unapplied lower one) MUST override this to return a genuine
@@ -1555,7 +1555,7 @@ pub trait Transactable: Send + Sync {
 	/// `None`).
 	///
 	/// Default impl returns [`Error::CompactionNotSupported`]; backends
-	/// whose storage engine exposes a compaction primitive (e.g. RocksDB)
+	/// whose storage engine exposes a compaction primitive (e.g. an LSM tree)
 	/// override this. The call is advisory — callers must not rely on it
 	/// for correctness, only for reclaiming space / improving read
 	/// performance.

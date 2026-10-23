@@ -6,8 +6,7 @@
 //! behaviour lives in `surrealdb-embedded`, shared with the Node addon.
 //!
 //! This crate only exists on wasm targets; on native targets it compiles to
-//! nothing, following `surrealdb-kvs-indxdb` — the IndexedDB backend it is
-//! built against.
+//! nothing.
 #![cfg(target_family = "wasm")]
 // An RPC request's futures nest a `Value` tree deeply enough that laying out
 // `execute`'s state machine exceeds the default query depth.

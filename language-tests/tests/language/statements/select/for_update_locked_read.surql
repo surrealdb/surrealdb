@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["mem", "rocksdb", "surrealkv"]
+backend = ["mem", "surrealkv"]
 
 [test]
 reason = "SELECT ... FOR UPDATE routes record-id targets (literal and param) through the locked read and returns the record on an engine with locked-read support"

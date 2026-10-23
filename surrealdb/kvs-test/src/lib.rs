@@ -26,7 +26,7 @@
 //! Tests are named `{backend}::{module}::{test}`.
 //!
 //! On targets without threads or a blockable executor — i.e. wasm, where
-//! backends like IndexedDB only make progress when control returns to the
+//! browser storage only makes progress when control returns to the
 //! JavaScript event loop — the libtest harness above is unavailable. Such
 //! consumers run the suite through [`run_all`] instead: a single async entry
 //! point awaited on the caller's executor (e.g. inside one
