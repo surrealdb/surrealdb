@@ -564,3 +564,47 @@ pub fn span_filters_from_value(v: &str) -> Vec<(String, LevelFilter)> {
 		})
 		.collect()
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn filter(value: &str) -> CustomFilter {
+		CustomFilter {
+			env: filter_from_value(value).expect("a valid log filter"),
+			spans: span_filters_from_value(value).into_iter().collect(),
+		}
+	}
+
+	/// The subscriber reports the most verbose level its filters admit.
+	/// `init` sets `log`'s max level from that hint, so a subscriber with no
+	/// hint makes every `log` record of every dependency reach the filters,
+	/// whatever the configured level.
+	#[test]
+	fn the_subscriber_reports_the_level_its_filters_admit() {
+		for (value, expected) in [
+			("error", LevelFilter::ERROR),
+			("warn", LevelFilter::WARN),
+			("info", LevelFilter::INFO),
+			("debug", LevelFilter::DEBUG),
+			("trace", LevelFilter::TRACE),
+			("surrealdb=info,[executor]=trace", LevelFilter::TRACE),
+		] {
+			for format in [LogFormat::Text, LogFormat::Json] {
+				for stdout_logs in [true, false] {
+					let (subscriber, _handles) = builder()
+						.with_filter(filter(value))
+						.with_log_format(format)
+						.with_stdout_logs(stdout_logs)
+						.build()
+						.expect("build the subscriber");
+					assert_eq!(
+						subscriber.max_level_hint(),
+						Some(expected),
+						"--log {value}, {format:?}, stdout_logs: {stdout_logs}"
+					);
+				}
+			}
+		}
+	}
+}

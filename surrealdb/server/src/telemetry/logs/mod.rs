@@ -91,7 +91,8 @@ where
 	let (show_file, show_line) = (false, false);
 	#[cfg(debug_assertions)]
 	let (show_file, show_line) = (true, true);
-	// Build the stderr layer (WARN and ERROR)
+	// Build the stderr layer (WARN and ERROR). The span filter is outermost so
+	// the layer reports the configured level as its hint, not WARN.
 	let stderr_filter = filter.clone();
 	let stderr_layer = {
 		let layer = tracing_subscriber::fmt::layer();
@@ -106,9 +107,9 @@ where
 				.with_thread_names(false)
 				.with_span_events(FmtSpan::NONE)
 				.with_writer(stderr_writer)
+				.with_filter(LevelFilter::WARN)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
-				.with_filter(LevelFilter::WARN)
 				.boxed(),
 			LogFormat::Text => layer
 				.compact()
@@ -120,9 +121,9 @@ where
 				.with_thread_names(false)
 				.with_span_events(FmtSpan::NONE)
 				.with_writer(stderr_writer)
+				.with_filter(LevelFilter::WARN)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
-				.with_filter(LevelFilter::WARN)
 				.boxed(),
 		}
 	};
@@ -130,8 +131,13 @@ where
 	// when `stdout_logs` is false
 	let stdout_layer = {
 		let layer = tracing_subscriber::fmt::layer();
+		// Applied over `filter`, so it admits at most what `filter` does.
 		let level_filter =
 			tracing_subscriber::filter::filter_fn(|meta| *meta.level() > Level::WARN);
+		let level_filter = match filter.max_level_hint() {
+			Some(hint) => level_filter.with_max_level_hint(hint),
+			None => level_filter,
+		};
 		match format {
 			LogFormat::Json => layer
 				.json()
