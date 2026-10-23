@@ -54,7 +54,7 @@ use crate::exec::ir::iface::catalog::PhysCx;
 use crate::exec::ir::iface::conversion::{Phase, PhysDialect};
 use crate::exec::ir::iface::fold::PlanTimeFolder;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
-use crate::exec::ir::iface::region_kind::{FieldRole, RegionKind};
+use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
 use crate::exec::ir::logical::ops::{FieldShape, FieldsShape};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::registry;
@@ -195,12 +195,16 @@ fn settle_thresholds(
 			Some(PhysOp::IndexUnion(attrs)) => attrs.topk.as_ref().map(|(key, _)| key),
 			Some(_) | None => None,
 		};
-		if key.is_some_and(|key| key.rejects_entries) {
-			keyed.push(source);
+		let keep_coarse = key
+			.is_some_and(|key| key.coarse_cutoff.is_some())
+			&& pipeline_keeps_coarse_cutoff(ir, *pipeline, source);
+		if key.is_some_and(|key| key.rejects_entries || (key.coarse_cutoff.is_some() && !keep_coarse))
+		{
+			keyed.push((source, keep_coarse));
 		}
 	}
 	let mut rw = Rewriter::new(ir, facts);
-	for scan in keyed {
+	for (scan, keep_coarse) in keyed {
 		rw.update_kind(scan, |kind| {
 			let key = match kind {
 				OpKind::Phys(PhysOp::TableScan(attrs)) => attrs.topk.as_mut(),
@@ -211,10 +215,41 @@ fn settle_thresholds(
 			};
 			if let Some(key) = key {
 				key.rejects_entries = false;
+				if !keep_coarse {
+					key.coarse_cutoff = None;
+				}
 			}
 		})?;
 	}
 	Ok(())
+}
+
+/// Whether `pipeline` holds a sort over `source` whose coarse cutoff is safe to keep because no
+/// crossed op or sort key between `source` and the sort can raise or have an effect.
+fn pipeline_keeps_coarse_cutoff(ir: &Ir, _pipeline: OpId, source: OpId) -> bool {
+	let Some(PhysOp::KeyRangeScan(scan)) = phys(ir, source) else {
+		return false;
+	};
+	let mut sorts = Vec::new();
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+		if matches!(phys(ir, op), Some(PhysOp::Sort(_))) {
+			sorts.push(op);
+		}
+		Walk::Continue
+	});
+	sorts.into_iter().any(|sort| {
+		let Some(PhysOp::Sort(attrs)) = phys(ir, sort) else {
+			return false;
+		};
+		let Some(input) = ir.op(sort).and_then(|data| data.operands.first().copied()) else {
+			return false;
+		};
+		let Some(chain) = beneath(ir, input, keeps_order) else {
+			return false;
+		};
+		chain.source == source
+			&& coarse_cutoff_safe(ir, sort, attrs, &scan.access.key, &chain.crossed)
+	})
 }
 
 /// Whether the full-text scan or index union of `pipeline`, which does not prune, may still reject
@@ -393,22 +428,92 @@ fn order_delivered(ir: &Ir, sort: OpId) -> bool {
 	let Some(chain) = beneath(ir, input, keeps_order) else {
 		return false;
 	};
-	let ordered_by = match phys(ir, chain.source) {
+	match phys(ir, chain.source) {
 		Some(PhysOp::TableScan(scan)) => {
-			return scan.id_order
-				&& keyed_by_id(ir, sort, attrs, scan.direction == Direction::Forward);
+			scan.id_order
+				&& !layer_writes_field(ir, &chain.crossed, &FieldPath::field("id"))
+				&& keyed_by_id(ir, sort, attrs, scan.direction == Direction::Forward)
 		}
 		Some(PhysOp::KeyRangeScan(scan)) => {
 			let access = &scan.access;
 			let forward = access.direction == Direction::Forward;
-			return (access.key.all_exactly_ordered() && keyed_by_id(ir, sort, attrs, forward))
-				|| key_range_delivers(ir, sort, attrs, access, &chain.crossed);
+			(access.key.all_exactly_ordered()
+				&& !layer_writes_field(ir, &chain.crossed, &FieldPath::field("id"))
+				&& keyed_by_id(ir, sort, attrs, forward))
+				|| key_range_delivers(ir, sort, attrs, access, &chain.crossed)
 		}
-		Some(PhysOp::IndexScan(scan)) => scan.ordered_by.as_deref(),
-		Some(PhysOp::IndexUnion(union)) => union.ordered_by.as_deref(),
-		Some(_) | None => None,
-	};
-	ordered_by.is_some_and(|fields| reads_exactly(ir, sort, attrs, fields))
+		Some(PhysOp::IndexScan(scan)) => {
+			let Some(fields) = scan.ordered_by.as_deref() else {
+				return false;
+			};
+			if !reads_exactly(ir, sort, attrs, fields)
+				|| fields.iter().any(|field| layer_writes_field(ir, &chain.crossed, field))
+			{
+				return false;
+			}
+			let forward = scan.direction == Direction::Forward;
+			let eq_len = match &scan.access {
+				crate::exec::index::access_path::BTreeAccess::Equality(values) => values.len(),
+				crate::exec::index::access_path::BTreeAccess::Compound {
+					prefix,
+					..
+				} => prefix.len(),
+				crate::exec::index::access_path::BTreeAccess::Range {
+					..
+				}
+				| crate::exec::index::access_path::BTreeAccess::FullText {
+					..
+				}
+				| crate::exec::index::access_path::BTreeAccess::Knn {
+					..
+				} => 0,
+			};
+			let eq_pinned =
+				scan.pinned.as_deref().and_then(|pinned| pinned.get(..eq_len)).unwrap_or(&[]);
+			if !attrs
+				.keys
+				.iter()
+				.zip(fields)
+				.all(|(key, field)| eq_pinned.contains(field) || key.ascending == forward)
+			{
+				return false;
+			}
+			if eq_len > 0 && scan.pinned.is_none() && scan.stated.is_none() {
+				return false;
+			}
+			if let Some(stated) = scan.stated.as_deref() {
+				let rest: Vec<&FieldPath> =
+					fields.iter().skip_while(|field| eq_pinned.contains(field)).collect();
+				let stated_paths: Option<Vec<FieldPath>> = stated
+					.iter()
+					.skip(eq_pinned.len())
+					.map(|col| crate::exec::field_path_convert::field_path_from_idiom(col).ok())
+					.collect();
+				let Some(mut allowed) = stated_paths else {
+					return false;
+				};
+				allowed.push(FieldPath::field("id"));
+				if rest.len() > allowed.len()
+					|| !rest.iter().zip(&allowed).all(|(field, col)| **field == *col)
+				{
+					return false;
+				}
+			}
+			true
+		}
+		Some(PhysOp::IndexUnion(union)) => {
+			let Some(fields) = union.ordered_by.as_deref() else {
+				return false;
+			};
+			reads_exactly(ir, sort, attrs, fields)
+				&& !fields.iter().any(|field| layer_writes_field(ir, &chain.crossed, field))
+				&& union.branches.first().is_none_or(|branch| {
+					let forward = branch.direction == Direction::Forward;
+					attrs.keys.iter().all(|key| key.ascending == forward)
+				})
+		}
+		Some(_) | None => false,
+	}
 }
 
 /// Whether the keys of the sort `op` are the one key `id`, plain, in the direction `forward`
@@ -722,14 +827,54 @@ fn reads_id_of_row(ir: &Ir, value: ValueId, region: RegionId) -> bool {
 	name.as_str() == "id" && read.operands.first().is_some_and(|row| is_row_of(ir, *row, region))
 }
 
-/// Whether the keys of the sort `op` read the field paths `fields`, in order, as plain paths: a
-/// key that computes anything else reads a value no stored field holds.
+/// Whether any layer among `crossed` writes to the root field of `path`, shadowing the stored
+/// value on the row.
+fn layer_writes_field(ir: &Ir, crossed: &[OpId], path: &FieldPath) -> bool {
+	let Some(FieldPathPart::Field(root)) = path.0.first() else {
+		return false;
+	};
+	crossed.iter().any(|layer| {
+		let Some(PhysOp::Layer(attrs)) = phys(ir, *layer) else {
+			return false;
+		};
+		match &attrs.fields {
+			FieldsShape::Value {
+				..
+			} => true,
+			FieldsShape::Select(fields) => {
+				let mut unaliased = attrs.names.iter();
+				fields.iter().any(|field| match field {
+					FieldShape::Single {
+						alias,
+						..
+					} => alias
+						.as_ref()
+						.or_else(|| unaliased.next())
+						.and_then(|out| out.parts.first())
+						.is_some_and(|part| {
+							matches!(
+								part,
+								crate::expr::logical::OutputPathPart::Field(name)
+									if name.as_str() == root.as_str()
+							)
+						}),
+					FieldShape::All => false,
+				})
+			}
+		}
+	})
+}
+
+/// Whether the keys of the sort `op` read the field paths `fields`, in order, as plain paths
+/// without `COLLATE` or `NUMERIC`: a key that computes anything else reads a value no stored
+/// field holds.
 fn reads_exactly(ir: &Ir, op: OpId, sort: &SortAttrs, fields: &[FieldPath]) -> bool {
 	sort.keys.len() == fields.len()
-		&& fields
-			.iter()
-			.enumerate()
-			.all(|(at, field)| key_path(ir, op, sort, at).is_some_and(|path| path == *field))
+		&& sort.keys.iter().zip(fields).enumerate().all(|(at, (key, field))| {
+			!key.collate
+				&& !key.numeric
+				&& key_path(ir, op, sort, at).is_some_and(|path| path == *field)
+		})
 }
 
 /// A sort whose input already delivers its order is removed.
@@ -1262,8 +1407,10 @@ impl Pattern<PhysDialect> for CoarseCutoffSort {
 			return Ok(false);
 		};
 		if scan.topk.is_some()
+			|| keep == 0
 			|| first.ascending != (access.direction == Direction::Forward)
 			|| sort_key_component(ir, op, attrs, 0, &access.key, &chain.crossed) != Some(position)
+			|| !coarse_cutoff_safe(ir, op, attrs, &access.key, &chain.crossed)
 		{
 			return Ok(false);
 		}
@@ -1299,6 +1446,122 @@ impl Pattern<PhysDialect> for CoarseCutoffSort {
 		})?;
 		Ok(true)
 	}
+}
+
+/// Whether the ops crossed between a key-range scan over `key` and the sort `sort`, and the key
+/// regions of `sort` itself, are total and free of effects over rows of `key`.
+fn coarse_cutoff_safe(
+	ir: &Ir,
+	sort: OpId,
+	_attrs: &SortAttrs,
+	key: &KeyStructure,
+	crossed: &[OpId],
+) -> bool {
+	if layer_writes_field(ir, crossed, &FieldPath::field("id")) {
+		return false;
+	}
+	let crossed_safe = crossed.iter().all(|op| {
+		let Some(data) = ir.op(*op) else {
+			return false;
+		};
+		match phys(ir, *op) {
+			Some(PhysOp::Filter) => {
+				!data.regions.is_empty()
+					&& data
+						.regions
+						.iter()
+						.all(|region| region_is_total_on_key_range(ir, *region, *region, key))
+			}
+			Some(PhysOp::Layer(layer_attrs)) => {
+				if layer_attrs.judged.is_some()
+					|| !matches!(layer_attrs.fields, FieldsShape::Select(_))
+				{
+					return false;
+				}
+				data.regions.iter().all(|region| {
+					let Some(info) = ir.region(*region) else {
+						return false;
+					};
+					if info.kind == RegionKind::FieldFrame(FieldRole::Computed) {
+						let is_key_part = ops_in_region(ir, *region)
+							.first()
+							.and_then(|first| ir.op(*first))
+							.and_then(|op| ir.frame(op.frame))
+							.is_some_and(|frame| frame.eval.key_part)
+							&& component_read(ir, *region, key, true).is_some();
+						is_key_part || region_is_total_on_key_range(ir, *region, *region, key)
+					} else if info.kind == RegionKind::Clause(ClauseRole::Projection) {
+						region_is_total_on_key_range(ir, *region, *region, key)
+					} else {
+						false
+					}
+				})
+			}
+			Some(_) | None => false,
+		}
+	});
+	if !crossed_safe {
+		return false;
+	}
+	let Some(sort_data) = ir.op(sort) else {
+		return false;
+	};
+	sort_data
+		.regions
+		.iter()
+		.all(|region| region_is_total_on_key_range(ir, *region, *region, key))
+}
+
+/// Whether every op in `region` (whose outer row-binding region is `root_region`) is total and
+/// free of effects over rows whose record id has the structure `key`.
+fn region_is_total_on_key_range(
+	ir: &Ir,
+	region: RegionId,
+	root_region: RegionId,
+	key: &KeyStructure,
+) -> bool {
+	let ops = ops_in_region(ir, region);
+	!ops.is_empty()
+		&& ops.iter().all(|op| {
+			let Some(data) = ir.op(*op) else {
+				return false;
+			};
+			let OpKind::Expr(expr) = &data.kind else {
+				return false;
+			};
+			if !data.regions.is_empty() {
+				return matches!(expr, ExprOp::ShortCircuit { .. })
+					&& data.regions.iter().all(|sub| {
+						ir.region(*sub)
+							.is_some_and(|info| info.kind == RegionKind::LazyOperand)
+							&& region_is_total_on_key_range(ir, *sub, root_region, key)
+					});
+			}
+			if matches!(
+				expr,
+				ExprOp::Field {
+					..
+				} | ExprOp::Doc
+			) {
+				data.operands
+					.first()
+					.is_some_and(|row| is_row_of(ir, *row, root_region))
+			} else if matches!(expr, ExprOp::Index) {
+				matches!(
+					data.operands.as_slice(),
+					[base, index]
+						if reads_id_of_row(ir, *base, root_region)
+							&& literal_count(ir, *index).is_some_and(|i| i < key.arity())
+				)
+			} else if matches!(expr, ExprOp::First) {
+				matches!(
+					data.operands.as_slice(),
+					[base] if reads_id_of_row(ir, *base, root_region) && key.arity() > 0
+				)
+			} else {
+				conjunct::is_total_form(ir, data)
+			}
+		})
 }
 
 /// The ops a record lookup's answer is read through: a layer, a permission and table enforcement.
@@ -1622,5 +1885,116 @@ impl Pattern<PhysDialect> for ConjunctOrder {
 			return Ok(false);
 		};
 		conjunct::reorder(rw, &site, &order)
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use super::*;
+	use crate::exec::ir::core::ir::IrScope;
+	use crate::exec::ir::tests_plan_request::plan_on;
+	use crate::exec::ir::{RequestInput, RequestStatement};
+	use crate::exec::operators::test_util::TestDb;
+
+	async fn key_range_coarse_cutoff(setup: &str, sql: &str) -> Option<CoarseCutoff> {
+		let db = TestDb::new(setup).await;
+		let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+		let statements = RequestStatement::of(&parsed);
+		let input = RequestInput::request(
+			&statements,
+			IrScope::Request {
+				fragment: None,
+			},
+		);
+		let planned = plan_on(&db, &input).await.expect("the request plans");
+		let ir = &planned.ir;
+		let mut cutoff = None;
+		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if let Some(PhysOp::KeyRangeScan(scan)) = phys(ir, op) {
+				cutoff = scan.topk.as_ref().and_then(|key| key.coarse_cutoff);
+			}
+			Walk::Continue
+		});
+		cutoff
+	}
+
+	async fn has_sort(setup: &str, sql: &str) -> bool {
+		let db = TestDb::new(setup).await;
+		let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
+		let statements = RequestStatement::of(&parsed);
+		let input = RequestInput::request(
+			&statements,
+			IrScope::Request {
+				fragment: None,
+			},
+		);
+		let planned = plan_on(&db, &input).await.expect("the request plans");
+		let ir = &planned.ir;
+		let mut found = false;
+		ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+			if matches!(phys(ir, op), Some(PhysOp::Sort(_))) {
+				found = true;
+			}
+			Walk::Continue
+		});
+		found
+	}
+
+	#[tokio::test]
+	async fn coarse_cutoff_sort_rejects_fallible_filters_and_sort_keys() {
+		let setup = "
+			DEFINE TABLE tick SCHEMALESS;
+			DEFINE FIELD id ON tick TYPE [feed: string, at: datetime];
+		";
+		assert_eq!(
+			key_range_coarse_cutoff(
+				setup,
+				"SELECT n FROM tick WHERE feed = 'f' ORDER BY at LIMIT 2"
+			)
+			.await,
+			Some(CoarseCutoff {
+				position: 1,
+				keep: 2,
+			})
+		);
+		assert_eq!(
+			key_range_coarse_cutoff(
+				setup,
+				"SELECT n FROM tick WHERE feed = 'f' AND <int>bad > 0 ORDER BY at LIMIT 2"
+			)
+			.await,
+			None
+		);
+		assert_eq!(
+			key_range_coarse_cutoff(
+				setup,
+				"SELECT n FROM tick WHERE feed = 'f' AND 1 / n > 0 ORDER BY at LIMIT 2"
+			)
+			.await,
+			None
+		);
+		assert_eq!(
+			key_range_coarse_cutoff(
+				setup,
+				"SELECT n FROM tick WHERE feed = 'f' ORDER BY at, <int>bad LIMIT 2"
+			)
+			.await,
+			None
+		);
+	}
+
+	#[tokio::test]
+	async fn elide_delivered_sort_keeps_collate_and_numeric_on_index_scan() {
+		let setup = "
+			DEFINE TABLE item SCHEMALESS;
+			DEFINE INDEX idx_name ON item FIELDS name;
+		";
+		assert!(!has_sort(setup, "SELECT * FROM item WHERE name >= 'a' ORDER BY name ASC").await);
+		assert!(
+			has_sort(setup, "SELECT * FROM item WHERE name >= 'a' ORDER BY name COLLATE ASC").await
+		);
+		assert!(
+			has_sort(setup, "SELECT * FROM item WHERE name >= 'a' ORDER BY name NUMERIC ASC").await
+		);
 	}
 }
