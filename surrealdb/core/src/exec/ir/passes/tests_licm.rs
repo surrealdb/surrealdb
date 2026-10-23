@@ -355,6 +355,7 @@ async fn a_field_guard_holds_no_candidate() {
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	let layer = OpKind::Logical(LogOp::Project(Box::new(attrs)));
 	let (layer, _) = create(&mut rw, InsertPoint::End(body), layer, &[row], 1);

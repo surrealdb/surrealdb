@@ -1127,6 +1127,11 @@ pub(crate) struct LayerAttrs {
 	/// The fields the schema of the layer's input declares `COMPUTED`, as
 	/// `ProjectAttrs::computed` states them.
 	pub(crate) computed: Vec<Strand>,
+	/// The `COMPUTED` fields of the layer's table its guards read, derived onto a copy of the row
+	/// the guards are judged against, as `ProjectAttrs::judged` states them: one
+	/// `FieldFrame(Computed)` region per field the shape derives follows the frame regions of the
+	/// columns.
+	pub(crate) judged: Option<ComputedReadsShape>,
 }
 
 /// The attributes of an aggregation.

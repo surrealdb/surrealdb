@@ -274,6 +274,7 @@ async fn invisible_reads_see_none() {
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	let project = OpKind::Logical(LogOp::Project(Box::new(attrs)));
 	let (owner, out) = create(&mut rw, at, project, &[row[0]], 1);

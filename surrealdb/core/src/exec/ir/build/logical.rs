@@ -57,6 +57,7 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::slice;
 use std::sync::Arc;
@@ -2502,20 +2503,16 @@ fn bind_permission_filter(
 			&[TypeKnowledge::Unknown],
 		)?;
 		row_clause(cx, op, RegionKind::PermissionFrame, predicate)?;
-		for derivation in &bodies {
-			let eval = EvalFrame::permission(derivation.auth.clone());
-			let kind = RegionKind::FieldFrame(FieldRole::Computed);
-			framed_clause(cx, op, kind, Some(&eval), &derivation.body)?;
-		}
+		bind_derivations(cx, op, &bodies)?;
 		first_result(cx, op)
 	})
 }
 
 /// What a permission predicate reads of a table's `COMPUTED` fields: the shape its op states, and
 /// the bodies of the fields it derives, in the order the shape lists them.
-struct ComputedReads {
-	shape: Box<ComputedReadsShape>,
-	bodies: Vec<Derivation>,
+pub(super) struct ComputedReads {
+	pub(super) shape: Box<ComputedReadsShape>,
+	pub(super) bodies: Vec<Derivation>,
 }
 
 /// The `COMPUTED` fields of the table `subject` names that `predicate` reads, decided by the
@@ -2543,6 +2540,82 @@ fn computed_reads_of(
 ) -> Option<ComputedReads> {
 	let (table, schema) = subject?;
 	let reads = computed_reads(predicate, &schema, registry)?;
+	Some(derived_reads(catalog, table, reads))
+}
+
+/// What the guards of the layer whose columns are `fields`, over rows of `schema`, read of the
+/// `COMPUTED` fields of `table`, the table whose rows they are, taken together, as
+/// [`computed_reads_of`] decides it for one predicate: `None` when they read none.
+///
+/// A permission column written `IF guard THEN value ELSE NONE` reads what its guard reads. A
+/// permission column on a stored field written otherwise holds its guards inside its value
+/// (a nested or wildcard guard, a guard over the whole column), so it reads what the column
+/// reads; its stored fields are the row's on the copy too. A column on a computed field reads its
+/// value as the caller derives it, and a column in any other frame is no guard. One copy of the
+/// row carries the fields every guard reads ([`ProjectAttrs::judged`]).
+///
+/// The decision is made over the bound expressions, before any pass of the IR, which adds no read
+/// to a guard. Guards reading a computed field of rows no table names are an invariant break: the
+/// resolver writes a layer over the source of a table alone.
+pub(super) fn judged_reads_of(
+	registry: &FunctionRegistry,
+	catalog: &dyn SemanticCatalog,
+	table: Option<&TableName>,
+	schema: &Schema,
+	fields: &LogicalFields,
+) -> Result<Option<ComputedReads>, IrError> {
+	let declared = declared_computed(schema);
+	let mut union: Option<Option<HashSet<String>>> = None;
+	for column in columns_of(fields) {
+		let Some(eval) = column.frame else {
+			continue;
+		};
+		if !matches!(eval.mode, EvalMode::Permission | EvalMode::MutablePermission) {
+			continue;
+		}
+		let judged = match judgement_of(eval, column.expr) {
+			Some((guard, _)) => guard,
+			None => {
+				let on_computed = column
+					.path
+					.as_ref()
+					.and_then(OutputPath::as_field)
+					.is_some_and(|name| declared.iter().any(|field| field.as_str() == name));
+				if on_computed {
+					continue;
+				}
+				column.expr
+			}
+		};
+		let Some(reads) = computed_reads(judged, schema, registry) else {
+			continue;
+		};
+		union = Some(match (union, reads) {
+			(Some(None), _) | (_, None) => None,
+			(Some(Some(mut all)), Some(reads)) => {
+				all.extend(reads);
+				Some(all)
+			}
+			(None, Some(reads)) => Some(reads),
+		});
+	}
+	let Some(reads) = union else {
+		return Ok(None);
+	};
+	let Some(table) = table else {
+		return Err(invariant("a layer guard reads a computed field of rows of no table"));
+	};
+	Ok(Some(derived_reads(catalog, table.clone(), reads)))
+}
+
+/// The derivation of `reads`, the `COMPUTED` fields of `table` an expression reads by name, sorted
+/// into the shape an op states — every one where `None` — with the bodies of the fields derived,
+/// as [`computed_reads_of`] states it.
+fn derived_reads(
+	catalog: &dyn SemanticCatalog,
+	table: TableName,
+	reads: Option<HashSet<String>>,
+) -> ComputedReads {
 	let fields = reads.map(|reads| {
 		let mut fields: Vec<String> = reads.into_iter().collect();
 		fields.sort_unstable();
@@ -2560,14 +2633,14 @@ fn computed_reads_of(
 		CatalogAnswer::Absent => (DerivedReads::Stated(Box::default()), Vec::new()),
 		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown => (DerivedReads::LateBound, Vec::new()),
 	};
-	Some(ComputedReads {
+	ComputedReads {
 		shape: Box::new(ComputedReadsShape {
 			table,
 			fields,
 			derived,
 		}),
 		bodies,
-	})
+	}
 }
 
 /// One projected value of a field list: its expression, the frame it is evaluated in and where it
@@ -2759,11 +2832,15 @@ fn bind_project(
 	input: ValueId,
 ) -> Result<ValueId, IrError> {
 	let layer = project.is_layer();
-	let computed = match layer {
-		true => declared_computed(&project.input.schema()),
-		false => Vec::new(),
-	};
-	bind_projection(cx, &project.fields, &project.omit, layer, computed, input)
+	if !layer {
+		return bind_projection(cx, &project.fields, &project.omit, false, Vec::new(), input);
+	}
+	let schema = project.input.schema();
+	let table = permission_subject(&project.input).map(|(table, _)| table);
+	let judged =
+		judged_reads_of(cx.registry(), cx.catalog(), table.as_ref(), &schema, &project.fields)?;
+	let computed = declared_computed(&schema);
+	bind_layer_projection(cx, &project.fields, computed, judged, input)
 }
 
 /// The fields `schema` declares `COMPUTED`, in its order: those with a computed body whose path is
@@ -2789,12 +2866,48 @@ pub(super) fn bind_projection(
 	computed: Vec<Strand>,
 	input: ValueId,
 ) -> Result<ValueId, IrError> {
+	bind_projection_judged(cx, fields, omit_paths, layer, computed, None, input)
+}
+
+/// A layer of `fields` over `input`, as [`bind_projection`] binds one, whose guards read `judged`
+/// of the table's `COMPUTED` fields ([`judged_reads_of`]): the body of each field it derives
+/// follows the frame regions of the columns as a `FieldFrame(Computed)` region, in the order the
+/// shape lists the fields, bound in a permission frame under the field's own `AUTH LIMIT`, as a
+/// permission filter binds the fields its predicate derives ([`bind_permission_filter`]).
+fn bind_layer_projection(
+	cx: &mut BindCx<'_>,
+	fields: &LogicalFields,
+	computed: Vec<Strand>,
+	judged: Option<ComputedReads>,
+	input: ValueId,
+) -> Result<ValueId, IrError> {
+	bind_projection_judged(cx, fields, &[], true, computed, judged, input)
+}
+
+/// [`bind_projection`], with the computed fields a layer's guards read ([`bind_layer_projection`]).
+fn bind_projection_judged(
+	cx: &mut BindCx<'_>,
+	fields: &LogicalFields,
+	omit_paths: &[LogicalExpr],
+	layer: bool,
+	computed: Vec<Strand>,
+	judged: Option<ComputedReads>,
+	input: ValueId,
+) -> Result<ValueId, IrError> {
 	let omit = u16::try_from(omit_paths.len()).map_err(|_| IrError::Capacity("omit paths"))?;
 	let sort_keys = match layer {
 		true => Vec::new(),
 		false => cx.take_sort_keys(),
 	};
-	let attrs = project_attrs(fields, omit, layer, computed, sort_keys);
+	let (judged, bodies) = match judged {
+		Some(ComputedReads {
+			shape,
+			bodies,
+		}) => (Some(shape), bodies),
+		None => (None, Vec::new()),
+	};
+	let mut attrs = project_attrs(fields, omit, layer, computed, sort_keys);
+	attrs.judged = judged;
 	let op = cx.emit(
 		OpKind::Logical(LogOp::Project(Box::new(attrs))),
 		&[input],
@@ -2822,8 +2935,25 @@ pub(super) fn bind_projection(
 		for column in &columns {
 			layer_column(cx, op, column.frame, column.expr)?;
 		}
+		bind_derivations(cx, op, &bodies)?;
 	}
 	first_result(cx, op)
+}
+
+/// The `FieldFrame(Computed)` region of each of `bodies`, owned by `op`, in order: each body bound
+/// in a permission frame under its field's own `AUTH LIMIT`, as the computed fields a permission
+/// predicate reads are derived.
+pub(super) fn bind_derivations(
+	cx: &mut BindCx<'_>,
+	op: OpId,
+	bodies: &[Derivation],
+) -> Result<(), IrError> {
+	for derivation in bodies {
+		let eval = EvalFrame::permission(derivation.auth.clone());
+		let kind = RegionKind::FieldFrame(FieldRole::Computed);
+		framed_clause(cx, op, kind, Some(&eval), &derivation.body)?;
+	}
+	Ok(())
 }
 
 /// The region of one column or `OMIT` path of a projection, which receives the row it projects
@@ -2852,6 +2982,7 @@ pub(crate) fn project_attrs(
 		names: unaliased_names(fields),
 		computed,
 		sort_keys,
+		judged: None,
 	}
 }
 
@@ -3405,7 +3536,7 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 	// The layers of the table's field view are asked for only by a write whose own facts say the
 	// view derives a value or cuts a field, so the facts and the regions never come from two
 	// catalog answers that could differ.
-	let field_view = field_view_of(cx.catalog(), table.as_ref(), &mut attrs.image)?;
+	let field_view = field_view_of(cx.registry(), cx.catalog(), table.as_ref(), &mut attrs.image)?;
 	attrs.stored.image_layers = field_view.layers;
 	let observed = observed_of(cx.catalog(), table.as_ref());
 	attrs.derived = gates.derived_attr(observed.as_deref());
@@ -3498,8 +3629,8 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 		})?;
 	}
 	if let Some(view) = &field_view.view {
-		for fields in view {
-			bind_layer(cx, op, fields)?;
+		for (fields, bodies) in view {
+			bind_layer(cx, op, fields, bodies)?;
 		}
 	}
 	first_result(cx, op).map(Flow::Value)
@@ -3509,7 +3640,8 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 /// the layers whose columns are the regions the write's op hosts.
 struct FieldViewOf {
 	layers: ImageLayers,
-	view: Option<Vec<LogicalFields>>,
+	/// The columns of each layer, with the bodies of the computed fields its guards read.
+	view: Option<Vec<(LogicalFields, Vec<Derivation>)>>,
 }
 
 /// The field view of `table` as the catalog answers it, for a write whose `image` says the view
@@ -3519,6 +3651,7 @@ struct FieldViewOf {
 /// before the statement, leaves the write's image [`ImageView::LateBound`], so that a lowering
 /// refuses and never shows an image through a view the plan did not describe.
 fn field_view_of(
+	registry: &FunctionRegistry,
 	catalog: &dyn SemanticCatalog,
 	table: Option<&TableName>,
 	image: &mut WriteImage,
@@ -3533,11 +3666,14 @@ fn field_view_of(
 	match catalog.field_view(table) {
 		CatalogAnswer::Found(found) => match &*found {
 			FieldView::Layers(layers) => {
-				let stack = layers
-					.iter()
-					.map(|(fields, schema)| subscriber_layer(fields, schema))
-					.collect::<Result<Vec<_>, _>>()?;
-				let view = layers.iter().map(|(fields, _)| fields.clone()).collect();
+				let mut stack = Vec::with_capacity(layers.len());
+				let mut view = Vec::with_capacity(layers.len());
+				for (fields, schema) in layers {
+					let (layer, bodies) =
+						subscriber_layer(registry, catalog, Some(table), fields, schema)?;
+					stack.push(layer);
+					view.push((fields.clone(), bodies));
+				}
 				Ok(FieldViewOf {
 					layers: ImageLayers::Stack(stack),
 					view: Some(view),

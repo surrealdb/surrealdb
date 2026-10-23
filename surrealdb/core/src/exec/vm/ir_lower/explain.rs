@@ -51,7 +51,9 @@ use crate::exec::ir::expr::ops::{ExprOp, KeyShape, NestedStrategy, RaiseKind, Sh
 use crate::exec::ir::iface::IndexRef;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::statements::{BindStepShape, MatchData};
-use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LoopKind, StepAttrs};
+use crate::exec::ir::logical::ops::{
+	ComputedReadsShape, FieldShape, FieldsShape, LoopKind, StepAttrs,
+};
 use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::{
@@ -2485,6 +2487,13 @@ impl<'a> TreeWalk<'a> {
 				Ok(node)
 			}
 			PhysOp::Layer(attrs) => {
+				// The derivations the guards read follow the columns' regions.
+				let judged = attrs.judged.as_ref().map_or(0, ComputedReadsShape::derived_regions);
+				let regions = regions
+					.len()
+					.checked_sub(judged)
+					.map(|columns| &regions[..columns])
+					.ok_or_else(|| invariant("a layer hosts a region for each field it derives"))?;
 				let columns = self.layer_attrs(&attrs.fields, &attrs.names, regions)?;
 				let mut node =
 					self.node("ProjectLayer", ContextLevel::Database, columns, vec![child]);

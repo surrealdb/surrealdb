@@ -541,16 +541,17 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   instead.
   Verified end to end by `reproductions/planned_source_enforced_once.surql`.
 - A `PERMISSIONS` predicate that reads a COMPUTED field of the row it judges —
-  a table `select`, `create`, `update` or `delete` clause, or a field `create` or
-  `update` clause — reads the value that field computes to: never `NONE`, and
-  never a value the statement assigned to the field's name. A computed field is
-  not stored, so judged against the record as stored, a clause written to deny
-  (`WHERE hidden != true`) admits every row and one written to allow admits
-  none. Each enforcement point derives the fields its predicate reads, with
-  what they read in turn, on a copy of the row, in the predicate's own frame:
-  reads unchecked, writes refused, each body under its field's `AUTH LIMIT`.
-  The copy reaches the predicate alone, and the caller receives each field as
-  the caller reads it. In the VM each body runs in a `FrameMode::Derived` frame
+  a table `select`, `create`, `update` or `delete` clause, or a field `select`,
+  `create` or `update` clause — reads the value that field computes to: never
+  `NONE`, and never a value the statement assigned to the field's name. A
+  computed field is not stored, so judged against the record as stored, a
+  clause written to deny (`WHERE hidden != true`) admits every row and one
+  written to allow admits none. Each enforcement point derives the fields its
+  predicate reads, with what they read in turn, on a copy of the row, in the
+  predicate's own frame: reads unchecked, writes refused, each body under its
+  field's `AUTH LIMIT`. The copy reaches the predicate alone, and the caller
+  receives each field as the caller reads it; a field's `select` clause judges
+  `$value` as the caller would receive it. In the VM each body runs in a `FrameMode::Derived` frame
   (`exec/vm/program.rs`), one under an `AUTH LIMIT` holding a statement or a
   user-defined function call is refused when it is lowered, with `NotYet`
   (`refuse_narrowed` and `derive_fields` in `exec/vm/ir_lower/stage.rs`). The points
@@ -566,11 +567,19 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   a `ComputedFieldGuard`), the write gates'
   `GateInstr::Judge` for the create, update, delete and select clauses on
   either image (`exec/vm/ir_lower/stage.rs`), a live subscriber's `select` clause
-  (`lower_subscription` in `exec/vm/ir_lower/units.rs`, admission in `exec/vm/ir_lower/subscription.rs`), and a field's write
-  clauses (`field_predicate_pipeline` in `exec/vm/ir_lower/stage.rs`, judged by `SchemaInstr::Permit` in `exec/vm/write_schema.rs`). Every compiled
-  table `SELECT` guard the host's streaming helpers evaluate — a record link
-  the program follows — is a `ComputedFieldGuard`
-  (`table_select_permission_physical`). The membership recogniser does not lift a
+  (`lower_subscription` in `exec/vm/ir_lower/units.rs`, admission in `exec/vm/ir_lower/subscription.rs`), a field's write
+  clauses (`field_predicate_pipeline` in `exec/vm/ir_lower/stage.rs`, judged by `SchemaInstr::Permit` in `exec/vm/write_schema.rs`), and a field's
+  `select` clause in a projection layer — a plan's, a record image's, a live
+  subscriber's — judged over one copy per layer (the layer's `judged`, set in
+  `exec/ir/build/logical.rs` by `judged_reads_of`, the copy built by
+  `judged_record` in `exec/vm/ir_lower/pipe/layer.rs` through
+  `Instr::JudgeCopy`). Every compiled table `SELECT` guard the host's
+  streaming helpers evaluate — a record link the program follows — is a
+  `ComputedFieldGuard` (`table_select_permission_physical`), and every field
+  `SELECT` guard they evaluate — a record link the program follows, a
+  late-bound statement's rows — is judged over one copy per record
+  (`guard_view` in `exec/operators/scan/pipeline.rs`). The membership
+  recogniser does not lift a
   permission conjunct that reads a computed field off the outer row into a
   join, which would read it off the row as stored (`reads_outer_any_of` in
   `exec/ir/build/membership/lift.rs`). Deriving in the caller's frame instead
@@ -602,8 +611,10 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   `call_evaluates_against_row` does for a bound plan.
   Verified by: `a_permission_membership_reading_a_computed_field_is_not_lifted`
   (`exec/ir/build/membership/lift.rs`),
-  `live_select_permission_reads_computed_fields` (`tests/it/live.rs`),
-  `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`),
+  `live_select_permission_reads_computed_fields` and
+  `live_field_select_permission_reads_computed_fields` (`tests/it/live.rs`),
+  `a_call_running_its_own_body_marks_incomplete` and
+  `bound_params_read_no_field_of_the_row` (`expr/computed_deps.rs`),
   `a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name`,
   `the_field_graph_matches_quoted_fields_by_their_unescaped_names` and
   `the_field_graph_tells_a_quoted_field_from_a_nested_path` (`doc/document.rs`),
@@ -615,6 +626,8 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   `reproductions/field_clauses_tell_a_quoted_field_from_a_nested_path.surql`,
   `reproductions/field_permissions_tell_a_quoted_computed_field_from_a_nested_path.surql`,
   `reproductions/a_table_select_permission_reads_computed_fields.surql`,
+  `reproductions/a_field_permission_derives_the_computed_fields_it_reads_unchecked.surql`
+  and its `_late_bound` variant,
   `reproductions/a_field_write_permission_reads_computed_fields.surql`,
   `reproductions/a_write_permission_computes_fields_in_dependency_order.surql`,
   `reproductions/a_permission_derives_the_computed_fields_it_reads_unchecked.surql`,

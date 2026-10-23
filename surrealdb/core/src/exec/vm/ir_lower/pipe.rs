@@ -3024,9 +3024,12 @@ impl Body<'_, '_, '_> {
 			PhysOp::Filter => self.filter(step_data)?,
 			PhysOp::Fetch => self.fetch(step_data)?,
 			PhysOp::PermissionFilter(attrs) => self.permission_filter(step_data, attrs)?,
-			PhysOp::Layer(attrs) => {
-				self.layer(&step_data.regions, &attrs.fields, &attrs.computed)?
-			}
+			PhysOp::Layer(attrs) => self.layer(
+				&step_data.regions,
+				&attrs.fields,
+				&attrs.computed,
+				attrs.judged.as_ref(),
+			)?,
 			PhysOp::Limit {
 				limit,
 				start,
@@ -5063,6 +5066,7 @@ pub(super) mod tests {
 				},
 				names: Vec::new(),
 				computed: Vec::new(),
+				judged: None,
 			})),
 			PhysOp::Limit {
 				limit: None,

@@ -876,6 +876,7 @@ mod tests {
 			names: Vec::new(),
 			computed: Vec::new(),
 			sort_keys: Vec::new(),
+			judged: None,
 		};
 		assert!(keeps_id(&select(vec![FieldShape::All, alias("name")], 0)));
 		assert!(!keeps_id(&select(vec![alias("id")], 0)));
@@ -889,6 +890,7 @@ mod tests {
 			names: Vec::new(),
 			computed: Vec::new(),
 			sort_keys: Vec::new(),
+			judged: None,
 		}));
 	}
 

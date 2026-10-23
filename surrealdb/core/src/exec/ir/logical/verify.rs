@@ -86,11 +86,12 @@ pub(crate) fn verify_op(ir: &Ir, op: OpId) -> Result<(), VerifyError> {
 	regions(ir, op, data, log)
 }
 
-/// Only a layer carries the computed fields of its input: a projection that is not one names none.
+/// Only a layer carries the computed fields of its input, or the computed fields its guards read:
+/// a projection that is not one names neither.
 fn layer_computed(op: OpId, log: &LogOp) -> Result<(), VerifyError> {
 	if let LogOp::Project(attrs) = log
 		&& !attrs.layer
-		&& !attrs.computed.is_empty()
+		&& (!attrs.computed.is_empty() || attrs.judged.is_some())
 	{
 		return Err(fail(
 			op,

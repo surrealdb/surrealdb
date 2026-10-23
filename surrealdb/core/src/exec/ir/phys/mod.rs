@@ -593,7 +593,7 @@ impl PhysOp {
 						.collect();
 				kinds.extend(std::iter::repeat_n(
 					RegionKind::FieldFrame(FieldRole::Computed),
-					count,
+					count + attrs.judged.as_ref().map_or(0, ComputedReadsShape::derived_regions),
 				));
 				kinds
 			}

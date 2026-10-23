@@ -42,9 +42,18 @@ pub struct ComputedDeps {
 /// field references. Returns a `ComputedDeps` indicating which fields are referenced
 /// and whether the analysis is complete.
 pub fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
+	extract_computed_deps_binding(expr, &[])
+}
+
+/// [`extract_computed_deps`] for a clause evaluated with each parameter named
+/// in `bound` bound to a value other than the row, as a field's `PERMISSIONS`
+/// clause is evaluated with `$value` bound to the field's value: a read of one
+/// of them reads no field of the row.
+pub fn extract_computed_deps_binding(expr: &Expr, bound: &[&str]) -> ComputedDeps {
 	let mut extractor = FieldDependencyExtractor {
 		deps: HashSet::new(),
 		is_complete: true,
+		bound,
 		nested: 0,
 	};
 	// Errors from our visitor are `Infallible`, so this cannot fail.
@@ -111,11 +120,14 @@ fn is_plain_lookup(lookup: &Lookup) -> bool {
 }
 
 /// Visitor that walks an expression tree extracting field dependencies.
-struct FieldDependencyExtractor {
+struct FieldDependencyExtractor<'b> {
 	/// Collected same-table field dependencies (root field names only).
 	deps: HashSet<String>,
 	/// Whether all dependencies could be statically determined.
 	is_complete: bool,
+	/// The parameters the expression is evaluated with bound to values other
+	/// than the row.
+	bound: &'b [&'b str],
 	/// How many subquery scopes away from the analysed document the current
 	/// row is (`0` when the current row is the document itself). A bare field
 	/// at `nested > 0` names a field of that subquery's record, not of the
@@ -123,7 +135,15 @@ struct FieldDependencyExtractor {
 	nested: u32,
 }
 
-impl Visitor for FieldDependencyExtractor {
+impl FieldDependencyExtractor<'_> {
+	/// Whether a read of `param` reads no field of the row: it is bound by the
+	/// session ([`is_session_param`]) or to a value other than the row.
+	fn reads_no_field(&self, param: &crate::expr::Param) -> bool {
+		is_session_param(param) || self.bound.contains(&param.as_str())
+	}
+}
+
+impl Visitor for FieldDependencyExtractor<'_> {
 	type Error = std::convert::Infallible;
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
@@ -252,9 +272,10 @@ impl Visitor for FieldDependencyExtractor {
 				expr.visit(self)?;
 			}
 
-			// === Session parameters: transparent ===
-			// Bound by the session, never to the row (see `is_session_param`).
-			Expr::Param(param) if is_session_param(param) => {}
+			// === Session and bound parameters: transparent ===
+			// Bound by the session or to a value other than the row, never to
+			// the row (see `reads_no_field`).
+			Expr::Param(param) if self.reads_no_field(param) => {}
 
 			// === Opaque (flip, do not walk) ===
 			// Any other parameter is resolved at runtime and may bind to
@@ -367,10 +388,10 @@ impl Visitor for FieldDependencyExtractor {
 				part.visit(self)?;
 			}
 
-			// A path from a session parameter (`$auth.id`) reads what the
-			// session is bound to, not the row; the parts after it are walked
-			// by `visit_idiom`.
-			Part::Start(Expr::Param(param)) if is_session_param(param) => {}
+			// A path from a session parameter (`$auth.id`) or a bound one
+			// reads what it is bound to, not the row; the parts after it are
+			// walked by `visit_idiom`.
+			Part::Start(Expr::Param(param)) if self.reads_no_field(param) => {}
 
 			// Opaque (flip + walk).
 			// Lookup: a graph traversal or reference lookup carrying a clause, which runs
@@ -388,7 +409,7 @@ impl Visitor for FieldDependencyExtractor {
 	}
 }
 
-impl FieldDependencyExtractor {
+impl FieldDependencyExtractor<'_> {
 	/// Whether a `SELECT ... FROM <target>` source expression refers directly
 	/// to the outer document being analysed, so that the rows the `SELECT`
 	/// iterates over are that document itself.
@@ -1021,6 +1042,29 @@ mod tests {
 		// records, and a parameter the session does not bind may be the row.
 		assert!(!extract(&parse("$auth->likes->post")).is_complete);
 		assert!(!extract(&parse("$auth.id = $this")).is_complete);
+	}
+
+	/// A field's `PERMISSIONS` clause binds `$value` to the field's value, so
+	/// with `value` bound neither the parameter nor a path from it reads the
+	/// row; unbound, it is opaque like any other parameter.
+	#[test]
+	fn bound_params_read_no_field_of_the_row() {
+		let bound = |src: &str| extract_computed_deps_binding(&parse(src), &["value"]);
+		for src in ["$value", "$value.owner", "$value[0]", "$value != NONE"] {
+			let deps = bound(src);
+			assert!(deps.fields.is_empty(), "`{src}` reads no field: {deps:?}");
+			assert!(deps.is_complete, "`{src}` is not opaque");
+		}
+		let deps = bound("$value = $auth.id OR hidden != true");
+		assert_eq!(deps.fields, vec!["hidden"]);
+		assert!(deps.is_complete);
+		// A path from the row still reads the row, another parameter may be
+		// the row, and an unbound `$value` is opaque.
+		let deps = bound("$value = $this.owner");
+		assert_eq!(deps.fields, vec!["owner"]);
+		assert!(deps.is_complete);
+		assert!(!bound("$value = $other").is_complete);
+		assert!(!extract(&parse("$value != NONE")).is_complete);
 	}
 
 	#[test]

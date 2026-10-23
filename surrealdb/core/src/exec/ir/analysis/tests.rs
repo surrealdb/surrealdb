@@ -1160,6 +1160,7 @@ fn layer_over_column(body: OpKind) -> (Ir, OpId) {
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	let layer = rw
 		.create(at, spec(OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row], 1))

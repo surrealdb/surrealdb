@@ -15,6 +15,17 @@
 //! the field's declared kind, and the guard then judges it. A value the guard refuses, or `NONE`
 //! where the field has no guard, cuts the field from the row.
 //!
+//! Where the guards read `COMPUTED` fields of the layer's table (`LayerAttrs::judged`,
+//! `SubscriberLayer::judged`), every guard reads, in place of the row, one copy of it with those
+//! fields derived onto it in the frame a permission predicate derives them in, by a host pipeline
+//! of the program ([`Instr::JudgeCopy`]): reads are not permission-checked, writes are refused,
+//! and each body runs under its field's `AUTH LIMIT`. Derived as the caller, a body following a
+//! record the caller may not select would read `NONE`, which satisfies a guard written to deny.
+//! The value of a permission column on a stored field that holds its guards reads the copy too.
+//! The copy's stored fields are the row's, and every other column's value is evaluated over the
+//! row, so the caller receives each computed field as the caller derives it, and `$value` is the
+//! value the caller would receive.
+//!
 //! A column on a computed field is one whose expression runs in a computed frame, one the layer's
 //! input declares `COMPUTED` (`LayerAttrs::computed` for a statement's layer,
 //! `SubscriberLayer::computed` for a subscriber's, carried from the bound plan whatever source,
@@ -31,6 +42,7 @@
 
 use surrealdb_strand::Strand;
 
+use super::permission::derived_fields;
 use super::{
 	Body, Branching, Emitted, EndJumps, PoolBase, Reads, region_frame, row_arg, yielded_value,
 };
@@ -41,11 +53,14 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::ids::{FrameId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::RegionProperties;
-use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, SubscriberLayer};
+use crate::exec::ir::logical::ops::{
+	ComputedReadsShape, DerivedField, FieldShape, FieldsShape, SubscriberLayer,
+};
 use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::vm::ir_lower::emit::Emitter;
 use crate::exec::vm::ir_lower::expr::{Lowerer, Needs};
+use crate::exec::vm::ir_lower::stage::{Derive, derive_fields};
 use crate::exec::vm::ir_lower::units::LowerCx;
 use crate::exec::vm::program::{
 	FrameMode, Instr, Operand, PermissionSpec, Pipeline, ROW, Reg, Source,
@@ -78,6 +93,9 @@ struct Targets {
 	cuts: Reg,
 	/// The record the computed columns read, when stored columns are present too.
 	reduced: Option<Reg>,
+	/// The copy of the row the guards read, with the computed fields they read derived onto it,
+	/// when they read one.
+	judged: Option<Reg>,
 }
 
 impl Body<'_, '_, '_> {
@@ -92,10 +110,12 @@ impl Body<'_, '_, '_> {
 		regions: &[RegionId],
 		fields: &FieldsShape,
 		declared: &[Strand],
+		judged: Option<&ComputedReadsShape>,
 	) -> Result<(), IrError> {
 		self.require_row("a layer over a projection")?;
-		let (stored, computed) = self.split_columns(regions, fields, declared)?;
-		self.land_columns(&stored, &computed, declared)
+		let (columns, derivations) = judged_regions(regions, judged)?;
+		let (stored, computed) = self.split_columns(columns, fields, declared)?;
+		self.land_columns(&stored, &computed, declared, &derivations)
 	}
 
 	/// Lowers the columns of the layer whose columns are `fields` and whose regions are `regions`
@@ -107,12 +127,14 @@ impl Body<'_, '_, '_> {
 		regions: &[RegionId],
 		fields: &FieldsShape,
 		declared: &[Strand],
+		judged: Option<&ComputedReadsShape>,
 	) -> Result<usize, IrError> {
 		self.require_row("a layer over a projection")?;
-		let (stored, _) = self.split_columns(regions, fields, declared)?;
+		let (columns, derivations) = judged_regions(regions, judged)?;
+		let (stored, _) = self.split_columns(columns, fields, declared)?;
 		let count = stored.len();
 		if count > 0 {
-			self.land_columns(&stored, &[], declared)?;
+			self.land_columns(&stored, &[], declared, &derivations)?;
 		}
 		Ok(count)
 	}
@@ -146,13 +168,16 @@ impl Body<'_, '_, '_> {
 	}
 
 	/// Evaluates the columns `stored` and `computed` of a layer whose input declares `declared`
-	/// `COMPUTED`, and lands them on the row.
+	/// `COMPUTED`, and lands them on the row. The guards read a copy of the row with `judged`
+	/// derived onto it, when there is a field to derive ([`Self::judged_record`]).
 	fn land_columns(
 		&mut self,
 		stored: &[Column],
 		computed: &[Column],
 		declared: &[Strand],
+		judged: &[JudgedField<'_>],
 	) -> Result<(), IrError> {
+		let judged = self.judged_record(judged, declared)?;
 		let sets = self.em.reg()?;
 		self.em.emit(Instr::NewObject {
 			dst: sets,
@@ -176,6 +201,7 @@ impl Body<'_, '_, '_> {
 			sets,
 			cuts,
 			reduced,
+			judged,
 		};
 		for column in stored {
 			self.layer_column(column, false, &targets)?;
@@ -203,6 +229,40 @@ impl Body<'_, '_, '_> {
 		});
 		self.schema = None;
 		Ok(())
+	}
+
+	/// A copy of the row with `fields` derived onto it in order, each body a region evaluated in
+	/// the derived frame it carries under its field's `AUTH LIMIT` ([`Derive::Gate`]), as the copy
+	/// a permission filter judges is built. A self-dereference in a body reads the row with every
+	/// name `declared` `COMPUTED` removed, as the record is stored. The copy is built by a host
+	/// pipeline of the program ([`Instr::JudgeCopy`]), once per row, and the row goes on as it
+	/// came. `None` where there is no field to derive.
+	fn judged_record(
+		&mut self,
+		fields: &[JudgedField<'_>],
+		declared: &[Strand],
+	) -> Result<Option<Reg>, IrError> {
+		if fields.is_empty() {
+			return Ok(None);
+		}
+		let ir = self.ir;
+		let pipeline = {
+			let aside = self.em.set_aside();
+			let mut lowerer = Lowerer::in_context(&mut *self.em, ir, self.cx);
+			let beside = lowerer.beside();
+			let built = derived_copy(&mut lowerer, fields, declared);
+			lowerer.rejoin(beside);
+			self.needs = self.needs.merged(&lowerer.needs());
+			lowerer.em.restore(aside);
+			built.and_then(|pipeline| self.em.host_code(pipeline))?
+		};
+		let judged = self.em.reg()?;
+		self.em.emit(Instr::JudgeCopy {
+			pipeline,
+			src: ROW,
+			dst: judged,
+		});
+		Ok(Some(judged))
 	}
 
 	/// The columns of the layer whose regions are `regions`, in the order of its fields.
@@ -296,6 +356,13 @@ impl Body<'_, '_, '_> {
 			None
 		};
 		let value_region = judgement.map_or(column.region, |(_, kept)| kept);
+		// A permission column on a stored field that is not split into a guard and a value holds
+		// its guards in its value, which reads the copy the guards read, whose stored fields are
+		// the row's.
+		let doc = match (judgement, targets.judged) {
+			(None, Some(judged)) if is_guard && !computed => Some(judged),
+			_ => doc,
+		};
 		let value = self.em.reg()?;
 		let (cut, unchanged) = (self.em.label()?, self.em.label()?);
 		// A computed column whose guard does not read `$value`, and whose value no later body reads
@@ -305,7 +372,7 @@ impl Body<'_, '_, '_> {
 			Some((guard, _))
 				if computed && targets.reduced.is_none() && !reads_judged(ir, column.region) =>
 			{
-				self.column_guard(column, guard, value, frame, cut)?;
+				self.column_guard(column, guard, value, targets.judged, frame, cut)?;
 				true
 			}
 			Some(_) | None => false,
@@ -346,7 +413,7 @@ impl Body<'_, '_, '_> {
 		match judgement {
 			Some((guard, _)) => {
 				if !judged_first {
-					self.column_guard(column, guard, value, frame, cut)?;
+					self.column_guard(column, guard, value, targets.judged, frame, cut)?;
 				}
 				// An admitted stored field is as the row has it.
 				if !computed {
@@ -438,12 +505,14 @@ impl Body<'_, '_, '_> {
 
 	/// Jumps to `cut` where the guard `guard` of `column`, a value of its region, refuses the
 	/// column's value `value`, evaluated in the permission frame `frame` over the row with `$value`
-	/// naming `value`.
+	/// naming `value` — over the copy `judged` in place of the row, where the layer's guards read
+	/// one ([`Self::judged_record`]).
 	fn column_guard(
 		&mut self,
 		column: &Column,
 		guard: ValueId,
 		value: Reg,
+		judged: Option<Reg>,
 		frame: u16,
 		cut: crate::exec::vm::program::Label,
 	) -> Result<(), IrError> {
@@ -452,8 +521,13 @@ impl Body<'_, '_, '_> {
 		let (objects, schema) = (self.objects, self.schema.clone());
 		let mut lowerer = Lowerer::in_context(&mut *self.em, ir, self.cx).with_schema(schema);
 		if let Some(arg) = row_arg(ir, column.region) {
-			lowerer.bind_arg(arg, Operand::Reg(ROW));
-			lowerer.bind_row(arg, objects);
+			match judged {
+				Some(judged) => lowerer.bind_arg(arg, Operand::Reg(judged)),
+				None => {
+					lowerer.bind_arg(arg, Operand::Reg(ROW));
+					lowerer.bind_row(arg, objects);
+				}
+			}
 		}
 		if let Some(judged) = judged_arg(ir, column.region) {
 			lowerer.bind_arg(judged, Operand::Reg(value));
@@ -543,10 +617,11 @@ fn lower_layer_stack(
 	body.end = body.em.label()?;
 	let mut guards = 0;
 	for (layer, regions) in layers {
+		let judged = layer.judged.as_deref();
 		if stored_only {
-			guards += body.stored_guards(regions, &layer.fields, &layer.computed)?;
+			guards += body.stored_guards(regions, &layer.fields, &layer.computed, judged)?;
 		} else {
-			body.layer(regions, &layer.fields, &layer.computed)?;
+			body.layer(regions, &layer.fields, &layer.computed, judged)?;
 		}
 	}
 	body.em.emit(Instr::Emit {
@@ -556,6 +631,42 @@ fn lower_layer_stack(
 	body.em.emit(Instr::EndRow);
 	let pipeline = body.em.finish_pipeline(Source::Once)?;
 	Ok((pipeline, body.needs, guards))
+}
+
+/// A `COMPUTED` field a layer's guards read, with the region that derives it.
+type JudgedField<'a> = (&'a DerivedField, RegionId);
+
+/// The regions of a layer's columns, and the fields `judged` derives for its guards, each with its
+/// region: the regions after the columns' ([`ComputedReadsShape::derived_regions`]). A derivation
+/// the catalog answered before a catalog change is planned again when the statement is reached
+/// ([`derived_fields`]).
+fn judged_regions<'r, 'j>(
+	regions: &'r [RegionId],
+	judged: Option<&'j ComputedReadsShape>,
+) -> Result<(&'r [RegionId], Vec<JudgedField<'j>>), IrError> {
+	let fields = derived_fields(judged)?;
+	let at = regions
+		.len()
+		.checked_sub(fields.len())
+		.ok_or_else(|| invariant("a layer hosts a region for each field its guards derive"))?;
+	let (columns, derivations) = regions.split_at(at);
+	Ok((columns, fields.iter().zip(derivations.iter().copied()).collect()))
+}
+
+/// The host pipeline over a copy of a row that derives `fields` onto it in order, each in the
+/// derived frame its body's region carries, and emits the copy. A self-dereference in a body reads
+/// the row with every name `declared` removed.
+fn derived_copy(
+	lowerer: &mut Lowerer<'_>,
+	fields: &[JudgedField<'_>],
+	declared: &[Strand],
+) -> Result<Pipeline, IrError> {
+	derive_fields(lowerer, fields, Derive::Gate, Some(declared))?;
+	lowerer.emit(Instr::Emit {
+		src: ROW,
+	});
+	lowerer.emit(Instr::EndRow);
+	lowerer.em.finish_pipeline(Source::Once)
 }
 
 /// The field a column lands under, which the region `region` reads from the row, and whether it
@@ -633,17 +744,22 @@ mod tests {
 	use super::super::tests::{
 		key_range_declaring, lowered, pipeline, placed, scan, scan_declaring, step,
 	};
+	use crate::exec::ir::error::IrError;
 	use crate::exec::ir::expr::ops::{ComputedReadAttrs, ExprOp};
 	use crate::exec::ir::iface::CatalogObjectKey;
 	use crate::exec::ir::iface::ids::{FrameId, OpId, ValueId};
 	use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
 	use crate::exec::ir::iface::types::TypeKnowledge;
-	use crate::exec::ir::logical::ops::{FieldShape, FieldsShape};
+	use crate::exec::ir::logical::ops::{
+		ComputedReadsShape, DerivedField, DerivedReads, FieldShape, FieldsShape,
+	};
 	use crate::exec::ir::phys::ops::{LayerAttrs, PhysOp};
 	use crate::exec::logical::footprint::CatalogKind;
 	use crate::exec::vm::compile_cache::ObjectVersion;
+	use crate::exec::vm::ir_lower::LowerCx;
+	use crate::exec::vm::ir_lower::pipe::lower_reads;
 	use crate::exec::vm::ir_lower::tests::Builder;
-	use crate::exec::vm::program::{FrameMode, Instr, Operand, PermissionSpec};
+	use crate::exec::vm::program::{FrameMode, Instr, Operand, PermissionSpec, ROW};
 	use crate::expr::logical::{EvalFrame, GuardKind};
 	use crate::expr::{BinaryOperator, Kind};
 	use crate::val::Value;
@@ -772,6 +888,7 @@ mod tests {
 						fields,
 						names: Vec::new(),
 						computed: computed.iter().map(|name| Strand::from(*name)).collect(),
+						judged: None,
 					})),
 					rows,
 					&[],
@@ -852,6 +969,8 @@ mod tests {
 			"{code:?}"
 		);
 		assert!(!code.iter().any(|instr| matches!(instr, Instr::BeginComputing { .. })));
+		// A guard that reads no computed field is judged over the row itself.
+		assert!(!code.iter().any(|instr| matches!(instr, Instr::JudgeCopy { .. })), "{code:?}");
 	}
 
 	#[test]
@@ -993,5 +1112,150 @@ mod tests {
 		// A key-range scan is judged as a table scan is: it holds its table's schema.
 		let b = stacked(&[&whole], |b| key_range_declaring(b, "a", Kind::Int));
 		assert!(!lowered(&b).program.pipelines[0].code.is_empty());
+	}
+
+	/// The shape of a layer whose guards read the computed field `c` of `t`, derived as `derived`
+	/// states.
+	fn reads_c(derived: DerivedReads) -> ComputedReadsShape {
+		ComputedReadsShape {
+			table: TableName::from("t"),
+			fields: Some(vec!["c".to_owned()]),
+			derived,
+		}
+	}
+
+	/// The rows of a scan with a layer of two permission columns, `a` and `b`, over them, whose
+	/// guards read the computed field `c`, as `judged` states, with `derivations` regions after the
+	/// columns' frames deriving it in a permission frame.
+	fn judged_layer(judged: ComputedReadsShape, derivations: usize) -> Builder {
+		let mut b = Builder::new();
+		let column = b.frame(EvalFrame::permission(None));
+		let derived = b.frame(EvalFrame::permission(None));
+		pipeline(&mut b, 0, |b| {
+			let rows = scan(b);
+			let single = || FieldShape::Single {
+				alias: None,
+				kind: None,
+			};
+			let layer: OpId = step(
+				b,
+				PhysOp::Layer(Box::new(LayerAttrs {
+					fields: FieldsShape::Select(Box::new([FieldShape::All, single(), single()])),
+					names: Vec::new(),
+					computed: Vec::new(),
+					judged: Some(judged),
+				})),
+				rows,
+				&[],
+			);
+			for name in ["a", "b"] {
+				b.region_with_args(
+					layer,
+					RegionKind::Clause(ClauseRole::Projection),
+					&[TypeKnowledge::Unknown],
+					|b, args| field(b, args[0], name),
+				);
+			}
+			for _ in 0..2 {
+				b.in_frame(column, |b| {
+					b.region_with_args(
+						layer,
+						RegionKind::FieldFrame(FieldRole::Computed),
+						&[TypeKnowledge::Unknown, TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+						|b, args| {
+							judged_by(b, args[1], args[2], |b, row, _| {
+								let c = computed_field(b, row, "c");
+								let one = b.literal(Value::from(1_i64));
+								b.binary(BinaryOperator::Equal, c, one)
+							})
+						},
+					);
+				});
+			}
+			for _ in 0..derivations {
+				b.in_frame(derived, |b| {
+					b.region_with_args(
+						layer,
+						RegionKind::FieldFrame(FieldRole::Computed),
+						&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+						|b, _| b.literal(Value::from(1_i64)),
+					);
+				});
+			}
+			b.result_of(layer)
+		});
+		placed(b)
+	}
+
+	/// A layer whose guards read the computed field `c` derives it onto one copy of the row, by a
+	/// host pipeline, before any column lands, and judges every guard over that copy.
+	#[test]
+	fn a_layer_whose_guards_read_computed_fields_judges_one_copy_with_them_derived() {
+		let b = judged_layer(
+			reads_c(DerivedReads::Stated(Box::new([DerivedField {
+				name: Strand::from("c"),
+				kind: None,
+				caller_bound: false,
+			}]))),
+			1,
+		);
+		let program = lowered(&b).program;
+		let code = &program.pipelines[0].code;
+		let copies: Vec<(usize, u16)> = code
+			.iter()
+			.enumerate()
+			.filter_map(|(at, instr)| match instr {
+				Instr::JudgeCopy {
+					pipeline: 0,
+					src: ROW,
+					dst,
+				} => Some((at, *dst)),
+				_ => None,
+			})
+			.collect();
+		let [(made, copy)] = copies.as_slice() else {
+			panic!("one copy of the row: {code:?}");
+		};
+		let reads: Vec<usize> = code
+			.iter()
+			.enumerate()
+			.filter(
+				|(_, instr)| matches!(instr, Instr::Access { src: Operand::Reg(src), .. } if src == copy),
+			)
+			.map(|(at, _)| at)
+			.collect();
+		assert_eq!(reads.len(), 2, "each guard reads the copy: {code:?}");
+		assert!(reads.iter().all(|read| read > made), "{code:?}");
+		let lands = code.iter().position(|instr| matches!(instr, Instr::LandRow { .. }));
+		assert!(lands.is_some_and(|lands| lands > *made), "{code:?}");
+		let derives = &program.host_code[0].code;
+		let begins = derives.iter().position(|instr| matches!(instr, Instr::BeginComputing { .. }));
+		let derived = derives.iter().position(|instr| matches!(instr, Instr::LandRow { .. }));
+		let emits = derives.iter().position(|instr| {
+			matches!(
+				instr,
+				Instr::Emit {
+					src: ROW
+				}
+			)
+		});
+		assert!(
+			matches!((begins, derived, emits), (Some(b), Some(d), Some(e)) if b < d && d < e),
+			"{derives:?}"
+		);
+		assert!(
+			program.permissions.iter().any(|spec| spec.mode == FrameMode::Derived),
+			"{:?}",
+			program.permissions
+		);
+	}
+
+	#[test]
+	fn a_layer_whose_derivation_predates_a_catalog_change_binds_late() {
+		let b = judged_layer(reads_c(DerivedReads::LateBound), 0);
+		assert!(matches!(
+			lower_reads(&mut LowerCx::detached(), &b.ir, false),
+			Err(IrError::LateBind { .. })
+		));
 	}
 }

@@ -677,7 +677,7 @@ impl LogOp {
 				if attrs.layer {
 					kinds.extend(std::iter::repeat_n(
 						RegionKind::FieldFrame(FieldRole::Computed),
-						fields,
+						fields + attrs.judged_regions(),
 					));
 				}
 				kinds

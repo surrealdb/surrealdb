@@ -896,6 +896,7 @@ fn project(ir: &Ir, data: &OpData, attrs: &ProjectAttrs) -> Result<Option<PhysOp
 			fields: attrs.fields.clone(),
 			names: attrs.names.clone(),
 			computed: attrs.computed.clone(),
+			judged: attrs.judged.as_deref().cloned(),
 		}))));
 	}
 	let omit = omissions(ir, data, attrs)?;
@@ -2738,6 +2739,7 @@ mod region_tests {
 			names,
 			computed: Vec::new(),
 			sort_keys: Vec::new(),
+			judged: None,
 		};
 		let project = fx.op(top, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[rows], 1);
 		for _ in 0..regions {
@@ -2831,6 +2833,7 @@ mod region_tests {
 			names: names.clone(),
 			computed: Vec::new(),
 			sort_keys: Vec::new(),
+			judged: None,
 		};
 		let layer = fx.op(top, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[rows], 1);
 		for _ in 0..2 {

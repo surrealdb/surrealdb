@@ -41,12 +41,16 @@
 //! admits. For a checked caller the stored fields' guards
 //! then run, each judged against the *unreduced* record — raw stored fields
 //! and the computed fields as first derived — with `$value` the field's
-//! value, and a denied field is cut. If anything was cut, every computed
-//! field is re-derived against the reduced record: a body reading a cut field
-//! sees `NONE`, and a self-dereference through `id` reads the reduced
-//! view. Last the computed fields' own guards run, judged against the
-//! unreduced record with `$value` the final computed value. An unchecked
-//! caller gets the derivation alone.
+//! value, and a denied field is cut. A guard that reads a computed field is
+//! judged against a copy of that record with the computed fields the guards
+//! read derived onto it in their own frame, as the table permission is: a
+//! field derived for the caller from a record the caller may not select is
+//! `NONE`, which satisfies a clause written to deny. If anything was cut,
+//! every computed field is re-derived against the reduced record: a body
+//! reading a cut field sees `NONE`, and a self-dereference through `id`
+//! reads the reduced view. Last the computed fields' own guards run, judged
+//! against the unreduced record, or the copy, with `$value` the final
+//! computed value. An unchecked caller gets the derivation alone.
 //!
 //! Let S be the restricted stored fields (a checked caller only), C the
 //! computed fields, and Cr ⊆ C the fields that need re-derivation: a body
@@ -101,8 +105,11 @@
 //!    order, each body in the `Computed` frame against the *reduced* record — the input with the
 //!    stored columns landed, carrying each re-derivation landed before it — so a body reading a
 //!    cut field reads `NONE` and a self-dereference reads the same view. A computed field's guard
-//!    is judged against the unreduced record with `$value` the value its body produced. The
-//!    physical layer operator supplies both records (`operators/layer.rs`).
+//!    is judged against the unreduced record with `$value` the value its body produced. A guard
+//!    that reads a computed field is judged against a copy of the unreduced record with the
+//!    computed fields the layer's guards read derived onto it in the frame a permission predicate
+//!    derives them in, which the layer states (`ProjectAttrs::judged`). The lowering of the layer
+//!    builds each record (`vm::ir_lower::pipe::layer`).
 //! 3. **Nested and wildcard guards** join B as a column on the root field: a guard on `a.b` is `a
 //!    := set_field(a, 'b', IF p THEN a.b ELSE NONE END)` with `$value` replaced by `a.b`; where the
 //!    position the segment applies to may hold an array, the `set_field` runs per element inside a

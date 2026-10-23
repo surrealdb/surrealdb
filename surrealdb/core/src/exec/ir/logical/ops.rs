@@ -790,8 +790,10 @@ impl ImageLayers {
 		};
 		layers.iter().flat_map(|layer| {
 			let columns = layer.fields.regions();
-			std::iter::repeat_n(RegionKind::Clause(ClauseRole::Projection), columns)
-				.chain(std::iter::repeat_n(RegionKind::FieldFrame(FieldRole::Computed), columns))
+			let judged = layer.judged.as_deref().map_or(0, ComputedReadsShape::derived_regions);
+			std::iter::repeat_n(RegionKind::Clause(ClauseRole::Projection), columns).chain(
+				std::iter::repeat_n(RegionKind::FieldFrame(FieldRole::Computed), columns + judged),
+			)
 		})
 	}
 }
@@ -1794,6 +1796,19 @@ pub(crate) struct ProjectAttrs {
 	/// field's expression, and the row's one evaluation of it is both what the row sorts by and
 	/// what it returns. Only a key that is not a path is shared, so the sort beneath stays.
 	pub(crate) sort_keys: Vec<(u16, u16)>,
+	/// For a layer whose guards read `COMPUTED` fields of its table, those fields, derived onto a
+	/// copy of the row the guards are judged against; `None` for any other projection. The layer
+	/// hosts one `FieldFrame(Computed)` region per field the shape derives, after the frame
+	/// regions of its columns ([`ComputedReadsShape::derived_regions`]).
+	pub(crate) judged: Option<Box<ComputedReadsShape>>,
+}
+
+impl ProjectAttrs {
+	/// The number of regions the projection hosts after its columns' frames: one per field its
+	/// judged reads derive.
+	pub(crate) fn judged_regions(&self) -> usize {
+		self.judged.as_deref().map_or(0, ComputedReadsShape::derived_regions)
+	}
 }
 
 /// One `ORDER BY` key's flags.
@@ -1911,6 +1926,19 @@ pub(crate) struct SubscriberLayer {
 	/// [`ProjectAttrs::computed`] carries them for a statement's layer. A column under one of
 	/// these names is judged as on a computed field.
 	pub(crate) computed: Vec<Strand>,
+	/// The `COMPUTED` fields of the layer's table its guards read, as [`ProjectAttrs::judged`]
+	/// states them for a statement's layer: the layer's regions are followed by one
+	/// `FieldFrame(Computed)` region per field the shape derives.
+	pub(crate) judged: Option<Box<ComputedReadsShape>>,
+}
+
+impl SubscriberLayer {
+	/// The number of regions the layer holds: the read and the frame of each column, then one per
+	/// field its judged reads derive.
+	pub(crate) fn regions(&self) -> usize {
+		let judged = self.judged.as_deref().map_or(0, ComputedReadsShape::derived_regions);
+		self.fields.regions() * 2 + judged
+	}
 }
 
 /// A live subscription's work on one record image of a table, for one subscriber.
@@ -1956,7 +1984,10 @@ impl SubscriberAttrs {
 		for layer in &self.layers {
 			let columns = layer.fields.regions();
 			kinds.extend(std::iter::repeat_n(RegionKind::Clause(ClauseRole::Projection), columns));
-			kinds.extend(std::iter::repeat_n(RegionKind::FieldFrame(FieldRole::Computed), columns));
+			kinds.extend(std::iter::repeat_n(
+				RegionKind::FieldFrame(FieldRole::Computed),
+				layer.regions() - columns,
+			));
 		}
 		if self.cond {
 			kinds.push(RegionKind::Clause(ClauseRole::Where));
@@ -1985,7 +2016,7 @@ impl SubscriberAttrs {
 
 	/// How many regions the view's layers hold.
 	pub(crate) fn viewed(&self) -> usize {
-		self.layers.iter().map(|layer| 2 * layer.fields.regions()).sum()
+		self.layers.iter().map(SubscriberLayer::regions).sum()
 	}
 
 	/// How many regions the projection holds: one for each field that is an expression, and one

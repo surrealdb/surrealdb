@@ -677,7 +677,9 @@ fn prune_layer(cx: &mut LoCx<'_>, layer: OpId) -> Result<u32, IrError> {
 	let FieldsShape::Select(shape) = &attrs.fields else {
 		return Ok(0);
 	};
-	if !attrs.layer {
+	// A layer whose guards read derived fields is left whole: its regions end with the derivations
+	// those guards read (`ProjectAttrs::judged`).
+	if !attrs.layer || attrs.judged.is_some() {
 		return Ok(0);
 	}
 	let (input, result) = (*input, *result);
@@ -767,6 +769,7 @@ fn prune_layer(cx: &mut LoCx<'_>, layer: OpId) -> Result<u32, IrError> {
 		names: attrs.names.clone(),
 		computed: attrs.computed.clone(),
 		sort_keys: attrs.sort_keys.clone(),
+		judged: None,
 	};
 	let ty = cx.ir.value(result).map(|value| value.ty.clone()).ok_or(IrError::Stale("value"))?;
 	let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);

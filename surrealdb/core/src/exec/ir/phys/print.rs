@@ -2142,7 +2142,11 @@ text_struct!(SubscriberAttrs {
 	cond: bool,
 	fetch: u16
 });
-text_struct!(SubscriberLayer { fields: FieldsShape, computed: Vec<Strand> });
+text_struct!(SubscriberLayer {
+	fields: FieldsShape,
+	computed: Vec<Strand>,
+	judged: Option<Box<ComputedReadsShape>>
+});
 text_struct!(ShowAttrs { table: Option<TableName>, since: ShowSince, limit: Option<u32> });
 text_struct!(ChooseSpec {
 	granularity: ChooseGranularity,
@@ -2827,7 +2831,12 @@ text_struct!(PhysSortAttrs {
 	spill: Spill,
 	tempfiles: bool
 });
-text_struct!(LayerAttrs { fields: FieldsShape, names: Vec<OutputPath>, computed: Vec<Strand> });
+text_struct!(LayerAttrs {
+	fields: FieldsShape,
+	names: Vec<OutputPath>,
+	computed: Vec<Strand>,
+	judged: Option<ComputedReadsShape>
+});
 text_struct!(AggregateAttrs {
 	groups: u16,
 	fields: FieldsShape,
@@ -3701,6 +3710,7 @@ mod tests {
 					exact: true,
 				}],
 				computed: Vec::new(),
+				judged: None,
 			})),
 			PhysTag::Filter => PhysOp::Filter,
 			PhysTag::Fetch => PhysOp::Fetch,
@@ -3897,10 +3907,12 @@ mod tests {
 							},
 						])),
 						computed: vec![strand("c"), strand("d")],
+						judged: None,
 					},
 					SubscriberLayer {
 						fields: FieldsShape::Select(Box::new([FieldShape::All])),
 						computed: Vec::new(),
+						judged: None,
 					},
 				],
 				projection: SubscriberProjection::Subject,

@@ -133,7 +133,7 @@ pub(crate) fn lower_subscriber(cx: &mut LowerCx<'_>, ir: &Ir) -> Result<LoweredL
 		let mut held = viewing;
 		let mut layers = Vec::with_capacity(attrs.layers.len());
 		for layer in &attrs.layers {
-			let (columns, after) = held.split_at(2 * layer.fields.regions());
+			let (columns, after) = held.split_at(layer.regions());
 			layers.push((layer, columns));
 			held = after;
 		}
@@ -582,6 +582,7 @@ mod tests {
 				kind: None,
 			}])),
 			computed: vec![Strand::new("c")],
+			judged: None,
 		}
 	}
 

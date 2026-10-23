@@ -853,6 +853,60 @@ async fn live_select_permission_reads_computed_fields() -> Result<()> {
 	Ok(())
 }
 
+/// A field's `PERMISSIONS FOR select` that reads a `COMPUTED` field is judged
+/// for a subscriber with that field derived in the clause's own frame: reads
+/// unchecked, so a body following a record the subscriber may not select still
+/// reads it. Derived as the subscriber, the body reads `NONE`, and a
+/// deny-intended clause delivers the field. The subscriber receives the
+/// computed field as the subscriber reads it.
+#[tokio::test]
+async fn live_field_select_permission_reads_computed_fields() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_record = Session::for_record(
+		"test",
+		"test",
+		"test",
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+	)
+	.with_rt(true);
+
+	let sql = "
+		DEFINE TABLE meta SCHEMALESS PERMISSIONS NONE;
+		CREATE meta:secret SET secret = true;
+		CREATE meta:open SET secret = false;
+		DEFINE TABLE doc SCHEMALESS PERMISSIONS FULL;
+		DEFINE FIELD hidden ON doc COMPUTED meta.secret;
+		DEFINE FIELD body ON doc PERMISSIONS FOR select WHERE hidden != true;
+	";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 6);
+	skip_ok(res, 6)?;
+
+	let res = &mut dbs.execute("LIVE SELECT id, body, hidden FROM doc;", &ses_record, None).await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	let sql = "
+		CREATE doc:sec SET meta = meta:secret, body = 'classified';
+		CREATE doc:pub SET meta = meta:open, body = 'public';
+	";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	skip_ok(res, 2)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(
+		tmp.result,
+		syn::value("{ body: NONE, hidden: NONE, id: doc:sec }").unwrap(),
+		"the body of a record whose `meta` is secret is withheld"
+	);
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("{ body: 'public', hidden: NONE, id: doc:pub }").unwrap());
+	Ok(())
+}
+
 // `LIVE` statements sent together over one task, as one connection's requests
 // are, all register. Thirty per round, resumed in the order they are woken,
 // share one task's cooperative budget, which runs out within a round, so a

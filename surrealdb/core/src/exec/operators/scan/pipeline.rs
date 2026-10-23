@@ -736,11 +736,10 @@ pub(crate) struct FieldState {
 	/// cheaply determine the subset of computed fields they need.
 	dep_map: Arc<HashMap<String, crate::expr::computed_deps::ComputedDeps>>,
 	/// Fields referenced by any conditional `PERMISSIONS FOR select WHERE …`
-	/// expression on this table. These root field names must be added to the
-	/// projection-driven "needed" set before deciding which computed fields
-	/// to evaluate — otherwise a `SELECT a` could skip computing field `b`
-	/// while still applying a field permission whose expression references
-	/// `b`, producing a permission decision against an incomplete row.
+	/// expression on this table, which [`filter_field_state_for_projection`]
+	/// adds to the projection-driven "needed" set. A guard judges the computed
+	/// fields it reads on a view of its own ([`guard_view`]), so these are
+	/// derived for the caller alone.
 	/// `is_complete = false` (opaque expression) collapses into
 	/// `permission_deps_complete = false`, which forces evaluation of all
 	/// computed fields.
@@ -756,6 +755,43 @@ pub(crate) struct FieldState {
 	/// [`Self::deferred_derivations`] is the only reader, and it answers `None`
 	/// for a list that does not line up with `computed_fields`.
 	derivations: Option<Arc<[PlannedDerivation]>>,
+	/// The computed fields the conditional guards of `field_permissions` read,
+	/// derived for them onto one copy of each record ([`guard_view`]). `None`
+	/// when no guard reads one, and in a state whose reads are not checked.
+	guard_reads: Option<Arc<GuardReads>>,
+}
+
+/// The `COMPUTED` fields of a table that its fields' conditional select
+/// guards read, and the field state that derives them for the guards.
+#[derive(Debug)]
+pub(crate) struct GuardReads {
+	table: TableName,
+	/// The fields read by name, or `None` when a guard reads the row other than
+	/// by name, which derives every computed field of the table.
+	reads: Option<HashSet<String>>,
+	/// The table's field state for reads that are not permission-checked,
+	/// narrowed to the computed fields `reads` reaches. Resolved on first use
+	/// and kept with the state that holds it, which is compiled once per table
+	/// version; `None` once resolved to hold none.
+	state: tokio::sync::OnceCell<Option<FieldState>>,
+}
+
+impl GuardReads {
+	/// The field state that derives the guards' reads, or `None` when they
+	/// reach no computed field. `frame` is the derivation's
+	/// ([`guard_view`]), so the bodies are compiled for reads that are not
+	/// permission-checked.
+	async fn state(&self, frame: &ExecutionContext) -> Result<Option<&FieldState>, ControlFlow> {
+		let state = self
+			.state
+			.get_or_try_init(|| async {
+				let state =
+					build_field_state(frame, &self.table, false, self.reads.as_ref()).await?;
+				Ok::<_, ControlFlow>((!state.computed_fields.is_empty()).then_some(state))
+			})
+			.await?;
+		Ok(state.as_ref())
+	}
 }
 
 /// When one `COMPUTED` field is derived for a checked caller.
@@ -779,6 +815,7 @@ impl FieldState {
 			permission_field_deps: Arc::new(HashSet::new()),
 			permission_deps_complete: true,
 			derivations: None,
+			guard_reads: None,
 		}
 	}
 
@@ -1025,20 +1062,27 @@ pub(crate) async fn compile_field_state(
 	// don't need a runtime check.
 	//
 	// While walking conditional permissions, accumulate the set of fields
-	// the expression references. `filter_field_state_for_projection` adds
-	// these to the projection-driven "needed" set so that any computed
-	// field referenced by a permission expression is evaluated even when
-	// the user's SELECT didn't list it — otherwise a permission decision
-	// would be made against an incomplete row.
+	// the expression references, which `filter_field_state_for_projection`
+	// adds to the projection-driven "needed" set, and what the guards read
+	// of the row by name, which `guard_view` derives for them.
 	let mut field_permissions: Vec<(crate::expr::Idiom, PhysicalPermission)> = Vec::new();
 	let mut permission_field_deps: HashSet<String> = HashSet::new();
 	let mut permission_deps_complete = true;
+	// What the guards read of the row by name, `$value` being bound to the
+	// field's value: `None` once one reads the row other than by name.
+	let mut guard_reads: Option<HashSet<String>> = Some(HashSet::new());
 	if check_perms {
 		for fd in field_defs.iter() {
 			let physical_perm = match &fd.select_permission {
 				Permission::Full => continue,
 				Permission::None => PhysicalPermission::Deny,
 				Permission::Specific(expr) => {
+					let reads =
+						crate::expr::computed_deps::extract_computed_deps_binding(expr, &["value"]);
+					match (&mut guard_reads, reads.is_complete) {
+						(Some(all), true) => all.extend(reads.fields),
+						_ => guard_reads = None,
+					}
 					let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 					if !deps.is_complete {
 						// Read the flag *before* flipping it below so we only
@@ -1076,6 +1120,27 @@ pub(crate) async fn compile_field_state(
 	} else {
 		None
 	};
+	// The guards judge the computed fields they read as derived in their own
+	// frame, on one copy of the record ([`guard_view`]).
+	let guard_reads = if check_perms && !dep_map.is_empty() {
+		match guard_reads {
+			None => Some(None),
+			Some(reads) => {
+				let reads: HashSet<String> =
+					reads.into_iter().filter(|name| dep_map.contains_key(name)).collect();
+				(!reads.is_empty()).then_some(Some(reads))
+			}
+		}
+	} else {
+		None
+	};
+	let guard_reads = guard_reads.map(|reads| {
+		Arc::new(GuardReads {
+			table: table_name.clone(),
+			reads,
+			state: tokio::sync::OnceCell::new(),
+		})
+	});
 
 	Ok(FieldState {
 		computed_fields,
@@ -1084,6 +1149,7 @@ pub(crate) async fn compile_field_state(
 		permission_field_deps: Arc::new(permission_field_deps),
 		permission_deps_complete,
 		derivations,
+		guard_reads,
 	})
 }
 
@@ -1155,14 +1221,11 @@ pub(crate) async fn build_field_state(
 /// a clone of the full state. This is a cheap CPU-only operation with no
 /// KV lookups.
 ///
-/// SECURITY: even when the projection is selective, computed fields
-/// referenced by any conditional `PERMISSIONS FOR select WHERE …`
-/// expression on this table are always evaluated. Otherwise a
-/// `SELECT a` could skip computing `b` while still applying a permission
-/// on field `c` whose expression references `b`, producing a permission
-/// decision against an incomplete row. If a permission expression had
-/// opaque dependencies (subqueries, params), all computed fields are
-/// evaluated.
+/// Even when the projection is selective, computed fields referenced by any
+/// conditional `PERMISSIONS FOR select WHERE …` expression on this table are
+/// evaluated for the caller, all of them where an expression has opaque
+/// dependencies (subqueries, params). The guards judge the computed fields
+/// they read on a view of their own ([`guard_view`]), not as evaluated here.
 pub(crate) fn filter_field_state_for_projection(
 	full_state: &FieldState,
 	needed_fields: Option<&std::collections::HashSet<String>>,
@@ -1227,6 +1290,7 @@ pub(crate) fn filter_field_state_for_projection(
 		dep_map: Arc::clone(&full_state.dep_map),
 		permission_field_deps: Arc::clone(&full_state.permission_field_deps),
 		permission_deps_complete: full_state.permission_deps_complete,
+		guard_reads: full_state.guard_reads.clone(),
 	}
 }
 
@@ -1466,12 +1530,14 @@ impl PermissionPass {
 /// order that stops a computed field from carrying a value the caller's
 /// permissions deny.
 ///
-/// Computed fields are evaluated first, because a field-level permission
-/// predicate may read one and must see the value the record computes to. That
-/// leaves every computed field derived from the document *before* any field was
-/// cut, so one whose body reads a denied field still holds its value once the
-/// permission pass has removed the source. Re-deriving them against the reduced
-/// document is what keeps the record consistent.
+/// Computed fields are evaluated first, as the caller reads them: a computed
+/// field's own clause judges the value the caller would receive. A clause that
+/// reads a computed field judges it as derived in the clause's own frame, on
+/// one view of the record shared by every clause ([`guard_view`]). The first
+/// evaluation leaves every computed field derived from the document *before*
+/// any field was cut, so one whose body reads a denied field still holds its
+/// value once the permission pass has removed the source. Re-deriving them
+/// against the reduced document is what keeps the record consistent.
 ///
 /// The passes are split by field kind, as [`PermissionPass`] describes: stored
 /// fields are cut first, because those cuts are what re-derivation reacts to,
@@ -1520,6 +1586,9 @@ pub(crate) async fn materialise_fields_with_permissions(
 	// The computed values and their snapshot are both in place, and the passes
 	// below may cut them before the batch's own threshold check would see them.
 	super::common::ensure_below_memory_threshold()?;
+	// What both passes judge: the record, with the computed fields the guards
+	// read derived in their own frame where they read one.
+	let view = guard_view(ctx, state, &record).await?;
 	// Stored fields first. `value` still equals `record`, so it doubles as the
 	// snapshot that `each` expansion and the `$value` binding read.
 	let cut = filter_fields_by_permission_inner(
@@ -1528,7 +1597,7 @@ pub(crate) async fn materialise_fields_with_permissions(
 		value,
 		PermissionPass::Stored,
 		Some(&record),
-		Some(&record),
+		Some(view.as_deref().unwrap_or(&record)),
 		&[],
 	)
 	.await?;
@@ -1557,7 +1626,7 @@ pub(crate) async fn materialise_fields_with_permissions(
 		value,
 		PermissionPass::Computed,
 		snapshot,
-		Some(&record),
+		Some(view.as_deref().unwrap_or(&record)),
 		&[],
 	)
 	.await?;
@@ -1620,13 +1689,14 @@ async fn materialise_judged(
 	// `materialise_fields_with_permissions`.
 	let record = value.clone();
 	super::common::ensure_below_memory_threshold()?;
+	let view = guard_view(ctx, state, &record).await?;
 	let cut = filter_fields_by_permission_inner(
 		ctx,
 		state,
 		value,
 		PermissionPass::Stored,
 		Some(&record),
-		Some(&record),
+		Some(view.as_deref().unwrap_or(&record)),
 		&judged,
 	)
 	.await?;
@@ -1643,7 +1713,7 @@ async fn materialise_judged(
 		value,
 		PermissionPass::Computed,
 		snapshot,
-		Some(&record),
+		Some(view.as_deref().unwrap_or(&record)),
 		&judged,
 	)
 	.await?;
@@ -1661,9 +1731,68 @@ pub(crate) async fn filter_fields_by_permission(
 	state: &FieldState,
 	value: &mut Value,
 ) -> Result<(), ControlFlow> {
-	filter_fields_by_permission_inner(ctx, state, value, PermissionPass::All, None, None, &[])
-		.await?;
+	let view = guard_view(ctx, state, value).await?;
+	filter_fields_by_permission_inner(
+		ctx,
+		state,
+		value,
+		PermissionPass::All,
+		None,
+		view.as_deref(),
+		&[],
+	)
+	.await?;
 	Ok(())
+}
+
+/// `record` as the conditional field guards of `state` judge it: a copy with
+/// the computed fields they read, and those those read in turn, derived onto
+/// it in dependency order in the frame a permission predicate derives them in
+/// — reads are not permission-checked, writes are refused, and each body runs
+/// under its field's `AUTH LIMIT` — or `None` where no guard reads a computed
+/// field and the guards judge `record` itself.
+///
+/// Derived as the caller, a body reading a record the caller may not select
+/// reads `NONE`, which satisfies a guard written to deny; the guard reads what
+/// its body would read written there in its place, as a table's guard does
+/// ([`ComputedFieldGuard`](crate::exec::permission::ComputedFieldGuard)). One
+/// copy serves every guard of the record, so the guards reading a field read
+/// one derivation of it. The caller receives each computed field as the caller
+/// derives it, and `$value` stays the value the caller would receive.
+///
+/// The view is derived out of line ([`out_of_line`](crate::exec::vm::out_of_line))
+/// and answered boxed. Every caller awaits this once per record and holds the
+/// view across its passes, and the VM's row driver awaits those callers in
+/// place, so in an unoptimised build a derivation or a view held inline would
+/// grow the driver's frame by its whole size.
+async fn guard_view(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	record: &Value,
+) -> Result<Option<Box<Value>>, ControlFlow> {
+	let Some(reads) = state.guard_reads.as_deref() else {
+		return Ok(None);
+	};
+	if !matches!(record, Value::Object(_)) {
+		return Ok(None);
+	}
+	crate::exec::vm::out_of_line(|| derive_guard_view(ctx, reads, record)).await
+}
+
+/// [`guard_view`]'s copy of `record`, an object, with the computed fields
+/// `reads` reaches derived onto it, or `None` where they reach none.
+async fn derive_guard_view(
+	ctx: &ExecutionContext,
+	reads: &GuardReads,
+	record: &Value,
+) -> Result<Option<Box<Value>>, ControlFlow> {
+	let frame = ctx.with_perms_suppressed(true);
+	let Some(derivation) = reads.state(&frame).await? else {
+		return Ok(None);
+	};
+	let mut view = Box::new(record.clone());
+	compute_fields_for_value(&frame, derivation, &mut view, true).await?;
+	Ok(Some(view))
 }
 
 /// The body of [`filter_fields_by_permission`], restricted to one
@@ -1683,7 +1812,9 @@ pub(crate) async fn filter_fields_by_permission(
 /// passes the unreduced record: the reduced view is missing the fields the
 /// caller may not select, so a clause naming one of them reads it as `NONE`
 /// there and passes a field the clause was written to deny — the same reason
-/// the reduce kernel answers a stored field's clause against the record.
+/// the reduce kernel answers a stored field's clause against the record. Where
+/// a clause reads a computed field, it is the guards' view of that record
+/// ([`guard_view`]).
 async fn filter_fields_by_permission_inner(
 	ctx: &ExecutionContext,
 	state: &FieldState,
@@ -1853,6 +1984,7 @@ mod tests {
 			permission_field_deps: Arc::new(HashSet::new()),
 			permission_deps_complete: true,
 			derivations: None,
+			guard_reads: None,
 		}
 	}
 

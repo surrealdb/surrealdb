@@ -688,7 +688,8 @@ struct LayerColumn {
 ///
 /// A column is a `Single` field of the layer's shape; `*` names nothing. Its field frame is the
 /// `FieldFrame(Computed)` region at the same position among the layer's frames, and it is a key
-/// column when that frame is the key-part frame.
+/// column when that frame is the key-part frame. The frames after the columns' derive the computed
+/// fields the layer's guards read (`ProjectAttrs::judged`).
 fn layer_columns(ir: &Ir, layer: OpId) -> Option<Vec<LayerColumn>> {
 	let data = ir.op(layer)?;
 	let OpKind::Logical(LogOp::Project(attrs)) = &data.kind else {
@@ -710,7 +711,7 @@ fn layer_columns(ir: &Ir, layer: OpId) -> Option<Vec<LayerColumn>> {
 				.is_some_and(|held| held.kind == RegionKind::FieldFrame(FieldRole::Computed))
 		})
 		.collect();
-	if frames.len() != names.len() {
+	if frames.len().checked_sub(attrs.judged_regions()) != Some(names.len()) {
 		return None;
 	}
 	Some(

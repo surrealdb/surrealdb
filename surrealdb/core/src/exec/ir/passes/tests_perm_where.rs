@@ -302,6 +302,7 @@ fn guarded_layer(ir: &mut Ir, facts: &mut FactCache, verdict: bool) -> (OpId, Op
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	let (layer, delivered) =
 		create(&mut rw, at, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row[0]], 1);
@@ -392,6 +393,7 @@ async fn specialise_guards_matches_nothing_without_guards() {
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	create(&mut rw, at, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row[0]], 1);
 	let before = SmallVec::<[usize; 4]>::from_slice(&[

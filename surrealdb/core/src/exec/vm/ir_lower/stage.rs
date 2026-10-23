@@ -328,8 +328,7 @@ impl StageRun {
 		let mut layers = Vec::new();
 		if let ImageLayers::Stack(stack) = &stored.image_layers {
 			for layer in stack {
-				let columns: Vec<RegionId> =
-					held.by_ref().take(2 * layer.fields.regions()).collect();
+				let columns: Vec<RegionId> = held.by_ref().take(layer.regions()).collect();
 				layers.push(columns);
 			}
 		}
@@ -4583,6 +4582,7 @@ mod tests {
 				kind: None,
 			}])),
 			computed: vec![Strand::new("c")],
+			judged: None,
 		}
 	}
 
@@ -4726,6 +4726,7 @@ mod tests {
 				kind: None,
 			}])),
 			computed: Vec::new(),
+			judged: None,
 		}
 	}
 

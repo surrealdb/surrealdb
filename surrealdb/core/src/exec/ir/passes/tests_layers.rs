@@ -101,6 +101,7 @@ fn layer_over(
 		names: Vec::new(),
 		computed: Vec::new(),
 		sort_keys: Vec::new(),
+		judged: None,
 	};
 	let (layer, out) = create(rw, at, OpKind::Logical(LogOp::Project(Box::new(attrs))), &[row], 1);
 	for column in columns {

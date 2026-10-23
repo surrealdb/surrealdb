@@ -278,6 +278,7 @@ impl LogOp {
 				attrs.layer.hash(hasher);
 				attrs.omit.hash(hasher);
 				attrs.computed.hash(hasher);
+				attrs.judged.hash(hasher);
 			}
 			LogOp::Explain {
 				analyze,

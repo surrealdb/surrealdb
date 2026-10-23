@@ -316,6 +316,7 @@ fn fixture(tag: LogTag) -> LogOp {
 			names: Vec::new(),
 			computed: Vec::new(),
 			sort_keys: Vec::new(),
+			judged: None,
 		})),
 		LogTag::Fetch => LogOp::Fetch,
 		LogTag::Timeout => LogOp::Timeout,
@@ -2115,6 +2116,7 @@ fn rich_fixtures() -> Vec<LogOp> {
 			names: Vec::new(),
 			computed: vec![strand("c")],
 			sort_keys: Vec::new(),
+			judged: None,
 		})),
 		LogOp::Choose(Box::new(ChooseSpec {
 			granularity: ChooseGranularity::Morsel,
@@ -2658,6 +2660,7 @@ fn only_a_layer_names_computed_fields() {
 				names: Vec::new(),
 				computed,
 				sort_keys: Vec::new(),
+				judged: None,
 			}));
 			op_with_regions(rw, block, project, &[input])
 		});

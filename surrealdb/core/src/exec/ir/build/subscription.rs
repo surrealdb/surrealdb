@@ -55,19 +55,21 @@
 use surrealdb_strand::{Strand, TableName};
 
 use super::logical::{
-	columns_of, declared_computed, fields_shape, framed_clause, row_clause, unaliased_names,
+	ComputedReads, bind_derivations, columns_of, declared_computed, fields_shape, framed_clause,
+	judged_reads_of, row_clause, unaliased_names,
 };
 use crate::catalog::{CompiledSubscription, Permission, SubscriptionFields};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, IrScope};
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx};
+use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, SemanticCatalog};
 use crate::exec::ir::iface::region_kind::{ClauseRole, FieldRole, RegionKind};
 use crate::exec::ir::logical::ops::{
 	FieldShape, FieldsShape, ImageView, LogOp, SubscriberAdmission, SubscriberAttrs,
 	SubscriberLayer, SubscriberProjection,
 };
-use crate::exec::ir::logical::seam::{BindCx, invariant};
+use crate::exec::ir::logical::seam::{BindCx, ExprHost, invariant};
 use crate::exec::ir::logical::stages::{Derivation, derivations_of, view_of};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::{SUBSCRIBER_NAMES, UnitKind};
@@ -225,11 +227,14 @@ fn bind_body_of(cx: &mut BindCx<'_>, input: &SubscriptionInput<'_>) -> Result<()
 			"a subscription's field view is bound with the layers its table's fields call for",
 		));
 	}
-	let layers = input
-		.view
-		.iter()
-		.map(|(fields, schema)| subscriber_layer(fields, schema))
-		.collect::<Result<Vec<_>, _>>()?;
+	let mut layers = Vec::with_capacity(input.view.len());
+	let mut judged_bodies = Vec::with_capacity(input.view.len());
+	for (fields, schema) in input.view {
+		let (layer, bodies) =
+			subscriber_layer(cx.registry(), cx.catalog(), Some(input.table), fields, schema)?;
+		layers.push(layer);
+		judged_bodies.push(bodies);
+	}
 
 	let cond = input
 		.compiled
@@ -317,8 +322,8 @@ fn bind_body_of(cx: &mut BindCx<'_>, input: &SubscriptionInput<'_>) -> Result<()
 			framed_clause(cx, op, kind, Some(&eval), &derivation.body)?;
 		}
 	}
-	for (fields, _) in input.view {
-		bind_layer(cx, op, fields)?;
+	for ((fields, _), bodies) in input.view.iter().zip(&judged_bodies) {
+		bind_layer(cx, op, fields, bodies)?;
 	}
 	if let Some(cond) = &cond {
 		row_clause(cx, op, RegionKind::Clause(ClauseRole::Where), cond)?;
@@ -333,19 +338,35 @@ fn bind_body_of(cx: &mut BindCx<'_>, input: &SubscriptionInput<'_>) -> Result<()
 	cx.yield_logical(&[])
 }
 
-/// One resolver layer of the field view, whose columns are `fields` over rows of `schema`. It
-/// carries the fields `schema` declares `COMPUTED` ([`declared_computed`]), the same set a
-/// statement's layer carries, so subscriber columns are judged computed exactly where statement
-/// columns are.
+/// One resolver layer of the field view, whose columns are `fields` over rows of `schema`, the
+/// records of `table`, with the bodies of the computed fields its guards read. It carries the
+/// fields `schema` declares `COMPUTED` ([`declared_computed`]) and the computed fields its guards
+/// read ([`judged_reads_of`]), as a statement's layer carries them, so subscriber columns are
+/// judged computed exactly where statement columns are, and over the same copy.
 pub(super) fn subscriber_layer(
+	registry: &FunctionRegistry,
+	catalog: &dyn SemanticCatalog,
+	table: Option<&TableName>,
 	fields: &LogicalFields,
 	schema: &Schema,
-) -> Result<SubscriberLayer, IrError> {
+) -> Result<(SubscriberLayer, Vec<Derivation>), IrError> {
 	match fields_shape(fields) {
-		shape @ FieldsShape::Select(_) => Ok(SubscriberLayer {
-			fields: shape,
-			computed: declared_computed(schema),
-		}),
+		shape @ FieldsShape::Select(_) => {
+			let (judged, bodies) = match judged_reads_of(registry, catalog, table, schema, fields)?
+			{
+				Some(ComputedReads {
+					shape,
+					bodies,
+				}) => (Some(shape), bodies),
+				None => (None, Vec::new()),
+			};
+			let layer = SubscriberLayer {
+				fields: shape,
+				computed: declared_computed(schema),
+				judged,
+			};
+			Ok((layer, bodies))
+		}
 		FieldsShape::Value {
 			..
 		} => Err(invariant("a layer of a value selection")),
@@ -353,11 +374,13 @@ pub(super) fn subscriber_layer(
 }
 
 /// The regions of one resolver layer of the field view: the read of the field each column lands
-/// under, for every column, then the expression of every column in its frame.
+/// under, for every column, then the expression of every column in its frame, then the body of
+/// each computed field its guards read, `bodies` ([`bind_derivations`]).
 pub(super) fn bind_layer(
 	cx: &mut BindCx<'_>,
 	op: crate::exec::ir::iface::ids::OpId,
 	fields: &LogicalFields,
+	bodies: &[Derivation],
 ) -> Result<(), IrError> {
 	let columns = columns_of(fields);
 	for column in &columns {
@@ -378,7 +401,7 @@ pub(super) fn bind_layer(
 			column.expr,
 		)?;
 	}
-	Ok(())
+	bind_derivations(cx, op, bodies)
 }
 
 /// One `Clause(Projection)` region for each column of `fields`, in order.
@@ -480,7 +503,14 @@ mod tests {
 		});
 		let schema =
 			Schema::closed(vec![FieldSchema::new(FieldPath::field("s"), Kind::Int), computed]);
-		let layer = subscriber_layer(&LogicalFields::all(), &schema).expect("a layer binds");
+		let (layer, _) = subscriber_layer(
+			&FunctionRegistry::with_builtins(),
+			&TableAnswer(|| CatalogAnswer::Unknown),
+			None,
+			&LogicalFields::all(),
+			&schema,
+		)
+		.expect("a layer binds");
 		assert_eq!(layer.computed, vec![Strand::new("c")]);
 		assert_eq!(layer.fields, fields_shape(&LogicalFields::all()));
 	}

@@ -3005,7 +3005,8 @@ text_struct!(ProjectAttrs {
 	omit: u16,
 	names: Vec<OutputPath>,
 	computed: Vec<Strand>,
-	sort_keys: Vec<(u16, u16)>
+	sort_keys: Vec<(u16, u16)>,
+	judged: Option<Box<ComputedReadsShape>>
 });
 text_struct!(LetAttrs { name: Strand, binding: LetBinding, ty: Option<Kind> });
 text_struct!(AccessAttrs { ac: Strand, base: Option<Base>, op: AccessOp });
@@ -3034,7 +3035,11 @@ text_struct!(SubscriberAttrs {
 	cond: bool,
 	fetch: u16
 });
-text_struct!(SubscriberLayer { fields: FieldsShape, computed: Vec<Strand> });
+text_struct!(SubscriberLayer {
+	fields: FieldsShape,
+	computed: Vec<Strand>,
+	judged: Option<Box<ComputedReadsShape>>
+});
 text_struct!(ShowAttrs { table: Option<TableName>, since: ShowSince, limit: Option<u32> });
 text_struct!(ChooseSpec {
 	granularity: ChooseGranularity,
