@@ -1389,27 +1389,27 @@ version = "0.9.117"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry]]
-version = "0.31.0"
+version = "0.32.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-http]]
-version = "0.31.0"
+version = "0.32.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-otlp]]
-version = "0.31.1"
+version = "0.32.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-prometheus-text-exporter]]
-version = "0.2.1"
+version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry-proto]]
-version = "0.31.0"
+version = "0.32.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry_sdk]]
-version = "0.31.0"
+version = "0.32.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ort]]
@@ -2168,6 +2168,10 @@ criteria = "safe-to-deploy"
 version = "0.14.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.tonic-types]]
+version = "0.14.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.tower-layer]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
@@ -2181,7 +2185,7 @@ version = "0.2.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]
-version = "0.32.1"
+version = "0.33.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-serde]]
