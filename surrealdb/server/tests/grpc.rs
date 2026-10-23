@@ -23,7 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use surrealdb::Surreal;
-use surrealdb::engine::remote::grpc::{Client, Grpc};
+use surrealdb::engine::remote::grpc::{Client, Grpc, Grpcs};
+use surrealdb::opt::Config;
 use surrealdb::opt::auth::Root;
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::kvs::Datastore;
@@ -59,10 +60,26 @@ type EncodingLog = Arc<std::sync::Mutex<Vec<(String, String)>>>;
 
 impl TestServer {
 	async fn start() -> Self {
-		Self::start_with(None).await
+		Self::start_with(None, None).await
 	}
 
-	async fn start_with(record: Option<EncodingLog>) -> Self {
+	/// Starts a server that serves over TLS with `certified`, as
+	/// `surreal start --web-crt --web-key` does.
+	async fn start_tls(certified: &rcgen::CertifiedKey<rcgen::KeyPair>) -> Self {
+		surrealdb_server::tls::install_default_crypto_provider().expect("crypto provider");
+		let config = axum_server::tls_rustls::RustlsConfig::from_pem(
+			certified.cert.pem().into_bytes(),
+			certified.signing_key.serialize_pem().into_bytes(),
+		)
+		.await
+		.expect("TLS configuration");
+		Self::start_with(None, Some(config)).await
+	}
+
+	async fn start_with(
+		record: Option<EncodingLog>,
+		tls: Option<axum_server::tls_rustls::RustlsConfig>,
+	) -> Self {
 		let (send, recv) = surrealdb_core::channel::bounded(128);
 		let datastore = Datastore::builder()
 			.with_capabilities(Capabilities::all())
@@ -108,12 +125,17 @@ impl TestServer {
 		}
 		tokio::spawn({
 			let handle = handle.clone();
+			let address = "127.0.0.1:0".parse().expect("address");
+			let service = app.into_make_service_with_connect_info::<SocketAddr>();
 			async move {
-				axum_server::bind("127.0.0.1:0".parse().expect("address"))
-					.handle(handle)
-					.serve(app.into_make_service_with_connect_info::<SocketAddr>())
-					.await
-					.ok();
+				match tls {
+					Some(config) => axum_server::bind_rustls(address, config)
+						.handle(handle)
+						.serve(service)
+						.await
+						.ok(),
+					None => axum_server::bind(address).handle(handle).serve(service).await.ok(),
+				};
 			}
 		});
 		let address = handle.listening().await.expect("the server to bind");
@@ -129,7 +151,7 @@ impl TestServer {
 	/// what either peer was configured to prefer.
 	async fn start_recording() -> (Self, Arc<std::sync::Mutex<Vec<(String, String)>>>) {
 		let seen: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::default();
-		let server = Self::start_with(Some(Arc::clone(&seen))).await;
+		let server = Self::start_with(Some(Arc::clone(&seen)), None).await;
 		(server, seen)
 	}
 
@@ -1240,4 +1262,81 @@ async fn an_unbounded_thrown_message_still_arrives_as_an_error() {
 		!rendered.contains("h2 protocol error"),
 		"an oversized trailer costs the caller the error itself: {rendered}"
 	);
+}
+
+/// A self-signed certificate for `localhost`, as a private certificate
+/// authority would issue one: no public root trusts it.
+fn localhost_certificate() -> rcgen::CertifiedKey<rcgen::KeyPair> {
+	rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).expect("certificate")
+}
+
+/// A client configuration that trusts `certificate` and nothing else.
+fn trusting(certificate: &rcgen::Certificate) -> rustls::ClientConfig {
+	// `ClientConfig::builder` needs a process-wide provider, and a test that
+	// only builds a configuration never starts a TLS server to install one.
+	surrealdb_server::tls::install_default_crypto_provider().expect("crypto provider");
+	let mut roots = rustls::RootCertStore::empty();
+	roots.add(certificate.der().clone()).expect("root certificate");
+	rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth()
+}
+
+/// `grpcs://` with a caller's `rustls` configuration completes the handshake
+/// against a certificate only that configuration trusts, and the connection
+/// then serves requests like any other.
+#[tokio::test]
+async fn grpcs_connects_with_the_callers_rustls_configuration() {
+	let certified = localhost_certificate();
+	let server = TestServer::start_tls(&certified).await;
+
+	let config = Config::new().rustls(trusting(&certified.cert));
+	let db = Surreal::new::<Grpcs>((format!("localhost:{}", server.address.port()), config))
+		.await
+		.expect("connect over grpcs");
+	db.signin(Root {
+		username: USER.to_string(),
+		password: PASS.to_string(),
+	})
+	.await
+	.expect("signin");
+	db.use_ns("test").use_db("test").await.expect("use");
+	let answer: Option<i64> = db.query("RETURN 42").await.expect("query").take(0).expect("take");
+	assert_eq!(answer, Some(42));
+}
+
+/// Without the caller's configuration the connection uses the public roots,
+/// which do not trust a private authority, so it fails rather than connecting.
+#[tokio::test]
+async fn grpcs_without_a_configuration_does_not_trust_a_private_authority() {
+	let certified = localhost_certificate();
+	let server = TestServer::start_tls(&certified).await;
+
+	let result = Surreal::new::<Grpcs>(format!("localhost:{}", server.address.port())).await;
+	assert!(result.is_err(), "a private certificate must not verify against the public roots");
+}
+
+/// A configuration that does not trust the server's certificate fails the
+/// handshake: the caller's configuration is the one verifying the server.
+#[tokio::test]
+async fn grpcs_refuses_a_server_the_callers_configuration_does_not_trust() {
+	let certified = localhost_certificate();
+	let server = TestServer::start_tls(&certified).await;
+	let other = localhost_certificate();
+
+	let config = Config::new().rustls(trusting(&other.cert));
+	let result =
+		Surreal::new::<Grpcs>((format!("localhost:{}", server.address.port()), config)).await;
+	assert!(result.is_err(), "a certificate the configuration does not trust must be refused");
+}
+
+/// A TLS configuration on a plaintext endpoint is refused rather than ignored.
+#[tokio::test]
+async fn a_tls_configuration_on_plaintext_grpc_is_refused() {
+	let certified = localhost_certificate();
+	let server = TestServer::start().await;
+
+	let config = Config::new().rustls(trusting(&certified.cert));
+	let error = Surreal::new::<Grpc>((server.address.to_string(), config))
+		.await
+		.expect_err("a TLS configuration on grpc:// must be refused");
+	assert!(error.to_string().contains("grpcs://"), "{error}");
 }

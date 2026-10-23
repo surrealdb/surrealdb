@@ -5398,6 +5398,7 @@ dependencies = [
  "surrealdb-types",
  "surrealdb-types-derive",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "tokio-tungstenite-wasm",
  "tokio-util",

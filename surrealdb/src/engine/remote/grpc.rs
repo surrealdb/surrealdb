@@ -40,6 +40,9 @@ use crate::types::{
 };
 use crate::{Error, ExtraFeatures, SessionId};
 
+#[cfg(feature = "rustls")]
+mod tls;
+
 type EngineResult<T> = crate::Result<T>;
 
 /// The gRPC scheme used to connect to `grpc://` endpoints.
@@ -103,42 +106,13 @@ pub(crate) async fn connect_engine(
 		}
 	};
 
-	#[cfg_attr(not(feature = "rustls"), expect(unused_mut))]
-	let mut builder = tonic::transport::Endpoint::from_shared(dst)
+	let builder = tonic::transport::Endpoint::from_shared(dst)
 		.map_err(|e| Error::configuration(e.to_string(), None))?;
-
-	// A caller-supplied TLS configuration cannot be honoured here: tonic builds
-	// its own client configuration and offers no way to adopt a `rustls`
-	// one, so a private certificate authority, a client certificate or a custom
-	// verifier would all be silently ignored -- and a connection the caller
-	// expected to be pinned would instead trust the public roots. Refusing is
-	// the only answer that does not weaken what was asked for.
-	#[cfg(any(feature = "native-tls", feature = "rustls"))]
-	if address.config.tls_config.is_some() {
-		return Err(Error::configuration(
-			"A custom TLS configuration is not supported over `grpcs://`; \
-			 the connection would fall back to the public roots instead"
-				.to_string(),
-			None,
-		));
-	}
-
-	if is_tls {
-		#[cfg(feature = "rustls")]
-		{
-			builder = builder
-				.tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
-				.map_err(|e| Error::configuration(e.to_string(), None))?;
+	let channel = connect_channel(builder, address, is_tls).await.map_err(|e| match e {
+		ChannelError::Configuration(message) => Error::configuration(message, None),
+		ChannelError::Connection(message) => {
+			Error::connection(message, crate::types::ConnectionError::ConnectionFailed)
 		}
-		#[cfg(not(feature = "rustls"))]
-		return Err(Error::configuration(
-			"Connecting over `grpcs://` requires the `rustls` feature".to_string(),
-			None,
-		));
-	}
-
-	let channel = builder.connect().await.map_err(|e| {
-		Error::connection(e.to_string(), crate::types::ConnectionError::ConnectionFailed)
 	})?;
 	// Advertise what this client can decode, which is what lets the server
 	// compress its responses -- the direction an export travels.
@@ -205,6 +179,113 @@ pub(crate) async fn connect_engine(
 	});
 	tokio::spawn(session_task(Arc::clone(&engine), session_rx, stopped_tx));
 	Ok((engine, features))
+}
+
+/// Why a channel could not be opened: the endpoint was configured in a way this
+/// engine cannot honour, or the connection itself failed.
+enum ChannelError {
+	Configuration(String),
+	Connection(String),
+}
+
+/// A transport error with its causes, which carry the detail -- a refused
+/// certificate, an unreachable host -- that tonic's own message leaves out.
+fn connection_error(error: &tonic::transport::Error) -> ChannelError {
+	let mut message = error.to_string();
+	let mut source = std::error::Error::source(error);
+	while let Some(cause) = source {
+		message.push_str(": ");
+		message.push_str(&cause.to_string());
+		source = cause.source();
+	}
+	ChannelError::Connection(message)
+}
+
+/// Opens the HTTP/2 channel to `builder`'s endpoint.
+///
+/// Over `grpcs://` the TLS configuration is the caller's when they set one
+/// with `Config::rustls`, and otherwise tonic's own over the public web PKI
+/// roots. A caller's configuration is never replaced by the public roots: one
+/// this engine cannot use -- a `native-tls` connector, or any configuration on
+/// a plaintext `grpc://` endpoint -- fails the connection instead, so a
+/// connection expected to be pinned to a private authority or to present a
+/// client certificate is never opened without it.
+async fn connect_channel(
+	builder: tonic::transport::Endpoint,
+	address: &crate::opt::Endpoint,
+	is_tls: bool,
+) -> Result<tonic::transport::Channel, ChannelError> {
+	// Only a TLS feature gives an endpoint a TLS configuration to read.
+	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+	let _ = address;
+	#[cfg(any(feature = "native-tls", feature = "rustls"))]
+	if let Some(tls) = &address.config.tls_config {
+		if !is_tls {
+			return Err(ChannelError::Configuration(
+				"A TLS configuration was given for a plaintext `grpc://` endpoint; connect over \
+				 `grpcs://` to use it"
+					.to_string(),
+			));
+		}
+		return match tls {
+			#[cfg(feature = "rustls")]
+			crate::opt::Tls::Rust(config) => connect_with_rustls(builder, address, config.clone()).await,
+			#[cfg(feature = "native-tls")]
+			crate::opt::Tls::Native(_) => Err(ChannelError::Configuration(
+				"A `native-tls` configuration is not supported over `grpcs://`; configure the \
+				 connection with `Config::rustls` instead"
+					.to_string(),
+			)),
+		};
+	}
+
+	#[cfg_attr(not(feature = "rustls"), expect(unused_mut))]
+	let mut builder = builder;
+	if is_tls {
+		#[cfg(feature = "rustls")]
+		{
+			builder = builder
+				.tls_config(tonic::transport::ClientTlsConfig::new().with_webpki_roots())
+				.map_err(|e| ChannelError::Configuration(e.to_string()))?;
+		}
+		#[cfg(not(feature = "rustls"))]
+		return Err(ChannelError::Configuration(
+			"Connecting over `grpcs://` requires the `rustls` feature".to_string(),
+		));
+	}
+	builder.connect().await.map_err(|e| connection_error(&e))
+}
+
+/// Opens the channel over TLS performed with the caller's `rustls`
+/// configuration.
+///
+/// tonic wraps a connection in TLS itself whenever the endpoint's scheme is
+/// `https`, and refuses one it has no TLS configuration for, so the channel
+/// dials the endpoint as `http` and the connector supplies the TLS. The
+/// requests still carry the endpoint's `https` origin.
+#[cfg(feature = "rustls")]
+async fn connect_with_rustls(
+	builder: tonic::transport::Endpoint,
+	address: &crate::opt::Endpoint,
+	config: rustls::ClientConfig,
+) -> Result<tonic::transport::Channel, ChannelError> {
+	let host = address.url.host_str().ok_or_else(|| {
+		ChannelError::Configuration(format!("Invalid gRPC endpoint: {}", address.url))
+	})?;
+	let host = host.trim_start_matches('[').trim_end_matches(']');
+	let server_name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| {
+		ChannelError::Configuration(format!("Invalid TLS server name `{host}`: {e}"))
+	})?;
+	let origin = builder.uri().clone();
+	let mut parts = origin.clone().into_parts();
+	parts.scheme = Some(tonic::codegen::http::uri::Scheme::HTTP);
+	let dial = tonic::codegen::http::Uri::from_parts(parts)
+		.map_err(|e| ChannelError::Configuration(e.to_string()))?;
+	tonic::transport::Endpoint::from(dial)
+		.origin(origin)
+		.connect_with_connector(tls::RustlsConnector::new(config, server_name))
+		.await
+		.map_err(|e| connection_error(&e))
 }
 
 /// Translates the server's reported capabilities into what the SDK gates on.

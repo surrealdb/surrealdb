@@ -27,6 +27,7 @@ protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 # Native only: tonic does not build for wasm32.
 protocol-grpc = [
     "dep:tonic",
+    "dep:hyper-util",
     "tonic?/gzip",
     "tonic?/zstd",
     "dep:surrealdb-protocol",
@@ -53,6 +54,7 @@ native-tls = [
 ]
 rustls = [
     "dep:rustls",
+    "dep:tokio-rustls",
     "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
     "tonic?/tls-webpki-roots",
@@ -158,6 +160,10 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
 tonic = { workspace = true, optional = true }
+# A `grpcs://` connection made with a caller's own `rustls` configuration does
+# its TLS handshake outside tonic, which cannot adopt one; tonic depends on both.
+hyper-util = { version = "0.1.20", default-features = false, features = ["tokio"], optional = true }
+tokio-rustls = { version = "0.26.4", default-features = false, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
