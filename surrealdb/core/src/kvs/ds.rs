@@ -65,8 +65,8 @@ use crate::dbs::executor::CarryBound;
 use crate::dbs::node::{Node, NodeRelease, Timestamp};
 use crate::dbs::{
 	Capabilities, Dispatch, DurableSession, Executor, MessageBroker, Options, QueryResult,
-	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, TopLevelStatement,
-	durable_session, restore_session,
+	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, StoredRpcSession,
+	TopLevelStatement, durable_session, restore_session,
 };
 use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
@@ -171,6 +171,10 @@ enum NodeCheck {
 }
 
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many transactions a durable RPC session create or delete spends before
+/// a conflicting concurrent writer is reported as an error.
+const RPC_SESSION_WRITE_ATTEMPTS: u32 = 3;
 
 /// How long [`Datastore::shutdown`] waits for the maintenance tasks to finish
 /// their in-flight pass before giving up on a clean stop.
@@ -361,6 +365,44 @@ fn archive_node_for_shutdown(
 			);
 			ShutdownNodeDeleteOutcome::Failed
 		}
+	}
+}
+
+/// How a conditional write to a durable RPC session ended.
+enum ConditionalWrite {
+	/// The write committed.
+	Committed,
+	/// The stored value did not meet the write's guard.
+	Superseded,
+	/// The transaction conflicted with a concurrent writer before the guard was
+	/// settled, so a fresh transaction re-evaluates it.
+	Conflicted(anyhow::Error),
+}
+
+/// Commits `txn` after the conditional write `write`, classifying how it ended.
+///
+/// Any failure cancels the transaction. An unmet guard and a transaction
+/// conflict are outcomes the caller decides on; every other failure is an
+/// error. On last-writer-wins backends (TiKV) the guard is validated at commit,
+/// so an unmet guard can surface from either the write or the commit.
+async fn commit_conditional_write(
+	txn: &Transaction,
+	write: Result<()>,
+) -> Result<ConditionalWrite> {
+	let result = match write {
+		Ok(()) => txn.commit().await,
+		Err(e) => Err(e),
+	};
+	let Err(e) = result else {
+		return Ok(ConditionalWrite::Committed);
+	};
+	let _ = txn.cancel().await;
+	if super::is_conditional_write_conflict(&e) {
+		Ok(ConditionalWrite::Superseded)
+	} else if is_retryable_transaction_conflict(&e) {
+		Ok(ConditionalWrite::Conflicted(e))
+	} else {
+		Err(e)
 	}
 }
 
@@ -3834,17 +3876,16 @@ impl Datastore {
 	/// Creates or replaces the durable copy of a client-attached RPC session,
 	/// expiring `ttl` from now (an unconditional upsert).
 	///
-	/// Session creation goes through [`create_rpc_session`](Self::create_rpc_session)
-	/// (insert-if-absent), local changes through
-	/// [`update_rpc_session`](Self::update_rpc_session) (update-if-present),
-	/// and cross-node reconciliation through
-	/// [`load_rpc_session`](Self::load_rpc_session), so none resurrects or
-	/// duplicates a session across nodes. This blind upsert is retained as a
-	/// primitive for callers that own the id exclusively (and for test setup).
+	/// Nothing on the request path uses this: a session is created by
+	/// [`create_rpc_session`](Self::create_rpc_session) (insert-if-absent) and
+	/// changed only by the conditional writes
+	/// [`replace_rpc_session`](Self::replace_rpc_session) and
+	/// [`refresh_rpc_session`](Self::refresh_rpc_session), so no node resurrects
+	/// or clobbers a session another node changed. This blind upsert is a
+	/// primitive for callers that own the id exclusively, and for test setup.
 	///
-	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
-	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
-	/// still removes one.
+	/// Runs through the bookkeeping transaction, so a store open read-only still
+	/// serves attached sessions (see [`Self::bookkeeping_transaction`]).
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -3869,24 +3910,23 @@ impl Datastore {
 		let key = SessionKey {
 			id,
 		};
-		let txn = self.transaction(Write).await?;
+		let txn = self.bookkeeping_transaction().await?;
 		run!(txn, txn.set_key(&key, &value).await)
 	}
 
-	/// Creates the durable copy of a client-attached RPC session, but only if
-	/// one does not already exist. Returns `true` if it created the entry,
-	/// `false` if a session with this id already exists.
+	/// Creates the durable copy of a client-attached RPC session, expiring `ttl`
+	/// from now, but only if no live session with this id is stored. Returns
+	/// the stored copy, or `None` if a live session with this id exists.
 	///
-	/// Uses a conditional insert (`put_compare_key` with no expected value),
-	/// which is atomic even on last-writer-wins backends (TiKV) — a blind
-	/// `set` is not — so two concurrent `attach`es for the same id on
-	/// different nodes cannot both create it: one wins and the other is
-	/// reported as an existing session, letting `attach` return
-	/// `session_exists` instead of silently overwriting.
+	/// An expired entry the purge task has not yet removed does not hold the
+	/// id: it is replaced. The write is conditional on the entry read — absent
+	/// (`put_compare_key` with no expected value) or that expired value — which
+	/// is atomic even on last-writer-wins backends (TiKV) where a blind `set`
+	/// is not, so two concurrent creates for one id on different nodes cannot
+	/// both succeed: one wins and the other reports the session as existing.
 	///
-	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
-	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
-	/// still removes one.
+	/// Runs through the bookkeeping transaction, so a store open read-only still
+	/// serves attached sessions (see [`Self::bookkeeping_transaction`]).
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -3901,130 +3941,55 @@ impl Datastore {
 		id: Uuid,
 		session: &Session,
 		ttl: Duration,
-	) -> Result<bool> {
+	) -> Result<Option<StoredRpcSession>> {
 		trace!(target: TARGET, id = %id, "Creating durable RPC session");
 		let key = SessionKey {
 			id,
 		};
-		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
-		let value = durable_session(session, expires_at);
-		let txn = self.transaction(Write).await?;
-		// `put_compare_key(.., None)` writes only if the key is absent.
-		match txn.put_compare_key(&key, &value, None).await {
-			Ok(()) => match txn.commit().await {
-				Ok(()) => Ok(true),
-				// Cancel after any failed commit (a conflict or otherwise), so
-				// the transaction is rolled back consistently with the `run!`
-				// macro; only the error classification differs.
-				Err(e) if super::is_conditional_write_conflict(&e) => {
-					let _ = txn.cancel().await;
-					Ok(false)
-				}
-				Err(e) => {
-					let _ = txn.cancel().await;
-					Err(e)
-				}
-			},
-			Err(e) => {
-				let _ = txn.cancel().await;
-				if super::is_conditional_write_conflict(&e) {
-					Ok(false)
-				} else {
-					Err(e)
-				}
+		let mut attempt = 1;
+		loop {
+			let now = self.clock_now().value;
+			let txn = self.bookkeeping_transaction().await?;
+			let current = catch!(txn, txn.get_key(&key, None).await);
+			if current.as_ref().is_some_and(|current| current.expires_at > now) {
+				catch!(txn, txn.cancel().await);
+				return Ok(None);
 			}
+			let value = durable_session(session, now + ttl.as_millis() as u64);
+			let write = txn.put_compare_key(&key, &value, current.as_ref()).await;
+			let lost = match commit_conditional_write(&txn, write).await? {
+				ConditionalWrite::Committed => return Ok(Some(StoredRpcSession::new(value))),
+				// The entry changed after it was read, and neither that nor a
+				// conflict decides whether the id is taken now, so both are
+				// re-evaluated in a fresh transaction.
+				ConditionalWrite::Superseded => {
+					anyhow::Error::new(super::Error::TransactionConditionNotMet)
+				}
+				ConditionalWrite::Conflicted(e) => e,
+			};
+			if attempt == RPC_SESSION_WRITE_ATTEMPTS {
+				return Err(lost);
+			}
+			attempt += 1;
 		}
 	}
 
-	/// Refreshes the durable copy of an *existing* RPC session with the given
-	/// value, expiring `ttl` from now, **without recreating it** if it is gone.
-	///
-	/// Returns `true` if the entry was present and updated, `false` if it does
-	/// not exist (or was changed on another node). Uses a conditional
-	/// write (`put_compare_key` guarded by the value just read), so it is
-	/// atomic on last-writer-wins backends (TiKV): a session deleted elsewhere
-	/// between the read and the write is neither resurrected nor clobbered — a
-	/// blind `set` would be last-writer-wins and could resurrect it. This is
-	/// the "push a local change to storage" path (a session-mutating method);
-	/// the authoritative *reload* path is
-	/// [`load_rpc_session`](Self::load_rpc_session).
-	///
-	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
-	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
-	/// still removes one.
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(
-			err,
-			level = "trace",
-			target = "surrealdb::core::kvs::ds",
-			skip(self, session)
-		)
-	)]
-	pub async fn update_rpc_session(
-		&self,
-		id: Uuid,
-		session: &Session,
-		ttl: Duration,
-	) -> Result<bool> {
-		trace!(target: TARGET, id = %id, "Updating durable RPC session");
-		let key = SessionKey {
-			id,
-		};
-		let txn = self.transaction(Write).await?;
-		// Read the current stored value to use as the conditional-write guard.
-		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
-			let _ = txn.cancel().await;
-			return Ok(false);
-		};
-		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
-		let value = durable_session(session, expires_at);
-		// Write only if the stored value is still the one we read, so a delete
-		// or change committed on another node in between wins (no resurrection,
-		// no clobber) instead of being overwritten by this blind write.
-		match txn.put_compare_key(&key, &value, Some(&current)).await {
-			Ok(()) => match txn.commit().await {
-				Ok(()) => Ok(true),
-				// Cancel after any failed commit (a conflict or otherwise), so
-				// the transaction is rolled back consistently with the `run!`
-				// macro; only the error classification differs.
-				Err(e) if super::is_conditional_write_conflict(&e) => {
-					let _ = txn.cancel().await;
-					Ok(false)
-				}
-				Err(e) => {
-					let _ = txn.cancel().await;
-					Err(e)
-				}
-			},
-			Err(e) => {
-				let _ = txn.cancel().await;
-				if super::is_conditional_write_conflict(&e) {
-					Ok(false)
-				} else {
-					Err(e)
-				}
-			}
-		}
-	}
-
-	/// Loads the current durable copy of a client-attached RPC session — the
-	/// authoritative cross-node state — returning the restored session and its
-	/// absolute expiry (ms since the UNIX epoch), or `None` if it is gone or
-	/// expired.
+	/// Loads the stored copy of a client-attached RPC session — the
+	/// authoritative state every node serves the session from — returning the
+	/// restored session with the stored copy it came from, or `None` if the
+	/// session is gone or expired.
 	///
 	/// This is a pure read plus lazy expiry: an entry past its `expires_at` is
 	/// deleted and reported as a miss, but a live entry is returned **without**
-	/// being rewritten. It never extends a session's life, so it is safe to
-	/// call before the caller is authorized — both when `get_session`
-	/// rehydrates an evicted session and when the transport reconciles a
-	/// cached session against storage before dispatch. The TTL is slid only
-	/// after authorization, by [`update_rpc_session`](Self::update_rpc_session).
+	/// being rewritten. It never extends a session's life, so it is safe to call
+	/// before the caller is authorized. The TTL is slid only after
+	/// authorization, by [`refresh_rpc_session`](Self::refresh_rpc_session) or
+	/// [`replace_rpc_session`](Self::replace_rpc_session).
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
 	)]
-	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, u64)>> {
+	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, StoredRpcSession)>> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %id, "Loading durable RPC session");
 		let key = SessionKey {
@@ -4044,57 +4009,120 @@ impl Datastore {
 		// Lazily delete an expired entry with a conditional delete guarded by
 		// the value we read, so a refresh committed on another node between the
 		// read and the delete is not clobbered (a blind `clr` is
-		// last-writer-wins on TiKV). On a condition conflict the entry changed
-		// — leave it and report a miss for this request; it rehydrates fresh on
-		// the next one.
+		// last-writer-wins on TiKV). When the delete loses to a concurrent
+		// writer the entry is left in place, and this request still reports the
+		// miss it read: the next one reads whatever that writer committed.
 		if durable.expires_at <= now {
 			trace!(target: TARGET, id = %id, "Durable RPC session has expired");
-			let txn = self.transaction(Write).await?;
-			match txn.del_compare_key(&key, Some(&durable)).await {
-				Ok(()) => match txn.commit().await {
-					Ok(()) => {}
-					Err(e) if super::is_conditional_write_conflict(&e) => {
-						let _ = txn.cancel().await;
-					}
-					Err(e) => {
-						let _ = txn.cancel().await;
-						return Err(e);
-					}
-				},
-				Err(e) => {
-					let _ = txn.cancel().await;
-					if !super::is_conditional_write_conflict(&e) {
-						return Err(e);
-					}
-				}
+			let txn = self.bookkeeping_transaction().await?;
+			let write = txn.del_compare_key(&key, Some(&durable)).await;
+			if let ConditionalWrite::Conflicted(e) = commit_conditional_write(&txn, write).await? {
+				trace!(target: TARGET, id = %id, "Expired RPC session changed concurrently: {e}");
 			}
 			return Ok(None);
 		}
-		// Restore the in-memory session without touching the durable copy,
-		// handing back the stored expiry so the caller can enforce the TTL.
-		let expires_at = durable.expires_at;
-		restore_session(durable).map(|session| Some((session, expires_at)))
+		let session = restore_session(durable.clone())?;
+		Ok(Some((session, StoredRpcSession::new(durable))))
 	}
 
-	/// Deletes the durable copy of a client-attached RPC session, when it is
-	/// still the value being torn down.
+	/// Replaces the stored copy of a client-attached RPC session with
+	/// `session`, expiring `ttl` from now — but only while the stored copy is
+	/// still `expected`. Returns the new stored copy, or `None` if the stored
+	/// copy is no longer `expected`: the session was changed, removed, or
+	/// expired since `expected` was read.
 	///
-	/// Run on detach/teardown so the session cannot be rehydrated. It reads the
-	/// current value and deletes only that (`del_compare_key`), rather than
-	/// clearing the key blindly: a blind `clr` is last-writer-wins on TiKV, so
-	/// a slow detach could otherwise delete a *newer* session that another node
-	/// re-attached under the same id after the old one was removed. An entry
+	/// The write is conditional (`put_compare_key` guarded by `expected`), so a
+	/// change committed on another node after `expected` was read is never
+	/// overwritten, and a session removed elsewhere is never recreated. On
+	/// `None` the caller reloads the session to learn which of those happened.
+	///
+	/// Runs through the bookkeeping transaction, so a store open read-only still
+	/// serves attached sessions (see [`Self::bookkeeping_transaction`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all, fields(id = %id))
+	)]
+	pub async fn replace_rpc_session(
+		&self,
+		id: Uuid,
+		expected: &StoredRpcSession,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<Option<StoredRpcSession>> {
+		trace!(target: TARGET, id = %id, "Replacing durable RPC session");
+		let value = durable_session(session, self.clock_now().value + ttl.as_millis() as u64);
+		self.write_rpc_session(id, expected, value).await
+	}
+
+	/// Extends the stored copy of a client-attached RPC session to expire `ttl`
+	/// from now, leaving its contents as they are — but only while the stored
+	/// copy is still `expected`. Returns the new stored copy, or `None` if the
+	/// stored copy is no longer `expected`.
+	///
+	/// This is how an actively used session's idle TTL slides. It writes the
+	/// stored contents back rather than a node's copy of them, so extending a
+	/// session never carries a node's view of it over a change made elsewhere.
+	///
+	/// Runs through the bookkeeping transaction, so a store open read-only still
+	/// serves attached sessions (see [`Self::bookkeeping_transaction`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all, fields(id = %id))
+	)]
+	pub async fn refresh_rpc_session(
+		&self,
+		id: Uuid,
+		expected: &StoredRpcSession,
+		ttl: Duration,
+	) -> Result<Option<StoredRpcSession>> {
+		trace!(target: TARGET, id = %id, "Refreshing durable RPC session");
+		let value = DurableSession {
+			expires_at: self.clock_now().value + ttl.as_millis() as u64,
+			..expected.durable().clone()
+		};
+		self.write_rpc_session(id, expected, value).await
+	}
+
+	/// Writes `value` over the stored copy of session `id` while that copy is
+	/// still `expected`, the guard shared by
+	/// [`replace_rpc_session`](Self::replace_rpc_session) and
+	/// [`refresh_rpc_session`](Self::refresh_rpc_session).
+	///
+	/// A transaction conflict is reported like an unmet guard: both mean
+	/// another writer touched the entry, and the caller's reload settles what
+	/// it now holds.
+	async fn write_rpc_session(
+		&self,
+		id: Uuid,
+		expected: &StoredRpcSession,
+		value: DurableSession,
+	) -> Result<Option<StoredRpcSession>> {
+		let key = SessionKey {
+			id,
+		};
+		let txn = self.bookkeeping_transaction().await?;
+		let write = txn.put_compare_key(&key, &value, Some(expected.durable())).await;
+		Ok(match commit_conditional_write(&txn, write).await? {
+			ConditionalWrite::Committed => Some(StoredRpcSession::new(value)),
+			ConditionalWrite::Superseded | ConditionalWrite::Conflicted(_) => None,
+		})
+	}
+
+	/// Deletes the durable copy of a client-attached RPC session.
+	///
+	/// Run on detach/teardown so the session cannot be rehydrated. Each attempt
+	/// reads the current value and deletes only that (`del_compare_key`) rather
+	/// than clearing the key blindly, because a blind `clr` is last-writer-wins
+	/// on TiKV. When another node changes the session between the read and the
+	/// delete, the attempt is repeated against the new value: the teardown is
+	/// the client's explicit intent and outranks a concurrent change. An entry
 	/// already absent is a no-op.
 	///
-	/// A condition conflict — the stored value changed between the read and the
-	/// delete (a concurrent refresh/re-attach on another node) — is surfaced as
-	/// an **error**, not swallowed: the durable copy was *not* removed, so
-	/// reporting success would let [`RpcProtocol::forget_session`]/`detach`
-	/// claim the session was torn down while it remains rehydratable. The
-	/// caller (whose `del_session` removes the durable copy before local state)
-	/// then fails the teardown and can retry, keeping detach fail-closed. In
-	/// the supported single-node-per-session model such a conflict does not
-	/// arise (the owning node serializes the session's writes).
+	/// When every attempt loses to a concurrent writer the error is returned,
+	/// not swallowed: the durable copy was *not* removed, so reporting success
+	/// would tell a detaching client its session is gone while it remains
+	/// loadable. Callers fail the teardown on that error, keeping detach
+	/// fail-closed.
 	///
 	/// Runs through the bookkeeping transaction, so a read-only store still removes the durable
 	/// copy.
@@ -4108,28 +4136,66 @@ impl Datastore {
 		let key = SessionKey {
 			id,
 		};
-		let txn = self.bookkeeping_transaction().await?;
-		// Read the value we intend to remove; if it is already gone, done.
-		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
-			let _ = txn.cancel().await;
-			return Ok(());
-		};
-		// Delete only if the stored value is still the one we read. A conflict
-		// (value changed concurrently) means the delete did not happen, so it
-		// is surfaced as an error rather than reported as a successful teardown.
-		match txn.del_compare_key(&key, Some(&current)).await {
-			Ok(()) => match txn.commit().await {
-				Ok(()) => Ok(()),
-				Err(e) => {
-					let _ = txn.cancel().await;
-					Err(e)
-				}
-			},
-			Err(e) => {
+		let mut attempt = 1;
+		loop {
+			let txn = self.bookkeeping_transaction().await?;
+			// Read the value we intend to remove; if it is already gone, done.
+			let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
 				let _ = txn.cancel().await;
-				Err(e)
+				return Ok(());
+			};
+			let write = txn.del_compare_key(&key, Some(&current)).await;
+			let lost = match commit_conditional_write(&txn, write).await? {
+				ConditionalWrite::Committed => return Ok(()),
+				ConditionalWrite::Superseded => {
+					anyhow::Error::new(super::Error::TransactionConditionNotMet)
+				}
+				ConditionalWrite::Conflicted(e) => e,
+			};
+			if attempt == RPC_SESSION_WRITE_ATTEMPTS {
+				return Err(lost);
 			}
+			attempt += 1;
 		}
+	}
+
+	/// Reports, for each of `ids`, whether a live (stored and unexpired)
+	/// client-attached RPC session exists under it. A pure read: expired
+	/// entries are reported as gone but left for lazy expiry and the purge
+	/// task to remove.
+	///
+	/// An entry that cannot be decoded is reported as live, and does not fail
+	/// the others: it may have been written by a newer node during a rolling
+	/// upgrade, and this node cannot tell when it expires.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
+	pub async fn live_rpc_sessions(&self, ids: &[Uuid]) -> Result<Vec<bool>> {
+		let now = self.clock_now().value;
+		let keys: Vec<SessionKey> = ids
+			.iter()
+			.map(|&id| SessionKey {
+				id,
+			})
+			.collect();
+		let txn = self.transaction(Read).await?;
+		let stored = catch!(txn, txn.getm_raw(keys, None).await);
+		catch!(txn, txn.cancel().await);
+		Ok(stored
+			.into_iter()
+			.map(|bytes| {
+				bytes.is_some_and(|bytes| {
+					match <DurableSession as KVValue>::kv_decode_value(&bytes, ()) {
+						Ok(stored) => stored.expires_at > now,
+						Err(e) => {
+							warn!(target: TARGET, "Undecodable durable RPC session entry: {e}");
+							true
+						}
+					}
+				})
+			})
+			.collect())
 	}
 
 	/// Purges expired durable RPC sessions.
@@ -4137,9 +4203,13 @@ impl Datastore {
 	/// This function should be run periodically at a regular interval.
 	///
 	/// It uses a distributed task lease so only one node in the cluster
-	/// performs the purge per interval. Entries are scanned in batches, and
-	/// only entries whose expiry has passed are deleted; an entry that fails
-	/// to decode (for example one written by a newer node during a rolling
+	/// performs the purge per interval. A store open read-only refuses the
+	/// lease row, so there every node purges; the conditional deletes make
+	/// concurrent purges safe. The deletes run through the bookkeeping
+	/// transaction, so a read-only store, which still accepts attached
+	/// sessions, still purges them. Entries are scanned in batches, and only
+	/// entries whose expiry has passed are deleted; an entry that fails to
+	/// decode (for example one written by a newer node during a rolling
 	/// upgrade) is skipped, never deleted.
 	///
 	/// # Arguments
@@ -4151,17 +4221,19 @@ impl Datastore {
 	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting expired RPC session purge");
-		// Create a new lease handler
-		let lh = LeaseHandler::new(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::RpcSessionCleanup,
-			*interval * 2,
-		)?;
-		// If we don't get the lease, another node is handling this task
-		if !lh.has_lease().await? {
-			return Ok(());
+		if !self.is_read_only() {
+			// Create a new lease handler
+			let lh = LeaseHandler::new(
+				self.sequences.clone(),
+				self.id,
+				self.transaction_factory.clone(),
+				TaskLeaseType::RpcSessionCleanup,
+				*interval * 2,
+			)?;
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Purging expired RPC sessions");
@@ -4205,7 +4277,7 @@ impl Datastore {
 				if val.expires_at <= now {
 					let key = SessionKey::decode_key(k)?;
 					trace!(target: TARGET, id = %key.id, "Purging expired RPC session");
-					let txn = self.transaction(Write).await?;
+					let txn = self.bookkeeping_transaction().await?;
 					match txn.del_compare_key(&key, Some(&val)).await {
 						Ok(()) => match txn.commit().await {
 							Ok(()) => {}
@@ -6796,9 +6868,13 @@ impl Datastore {
 
 	/// A write transaction that a read-only store still opens.
 	///
-	/// For this node's own membership rows and for deleting a torn-down session's durable
-	/// copy, which must be written whatever the ledger says. Every other writer opens its
-	/// transaction through [`Self::transaction`], which a read-only store refuses.
+	/// For this node's own membership rows and for the durable copies of attached RPC
+	/// sessions (written, and purged once expired), which must be written whatever the
+	/// ledger says: they are a connection's state, not data the ledger's features govern,
+	/// and a store open read-only still serves its data over HTTP, which keeps every
+	/// attached session only in storage.
+	/// Every other writer opens its transaction through [`Self::transaction`], which a
+	/// read-only store refuses.
 	pub(crate) async fn bookkeeping_transaction(&self) -> Result<Transaction> {
 		self.transaction_factory.bookkeeping(self.sequences.clone()).await
 	}

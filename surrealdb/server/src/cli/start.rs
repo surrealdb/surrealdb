@@ -154,26 +154,24 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_TIKV_LOCK_CLEANUP_INTERVAL", long = "tikv-lock-cleanup-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "60s")]
 	tikv_lock_cleanup_interval: Duration,
-	#[arg(
-		help = "Whether to persist client-attached HTTP RPC sessions in the datastore so they survive server restarts and can be resumed on any cluster node. Intended for deployments that route a given session to one node at a time (sticky routing / one runtime per session); a session used concurrently from multiple nodes is best-effort. The durable copy contains the session's authentication state, stored unencrypted in the datastore",
-		help_heading = "Database"
-	)]
-	#[arg(env = "SURREAL_DURABLE_SESSIONS", long = "durable-sessions")]
+	// Accepted so deployments that still pass it keep starting: attached HTTP
+	// RPC sessions are always stored in the datastore, so it has no effect.
+	#[arg(env = "SURREAL_DURABLE_SESSIONS", long = "durable-sessions", hide = true)]
 	#[arg(default_value_t = false)]
 	durable_sessions: bool,
 	#[arg(
-		help = "How long a persisted RPC session survives without being used; each use refreshes the expiry",
+		help = "How long an attached HTTP RPC session survives without being used: it expires between one and one and a half times this long after its last request. Attached sessions are stored in the datastore, including their authentication state, so they survive restarts and any node can serve them",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_DURABLE_SESSION_TTL", long = "durable-session-ttl", value_parser = super::validator::duration)]
 	#[arg(default_value = "24h")]
 	durable_session_ttl: Duration,
 	#[arg(
-		help = "The interval at which expired persisted RPC sessions are purged (0 to disable)",
+		help = "The interval at which expired attached HTTP RPC sessions are purged from the datastore (0 to disable). An expired session is refused whether or not it has been purged",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_DURABLE_SESSION_GC_INTERVAL", long = "durable-session-gc-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "60s")]
+	#[arg(default_value = "1h")]
 	durable_session_gc_interval: Duration,
 	//
 	// Authentication
@@ -332,10 +330,7 @@ pub async fn init<
 ) -> Result<()> {
 	// Check the path is valid
 	composer.path_valid(&path)?;
-	// Persisted sessions must have a finite expiration
-	if durable_sessions && durable_session_ttl.is_zero() {
-		return Err(anyhow::anyhow!("The durable session TTL must be greater than zero"));
-	}
+	check_durable_session_ttl(durable_session_ttl)?;
 	// Clean the path
 	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {
@@ -376,6 +371,11 @@ pub async fn init<
 		0 => info!("Memory threshold is disabled; queries will not be refused on memory pressure"),
 		bytes => info!("Memory threshold is {bytes} bytes"),
 	}
+	if durable_sessions {
+		warn!(
+			"--durable-sessions is deprecated and has no effect: attached HTTP RPC sessions are always stored in the datastore"
+		);
+	}
 	// Configure the config
 	let Some(bind) = listen_addresses.first().copied() else {
 		return Err(anyhow::anyhow!("No listen address provided"));
@@ -393,7 +393,7 @@ pub async fn init<
 		engine,
 		crt,
 		key,
-		durable_session_ttl: durable_sessions.then_some(durable_session_ttl),
+		durable_session_ttl,
 		cookie_auth,
 	};
 	composer.check_config(&config).await?;
@@ -755,4 +755,27 @@ fn build_observability<C: ObservabilityProvider>(
 		observer: metrics_observer,
 	});
 	Ok((metrics_state, combined))
+}
+
+/// Refuse a `--durable-session-ttl` under one millisecond. Stored sessions must
+/// have a finite expiry, and expiries are stored in milliseconds, so a shorter
+/// TTL would expire every session at birth.
+fn check_durable_session_ttl(ttl: Duration) -> Result<()> {
+	if ttl < Duration::from_millis(1) {
+		return Err(anyhow::anyhow!("The durable session TTL must be at least one millisecond"));
+	}
+	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_durable_session_ttl_under_one_millisecond_is_refused() {
+		for ttl in [Duration::ZERO, Duration::from_nanos(1), Duration::from_micros(999)] {
+			assert!(check_durable_session_ttl(ttl).is_err(), "{ttl:?} must be refused");
+		}
+		check_durable_session_ttl(Duration::from_millis(1)).unwrap();
+	}
 }

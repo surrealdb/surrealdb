@@ -183,13 +183,16 @@ the ledger holds an unknown read-only compatible entry. It lasts for the life of
 the process.
 
 - Refused with `StoreReadOnly`: every write transaction (every statement that
-  writes, `LIVE SELECT` included), every maintenance job, and the creation and
-  refresh of durable RPC sessions.
+  writes, `LIVE SELECT` included) and every maintenance job.
 - Still written: this node's own membership row and its release record, so the
-  store keeps seeing the node as live, and the deletion of a durable session
-  when its session is torn down, so that a torn-down session cannot be revived.
-- Not started: every maintenance task except the node membership refresh. A
-  session that expired is still refused when it is loaded.
+  store keeps seeing the node as live, and the durable copies of attached RPC
+  sessions. An HTTP SDK attaches a session when it connects, and an attached
+  session lives only in storage, so without them an HTTP SDK could not read the
+  store. A torn-down session's copy is deleted, so it cannot be revived.
+- Not started: every maintenance task except the node membership refresh and
+  the expired RPC session purge. Each node purges, since the purge's cluster
+  lease is refused. A session that expired is refused when it is loaded
+  whether or not it has been purged.
 - Skipped by the server, with one warning each: the configured import and the
   root credential initialisation. With no root user created, a root sign-in
   fails, so the store never opens without authentication.

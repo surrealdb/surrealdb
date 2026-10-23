@@ -492,6 +492,31 @@ pub(crate) fn durable_session(session: &Session, expires_at: u64) -> DurableSess
 	}
 }
 
+/// A durable RPC session exactly as storage holds it.
+///
+/// It is the guard every conditional write on a stored session names:
+/// [`Datastore::replace_rpc_session`](crate::kvs::Datastore::replace_rpc_session)
+/// and [`Datastore::refresh_rpc_session`](crate::kvs::Datastore::refresh_rpc_session)
+/// write only while the stored copy is still this value, so a change another
+/// node committed since it was read is never overwritten unseen.
+#[derive(Clone, Debug)]
+pub struct StoredRpcSession(DurableSession);
+
+impl StoredRpcSession {
+	pub(crate) fn new(durable: DurableSession) -> Self {
+		Self(durable)
+	}
+
+	pub(crate) fn durable(&self) -> &DurableSession {
+		&self.0
+	}
+
+	/// When the stored copy expires, in milliseconds since the UNIX epoch.
+	pub fn expires_at(&self) -> u64 {
+		self.0.expires_at
+	}
+}
+
 /// Restore the in-memory session `durable` was captured from.
 ///
 /// See [`durable_session`] for why this is not a method.

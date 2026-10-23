@@ -4792,39 +4792,29 @@ mod http_integration {
 	}
 
 	// ------------------------------
-	// Durable RPC sessions (`--durable-sessions`)
+	// Durable RPC sessions
 	// ------------------------------
 
 	/// `--durable-session-ttl` (in seconds) for the two expiry tests below
 	/// (`rpc_durable_session_expires_after_ttl` and
-	/// `rpc_durable_session_expires_while_cached`).
+	/// `rpc_durable_session_expires_without_restart`).
 	///
-	/// Those tests need a TTL short enough to watch a session expire within the
-	/// test, but it must stay comfortably longer than [`durable_rpc_setup_session`]
-	/// takes: `attach` (a durable KV write), a root `signin` (a deliberately
-	/// CPU-slow argon2 verification) and `use`, each a full HTTP round-trip. A
-	/// durable session's expiry is baked at write time (`now + ttl`) and only
-	/// slid *after* a request is authorized, so if setup outruns the TTL the
-	/// attached session expires mid-setup and the next request is rejected with
-	/// `session_not_found` — the helper then panics at its `signin must succeed`
-	/// assertion. The original 1s window was narrow enough that on a loaded CI
-	/// runner (the merge queue, where the server alone took ~2.5s to boot)
-	/// setup's round-trips overran it and both tests failed across every nextest
-	/// retry. Five seconds gives setup ample headroom while staying short enough
-	/// to sleep past. See also [`DURABLE_EXPIRY_WAIT`].
-	#[cfg(feature = "storage-surrealkv")]
+	/// Short enough to watch a session expire within the test, and comfortably
+	/// longer than [`durable_rpc_setup_session`] takes on a loaded runner:
+	/// `attach`, a root `signin` (a deliberately CPU-slow argon2 verification)
+	/// and `use`, each a full HTTP round-trip. A session is only guaranteed to
+	/// outlive its last request by one TTL, so a setup step slower than that
+	/// could see the session expire and fail its `must succeed` assertion. See
+	/// also [`DURABLE_EXPIRY_WAIT`].
 	const DURABLE_EXPIRY_TTL_SECS: u64 = 5;
 
-	/// How long to idle before asserting a session has expired. Must exceed
-	/// [`DURABLE_EXPIRY_TTL_SECS`] with margin so the session is unambiguously
-	/// past its (write-time, slid-on-use) expiry regardless of when the last
-	/// setup request last refreshed it — decoupling the assertion from how long
-	/// setup took.
-	#[cfg(feature = "storage-surrealkv")]
-	const DURABLE_EXPIRY_WAIT: Duration = Duration::from_secs(7);
+	/// How long to idle before asserting a session has expired. A session
+	/// expires at most one and a half TTLs after its last request, so this
+	/// exceeds one and a half times [`DURABLE_EXPIRY_TTL_SECS`] with margin,
+	/// decoupling the assertion from how long setup took.
+	const DURABLE_EXPIRY_WAIT: Duration = Duration::from_secs(9);
 
 	/// A JSON `/rpc` client for the durable-session tests.
-	#[cfg(feature = "storage-surrealkv")]
 	fn durable_rpc_client() -> Result<Client, Box<dyn std::error::Error>> {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
@@ -4836,7 +4826,6 @@ mod http_integration {
 	}
 
 	/// POST one authenticated RPC request and return the JSON response body.
-	#[cfg(feature = "storage-surrealkv")]
 	async fn durable_rpc_send(
 		client: &Client,
 		addr: &str,
@@ -4853,9 +4842,7 @@ mod http_integration {
 	}
 
 	/// Attach `sid`, sign it in as root, and select `ns`/`db` on it — the
-	/// session state the durable-session tests expect to find (or not find)
-	/// again after a server restart.
-	#[cfg(feature = "storage-surrealkv")]
+	/// session state the durable-session tests expect to find again, or not.
 	async fn durable_rpc_setup_session(
 		client: &Client,
 		addr: &str,
@@ -4885,19 +4872,17 @@ mod http_integration {
 		Ok(())
 	}
 
-	/// A client-attached session survives a full server restart when
-	/// `--durable-sessions` is enabled: the same session id resumes with its
-	/// authentication and selected namespace/database intact, and stays
-	/// bound to the principal that authenticated it.
+	/// A client-attached session survives a full server restart: the same
+	/// session id resumes with its authentication and selected
+	/// namespace/database intact, and stays bound to the principal that
+	/// authenticated it.
 	#[cfg(feature = "storage-surrealkv")]
 	#[test(tokio::test)]
 	async fn rpc_durable_session_survives_restart() -> Result<(), Box<dyn std::error::Error>> {
 		let dir = tempfile::tempdir()?;
 		let path = format!("surrealkv:{}", dir.path().display());
-		let args = "--durable-sessions".to_string();
 		let (addr, server) = common::start_server(StartServerArguments {
 			path: Some(path.clone()),
-			args: args.clone(),
 			..Default::default()
 		})
 		.await?;
@@ -4911,12 +4896,11 @@ mod http_integration {
 		server.kill();
 		let (addr, _server) = common::start_server(StartServerArguments {
 			path: Some(path),
-			args,
 			..Default::default()
 		})
 		.await?;
 
-		// The rehydrated session still refuses anonymous callers, exactly
+		// The stored session still refuses anonymous callers, exactly
 		// like an in-memory one (and indistinguishably from a missing
 		// session).
 		let body = json!({
@@ -4962,7 +4946,7 @@ mod http_integration {
 	async fn rpc_durable_session_expires_after_ttl() -> Result<(), Box<dyn std::error::Error>> {
 		let dir = tempfile::tempdir()?;
 		let path = format!("surrealkv:{}", dir.path().display());
-		let args = format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s");
+		let args = format!("--durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s");
 		let (addr, server) = common::start_server(StartServerArguments {
 			path: Some(path.clone()),
 			args: args.clone(),
@@ -4997,18 +4981,14 @@ mod http_integration {
 		Ok(())
 	}
 
-	/// The TTL is enforced for a session still cached in the *running* server,
-	/// not only after a restart: a client idle past `--durable-session-ttl`
-	/// must be rejected on its next request even though the server never
-	/// evicted the in-memory session.
-	#[cfg(feature = "storage-surrealkv")]
+	/// The TTL is enforced by the running server, not only across a restart: a
+	/// client idle past `--durable-session-ttl` is rejected on its next request
+	/// to the node that served it all along.
 	#[test(tokio::test)]
-	async fn rpc_durable_session_expires_while_cached() -> Result<(), Box<dyn std::error::Error>> {
-		let dir = tempfile::tempdir()?;
-		let path = format!("surrealkv:{}", dir.path().display());
+	async fn rpc_durable_session_expires_without_restart() -> Result<(), Box<dyn std::error::Error>>
+	{
 		let (addr, _server) = common::start_server(StartServerArguments {
-			path: Some(path),
-			args: format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s"),
+			args: format!("--durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s"),
 			..Default::default()
 		})
 		.await?;
@@ -5016,11 +4996,9 @@ mod http_integration {
 		let sid = uuid::Uuid::new_v4();
 		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
 
-		// No restart: the session stays cached in the running server. Once it has
-		// sat idle past the TTL, the next request must be rejected rather than
-		// served the stale cached copy. The idle wait exceeds the TTL (sized to
-		// clear the argon2-bearing setup), so the rejection is driven by the idle
-		// window, not by a setup that happened to overrun a tight TTL.
+		// No restart. The idle wait exceeds the TTL (sized to clear the
+		// argon2-bearing setup), so the rejection is driven by the idle window,
+		// not by a setup that happened to overrun a tight TTL.
 		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
 		let body = json!({
 			"id": "idle",
@@ -5029,15 +5007,15 @@ mod http_integration {
 			"params": ["RETURN 1"],
 		});
 		let res = durable_rpc_send(&client, &addr, body).await?;
-		assert!(
-			res.get("error").is_some(),
-			"an idle-past-TTL cached session must be rejected: {res}"
-		);
+		assert!(res.get("error").is_some(), "an idle-past-TTL session must be rejected: {res}");
 		Ok(())
 	}
 
 	/// `detach` removes the durable copy immediately: the session cannot be
 	/// resumed after a restart even though its TTL has not elapsed.
+	///
+	/// The server is started with the deprecated `--durable-sessions` flag,
+	/// which must still be accepted and change nothing.
 	#[cfg(feature = "storage-surrealkv")]
 	#[test(tokio::test)]
 	async fn rpc_detached_durable_session_cannot_be_resumed()
@@ -5074,44 +5052,6 @@ mod http_integration {
 		});
 		let res = durable_rpc_send(&client, &addr, body).await?;
 		assert!(res.get("error").is_some(), "a detached session must not resume: {res}");
-		Ok(())
-	}
-
-	/// Without `--durable-sessions`, attached sessions stay in-memory only:
-	/// a restart on the same datastore loses them (the pre-existing
-	/// behaviour).
-	#[cfg(feature = "storage-surrealkv")]
-	#[test(tokio::test)]
-	async fn rpc_sessions_are_not_durable_by_default() -> Result<(), Box<dyn std::error::Error>> {
-		let dir = tempfile::tempdir()?;
-		let path = format!("surrealkv:{}", dir.path().display());
-		let (addr, server) = common::start_server(StartServerArguments {
-			path: Some(path.clone()),
-			..Default::default()
-		})
-		.await?;
-		let client = durable_rpc_client()?;
-		let sid = uuid::Uuid::new_v4();
-		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
-
-		server.kill();
-		let (addr, _server) = common::start_server(StartServerArguments {
-			path: Some(path),
-			..Default::default()
-		})
-		.await?;
-
-		let body = json!({
-			"id": "resume",
-			"method": "query",
-			"session": sid,
-			"params": ["RETURN 1"],
-		});
-		let res = durable_rpc_send(&client, &addr, body).await?;
-		assert!(
-			res.get("error").is_some(),
-			"sessions must not survive a restart without --durable-sessions: {res}"
-		);
 		Ok(())
 	}
 

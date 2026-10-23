@@ -264,34 +264,94 @@ SurrealDB's security model rests on four pillars:
   state.
 - Refresh token revocation and reissuance must be atomic within a single
   transaction. Concurrent reuse must result in at most one successful refresh.
-- Durable RPC sessions (`--durable-sessions`) must be opt-in, and every persisted
-  entry must carry a finite absolute expiry, enforced both lazily on load and by
-  the periodic purge task. The durable copy contains the session's authentication
-  state at rest, so only client-named (attached) sessions may ever be persisted —
-  never ephemeral per-request sessions. A CONTEXT payload is part of that
-  authentication state and is written at rest with it, in the durable copy and in
-  the frozen session snapshot each LIVE subscription carries.
-- Deleting a session (`detach`, teardown) must delete its durable copy in the same
-  operation, so a torn-down session cannot be rehydrated. A failed durable delete
-  must fail the teardown (leaving the session intact for retry), never report
-  success while the durable copy survives. A durable session must never be
-  recreated by a persist/refresh (only `attach` creates it, via a conditional
-  insert), so a delete on one node cannot be undone by a stale cached copy on
-  another. Each node revalidates a cached durable session against storage **before**
-  dispatching each request — reloading the authoritative value, or evicting it when
-  the durable copy is gone — so a detach, invalidation, or auth/USE change made on
-  another node takes effect on the next request routed to a stale node, instead of
-  that request running on cached state or the change lasting the node's cache
-  lifetime. Durable sessions target deployments that route a given session to one
-  node at a time (sticky routing / one runtime per session, per the `RpcProtocol`
-  durable-session seam's design). Concurrently *mutating the same session id from
-  multiple nodes* is best-effort: durable writes are compare-guarded so they never
-  resurrect or clobber across nodes, but under such a race a losing mutation may be
-  dropped rather than merged, so security-critical revocation should be driven from
-  the session's owning node.
-  Verified by: `detach_deletes_the_durable_copy`,
-  `detach_fails_and_keeps_the_session_when_the_durable_delete_fails`
-  (`rpc/protocol.rs`).
+- Every client-attached HTTP RPC session is stored in the datastore (`/!se{id}`),
+  and every stored entry must carry a finite absolute expiry (a
+  `--durable-session-ttl` under one millisecond, the unit expiries are stored
+  in, is refused), enforced lazily on load, by `attach`
+  (an expired entry does not hold its id), and by the periodic purge task. A
+  session expires between one and one and a half TTLs after its last request.
+  The stored copy contains the session's authentication
+  state at rest, so only client-named (attached) sessions may ever be stored —
+  never request-private sessions. A CONTEXT payload is part of that
+  authentication state and is written at rest with it, in the stored copy and in
+  the frozen session snapshot each LIVE subscription carries. Stored sessions are
+  written through the bookkeeping transaction, the only write a store open
+  read-only accepts besides node membership, so that store still serves HTTP
+  clients. Nothing else may use that transaction. Because an anonymous `attach`
+  can still create sessions there, the expired-session purge must run on a
+  read-only store too, or their expired copies would accumulate.
+  Verified by: `a_read_only_store_still_serves_sessions`
+  (`core/src/kvs/tests/rpc_session_test.rs`).
+- A request on an attached HTTP session records its RPC and auth completion
+  events only once its session changes are stored, with the outcome the client
+  receives. A request whose changes were refused is recorded as failed, with the
+  session context it loaded, never one that was not stored.
+  Verified by: `a_change_that_could_not_be_stored_is_observed_as_failed`
+  (`server/src/rpc/http.rs`).
+- No node caches an attached HTTP session between requests: each request loads
+  the stored copy and runs on a private copy of it, so a detach, invalidation,
+  expiry, or auth/USE change made through any node is what the next request
+  through every node runs on. A change is written back with a conditional write
+  guarded by the stored copy the request loaded; when another request changed the
+  session meanwhile, the request's changes are merged onto the newer copy, with
+  the authentication state (`au`, `ac`, `tk`, `rd`, `data`, `exp`) moving as one
+  unit, so a principal is never assembled from two sign-ins. A change approved
+  under one identity (actor id and level, which is all a `use` is authorized
+  against) is never applied under another: before merging, the caller must still
+  pass the ownership gate against the newer copy, and a request that did not
+  itself change the identity is refused if the newer copy's identity differs
+  from the one it ran under (so it can never undo a concurrent `invalidate`, nor
+  move a newly signed-in session to a namespace/database a `use` approved for the
+  previous identity); a request that did change it keeps its own namespace and
+  database. A renewal keeps the identity, even when it recomputes the `CONTEXT`
+  payload, so it neither refuses nor overrides a `use` stored meanwhile (`same_identity`).
+  A TTL refresh writes back the stored contents, never a request's copy
+  of them. A failed write fails the request rather than reporting a change that
+  did not take. The one exception is a `refresh` that only renewed the
+  session's authentication (the same identity, actor id and level, with a new
+  token, expiry and possibly a recomputed `CONTEXT` payload) and was refused
+  because the session was removed or bound to another identity meanwhile. It
+  has spent its single-use refresh token, so it succeeds without being stored:
+  no stored copy is then one the renewed token can reach while holding the
+  authentication it replaced. A `refresh` whose write failed fails like any
+  change, so no token pair is handed out while the stored copy still holds the
+  previous authentication: a renewed token passes the ownership gate wherever
+  the old one did, and the old `CONTEXT` may grant what the recomputed one
+  revoked. `refresh`, `signup` and `signin` are exempt from the query timeout
+  while their session write runs, since the credentials they issued cannot be
+  asked for again. Another method that renews, such as an `authenticate` with
+  another token for the same identity, spent nothing the client cannot send
+  again, and fails as any change does. A renewal is never written over the
+  newer copy.
+- A stored session must never be recreated by a write after it is removed (only
+  `attach` creates it, via a conditional insert), so a removal through one node
+  cannot be undone by a request in flight on another. Deleting a session
+  (`detach`) must delete the stored copy, and a failed delete must fail the
+  detach (leaving the session intact for retry), never report success while the
+  stored copy survives.
+  Verified by: `a_request_never_undoes_a_concurrent_invalidate`,
+  `a_change_made_under_a_replaced_principal_is_refused`,
+  `a_sign_in_keeps_its_own_selection`, `refresh_never_writes_back_a_stale_copy`,
+  `a_change_to_a_session_removed_meanwhile_is_refused`,
+  `a_refresh_refused_meanwhile_still_succeeds`,
+  `an_authenticate_that_renews_fails_like_any_change`,
+  `the_query_timeout_never_withholds_issued_credentials`,
+  `a_renewal_and_a_use_meanwhile_both_survive`,
+  `detach_removes_the_session_everywhere` (`server/src/rpc/http.rs`);
+  `replace_writes_only_over_the_expected_copy`,
+  `delete_removes_the_entry_and_is_idempotent`
+  (`core/src/kvs/tests/rpc_session_test.rs`).
+- `attach` is reachable anonymously and writes to the datastore, so each node
+  bounds the live sessions attached through it (`HTTP_MAX_ATTACHED_SESSIONS`).
+  An attach must reserve its slot before it writes the session, so concurrent
+  attaches cannot overshoot the cap. A slot is freed only while the attach
+  seen holding it still holds it, so a session attached again meanwhile keeps
+  its slot. Verified by
+  `an_attach_in_flight_holds_its_slot` and
+  `a_slot_taken_again_meanwhile_is_kept` (`server/src/rpc/http.rs`).
+  The check that releases slots of sessions ended through other nodes reads
+  storage, so it must stay rate-limited and single-flight, and an entry it
+  cannot decode must not stop it releasing the others.
 
 ### Review Triggers
 
@@ -304,8 +364,9 @@ Flag for detailed review when changes touch:
 - Session expiration checking in any query execution path
 - New RPC methods or HTTP endpoints interacting with session state
 - The role model (new roles, new privilege levels, `is_allowed`)
-- Durable RPC session storage (`/!se` keys, `DurableSession`, the
-  `load_session`/`persist_session`/`forget_session` hooks and their TTL handling)
+- Durable RPC session storage (`/!se` keys, `DurableSession`, the `Datastore`
+  `*_rpc_session` methods, the `RpcProtocol` `load_session`/`persist_session`/
+  `forget_session` hooks, and their TTL handling)
 
 ---
 
@@ -1134,14 +1195,9 @@ transaction management, notification routing
   trim) before protection checks. The check must apply in all code paths that set
   session variables.
 - Each HTTP RPC request must operate on an isolated session copy.
-- A session rehydrated from durable storage must pass the same caller-principal
-  verification (`verify_caller_for_session`) as an in-memory one; rehydration
-  happens inside `get_session`, so no code path may reach a rehydrated session
-  without going through the ownership gate.
-- When durable sessions are enabled, dispatch must be serialized per client-named
-  session id (one in-flight RPC per session id), otherwise concurrent mutations can
-  persist out of order and resurrect overwritten auth state (e.g. an `invalidate`
-  lost to a racing `signin`).
+- A request naming an attached HTTP session must pass the caller-principal check
+  (`caller_may_use_session`, in `Http::handle`) against the session as loaded
+  from storage, before any method other than `attach` runs on it.
 - Live query notification delivery must verify the target WebSocket still exists and
   the live query is still registered to that connection/session.
 - A `LIVE SELECT` that commits must end up either registered for notification
@@ -1225,8 +1281,8 @@ Flag when changes touch:
   `query_stream`/`query_cancel` methods
 - Notification routing or LiveQueries map structure
 - HTTP RPC handler session management
-- Durable session persistence (`Http::load_session`/`persist_session`/
-  `forget_session`, `SessionLocks`, the `post_handler` dispatch guard)
+- Durable HTTP session handling (`Http::handle`, `store_changes`, `refresh`,
+  `merge_session_changes`, the attach cap and its reclaim)
 - `check_protected_param` or `PROTECTED_PARAM_NAMES`
 - WebSocket upgrade handler (Origin validation, protocol negotiation)
 - Default values for message size, buffer size, or memory threshold

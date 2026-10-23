@@ -32,7 +32,7 @@ pub(crate) use self::capabilities::Capabilities;
 pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
 pub(crate) use self::options::{Force, NoWriteFrame, Options};
-pub use self::session::{AuthPrincipalSnapshot, Session, SessionData};
+pub use self::session::{AuthPrincipalSnapshot, Session, SessionData, StoredRpcSession};
 pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::{

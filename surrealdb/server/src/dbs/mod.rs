@@ -1272,8 +1272,8 @@ pub(crate) async fn initialise_datastore<C: TransactionBuilderFactory>(
 		.await?;
 	// The version is stamped and this node is registered, so the maintenance
 	// tasks may start writing. A read-only datastore starts only the membership
-	// refresh, and its first pass would only be refused: expiry and cleanup write
-	// state it does not accept.
+	// refresh and the session purge, and its first pass would only be refused:
+	// expiry and cleanup write state it does not accept.
 	dbs.start_maintenance_tasks_checked().await?;
 	if !dbs.is_read_only() {
 		spawn_first_node_maintenance_pass(dbs, &pending.engine, pending.canceller.clone());
@@ -2377,7 +2377,7 @@ mod tests {
 				.with_node_membership_cleanup_interval(interval),
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
-			durable_session_ttl: None,
+			durable_session_ttl: crate::cnf::DEFAULT_DURABLE_SESSION_TTL,
 			cookie_auth: false,
 		})
 	}

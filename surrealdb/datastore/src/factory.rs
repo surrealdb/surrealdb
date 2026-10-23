@@ -375,9 +375,10 @@ impl TransactionFactory {
 
 	/// Opens a write transaction that ignores the read-only mark.
 	///
-	/// Reserved for a node's own membership rows and for deleting a torn-down session's durable
-	/// copy, which must still be written on a read-only store. Nothing else may call it: a
-	/// statement, a maintenance job or a feature-state write goes through [`Self::transaction`].
+	/// Reserved for a node's own membership rows and for the durable copies of attached RPC
+	/// sessions (written, and purged once expired), which must still be written on a read-only
+	/// store. Nothing else may call it: a statement, any other maintenance job or a feature-state
+	/// write goes through [`Self::transaction`].
 	pub async fn bookkeeping(&self, sequences: Sequences) -> Result<Transaction> {
 		self.open(TransactionType::Write, sequences).await
 	}

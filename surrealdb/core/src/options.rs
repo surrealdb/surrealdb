@@ -120,13 +120,14 @@ pub struct EngineOptions {
 	pub tikv_lock_cleanup_interval: Duration,
 	/// Interval for purging expired durable RPC sessions.
 	///
-	/// When RPC session persistence is enabled, client-attached sessions are
-	/// mirrored to the KV store with an absolute expiry. Expired entries are
-	/// already dropped lazily on load; this task additionally sweeps the
-	/// session keyspace so entries that are never loaded again do not
-	/// accumulate. Set to `Duration::ZERO` to disable the sweep.
+	/// Client-attached RPC sessions are stored in the KV store with an
+	/// absolute expiry, and an expired one is refused and dropped when it is
+	/// next loaded. This task sweeps the whole session keyspace so entries
+	/// that are never loaded again do not accumulate; it reclaims storage
+	/// only, so it can run far less often than sessions expire. Set to
+	/// `Duration::ZERO` to disable the sweep.
 	///
-	/// Default: 60 seconds
+	/// Default: 1 hour
 	pub rpc_session_gc_interval: Duration,
 	/// Interval for refreshing the cached process/system utilisation metrics.
 	///
@@ -164,7 +165,7 @@ impl Default for EngineOptions {
 			tikv_gc_interval: Duration::from_secs(600),
 			tikv_gc_lifetime: Duration::from_secs(600),
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
-			rpc_session_gc_interval: Duration::from_secs(60),
+			rpc_session_gc_interval: Duration::from_secs(60 * 60),
 			system_metrics_refresh_interval: Duration::from_secs(30),
 		}
 	}

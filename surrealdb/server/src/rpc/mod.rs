@@ -21,6 +21,7 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::cnf::DEFAULT_DURABLE_SESSION_TTL;
 #[cfg(feature = "graphql")]
 use crate::cnf::GRAPHQL_SUBSCRIPTION_CHANNEL_CAPACITY;
 use crate::rpc::websocket::Websocket;
@@ -54,7 +55,7 @@ pub struct RpcState {
 	pub web_sockets: WebSockets,
 	/// Stores the currently initiated LIVE queries
 	pub live_queries: LiveQueries,
-	/// HTTP RPC handler with persistent sessions
+	/// HTTP RPC handler, serving attached sessions from the datastore
 	pub http: Arc<crate::rpc::http::Http>,
 	/// gRPC RPC handler, holding the sessions, transactions and live query
 	/// subscriptions of the gRPC transport
@@ -76,18 +77,25 @@ impl RpcState {
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
 	) -> Self {
-		Self::new_with_options(datastore, metrics_observer, None)
+		Self::new_with_options(datastore, metrics_observer, DEFAULT_DURABLE_SESSION_TTL)
 	}
 
+	/// `durable_session_ttl` is how long an attached HTTP RPC session lives
+	/// without being used (see [`Http`](crate::rpc::http::Http#expiry)).
+	///
+	/// # Panics
+	///
+	/// If `durable_session_ttl` is under one millisecond (see
+	/// [`Http::new`](crate::rpc::http::Http::new)).
 	pub fn new_with_options(
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
-		durable_session_ttl: Option<std::time::Duration>,
+		durable_session_ttl: Duration,
 	) -> Self {
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
-			http: Arc::new(crate::rpc::http::Http::new_with_durability(
+			http: Arc::new(crate::rpc::http::Http::new(
 				Arc::clone(&datastore),
 				durable_session_ttl,
 			)),

@@ -254,7 +254,8 @@ pub struct Readiness {
 /// - `client_ip`: [`ClientIp::Socket`] (extract the client IP from the raw socket)
 /// - `no_identification_headers`: `false` (include `Server` and version headers)
 /// - `allow_origin`: empty (allow all origins)
-/// - `durable_session_ttl`: `None` (HTTP RPC sessions are in-memory only)
+/// - `durable_session_ttl`:
+///   [`DEFAULT_DURABLE_SESSION_TTL`](crate::cnf::DEFAULT_DURABLE_SESSION_TTL)
 /// - `cookie_auth`: `false` (no session cookies)
 ///
 /// # Example
@@ -269,7 +270,7 @@ pub struct Readiness {
 ///     client_ip: ClientIp::None,
 ///     no_identification_headers: true,
 ///     allow_origin: vec!["https://example.com".to_string()],
-///     durable_session_ttl: None,
+///     durable_session_ttl: Duration::from_secs(3600),
 ///     cookie_auth: false,
 /// };
 /// ```
@@ -282,11 +283,12 @@ pub struct RouterOptions {
 	/// Allowed CORS origins. When empty (the default), all origins are allowed.
 	/// Each entry should be a valid origin string (e.g. `"https://example.com"`).
 	pub allow_origin: Vec<String>,
-	/// When set, client-attached HTTP RPC sessions are persisted in the
-	/// datastore — surviving server restarts and shared across cluster nodes
-	/// — and expire after this idle TTL. `None` (the default) keeps sessions
-	/// in-memory only.
-	pub durable_session_ttl: Option<Duration>,
+	/// How long an attached HTTP RPC session lives without being used: it
+	/// expires between one and one and a half times this long after its last
+	/// request. Must be at least one millisecond, or building the router
+	/// panics. Attached sessions are stored in the datastore, so they survive
+	/// server restarts and any node sharing the datastore serves them.
+	pub durable_session_ttl: Duration,
 	/// When `true`, `/signin/cookie` and `/signup/cookie` issue the access token
 	/// as an `HttpOnly` cookie (plus an `HttpOnly` refresh cookie for record
 	/// access methods with `WITH REFRESH`), `/refresh/cookie` rotates them,
@@ -304,7 +306,7 @@ impl Default for RouterOptions {
 			client_ip: client_ip::ClientIp::Socket,
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
-			durable_session_ttl: None,
+			durable_session_ttl: crate::cnf::DEFAULT_DURABLE_SESSION_TTL,
 			cookie_auth: false,
 		}
 	}

@@ -45,16 +45,21 @@ pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_RPC_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);
 
-/// The maximum number of explicitly attached sessions the HTTP transport
-/// will retain at once (default: 16384).
+/// The maximum number of live sessions attached through one node's HTTP
+/// transport (default: 16384).
 ///
-/// The HTTP `/rpc` session map is process-global (there is no per-connection
-/// scope as with WebSocket), so an uncapped map is a denial-of-service target
-/// for anonymous callers. This cap bounds total memory attributable to
-/// attached HTTP sessions. Ephemeral per-request sessions do not count
-/// against this cap.
+/// `attach` is reachable before authentication and stores the session in the
+/// datastore, so without a cap any anonymous caller could grow the session
+/// keyspace without bound. A session counts against the node it was attached
+/// through until it is detached or expires, wherever it is used; when the cap
+/// is reached, the node checks its sessions against storage to release those
+/// detached through other nodes before refusing.
 pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_HTTP_MAX_ATTACHED_SESSIONS", usize, 16384);
+
+/// How long an attached HTTP RPC session lives without being used, unless
+/// configured otherwise (`--durable-session-ttl`).
+pub const DEFAULT_DURABLE_SESSION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The maximum number of explicitly attached sessions a single WebSocket
 /// connection may hold at once (default: 256).

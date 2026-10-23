@@ -196,6 +196,20 @@ pub async fn live_query_owner(
 	(!principal.differs_from(&session)).then_some(session)
 }
 
+/// Whether the `--query-timeout` wall-clock guard around
+/// [`RpcProtocol::dispatch`] may cut `method` short.
+///
+/// Exempt are the methods whose commit the client must learn of, because a
+/// future dropped mid-flight may have committed it. Transaction control
+/// (`begin` / `commit` / `cancel`, see `Method::is_transaction_control`) is
+/// one. So are `attach` and `detach`: a create committed but not reported
+/// leaves the client an id that every retry finds taken, and a delete committed
+/// but not reported leaves it a session that every retry finds gone. None of
+/// them runs user-defined SurrealQL, so exempting them opens no unbounded work.
+pub(crate) fn bounded_by_query_timeout(method: Method) -> bool {
+	!method.is_transaction_control() && !matches!(method, Method::Attach | Method::Detach)
+}
+
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocol {
 	/// The datastore for this RPC interface
@@ -279,7 +293,6 @@ pub trait RpcProtocol {
 			return Ok(session);
 		}
 		if Self::PERSIST_SESSIONS
-			&& self.persist_sessions_enabled()
 			&& let Some(restored) = self.load_session(id).await
 		{
 			self.set_session(*id, Arc::new(RwLock::new(restored)));
@@ -307,7 +320,7 @@ pub trait RpcProtocol {
 		// Remove the durable copy first, propagating any failure before we
 		// touch local state — otherwise a `detach`/logout could return success
 		// with the session still resurrectable.
-		if Self::PERSIST_SESSIONS && self.persist_sessions_enabled() {
+		if Self::PERSIST_SESSIONS {
 			self.forget_session(id).await?;
 		}
 		// Drop the in-memory session
@@ -367,24 +380,9 @@ pub trait RpcProtocol {
 	/// runtime — one Durable Object or Worker per session — satisfies this by
 	/// construction.
 	///
-	/// This const is the compile-time *capability* gate; the runtime switch is
-	/// [`persist_sessions_enabled`](Self::persist_sessions_enabled). Every
-	/// durability branch checks both, so an implementation whose const is
-	/// `false` pays nothing, while one that exposes persistence behind
-	/// operator configuration sets the const to `true` and overrides the
-	/// method.
+	/// Every durability branch is gated on this const, so an implementation
+	/// whose const is `false` pays nothing for it.
 	const PERSIST_SESSIONS: bool = false;
-
-	/// Runtime companion to [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS),
-	/// consulted only when the const is `true`. The default returns the
-	/// const, so a compile-time-only implementation needs no override; an
-	/// implementation that exposes persistence behind operator configuration
-	/// (e.g. a CLI flag) overrides this with its runtime setting. When it
-	/// returns `false`, sessions behave exactly as if the const were `false`:
-	/// no snapshot, no rehydration, no persistence.
-	fn persist_sessions_enabled(&self) -> bool {
-		Self::PERSIST_SESSIONS
-	}
 
 	/// Load a session from durable storage. Called by
 	/// [`get_session`](Self::get_session) on a `session_map` miss to
@@ -492,28 +490,18 @@ pub trait RpcProtocol {
 	// Method execution
 	// ------------------------------
 
-	/// Executes a method on this RPC implementation.
+	/// Executes a method on this RPC implementation:
+	/// [`dispatch`](Self::dispatch) runs it, then
+	/// [`record_completion`](Self::record_completion) reports its outcome.
 	///
 	/// `session` is the resolved session ID (always valid). `client_session`
 	/// is the raw value from the client request (`None` when the client did
 	/// not specify one). Session-management methods (`attach`, `detach`) use
 	/// `client_session` to reject calls with no explicit session ID.
 	///
-	/// Wraps the dispatch in a timer and fires an
-	/// [`crate::observe::RpcEvent`] on completion regardless of outcome. The
-	/// safe half of the event carries only the bounded [`Method`] and the
-	/// outcome label; the context half carries the current session's
-	/// namespace/database/user (ignored by the community metrics observer
-	/// but consumed by enterprise audit sinks). Auth-related methods
-	/// additionally fan out an [`AuthEvent`] so auth attempt counters can
-	/// be broken out by action/scope/outcome.
-	#[cfg_attr(feature = "observability", tracing::instrument(
-		level = "debug",
-		target = "surrealdb::core::rpc",
-		name = "rpc.execute",
-		skip_all,
-		fields(rpc.method = method.to_str(), rpc.session = %session)
-	))]
+	/// A transport whose response can still fail after the method ran calls
+	/// the two halves itself, recording the outcome once the response is
+	/// settled, so observers see the outcome the client receives.
 	async fn execute(
 		&self,
 		txn: Option<Uuid>,
@@ -523,6 +511,29 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let start = web_time::Instant::now();
+		let result = self.dispatch(txn, session, client_session, method, params).await;
+		self.record_completion(session, method, start, &result).await;
+		result
+	}
+
+	/// Runs a method on this RPC implementation, without reporting its
+	/// outcome (see [`execute`](Self::execute)). Arguments are as for
+	/// [`execute`](Self::execute).
+	#[cfg_attr(feature = "observability", tracing::instrument(
+		level = "debug",
+		target = "surrealdb::core::rpc",
+		name = "rpc.execute",
+		skip_all,
+		fields(rpc.method = method.to_str(), rpc.session = %session)
+	))]
+	async fn dispatch(
+		&self,
+		txn: Option<Uuid>,
+		session: Uuid,
+		client_session: Option<Uuid>,
+		method: Method,
+		params: PublicArray,
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let dispatch = async {
 			// Check if capabilities allow executing the requested RPC method
 			if !self.kvs().allows_rpc_method(&MethodTarget {
@@ -541,17 +552,15 @@ pub trait RpcProtocol {
 			// the way, so this also covers the "evicted, first request" case.
 			// Const-gated to nothing for in-memory-only implementations, which
 			// never clone.
-			let tracked: Option<Option<Session>> = if Self::PERSIST_SESSIONS
-				&& self.persist_sessions_enabled()
-				&& client_session.is_some()
-			{
-				Some(match self.get_session(&session).await {
-					Ok(lock) => Some(lock.read().await.clone()),
-					Err(_) => None,
-				})
-			} else {
-				None
-			};
+			let tracked: Option<Option<Session>> =
+				if Self::PERSIST_SESSIONS && client_session.is_some() {
+					Some(match self.get_session(&session).await {
+						Ok(lock) => Some(lock.read().await.clone()),
+						Err(_) => None,
+					})
+				} else {
+					None
+				};
 			// Execute the desired method
 			let dispatched = match method {
 				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
@@ -632,13 +641,12 @@ pub trait RpcProtocol {
 		// behaviour change unless an operator sets it). The deadline plumbed
 		// into the executor via `Datastore::setup_ctx` only fires at yield
 		// points and does not bound the GraphQL engine's own work; this
-		// wall-clock backstop bounds the whole method call. Transaction-control
-		// methods (`begin` / `commit` / `cancel`) are exempt because dropping a
-		// commit future mid-flight would be unsafe; the statements executed
-		// inside an explicit transaction are still guarded individually (see
-		// `Method::is_transaction_control`).
-		let result: Result<DbResult, surrealdb_types::Error> = match self.kvs().query_timeout() {
-			Some(timeout) if !method.is_transaction_control() => {
+		// wall-clock backstop bounds the whole method call. The methods whose
+		// commit must be reported are exempt (see `bounded_by_query_timeout`);
+		// the statements executed inside an explicit transaction are still
+		// guarded individually.
+		match self.kvs().query_timeout() {
+			Some(timeout) if bounded_by_query_timeout(method) => {
 				match common::time::timeout(timeout, dispatch).await {
 					Ok(inner) => inner,
 					Err(_elapsed) => {
@@ -653,16 +661,33 @@ pub trait RpcProtocol {
 				}
 			}
 			_ => dispatch.await,
-		};
+		}
+	}
+
+	/// Fires an [`crate::observe::RpcEvent`] for `method`, run on `session`
+	/// from `start`, whatever its `result`. The safe half of the event carries
+	/// only the bounded [`Method`] and the outcome label; the context half
+	/// carries `session`'s namespace/database/user as it stands when this
+	/// runs (ignored by the community metrics observer but consumed by
+	/// enterprise audit sinks). Auth-related methods additionally fan out an
+	/// [`AuthEvent`] so auth attempt counters can be broken out by
+	/// action/scope/outcome.
+	async fn record_completion(
+		&self,
+		session: Uuid,
+		method: Method,
+		start: web_time::Instant,
+		result: &Result<DbResult, surrealdb_types::Error>,
+	) {
 		let observer = self.kvs().observer();
 		// Nothing is observing, so none of the event context below is ever read.
 		// Building it costs a session lookup, a read-lock acquisition and several
 		// `String` clones on every single RPC, which is the default configuration
 		// for an embedded datastore and for a server with metrics disabled.
 		if observer.is_noop() {
-			return result;
+			return;
 		}
-		let outcome = Outcome::from(&result);
+		let outcome = Outcome::from(result);
 		// Resolve session context for the observer event. An unknown
 		// session ID yields an empty `TenantIdentity` rather than an
 		// error, keeping the metrics path infallible. We capture the
@@ -710,7 +735,6 @@ pub trait RpcProtocol {
 				ctx: identity.to_auth_ctx(),
 			});
 		}
-		result
 	}
 
 	// ------------------------------
@@ -3051,7 +3075,7 @@ mod tests {
 	use tokio::sync::RwLock;
 	use uuid::Uuid;
 
-	use super::{DbResult, Method, RpcProtocol};
+	use super::{DbResult, Method, RpcProtocol, bounded_by_query_timeout};
 	use crate::dbs::Session;
 	use crate::kvs::Datastore;
 	use crate::types::{PublicArray, PublicValue};
@@ -3120,6 +3144,19 @@ mod tests {
 
 	fn use_params(ns: &str, db: &str) -> PublicArray {
 		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	#[test]
+	fn the_query_timeout_spares_methods_whose_commit_must_be_reported() {
+		let exempt =
+			[Method::Begin, Method::Commit, Method::Cancel, Method::Attach, Method::Detach];
+		for method in exempt {
+			assert!(!bounded_by_query_timeout(method), "{method} must not be cut short");
+		}
+		for method in [Method::Query, Method::Signin, Method::Signup, Method::Refresh, Method::Use]
+		{
+			assert!(bounded_by_query_timeout(method), "{method} must be bounded");
+		}
 	}
 
 	/// Regression (GHSA-2v9j): the RPC `use` handler (`yuse`) enforces the same

@@ -130,8 +130,10 @@ impl Tasks {
 /// [`Builder::without_maintenance_tasks`](crate::kvs::ds::builder::Builder::without_maintenance_tasks).
 ///
 /// On a datastore that [`Datastore::is_read_only`] reports, only the cluster
-/// heartbeat runs: it writes this node's own membership rows, which a read-only
-/// datastore still accepts, and every other task writes state it refuses.
+/// heartbeat and the expired RPC session purge run (see [`read_only_slots`]):
+/// they write this node's own membership rows and attached sessions' durable
+/// copies, which a read-only datastore still accepts, and every other task
+/// writes state it refuses.
 ///
 /// A build without the `maintenance-tasks` feature starts nothing and logs an
 /// error naming the feature: its host drives that work instead.
@@ -158,6 +160,10 @@ fn start(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOption
 	let mut tasks = Vec::with_capacity(8);
 	tasks.push(spawn_task_node_membership_refresh(Weak::clone(&weak), canceller.clone(), opts));
 	if dbs.is_read_only() {
+		let slots = read_only_slots(opts);
+		if !slots.is_empty() {
+			tasks.push(spawn_task_scheduler("sweep", slots, weak, canceller, opts));
+		}
 		return Tasks(tasks);
 	}
 	tasks.push(spawn_task_write_barrier(Weak::clone(&weak), canceller.clone()));
@@ -653,6 +659,15 @@ fn sweep_slots(opts: &EngineOptions) -> Vec<Slot> {
 	])
 }
 
+/// The jobs a datastore open read-only still runs, besides the cluster
+/// heartbeat: only the expired RPC session purge. A read-only store still
+/// accepts attached sessions, so without the purge their expired copies, which
+/// an anonymous `attach` can create, would accumulate for as long as it stays
+/// read-only.
+fn read_only_slots(opts: &EngineOptions) -> Vec<Slot> {
+	slots(&[(MaintenanceJob::RpcSessionGc, opts.rpc_session_gc_interval)])
+}
+
 /// Builds a schedule from the given job/interval pairs.
 ///
 /// A zero interval leaves the job unregistered, which is how the documented
@@ -902,7 +917,8 @@ mod test {
 	#[cfg(feature = "kv-mem")]
 	use super::RefreshClaim;
 	use super::{
-		MaintenanceJob, Slot, maintenance_loop, maintenance_slots, next_slot, sweep_slots,
+		MaintenanceJob, Slot, maintenance_loop, maintenance_slots, next_slot, read_only_slots,
+		sweep_slots,
 	};
 	#[cfg(feature = "kv-mem")]
 	use crate::kvs::Datastore;
@@ -1015,6 +1031,17 @@ mod test {
 		assert!(maintenance.contains(&MaintenanceJob::NodeExpire));
 		assert!(maintenance.contains(&MaintenanceJob::TikvLockCleanup));
 		assert!(sweeps.contains(&MaintenanceJob::ReclaimTombstones));
+	}
+
+	/// A read-only store runs only the session purge, which writes nothing but
+	/// the session copies it still accepts.
+	#[test]
+	fn a_read_only_store_schedules_only_the_session_purge() {
+		let jobs: Vec<_> =
+			read_only_slots(&EngineOptions::default()).into_iter().map(|s| s.job).collect();
+		assert_eq!(jobs, [MaintenanceJob::RpcSessionGc]);
+		let opts = EngineOptions::default().with_rpc_session_gc_interval(Duration::ZERO);
+		assert!(read_only_slots(&opts).is_empty());
 	}
 
 	/// The two groups must partition the job set: a job in neither would never

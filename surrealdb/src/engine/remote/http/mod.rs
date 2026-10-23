@@ -41,34 +41,21 @@
 //!
 //! [`Level`]: surrealdb_iam::Level
 //!
-//! # Multi-Node Deployments and Sticky Sessions
+//! # Multi-Node Deployments
 //!
-//! **Important:** When deploying SurrealDB in a multi-node cluster behind a load balancer,
-//! you must configure **sticky sessions** (session affinity) at the load balancer level.
+//! The server stores each attached HTTP session — its authentication state, selected namespace
+//! and database, and session variables — in its datastore, and every request loads it from
+//! there. Any node sharing that datastore therefore serves any session, so a load balancer in
+//! front of several nodes may route each request to any of them, and a session survives a
+//! server restart.
 //!
-//! The SDK performs DNS resolution at connection time and pins all requests to a single
-//! resolved IP address. However, if that IP address belongs to a load balancer, the load
-//! balancer may still distribute requests to different backend nodes unless sticky sessions
-//! are configured.
+//! Older servers keep an HTTP session in the memory of the node that attached it. Behind a load
+//! balancer they need sticky sessions (session affinity), or a [WebSocket
+//! connection](`super::ws`), which stays on one node; otherwise a request routed to another node
+//! fails with "session not found".
 //!
-//! ## Why Sticky Sessions Are Required
-//!
-//! SurrealDB maintains session state on the server, including:
-//! - Authentication state
-//! - Selected namespace and database
-//! - Session variables set via `LET`/`SET`
-//! - Transaction context
-//!
-//! If requests for a single SDK session are routed to different server nodes, those nodes
-//! will not have the session state, resulting in "session not found" errors.
-//!
-//! ## Recommendations
-//!
-//! - **Single-node deployments:** No special configuration needed.
-//! - **Multi-node with load balancer:** Configure sticky sessions/session affinity based on client
-//!   IP or a session cookie.
-//! - **Multi-node clusters:** Consider using [WebSocket connections](`super::ws`) instead, which
-//!   maintain a persistent connection to a single node naturally.
+//! The SDK resolves the server's address once, at connection time, and sends every request to
+//! that address.
 //!
 //! ## Example: Connecting via HTTP
 //!
@@ -78,14 +65,10 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> surrealdb::Result<()> {
-//! // Connect to a single server or load balancer with sticky sessions configured
 //! let db = Surreal::new::<Http>("localhost:8000").await?;
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! For multi-node deployments without sticky session support at the infrastructure level,
-//! prefer WebSocket connections which maintain session affinity through persistent connections.
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -312,6 +295,10 @@ impl RouterState {
 	}
 
 	/// Handle a session being dropped.
+	///
+	/// The detach carries the session's own credentials: the server binds an
+	/// attached session to the principal that signed in on it and refuses any
+	/// other caller, a detach included.
 	async fn handle_session_drop(&self, session_id: Uuid) {
 		let found = self.sessions.get(&session_id);
 		self.sessions.remove(&session_id);
@@ -358,9 +345,9 @@ impl RouterState {
 ///
 /// # Multi-Node Deployments
 ///
-/// When connecting to a load balancer in front of multiple SurrealDB nodes,
-/// ensure sticky sessions are configured. See the [module documentation](self)
-/// for details.
+/// Any node behind a load balancer can serve this client's session; older
+/// servers need sticky sessions. See the [module documentation](self) for
+/// details.
 ///
 /// # Example
 ///
@@ -384,9 +371,9 @@ pub struct Http;
 ///
 /// # Multi-Node Deployments
 ///
-/// When connecting to a load balancer in front of multiple SurrealDB nodes,
-/// ensure sticky sessions are configured. See the [module documentation](self)
-/// for details.
+/// Any node behind a load balancer can serve this client's session; older
+/// servers need sticky sessions. See the [module documentation](self) for
+/// details.
 ///
 /// # Example
 ///
@@ -406,14 +393,13 @@ pub struct Https;
 /// An HTTP client for communicating with the server via HTTP.
 ///
 /// This client maintains session state and supports all SurrealDB operations
-/// over HTTP. The client pins connections to a specific server IP address
-/// resolved at connection time to ensure session consistency.
+/// over HTTP. The client sends every request to the server address resolved at
+/// connection time.
 ///
-/// # Session Affinity
+/// # Multi-Node Deployments
 ///
-/// All requests from this client are routed to the same server node (determined
-/// by DNS resolution at connection time). However, if connecting through a load
-/// balancer, sticky sessions must be configured at the load balancer level.
+/// The server stores the client's session in its datastore, so any node behind
+/// a load balancer can serve each request; older servers need sticky sessions.
 /// See the [module documentation](self) for details.
 ///
 /// # Comparison with WebSocket
@@ -423,10 +409,10 @@ pub struct Https;
 /// | Live queries | ❌ Not supported | ✅ Supported |
 /// | Connection persistence | Per-request | Persistent |
 /// | Proxy compatibility | Excellent | May require configuration |
-/// | Multi-node clusters | Requires sticky sessions | Natural session affinity |
+/// | Multi-node clusters | Any node serves the session | Natural session affinity |
 ///
-/// For multi-node deployments or when live queries are needed, consider using
-/// [WebSocket connections](`super::ws::Client`) instead.
+/// When live queries are needed, use [WebSocket
+/// connections](`super::ws::Client`) instead.
 #[derive(Debug, Clone)]
 pub struct Client(());
 
@@ -980,11 +966,10 @@ async fn router(
 			.await?;
 
 			// Stash the signup-issued bearer token so subsequent HTTP
-			// requests carry the new credentials and pass the
-			// per-session ownership gate added in
-			// `Http::verify_caller_for_session`. Without this the next
-			// auth call would arrive anonymous against a session that
-			// the server has already bound to the new record principal.
+			// requests carry the new credentials and pass the server's
+			// per-session ownership gate. Without this the next auth call
+			// would arrive anonymous against a session that the server has
+			// already bound to the new record principal.
 			let value = match results.first() {
 				Some(result) => result.clone().result?,
 				None => {

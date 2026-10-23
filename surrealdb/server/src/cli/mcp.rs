@@ -102,7 +102,7 @@ pub async fn init<
 		engine,
 		crt: None,
 		key: None,
-		durable_session_ttl: None,
+		durable_session_ttl: crate::cnf::DEFAULT_DURABLE_SESSION_TTL,
 		cookie_auth: false,
 	};
 

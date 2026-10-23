@@ -49,8 +49,9 @@ files (`live.rs`, `run.rs`, `serialisation.rs`, `session_isolation.rs`,
 - **CLI-process** — asserts the `surreal` CLI binary / process (stdout, argv
   parsing), not an endpoint.
 - **experimental-feature** — gated behind an experimental build/feature not
-  enabled in the conformance harness (e.g. `files` buckets, ML, durable
-  sessions requiring an on-disk restart).
+  enabled in the conformance harness (e.g. `files` buckets, ML).
+- **server-restart** — restarts the server on the same on-disk datastore; the
+  harness only spawns fresh in-memory servers.
 - **not-yet-ported** — portable in principle, simply out of Phase-1 scope. These
   are NOT deletion-eligible until ported (deleting them would drop coverage).
 
@@ -139,13 +140,11 @@ KEEP-RUST:
   the deny/subject checks for the upgrade ARE covered in `http.test.ts`)
 - `rpc_durable_session_survives_restart`,
   `rpc_durable_session_expires_after_ttl`,
-  `rpc_durable_session_expires_while_cached`,
-  `rpc_detached_durable_session_cannot_be_resumed`,
-  `rpc_sessions_are_not_durable_by_default`,
-  `rpc_attach_signup_signin_forwards_bearer` — **experimental-feature /
-  embedded-engine** (need `--durable-sessions` + `storage-surrealkv` + a server
-  RESTART on the same on-disk path; the harness only spawns fresh in-memory
-  servers)
+  `rpc_detached_durable_session_cannot_be_resumed` — **server-restart** (need
+  `storage-surrealkv` + a server RESTART on the same on-disk path)
+- `rpc_durable_session_expires_without_restart`,
+  `rpc_attach_signup_signin_forwards_bearer` — **not-yet-ported** (the first
+  needs a server started with a seconds-long `--durable-session-ttl`)
 - `bucket_where_permissions_deny_record_users_in_streaming_planner`,
   `bucket_action_and_file_variables_gate_reads_in_streaming_planner`,
   `bucket_action_and_file_variables_gate_writes_in_streaming_planner`,
@@ -302,7 +301,7 @@ remain".
 
 - **All KEEP-RUST fns** enumerated per file in section 2 (protocol-byte,
   handshake-header, SDK-API, embedded-engine, CLI-process,
-  experimental-feature, not-yet-ported).
+  experimental-feature, server-restart, not-yet-ported).
 - **The entire `api_integration` suite** — the JS port re-pins wire behavior but
   the Rust suite is the only coverage of the embedded `engine::local` backends
   and the typed SDK. Deletion-eligible: 0.
