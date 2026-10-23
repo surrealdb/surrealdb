@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use castaway::{cast, match_type};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -379,16 +380,42 @@ impl_surreal_value!(
 	}
 );
 
+/// The value of a whole-number Decimal as `T`, or `None` when the Decimal has a
+/// fractional part or does not fit in `T`.
+fn whole_decimal_to<T: TryFrom<i128>>(d: &Decimal) -> Option<T> {
+	if !d.is_integer() {
+		return None;
+	}
+	d.to_i128().and_then(|n| T::try_from(n).ok())
+}
+
+/// The error for a Decimal that [`whole_decimal_to`] could not convert to `T`.
+fn decimal_to_int_error<T>(d: Decimal) -> Error {
+	let error = OutOfRangeError::new(d, std::any::type_name::<T>());
+	if d.is_integer() {
+		error.into()
+	} else {
+		error.with_context("the value has a fractional part").into()
+	}
+}
+
 impl_surreal_value!(
 	i64 as kind!(int),
 	is_int, is_i64(value) => matches!(value, Value::Number(Number::Int(_))),
 	from_int, from_i64(self) => Value::Number(Number::Int(self)),
 	into_int, into_i64(value) => {
-		let Value::Number(Number::Int(n)) = value else {
-			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
-		};
-		Ok(n)
+		if let Value::Number(Number::Int(n)) = value {
+			Ok(n)
+		} else if let Value::Number(Number::Decimal(d)) = value {
+			// A whole-number Decimal converts when it fits, as it does for the other
+			// integer types
+			whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<i64>(d))
+		} else {
+			Err(ConversionError::from_value(Self::kind_of(), &value).into())
+		}
 	},
+	// A reference into the value, so only an `Int` is returned. `into_i64` and
+	// `is_i64_and` also accept a whole-number Decimal that fits.
 	as_ty => as_int, as_i64(self) => {
 		if let Value::Number(Number::Int(n)) = self {
 			Some(n)
@@ -399,6 +426,8 @@ impl_surreal_value!(
 	is_ty_and => is_int_and, is_i64_and(self, callback) => {
 		if let Value::Number(Number::Int(n)) = self {
 			callback(n)
+		} else if let Value::Number(Number::Decimal(d)) = self {
+			whole_decimal_to::<i64>(d).is_some_and(|n| callback(&n))
 		} else {
 			false
 		}
@@ -1258,15 +1287,25 @@ macro_rules! impl_numeric {
 				}
 
 				fn into_value(self) -> Value {
-					Value::Number(Number::Int(self as i64))
+					// A value that does not fit in `i64` is stored as a whole-number
+					// Decimal, the same form the serde serializer writes
+					match i64::try_from(self) {
+						Ok(n) => Value::Number(Number::Int(n)),
+						Err(_) => Value::Number(Number::Decimal(Decimal::from(self))),
+					}
 				}
 
 				fn from_value(value: Value) -> Result<Self, Error> {
-					let Value::Number(Number::Int(n)) = value else {
-						return Err(ConversionError::from_value(Self::kind_of(), &value).into());
-					};
-					<$k>::try_from(n)
-						.map_err(|_| OutOfRangeError::new(n, std::any::type_name::<$k>()).into())
+					match value {
+						Value::Number(Number::Int(n)) => <$k>::try_from(n)
+							.map_err(|_| OutOfRangeError::new(n, std::any::type_name::<$k>()).into()),
+						// A whole-number Decimal, which `into_value` writes for a value that
+						// does not fit in `i64`, converts when it fits in this type
+						Value::Number(Number::Decimal(d)) => {
+							whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
+						}
+						value => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
+					}
 				}
 			}
 
@@ -1288,21 +1327,19 @@ macro_rules! impl_numeric {
 
 				/// Checks if this value matches the type and passes the callback check
 				pub fn $is_and_fn(&self, callback: impl FnOnce(&$k) -> bool) -> bool {
-					if let Value::Number(Number::Int(n)) = self {
-						if let Ok(v) = <$k>::try_from(*n) {
-							return callback(&v);
-						}
+					match self.$as_fn() {
+						Some(v) => callback(&v),
+						None => false,
 					}
-					false
 				}
 
-				/// Returns a reference-like value if it matches the expected type
-				/// Note: For integer types, this returns `None` since the value needs conversion
+				/// Returns the value as this type when it is an `Int` or a whole-number
+				/// Decimal that fits in it, and `None` otherwise
 				pub fn $as_fn(&self) -> Option<$k> {
-					if let Value::Number(Number::Int(n)) = self {
-						<$k>::try_from(*n).ok()
-					} else {
-						None
+					match self {
+						Value::Number(Number::Int(n)) => <$k>::try_from(*n).ok(),
+						Value::Number(Number::Decimal(d)) => whole_decimal_to(d),
+						_ => None,
 					}
 				}
 			}

@@ -472,3 +472,136 @@ fn ip_addresses_roundtrip_as_strings() {
 	assert!(IpAddr::from_value(Value::String("not an address".to_string())).is_err());
 	assert!(Ipv4Addr::from_value(Value::String("::1".to_string())).is_err());
 }
+
+#[test]
+fn unsigned_integers_wider_than_i64_roundtrip() {
+	// An integer above `i64::MAX` is stored as a whole-number Decimal and
+	// deserializes back into the field it came from.
+	#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+	struct Nums {
+		u64_max: u64,
+		just_over_i64: u64,
+		i64_min: i64,
+		u32_max: u32,
+	}
+
+	let input = Nums {
+		u64_max: u64::MAX,
+		just_over_i64: (i64::MAX as u64) + 1,
+		i64_min: i64::MIN,
+		u32_max: u32::MAX,
+	};
+
+	let value = SerdeWrapper(input).into_value();
+	let Value::Object(object) = &value else {
+		panic!("numbers should serialize as an object");
+	};
+
+	// Stored intact, as a Decimal, rather than wrapped to a negative Int.
+	assert!(matches!(object.get("u64_max"), Some(Value::Number(Number::Decimal(_)))));
+	// A value that still fits stays an Int.
+	assert_eq!(object.get("u32_max"), Some(&Value::Number(Number::Int(u32::MAX as i64))));
+
+	let SerdeWrapper(output): SerdeWrapper<Nums> =
+		SerdeWrapper::from_value(value).expect("wide integers should deserialize");
+	assert_eq!(output.u64_max, u64::MAX);
+	assert_eq!(output.just_over_i64, (i64::MAX as u64) + 1);
+	assert_eq!(output.i64_min, i64::MIN);
+	assert_eq!(output.u32_max, u32::MAX);
+}
+
+#[test]
+fn surreal_value_integers_wider_than_i64_roundtrip() {
+	// An integer above `i64::MAX` is stored as a whole-number Decimal and
+	// converts back into the field it came from.
+	#[derive(Debug, SurrealValue, PartialEq, Eq)]
+	#[surreal(crate = "surrealdb_types")]
+	struct Nums {
+		u64_max: u64,
+		just_over_i64: u64,
+		usize_max: usize,
+		i64_min: i64,
+		u32_max: u32,
+	}
+
+	let input = Nums {
+		u64_max: u64::MAX,
+		just_over_i64: (i64::MAX as u64) + 1,
+		usize_max: usize::MAX,
+		i64_min: i64::MIN,
+		u32_max: u32::MAX,
+	};
+
+	let value = input.into_value();
+	let Value::Object(object) = &value else {
+		panic!("numbers should convert to an object");
+	};
+
+	// Stored intact, as a Decimal, rather than wrapped to a negative Int.
+	assert!(matches!(object.get("u64_max"), Some(Value::Number(Number::Decimal(_)))));
+	// A value that still fits stays an Int.
+	assert_eq!(object.get("u32_max"), Some(&Value::Number(Number::Int(u32::MAX as i64))));
+
+	let output = Nums::from_value(value).expect("wide integers should convert back");
+	assert_eq!(output.u64_max, u64::MAX);
+	assert_eq!(output.just_over_i64, (i64::MAX as u64) + 1);
+	assert_eq!(output.usize_max, usize::MAX);
+	assert_eq!(output.i64_min, i64::MIN);
+	assert_eq!(output.u32_max, u32::MAX);
+
+	// A whole-number Decimal converts into every integer type it fits in, i64
+	// included.
+	let five = Value::Number(Number::Decimal(rust_decimal::Decimal::from(5)));
+	assert_eq!(i64::from_value(five.clone()).unwrap(), 5);
+	assert_eq!(i32::from_value(five.clone()).unwrap(), 5);
+	assert!(five.is_i64_and(|n| *n == 5));
+
+	// A fractional Decimal is refused, and the error says why.
+	let fraction = Value::Number(Number::Decimal(rust_decimal::Decimal::new(15, 1)));
+	let error = u64::from_value(fraction.clone()).unwrap_err().to_string();
+	assert!(error.contains("fractional part"), "{error}");
+	assert!(i64::from_value(fraction).is_err());
+
+	// A whole Decimal that does not fit is refused.
+	let too_big = Value::Number(Number::Decimal(rust_decimal::Decimal::from(u64::MAX)));
+	assert!(u32::from_value(too_big.clone()).is_err());
+	assert_eq!(too_big.as_u64(), Some(u64::MAX));
+}
+
+#[test]
+fn fractional_decimals_deserialize_without_truncation() {
+	// A fractional Decimal is offered to serde as `f64`: a float or an untyped
+	// target keeps the fraction, and an integer target refuses it.
+	let price = Value::Number(Number::Decimal(rust_decimal::Decimal::new(1999, 2)));
+
+	let SerdeWrapper(as_f64): SerdeWrapper<f64> = SerdeWrapper::from_value(price.clone())
+		.expect("a fractional Decimal should deserialize as f64");
+	assert_eq!(as_f64, 19.99);
+
+	let SerdeWrapper(as_json): SerdeWrapper<serde_json::Value> =
+		SerdeWrapper::from_value(price.clone())
+			.expect("a fractional Decimal should deserialize as JSON");
+	assert_eq!(as_json, serde_json::json!(19.99));
+
+	assert!(SerdeWrapper::<i128>::from_value(price.clone()).is_err());
+	assert!(SerdeWrapper::<u64>::from_value(price.clone()).is_err());
+
+	// A Decimal target keeps the exact value, including digits an f64 cannot
+	// hold. An untyped target receives such a value as its decimal text rather
+	// than a rounded float.
+	let SerdeWrapper(as_decimal): SerdeWrapper<rust_decimal::Decimal> =
+		SerdeWrapper::from_value(price).expect("a Decimal should deserialize as a Decimal");
+	assert_eq!(as_decimal, rust_decimal::Decimal::new(1999, 2));
+
+	let precise: rust_decimal::Decimal = "0.1234567890123456789012345678".parse().unwrap();
+	let precise_value = Value::Number(Number::Decimal(precise));
+	let SerdeWrapper(as_decimal): SerdeWrapper<rust_decimal::Decimal> =
+		SerdeWrapper::from_value(precise_value.clone())
+			.expect("a precise Decimal should deserialize as a Decimal");
+	assert_eq!(as_decimal, precise);
+
+	let SerdeWrapper(as_json): SerdeWrapper<serde_json::Value> =
+		SerdeWrapper::from_value(precise_value)
+			.expect("a precise Decimal should deserialize as JSON");
+	assert_eq!(as_json, serde_json::json!("0.1234567890123456789012345678"));
+}

@@ -23,7 +23,19 @@ impl serde::de::Error for Error {
 	}
 }
 
-fn deserialize_number<'de, V>(n: &Number, visitor: V) -> Result<V::Value, Error>
+/// How a fractional Decimal is offered to a visitor.
+#[derive(Clone, Copy)]
+enum Fraction {
+	/// As `f64`, for a target that asked for a float or an integer: a float
+	/// target accepts the nearest `f64`, and an integer target refuses it.
+	Float,
+	/// As `f64` when that reproduces the Decimal exactly, and otherwise as its
+	/// decimal text, for a self-describing target such as `rust_decimal::Decimal`
+	/// or `serde_json::Value`, so the value is never rounded on the way in.
+	Exact,
+}
+
+fn deserialize_number<'de, V>(n: &Number, visitor: V, fraction: Fraction) -> Result<V::Value, Error>
 where
 	V: Visitor<'de>,
 {
@@ -31,10 +43,44 @@ where
 		Number::Int(v) => visitor.visit_i64(*v),
 		Number::Float(v) => visitor.visit_f64(*v),
 		Number::Decimal(decimal) => {
-			if let Some(v) = decimal.to_i128() {
-				visitor.visit_i128(v)
-			} else {
-				Err(serde::de::Error::custom("decimal value not in range of an i128"))
+			// A whole Decimal is offered as the narrowest of `u64`, `i64`, `u128` and
+			// `i128` that holds it, so integer visitors of any width accept it. A
+			// fractional Decimal is offered as described by `Fraction`, so it is never
+			// truncated to an integer.
+			if decimal.is_integer() {
+				if let Some(v) = decimal.to_u64() {
+					return visitor.visit_u64(v);
+				}
+				if let Some(v) = decimal.to_i64() {
+					return visitor.visit_i64(v);
+				}
+				if let Some(v) = decimal.to_u128() {
+					return visitor.visit_u128(v);
+				}
+				if let Some(v) = decimal.to_i128() {
+					return visitor.visit_i128(v);
+				}
+				return Err(serde::de::Error::custom("decimal value not in range of an i128"));
+			}
+			let float = decimal.to_f64();
+			match fraction {
+				Fraction::Float => match float {
+					Some(v) => visitor.visit_f64(v),
+					None => {
+						Err(serde::de::Error::custom("decimal value not representable as an f64"))
+					}
+				},
+				Fraction::Exact => match float {
+					// `f64` keeps a numeric target numeric when nothing is lost: the
+					// shortest text of the float parses back to the same Decimal
+					Some(v)
+						if v.to_string().parse::<rust_decimal::Decimal>().ok()
+							== Some(*decimal) =>
+					{
+						visitor.visit_f64(v)
+					}
+					_ => visitor.visit_string(decimal.to_string()),
+				},
 			}
 		}
 	}
@@ -47,7 +93,7 @@ macro_rules! deserialize_number {
 			V: Visitor<'de>,
 		{
 			if let Value::Number(n) = self {
-				deserialize_number(&n, visitor)
+				deserialize_number(&n, visitor, Fraction::Float)
 			} else {
 				Err(self.invalid_type(&visitor))
 			}
@@ -144,7 +190,7 @@ impl<'de> serde::Deserializer<'de> for Value {
 		match self {
 			Value::Null => visitor.visit_unit(),
 			Value::Bool(v) => visitor.visit_bool(v),
-			Value::Number(n) => deserialize_number(&n, visitor),
+			Value::Number(n) => deserialize_number(&n, visitor, Fraction::Exact),
 			Value::String(v) => visitor.visit_string(v),
 			Value::Array(v) => visit_array(v, visitor),
 			Value::Object(v) => v.deserialize_any(visitor),
