@@ -1,7 +1,8 @@
 use axum_extra::headers;
 use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
-use surrealdb::headers::ID;
+
+use super::ID;
 
 /// Typed header implementation for the id header.
 /// It's used to specify the session id.

@@ -9,7 +9,6 @@ use axum_extra::headers::Header;
 use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
 use http::header::{InvalidHeaderValue, SERVER};
 use http::{HeaderName, HeaderValue};
-use surrealdb::headers::VERSION;
 use surrealdb_cnf::SERVER_NAME;
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -31,6 +30,14 @@ pub use content_type::ContentType;
 pub use db::SurrealDatabase;
 pub use id::SurrealId;
 pub use ns::SurrealNamespace;
+
+/// The SurrealDB header names, as `HeaderName`s; see [`surrealdb_rpc::headers`].
+pub static ID: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::ID);
+pub static NS: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::NS);
+pub static DB: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::DB);
+pub static AUTH_NS: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::AUTH_NS);
+pub static AUTH_DB: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::AUTH_DB);
+pub static VERSION: HeaderName = HeaderName::from_static(surrealdb_rpc::headers::VERSION);
 
 /// Creates a Tower middleware layer that conditionally adds a response header.
 ///

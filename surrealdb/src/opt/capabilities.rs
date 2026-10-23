@@ -164,11 +164,7 @@ impl Capabilities {
 	/// Create a builder with all capabilities enabled.
 	pub fn all() -> Self {
 		Capabilities {
-			cap: CoreCapabilities::all()
-				.with_functions(Targets::All)
-				.without_functions(Targets::None)
-				.with_network_targets(Targets::All)
-				.without_network_targets(Targets::None),
+			cap: CoreCapabilities::all(),
 		}
 	}
 

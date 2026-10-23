@@ -6,7 +6,6 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use rand::Rng;
-use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_catalog::providers::RootProvider;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel::Receiver;
@@ -720,7 +719,7 @@ impl DbsCapabilities {
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
-		merge_capabilities(SdkCapabilities::all().into(), &self)
+		merge_capabilities(Capabilities::all(), &self)
 	}
 }
 

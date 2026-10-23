@@ -20,6 +20,7 @@ pub mod error;
 pub mod export;
 pub mod format;
 pub mod framing;
+pub mod headers;
 pub mod method;
 pub mod query;
 pub mod request;

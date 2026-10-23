@@ -48,7 +48,6 @@ use axum_server::Handle;
 use axum_server::accept::NoDelayAcceptor;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use http::header;
-use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
@@ -67,6 +66,7 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
+use self::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 /// Re-exported so an edition overriding `/ready` can reuse the community
 /// readiness decision; pair it with [`community_router`] to omit the built-in
 /// `/ready` route.
