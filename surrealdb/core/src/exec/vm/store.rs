@@ -886,7 +886,11 @@ async fn step_inner(
 			// The changefeed buffer holds the Rust definition it writes at
 			// commit.
 			let stored: crate::catalog::StoredTableDefinition = rust(&read(regs, *definition))?;
-			ctx.txn().changefeed_buffer_table_change(ns, db, &tb, &stored);
+			// The external live-query engine leaves the change feed to its host, so a
+			// definition is not recorded in one.
+			if ctx.ctx().config.datastore.live_query_engine.writes_changefeed() {
+				ctx.txn().changefeed_buffer_table_change(ns, db, &tb, &stored);
+			}
 		}
 		StoreInstr::ClearDatastoreCache => {
 			if let Some(cache) = ctx.ctx().get_cache() {

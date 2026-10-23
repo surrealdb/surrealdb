@@ -47,14 +47,17 @@ static CACHE_COOLDOWN: LazyLock<chrono::Duration> =
 		}
 	});
 
-#[cfg(not(target_family = "wasm"))]
 static REMOTE_TIMEOUT: LazyLock<chrono::Duration> =
 	LazyLock::new(|| match std::env::var("SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS") {
 		Ok(milliseconds_str) => {
 			let milliseconds = milliseconds_str.parse::<u64>().expect(
 				"Expected a valid number of milliseconds for SURREAL_JWKS_REMOTE_TIMEOUT_MILLISECONDS",
 			);
-			Duration::milliseconds(milliseconds as i64)
+			// Saturates, so the value is never negative and always converts to a std duration.
+			i64::try_from(milliseconds)
+				.ok()
+				.and_then(Duration::try_milliseconds)
+				.unwrap_or(Duration::MAX)
 		}
 		Err(_) => {
 			Duration::milliseconds(1000) // Set default remote timeout to 1 second
@@ -374,16 +377,17 @@ async fn fetch_jwks_from_url(kvs: &Datastore, url: &str) -> Result<JwkSet> {
 		let cache = kvs.cache();
 		#[cfg(not(target_family = "wasm"))]
 		let client = build_jwks_client(kvs)?;
+		// The runtime's `fetch` takes the redirect and DNS decisions on wasm, so the client carries
+		// only the configured User-Agent, which the Workers `fetch` permits setting.
 		#[cfg(target_family = "wasm")]
-		let client = Client::new();
+		let client = Client::builder()
+			.user_agent(kvs.config().http.surrealdb_user_agent.as_str())
+			.build()?;
 		let req = client.get(url);
 		// Add a User-Agent header so that WAF rules don't reject the request
 		#[cfg(not(target_family = "wasm"))]
 		let req = req.header(reqwest::header::USER_AGENT, &kvs.config().http.surrealdb_user_agent);
-		#[cfg(not(target_family = "wasm"))]
 		let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
-		#[cfg(target_family = "wasm")]
-		let res = req.send().await?;
 		if !res.status().is_success() {
 			warn!(
 				"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",

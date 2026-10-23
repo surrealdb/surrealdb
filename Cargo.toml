@@ -880,3 +880,25 @@ panic = 'unwind'
 # rustc. Worth it for an iterative profiling loop.
 lto = "thin"
 codegen-units = 16
+
+# The Workers node module at opt-level 3: it stays within Workers' 64 MiB module limit and runs
+# faster than the size-optimised profile.
+[profile.wasm-fast]
+inherits = "release"
+opt-level = 3
+# Keep symbol names (the wasm name section) so a production profile of the Workers node
+# symbolises; stripping only debug info changes no code.
+strip = "debuginfo"
+
+# The Workers node module as built today (scripts/build-surreal.sh in cf-experiments): faster
+# than z, about 22 MB.
+[profile.wasm-s]
+inherits = "release"
+opt-level = 's'
+
+[patch.crates-io]
+# quanta 0.12.6 leaves Emscripten out of its unix monotonic clock. Upstream fixed it
+# in 0.13.0 (metrics-rs/quanta 258aaad), but egg 0.11 pins quanta ^0.12, so this
+# carries the two cfg lines of that fix on 0.12.6. Remove this patch once egg
+# accepts quanta 0.13.
+quanta = { path = "third_party/quanta" }

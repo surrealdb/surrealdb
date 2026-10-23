@@ -51,12 +51,12 @@ pub mod wire;
 
 pub use surrealdb_core::rpc::Format;
 pub use surrealdb_rpc::export::Config as ExportConfig;
-pub use surrealdb_rpc::{DbResult, Request};
+pub use surrealdb_rpc::{DbResponse, DbResult, Request};
 
 pub use self::options::{
 	CapabilitiesConfig, DefaultsConfig, Options, PlannerStrategy, Targets, TargetsConfig,
 };
-pub use self::stream::{EncodedQueryFrames, QueryFrames};
+pub use self::stream::{BoundedHooks, EncodedQueryFrames, FramedQueryFrames, QueryFrames};
 
 /// An embedded SurrealDB instance addressed over the RPC protocol.
 ///
@@ -153,6 +153,51 @@ impl EmbeddedEngine {
 		})
 	}
 
+	/// A connection over a datastore its caller opened and keeps, with an
+	/// implicit default session of its own, so one datastore can serve many
+	/// connections the way a server does.
+	///
+	/// Live-query notifications are not delivered: the datastore's
+	/// notification channel, if any, belongs to its owner.
+	pub fn attach(kvs: Arc<Datastore>) -> Self {
+		Self::attach_as(kvs, Session::default().with_rt(true))
+	}
+
+	/// [`Self::attach`] with the default session starting as `session` rather
+	/// than anonymous, e.g. already signed in and with a namespace selected.
+	pub fn attach_as(kvs: Arc<Datastore>, mut session: Session) -> Self {
+		let (_, notifications) = async_channel::bounded(1);
+		let id = Uuid::now_v7();
+		session.id = Some(id);
+		let sessions = Arc::new(HashMap::new());
+		sessions.insert(id, Arc::new(RwLock::new(session)));
+		Self {
+			id,
+			kvs,
+			live_queries: Arc::new(HashMap::new()),
+			transactions: DashMap::new(),
+			sessions,
+			notifications,
+		}
+	}
+
+	/// A copy of the default session as it is now: who it is signed in as, the
+	/// namespace and database selected, the variables set. A host that keeps a
+	/// connection across its own restart saves this, and starts the connection
+	/// again with [`Self::attach_as`].
+	pub async fn default_session_snapshot(&self) -> Session {
+		self.default_session().read().await.clone()
+	}
+
+	/// The namespace and database of the default session when it is signed in
+	/// as a root owner, and `None` otherwise.
+	pub async fn root_scope(&self) -> Option<(Option<String>, Option<String>)> {
+		let session = self.sessions.get(&self.id)?;
+		let session = session.read().await;
+		(session.au.is_root() && session.au.has_owner_role())
+			.then(|| (session.ns.clone(), session.db.clone()))
+	}
+
 	/// Answers one RPC request.
 	///
 	/// This is the engine's actual boundary: no encoding is involved, so a shim
@@ -197,6 +242,30 @@ impl EmbeddedEngine {
 			}
 		};
 		wire::encode(format, value)
+	}
+
+	/// Answers one encoded RPC request with the reply a WebSocket server sends:
+	/// the request's `id` and session echoed beside its `result` or `error`.
+	///
+	/// A request that cannot be framed at all is answered too, with an error
+	/// and no `id`, since a socket has nowhere else to report it.
+	pub async fn execute_framed(&self, format: Format, request: &[u8]) -> Result<Vec<u8>> {
+		let request = wire::decode(format, request, self.recursion_limit())
+			.and_then(|v| Ok(v.into_object()?))
+			.and_then(|obj| Ok(Request::from_object(obj)?));
+		let response = match request {
+			Ok(request) => {
+				let id = request.id.clone();
+				let session = request.session_id.map(Into::into);
+				DbResponse::new(id, session, self.execute(request).await)
+			}
+			Err(err) => DbResponse::failure(
+				None,
+				None,
+				surrealdb_types::Error::internal(format!("{err:#}")),
+			),
+		};
+		wire::encode(format, surrealdb_types::SurrealValue::into_value(response))
 	}
 
 	/// The live-query notifications for this connection.

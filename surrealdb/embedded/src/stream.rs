@@ -150,6 +150,19 @@ impl EmbeddedEngine {
 		request: Request,
 		format: Option<Format>,
 	) -> Result<Receiver<T>, Error> {
+		Ok(self.start_stream_with(request, format, false).await?.0)
+	}
+
+	/// [`Self::start_stream`], with the driver either spawned or, when `inline`, handed back for
+	/// the consumer to poll alongside the channel ([`FramedQueryFrames::next`] does): the query
+	/// then runs only inside the consumer's polls, so whatever the consumer sets up around them
+	/// (a host's pin of reads to one log position) reaches it.
+	async fn start_stream_with<T: FrameSink>(
+		&self,
+		request: Request,
+		format: Option<Format>,
+		inline: bool,
+	) -> Result<(Receiver<T>, Option<Pin<Box<dyn Future<Output = ()>>>>), Error> {
 		// `query_stream` is its own capability target, and the execution below
 		// re-applies the `query` gate inside `RpcProtocol::query_stream` — so
 		// denying either method name denies streaming, exactly as it does on the
@@ -171,11 +184,12 @@ impl EmbeddedEngine {
 			items_tx,
 		)
 		.await?;
-		Ok(self.spawn_driver(job, principal, session_id, cancel, items, format))
+		Ok(self.spawn_driver(job, principal, session_id, cancel, items, format, inline))
 	}
 
 	/// Spawn the driver that runs `job`, sending what it reads from `items` as
 	/// frames on the returned channel.
+	#[allow(clippy::too_many_arguments)]
 	fn spawn_driver<T: FrameSink>(
 		&self,
 		job: QueryStreamJob,
@@ -184,7 +198,8 @@ impl EmbeddedEngine {
 		cancel: CancelHandle,
 		items: Receiver<QueryStreamItem>,
 		format: Option<Format>,
-	) -> Receiver<T> {
+		inline: bool,
+	) -> Spawned<T> {
 		let (frames_tx, frames_rx) = bounded(FRAME_BUFFER);
 		let driver = Driver {
 			frames: StreamFrames::new(),
@@ -204,8 +219,14 @@ impl EmbeddedEngine {
 		// The timeout the execution carries only fires while the execution is
 		// polled, and the driver polls it for as long as it runs -- including
 		// after a consumer has gone, which is what bounds an abandoned stream.
-		spawn(driver.drive(statements, job.run));
-		frames_rx
+		let drive = driver.drive(statements, job.run);
+		if inline {
+			let drive: Pin<Box<dyn Future<Output = ()>>> = Box::pin(drive);
+			(frames_rx, Some(drive))
+		} else {
+			spawn(drive);
+			(frames_rx, None)
+		}
 	}
 }
 
@@ -274,6 +295,9 @@ impl Stream for EncodedQueryFrames {
 		self.frames.as_mut().poll_next(cx)
 	}
 }
+
+/// The frames a spawned driver sends, and the driver itself when the caller is to run it.
+type Spawned<T> = (Receiver<T>, Option<Pin<Box<dyn Future<Output = ()>>>>);
 
 /// One stream's execution, and everything that turns it into frames.
 ///
@@ -583,10 +607,11 @@ mod tests {
 			)
 			.expect("the query parses");
 		let principal = AuthPrincipalSnapshot::capture(session);
-		engine
-			.spawn_driver::<QueryStreamFrame>(job, principal, engine.id, cancel, items, None)
-			.collect()
-			.await
+		let (frames, driver) = engine.spawn_driver::<QueryStreamFrame>(
+			job, principal, engine.id, cancel, items, None, false,
+		);
+		assert!(driver.is_none(), "a spawned driver is not handed back");
+		frames.collect().await
 	}
 
 	/// A database with two `thing` records, and the session that reads it.
@@ -1193,5 +1218,867 @@ mod tests {
 				..
 			})
 		));
+	}
+}
+
+impl EmbeddedEngine {
+	/// Runs an encoded `query_stream` request, answering with what a WebSocket
+	/// server sends: each frame wrapped in a response envelope carrying the
+	/// request's `id` and session, encoded.
+	///
+	/// No envelope is larger than `max_bytes` when the rows in it allow: a rows
+	/// frame whose encoding exceeds it is split into rows frames for the same
+	/// statement, which a client concatenates exactly as it would the original.
+	/// A single value too large on its own is sent as it is.
+	///
+	/// A request that cannot be framed at all is answered with one error
+	/// envelope and no `id`, as [`Self::execute_framed`] does.
+	pub async fn query_stream_framed(
+		&self,
+		format: Format,
+		request: &[u8],
+		max_bytes: usize,
+	) -> anyhow::Result<FramedQueryFrames> {
+		self.query_stream_framed_with(format, request, max_bytes, false).await
+	}
+
+	/// [`Self::query_stream_framed`] with the query run inside the calls to
+	/// [`FramedQueryFrames::next`] rather than on a task of its own (see
+	/// [`Self::start_stream_with`]).
+	pub async fn query_stream_framed_inline(
+		&self,
+		format: Format,
+		request: &[u8],
+		max_bytes: usize,
+	) -> anyhow::Result<FramedQueryFrames> {
+		self.query_stream_framed_with(format, request, max_bytes, true).await
+	}
+
+	async fn query_stream_framed_with(
+		&self,
+		format: Format,
+		request: &[u8],
+		max_bytes: usize,
+		inline: bool,
+	) -> anyhow::Result<FramedQueryFrames> {
+		let request = wire::decode(format, request, self.recursion_limit())
+			.and_then(|v| Ok(v.into_object()?))
+			.and_then(|obj| Ok(Request::from_object(obj)?));
+		let request = match request {
+			Ok(request) => request,
+			Err(err) => {
+				let response =
+					crate::DbResponse::failure(None, None, Error::internal(format!("{err:#}")));
+				let encoded =
+					wire::encode(format, surrealdb_types::SurrealValue::into_value(response))?;
+				return Ok(FramedQueryFrames::ready(vec![encoded]));
+			}
+		};
+		let id = request.id.clone();
+		let session = request.session_id.map(Into::into);
+		let (frames, driver): (Pin<Box<dyn Stream<Item = QueryStreamFrame>>>, _) =
+			match self.start_stream_with::<QueryStreamFrame>(request, None, inline).await {
+				Ok((rx, driver)) => (Box::pin(rx), driver),
+				Err(error) => (
+					Box::pin(futures::stream::iter([QueryStreamFrame::End {
+						results: 0,
+						time: Duration::ZERO,
+						error: Some(error),
+					}])),
+					None,
+				),
+			};
+		Ok(FramedQueryFrames {
+			frames,
+			driver,
+			pending: std::collections::VecDeque::new(),
+			last_kind: KIND_OTHER,
+			held: None,
+			row_bytes: None,
+			ended: false,
+			id,
+			session,
+			format,
+			max_bytes,
+		})
+	}
+}
+
+/// [`EmbeddedEngine::query_stream_framed`]'s envelopes.
+pub struct FramedQueryFrames {
+	frames: Pin<Box<dyn Stream<Item = QueryStreamFrame>>>,
+	/// The query's driver when it runs inline (see
+	/// [`EmbeddedEngine::query_stream_framed_inline`]): polled with every read of `frames`, and
+	/// dropped once it has finished.
+	driver: Option<Pin<Box<dyn Future<Output = ()>>>>,
+	/// Envelopes already encoded and waiting, from a frame that was split.
+	/// Encoded envelopes waiting, each with its frame's kind (see
+	/// [`FramedQueryFrames::last_kind`]).
+	pending: std::collections::VecDeque<(u8, Vec<u8>)>,
+	/// The kind of the envelope `next` returned last.
+	last_kind: u8,
+	/// A frame taken while coalescing that belongs in the next envelope.
+	held: Option<QueryStreamFrame>,
+	/// Encoded bytes per row, the largest average seen (see `push`).
+	row_bytes: Option<usize>,
+	/// The frame stream has ended (seen while coalescing).
+	ended: bool,
+	id: Option<surrealdb_types::Value>,
+	session: Option<Uuid>,
+	format: Format,
+	max_bytes: usize,
+}
+
+impl FramedQueryFrames {
+	fn ready(envelopes: Vec<Vec<u8>>) -> Self {
+		Self {
+			frames: Box::pin(futures::stream::empty()),
+			driver: None,
+			pending: envelopes.into_iter().map(|e| (KIND_OTHER, e)).collect(),
+			last_kind: KIND_OTHER,
+			held: None,
+			row_bytes: None,
+			ended: false,
+			id: None,
+			session: None,
+			format: Format::Json,
+			max_bytes: usize::MAX,
+		}
+	}
+
+	fn envelope(&self, frame: QueryStreamFrame) -> anyhow::Result<Vec<u8>> {
+		let response = crate::DbResponse::new(
+			self.id.clone(),
+			self.session,
+			Ok(crate::DbResult::Other(frame.into_value())),
+		);
+		wire::encode(self.format, surrealdb_types::SurrealValue::into_value(response))
+	}
+
+	/// Encode `frame` onto the back of `pending`, splitting a rows frame so each
+	/// envelope fits `max_bytes`.
+	///
+	/// Rows are encoded by move: the split is planned from the encoded bytes
+	/// per row seen so far, so no row is copied. Only a frame with no estimate
+	/// yet, or one predicted near the limit, is encoded from a copy, which is
+	/// what lets an envelope that came out too large be split in halves after
+	/// all.
+	fn push(&mut self, frame: QueryStreamFrame) -> anyhow::Result<()> {
+		let (index, mut values) = match frame {
+			QueryStreamFrame::Rows {
+				index,
+				values,
+			} if values.len() > 1 => (index, values),
+			frame => {
+				let kind = kind_of(&frame);
+				let encoded = self.envelope(frame)?;
+				self.pending.push_back((kind, encoded));
+				return Ok(());
+			}
+		};
+		match self.row_bytes {
+			Some(per_row) => {
+				// Rows per envelope at the estimate, with room for rows larger
+				// than the average so far.
+				let fit = (self.max_bytes / 2 / per_row.max(1)).max(1);
+				while values.len() > fit {
+					let rest = values.split_off(fit);
+					self.push_rows(index, values)?;
+					values = rest;
+				}
+				self.push_rows(index, values)
+			}
+			None => self.push_checked(index, values),
+		}
+	}
+
+	/// Encode a rows frame by move, falling back to a checked encode when the
+	/// estimate says it may not fit.
+	fn push_rows(
+		&mut self,
+		index: usize,
+		values: Vec<surrealdb_types::Value>,
+	) -> anyhow::Result<()> {
+		let n = values.len();
+		let predicted = self.row_bytes.unwrap_or(usize::MAX).saturating_mul(n);
+		if n > 1 && predicted > self.max_bytes / 2 {
+			return self.push_checked(index, values);
+		}
+		let encoded = self.envelope(QueryStreamFrame::Rows {
+			index,
+			values,
+		})?;
+		self.learn(encoded.len(), n);
+		self.pending.push_back((KIND_ROWS, encoded));
+		Ok(())
+	}
+
+	/// Encode a rows frame from a copy, splitting it in halves until each
+	/// envelope fits.
+	fn push_checked(
+		&mut self,
+		index: usize,
+		mut values: Vec<surrealdb_types::Value>,
+	) -> anyhow::Result<()> {
+		let n = values.len();
+		let encoded = self.envelope(QueryStreamFrame::Rows {
+			index,
+			values: values.clone(),
+		})?;
+		self.learn(encoded.len(), n);
+		if encoded.len() <= self.max_bytes || n <= 1 {
+			self.pending.push_back((KIND_ROWS, encoded));
+			return Ok(());
+		}
+		let tail = values.split_off(n / 2);
+		self.push_checked(index, values)?;
+		self.push_checked(index, tail)
+	}
+
+	/// Fold an envelope's size into the bytes-per-row estimate (the largest
+	/// average seen, so the estimate errs towards smaller envelopes).
+	fn learn(&mut self, bytes: usize, rows: usize) {
+		let per_row = bytes.div_ceil(rows.max(1));
+		self.row_bytes = Some(self.row_bytes.map_or(per_row, |r| r.max(per_row)));
+	}
+
+	/// The next envelope, or `None` once the terminal frame has been sent.
+	///
+	/// Rows frames of one statement that are already produced are coalesced
+	/// into one envelope of up to [`COALESCE_BYTES`]: fewer, larger messages,
+	/// with nothing waited for, since only frames ready now are taken.
+	pub async fn next(&mut self) -> anyhow::Result<Option<Vec<u8>>> {
+		use futures::FutureExt;
+		loop {
+			if let Some((kind, envelope)) = self.pending.pop_front() {
+				self.last_kind = kind;
+				return Ok(Some(envelope));
+			}
+			let mut frame = match self.held.take() {
+				Some(frame) => frame,
+				None if self.ended => return Ok(None),
+				None => match self.next_frame().await {
+					Some(frame) => frame,
+					None => return Ok(None),
+				},
+			};
+			if let QueryStreamFrame::Rows {
+				index,
+				values,
+			} = &mut frame
+			{
+				let target = COALESCE_BYTES.min(self.max_bytes);
+				while let Some(per_row) = self.row_bytes
+					&& values.len().saturating_mul(per_row) < target
+				{
+					match self.next_frame().now_or_never() {
+						Some(Some(QueryStreamFrame::Rows {
+							index: i,
+							values: more,
+						})) if i == *index => values.extend(more),
+						Some(Some(other)) => {
+							self.held = Some(other);
+							break;
+						}
+						// Ended: never polled again.
+						Some(None) => {
+							self.ended = true;
+							break;
+						}
+						None => break,
+					}
+				}
+			}
+			self.push(frame)?;
+		}
+	}
+}
+
+/// Envelope kinds, by the frame each carries ([`FramedQueryFrames::last_kind`]).
+pub const KIND_BEGIN: u8 = 0;
+pub const KIND_ROWS: u8 = 1;
+pub const KIND_VALUE: u8 = 2;
+pub const KIND_FINISHED: u8 = 3;
+pub const KIND_END: u8 = 4;
+/// An envelope carrying no frame: a request that could not be framed at all.
+pub const KIND_OTHER: u8 = 9;
+
+fn kind_of(frame: &QueryStreamFrame) -> u8 {
+	match frame {
+		QueryStreamFrame::Begin {
+			..
+		} => KIND_BEGIN,
+		QueryStreamFrame::Rows {
+			..
+		} => KIND_ROWS,
+		QueryStreamFrame::Value {
+			..
+		} => KIND_VALUE,
+		QueryStreamFrame::Finished {
+			..
+		} => KIND_FINISHED,
+		QueryStreamFrame::End {
+			..
+		} => KIND_END,
+	}
+}
+
+impl FramedQueryFrames {
+	/// The kind of the envelope [`Self::next`] returned last (a `KIND_` constant): what a host
+	/// splicing several streams into one needs, without decoding the envelope.
+	pub fn last_kind(&self) -> u8 {
+		self.last_kind
+	}
+
+	/// The next frame, polling an inline driver while waiting for it (the driver fills the
+	/// channel; the channel holds one frame, so neither progresses without the other).
+	async fn next_frame(&mut self) -> Option<QueryStreamFrame> {
+		use futures::StreamExt;
+		std::future::poll_fn(|cx| {
+			if let Some(driver) = self.driver.as_mut()
+				&& driver.as_mut().poll(cx).is_ready()
+			{
+				self.driver = None;
+			}
+			self.frames.poll_next_unpin(cx)
+		})
+		.await
+	}
+}
+
+/// A host's hooks into [`EmbeddedEngine::execute_bounded_with`]: checked and awaited between
+/// batches of rows.
+#[derive(Default)]
+pub struct BoundedHooks<'a> {
+	/// Whether to stop: the stream is dropped, which stops the execution.
+	pub cancelled: Option<&'a dyn Fn() -> bool>,
+	/// A pause the host serves other work in.
+	pub pause: Option<&'a dyn Fn() -> Pin<Box<dyn Future<Output = ()>>>>,
+	/// Whether the host is out of memory for this query: the stream is dropped, and the reply is
+	/// an error carrying `exhausted_message`.
+	pub exhausted: Option<&'a dyn Fn() -> bool>,
+	pub exhausted_message: Option<&'a dyn Fn() -> String>,
+}
+
+/// The size [`FramedQueryFrames::next`] coalesces ready rows frames up to.
+const COALESCE_BYTES: usize = 1 << 20;
+
+impl EmbeddedEngine {
+	/// Answers an encoded RPC request as [`Self::execute_framed`] does, except
+	/// that a `query` runs on the streaming path and its reply is assembled from
+	/// the frames while counting their encoded size: past `max_bytes` the stream
+	/// is dropped, which stops the execution, and the reply is an error.
+	///
+	/// So a result too large for one message costs at most `max_bytes` of
+	/// memory to refuse, instead of being built whole first — which on a host
+	/// with a small memory limit is the difference between an error and a crash.
+	pub async fn execute_bounded(
+		&self,
+		format: Format,
+		request: &[u8],
+		max_bytes: usize,
+	) -> anyhow::Result<Vec<u8>> {
+		self.execute_bounded_with(format, request, max_bytes, &BoundedHooks::default()).await
+	}
+
+	/// [`Self::execute_bounded`] with a host's hooks between batches of rows: `cancelled`, when it
+	/// answers true, drops the stream (which stops the execution) and answers an error; `pause`,
+	/// awaited between batches, lets a host on a single thread serve other work in between, so a
+	/// long statement does not hold the thread from start to end.
+	pub async fn execute_bounded_with(
+		&self,
+		format: Format,
+		request: &[u8],
+		max_bytes: usize,
+		hooks: &BoundedHooks<'_>,
+	) -> anyhow::Result<Vec<u8>> {
+		let decoded = wire::decode(format, request, self.recursion_limit())
+			.and_then(|v| Ok(v.into_object()?))
+			.and_then(|obj| Ok(Request::from_object(obj)?));
+		let request = match decoded {
+			Ok(request) if request.method == Method::Query => request,
+			_ => return self.execute_framed(format, request).await,
+		};
+		let id = request.id.clone();
+		let session = request.session_id.map(Into::into);
+		let respond = |result: Result<crate::DbResult, Error>| {
+			wire::encode(
+				format,
+				surrealdb_types::SurrealValue::into_value(crate::DbResponse::new(
+					id.clone(),
+					session,
+					result,
+				)),
+			)
+		};
+		let mut frames = match self.query_stream(request).await {
+			Ok(frames) => frames,
+			Err(error) => return respond(Err(error)),
+		};
+		use futures::StreamExt;
+		// Per statement: its rows so far, kept encoded (a decoded row is many times its encoding,
+		// so holding values ran a large result out of memory long before its encoding reached
+		// `max_bytes`); spliced into the reply at the end. Formats other than JSON and CBOR keep
+		// the values.
+		let splice = matches!(format, Format::Json | Format::Cbor);
+		// Unique to this reply, so no value a query returns can equal a placeholder.
+		let nonce = uuid::Uuid::now_v7().simple().to_string();
+		let mut encoded: std::collections::BTreeMap<usize, (usize, Vec<u8>)> = Default::default();
+		let mut rows: std::collections::BTreeMap<usize, Vec<surrealdb_types::Value>> =
+			Default::default();
+		let mut values: std::collections::BTreeMap<usize, surrealdb_types::Value> =
+			Default::default();
+		let mut finished: std::collections::BTreeMap<usize, QueryResult> = Default::default();
+		let mut bytes = 0usize;
+		let mut scratch = Vec::new();
+		while let Some(frame) = frames.next().await {
+			if hooks.cancelled.is_some_and(|c| c()) {
+				drop(frames);
+				return respond(Err(Error::internal(
+					"The query was cancelled: its connection closed".to_owned(),
+				)));
+			}
+			if hooks.exhausted.is_some_and(|c| c()) {
+				drop(frames);
+				// The rows held so far go with the stream before the reply is built.
+				drop(encoded);
+				drop(rows);
+				let message = hooks
+					.exhausted_message
+					.map_or_else(|| "The query ran out of memory".to_owned(), |m| m());
+				return respond(Err(Error::internal(message)));
+			}
+			match frame {
+				QueryStreamFrame::Begin {
+					..
+				} => {}
+				QueryStreamFrame::Rows {
+					index,
+					values: batch,
+				} => {
+					if splice {
+						// Encoded once, here, and the values dropped.
+						let (n, out) = encoded.entry(index).or_default();
+						for v in &batch {
+							if format == Format::Json && *n > 0 {
+								out.push(b',');
+							}
+							let before = out.len();
+							wire::encode_into(format, v, out)?;
+							bytes += out.len() - before + 1;
+							*n += 1;
+						}
+					} else {
+						for v in &batch {
+							scratch.clear();
+							wire::encode_into(format, v, &mut scratch)?;
+							bytes += scratch.len() + 1;
+						}
+						rows.entry(index).or_default().extend(batch);
+					}
+					if let Some(pause) = hooks.pause {
+						pause().await;
+					}
+				}
+				QueryStreamFrame::Value {
+					index,
+					value,
+				} => {
+					scratch.clear();
+					wire::encode_into(format, &value, &mut scratch)?;
+					bytes += scratch.len();
+					values.insert(index, value);
+				}
+				QueryStreamFrame::Finished {
+					index,
+					time,
+					query_type,
+					single,
+					error,
+				} => {
+					let result = match error {
+						Some(error) => Err(error),
+						None if single => {
+							Ok(values.remove(&index).unwrap_or(surrealdb_types::Value::None))
+						}
+						// A placeholder the encoded rows replace in the reply's bytes (an empty
+						// array for a statement that produced none).
+						None if splice => {
+							encoded.entry(index).or_default();
+							Ok(surrealdb_types::Value::String(rows_placeholder(&nonce, index)))
+						}
+						None => Ok(surrealdb_types::Value::Array(
+							rows.remove(&index).unwrap_or_default().into(),
+						)),
+					};
+					rows.remove(&index);
+					finished.insert(
+						index,
+						QueryResult {
+							time,
+							result,
+							query_type,
+						},
+					);
+				}
+				QueryStreamFrame::End {
+					error,
+					..
+				} => {
+					if let Some(error) = error {
+						return respond(Err(error));
+					}
+					break;
+				}
+			}
+			if bytes > max_bytes {
+				drop(frames);
+				return respond(Err(Error::internal(format!(
+					"The result is over the {max_bytes}-byte limit for one message: use query_stream, \
+					 or LIMIT/START to page it"
+				))));
+			}
+		}
+		let over = || {
+			Error::internal(format!(
+				"The result is over the {max_bytes}-byte limit for one message: use query_stream, \
+				 or LIMIT/START to page it"
+			))
+		};
+		let envelope = respond(Ok(crate::DbResult::Query(finished.into_values().collect())))?;
+		if encoded.is_empty() {
+			return if envelope.len() > max_bytes {
+				respond(Err(over()))
+			} else {
+				Ok(envelope)
+			};
+		}
+		// The reply in one allocation: the envelope's bytes with each placeholder replaced by its
+		// statement's rows, each statement's encoding dropped once copied.
+		let mut cuts = Vec::with_capacity(encoded.len());
+		for (index, rows) in encoded {
+			let marker = wire::encode(
+				format,
+				surrealdb_types::Value::String(rows_placeholder(&nonce, index)),
+			)?;
+			// Absent when the statement failed: its rows are not in the reply.
+			if let Some(at) = envelope.windows(marker.len()).position(|w| w == marker.as_slice()) {
+				cuts.push((at, marker.len(), rows));
+			}
+		}
+		cuts.sort_by_key(|(at, ..)| *at);
+		let size =
+			envelope.len() + cuts.iter().map(|(_, _, (_, items))| items.len() + 9).sum::<usize>();
+		let mut reply = Vec::with_capacity(size);
+		let mut from = 0;
+		for (at, len, (n, items)) in cuts {
+			reply.extend_from_slice(&envelope[from..at]);
+			if format == Format::Json {
+				reply.push(b'[');
+				reply.extend_from_slice(&items);
+				reply.push(b']');
+			} else {
+				cbor_array_head(&mut reply, n as u64);
+				reply.extend_from_slice(&items);
+			}
+			drop(items);
+			from = at + len;
+		}
+		reply.extend_from_slice(&envelope[from..]);
+		if reply.len() > max_bytes {
+			return respond(Err(over()));
+		}
+		Ok(reply)
+	}
+}
+
+/// The stand-in for statement `index`'s rows while the reply is encoded: a string carrying the
+/// reply's `nonce`, which no result holds, replaced by the encoded rows after.
+fn rows_placeholder(nonce: &str, index: usize) -> String {
+	format!("\u{1}\u{2}surreal-rows:{nonce}:{index}\u{2}\u{1}")
+}
+
+/// A CBOR array head for `n` items, in the shortest form.
+fn cbor_array_head(out: &mut Vec<u8>, n: u64) {
+	match n {
+		0..=23 => out.push(0x80 | n as u8),
+		24..=0xff => out.extend_from_slice(&[0x98, n as u8]),
+		0x100..=0xffff => {
+			out.push(0x99);
+			out.extend_from_slice(&(n as u16).to_be_bytes());
+		}
+		0x1_0000..=0xffff_ffff => {
+			out.push(0x9a);
+			out.extend_from_slice(&(n as u32).to_be_bytes());
+		}
+		_ => {
+			out.push(0x9b);
+			out.extend_from_slice(&n.to_be_bytes());
+		}
+	}
+}
+
+/// Where a streamed full scan spends its time, natively, in-memory:
+/// `cargo test -p surrealdb-embedded --features kv-mem --release stream_throughput -- --ignored
+/// --nocapture`
+#[cfg(test)]
+mod throughput {
+	use std::time::Instant;
+
+	use surrealdb_types::{Array, Object, Value};
+
+	use super::*;
+	use crate::{EmbeddedEngine, Options};
+
+	fn req(method: &str, sql: &str) -> Vec<u8> {
+		let mut obj = Object::default();
+		obj.insert("id".to_owned(), Value::Number(1.into()));
+		obj.insert("method".to_owned(), Value::String(method.to_owned()));
+		obj.insert(
+			"params".to_owned(),
+			Value::Array(Array::from(vec![Value::String(sql.to_owned())])),
+		);
+		wire::encode(Format::Cbor, Value::Object(obj)).unwrap()
+	}
+
+	#[tokio::test(flavor = "current_thread")]
+	#[ignore]
+	async fn stream_throughput() {
+		let rows: usize =
+			std::env::var("ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(200_000);
+		let e = EmbeddedEngine::connect("memory", Options::default()).await.unwrap();
+		let mut sql = String::from("USE NS test DB test; DEFINE TABLE huge SCHEMALESS;");
+		e.execute_framed(Format::Cbor, &req("query", &sql)).await.unwrap();
+		for lo in (1..=rows).step_by(5000) {
+			sql.clear();
+			sql.push_str("USE NS test DB test; INSERT INTO huge [");
+			for i in lo..(lo + 5000).min(rows + 1) {
+				sql.push_str(&format!(
+					"{{id:{i},n:{i},g:{},v:{}}},",
+					i % 100,
+					(i * 7919) % 1000003
+				));
+			}
+			sql.push_str("] RETURN NONE;");
+			e.execute_framed(Format::Cbor, &req("query", &sql)).await.unwrap();
+		}
+		let repeat: usize = std::env::var("REPEAT").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+		let only = std::env::var("ONLY").ok();
+		let cases = [
+			(
+				"VALUE 1 (scan + per-row frame)",
+				Format::Cbor,
+				"USE NS test DB test; SELECT VALUE 1 FROM huge",
+			),
+			("SELECT * cbor", Format::Cbor, "USE NS test DB test; SELECT * FROM huge"),
+			("SELECT * json", Format::Json, "USE NS test DB test; SELECT * FROM huge"),
+		];
+		for (label, fmt, q) in cases
+			.into_iter()
+			.filter(|(l, ..)| only.as_deref().is_none_or(|o| l.contains(o)))
+			.flat_map(|c| std::iter::repeat_n(c, repeat))
+		{
+			let body = if fmt == Format::Json {
+				format!(r#"{{"id":1,"method":"query_stream","params":["{q}"]}}"#).into_bytes()
+			} else {
+				req("query_stream", q)
+			};
+			let t = Instant::now();
+			let mut frames = e.query_stream_framed(fmt, &body, 4 << 20).await.unwrap();
+			let (mut n, mut bytes) = (0usize, 0usize);
+			while let Some(env) = frames.next().await.unwrap() {
+				n += 1;
+				bytes += env.len();
+			}
+			let s = t.elapsed().as_secs_f64();
+			eprintln!(
+				"{label:32} {n:6} envelopes {:7.1} MB {:6.3} s  {:8.0} rows/s {:6.1} MB/s",
+				bytes as f64 / 1e6,
+				s,
+				rows as f64 / s,
+				bytes as f64 / 1e6 / s
+			);
+		}
+	}
+}
+
+#[cfg(test)]
+mod inline {
+	use surrealdb_types::{Array, Object, Value};
+
+	use super::*;
+	use crate::{EmbeddedEngine, Options};
+
+	fn req(method: &str, sql: &str) -> Vec<u8> {
+		let mut obj = Object::default();
+		obj.insert("id".to_owned(), Value::Number(7.into()));
+		obj.insert("method".to_owned(), Value::String(method.to_owned()));
+		obj.insert(
+			"params".to_owned(),
+			Value::Array(Array::from(vec![Value::String(sql.to_owned())])),
+		);
+		wire::encode(Format::Cbor, Value::Object(obj)).unwrap()
+	}
+
+	async fn drain(mut f: FramedQueryFrames) -> Vec<Vec<u8>> {
+		let mut out = Vec::new();
+		while let Some(e) = f.next().await.unwrap() {
+			out.push(e);
+		}
+		out
+	}
+
+	/// The inline stream (the query driven inside `next`) answers with exactly the envelopes the
+	/// spawned one does, small envelopes forcing many frames through the one-frame channel.
+	#[tokio::test(flavor = "current_thread")]
+	async fn inline_frames_match_spawned() {
+		let e = EmbeddedEngine::connect("memory", Options::default()).await.unwrap();
+		let mut sql = String::from("USE NS test DB test; INSERT INTO t [");
+		for i in 1..=3000 {
+			sql.push_str(&format!("{{id:{i},v:{}}},", i * 3));
+		}
+		sql.push_str("] RETURN NONE;");
+		e.execute_framed(Format::Cbor, &req("query", &sql)).await.unwrap();
+		let q = req(
+			"query_stream",
+			"USE NS test DB test; SELECT * FROM t; SELECT VALUE v FROM t WHERE v > 4000; RETURN 1",
+		);
+		let spawned = drain(e.query_stream_framed(Format::Cbor, &q, 2048).await.unwrap()).await;
+		let inline =
+			drain(e.query_stream_framed_inline(Format::Cbor, &q, 2048).await.unwrap()).await;
+		assert!(spawned.len() > 10, "many envelopes: {}", spawned.len());
+		// Envelope boundaries may differ (frames ready together coalesce), and so do timings:
+		// compare each statement's rows in order, and the frame kinds' sequence less repeats.
+		assert_eq!(rows_by_statement(&spawned), rows_by_statement(&inline));
+		assert_eq!(kinds(&spawned), kinds(&inline));
+	}
+
+	/// The limit covers the whole reply, envelope included, and a value that looks like a row
+	/// placeholder is a value.
+	#[tokio::test(flavor = "current_thread")]
+	async fn bounded_reply_enforces_its_limit_and_ignores_lookalike_values() {
+		let e = EmbeddedEngine::connect("memory", Options::default()).await.unwrap();
+		let body = req("query", "USE NS test DB test; RETURN 1");
+		let refused = e.execute_bounded(Format::Cbor, &body, 1).await.unwrap();
+		let refused = wire::decode(Format::Cbor, &refused, 64).unwrap().into_object().unwrap();
+		assert!(refused.contains_key("error"), "{refused:?}");
+		let look = rows_placeholder("x", 1);
+		let q =
+			format!("USE NS test DB test; CREATE t:1 SET v = 1; RETURN '{look}'; SELECT * FROM t;");
+		let reply = e
+			.execute_bounded(
+				Format::Json,
+				format!(r#"{{"id":7,"method":"query","params":["{q}"]}}"#).as_bytes(),
+				1 << 20,
+			)
+			.await
+			.unwrap();
+		let text = String::from_utf8(reply).unwrap();
+		assert!(text.contains("surreal-rows:x:1"), "{text}");
+		assert!(text.contains("\"v\":1"), "{text}");
+	}
+
+	/// The bounded path keeps rows encoded and splices them into the reply: the reply decodes to
+	/// what the unbounded path answers, in both formats, over every shape of result.
+	#[tokio::test(flavor = "current_thread")]
+	async fn bounded_reply_matches_unbounded() {
+		let e = EmbeddedEngine::connect("memory", Options::default()).await.unwrap();
+		let mut sql = String::from("USE NS test DB test; INSERT INTO t [");
+		for i in 1..=2500 {
+			sql.push_str(&format!("{{id:{i},v:{},s:'x{i}'}},", i * 3));
+		}
+		sql.push_str("] RETURN NONE;");
+		e.execute_framed(Format::Cbor, &req("query", &sql)).await.unwrap();
+		let q = "USE NS test DB test; SELECT * FROM t; SELECT VALUE v FROM t WHERE v > 7000; \
+		         SELECT * FROM t WHERE v < 0; SELECT * FROM ONLY t:5; THROW 'no'; RETURN 'surreal-rows:0'; \
+		         SELECT id FROM t LIMIT 3";
+		for format in [Format::Cbor, Format::Json] {
+			let body = if format == Format::Json {
+				format!(r#"{{"id":7,"method":"query","params":["{q}"]}}"#).into_bytes()
+			} else {
+				req("query", q)
+			};
+			let bounded = e.execute_bounded(format, &body, 64 << 20).await.unwrap();
+			let plain = e.execute_framed(format, &body).await.unwrap();
+			let strip = |bytes: &[u8]| {
+				let mut v = wire::decode(format, bytes, 64).unwrap().into_object().unwrap();
+				let Some(Value::Array(results)) = v.remove("result") else {
+					panic!("no results")
+				};
+				// Timings differ between runs.
+				results
+					.into_iter()
+					.map(|r| {
+						let mut r = r.into_object().unwrap();
+						r.remove("time");
+						r
+					})
+					.collect::<Vec<_>>()
+			};
+			let (b, p) = (strip(&bounded), strip(&plain));
+			assert_eq!(b.len(), p.len(), "{format:?}: statement count");
+			for (i, (x, y)) in b.iter().zip(&p).enumerate() {
+				if x != y {
+					let brief = |o: &Object| {
+						o.iter()
+							.map(|(k, v)| {
+								let s = format!("{v:?}");
+								format!("{k}={}", &s[..s.len().min(160)])
+							})
+							.collect::<Vec<_>>()
+							.join(" ")
+					};
+					panic!(
+						"{format:?} statement {i} differs:\n bounded {}\n plain   {}",
+						brief(x),
+						brief(y)
+					);
+				}
+			}
+		}
+	}
+
+	fn frames(envelopes: &[Vec<u8>]) -> Vec<Object> {
+		envelopes
+			.iter()
+			.map(|e| {
+				let v = wire::decode(Format::Cbor, e, 64).unwrap().into_object().unwrap();
+				v.get("result").cloned().unwrap().into_object().unwrap()
+			})
+			.collect()
+	}
+
+	fn rows_by_statement(envelopes: &[Vec<u8>]) -> Vec<(i64, Vec<Value>)> {
+		let mut out: Vec<(i64, Vec<Value>)> = Vec::new();
+		for f in frames(envelopes) {
+			if f.get("stream") != Some(&Value::String("rows".into())) {
+				continue;
+			}
+			let Some(Value::Number(i)) = f.get("index") else {
+				panic!("rows without an index")
+			};
+			let i = i.to_int().unwrap();
+			let Some(Value::Array(vals)) = f.get("values") else {
+				panic!("rows without values")
+			};
+			match out.last_mut() {
+				Some((j, v)) if *j == i => v.extend(vals.iter().cloned()),
+				_ => out.push((i, vals.iter().cloned().collect())),
+			}
+		}
+		out
+	}
+
+	fn kinds(envelopes: &[Vec<u8>]) -> Vec<String> {
+		let mut out: Vec<String> = Vec::new();
+		for f in frames(envelopes) {
+			let Some(Value::String(k)) = f.get("stream") else {
+				panic!("a frame without a kind")
+			};
+			if out.last() != Some(k) {
+				out.push(k.clone());
+			}
+		}
+		out
 	}
 }

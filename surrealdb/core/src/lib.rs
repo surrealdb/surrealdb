@@ -60,7 +60,7 @@ pub mod extension;
 mod fmt_roundtrip_test;
 mod fnc;
 pub(crate) mod key;
-mod lq;
+pub mod lq;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 

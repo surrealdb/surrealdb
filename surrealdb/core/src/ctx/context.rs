@@ -234,6 +234,8 @@ pub struct Context {
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
+	/// The host-provided `SHOW CHANGES` source, when the datastore has one.
+	changefeed_source: Option<Arc<dyn crate::lq::external::ChangeFeedSource>>,
 	/// How a running program gives up its thread once it has spent its
 	/// quantum; the default scheduler when `None`. A child context carries
 	/// its parent's.
@@ -333,6 +335,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::new(std::sync::OnceLock::new()),
@@ -405,6 +408,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
@@ -466,6 +470,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
@@ -553,6 +558,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: from.memory.clone(),
 			index_places: Arc::clone(&from.index_places),
@@ -642,6 +648,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
@@ -721,6 +728,7 @@ impl Context {
 			dynamic_configuration,
 			live: false,
 			broker: None,
+			changefeed_source: None,
 			scheduler: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
@@ -795,6 +803,7 @@ impl Context {
 			dynamic_configuration: DynamicConfiguration::default(),
 			live: false,
 			broker: None,
+			changefeed_source: None,
 			scheduler: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
@@ -931,6 +940,20 @@ impl Context {
 
 	pub(crate) fn set_broker(&mut self, broker: Option<Arc<dyn MessageBroker>>) {
 		self.broker = broker;
+	}
+
+	/// The host-provided `SHOW CHANGES` source, if one was installed.
+	pub(crate) fn changefeed_source(
+		&self,
+	) -> Option<&Arc<dyn crate::lq::external::ChangeFeedSource>> {
+		self.changefeed_source.as_ref()
+	}
+
+	pub(crate) fn set_changefeed_source(
+		&mut self,
+		source: Option<Arc<dyn crate::lq::external::ChangeFeedSource>>,
+	) {
+		self.changefeed_source = source;
 	}
 
 	/// The scheduler a running program yields through, `None` for the

@@ -88,7 +88,7 @@ pub(crate) use surrealdb_datastore::{
 	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
 pub use surrealdb_kvs::{FeatureLevel, Isolation, Release, SnapshotInfo};
-pub(crate) use tx::Transaction;
+pub use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;
 

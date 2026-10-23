@@ -56,7 +56,10 @@ pub(crate) async fn changes(
 	}
 	let txn = ctx.tx();
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let changes = read(&txn, ns, db, table, since, limit).await?;
+	let changes = match ctx.changefeed_source() {
+		Some(source) => source.show_changes(&txn, ns, db, table, since, limit).await?,
+		None => read(&txn, ns, db, table, since, limit).await?,
+	};
 	changes.iter().cloned().map(|change| change.into_value()).collect()
 }
 

@@ -39,7 +39,7 @@ use crate::exec::operators::write::row::WriteRow;
 use crate::exec::{Error as ExecError, ExecutionContext};
 use crate::expr::{ChangeFeed, ControlFlow};
 use crate::key::schema::EventQueueKey;
-use crate::kvs::{LiveQueryEngine, Transaction};
+use crate::kvs::Transaction;
 use crate::val::Value;
 
 /// Whether this statement replays a dump.
@@ -212,6 +212,12 @@ async fn held(
 	Ok(())
 }
 
+/// Whether the datastore's live-query engine writes change feeds: the external
+/// engine leaves the feed to its host.
+pub(crate) fn writes_changefeed(ctx: &WriteCtx) -> bool {
+	ctx.exec().ctx().config.datastore.live_query_engine.writes_changefeed()
+}
+
 /// Buffer this record's change for the table's change feed, and capture the
 /// live-query event the router engine replays from: the effect
 /// [`ProcessChangefeeds`] takes, and the one the VM's write body asks its host
@@ -230,7 +236,9 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	// What the transaction buffers until it commits counts against the
 	// query's memory.
 	let memory = ctx.exec.ctx().memory().cloned();
-	if let Some(changefeed) = changefeed_definition(ctx) {
+	if let Some(changefeed) = changefeed_definition(ctx)
+		&& writes_changefeed(ctx)
+	{
 		held(memory.as_ref(), &[&row.initial, &row.current], ctx).await?;
 		txn.changefeed_buffer_record_change(
 			ctx.db.namespace_id,
@@ -298,7 +306,7 @@ pub(crate) async fn view_row_reaches_nothing(ctx: &WriteCtx) -> Result<bool, Con
 /// a limit-one key scan, so its cost is independent of how many subscribers
 /// there are.
 async fn captures_live_events(ctx: &WriteCtx, txn: &Transaction) -> Result<bool, ControlFlow> {
-	if ctx.exec().ctx().config.datastore.live_query_engine != LiveQueryEngine::Router {
+	if !ctx.exec().ctx().config.datastore.live_query_engine.captures_events() {
 		return Ok(false);
 	}
 	txn.table_has_live_query(ctx.db.namespace_id, ctx.db.database_id, &ctx.table.name)

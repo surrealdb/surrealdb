@@ -78,6 +78,82 @@ impl Value {
 	}
 }
 
+impl Value {
+	/// Appends the JSON encoding of this value to `out`: exactly what
+	/// serialising [`Value::into_json_value`] would produce, without building
+	/// the intermediate tree (one allocation per node) or consuming the value.
+	pub fn write_json(&self, out: &mut Vec<u8>) {
+		// Strings and numbers go through serde_json's own formatting, so the
+		// escaping and float formatting are the ones `into_json_value` gets.
+		fn put<T: serde::Serialize + ?Sized>(out: &mut Vec<u8>, v: &T) {
+			serde_json::to_writer(&mut *out, v).expect("writing json to a Vec cannot fail");
+		}
+		match self {
+			Value::None | Value::Null => out.extend_from_slice(b"null"),
+			Value::Bool(true) => out.extend_from_slice(b"true"),
+			Value::Bool(false) => out.extend_from_slice(b"false"),
+			Value::Number(Number::Int(int)) => put(out, int),
+			Value::Number(Number::Float(float)) => {
+				if float.is_finite() {
+					put(out, float)
+				} else {
+					out.extend_from_slice(b"null")
+				}
+			}
+			Value::Number(Number::Decimal(decimal)) => put(out, &decimal.to_string()),
+			Value::String(strand) => put(out, strand.as_str()),
+			Value::Uuid(uuid) => {
+				let mut buffer = [0u8; uuid::fmt::Hyphenated::LENGTH];
+				put(out, &*uuid.0.hyphenated().encode_lower(&mut buffer))
+			}
+			Value::Array(array) => write_json_seq(out, array.0.iter()),
+			Value::Set(set) => write_json_seq(out, set.0.iter()),
+			Value::Object(object) => {
+				out.push(b'{');
+				for (i, (k, v)) in object.0.iter().enumerate() {
+					if i > 0 {
+						out.push(b',');
+					}
+					put(out, k.as_str());
+					out.push(b':');
+					v.write_json(out);
+				}
+				out.push(b'}');
+			}
+			Value::Bytes(bytes) => {
+				out.push(b'[');
+				for (i, b) in bytes.0.iter().enumerate() {
+					if i > 0 {
+						out.push(b',');
+					}
+					put(out, b);
+				}
+				out.push(b']');
+			}
+			// Rare or string-shaped: the conversion itself, so they cannot drift.
+			other @ (Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Geometry(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)) => put(out, &other.clone().into_json_value()),
+		}
+	}
+}
+
+fn write_json_seq<'a>(out: &mut Vec<u8>, items: impl Iterator<Item = &'a Value>) {
+	out.push(b'[');
+	for (i, v) in items.enumerate() {
+		if i > 0 {
+			out.push(b',');
+		}
+		v.write_json(out);
+	}
+	out.push(b']');
+}
+
 fn geometry_into_json_value(geo: Geometry) -> JsonValue {
 	match geo {
 		Geometry::Point(point) => json!({
@@ -140,4 +216,47 @@ fn polygon_into_json_value(polygon: &Polygon) -> JsonValue {
 		coords.push(int);
 	}
 	coords.into()
+}
+
+#[cfg(test)]
+mod write_json_tests {
+	use std::collections::BTreeMap;
+
+	use crate::{Array, Number, Object, Value};
+
+	#[test]
+	fn matches_into_json_value() {
+		let mut obj = BTreeMap::new();
+		obj.insert("b\"q\u{1}".to_owned(), Value::Number(Number::Float(1.5)));
+		obj.insert("a".to_owned(), Value::Number(Number::Int(-7)));
+		obj.insert("n".to_owned(), Value::Number(Number::Float(f64::NAN)));
+		obj.insert("f".to_owned(), Value::Number(Number::Float(1e300)));
+		obj.insert("z".to_owned(), Value::Number(Number::Float(-0.0)));
+		obj.insert("s".to_owned(), Value::String("héllo \n \u{2028} 😀".to_owned()));
+		obj.insert("none".to_owned(), Value::None);
+		obj.insert("t".to_owned(), Value::Bool(true));
+		obj.insert(
+			"arr".to_owned(),
+			Value::Array(Array::from(vec![
+				Value::Null,
+				Value::Bool(false),
+				Value::Number(Number::Int(i64::MIN)),
+			])),
+		);
+		obj.insert("bytes".to_owned(), Value::Bytes(crate::Bytes::from(vec![0u8, 255, 7])));
+		obj.insert("uuid".to_owned(), Value::Uuid(crate::Uuid::new_v4()));
+		obj.insert("dt".to_owned(), Value::Datetime(crate::Datetime::now()));
+		obj.insert("dur".to_owned(), Value::Duration(crate::Duration::from_secs(90)));
+		obj.insert("empty".to_owned(), Value::Object(Object::default()));
+		let v = Value::Array(Array::from(vec![
+			Value::Object(Object::from(obj)),
+			Value::Array(Array::new()),
+		]));
+		let mut out = Vec::new();
+		v.write_json(&mut out);
+		assert_eq!(
+			String::from_utf8(out).unwrap(),
+			serde_json::to_string(&v.into_json_value()).unwrap()
+		);
+	}
 }

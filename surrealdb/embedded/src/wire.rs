@@ -42,3 +42,22 @@ pub fn encode(format: Format, value: Value) -> Result<Vec<u8>> {
 		Format::Shaped | Format::Unsupported => bail!("unsupported wire format"),
 	}
 }
+
+/// Appends the encoding of `value` to `out`: the bytes [`encode`] would produce. JSON is written
+/// by reference, without copying the value first; the other formats encode a copy.
+pub fn encode_into(format: Format, value: &Value, out: &mut Vec<u8>) -> Result<()> {
+	match format {
+		Format::Cbor => {
+			out.extend_from_slice(&cbor::encode(value.clone())?);
+			Ok(())
+		}
+		Format::Json => {
+			value.write_json(out);
+			Ok(())
+		}
+		_ => {
+			out.extend_from_slice(&encode(format, value.clone())?);
+			Ok(())
+		}
+	}
+}

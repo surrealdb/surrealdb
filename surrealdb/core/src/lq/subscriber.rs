@@ -30,13 +30,37 @@ use crate::lq::event::{LiveAction, LiveEvent};
 /// The error a write-context failure carries. Neither resolving a table's
 /// context nor delivering a notification can signal a loop or a `RETURN`, so
 /// anything but an error is a broken invariant.
-fn into_error(flow: ControlFlow) -> anyhow::Error {
+pub(crate) fn into_error(flow: ControlFlow) -> anyhow::Error {
 	match flow {
 		ControlFlow::Err(e) => e,
 		ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
 			anyhow::Error::new(crate::exec::Error::InvalidControlFlow)
 		}
 	}
+}
+
+/// The write context of `table` that a subscription's notification is built in: a background
+/// context over the read transaction `txn`, in `ns_name` and `db_name`, carrying `broker` when
+/// the notifications are sent through one.
+///
+/// Base options are scoped to the namespace and database with an anonymous principal, which is
+/// irrelevant: the pipeline applies each subscription's own stored auth snapshot before
+/// evaluating any permission. The table must exist.
+pub(crate) async fn table_write_ctx(
+	ds: &Datastore,
+	txn: Arc<Transaction>,
+	ns_name: &str,
+	db_name: &str,
+	table: &TableName,
+	broker: Option<Arc<dyn MessageBroker>>,
+) -> Result<WriteCtx> {
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(txn);
+	ctx.set_broker(broker);
+	let ctx = ctx.freeze();
+	let opt = ds.setup_options(&Session::default().with_ns(ns_name).with_db(db_name));
+	let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
+	WriteCtx::resolve(&exec, table, TableExistence::Required).await.map_err(into_error)
 }
 
 /// A table's live subscriptions, resolved once per router pass, that captured

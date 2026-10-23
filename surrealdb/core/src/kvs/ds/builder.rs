@@ -15,7 +15,7 @@ use surrealdb_kvs::api::BoxFut;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::config::FeatureLevelSetting;
+use super::config::{FeatureLevelSetting, LiveQueryEngine};
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
@@ -35,6 +35,7 @@ use crate::kvs::{
 	TransactionConfig, TransactionFactory,
 };
 use crate::lq::LiveQueryRouter;
+use crate::lq::external::ChangeFeedSource;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::options::EngineOptions;
 #[cfg(feature = "surrealism")]
@@ -52,6 +53,8 @@ pub struct Builder {
 	/// custom broker that owns it instead.
 	notify_channel: Option<Sender<PublicNotification>>,
 	live_query_broker: Option<Arc<dyn MessageBroker>>,
+	/// A host-provided source for `SHOW CHANGES`, consulted in place of the change-feed keyspace.
+	changefeed_source: Option<Arc<dyn ChangeFeedSource>>,
 	/// Public HTTP endpoint this datastore publishes for cross-node messaging
 	/// (live-query relay). Surfaced by the composer via
 	/// [`TransactionBuilderFactory::http_endpoint`] when present.
@@ -148,6 +151,7 @@ impl Builder {
 			shutdown: CancellationToken::new(),
 			notify_channel: None,
 			live_query_broker: None,
+			changefeed_source: None,
 			http_endpoint: None,
 			id: None,
 			slow_log: None,
@@ -342,6 +346,12 @@ impl Builder {
 	/// Installs the broker used to deliver buffered live-query notifications after commit.
 	pub fn with_live_query_broker(mut self, broker: Arc<dyn MessageBroker>) -> Self {
 		self.live_query_broker = Some(broker);
+		self
+	}
+
+	/// Installs the source `SHOW CHANGES` reads from, in place of the change-feed keyspace.
+	pub fn with_changefeed_source(mut self, source: Arc<dyn ChangeFeedSource>) -> Self {
+		self.changefeed_source = Some(source);
 		self
 	}
 
@@ -594,6 +604,17 @@ impl Builder {
 			.context("Could not create http client")?,
 		);
 
+		// The host-driven engine writes no change feed and notifies no one itself: without the
+		// host's change-feed source `SHOW CHANGES` would read a keyspace nothing writes.
+		if config.datastore.live_query_engine == LiveQueryEngine::External
+			&& self.changefeed_source.is_none()
+		{
+			bail!(
+				"The external live query engine needs a change feed source: install one with \
+				 `Builder::with_changefeed_source`"
+			);
+		}
+
 		let datastore = Datastore {
 			shutdown,
 			maintenance: parking_lot::Mutex::new(None),
@@ -609,6 +630,7 @@ impl Builder {
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
 			live_query_broker: self.live_query_broker,
+			changefeed_source: self.changefeed_source,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: None,
 			memory_governor: self.memory_governor,

@@ -132,6 +132,7 @@ use crate::kvs::{
 	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
+use crate::lq::external::ChangeFeedSource;
 use crate::observe::ExecutionObserver;
 use crate::options::EngineOptions;
 #[cfg(feature = "surrealism")]
@@ -482,6 +483,8 @@ pub struct Datastore {
 	/// half of the notification channel internally). `None` disables live-query work entirely
 	/// at the executor boundary.
 	live_query_broker: Option<Arc<dyn MessageBroker>>,
+	/// Host-provided source `SHOW CHANGES` reads from instead of the change-feed keyspace.
+	changefeed_source: Option<Arc<dyn ChangeFeedSource>>,
 	/// Per-node live-query router state (the tail cursor over the `lqe`
 	/// keyspace). Only used when `config.datastore.live_query_engine` is
 	/// `Router`, where the router is the sole notification delivery path. See
@@ -1285,6 +1288,7 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker,
+			changefeed_source: self.changefeed_source,
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler,
@@ -1367,6 +1371,7 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker.clone(),
+			changefeed_source: self.changefeed_source.clone(),
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler.clone(),
@@ -4424,6 +4429,10 @@ impl Datastore {
 		budget: u64,
 		canceller: &CancellationToken,
 	) -> Result<()> {
+		// An engine that writes no change feed has nothing to collect.
+		if !self.config.datastore.live_query_engine.writes_changefeed() {
+			return Ok(());
+		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting changefeed garbage collection");
 		// Create a new lease handler
@@ -7956,6 +7965,7 @@ impl Datastore {
 			Arc::clone(&self.surrealism_cache),
 		)?;
 		ctx.set_scheduler(self.scheduler.clone());
+		ctx.set_changefeed_source(self.changefeed_source.clone());
 		ctx.set_memory(Some(self.memory_host().query()));
 		Ok(ctx)
 	}

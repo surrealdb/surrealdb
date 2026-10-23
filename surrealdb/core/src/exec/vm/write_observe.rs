@@ -41,7 +41,6 @@ use crate::exec::vm::live::LiveUnit;
 use crate::exec::vm::program::{Label, Program, UnitId};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
-use crate::kvs::LiveQueryEngine;
 use crate::val::{RecordId, Value};
 
 /// An instruction of the observer stages.
@@ -229,15 +228,15 @@ pub(super) async fn step(
 /// Notify the live subscriptions the record in flight's context holds of the
 /// record, each by the unit its context holds for it (`vm::live`).
 ///
-/// Nothing runs under the router engine, which delivers off the write path;
-/// for a write no observer sees; for a table with no subscription; or where no
-/// broker takes notifications. A record with no id is a broken order, failed
-/// once rather than per subscription.
+/// Nothing runs under the router engine, which delivers off the write path, or
+/// the external engine, whose host delivers; for a write no observer sees; for a table with no
+/// subscription; or where no broker takes notifications. A record with no id is a broken order,
+/// failed once rather than per subscription.
 async fn lives(action: Action, state: &mut State) -> FlowResult<()> {
 	let write =
 		state.write.as_deref_mut().ok_or_else(|| internal("a write body with no write state"))?;
 	let (row, ctx) = write.in_flight()?;
-	if ctx.exec().root().ctx.config.datastore.live_query_engine == LiveQueryEngine::Router
+	if !ctx.exec().root().ctx.config.datastore.live_query_engine.notifies_inline()
 		|| ctx.lives.is_empty()
 		|| !is_observed(row, &ctx)
 	{

@@ -33,6 +33,32 @@ pub enum LiveQueryEngine {
 	/// per-node router performs per-subscriber matching off the write path, so
 	/// write throughput is independent of the subscriber count.
 	Router,
+	/// Host-driven engine: the write path neither captures record changes for a
+	/// router nor notifies inline, and writes no change feed. `LIVE` and `KILL`
+	/// still commit their subscription and node keys in the statement's
+	/// transaction. The host observes the committed record changes itself and
+	/// asks the datastore to build each subscription's notification with
+	/// [`Datastore::live_notifications`](crate::kvs::Datastore::live_notifications).
+	External,
+}
+
+impl LiveQueryEngine {
+	/// Whether a write notifies the table's subscriptions on its own path,
+	/// before its transaction commits.
+	pub(crate) fn notifies_inline(self) -> bool {
+		self == Self::Inline
+	}
+
+	/// Whether a write captures its record change into the live-event keyspace
+	/// for the router to replay.
+	pub(crate) fn captures_events(self) -> bool {
+		self == Self::Router
+	}
+
+	/// Whether a write appends to the table's change feed.
+	pub(crate) fn writes_changefeed(self) -> bool {
+		self != Self::External
+	}
 }
 
 impl fmt::Display for LiveQueryEngine {
@@ -40,6 +66,7 @@ impl fmt::Display for LiveQueryEngine {
 		match self {
 			Self::Inline => f.write_str("inline"),
 			Self::Router => f.write_str("router"),
+			Self::External => f.write_str("external"),
 		}
 	}
 }
@@ -51,7 +78,10 @@ impl FromStr for LiveQueryEngine {
 		match s.to_lowercase().as_str() {
 			"inline" => Ok(Self::Inline),
 			"router" => Ok(Self::Router),
-			v => Err(format!("Invalid live query engine: '{v}'. Expected 'inline' or 'router'")),
+			"external" => Ok(Self::External),
+			v => Err(format!(
+				"Invalid live query engine: '{v}'. Expected 'inline', 'router' or 'external'"
+			)),
 		}
 	}
 }

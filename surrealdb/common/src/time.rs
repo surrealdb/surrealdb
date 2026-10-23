@@ -19,6 +19,9 @@
 //! choice is made once rather than at each call site — and off the browser
 //! these are `tokio::time`'s own items.
 //!
+//! `wasm32-unknown-emscripten` is the exception among the wasm targets: it has a clock behind
+//! `std::time` and a Tokio runtime with working timers, so it takes `tokio::time` as native does.
+//!
 //! [`std::time::Duration`] is a plain value with no clock behind it and is used
 //! directly. For wall-clock timestamps rather than timers, use
 //! [`web_time`](https://docs.rs/web-time).
