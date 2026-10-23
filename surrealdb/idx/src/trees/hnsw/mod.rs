@@ -621,6 +621,12 @@ where
 	for layer in h.layers.iter() {
 		layer.check_props(&h.elements).await;
 	}
+	// A walk enters layer 0 at the entry point, so a node it cannot reach from
+	// there is a vector no search can find.
+	if let Some(entry) = h.state.enter_point {
+		let unreachable = h.layer0.unreachable_from(entry);
+		assert!(unreachable.is_empty(), "layer 0 nodes unreachable from {entry}: {unreachable:?}");
+	}
 }
 
 #[cfg(test)]
