@@ -1,6 +1,8 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 #![deny(clippy::wildcard_enum_match_arm)]
 
+#[cfg(feature = "geo")]
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
@@ -620,6 +622,43 @@ impl Value {
 		}
 	}
 
+	/// The geometry a geometry operator reads from this value: the value
+	/// itself, or the geometry an object that is exactly GeoJSON describes
+	/// ([`Geometry::try_from_object`]). That is the form a geometry takes as
+	/// data, such as a query parameter, so `$point INSIDE area` answers the
+	/// same whether `$point` was written as a literal or sent by a client.
+	#[cfg(feature = "geo")]
+	fn geometry_operand(&self) -> Option<Cow<'_, Geometry>> {
+		match self {
+			Value::Geometry(v) => Some(Cow::Borrowed(v)),
+			Value::Object(v) => Geometry::try_from_object(v).map(Cow::Owned),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
+		}
+	}
+
+	/// Whether this value and `other` are both geometries, or GeoJSON objects
+	/// describing them, and this one contains the other.
+	#[cfg(feature = "geo")]
+	fn geometry_contains(&self, other: &Value) -> bool {
+		self.geometry_operand().zip(other.geometry_operand()).is_some_and(|(v, w)| v.contains(&w))
+	}
+
 	/// Check if this Value contains another Value. Without the `geo` feature
 	/// no geometry contains anything; the operators that reach this fail first.
 	pub fn contains(&self, other: &Value) -> bool {
@@ -629,10 +668,33 @@ impl Value {
 			Value::Uuid(v) => other.is_strand_and(|w| v.to_string().contains(w.as_str())),
 			Value::String(v) => other.is_strand_and(|w| v.contains(w.as_str())),
 			#[cfg(feature = "geo")]
-			Value::Geometry(v) => other.is_geometry_and(|w| v.contains(w)),
+			Value::Geometry(_) => self.geometry_contains(other),
 			#[cfg(not(feature = "geo"))]
 			Value::Geometry(_) => false,
-			Value::Object(v) => other.is_strand_and(|w| v.contains_key(w.as_str())),
+			// A string is a key. Anything else is a geometry, if the object is GeoJSON.
+			Value::Object(v) => match other {
+				Value::String(w) => v.contains_key(w.as_str()),
+				#[cfg(feature = "geo")]
+				Value::Object(_) | Value::Geometry(_) => self.geometry_contains(other),
+				#[cfg(not(feature = "geo"))]
+				Value::Object(_) | Value::Geometry(_) => false,
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => false,
+			},
 			Value::Range(r) => {
 				let beg = match &r.start {
 					Bound::Unbounded => true,
@@ -685,8 +747,23 @@ impl Value {
 		}
 	}
 
+	/// An object that is exactly GeoJSON, as the geometry it describes. A
+	/// container is read through this once, before its elements are checked,
+	/// rather than once per element.
+	#[cfg(feature = "geo")]
+	fn geojson_as_geometry(&self) -> Option<Value> {
+		let Value::Object(v) = self else {
+			return None;
+		};
+		Geometry::try_from_object(v).map(Value::Geometry)
+	}
+
 	/// Check if all Values in an Array, Set or String contain another Value
 	pub fn contains_all(&self, other: &Value) -> bool {
+		#[cfg(feature = "geo")]
+		if let Some(geometry) = self.geojson_as_geometry() {
+			return geometry.contains_all(other);
+		}
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
@@ -736,6 +813,10 @@ impl Value {
 
 	/// Check if any Values in an Array, Set or String contain another Value
 	pub fn contains_any(&self, other: &Value) -> bool {
+		#[cfg(feature = "geo")]
+		if let Some(geometry) = self.geojson_as_geometry() {
+			return geometry.contains_any(other);
+		}
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
@@ -783,13 +864,13 @@ impl Value {
 		}
 	}
 
-	/// Check if this Geometry intersects another Value. Without the `geo`
-	/// feature no geometry intersects anything; the operators that reach this
-	/// fail first.
+	/// Check if this Geometry intersects another Value, either of them possibly
+	/// a GeoJSON object. Without the `geo` feature no geometry intersects
+	/// anything; the operators that reach this fail first.
 	pub fn intersects(&self, other: &Value) -> bool {
 		#[cfg(feature = "geo")]
-		if let (Value::Geometry(v), Value::Geometry(w)) = (self, other) {
-			return v.intersects(w);
+		if let (Some(v), Some(w)) = (self.geometry_operand(), other.geometry_operand()) {
+			return v.intersects(&w);
 		}
 		#[cfg(not(feature = "geo"))]
 		let _ = other;
