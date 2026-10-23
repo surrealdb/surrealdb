@@ -2101,4 +2101,130 @@ mod tests {
 		assert!(frame.push_stored(&key, &broken, None).is_err());
 		assert_eq!(frame.len(), 1, "the failed row is not kept");
 	}
+
+	/// A packed row with a narrowed `F32` column holding a signaling NaN preserves its exact
+	/// `f64` bit pattern when transcoded into both CBOR and shaped row frames.
+	#[cfg(feature = "shaped")]
+	#[test]
+	fn a_packed_f32_signaling_nan_preserves_bits_in_shaped_and_cbor_frames() {
+		use std::sync::Arc;
+
+		use crate::catalog::{
+			Column, ColumnRole, DatabaseId, Generation, GenerationLayout, GenerationRing,
+			LayoutDescriptor, Location, NamespaceId, PackedDescriptor, PhysicalKind, Presence,
+			RecordFormat, RowLayout, StoredRecord, TableLayouts, encode_record_with,
+		};
+		use crate::key::KVKey as _;
+		use crate::val::{Object, TableName};
+
+		let table = TableName::new("t");
+		let generation = Generation::FIRST;
+		let packed_descriptor = PackedDescriptor {
+			columns: vec![Column {
+				path: vec!["f".to_owned()],
+				kind: PhysicalKind::F32,
+				presence: Presence::Required,
+				location: Location::Fixed(0),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			}],
+			presence_bits: 0,
+			bool_bits: 0,
+			fixed_size: 4,
+			var_count: 0,
+		};
+		let layout_descriptor = Arc::new(LayoutDescriptor {
+			table: table.clone(),
+			layout: RowLayout::Packed(packed_descriptor),
+			migration: None,
+			migrated: None,
+		});
+		let ring = GenerationRing::new(generation, generation, None).expect("ring");
+		let layouts = TableLayouts::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			table,
+			ring,
+			vec![(generation, GenerationLayout::Readable(layout_descriptor))],
+			0,
+		)
+		.expect("layouts");
+
+		let rid = crate::val::RecordId {
+			table: "t".into(),
+			key: RecordIdKey::Number(1),
+		};
+		let key = crate::key::schema::RecordKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			std::borrow::Cow::Borrowed(&rid.table),
+			std::borrow::Cow::Borrowed(&rid.key),
+		)
+		.encode_key()
+		.expect("encodes");
+
+		for expected_bits in [
+			0x7ff0_0000_2000_0000u64,
+			0xfff0_0000_2000_0000u64,
+			0x7ff8_0000_2000_0000u64,
+		] {
+			let mut obj = Object::default();
+			obj.insert("id".to_owned(), Value::RecordId(rid.clone()));
+			obj.insert("f".to_owned(), Value::Number(Number::Float(f64::from_bits(expected_bits))));
+			let packed_bytes = encode_record_with(
+				RecordFormat::Packed {
+					generation,
+				},
+				Some(&layouts),
+				None,
+				&Value::Object(obj),
+				Some(&rid),
+			)
+			.expect("encodes packed");
+			assert!(
+				StoredRecord::parse(&packed_bytes).expect("parses").expect("v1").is_packed(),
+				"expected F32 NaN with 23-bit payload to fit in PhysicalKind::F32"
+			);
+
+			let whole = crate::exec::operators::scan::pipeline::decode_record_value(
+				&key,
+				&packed_bytes,
+				Some(&layouts),
+			)
+			.expect("decodes whole");
+			let Value::Object(whole_obj) = &whole else {
+				panic!("expected object, got {whole:?}");
+			};
+			let Some(Value::Number(Number::Float(whole_f))) = whole_obj.get("f") else {
+				panic!("expected float field f in {whole_obj:?}");
+			};
+			assert_eq!(whole_f.to_bits(), expected_bits, "whole decode preserves NaN bits");
+
+			for format in [RowFormat::Cbor, RowFormat::Shaped] {
+				let mut frame = RowFrame::with_format(format);
+				let whole_before = WHOLE_DECODES.with(|n| n.get());
+				let visits_before = PACKED_VISITS.with(|n| n.get());
+				frame.push_stored(&key, &packed_bytes, Some(&layouts)).expect("transcodes");
+				assert_eq!(WHOLE_DECODES.with(|n| n.get()), whole_before, "{format:?}");
+				assert_eq!(PACKED_VISITS.with(|n| n.get()), visits_before + 1, "{format:?}");
+
+				let values = frame.take_encoded().to_values().expect("decodes frame");
+				assert_eq!(values.len(), 1);
+				let surrealdb_types::Value::Object(decoded_obj) = &values[0] else {
+					panic!("expected object in {format:?}, got {:?}", values[0]);
+				};
+				let Some(surrealdb_types::Value::Number(surrealdb_types::Number::Float(f))) =
+					decoded_obj.get("f")
+				else {
+					panic!("expected float field f in {format:?}, got {decoded_obj:?}");
+				};
+				assert_eq!(
+					f.to_bits(),
+					expected_bits,
+					"{format:?} preserves signaling NaN bits {expected_bits:#018x}"
+				);
+			}
+		}
+	}
 }

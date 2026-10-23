@@ -424,9 +424,9 @@ impl Row<'_> {
 					Err(_) => Value::Number(Number::Decimal(Decimal::from(v))),
 				}
 			}
-			Kind::F32 => Value::Number(Number::Float(f64::from(f32::from_bits(
-				u32::from_le_bytes(array(self.fixed(slot, 4)?)),
-			)))),
+			Kind::F32 => Value::Number(Number::Float(widen_f32(u32::from_le_bytes(array(
+				self.fixed(slot, 4)?,
+			))))),
 			Kind::DatetimeNs => {
 				let ns = i64::from_le_bytes(array(self.fixed(slot, 8)?));
 				let (secs, nanos) = if ns == i64::MIN || ns == i64::MAX {
@@ -554,6 +554,17 @@ fn int(v: i64) -> Value {
 	Value::Number(Number::Int(v))
 }
 
+fn widen_f32(bits: u32) -> f64 {
+	let mantissa = bits & 0x007F_FFFF;
+	if (bits & 0x7F80_0000) == 0x7F80_0000 && mantissa != 0 {
+		f64::from_bits(
+			(u64::from(bits >> 31) << 63) | 0x7FF0_0000_0000_0000 | (u64::from(mantissa) << 29),
+		)
+	} else {
+		f64::from(f32::from_bits(bits))
+	}
+}
+
 fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
 	let mut out = [0u8; N];
 	out.copy_from_slice(&bytes[..N]);
@@ -623,4 +634,51 @@ fn record(
 		table: Table::new(table),
 		key,
 	}))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::shaped::shape::{ColumnDef, Shape, ShapeDef};
+	use crate::shaped::write::RowWriter;
+
+	/// A narrowed `F32` slot widens a signaling NaN bit-for-bit without quietening its payload,
+	/// matching `surrealdb_catalog::packed::widen_f32`.
+	#[test]
+	fn f32_leaf_preserves_signaling_nan_bits() {
+		let shape = Shape::new(ShapeDef::object(
+			false,
+			&[ColumnDef {
+				name: "f".into(),
+				kind: Kind::F32,
+				element: None,
+				flags: 0,
+				table: String::new(),
+				open: false,
+				children: vec![],
+			}],
+		))
+		.expect("shape");
+
+		for (f32_bits, expected_f64_bits) in [
+			(0x7f80_0001u32, 0x7ff0_0000_2000_0000u64),
+			(0xff80_0001u32, 0xfff0_0000_2000_0000u64),
+			(0x7fc0_0001u32, 0x7ff8_0000_2000_0000u64),
+		] {
+			let mut row = Vec::new();
+			let mut writer = RowWriter::begin(&mut row, &shape);
+			writer.fixed(0, &f32_bits.to_le_bytes());
+			writer.finish().expect("finishes");
+
+			let (decoded, len) = decode_row(&shape, &row, &mut |_| unreachable!()).expect("decodes");
+			assert_eq!(len, row.len());
+			let Value::Object(obj) = decoded else {
+				panic!("expected object, got {decoded:?}");
+			};
+			let Some(Value::Number(Number::Float(v))) = obj.get("f") else {
+				panic!("expected float field f, got {obj:?}");
+			};
+			assert_eq!(v.to_bits(), expected_f64_bits, "f32 bits {f32_bits:#010x}");
+		}
+	}
 }
