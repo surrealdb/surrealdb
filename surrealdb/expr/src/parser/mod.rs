@@ -1467,7 +1467,7 @@ impl<'a> Lower<'a> {
 			let mut splits = Vec::with_capacity(ids.len());
 			for &id in ids {
 				let g = self.idiom(id)?;
-				if !projected(fields, &g, false) {
+				if !names_projected(fields, &g) {
 					let msg =
 						format!("Missing split idiom `{:?}` in statement selection", g.to_sql());
 					return Err(missing(msg, id));
@@ -1728,8 +1728,28 @@ fn binary(op: Binary) -> BinaryOperator {
 	}
 }
 
-/// Whether the projection holds `g`, as a `SPLIT` idiom (exactly) or a
-/// `GROUP BY` idiom (or a prefix of a projected idiom).
+/// Whether a `SPLIT` target names a field of the row the selection returns: the name a field is
+/// projected under, its alias where it has one, otherwise the expression it projects. `*` projects
+/// every field of the source under its own name. A target that only the source expression of an
+/// aliased field carries names nothing in the projected row, so it is refused.
+fn names_projected(fields: &Fields, g: &Idiom) -> bool {
+	let named = |sel: &Selector| match &sel.alias {
+		Some(alias) => alias == g,
+		None => match &sel.expr {
+			Expr::Idiom(x) => x == g,
+			v => &v.to_idiom() == g,
+		},
+	};
+	match fields {
+		Fields::Value(sel) => named(sel),
+		Fields::Select(fs) => fs.iter().any(|f| match f {
+			Field::All => true,
+			Field::Single(sel) => named(sel),
+		}),
+	}
+}
+
+/// Whether the projection holds `g` as a `GROUP BY` idiom (or a prefix of a projected idiom).
 fn projected(fields: &Fields, g: &Idiom, group: bool) -> bool {
 	let prefix = |a: &Idiom, b: &Idiom| b.0.len() >= a.0.len() && b.0[..a.0.len()] == a.0[..];
 	let ok = |sel: &Selector| {

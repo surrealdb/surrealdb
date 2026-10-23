@@ -1638,6 +1638,9 @@ fn per_row_input(op: &LogicalOp) -> Option<&LogicalOp> {
 /// Binds the relational node `op` and the plan below it, and answers the value of the rows it
 /// produces.
 fn bind_relational(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError> {
+	if let Some(rebuilt) = value_split_over_source(op) {
+		return bind_row_run(cx, &rebuilt);
+	}
 	if let LogicalOp::Project(project) = op
 		&& let Some(split) = split_after_projection(project)
 	{
@@ -1760,6 +1763,11 @@ fn bind_relational(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError>
 /// the projection produced under the names it gave, and the ordering and paging read the rows the
 /// split delivers.
 fn split_after_projection(project: &LogicalProject) -> Option<LogicalOp> {
+	// A `VALUE` projection yields bare values, which have no field for a split to name. Its split
+	// stays beneath the projection; see `value_split_over_source`.
+	if matches!(project.fields, LogicalFields::Value { .. }) {
+		return None;
+	}
 	let mut sorts = Vec::new();
 	let mut node = &*project.input;
 	let split = loop {
@@ -1799,6 +1807,148 @@ fn split_after_projection(project: &LogicalProject) -> Option<LogicalOp> {
 		};
 	}
 	Some(op)
+}
+
+/// The plan of a `VALUE` projection whose `SPLIT` stands beneath its ordering and paging, rebuilt
+/// so that the split reads the expression the projection yields from each record below it.
+///
+/// The parser admits a `SPLIT` target only when it names that expression, so splitting the record
+/// on it gives one record per element, and the projection then yields each element as the value.
+/// The ordering and paging read those records, as they do for a projection with no split. `op` is
+/// the projection or a fetch over it. `None` when no split stands beneath the projection's
+/// ordering and paging, or when `op` is not such a projection.
+fn value_split_over_source(op: &LogicalOp) -> Option<LogicalOp> {
+	fn rebuild(node: &LogicalOp, expr: &LogicalExpr) -> Option<LogicalOp> {
+		match node {
+			LogicalOp::Sort(sort) => Some(LogicalOp::Sort(LogicalSort {
+				input: Box::new(rebuild(&sort.input, expr)?),
+				ordering: sort.ordering.clone(),
+				tempfiles: sort.tempfiles,
+			})),
+			LogicalOp::Limit(limit) => Some(LogicalOp::Limit(LogicalLimit {
+				input: Box::new(rebuild(&limit.input, expr)?),
+				limit: limit.limit.clone(),
+				start: limit.start.clone(),
+			})),
+			LogicalOp::Split(split) => Some(LogicalOp::Split(LogicalSplit {
+				input: split.input.clone(),
+				exprs: vec![expr.clone()],
+			})),
+			LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => None,
+		}
+	}
+	let project_over = |project: &LogicalProject| {
+		let LogicalFields::Value {
+			expr,
+			..
+		} = &project.fields
+		else {
+			return None;
+		};
+		Some(LogicalProject {
+			input: Box::new(rebuild(&project.input, expr)?),
+			fields: project.fields.clone(),
+			omit: project.omit.clone(),
+		})
+	};
+	match op {
+		LogicalOp::Project(project) => project_over(project).map(LogicalOp::Project),
+		LogicalOp::Fetch(fetch) => match &*fetch.input {
+			LogicalOp::Project(project) => Some(LogicalOp::Fetch(LogicalFetch {
+				input: Box::new(LogicalOp::Project(project_over(project)?)),
+				fetches: fetch.fetches.clone(),
+			})),
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => None,
+		},
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Write(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => None,
+	}
 }
 
 /// Binds `op` in value position and answers its value; `None` when it ended its block.
@@ -2856,12 +3006,11 @@ pub(super) fn aggregate_over(
 ///
 /// A key that names a field or an alias of the projection above the sort is bound as the
 /// expression that field holds, as the planner reads it, so it is read from the sort's input rows
-/// and not from the output the alias lands in. Over a grouping or a split the keys read the rows
-/// those produce, under the names the projection gave them, and are bound as written.
+/// and not from the output the alias lands in. Over a grouping the keys read the rows it produces,
+/// under the names the projection gave them, and are bound as written.
 fn bind_sort(cx: &mut BindCx<'_>, sort: &LogicalSort) -> Result<Flow, IrError> {
-	let order_fields = cx
-		.take_order_fields()
-		.filter(|_| !matches!(&*sort.input, LogicalOp::Aggregate(_) | LogicalOp::Split(_)));
+	let order_fields =
+		cx.take_order_fields().filter(|_| !matches!(&*sort.input, LogicalOp::Aggregate(_)));
 	let Some(rows) = bind_rows(cx, &sort.input)? else {
 		return Ok(Flow::Diverged);
 	};
