@@ -25,6 +25,7 @@ use web_time::Instant;
 
 use crate::catalog::{Permission, Permissions};
 use crate::ctx::FrozenContext;
+use crate::ctx::reason::Reason;
 use crate::expr::visit::{Visit, Visitor};
 
 #[derive(Clone)]
@@ -133,22 +134,60 @@ impl SlowLog {
 	/// statement in expression form, and the plan of a statement the
 	/// streaming engine ran. Both renderings collapse whitespace so the entry
 	/// is a single line.
+	///
+	/// Returns whether an entry was emitted.
 	pub(crate) fn check_log<T: ToSql, P: SlowLogVisit>(
 		&self,
 		ctx: &FrozenContext,
 		start: &Instant,
 		stm: &T,
 		params: &P,
-	) {
+	) -> bool {
 		let elapsed = start.elapsed();
 		if elapsed < self.0.duration {
-			return;
+			return false;
 		}
 
 		let params = self.extract_params(ctx, params);
 		// Ensure the query is logged on a single line by collapsing whitespace
 		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+		true
+	}
+
+	/// Emit an entry for a batch of statements that its query timeout or its
+	/// cancellation stopped before it completed, when the batch had run for at
+	/// least the threshold by then.
+	///
+	/// The entry reports the time since `batch_start` and the `reason`, and
+	/// names `stm`, the statement the interruption stopped: the one it cut
+	/// short, whose `params` are listed as [`SlowLog::check_log`] lists them,
+	/// or the one it kept from starting, which passes no `params` since it
+	/// never ran. The statement is rendered only once the threshold is met.
+	///
+	/// Returns whether an entry was emitted.
+	pub(crate) fn check_log_interrupted<T: ToSql, P: SlowLogVisit>(
+		&self,
+		ctx: &FrozenContext,
+		batch_start: &Instant,
+		reason: Reason,
+		stm: &T,
+		params: Option<&P>,
+	) -> bool {
+		let elapsed = batch_start.elapsed();
+		if elapsed < self.0.duration {
+			return false;
+		}
+		let reason = match reason {
+			Reason::Timedout(timeout) => format!("timed out after {timeout}"),
+			Reason::Canceled => "cancelled".to_string(),
+		};
+		let params = params.map_or_else(String::new, |params| self.extract_params(ctx, params));
+		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+		warn!(
+			"Slow query detected - time: {elapsed:#?} - batch did not complete ({reason}) - query: {stm} - params: [ {params} ]"
+		);
+		true
 	}
 
 	fn extract_params<P: SlowLogVisit>(&self, ctx: &FrozenContext, params: &P) -> String {

@@ -859,6 +859,15 @@ pub struct Executor {
 	/// read them in the order they were bound, so the plan runs them in the order of the serial
 	/// run.
 	binds_rows: bool,
+	/// When the batch this executor drives began, which the slow-log entry for
+	/// a batch its timeout or cancellation cuts short measures from (see
+	/// [`Executor::slow_log_interrupted`]). `None` outside a batch.
+	batch_start: Option<Instant>,
+	/// Whether the slow log already accounts for the interruption of the
+	/// batch, by an entry for the batch or for the statement the interruption
+	/// cut short. Every statement after an interruption observes it, and this
+	/// keeps the batch to one entry.
+	interruption_slow_logged: bool,
 }
 
 /// A statement of an explicit block that queued work for after the block's
@@ -1056,6 +1065,15 @@ thread_local! {
 /// The context is shared as an `Arc` while a statement runs, so it can only be
 /// unfrozen between statements; a live reference here means a statement held
 /// on to one past its own execution.
+/// The error a statement fails with when the query's timeout or cancellation
+/// has ended it.
+fn interruption_error(reason: Reason) -> anyhow::Error {
+	match reason {
+		Reason::Timedout(d) => EngineError::QueryTimedout(d.0).into(),
+		Reason::Canceled => EngineError::QueryCancelled.into(),
+	}
+}
+
 pub(crate) fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow::Error> {
 	Arc::get_mut(ctx)
 		.ok_or_else(|| {
@@ -1436,6 +1454,8 @@ impl Executor {
 			slow_log_after_commit: None,
 			block_waits: Vec::new(),
 			binds_rows: false,
+			batch_start: None,
+			interruption_slow_logged: false,
 		}
 	}
 
@@ -1748,9 +1768,58 @@ impl Executor {
 	/// references whose values the entry lists. They are one value for a
 	/// statement in expression form, and a surface statement paired with its
 	/// plan for one the engine ran.
-	fn check_slow_log<T: ToSql, P: SlowLogVisit>(&self, start: &Instant, stm: &T, params: &P) {
-		if let Some(slow_log) = self.ctx.slow_log() {
-			slow_log.check_log(&self.ctx, start, stm, params);
+	fn check_slow_log<T: ToSql, P: SlowLogVisit>(&mut self, start: &Instant, stm: &T, params: &P) {
+		let Some(slow_log) = self.ctx.slow_log() else {
+			return;
+		};
+		if slow_log.check_log(&self.ctx, start, stm, params) {
+			// A statement the interruption cut short is accounted for by its
+			// own entry.
+			if !self.interruption_slow_logged && matches!(self.ctx.done(true), Ok(Some(_))) {
+				self.interruption_slow_logged = true;
+			}
+		} else if !self.interruption_slow_logged
+			&& let Ok(Some(reason)) = self.ctx.done(true)
+		{
+			// The statement ran under the threshold, but the batch it belongs
+			// to may not have.
+			self.slow_log_interrupted(reason, stm, Some(params));
+		}
+	}
+
+	/// Log the batch as a slow query when its timeout or cancellation has
+	/// stopped `stm` and the batch has run for at least the slow-log
+	/// threshold.
+	///
+	/// `stm` is the statement the interruption cut short, with the `params`
+	/// it ran with, or the statement it kept from starting, with none. The
+	/// batch is logged at most once, and not when the statement the
+	/// interruption cut short has an entry of its own.
+	fn slow_log_interrupted<T: ToSql, P: SlowLogVisit>(
+		&mut self,
+		reason: Reason,
+		stm: &T,
+		params: Option<&P>,
+	) {
+		if self.interruption_slow_logged {
+			return;
+		}
+		let (Some(slow_log), Some(batch_start)) = (self.ctx.slow_log(), self.batch_start) else {
+			return;
+		};
+		self.interruption_slow_logged =
+			slow_log.check_log_interrupted(&self.ctx, &batch_start, reason, stm, params);
+	}
+
+	/// [`Executor::slow_log_interrupted`] for `next`, a statement that is not
+	/// run because the block it belongs to has already failed, when the reason
+	/// the block failed is the batch's timeout or cancellation.
+	fn slow_log_if_interrupted(&mut self, next: &TopLevelStatement) {
+		if self.interruption_slow_logged || self.ctx.slow_log().is_none() {
+			return;
+		}
+		if let Ok(Some(reason)) = self.ctx.done(true) {
+			self.slow_log_interrupted(reason, next, None::<&PlanParams<'_>>);
 		}
 	}
 
@@ -3005,7 +3074,13 @@ impl Executor {
 		stmt: TopLevelStatement,
 	) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
-		self.bail_if_done()?;
+		match self.ctx.done(true)? {
+			None => {}
+			Some(reason) => {
+				self.slow_log_interrupted(reason, &stmt, None::<&PlanParams<'_>>);
+				return Err(interruption_error(reason));
+			}
+		}
 		self.execute_plan_impl(kvs, start, stmt).await
 	}
 
@@ -3013,8 +3088,7 @@ impl Executor {
 	fn bail_if_done(&self) -> Result<()> {
 		match self.ctx.done(true)? {
 			None => Ok(()),
-			Some(Reason::Timedout(d)) => bail!(EngineError::QueryTimedout(d.0)),
-			Some(Reason::Canceled) => bail!(EngineError::QueryCancelled),
+			Some(reason) => Err(interruption_error(reason)),
 		}
 	}
 
@@ -3975,6 +4049,7 @@ impl Executor {
 			if let Some(done) = done {
 				// A cancellation happened. Cancel the transaction, fast-forward the remaining
 				// results and then return.
+				self.slow_log_interrupted(done, &stmt, None::<&PlanParams<'_>>);
 				let _ = txn.cancel().await;
 
 				let cancelled_count = self.results.len().saturating_sub(start_results);
@@ -4337,6 +4412,7 @@ impl Executor {
 							{
 								yield_now!();
 								let stmt = stmt?;
+								self.slow_log_if_interrupted(&stmt);
 								let place = place_statement(grouper, &stmt);
 								let end = match place.role {
 									StatementRole::Commit => FailedEnd::Commit,
@@ -4542,6 +4618,8 @@ impl Executor {
 			tx.on_commit(Box::new(FlushOnCommit(prepared))).await;
 		}
 		let batch_start = Instant::now();
+		self.batch_start = Some(batch_start);
+		self.interruption_slow_logged = false;
 		let results_start = self.results.len();
 		// Every statement shares the transaction the caller holds, so each
 		// transaction-control statement is marked misplaced.
@@ -4832,6 +4910,8 @@ impl Executor {
 		// of `QueryResult`s the executor produced is the source of
 		// truth for the per-batch counters.
 		let batch_start = Instant::now();
+		self.batch_start = Some(batch_start);
+		self.interruption_slow_logged = false;
 		let batch_results_start = self.results.len();
 		let mut stream = pin!(stream);
 		// Groups the statements as they are pulled: the stream cannot be read
