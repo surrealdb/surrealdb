@@ -11186,3 +11186,150 @@ async fn an_interrupted_rebuild_rolled_back_to_the_same_layout_is_resumed() -> R
 	assert_ne!(state.phase, IndexBuildPhase::Error, "the resumable build was withdrawn: {state:?}");
 	Ok(())
 }
+
+/// The keys of `ix`'s entries with the index's own prefix removed, so that two
+/// indexes over the same fields compare equal exactly when they hold the same
+/// entries.
+#[cfg(feature = "kv-mem")]
+async fn index_entry_suffixes(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: IndexId,
+) -> Result<std::collections::BTreeSet<Vec<u8>>> {
+	let prefix = EntryPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+		ix,
+	};
+	let start = KVSubspace::encode_bound(&prefix)?.to_vec();
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let keys = catch!(tx, tx.keys(prefix.range()?, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	keys.into_iter()
+		.map(|key| {
+			anyhow::ensure!(key.starts_with(&start), "entry key outside its index prefix");
+			Ok(key[start.len()..].to_vec())
+		})
+		.collect()
+}
+
+/// A build comes online while writers keep queueing behind its replay, and the
+/// handover to inline maintenance loses and leaves no entry.
+///
+/// The catch-up hook commits a write before every read of the replay that runs
+/// while admissions are open, so no read of it ever finds the queues empty: a
+/// replay that waited for that would never reach `Closing`. Other writers run
+/// throughout, across `Closing` (where they wait) and past `Online` (where they
+/// maintain the index inline). The finished index must then hold exactly the
+/// entries of an index built afterwards with no writers.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_comes_online_while_writers_keep_queueing() -> Result<()> {
+	const ROWS: u64 = 200;
+	const WRITERS: u64 = 4;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			 CREATE |t:1..={ROWS}| SET x = 0 RETURN NONE;
+			 DEFINE INDEX ix ON t FIELDS x;"
+		),
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a fresh generation `Building` under an expired owner, with no
+	// index data and its own ticket counter, for a hand-driven takeover.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, 2, None);
+	state.initial_complete = false;
+	state.initial = None;
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
+		tb: Cow::Borrowed(&table),
+		ix: ix.index_id,
+	})
+	.await?;
+	tx.set_key(&ikb.new_bs_key(), &state).await?;
+	tx.set_key(&ikb.new_bt_key(2), &(0 as BuildTicket)).await?;
+	tx.commit().await?;
+
+	// One write per catch-up read, committed before the read runs.
+	let (hook, mut reads) = super::replay::catch_up_hook::register(ds.id());
+	let hooked = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		async move {
+			let mut reads_held = 0usize;
+			while let Some(done) = reads.recv().await {
+				execute_all_retrying_conflicts(&ds, &session, "UPDATE t:1 SET x += 1 RETURN NONE")
+					.await?;
+				reads_held += 1;
+				let _ = done.send(());
+			}
+			Ok::<_, anyhow::Error>(reads_held)
+		}
+	});
+	// Writers on every other row, for the whole build and past it.
+	let stop = Arc::new(AtomicBool::new(false));
+	let writers: Vec<_> = (0..WRITERS)
+		.map(|w| {
+			let (ds, session, stop) = (Arc::clone(&ds), session.clone(), Arc::clone(&stop));
+			tokio::spawn(async move {
+				let mut i = 0u64;
+				while !stop.load(Ordering::Acquire) {
+					let id = 2 + (i * 7 + w * 53) % (ROWS - 1);
+					execute_all_retrying_conflicts(
+						&ds,
+						&session,
+						&format!("UPDATE t:{id} SET x += 1 RETURN NONE"),
+					)
+					.await?;
+					i += 1;
+				}
+				Ok::<_, anyhow::Error>(i)
+			})
+		})
+		.collect();
+
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, 2);
+	timeout(Duration::from_secs(10), build.run_acquired(acquired)).await.map_err(|_| {
+		anyhow::anyhow!("the build did not come online while writers kept queueing")
+	})??;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+
+	drop(hook);
+	let reads_held = hooked.await??;
+	assert!(reads_held >= 1, "the catch-up replay must have read the queues");
+	// Keep writing for a moment against the online index, then stop.
+	sleep(Duration::from_millis(100)).await;
+	stop.store(true, Ordering::Release);
+	let mut written = 0;
+	for writer in writers {
+		written += writer.await??;
+	}
+	assert!(written > 0, "the writers must have committed while the build ran");
+
+	execute_all(&ds, &session, "DEFINE INDEX reference ON t FIELDS x;").await?;
+	let (_, _, _, reference) = get_table_index(&ds, "t", "reference").await?;
+	let built = index_entry_suffixes(&ds, ns, db, &table, ix.index_id).await?;
+	let expected = index_entry_suffixes(&ds, ns, db, &table, reference.index_id).await?;
+	assert_eq!(expected.len(), ROWS as usize, "one entry per record");
+	assert_eq!(built, expected, "the built index must hold exactly the records' current entries");
+	Ok(())
+}

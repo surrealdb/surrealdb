@@ -19,7 +19,7 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
-use super::replay::CountPrimaryProgress;
+use super::replay::{CountPrimaryProgress, ReplayUntil};
 use super::state::{
 	build_owner_expired, delete_durable_build_artifacts, delete_stale_build_queues,
 	durable_index_error_reason, durable_report_count, is_condition_not_met,
@@ -2355,7 +2355,15 @@ impl Building {
 		}
 		// First replay pass: catch up with writes that were admitted while the
 		// initial scan was running. The build is still in `Building`, so new
-		// writers may continue to reserve tickets.
+		// writers may continue to reserve tickets, and the pass returns once it
+		// has caught up with them rather than once they pause; the passes after
+		// `Closing` replay whatever they committed meanwhile. A takeover from
+		// `Closing` has nothing left to admit and drains outright.
+		let first_pass = if acquired.phase == IndexBuildPhase::Building {
+			ReplayUntil::CaughtUp
+		} else {
+			ReplayUntil::Drained
+		};
 		self.mark_durable_report(
 			generation,
 			IndexBuildReportStatus::Indexing,
@@ -2365,6 +2373,7 @@ impl Building {
 		)
 		.await?;
 		self.index_appending_loop(
+			first_pass,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,
@@ -2385,6 +2394,7 @@ impl Building {
 		// writers that already reserved tickets may still be committing their
 		// durable appendings.
 		self.index_appending_loop(
+			ReplayUntil::Drained,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,
@@ -2394,6 +2404,7 @@ impl Building {
 		// Final replay pass: reservations have cleared, so any remaining queued
 		// appendings are the last work that can exist before publishing `Online`.
 		self.index_appending_loop(
+			ReplayUntil::Drained,
 			initial_count,
 			&mut updates_count,
 			&mut last_prepare_remove_check,

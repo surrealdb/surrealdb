@@ -192,14 +192,36 @@ impl Met {
 	}
 }
 
+/// When a replay pass over the queued mutations may return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ReplayUntil {
+	/// Return once a pass has applied every mutation that one read of the
+	/// queues found, which takes a read returning less than a full batch from
+	/// each queue.
+	///
+	/// This is the pass that runs while admissions are open. Writers keep
+	/// queueing behind it, so the queues are not expected to be empty at any
+	/// read: under a steady stream of commits a pass that waited for that could
+	/// run for as long as the stream does. What a caught-up pass leaves is what
+	/// writers committed while it applied its last batch, and the `Closing`
+	/// passes that follow drain it with admissions fenced.
+	CaughtUp,
+	/// Return only once a read finds both queues empty.
+	///
+	/// Bounded only while admissions are fenced, which makes the queued work
+	/// finite: the passes after `Closing` is durable.
+	Drained,
+}
+
 impl Building {
-	/// Drain both legacy and durable queued mutations until the visible queues are empty.
+	/// Replay both legacy and durable queued mutations until `until` holds.
 	///
 	/// Legacy `!ig`/`!ip` appendings can exist from already committed work
 	/// created by older paths. Durable `!bg` appendings are scoped to the
 	/// current generation and must be replayed before the build can move online.
 	pub(super) async fn index_appending_loop(
 		&self,
+		until: ReplayUntil,
 		initial_count: usize,
 		updates_count: &mut usize,
 		last_prepare_remove_check: &mut Instant,
@@ -218,6 +240,10 @@ impl Building {
 			self.is_beyond_threshold(None)?;
 			// Check the index still exists and has not been marked for removal
 			self.check_prepare_remove(last_prepare_remove_check).await?;
+			#[cfg(all(test, feature = "kv-mem"))]
+			if until == ReplayUntil::CaughtUp {
+				catch_up_hook::before_read(self.ctx.node_id()).await;
+			}
 
 			let (keys, durable_keys) = {
 				let tx = self.new_read_tx().await?;
@@ -231,6 +257,8 @@ impl Building {
 				(keys, durable_keys)
 			};
 			let pending = keys.len() + durable_keys.len();
+			let full_batch = INDEXING_BATCH_SIZE as usize;
+			let caught_up = keys.len() < full_batch && durable_keys.len() < full_batch;
 			if keys.is_empty() && durable_keys.is_empty() {
 				self.mark_durable_report(
 					generation,
@@ -385,6 +413,11 @@ impl Building {
 						return Err(err);
 					}
 				}
+			}
+			// Only reached once this round's batches have committed: a retried
+			// batch `continue`s and reads the queues again.
+			if until == ReplayUntil::CaughtUp && caught_up {
+				break;
 			}
 		}
 		Ok(())
@@ -2072,4 +2105,51 @@ fn capped_product(parts: Vec<Vec<Value>>, cap: usize) -> Vec<Vec<Value>> {
 		acc = next;
 	}
 	acc
+}
+
+/// A test hook run before every read of a [`ReplayUntil::CaughtUp`] pass, so a
+/// test can commit a write between any two of the pass's reads and hold the
+/// queues non-empty at each of them.
+#[cfg(all(test, feature = "kv-mem"))]
+pub(super) mod catch_up_hook {
+	use std::collections::HashMap;
+	use std::sync::{LazyLock, Mutex};
+
+	use tokio::sync::{mpsc, oneshot};
+	use uuid::Uuid;
+
+	/// One request per read: the pass waits until the receiver answers it.
+	pub(in super::super) type Request = oneshot::Sender<()>;
+
+	static HOOKS: LazyLock<Mutex<HashMap<Uuid, mpsc::UnboundedSender<Request>>>> =
+		LazyLock::new(Default::default);
+
+	/// Unregisters the node's hook when dropped.
+	pub(in super::super) struct Guard(Uuid);
+
+	impl Drop for Guard {
+		fn drop(&mut self) {
+			HOOKS.lock().expect("catch-up hooks lock").remove(&self.0);
+		}
+	}
+
+	/// Routes the reads of every catch-up pass on `node` to the returned
+	/// receiver until the guard is dropped.
+	pub(in super::super) fn register(node: Uuid) -> (Guard, mpsc::UnboundedReceiver<Request>) {
+		let (tx, rx) = mpsc::unbounded_channel();
+		HOOKS.lock().expect("catch-up hooks lock").insert(node, tx);
+		(Guard(node), rx)
+	}
+
+	pub(super) async fn before_read(node: Uuid) {
+		let hook = HOOKS.lock().expect("catch-up hooks lock").get(&node).cloned();
+		let Some(hook) = hook else {
+			return;
+		};
+		let (done, wait) = oneshot::channel();
+		if hook.send(done).is_ok() {
+			// A dropped receiver releases the pass as an answer would.
+			let _ = wait.await;
+		}
+	}
 }
