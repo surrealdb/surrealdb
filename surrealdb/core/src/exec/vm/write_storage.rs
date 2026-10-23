@@ -1530,31 +1530,39 @@ async fn store(
 		// anything reads the key. A held create's failure is raised by whichever operation
 		// flushes it, and the statement reports it as that create's duplicate.
 		let put = txn.put_held(key.into(), bytes).await;
-		put.map_err(|err| {
-			if matches!(storage_error(&err), Some(crate::kvs::Error::TransactionKeyAlreadyExists)) {
+		put.map_err(|err| match storage_error(&err) {
+			Some(crate::kvs::Error::TransactionKeyAlreadyExists) => {
 				ControlFlow::Err(anyhow::Error::new(DocError::RecordExists {
 					record: rid.clone(),
 				}))
-			} else {
-				ControlFlow::Err(err)
 			}
+			Some(crate::kvs::Error::DeferredKeyExists {
+				key,
+			}) => ControlFlow::Err(crate::dbs::executor::held_create_exists(key)),
+			_ => ControlFlow::Err(err),
 		})?;
 		if let Some(key) = noted {
 			txn.note_creation(ns, db, &rid.table, key);
 		}
 		// The transaction holds the record it just put, as a record put
-		// through its record API is held.
-		txn.cache_record(
-			ns,
-			db,
-			&rid.table,
-			&rid.key,
-			Arc::new(Record {
-				metadata: row.metadata.clone(),
-				data: row.current.clone(),
-			}),
-			generation,
-		);
+		// through its record API is held, once its absence in storage has
+		// been checked; while the check is held, a read goes through the
+		// transactor so the check runs first.
+		if txn.holds_creates() {
+			txn.forget_record(ns, db, &rid.table, &rid.key);
+		} else {
+			txn.cache_record(
+				ns,
+				db,
+				&rid.table,
+				&rid.key,
+				Arc::new(Record {
+					metadata: row.metadata.clone(),
+					data: row.current.clone(),
+				}),
+				generation,
+			);
+		}
 	} else {
 		txn.set(key.into(), bytes).await.map_err(ControlFlow::Err)?;
 		txn.forget_record(ns, db, &rid.table, &rid.key);

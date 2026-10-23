@@ -435,6 +435,7 @@ impl Datastore {
 		.await;
 		drop(exec_ctx);
 		drop(plan);
+		let ran = settle_held_creates(txn, ran).await;
 
 		let Some((name, kind, bare_return)) = binding else {
 			apply_session_effects(ctx, sink, bindings)?;
@@ -470,6 +471,20 @@ impl Datastore {
 		context_mut(ctx)?.add_value(name, value);
 		*shape = OutputShape::Scalar;
 		Ok(Value::None)
+	}
+}
+
+/// The result of a statement once the creates it held are checked ([`Transaction::put_held`]):
+/// `result` when every held key was absent, and otherwise the duplicate the earliest failing
+/// create would have raised had its check been immediate, whatever the statement went on to do.
+async fn settle_held_creates(txn: &Transaction, result: FlowResult<Value>) -> FlowResult<Value> {
+	match txn.take_absence_violation().await {
+		Ok(None) => result,
+		Ok(Some(key)) => Err(ControlFlow::Err(crate::dbs::executor::held_create_exists(&key))),
+		Err(e) => match result {
+			Ok(_) => Err(ControlFlow::Err(e.into())),
+			Err(prior) => Err(prior),
+		},
 	}
 }
 

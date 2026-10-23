@@ -471,15 +471,18 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		let val = val.into_vec();
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.set(key, val).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.set(key, val).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -537,15 +540,18 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		let val = val.into_vec();
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.replace(key, val).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.replace(key, val).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -559,18 +565,24 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		let val = val.into_vec();
 		if self.speculating() {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
 			if self.speculative_value(&key).await?.is_some() {
 				return Err(crate::Error::TransactionKeyAlreadyExists);
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.put(key, val).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.put(key, val).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -630,19 +642,25 @@ impl Transactor {
 	where
 		V: IntoBytes + Debug,
 	{
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		let val = val.into_vec();
 		let chk = chk.map(|v| v.into_vec());
 		if self.speculating() {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
 			if self.speculative_value(&key).await? != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
 			}
 			return self.overlay_mut(|overlay| overlay.set(&key, val));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.putc(key, val, chk).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.putc(key, val, chk).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -653,14 +671,17 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.del(key).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.del(key).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -672,17 +693,23 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		if self.speculating() {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.delc(key, chk).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.delc(key, chk).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -696,14 +723,17 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
-		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
 		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
-		let written = self.inner.delr(rng).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			}
+			self.inner.delr(rng).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -714,14 +744,17 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.clr(key).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.clr(key).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -733,17 +766,23 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
-		}
 		if self.speculating() {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
 			}
 			return self.overlay_mut(|overlay| overlay.delete(&key));
 		}
 		let doc = self.written.lock().note_key(key.as_slice());
-		let written = self.inner.clrc(key, chk).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			}
+			self.inner.clrc(key, chk).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -757,14 +796,17 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
-		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
-		}
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
 		}
 		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
-		let written = self.inner.clrr(rng).await;
+		let written = async {
+			if self.absence.holds() {
+				self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			}
+			self.inner.clrr(rng).await
+		}
+		.await;
 		self.end_write(doc);
 		written
 	}
@@ -1562,5 +1604,25 @@ mod tests {
 			Transactor::speculative(viewing_storage().await, Arc::new(Mutex::new(None)));
 		assert!(speculating.speculating());
 		assert!(speculating.snapshot().is_none());
+	}
+
+	/// A write that flushes a held create records its key in `written` before guarding `absence`
+	/// and closes its write tracking even when the held create fails with `DeferredKeyExists`.
+	#[tokio::test]
+	async fn a_write_notes_its_key_before_guarding_held_creates() {
+		let tr = Transactor::new(writing_storage().await);
+		let existing = record_key("a", 1);
+		tr.set(existing.clone(), b"old".to_vec()).await.unwrap();
+
+		let tr2 = Transactor::new(writing_storage().await);
+		// Seed `existing` in the underlying storage without noting it in `tr2.written`,
+		// then hold a duplicate create on `existing` and trigger a flush via `set` on table `b`.
+		tr2.inner.set(existing.clone(), b"stored".to_vec()).await.unwrap();
+		tr2.put_held(existing.clone(), b"dup".to_vec()).await.unwrap();
+		assert!(tr2.absence.holds(), "create is held in absence");
+
+		let err = tr2.set(existing, b"overwrite".to_vec()).await.unwrap_err();
+		assert!(matches!(err, crate::Error::DeferredKeyExists { .. }), "unexpected: {err:?}");
+		assert!(tr2.doc_lookup_writes().is_some(), "write tracking closed cleanly on error");
 	}
 }

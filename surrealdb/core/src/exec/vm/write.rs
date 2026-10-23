@@ -573,6 +573,21 @@ impl WriteState {
 		}
 	}
 
+	/// Open a creation watch on `table` for the rest of the statement if none
+	/// is open yet, so a record the statement creates in `table` from now on
+	/// is passed over when a later target or pipeline of the statement scans
+	/// `table` ([`Self::created_while_read`]).
+	pub(super) fn watch_table(&mut self, table: &crate::val::TableName) -> FlowResult<()> {
+		if self.reading.iter().any(|watch| watch.table() == table) {
+			return Ok(());
+		}
+		let exec = self.scope.exec();
+		let db = exec.database().context("a write requires a database context")?;
+		let watch = exec.txn().watch_creations(db.ns_ctx.ns.namespace_id, db.db.database_id, table);
+		self.reading.push(watch);
+		Ok(())
+	}
+
 	/// Begin a read of the records of `table`, a batch at a time through the
 	/// statement's own transaction while the statement writes between
 	/// batches: a later batch would see the records the statement, or one
@@ -583,14 +598,10 @@ impl WriteState {
 	/// read. Called as each read begins, after the value naming its range is
 	/// evaluated; a read while the subjects are named watches nothing.
 	pub(super) fn read_table(&mut self, table: &crate::val::TableName) -> FlowResult<()> {
-		if !self.scanning || self.reading.iter().any(|watch| watch.table() == table) {
+		if !self.scanning {
 			return Ok(());
 		}
-		let exec = self.scope.exec();
-		let db = exec.database().context("a write requires a database context")?;
-		let watch = exec.txn().watch_creations(db.ns_ctx.ns.namespace_id, db.db.database_id, table);
-		self.reading.push(watch);
-		Ok(())
+		self.watch_table(table)
 	}
 
 	/// Whether the row a source is about to run, until it has run, is a
@@ -959,6 +970,15 @@ impl WriteState {
 	/// failure the carrying region holds, and after counting the record if its
 	/// writes stand.
 	fn unwind(&mut self, failure: ControlFlow) -> FlowResult<usize> {
+		let failure = match failure {
+			ControlFlow::Err(err) => match crate::kvs::storage_error(&err) {
+				Some(crate::kvs::Error::DeferredKeyExists {
+					key,
+				}) => ControlFlow::Err(crate::dbs::executor::held_create_exists(key)),
+				_ => ControlFlow::Err(err),
+			},
+			other => other,
+		};
 		if let Some(handler) = self.handlers.pop() {
 			self.failure = Some(failure);
 			return Ok(handler as usize);
@@ -1825,6 +1845,15 @@ pub(super) async fn run_write(
 	if let Some(write) = state.write.as_deref_mut() {
 		write.end_reads();
 	}
+	let ran = match ran {
+		Err(ControlFlow::Err(err)) => match crate::kvs::storage_error(&err) {
+			Some(crate::kvs::Error::DeferredKeyExists {
+				key,
+			}) => Err(ControlFlow::Err(crate::dbs::executor::held_create_exists(key))),
+			_ => Err(ControlFlow::Err(err)),
+		},
+		other => other,
+	};
 	ran?;
 	let write = write_state(state)?;
 	write.judge_only()?;
@@ -2203,11 +2232,21 @@ async fn run_targets(
 			super::fuel::tick(ctx, 1).await?;
 			let mut rows = match subject {
 				Subject::Row(row) => {
-					write_state(state)?.reads_subjects(false);
+					let write = write_state(state)?;
+					write.reads_subjects(false);
+					if !matches!(form, WriteForm::Create)
+						&& let Some(table) = row.table()
+					{
+						write.watch_table(table)?;
+					}
 					Rows::One(Some(row))
 				}
 				Subject::Read(id) => {
-					write_state(state)?.reads_subjects(false);
+					let write = write_state(state)?;
+					write.reads_subjects(false);
+					if !matches!(form, WriteForm::Create) {
+						write.watch_table(&id.table)?;
+					}
 					Rows::One(Some(Box::new(read_subject(ctx, id).await?)))
 				}
 				Subject::Scan(table, range) => {
@@ -2536,5 +2575,78 @@ mod tests {
 				"{session:?}"
 			);
 		}
+	}
+
+	/// A multi-target write that creates a record in an earlier target and scans the same table in
+	/// a later target passes over the record it created, while still visiting records that already
+	/// stood before the statement began.
+	#[tokio::test]
+	async fn a_later_table_target_passes_over_a_record_an_earlier_target_created() {
+		let db = TestDb::new(SETUP).await;
+		let sql = "
+			UPSERT plain:new, plain SET n = (n ?? 0) + 1;
+			SELECT id, n FROM plain ORDER BY id;
+		";
+		let held = answers(&db, &TestDb::owner(), sql).await;
+		assert_eq!(
+			held,
+			[
+				"[{ id: plain:new, n: 1 }, { id: plain:1, n: 2, tag: 'a' }, { id: plain:2, n: 2, tag: 'a' }, { id: plain:3, n: 2, tag: 'a' }]",
+				"[{ id: plain:1, n: 2 }, { id: plain:2, n: 2 }, { id: plain:3, n: 2 }, { id: plain:new, n: 1 }]",
+			]
+		);
+	}
+
+	/// A held create that fails against a record already in storage does not leave the failed
+	/// image cached in the transaction for a subsequent read in the same transaction.
+	#[tokio::test]
+	async fn a_failed_held_create_does_not_pollute_the_transaction_record_cache() {
+		let db = TestDb::new(SETUP).await;
+		let sql = "
+			INSERT IGNORE INTO plain [{ id: plain:1, n: 99, tag: 'stale' }, { id: plain:4, n: 4, tag: 'b' }];
+			SELECT id, n, tag FROM plain:1;
+			SELECT id, n, tag FROM plain:4;
+		";
+		let held = answers(&db, &TestDb::owner(), sql).await;
+		assert_eq!(
+			held,
+			[
+				"[{ id: plain:4, n: 4, tag: 'b' }]",
+				"[{ id: plain:1, n: 1, tag: 'a' }]",
+				"[{ id: plain:4, n: 4, tag: 'b' }]",
+			]
+		);
+	}
+
+	/// `Datastore::execute_edge` settles held creates before committing each statement, persisting
+	/// absent creates and reporting a duplicate record as `RecordExists`.
+	#[tokio::test]
+	async fn edge_execution_settles_held_creates_and_reports_duplicates() {
+		let db = TestDb::new(SETUP).await;
+		let sql = "
+			CREATE plain:4 SET n = 4, tag = 'b';
+			CREATE plain:1 SET n = 99, tag = 'dup';
+			SELECT id, n FROM plain ORDER BY id;
+		";
+		let responses = db
+			.datastore()
+			.execute_edge(sql, &TestDb::owner(), None)
+			.await
+			.expect("edge query is admitted");
+		let outcomes: Vec<String> = responses
+			.into_iter()
+			.map(|r| match r.result {
+				Ok(v) => v.to_sql(),
+				Err(e) => format!("error: {e}"),
+			})
+			.collect();
+		assert_eq!(
+			outcomes,
+			[
+				"[{ id: plain:4, n: 4, tag: 'b' }]",
+				"error: Database record `plain:1` already exists",
+				"[{ id: plain:1, n: 1 }, { id: plain:2, n: 1 }, { id: plain:3, n: 1 }, { id: plain:4, n: 4 }]",
+			]
+		);
 	}
 }
