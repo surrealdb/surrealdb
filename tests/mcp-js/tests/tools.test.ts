@@ -63,6 +63,21 @@ describe("tool surface", () => {
 	});
 
 	/**
+	 * Output schemas are what makes the rest of this file check result shapes at
+	 * all: the SDK validates `structuredContent` against the advertised schema
+	 * and rejects a mismatch as a protocol error. It compiles those validators
+	 * from `tools/list`, so a server that answers tool listing from a router
+	 * without the schemas attached silently disables that validation everywhere.
+	 */
+	test("every tool advertises an output schema", async () => {
+		const { tools } = await client.listTools();
+		for (const tool of tools) {
+			expect(tool.outputSchema, `${tool.name} must expose an output schema`).toBeTruthy();
+			expect(tool.outputSchema!.type).toBe("object");
+		}
+	});
+
+	/**
 	 * Annotation hints drive client-side auto-approval, so a tool that can write
 	 * must never advertise itself as read-only. `gql` is included in the mutating
 	 * set because the GQL dialect parses INSERT/SET/REMOVE/DELETE.
@@ -325,6 +340,99 @@ describe("query, run and alternate dialects", () => {
 		// A configured schema returns data; an unconfigured one returns errors.
 		// Either way the response must be the GraphQL envelope, not a tool error.
 		expect("data" in sc || "errors" in sc).toBe(true);
+	});
+});
+
+/**
+ * Result shapes that the tests above never produce, each one a branch an output
+ * schema has to admit. Reaching them here is the point: the SDK rejects any
+ * result its schema does not cover, so an uncovered branch fails these calls
+ * outright rather than merely going unasserted.
+ *
+ * Every test lists tools first. The SDK compiles its validators from
+ * `tools/list` and validates nothing until it has, so a test that skipped the
+ * listing would pass without checking anything.
+ */
+describe("output schema coverage", () => {
+	test("a CRUD clause fragment carrying a separator returns the batch shape", async () => {
+		await client.listTools();
+		await useFreshContext(client);
+		await client.callTool({ name: "create", arguments: { target: "widget:w1" } });
+		// Clause arguments are raw SurrealQL fragments, so a caller can submit
+		// more than one statement through a tool that otherwise emits exactly
+		// one, and the result arrives as a per-statement batch instead.
+		const result = await client.callTool({
+			name: "select",
+			arguments: { target: "widget", where_clause: "1 = 1; RETURN 99" },
+		});
+		const sc = expectOk(result, "select with a multi-statement clause");
+		expect(Array.isArray(sc.results), "expected the batch shape").toBe(true);
+		expect(sc.has_errors).toBe(false);
+		expect((sc.results as Array<{ index: number }>).map((r) => r.index)).toEqual([0, 1]);
+	});
+
+	test("list reports an unreadable scope as a bare error payload", async () => {
+		await client.listTools();
+		const { namespace } = await useFreshContext(client);
+		// `list` does not wrap its failures in the statement envelope the CRUD
+		// tools use: there is no `status`, only the message and its kind.
+		const result = await client.callTool({
+			name: "list",
+			arguments: { kind: "tables", namespace, database: "no_such_database" },
+		});
+		expect(isToolError(result)).toBe(true);
+		const sc = structured(result);
+		expect(sc.status, "list errors carry no statement status").toBeUndefined();
+		expect(String(sc.kind)).toBe("NotFound");
+		expect(String(sc.error)).toContain("no_such_database");
+	});
+
+	describe("under a response cap small enough to trip", () => {
+		let capped: TestServer;
+		let cappedClient: Client;
+
+		beforeAll(async () => {
+			capped = await startServer({ env: { SURREAL_MCP_MAX_RESULT_BYTES: "220" } });
+			cappedClient = await connectClient(capped);
+			await cappedClient.listTools();
+		});
+
+		afterAll(async () => {
+			await cappedClient?.close();
+			await capped?.stop();
+		});
+
+		test("an oversized statement value is replaced by the truncation marker", async () => {
+			await useFreshContext(cappedClient);
+			await cappedClient.callTool({
+				name: "query",
+				arguments: { query: `CREATE big:one SET blob = "${"x".repeat(2000)}"` },
+			});
+			const result = await cappedClient.callTool({
+				name: "select",
+				arguments: { target: "big" },
+			});
+			const sc = expectOk(result, "select over the cap");
+			expect(sc.truncated).toBe(true);
+			expect((sc.value as Record<string, unknown>).$truncated).toBe(true);
+		});
+
+		test("an oversized list is replaced by the truncation marker", async () => {
+			await useFreshContext(cappedClient);
+			await cappedClient.callTool({
+				name: "query",
+				arguments: {
+					query: Array.from({ length: 20 }, (_, i) => `DEFINE TABLE t${i}`).join("; "),
+				},
+			});
+			const result = await cappedClient.callTool({ name: "list", arguments: { kind: "tables" } });
+			const sc = expectOk(result, "list over the cap");
+			expect(sc.truncated).toBe(true);
+			// `items` is an array everywhere else; over the cap it is the marker
+			// object instead, which the schema has to admit in the same position.
+			expect(Array.isArray(sc.items)).toBe(false);
+			expect((sc.items as Record<string, unknown>).$truncated).toBe(true);
+		});
 	});
 });
 

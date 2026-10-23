@@ -84,7 +84,14 @@ pub struct McpService {
 	/// handlers read caps off the session rather than process-global
 	/// statics. See [`McpConfig`] for the available knobs.
 	config: Arc<McpConfig>,
-	#[allow(dead_code)] // Read by #[tool_handler] macro-generated code
+	/// The tool table every handler answers from, carrying the output schemas
+	/// [`crate::tools::output_schemas::attach`] applies at construction.
+	///
+	/// `#[tool_handler]` is pointed at this field explicitly. Its default is the
+	/// expression `Self::tool_router()`, which builds a *fresh, schema-free*
+	/// router on every request — so a handler that reaches for the associated
+	/// function instead of this field both drops the schemas and rebuilds the
+	/// whole table per call.
 	tool_router: ToolRouter<Self>,
 	/// Optional metrics recorder. When present, every tool dispatch fires
 	/// a single `record_tool_invocation` call. The MCP crate has no
@@ -1100,7 +1107,7 @@ impl McpService {
 // ServerHandler -- wires tools, resources, prompts, completions
 // ---------------------------------------------------------------------------
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpService {
 	fn get_info(&self) -> ServerConfig {
 		ServerConfig::new(
@@ -1165,15 +1172,10 @@ impl ServerHandler for McpService {
 	/// possession of an `mcp-session-id` alone enough to confirm the id is live —
 	/// the exact inference the binding exists to deny.
 	///
-	/// Everything below the check reproduces the generated body exactly,
-	/// including the cache hints the sessionless revision added and the
-	/// `Self::tool_router()` call. That call builds a *fresh* router, which is
-	/// not the same value as [`Self::tool_router`]: the field additionally
-	/// carries the output schemas [`crate::tools::output_schemas::attach`]
-	/// applies, and those schemas do not currently describe what the tools
-	/// return. Reading the field here would start advertising them and make
-	/// every SDK client reject the responses, so this must keep calling the
-	/// associated function until the schemas are corrected.
+	/// Everything below the check reproduces the generated body, including the
+	/// cache hints the sessionless revision added. It must keep reading
+	/// [`Self::tool_router`] rather than calling `Self::tool_router()`: only the
+	/// field carries the output schemas clients introspect and validate against.
 	async fn list_tools(
 		&self,
 		_: Option<PaginatedRequestParams>,
@@ -1181,7 +1183,7 @@ impl ServerHandler for McpService {
 	) -> Result<ListToolsResult, McpError> {
 		self.verify_request_subject(&ctx)?;
 		let supports_cache_hints = Self::claims_sessionless_revision(&ctx);
-		let mut tools = Self::tool_router().list_all();
+		let mut tools = self.tool_router.list_all();
 		crate::tools::input_schemas::object_subschemas(&mut tools);
 		Ok(ListToolsResult {
 			result_type: Some(ResultType::COMPLETE),
@@ -1539,5 +1541,35 @@ mod tests {
 			svc.init_session(Session::owner()).is_err(),
 			"a second handshake on one service is a protocol error"
 		);
+	}
+
+	/// Every tool the service advertises must carry an output schema, and it
+	/// must be an object at the root — the MCP spec's requirement, which SDK
+	/// clients enforce when parsing `tools/list`, so a malformed one takes down
+	/// tool listing for the whole server.
+	///
+	/// Asserted against the stored router because that is what
+	/// [`ServerHandler::list_tools`] and the generated `call_tool` answer from.
+	/// A tool added without a matching arm in
+	/// [`crate::tools::output_schemas::attach`] would otherwise ship
+	/// schema-less: nothing else in the Rust suite validates output schemas,
+	/// only the `tests/mcp-js` conformance suite does, and it can only check
+	/// schemas that exist.
+	#[tokio::test]
+	async fn every_advertised_tool_carries_a_root_object_output_schema() {
+		let ds = fresh_datastore().await;
+		let svc = McpService::new(ds, None, None, Session::default());
+		for tool in svc.tool_router.list_all() {
+			let schema = tool
+				.output_schema
+				.as_ref()
+				.unwrap_or_else(|| panic!("`{}` ships without an output schema", tool.name));
+			assert_eq!(
+				schema.get("type").and_then(|t| t.as_str()),
+				Some("object"),
+				"`{}` must declare `type: object` at the root",
+				tool.name
+			);
+		}
 	}
 }
