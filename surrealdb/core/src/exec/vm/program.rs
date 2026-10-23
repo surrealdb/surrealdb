@@ -6027,12 +6027,26 @@ pub(super) struct MatchesSpec {
 
 assert_plain!(MatchesSpec);
 
+/// A query of a [`IndexBinding::FullText`] call beyond its primary one.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum ExtraQuery {
+	/// The query text, known when the plan is made.
+	Text(String),
+	/// A parameter or bound name, passed as one of the call's trailing arguments, before the
+	/// primary query's argument when that is one.
+	Arg,
+}
+
 /// What an index function reports against: the `MATCHES` clause or the `KNN`
 /// operator of the statement that calls it.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum IndexBinding {
 	/// The full-text clause reading the declared position `path` of `table`
 	/// for `query`; `None` for a field that reads no declared position.
+	///
+	/// `extra` holds the other clauses that share the reference and read the same field, in
+	/// clause order, before the primary one. The call highlights and reports offsets for the
+	/// union of all of them.
 	FullText {
 		table: TableName,
 		path: Option<crate::expr::logical::FieldPath>,
@@ -6040,6 +6054,7 @@ pub(super) enum IndexBinding {
 		/// Whether the query is the call's last argument, read when the call
 		/// runs, rather than `query`.
 		query_arg: bool,
+		extra: Vec<ExtraQuery>,
 	},
 	/// The `KNN` operator of the statement whose scan publishes its distances
 	/// in `slot` ([`Source::Knn::slot`]).

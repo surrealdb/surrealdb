@@ -4924,14 +4924,14 @@ async fn run_body(
 										.collect::<anyhow::Result<Vec<_>>>()
 										.map_err(ControlFlow::Err)?;
 									let spec = &program.calls[*call as usize];
-									let query = interp::runtime_query(spec, &mut args)
+									let queries = interp::runtime_queries(spec, &mut args)
 										.map_err(ControlFlow::Err)?;
 									let run = state
 										.index_run_for(
 											*call,
 											spec,
 											ctx.function_registry(),
-											query.as_deref(),
+											queries.as_deref(),
 										)
 										.map_err(ControlFlow::Err)?;
 									let eval_ctx = frame_eval(program, state, ctx, *frame);

@@ -2686,7 +2686,7 @@ impl<'a> Lowerer<'a> {
 	/// last argument. A call that names no clause of its scope is refused for the statement
 	/// ([`Lowerer::unbound_index_call`]).
 	fn index_call(&mut self, name: &str, args: &[ValueId]) -> Result<Operand, IrError> {
-		use super::super::program::IndexBinding;
+		use super::super::program::{ExtraQuery, IndexBinding};
 		use crate::exec::function::IndexContextKind;
 		use crate::exec::ir::phys::matches::ClauseQuery;
 		let ir = self.ir;
@@ -2702,7 +2702,7 @@ impl<'a> Lowerer<'a> {
 			));
 		};
 		let mut args: Vec<ValueId> = args.to_vec();
-		let mut query = None;
+		let mut query_operands: Vec<Query> = Vec::new();
 		let binding = match function.index_context_kind() {
 			IndexContextKind::FullText => {
 				let Some(at) = function.index_ref_arg_index().filter(|at| *at < args.len()) else {
@@ -2744,7 +2744,7 @@ impl<'a> Lowerer<'a> {
 						));
 					}
 				};
-				let Some(clause) = scope.resolve(rf) else {
+				let Some((clause, others)) = scope.resolve_union(rf) else {
 					return Err(self.unbound_index_call(
 						name,
 						&written,
@@ -2752,14 +2752,30 @@ impl<'a> Lowerer<'a> {
 						"ir_lower::expr: an index reference no clause declares",
 					));
 				};
+				// The other clauses come first among the trailing arguments, so the primary
+				// clause's argument, if it has one, is the last.
+				let mut extra = Vec::with_capacity(others.len());
+				for other in others {
+					match &other.query {
+						ClauseQuery::Text(text) => extra.push(ExtraQuery::Text(text.clone())),
+						ClauseQuery::Param(param) => {
+							query_operands.push(Query::Param(param.clone()));
+							extra.push(ExtraQuery::Arg);
+						}
+						ClauseQuery::Bound(value) => {
+							query_operands.push(Query::Bound(*value));
+							extra.push(ExtraQuery::Arg);
+						}
+					}
+				}
 				let (text, query_arg) = match &clause.query {
 					ClauseQuery::Text(text) => (text.clone(), false),
 					ClauseQuery::Param(param) => {
-						query = Some(Query::Param(param.clone()));
+						query_operands.push(Query::Param(param.clone()));
 						(String::new(), true)
 					}
 					ClauseQuery::Bound(value) => {
-						query = Some(Query::Bound(*value));
+						query_operands.push(Query::Bound(*value));
 						(String::new(), true)
 					}
 				};
@@ -2771,6 +2787,7 @@ impl<'a> Lowerer<'a> {
 					path: clause.field.clone(),
 					query: text,
 					query_arg,
+					extra,
 				}
 			}
 			IndexContextKind::Knn => {
@@ -2805,22 +2822,23 @@ impl<'a> Lowerer<'a> {
 			frame: self.frame.program,
 		});
 		let mut operands = self.values(&args)?;
-		match query {
-			Some(Query::Param(name)) => {
-				let param = self.em.param(ParamSpec {
-					name,
-					guard: None,
-				})?;
-				let dst = self.em.reg()?;
-				self.emit(Instr::LoadParam {
-					param,
-					dst,
-					frame: self.frame.program,
-				});
-				operands.push(Operand::Reg(dst));
+		for query in query_operands {
+			match query {
+				Query::Param(name) => {
+					let param = self.em.param(ParamSpec {
+						name,
+						guard: None,
+					})?;
+					let dst = self.em.reg()?;
+					self.emit(Instr::LoadParam {
+						param,
+						dst,
+						frame: self.frame.program,
+					});
+					operands.push(Operand::Reg(dst));
+				}
+				Query::Bound(value) => operands.push(self.value(value)?),
 			}
-			Some(Query::Bound(value)) => operands.push(self.value(value)?),
-			None => {}
 		}
 		let dst = self.em.reg()?;
 		self.emit(Instr::CallIndexFn {

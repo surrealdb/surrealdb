@@ -885,7 +885,7 @@ pub(super) struct IndexRun {
 	pub(super) context: crate::exec::function::IndexContext,
 	/// The query read when the call ran that the context was resolved for;
 	/// `None` for a context resolved for its clause's planned query.
-	pub(super) query: Option<String>,
+	pub(super) query: Option<Vec<String>>,
 }
 
 /// The function whose calls a full-text scan scores the hits of, in the
@@ -901,30 +901,53 @@ pub(super) struct ScanMatch {
 	pub(super) scored: bool,
 }
 
-/// The query index function call `spec` reads when it runs, taken from the
-/// end of `args`, where the call's clause reads one
-/// ([`super::program::IndexBinding::FullText::query_arg`]). A value that is no
-/// string names no clause the call can report against and registers no query.
-pub(super) fn runtime_query(
+/// The queries index function call `spec` reads when it runs, in clause order: the call's
+/// other clauses ([`super::program::IndexBinding::FullText::extra`]), then its primary one.
+/// Each query the call reads when it runs is taken from the end of `args`, the primary one
+/// last. `None` when no query of the call is read at run time. A value that is no string
+/// names no clause the call can report against and is an error.
+pub(super) fn runtime_queries(
 	spec: &super::program::CallSpec,
 	args: &mut Vec<Value>,
-) -> anyhow::Result<Option<String>> {
-	let Some(super::program::IndexBinding::FullText {
-		query_arg: true,
+) -> anyhow::Result<Option<Vec<String>>> {
+	use super::program::{ExtraQuery, IndexBinding};
+	let Some(IndexBinding::FullText {
+		query,
+		query_arg,
+		extra,
 		..
 	}) = &spec.index
 	else {
 		return Ok(None);
 	};
-	match args.pop() {
-		Some(Value::String(query)) => Ok(Some(query.as_str().to_owned())),
+	let reads_arg = |e: &ExtraQuery| matches!(e, ExtraQuery::Arg);
+	if !*query_arg && !extra.iter().any(reads_arg) {
+		return Ok(None);
+	}
+	let pop = |args: &mut Vec<Value>| match args.pop() {
+		Some(Value::String(text)) => Ok(text.as_str().to_owned()),
 		_ => Err(anyhow::Error::new(crate::exec::Error::Query {
 			message: format!(
 				"Index function '{}': no MATCHES clause found in WHERE condition",
 				spec.name
 			),
 		})),
+	};
+	let primary = if *query_arg {
+		pop(args)?
+	} else {
+		query.clone()
+	};
+	let mut texts = Vec::with_capacity(extra.len() + 1);
+	for other in extra.iter().rev() {
+		texts.push(match other {
+			ExtraQuery::Text(text) => text.clone(),
+			ExtraQuery::Arg => pop(args)?,
+		});
 	}
+	texts.reverse();
+	texts.push(primary);
+	Ok(Some(texts))
 }
 
 /// The function each call of each field of each aggregate names.
@@ -1388,7 +1411,7 @@ impl State {
 		index: u32,
 		spec: &super::program::CallSpec,
 		registry: &crate::exec::function::FunctionRegistry,
-		query: Option<&str>,
+		query: Option<&[String]>,
 	) -> anyhow::Result<IndexRun> {
 		use super::program::IndexBinding;
 		let at = index as usize;
@@ -1414,13 +1437,26 @@ impl State {
 				table,
 				path,
 				query: planned,
+				extra,
 				..
 			}) => {
-				let query = query.map_or_else(|| planned.clone(), str::to_owned);
+				let mut texts: Vec<String> = match query {
+					Some(texts) => texts.to_vec(),
+					None => extra
+						.iter()
+						.map(|other| match other {
+							super::program::ExtraQuery::Text(text) => text.clone(),
+							super::program::ExtraQuery::Arg => String::new(),
+						})
+						.chain(std::iter::once(planned.clone()))
+						.collect(),
+				};
+				let primary = texts.pop().unwrap_or_default();
 				crate::exec::function::IndexContext::FullText(self.match_context(
 					table,
 					path.as_ref(),
-					&query,
+					&primary,
+					&texts,
 				))
 			}
 			Some(
@@ -1436,7 +1472,7 @@ impl State {
 		let run = IndexRun {
 			function,
 			context,
-			query: query.map(str::to_owned),
+			query: query.map(<[String]>::to_vec),
 		};
 		if self.read_only {
 			self.index_runs[at] = Some(run.clone());
@@ -1446,7 +1482,8 @@ impl State {
 
 	/// The full-text context of the clause reading `path` of `table` for
 	/// `query`, shared by every index call and full-text scan of the run that
-	/// names the clause: made by the first to ask, and found by the rest.
+	/// names the clause and the other queries `extra` of its match reference:
+	/// made by the first to ask, and found by the rest.
 	///
 	/// Sharing it is what has the index opened, the query's terms read and the
 	/// scorer built once per run rather than once per reader: `search::score(1)`
@@ -1462,18 +1499,21 @@ impl State {
 		table: &crate::val::TableName,
 		path: Option<&crate::expr::logical::FieldPath>,
 		query: &str,
+		extra: &[String],
 	) -> std::sync::Arc<crate::exec::function::MatchContext> {
 		if self.read_only
-			&& let Some(shared) = self
-				.match_contexts
-				.iter()
-				.find(|ctx| ctx.table == *table && ctx.path.as_ref() == path && ctx.query == query)
-		{
+			&& let Some(shared) = self.match_contexts.iter().find(|ctx| {
+				ctx.table == *table
+					&& ctx.path.as_ref() == path
+					&& ctx.query == query
+					&& ctx.extra_queries == extra
+			}) {
 			return std::sync::Arc::clone(shared);
 		}
 		let ctx = std::sync::Arc::new(crate::exec::function::MatchContext::of_path(
 			path.cloned(),
 			query.to_owned(),
+			extra.to_vec(),
 			table.clone(),
 			self.read_only,
 		));
@@ -1490,6 +1530,8 @@ impl State {
 	///
 	/// A call names the scan's clause when it reads the scan's query, planned
 	/// rather than read when the call runs, from a column of the scan's index.
+	/// The calls sharing the context also share the other queries of their
+	/// match reference, all planned.
 	pub(super) fn scan_match_context(
 		&mut self,
 		program: &super::program::Program,
@@ -1508,22 +1550,32 @@ impl State {
 				path: Some(path),
 				query: planned,
 				query_arg: false,
+				extra,
 			}) if called == table
 				&& planned == query
 				&& index.cols.iter().any(|col| {
 					crate::expr::logical::FieldPath::from_idiom(col).as_ref() == Some(path)
 				}) =>
 			{
-				Some((path, call.name.as_str()))
+				let extra = extra
+					.iter()
+					.map(|other| match other {
+						super::program::ExtraQuery::Text(text) => Some(text.clone()),
+						super::program::ExtraQuery::Arg => None,
+					})
+					.collect::<Option<Vec<_>>>()?;
+				Some((path, extra, call.name.as_str()))
 			}
 			_ => None,
 		});
-		let (path, name) = naming.next()?;
+		let (path, extra, name) = naming.next()?;
 		let scored = name == SCORE_FUNCTION
-			|| naming.any(|(other, name)| other == path && name == SCORE_FUNCTION);
+			|| naming.any(|(other, others, name)| {
+				other == path && others == extra && name == SCORE_FUNCTION
+			});
 		let path = path.clone();
 		Some(ScanMatch {
-			context: self.match_context(table, Some(&path), query),
+			context: self.match_context(table, Some(&path), query, &extra),
 			scored,
 		})
 	}

@@ -20,6 +20,7 @@ fn call(name: &str, field: &str, query: &str) -> CallSpec {
 			path: Some(FieldPath::field(field)),
 			query: query.to_owned(),
 			query_arg: false,
+			extra: Vec::new(),
 		}),
 		closure_args: Vec::new(),
 	}

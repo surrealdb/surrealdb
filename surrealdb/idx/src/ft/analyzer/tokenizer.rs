@@ -4,7 +4,7 @@ use surrealdb_strand::Strand;
 use crate::Error;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
 use crate::ft::Position;
-use crate::ft::analyzer::filter::{Filter, FilterResult, Term};
+use crate::ft::analyzer::filter::{Filter, FilterResult, FilteringStage, Term};
 use crate::ft::analyzer::segmenter::Segmenter;
 use crate::ft::offset::Offset;
 use crate::val::Value;
@@ -30,14 +30,14 @@ impl Tokens {
 		t.get_str(&self.i)
 	}
 
-	pub(super) fn filter(self, f: &Filter) -> Result<Tokens> {
+	pub(super) fn filter(self, f: &Filter, stage: FilteringStage) -> Result<Tokens> {
 		let mut tks = Vec::new();
 		for tk in self.t {
 			if tk.is_empty() {
 				continue;
 			}
 			let c = tk.get_str(&self.i)?;
-			match f.apply_filter(c) {
+			match f.apply_filter(c, stage) {
 				FilterResult::Term(t) => match t {
 					Term::Unchanged => tks.push(tk),
 					Term::NewTerm(t, s) => tks.push(tk.new_token(t, s)),
@@ -156,6 +156,22 @@ impl Token {
 				term,
 				..
 			} => term.is_empty(),
+		}
+	}
+
+	/// The char offset where the input word this token came from starts. Every
+	/// token a filter derives from one word, such as the windows of a query
+	/// n-gram, reports the same value.
+	pub(in crate::ft) fn word(&self) -> Position {
+		match self {
+			Token::Ref {
+				chars,
+				..
+			}
+			| Token::String {
+				chars,
+				..
+			} => chars.0,
 		}
 	}
 

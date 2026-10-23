@@ -212,7 +212,8 @@ impl IndexFunction for SearchHighlight {
 			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
 				return Ok(Value::None);
 			};
-			ft.index.highlight_doc(&tx, doc_id, &ft.terms, hlp, &ft.column, doc).await
+			let terms: Vec<&_> = std::iter::once(&ft.terms).chain(ft.extra_terms.iter()).collect();
+			ft.index.highlight_doc(&tx, doc_id, &terms, hlp, &ft.column, doc).await
 		})
 	}
 }
@@ -376,7 +377,8 @@ impl IndexFunction for SearchOffsets {
 			let Some(doc_id) = match_ctx.doc_id(ctx, ft, &rid).await? else {
 				return Ok(Value::None);
 			};
-			ft.index.read_offsets_doc(&tx, doc_id, &ft.terms, partial).await
+			let terms: Vec<&_> = std::iter::once(&ft.terms).chain(ft.extra_terms.iter()).collect();
+			ft.index.read_offsets_doc(&tx, doc_id, &terms, partial).await
 		})
 	}
 }

@@ -37,7 +37,7 @@ use crate::ft::analyzer::filter::FilteringStage;
 use crate::ft::analyzer::tokenizer::Tokens;
 use crate::ft::analyzer::{Analyzer, AnalyzerFunction};
 use crate::ft::highlighter::HighlightParams;
-use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
+use crate::ft::{DocLength, MatchesHitsIterator, Position, Score, TermFrequency};
 use crate::kernels::postings::{BlockWindow, TermPostings};
 use crate::key::schema::{
 	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
@@ -66,21 +66,46 @@ type ChangeTags = (Uuid, Uuid);
 /// more than one names.
 type OneChange<T> = HashMap<DocId, Option<T>>;
 
+/// One distinct term of a query, scored on its own: a document's score sums
+/// the term's contribution over the terms it carries, whatever word of the
+/// query the term belongs to.
+struct ScoredTerm {
+	term: String,
+	docs: TermDocs,
+	/// The term's compacted postings, where the index keeps them in blocks: a
+	/// document no term holds uncompacted state for is scored from them.
+	postings: Option<Arc<TermPostings>>,
+}
+
+/// Where a [`ScoredTerm`]'s document set is held.
+enum TermDocs {
+	/// The set of the query word that is this term alone, an index into
+	/// [`QueryTerms::docs`].
+	Word(usize),
+	/// The set of a term only in words of several terms, which no word's set
+	/// holds.
+	Own(Option<RoaringTreemap>),
+}
+
 /// Represents the terms in a search query and their associated document sets
 pub struct QueryTerms {
 	/// The tokenized query terms
 	#[allow(dead_code)]
 	tokens: Tokens,
-	/// Document sets for each term (RoaringTreemap of document IDs)
-	#[allow(dead_code)]
+	/// The query's words, each as the terms it requires together: a word the
+	/// analyzer split into several terms, such as the windows of a long query
+	/// word under an n-gram analyzer, matches a document only when the document
+	/// carries all of them. Each entry is the term strings of one word.
+	groups: Vec<Vec<String>>,
+	/// Document sets for each word (RoaringTreemap of document IDs), in the
+	/// order of `groups`: the documents that carry every term of the word, or
+	/// `None` when the word has no document set.
 	docs: Vec<Option<RoaringTreemap>>,
-	/// Indicates if any terms in the query are not found in the index
+	/// Indicates if any words in the query have no document set in the index
 	#[allow(dead_code)]
 	has_unknown_terms: bool,
-	/// Each term's compacted postings, aligned with `docs`, where the index
-	/// keeps them in blocks: a document no term holds uncompacted state for is
-	/// scored from them.
-	postings: Vec<Option<Arc<TermPostings>>>,
+	/// Each distinct term of the query, as a document's score takes it.
+	scored: Vec<ScoredTerm>,
 	/// Whether a term's compacted documents were read from a bitmap, which
 	/// holds no frequency and so bounds no score.
 	bitmaps: bool,
@@ -93,70 +118,6 @@ pub struct QueryTerms {
 	/// The scope the terms were read at, when the node's cache may serve
 	/// this query.
 	scope: Option<crate::ft::cache::TermScope>,
-	/// The terms a document's score sums, in the order it sums them
-	/// ([`SummedTerms`]).
-	summed: SummedTerms,
-}
-
-/// The terms a document's score sums, in the order it sums them: positions in
-/// a query's terms, each with the first position whose token is the same
-/// string.
-///
-/// A score takes each string once, at the first position, in query order,
-/// that carries the document. Where the query's terms are its tokens one to
-/// one, two positions holding one string read the same state, so they carry
-/// the same documents and the score takes the first of them for every
-/// document: only those positions are listed, and no document is told apart.
-/// Otherwise a position may stand for another token than its term
-/// ([`FullTextIndex::plan_query`] drops a token equal to an earlier one,
-/// offsets included), every position is listed, and a document drops a
-/// position whose string an earlier position carrying it already took.
-struct SummedTerms {
-	/// `(position, first position of its string)`, in query order.
-	positions: Vec<(usize, usize)>,
-	/// Whether a document drops the positions whose string an earlier position
-	/// carrying it took.
-	per_document: bool,
-}
-
-impl SummedTerms {
-	/// The terms a score sums, of a query reading `terms` terms whose tokens
-	/// are `tokens`.
-	fn of(tokens: &Tokens, terms: usize) -> Result<Self> {
-		let tl = tokens.list();
-		let mut first: HashMap<&str, usize> = HashMap::with_capacity(terms);
-		let mut positions = Vec::with_capacity(terms);
-		let mut repeats = false;
-		for (at, token) in tl.iter().enumerate().take(terms) {
-			let key = *first.entry(tokens.get_token_string(token)?).or_insert(at);
-			repeats |= key != at;
-			positions.push((at, key));
-		}
-		let aligned = tl.len() == terms;
-		if aligned {
-			positions.retain(|(at, key)| at == key);
-		}
-		Ok(Self {
-			positions,
-			per_document: repeats && !aligned,
-		})
-	}
-
-	/// What a document records of the strings it has taken, where it tells
-	/// them apart.
-	fn taken(&self, terms: usize) -> Option<Vec<bool>> {
-		self.per_document.then(|| vec![false; terms])
-	}
-}
-
-/// Whether a document that `taken` records the strings of, `None` where none
-/// is told apart, takes the position whose string's first position is
-/// `key`; recorded as taken.
-fn takes(taken: &mut Option<Vec<bool>>, key: usize) -> bool {
-	match taken {
-		Some(taken) => !std::mem::replace(&mut taken[key], true),
-		None => true,
-	}
 }
 
 /// A query's terms, analyzed, and what each reads of the index
@@ -164,6 +125,8 @@ fn takes(taken: &mut Option<Vec<bool>>, key: usize) -> bool {
 pub struct QueryPlan {
 	tokens: Tokens,
 	terms: Vec<String>,
+	/// The indices into `terms` each word requires together, in query order.
+	groups: Vec<Vec<usize>>,
 	reads: Vec<kernels::fulltext::TermReads>,
 }
 
@@ -240,8 +203,9 @@ impl QueryPlan {
 		&self.reads
 	}
 
-	/// The query's terms with their document sets, from `states`, one per
-	/// term of [`Self::terms`] in the same order.
+	/// The query's words with their document sets, from `states`, one per
+	/// term of [`Self::terms`] in the same order. A word's document set is the
+	/// intersection of its terms' sets.
 	pub fn resolve(self, states: Vec<TermState>) -> Result<QueryTerms> {
 		anyhow::ensure!(
 			states.len() == self.terms.len(),
@@ -249,8 +213,8 @@ impl QueryPlan {
 			states.len(),
 			self.terms.len()
 		);
-		let mut docs = Vec::with_capacity(states.len());
-		let mut postings = Vec::with_capacity(states.len());
+		let mut term_docs = Vec::with_capacity(states.len());
+		let mut term_postings = Vec::with_capacity(states.len());
 		let mut bitmaps = false;
 		let mut uncompacted = RoaringTreemap::new();
 		for state in states {
@@ -265,24 +229,53 @@ impl QueryPlan {
 				uncompacted.extend(residual.counts.iter().map(|(doc_id, _)| *doc_id));
 			}
 			bitmaps |= matches!(state.compacted, Compacted::Bitmap(_));
-			postings.push(state.compacted.postings());
-			docs.push(kernels::fulltext::term_docs(
+			term_postings.push(state.compacted.postings());
+			term_docs.push(kernels::fulltext::term_docs(
 				state.compacted.docs(),
 				state.residual.as_ref(),
 				deltas,
 			));
 		}
+		let mut docs = Vec::with_capacity(self.groups.len());
+		let mut groups = Vec::with_capacity(self.groups.len());
+		for members in &self.groups {
+			let sets = members.iter().map(|&i| term_docs[i].as_ref()).collect::<Option<Vec<_>>>();
+			docs.push(sets.and_then(|sets| {
+				let mut sets = sets;
+				sets.sort_by_key(|set| set.len());
+				let mut sets = sets.into_iter();
+				let mut result = sets.next()?.clone();
+				for set in sets {
+					result &= set;
+				}
+				(!result.is_empty()).then_some(result)
+			}));
+			groups.push(members.iter().map(|&i| self.terms[i].clone()).collect());
+		}
+		let scored = self
+			.terms
+			.into_iter()
+			.zip(term_docs.iter_mut().zip(term_postings))
+			.enumerate()
+			.map(|(i, (term, (own, postings)))| ScoredTerm {
+				term,
+				docs: match self.groups.iter().position(|members| members.as_slice() == [i]) {
+					Some(word) => TermDocs::Word(word),
+					None => TermDocs::Own(own.take()),
+				},
+				postings,
+			})
+			.collect();
 		let has_unknown_terms = docs.iter().any(Option::is_none);
-		let summed = SummedTerms::of(&self.tokens, docs.len())?;
 		Ok(QueryTerms {
 			tokens: self.tokens,
+			groups,
 			docs,
 			has_unknown_terms,
-			postings,
+			scored,
 			bitmaps,
 			uncompacted,
 			scope: None,
-			summed,
 		})
 	}
 }
@@ -299,9 +292,17 @@ impl QueryTerms {
 	/// bounding no score: for a statement that may rewrite a document after
 	/// reading them, whose blocks then no longer describe it.
 	pub fn scored_as_stored(mut self) -> Self {
-		self.postings.iter_mut().for_each(|postings| *postings = None);
+		self.scored.iter_mut().for_each(|term| term.postings = None);
 		self.bitmaps = true;
 		self
+	}
+
+	/// The documents that carry `term`, `None` when none does.
+	fn docs_of<'a>(&'a self, term: &'a ScoredTerm) -> Option<&'a RoaringTreemap> {
+		match &term.docs {
+			TermDocs::Word(word) => self.docs[*word].as_ref(),
+			TermDocs::Own(docs) => docs.as_ref(),
+		}
 	}
 
 	/// The scope a document's stored state may be cached and served at for
@@ -324,9 +325,8 @@ impl QueryTerms {
 	/// Upper bounds on the score `scorer` gives these terms in a document,
 	/// over ranges of doc ids, from the impacts of the terms' posting blocks;
 	/// `None` where no bound holds: a term's compacted documents were read
-	/// from a bitmap, a document tells repeated tokens apart by which term
-	/// carries it ([`SummedTerms`]), or the scorer's parameters do not make
-	/// its score rise with frequency and fall with length
+	/// from a bitmap, or the scorer's parameters do not make its score rise
+	/// with frequency and fall with length
 	/// ([`kernels::fulltext::Bm25::bounded_by_extremes`]).
 	///
 	/// A range starts at the first document of any term's block and ends at
@@ -342,17 +342,17 @@ impl QueryTerms {
 	/// beside the ranges: a document carrying only some of the terms scores no
 	/// more than the sum of their ceilings ([`BlockBounds::passed_terms`]).
 	pub fn block_bounds(&self, scorer: &Scorer) -> Option<BlockBounds> {
-		if self.bitmaps || self.summed.per_document || !scorer.bm25.bounded_by_extremes() {
+		if self.bitmaps || !scorer.bm25.bounded_by_extremes() {
 			return None;
 		}
 		// Each distinct term once, as a document's score takes it.
 		let mut terms = Vec::new();
-		for (at, _) in &self.summed.positions {
-			let Some(docs) = &self.docs[*at] else {
+		for (at, term) in self.scored.iter().enumerate() {
+			let Some(docs) = self.docs_of(term) else {
 				continue;
 			};
-			if let Some(postings) = &self.postings[*at] {
-				terms.push((*at, postings, docs.len() as f64));
+			if let Some(postings) = &term.postings {
+				terms.push((at, postings, docs.len() as f64));
 			}
 		}
 		// Each term's blocks, scored once: a block's first document and the best score
@@ -422,12 +422,12 @@ impl QueryTerms {
 		}
 	}
 
-	/// Whether document `doc_id` carries any of the query's terms.
+	/// Whether document `doc_id` carries any of the query's words.
 	pub fn carries_any(&self, doc_id: DocId) -> bool {
 		self.docs.iter().flatten().any(|d| d.contains(doc_id))
 	}
 
-	/// The documents carrying any of the query's terms
+	/// The documents carrying any of the query's words
 	/// ([`Self::carries_any`]).
 	pub fn carriers(&self) -> RoaringTreemap {
 		kernels::fulltext::combine(&self.docs, BooleanOperator::Or).unwrap_or_default()
@@ -439,29 +439,41 @@ impl QueryTerms {
 		&self.uncompacted
 	}
 
-	pub(in crate::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
-		for t in self.tokens.list() {
-			let t = self.tokens.get_token_string(t)?;
+	/// Whether document `doc_id` carries any term of the query, whether or not
+	/// it carries the rest of that term's word.
+	fn carries_any_term(&self, doc_id: DocId) -> bool {
+		self.carries_any(doc_id)
+			|| self
+				.scored
+				.iter()
+				.any(|t| matches!(&t.docs, TermDocs::Own(Some(d)) if d.contains(doc_id)))
+	}
+
+	/// Whether `tks` holds every term of the word `terms`.
+	fn word_in(terms: &[String], tks: &[Tokens]) -> Result<bool> {
+		'terms: for t in terms {
 			for tokens in tks {
 				if tokens.try_contains(t)? {
-					return Ok(true);
+					continue 'terms;
 				}
+			}
+			return Ok(false);
+		}
+		Ok(true)
+	}
+
+	pub(in crate::ft) fn matches_or(&self, tks: &[Tokens]) -> Result<bool> {
+		for word in &self.groups {
+			if Self::word_in(word, tks)? {
+				return Ok(true);
 			}
 		}
 		Ok(false)
 	}
 
 	pub(in crate::ft) fn matches_and(&self, tks: &[Tokens]) -> Result<bool> {
-		for t in self.tokens.list() {
-			let t = self.tokens.get_token_string(t)?;
-			let mut found = false;
-			for tokens in tks {
-				if tokens.try_contains(t)? {
-					found = true;
-					break;
-				}
-			}
-			if !found {
+		for word in &self.groups {
+			if !Self::word_in(word, tks)? {
 				return Ok(false);
 			}
 		}
@@ -1001,11 +1013,26 @@ impl FullTextIndex {
 			.analyzer
 			.generate_tokens(az_fn, FilteringStage::Querying, query_string.into())
 			.await?;
-		let mut terms = Vec::new();
-		let mut unique_tokens = HashSet::new();
+		let mut terms: Vec<String> = Vec::new();
+		let mut term_index: HashMap<String, usize> = HashMap::new();
+		let mut word_index: HashMap<Position, usize> = HashMap::new();
+		let mut groups: Vec<Vec<usize>> = Vec::new();
 		for token in tokens.list() {
-			if unique_tokens.insert(token) {
-				terms.push(tokens.get_token_string(token)?.to_owned());
+			let text = tokens.get_token_string(token)?;
+			let term = match term_index.get(text) {
+				Some(&i) => i,
+				None => {
+					terms.push(text.to_owned());
+					term_index.insert(text.to_owned(), terms.len() - 1);
+					terms.len() - 1
+				}
+			};
+			let word = *word_index.entry(token.word()).or_insert_with(|| {
+				groups.push(Vec::new());
+				groups.len() - 1
+			});
+			if !groups[word].contains(&term) {
+				groups[word].push(term);
 			}
 		}
 		let reads = terms
@@ -1015,6 +1042,7 @@ impl FullTextIndex {
 		Ok(QueryPlan {
 			tokens,
 			terms,
+			groups,
 			reads,
 		})
 	}
@@ -2162,43 +2190,53 @@ impl FullTextIndex {
 	/// Each of the query's terms that document `doc_id` carries, in query
 	/// order, with its offsets in the document.
 	///
-	/// A document in none of the terms' document sets carries none of them,
-	/// so it is answered without reading its postings.
+	/// The hits are those of the union of the terms of `qts`: each term once,
+	/// however many of the queries name it, including a term of a word the
+	/// document carries only part of. A document in none of the terms' document
+	/// sets carries none of them, so it is answered without reading its postings.
 	async fn term_hits(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-		qt: &QueryTerms,
+		qts: &[&QueryTerms],
 	) -> Result<Vec<kernels::fulltext::TermHit>> {
-		if !qt.carries_any(doc_id) {
+		if !qts.iter().any(|qt| qt.carries_any_term(doc_id)) {
 			return Ok(Vec::new());
 		}
 		let mut hits = Vec::new();
 		let mut loaded = self.get_document_terms(tx, doc_id).await?;
-		for tk in qt.tokens.list() {
-			let term = qt.tokens.get_token_string(tk)?;
-			if let Some(td) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
-				hits.push(kernels::fulltext::TermHit {
-					char_len: tk.get_char_len(),
-					offsets: td.o,
-				});
+		let mut seen = HashSet::new();
+		for qt in qts {
+			for tk in qt.tokens.list() {
+				let term = qt.tokens.get_token_string(tk)?;
+				if !seen.insert(term) {
+					continue;
+				}
+				if let Some(td) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
+					hits.push(kernels::fulltext::TermHit {
+						char_len: tk.get_char_len(),
+						offsets: td.o,
+					});
+				}
 			}
 		}
 		Ok(hits)
 	}
 
-	/// Highlights the occurrences of the query's terms in the document `doc_id`,
+	/// Highlights the occurrences of the terms of `qts` in the document `doc_id`,
 	/// as this index numbers it, whose value is `doc`, formatted as `hlp` asks.
+	/// `qts` are the queries whose terms are highlighted together; a term that
+	/// several of them name is highlighted once.
 	pub async fn highlight_doc(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-		qt: &QueryTerms,
+		qts: &[&QueryTerms],
 		hlp: HighlightParams,
 		idiom: &Idiom,
 		doc: &Value,
 	) -> Result<Value> {
-		let hits = self.term_hits(tx, doc_id, qt).await?;
+		let hits = self.term_hits(tx, doc_id, qts).await?;
 		kernels::fulltext::highlight(&hlp, idiom, doc, &hits)
 	}
 
@@ -2257,16 +2295,16 @@ impl FullTextIndex {
 		}
 	}
 
-	/// The offsets of the query's terms in the document `doc_id`, as this index
-	/// numbers it.
+	/// The offsets of the terms of `qts` in the document `doc_id`, as this index
+	/// numbers it, unioned as [`Self::highlight_doc`] does.
 	pub async fn read_offsets_doc(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
-		qt: &QueryTerms,
+		qts: &[&QueryTerms],
 		partial: bool,
 	) -> Result<Value> {
-		let hits = self.term_hits(tx, doc_id, qt).await?;
+		let hits = self.term_hits(tx, doc_id, qts).await?;
 		Ok(kernels::fulltext::offsets(partial, &hits))
 	}
 }
@@ -2396,7 +2434,7 @@ impl FullTextHitsIterator {
 			if count > self.passed_terms {
 				let mut kept = terms.uncompacted.clone();
 				for ((at, _), passed) in bounds.terms.iter().zip(&passed_terms) {
-					if let (false, Some(docs)) = (passed, &terms.docs[*at]) {
+					if let (false, Some(docs)) = (passed, terms.docs_of(&terms.scored[*at])) {
 						kept |= docs;
 					}
 				}
@@ -2528,8 +2566,8 @@ pub struct BlockBounds {
 	/// Each range's bound.
 	bounds: Vec<f32>,
 	/// Each distinct term whose blocks bound its score, in the order a score
-	/// sums them: its position in the query's terms, and its ceiling, the best
-	/// score among the impacts of all of its blocks.
+	/// sums them: its index in [`QueryTerms::scored`], and its ceiling, the
+	/// best score among the impacts of all of its blocks.
 	terms: Vec<(usize, f64)>,
 }
 
@@ -2672,7 +2710,7 @@ impl Scorer {
 			return Ok(0.0);
 		}
 		let idfs = self.idfs(qt);
-		let mut cursors = vec![0; qt.summed.positions.len()];
+		let mut cursors = vec![0; qt.scored.len()];
 		if let Some(score) = self.score_from_postings(qt, &idfs, &mut cursors, doc_id) {
 			return Ok(score);
 		}
@@ -2684,16 +2722,13 @@ impl Scorer {
 			.await
 	}
 
-	/// The inverse document frequency of each term a score sums
-	/// ([`SummedTerms`]), in order; zero for a term no document carries, which
-	/// no score takes.
+	/// The inverse document frequency of each distinct term of the query, in
+	/// the order of [`QueryTerms::scored`]; zero for a term no document
+	/// carries, which no score takes.
 	fn idfs(&self, qt: &QueryTerms) -> Vec<f64> {
-		qt.summed
-			.positions
+		qt.scored
 			.iter()
-			.map(|(at, _)| {
-				qt.docs[*at].as_ref().map_or(0.0, |docs| self.bm25.idf(docs.len() as f64))
-			})
+			.map(|term| qt.docs_of(term).map_or(0.0, |docs| self.bm25.idf(docs.len() as f64)))
 			.collect()
 	}
 
@@ -2715,15 +2750,16 @@ impl Scorer {
 		let idfs = self.idfs(qt);
 		// A cursor per term into its postings, moved forward by doc ids that
 		// ascend, as a scan lists them.
-		let mut cursors = vec![0; qt.summed.positions.len()];
+		let mut cursors = vec![0; qt.scored.len()];
 		let mut scores = vec![0.0; doc_ids.len()];
 		// The positions in `doc_ids` of the documents scored from what they store.
 		let mut stored = Vec::new();
-		for (at, doc_id) in doc_ids.iter().enumerate() {
+		// A document carrying none of the query's words scores zero, as
+		// [`Self::score`] answers it, whatever terms of a word it carries alone.
+		for (at, doc_id) in doc_ids.iter().enumerate().filter(|(_, d)| qt.carries_any(**d)) {
 			match self.score_from_postings(qt, &idfs, &mut cursors, *doc_id) {
 				Some(score) => scores[at] = score,
-				None if qt.carries_any(*doc_id) => stored.push(at),
-				None => {}
+				None => stored.push(at),
 			}
 		}
 		if stored.is_empty() {
@@ -2792,8 +2828,8 @@ impl Scorer {
 	///
 	/// A document the terms hold no uncompacted state for carries a term
 	/// exactly where the term's blocks hold an entry for it, so the entry is
-	/// all a term is asked for: through `cursors`, one per term a score sums
-	/// ([`SummedTerms`]), which calls for doc ids in ascending order move
+	/// all a term is asked for: through `cursors`, one per term of
+	/// [`QueryTerms::scored`], which calls for doc ids in ascending order move
 	/// forward. `idfs` holds each such term's idf ([`Self::idfs`]). A document
 	/// of an index whose terms keep no blocks, or that a statement scores from
 	/// what it stores ([`QueryTerms::scored_as_stored`]), must carry a term.
@@ -2808,19 +2844,16 @@ impl Scorer {
 			return None;
 		}
 		let mut sc = 0.0;
-		let mut taken = qt.summed.taken(qt.docs.len());
-		for (((at, key), idf), cursor) in qt.summed.positions.iter().zip(idfs).zip(cursors) {
+		for ((term, idf), cursor) in qt.scored.iter().zip(idfs).zip(cursors) {
 			let Some((frequency, length)) =
-				qt.postings[*at].as_ref().and_then(|postings| postings.entry_at(cursor, doc_id))
+				term.postings.as_ref().and_then(|postings| postings.entry_at(cursor, doc_id))
 			else {
 				continue;
 			};
 			if frequency == 0 {
 				return None;
 			}
-			if takes(&mut taken, *key) {
-				sc += self.bm25.score_with_idf(*idf, frequency, length as f64);
-			}
+			sc += self.bm25.score_with_idf(*idf, frequency, length as f64);
 		}
 		Some(sc as f32)
 	}
@@ -2828,10 +2861,10 @@ impl Scorer {
 	/// The score of document `doc_id`, of length `doc_length`, from its
 	/// postings entry `loaded`; `None` for a document whose postings predate
 	/// the per-document entry, which are read per term. `idfs` holds the idf
-	/// of each term a score sums ([`Self::idfs`]).
+	/// of each distinct term ([`Self::idfs`]).
 	///
-	/// A term the query repeats is taken from the entry once, as a posting
-	/// moved out of it would be; a per-term read answers it each time.
+	/// Each distinct term of the query is read once, however many of its words
+	/// name it.
 	#[allow(clippy::too_many_arguments)]
 	async fn score_loaded(
 		&self,
@@ -2844,17 +2877,14 @@ impl Scorer {
 		loaded: Option<&DocumentTerms>,
 	) -> Result<Score> {
 		let mut sc = 0.0;
-		let tl = qt.tokens.list();
 		let doc_length = doc_length.unwrap_or(0) as f64;
 		let Some(doc) = loaded else {
-			for (i, d) in qt.docs.iter().enumerate() {
-				if let Some(docs) = d
+			for term in &qt.scored {
+				if let Some(docs) = qt.docs_of(term)
 					&& docs.contains(doc_id)
-					&& let Some(token) = tl.get(i)
 				{
-					let term = qt.tokens.get_token_string(token)?;
 					let frequency = tx
-						.get_key(&fti.ikb.new_td(term, doc_id), None)
+						.get_key(&fti.ikb.new_td(&term.term, doc_id), None)
 						.await?
 						.map(|td: TermDocument| td.f);
 					if let Some(frequency) = frequency {
@@ -2864,16 +2894,11 @@ impl Scorer {
 			}
 			return Ok(sc as f32);
 		};
-		let mut taken = qt.summed.taken(qt.docs.len());
-		for ((at, key), idf) in qt.summed.positions.iter().zip(idfs) {
-			if !qt.docs[*at].as_ref().is_some_and(|docs| docs.contains(doc_id)) {
+		for (term, idf) in qt.scored.iter().zip(idfs) {
+			if !qt.docs_of(term).is_some_and(|docs| docs.contains(doc_id)) {
 				continue;
 			}
-			if !takes(&mut taken, *key) {
-				continue;
-			}
-			let term = qt.tokens.get_token_string(&tl[*at])?;
-			if let Some(td) = doc.terms.get(term) {
+			if let Some(td) = doc.terms.get(term.term.as_str()) {
 				sc += self.bm25.score_with_idf(*idf, td.f, doc_length);
 			}
 		}
@@ -2881,8 +2906,9 @@ impl Scorer {
 	}
 }
 
-/// Scoring as it was computed term by term with a set of the strings taken,
-/// kept to check the scoring above against, bit for bit.
+/// Scoring computed term by term, each distinct term from its own document
+/// set and its own posting read, kept to check the scoring above against, bit
+/// for bit.
 #[cfg(test)]
 impl Scorer {
 	fn reference_score_from_postings(
@@ -2894,25 +2920,19 @@ impl Scorer {
 			return Ok(None);
 		}
 		let mut sc = 0.0;
-		let tl = qt.tokens.list();
-		let mut taken = HashSet::new();
-		for (i, d) in qt.docs.iter().enumerate() {
-			if let Some(docs) = d
+		for term in &qt.scored {
+			if let Some(docs) = qt.docs_of(term)
 				&& docs.contains(doc_id)
-				&& let Some(token) = tl.get(i)
 			{
 				let Some((frequency, length)) =
-					qt.postings.get(i).and_then(Option::as_ref).and_then(|p| p.entry(doc_id))
+					term.postings.as_ref().and_then(|p| p.entry(doc_id))
 				else {
 					return Ok(None);
 				};
 				if frequency == 0 {
 					return Ok(None);
 				}
-				let term = qt.tokens.get_token_string(token)?;
-				if taken.insert(term) {
-					sc += self.bm25.score(frequency as f64, docs.len() as f64, length as f64);
-				}
+				sc += self.bm25.score(frequency as f64, docs.len() as f64, length as f64);
 			}
 		}
 		Ok(Some(sc as f32))
@@ -2928,23 +2948,14 @@ impl Scorer {
 		loaded: Option<&DocumentTerms>,
 	) -> Result<Score> {
 		let mut sc = 0.0;
-		let tl = qt.tokens.list();
 		let doc_length = doc_length.unwrap_or(0) as f64;
-		let mut taken = HashSet::new();
-		for (i, d) in qt.docs.iter().enumerate() {
-			if let Some(docs) = d
+		for term in &qt.scored {
+			if let Some(docs) = qt.docs_of(term)
 				&& docs.contains(doc_id)
-				&& let Some(token) = tl.get(i)
 			{
-				let term = qt.tokens.get_token_string(token)?;
+				let term = term.term.as_str();
 				let frequency = match loaded {
-					Some(doc) => {
-						if taken.insert(term) {
-							doc.terms.get(term).map(|td| td.f)
-						} else {
-							None
-						}
-					}
+					Some(doc) => doc.terms.get(term).map(|td| td.f),
 					None => tx
 						.get_key(&fti.ikb.new_td(term, doc_id), None)
 						.await?
@@ -3542,7 +3553,7 @@ mod tests {
 
 	/// Every document's score, one at a time and in batches of doc ids ascending
 	/// or not, is bit for bit the score of the reference scoring that takes
-	/// each term once per document through a set of the strings taken. Over the
+	/// each distinct term from its own document set. Over the
 	/// legacy, bitmap and block formats, queries repeating a term, documents
 	/// compacted, partly compacted and rewritten since, documents whose
 	/// per-document postings entry is gone, and terms read as a statement that
@@ -3636,16 +3647,12 @@ mod tests {
 					self.fti.extract_querying_terms(&ctx, &az_fn, query.to_owned()).await.unwrap();
 				match mode {
 					1 => qt = qt.scored_as_stored(),
-					2 if qt.docs.len() > 2 => {
-						qt.docs.remove(1);
-						qt.postings.remove(1);
-						qt.summed = super::SummedTerms::of(&qt.tokens, qt.docs.len()).unwrap();
+					// Scored terms that are not the query's words one to one.
+					2 if qt.scored.len() > 2 => {
+						qt.scored.remove(1);
 					}
 					2 => continue,
 					_ => {}
-				}
-				if qt.summed.per_document {
-					assert!(qt.block_bounds(&scorer).is_none());
 				}
 				let mut expected = Vec::new();
 				for doc_id in &doc_ids {
@@ -5381,7 +5388,8 @@ mod tests {
 				let essential = !or
 					|| bounds.terms.len() < 2
 					|| bounds.terms.iter().zip(&passed).any(|((at, _), passed)| {
-						!passed && qt.docs[*at].as_ref().is_some_and(|docs| docs.contains(doc_id))
+						!passed
+							&& qt.docs_of(&qt.scored[*at]).is_some_and(|docs| docs.contains(doc_id))
 					});
 				essential && bounds.bound(doc_id).is_none_or(|b| b > threshold)
 			};
@@ -5475,8 +5483,8 @@ mod tests {
 		let other = test.fti.get_doc_id(&tx, &others[0]).await.unwrap().unwrap();
 		assert!(scorer.score(&test.fti, &tx, &qt, carrier).await.unwrap() > 0.0);
 		assert_eq!(scorer.score(&test.fti, &tx, &qt, other).await.unwrap(), 0.0);
-		assert!(test.fti.term_hits(&tx, other, &qt).await.unwrap().is_empty());
-		assert_eq!(test.fti.term_hits(&tx, carrier, &qt).await.unwrap().len(), 1);
+		assert!(test.fti.term_hits(&tx, other, &[&qt]).await.unwrap().is_empty());
+		assert_eq!(test.fti.term_hits(&tx, carrier, &[&qt]).await.unwrap().len(), 1);
 		tx.cancel().await.unwrap();
 	}
 

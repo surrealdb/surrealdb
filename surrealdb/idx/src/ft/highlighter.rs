@@ -1,5 +1,3 @@
-use std::collections::btree_map::Entry as BEntry;
-use std::collections::hash_map::Entry as HEntry;
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Result, ensure};
@@ -133,30 +131,34 @@ impl Offseter {
 		}
 	}
 
+	/// Records the highlighted ranges of `os`. A range that overlaps or touches
+	/// one already recorded for the same value is merged with it, so the
+	/// prefix and suffix markers of each range are emitted once, in order.
 	pub(crate) fn highlight(&mut self, term_len: u32, os: &[Offset]) {
 		for o in os {
-			let (start, end) = if self.partial {
+			let (mut start, mut end) = if self.partial {
 				let start = o.gen_start.min(o.end);
 				let end = (start + term_len).min(o.end);
 				(start, end)
 			} else {
 				(o.start, o.end)
 			};
-			match self.offsets.entry(o.index) {
-				HEntry::Occupied(mut e) => match e.get_mut().entry(start) {
-					BEntry::Vacant(e) => {
-						e.insert(end);
-					}
-					BEntry::Occupied(mut e) => {
-						if o.end.gt(e.get()) {
-							e.insert(end);
-						}
-					}
-				},
-				HEntry::Vacant(e) => {
-					e.insert(BTreeMap::from([(start, end)]));
-				}
+			let ranges = self.offsets.entry(o.index).or_default();
+			if let Some((&ps, &pe)) = ranges.range(..=start).next_back()
+				&& pe >= start
+			{
+				start = ps;
+				end = end.max(pe);
+				ranges.remove(&ps);
 			}
+			while let Some((&ns, &ne)) = ranges.range(start..).next() {
+				if ns > end {
+					break;
+				}
+				end = end.max(ne);
+				ranges.remove(&ns);
+			}
+			ranges.insert(start, end);
 		}
 	}
 }

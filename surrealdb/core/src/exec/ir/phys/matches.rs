@@ -99,8 +99,9 @@ pub(crate) struct MatchesTable {
 pub(crate) struct IndexScope {
 	/// The table the clauses are read against: the first table the loop reads whole.
 	pub(crate) table: Option<TableName>,
-	/// The clauses, in the order the stages write them; a later clause with a reference replaces
-	/// an earlier one with the same reference.
+	/// The clauses, in the order the stages write them. Several may share a reference; the one
+	/// [`Self::resolve`] picks is the last of them, and [`Self::resolve_union`] also reads the
+	/// others that read the same field.
 	pub(crate) clauses: Vec<Clause>,
 	/// Whether the stages hold a `KNN` operator.
 	pub(crate) knn: bool,
@@ -154,13 +155,28 @@ impl IndexScope {
 		}
 	}
 
-	/// The clause match reference `rf` names, or the only clause the scope holds when none carries
-	/// that reference.
+	/// The clauses that share the match reference `rf` with the clause [`Self::resolve`] picks
+	/// and read the same field: the picked clause, last, and the others in clause order. A
+	/// reference no clause carries resolves as [`Self::resolve`] falls back, to the clauses of the
+	/// one reference the scope holds.
+	pub(crate) fn resolve_union(&self, rf: MatchRef) -> Option<(&Clause, Vec<&Clause>)> {
+		let primary = self.resolve(rf)?;
+		let others = self
+			.clauses
+			.iter()
+			.filter(|clause| {
+				clause.rf == primary.rf
+					&& clause.field == primary.field
+					&& !std::ptr::eq(*clause, primary)
+			})
+			.collect();
+		Some((primary, others))
+	}
+
+	/// The clause match reference `rf` names, or, when none carries that reference and every
+	/// clause the scope holds shares one reference, the last of them.
 	pub(crate) fn resolve(&self, rf: MatchRef) -> Option<&Clause> {
-		let only = match self.clauses.as_slice() {
-			[only] => Some(only),
-			_ => None,
-		};
+		let only = self.clauses.last().filter(|last| self.clauses.iter().all(|c| c.rf == last.rf));
 		self.clauses.iter().rev().find(|clause| clause.rf == rf).or(only)
 	}
 }
@@ -377,10 +393,7 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 			let Some(clause) = clause_of(ir, op) else {
 				continue;
 			};
-			match clauses.iter_mut().find(|held| held.rf == clause.rf) {
-				Some(held) => *held = clause,
-				None => clauses.push(clause),
-			}
+			clauses.push(clause);
 		}
 		if !clauses.is_empty() || searched {
 			let scope = Arc::new(IndexScope {
@@ -494,10 +507,7 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 			let Some(clause) = clause_of(ir, op) else {
 				continue;
 			};
-			match clauses.iter_mut().find(|held| held.rf == clause.rf) {
-				Some(held) => *held = clause,
-				None => clauses.push(clause),
-			}
+			clauses.push(clause);
 		}
 		if !clauses.is_empty() || searched {
 			let scope = Arc::new(IndexScope {

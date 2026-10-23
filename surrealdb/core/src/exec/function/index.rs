@@ -208,6 +208,9 @@ pub struct MatchContext {
 	pub path: Option<FieldPath>,
 	/// The search query string from the right side of the MATCHES operator.
 	pub query: String,
+	/// The other queries that share this clause's match reference and field. The
+	/// highlight and offsets of the reference cover the terms of all of them.
+	pub extra_queries: Vec<String>,
 	/// The table name for index lookup.
 	pub table: TableName,
 	/// Lazily initialized full-text index resources. The inner `Option` is
@@ -288,6 +291,8 @@ impl RecentDocIds {
 pub struct FullTextResources {
 	pub index: FullTextIndex,
 	pub terms: QueryTerms,
+	/// The terms of [`MatchContext::extra_queries`], in the same order.
+	pub extra_terms: Vec<QueryTerms>,
 	/// The indexed column the MATCHES field named, as the catalog declares it.
 	/// Highlighting reads the document through this path.
 	pub column: Idiom,
@@ -299,22 +304,25 @@ impl MatchContext {
 	/// Create a new MatchContext from resolved MATCHES clause info. It keeps
 	/// no score, since nothing says the statement it serves is read-only.
 	pub fn new(field: &LogicalExpr, query: String, table: TableName) -> Self {
-		Self::of_path(field.field_path(), query, table, false)
+		Self::of_path(field.field_path(), query, Vec::new(), table, false)
 	}
 
 	/// A MatchContext for a MATCHES clause whose field reads the declared
 	/// position `path`, as [`Self::new`] makes one for the field itself.
-	/// `read_only` is whether the statement is read-only, so a record holds
-	/// what the terms read of it while the statement runs.
+	/// `extra_queries` are the other queries sharing the clause's match
+	/// reference. `read_only` is whether the statement is read-only, so a record
+	/// holds what the terms read of it while the statement runs.
 	pub fn of_path(
 		path: Option<FieldPath>,
 		query: String,
+		extra_queries: Vec<String>,
 		table: TableName,
 		read_only: bool,
 	) -> Self {
 		Self {
 			path,
 			query,
+			extra_queries,
 			table,
 			ft_cache: tokio::sync::OnceCell::new(),
 			scorer: tokio::sync::OnceCell::new(),
@@ -428,14 +436,39 @@ impl MatchContext {
 					))
 					.await?
 				};
+				let extra_terms = self.extra_terms(ctx.exec_ctx, &fti).await?;
 				Ok(Some(FullTextResources {
 					index: fti,
 					terms: self.as_held(terms),
+					extra_terms,
 					column,
 					index_id: index_def.index_id,
 				}))
 			})
 			.await
+	}
+
+	/// The terms of [`Self::extra_queries`] as `fti` reads them, in the same
+	/// order.
+	async fn extra_terms(
+		&self,
+		exec_ctx: &crate::exec::ExecutionContext,
+		fti: &FullTextIndex,
+	) -> Result<Vec<QueryTerms>> {
+		let frozen = exec_ctx.ctx();
+		let mut terms = Vec::with_capacity(self.extra_queries.len());
+		for query in &self.extra_queries {
+			let az_fn = StreamingAnalyzerFunction::new(exec_ctx);
+			terms.push(
+				crate::exec::compiles::seam(fti.extract_querying_terms(
+					frozen,
+					&az_fn,
+					query.clone(),
+				))
+				.await?,
+			);
+		}
+		Ok(terms)
 	}
 
 	/// `terms` as the context holds them: scoring each record from what it
@@ -484,9 +517,11 @@ impl MatchContext {
 			.ft_cache
 			.get_or_try_init(|| async {
 				let (index, terms) = init().await?;
+				let extra_terms = self.extra_terms(exec_ctx, &index).await?;
 				Ok::<_, E>(Some(FullTextResources {
 					index,
 					terms: self.as_held(terms),
+					extra_terms,
 					column,
 					index_id,
 				}))
@@ -774,6 +809,7 @@ impl Debug for MatchContext {
 		f.debug_struct("MatchContext")
 			.field("path", &self.path)
 			.field("query", &self.query)
+			.field("extra_queries", &self.extra_queries)
 			.field("table", &self.table)
 			.field("initialized", &self.ft_cache.initialized())
 			.finish()

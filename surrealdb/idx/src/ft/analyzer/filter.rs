@@ -89,9 +89,11 @@ impl Filter {
 		}
 	}
 
+	/// Whether the filter runs in `stage`. An edge n-gram filter runs only at
+	/// indexing: a query prefix longer than its `max` is not a stored term.
 	fn is_stage(&self, stage: FilteringStage) -> bool {
 		if let FilteringStage::Querying = stage {
-			!matches!(self, Filter::EdgeNgram(_, _) | Filter::Ngram(_, _))
+			!matches!(self, Filter::EdgeNgram(_, _))
 		} else {
 			true
 		}
@@ -105,20 +107,23 @@ impl Filter {
 		if let Some(filters) = f {
 			for filter in filters {
 				if filter.is_stage(stage) {
-					t = t.filter(filter)?;
+					t = t.filter(filter, stage)?;
 				}
 			}
 		}
 		Ok(t)
 	}
 
-	pub(super) fn apply_filter(&self, c: &str) -> FilterResult {
+	pub(super) fn apply_filter(&self, c: &str, stage: FilteringStage) -> FilterResult {
 		match self {
 			#[cfg(feature = "fulltext")]
 			Filter::Ascii => Self::deunicode(c),
 			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
 			Filter::Lowercase => Self::lowercase(c),
-			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
+			Filter::Ngram(min, max) => match stage {
+				FilteringStage::Indexing => Self::ngram(c, *min, *max),
+				FilteringStage::Querying => Self::query_ngram(c, *min, *max),
+			},
 			#[cfg(feature = "fulltext")]
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
@@ -183,6 +188,29 @@ impl Filter {
 			}
 		}
 		FilterResult::Terms(ng)
+	}
+
+	/// The query-side form of an n-gram filter. A query word within `[min, max]`
+	/// is kept as it is, since the index holds every gram of that length. A
+	/// longer word becomes its sliding windows of length `max`, each a gram the
+	/// index holds, and a shorter word is dropped as the index never holds it.
+	/// The windows of one word all carry that word's start, which
+	/// [`Token::word`] reports, so a caller can require them together.
+	fn query_ngram(c: &str, min: u16, max: u16) -> FilterResult {
+		let min = min as usize;
+		let max = max as usize;
+		let c: Vec<char> = c.chars().collect();
+		let l = c.len();
+		if l < min {
+			return FilterResult::Ignore;
+		}
+		if l <= max {
+			return FilterResult::Term(Term::Unchanged);
+		}
+		let windows = (0..=(l - max))
+			.map(|s| Term::NewTerm(c[s..s + max].iter().collect(), s as Position))
+			.collect();
+		FilterResult::Terms(windows)
 	}
 
 	#[inline]
