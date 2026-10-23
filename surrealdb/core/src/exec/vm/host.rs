@@ -39,7 +39,9 @@ use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::operators::scan::common::{
 	DecodeFields, ensure_below_memory_threshold, resolve_version_stamp,
 };
-use crate::exec::operators::scan::pipeline::{decode_record_value, kv_scan_stream};
+use crate::exec::operators::scan::pipeline::{
+	ScalarRows, decode_record_value, kv_scan_stream, read_by_id,
+};
 use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
@@ -54,7 +56,7 @@ use crate::exec::{
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordPrefix;
 use crate::kvs::{Admission, RowGate};
-use crate::val::{RecordIdKey, Value};
+use crate::val::{RecordId, RecordIdKey, Value};
 
 /// A statement run by the bytecode VM.
 #[derive(Debug)]
@@ -1956,6 +1958,7 @@ pub(super) async fn run_storage_source(
 					let Some(row) = row else {
 						return Ok(false);
 					};
+					let row = write_subject_row(state.write.is_some(), &rid, row);
 					let named = state.write.as_deref_mut().map(|write| write.row_named(true));
 					let step = run_value_row(program, pipeline, row, state, ctx).await;
 					if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
@@ -1985,6 +1988,7 @@ pub(super) async fn run_storage_source(
 						let Some(row) = fetch_raw_record(ctx, rid, version).await? else {
 							continue;
 						};
+						let row = write_subject_row(state.write.is_some(), rid, row);
 						let named = state.write.as_deref_mut().map(|write| write.row_named(true));
 						let step = run_value_row(program, pipeline, row, state, ctx).await;
 						if let (Some(named), Some(write)) = (named, state.write.as_deref_mut()) {
@@ -3347,6 +3351,17 @@ async fn scan_range(
 	ended
 }
 
+/// The row of the record `rid` a write names. A record whose content is not an
+/// object or `NONE` is passed on as its record id, which the write reads by id,
+/// so that the content of the stored record is read as the object of its id.
+fn write_subject_row(writing: bool, rid: &RecordId, row: Value) -> Value {
+	if writing && read_by_id(&row) {
+		Value::RecordId(rid.clone())
+	} else {
+		row
+	}
+}
+
 /// [`scan_range`] without the emptying of the windows the scan filled.
 #[allow(clippy::too_many_arguments)]
 async fn scan_rows(
@@ -3445,6 +3460,11 @@ async fn scan_rows(
 		prefilter,
 		topk_probe,
 		replay.clone(),
+		if program.write.is_some() {
+			ScalarRows::RecordIds
+		} else {
+			ScalarRows::Content
+		},
 	);
 	// The rows of a program that does heavy work for each, reading only, are
 	// read and decoded on a task of their own, ahead of the work.

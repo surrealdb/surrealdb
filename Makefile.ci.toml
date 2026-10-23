@@ -64,7 +64,7 @@ LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition 
 # Every numeric entry must have a published binary at
 #   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
 # Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
-LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,3.3.1,3.3.2,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
     "LANG_UPGRADE_VERSIONS",
 ] } }
 
@@ -84,7 +84,7 @@ LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1
 # walk cannot skip a version. A release that can only be upgraded onto a target
 # further down the list therefore cannot take part at all — 3.1.6 is omitted for
 # that reason, and the pair and seed axes carry it instead.
-LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,..", condition = { env_not_set = [
+LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,3.3.1,3.3.2,..", condition = { env_not_set = [
     "LANG_UPGRADE_CHAIN",
 ] } }
 
@@ -103,7 +103,7 @@ LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,
 # all. Its presence is a statement about the code paths this axis reaches, not
 # about which releases are supported upgrade sources — `doc/UPGRADING.md`
 # answers that, and answers it with stable releases only.
-LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3,3.3.0", condition = { env_not_set = [
+LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3,3.3.0,3.3.2", condition = { env_not_set = [
     "LANG_UPGRADE_SEEDS",
 ] } }
 

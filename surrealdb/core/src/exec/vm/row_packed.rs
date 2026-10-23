@@ -302,7 +302,9 @@ impl RowReader for LazyPackedRow<'_> {
 		if let Value::Object(object) = self.decoded()? {
 			Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None))
 		} else {
-			anyhow::bail!("the VM read a field from a row that is not an object")
+			// A record whose content is not an object has no field, as a field of
+			// any non-object value is `NONE`.
+			Ok(Scalar::None)
 		}
 	}
 

@@ -51,7 +51,7 @@ use crate::exec::fan_out::evaluate_each;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::link_window::LinkPool;
 use crate::exec::operators::scan::common::resolve_version_stamp;
-use crate::exec::operators::scan::pipeline::kv_scan_stream;
+use crate::exec::operators::scan::pipeline::{ScalarRows, kv_scan_stream, read_by_id};
 use crate::exec::operators::scan::resolved::EnforcementMode;
 use crate::exec::operators::scan::{execute_record_lookup, record_key_range};
 use crate::exec::{AccessMode, ExecutionContext, FlowResult, ValueBatchStream};
@@ -748,7 +748,12 @@ async fn stored_rows(
 	})
 	.await?;
 	for (at, record) in at.into_iter().zip(stored) {
-		subjects[at] = record;
+		// A subject of a write whose content is not an object stays its record id,
+		// so the write reads that record by id, as it reads any record it names.
+		subjects[at] = match record {
+			record if read_by_id(&record) => subjects[at].clone(),
+			record => record,
+		};
 	}
 	subjects.retain(|subject| !matches!(subject, Value::None));
 	Ok(subjects)
@@ -960,6 +965,7 @@ async fn dispatched(
 						None,
 						None,
 						replay.clone(),
+						ScalarRows::Content,
 					);
 					let (deref, ctx, table) = (Arc::clone(deref), ctx.clone(), rid.table.clone());
 					let unchecked = ctx.root().skip_fetch_perms;
@@ -1182,6 +1188,7 @@ async fn undispatched_table(
 		None,
 		None,
 		replay.clone(),
+		ScalarRows::Content,
 	);
 	if plain {
 		return Ok(Values::Stream(records, table.clone()));

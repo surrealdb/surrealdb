@@ -10,7 +10,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::pipeline::{
-	FieldState, ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream,
+	FieldState, ScalarRows, ScanPipeline, build_field_state, filter_and_process_batch,
+	kv_scan_stream,
 };
 use super::resolved::{EnforcementMode, planned_select_permission};
 use crate::err::EngineError;
@@ -180,6 +181,7 @@ pub(crate) async fn execute_record_lookup(
 			// TopK threshold pushdown targets full table scans only.
 			None,
 			replay.clone(),
+			ScalarRows::Content,
 		);
 
 		let mut pipeline = ScanPipeline::new(

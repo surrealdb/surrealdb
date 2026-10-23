@@ -37,7 +37,7 @@ use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordKey;
 use crate::key::{KVKeyDecode, RawRange};
 use crate::kvs::{Admission, Direction, RowGate, Transaction};
-use crate::val::{TableName, Value};
+use crate::val::{RecordId, TableName, Value};
 
 /// A raw computed field entry before topological sorting:
 /// `(field_name, clause, optional_kind, dependency_field_names, auth_limit, reenters)`.
@@ -267,6 +267,7 @@ pub(crate) fn kv_scan_stream(
 	pre_decode_filter: Option<Arc<PreDecodeFilter>>,
 	topk_probe: Option<Arc<TopKThresholdProbe>>,
 	replay: Option<Replay>,
+	scalars: ScalarRows,
 ) -> ValueBatchStream {
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -346,6 +347,7 @@ pub(crate) fn kv_scan_stream(
 						threshold: topk_threshold.as_deref(),
 						layouts: Some(layouts),
 						replay: replay.as_ref(),
+						scalars,
 					};
 					match row.read(key, val, &mut decoded, &mut stamps, &mut topk_skipped) {
 						Ok(()) => Ok(std::ops::ControlFlow::Continue(())),
@@ -378,6 +380,7 @@ pub(crate) fn kv_scan_stream(
 					threshold: topk_threshold.as_deref(),
 					layouts: Some(&**gate.layouts()),
 					replay: replay.as_ref(),
+					scalars,
 				}
 				.read(&key, &val, &mut decoded, &mut stamps, &mut topk_skipped)?;
 			}
@@ -428,6 +431,8 @@ struct ScanRow<'a> {
 	layouts: Option<&'a TableLayouts>,
 	/// The table's migration steps, when it has any.
 	replay: Option<&'a Replay>,
+	/// What a row whose content is not an object yields.
+	scalars: ScalarRows,
 }
 
 impl ScanRow<'_> {
@@ -484,12 +489,49 @@ impl ScanRow<'_> {
 			return Ok(());
 		}
 		// A packed row the filter or the probe checked is decoded from the checked row.
-		decoded.push(admitted.decode(key, val, self.layouts).map_err(ControlFlow::Err)?);
+		let value = admitted.decode(key, val, self.layouts).map_err(ControlFlow::Err)?;
+		decoded.push(match self.scalars {
+			ScalarRows::Content => value,
+			ScalarRows::RecordIds if !read_by_id(&value) => value,
+			ScalarRows::RecordIds => {
+				Value::RecordId(record_id_of_key(key).map_err(ControlFlow::Err)?)
+			}
+		});
 		if let Some(stamp) = stamp {
 			stamps.push(stamp);
 		}
 		Ok(())
 	}
+}
+
+/// What a scan yields for a row whose stored content is not an object. Such a
+/// record carries no `id` of its own, so the scan's only source of its record id
+/// is its key.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScalarRows {
+	/// The content as stored, for a read, which returns it as it is.
+	Content,
+	/// The record id the key names, for a write, which reads the record by that id
+	/// as it reads any record it names. A row [`read_by_id`] passes over is
+	/// yielded unchanged.
+	RecordIds,
+}
+
+/// Whether a write reads the stored record `content` by its record id: content
+/// that is neither an object nor `NONE`. `NONE` stays `NONE`, the value of a
+/// record that is absent.
+pub(crate) fn read_by_id(content: &Value) -> bool {
+	!content.is_object() && !content.is_none()
+}
+
+/// The record id a storage key names.
+pub(crate) fn record_id_of_key(key: &[u8]) -> anyhow::Result<RecordId> {
+	let decoded_key =
+		RecordKey::decode_key(key).map_err(|e| e.context("Failed to decode record key"))?;
+	Ok(RecordId {
+		table: decoded_key.tb.into_owned(),
+		key: decoded_key.id.into_owned(),
+	})
 }
 
 /// Decode a record from its key and value bytes.

@@ -346,6 +346,7 @@ pub(crate) async fn scan_subjects(
 		None,
 		None,
 		replay,
+		crate::exec::operators::scan::pipeline::ScalarRows::RecordIds,
 	))
 }
 
@@ -394,8 +395,14 @@ impl Rows {
 				},
 				Self::Batch(batch, stamps, _) => match batch.next() {
 					Some(value) => {
+						let stamp = stamps.as_mut().and_then(Iterator::next);
+						// A record whose content is not an object arrives as its record id,
+						// and is read by that id as a record a statement names is.
+						if let Value::RecordId(id) = value {
+							return Ok(Some(read_subject(exec, id).await?));
+						}
 						let mut row = WriteRow::for_record(value)?;
-						row.stored_stamp = stamps.as_mut().and_then(Iterator::next);
+						row.stored_stamp = stamp;
 						row.replay_stored(exec).await?;
 						return Ok(Some(row));
 					}

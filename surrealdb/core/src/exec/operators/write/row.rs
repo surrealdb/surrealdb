@@ -17,7 +17,7 @@ use crate::exec::Error as ExecError;
 use crate::exec::memory::size::value_bytes;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::expr::ControlFlow;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{Object, RecordId, RecordIdKey, TableName, Value};
 
 /// The evaluated data clause a record's stages apply.
 ///
@@ -537,6 +537,32 @@ impl WriteRow {
 		replay.apply(exec, &mut self.initial, stamp).await?;
 		self.current.clone_from(&self.initial);
 		Ok(())
+	}
+
+	/// Start the after-image of a record whose stored content is not an object
+	/// from the empty object of its id, the content a `CREATE` of that id starts
+	/// from. A data clause that edits content runs on that object, so it
+	/// replaces the stored scalar with an object rather than failing or doing
+	/// nothing. The before-image is left as stored.
+	///
+	/// Does nothing for a row that read no record (`initial` is `NONE`) or whose
+	/// content is already an object.
+	pub(crate) fn content_from_id(&mut self) {
+		if self.initial.is_none() || self.current.is_object() {
+			return;
+		}
+		self.object_of_id();
+	}
+
+	/// Set the after-image to the empty object of the row's id, or to an empty
+	/// object when the row names no id yet (a table target whose id is generated
+	/// later).
+	pub(crate) fn object_of_id(&mut self) {
+		let mut object = Object::default();
+		if let Some(id) = self.id.clone() {
+			object.insert("id", Value::RecordId(id));
+		}
+		self.current = object.into();
 	}
 
 	/// Take both images and both markers from a record read from storage,

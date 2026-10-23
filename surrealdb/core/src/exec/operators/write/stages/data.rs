@@ -76,6 +76,24 @@ use crate::val::{
 /// value, whose `id`, `in` or `out` disagrees with the record the statement
 /// named.
 pub(crate) fn check_data_fields(row: &WriteRow) -> Result<(), ControlFlow> {
+	// A MERGE, CONTENT or REPLACE value must be an object before its `id` is
+	// read: a non-object has no id, so the id check below would refuse with an
+	// internal error instead of the clause's own refusal.
+	match row.input.as_ref() {
+		Some(ComputedInput::Merge(value)) if !value.is_object() => {
+			return Err(fail(ExprError::InvalidMerge {
+				value: value.as_ref().clone(),
+			}));
+		}
+		Some(ComputedInput::Content(value) | ComputedInput::Replace(value))
+			if !value.is_object() =>
+		{
+			return Err(fail(ExprError::InvalidContent {
+				value: value.as_ref().clone(),
+			}));
+		}
+		_ => {}
+	}
 	if row.generate_in.is_some() {
 		return Ok(());
 	}

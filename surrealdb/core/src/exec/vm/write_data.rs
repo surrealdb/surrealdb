@@ -450,6 +450,9 @@ pub(super) async fn step(
 			pipeline,
 			binds_input,
 		} => {
+			// The clause is evaluated against the record's content as an object,
+			// so a stored scalar is edited as the object of its id.
+			row.content_from_id();
 			let value = match pipeline {
 				Some(pipeline) => {
 					let image = snapshot(row).clone();
@@ -545,6 +548,19 @@ pub(super) async fn step(
 			check_patch_pointers(program, *view, *bare, *checked, &data, state, exec).await?;
 			let row = write_state(state)?.row()?;
 			row.current.patch(Value::clone(&data)).map_err(ControlFlow::Err)?;
+			// A root replaced by NONE or NULL leaves the record with its id alone.
+			// Any other non-object root is refused below.
+			if matches!(row.current, Value::None | Value::Null) {
+				row.object_of_id();
+			}
+			// A record's content is an object. The check is on the result, so a
+			// PATCH that replaces the root with a scalar is refused as a CONTENT
+			// clause is, whichever operation put it there.
+			if !row.current.is_object() {
+				return Err(ControlFlow::Err(anyhow::Error::new(ExprError::InvalidContent {
+					value: row.current.clone(),
+				})));
+			}
 			row.current_reduced = None;
 			row.fields_computed = false;
 			Ok(next)

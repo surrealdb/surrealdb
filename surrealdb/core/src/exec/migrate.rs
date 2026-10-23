@@ -835,6 +835,11 @@ impl Replay {
 			return Ok(());
 		};
 		for (row, stamp) in batch.values_mut().iter_mut().zip(stamps) {
+			// A record id stands for a record whose content is not an object. The
+			// write that takes it reads that record by id, and replays it then.
+			if matches!(row, Value::RecordId(_)) {
+				continue;
+			}
 			self.apply(ctx, row, stamp).await?;
 		}
 		Ok(())

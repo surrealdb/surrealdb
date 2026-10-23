@@ -783,7 +783,9 @@ impl RowReader for ValueRow<'_> {
 	fn field(&self, name: &FieldName) -> anyhow::Result<Scalar<'_>> {
 		match self.0.as_object() {
 			Some(object) => Ok(object.get(name.as_str()).map(Scalar::of).unwrap_or(Scalar::None)),
-			None => anyhow::bail!("the VM read a field from a row that is not an object"),
+			// A record whose content is not an object has no field, as a field of
+			// any non-object value is `NONE`.
+			None => Ok(Scalar::None),
 		}
 	}
 
