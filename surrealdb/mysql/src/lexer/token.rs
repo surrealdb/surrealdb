@@ -34,6 +34,12 @@ pub enum TokenKind {
 
 	// Literals
 	IntLiteral(i64),
+	/// A decimal integer literal that does not fit 64 bits: the nearest double to its value, and
+	/// whether it is the magnitude of the minimum 64-bit integer (9223372036854775808).
+	WideIntLiteral {
+		value: f64,
+		int8_minimum_magnitude: bool,
+	},
 	FloatLiteral(f64),
 	StringLiteral(String),
 	HexLiteral(Vec<u8>),
@@ -99,6 +105,10 @@ impl std::fmt::Display for TokenKind {
 			Self::Ident(id) => write!(f, "{id}"),
 			Self::CharsetIntro(cs) => write!(f, "_{cs}"),
 			Self::IntLiteral(n) => write!(f, "{n}"),
+			Self::WideIntLiteral {
+				value,
+				..
+			} => write!(f, "{value}"),
 			Self::FloatLiteral(fl) => write!(f, "{fl}"),
 			Self::StringLiteral(s) => write!(f, "'{s}'"),
 			Self::HexLiteral(_) => write!(f, "HEX_LITERAL"),

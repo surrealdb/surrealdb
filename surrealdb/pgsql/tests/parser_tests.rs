@@ -347,3 +347,204 @@ fn test_parse_subqueries() {
 		other => panic!("expected Quantified ANY, got {other:?}"),
 	}
 }
+
+#[test]
+fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
+	let beyond_a_double = format!("0x{}", "F".repeat(300));
+	for literal in [
+		"0x8000000000000000",
+		"0xFFFFFFFFFFFFFFFFF",
+		"0o2000000000000000000000",
+		"0b1111111111111111111111111111111111111111111111111111111111111111",
+		"0b1_0000000000000000000000000000000000000000000000000000000000000000",
+		&beyond_a_double,
+	] {
+		let err = parse_expr(literal).expect_err(literal);
+		assert!(err.to_string().contains("overflow"), "{literal}: {err}");
+	}
+	for (literal, value) in [
+		("9223372036854775807", i64::MAX),
+		("0x7FFFFFFFFFFFFFFF", i64::MAX),
+		("0o777777777777777777777", i64::MAX),
+		("0b0111111111111111111111111111111111111111111111111111111111111111", i64::MAX),
+	] {
+		match parse_expr(literal).expect(literal) {
+			Expr::Literal {
+				lit: Literal::Integer(parsed),
+				..
+			} => assert_eq!(parsed, value, "{literal}"),
+			other => panic!("{literal}: expected an integer, got {other:?}"),
+		}
+	}
+}
+
+#[test]
+fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
+	for literal in [
+		"9223372036854775808",
+		"18446744073709551616",
+		"10000000000000000000",
+		"123456789012345678901234567890",
+		"10_000_000_000_000_000_000",
+		"000000000000000000009223372036854775808",
+	] {
+		let expected = literal.replace('_', "").parse::<f64>().expect(literal);
+		match parse_expr(literal).expect(literal) {
+			Expr::Literal {
+				lit: Literal::Float(parsed),
+				..
+			} => assert_eq!(parsed, expected, "{literal}"),
+			other => panic!("{literal}: expected a float, got {other:?}"),
+		}
+	}
+	let beyond_a_double = "9".repeat(400);
+	let err = parse_expr(&beyond_a_double).expect_err("a literal beyond a double has no value");
+	assert!(err.to_string().contains("overflow"), "{err}");
+}
+
+#[test]
+fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
+	for sql in [
+		"-9223372036854775808",
+		"- 9223372036854775808",
+		"-(9223372036854775808)",
+		"-  ( ( 9223372036854775808 ) )",
+		"-9_223_372_036_854_775_808",
+		"-09223372036854775808",
+	] {
+		match parse_expr(sql).expect(sql) {
+			Expr::Literal {
+				lit: Literal::Integer(parsed),
+				..
+			} => assert_eq!(parsed, i64::MIN, "{sql}"),
+			other => panic!("{sql}: expected the int8 minimum, got {other:?}"),
+		}
+	}
+}
+
+#[test]
+fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
+	for sql in [
+		"-9223372036854775809",
+		"-9223372036854775808.0",
+		"-9223372036854775808e0",
+		"-9223372036854775808::int8",
+		"-9223372036854775807",
+		"+9223372036854775808",
+		"-0x8000000000000000",
+	] {
+		match parse_expr(sql) {
+			Ok(Expr::UnaryOp {
+				expr,
+				..
+			}) => assert!(
+				!matches!(
+					*expr,
+					Expr::Literal {
+						lit: Literal::Integer(i64::MIN),
+						..
+					}
+				),
+				"{sql}: {expr:?}"
+			),
+			Ok(other) => panic!("{sql}: expected a negation, got {other:?}"),
+			Err(err) => assert!(sql.starts_with("-0x") && err.to_string().contains("overflow")),
+		}
+	}
+	match parse_expr("- -9223372036854775808").expect("a negated int8 minimum") {
+		Expr::UnaryOp {
+			op: UnaryOperator::Minus,
+			expr,
+			..
+		} => assert!(matches!(
+			*expr,
+			Expr::Literal {
+				lit: Literal::Integer(i64::MIN),
+				..
+			}
+		)),
+		other => panic!("expected a negation of the int8 minimum, got {other:?}"),
+	}
+}
+
+#[test]
+fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
+	for (sql, operator) in [
+		("x = -9223372036854775808", BinaryOperator::Eq),
+		("x=-9223372036854775808", BinaryOperator::Eq),
+		("x > -9223372036854775808", BinaryOperator::Gt),
+		("x>-9223372036854775808", BinaryOperator::Gt),
+		("x >= -9223372036854775808", BinaryOperator::GtEq),
+		("x < -9223372036854775808", BinaryOperator::Lt),
+		("x - -9223372036854775808", BinaryOperator::Sub),
+		("x * -9223372036854775808", BinaryOperator::Mul),
+	] {
+		match parse_expr(sql).expect(sql) {
+			Expr::BinaryOp {
+				op,
+				right,
+				..
+			} => {
+				assert_eq!(op, operator, "{sql}");
+				assert!(
+					matches!(
+						*right,
+						Expr::Literal {
+							lit: Literal::Integer(i64::MIN),
+							..
+						}
+					),
+					"{sql}: {right:?}"
+				);
+			}
+			other => panic!("{sql}: expected a binary operator, got {other:?}"),
+		}
+	}
+	match parse_expr("-9223372036854775808 / -1").expect("a quotient") {
+		Expr::BinaryOp {
+			left,
+			op: BinaryOperator::Div,
+			..
+		} => assert!(matches!(
+			*left,
+			Expr::Literal {
+				lit: Literal::Integer(i64::MIN),
+				..
+			}
+		)),
+		other => panic!("expected a quotient, got {other:?}"),
+	}
+}
+
+#[test]
+fn test_a_json_operator_followed_by_a_negative_integer_is_one_operator_and_a_negation() {
+	for (sql, operator) in [
+		("data->>-1", BinaryOperator::LongArrow),
+		("data->-1", BinaryOperator::Arrow),
+		("data ->> -1", BinaryOperator::LongArrow),
+	] {
+		match parse_expr(sql).expect(sql) {
+			Expr::BinaryOp {
+				op,
+				right,
+				..
+			} => {
+				assert_eq!(op, operator, "{sql}");
+				assert!(
+					matches!(
+						*right,
+						Expr::UnaryOp {
+							op: UnaryOperator::Minus,
+							..
+						} | Expr::Literal {
+							lit: Literal::Integer(-1),
+							..
+						}
+					),
+					"{sql}: {right:?}"
+				);
+			}
+			other => panic!("{sql}: expected a binary operator, got {other:?}"),
+		}
+	}
+}

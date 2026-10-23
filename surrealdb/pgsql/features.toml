@@ -1,0 +1,16 @@
+# Local feature provenance for the PostgreSQL FROM-function surface.
+version = 1
+
+[[sources]]
+id = "postgresql-15-grammar"
+kind = "postgresql_grammar"
+url = "https://github.com/postgres/postgres/blob/REL_15_STABLE/src/backend/parser/gram.y"
+
+[[features]]
+key = "from.single_function"
+source = "postgresql-15-grammar"
+productions = ["table_ref", "func_table", "func_alias_clause", "opt_ordinality"]
+lines = [12413, 12826, 12860]
+supported = ["single function call", "table alias", "column aliases", "WITH ORDINALITY"]
+execution = "registered uncorrelated scalar functions"
+unsupported = ["ROWS FROM", "LATERAL correlation", "record column definitions", "set-returning functions"]

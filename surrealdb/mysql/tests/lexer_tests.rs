@@ -46,6 +46,33 @@ fn test_numbers() {
 }
 
 #[test]
+fn test_a_decimal_integer_beyond_64_bits_is_a_wide_integer() {
+	let tokens = tokenize(
+		"9223372036854775807 9223372036854775808 9223372036854775809 18446744073709551616 \
+		 123456789012345678901234567890 00009223372036854775808",
+	)
+	.unwrap();
+	assert_eq!(tokens[0].kind, TokenKind::IntLiteral(i64::MAX));
+	for (index, text, int8_minimum_magnitude) in [
+		(1, "9223372036854775808", true),
+		(2, "9223372036854775809", false),
+		(3, "18446744073709551616", false),
+		(4, "123456789012345678901234567890", false),
+		(5, "00009223372036854775808", true),
+	] {
+		assert_eq!(
+			tokens[index].kind,
+			TokenKind::WideIntLiteral {
+				value: text.parse::<f64>().unwrap(),
+				int8_minimum_magnitude,
+			},
+			"{text}"
+		);
+	}
+	assert!(tokenize(&"9".repeat(400)).is_err(), "a literal beyond a double has no value");
+}
+
+#[test]
 fn test_hex_and_bit() {
 	let tokens = tokenize("0x12AF x'12af' 0b101 b'101'").unwrap();
 	assert_eq!(tokens[0].kind, TokenKind::HexLiteral(vec![0x12, 0xAF]));

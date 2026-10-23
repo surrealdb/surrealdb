@@ -136,6 +136,17 @@ pub enum TableRef {
 		/// Source span.
 		span: Span,
 	},
+	/// A single function expression in FROM (`func_table`), optionally with ordinality.
+	Function {
+		/// Function expression; window calls are excluded from a table factor.
+		function: Box<Expr>,
+		/// Optional table and column aliases.
+		alias: Option<TableAlias>,
+		/// Append a one-based ordinality column.
+		with_ordinality: bool,
+		/// Source span.
+		span: Span,
+	},
 	/// Subquery in `FROM` clause (e.g. `(SELECT * FROM t) AS sub`).
 	Subquery {
 		/// Subquery statement.
@@ -266,8 +277,14 @@ pub enum OnConflictAction {
 pub struct OnConflictClause {
 	/// Target columns for conflict inference (e.g. `(id)`).
 	pub target: Option<Vec<String>>,
+	/// Predicate of a partial unique index that the conflict target must infer
+	/// (`ON CONFLICT (col) WHERE pred`).
+	pub target_where: Option<Expr>,
 	/// Action to take on conflict.
 	pub action: OnConflictAction,
+	/// Condition of `DO UPDATE SET ... WHERE cond`: the existing row is updated only when it is
+	/// true. Always `None` for `DO NOTHING`.
+	pub where_clause: Option<Expr>,
 	/// Source span.
 	pub span: Span,
 }
@@ -281,6 +298,8 @@ pub struct InsertStmt {
 	pub with: Option<WithClause>,
 	/// Target table name.
 	pub relation: QualifiedName,
+	/// Alias of the target table (`INSERT INTO t AS a`).
+	pub alias: Option<String>,
 	/// Explicit column list (e.g. `INSERT INTO t (a, b)`).
 	pub columns: Vec<String>,
 	/// Values rows (`VALUES (...), (...)`).
@@ -939,6 +958,12 @@ impl Statement {
 				}
 				if let Some(c) = &mut s.on_conflict {
 					c.span = zero;
+					if let Some(w) = &mut c.target_where {
+						w.normalize_spans();
+					}
+					if let Some(w) = &mut c.where_clause {
+						w.normalize_spans();
+					}
 					if let OnConflictAction::DoUpdate(updates) = &mut c.action {
 						for u in updates {
 							u.span = zero;
@@ -1172,6 +1197,18 @@ fn normalize_table_ref(r: &mut TableRef) {
 			name.span = zero;
 			if let Some(a) = alias {
 				a.span = zero;
+			}
+		}
+		TableRef::Function {
+			function,
+			alias,
+			span,
+			..
+		} => {
+			*span = zero;
+			function.normalize_spans();
+			if let Some(alias) = alias {
+				alias.span = zero;
 			}
 		}
 		TableRef::Subquery {

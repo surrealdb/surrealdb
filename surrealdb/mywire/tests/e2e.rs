@@ -1597,3 +1597,311 @@ async fn test_mysql_failed_commit_is_reported_and_keeps_the_connection() {
 
 	shutdown.cancel();
 }
+
+/// Skip one length-encoded string in a packet, returning its bytes.
+fn lenenc_bytes(buf: &[u8], off: &mut usize) -> Vec<u8> {
+	let b = buf[*off];
+	let (len, n) = match b {
+		0xfc => ((buf[*off + 1] as usize) | ((buf[*off + 2] as usize) << 8), 3),
+		0xfd => (
+			(buf[*off + 1] as usize)
+				| ((buf[*off + 2] as usize) << 8)
+				| ((buf[*off + 3] as usize) << 16),
+			4,
+		),
+		_ => (b as usize, 1),
+	};
+	*off += n;
+	let out = buf[*off..*off + len].to_vec();
+	*off += len;
+	out
+}
+
+/// A text-protocol result: each column's name and MySQL type code, and the rows' cells.
+struct TextResult {
+	columns: Vec<(String, u8)>,
+	rows: Vec<Vec<Option<String>>>,
+}
+
+impl TextResult {
+	fn type_of(&self, name: &str) -> u8 {
+		self.columns.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no column {name}")).1
+	}
+
+	fn cell(&self, row: usize, name: &str) -> Option<&str> {
+		let idx = self
+			.columns
+			.iter()
+			.position(|(n, _)| n == name)
+			.unwrap_or_else(|| panic!("no column {name}"));
+		self.rows[row][idx].as_deref()
+	}
+}
+
+async fn query_text(stream: &mut TcpStream, sql: &str) -> TextResult {
+	let mut q = vec![COM_QUERY];
+	q.extend_from_slice(sql.as_bytes());
+	write_packet(stream, 0, &q).await;
+	let (_, first) = read_packet(stream).await;
+	assert!(first[0] != 0xff, "query failed: {sql}: {}", String::from_utf8_lossy(&first[3..]));
+	assert!(first[0] != 0x00, "query returned no result set: {sql}");
+	let col_count = first[0] as usize;
+	let mut columns = Vec::new();
+	for _ in 0..col_count {
+		let (_, def) = read_packet(stream).await;
+		let mut off = 0;
+		for _ in 0..4 {
+			lenenc_bytes(&def, &mut off);
+		}
+		let name = String::from_utf8_lossy(&lenenc_bytes(&def, &mut off)).to_string();
+		lenenc_bytes(&def, &mut off);
+		off += 1 + 2 + 4;
+		columns.push((name, def[off]));
+	}
+	let (_, eof) = read_packet(stream).await;
+	assert_eq!(eof[0], 0xfe);
+	let mut rows = Vec::new();
+	loop {
+		let (_, pkt) = read_packet(stream).await;
+		if pkt[0] == 0xfe && pkt.len() < 9 {
+			break;
+		}
+		rows.push(decode_mysql_text_row(&pkt));
+	}
+	TextResult {
+		columns,
+		rows,
+	}
+}
+
+async fn seed_person_with_json_and_arrays(stream: &mut TcpStream) {
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE TABLE person SCHEMALESS",
+		"CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], scores: [1, 2, 3], \
+		 profile: { city: 'London', langs: ['en', 'fr'], geo: { lat: 51.5, lon: -0.12 } }, \
+		 friends: [person:jaime, person:silvana], objs: [{ a: 1 }, { b: 2 }], \
+		 joined: [1, NONE, 3], grid: [[1, 2], [3, 4]], born: d'1980-01-01T00:00:00Z', \
+		 seen: d'1980-01-01T12:30:45.123456Z', took: 26h, nothing: NULL } RETURN NONE",
+	] {
+		let res = query_mysql(stream, sql).await;
+		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
+	}
+}
+
+#[tokio::test]
+async fn test_mywire_composites_are_json_columns_holding_json() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_person_with_json_and_arrays(&mut stream).await;
+	let res = query_text(&mut stream, "SELECT * FROM person:tobie").await;
+	assert_eq!(res.rows.len(), 1);
+	for column in ["tags", "scores", "profile", "friends", "objs", "joined", "grid"] {
+		assert_eq!(res.type_of(column), MYSQL_TYPE_JSON, "{column} is a JSON column");
+	}
+	assert_eq!(res.cell(0, "tags"), Some("[\"rust\",\"db\"]"));
+	assert_eq!(res.cell(0, "scores"), Some("[1,2,3]"));
+	assert_eq!(
+		res.cell(0, "profile"),
+		Some(
+			"{\"city\":\"London\",\"geo\":{\"lat\":51.5,\"lon\":-0.12},\"langs\":[\"en\",\"fr\"]}"
+		)
+	);
+	assert_eq!(res.cell(0, "friends"), Some("[\"person:jaime\",\"person:silvana\"]"));
+	assert_eq!(res.cell(0, "objs"), Some("[{\"a\":1},{\"b\":2}]"));
+	assert_eq!(res.cell(0, "joined"), Some("[1,null,3]"));
+	assert_eq!(res.cell(0, "grid"), Some("[[1,2],[3,4]]"));
+	assert_eq!(res.cell(0, "nothing"), None);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_datetimes_and_durations_use_mysql_text_forms() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_person_with_json_and_arrays(&mut stream).await;
+	let res = query_text(&mut stream, "SELECT * FROM person:tobie").await;
+	assert_eq!(res.type_of("born"), MYSQL_TYPE_DATETIME);
+	assert_eq!(res.cell(0, "born"), Some("1980-01-01 00:00:00"));
+	assert_eq!(res.cell(0, "seen"), Some("1980-01-01 12:30:45.123456"));
+	assert_eq!(res.type_of("took"), MYSQL_TYPE_TIME);
+	assert_eq!(res.cell(0, "took"), Some("26:00:00"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_mysql_dialect_select_star_over_a_schemaless_table_returns_its_columns() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_person_with_json_and_arrays(&mut stream).await;
+	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
+	assert!(matches!(res, QueryResult::Ok));
+	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
+	assert_eq!(res.rows.len(), 1);
+	let names: Vec<&str> = res.columns.iter().map(|(n, _)| n.as_str()).collect();
+	assert!(!names.contains(&"*"), "the wildcard must not surface as a column: {names:?}");
+	for expected in ["name", "tags", "profile", "born", "nothing"] {
+		assert!(names.contains(&expected), "missing column {expected} in {names:?}");
+	}
+	assert_eq!(res.cell(0, "name"), Some("Tobie"));
+	assert_eq!(res.cell(0, "tags"), Some("[\"rust\",\"db\"]"));
+	assert_eq!(res.cell(0, "born"), Some("1980-01-01 00:00:00"));
+	assert_eq!(res.cell(0, "nothing"), None);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_mysql_dialect_reads_arrays_objects_and_datetimes() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_person_with_json_and_arrays(&mut stream).await;
+	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
+	assert!(matches!(res, QueryResult::Ok));
+	for (column, text) in [
+		("tags", "[\"rust\",\"db\"]"),
+		("grid", "[[1,2],[3,4]]"),
+		("friends", "[\"jaime\",\"silvana\"]"),
+		("born", "1980-01-01 00:00:00"),
+		("took", "26:00:00"),
+	] {
+		let res =
+			query_text(&mut stream, &format!("SELECT {column} FROM person WHERE name = 'Tobie'"))
+				.await;
+		assert_eq!(res.rows.len(), 1, "{column}");
+		assert_eq!(res.cell(0, column), Some(text), "{column}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_sql_dialects_show_every_record_id_as_its_key() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE TABLE emp SCHEMALESS",
+		"CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
+		 meta: { boss: emp:8 }, handle: emp:tobie } RETURN NONE",
+	] {
+		let res = query_mysql(&mut stream, sql).await;
+		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
+	}
+	let surreal = query_text(&mut stream, "SELECT * FROM emp:7").await;
+	assert_eq!(surreal.cell(0, "dept"), Some("dept:1"), "SurrealQL keeps the table");
+	for dialect in ["mysql", "pgsql"] {
+		let res = query_mysql(&mut stream, &format!("SET dialect = '{dialect}'")).await;
+		assert!(matches!(res, QueryResult::Ok), "{dialect}: {res:?}");
+		let sql = "SELECT id, dept, friends, meta, handle FROM emp WHERE name = 'Eve'";
+		let res = query_text(&mut stream, sql).await;
+		assert_eq!(res.rows.len(), 1, "{dialect}");
+		assert_eq!(res.cell(0, "id"), Some("7"), "{dialect}");
+		assert_eq!(res.cell(0, "dept"), Some("1"), "{dialect}");
+		assert_eq!(res.cell(0, "friends"), Some("[8,9]"), "{dialect}");
+		assert_eq!(res.cell(0, "meta"), Some("{\"boss\":8}"), "{dialect}");
+		assert_eq!(res.cell(0, "handle"), Some("tobie"), "{dialect}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_select_star_with_no_rows_still_answers_with_a_result_set() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_person_with_json_and_arrays(&mut stream).await;
+	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
+	assert!(matches!(res, QueryResult::Ok));
+	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'nobody'").await;
+	assert!(res.rows.is_empty());
+	assert!(!res.columns.is_empty(), "a result set carries at least one column");
+	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
+	assert_eq!(res.rows.len(), 1, "the same statement with a match still lists its columns");
+	assert!(res.columns.iter().any(|(n, _)| n == "name"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_a_column_of_mixed_kinds_is_text() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE TABLE thing SCHEMALESS",
+		"CREATE thing:1 SET n = 'a', v = 3 RETURN NONE",
+		"CREATE thing:2 SET n = 'b', v = 'three' RETURN NONE",
+		"CREATE thing:3 SET n = 'c', w = 1, x = 2 RETURN NONE",
+		"CREATE thing:4 SET n = 'd', w = 1.5, x = 2 RETURN NONE",
+	] {
+		let res = query_mysql(&mut stream, sql).await;
+		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
+	}
+	for dialect in ["surrealql", "mysql"] {
+		let res = query_mysql(&mut stream, &format!("SET dialect = '{dialect}'")).await;
+		assert!(matches!(res, QueryResult::Ok));
+		let sql = "SELECT * FROM thing ORDER BY n";
+		let res = query_text(&mut stream, sql).await;
+		assert_eq!(
+			res.type_of("v"),
+			MYSQL_TYPE_VAR_STRING,
+			"{dialect}: ints and text in one column"
+		);
+		assert_eq!(res.cell(0, "v"), Some("3"), "{dialect}");
+		assert_eq!(res.cell(1, "v"), Some("three"), "{dialect}");
+		assert_eq!(res.type_of("w"), MYSQL_TYPE_VAR_STRING, "{dialect}: an int and a float");
+		assert_eq!(
+			res.type_of("x"),
+			MYSQL_TYPE_LONGLONG,
+			"{dialect}: a column of one kind keeps its type"
+		);
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_a_named_column_and_select_star_show_one_text_for_a_value() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE TABLE emp SCHEMALESS",
+		"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
+		 seen: d'1980-01-01T12:30:45.123456Z', early: d'1969-12-31T23:59:59Z', took: 26h, \
+		 short: 1h30m, zero: 0s, flag: true, ratio: 1.5, price: 1.25dec, \
+		 u: u'018f6b2e-4c3d-7a11-9a52-0123456789ab', tags: ['rust', 'db'], \
+		 meta: { a: 1 } } RETURN NONE",
+		"SET dialect = 'mysql'",
+	] {
+		let res = query_mysql(&mut stream, sql).await;
+		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
+	}
+	let fields = [
+		"born", "seen", "early", "took", "short", "zero", "flag", "ratio", "price", "u", "tags",
+		"meta",
+	];
+	let star = query_text(&mut stream, "SELECT * FROM emp WHERE name = 'Ada'").await;
+	let named = query_text(
+		&mut stream,
+		&format!("SELECT {} FROM emp WHERE name = 'Ada'", fields.join(", ")),
+	)
+	.await;
+	for field in fields {
+		assert_eq!(named.cell(0, field), star.cell(0, field), "{field}");
+	}
+	// The temporal fields are typed apart in the two results, and show one text.
+	for (field, ty, text) in [
+		("born", MYSQL_TYPE_DATETIME, "1980-01-01 00:00:00"),
+		("seen", MYSQL_TYPE_DATETIME, "1980-01-01 12:30:45.123456"),
+		("early", MYSQL_TYPE_DATETIME, "1969-12-31 23:59:59"),
+		("took", MYSQL_TYPE_TIME, "26:00:00"),
+		("short", MYSQL_TYPE_TIME, "01:30:00"),
+		("zero", MYSQL_TYPE_TIME, "00:00:00"),
+	] {
+		assert_eq!(star.type_of(field), ty, "`SELECT *` types {field}");
+		assert_ne!(named.type_of(field), ty, "a named column {field} is not typed from its rows");
+		assert_eq!(named.cell(0, field), Some(text), "{field}");
+	}
+	assert_eq!(named.cell(0, "flag"), Some("1"));
+	assert_eq!(named.cell(0, "price"), Some("1.25"));
+	assert_eq!(named.cell(0, "u"), Some("018f6b2e-4c3d-7a11-9a52-0123456789ab"));
+	assert_eq!(named.cell(0, "tags"), Some("[\"rust\",\"db\"]"));
+	shutdown.cancel();
+}

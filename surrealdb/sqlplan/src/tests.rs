@@ -40,7 +40,8 @@ fn test_single_table_alias_binding() {
 				panic!("expected Select fields");
 			};
 			assert_eq!(fields.len(), 2);
-			// Under relation 0, lowering emits direct Field("id"), not Access(Field("u"), "id")
+			// Under relation 0, lowering emits the key of the direct `id` field, not
+			// Access(Field("u"), "id")
 			let surrealdb_expr::expr::logical::LogicalField::Single {
 				expr: expr0,
 				..
@@ -48,7 +49,7 @@ fn test_single_table_alias_binding() {
 			else {
 				panic!("expected Single field");
 			};
-			assert_eq!(expr0, &LogicalExpr::Field("id".into()));
+			assert_eq!(expr0.to_string(), "record::id(id)");
 
 			let surrealdb_expr::expr::logical::LogicalField::Single {
 				expr: expr1,
@@ -111,7 +112,7 @@ fn test_join_table_alias_binding() {
 			else {
 				panic!("expected Single field");
 			};
-			assert_eq!(expr0, &LogicalExpr::Field("id".into()));
+			assert_eq!(expr0.to_string(), "record::id(id)");
 
 			let surrealdb_expr::expr::logical::LogicalField::Single {
 				expr: expr1,
@@ -136,17 +137,13 @@ fn test_join_table_alias_binding() {
 				LogicalOp::Join(join) => {
 					assert_eq!(join.on.len(), 1);
 					let (left, right) = &join.on[0];
+					// The stored id is compared with the record of `users` the foreign key names,
+					// whether it holds a key or a link.
 					assert_eq!(left, &LogicalExpr::Field("id".into()));
-					match right {
-						LogicalExpr::Access {
-							base,
-							field,
-						} => {
-							assert_eq!(base.as_ref(), &LogicalExpr::Field("_join0".into()));
-							assert_eq!(field.as_str(), "user_id");
-						}
-						other => panic!("expected LogicalExpr::Access to _join0, got {other:?}"),
-					}
+					assert_eq!(
+						right.to_string(),
+						"IF _join0.user_id = '' OR !(type::is_int(_join0.user_id) OR type::is_string(_join0.user_id) OR type::is_uuid(_join0.user_id) OR type::is_array(_join0.user_id) OR type::is_object(_join0.user_id) OR type::is_record(_join0.user_id)) THEN NULL ELSE type::record('users', _join0.user_id) END"
+					);
 				}
 				other => panic!("expected LogicalOp::Join, got {other:?}"),
 			}
@@ -714,6 +711,156 @@ fn test_division_semantics() {
 	assert_eq!(bound.targets[0].expr, BoundExpr::Literal(BoundLiteral::Integer(2)));
 }
 
+/// The first output column of the PostgreSQL `SELECT` `sql` once its constants are folded, or the
+/// error that folding raised.
+fn folded_pgsql(sql: &str) -> Result<BoundLiteral, PlanError> {
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap_or_else(|err| panic!("{sql}: {err}"));
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let policy = DialectPolicy::postgres();
+	let mut bound =
+		binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None).unwrap();
+	fold_select(&mut bound, &policy)?;
+	match &bound.targets[0].expr {
+		BoundExpr::Literal(lit) => Ok(lit.clone()),
+		other => panic!("{sql}: expected a folded literal, got {other:?}"),
+	}
+}
+
+/// The first output column of the MySQL `SELECT` `sql` once its constants are folded, or the error
+/// that folding raised.
+fn folded_mysql(sql: &str) -> Result<BoundLiteral, PlanError> {
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap_or_else(|err| panic!("{sql}: {err}"));
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let policy = DialectPolicy::mysql();
+	let mut bound =
+		binder::mysql::bind_select(select, &MemoryCatalog::new(), &policy, None).unwrap();
+	fold_select(&mut bound, &policy)?;
+	match &bound.targets[0].expr {
+		BoundExpr::Literal(lit) => Ok(lit.clone()),
+		other => panic!("{sql}: expected a folded literal, got {other:?}"),
+	}
+}
+
+#[test]
+fn test_integer_arithmetic_that_fits_64_bits_is_exact() {
+	let two_pow_63 = 2f64.powi(63);
+	for (sql, expected) in [
+		("SELECT 9223372036854775806 + 1", BoundLiteral::Integer(i64::MAX)),
+		("SELECT 9223372036854775807 - 1", BoundLiteral::Integer(i64::MAX - 1)),
+		("SELECT -9223372036854775807 - 1", BoundLiteral::Integer(i64::MIN)),
+		("SELECT -9223372036854775808 + 0", BoundLiteral::Integer(i64::MIN)),
+		("SELECT -4611686018427387904 * 2", BoundLiteral::Integer(i64::MIN)),
+		("SELECT 9223372036854775807 * 1", BoundLiteral::Integer(i64::MAX)),
+		("SELECT -9223372036854775808 / 1", BoundLiteral::Integer(i64::MIN)),
+		("SELECT 9223372036854775807 / -1", BoundLiteral::Integer(-i64::MAX)),
+		("SELECT -9223372036854775808 % -1", BoundLiteral::Integer(0)),
+		("SELECT 9223372036854775807 % -1", BoundLiteral::Integer(0)),
+		("SELECT -7 % 3", BoundLiteral::Integer(-1)),
+		("SELECT 9223372036854775807 + 1.0", BoundLiteral::Float(two_pow_63)),
+		("SELECT 10000000000000000000 + 1", BoundLiteral::Float(1e19)),
+		("SELECT 10000000000000000000 / 2", BoundLiteral::Float(5e18)),
+	] {
+		assert_eq!(folded_pgsql(sql), Ok(expected), "{sql}");
+	}
+	for (sql, expected) in [
+		("SELECT 9223372036854775806 + 1", BoundLiteral::Integer(i64::MAX)),
+		("SELECT -9223372036854775807 - 1", BoundLiteral::Integer(i64::MIN)),
+		("SELECT -4611686018427387904 * 2", BoundLiteral::Integer(i64::MIN)),
+		("SELECT -9223372036854775808 DIV 1", BoundLiteral::Integer(i64::MIN)),
+		("SELECT 9223372036854775807 DIV -1", BoundLiteral::Integer(-i64::MAX)),
+		("SELECT -9223372036854775808 % -1", BoundLiteral::Integer(0)),
+		("SELECT -9223372036854775808 / -1", BoundLiteral::Float(two_pow_63)),
+		("SELECT 9223372036854775807 + 1.0", BoundLiteral::Float(two_pow_63)),
+	] {
+		assert_eq!(folded_mysql(sql), Ok(expected), "{sql}");
+	}
+}
+
+#[test]
+fn test_integer_arithmetic_beyond_64_bits_is_out_of_range() {
+	for sql in [
+		"SELECT 9223372036854775807 + 1",
+		"SELECT -9223372036854775808 - 1",
+		"SELECT 9223372036854775807 * 2",
+		"SELECT -9223372036854775808 * -1",
+		"SELECT -9223372036854775808 / -1",
+		"SELECT - -9223372036854775808",
+	] {
+		let err = folded_pgsql(sql).expect_err(sql);
+		assert_eq!(err, PlanError::NumericValueOutOfRange, "{sql}");
+		assert_eq!(err.pg_sqlstate(), "22003", "{sql}");
+		assert_eq!(err.to_string(), "bigint out of range", "{sql}");
+	}
+	for sql in [
+		"SELECT 9223372036854775807 + 1",
+		"SELECT -9223372036854775808 - 1",
+		"SELECT 9223372036854775807 * 2",
+		"SELECT -9223372036854775808 * -1",
+		"SELECT -9223372036854775808 DIV -1",
+		"SELECT - -9223372036854775808",
+		"SELECT 1e30 DIV 1",
+		"SELECT 9223372036854775807 DIV 0.5",
+	] {
+		let err = folded_mysql(sql).expect_err(sql);
+		assert_eq!(err, PlanError::NumericValueOutOfRange, "{sql}");
+		assert_eq!(err.mysql_error_code(), 1690, "{sql}");
+	}
+}
+
+#[test]
+fn test_a_divisor_of_zero_is_division_by_zero_and_not_a_panic() {
+	for sql in ["SELECT 1 / 0", "SELECT 1 % 0", "SELECT 1 / 0.0", "SELECT -9223372036854775808 % 0"]
+	{
+		assert_eq!(folded_pgsql(sql), Err(PlanError::DivisionByZero), "{sql}");
+	}
+	for sql in
+		["SELECT 1 DIV 0", "SELECT 1 DIV 0.0", "SELECT 1 / 0", "SELECT 1 % 0", "SELECT 1 % 0.0"]
+	{
+		assert_eq!(folded_mysql(sql), Ok(BoundLiteral::Null), "{sql}");
+	}
+}
+
+#[test]
+fn test_div_with_a_divisor_that_is_not_an_integer_divides_before_it_truncates() {
+	for (sql, expected) in [
+		("SELECT 1 DIV 0.5", 2),
+		("SELECT 7 DIV 2.5", 2),
+		("SELECT -7 DIV 2.5", -2),
+		("SELECT 7.5 DIV 2", 3),
+		("SELECT 5 DIV 2", 2),
+		("SELECT -5 DIV 2", -2),
+	] {
+		assert_eq!(folded_mysql(sql), Ok(BoundLiteral::Integer(expected)), "{sql}");
+	}
+}
+
+#[test]
+fn test_div_of_integral_values_is_exact_even_when_an_operand_is_a_float() {
+	for (sql, expected) in [
+		("SELECT 9223372036854775807 DIV 1.0", i64::MAX),
+		("SELECT 9223372036854775806 DIV 1.0", i64::MAX - 1),
+		("SELECT 9223372036854775807 DIV 2.0", 4611686018427387903),
+		("SELECT 9223372036854775807 DIV -1.0", -i64::MAX),
+		("SELECT -9223372036854775808 DIV 1.0", i64::MIN),
+		("SELECT -9223372036854775808 DIV 2.0", -4611686018427387904),
+		("SELECT -7 DIV 2.0", -3),
+		("SELECT 7.0 DIV 2", 3),
+		("SELECT 7.0 DIV 2.0", 3),
+		("SELECT 4611686018427387904.0 DIV 3", 1537228672809129301),
+		("SELECT 4611686018427387904 DIV 3.0", 1537228672809129301),
+	] {
+		assert_eq!(folded_mysql(sql), Ok(BoundLiteral::Integer(expected)), "{sql}");
+	}
+	assert_eq!(
+		folded_mysql("SELECT -9223372036854775808 DIV -1.0"),
+		Err(PlanError::NumericValueOutOfRange)
+	);
+}
+
 #[test]
 fn test_mysql_string_coercion() {
 	let catalog = MemoryCatalog::new();
@@ -941,13 +1088,13 @@ fn test_a_column_alias_list_names_the_columns_of_a_derived_table() {
 		other => panic!("expected a derived table, got {other:?}"),
 	}
 
-	// The names are folded as every other identifier is.
+	// A quoted name keeps its case, as every other quoted identifier does.
 	let bound = bind("SELECT x FROM (SELECT a FROM t) AS v(\"X\")").unwrap();
 	match bound.from.as_ref() {
 		Some(BoundTableSource::Subquery {
 			query,
 			..
-		}) => assert_eq!(query.targets[0].alias.as_deref(), Some("x")),
+		}) => assert_eq!(query.targets[0].alias.as_deref(), Some("X")),
 		other => panic!("expected a derived table, got {other:?}"),
 	}
 

@@ -2,6 +2,7 @@
 
 #![allow(clippy::absolute_paths)]
 
+pub mod array_literal;
 pub mod binder;
 pub mod catalog;
 pub mod descriptor;
@@ -12,6 +13,7 @@ pub mod ir;
 pub mod lower;
 pub mod namespace;
 pub mod observability;
+pub mod presentation;
 pub mod scope;
 pub mod semantics;
 
@@ -42,6 +44,7 @@ pub use namespace::{resolve_mysql_table_name, resolve_pgsql_table_name};
 pub use observability::{
 	SqlPlanMetrics, SqlPlanMetricsSnapshot, global_metrics, redact_sql_credentials,
 };
+pub use presentation::show_record_ids_as_keys;
 pub use scope::{QueryScope, RelationEntry};
 pub use semantics::{fold_expr, fold_select};
 pub use surrealdb_expr::expr::logical::LogicalOp;

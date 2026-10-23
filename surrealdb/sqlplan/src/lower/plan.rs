@@ -17,7 +17,10 @@ use crate::ir::{
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
+	lower_column_raw, lower_lookup_predicate,
 };
+use crate::lower::id_key::{id_column, is_key_or_link, key_of, record_of};
+use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
 
 /// Lower a fully bound SQL `BoundSelect` into a SurrealDB `LogicalOp` execution plan.
 pub fn lower_bound_select(
@@ -71,7 +74,7 @@ fn lower_bound_select_internal(
 	if let Some(where_expr) = &select.where_clause {
 		op = LogicalOp::Filter(LogicalFilter {
 			input: Box::new(op),
-			predicate: lower_bound_expr(where_expr, policy)?,
+			predicate: lower_where(where_expr, policy)?,
 		});
 	}
 
@@ -84,10 +87,50 @@ fn lower_bound_select_internal(
 		grouped || has_aggregates || has_having_agg || has_order_agg || select.having.is_some();
 
 	let mut aggregate_targets = select.targets.clone();
+
+	// The engine recognises a projected field as a grouping key only when it is the stored path the
+	// aggregation groups by. Grouping by the stored record ids of a table groups by its keys, so
+	// an `id` grouped by is grouped and projected as stored, and read as its key afterwards.
+	let stored_keys: Vec<&BoundExpr> = if is_aggregate {
+		select
+			.group_by
+			.iter()
+			.filter(|g| id_column(g).is_some_and(|(col, _)| col.correlation_depth == 0))
+			.collect()
+	} else {
+		Vec::new()
+	};
+	let mut key_outputs: Vec<String> = Vec::new();
+	for (target, original) in aggregate_targets.iter_mut().zip(&select.targets) {
+		if stored_keys.contains(&&original.expr) {
+			let name = target_output_name(original);
+			target.expr = as_stored(&original.expr);
+			target.alias = Some(name.clone());
+			key_outputs.push(name);
+		}
+	}
+
 	let mut agg_mapping: Vec<(BoundExpr, String)> = Vec::new();
 	for t in &select.targets {
 		let col_name = target_output_name(t);
 		agg_mapping.push((t.expr.clone(), col_name));
+	}
+
+	for (index, group) in select.group_by.iter().enumerate() {
+		if !agg_mapping.iter().any(|(expr, _)| expr == group) {
+			let name = format!("__sql_group_{index}");
+			aggregate_targets.push(BoundTarget {
+				expr: if stored_keys.contains(&group) {
+					as_stored(group)
+				} else {
+					group.clone()
+				},
+				alias: Some(name.clone()),
+				is_wildcard: false,
+				table_wildcard: None,
+			});
+			agg_mapping.push((group.clone(), name));
+		}
 	}
 
 	let mut synthetic_idx = 0;
@@ -151,28 +194,56 @@ fn lower_bound_select_internal(
 	let as_value =
 		as_value && (!is_aggregate || (select.having.is_none() && select.order_by.is_empty()));
 	let fields = if as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard {
-		let expr = lower_bound_expr(&select.targets[0].expr, policy)?;
+		let target = &select.targets[0].expr;
+		let expr = lower_bound_expr(target, policy)?;
+		let expr = if matches!(target, BoundExpr::Column(col) if col.id_table.is_none() && col.link_table.is_none())
+		{
+			key_of(expr, true)
+		} else {
+			expr
+		};
 		let alias = select.targets[0].alias.as_ref().map(|a| OutputPath::field(a.clone()));
 		LogicalFields::Value {
 			expr,
 			alias,
 		}
 	} else {
-		LogicalFields::Select(
-			aggregate_targets
-				.iter()
-				.map(|t| lower_bound_target(t, policy))
-				.collect::<Result<Vec<_>, _>>()?,
-		)
+		let mut lowered = aggregate_targets
+			.iter()
+			.map(|t| lower_bound_target(t, policy))
+			.collect::<Result<Vec<_>, _>>()?;
+		if !is_aggregate && sole_base_table(select).is_some() {
+			// The one relation a `t.*` can name is the one `*` reads, and the engine reads a
+			// field called `*` as nothing, so it is the wildcard field.
+			for (field, target) in lowered.iter_mut().zip(&aggregate_targets) {
+				if target.table_wildcard.is_some() && target.is_unlisted_wildcard() {
+					*field = LogicalField::All;
+				}
+			}
+			let last_wildcard =
+				aggregate_targets.iter().rposition(BoundTarget::is_unlisted_wildcard);
+			read_wildcard_id_as_key(&mut lowered, last_wildcard);
+		}
+		LogicalFields::Select(lowered)
 	};
 
+	// A clause over the rows of an aggregation reads its stored `id` columns; one over the rows of
+	// a set operation reads the keys the operands projected; any other reads the rows the query
+	// reads.
 	let rewritten_having =
-		select.having.as_ref().map(|h| rewrite_aggregates_to_columns(h, &agg_mapping));
+		select.having.as_ref().map(|h| rewrite_aggregates_to_columns(h, &agg_mapping, true));
 
 	let mut rewritten_order_by = Vec::new();
 	for o in &select.order_by {
+		let expr = if select.set_op.is_some() {
+			rewrite_aggregates_to_columns(&o.expr, &agg_mapping, false)
+		} else if is_aggregate {
+			rewrite_aggregates_to_columns(&o.expr, &agg_mapping, true)
+		} else {
+			o.expr.clone()
+		};
 		rewritten_order_by.push(BoundOrder {
-			expr: rewrite_aggregates_to_columns(&o.expr, &agg_mapping),
+			expr,
 			direction: o.direction,
 			nulls_first: o.nulls_first,
 		});
@@ -182,7 +253,13 @@ fn lower_bound_select_internal(
 		let group = select
 			.group_by
 			.iter()
-			.map(|g| lower_bound_expr(g, policy))
+			.map(|g| {
+				if stored_keys.contains(&g) {
+					lower_bound_expr(&as_stored(g), policy)
+				} else {
+					lower_stored(g, policy)
+				}
+			})
 			.collect::<Result<Vec<_>, _>>()?;
 		op = LogicalOp::Aggregate(LogicalAggregate {
 			input: Box::new(op),
@@ -254,6 +331,9 @@ fn lower_bound_select_internal(
 			.iter()
 			.map(|t| {
 				let col_name = target_output_name(t);
+				if key_outputs.contains(&col_name) {
+					return key_output_field(col_name);
+				}
 				let alias = t.alias.as_ref().map(|a| OutputPath::field(a.clone()));
 				LogicalField::user(LogicalExpr::Field(col_name.into()), alias)
 			})
@@ -263,10 +343,18 @@ fn lower_bound_select_internal(
 			fields: LogicalFields::Select(project_fields),
 			omit: vec![],
 		});
-	} else {
+	} else if key_outputs.is_empty() {
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields: LogicalFields::all(),
+			omit: vec![],
+		});
+	} else {
+		let mut fields = vec![LogicalField::All];
+		fields.extend(key_outputs.into_iter().map(key_output_field));
+		op = LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Select(fields),
 			omit: vec![],
 		});
 	}
@@ -584,7 +672,15 @@ fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {
 	}
 }
 
-fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String)]) -> BoundExpr {
+/// Rewrite the sub-expressions of `expr` that are projected targets to references to the output
+/// column of the target, for a clause evaluated over the rows a projection or aggregation
+/// produced. A reference to the key of an `id` keeps reading the key when `keep_id` says the
+/// output column holds the stored record id.
+fn rewrite_aggregates_to_columns(
+	expr: &BoundExpr,
+	mapping: &[(BoundExpr, String)],
+	keep_id: bool,
+) -> BoundExpr {
 	for (agg, col_name) in mapping {
 		if expr == agg {
 			return BoundExpr::Column(BoundColumnRef {
@@ -592,6 +688,13 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 				relation_name: String::new(),
 				column: col_name.clone(),
 				correlation_depth: 0,
+				id_table: id_column(agg).filter(|_| keep_id).map(|(_, table)| table.to_string()),
+				link_table: link_column(agg).map(|(_, table)| table.to_string()),
+				aggregate_output: keep_id,
+				declared_type: match agg {
+					BoundExpr::Column(col) => col.declared_type,
+					_ => crate::SqlType::Unknown,
+				},
 			});
 		}
 	}
@@ -601,22 +704,43 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 			op,
 			right,
 		} => BoundExpr::Binary {
-			left: Box::new(rewrite_aggregates_to_columns(left, mapping)),
+			left: Box::new(rewrite_aggregates_to_columns(left, mapping, keep_id)),
 			op: *op,
-			right: Box::new(rewrite_aggregates_to_columns(right, mapping)),
+			right: Box::new(rewrite_aggregates_to_columns(right, mapping, keep_id)),
+		},
+		BoundExpr::FunctionCall {
+			name,
+			args,
+			distinct,
+		} => BoundExpr::FunctionCall {
+			name: name.clone(),
+			args: args
+				.iter()
+				.map(|arg| rewrite_aggregates_to_columns(arg, mapping, keep_id))
+				.collect(),
+			distinct: *distinct,
+		},
+		BoundExpr::InSubquery {
+			expr,
+			subquery,
+			negated,
+		} => BoundExpr::InSubquery {
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
+			subquery: subquery.clone(),
+			negated: *negated,
 		},
 		BoundExpr::Unary {
 			op,
 			expr,
 		} => BoundExpr::Unary {
 			op: *op,
-			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
 		},
 		BoundExpr::Access {
 			base,
 			field,
 		} => BoundExpr::Access {
-			base: Box::new(rewrite_aggregates_to_columns(base, mapping)),
+			base: Box::new(rewrite_aggregates_to_columns(base, mapping, keep_id)),
 			field: field.clone(),
 		},
 		BoundExpr::Between {
@@ -625,9 +749,9 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 			high,
 			negated,
 		} => BoundExpr::Between {
-			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
-			low: Box::new(rewrite_aggregates_to_columns(low, mapping)),
-			high: Box::new(rewrite_aggregates_to_columns(high, mapping)),
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
+			low: Box::new(rewrite_aggregates_to_columns(low, mapping, keep_id)),
+			high: Box::new(rewrite_aggregates_to_columns(high, mapping, keep_id)),
 			negated: *negated,
 		},
 		BoundExpr::InList {
@@ -635,22 +759,25 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 			list,
 			negated,
 		} => BoundExpr::InList {
-			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
-			list: list.iter().map(|item| rewrite_aggregates_to_columns(item, mapping)).collect(),
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
+			list: list
+				.iter()
+				.map(|item| rewrite_aggregates_to_columns(item, mapping, keep_id))
+				.collect(),
 			negated: *negated,
 		},
 		BoundExpr::IsNull {
 			expr,
 			negated,
 		} => BoundExpr::IsNull {
-			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
 			negated: *negated,
 		},
 		BoundExpr::Cast {
 			expr,
 			target_type,
 		} => BoundExpr::Cast {
-			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping, keep_id)),
 			target_type: target_type.clone(),
 		},
 		BoundExpr::Case {
@@ -660,19 +787,19 @@ fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String
 		} => BoundExpr::Case {
 			operand: operand
 				.as_ref()
-				.map(|op| Box::new(rewrite_aggregates_to_columns(op, mapping))),
+				.map(|op| Box::new(rewrite_aggregates_to_columns(op, mapping, keep_id))),
 			branches: branches
 				.iter()
 				.map(|(c, v)| {
 					(
-						rewrite_aggregates_to_columns(c, mapping),
-						rewrite_aggregates_to_columns(v, mapping),
+						rewrite_aggregates_to_columns(c, mapping, keep_id),
+						rewrite_aggregates_to_columns(v, mapping, keep_id),
 					)
 				})
 				.collect(),
 			else_expr: else_expr
 				.as_ref()
-				.map(|el| Box::new(rewrite_aggregates_to_columns(el, mapping))),
+				.map(|el| Box::new(rewrite_aggregates_to_columns(el, mapping, keep_id))),
 		},
 		_ => expr.clone(),
 	}
@@ -761,9 +888,7 @@ fn lower_table_source(
 								} else {
 									(l, r)
 								};
-							let probe_expr = lower_bound_expr(&probe, policy)?;
-							let build_expr = lower_bound_expr(&build, policy)?;
-							on.push((probe_expr, build_expr));
+							on.push(lower_join_key(&probe, &build, policy)?);
 						}
 
 						if !residual.is_empty() {
@@ -786,7 +911,11 @@ fn lower_table_source(
 						for col in cols {
 							let left_key = LogicalExpr::Field(col.clone().into());
 							let right_key = RelationAlias::new(alias_idx).access(col.clone());
-							on.push((left_key, right_key));
+							on.push(if col == "id" {
+								lower_using_id_key(left, right, left_key, right_key)
+							} else {
+								(left_key, right_key)
+							});
 						}
 					}
 				}
@@ -802,6 +931,191 @@ fn lower_table_source(
 				EvalFrame::caller(),
 			)))
 		}
+	}
+}
+
+/// `expr` with the key read of an `id` column undone: the stored field itself.
+fn as_stored(expr: &BoundExpr) -> BoundExpr {
+	match expr {
+		BoundExpr::Column(col) => BoundExpr::Column(BoundColumnRef {
+			id_table: None,
+			..col.clone()
+		}),
+		other => other.clone(),
+	}
+}
+
+/// The field that reads the stored record id an aggregation produced as the output `name` as its
+/// key, under the same name. The group of the absent id an outer join leaves reads as absent.
+fn key_output_field(name: String) -> LogicalField {
+	LogicalField::user(
+		key_of(LogicalExpr::Field(name.clone().into()), true),
+		Some(OutputPath::field(name)),
+	)
+}
+
+/// Lower a `WHERE` predicate.
+///
+/// A predicate is judged for truth alone. A top-level conjunct that compares the `id` of a base
+/// table with keys is lowered as the lookup of the records the keys name, and its conjuncts are
+/// joined by the engine's own `AND` so the engine finds the lookup among them. A predicate without
+/// such a conjunct keeps the three-valued `AND`.
+fn lower_where(expr: &BoundExpr, policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	let mut conjuncts = Vec::new();
+	collect_conjuncts(expr, &mut conjuncts);
+	let lookups = conjuncts
+		.iter()
+		.map(|conjunct| lower_lookup_predicate(conjunct, policy))
+		.collect::<Result<Vec<_>, _>>()?;
+	if lookups.iter().all(Option::is_none) {
+		return lower_bound_expr(expr, policy);
+	}
+	let mut lowered = conjuncts.into_iter().zip(lookups).map(|(conjunct, lookup)| match lookup {
+		Some(lookup) => Ok(lookup),
+		None => lower_bound_expr(conjunct, policy),
+	});
+	let Some(first) = lowered.next() else {
+		return lower_bound_expr(expr, policy);
+	};
+	lowered.try_fold(first?, |acc, next| {
+		Ok(LogicalExpr::Binary {
+			left: Box::new(acc),
+			op: BinaryOperator::And,
+			right: Box::new(next?),
+		})
+	})
+}
+
+/// The operands of the `AND` chain `expr`, left to right.
+fn collect_conjuncts<'a>(expr: &'a BoundExpr, out: &mut Vec<&'a BoundExpr>) {
+	match expr {
+		BoundExpr::Binary {
+			left,
+			op: BoundBinaryOp::And,
+			right,
+		} => {
+			collect_conjuncts(left, out);
+			collect_conjuncts(right, out);
+		}
+		other => out.push(other),
+	}
+}
+
+/// The base table `source` reads when it is a single base table.
+fn base_table_of(source: &BoundTableSource) -> Option<&str> {
+	match source {
+		BoundTableSource::Table {
+			name,
+			schema,
+			..
+		} if !crate::catalog::system::is_system_catalog_table(schema.as_deref(), name) => {
+			Some(name.as_str())
+		}
+		_ => None,
+	}
+}
+
+/// The base table `select` reads, when its only source is a single base table.
+fn sole_base_table(select: &BoundSelect) -> Option<&str> {
+	select.from.as_ref().and_then(base_table_of)
+}
+
+/// The base table whose row is the left row of a join over `source`: its leftmost relation.
+fn leftmost_base_table(source: &BoundTableSource) -> Option<&str> {
+	match source {
+		BoundTableSource::Join {
+			left,
+			..
+		} => leftmost_base_table(left),
+		other => base_table_of(other),
+	}
+}
+
+/// Make a wildcard over a base table yield the key of the record id as its `id`, as an explicit
+/// `id` column does: the wildcard, `*` or `t.*`, is followed by the key as `id`, which replaces the
+/// stored record id the wildcard yields. `last_wildcard` is the position of the last wildcard of
+/// the projection, if there is one.
+fn read_wildcard_id_as_key(fields: &mut Vec<LogicalField>, last_wildcard: Option<usize>) {
+	if let Some(last_all) = last_wildcard {
+		fields.insert(
+			last_all + 1,
+			LogicalField::user(
+				key_of(LogicalExpr::Field("id".into()), false),
+				Some(OutputPath::field("id".to_string())),
+			),
+		);
+	}
+}
+
+/// Lower an equality join key `probe = build`.
+///
+/// When the build side is the `id` of a base table, it keeps the shape of the stored column and
+/// the probe side is turned into the record of that table its value names (a key, or a record link
+/// to the row), unless the probe is the `id` of the same table, whose stored record id is compared
+/// as it is. When the probe side is the `id` of a base table and the build side a column or an
+/// expression, the stored id is compared with the record of its table the build value names, which
+/// leaves a build key that is no longer a bare column for the engine to read the build table by an
+/// index.
+///
+/// A link column is joined as stored with the `id` of its target table and with a link column to
+/// the same table. A link column on either side of anything else is joined with the record of its
+/// target table the other side names. Otherwise the keys are lowered as they are.
+fn lower_join_key(
+	probe: &BoundExpr,
+	build: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<(LogicalExpr, LogicalExpr), PlanError> {
+	if let Some((probe_col, build_col)) = same_table_pair(probe, build) {
+		return Ok((lower_column_raw(probe_col), lower_column_raw(build_col)));
+	}
+	if let Some((build_col, build_table)) = id_column(build) {
+		if let Some((probe_col, probe_table)) = id_column(probe)
+			&& probe_table == build_table
+		{
+			return Ok((lower_column_raw(probe_col), lower_column_raw(build_col)));
+		}
+		return Ok((
+			record_of(build_table, lower_stored(probe, policy)?),
+			lower_column_raw(build_col),
+		));
+	}
+	if let Some((probe_col, probe_table)) = id_column(probe)
+		&& is_key_or_link(build)
+	{
+		return Ok((
+			lower_column_raw(probe_col),
+			record_of(probe_table, lower_stored(build, policy)?),
+		));
+	}
+	if let Some((build_col, build_table)) = link_column(build)
+		&& let LinkOperand::Record(record) = link_operand(build_table, probe, policy)?
+	{
+		return Ok((record, lower_column_raw(build_col)));
+	}
+	if let Some((probe_col, probe_table)) = link_column(probe)
+		&& let LinkOperand::Record(record) = link_operand(probe_table, build, policy)?
+	{
+		return Ok((lower_column_raw(probe_col), record));
+	}
+	Ok((lower_stored(probe, policy)?, lower_stored(build, policy)?))
+}
+
+/// Lower the keys of `USING (id)` between `left` and `right`, whose row is read through
+/// `right_key`. The key shapes follow the rules of [`lower_join_key`].
+fn lower_using_id_key(
+	left: &BoundTableSource,
+	right: &BoundTableSource,
+	left_key: LogicalExpr,
+	right_key: LogicalExpr,
+) -> (LogicalExpr, LogicalExpr) {
+	match (leftmost_base_table(left), base_table_of(right)) {
+		(Some(left_table), Some(right_table)) if left_table == right_table => (left_key, right_key),
+		(Some(_), Some(right_table)) => {
+			(record_of(right_table, key_of(left_key, false)), right_key)
+		}
+		(None, Some(right_table)) => (record_of(right_table, left_key), right_key),
+		(Some(_), None) => (key_of(left_key, false), right_key),
+		(None, None) => (left_key, right_key),
 	}
 }
 

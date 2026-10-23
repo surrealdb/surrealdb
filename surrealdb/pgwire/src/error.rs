@@ -382,6 +382,62 @@ impl PgError {
 	}
 }
 
+/// The planner's own message in the text of a planner error.
+///
+/// The datastore reports a planner failure as a validation error whose message is
+/// `<dialect> <statement> lowering error: <the planner's message>`, where the dialect is
+/// `PostgreSQL` or `MySQL` and the statement is one upper-case word. A prepared statement that the
+/// planner refuses at Parse carries the planner's message alone. Any other text is returned
+/// whole, so a message that only holds `lowering error: ` is not read as a planner error.
+fn planner_message(message: &str) -> &str {
+	match message.split_once(" lowering error: ") {
+		Some((head, reason)) if is_lowering_head(head) => reason,
+		_ => message,
+	}
+}
+
+fn is_lowering_head(head: &str) -> bool {
+	let mut words = head.split(' ');
+	match (words.next(), words.next(), words.next()) {
+		(Some("PostgreSQL" | "MySQL"), Some(statement), None) => {
+			!statement.is_empty() && statement.bytes().all(|byte| byte.is_ascii_uppercase())
+		}
+		_ => false,
+	}
+}
+
+/// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
+/// (`PlanError::pg_sqlstate`). A feature the planner does not lower is `0A000`, a text it cannot
+/// read as a value of the type it must have is `22P02`, an operator that has no definition for
+/// its operand types is `42883` and an integer result beyond 64 bits is `22003`. Any other message
+/// gives `None`.
+fn planner_sqlstate(message: &str) -> Option<&'static str> {
+	let reason = planner_message(message);
+	if unsupported_construct(message).is_some() {
+		Some("0A000")
+	} else if reason.starts_with("invalid input syntax for type: ") {
+		Some("22P02")
+	} else if reason.starts_with("operator does not exist: ") {
+		Some("42883")
+	} else if reason == "bigint out of range" {
+		Some("22003")
+	} else {
+		None
+	}
+}
+
+/// The kind of construct the planner refused as unsupported, from the text of a planner error:
+/// `unsupported expression` or `unsupported statement`, and `None` for any other message.
+///
+/// The planner's message goes on to describe the construct from the client's statement, so the
+/// kind alone is what a counter or a log line may carry.
+pub(super) fn unsupported_construct(message: &str) -> Option<&'static str> {
+	let reason = planner_message(message);
+	["unsupported expression", "unsupported statement"]
+		.into_iter()
+		.find(|kind| reason.strip_prefix(kind).is_some_and(|rest| rest.starts_with(": ")))
+}
+
 impl From<&TypesError> for PgError {
 	fn from(err: &TypesError) -> Self {
 		let msg = err.message();
@@ -471,7 +527,9 @@ impl From<&TypesError> for PgError {
 			},
 			ErrorDetails::Validation(opt) => {
 				let lower = msg.to_ascii_lowercase();
-				if lower.contains("division by zero") || lower.contains("divide by zero") {
+				if let Some(code) = planner_sqlstate(msg) {
+					code
+				} else if lower.contains("division by zero") || lower.contains("divide by zero") {
 					"22012"
 				} else if lower.contains("not null") {
 					"23502"
@@ -622,6 +680,78 @@ mod tests {
 
 		let fk_err = TypesError::validation("violates foreign key constraint".to_string(), None);
 		assert_eq!(PgError::from(&fk_err).code, "23503");
+	}
+
+	#[test]
+	fn test_planner_refusals_keep_the_code_the_planner_chose() {
+		use surrealdb_sqlplan::PlanError;
+
+		for plan in [
+			PlanError::UnsupportedExpression("the @> containment operator".to_string()),
+			PlanError::UnsupportedStatement("MERGE".to_string()),
+			PlanError::InvalidTextRepresentation("malformed array literal: \"{a,\"".to_string()),
+			PlanError::UndefinedOperator("jsonb -> bigint".to_string()),
+			PlanError::NumericValueOutOfRange,
+		] {
+			for statement in ["SELECT", "INSERT", "UPDATE", "DELETE"] {
+				let message = format!("PostgreSQL {statement} lowering error: {plan}");
+				let err = TypesError::validation(message.clone(), None);
+				assert_eq!(PgError::from(&err).code, plan.pg_sqlstate(), "{message}");
+			}
+		}
+	}
+
+	#[test]
+	fn test_a_message_that_is_not_a_planner_refusal_is_a_syntax_error() {
+		for message in [
+			"PostgreSQL parse error: unsupported expression: x",
+			"Parse error: invalid input syntax for type: x",
+			"the value lowering error: unsupported expression: x",
+			"PostgreSQL SELECT lowering error: unsupported-expression: x",
+			"postgresql SELECT lowering error: unsupported expression: x",
+			"PostgreSQL select lowering error: unsupported expression: x",
+			"PostgreSQL SELECT FROM lowering error: unsupported expression: x",
+			"table \"PostgreSQL SELECT lowering error: unsupported expression: x\" is wrong",
+			"expected unsupported expression: x",
+		] {
+			let err = TypesError::validation(message.to_string(), None);
+			assert_eq!(PgError::from(&err).code, "42601", "{message}");
+		}
+	}
+
+	#[test]
+	fn test_a_planner_refusal_is_read_with_or_without_its_statement_prefix() {
+		for message in [
+			"unsupported expression: ArrayConstructor { elements: [] }",
+			"PostgreSQL SELECT lowering error: unsupported expression: Row { fields: [] }",
+			"MySQL REPLACE lowering error: unsupported expression: x",
+		] {
+			assert_eq!(planner_sqlstate(message), Some("0A000"), "{message}");
+			assert_eq!(unsupported_construct(message), Some("unsupported expression"), "{message}");
+		}
+		assert_eq!(
+			unsupported_construct("PostgreSQL DDL lowering error: unsupported statement: MERGE"),
+			Some("unsupported statement")
+		);
+		let malformed = "PostgreSQL SELECT lowering error: invalid input syntax for type: x";
+		assert_eq!(planner_sqlstate(malformed), Some("22P02"));
+		assert_eq!(unsupported_construct(malformed), None);
+		let overflow = "PostgreSQL SELECT lowering error: bigint out of range";
+		assert_eq!(planner_sqlstate(overflow), Some("22003"));
+		assert_eq!(planner_sqlstate("bigint out of range"), Some("22003"));
+		assert_eq!(planner_sqlstate("parameter $1 out of range"), None);
+		assert_eq!(unsupported_construct(overflow), None);
+	}
+
+	#[test]
+	fn test_the_construct_of_a_refusal_carries_none_of_the_statement() {
+		for message in [
+			"unsupported expression: ArrayConstructor { elements: [Literal { lit: Integer(918273645) }] }",
+			"PostgreSQL SELECT lowering error: unsupported expression: Row { 918273645 }",
+		] {
+			let construct = unsupported_construct(message).expect("a planner refusal");
+			assert!(!construct.contains("918273645"), "{construct}");
+		}
 	}
 
 	#[test]

@@ -1,12 +1,14 @@
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::str::FromStr;
 
 use chrono::Timelike as _;
 use rust_decimal::Decimal;
+use surrealdb_sqlplan::array_literal::{ArrayElement, is_array_space, parse_array_literal};
 use surrealdb_types::{Bytes, Datetime, Number, ToSql, Uuid, Value};
 
 use super::error::PgError;
-use super::typing::PgType;
+use super::typing::{PgType, base_type};
 
 // Postgres type OIDs recognised when decoding Bind parameters.
 const OID_BOOL: i32 = 16;
@@ -131,21 +133,7 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			Value::Number(Number::Int(i)) => Ok(vec![i as u8]),
 			v => Err(mismatch(&v, ty)),
 		},
-		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => match value {
-			Value::String(s) => Ok(s.into_bytes()),
-			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
-			Value::Number(Number::Float(f)) => Ok(float_text(f)),
-			Value::Number(Number::Decimal(d)) => Ok(d.to_string().into_bytes()),
-			Value::Bool(b) => Ok(b.to_string().into_bytes()),
-			v @ (Value::RecordId(_)
-			| Value::Range(_)
-			| Value::Regex(_)
-			| Value::File(_)
-			| Value::Table(_)) => Ok(v.to_sql().into_bytes()),
-			v @ (Value::Object(_) | Value::Array(_)) => serde_json::to_vec(&v.into_json_value())
-				.map_err(|e| PgError::internal(format!("failed to encode value as json: {e}"))),
-			v => Err(mismatch(&v, ty)),
-		},
+		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => text_form(value, ty),
 		PgType::Date => match value {
 			Value::Datetime(dt) => Ok(date_text(dt.into_inner().date_naive())),
 			Value::String(s) => {
@@ -193,15 +181,7 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Bytea => match value {
-			Value::Bytes(b) => {
-				let bytes = b.into_inner();
-				let mut out = String::with_capacity(2 + bytes.len() * 2);
-				out.push_str("\\x");
-				for byte in &bytes {
-					write!(out, "{byte:02x}").expect("writing to a String cannot fail");
-				}
-				Ok(out.into_bytes())
-			}
+			Value::Bytes(b) => Ok(bytea_hex(&b.into_inner()).into_bytes()),
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Json | PgType::Jsonb => serde_json::to_vec(&value.into_json_value())
@@ -222,6 +202,38 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 	}
 }
 
+/// The text a value takes in a `text`-family column, whatever the value's own
+/// kind: the text of the column type the value has on its own
+/// ([`base_type`]), so a column inferred from its rows and a column declared
+/// as text show one value in one form. A string is its own text, and a record
+/// id, range, regex, file or table is its SurrealQL source; every other kind
+/// is encoded by [`encode_text`] for its own type. None of those types is a
+/// text type, so that call cannot come back to this function.
+fn text_form(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
+	match value {
+		Value::String(s) => Ok(s.into_bytes()),
+		v @ (Value::RecordId(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::File(_)
+		| Value::Table(_)) => Ok(v.to_sql().into_bytes()),
+		v => match base_type(&v) {
+			Some(own) => encode_text(v, &own),
+			None => Err(mismatch(&v, ty)),
+		},
+	}
+}
+
+/// The `bytea` hex text form: a backslash and `x`, then two lowercase digits per byte.
+fn bytea_hex(bytes: &[u8]) -> String {
+	let mut out = String::with_capacity(2 + bytes.len() * 2);
+	out.push_str("\\x");
+	for byte in bytes {
+		write!(out, "{byte:02x}").expect("writing to a String cannot fail");
+	}
+	out
+}
+
 fn mismatch(value: &Value, ty: &PgType) -> PgError {
 	PgError::internal(format!("cannot encode a {} cell into a {ty:?} column", value.kind()))
 }
@@ -239,14 +251,11 @@ fn date_text(nd: chrono::NaiveDate) -> Vec<u8> {
 
 fn time_text(nt: chrono::NaiveTime) -> Vec<u8> {
 	use chrono::Timelike;
-	let subsec_micros = nt.nanosecond() / 1_000;
-	if subsec_micros == 0 {
-		format!("{:02}:{:02}:{:02}", nt.hour(), nt.minute(), nt.second()).into_bytes()
-	} else {
-		let frac = format!(".{subsec_micros:06}");
-		let frac = frac.trim_end_matches('0');
-		format!("{:02}:{:02}:{:02}{frac}", nt.hour(), nt.minute(), nt.second()).into_bytes()
-	}
+	let mut out = Vec::with_capacity(15);
+	write!(out, "{:02}:{:02}:{:02}", nt.hour(), nt.minute(), nt.second())
+		.expect("writing to a Vec cannot fail");
+	push_fraction(&mut out, nt.nanosecond() / 1_000);
+	out
 }
 
 fn timetz_text(dt: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
@@ -255,59 +264,37 @@ fn timetz_text(dt: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
 	out
 }
 
+/// Render a UTC datetime in the Postgres `timestamp` output style, e.g.
+/// `2024-01-15 12:34:56.123456`; see [`datetime_text`].
 fn timestamp_text(dt: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
-	use chrono::{Datelike, Timelike};
-	let year = dt.year();
-	let (display_year, era) = if year <= 0 {
-		(1 - year, " BC")
-	} else {
-		(year, "")
-	};
-	let subsec_micros = dt.timestamp_subsec_micros();
-	if subsec_micros == 0 {
-		format!(
-			"{:04}-{:02}-{:02} {:02}:{:02}:{:02}{era}",
-			display_year,
-			dt.month(),
-			dt.day(),
-			dt.hour(),
-			dt.minute(),
-			dt.second()
-		)
-	} else {
-		let frac = format!(".{subsec_micros:06}");
-		let frac = frac.trim_end_matches('0');
-		format!(
-			"{:04}-{:02}-{:02} {:02}:{:02}:{:02}{frac}{era}",
-			display_year,
-			dt.month(),
-			dt.day(),
-			dt.hour(),
-			dt.minute(),
-			dt.second()
-		)
-	}
-	.into_bytes()
+	datetime_text(dt, false)
 }
 
 /// Render a UTC datetime in the Postgres `timestamptz` output style, e.g.
-/// `2024-01-15 12:34:56.123456+00`. Nanoseconds truncate to microsecond
-/// precision (Postgres timestamps carry microseconds), and trailing
-/// fractional zeros are trimmed — the fractional part is dropped entirely when
-/// zero, matching Postgres.
+/// `2024-01-15 12:34:56.123456+00`; see [`datetime_text`].
 fn timestamptz_text(dt: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
+	datetime_text(dt, true)
+}
+
+/// The fields of a UTC datetime in the Postgres output style, followed by the
+/// `+00` zone when `zone` is set. Nanoseconds truncate to microsecond
+/// precision (Postgres timestamps carry microseconds), and trailing fractional
+/// zeros are trimmed: the fractional part is dropped entirely when zero,
+/// matching Postgres. Postgres never prints a sign on the year: a proleptic
+/// year <= 0 is rendered as `NNNN ... BC` (astronomical year 0 is 1 BC), with
+/// the era tag appended after the zone. chrono's `%Y` would instead emit a
+/// negative or under-padded year, which no Postgres client expects.
+fn datetime_text(dt: chrono::DateTime<chrono::Utc>, zone: bool) -> Vec<u8> {
 	use chrono::{Datelike, Timelike};
-	// Postgres never prints a sign on the year: a proleptic year <= 0 is
-	// rendered as `NNNN ... BC` (astronomical year 0 is 1 BC), with the era tag
-	// appended after the zone. chrono's `%Y` would instead emit a negative or
-	// under-padded year, which no Postgres client expects.
 	let year = dt.year();
 	let (display_year, era) = if year <= 0 {
 		(1 - year, " BC")
 	} else {
 		(year, "")
 	};
-	let mut out = format!(
+	let mut out = Vec::with_capacity(32);
+	write!(
+		out,
 		"{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
 		display_year,
 		dt.month(),
@@ -315,15 +302,33 @@ fn timestamptz_text(dt: chrono::DateTime<chrono::Utc>) -> Vec<u8> {
 		dt.hour(),
 		dt.minute(),
 		dt.second()
-	);
-	let micros = dt.nanosecond() / 1_000;
-	if micros > 0 {
-		let frac = format!(".{micros:06}");
-		out.push_str(frac.trim_end_matches('0'));
+	)
+	.expect("writing to a Vec cannot fail");
+	push_fraction(&mut out, dt.timestamp_subsec_micros());
+	if zone {
+		out.extend_from_slice(b"+00");
 	}
-	out.push_str("+00");
-	out.push_str(era);
-	out.into_bytes()
+	out.extend_from_slice(era.as_bytes());
+	out
+}
+
+/// Append the fractional seconds of `micros` as `.` and up to six digits with
+/// trailing zeros trimmed, or nothing when there are none. A count of a whole
+/// second or more (chrono's leap-second range) keeps only its sub-second part.
+fn push_fraction(out: &mut Vec<u8>, micros: u32) {
+	let micros = micros % 1_000_000;
+	if micros == 0 {
+		return;
+	}
+	let mut digits = [b'0'; 6];
+	let mut rest = micros;
+	for digit in digits.iter_mut().rev() {
+		*digit = b'0' + (rest % 10) as u8;
+		rest /= 10;
+	}
+	let len = digits.iter().rposition(|digit| *digit != b'0').map_or(0, |last| last + 1);
+	out.push(b'.');
+	out.extend_from_slice(&digits[..len]);
 }
 
 /// Postgres renders non-finite `float8` values as `NaN`, `Infinity` and
@@ -362,26 +367,23 @@ fn interval_text(d: std::time::Duration) -> Vec<u8> {
 	let days = secs / 86_400;
 	let rem = secs % 86_400;
 	let (h, m, s) = (rem / 3600, rem % 3600 / 60, rem % 60);
-	let mut out = String::new();
+	let mut out = Vec::with_capacity(32);
 	if days > 0 {
 		let plural = if days == 1 {
 			""
 		} else {
 			"s"
 		};
-		write!(out, "{days} day{plural}").expect("writing to a String cannot fail");
+		write!(out, "{days} day{plural}").expect("writing to a Vec cannot fail");
 	}
 	if days == 0 || rem > 0 || micros > 0 {
 		if !out.is_empty() {
-			out.push(' ');
+			out.push(b' ');
 		}
-		write!(out, "{h:02}:{m:02}:{s:02}").expect("writing to a String cannot fail");
-		if micros > 0 {
-			let frac = format!(".{micros:06}");
-			out.push_str(frac.trim_end_matches('0'));
-		}
+		write!(out, "{h:02}:{m:02}:{s:02}").expect("writing to a Vec cannot fail");
+		push_fraction(&mut out, micros);
 	}
-	out.into_bytes()
+	out
 }
 
 fn parse_date(text: &str) -> Option<chrono::NaiveDate> {
@@ -559,17 +561,14 @@ fn array_text(arr: &[Value], elem_ty: &PgType) -> Result<Vec<u8>, PgError> {
 			Value::None | Value::Null => {
 				out.extend_from_slice(b"NULL");
 			}
-			Value::Array(nested) => {
-				let nested_bytes = array_text(nested.as_slice(), elem_ty)?;
-				out.extend_from_slice(&nested_bytes);
-			}
 			v => {
 				let text = encode_text(v.clone(), elem_ty)?;
 				let s = std::str::from_utf8(&text)
 					.map_err(|_| PgError::internal("invalid utf8 in array element"))?;
 				let needs_quotes = s.is_empty()
 					|| s.eq_ignore_ascii_case("NULL")
-					|| s.contains(['{', '}', ',', '"', '\\', ' ', '\t', '\n']);
+					|| s.chars()
+						.any(|c| matches!(c, '{' | '}' | ',' | '"' | '\\') || is_array_space(c));
 				if needs_quotes {
 					out.push(b'"');
 					for b in s.bytes() {
@@ -741,19 +740,7 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			Value::Number(Number::Int(i)) => Ok(vec![i as u8]),
 			v => Err(mismatch(&v, ty)),
 		},
-		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => match value {
-			Value::String(s) => Ok(s.into_bytes()),
-			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
-			Value::Number(Number::Float(f)) => Ok(float_text(f)),
-			Value::Number(Number::Decimal(d)) => Ok(d.to_string().into_bytes()),
-			Value::Bool(b) => Ok(b.to_string().into_bytes()),
-			v @ (Value::RecordId(_)
-			| Value::Range(_)
-			| Value::Regex(_)
-			| Value::File(_)
-			| Value::Table(_)) => Ok(v.to_sql().into_bytes()),
-			v => Err(mismatch(&v, ty)),
-		},
+		PgType::Name | PgType::Text | PgType::Bpchar | PgType::Varchar => text_form(value, ty),
 		PgType::Date => match value {
 			Value::Datetime(dt) => {
 				let nd = dt.into_inner().date_naive();
@@ -1483,83 +1470,21 @@ fn is_array_oid(oid: i32) -> Option<i32> {
 }
 
 fn decode_array_text(text: &str, elem_oid: i32) -> Result<Value, PgError> {
-	let trimmed = text.trim();
-	if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-		return Err(param_err(elem_oid, "array must start with { and end with }"));
-	}
-	let inner = &trimmed[1..trimmed.len() - 1];
-	if inner.trim().is_empty() {
-		return Ok(Value::Array(Vec::<Value>::new().into()));
-	}
+	let items = parse_array_literal(text)
+		.ok_or_else(|| PgError::invalid_text(format!("malformed array literal: \"{text}\"")))?;
+	decode_array_elements(items, elem_oid)
+}
 
-	let mut elements = Vec::new();
-	let mut current = String::new();
-	let mut in_quotes = false;
-	let mut escape = false;
-	let mut brace_depth = 0;
-
-	let chars: Vec<char> = inner.chars().collect();
-	let mut i = 0;
-	while i < chars.len() {
-		let c = chars[i];
-		if escape {
-			current.push(c);
-			escape = false;
-			i += 1;
-			continue;
-		}
-		if c == '\\' {
-			escape = true;
-			i += 1;
-			continue;
-		}
-		if c == '"' {
-			in_quotes = !in_quotes;
-			i += 1;
-			continue;
-		}
-		if !in_quotes {
-			if c == '{' {
-				brace_depth += 1;
-				current.push(c);
-				i += 1;
-				continue;
-			} else if c == '}' {
-				brace_depth -= 1;
-				current.push(c);
-				i += 1;
-				continue;
-			}
-			if brace_depth == 0 && c == ',' {
-				let trimmed_elem = current.trim();
-				if !in_quotes && trimmed_elem.eq_ignore_ascii_case("NULL") {
-					elements.push(Value::Null);
-				} else if trimmed_elem.starts_with('{') {
-					elements.push(decode_array_text(trimmed_elem, elem_oid)?);
-				} else {
-					elements.push(decode_text(trimmed_elem, elem_oid)?);
-				}
-				current.clear();
-				i += 1;
-				continue;
-			}
-		}
-		current.push(c);
-		i += 1;
-	}
-
-	let trimmed_elem = current.trim();
-	if !trimmed_elem.is_empty() || in_quotes {
-		if !in_quotes && trimmed_elem.eq_ignore_ascii_case("NULL") {
-			elements.push(Value::Null);
-		} else if trimmed_elem.starts_with('{') {
-			elements.push(decode_array_text(trimmed_elem, elem_oid)?);
-		} else {
-			elements.push(decode_text(trimmed_elem, elem_oid)?);
-		}
-	}
-
-	Ok(Value::Array(elements.into()))
+fn decode_array_elements(items: Vec<ArrayElement>, elem_oid: i32) -> Result<Value, PgError> {
+	let values = items
+		.into_iter()
+		.map(|item| match item {
+			ArrayElement::Null => Ok(Value::Null),
+			ArrayElement::Text(text) => decode_text(&text, elem_oid),
+			ArrayElement::Array(items) => decode_array_elements(items, elem_oid),
+		})
+		.collect::<Result<Vec<_>, _>>()?;
+	Ok(Value::Array(values.into()))
 }
 
 fn decode_array_binary(bytes: &[u8], expected_elem_oid: i32) -> Result<Value, PgError> {
@@ -1689,6 +1614,313 @@ mod tests {
 	#[allow(clippy::needless_pass_by_value)]
 	fn text(value: Value, ty: PgType) -> String {
 		String::from_utf8(encode_text(value, &ty).unwrap()).unwrap()
+	}
+
+	const TEXT_FAMILY: [PgType; 4] = [PgType::Text, PgType::Varchar, PgType::Bpchar, PgType::Name];
+
+	fn int(i: i64) -> Value {
+		Value::Number(Number::Int(i))
+	}
+
+	fn string(s: &str) -> Value {
+		Value::String(s.to_string())
+	}
+
+	fn array(values: Vec<Value>) -> Value {
+		Value::Array(values.into())
+	}
+
+	fn object(entries: Vec<(&str, Value)>) -> Value {
+		let mut object = surrealdb_types::Object::new();
+		for (key, value) in entries {
+			object.insert(key.to_string(), value);
+		}
+		Value::Object(object)
+	}
+
+	fn at(seconds: i64, nanos: u32) -> Value {
+		Value::Datetime(
+			surrealdb_types::Datetime::from_timestamp(seconds, nanos).expect("a datetime"),
+		)
+	}
+
+	fn lasting(secs: u64, nanos: u32) -> Value {
+		Value::Duration(std::time::Duration::new(secs, nanos).into())
+	}
+
+	fn record(table: &str, key: &str) -> Value {
+		Value::RecordId(surrealdb_types::RecordId::new(table, key))
+	}
+
+	/// Every kind of value a text-family column can receive, with the text its
+	/// own typed column shows for it.
+	fn text_family_values() -> Vec<(&'static str, Value, String)> {
+		let uuid = Uuid::from(uuid::Uuid::from_u128(0x018f_6b2e_4c3d_7a11_9a52_0123_4567_89ab));
+		let uuid_text = "018f6b2e-4c3d-7a11-9a52-0123456789ab";
+		let float = |f: f64| Value::Number(Number::Float(f));
+		let decimal = |mantissa: i64, scale: u32| {
+			Value::Number(Number::Decimal(Decimal::new(mantissa, scale)))
+		};
+		let date = |text: &str| text.to_string();
+		vec![
+			("datetime", at(315_532_800, 0), date("1980-01-01 00:00:00+00")),
+			(
+				"datetime, millis",
+				at(1_577_882_096, 789_000_000),
+				date("2020-01-01 12:34:56.789+00"),
+			),
+			(
+				"datetime, nanos truncate",
+				at(1_705_322_096, 123_456_789),
+				date("2024-01-15 12:34:56.123456+00"),
+			),
+			("datetime, before 1970", at(-1, 0), date("1969-12-31 23:59:59+00")),
+			(
+				"datetime, before 1970 with a fraction",
+				at(-1, 500_000_000),
+				date("1969-12-31 23:59:59.5+00"),
+			),
+			("datetime, year 1", at(-62_135_596_800, 0), date("0001-01-01 00:00:00+00")),
+			("datetime, year 0 is 1 BC", at(-62_167_219_200, 0), date("0001-01-01 00:00:00+00 BC")),
+			(
+				"datetime, last microsecond of 9999",
+				at(253_402_300_799, 999_999_000),
+				date("9999-12-31 23:59:59.999999+00"),
+			),
+			("datetime, year 10000", at(253_402_300_800, 0), date("10000-01-01 00:00:00+00")),
+			(
+				"datetime, far future",
+				at(8_210_266_876_799, 999_999_999),
+				date("262142-12-31 23:59:59.999999+00"),
+			),
+			("duration, zero", lasting(0, 0), "00:00:00".into()),
+			("duration, milliseconds", lasting(0, 1_000_000), "00:00:00.001".into()),
+			("duration, fraction", lasting(1, 500_000_000), "00:00:01.5".into()),
+			("duration, a microsecond", lasting(0, 1_000), "00:00:00.000001".into()),
+			("duration, below a microsecond", lasting(0, 1), "00:00:00".into()),
+			("duration, 1h30m", lasting(5_400, 0), "01:30:00".into()),
+			("duration, 26h", lasting(93_600, 0), "1 day 02:00:00".into()),
+			("duration, 1d", lasting(86_400, 0), "1 day".into()),
+			("duration, 2d", lasting(172_800, 0), "2 days".into()),
+			("duration, 1w", lasting(604_800, 0), "7 days".into()),
+			("duration, 1y", lasting(31_536_000, 0), "365 days".into()),
+			(
+				"duration, days and a fraction",
+				lasting(86_400, 500_000_000),
+				"1 day 00:00:00.5".into(),
+			),
+			(
+				"duration, the largest",
+				lasting(u64::MAX, 999_999_999),
+				"213503982334601 days 07:00:15.999999".into(),
+			),
+			("uuid", Value::Uuid(uuid), uuid_text.into()),
+			("bytes", Value::Bytes(vec![0xde, 0xad].into()), "\\xdead".into()),
+			("bytes, empty", Value::Bytes(Vec::<u8>::new().into()), "\\x".into()),
+			("decimal", decimal(12_345, 2), "123.45".into()),
+			("decimal, negative", decimal(-5, 3), "-0.005".into()),
+			("decimal, trailing zeros", decimal(100, 2), "1.00".into()),
+			("float", float(1.5), "1.5".into()),
+			("float, whole", float(3.0), "3".into()),
+			("float, negative zero", float(-0.0), "-0".into()),
+			("float, NaN", float(f64::NAN), "NaN".into()),
+			("float, Infinity", float(f64::INFINITY), "Infinity".into()),
+			("float, -Infinity", float(f64::NEG_INFINITY), "-Infinity".into()),
+			("float, huge", float(f64::MAX), f64::MAX.to_string()),
+			("float, tiny", float(f64::MIN_POSITIVE), f64::MIN_POSITIVE.to_string()),
+			("int", int(-42), "-42".into()),
+			("int, largest", int(i64::MAX), i64::MAX.to_string()),
+			("int, smallest", int(i64::MIN), i64::MIN.to_string()),
+			("bool, true", Value::Bool(true), "t".into()),
+			("bool, false", Value::Bool(false), "f".into()),
+			("string", string("hello"), "hello".into()),
+			("string, empty", string(""), "".into()),
+			("string, punctuation", string("a,b {c} \"d\""), "a,b {c} \"d\"".into()),
+			("string, unicode", string("caf\u{e9} \u{1f600}"), "caf\u{e9} \u{1f600}".into()),
+			("array, empty", array(vec![]), "{}".into()),
+			("array, ints", array(vec![int(1), int(2), int(3)]), "{1,2,3}".into()),
+			("array, strings", array(vec![string("a"), string("b c")]), "{a,\"b c\"}".into()),
+			(
+				"array, strings that need quoting",
+				array(vec![
+					string(""),
+					string("NULL"),
+					string("a,b"),
+					string("say \"hi\""),
+					string("back\\slash"),
+				]),
+				"{\"\",\"NULL\",\"a,b\",\"say \\\"hi\\\"\",\"back\\\\slash\"}".into(),
+			),
+			("array, with a hole", array(vec![int(1), Value::None, int(3)]), "{1,NULL,3}".into()),
+			("array, bools", array(vec![Value::Bool(true), Value::Bool(false)]), "{t,f}".into()),
+			("array, floats and ints", array(vec![float(1.5), int(2)]), "{1.5,2}".into()),
+			(
+				"array, datetimes",
+				array(vec![at(315_532_800, 0), at(1_577_882_096, 789_000_000)]),
+				"{\"1980-01-01 00:00:00+00\",\"2020-01-01 12:34:56.789+00\"}".into(),
+			),
+			(
+				"array, durations",
+				array(vec![lasting(5_400, 0), lasting(93_600, 0)]),
+				"{01:30:00,\"1 day 02:00:00\"}".into(),
+			),
+			("array, uuids", array(vec![Value::Uuid(uuid)]), format!("{{{uuid_text}}}")),
+			(
+				"array, bytes",
+				array(vec![Value::Bytes(vec![0xde, 0xad].into())]),
+				"{\"\\\\xdead\"}".into(),
+			),
+			(
+				"array, mixed kinds are jsonb elements",
+				array(vec![int(1), string("a"), Value::Bool(true)]),
+				"{1,\"\\\"a\\\"\",true}".into(),
+			),
+			(
+				"array, objects are jsonb elements",
+				array(vec![object(vec![("a", int(1))])]),
+				"{\"{\\\"a\\\":1}\"}".into(),
+			),
+			("array, record ids", array(vec![record("person", "tobie")]), "{person:tobie}".into()),
+			(
+				"array of arrays is one json document",
+				array(vec![array(vec![int(1), int(2)]), array(vec![int(3), int(4)])]),
+				"[[1,2],[3,4]]".into(),
+			),
+			(
+				"array of jagged arrays is one json document",
+				array(vec![array(vec![int(1)]), array(vec![int(2), int(3)])]),
+				"[[1],[2,3]]".into(),
+			),
+			(
+				"object",
+				object(vec![("a", int(1)), ("b", array(vec![int(1), int(2)]))]),
+				"{\"a\":1,\"b\":[1,2]}".into(),
+			),
+			("object, empty", object(vec![]), "{}".into()),
+			("set", Value::Set(vec![int(1), int(2)].into()), "[1,2]".into()),
+			("record id", record("person", "tobie"), "person:tobie".into()),
+			("range", Value::Range(Box::new(surrealdb_types::Range::from(1i64..5))), "1..5".into()),
+			("table", Value::Table(surrealdb_types::Table::new("person")), "person".into()),
+		]
+	}
+
+	#[test]
+	fn a_text_column_shows_a_value_as_its_own_typed_column_does() {
+		let mut mismatches = Vec::new();
+		for (name, value, expected) in text_family_values() {
+			for ty in TEXT_FAMILY {
+				let shown = text(value.clone(), ty.clone());
+				if shown != expected {
+					mismatches.push(format!("{name} in {ty:?}: {shown:?}, expected {expected:?}"));
+				}
+				// A text column's binary cell is its text.
+				let binary = String::from_utf8(encode_binary(value.clone(), &ty).unwrap()).unwrap();
+				if binary != expected {
+					mismatches.push(format!(
+						"{name} in {ty:?} (binary): {binary:?}, expected {expected:?}"
+					));
+				}
+			}
+		}
+		assert!(mismatches.is_empty(), "\n{}", mismatches.join("\n"));
+	}
+
+	#[test]
+	fn a_text_cell_equals_the_text_cell_of_the_column_inferred_from_the_rows() {
+		let mut mismatches = Vec::new();
+		for (name, value, _) in text_family_values() {
+			let mut row = surrealdb_types::Object::new();
+			row.insert("c".to_string(), value.clone());
+			let rows = array(vec![Value::Object(row.clone()), Value::Object(row)]);
+			let shape = crate::typing::shape_result(rows);
+			let inferred = &shape.columns[0].ty;
+			let cell = shape.rows[0][0].clone().expect("a cell");
+			let typed = text(cell, inferred.clone());
+			let as_text = text(value.clone(), PgType::Text);
+			if typed != as_text {
+				mismatches.push(format!(
+					"{name}: {inferred:?} column {typed:?}, text column {as_text:?}"
+				));
+			}
+		}
+		assert!(mismatches.is_empty(), "\n{}", mismatches.join("\n"));
+	}
+
+	#[test]
+	fn values_that_a_typed_column_would_show_differently_are_typed_as_expected() {
+		// The cases above compare a text column with a typed one only if the typed one differs.
+		for (name, ty) in [
+			("datetime", PgType::Timestamptz),
+			("duration, 1h30m", PgType::Interval),
+			("bool, true", PgType::Bool),
+			("array, ints", PgType::Array(Box::new(PgType::Int8))),
+			("array, datetimes", PgType::Array(Box::new(PgType::Timestamptz))),
+			("array, mixed kinds are jsonb elements", PgType::Array(Box::new(PgType::Jsonb))),
+			("array of arrays is one json document", PgType::Jsonb),
+		] {
+			let (_, value, _) =
+				text_family_values().into_iter().find(|(n, ..)| *n == name).expect(name);
+			assert_eq!(base_type(&value), Some(ty), "{name}");
+		}
+	}
+
+	#[test]
+	fn the_elements_of_a_text_array_column_show_as_a_text_column_does() {
+		let ty = PgType::Array(Box::new(PgType::Text));
+		let elements = array(vec![
+			at(1_577_882_096, 789_000_000),
+			lasting(5_400, 0),
+			Value::Bool(true),
+			int(7),
+			string("x"),
+		]);
+		assert_eq!(text(elements, ty), "{\"2020-01-01 12:34:56.789+00\",01:30:00,t,7,x}");
+	}
+
+	#[test]
+	fn the_fields_of_a_record_column_show_as_a_text_column_does() {
+		let value = object(vec![
+			("born", at(315_532_800, 0)),
+			("flag", Value::Bool(false)),
+			("took", lasting(5_400, 0)),
+		]);
+		assert_eq!(text(value, PgType::Record), "(\"1980-01-01 00:00:00+00\",f,01:30:00)");
+	}
+
+	#[test]
+	fn nothing_has_no_text() {
+		for ty in TEXT_FAMILY {
+			assert!(encode_text(Value::None, &ty).is_err());
+			assert!(encode_text(Value::Null, &ty).is_err());
+		}
+	}
+
+	#[test]
+	fn fractional_seconds_keep_only_their_significant_digits() {
+		let mut out = Vec::new();
+		for (micros, expected) in [
+			(0, ""),
+			(1, ".000001"),
+			(10, ".00001"),
+			(500_000, ".5"),
+			(120_000, ".12"),
+			(123_456, ".123456"),
+			(999_999, ".999999"),
+			(1_000_000, ""),
+			(1_500_000, ".5"),
+		] {
+			out.clear();
+			push_fraction(&mut out, micros);
+			assert_eq!(String::from_utf8(out.clone()).unwrap(), expected, "{micros}");
+		}
+	}
+
+	#[test]
+	fn nested_arrays_in_a_jsonb_array_are_json_elements() {
+		let inner =
+			Value::Array(vec![Value::Number(Number::Int(2)), Value::Number(Number::Int(3))].into());
+		let arr = Value::Array(vec![Value::Number(Number::Int(1)), inner].into());
+		assert_eq!(text(arr, PgType::Array(Box::new(PgType::Jsonb))), "{1,\"[2,3]\"}");
 	}
 
 	#[test]
@@ -2098,6 +2330,51 @@ mod tests {
 		);
 		let decoded_text = decode_param(Some(&text_str_arr), OID_ARRAY_TEXT, 0).unwrap();
 		assert_eq!(decoded_text, str_arr);
+	}
+
+	#[test]
+	fn text_array_parameters_read_as_postgresql_reads_array_input() {
+		let decode = |text: &str| decode_param(Some(text.as_bytes()), OID_ARRAY_TEXT, 0);
+		let strings = |items: &[&str]| {
+			Value::Array(
+				items.iter().map(|s| Value::String(s.to_string())).collect::<Vec<_>>().into(),
+			)
+		};
+		assert_eq!(
+			decode("{\"NULL\",null}").unwrap(),
+			Value::Array(vec![Value::String("NULL".into()), Value::Null].into())
+		);
+		assert_eq!(decode("{a,\"\"}").unwrap(), strings(&["a", ""]));
+		assert_eq!(decode("{\" a \",b }").unwrap(), strings(&[" a ", "b"]));
+		assert_eq!(decode("{\"a\\\\b\",\"c\\\"d\"}").unwrap(), strings(&["a\\b", "c\"d"]));
+		assert_eq!(
+			decode("{{\"a,b\",c},{\"}\",\"{\"}}").unwrap(),
+			Value::Array(vec![strings(&["a,b", "c"]), strings(&["}", "{"])].into())
+		);
+		for malformed in ["a,b", "{a,,b}", "{a", "{\"a}", "{{a},b}", "{{a},{b,c}}", "{a} b"] {
+			let err = decode(malformed).unwrap_err();
+			assert_eq!(err.code, "22P02", "{malformed}");
+		}
+		assert_eq!(
+			decode_param(Some(b"{1, -2 ,NULL}"), OID_ARRAY_INT8, 0).unwrap(),
+			Value::Array(
+				vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(-2)), Value::Null]
+					.into()
+			)
+		);
+	}
+
+	#[test]
+	fn text_array_values_round_trip_through_their_literal() {
+		let values = [
+			"", "NULL", "null", " lead", "trail ", "a,b", "{x}", "q\"q", "b\\s", "tab\t", "cr\r",
+			"vt\u{b}", "ff\u{c}", "plain",
+		];
+		let arr = Value::Array(
+			values.iter().map(|s| Value::String(s.to_string())).collect::<Vec<_>>().into(),
+		);
+		let text = encode_text(arr.clone(), &PgType::Array(Box::new(PgType::Text))).unwrap();
+		assert_eq!(decode_param(Some(&text), OID_ARRAY_TEXT, 0).unwrap(), arr);
 	}
 
 	#[test]

@@ -732,10 +732,24 @@ impl<'a> Lexer<'a> {
 			})?;
 			Ok(Token::new(TokenKind::FloatLiteral(val), Span::new(start, end)))
 		} else {
-			let val = num_str.parse::<i64>().map_err(|_| LexError::InvalidNumber {
-				offset: start,
-			})?;
-			Ok(Token::new(TokenKind::IntLiteral(val), Span::new(start, end)))
+			match num_str.parse::<i64>() {
+				Ok(val) => Ok(Token::new(TokenKind::IntLiteral(val), Span::new(start, end))),
+				Err(_) => {
+					let value =
+						num_str.parse::<f64>().ok().filter(|value| value.is_finite()).ok_or(
+							LexError::InvalidNumber {
+								offset: start,
+							},
+						)?;
+					Ok(Token::new(
+						TokenKind::WideIntLiteral {
+							value,
+							int8_minimum_magnitude: num_str.parse::<u64>() == Ok(1 << 63),
+						},
+						Span::new(start, end),
+					))
+				}
+			}
 		}
 	}
 

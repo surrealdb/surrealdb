@@ -158,6 +158,62 @@ fn test_comments() {
 }
 
 #[test]
+fn test_a_multi_character_operator_does_not_end_in_a_sign() {
+	// Without a character that is not in an SQL operator, the trailing signs are operators of
+	// their own.
+	fn operators(sql: &str) -> Vec<TokenKind<'_>> {
+		lex_all(sql)
+	}
+	assert_eq!(
+		operators("a->>-1"),
+		vec![
+			TokenKind::Ident("a".into()),
+			TokenKind::Operator("->>"),
+			TokenKind::Operator("-"),
+			TokenKind::Integer(1),
+		]
+	);
+	assert_eq!(
+		operators("a->-1"),
+		vec![
+			TokenKind::Ident("a".into()),
+			TokenKind::Operator("->"),
+			TokenKind::Operator("-"),
+			TokenKind::Integer(1),
+		]
+	);
+	assert_eq!(
+		operators("a=-1"),
+		vec![
+			TokenKind::Ident("a".into()),
+			TokenKind::Operator("="),
+			TokenKind::Operator("-"),
+			TokenKind::Integer(1),
+		]
+	);
+	assert_eq!(
+		operators("a<+-1"),
+		vec![
+			TokenKind::Ident("a".into()),
+			TokenKind::Operator("<"),
+			TokenKind::Operator("+"),
+			TokenKind::Operator("-"),
+			TokenKind::Integer(1),
+		]
+	);
+	// An operator with such a character keeps its signs, as PostgreSQL's operators `@-` and `?-`
+	// do.
+	assert_eq!(operators("@-"), vec![TokenKind::Operator("@-")]);
+	assert_eq!(operators("?-"), vec![TokenKind::Operator("?-")]);
+	assert_eq!(operators("#>>+"), vec![TokenKind::Operator("#>>+")]);
+	// The left arrow of a graph pattern edge is the one operator that keeps its sign.
+	assert_eq!(operators("<-"), vec![TokenKind::Operator("<-")]);
+	assert_eq!(operators("+"), vec![TokenKind::Operator("+")]);
+	assert_eq!(operators("-"), vec![TokenKind::Operator("-")]);
+	assert_eq!(operators("->>"), vec![TokenKind::Operator("->>")]);
+}
+
+#[test]
 fn test_statement_splitter() {
 	let sql = "SELECT 1; INSERT INTO t VALUES ('a;b'); SELECT $$c;d$$; /* comment; */ SELECT 4";
 	let stmts = split_statements(sql).expect("statement splitting must succeed");

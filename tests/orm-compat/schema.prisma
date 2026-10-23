@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+model CompatUser {
+  id       Int @id
+  name     String
+  age      Int
+  active   Boolean
+  nickname String?
+  posts    CompatPost[]
+}
+model CompatPost {
+  id       Int @id
+  title    String
+  authorId Int
+  author   CompatUser @relation(fields: [authorId], references: [id])
+}
+
+model CompatValue {
+ id Int @id
+ payload Json
+ tags String[]
+ amount Decimal @db.Decimal(10,2)
+ createdAt DateTime @db.Timestamptz(3)
+}
+model CompatGenerated {
+ id Int @id @default(autoincrement())
+ name String
+}

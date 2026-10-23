@@ -45,6 +45,27 @@ impl Default for SqlPlanMetrics {
 
 static GLOBAL_METRICS: std::sync::OnceLock<SqlPlanMetrics> = std::sync::OnceLock::new();
 
+/// The most distinct unsupported constructs the registry holds.
+pub const MAX_CONSTRUCTS: usize = 256;
+
+/// The most bytes of a construct the registry keeps.
+pub const MAX_CONSTRUCT_LEN: usize = 128;
+
+/// The key that counts the unsupported constructs past [`MAX_CONSTRUCTS`].
+pub const OTHER_CONSTRUCTS: &str = "other";
+
+/// `construct` cut to at most [`MAX_CONSTRUCT_LEN`] bytes, at a character boundary.
+fn truncate_construct(construct: &str) -> &str {
+	if construct.len() <= MAX_CONSTRUCT_LEN {
+		return construct;
+	}
+	let mut end = MAX_CONSTRUCT_LEN;
+	while !construct.is_char_boundary(end) {
+		end -= 1;
+	}
+	&construct[..end]
+}
+
 /// Access the global metrics singleton.
 pub fn global_metrics() -> &'static SqlPlanMetrics {
 	GLOBAL_METRICS.get_or_init(SqlPlanMetrics::default)
@@ -64,10 +85,20 @@ impl SqlPlanMetrics {
 	}
 
 	/// Record an unsupported-feature error encountered for a specific construct.
+	///
+	/// The registry is bounded: a construct is kept to [`MAX_CONSTRUCT_LEN`] bytes, and once
+	/// [`MAX_CONSTRUCTS`] distinct constructs are held any other is counted under
+	/// [`OTHER_CONSTRUCTS`]. The caller names the kind of construct and not the client's text.
 	pub fn record_unsupported_feature(&self, construct: &str) {
+		let construct = truncate_construct(construct);
 		tracing::warn!(construct = %construct, "unsupported SQL construct encountered");
 		if let Ok(mut map) = self.unsupported_constructs.write() {
-			let entry = map.entry(construct.to_string()).or_insert(0);
+			let key = if map.contains_key(construct) || map.len() < MAX_CONSTRUCTS {
+				construct
+			} else {
+				OTHER_CONSTRUCTS
+			};
+			let entry = map.entry(key.to_string()).or_insert(0);
 			*entry = entry.saturating_add(1);
 		}
 	}
@@ -167,6 +198,30 @@ mod tests {
 		let snap2 = metrics.snapshot();
 		assert_eq!(snap2.prepared_statements_active, 0);
 		assert_eq!(snap2.prepared_bytes_active, 0);
+	}
+
+	#[test]
+	fn test_unsupported_constructs_are_bounded() {
+		let metrics = SqlPlanMetrics::default();
+		let long = "é".repeat(MAX_CONSTRUCT_LEN);
+		metrics.record_unsupported_feature(&long);
+		for n in 0..(MAX_CONSTRUCTS * 2) {
+			metrics.record_unsupported_feature(&format!("construct {n}"));
+		}
+		metrics.record_unsupported_feature("construct 0");
+
+		let snap = metrics.snapshot();
+		assert_eq!(snap.unsupported_constructs.len(), MAX_CONSTRUCTS + 1);
+		assert!(snap.unsupported_constructs.keys().all(|key| key.len() <= MAX_CONSTRUCT_LEN));
+		assert_eq!(snap.unsupported_constructs.get("construct 0"), Some(&2));
+		assert_eq!(
+			snap.unsupported_constructs.get(OTHER_CONSTRUCTS),
+			Some(&(MAX_CONSTRUCTS as u64 + 1))
+		);
+		assert_eq!(
+			snap.unsupported_constructs.values().sum::<u64>(),
+			2 * MAX_CONSTRUCTS as u64 + 2
+		);
 	}
 
 	#[test]

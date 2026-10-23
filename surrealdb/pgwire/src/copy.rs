@@ -211,6 +211,10 @@ pub(super) struct Ingest {
 	pub ended: bool,
 	/// The rendered length of each column's key in the generated INSERT.
 	pub key_lens: Vec<usize>,
+	/// For each column, the table its values are record links to, when the
+	/// column is declared as a link; a value is then inserted as the link
+	/// its text names the key of.
+	pub links: Vec<Option<String>>,
 	/// How far the unconsumed bytes have been scanned.
 	pub scan: ScanState,
 	/// The rows waiting for the next INSERT.
@@ -238,6 +242,7 @@ impl Ingest {
 			columns_settled: false,
 			ended: false,
 			key_lens: Vec::new(),
+			links: Vec::new(),
 			scan: ScanState::default(),
 			batch: Vec::new(),
 			batch_bytes: 0,

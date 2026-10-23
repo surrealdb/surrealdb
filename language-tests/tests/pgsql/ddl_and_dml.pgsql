@@ -16,7 +16,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: tags:1, tag: 'rust' }, { id: tags:2, tag: 'database' }]"
+value = "[{ id: 1, tag: 'rust' }, { id: 2, tag: 'database' }]"
 
 [[test.results]]
 value = "[{ tag: 'database' }, { tag: 'rust' }]"

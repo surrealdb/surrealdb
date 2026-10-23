@@ -8,7 +8,7 @@ imports = ["pgsql/_schema.surql"]
 reason = "PostgreSQL INSERT DML write lowering and subsequent SELECT"
 
 [[test.results]]
-value = "[{ age: 28, id: users:4, name: 'Diana', user_id: 4 }]"
+value = "[{ age: 28, id: 4, name: 'Diana', user_id: 4 }]"
 
 [[test.results]]
 value = "[{ age: 28, name: 'Diana' }]"

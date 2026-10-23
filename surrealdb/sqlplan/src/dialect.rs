@@ -73,16 +73,11 @@ impl DialectPolicy {
 		}
 	}
 
-	/// Fold an unquoted identifier according to the dialect's name policy.
+	/// Canonicalize a parser-produced name. PostgreSQL has already folded unquoted names;
+	/// its remaining spelling is significant and must be retained.
 	pub fn fold_identifier<'a>(&self, name: &'a str) -> std::borrow::Cow<'a, str> {
 		match self.name_policy {
-			NamePolicy::PgLowercaseUnquoted => {
-				if name.chars().any(|c| c.is_ascii_uppercase()) {
-					std::borrow::Cow::Owned(name.to_ascii_lowercase())
-				} else {
-					std::borrow::Cow::Borrowed(name)
-				}
-			}
+			NamePolicy::PgLowercaseUnquoted => std::borrow::Cow::Borrowed(name),
 			NamePolicy::MySqlCaseInsensitive => {
 				// Normalize to lowercase for internal matching
 				std::borrow::Cow::Owned(name.to_ascii_lowercase())

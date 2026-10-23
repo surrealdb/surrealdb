@@ -98,8 +98,8 @@ pub fn translate_select(
 				SelectItem::Wildcard(_) => {
 					out.push_str("\"*\": true");
 				}
-				SelectItem::QualifiedWildcard(tbl, _) => {
-					write!(out, "\"{tbl}.*\": true")?;
+				SelectItem::QualifiedWildcard(parts, _) => {
+					write!(out, "\"{}.*\": true", parts.join("."))?;
 				}
 			}
 		}
@@ -118,8 +118,8 @@ pub fn translate_select(
 		}
 		match p {
 			SelectItem::Wildcard(_) => out.push('*'),
-			SelectItem::QualifiedWildcard(tbl, _) => {
-				out.push_str(tbl);
+			SelectItem::QualifiedWildcard(parts, _) => {
+				out.push_str(&parts.join("."));
 				out.push_str(".*");
 			}
 			SelectItem::Expr {

@@ -378,8 +378,8 @@ fn test_lower_mysql_create_table() {
 	.expect("parse");
 
 	let exprs = lower_mysql_ddl(&stmt).expect("lower");
-	// 1 DefineTable + 7 DefineField + 2 DefineIndex (id PK + sku UNIQUE) = 10
-	assert_eq!(exprs.len(), 10);
+	// 1 DefineTable + 1 DefineSequence (id) + 7 DefineField + 2 DefineIndex (id PK + sku UNIQUE)
+	assert_eq!(exprs.len(), 11);
 
 	match &exprs[0] {
 		Expr::Define(d) => match &**d {
@@ -437,8 +437,8 @@ fn test_lower_pgsql_foreign_key_column_constraint() {
 	.expect("parse");
 
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
-	// 1 DefineTable + 3 DefineField + 1 PK Index = 5
-	assert_eq!(exprs.len(), 5);
+	// 1 DefineTable + 1 DefineSequence (id) + 3 DefineField + 1 PK Index = 6
+	assert_eq!(exprs.len(), 6);
 
 	// Find the author_id field
 	let author_field = exprs
@@ -474,8 +474,8 @@ fn test_lower_pgsql_foreign_key_table_constraint() {
 	.expect("parse");
 
 	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
-	// 1 DefineTable + 4 DefineField + 1 PK Index + 2 FK field updates = 8
-	assert_eq!(exprs.len(), 8);
+	// 1 DefineTable + 1 DefineSequence (id) + 4 DefineField + 1 PK Index + 2 FK field updates
+	assert_eq!(exprs.len(), 9);
 }
 
 #[test]
@@ -839,4 +839,79 @@ fn test_lower_mysql_alter_table() {
 	assert!(matches!(&exprs[1], Expr::Remove(r) if matches!(&**r, RemoveStatement::Field(_))));
 	// 3: DefineTable (RENAME customers)
 	assert!(matches!(&exprs[2], Expr::Define(d) if matches!(&**d, DefineStatement::Table(_))));
+}
+
+/// The `(name, flexible)` of every field `exprs` defines.
+fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
+	exprs
+		.iter()
+		.filter_map(|expr| match expr {
+			Expr::Define(define) => match &**define {
+				DefineStatement::Field(field) => Some((field.name.to_sql(), field.flexible)),
+				_ => None,
+			},
+			_ => None,
+		})
+		.collect()
+}
+
+#[test]
+fn json_columns_of_a_created_table_are_flexible() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE docs (id INT PRIMARY KEY, a JSONB NOT NULL, b JSON, c JSONB[], d TEXT, e TEXT[]);",
+	)
+	.expect("parse");
+	assert_eq!(
+		field_flexibility(&lower_pgsql_ddl(&stmt).expect("lower")),
+		[
+			("id".to_string(), false),
+			("a".to_string(), true),
+			("b".to_string(), true),
+			("c".to_string(), true),
+			("d".to_string(), false),
+			("e".to_string(), false),
+		]
+	);
+	let stmt =
+		surrealdb_mysql::parse_statement("CREATE TABLE docs (id INT PRIMARY KEY, a JSON, b TEXT);")
+			.expect("parse");
+	assert_eq!(
+		field_flexibility(&lower_mysql_ddl(&stmt).expect("lower")),
+		[("id".to_string(), false), ("a".to_string(), true), ("b".to_string(), false)]
+	);
+}
+
+/// The SurrealQL of every statement `exprs` holds.
+fn statements_sql(exprs: &[Expr]) -> Vec<String> {
+	exprs.iter().map(|expr| expr.to_sql()).collect()
+}
+
+#[test]
+fn serial_and_auto_increment_columns_draw_from_a_sequence_of_their_own() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE gen (id SERIAL PRIMARY KEY, n BIGSERIAL, m INT, d SERIAL DEFAULT 7);",
+	)
+	.expect("parse");
+	let sql = statements_sql(&lower_pgsql_ddl(&stmt).expect("lower"));
+	let defines = |name: &str| sql.iter().filter(|s| s.contains(name)).cloned().collect::<Vec<_>>();
+	for column in ["id", "n"] {
+		let sequence = format!("gen_{column}_seq");
+		let lines = defines(&sequence);
+		assert_eq!(lines.len(), 2, "{lines:?}");
+		assert!(lines[0].starts_with("DEFINE SEQUENCE IF NOT EXISTS"), "{lines:?}");
+		assert!(lines[0].contains("START 1"), "{lines:?}");
+		assert!(lines[1].starts_with("DEFINE FIELD"), "{lines:?}");
+		assert!(lines[1].contains(&format!("::nextval('{sequence}')")), "{lines:?}");
+		assert!(!lines[1].contains("option<"), "a serial column is NOT NULL: {lines:?}");
+	}
+	assert!(defines("gen_m_seq").is_empty());
+	assert!(defines("gen_d_seq").is_empty(), "an explicit DEFAULT is kept");
+
+	let stmt = surrealdb_mysql::parse_statement(
+		"CREATE TABLE gen (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT);",
+	)
+	.expect("parse");
+	let sql = statements_sql(&lower_mysql_ddl(&stmt).expect("lower"));
+	assert_eq!(sql.iter().filter(|s| s.contains("gen_id_seq")).count(), 2, "{sql:?}");
+	assert!(!sql.iter().any(|s| s.contains("gen_name_seq")), "{sql:?}");
 }

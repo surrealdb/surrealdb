@@ -7,14 +7,23 @@ use surrealdb_expr::expr::logical::{
 use surrealdb_expr::expr::{BinaryOperator, Function, Kind, Param, PrefixOperator};
 use surrealdb_strand::Strand;
 
+use crate::array_literal::{is_array_space, parse_text_array_literal};
 use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
 use crate::functions::FunctionRegistry;
 use crate::ir::{
-	BoundBinaryOp, BoundExpr, BoundLiteral, BoundOrder, BoundOrderDirection, BoundTarget,
-	BoundUnaryOp,
+	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundLiteral, BoundOrder, BoundOrderDirection,
+	BoundTarget, BoundUnaryOp,
+};
+use crate::lower::id_key::{
+	equal, id_column, is_key_or_link, key_of, key_operand, lower_id_key, record_of,
+	record_of_operand, record_or_value,
+};
+use crate::lower::link::{
+	LinkOperand, link_column, link_comparison_operand, link_operand, lower_stored, same_table_pair,
 };
 use crate::lower::plan::lower_bound_subquery;
+use crate::lower::quote_ident::{lower_quote_ident, quote_ident_str};
 use crate::semantics::sql_like_to_regex;
 
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
@@ -33,27 +42,12 @@ pub fn lower_bound_expr(
 			BoundLiteral::Null => Ok(LogicalExpr::Literal(LogicalLiteral::Null)),
 		},
 		BoundExpr::Column(col) => {
-			if col.correlation_depth > 0 {
-				let mut expr = LogicalExpr::Param(Param::from("parent".to_string()));
-				for _ in 1..col.correlation_depth {
-					expr = LogicalExpr::Access {
-						base: Box::new(expr),
-						field: Strand::from("parent"),
-					};
-				}
-				Ok(LogicalExpr::Access {
-					base: Box::new(expr),
-					field: Strand::from(col.column.as_str()),
-				})
-			} else if col.column == "*" {
-				Ok(LogicalExpr::Field(Strand::from("*")))
-			} else if col.relation_index == 0 {
-				// Base table in join or single-table query: field is directly on the row
-				Ok(LogicalExpr::Field(Strand::from(col.column.as_str())))
+			if col.id_table.is_some() {
+				Ok(lower_id_key(col))
+			} else if col.link_table.is_some() {
+				Ok(key_of(lower_column_raw(col), true))
 			} else {
-				// Joined table at index k >= 1: field is nested under _join{k-1}
-				let alias = RelationAlias::new(col.relation_index - 1);
-				Ok(alias.access(Strand::from(col.column.as_str())))
+				Ok(lower_column_raw(col))
 			}
 		}
 		BoundExpr::Access {
@@ -358,8 +352,10 @@ pub fn lower_bound_expr(
 					return lower_regex_match(&args[0], &args[1], case_insensitive, false, policy);
 				}
 				"current_database" | "database" | "schema" => {
-					let db = policy.default_schema.unwrap_or("test");
-					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(db))));
+					return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("session::db".to_string()),
+						args: Vec::new(),
+					})));
 				}
 				"current_schema" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
@@ -449,6 +445,17 @@ pub fn lower_bound_expr(
 				| "has_column_privilege" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Bool(true)));
 				}
+				"quote_ident" if args.len() == 1 => {
+					return Ok(match &args[0] {
+						BoundExpr::Literal(BoundLiteral::String(s)) => LogicalExpr::Literal(
+							LogicalLiteral::String(Strand::from(quote_ident_str(s).as_str())),
+						),
+						BoundExpr::Literal(BoundLiteral::Null) => {
+							LogicalExpr::Literal(LogicalLiteral::Null)
+						}
+						arg => lower_quote_ident(lower_bound_expr(arg, policy)?),
+					});
+				}
 				"obj_description" | "col_description" | "shobj_description" | "pg_get_expr" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 				}
@@ -467,6 +474,7 @@ pub fn lower_bound_expr(
 					let val = match name_str.to_ascii_lowercase().as_str() {
 						"timezone" | "time zone" => "UTC",
 						"server_version" => "16.0-surrealdb",
+						"server_version_num" => "160000",
 						"server_encoding" => "UTF8",
 						"client_encoding" => "UTF8",
 						"datestyle" => "ISO, MDY",
@@ -534,7 +542,7 @@ pub fn lower_bound_expr(
 			{
 				Vec::new()
 			} else if mapped_fn == "count" && args.len() == 1 {
-				let inner = lower_bound_expr(&args[0], policy)?;
+				let inner = lower_stored(&args[0], policy)?;
 				let not_null = is_not_null_expr(inner);
 				vec![LogicalExpr::If(Box::new(LogicalIf {
 					branches: vec![(not_null, LogicalExpr::Literal(LogicalLiteral::Bool(true)))],
@@ -543,6 +551,34 @@ pub fn lower_bound_expr(
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};
+			if func_def.is_scalar()
+				&& mapped_fn.starts_with("math::")
+				&& !lower_args.is_empty()
+				&& !args.iter().all(|arg| {
+					matches!(
+						arg,
+						BoundExpr::Literal(BoundLiteral::Integer(_) | BoundLiteral::Float(_))
+					)
+				}) {
+				let refs: Vec<_> =
+					(0..lower_args.len()).map(|index| current_item(index as i64)).collect();
+				let null = refs
+					.iter()
+					.cloned()
+					.map(is_null_expr)
+					.reduce(LogicalExpr::or)
+					.unwrap_or(LogicalExpr::Literal(LogicalLiteral::Bool(false)));
+				return Ok(LogicalExpr::Optional {
+					base: Box::new(LogicalExpr::Array(lower_args)),
+					then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(null, LogicalExpr::Literal(LogicalLiteral::Null))],
+						otherwise: Some(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal(mapped_fn.to_string()),
+							args: refs,
+						}))),
+					}))),
+				});
+			}
 			// The value that decides whether the group holds any, as written.
 			let counted = (matches!(mapped_fn, "math::sum" | "math::mean" | "array::join")
 				&& !lower_args.is_empty())
@@ -645,66 +681,47 @@ pub fn lower_bound_expr(
 				otherwise,
 			})))
 		}
+
 		BoundExpr::Between {
 			expr,
 			low,
 			high,
 			negated,
-		} => {
-			let val = lower_bound_expr(expr, policy)?;
-			let l = lower_bound_expr(low, policy)?;
-			let h = lower_bound_expr(high, policy)?;
-			let ge = LogicalExpr::Binary {
-				left: Box::new(val.clone()),
-				op: BinaryOperator::MoreThanEqual,
-				right: Box::new(l),
-			};
-			let le = LogicalExpr::Binary {
-				left: Box::new(val),
-				op: BinaryOperator::LessThanEqual,
-				right: Box::new(h),
-			};
-			let between = LogicalExpr::Binary {
-				left: Box::new(ge),
-				op: BinaryOperator::And,
-				right: Box::new(le),
-			};
-			if *negated {
-				Ok(LogicalExpr::Prefix {
-					op: PrefixOperator::Not,
-					expr: Box::new(between),
-				})
-			} else {
-				Ok(between)
-			}
-		}
+		} => Ok(sql_between(
+			lower_bound_expr(expr, policy)?,
+			lower_bound_expr(low, policy)?,
+			lower_bound_expr(high, policy)?,
+			*negated,
+		)),
 		BoundExpr::InList {
 			expr,
 			list,
 			negated,
 		} => {
+			if let Some((col, table)) = id_column(expr)
+				&& let Some((records, true)) = id_member_records(table, list, policy, true)?
+			{
+				return Ok(sql_membership(
+					lower_column_raw(col),
+					LogicalExpr::Array(records),
+					*negated,
+				));
+			}
+			if let Some((col, table)) = link_column(expr) {
+				return lower_link_membership(col, table, list, *negated, policy);
+			}
 			let val = lower_bound_expr(expr, policy)?;
 			let items = list
 				.iter()
 				.map(|item| lower_bound_expr(item, policy))
 				.collect::<Result<Vec<_>, _>>()?;
-			let op = if *negated {
-				BinaryOperator::NotInside
-			} else {
-				BinaryOperator::Inside
-			};
-			Ok(LogicalExpr::Binary {
-				left: Box::new(val),
-				op,
-				right: Box::new(LogicalExpr::Array(items)),
-			})
+			Ok(sql_membership(val, LogicalExpr::Array(items), *negated))
 		}
 		BoundExpr::IsNull {
 			expr,
 			negated,
 		} => {
-			let val = lower_bound_expr(expr, policy)?;
-			let is_null = is_null_expr(val);
+			let is_null = lower_null_test(expr, policy)?;
 			if *negated {
 				Ok(LogicalExpr::Prefix {
 					op: PrefixOperator::Not,
@@ -788,18 +805,13 @@ pub fn lower_bound_expr(
 			subquery,
 			negated,
 		} => {
-			let val = lower_bound_expr(expr, policy)?;
-			let sub_op = lower_bound_subquery(subquery, policy)?;
-			let op = if *negated {
-				BinaryOperator::NotInside
-			} else {
-				BinaryOperator::Inside
+			// The values of a subquery are keys, so a link column is compared by its key.
+			let val = match link_column(expr) {
+				Some((col, _)) => key_of(lower_column_raw(col), true),
+				None => lower_bound_expr(expr, policy)?,
 			};
-			Ok(LogicalExpr::Binary {
-				left: Box::new(val),
-				op,
-				right: Box::new(LogicalExpr::Subquery(Box::new(sub_op))),
-			})
+			let sub_op = lower_bound_subquery(subquery, policy)?;
+			Ok(sql_membership(val, LogicalExpr::Subquery(Box::new(sub_op)), *negated))
 		}
 		BoundExpr::ArraySubquery(subquery) => {
 			let sub_op = lower_bound_subquery(subquery, policy)?;
@@ -816,6 +828,297 @@ pub fn lower_bound_expr(
 	}
 }
 
+/// Lower a column reference to the stored field it names, with no key extraction.
+pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
+	if col.correlation_depth > 0 {
+		let mut expr = LogicalExpr::Param(Param::from("parent".to_string()));
+		for _ in 1..col.correlation_depth {
+			expr = LogicalExpr::Access {
+				base: Box::new(expr),
+				field: Strand::from("parent"),
+			};
+		}
+		LogicalExpr::Access {
+			base: Box::new(expr),
+			field: Strand::from(col.column.as_str()),
+		}
+	} else if col.column == "*" {
+		LogicalExpr::Field(Strand::from("*"))
+	} else if col.relation_index == 0 {
+		// Base table in join or single-table query: field is directly on the row
+		LogicalExpr::Field(Strand::from(col.column.as_str()))
+	} else {
+		// Joined table at index k >= 1: field is nested under _join{k-1}
+		let alias = RelationAlias::new(col.relation_index - 1);
+		alias.access(Strand::from(col.column.as_str()))
+	}
+}
+
+/// The records of `table` that the members of an `IN` list of the `id` of `table` name, and whether
+/// some member is a column or an expression, not a literal or a parameter. `None` when a member is
+/// neither: a literal that is no key, or an expression that holds a subquery.
+fn id_member_records(
+	table: &str,
+	list: &[BoundExpr],
+	policy: &DialectPolicy,
+	preserve_value: bool,
+) -> Result<Option<(Vec<LogicalExpr>, bool)>, PlanError> {
+	let mut records = Vec::with_capacity(list.len());
+	let mut has_value = false;
+	for member in list {
+		if let Some(key) = key_operand(member) {
+			records.push(
+				if preserve_value && matches!(key, crate::lower::id_key::KeyOperand::Param(_)) {
+					record_or_value(table, lower_stored(member, policy)?)
+				} else {
+					record_of_operand(table, &key)
+				},
+			);
+		} else if is_key_or_link(member) {
+			has_value = true;
+			let value = lower_stored(member, policy)?;
+			records.push(if preserve_value {
+				record_or_value(table, value)
+			} else {
+				record_of(table, value)
+			});
+		} else {
+			return Ok(None);
+		}
+	}
+	Ok(Some((records, has_value)))
+}
+
+/// Whether `col` is the `id` of the table the statement reads (or of the leftmost table of its
+/// joins), whose record is never absent: the only `id` a lookup can read by.
+fn names_scanned_record(col: &BoundColumnRef) -> bool {
+	col.relation_index == 0 && col.correlation_depth == 0
+}
+
+/// The lookup form of `expr`, a top-level conjunct of a `WHERE` predicate that compares the `id`
+/// of a base table, or a link column, with keys: `id = <key>` or `id IN (<keys>)`, where a key is
+/// an integer or string literal, a parameter, or a column or expression that holds the key or a
+/// record link.
+///
+/// The form compares the stored record id with the records the keys name, plainly, with no SQL
+/// null handling: it is false where SQL says NULL (a NULL, absent or empty key names no record),
+/// which a predicate judged for truth alone filters the same way. It is formed only for the `id`
+/// or the link column of the table read, never for those of a joined table, which an outer join may
+/// leave absent. A comparison anywhere else is lowered with its null handling.
+pub(crate) fn lower_lookup_predicate(
+	expr: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<Option<LogicalExpr>, PlanError> {
+	match expr {
+		BoundExpr::Binary {
+			left,
+			op: BoundBinaryOp::Equal,
+			right,
+		} => {
+			if same_table_pair(left, right).is_some() {
+				return Ok(None);
+			}
+			let (col, table, other) = match (id_column(left), id_column(right)) {
+				(Some((col, table)), None) => (col, table, right.as_ref()),
+				(None, Some((col, table))) => (col, table, left.as_ref()),
+				(Some(_), Some(_)) => return Ok(None),
+				(None, None) => return lower_link_lookup(left, right, policy),
+			};
+			if !names_scanned_record(col) {
+				return Ok(None);
+			}
+			if let Some(key) = key_operand(other) {
+				Ok(Some(equal(lower_column_raw(col), record_of_operand(table, &key))))
+			} else if is_key_or_link(other) {
+				let record = record_of(table, lower_stored(other, policy)?);
+				Ok(Some(equal(lower_column_raw(col), record)))
+			} else {
+				Ok(None)
+			}
+		}
+		BoundExpr::InList {
+			expr,
+			list,
+			negated: false,
+		} => {
+			if let Some((col, table)) = link_column(expr) {
+				if !names_scanned_record(col) {
+					return Ok(None);
+				}
+				let mut records = Vec::with_capacity(list.len());
+				for member in list {
+					let LinkOperand::Record(record) = link_operand(table, member, policy)? else {
+						return Ok(None);
+					};
+					records.push(record);
+				}
+				let dynamic =
+					records.iter().any(|record| !matches!(record, LogicalExpr::RecordId(_)));
+				return Ok(one_or_inside(col, records).map(|predicate| {
+					if dynamic {
+						predicate.and(is_not_null_expr(lower_column_raw(col)))
+					} else {
+						predicate
+					}
+				}));
+			}
+			let Some((col, table)) = id_column(expr) else {
+				return Ok(None);
+			};
+			if !names_scanned_record(col) {
+				return Ok(None);
+			}
+			let Some((records, _)) = id_member_records(table, list, policy, false)? else {
+				return Ok(None);
+			};
+			Ok(one_or_inside(col, records))
+		}
+		_ => Ok(None),
+	}
+}
+
+/// The lookup of a link column compared for equality with a value that is not an `id` column.
+fn lower_link_lookup(
+	left: &BoundExpr,
+	right: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<Option<LogicalExpr>, PlanError> {
+	let (col, table, other) = match (link_column(left), link_column(right)) {
+		(Some((col, table)), None) => (col, table, right),
+		(None, Some((col, table))) => (col, table, left),
+		_ => return Ok(None),
+	};
+	if !names_scanned_record(col) {
+		return Ok(None);
+	}
+	Ok(match link_operand(table, other, policy)? {
+		LinkOperand::Record(record) => {
+			let dynamic = !matches!(record, LogicalExpr::RecordId(_));
+			let predicate = equal(lower_column_raw(col), record);
+			Some(if dynamic {
+				predicate.and(is_not_null_expr(lower_column_raw(col)))
+			} else {
+				predicate
+			})
+		}
+		LinkOperand::Subquery(_) | LinkOperand::Plain(_) => None,
+	})
+}
+
+/// The equality of `col` with the only record of `records`, or its membership of them.
+fn one_or_inside(col: &BoundColumnRef, mut records: Vec<LogicalExpr>) -> Option<LogicalExpr> {
+	match records.len() {
+		0 => None,
+		1 => records.pop().map(|record| equal(lower_column_raw(col), record)),
+		_ => Some(LogicalExpr::Binary {
+			left: Box::new(lower_column_raw(col)),
+			op: BinaryOperator::Inside,
+			right: Box::new(LogicalExpr::Array(records)),
+		}),
+	}
+}
+
+/// Membership of the link column `col` to `table` in an IN or NOT IN list: each member is the
+/// record it names, so the comparison is made on the
+/// stored links. A list with a member that holds a subquery cannot be converted, and compares the
+/// key of the column with its members as they are.
+fn lower_link_membership(
+	col: &BoundColumnRef,
+	table: &str,
+	list: &[BoundExpr],
+	negated: bool,
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	let mut records = Vec::with_capacity(list.len());
+	for member in list {
+		match link_comparison_operand(table, member, policy)? {
+			LinkOperand::Record(record) | LinkOperand::Plain(record) => records.push(record),
+			LinkOperand::Subquery(_) => {
+				let members = list
+					.iter()
+					.map(|member| lower_bound_expr(member, policy))
+					.collect::<Result<Vec<_>, _>>()?;
+				return Ok(sql_membership(
+					key_of(lower_column_raw(col), true),
+					LogicalExpr::Array(members),
+					negated,
+				));
+			}
+		}
+	}
+	Ok(sql_membership(lower_column_raw(col), LogicalExpr::Array(records), negated))
+}
+
+/// Lower the operands of a comparison of two values for equality or distinctness.
+///
+/// Two `id` columns of the same base table are compared as the stored record ids, which is the same
+/// comparison as of their keys. The `id` of a base table and a column or an expression are
+/// compared as the stored record id and the record of the table the value names, which is the
+/// record the key names when the value holds a key and the record the link names when it holds one.
+///
+/// A link column is compared as stored with the `id` of its target table and with a link column to
+/// the same table. Compared with anything else it is compared with the record of its target table
+/// the other operand names, and with the key of the link when the other operand holds a subquery.
+fn lower_operands(
+	left: &BoundExpr,
+	op: BoundBinaryOp,
+	right: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<(LogicalExpr, LogicalExpr), PlanError> {
+	if matches!(
+		op,
+		BoundBinaryOp::Equal
+			| BoundBinaryOp::NotEqual
+			| BoundBinaryOp::NullSafeEqual
+			| BoundBinaryOp::DistinctFrom
+	) {
+		if let Some((l, r)) = same_table_pair(left, right) {
+			return Ok((lower_column_raw(l), lower_column_raw(r)));
+		}
+		match (id_column(left), id_column(right)) {
+			(Some((l, l_table)), Some((r, r_table)))
+				if l_table == r_table
+					&& matches!(op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) =>
+			{
+				return Ok((lower_column_raw(l), lower_column_raw(r)));
+			}
+			(Some((col, table)), None) if is_key_or_link(right) => {
+				let record = record_or_value(table, lower_stored(right, policy)?);
+				return Ok((lower_column_raw(col), record));
+			}
+			(None, Some((col, table))) if is_key_or_link(left) => {
+				let record = record_or_value(table, lower_stored(left, policy)?);
+				return Ok((record, lower_column_raw(col)));
+			}
+			(None, None) => {
+				if let Some((col, table)) = link_column(left) {
+					return link_comparison(col, table, right, policy);
+				}
+				if let Some((col, table)) = link_column(right) {
+					let (column, operand) = link_comparison(col, table, left, policy)?;
+					return Ok((operand, column));
+				}
+			}
+			_ => {}
+		}
+	}
+	Ok((lower_bound_expr(left, policy)?, lower_bound_expr(right, policy)?))
+}
+
+/// The two sides of a comparison of the link column `col` to `table` with `other`: the column (or
+/// its key when `other` holds a subquery) and what `other` is compared as.
+fn link_comparison(
+	col: &BoundColumnRef,
+	table: &str,
+	other: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<(LogicalExpr, LogicalExpr), PlanError> {
+	Ok(match link_comparison_operand(table, other, policy)? {
+		LinkOperand::Record(other) | LinkOperand::Plain(other) => (lower_column_raw(col), other),
+		LinkOperand::Subquery(other) => (key_of(lower_column_raw(col), true), other),
+	})
+}
+
 /// Lower binary operations preserving SQL 3VL, NULL propagation, and dialect rules.
 fn lower_binary_op(
 	left: &BoundExpr,
@@ -823,8 +1126,16 @@ fn lower_binary_op(
 	right: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<LogicalExpr, PlanError> {
-	let l = lower_bound_expr(left, policy)?;
-	let r = lower_bound_expr(right, policy)?;
+	if matches!(
+		op,
+		BoundBinaryOp::JsonExtract
+			| BoundBinaryOp::JsonExtractText
+			| BoundBinaryOp::JsonPathExtractText
+			| BoundBinaryOp::JsonContains
+	) {
+		return lower_json_op(left, op, right, policy);
+	}
+	let (l, r) = lower_operands(left, op, right, policy)?;
 
 	match op {
 		BoundBinaryOp::NullSafeEqual => {
@@ -1063,55 +1374,6 @@ fn lower_binary_op(
 				})))
 			}
 		}
-		BoundBinaryOp::JsonExtract => {
-			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let extract_expr = match right {
-				BoundExpr::Literal(BoundLiteral::String(field)) => LogicalExpr::Access {
-					base: Box::new(l),
-					field: Strand::from(field.as_str()),
-				},
-				_ => LogicalExpr::Index {
-					base: Box::new(l),
-					index: Box::new(r),
-				},
-			};
-			Ok(LogicalExpr::If(Box::new(LogicalIf {
-				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(extract_expr),
-			})))
-		}
-		BoundBinaryOp::JsonExtractText | BoundBinaryOp::JsonPathExtractText => {
-			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			let extract_expr = match right {
-				BoundExpr::Literal(BoundLiteral::String(field)) => LogicalExpr::Access {
-					base: Box::new(l),
-					field: Strand::from(field.as_str()),
-				},
-				_ => LogicalExpr::Index {
-					base: Box::new(l),
-					index: Box::new(r),
-				},
-			};
-			let text_expr = LogicalExpr::Call(Box::new(LogicalCall {
-				receiver: Function::Normal("type::string".to_string()),
-				args: vec![extract_expr],
-			}));
-			Ok(LogicalExpr::If(Box::new(LogicalIf {
-				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(text_expr),
-			})))
-		}
-		BoundBinaryOp::JsonContains => {
-			let null_check = is_null_expr(l.clone()).or(is_null_expr(r.clone()));
-			Ok(LogicalExpr::If(Box::new(LogicalIf {
-				branches: vec![(null_check, LogicalExpr::Literal(LogicalLiteral::Null))],
-				otherwise: Some(LogicalExpr::Binary {
-					left: Box::new(l),
-					op: BinaryOperator::Contain,
-					right: Box::new(r),
-				}),
-			})))
-		}
 		_ => {
 			let bin_op = match op {
 				BoundBinaryOp::Add => BinaryOperator::Add,
@@ -1137,6 +1399,387 @@ fn lower_binary_op(
 			})))
 		}
 	}
+}
+
+/// The most steps a `#>>` path may take: each step is one level of the lowered expression, so a
+/// path from a client is bounded rather than lowered to any depth.
+const MAX_JSON_PATH_STEPS: usize = 64;
+
+/// Lower `->`, `->>`, `#>>` and `@>`.
+///
+/// `->` gives the value it reaches with an absent one read as NULL, and `->>` and `#>>` give its
+/// text. The operators of a chain such as `doc -> 'a' -> 'b' ->> 'c'` are read as one place, so
+/// only the outermost converts what it reaches.
+fn lower_json_op(
+	left: &BoundExpr,
+	op: BoundBinaryOp,
+	right: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	if op == BoundBinaryOp::JsonContains {
+		return Err(PlanError::UnsupportedExpression("the @> containment operator".into()));
+	}
+	let Some(place) = lower_json_place(left, op, right, policy)? else {
+		return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+	};
+	Ok(match op {
+		BoundBinaryOp::JsonExtract => absent_as_null(place),
+		_ => json_text(place),
+	})
+}
+
+/// `operand IS NULL`.
+///
+/// The test holds for NONE as it does for NULL, and a JSON operator is NULL or NONE exactly when
+/// the place it reaches is, so a JSON operator is tested at that place. Neither the NONE read as
+/// NULL nor the text of what it reaches is of use to the test. A [place](is_json_place) is read
+/// by each of the two comparisons, and any other value is evaluated once.
+fn lower_null_test(operand: &BoundExpr, policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	let BoundExpr::Binary {
+		left,
+		op:
+			op @ (BoundBinaryOp::JsonExtract
+			| BoundBinaryOp::JsonExtractText
+			| BoundBinaryOp::JsonPathExtractText),
+		right,
+	} = operand
+	else {
+		return Ok(is_null_expr(lower_stored(operand, policy)?));
+	};
+	Ok(match lower_json_place(left, *op, right, policy)? {
+		Some(place) if is_json_place(&place) => is_null_expr(place),
+		Some(value) => value_is_null(value),
+		None => LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+	})
+}
+
+/// Whether `value` is NULL or NONE, with `value` evaluated once: an optional step gives NONE or
+/// NULL for either, and `false` for any other value.
+fn value_is_null(value: LogicalExpr) -> LogicalExpr {
+	LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Optional {
+			base: Box::new(value),
+			then: Box::new(LogicalExpr::Literal(LogicalLiteral::Bool(false))),
+		}),
+		op: BinaryOperator::NullCoalescing,
+		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Bool(true))),
+	}
+}
+
+/// The value `->`, `->>` or `#>>` reaches, read where it lies: NONE when it reaches nothing,
+/// and `None` when the operator is NULL whatever the value is.
+///
+/// The place is neither read as NULL nor converted to text, so that a consumer that is not
+/// interested in either, and a step that continues from it, read it without copying it.
+fn lower_json_place(
+	left: &BoundExpr,
+	op: BoundBinaryOp,
+	right: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<Option<LogicalExpr>, PlanError> {
+	let base = lower_json_base(left, policy)?;
+	if op == BoundBinaryOp::JsonPathExtractText {
+		let BoundExpr::Literal(BoundLiteral::String(path)) = right else {
+			return Err(PlanError::UnsupportedExpression(
+				"the path of #>> must be a text array literal such as '{a,b}'".into(),
+			));
+		};
+		let elements = parse_text_array_literal(path).ok_or_else(|| {
+			PlanError::InvalidTextRepresentation(format!("malformed array literal: \"{path}\""))
+		})?;
+		// A path with a NULL element reaches nothing.
+		let Some(steps) = elements.into_iter().collect::<Option<Vec<String>>>() else {
+			return Ok(None);
+		};
+		if steps.len() > MAX_JSON_PATH_STEPS {
+			return Err(PlanError::UnsupportedExpression(format!(
+				"the path of #>> has more than {MAX_JSON_PATH_STEPS} steps"
+			)));
+		}
+		let mut two_sided_steps = 0;
+		return Ok(base.map(|base| {
+			steps.iter().fold(base, |base, step| json_path_step(base, step, &mut two_sided_steps))
+		}));
+	}
+	let operand = json_operand(op, right)?;
+	let Some(base) = base else {
+		return Ok(None);
+	};
+	Ok(match operand {
+		JsonOperand::Null => None,
+		JsonOperand::Key(key) => Some(json_member(base, &key)),
+		JsonOperand::Element(index) => Some(json_element(base, index)),
+		JsonOperand::Dynamic => Some(LogicalExpr::Index {
+			base: Box::new(base),
+			index: Box::new(lower_bound_expr(right, policy)?),
+		}),
+	})
+}
+
+/// The value a JSON operator takes its steps from. A `->` is the place it reaches, so a chain of
+/// them is one place; `None` is a value that is NULL.
+fn lower_json_base(
+	left: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Result<Option<LogicalExpr>, PlanError> {
+	match left {
+		BoundExpr::Binary {
+			left,
+			op: BoundBinaryOp::JsonExtract,
+			right,
+		} => lower_json_place(left, BoundBinaryOp::JsonExtract, right, policy),
+		_ => lower_bound_expr(left, policy).map(Some),
+	}
+}
+
+/// The right operand of `->` and `->>`, by the step it takes.
+enum JsonOperand {
+	/// A text literal: names a member of an object.
+	Key(String),
+	/// An integer literal: selects an element of an array, counting from the end when negative.
+	Element(i64),
+	/// A NULL literal: the result is NULL.
+	Null,
+	/// Any other operand, used as the index of the value as it evaluates: text names a member of
+	/// an object and nothing else, and an integer is an element of an array counted from the
+	/// start, or the member of an object that is named by the same text.
+	Dynamic,
+}
+
+/// The step `->` or `->>` takes for `operand`.
+///
+/// PostgreSQL defines the operators for a text key and for an `integer` index. A literal of any
+/// other type, which is an integer that does not fit 32 bits, a number with a fraction or a
+/// boolean, has no operator and is refused.
+fn json_operand(op: BoundBinaryOp, operand: &BoundExpr) -> Result<JsonOperand, PlanError> {
+	let (negated, literal) = match operand {
+		BoundExpr::Literal(literal) => (false, literal),
+		BoundExpr::Unary {
+			op: BoundUnaryOp::Negate,
+			expr,
+		} => match &**expr {
+			BoundExpr::Literal(literal) => (true, literal),
+			_ => return Ok(JsonOperand::Dynamic),
+		},
+		_ => return Ok(JsonOperand::Dynamic),
+	};
+	let undefined = |operand_type: &str| {
+		let operator = if op == BoundBinaryOp::JsonExtract {
+			"->"
+		} else {
+			"->>"
+		};
+		PlanError::UndefinedOperator(format!("jsonb {operator} {operand_type}"))
+	};
+	match literal {
+		BoundLiteral::String(key) if !negated => Ok(JsonOperand::Key(key.clone())),
+		BoundLiteral::Null if !negated => Ok(JsonOperand::Null),
+		BoundLiteral::Integer(index) => match i32::try_from(*index) {
+			Ok(index) if negated => Ok(JsonOperand::Element(-i64::from(index))),
+			Ok(index) => Ok(JsonOperand::Element(i64::from(index))),
+			Err(_) => Err(undefined("bigint")),
+		},
+		BoundLiteral::Float(_) => Err(undefined("numeric")),
+		BoundLiteral::Boolean(_) => Err(undefined("boolean")),
+		BoundLiteral::String(_) | BoundLiteral::Null => Ok(JsonOperand::Dynamic),
+	}
+}
+
+fn json_call(name: &str, args: Vec<LogicalExpr>) -> LogicalExpr {
+	LogicalExpr::Call(Box::new(LogicalCall {
+		receiver: Function::Normal(name.to_string()),
+		args,
+	}))
+}
+
+fn json_integer(value: i64) -> LogicalExpr {
+	LogicalExpr::Literal(LogicalLiteral::Integer(value))
+}
+
+/// The member `key` of `base` when `base` is an object, and NONE for an array, a scalar, NULL or
+/// NONE. An index by text reads an object and nothing else, so `base` is read once and is not
+/// mapped over the elements of an array.
+fn json_member(base: LogicalExpr, key: &str) -> LogicalExpr {
+	LogicalExpr::Index {
+		base: Box::new(base),
+		index: Box::new(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(key)))),
+	}
+}
+
+/// Whether `value` is an array: the slice `[0..0]` of an array is the empty array and of
+/// anything else is NONE. The slice is read from `value` where it lies, so `value` is not copied
+/// out as it is to a function.
+fn json_is_array(value: LogicalExpr) -> LogicalExpr {
+	LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Index {
+			base: Box::new(value),
+			index: Box::new(LogicalExpr::Binary {
+				left: Box::new(json_integer(0)),
+				op: BinaryOperator::Range,
+				right: Box::new(json_integer(0)),
+			}),
+		}),
+		op: BinaryOperator::ExactEqual,
+		right: Box::new(LogicalExpr::Array(Vec::new())),
+	}
+}
+
+/// The element `index` of `base` when `base` is an array, counting from the end when `index` is
+/// negative: NONE for an index out of range in either direction and for a value that is not an
+/// array.
+///
+/// An index from the start is the one-element slice `[index..index + 1]`, which is NONE unless
+/// `base` is an array, and the last element is `[$]`, which is NONE unless `base` is a non-empty
+/// array. Both read `base` where it lies and copy only the element. An index before the last
+/// element needs the length of the array, so `base` is bound as a value and copied out whole.
+fn json_element(base: LogicalExpr, index: i64) -> LogicalExpr {
+	if index >= 0 {
+		let Some(end) = index.checked_add(1) else {
+			return LogicalExpr::Literal(LogicalLiteral::None);
+		};
+		return LogicalExpr::Index {
+			base: Box::new(LogicalExpr::Index {
+				base: Box::new(base),
+				index: Box::new(LogicalExpr::Binary {
+					left: Box::new(json_integer(index)),
+					op: BinaryOperator::Range,
+					right: Box::new(json_integer(end)),
+				}),
+			}),
+			index: Box::new(json_integer(0)),
+		};
+	}
+	if index == -1 {
+		return LogicalExpr::Last(Box::new(base));
+	}
+	json_element_or(base, index, None)
+}
+
+/// The element `index` of `base` when `base` is an array, counting from the end when `index` is
+/// negative, and `otherwise` for any other value, NONE when there is none. `base` is evaluated
+/// once, as the value `otherwise` is over, and is copied out whole.
+fn json_element_or(base: LogicalExpr, index: i64, otherwise: Option<LogicalExpr>) -> LogicalExpr {
+	LogicalExpr::Optional {
+		base: Box::new(base),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				json_is_array(LogicalExpr::Current),
+				json_call("array::at", vec![LogicalExpr::Current, json_integer(index)]),
+			)],
+			otherwise,
+		}))),
+	}
+}
+
+/// The array index a step of a `#>>` path spells, as PostgreSQL reads one: optional leading
+/// whitespace, an optional sign and decimal digits that fit a 32-bit integer.
+fn json_path_index(step: &str) -> Option<i64> {
+	let step = step.trim_start_matches(is_array_space);
+	let digits = step.strip_prefix(['+', '-']).unwrap_or(step);
+	if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+		return None;
+	}
+	step.parse::<i32>().ok().map(i64::from)
+}
+
+/// How many steps of one `#>>` path read their value twice.
+///
+/// A step that reaches the member named by its text on an object and the element it indexes on an
+/// array reads both of them from the value in place, which evaluates the value twice. Each such
+/// step doubles the expression of the steps before it, so a path takes only this many, and only
+/// over a [place](is_json_place); the later ones, and every one over a value that is not a place,
+/// evaluate the value once and copy it out whole.
+pub(crate) const MAX_TWO_SIDED_STEPS: usize = 3;
+
+/// Whether `expr` is a place: a chain of reads from the row, a parameter or an outer row, by a
+/// literal key or index. A place can be evaluated any number of times to the same value, at the
+/// cost of the reads alone, so a step may read it twice. A call, a subquery or any other
+/// expression may be neither deterministic nor cheap, and is evaluated once.
+fn is_json_place(expr: &LogicalExpr) -> bool {
+	match expr {
+		LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Param(_) => true,
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::Last(base) => is_json_place(base),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => is_json_place(base) && is_literal_index(index),
+		// The value of a step that reads both an object and an array.
+		LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::NullCoalescing,
+			right,
+		} => is_json_place(left) && is_json_place(right),
+		_ => false,
+	}
+}
+
+/// Whether `index` is a literal or a range of literals.
+fn is_literal_index(index: &LogicalExpr) -> bool {
+	match index {
+		LogicalExpr::Literal(_) => true,
+		LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Range,
+			right,
+		} => matches!(**left, LogicalExpr::Literal(_)) && matches!(**right, LogicalExpr::Literal(_)),
+		_ => false,
+	}
+}
+
+/// One step of a `#>>` path. Every step is text: on an object it names a member, on an array it
+/// is an index when it spells an integer, and on anything else it reaches nothing.
+///
+/// `two_sided_steps` counts the steps of the path so far that read their value twice.
+fn json_path_step(base: LogicalExpr, step: &str, two_sided_steps: &mut usize) -> LogicalExpr {
+	let Some(index) = json_path_index(step) else {
+		return json_member(base, step);
+	};
+	if index >= 0 && index.to_string() == step {
+		// The same text names the member of an object and the element of an array.
+		return LogicalExpr::Index {
+			base: Box::new(base),
+			index: Box::new(json_integer(index)),
+		};
+	}
+	if index >= -1 && *two_sided_steps < MAX_TWO_SIDED_STEPS && is_json_place(&base) {
+		*two_sided_steps += 1;
+		// At most one side reaches a value: a text index reads an object only, and the element
+		// of an array is NONE for any other value.
+		return LogicalExpr::Binary {
+			left: Box::new(json_member(base.clone(), step)),
+			op: BinaryOperator::NullCoalescing,
+			right: Box::new(json_element(base, index)),
+		};
+	}
+	json_element_or(base, index, Some(json_member(LogicalExpr::Current, step)))
+}
+
+/// `value` with NONE read as NULL. A member that is not there and a JSON null are both NULL.
+fn absent_as_null(value: LogicalExpr) -> LogicalExpr {
+	LogicalExpr::Binary {
+		left: Box::new(value),
+		op: BinaryOperator::NullCoalescing,
+		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+	}
+}
+
+/// The text `->>` and `#>>` give an extracted JSON value: NULL when the value is absent or null,
+/// a string as itself, and anything else as its JSON text. `value` is evaluated once.
+fn json_text(value: LogicalExpr) -> LogicalExpr {
+	absent_as_null(LogicalExpr::Optional {
+		base: Box::new(value),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				json_call("type::is_string", vec![LogicalExpr::Current]),
+				LogicalExpr::Current,
+			)],
+			otherwise: Some(json_call("encoding::json::encode", vec![LogicalExpr::Current])),
+		}))),
+	})
 }
 
 /// Helper to create `(expr == NULL || expr == NONE)`.
@@ -1301,7 +1944,7 @@ pub fn lower_bound_target(
 	if target.is_wildcard {
 		return Ok(LogicalField::All);
 	}
-	let expr = lower_bound_expr(&target.expr, policy)?;
+	let expr = lower_stored(&target.expr, policy)?;
 	let alias = match &target.alias {
 		Some(a) => Some(OutputPath::field(a.clone())),
 		None => match &target.expr {
@@ -1340,7 +1983,12 @@ pub fn lower_bound_order(
 	order: &BoundOrder,
 	policy: &DialectPolicy,
 ) -> Result<Vec<LogicalOrder>, PlanError> {
-	let value = lower_bound_expr(&order.expr, policy)?;
+	// The stored record ids of a table order as their keys do, so an `id` column and a link column
+	// sort as stored.
+	let value = match id_column(&order.expr).or_else(|| link_column(&order.expr)) {
+		Some((col, _)) => lower_column_raw(col),
+		None => lower_bound_expr(&order.expr, policy)?,
+	};
 	let direction = match order.direction {
 		BoundOrderDirection::Asc => true,
 		BoundOrderDirection::Desc => false,
@@ -1528,4 +2176,77 @@ fn lower_system_var(
 		_ => LogicalExpr::Literal(LogicalLiteral::Null),
 	};
 	Ok(val)
+}
+
+fn current_item(index: i64) -> LogicalExpr {
+	LogicalExpr::Index {
+		base: Box::new(LogicalExpr::Current),
+		index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(index))),
+	}
+}
+
+fn sql_membership(value: LogicalExpr, items: LogicalExpr, negated: bool) -> LogicalExpr {
+	let inside = |value| LogicalExpr::Binary {
+		left: Box::new(value),
+		op: BinaryOperator::Inside,
+		right: Box::new(current_item(1)),
+	};
+	LogicalExpr::Optional {
+		base: Box::new(LogicalExpr::Array(vec![value, items])),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![
+				(
+					equal(current_item(1), LogicalExpr::Array(Vec::new())),
+					LogicalExpr::Literal(LogicalLiteral::Bool(negated)),
+				),
+				(is_null_expr(current_item(0)), LogicalExpr::Literal(LogicalLiteral::Null)),
+				(inside(current_item(0)), LogicalExpr::Literal(LogicalLiteral::Bool(!negated))),
+				(
+					inside(LogicalExpr::Literal(LogicalLiteral::Null))
+						.or(inside(LogicalExpr::Literal(LogicalLiteral::None))),
+					LogicalExpr::Literal(LogicalLiteral::Null),
+				),
+			],
+			otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Bool(negated))),
+		}))),
+	}
+}
+
+fn sql_between(
+	value: LogicalExpr,
+	low: LogicalExpr,
+	high: LogicalExpr,
+	negated: bool,
+) -> LogicalExpr {
+	let comparison = |op, bound: i64| {
+		LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				is_null_expr(current_item(0)).or(is_null_expr(current_item(bound))),
+				LogicalExpr::Literal(LogicalLiteral::Null),
+			)],
+			otherwise: Some(LogicalExpr::Binary {
+				left: Box::new(current_item(0)),
+				op,
+				right: Box::new(current_item(bound)),
+			}),
+		}))
+	};
+	let ge = comparison(BinaryOperator::MoreThanEqual, 1);
+	let le = comparison(BinaryOperator::LessThanEqual, 2);
+	LogicalExpr::Optional {
+		base: Box::new(LogicalExpr::Array(vec![value, low, high])),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![
+				(
+					is_false_expr(ge.clone()).or(is_false_expr(le.clone())),
+					LogicalExpr::Literal(LogicalLiteral::Bool(negated)),
+				),
+				(
+					is_true_expr(ge).and(is_true_expr(le)),
+					LogicalExpr::Literal(LogicalLiteral::Bool(!negated)),
+				),
+			],
+			otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+		}))),
+	}
 }

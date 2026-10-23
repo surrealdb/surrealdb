@@ -245,6 +245,11 @@ fn translate_table_ref(
 			}
 			Ok(())
 		}
+		TableRef::Function {
+			..
+		} => Err(TranslationError::Unsupported(
+			"function tables require logical planning".to_string(),
+		)),
 		TableRef::Subquery {
 			query,
 			alias,

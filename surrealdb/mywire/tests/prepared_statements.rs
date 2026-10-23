@@ -738,3 +738,221 @@ async fn test_prepared_statement_unbound_param_rejected_in_simple_query() {
 	assert_eq!(err_code, 1064);
 	assert_eq!(&err_resp[4..9], b"42000");
 }
+
+#[tokio::test]
+async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json() {
+	let ds = setup_test_datastore().await;
+	let ready = Arc::new(AtomicBool::new(true));
+	let shutdown = CancellationToken::new();
+
+	let addr = surrealdb_mywire::start(
+		"127.0.0.1:0".parse().unwrap(),
+		ds,
+		ready,
+		shutdown.clone(),
+		None,
+		None,
+	)
+	.await
+	.unwrap();
+
+	let mut stream = TcpStream::connect(addr).await.unwrap();
+	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
+	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
+
+	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
+	execute_query(&mut stream, "DEFINE TABLE person SCHEMALESS").await;
+	execute_query(
+		&mut stream,
+		"CREATE person:tobie CONTENT { tags: ['rust', 'db'], born: d'1980-01-01T00:00:00Z', \
+		 seen: d'1980-01-01T12:30:45.123456Z', took: 26h } RETURN NONE",
+	)
+	.await;
+
+	let mut prep = vec![COM_STMT_PREPARE];
+	prep.extend_from_slice(b"SELECT born, seen, tags, took FROM person:tobie");
+	write_packet(&mut stream, 0, &prep).await;
+	let (_, prep_resp) = read_packet(&mut stream).await;
+	let ok_prep = StmtPrepareOk::deserialize(&prep_resp).expect("Valid StmtPrepareOk");
+	assert_eq!(ok_prep.num_columns, 0, "the columns of a SurrealQL statement are not known yet");
+
+	let mut exec = vec![COM_STMT_EXECUTE];
+	exec.extend_from_slice(&ok_prep.statement_id.to_le_bytes());
+	exec.push(CURSOR_TYPE_NO_CURSOR);
+	exec.extend_from_slice(&1u32.to_le_bytes());
+	write_packet(&mut stream, 0, &exec).await;
+
+	let (_, col_count) = read_packet(&mut stream).await;
+	assert_eq!(col_count[0], 4);
+	let mut types = Vec::new();
+	for _ in 0..4 {
+		let (_, def) = read_packet(&mut stream).await;
+		let def = ColumnDefinition41::deserialize(&def).expect("Valid column def");
+		types.push((def.name, def.column_type));
+	}
+	assert_eq!(
+		types,
+		vec![
+			("born".to_string(), MYSQL_TYPE_DATETIME),
+			("seen".to_string(), MYSQL_TYPE_DATETIME),
+			("tags".to_string(), MYSQL_TYPE_JSON),
+			("took".to_string(), MYSQL_TYPE_TIME),
+		]
+	);
+
+	let (_, row) = read_packet(&mut stream).await;
+	let mut expected: Vec<u8> = vec![0x00, 0x00];
+	// born: DATETIME 1980-01-01 00:00:00 is a date-only value (length 4).
+	expected.extend_from_slice(&[4, 0xbc, 0x07, 1, 1]);
+	// seen: DATETIME 1980-01-01 12:30:45.123456 (length 11).
+	expected.extend_from_slice(&[11, 0xbc, 0x07, 1, 1, 12, 30, 45, 0x40, 0xe2, 0x01, 0x00]);
+	// tags: JSON as a length-encoded string.
+	expected.push(13);
+	expected.extend_from_slice(b"[\"rust\",\"db\"]");
+	// took: TIME of 26h is 1 day 02:00:00 (length 8, positive).
+	expected.extend_from_slice(&[8, 0, 1, 0, 0, 0, 2, 0, 0]);
+	assert_eq!(row, expected);
+
+	let (_, term) = read_packet(&mut stream).await;
+	assert_eq!(term[0], 0xfe, "Expected terminating EOF_OK packet");
+	shutdown.cancel();
+}
+
+async fn execute_prepared(
+	stream: &mut TcpStream,
+	sql: &str,
+) -> (u64, Vec<(String, u8)>, Vec<Vec<u8>>) {
+	let mut prep = vec![COM_STMT_PREPARE];
+	prep.extend_from_slice(sql.as_bytes());
+	write_packet(stream, 0, &prep).await;
+	let (_, prep_resp) = read_packet(stream).await;
+	let ok_prep = StmtPrepareOk::deserialize(&prep_resp).expect("Valid StmtPrepareOk");
+	for _ in 0..ok_prep.num_columns {
+		read_packet(stream).await;
+	}
+	let mut exec = vec![COM_STMT_EXECUTE];
+	exec.extend_from_slice(&ok_prep.statement_id.to_le_bytes());
+	exec.push(CURSOR_TYPE_NO_CURSOR);
+	exec.extend_from_slice(&1u32.to_le_bytes());
+	write_packet(stream, 0, &exec).await;
+	let (_, count) = read_packet(stream).await;
+	assert!(count[0] != 0xff && count[0] != 0x00, "a result set was expected: {count:?}");
+	let mut columns = Vec::new();
+	for _ in 0..count[0] {
+		let (_, def) = read_packet(stream).await;
+		let def = ColumnDefinition41::deserialize(&def).expect("Valid column def");
+		columns.push((def.name, def.column_type));
+	}
+	let mut rows = Vec::new();
+	loop {
+		let (_, pkt) = read_packet(stream).await;
+		if pkt[0] == 0xfe && pkt.len() < 9 {
+			break;
+		}
+		rows.push(pkt);
+	}
+	(u64::from(ok_prep.num_columns), columns, rows)
+}
+
+#[tokio::test]
+async fn test_prepared_statement_mysql_dialect_shows_record_ids_as_keys_and_lists_wildcard_columns()
+{
+	let ds = setup_test_datastore().await;
+	let ready = Arc::new(AtomicBool::new(true));
+	let shutdown = CancellationToken::new();
+	let addr = surrealdb_mywire::start(
+		"127.0.0.1:0".parse().unwrap(),
+		ds,
+		ready,
+		shutdown.clone(),
+		None,
+		None,
+	)
+	.await
+	.unwrap();
+	let mut stream = TcpStream::connect(addr).await.unwrap();
+	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
+	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
+
+	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
+	execute_query(&mut stream, "DEFINE TABLE emp SCHEMALESS").await;
+	execute_query(&mut stream, "CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE").await;
+	execute_query(&mut stream, "SET dialect = 'mysql'").await;
+
+	// Named columns are typed before the statement runs, and the id and the link are keys.
+	let (prepared_columns, columns, rows) =
+		execute_prepared(&mut stream, "SELECT id, dept FROM emp WHERE name = 'Eve'").await;
+	assert_eq!(prepared_columns, 2);
+	assert_eq!(columns.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["id", "dept"]);
+	assert_eq!(rows, vec![vec![0x00, 0x00, 1, b'7', 1, b'1']]);
+
+	// A * the planner cannot list is described when the statement runs, from its rows.
+	let (prepared_columns, columns, rows) =
+		execute_prepared(&mut stream, "SELECT * FROM emp WHERE name = 'Eve'").await;
+	assert_eq!(prepared_columns, 0);
+	assert_eq!(columns.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["dept", "id", "name"]);
+	let mut expected: Vec<u8> = vec![0x00, 0x00];
+	expected.extend_from_slice(&1i64.to_le_bytes());
+	expected.extend_from_slice(&7i64.to_le_bytes());
+	expected.extend_from_slice(&[3, b'E', b'v', b'e']);
+	assert_eq!(rows, vec![expected]);
+
+	// With no rows the statement still answers with a result set.
+	let (_, columns, rows) =
+		execute_prepared(&mut stream, "SELECT * FROM emp WHERE name = 'nobody'").await;
+	assert!(!columns.is_empty());
+	assert!(rows.is_empty());
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_prepared_statement_mysql_dialect_writes_a_key_into_a_link_field_and_finds_it_again() {
+	let ds = setup_test_datastore().await;
+	let ready = Arc::new(AtomicBool::new(true));
+	let shutdown = CancellationToken::new();
+	let addr = surrealdb_mywire::start(
+		"127.0.0.1:0".parse().unwrap(),
+		ds,
+		ready,
+		shutdown.clone(),
+		None,
+		None,
+	)
+	.await
+	.unwrap();
+	let mut stream = TcpStream::connect(addr).await.unwrap();
+	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
+	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
+
+	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
+	execute_query(&mut stream, "DEFINE TABLE dept SCHEMALESS").await;
+	execute_query(&mut stream, "CREATE dept:1 SET dname = 'Engineering' RETURN NONE").await;
+	execute_query(&mut stream, "DEFINE TABLE emp SCHEMAFULL").await;
+	execute_query(&mut stream, "DEFINE FIELD name ON emp TYPE string").await;
+	execute_query(&mut stream, "DEFINE FIELD dept ON emp TYPE record<dept>").await;
+	execute_query(&mut stream, "SET dialect = 'mysql'").await;
+
+	// A plain key is stored as the link to the declared table, by a simple query and by a
+	// prepared statement alike.
+	execute_query(&mut stream, "INSERT INTO emp (id, name, dept) VALUES (8, 'Sam', 1)").await;
+	let (_, _, rows) = execute_prepared(&mut stream, "SELECT name FROM emp WHERE dept = 1").await;
+	assert_eq!(rows, vec![vec![0x00, 0x00, 3, b'S', b'a', b'm']]);
+	let (_, _, rows) = execute_prepared(&mut stream, "SELECT name FROM emp WHERE dept = 2").await;
+	assert!(rows.is_empty());
+
+	// What is not a key reaches the field's own type check.
+	let mut bad = vec![COM_QUERY];
+	bad.extend_from_slice(b"INSERT INTO emp (id, name, dept) VALUES (9, 'Bad', 1.5)");
+	write_packet(&mut stream, 0, &bad).await;
+	let (_, resp) = read_packet(&mut stream).await;
+	assert_eq!(resp[0], 0xff, "a float is no key of a link");
+
+	// The stored value is a link: SurrealQL follows it.
+	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
+	let mut query = vec![COM_QUERY];
+	query.extend_from_slice(b"SELECT VALUE dept.dname FROM emp:8");
+	write_packet(&mut stream, 0, &query).await;
+	let (_, count) = read_packet(&mut stream).await;
+	assert_eq!(count[0], 1, "one column");
+	shutdown.cancel();
+}

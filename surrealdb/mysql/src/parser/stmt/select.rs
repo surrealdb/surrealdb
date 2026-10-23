@@ -166,6 +166,29 @@ impl<'a> Parser<'a> {
 			if self.peek().kind == TokenKind::Star {
 				let s = self.bump().span;
 				projection.push(SelectItem::Wildcard(s));
+			} else if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Keyword(_))
+				&& self.peek_nth(1).kind == TokenKind::Dot
+				&& self.peek_nth(2).kind == TokenKind::Star
+			{
+				// `t.*`; a quoted `*` is an identifier, and `t.`*`` is a column like any other.
+				let (table, start) = self.parse_ident()?;
+				self.bump(); // '.'
+				let end = self.bump().span;
+				projection.push(SelectItem::QualifiedWildcard(vec![table], start.merge(end)));
+			} else if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Keyword(_))
+				&& self.peek_nth(1).kind == TokenKind::Dot
+				&& matches!(self.peek_nth(2).kind, TokenKind::Ident(_) | TokenKind::Keyword(_))
+				&& self.peek_nth(3).kind == TokenKind::Dot
+				&& self.peek_nth(4).kind == TokenKind::Star
+			{
+				// `db.t.*`
+				let (database, start) = self.parse_ident()?;
+				self.bump(); // '.'
+				let (table, _) = self.parse_ident()?;
+				self.bump(); // '.'
+				let end = self.bump().span;
+				projection
+					.push(SelectItem::QualifiedWildcard(vec![database, table], start.merge(end)));
 			} else {
 				let expr = self.parse_expr()?;
 				let alias = if self.peek_keyword() == Some(Keyword::As) {

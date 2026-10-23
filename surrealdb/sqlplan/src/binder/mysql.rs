@@ -113,11 +113,11 @@ pub fn bind_select(
 	for item in &select.projection {
 		match item {
 			SelectItem::Wildcard(_) => {
-				targets.extend(scope.expand_wildcard());
+				targets.extend(scope.expand_wildcard(catalog));
 			}
-			SelectItem::QualifiedWildcard(name, _) => {
-				let prefix = name.clone();
-				targets.extend(scope.expand_table_wildcard(&prefix, policy)?);
+			SelectItem::QualifiedWildcard(parts, _) => {
+				let prefix = parts.join(".");
+				targets.extend(scope.expand_table_wildcard(&prefix, policy, catalog)?);
 			}
 			SelectItem::Expr {
 				expr,
@@ -310,26 +310,30 @@ fn bind_table_ref(
 			{
 				let exposed_name = alias.clone().unwrap_or_else(|| cte.name.clone());
 
-				let columns = if !cte.columns.is_empty() {
-					Some(cte.columns.clone())
-				} else {
-					Some(
-						cte.query
-							.targets
-							.iter()
-							.enumerate()
-							.map(|(i, t)| {
-								t.alias.clone().unwrap_or_else(|| match &t.expr {
-									BoundExpr::Column(c) => c.column.clone(),
-									_ => format!("col_{}", i + 1),
+				let columns =
+					if cte.query.targets.iter().any(crate::ir::BoundTarget::is_unlisted_wildcard) {
+						None
+					} else if !cte.columns.is_empty() {
+						Some(cte.columns.clone())
+					} else {
+						Some(
+							cte.query
+								.targets
+								.iter()
+								.enumerate()
+								.map(|(i, t)| {
+									t.alias.clone().unwrap_or_else(|| match &t.expr {
+										BoundExpr::Column(c) => c.column.clone(),
+										_ => format!("col_{}", i + 1),
+									})
 								})
-							})
-							.collect(),
-					)
-				};
+								.collect(),
+						)
+					};
 
 				let relation_index =
 					scope.register_subquery_with_columns(&exposed_name, columns, policy);
+				scope.relations[relation_index].source_query = Some(Arc::from(cte.query.clone()));
 
 				return Ok(BoundTableSource::Subquery {
 					query: cte.query,
@@ -365,6 +369,7 @@ fn bind_table_ref(
 		} => {
 			let bound_sub = bind_select(subquery, catalog, policy, scope.parent.clone())?;
 			let relation_index = scope.register_subquery(alias, policy);
+			scope.relations[relation_index].source_query = Some(Arc::new(bound_sub.clone()));
 
 			Ok(BoundTableSource::Subquery {
 				query: Box::new(bound_sub),
@@ -469,7 +474,7 @@ pub fn bind_expr(
 			fields,
 			..
 		}) => {
-			let bound_col = scope.resolve_column(fields, policy)?;
+			let bound_col = scope.resolve_column(fields, policy, catalog)?;
 			Ok(BoundExpr::Column(bound_col))
 		}
 		Expr::Param(idx, _) => {
@@ -576,6 +581,10 @@ pub fn bind_expr(
 					relation_name: String::new(),
 					column: "*".to_string(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				})]
 			} else {
 				args.iter()

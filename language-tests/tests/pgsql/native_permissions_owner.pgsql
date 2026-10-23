@@ -23,10 +23,10 @@ value = "[{ dname: 'Eng', label: 'ENG', name: 'Alice' }, { dname: 'Eng', label: 
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Legal', name: 'Eve' }, { dname: 'Legal', name: 'Finn' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ hours: 10, name: 'Alice' }, { hours: 5, name: 'Cara' }]"
 
 [[test.results]]
-value = "[{ hours: NONE, name: 'Alice' }, { hours: NONE, name: 'Bob' }, { hours: NONE, name: 'Cara' }, { hours: NONE, name: 'Dan' }, { hours: NONE, name: 'Eve' }, { hours: NONE, name: 'Finn' }]"
+value = "[{ hours: 10, name: 'Alice' }, { hours: NONE, name: 'Bob' }, { hours: 5, name: 'Cara' }, { hours: NONE, name: 'Dan' }, { hours: NONE, name: 'Eve' }, { hours: NONE, name: 'Finn' }]"
 
 [[test.results]]
 value = "[{ n: 6 }]"
@@ -68,7 +68,7 @@ value = "[{ name: 'Alice' }, { name: 'Cara' }, { name: 'Eve' }]"
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }]"
 
 [[test.results]]
-value = "[{ did: 1, dname: 'Eng', floor: 3, id: dept:1, label: 'ENG' }, { did: 3, dname: 'Legal', floor: 5, id: dept:3, label: 'LEGAL' }, { did: 2, dname: 'Ops', floor: 1, id: dept:2, label: 'OPS' }]"
+value = "[{ did: 1, dname: 'Eng', floor: 3, id: 1, label: 'ENG' }, { did: 3, dname: 'Legal', floor: 5, id: 3, label: 'LEGAL' }, { did: 2, dname: 'Ops', floor: 1, id: 2, label: 'OPS' }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', n: 2 }, { dname: 'Legal', n: 2 }, { dname: 'Ops', n: 2 }]"

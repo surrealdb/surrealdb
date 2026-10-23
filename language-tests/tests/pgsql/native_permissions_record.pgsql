@@ -69,7 +69,7 @@ value = "[{ name: 'Alice' }, { name: 'Cara' }, { name: 'Eve' }]"
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }]"
 
 [[test.results]]
-value = "[{ did: 1, dname: 'Eng', floor: 3, id: dept:1, label: 'ENG' }, { did: 2, dname: 'Ops', floor: 1, id: dept:2, label: 'OPS' }]"
+value = "[{ did: 1, dname: 'Eng', floor: 3, id: 1, label: 'ENG' }, { did: 2, dname: 'Ops', floor: 1, id: 2, label: 'OPS' }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', n: 2 }, { dname: 'Ops', n: 1 }]"

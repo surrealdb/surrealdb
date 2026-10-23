@@ -14,7 +14,6 @@ use surrealdb_core::kvs::{
 	Datastore, Dialect, Isolation, QueryRequest, QuerySource, ReadOnlyOptions,
 	is_isolation_not_supported,
 };
-use surrealdb_core::pgsql::lower::lower_stmt;
 use surrealdb_core::syn;
 use surrealdb_core::syn::{Query as Ast, TopLevelExpr};
 use surrealdb_datastore::Transaction;
@@ -27,11 +26,12 @@ use surrealdb_pgsql::printer::{print_ident, print_string_literal};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::binder::pgsql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
+use surrealdb_sqlplan::descriptor::pgsql::{PgWriteAnalysis, PgWriteMetadata};
 use surrealdb_sqlplan::dialect::DialectPolicy;
 use surrealdb_sqlplan::observability::global_metrics;
 use surrealdb_sqlplan::{
-	LogicalOp, SqlDialect, lower_pgsql_ddl, lower_pgsql_delete, lower_pgsql_insert,
-	lower_pgsql_truncate, lower_pgsql_update,
+	EmptyCatalog, PlanError, SqlDialect, bind_and_lower_pgsql, lower_pgsql_ddl,
+	lower_pgsql_truncate,
 };
 use surrealdb_types::{RecordIdKey, SurrealValue, ToSql, Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,7 +46,7 @@ use tokio_util::sync::CancellationToken;
 use super::copy::{
 	BATCH_BYTES, BATCH_ROWS, Format, Ingest, MAX_RECORD_BYTES, Row, SLICE_BYTES, Scan, row_cost,
 };
-use super::error::PgError;
+use super::error::{PgError, unsupported_construct};
 use super::guc::{GucStore, ShowResult, normalize_name};
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
 use super::typing::{
@@ -82,13 +82,15 @@ const MAX_PORTAL_BYTES: usize = 64 * 1024 * 1024;
 /// allocation; `i16::MAX` also keeps the on-wire parameter count in range.
 const MAX_PARAMS: usize = i16::MAX as usize;
 
-/// Pre-parsed and pre-bound plan execution artifact.
+/// Pre-parsed execution artifact.
+///
+/// A PostgreSQL `SELECT`, `INSERT`, `UPDATE` or `DELETE` is never held here:
+/// how it lowers depends on the schema at the time it runs (a column declared
+/// `record<T>` is compared and assigned by its key), so it is parsed and
+/// lowered by the datastore on every execution.
 #[derive(Clone)]
 enum CachedPlan {
 	SurrealQl(syn::Query),
-	PgSelect {
-		plan: Box<LogicalOp>,
-	},
 	PgAst(Ast),
 }
 
@@ -131,8 +133,8 @@ struct PreparedStatement {
 	/// The (positional-rewritten) query text; used for GQL, and as the source
 	/// for error messages.
 	query: String,
-	/// Pre-parsed and pre-bound query plan (SurrealQL AST or PgSQL LogicalOp/AST),
-	/// cached at Parse so repeated Execute does not re-parse or re-bind.
+	/// Pre-parsed query (a SurrealQL AST, or the AST of a PostgreSQL DDL
+	/// statement), cached at Parse so repeated Execute does not re-parse it.
 	cached_plan: Option<CachedPlan>,
 	/// Client-declared parameter type OIDs (`0` = unspecified); may be shorter
 	/// than the number of `$n` placeholders in the query.
@@ -993,7 +995,7 @@ impl Connection {
 						skip_until_sync = true;
 						continue;
 					}
-					if let Err(err) = self.handle_parse(name, &query, param_types, &mut out) {
+					if let Err(err) = self.handle_parse(name, &query, param_types, &mut out).await {
 						self.note_extended_error(&err, &mut out);
 						skip_until_sync = true;
 					}
@@ -1187,7 +1189,26 @@ impl Connection {
 		}
 	}
 
-	fn handle_parse(
+	async fn describe_pgsql_write(
+		&self,
+		statement: &PgStatement,
+		declared: &[i32],
+	) -> Result<Option<PgWriteMetadata>, PgError> {
+		let Some(analysis) = PgWriteAnalysis::new(statement) else {
+			return Ok(None);
+		};
+		let catalog = self
+			.ds
+			.pgsql_catalog(&self.session, self.transaction.as_ref(), &analysis.query)
+			.await
+			.map_err(|error| PgError::from(&error))?;
+		analysis
+			.describe(&catalog, declared)
+			.map(Some)
+			.map_err(|error| PgError::new(error.pg_sqlstate(), error.to_string()))
+	}
+
+	async fn handle_parse(
 		&mut self,
 		name: String,
 		query: &str,
@@ -1295,6 +1316,12 @@ impl Connection {
 					let (_, positional) = rewrite_positional_params(query);
 					let mut param_types = param_types;
 					let mut param_count = param_types.len().max(positional);
+					if param_count > MAX_PARAMS {
+						return Err(PgError::protocol(format!(
+							"statement references {param_count} parameters, exceeding the maximum of {MAX_PARAMS}"
+						)));
+					}
+
 					let mut descriptor = None;
 					let mut cached_plan = None;
 					let mut kind = StatementKind::Other;
@@ -1304,16 +1331,17 @@ impl Connection {
 							PgStatement::Select(select) => {
 								kind = StatementKind::Select;
 								returns_rows = true;
-								let mut catalog = MemoryCatalog::new();
-								if let Some(db) = &self.session.db {
-									catalog.set_database(Some(db.clone()));
-								}
+								let catalog = self
+									.ds
+									.pgsql_catalog(&self.session, self.transaction.as_ref(), select)
+									.await
+									.map_err(|err| PgError::from(&err))?;
 								let policy = DialectPolicy::postgres();
 								if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
-									let desc = bound.describe(&catalog, &policy);
 									let param_desc = bound.describe_parameters(&catalog);
 									param_count = param_count.max(param_desc.param_types.len());
-									descriptor = Some(desc);
+									param_types.resize(param_count, 0);
+									descriptor = bound.describe_static(&catalog, &policy);
 									for (idx, sql_ty) in param_desc.param_types.iter().enumerate() {
 										if *sql_ty != surrealdb_sqlplan::SqlType::Unknown {
 											let oid = PgType::from_sql_type(*sql_ty).oid();
@@ -1327,38 +1355,35 @@ impl Connection {
 										}
 									}
 								}
-								if let Ok(op) = lower_stmt(&stmts[0]) {
-									cached_plan = Some(CachedPlan::PgSelect {
-										plan: Box::new(op),
-									});
+								// The statement is lowered here only to report what the planner
+								// refuses; the plan is not kept, because how a statement lowers
+								// depends on the schema when it runs.
+								// A feature the planner does not lower, a text it cannot read as
+								// the value it must be, or an operator that does not exist for
+								// its operands fails every Execute of this statement, so it is
+								// reported here as PostgreSQL reports a statement it cannot
+								// analyse.
+								if let Err(
+									err @ (PlanError::UnsupportedExpression(_)
+									| PlanError::UnsupportedStatement(_)
+									| PlanError::InvalidTextRepresentation(_)
+									| PlanError::UndefinedOperator(_)),
+								) = bind_and_lower_pgsql(select, &EmptyCatalog, &policy)
+								{
+									return Err(PgError::new(err.pg_sqlstate(), err.to_string()));
 								}
 							}
 							PgStatement::Insert(insert) => {
 								kind = StatementKind::Insert;
 								returns_rows = insert.returning.is_some();
-								if let Ok(expr) = lower_pgsql_insert(insert) {
-									cached_plan = Some(CachedPlan::PgAst(Ast {
-										expressions: vec![TopLevelExpr::Expr(expr)],
-									}));
-								}
 							}
 							PgStatement::Update(update) => {
 								kind = StatementKind::Update;
 								returns_rows = update.returning.is_some();
-								if let Ok(expr) = lower_pgsql_update(update) {
-									cached_plan = Some(CachedPlan::PgAst(Ast {
-										expressions: vec![TopLevelExpr::Expr(expr)],
-									}));
-								}
 							}
 							PgStatement::Delete(delete) => {
 								kind = StatementKind::Delete;
 								returns_rows = delete.returning.is_some();
-								if let Ok(expr) = lower_pgsql_delete(delete) {
-									cached_plan = Some(CachedPlan::PgAst(Ast {
-										expressions: vec![TopLevelExpr::Expr(expr)],
-									}));
-								}
 							}
 							PgStatement::Truncate(truncate) => {
 								kind = StatementKind::Truncate;
@@ -1435,6 +1460,29 @@ impl Connection {
 							}
 						}
 					}
+					if let Some(statement) = stmts.first()
+						&& let Some(metadata) =
+							self.describe_pgsql_write(statement, &param_types).await?
+					{
+						param_count = param_count.max(metadata.parameters.param_types.len());
+						param_types.resize(param_count, 0);
+						for (slot, ty) in
+							param_types.iter_mut().zip(metadata.parameters.param_types)
+						{
+							if *slot == 0 && ty != surrealdb_sqlplan::SqlType::Unknown {
+								*slot = PgType::from_sql_type(ty).oid();
+							}
+						}
+						descriptor = metadata.result;
+					}
+
+					param_types.resize(param_count, 0);
+					for oid in &mut param_types {
+						if *oid == 0 {
+							*oid = PgType::Text.oid();
+						}
+					}
+
 					(
 						query.to_string(),
 						cached_plan,
@@ -1908,22 +1956,6 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			(
-				Dialect::PgSql,
-				transaction,
-				Some(CachedPlan::PgSelect {
-					plan,
-				}),
-			) => self
-				.ds
-				.run(
-					QueryRequest::new(QuerySource::Plan(vec![*plan]), &self.session)
-						.with_variables(Some(params))
-						.with_optional_transaction(transaction)
-						.with_cancel(cancel),
-				)
-				.await
-				.map_err(|e| PgError::from(&e)),
 			(Dialect::PgSql, transaction, Some(CachedPlan::PgAst(ast))) => self
 				.ds
 				.run(
@@ -1982,7 +2014,16 @@ impl Connection {
 				Err(err) => return Err(PgError::from(&err)),
 			}
 		}
-		Ok(last)
+		Ok(self.present(last))
+	}
+
+	/// A result as the connection's dialect shows it: the SQL dialects show a
+	/// record id as its bare key, since SQL values carry no table.
+	fn present(&self, value: Value) -> Value {
+		match self.dialect {
+			Dialect::PgSql | Dialect::MySql => surrealdb_sqlplan::show_record_ids_as_keys(value),
+			Dialect::SurrealQl | Dialect::Gql => value,
+		}
 	}
 
 	async fn simple_query(&mut self, sql: &str) -> Result<()> {
@@ -2136,6 +2177,8 @@ impl Connection {
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		global_metrics().record_query(SqlDialect::Postgres);
 		let mut descriptor = None;
+		let mut write_kind = None;
+		let mut returns_rows = true;
 		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
 			if let Some(PgStatement::Copy(copy)) = stmts.first() {
 				return self.run_copy(copy, out).await;
@@ -2146,17 +2189,37 @@ impl Connection {
 			}
 			let policy = DialectPolicy::postgres();
 			for stmt in &stmts {
+				match self.describe_pgsql_write(stmt, &[]).await {
+					Ok(Some(metadata)) => descriptor = metadata.result,
+					Ok(None) => {}
+					Err(error) => {
+						self.note_simple_error(&error, out);
+						return Ok(());
+					}
+				}
 				match stmt {
 					PgStatement::Select(select) => {
+						let catalog = match self
+							.ds
+							.pgsql_catalog(&self.session, self.transaction.as_ref(), select)
+							.await
+						{
+							Ok(catalog) => catalog,
+							Err(err) => {
+								self.note_simple_error(&PgError::from(&err), out);
+								return Ok(());
+							}
+						};
+
 						match bind_select(select, &catalog, &policy, None) {
 							Ok(bound) => {
 								if descriptor.is_none() {
-									descriptor = Some(bound.describe(&catalog, &policy));
+									descriptor = bound.describe_static(&catalog, &policy);
 								}
 							}
 							Err(e) => {
 								self.note_simple_error(
-									&PgError::undefined_table(e.to_string()),
+									&PgError::new(e.pg_sqlstate(), e.to_string()),
 									out,
 								);
 								return Ok(());
@@ -2164,6 +2227,8 @@ impl Connection {
 						}
 					}
 					PgStatement::Insert(insert) => {
+						write_kind = Some(StatementKind::Insert);
+						returns_rows = insert.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&insert.relation.parts,
 							Some(&catalog),
@@ -2173,6 +2238,8 @@ impl Connection {
 						}
 					}
 					PgStatement::Update(update) => {
+						write_kind = Some(StatementKind::Update);
+						returns_rows = update.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&update.relation.parts,
 							Some(&catalog),
@@ -2182,6 +2249,8 @@ impl Connection {
 						}
 					}
 					PgStatement::Delete(delete) => {
+						write_kind = Some(StatementKind::Delete);
+						returns_rows = delete.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&delete.relation.parts,
 							Some(&catalog),
@@ -2235,6 +2304,29 @@ impl Connection {
 				for result in results {
 					match result.result {
 						Ok(value) => {
+							let value = self.present(value);
+							if let Some(kind) = write_kind
+								&& !returns_rows
+							{
+								let count = match &value {
+									Value::Array(rows) => rows.len(),
+									Value::None | Value::Null => 0,
+									_ => 1,
+								};
+								msg::write_command_complete(out, &kind.command_tag(count));
+								continue;
+							}
+							if let Some(kind) = write_kind {
+								let shape = if let Some(desc) = &descriptor {
+									shape_result_with_descriptor(desc, value)
+								} else {
+									shape_result(value)
+								};
+								if !self.emit_shape_with_kind(shape, kind, out).await? {
+									break;
+								}
+								continue;
+							}
 							let ok = if let Some(desc) = &descriptor {
 								self.emit_result_with_descriptor(desc, value, out).await?
 							} else {
@@ -2479,6 +2571,25 @@ impl Connection {
 				}
 				ingest.key_lens =
 					ingest.columns.iter().map(|c| surql_object_key(c).len()).collect();
+				let links = match self
+					.ds
+					.record_link_columns(
+						&self.session,
+						self.transaction.as_ref(),
+						&ingest.table_name,
+					)
+					.await
+				{
+					Ok(links) => links,
+					Err(err) => return Some(PgError::from(&err)),
+				};
+				ingest.links = ingest
+					.columns
+					.iter()
+					.map(|column| {
+						links.iter().find(|(name, _)| name == column).map(|(_, to)| to.clone())
+					})
+					.collect();
 			}
 			ingest.batch_bytes += row_cost(&row, &ingest.key_lens);
 			ingest.batch.push(row);
@@ -2535,7 +2646,11 @@ impl Connection {
 					q.push_str(", ");
 				}
 				let col = ingest.columns.get(j).map(|s| s.as_str()).unwrap_or("col");
-				q.push_str(&format!("{}: {}", surql_object_key(col), value_to_surrealql(val)));
+				let literal = match ingest.links.get(j) {
+					Some(Some(target)) => link_to_surrealql(val, target),
+					_ => value_to_surrealql(val),
+				};
+				q.push_str(&format!("{}: {}", surql_object_key(col), literal));
 			}
 			q.push('}');
 		}
@@ -2624,8 +2739,10 @@ impl Connection {
 			return Ok(());
 		};
 
+		// The query is lowered by the PostgreSQL front end whatever the connection's dialect, so
+		// its record ids are shown as keys throughout.
 		let value = match first_res.result {
-			Ok(v) => v,
+			Ok(v) => surrealdb_sqlplan::show_record_ids_as_keys(v),
 			Err(err) => {
 				self.note_simple_error(&PgError::from(&err), out);
 				return Ok(());
@@ -2640,7 +2757,7 @@ impl Connection {
 			}
 			let policy = DialectPolicy::postgres();
 			if let Ok(bound) = bind_select(s, &catalog, &policy, None) {
-				descriptor = Some(bound.describe(&catalog, &policy));
+				descriptor = bound.describe_static(&catalog, &policy);
 			}
 		}
 
@@ -2721,6 +2838,7 @@ impl Connection {
 				for result in results {
 					match result.result {
 						Ok(value) => {
+							let value = self.present(value);
 							if !self.emit_result(value, out).await? {
 								break;
 							}
@@ -3287,12 +3405,11 @@ impl Connection {
 			isolation_setting(&value)?;
 		}
 		if name.is_empty() {
-			let msg = if !value.is_empty() {
-				format!("SET {value} is not supported")
-			} else {
-				"this form of SET statement is not supported".to_string()
-			};
-			return Err(PgError::feature_not_supported(msg));
+			// The message is the key the unsupported-feature counter and the log line carry, so it
+			// holds none of the client's statement.
+			return Err(PgError::feature_not_supported(
+				"this form of SET statement is not supported",
+			));
 		}
 		if name.eq_ignore_ascii_case("dialect") {
 			let dialect = parse_dialect(&value)
@@ -3667,9 +3784,7 @@ impl Connection {
 	/// interactive transaction, poison the transaction so the next Sync reports
 	/// status 'E' — matching the simple-protocol path and Postgres semantics.
 	fn note_extended_error(&mut self, err: &PgError, out: &mut BytesMut) {
-		if err.code == "0A000" {
-			global_metrics().record_unsupported_feature(&err.message);
-		}
+		record_unsupported(err);
 		msg::write_error_response(out, err);
 		if self.transaction.is_some() {
 			self.txn_failed = true;
@@ -3682,9 +3797,7 @@ impl Connection {
 	/// it, so the next statement must be refused with 25P02 until
 	/// `COMMIT`/`ROLLBACK` — an intercepted statement is not an exception.
 	fn note_simple_error(&mut self, err: &PgError, out: &mut BytesMut) {
-		if err.code == "0A000" {
-			global_metrics().record_unsupported_feature(&err.message);
-		}
+		record_unsupported(err);
 		msg::write_error_response(out, err);
 		if self.transaction.is_some() {
 			self.txn_failed = true;
@@ -3700,6 +3813,15 @@ impl Connection {
 	/// a valid Postgres sequence — but such errors are internal invariant
 	/// failures that inferred column types make unreachable in practice.
 	async fn emit_shape(&mut self, shape: ResultShape, out: &mut BytesMut) -> Result<bool> {
+		self.emit_shape_with_kind(shape, StatementKind::Select, out).await
+	}
+
+	async fn emit_shape_with_kind(
+		&mut self,
+		shape: ResultShape,
+		kind: StatementKind,
+		out: &mut BytesMut,
+	) -> Result<bool> {
 		let ResultShape {
 			columns,
 			rows,
@@ -3732,7 +3854,7 @@ impl Connection {
 				out.clear();
 			}
 		}
-		msg::write_command_complete(out, &format!("SELECT {count}"));
+		msg::write_command_complete(out, &kind.command_tag(count));
 		Ok(true)
 	}
 
@@ -3925,6 +4047,19 @@ fn subject_names_record(rd: &Value, claimed: &str) -> bool {
 	}
 }
 
+/// Count a `0A000` refusal in the unsupported-feature metrics, and log it.
+///
+/// A refusal by the SQL planner is counted under the kind of construct it refused and not under
+/// its message, which describes the client's statement: the counter and the log line carry no
+/// client text.
+fn record_unsupported(err: &PgError) {
+	if err.code != "0A000" {
+		return;
+	}
+	let construct = unsupported_construct(&err.message).unwrap_or(&err.message);
+	global_metrics().record_unsupported_feature(construct);
+}
+
 /// The error for a COPY option that the record scanner cannot honour: the
 /// delimiter, and for CSV the quote and escape, must each be one ASCII byte, and
 /// the delimiter cannot be a line end.
@@ -3990,6 +4125,31 @@ fn surql_object_key(key: &str) -> String {
 	}
 }
 
+/// A COPY field for a column declared as a link to `target`: text that reads as an integer names
+/// an integer key, and any other non-empty text, `true` and `1.5` included, names the string key
+/// it spells. NULL stays NULL, and the empty text stays the empty string, which the type check of
+/// the column refuses.
+fn link_to_surrealql(val: &Option<String>, target: &str) -> String {
+	let Some(text) = val else {
+		return "NULL".to_string();
+	};
+	if text.is_empty() {
+		return "''".to_string();
+	}
+	let literal = value_to_surrealql(val);
+	let key = if literal.parse::<i64>().is_ok() {
+		literal
+	} else {
+		string_literal(text)
+	};
+	format!("type::record({}, {key})", string_literal(target))
+}
+
+/// `text` as a quoted SurrealQL string.
+fn string_literal(text: &str) -> String {
+	format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
 fn value_to_surrealql(val: &Option<String>) -> String {
 	match val {
 		None => "NULL".to_string(),
@@ -4001,7 +4161,7 @@ fn value_to_surrealql(val: &Option<String>) -> String {
 				return "false".to_string();
 			}
 			if s.len() > 1 && s.starts_with('0') && !s.contains('.') {
-				return format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"));
+				return string_literal(s);
 			}
 			if let Ok(i) = s.parse::<i64>() {
 				return i.to_string();
@@ -4012,7 +4172,7 @@ fn value_to_surrealql(val: &Option<String>) -> String {
 			{
 				return f.to_string();
 			}
-			format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+			string_literal(s)
 		}
 	}
 }

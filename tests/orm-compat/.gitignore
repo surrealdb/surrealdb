@@ -1,0 +1,10 @@
+node_modules
+.postgres-reference/
+drizzle-introspect-*/
+cli-logs/
+*.log
+results.json
+reference-results.json
+cli-results.json
+environment.json
+__pycache__/

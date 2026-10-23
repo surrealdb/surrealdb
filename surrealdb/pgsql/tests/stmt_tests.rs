@@ -4,6 +4,7 @@ use surrealdb_pgsql::ast::stmt::{
 	DistinctClause, DropObjectType, JoinCondition, JoinType, NullsOrder, OnConflictAction,
 	OrderDirection, Statement, TableConstraint, TableRef, TransactionStmt,
 };
+use surrealdb_pgsql::printer::ToPgSql;
 use surrealdb_pgsql::{parse_statement, parse_statements};
 
 #[test]
@@ -317,4 +318,40 @@ fn test_parse_multiple_statements() {
 	assert!(matches!(stmts[0], Statement::Select(_)));
 	assert!(matches!(stmts[1], Statement::Insert(_)));
 	assert!(matches!(stmts[2], Statement::Delete(_)));
+}
+
+#[test]
+fn test_parse_insert_on_conflict_do_update_where() {
+	let sql = "INSERT INTO t AS a (id, age) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET age = $3 WHERE (\"public\".\"t\".\"id\" = $4 AND 1 = 1) RETURNING id";
+	let Statement::Insert(insert) = parse_statement(sql).expect("parse insert") else {
+		panic!("expected Insert statement");
+	};
+	assert_eq!(insert.alias.as_deref(), Some("a"));
+	let conflict = insert.on_conflict.as_ref().expect("expected on conflict");
+	assert_eq!(conflict.target, Some(vec!["id".to_string()]));
+	assert!(conflict.target_where.is_none());
+	assert!(matches!(&conflict.action, OnConflictAction::DoUpdate(sets) if sets.len() == 1));
+	assert!(conflict.where_clause.is_some());
+	assert_eq!(insert.returning.as_ref().map(Vec::len), Some(1));
+
+	for sql in [sql, "INSERT INTO t (id) VALUES (1) ON CONFLICT (id) WHERE id > 0 DO NOTHING"] {
+		let mut ast = parse_statement(sql).expect("parse insert");
+		ast.normalize_spans();
+		let printed = ast.to_pgsql_string();
+		let mut reparsed = parse_statement(&printed).expect("reparse insert");
+		reparsed.normalize_spans();
+		assert_eq!(ast, reparsed, "printed as: {printed}");
+	}
+}
+
+#[test]
+fn test_parse_insert_on_conflict_target_where_and_do_nothing() {
+	let sql = "INSERT INTO t (id) VALUES (1) ON CONFLICT (id) WHERE id > 0 DO NOTHING";
+	let Statement::Insert(insert) = parse_statement(sql).expect("parse insert") else {
+		panic!("expected Insert statement");
+	};
+	let conflict = insert.on_conflict.expect("expected on conflict");
+	assert!(conflict.target_where.is_some());
+	assert!(conflict.where_clause.is_none());
+	assert!(matches!(conflict.action, OnConflictAction::DoNothing));
 }

@@ -41,37 +41,54 @@ pub(crate) fn parse_to_statements(
 	capabilities: &Capabilities,
 	config: &ParserConfig,
 ) -> Result<Vec<TopLevelStatement>> {
-	let stmts = surrealdb_mysql::parse_statements(input)
-		.map_err(|e| anyhow::anyhow!("MySQL parse error: {e}"))?;
+	let stmts = parse(input)?;
+	lower_statements(&stmts, &surrealdb_sqlplan::EmptyCatalog, capabilities, config)
+}
 
+/// Parse MySQL SQL text into its statements, without lowering them.
+pub(crate) fn parse(input: &str) -> Result<Vec<surrealdb_mysql::ast::stmt::Statement>> {
+	surrealdb_mysql::parse_statements(input).map_err(|e| anyhow::anyhow!("MySQL parse error: {e}"))
+}
+
+/// Lower parsed MySQL statements to the statements the executor runs.
+///
+/// `catalog` describes the tables the statements name, which decides how a
+/// column that holds a record link is compared and assigned; see
+/// [`surrealdb_sqlplan::BinderCatalog::link_table`].
+pub(crate) fn lower_statements(
+	stmts: &[surrealdb_mysql::ast::stmt::Statement],
+	catalog: &dyn surrealdb_sqlplan::BinderCatalog,
+	capabilities: &Capabilities,
+	config: &ParserConfig,
+) -> Result<Vec<TopLevelStatement>> {
 	let mut statements = Vec::new();
 	for stmt in stmts {
-		match &stmt {
+		match stmt {
 			surrealdb_mysql::ast::stmt::Statement::Select(select) => {
-				let plan = lower::lower_select(select)
+				let plan = lower::lower_select_with(select, catalog)
 					.map_err(|e| anyhow::anyhow!("MySQL SELECT lowering error: {e}"))?;
 				statements.push(TopLevelStatement::Plan(Box::new(plan)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Insert(insert) => {
-				let expr = surrealdb_sqlplan::lower_mysql_insert(insert)
+				let expr = surrealdb_sqlplan::lower_mysql_insert(insert, catalog)
 					.map_err(|e| anyhow::anyhow!("MySQL INSERT lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Replace(replace) => {
-				let expr = surrealdb_sqlplan::lower_mysql_replace(replace)
+				let expr = surrealdb_sqlplan::lower_mysql_replace(replace, catalog)
 					.map_err(|e| anyhow::anyhow!("MySQL REPLACE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Update(update) => {
-				let expr = surrealdb_sqlplan::lower_mysql_update(update)
+				let expr = surrealdb_sqlplan::lower_mysql_update(update, catalog)
 					.map_err(|e| anyhow::anyhow!("MySQL UPDATE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Delete(delete) => {
-				let expr = surrealdb_sqlplan::lower_mysql_delete(delete)
+				let expr = surrealdb_sqlplan::lower_mysql_delete(delete, catalog)
 					.map_err(|e| anyhow::anyhow!("MySQL DELETE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
@@ -84,7 +101,7 @@ pub(crate) fn parse_to_statements(
 			}
 			surrealdb_mysql::ast::stmt::Statement::CreateTable(_)
 			| surrealdb_mysql::ast::stmt::Statement::DropTable(_) => {
-				let exprs = surrealdb_sqlplan::lower_mysql_ddl(&stmt)
+				let exprs = surrealdb_sqlplan::lower_mysql_ddl(stmt)
 					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
 				for expr in exprs {
 					statements
@@ -120,7 +137,7 @@ pub(crate) fn parse_to_statements(
 			| surrealdb_mysql::ast::stmt::Statement::Transaction(_) => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(
-					&stmt,
+					stmt,
 					&surrealdb_mysql::TranslationContext::default(),
 					&mut surql_text,
 				)

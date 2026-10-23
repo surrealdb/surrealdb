@@ -35,6 +35,30 @@ impl<'a> Parser<'a> {
 		self.parse_select_stmt().map(Box::new)
 	}
 
+	/// Whether `expr`, looking through parentheses, is the decimal integer literal
+	/// 9223372036854775808 as written in the source: digits (and `_`) only, the magnitude of the
+	/// int8 minimum.
+	fn is_int8_minimum_magnitude(&self, mut expr: &Expr) -> bool {
+		while let Expr::Grouping {
+			expr: inner,
+			..
+		} = expr
+		{
+			expr = inner;
+		}
+		let Expr::Literal {
+			lit: Literal::Float(_),
+			span,
+		} = expr
+		else {
+			return false;
+		};
+		span.slice(self.src()).is_some_and(|text| {
+			text.bytes().all(|b| b.is_ascii_digit() || b == b'_')
+				&& text.replace('_', "").parse::<u64>() == Ok(1 << 63)
+		})
+	}
+
 	fn parse_expr_bp_inner(&mut self, min_bp: u8, loop_depth: &mut u32) -> ParseResult<Expr> {
 		// Prefix / Prefix operator handling
 		let mut left = if let Some(prefix_bp) = prefix_binding_power(&self.peek().kind) {
@@ -56,10 +80,20 @@ impl<'a> Parser<'a> {
 				}
 			};
 
-			Expr::UnaryOp {
-				op: unary_op,
-				expr: Box::new(right),
-				span,
+			// gram.y: a_expr: '-' a_expr %prec UMINUS (doNegate) folds a minus into the numeric
+			// constant it applies to. The decimal 9223372036854775808 is a number beyond int8
+			// until it is negated, and then it is the integer `i64::MIN`.
+			if unary_op == UnaryOperator::Minus && self.is_int8_minimum_magnitude(&right) {
+				Expr::Literal {
+					lit: Literal::Integer(i64::MIN),
+					span,
+				}
+			} else {
+				Expr::UnaryOp {
+					op: unary_op,
+					expr: Box::new(right),
+					span,
+				}
 			}
 		} else {
 			self.parse_primary_expr()?
@@ -375,10 +409,15 @@ impl<'a> Parser<'a> {
 				})
 			}
 			TokenKind::IntegerRaw(s) => {
+				let Some(lit) = raw_integer_literal(s) else {
+					return Err(ParseError::new(
+						tok.span,
+						ErrorKind::NumericOverflow((*s).to_string()),
+					));
+				};
 				self.bump()?;
-				let val = parse_int_literal(s);
 				Ok(Expr::Literal {
-					lit: Literal::Integer(val),
+					lit,
 					span: tok.span,
 				})
 			}
@@ -666,8 +705,8 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Helper to finish parsing an identifier or function call.
-	fn parse_ident_or_func(&mut self, qname: QualifiedName) -> ParseResult<Expr> {
+	/// gram.y: columnref, func_application.
+	pub(crate) fn parse_ident_or_func(&mut self, qname: QualifiedName) -> ParseResult<Expr> {
 		// Check if followed by `(` -> Function Call
 		if self.peek().kind == TokenKind::LParen {
 			self.bump()?; // consume '('
@@ -1271,16 +1310,23 @@ fn token_to_binary_op(tok: &TokenKind<'_>) -> ParseResult<BinaryOperator> {
 	}
 }
 
-/// Helper to parse integer string with base prefixes (0x, 0o, 0b).
-fn parse_int_literal(s: &str) -> i64 {
+/// The literal of an integer token that is not a plain 64-bit decimal, and `None` when it has no
+/// value.
+///
+/// gram.y: Iconst, FCONST (scan.l: process_integer_literal). A literal with a base prefix (0x, 0o,
+/// 0b) is an integer that must fit 64 bits. A decimal integer beyond 64 bits is a numeric
+/// constant, which this front end reads as the float of its value, as it reads `1.5`; it has no
+/// value when that float is not finite.
+fn raw_integer_literal(s: &str) -> Option<Literal> {
 	let clean = s.replace('_', "");
-	if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
-		i64::from_str_radix(hex, 16).unwrap_or(0)
-	} else if let Some(oct) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
-		i64::from_str_radix(oct, 8).unwrap_or(0)
-	} else if let Some(bin) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
-		i64::from_str_radix(bin, 2).unwrap_or(0)
-	} else {
-		clean.parse::<i64>().unwrap_or(0)
+	let based = [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)]
+		.into_iter()
+		.find_map(|(prefix, radix)| clean.strip_prefix(prefix).map(|digits| (digits, radix)));
+	if let Some((digits, radix)) = based {
+		return i64::from_str_radix(digits, radix).ok().map(Literal::Integer);
+	}
+	match clean.parse::<i64>() {
+		Ok(value) => Some(Literal::Integer(value)),
+		Err(_) => clean.parse::<f64>().ok().filter(|value| value.is_finite()).map(Literal::Float),
 	}
 }

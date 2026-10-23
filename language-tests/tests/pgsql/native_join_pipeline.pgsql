@@ -32,10 +32,10 @@ value = "[{ dname: 'Eng', high: 100, low: 80, mean: 90f }, { dname: 'Keyless', h
 value = "[{ city: 'Berlin', dname: 'Keyless', n: 1 }, { city: 'Berlin', dname: 'Ops', n: 1 }, { city: 'Berlin', dname: 'Ops2', n: 1 }, { city: 'London', dname: 'Eng', n: 1 }, { city: 'London', dname: 'Nowhere', n: 1 }, { city: 'London', dname: 'Ops', n: 1 }, { city: 'London', dname: 'Ops2', n: 1 }, { city: 'Paris', dname: 'Eng', n: 1 }]"
 
 [[test.results]]
-value = "[{ name: 'Alice', projects: 0 }, { name: 'Bob', projects: 0 }, { name: 'Cara', projects: 0 }, { name: 'Dan', projects: 0 }, { name: 'Eve', projects: 0 }, { name: 'Finn', projects: 0 }, { name: 'Gus', projects: 0 }, { name: 'Hana', projects: 0 }]"
+value = "[{ name: 'Alice', projects: 2 }, { name: 'Bob', projects: 0 }, { name: 'Cara', projects: 1 }, { name: 'Dan', projects: 0 }, { name: 'Eve', projects: 1 }, { name: 'Finn', projects: 0 }, { name: 'Gus', projects: 0 }, { name: 'Hana', projects: 0 }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ hours: 30, name: 'Alice' }, { hours: 40, name: 'Eve' }]"
 
 [[test.results]]
 value = "[{ dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Eng', name: 'Alice' }]"
@@ -89,7 +89,7 @@ value = "[{ dname: 'Eng', n: 2 }, { dname: 'Keyless', n: 1 }, { dname: 'Nowhere'
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ name: 'Alice', total: 30 }, { name: 'Cara', total: 5 }, { name: 'Eve', total: 40 }]"
 */
 
 SELECT count(*) AS n FROM emp e JOIN dept d ON e.dept = d.did;

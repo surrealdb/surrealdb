@@ -2,7 +2,7 @@
 
 use surrealdb_mysql::ast::expr::Expr;
 use surrealdb_mysql::ast::literal::Literal;
-use surrealdb_mysql::ast::operator::BinaryOperator;
+use surrealdb_mysql::ast::operator::{BinaryOperator, UnaryOperator};
 use surrealdb_mysql::ast::stmt::{SelectItem, Statement, VariableTarget};
 use surrealdb_mysql::parser::{parse_expr, parse_statement, parse_statements};
 
@@ -724,5 +724,126 @@ fn test_parse_executable_version_comments() {
 		assert_eq!(sel.projection.len(), 1);
 	} else {
 		panic!("expected Select statement");
+	}
+}
+
+#[test]
+fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
+	for literal in [
+		"9223372036854775808",
+		"18446744073709551616",
+		"10000000000000000000",
+		"123456789012345678901234567890",
+	] {
+		let e = parse_expr(literal).expect(literal);
+		assert_eq!(e, Expr::Literal(Literal::Float(literal.parse::<f64>().unwrap()), e.span()));
+	}
+	assert!(parse_expr(&"9".repeat(400)).is_err(), "a literal beyond a double has no value");
+}
+
+#[test]
+fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
+	for sql in [
+		"-9223372036854775808",
+		"- 9223372036854775808",
+		"-(9223372036854775808)",
+		"-((9223372036854775808))",
+		"-09223372036854775808",
+	] {
+		let e = parse_expr(sql).expect(sql);
+		assert_eq!(e, Expr::Literal(Literal::Integer(i64::MIN), e.span()), "{sql}");
+	}
+}
+
+#[test]
+fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
+	let two_pow_63 = 2f64.powi(63);
+	for (sql, operator, operand) in [
+		("-9223372036854775809", UnaryOperator::Minus, Literal::Float(two_pow_63)),
+		("-9223372036854775808.0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
+		("-9223372036854775808e0", UnaryOperator::Minus, Literal::Float(two_pow_63)),
+		("-9223372036854775807", UnaryOperator::Minus, Literal::Integer(i64::MAX)),
+		("+9223372036854775808", UnaryOperator::Plus, Literal::Float(two_pow_63)),
+		("- -9223372036854775808", UnaryOperator::Minus, Literal::Integer(i64::MIN)),
+	] {
+		match parse_expr(sql).expect(sql) {
+			Expr::UnaryOp {
+				op,
+				expr,
+				..
+			} => {
+				assert_eq!(op, operator, "{sql}");
+				assert_eq!(*expr, Expr::Literal(operand, expr.span()), "{sql}");
+			}
+			other => panic!("{sql}: expected a negation, got {other:?}"),
+		}
+	}
+}
+
+#[test]
+fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
+	for (sql, operator) in [
+		("x = -9223372036854775808", BinaryOperator::Equal),
+		("x=-9223372036854775808", BinaryOperator::Equal),
+		("x > -9223372036854775808", BinaryOperator::Greater),
+		("x>-9223372036854775808", BinaryOperator::Greater),
+		("x >= -9223372036854775808", BinaryOperator::GreaterEqual),
+		("x <= -9223372036854775808", BinaryOperator::LessEqual),
+		("x <=> -9223372036854775808", BinaryOperator::NullSafeEqual),
+		("x - -9223372036854775808", BinaryOperator::Sub),
+		("x * -9223372036854775808", BinaryOperator::Mul),
+	] {
+		match parse_expr(sql).expect(sql) {
+			Expr::BinaryOp {
+				op,
+				right,
+				..
+			} => {
+				assert_eq!(op, operator, "{sql}");
+				assert_eq!(
+					*right,
+					Expr::Literal(Literal::Integer(i64::MIN), right.span()),
+					"{sql}"
+				);
+			}
+			other => panic!("{sql}: expected a binary operator, got {other:?}"),
+		}
+	}
+	match parse_expr("-9223372036854775808 DIV -1").expect("a quotient") {
+		Expr::BinaryOp {
+			left,
+			op: BinaryOperator::IntDiv,
+			..
+		} => assert_eq!(*left, Expr::Literal(Literal::Integer(i64::MIN), left.span())),
+		other => panic!("expected a quotient, got {other:?}"),
+	}
+}
+
+#[test]
+fn test_parse_qualified_wildcard_and_a_column_named_star() {
+	fn projection(sql: &str) -> Vec<SelectItem> {
+		match parse_statement(sql).expect("parse") {
+			Statement::Select(select) => select.projection,
+			other => panic!("expected SELECT, got {other:?}"),
+		}
+	}
+
+	let items = projection("SELECT t.*, u.name FROM t JOIN u");
+	assert!(matches!(&items[0], SelectItem::QualifiedWildcard(parts, _) if *parts == ["t"]));
+	assert!(matches!(&items[1], SelectItem::Expr { .. }));
+
+	let items = projection("SELECT `t`.* FROM t");
+	assert!(matches!(&items[0], SelectItem::QualifiedWildcard(parts, _) if *parts == ["t"]));
+
+	let items = projection("SELECT db.t.* FROM db.t");
+	assert!(
+		matches!(&items[0], SelectItem::QualifiedWildcard(parts, _) if *parts == ["db", "t"]),
+		"{items:?}"
+	);
+
+	// A quoted `*` is an identifier: the column of that name, not the wildcard.
+	for sql in ["SELECT t.`*` FROM t", "SELECT `*` FROM t", "SELECT db.t.`*` FROM db.t"] {
+		let items = projection(sql);
+		assert!(matches!(&items[0], SelectItem::Expr { .. }), "{sql}: {items:?}");
 	}
 }

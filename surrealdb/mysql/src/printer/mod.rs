@@ -297,7 +297,12 @@ impl ToMySql for SelectItem {
 	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			Self::Wildcard(_) => write!(f, "*"),
-			Self::QualifiedWildcard(tbl, _) => write!(f, "{}.*", escape_mysql_ident(tbl)),
+			Self::QualifiedWildcard(parts, _) => {
+				for part in parts {
+					write!(f, "{}.", escape_mysql_ident(part))?;
+				}
+				write!(f, "*")
+			}
 			Self::Expr {
 				expr,
 				alias,

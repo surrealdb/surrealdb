@@ -19,7 +19,8 @@ use crate::error::PlanError;
 
 /// Resolves a PostgreSQL table name from qualified name parts per Decision D4.
 ///
-/// Returns `(Option<schema>, resolved_table_name)`.
+/// The parts are parser-produced names: unquoted names are already lowercase, and the remaining
+/// spelling is significant. Returns `(Option<schema>, resolved_table_name)`.
 pub fn resolve_pgsql_table_name(
 	parts: &[String],
 	catalog: Option<&dyn BinderCatalog>,
@@ -27,12 +28,12 @@ pub fn resolve_pgsql_table_name(
 	match parts.len() {
 		0 => Err(PlanError::Custom("empty table name".into())),
 		1 => {
-			let tbl = parts[0].to_ascii_lowercase();
+			let tbl = parts[0].clone();
 			Ok((None, tbl))
 		}
 		2 => {
-			let schema = parts[0].to_ascii_lowercase();
-			let table = parts[1].to_ascii_lowercase();
+			let schema = parts[0].clone();
+			let table = parts[1].clone();
 			if schema == "public" {
 				// PostgreSQL public schema is elided to plain table name
 				Ok((Some("public".to_string()), table))
@@ -43,13 +44,13 @@ pub fn resolve_pgsql_table_name(
 			}
 		}
 		3 => {
-			let db = parts[0].to_ascii_lowercase();
-			let schema = parts[1].to_ascii_lowercase();
-			let table = parts[2].to_ascii_lowercase();
+			let db = parts[0].clone();
+			let schema = parts[1].clone();
+			let table = parts[2].clone();
 
 			if let Some(cat) = catalog
 				&& let Some(cur_db) = cat.current_database()
-				&& !db.eq_ignore_ascii_case(cur_db)
+				&& db != cur_db
 			{
 				return Err(PlanError::Custom(format!(
 					"cross-database queries not supported: {}",

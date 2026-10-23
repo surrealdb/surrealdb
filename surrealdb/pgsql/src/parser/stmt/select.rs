@@ -478,6 +478,7 @@ impl<'a> Parser<'a> {
 
 	/// Parse a single table reference factor (table, subquery, GRAPH_TABLE, JSON_TABLE,
 	/// parenthesized join).
+	/// gram.y: table_ref, func_table, func_alias_clause.
 	pub fn parse_table_factor(&mut self) -> ParseResult<TableRef> {
 		if self.eat(&TokenKind::LParen)? {
 			if matches!(self.peek().kind, TokenKind::Keyword(Keyword::Select | Keyword::Values)) {
@@ -509,9 +510,30 @@ impl<'a> Parser<'a> {
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::JsonTable) {
 			let tok = self.bump()?;
 			self.parse_json_table_tail(tok.span)
+		} else if matches!(
+			self.peek().kind,
+			TokenKind::Keyword(
+				Keyword::CurrentSchema
+					| Keyword::CurrentDate
+					| Keyword::CurrentTime
+					| Keyword::CurrentTimestamp
+					| Keyword::CurrentUser
+					| Keyword::SessionUser
+					| Keyword::CurrentRole
+					| Keyword::CurrentCatalog
+					| Keyword::Localtime
+					| Keyword::Localtimestamp
+					| Keyword::User
+			)
+		) {
+			let function = self.parse_primary_expr()?;
+			self.parse_function_table_tail(function)
 		} else {
-			// Plain table name
 			let name = self.parse_qualified_name()?;
+			if self.peek().kind == TokenKind::LParen {
+				let function = self.parse_ident_or_func(name)?;
+				return self.parse_function_table_tail(function);
+			}
 			let alias = self.parse_table_alias()?;
 			let span = if let Some(ref a) = alias {
 				name.span.merge(a.span)
@@ -524,6 +546,41 @@ impl<'a> Parser<'a> {
 				span,
 			})
 		}
+	}
+
+	/// gram.y: func_table -> func_expr_windowless opt_ordinality; table_ref attaches
+	/// func_alias_clause.
+	fn parse_function_table_tail(&mut self, function: Expr) -> ParseResult<TableRef> {
+		if !matches!(
+			&function,
+			Expr::FunctionCall {
+				over: None,
+				..
+			}
+		) {
+			return Err(ParseError::new(
+				function.span(),
+				ErrorKind::InvalidStatement("FROM requires a windowless function call"),
+			));
+		}
+		let start = function.span();
+		let mut end = start;
+		let with_ordinality = if self.eat(&TokenKind::Keyword(Keyword::With))? {
+			end = self.expect(&TokenKind::Keyword(Keyword::Ordinality), "ORDINALITY")?.span;
+			true
+		} else {
+			false
+		};
+		let alias = self.parse_table_alias()?;
+		if let Some(alias) = &alias {
+			end = alias.span;
+		}
+		Ok(TableRef::Function {
+			function: Box::new(function),
+			alias,
+			with_ordinality,
+			span: start.merge(end),
+		})
 	}
 
 	/// Parse `JSON_TABLE(...)` table factor tail.
@@ -725,6 +782,10 @@ impl TableRef {
 	pub const fn span(&self) -> Span {
 		match self {
 			Self::Table {
+				span,
+				..
+			}
+			| Self::Function {
 				span,
 				..
 			}

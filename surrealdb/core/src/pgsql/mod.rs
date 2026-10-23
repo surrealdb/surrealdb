@@ -41,31 +41,49 @@ pub(crate) fn parse_to_statements(
 	capabilities: &Capabilities,
 	config: &ParserConfig,
 ) -> Result<Vec<TopLevelStatement>> {
-	let stmts = surrealdb_pgsql::parse_statements(input)
-		.map_err(|e| anyhow::anyhow!("PostgreSQL parse error: {e}"))?;
+	let stmts = parse(input)?;
+	lower_statements(&stmts, &surrealdb_sqlplan::EmptyCatalog, capabilities, config)
+}
 
+/// Parse PostgreSQL SQL text into its statements, without lowering them.
+pub(crate) fn parse(input: &str) -> Result<Vec<surrealdb_pgsql::ast::stmt::Statement>> {
+	surrealdb_pgsql::parse_statements(input)
+		.map_err(|e| anyhow::anyhow!("PostgreSQL parse error: {e}"))
+}
+
+/// Lower parsed PostgreSQL statements to the statements the executor runs.
+///
+/// `catalog` describes the tables the statements name, which decides how a
+/// column that holds a record link is compared and assigned; see
+/// [`surrealdb_sqlplan::BinderCatalog::link_table`].
+pub(crate) fn lower_statements(
+	stmts: &[surrealdb_pgsql::ast::stmt::Statement],
+	catalog: &dyn surrealdb_sqlplan::BinderCatalog,
+	capabilities: &Capabilities,
+	config: &ParserConfig,
+) -> Result<Vec<TopLevelStatement>> {
 	let mut statements = Vec::new();
 	for stmt in stmts {
-		match &stmt {
+		match stmt {
 			surrealdb_pgsql::ast::stmt::Statement::Select(select) => {
-				let plan = lower::lower_select(select)
+				let plan = lower::lower_select_with(select, catalog)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL SELECT lowering error: {e}"))?;
 				statements.push(TopLevelStatement::Plan(Box::new(plan)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Insert(insert) => {
-				let expr = surrealdb_sqlplan::lower_pgsql_insert(insert)
+				let expr = surrealdb_sqlplan::lower_pgsql_insert(insert, catalog)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL INSERT lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Update(update) => {
-				let expr = surrealdb_sqlplan::lower_pgsql_update(update)
+				let expr = surrealdb_sqlplan::lower_pgsql_update(update, catalog)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL UPDATE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Delete(delete) => {
-				let expr = surrealdb_sqlplan::lower_pgsql_delete(delete)
+				let expr = surrealdb_sqlplan::lower_pgsql_delete(delete, catalog)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DELETE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
@@ -81,7 +99,7 @@ pub(crate) fn parse_to_statements(
 			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
 			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
 			| surrealdb_pgsql::ast::stmt::Statement::Drop(_) => {
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(&stmt)
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
 				for expr in exprs {
 					statements
@@ -103,7 +121,7 @@ pub(crate) fn parse_to_statements(
 			| surrealdb_pgsql::ast::stmt::Statement::Empty => {
 				let mut surql_text = String::new();
 				surrealdb_pgsql::translate::translate_statement(
-					&stmt,
+					stmt,
 					&surrealdb_pgsql::TranslationContext::default(),
 					&mut surql_text,
 				)

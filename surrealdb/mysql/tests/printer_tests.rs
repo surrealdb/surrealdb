@@ -138,3 +138,23 @@ fn test_round_trip_m01_extended() {
 		assert_eq!(s1, s2, "Mismatch on round-trip for: {sql}");
 	}
 }
+
+#[test]
+fn test_round_trip_wide_integer_literals() {
+	for sql in [
+		"SELECT 10000000000000000000",
+		"SELECT 9223372036854775808, 123456789012345678901234567890",
+		"SELECT -9223372036854775808",
+		"SELECT `id` FROM `ledger` WHERE `amount` > -9223372036854775808",
+		"SELECT `id` FROM `ledger` WHERE `amount` - -9223372036854775808 > 10000000000000000000",
+		"SELECT - -9223372036854775808",
+	] {
+		let mut s1 = parse_statement(sql).unwrap();
+		let printed = s1.to_mysql_string();
+		let mut s2 = parse_statement(&printed)
+			.unwrap_or_else(|e| panic!("failed to reparse '{printed}' (original '{sql}'): {e}"));
+		s1.normalize_spans();
+		s2.normalize_spans();
+		assert_eq!(s1, s2, "{sql}");
+	}
+}

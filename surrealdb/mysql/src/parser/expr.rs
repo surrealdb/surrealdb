@@ -309,6 +309,29 @@ impl<'a> Parser<'a> {
 		Ok(lhs)
 	}
 
+	/// Whether `expr` is the literal 9223372036854775808, the magnitude of the minimum 64-bit
+	/// integer, as a decimal integer literal. The token that `expr` was read from is the one that
+	/// starts at its span.
+	fn is_int8_minimum_magnitude(&self, expr: &Expr) -> bool {
+		let Expr::Literal(Literal::Float(_), span) = expr else {
+			return false;
+		};
+		self.tokens
+			.binary_search_by_key(&span.start, |token| token.span.start)
+			.ok()
+			.and_then(|index| self.tokens.get(index))
+			.is_some_and(|token| {
+				token.span == *span
+					&& matches!(
+						token.kind,
+						TokenKind::WideIntLiteral {
+							int8_minimum_magnitude: true,
+							..
+						}
+					)
+			})
+	}
+
 	fn parse_prefix(&mut self) -> ParseResult<Expr> {
 		let tok = self.peek().clone();
 		match tok.kind {
@@ -327,6 +350,11 @@ impl<'a> Parser<'a> {
 				self.bump();
 				let operand = self.parse_expr_bp(PREC_UNARY)?;
 				let span = tok.span.merge(operand.span());
+				// A minus applied to the literal 9223372036854775808 alone is the minimum 64-bit
+				// integer; the literal is a number beyond 64 bits until it is negated.
+				if self.is_int8_minimum_magnitude(&operand) {
+					return Ok(Expr::Literal(Literal::Integer(i64::MIN), span));
+				}
 				Ok(Expr::UnaryOp {
 					op: UnaryOperator::Minus,
 					expr: Box::new(operand),
@@ -396,6 +424,13 @@ impl<'a> Parser<'a> {
 			TokenKind::IntLiteral(n) => {
 				self.bump();
 				Ok(Expr::Literal(Literal::Integer(n), tok.span))
+			}
+			TokenKind::WideIntLiteral {
+				value,
+				..
+			} => {
+				self.bump();
+				Ok(Expr::Literal(Literal::Float(value), tok.span))
 			}
 			TokenKind::FloatLiteral(fl) => {
 				self.bump();

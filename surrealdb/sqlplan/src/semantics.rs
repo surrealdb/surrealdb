@@ -410,7 +410,7 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 	}
 }
 
-/// Evaluate constant unary operation.
+/// Evaluate constant unary operation. Negating `i64::MIN` is `NumericValueOutOfRange`.
 pub fn eval_unary_op(
 	op: BoundUnaryOp,
 	lit: &BoundLiteral,
@@ -443,12 +443,12 @@ pub fn eval_unary_op(
 		},
 		BoundUnaryOp::Negate => match lit {
 			BoundLiteral::Null => Ok(BoundLiteral::Null),
-			BoundLiteral::Integer(i) => Ok(BoundLiteral::Integer(-*i)),
+			BoundLiteral::Integer(i) => checked_integer(i.checked_neg()),
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Float(-*f)),
 			BoundLiteral::String(s) if policy.dialect == SqlDialect::MySql => {
 				let (num, is_int) = mysql_parse_leading_number(s);
 				if is_int {
-					Ok(BoundLiteral::Integer(-(num as i64)))
+					checked_integer((num as i64).checked_neg())
 				} else {
 					Ok(BoundLiteral::Float(-num))
 				}
@@ -696,41 +696,75 @@ fn literals_equal(left: &BoundLiteral, right: &BoundLiteral, policy: &DialectPol
 	compare_literals(left, right, policy) == Some(std::cmp::Ordering::Equal)
 }
 
+/// A numeric operand of constant arithmetic. An integer is kept exact so that 64-bit arithmetic
+/// can be checked.
+#[derive(Clone, Copy)]
+enum Number {
+	Int(i64),
+	Float(f64),
+}
+
+impl Number {
+	fn as_f64(self) -> f64 {
+		match self {
+			Self::Int(i) => i as f64,
+			Self::Float(f) => f,
+		}
+	}
+
+	/// The value as a 64-bit integer when it is an integer or a float with no fraction that lies in
+	/// the 64-bit range. NaN and the infinities have no integer value.
+	fn as_exact_integer(self) -> Option<i64> {
+		match self {
+			Self::Int(i) => Some(i),
+			// The doubles that are 64-bit integers run from -2^63 up to, but not including, 2^63.
+			Self::Float(f)
+				if f.fract() == 0.0 && f >= i64::MIN as f64 && f < -(i64::MIN as f64) =>
+			{
+				Some(f as i64)
+			}
+			Self::Float(_) => None,
+		}
+	}
+}
+
+/// The integer result of a checked 64-bit operation, or the out of range error when it overflowed.
+fn checked_integer(result: Option<i64>) -> Result<BoundLiteral, PlanError> {
+	result.map(BoundLiteral::Integer).ok_or(PlanError::NumericValueOutOfRange)
+}
+
 /// Arithmetic evaluation with dialect division rules and string-to-number coercion.
+///
+/// Integer arithmetic is checked: a result beyond 64 bits is `NumericValueOutOfRange`, as
+/// PostgreSQL's `bigint out of range` and MySQL's `BIGINT value is out of range`. `i64::MIN % -1`
+/// is 0 in both dialects. `DIV` divides exactly in 64 bits when both operands have an integer value
+/// that fits, a float such as `1.0` included, and otherwise divides in floating point, then
+/// truncates.
 fn eval_arithmetic(
 	left: &BoundLiteral,
 	op: BoundBinaryOp,
 	right: &BoundLiteral,
 	policy: &DialectPolicy,
 ) -> Result<BoundLiteral, PlanError> {
-	let (l_num, l_is_int) = to_number(left, policy)?;
-	let (r_num, r_is_int) = to_number(right, policy)?;
+	let l = to_number(left, policy)?;
+	let r = to_number(right, policy)?;
 
 	match op {
-		BoundBinaryOp::Add => {
-			if l_is_int && r_is_int {
-				Ok(BoundLiteral::Integer(l_num as i64 + r_num as i64))
-			} else {
-				Ok(BoundLiteral::Float(l_num + r_num))
-			}
-		}
-		BoundBinaryOp::Subtract => {
-			if l_is_int && r_is_int {
-				Ok(BoundLiteral::Integer(l_num as i64 - r_num as i64))
-			} else {
-				Ok(BoundLiteral::Float(l_num - r_num))
-			}
-		}
-		BoundBinaryOp::Multiply => {
-			if l_is_int && r_is_int {
-				Ok(BoundLiteral::Integer(l_num as i64 * r_num as i64))
-			} else {
-				Ok(BoundLiteral::Float(l_num * r_num))
-			}
-		}
+		BoundBinaryOp::Add => match (l, r) {
+			(Number::Int(a), Number::Int(b)) => checked_integer(a.checked_add(b)),
+			_ => Ok(BoundLiteral::Float(l.as_f64() + r.as_f64())),
+		},
+		BoundBinaryOp::Subtract => match (l, r) {
+			(Number::Int(a), Number::Int(b)) => checked_integer(a.checked_sub(b)),
+			_ => Ok(BoundLiteral::Float(l.as_f64() - r.as_f64())),
+		},
+		BoundBinaryOp::Multiply => match (l, r) {
+			(Number::Int(a), Number::Int(b)) => checked_integer(a.checked_mul(b)),
+			_ => Ok(BoundLiteral::Float(l.as_f64() * r.as_f64())),
+		},
 		BoundBinaryOp::Divide => {
 			// Check division by zero
-			if r_num == 0.0 {
+			if r.as_f64() == 0.0 {
 				if policy.dialect == SqlDialect::Postgres {
 					return Err(PlanError::DivisionByZero);
 				} else {
@@ -738,69 +772,70 @@ fn eval_arithmetic(
 				}
 			}
 
-			if policy.dialect == SqlDialect::Postgres {
+			match (policy.dialect, l, r) {
 				// In PostgreSQL: integer / integer produces integer division (1 / 2 = 0)
-				if l_is_int && r_is_int {
-					Ok(BoundLiteral::Integer(l_num as i64 / r_num as i64))
-				} else {
-					Ok(BoundLiteral::Float(l_num / r_num))
+				(SqlDialect::Postgres, Number::Int(a), Number::Int(b)) => {
+					checked_integer(a.checked_div(b))
 				}
-			} else {
 				// In MySQL: `/` is always float division (1 / 2 = 0.5)
-				Ok(BoundLiteral::Float(l_num / r_num))
+				_ => Ok(BoundLiteral::Float(l.as_f64() / r.as_f64())),
 			}
 		}
 		BoundBinaryOp::IntDiv => {
 			// MySQL integer division (`DIV`)
-			if r_num == 0.0 {
-				Ok(BoundLiteral::Null)
-			} else {
-				Ok(BoundLiteral::Integer(l_num as i64 / r_num as i64))
+			if r.as_f64() == 0.0 {
+				return Ok(BoundLiteral::Null);
+			}
+			match (l.as_exact_integer(), r.as_exact_integer()) {
+				// The divisor is not zero here, so `None` is `i64::MIN DIV -1`.
+				(Some(a), Some(b)) => checked_integer(a.checked_div(b)),
+				_ => match Number::Float((l.as_f64() / r.as_f64()).trunc()).as_exact_integer() {
+					Some(quotient) => Ok(BoundLiteral::Integer(quotient)),
+					None => Err(PlanError::NumericValueOutOfRange),
+				},
 			}
 		}
 		BoundBinaryOp::Remainder => {
-			if r_num == 0.0 {
+			if r.as_f64() == 0.0 {
 				if policy.dialect == SqlDialect::Postgres {
 					return Err(PlanError::DivisionByZero);
 				} else {
 					return Ok(BoundLiteral::Null);
 				}
 			}
-			if l_is_int && r_is_int {
-				Ok(BoundLiteral::Integer(l_num as i64 % r_num as i64))
-			} else {
-				Ok(BoundLiteral::Float(l_num % r_num))
+			match (l, r) {
+				// `wrapping_rem` is 0 for `i64::MIN % -1`; the divisor is not zero here.
+				(Number::Int(a), Number::Int(b)) => Ok(BoundLiteral::Integer(a.wrapping_rem(b))),
+				_ => Ok(BoundLiteral::Float(l.as_f64() % r.as_f64())),
 			}
 		}
 		_ => Err(PlanError::unsupported(format!("Arithmetic operation {op:?}"))),
 	}
 }
 
-/// Convert a literal to a number (f64, is_integer).
-fn to_number(lit: &BoundLiteral, policy: &DialectPolicy) -> Result<(f64, bool), PlanError> {
+/// Convert a literal to a number.
+fn to_number(lit: &BoundLiteral, policy: &DialectPolicy) -> Result<Number, PlanError> {
 	match lit {
-		BoundLiteral::Integer(i) => Ok((*i as f64, true)),
-		BoundLiteral::Float(f) => Ok((*f, false)),
+		BoundLiteral::Integer(i) => Ok(Number::Int(*i)),
+		BoundLiteral::Float(f) => Ok(Number::Float(*f)),
 		BoundLiteral::String(s) if policy.dialect == SqlDialect::MySql => {
-			Ok(mysql_parse_leading_number(s))
+			let (num, is_int) = mysql_parse_leading_number(s);
+			Ok(if is_int {
+				Number::Int(num as i64)
+			} else {
+				Number::Float(num)
+			})
 		}
 		BoundLiteral::String(s) => {
 			if let Ok(i) = s.parse::<i64>() {
-				Ok((i as f64, true))
+				Ok(Number::Int(i))
 			} else if let Ok(f) = s.parse::<f64>() {
-				Ok((f, false))
+				Ok(Number::Float(f))
 			} else {
 				Err(PlanError::InvalidTextRepresentation(format!("numeric: \"{s}\"")))
 			}
 		}
-		BoundLiteral::Boolean(b) => Ok((
-			if *b {
-				1.0
-			} else {
-				0.0
-			},
-			true,
-		)),
+		BoundLiteral::Boolean(b) => Ok(Number::Int(i64::from(*b))),
 		BoundLiteral::Null => Err(PlanError::Custom("cannot convert null to number".into())),
 	}
 }

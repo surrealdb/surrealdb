@@ -116,6 +116,13 @@ impl GucStore {
 		// Read-only parameters (55P02 on attempt to change)
 		self.register("server_version", "16.0-surrealdb", "Shows the server version.", true, true);
 		self.register(
+			"server_version_num",
+			"160000",
+			"Shows the numeric server version.",
+			false,
+			true,
+		);
+		self.register(
 			"server_encoding",
 			"UTF8",
 			"Shows the server (database) character set encoding.",

@@ -220,6 +220,11 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 		| Expr::Slice {
 			..
 		} => 130,
+		// A negative integer literal prints with its sign, so it binds as the prefix `-` does.
+		Expr::Literal {
+			lit: Literal::Integer(n),
+			..
+		} if *n < 0 => 110,
 		Expr::Literal {
 			..
 		}

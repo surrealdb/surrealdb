@@ -147,6 +147,8 @@ pub(crate) mod config;
 mod edge;
 #[cfg(all(test, feature = "kv-mem"))]
 mod edge_tests;
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+mod sql_links;
 mod table_migration;
 
 pub use builder::Builder;
@@ -419,6 +421,33 @@ pub struct StatementCacheStats {
 	/// the variable values it was compiled for, no longer held; each is also
 	/// counted as a miss.
 	pub invalidations: u64,
+}
+
+/// The SQL dialects whose text is lowered with the links of the tables it names.
+#[derive(Clone, Copy)]
+enum LinkedSql {
+	PgSql,
+	MySql,
+}
+
+/// The text and dialect of `source` when it is SQL text that is lowered with links.
+fn linked_sql_text<'a>(source: &QuerySource<'a>) -> Option<(&'a str, LinkedSql)> {
+	match source {
+		QuerySource::Text {
+			text,
+			dialect: Dialect::PgSql,
+		} => Some((text, LinkedSql::PgSql)),
+		QuerySource::Text {
+			text,
+			dialect: Dialect::MySql,
+		} => Some((text, LinkedSql::MySql)),
+		QuerySource::Text {
+			dialect: Dialect::SurrealQl | Dialect::Gql,
+			..
+		}
+		| QuerySource::Ast(_)
+		| QuerySource::Plan(_) => None,
+	}
 }
 
 /// The underlying datastore instance which stores the dataset.
@@ -7019,6 +7048,11 @@ impl Datastore {
 	/// whatever else is wrong with the request. SurrealQL statements stay in
 	/// surface form; see [`Self::statements_for`].
 	///
+	/// The PostgreSQL and MySQL front ends also read the catalog, for the link
+	/// columns of the tables their text names. That read comes after the
+	/// session checks of [`Self::check_session`], so a session the preflight
+	/// refuses is refused without a read of storage.
+	///
 	/// See [`Self::run_streaming`] to receive results as they are produced
 	/// rather than all at once.
 	///
@@ -7069,7 +7103,17 @@ impl Datastore {
 			read_only,
 			held_transactions: _,
 		} = req;
-		let statements = self.request_statements(source, read_only, transaction.is_some())?;
+		let statements = match linked_sql_text(&source) {
+			Some((text, LinkedSql::PgSql)) => {
+				let statements = self.pgsql_statements(text, session, transaction.as_ref()).await?;
+				Self::read_only_block(statements, read_only, transaction.is_some())?
+			}
+			Some((text, LinkedSql::MySql)) => {
+				let statements = self.mysql_statements(text, session, transaction.as_ref()).await?;
+				Self::read_only_block(statements, read_only, transaction.is_some())?
+			}
+			None => self.request_statements(source, read_only, transaction.is_some())?,
+		};
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
 		match transaction {
 			// Boxed: held inline, the run inside a caller's transaction would make this
@@ -7167,6 +7211,12 @@ impl Datastore {
 			read_only,
 			held_transactions,
 		} = req;
+		// SQL text is lowered here without links, which reports what it refuses and
+		// fixes the statement count, and again when the job starts, once the
+		// catalog can be read (see [`Self::lower_linked`]).
+		let relowered = linked_sql_text(&source).map(|(text, dialect)| {
+			(text.to_string(), dialect, session.clone(), transaction.clone())
+		});
 		let statements = self.request_statements(source, read_only, transaction.is_some())?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
 		let in_transaction = transaction.is_some();
@@ -7177,6 +7227,20 @@ impl Datastore {
 		Ok(QueryStreamJob {
 			statement_count,
 			run: Box::pin(async move {
+				let statements = match relowered {
+					Some((text, dialect, session, transaction)) => {
+						let lowered = match dialect {
+							LinkedSql::MySql => {
+								kvs.mysql_statements(&text, &session, transaction.as_ref()).await
+							}
+							LinkedSql::PgSql => {
+								kvs.pgsql_statements(&text, &session, transaction.as_ref()).await
+							}
+						}?;
+						Self::read_only_block(lowered, read_only, in_transaction)?
+					}
+					None => statements,
+				};
 				let executed = if in_transaction {
 					Executor::execute_statements_streaming_with_transaction(
 						&kvs, ctx, opt, statements, items, row_format,
@@ -7208,6 +7272,15 @@ impl Datastore {
 		in_caller_transaction: bool,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
 		let statements = self.statements_for(source)?;
+		Self::read_only_block(statements, read_only, in_caller_transaction)
+	}
+
+	/// `statements`, wrapped in a read-only block when the request asks for one.
+	fn read_only_block(
+		statements: Vec<TopLevelStatement>,
+		read_only: Option<ReadOnlyOptions>,
+		in_caller_transaction: bool,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
 		let Some(read_only) = read_only else {
 			return Ok(statements);
 		};
@@ -7329,6 +7402,265 @@ impl Datastore {
 		))
 	}
 
+	/// Parse and lower PostgreSQL query text to the statements the executor
+	/// runs, telling the lowering which columns of the tables it names hold
+	/// record links. See [`Self::lower_linked`].
+	#[cfg(feature = "postgres")]
+	async fn pgsql_statements(
+		&self,
+		text: &str,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		let stmts =
+			crate::pgsql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
+		let capabilities = self.capabilities.load();
+		self.lower_linked(session, None, transaction, |catalog| {
+			crate::pgsql::lower_statements(&stmts, catalog, &capabilities, &self.parser_config)
+		})
+		.await
+	}
+
+	#[cfg(not(feature = "postgres"))]
+	async fn pgsql_statements(
+		&self,
+		text: &str,
+		_session: &Session,
+		_transaction: Option<&Arc<Transaction>>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		self.parse_pgsql(text)
+	}
+
+	/// Parse and lower MySQL query text to the statements the executor runs,
+	/// telling the lowering which columns of the tables it names hold record
+	/// links. See [`Self::lower_linked`].
+	#[cfg(feature = "mysql")]
+	async fn mysql_statements(
+		&self,
+		text: &str,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		use surrealdb_mysql::ast::stmt::Statement;
+
+		let stmts =
+			crate::mysql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
+		let capabilities = self.capabilities.load();
+		// A `USE` changes the database the statements after it run in, so the
+		// links of their tables are those of that database: each run of statements
+		// up to and including a `USE` is lowered against the database in force
+		// before it.
+		let mut statements = Vec::new();
+		let mut database: Option<&str> = None;
+		let mut start = 0;
+		for (end, stmt) in stmts.iter().enumerate() {
+			let Statement::Use(use_stmt) = stmt else {
+				continue;
+			};
+			statements.extend(
+				self.lower_mysql_run(
+					session,
+					database,
+					transaction,
+					&stmts[start..=end],
+					&capabilities,
+				)
+				.await?,
+			);
+			database = Some(use_stmt.database.as_str());
+			start = end + 1;
+		}
+		if start < stmts.len() {
+			statements.extend(
+				self.lower_mysql_run(
+					session,
+					database,
+					transaction,
+					&stmts[start..],
+					&capabilities,
+				)
+				.await?,
+			);
+		}
+		Ok(statements)
+	}
+
+	/// Lower the MySQL statements `stmts`, which all run in `database` (the
+	/// session's own when it is `None`), with the links of the tables they name.
+	#[cfg(feature = "mysql")]
+	async fn lower_mysql_run(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+		stmts: &[surrealdb_mysql::ast::stmt::Statement],
+		capabilities: &Capabilities,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		self.lower_linked(session, database, transaction, |catalog| {
+			crate::mysql::lower_statements(stmts, catalog, capabilities, &self.parser_config)
+		})
+		.await
+	}
+
+	#[cfg(not(feature = "mysql"))]
+	async fn mysql_statements(
+		&self,
+		text: &str,
+		_session: &Session,
+		_transaction: Option<&Arc<Transaction>>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		self.parse_mysql(text)
+	}
+
+	/// Lower with a catalog that names the link columns of the tables the
+	/// lowering asks about; see [`sql_links`] for the two steps.
+	///
+	/// The first lowering reads nothing, so its errors, like those of parsing,
+	/// are reported whatever the session. The catalog is read after it, and only
+	/// as [`Self::link_columns`] allows.
+	///
+	/// The catalog is read through `transaction` when there is one, so a link
+	/// the caller's own transaction has defined is seen; otherwise through a
+	/// read transaction of its own that ends before the statements run. It is
+	/// read for the session's namespace and for `database`, or the session's
+	/// own database when that is `None`.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn lower_linked(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+		lower: impl Fn(&dyn surrealdb_sqlplan::BinderCatalog) -> anyhow::Result<Vec<TopLevelStatement>>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		let invalid = |e: anyhow::Error| TypesError::validation(e.to_string(), None);
+		let recorder = sql_links::RecordingCatalog::default();
+		let statements = lower(&recorder).map_err(invalid)?;
+		let tables = recorder.into_tables();
+		if tables.is_empty() {
+			return Ok(statements);
+		}
+		let links = self.link_columns(session, database, transaction, &tables).await?;
+		match sql_links::link_catalog(&links) {
+			Some(catalog) => lower(&catalog).map_err(invalid),
+			None => Ok(statements),
+		}
+	}
+
+	/// The columns of `tables` that hold record links, as `(table, column,
+	/// target)`, read through `transaction` when there is one and otherwise
+	/// through a read transaction of its own.
+	///
+	/// This is the one place the front ends' lookup reads storage, and it reads
+	/// for a session only when a query of that session would be served:
+	///
+	/// - A session [`Self::check_session`] refuses gets that refusal, as a query does, with nothing
+	///   read.
+	/// - A session with no namespace selected, or with no database selected and none given as
+	///   `database`, has no links, and nothing is read.
+	/// - A session whose authenticated level cannot reach the selected namespace and database
+	///   ([`Auth::can_access_ns_db`]) has no links, and nothing is read: the executor refuses its
+	///   statements with `NsNotAllowed` or `DbNotAllowed`, so it learns nothing of another tenant's
+	///   field definitions on the way.
+	///
+	/// The field definitions are read with the datastore's own authority, not
+	/// the session's permissions. They decide only how a comparison or an
+	/// assignment converts the operand of a link column; none is returned to the
+	/// session, and the statement then runs under the session's table and field
+	/// permissions as any statement does.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn link_columns(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+		tables: &[String],
+	) -> std::result::Result<Vec<(String, String, String)>, TypesError> {
+		self.check_session(session)?;
+		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
+		else {
+			return Ok(Vec::new());
+		};
+		if tables.is_empty() || !session.au.can_access_ns_db(ns, db) {
+			return Ok(Vec::new());
+		}
+		let links = match transaction {
+			Some(txn) => sql_links::link_columns(txn, ns, db, tables).await,
+			None => {
+				let txn =
+					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
+				let links = sql_links::link_columns(&txn, ns, db, tables).await;
+				let _ = txn.cancel().await;
+				links
+			}
+		};
+		links.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// The columns of `table` declared as a link to one table, as `(column,
+	/// target)`, for a front end that writes rows without going through
+	/// the SQL lowering.
+	///
+	/// A session that [`Self::check_session`] refuses is an error, the one a
+	/// query gets, and is not served from the catalog. The result is empty when
+	/// the session has no namespace or database selected, or when its level
+	/// cannot reach them; see [`Self::link_columns`].
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	pub async fn record_link_columns(
+		&self,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+		table: &str,
+	) -> std::result::Result<Vec<(String, String)>, TypesError> {
+		let links = self.link_columns(session, None, transaction, &[table.to_owned()]).await?;
+		Ok(links.into_iter().map(|(_, column, target)| (column, target)).collect())
+	}
+
+	/// Read declared scalar types for a PostgreSQL SELECT, through the caller's transaction when
+	/// present. Catalog preflight follows the same session and tenant checks as link lowering.
+	#[cfg(feature = "postgres")]
+	#[tracing::instrument(level = "trace", skip_all)]
+	pub async fn pgsql_catalog(
+		&self,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+		select: &surrealdb_pgsql::ast::stmt::SelectStmt,
+	) -> std::result::Result<surrealdb_sqlplan::MemoryCatalog, TypesError> {
+		let mut empty = surrealdb_sqlplan::MemoryCatalog::new();
+		empty.set_database(session.db.clone());
+		let recorder = sql_links::RecordingCatalog::default();
+		if surrealdb_sqlplan::binder::pgsql::bind_select(
+			select,
+			&recorder,
+			&surrealdb_sqlplan::DialectPolicy::postgres(),
+			None,
+		)
+		.is_err()
+		{
+			// The caller binds the statement and reports analysis errors with their SQLSTATE.
+			// A failed dependency discovery needs no schema read.
+			return Ok(empty);
+		}
+		let tables = recorder.into_tables();
+		self.check_session(session)?;
+		let (Some(ns), Some(db)) = (session.ns.as_deref(), session.db.as_deref()) else {
+			return Ok(empty);
+		};
+		if tables.is_empty() || !session.au.can_access_ns_db(ns, db) {
+			return Ok(empty);
+		}
+		let catalog = match transaction {
+			Some(txn) => sql_links::column_types(txn, ns, db, &tables).await,
+			None => {
+				let txn =
+					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
+				let catalog = sql_links::column_types(&txn, ns, db, &tables).await;
+				let _ = txn.cancel().await;
+				catalog
+			}
+		};
+		catalog.map_err(crate::err::anyhow_to_types_error)
+	}
+
 	/// Parse and lower PostgreSQL SQL query text to statements and plans.
 	#[cfg(feature = "postgres")]
 	fn parse_pgsql(&self, text: &str) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
@@ -7359,8 +7691,43 @@ impl Datastore {
 		))
 	}
 
-	/// The preflight a query runs: the session checks, and the options and
-	/// context the statements execute against.
+	/// The session checks of the preflight: an expired session, and an
+	/// anonymous actor on a datastore that refuses them, are not served.
+	///
+	/// They are a function of the session and the datastore's settings alone and
+	/// read no storage, so work that reads storage on a request's behalf before
+	/// [`Self::setup_query`] runs (the catalog lookup of the SQL front ends)
+	/// calls this first, and a refused session costs no I/O. The request's text
+	/// is parsed before them, so unparsable text is reported as that whatever
+	/// the session. [`Self::execute_import`] repeats these checks inline; see
+	/// [`Self::setup_query`].
+	fn check_session(&self, sess: &Session) -> std::result::Result<(), TypesError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		if let Err(e) = self.check_anon(sess) {
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
+		}
+		Ok(())
+	}
+
+	/// The preflight a query runs: the session checks
+	/// ([`Self::check_session`]), and the options and context the statements
+	/// execute against.
 	///
 	/// [`Self::execute_import`] does not come through here. It repeats these
 	/// checks inline and reports an expired session and an anonymous actor as
@@ -7396,26 +7763,7 @@ impl Datastore {
 		tx: Option<&Arc<Transaction>>,
 		cancel: Option<CancelHandle>,
 	) -> std::result::Result<(Options, FrozenContext), TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
+		self.check_session(sess)?;
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
@@ -9014,6 +9362,441 @@ pub(crate) mod test {
 		assert_eq!(res.len(), 1);
 		let val = res.remove(0).result?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { num: 1 }]));
+		Ok(())
+	}
+
+	/// The SQL front ends under test: the label and the constructor of their
+	/// query source.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[allow(clippy::type_complexity, clippy::vec_init_then_push)]
+	fn sql_dialects() -> Vec<(&'static str, for<'a> fn(&'a str) -> QuerySource<'a>)> {
+		#[cfg(feature = "postgres")]
+		fn pgsql(text: &str) -> QuerySource<'_> {
+			QuerySource::pgsql(text)
+		}
+		#[cfg(feature = "mysql")]
+		fn mysql(text: &str) -> QuerySource<'_> {
+			QuerySource::mysql(text)
+		}
+		let mut dialects: Vec<(&'static str, for<'a> fn(&'a str) -> QuerySource<'a>)> = Vec::new();
+		#[cfg(feature = "postgres")]
+		dialects.push(("pgsql", pgsql));
+		#[cfg(feature = "mysql")]
+		dialects.push(("mysql", mysql));
+		dialects
+	}
+
+	/// A datastore whose `test`/`test` database has the table `emp` with a
+	/// column `dept` declared a link to the table `dept`, with `auth` and
+	/// `guests` as its authentication settings. The observer has seen every
+	/// transaction the setup took, and is cleared.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn sql_link_ds(
+		auth: bool,
+		guests: bool,
+	) -> Result<(Arc<Datastore>, Arc<TxOutcomeObserver>)> {
+		use crate::dbs::capabilities::Targets;
+		let observer = Arc::new(TxOutcomeObserver::default());
+		let capabilities =
+			Capabilities::all().with_experimental(Targets::All).with_guest_access(guests);
+		let ds = Datastore::builder()
+			.with_capabilities(capabilities)
+			.with_auth(auth)
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await?;
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		execute_all(
+			&ds,
+			&owner,
+			"DEFINE TABLE dept; DEFINE TABLE emp;
+			 DEFINE FIELD dept ON emp TYPE record<dept>;
+			 CREATE dept:1; CREATE dept:2;
+			 CREATE emp:1 SET dept = dept:1;
+			 CREATE emp:2 SET dept = dept:2;",
+		)
+		.await?;
+		let _ = observer.take();
+		Ok((ds, observer))
+	}
+
+	/// What a request for `sql` as `session` answers: the error of the request
+	/// itself, or of its single statement, rendered.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn sql_error(
+		ds: &Datastore,
+		session: &Session,
+		source: QuerySource<'_>,
+		transaction: Option<&Arc<Transaction>>,
+	) -> String {
+		let req =
+			QueryRequest::new(source, session).with_optional_transaction(transaction.cloned());
+		match ds.run(req).await {
+			Err(err) => err.to_string(),
+			Ok(mut results) => match results.remove(0).result {
+				Err(err) => err.to_string(),
+				Ok(value) => panic!("expected the request to fail, got {value:?}"),
+			},
+		}
+	}
+
+	/// A session that [`Datastore::setup_query`] refuses because it expired a
+	/// minute ago.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn expired_session() -> Session {
+		let mut session = Session::owner().with_ns("test").with_db("test");
+		session.exp = Some(Utc::now().timestamp() - 60);
+		session
+	}
+
+	/// Asserts that SQL text as `session` is refused with the error the same
+	/// request gets as SurrealQL text, and that doing so read no catalog entry:
+	/// not through a caller-owned transaction, not through a transaction the
+	/// request would open for itself, and not when the request is streamed. The
+	/// text names both tables, so a lookup of their links is what would read.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn assert_refused_before_the_catalog(
+		ds: &Arc<Datastore>,
+		observer: &TxOutcomeObserver,
+		session: &Session,
+		refusal: &str,
+	) -> Result<()> {
+		let surql =
+			sql_error(ds, session, QuerySource::text("SELECT * FROM emp, dept"), None).await;
+		assert!(surql.contains(refusal), "SurrealQL answers `{surql}`, not `{refusal}`");
+		assert!(observer.take().is_empty(), "the refused SurrealQL request opened a transaction");
+		for (label, source) in sql_dialects() {
+			let text = "SELECT * FROM emp, dept WHERE emp.dept = 1";
+			let err = sql_error(ds, session, source(text), None).await;
+			assert_eq!(err, surql, "{label}: the refusal is not the one SurrealQL gets");
+			let opened = observer.take();
+			assert!(opened.is_empty(), "{label}: a refused request opened {opened:?}");
+
+			let txn = Arc::new(ds.transaction(Read).await?);
+			let recording = txn.record_catalog_reads();
+			let err = sql_error(ds, session, source(text), Some(&txn)).await;
+			let reads = recording.finish();
+			txn.cancel().await?;
+			let _ = observer.take();
+			assert_eq!(err, surql, "{label}: the refusal in a caller's transaction differs");
+			assert_eq!(
+				reads,
+				Default::default(),
+				"{label}: a refused request read the catalog of the caller's transaction"
+			);
+
+			let (items, _) = async_channel::unbounded();
+			match ds.run_streaming(QueryRequest::new(source(text), session), items) {
+				Err(err) => {
+					assert_eq!(err.to_string(), surql, "{label}: the streamed refusal differs")
+				}
+				Ok(_) => panic!("{label}: a refused request was prepared to stream"),
+			}
+			let opened = observer.take();
+			assert!(opened.is_empty(), "{label}: a refused streamed request opened {opened:?}");
+		}
+		Ok(())
+	}
+
+	/// A valid session's request reads the catalog through a caller-owned
+	/// transaction and, without one, opens a transaction of its own. These are
+	/// the controls for the refusal tests, whose observations would otherwise
+	/// be empty for want of any way to see a read. The recording also notes the
+	/// executor's own reads, so a refusal test, where the executor never starts,
+	/// is what attributes a read to the lookup.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn a_valid_session_reads_the_catalog_for_sql_links() -> Result<()> {
+		let (ds, observer) = sql_link_ds(false, true).await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		for (label, source) in sql_dialects() {
+			let text = "SELECT * FROM emp, dept WHERE emp.dept = 1";
+			let txn = Arc::new(ds.transaction(Read).await?);
+			let recording = txn.record_catalog_reads();
+			let req = QueryRequest::new(source(text), &session).with_transaction(Arc::clone(&txn));
+			let results = ds.run(req).await?;
+			let reads = recording.finish();
+			txn.cancel().await?;
+			for result in results {
+				result.result?;
+			}
+			assert!(
+				reads.databases.contains(&("test".to_owned(), "test".to_owned())),
+				"{label}: the lookup read no database: {reads:?}"
+			);
+
+			let _ = observer.take();
+			ds.run(QueryRequest::new(source(text), &session)).await?;
+			assert!(
+				!observer.take().is_empty(),
+				"{label}: the observer saw no transaction of an accepted request"
+			);
+		}
+		Ok(())
+	}
+
+	/// A link column named in SQL text is converted for a valid session: the
+	/// key `1` finds the record that links to `dept:1`.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn a_valid_session_gets_sql_links_converted() -> Result<()> {
+		let (ds, _) = sql_link_ds(false, true).await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		for (label, source) in sql_dialects() {
+			let mut res = ds
+				.run(QueryRequest::new(source("SELECT id FROM emp WHERE dept = 1"), &session))
+				.await?;
+			let val = res.remove(0).result?;
+			assert_eq!(
+				val,
+				PublicValue::Array(surrealdb_types::array![object! { id: 1 }]),
+				"{label}: the key did not find the linked record"
+			);
+		}
+		Ok(())
+	}
+
+	/// SQL text run as a result stream is lowered with the links of its tables, as
+	/// it is when it is run to completion: a bare key written to a link column
+	/// is stored as the link, and a key finds the record that links to it.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn streamed_sql_text_is_lowered_with_links() -> Result<()> {
+		use crate::dbs::QueryStreamItem;
+
+		let (ds, _) = sql_link_ds(false, true).await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		for (label, source) in sql_dialects() {
+			let (tx, rx) = async_channel::unbounded();
+			let sql = "INSERT INTO emp (id, dept) VALUES (9, 2); SELECT id FROM emp WHERE dept = 2";
+			let job = ds.run_streaming(QueryRequest::new(source(sql), &session), tx)?;
+			assert_eq!(job.statement_count, 2, "{label}");
+			job.run.await?;
+			let mut finished = 0;
+			let mut ids = Vec::new();
+			while let Ok(item) = rx.try_recv() {
+				match item {
+					QueryStreamItem::Finished {
+						error,
+						..
+					} => {
+						assert!(error.is_none(), "{label}: {error:?}");
+						finished += 1;
+					}
+					QueryStreamItem::Rows {
+						values,
+						..
+					} => ids.extend(values),
+					QueryStreamItem::Frame {
+						rows,
+						..
+					} => ids.extend(rows.to_values()?),
+					QueryStreamItem::Value {
+						..
+					} => {}
+				}
+			}
+			assert_eq!(finished, 2, "{label}");
+			assert!(!ids.is_empty(), "{label}: the key did not find the linked record");
+			execute_all(&ds, &session, "DELETE emp:9").await?;
+		}
+		Ok(())
+	}
+
+	/// A `USE` in MySQL text moves the catalog lookup with it: the statements
+	/// after it are lowered with the links of the database it selects, and those
+	/// before it with the links of the database in force before.
+	#[cfg(feature = "mysql")]
+	#[tokio::test]
+	async fn a_use_in_mysql_text_moves_the_link_lookup_to_the_database_it_selects() -> Result<()> {
+		let (ds, _) = sql_link_ds(false, true).await?;
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "other").await?;
+		txn.commit().await?;
+		let other = Session::owner().with_ns("test").with_db("other");
+		execute_all(&ds, &other, "DEFINE TABLE emp; DEFINE FIELD dept ON emp TYPE int;").await?;
+
+		// The session is in `other`, where `dept` is an integer, and the text
+		// writes `emp:3` in `test`, where `dept` is a link, between two writes
+		// to `other`.
+		let text = "INSERT INTO emp (id, dept) VALUES (1, 7); \
+		            USE test; INSERT INTO emp (id, dept) VALUES (3, 2); \
+		            USE other; INSERT INTO emp (id, dept) VALUES (3, 8)";
+		for result in ds.run(QueryRequest::new(QuerySource::mysql(text), &other)).await? {
+			result.result?;
+		}
+
+		let read = |db: &'static str, id: i64| {
+			let ds = &ds;
+			async move {
+				use surrealdb_types::ToSql;
+				let session = Session::owner().with_ns("test").with_db(db);
+				let sql = format!("RETURN (SELECT VALUE dept FROM ONLY emp:{id})");
+				let mut res = ds.execute(&sql, &session, None).await?;
+				Ok::<_, anyhow::Error>(res.remove(0).result?.to_sql())
+			}
+		};
+		assert_eq!(read("other", 1).await?, "7");
+		assert_eq!(read("test", 3).await?, "dept:2");
+		assert_eq!(read("other", 3).await?, "8");
+		Ok(())
+	}
+
+	/// An expired session is refused before the front end reads the catalog for
+	/// the tables its text names.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn an_expired_session_reads_no_catalog_for_sql_text() -> Result<()> {
+		let (ds, observer) = sql_link_ds(false, true).await?;
+		assert_refused_before_the_catalog(
+			&ds,
+			&observer,
+			&expired_session(),
+			"The session has expired",
+		)
+		.await
+	}
+
+	/// An anonymous session of a datastore that refuses guests is refused
+	/// before the front end reads the catalog for the tables its text names.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn an_anonymous_session_reads_no_catalog_for_sql_text() -> Result<()> {
+		let (ds, observer) = sql_link_ds(true, false).await?;
+		let session = Session::default().with_ns("test").with_db("test");
+		assert_refused_before_the_catalog(&ds, &observer, &session, "Anonymous access not allowed")
+			.await
+	}
+
+	/// Text that does not parse is reported as the parse error it is, whatever
+	/// the session: the parse comes before the session checks.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn a_parse_error_wins_over_an_expired_session() -> Result<()> {
+		let (ds, observer) = sql_link_ds(false, true).await?;
+		let valid = Session::owner().with_ns("test").with_db("test");
+		for (label, source) in sql_dialects() {
+			let text = "SELECT FROM FROM emp WHERE";
+			let parse_error = sql_error(&ds, &valid, source(text), None).await;
+			assert!(
+				!parse_error.contains("expired"),
+				"{label}: the valid session's parse error `{parse_error}`"
+			);
+			let _ = observer.take();
+			let err = sql_error(&ds, &expired_session(), source(text), None).await;
+			assert_eq!(err, parse_error, "{label}: the expired session hides the parse error");
+			assert!(observer.take().is_empty(), "{label}: unparsable text opened a transaction");
+		}
+		Ok(())
+	}
+
+	/// Text that parses but that the lowering refuses without any catalog is
+	/// reported as that refusal, whatever the session: the lowering that notes
+	/// the tables a statement names reads nothing, and comes before the session
+	/// checks.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn a_lowering_error_wins_over_an_expired_session() -> Result<()> {
+		let (ds, observer) = sql_link_ds(false, true).await?;
+		let valid = Session::owner().with_ns("test").with_db("test");
+		for (label, source) in sql_dialects() {
+			let text = "WITH RECURSIVE t AS (SELECT n FROM t) SELECT * FROM t, emp";
+			let lowering_error = sql_error(&ds, &valid, source(text), None).await;
+			assert!(
+				lowering_error.contains("Recursive CTE self-reference"),
+				"{label}: the valid session's error is `{lowering_error}`"
+			);
+			let _ = observer.take();
+			let err = sql_error(&ds, &expired_session(), source(text), None).await;
+			assert_eq!(err, lowering_error, "{label}: the expired session hides the error");
+			assert!(observer.take().is_empty(), "{label}: a refused lowering opened a transaction");
+		}
+		Ok(())
+	}
+
+	/// A session whose level cannot reach the database it selected is served no
+	/// links, and the executor refuses its statement as it refuses the same
+	/// statement in SurrealQL: skipping the lookup does not change the answer.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn a_session_outside_its_scope_gets_the_executors_refusal_for_sql_text() -> Result<()> {
+		use crate::iam::Level;
+		let (ds, _) = sql_link_ds(true, false).await?;
+		let mut elsewhere = Session::for_level(
+			Level::Database("other".to_owned(), "other".to_owned()),
+			Role::Owner,
+		);
+		elsewhere.ns = Some("test".to_owned());
+		elsewhere.db = Some("test".to_owned());
+		let surql = sql_error(&ds, &elsewhere, QuerySource::text("SELECT * FROM emp"), None).await;
+		assert!(
+			surql.contains("permission to change to the test namespace"),
+			"SurrealQL: `{surql}`"
+		);
+		for (label, source) in sql_dialects() {
+			let err =
+				sql_error(&ds, &elsewhere, source("SELECT * FROM emp WHERE dept = 1"), None).await;
+			assert_eq!(err, surql, "{label}: the refusal is not the one SurrealQL gets");
+		}
+		Ok(())
+	}
+
+	/// What a front end that writes rows itself, as pgwire's `COPY` does, is told
+	/// of the link columns of a table: the links of a valid session, an error
+	/// for a session a query would refuse, and nothing for a session that names
+	/// no database or one its level cannot reach. None of the last three reads
+	/// the catalog.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn record_link_columns_reads_the_catalog_only_for_a_session_that_may() -> Result<()> {
+		use crate::iam::Level;
+		let (ds, observer) = sql_link_ds(true, false).await?;
+
+		async fn links(
+			ds: &Datastore,
+			session: &Session,
+		) -> (
+			std::result::Result<Vec<(String, String)>, TypesError>,
+			crate::kvs::catalog_reads::CatalogReads,
+		) {
+			let txn = Arc::new(ds.transaction(Read).await.expect("a read transaction opens"));
+			let recording = txn.record_catalog_reads();
+			let links = ds.record_link_columns(session, Some(&txn), "emp").await;
+			let reads = recording.finish();
+			txn.cancel().await.expect("the read transaction cancels");
+			(links, reads)
+		}
+
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let (found, reads) = links(&ds, &owner).await;
+		assert_eq!(found?, vec![("dept".to_owned(), "dept".to_owned())]);
+		assert!(!reads.databases.is_empty(), "the lookup of a valid session read nothing");
+
+		let mut elsewhere = Session::for_level(
+			Level::Database("other".to_owned(), "other".to_owned()),
+			Role::Owner,
+		);
+		elsewhere.ns = Some("test".to_owned());
+		elsewhere.db = Some("test".to_owned());
+		let mut no_db = Session::owner();
+		no_db.ns = Some("test".to_owned());
+		for (what, session) in [("no database", no_db), ("another tenant", elsewhere)] {
+			let (found, reads) = links(&ds, &session).await;
+			assert_eq!(found?, Vec::new(), "{what} has links");
+			assert_eq!(reads, Default::default(), "{what}: the lookup read the catalog");
+		}
+
+		let anonymous = Session::default().with_ns("test").with_db("test");
+		for (what, session) in [("expired", expired_session()), ("anonymous", anonymous)] {
+			let (found, reads) = links(&ds, &session).await;
+			assert!(found.is_err(), "{what}: the lookup answered {found:?}");
+			assert_eq!(reads, Default::default(), "{what}: the lookup read the catalog");
+		}
+		let _ = observer.take();
 		Ok(())
 	}
 

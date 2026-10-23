@@ -26,6 +26,13 @@ impl<'a> Parser<'a> {
 		// Target table name
 		let relation = self.parse_qualified_name()?;
 
+		// Optional alias: `AS a`
+		let alias = if self.eat(&TokenKind::Keyword(Keyword::As))? {
+			Some(self.parse_ident()?.0)
+		} else {
+			None
+		};
+
 		// Optional column list: `(col1, col2, ...)`
 		let columns = if self.eat(&TokenKind::LParen)? {
 			let mut cols = Vec::new();
@@ -92,8 +99,17 @@ impl<'a> Parser<'a> {
 				None
 			};
 
+			// Optional index predicate of the conflict target: `(col) WHERE pred`
+			let target_where =
+				if target.is_some() && self.eat(&TokenKind::Keyword(Keyword::Where))? {
+					Some(self.parse_expr()?)
+				} else {
+					None
+				};
+
 			self.expect(&TokenKind::Keyword(Keyword::Do), "'DO'")?;
 
+			let mut where_clause = None;
 			let action = if self.eat(&TokenKind::Keyword(Keyword::Nothing))? {
 				OnConflictAction::DoNothing
 			} else {
@@ -114,13 +130,18 @@ impl<'a> Parser<'a> {
 						break;
 					}
 				}
+				if self.eat(&TokenKind::Keyword(Keyword::Where))? {
+					where_clause = Some(self.parse_expr()?);
+				}
 				OnConflictAction::DoUpdate(assignments)
 			};
 
 			let span = self.peek().span;
 			Some(OnConflictClause {
 				target,
+				target_where,
 				action,
+				where_clause,
 				span,
 			})
 		} else {
@@ -140,6 +161,7 @@ impl<'a> Parser<'a> {
 		Ok(InsertStmt {
 			with,
 			relation,
+			alias,
 			columns,
 			values,
 			query,

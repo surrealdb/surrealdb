@@ -113,7 +113,7 @@ value = "[{ one: 1 }]"
 value = "[{ s: 'x', three: 3 }]"
 
 [[test.results]]
-value = "[{ did: 1, dname: 'Eng', floor: 3, id: dept:1 }, { dname: 'Keyless', floor: 7, id: dept:6 }, { did: 4, dname: 'Legal', floor: 5, id: dept:4 }, { did: NULL, dname: 'Nowhere', floor: 0, id: dept:5 }, { did: 2, dname: 'Ops', floor: 1, id: dept:2 }, { did: 2, dname: 'Ops2', floor: 2, id: dept:3 }]"
+value = "[{ did: 1, dname: 'Eng', floor: 3, id: 1 }, { dname: 'Keyless', floor: 7, id: 6 }, { did: 4, dname: 'Legal', floor: 5, id: 4 }, { did: NULL, dname: 'Nowhere', floor: 0, id: 5 }, { did: 2, dname: 'Ops', floor: 1, id: 2 }, { did: 2, dname: 'Ops2', floor: 2, id: 3 }]"
 
 [[test.results]]
 value = "[{ dname: 'Ops' }, { dname: 'Ops2' }]"

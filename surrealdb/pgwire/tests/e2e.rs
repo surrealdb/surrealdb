@@ -963,10 +963,10 @@ async fn test_pgwire_query_matrix_aggregations_and_group_by() {
 	assert_eq!(last, b'C');
 	assert_eq!(rows.len(), 2);
 	let r_false = decode_data_row(&rows[0]);
-	assert_eq!(r_false[0].as_deref(), Some("false"));
+	assert_eq!(r_false[0].as_deref(), Some("f"));
 	assert_eq!(r_false[1].as_deref(), Some("1"));
 	let r_true = decode_data_row(&rows[1]);
-	assert_eq!(r_true[0].as_deref(), Some("true"));
+	assert_eq!(r_true[0].as_deref(), Some("t"));
 	assert_eq!(r_true[1].as_deref(), Some("3"));
 
 	// 8. Multi-column GROUP BY
@@ -2447,6 +2447,85 @@ fn overlong_record() -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn test_pgwire_copy_from_stdin_stores_a_key_in_a_link_column_as_the_link() {
+	let ds = Datastore::new("memory").await.expect("Failed to create datastore");
+	query_rendered(&ds, "DEFINE NAMESPACE IF NOT EXISTS test")
+		.await
+		.expect("Failed to define the namespace");
+	query_rendered(&ds, "DEFINE DATABASE IF NOT EXISTS test")
+		.await
+		.expect("Failed to define the database");
+	query_rendered(
+		&ds,
+		"DEFINE TABLE copy_dept SCHEMALESS; \
+		 DEFINE TABLE copy_emp SCHEMAFULL; \
+		 DEFINE FIELD name ON copy_emp TYPE string; \
+		 DEFINE FIELD dept ON copy_emp TYPE record<copy_dept>; \
+		 DEFINE FIELD boss ON copy_emp TYPE option<record<copy_emp>>;",
+	)
+	.await
+	.expect("Failed to define the tables");
+	let (addr, shutdown) = start_test_pg_server_with_ds(Arc::clone(&ds)).await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let outcome = copy_in_raw(
+		&mut stream,
+		"COPY copy_emp (id, name, dept) FROM STDIN;",
+		&[b"1\tEve\t7\n"],
+		CopyEnd::Done,
+	)
+	.await;
+	assert!(outcome.errors.is_empty(), "COPY failed: {:?}", outcome.messages);
+	let outcome = copy_in_raw(
+		&mut stream,
+		"COPY copy_emp (id, name, dept, boss) FROM STDIN;",
+		&[b"2\tSam\tops\t1\n"],
+		CopyEnd::Done,
+	)
+	.await;
+	assert!(outcome.errors.is_empty(), "COPY failed: {:?}", outcome.messages);
+	assert_eq!(outcome.complete, "COPY 1");
+	assert_eq!(
+		try_query_rendered(&ds, "SELECT VALUE [dept, boss ?? NONE] FROM copy_emp ORDER BY id;")
+			.await
+			.as_deref(),
+		Some("[[copy_dept:7, NONE], [copy_dept:ops, copy_emp:1]]")
+	);
+
+	// Text that is not an integer names the string key it spells, whatever it looks like.
+	let outcome = copy_in_raw(
+		&mut stream,
+		"COPY copy_emp (id, name, dept) FROM STDIN;",
+		&[b"3\tFlag\ttrue\n4\tRatio\t1.5\n5\tShort\tt\n"],
+		CopyEnd::Done,
+	)
+	.await;
+	assert!(outcome.errors.is_empty(), "COPY failed: {:?}", outcome.messages);
+	assert_eq!(
+		try_query_rendered(
+			&ds,
+			"SELECT VALUE dept FROM copy_emp WHERE record::id(id) IN [3, 4, 5] ORDER BY id;"
+		)
+		.await
+		.as_deref(),
+		Some("[copy_dept:true, copy_dept:`1.5`, copy_dept:t]")
+	);
+
+	// The empty text is no key: the column's own type check refuses it.
+	let outcome = copy_in_raw(
+		&mut stream,
+		"COPY copy_emp (id, name, dept) FROM STDIN;",
+		&[b"6\tBad\t\n"],
+		CopyEnd::Done,
+	)
+	.await;
+	assert!(!outcome.errors.is_empty(), "the empty text is no key of a link");
+	assert_eq!(stored_count(&ds, "copy_emp").await, 5);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_pgwire_copy_from_stdin_streams_many_text_rows() {
 	let ds = Datastore::new("memory").await.expect("Failed to create datastore");
 	let (addr, shutdown) = start_test_pg_server_with_ds(Arc::clone(&ds)).await;
@@ -3140,6 +3219,31 @@ async fn test_pgwire_copy_to_stdout_quotes_table_and_column_names() {
 	assert_eq!(complete, "COPY 1");
 	assert_eq!(chunks.concat(), b"7\n");
 
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_copy_to_stdout_shows_record_ids_as_keys_on_either_dialect() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in
+		["SET dialect = 'surrealql'", "CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE"]
+	{
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C');
+	}
+	// Under the SurrealQL dialect the COPY is still a PostgreSQL statement, so it reads like one.
+	let (chunks, complete) =
+		run_copy_out(&mut stream, "COPY (SELECT id, dept FROM emp) TO STDOUT;").await;
+	assert_eq!(complete, "COPY 1");
+	assert_eq!(chunks.concat(), b"7\t1\n");
+	let (_, last, err) = run_simple_query_with_err(&mut stream, "SET dialect = 'pgsql'").await;
+	assert!(err.is_none() && last == b'C');
+	let (chunks, complete) =
+		run_copy_out(&mut stream, "COPY (SELECT id, dept FROM emp) TO STDOUT;").await;
+	assert_eq!(complete, "COPY 1");
+	assert_eq!(chunks.concat(), b"7\t1\n");
 	shutdown.cancel();
 }
 
@@ -4133,5 +4237,1585 @@ async fn test_pgwire_reject_function_call_message() {
 	assert_eq!(code, "0A000", "Expected feature_not_supported 0A000");
 	assert!(msg.contains("FunctionCall is not supported"), "Unexpected message: {msg}");
 
+	shutdown.cancel();
+}
+
+/// Every message of an extended-protocol batch up to ReadyForQuery, as (type, payload).
+async fn run_extended_batch_messages(
+	stream: &mut TcpStream,
+	packets: &[BytesMut],
+) -> Vec<(u8, Vec<u8>)> {
+	for p in packets {
+		stream.write_all(p).await.expect("send packet");
+	}
+	let mut messages = Vec::new();
+	let res = timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = stream.read_u8().await?;
+			let msg_len = stream.read_i32().await? as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await?;
+			messages.push((msg_type, payload));
+			if msg_type == b'Z' {
+				break;
+			}
+		}
+		Ok::<_, std::io::Error>(())
+	})
+	.await;
+	assert!(res.is_ok(), "Timed out waiting for extended batch response");
+	messages
+}
+
+/// The bytes of the SQLSTATE field (`C`) of an ErrorResponse payload, as they are on the wire.
+fn sqlstate_bytes(payload: &[u8]) -> Vec<u8> {
+	let mut idx = 0;
+	while idx < payload.len() && payload[idx] != 0 {
+		let field = payload[idx];
+		let start = idx + 1;
+		let end = start + payload[start..].iter().position(|b| *b == 0).expect("terminated field");
+		if field == b'C' {
+			return payload[start..end].to_vec();
+		}
+		idx = end + 1;
+	}
+	panic!("no SQLSTATE field in {payload:?}");
+}
+
+/// The SQLSTATE bytes of every ErrorResponse among `messages`.
+fn error_sqlstates(messages: &[(u8, Vec<u8>)]) -> Vec<Vec<u8>> {
+	messages
+		.iter()
+		.filter(|(ty, _)| *ty == b'E')
+		.map(|(_, payload)| sqlstate_bytes(payload))
+		.collect()
+}
+
+/// Statements the planner refuses, each with the SQLSTATE the refusal carries: a feature that is
+/// not supported is `0A000`, a path that is not a text array is `22P02` and an index that is
+/// neither text nor a 32-bit integer is an operator that does not exist, `42883`.
+const JSON_REFUSALS: [(&str, &[u8]); 10] = [
+	("SELECT data @> '{\"a\":1}' FROM jt", b"0A000"),
+	("SELECT data #> '{a}' FROM jt", b"0A000"),
+	("SELECT data #>> $1 FROM jt", b"0A000"),
+	("SELECT data #>> '{a,' FROM jt", b"22P02"),
+	("SELECT data #>> 'a' FROM jt", b"22P02"),
+	("UPDATE jt SET n = 1 WHERE data ->> 'a' = 'b'", b"0A000"),
+	("SELECT data #>> '{a,,b}' FROM jt", b"22P02"),
+	("SELECT data ->> 3000000000 FROM jt", b"42883"),
+	("SELECT data -> 1.5 FROM jt", b"42883"),
+	("SELECT data -> true FROM jt", b"42883"),
+];
+
+#[tokio::test]
+async fn test_pgwire_planner_refusals_carry_their_sqlstate_in_the_simple_protocol() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, last) = run_simple_query(&mut stream, "CREATE TABLE jt (n int, data jsonb);").await;
+	assert_eq!(last, b'C');
+
+	for (sql, sqlstate) in JSON_REFUSALS {
+		let (rows, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(rows.is_empty(), "{sql}");
+		assert_eq!(last, b'E', "{sql}");
+		let (code, message) = err.expect("an ErrorResponse");
+		assert_eq!(code.as_bytes(), sqlstate, "{sql}: {message}");
+	}
+
+	// A syntax error is still a syntax error, and the session carries on after every refusal.
+	let (_, last, err) = run_simple_query_with_err(&mut stream, "SELECT FROM WHERE;").await;
+	assert_eq!(last, b'E');
+	assert_eq!(err.expect("an ErrorResponse").0, "42601");
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 AS one;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_planner_refusals_carry_their_sqlstate_in_the_extended_protocol() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, last) = run_simple_query(&mut stream, "CREATE TABLE jt (n int, data jsonb);").await;
+	assert_eq!(last, b'C');
+
+	for (sql, sqlstate) in JSON_REFUSALS {
+		let packets = [
+			build_parse("", sql, &[]),
+			build_bind("", "", &[], &[]),
+			build_exec("", 0),
+			build_sync(),
+		];
+		let messages = run_extended_batch_messages(&mut stream, &packets).await;
+		let errors = error_sqlstates(&messages);
+		assert_eq!(errors, vec![sqlstate.to_vec()], "{sql}: {messages:?}");
+		let types: Vec<u8> = messages.iter().map(|(ty, _)| *ty).collect();
+		assert_eq!(types.last(), Some(&b'Z'), "{sql}");
+		assert!(!types.contains(&b'C'), "{sql}: a refused statement completes nothing");
+	}
+
+	// A SELECT is refused by Parse, which gives no ParseComplete; a write is refused when it runs.
+	for (sql, sqlstate) in JSON_REFUSALS.iter().filter(|(sql, _)| sql.starts_with("SELECT")) {
+		let messages =
+			run_extended_batch_messages(&mut stream, &[build_parse("", sql, &[]), build_sync()])
+				.await;
+		let types: Vec<u8> = messages.iter().map(|(ty, _)| *ty).collect();
+		assert_eq!(types, vec![b'E', b'Z'], "{sql}");
+		assert_eq!(error_sqlstates(&messages), vec![sqlstate.to_vec()], "{sql}");
+	}
+	let messages = run_extended_batch_messages(
+		&mut stream,
+		&[build_parse("", JSON_REFUSALS[5].0, &[]), build_sync()],
+	)
+	.await;
+	let types: Vec<u8> = messages.iter().map(|(ty, _)| *ty).collect();
+	assert_eq!(types, vec![b'1', b'Z']);
+
+	// The session carries on, and a statement that is not refused still runs.
+	let packets = [
+		build_parse("", "SELECT data ->> 'a' AS a FROM jt", &[]),
+		build_bind("", "", &[], &[]),
+		build_exec("", 0),
+		build_sync(),
+	];
+	let messages = run_extended_batch_messages(&mut stream, &packets).await;
+	assert!(error_sqlstates(&messages).is_empty(), "{messages:?}");
+	assert!(messages.iter().any(|(ty, _)| *ty == b'C'), "{messages:?}");
+
+	shutdown.cancel();
+}
+
+/// The unsupported-feature counters hold the kind of construct a refusal names. The planner's
+/// message goes on to describe the client's statement, and none of that text is a counter key.
+#[tokio::test]
+async fn test_pgwire_planner_refusals_leave_the_statement_out_of_the_metrics() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, last) = run_simple_query(&mut stream, "CREATE TABLE jt (n int, data jsonb);").await;
+	assert_eq!(last, b'C');
+
+	// A SELECT is refused while it is bound, and a write while it is lowered. Each one is sent
+	// as a simple query and as a prepared statement, with a literal of its own.
+	let refusals = [
+		"SELECT ARRAY[918273641] AS a FROM jt",
+		"SELECT (918273642, 1) AS a FROM jt",
+		"UPDATE jt SET n = ARRAY[918273643] WHERE n = 1",
+		"UPDATE jt SET n = 1 WHERE (918273644, 2) = (n, n)",
+	];
+	for sql in refusals {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(last, b'E', "{sql}");
+		assert_eq!(err.expect("an ErrorResponse").0, "0A000", "{sql}");
+		let packets = [
+			build_parse("", &sql.replace("9182736", "9182737"), &[]),
+			build_bind("", "", &[], &[]),
+			build_exec("", 0),
+			build_sync(),
+		];
+		let messages = run_extended_batch_messages(&mut stream, &packets).await;
+		assert_eq!(error_sqlstates(&messages), vec![b"0A000".to_vec()], "{sql}: {messages:?}");
+	}
+
+	// A form of SET that the connection does not model is refused by the connection itself.
+	for sql in ["SET TRANSACTION READ ONLY 918273645", "SET 918273646"] {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(last, b'E', "{sql}");
+		assert_eq!(err.expect("an ErrorResponse").0, "0A000", "{sql}");
+	}
+
+	let constructs = surrealdb_sqlplan::global_metrics().snapshot().unsupported_constructs;
+	let keys: Vec<&String> = constructs.keys().collect();
+	assert!(
+		keys.iter().all(|key| !key.contains("91827")),
+		"a counter key holds the client's statement: {keys:?}"
+	);
+	assert!(
+		keys.iter().any(|key| key.as_str() == "unsupported expression"),
+		"the refusals are counted by the construct they name: {keys:?}"
+	);
+
+	shutdown.cancel();
+}
+
+/// A result as a client sees it: the type OID of each column, and every row's cells.
+struct Described {
+	columns: Vec<(String, i32)>,
+	rows: Vec<Vec<Option<Vec<u8>>>>,
+}
+
+impl Described {
+	fn index(&self, name: &str) -> usize {
+		self.columns
+			.iter()
+			.position(|(column, _)| column == name)
+			.unwrap_or_else(|| panic!("no column {name} in {:?}", self.columns))
+	}
+
+	fn oid(&self, name: &str) -> i32 {
+		self.columns[self.index(name)].1
+	}
+
+	fn raw(&self, row: usize, name: &str) -> Option<&[u8]> {
+		self.rows[row][self.index(name)].as_deref()
+	}
+
+	fn cell(&self, row: usize, name: &str) -> Option<String> {
+		self.raw(row, name).map(|bytes| String::from_utf8(bytes.to_vec()).expect("a UTF-8 cell"))
+	}
+}
+
+fn parse_row_description(payload: &[u8]) -> Vec<(String, i32)> {
+	let mut cur = payload;
+	let count = cur.get_i16();
+	let mut columns = Vec::new();
+	for _ in 0..count {
+		let end = cur.iter().position(|b| *b == 0).expect("a column name");
+		let name = String::from_utf8_lossy(&cur[..end]).to_string();
+		cur.advance(end + 1);
+		cur.advance(4 + 2); // table oid, attribute number
+		let type_oid = cur.get_i32();
+		cur.advance(2 + 4 + 2); // type length, type modifier, format code
+		columns.push((name, type_oid));
+	}
+	columns
+}
+
+fn parse_data_row_cells(payload: &[u8]) -> Vec<Option<Vec<u8>>> {
+	let mut cur = payload;
+	let count = cur.get_i16();
+	(0..count)
+		.map(|_| {
+			let len = cur.get_i32();
+			(len >= 0).then(|| {
+				let cell = cur[..len as usize].to_vec();
+				cur.advance(len as usize);
+				cell
+			})
+		})
+		.collect()
+}
+
+async fn read_until_ready(stream: &mut TcpStream) -> Vec<(u8, Vec<u8>)> {
+	let mut messages = Vec::new();
+	let res = timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = stream.read_u8().await?;
+			let msg_len = stream.read_i32().await? as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await?;
+			let ready = msg_type == b'Z';
+			messages.push((msg_type, payload));
+			if ready {
+				break;
+			}
+		}
+		Ok::<_, std::io::Error>(())
+	})
+	.await;
+	assert!(res.is_ok(), "Timed out waiting for ReadyForQuery");
+	messages
+}
+
+fn described(messages: Vec<(u8, Vec<u8>)>, sql: &str) -> Described {
+	let mut columns = None;
+	let mut rows = Vec::new();
+	for (msg_type, payload) in messages {
+		match msg_type {
+			b'E' => panic!("{sql}: {:?}", parse_pg_error_fields(&payload)),
+			b'T' => columns = Some(parse_row_description(&payload)),
+			b'D' => rows.push(parse_data_row_cells(&payload)),
+			_ => {}
+		}
+	}
+	Described {
+		columns: columns.unwrap_or_else(|| panic!("{sql}: no RowDescription")),
+		rows,
+	}
+}
+
+async fn describe_simple(stream: &mut TcpStream, sql: &str) -> Described {
+	let mut query = sql.as_bytes().to_vec();
+	query.push(0);
+	let mut packet = BytesMut::new();
+	packet.put_u8(b'Q');
+	packet.put_i32((query.len() + 4) as i32);
+	packet.put_slice(&query);
+	stream.write_all(&packet).await.expect("send query");
+	described(read_until_ready(stream).await, sql)
+}
+
+/// Run `sql` through the extended protocol the way psql and libpq do (Parse, Bind, Describe of
+/// the portal, Execute, Sync), asking for every column in `result_format`.
+async fn describe_extended(stream: &mut TcpStream, sql: &str, result_format: i16) -> Described {
+	let mut bind = BytesMut::new();
+	bind.put_u8(b'B');
+	let mut body = BytesMut::new();
+	body.put_u8(0); // unnamed portal
+	body.put_u8(0); // unnamed statement
+	body.put_i16(0); // no parameter formats
+	body.put_i16(0); // no parameters
+	body.put_i16(1); // one result format, for every column
+	body.put_i16(result_format);
+	bind.put_i32((body.len() + 4) as i32);
+	bind.put(body);
+	for packet in
+		[build_parse("", sql, &[]), bind, build_desc(b'P', ""), build_exec("", 0), build_sync()]
+	{
+		stream.write_all(&packet).await.expect("send packet");
+	}
+	described(read_until_ready(stream).await, sql)
+}
+
+/// A schemaless `emp` table whose fields cover what a text column can be handed: datetimes with
+/// and without a fraction and before 1970, durations of under and over a day, a bool, arrays, a
+/// float, a decimal, a uuid, a geometry and an object.
+async fn seed_emp(stream: &mut TcpStream) {
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE TABLE emp SCHEMALESS",
+		"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
+		 seen: d'2020-01-01T12:34:56.789Z', took: 1h30m, flag: true, tags: ['rust', 'db'], \
+		 ratio: 1.5, dec: 1.25dec, u: u'018f6b2e-4c3d-7a11-9a52-0123456789ab', geo: (1.0, 2.0), \
+		 meta: { a: 1, at: d'2020-01-01T00:00:00Z' } } RETURN NONE",
+		"CREATE emp:2 CONTENT { name: 'Bob', born: d'1969-12-31T23:59:59Z', \
+		 seen: d'2024-01-15T12:34:56.123456Z', took: 26h, flag: false, tags: [], \
+		 ratio: 3.0 } RETURN NONE",
+		"CREATE emp:3 CONTENT { name: 'Cy', born: d'2000-02-29T00:00:00.5Z', \
+		 seen: d'2020-06-01T00:00:00Z', took: 0s, flag: true, tags: ['a b'], \
+		 ratio: 0.25 } RETURN NONE",
+		"SET dialect = 'pgsql'",
+	] {
+		let (_, last, err) = run_simple_query_with_err(stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C', "{sql}");
+	}
+}
+
+const EMP_FIELDS: [&str; 11] =
+	["born", "seen", "took", "flag", "tags", "ratio", "dec", "u", "geo", "meta", "name"];
+
+fn emp_named_select() -> String {
+	format!("SELECT {} FROM emp ORDER BY id", EMP_FIELDS.join(", "))
+}
+
+const TIMESTAMPTZ_OID: i32 = 1184;
+const INTERVAL_OID: i32 = 1186;
+const BOOL_OID: i32 = 16;
+const TEXT_ARRAY_OID: i32 = 1009;
+const TEXT_OID: i32 = 25;
+
+/// The text a field has in each row of `emp`, as a typed column shows it.
+const EMP_TEXT: [(&str, [&str; 3]); 6] = [
+	("born", ["1980-01-01 00:00:00+00", "1969-12-31 23:59:59+00", "2000-02-29 00:00:00.5+00"]),
+	(
+		"seen",
+		["2020-01-01 12:34:56.789+00", "2024-01-15 12:34:56.123456+00", "2020-06-01 00:00:00+00"],
+	),
+	("took", ["01:30:00", "1 day 02:00:00", "00:00:00"]),
+	("flag", ["t", "f", "t"]),
+	("tags", ["{rust,db}", "{}", "{\"a b\"}"]),
+	("ratio", ["1.5", "3", "0.25"]),
+];
+
+/// The text columns of `named` and the typed columns of `star` hold one text per field and row.
+fn assert_one_text_per_value(star: &Described, named: &Described) {
+	assert_eq!(named.rows.len(), 3);
+	assert_eq!(star.rows.len(), 3);
+	for field in EMP_FIELDS {
+		for row in 0..3 {
+			assert_eq!(
+				named.raw(row, field).map(String::from_utf8_lossy),
+				star.raw(row, field).map(String::from_utf8_lossy),
+				"{field}, row {row}: a named column and `SELECT *` differ"
+			);
+		}
+	}
+	for (field, texts) in EMP_TEXT {
+		for (row, text) in texts.iter().enumerate() {
+			assert_eq!(named.cell(row, field).as_deref(), Some(*text), "{field}, row {row}");
+		}
+	}
+	assert_eq!(
+		named.cell(0, "u").as_deref(),
+		Some("018f6b2e-4c3d-7a11-9a52-0123456789ab"),
+		"a uuid"
+	);
+	assert_eq!(named.cell(0, "dec").as_deref(), Some("1.25"), "a decimal");
+	assert_eq!(
+		named.cell(0, "geo").as_deref(),
+		Some("{\"coordinates\":[1.0,2.0],\"type\":\"Point\"}"),
+		"a geometry"
+	);
+	assert_eq!(
+		named.cell(0, "meta").as_deref(),
+		Some("{\"a\":1,\"at\":\"2020-01-01T00:00:00Z\"}"),
+		"an object is a JSON document"
+	);
+	assert_eq!(named.cell(1, "meta"), None);
+}
+
+/// The columns of `star` are typed from its rows, and the columns of `named` are text.
+fn assert_typed_apart(star: &Described, named: &Described) {
+	for (field, oid) in [
+		("born", TIMESTAMPTZ_OID),
+		("seen", TIMESTAMPTZ_OID),
+		("took", INTERVAL_OID),
+		("flag", BOOL_OID),
+		("tags", TEXT_ARRAY_OID),
+	] {
+		assert_eq!(star.oid(field), oid, "`SELECT *` types {field}");
+		assert_eq!(named.oid(field), TEXT_OID, "a named column {field} is text");
+	}
+}
+
+#[tokio::test]
+async fn test_pgwire_simple_query_named_columns_and_select_star_show_one_text() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_emp(&mut stream).await;
+	let star = describe_simple(&mut stream, "SELECT * FROM emp ORDER BY id").await;
+	let named = describe_simple(&mut stream, &emp_named_select()).await;
+	assert_typed_apart(&star, &named);
+	assert_one_text_per_value(&star, &named);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_extended_query_named_columns_and_select_star_show_one_text() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_emp(&mut stream).await;
+	let star = describe_extended(&mut stream, "SELECT * FROM emp ORDER BY id", 0).await;
+	let named = describe_extended(&mut stream, &emp_named_select(), 0).await;
+	assert_typed_apart(&star, &named);
+	assert_one_text_per_value(&star, &named);
+	// The extended protocol shows what the simple protocol does.
+	let simple = describe_simple(&mut stream, "SELECT * FROM emp ORDER BY id").await;
+	assert_eq!(star.rows, simple.rows);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_extended_query_binary_text_column_is_the_text_of_the_typed_column() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_emp(&mut stream).await;
+	let star_text = describe_extended(&mut stream, "SELECT * FROM emp ORDER BY id", 0).await;
+	let named_binary = describe_extended(&mut stream, &emp_named_select(), 1).await;
+	assert_typed_apart(&star_text, &named_binary);
+	// A text column's binary cell is its text, which is the text cell of the typed column.
+	assert_one_text_per_value(&star_text, &named_binary);
+	// A typed column in binary format is the binary type, not text.
+	let star_binary = describe_extended(&mut stream, "SELECT * FROM emp ORDER BY id", 1).await;
+	assert_eq!(star_binary.raw(0, "flag"), Some(&[1u8][..]));
+	let micros_since_2000 = (315_532_800i64 - 946_684_800) * 1_000_000;
+	assert_eq!(star_binary.raw(0, "born"), Some(&micros_since_2000.to_be_bytes()[..]));
+	assert_eq!(star_binary.raw(0, "took").map(<[u8]>::len), Some(16));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_copy_to_stdout_exports_a_text_column_as_the_typed_column_shows_it() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	seed_emp(&mut stream).await;
+	let select = "SELECT id, tags, born, seen, took, flag FROM emp ORDER BY id";
+
+	let (chunks, complete) =
+		run_copy_out(&mut stream, &format!("COPY ({select}) TO STDOUT (FORMAT csv);")).await;
+	assert_eq!(complete, "COPY 3");
+	assert_eq!(
+		String::from_utf8(chunks.concat()).unwrap(),
+		"1,\"{rust,db}\",1980-01-01 00:00:00+00,2020-01-01 12:34:56.789+00,01:30:00,t\n\
+		 2,{},1969-12-31 23:59:59+00,2024-01-15 12:34:56.123456+00,1 day 02:00:00,f\n\
+		 3,\"{\"\"a b\"\"}\",2000-02-29 00:00:00.5+00,2020-06-01 00:00:00+00,00:00:00,t\n"
+	);
+
+	let (chunks, complete) =
+		run_copy_out(&mut stream, &format!("COPY ({select}) TO STDOUT;")).await;
+	assert_eq!(complete, "COPY 3");
+	assert_eq!(
+		String::from_utf8(chunks.concat()).unwrap(),
+		"1\t{rust,db}\t1980-01-01 00:00:00+00\t2020-01-01 12:34:56.789+00\t01:30:00\tt\n\
+		 2\t{}\t1969-12-31 23:59:59+00\t2024-01-15 12:34:56.123456+00\t1 day 02:00:00\tf\n\
+		 3\t{\"a b\"}\t2000-02-29 00:00:00.5+00\t2020-06-01 00:00:00+00\t00:00:00\tt\n"
+	);
+
+	// The table form exports the same text.
+	let (chunks, complete) =
+		run_copy_out(&mut stream, "COPY emp (born, took, flag) TO STDOUT (FORMAT csv);").await;
+	assert_eq!(complete, "COPY 3");
+	let exported = String::from_utf8(chunks.concat()).unwrap();
+	let mut lines: Vec<&str> = exported.lines().collect();
+	lines.sort_unstable();
+	assert_eq!(
+		lines,
+		[
+			"1969-12-31 23:59:59+00,1 day 02:00:00,f",
+			"1980-01-01 00:00:00+00,01:30:00,t",
+			"2000-02-29 00:00:00.5+00,00:00:00,t",
+		]
+	);
+	shutdown.cancel();
+}
+
+async fn seed_link_comparisons() -> (TcpStream, CancellationToken) {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE FIELD dept ON link_cmp TYPE option<record<dept>>",
+		"CREATE link_cmp:1 SET dept = dept:1 RETURN NONE",
+		"CREATE link_cmp:2 SET dept = dept:2 RETURN NONE",
+		"CREATE link_cmp:3 RETURN NONE",
+		"SET dialect = 'pgsql'",
+	] {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C', "{sql}");
+	}
+	(stream, shutdown)
+}
+
+#[tokio::test]
+async fn test_pgwire_link_nonkeys_remain_nonnull() {
+	let (mut stream, shutdown) = seed_link_comparisons().await;
+	for sql in [
+		"SELECT id FROM link_cmp WHERE dept <> '' ORDER BY id",
+		"SELECT id FROM link_cmp WHERE dept <> lower('') ORDER BY id",
+	] {
+		let (rows, _, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		let rows: Vec<_> = rows.iter().map(|row| decode_data_row(row)).collect();
+		assert_eq!(rows, vec![vec![Some("1".into())], vec![Some("2".into())]], "{sql}");
+	}
+	for sql in [
+		"SELECT id FROM link_cmp WHERE dept IS NOT DISTINCT FROM ''",
+		"SELECT id FROM link_cmp WHERE dept IS NOT DISTINCT FROM lower('')",
+	] {
+		let (rows, _, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert!(rows.is_empty(), "{sql}: {rows:?}");
+	}
+	for (sql, expected) in [
+		(
+			"SELECT id FROM link_cmp WHERE dept <> $1 ORDER BY id",
+			vec![vec![Some("1".into())], vec![Some("2".into())]],
+		),
+		("SELECT id FROM link_cmp WHERE dept IS NOT DISTINCT FROM $1", vec![]),
+	] {
+		let (rows, last) = run_extended_query(&mut stream, sql, &[25], &[Some(b"")]).await;
+		assert_eq!(last, b'C', "{sql}");
+		let rows: Vec<_> = rows.iter().map(|row| decode_data_row(row)).collect();
+		assert_eq!(rows, expected, "{sql}");
+	}
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		"SELECT id FROM link_cmp WHERE dept IS NOT DISTINCT FROM $1",
+		&[25],
+		&[None],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(
+		rows.iter().map(|row| decode_data_row(row)).collect::<Vec<_>>(),
+		vec![vec![Some("3".into())]]
+	);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_link_integral_numeric_literals_match_integer_keys() {
+	let (mut stream, shutdown) = seed_link_comparisons().await;
+	for predicate in [
+		"dept = 1",
+		"dept = 1.0",
+		"dept IN (1.0)",
+		"dept IN (1.0, 9.0)",
+		"dept = CAST(1 AS double precision)",
+		"dept IS NOT DISTINCT FROM 1.0",
+	] {
+		let sql = format!("SELECT id FROM link_cmp WHERE {predicate}");
+		let (rows, _, err) = run_simple_query_with_err(&mut stream, &sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(
+			rows.iter().map(|row| decode_data_row(row)).collect::<Vec<_>>(),
+			vec![vec![Some("1".into())]],
+			"{sql}"
+		);
+	}
+	for predicate in ["dept = 1.5", "dept IN (1.5)"] {
+		let sql = format!("SELECT id FROM link_cmp WHERE {predicate}");
+		let (rows, _, err) = run_simple_query_with_err(&mut stream, &sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert!(rows.is_empty(), "{sql}: {rows:?}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_declared_scalar_types_drive_results_and_parameters() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"CREATE TABLE scalar_types (id int PRIMARY KEY, age int, enabled boolean, name text)",
+		"INSERT INTO scalar_types (id, age, enabled, name) VALUES (1, 42, true, 'Ada')",
+		"INSERT INTO scalar_types (id, age, enabled, name) VALUES (2, NULL, false, 'Bob')",
+	] {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C', "{sql}");
+	}
+	let described = describe_simple(
+		&mut stream,
+		"SELECT p.id, p.age, p.enabled, p.name FROM scalar_types p ORDER BY p.id",
+	)
+	.await;
+	assert_eq!(
+		described.columns,
+		vec![("id".into(), 20), ("age".into(), 20), ("enabled".into(), 16), ("name".into(), 25)]
+	);
+	assert_eq!(described.cell(0, "age").as_deref(), Some("42"));
+	assert_eq!(described.cell(1, "age"), None);
+
+	for (sql, params) in [
+		("SELECT id FROM scalar_types p WHERE p.id = $1", vec![Some(b"1".as_slice())]),
+		("SELECT id FROM scalar_types p WHERE p.age = $1", vec![Some(b"42".as_slice())]),
+		("SELECT id FROM scalar_types p WHERE p.enabled = $1", vec![Some(b"true".as_slice())]),
+		(
+			"SELECT id FROM scalar_types WHERE id = $2 AND $1 IS NULL",
+			vec![None, Some(b"1".as_slice())],
+		),
+		("SELECT id FROM scalar_types WHERE id = $1::int", vec![Some(b"1".as_slice())]),
+	] {
+		let (rows, last) = run_extended_query(&mut stream, sql, &[], &params).await;
+		assert_eq!(last, b'C', "{sql}");
+		assert_eq!(
+			rows.iter().map(|row| decode_data_row(row)).collect::<Vec<_>>(),
+			vec![vec![Some("1".into())]],
+			"{sql}"
+		);
+	}
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		"SELECT id FROM scalar_types WHERE id = $1",
+		&[25],
+		&[Some(b"1")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert!(rows.is_empty(), "an explicit text key must stay text");
+
+	stream
+		.write_all(&build_parse(
+			"scalar_desc",
+			"SELECT p.age, p.enabled FROM scalar_types p WHERE p.id = $2 AND $1 IS NULL",
+			&[],
+		))
+		.await
+		.unwrap();
+	stream.write_all(&build_desc(b'S', "scalar_desc")).await.unwrap();
+	stream.write_all(&build_sync()).await.unwrap();
+	let messages = read_until_ready(&mut stream).await;
+	let parameters = messages.iter().find(|(tag, _)| *tag == b't').expect("parameter description");
+	let mut body = parameters.1.as_slice();
+	assert_eq!(body.get_i16(), 2);
+	assert_eq!(body.get_i32(), 25);
+	assert_eq!(body.get_i32(), 20);
+	let columns = messages.iter().find(|(tag, _)| *tag == b'T').expect("row description");
+	assert_eq!(parse_row_description(&columns.1), vec![("age".into(), 20), ("enabled".into(), 16)]);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_scalar_types_use_the_current_transaction_schema() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"BEGIN",
+		"CREATE TABLE transaction_types (id int, enabled boolean)",
+		"INSERT INTO transaction_types (id, enabled) VALUES (1, true)",
+	] {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C', "{sql}");
+	}
+	let desc = describe_extended(&mut stream, "SELECT id, enabled FROM transaction_types", 1).await;
+	assert_eq!(desc.columns, vec![("id".into(), 20), ("enabled".into(), 16)]);
+	assert_eq!(desc.raw(0, "id"), Some(1_i64.to_be_bytes().as_slice()));
+	assert_eq!(desc.raw(0, "enabled"), Some([1_u8].as_slice()));
+	let (_, last, err) = run_simple_query_with_err(&mut stream, "ROLLBACK").await;
+	assert!(err.is_none(), "{err:?}");
+	assert_eq!(last, b'C');
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_schema_discovery_preserves_analysis_sqlstates() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for (sql, code) in [("SELECT missing", "42703"), ("SELECT unknown.age FROM person p", "42P01")]
+	{
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(last, b'E', "{sql}");
+		assert_eq!(err.expect("analysis error").0, code, "{sql}");
+	}
+	shutdown.cancel();
+}
+
+async fn assert_sql_ids(stream: &mut TcpStream, sql: &str, expected: &[&str]) {
+	let (rows, _, error) = run_simple_query_with_err(stream, sql).await;
+	assert!(error.is_none(), "{sql}: {error:?}");
+	let mut ids: Vec<_> =
+		rows.iter().map(|row| decode_data_row(row)[0].clone().expect("id")).collect();
+	ids.sort();
+	assert_eq!(ids, expected, "{sql}");
+}
+
+#[tokio::test]
+async fn test_pgwire_sql_null_predicates_select_update_and_delete_agree() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"CREATE null_pred:1 SET v = NULL, flag = NULL RETURN NONE",
+		"CREATE null_pred:2 SET v = 1, flag = true RETURN NONE",
+		"CREATE null_pred:3 SET v = 2, flag = false RETURN NONE",
+		"CREATE null_pred:4 RETURN NONE",
+		"CREATE null_pred:5 SET v = 3, flag = false RETURN NONE",
+		"SET dialect = 'pgsql'",
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	let cases: &[(&str, &[&str])] = &[
+		("v <> 1", &["3", "5"]),
+		("NOT (v = 1)", &["3", "5"]),
+		("NOT (v <> 1)", &["2"]),
+		("v = NULL", &[]),
+		("NOT (v = NULL)", &[]),
+		("v IS NULL", &["1", "4"]),
+		("v IS NOT NULL", &["2", "3", "5"]),
+		("v NOT IN (1, NULL)", &[]),
+		("v IN (2, NULL)", &["3"]),
+		("NOT (v IN (1, NULL))", &[]),
+		("v BETWEEN 1 AND 2", &["2", "3"]),
+		("v NOT BETWEEN 1 AND 2", &["5"]),
+		("NOT (v BETWEEN NULL AND 0)", &["2", "3", "5"]),
+		("NOT flag", &["3", "5"]),
+		("flag OR v = 1", &["2"]),
+		("NOT (flag AND v = NULL)", &["3", "5"]),
+		("NOT (flag OR v = NULL)", &[]),
+		("v = NULL OR true", &["1", "2", "3", "4", "5"]),
+		("NOT (v = NULL AND false)", &["1", "2", "3", "4", "5"]),
+	];
+	for &(predicate, expected) in cases {
+		assert_sql_ids(
+			&mut stream,
+			&format!("UPDATE null_pred SET touched = true WHERE {predicate} RETURNING id"),
+			expected,
+		)
+		.await;
+		assert_sql_ids(
+			&mut stream,
+			&format!("SELECT id FROM null_pred WHERE {predicate}"),
+			expected,
+		)
+		.await;
+		let (_, _, error) = run_simple_query_with_err(&mut stream, "BEGIN").await;
+		assert!(error.is_none(), "{error:?}");
+		assert_sql_ids(
+			&mut stream,
+			&format!("DELETE FROM null_pred WHERE {predicate} RETURNING id"),
+			expected,
+		)
+		.await;
+		let (_, _, error) = run_simple_query_with_err(&mut stream, "ROLLBACK").await;
+		assert!(error.is_none(), "{error:?}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_quoted_names_preserve_case_through_crud_and_inference() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		r#"CREATE TABLE "User" (id int, "ID" int, "createdAt" text, createdat text)"#,
+		r#"INSERT INTO "User" (id, "ID", "createdAt", createdat) VALUES (1, 99, 'upper', 'lower')"#,
+		r#"CREATE TABLE "user" (id int)"#,
+		r#"INSERT INTO "user" (id) VALUES (7)"#,
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	let result = describe_simple(
+		&mut stream,
+		r#"SELECT "U".id, "U"."ID", "U"."createdAt" AS "createdAt", "U".CREATEDAT FROM "User" "U""#,
+	)
+	.await;
+	assert_eq!(
+		result.columns,
+		vec![
+			("id".into(), 20),
+			("ID".into(), 20),
+			("createdAt".into(), 25),
+			("createdat".into(), 25)
+		]
+	);
+	assert_eq!(result.cell(0, "id").as_deref(), Some("1"));
+	assert_eq!(result.cell(0, "ID").as_deref(), Some("99"));
+	assert_eq!(result.cell(0, "createdAt").as_deref(), Some("upper"));
+	assert_eq!(result.cell(0, "createdat").as_deref(), Some("lower"));
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"SELECT "U"."createdAt" FROM "User" "U" WHERE "U".id = $1"#,
+		&[],
+		&[Some(b"1")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("upper".into())]);
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, r#"SELECT u.id FROM "User" "U""#).await;
+	assert_eq!(error.expect("case-sensitive alias").0, "42P01");
+	let result = describe_simple(
+		&mut stream,
+		r#"UPDATE "User" SET "createdAt" = 'updated' WHERE "ID" = 99 RETURNING "createdAt""#,
+	)
+	.await;
+	assert_eq!(result.cell(0, "createdAt").as_deref(), Some("updated"));
+	let result = describe_simple(
+		&mut stream,
+		r#"WITH "Recent" AS (SELECT "createdAt" FROM "User") SELECT "createdAt" FROM "Recent""#,
+	)
+	.await;
+	assert_eq!(result.cell(0, "createdAt").as_deref(), Some("updated"));
+	assert_sql_ids(&mut stream, r#"DELETE FROM "User" WHERE id = 1 RETURNING id"#, &["1"]).await;
+	assert_sql_ids(&mut stream, r#"SELECT id FROM "user""#, &["7"]).await;
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_nullable_link_parameters_keep_sql_unknown() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SET dialect = 'surrealql'",
+		"DEFINE FIELD dept ON nullable_links TYPE record<dept> | null | none",
+		"CREATE nullable_links:1 SET dept = NULL RETURN NONE",
+		"CREATE nullable_links:2 SET dept = dept:1 RETURN NONE",
+		"CREATE nullable_links:3 SET dept = dept:2 RETURN NONE",
+		"CREATE nullable_links:4 RETURN NONE",
+		"SET dialect = 'pgsql'",
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	for (predicate, param, expected) in [
+		("dept = $1", None, vec![]),
+		("dept <> $1", None, vec![]),
+		("NOT (dept = $1)", None, vec![]),
+		("dept IN ($1)", None, vec![]),
+		("dept NOT IN ($1)", None, vec![]),
+		("dept = $1", Some(b"".as_slice()), vec![]),
+		("dept <> $1", Some(b"".as_slice()), vec!["2", "3"]),
+		("dept NOT IN ($1)", Some(b"".as_slice()), vec!["2", "3"]),
+	] {
+		for sql in [
+			format!("SELECT id FROM nullable_links WHERE {predicate}"),
+			format!("UPDATE nullable_links SET touched = true WHERE {predicate} RETURNING id"),
+		] {
+			let (rows, last) = run_extended_query(&mut stream, &sql, &[25], &[param]).await;
+			assert_eq!(last, b'C', "{sql}");
+			let mut ids: Vec<_> =
+				rows.iter().map(|row| decode_data_row(row)[0].clone().unwrap()).collect();
+			ids.sort();
+			assert_eq!(ids, expected, "{sql}: {param:?}");
+		}
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_null_membership_in_an_empty_subquery_is_false() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		"INSERT INTO empty_membership (id, v) VALUES (1, NULL), (2, 2)",
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	assert_sql_ids(
+		&mut stream,
+		"SELECT id FROM empty_membership WHERE v NOT IN (SELECT v FROM empty_membership WHERE id = 99)",
+		&["1", "2"],
+	)
+	.await;
+	assert_sql_ids(
+		&mut stream,
+		"SELECT id FROM empty_membership WHERE v IN (SELECT v FROM empty_membership WHERE id = 99)",
+		&[],
+	)
+	.await;
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_null_write_values_and_returning_preserve_unknown() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		"INSERT INTO null_values (id, v) VALUES (1, NULL), (2, 1), (3, 2)",
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let result = describe_simple(
+		&mut stream,
+		"UPDATE null_values SET comparison = v <> 1 RETURNING id, comparison",
+	)
+	.await;
+	for (row, comparison) in [(0, None), (1, Some("f")), (2, Some("t"))] {
+		assert_eq!(result.cell(row, "comparison").as_deref(), comparison);
+	}
+	let result =
+		describe_simple(&mut stream, "DELETE FROM null_values RETURNING id, v <> 1 AS comparison")
+			.await;
+	for (row, comparison) in [(0, None), (1, Some("f")), (2, Some("t"))] {
+		assert_eq!(result.cell(row, "comparison").as_deref(), comparison);
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_quoted_schema_and_qualified_write_fields() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		r#"CREATE TABLE "Audit"."Log" (id int, "entryValue" text, other text)"#,
+		r#"INSERT INTO "Audit"."Log" (id, "entryValue", other) VALUES (1, 'first', 'second')"#,
+		r#"UPDATE "Audit"."Log" SET "entryValue" = "Audit"."Log".other WHERE "Audit"."Log".id = 1"#,
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	let result =
+		describe_simple(&mut stream, r#"SELECT "Audit"."Log"."entryValue" FROM "Audit"."Log""#)
+			.await;
+	assert_eq!(result.cell(0, "entryValue").as_deref(), Some("second"));
+	shutdown.cancel();
+}
+
+async fn describe_write_statement(
+	stream: &mut TcpStream,
+	name: &str,
+	sql: &str,
+	declared: &[i32],
+) -> (Vec<i32>, Option<Vec<(String, i32)>>) {
+	for packet in [build_parse(name, sql, declared), build_desc(b'S', name), build_sync()] {
+		stream.write_all(&packet).await.expect("send statement description");
+	}
+	let messages = read_until_ready(stream).await;
+	assert!(!messages.iter().any(|(tag, _)| *tag == b'E'), "{sql}: {messages:?}");
+	let body = &messages.iter().find(|(tag, _)| *tag == b't').expect("parameter description").1;
+	let mut cursor = body.as_slice();
+	let count = cursor.get_i16();
+	let parameters = (0..count).map(|_| cursor.get_i32()).collect();
+	let columns =
+		messages.iter().find(|(tag, _)| *tag == b'T').map(|(_, body)| parse_row_description(body));
+	(parameters, columns)
+}
+
+#[tokio::test]
+async fn test_pgwire_write_parameters_use_declared_scalar_types() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "WriteTypes" (id int, age int, enabled boolean, name text)"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let (parameters, columns) = describe_write_statement(
+		&mut stream,
+		"typed_insert",
+		r#"INSERT INTO "WriteTypes" (id, age, enabled, name) VALUES ($1, $2, $3, $4)"#,
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, vec![20, 20, 16, 25]);
+	assert_eq!(columns, None);
+	let (rows, last) = run_extended_query(&mut stream,
+        r#"INSERT INTO "WriteTypes" (id, age, enabled, name) VALUES ($1, $2, $3, $4) RETURNING name, id, enabled, age"#,
+        &[], &[Some(b"1"), Some(b"42"), Some(b"true"), Some(b"Ada")]).await;
+	assert_eq!(last, b'C');
+	assert_eq!(
+		decode_data_row(&rows[0]),
+		vec![Some("Ada".into()), Some("1".into()), Some("t".into()), Some("42".into())]
+	);
+	let (parameters, _) = describe_write_statement(
+		&mut stream,
+		"typed_update",
+		r#"UPDATE "WriteTypes" SET age = $2, enabled = $3 WHERE id = $1 RETURNING name, id"#,
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, vec![20, 20, 16]);
+	let (parameters, _) = describe_write_statement(
+		&mut stream,
+		"typed_delete",
+		r#"DELETE FROM "WriteTypes" WHERE id = $2 AND $1 IS NULL RETURNING id"#,
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, vec![25, 20]);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_unspecified_array_parameters_use_declared_array_types() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "ArrayTypes" (id int, tags text[], scores int[])"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let (parameters, _) = describe_write_statement(
+		&mut stream,
+		"array_insert",
+		r#"INSERT INTO "ArrayTypes" (id, tags, scores) VALUES ($1, $2, $3)"#,
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, vec![20, 1009, 1016]);
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"INSERT INTO "ArrayTypes" (id, tags, scores) VALUES ($1, $2, $3) RETURNING tags, scores"#,
+		&[],
+		&[Some(b"1"), Some(br#"{"NULL","a b",""}"#), Some(b"{1, -2}")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(
+		decode_data_row(&rows[0]),
+		vec![Some(r#"{"NULL","a b",""}"#.into()), Some("{1,-2}".into())]
+	);
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"UPDATE "ArrayTypes" SET tags = $2 WHERE id = $1 RETURNING tags"#,
+		&[],
+		&[Some(b"1"), Some(b"{x,y}")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("{x,y}".into())]);
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"SELECT id FROM "ArrayTypes" WHERE tags = $1"#,
+		&[],
+		&[Some(b"{x,y}")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(
+		rows.iter().map(|row| decode_data_row(row)).collect::<Vec<_>>(),
+		vec![vec![Some("1".into())]]
+	);
+	let (_, last) = run_extended_query(
+		&mut stream,
+		r#"UPDATE "ArrayTypes" SET tags = $1"#,
+		&[],
+		&[Some(b"{x,,y}")],
+	)
+	.await;
+	assert_eq!(last, b'E', "a malformed array literal is refused");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_jsonb_columns_keep_nested_keys() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "Docs" (id int PRIMARY KEY, payload jsonb NOT NULL, extra json)"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"INSERT INTO "Docs" (id, payload, extra) VALUES ($1, $2, $3) RETURNING payload, extra"#,
+		&[],
+		&[Some(b"1"), Some(br#"{"nested":{"ok":true},"n":3}"#), Some(br#"{"k":[1,{"x":"y"}]}"#)],
+	)
+	.await;
+	assert_eq!(last, b'C', "{rows:?}");
+	let row = decode_data_row(&rows[0]);
+	let json = |cell: &Option<String>| -> serde_json::Value {
+		serde_json::from_str(cell.as_deref().expect("a value")).expect("JSON text")
+	};
+	assert_eq!(json(&row[0]), serde_json::json!({"nested": {"ok": true}, "n": 3}));
+	assert_eq!(json(&row[1]), serde_json::json!({"k": [1, {"x": "y"}]}));
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		r#"SELECT payload FROM "Docs" WHERE id = $1"#,
+		&[],
+		&[Some(b"1")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(
+		json(&decode_data_row(&rows[0])[0]),
+		serde_json::json!({"nested": {"ok": true}, "n": 3})
+	);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_serial_ids_are_generated_in_order() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "Gen" (id serial PRIMARY KEY, name text NOT NULL, seq bigserial)"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let mut returned = Vec::new();
+	for sql in [
+		r#"INSERT INTO "Gen" (name) VALUES ($1) RETURNING id, name, seq"#,
+		r#"INSERT INTO "Gen" (id, name, seq) VALUES (DEFAULT, $1, DEFAULT) RETURNING id, name, seq"#,
+	] {
+		let (rows, last) = run_extended_query(&mut stream, sql, &[], &[Some(b"a")]).await;
+		assert_eq!(last, b'C', "{sql}: {rows:?}");
+		returned.push(decode_data_row(&rows[0]));
+	}
+	assert_eq!(
+		returned,
+		vec![
+			vec![Some("1".into()), Some("a".into()), Some("1".into())],
+			vec![Some("2".into()), Some("a".into()), Some("2".into())],
+		]
+	);
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		r#"INSERT INTO "Gen" (id, name) VALUES (10, 'explicit') RETURNING id, seq"#,
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("10".into()), Some("3".into())]);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_returning_metadata_preserves_order_without_executing() {
+	let ds = Datastore::new("memory").await.unwrap();
+	let (addr, shutdown) = start_test_pg_server_with_ds(Arc::clone(&ds)).await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		"CREATE TABLE returning_order (id int, age int, enabled boolean, name text)",
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	let sql = "INSERT INTO returning_order (id, age, enabled, name) VALUES (1, 42, true, 'Ada') RETURNING name, id, enabled, age";
+	let (_, columns) = describe_write_statement(&mut stream, "ordered_insert", sql, &[]).await;
+	assert_eq!(
+		columns,
+		Some(vec![
+			("name".into(), 25),
+			("id".into(), 20),
+			("enabled".into(), 16),
+			("age".into(), 20)
+		])
+	);
+	assert_eq!(
+		stored_count(&ds, "returning_order").await,
+		0,
+		"Parse/Describe must not execute the write"
+	);
+	let (_, _, error) = run_simple_query_with_err(&mut stream, "BEGIN").await;
+	assert!(error.is_none(), "{error:?}");
+	for packet in [
+		build_bind("ordered_portal", "ordered_insert", &[], &[]),
+		build_desc(b'P', "ordered_portal"),
+		build_sync(),
+	] {
+		stream.write_all(&packet).await.unwrap();
+	}
+	let messages = read_until_ready(&mut stream).await;
+	assert!(messages.iter().any(|(tag, _)| *tag == b'T'));
+	assert_eq!(
+		stored_count(&ds, "returning_order").await,
+		0,
+		"Describe(portal) must not execute a static RETURNING"
+	);
+	for packet in [build_exec("ordered_portal", 0), build_sync()] {
+		stream.write_all(&packet).await.unwrap();
+	}
+	let messages = read_until_ready(&mut stream).await;
+	let row = &messages
+		.iter()
+		.find(|(tag, _)| *tag == b'D')
+		.unwrap_or_else(|| panic!("returned row: {messages:?}"))
+		.1;
+	assert_eq!(
+		decode_data_row(row),
+		vec![Some("Ada".into()), Some("1".into()), Some("t".into()), Some("42".into())]
+	);
+	let (_, _, error) = run_simple_query_with_err(&mut stream, "COMMIT").await;
+	assert!(error.is_none(), "{error:?}");
+	let empty = describe_simple(
+		&mut stream,
+		"UPDATE returning_order SET age = 50 WHERE id = 99 RETURNING name, id, enabled, age",
+	)
+	.await;
+	assert_eq!(empty.columns, columns.unwrap());
+	assert!(empty.rows.is_empty());
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		"INSERT INTO returning_order (id, age) VALUES (2, 20) RETURNING id, age AS id",
+	)
+	.await;
+	assert_eq!(error.expect("duplicate labels rejected").0, "0A000");
+	assert_eq!(stored_count(&ds, "returning_order").await, 1);
+	let expression = describe_simple(
+		&mut stream,
+		"UPDATE returning_order SET age = 43 RETURNING age + 1, name AS person",
+	)
+	.await;
+	assert_eq!(expression.columns, [("?column?".into(), 20), ("person".into(), 25)]);
+	assert_eq!(expression.cell(0, "?column?").as_deref(), Some("44"));
+	assert_eq!(expression.cell(0, "person").as_deref(), Some("Ada"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_write_binary_types_casts_and_command_tags() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in ["BEGIN", "CREATE TABLE binary_writes (id int, age int, active boolean, name text)"]
+	{
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	let (parameters, columns) = describe_write_statement(
+		&mut stream,
+		"explicit_write",
+		"INSERT INTO binary_writes (id) VALUES ($1::int4) RETURNING $1 AS input, id",
+		&[25],
+	)
+	.await;
+	assert_eq!(parameters, [25], "client-declared OIDs take precedence");
+	assert_eq!(columns, Some(vec![("input".into(), 25), ("id".into(), 20)]));
+	let bytes = 7_i64.to_be_bytes();
+	let (rows, last) = run_extended_query_with_formats(
+		&mut stream,
+		"INSERT INTO binary_writes (id, active, name) VALUES ($1, $2, $3) RETURNING name, active, id",
+		&[],
+		&[1, 1, 0],
+		&[Some(&bytes), Some(&[1]), Some(b"Ada")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), [Some("Ada".into()), Some("t".into()), Some("7".into())]);
+	let binary = describe_extended(
+		&mut stream,
+		"UPDATE binary_writes SET active = false WHERE id = 7 RETURNING active, id",
+		1,
+	)
+	.await;
+	assert_eq!(binary.columns, [("active".into(), 16), ("id".into(), 20)]);
+	assert_eq!(binary.raw(0, "active"), Some([0_u8].as_slice()));
+	assert_eq!(binary.raw(0, "id"), Some(bytes.as_slice()));
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		"UPDATE binary_writes SET age = $1::int4 WHERE id = 7 RETURNING age",
+		&[25],
+		&[Some(b"8")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), [Some("8".into())]);
+	for (sql, expected) in [
+		("INSERT INTO binary_writes (id) VALUES (9), (10)", "INSERT 0 2"),
+		("UPDATE binary_writes SET active = true WHERE id = 9", "UPDATE 1"),
+		("DELETE FROM binary_writes WHERE id = 10", "DELETE 1"),
+		("DELETE FROM binary_writes WHERE id = 99", "DELETE 0"),
+	] {
+		let mut packet = BytesMut::new();
+		packet.put_u8(b'Q');
+		packet.put_i32((sql.len() + 5) as i32);
+		packet.put_slice(sql.as_bytes());
+		packet.put_u8(0);
+		stream.write_all(&packet).await.unwrap();
+		let messages = read_until_ready(&mut stream).await;
+		assert!(
+			!messages.iter().any(|(tag, _)| matches!(tag, b'E' | b'T' | b'D')),
+			"{sql}: {messages:?}"
+		);
+		let tag = &messages.iter().find(|(tag, _)| *tag == b'C').unwrap().1;
+		assert_eq!(&tag[..tag.len() - 1], expected.as_bytes());
+	}
+	let (_, _, error) = run_simple_query_with_err(&mut stream, "ROLLBACK").await;
+	assert!(error.is_none(), "{error:?}");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_joined_writes_reject_without_mutating_either_table() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"CREATE TABLE write_target (id int, active boolean)",
+		"CREATE TABLE write_source (id int, active boolean)",
+		"INSERT INTO write_target (id, active) VALUES (1, false)",
+		"INSERT INTO write_source (id, active) VALUES (1, false)",
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	for sql in [
+		"UPDATE write_target SET active = true FROM write_source",
+		"DELETE FROM write_target USING write_source",
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(error.expect("joined write must be rejected").0, "0A000", "{sql}");
+		for table in ["write_target", "write_source"] {
+			let result =
+				describe_simple(&mut stream, &format!("SELECT id, active FROM {table}")).await;
+			assert_eq!(result.rows.len(), 1, "{sql}: {table}");
+			assert_eq!(result.cell(0, "active").as_deref(), Some("f"), "{sql}: {table}");
+		}
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_pagination_parameters_infer_integer_types() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, "CREATE TABLE page_values (id int)").await;
+	assert!(error.is_none(), "{error:?}");
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, "INSERT INTO page_values (id) VALUES (1), (2), (3)")
+			.await;
+	assert!(error.is_none(), "{error:?}");
+	let (parameters, _) = describe_write_statement(
+		&mut stream,
+		"page",
+		"SELECT id FROM page_values ORDER BY id LIMIT $1 OFFSET $2",
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, [20, 20]);
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		"SELECT id FROM page_values ORDER BY id LIMIT $1 OFFSET $2",
+		&[],
+		&[Some(b"1"), Some(b"1")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	assert_eq!(decode_data_row(&rows[0]), [Some("2".into())]);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_session_database_and_numeric_server_version() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let result = describe_simple(&mut stream, "SELECT current_database() AS db").await;
+	assert_eq!(result.cell(0, "db").as_deref(), Some("test"));
+	let result =
+		describe_simple(&mut stream, "SELECT current_setting('server_version_num') AS v").await;
+	assert_eq!(result.cell(0, "v").as_deref(), Some("160000"));
+	let result = describe_simple(&mut stream, "SHOW server_version_num").await;
+	assert_eq!(result.cell(0, "server_version_num").as_deref(), Some("160000"));
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, "SET server_version_num = '150000'").await;
+	assert_eq!(error.expect("read-only setting").0, "55P02");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_scalar_functions_in_from() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let result = describe_simple(&mut stream, "SELECT * FROM current_schema()").await;
+	assert_eq!(result.cell(0, "current_schema").as_deref(), Some("public"));
+	let (parameters, columns) = describe_write_statement(
+		&mut stream,
+		"function_source",
+		"SELECT * FROM abs($1::int4) WITH ORDINALITY AS a(n, ord)",
+		&[],
+	)
+	.await;
+	assert_eq!(parameters, [23]);
+	assert_eq!(columns, Some(vec![("n".into(), 23), ("ord".into(), 20)]));
+	let (rows, last) = run_extended_query(
+		&mut stream,
+		"SELECT * FROM abs($1::int4) WITH ORDINALITY AS a(n, ord)",
+		&[],
+		&[Some(b"-2")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), [Some("2".into()), Some("1".into())]);
+	let same = describe_simple(&mut stream, "SELECT r AS a, r AS b FROM random() AS r").await;
+	assert_eq!(
+		same.cell(0, "a"),
+		same.cell(0, "b"),
+		"one function result shared by both references"
+	);
+	for sql in
+		["SELECT * FROM generate_series(1, 2)", "SELECT * FROM abs(2) WITH ORDINALITY AS a(n,n)"]
+	{
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(error.expect("unsupported function source").0, "0A000", "{sql}");
+	}
+	shutdown.cancel();
+}
+
+const PRISMA_UPSERT: &str = r#"INSERT INTO "public"."CompatUser" ("id","name","age","active") VALUES ($1,$2,$3,$4) ON CONFLICT ("id") DO UPDATE SET "age" = $5 WHERE ("public"."CompatUser"."id" = $6 AND 1=1) RETURNING "public"."CompatUser"."id", "public"."CompatUser"."name", "public"."CompatUser"."age", "public"."CompatUser"."active", "public"."CompatUser"."nickname""#;
+
+/// The rows, the command tag and the error of one extended-protocol execution, with parameters of
+/// unspecified type.
+async fn run_untyped_extended(
+	stream: &mut TcpStream,
+	sql: &str,
+	params: &[&[u8]],
+) -> (Vec<Vec<Option<String>>>, Option<String>, Option<(String, String)>) {
+	let params: Vec<Option<&[u8]>> = params.iter().map(|param| Some(*param)).collect();
+	for packet in [
+		build_parse("", sql, &[]),
+		build_bind("", "", &[], &params),
+		build_exec("", 0),
+		build_sync(),
+	] {
+		stream.write_all(&packet).await.expect("send statement");
+	}
+	let mut rows = Vec::new();
+	let mut tag = None;
+	let mut error = None;
+	for (kind, body) in read_until_ready(stream).await {
+		match kind {
+			b'D' => rows.push(decode_data_row(&body)),
+			b'C' => tag = Some(String::from_utf8_lossy(&body[..body.len() - 1]).to_string()),
+			b'E' => error = Some(parse_pg_error_fields(&body)),
+			_ => {}
+		}
+	}
+	(rows, tag, error)
+}
+
+#[tokio::test]
+async fn test_pgwire_prisma_upsert_applies_do_update_where() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "CompatUser" (id int, name text, age int, active boolean, nickname text)"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+
+	let (parameters, columns) =
+		describe_write_statement(&mut stream, "prisma_upsert", PRISMA_UPSERT, &[]).await;
+	assert_eq!(parameters, vec![20, 25, 20, 16, 20, 20]);
+	assert_eq!(columns.expect("RETURNING columns").len(), 5);
+
+	// No conflict: the row is inserted and returned, and the DO UPDATE clause is not applied.
+	let (rows, tag, error) = run_untyped_extended(
+		&mut stream,
+		PRISMA_UPSERT,
+		&[b"1", b"Ada", b"36", b"true", b"99", b"1"],
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	assert_eq!(tag.as_deref(), Some("INSERT 0 1"));
+	assert_eq!(
+		rows,
+		vec![vec![Some("1".into()), Some("Ada".into()), Some("36".into()), Some("t".into()), None]]
+	);
+
+	// Conflict with a true condition: the existing row is updated and returned.
+	let (rows, tag, error) = run_untyped_extended(
+		&mut stream,
+		PRISMA_UPSERT,
+		&[b"1", b"Other", b"1", b"false", b"50", b"1"],
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	assert_eq!(tag.as_deref(), Some("INSERT 0 1"));
+	assert_eq!(
+		rows,
+		vec![vec![Some("1".into()), Some("Ada".into()), Some("50".into()), Some("t".into()), None]]
+	);
+
+	// Conflict with a false condition: the row is left as it is, and nothing is returned or
+	// counted.
+	let (rows, tag, error) = run_untyped_extended(
+		&mut stream,
+		PRISMA_UPSERT,
+		&[b"1", b"Other", b"1", b"false", b"77", b"2"],
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	assert!(rows.is_empty(), "{rows:?}");
+	assert_eq!(tag.as_deref(), Some("INSERT 0 0"));
+	let result = describe_simple(&mut stream, r#"SELECT age, name FROM "CompatUser""#).await;
+	assert_eq!(result.cell(0, "age").as_deref(), Some("50"));
+	assert_eq!(result.cell(0, "name").as_deref(), Some("Ada"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_on_conflict_where_reads_the_existing_and_proposed_rows() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		r#"CREATE TABLE "Counter" (id int, hits int)"#,
+		r#"INSERT INTO "Counter" (id, hits) VALUES (1, 5)"#,
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+	let sql = r#"INSERT INTO "Counter" AS c (id, hits) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET hits = c.hits + EXCLUDED.hits WHERE c.hits < EXCLUDED.hits + $3 RETURNING hits"#;
+	// 5 < 3 + 4 holds: the existing hits grow by the proposed ones.
+	let (rows, tag, error) = run_untyped_extended(&mut stream, sql, &[b"1", b"3", b"4"]).await;
+	assert!(error.is_none(), "{error:?}");
+	assert_eq!(tag.as_deref(), Some("INSERT 0 1"));
+	assert_eq!(rows, vec![vec![Some("8".into())]]);
+	// 8 < 3 + 4 does not hold.
+	let (rows, tag, error) = run_untyped_extended(&mut stream, sql, &[b"1", b"3", b"4"]).await;
+	assert!(error.is_none(), "{error:?}");
+	assert!(rows.is_empty(), "{rows:?}");
+	assert_eq!(tag.as_deref(), Some("INSERT 0 0"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_on_conflict_target_predicate_is_not_supported() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, r#"CREATE TABLE "Partial" (id int, name text)"#)
+			.await;
+	assert!(error.is_none(), "{error:?}");
+	for sql in [
+		r#"INSERT INTO "Partial" (id, name) VALUES ($1, $2) ON CONFLICT (id) WHERE id > 0 DO NOTHING"#,
+		r#"INSERT INTO "Partial" (id, name) VALUES ($1, $2) ON CONFLICT (id) WHERE id > 0 DO UPDATE SET name = $2"#,
+	] {
+		let (_, _, error) = run_untyped_extended(&mut stream, sql, &[b"1", b"a"]).await;
+		assert_eq!(error.expect("unsupported conflict target").0, "0A000", "{sql}");
+	}
 	shutdown.cancel();
 }

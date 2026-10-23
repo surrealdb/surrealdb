@@ -212,7 +212,9 @@ impl PgType {
 			surrealdb_sqlplan::SqlType::Interval => Self::Interval,
 			surrealdb_sqlplan::SqlType::Uuid => Self::Uuid,
 			surrealdb_sqlplan::SqlType::Json => Self::Json,
-			surrealdb_sqlplan::SqlType::Array => Self::Array(Box::new(Self::Text)),
+			surrealdb_sqlplan::SqlType::Array(elem) => {
+				Self::Array(Box::new(Self::from_sql_type(*elem)))
+			}
 			surrealdb_sqlplan::SqlType::Inet => Self::Inet,
 			surrealdb_sqlplan::SqlType::Cidr => Self::Cidr,
 			surrealdb_sqlplan::SqlType::MacAddr => Self::MacAddr,
@@ -239,7 +241,7 @@ pub(super) struct ResultShape {
 }
 
 /// The wire type a single value naturally maps to; `None` for NONE/NULL.
-fn base_type(value: &Value) -> Option<PgType> {
+pub(super) fn base_type(value: &Value) -> Option<PgType> {
 	match value {
 		Value::None | Value::Null => None,
 		Value::Bool(_) => Some(PgType::Bool),
@@ -257,7 +259,13 @@ fn base_type(value: &Value) -> Option<PgType> {
 				Some(PgType::Array(Box::new(PgType::Text)))
 			} else {
 				let elem_ty = column_type(inner.iter().map(base_type));
-				Some(PgType::Array(Box::new(elem_ty)))
+				// A Postgres array is rectangular and of one element type; an
+				// array of arrays has neither guarantee, so it travels as JSON.
+				if matches!(elem_ty, PgType::Array(_)) {
+					Some(PgType::Jsonb)
+				} else {
+					Some(PgType::Array(Box::new(elem_ty)))
+				}
 			}
 		}
 		Value::RecordId(_)
@@ -453,6 +461,39 @@ mod tests {
 			object.insert(key.to_string(), value.clone());
 		}
 		Value::Object(object)
+	}
+
+	fn int_array(values: &[i64]) -> Value {
+		Value::Array(
+			values.iter().map(|i| Value::Number(Number::Int(*i))).collect::<Vec<_>>().into(),
+		)
+	}
+
+	#[test]
+	fn an_array_of_arrays_is_one_jsonb_cell() {
+		let grid = Value::Array(vec![int_array(&[1, 2]), int_array(&[3, 4])].into());
+		assert_eq!(base_type(&grid), Some(PgType::Jsonb));
+		let shape = shape_result(Value::Array(vec![obj(&[("grid", grid)])].into()));
+		assert_eq!(shape.columns[0].ty, PgType::Jsonb);
+		let cell = shape.rows[0][0].clone().expect("a cell");
+		let text = crate::encode::encode_text(cell, &shape.columns[0].ty).unwrap();
+		assert_eq!(String::from_utf8(text).unwrap(), "[[1,2],[3,4]]");
+	}
+
+	#[test]
+	fn jagged_and_mixed_nesting_is_jsonb_too() {
+		let jagged = Value::Array(vec![int_array(&[1]), int_array(&[2, 3])].into());
+		assert_eq!(base_type(&jagged), Some(PgType::Jsonb));
+		let mixed = Value::Array(vec![Value::Number(Number::Int(1)), int_array(&[2])].into());
+		assert_eq!(base_type(&mixed), Some(PgType::Array(Box::new(PgType::Jsonb))));
+		let text =
+			crate::encode::encode_text(mixed, &PgType::Array(Box::new(PgType::Jsonb))).unwrap();
+		assert_eq!(String::from_utf8(text).unwrap(), "{1,[2]}");
+	}
+
+	#[test]
+	fn a_flat_array_keeps_its_element_type() {
+		assert_eq!(base_type(&int_array(&[1, 2])), Some(PgType::Array(Box::new(PgType::Int8))));
 	}
 
 	#[test]

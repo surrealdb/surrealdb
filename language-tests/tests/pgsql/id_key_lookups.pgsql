@@ -1,0 +1,230 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_id_key.surql"]
+
+[test]
+reason = "Comparisons of the id column of a PostgreSQL table compare keys: equality with an integer or string literal finds the record, IN, ranges, BETWEEN, <> and functions over id use the key, and the keys of every kind (integer, string, uuid, array, object) read back as the value they are. A string that spells a record id, or the string form of an integer key, names a different key and finds nothing."
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }]"
+
+[[test.results]]
+value = "[{ id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: 1, name: 'Tobie' }, { id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 10, name: 'Ten' }]"
+
+[[test.results]]
+value = "[{ id: 'rust', label: 'Rust' }]"
+
+[[test.results]]
+value = "[{ id: '1', label: 'The string one' }]"
+
+[[test.results]]
+value = "[{ id: 'person:1', label: 'A key that spells a record id' }]"
+
+[[test.results]]
+value = "[{ id: 'db', label: 'Database' }, { id: 'rust', label: 'Rust' }]"
+
+[[test.results]]
+value = "[{ id: 'rust', label: 'Rust' }]"
+
+[[test.results]]
+value = "[{ id: '1', label: 'The string one' }, { id: 'db', label: 'Database' }, { id: 'person:1', label: 'A key that spells a record id' }]"
+
+[[test.results]]
+value = "[{ id: 'person:1', label: 'A key that spells a record id' }, { id: 'rust', label: 'Rust' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: u'018f6a52-0000-7000-8000-000000000001', title: 'First' }, { id: u'018f6a52-0000-7000-8000-000000000002', title: 'Second' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: [1, 2], v: 'array' }, { id: { x: 1 }, v: 'object' }]"
+
+[[test.results]]
+value = "[{ id: [1, 2], v: 'array' }]"
+
+[[test.results]]
+value = "[{ id: 10, name: 'Ten' }, { id: 3, name: 'Zed' }]"
+
+[[test.results]]
+value = "[{ id: 2 }, { id: 3 }]"
+
+[[test.results]]
+value = "[{ id: 1, n: 1 }, { id: 2, n: 1 }, { id: 3, n: 1 }, { id: 10, n: 1 }]"
+
+[[test.results]]
+value = "[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 10 }]"
+
+[[test.results]]
+value = "[{ id: 3, name: 'Zed' }]"
+
+*/
+
+SELECT id, name FROM person WHERE id = 1;
+
+SELECT id, name FROM person WHERE 2 = id;
+
+SELECT p.id, p.name FROM person p WHERE p.id = 3;
+
+SELECT id, name FROM person WHERE id = 4;
+
+SELECT id, name FROM person WHERE id = '1';
+
+SELECT id, name FROM person WHERE id = 'person:1';
+
+SELECT id, name FROM person WHERE id = 1.5;
+
+SELECT id, name FROM person WHERE id = 1.0;
+
+SELECT id, name FROM person WHERE id IN (1, 3);
+
+SELECT id, name FROM person WHERE id IN (1, 99, 3, 3);
+
+SELECT id, name FROM person WHERE id NOT IN (1, 3) ORDER BY id;
+
+SELECT id, name FROM person WHERE id <> 1 ORDER BY id;
+
+SELECT id, name FROM person WHERE id > 1 ORDER BY id;
+
+SELECT id, name FROM person WHERE id >= 2 AND id < 10 ORDER BY id;
+
+SELECT id, name FROM person WHERE id BETWEEN 2 AND 10 ORDER BY id;
+
+SELECT id, name FROM person WHERE id NOT BETWEEN 2 AND 10 ORDER BY id;
+
+SELECT id, name FROM person WHERE id = 1 OR id = 3 ORDER BY id;
+
+SELECT id, name FROM person WHERE id = 1 AND age = 42;
+
+SELECT id, name FROM person WHERE id = 1 AND age = 41;
+
+SELECT id, name FROM person WHERE id = 1 AND (age = 41 OR name = 'Tobie');
+
+SELECT id, name FROM person WHERE id = NULL;
+
+SELECT id, name FROM person WHERE id IS NULL;
+
+SELECT id, name FROM person WHERE id IS NOT NULL ORDER BY id;
+
+SELECT id, name FROM person WHERE id + 1 = 3;
+
+SELECT id, name FROM person WHERE id % 2 = 0 ORDER BY id;
+
+SELECT id, name FROM person WHERE CAST(id AS TEXT) = '10';
+
+SELECT id, name FROM person WHERE NOT (id = 1) ORDER BY id;
+
+SELECT id, label FROM tag WHERE id = 'rust';
+
+SELECT id, label FROM tag WHERE id = '1';
+
+SELECT id, label FROM tag WHERE id = 'person:1';
+
+SELECT id, label FROM tag WHERE id IN ('rust', 'db') ORDER BY id;
+
+SELECT id, label FROM tag WHERE id LIKE 'r%';
+
+SELECT id, label FROM tag WHERE id <> 'rust' ORDER BY id;
+
+SELECT id, label FROM tag WHERE id > 'db' ORDER BY id;
+
+SELECT id, label FROM tag WHERE id = 1;
+
+SELECT id, title FROM doc ORDER BY id;
+
+SELECT id, title FROM doc WHERE id = '018f6a52-0000-7000-8000-000000000001';
+
+SELECT id, v FROM cell ORDER BY v;
+
+SELECT id, v FROM cell WHERE v = 'array';
+
+SELECT id, name FROM person ORDER BY id DESC LIMIT 2;
+
+SELECT id FROM person ORDER BY id LIMIT 2 OFFSET 1;
+
+SELECT id, count(*) AS n FROM person GROUP BY id ORDER BY id;
+
+SELECT DISTINCT id FROM person ORDER BY id;
+
+SELECT id, name FROM person WHERE name = 'Zed' AND id = 3;

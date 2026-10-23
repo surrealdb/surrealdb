@@ -515,6 +515,24 @@ async fn perform_handshake(
 }
 
 impl Connection {
+	/// Results as the connection's dialect shows them: the SQL dialects show a
+	/// record id as its bare key, since SQL values carry no table.
+	fn present_all(
+		&self,
+		results: Vec<surrealdb_rpc::QueryResult>,
+	) -> Vec<surrealdb_rpc::QueryResult> {
+		match self.dialect {
+			Dialect::MySql | Dialect::PgSql => results
+				.into_iter()
+				.map(|mut result| {
+					result.result = result.result.map(surrealdb_sqlplan::show_record_ids_as_keys);
+					result
+				})
+				.collect(),
+			Dialect::SurrealQl | Dialect::Gql => results,
+		}
+	}
+
 	pub fn client_capabilities(&self) -> u32 {
 		self.client_capabilities
 	}
@@ -1094,7 +1112,7 @@ impl Connection {
 			Dialect::Gql => QueryRequest::new(QuerySource::gql(trimmed), &self.session),
 		}
 		.with_optional_transaction(self.transaction.clone());
-		let res = self.ds.run(req).await;
+		let res = self.ds.run(req).await.map(|results| self.present_all(results));
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);
@@ -1459,7 +1477,7 @@ impl Connection {
 					let policy = DialectPolicy::mysql();
 					bind_select(select, &catalog, &policy, None)
 						.ok()
-						.map(|bound| bound.describe(&catalog, &policy))
+						.and_then(|bound| bound.describe_static(&catalog, &policy))
 				} else {
 					None
 				}
@@ -1768,7 +1786,7 @@ impl Connection {
 		.with_variables(Some(vars))
 		.with_optional_transaction(self.transaction.clone());
 
-		let res = self.ds.run(req).await;
+		let res = self.ds.run(req).await.map(|results| self.present_all(results));
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);

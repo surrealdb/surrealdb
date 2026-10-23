@@ -9,14 +9,16 @@ use surrealdb_expr::expr::operator::BinaryOperator;
 use surrealdb_expr::expr::reference::{Reference, ReferenceDeleteStrategy};
 use surrealdb_expr::expr::statements::define::{
 	DefineDatabaseStatement, DefineDefault, DefineFieldStatement, DefineIndexStatement, DefineKind,
-	DefineStatement, DefineTableStatement,
+	DefineSequenceStatement, DefineStatement, DefineTableStatement,
 };
 use surrealdb_expr::expr::statements::remove::{
 	RemoveDatabaseStatement, RemoveFieldStatement, RemoveIndexStatement, RemoveStatement,
 	RemoveTableStatement,
 };
 use surrealdb_expr::expr::table_type::TableType;
-use surrealdb_expr::expr::{Cond, Expr, Field, Fields, Idiom, Kind, Literal, Param, Part, View};
+use surrealdb_expr::expr::{
+	Cond, Expr, Field, Fields, Function, FunctionCall, Idiom, Kind, Literal, Param, Part, View,
+};
 use surrealdb_mysql::ast::stmt::{
 	AlterTableAction as MyAlterTableAction, AlterTableStmt as MyAlterTableStmt,
 	CreateDatabaseStmt as MyCreateDatabaseStmt, CreateIndexStmt as MyCreateIndexStmt,
@@ -47,7 +49,7 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 
 	let inner_kind = match base_name {
 		"int" | "integer" | "int4" | "int2" | "smallint" | "int8" | "bigint" | "serial"
-		| "bigserial" | "smallserial" => Kind::Int,
+		| "serial4" | "bigserial" | "serial8" | "smallserial" | "serial2" => Kind::Int,
 		"float" | "float4" | "real" | "float8" | "double precision" | "double" => Kind::Float,
 		"numeric" | "decimal" | "dec" => Kind::Decimal,
 		"text" | "varchar" | "char" | "character" | "character varying" | "bpchar" | "string" => {
@@ -111,6 +113,55 @@ fn column_kind(data_type: &surrealdb_pgsql::ast::expr::TypeName, not_null: bool)
 	}
 }
 
+/// Whether a column of `kind` holds a JSON document (`json`, `jsonb`, an array of them, or one
+/// that may be NULL). Its field is `FLEXIBLE`, so a document keeps the keys it is written with in
+/// the SCHEMAFULL table `CREATE TABLE` defines.
+fn holds_json(kind: &Kind) -> bool {
+	match kind {
+		Kind::Object => true,
+		Kind::Array(elem, _) => holds_json(elem),
+		Kind::Either(kinds) => kinds.iter().any(holds_json),
+		_ => false,
+	}
+}
+
+/// Whether a PostgreSQL column of `type_name` is a serial column, numbered by a sequence of its
+/// own.
+fn is_serial(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> bool {
+	type_name.array_bounds.is_empty()
+		&& type_name.name.parts.last().is_some_and(|name| {
+			matches!(
+				name.to_ascii_lowercase().as_str(),
+				"serial" | "serial4" | "bigserial" | "serial8" | "smallserial" | "serial2"
+			)
+		})
+}
+
+/// The sequence that numbers the serial or auto-increment `column` of `table`, named as
+/// PostgreSQL names it (`<table>_<column>_seq`) and starting at 1, and the `DEFAULT` of the column
+/// that draws its next value. The `id` column's `DEFAULT` is its record key when a write names no
+/// id.
+///
+/// The sequence is defined only if it does not exist. The statements a `CREATE TABLE` lowers to
+/// run one by one, so a definition that replaced the sequence would reset the numbering of a table
+/// whose own definition failed because it exists. A sequence outlives its table, so a table created
+/// again under a dropped one's name carries on from the last number the old one drew.
+fn column_sequence(table: &str, column: &str) -> (Expr, DefineDefault) {
+	let name = format!("{}_{column}_seq", table.replace('.', "_"));
+	let define = DefineSequenceStatement {
+		kind: DefineKind::IfNotExists,
+		name: Expr::Idiom(Idiom::field(name.as_str())),
+		batch: Expr::Literal(Literal::Integer(1000)),
+		start: Expr::Literal(Literal::Integer(1)),
+		..Default::default()
+	};
+	let next = Expr::FunctionCall(Box::new(FunctionCall {
+		receiver: Function::Normal("sequence::nextval".to_string()),
+		arguments: vec![Expr::Literal(Literal::String(Strand::from(name.as_str())))],
+	}));
+	(Expr::Define(Box::new(DefineStatement::Sequence(define))), DefineDefault::Set(next))
+}
+
 fn not_null_assertion() -> Expr {
 	Expr::Binary {
 		left: Box::new(Expr::Param(Param::from("value".to_string()))),
@@ -149,17 +200,19 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 			PgTableConstraint::PrimaryKey(cols) => cols.iter().any(|c| c == &col.name),
 			_ => false,
 		});
+		let serial = is_serial(&col.data_type);
 		let is_not_null = is_id
 			|| is_table_pk
-			|| col
-				.constraints
-				.iter()
-				.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
+			|| serial || col
+			.constraints
+			.iter()
+			.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
 		let field_kind = column_kind(&col.data_type, is_not_null);
 
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
 			what: Expr::Table(TableName::from(tbl_name)),
+			flexible: holds_json(&field_kind),
 			field_kind: Some(field_kind),
 			kind: if create.if_not_exists {
 				DefineKind::IfNotExists
@@ -230,6 +283,12 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				}
 				ColumnConstraint::Null => {}
 			}
+		}
+
+		if serial && matches!(field_def.default, DefineDefault::None) {
+			let (sequence, default) = column_sequence(tbl_name, &col.name);
+			exprs.push(sequence);
+			field_def.default = default;
 		}
 
 		exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
@@ -658,6 +717,7 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
 			what: Expr::Table(TableName::from(tbl_name)),
+			flexible: holds_json(&field_kind),
 			field_kind: Some(field_kind),
 			kind: if create.if_not_exists {
 				DefineKind::IfNotExists
@@ -673,6 +733,10 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 
 		if let Some(def) = &col.default {
 			field_def.default = DefineDefault::Set(lower_mysql_expr(def)?);
+		} else if col.auto_increment {
+			let (sequence, default) = column_sequence(tbl_name, &col.name);
+			exprs.push(sequence);
+			field_def.default = default;
 		}
 
 		if col.primary_key {
@@ -920,12 +984,15 @@ pub fn lower_mysql_create_view(view: &MyCreateViewStmt) -> Result<Vec<Expr>, Pla
 						alias: a,
 					}));
 				}
-				surrealdb_mysql::ast::stmt::SelectItem::QualifiedWildcard(tbl, _) => {
+				surrealdb_mysql::ast::stmt::SelectItem::QualifiedWildcard(parts, _) => {
 					selectors.push(Field::Single(Selector {
-						expr: Expr::Idiom(Idiom(vec![
-							Part::Field(Strand::from(tbl.as_str())),
-							Part::All,
-						])),
+						expr: Expr::Idiom(Idiom(
+							parts
+								.iter()
+								.map(|part| Part::Field(Strand::from(part.as_str())))
+								.chain(std::iter::once(Part::All))
+								.collect(),
+						)),
 						alias: None,
 					}));
 				}

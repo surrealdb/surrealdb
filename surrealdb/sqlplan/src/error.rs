@@ -37,6 +37,9 @@ pub enum PlanError {
 	#[error("function \"{0}\" does not exist")]
 	UndefinedFunction(String),
 
+	#[error("operator does not exist: {0}")]
+	UndefinedOperator(String),
+
 	#[error("function \"{name}\" requires {expected} arguments, but {got} were provided")]
 	FunctionArgumentCountMismatch {
 		name: String,
@@ -55,6 +58,9 @@ pub enum PlanError {
 
 	#[error("division by zero")]
 	DivisionByZero,
+
+	#[error("bigint out of range")]
+	NumericValueOutOfRange,
 
 	#[error("invalid input syntax for type: {0}")]
 	InvalidTextRepresentation(String),
@@ -100,6 +106,7 @@ impl PlanError {
 			Self::ColumnNotInGroupBy(_) => "42803", // grouping_error
 			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => "42803", // grouping_error
 			Self::UndefinedFunction(_)
+			| Self::UndefinedOperator(_)
 			| Self::FunctionArgumentCountMismatch {
 				..
 			} => "42883", /* undefined_function */
@@ -107,6 +114,7 @@ impl PlanError {
 			Self::SubqueryMustHaveAlias => "42601", // syntax_error
 			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
 			Self::DivisionByZero => "22012",        // division_by_zero
+			Self::NumericValueOutOfRange => "22003", // numeric_value_out_of_range
 			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
 			Self::NoActiveTransaction => "25P01", // no_active_sql_transaction
@@ -136,6 +144,7 @@ impl PlanError {
 			Self::SubqueryMustHaveAlias => 1248, // ER_DERIVED_MUST_HAVE_ALIAS
 			Self::ParameterOutOfRange(_) => 1210, // ER_WRONG_ARGUMENTS
 			Self::DivisionByZero => 1365,        // ER_DIVISION_BY_ZERO
+			Self::NumericValueOutOfRange => 1690, // ER_DATA_OUT_OF_RANGE
 			Self::InvalidTextRepresentation(_) => 1264, // ER_DATA_OUT_OF_RANGE
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, /* ER_NOT_SUPPORTED_YET */
 			Self::NoActiveTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
@@ -143,7 +152,7 @@ impl PlanError {
 			Self::SavepointDoesNotExist(_) => 1305, // ER_SP_DOES_NOT_EXIST
 			Self::ActiveTransactionAlreadyInProgress => 1105, // ER_UNKNOWN_ERROR
 			Self::UndefinedObject(_) => 1193,       // ER_UNKNOWN_SYSTEM_VARIABLE
-			Self::Custom(_) => 1064,
+			Self::UndefinedOperator(_) | Self::Custom(_) => 1064,
 		}
 	}
 }

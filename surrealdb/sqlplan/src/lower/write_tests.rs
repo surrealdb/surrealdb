@@ -5,7 +5,107 @@ use surrealdb_expr::expr::statements::{DeleteStatement, InsertStatement, UpdateS
 use surrealdb_expr::expr::{Data, Expr, Field, Fields, Literal, Output, Part};
 use surrealdb_types::ToSql;
 
+use crate::catalog::EmptyCatalog;
 use crate::lower::write::*;
+
+/// The rendered projection of a statement's output.
+fn output_sql(output: &Option<Output>) -> String {
+	let Some(Output::Fields(fields)) = output else {
+		panic!("expected Output::Fields, got {output:?}");
+	};
+	format!("RETURN {}", fields.to_sql())
+}
+
+fn pg_update(sql: &str) -> UpdateStatement {
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Update(update) = &stmts[0] else {
+		panic!("Expected Update statement");
+	};
+	let Expr::Update(upd) = lower_pgsql_update(update, &EmptyCatalog).unwrap() else {
+		panic!("Expected Expr::Update");
+	};
+	*upd
+}
+
+#[test]
+fn a_literal_that_is_no_key_is_compared_with_the_key_in_the_condition_of_a_write() {
+	for literal in ["3.0", "1.5", "true", "''", "NULL"] {
+		for sql in [
+			format!("UPDATE emp SET name = 'z' WHERE id = {literal}"),
+			format!("UPDATE emp SET name = 'z' WHERE {literal} = id"),
+		] {
+			let text = where_sql(&pg_update(&sql).cond);
+			assert!(text.contains("record::id(id)"), "{text}");
+			assert!(!text.contains("type::record"), "{text}");
+			if literal == "NULL" {
+				assert!(text.contains("THEN NULL"), "{text}");
+			}
+		}
+	}
+	let text = where_sql(&pg_update("UPDATE emp SET name = 'z' WHERE id IN (1.5, 2)").cond);
+	assert!(text.contains("record::id(id)") && text.contains("1.5f"), "{text}");
+}
+
+fn pg_delete(sql: &str) -> Result<DeleteStatement, crate::PlanError> {
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Delete(delete) = &stmts[0] else {
+		panic!("Expected Delete statement");
+	};
+	match lower_pgsql_delete(delete, &EmptyCatalog)? {
+		Expr::Delete(del) => Ok(*del),
+		other => panic!("Expected Expr::Delete, got {other:?}"),
+	}
+}
+
+fn pg_insert(sql: &str) -> InsertStatement {
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Insert(insert) = &stmts[0] else {
+		panic!("Expected Insert statement");
+	};
+	let Expr::Insert(ins) = lower_pgsql_insert(insert, &EmptyCatalog).unwrap() else {
+		panic!("Expected Expr::Insert");
+	};
+	*ins
+}
+
+fn my_update(sql: &str) -> UpdateStatement {
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Update(update) = &stmts[0] else {
+		panic!("Expected Update statement");
+	};
+	let Expr::Update(upd) = lower_mysql_update(update, &EmptyCatalog).unwrap() else {
+		panic!("Expected Expr::Update");
+	};
+	*upd
+}
+
+fn my_delete(sql: &str) -> DeleteStatement {
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Delete(delete) = &stmts[0] else {
+		panic!("Expected Delete statement");
+	};
+	let Expr::Delete(del) = lower_mysql_delete(delete, &EmptyCatalog).unwrap() else {
+		panic!("Expected Expr::Delete");
+	};
+	*del
+}
+
+fn my_insert(sql: &str) -> InsertStatement {
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Insert(insert) = &stmts[0] else {
+		panic!("Expected Insert statement");
+	};
+	let Expr::Insert(ins) = lower_mysql_insert(insert, &EmptyCatalog).unwrap() else {
+		panic!("Expected Expr::Insert");
+	};
+	*ins
+}
+
+fn where_sql(stmt_cond: &Option<surrealdb_expr::expr::Cond>) -> String {
+	stmt_cond.as_ref().unwrap().0.to_sql()
+}
+
+const PARAM_RECORD: &str = "IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NONE ELSE type::record('users', $_1) END";
 
 // ============================================================================
 // PostgreSQL DML Lowering Tests
@@ -21,7 +121,7 @@ fn test_lower_pgsql_insert_values() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -29,7 +129,7 @@ fn test_lower_pgsql_insert_values() {
 	assert_eq!(ins.into, Some(Expr::Table(surrealdb_strand::TableName::from("users"))));
 	assert!(!ins.ignore);
 	assert!(ins.update.is_none());
-	assert!(ins.output.is_none());
+	assert_eq!(output_sql(&ins.output), "RETURN *, record::id(id) AS id");
 
 	let Data::ValuesExpression(rows) = &ins.data else {
 		panic!("Expected Data::ValuesExpression");
@@ -50,7 +150,7 @@ fn test_lower_pgsql_insert_default_values() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -66,7 +166,7 @@ fn test_lower_pgsql_insert_select() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -86,7 +186,7 @@ fn test_lower_pgsql_insert_on_conflict_do_nothing() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -103,7 +203,7 @@ fn test_lower_pgsql_insert_on_conflict_do_update() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -134,7 +234,7 @@ fn test_lower_pgsql_insert_returning() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -146,7 +246,8 @@ fn test_lower_pgsql_insert_returning() {
 	let Field::Single(s1) = &fields[0] else {
 		panic!()
 	};
-	assert_eq!(s1.expr.to_sql(), "id");
+	assert_eq!(s1.expr.to_sql(), "record::id(id)");
+	assert_eq!(s1.alias.as_ref().unwrap().to_sql(), "id");
 	let Field::Single(s2) = &fields[1] else {
 		panic!()
 	};
@@ -162,12 +263,12 @@ fn test_lower_pgsql_insert_returning_wildcard() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_pgsql_insert(insert).unwrap();
+	let expr = lower_pgsql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
 
-	assert_eq!(ins.output, Some(Output::Fields(Fields::all())));
+	assert_eq!(output_sql(&ins.output), "RETURN *, record::id(id) AS id");
 }
 
 #[test]
@@ -178,7 +279,7 @@ fn test_lower_pgsql_update() {
 		panic!("Expected Update statement");
 	};
 
-	let expr = lower_pgsql_update(update).unwrap();
+	let expr = lower_pgsql_update(update, &EmptyCatalog).unwrap();
 	let Expr::Update(upd) = expr else {
 		panic!("Expected Expr::Update");
 	};
@@ -190,8 +291,8 @@ fn test_lower_pgsql_update() {
 	assert_eq!(assignments.len(), 2);
 	assert_eq!(assignments[0].place.to_sql(), "age");
 	assert_eq!(assignments[1].place.to_sql(), "name");
-	assert!(upd.cond.is_some());
-	assert_eq!(upd.output, Some(Output::Fields(Fields::all())));
+	assert_eq!(upd.cond.as_ref().unwrap().0.to_sql(), "id = (users:1)");
+	assert_eq!(output_sql(&upd.output), "RETURN *, record::id(id) AS id");
 }
 
 #[test]
@@ -202,7 +303,7 @@ fn test_lower_pgsql_delete() {
 		panic!("Expected Delete statement");
 	};
 
-	let expr = lower_pgsql_delete(delete).unwrap();
+	let expr = lower_pgsql_delete(delete, &EmptyCatalog).unwrap();
 	let Expr::Delete(del) = expr else {
 		panic!("Expected Expr::Delete");
 	};
@@ -242,7 +343,7 @@ fn test_lower_mysql_insert_values() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_mysql_insert(insert).unwrap();
+	let expr = lower_mysql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -262,7 +363,7 @@ fn test_lower_mysql_insert_ignore() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_mysql_insert(insert).unwrap();
+	let expr = lower_mysql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -278,7 +379,7 @@ fn test_lower_mysql_insert_on_duplicate_key_update() {
 		panic!("Expected Insert statement");
 	};
 
-	let expr = lower_mysql_insert(insert).unwrap();
+	let expr = lower_mysql_insert(insert, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -308,7 +409,7 @@ fn test_lower_mysql_replace() {
 		panic!("Expected Replace statement");
 	};
 
-	let expr = lower_mysql_replace(replace).unwrap();
+	let expr = lower_mysql_replace(replace, &EmptyCatalog).unwrap();
 	let Expr::Insert(ins) = expr else {
 		panic!("Expected Expr::Insert");
 	};
@@ -330,7 +431,7 @@ fn test_lower_mysql_update() {
 		panic!("Expected Update statement");
 	};
 
-	let expr = lower_mysql_update(update).unwrap();
+	let expr = lower_mysql_update(update, &EmptyCatalog).unwrap();
 	let Expr::Update(upd) = expr else {
 		panic!("Expected Expr::Update");
 	};
@@ -351,7 +452,7 @@ fn test_lower_mysql_delete() {
 		panic!("Expected Delete statement");
 	};
 
-	let expr = lower_mysql_delete(delete).unwrap();
+	let expr = lower_mysql_delete(delete, &EmptyCatalog).unwrap();
 	let Expr::Delete(del) = expr else {
 		panic!("Expected Expr::Delete");
 	};
@@ -375,4 +476,378 @@ fn test_lower_mysql_truncate() {
 
 	assert_eq!(del.what, vec![Expr::Table(surrealdb_strand::TableName::from("users"))]);
 	assert!(del.cond.is_none());
+}
+
+// ============================================================================
+// The `id` column of the target table
+// ============================================================================
+
+#[test]
+fn pgsql_where_id_equal_to_a_literal_reads_the_record_by_its_id() {
+	let upd = pg_update("UPDATE users SET name = 'x' WHERE id = 1");
+	assert_eq!(where_sql(&upd.cond), "id = (users:1)");
+	let del = pg_delete("DELETE FROM tag WHERE id = 'rust'").unwrap();
+	assert_eq!(where_sql(&del.cond), "id = (tag:rust)");
+	let del = pg_delete("DELETE FROM users WHERE 2 = id").unwrap();
+	assert_eq!(where_sql(&del.cond), "id = (users:2)");
+}
+
+#[test]
+fn pgsql_where_id_equal_to_a_parameter_reads_the_record_by_its_id() {
+	let upd = pg_update("UPDATE users SET name = 'x' WHERE id = $1");
+	assert_eq!(
+		where_sql(&upd.cond),
+		format!("id = ({})", PARAM_RECORD.replace("THEN NONE", "THEN $_1 ?? NULL"))
+	);
+}
+
+#[test]
+fn pgsql_where_id_in_literals_and_parameters_is_a_membership_of_records() {
+	let del = pg_delete("DELETE FROM users WHERE id IN (1, 2, $1)").unwrap();
+	assert_eq!(
+		where_sql(&del.cond),
+		format!(
+			"id INSIDE [users:1, users:2, ({})]",
+			PARAM_RECORD.replace("THEN NONE", "THEN $_1 ?? NULL")
+		)
+	);
+}
+
+#[test]
+fn pgsql_where_id_in_one_key_is_the_lookup_of_its_record() {
+	let del = pg_delete("DELETE FROM users WHERE id IN (7)").unwrap();
+	assert_eq!(where_sql(&del.cond), "id = (users:7)");
+}
+
+#[test]
+fn pgsql_where_id_otherwise_reads_the_key() {
+	for predicate in [
+		"id > 1",
+		"id <> 1",
+		"id = NULL",
+		"id = 1.5",
+		"id NOT IN (1, 2)",
+		"users.id > 1",
+		"id BETWEEN 1 AND 3",
+	] {
+		let del = pg_delete(&format!("DELETE FROM users WHERE {predicate}")).unwrap();
+		let text = where_sql(&del.cond);
+		assert!(
+			text.contains("record::id(id)")
+				|| ((predicate == "id <> 1" || predicate == "id NOT IN (1, 2)")
+					&& text.contains("users:1")),
+			"{predicate}: {text}"
+		);
+		assert!(!text.contains("type::record"), "{predicate}: {text}");
+	}
+}
+
+#[test]
+fn pgsql_a_column_path_ending_in_id_is_left_as_written() {
+	let del = pg_delete("DELETE FROM users WHERE data.id = 1").unwrap();
+	assert_eq!(where_sql(&del.cond), "data.id = 1");
+}
+
+#[test]
+fn pgsql_set_right_hand_sides_read_the_key() {
+	let upd = pg_update("UPDATE users SET n = id + 1 WHERE name = 'x'");
+	let Some(Data::SetExpression(assignments)) = &upd.data else {
+		panic!("Expected SetExpression");
+	};
+	assert_eq!(
+		assignments[0].value.to_sql(),
+		"{ LET $_sql_left = record::id(id); IF $_sql_left = NULL OR $_sql_left = NONE OR 1 = NULL OR 1 = NONE THEN NULL ELSE $_sql_left + 1 END; }"
+	);
+}
+
+#[test]
+fn pgsql_assigning_to_id_is_still_an_assignment_to_the_stored_id() {
+	let upd = pg_update("UPDATE users SET id = 5 WHERE id = 1");
+	let Some(Data::SetExpression(assignments)) = &upd.data else {
+		panic!("Expected SetExpression");
+	};
+	assert_eq!(assignments[0].place.to_sql(), "id");
+	assert_eq!(assignments[0].value.to_sql(), "5");
+}
+
+#[test]
+fn pgsql_returning_id_is_the_key_of_the_written_row() {
+	let upd = pg_update("UPDATE users SET name = 'x' WHERE id = 1 RETURNING id, name");
+	assert_eq!(output_sql(&upd.output), "RETURN record::id(id) AS id, name");
+	let ins = pg_insert("INSERT INTO users (id, name) VALUES (1, 'x') RETURNING users.id");
+	assert_eq!(output_sql(&ins.output), "RETURN record::id(id) AS id");
+}
+
+#[test]
+fn pgsql_a_returned_wildcard_is_followed_by_the_key() {
+	let upd = pg_update("UPDATE users SET name = 'x' RETURNING *, name AS n");
+	assert_eq!(output_sql(&upd.output), "RETURN *, record::id(id) AS id, name AS n");
+}
+
+#[test]
+fn pgsql_a_deleted_row_is_read_from_before() {
+	let del = pg_delete("DELETE FROM users WHERE id = 2 RETURNING id, name").unwrap();
+	assert_eq!(where_sql(&del.cond), "id = (users:2)");
+	assert_eq!(
+		output_sql(&del.output),
+		"RETURN record::id($before.id) AS id, $before.name AS name"
+	);
+	let del = pg_delete("DELETE FROM users WHERE id = 2").unwrap();
+	assert_eq!(
+		output_sql(&del.output),
+		"RETURN VALUE object::extend($before, { id: record::id($before.id) })"
+	);
+	let del = pg_delete("DELETE FROM users WHERE id = 2 RETURNING *").unwrap();
+	assert_eq!(
+		output_sql(&del.output),
+		"RETURN VALUE object::extend($before, { id: record::id($before.id) })"
+	);
+	assert!(pg_delete("DELETE FROM users RETURNING *, name").is_err());
+}
+
+#[test]
+fn pgsql_on_conflict_reads_the_existing_key_and_the_proposed_row_as_given() {
+	let ins = pg_insert(
+		"INSERT INTO users (id, name) VALUES (1, 'x') ON CONFLICT (id) DO UPDATE SET n = id, m = EXCLUDED.id RETURNING id",
+	);
+	let Some(Data::UpdateExpression(assignments)) = &ins.update else {
+		panic!("Expected UpdateExpression");
+	};
+	assert_eq!(assignments[0].value.to_sql(), "record::id(id)");
+	assert_eq!(assignments[1].value.to_sql(), "$input.id");
+	assert_eq!(output_sql(&ins.output), "RETURN record::id(id) AS id");
+	let Data::ValuesExpression(rows) = &ins.data else {
+		panic!("Expected ValuesExpression");
+	};
+	assert_eq!(rows[0][0].0.to_sql(), "id");
+	assert_eq!(rows[0][0].1, Expr::Literal(Literal::Integer(1)));
+}
+
+#[test]
+fn pgsql_insert_select_reads_the_key_of_the_source_table() {
+	let ins = pg_insert("INSERT INTO users (id, name) SELECT id, name FROM temp_users");
+	let Data::SingleExpression(Expr::Select(sel)) = &ins.data else {
+		panic!("Expected a SELECT source");
+	};
+	assert_eq!(sel.fields.to_sql(), "record::id(id) AS id, name");
+	let ins = pg_insert("INSERT INTO users SELECT * FROM temp_users WHERE id = 3");
+	let Data::SingleExpression(Expr::Select(sel)) = &ins.data else {
+		panic!("Expected a SELECT source");
+	};
+	assert_eq!(sel.fields.to_sql(), "*, record::id(id) AS id");
+	assert_eq!(where_sql(&sel.cond), "id = (temp_users:3)");
+}
+
+#[test]
+fn mysql_where_id_reads_the_record_by_its_id() {
+	let upd = my_update("UPDATE users SET name = 'x' WHERE id = 1");
+	assert_eq!(where_sql(&upd.cond), "id = (users:1)");
+	let upd = my_update("UPDATE users SET name = 'x' WHERE id IN (1, 2) AND name = 'y'");
+	assert!(
+		where_sql(&upd.cond).contains("id INSIDE [users:1, users:2]"),
+		"{}",
+		where_sql(&upd.cond)
+	);
+	let del = my_delete("DELETE FROM users WHERE id = ?");
+	assert_eq!(where_sql(&del.cond), format!("id = ({PARAM_RECORD})"));
+	let del = my_delete("DELETE FROM users WHERE id > 1");
+	assert_eq!(where_sql(&del.cond), "record::id(id) > 1");
+}
+
+#[test]
+fn mysql_echoes_a_written_row_with_the_key_and_a_deleted_row_from_before() {
+	let ins = my_insert("INSERT INTO users (id, name) VALUES (1, 'x')");
+	assert_eq!(output_sql(&ins.output), "RETURN *, record::id(id) AS id");
+	let upd = my_update("UPDATE users SET name = 'x' WHERE id = 1");
+	assert_eq!(output_sql(&upd.output), "RETURN *, record::id(id) AS id");
+	let del = my_delete("DELETE FROM users WHERE id = 1");
+	assert_eq!(
+		output_sql(&del.output),
+		"RETURN VALUE object::extend($before, { id: record::id($before.id) })"
+	);
+}
+
+#[test]
+fn mysql_on_duplicate_key_update_reads_the_existing_key() {
+	let ins = my_insert(
+		"INSERT INTO users (id, name) VALUES (1, 'x') ON DUPLICATE KEY UPDATE n = id, m = VALUES(id)",
+	);
+	let Some(Data::UpdateExpression(assignments)) = &ins.update else {
+		panic!("Expected UpdateExpression");
+	};
+	assert_eq!(assignments[0].value.to_sql(), "record::id(id)");
+	assert_eq!(assignments[1].value.to_sql(), "$input.id");
+}
+
+#[test]
+fn mysql_a_multi_table_update_leaves_id_as_written() {
+	let upd =
+		my_update("UPDATE users u JOIN orders o ON u.id = o.user_id SET n = 1 WHERE u.id = 1");
+	assert!(!where_sql(&upd.cond).contains("record::id"), "{}", where_sql(&upd.cond));
+}
+
+const PARENT_RECORD: &str = "IF parent = '' OR !(type::is_int(parent) OR type::is_string(parent) OR type::is_uuid(parent) OR type::is_array(parent) OR type::is_object(parent) OR type::is_record(parent)) THEN NONE ELSE type::record('users', parent) END";
+
+#[test]
+fn pgsql_where_id_equal_to_a_column_is_compared_with_the_record_the_column_names() {
+	for sql in [
+		"UPDATE users SET name = 'x' WHERE id = parent",
+		"DELETE FROM users WHERE parent = id",
+		"DELETE FROM users WHERE id <> parent",
+	] {
+		let text = if sql.starts_with("UPDATE") {
+			where_sql(&pg_update(sql).cond)
+		} else {
+			where_sql(&pg_delete(sql).unwrap().cond)
+		};
+		assert!(text.contains("type::record('users', parent)"), "{text}");
+		assert!(text.contains("parent ?? NULL"), "{text}");
+	}
+}
+
+#[test]
+fn pgsql_where_id_in_columns_and_keys_is_a_membership_of_the_records_they_name() {
+	for sql in [
+		"DELETE FROM users WHERE id IN (parent, 2)",
+		"DELETE FROM users WHERE id NOT IN (parent, 2)",
+		"DELETE FROM users WHERE id IN (parent)",
+	] {
+		let text = where_sql(&pg_delete(sql).unwrap().cond);
+		assert!(text.contains("type::record('users', parent)"), "{text}");
+		assert!(text.contains("parent ?? NULL"), "{text}");
+		if sql.contains("NOT IN") {
+			assert!(text.contains("THEN NULL"), "{text}");
+		}
+	}
+}
+
+#[test]
+fn mysql_where_id_equal_to_a_column_is_compared_with_the_record_the_column_names() {
+	let upd = my_update("UPDATE users SET name = 'x' WHERE id = parent");
+	assert_eq!(where_sql(&upd.cond), format!("id = ({PARENT_RECORD})"));
+	let del = my_delete("DELETE FROM users WHERE id <> parent AND id IN (parent, 3)");
+	assert!(
+		where_sql(&del.cond).contains(&format!("id != ({PARENT_RECORD})")),
+		"{}",
+		where_sql(&del.cond)
+	);
+	assert!(
+		where_sql(&del.cond).contains(&format!("id INSIDE [({PARENT_RECORD}), users:3]")),
+		"{}",
+		where_sql(&del.cond)
+	);
+}
+
+#[test]
+fn pgsql_write_null_guards_evaluate_volatile_operands_once() {
+	for (predicate, calls) in [
+		("v <> random()", 1),
+		("NOT (v = random())", 1),
+		("v IN (random(), random())", 2),
+		("v BETWEEN random() AND random()", 2),
+	] {
+		let text = where_sql(
+			&pg_delete(&format!("DELETE FROM values_once WHERE {predicate}")).unwrap().cond,
+		);
+		assert_eq!(text.matches("`rand`::float()").count(), calls, "{predicate}: {text}");
+	}
+}
+
+fn pg_insert_expr(sql: &str) -> Result<Expr, crate::PlanError> {
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Insert(insert) = &stmts[0] else {
+		panic!("Expected Insert statement");
+	};
+	lower_pgsql_insert(insert, &EmptyCatalog)
+}
+
+#[test]
+fn pgsql_on_conflict_do_update_where_updates_the_conflicting_row_only_when_the_condition_holds() {
+	let expr = pg_insert_expr(
+		"INSERT INTO users (id, name, age) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET age = \"public\".\"users\".\"age\" + EXCLUDED.age WHERE (\"public\".\"users\".\"id\" = $4 AND 1 = 1) RETURNING id, age",
+	)
+	.unwrap();
+	let Expr::Block(block) = expr else {
+		panic!("Expected a block");
+	};
+	assert_eq!(block.len(), 3);
+	let Expr::Let(proposed) = &block[0] else {
+		panic!("Expected LET");
+	};
+	assert_eq!(proposed.name.as_str(), "excluded");
+	assert_eq!(proposed.what.to_sql(), "{ id: $_1, name: $_2, age: $_3 }");
+	let Expr::Let(conflicting) = &block[1] else {
+		panic!("Expected LET");
+	};
+	assert_eq!(conflicting.name.as_str(), "conflicting");
+	let Expr::Select(lookup) = &conflicting.what else {
+		panic!("Expected SELECT");
+	};
+	assert_eq!(lookup.fields.to_sql(), "VALUE id");
+	let Expr::IfElse(branches) = &block[2] else {
+		panic!("Expected IF");
+	};
+	let Expr::Insert(inserted) = &branches.exprs[0].1 else {
+		panic!("Expected INSERT");
+	};
+	assert!(!inserted.ignore && inserted.update.is_none());
+	let Some(Expr::Update(updated)) = &branches.close else {
+		panic!("Expected UPDATE");
+	};
+	let Some(Data::SetExpression(assignments)) = &updated.data else {
+		panic!("Expected SET");
+	};
+	let assigned = assignments[0].value.to_sql();
+	assert!(assigned.contains("age + $_sql_right"), "{assigned}");
+	assert!(assigned.contains("$excluded.age") && !assigned.contains("public"), "{assigned}");
+	let matched = where_sql(&lookup.cond);
+	let condition = where_sql(&updated.cond);
+	assert!(condition.starts_with(&format!("{matched} AND ")), "{condition}");
+	assert!(condition.contains("$_4"), "{condition}");
+	assert_eq!(output_sql(&updated.output), output_sql(&inserted.output));
+}
+
+#[test]
+fn pgsql_on_conflict_do_update_where_supports_an_alias_and_a_target_that_is_not_the_key() {
+	let expr = pg_insert_expr(
+		"INSERT INTO users AS u (id, email) VALUES (1, 'a') ON CONFLICT (email) DO UPDATE SET id = u.id WHERE u.id = EXCLUDED.id",
+	)
+	.unwrap();
+	let Expr::Block(block) = expr else {
+		panic!("Expected a block");
+	};
+	let Expr::IfElse(branches) = &block[2] else {
+		panic!("Expected IF");
+	};
+	let Some(Expr::Update(updated)) = &branches.close else {
+		panic!("Expected UPDATE");
+	};
+	let sql = where_sql(&updated.cond);
+	assert!(sql.contains("$excluded.email") && !sql.contains("'a'"), "{sql}");
+	assert!(sql.contains("$excluded.id"), "{sql}");
+}
+
+#[test]
+fn pgsql_on_conflict_forms_without_a_lowering_are_unsupported() {
+	for sql in [
+		"INSERT INTO users (id) VALUES (1) ON CONFLICT (id) WHERE id > 0 DO NOTHING",
+		"INSERT INTO users (id) VALUES (1) ON CONFLICT (id) WHERE id > 0 DO UPDATE SET id = 2",
+		"INSERT INTO users (id) VALUES (1), (2) ON CONFLICT (id) DO UPDATE SET id = 2 WHERE id > 0",
+		"INSERT INTO users (id) SELECT id FROM t ON CONFLICT (id) DO UPDATE SET id = 2 WHERE id > 0",
+		"INSERT INTO users (id) VALUES (1) ON CONFLICT DO UPDATE SET id = 2 WHERE id > 0",
+		"INSERT INTO users (name) VALUES ('a') ON CONFLICT (id) DO UPDATE SET name = 'b' WHERE id > 0",
+	] {
+		let err = pg_insert_expr(sql).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+	}
+}
+
+#[test]
+fn pgsql_conditional_upsert_evaluates_each_proposed_value_once() {
+	let expr = pg_insert_expr(
+		"INSERT INTO users (id, name) VALUES (1, gen_random_uuid()) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name WHERE users.id > 0",
+	)
+	.unwrap();
+	let sql = expr.to_sql();
+	assert_eq!(sql.matches("::uuid::v4").count(), 1, "{sql}");
 }

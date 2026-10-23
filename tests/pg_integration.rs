@@ -1074,7 +1074,539 @@ mod pg_integration {
 		}
 		let rows = rows(res3.unwrap());
 		assert_eq!(rows.len(), 1, "expected 1 row, got {:?}", rows.len());
-		assert_eq!(rows[0].get(0), Some("pg_users:1"));
+		assert_eq!(rows[0].get(0), Some("1"));
 		assert_eq!(rows[0].get(1), Some("Alice"));
+	}
+
+	/// A result cell read as the bytes the server sent, whatever its type.
+	struct RawCell(Vec<u8>);
+
+	impl<'a> tokio_postgres::types::FromSql<'a> for RawCell {
+		fn from_sql(
+			_: &tokio_postgres::types::Type,
+			raw: &'a [u8],
+		) -> Result<Self, Box<dyn Error + Sync + Send>> {
+			Ok(RawCell(raw.to_vec()))
+		}
+
+		fn accepts(_: &tokio_postgres::types::Type) -> bool {
+			true
+		}
+	}
+
+	/// The text of a `jsonb` cell received in binary format: a version byte, then JSON.
+	fn jsonb_text(cell: &RawCell) -> String {
+		assert_eq!(cell.0.first(), Some(&1), "a binary jsonb cell starts with version 1");
+		String::from_utf8(cell.0[1..].to_vec()).expect("jsonb text is utf-8")
+	}
+
+	/// A schemaless `person:tobie` whose fields cover the shapes a client meets: scalars,
+	/// flat and nested arrays, objects, record links, a datetime and a NULL.
+	async fn seed_person_with_json_and_arrays(client: &Client) -> Result<(), Box<dyn Error>> {
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		client.simple_query("DEFINE TABLE person SCHEMALESS").await?;
+		client
+			.simple_query(
+				"CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], \
+				 scores: [1, 2, 3], mixed: [1, 'a', true], \
+				 profile: { city: 'London', langs: ['en', 'fr'], geo: { lat: 51.5, lon: -0.12 } }, \
+				 friends: [person:jaime, person:silvana], objs: [{ a: 1 }, { b: 2 }], \
+				 joined: [1, NONE, 3], empty: [], born: d'1980-01-01T00:00:00Z', nothing: NULL, \
+				 quoted: ['a,b', 'say \"hi\"', 'NULL', ''] } RETURN NONE",
+			)
+			.await?;
+		client
+			.simple_query(
+				"CREATE person:grid CONTENT { name: 'Grid', grid: [[1, 2], [3, 4]], \
+				 jagged: [[1], [2, 3]] } RETURN NONE",
+			)
+			.await?;
+		Ok(())
+	}
+
+	fn cell<'a>(row: &'a SimpleQueryRow, name: &str) -> Option<&'a str> {
+		let idx = row
+			.columns()
+			.iter()
+			.position(|c| c.name() == name)
+			.unwrap_or_else(|| panic!("no column {name}"));
+		row.get(idx)
+	}
+
+	#[test(tokio::test)]
+	async fn surrealql_dialect_renders_a_record_with_json_and_arrays() -> Result<(), Box<dyn Error>>
+	{
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		let found = rows(client.simple_query("SELECT * FROM person:tobie").await?);
+		assert_eq!(found.len(), 1);
+		let row = &found[0];
+		assert_eq!(cell(row, "name"), Some("Tobie"));
+		assert_eq!(cell(row, "tags"), Some("{rust,db}"));
+		assert_eq!(cell(row, "scores"), Some("{1,2,3}"));
+		assert_eq!(cell(row, "empty"), Some("{}"));
+		assert_eq!(cell(row, "joined"), Some("{1,NULL,3}"));
+		assert_eq!(cell(row, "friends"), Some("{person:jaime,person:silvana}"));
+		assert_eq!(cell(row, "mixed"), Some("{1,\"\\\"a\\\"\",true}"));
+		assert_eq!(cell(row, "objs"), Some("{\"{\\\"a\\\":1}\",\"{\\\"b\\\":2}\"}"));
+		assert_eq!(cell(row, "quoted"), Some("{\"a,b\",\"say \\\"hi\\\"\",\"NULL\",\"\"}"));
+		assert_eq!(
+			cell(row, "profile"),
+			Some(
+				"{\"city\":\"London\",\"geo\":{\"lat\":51.5,\"lon\":-0.12},\"langs\":[\"en\",\"fr\"]}"
+			)
+		);
+		assert_eq!(cell(row, "born"), Some("1980-01-01 00:00:00+00"));
+		assert_eq!(cell(row, "nothing"), None);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn surrealql_dialect_renders_nested_arrays_as_json() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		let found = rows(client.simple_query("SELECT * FROM person:grid").await?);
+		assert_eq!(found.len(), 1);
+		assert_eq!(cell(&found[0], "grid"), Some("[[1,2],[3,4]]"));
+		assert_eq!(cell(&found[0], "jagged"), Some("[[1],[2,3]]"));
+		let created = rows(
+			client
+				.simple_query("CREATE person:other CONTENT { name: 'O', grid: [[5, 6]] }")
+				.await?,
+		);
+		assert_eq!(cell(&created[0], "grid"), Some("[[5,6]]"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn surrealql_dialect_extended_protocol_returns_the_record_as_one_jsonb_document()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		let found = client.query("SELECT * FROM person:grid", &[]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].columns().len(), 1);
+		assert_eq!(found[0].columns()[0].name(), "result");
+		let doc = jsonb_text(&found[0].try_get::<_, RawCell>(0)?);
+		assert!(doc.contains("\"grid\":[[1,2],[3,4]]"), "{doc}");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_select_star_over_a_schemaless_table_returns_its_columns()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let found = rows(client.simple_query("SELECT * FROM person WHERE name = 'Tobie'").await?);
+		assert_eq!(found.len(), 1);
+		let names: Vec<&str> = found[0].columns().iter().map(|c| c.name()).collect();
+		assert!(!names.contains(&"*"), "the wildcard must not surface as a column: {names:?}");
+		for expected in ["name", "tags", "profile", "born", "friends", "nothing"] {
+			assert!(names.contains(&expected), "missing column {expected} in {names:?}");
+		}
+		assert_eq!(cell(&found[0], "name"), Some("Tobie"));
+		assert_eq!(cell(&found[0], "nothing"), None);
+		let all = rows(client.simple_query("SELECT * FROM person ORDER BY name").await?);
+		assert_eq!(all.len(), 2);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_select_star_in_the_extended_protocol_is_one_jsonb_document()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let found = client.query("SELECT * FROM person WHERE name = 'Tobie'", &[]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].columns().len(), 1);
+		let doc = jsonb_text(&found[0].try_get::<_, RawCell>(0)?);
+		assert!(
+			doc.contains("\"name\":\"Tobie\"") && doc.contains("\"tags\":[\"rust\",\"db\"]"),
+			"{doc}"
+		);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_reads_arrays_objects_and_datetimes_over_both_protocols()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let expected: &[(&str, &str)] = &[
+			("tags", "{rust,db}"),
+			("scores", "{1,2,3}"),
+			("mixed", "{1,\"\\\"a\\\"\",true}"),
+			(
+				"profile",
+				"{\"city\":\"London\",\"geo\":{\"lat\":51.5,\"lon\":-0.12},\"langs\":[\"en\",\"fr\"]}",
+			),
+			("friends", "{jaime,silvana}"),
+			("objs", "{\"{\\\"a\\\":1}\",\"{\\\"b\\\":2}\"}"),
+			("joined", "{1,NULL,3}"),
+			("empty", "{}"),
+			("born", "1980-01-01 00:00:00+00"),
+		];
+		for (column, text) in expected {
+			let sql = format!("SELECT {column} FROM person WHERE name = 'Tobie'");
+			let simple = rows(client.simple_query(&sql).await?);
+			assert_eq!(simple.len(), 1, "{sql}");
+			assert_eq!(simple[0].get(0), Some(*text), "simple protocol, {sql}");
+			let extended = client.query(&sql, &[]).await?;
+			assert_eq!(extended.len(), 1, "{sql}");
+			let value: String = extended[0].try_get(0)?;
+			assert_eq!(value, *text, "extended protocol, {sql}");
+		}
+		let null = client.query("SELECT nothing FROM person WHERE name = 'Tobie'", &[]).await?;
+		assert_eq!(null[0].try_get::<_, Option<String>>(0)?, None);
+		let grid = client.query("SELECT grid FROM person WHERE name = 'Grid'", &[]).await?;
+		assert_eq!(grid[0].try_get::<_, String>(0)?, "[[1,2],[3,4]]");
+		// A named column and the same field under `SELECT *` carry one text.
+		let star = rows(client.simple_query("SELECT * FROM person WHERE name = 'Tobie'").await?);
+		assert_eq!(star.len(), 1);
+		for (column, text) in expected {
+			assert_eq!(cell(&star[0], column), Some(*text), "SELECT *, {column}");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_refuses_json_containment_instead_of_answering_wrongly()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let err = client
+			.simple_query("SELECT name FROM person WHERE profile @> '{\"city\":\"London\"}'")
+			.await
+			.expect_err("containment is not implemented");
+		let message = err.as_db_error().map(|d| d.message().to_string()).unwrap_or_default();
+		assert!(message.contains("containment"), "{message}");
+		assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED));
+		let back = rows(client.simple_query("SELECT name FROM person WHERE name = 'Tobie'").await?);
+		assert_eq!(back.len(), 1, "the connection stays usable");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_reports_a_refused_json_operator_with_its_sqlstate()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let malformed = "SELECT profile #>> '{city' FROM person";
+		let err = client.simple_query(malformed).await.expect_err("a malformed path");
+		assert_eq!(err.code(), Some(&SqlState::INVALID_TEXT_REPRESENTATION), "{err:?}");
+		let err = client.simple_query("SELECT profile #> '{city}' FROM person").await.unwrap_err();
+		assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED), "{err:?}");
+		// Parse refuses a SELECT the planner cannot lower, before anything is bound.
+		let err = client.prepare(malformed).await.expect_err("a malformed path");
+		assert_eq!(err.code(), Some(&SqlState::INVALID_TEXT_REPRESENTATION), "{err:?}");
+		let err = client
+			.prepare("SELECT name FROM person WHERE profile @> '{\"city\":\"London\"}'")
+			.await
+			.expect_err("containment");
+		assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED), "{err:?}");
+		let back = client.query("SELECT name FROM person WHERE name = 'Tobie'", &[]).await?;
+		assert_eq!(back.len(), 1, "the connection stays usable");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_extracts_json_text_and_paths() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_person_with_json_and_arrays(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		for (select, expected) in [
+			("profile ->> 'city'", Some("London")),
+			("profile #>> '{geo,lat}'", Some("51.5")),
+			("profile #>> '{langs,1}'", Some("fr")),
+			("profile ->> 'langs'", Some("[\"en\",\"fr\"]")),
+			("profile ->> 'missing'", None),
+			("profile #>> '{geo,lon,x}'", None),
+		] {
+			let sql = format!("SELECT {select} AS v FROM person WHERE name = 'Tobie'");
+			let found = rows(client.simple_query(&sql).await?);
+			assert_eq!(found.len(), 1, "{sql}");
+			assert_eq!(found[0].get(0), expected, "{sql}");
+		}
+		Ok(())
+	}
+
+	/// `dept` links to `dept:1`, `friends` and `meta.boss` link to other employees.
+	async fn seed_employees_with_record_links(client: &Client) -> Result<(), Box<dyn Error>> {
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		client.simple_query("DEFINE TABLE emp SCHEMALESS").await?;
+		client
+			.simple_query(
+				"CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
+				 meta: { boss: emp:8, tags: ['a'] }, handle: emp:tobie } RETURN NONE",
+			)
+			.await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn sql_dialects_show_every_record_id_as_its_key() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_employees_with_record_links(&client).await?;
+		let surreal = rows(client.simple_query("SELECT * FROM emp:7").await?);
+		assert_eq!(cell(&surreal[0], "dept"), Some("dept:1"), "SurrealQL keeps the table");
+		assert_eq!(cell(&surreal[0], "id"), Some("emp:7"));
+		for dialect in ["pgsql"] {
+			client.simple_query(&format!("SET dialect = '{dialect}'")).await?;
+			let sql = "SELECT id, dept, friends, meta, handle FROM emp WHERE name = 'Eve'";
+			let found = rows(client.simple_query(sql).await?);
+			assert_eq!(found.len(), 1, "{dialect}");
+			assert_eq!(cell(&found[0], "id"), Some("7"), "{dialect}");
+			assert_eq!(cell(&found[0], "dept"), Some("1"), "{dialect}");
+			assert_eq!(cell(&found[0], "friends"), Some("{8,9}"), "{dialect}");
+			assert_eq!(cell(&found[0], "meta"), Some("{\"boss\":8,\"tags\":[\"a\"]}"), "{dialect}");
+			assert_eq!(cell(&found[0], "handle"), Some("tobie"), "{dialect}");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn sql_dialects_show_record_ids_as_keys_over_the_extended_protocol()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_employees_with_record_links(&client).await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let found =
+			client.query("SELECT id, dept, friends FROM emp WHERE name = 'Eve'", &[]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].try_get::<_, String>(0)?, "7");
+		assert_eq!(found[0].try_get::<_, String>(1)?, "1");
+		assert_eq!(found[0].try_get::<_, String>(2)?, "{8,9}");
+		Ok(())
+	}
+
+	async fn seed_people_for_key_parameters(client: &Client) -> Result<(), Box<dyn Error>> {
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		client.simple_query("DEFINE TABLE person SCHEMALESS").await?;
+		client.simple_query("CREATE person:1 SET name = 'Tobie' RETURN NONE").await?;
+		client.simple_query("CREATE person:tobie SET name = 'Named' RETURN NONE").await?;
+		client.simple_query("CREATE person:3 SET name = 'Third' RETURN NONE").await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_integer_key_parameters_match_the_record_they_name()
+	-> Result<(), Box<dyn Error>> {
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_people_for_key_parameters(&client).await?;
+		let select =
+			client.prepare_typed("SELECT name FROM person WHERE id = $1", &[Type::INT8]).await?;
+		let found = client.query(&select, &[&1i64]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].try_get::<_, String>(0)?, "Tobie");
+		assert!(client.query(&select, &[&99i64]).await?.is_empty());
+		let nothing: Option<i64> = None;
+		assert!(client.query(&select, &[&nothing]).await?.is_empty(), "NULL names no record");
+		let members = client
+			.prepare_typed(
+				"SELECT name FROM person WHERE id IN ($1, $2) ORDER BY name",
+				&[Type::INT8, Type::INT8],
+			)
+			.await?;
+		let found = client.query(&members, &[&1i64, &3i64]).await?;
+		let names: Vec<String> = found.iter().map(|r| r.get(0)).collect();
+		assert_eq!(names, ["Third", "Tobie"]);
+		let update = client
+			.prepare_typed("UPDATE person SET name = 'Changed' WHERE id = $1", &[Type::INT8])
+			.await?;
+		assert_eq!(client.execute(&update, &[&3i64]).await?, 1);
+		let delete =
+			client.prepare_typed("DELETE FROM person WHERE id = $1", &[Type::INT8]).await?;
+		assert_eq!(client.execute(&delete, &[&1i64]).await?, 1);
+		assert_eq!(client.execute(&delete, &[&1i64]).await?, 0);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_text_key_parameters_match_the_record_they_name_and_empty_text_names_none()
+	-> Result<(), Box<dyn Error>> {
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_people_for_key_parameters(&client).await?;
+		let select =
+			client.prepare_typed("SELECT name FROM person WHERE id = $1", &[Type::TEXT]).await?;
+		let found = client.query(&select, &[&"tobie"]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].try_get::<_, String>(0)?, "Named");
+		assert!(client.query(&select, &[&""]).await?.is_empty(), "an empty key names no record");
+		let nothing: Option<&str> = None;
+		assert!(client.query(&select, &[&nothing]).await?.is_empty());
+		let delete =
+			client.prepare_typed("DELETE FROM person WHERE id = $1", &[Type::TEXT]).await?;
+		assert_eq!(client.execute(&delete, &[&""]).await?, 0, "an empty key deletes nothing");
+		assert_eq!(client.execute(&delete, &[&"tobie"]).await?, 1);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_key_parameters_of_other_kinds_name_no_record()
+	-> Result<(), Box<dyn Error>> {
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		client.simple_query("DEFINE TABLE price SCHEMALESS").await?;
+		client
+			.simple_query(
+				"CREATE price:⟨1.5⟩ SET name = 'float-looking text key' RETURN NONE; \
+				 CREATE price:⟨true⟩ SET name = 'bool-looking text key' RETURN NONE",
+			)
+			.await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let by_float =
+			client.prepare_typed("SELECT name FROM price WHERE id = $1", &[Type::FLOAT8]).await?;
+		assert!(client.query(&by_float, &[&1.5f64]).await?.is_empty(), "a float is no record key");
+		let by_bool =
+			client.prepare_typed("SELECT name FROM price WHERE id = $1", &[Type::BOOL]).await?;
+		assert!(client.query(&by_bool, &[&true]).await?.is_empty(), "a boolean is no record key");
+		let delete =
+			client.prepare_typed("DELETE FROM price WHERE id = $1", &[Type::FLOAT8]).await?;
+		assert_eq!(client.execute(&delete, &[&1.5f64]).await?, 0, "a float deletes no record");
+		let by_text =
+			client.prepare_typed("SELECT name FROM price WHERE id = $1", &[Type::TEXT]).await?;
+		assert_eq!(client.query(&by_text, &[&"1.5"]).await?.len(), 1, "text is the string key");
+		Ok(())
+	}
+
+	async fn seed_employees_with_link_field(client: &Client) -> Result<(), Box<dyn Error>> {
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		client
+			.simple_query(
+				"DEFINE TABLE dept SCHEMALESS; \
+				 CREATE dept:1 SET dname = 'Engineering' RETURN NONE; \
+				 CREATE dept:ops SET dname = 'Operations' RETURN NONE; \
+				 DEFINE TABLE emp SCHEMAFULL; \
+				 DEFINE FIELD name ON emp TYPE string; \
+				 DEFINE FIELD dept ON emp TYPE record<dept>",
+			)
+			.await?;
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_writes_a_key_parameter_into_a_link_field_and_finds_it_again()
+	-> Result<(), Box<dyn Error>> {
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_employees_with_link_field(&client).await?;
+		let insert = client
+			.prepare_typed(
+				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
+				&[Type::INT8, Type::TEXT, Type::INT8],
+			)
+			.await?;
+		assert_eq!(client.execute(&insert, &[&1i64, &"Eve", &1i64]).await?, 1);
+		let by_text = client
+			.prepare_typed(
+				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
+				&[Type::INT8, Type::TEXT, Type::TEXT],
+			)
+			.await?;
+		assert_eq!(client.execute(&by_text, &[&2i64, &"Ora", &"ops"]).await?, 1);
+		let select =
+			client.prepare_typed("SELECT name FROM emp WHERE dept = $1", &[Type::INT8]).await?;
+		let found = client.query(&select, &[&1i64]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].try_get::<_, String>(0)?, "Eve");
+		assert!(client.query(&select, &[&99i64]).await?.is_empty());
+		let nothing: Option<i64> = None;
+		assert!(client.query(&select, &[&nothing]).await?.is_empty(), "NULL names no record");
+		let select_text =
+			client.prepare_typed("SELECT name FROM emp WHERE dept = $1", &[Type::TEXT]).await?;
+		let found = client.query(&select_text, &[&"ops"]).await?;
+		assert_eq!(found.len(), 1);
+		assert_eq!(found[0].try_get::<_, String>(0)?, "Ora");
+		let update = client
+			.prepare_typed("UPDATE emp SET dept = $1 WHERE id = $2", &[Type::INT8, Type::INT8])
+			.await?;
+		assert_eq!(client.execute(&update, &[&1i64, &2i64]).await?, 1);
+		assert_eq!(client.query(&select, &[&1i64]).await?.len(), 2);
+		let shown = client.query("SELECT dept FROM emp WHERE id = 2", &[]).await?;
+		assert_eq!(shown[0].try_get::<_, String>(0)?, "1", "SQL shows the key of the link");
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		let linked = rows(client.simple_query("SELECT VALUE dept.dname FROM emp:2").await?);
+		assert_eq!(linked[0].get(0), Some("Engineering"), "the stored value is a record link");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_writes_a_link_field_inside_a_transaction() -> Result<(), Box<dyn Error>>
+	{
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_employees_with_link_field(&client).await?;
+		client.simple_query("BEGIN").await?;
+		let insert = client
+			.prepare_typed(
+				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
+				&[Type::INT8, Type::TEXT, Type::INT8],
+			)
+			.await?;
+		assert_eq!(client.execute(&insert, &[&1i64, &"Eve", &1i64]).await?, 1);
+		let inside = client.query("SELECT name FROM emp WHERE dept = 1", &[]).await?;
+		assert_eq!(inside.len(), 1, "the transaction sees its own write by key");
+		client.simple_query("ROLLBACK").await?;
+		assert!(client.query("SELECT name FROM emp WHERE dept = 1", &[]).await?.is_empty());
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn pgsql_dialect_refuses_what_is_not_a_key_for_a_link_field() -> Result<(), Box<dyn Error>>
+	{
+		use tokio_postgres::types::Type;
+
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		seed_employees_with_link_field(&client).await?;
+		let by_float = client
+			.prepare_typed(
+				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
+				&[Type::INT8, Type::TEXT, Type::FLOAT8],
+			)
+			.await?;
+		assert!(client.execute(&by_float, &[&1i64, &"Bad", &1.5f64]).await.is_err());
+		let by_text = client
+			.prepare_typed(
+				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
+				&[Type::INT8, Type::TEXT, Type::TEXT],
+			)
+			.await?;
+		assert!(client.execute(&by_text, &[&1i64, &"Bad", &""]).await.is_err());
+		let nothing: Option<&str> = None;
+		assert!(client.execute(&by_text, &[&1i64, &"Bad", &nothing]).await.is_err());
+		assert!(client.query("SELECT name FROM emp", &[]).await?.is_empty());
+		Ok(())
 	}
 }

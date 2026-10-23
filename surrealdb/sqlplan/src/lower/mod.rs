@@ -2,8 +2,12 @@
 
 pub mod ddl;
 pub mod expr;
+pub(crate) mod id_key;
+pub(crate) mod link;
 pub mod plan;
+mod quote_ident;
 pub mod write;
+mod write_null;
 
 pub use ddl::{
 	lower_mysql_create_table, lower_mysql_ddl, lower_mysql_drop_table, lower_pgsql_alter_table,
@@ -19,5 +23,15 @@ pub use write::{
 
 #[cfg(test)]
 mod ddl_tests;
+#[cfg(test)]
+mod id_key_tests;
+#[cfg(test)]
+mod json_tests;
+#[cfg(test)]
+mod link_expr_tests;
+#[cfg(test)]
+mod link_tests;
+#[cfg(test)]
+mod link_write_tests;
 #[cfg(test)]
 mod write_tests;

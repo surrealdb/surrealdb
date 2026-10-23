@@ -6,7 +6,10 @@ use std::sync::Arc;
 use crate::catalog::BinderCatalog;
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
-use crate::ir::{BoundColumnRef, BoundCte, BoundExpr, BoundTarget, BoundWindowSpec};
+use crate::ir::{
+	BoundColumnRef, BoundCte, BoundExpr, BoundSelect, BoundTableSource, BoundTarget,
+	BoundWindowSpec,
+};
 
 /// A single relation registered in the current query scope (from a FROM clause or JOIN).
 #[derive(Debug, Clone)]
@@ -21,6 +24,86 @@ pub struct RelationEntry {
 	pub exposed_name: String,
 	/// Known column names from the catalog (if catalog has schema for this table).
 	pub known_columns: Option<Vec<String>>,
+	/// Whether this relation reads a base table, whose `id` column is the stored record id and
+	/// is read as its key. False for subquery aliases and CTEs, whose `id` is a plain value.
+	pub is_base_table: bool,
+	/// Bound projection supplying scalar and record-link provenance for a derived relation.
+	pub source_query: Option<Arc<BoundSelect>>,
+}
+
+impl RelationEntry {
+	/// A reference to column `column` (already folded) of this relation, bound at
+	/// `correlation_depth` 0.
+	///
+	/// For a base-table relation the catalog is asked which table the column holds record links to.
+	/// `id` is asked about too, but never holds links.
+	fn column_ref(&self, column: String, catalog: &dyn BinderCatalog) -> BoundColumnRef {
+		let id_table = (self.is_base_table && column == "id").then(|| self.table_name.clone());
+		let derived =
+			self.source_query.as_ref().map(|query| projected_column(query, &column, catalog));
+		let link_table = if self.is_base_table && column != "*" {
+			catalog
+				.link_table(self.schema.as_deref(), &self.table_name, &column)
+				.filter(|_| column != "id")
+		} else {
+			derived.as_ref().and_then(|(_, link)| link.clone())
+		};
+		BoundColumnRef {
+			relation_index: self.relation_index,
+			relation_name: self.exposed_name.clone(),
+			declared_type: if self.is_base_table {
+				catalog.column_type(self.schema.as_deref(), &self.table_name, &column)
+			} else {
+				derived.map(|(ty, _)| ty).unwrap_or(crate::SqlType::Unknown)
+			},
+			column,
+			correlation_depth: 0,
+			id_table,
+			link_table,
+			aggregate_output: false,
+		}
+	}
+}
+
+/// The scalar type and stored-link target of a projected column. Wildcards inherit only from
+/// a single source; joins with unlisted columns do not supply unambiguous provenance.
+fn projected_column(
+	query: &BoundSelect,
+	column: &str,
+	catalog: &dyn BinderCatalog,
+) -> (crate::SqlType, Option<String>) {
+	for target in &query.targets {
+		let name = target.alias.as_deref().or(match &target.expr {
+			BoundExpr::Column(col) => Some(col.column.as_str()),
+			_ => None,
+		});
+		if name == Some(column) && !target.is_unlisted_wildcard() {
+			return match &target.expr {
+				BoundExpr::Column(col) => (col.declared_type, col.link_table.clone()),
+				_ => (query.infer_expr_type(&target.expr, catalog), None),
+			};
+		}
+	}
+	if query.targets.iter().any(BoundTarget::is_unlisted_wildcard) {
+		match query.from.as_ref() {
+			Some(BoundTableSource::Table {
+				schema,
+				name,
+				..
+			}) => {
+				let link = (column != "id")
+					.then(|| catalog.link_table(schema.as_deref(), name, column))
+					.flatten();
+				return (catalog.column_type(schema.as_deref(), name, column), link);
+			}
+			Some(BoundTableSource::Subquery {
+				query,
+				..
+			}) => return projected_column(query, column, catalog),
+			_ => {}
+		}
+	}
+	(crate::SqlType::Unknown, None)
 }
 
 /// The lexical scope of a query or subquery, maintaining available relations and target bindings.
@@ -112,6 +195,11 @@ impl QueryScope {
 			schema: schema.clone(),
 			exposed_name: exposed_name.clone(),
 			known_columns,
+			source_query: None,
+			is_base_table: !crate::catalog::system::is_system_catalog_table(
+				schema.as_deref(),
+				table_name,
+			),
 		};
 
 		self.relations.push(entry);
@@ -143,6 +231,8 @@ impl QueryScope {
 			schema: None,
 			exposed_name: alias.to_string(),
 			known_columns: None,
+			is_base_table: false,
+			source_query: None,
 		};
 
 		self.relations.push(entry);
@@ -165,6 +255,8 @@ impl QueryScope {
 			schema: None,
 			exposed_name: alias.to_string(),
 			known_columns: columns,
+			is_base_table: false,
+			source_query: None,
 		};
 
 		self.relations.push(entry);
@@ -192,39 +284,42 @@ impl QueryScope {
 	}
 
 	/// Resolve a column reference given identifier parts (e.g. `["col"]` or `["tbl", "col"]` or
-	/// `["schema", "tbl", "col"]`).
+	/// `["schema", "tbl", "col"]`). `catalog` says which columns of a base table hold record links.
 	pub fn resolve_column(
 		&self,
 		parts: &[String],
 		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
 	) -> Result<BoundColumnRef, PlanError> {
 		match parts.len() {
 			0 => Err(PlanError::Custom("empty column reference".into())),
 			1 => {
 				// Unqualified column name: e.g. `id`
 				let col_name = parts[0].clone();
-				self.resolve_unqualified_column(&col_name, policy)
+				self.resolve_unqualified_column(&col_name, policy, catalog)
 			}
 			2 => {
 				// Qualified column name: e.g. `tbl.col` or `alias.col`
 				let prefix = &parts[0];
 				let col_name = &parts[1];
-				self.resolve_qualified_column(prefix, col_name, policy)
+				self.resolve_qualified_column(prefix, col_name, policy, catalog)
 			}
 			3 => {
 				// Schema-qualified column name: e.g. `public.users.id`
 				let full_prefix = format!("{}.{}", parts[0], parts[1]);
 				let col_name = &parts[2];
-				if let Ok(col) = self.resolve_qualified_column(&full_prefix, col_name, policy) {
+				if let Ok(col) =
+					self.resolve_qualified_column(&full_prefix, col_name, policy, catalog)
+				{
 					return Ok(col);
 				}
 				// If not matching a schema-qualified table, try prefix as table and parts[1..] as
 				// nested field
-				self.resolve_qualified_column(&parts[0], &parts[1], policy)
+				self.resolve_qualified_column(&parts[0], &parts[1], policy, catalog)
 			}
 			_ => {
 				// Deeper dotted access: try parts[0] as relation, parts[1] as column
-				self.resolve_qualified_column(&parts[0], &parts[1], policy)
+				self.resolve_qualified_column(&parts[0], &parts[1], policy, catalog)
 			}
 		}
 	}
@@ -233,10 +328,11 @@ impl QueryScope {
 		&self,
 		col_name: &str,
 		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
 	) -> Result<BoundColumnRef, PlanError> {
 		if self.relations.is_empty() {
 			if let Some(parent) = &self.parent {
-				let mut col = parent.resolve_unqualified_column(col_name, policy)?;
+				let mut col = parent.resolve_unqualified_column(col_name, policy, catalog)?;
 				col.correlation_depth += 1;
 				return Ok(col);
 			}
@@ -247,13 +343,7 @@ impl QueryScope {
 		// If exactly 1 relation in scope, bind directly to relation 0
 		if self.relations.len() == 1 {
 			let rel = &self.relations[0];
-			let folded_col = policy.fold_identifier(col_name).into_owned();
-			return Ok(BoundColumnRef {
-				relation_index: rel.relation_index,
-				relation_name: rel.exposed_name.clone(),
-				column: folded_col,
-				correlation_depth: 0,
-			});
+			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		}
 
 		// Multiple relations in scope: check known columns across relations
@@ -270,13 +360,7 @@ impl QueryScope {
 
 		if matching_relations.len() == 1 {
 			let rel = matching_relations[0];
-			let folded_col = policy.fold_identifier(col_name).into_owned();
-			return Ok(BoundColumnRef {
-				relation_index: rel.relation_index,
-				relation_name: rel.exposed_name.clone(),
-				column: folded_col,
-				correlation_depth: 0,
-			});
+			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		} else if matching_relations.len() > 1 {
 			return Err(PlanError::AmbiguousColumn(col_name.to_string()));
 		}
@@ -284,7 +368,7 @@ impl QueryScope {
 		// If relations have known columns and col was not found, check parent before fallback
 		if self.relations.iter().any(|r| r.known_columns.is_some())
 			&& let Some(parent) = &self.parent
-			&& let Ok(mut col) = parent.resolve_unqualified_column(col_name, policy)
+			&& let Ok(mut col) = parent.resolve_unqualified_column(col_name, policy, catalog)
 		{
 			col.correlation_depth += 1;
 			return Ok(col);
@@ -292,13 +376,7 @@ impl QueryScope {
 
 		// Fallback when schema is not strictly known (schemaless tables): default to relation 0
 		let rel = &self.relations[0];
-		let folded_col = policy.fold_identifier(col_name).into_owned();
-		Ok(BoundColumnRef {
-			relation_index: rel.relation_index,
-			relation_name: rel.exposed_name.clone(),
-			column: folded_col,
-			correlation_depth: 0,
-		})
+		Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog))
 	}
 
 	fn resolve_qualified_column(
@@ -306,22 +384,17 @@ impl QueryScope {
 		prefix: &str,
 		col_name: &str,
 		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
 	) -> Result<BoundColumnRef, PlanError> {
 		let key = policy.fold_identifier(prefix).into_owned();
 		if let Some(&rel_idx) = self.name_to_relation.get(&key) {
 			let rel = &self.relations[rel_idx];
-			let folded_col = policy.fold_identifier(col_name).into_owned();
-			return Ok(BoundColumnRef {
-				relation_index: rel.relation_index,
-				relation_name: rel.exposed_name.clone(),
-				column: folded_col,
-				correlation_depth: 0,
-			});
+			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		}
 
 		// Check parent scope for correlated subqueries
 		if let Some(parent) = &self.parent
-			&& let Ok(mut col) = parent.resolve_qualified_column(prefix, col_name, policy)
+			&& let Ok(mut col) = parent.resolve_qualified_column(prefix, col_name, policy, catalog)
 		{
 			col.correlation_depth += 1;
 			return Ok(col);
@@ -350,6 +423,10 @@ impl QueryScope {
 				relation_name: String::new(),
 				column: alias.clone(),
 				correlation_depth: 0,
+				id_table: None,
+				link_table: None,
+				declared_type: crate::SqlType::Unknown,
+				aggregate_output: false,
 			}))
 		} else {
 			match &target.expr {
@@ -361,6 +438,10 @@ impl QueryScope {
 					relation_name: String::new(),
 					column: name.clone(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				})),
 				_ => Ok(target.expr.clone()),
 			}
@@ -378,6 +459,10 @@ impl QueryScope {
 					relation_name: String::new(),
 					column: a.clone(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				}));
 			}
 		}
@@ -385,7 +470,7 @@ impl QueryScope {
 	}
 
 	/// Expand `*` to all columns or a wildcard target.
-	pub fn expand_wildcard(&self) -> Vec<BoundTarget> {
+	pub fn expand_wildcard(&self, catalog: &dyn BinderCatalog) -> Vec<BoundTarget> {
 		let mut targets = Vec::new();
 		let mut has_known = false;
 
@@ -394,14 +479,9 @@ impl QueryScope {
 				has_known = true;
 				for col in cols {
 					targets.push(BoundTarget {
-						expr: BoundExpr::Column(BoundColumnRef {
-							relation_index: rel.relation_index,
-							relation_name: rel.exposed_name.clone(),
-							column: col.clone(),
-							correlation_depth: 0,
-						}),
+						expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
 						alias: Some(col.clone()),
-						is_wildcard: true,
+						is_wildcard: rel.source_query.is_none(),
 						table_wildcard: None,
 					});
 				}
@@ -418,6 +498,10 @@ impl QueryScope {
 					relation_name: String::new(),
 					column: "*".to_string(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				}),
 				alias: None,
 				is_wildcard: true,
@@ -431,6 +515,7 @@ impl QueryScope {
 		&self,
 		table_prefix: &str,
 		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
 	) -> Result<Vec<BoundTarget>, PlanError> {
 		let key = policy.fold_identifier(table_prefix).into_owned();
 		let rel_idx = self
@@ -444,12 +529,7 @@ impl QueryScope {
 			let mut targets = Vec::new();
 			for col in cols {
 				targets.push(BoundTarget {
-					expr: BoundExpr::Column(BoundColumnRef {
-						relation_index: rel.relation_index,
-						relation_name: rel.exposed_name.clone(),
-						column: col.clone(),
-						correlation_depth: 0,
-					}),
+					expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
 					alias: Some(col.clone()),
 					is_wildcard: false,
 					table_wildcard: Some(table_prefix.to_string()),
@@ -464,6 +544,10 @@ impl QueryScope {
 					relation_name: rel.exposed_name.clone(),
 					column: "*".to_string(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				}),
 				alias: None,
 				is_wildcard: false,

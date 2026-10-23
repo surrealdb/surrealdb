@@ -32,6 +32,7 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::AggregateNotAllowed(_)
 			| surrealdb_sqlplan::PlanError::WindowNotAllowed(_)
 			| surrealdb_sqlplan::PlanError::UndefinedFunction(_)
+			| surrealdb_sqlplan::PlanError::UndefinedOperator(_)
 			| surrealdb_sqlplan::PlanError::FunctionArgumentCountMismatch {
 				..
 			}
@@ -39,6 +40,7 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::SubqueryMustHaveAlias
 			| surrealdb_sqlplan::PlanError::ParameterOutOfRange(_)
 			| surrealdb_sqlplan::PlanError::DivisionByZero
+			| surrealdb_sqlplan::PlanError::NumericValueOutOfRange
 			| surrealdb_sqlplan::PlanError::InvalidTextRepresentation(_)
 			| surrealdb_sqlplan::PlanError::NoActiveTransaction
 			| surrealdb_sqlplan::PlanError::InFailedTransaction
@@ -70,11 +72,19 @@ pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
 	}
 }
 
-/// Lower a MySQL `SELECT` statement directly to a `LogicalOp` pipeline.
+/// Lower a MySQL `SELECT` statement directly to a `LogicalOp` pipeline, against a
+/// catalog that describes no table.
 pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
+	lower_select_with(select, &surrealdb_sqlplan::EmptyCatalog)
+}
+
+/// Lower a MySQL `SELECT` statement directly to a `LogicalOp` pipeline, against `catalog`.
+pub fn lower_select_with(
+	select: &SelectStmt,
+	catalog: &dyn surrealdb_sqlplan::BinderCatalog,
+) -> Result<LogicalOp, LowerError> {
 	let policy = surrealdb_sqlplan::DialectPolicy::mysql();
-	let catalog = surrealdb_sqlplan::EmptyCatalog;
-	let op = surrealdb_sqlplan::bind_and_lower_mysql(select, &catalog, &policy)?;
+	let op = surrealdb_sqlplan::bind_and_lower_mysql(select, catalog, &policy)?;
 	Ok(op)
 }
 

@@ -267,3 +267,24 @@ fn test_conformance_ratchet_evaluation() {
 	assert!(ratchet.assert_floor(8).is_ok());
 	assert!(ratchet.assert_floor(9).is_err());
 }
+
+#[test]
+fn scalar_function_range_projection_matches_pg_query() {
+	let statement = parse_statement("SELECT * FROM abs(2) WITH ORDINALITY AS a(n, ord)")
+		.expect("function table");
+	let projected = statement.to_pg_query_json();
+	assert_eq!(
+		projected["RawStmt"]["stmt"]["SelectStmt"]["fromClause"][0],
+		serde_json::json!({
+			"RangeFunction": {
+				"ordinality": true,
+				"functions": [{"List": {"items": [{"FuncCall": {
+					"funcname": [{"String": {"sval": "abs"}}],
+					"args": [{"A_Const": {"ival": {"ival": 2}}}],
+					"funcformat": "COERCE_EXPLICIT_CALL"
+				}}, {}]}}],
+				"alias": {"aliasname": "a", "colnames": [{"String": {"sval": "n"}}, {"String": {"sval": "ord"}}]}
+			}
+		})
+	);
+}

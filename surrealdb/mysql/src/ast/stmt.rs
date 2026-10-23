@@ -43,7 +43,8 @@ impl QualifiedName {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectItem {
 	Wildcard(Span),
-	QualifiedWildcard(String, Span),
+	/// `t.*` or `db.t.*`: the parts of the qualified name of the relation.
+	QualifiedWildcard(Vec<String>, Span),
 	Expr {
 		expr: Expr,
 		alias: Option<String>,

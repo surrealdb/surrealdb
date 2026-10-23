@@ -251,6 +251,35 @@ impl ToPgQueryJson for TableRef {
 				}
 				pg_node("JoinExpr", Value::Object(obj))
 			}
+			// gram.y REL_15_STABLE table_ref (12413), func_table (12826): RangeFunction.
+			Self::Function {
+				function,
+				alias,
+				with_ordinality,
+				..
+			} => {
+				let mut obj = Map::new();
+				let mut call = function.to_pg_query_json();
+				if let Some(body) = call.get_mut("FuncCall").and_then(Value::as_object_mut) {
+					body.insert("funcformat".to_string(), json!("COERCE_EXPLICIT_CALL"));
+				}
+				obj.insert("functions".to_string(), json!([{"List": {"items": [call, {}]}}]));
+				if *with_ordinality {
+					obj.insert("ordinality".to_string(), json!(true));
+				}
+				if let Some(alias) = alias {
+					let mut fields = Map::new();
+					fields.insert("aliasname".to_string(), json!(alias.name));
+					if !alias.columns.is_empty() {
+						fields.insert(
+							"colnames".to_string(),
+							Value::Array(alias.columns.iter().map(|name| pg_str(name)).collect()),
+						);
+					}
+					obj.insert("alias".to_string(), Value::Object(fields));
+				}
+				pg_node("RangeFunction", Value::Object(obj))
+			}
 			Self::Subquery {
 				query,
 				alias,
@@ -885,7 +914,11 @@ impl ToPgQueryJson for InsertStmt {
 			"relation".to_string(),
 			TableRef::Table {
 				name: self.relation.clone(),
-				alias: None,
+				alias: self.alias.clone().map(|name| TableAlias {
+					name,
+					columns: Vec::new(),
+					span: self.relation.span,
+				}),
 				span: self.relation.span,
 			}
 			.to_pg_query_json(),
@@ -954,12 +987,16 @@ impl ToPgQueryJson for OnConflictClause {
 				obj.insert("targetList".to_string(), Value::Array(targets));
 			}
 		}
+		if let Some(condition) = &self.where_clause {
+			obj.insert("whereClause".to_string(), condition.to_pg_query_json());
+		}
 		if let Some(targets) = &self.target {
 			let infer_elems: Vec<Value> = targets.iter().map(|t| pg_str(t)).collect();
-			obj.insert(
-				"infer".to_string(),
-				pg_node("InferClause", json!({ "indexElems": infer_elems })),
-			);
+			let mut infer = json!({ "indexElems": infer_elems });
+			if let Some(predicate) = &self.target_where {
+				infer["whereClause"] = predicate.to_pg_query_json();
+			}
+			obj.insert("infer".to_string(), pg_node("InferClause", infer));
 		}
 		pg_node("OnConflictClause", Value::Object(obj))
 	}

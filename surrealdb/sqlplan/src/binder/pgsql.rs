@@ -133,10 +133,10 @@ pub fn bind_select(
 	for target in &select.targets {
 		if let Expr::ColumnRef(col) = &target.expr {
 			if col.fields.len() == 1 && col.fields[0] == "*" {
-				targets.extend(scope.expand_wildcard());
+				targets.extend(scope.expand_wildcard(catalog));
 				continue;
 			} else if col.fields.len() == 2 && col.fields[1] == "*" {
-				targets.extend(scope.expand_table_wildcard(&col.fields[0], policy)?);
+				targets.extend(scope.expand_table_wildcard(&col.fields[0], policy, catalog)?);
 				continue;
 			}
 		}
@@ -402,28 +402,32 @@ fn bind_table_ref(
 				let alias_list = alias.as_ref().map(|a| a.columns.as_slice()).unwrap_or_default();
 				name_derived_columns(&mut cte_query, &exposed_name, alias_list, policy)?;
 
-				let columns = if !alias_list.is_empty() {
-					derived_column_names(&cte_query)
-				} else if !cte.columns.is_empty() {
-					Some(cte.columns)
-				} else {
-					Some(
-						cte_query
-							.targets
-							.iter()
-							.enumerate()
-							.map(|(i, t)| {
-								t.alias.clone().unwrap_or_else(|| match &t.expr {
-									BoundExpr::Column(c) => c.column.clone(),
-									_ => format!("col_{}", i + 1),
+				let columns =
+					if cte_query.targets.iter().any(crate::ir::BoundTarget::is_unlisted_wildcard) {
+						None
+					} else if !alias_list.is_empty() {
+						derived_column_names(&cte_query)
+					} else if !cte.columns.is_empty() {
+						Some(cte.columns)
+					} else {
+						Some(
+							cte_query
+								.targets
+								.iter()
+								.enumerate()
+								.map(|(i, t)| {
+									t.alias.clone().unwrap_or_else(|| match &t.expr {
+										BoundExpr::Column(c) => c.column.clone(),
+										_ => format!("col_{}", i + 1),
+									})
 								})
-							})
-							.collect(),
-					)
-				};
+								.collect(),
+						)
+					};
 
 				let relation_index =
 					scope.register_subquery_with_columns(&exposed_name, columns, policy);
+				scope.relations[relation_index].source_query = Some(Arc::from(cte_query.clone()));
 
 				return Ok(BoundTableSource::Subquery {
 					query: cte_query,
@@ -458,6 +462,108 @@ fn bind_table_ref(
 				alias: exposed_name,
 			})
 		}
+		TableRef::Function {
+			function,
+			alias,
+			with_ordinality,
+			..
+		} => {
+			let Expr::FunctionCall {
+				name,
+				distinct: false,
+				filter: None,
+				over: None,
+				..
+			} = function.as_ref()
+			else {
+				return Err(PlanError::UnsupportedExpression(
+					"FROM requires a scalar function without aggregate or window decorations"
+						.into(),
+				));
+			};
+			let bound = bind_expr(function, &QueryScope::new(), catalog, policy)?;
+			let BoundExpr::FunctionCall {
+				name: function_name,
+				..
+			} = &bound
+			else {
+				return Err(PlanError::UnsupportedExpression("non-scalar function in FROM".into()));
+			};
+			let definition = FunctionRegistry::lookup(function_name, policy.dialect)
+				.ok_or_else(|| PlanError::UndefinedFunction(function_name.clone()))?;
+			if !definition.is_scalar() || function_name == "generate_series" {
+				return Err(PlanError::UnsupportedStatement(
+					"aggregate and set-returning functions in FROM are unsupported".into(),
+				));
+			}
+			let default_name = name
+				.parts
+				.last()
+				.cloned()
+				.ok_or_else(|| PlanError::UndefinedFunction(String::new()))?;
+			let exposed = alias
+				.as_ref()
+				.map(|alias| alias.name.clone())
+				.unwrap_or_else(|| default_name.clone());
+			let count = if *with_ordinality {
+				2
+			} else {
+				1
+			};
+			let aliases = alias.as_ref().map(|alias| alias.columns.as_slice()).unwrap_or(&[]);
+			if aliases.len() > count {
+				return Err(PlanError::UnsupportedExpression(
+					"too many column aliases for scalar function in FROM".into(),
+				));
+			}
+			let first_name = aliases.first().cloned().unwrap_or_else(|| exposed.clone());
+			let mut targets = vec![BoundTarget {
+				expr: bound,
+				alias: Some(first_name.clone()),
+				is_wildcard: false,
+				table_wildcard: None,
+			}];
+			let mut columns = vec![first_name];
+			if *with_ordinality {
+				let name = aliases.get(1).cloned().unwrap_or_else(|| "ordinality".into());
+				if columns.contains(&name) {
+					return Err(PlanError::UnsupportedExpression(
+						"duplicate function output names; use distinct aliases".into(),
+					));
+				}
+				columns.push(name.clone());
+				targets.push(BoundTarget {
+					expr: BoundExpr::Literal(BoundLiteral::Integer(1)),
+					alias: Some(name),
+					is_wildcard: false,
+					table_wildcard: None,
+				});
+			}
+			let query = BoundSelect {
+				with: None,
+				from: None,
+				where_clause: None,
+				targets,
+				group_by: Vec::new(),
+				having: None,
+				windows: Vec::new(),
+				order_by: Vec::new(),
+				limit: None,
+				offset: None,
+				distinct: None,
+				set_op: None,
+				for_update: false,
+				user_tables: Vec::new(),
+			};
+			let relation_index =
+				scope.register_subquery_with_columns(&exposed, Some(columns), policy);
+			scope.relations[relation_index].source_query = Some(Arc::new(query.clone()));
+			Ok(BoundTableSource::Subquery {
+				query: Box::new(query),
+				relation_index,
+				alias: exposed,
+			})
+		}
 		TableRef::Subquery {
 			query,
 			alias,
@@ -475,6 +581,7 @@ fn bind_table_ref(
 					policy,
 				)
 			};
+			scope.relations[relation_index].source_query = Some(Arc::new(bound_sub.clone()));
 
 			Ok(BoundTableSource::Subquery {
 				query: Box::new(bound_sub),
@@ -580,7 +687,7 @@ pub fn bind_expr(
 			_ => Ok(BoundExpr::Literal(BoundLiteral::Null)),
 		},
 		Expr::ColumnRef(col) => {
-			let bound_col = scope.resolve_column(&col.fields, policy)?;
+			let bound_col = scope.resolve_column(&col.fields, policy, catalog)?;
 			Ok(BoundExpr::Column(bound_col))
 		}
 		Expr::Param {
@@ -780,6 +887,10 @@ pub fn bind_expr(
 					relation_name: String::new(),
 					column: "*".to_string(),
 					correlation_depth: 0,
+					id_table: None,
+					link_table: None,
+					declared_type: crate::SqlType::Unknown,
+					aggregate_output: false,
 				})]
 			} else {
 				args.iter()
@@ -1058,7 +1169,7 @@ fn table_ref_contains(tr: &TableRef, table_name: &str) -> bool {
 		TableRef::Table {
 			name,
 			..
-		} => name.parts.last().map(|s| s.eq_ignore_ascii_case(table_name)).unwrap_or(false),
+		} => name.parts.last().map(|s| s == table_name).unwrap_or(false),
 		TableRef::Subquery {
 			query,
 			..

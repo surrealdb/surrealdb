@@ -50,6 +50,34 @@ fn test_print_literals() {
 }
 
 #[test]
+fn test_print_wide_integer_literals() {
+	assert_expr_roundtrip("9223372036854775808");
+	assert_expr_roundtrip("10000000000000000000");
+	assert_expr_roundtrip("123456789012345678901234567890");
+	assert_expr_roundtrip(&format!("1{}", "0".repeat(300)));
+	assert_expr_roundtrip("-9223372036854775809");
+	assert_expr_roundtrip("-9223372036854775808");
+	assert_expr_roundtrip("x = -9223372036854775808");
+	assert_expr_roundtrip("x - -9223372036854775808");
+	assert_expr_roundtrip("-9223372036854775808 / -1");
+	assert_expr_roundtrip("-(-9223372036854775808)");
+	assert_expr_roundtrip("(-9223372036854775808)::int8");
+	assert_expr_roundtrip("(-9223372036854775808)[1]");
+}
+
+#[test]
+fn test_a_negated_int8_minimum_is_not_printed_as_a_comment() {
+	for (sql, printed) in [
+		("- -9223372036854775808", "-(-9223372036854775808)"),
+		("~ -9223372036854775808", "~(-9223372036854775808)"),
+	] {
+		let ast = parse_expr(sql).unwrap_or_else(|e| panic!("failed to parse '{sql}': {e}"));
+		assert_eq!(ast.to_pgsql_string(), printed, "{sql}");
+		parse_expr(printed).unwrap_or_else(|e| panic!("failed to reparse '{printed}': {e}"));
+	}
+}
+
+#[test]
 fn test_print_precedence_and_associativity() {
 	// Precedence preservation: addition inside multiplication requires parens
 	assert_expr_roundtrip("(1 + 2) * 3");
@@ -158,4 +186,15 @@ fn test_roundtrip_misc_statements() {
 	assert_stmt_roundtrip("SHOW client_encoding");
 	assert_stmt_roundtrip("RESET ALL");
 	assert_stmt_roundtrip("EXPLAIN (analyze, verbose) SELECT 1");
+}
+
+#[test]
+fn scalar_function_tables_roundtrip() {
+	for sql in [
+		"SELECT * FROM current_schema()",
+		"SELECT * FROM pg_catalog.abs(2) AS a(n)",
+		"SELECT * FROM abs(2) WITH ORDINALITY AS a(n, ord)",
+	] {
+		assert_stmt_roundtrip(sql);
+	}
 }

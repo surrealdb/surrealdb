@@ -1,0 +1,114 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/id_key_join_literals_import.surql"]
+
+[test]
+reason = "A literal compared with the id of a joined table names a record only when it is a key. An integer or string literal names its record, and a number with an integral value (3.0, -3.0, -0.0) names the integer key it equals, as the same literal does in a WHERE clause. A number with a fraction or beyond 64 bits, a boolean and the empty string name no record: they do not match the string key that spells the same text, they do not stop the statement, and a left join keeps its row without a match."
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int three' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'text 1.5' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int three' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int three' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int minus three' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int zero' }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: 'int three' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ label: 'only', name: NONE }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: NONE }]"
+
+[[test.results]]
+value = "[{ label: 'only', name: NONE }]"
+
+[[test.results]]
+value = "[{ name: 'int three' }]"
+
+[[test.results]]
+value = "[{ name: 'int minus three' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ name: 'int three' }]"
+*/
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = 3;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = '1.5';
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = 3.0;
+
+SELECT a.label, e.name FROM a JOIN emp e ON 3.0 = e.id;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = -3.0;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = -0.0;
+
+SELECT a.label, e.name FROM a LEFT JOIN emp e ON e.id = 3.0;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = 1.5;
+
+SELECT a.label, e.name FROM a JOIN emp e ON 1.5 = e.id;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = 1e30;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = true;
+
+SELECT a.label, e.name FROM a JOIN emp e ON e.id = '';
+
+SELECT a.label, e.name FROM a LEFT JOIN emp e ON e.id = 1.5;
+
+SELECT a.label, e.name FROM a LEFT JOIN emp e ON e.id = true;
+
+SELECT a.label, e.name FROM a LEFT JOIN emp e ON e.id = '';
+
+SELECT name FROM emp WHERE id = 3.0;
+
+SELECT name FROM emp WHERE id = -3.0;
+
+SELECT name FROM emp WHERE id = 1.5;
+
+SELECT name FROM emp WHERE id = true;
+
+SELECT name FROM emp WHERE id = '';
+
+SELECT name FROM emp WHERE id = 3;

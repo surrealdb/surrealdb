@@ -117,6 +117,21 @@ impl ToPgSql for TableRef {
 				}
 				Ok(())
 			}
+			Self::Function {
+				function,
+				alias,
+				with_ordinality,
+				..
+			} => {
+				function.to_pgsql(f)?;
+				if *with_ordinality {
+					f.write_str(" WITH ORDINALITY")?;
+				}
+				if let Some(alias) = alias {
+					alias.to_pgsql(f)?;
+				}
+				Ok(())
+			}
 			Self::Subquery {
 				query,
 				alias,
@@ -420,8 +435,17 @@ impl ToPgSql for OnConflictClause {
 			}
 			f.write_str(")")?;
 		}
+		if let Some(ref predicate) = self.target_where {
+			f.write_str(" WHERE ")?;
+			predicate.to_pgsql(f)?;
+		}
 		f.write_str(" ")?;
-		self.action.to_pgsql(f)
+		self.action.to_pgsql(f)?;
+		if let Some(ref condition) = self.where_clause {
+			f.write_str(" WHERE ")?;
+			condition.to_pgsql(f)?;
+		}
+		Ok(())
 	}
 }
 
@@ -434,6 +458,10 @@ impl ToPgSql for InsertStmt {
 
 		f.write_str("INSERT INTO ")?;
 		self.relation.to_pgsql(f)?;
+		if let Some(ref alias) = self.alias {
+			f.write_str(" AS ")?;
+			print_ident(f, alias)?;
+		}
 
 		if !self.columns.is_empty() {
 			f.write_str(" (")?;

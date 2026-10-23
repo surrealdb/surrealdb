@@ -92,13 +92,13 @@ value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dnam
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ n: 2, name: 'Alice' }, { n: 1, name: 'Cara' }, { n: 1, name: 'Eve' }]"
 
 [[test.results]]
-value = "[{ n: NONE, name: 'Alice' }, { n: NONE, name: 'Bob' }, { n: NONE, name: 'Cara' }, { n: NONE, name: 'Dan' }, { n: NONE, name: 'Eve' }, { n: NONE, name: 'Finn' }, { n: NONE, name: 'Gus' }, { n: NONE, name: 'Hana' }]"
+value = "[{ n: 2, name: 'Alice' }, { n: NONE, name: 'Bob' }, { n: 1, name: 'Cara' }, { n: NONE, name: 'Dan' }, { n: 1, name: 'Eve' }, { n: NONE, name: 'Finn' }, { n: NONE, name: 'Gus' }, { n: NONE, name: 'Hana' }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ dname: 'Eng', hours: 10, label: 'dec one', name: 'Alice' }, { dname: 'Eng', hours: 10, label: 'float one', name: 'Alice' }, { dname: 'Eng', hours: 10, label: 'int one', name: 'Alice' }, { dname: 'Eng', hours: 20, label: 'dec one', name: 'Alice' }, { dname: 'Eng', hours: 20, label: 'float one', name: 'Alice' }, { dname: 'Eng', hours: 20, label: 'int one', name: 'Alice' }, { dname: 'Ops', hours: 5, label: 'two', name: 'Cara' }, { dname: 'Ops2', hours: 5, label: 'two', name: 'Cara' }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Nowhere', name: 'Finn' }]"

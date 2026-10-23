@@ -738,22 +738,46 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lex an operator symbol.
+	///
+	/// A multi-character operator does not end in `+` or `-` unless it holds a character that is
+	/// not in an SQL operator (one of `~ ! @ # % ^ & | ` ?`), so `a=-1` is `=` and `-1`, and
+	/// `a->>-1` is `->>` and `-1`. The exception is `<-`, the arrow of a graph pattern edge that
+	/// points left.
 	fn lex_operator(&mut self, start: u32) -> ParseResult<Token<'a>> {
-		while let Some(c) = self.cursor.peek() {
+		let rest = self.cursor.rest().as_bytes();
+		let mut len = 0;
+		while let Some(&byte) = rest.get(len) {
 			// Avoid eating comment starts
-			if c == '-' && self.cursor.peek_char_at(1) == Some('-') {
+			if byte == b'-' && rest.get(len + 1) == Some(&b'-') {
 				break;
 			}
-			if c == '/' && self.cursor.peek_char_at(1) == Some('*') {
+			if byte == b'/' && rest.get(len + 1) == Some(&b'*') {
 				break;
 			}
-
-			if is_operator_char(c) {
-				self.cursor.bump();
-			} else {
+			if !byte.is_ascii() || !is_operator_char(char::from(byte)) {
 				break;
+			}
+			len += 1;
+		}
+		let mut op = rest.get(..len).unwrap_or_default();
+		let is_sign = |byte: &u8| matches!(byte, b'+' | b'-');
+		let is_not_sql = |byte: &u8| {
+			matches!(byte, b'~' | b'!' | b'@' | b'#' | b'%' | b'^' | b'&' | b'|' | b'`' | b'?')
+		};
+		if let [head @ .., last] = op
+			&& is_sign(last)
+			&& !head.is_empty()
+			&& op != b"<-"
+			&& !head.iter().any(is_not_sql)
+		{
+			while let [head @ .., last] = op
+				&& is_sign(last)
+				&& !head.is_empty()
+			{
+				op = head;
 			}
 		}
+		self.cursor.advance_bytes(op.len());
 
 		let op = self.cursor.slice_from(start).unwrap_or("");
 		let span = Span::new(start, self.cursor.pos());

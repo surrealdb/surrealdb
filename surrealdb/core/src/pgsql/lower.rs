@@ -5,13 +5,16 @@ use surrealdb_pgsql::ast::stmt::{SelectStmt, Statement};
 use thiserror::Error;
 
 /// Error type for lowering failures.
+///
+/// Each variant displays as the planner's own message for the failure, so the message names the
+/// failure once, however many layers wrap it.
 #[derive(Debug, Error)]
 pub enum LowerError {
 	#[error("unsupported expression: {0}")]
 	UnsupportedExpr(String),
 	#[error("unsupported statement: {0}")]
 	UnsupportedStmt(String),
-	#[error("lowering error: {0}")]
+	#[error("{0}")]
 	Custom(String),
 }
 
@@ -32,6 +35,7 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::AggregateNotAllowed(_)
 			| surrealdb_sqlplan::PlanError::WindowNotAllowed(_)
 			| surrealdb_sqlplan::PlanError::UndefinedFunction(_)
+			| surrealdb_sqlplan::PlanError::UndefinedOperator(_)
 			| surrealdb_sqlplan::PlanError::FunctionArgumentCountMismatch {
 				..
 			}
@@ -39,6 +43,7 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::SubqueryMustHaveAlias
 			| surrealdb_sqlplan::PlanError::ParameterOutOfRange(_)
 			| surrealdb_sqlplan::PlanError::DivisionByZero
+			| surrealdb_sqlplan::PlanError::NumericValueOutOfRange
 			| surrealdb_sqlplan::PlanError::InvalidTextRepresentation(_)
 			| surrealdb_sqlplan::PlanError::NoActiveTransaction
 			| surrealdb_sqlplan::PlanError::InFailedTransaction
@@ -70,11 +75,19 @@ pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
 	}
 }
 
-/// Lower a PostgreSQL `SELECT` statement directly to a `LogicalOp` pipeline.
+/// Lower a PostgreSQL `SELECT` statement directly to a `LogicalOp` pipeline, against a
+/// catalog that describes no table.
 pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
+	lower_select_with(select, &surrealdb_sqlplan::EmptyCatalog)
+}
+
+/// Lower a PostgreSQL `SELECT` statement directly to a `LogicalOp` pipeline, against `catalog`.
+pub fn lower_select_with(
+	select: &SelectStmt,
+	catalog: &dyn surrealdb_sqlplan::BinderCatalog,
+) -> Result<LogicalOp, LowerError> {
 	let policy = surrealdb_sqlplan::DialectPolicy::postgres();
-	let catalog = surrealdb_sqlplan::EmptyCatalog;
-	let op = surrealdb_sqlplan::bind_and_lower_pgsql(select, &catalog, &policy)?;
+	let op = surrealdb_sqlplan::bind_and_lower_pgsql(select, catalog, &policy)?;
 	Ok(op)
 }
 

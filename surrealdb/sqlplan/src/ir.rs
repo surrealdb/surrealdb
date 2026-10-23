@@ -78,6 +78,16 @@ pub struct BoundTarget {
 	pub table_wildcard: Option<String>,
 }
 
+impl BoundTarget {
+	/// Whether the target is a `*` or a `t.*` over a relation whose columns the binder could not
+	/// list, so that the columns it stands for are known only from the rows that come back. A
+	/// column that is merely named `*` (written quoted) is an ordinary column.
+	pub fn is_unlisted_wildcard(&self) -> bool {
+		(self.is_wildcard || self.table_wildcard.is_some())
+			&& matches!(&self.expr, BoundExpr::Column(col) if col.column == "*")
+	}
+}
+
 /// A table reference or join tree in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BoundTableSource {
@@ -135,8 +145,31 @@ pub struct BoundColumnRef {
 	pub relation_name: String,
 	/// Column name within the relation.
 	pub column: String,
+	/// Declared SQL type, retained through direct projections, aliases and outer scopes.
+	pub declared_type: crate::SqlType,
 	/// Correlation depth: 0 for local relation, 1+ for outer scopes.
 	pub correlation_depth: usize,
+	/// The base table whose record key this reference reads.
+	///
+	/// Set only for the `id` column of a base-table relation, where the stored `id` field is the
+	/// engine's full record id and the SQL-visible value is its key. It is `None` for every other
+	/// column, and for the `id` of a derived table, subquery alias, CTE or `VALUES` list, whose
+	/// `id` is already a plain value.
+	pub id_table: Option<String>,
+	/// The table whose record links this column holds.
+	///
+	/// Set for a base-table field declared as a link to one table (`record<t>`) and retained
+	/// through direct projections and unambiguous wildcards of derived relations and CTEs. The
+	/// stored value is the link; comparisons with a key name the record of this table. Base-table
+	/// `id`, system catalog columns and computed expressions do not carry this provenance.
+	pub link_table: Option<String>,
+	/// Whether the reference reads an output column of an aggregation, from a clause that is
+	/// evaluated over the rows the aggregation produced (`HAVING`, an `ORDER BY` expression).
+	///
+	/// An `id` column read this way holds the stored record id of whichever relation was
+	/// grouped, which is absent for the group of the null-extended side of an outer join, so the
+	/// key of its record id is read through a guard.
+	pub aggregate_output: bool,
 }
 
 /// Bound literal value.

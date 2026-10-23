@@ -92,6 +92,36 @@ pub trait BinderCatalog: Send + Sync {
 	fn all_tables(&self) -> Vec<TableSchema> {
 		Vec::new()
 	}
+
+	/// A declared column type, independent of whether the table's columns can be enumerated.
+	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
+		self.get_table(schema, table)
+			.and_then(|table| {
+				table.find_column(column, false).and_then(|column| column.data_type.clone())
+			})
+			.map(|name| crate::SqlType::from_name(&name))
+			.unwrap_or(crate::SqlType::Unknown)
+	}
+
+	/// The table that column `column` of table `table` holds record links to.
+	///
+	/// A column holds links to one table when its declared type names exactly that table:
+	/// `record<t>`, `option<record<t>>` or `record<t> | none`. The answer is `None` for a table or
+	/// a column the catalog does not describe, for a `record` of several tables or of any table,
+	/// and for every other type, including a collection of links.
+	///
+	/// The table and the column are named as the lowering names them, which is the name of the
+	/// stored field, and are compared exactly: SurrealDB field names are case-sensitive, so a field
+	/// that differs from a link column only in case is not a link.
+	///
+	/// The binder and the write lowering ask for each column they resolve against a table (a column
+	/// may be asked about more than once), never for the columns of a table as a whole, so an
+	/// implementation may answer from the definition of the one column. The answer does not change
+	/// what [`BinderCatalog::get_table`] returns: a table that only has link columns described is
+	/// still an undescribed table.
+	fn link_table(&self, _schema: Option<&str>, _table: &str, _column: &str) -> Option<String> {
+		None
+	}
 }
 
 /// An empty or schemaless catalog.
@@ -113,15 +143,27 @@ impl BinderCatalog for EmptyCatalog {
 #[derive(Debug, Default, Clone)]
 pub struct MemoryCatalog {
 	tables: HashMap<(Option<String>, String), TableSchema>,
+	/// The link columns, by (schema, table, column), and the table each holds links to. Kept apart
+	/// from `tables`: describing a link column does not describe its table.
+	links: HashMap<(Option<String>, String, String), String>,
 	current_db: Option<String>,
+	column_types: HashMap<(String, String), crate::SqlType>,
 }
 
 impl MemoryCatalog {
 	pub fn new() -> Self {
 		Self {
 			tables: HashMap::new(),
+			links: HashMap::new(),
 			current_db: None,
+			column_types: HashMap::new(),
 		}
+	}
+
+	/// Supply a field's declared type without treating a schemaless table as a closed schema.
+	pub fn with_column_type(mut self, table: &str, column: &str, ty: crate::SqlType) -> Self {
+		self.column_types.insert((table.to_owned(), column.to_owned()), ty);
+		self
 	}
 
 	/// Set the active database name.
@@ -139,6 +181,30 @@ impl MemoryCatalog {
 	pub fn add_table(&mut self, schema: TableSchema) {
 		let key = (schema.schema.clone(), schema.name.clone());
 		self.tables.insert(key, schema);
+	}
+
+	/// Declare that column `column` of the schema-less table `table` holds record links to the
+	/// table `target`, whether the table is named bare or qualified. The table itself stays as
+	/// described (or undescribed) as it was.
+	pub fn with_link(mut self, table: &str, column: &str, target: &str) -> Self {
+		self.add_link(None, table, column, target);
+		self
+	}
+
+	/// Declare that column `column` of table `table` in `schema` holds record links to the table
+	/// `target`.
+	pub fn add_link(
+		&mut self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+		target: &str,
+	) -> &mut Self {
+		self.links.insert(
+			(schema.map(str::to_string), table.to_string(), column.to_string()),
+			target.to_string(),
+		);
+		self
 	}
 
 	/// Helper to define a table quickly.
@@ -182,6 +248,41 @@ impl BinderCatalog for MemoryCatalog {
 					return Some(tbl.clone());
 				}
 			}
+		}
+		None
+	}
+
+	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
+		self.column_types.get(&(table.to_owned(), column.to_owned())).copied().unwrap_or_else(
+			|| {
+				self.get_table(schema, table)
+					.and_then(|table| {
+						table.find_column(column, false).and_then(|column| column.data_type.clone())
+					})
+					.map(|name| crate::SqlType::from_name(&name))
+					.unwrap_or(crate::SqlType::Unknown)
+			},
+		)
+	}
+
+	fn link_table(&self, schema: Option<&str>, table: &str, column: &str) -> Option<String> {
+		let key = (schema.map(str::to_string), table.to_string(), column.to_string());
+		if let Some(target) = self.links.get(&key) {
+			return Some(target.clone());
+		}
+		// A link declared without a schema belongs to the table whatever qualifier names it: a
+		// qualified name (`public.emp`, `db.emp`) reads the same table of the current database.
+		if schema.is_some()
+			&& let Some(target) = self.links.get(&(None, table.to_string(), column.to_string()))
+		{
+			return Some(target.clone());
+		}
+		// A bare table is the table of the `public` schema, as `get_table` reads it.
+		if schema.is_none() {
+			return self
+				.links
+				.get(&(Some("public".to_string()), table.to_string(), column.to_string()))
+				.cloned();
 		}
 		None
 	}
