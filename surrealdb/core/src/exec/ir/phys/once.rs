@@ -12,7 +12,9 @@
 //!   recursion or raise, a call only of a builtin that is not an index function, and no literal
 //!   standing for a `KNN` operator no search answers, which reads the row as that operator does.
 //! - Its effects are deterministic and read neither the row nor stored data.
-//! - Every conjunct written before it that stays per row is total ([`conjunct::judge`]).
+//! - Every conjunct written before it that stays per row is total ([`conjunct::judge`]), and once
+//!   any earlier conjunct stays per row, the conjunct moved to `once` must itself be infallible so
+//!   short-circuit failure order is preserved.
 //! - Its tree can be rehomed beside the filter ([`can_rehome`]): every value it reads that it does
 //!   not compute is visible there. A value it shares with a conjunct judged per row stays where it
 //!   is, and is visible beside the filter only when it is computed outside the predicate.
@@ -36,13 +38,14 @@ use surrealdb_types::ToSql;
 
 use super::conjunct::{self, Site, def_op};
 use super::ops::PhysOp;
-use crate::exec::ir::analysis::effects;
+use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::fxhash::FxHashSet;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::{ancestors, ops_in};
+use crate::exec::ir::egraph::guards;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::iface::catalog::PhysCx;
@@ -85,7 +88,10 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		// Whether every conjunct left per row so far is total.
 		let mut total = true;
 		for value in &chain {
-			if total && row_independent(ir, facts, cx, *value) && rehomes(ir, filter, *value) {
+			if total
+				&& row_independent(ir, facts, cx, *value, !kept.is_empty())
+				&& rehomes(ir, filter, *value)
+			{
 				once.push(*value);
 			} else {
 				total &= conjunct::judge(ir, *value).total;
@@ -122,8 +128,16 @@ fn movable(ir: &Ir, chain: &[ValueId]) -> bool {
 }
 
 /// Whether the conjunct `value` answers the same at every row of a run of the statement, by the
-/// rules of the module.
-fn row_independent(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, value: ValueId) -> bool {
+/// rules of the module. When `must_be_infallible` holds, every op of its tree must also be
+/// infallible so moving it ahead of an earlier per-row conjunct cannot raise an error on a row
+/// that conjunct rejects.
+fn row_independent(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &PhysCx<'_>,
+	value: ValueId,
+	must_be_infallible: bool,
+) -> bool {
 	let Some(root) = def_op(ir, value) else {
 		return false;
 	};
@@ -170,9 +184,11 @@ fn row_independent(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, value: Value
 	}
 	tree.iter().all(|op| {
 		let answer = effects::of_with(ir, facts, &cx.effects, *op);
+		let class = answer.fallibility.union(fallibility::floor(answer.set));
 		answer.determinism == Determinism::Deterministic
 			&& answer.set.is_deterministic()
 			&& !answer.set.intersects(EffectSet::READS_ROW.union(EffectSet::READS_DATA))
+			&& (!must_be_infallible || guards::infallible(class))
 	})
 }
 
@@ -337,7 +353,7 @@ fn split(
 	let (_, body) =
 		rw.create_region(filter, RegionKind::Clause(ClauseRole::Where), &[TypeKnowledge::Unknown])?;
 	let judged = rw.derived(&[filter], |rw| {
-		crate::exec::ir::passes::rehome::rebuild_and_chain(rw, InsertPoint::End(body), once)
+		crate::exec::ir::passes::rehome::rebuild_lazy_and_chain(rw, InsertPoint::End(body), once)
 	})?;
 	let close = OpSpec {
 		kind: OpKind::Expr(ExprOp::Yield),
@@ -349,4 +365,296 @@ fn split(
 	};
 	rw.derived(&[filter], |rw| rw.create(InsertPoint::End(body), close))?;
 	conjunct::keep_per_row(&mut rw, site, kept)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::function::FunctionRegistry;
+	use crate::exec::ir::core::ir::IrScope;
+	use crate::exec::ir::expr::ops::ShortCircuitOp;
+	use crate::exec::ir::iface::catalog::{
+		EffectCx, PhysicalCatalog, SemanticCatalog, default_config,
+	};
+	use crate::exec::ir::iface::frame::FrameTable;
+	use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
+	use crate::exec::ir::iface::loc::SourceLoc;
+	use crate::expr::BinaryOperator;
+	use crate::val::Value;
+
+	struct EmptyCatalog;
+	impl SemanticCatalog for EmptyCatalog {}
+	impl PhysicalCatalog for EmptyCatalog {}
+
+	fn build_filter_with_rhs(rhs_kind: ExprOp, rhs_operands_fn: impl FnOnce(&mut Rewriter<'_>, crate::exec::ir::iface::ids::BlockId) -> SmallVec<[ValueId; 4]>) -> (Ir, OpId) {
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let mut facts = FactCache::new();
+		let top = ir.region(ir.top()).expect("top").blocks[0];
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let src = rw
+			.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true)))),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("src");
+		let src_val = rw.ir().op(src).expect("src").results[0];
+		let filter = rw
+			.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Phys(PhysOp::Filter),
+					operands: smallvec![src_val],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("filter");
+		let (_, block) = rw
+			.create_region(
+				filter,
+				RegionKind::Clause(ClauseRole::Where),
+				&[TypeKnowledge::Unknown],
+			)
+			.expect("where region");
+		let row = rw.ir().block(block).expect("where block").args[0];
+		let field_a = rw
+			.create(
+				InsertPoint::End(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Field {
+						name: "a".into(),
+					}),
+					operands: smallvec![row],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("field");
+		let field_a_val = rw.ir().op(field_a).expect("field").results[0];
+		let one = rw
+			.create(
+				InsertPoint::End(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("one");
+		let one_val = rw.ir().op(one).expect("one").results[0];
+		let lhs = rw
+			.create(
+				InsertPoint::End(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Binary {
+						op: BinaryOperator::Equal,
+					}),
+					operands: smallvec![field_a_val, one_val],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("lhs");
+		let lhs_val = rw.ir().op(lhs).expect("lhs").results[0];
+		let and_op = rw
+			.create(
+				InsertPoint::End(block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::ShortCircuit {
+						op: ShortCircuitOp::And,
+					}),
+					operands: smallvec![lhs_val],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("and");
+		let (_, lazy_block) = rw
+			.create_region(and_op, RegionKind::LazyOperand, &[])
+			.expect("lazy");
+		let rhs_operands = rhs_operands_fn(&mut rw, lazy_block);
+		let rhs = rw
+			.create(
+				InsertPoint::End(lazy_block),
+				OpSpec {
+					kind: OpKind::Expr(rhs_kind),
+					operands: rhs_operands,
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("rhs");
+		let rhs_val = rw.ir().op(rhs).expect("rhs").results[0];
+		rw.create(
+			InsertPoint::End(lazy_block),
+			OpSpec {
+				kind: OpKind::Expr(ExprOp::Yield),
+				operands: smallvec![rhs_val],
+				results: SmallVec::new(),
+				frame: FrameId::ROOT,
+				snapshot: SnapshotId::CURRENT,
+				loc: SourceLoc::NONE,
+			},
+		)
+		.expect("lazy yield");
+		let and_val = rw.ir().op(and_op).expect("and").results[0];
+		rw.create(
+			InsertPoint::End(block),
+			OpSpec {
+				kind: OpKind::Expr(ExprOp::Yield),
+				operands: smallvec![and_val],
+				results: SmallVec::new(),
+				frame: FrameId::ROOT,
+				snapshot: SnapshotId::CURRENT,
+				loc: SourceLoc::NONE,
+			},
+		)
+		.expect("where yield");
+		(ir, filter)
+	}
+
+	#[test]
+	fn once_keeps_fallible_conjunct_per_row_after_kept_conjunct() {
+		let registry = FunctionRegistry::new();
+		let catalog = EmptyCatalog;
+		let frames = FrameTable::new();
+		let cx = PhysCx {
+			effects: EffectCx {
+				registry: &registry,
+				catalog: &catalog,
+				frames: &frames,
+			},
+			physical: &catalog,
+			config: default_config(),
+		};
+
+		// `row.a = 1 AND (1 / 0)`: `1 / 0` is row-independent but fallible, and follows `row.a = 1`,
+		// so it must not move to the `once` region ahead of `row.a = 1`.
+		let (mut ir, filter) = build_filter_with_rhs(
+			ExprOp::Binary {
+				op: BinaryOperator::Divide,
+			},
+			|rw, lazy_block| {
+				let n1 = rw
+					.create(
+						InsertPoint::End(lazy_block),
+						OpSpec {
+							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
+							operands: SmallVec::new(),
+							results: smallvec![TypeKnowledge::Unknown],
+							frame: FrameId::ROOT,
+							snapshot: SnapshotId::CURRENT,
+							loc: SourceLoc::NONE,
+						},
+					)
+					.expect("n1");
+				let n0 = rw
+					.create(
+						InsertPoint::End(lazy_block),
+						OpSpec {
+							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(0i64)))),
+							operands: SmallVec::new(),
+							results: smallvec![TypeKnowledge::Unknown],
+							frame: FrameId::ROOT,
+							snapshot: SnapshotId::CURRENT,
+							loc: SourceLoc::NONE,
+						},
+					)
+					.expect("n0");
+				smallvec![
+					rw.ir().op(n1).expect("n1").results[0],
+					rw.ir().op(n0).expect("n0").results[0]
+				]
+			},
+		);
+		let mut facts = FactCache::new();
+		let changed = run(&mut ir, &mut facts, &cx).expect("once runs");
+		assert_eq!(changed, 0);
+		assert_eq!(ir.op(filter).expect("filter").regions.len(), 1);
+	}
+
+	#[test]
+	fn once_moves_infallible_conjunct_ahead_of_total_kept_conjunct() {
+		let registry = FunctionRegistry::new();
+		let catalog = EmptyCatalog;
+		let frames = FrameTable::new();
+		let cx = PhysCx {
+			effects: EffectCx {
+				registry: &registry,
+				catalog: &catalog,
+				frames: &frames,
+			},
+			physical: &catalog,
+			config: default_config(),
+		};
+
+		// `row.a = 1 AND (1 = 2)`: `1 = 2` is row-independent and infallible, so it can move to
+		// the `once` region after a total per-row conjunct.
+		let (mut ir, filter) = build_filter_with_rhs(
+			ExprOp::Binary {
+				op: BinaryOperator::Equal,
+			},
+			|rw, lazy_block| {
+				let n1 = rw
+					.create(
+						InsertPoint::End(lazy_block),
+						OpSpec {
+							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
+							operands: SmallVec::new(),
+							results: smallvec![TypeKnowledge::Unknown],
+							frame: FrameId::ROOT,
+							snapshot: SnapshotId::CURRENT,
+							loc: SourceLoc::NONE,
+						},
+					)
+					.expect("n1");
+				let n2 = rw
+					.create(
+						InsertPoint::End(lazy_block),
+						OpSpec {
+							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(2i64)))),
+							operands: SmallVec::new(),
+							results: smallvec![TypeKnowledge::Unknown],
+							frame: FrameId::ROOT,
+							snapshot: SnapshotId::CURRENT,
+							loc: SourceLoc::NONE,
+						},
+					)
+					.expect("n2");
+				smallvec![
+					rw.ir().op(n1).expect("n1").results[0],
+					rw.ir().op(n2).expect("n2").results[0]
+				]
+			},
+		);
+		let mut facts = FactCache::new();
+		let changed = run(&mut ir, &mut facts, &cx).expect("once runs");
+		assert_eq!(changed, 1);
+		assert_eq!(ir.op(filter).expect("filter").regions.len(), 2);
+	}
 }

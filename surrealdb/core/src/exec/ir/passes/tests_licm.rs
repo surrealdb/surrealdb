@@ -370,23 +370,24 @@ async fn a_field_guard_holds_no_candidate() {
 	assert!(candidates(&ir, &mut FactCache::new(), &env.cx(), stmt).is_empty());
 }
 
-/// The invariant conjunct that raises moves in front of the row conjunct written before it.
+/// An infallible invariant conjunct moves in front of a total row conjunct written before it,
+/// rebuilding the predicate as a lazy `AND` chain.
 #[tokio::test]
-async fn hoist_leading_reorders_like_main() {
+async fn hoist_leading_reorders_infallible_invariant_ahead_of_total_row_conjunct() {
 	let env = Env::new();
-	let mut ir = bind(FIRST_USE).await;
+	let mut ir = bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 1").await;
 	let before = where_chain(&ir);
 	assert_eq!(before.len(), 2);
-	assert!(!computes(&ir, before[0], CONVERT));
-	assert!(computes(&ir, before[1], CONVERT));
+	let doc = OpTag::Expr(ExprTag::Doc);
+	assert!(computes(&ir, before[0], doc));
+	assert!(!computes(&ir, before[1], doc));
 
 	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 1);
 	let after = where_chain(&ir);
 	assert_eq!(after.len(), 2);
-	assert!(computes(&ir, after[0], CONVERT));
-	assert!(!computes(&ir, after[1], CONVERT));
-	assert_eq!(after[1], before[0], "the row conjunct is read where it was computed");
+	assert!(!computes(&ir, after[0], doc));
+	assert!(computes(&ir, after[1], doc));
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 
 	let again = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
@@ -398,7 +399,7 @@ async fn hoist_leading_reorders_like_main() {
 async fn hoist_leading_off_keeps_written_order() {
 	let env = Env::new();
 	let cx = env.cx();
-	let mut ir = bind(FIRST_USE).await;
+	let mut ir = bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 1").await;
 	let before = printed(&ir);
 	let cfg = PassConfig {
 		hoist_leading: false,
@@ -420,43 +421,54 @@ async fn hoist_leading_off_keeps_written_order() {
 	assert_eq!(printed(&ir), before);
 }
 
-/// An invariant conjunct that cannot raise and is written before one that can stays in front of
-/// it: the later one is judged only when the earlier one holds.
+/// An invariant conjunct that cannot raise moves ahead of an earlier total row conjunct, while a
+/// subsequent fallible invariant conjunct stays behind the row conjunct so a rejected row never
+/// raises its error.
 #[tokio::test]
 async fn hoist_leading_keeps_a_guarding_conjunct_ahead() {
+	let env = Env::new();
 	let mut ir =
 		bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 0 AND <int>'x' = 1").await;
 	let before = where_chain(&ir);
 	assert_eq!(before.len(), 3);
+	let doc = OpTag::Expr(ExprTag::Doc);
 
 	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 1);
 	let after = where_chain(&ir);
 	assert_eq!(after.len(), 3);
+	assert!(!computes(&ir, after[0], doc));
 	assert!(!computes(&ir, after[0], CONVERT));
-	assert_ne!(after[0], before[0]);
-	assert!(computes(&ir, after[1], CONVERT));
-	assert_eq!(after[2], before[0]);
+	assert!(computes(&ir, after[1], doc));
+	assert!(computes(&ir, after[2], CONVERT));
+	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 }
 
-/// An invariant conjunct that cannot raise gains nothing at the front while no memo is placed.
+/// A fallible invariant conjunct written after a per-row conjunct stays behind it so a row the
+/// per-row conjunct rejects does not raise.
 #[tokio::test]
-async fn hoist_leading_leaves_an_infallible_conjunct_in_place() {
-	let mut ir = bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 1").await;
+async fn hoist_leading_leaves_a_fallible_conjunct_behind_row_conjunct() {
+	let mut ir = bind(FIRST_USE).await;
 	let before = printed(&ir);
 	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 0);
 	assert_eq!(printed(&ir), before);
 }
 
-/// A row conjunct that may raise stays ahead of every invariant conjunct written after it.
+/// A row conjunct that may raise (directly or inside a nested region) stays ahead of every
+/// invariant conjunct written after it.
 #[tokio::test]
 async fn hoist_leading_stops_at_a_fallible_row_conjunct() {
-	let mut ir = bind("SELECT VALUE $this FROM [1] WHERE 1 + $this = 2 AND <int>'x' = 1").await;
-	let before = printed(&ir);
-	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
-	assert_eq!(report.rewrites, 0);
-	assert_eq!(printed(&ir), before);
+	for query in [
+		"SELECT VALUE $this FROM [1] WHERE 1 + $this = 2 AND 1 = 1",
+		"SELECT VALUE $this FROM [1] WHERE ($this = 2 OR <int>$this = 1) AND 1 = 1",
+	] {
+		let mut ir = bind(query).await;
+		let before = printed(&ir);
+		let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
+		assert_eq!(report.rewrites, 0, "query: {query}");
+		assert_eq!(printed(&ir), before, "query: {query}");
+	}
 }
 
 /// Without a memo op the pass places nothing and counts every candidate.

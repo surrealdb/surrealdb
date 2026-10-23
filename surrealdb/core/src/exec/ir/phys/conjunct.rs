@@ -760,3 +760,234 @@ pub(super) fn drop_conjuncts(
 	retire(rw, &spine, dropped)?;
 	Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::ir::core::facts::FactCache;
+	use crate::exec::ir::core::ir::IrScope;
+	use crate::exec::ir::expr::ops::{ConvertAttrs, ConvertMode, ConvertSite, OnFail};
+	use crate::exec::ir::iface::ids::{BlockId, FrameId, SnapshotId};
+	use crate::exec::ir::iface::loc::SourceLoc;
+	use crate::exec::ir::iface::types::TypeKnowledge;
+	use crate::expr::Kind;
+	use crate::expr::logical::LogicalPostfixOperator;
+
+	fn make_where_ir() -> (Ir, BlockId, ValueId) {
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let mut facts = FactCache::new();
+		let top = ir.region(ir.top()).expect("top").blocks[0];
+		let filter = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let src = rw
+				.create(
+					InsertPoint::End(top),
+					OpSpec {
+						kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true)))),
+						operands: SmallVec::new(),
+						results: smallvec![TypeKnowledge::Unknown],
+						frame: FrameId::ROOT,
+						snapshot: SnapshotId::CURRENT,
+						loc: SourceLoc::NONE,
+					},
+				)
+				.expect("src");
+			let src_val = rw.ir().op(src).expect("src").results[0];
+			rw.create(
+				InsertPoint::End(top),
+				OpSpec {
+					kind: OpKind::Phys(PhysOp::Filter),
+					operands: smallvec![src_val],
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("filter")
+		};
+		let mut rw = Rewriter::new(&mut ir, &mut facts);
+		let (_, block) = rw
+			.create_region(
+				filter,
+				RegionKind::Clause(ClauseRole::Where),
+				&[TypeKnowledge::Unknown],
+			)
+			.expect("where region");
+		let row = rw.ir().block(block).expect("where block").args[0];
+		(ir, block, row)
+	}
+
+	fn emit(ir: &mut Ir, at: InsertPoint, kind: ExprOp, operands: &[ValueId]) -> ValueId {
+		let mut facts = FactCache::new();
+		let mut rw = Rewriter::new(ir, &mut facts);
+		let op = rw
+			.create(
+				at,
+				OpSpec {
+					kind: OpKind::Expr(kind),
+					operands: operands.iter().copied().collect(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("emit op");
+		rw.ir().op(op).expect("op").results[0]
+	}
+
+	#[test]
+	fn judge_inspects_nested_regions_for_totality_and_cost() {
+		let (mut ir, block, row) = make_where_ir();
+		let field_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Field {
+				name: "a".into(),
+			},
+			&[row],
+		);
+		let one =
+			emit(&mut ir, InsertPoint::End(block), ExprOp::Literal(Box::new(Value::from(1i64))), &[]);
+		let zero =
+			emit(&mut ir, InsertPoint::End(block), ExprOp::Literal(Box::new(Value::from(0i64))), &[]);
+		let eq_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Binary {
+				op: BinaryOperator::Equal,
+			},
+			&[field_a, one],
+		);
+
+		// `a = 1 OR (1 / 0 = 1)`: the fallible division inside the lazy `OR` region makes the
+		// whole conjunct non-total.
+		let or_fallible = {
+			let mut facts = FactCache::new();
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let or_op = rw
+				.create(
+					InsertPoint::End(block),
+					OpSpec {
+						kind: OpKind::Expr(ExprOp::ShortCircuit {
+							op: ShortCircuitOp::Or,
+						}),
+						operands: smallvec![eq_a],
+						results: smallvec![TypeKnowledge::Unknown],
+						frame: FrameId::ROOT,
+						snapshot: SnapshotId::CURRENT,
+						loc: SourceLoc::NONE,
+					},
+				)
+				.expect("or op");
+			let (_, rhs_block) = rw
+				.create_region(or_op, RegionKind::LazyOperand, &[])
+				.expect("lazy region");
+			let div = rw
+				.create(
+					InsertPoint::End(rhs_block),
+					OpSpec {
+						kind: OpKind::Expr(ExprOp::Binary {
+							op: BinaryOperator::Divide,
+						}),
+						operands: smallvec![one, zero],
+						results: smallvec![TypeKnowledge::Unknown],
+						frame: FrameId::ROOT,
+						snapshot: SnapshotId::CURRENT,
+						loc: SourceLoc::NONE,
+					},
+				)
+				.expect("div");
+			let div_val = rw.ir().op(div).expect("div").results[0];
+			rw.create(
+				InsertPoint::End(rhs_block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::Yield),
+					operands: smallvec![div_val],
+					results: SmallVec::new(),
+					frame: FrameId::ROOT,
+					snapshot: SnapshotId::CURRENT,
+					loc: SourceLoc::NONE,
+				},
+			)
+			.expect("yield");
+			rw.ir().op(or_op).expect("or").results[0]
+		};
+		assert_eq!(
+			judge(&ir, or_fallible),
+			Judgement {
+				total: false,
+				class: CostClass::Field,
+			}
+		);
+	}
+
+	#[test]
+	fn judge_distinguishes_total_not_from_fallible_prefix_postfix_each_and_convert() {
+		let (mut ir, block, row) = make_where_ir();
+		let field_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Field {
+				name: "a".into(),
+			},
+			&[row],
+		);
+
+		let not_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Prefix(Box::new(PrefixOperator::Not)),
+			&[field_a],
+		);
+		assert!(judge(&ir, not_a).total);
+
+		let neg_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Prefix(Box::new(PrefixOperator::Negate)),
+			&[field_a],
+		);
+		assert!(!judge(&ir, neg_a).total);
+
+		let pos_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Prefix(Box::new(PrefixOperator::Positive)),
+			&[field_a],
+		);
+		assert!(!judge(&ir, pos_a).total);
+
+		let postfix_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Postfix {
+				op: LogicalPostfixOperator::Range,
+			},
+			&[field_a],
+		);
+		assert!(!judge(&ir, postfix_a).total);
+
+		let each_a = emit(&mut ir, InsertPoint::End(block), ExprOp::Each, &[field_a]);
+		assert!(!judge(&ir, each_a).total);
+
+		let convert_a = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Convert(Box::new(ConvertAttrs {
+				mode: ConvertMode::Cast,
+				kind: Kind::Int,
+				site: ConvertSite(0),
+				on_fail: OnFail::Error,
+			})),
+			&[field_a],
+		);
+		assert!(!judge(&ir, convert_a).total);
+	}
+}

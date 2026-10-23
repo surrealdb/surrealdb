@@ -9,16 +9,16 @@
 //!   candidate the container cannot memoise is left as it is and counted as unapplied. The count is
 //!   kept in the pass report.
 //! - [`HoistLeadingConjuncts`] reorders the `AND` chain of a plain `WHERE` filter or of a table
-//!   permission predicate so that the loop-invariant conjuncts stand at its front. It moves a
-//!   conjunct only ahead of conjuncts that raise nothing, have no effect and read nothing beyond
-//!   the row, so the only observable difference is that an invariant conjunct that raises does so
-//!   for every row, including a row an earlier total conjunct rejects.
+//!   permission predicate so that the loop-invariant conjuncts stand at its front. It moves an
+//!   invariant conjunct past an earlier per-row conjunct only when the earlier conjunct is total
+//!   (raises nothing, has no effect and reads nothing beyond the row) and the invariant conjunct
+//!   itself cannot raise, so short-circuit failure semantics are preserved.
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::cmp::Reverse;
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport, PassRun};
-use super::rehome::{and_chain, can_rehome, rebuild_and_chain};
+use super::rehome::{and_chain, can_rehome, rebuild_lazy_and_chain};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
 use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in, outermost_scope};
 use crate::exec::ir::analysis::{effects, fallibility};
@@ -42,11 +42,6 @@ use crate::exec::ir::op_kind::{OpKind, OpTag};
 /// The most memo candidates one statement offers. Past it, the candidates with the fewest ops are
 /// left unmemoised.
 pub(crate) const MAX_MEMOS_PER_STATEMENT: usize = 256;
-
-/// Whether [`place_memo`] places memos. An invariant conjunct that cannot raise gains nothing by
-/// moving ahead of the per-row conjuncts unless it is then evaluated once, so such a conjunct
-/// moves only while this holds. It must agree with [`place_memo`].
-const MEMO_PLACEABLE: bool = false;
 
 /// A maximal loop-invariant subexpression worth evaluating once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,15 +155,11 @@ impl LoPass for Licm {
 ///
 /// Applies to the `AND` chain of a `logical.filter` over a loop whose body holds no permission
 /// filter and no projection layer, and to the predicate of every `logical.permission_filter`. A
-/// conjunct is eligible when it is invariant in the enclosing loop and every conjunct written
-/// before it that is not eligible is total: infallible, effect-free and reading nothing beyond the
-/// row. The eligible conjuncts keep their written order and move to the front, and the others
-/// follow in their written order. An eligible conjunct that raises therefore raises for every row,
-/// including a row a conjunct written before it rejects.
-///
-/// An eligible conjunct that cannot raise gains nothing at the front unless a memo covers it.
-/// The front is then the eligible conjuncts up to the last one that may raise, and an eligible
-/// conjunct after that one stays where it is.
+/// conjunct is eligible when it is invariant in the enclosing loop, every conjunct written before
+/// it that is not eligible is total (infallible, effect-free and reading nothing beyond the row),
+/// and once any non-eligible conjunct precedes it, the invariant conjunct itself is infallible.
+/// The eligible conjuncts keep their written order and move to the front, and the others follow in
+/// their written order.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HoistLeadingConjuncts;
 
@@ -636,6 +627,20 @@ fn computing_ops(ir: &Ir, value: ValueId) -> Vec<OpId> {
 				pending.push(def);
 			}
 		}
+		for region in &data.regions {
+			for inner in ops_in(ir, *region) {
+				let Some(inner_data) = ir.op(inner) else {
+					continue;
+				};
+				for operand in &inner_data.operands {
+					if let Some(def) = def_op(ir, *operand)
+						&& ir.op(def).is_some_and(|held| held.parent == block)
+					{
+						pending.push(def);
+					}
+				}
+			}
+		}
 	}
 	let Some(held) = ir.block(block) else {
 		return Vec::new();
@@ -681,19 +686,19 @@ fn hoisted_order(
 	site: &Site,
 	chain: &[ValueId],
 ) -> Option<Vec<ValueId>> {
-	// The position of each eligible conjunct, with whether it cannot raise.
-	let mut eligible: Vec<(usize, bool)> = Vec::new();
+	let mut moved: Vec<usize> = Vec::new();
+	let mut stays = false;
 	for (position, value) in chain.iter().enumerate() {
 		let verdict = judge(ir, facts, cx, *value);
-		if invariant(ir, *value, site.loop_op) {
-			eligible.push((position, verdict.infallible));
-		} else if !verdict.total() {
+		if invariant(ir, *value, site.loop_op) && (!stays || verdict.infallible) {
+			moved.push(position);
+		} else if verdict.total() {
+			stays = true;
+		} else {
 			break;
 		}
 	}
-	let last = eligible.iter().rposition(|(_, infallible)| MEMO_PLACEABLE || !infallible)?;
-	let moved: Vec<usize> = eligible[..=last].iter().map(|(position, _)| *position).collect();
-	if moved.iter().enumerate().all(|(slot, position)| slot == *position) {
+	if moved.is_empty() || moved.iter().enumerate().all(|(slot, position)| slot == *position) {
 		return None;
 	}
 	let front = moved.iter().map(|position| chain[*position]);
@@ -705,18 +710,19 @@ fn hoisted_order(
 	Some(front.chain(rest).collect())
 }
 
-/// Whether every conjunct of `order` can stand before the clause's yield: one defined in the
-/// yield's block is read where it is, and any other passes the checks of a move.
+/// Whether every conjunct of `order` can stand before the clause's yield: one at the front that is
+/// already defined in the yield's block is read where it is, and every other conjunct is read by
+/// the chain alone and passes the checks of a move into its lazy region.
 fn can_place(ir: &Ir, site: &Site, order: &[ValueId]) -> bool {
 	let Some(block) = ir.op(site.yielded).map(|data| data.parent) else {
 		return false;
 	};
-	order.iter().all(|value| {
-		let Some(def) = def_op(ir, *value) else {
-			return true;
-		};
-		ir.op(def).is_some_and(|data| data.parent == block)
-			|| can_rehome(ir, def, InsertPoint::Before(site.yielded), &[])
+	order.iter().enumerate().all(|(slot, value)| {
+		ir.uses(*value).len() == 1
+			&& def_op(ir, *value).is_none_or(|def| {
+				(slot == 0 && ir.op(def).is_some_and(|data| data.parent == block))
+					|| can_rehome(ir, def, InsertPoint::Before(site.yielded), &[])
+			})
 	})
 }
 
@@ -754,7 +760,7 @@ fn hoist_at(cx: &mut LoCx<'_>, op: OpId) -> Result<bool, IrError> {
 	let chain = and_chain(cx.ir, site.predicate);
 	if chain.len() < 2 {
 		return Ok(false);
-	}
+	};
 	let Some(order) = hoisted_order(&*cx.ir, &mut *cx.facts, cx.effects, &site, &chain) else {
 		return Ok(false);
 	};
@@ -763,7 +769,7 @@ fn hoist_at(cx: &mut LoCx<'_>, op: OpId) -> Result<bool, IrError> {
 	}
 	let spine = chain_spine(cx.ir, site.predicate);
 	let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);
-	let rebuilt = rebuild_and_chain(&mut rw, InsertPoint::Before(site.yielded), &order)?;
+	let rebuilt = rebuild_lazy_and_chain(&mut rw, InsertPoint::Before(site.yielded), &order)?;
 	rw.set_operand(site.yielded, 0, rebuilt)?;
 	for gate in spine {
 		if rw.ir().op(gate).is_none() {
