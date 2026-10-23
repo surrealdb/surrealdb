@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::conn::ctx;
 use crate::method::live::spawn;
-use crate::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Update, Upsert};
+use crate::method::{Api, Cancel, Commit, Create, Delete, Insert, Query, Select, Update, Upsert};
 use crate::opt::{CreateResource, IntoResource};
 use crate::{Connection, OnceLockExt, Surreal};
 
@@ -113,6 +113,14 @@ where
 	/// authentication, and variables.
 	pub fn client(&self) -> &Surreal<C> {
 		&self.client
+	}
+
+	/// See [Surreal::api]. Every call made from the handle runs inside this
+	/// transaction.
+	pub fn api(&self) -> Api<'_, C> {
+		let mut api = self.client.api();
+		api.txn = Some(self.id);
+		api
 	}
 
 	/// See [Surreal::query]

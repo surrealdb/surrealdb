@@ -41,6 +41,7 @@ macro_rules! include_tests {
 	};
 }
 
+mod api;
 mod backup;
 // The versioned suites run only on backends that still support native
 // versioning; the memory backend dropped it in the surrealmx 0.23 upgrade.
@@ -155,7 +156,7 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -196,7 +197,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -409,7 +410,7 @@ mod ws {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -669,7 +670,7 @@ mod mem {
 		);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -756,7 +757,7 @@ mod surrealkv {
 		panic!("the datastore was never released: {last:?}");
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -790,7 +791,7 @@ mod tikv {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -846,5 +847,5 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
+	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }

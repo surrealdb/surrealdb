@@ -14,6 +14,7 @@ use crate::{Connect, Connection, OnceLockExt, SessionClone, Surreal};
 pub(crate) mod live;
 pub(crate) mod query;
 
+mod api;
 mod authenticate;
 mod begin;
 mod cancel;
@@ -46,6 +47,7 @@ mod version;
 #[cfg(test)]
 mod tests;
 
+pub use api::{Api, ApiCall, ApiMethod, ApiResponse, ApiValue};
 pub use authenticate::Authenticate;
 pub use begin::{Begin, IsolationLevel};
 pub use cancel::Cancel;
@@ -1327,6 +1329,57 @@ where
 			function: function.into_fn(),
 			args: Value::None,
 			response_type: PhantomData,
+		}
+	}
+
+	/// Invokes the endpoints defined with `DEFINE API` on the selected
+	/// database.
+	///
+	/// Each call compiles to `api::invoke($path, $request)` and runs as a
+	/// query, so it is available over every engine. Awaiting a call yields the
+	/// [`ApiResponse`](crate::method::ApiResponse) whatever its status;
+	/// [`ApiCall::value`](crate::method::ApiCall::value) yields only the body
+	/// of a successful one.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # use surrealdb::types::SurrealValue;
+	/// # #[derive(SurrealValue)]
+	/// # struct User { name: String }
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.use_ns("main").use_db("main").await?;
+	///
+	/// // The whole response: status, headers and body
+	/// let response = db.api().get("/users").await?;
+	/// println!("{} {:?}", response.status, response.body);
+	///
+	/// // Only the body, decoded, failing unless the status is 2xx
+	/// let users: Vec<User> = db.api().get("/users").value().await?;
+	///
+	/// // A body, headers and query parameters
+	/// let created = db
+	///     .api()
+	///     .post("/users", User { name: "Tobie".into() })
+	///     .header("x-request-id", "42")
+	///     .query("notify", "true")
+	///     .await?;
+	///
+	/// // A prefix and headers shared by every call from one handle
+	/// let users = db.api().prefix("/users").header("x-tenant", "acme");
+	/// let one = users.get("1").await?;
+	/// let two = users.get("2").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn api(&self) -> Api<'_, C> {
+		Api {
+			client: self,
+			txn: None,
+			prefix: String::new(),
+			headers: Default::default(),
 		}
 	}
 
