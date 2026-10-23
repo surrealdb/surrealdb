@@ -1,0 +1,74 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "A scalar subquery that aggregates yields the aggregate's value in WHERE, in the select list, with HAVING or ORDER BY, correlated, nested and over no row"
+
+[[test.results]]
+value = "[{ total: 200, user_id: 1 }]"
+
+[[test.results]]
+value = "[{ n: 3, user_id: 1 }, { n: 3, user_id: 2 }, { n: 3, user_id: 3 }]"
+
+[[test.results]]
+value = "[{ m: 200 }]"
+
+[[test.results]]
+value = "[{ user_id: 1 }]"
+
+[[test.results]]
+value = "[{ none_match: 0 }]"
+
+[[test.results]]
+value = "[{ user_id: 1 }]"
+
+[[test.results]]
+value = "[{ total: 200, user_id: 1 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ s: 300 }]"
+
+[[test.results]]
+value = "[{ top: 200 }]"
+
+[[test.results]]
+value = "[{ spent: 300, uid: 1 }, { spent: 150, uid: 2 }]"
+
+[[test.results]]
+value = "[{ m: 201 }]"
+
+[[test.results]]
+value = "[{ m: 201 }]"
+
+[[test.results]]
+value = "[{ m: 201 }]"
+
+[[test.results]]
+value = "[{ x: 201 }]"
+
+[[test.results]]
+match = "$result.len() == 1 && $result[0].values() == [201]"
+*/
+
+SELECT user_id, total FROM orders WHERE total = (SELECT max(total) FROM orders);
+SELECT user_id, (SELECT count(*) FROM orders) AS n FROM users ORDER BY user_id;
+SELECT (SELECT max(total) FROM orders) AS m;
+SELECT user_id FROM orders WHERE total > (SELECT avg(total) FROM orders) ORDER BY user_id;
+SELECT (SELECT count(*) FROM orders WHERE total > 1000) AS none_match;
+SELECT user_id FROM users WHERE user_id IN (SELECT user_id FROM orders GROUP BY user_id HAVING count(*) > 1) ORDER BY user_id;
+SELECT user_id, total FROM orders WHERE total = (SELECT max(total) FROM orders GROUP BY user_id ORDER BY max(total) DESC LIMIT 1);
+SELECT user_id FROM users WHERE EXISTS (SELECT count(*) FROM orders HAVING count(*) > 5) ORDER BY user_id;
+SELECT (SELECT max(total) + (SELECT min(total) FROM orders) FROM orders) AS s;
+SELECT (SELECT total FROM orders ORDER BY total DESC LIMIT 1) AS top;
+SELECT u.user_id AS uid, (SELECT sum(o.total) FROM orders o WHERE o.user_id = u.user_id) AS spent FROM users u WHERE u.user_id < 3 ORDER BY u.user_id;
+SELECT (SELECT max(total) + 1 FROM orders HAVING count(*) > 0) AS m;
+SELECT (SELECT max(total) + 1 FROM orders ORDER BY max(total)) AS m;
+SELECT (SELECT max(total) + 1 AS x FROM orders HAVING count(*) > 0) AS m;
+SELECT max(total) + 1 AS x FROM orders HAVING count(*) > 0;
+SELECT max(total) + 1 FROM orders HAVING count(*) > 0;

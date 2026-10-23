@@ -128,6 +128,28 @@ fn lower_bound_select_internal(
 		}
 	}
 
+	// The projection after an aggregate that keeps its rows as objects reads each selected column
+	// back by `target_output_name`. A target that lowering leaves unnamed, a computed expression,
+	// is given that name so the column is found.
+	let reads_columns_by_name = is_aggregate
+		&& (aggregate_targets.len() > select.targets.len()
+			|| (as_value
+				&& select.targets.len() == 1
+				&& (select.having.is_some() || !select.order_by.is_empty())));
+	if reads_columns_by_name {
+		for t in &mut aggregate_targets {
+			if !t.is_wildcard && t.alias.is_none() && !target_names_itself(t) {
+				t.alias = Some(target_output_name(t));
+			}
+		}
+	}
+
+	// A subquery that selects one column answers with bare values. An aggregate with a HAVING or
+	// an ORDER BY keeps its rows as objects, so that those clauses read their columns, and takes
+	// the values from the one column it selects after them.
+	let value_column = as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard;
+	let as_value =
+		as_value && (!is_aggregate || (select.having.is_none() && select.order_by.is_empty()));
 	let fields = if as_value && select.targets.len() == 1 && !select.targets[0].is_wildcard {
 		let expr = lower_bound_expr(&select.targets[0].expr, policy)?;
 		let alias = select.targets[0].alias.as_ref().map(|a| OutputPath::field(a.clone()));
@@ -209,12 +231,23 @@ fn lower_bound_select_internal(
 	}
 
 	// 8. Projection
-	if matches!(fields, LogicalFields::Value { .. }) || !is_aggregate {
+	if !is_aggregate {
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields,
 			omit: vec![],
 		});
+	} else if !matches!(fields, LogicalFields::Value { .. }) && value_column {
+		op = LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Value {
+				expr: LogicalExpr::Field(target_output_name(&select.targets[0]).into()),
+				alias: None,
+			},
+			omit: vec![],
+		});
+	} else if matches!(fields, LogicalFields::Value { .. }) {
+		// The aggregate already answers with the value of the one column.
 	} else if aggregate_targets.len() > select.targets.len() {
 		let project_fields = select
 			.targets
@@ -354,6 +387,15 @@ fn target_output_name(target: &BoundTarget) -> String {
 			_ => "col".to_string(),
 		},
 	}
+}
+
+/// Whether `lower_bound_target` names the output of `target` when it has no alias.
+fn target_names_itself(target: &BoundTarget) -> bool {
+	matches!(&target.expr, BoundExpr::Column(col) if col.column != "*")
+		|| matches!(
+			&target.expr,
+			BoundExpr::FunctionCall { .. } | BoundExpr::UserVar(_) | BoundExpr::SystemVar { .. }
+		)
 }
 
 fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {

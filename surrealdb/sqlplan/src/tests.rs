@@ -943,6 +943,47 @@ fn test_set_operations_union_all_and_distinct() {
 }
 
 #[test]
+fn test_aggregate_subquery_keeps_bare_rows_unless_it_has_having_or_order_by() {
+	let policy = DialectPolicy::postgres();
+	let lower = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let bound = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None)
+			.expect("bind failed");
+		(
+			lower_bound_subquery(&bound, &policy).expect("lower failed"),
+			lower_bound_select(&bound, &policy).expect("lower failed"),
+		)
+	};
+
+	// The aggregate's rows are the values themselves; a projection over them would read the
+	// aggregated field of a row that is not an object. As a statement of its own the result keeps
+	// its column.
+	let (subquery, statement) = lower("SELECT max(total) FROM orders;");
+	assert!(matches!(subquery, LogicalOp::Aggregate(_)), "got {subquery:?}");
+	assert!(matches!(statement, LogicalOp::Project(_)), "got {statement:?}");
+
+	// With a HAVING or an ORDER BY the rows stay objects until those clauses have run, and the
+	// subquery projects its one column last.
+	for sql in [
+		"SELECT max(total) FROM orders GROUP BY user_id HAVING count(*) > 1;",
+		"SELECT max(total) FROM orders GROUP BY user_id ORDER BY max(total) DESC LIMIT 1;",
+	] {
+		let (subquery, _) = lower(sql);
+		let LogicalOp::Project(project) = &subquery else {
+			panic!("{sql}: got {subquery:?}");
+		};
+		assert!(
+			matches!(project.fields, surrealdb_expr::expr::logical::LogicalFields::Value { .. }),
+			"{sql}"
+		);
+	}
+}
+
+#[test]
 fn test_joins_multi_table_using_and_right() {
 	let mut catalog = MemoryCatalog::new();
 	catalog.add_table(
