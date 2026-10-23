@@ -406,6 +406,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::DeleteRange {
 			..
 		}
+		| StoreInstr::DiscardTableMigration {
+			..
+		}
 		| StoreInstr::BufferTableChange {
 			..
 		}

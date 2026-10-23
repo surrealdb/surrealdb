@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "Changes 11 and 12: a COMPUTED field made stored is a new field (an enforced table with rows refuses one that does not accept NONE unless it carries MIGRATE), and on an enforced table with rows a step first clears its path of whatever values were kept beneath the computed field; a stored field made COMPUTED mints a removal step on an enforced table with rows, so the stored values disappear for every reader at once; every other table accepts both, mints nothing for either and keeps the stored values."
 
@@ -135,7 +138,7 @@ value = "[{ a: 1, id: loose:1, s: 10 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

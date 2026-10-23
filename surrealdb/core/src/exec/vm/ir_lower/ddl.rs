@@ -2768,10 +2768,9 @@ impl Ddl<'_, '_> {
 			l.each_database(ns, |l, db| l.evict_database_sequences(ns, db))
 		})?;
 		self.delete("NamespaceKey", key, expunge);
-		// The table migration job's progress and requests name the namespace by id.
-		let jobs = self.object(&[("ns", Operand::Reg(ns))])?;
-		self.delete_range("TableMigrationNsPrefix", jobs, false);
-		self.delete_range("TableMigrationRequestNsPrefix", jobs, false);
+		// The table migration job's progress and requests name the namespace by an id no later
+		// namespace is given. They are left for the job, which deletes those of a namespace that
+		// is gone: deleting them here would conflict with a page of the job.
 		let (zero, empty) = self.unused_scope()?;
 		self.enqueue_reclaim(0, [Operand::Reg(ns), zero, empty, zero], expunge)?;
 		self.store(StoreInstr::ClearDatastoreCache);
@@ -2839,10 +2838,9 @@ impl Ddl<'_, '_> {
 		self.with_service(Service::Broker, |l| l.kill_database_subscriptions(ns, db))?;
 		self.with_service(Service::Sequences, |l| l.evict_database_sequences(ns, db))?;
 		self.delete("DatabaseKey", key, expunge);
-		// The table migration job's progress and requests name the database by id.
-		let jobs = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(db))])?;
-		self.delete_range("TableMigrationDbPrefix", jobs, false);
-		self.delete_range("TableMigrationRequestDbPrefix", jobs, false);
+		// The table migration job's progress and requests name the database by an id no later
+		// database is given. They are left for the job, which deletes those of a database that is
+		// gone: deleting them here would conflict with a page of the job.
 		let (zero, empty) = self.unused_scope()?;
 		self.enqueue_reclaim(1, [Operand::Reg(ns), Operand::Reg(db), empty, zero], expunge)?;
 		self.store(StoreInstr::ClearDatastoreCache);

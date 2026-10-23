@@ -602,10 +602,15 @@ impl Ddl<'_, '_> {
 		self.retire_table_indexes(ns, db, table, tb, expunge)?;
 		self.with_service(Service::Broker, |l| l.kill_table_subscriptions(ns, db, tb))?;
 		self.delete("TableKey", key, expunge);
-		// The table migration job's progress and requests, at the root, which the table's own
-		// range does not cover: its rewrite and verification end here.
-		self.delete("TableMigrationKey", key, false);
-		self.delete_range("TableMigrationRequestTbPrefix", key, false);
+		// The table migration job's progress and requests sit at the root, outside the table's
+		// own range. They are discarded through a request of their own rather than deleted, since
+		// the job writes the progress and deletes the requests: the job drops them, and a table
+		// defined again under the name inherits nothing.
+		self.store(StoreInstr::DiscardTableMigration {
+			ns,
+			db,
+			tb,
+		});
 		self.stamp(ns, db, name)?;
 		self.delete_range("TblRoot", key, expunge);
 		self.unregister_view((ns, db), name, sources, expunge)?;

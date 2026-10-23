@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "In a database at compatibility level 4 a SCHEMAFULL table refuses changes its rows might not satisfy unless they carry MIGRATE, exempts an empty table, and REMOVE FIELD drops values; a SCHEMALESS table is held to none of it, and a table made SCHEMAFULL again has its rows verified."
 

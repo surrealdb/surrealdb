@@ -487,6 +487,9 @@ pub struct RemoteProvisioner {
 	grade_send: Sender<Arc<Datastore>>,
 	grade_recv: Receiver<Arc<Datastore>>,
 	root_baseline: Arc<super::executor::RootSnapshot>,
+	/// The scratch namespace the default compatibility level is read through
+	/// ([`super::executor::probe_compatibility`]).
+	compatibility_probe: String,
 }
 
 #[cfg(feature = "remote")]
@@ -496,6 +499,7 @@ impl RemoteProvisioner {
 		endpoint: String,
 		user: String,
 		pass: String,
+		run_prefix: &str,
 	) -> Result<Self> {
 		use crate::cmd::remote::RemoteConn;
 
@@ -508,7 +512,15 @@ impl RemoteProvisioner {
 		// tests are forbidden from changing it, so one reading taken here serves
 		// every leak check for the rest of the run — and anything already on the
 		// endpoint is recorded as pre-existing rather than blamed on a test.
-		let root_baseline = Arc::new(super::executor::snapshot_root(&conns[0]).await?);
+		//
+		// The default compatibility level is read beside it, by a probe that leaves
+		// the connection's session on a removed namespace; `RemotePermit::with`
+		// resets the session before the connection's next test.
+		let compatibility_probe = super::executor::compatibility_probe(run_prefix);
+		let mut root_baseline = super::executor::snapshot_root(&conns[0]).await?;
+		root_baseline.compatibility =
+			super::executor::probe_compatibility(&conns[0], &compatibility_probe).await?;
+		let root_baseline = Arc::new(root_baseline);
 
 		let (send, recv) = mpsc::channel(num_jobs);
 		for conn in conns {
@@ -524,6 +536,7 @@ impl RemoteProvisioner {
 			grade_send,
 			grade_recv,
 			root_baseline,
+			compatibility_probe,
 		})
 	}
 
@@ -555,7 +568,8 @@ impl RemoteProvisioner {
 		let baseline = self.root_baseline.clone();
 		let conn =
 			self.recv.recv().await.context("connection pool closed before the final sweep")?;
-		let residue = super::executor::sweep_to_baseline(&conn, &baseline).await;
+		let residue =
+			super::executor::sweep_to_baseline(&conn, &baseline, &self.compatibility_probe).await;
 		// Back into the pool either way, so `shutdown` closes it with the rest.
 		self.send.try_send(conn).ok();
 		residue

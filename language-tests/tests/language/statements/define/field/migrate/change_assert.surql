@@ -132,7 +132,7 @@ error = "Found 1 for field `a`, with record `loose:2`, but field must conform to
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

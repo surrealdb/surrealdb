@@ -5208,6 +5208,22 @@ impl Transaction {
 		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Restart).await
 	}
 
+	/// Discard what the table migration job holds for table `tb`, in the transaction that
+	/// removes it, so a table defined again under the name starts with nothing queued.
+	///
+	/// The job's progress and requests are not deleted here: the progress is a key only the job
+	/// writes and a request is one only the job deletes, so deleting either would fail this
+	/// transaction's commit whenever a page of the job committed first. The request is a key no
+	/// other transaction writes ([`Self::request_tb_migration`]), so it conflicts with nothing.
+	pub async fn discard_tb_migration(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		self.request_tb_migration(ns, db, tb, TableMigrationRequest::Discard).await
+	}
+
 	/// Write `request` of the table migration job for table `tb` under a fresh version-7 id, and
 	/// wake the job when this transaction commits.
 	///

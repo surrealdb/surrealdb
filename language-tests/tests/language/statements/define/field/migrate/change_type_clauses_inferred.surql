@@ -43,7 +43,7 @@ value = "'DEFINE FIELD k ON p TYPE number DEFAULT `rand`::int() PERMISSIONS FULL
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

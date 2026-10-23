@@ -334,8 +334,8 @@ impl Executor for EmbeddedExecutor {
 
 #[cfg(feature = "remote")]
 pub use remote_executor::{
-	Isolation, RemoteExecutor, RootSnapshot, SweepResidue, remote_unsupported, snapshot_root,
-	sweep_to_baseline,
+	Isolation, RemoteExecutor, RootSnapshot, SweepResidue, compatibility_probe,
+	probe_compatibility, remote_unsupported, snapshot_root, sweep_to_baseline,
 };
 
 #[cfg(feature = "remote")]
@@ -350,10 +350,10 @@ mod remote_executor {
 	use surrealdb_types::{Object, ToSql, Value as SurValue};
 
 	use super::{ExecOutcome, Executor, Unsupported};
+	use crate::cli::RunMode;
 	use crate::cmd::graphql;
 	use crate::cmd::remote::{RawCredentials, RemoteConn, extract_results};
-	use crate::cli::RunMode;
-use crate::cmd::util::ImportFailure;
+	use crate::cmd::util::ImportFailure;
 	use crate::tests::case::{Dialect, TestCase};
 	use crate::tests::run::CaseImports;
 	use crate::tests::schema::{AuthLevel, BoolOr, TestAuth, TestConfig};
@@ -414,6 +414,10 @@ use crate::cmd::util::ImportFailure;
 		accesses: std::collections::HashSet<String>,
 		config: SurValue,
 		defaults: SurValue,
+		/// The default compatibility level ([`probe_compatibility`]), read only into the run
+		/// baseline: `INFO FOR ROOT` does not report it, and reading it takes a namespace of its
+		/// own. `None` in every other snapshot, and where the probe read no level.
+		pub compatibility: Option<u8>,
 	}
 
 	impl RootSnapshot {
@@ -546,6 +550,56 @@ use crate::cmd::util::ImportFailure;
 		}
 	}
 
+	/// The scratch namespace a run with name prefix `run_prefix` reads the default compatibility
+	/// level through ([`probe_compatibility`]). Prefixed, so one an interrupted run leaves says
+	/// which run left it.
+	pub fn compatibility_probe(run_prefix: &str) -> String {
+		format!("{run_prefix}_compatibility")
+	}
+
+	/// The compatibility level a database defined without one takes on the endpoint: the
+	/// store's default, which `ALTER SYSTEM COMPATIBILITY` sets and `INFO FOR ROOT` does not
+	/// report, so no [`RootSnapshot`] can see a test change it.
+	///
+	/// Read by defining a database in the scratch namespace `probe` and removing the namespace
+	/// again. The caller must be authenticated as root, and must run this where nothing else
+	/// is running and where the connection's session is reset before its next use: the session
+	/// is left on the removed namespace. `None` when the answer holds no level.
+	pub async fn probe_compatibility(conn: &RemoteConn, probe: &str) -> Result<Option<u8>> {
+		let mut response = conn
+			.db
+			.query(format!(
+				"REMOVE NAMESPACE IF EXISTS `{probe}`; DEFINE NAMESPACE `{probe}`; USE NS \
+				 `{probe}`; DEFINE DATABASE `{probe}`; USE DB `{probe}`; RETURN (INFO FOR \
+				 DB).compatibility; REMOVE NAMESPACE `{probe}`;"
+			))
+			.await?
+			.check()?;
+		Ok(match response.take::<SurValue>(5)? {
+			SurValue::Number(n) => n.to_int().and_then(|n| u8::try_from(n).ok()),
+			_ => None,
+		})
+	}
+
+	/// Put the endpoint's default compatibility level back to `baseline` when it no longer
+	/// stands there, answering whether it stands there afterwards. `None` for a baseline the
+	/// run could not read, which leaves the level as it is. Runs [`probe_compatibility`], with
+	/// its conditions.
+	pub async fn restore_compatibility(
+		conn: &RemoteConn,
+		probe: &str,
+		baseline: Option<u8>,
+	) -> Result<bool> {
+		let Some(baseline) = baseline else {
+			return Ok(true);
+		};
+		if probe_compatibility(conn, probe).await? == Some(baseline) {
+			return Ok(true);
+		}
+		conn.db.query(format!("ALTER SYSTEM COMPATIBILITY {baseline}")).await?.check()?;
+		Ok(probe_compatibility(conn, probe).await? == Some(baseline))
+	}
+
 	/// What a sweep could not put back.
 	#[derive(Default)]
 	pub struct SweepResidue {
@@ -590,8 +644,13 @@ use crate::cmd::util::ImportFailure;
 	pub async fn sweep_to_baseline(
 		conn: &RemoteConn,
 		baseline: &RootSnapshot,
+		probe: &str,
 	) -> Result<SweepResidue> {
 		conn.signin_root().await?;
+		// The default compatibility level is not in a snapshot, so it is put back
+		// on its own, and reported only if that fails.
+		let compatibility = (!restore_compatibility(conn, probe, baseline.compatibility).await?)
+			.then(|| "the default compatibility level (ALTER SYSTEM COMPATIBILITY)".to_owned());
 		let after = snapshot_root(conn).await?;
 
 		// Nothing is the run's to keep now that it is over, so the whole diff is
@@ -601,7 +660,7 @@ use crate::cmd::util::ImportFailure;
 		let destroyed = after.removed_since(baseline);
 		if found.is_empty() {
 			return Ok(SweepResidue {
-				remaining: Vec::new(),
+				remaining: compatibility.into_iter().collect(),
 				destroyed,
 			});
 		}
@@ -636,8 +695,10 @@ use crate::cmd::util::ImportFailure;
 		// is taken from the reading before them: the removals only ever subtract,
 		// so re-deriving it afterwards would blame this sweep for the namespaces it
 		// has just correctly taken away.
+		let mut remaining = snapshot_root(conn).await?.added_since(baseline, None);
+		remaining.extend(compatibility);
 		Ok(SweepResidue {
-			remaining: snapshot_root(conn).await?.added_since(baseline, None),
+			remaining,
 			destroyed,
 		})
 	}
@@ -661,6 +722,7 @@ use crate::cmd::util::ImportFailure;
 			accesses: names("accesses"),
 			config: info.get("config").cloned().unwrap_or_default(),
 			defaults: info.get("defaults").cloned().unwrap_or_default(),
+			compatibility: None,
 		})
 	}
 
@@ -707,6 +769,9 @@ use crate::cmd::util::ImportFailure;
 			/// creates outside a test's namespace carries it, and so says plainly
 			/// which run left it if a run is interrupted.
 			run_prefix: String,
+			/// The endpoint's default compatibility level before the run
+			/// ([`probe_compatibility`]), which `cleanup` puts back.
+			compatibility: Option<u8>,
 		},
 	}
 
@@ -1071,6 +1136,7 @@ use crate::cmd::util::ImportFailure;
 				} => format!("{run_prefix}_user_{}", self.uid),
 				Isolation::Exclusive {
 					run_prefix,
+					..
 				} => format!("{run_prefix}_user_{}", self.uid),
 			};
 			self.pending_auth = match &env.auth {
@@ -1390,6 +1456,25 @@ use crate::cmd::util::ImportFailure;
 			// failed before its own compensating `ALTER SYSTEM DROP` would otherwise
 			// leave the setting in force for every test that follows.
 			restore_system_config(self.conn, &before.config, &after.config).await;
+			// So is the default compatibility level, which `INFO FOR ROOT` does not
+			// report: left changed, every database a later test defines without a
+			// level of its own takes it, and fails as an engine difference would.
+			let compatibility_restored = match &self.isolation {
+				Isolation::Exclusive {
+					run_prefix,
+					compatibility,
+				} => {
+					restore_compatibility(
+						self.conn,
+						&compatibility_probe(run_prefix),
+						*compatibility,
+					)
+					.await?
+				}
+				Isolation::Concurrent {
+					..
+				} => true,
+			};
 
 			// Read the endpoint back rather than trust the removals above: what
 			// matters is what is still there. Anything left fails the test, because
@@ -1405,10 +1490,16 @@ use crate::cmd::util::ImportFailure;
 			// that sees it per test — the concurrent leak check deliberately does
 			// not — so it reports it here, where exactly one test can be blamed.
 			let destroyed = after_cleanup.removed_since(&before);
-			if !residue.is_empty() || !destroyed.is_empty() {
+			if !residue.is_empty() || !destroyed.is_empty() || !compatibility_restored {
 				let mut parts = Vec::new();
 				if !residue.is_empty() {
 					parts.push(format!("still present: {}", residue.join(", ")));
+				}
+				if !compatibility_restored {
+					parts.push(
+						"the default compatibility level (ALTER SYSTEM COMPATIBILITY) differs"
+							.to_owned(),
+					);
 				}
 				if !destroyed.is_empty() {
 					parts.push(format!(

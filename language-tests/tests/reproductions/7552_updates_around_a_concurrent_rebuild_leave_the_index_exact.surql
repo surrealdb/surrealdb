@@ -20,6 +20,33 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -36,6 +63,33 @@ value = "[]"
 
 [[test.results]]
 value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -60,14 +114,36 @@ value = "[{ count: 297 }]"
 DEFINE TABLE t SCHEMALESS;
 FOR $i IN 1..=300 { CREATE type::record("t", $i) SET x = 'old' RETURN NONE; };
 DEFINE INDEX ix ON t FIELDS x CONCURRENTLY;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
 UPDATE t:1 SET x = 'new' RETURN NONE;
 REBUILD INDEX ix ON t CONCURRENTLY;
 SLEEP 1s;
 UPDATE t:2 SET x = 'new' RETURN NONE;
 UPDATE t:3 SET x = 'third' RETURN NONE;
 UPDATE t:3 SET x = 'fourth' RETURN NONE;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
 RETURN (INFO FOR INDEX ix ON t).building.status;
 SELECT VALUE id FROM t WITH INDEX ix WHERE x = 'new' ORDER BY id;
 SELECT VALUE id FROM t WITH INDEX ix WHERE x = 'third' ORDER BY id;

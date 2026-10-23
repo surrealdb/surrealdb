@@ -207,7 +207,7 @@ value = "{ a: 1, ai: true, b: 2, bi: true, c: 3, ci: true, o: {  } }"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

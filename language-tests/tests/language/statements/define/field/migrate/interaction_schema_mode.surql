@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "A table with rows behind a migration step, changed from SCHEMAFULL to SCHEMALESS and back: every change is accepted, every read returns the same values on either side, the steps and their generations are kept, a table that is no longer enforced accepts what an enforced one refuses, one that is enforced again is held to the rules and verifies the fields that are not guaranteed, and one made SCHEMALESS by redefining it without its TYPE is refused while a row is behind a step."
 
@@ -132,7 +135,7 @@ value = "{ generation: 4, guaranteed: [], migrations: [] }"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

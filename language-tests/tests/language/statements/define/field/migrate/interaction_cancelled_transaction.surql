@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "A migration inside a transaction that is cancelled, or that fails, leaves nothing behind: no generation is minted, no step is stored, no rewrite is queued, every read is unchanged, and a later attempt, under the same name and with another transform, mints the first generation."
 
@@ -174,7 +177,7 @@ error = "The table 'nu' does not exist"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

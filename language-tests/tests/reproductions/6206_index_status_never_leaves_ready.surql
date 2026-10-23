@@ -21,6 +21,33 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "{ building: { compacting: false, initial: 500, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
@@ -39,7 +66,18 @@ value = "[{ count: 500 }]"
 DEFINE TABLE t SCHEMALESS;
 FOR $i IN 1..=500 { CREATE type::record("t", $i) SET v = $i RETURN NONE; };
 DEFINE INDEX ix ON t FIELDS v CONCURRENTLY;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
 INFO FOR INDEX ix ON t;
 INFO FOR INDEX ix ON t;
 INFO FOR INDEX ix ON t;

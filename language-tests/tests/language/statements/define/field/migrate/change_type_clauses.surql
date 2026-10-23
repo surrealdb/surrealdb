@@ -120,7 +120,7 @@ value = "{ a: 'DEFINE FIELD a ON e TYPE int VALUE $value * 2 PERMISSIONS FULL', 
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"
@@ -177,7 +177,7 @@ error = "Cannot change field `c` of table `p`: its DEFAULT does not coerce to `s
 value = "{ a: 'DEFINE FIELD a ON p TYPE int VALUE $value * 2 PERMISSIONS FULL', b: 'DEFINE FIELD b ON p TYPE int ASSERT $value > 0 PERMISSIONS FULL', c: 'DEFINE FIELD c ON p TYPE int DEFAULT 5 PERMISSIONS FULL', d: 'DEFINE FIELD d ON p TYPE int DEFAULT 5 PERMISSIONS FULL' }"
 
 [[test.results]]
-value = "{ database: 'test', namespace: 'test' }"
+match = "$result.database == 'test'"
 
 [[test.results]]
 value = "NONE"

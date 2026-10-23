@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "Changes 8-10: a new field whose TYPE accepts NONE is accepted by every table (an enforced one queues its verification), a new field whose TYPE does not accept NONE is refused by an enforced table with rows unless it carries MIGRATE, and a new field with MIGRATE fills every old row; an enforced table with no rows, a SCHEMALESS table and a table at compatibility level 3 accept every new field and leave old rows without a value."
 
@@ -174,7 +177,7 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

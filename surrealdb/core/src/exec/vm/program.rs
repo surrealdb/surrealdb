@@ -1542,6 +1542,14 @@ pub(crate) enum StoreInstr {
 		tb: Reg,
 		expunge: bool,
 	},
+	/// Discard what the table migration job holds for the table `tb` of the
+	/// database `ns`, `db`, which the statement removes
+	/// ([`crate::kvs::Transaction::discard_tb_migration`]).
+	DiscardTableMigration {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+	},
 	/// Delete every key beneath the root of the table `tb` of the database
 	/// `ns`, `db` except the registrations of the views that read it
 	/// (`ForeignTableKey`), its field definitions when `keep_fields` holds a

@@ -45,7 +45,7 @@ match = '''$result.generation = 0 && array::len($result.migrations) = 0'''
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

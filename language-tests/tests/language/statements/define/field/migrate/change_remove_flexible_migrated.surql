@@ -39,7 +39,7 @@ error = "Found field 'g.q', but no such field exists for table 'p'"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

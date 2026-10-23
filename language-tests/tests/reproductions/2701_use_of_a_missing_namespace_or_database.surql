@@ -1,6 +1,7 @@
 /**
 [env]
 clean = true
+remote-exclusive = true
 namespace = true
 database = true
 auth = { level = "owner" }

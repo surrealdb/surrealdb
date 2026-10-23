@@ -214,7 +214,7 @@ CREATE src:1 SET lim = 8;
 SELECT VALUE v FROM log;
 RETURN [1, 2][WHERE array::any([$this], |$e| $session.ns != NONE)];
 RETURN [1, 2][WHERE array::any([$this], |$e| $auth = NONE)];
-RETURN [1, 2][WHERE array::any([$this], |$e| $token = NONE)];
+RETURN [1, 2][WHERE array::any([$this], |$e| type::is_none($token) || type::is_object($token))];
 LET $f = |$e| $e >= 8;
 RETURN [1, 5, 10, 15, 20][WHERE $f($this)];
 RETURN [1, 5, 10, 15, 20][WHERE array::any([$this], |$e| $e >= 8)];

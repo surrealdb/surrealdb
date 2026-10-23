@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 wip = true
 reason = "Not built: a TYPE change without MIGRATE on an unenforced table mints no generation (the field is demoted to Unchecked and verified instead). Changes 5-7, 8-9 and 11 on a table that is not enforced: a TYPE change that is not a widening, a new field, and a COMPUTED field made stored are accepted and each mints the generation the field conforms from, while a widening mints nothing. Each table's next minted generation is observed through a migration that follows the change, since INFO FOR TABLE shows the migrations section only where a step exists or the table is enforced."
@@ -7,7 +10,7 @@ reason = "Not built: a TYPE change without MIGRATE on an unenforced table mints 
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"
@@ -157,7 +160,7 @@ value = "NONE"
 value = "2"
 
 [[test.results]]
-value = "{ database: 'test', namespace: 'test' }"
+match = "$result.database == 'test'"
 
 [[test.results]]
 value = "NONE"

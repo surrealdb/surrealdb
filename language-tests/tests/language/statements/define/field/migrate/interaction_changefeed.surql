@@ -78,7 +78,7 @@ value = "[{ a: 6, id: cf:1, o: { n: 1 } }, { a: 9, id: cf:3, o: { n: 7 } }, { a:
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

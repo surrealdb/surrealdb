@@ -263,6 +263,9 @@ pub(super) async fn step(
 		| StoreInstr::DeleteRange {
 			..
 		}
+		| StoreInstr::DiscardTableMigration {
+			..
+		}
 		| StoreInstr::BufferTableChange {
 			..
 		}

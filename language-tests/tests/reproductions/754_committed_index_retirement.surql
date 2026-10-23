@@ -29,6 +29,60 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "{ building: { compacting: false, initial: 2, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
@@ -39,8 +93,30 @@ DEFINE TABLE user SCHEMALESS;
 CREATE user:one SET email = 'one@example.com', account = 'apple' RETURN NONE;
 CREATE user:two SET email = 'two@example.com', account = 'banana' RETURN NONE;
 DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
 DEFINE INDEX OVERWRITE test ON user FIELDS account CONCURRENTLY;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON user).building.status != 'ready' { SLEEP 1s };
 INFO FOR INDEX test ON user;
 SELECT id FROM user WITH INDEX test WHERE account = 'apple';

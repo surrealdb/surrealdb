@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "A plain index defined over a field whose rows are behind a migration step holds the migrated values, not the stored ones: it is the access path of the lookups and ranges that name those values, writes to a row behind the step move its entry from the migrated value, and an index defined before the migration on another field keeps working."
 
@@ -108,7 +111,7 @@ value = "{ events: {  }, fields: { a: 'DEFINE FIELD a ON `tb` TYPE int PERMISSIO
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

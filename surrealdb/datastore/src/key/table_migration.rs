@@ -3,7 +3,8 @@
 //!
 //! A statement that gives a table work for the job — rows stamped before a migration step it
 //! minted, a field whose stored values must be verified, rows to check for keys no definition
-//! declares, a verification to start over or a check to drop — writes a request
+//! declares, a verification to start over, a check to drop, or the removal of the table — writes a
+//! request
 //! ([`TableMigrationRequest`]) at `/!tq{ns}{db}{tb}{uid}`, under a fresh version-7 id. The request
 //! is written in the transaction that makes the change, so it exists exactly when that transaction
 //! commits. No other transaction writes the key, so a request never conflicts with the job or with
@@ -19,7 +20,11 @@
 //!
 //! What the job will do for a table is its progress with every request it has not yet folded
 //! applied in order. Both keys live at the root level, so they survive the removal of the table
-//! they name: the job deletes the progress and the requests of a table that is gone.
+//! they name: the job deletes the progress and the requests of a table, database or namespace that
+//! is gone. No statement deletes either key, so a removal never conflicts with a page of the job.
+//! `REMOVE TABLE` writes a request ([`TableMigrationRequest::Discard`]) instead, so a table
+//! defined again under the name before the job visits it inherits nothing; a namespace or database
+//! defined again is given a new id, under which nothing is queued.
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -77,7 +82,7 @@ pub struct VerifiedField {
 }
 
 /// What a statement asks the table migration job to do for one table.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TableMigrationRequest {
 	/// Rewrite the rows stamped before the table's newest migration step.
@@ -94,6 +99,10 @@ pub enum TableMigrationRequest {
 	/// Drop the check for undeclared keys: a `SCHEMALESS` table refuses no key, so the check
 	/// reports nothing a write refuses.
 	DropUndeclared,
+	/// Drop the progress and every request made before this one: the table was removed, so
+	/// nothing queued for it applies to a table defined again under its name.
+	#[revision(start = 2)]
+	Discard,
 }
 
 impl TableMigrationRequest {
@@ -110,6 +119,7 @@ impl TableMigrationRequest {
 	///   lap over, unsettled, as [`Self::Verify`] does.
 	/// - [`Self::DropUndeclared`] drops the check, and the progress with it when nothing else is
 	///   left in it ([`TableMigrationState::is_spent`]).
+	/// - [`Self::Discard`] leaves no progress.
 	pub fn apply(&self, state: Option<TableMigrationState>) -> Option<TableMigrationState> {
 		match self {
 			Self::Rewrite => {
@@ -154,6 +164,7 @@ impl TableMigrationRequest {
 				}
 				(!state.is_spent()).then_some(state)
 			}
+			Self::Discard => None,
 		}
 	}
 }
@@ -304,6 +315,27 @@ mod tests {
 			None
 		);
 		assert_eq!(fold(&[TableMigrationRequest::DropUndeclared]), None);
+	}
+
+	#[test]
+	fn a_discard_drops_what_was_queued_before_it_and_nothing_after() {
+		let names = vec!["a".to_owned()];
+		assert_eq!(
+			fold(&[
+				TableMigrationRequest::Rewrite,
+				TableMigrationRequest::Verify(field("a", 1)),
+				TableMigrationRequest::Undeclared(names),
+				TableMigrationRequest::Discard,
+			]),
+			None
+		);
+		let after = fold(&[
+			TableMigrationRequest::Verify(field("a", 1)),
+			TableMigrationRequest::Discard,
+			TableMigrationRequest::Rewrite,
+		])
+		.unwrap();
+		assert_eq!((after.lap, after.rewrite, after.verify), (1, true, vec![]));
 	}
 
 	#[test]

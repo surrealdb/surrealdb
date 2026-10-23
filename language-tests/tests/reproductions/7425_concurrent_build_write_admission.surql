@@ -23,6 +23,33 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -36,7 +63,18 @@ DEFINE TABLE item SCHEMALESS;
 FOR $i IN 1..=500 { CREATE type::record("item", $i) SET scope = 'a', v = 0 RETURN NONE; };
 DEFINE INDEX ix ON item FIELDS scope, v CONCURRENTLY;
 UPDATE item:1 SET v = 7 RETURN NONE;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON item).building.status != 'ready' { SLEEP 1s };
 UPDATE item:2 SET v = 8 RETURN NONE;
 INFO FOR INDEX ix ON item;
 SELECT VALUE id FROM item WITH INDEX ix WHERE scope = 'a' AND v > 0 ORDER BY id;

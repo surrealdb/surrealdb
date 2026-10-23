@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "A level-4 table made SCHEMAFULL over rows, and a database raised to level 4, queue a check for rows holding a top-level key no definition declares, beside the verification of each field, since a write of such a row is refused. INFO shows the queued check as `undeclared`; the job that runs it never runs here. A table with no rows, an import and level 3 queue none, and REMOVE UNDECLARED FIELDS clears the key the check would count."
 
@@ -60,7 +63,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

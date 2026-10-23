@@ -19,7 +19,11 @@
 //!   when the progress asks for a rewrite, stored again in the layout of the table's head
 //!   generation, stamped with it. The page then advances the progress by compare-and-set on the
 //!   state it read, so a page whose progress was replaced (by a node that took the lease over) or
-//!   deleted (`REMOVE TABLE`) meanwhile commits nothing.
+//!   deleted meanwhile commits nothing. The page takes locked reads of the definitions of the
+//!   table, its database and its namespace, so a removal of any of them that commits first fails
+//!   the page's commit instead of leaving rows written beneath what was removed. No removal writes
+//!   the progress or deletes a request, so a page that commits first fails a removal only through
+//!   the rows it rewrote, which `REMOVE TABLE` deletes in its own transaction.
 //! - At the end of a lap the rewrite is done if the table's newest step is the one the lap began
 //!   under. Otherwise another lap starts. A step minted after the last page's snapshot comes with a
 //!   request that page did not delete, so the next page starts a lap for it. The steps stay in
@@ -66,8 +70,8 @@ use crate::exec::ExecutionContext;
 use crate::exec::migrate::{Replay, into_error};
 use crate::iam::{Auth, Role};
 use crate::key::schema::{
-	RecordKey, RecordPrefix, TableMigrationKey, TableMigrationPrefix, TableMigrationRequestKey,
-	TableMigrationRequestPrefix,
+	DatabaseKey, NamespaceKey, RecordKey, RecordPrefix, TableKey, TableMigrationKey,
+	TableMigrationPrefix, TableMigrationRequestKey, TableMigrationRequestPrefix,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState};
 use crate::key::{KVKeyDecode, Key, Resumable};
@@ -117,7 +121,7 @@ impl Datastore {
 	/// Work through every table queued for the table migration job, under the job's lease:
 	/// rewrite the rows its steps have not reached, and verify the fields queued for
 	/// verification. The tables with requests are visited first, then the tables whose progress
-	/// asks for work that this pass has not visited.
+	/// asks for work, or whose database or namespace is gone, that this pass has not visited.
 	pub async fn table_migration(
 		dbs: Arc<Datastore>,
 		interval: Duration,
@@ -173,7 +177,9 @@ impl Datastore {
 			}
 			range = range.resume_after(&last, Direction::Forward);
 		}
-		// The tables whose progress asks for work, as a pass that stopped left them.
+		// The tables whose progress asks for work, as a pass that stopped left them, and those
+		// whose database or namespace was removed, whose progress is deleted on the visit.
+		let mut live = None;
 		let mut range = TableMigrationPrefix {}.range()?;
 		loop {
 			let entries = {
@@ -189,9 +195,6 @@ impl Datastore {
 			let full = entries.len() >= QUEUE_BATCH as usize;
 			for (key, state) in entries {
 				Self::ensure_not_cancelled(&canceller)?;
-				if !state.has_work() {
-					continue;
-				}
 				let key = match TableMigrationKey::decode_key(&key) {
 					Ok(key) => key,
 					Err(e) => {
@@ -199,6 +202,15 @@ impl Datastore {
 						continue;
 					}
 				};
+				if !state.has_work() {
+					let live = match &live {
+						Some(live) => live,
+						None => live.insert(Self::live_databases(&dbs).await?),
+					};
+					if live.contains(&(key.ns, key.db)) {
+						continue;
+					}
+				}
 				let table = (key.ns, key.db, key.tb.into_owned());
 				if visited.contains(&table) {
 					continue;
@@ -213,6 +225,23 @@ impl Datastore {
 			}
 			range = range.resume_after(&last, Direction::Forward);
 		}
+	}
+
+	/// The databases that exist, by the ids of their namespace and their own.
+	async fn live_databases(dbs: &Datastore) -> Result<HashSet<(NamespaceId, DatabaseId)>> {
+		let txn = dbs.transaction(TransactionType::Read).await?;
+		let live = async {
+			let mut live = HashSet::new();
+			for ns in txn.all_ns(None).await?.iter() {
+				for db in txn.all_db(ns.namespace_id, None).await?.iter() {
+					live.insert((ns.namespace_id, db.database_id));
+				}
+			}
+			Ok(live)
+		}
+		.await;
+		let _ = txn.cancel().await;
+		live
 	}
 
 	/// Work through table `tb` of database `db` of namespace `ns`, as [`Self::migrate_table`]
@@ -387,6 +416,12 @@ impl Datastore {
 				}
 				continue;
 			}
+			if !catch!(txn, Self::fence(&txn, target).await) {
+				// The database or namespace was removed since the visit began; the next visit
+				// finds it gone and deletes the progress.
+				let _ = txn.cancel().await;
+				return Ok(TableOutcome::Done);
+			}
 			let outcome = Self::migration_page(dbs, &txn, target, &state, page).await;
 			match outcome {
 				Ok(more) => match Self::commit_page(&txn).await {
@@ -397,15 +432,16 @@ impl Datastore {
 						page = (page * 2).min(PAGE_ROWS);
 					}
 					Err(e) if surrealdb_datastore::is_retryable_transaction_conflict(&e) => {
-						// A user write of a row the page rewrote beat the page; take a fresh
-						// snapshot with a smaller page.
+						// A user write of a row the page rewrote, or a change to the definition
+						// of the table, its database or its namespace, beat the page; take a
+						// fresh snapshot with a smaller page.
 						page = (page / 2).max(1);
 						common::time::sleep(SETTLE_POLL).await;
 					}
 					Err(e) => return Err(e),
 				},
-				// The progress moved under the page: a node that took the lease over replaced it,
-				// or `REMOVE TABLE` deleted it. The next page reads it again.
+				// The progress moved under the page: a node that took the lease over replaced it.
+				// The next page reads it again.
 				Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
 					let _ = txn.cancel().await;
 				}
@@ -416,6 +452,24 @@ impl Datastore {
 			}
 			yield_now!();
 		}
+	}
+
+	/// Take locked reads of the definitions of `target`'s namespace, database and table in `txn`,
+	/// so a change to any of them that commits after `txn`'s snapshot fails `txn`'s commit.
+	/// Answers whether all three stand under the ids `target` names.
+	async fn fence(txn: &Transaction, target: &Target) -> Result<bool> {
+		let ns = txn.getu_key(&NamespaceKey::new(Cow::Borrowed(&target.ns_name))).await?;
+		let db = txn.getu_key(&DatabaseKey::new(target.ns, Cow::Borrowed(&target.db_name))).await?;
+		let tb = txn
+			.getu_key_raw(&TableKey {
+				ns: target.ns,
+				db: target.db,
+				tb: Cow::Borrowed(&target.tb),
+			})
+			.await?;
+		Ok(ns.is_some_and(|ns| ns.namespace_id == target.ns)
+			&& db.is_some_and(|db| db.database_id == target.db)
+			&& tb.is_some())
 	}
 
 	/// Fold `requests`, the first of `target`'s in the order made, into `progress`, the progress

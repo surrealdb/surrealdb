@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "ALTER DATABASE COMPATIBILITY, either way, with rows behind migration steps: the level changes only which statements are accepted and which fields are verified, never what a read returns or which step a row replays. Raising it queues a verification and no rewrite, it is judged by the transaction that changes it, a cancelled change leaves the level alone, and the tables it does not enforce are left alone."
 

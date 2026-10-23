@@ -75,7 +75,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		bail!(FRAGMENTS_UNAVAILABLE);
 	}
 
-
 	// A `--endpoint` selects the remote (SDK) execution path; without it the
 	// runner uses an embedded datastore (the default).
 	let endpoint = matches.get_one::<String>("endpoint").cloned();
@@ -767,6 +766,38 @@ fn removed_namespaces(source: &str) -> NamespaceRemovals {
 	out
 }
 
+/// Whether a test's expected results name the namespace its config gives.
+///
+/// A concurrent remote test runs in a namespace named for the run, not the one
+/// its config names, so an expectation spelling the configured name can never
+/// match there: `USE DB other` answers `{ database: 'other', namespace: 'test' }`
+/// embedded and `{ database: 'other', namespace: 'lt_…' }` remotely. Read from
+/// the parsed expectations rather than the source, so it judges exactly what
+/// grading compares: a `namespace` field holding the name, at any depth.
+#[cfg(feature = "remote")]
+fn expects_namespace_name(results: &crate::tests::schema::TestDetailsResults, ns: &str) -> bool {
+	use crate::tests::schema::{TestDetailsResults, TestExpectation};
+
+	fn names(value: &SurValue, ns: &str) -> bool {
+		match value {
+			SurValue::Object(object) => object.iter().any(|(key, v)| {
+				(key == "namespace" && matches!(v, SurValue::String(s) if s == ns)) || names(v, ns)
+			}),
+			SurValue::Array(array) => array.iter().any(|v| names(v, ns)),
+			_ => false,
+		}
+	}
+
+	let TestDetailsResults::QueryResult(expectations) = results else {
+		return false;
+	};
+	expectations.iter().any(|expectation| match expectation {
+		TestExpectation::Plain(value) => names(&value.0, ns),
+		TestExpectation::Value(value) => names(&value.value.0, ns),
+		TestExpectation::Match(_) | TestExpectation::Error(_) => false,
+	})
+}
+
 /// Schedules every run against a remote SurrealDB instance, collecting the reports.
 #[cfg(feature = "remote")]
 async fn run_remote_jobs(
@@ -867,6 +898,39 @@ async fn run_remote_jobs(
 		);
 	}
 
+	// A concurrent test is renamed into this run's namespace, so one expecting
+	// the name its config gives fails on the name alone, reported as a value
+	// mismatch that reads like an engine difference. Refuse it up front, by name.
+	let misnamed: std::collections::BTreeSet<String> = runs
+		.iter()
+		.filter(|r| executor::remote_unsupported(&r.case).is_none())
+		.filter(|r| {
+			let env = &r.case.test.config.parsed.env;
+			!env.needs_exclusive_endpoint()
+				&& env.namespace().is_some_and(|ns| {
+					r.case
+						.test
+						.config
+						.parsed
+						.test
+						.results
+						.as_ref()
+						.is_some_and(|results| expects_namespace_name(results, ns))
+				})
+		})
+		.map(|r| r.case.test.origin.path.to_string())
+		.collect();
+
+	if !misnamed.is_empty() {
+		bail!(
+			"{} test(s) expect the literal name of their namespace, which a concurrent remote run \
+			 replaces with its own: {}. Assert on something other than the name (a `match` on the \
+			 `database` field, say), or add `remote-exclusive = true`.",
+			misnamed.len(),
+			misnamed.iter().take(10).cloned().collect::<Vec<_>>().join(", ")
+		);
+	}
+
 	// A test that reaches outside its namespace can't be isolated by one, so it
 	// takes the endpoint to itself. Counted up front to report the split.
 	let exclusive =
@@ -877,7 +941,8 @@ async fn run_remote_jobs(
 	let mut schedular = Schedular::new(num_jobs);
 	let (report_send, mut report_recv) = mpsc::unbounded_channel();
 	let mut provisioner =
-		provisioner::RemoteProvisioner::new(num_jobs as usize, endpoint, user, pass).await?;
+		provisioner::RemoteProvisioner::new(num_jobs as usize, endpoint, user, pass, &run_prefix)
+			.await?;
 	let baseline = provisioner.root_baseline();
 
 	// A namespace the endpoint already holds is destroyed, with every database
@@ -1095,6 +1160,7 @@ pub async fn schedule_run_remote(
 	let isolation = if exclusive {
 		executor::Isolation::Exclusive {
 			run_prefix: run_prefix.to_owned(),
+			compatibility: baseline.compatibility,
 		}
 	} else {
 		executor::Isolation::Concurrent {
@@ -1459,6 +1525,17 @@ async fn cleanup_environment(dbs: &Arc<Datastore>, session: &Session) -> Result<
 		}
 	}
 
+	// No `REMOVE` deletes the table migration job's queue entries: the job deletes those of a
+	// table, database or namespace that is gone. One pass of it, which the harness does not
+	// otherwise run, deletes the entries of everything removed above.
+	Datastore::table_migration(
+		Arc::clone(dbs),
+		std::time::Duration::from_secs(1),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await
+	.context("failed to drain the table migration queue")?;
+
 	Ok(())
 }
 
@@ -1561,6 +1638,29 @@ mod tests {
 		let r = removed_namespaces("LET $ns = 'a'; REMOVE NAMESPACE plain;");
 		assert_eq!(r.names.into_iter().collect::<Vec<_>>(), vec!["plain"]);
 		assert!(r.unresolved.is_empty());
+	}
+
+	#[cfg(feature = "remote")]
+	#[test]
+	fn an_expectation_naming_the_namespace_is_found_at_any_depth() {
+		let expects = |results: &str| {
+			let config: crate::tests::schema::TestConfig = toml::from_str(results).expect("parses");
+			expects_namespace_name(config.test.results.as_ref().expect("has results"), "test")
+		};
+
+		// What `USE DB` answers, bare and as a table.
+		assert!(expects("[[test.results]]\nvalue = \"{ database: 'd', namespace: 'test' }\""));
+		assert!(expects(
+			"[[test.results]]\nvalue = \"{ database: 'd', namespace: 'test' }\"\nskip-uuid = true"
+		));
+		// Nested in whatever a statement returns.
+		assert!(expects("[[test.results]]\nvalue = \"[{ x: { namespace: 'test' } }]\""));
+
+		// Another namespace, the name under another key, or a matcher: left alone.
+		assert!(!expects("[[test.results]]\nvalue = \"{ database: 'd', namespace: 'other' }\""));
+		assert!(!expects("[[test.results]]\nvalue = \"{ name: 'test' }\""));
+		assert!(!expects("[[test.results]]\nmatch = \"$result.database == 'd'\""));
+		assert!(!expects("[[test.results]]\nerror = \"namespace: 'test'\""));
 	}
 
 	#[cfg(feature = "remote")]

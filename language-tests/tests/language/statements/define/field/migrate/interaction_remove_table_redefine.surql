@@ -156,7 +156,7 @@ value = "[{ field: 'a', generation: 3, name: 'a_int' }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'other', namespace: 'test' }"
+match = "$result.database == 'other'"
 
 [[test.results]]
 value = "NONE"
@@ -180,13 +180,13 @@ value = "NONE"
 value = "[6]"
 
 [[test.results]]
-value = "{ database: 'test', namespace: 'test' }"
+match = "$result.database == 'test'"
 
 [[test.results]]
 value = "[1005]"
 
 [[test.results]]
-value = "{ database: 'other', namespace: 'test' }"
+match = "$result.database == 'other'"
 
 [[test.results]]
 value = "NONE"
@@ -195,7 +195,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'other', namespace: 'test' }"
+match = "$result.database == 'other'"
 
 [[test.results]]
 value = "NONE"

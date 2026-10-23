@@ -36,6 +36,33 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'ready'"
 
 [[test.results]]
@@ -51,6 +78,17 @@ DEFINE ANALYZER accounts_admin_search TOKENIZERS blank FILTERS lowercase, ascii,
 DEFINE INDEX _admin_search ON accounts FIELDS firstName FULLTEXT ANALYZER accounts_admin_search BM25(1.2, 0.75) CONCURRENTLY;
 SLEEP 500ms;
 COMMIT;
-SLEEP 1s;
+-- Wait for the build in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it finish.
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX _admin_search ON accounts).building.status != 'ready' { SLEEP 1s };
 RETURN (INFO FOR INDEX _admin_search ON accounts).building.status;
 SELECT id FROM accounts WITH INDEX _admin_search WHERE firstName @@ 'ali';

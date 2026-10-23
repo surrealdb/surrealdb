@@ -87,11 +87,24 @@ fn install_crypto_provider() {
 	);
 }
 
+/// Open an SDK connection to `endpoint`.
+///
+/// The SDK refuses a WebSocket message over 64MiB by default, which is smaller than
+/// the 128MiB a server sends by default (`SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE`), so a
+/// response the server sends whole would reach the harness as a reset connection.
+/// The client takes any size here, which leaves the server's limit as the one a test
+/// meets.
+async fn open(endpoint: &str) -> Result<Surreal<Any>> {
+	let config = surrealdb::opt::Config::new()
+		.websocket(surrealdb::opt::WebsocketConfig::default().max_message_size(None))?;
+	Ok(surrealdb::engine::any::connect((endpoint.to_string(), config)).await?)
+}
+
 impl RemoteConn {
 	/// Connect to `endpoint` (ws/wss/http/https) and sign in as root.
 	pub async fn connect(endpoint: &str, user: &str, pass: &str) -> Result<RemoteConn> {
 		install_crypto_provider();
-		let db = surrealdb::engine::any::connect(endpoint.to_string())
+		let db = open(endpoint)
 			.await
 			.with_context(|| format!("connecting to --endpoint `{endpoint}`"))?;
 		let http_base = http_base_from_endpoint(endpoint)?;
@@ -117,7 +130,7 @@ impl RemoteConn {
 	/// only faithful reset. Without it, e.g. a test that expects "Specify a
 	/// namespace to use" instead sees the previous test's namespace still selected.
 	pub async fn reset_session(&mut self) -> Result<()> {
-		self.db = surrealdb::engine::any::connect(self.endpoint.clone())
+		self.db = open(&self.endpoint)
 			.await
 			.with_context(|| format!("reconnecting to --endpoint `{}`", self.endpoint))?;
 		self.signin_root().await?;

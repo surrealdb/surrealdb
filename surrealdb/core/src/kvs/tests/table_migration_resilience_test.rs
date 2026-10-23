@@ -29,7 +29,10 @@ use crate::catalog::{DatabaseId, Generation, NamespaceId, RecordFormat, TaskLeas
 use crate::dbs::Session;
 use crate::exec::scheduler::{Scheduler, YieldFuture};
 use crate::key::Key;
-use crate::key::schema::{RecordPrefix, TableMigrationKey, TaskLeaseKey};
+use crate::key::schema::{
+	RecordPrefix, TableMigrationKey, TableMigrationPrefix, TableMigrationRequestPrefix,
+	TaskLeaseKey,
+};
 use crate::key::table_migration::{TableMigrationState, VerifiedField};
 use crate::kvs::tasklease::TaskLeaseType;
 use crate::kvs::{Datastore, QueryRequest, Transaction};
@@ -863,6 +866,101 @@ async fn an_import_write_commits_beside_the_pages_the_job_commits_for_its_table(
 	drop(txn);
 	assert!(entry(&ds, "tb").await.is_none(), "no verification was under way to restart");
 	assert_row(&ds, ROWS - 1, 2 * ROWS, 1).await;
+}
+
+/// How many keys the job's queue holds, progress and requests, over every table.
+async fn queue_keys(ds: &Datastore) -> usize {
+	let txn = ds.transaction(Read).await.unwrap();
+	let progress = txn.keys(TableMigrationPrefix {}.range().unwrap(), u32::MAX, 0, None);
+	let progress = progress.await.unwrap().len();
+	let requests = txn.keys(TableMigrationRequestPrefix {}.range().unwrap(), u32::MAX, 0, None);
+	let requests = requests.await.unwrap().len();
+	txn.cancel().await.unwrap();
+	progress + requests
+}
+
+/// The removal of a table, of its database or of its namespace is open while the job passes a
+/// check of the table, writing its progress on every page. No removal writes the progress or
+/// deletes a request, so each commits; the job then deletes what it held for the table. The check
+/// is settled by hand, so the lap waits for no older transaction, and it rewrites no row.
+#[tokio::test]
+async fn a_removal_commits_beside_the_pages_the_job_commits_for_its_table() {
+	for removal in ["REMOVE TABLE t;", "REMOVE DATABASE test;", "REMOVE NAMESPACE test;"] {
+		let ds = datastore(4).await;
+		run(
+			&ds,
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD a ON t TYPE int;
+			 CREATE t:1 SET a = 1, z = 1;
+			 CREATE t:2 SET a = 2;
+			 ALTER TABLE t SCHEMAFULL;",
+		)
+		.await;
+		let (ns, db) = ids(&ds).await;
+		let table = TableName::from("t");
+		{
+			let txn = ds.transaction(Write).await.unwrap();
+			let mut state = txn.get_tb_migration_job(ns, db, &table).await.unwrap().unwrap();
+			state.verify.clear();
+			state.settled = true;
+			for (request, _) in txn.tb_migration_requests(ns, db, &table, u32::MAX).await.unwrap() {
+				txn.del(Key::from(request)).await.unwrap();
+			}
+			let key = TableMigrationKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&table),
+			};
+			txn.set_key(&key, &state).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		let txn = Arc::new(ds.transaction(Write).await.unwrap());
+		run_in(&ds, &txn, removal).await;
+		drain(&ds).await;
+		let check = entry(&ds, "t").await.and_then(|state| state.undeclared).unwrap();
+		assert_eq!((check.failures, check.finished), (1, true), "{removal}");
+
+		txn.commit().await.expect("a page of the job must not fail the removal's commit");
+		drop(txn);
+		drain(&ds).await;
+		assert_eq!(queue_keys(&ds).await, 0, "{removal}");
+	}
+}
+
+/// A table removed while a page of the job over it is under way fails the page's commit, so no
+/// row is written beneath the removed table, and the job then deletes what it held for the table.
+#[tokio::test]
+async fn a_page_under_way_when_its_table_is_removed_commits_nothing() {
+	const ROWS: i64 = 300;
+	let (base, gated, gate) = gated_nodes().await;
+	untyped_doubling_table(&base, ROWS).await;
+
+	// The owner is held inside its first page of rows.
+	gate.arm();
+	let owner = spawn_pass(&gated);
+	gate.paused().await;
+	run(&base, "REMOVE TABLE tb;").await;
+	gate.release();
+	finish(owner).await;
+
+	assert!(raw_rows(&base, "tb").await.is_empty());
+	assert_eq!(queue_keys(&base).await, 0);
+}
+
+/// A table defined again under the name of one removed before the job visited it inherits
+/// nothing the job held for the removed one.
+#[tokio::test]
+async fn a_table_defined_again_inherits_nothing_queued_for_the_removed_one() {
+	let ds = datastore(4).await;
+	untyped_doubling_table(&ds, 3).await;
+	assert!(entry(&ds, "tb").await.is_some_and(|job| job.rewrite));
+	run(&ds, "REMOVE TABLE tb; DEFINE TABLE tb SCHEMALESS; CREATE tb:1 SET f = 1 RETURN NONE;")
+		.await;
+	assert_eq!(entry(&ds, "tb").await, None);
+	drain(&ds).await;
+	assert_eq!(queue_keys(&ds).await, 0);
+	assert_eq!(run(&ds, "SELECT VALUE f FROM tb;").await[0].to_sql(), "[1]");
 }
 
 /// A field change forfeits the table's conformance claims, a write of the

@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "While a row of an enforced table is behind a migration step, the table's TYPE cannot change and it cannot be redefined as a view, whatever the statement that asks: the table, its rows and its steps are left as they were, and every other change of the table is accepted. A TYPE that a record of the table does not admit is refused for that record before the step is judged, since waiting for the rewrite job would not let it through. A table that is not enforced accepts both, and what its reads return afterwards is the new table's: a relation's edges are read as they were, a view holds only the rows its source gives it, with nothing of the old rows or steps."
 
@@ -189,7 +192,7 @@ error = "Cannot migrate field `a` of table `src`: the view `lo` selects from the
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

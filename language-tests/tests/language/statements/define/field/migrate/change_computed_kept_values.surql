@@ -6,7 +6,7 @@ reason = "A COMPUTED field reads nothing stored, but its path can still hold the
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'lvl3', namespace: 'test' }"
+match = "$result.database == 'lvl3'"
 
 [[test.results]]
 value = "NONE"

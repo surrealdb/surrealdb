@@ -1,5 +1,6 @@
 /**
 [env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
 compatibility = 3
 
 [test]

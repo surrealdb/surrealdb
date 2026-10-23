@@ -222,7 +222,7 @@ error = "Found changed value for field `r`, with record `loose:1`, but field is 
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"

@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (`finished: false`, its lap and counts), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "Changes 13-16: a MIGRATE with no TYPE change transforms (or repairs) every old row on any table and mints one generation; a definition restated unchanged and DEFINE FIELD IF NOT EXISTS on an existing field change nothing and mint nothing; REMOVE FIELD mints a removal step on an enforced table with rows, so the values disappear for every reader, and on every other table the stored values stay."
 
@@ -225,7 +228,7 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ database: 'd3', namespace: 'test' }"
+match = "$result.database == 'd3'"
 
 [[test.results]]
 value = "NONE"
