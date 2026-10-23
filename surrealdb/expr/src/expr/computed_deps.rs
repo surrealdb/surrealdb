@@ -11,6 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::expr::function::{Function, FunctionCall};
+use crate::expr::lookup::{Lookup, LookupSubject};
 use crate::expr::statements::SelectStatement;
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Expr, Idiom, Literal, Part};
@@ -79,6 +80,36 @@ fn is_session_param(param: &crate::expr::Param) -> bool {
 	surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&param.as_str())
 }
 
+/// Whether `lookup` is a bare traversal: table subjects and a direction, with no projection,
+/// condition, split, group, order, limit, start or alias. Such a lookup reads the edges or
+/// references of one record by its id and evaluates no user expression, so it reads no field of
+/// the document. A range subject holds a key range expression and any clause may read the row
+/// it runs over, so those stay opaque.
+fn is_plain_lookup(lookup: &Lookup) -> bool {
+	let Lookup {
+		kind: _,
+		expr,
+		only: _,
+		what,
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		alias,
+	} = lookup;
+	expr.is_none()
+		&& cond.is_none()
+		&& split.is_none()
+		&& group.is_none()
+		&& order.is_none()
+		&& limit.is_none()
+		&& start.is_none()
+		&& alias.is_none()
+		&& what.iter().all(|subject| matches!(subject, LookupSubject::Table { .. }))
+}
+
 /// Visitor that walks an expression tree extracting field dependencies.
 struct FieldDependencyExtractor {
 	/// Collected same-table field dependencies (root field names only).
@@ -105,6 +136,13 @@ impl Visitor for FieldDependencyExtractor {
 				if self.nested == 0 {
 					self.deps.insert(name.as_str().to_owned());
 				}
+				1
+			}
+			// A bare lookup first in the idiom (`<~doc`, `->edge`) starts at the document and
+			// reads its record id, which every row carries, and no field. Whatever follows the
+			// lookup runs over the records it reaches.
+			[Part::Lookup(lookup), ..] if self.nested == 0 && is_plain_lookup(lookup) => {
+				self.deps.insert("id".to_owned());
 				1
 			}
 			// `$this.field` / `$self["field"]` — equivalent to bare field.
@@ -335,7 +373,8 @@ impl Visitor for FieldDependencyExtractor {
 			Part::Start(Expr::Param(param)) if is_session_param(param) => {}
 
 			// Opaque (flip + walk).
-			// Lookup: graph traversals can access other tables.
+			// Lookup: a graph traversal or reference lookup carrying a clause, which runs
+			//   user expressions over the rows it reaches.
 			// Start: `(subexpr).field` — the start expr is itself opaque to
 			//   idiom-root extraction.
 			// Method: method dispatch is dynamic on the receiver's runtime
@@ -1065,12 +1104,25 @@ mod tests {
 	}
 
 	#[test]
-	fn graph_lookup_marks_incomplete() {
-		// `->friends->person` graph traversal -- contains a Part::Lookup which
-		// is opaque to static analysis.
-		let expr = parse("->friends->person");
-		let deps = extract(&expr);
-		assert!(!deps.is_complete);
+	fn a_leading_bare_lookup_reads_only_the_id() {
+		for text in ["<~doc", "->friends", "<-friends"] {
+			let deps = extract(&parse(text));
+			assert!(deps.is_complete, "`{text}` is not opaque");
+			assert_eq!(deps.fields, vec!["id".to_owned()]);
+		}
+	}
+
+	#[test]
+	fn graph_lookup_beyond_the_bare_leading_one_marks_incomplete() {
+		for text in [
+			"->friends->person",
+			"->(friends WHERE x > 1)",
+			"->(friends LIMIT 1)",
+			"->friends.name->person",
+			"a->friends",
+		] {
+			assert!(!extract(&parse(text)).is_complete, "`{text}` must stay opaque");
+		}
 	}
 
 	#[test]
