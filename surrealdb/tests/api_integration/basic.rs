@@ -1796,13 +1796,19 @@ pub async fn set_unset(new_db: impl CreateDb) {
 	assert_eq!(name, value);
 	// `token` is a reserved variable
 	db.set("token", value).await.unwrap_err();
-	// as is each name the system binds, which can be neither set nor unset
-	for name in [
-		"auth", "access", "token", "session", "this", "self", "parent", "value", "input", "before",
-		"after", "event",
-	] {
+	// as is each name the engine reads from the session, which can be neither set nor unset
+	for name in ["auth", "access", "token", "session"] {
 		db.set(name, value).await.unwrap_err();
 		db.unset(name).await.unwrap_err();
+	}
+	// A name the engine binds per frame is not reserved: the frame's own binding shadows it, so
+	// a client may bind it like any other parameter.
+	for name in ["this", "self", "parent", "value", "input", "before", "after", "event"] {
+		db.set(name, value).await.unwrap();
+		let mut response = db.query(format!("RETURN ${name}")).await.unwrap();
+		let bound: Option<String> = response.take(0).unwrap();
+		assert_eq!(bound.as_deref(), Some(value), "`{name}` read back");
+		db.unset(name).await.unwrap();
 	}
 	// make sure we can still run queries after trying to set a protected variable
 	db.query("RETURN true").await.unwrap().check().unwrap();

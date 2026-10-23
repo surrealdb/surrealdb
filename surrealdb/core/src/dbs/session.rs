@@ -229,10 +229,9 @@ pub struct Session {
 	/// once at authentication time and read back as `$session.data`.
 	///
 	/// Server-computed: nothing a client sends populates it. `session` is in
-	/// [`surrealdb_cnf::PROTECTED_PARAM_NAMES`], so `LET`, `UNSET`, `db.set`
-	/// and the RPC `set`/`unset` methods all refuse to bind the name, as they
-	/// do each name the system binds in a frame
-	/// ([`surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES`]).
+	/// [`surrealdb_cnf::PROTECTED_PARAM_NAMES`], so `LET`, `UNSET`, `db.set`,
+	/// the RPC `set`/`unset` methods and a request's own parameters all refuse
+	/// to bind the name.
 	///
 	/// SECURITY: every route that binds a user-chosen parameter name refuses a
 	/// protected one as well: a `FOR` variable, a closure parameter and a

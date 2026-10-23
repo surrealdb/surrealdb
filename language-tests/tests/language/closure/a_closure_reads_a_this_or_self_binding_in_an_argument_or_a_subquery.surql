@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure written in a frame that binds `$this` or `$self` reads that binding, whether the literal is a method argument, is invoked inside an argument, is nested in the body of another such closure, or is written in a subquery of another closure's body. `LET $this` and `LET $self` are refused wherever they are written, in a block, in a clause and at the top level, so each statement that holds one raises the refusal. A `$this` read where none is bound is the current value of the frame: none at the top level, the row in a statement over rows, and the row a subquery's source yields inside a subquery."
+reason = "A closure written in a frame that binds `$this` or `$self` reads that binding, whether the literal is a method argument, is invoked inside an argument, is nested in the body of another such closure, or is written in a subquery of another closure's body. `LET $this` and `LET $self` are refused where they are written inside a frame — in a block, in a clause — so each statement that holds one raises the refusal; a `LET` that is a whole statement binds a request variable instead. A `$this` read where none is bound is the current value of the frame: none at the top level, the row in a statement over rows, and the row a subquery's source yields inside a subquery."
 
 [[test.results]]
 value = "[{ id: ts:1, lim: 1 }]"
@@ -70,7 +70,7 @@ error = "'this' is a protected variable and cannot be set"
 error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-error = "'this' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
 value = "[NONE]"

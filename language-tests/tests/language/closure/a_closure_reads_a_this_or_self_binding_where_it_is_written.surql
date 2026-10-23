@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure whose body reads `$this` or `$self` reads the binding of that name that holds where the literal is written: a `FOR` variable or a function parameter. The closure-free read at the same place is the control, and an unbound name is the current value, as it is without a binding. `LET $this` and `LET $self` are refused wherever they are written, in a block, in a clause, in a field definition and at the top level, so each statement that holds one raises the refusal and a `$this` or `$self` read after a refused `LET` is unbound."
+reason = "A closure whose body reads `$this` or `$self` reads the binding of that name that holds where the literal is written: a `FOR` variable or a function parameter. The closure-free read at the same place is the control, and an unbound name is the current value, as it is without a binding. `LET $this` and `LET $self` are refused where they are written inside a frame — in a block, in a clause, in a field definition — so each statement that holds one raises the refusal and a `$this` or `$self` read after a refused `LET` is unbound. A `LET` that is a whole statement binds a request variable instead, which a closure written outside a row reads and a row-bearing statement shadows with its row."
 
 [[test.results]]
 value = "[{ id: pt:1, lim: 1 }]"
@@ -103,31 +103,31 @@ error = "'this' is a protected variable and cannot be set"
 error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-error = "'this' is a protected variable and cannot be set"
+value = "NONE"
+
+[[test.results]]
+value = "3"
+
+[[test.results]]
+value = "3"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "3"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
+value = "[3, 3]"
 
 [[test.results]]
 value = "[1, 8]"
 
 [[test.results]]
-value = "[1, 8]"
-
-[[test.results]]
-error = "'self' is a protected variable and cannot be set"
-
-[[test.results]]
 value = "NONE"
+
+[[test.results]]
+value = "3"
 
 [[test.results]]
 value = "NONE"

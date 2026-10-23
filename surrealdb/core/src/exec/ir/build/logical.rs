@@ -1135,12 +1135,13 @@ fn bind_fetch(
 /// `LET`: a name bound to the value for the rest of the statement list it stands in.
 ///
 /// A `LET` that is a whole statement sets a parameter of the session, which no later statement
-/// region reads through this value; one anywhere else is local to its region. A protected name
-/// and a name the system binds (`this`, `value`, ...) are refused, unless the planner wrote the
-/// `LET`. Where the `LET` is planned with its top-level statement the refusal is the whole
-/// statement's, raised before any of it runs, whether or not the `LET` is reached; where it
-/// follows a statement that may change the catalog it is planned when its list reaches it, so the
-/// raise stands at the `LET` and is not bound at all when the `LET` is never reached.
+/// region reads through this value; one anywhere else is local to its region. A protected name is
+/// refused either way; a name the system binds in a frame (`this`, `value`, ...) is refused only
+/// of a `LET` local to a region, and not where the planner wrote the `LET`. Where the `LET` is
+/// planned with its top-level statement the refusal is the whole statement's, raised before any
+/// of it runs, whether or not the `LET` is reached; where it follows a statement that may change
+/// the catalog it is planned when its list reaches it, so the raise stands at the `LET` and is
+/// not bound at all when the `LET` is never reached.
 fn bind_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, IrError> {
 	bind_let_as(cx, statement, false)
 }
@@ -1175,7 +1176,15 @@ fn bind_valued_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, 
 /// [`bind_let`], binding a name local to the region whatever region it stands in where `local`
 /// says so.
 fn bind_let_as(cx: &mut BindCx<'_>, statement: &LogicalLet, local: bool) -> Result<Flow, IrError> {
-	if statement.is_refused() {
+	// What the `LET` binds decides which names it refuses, so it is settled before the refusal: a
+	// session binding is a request variable and refuses the protected names alone, a local one
+	// stands in a frame and also refuses the names the system binds there.
+	let binding = if !local && matches!(cx.kinds().last(), Some(RegionKind::Statement(_))) {
+		LetBinding::Session
+	} else {
+		LetBinding::Local
+	};
+	if statement.is_refused(binding == LetBinding::Session) {
 		let refusal = Refusal::ProtectedParam {
 			name: statement.name.clone(),
 		};
@@ -1186,11 +1195,6 @@ fn bind_let_as(cx: &mut BindCx<'_>, statement: &LogicalLet, local: bool) -> Resu
 		cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
 		return Ok(Flow::Diverged);
 	}
-	let binding = if !local && matches!(cx.kinds().last(), Some(RegionKind::Statement(_))) {
-		LetBinding::Session
-	} else {
-		LetBinding::Local
-	};
 	// The value of a block's `LET` that is a statement runs as a group of its own. A `RETURN` that
 	// is the value of a block-local `LET` is a parenthesised subquery, the value scope its `RETURN`
 	// ends. A session `LET` at statement level keeps the `RETURN` as its statement's value.

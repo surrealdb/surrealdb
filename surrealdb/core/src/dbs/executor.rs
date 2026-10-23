@@ -1220,17 +1220,19 @@ impl SessionLetRefusal {
 
 /// Admit the binding of the top-level `LET` `name` to `value`, or refuse it.
 ///
-/// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) or a name the system
-/// binds (`$this`, `$value`, ...) is never bound by a `LET`, whichever path delivers the binding.
-/// A binding the carry bound refuses is recorded nowhere. Every driver of top-level statements
-/// admits a binding here before it writes it to the request context.
+/// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) is never bound by a
+/// `LET`, whichever path delivers the binding. A top-level `LET` binds a variable of the request,
+/// as a client's own `set` does, so a name the system binds in a frame (`$this`, `$value`, ...)
+/// is admitted here and shadowed by the frame that binds it. A binding the carry bound refuses is
+/// recorded nowhere. Every driver of top-level statements admits a binding here before it writes
+/// it to the request context.
 pub(crate) fn admit_session_let(
 	carry: &CarryBound,
 	carried: &mut Carried,
 	name: &str,
 	value: &Value,
 ) -> std::result::Result<(), SessionLetRefusal> {
-	if surrealdb_cnf::is_refused_let_name(name) {
+	if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name) {
 		return Err(SessionLetRefusal::Name(ExecError::InvalidParam {
 			name: name.to_owned(),
 		}));
@@ -2668,7 +2670,7 @@ impl Executor {
 	) -> FlowResult<Value> {
 		// Reject protected names first, before any work: avoids planning
 		// or computing a value we'll throw away.
-		if surrealdb_cnf::is_refused_let_name(stm.name.as_str()) {
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
 			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: stm.name.to_string(),
 			})));
@@ -2725,7 +2727,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		if surrealdb_cnf::is_refused_let_name(name.as_str()) {
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: name.clone(),
 			})));

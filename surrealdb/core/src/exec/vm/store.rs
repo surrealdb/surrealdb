@@ -195,9 +195,10 @@ fn dml_inner(
 		StoreInstr::SessionLetChecks {
 			name,
 		} => {
-			// SECURITY: a protected name, and a name the system binds, is refused before the value
-			// is evaluated, so a refused `LET` has no side effects.
-			if surrealdb_cnf::is_refused_let_name(name.as_str()) {
+			// SECURITY: a protected name is refused before the value is evaluated, so a refused
+			// `LET` has no side effects. This `LET` is a statement of the request and binds a
+			// variable of it, so a name the system binds in a frame is not refused here.
+			if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(ControlFlow::Err(anyhow::Error::new(
 					crate::exec::Error::InvalidParam {
 						name: name.as_str().to_owned(),

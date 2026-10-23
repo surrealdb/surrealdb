@@ -344,7 +344,7 @@ impl Datastore {
 				} = binding;
 				// SECURITY: a protected name is refused before the value is evaluated, so a refused
 				// `LET` has no side effects.
-				if surrealdb_cnf::is_refused_let_name(name.as_str()) {
+				if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 					return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidParam {
 						name,
 					})));

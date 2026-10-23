@@ -42,19 +42,29 @@ pub const ID_CHARS: [char; 36] = [
 /// Specifies the names of parameters which can not be specified in a query
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
-/// Specifies the names the system binds itself in the frame of a statement, a clause, a field, an
-/// event or a function: the value a clause or an element filter reads (`this`, `self`, `parent`),
-/// and the values an event or a field definition reads (`value`, `input`, `before`, `after`,
+/// Specifies the names the system binds itself in the frame of a clause, a field, an event or a
+/// function body: the value a clause or an element filter reads (`this`, `self`, `parent`), and
+/// the values an event or a field definition reads (`value`, `input`, `before`, `after`,
 /// `event`). They are not in [`PROTECTED_PARAM_NAMES`]: that list names the values read from the
 /// session, and the planner folds, captures and scopes by it, which these names are not.
+///
+/// A name here is bound per frame, so it is the frame's to bind and a binding made outside one is
+/// shadowed by it. A client may bind any of these as a request or session variable, and a `LET`
+/// that is a whole statement of a request — which binds the same request variable by another
+/// route — may bind one too. Only a `LET` written *inside* a frame may not
+/// ([`is_refused_local_let_name`]), because the plan reads the name from the frame rather than
+/// from the `LET`.
 pub const SYSTEM_BOUND_PARAM_NAMES: &[&str] =
 	&["this", "self", "parent", "value", "input", "before", "after", "event"];
 
-/// Whether a user may not set or unset the variable `name`, by `LET`, by the session's `set` and
-/// `unset`, or by a variable bound to a request: a protected parameter name, and a name the system
-/// binds. A `LET` the planner writes to bind a system name into a frame is exempt, see
+/// Whether a `LET` written inside a frame — a block, a clause, a field, an event, a function body,
+/// stored code — may not bind `name`: a protected parameter name, and a name the system binds in
+/// that frame. A `LET` the planner writes to bind a system name into a frame is exempt, see
 /// [`SYSTEM_BOUND_PARAM_NAMES`].
-pub fn is_refused_let_name(name: &str) -> bool {
+///
+/// This is not the question asked of a variable a client binds, or of a `LET` that is a whole
+/// statement of a request: those refuse [`PROTECTED_PARAM_NAMES`] alone.
+pub fn is_refused_local_let_name(name: &str) -> bool {
 	SYSTEM_BOUND_PARAM_NAMES.contains(&name) || PROTECTED_PARAM_NAMES.contains(&name)
 }
 

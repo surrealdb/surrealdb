@@ -4,7 +4,31 @@ namespace = true
 database = true
 
 [test]
-reason = "A LET of a name the system binds is refused as a LET of a protected name is: `$this`, `$self`, `$parent`, `$value`, `$input`, `$before`, `$after` and `$event` are values a clause, an event or a field definition reads from the frame it runs in, so no statement binds one, whether it is a whole statement, written in a block or a branch, typed, in a function body, which `DEFINE FUNCTION` refuses so that no function is defined, or in a closure body. The refusal is the whole statement's and no binding is made. An ordinary name is bound."
+reason = "A `LET` written inside a frame may not bind a name the system binds there: `$this`, `$self`, `$parent`, `$value`, `$input`, `$before`, `$after` and `$event` are values a clause, an event or a field definition reads from the frame it runs in, and a `LET` stands in the plan rather than around it, so nothing could shadow it. The refusal covers a block, a branch, a function body — which `DEFINE FUNCTION` refuses so that no function is defined — and a closure body, and is the whole statement's, so no binding is made. A `LET` that is a whole statement of the request binds a request variable instead, which the frame's own binding shadows, so it binds the name like any other. An ordinary name is bound either way."
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 error = "'this' is a protected variable and cannot be set"
@@ -31,52 +55,28 @@ error = "'after' is a protected variable and cannot be set"
 error = "'event' is a protected variable and cannot be set"
 
 [[test.results]]
-error = "'this' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'self' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'parent' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'value' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'input' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'before' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'after' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-error = "'event' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'this' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'self' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'parent' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'value' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'input' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'before' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'after' is a protected variable and cannot be set"
-
-[[test.results]]
-error = "'event' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
 error = "'this' is a protected variable and cannot be set"

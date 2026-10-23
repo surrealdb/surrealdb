@@ -175,10 +175,9 @@ SurrealDB's security model rests on four pillars:
   record user can print. It must also be read-only and must run only after the
   identity is settled, so an unverified credential never triggers it.
 - `$session.data` is server-computed, but it is **not** unforgeable, and no
-  invariant may be written as if it were. `PROTECTED_PARAM_NAMES`, with the
-  names the system binds in a frame (`surrealdb_cnf::is_refused_let_name`), is
-  consulted only by `LET`, `UNSET`, `db.set`, RPC `set`/`unset` and request
-  variables; the constructs that
+  invariant may be written as if it were. `PROTECTED_PARAM_NAMES` is consulted
+  only by `LET`, `UNSET`, `db.set`, RPC `set`/`unset` and request variables; the
+  constructs that
   bind a caller-chosen parameter name — `FOR $session IN [...]`, closure
   parameters, user-defined function arguments — bind it unchecked, and
   `Context::value` prefers a locally-inserted key over the parent chain. The
@@ -193,6 +192,23 @@ SurrealDB's security model rests on four pillars:
   closure or user-defined function binds so that a read beneath one of them is
   left to the evaluator. A fold that ignored them would answer with the
   ambient session where the evaluator answers with the binding.
+- `SYSTEM_BOUND_PARAM_NAMES` — `$this`, `$self`, `$parent`, `$value`, `$input`,
+  `$before`, `$after`, `$event` — are bound per frame, not read from the
+  session, and a client may bind any of them as a request or session variable.
+  What keeps the client's binding from standing in for the frame's is scope,
+  not a refusal, so two properties are load-bearing wherever a frame binds one:
+  the frame's binding must be the nearer one a read finds, and nothing the
+  frame runs may fold the ambient value at plan time. A write frame's names are
+  resolved per evaluation with `EvalContext::write_binding` ahead of the
+  context value (`scalar_unit.rs`), a subscription's unit is planned with
+  `SUBSCRIBER_NAMES` shadowed (`vm/live.rs`) and its frame adds the captured
+  variables **before** the trusted bindings so the trusted ones overwrite
+  (`subscriber_frame`). A new frame that binds one of these names must do the
+  same; folding one, or binding it before a captured variable of the same name,
+  hands a subscriber or a permission predicate a document of the caller's
+  choosing. A `LET` written inside a frame is refused one of these names
+  (`is_refused_local_let_name`), because a `LET` is in the plan rather than
+  around it and there is no scope that could shadow it.
 - A closure invoked at runtime reads whatever row it is invoked against, and
   its body is nowhere in the expression that invokes it. The streaming
   planner's demand analysis decides which fields can reach the caller and
@@ -1614,8 +1630,7 @@ Flag when changes touch:
   seen as `record` and remains denied.
 - eval must reject transaction-control and session-level top-level statements
   (BEGIN/CANCEL/COMMIT/USE/LIVE/KILL/OPTION/SHOW/access), bound recursion, and
-  honour `PROTECTED_PARAM_NAMES` and the names the system binds
-  (`surrealdb_cnf::is_refused_let_name`) for caller bindings. The recursion bound is
+  honour `PROTECTED_PARAM_NAMES` for caller bindings. The recursion bound is
   expression-nesting depth charged against `max_computation_depth`, carried in as a
   budget so a query reached through nested `eval` calls cannot reset it; there is no
   separate eval-only depth constant.

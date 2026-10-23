@@ -270,13 +270,6 @@ impl Debug for Context {
 	}
 }
 
-/// Whether a variable named `name` may not be bound to a context: a protected name always, and a
-/// name the system binds in a frame (`$this`, `$value`, ...) where the binding is a request's
-/// variable rather than a closure's capture of the frame's own binding.
-fn bound_name_refused(name: &str, request: bool) -> bool {
-	PROTECTED_PARAM_NAMES.contains(&name) || (request && surrealdb_cnf::is_refused_let_name(name))
-}
-
 impl Context {
 	/// Creates a new empty background context. It carries the parent's
 	/// statement clock: the work it runs, a live subscription's clauses for one
@@ -1728,6 +1721,13 @@ impl Context {
 	/// Attach variables to the context. They are the request's parameters: a
 	/// function body reads them past its call boundary
 	/// ([`Self::lexical_value`]), where it reads no `LET` or `FOR` binding.
+	///
+	/// A protected name is refused. A name the system binds in a frame
+	/// (`$this`, `$value`, ...) is not: the frame binds it on a context of its
+	/// own and [`Self::value`] prefers the nearer binding, so the frame's
+	/// value is what its code reads, and outside such a frame the request's
+	/// own binding is read. Refusing it here would refuse the ordinary
+	/// parameters clients bind.
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
 		self.bind_variables(vars, true)
 	}
@@ -1736,15 +1736,15 @@ impl Context {
 	/// protected name as [`Self::attach_variables`] does. A capture is the
 	/// closure's own binding, not a request parameter, so a function the
 	/// closure's body calls does not read it. A capture may be named as a
-	/// value the system binds (`$this`, `$value`, ...): the closure captured
-	/// the frame's binding of it.
+	/// value the system binds (`$this`, `$value`, ...), which is the frame's
+	/// binding that the closure captured.
 	pub(crate) fn attach_captures(&mut self, vars: Variables) -> Result<(), Error> {
 		self.bind_variables(vars, false)
 	}
 
 	fn bind_variables(&mut self, vars: Variables, request: bool) -> Result<(), Error> {
 		for (name, val) in vars {
-			if bound_name_refused(name.as_str(), request) {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(ExecError::InvalidParam {
 					name: name.into_string(),
 				}
@@ -1777,7 +1777,7 @@ impl Context {
 	/// [`Self::attach_variables`] attaches them.
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
-			if bound_name_refused(name.as_str(), true) {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(ExecError::InvalidParam {
 					name,
 				}
@@ -2695,31 +2695,58 @@ mod tests {
 		assert_eq!(frame.lexical_value("q"), None);
 	}
 
-	/// A request's variables refuse a protected name and each name the system binds; a
-	/// closure's captures refuse only a protected name, for a closure written in a frame
-	/// that binds `$value` captures that binding.
+	/// A request's variables, and a closure's captures, refuse a protected name alone. A name
+	/// the system binds in a frame is bound per frame and shadowed there, so a client may bind
+	/// one as a parameter of its request: refusing it would refuse `$value`, `$input` and the
+	/// rest as ordinary parameter names, which every SDK lets a caller bind.
 	#[test]
-	fn request_variables_refuse_the_names_the_system_binds() {
+	fn variables_refuse_a_protected_name_and_no_other() {
 		use crate::dbs::Variables;
 		use crate::val::Value;
 
-		for name in ["auth", "this", "self", "parent", "value", "input", "before", "after", "event"]
-		{
+		for name in surrealdb_cnf::PROTECTED_PARAM_NAMES {
 			let mut vars = Variables::new();
-			vars.insert(name, Value::from(1));
+			vars.insert(*name, Value::from(1));
 			assert!(
 				Context::new_test().attach_variables(vars.clone()).is_err(),
 				"`{name}` bound as a request variable"
 			);
-			assert_eq!(
+			assert!(
 				Context::new_test().attach_captures(vars).is_err(),
-				name == "auth",
 				"`{name}` bound as a capture"
 			);
 		}
+		for name in surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES.iter().chain(["limit"].iter()) {
+			let mut vars = Variables::new();
+			vars.insert(*name, Value::from(1));
+			Context::new_test()
+				.attach_variables(vars.clone())
+				.unwrap_or_else(|_| panic!("`{name}` attaches as a request variable"));
+			Context::new_test()
+				.attach_captures(vars)
+				.unwrap_or_else(|_| panic!("`{name}` attaches as a capture"));
+		}
+	}
+
+	/// A frame's own binding of a name the system binds is what its code reads, whatever the
+	/// request bound under that name: the nearer binding wins.
+	#[test]
+	fn a_frame_binding_shadows_a_request_variable_of_the_same_name() {
+		use std::sync::Arc;
+
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
 		let mut vars = Variables::new();
-		vars.insert("limit", Value::from(1));
-		Context::new_test().attach_variables(vars).expect("an ordinary name attaches");
+		vars.insert("value", Value::from(1));
+		let mut request = Context::new_test();
+		request.attach_variables(vars).expect("`value` attaches as a request variable");
+		let request = request.freeze();
+		assert_eq!(request.value("value"), Some(&Value::from(1)));
+
+		let mut frame = Context::new_child(&request);
+		frame.add_value("value", Arc::new(Value::from(2)));
+		assert_eq!(frame.value("value"), Some(&Value::from(2)));
 	}
 
 	/// The scope a body is planned in holds the request parameters and the

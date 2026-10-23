@@ -1449,11 +1449,21 @@ pub struct LogicalLet {
 }
 
 impl LogicalLet {
-	/// Whether `LET` refuses to bind this name: a protected parameter name, and a name the system
-	/// binds. A `LET` the planner wrote may bind a name the system binds, never a protected one.
-	pub fn is_refused(&self) -> bool {
+	/// Whether `LET` refuses to bind this name, where `session` says the `LET` is a whole
+	/// statement of a request and so binds a request variable.
+	///
+	/// A session `LET` refuses a protected parameter name alone: it binds the same variable a
+	/// client binds with `set` or with a query's parameters, and the names the system binds are
+	/// bound per frame, so a frame's own binding shadows it. A `LET` written inside a frame — a
+	/// block, a clause, a field, an event, a function body — also refuses a name the system binds
+	/// there, because the plan reads that name from the frame rather than from the `LET`. A `LET`
+	/// the planner wrote is what binds the system's name into a frame, so it is exempt.
+	pub fn is_refused(&self, session: bool) -> bool {
 		let name = self.name.as_str();
-		surrealdb_cnf::is_refused_let_name(name)
+		if session {
+			return surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name);
+		}
+		surrealdb_cnf::is_refused_local_let_name(name)
 			&& !(self.synthetic && surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES.contains(&name))
 	}
 }

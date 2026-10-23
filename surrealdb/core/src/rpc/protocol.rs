@@ -3479,10 +3479,11 @@ mod tests {
 		assert_eq!(count_rpc_events(true).await, 0, "the no-op short-circuit did not fire");
 	}
 
-	/// The `set`/`let` and `unset` methods refuse a protected name and each name the system
-	/// binds, and leave the session's variables as they were.
+	/// The `set`/`let` and `unset` methods refuse a protected name, and leave the session's
+	/// variables as they were. A name the system binds in a frame is not refused: the frame's
+	/// own binding shadows it, so a client may hold a variable under that name.
 	#[tokio::test]
-	async fn set_and_unset_refuse_the_names_the_system_binds() {
+	async fn set_and_unset_refuse_a_protected_name() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(41);
@@ -3495,10 +3496,7 @@ mod tests {
 			]
 			.into()
 		};
-		for name in [
-			"auth", "access", "token", "session", "this", "self", "parent", "value", "input",
-			"before", "after", "event",
-		] {
+		for name in ["auth", "access", "token", "session"] {
 			for method in [Method::Set, Method::Unset] {
 				let params = if matches!(method, Method::Set) {
 					keyed(name)
@@ -3518,9 +3516,13 @@ mod tests {
 				.await
 				.expect_err("a refused name is not removed by a set to NONE");
 		}
-		// An ordinary name is set and unset.
-		rpc.execute(None, sid, Some(sid), Method::Set, keyed("limit")).await.unwrap();
-		rpc.execute(None, sid, Some(sid), Method::Unset, key("limit")).await.unwrap();
+		// An ordinary name is set and unset, as is each name the system binds in a frame.
+		for name in
+			["limit", "this", "self", "parent", "value", "input", "before", "after", "event"]
+		{
+			rpc.execute(None, sid, Some(sid), Method::Set, keyed(name)).await.unwrap();
+			rpc.execute(None, sid, Some(sid), Method::Unset, key(name)).await.unwrap();
+		}
 	}
 
 	/// A query and a session mutation on the same session must both complete.

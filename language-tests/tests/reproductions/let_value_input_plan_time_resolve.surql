@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "A LET of `$value` or `$input` is refused: they are names the system binds for an event or a field, so no statement binds one. A statement that reads the name afterwards reads it unbound, so it matches no row."
+reason = "LET $value and $input bindings must be resolvable at plan time despite sharing names with doc-scoped params"
 
 [[test.results]]
 value = "NONE"
@@ -23,16 +23,16 @@ value = "[{ id: items:2, x: 20 }]"
 value = "[{ id: items:3, x: 30 }]"
 
 [[test.results]]
-error = "'value' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: items:2, x: 20 }]"
 
 [[test.results]]
-error = "'input' is a protected variable and cannot be set"
+value = "NONE"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: items:1, x: 10 }]"
 */
 
 DEFINE TABLE items SCHEMAFULL;
@@ -41,8 +41,8 @@ CREATE items:1 SET x = 10;
 CREATE items:2 SET x = 20;
 CREATE items:3 SET x = 30;
 
--- $value and $input are names the system binds for events and fields, so
--- a LET of either is refused.
+-- $value and $input share names with doc-scoped event variables, but
+-- when set via LET they must be resolved normally at plan time.
 LET $value = 20;
 SELECT * FROM items WHERE x = $value;
 
