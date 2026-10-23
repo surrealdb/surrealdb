@@ -333,11 +333,11 @@ impl TransactionBuilder for SharedBuilder {
 }
 
 /// A composer handing every datastore it builds the same backend.
-struct SharedBackend(Arc<dyn TransactionBuilder>);
+pub(super) struct SharedBackend(Arc<dyn TransactionBuilder>);
 
 impl SharedBackend {
 	#[cfg(feature = "kv-mem")]
-	async fn memory() -> Self {
+	pub(super) async fn memory() -> Self {
 		let builder = surrealdb_kvs_any::Backends::community()
 			.new_transaction_builder("memory", CancellationToken::new(), ConfigMap::empty())
 			.await
@@ -369,7 +369,7 @@ impl TransactionBuilderFactory for SharedBackend {
 /// Where `legacy`, it keeps a store at the Legacy level there, and records no
 /// level of its own on a store it finds new.
 #[cfg(feature = "kv-mem")]
-async fn node(backend: &SharedBackend, legacy: bool) -> Arc<Datastore> {
+pub(super) async fn node(backend: &SharedBackend, legacy: bool) -> Arc<Datastore> {
 	let builder = Datastore::builder().with_id(Uuid::new_v4()).without_maintenance_tasks();
 	let builder = if legacy {
 		builder.with_legacy_feature_level().without_startup_transactions()

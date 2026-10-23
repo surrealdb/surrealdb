@@ -715,7 +715,10 @@ impl BoundSelect {
 				self.collect_source_parameters(left, catalog, params);
 				self.collect_source_parameters(right, catalog, params);
 			}
-			_ => {}
+			BoundTableSource::Table {
+				..
+			}
+			| BoundTableSource::Values => {}
 		}
 	}
 

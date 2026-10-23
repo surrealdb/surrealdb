@@ -449,7 +449,28 @@ impl TransactionFactory {
 		sequences: &Sequences,
 		idle: std::time::Duration,
 	) -> Result<usize> {
-		crate::tx::release_idle_writer_leases(self, &self.triggers, sequences, idle).await
+		crate::tx::release_idle_writer_leases(self, &self.triggers, sequences, idle, None).await
+	}
+
+	/// Release every writer lease this datastore holds on `index`, however
+	/// recently a commit relied on it, and return how many it released. For a
+	/// caller that has finished writing into the index and wants its drained
+	/// guards stepped to `Empty` now rather than once the leases go idle; a
+	/// later write takes a lease again. See
+	/// [`crate::tx::release_idle_writer_leases`].
+	pub async fn release_writer_leases_of(
+		&self,
+		sequences: &Sequences,
+		index: &crate::values::index_delta::BufferedIndex,
+	) -> Result<usize> {
+		crate::tx::release_idle_writer_leases(
+			self,
+			&self.triggers,
+			sequences,
+			std::time::Duration::ZERO,
+			Some(index),
+		)
+		.await
 	}
 
 	/// The write transactions open through this datastore

@@ -37,7 +37,33 @@ fn predicate(op: &LogicalOp) -> String {
 		LogicalOp::Sort(s) => predicate(&s.input),
 		LogicalOp::Limit(l) => predicate(&l.input),
 		LogicalOp::Aggregate(a) => predicate(&a.input),
-		other => panic!("no filter under {other:?}"),
+		other @ LogicalOp::Source(_)
+		| other @ LogicalOp::Values(_)
+		| other @ LogicalOp::Match(_)
+		| other @ LogicalOp::Subquery(_)
+		| other @ LogicalOp::Write(_)
+		| other @ LogicalOp::Ddl(_)
+		| other @ LogicalOp::UnionAll(_)
+		| other @ LogicalOp::Join(_)
+		| other @ LogicalOp::PermissionFilter(_)
+		| other @ LogicalOp::Split(_)
+		| other @ LogicalOp::Distinct(_)
+		| other @ LogicalOp::Fetch(_)
+		| other @ LogicalOp::Timeout(_)
+		| other @ LogicalOp::VersionScope(_)
+		| other @ LogicalOp::Only(_)
+		| other @ LogicalOp::Explain(_)
+		| other @ LogicalOp::Eval(_)
+		| other @ LogicalOp::Sequence(_)
+		| other @ LogicalOp::Let(_)
+		| other @ LogicalOp::Return(_)
+		| other @ LogicalOp::Foreach(_)
+		| other @ LogicalOp::If(_)
+		| other @ LogicalOp::Throw(_)
+		| other @ LogicalOp::Break(_)
+		| other @ LogicalOp::Continue(_)
+		| other @ LogicalOp::Info(_)
+		| other @ LogicalOp::Sleep(_) => panic!("no filter under {other:?}"),
 	}
 }
 
@@ -73,7 +99,34 @@ fn join_keys(op: &LogicalOp) -> Vec<(String, String)> {
 		LogicalOp::Project(p) => join_keys(&p.input),
 		LogicalOp::Filter(f) => join_keys(&f.input),
 		LogicalOp::Sort(s) => join_keys(&s.input),
-		other => panic!("no join under {other:?}"),
+		other @ LogicalOp::Source(_)
+		| other @ LogicalOp::Values(_)
+		| other @ LogicalOp::Match(_)
+		| other @ LogicalOp::Subquery(_)
+		| other @ LogicalOp::Write(_)
+		| other @ LogicalOp::Ddl(_)
+		| other @ LogicalOp::UnionAll(_)
+		| other @ LogicalOp::PermissionFilter(_)
+		| other @ LogicalOp::Split(_)
+		| other @ LogicalOp::Aggregate(_)
+		| other @ LogicalOp::Distinct(_)
+		| other @ LogicalOp::Limit(_)
+		| other @ LogicalOp::Fetch(_)
+		| other @ LogicalOp::Timeout(_)
+		| other @ LogicalOp::VersionScope(_)
+		| other @ LogicalOp::Only(_)
+		| other @ LogicalOp::Explain(_)
+		| other @ LogicalOp::Eval(_)
+		| other @ LogicalOp::Sequence(_)
+		| other @ LogicalOp::Let(_)
+		| other @ LogicalOp::Return(_)
+		| other @ LogicalOp::Foreach(_)
+		| other @ LogicalOp::If(_)
+		| other @ LogicalOp::Throw(_)
+		| other @ LogicalOp::Break(_)
+		| other @ LogicalOp::Continue(_)
+		| other @ LogicalOp::Info(_)
+		| other @ LogicalOp::Sleep(_) => panic!("no join under {other:?}"),
 	}
 }
 
@@ -692,7 +745,35 @@ fn ordering(op: &LogicalOp) -> Vec<String> {
 		}
 		LogicalOp::Project(p) => ordering(&p.input),
 		LogicalOp::Limit(l) => ordering(&l.input),
-		other => panic!("no sort under {other:?}"),
+		other @ LogicalOp::Source(_)
+		| other @ LogicalOp::Values(_)
+		| other @ LogicalOp::Match(_)
+		| other @ LogicalOp::Subquery(_)
+		| other @ LogicalOp::Write(_)
+		| other @ LogicalOp::Ddl(_)
+		| other @ LogicalOp::UnionAll(_)
+		| other @ LogicalOp::Join(_)
+		| other @ LogicalOp::Filter(_)
+		| other @ LogicalOp::PermissionFilter(_)
+		| other @ LogicalOp::Split(_)
+		| other @ LogicalOp::Aggregate(_)
+		| other @ LogicalOp::Distinct(_)
+		| other @ LogicalOp::Fetch(_)
+		| other @ LogicalOp::Timeout(_)
+		| other @ LogicalOp::VersionScope(_)
+		| other @ LogicalOp::Only(_)
+		| other @ LogicalOp::Explain(_)
+		| other @ LogicalOp::Eval(_)
+		| other @ LogicalOp::Sequence(_)
+		| other @ LogicalOp::Let(_)
+		| other @ LogicalOp::Return(_)
+		| other @ LogicalOp::Foreach(_)
+		| other @ LogicalOp::If(_)
+		| other @ LogicalOp::Throw(_)
+		| other @ LogicalOp::Break(_)
+		| other @ LogicalOp::Continue(_)
+		| other @ LogicalOp::Info(_)
+		| other @ LogicalOp::Sleep(_) => panic!("no sort under {other:?}"),
 	}
 }
 
@@ -769,7 +850,27 @@ fn pg_write(sql: &str) -> String {
 		surrealdb_pgsql::ast::stmt::Statement::Delete(delete) => {
 			lower_pgsql_delete(delete, &catalog())
 		}
-		_ => panic!("expected UPDATE or DELETE"),
+		surrealdb_pgsql::ast::stmt::Statement::Copy(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Select(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Insert(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Truncate(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
+		| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateSchema(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Drop(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Transaction(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Set(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Show(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Reset(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Explain(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Prepare(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Execute(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Deallocate(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreatePropertyGraph(_)
+		| surrealdb_pgsql::ast::stmt::Statement::DropPropertyGraph(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Empty => panic!("expected UPDATE or DELETE"),
 	}
 	.expect("lower")
 	.to_sql()

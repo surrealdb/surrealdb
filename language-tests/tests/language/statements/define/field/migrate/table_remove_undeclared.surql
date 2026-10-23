@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "asserts the table migration job's progress before the job has run (an index refused while `drop_legacy` has not finished rewriting), which holds only because the embedded harness builds its datastores without maintenance tasks; a server wakes the job when the statement commits"
+
 [test]
 reason = "REMOVE UNDECLARED FIELDS clears values no field declares from every row stored before it, keeps id, re-runs as a no-op, and refuses an index on an undeclared path while pending."
 

@@ -432,6 +432,14 @@ impl Materialiser {
 		self.builder.transaction_factory().transaction(tt, self.sequences.clone()).await
 	}
 
+	/// Release every writer lease this node holds on index `ikb`, in every guard family, and
+	/// answer how many it released. A lease is only held on a store this datastore is not the
+	/// sole writer of, so elsewhere this releases nothing.
+	async fn release_writer_leases(&self, ikb: &IndexKeyBase) -> Result<usize> {
+		let index = ikb.guarded(surrealdb_datastore::pending_guard::PendingGuardFamily::Hnsw).index;
+		self.builder.transaction_factory().release_writer_leases_of(&self.sequences, &index).await
+	}
+
 	/// The process-local mutex for `ikb`'s passes. A caller holds it across a
 	/// pass, so two passes in this process never plan the same work.
 	pub(crate) fn lock(&self, ikb: &IndexKeyBase) -> Arc<tokio::sync::Mutex<()>> {
@@ -1902,6 +1910,7 @@ impl MaterialiseAfterCommit {
 		};
 		let lock = materialiser.lock(&self.ikb);
 		let mut fenced_since: Option<Instant> = None;
+		let mut leases_released = false;
 		loop {
 			if let Some(done) = self.done(deadline) {
 				return settle(done);
@@ -1935,14 +1944,30 @@ impl MaterialiseAfterCommit {
 			};
 			drop(held);
 			match report.result {
-				Ok(CompactionPassOutcome::Empty | CompactionPassOutcome::Short) => return Ok(()),
-				Ok(CompactionPassOutcome::NotVisible) => return Ok(()),
+				Ok(CompactionPassOutcome::Empty | CompactionPassOutcome::Short) => {
+					// On a store other datastores write to, a shard this node wrote into is
+					// covered by its writer lease, and no node steps a guard under a lease, so
+					// the drained guard would read `NonEmpty` until the lease went idle. The
+					// backlog is folded, so the leases are released and the next pass steps
+					// the guards.
+					if !leases_released && materialiser.release_writer_leases(&self.ikb).await? > 0
+					{
+						leases_released = true;
+						continue;
+					}
+					return Ok(());
+				}
+				Ok(CompactionPassOutcome::NotVisible) => {
+					debug!(target: TARGET, "Materialise wait for {:?} found no definition to fold through, leaving its backlog queued", self.ikb);
+					return Ok(());
+				}
 				Ok(CompactionPassOutcome::Budget | CompactionPassOutcome::LostRace) => {
 					fenced_since = None;
 				}
 				Ok(CompactionPassOutcome::Fenced) => {
 					let since = *fenced_since.get_or_insert_with(Instant::now);
 					if since.elapsed() >= MATERIALISE_FENCE_PATIENCE {
+						debug!(target: TARGET, "Materialise wait for {:?} stayed fenced by a live build owner, leaving its backlog queued", self.ikb);
 						return Ok(());
 					}
 					sleep(super::BUILD_CLOSING_SLEEP.min(self.slice(deadline))).await;

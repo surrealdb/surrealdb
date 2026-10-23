@@ -61,6 +61,8 @@ mod layout_oracle_test;
 #[cfg(feature = "kv-mem")]
 mod lightweight_test;
 #[cfg(feature = "kv-mem")]
+mod own_write_catalog_test;
+#[cfg(feature = "kv-mem")]
 mod read_only_transaction_test;
 mod reclaim_backends_test;
 #[cfg(feature = "kv-mem")]
@@ -73,6 +75,8 @@ mod rpc_session_test;
 mod select_for_update_test;
 #[cfg(feature = "kv-tikv")]
 mod sequences_tikv_test;
+#[cfg(all(feature = "search", feature = "kv-mem"))]
+mod shared_store_materialise_test;
 #[cfg(feature = "kv-mem")]
 mod stale_read_test;
 #[cfg(feature = "kv-mem")]

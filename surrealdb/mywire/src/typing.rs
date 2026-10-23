@@ -653,7 +653,22 @@ fn binary_datetime_parts(val: &Value) -> Option<DatetimeParts> {
 			};
 			(parts.year <= 9999).then_some(parts)
 		}
-		_ => None,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_) => None,
 	}
 }
 
@@ -702,7 +717,22 @@ fn encode_binary_time(buf: &mut Vec<u8>, val: &Value) {
 			),
 			None => (0, 0),
 		},
-		_ => (0, 0),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Array(_)
+		| Value::Object(_)
+		| Value::Set(_) => (0, 0),
 	};
 	if secs == 0 && micros == 0 {
 		buf.push(0);

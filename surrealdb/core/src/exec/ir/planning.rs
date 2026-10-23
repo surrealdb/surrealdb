@@ -375,7 +375,7 @@ async fn prepare(
 		memo = memo.with_database_names(ns, db);
 	}
 	if ids.is_some() {
-		memo.load_database().await.map_err(|_| unreadable())?;
+		memo.load_database().await.map_err(|e| unreadable(&e))?;
 	}
 	preload(&memo, input).await?;
 	// A statement the parser wrote is bound from the logical form the binder would lower it to,
@@ -463,7 +463,7 @@ pub(crate) async fn plan_subscription(
 			.with_backend(planning.backend)
 			.with_database_names(ns, db)
 			.with_shadowed(request.shadowed.iter().cloned());
-	memo.load_database().await.map_err(|_| unreadable())?;
+	memo.load_database().await.map_err(|e| unreadable(&e))?;
 
 	let mut fetch = Vec::new();
 	for expr in request.compiled.fetch.iter().flatten() {
@@ -525,7 +525,7 @@ pub(crate) async fn plan_subscription(
 			}
 		};
 		let views = memo.take_pending_field_views();
-		let loaded = memo.load_pending().await.map_err(|_| unreadable())?;
+		let loaded = memo.load_pending().await.map_err(|e| unreadable(&e))?;
 		for table in &views {
 			memo.insert_field_view(table.clone(), bind_field_view(planner, &memo, table).await);
 		}
@@ -731,7 +731,7 @@ async fn bind_loaded(
 			bind_request_noted(input, &effects, Some(planner.frozen().surface())).await?
 		};
 		let views = memo.take_pending_field_views();
-		let loaded = memo.load_pending().await.map_err(|_| unreadable())?;
+		let loaded = memo.load_pending().await.map_err(|e| unreadable(&e))?;
 		for table in &views {
 			memo.insert_field_view(table.clone(), bind_field_view(planner, memo, table).await);
 		}
@@ -744,9 +744,10 @@ async fn bind_loaded(
 	})
 }
 
-fn unreadable() -> IrError {
-	IrError::Invariant {
-		what: "plan_request: the catalog could not be read",
+fn unreadable(cause: &anyhow::Error) -> IrError {
+	IrError::CatalogUnreadable {
+		what: "plan_request",
+		cause: format!("{cause:#}"),
 	}
 }
 
@@ -757,7 +758,7 @@ async fn preload(memo: &PlanningCatalog, input: &RequestInput<'_>) -> Result<(),
 	let base = input.unit.position();
 	for (index, statement) in input.statements.iter().enumerate() {
 		if let RequestStatement::Ast(statement) = statement {
-			memo.preload(base + index, statement).await.map_err(|_| unreadable())?;
+			memo.preload(base + index, statement).await.map_err(|e| unreadable(&e))?;
 		}
 	}
 	Ok(())

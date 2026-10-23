@@ -103,6 +103,47 @@ pub struct LogicalStatement {
 	pub text: StatementText,
 }
 
+impl LogicalStatement {
+	/// What it takes to compile this statement again: its text and the settings that admitted
+	/// it. Cheap to take, as the text is shared with every statement of the request.
+	pub fn source(&self) -> StatementSource {
+		StatementSource {
+			kind: self.kind,
+			text: self.text.clone(),
+		}
+	}
+}
+
+/// The text of a [`LogicalStatement`], kept so that a statement whose plan a run consumed can be
+/// compiled again for another run ([`Self::compile`]).
+#[derive(Clone)]
+pub struct StatementSource {
+	kind: StatementKind,
+	text: StatementText,
+}
+
+impl StatementSource {
+	/// Compile the statement again, under the settings that admitted it the first time.
+	///
+	/// The text compiled once, so it compiles again to the same plan; `None` when it does not,
+	/// which a caller treats as a statement it cannot run again.
+	pub fn compile(&self) -> Option<LogicalStatement> {
+		let src = self.text.source.get(self.text.span.clone())?;
+		let mut statements = super::entry::execution_query(src, self.text.settings).ok()?;
+		if statements.len() != 1 {
+			return None;
+		}
+		match statements.pop()? {
+			ExecutionStatement::Logical(statement) => Some(LogicalStatement {
+				plan: statement.plan,
+				kind: self.kind,
+				text: self.text.clone(),
+			}),
+			ExecutionStatement::Surface(_) => None,
+		}
+	}
+}
+
 /// Driver directives retain their dedicated payload. Engine statements carry
 /// the logical form compiled from the flat parser arena.
 pub enum ExecutionStatement {

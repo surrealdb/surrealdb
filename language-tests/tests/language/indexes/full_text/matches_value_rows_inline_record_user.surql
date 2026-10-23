@@ -6,8 +6,9 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:rea
 [test]
 reason = """
 	As matches_value_rows_inline, for a record user denied `select` on `doc`:
-	a value row whose `id` names a `doc` record is judged on its own content in
-	either source order, and a `doc` row it may not read contributes nothing.
+	a value row whose `id` names a `doc` record is not judged against `doc`'s
+	index at all, in either source order, so even a row whose own content holds
+	the word does not match, and a `doc` row it may not read contributes nothing.
 	On `pdoc`, which it may read, a field a subquery projects as a literal is
 	judged on that literal.
 """
@@ -25,13 +26,13 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ text: 'a quick probe' }]"
+value = "[]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ text: 'a quick probe' }]"
+value = "[]"
 
 [[test.results]]
 value = "[]"

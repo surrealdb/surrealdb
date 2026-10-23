@@ -110,8 +110,8 @@ test("distinct-record writes racing on implicit table creation: occasional confl
 	const b = await secondRoot(namespace, database);
 
 	// No DEFINE TABLE: the first writers race to create the table definition
-	// implicitly, and that shared write intermittently produces a handful of
-	// write-conflict errors (observed 0-3 per 50). Invariant: a record exists
+	// implicitly, and that shared write can produce write-conflict errors once
+	// the server's bounded re-runs of a statement are spent. Invariant: a record exists
 	// for exactly every reported success — conflicts reject loudly, nothing
 	// is silently dropped.
 	const perConn = 25;
@@ -142,9 +142,10 @@ test(
 		const b = await secondRoot(namespace, database);
 		await a.query("DEFINE TABLE conc_inc; CREATE conc_inc:c SET n = 0;");
 
-		// The server does NOT auto-retry conflicting writes: a bare
-		// `UPDATE .. SET n += 1` racing a writer on another connection can fail
-		// with a write-conflict error, and it is the client's job to retry.
+		// The server runs a bare statement that loses a write conflict again, a
+		// bounded number of times, so most racing increments land; one that
+		// keeps losing still fails with a write-conflict error, and it is the
+		// client's job to retry it.
 		const perConn = 20;
 		const tasks: Promise<IncrementResult>[] = [];
 		for (let i = 0; i < perConn; i++) {
@@ -181,10 +182,10 @@ test("writes pipelined on a single connection can also conflict: they are not se
 	await a.query("DEFINE TABLE conc_pipe; CREATE conc_pipe:c SET n = 0;");
 
 	// Same contended record, all writers sharing ONE WebSocket connection.
-	// The server does NOT serialize a connection's requests — most rounds all
-	// 20 land conflict-free, but some rounds drop one write with the same
-	// write-conflict error as the cross-connection case. Do not design clients
-	// around single-connection serialization.
+	// The server does NOT serialize a connection's requests: the writes race
+	// as the cross-connection case does, and one that keeps losing after the
+	// server's bounded re-runs fails with the same write-conflict error. Do not
+	// design clients around single-connection serialization.
 	const attempts = 20;
 	const tasks: Promise<IncrementResult>[] = [];
 	for (let i = 0; i < attempts; i++) {

@@ -30,7 +30,50 @@ use crate::lower::id_key::{
 pub(crate) fn link_column(expr: &BoundExpr) -> Option<(&BoundColumnRef, &str)> {
 	match expr {
 		BoundExpr::Column(col) => col.link_table.as_deref().map(|table| (col, table)),
-		_ => None,
+		BoundExpr::Literal(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::Binary {
+			..
+		}
+		| BoundExpr::Unary {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::Cast {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => None,
 	}
 }
 
@@ -131,7 +174,9 @@ fn link_operand_with(
 			crate::lower::id_key::KeyOperand::Param(_) if preserve_value => {
 				record(lower_bound_expr(other, policy)?)
 			}
-			_ => record_of_operand(table, &key),
+			crate::lower::id_key::KeyOperand::Int(_)
+			| crate::lower::id_key::KeyOperand::Str(_)
+			| crate::lower::id_key::KeyOperand::Param(_) => record_of_operand(table, &key),
 		}));
 	}
 	if let Some((col, other_table)) = stored_record_column(other) {

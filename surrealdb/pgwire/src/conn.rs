@@ -2351,7 +2351,21 @@ impl Connection {
 								let count = match &value {
 									Value::Array(rows) => rows.len(),
 									Value::None | Value::Null => 0,
-									_ => 1,
+									Value::Bool(_)
+									| Value::Number(_)
+									| Value::String(_)
+									| Value::Bytes(_)
+									| Value::Duration(_)
+									| Value::Datetime(_)
+									| Value::Uuid(_)
+									| Value::Geometry(_)
+									| Value::Table(_)
+									| Value::RecordId(_)
+									| Value::File(_)
+									| Value::Range(_)
+									| Value::Regex(_)
+									| Value::Object(_)
+									| Value::Set(_) => 1,
 								};
 								msg::write_command_complete(out, &kind.command_tag(count));
 								continue;

@@ -163,6 +163,8 @@ fn armed_pending_summary(current: Option<&DiskAnnPendingState>) -> DiskAnnPendin
 
 /// Release the writer leases this datastore holds on indexes
 /// it has committed nothing under for `idle`, and return how many it released.
+/// Where `of` names an index, only that index's leases are considered, in
+/// every guard family.
 ///
 /// Each index's leases are released holding its guard fence exclusively, so no
 /// commit of this datastore relies on them while they go, and in one
@@ -175,11 +177,15 @@ pub(crate) async fn release_idle_writer_leases(
 	triggers: &CommitTriggers,
 	sequences: &Sequences,
 	idle: Duration,
+	of: Option<&crate::values::index_delta::BufferedIndex>,
 ) -> Result<usize> {
 	let fenced = &triggers.pending_guard_fences;
 	let (node, process) = (sequences.node_id(), fenced.process());
 	let mut released = 0;
 	for (prefix, index) in fenced.idle_lease_fences(idle) {
+		if of.is_some_and(|of| *of != index.index) {
+			continue;
+		}
 		let fence = fenced.exclusive(&prefix, || index.clone()).await;
 		// A commit may have relied on the leases while the fence was awaited.
 		let shards = fence.idle_leases(idle);
@@ -957,6 +963,11 @@ pub struct Transaction {
 	/// queue (see [`AfterCommitWaits`]); discarded by [`Self::cancel`] and by a
 	/// failed commit.
 	after_commit_waits: Option<std::sync::Weak<AfterCommitQueue>>,
+	/// Whether a statement running in this transaction has done something outside it that its
+	/// cancel cannot undo: sent a request that may change a remote endpoint, written a bucket,
+	/// run a script or a module ([`Self::note_external_effect`]). A transaction that lost a
+	/// conflict without it can be run again from the start with nothing observable done twice.
+	external_effect: AtomicBool,
 	/// Whether the owner of [`Self::after_commit_waits`] also accepts a
 	/// blocking build's wait for its index to come online, rather than only the
 	/// wait for that index to be materialised. See
@@ -1858,6 +1869,7 @@ impl Transaction {
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
 			after_commit_waits: None,
+			external_effect: AtomicBool::new(false),
 			defers_build_waits: false,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		}
@@ -2532,6 +2544,21 @@ impl Transaction {
 	/// wrote.
 	pub fn poison_failed_statement(&self) {
 		self.failed_statement_poisoned.store(true, Ordering::Relaxed);
+	}
+
+	/// Record that a statement in this transaction has done something outside it that its
+	/// cancel cannot undo, so the transaction is never run again after it loses a conflict.
+	///
+	/// Called before the effect starts: a request that fails part-way may still have reached
+	/// its endpoint.
+	pub fn note_external_effect(&self) {
+		self.external_effect.store(true, Ordering::Relaxed);
+	}
+
+	/// Whether [`Self::note_external_effect`] was called on this transaction. A save point
+	/// rollback does not clear it: the effect happened whatever became of the writes.
+	pub fn performed_external_effect(&self) -> bool {
+		self.external_effect.load(Ordering::Relaxed)
 	}
 
 	/// Refuses this transaction's COMMIT, because a record's write stopped
@@ -9678,6 +9705,7 @@ impl Transaction {
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
 			after_commit_waits: None,
+			external_effect: AtomicBool::new(false),
 			defers_build_waits: false,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		};

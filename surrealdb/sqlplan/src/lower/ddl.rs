@@ -121,7 +121,28 @@ fn holds_json(kind: &Kind) -> bool {
 		Kind::Object => true,
 		Kind::Array(elem, _) => holds_json(elem),
 		Kind::Either(kinds) => kinds.iter().any(holds_json),
-		_ => false,
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Set(..)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => false,
 	}
 }
 

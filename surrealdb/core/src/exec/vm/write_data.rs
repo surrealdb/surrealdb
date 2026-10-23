@@ -295,7 +295,23 @@ fn data_clause_image(row: &WriteRow) -> Value {
 	let mut object = match image {
 		Value::Object(object) => object,
 		Value::None => Object::default(),
-		image => return image,
+		image @ Value::Null
+		| image @ Value::Bool(_)
+		| image @ Value::Number(_)
+		| image @ Value::String(_)
+		| image @ Value::Duration(_)
+		| image @ Value::Datetime(_)
+		| image @ Value::Uuid(_)
+		| image @ Value::Array(_)
+		| image @ Value::Set(_)
+		| image @ Value::Geometry(_)
+		| image @ Value::Bytes(_)
+		| image @ Value::Table(_)
+		| image @ Value::RecordId(_)
+		| image @ Value::File(_)
+		| image @ Value::Regex(_)
+		| image @ Value::Range(_)
+		| image @ Value::Closure(_) => return image,
 	};
 	if object.get("id").is_none_or(Value::is_none) {
 		object.insert("id", Value::RecordId(rid.clone()));

@@ -685,6 +685,10 @@ async fn clause(
 /// to target and is the misplaced-control-flow error, the one text every such
 /// site answers. An error keeps its own text. A `RETURN` is a clause's value
 /// and never a failure, so one reaching here is an internal error.
+///
+/// A storage failure under the clause's error stays the failure's source
+/// ([`EventFailure`]), so the statement that fired the event classifies it as
+/// it would outside one: a retryable conflict is run again.
 fn event_failure(event: &str, signal: ControlFlow) -> anyhow::Error {
 	let inner = match signal {
 		ControlFlow::Break | ControlFlow::Continue => {
@@ -695,7 +699,33 @@ fn event_failure(event: &str, signal: ControlFlow) -> anyhow::Error {
 			"a RETURN was treated as the failure of an event clause".to_owned(),
 		)),
 	};
-	anyhow::anyhow!("Error while processing event {event}: {inner}")
+	anyhow::Error::new(EventFailure {
+		event: event.to_owned(),
+		inner,
+	})
+}
+
+/// A clause of event `event` failed with `inner`. Its text is the event's name
+/// and `inner`'s text. Its source is the storage failure under `inner`, if any,
+/// and nothing else: the classifiers of storage failures see through the event,
+/// while every other reader of the chain sees the event's failure alone, as a
+/// typed error under it belongs to the clause rather than to the statement.
+#[derive(Debug)]
+struct EventFailure {
+	event: String,
+	inner: anyhow::Error,
+}
+
+impl std::fmt::Display for EventFailure {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Error while processing event {}: {}", self.event, self.inner)
+	}
+}
+
+impl std::error::Error for EventFailure {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		crate::kvs::storage_error(&self.inner).map(|e| e as &(dyn std::error::Error + 'static))
+	}
 }
 
 #[cfg(test)]
@@ -790,5 +820,18 @@ mod tests {
 			event_failure("e", ControlFlow::Err(anyhow::anyhow!("boom"))).to_string(),
 			"Error while processing event e: boom",
 		);
+	}
+
+	#[test]
+	fn a_storage_failure_in_an_event_keeps_its_classification() {
+		let conflict = anyhow::Error::new(crate::kvs::Error::TransactionConflict(
+			"written under the transaction".to_owned(),
+		));
+		let raised = event_failure("e", ControlFlow::Err(conflict));
+		assert!(raised.to_string().starts_with("Error while processing event e: "), "{raised}");
+		assert!(crate::kvs::is_retryable_transaction_conflict(&raised));
+		let typed = anyhow::Error::new(crate::err::EngineError::Internal("x".to_owned()));
+		let raised = event_failure("e", ControlFlow::Err(typed));
+		assert_eq!(raised.chain().count(), 1, "only a storage failure is a source");
 	}
 }

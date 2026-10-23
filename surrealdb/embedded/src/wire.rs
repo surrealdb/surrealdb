@@ -55,7 +55,7 @@ pub fn encode_into(format: Format, value: &Value, out: &mut Vec<u8>) -> Result<(
 			value.write_json(out);
 			Ok(())
 		}
-		_ => {
+		Format::Flatbuffers | Format::Shaped | Format::Unsupported => {
 			out.extend_from_slice(&encode(format, value.clone())?);
 			Ok(())
 		}

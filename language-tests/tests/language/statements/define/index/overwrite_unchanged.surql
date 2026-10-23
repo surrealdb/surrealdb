@@ -1,7 +1,7 @@
 /**
 [env]
-timeout = 10000
-context-timeout = 10000
+timeout = 30000
+context-timeout = 30000
 clean = true
 
 [test]
@@ -66,10 +66,64 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'error'"
 
 [[test.results]]
 value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -101,9 +155,27 @@ DEFINE TABLE u SCHEMALESS;
 CREATE u:1 SET e = 'x' RETURN NONE;
 CREATE u:2 SET e = 'x' RETURN NONE;
 DEFINE INDEX uq ON u FIELDS e UNIQUE CONCURRENTLY;
-SLEEP 1s;
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'error' { SLEEP 1s };
 RETURN (INFO FOR INDEX uq ON u).building.status;
 DELETE u:2;
 DEFINE INDEX OVERWRITE uq ON u FIELDS e UNIQUE CONCURRENTLY;
-SLEEP 1s;
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX uq ON u).building.status != 'ready' { SLEEP 1s };
 RETURN (INFO FOR INDEX uq ON u).building.{ initial, status };

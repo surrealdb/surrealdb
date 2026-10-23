@@ -147,6 +147,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			Backend::TikV => {}
 			#[cfg(not(feature = "backend-tikv"))]
 			Backend::TikV => bail!("TiKV backend feature is not enabled"),
+			Backend::Other => bail!("the `other` backend names a server's engine: pass --endpoint"),
 		}
 	}
 

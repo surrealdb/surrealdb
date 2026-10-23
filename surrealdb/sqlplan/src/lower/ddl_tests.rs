@@ -795,9 +795,63 @@ fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
 		.filter_map(|expr| match expr {
 			Expr::Define(define) => match &**define {
 				DefineStatement::Field(field) => Some((field.name.to_sql(), field.flexible)),
-				_ => None,
+				DefineStatement::Namespace(_)
+				| DefineStatement::Database(_)
+				| DefineStatement::Function(_)
+				| DefineStatement::Analyzer(_)
+				| DefineStatement::Param(_)
+				| DefineStatement::Table(_)
+				| DefineStatement::Event(_)
+				| DefineStatement::Index(_)
+				| DefineStatement::User(_)
+				| DefineStatement::Model(_)
+				| DefineStatement::Access(_)
+				| DefineStatement::Config(_)
+				| DefineStatement::Api(_)
+				| DefineStatement::Bucket(_)
+				| DefineStatement::Sequence(_)
+				| DefineStatement::Module(_) => None,
 			},
-			_ => None,
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => None,
 		})
 		.collect()
 }

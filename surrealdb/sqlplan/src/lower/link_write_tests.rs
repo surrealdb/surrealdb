@@ -26,7 +26,26 @@ fn pg_in(sql: &str, catalog: &dyn BinderCatalog) -> Expr {
 		surrealdb_pgsql::ast::stmt::Statement::Insert(s) => lower_pgsql_insert(s, catalog),
 		surrealdb_pgsql::ast::stmt::Statement::Update(s) => lower_pgsql_update(s, catalog),
 		surrealdb_pgsql::ast::stmt::Statement::Delete(s) => lower_pgsql_delete(s, catalog),
-		_ => panic!("expected a write"),
+		surrealdb_pgsql::ast::stmt::Statement::Copy(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Select(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Truncate(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
+		| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateSchema(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Drop(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Transaction(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Set(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Show(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Reset(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Explain(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Prepare(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Execute(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Deallocate(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreatePropertyGraph(_)
+		| surrealdb_pgsql::ast::stmt::Statement::DropPropertyGraph(_)
+		| surrealdb_pgsql::ast::stmt::Statement::Empty => panic!("expected a write"),
 	}
 	.unwrap()
 }
@@ -42,7 +61,32 @@ fn my_in(sql: &str, catalog: &dyn BinderCatalog) -> Expr {
 		surrealdb_mysql::ast::stmt::Statement::Replace(s) => lower_mysql_replace(s, catalog),
 		surrealdb_mysql::ast::stmt::Statement::Update(s) => lower_mysql_update(s, catalog),
 		surrealdb_mysql::ast::stmt::Statement::Delete(s) => lower_mysql_delete(s, catalog),
-		_ => panic!("expected a write"),
+		surrealdb_mysql::ast::stmt::Statement::Select(_)
+		| surrealdb_mysql::ast::stmt::Statement::Truncate(_)
+		| surrealdb_mysql::ast::stmt::Statement::CreateTable(_)
+		| surrealdb_mysql::ast::stmt::Statement::DropTable(_)
+		| surrealdb_mysql::ast::stmt::Statement::CreateDatabase(_)
+		| surrealdb_mysql::ast::stmt::Statement::DropDatabase(_)
+		| surrealdb_mysql::ast::stmt::Statement::CreateIndex(_)
+		| surrealdb_mysql::ast::stmt::Statement::DropIndex(_)
+		| surrealdb_mysql::ast::stmt::Statement::CreateView(_)
+		| surrealdb_mysql::ast::stmt::Statement::DropView(_)
+		| surrealdb_mysql::ast::stmt::Statement::AlterTable(_)
+		| surrealdb_mysql::ast::stmt::Statement::CreateUser(_)
+		| surrealdb_mysql::ast::stmt::Statement::DropUser(_)
+		| surrealdb_mysql::ast::stmt::Statement::Grant(_)
+		| surrealdb_mysql::ast::stmt::Statement::Revoke(_)
+		| surrealdb_mysql::ast::stmt::Statement::LockTables(_)
+		| surrealdb_mysql::ast::stmt::Statement::UnlockTables(_)
+		| surrealdb_mysql::ast::stmt::Statement::Prepare(_)
+		| surrealdb_mysql::ast::stmt::Statement::Execute(_)
+		| surrealdb_mysql::ast::stmt::Statement::Deallocate(_)
+		| surrealdb_mysql::ast::stmt::Statement::Use(_)
+		| surrealdb_mysql::ast::stmt::Statement::Set(_)
+		| surrealdb_mysql::ast::stmt::Statement::Show(_)
+		| surrealdb_mysql::ast::stmt::Statement::Describe(_)
+		| surrealdb_mysql::ast::stmt::Statement::Explain(_)
+		| surrealdb_mysql::ast::stmt::Statement::Transaction(_) => panic!("expected a write"),
 	}
 	.unwrap()
 }
@@ -86,7 +130,45 @@ fn cond(expr: Expr) -> String {
 	match expr {
 		Expr::Update(update) => update.cond.expect("a WHERE clause").0.to_sql(),
 		Expr::Delete(delete) => delete.cond.expect("a WHERE clause").0.to_sql(),
-		other => panic!("expected UPDATE or DELETE, got {other:?}"),
+		other @ Expr::Literal(_)
+		| other @ Expr::Param(_)
+		| other @ Expr::Idiom(_)
+		| other @ Expr::Table(_)
+		| other @ Expr::Mock(_)
+		| other @ Expr::Block(_)
+		| other @ Expr::Constant(_)
+		| other @ Expr::Prefix {
+			..
+		}
+		| other @ Expr::Postfix {
+			..
+		}
+		| other @ Expr::Binary {
+			..
+		}
+		| other @ Expr::FunctionCall(_)
+		| other @ Expr::Closure(_)
+		| other @ Expr::Break
+		| other @ Expr::Continue
+		| other @ Expr::Return(_)
+		| other @ Expr::Throw(_)
+		| other @ Expr::IfElse(_)
+		| other @ Expr::Select(_)
+		| other @ Expr::Create(_)
+		| other @ Expr::Upsert(_)
+		| other @ Expr::Relate(_)
+		| other @ Expr::Insert(_)
+		| other @ Expr::Define(_)
+		| other @ Expr::Remove(_)
+		| other @ Expr::Rebuild(_)
+		| other @ Expr::Alter(_)
+		| other @ Expr::Info(_)
+		| other @ Expr::Foreach(_)
+		| other @ Expr::Let(_)
+		| other @ Expr::Sleep(_)
+		| other @ Expr::Explain {
+			..
+		} => panic!("expected UPDATE or DELETE, got {other:?}"),
 	}
 }
 
@@ -111,7 +193,44 @@ fn returned(expr: Expr) -> String {
 		Expr::Update(update) => update.output,
 		Expr::Delete(delete) => delete.output,
 		Expr::Insert(insert) => insert.output,
-		other => panic!("expected a write, got {other:?}"),
+		other @ Expr::Literal(_)
+		| other @ Expr::Param(_)
+		| other @ Expr::Idiom(_)
+		| other @ Expr::Table(_)
+		| other @ Expr::Mock(_)
+		| other @ Expr::Block(_)
+		| other @ Expr::Constant(_)
+		| other @ Expr::Prefix {
+			..
+		}
+		| other @ Expr::Postfix {
+			..
+		}
+		| other @ Expr::Binary {
+			..
+		}
+		| other @ Expr::FunctionCall(_)
+		| other @ Expr::Closure(_)
+		| other @ Expr::Break
+		| other @ Expr::Continue
+		| other @ Expr::Return(_)
+		| other @ Expr::Throw(_)
+		| other @ Expr::IfElse(_)
+		| other @ Expr::Select(_)
+		| other @ Expr::Create(_)
+		| other @ Expr::Upsert(_)
+		| other @ Expr::Relate(_)
+		| other @ Expr::Define(_)
+		| other @ Expr::Remove(_)
+		| other @ Expr::Rebuild(_)
+		| other @ Expr::Alter(_)
+		| other @ Expr::Info(_)
+		| other @ Expr::Foreach(_)
+		| other @ Expr::Let(_)
+		| other @ Expr::Sleep(_)
+		| other @ Expr::Explain {
+			..
+		} => panic!("expected a write, got {other:?}"),
 	};
 	let Some(Output::Fields(fields)) = output else {
 		panic!("expected a projection");

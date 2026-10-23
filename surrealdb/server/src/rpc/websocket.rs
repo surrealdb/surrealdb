@@ -2191,7 +2191,23 @@ mod tests {
 			let bad = rows(Value::from_t(7i64));
 			let error_of = |reply: Value| match reply {
 				Value::Object(o) => o.get("error").cloned().expect("an error"),
-				other => panic!("an object, got {other:?}"),
+				other @ Value::None
+				| other @ Value::Null
+				| other @ Value::Bool(_)
+				| other @ Value::Number(_)
+				| other @ Value::String(_)
+				| other @ Value::Bytes(_)
+				| other @ Value::Duration(_)
+				| other @ Value::Datetime(_)
+				| other @ Value::Uuid(_)
+				| other @ Value::Geometry(_)
+				| other @ Value::Table(_)
+				| other @ Value::RecordId(_)
+				| other @ Value::File(_)
+				| other @ Value::Range(_)
+				| other @ Value::Regex(_)
+				| other @ Value::Array(_)
+				| other @ Value::Set(_) => panic!("an object, got {other:?}"),
 			};
 			let by_array = error_of(send(format, request(&a, &plain(&bad))).await);
 			let by_block = error_of(send(format, request(&a, &block(&bad))).await);

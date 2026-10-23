@@ -511,7 +511,7 @@ pub(crate) async fn kept_request_statement(
 	};
 	let mut shadowed = bound;
 	for name in crate::exec::planner::UNIT_RUNTIME_PARAMS {
-		if !folded.contains(&name) && !shadowed.iter().any(|shadow| shadow == name) {
+		if !folded.contains(name) && !shadowed.iter().any(|shadow| shadow == name) {
 			shadowed.push((*name).to_owned());
 		}
 	}

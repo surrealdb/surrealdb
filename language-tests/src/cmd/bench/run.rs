@@ -104,6 +104,7 @@ fn calc_group_key(
 		Backend::Memory => "mem",
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => "tikv",
+		Backend::Other => "other",
 	};
 	hasher.update(backend_tag.as_bytes());
 	// The datastore configuration the run was given: a store built under one is not
@@ -156,6 +157,7 @@ fn datastore_conn(config: &BenchConfig) -> String {
 		Backend::Memory => return "mem://".to_string(),
 		Backend::SurrealKv => "surrealkv",
 		Backend::TikV => unreachable!("TiKV is rejected before prepare()"),
+		Backend::Other => unreachable!("`other` is rejected before prepare()"),
 	};
 	let root = config.bench_root.as_ref().expect("file backend requires a bench root");
 	let id = DS_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -395,6 +397,9 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		Backend::SurrealKv => Some(make_bench_root()?),
 		Backend::TikV => {
 			bail!("TiKV is not supported for benchmarking (it needs an external cluster)")
+		}
+		Backend::Other => {
+			bail!("the `other` backend names a server's engine; benchmarks open their own")
 		}
 	};
 	// Removes the whole temp tree when `run()` returns; declared here so it drops

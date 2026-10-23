@@ -21,6 +21,7 @@ error = "Unable to perform the realtime query"
 error = "Unable to perform the realtime query"
 
 [env]
+remote-skip = "asserts the refusal of LIVE by a session without realtime, which the embedded harness's session is; a server endpoint opens the live query"
 namespace = true
 database = true
 auth = { level = "owner" }

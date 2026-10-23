@@ -454,7 +454,51 @@ pub fn lower_bound_expr(
 						BoundExpr::Literal(BoundLiteral::Null) => {
 							LogicalExpr::Literal(LogicalLiteral::Null)
 						}
-						arg => lower_quote_ident(lower_bound_expr(arg, policy)?),
+						arg @ BoundExpr::Literal(_)
+						| arg @ BoundExpr::Column(_)
+						| arg @ BoundExpr::Access {
+							..
+						}
+						| arg @ BoundExpr::Param {
+							..
+						}
+						| arg @ BoundExpr::Binary {
+							..
+						}
+						| arg @ BoundExpr::Unary {
+							..
+						}
+						| arg @ BoundExpr::FunctionCall {
+							..
+						}
+						| arg @ BoundExpr::Case {
+							..
+						}
+						| arg @ BoundExpr::Between {
+							..
+						}
+						| arg @ BoundExpr::InList {
+							..
+						}
+						| arg @ BoundExpr::IsNull {
+							..
+						}
+						| arg @ BoundExpr::Cast {
+							..
+						}
+						| arg @ BoundExpr::ScalarSubquery(_)
+						| arg @ BoundExpr::Exists(_)
+						| arg @ BoundExpr::InSubquery {
+							..
+						}
+						| arg @ BoundExpr::ArraySubquery(_)
+						| arg @ BoundExpr::WindowFunction {
+							..
+						}
+						| arg @ BoundExpr::UserVar(_)
+						| arg @ BoundExpr::SystemVar {
+							..
+						} => lower_quote_ident(lower_bound_expr(arg, policy)?),
 					});
 				}
 				"obj_description" | "col_description" | "shobj_description" | "pg_get_expr" => {
@@ -950,8 +994,7 @@ pub(crate) fn lower_lookup_predicate(
 				};
 				records.push(record);
 			}
-			let dynamic =
-				records.iter().any(|record| !matches!(record, LogicalExpr::RecordId(_)));
+			let dynamic = records.iter().any(|record| !matches!(record, LogicalExpr::RecordId(_)));
 			return Ok(one_or_inside(col, records).map(|predicate| {
 				if dynamic {
 					predicate.and(is_not_null_expr(lower_column_raw(col)))

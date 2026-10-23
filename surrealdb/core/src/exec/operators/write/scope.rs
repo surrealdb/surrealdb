@@ -95,11 +95,6 @@ pub(crate) struct WriteScope {
 	/// The contexts earlier runs of the same statement resolved, whose
 	/// catalog reads this one takes; `None` for a statement run once.
 	kept: Option<Arc<KeptContexts>>,
-	/// Whether a context resolved earlier is checked against the catalog
-	/// before it is taken again, and resolved anew where its table's catalog
-	/// changed: the scope of a late-bound write, whose tables' catalog may
-	/// change while it runs.
-	revalidates: bool,
 }
 
 impl WriteScope {
@@ -110,17 +105,7 @@ impl WriteScope {
 			existence,
 			contexts: Mutex::new(Vec::new()),
 			kept: None,
-			revalidates: false,
 		})
-	}
-
-	/// [`Self::new`] for a late-bound write: each context it resolves is
-	/// checked against the catalog before it is taken again
-	/// ([`WriteCtx::stands`]).
-	pub(crate) fn revalidating(exec: ExecutionContext, existence: TableExistence) -> Arc<Self> {
-		let mut scope = Self::new(exec, existence);
-		Arc::get_mut(&mut scope).expect("a scope just made has no other owner").revalidates = true;
-		scope
 	}
 
 	/// Open the scope for one run of a statement run again and again, taking
@@ -154,11 +139,10 @@ impl WriteScope {
 		table: &TableName,
 		purpose: WritePurpose,
 	) -> Result<Arc<WriteCtx>, ControlFlow> {
+		// A context is resolved once per run: within one the catalog changes only by what the
+		// statement itself defines, which applies to none of the records it writes.
 		if let Some(resolved) = self.cached_ctx(table, purpose).await {
-			if !self.revalidates || resolved.stands().await? {
-				return Ok(resolved);
-			}
-			self.contexts.lock().await.retain(|((t, p), _)| !(t == table && *p == purpose));
+			return Ok(resolved);
 		}
 		let (exec, existence) = match purpose {
 			WritePurpose::Statement => (self.exec.clone(), self.existence),

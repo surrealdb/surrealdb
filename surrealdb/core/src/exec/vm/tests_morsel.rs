@@ -1049,15 +1049,15 @@ async fn a_measure_and_a_ranking_charge_the_fuel_their_vectors_cost() {
 	)
 	.await;
 
-	#[cfg(feature = "kv-rocksdb")]
+	#[cfg(feature = "kv-surrealkv")]
 	{
 		let (q_dir, u_dir) = (
 			tempfile::tempdir().expect("temporary directory"),
 			tempfile::tempdir().expect("temporary directory"),
 		);
 		verify(
-			TestDb::new_on_rocksdb(&setup, q_dir.path(), q_cfg()).await,
-			TestDb::new_on_rocksdb(&setup, u_dir.path(), u_cfg()).await,
+			TestDb::new_on_surrealkv(&setup, q_dir.path(), q_cfg()).await,
+			TestDb::new_on_surrealkv(&setup, u_dir.path(), u_cfg()).await,
 		)
 		.await;
 	}
@@ -3719,7 +3719,7 @@ async fn the_rows_a_let_binds_keep_the_serial_order_whatever_order_batches_finis
 /// reads them in order: `eval::surql` returns them to the expression that called it, and an access
 /// method's `SIGNIN` takes the first. Its merge takes the morsels in the order of the serial run
 /// however late the first ones are, as a `LET`'s value does.
-#[cfg(feature = "kv-rocksdb")]
+#[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order() {
 	let _turn = TURNS.lock().await;
@@ -3727,8 +3727,8 @@ async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order() {
 		tempfile::tempdir().expect("temporary directory"),
 		tempfile::tempdir().expect("temporary directory"),
 	);
-	let serial = evaluating(&format!("rocksdb:{}", serial_dir.path().display()), whole()).await;
-	let wide = evaluating(&format!("rocksdb:{}", wide_dir.path().display()), tiny()).await;
+	let serial = evaluating(&format!("surrealkv://{}", serial_dir.path().display()), whole()).await;
+	let wide = evaluating(&format!("surrealkv://{}", wide_dir.path().display()), tiny()).await;
 	let statements = [
 		"RETURN eval::surql('SELECT n, s FROM t WHERE n % 3 = 0')",
 		"RETURN eval::surql('SELECT * FROM t')",

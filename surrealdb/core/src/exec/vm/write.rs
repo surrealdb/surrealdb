@@ -513,7 +513,7 @@ impl WriteState {
 		ctx: &WriteCtx,
 	) -> FlowResult<Arc<Program>> {
 		let table = &ctx.table.name;
-		let version = ctx.resolved_at.0;
+		let version = ctx.resolved_at;
 		if let Some(held) = self.bundles.iter().find(|held| {
 			held.table == *table
 				&& (held.version == version
@@ -979,10 +979,10 @@ impl WriteState {
 }
 
 /// The scope a run of the write `spec` describes takes in `ctx`. A
-/// late-bound write's tables' catalog may change while the program runs, so
-/// its scope checks each context against the catalog before taking it again
-/// and keeps none from one run to the next; any other write's run takes the
-/// contexts earlier runs left in `kept`, where it is run again and again.
+/// late-bound write's tables' catalog may change between its runs, so each run
+/// resolves its contexts afresh and keeps none for the next; any other write's
+/// run takes the contexts earlier runs left in `kept`, where it is run again
+/// and again.
 fn scope_for(
 	spec: &WriteSpec,
 	ctx: &ExecutionContext,
@@ -991,7 +991,7 @@ fn scope_for(
 	let late = spec.tables.as_ref().is_some_and(|tables| tables.revalidates);
 	let existence = spec.form.table_existence();
 	match kept {
-		_ if late => WriteScope::revalidating(ctx.clone(), existence),
+		_ if late => WriteScope::new(ctx.clone(), existence),
 		Some(kept) => WriteScope::kept(
 			ctx.clone(),
 			existence,

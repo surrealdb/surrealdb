@@ -3,8 +3,8 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-timeout = 10000
-context-timeout = 10000
+timeout = 20000
+context-timeout = 20000
 
 [test]
 reason = """
@@ -55,6 +55,33 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[item:3]"
 
 [[test.results]]
@@ -83,7 +110,16 @@ CREATE item:3 SET k = 1 RETURN NONE;
 SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 1 ORDER BY id;
 SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 9 ORDER BY id;
 COMMIT;
-SLEEP 1s;
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_k ON item).building.status != 'ready' { SLEEP 1s };
 SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 1 ORDER BY id;
 SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 9 ORDER BY id;
 SELECT VALUE id FROM item WITH INDEX by_k WHERE k = 2 ORDER BY id;

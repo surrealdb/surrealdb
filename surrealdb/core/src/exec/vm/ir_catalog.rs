@@ -60,9 +60,10 @@ use crate::kvs::index::filter_online_indexes;
 use crate::val::{TableName, Value};
 
 /// The outcome for a catalog read that failed.
-fn unreadable() -> IrError {
-	IrError::Invariant {
-		what: "ir_catalog: the catalog could not be read",
+fn unreadable(cause: &anyhow::Error) -> IrError {
+	IrError::CatalogUnreadable {
+		what: "ir_catalog",
+		cause: format!("{cause:#}"),
 	}
 }
 
@@ -273,7 +274,7 @@ pub(crate) async fn fill(
 	for name in &functions {
 		let _ = memo.function(name);
 	}
-	while memo.load_pending().await.map_err(|_| unreadable())? {}
+	while memo.load_pending().await.map_err(|e| unreadable(&e))? {}
 	Ok(())
 }
 
@@ -334,7 +335,7 @@ pub(crate) async fn top_up(
 		memo.insert_answers(key.clone(), Arc::new(answers));
 		let _ = memo.table(&key.0);
 	}
-	while memo.load_pending().await.map_err(|_| unreadable())? {}
+	while memo.load_pending().await.map_err(|e| unreadable(&e))? {}
 	Ok(())
 }
 
@@ -658,7 +659,7 @@ pub(super) async fn read_answers(
 		return Ok(plain);
 	};
 	let reads_versioned = *version != ReadVersion::Current;
-	let current = txn.get_tb(ns, db, table, None).await.map_err(|_| unreadable())?;
+	let current = txn.get_tb(ns, db, table, None).await.map_err(|e| unreadable(&e))?;
 	let defined = match version {
 		ReadVersion::Current => current.is_some(),
 		ReadVersion::Stamped(stamp) => {
@@ -666,12 +667,13 @@ pub(super) async fn read_answers(
 				|| txn
 					.get_tb(ns, db, table, Some(*stamp))
 					.await
-					.map_err(|_| unreadable())?
+					.map_err(|e| unreadable(&e))?
 					.is_some()
 		}
 		ReadVersion::Deferred => true,
 	};
-	let lightweight = is_lightweight(planner, table).await.map_err(|_| unreadable())?;
+	let lightweight =
+		is_lightweight(planner, table).await.map_err(|e| unreadable(&anyhow::anyhow!(e.reason)))?;
 	// A late-bound statement meets the table's permission as it stands when it runs, so a count
 	// judges each record rather than trusting the definition read here.
 	let select = match planner.is_late_bound() {

@@ -75,12 +75,98 @@ fn projected_column(
 	for target in &query.targets {
 		let name = target.alias.as_deref().or(match &target.expr {
 			BoundExpr::Column(col) => Some(col.column.as_str()),
-			_ => None,
+			BoundExpr::Literal(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::Binary {
+				..
+			}
+			| BoundExpr::Unary {
+				..
+			}
+			| BoundExpr::FunctionCall {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Between {
+				..
+			}
+			| BoundExpr::InList {
+				..
+			}
+			| BoundExpr::IsNull {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => None,
 		});
 		if name == Some(column) && !target.is_unlisted_wildcard() {
 			return match &target.expr {
 				BoundExpr::Column(col) => (col.declared_type, col.link_table.clone()),
-				_ => (query.infer_expr_type(&target.expr, catalog), None),
+				BoundExpr::Literal(_)
+				| BoundExpr::Access {
+					..
+				}
+				| BoundExpr::Param {
+					..
+				}
+				| BoundExpr::Binary {
+					..
+				}
+				| BoundExpr::Unary {
+					..
+				}
+				| BoundExpr::FunctionCall {
+					..
+				}
+				| BoundExpr::Case {
+					..
+				}
+				| BoundExpr::Between {
+					..
+				}
+				| BoundExpr::InList {
+					..
+				}
+				| BoundExpr::IsNull {
+					..
+				}
+				| BoundExpr::Cast {
+					..
+				}
+				| BoundExpr::ScalarSubquery(_)
+				| BoundExpr::Exists(_)
+				| BoundExpr::InSubquery {
+					..
+				}
+				| BoundExpr::ArraySubquery(_)
+				| BoundExpr::WindowFunction {
+					..
+				}
+				| BoundExpr::UserVar(_)
+				| BoundExpr::SystemVar {
+					..
+				} => (query.infer_expr_type(&target.expr, catalog), None),
 			};
 		}
 	}

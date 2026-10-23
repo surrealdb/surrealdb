@@ -751,7 +751,50 @@ fn rewrite_aggregates_to_columns(
 				aggregate_output: keep_id,
 				declared_type: match agg {
 					BoundExpr::Column(col) => col.declared_type,
-					_ => crate::SqlType::Unknown,
+					BoundExpr::Literal(_)
+					| BoundExpr::Access {
+						..
+					}
+					| BoundExpr::Param {
+						..
+					}
+					| BoundExpr::Binary {
+						..
+					}
+					| BoundExpr::Unary {
+						..
+					}
+					| BoundExpr::FunctionCall {
+						..
+					}
+					| BoundExpr::Case {
+						..
+					}
+					| BoundExpr::Between {
+						..
+					}
+					| BoundExpr::InList {
+						..
+					}
+					| BoundExpr::IsNull {
+						..
+					}
+					| BoundExpr::Cast {
+						..
+					}
+					| BoundExpr::ScalarSubquery(_)
+					| BoundExpr::Exists(_)
+					| BoundExpr::InSubquery {
+						..
+					}
+					| BoundExpr::ArraySubquery(_)
+					| BoundExpr::WindowFunction {
+						..
+					}
+					| BoundExpr::UserVar(_)
+					| BoundExpr::SystemVar {
+						..
+					} => crate::SqlType::Unknown,
 				},
 			});
 		}
@@ -864,14 +907,8 @@ fn rewrite_aggregates_to_columns(
 		| BoundExpr::Param {
 			..
 		}
-		| BoundExpr::FunctionCall {
-			..
-		}
 		| BoundExpr::ScalarSubquery(_)
 		| BoundExpr::Exists(_)
-		| BoundExpr::InSubquery {
-			..
-		}
 		| BoundExpr::ArraySubquery(_)
 		| BoundExpr::WindowFunction {
 			..
@@ -1019,7 +1056,50 @@ fn as_stored(expr: &BoundExpr) -> BoundExpr {
 			id_table: None,
 			..col.clone()
 		}),
-		other => other.clone(),
+		other @ BoundExpr::Literal(_)
+		| other @ BoundExpr::Access {
+			..
+		}
+		| other @ BoundExpr::Param {
+			..
+		}
+		| other @ BoundExpr::Binary {
+			..
+		}
+		| other @ BoundExpr::Unary {
+			..
+		}
+		| other @ BoundExpr::FunctionCall {
+			..
+		}
+		| other @ BoundExpr::Case {
+			..
+		}
+		| other @ BoundExpr::Between {
+			..
+		}
+		| other @ BoundExpr::InList {
+			..
+		}
+		| other @ BoundExpr::IsNull {
+			..
+		}
+		| other @ BoundExpr::Cast {
+			..
+		}
+		| other @ BoundExpr::ScalarSubquery(_)
+		| other @ BoundExpr::Exists(_)
+		| other @ BoundExpr::InSubquery {
+			..
+		}
+		| other @ BoundExpr::ArraySubquery(_)
+		| other @ BoundExpr::WindowFunction {
+			..
+		}
+		| other @ BoundExpr::UserVar(_)
+		| other @ BoundExpr::SystemVar {
+			..
+		} => other.clone(),
 	}
 }
 
@@ -1075,7 +1155,51 @@ fn collect_conjuncts<'a>(expr: &'a BoundExpr, out: &mut Vec<&'a BoundExpr>) {
 			collect_conjuncts(left, out);
 			collect_conjuncts(right, out);
 		}
-		other => out.push(other),
+		other @ BoundExpr::Literal(_)
+		| other @ BoundExpr::Column(_)
+		| other @ BoundExpr::Access {
+			..
+		}
+		| other @ BoundExpr::Param {
+			..
+		}
+		| other @ BoundExpr::Binary {
+			..
+		}
+		| other @ BoundExpr::Unary {
+			..
+		}
+		| other @ BoundExpr::FunctionCall {
+			..
+		}
+		| other @ BoundExpr::Case {
+			..
+		}
+		| other @ BoundExpr::Between {
+			..
+		}
+		| other @ BoundExpr::InList {
+			..
+		}
+		| other @ BoundExpr::IsNull {
+			..
+		}
+		| other @ BoundExpr::Cast {
+			..
+		}
+		| other @ BoundExpr::ScalarSubquery(_)
+		| other @ BoundExpr::Exists(_)
+		| other @ BoundExpr::InSubquery {
+			..
+		}
+		| other @ BoundExpr::ArraySubquery(_)
+		| other @ BoundExpr::WindowFunction {
+			..
+		}
+		| other @ BoundExpr::UserVar(_)
+		| other @ BoundExpr::SystemVar {
+			..
+		} => out.push(other),
 	}
 }
 
@@ -1089,7 +1213,16 @@ fn base_table_of(source: &BoundTableSource) -> Option<&str> {
 		} if !crate::catalog::system::is_system_catalog_table(schema.as_deref(), name) => {
 			Some(name.as_str())
 		}
-		_ => None,
+		BoundTableSource::Table {
+			..
+		}
+		| BoundTableSource::Subquery {
+			..
+		}
+		| BoundTableSource::Join {
+			..
+		}
+		| BoundTableSource::Values => None,
 	}
 }
 
@@ -1105,7 +1238,13 @@ fn leftmost_base_table(source: &BoundTableSource) -> Option<&str> {
 			left,
 			..
 		} => leftmost_base_table(left),
-		other => base_table_of(other),
+		other @ BoundTableSource::Table {
+			..
+		}
+		| other @ BoundTableSource::Subquery {
+			..
+		}
+		| other @ BoundTableSource::Values => base_table_of(other),
 	}
 }
 

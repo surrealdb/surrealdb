@@ -2,8 +2,8 @@
 [env]
 
 # Extra timeout because this test has a sleep.
-timeout = 5000
-context-timeout = 5000
+timeout = 15000
+context-timeout = 15000
 
 [test]
 
@@ -21,6 +21,33 @@ value = "NONE"
 
 [[test.results]]
 error = "The index 'test' already exists"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -53,7 +80,16 @@ CREATE `user.csv`:2 SET email = 'testA@surrealdb.com';
 CREATE `user.csv`:3 SET email = 'testB@surrealdb.com';
 DEFINE INDEX test ON `user.csv` FIELDS email CONCURRENTLY;
 DEFINE INDEX `test` ON `user.csv` FIELDS email CONCURRENTLY;
-SLEEP 1s;
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX test ON `user.csv`).building.status != 'ready' { SLEEP 1s };
 INFO FOR TABLE `user.csv`;
 INFO FOR INDEX test ON `user.csv`;
 INFO FOR INDEX `test` ON `user.csv`;

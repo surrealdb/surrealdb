@@ -41,6 +41,9 @@ pub enum Backend {
 	Memory,
 	SurrealKv,
 	TikV,
+	/// A server's storage engine that is none of the above, reached with `--endpoint`. A test
+	/// declaring `[env] backend` names the engines whose behaviour it asserts, so none runs here.
+	Other,
 }
 
 impl Backend {
@@ -55,7 +58,7 @@ impl Backend {
 	pub fn supports_versioning(self) -> bool {
 		match self {
 			Backend::SurrealKv => true,
-			Backend::Memory | Backend::TikV => false,
+			Backend::Memory | Backend::TikV | Backend::Other => false,
 		}
 	}
 }
@@ -71,6 +74,7 @@ impl SurrealValue for Backend {
 			Backend::Memory => "Memory".into_value(),
 			Backend::SurrealKv => "SurrealKv".into_value(),
 			Backend::TikV => "TikV".into_value(),
+			Backend::Other => "Other".into_value(),
 		}
 	}
 
@@ -83,6 +87,7 @@ impl SurrealValue for Backend {
 			"Memory" => Ok(Backend::Memory),
 			"SurrealKv" => Ok(Backend::SurrealKv),
 			"TikV" => Ok(Backend::TikV),
+			"Other" => Ok(Backend::Other),
 			_ => {
 				Err(surrealdb_types::Error::serialization("Invalid backend type".to_string(), None))
 			}
@@ -92,7 +97,7 @@ impl SurrealValue for Backend {
 
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[Backend::Memory, Backend::SurrealKv, Backend::TikV]
+		&[Backend::Memory, Backend::SurrealKv, Backend::TikV, Backend::Other]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
@@ -100,6 +105,10 @@ impl ValueEnum for Backend {
 			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
+			Backend::Other => Some(
+				PossibleValue::new("other")
+					.help("With --endpoint: a server whose storage engine is none of the others"),
+			),
 		}
 	}
 }
@@ -110,6 +119,7 @@ impl Display for Backend {
 			Self::Memory => f.write_str("mem"),
 			Self::SurrealKv => f.write_str("surrealkv"),
 			Self::TikV => f.write_str("tikv"),
+			Self::Other => f.write_str("other"),
 		}
 	}
 }
@@ -124,6 +134,7 @@ impl<'de> Deserialize<'de> for Backend {
 			"mem" => Ok(Backend::Memory),
 			"surrealkv" => Ok(Backend::SurrealKv),
 			"tikv" => Ok(Backend::TikV),
+			"other" => Ok(Backend::Other),
 			_ => Err(<D::Error as serde::de::Error>::custom(format_args!("Invalid backend kind"))),
 		}
 	}
@@ -138,6 +149,7 @@ impl Serialize for Backend {
 			Backend::Memory => serializer.serialize_str("mem"),
 			Backend::SurrealKv => serializer.serialize_str("surrealkv"),
 			Backend::TikV => serializer.serialize_str("tikv"),
+			Backend::Other => serializer.serialize_str("other"),
 		}
 	}
 }

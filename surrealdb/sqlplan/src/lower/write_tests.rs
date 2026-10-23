@@ -53,7 +53,46 @@ fn pg_delete(sql: &str) -> Result<DeleteStatement, crate::PlanError> {
 	};
 	match lower_pgsql_delete(delete, &EmptyCatalog)? {
 		Expr::Delete(del) => Ok(*del),
-		other => panic!("Expected Expr::Delete, got {other:?}"),
+		other @ Expr::Literal(_)
+		| other @ Expr::Param(_)
+		| other @ Expr::Idiom(_)
+		| other @ Expr::Table(_)
+		| other @ Expr::Mock(_)
+		| other @ Expr::Block(_)
+		| other @ Expr::Constant(_)
+		| other @ Expr::Prefix {
+			..
+		}
+		| other @ Expr::Postfix {
+			..
+		}
+		| other @ Expr::Binary {
+			..
+		}
+		| other @ Expr::FunctionCall(_)
+		| other @ Expr::Closure(_)
+		| other @ Expr::Break
+		| other @ Expr::Continue
+		| other @ Expr::Return(_)
+		| other @ Expr::Throw(_)
+		| other @ Expr::IfElse(_)
+		| other @ Expr::Select(_)
+		| other @ Expr::Create(_)
+		| other @ Expr::Update(_)
+		| other @ Expr::Upsert(_)
+		| other @ Expr::Relate(_)
+		| other @ Expr::Insert(_)
+		| other @ Expr::Define(_)
+		| other @ Expr::Remove(_)
+		| other @ Expr::Rebuild(_)
+		| other @ Expr::Alter(_)
+		| other @ Expr::Info(_)
+		| other @ Expr::Foreach(_)
+		| other @ Expr::Let(_)
+		| other @ Expr::Sleep(_)
+		| other @ Expr::Explain {
+			..
+		} => panic!("Expected Expr::Delete, got {other:?}"),
 	}
 }
 

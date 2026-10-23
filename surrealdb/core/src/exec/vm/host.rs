@@ -8035,8 +8035,14 @@ async fn invoke_builtin(
 	if !func.is_pure() || func.is_async() {
 		// A call that reaches past the transaction runs only once every create held before it
 		// is checked, so none runs after a create that fails.
-		if func.effects().intersects(HELD_CREATES_FLUSHED_BY) {
+		let effects = func.effects();
+		if effects.intersects(HELD_CREATES_FLUSHED_BY) {
 			exec.txn().flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
+		}
+		// A call that may change something outside the transaction keeps the statement from
+		// being run again after a lost conflict.
+		if effects.contains(crate::expr::logical::EffectSet::WRITES_EXTERNAL) {
+			exec.txn().note_external_effect();
 		}
 		return super::fuel::metered(exec, func.invoke_async(ctx, args)).await;
 	}

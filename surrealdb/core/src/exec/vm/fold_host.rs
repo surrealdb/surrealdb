@@ -223,6 +223,9 @@ fn refusal_of(error: &IrError) -> FoldRun {
 		}
 		| IrError::Invariant {
 			..
+		}
+		| IrError::CatalogUnreadable {
+			..
 		} => FoldRun::Refused(NotFoldable::HostRefused("lowering")),
 	}
 }

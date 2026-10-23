@@ -56,6 +56,9 @@ pub(crate) async fn run_script(
 		// where that is a KNN query vector's row being scanned, the call is
 		// refused before it runs, whether or not the script reads it.
 		let doc = ctx.value_in_scope().read()?.map(|v| CursorDoc::new(None, v.clone()));
+		// A script may reach outside the transaction (`fetch`), so the statement is not run
+		// again after a lost conflict.
+		ctx.exec_ctx.txn().note_external_effect();
 		Ok(script::run(&frozen_ctx, &opt, doc.as_ref(), source, args).await?)
 	}
 	#[cfg(not(feature = "scripting"))]

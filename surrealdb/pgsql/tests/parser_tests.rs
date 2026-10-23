@@ -339,6 +339,10 @@ fn test_parse_subqueries() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 	let beyond_a_double = format!("0x{}", "F".repeat(300));
 	for literal in [
@@ -369,6 +373,10 @@ fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
 	for literal in [
 		"9223372036854775808",
@@ -393,6 +401,10 @@ fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 	for sql in [
 		"-9223372036854775808",
@@ -413,6 +425,10 @@ fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 	for sql in [
 		"-9223372036854775809",
@@ -458,6 +474,10 @@ fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 	for (sql, operator) in [
 		("x = -9223372036854775808", BinaryOperator::Eq),
@@ -507,6 +527,10 @@ fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_json_operator_followed_by_a_negative_integer_is_one_operator_and_a_negation() {
 	for (sql, operator) in [
 		("data->>-1", BinaryOperator::LongArrow),

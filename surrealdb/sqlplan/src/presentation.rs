@@ -31,7 +31,21 @@ fn show_in_place(value: &mut Value) {
 			members.iter_mut().for_each(show_in_place);
 			*value = Value::Array(members.into());
 		}
-		_ => {}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Set(_) => {}
 	}
 }
 
@@ -42,7 +56,20 @@ fn holds_record_id(value: &Value) -> bool {
 		Value::Array(array) => array.iter().any(holds_record_id),
 		Value::Object(object) => object.values().any(holds_record_id),
 		Value::Set(set) => set.iter().any(holds_record_id),
-		_ => false,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_) => false,
 	}
 }
 

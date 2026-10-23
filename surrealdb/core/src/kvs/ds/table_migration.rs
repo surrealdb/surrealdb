@@ -267,6 +267,15 @@ impl Datastore {
 				if canceller.is_cancelled() {
 					return Err(e);
 				}
+				// A conflict means another writer committed first; the table is visited again
+				// on the next pass.
+				if surrealdb_datastore::is_retryable_transaction_conflict(&e) {
+					debug!(
+						"Table migration of `{}` in {}/{} lost a conflict, retrying on the next pass: {e}",
+						target.tb, target.ns_name, target.db_name
+					);
+					return Ok(true);
+				}
 				warn!(
 					"Table migration of `{}` in {}/{} failed: {e}",
 					target.tb, target.ns_name, target.db_name
@@ -360,15 +369,19 @@ impl Datastore {
 				if let Some(progress) = &progress {
 					txn.del_compare_key(&target.key(), Some(progress)).await?;
 				}
-				Self::commit_page(&txn).await?;
-				return Ok(TableOutcome::Done);
+				if Self::page_committed(&txn).await? {
+					return Ok(TableOutcome::Done);
+				}
+				continue;
 			}
 			if !requests.is_empty() {
 				// The requests are folded in a page of their own, so a verification a request
 				// asks for is in the progress before the lap waits for the transactions older
 				// than it.
 				match Self::fold_requests(&txn, target, progress.as_ref(), &requests).await {
-					Ok(()) => Self::commit_page(&txn).await?,
+					Ok(()) => {
+						Self::page_committed(&txn).await?;
+					}
 					// Another node's job replaced the progress; the next page reads it again.
 					Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
 						let _ = txn.cancel().await;
@@ -404,7 +417,9 @@ impl Datastore {
 					..state.clone()
 				};
 				match txn.put_compare_key(&target.key(), &settled, Some(&state)).await {
-					Ok(()) => Self::commit_page(&txn).await?,
+					Ok(()) => {
+						Self::page_committed(&txn).await?;
+					}
 					// The progress moved meanwhile; the next page reads it again.
 					Err(e) if crate::kvs::is_conditional_write_conflict(&e) => {
 						let _ = txn.cancel().await;
@@ -451,6 +466,22 @@ impl Datastore {
 				}
 			}
 			yield_now!();
+		}
+	}
+
+	/// Commit `txn`, a page that writes only the job's own keys, answering whether it applied.
+	///
+	/// A page that loses a retryable conflict to another writer (a user statement, or a node that
+	/// took the lease over) applied nothing; it is answered `false` after a short wait, and the
+	/// next page reads the state afresh. The job never makes a writer that beat it fail.
+	async fn page_committed(txn: &Transaction) -> Result<bool> {
+		match Self::commit_page(txn).await {
+			Ok(()) => Ok(true),
+			Err(e) if surrealdb_datastore::is_retryable_transaction_conflict(&e) => {
+				common::time::sleep(SETTLE_POLL).await;
+				Ok(false)
+			}
+			Err(e) => Err(e),
 		}
 	}
 

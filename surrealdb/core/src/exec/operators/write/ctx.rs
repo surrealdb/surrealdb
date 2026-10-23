@@ -320,11 +320,9 @@ pub(crate) struct WriteCtx {
 	/// has no scope and a stage that needs one says so rather than appearing
 	/// to work.
 	pub(crate) scope: Weak<WriteScope>,
-	/// The table's catalog version when the context was resolved, and how
-	/// many catalog stamps the transaction had made then: a context resolved
-	/// before a change to its table's catalog no longer stands
-	/// ([`Self::stands`]).
-	pub(crate) resolved_at: (Option<uuid::Uuid>, u64),
+	/// The table's catalog version when the context was resolved: the
+	/// definitions it holds are the ones that version names.
+	pub(crate) resolved_at: Option<uuid::Uuid>,
 	/// The format this statement's record writes give this table's rows, cached per layout epoch
 	/// ([`RecordFormatSlot`]).
 	pub(crate) format: RecordFormatSlot,
@@ -397,7 +395,6 @@ impl WriteCtx {
 			}
 		};
 		let txn = exec.txn();
-		let stamps = txn.catalog_stamps();
 		let catalog_version = txn
 			.catalog_version(parent.ns.namespace_id, parent.db.database_id, table)
 			.await
@@ -441,7 +438,7 @@ impl WriteCtx {
 			key,
 			exec: exec.clone(),
 			scope: Weak::new(),
-			resolved_at: (catalog_version, stamps),
+			resolved_at: catalog_version,
 			format: RecordFormatSlot::empty(),
 			conformance_forfeit: AtomicU64::new(u64::MAX),
 			index_shapes,
@@ -478,26 +475,6 @@ impl WriteCtx {
 			conformance_forfeit: AtomicU64::new(u64::MAX),
 			index_shapes: self.index_shapes.clone(),
 		}
-	}
-
-	/// Whether the table's catalog is the one this context read: the
-	/// transaction has stamped no catalog version since, or none of this
-	/// table's. The version is read through the transaction's cache, a seam
-	/// of the run-time seal ([`crate::exec::compiles::seam`]).
-	pub(crate) async fn stands(&self) -> Result<bool, ControlFlow> {
-		let txn = self.exec.txn();
-		let (version, stamps) = self.resolved_at;
-		if txn.catalog_stamps() == stamps {
-			return Ok(true);
-		}
-		let now = crate::exec::vm::descriptor::object(txn.catalog_version(
-			self.ns.namespace_id,
-			self.db.database_id,
-			&self.table.name,
-		))
-		.await
-		.map_err(ControlFlow::Err)?;
-		Ok(now == version)
 	}
 
 	/// The transaction the stages write through.

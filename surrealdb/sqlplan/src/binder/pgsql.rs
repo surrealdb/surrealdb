@@ -1261,7 +1261,10 @@ fn table_ref_contains(tr: &TableRef, table_name: &str) -> bool {
 			right,
 			..
 		} => table_ref_contains(left, table_name) || table_ref_contains(right, table_name),
-		TableRef::GraphTable {
+		TableRef::Function {
+			..
+		}
+		| TableRef::GraphTable {
 			..
 		}
 		| TableRef::JsonTable(_) => false,

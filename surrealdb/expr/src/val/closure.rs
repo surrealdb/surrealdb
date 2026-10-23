@@ -166,8 +166,10 @@ impl Ord for Closure {
 				.then_with(|| args1.len().cmp(&args2.len()))
 				.then_with(|| {
 					for ((p1, k1), (p2, k2)) in args1.iter().zip(args2.iter()) {
-						let ord =
-							p1.as_str().cmp(p2.as_str()).then_with(|| k1.to_sql().cmp(&k2.to_sql()));
+						let ord = p1
+							.as_str()
+							.cmp(p2.as_str())
+							.then_with(|| k1.to_sql().cmp(&k2.to_sql()));
 						if ord != Ordering::Equal {
 							return ord;
 						}
@@ -175,10 +177,7 @@ impl Ord for Closure {
 					Ordering::Equal
 				})
 				.then_with(|| {
-					returns1
-						.as_ref()
-						.map(ToSql::to_sql)
-						.cmp(&returns2.as_ref().map(ToSql::to_sql))
+					returns1.as_ref().map(ToSql::to_sql).cmp(&returns2.as_ref().map(ToSql::to_sql))
 				})
 				.then_with(|| body1.to_sql().cmp(&body2.to_sql()))
 				.then_with(|| format!("{self:?}").cmp(&format!("{other:?}"))),
@@ -437,6 +436,7 @@ mod tests {
 		assert_ne!(c1.cmp(&c3), Ordering::Equal);
 		assert_eq!(c1.cmp(&c3), c3.cmp(&c1).reverse());
 
+		#[expect(clippy::mutable_key_type, reason = "a closure value is ordered by its definition")]
 		let mut set = BTreeSet::new();
 		set.insert(Value::Closure(Box::new(c1)));
 		set.insert(Value::Closure(Box::new(c1_dup)));
@@ -454,8 +454,8 @@ mod tests {
 		with_spill_serialization(|| {
 			c.serialize_revisioned(&mut buf).expect("spill serialization succeeds");
 			let mut slice = buf.as_slice();
-			let decoded =
-				Closure::deserialize_revisioned(&mut slice).expect("spill deserialization succeeds");
+			let decoded = Closure::deserialize_revisioned(&mut slice)
+				.expect("spill deserialization succeeds");
 			assert_eq!(decoded, c);
 		});
 

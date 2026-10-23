@@ -5,8 +5,8 @@ database = true
 auth = { level = "owner" }
 imports = ["language/planner/id_components_index_import.surql"]
 # Extra timeout because this test sleeps while the builds run.
-timeout = 10000
-context-timeout = 10000
+timeout = 20000
+context-timeout = 20000
 
 [test]
 reason = """
@@ -34,6 +34,33 @@ value = "NONE"
 value = "NONE"
 
 # Each build scanned the eleven rows the table held and nothing else.
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
 [[test.results]]
 match = '''$result.building.status = 'ready' AND $result.building.pending = 0 AND $result.building.initial = 11'''
 error = false
@@ -90,7 +117,16 @@ value = "true"
 DEFINE INDEX by_at ON tick FIELDS at CONCURRENTLY;
 DEFINE INDEX tick_f ON tick COUNT WHERE feed = 'f' CONCURRENTLY;
 
-SLEEP 1s;
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX by_at ON tick).building.status != 'ready' OR (INFO FOR INDEX tick_f ON tick).building.status != 'ready' { SLEEP 1s };
 
 INFO FOR INDEX by_at ON tick;
 INFO FOR INDEX tick_f ON tick;

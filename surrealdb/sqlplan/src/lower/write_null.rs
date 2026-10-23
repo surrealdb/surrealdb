@@ -28,7 +28,44 @@ fn once(value: Expr, name: &str, build: impl FnOnce(Expr) -> Expr) -> Expr {
 		Expr::Idiom(Idiom(parts)) => parts.iter().all(|part| matches!(part, Part::Field(_))),
 		Expr::Literal(Literal::Array(_) | Literal::Object(_)) => false,
 		Expr::Literal(_) => true,
-		_ => false,
+		Expr::Table(_)
+		| Expr::Mock(_)
+		| Expr::Block(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Postfix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Return(_)
+		| Expr::Throw(_)
+		| Expr::IfElse(_)
+		| Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_)
+		| Expr::Define(_)
+		| Expr::Remove(_)
+		| Expr::Rebuild(_)
+		| Expr::Alter(_)
+		| Expr::Info(_)
+		| Expr::Foreach(_)
+		| Expr::Let(_)
+		| Expr::Sleep(_)
+		| Expr::Explain {
+			..
+		} => false,
 	};
 	if simple {
 		return build(value);
@@ -92,7 +129,41 @@ pub(super) fn binary(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
 			let decisive = match &op {
 				BinaryOperator::And => Some(false),
 				BinaryOperator::Or => Some(true),
-				_ => None,
+				BinaryOperator::Subtract
+				| BinaryOperator::Add
+				| BinaryOperator::Multiply
+				| BinaryOperator::Divide
+				| BinaryOperator::Remainder
+				| BinaryOperator::Power
+				| BinaryOperator::Equal
+				| BinaryOperator::ExactEqual
+				| BinaryOperator::NotEqual
+				| BinaryOperator::AllEqual
+				| BinaryOperator::AnyEqual
+				| BinaryOperator::NullCoalescing
+				| BinaryOperator::TenaryCondition
+				| BinaryOperator::LessThan
+				| BinaryOperator::LessThanEqual
+				| BinaryOperator::MoreThan
+				| BinaryOperator::MoreThanEqual
+				| BinaryOperator::Contain
+				| BinaryOperator::NotContain
+				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
+				| BinaryOperator::ContainNone
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
+				| BinaryOperator::AllInside
+				| BinaryOperator::AnyInside
+				| BinaryOperator::NoneInside
+				| BinaryOperator::Outside
+				| BinaryOperator::Intersects
+				| BinaryOperator::Range
+				| BinaryOperator::RangeInclusive
+				| BinaryOperator::RangeSkip
+				| BinaryOperator::RangeSkipInclusive
+				| BinaryOperator::Matches(_)
+				| BinaryOperator::NearestNeighbor(_) => None,
 			};
 			let result = raw(left.clone(), op, right.clone());
 			match decisive {
@@ -154,7 +225,44 @@ pub(super) fn guard(expr: Expr) -> Expr {
 			op,
 			right,
 		} => binary(*left, op, *right),
-		other => other,
+		other @ Expr::Literal(_)
+		| other @ Expr::Param(_)
+		| other @ Expr::Idiom(_)
+		| other @ Expr::Table(_)
+		| other @ Expr::Mock(_)
+		| other @ Expr::Block(_)
+		| other @ Expr::Constant(_)
+		| other @ Expr::Prefix {
+			..
+		}
+		| other @ Expr::Postfix {
+			..
+		}
+		| other @ Expr::FunctionCall(_)
+		| other @ Expr::Closure(_)
+		| other @ Expr::Break
+		| other @ Expr::Continue
+		| other @ Expr::Return(_)
+		| other @ Expr::Throw(_)
+		| other @ Expr::IfElse(_)
+		| other @ Expr::Select(_)
+		| other @ Expr::Create(_)
+		| other @ Expr::Update(_)
+		| other @ Expr::Upsert(_)
+		| other @ Expr::Delete(_)
+		| other @ Expr::Relate(_)
+		| other @ Expr::Insert(_)
+		| other @ Expr::Define(_)
+		| other @ Expr::Remove(_)
+		| other @ Expr::Rebuild(_)
+		| other @ Expr::Alter(_)
+		| other @ Expr::Info(_)
+		| other @ Expr::Foreach(_)
+		| other @ Expr::Let(_)
+		| other @ Expr::Sleep(_)
+		| other @ Expr::Explain {
+			..
+		} => other,
 	}
 }
 

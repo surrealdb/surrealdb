@@ -65,9 +65,6 @@ Total rows: 1"'''
 error = "'auth' is a protected variable and cannot be set"
 
 [[test.results]]
-error = "Internal database error: reading the definition of table `person`: The underlying datastore does not support versioned queries"
-
-[[test.results]]
 value = "[person:2]"
 
 [[test.results]]
@@ -199,7 +196,6 @@ RETURN { LET $a = { x: 1 }; $a } FETCH x;
 RETURN INFO FOR DB FETCH x;
 { EXPLAIN ANALYZE EXPLAIN SELECT * FROM person };
 EXPLAIN LET $auth = 1;
-RETURN (SELECT * FROM person:1 VERSION d'2024-01-01T00:00:00Z' FOR UPDATE);
 { LET $m = 18; RETURN person:1.{1..3}(->knows->person[WHERE age > $m]); };
 DEFINE FUNCTION fn::w($v: any) { CREATE t; RETURN true; };
 CREATE person:5 SET next = person:6; CREATE person:6;

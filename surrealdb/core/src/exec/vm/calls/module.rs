@@ -210,6 +210,9 @@ pub(crate) async fn run_module_export(
 		.capabilities
 		.as_ref()
 		.ok_or_else(|| anyhow::anyhow!("The extension `{fnc_name}` records no CAPABILITIES"))?;
+	// A module may reach outside the transaction through its capabilities, so the statement is
+	// not run again after a lost conflict.
+	ctx.exec_ctx.txn().note_external_effect();
 	let result = crate::fnc::module::module_executable_run(
 		&export.executable,
 		crate::fnc::module::CalledDefinition {

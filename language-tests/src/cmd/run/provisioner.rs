@@ -150,6 +150,9 @@ impl CreateInfo {
 					.await?;
 				ds
 			}
+			Backend::Other => {
+				anyhow::bail!("the `other` backend names a server's engine: pass --endpoint")
+			}
 		};
 
 		ds.bootstrap().await?;

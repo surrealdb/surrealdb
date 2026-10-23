@@ -753,6 +753,10 @@ fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 	let two_pow_63 = 2f64.powi(63);
 	for (sql, operator, operand) in [
@@ -778,6 +782,10 @@ fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 }
 
 #[test]
+#[expect(
+	clippy::wildcard_enum_match_arm,
+	reason = "a test asserts one shape and fails on any other"
+)]
 fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 	for (sql, operator) in [
 		("x = -9223372036854775808", BinaryOperator::Equal),
@@ -818,6 +826,10 @@ fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 
 #[test]
 fn test_parse_qualified_wildcard_and_a_column_named_star() {
+	#[expect(
+		clippy::wildcard_enum_match_arm,
+		reason = "a test asserts one shape and fails on any other"
+	)]
 	fn projection(sql: &str) -> Vec<SelectItem> {
 		match parse_statement(sql).expect("parse") {
 			Statement::Select(select) => select.projection,

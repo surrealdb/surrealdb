@@ -676,7 +676,50 @@ fn folded_pgsql(sql: &str) -> Result<BoundLiteral, PlanError> {
 	fold_select(&mut bound, &policy)?;
 	match &bound.targets[0].expr {
 		BoundExpr::Literal(lit) => Ok(lit.clone()),
-		other => panic!("{sql}: expected a folded literal, got {other:?}"),
+		other @ BoundExpr::Column(_)
+		| other @ BoundExpr::Access {
+			..
+		}
+		| other @ BoundExpr::Param {
+			..
+		}
+		| other @ BoundExpr::Binary {
+			..
+		}
+		| other @ BoundExpr::Unary {
+			..
+		}
+		| other @ BoundExpr::FunctionCall {
+			..
+		}
+		| other @ BoundExpr::Case {
+			..
+		}
+		| other @ BoundExpr::Between {
+			..
+		}
+		| other @ BoundExpr::InList {
+			..
+		}
+		| other @ BoundExpr::IsNull {
+			..
+		}
+		| other @ BoundExpr::Cast {
+			..
+		}
+		| other @ BoundExpr::ScalarSubquery(_)
+		| other @ BoundExpr::Exists(_)
+		| other @ BoundExpr::InSubquery {
+			..
+		}
+		| other @ BoundExpr::ArraySubquery(_)
+		| other @ BoundExpr::WindowFunction {
+			..
+		}
+		| other @ BoundExpr::UserVar(_)
+		| other @ BoundExpr::SystemVar {
+			..
+		} => panic!("{sql}: expected a folded literal, got {other:?}"),
 	}
 }
 
@@ -693,7 +736,50 @@ fn folded_mysql(sql: &str) -> Result<BoundLiteral, PlanError> {
 	fold_select(&mut bound, &policy)?;
 	match &bound.targets[0].expr {
 		BoundExpr::Literal(lit) => Ok(lit.clone()),
-		other => panic!("{sql}: expected a folded literal, got {other:?}"),
+		other @ BoundExpr::Column(_)
+		| other @ BoundExpr::Access {
+			..
+		}
+		| other @ BoundExpr::Param {
+			..
+		}
+		| other @ BoundExpr::Binary {
+			..
+		}
+		| other @ BoundExpr::Unary {
+			..
+		}
+		| other @ BoundExpr::FunctionCall {
+			..
+		}
+		| other @ BoundExpr::Case {
+			..
+		}
+		| other @ BoundExpr::Between {
+			..
+		}
+		| other @ BoundExpr::InList {
+			..
+		}
+		| other @ BoundExpr::IsNull {
+			..
+		}
+		| other @ BoundExpr::Cast {
+			..
+		}
+		| other @ BoundExpr::ScalarSubquery(_)
+		| other @ BoundExpr::Exists(_)
+		| other @ BoundExpr::InSubquery {
+			..
+		}
+		| other @ BoundExpr::ArraySubquery(_)
+		| other @ BoundExpr::WindowFunction {
+			..
+		}
+		| other @ BoundExpr::UserVar(_)
+		| other @ BoundExpr::SystemVar {
+			..
+		} => panic!("{sql}: expected a folded literal, got {other:?}"),
 	}
 }
 

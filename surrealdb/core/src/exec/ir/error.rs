@@ -74,4 +74,11 @@ pub(crate) enum IrError {
 	Invariant {
 		what: &'static str,
 	},
+	/// A catalog read the planner made failed. `cause` is the failure's text, so the statement's
+	/// error names what the store answered.
+	#[error("{what}: the catalog could not be read: {cause}")]
+	CatalogUnreadable {
+		what: &'static str,
+		cause: String,
+	},
 }

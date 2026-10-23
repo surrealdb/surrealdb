@@ -1,7 +1,7 @@
 /**
 [env]
-timeout = 10000
-context-timeout = 10000
+timeout = 20000
+context-timeout = 20000
 
 [test]
 issue = 7551
@@ -26,6 +26,33 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'ready'"
 
 [[test.results]]
@@ -40,7 +67,16 @@ CREATE |t:1..=500| SET x = 0 RETURN NONE;
 DEFINE INDEX ix ON t FIELDS x CONCURRENTLY;
 UPDATE t:1, t:2 SET x = 1 RETURN NONE;
 UPDATE t:3 SET x = 2 RETURN NONE;
-SLEEP 2s;
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
+IF (INFO FOR INDEX ix ON t).building.status != 'ready' { SLEEP 1s };
 (INFO FOR INDEX ix ON t).building.status;
 SELECT VALUE id FROM t WITH INDEX ix WHERE x = 1 ORDER BY id;
 SELECT VALUE id FROM t WITH INDEX ix WHERE x = 2;

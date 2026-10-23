@@ -1458,7 +1458,21 @@ impl FramedQueryFrames {
 				index,
 				values,
 			} if values.len() > 1 => (index, values),
-			frame => {
+			frame @ QueryStreamFrame::Begin {
+				..
+			}
+			| frame @ QueryStreamFrame::Rows {
+				..
+			}
+			| frame @ QueryStreamFrame::Value {
+				..
+			}
+			| frame @ QueryStreamFrame::Finished {
+				..
+			}
+			| frame @ QueryStreamFrame::End {
+				..
+			} => {
 				let kind = kind_of(&frame);
 				let encoded = self.envelope(frame)?;
 				self.pending.push_back((kind, encoded));

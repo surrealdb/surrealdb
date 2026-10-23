@@ -80,6 +80,11 @@ through; a run whose `--username` collides with a scheduled test is refused
 before it starts, naming the tests. `root` is safe: the two tests that define
 it declare `[env] remote-skip`.
 
+`--backend` names the server's storage engine, since a test declaring `[env]
+backend` asserts how the engines it lists behave. Pass `--backend other` for an
+engine the flag has no name for: every test that names its backends is skipped
+there.
+
 Results are compared identically to embedded runs: SurrealQL goes through the
 SDK (flatbuffers, so types round-trip exactly), and GraphQL/GQL are POSTed
 to the server's `/graphql` and `/gql` routes.

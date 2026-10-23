@@ -1515,7 +1515,24 @@ mod tests {
 			table: TableName::from("reading"),
 			key: RecordIdKey::Object(match key {
 				Value::Object(object) => object,
-				other => panic!("not an object: {other:?}"),
+				other @ Value::None
+				| other @ Value::Null
+				| other @ Value::Bool(_)
+				| other @ Value::Number(_)
+				| other @ Value::String(_)
+				| other @ Value::Duration(_)
+				| other @ Value::Datetime(_)
+				| other @ Value::Uuid(_)
+				| other @ Value::Array(_)
+				| other @ Value::Set(_)
+				| other @ Value::Geometry(_)
+				| other @ Value::Bytes(_)
+				| other @ Value::Table(_)
+				| other @ Value::RecordId(_)
+				| other @ Value::File(_)
+				| other @ Value::Regex(_)
+				| other @ Value::Range(_)
+				| other @ Value::Closure(_) => panic!("not an object: {other:?}"),
 			}),
 		};
 		let fits = rid(object(vec![("city", text("London")), ("n", int(1))]));

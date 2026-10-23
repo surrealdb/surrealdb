@@ -45,7 +45,48 @@ pub(crate) fn key_operand(expr: &BoundExpr) -> Option<KeyOperand<'_>> {
 			name,
 			..
 		} => Some(KeyOperand::Param(name.as_str())),
-		_ => None,
+		BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Binary {
+			..
+		}
+		| BoundExpr::Unary {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::Cast {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => None,
 	}
 }
 
@@ -53,7 +94,50 @@ pub(crate) fn key_operand(expr: &BoundExpr) -> Option<KeyOperand<'_>> {
 pub(crate) fn id_column(expr: &BoundExpr) -> Option<(&BoundColumnRef, &str)> {
 	match expr {
 		BoundExpr::Column(col) => col.id_table.as_deref().map(|table| (col, table)),
-		_ => None,
+		BoundExpr::Literal(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::Binary {
+			..
+		}
+		| BoundExpr::Unary {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::Cast {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => None,
 	}
 }
 
@@ -200,7 +284,71 @@ fn record_of_with(table: &str, key: LogicalExpr, preserve_value: bool) -> Logica
 			}
 			None => no_record(),
 		},
-		other => {
+		other @ LogicalExpr::Array(_)
+		| other @ LogicalExpr::Set(_)
+		| other @ LogicalExpr::Object(_)
+		| other @ LogicalExpr::RecordId(_)
+		| other @ LogicalExpr::Param(_)
+		| other @ LogicalExpr::Table(_)
+		| other @ LogicalExpr::Mock(_)
+		| other @ LogicalExpr::Constant(_)
+		| other @ LogicalExpr::Field(_)
+		| other @ LogicalExpr::Doc
+		| other @ LogicalExpr::Current
+		| other @ LogicalExpr::Access {
+			..
+		}
+		| other @ LogicalExpr::Index {
+			..
+		}
+		| other @ LogicalExpr::First(_)
+		| other @ LogicalExpr::Last(_)
+		| other @ LogicalExpr::Each(_)
+		| other @ LogicalExpr::Flatten {
+			..
+		}
+		| other @ LogicalExpr::Filter {
+			..
+		}
+		| other @ LogicalExpr::Method {
+			..
+		}
+		| other @ LogicalExpr::Destructure {
+			..
+		}
+		| other @ LogicalExpr::Optional {
+			..
+		}
+		| other @ LogicalExpr::Lookup {
+			..
+		}
+		| other @ LogicalExpr::Recurse(_)
+		| other @ LogicalExpr::RepeatRecurse(_)
+		| other @ LogicalExpr::Broadcast {
+			..
+		}
+		| other @ LogicalExpr::SetField {
+			..
+		}
+		| other @ LogicalExpr::Prefix {
+			..
+		}
+		| other @ LogicalExpr::Postfix {
+			..
+		}
+		| other @ LogicalExpr::Invoke {
+			..
+		}
+		| other @ LogicalExpr::Binary {
+			..
+		}
+		| other @ LogicalExpr::Call(_)
+		| other @ LogicalExpr::Closure(_)
+		| other @ LogicalExpr::If(_)
+		| other @ LogicalExpr::Throw(_)
+		| other @ LogicalExpr::Break
+		| other @ LogicalExpr::Continue
+		| other @ LogicalExpr::Subquery(_) => {
 			let empty = equal(
 				other.clone(),
 				LogicalExpr::Literal(LogicalLiteral::String(Strand::from(""))),

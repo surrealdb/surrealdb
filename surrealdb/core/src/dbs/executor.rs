@@ -57,27 +57,51 @@ use crate::val::{Value, convert_result_rows_to_public, convert_value_to_public_v
 
 const TARGET: &str = "surrealdb::core::dbs";
 
-/// How many times a bare `LIVE` or `KILL` statement runs, the first attempt
-/// included, when it loses a retryable transaction conflict. Both statements
-/// read and then write their table's live-query stamp, so two that overlap on
-/// one table conflict at commit, and a conflict means the attempt's writes did
-/// not apply: running the statement again is safe. The count is bounded so a
+/// How many times a statement run in a transaction of its own runs, the first
+/// attempt included, when it loses a retryable transaction conflict. A conflict
+/// means the attempt's writes did not apply, so running the statement again is
+/// safe unless the attempt did something outside the transaction
+/// ([`Transaction::performed_external_effect`]). Another writer that commits
+/// first, a client or one of the datastore's own background jobs, therefore
+/// delays the statement rather than failing it. The count is bounded so a
 /// statement that keeps losing the race still reports the conflict to its
 /// caller rather than holding the connection indefinitely; it is also cut
 /// short by the datastore's transaction timeout, whose one budget the
-/// statement's attempts share (see `Executor::execute_live_or_kill`).
-const LIVE_KILL_CONFLICT_ATTEMPTS: u32 = 10;
+/// statement's attempts share (see `Executor::execute_rerunning_on_conflict`).
+const STATEMENT_CONFLICT_ATTEMPTS: u32 = 10;
 
-/// The wait before the second run of a bare `LIVE` or `KILL`. It doubles
-/// before each later run up to [`LIVE_KILL_CONFLICT_MAX_BACKOFF`], and each
-/// wait is drawn from half to one and a half times that, so statements that
-/// lost to one winner do not run again in step and collide again. The wait
-/// also yields the connection's task, so a winner running on the same task
-/// gets to commit.
-const LIVE_KILL_CONFLICT_MIN_BACKOFF: Duration = Duration::from_millis(1);
+/// The wait before the second run of a statement that lost a conflict. It
+/// doubles before each later run up to [`STATEMENT_CONFLICT_MAX_BACKOFF`], and
+/// each wait is drawn from half to one and a half times that, so statements
+/// that lost to one winner do not run again in step and collide again. The
+/// wait also yields the connection's task, so a winner running on the same
+/// task gets to commit.
+const STATEMENT_CONFLICT_MIN_BACKOFF: Duration = Duration::from_millis(1);
 
-/// The longest wait before a re-run of a bare `LIVE` or `KILL`, before jitter.
-const LIVE_KILL_CONFLICT_MAX_BACKOFF: Duration = Duration::from_millis(32);
+/// The longest wait before a re-run of a statement that lost a conflict,
+/// before jitter.
+const STATEMENT_CONFLICT_MAX_BACKOFF: Duration = Duration::from_millis(32);
+
+/// What a statement that lost a conflict runs again from
+/// (`Executor::execute_rerunning_on_conflict`).
+enum Rerun {
+	/// The source of a statement compiled to a plan, which its run consumed.
+	Compile(surrealdb_expr::parser::StatementSource),
+	/// A copy of a dedicated statement, taken before its run.
+	Copy(TopLevelExpr),
+}
+
+impl Rerun {
+	/// The statement to run again; `None` when its source no longer compiles.
+	fn statement(self) -> Option<TopLevelStatement> {
+		match self {
+			Self::Compile(source) => {
+				source.compile().map(|stmt| TopLevelStatement::Surreal(Box::new(stmt)))
+			}
+			Self::Copy(expr) => Some(TopLevelStatement::Ast(expr)),
+		}
+	}
+}
 
 /// Classify an [`anyhow::Error`] into one of the bounded `error_class`
 /// constants by downcasting to the well-known concrete error types
@@ -3042,10 +3066,83 @@ impl Executor {
 			stmt @ (TopLevelStatement::Ast(_)
 			| TopLevelStatement::Plan(_)
 			| TopLevelStatement::Surreal(_)) => {
-				let mut budget = kvs.transaction_timeout();
-				self.execute_in_own_transaction(kvs, start, stmt, transaction_type, &mut budget)
+				Box::pin(self.execute_rerunning_on_conflict(kvs, start, stmt, transaction_type))
 					.await
 			}
+		}
+	}
+
+	/// Run `stmt` in a transaction of its own, and again in a fresh one each
+	/// time it loses a retryable conflict having done nothing outside the
+	/// transaction.
+	///
+	/// The statement runs at most `STATEMENT_CONFLICT_ATTEMPTS` times, its
+	/// attempts sharing one transaction-timeout budget as a bare `LIVE` or
+	/// `KILL`'s do (see [`Self::execute_live_or_kill`]). An attempt is not
+	/// followed by another when it:
+	/// - reached outside its transaction ([`Transaction::note_external_effect`]): a request sent or
+	///   a bucket written is not undone by the lost commit, and a second attempt would repeat it;
+	/// - committed and then left work to await (a blocking index build): the conflict is that
+	///   work's, and the commit stands;
+	/// - is a read: it has no commit to lose;
+	/// - was supplied as a plan rather than as SurrealQL text, which keeps no source to run again
+	///   from.
+	///
+	/// When the attempts or the timeout run out, the last conflict is returned
+	/// unchanged. Inside a transaction block or a caller-owned transaction a
+	/// statement never reaches this point, and the conflict surfaces to the
+	/// caller, who owns the transaction's other statements.
+	async fn execute_rerunning_on_conflict(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		mut stmt: TopLevelStatement,
+		transaction_type: TransactionType,
+	) -> Result<Value> {
+		let mut budget = kvs.transaction_timeout();
+		let mut attempt = 1;
+		loop {
+			// What a further attempt runs from, taken before this one consumes the
+			// statement: the source text of a compiled statement, which is
+			// shared and cheap to keep, or a copy of a dedicated one.
+			let source = match (&stmt, transaction_type) {
+				(_, TransactionType::Read) => None,
+				(TopLevelStatement::Surreal(stmt), _) => Some(Rerun::Compile(stmt.source())),
+				(TopLevelStatement::Ast(expr), _) => Some(Rerun::Copy(expr.clone())),
+				(TopLevelStatement::Plan(_), _) => None,
+			};
+			let mut rerunnable = false;
+			let e = match self
+				.execute_in_own_transaction(
+					kvs,
+					start,
+					stmt,
+					transaction_type,
+					&mut budget,
+					&mut rerunnable,
+				)
+				.await
+			{
+				Ok(value) => return Ok(value),
+				Err(e) => e,
+			};
+			// A commit whose outcome is unknown is not a retryable conflict,
+			// so a statement that may have applied is never run again.
+			if attempt == STATEMENT_CONFLICT_ATTEMPTS
+				|| !rerunnable
+				|| !crate::kvs::is_retryable_transaction_conflict(&e)
+			{
+				return Err(e);
+			}
+			let Some(next) = source.and_then(Rerun::statement) else {
+				return Err(e);
+			};
+			debug!(target: TARGET, attempt, "a statement lost a retryable transaction conflict");
+			if !self.before_conflict_retry(attempt, &mut budget).await? {
+				return Err(e);
+			}
+			stmt = next;
+			attempt += 1;
 		}
 	}
 
@@ -3053,7 +3150,7 @@ impl Executor {
 	/// fresh one each time it loses a retryable conflict on its table's
 	/// live-query stamp.
 	///
-	/// The statement runs at most `LIVE_KILL_CONFLICT_ATTEMPTS` times, and its
+	/// The statement runs at most `STATEMENT_CONFLICT_ATTEMPTS` times, and its
 	/// attempts share one transaction-timeout budget, spent by their execution
 	/// and by the waits between them: each attempt's execution must finish
 	/// within what is left, and no attempt starts once the wait before it has
@@ -3094,8 +3191,17 @@ impl Executor {
 				self.arrive_live(kvs, live.clone()).await;
 			}
 			let stmt = TopLevelStatement::Ast(expr.clone());
+			// A `LIVE` or `KILL` reaches nothing outside its transaction, so
+			// every attempt that loses a conflict may be followed by another.
 			let e = match self
-				.execute_in_own_transaction(kvs, start, stmt, transaction_type, &mut budget)
+				.execute_in_own_transaction(
+					kvs,
+					start,
+					stmt,
+					transaction_type,
+					&mut budget,
+					&mut false,
+				)
 				.await
 			{
 				Ok(value) => return Ok(value),
@@ -3103,7 +3209,7 @@ impl Executor {
 			};
 			// A commit whose outcome is unknown is not a retryable conflict,
 			// so a statement that may have applied is never run again.
-			if attempt == LIVE_KILL_CONFLICT_ATTEMPTS
+			if attempt == STATEMENT_CONFLICT_ATTEMPTS
 				|| !crate::kvs::is_retryable_transaction_conflict(&e)
 			{
 				return Err(e);
@@ -3117,9 +3223,9 @@ impl Executor {
 	}
 
 	/// Return the executor to the state a statement starts from, then wait out
-	/// the backoff, after attempt number `attempt` of a bare `LIVE` or `KILL`
-	/// lost a conflict. The wait, as long as it actually lasted, is taken from
-	/// `budget`; `false` when it would spend or has spent what is left, so the
+	/// the backoff, after attempt number `attempt` of a statement run in a
+	/// transaction of its own lost a conflict. The wait, as long as it actually lasted, is taken
+	/// from `budget`; `false` when it would spend or has spent what is left, so the
 	/// statement is not run again.
 	///
 	/// The broker the previous attempt installed is cleared: a broker still on
@@ -3138,11 +3244,15 @@ impl Executor {
 		}
 		self.broker_owned_by_executor = false;
 		self.arrived_live = None;
+		// The lost attempt's transaction has ended, and with it what it held.
+		if let Some(memory) = self.ctx.memory() {
+			memory.transaction_ended();
+		}
 		self.bail_if_done()?;
-		// `attempt` is below `LIVE_KILL_CONFLICT_ATTEMPTS`, so the doubling
+		// `attempt` is below `STATEMENT_CONFLICT_ATTEMPTS`, so the doubling
 		// cannot overflow before the cap applies.
-		let backoff = (LIVE_KILL_CONFLICT_MIN_BACKOFF * 2u32.pow(attempt - 1))
-			.min(LIVE_KILL_CONFLICT_MAX_BACKOFF)
+		let backoff = (STATEMENT_CONFLICT_MIN_BACKOFF * 2u32.pow(attempt - 1))
+			.min(STATEMENT_CONFLICT_MAX_BACKOFF)
 			.mul_f64(rand::rng().random_range(0.5..=1.5));
 		if budget.is_some_and(|left| backoff >= left) {
 			return Ok(false);
@@ -3164,6 +3274,11 @@ impl Executor {
 	/// Run `stmt` in a transaction of `transaction_type` opened for it alone,
 	/// committing a write transaction it completes and cancelling it otherwise.
 	///
+	/// `rerunnable` is set when the statement failed in a write transaction
+	/// that reached nothing outside itself and left nothing to await after its
+	/// commit, so that running the statement again from the start repeats
+	/// nothing observable. It is left `false` otherwise.
+	///
 	/// Where `budget` holds a duration, the statement's execution must finish
 	/// within it, and the time execution took is taken from it; a statement
 	/// that runs out reports the datastore's configured transaction timeout.
@@ -3176,7 +3291,9 @@ impl Executor {
 		stmt: TopLevelStatement,
 		transaction_type: TransactionType,
 		budget: &mut Option<Duration>,
+		rerunnable: &mut bool,
 	) -> Result<Value> {
+		*rerunnable = false;
 		#[cfg(test)]
 		let live_or_kill =
 			matches!(&stmt, TopLevelStatement::Ast(TopLevelExpr::Live(_) | TopLevelExpr::Kill(_)));
@@ -3273,6 +3390,20 @@ impl Executor {
 				// other does.
 				let waits = waits.take().await;
 				if waits.is_empty() {
+					// A commit that fails discards every write, and nothing is
+					// left to await after it.
+					*rerunnable = !txn.performed_external_effect();
+					// Stands in for a lost commit of any other statement.
+					#[cfg(test)]
+					if !live_or_kill
+						&& !defers_builds && let Err(e) =
+						crate::kvs::testing::maybe_inject_retryable_conflict(
+							crate::kvs::testing::RetryableConflictSite::StatementCommit,
+							self.ctx.node_id(),
+						) {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
 					Self::commit_and_flush(&txn, receiver).await?;
 					return Ok(value);
 				}
@@ -3359,6 +3490,8 @@ impl Executor {
 				bail!(ExecError::InvalidControlFlow)
 			}
 			Err(ControlFlow::Err(e)) => {
+				*rerunnable = matches!(transaction_type, TransactionType::Write)
+					&& !txn.performed_external_effect();
 				let _ = txn.cancel().await;
 				Err(e)
 			}
@@ -7121,8 +7254,149 @@ mod tests {
 		}
 	}
 
+	/// A statement run in a transaction of its own that loses a retryable
+	/// commit conflict runs again in a fresh one, bounded by
+	/// `STATEMENT_CONFLICT_ATTEMPTS`, unless it reached outside its transaction.
+	mod statement_conflict_retry {
+		use std::sync::Arc;
+
+		use surrealdb_types::Value;
+
+		use super::super::STATEMENT_CONFLICT_ATTEMPTS;
+		use crate::dbs::Session;
+		use crate::kvs::Datastore;
+		use crate::kvs::testing::{
+			RetryableConflictSite, inject_retryable_conflicts, retryable_conflict_count,
+		};
+
+		const SITE: RetryableConflictSite = RetryableConflictSite::StatementCommit;
+
+		async fn new_ds() -> (Arc<Datastore>, Session) {
+			let ds = Datastore::builder()
+				.without_maintenance_tasks()
+				.with_capabilities(crate::dbs::Capabilities::all())
+				.build_with_path("memory")
+				.await
+				.expect("datastore should open");
+			let ses = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				"DEFINE NAMESPACE test; USE NS test; DEFINE DATABASE test",
+				&Session::owner(),
+				None,
+			)
+			.await
+			.expect("the namespace and database should be defined");
+			ds.execute("DEFINE TABLE t; CREATE t:counter SET n = 0", &ses, None)
+				.await
+				.expect("the table should be defined");
+			(ds, ses)
+		}
+
+		async fn query(ds: &Datastore, ses: &Session, sql: &str) -> Result<Value, String> {
+			let mut res = ds.execute(sql, ses, None).await.expect("the query should run");
+			res.remove(0).result.map_err(|e| e.to_string())
+		}
+
+		async fn counter(ds: &Datastore, ses: &Session) -> Value {
+			query(ds, ses, "SELECT VALUE n FROM ONLY t:counter").await.expect("the read")
+		}
+
+		#[tokio::test]
+		async fn a_write_that_loses_its_commit_runs_again_and_applies_once() {
+			let (ds, ses) = new_ds().await;
+			let _guard = inject_retryable_conflicts(
+				SITE,
+				ds.id(),
+				(STATEMENT_CONFLICT_ATTEMPTS - 1) as usize,
+			);
+			let res = query(&ds, &ses, "UPDATE t:counter SET n += 1 RETURN VALUE n").await;
+			assert_eq!(
+				res,
+				Ok(Value::Array(vec![Value::Number(surrealdb_types::Number::Int(1))].into()))
+			);
+			assert_eq!(retryable_conflict_count(SITE, ds.id()), 0, "every conflict is consumed");
+			assert_eq!(
+				counter(&ds, &ses).await,
+				Value::Number(surrealdb_types::Number::Int(1)),
+				"the write applied once"
+			);
+		}
+
+		#[tokio::test]
+		async fn a_schema_statement_runs_again_too() {
+			let (ds, ses) = new_ds().await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 2);
+			query(&ds, &ses, "REMOVE TABLE t").await.expect("REMOVE TABLE should succeed");
+			assert_eq!(retryable_conflict_count(SITE, ds.id()), 0, "every conflict is consumed");
+			let tables = query(&ds, &ses, "RETURN object::keys((INFO FOR DB).tables)").await;
+			assert_eq!(tables, Ok(Value::Array(Vec::<Value>::new().into())), "the table is gone");
+		}
+
+		#[tokio::test]
+		async fn a_write_that_keeps_losing_reports_the_conflict() {
+			let (ds, ses) = new_ds().await;
+			let _guard =
+				inject_retryable_conflicts(SITE, ds.id(), STATEMENT_CONFLICT_ATTEMPTS as usize);
+			let mut res = ds
+				.execute("UPDATE t:counter SET n += 1", &ses, None)
+				.await
+				.expect("the query should run");
+			let err = res.remove(0).result.expect_err("the write should report the conflict");
+			assert_eq!(
+				err.query_details(),
+				Some(&surrealdb_types::QueryError::TransactionConflict),
+				"the conflict must arrive unwrapped: {err}"
+			);
+			assert_eq!(
+				retryable_conflict_count(SITE, ds.id()),
+				0,
+				"exactly the bounded number of attempts is made"
+			);
+			assert_eq!(
+				counter(&ds, &ses).await,
+				Value::Number(surrealdb_types::Number::Int(0)),
+				"nothing applied"
+			);
+		}
+
+		/// A script may have reached outside the transaction, so a statement
+		/// that ran one is not run again.
+		#[cfg(feature = "scripting")]
+		#[tokio::test]
+		async fn a_write_that_ran_a_script_is_not_run_again() {
+			let (ds, ses) = new_ds().await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 1);
+			let res = query(&ds, &ses, "UPDATE t:counter SET n += function() { return 1; }").await;
+			let err = res.expect_err("the conflict is reported");
+			assert!(err.contains("can be retried"), "the conflict is reported: {err}");
+			assert_eq!(retryable_conflict_count(SITE, ds.id()), 0, "one attempt was made");
+			assert_eq!(
+				counter(&ds, &ses).await,
+				Value::Number(surrealdb_types::Number::Int(0)),
+				"nothing applied"
+			);
+		}
+
+		#[tokio::test]
+		async fn a_statement_in_a_block_is_not_run_again() {
+			let (ds, ses) = new_ds().await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 1);
+			let res = ds
+				.execute("BEGIN; UPDATE t:counter SET n += 1; COMMIT;", &ses, None)
+				.await
+				.expect("the query should run");
+			assert!(res.iter().all(|r| r.result.is_ok()), "the block commits: {res:?}");
+			assert_eq!(
+				retryable_conflict_count(SITE, ds.id()),
+				1,
+				"a block's commit is not a statement's own"
+			);
+			assert_eq!(counter(&ds, &ses).await, Value::Number(surrealdb_types::Number::Int(1)));
+		}
+	}
+
 	/// A bare `LIVE` or `KILL` that loses a retryable commit conflict runs
-	/// again in a fresh transaction, bounded by `LIVE_KILL_CONFLICT_ATTEMPTS`,
+	/// again in a fresh transaction, bounded by `STATEMENT_CONFLICT_ATTEMPTS`,
 	/// and a statement inside a transaction block never does.
 	mod live_kill_conflict_retry {
 		use std::sync::Arc;
@@ -7131,7 +7405,7 @@ mod tests {
 		use surrealdb_catalog::providers::CatalogProvider;
 		use surrealdb_types::{Action, Notification, Value};
 
-		use super::super::LIVE_KILL_CONFLICT_ATTEMPTS;
+		use super::super::STATEMENT_CONFLICT_ATTEMPTS;
 		use crate::dbs::Session;
 		use crate::kvs::Datastore;
 		use crate::kvs::testing::{
@@ -7204,7 +7478,7 @@ mod tests {
 			let _guard = inject_retryable_conflicts(
 				SITE,
 				ds.id(),
-				(LIVE_KILL_CONFLICT_ATTEMPTS - 1) as usize,
+				(STATEMENT_CONFLICT_ATTEMPTS - 1) as usize,
 			);
 			let vars = surrealdb_types::vars! { id: id.clone() };
 			let res = ds.execute("KILL $id", &ses, Some(vars)).await.expect("KILL should run");
@@ -7226,7 +7500,7 @@ mod tests {
 			let (ds, _recv, ses) = new_ds().await;
 			let id = live(&ds, &ses).await;
 			let _guard =
-				inject_retryable_conflicts(SITE, ds.id(), LIVE_KILL_CONFLICT_ATTEMPTS as usize);
+				inject_retryable_conflicts(SITE, ds.id(), STATEMENT_CONFLICT_ATTEMPTS as usize);
 			let vars = surrealdb_types::vars! { id: id.clone() };
 			let res = ds.execute("KILL $id", &ses, Some(vars)).await.expect("KILL should run");
 			let err = res[0].result.as_ref().expect_err("KILL should report the conflict");
@@ -7254,7 +7528,7 @@ mod tests {
 				.with_transaction_timeout(Some(Duration::from_millis(20)));
 			let id = live(&ds, &ses).await;
 			let _guard =
-				inject_retryable_conflicts(SITE, ds.id(), LIVE_KILL_CONFLICT_ATTEMPTS as usize);
+				inject_retryable_conflicts(SITE, ds.id(), STATEMENT_CONFLICT_ATTEMPTS as usize);
 			let vars = surrealdb_types::vars! { id: id.clone() };
 			let res = ds.execute("KILL $id", &ses, Some(vars)).await.expect("KILL should run");
 			let err = res[0].result.as_ref().expect_err("KILL should report the conflict");

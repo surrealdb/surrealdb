@@ -601,6 +601,9 @@ impl From<IrError> for NotCovered {
 			}
 			| IrError::Invariant {
 				..
+			}
+			| IrError::CatalogUnreadable {
+				..
 			}) => Self::internal(other.to_string()),
 		}
 	}

@@ -19,6 +19,33 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 match = '''$result.building.status == 'error''''
 
 [[test.results]]
@@ -45,7 +72,18 @@ value = "[{ a: 2, id: t:6 }]"
 CREATE t:1 SET a = 1;
 CREATE t:2 SET a = 1;
 DEFINE INDEX ua ON t FIELDS a UNIQUE CONCURRENTLY;
-SLEEP 500ms;
+-- Wait for the build to fail in bounded steps, each its own statement: the reads of a
+-- single statement all come from one snapshot and would never see it end.
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
+IF (INFO FOR INDEX ua ON t).building.status != 'error' { SLEEP 500ms };
 INFO FOR INDEX ua ON t;
 CREATE t:3 SET a = 2;
 CREATE t:4 SET b = 1;

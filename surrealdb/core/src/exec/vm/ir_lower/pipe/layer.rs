@@ -1204,13 +1204,17 @@ mod tests {
 		let copies: Vec<(usize, u16)> = code
 			.iter()
 			.enumerate()
-			.filter_map(|(at, instr)| match instr {
-				Instr::JudgeCopy {
+			.filter_map(|(at, instr)| {
+				if let Instr::JudgeCopy {
 					pipeline: 0,
 					src: ROW,
 					dst,
-				} => Some((at, *dst)),
-				_ => None,
+				} = instr
+				{
+					Some((at, *dst))
+				} else {
+					None
+				}
 			})
 			.collect();
 		let [(made, copy)] = copies.as_slice() else {

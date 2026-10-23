@@ -846,7 +846,23 @@ async fn read_record_object(
 ) -> Result<surrealdb_types::Object> {
 	match ds.execute(sql, ses, None).await?.remove(0).result? {
 		Value::Object(object) => Ok(object),
-		other => anyhow::bail!("expected the record as an object, got {other:?}"),
+		other @ Value::None
+		| other @ Value::Null
+		| other @ Value::Bool(_)
+		| other @ Value::Number(_)
+		| other @ Value::String(_)
+		| other @ Value::Bytes(_)
+		| other @ Value::Duration(_)
+		| other @ Value::Datetime(_)
+		| other @ Value::Uuid(_)
+		| other @ Value::Geometry(_)
+		| other @ Value::Table(_)
+		| other @ Value::RecordId(_)
+		| other @ Value::File(_)
+		| other @ Value::Range(_)
+		| other @ Value::Regex(_)
+		| other @ Value::Array(_)
+		| other @ Value::Set(_) => anyhow::bail!("expected the record as an object, got {other:?}"),
 	}
 }
 

@@ -79,7 +79,26 @@ impl PgWriteAnalysis {
 				Vec::new(),
 				delete.span,
 			),
-			_ => return None,
+			Statement::Copy(_)
+			| Statement::Select(_)
+			| Statement::Truncate(_)
+			| Statement::CreateTable(_)
+			| Statement::CreateIndex(_)
+			| Statement::CreateView(_)
+			| Statement::AlterTable(_)
+			| Statement::CreateSchema(_)
+			| Statement::Drop(_)
+			| Statement::Transaction(_)
+			| Statement::Set(_)
+			| Statement::Show(_)
+			| Statement::Reset(_)
+			| Statement::Explain(_)
+			| Statement::Prepare(_)
+			| Statement::Execute(_)
+			| Statement::Deallocate(_)
+			| Statement::CreatePropertyGraph(_)
+			| Statement::DropPropertyGraph(_)
+			| Statement::Empty => return None,
 		};
 		let mut sources = vec![TableRef::Table {
 			name: relation.clone(),
@@ -224,7 +243,90 @@ pub fn returning_name(target: &ResTarget) -> String {
 				expr,
 				..
 			} => label(expr),
-			_ => "?column?".into(),
+			Expr::Literal {
+				..
+			}
+			| Expr::Param {
+				..
+			}
+			| Expr::UnaryOp {
+				..
+			}
+			| Expr::BinaryOp {
+				..
+			}
+			| Expr::Subscript {
+				..
+			}
+			| Expr::Slice {
+				..
+			}
+			| Expr::Between {
+				..
+			}
+			| Expr::InList {
+				..
+			}
+			| Expr::IsNull {
+				..
+			}
+			| Expr::IsTrue {
+				..
+			}
+			| Expr::IsFalse {
+				..
+			}
+			| Expr::IsUnknown {
+				..
+			}
+			| Expr::IsDistinctFrom {
+				..
+			}
+			| Expr::Case {
+				..
+			}
+			| Expr::Collate {
+				..
+			}
+			| Expr::ArrayConstructor {
+				..
+			}
+			| Expr::Row {
+				..
+			}
+			| Expr::IsBound {
+				..
+			}
+			| Expr::JsonObject {
+				..
+			}
+			| Expr::JsonArray {
+				..
+			}
+			| Expr::JsonExists {
+				..
+			}
+			| Expr::JsonValue {
+				..
+			}
+			| Expr::JsonQuery {
+				..
+			}
+			| Expr::Subquery {
+				..
+			}
+			| Expr::Exists {
+				..
+			}
+			| Expr::InSubquery {
+				..
+			}
+			| Expr::ArraySubquery {
+				..
+			}
+			| Expr::Quantified {
+				..
+			} => "?column?".into(),
 		}
 	}
 	target.alias.clone().unwrap_or_else(|| label(&target.expr))

@@ -67,7 +67,9 @@ use crate::expr::{
 pub mod api;
 mod execution;
 mod query;
-pub use execution::{ExecutionStatement, LogicalStatement, StatementKind, StatementText};
+pub use execution::{
+	ExecutionStatement, LogicalStatement, StatementKind, StatementSource, StatementText,
+};
 pub use query::{BeginOptions, IsolationLevel, Query, ReadOnly, Staleness, TopLevelExpr};
 mod define;
 pub mod entry;

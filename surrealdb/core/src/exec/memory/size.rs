@@ -191,7 +191,7 @@ mod tests {
 		assert!(value_bytes(&set_val) > 4096);
 
 		let range_val = Value::Range(Box::new(crate::val::Range {
-			start: std::ops::Bound::Included(big_str.clone()),
+			start: std::ops::Bound::Included(big_str),
 			end: std::ops::Bound::Unbounded,
 		}));
 		assert!(value_bytes(&range_val) > 4096);

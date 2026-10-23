@@ -406,7 +406,47 @@ fn record_literal(table: &str, value: &Expr) -> Option<Expr> {
 		Expr::Literal(Literal::String(s)) if !s.as_str().is_empty() => {
 			RecordIdKeyLit::String(s.clone())
 		}
-		_ => return None,
+		Expr::Literal(_)
+		| Expr::Param(_)
+		| Expr::Idiom(_)
+		| Expr::Table(_)
+		| Expr::Mock(_)
+		| Expr::Block(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Postfix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Return(_)
+		| Expr::Throw(_)
+		| Expr::IfElse(_)
+		| Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_)
+		| Expr::Define(_)
+		| Expr::Remove(_)
+		| Expr::Rebuild(_)
+		| Expr::Alter(_)
+		| Expr::Info(_)
+		| Expr::Foreach(_)
+		| Expr::Let(_)
+		| Expr::Sleep(_)
+		| Expr::Explain {
+			..
+		} => return None,
 	};
 	Some(Expr::Literal(Literal::RecordId(RecordIdLit {
 		table: TableName::from(table),
@@ -989,7 +1029,97 @@ fn lower_pgsql_predicate(
 			}
 			lower_pgsql_expr_in(expr, scope)
 		}
-		_ => lower_pgsql_expr_in(expr, scope),
+		PgExpr::Literal {
+			..
+		}
+		| PgExpr::ColumnRef(_)
+		| PgExpr::Param {
+			..
+		}
+		| PgExpr::UnaryOp {
+			..
+		}
+		| PgExpr::BinaryOp {
+			..
+		}
+		| PgExpr::TypeCast {
+			..
+		}
+		| PgExpr::FunctionCall {
+			..
+		}
+		| PgExpr::Subscript {
+			..
+		}
+		| PgExpr::Slice {
+			..
+		}
+		| PgExpr::Between {
+			..
+		}
+		| PgExpr::InList {
+			..
+		}
+		| PgExpr::IsNull {
+			..
+		}
+		| PgExpr::IsTrue {
+			..
+		}
+		| PgExpr::IsFalse {
+			..
+		}
+		| PgExpr::IsUnknown {
+			..
+		}
+		| PgExpr::IsDistinctFrom {
+			..
+		}
+		| PgExpr::Case {
+			..
+		}
+		| PgExpr::Collate {
+			..
+		}
+		| PgExpr::ArrayConstructor {
+			..
+		}
+		| PgExpr::Row {
+			..
+		}
+		| PgExpr::IsBound {
+			..
+		}
+		| PgExpr::JsonObject {
+			..
+		}
+		| PgExpr::JsonArray {
+			..
+		}
+		| PgExpr::JsonExists {
+			..
+		}
+		| PgExpr::JsonValue {
+			..
+		}
+		| PgExpr::JsonQuery {
+			..
+		}
+		| PgExpr::Subquery {
+			..
+		}
+		| PgExpr::Exists {
+			..
+		}
+		| PgExpr::InSubquery {
+			..
+		}
+		| PgExpr::ArraySubquery {
+			..
+		}
+		| PgExpr::Quantified {
+			..
+		} => lower_pgsql_expr_in(expr, scope),
 	}
 }
 
@@ -1008,7 +1138,97 @@ fn pgsql_key_operand(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<WriteKey
 			id,
 			..
 		} => Some(WriteKey::Param(format!("_{id}"))),
-		_ => None,
+		surrealdb_pgsql::ast::expr::Expr::Literal {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ColumnRef(_)
+		| surrealdb_pgsql::ast::expr::Expr::UnaryOp {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::BinaryOp {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::TypeCast {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::FunctionCall {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subscript {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Slice {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Between {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::InList {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsNull {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsTrue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsFalse {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsUnknown {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsDistinctFrom {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Case {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArrayConstructor {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Row {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Grouping {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsBound {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonObject {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonArray {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonExists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonValue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonQuery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArraySubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Quantified {
+			..
+		} => None,
 	}
 }
 
@@ -1044,7 +1264,41 @@ fn pgsql_id_comparison(
 	let bin_op = match op {
 		surrealdb_pgsql::ast::op::BinaryOperator::Eq => BinaryOperator::Equal,
 		surrealdb_pgsql::ast::op::BinaryOperator::NotEq => BinaryOperator::NotEqual,
-		_ => return Ok(None),
+		surrealdb_pgsql::ast::op::BinaryOperator::Add
+		| surrealdb_pgsql::ast::op::BinaryOperator::Sub
+		| surrealdb_pgsql::ast::op::BinaryOperator::Mul
+		| surrealdb_pgsql::ast::op::BinaryOperator::Div
+		| surrealdb_pgsql::ast::op::BinaryOperator::Mod
+		| surrealdb_pgsql::ast::op::BinaryOperator::Exp
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitAnd
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
+		| surrealdb_pgsql::ast::op::BinaryOperator::And
+		| surrealdb_pgsql::ast::op::BinaryOperator::Or
+		| surrealdb_pgsql::ast::op::BinaryOperator::Lt
+		| surrealdb_pgsql::ast::op::BinaryOperator::LtEq
+		| surrealdb_pgsql::ast::op::BinaryOperator::Gt
+		| surrealdb_pgsql::ast::op::BinaryOperator::GtEq
+		| surrealdb_pgsql::ast::op::BinaryOperator::Concat
+		| surrealdb_pgsql::ast::op::BinaryOperator::Like
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotLike
+		| surrealdb_pgsql::ast::op::BinaryOperator::ILike
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotILike
+		| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi
+		| surrealdb_pgsql::ast::op::BinaryOperator::Arrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::LongArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::Contains
+		| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
+		| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => return Ok(None),
 	};
 	let other = match (pgsql_is_id(left, scope), pgsql_is_id(right, scope)) {
 		(true, false) => right,
@@ -1093,7 +1347,99 @@ fn pgsql_id_membership(
 fn pgsql_column_fields(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<&[String]> {
 	match expr {
 		surrealdb_pgsql::ast::expr::Expr::ColumnRef(col) => Some(&col.fields),
-		_ => None,
+		surrealdb_pgsql::ast::expr::Expr::Literal {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Param {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::UnaryOp {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::BinaryOp {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::TypeCast {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::FunctionCall {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subscript {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Slice {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Between {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::InList {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsNull {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsTrue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsFalse {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsUnknown {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsDistinctFrom {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Case {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArrayConstructor {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Row {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Grouping {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::IsBound {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonObject {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonArray {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonExists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonValue {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::JsonQuery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::ArraySubquery {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::Quantified {
+			..
+		} => None,
 	}
 }
 
@@ -1109,7 +1455,41 @@ fn pgsql_link_comparison(
 	let bin_op = match op {
 		surrealdb_pgsql::ast::op::BinaryOperator::Eq => BinaryOperator::Equal,
 		surrealdb_pgsql::ast::op::BinaryOperator::NotEq => BinaryOperator::NotEqual,
-		_ => return Ok(None),
+		surrealdb_pgsql::ast::op::BinaryOperator::Add
+		| surrealdb_pgsql::ast::op::BinaryOperator::Sub
+		| surrealdb_pgsql::ast::op::BinaryOperator::Mul
+		| surrealdb_pgsql::ast::op::BinaryOperator::Div
+		| surrealdb_pgsql::ast::op::BinaryOperator::Mod
+		| surrealdb_pgsql::ast::op::BinaryOperator::Exp
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitAnd
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+		| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
+		| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
+		| surrealdb_pgsql::ast::op::BinaryOperator::And
+		| surrealdb_pgsql::ast::op::BinaryOperator::Or
+		| surrealdb_pgsql::ast::op::BinaryOperator::Lt
+		| surrealdb_pgsql::ast::op::BinaryOperator::LtEq
+		| surrealdb_pgsql::ast::op::BinaryOperator::Gt
+		| surrealdb_pgsql::ast::op::BinaryOperator::GtEq
+		| surrealdb_pgsql::ast::op::BinaryOperator::Concat
+		| surrealdb_pgsql::ast::op::BinaryOperator::Like
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotLike
+		| surrealdb_pgsql::ast::op::BinaryOperator::ILike
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotILike
+		| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch
+		| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi
+		| surrealdb_pgsql::ast::op::BinaryOperator::Arrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::LongArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow
+		| surrealdb_pgsql::ast::op::BinaryOperator::Contains
+		| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
+		| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => return Ok(None),
 	};
 	let (column, table, other) = if let Some((column, table)) =
 		pgsql_column_fields(left).and_then(|fields| scope.link_of(fields))
@@ -2034,7 +2414,57 @@ fn mysql_key_operand(expr: &surrealdb_mysql::ast::expr::Expr) -> Option<WriteKey
 		surrealdb_mysql::ast::expr::Expr::Param(idx, _) => {
 			Some(WriteKey::Param(surrealdb_types::positional_param_name(*idx)))
 		}
-		_ => None,
+		surrealdb_mysql::ast::expr::Expr::Literal(..)
+		| surrealdb_mysql::ast::expr::Expr::ColumnRef(_)
+		| surrealdb_mysql::ast::expr::Expr::UserVar(..)
+		| surrealdb_mysql::ast::expr::Expr::SystemVar {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::UnaryOp {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::BinaryOp {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::FunctionCall {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Cast {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Case {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::InList {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Between {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::IsNull {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::IsTruthValue {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Interval {
+			..
+		} => None,
 	}
 }
 
@@ -2069,7 +2499,30 @@ fn mysql_id_comparison(
 	let bin_op = match op {
 		surrealdb_mysql::ast::operator::BinaryOperator::Equal => BinaryOperator::Equal,
 		surrealdb_mysql::ast::operator::BinaryOperator::NotEqual => BinaryOperator::NotEqual,
-		_ => return Ok(None),
+		surrealdb_mysql::ast::operator::BinaryOperator::Add
+		| surrealdb_mysql::ast::operator::BinaryOperator::Sub
+		| surrealdb_mysql::ast::operator::BinaryOperator::Mul
+		| surrealdb_mysql::ast::operator::BinaryOperator::Div
+		| surrealdb_mysql::ast::operator::BinaryOperator::IntDiv
+		| surrealdb_mysql::ast::operator::BinaryOperator::Mod
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitAnd
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitOr
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitXor
+		| surrealdb_mysql::ast::operator::BinaryOperator::ShiftLeft
+		| surrealdb_mysql::ast::operator::BinaryOperator::ShiftRight
+		| surrealdb_mysql::ast::operator::BinaryOperator::NullSafeEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Less
+		| surrealdb_mysql::ast::operator::BinaryOperator::LessEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Greater
+		| surrealdb_mysql::ast::operator::BinaryOperator::GreaterEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Like
+		| surrealdb_mysql::ast::operator::BinaryOperator::Regexp
+		| surrealdb_mysql::ast::operator::BinaryOperator::Rlike
+		| surrealdb_mysql::ast::operator::BinaryOperator::And
+		| surrealdb_mysql::ast::operator::BinaryOperator::Or
+		| surrealdb_mysql::ast::operator::BinaryOperator::Xor
+		| surrealdb_mysql::ast::operator::BinaryOperator::Concat
+		| surrealdb_mysql::ast::operator::BinaryOperator::Assign => return Ok(None),
 	};
 	let other = match (mysql_is_id(left, scope), mysql_is_id(right, scope)) {
 		(true, false) => right,
@@ -2113,7 +2566,57 @@ fn mysql_id_membership(
 fn mysql_column_fields(expr: &surrealdb_mysql::ast::expr::Expr) -> Option<&[String]> {
 	match expr {
 		surrealdb_mysql::ast::expr::Expr::ColumnRef(col) => Some(&col.fields),
-		_ => None,
+		surrealdb_mysql::ast::expr::Expr::Literal(..)
+		| surrealdb_mysql::ast::expr::Expr::UserVar(..)
+		| surrealdb_mysql::ast::expr::Expr::SystemVar {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Param(..)
+		| surrealdb_mysql::ast::expr::Expr::UnaryOp {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::BinaryOp {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::FunctionCall {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Cast {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Case {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::InList {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::InSubquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Between {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::IsNull {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::IsTruthValue {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Exists {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Subquery {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Collate {
+			..
+		}
+		| surrealdb_mysql::ast::expr::Expr::Interval {
+			..
+		} => None,
 	}
 }
 
@@ -2129,7 +2632,30 @@ fn mysql_link_comparison(
 	let bin_op = match op {
 		surrealdb_mysql::ast::operator::BinaryOperator::Equal => BinaryOperator::Equal,
 		surrealdb_mysql::ast::operator::BinaryOperator::NotEqual => BinaryOperator::NotEqual,
-		_ => return Ok(None),
+		surrealdb_mysql::ast::operator::BinaryOperator::Add
+		| surrealdb_mysql::ast::operator::BinaryOperator::Sub
+		| surrealdb_mysql::ast::operator::BinaryOperator::Mul
+		| surrealdb_mysql::ast::operator::BinaryOperator::Div
+		| surrealdb_mysql::ast::operator::BinaryOperator::IntDiv
+		| surrealdb_mysql::ast::operator::BinaryOperator::Mod
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitAnd
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitOr
+		| surrealdb_mysql::ast::operator::BinaryOperator::BitXor
+		| surrealdb_mysql::ast::operator::BinaryOperator::ShiftLeft
+		| surrealdb_mysql::ast::operator::BinaryOperator::ShiftRight
+		| surrealdb_mysql::ast::operator::BinaryOperator::NullSafeEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Less
+		| surrealdb_mysql::ast::operator::BinaryOperator::LessEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Greater
+		| surrealdb_mysql::ast::operator::BinaryOperator::GreaterEqual
+		| surrealdb_mysql::ast::operator::BinaryOperator::Like
+		| surrealdb_mysql::ast::operator::BinaryOperator::Regexp
+		| surrealdb_mysql::ast::operator::BinaryOperator::Rlike
+		| surrealdb_mysql::ast::operator::BinaryOperator::And
+		| surrealdb_mysql::ast::operator::BinaryOperator::Or
+		| surrealdb_mysql::ast::operator::BinaryOperator::Xor
+		| surrealdb_mysql::ast::operator::BinaryOperator::Concat
+		| surrealdb_mysql::ast::operator::BinaryOperator::Assign => return Ok(None),
 	};
 	let (column, table, other) = if let Some((column, table)) =
 		mysql_column_fields(left).and_then(|fields| scope.link_of(fields))

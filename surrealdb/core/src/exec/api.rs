@@ -385,6 +385,9 @@ async fn call_middleware(
 			if builtin.is_pure() && !builtin.is_async() {
 				builtin.invoke(args).map_err(ControlFlow::Err)
 			} else {
+				if builtin.effects().contains(crate::expr::logical::EffectSet::WRITES_EXTERNAL) {
+					exec.txn().note_external_effect();
+				}
 				builtin.invoke_async(&eval, args).await.map_err(ControlFlow::Err)
 			}
 		}
