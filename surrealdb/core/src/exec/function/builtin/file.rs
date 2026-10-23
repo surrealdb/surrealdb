@@ -2,6 +2,14 @@
 //!
 //! These provide file storage functionality for working with buckets.
 //! Note: File functions require the experimental "files" capability to be enabled.
+//!
+//! File writes are not transactional. `file::put`, `file::delete`, `file::copy`,
+//! `file::rename` and their `_if_not_exists` variants act on the bucket's object
+//! store when they run, and a `CANCEL`, a failed statement or a failed commit
+//! does not undo them, while the records written beside them roll back. A
+//! transaction that must keep records and bucket objects consistent writes the
+//! object first and commits the records that name it after, so a failure leaves
+//! at worst an unreferenced object.
 
 use std::sync::Arc;
 

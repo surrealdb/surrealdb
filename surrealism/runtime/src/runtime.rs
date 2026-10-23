@@ -299,6 +299,8 @@ impl Runtime {
 			)));
 		}
 
+		refuse_unbound_imports(engine, &comp)?;
+
 		let mut linker: component::Linker<StoreData> = component::Linker::new(engine);
 		wasmtime_wasi::p2::add_to_linker_async(&mut linker)
 			.prefix_err(|| "failed to add WASI P2 to component linker")?;
@@ -514,6 +516,30 @@ impl Runtime {
 	}
 }
 
+/// Refuse a component that imports an interface the host never binds, naming
+/// the route an extension has instead of the linker's report of a missing
+/// implementation.
+///
+/// The host binds no WASI HTTP interface, which an HTTP client crate built for
+/// `wasm32-wasip2` imports. An extension makes outbound requests by calling an
+/// `http::*` function through its transaction's `run`, where the definition's
+/// `functions` and `net` capabilities apply.
+pub fn refuse_unbound_imports(
+	engine: &Engine,
+	component: &component::Component,
+) -> SurrealismResult<()> {
+	if let Some((name, _)) =
+		component.component_type().imports(engine).find(|(name, _)| name.starts_with("wasi:http/"))
+	{
+		return Err(SurrealismError::Other(anyhow::anyhow!(
+			"the component imports `{name}`, and extensions cannot use WASI HTTP: make outbound \
+			 requests by calling an `http::*` function through the transaction's `run`, which the \
+			 definition's `functions` and `net` capabilities govern"
+		)));
+	}
+	Ok(())
+}
+
 #[cfg(test)]
 mod tests {
 	use std::time::Duration;
@@ -594,5 +620,26 @@ mod tests {
 		// and fails only where it lacks what a module needs.
 		let other = Runtime::build(&engine, component("other").as_bytes());
 		assert!(other.err().is_none_or(|e| !e.to_string().contains("`init`")));
+	}
+
+	/// A component that imports a WASI HTTP interface is refused with the
+	/// route an extension has for HTTP, not the linker's report of a missing
+	/// implementation.
+	#[test]
+	fn a_component_importing_wasi_http_is_refused() {
+		let engines = engines(EngineSettings {
+			max_concurrent_invocations: 1,
+			max_memory_bytes: Some(1 << 20),
+		});
+		let engine = engines.engine(true).expect("engine");
+		let wasm = br#"(component
+			(import "wasi:http/types@0.2.9" (instance))
+			(core module $m (func (export "f")))
+			(core instance $i (instantiate $m))
+			(func (export "invoke") (canon lift (core func $i "f"))))"#;
+		let err = Runtime::build(&engine, wasm).err().expect("refused");
+		let err = err.to_string();
+		assert!(err.contains("`wasi:http/types@0.2.9`"), "{err}");
+		assert!(err.contains("`http::*`"), "{err}");
 	}
 }

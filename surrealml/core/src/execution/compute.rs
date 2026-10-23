@@ -237,6 +237,86 @@ impl ModelComputation<'_> {
 #[cfg(test)]
 mod tests {
 
+	/// A model of one `MatMul` node, `y = x · w`, taking `x` of shape `[1, 3]` and returning `y`
+	/// of shape `[1, 3]`, encoded as an ONNX `ModelProto`.
+	///
+	/// Written out by hand so a test can run a model with several outputs without a training
+	/// framework or a stored model file.
+	fn multi_output_onnx(w: [f32; 9]) -> Vec<u8> {
+		fn varint(mut v: u64, out: &mut Vec<u8>) {
+			while v >= 0x80 {
+				out.push((v as u8) | 0x80);
+				v >>= 7;
+			}
+			out.push(v as u8);
+		}
+		fn int(field: u64, v: u64, out: &mut Vec<u8>) {
+			varint(field << 3, out);
+			varint(v, out);
+		}
+		fn bytes(field: u64, v: &[u8], out: &mut Vec<u8>) {
+			varint((field << 3) | 2, out);
+			varint(v.len() as u64, out);
+			out.extend_from_slice(v);
+		}
+		// A float tensor value of shape `[1, 3]`.
+		fn value_info(name: &str) -> Vec<u8> {
+			let mut shape = Vec::new();
+			for dim in [1, 3] {
+				let mut d = Vec::new();
+				int(1, dim, &mut d);
+				bytes(1, &d, &mut shape);
+			}
+			let mut tensor = Vec::new();
+			int(1, 1, &mut tensor);
+			bytes(2, &shape, &mut tensor);
+			let mut ty = Vec::new();
+			bytes(1, &tensor, &mut ty);
+			let mut info = Vec::new();
+			bytes(1, name.as_bytes(), &mut info);
+			bytes(2, &ty, &mut info);
+			info
+		}
+		let mut node = Vec::new();
+		bytes(1, b"x", &mut node);
+		bytes(1, b"w", &mut node);
+		bytes(2, b"y", &mut node);
+		bytes(4, b"MatMul", &mut node);
+		let mut weights = Vec::new();
+		int(1, 3, &mut weights);
+		int(1, 3, &mut weights);
+		int(2, 1, &mut weights);
+		bytes(8, b"w", &mut weights);
+		let raw: Vec<u8> = w.iter().flat_map(|v| v.to_le_bytes()).collect();
+		bytes(9, &raw, &mut weights);
+		let mut graph = Vec::new();
+		bytes(1, &node, &mut graph);
+		bytes(2, b"multi_output", &mut graph);
+		bytes(5, &weights, &mut graph);
+		bytes(11, &value_info("x"), &mut graph);
+		bytes(12, &value_info("y"), &mut graph);
+		let mut opset = Vec::new();
+		int(2, 13, &mut opset);
+		let mut model = Vec::new();
+		int(1, 8, &mut model);
+		bytes(7, &graph, &mut model);
+		bytes(8, &opset, &mut model);
+		model
+	}
+
+	#[test]
+	fn raw_compute_returns_every_output() {
+		use super::*;
+		let model = multi_output_onnx([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+		let mut file = SurMlFile::fresh(model);
+		let computation = ModelComputation {
+			surml_file: &mut file,
+		};
+		let input = ndarray::arr1::<f32>(&[1.0, 1.0, 1.0]).into_dyn();
+		let output = computation.raw_compute(input, None).unwrap();
+		assert_eq!(output, [12.0, 15.0, 18.0]);
+	}
+
 	#[cfg(any(
 		feature = "sklearn-tests",
 		feature = "onnx-tests",

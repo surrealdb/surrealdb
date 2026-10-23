@@ -215,6 +215,7 @@ pub async fn snapshot_with(
 		return Ok(None);
 	}
 
+	surrealism_runtime::runtime::refuse_unbound_imports(&engine, &component)?;
 	let log = SharedLog::default();
 	let mut linker = Linker::new(&engine);
 	wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(wasmtime_err)?;

@@ -595,6 +595,35 @@ fn resolve_output_path(out: Option<PathBuf>, config: &SurrealismConfig) -> Resul
 mod tests {
 	use super::*;
 
+	/// The release build runs every core module of the component through
+	/// wasm-opt and re-embeds it, and the result is still a valid component
+	/// with the same exports.
+	#[test]
+	fn optimize_component_runs_wasm_opt_on_each_core_module() {
+		let component = wat::parse_str(
+			r#"(component
+				(core module $m
+					(func $double (param i32) (result i32)
+						local.get 0
+						local.get 0
+						i32.add)
+					(func (export "f") (param i32) (result i32)
+						local.get 0
+						call $double))
+				(core instance $i (instantiate $m))
+				(func (export "invoke") (param "x" u32) (result u32)
+					(canon lift (core func $i "f"))))"#,
+		)
+		.unwrap();
+		let optimized = optimize_component(&component).unwrap();
+		wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+			.validate_all(&optimized)
+			.unwrap();
+		let engine = wasmtime::Engine::default();
+		let optimized = wasmtime::component::Component::new(&engine, &optimized).unwrap();
+		assert!(optimized.get_export_index(None, "invoke").is_some());
+	}
+
 	fn package_toml(name: &str) -> String {
 		format!(
 			"abi = 1\n[package]\norganisation = \"test\"\nname = \"{name}\"\nversion = \"1.0.0\"\n"

@@ -10,6 +10,10 @@
 //! - `BucketController` - Controls bucket operations with permission checking
 //! - `BucketsManager` - Manages bucket connections and caching
 //! - [`store`] - Object store trait and implementations
+//!
+//! An object store is not transactional: a write reaches it when it is made and
+//! is not undone when the transaction that made it is cancelled or fails to
+//! commit.
 
 use std::path::PathBuf;
 use std::sync::Arc;
