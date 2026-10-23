@@ -1216,6 +1216,9 @@ impl Transactable for Transaction {
 			let inner = self.inner.read().await;
 			let mut buf = Vec::new();
 			'ranges: for (at, rng) in ranges.iter().enumerate() {
+				if rng.start >= rng.end {
+					continue;
+				}
 				let (beg, end) = (rng.start.as_slice(), rng.end.as_slice());
 				let mut taken = 0u32;
 				match version {
@@ -1843,5 +1846,47 @@ mod commit_error_test {
 			let e = commit_error(e);
 			assert!(matches!(e, Error::CommitOutcomeUnknown(_)), "{e:?}");
 		}
+	}
+
+	#[tokio::test]
+	async fn visit_key_ranges_skips_empty_and_inverted_ranges() {
+		let dir = std::env::temp_dir().join(format!(
+			"surrealkv_visit_key_ranges_{}_{}",
+			std::process::id(),
+			std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.unwrap()
+				.as_nanos()
+		));
+		let path = dir.to_string_lossy().into_owned();
+		let ds = Datastore::new(&path, SurrealKvConfig::default()).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(Key::from(b"b".as_slice()), b"1".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let rd = ds.transaction(TransactionType::Read).await.unwrap();
+		let ranges = [
+			KeyRange::from(Key::from(b"b".as_slice())..Key::from(b"b".as_slice())),
+			KeyRange::from(Key::from(b"z".as_slice())..Key::from(b"a".as_slice())),
+			KeyRange::from(Key::from(b"a".as_slice())..Key::from(b"c".as_slice())),
+		];
+		let mut visited = Vec::new();
+		let stats = rd
+			.visit_key_ranges(
+				&ranges,
+				10,
+				None,
+				&mut |at: usize, key: &[u8]| {
+					visited.push((at, key.to_vec()));
+					Ok(std::ops::ControlFlow::Continue(()))
+				},
+			)
+			.await
+			.unwrap();
+		assert_eq!(stats.rows, 1);
+		assert_eq!(visited, vec![(2, b"b".to_vec())]);
+		rd.cancel().await.unwrap();
+		drop(ds);
+		let _ = std::fs::remove_dir_all(&dir);
 	}
 }

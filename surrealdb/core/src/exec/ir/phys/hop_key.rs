@@ -191,11 +191,10 @@ fn key_of(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, hop: OpId) -> Option<
 	let needs_id = roots.contains("id");
 	let needs_in = roots.contains("in");
 	let needs_out = roots.contains("out");
-	if (needs_id || needs_in || needs_out)
-		&& attrs
-			.subjects
-			.iter()
-			.any(|subject| !key_fields_readable(cx, &subject.table, needs_id, needs_in, needs_out))
+	if attrs
+		.subjects
+		.iter()
+		.any(|subject| !key_fields_readable(cx, &subject.table, needs_id, needs_in, needs_out))
 	{
 		return None;
 	}
@@ -393,10 +392,11 @@ fn admitted_form(ir: &Ir, cx: &PhysCx<'_>, kind: &ExprOp, operands: &[ValueId]) 
 }
 
 /// Whether the caller reads every key field among `id`, `in` and `out` that `needs_id`,
-/// `needs_in` and `needs_out` select, of the edge table `table`, as the entry's key holds it: no
-/// field at or beneath one of them is governed by a `SELECT` permission that is not `FULL` for the
-/// caller. `false` where the physical catalog holds no answers for the table's current read, or
-/// holds an unresolved permission context.
+/// `needs_in` and `needs_out` select, of the edge table `table`, as the entry's key holds it: the
+/// caller's reads of the table are not governed by a `SELECT` permission, and no field at or
+/// beneath one of them is governed by a `SELECT` permission that is not `FULL` for the caller.
+/// `false` where the physical catalog holds no answers for the table's current read, or holds an
+/// unresolved permission context.
 fn key_fields_readable(
 	cx: &PhysCx<'_>,
 	table: &TableName,
@@ -409,6 +409,9 @@ fn key_fields_readable(
 		CatalogAnswer::Found(answers) => answers,
 		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => return false,
 	};
+	if answers.permissioned {
+		return false;
+	}
 	match &answers.restricted {
 		super::access::RestrictedSelect::None => true,
 		super::access::RestrictedSelect::Unresolved => false,
@@ -537,5 +540,69 @@ fn root(ir: &Ir, row: ValueId, value: ValueId) -> Option<String> {
 			[base],
 		) if *base == row => Some(name.as_str().to_owned()),
 		_ => None,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::ir::analysis::cx::builtin_registry;
+	use crate::exec::ir::iface::catalog::{
+		EffectCx, PhysicalCatalog, SemanticCatalog, default_config,
+	};
+	use crate::exec::ir::iface::frame::FrameTable;
+	use crate::exec::ir::phys::access::{RestrictedSelect, TableAnswers};
+
+	struct OneTable(Arc<TableAnswers>);
+
+	impl SemanticCatalog for OneTable {}
+	impl PhysicalCatalog for OneTable {
+		fn table_answers(&self, key: &SourceKey) -> CatalogAnswer<Arc<TableAnswers>> {
+			if key.0 == self.0.table {
+				CatalogAnswer::Found(Arc::clone(&self.0))
+			} else {
+				CatalogAnswer::Unknown
+			}
+		}
+	}
+
+	#[test]
+	fn key_fields_readable_rejects_permissioned_table() {
+		let table = TableName::from("edge");
+		let frames = FrameTable::default();
+		let registry = builtin_registry();
+
+		let mut answers = TableAnswers::plain(table.clone(), true);
+		answers.restricted = RestrictedSelect::None;
+		answers.permissioned = false;
+		let catalog = OneTable(Arc::new(answers));
+		let cx = PhysCx {
+			effects: EffectCx {
+				registry,
+				catalog: &catalog,
+				frames: &frames,
+			},
+			physical: &catalog,
+			config: default_config(),
+		};
+		assert!(key_fields_readable(&cx, &table, true, true, true));
+
+		let mut perm_answers = TableAnswers::plain(table.clone(), true);
+		perm_answers.restricted = RestrictedSelect::None;
+		perm_answers.permissioned = true;
+		let perm_catalog = OneTable(Arc::new(perm_answers));
+		let perm_cx = PhysCx {
+			effects: EffectCx {
+				registry,
+				catalog: &perm_catalog,
+				frames: &frames,
+			},
+			physical: &perm_catalog,
+			config: default_config(),
+		};
+		assert!(!key_fields_readable(&perm_cx, &table, true, false, false));
+		assert!(!key_fields_readable(&perm_cx, &table, false, true, false));
+		assert!(!key_fields_readable(&perm_cx, &table, false, false, true));
+		assert!(!key_fields_readable(&perm_cx, &table, false, false, false));
 	}
 }

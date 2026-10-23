@@ -823,6 +823,9 @@ impl Transactable for Transaction {
 			// Load the inner transaction once for every range
 			let inner = self.inner.read().await;
 			'ranges: for (at, rng) in ranges.iter().enumerate() {
+				if rng.start >= rng.end {
+					continue;
+				}
 				let mut iter =
 					inner.keys_iter(rng.start.as_slice()..rng.end.as_slice()).map_err(kvs_error)?;
 				for _ in 0..limit {
@@ -1593,6 +1596,37 @@ mod tests {
 		r.commit().await.unwrap();
 		let rd = ds.transaction(TransactionType::Read).await.unwrap();
 		assert!(!rd.plain_reads_tracked());
+		rd.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn visit_key_ranges_skips_empty_and_inverted_ranges() {
+		let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(Key::from(b"b".as_slice()), b"1".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let rd = ds.transaction(TransactionType::Read).await.unwrap();
+		let ranges = [
+			KeyRange::from(Key::from(b"b".as_slice())..Key::from(b"b".as_slice())),
+			KeyRange::from(Key::from(b"z".as_slice())..Key::from(b"a".as_slice())),
+			KeyRange::from(Key::from(b"a".as_slice())..Key::from(b"c".as_slice())),
+		];
+		let mut visited = Vec::new();
+		let stats = rd
+			.visit_key_ranges(
+				&ranges,
+				10,
+				None,
+				&mut |at: usize, key: &[u8]| {
+					visited.push((at, key.to_vec()));
+					Ok(std::ops::ControlFlow::Continue(()))
+				},
+			)
+			.await
+			.unwrap();
+		assert_eq!(stats.rows, 1);
+		assert_eq!(visited, vec![(2, b"b".to_vec())]);
 		rd.cancel().await.unwrap();
 	}
 }
