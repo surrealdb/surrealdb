@@ -340,6 +340,17 @@ impl Ddl<'_, '_> {
 				table: table_reg,
 				key: Arc::clone(key),
 			});
+		} else if name.is_id() {
+			// A definition that leaves the table with no structure is held to the order the
+			// records it already holds are stored in.
+			let id_field = self.load(template)?;
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::DroppedKeyStructure {
+					field: id_field,
+					ns,
+					db,
+				},
+			});
 		}
 		let stored_field = self.load(template)?;
 		self.session_auth_limit(stored_field)?;
@@ -794,6 +805,15 @@ impl Ddl<'_, '_> {
 						ns,
 						db,
 						kind: DefineKind::Overwrite,
+					},
+				});
+				// A merged definition that leaves the table with no structure is held to the
+				// order the records it already holds are stored in.
+				self.store(StoreInstr::FieldCheck {
+					check: FieldCheck::DroppedKeyStructure {
+						field: stored,
+						ns,
+						db,
 					},
 				});
 			}

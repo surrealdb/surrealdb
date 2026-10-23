@@ -191,14 +191,33 @@ pub(super) async fn check_table_altered(
 /// They are judged as a `DEFINE FIELD` of `kind` judges them, against the
 /// catalog and the table's view rows as `txn` holds them.
 pub(super) async fn check_key_components(
-	txn: &Transaction,
+	ctx: &crate::exec::ExecutionContext,
 	ns: NamespaceId,
 	db: DatabaseId,
 	kind: &DefineKind,
 	definition: &crate::catalog::FieldDefinition,
 ) -> anyhow::Result<()> {
+	let txn = ctx.txn();
 	crate::exec::vm::descriptor::schema(crate::ddl::define_field_statement_validate_key_components(
-		txn, ns, db, kind, definition,
+		&txn, ns, db, kind, definition,
+	))
+	.await
+}
+
+/// The order the records of the table `definition` defines the `id` of are
+/// stored in, which holds a definition that leaves that table with no record
+/// id structure, judged against the catalog of the database `ns`, `db` as
+/// `ctx` holds it. A definition that keeps a structure, or defines any other
+/// field, reads no record.
+pub(super) async fn refuse_dropping_key_structure(
+	ctx: &crate::exec::ExecutionContext,
+	ns: NamespaceId,
+	db: DatabaseId,
+	definition: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	let txn = ctx.txn();
+	crate::exec::vm::descriptor::schema(crate::ddl::key_scan::refuse_dropping_unordered_keys_for(
+		ctx, &txn, ns, db, definition,
 	))
 	.await
 }
@@ -264,13 +283,15 @@ pub(super) async fn refuse_removing_filled_table(
 /// `db`: a definition of the table that reads a component of its record id,
 /// as `txn` holds the catalog and the rows of the table's views.
 pub(super) async fn refuse_removing_id(
-	txn: &Transaction,
+	ctx: &crate::exec::ExecutionContext,
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableName,
 ) -> anyhow::Result<()> {
+	let txn = ctx.txn();
 	crate::exec::vm::descriptor::schema(crate::ddl::key_scan::refuse_removing_field(
-		txn,
+		ctx,
+		&txn,
 		ns,
 		db,
 		table,

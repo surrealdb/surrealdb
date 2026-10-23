@@ -655,6 +655,19 @@ pub(crate) enum Error {
 		view: String,
 	},
 
+	/// The table holds records whose keys are stored in an order other than
+	/// their record ids', which only the record id structure accounts for, and
+	/// the statement would leave the table with no structure. A scan of such a
+	/// table is read as delivering `ORDER BY id`, which these keys do not.
+	#[error(
+		"Cannot remove the names from the record id of `{table}`: it holds {first} and {second}, whose keys are stored in the opposite order to their record ids, which only the names account for. Delete those records, or copy them into a table with the record id you want, first"
+	)]
+	IdComponentsOutOfOrderWithoutNames {
+		table: String,
+		first: String,
+		second: String,
+	},
+
 	/// A write's maintenance reached the view `view` while a row of `view` was
 	/// already in flight beneath it: the view reads itself, directly or through
 	/// the views of `through`, each of which reads the next and the last of
@@ -791,6 +804,9 @@ impl LeafError for Error {
 				..
 			}
 			| Error::IdComponentsUnderWildcardView {
+				..
+			}
+			| Error::IdComponentsOutOfOrderWithoutNames {
 				..
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			// A view that reads itself is a definition no write can maintain,

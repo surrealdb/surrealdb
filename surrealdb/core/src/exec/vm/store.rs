@@ -2126,8 +2126,19 @@ async fn step_inner(
 					let definition = field(*reg)?;
 					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
 					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
-					let txn = ctx.txn();
-					super::schema_host::check_key_components(&txn, ns, db, kind, &definition)
+					super::schema_host::check_key_components(ctx, ns, db, kind, &definition)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+				FieldCheck::DroppedKeyStructure {
+					field: reg,
+					ns,
+					db,
+				} => {
+					let definition = field(*reg)?;
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					super::schema_host::refuse_dropping_key_structure(ctx, ns, db, &definition)
 						.await
 						.map_err(ControlFlow::Err)?;
 				}
@@ -2207,8 +2218,7 @@ async fn step_inner(
 					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
 					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
 					let table = table_named(&read(regs, *table))?;
-					let txn = ctx.txn();
-					super::schema_host::refuse_removing_id(&txn, ns, db, &table)
+					super::schema_host::refuse_removing_id(ctx, ns, db, &table)
 						.await
 						.map_err(ControlFlow::Err)?;
 				}

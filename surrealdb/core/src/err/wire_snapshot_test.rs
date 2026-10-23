@@ -1489,6 +1489,14 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		(
+			"IdComponentsOutOfOrderWithoutNames",
+			ExecError::IdComponentsOutOfOrderWithoutNames {
+				table: "reading".to_string(),
+				first: "reading:['London', d'2024-01-01T00:00:00.500Z']".to_string(),
+				second: "reading:['London', d'2024-01-01T00:00:00Z']".to_string(),
+			},
+		),
+		(
 			"ViewReadsItself",
 			ExecError::ViewReadsItself {
 				view: "totals".to_string(),

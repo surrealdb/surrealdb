@@ -421,10 +421,19 @@ async fn alter_field_write(
 
 	// A record id that names its components must admit every record the table
 	// holds; the scan is skipped when the stored `id` already has the same
-	// structure.
-	if let Some(key) = df.live_key() {
+	// structure. A definition that leaves the table with no structure is held
+	// to the order the records it already holds are stored in instead.
+	if df.live_key().is_some() || df.name.is_id() {
 		let exec = crate::ddl::frame(ctx, opt, None).await;
-		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, what, key).await?;
+		match df.live_key() {
+			Some(key) => {
+				crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, what, key).await?;
+			}
+			None => {
+				crate::ddl::key_scan::refuse_dropping_unordered_keys_for(&exec, &txn, ns, db, &df)
+					.await?;
+			}
+		}
 	}
 
 	// Altering the kind of a `COMPUTED` field changes the value it derives.

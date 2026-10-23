@@ -3128,6 +3128,17 @@ pub(crate) enum FieldCheck {
 		db: Reg,
 		kind: crate::expr::statements::define::DefineKind,
 	},
+	/// The definition in `field`, which leaves the table it defines the `id`
+	/// of with no record id structure, is held to the order the records the
+	/// table already holds are stored in, judged against the catalog of the
+	/// database `ns`, `db` (`ddl::key_scan::refuse_dropping_unordered_keys_for`).
+	/// A definition that keeps a structure, or defines any other field, reads
+	/// no record.
+	DroppedKeyStructure {
+		field: Reg,
+		ns: Reg,
+		db: Reg,
+	},
 	/// No aggregated view of the table depends on the value the definition in
 	/// `field` changes the derivation of, replacing the stored definition in
 	/// `old` (`NONE` when the field is new) while the table holds a record,

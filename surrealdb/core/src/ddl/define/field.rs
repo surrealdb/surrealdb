@@ -219,10 +219,22 @@ pub(crate) async fn define_field_definition_apply(
 
 	// A record id that names its components must admit every record the table
 	// holds; the scan is skipped when the stored `id` already has the same
-	// structure.
-	if let Some(key) = definition.live_key() {
+	// structure. A definition that leaves the table with no structure is held
+	// to the order the records it already holds are stored in instead.
+	if definition.live_key().is_some() || definition.name.is_id() {
 		let exec = crate::ddl::frame(ctx, opt, None).await;
-		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &tb_name, key).await?;
+		match definition.live_key() {
+			Some(key) => {
+				crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &tb_name, key)
+					.await?;
+			}
+			None => {
+				crate::ddl::key_scan::refuse_dropping_unordered_keys_for(
+					&exec, &txn, ns, db, definition,
+				)
+				.await?;
+			}
+		}
 	}
 
 	// A restore defines the table before it holds a record, so an import has

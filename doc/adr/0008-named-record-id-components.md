@@ -238,6 +238,25 @@ datetime, so its record id cannot be read back by any statement (a limitation of
 that predates this decision); the scan refuses the table with a message that says so and names no
 record.
 
+**The structure is not dropped under the records it orders.** `REMOVE FIELD id`, an `ALTER FIELD
+id` or a `DEFINE FIELD OVERWRITE id` that retypes `id` to a kind naming nothing, and any other
+route that leaves the table with no structure, scan the table when the structure they drop is not
+`all_exactly_ordered`: each record id is compared with the one before it in stored key order, and
+the first pair that disagrees is refused (`IdComponentsOutOfOrderWithoutNames`). The order of a
+scan is judged from the structure the catalog holds now, while the keys were written earlier and
+no change of the names rewrites them, so a table left with records and no structure would read as
+one whose keys walk in `id` order. What the refusal keeps is that dropping the names changes the
+answer to no query over the records that exist. It refuses exactly the tables that judgement would
+be wrong about: a datetime structure holding one record per second orders exactly as it stands and
+keeps its freedom, as do a structure every component of which orders exactly and an empty table.
+Records written after the names are gone are not covered: the table is then an ordinary one whose
+array record ids nothing describes, and the order of such a table's keys has never been its `id`
+order. A statement that keeps a structure scans for conformance
+(`validate_record_keys`) instead and is never refused for order; the two scans are exclusive. Both
+scan where the statement is known to store its definition, so one that replaces nothing — an `IF
+NOT EXISTS` or a duplicate `DEFINE` meeting the stored `id` — reads no record and is answered as
+it would be over a table holding none.
+
 **Operational notes.** The scan validates the records the defining transaction sees. A writer
 whose statement was planned against the catalog before the definition committed does not see the
 structure, and can still commit records whose keys do not conform, on any backend. The same writer

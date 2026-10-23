@@ -16,6 +16,10 @@
 //!   array of the declared shape, and no record body may store a field under a component's name
 //!   with a value other than the component's: such a field would be shadowed by the derived one and
 //!   cut on the record's next write.
+//! - whether the table may lose its structure at all ([`refuse_dropping_unordered_keys`]). A
+//!   structure that does not order its keys exactly is what stops a scan being read as delivering
+//!   `ORDER BY id`; the keys outlive the names, so the names go only while the records they key
+//!   still walk in the order of their record ids.
 //!
 //! Both read through the transaction of the statement, so a table written or
 //! defined earlier in the same transaction is seen as it stands.
@@ -1261,18 +1265,170 @@ pub(crate) async fn refuse_component_name(
 	Ok(())
 }
 
+/// Refuse leaving `table` with no record id structure while the keys it
+/// already holds do not walk in the order of their record ids.
+///
+/// A component whose [`catalog::ComponentOrder`] is not `Exact` — a datetime,
+/// whose key text orders by the whole second — is why a scan of such a table
+/// is not taken to deliver `ORDER BY id`. That judgement reads the structure
+/// the catalog holds now, while the keys it judges were written earlier and
+/// are rewritten by no change of the names: a table left with records and no
+/// structure reads as one whose keys walk in `id` order. The contract this
+/// keeps is that dropping the names changes the answer to no query over the
+/// records that exist.
+///
+/// The scan compares each record id with the one before it, in the order the
+/// keys are stored, and refuses the first pair that is out of order. It
+/// therefore refuses exactly the tables the judgement would be wrong about: a
+/// coarse structure whose records happen to order exactly — one reading per
+/// second — keeps its freedom to drop the names. Records written after the
+/// names are gone are not covered, and are the ordinary case of a table whose
+/// array record ids nothing describes.
+///
+/// Nothing is scanned unless the structure is lost: a structure that is
+/// renamed, reordered or retyped keeps one, and its records are held to it by
+/// [`validate_record_keys`] instead. A structure whose every component orders
+/// exactly loses nothing when its names go.
+///
+/// The scan reads in pages sized to the fuel left and charges a unit per
+/// record, as [`validate_record_keys`] does, so it honours the statement's
+/// cancellation and deadline. The snapshot it reads is the statement's, with
+/// the stale-writer race ADR 0008 describes under *Operational notes*.
+///
+/// # Errors
+///
+/// [`ExecError::IdComponentsOutOfOrderWithoutNames`] naming the first pair of
+/// records whose keys and record ids disagree; the error of a storage read
+/// that fails, or of the interruption of the statement.
+pub(crate) async fn refuse_dropping_unordered_keys(
+	exec: &ExecutionContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	old: Option<&KeyStructure>,
+	new: Option<&KeyStructure>,
+) -> Result<()> {
+	if new.is_some() {
+		return Ok(());
+	}
+	let Some(old) = old else {
+		return Ok(());
+	};
+	if old.all_exactly_ordered() {
+		return Ok(());
+	}
+	let range = RecordPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+	}
+	.range()?;
+	// Only the keys are read: the order of the record ids is the whole
+	// question, and no body decides it.
+	let mut cursor = txn.open_keys_cursor_raw(range, Direction::Forward, 0, None).await?;
+	let mut previous: Option<RecordIdKey> = None;
+	loop {
+		let mut refused = None;
+		let chunk = crate::exec::vm::fuel::batch(NORMAL_BATCH_SIZE);
+		let stats = cursor
+			.for_each(chunk, &mut |raw_key| {
+				// A key that cannot be read back is left to the scan that
+				// admits records into a structure: it is not this statement's
+				// to refuse, and it orders against nothing.
+				let Ok(record_key) = RecordKey::decode_key(raw_key) else {
+					return Ok(Step::Continue(()));
+				};
+				let current = record_key.id.as_ref().clone();
+				if let Some(before) = &previous
+					&& before > &current
+				{
+					refused = Some(ExecError::IdComponentsOutOfOrderWithoutNames {
+						table: table.as_str().to_owned(),
+						first: RecordId {
+							table: table.clone(),
+							key: before.clone(),
+						}
+						.to_sql(),
+						second: RecordId {
+							table: table.clone(),
+							key: current,
+						}
+						.to_sql(),
+					});
+					return Ok(Step::Break(()));
+				}
+				previous = Some(current);
+				Ok(Step::Continue(()))
+			})
+			.await?;
+		if let Some(error) = refused {
+			bail!(error);
+		}
+		if stats.rows == 0 {
+			return Ok(());
+		}
+		crate::exec::vm::fuel::tick(exec, crate::exec::vm::fuel::units(stats.rows as usize))
+			.await
+			.map_err(interrupted)?;
+	}
+}
+
+/// [`refuse_dropping_unordered_keys`] for the table `definition` defines a
+/// field of, where that field is the `id`: the structure the stored `id`
+/// gives is the one being left behind, and `definition` gives the one that
+/// replaces it.
+///
+/// A definition of any other field changes no record id structure and is not
+/// scanned. The caller runs this once the statement is known to store
+/// `definition`, so a statement that leaves the stored `id` alone reads no
+/// record.
+///
+/// # Errors
+///
+/// Those of [`refuse_dropping_unordered_keys`]; the error of a catalog read
+/// that fails.
+pub(crate) async fn refuse_dropping_unordered_keys_for(
+	exec: &ExecutionContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	if !definition.name.is_id() {
+		return Ok(());
+	}
+	let table = &definition.table;
+	let existing_id = txn.get_tb_field(ns, db, table, "id", None).await?;
+	let old = existing_id.as_deref().and_then(catalog::FieldDefinition::live_key);
+	refuse_dropping_unordered_keys(
+		exec,
+		txn,
+		ns,
+		db,
+		table,
+		old.map(|key| key.as_ref()),
+		definition.live_key().map(|key| key.as_ref()),
+	)
+	.await
+}
+
 /// What refuses `REMOVE FIELD name` on `table`: a component name, which has no
 /// definition to remove, and the `id` while any definition of the table reads
-/// one of its component names.
+/// one of its component names, or while the table holds records whose keys
+/// only the structure orders ([`refuse_dropping_unordered_keys`]).
 ///
 /// # Errors
 ///
 /// [`ExecError::IdComponentNotAField`] for a component name;
 /// [`ExecError::IdComponentInUse`], [`ExecError::IdComponentsUnderWildcardView`]
 /// or [`ExecError::IdComponentReadUnresolved`] for the `id` of a record id some
-/// definition reads the components of ([`first_reader`]); the error of a
-/// catalog or storage read that fails.
+/// definition reads the components of ([`first_reader`]);
+/// [`ExecError::IdComponentsOutOfOrderWithoutNames`] for the `id` of a record
+/// id whose keys the records still depend on; the error of a catalog or
+/// storage read that fails.
 pub(crate) async fn refuse_removing_field(
+	exec: &ExecutionContext,
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -1291,7 +1447,7 @@ pub(crate) async fn refuse_removing_field(
 	if let Some(reader) = first_reader(txn, ns, db, table, &names, Readers::All).await? {
 		bail!(in_use(table, reader));
 	}
-	Ok(())
+	refuse_dropping_unordered_keys(exec, txn, ns, db, table, Some(&key), None).await
 }
 
 /// The error for a component name that `reader` still reads while the record id

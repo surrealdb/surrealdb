@@ -36,7 +36,8 @@ pub(crate) async fn remove_field_statement_apply(
 	}
 	// A component of a named record id is a derived field with no definition to
 	// remove, and the `id` itself stays while a definition reads a component.
-	crate::ddl::key_scan::refuse_removing_field(&txn, ns, db, &table_name, &name).await?;
+	let exec = crate::ddl::frame(ctx, opt, None).await;
+	crate::ddl::key_scan::refuse_removing_field(&exec, &txn, ns, db, &table_name, &name).await?;
 	// Get the field name
 	let name = catalog::FieldDefinition::storage_name(&name);
 	// Get the definition
