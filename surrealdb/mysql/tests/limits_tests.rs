@@ -74,6 +74,13 @@ fn test_flat_chains_on_2mib_stack() {
 		let err = parse_statement(&join_chain).expect_err("5000 joins must hit recursion limit");
 		assert_eq!(err.kind, ErrorKind::RecursionLimitExceeded);
 
+		println!("Testing union chain...");
+		// 5000 UNION ALL chain
+		let union_chain =
+			(0..5000).map(|i| format!("SELECT {i}")).collect::<Vec<_>>().join(" UNION ALL ");
+		let err = parse_statement(&union_chain).expect_err("5000 unions must hit recursion limit");
+		assert_eq!(err.kind, ErrorKind::RecursionLimitExceeded);
+
 		println!("Testing derived tables with settings depth 10...");
 		let settings = ParserSettings {
 			max_recursion_depth: 10,

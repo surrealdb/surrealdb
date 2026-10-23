@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_union_tables.surql"]
+
+[test]
+reason = "A chain of more than two queries is lowered only when it is made of UNION or UNION ALL links, so a chain of INTERSECT links is refused as a chain, without advice to group it"
+
+[test.results]
+request-error = "PostgreSQL SELECT lowering error: unsupported expression: a chain of more than two queries is supported only with UNION or UNION ALL"
+*/
+
+SELECT name FROM un_a INTERSECT SELECT label FROM un_b INTERSECT SELECT name FROM un_a;

@@ -35,6 +35,14 @@ impl<'a> Parser<'a> {
 			let Some(op) = set_op_kind else {
 				break;
 			};
+			if current.set_op.is_some() {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::InvalidStatement(
+						"a set operation cannot be the left operand of another set operation",
+					),
+				));
+			}
 
 			self.enter_recursion(self.peek().span)?;
 			set_depth = set_depth.saturating_add(1);

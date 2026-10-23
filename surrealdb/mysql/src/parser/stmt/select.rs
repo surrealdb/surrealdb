@@ -25,6 +25,7 @@ impl<'a> Parser<'a> {
 			root.with = with;
 		}
 
+		let mut set_depth: usize = 0;
 		let mut current = &mut root;
 		loop {
 			let set_op_kind = match self.peek_keyword() {
@@ -36,6 +37,19 @@ impl<'a> Parser<'a> {
 			let Some(op) = set_op_kind else {
 				break;
 			};
+			if current.set_op.is_some() {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::Custom(
+						"a set operation cannot be the left operand of another set operation"
+							.to_string(),
+					),
+				));
+			}
+			// Every link of a chain nests one level deeper in the tree later stages walk.
+			self.check_recursion_limit()?;
+			self.recursion_depth += 1;
+			set_depth += 1;
 			self.bump();
 			let all = if self.peek_keyword() == Some(Keyword::All) {
 				self.bump();
@@ -120,7 +134,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 
-		self.recursion_depth -= 1;
+		self.recursion_depth -= 1 + set_depth;
 		Ok(root)
 	}
 

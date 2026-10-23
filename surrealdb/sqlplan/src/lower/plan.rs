@@ -13,7 +13,7 @@ use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
 	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundOrder,
-	BoundSelect, BoundSetOpKind, BoundTableSource, BoundTarget,
+	BoundSelect, BoundSetOpKind, BoundSetOperation, BoundTableSource, BoundTarget,
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
@@ -271,81 +271,9 @@ fn lower_bound_select_internal(
 		});
 	}
 
-	// 9. Set Operation (UNION, INTERSECT, EXCEPT)
-	if let Some(set_op) = &select.set_op {
-		let right_op = lower_bound_select(&set_op.right, policy)?;
-		match set_op.op {
-			BoundSetOpKind::Union => {
-				let union_all = LogicalOp::UnionAll(LogicalUnionAll {
-					inputs: vec![op, right_op],
-				});
-				op = if set_op.all {
-					union_all
-				} else {
-					LogicalOp::Distinct(LogicalDistinct {
-						input: Box::new(union_all),
-					})
-				};
-			}
-			BoundSetOpKind::Intersect => {
-				let mut on = Vec::new();
-				for (i, t) in select.targets.iter().enumerate() {
-					let left_name = target_output_name(t);
-					let right_name = if i < set_op.right.targets.len() {
-						target_output_name(&set_op.right.targets[i])
-					} else {
-						left_name.clone()
-					};
-					let alias = RelationAlias::new(0);
-					on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
-				}
-				let semi_join = LogicalOp::Join(LogicalJoin::new(
-					op,
-					right_op,
-					JoinKind::Semi,
-					on,
-					None,
-					RelationAlias::new(0),
-					EvalFrame::caller(),
-				));
-				op = if set_op.all {
-					semi_join
-				} else {
-					LogicalOp::Distinct(LogicalDistinct {
-						input: Box::new(semi_join),
-					})
-				};
-			}
-			BoundSetOpKind::Except => {
-				let mut on = Vec::new();
-				for (i, t) in select.targets.iter().enumerate() {
-					let left_name = target_output_name(t);
-					let right_name = if i < set_op.right.targets.len() {
-						target_output_name(&set_op.right.targets[i])
-					} else {
-						left_name.clone()
-					};
-					let alias = RelationAlias::new(0);
-					on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
-				}
-				let anti_join = LogicalOp::Join(LogicalJoin::new(
-					op,
-					right_op,
-					JoinKind::Anti,
-					on,
-					None,
-					RelationAlias::new(0),
-					EvalFrame::caller(),
-				));
-				op = if set_op.all {
-					anti_join
-				} else {
-					LogicalOp::Distinct(LogicalDistinct {
-						input: Box::new(anti_join),
-					})
-				};
-			}
-		}
+	// 9. Set Operations (UNION, INTERSECT, EXCEPT)
+	if let Some(first) = &select.set_op {
+		op = lower_set_operations(&select.targets, first, op, policy)?;
 
 		// Apply outer ORDER BY after set operation
 		if !rewritten_order_by.is_empty() {
@@ -373,6 +301,177 @@ fn lower_bound_select_internal(
 	}
 
 	Ok(op)
+}
+
+/// Combine `left`, the lowered first query of a set operation, with the queries chained after it.
+///
+/// A chain `a op b op c` is held as nested right operands with no record of which operands were
+/// parenthesised, so `a UNION ALL b UNION c` and `a UNION ALL (b UNION c)` are the same chain.
+/// Only a chain made of `UNION` links alone, or of `UNION ALL` links alone, reads alike under every
+/// grouping, so a chain of more than two queries is lowered only when it is one of those, and is
+/// refused otherwise: a chain with an `INTERSECT` or `EXCEPT` link as a chain, a mix of `UNION`
+/// and `UNION ALL` with advice to group it. An operand followed by further links cannot carry its
+/// own ORDER BY, LIMIT or OFFSET for the same reason: only a parenthesised group can hold them.
+///
+/// A UNION answers rows under the column names of its first query.
+fn lower_set_operations(
+	first_targets: &[BoundTarget],
+	first: &BoundSetOperation,
+	left: LogicalOp,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	if first.right.set_op.is_some() {
+		let links = || std::iter::successors(Some(first), |l| l.right.set_op.as_ref());
+		if links().any(|l| l.op != BoundSetOpKind::Union) {
+			return Err(PlanError::unsupported(
+				"a chain of more than two queries is supported only with UNION or UNION ALL",
+			));
+		}
+		if links().any(|l| l.all != first.all) {
+			return Err(PlanError::unsupported(
+				"a chain of more than two queries must join them all with UNION or all with \
+				 UNION ALL; group a mix with subqueries",
+			));
+		}
+	}
+
+	// The chain is cloned once and taken apart link by link, so each query is lowered without the
+	// rest of the chain and the work stays linear in its length.
+	let mut branches = Vec::new();
+	let mut next = Some(first.clone());
+	while let Some(link) = next.take() {
+		let mut branch = *link.right;
+		next = branch.set_op.take();
+		if next.is_some()
+			&& (!branch.order_by.is_empty() || branch.limit.is_some() || branch.offset.is_some())
+		{
+			return Err(PlanError::unsupported(
+				"ORDER BY, LIMIT or OFFSET on a query that is followed by another set operation",
+			));
+		}
+		if !has_wildcard(first_targets)
+			&& !has_wildcard(&branch.targets)
+			&& first_targets.len() != branch.targets.len()
+		{
+			return Err(PlanError::Custom(
+				"each query of a set operation must have the same number of columns".into(),
+			));
+		}
+		if link.op == BoundSetOpKind::Union {
+			name_as_first_query(first_targets, &mut branch);
+		}
+		branches.push((lower_bound_select(&branch, policy)?, branch.targets));
+	}
+
+	let all = first.all;
+	match first.op {
+		BoundSetOpKind::Union => {
+			let mut inputs = vec![left];
+			inputs.extend(branches.into_iter().map(|(branch_op, _)| branch_op));
+			let union_all = LogicalOp::UnionAll(LogicalUnionAll {
+				inputs,
+			});
+			Ok(if all {
+				union_all
+			} else {
+				LogicalOp::Distinct(LogicalDistinct {
+					input: Box::new(union_all),
+				})
+			})
+		}
+		BoundSetOpKind::Intersect | BoundSetOpKind::Except => {
+			// A chain of these is refused above, so there is exactly one right query.
+			let Some((right_op, right_targets)) = branches.pop() else {
+				return Ok(left);
+			};
+			let mut on = Vec::new();
+			for (i, t) in first_targets.iter().enumerate() {
+				let left_name = target_output_name(t);
+				let right_name = if i < right_targets.len() {
+					target_output_name(&right_targets[i])
+				} else {
+					left_name.clone()
+				};
+				let alias = RelationAlias::new(0);
+				on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
+			}
+			let kind = if first.op == BoundSetOpKind::Intersect {
+				JoinKind::Semi
+			} else {
+				JoinKind::Anti
+			};
+			let join = LogicalOp::Join(LogicalJoin::new(
+				left,
+				right_op,
+				kind,
+				on,
+				None,
+				RelationAlias::new(0),
+				EvalFrame::caller(),
+			));
+			Ok(if all {
+				join
+			} else {
+				LogicalOp::Distinct(LogicalDistinct {
+					input: Box::new(join),
+				})
+			})
+		}
+	}
+}
+
+/// Whether any of `targets` is a wildcard, whose columns are not known at plan time.
+fn has_wildcard(targets: &[BoundTarget]) -> bool {
+	targets.iter().any(|t| t.is_wildcard || t.table_wildcard.is_some())
+}
+
+/// The name a target gives its column in the rows it produces: its alias, the column it reads or
+/// the function it calls. `None` where the name is not one of those or the target is a wildcard.
+fn column_name(target: &BoundTarget) -> Option<String> {
+	if target.is_wildcard || target.table_wildcard.is_some() {
+		return None;
+	}
+	match (&target.alias, &target.expr) {
+		(Some(alias), _) => Some(alias.clone()),
+		(
+			None,
+			BoundExpr::Column(BoundColumnRef {
+				column,
+				..
+			}),
+		) if column != "*" => Some(column.clone()),
+		(
+			None,
+			BoundExpr::FunctionCall {
+				name,
+				..
+			},
+		) => Some(name.clone()),
+		(None, _) => None,
+	}
+}
+
+/// Name the columns of `branch`, a later query of a UNION, as the columns of the first query are.
+///
+/// A UNION answers rows under the names its first query gives its columns, whatever the later
+/// queries call theirs, and a query over the union reads them under those names. A column is left
+/// as it is where the first query's name for it cannot be told, where the later query's column is
+/// a wildcard, or where the two queries do not have the same number of columns.
+fn name_as_first_query(first: &[BoundTarget], branch: &mut BoundSelect) {
+	if first.len() != branch.targets.len() {
+		return;
+	}
+	for (first, later) in first.iter().zip(&mut branch.targets) {
+		let Some(name) = column_name(first) else {
+			continue;
+		};
+		if !later.is_wildcard
+			&& later.table_wildcard.is_none()
+			&& column_name(later).as_deref() != Some(name.as_str())
+		{
+			later.alias = Some(name);
+		}
+	}
 }
 
 fn target_output_name(target: &BoundTarget) -> String {

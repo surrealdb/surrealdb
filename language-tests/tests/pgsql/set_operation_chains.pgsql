@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_union_tables.surql"]
+
+[test]
+reason = "A chain of UNION ALL, or of UNION, is one union of all its queries: its rows are counted once per query for UNION ALL and once overall for UNION, and an ORDER BY, LIMIT and OFFSET after the chain apply to the whole union"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'ada' }, { name: 'bob' }, { name: 'bob' }, { name: 'bob' }, { name: 'cy' }]"
+
+[[test.results]]
+value = "[{ name: 'ada' }, { name: 'bob' }, { name: 'cy' }]"
+
+[[test.results]]
+value = "[{ name: 'bob' }, { name: 'bob' }, { name: 'bob' }]"
+
+[[test.results]]
+value = "[{ n: 1 }, { n: 2 }]"
+
+[[test.results]]
+value = "[{ column1: 1, column2: 'a' }, { column1: 2, column2: 'b' }, { column1: 3, column2: 'c' }]"
+*/
+
+SELECT name FROM un_a UNION ALL SELECT label FROM un_b UNION ALL SELECT name FROM un_a ORDER BY name;
+SELECT name FROM un_a UNION SELECT label FROM un_b UNION SELECT name FROM un_a ORDER BY name;
+SELECT name FROM un_a UNION ALL SELECT label FROM un_b UNION ALL SELECT name FROM un_a UNION ALL SELECT label FROM un_b ORDER BY name LIMIT 3 OFFSET 2;
+SELECT 1 AS n UNION SELECT 1 UNION SELECT 1 UNION SELECT 2 ORDER BY n;
+VALUES (1, 'a'), (2, 'b'), (3, 'c');

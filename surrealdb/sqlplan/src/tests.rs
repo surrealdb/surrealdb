@@ -541,6 +541,118 @@ fn test_null_comparisons_and_distinct_from() {
 }
 
 #[test]
+fn test_union_branches_answer_under_the_names_of_the_first_branch() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new("t1", vec![ColumnInfo::new("a", 0).with_type("int4")])
+			.with_schema("public"),
+	);
+	catalog.add_table(
+		TableSchema::new("t2", vec![ColumnInfo::new("b", 0).with_type("int4")])
+			.with_schema("public"),
+	);
+	let policy = DialectPolicy::postgres();
+	let lower = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		lower_bound_select(&bound, &policy).unwrap()
+	};
+	let later_branch = |op: LogicalOp| match op {
+		LogicalOp::UnionAll(union) => format!("{:?}", union.inputs[1]),
+		other => panic!("expected UnionAll, got {other:?}"),
+	};
+
+	// A later branch that names its column differently is renamed to the first branch's name.
+	assert!(later_branch(lower("SELECT a FROM t1 UNION ALL SELECT b FROM t2;")).contains("\"a\""));
+	assert!(later_branch(lower("SELECT a FROM t1 UNION ALL SELECT 2;")).contains("\"a\""));
+	assert!(later_branch(lower("SELECT 1 AS n UNION ALL SELECT b FROM t2;")).contains("\"n\""));
+	// A branch that already names its column alike is lowered as it is.
+	assert_eq!(
+		later_branch(lower("SELECT a FROM t1 UNION ALL SELECT a AS a FROM t1;")),
+		format!("{:?}", lower("SELECT a AS a FROM t1;"))
+	);
+}
+
+#[test]
+fn test_a_chain_of_set_operations() {
+	let mut catalog = MemoryCatalog::new();
+	for (table, column) in [("t1", "a"), ("t2", "b")] {
+		catalog.add_table(
+			TableSchema::new(table, vec![ColumnInfo::new(column, 0).with_type("int4")])
+				.with_schema("public"),
+		);
+	}
+	let policy = DialectPolicy::postgres();
+	let lower = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		lower_bound_select(&bound, &policy)
+	};
+	let inputs = |op: LogicalOp| match op {
+		LogicalOp::UnionAll(union) => union.inputs.len(),
+		LogicalOp::Distinct(distinct) => match *distinct.input {
+			LogicalOp::UnionAll(union) => union.inputs.len(),
+			other => panic!("expected UnionAll under Distinct, got {other:?}"),
+		},
+		other => panic!("expected a union, got {other:?}"),
+	};
+
+	// A chain of UNION ALL, or of UNION, is one union of all its queries.
+	let sql = "SELECT a FROM t1 UNION ALL SELECT b FROM t2 UNION ALL SELECT 3 UNION ALL SELECT 4;";
+	assert!(matches!(lower(sql).unwrap(), LogicalOp::UnionAll(u) if u.inputs.len() == 4));
+	let sql = "SELECT a FROM t1 UNION SELECT b FROM t2 UNION SELECT 3;";
+	assert_eq!(inputs(lower(sql).unwrap()), 3);
+
+	let refusal = |sql: &str| match lower(sql) {
+		Err(PlanError::UnsupportedExpression(message)) => message,
+		other => panic!("expected a refusal of {sql}, got {other:?}"),
+	};
+	// A chain that mixes UNION and UNION ALL reads differently under different groupings, so it is
+	// refused with advice to group it.
+	for sql in [
+		"SELECT a FROM t1 UNION ALL SELECT b FROM t2 UNION SELECT 3;",
+		"SELECT a FROM t1 UNION SELECT b FROM t2 UNION ALL SELECT 3;",
+	] {
+		assert!(refusal(sql).contains("group a mix with subqueries"), "{sql}");
+	}
+	// A chain with an INTERSECT or EXCEPT link is refused as a chain, mixed or not.
+	for sql in [
+		"SELECT a FROM t1 UNION ALL SELECT b FROM t2 EXCEPT SELECT 3;",
+		"SELECT a FROM t1 INTERSECT SELECT b FROM t2 INTERSECT SELECT 3;",
+		"SELECT a FROM t1 EXCEPT SELECT b FROM t2 EXCEPT SELECT 3;",
+	] {
+		assert!(refusal(sql).ends_with("supported only with UNION or UNION ALL"), "{sql}");
+	}
+	// So is a query inside a chain that orders or limits only itself.
+	let sql =
+		"SELECT a FROM t1 UNION ALL (SELECT b FROM t2 UNION ALL SELECT 3 ORDER BY 1 LIMIT 1);";
+	assert!(matches!(lower(sql), Err(PlanError::UnsupportedExpression(_))));
+	// Queries of one set operation have the same number of columns, unless a wildcard hides it.
+	let sql = "SELECT a FROM t1 UNION ALL SELECT b, b FROM t2;";
+	assert!(matches!(lower(sql), Err(PlanError::Custom(_))));
+	assert!(lower("SELECT * FROM t1 UNION ALL SELECT b FROM t2;").is_ok());
+}
+
+#[test]
+fn test_a_set_operation_cannot_be_the_left_operand_of_another() {
+	for sql in ["(SELECT 1 UNION SELECT 2) UNION SELECT 3;", "VALUES (1), (2) UNION ALL SELECT 3;"]
+	{
+		assert!(surrealdb_pgsql::parse_statements(sql).is_err(), "{sql}");
+	}
+	assert!(
+		surrealdb_mysql::parse_statements("(SELECT 1 UNION SELECT 2) UNION SELECT 3;").is_err()
+	);
+}
+
+#[test]
 fn test_division_semantics() {
 	let catalog = MemoryCatalog::new();
 	let pg_policy = DialectPolicy::postgres();
