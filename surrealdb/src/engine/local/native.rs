@@ -1,8 +1,12 @@
 use std::collections::HashSet;
+#[cfg(any(feature = "unstable", test))]
 use std::sync::Arc;
 
+#[cfg(any(feature = "unstable", test))]
 use async_channel::Receiver;
+#[cfg(any(feature = "unstable", test))]
 use surrealdb_engine_local::Datastore;
+#[cfg(any(feature = "unstable", test))]
 use surrealdb_types::Notification;
 use tokio::sync::watch;
 
@@ -42,15 +46,18 @@ impl conn::Sealed for Db {
 	}
 }
 
+#[cfg(any(feature = "unstable", test))]
 impl Surreal<Db> {
-	// This function was introduced by a community PR,
-	//
-	// It exposes internal types in the public API so it is marked as doc(hidden).
-	// This function is not stable nor subject to semver stability guarentees.
-	#[doc(hidden)]
+	/// Builds a client over a datastore the caller constructed.
+	///
+	/// Requires the `unstable` feature: `Datastore` and `Notification` are the
+	/// embedded engine's own types, so this signature follows the engine crates
+	/// and carries no semver guarantee.
+	///
 	/// The datastore carries its own maintenance tasks and cancellation, both
-	/// established when it was built, so neither is passed here any more. Set
-	/// them on the `Builder` used to construct the datastore instead.
+	/// established when it was built; set them on the `Builder` used to
+	/// construct it.
+	#[doc(hidden)]
 	pub async fn unstable_from_datastore(
 		datastore: Arc<Datastore>,
 		notifications: Option<Receiver<Notification>>,

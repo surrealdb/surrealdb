@@ -36,11 +36,11 @@ protocol-grpc = [
 ]
 # The `kv-*` features select a storage backend for the embedded engine. The
 # engine crate is the only route from the SDK to the database core.
-kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
+kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "tokio/time"]
 kv-indxdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-indxdb"]
-kv-rocksdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-rocksdb", "dep:surrealdb-kvs", "tokio/time"]
+kv-rocksdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-rocksdb", "tokio/time"]
 kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "tokio/time"]
-kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
+kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-engine-local/scripting"]
 http = ["surrealdb-engine-local/http"]
 # Embedded CJK segmentation dictionaries. Without this an embedded engine
@@ -64,6 +64,10 @@ ml = ["surrealdb-engine-local/ml"]
 jwks = ["surrealdb-engine-local/jwks"]
 arbitrary = ["surrealdb-engine-local/arbitrary"]
 allocation-tracking = ["surrealdb-engine-local/allocation-tracking"]
+# Items that expose the embedded engine's own types (`engine::tasks`,
+# `Surreal::<Db>::unstable_from_datastore`). They follow the engine crates'
+# versions rather than the SDK's, so they carry no semver guarantee.
+unstable = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -95,7 +99,6 @@ targets = []
 surrealdb-engine-api = { workspace = true }
 surrealdb-engine-local = { workspace = true, default-features = false, optional = true }
 surrealdb-iam = { workspace = true }
-surrealdb-kvs = { workspace = true, optional = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-expr = { workspace = true, optional = true }
 surrealdb-types = { workspace = true, features = ["convert"] }
@@ -170,6 +173,8 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 ciborium.workspace = true
 surrealdb-cnf = { workspace = true }
 surrealdb-expr = { workspace = true }
+# Checks the SDK's storage modes against the engine's own parser.
+surrealdb-kvs = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true

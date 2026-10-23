@@ -1,39 +1,10 @@
 use std::fmt;
 use std::time::Duration;
 
-use surrealdb_kvs::config::{AolMode, SnapshotMode};
-
 use crate::engine::local::Db;
+use crate::opt::storage::format_duration;
+use crate::opt::{AolMode, SnapshotMode};
 use crate::{Connect, Error};
-
-/// Format a duration in the compact suffix form the server's config parser
-/// accepts (`30d`, `12h`, `5m`, `90s`, `250ms`, `10us`), choosing the largest
-/// unit that divides the duration exactly. Inlined copy of the engine-side
-/// helper so the SDK does not depend on the config crate for one formatter.
-fn format_duration(d: Duration) -> String {
-	let micros = d.as_micros() as u64;
-	if micros == 0 {
-		return "0".to_string();
-	}
-	let secs = d.as_secs();
-	// Try largest unit first
-	if secs > 0 && secs.is_multiple_of(86400) && d.subsec_nanos() == 0 {
-		return format!("{}d", secs / 86400);
-	}
-	if secs > 0 && secs.is_multiple_of(3600) && d.subsec_nanos() == 0 {
-		return format!("{}h", secs / 3600);
-	}
-	if secs > 0 && secs.is_multiple_of(60) && d.subsec_nanos() == 0 {
-		return format!("{}m", secs / 60);
-	}
-	if d.subsec_nanos() == 0 {
-		return format!("{secs}s");
-	}
-	if micros.is_multiple_of(1000) {
-		return format!("{}ms", micros / 1000);
-	}
-	format!("{micros}us")
-}
 
 impl<R> Connect<Db, R> {
 	/// Enable MVCC versioning on the datastore.
@@ -98,8 +69,8 @@ impl<R> Connect<Db, R> {
 	/// e.g. `Surreal::new::<Mem>("/tmp/data")` or `connect("mem:///tmp/data")`,
 	/// for sync to take effect).
 	///
-	/// The `mode` argument can be any type that implements `Display`. The
-	/// canonical type is `SyncMode`:
+	/// The `mode` argument can be any type whose `Display` form the engine
+	/// parses as a sync mode. The canonical type is [`SyncMode`](crate::opt::SyncMode):
 	///
 	/// - `SyncMode::Never` - leave flushing to the OS (fastest, least durable).
 	/// - `SyncMode::Every` - sync on every transaction commit (fast, most durable).
@@ -112,7 +83,7 @@ impl<R> Connect<Db, R> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::local::SurrealKv;
-	/// use surrealdb_kvs::config::SyncMode;
+	/// use surrealdb::opt::SyncMode;
 	///
 	/// let db = Surreal::new::<SurrealKv>("path/to/database-folder")
 	///     .sync(SyncMode::Every)
@@ -127,7 +98,7 @@ impl<R> Connect<Db, R> {
 	/// use std::time::Duration;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::local::RocksDb;
-	/// use surrealdb_kvs::config::SyncMode;
+	/// use surrealdb::opt::SyncMode;
 	///
 	/// let db = Surreal::new::<RocksDb>("path/to/database-folder")
 	///     .sync(SyncMode::Interval(Duration::from_millis(200)))
@@ -148,9 +119,9 @@ impl<R> Connect<Db, R> {
 	/// Requires a persist path (e.g. `Surreal::new::<Mem>("/tmp/data")` or
 	/// `connect("mem:///tmp/data")`).
 	///
-	/// - `MemAolMode::Never` - never use AOL (default).
-	/// - `MemAolMode::Sync` - write synchronously to AOL on every commit.
-	/// - `MemAolMode::Async` - write asynchronously to AOL after commit.
+	/// - `AolMode::Never` - never use AOL (default).
+	/// - `AolMode::Sync` - write synchronously to AOL on every commit.
+	/// - `AolMode::Async` - write asynchronously to AOL after commit.
 	pub fn aol(mut self, mode: AolMode) -> Self {
 		self.address = self.address.and_then(|mut endpoint| match endpoint.url.scheme() {
 			"mem" => {

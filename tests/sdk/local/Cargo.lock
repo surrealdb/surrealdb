@@ -4165,7 +4165,6 @@ dependencies = [
  "surrealdb-engine-local",
  "surrealdb-expr",
  "surrealdb-iam",
- "surrealdb-kvs",
  "surrealdb-rpc",
  "surrealdb-types",
  "surrealdb-types-derive",

@@ -9,6 +9,8 @@ mod export;
 mod grpc;
 pub(crate) mod query;
 mod resource;
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+mod storage;
 mod tls;
 mod websocket;
 
@@ -18,6 +20,8 @@ pub use export::*;
 pub use grpc::*;
 pub use query::*;
 pub use resource::*;
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+pub use storage::{AolMode, SnapshotMode, SyncMode};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 pub use websocket::*;

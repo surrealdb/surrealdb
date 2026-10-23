@@ -11,13 +11,18 @@ pub mod any;
 pub mod local;
 #[cfg(any(http_engine, ws_engine, feature = "protocol-grpc"))]
 pub mod remote;
-/// The embedded engine's background maintenance tasks.
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-indxdb",
-	feature = "kv-surrealkv",
+/// The embedded engine's background maintenance tasks. Requires the
+/// `unstable` feature: these are the engine's own types, outside the SDK's
+/// semver guarantees.
+#[cfg(all(
+	feature = "unstable",
+	any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	)
 ))]
 #[doc(hidden)]
 pub use surrealdb_engine_local::tasks;
