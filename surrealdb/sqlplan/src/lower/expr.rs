@@ -602,13 +602,32 @@ pub fn lower_bound_expr(
 				_ => Kind::Any,
 			};
 			if matches!(kind, Kind::Any) {
-				Ok(lowered)
-			} else {
-				Ok(LogicalExpr::Prefix {
+				return Ok(lowered);
+			}
+			if matches!(lowered, LogicalExpr::Literal(LogicalLiteral::Null | LogicalLiteral::None))
+			{
+				return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+			}
+			if matches!(lowered, LogicalExpr::Literal(_)) {
+				return Ok(LogicalExpr::Prefix {
 					op: PrefixOperator::Cast(kind),
 					expr: Box::new(lowered),
-				})
+				});
 			}
+			// A cast of NULL or NONE is NULL. The operand is evaluated once and the cast applies to
+			// it as `Current`, so chained casts grow linearly; `??` maps the NONE that `Optional`
+			// passes through to NULL.
+			Ok(LogicalExpr::Binary {
+				left: Box::new(LogicalExpr::Optional {
+					base: Box::new(lowered),
+					then: Box::new(LogicalExpr::Prefix {
+						op: PrefixOperator::Cast(kind),
+						expr: Box::new(LogicalExpr::Current),
+					}),
+				}),
+				op: BinaryOperator::NullCoalescing,
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+			})
 		}
 		BoundExpr::ScalarSubquery(subquery) => {
 			let sub_op = lower_bound_subquery(subquery, policy)?;
