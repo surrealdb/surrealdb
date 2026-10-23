@@ -11,6 +11,7 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use smallvec::{SmallVec, smallvec};
+use surrealdb_strand::Strand;
 
 use super::driver::{FoldObserver, LoCx, LoPass, PassConfig, PassReport, PassRun};
 use crate::exec::ir::analysis::loop_legality::{exit_of, of_with};
@@ -33,7 +34,9 @@ use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::r#loop::Exit;
 use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::{LogOp, LogTag, LoopKind, LoopSink};
+use crate::exec::ir::logical::ops::{
+	LetAttrs, LetBinding, LogOp, LogTag, LoopKind, LoopSink, StepAttrs,
+};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::val::{Array, Value};
 
@@ -144,6 +147,68 @@ fn lands_on_body(ir: &Ir, body: RegionId) -> bool {
 	lands
 }
 
+/// Whether `body`, a `StatementFor` region, holds a statement whose result is discarded because it
+/// stands in `body` (or in `StatementIf` arms rooted in `body`) rather than being consumed by a
+/// `LET` or `RETURN`. Unrolling `body` into a `Block` or `ValueBlock` would change its collection
+/// mode from `Collect::Discard` to `Collect::Block`.
+fn discards_statement_in_body(ir: &Ir, body: RegionId) -> bool {
+	if ir.region(body).is_none_or(|info| info.kind != RegionKind::StatementFor) {
+		return false;
+	}
+	let mut discards = false;
+	ir.walk(body, WalkOrder::PreOrder, &mut |op| {
+		let Some(data) = ir.op(op) else {
+			return Walk::Continue;
+		};
+		let is_statement = matches!(
+			&data.kind,
+			OpKind::Logical(
+				LogOp::Statement {
+					..
+				}
+				| LogOp::Info {
+					..
+				}
+				| LogOp::Stmt {
+					..
+				}
+				| LogOp::Loop {
+					kind: LoopKind::Select | LoopKind::Write,
+					..
+				}
+			)
+		);
+		if !is_statement {
+			return Walk::Continue;
+		}
+		let consumed = data.results.first().is_some_and(|result| match ir.uses(*result) {
+			[only] => ir.op(only.user).is_some_and(|user| {
+				matches!(user.kind, OpKind::Logical(LogOp::Let(_) | LogOp::Return))
+			}),
+			_ => false,
+		});
+		if consumed {
+			return Walk::Continue;
+		}
+		let mut region = ir.enclosing_region(op);
+		while region != body {
+			let Some(info) = ir.region(region) else {
+				return Walk::Continue;
+			};
+			if info.kind != RegionKind::StatementIf {
+				return Walk::Continue;
+			}
+			let Some(owner) = ir.parent_op(region) else {
+				return Walk::Continue;
+			};
+			region = ir.enclosing_region(owner);
+		}
+		discards = true;
+		Walk::Stop
+	});
+	discards
+}
+
 /// Whether `region` and every region inside it is one block and is not stored code, which is what
 /// lets the ops of `region` be recreated one by one.
 fn copyable(ir: &Ir, region: RegionId, depth: usize) -> bool {
@@ -190,6 +255,8 @@ struct Plan {
 	elements: Vec<Value>,
 	/// Whether the sink is `Discard`; the sink is `Output` otherwise.
 	discard: bool,
+	/// The parameter name the loop binds its element to, when it is a `FOR` with a named parameter.
+	param: Option<Strand>,
 	/// The kind of the region of each iteration's block.
 	arms: RegionKind,
 	body: BodyShape,
@@ -272,6 +339,7 @@ fn plan_for(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId) ->
 	let OpKind::Logical(LogOp::Loop {
 		kind,
 		sink,
+		step,
 		..
 	}) = &data.kind
 	else {
@@ -282,6 +350,11 @@ fn plan_for(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId) ->
 	{
 		return None;
 	}
+	let param = match (kind, step.as_deref()) {
+		(_, None) => None,
+		(LoopKind::For, Some(StepAttrs::Param(name))) => Some(name.clone()),
+		_ => return None,
+	};
 	let discard = matches!(sink, LoopSink::Discard);
 	let ([source], [_], [region]) =
 		(data.operands.as_slice(), data.results.as_slice(), data.regions.as_slice())
@@ -293,7 +366,11 @@ fn plan_for(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId) ->
 		return None;
 	}
 	let body = body_shape(ir, region, discard)?;
-	if exit_of(ir, loop_op) != Exit::None || lands_on_body(ir, region) || !copyable(ir, region, 0) {
+	if exit_of(ir, loop_op) != Exit::None
+		|| lands_on_body(ir, region)
+		|| discards_statement_in_body(ir, region)
+		|| !copyable(ir, region, 0)
+	{
 		return None;
 	}
 	let (elements, folded) = {
@@ -319,6 +396,7 @@ fn plan_for(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, loop_op: OpId) ->
 		folded,
 		elements,
 		discard,
+		param,
 		arms,
 		body,
 	})
@@ -450,7 +528,22 @@ fn iteration(
 	let position = i64::try_from(index).map_err(|_| IrError::Capacity("unroll position"))?;
 	let mut renamed: FxHashMap<ValueId, ValueId> = FxHashMap::default();
 	let [element_arg, position_arg] = plan.body.args;
-	if !rw.ir().uses(element_arg).is_empty() {
+	if let Some(name) = &plan.param {
+		let made = make_literal(rw, at, template, loop_op, element.clone())?;
+		let ty = rw.ir().value(made).ok_or(IrError::Stale("value"))?.ty.clone();
+		let let_spec = spec_at(
+			template,
+			OpKind::Logical(LogOp::Let(Box::new(LetAttrs {
+				name: name.clone(),
+				binding: LetBinding::Local,
+				ty: None,
+			}))),
+			smallvec![made],
+			smallvec![ty],
+		);
+		let let_op = rw.derived(&[loop_op], |rw| rw.create(at, let_spec))?;
+		renamed.insert(element_arg, first_result(rw, let_op)?);
+	} else if !rw.ir().uses(element_arg).is_empty() {
 		let made = make_literal(rw, at, template, loop_op, element.clone())?;
 		renamed.insert(element_arg, made);
 	}

@@ -499,11 +499,20 @@ fn collect_tree(ir: &Ir, root: OpId) -> Result<Vec<OpId>, IrError> {
 		let Some(data) = ir.op(op) else {
 			continue;
 		};
-		for operand in &data.operands {
+		let mut reads: Vec<ValueId> = data.operands.to_vec();
+		for region in &data.regions {
+			ir.walk(*region, WalkOrder::PreOrder, &mut |inner| {
+				if let Some(held) = ir.op(inner) {
+					reads.extend_from_slice(&held.operands);
+				}
+				Walk::Continue
+			});
+		}
+		for operand in reads {
 			let Some(ValueDef::OpResult {
 				op: defining,
 				..
-			}) = ir.value(*operand).map(|value| value.def)
+			}) = ir.value(operand).map(|value| value.def)
 			else {
 				continue;
 			};

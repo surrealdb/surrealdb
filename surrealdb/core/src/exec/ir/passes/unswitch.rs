@@ -237,8 +237,17 @@ fn copy_tree(ir: &Ir, root: OpId) -> Vec<OpId> {
 		let Some(data) = ir.op(op) else {
 			continue;
 		};
-		for operand in &data.operands {
-			if let Some(defining) = def_op(ir, *operand)
+		let mut reads: Vec<ValueId> = data.operands.to_vec();
+		for region in &data.regions {
+			ir.walk(*region, WalkOrder::PreOrder, &mut |inner| {
+				if let Some(held) = ir.op(inner) {
+					reads.extend_from_slice(&held.operands);
+				}
+				Walk::Continue
+			});
+		}
+		for operand in reads {
+			if let Some(defining) = def_op(ir, operand)
 				&& ir.op(defining).is_some_and(|held| held.parent == block)
 				&& members.insert(defining)
 			{
@@ -647,7 +656,7 @@ fn condition_of(
 		return None;
 	}
 	let tree = copy_tree(ir, op);
-	if !tree.iter().all(|member| guards::infallible(fallibility::of_with(ir, facts, cx, *member))) {
+	if !tree.iter().all(|member| total_in_row(ir, facts, cx, *member)) {
 		return None;
 	}
 	if !inputs_outside_loops(ir, &tree)

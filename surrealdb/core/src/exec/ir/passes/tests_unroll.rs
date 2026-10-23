@@ -20,13 +20,17 @@ use crate::exec::ir::iface::fold::{FoldConsumer, FoldOutcome, NotFoldable, NotYe
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::premise::PremiseSet;
 use crate::exec::ir::iface::region_kind::{RegionKind, StatementCommit};
+use crate::exec::ir::iface::statements::InfoSubject;
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::{DecisiveKind, LogOp, LogTag, LoopKind, LoopSink, SourceOrder};
+use crate::exec::ir::logical::ops::{
+	DecisiveKind, LetAttrs, LetBinding, LogOp, LogTag, LoopKind, LoopSink, SourceOrder, StepAttrs,
+};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::val::{Array, Set, Value};
 
 const LOOP: OpTag = OpTag::Logical(LogTag::Loop);
 const BLOCK: OpTag = OpTag::Logical(LogTag::Block);
+const LET: OpTag = OpTag::Logical(LogTag::Let);
 const IF: OpTag = OpTag::Logical(LogTag::If);
 const YIELD: OpTag = OpTag::Logical(LogTag::Yield);
 const TRUTHY: OpTag = OpTag::Expr(ExprTag::Truthy);
@@ -681,4 +685,134 @@ fn unroll_is_registered_before_the_memo_passes() {
 	assert!(position("push_below_permission") < position("loop_unroll"));
 	assert!(position("loop_unroll") < position("unswitch"));
 	assert!(position("unswitch") < position("licm"));
+}
+
+/// A `FOR` loop that binds a named parameter (`StepAttrs::Param`) emits a local `logical.let` for
+/// that parameter in each unrolled iteration block and renames uses of the element block argument
+/// to the `let`'s result.
+#[tokio::test]
+async fn unroll_for_with_param_binds_local_let_in_each_block() {
+	let mut ir = empty_ir();
+	let mut facts = FactCache::new();
+	let top = ir.region(ir.top()).expect("the top region exists").blocks[0];
+	let mut rw = Rewriter::new(&mut ir, &mut facts);
+	let commit = StatementCommit::Auto;
+	let (stmt, _) = create(
+		&mut rw,
+		InsertPoint::End(top),
+		OpKind::Logical(LogOp::Stmt {
+			commit,
+			control: None,
+		}),
+		&[],
+		0,
+	);
+	let (statement, block) = rw
+		.create_region(stmt, RegionKind::Statement(commit), &[TypeKnowledge::Unknown])
+		.expect("the statement region is created");
+	let source = literal_source(ints(&[10, 20]))(&mut rw, InsertPoint::End(block));
+	let (loop_op, _) = create(
+		&mut rw,
+		InsertPoint::End(block),
+		OpKind::Logical(LogOp::Loop {
+			kind: LoopKind::For,
+			sink: LoopSink::Discard,
+			order: SourceOrder::Positional,
+			step: Some(Box::new(StepAttrs::Param("x".into()))),
+		}),
+		&[source],
+		1,
+	);
+	let (_, body) = rw
+		.create_region(
+			loop_op,
+			RegionKind::StatementFor,
+			&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+		)
+		.expect("the body region is created");
+	let args = rw.ir().block(body).expect("the body exists").args.clone();
+	read_element(&mut rw, body, [args[0], args[1]]);
+	close(&mut rw, block, None);
+
+	let report = run(&mut ir, &PassConfig::ALL_ON).await;
+	assert_eq!(report.rewrites, 1);
+	let blocks = blocks_in(&ir, statement);
+	assert_eq!(blocks.len(), 2);
+	for (block_op, expected) in blocks.iter().zip([10_i64, 20]) {
+		let ops = inner_ops(&ir, *block_op);
+		assert_eq!(literal_value(&ir, ops[0]), Some(Value::from(expected)));
+		let lit_val = ir.op(ops[0]).expect("literal exists").results[0];
+		assert_eq!(kind_of(&ir, ops[1]).tag(), LET);
+		if let OpKind::Logical(LogOp::Let(attrs)) = kind_of(&ir, ops[1]) {
+			assert_eq!(attrs.name.as_str(), "x");
+			assert_eq!(attrs.binding, LetBinding::Local);
+		} else {
+			panic!("expected LogOp::Let");
+		}
+		assert_eq!(ir.op(ops[1]).expect("let exists").operands[0], lit_val);
+		let let_val = ir.op(ops[1]).expect("let exists").results[0];
+		let truthy = ops.iter().find(|op| kind_of(&ir, **op).tag() == TRUTHY).expect("a read");
+		assert_eq!(ir.op(*truthy).expect("truthy exists").operands[0], let_val);
+	}
+}
+
+/// A `FOR` loop whose `StatementFor` body discards a statement (`Collect::Discard`) is not
+/// unrolled, whereas a statement consumed by a `LET` (`Collect::Let`) may be unrolled.
+#[tokio::test]
+async fn unroll_refuses_discarded_statement_in_for_body_and_allows_consumed_statement() {
+	let source = literal_source(ints(&[1, 2]));
+	let discarded_info = |rw: &mut Rewriter<'_>, body: BlockId, _args: [ValueId; 2]| {
+		create(
+			rw,
+			InsertPoint::End(body),
+			OpKind::Logical(LogOp::Info {
+				subject: InfoSubject::Root,
+				structure: false,
+			}),
+			&[],
+			1,
+		);
+		close(rw, body, None);
+	};
+	let mut discarded = build(&Loop {
+		kind: LoopKind::For,
+		sink: LoopSink::Discard,
+		source: &source,
+		body: &discarded_info,
+	});
+	let before = printed(&discarded.ir);
+	assert_eq!(run(&mut discarded.ir, &PassConfig::ALL_ON).await.rewrites, 0);
+	assert_eq!(printed(&discarded.ir), before);
+
+	let consumed_info = |rw: &mut Rewriter<'_>, body: BlockId, _args: [ValueId; 2]| {
+		let (_, info) = create(
+			rw,
+			InsertPoint::End(body),
+			OpKind::Logical(LogOp::Info {
+				subject: InfoSubject::Root,
+				structure: false,
+			}),
+			&[],
+			1,
+		);
+		create(
+			rw,
+			InsertPoint::End(body),
+			OpKind::Logical(LogOp::Let(Box::new(LetAttrs {
+				name: "info".into(),
+				binding: LetBinding::Local,
+				ty: None,
+			}))),
+			&[info[0]],
+			1,
+		);
+		close(rw, body, None);
+	};
+	let mut consumed = build(&Loop {
+		kind: LoopKind::For,
+		sink: LoopSink::Discard,
+		source: &source,
+		body: &consumed_info,
+	});
+	assert_eq!(run(&mut consumed.ir, &PassConfig::ALL_ON).await.rewrites, 1);
 }

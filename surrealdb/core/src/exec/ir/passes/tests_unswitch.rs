@@ -4,7 +4,10 @@
 
 use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport};
 use super::reg::lo_passes;
-use super::tests_support::{Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens};
+use super::rehome::copy_tree_bound;
+use super::tests_support::{
+	Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens, verify_logical,
+};
 use super::unswitch::{UNSWITCH_MAX_OPS, Unswitch};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -12,7 +15,7 @@ use crate::exec::ir::core::print::{PrintOpts, print};
 use crate::exec::ir::core::rewriter::{InsertPoint, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
-use crate::exec::ir::expr::ops::{ExprOp, ExprTag};
+use crate::exec::ir::expr::ops::{ExprOp, ExprTag, NowWhich};
 use crate::exec::ir::iface::fold::NotYetFolder;
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind, StatementCommit};
@@ -398,4 +401,87 @@ fn unswitch_is_registered_before_the_memo_passes() {
 	};
 	assert!(position("unswitch") < position("hoist_leading_conjuncts"));
 	assert!(position("hoist_leading_conjuncts") < position("licm"));
+}
+
+/// An infallible conjunct that reads the statement clock (`expr.now`) is not pure and is refused.
+#[tokio::test]
+async fn unswitch_refuses_impure_clock_condition() {
+	let clock_conjunct = |rw: &mut Rewriter<'_>, at: InsertPoint, _row: ValueId| -> ValueId {
+		let (_, stamp) = create(rw, at, literal(0), &[], 1);
+		let (_, now) = create(
+			rw,
+			at,
+			OpKind::Expr(ExprOp::Now {
+				which: NowWhich::Datetime,
+			}),
+			&[stamp[0]],
+			1,
+		);
+		let (_, truth) = create(rw, at, OpKind::Expr(ExprOp::Truthy), &[now[0]], 1);
+		truth[0]
+	};
+	let mut built = build(&Shape {
+		conjunct: &clock_conjunct,
+		..shape(LoopKind::Select)
+	});
+	let before = printed(&built.ir);
+	let report = run(&Unswitch, &mut built.ir, &PassConfig::ALL_ON).await;
+	assert_eq!(report.rewrites, 0);
+	assert_eq!(printed(&built.ir), before);
+}
+
+/// An invariant conjunct containing an `expr.if` whose arms read an operand defined in the clause
+/// block outside the `expr.if` copies that operand into the hoisted tree, keeping dominance intact
+/// in both `Unswitch` and `Rehome`.
+#[tokio::test]
+async fn unswitch_and_rehome_copy_operands_read_inside_nested_regions() {
+	let nested_if_conjunct = |rw: &mut Rewriter<'_>, at: InsertPoint, _row: ValueId| -> ValueId {
+		let (_, leaf) = create(rw, at, literal(1), &[], 1);
+		let (_, cond) = create(rw, at, literal(1), &[], 1);
+		let (_, cond_truth) = create(rw, at, OpKind::Expr(ExprOp::Truthy), &[cond[0]], 1);
+		let (expr_if, chosen) =
+			create(rw, at, OpKind::Expr(ExprOp::If), &[cond_truth[0]], 1);
+		for _ in 0..2 {
+			let (_, arm) = rw
+				.create_region(expr_if, RegionKind::ValueIf, &[])
+				.expect("the arm is created");
+			create(rw, InsertPoint::End(arm), yield_op(), &[leaf[0]], 0);
+		}
+		let (_, truth) = create(rw, at, OpKind::Expr(ExprOp::Truthy), &[chosen[0]], 1);
+		truth[0]
+	};
+
+	let mut built = build(&Shape {
+		conjunct: &nested_if_conjunct,
+		..shape(LoopKind::Select)
+	});
+	let env = Env::new();
+	verify_logical(&built.ir, &mut FactCache::new(), &env).expect("initial IR verifies");
+	let report = run(&Unswitch, &mut built.ir, &PassConfig::ALL_ON).await;
+	assert_eq!(report.rewrites, 1);
+	verify_logical(&built.ir, &mut FactCache::new(), &env).expect("unswitched IR verifies");
+
+	let mut rehomed = build(&Shape {
+		conjunct: &nested_if_conjunct,
+		..shape(LoopKind::Select)
+	});
+	verify_logical(&rehomed.ir, &mut FactCache::new(), &env).expect("initial rehome IR verifies");
+	let loop_op = ops_of_tag(&rehomed.ir, LOOP)[0];
+	let filter = ops_of_tag(&rehomed.ir, FILTER)[0];
+	let clause = rehomed.ir.op(filter).expect("filter exists").regions[0];
+	let clause_block = rehomed.ir.region(clause).expect("clause exists").blocks[0];
+	let yield_id = *rehomed.ir.block(clause_block).expect("block exists").ops.last().unwrap();
+	let yielded = rehomed.ir.op(yield_id).expect("yield exists").operands[0];
+	let ValueDef::OpResult {
+		op: root,
+		..
+	} = rehomed.ir.value(yielded).expect("value exists").def
+	else {
+		panic!("expected op result");
+	};
+	let mut facts = FactCache::new();
+	let mut rw = Rewriter::new(&mut rehomed.ir, &mut facts);
+	copy_tree_bound(&mut rw, root, InsertPoint::Before(loop_op), &[])
+		.expect("copy_tree_bound succeeds");
+	verify_logical(&rehomed.ir, &mut FactCache::new(), &env).expect("rehomed IR verifies");
 }
