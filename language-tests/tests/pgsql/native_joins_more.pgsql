@@ -50,7 +50,7 @@ value = "[{ n: 8 }]"
 value = "[{ n: 0 }]"
 
 [[test.results]]
-value = "[{ pay: 0 }]"
+value = "[{ pay: NULL }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', n: 2, pay: 180 }, { dname: 'Keyless', n: 1, pay: 50 }, { dname: 'Nowhere', n: 1, pay: 60 }, { dname: 'Ops', n: 2, pay: 210.5f }, { dname: 'Ops2', n: 2, pay: 210.5f }]"

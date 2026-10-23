@@ -402,11 +402,16 @@ fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {
 	match expr {
 		BoundExpr::FunctionCall {
 			name,
+			args,
 			..
-		} if matches!(name.as_str(), "count" | "sum" | "avg" | "min" | "max")
-			&& !acc.contains(expr) =>
-		{
-			acc.push(expr.clone());
+		} => {
+			// A call that holds an aggregate is one expression of the aggregation, so that its
+			// result is named once and read by a HAVING or an ORDER BY as that column.
+			let aggregates = matches!(name.as_str(), "count" | "sum" | "avg" | "min" | "max")
+				|| args.iter().any(bound_expr_contains_aggregate);
+			if aggregates && !acc.contains(expr) {
+				acc.push(expr.clone());
+			}
 		}
 		BoundExpr::Binary {
 			left,

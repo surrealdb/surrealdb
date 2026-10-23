@@ -33,7 +33,7 @@ value = "[{ hours: NONE, name: 'Alice' }, { hours: NONE, name: 'Bob' }, { hours:
 value = "[{ n: 4 }]"
 
 [[test.results]]
-value = "[{ dept: 1, n: 2, pay: 180 }, { dept: 2, n: 1, pay: 0 }, { dept: 3, n: 1, pay: 70 }]"
+value = "[{ dept: 1, n: 2, pay: 180 }, { dept: 2, n: 1, pay: NULL }, { dept: 3, n: 1, pay: 70 }]"
 
 [[test.results]]
 value = "[{ dept: 1, pay: 180 }]"

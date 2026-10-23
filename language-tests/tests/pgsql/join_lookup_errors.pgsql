@@ -23,7 +23,7 @@ value = "[{ c: 50, total: 1275 }]"
 error = "Could not cast into `int` using input `'x'`"
 
 [[test.results]]
-value = "[{ c: 0, total: 0 }]"
+value = "[{ c: 0, total: NULL }]"
 
 [[test.results]]
 error = "Could not cast into `int` using input `'x'`"

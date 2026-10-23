@@ -532,10 +532,46 @@ pub fn lower_bound_expr(
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};
-			Ok(LogicalExpr::Call(Box::new(LogicalCall {
+			// The engine folds no value to 0 (and 0/0 to NaN) and no value to NONE for MIN and MAX;
+			// SQL answers NULL when the group holds no value at all.
+			let counted = (matches!(mapped_fn, "math::sum" | "math::mean")
+				&& lower_args.len() == 1)
+				.then(|| lower_args[0].clone());
+			let call = LogicalExpr::Call(Box::new(LogicalCall {
 				receiver: Function::Normal(mapped_fn.to_string()),
 				args: lower_args,
-			})))
+			}));
+			if let Some(value) = counted {
+				let values = LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("count".to_string()),
+					args: vec![LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							is_not_null_expr(value),
+							LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+						)],
+						otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+					}))],
+				}));
+				return Ok(LogicalExpr::If(Box::new(LogicalIf {
+					branches: vec![(
+						LogicalExpr::Binary {
+							left: Box::new(values),
+							op: BinaryOperator::Equal,
+							right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+						},
+						LogicalExpr::Literal(LogicalLiteral::Null),
+					)],
+					otherwise: Some(call),
+				})));
+			}
+			if matches!(mapped_fn, "array::min" | "array::max") {
+				return Ok(LogicalExpr::Binary {
+					left: Box::new(call),
+					op: BinaryOperator::NullCoalescing,
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+				});
+			}
+			Ok(call)
 		}
 		BoundExpr::Case {
 			operand,
@@ -1310,9 +1346,11 @@ pub fn bound_expr_contains_aggregate(expr: &BoundExpr) -> bool {
 	match expr {
 		BoundExpr::FunctionCall {
 			name,
+			args,
 			..
 		} => {
 			matches!(name.as_str(), "count" | "sum" | "avg" | "min" | "max")
+				|| args.iter().any(bound_expr_contains_aggregate)
 		}
 		BoundExpr::Binary {
 			left,
