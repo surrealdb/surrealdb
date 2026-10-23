@@ -27,6 +27,30 @@ pub fn decode(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
 	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
 }
 
+/// A client request: the CBOR item at the start of `bytes` (trailing bytes as `decode`), where
+/// every shaped block (tag 57) at a value position decodes to the array of its rows.
+///
+/// A block decodes to a value a plain CBOR request could carry, through the same conversion, so
+/// everything after the decode treats it as one. The decode is bounded: all blocks together
+/// materialise at most `128 * bytes.len() + 1 MiB` budget units (about bytes of memory, twice what
+/// the densest plain CBOR decodes to), and nest within `recursion_limit`.
+/// A build without the `shaped` feature refuses blocks as `decode` does.
+pub fn decode_request(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
+	#[cfg(feature = "shaped")]
+	{
+		let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
+			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+		let mut blocks = convert::RequestBlocks {
+			budget: surrealdb_types::shaped::Budget::new(128 * bytes.len() as u64 + (1 << 20)),
+			limit: recursion_limit,
+		};
+		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks))
+			.map_err(|e| anyhow::anyhow!(e))
+	}
+	#[cfg(not(feature = "shaped"))]
+	decode(bytes, recursion_limit)
+}
+
 /// Decode `bytes` as exactly one CBOR item: bytes after the item are an error.
 pub fn decode_exact(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
 	let mut reader = bytes;
@@ -288,5 +312,81 @@ mod tests {
 			None
 		);
 		assert_eq!(request_id(b"\xff\xff", 64), None);
+	}
+
+	fn refusal(item: &Cbor) -> String {
+		decode(&encode_cbor(item), 64).expect_err("is refused").to_string()
+	}
+
+	#[test]
+	fn text_forms_of_datetime_uuid_and_duration_are_refused_with_their_replacement() {
+		assert_eq!(
+			refusal(&Cbor::Tag(0, Box::new(text("2020-01-01T00:00:00Z")))),
+			"CBOR tag 0 (a datetime as text) is not accepted: send tag 12 [seconds, nanos]"
+		);
+		assert_eq!(
+			refusal(&Cbor::Tag(9, Box::new(text("00000000-0000-0000-0000-000000000000")))),
+			"CBOR tag 9 (a uuid as text) is not accepted: send tag 37 (16 bytes)"
+		);
+		assert_eq!(
+			refusal(&Cbor::Tag(13, Box::new(text("1s")))),
+			"CBOR tag 13 (a duration as text) is not accepted: send tag 14 [seconds, nanos]"
+		);
+		// Nested, and as a record id key.
+		assert!(refusal(&Cbor::Array(vec![Cbor::Tag(0, Box::new(text("x")))])).contains("tag 0"));
+		let key =
+			Cbor::Tag(8, Box::new(Cbor::Array(vec![text("t"), Cbor::Tag(9, Box::new(text("x")))])));
+		assert!(refusal(&key).contains("tag 9"));
+	}
+
+	#[test]
+	fn the_forms_that_replace_them_decode() {
+		let uuid = Cbor::Tag(37, Box::new(Cbor::Bytes(vec![0; 16])));
+		assert!(matches!(decode(&encode_cbor(&uuid), 64), Ok(Value::Uuid(_))));
+		let datetime = Cbor::Tag(12, Box::new(Cbor::Array(vec![0.into(), 0.into()])));
+		assert!(matches!(decode(&encode_cbor(&datetime), 64), Ok(Value::Datetime(_))));
+		let duration = Cbor::Tag(14, Box::new(Cbor::Array(vec![1.into(), 5.into()])));
+		assert!(matches!(decode(&encode_cbor(&duration), 64), Ok(Value::Duration(_))));
+	}
+
+	#[test]
+	fn integers_outside_the_signed_64_bit_range_are_refused() {
+		let big = Cbor::Integer(u64::MAX.into());
+		assert_eq!(
+			refusal(&big),
+			"integer 18446744073709551615 is outside the 64-bit signed range"
+		);
+		let small = Cbor::Integer(ciborium::value::Integer::try_from(-(1i128 << 64)).unwrap());
+		assert!(refusal(&small).contains("outside the 64-bit signed range"));
+		let key = Cbor::Tag(8, Box::new(Cbor::Array(vec![text("t"), big])));
+		assert!(refusal(&key).contains("outside the 64-bit signed range"));
+		let edge = Cbor::Integer(i64::MIN.into());
+		assert!(decode(&encode_cbor(&edge), 64).is_ok());
+	}
+
+	#[test]
+	fn duplicate_map_keys_are_refused() {
+		let map = Cbor::Map(vec![(text("a"), 1.into()), (text("a"), 2.into())]);
+		assert_eq!(refusal(&map), "duplicate key a in a CBOR map");
+		let key = Cbor::Tag(8, Box::new(Cbor::Array(vec![text("t"), map])));
+		assert!(refusal(&key).contains("duplicate key"));
+	}
+
+	#[test]
+	fn none_takes_only_a_null_payload() {
+		assert!(matches!(
+			decode(&encode_cbor(&Cbor::Tag(6, Box::new(Cbor::Null))), 64),
+			Ok(Value::None)
+		));
+		assert!(refusal(&Cbor::Tag(6, Box::new(1.into()))).contains("NONE"));
+	}
+
+	#[cfg(not(feature = "shaped"))]
+	#[test]
+	fn a_build_without_shaped_frames_refuses_a_block_in_a_request() {
+		let block = Cbor::Tag(57, Box::new(Cbor::Bytes(vec![1])));
+		let bytes = encode_cbor(&Cbor::Array(vec![block]));
+		let err = decode_request(&bytes, 64).expect_err("refused").to_string();
+		assert!(err.contains("tag 57"), "{err}");
 	}
 }

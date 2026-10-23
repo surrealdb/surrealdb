@@ -262,9 +262,7 @@ pub fn fits<'v, V: ShapedValue<'v>>(shape: &Shape, node: Option<usize>, value: V
 					Kind::Dynamic => true,
 					Kind::Object => matches!(leaf, Leaf::Object) && fits(shape, Some(at), child),
 					Kind::Record => {
-						if let Leaf::Record(_, KeyLeaf::Other) = leaf {
-							true
-						} else if let Leaf::Record(table, _) = leaf {
+						if let Leaf::Record(table, _) = leaf {
 							column.table.is_empty() || column.table == table
 						} else {
 							false
@@ -332,8 +330,8 @@ fn join_node<'v, V: ShapedValue<'v>>(
 				(Kind::Object, Leaf::Object) => {
 					join_node(&mut column.children, &mut column.open, child, depth + 1)
 				}
-				(Kind::Record, Leaf::Record(table, key)) => {
-					if !matches!(key, KeyLeaf::Other) && column.table != table {
+				(Kind::Record, Leaf::Record(table, _)) => {
+					if column.table != table {
 						column.table.clear();
 					}
 				}

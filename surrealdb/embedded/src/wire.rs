@@ -23,7 +23,7 @@ use surrealdb_types::Value;
 /// matches what the server's transports apply.
 pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Value> {
 	match format {
-		Format::Cbor => cbor::decode(bytes, recursion_limit),
+		Format::Cbor => cbor::decode_request(bytes, recursion_limit),
 		// Flatbuffers is length-prefixed and self-describing, so nesting is
 		// bounded by the buffer rather than by a configured depth.
 		Format::Flatbuffers => surrealdb_types::decode(bytes),

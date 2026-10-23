@@ -527,3 +527,40 @@ fn rows_of_no_bytes_are_bounded_per_batch() {
 	let contents = block_contents(&block).expect("a block");
 	assert!(BlockReader::new().read_block(contents, &mut undynamic).is_err());
 }
+
+#[test]
+fn a_shape_knows_how_deep_its_object_columns_nest() {
+	let object = |name: &str, children: Vec<ColumnDef>| ColumnDef {
+		kind: Kind::Object,
+		children,
+		..column(name, Kind::Object, 0, "")
+	};
+	let flat = ShapeDef::object(false, &[column("a", Kind::Int, 0, "")]);
+	assert_eq!(Shape::new(flat).expect("a shape").depth(), 0);
+	let two = ShapeDef::object(
+		false,
+		&[object("a", vec![object("b", vec![column("c", Kind::Int, 0, "")])])],
+	);
+	assert_eq!(Shape::new(two).expect("a shape").depth(), 2);
+}
+
+#[test]
+fn a_budget_bounds_what_a_block_materialises() {
+	let rows = sample_rows();
+	let (_, blocks) = round_trip(&rows, rows.len());
+	let contents = block_contents(&blocks[0]).expect("a block");
+	let mut dynamic = |slice: &[u8], _: usize| undynamic(slice);
+	let mut ample = Budget::new(1 << 20);
+	BlockReader::new().read_block_within(contents, &mut dynamic, &mut ample).expect("reads");
+	let mut scant = Budget::new(rows.len() as u64);
+	let err = BlockReader::new()
+		.read_block_within(contents, &mut dynamic, &mut scant)
+		.expect_err("over budget");
+	assert!(err.0.contains("budget"), "{err}");
+	let mut shallow = Budget::new(1 << 20);
+	shallow.max_shape_depth = 0;
+	let err = BlockReader::new()
+		.read_block_within(contents, &mut dynamic, &mut shallow)
+		.expect_err("too deep");
+	assert!(err.0.contains("too deep"), "{err}");
+}

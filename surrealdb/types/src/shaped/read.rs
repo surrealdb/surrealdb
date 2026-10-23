@@ -44,6 +44,51 @@ fn cbor_head(r: &mut &[u8]) -> Option<(u8, u64)> {
 	Some((major, n))
 }
 
+/// A decoder of one dynamic slice, given the slice and the depth ([`Shape::depth`]) of the shape
+/// it belongs to.
+pub type Dynamic<'a> = dyn FnMut(&[u8], usize) -> Result<Value, String> + 'a;
+
+/// What reading blocks may materialise, in units of about a byte of memory: [`VALUE_UNITS`] per
+/// row and per array element, [`VALUE_UNITS`] + [`ENTRY_UNITS`] + the name's length per present
+/// column, a column-level record table's length per record value, the bytes of every variable
+/// array element, and [`VALUE_UNITS`] per byte of every dynamic slice (CBOR can decode a value
+/// from each byte). One budget is shared by every block of a request, so what a request
+/// materialises is bounded by a multiple of its bytes.
+#[derive(Debug)]
+pub struct Budget {
+	units: u64,
+	/// The deepest [`Shape::depth`] a shape announced in a block may have.
+	pub max_shape_depth: usize,
+}
+
+impl Budget {
+	/// A budget of `units`, for shapes of any depth the format allows.
+	pub fn new(units: u64) -> Self {
+		Self {
+			units,
+			max_shape_depth: usize::MAX,
+		}
+	}
+
+	/// A budget that no reading exhausts.
+	pub fn unbounded() -> Self {
+		Self::new(u64::MAX)
+	}
+
+	/// Spends `units`, or refuses when fewer remain.
+	pub fn charge(&mut self, units: u64) -> Result<(), ShapedError> {
+		self.units = self.units.checked_sub(units).ok_or_else(|| {
+			ShapedError::new("a shaped block decodes to more than its request's budget")
+		})?;
+		Ok(())
+	}
+}
+
+/// The units a materialised value costs.
+pub const VALUE_UNITS: u64 = 64;
+/// The units an object entry costs beyond its value and its name's bytes.
+pub const ENTRY_UNITS: u64 = 32;
+
 /// The shapes one scope has announced, reading its blocks in order.
 #[derive(Debug, Default)]
 pub struct BlockReader {
@@ -64,6 +109,18 @@ impl BlockReader {
 		contents: &[u8],
 		dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
 	) -> Result<Vec<Value>, ShapedError> {
+		self.read_block_within(contents, &mut |slice, _| dynamic(slice), &mut Budget::unbounded())
+	}
+
+	/// [`read_block`](Self::read_block) charging what it materialises to `budget`, and refusing a
+	/// shape nested deeper than the budget's [`max_shape_depth`](Budget::max_shape_depth).
+	/// `dynamic` is given each slice and the depth of the shape it belongs to.
+	pub fn read_block_within(
+		&mut self,
+		contents: &[u8],
+		dynamic: &mut Dynamic,
+		budget: &mut Budget,
+	) -> Result<Vec<Value>, ShapedError> {
 		let mut r = Reader(contents);
 		if r.u8()? != VERSION {
 			return Err(ShapedError::new("an unknown block version"));
@@ -78,6 +135,9 @@ impl BlockReader {
 					let mut p = Reader(payload);
 					let id = p.u32()?;
 					let shape = Shape::decode(p.0)?;
+					if shape.depth() > budget.max_shape_depth {
+						return Err(ShapedError::new("a shape nested too deep"));
+					}
 					if !self.shapes.contains_key(&id) && self.shapes.len() >= MAX_SHAPES {
 						return Err(ShapedError::new("too many shapes in one scope"));
 					}
@@ -103,7 +163,8 @@ impl BlockReader {
 					}
 					let mut bytes = p.0;
 					for _ in 0..count {
-						let (value, used) = decode_row(&shape, bytes, dynamic)?;
+						budget.charge(VALUE_UNITS)?;
+						let (value, used) = decode_row_within(&shape, bytes, dynamic, budget)?;
 						rows.push(value);
 						bytes = &bytes[used..];
 					}
@@ -124,6 +185,16 @@ pub fn decode_row(
 	shape: &Shape,
 	bytes: &[u8],
 	dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
+) -> Result<(Value, usize), ShapedError> {
+	decode_row_within(shape, bytes, &mut |slice, _| dynamic(slice), &mut Budget::unbounded())
+}
+
+/// [`decode_row`] charging what it materialises to `budget`.
+pub fn decode_row_within(
+	shape: &Shape,
+	bytes: &[u8],
+	dynamic: &mut Dynamic,
+	budget: &mut Budget,
 ) -> Result<(Value, usize), ShapedError> {
 	let def = shape.def();
 	let header = shape.header_len();
@@ -163,8 +234,8 @@ pub fn decode_row(
 		var,
 	};
 	let value = match def.root {
-		Root::Value => decode_dynamic(row.slice(def.root_rest)?, dynamic)?,
-		Root::Object => Value::Object(row.node(None, dynamic)?),
+		Root::Value => decode_dynamic(row.slice(def.root_rest)?, shape.depth(), dynamic, budget)?,
+		Root::Object => Value::Object(row.node(None, dynamic, budget)?),
 	};
 	Ok((value, total))
 }
@@ -231,14 +302,17 @@ impl Row<'_> {
 	fn node(
 		&self,
 		node: Option<usize>,
-		dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
+		dynamic: &mut Dynamic,
+		budget: &mut Budget,
 	) -> Result<Object, ShapedError> {
 		let mut object = BTreeMap::new();
 		let rest = self.shape.rest(node);
 		if rest != NO_SLOT {
 			let slice = self.slice(rest)?;
 			if !slice.is_empty() {
-				if let Value::Object(entries) = decode_dynamic(slice, dynamic)? {
+				if let Value::Object(entries) =
+					decode_dynamic(slice, self.shape.depth(), dynamic, budget)?
+				{
 					object = entries.0;
 				} else {
 					return Err(ShapedError::new("a remainder that is not an object"));
@@ -247,11 +321,15 @@ impl Row<'_> {
 		}
 		for at in self.shape.children(node) {
 			let column = &self.shape.columns()[at];
-			let value = match self.state(column)? {
+			let state = self.state(column)?;
+			if state != STATE_ABSENT {
+				budget.charge(VALUE_UNITS + ENTRY_UNITS + column.name.len() as u64)?;
+			}
+			let value = match state {
 				STATE_ABSENT if column.flags & MAY_BE_ABSENT != 0 => continue,
 				STATE_NULL if column.flags & MAY_BE_NULL != 0 => Value::Null,
 				STATE_NONE if column.flags & MAY_BE_ABSENT != 0 => Value::None,
-				STATE_VALUE => self.leaf(at, dynamic)?,
+				STATE_VALUE => self.leaf(at, dynamic, budget)?,
 				_ => return Err(ShapedError::new("a presence state the column does not allow")),
 			};
 			if object.insert(column.name.clone(), value).is_some() {
@@ -264,7 +342,8 @@ impl Row<'_> {
 	fn leaf(
 		&self,
 		at: usize,
-		dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
+		dynamic: &mut Dynamic,
+		budget: &mut Budget,
 	) -> Result<Value, ShapedError> {
 		let column = &self.shape.columns()[at];
 		let bad = ShapedError::new;
@@ -316,13 +395,21 @@ impl Row<'_> {
 					.normalize();
 				Value::Number(Number::Decimal(decimal))
 			}
-			Kind::Record => record(self.slice(slot)?, &column.table, dynamic)?,
-			Kind::Dynamic => decode_dynamic(self.slice(slot)?, dynamic)?,
-			Kind::Object => Value::Object(self.node(Some(at), dynamic)?),
+			Kind::Record => {
+				if !column.table.is_empty() {
+					budget.charge(column.table.len() as u64)?;
+				}
+				record(self.slice(slot)?, &column.table, self.shape.depth(), dynamic, budget)?
+			}
+			Kind::Dynamic => {
+				decode_dynamic(self.slice(slot)?, self.shape.depth(), dynamic, budget)?
+			}
+			Kind::Object => Value::Object(self.node(Some(at), dynamic, budget)?),
 			Kind::Bit => Value::Bool(self.fixed_bit(slot)?),
 			Kind::Array => array_of(
 				self.slice(slot)?,
 				column.element.ok_or_else(|| bad("an array of no element kind"))?,
+				budget,
 			)?,
 			Kind::I8 => int(i64::from(i8::from_le_bytes(array(self.fixed(slot, 1)?)))),
 			Kind::I16 => int(i64::from(i16::from_le_bytes(array(self.fixed(slot, 2)?)))),
@@ -378,14 +465,17 @@ impl Row<'_> {
 }
 
 /// An `array` slice of elements of `kind`.
-fn array_of(slice: &[u8], kind: Kind) -> Result<Value, ShapedError> {
+fn array_of(slice: &[u8], kind: Kind, budget: &mut Budget) -> Result<Value, ShapedError> {
 	let bad = ShapedError::new;
 	let mut r = Reader(slice);
 	let count = r.u32()? as usize;
-	let mut out = Vec::with_capacity(count.min(slice.len()));
 	if kind.is_var() {
 		let ends = r.take(count.checked_mul(4).ok_or_else(|| bad("an array too long"))?)?;
 		let bytes = r.0;
+		budget.charge(
+			(count as u64).saturating_mul(VALUE_UNITS).saturating_add(bytes.len() as u64),
+		)?;
+		let mut out = Vec::with_capacity(count.min(slice.len()));
 		let mut start = 0usize;
 		for at in 0..count {
 			let end = u32::from_le_bytes(array(&ends[4 * at..4 * at + 4])) as usize;
@@ -427,6 +517,8 @@ fn array_of(slice: &[u8], kind: Kind) -> Result<Value, ShapedError> {
 	if r.0.len() != count.checked_mul(width).ok_or_else(|| bad("an array too long"))? {
 		return Err(bad("an array of the wrong length"));
 	}
+	budget.charge((count as u64).saturating_mul(VALUE_UNITS))?;
+	let mut out = Vec::with_capacity(count.min(slice.len()));
 	for element in r.0.chunks_exact(width) {
 		out.push(if kind == Kind::Bool {
 			match element[0] {
@@ -470,28 +562,36 @@ fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
 
 fn decode_dynamic(
 	slice: &[u8],
-	dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
+	depth: usize,
+	dynamic: &mut Dynamic,
+	budget: &mut Budget,
 ) -> Result<Value, ShapedError> {
 	if slice.is_empty() {
 		return Err(ShapedError::new("an empty dynamic slice"));
 	}
-	dynamic(slice).map_err(|e| ShapedError::new(format!("a dynamic value: {e}")))
+	budget.charge((slice.len() as u64).saturating_mul(VALUE_UNITS))?;
+	dynamic(slice, depth).map_err(|e| ShapedError::new(format!("a dynamic value: {e}")))
 }
 
 fn record(
 	slice: &[u8],
 	column_table: &str,
-	dynamic: &mut dyn FnMut(&[u8]) -> Result<Value, String>,
+	depth: usize,
+	dynamic: &mut Dynamic,
+	budget: &mut Budget,
 ) -> Result<Value, ShapedError> {
 	let bad = ShapedError::new;
 	let mut r = Reader(slice);
 	let code = r.u8()?;
 	if code == 3 {
-		return if let value @ Value::RecordId(_) = decode_dynamic(r.0, dynamic)? {
-			Ok(value)
-		} else {
-			Err(bad("a record held as CBOR that is not a record id"))
+		let value = decode_dynamic(r.0, depth, dynamic, budget)?;
+		let Value::RecordId(id) = &value else {
+			return Err(bad("a record held as CBOR that is not a record id"));
 		};
+		if !column_table.is_empty() && *id.table != *column_table {
+			return Err(bad("a record held as CBOR that names another table than its column"));
+		}
+		return Ok(value);
 	}
 	let table = if column_table.is_empty() {
 		let len = r.u16()? as usize;

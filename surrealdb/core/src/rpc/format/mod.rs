@@ -3,6 +3,8 @@ pub mod encoded;
 pub mod flatbuffers;
 pub mod json;
 #[cfg(all(test, feature = "shaped"))]
+mod request_blocks_tests;
+#[cfg(all(test, feature = "shaped"))]
 pub(crate) mod shaped_tests;
 
 pub use encoded::decode_rows;

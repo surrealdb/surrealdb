@@ -2043,6 +2043,168 @@ mod tests {
 		assert_eq!(values(&shaped), values(&cbor));
 	}
 
+	/// A request whose data is a shaped block stores what the same request with a CBOR array
+	/// stores, and fails as it fails, over both CBOR subprotocols.
+	#[tokio::test]
+	async fn an_insert_of_a_block_is_an_insert_of_its_rows() {
+		use surrealdb_types::shaped::{PublicShaped, ShapeScope, ValueShaper, write_block};
+		let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+		ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+			.await
+			.unwrap();
+		let session = Session::owner().with_ns("test").with_db("test");
+		let rows = |name: Value| -> Vec<Value> {
+			(1..=5i64)
+				.map(|n| {
+					let mut row = surrealdb_types::Object::new();
+					row.insert("n", Value::from_t(n));
+					row.insert(
+						"name",
+						if n == 3 {
+							name.clone()
+						} else {
+							Value::String(format!("r{n}"))
+						},
+					);
+					Value::Object(row)
+				})
+				.collect()
+		};
+		let block = |rows: &[Value]| -> Vec<u8> {
+			let mut shaper = ValueShaper::new();
+			let mut bytes = Vec::new();
+			let mut runs = Vec::new();
+			for row in rows {
+				let start = bytes.len();
+				let shape = shaper
+					.write(
+						PublicShaped::new(
+							row,
+							surrealdb_core::rpc::format::encoded::encode_dynamic,
+						),
+						&mut bytes,
+					)
+					.expect("writes");
+				runs.push((shape, 1u32, start..bytes.len()));
+			}
+			let mut out = Vec::new();
+			write_block(
+				&mut out,
+				&mut ShapeScope::new(),
+				runs.iter().map(|(shape, n, range)| (shape, *n, &bytes[range.clone()])),
+			)
+			.expect("frames");
+			out
+		};
+		// `{id: "1", method: "insert", params: [table, <data>]}`, the data being CBOR bytes.
+		let request = |table: &str, data: &[u8]| -> Vec<u8> {
+			let text = |s: &str| {
+				let mut out = vec![0x60 | s.len() as u8];
+				out.extend_from_slice(s.as_bytes());
+				out
+			};
+			let mut out = vec![0xa3];
+			out.extend(text("id"));
+			out.extend(text("1"));
+			out.extend(text("method"));
+			out.extend(text("insert"));
+			out.extend(text("params"));
+			out.push(0x82);
+			out.extend(text(table));
+			out.extend_from_slice(data);
+			out
+		};
+		let send = |format: Format, bytes: Vec<u8>| {
+			let ds = Arc::clone(&ds);
+			let session = session.clone();
+			async move {
+				let (tx, _rx) = channel::<Message>(8);
+				let (notifier, _notify_rx) = channel::<Message>(8);
+				let (closer, _close_rx) = channel::<Message>(1);
+				let rpc = Arc::new(Websocket {
+					id: Uuid::new_v4(),
+					format,
+					state: Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds))),
+					datastore: ds,
+					sessions: HashMap::new(),
+					transactions: DashMap::new(),
+					counters: DashMap::new(),
+					streams: DashMap::new(),
+					stream_slots: AtomicUsize::new(0),
+					shutdown: CancellationToken::new(),
+					cancel: surrealdb_core::ctx::CancelHandle::new(),
+					channel: tx,
+					notifications: notifier,
+					lagging_close: closer,
+					live_shapes: Default::default(),
+				});
+				rpc.set_session(rpc.id, Arc::new(RwLock::new(session)));
+				let (chn, mut replies) = channel::<Message>(8);
+				Websocket::handle_message(&rpc, Message::Binary(bytes.into()), chn, 1024).await;
+				match replies.recv().await {
+					Some(Message::Binary(reply)) => {
+						surrealdb_core::rpc::format::cbor::decode(&reply, 64).expect("decodes")
+					}
+					other => panic!("a binary reply, got {other:?}"),
+				}
+			}
+		};
+		let plain = |rows: &[Value]| {
+			surrealdb_core::rpc::format::cbor::encode(Value::Array(rows.to_vec().into()))
+				.expect("encodes")
+		};
+		let stored = async |table: &str| {
+			ds.execute(&format!("SELECT n, name FROM {table} ORDER BY n"), &session, None)
+				.await
+				.expect("runs")
+				.remove(0)
+				.result
+				.expect("rows")
+		};
+		for (at, format) in [Format::Cbor, Format::Shaped].into_iter().enumerate() {
+			let (a, b) = (format!("a{at}"), format!("b{at}"));
+			let define = format!(
+				"DEFINE TABLE {a} SCHEMAFULL; DEFINE FIELD n ON {a} TYPE int; \
+				 DEFINE FIELD name ON {a} TYPE string; \
+				 DEFINE TABLE {b} SCHEMAFULL; DEFINE FIELD n ON {b} TYPE int; \
+				 DEFINE FIELD name ON {b} TYPE string;"
+			);
+			ds.execute(&define, &session, None).await.expect("defines");
+			let good = rows(Value::String("r3".into()));
+			let by_array = send(format, request(&a, &plain(&good))).await;
+			let by_block = send(format, request(&b, &block(&good))).await;
+			assert!(
+				!matches!(&by_array, Value::Object(o) if o.get("error").is_some()),
+				"{by_array:?}"
+			);
+			assert!(
+				!matches!(&by_block, Value::Object(o) if o.get("error").is_some()),
+				"{by_block:?}"
+			);
+			assert_eq!(stored(&a).await, stored(&b).await);
+			assert_eq!(stored(&b).await.into_array().expect("rows").len(), 5);
+
+			// A field type mismatch in the data fails the same way.
+			let bad = rows(Value::from_t(7i64));
+			let error_of = |reply: Value| match reply {
+				Value::Object(o) => o.get("error").cloned().expect("an error"),
+				other => panic!("an object, got {other:?}"),
+			};
+			let by_array = error_of(send(format, request(&a, &plain(&bad))).await);
+			let by_block = error_of(send(format, request(&a, &block(&bad))).await);
+			// Each insert generates its own record id, which the message names.
+			let masked = |error: Value| {
+				let mut text = error.to_sql();
+				if let Some(from) = text.find(&format!("`{a}:")) {
+					let len = text[from + 1..].find('`').expect("a closing quote");
+					text.replace_range(from..from + len + 2, "`id`");
+				}
+				text
+			};
+			assert_eq!(masked(by_block), masked(by_array));
+		}
+	}
+
 	/// On a shaped connection, the notifications of one live query carry their
 	/// payload as blocks read through one shape scope: each reads back to what
 	/// its CBOR notification decodes to, and the last (`KILLED`) ends the

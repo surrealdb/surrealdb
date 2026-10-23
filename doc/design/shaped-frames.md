@@ -29,6 +29,7 @@ by the scan and the fixed statement cost.
 | HTTP `POST /sql` with `Accept: application/vnd.surrealdb.shaped` | The response body is the CBOR array of statement results; a row statement's `result` is a block |
 | HTTP `POST /rpc`, `Content-Type: application/cbor`, `Accept: application/vnd.surrealdb.shaped` | Requests are CBOR; the response is the CBOR envelope; a `query` row result is a block |
 | WebSocket subprotocol `shaped` | Requests and every response are CBOR (binary messages); `query` row results, `query_stream` `rows` frames and live notification payloads carry blocks |
+| CBOR requests (WebSocket `cbor` and `shaped`, HTTP `/rpc` with `Content-Type: application/cbor`, the embedded engine's CBOR input) | A value in a request may be a block, which reads as the array of its rows ("Blocks in requests") |
 
 Everything that is not a row list (errors, non-query methods, `INFO`, `RETURN`, scalars,
 `SELECT ONLY`, DDL) is encoded exactly as the CBOR format encodes it. A client therefore needs one
@@ -46,7 +47,8 @@ There is no capability handshake RPC. The format is chosen the way every other f
   to equal `Content-Type`; the one admitted difference is CBOR in, shaped out.
 - HTTP `/sql`: `Accept: application/vnd.surrealdb.shaped`.
 
-A client that does not ask for `shaped` never receives a block.
+A client that does not ask for `shaped` never receives a block. A block in a request needs no
+negotiation: a build with the `shaped` feature accepts it in any CBOR request.
 
 Shaped frames are built by the `surrealdb-core` feature `shaped`, which the server, the default
 feature set and the edge bundle include and the lean wasm bundle leaves out. A build without it
@@ -251,6 +253,57 @@ block; a `query_stream` statement's rows are framed by row count as every format
 (`QUERY_FIRST_BATCH_RECORDS` rising to `QUERY_BATCH_RECORDS`), each `rows` frame carrying one
 block. Frames are bounded by record count, not by encoded bytes, as on the CBOR subprotocol; the
 WebSocket message limit applies unchanged.
+
+## Blocks in requests
+
+A client may send a block where a CBOR request holds a value: an RPC parameter, a query variable,
+or any value nested in an object or array of one. Map keys are never blocks. It is accepted on
+the WebSocket subprotocols `cbor` and `shaped`, on HTTP `/rpc` with `Content-Type:
+application/cbor`, and on the embedded engine's CBOR input, and only there: a CBOR value decoded
+anywhere else (a custom API body, `encoding::cbor::decode`, an export configuration, a
+response) refuses tag 57. A build without the `shaped` feature refuses it everywhere.
+
+**Principle.** A block in a request decodes, in the wire layer, to exactly the public value (an
+array of row values) that some plain CBOR request could have carried. The executor, schema checks,
+field types, `ASSERT`, permissions and the storage encoding see an ordinary value and treat it as
+a CBOR-decoded one. A block never writes storage bytes and never skips a check, so a hostile block
+can do no more than a hostile CBOR request, provided its decode is bounded and strict.
+
+Rules, all enforced by the one CBOR conversion that every request value goes through, so a map
+next to or around a block is held to the CBOR rules too (duplicate keys, integer range):
+
+- **Scope.** Each block has a shape scope of its own, as a `query` response block has: shape ids
+  announced in one block mean nothing in another.
+- **Shape.** The block's contents are tag 57 around a byte string; any other item under tag 57 is
+  refused.
+- **No nesting.** A dynamic slice and a remainder are decoded as strict CBOR, which refuses tag 57.
+- **Depth.** A block with `d` containers or tags around it, whose shape nests object columns `s`
+  deep (`Shape::depth`), adds `s + 2` levels (the rows' array and object, then the objects). It is
+  refused unless `d + s + 2` is below the request's recursion limit, and its dynamic slices decode
+  with the limit that remains. A block therefore never reads to a value a plain CBOR request
+  could not carry under the same limit.
+- **Budget.** One budget serves every block of a request: `128 * request_bytes + 2^20` units, a
+  unit being about a byte of memory. Plain CBOR decodes at most one value (about 64 bytes) from
+  each byte of a request, so a block can materialise at most about twice what the densest CBOR
+  request of the same size could. Decoding charges, before it allocates: 64 per row and per array
+  element; `64 + 32 + name_len` per present column of any kind (a value, `NULL` or `NONE`,
+  objects included), as each clones its name into the row; the column-level table's length per
+  record value that takes its table from the column; the byte length of variable array elements;
+  and 64 per byte of every dynamic and remainder slice. A shape is announced once but its names and tables are copied per row, so
+  they are charged per row. A request that exceeds the budget is refused. The per-batch cap on
+  rows of no bytes holds as well.
+- **Records.** A `record` value held as a whole CBOR record id (key kind `0x03`) in a column whose
+  shape names a table must name that table.
+- **Everything else** the reader validates (UTF-8, ordering, bounds, datetime and duration
+  ranges, the `MAX_*` limits) is unchanged. NaN and infinite floats are accepted, as in CBOR.
+
+### Accepted CBOR tags
+
+Every CBOR decode reads a datetime only as tag 12 `[seconds, nanos]`, a uuid only as tag 37 (16
+bytes) and a duration only as tag 14 `[seconds, nanos]`. Tags 0 (a datetime as text), 9 (a uuid
+as text) and 13 (a duration as text) are refused with an error naming the form to send instead. An
+integer outside the signed 64-bit range, a map with a repeated key, and tag 6 (`NONE`) around
+anything but `null` are refused rather than wrapped, merged or ignored.
 
 ## Layers
 

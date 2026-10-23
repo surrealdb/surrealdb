@@ -443,6 +443,8 @@ pub struct Shape {
 	header: usize,
 	/// The SHAPE payload past the shape id.
 	payload: Vec<u8>,
+	/// The deepest nesting of object columns.
+	depth: usize,
 }
 
 impl PartialEq for Shape {
@@ -482,7 +484,7 @@ impl Shape {
 			}
 		}
 		let mut ends = vec![0u32; def.columns.len()];
-		check_node(&def, &mut ends, 0, def.columns.len(), 0)?;
+		let depth = check_node(&def, &mut ends, 0, def.columns.len(), 0)?;
 		let header = presence_bytes(def.presence_bits)
 			+ def.fixed_size as usize
 			+ 4 * def.var_count as usize;
@@ -493,6 +495,7 @@ impl Shape {
 			ends,
 			header,
 			payload,
+			depth,
 		})
 	}
 
@@ -568,6 +571,12 @@ impl Shape {
 		&self.def.columns
 	}
 
+	/// The deepest nesting of object columns: 0 for a shape with none, 1 for one whose object
+	/// columns hold no object column.
+	pub fn depth(&self) -> usize {
+		self.depth
+	}
+
 	/// The SHAPE payload past the shape id.
 	pub fn payload(&self) -> &[u8] {
 		&self.payload
@@ -636,15 +645,16 @@ impl Iterator for Children<'_> {
 }
 
 /// Checks the columns `start..end`, the children of one node at depth `depth`, filling each
-/// column's subtree end.
+/// column's subtree end. Returns the deepest nesting of object columns below the node.
 fn check_node(
 	def: &ShapeDef,
 	ends: &mut [u32],
 	start: usize,
 	end: usize,
 	depth: usize,
-) -> Result<(), ShapedError> {
+) -> Result<usize, ShapedError> {
 	let bad = ShapedError::new;
+	let mut deepest = 0;
 	if depth >= MAX_DEPTH {
 		return Err(bad("objects nested too deep"));
 	}
@@ -714,12 +724,12 @@ fn check_node(
 			if column.rest != NO_SLOT && column.rest >= def.var_count {
 				return Err(bad("a remainder slot out of range"));
 			}
-			check_node(def, ends, at + 1, stop, depth + 1)?;
+			deepest = deepest.max(1 + check_node(def, ends, at + 1, stop, depth + 1)?);
 		}
 		ends[at] = stop as u32;
 		at = stop;
 	}
-	Ok(())
+	Ok(deepest)
 }
 
 fn encode(def: &ShapeDef, out: &mut Vec<u8>) {

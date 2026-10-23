@@ -24,7 +24,10 @@ mod write;
 #[cfg(test)]
 mod tests;
 
-pub use read::{BlockReader, block_contents, decode_row};
+pub use read::{
+	BlockReader, Budget, Dynamic, ENTRY_UNITS, VALUE_UNITS, block_contents, decode_row,
+	decode_row_within,
+};
 pub use shape::{Column, ColumnDef, Kind, Root, Shape, ShapeDef, presence_width};
 pub use value::{
 	KeyLeaf, Leaf, MAX_DERIVED_COLUMNS, MAX_DERIVED_DEPTH, MAX_JOINS, PublicShaped, ShapedValue,

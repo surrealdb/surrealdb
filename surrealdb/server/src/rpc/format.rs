@@ -109,7 +109,7 @@ impl WsFormat for Format {
 			}
 			// A shaped connection's requests are CBOR.
 			Format::Cbor | Format::Shaped => {
-				let val = surrealdb_core::rpc::format::cbor::decode(&val, recursion_limit)
+				let val = surrealdb_core::rpc::format::cbor::decode_request(&val, recursion_limit)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -200,7 +200,7 @@ impl HttpFormat for Format {
 			}
 			// A shaped request is CBOR.
 			Format::Cbor | Format::Shaped => {
-				let val = surrealdb_core::rpc::format::cbor::decode(&body, recursion_limit)
+				let val = surrealdb_core::rpc::format::cbor::decode_request(&body, recursion_limit)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)

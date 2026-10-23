@@ -1,3 +1,4 @@
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
 use std::ops::Bound;
@@ -16,18 +17,15 @@ use crate::types::{
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
-const TAG_SPEC_DATETIME: u64 = 0;
 const TAG_SPEC_UUID: u64 = 37;
 
 // Custom tags (6->15 is unassigned)
 const TAG_NONE: u64 = 6;
 const TAG_TABLE: u64 = 7;
 const TAG_RECORDID: u64 = 8;
-const TAG_STRING_UUID: u64 = 9;
 const TAG_STRING_DECIMAL: u64 = 10;
 // const TAG_BINARY_DECIMAL: u64 = 11;
 const TAG_CUSTOM_DATETIME: u64 = 12;
-const TAG_STRING_DURATION: u64 = 13;
 const TAG_CUSTOM_DURATION: u64 = 14;
 // unused but the for backwards compatibility kept around to maybe avoid using
 // that tag again.
@@ -37,6 +35,9 @@ const _TAG_FUTURE: u64 = 15;
 const TAG_RANGE: u64 = 49;
 const TAG_BOUND_INCLUDED: u64 = 50;
 const TAG_BOUND_EXCLUDED: u64 = 51;
+
+// A shaped block, accepted in requests only (`decode_request`)
+const TAG_SHAPED_BLOCK: u64 = surrealdb_types::shaped::CBOR_TAG;
 
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
@@ -51,30 +52,23 @@ const TAG_GEOMETRY_MULTILINE: u64 = 92;
 const TAG_GEOMETRY_MULTIPOLYGON: u64 = 93;
 const TAG_GEOMETRY_COLLECTION: u64 = 94;
 
-pub fn to_value(val: CborValue) -> Result<PublicValue> {
+fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	match val {
 		CborValue::Null => Ok(PublicValue::Null),
 		CborValue::Bool(v) => Ok(PublicValue::Bool(v)),
-		CborValue::Integer(v) => Ok(PublicValue::Number(PublicNumber::Int(i128::from(v) as i64))),
+		CborValue::Integer(v) => Ok(PublicValue::Number(PublicNumber::Int(to_i64(v)?))),
 		CborValue::Float(v) => Ok(PublicValue::Number(PublicNumber::Float(v))),
 		CborValue::Bytes(v) => Ok(PublicValue::Bytes(v.into())),
 		CborValue::Text(v) => Ok(PublicValue::String(v)),
-		CborValue::Array(v) => Ok(PublicValue::Array(to_array(v)?)),
-		CborValue::Map(v) => Ok(PublicValue::Object(to_object(v)?)),
+		CborValue::Array(v) => Ok(PublicValue::Array(to_array(v, ctx)?)),
+		CborValue::Map(v) => Ok(PublicValue::Object(to_object(v, ctx)?)),
 		CborValue::Tag(t, v) => {
+			#[cfg(feature = "shaped")]
+			if t == TAG_SHAPED_BLOCK && ctx.blocks.is_some() {
+				return block(*v, ctx);
+			}
+			let ctx = &mut ctx.child();
 			match t {
-				// A literal datetime
-				TAG_SPEC_DATETIME => {
-					if let CborValue::Text(v) = *v {
-						if let Ok(v) = syn::datetime(v.as_str()) {
-							Ok(PublicValue::Datetime(v))
-						} else {
-							Err(anyhow!("Expected a valid Datetime value"))
-						}
-					} else {
-						Err(anyhow!("Expected a CBOR text data type"))
-					}
-				}
 				// A custom [seconds: i64, nanos: u32] datetime
 				TAG_CUSTOM_DATETIME => {
 					if let CborValue::Array(v) = *v
@@ -107,17 +101,11 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					}
 				}
 				// A literal NONE
-				TAG_NONE => Ok(PublicValue::None),
-				// A literal uuid
-				TAG_STRING_UUID => {
-					if let CborValue::Text(v) = *v {
-						if let Ok(v) = v.parse::<PublicUuid>() {
-							Ok(PublicValue::Uuid(v))
-						} else {
-							Err(anyhow!("Expected a valid UUID value"))
-						}
+				TAG_NONE => {
+					if let CborValue::Null = *v {
+						Ok(PublicValue::None)
 					} else {
-						Err(anyhow!("Expected a CBOR text data type"))
+						Err(anyhow!("Expected a CBOR null under the NONE tag"))
 					}
 				}
 				// A byte string uuid
@@ -129,18 +117,6 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							Ok(PublicValue::Number(PublicNumber::Decimal(v)))
 						} else {
 							Err(anyhow!("Expected a valid Decimal value"))
-						}
-					} else {
-						Err(anyhow!("Expected a CBOR text data type"))
-					}
-				}
-				// A literal duration
-				TAG_STRING_DURATION => {
-					if let CborValue::Text(v) = *v {
-						if let Ok(v) = v.parse::<PublicDuration>() {
-							Ok(PublicValue::Duration(v))
-						} else {
-							Err(anyhow!("Expected a valid Duration value"))
 						}
 					} else {
 						Err(anyhow!("Expected a CBOR text data type"))
@@ -194,9 +170,9 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							));
 						}
 
-						let table = to_value(table)?.into_string()?;
+						let table = sub(table, ctx)?.into_string()?;
 
-						let key = to_record_id_key(key)?;
+						let key = to_record_id_key(key, &mut ctx.child())?;
 
 						Ok(PublicValue::RecordId(PublicRecordId {
 							table: table.into(),
@@ -217,7 +193,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					}
 				}
 				// A range
-				TAG_RANGE => Ok(PublicValue::Range(Box::new(to_range(*v)?))),
+				TAG_RANGE => Ok(PublicValue::Range(Box::new(to_range(*v, ctx)?))),
 				TAG_GEOMETRY_POINT => {
 					if let CborValue::Array(v) = *v {
 						let err_msg = "Expected a CBOR array with 2 decimal values";
@@ -228,8 +204,8 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							return Err(anyhow!(err_msg));
 						};
 
-						let x = to_value(x)?;
-						let y = to_value(y)?;
+						let x = sub(x, ctx)?;
+						let y = sub(y, ctx)?;
 
 						if let (PublicValue::Number(x), PublicValue::Number(y)) = (x, y) {
 							Ok(PublicValue::Geometry(PublicGeometry::Point(
@@ -249,7 +225,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							.into_iter()
 							.map(|v| {
 								if let PublicValue::Geometry(PublicGeometry::Point(v)) =
-									to_value(v)?
+									sub(v, ctx)?
 								{
 									Ok(v)
 								} else {
@@ -270,7 +246,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						let lines = v
 							.into_iter()
 							.map(|v| {
-								if let PublicValue::Geometry(PublicGeometry::Line(v)) = to_value(v)?
+								if let PublicValue::Geometry(PublicGeometry::Line(v)) = sub(v, ctx)?
 								{
 									Ok(v)
 								} else {
@@ -303,7 +279,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							.into_iter()
 							.map(|v| {
 								if let PublicValue::Geometry(PublicGeometry::Point(v)) =
-									to_value(v)?
+									sub(v, ctx)?
 								{
 									Ok(v)
 								} else {
@@ -324,7 +300,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						let lines = v
 							.into_iter()
 							.map(|v| {
-								if let PublicValue::Geometry(PublicGeometry::Line(v)) = to_value(v)?
+								if let PublicValue::Geometry(PublicGeometry::Line(v)) = sub(v, ctx)?
 								{
 									Ok(v)
 								} else {
@@ -346,7 +322,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							.into_iter()
 							.map(|v| {
 								if let PublicValue::Geometry(PublicGeometry::Polygon(v)) =
-									to_value(v)?
+									sub(v, ctx)?
 								{
 									Ok(v)
 								} else {
@@ -369,7 +345,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						let geometries = v
 							.into_iter()
 							.map(|v| {
-								if let PublicValue::Geometry(v) = to_value(v)? {
+								if let PublicValue::Geometry(v) = sub(v, ctx)? {
 									Ok(v)
 								} else {
 									Err(anyhow!("Expected a CBOR array with Geometry values"))
@@ -403,19 +379,128 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					if let CborValue::Array(v) = *v {
 						Ok(PublicValue::Set(PublicSet::from(
 							v.into_iter()
-								.map(to_value)
+								.map(|v| sub(v, ctx))
 								.collect::<Result<BTreeSet<PublicValue>>>()?,
 						)))
 					} else {
 						Err(anyhow!("Expected a CBOR array with Set values"))
 					}
 				}
-				// An unknown tag
-				_ => Err(anyhow!("Encountered an unknown CBOR tag")),
+				// A tag this format does not read
+				t => Err(unsupported_tag(t)),
 			}
 		}
 		_ => Err(anyhow!("Encountered an unknown CBOR data type")),
 	}
+}
+
+/// The refusal of a tag the format does not read: the tags that carried a datetime, uuid or
+/// duration as text name the form to send instead.
+fn unsupported_tag(tag: u64) -> anyhow::Error {
+	match tag {
+		0 => anyhow!(
+			"CBOR tag 0 (a datetime as text) is not accepted: send tag {TAG_CUSTOM_DATETIME} [seconds, nanos]"
+		),
+		9 => anyhow!(
+			"CBOR tag 9 (a uuid as text) is not accepted: send tag {TAG_SPEC_UUID} (16 bytes)"
+		),
+		13 => anyhow!(
+			"CBOR tag 13 (a duration as text) is not accepted: send tag {TAG_CUSTOM_DURATION} [seconds, nanos]"
+		),
+		TAG_SHAPED_BLOCK => anyhow!("CBOR tag 57 (a shaped block) is not accepted here"),
+		_ => anyhow!("Encountered an unknown CBOR tag"),
+	}
+}
+
+/// What a request's shaped blocks may materialise: the budget they share and the recursion limit
+/// the request is decoded under.
+#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
+pub struct RequestBlocks {
+	pub budget: surrealdb_types::shaped::Budget,
+	pub limit: usize,
+}
+
+/// Where an item sits in the value being decoded, and whether it may be a shaped block.
+pub struct Ctx<'a> {
+	blocks: Option<&'a mut RequestBlocks>,
+	/// The number of arrays, maps and tags around the item.
+	depth: usize,
+}
+
+impl<'a> Ctx<'a> {
+	/// The context of an item whose blocks are refused.
+	fn strict() -> Ctx<'static> {
+		Ctx {
+			blocks: None,
+			depth: 0,
+		}
+	}
+
+	/// The context of a value that accepts blocks within `blocks`.
+	#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
+	pub fn requests(blocks: &'a mut RequestBlocks) -> Self {
+		Ctx {
+			blocks: Some(blocks),
+			depth: 0,
+		}
+	}
+
+	/// The context of an item one level in.
+	fn child(&mut self) -> Ctx<'_> {
+		Ctx {
+			blocks: self.blocks.as_deref_mut(),
+			depth: self.depth + 1,
+		}
+	}
+}
+
+/// An item one level inside the one `ctx` describes.
+fn sub(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
+	value(val, &mut ctx.child())
+}
+
+pub fn to_value(val: CborValue) -> Result<PublicValue> {
+	value(val, &mut Ctx::strict())
+}
+
+/// A decoded request item, where a shaped block is the array of its rows.
+#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
+pub fn to_request_value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
+	value(val, ctx)
+}
+
+/// A shaped block at the depth `ctx` holds: the array of its rows, read in a scope of its own.
+///
+/// Every row is a value a plain CBOR request could carry, and the block can nest no deeper than
+/// the request's recursion limit: the rows add an array and an object around the shape's own
+/// object columns, and a dynamic slice decodes within what is left.
+#[cfg(feature = "shaped")]
+fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
+	let CborValue::Bytes(contents) = val else {
+		return Err(anyhow!("a shaped block that is not a byte string"));
+	};
+	let depth = ctx.depth;
+	let Some(blocks) = ctx.blocks.as_deref_mut() else {
+		return Err(unsupported_tag(TAG_SHAPED_BLOCK));
+	};
+	let limit = blocks.limit;
+	// The rows' array and object sit inside the block's own item.
+	let room = limit.checked_sub(depth + 2).filter(|room| *room > 0);
+	blocks.budget.max_shape_depth = match room {
+		Some(room) => room - 1,
+		None => return Err(anyhow!("a shaped block nested too deep")),
+	};
+	let mut dynamic = |slice: &[u8], shape_depth: usize| -> Result<PublicValue, String> {
+		let room = limit
+			.checked_sub(depth + 2 + shape_depth)
+			.filter(|room| *room > 0)
+			.ok_or_else(|| "a shaped block nested too deep".to_owned())?;
+		super::decode_exact(slice, room).map_err(|e| e.to_string())
+	};
+	let rows = surrealdb_types::shaped::BlockReader::new()
+		.read_block_within(&contents, &mut dynamic, &mut blocks.budget)
+		.map_err(|e| anyhow!(e))?;
+	Ok(PublicValue::Array(rows.into()))
 }
 
 pub fn from_value(val: PublicValue) -> Result<CborValue> {
@@ -562,12 +647,12 @@ fn from_geometry(v: PublicGeometry) -> Result<CborValue> {
 	}
 }
 
-fn to_range(val: CborValue) -> Result<PublicRange> {
-	fn decode_bound(v: CborValue) -> Result<Bound<PublicValue>> {
+fn to_range(val: CborValue, ctx: &mut Ctx) -> Result<PublicRange> {
+	fn decode_bound(v: CborValue, ctx: &mut Ctx) -> Result<Bound<PublicValue>> {
 		if let CborValue::Tag(TAG_BOUND_INCLUDED, v) = v {
-			Ok(Bound::Included(to_value(*v)?))
+			Ok(Bound::Included(sub(*v, ctx)?))
 		} else if let CborValue::Tag(TAG_BOUND_EXCLUDED, v) = v {
-			Ok(Bound::Excluded(to_value(*v)?))
+			Ok(Bound::Excluded(sub(*v, ctx)?))
 		} else if let CborValue::Null = v {
 			Ok(Bound::Unbounded)
 		} else {
@@ -578,8 +663,8 @@ fn to_range(val: CborValue) -> Result<PublicRange> {
 	if let CborValue::Array(mut v) = val
 		&& v.len() == 2
 	{
-		let beg = decode_bound(v.remove(0))?;
-		let end = decode_bound(v.remove(0))?;
+		let beg = decode_bound(v.remove(0), &mut ctx.child())?;
+		let end = decode_bound(v.remove(0), &mut ctx.child())?;
 		Ok(PublicRange::new(beg, end))
 	} else {
 		Err(anyhow!("Expected a CBOR array with 2 bounds"))
@@ -615,12 +700,12 @@ fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
 	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
 }
 
-fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
-	fn decode_bound(v: CborValue) -> Result<Bound<PublicRecordIdKey>> {
+fn to_record_id_key_range(val: CborValue, ctx: &mut Ctx) -> Result<PublicRecordIdKeyRange> {
+	fn decode_bound(v: CborValue, ctx: &mut Ctx) -> Result<Bound<PublicRecordIdKey>> {
 		if let CborValue::Tag(TAG_BOUND_INCLUDED, v) = v {
-			Ok(Bound::Included(to_record_id_key(*v)?))
+			Ok(Bound::Included(to_record_id_key(*v, &mut ctx.child())?))
 		} else if let CborValue::Tag(TAG_BOUND_EXCLUDED, v) = v {
-			Ok(Bound::Excluded(to_record_id_key(*v)?))
+			Ok(Bound::Excluded(to_record_id_key(*v, &mut ctx.child())?))
 		} else if let CborValue::Null = v {
 			Ok(Bound::Unbounded)
 		} else {
@@ -631,8 +716,8 @@ fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
 	if let CborValue::Array(mut v) = val
 		&& v.len() == 2
 	{
-		let start = decode_bound(v.remove(0))?;
-		let end = decode_bound(v.remove(0))?;
+		let start = decode_bound(v.remove(0), &mut ctx.child())?;
+		let end = decode_bound(v.remove(0), &mut ctx.child())?;
 
 		Ok(PublicRecordIdKeyRange {
 			start,
@@ -658,27 +743,17 @@ fn from_record_id_key(v: PublicRecordIdKey) -> Result<CborValue> {
 	}
 }
 
-fn to_record_id_key(val: CborValue) -> Result<PublicRecordIdKey> {
+fn to_record_id_key(val: CborValue, ctx: &mut Ctx) -> Result<PublicRecordIdKey> {
 	match val {
-		CborValue::Integer(v) => Ok(PublicRecordIdKey::Number(i128::from(v) as i64)),
+		CborValue::Integer(v) => Ok(PublicRecordIdKey::Number(to_i64(v)?)),
 		CborValue::Text(v) => Ok(PublicRecordIdKey::String(v)),
-		CborValue::Array(v) => Ok(PublicRecordIdKey::Array(to_array(v)?)),
-		CborValue::Map(v) => Ok(PublicRecordIdKey::Object(to_object(v)?)),
+		CborValue::Array(v) => Ok(PublicRecordIdKey::Array(to_array(v, ctx)?)),
+		CborValue::Map(v) => Ok(PublicRecordIdKey::Object(to_object(v, ctx)?)),
 		CborValue::Tag(TAG_RANGE, v) => {
-			Ok(PublicRecordIdKey::Range(Box::new(to_record_id_key_range(*v)?)))
-		}
-		CborValue::Tag(TAG_STRING_UUID, v) => {
-			if let CborValue::Text(v) = *v {
-				if let Ok(v) = PublicUuid::try_from(v) {
-					Ok(PublicRecordIdKey::Uuid(v))
-				} else {
-					Err(anyhow!("Expected a valid UUID value"))
-				}
-			} else {
-				Err(anyhow!("Expected a CBOR text data type"))
-			}
+			Ok(PublicRecordIdKey::Range(Box::new(to_record_id_key_range(*v, &mut ctx.child())?)))
 		}
 		CborValue::Tag(TAG_SPEC_UUID, v) => to_uuid(*v).map(PublicRecordIdKey::Uuid),
+		CborValue::Tag(t @ (0 | 9 | 13), _) => Err(unsupported_tag(t)),
 		CborValue::Bytes(_)
 		| CborValue::Float(_)
 		| CborValue::Bool(_)
@@ -717,8 +792,15 @@ fn from_array(array: PublicArray) -> Result<CborValue> {
 		.map(CborValue::Array)
 }
 
-fn to_array(array: Vec<CborValue>) -> Result<PublicArray> {
-	Ok(array.into_iter().map(to_value).collect::<Result<Vec<PublicValue>, _>>()?.into())
+/// A CBOR integer as the `i64` every integer value holds; one outside that range is refused
+/// rather than wrapped.
+fn to_i64(v: ciborium::value::Integer) -> Result<i64> {
+	i64::try_from(v)
+		.map_err(|_| anyhow!("integer {} is outside the 64-bit signed range", i128::from(v)))
+}
+
+fn to_array(array: Vec<CborValue>, ctx: &mut Ctx) -> Result<PublicArray> {
+	Ok(array.into_iter().map(|v| sub(v, ctx)).collect::<Result<Vec<PublicValue>, _>>()?.into())
 }
 
 fn from_object(obj: PublicObject) -> Result<CborValue> {
@@ -732,16 +814,21 @@ fn from_object(obj: PublicObject) -> Result<CborValue> {
 		.map(CborValue::Map)
 }
 
-fn to_object(obj: Vec<(CborValue, CborValue)>) -> Result<PublicObject> {
-	let res = obj
-		.into_iter()
-		.map(|(k, v)| {
-			let CborValue::Text(k) = k else {
-				return Err(anyhow!("Expected object key to be a string"));
-			};
-			let v = to_value(v)?;
-			Ok((k, v))
-		})
-		.collect::<Result<BTreeMap<_, _>>>()?;
+fn to_object(obj: Vec<(CborValue, CborValue)>, ctx: &mut Ctx) -> Result<PublicObject> {
+	let mut res = BTreeMap::new();
+	for (k, v) in obj {
+		let CborValue::Text(k) = k else {
+			return Err(anyhow!("Expected object key to be a string"));
+		};
+		let v = sub(v, ctx)?;
+		match res.entry(k) {
+			Entry::Vacant(slot) => {
+				slot.insert(v);
+			}
+			Entry::Occupied(slot) => {
+				return Err(anyhow!("duplicate key {} in a CBOR map", slot.key()));
+			}
+		}
+	}
 	Ok(PublicObject::from(res))
 }
