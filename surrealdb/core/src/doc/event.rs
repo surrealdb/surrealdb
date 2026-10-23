@@ -231,7 +231,7 @@ struct AsyncEventContext {
 	sequences: Sequences,
 	/// Delivers the live-query notifications an attempt's writes raise, once
 	/// that attempt commits. `None` when the datastore delivers none inline.
-	broker: Option<Arc<dyn crate::dbs::MessageBroker>>,
+	broker: Option<Arc<crate::dbs::OrderedBroker>>,
 	k: Vec<u8>,
 	v: Option<AsyncEventRecord>,
 }

@@ -21,8 +21,9 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, RootProvide
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{
-	DefaultBroker, Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem,
-	QueryType, RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
+	DefaultBroker, Dispatch, Force, MessageBroker, Options, OrderedBroker, QueryResult,
+	QueryStreamItem, QueryType, RoutedNotification, StatementCounters, TopLevelStatement,
+	items_for_result,
 };
 use crate::err;
 use crate::err::{EngineError, Error};
@@ -509,7 +510,7 @@ impl StreamSink {
 
 pub(crate) struct PreparedBroker {
 	receiver: async_channel::Receiver<RoutedNotification>,
-	delivery: Arc<dyn MessageBroker>,
+	delivery: Arc<OrderedBroker>,
 }
 
 /// Flush a batch's buffered live-query notifications once the caller-owned
@@ -1039,7 +1040,7 @@ pub(crate) fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow
 /// shared and cannot be changed.
 pub(crate) fn install_broker(
 	ctx: &mut FrozenContext,
-	delivery: Arc<dyn MessageBroker>,
+	delivery: Arc<OrderedBroker>,
 ) -> Option<PreparedBroker> {
 	// If a broker is already provided by a higher layer, don't override it here.
 	if ctx.broker().is_some() {
@@ -1059,7 +1060,7 @@ pub(crate) fn install_broker(
 		}
 		return None;
 	};
-	ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery))));
+	ctx.set_broker(Some(DefaultBroker::new(send, Arc::clone(&delivery) as Arc<dyn MessageBroker>)));
 	Some(PreparedBroker {
 		receiver: recv,
 		delivery,
@@ -1067,19 +1068,30 @@ pub(crate) fn install_broker(
 }
 
 /// Hand the notifications `prepared` buffered to the broker that delivers them. Called only once
-/// the transaction that produced them has committed.
+/// the transaction that produced them has committed, and before the statement that committed it
+/// answers.
+///
+/// What the transaction buffered is queued before this returns, so the notifications of commits a
+/// client makes one after another are delivered in the order of those commits. A context that
+/// outlives the commit may still hold a sender — a `KILL` queues its notification for after the
+/// commit — and what it sends later is queued as it arrives, behind everything queued here.
 pub(crate) fn flush_live_query_notifications(prepared: PreparedBroker) {
 	let PreparedBroker {
 		receiver,
 		delivery,
 	} = prepared;
-	// Every sender is gone and nothing is buffered, so no item can arrive.
-	if receiver.is_empty() && receiver.is_closed() {
+	// Read before draining: once every sender is gone nothing more can arrive,
+	// so the drain below takes everything there will ever be.
+	let closed = receiver.is_closed();
+	while let Ok(item) = receiver.try_recv() {
+		delivery.enqueue(item);
+	}
+	if closed {
 		return;
 	}
 	common::rt::spawn_detached(async move {
 		while let Ok(item) = receiver.recv().await {
-			delivery.send(item).await;
+			delivery.enqueue(item);
 		}
 	});
 }
@@ -1299,7 +1311,7 @@ impl Executor {
 	fn prepare_broker(
 		&mut self,
 		writable: bool,
-		delivery: Option<Arc<dyn MessageBroker>>,
+		delivery: Option<Arc<OrderedBroker>>,
 	) -> Option<PreparedBroker> {
 		if !writable {
 			return None;

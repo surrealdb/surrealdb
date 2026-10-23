@@ -64,8 +64,8 @@ use crate::dbs::capabilities::{
 use crate::dbs::executor::CarryBound;
 use crate::dbs::node::{Node, NodeRelease, Timestamp};
 use crate::dbs::{
-	Capabilities, Dispatch, DurableSession, Executor, MessageBroker, Options, QueryResult,
-	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, StoredRpcSession,
+	Capabilities, Dispatch, DurableSession, Executor, MessageBroker, Options, OrderedBroker,
+	QueryResult, QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, StoredRpcSession,
 	TopLevelStatement, durable_session, restore_session,
 };
 use crate::doc::process_next_events_batch;
@@ -482,7 +482,7 @@ pub struct Datastore {
 	/// `Some` iff live-query subscribers exist for this datastore (the broker owns the sender
 	/// half of the notification channel internally). `None` disables live-query work entirely
 	/// at the executor boundary.
-	live_query_broker: Option<Arc<dyn MessageBroker>>,
+	live_query_broker: Option<Arc<OrderedBroker>>,
 	/// Host-provided source `SHOW CHANGES` reads from instead of the change-feed keyspace.
 	changefeed_source: Option<Arc<dyn ChangeFeedSource>>,
 	/// Per-node live-query router state (the tail cursor over the `lqe`
@@ -1479,7 +1479,7 @@ impl Datastore {
 	}
 
 	/// Returns the broker used to flush live-query notifications after commit.
-	pub(crate) fn live_query_broker(&self) -> Option<Arc<dyn MessageBroker>> {
+	pub(crate) fn live_query_broker(&self) -> Option<Arc<OrderedBroker>> {
 		self.live_query_broker.clone()
 	}
 

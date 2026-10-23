@@ -1,11 +1,16 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{MessageBroker, RoutedNotification, Session};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_types::{Action, Kind, RecordId, ToSql, Value, vars};
+use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_types::{Action, Kind, Notification, RecordId, ToSql, Value, vars};
 
-use crate::helpers::{new_ds, skip_ok};
+use crate::helpers::{new_ds, new_ns_db, skip_ok};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -1202,6 +1207,75 @@ async fn live_diff_notifications_carry_value_diff_operations() -> Result<()> {
 		)
 		.unwrap()
 	);
+	Ok(())
+}
+
+/// A broker that holds the delivery of the first notification it is handed until its gate opens,
+/// and records every delivery in the order it completes.
+#[derive(Debug)]
+struct GatedBroker {
+	gate: tokio::sync::Semaphore,
+	held: std::sync::atomic::AtomicBool,
+	delivered: async_channel::Sender<Notification>,
+}
+
+impl MessageBroker for GatedBroker {
+	fn should_emit(&self, node_id: [u8; 16], target_node: [u8; 16]) -> Result<bool> {
+		Ok(node_id == target_node)
+	}
+
+	fn send(&self, item: RoutedNotification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		Box::pin(async move {
+			if !self.held.swap(true, std::sync::atomic::Ordering::SeqCst) {
+				let _ = self.gate.acquire().await;
+			}
+			let _ = self.delivered.send(item.into_notification()).await;
+		})
+	}
+}
+
+/// The notifications of one writer's commits reach the broker in the order of those commits, even
+/// when the broker has not finished delivering an earlier one by the time a later commit is made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_writers_notifications_reach_the_broker_in_commit_order() -> Result<()> {
+	const WRITES: i64 = 5;
+	let (delivered, received) = async_channel::unbounded();
+	let broker = Arc::new(GatedBroker {
+		gate: tokio::sync::Semaphore::new(0),
+		held: Default::default(),
+		delivered,
+	});
+	let (notify, _) = surrealdb_core::channel::bounded(1);
+	let dbs = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_capabilities(Capabilities::all())
+		.with_notify(notify)
+		.with_live_query_broker(Arc::clone(&broker) as Arc<dyn MessageBroker>)
+		.build_with_path("memory")
+		.await?;
+	new_ns_db(&dbs, "test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let res = dbs.execute("DEFINE TABLE counter; LIVE SELECT * FROM counter;", &ses, None).await?;
+	assert!(res.into_iter().all(|r| r.result.is_ok()));
+	for n in 1..=WRITES {
+		let res = dbs.execute("UPSERT counter:1 SET n = $n;", &ses, Some(vars! { "n": n })).await?;
+		assert!(res.into_iter().all(|r| r.result.is_ok()));
+	}
+	// Every later commit has been made while the first notification is still held.
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	broker.gate.add_permits(1);
+	let mut seen = Vec::new();
+	while seen.len() < WRITES as usize {
+		let n = tokio::time::timeout(Duration::from_secs(5), received.recv()).await??;
+		let Value::Object(object) = n.result else {
+			panic!("a notification without a record: {n:?}");
+		};
+		let Some(Value::Number(value)) = object.get("n") else {
+			panic!("a record without a value: {object:?}");
+		};
+		seen.push(value.to_int().expect("an integer value"));
+	}
+	assert_eq!(seen, (1..=WRITES).collect::<Vec<_>>());
 	Ok(())
 }
 

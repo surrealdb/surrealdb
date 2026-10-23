@@ -472,7 +472,9 @@ impl TestDb {
 		let txn = Arc::new(self.ds.transaction(mode).await.expect("transaction"));
 		let mut ctx = self.ds.setup_ctx().expect("context from datastore");
 		if broker {
-			ctx.set_broker(self.ds.live_query_broker());
+			ctx.set_broker(
+				self.ds.live_query_broker().map(|b| b as Arc<dyn crate::dbs::MessageBroker>),
+			);
 		}
 		if scheduler.is_some() {
 			ctx.set_scheduler(scheduler);

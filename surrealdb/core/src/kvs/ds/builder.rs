@@ -20,7 +20,7 @@ use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::config::RuntimeConfig;
-use crate::dbs::{Capabilities, MessageBroker};
+use crate::dbs::{Capabilities, MessageBroker, OrderedBroker};
 use crate::exec::function::FunctionRegistry;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
@@ -629,7 +629,7 @@ impl Builder {
 			dynamic_configuration,
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			live_query_broker: self.live_query_broker,
+			live_query_broker: self.live_query_broker.map(OrderedBroker::new),
 			changefeed_source: self.changefeed_source,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: None,

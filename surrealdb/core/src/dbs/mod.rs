@@ -27,7 +27,7 @@ pub use self::broker::{
 	BrokerRoutingContext, LocalMessageBroker, MessageBroker, NodeEndpointResolver,
 	RoutedNotification,
 };
-pub(crate) use self::broker::{DefaultBroker, SendKill};
+pub(crate) use self::broker::{DefaultBroker, OrderedBroker, SendKill};
 pub(crate) use self::capabilities::Capabilities;
 pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;

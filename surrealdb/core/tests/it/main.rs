@@ -22,6 +22,7 @@ mod asyncevent;
 mod auth_limit;
 mod cache;
 mod changefeeds;
+mod concurrency;
 mod create;
 mod define;
 mod delete;

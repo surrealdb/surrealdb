@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::pin::Pin;
@@ -5,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
+use parking_lot::RwLock;
 use surrealdb_datastore::close::CommitAction;
 use surrealdb_types::Notification;
 
@@ -124,6 +126,92 @@ impl MessageBroker for LocalMessageBroker {
 	}
 }
 
+/// The datastore's live-query broker, fed through a queue per node it delivers
+/// to, each drained in order.
+///
+/// A commit queues its notifications here once it has applied and before its
+/// statement answers, so the notifications of one client's commits are queued
+/// in the order of those commits. A subscription is owned by one node, so its
+/// notifications all take that node's queue, and one task per queue hands them
+/// to the broker one at a time, awaiting each delivery before starting the
+/// next: a delivery the broker holds up holds up the ones queued for that node
+/// after it, instead of being overtaken by them, and holds up nothing queued
+/// for any other node. A queue's task is started by the first notification
+/// queued for its node, and ends once this handle is dropped and everything
+/// queued before then is delivered.
+#[derive(Debug)]
+pub(crate) struct OrderedBroker {
+	broker: Arc<dyn MessageBroker>,
+	/// Each node's queue, once a notification for that node has started it. A
+	/// task dropped with the runtime it ran on leaves its queue closed, and the
+	/// next notification for that node starts another on the runtime queueing
+	/// it.
+	queues: RwLock<HashMap<[u8; 16], Sender<RoutedNotification>>>,
+}
+
+impl OrderedBroker {
+	pub(crate) fn new(broker: Arc<dyn MessageBroker>) -> Arc<Self> {
+		Arc::new(Self {
+			broker,
+			queues: RwLock::new(HashMap::new()),
+		})
+	}
+
+	/// Queue `item` behind everything queued before it for the same node. Never
+	/// waits: the queues are unbounded, and hold what the broker has yet to
+	/// take.
+	pub(crate) fn enqueue(&self, item: RoutedNotification) {
+		let node = item.target_node_bytes();
+		let Some(item) = Self::try_enqueue(&self.queues.read(), node, item) else {
+			return;
+		};
+		let mut queues = self.queues.write();
+		// Another caller may have started the queue since the read.
+		let Some(item) = Self::try_enqueue(&queues, node, item) else {
+			return;
+		};
+		let (sender, receiver) = async_channel::unbounded();
+		let broker = Arc::clone(&self.broker);
+		common::rt::spawn_detached(async move {
+			while let Ok(item) = receiver.recv().await {
+				broker.send(item).await;
+			}
+		});
+		// The receiver is held by the task just started, so the queue is open.
+		let _ = sender.try_send(item);
+		queues.insert(node, sender);
+	}
+
+	/// Queue `item` on `node`'s open queue, or hand it back when there is none.
+	fn try_enqueue(
+		queues: &HashMap<[u8; 16], Sender<RoutedNotification>>,
+		node: [u8; 16],
+		item: RoutedNotification,
+	) -> Option<RoutedNotification> {
+		match queues.get(&node) {
+			Some(queue) => queue.try_send(item).err().map(|closed| closed.into_inner()),
+			None => Some(item),
+		}
+	}
+}
+
+impl MessageBroker for OrderedBroker {
+	fn should_emit(&self, node_id: [u8; 16], target_node: [u8; 16]) -> Result<bool> {
+		self.broker.should_emit(node_id, target_node)
+	}
+
+	/// Queues `item` when called, so it is ordered by the call rather than by
+	/// when the returned future is first polled.
+	fn send(&self, item: RoutedNotification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		self.enqueue(item);
+		Box::pin(std::future::ready(()))
+	}
+
+	fn attach_routing_context(&self, ctx: BrokerRoutingContext) {
+		self.broker.attach_routing_context(ctx);
+	}
+}
+
 /// Tell a live subscriber its subscription is gone, once the removal has
 /// committed.
 ///
@@ -186,5 +274,70 @@ impl MessageBroker for DefaultBroker {
 			// as it means that the channel was closed.
 			let _ = self.sender.send(item).await;
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use surrealdb_types::{Action, Value};
+
+	use super::*;
+
+	/// Holds every delivery to `held` until its gate opens, and records each
+	/// delivery as it completes.
+	#[derive(Debug)]
+	struct HoldingBroker {
+		held: [u8; 16],
+		gate: tokio::sync::Semaphore,
+		delivered: Sender<Notification>,
+	}
+
+	impl MessageBroker for HoldingBroker {
+		fn should_emit(&self, _: [u8; 16], _: [u8; 16]) -> Result<bool> {
+			Ok(true)
+		}
+
+		fn send(&self, item: RoutedNotification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+			Box::pin(async move {
+				if item.target_node_bytes() == self.held {
+					let _ = self.gate.acquire().await.map(|permit| permit.forget());
+				}
+				let _ = self.delivered.send(item.into_notification()).await;
+			})
+		}
+	}
+
+	fn routed(node: [u8; 16], n: i64) -> RoutedNotification {
+		let id = uuid::Uuid::from_bytes(node);
+		RoutedNotification::new(
+			id,
+			Notification::new(id.into(), None, Action::Update, Value::None, Value::from_t(n)),
+		)
+	}
+
+	/// A node's notifications are delivered in the order they were queued, and
+	/// a delivery held up for one node holds up nothing queued for another.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn a_held_node_holds_up_only_its_own_queue() {
+		let (a, b) = ([1; 16], [2; 16]);
+		let (delivered, received) = async_channel::unbounded();
+		let inner = Arc::new(HoldingBroker {
+			held: a,
+			gate: tokio::sync::Semaphore::new(0),
+			delivered,
+		});
+		let ordered = OrderedBroker::new(Arc::clone(&inner) as Arc<dyn MessageBroker>);
+		ordered.enqueue(routed(a, 1));
+		ordered.enqueue(routed(b, 2));
+		ordered.enqueue(routed(a, 3));
+		let next = || async {
+			tokio::time::timeout(Duration::from_secs(5), received.recv()).await.unwrap().unwrap()
+		};
+		assert_eq!(next().await.result, Value::from_t(2i64), "the other node is not held up");
+		inner.gate.add_permits(2);
+		assert_eq!(next().await.result, Value::from_t(1i64));
+		assert_eq!(next().await.result, Value::from_t(3i64));
 	}
 }

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use async_channel::{Receiver, Sender};
+use async_channel::{Receiver, Sender, TrySendError};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_datastore::Transaction;
@@ -196,24 +196,35 @@ async fn deliver(kvs: &Arc<Datastore>, sessions: &SessionRegistry, notification:
 		}
 	};
 
+	// Handed over here, in the one task that delivers every notification in the
+	// order the datastore queued it, so a subscriber receives its notifications
+	// in that order, and never waited on: the SDK's subscriber channels are
+	// unbounded. A subscriber that has gone away, or whose bounded channel is
+	// full because it has stopped reading, loses its subscription, as a
+	// WebSocket that stops reading loses its connection.
+	match sender.try_send(Ok(notification)) {
+		Ok(()) => return,
+		// The subscription is what has already gone, so there is nothing
+		// left to end.
+		Err(_) if ended => return,
+		Err(TrySendError::Full(_)) => {
+			warn!("Ending live query '{live_query_id}': its subscriber has stopped reading");
+		}
+		Err(TrySendError::Closed(_)) => {}
+	}
+	// Dropped here, so the notifications that follow find no subscription
+	// rather than each ending it again.
+	state.live_queries.remove(&live_query_id);
 	let kvs = Arc::clone(kvs);
-	// Delivery is spawned so one blocked subscriber cannot hold up the rest.
-	//
 	// The session is read inside the task, and only where it is needed: an auth
 	// operation holds this session's write lock for as long as it runs -- across
 	// a remote JWKS fetch, for a JWT access method -- and reading it out here
 	// would stall delivery to every *other* session behind that one.
 	spawn(async move {
-		// A subscriber that has gone away takes its subscription with it --
-		// unless the subscription is what has already gone, in which case the
-		// registration is dropped above and there is nothing left to kill.
-		if sender.send(Ok(notification)).await.is_err() && !ended {
-			state.live_queries.remove(&live_query_id);
-			let vars = state.vars.read().await.clone();
-			let session = state.session.read().await.clone();
-			if let Err(error) = kill_live_query(&kvs, live_query_id, &session, vars).await {
-				warn!("Failed to kill live query '{live_query_id}'; {error}");
-			}
+		let vars = state.vars.read().await.clone();
+		let session = state.session.read().await.clone();
+		if let Err(error) = kill_live_query(&kvs, live_query_id, &session, vars).await {
+			warn!("Failed to kill live query '{live_query_id}'; {error}");
 		}
 	});
 }
@@ -419,6 +430,85 @@ mod tests {
 		assert!(
 			matches!(state.live_queries.get(&live), Some(Some(_))),
 			"the subscription is still running and still the session's"
+		);
+	}
+
+	/// A subscriber receives its notifications in the order they are delivered.
+	///
+	/// The pump delivers each notification the moment it reads it, one after
+	/// another from a backlog. On a runtime with several workers, a
+	/// notification handed to a task of its own may run before one handed over
+	/// earlier, so the order has to be kept by the handover itself.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 4))]
+	async fn a_subscriber_receives_its_notifications_in_delivery_order() {
+		const DELIVERIES: i64 = 2_000;
+		let kvs = Datastore::new("memory").await.unwrap();
+		let sessions = registry();
+		let session = Uuid::now_v7();
+		sessions.apply(SessionId::Initial(session)).await;
+		let state = sessions.resolve(session).await.unwrap();
+
+		let live = Uuid::now_v7();
+		let (sender, subscriber) = async_channel::unbounded();
+		state.live_queries.insert(live, Some(sender));
+
+		for n in 0..DELIVERIES {
+			deliver(
+				&kvs,
+				&sessions,
+				Notification::new(
+					live.into(),
+					Some(session.into()),
+					Action::Update,
+					Value::None,
+					Value::from_t(n),
+				),
+			)
+			.await;
+		}
+
+		let mut received = Vec::with_capacity(DELIVERIES as usize);
+		for _ in 0..DELIVERIES {
+			let notification = subscriber.recv().await.unwrap().unwrap();
+			received.push(notification.result);
+		}
+		assert_eq!(received, (0..DELIVERIES).map(Value::from_t).collect::<Vec<_>>());
+	}
+
+	/// A subscriber whose bounded channel is full has stopped reading, and
+	/// loses its subscription rather than having notifications held for it.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	async fn a_subscriber_that_stops_reading_loses_its_subscription() {
+		let kvs = Datastore::new("memory").await.unwrap();
+		let sessions = registry();
+		let session = Uuid::now_v7();
+		sessions.apply(SessionId::Initial(session)).await;
+		let state = sessions.resolve(session).await.unwrap();
+
+		let live = Uuid::now_v7();
+		let (sender, _subscriber) = async_channel::bounded(1);
+		state.live_queries.insert(live, Some(sender));
+
+		for n in 0..3i64 {
+			deliver(
+				&kvs,
+				&sessions,
+				Notification::new(
+					live.into(),
+					Some(session.into()),
+					Action::Update,
+					Value::None,
+					Value::from_t(n),
+				),
+			)
+			.await;
+		}
+
+		assert!(
+			state.live_queries.get(&live).is_none(),
+			"a subscriber that stopped reading kept its subscription"
 		);
 	}
 }
