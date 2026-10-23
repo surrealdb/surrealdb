@@ -24,6 +24,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_util::sync::CancellationToken;
 
 #[macro_use]
@@ -67,6 +68,26 @@ fn next_backend_key() -> (i32, i32) {
 /// accepted, told the server is full, and closed.
 const MAX_CONNECTIONS: usize = 1024;
 
+/// The ALPN protocol name PostgreSQL clients offer (libpq 17 and later offer it
+/// on every TLS connection, including one negotiated by `SSLRequest`).
+const ALPN_POSTGRESQL: &[u8] = b"postgresql";
+
+/// Build the TLS acceptor for the Postgres listener from the server
+/// certificate configuration.
+///
+/// The ALPN list is set explicitly to `postgresql` rather than inherited from
+/// the HTTP server's defaults. A TLS server that advertises ALPN protocols
+/// aborts the handshake with `no_application_protocol` when the client offers
+/// a list sharing none of them, so a client that offers `postgresql` (libpq 17
+/// and later) completes, while a client that offers only other protocols (for
+/// example `h2` or `http/1.1`) is refused. A client that offers no ALPN list
+/// is unaffected.
+fn postgres_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
+	let mut server = ServerConfig::clone(&config.get_inner());
+	server.alpn_protocols = vec![ALPN_POSTGRESQL.to_vec()];
+	TlsAcceptor::from(Arc::new(server))
+}
+
 /// Bind the Postgres wire protocol listener and spawn its accept loop.
 ///
 /// Binding happens before returning so startup fails loudly when the address
@@ -86,7 +107,7 @@ pub async fn start(
 			let config = RustlsConfig::from_pem_file(&crt, &key)
 				.await
 				.with_context(|| "Failed to load the postgres TLS certificate and key")?;
-			Some(Arc::new(TlsAcceptor::from(config.get_inner())))
+			Some(Arc::new(postgres_tls_acceptor(&config)))
 		}
 		_ => {
 			warn!(

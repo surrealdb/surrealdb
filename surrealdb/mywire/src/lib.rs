@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig;
 use tokio_util::sync::CancellationToken;
 
 pub mod auth;
@@ -36,6 +37,20 @@ pub use query::translate_query;
 
 pub const LOG: &str = "surrealdb::mywire";
 const MAX_CONNECTIONS: usize = 1024;
+
+/// Build the TLS acceptor for the MySQL listener from the server certificate
+/// configuration.
+///
+/// MySQL has no ALPN protocol, so the listener advertises none rather than
+/// inheriting the HTTP server's defaults. A TLS server that advertises ALPN
+/// protocols aborts the handshake with `no_application_protocol` when the
+/// client offers a list sharing none of them; with an empty list the client's
+/// ALPN offer is ignored and the handshake completes with no protocol selected.
+fn mysql_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
+	let mut server = ServerConfig::clone(&config.get_inner());
+	server.alpn_protocols.clear();
+	TlsAcceptor::from(Arc::new(server))
+}
 
 /// Bind the MySQL wire protocol listener and spawn its accept loop.
 ///
@@ -67,7 +82,7 @@ pub async fn start_with_max_connections(
 			let config = RustlsConfig::from_pem_file(&crt, &key)
 				.await
 				.with_context(|| "Failed to load the MySQL TLS certificate and key")?;
-			Some(Arc::new(TlsAcceptor::from(config.get_inner())))
+			Some(Arc::new(mysql_tls_acceptor(&config)))
 		}
 		_ => {
 			warn!(

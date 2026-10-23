@@ -16,7 +16,10 @@ use surrealdb_mywire::msg::SslRequest;
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::crypto::aws_lc_rs;
+use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_util::sync::CancellationToken;
 
 /// Installs the process-wide rustls provider, as the server does at startup. A test
@@ -428,6 +431,59 @@ async fn test_server_advertises_ssl_when_configured() {
 		"Expected OK packet, got error: {:?}",
 		String::from_utf8_lossy(&ok)
 	);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_tls_handshake_completes_for_a_client_offering_an_alpn_protocol() {
+	install_crypto_provider();
+	let ds = setup_datastore_with_root().await;
+	let ready = Arc::new(AtomicBool::new(true));
+	let shutdown = CancellationToken::new();
+
+	let CertifiedKey {
+		cert,
+		signing_key,
+	} = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+	let crt_file = NamedTempFile::new().expect("Failed to create temp crt file");
+	let key_file = NamedTempFile::new().expect("Failed to create temp key file");
+	fs::write(crt_file.path(), cert.pem()).expect("Failed to write cert pem");
+	fs::write(key_file.path(), signing_key.serialize_pem()).expect("Failed to write key pem");
+
+	let bind_addr: std::net::SocketAddr =
+		"127.0.0.1:0".parse().expect("Failed to parse socket address");
+	let addr = surrealdb_mywire::start(
+		bind_addr,
+		ds,
+		ready,
+		shutdown.clone(),
+		Some(crt_file.path().to_path_buf()),
+		Some(key_file.path().to_path_buf()),
+	)
+	.await
+	.expect("Failed to start mywire server with TLS");
+
+	let mut stream = TcpStream::connect(addr).await.expect("Failed to connect");
+	let (_, hs) = read_packet(&mut stream).await;
+	assert_ne!(extract_capabilities(&hs) & CLIENT_SSL, 0);
+	let ssl_req = SslRequest::new(
+		CLIENT_PROTOCOL_41 | CLIENT_SSL,
+		16 * 1024 * 1024,
+		CHARSET_UTF8MB4_GENERAL_CI as u8,
+	);
+	write_packet(&mut stream, 1, &ssl_req.serialize()).await;
+
+	// MySQL has no ALPN protocol, but a TLS stack may offer a list anyway; the
+	// handshake must complete rather than abort with `no_application_protocol`.
+	let mut roots = RootCertStore::empty();
+	roots.add(cert.der().clone()).expect("Failed to trust the server certificate");
+	let mut config = ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+	config.alpn_protocols = vec![b"mysql".to_vec(), b"h2".to_vec(), b"http/1.1".to_vec()];
+	let name = ServerName::try_from("localhost").unwrap();
+	let tls = TlsConnector::from(Arc::new(config)).connect(name, stream).await;
+	let tls = tls.expect("TLS handshake with an ALPN list must complete");
+	assert_eq!(tls.get_ref().1.alpn_protocol(), None, "the listener selects no ALPN protocol");
 
 	shutdown.cancel();
 }

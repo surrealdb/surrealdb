@@ -2210,6 +2210,7 @@ Flag when changes touch:
 - **Database Selection**:
   - Authentication must complete successfully before database selection (`process_use` / `set_current_db`) runs.
   - Errors from `process_use` must never be swallowed; if a database or namespace does not exist or access is denied, an error is returned to the client.
+- **TLS ALPN**: The wire listeners set their ALPN list explicitly and never inherit the HTTP server's. `pgwire` advertises exactly `postgresql`, so a client offering only other protocols (such as `h2` or `http/1.1`) is refused with `no_application_protocol` instead of being steered into a cross-protocol exchange; a client offering no ALPN list connects. `mywire` advertises no protocol and ignores the client's offer. Certificate verification, protocol versions and cipher suites are those of the shared server certificate configuration.
 - **Connection and Resource Limits**: Each listener enforces maximum connection concurrency via a semaphore (`MAX_CONNECTIONS = 1024`), cleanly rejecting connections when capacity is exceeded.
 - **Named Dialect Selection & Fail-Closed Execution**:
   - `pgwire` defaults to `Dialect::PgSql`. It does not sniff query syntax or fall back to SurrealQL on parse failure.

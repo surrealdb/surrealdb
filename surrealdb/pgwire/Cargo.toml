@@ -40,6 +40,10 @@ axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 [dev-dependencies]
 surrealdb-core = { workspace = true, features = ["kv-mem"] }
 jsonwebtoken = { workspace = true }
+rcgen = "0.14.7"
+tempfile = { workspace = true }
+# The TLS tests install the same process-wide provider the server does.
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs"] }
 
 [lints]
 workspace = true
