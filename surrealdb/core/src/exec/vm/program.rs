@@ -2510,6 +2510,11 @@ pub(crate) enum FieldRefusal {
 		table: String,
 		view: String,
 	},
+	IdComponentsOutOfOrderWithoutNames {
+		table: String,
+		first: String,
+		second: String,
+	},
 	/// The catalog's missing-table error.
 	TbNotFound(crate::val::TableName),
 	/// The catalog's refusal of a view's aggregation.
@@ -2730,6 +2735,15 @@ impl FieldRefusal {
 				table: table.clone(),
 				view: view.clone(),
 			},
+			E::IdComponentsOutOfOrderWithoutNames {
+				table,
+				first,
+				second,
+			} => Self::IdComponentsOutOfOrderWithoutNames {
+				table: table.clone(),
+				first: first.clone(),
+				second: second.clone(),
+			},
 			E::NsEmpty
 			| E::DbEmpty
 			| E::Query {
@@ -2865,6 +2879,9 @@ impl FieldRefusal {
 				..
 			}
 			| E::ViewReadsItself {
+				..
+			}
+			| E::CorruptView {
 				..
 			} => return None,
 		})
@@ -3078,6 +3095,15 @@ impl FieldRefusal {
 			} => E::IdComponentsUnderWildcardView {
 				table,
 				view,
+			},
+			Self::IdComponentsOutOfOrderWithoutNames {
+				table,
+				first,
+				second,
+			} => E::IdComponentsOutOfOrderWithoutNames {
+				table,
+				first,
+				second,
 			},
 		};
 		anyhow::Error::new(error)

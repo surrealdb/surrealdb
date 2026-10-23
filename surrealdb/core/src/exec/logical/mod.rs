@@ -595,9 +595,9 @@ pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
 		ControlFlow::Break(ExecError::InvalidStatement(LET_IN_AN_EXPRESSION.to_owned()))
 	}
 
-	fn in_op(op: &LogicalOp) -> ControlFlow<ExecError> {
+	fn in_op(op: &LogicalOp, session: bool) -> ControlFlow<ExecError> {
 		if let LogicalOp::Let(stmt) = op
-			&& stmt.is_refused()
+			&& stmt.is_refused(session)
 		{
 			return ControlFlow::Break(ExecError::InvalidParam {
 				name: stmt.name.clone(),
@@ -612,7 +612,7 @@ pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
 				if matches!(arm, LogicalOp::Let(_)) {
 					return let_in_an_expression();
 				}
-				in_op(arm)
+				in_op(arm, false)
 			}
 			for (condition, then) in ifs.branches() {
 				in_expr(condition)?;
@@ -631,7 +631,7 @@ pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
 			}
 		});
 		flow?;
-		op.children().iter().try_for_each(in_op)
+		op.children().iter().try_for_each(|child| in_op(child, false))
 	}
 
 	/// `expr` and the statements nested in it.
@@ -640,7 +640,7 @@ pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
 			if matches!(op.as_ref(), LogicalOp::Let(_)) {
 				return let_in_an_expression();
 			}
-			return in_op(op);
+			return in_op(op, false);
 		}
 		if let LogicalExpr::Closure(closure) = expr {
 			return in_expr(&closure.body);
@@ -654,7 +654,7 @@ pub(crate) fn invalid_let(op: &LogicalOp) -> Option<Error> {
 		flow
 	}
 
-	match in_op(op) {
+	match in_op(op, true) {
 		ControlFlow::Break(error) => Some(Error::Exec(error)),
 		ControlFlow::Continue(()) => None,
 	}
