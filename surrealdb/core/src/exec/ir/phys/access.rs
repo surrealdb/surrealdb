@@ -1500,7 +1500,41 @@ struct Planned {
 }
 
 /// The decision for the source `op`: `None` when `op` is not a source.
+///
+/// A source whose rows are the subjects of a write that holds a `KNN` operator is refused unless
+/// its access path is a `KNN` scan, which is the only search a write's operator is answered by
+/// ([`knn::write_refusal`]).
 fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, IrError> {
+	let Some(mut planned) = plan_source_choice(ir, op, cx)? else {
+		return Ok(None);
+	};
+	if planned.choice.refusal.is_none()
+		&& planned.choice.knn.is_none()
+		&& !matches!(planned.choice.access, PhysOp::KnnScan(..))
+		&& let Some(refusal) = knn::write_refusal(ir, op)?
+	{
+		planned.choice = AccessChoice {
+			access: PhysOp::Union,
+			fallback: None,
+			enforce: None,
+			residual: Vec::new(),
+			point_lookup: None,
+			knn: None,
+			refusal: Some(refusal),
+			key_operands: Vec::new(),
+		};
+		planned.point = None;
+		planned.key_operands = Vec::new();
+		planned.offer = Offer::default();
+		planned.exact = Vec::new();
+		planned.knn_vector = None;
+		planned.keyed = None;
+	}
+	Ok(Some(planned))
+}
+
+/// The choice of the source `op`, before a write's `KNN` operator is weighed.
+fn plan_source_choice(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, IrError> {
 	let data = ir.op(op).ok_or(IrError::Stale("source to convert"))?;
 	let OpKind::Logical(LogOp::Source(attrs)) = &data.kind else {
 		return Ok(None);

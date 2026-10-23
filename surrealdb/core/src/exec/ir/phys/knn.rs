@@ -66,7 +66,7 @@ use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::{LogOp, LoopKind, LoopSink};
+use crate::exec::ir::logical::ops::{LogOp, LoopKind, LoopSink, WriteStageKind};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::planner::util::{
 	BruteForceKnnParams, KnnQueryVector, KnnVectorClass, classify_knn_vector,
@@ -962,6 +962,80 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 	}
 	Ok(())
 }
+
+/// The refusal of a write whose rows the source `source` reads, when the write's condition holds a
+/// `KNN` operator. A write's operator is answered only by an index search over its subjects, so a
+/// write no index search reads is refused rather than judging each row against no search.
+///
+/// The rows reach the write through unions and enforcement, as [`stages_over`] follows them.
+pub(super) fn write_refusal(ir: &Ir, source: OpId) -> Result<Option<Refusal>, IrError> {
+	let Some(mut rows) = ir.op(source).and_then(|data| data.results.first().copied()) else {
+		return Ok(None);
+	};
+	let write = loop {
+		let [only] = ir.uses(rows) else {
+			return Ok(None);
+		};
+		let Some(user) = ir.op(only.user) else {
+			return Ok(None);
+		};
+		match &user.kind {
+			OpKind::Logical(LogOp::UnionAll) | OpKind::Phys(PhysOp::Union) => {
+				rows = match user.results.first() {
+					Some(next) => *next,
+					None => return Ok(None),
+				};
+			}
+			OpKind::Phys(PhysOp::Enforced {
+				..
+			}) if only.operand == 0 => {
+				rows = match user.results.first() {
+					Some(next) => *next,
+					None => return Ok(None),
+				};
+			}
+			OpKind::Logical(LogOp::Loop {
+				kind: LoopKind::Write,
+				..
+			}) if only.operand == 0 => break only.user,
+			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return Ok(None),
+		}
+	};
+	let Some(body) = ir.op(write).and_then(|data| data.regions.first().copied()) else {
+		return Ok(None);
+	};
+	let mut held = Vec::new();
+	for op in ops_in(ir, body) {
+		let Some(data) = ir.op(op) else {
+			continue;
+		};
+		if !matches!(
+			data.kind,
+			OpKind::Logical(LogOp::WriteStage {
+				stage: WriteStageKind::CheckWhereCondition,
+				..
+			})
+		) {
+			continue;
+		}
+		for region in &data.regions {
+			if ir
+				.region(*region)
+				.is_some_and(|found| found.kind == RegionKind::Clause(ClauseRole::WriteCond))
+			{
+				collect_operators(ir, *region, &mut held);
+			}
+		}
+	}
+	Ok((!held.is_empty()).then(|| Refusal::Query {
+		message: WRITE_KNN_NEEDS_INDEX.to_owned(),
+	}))
+}
+
+/// What a write whose condition holds a `KNN` operator that no index search answers is refused
+/// with ([`write_refusal`]).
+const WRITE_KNN_NEEDS_INDEX: &str = "A KNN operator in the WHERE of an UPDATE or DELETE needs a \
+	vector index on the field; define one, or write `UPDATE (SELECT id FROM ... WHERE ...)`.";
 
 /// Whether the query vector of the `KNN` operator `op` is a literal: a search over it is planned
 /// wherever its index may serve the caller, so a read no search reads has none that may.

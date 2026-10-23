@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A KNN operator in the WHERE of an UPDATE, UPSERT or DELETE is answered by the search it names, as in a SELECT: an HNSW search and a brute-force search each reach their nearest records, and the distance the search found is readable in the data clause."
+reason = "A KNN operator in the WHERE of an UPDATE or DELETE is answered by the search it names, as in a SELECT: an HNSW search and a brute-force search each reach their nearest records, and the distance the search found is readable in the data clause."
 
 [[test.results]]
 value = "NONE"
@@ -31,13 +31,13 @@ value = "[NONE]"
 value = "[{ bf: NONE, id: pts:2, near: true }, { bf: true, id: pts:3, near: NONE }]"
 
 [[test.results]]
-value = "[pts:3]"
+error = "Invalid query: A KNN operator is not supported in the WHERE of an UPSERT; use UPDATE, or UPSERT the ids a SELECT returns."
 
 [[test.results]]
 value = "[0f]"
 
 [[test.results]]
-value = "[{ id: pts:2, up: NONE }, { id: pts:3, up: true }]"
+value = "[{ id: pts:2, up: NONE }, { id: pts:3, up: NONE }]"
 
 */
 

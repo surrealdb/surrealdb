@@ -3339,7 +3339,8 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 	let named = cx.take_named_table().or_else(|| written_table(write));
 	// As for a `LET` of a protected name ([`bind_let`]): where the write is planned with its
 	// top-level statement the refusal is the whole statement's, raised before any of it runs.
-	if let Some(refusal) = mixed_targets_search_refusal(write) {
+	if let Some(refusal) = upsert_knn_refusal(write).or_else(|| mixed_targets_search_refusal(write))
+	{
 		if cx.eager() {
 			cx.hoist_refusal(refusal.clone());
 			return raise_refused(cx, refusal);
@@ -3899,6 +3900,23 @@ fn value_target(leaf: &LogicalOp) -> Option<LogicalExpr> {
 ///
 /// A value, or a list of values alone, is written as the same statement naming each would be, and
 /// is not refused.
+/// The refusal of an `UPSERT` whose condition holds a `KNN` operator. An `UPSERT` creates a record
+/// when its condition matches none, which a nearest-neighbour condition has no meaning for.
+fn upsert_knn_refusal(write: &LogicalWrite) -> Option<Refusal> {
+	if !matches!(write.statement, LogicalWriteStatement::Upsert(_)) {
+		return None;
+	}
+	let cond = write.cond.as_ref()?;
+	crate::exec::planner::util::has_knn_operator(cond).then(|| Refusal::Query {
+		message: UPSERT_KNN_REFUSED.to_owned(),
+	})
+}
+
+/// What an `UPSERT` whose condition holds a `KNN` operator is answered with
+/// ([`upsert_knn_refusal`]).
+const UPSERT_KNN_REFUSED: &str = "A KNN operator is not supported in the WHERE of an UPSERT; use \
+	UPDATE, or UPSERT the ids a SELECT returns.";
+
 fn mixed_targets_search_refusal(write: &LogicalWrite) -> Option<Refusal> {
 	let LogicalWriteSource::Rows(rows) = &write.source else {
 		return None;
