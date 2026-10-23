@@ -3,6 +3,8 @@
 reason = "Create a batch of 100,000 records with realistic field data (the mock-target memory-scaling case)"
 run = true
 rebuild = true
+# One iteration, re-import included, outlasts quick mode's cap (`QUICK_MAX_TIME`).
+quick = false
 warmup = "2s"
 sample-size = 10
 measurement-time = "30s"

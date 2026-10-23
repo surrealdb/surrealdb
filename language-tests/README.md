@@ -226,6 +226,10 @@ p-value).
 `--quick` overrides every bench's timing config with much smaller values (250ms
 warmup, 10 samples, 2s measurement, 10s cap) for a fast, low-power local pass: it
 reliably surfaces **large** regressions but is too coarse for few-percent drift.
+A bench whose single iteration, re-import included, outlasts that cap
+(`QUICK_MAX_TIME` in `src/cmd/bench/run.rs`) can never collect the two samples
+statistics need there, so it sets `quick = false` and quick runs skip it by
+name.
 
 `--json <path>` writes a machine-readable report — for each bench its median /
 mean times and, when a baseline was found, the baseline's median, percentage
@@ -280,6 +284,7 @@ cargo make bench -- scans/count --backend surrealkv
 run = true                    # include this file in `bench run`
 rebuild = false               # see below; defaults to false
 rebuild-file-backend = false  # see below; defaults to false
+quick = true                  # include in `bench run --quick`; defaults to true
 warmup = "2s"                 # warmup duration
 sample-size = 50              # number of samples (note: kebab-case keys)
 measurement-time = "20s"      # target total measurement window

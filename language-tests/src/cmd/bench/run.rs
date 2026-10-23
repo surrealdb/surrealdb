@@ -27,6 +27,11 @@ use crate::tests::run::{CaseImports, RunConfig, TestRunId};
 use crate::tests::schema::{BoolOr, TestConfig};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
+/// The measurement cap `--quick` imposes on every bench. A bench whose single
+/// iteration, re-import included, outlasts it can collect only one sample, so
+/// it sets `[bench] quick = false`; revisit those benches if this changes.
+const QUICK_MAX_TIME: Duration = Duration::from_secs(10);
+
 struct BenchRunConfig {
 	/// Key grouping runs whose populated datastore is byte-for-byte
 	/// interchangeable, so the dataset is imported once and reused across them.
@@ -530,6 +535,24 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	if runs.is_empty() {
 		println!("No benchmarks found, exiting");
 		return Ok(());
+	}
+
+	// `--quick` leaves out the benches that opt out of it (`[bench] quick =
+	// false`), naming each so an explicit quick run of one does not read as a
+	// filter that matched nothing. A set they empty still reaches the common
+	// finalization, so a requested `--json` report is written (empty) and load
+	// errors are reported.
+	if cfg.quick {
+		runs.retain(|run| {
+			let keep = run.case.test.config.parsed.bench.quick;
+			if !keep {
+				println!(
+					"Skipping {} (`quick = false`: one iteration outlasts quick mode's {QUICK_MAX_TIME:?} cap)",
+					run.name()
+				);
+			}
+			keep
+		});
 	}
 
 	// Split runs into read-only (groupable) and mutating (`rebuild = true`). Only
@@ -1441,7 +1464,7 @@ async fn run_bench(
 		bench_config.measurement_time.0
 	};
 	let max_time = if quick {
-		Duration::from_secs(10)
+		QUICK_MAX_TIME
 	} else {
 		bench_config.max_time.0
 	};

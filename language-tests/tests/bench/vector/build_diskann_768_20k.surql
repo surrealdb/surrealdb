@@ -7,6 +7,8 @@ reason = "Build a cosine DiskANN index over 20000 768-dim vectors at the DDL def
 run = true
 rebuild = true
 rebuild-file-backend = true
+# One iteration, re-import included, outlasts quick mode's cap (`QUICK_MAX_TIME`).
+quick = false
 warmup = "1s"
 sample-size = 3
 measurement-time = "60s"

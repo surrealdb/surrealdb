@@ -7,6 +7,8 @@ reason = "Delete every one of 100,000 records, returning nothing"
 run = true
 rebuild = true
 rebuild-file-backend = true
+# One iteration, re-import included, outlasts quick mode's cap (`QUICK_MAX_TIME`).
+quick = false
 warmup = "2s"
 sample-size = 10
 measurement-time = "30s"

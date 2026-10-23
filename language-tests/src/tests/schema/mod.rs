@@ -1052,6 +1052,16 @@ pub struct BenchDetails {
 	/// rather than one per sample.
 	#[serde(default)]
 	pub rebuild_file_backend: bool,
+	/// Whether `bench run --quick` includes this bench. Defaults to `true`.
+	///
+	/// Quick mode caps a bench's measurement at `QUICK_MAX_TIME` (in
+	/// `cmd/bench/run.rs`) and needs two samples for statistics, so a bench
+	/// whose single iteration, re-import included, takes longer can only ever
+	/// be reported as skipped there, after paying for a warmup and a sample.
+	/// Set `false` on such a bench so quick runs skip it up front, by name;
+	/// full runs are unaffected.
+	#[serde(default = "t")]
+	pub quick: bool,
 	/// Folds the imported graph adjacency into packed blocks before the warmup,
 	/// so the timed statement reads the folded layout. The datastore is built
 	/// with `graph_fold_threshold = 1`, the bench statement is executed once as
@@ -1134,6 +1144,22 @@ mod request_error_tests {
 		let cfg: TestConfig =
 			toml::from_str("[test.results]\nrequest-error = true\nextra = 1").expect("parses");
 		assert_eq!(cfg.unused_keys(), vec!["test.results.extra".to_owned()]);
+	}
+}
+
+#[cfg(test)]
+mod bench_quick_tests {
+	use super::*;
+
+	#[test]
+	fn a_bench_runs_in_quick_mode_unless_it_opts_out() {
+		// The default is load-bearing: were it `false`, every bench would drop
+		// out of `--quick` and the PR workflow would compare nothing, green.
+		let config = toml::from_str::<TestConfig>("[bench]\nrun = true").expect("parses");
+		assert!(config.bench.quick);
+		let config = toml::from_str::<TestConfig>("[bench]\nquick = false").expect("parses");
+		assert!(!config.bench.quick);
+		assert!(config.unused_keys().is_empty(), "{:?}", config.unused_keys());
 	}
 }
 
