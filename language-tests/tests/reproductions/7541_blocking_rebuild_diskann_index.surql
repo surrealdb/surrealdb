@@ -2,7 +2,7 @@
 [env]
 
 [test]
-reason = "A blocking REBUILD INDEX of a DiskANN I8 index returns once the index is ready, and the rebuilt index answers KNN queries."
+reason = "A blocking REBUILD INDEX of a DiskANN I8 index returns once the index is ready, and the rebuilt index answers KNN queries. Background compaction of the rebuilt index may still be running when the statement returns, so `compacting` is not asserted."
 issue = 7541
 
 [[test.results]]
@@ -15,7 +15,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 128, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ initial: 128, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "[{ d: 0f, id: t:5 }]"
@@ -30,7 +30,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { compacting: false, initial: 128, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ initial: 128, pending: 0, status: 'ready', updated: 0 }"
 
 [[test.results]]
 value = "[{ d: 0f, id: t:5 }]"
@@ -41,12 +41,12 @@ DEFINE INDEX ix ON t FIELDS v DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE I8;
 
 -- A standalone blocking rebuild: commits its definition, then waits for the build.
 REBUILD INDEX ix ON t;
-INFO FOR INDEX ix ON t;
+(INFO FOR INDEX ix ON t).building.{ initial, pending, status, updated };
 SELECT id, vector::distance::knn() AS d FROM t WHERE v <|1,40|> [5, 0, 0, 0] ORDER BY d;
 
 -- Inside a transaction the rebuild still waits for its build before COMMIT.
 BEGIN;
 REBUILD INDEX ix ON t;
 COMMIT;
-INFO FOR INDEX ix ON t;
+(INFO FOR INDEX ix ON t).building.{ initial, pending, status, updated };
 SELECT id, vector::distance::knn() AS d FROM t WHERE v <|1,40|> [5, 0, 0, 0] ORDER BY d;
