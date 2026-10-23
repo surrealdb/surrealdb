@@ -1903,10 +1903,22 @@ impl<'a> IndexAnalyzer<'a> {
 			let mut upper_condition: Option<(BinaryOperator, BoundOperand)> = None;
 
 			for (col_idx, col) in ix_def.cols.iter().enumerate() {
-				// Find a condition that matches this column
-				let matching_cond = conditions
-					.iter()
-					.find(|c| path_matches_column(&c.path, col, self.key.as_deref()));
+				// Prefer an equality condition that pins this column so that an
+				// earlier non-equality conjunct on the same column (such as
+				// `b != 99` or a range bound) does not prematurely terminate
+				// prefix building or shadow usable range bounds. No key is a
+				// whole array (see `match_operator_to_access`), so a comparison
+				// to one cannot pin a column.
+				let equality_cond = conditions.iter().find(|c| {
+					path_matches_column(&c.path, col, self.key.as_deref())
+						&& matches!(c.op, BinaryOperator::Equal | BinaryOperator::ExactEqual)
+						&& !matches!(c.value.as_literal(), Some(Value::Array(_)))
+				});
+
+				if let Some(cond) = equality_cond {
+					prefix_values.push(cond.value.clone());
+					continue;
+				}
 
 				// `path_matches_column` vetoes any column holding `*`, so a
 				// fanning column is reached only through the containment
@@ -1924,150 +1936,128 @@ impl<'a> IndexAnalyzer<'a> {
 				// nothing for this loop to withhold — an index whose
 				// columns all fan out is served exactly when a containment
 				// leaf pins each of them.
-				let containment_cond = if matching_cond.is_none() {
-					conditions.iter().find(|c| {
-						matches!(
-							(&c.op, c.position),
-							(BinaryOperator::Contain, IdiomPosition::Left)
-								| (BinaryOperator::Inside, IdiomPosition::Right)
-						) && self.seeks_containment(idx, col_idx, &c.path)
-					})
-				} else {
-					None
-				};
+				let containment_cond = conditions.iter().find(|c| {
+					matches!(
+						(&c.op, c.position),
+						(BinaryOperator::Contain, IdiomPosition::Left)
+							| (BinaryOperator::Inside, IdiomPosition::Right)
+					) && !matches!(c.value.as_literal(), Some(Value::Array(_)))
+						&& self.seeks_containment(idx, col_idx, &c.path)
+				});
 
 				if let Some(cond) = containment_cond {
 					prefix_values.push(cond.value.clone());
 					continue;
 				}
 
-				match matching_cond {
-					// No key is a whole array (see `match_operator_to_access`),
-					// so a comparison to one ends the prefix.
-					Some(cond) if matches!(cond.value.as_literal(), Some(Value::Array(_))) => break,
-					Some(cond) => {
-						let is_equality =
-							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
-
-						if is_equality {
-							// Equality condition -- add to prefix
-							prefix_values.push(cond.value.clone());
+				// Non-equality (range) -- capture the range condition on this
+				// column and stop. The range narrows the scan beyond the
+				// equality prefix.
+				if let Some(op) = conditions
+					.iter()
+					.filter(|c| {
+						path_matches_column(&c.path, col, self.key.as_deref())
+							&& !matches!(c.value.as_literal(), Some(Value::Array(_)))
+					})
+					.find_map(|c| normalize_range_op(&c.op, c.position))
+				{
+					let cond_is_lower =
+						matches!(op, BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual);
+					// A conjunct bounding the same column from the other side
+					// closes the range, so that the scan stops at the far end
+					// rather than reading every key past it. Of several literal
+					// bounds on one side the tightest is kept, so the scanned
+					// interval does not depend on the order of the conjuncts. A
+					// bound comparing with an array bounds nothing, since no key
+					// is a whole array. Nor does a bound naming a number the index
+					// keys apart from numbers equal to it
+					// ([`number_keyed_as_compared`]), the first conjunct's
+					// included: its key could end the scan before records the
+					// comparison accepts, which no filter recovers. Such a bound
+					// is judged by the residual filter alone, and a column left
+					// with no bound is scanned whole under the prefix.
+					let normalised = spells_normalised_decimal_keys(ix_def.format_version);
+					let mut lower = None;
+					let mut upper = None;
+					for c in conditions
+						.iter()
+						.filter(|c| path_matches_column(&c.path, col, self.key.as_deref()))
+					{
+						let Some(op) = normalize_range_op(&c.op, c.position) else {
+							continue;
+						};
+						if matches!(c.value.as_literal(), Some(Value::Array(_))) {
+							continue;
+						}
+						if matches!(
+							c.value.as_literal(),
+							Some(Value::Number(n)) if !number_keyed_as_compared(n, normalised)
+						) {
+							continue;
+						}
+						let is_lower =
+							matches!(op, BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual);
+						let side = if is_lower {
+							&mut lower
 						} else {
-							// Non-equality (range) -- capture the range condition
-							// on this column and stop. The range narrows the scan
-							// beyond the equality prefix.
-							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
-								let cond_is_lower = matches!(
-									op,
-									BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual
-								);
-								// A conjunct bounding the same column from the other side
-								// closes the range, so that the scan stops at the far end
-								// rather than reading every key past it. Of several literal
-								// bounds on one side the tightest is kept, so the scanned
-								// interval does not depend on the order of the conjuncts. A
-								// bound comparing with an array bounds nothing, since no key
-								// is a whole array. Nor does a bound naming a number the index
-								// keys apart from numbers equal to it
-								// ([`number_keyed_as_compared`]), the first conjunct's
-								// included: its key could end the scan before records the
-								// comparison accepts, which no filter recovers. Such a bound
-								// is judged by the residual filter alone, and a column left
-								// with no bound is scanned whole under the prefix.
-								let normalised =
-									spells_normalised_decimal_keys(ix_def.format_version);
-								let mut lower = None;
-								let mut upper = None;
-								for c in conditions.iter().filter(|c| {
-									path_matches_column(&c.path, col, self.key.as_deref())
-								}) {
-									let Some(op) = normalize_range_op(&c.op, c.position) else {
-										continue;
-									};
-									if matches!(c.value.as_literal(), Some(Value::Array(_))) {
-										continue;
-									}
-									if matches!(
-										c.value.as_literal(),
-										Some(Value::Number(n)) if !number_keyed_as_compared(n, normalised)
-									) {
-										continue;
-									}
-									let is_lower = matches!(
-										op,
-										BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual
-									);
-									let side = if is_lower {
-										&mut lower
-									} else {
-										&mut upper
-									};
-									if side.as_ref().is_none_or(|kept| {
-										bound_is_tighter(is_lower, (&op, &c.value), kept)
-									}) {
-										*side = Some((op, &c.value));
-									}
-								}
-								// Bounds that admit nothing leave the scan to the tightest bound
-								// on the side of the first conjunct, rather than a reversed key
-								// range; the other side is judged by the residual filter. A
-								// column bounded on one side alone is scanned from that bound.
-								let closes = match (&lower, &upper) {
-									(Some((lower_op, lo)), Some((upper_op, up))) => {
-										match (lo.as_literal(), up.as_literal()) {
-											(Some(lo), Some(up)) => {
-												lo < up
-													|| (lo == up
-														&& matches!(
-															lower_op,
-															BinaryOperator::MoreThanEqual
-														) && matches!(
-														upper_op,
-														BinaryOperator::LessThanEqual
-													))
-											}
-											_ => false,
-										}
-									}
-									_ => false,
-								};
-								let (preferred, other) = if closes || cond_is_lower {
-									(&lower, &upper)
-								} else {
-									(&upper, &lower)
-								};
-								range_condition = preferred
-									.as_ref()
-									.or(other.as_ref())
-									.map(|(op, value)| (op.clone(), (*value).clone()));
-								if closes && let Some((op, value)) = upper {
-									upper_condition = Some((op, value.clone()));
-								}
-							} else if matches!(cond.op, BinaryOperator::NotEqual)
-								&& matches!(cond.value.as_literal(), Some(Value::None))
-							{
-								// `field != NONE`. NONE sorts first in BTree key
-								// ordering, so this is equivalent to `field > NONE`
-								// and yields every NULL and concrete value
-								// (matching the filter semantics).
-								//
-								// `field != NULL` is intentionally not handled here.
-								// NONE sorts before NULL, so an exclusive `> NULL`
-								// scan would silently drop NONE rows — and
-								// `NONE != NULL` is true under SurrealQL semantics.
-								// Leaving this branch unmatched lets the filter
-								// pipeline apply the predicate correctly.
-								range_condition =
-									Some((BinaryOperator::MoreThan, cond.value.clone()));
-							}
-							break;
+							&mut upper
+						};
+						if side
+							.as_ref()
+							.is_none_or(|kept| bound_is_tighter(is_lower, (&op, &c.value), kept))
+						{
+							*side = Some((op, &c.value));
 						}
 					}
-					None => {
-						// No condition for this column -- stop looking
-						break;
+					// Bounds that admit nothing leave the scan to the tightest bound
+					// on the side of the first conjunct, rather than a reversed key
+					// range; the other side is judged by the residual filter. A
+					// column bounded on one side alone is scanned from that bound.
+					let closes = match (&lower, &upper) {
+						(Some((lower_op, lo)), Some((upper_op, up))) => {
+							match (lo.as_literal(), up.as_literal()) {
+								(Some(lo), Some(up)) => {
+									lo < up
+										|| (lo == up
+											&& matches!(lower_op, BinaryOperator::MoreThanEqual)
+											&& matches!(upper_op, BinaryOperator::LessThanEqual))
+								}
+								_ => false,
+							}
+						}
+						_ => false,
+					};
+					let (preferred, other) = if closes || cond_is_lower {
+						(&lower, &upper)
+					} else {
+						(&upper, &lower)
+					};
+					range_condition = preferred
+						.as_ref()
+						.or(other.as_ref())
+						.map(|(op, value)| (op.clone(), (*value).clone()));
+					if closes && let Some((op, value)) = upper {
+						upper_condition = Some((op, value.clone()));
 					}
+				} else if let Some(cond) = conditions.iter().find(|c| {
+					path_matches_column(&c.path, col, self.key.as_deref())
+						&& matches!(c.op, BinaryOperator::NotEqual)
+						&& matches!(c.value.as_literal(), Some(Value::None))
+				}) {
+					// `field != NONE`. NONE sorts first in BTree key
+					// ordering, so this is equivalent to `field > NONE`
+					// and yields every NULL and concrete value
+					// (matching the filter semantics).
+					//
+					// `field != NULL` is intentionally not handled here.
+					// NONE sorts before NULL, so an exclusive `> NULL`
+					// scan would silently drop NONE rows — and
+					// `NONE != NULL` is true under SurrealQL semantics.
+					// Leaving this branch unmatched lets the filter
+					// pipeline apply the predicate correctly.
+					range_condition = Some((BinaryOperator::MoreThan, cond.value.clone()));
 				}
+				break;
 			}
 
 			// Create compound candidate if we have at least 2 equality columns,
@@ -3008,19 +2998,26 @@ fn is_range_comparison(op: &BinaryOperator) -> bool {
 	)
 }
 
-/// Whether the index key of every record id `value` holds with an array or
-/// object key compares as the record id does, for a range comparison when
-/// `range`. Such a key encodes its elements in the record-id key format, where
-/// a regex has no encoding at all and a datetime is RFC 3339 text, whose byte
-/// order is not chronological; so a key holding a regex is never an index
-/// operand, and one holding a datetime only for an equality. A key is judged
-/// through everything it holds, the bounds of a range in it included. A record
-/// id nested in an array, set or object is judged as the comparison judges the
-/// container, and a range (`IN a..b`) by its bounds as a range comparison.
+/// Whether `value` has an index key whose byte order agrees with value
+/// comparison, for a range comparison when `range`.
+///
+/// - A regex has no key encoding at all (`storekey::Encode` rejects it) and compares with strings
+///   by pattern matching, so it is never an index operand.
+/// - A geometry encodes raw IEEE 754 `f64` coordinate bytes (`-0.0` and `+0.0` encode to distinct
+///   bytes, and polygon ring closing/terminators differ from `Geometry`'s `PartialEq` and `Ord`),
+///   so its index key does not agree with value equality or ordering.
+/// - A record id with an array or object key encodes its elements in the record-id key format,
+///   where a datetime is RFC 3339 text whose byte order is not chronological, so a key holding a
+///   datetime is only an index operand for an equality.
+///
+/// A value or record-id key is judged through everything it holds, the bounds
+/// of a range in it included. A value nested in an array, set or object is
+/// judged as the comparison judges the container, and a range (`IN a..b`) by
+/// its bounds as a range comparison.
 fn keyed_as_compared(value: &Value, range: bool) -> bool {
 	fn element_keyed(value: &Value, range: bool) -> bool {
 		match value {
-			Value::Regex(_) => false,
+			Value::Regex(_) | Value::Geometry(_) => false,
 			Value::Datetime(_) => !range,
 			Value::Array(items) => items.iter().all(|v| element_keyed(v, range)),
 			Value::Set(items) => items.iter().all(|v| element_keyed(v, range)),
@@ -3037,7 +3034,6 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 			| Value::String(_)
 			| Value::Duration(_)
 			| Value::Uuid(_)
-			| Value::Geometry(_)
 			| Value::Bytes(_)
 			| Value::Table(_)
 			| Value::File(_)
@@ -3056,6 +3052,7 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 		}
 	}
 	match value {
+		Value::Regex(_) | Value::Geometry(_) => false,
 		Value::RecordId(id) => key_keyed(&id.key, range),
 		Value::Array(items) => items.iter().all(|v| keyed_as_compared(v, range)),
 		Value::Set(items) => items.iter().all(|v| keyed_as_compared(v, range)),
@@ -3072,11 +3069,9 @@ fn keyed_as_compared(value: &Value, range: bool) -> bool {
 		| Value::Duration(_)
 		| Value::Datetime(_)
 		| Value::Uuid(_)
-		| Value::Geometry(_)
 		| Value::Bytes(_)
 		| Value::Table(_)
 		| Value::File(_)
-		| Value::Regex(_)
 		| Value::Closure(_) => true,
 	}
 }
@@ -3871,6 +3866,27 @@ mod tests {
 			let cands = a.analyze(Some(&cond), None);
 			assert!(cands.is_empty(), "no index matches column b");
 		}
+
+		#[test]
+		fn regex_and_geometry_literals_decline_btree_index() {
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			for text in [
+				"a = /foo/",
+				"a = (1.0, 2.0)",
+				"a > (1.0, 2.0)",
+				"a IN [/foo/, /bar/]",
+				"a IN [(1.0, 2.0), (3.0, 4.0)]",
+				"a = r't:[(1.0, 2.0)]'",
+			] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				assert_no_candidate(&cands, "ix_a");
+				assert!(
+					a.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward).is_none(),
+					"IN expansion must also decline `{text}`"
+				);
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -4398,6 +4414,47 @@ mod tests {
 			// Compound analysis rejects (no leading column); single-column
 			// analysis also rejects (b is not the first column of the index).
 			assert_no_candidate(&cands, "ix_ab");
+		}
+
+		#[test]
+		fn non_equality_before_equality_or_range_does_not_shadow_compound_access() {
+			let a = scalar_analyzer(vec![idx_current(1, "ix_abc", &["a", "b", "c"])], None);
+
+			// `b != 99` before `b >= 10 AND b < 20` must still capture the closed range on `b`.
+			let cond = parse_cond("a = 1 AND b != 99 AND b >= 10 AND b < 20");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_abc").expect("ix_abc");
+			assert_eq!(
+				c.access,
+				BTreeAccess::Compound {
+					prefix: vec![Value::from(1).into()],
+					range: Some((BinaryOperator::MoreThanEqual, Value::from(10).into())),
+					upper: Some((BinaryOperator::LessThan, Value::from(20).into())),
+				}
+			);
+
+			// `b != 99` or `b > 0` before `b = 5` must still extend the equality prefix through `b` and `c`.
+			for text in [
+				"a != 99 AND a = 1 AND b != 99 AND b = 5 AND c = 3",
+				"a = 1 AND b > 0 AND b = 5 AND c = 3",
+			] {
+				let cond = parse_cond(text);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_abc").expect("ix_abc");
+				assert_eq!(
+					c.access,
+					BTreeAccess::Compound {
+						prefix: vec![
+							Value::from(1).into(),
+							Value::from(5).into(),
+							Value::from(3).into(),
+						],
+						range: None,
+						upper: None,
+					},
+					"{text}"
+				);
+			}
 		}
 	}
 
