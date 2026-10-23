@@ -666,6 +666,14 @@ pub fn bind_expr(
 						branches: vec![(bound_cond, BoundExpr::Literal(BoundLiteral::Integer(1)))],
 						else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
 					}]
+				} else if args.len() == 1
+					&& matches!(fn_name.as_str(), "array_agg" | "json_agg" | "jsonb_agg")
+				{
+					// These keep the NULLs the rewrite below would leave for every filtered row.
+					return Err(PlanError::UnsupportedExpression(format!(
+						"FILTER (WHERE ...) on {}",
+						fn_name.to_uppercase()
+					)));
 				} else if args.len() == 1 {
 					let bound_arg = bind_expr(&args[0], scope, catalog, policy)?;
 					// AGG(arg) FILTER (WHERE cond) -> agg(CASE WHEN cond THEN arg ELSE NULL END)

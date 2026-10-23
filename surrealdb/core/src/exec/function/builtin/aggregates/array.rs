@@ -47,13 +47,15 @@ impl AggregateFunction for ArrayGroup {
 ///
 /// The fold that answers "every value this group saw", as distinct from
 /// `array::group`'s "the distinct values, flattened". One accumulator cannot
-/// honour both contracts, so they are separate functions, and two callers
+/// honour both contracts, so they are separate functions, and three callers
 /// depend on this one:
 ///
 /// - the SurrealQL planner substitutes it for a projected expression that carries no aggregate of
 ///   its own but does read the row, so that `SELECT name, count() ... GROUP BY type` reports one
 ///   element per row;
-/// - the GQL lowering targets it for `collect`/`collect_list`, which owe one entry per matched row.
+/// - the GQL lowering targets it for `collect`/`collect_list`, which owe one entry per matched row;
+/// - the SQL front ends target it for `array_agg`, `json_agg` and `jsonb_agg`, which keep the NULLs
+///   they are given.
 ///
 /// The name is not in the parser's builtin path table, so SurrealQL text
 /// cannot call it. It names the fold in plan output and is the target of the
@@ -161,7 +163,8 @@ impl Accumulator for ArrayGroupAccumulator {
 // ArrayJoin
 // ============================================================================
 
-/// array::join - collects values and joins them with a separator
+/// array::join - collects the group's values other than `NONE` and `NULL` and joins them with a
+/// separator
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArrayJoin;
 
@@ -213,8 +216,12 @@ impl Accumulator for ArrayJoinAccumulator {
 		Ok(())
 	}
 
+	/// `NONE` and `NULL` have no text to join and are skipped, so a column with missing values
+	/// joins the ones it has.
 	fn update(&mut self, value: Value) -> Result<()> {
-		self.values.push(value);
+		if !matches!(value, Value::None | Value::Null) {
+			self.values.push(value);
+		}
 		Ok(())
 	}
 

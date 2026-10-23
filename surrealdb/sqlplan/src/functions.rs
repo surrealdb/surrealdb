@@ -127,7 +127,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		min_args: 1,
 		max_args: None,
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
-		internal_name: None,
+		internal_name: Some("array::join"),
 		pgsql: false,
 		mysql: true,
 	},
@@ -137,7 +137,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		min_args: 2,
 		max_args: Some(2),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
-		internal_name: None,
+		internal_name: Some("array::join"),
 		pgsql: true,
 		mysql: false,
 	},
@@ -147,7 +147,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		min_args: 1,
 		max_args: Some(1),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Array),
-		internal_name: None,
+		internal_name: Some("array::collect"),
 		pgsql: true,
 		mysql: false,
 	},
@@ -157,7 +157,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		min_args: 1,
 		max_args: Some(1),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Json),
-		internal_name: None,
+		internal_name: Some("array::collect"),
 		pgsql: true,
 		mysql: false,
 	},
@@ -167,7 +167,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		min_args: 1,
 		max_args: Some(1),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Json),
-		internal_name: None,
+		internal_name: Some("array::collect"),
 		pgsql: true,
 		mysql: false,
 	},
@@ -1495,6 +1495,14 @@ impl FunctionRegistry {
 	/// Check whether a function is registered as an aggregate for the dialect.
 	pub fn is_aggregate(name: &str, dialect: SqlDialect) -> bool {
 		Self::lookup(name, dialect).map(|d| d.is_aggregate()).unwrap_or(false)
+	}
+
+	/// Check whether `name` is an aggregate of either dialect. A bound call has already been
+	/// resolved under its own dialect, so a name that is an aggregate of the other one only
+	/// is never reached.
+	pub fn is_bound_aggregate(name: &str) -> bool {
+		Self::is_aggregate(name, SqlDialect::Postgres)
+			|| Self::is_aggregate(name, SqlDialect::MySql)
 	}
 
 	/// Check whether a function is registered as a window function for the dialect.

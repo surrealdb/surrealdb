@@ -204,6 +204,12 @@ pub fn lower_bound_expr(
 						// MIN(DISTINCT x) is identical to MIN(x)
 						// MAX(DISTINCT x) is identical to MAX(x)
 					}
+					"string_agg" | "group_concat" | "array_agg" | "json_agg" | "jsonb_agg" => {
+						return Err(PlanError::UnsupportedExpression(format!(
+							"{}(DISTINCT ...)",
+							name.to_uppercase()
+						)));
+					}
 					_ => {}
 				}
 			}
@@ -515,6 +521,11 @@ pub fn lower_bound_expr(
 			}
 
 			let mapped_fn = func_def.internal_name.unwrap_or(func_def.name);
+			if func_def.name == "group_concat" && args.len() > 1 {
+				return Err(PlanError::UnsupportedExpression(
+					"GROUP_CONCAT over several expressions".into(),
+				));
+			}
 			let lower_args = if mapped_fn == "count"
 				&& (args.is_empty()
 					|| (args.len() == 1
@@ -532,35 +543,71 @@ pub fn lower_bound_expr(
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};
-			// The engine folds no value to 0 (and 0/0 to NaN) and no value to NONE for MIN and MAX;
-			// SQL answers NULL when the group holds no value at all.
-			let counted = (matches!(mapped_fn, "math::sum" | "math::mean")
-				&& lower_args.len() == 1)
-				.then(|| lower_args[0].clone());
+			// The value that decides whether the group holds any, as written.
+			let counted = (matches!(mapped_fn, "math::sum" | "math::mean" | "array::join")
+				&& !lower_args.is_empty())
+			.then(|| lower_args[0].clone());
+			let lower_args = if mapped_fn == "array::join" && !lower_args.is_empty() {
+				// The value joins as text, so that a float or a decimal carries no SurrealQL
+				// suffix and NULL stays NULL, which the join skips. A NULL separator is none, and
+				// `GROUP_CONCAT(x)` joins on a comma.
+				let mut given = lower_args.into_iter();
+				let value = given.next().into_iter().map(|value| LogicalExpr::Optional {
+					base: Box::new(value),
+					then: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("type::string".to_string()),
+						args: vec![LogicalExpr::Current],
+					}))),
+				});
+				let separator = match given.next() {
+					Some(separator) => LogicalExpr::Binary {
+						left: Box::new(separator),
+						op: BinaryOperator::NullCoalescing,
+						right: Box::new(LogicalExpr::Literal(LogicalLiteral::String(
+							Strand::from(""),
+						))),
+					},
+					None => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(","))),
+				};
+				value.chain(std::iter::once(separator)).collect()
+			} else {
+				lower_args
+			};
 			let call = LogicalExpr::Call(Box::new(LogicalCall {
 				receiver: Function::Normal(mapped_fn.to_string()),
 				args: lower_args,
 			}));
-			if let Some(value) = counted {
-				let values = LogicalExpr::Call(Box::new(LogicalCall {
-					receiver: Function::Normal("count".to_string()),
-					args: vec![LogicalExpr::If(Box::new(LogicalIf {
-						branches: vec![(
-							is_not_null_expr(value),
-							LogicalExpr::Literal(LogicalLiteral::Bool(true)),
-						)],
-						otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
-					}))],
-				}));
+			// The engine folds no value to 0 (and 0/0 to NaN), joins none to the empty string and
+			// no value to NONE for MIN and MAX; SQL answers NULL when the group holds no value at
+			// all, and an array aggregate answers NULL over no row.
+			let empty = match counted {
+				Some(value) => Some(LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("count".to_string()),
+						args: vec![LogicalExpr::If(Box::new(LogicalIf {
+							branches: vec![(
+								is_not_null_expr(value),
+								LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+							)],
+							otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+						}))],
+					}))),
+					op: BinaryOperator::Equal,
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+				}),
+				None if mapped_fn == "array::collect" => Some(LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("count".to_string()),
+						args: Vec::new(),
+					}))),
+					op: BinaryOperator::Equal,
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+				}),
+				None => None,
+			};
+			if let Some(empty) = empty {
 				return Ok(LogicalExpr::If(Box::new(LogicalIf {
-					branches: vec![(
-						LogicalExpr::Binary {
-							left: Box::new(values),
-							op: BinaryOperator::Equal,
-							right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
-						},
-						LogicalExpr::Literal(LogicalLiteral::Null),
-					)],
+					branches: vec![(empty, LogicalExpr::Literal(LogicalLiteral::Null))],
 					otherwise: Some(call),
 				})));
 			}
@@ -1349,7 +1396,7 @@ pub fn bound_expr_contains_aggregate(expr: &BoundExpr) -> bool {
 			args,
 			..
 		} => {
-			matches!(name.as_str(), "count" | "sum" | "avg" | "min" | "max")
+			crate::functions::FunctionRegistry::is_bound_aggregate(name)
 				|| args.iter().any(bound_expr_contains_aggregate)
 		}
 		BoundExpr::Binary {

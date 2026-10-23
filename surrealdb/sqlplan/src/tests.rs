@@ -2287,3 +2287,60 @@ fn test_mysql_builtin_functions() {
 	let op = lower_bound_select(&bound, &policy).unwrap();
 	assert!(matches!(op, LogicalOp::Project(_)));
 }
+
+#[test]
+fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
+	let policy = DialectPolicy::postgres();
+	for sql in [
+		"SELECT array_agg(DISTINCT x) FROM t;",
+		"SELECT json_agg(DISTINCT x) FROM t;",
+		"SELECT string_agg(DISTINCT x, ',') FROM t;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let bound = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None)
+			.expect("bind failed");
+		let refused = lower_bound_select(&bound, &policy);
+		assert!(
+			matches!(refused, Err(crate::error::PlanError::UnsupportedExpression(_))),
+			"{sql}: {refused:?}"
+		);
+	}
+
+	// FILTER would leave a NULL for every filtered row of an aggregate that keeps NULLs.
+	for sql in [
+		"SELECT array_agg(x) FILTER (WHERE y > 1) FROM t;",
+		"SELECT jsonb_agg(x) FILTER (WHERE y > 1) FROM t;",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+		let select = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let refused = binder::pgsql::bind_select(select, &MemoryCatalog::new(), &policy, None);
+		assert!(
+			matches!(refused, Err(crate::error::PlanError::UnsupportedExpression(_))),
+			"{sql}: {refused:?}"
+		);
+	}
+
+	// GROUP_CONCAT(a, b) concatenates the two per row, which is not a separator.
+	let policy = DialectPolicy::mysql();
+	for sql in ["SELECT GROUP_CONCAT(a, b) FROM t;", "SELECT GROUP_CONCAT(DISTINCT a) FROM t;"] {
+		let stmts = surrealdb_mysql::parse_statements(sql).expect("parse failed");
+		let select = match &stmts[0] {
+			surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
+			_ => panic!("expected SELECT"),
+		};
+		let bound = binder::mysql::bind_select(select, &MemoryCatalog::new(), &policy, None)
+			.expect("bind failed");
+		let refused = lower_bound_select(&bound, &policy);
+		assert!(
+			matches!(refused, Err(crate::error::PlanError::UnsupportedExpression(_))),
+			"{sql}: {refused:?}"
+		);
+	}
+}

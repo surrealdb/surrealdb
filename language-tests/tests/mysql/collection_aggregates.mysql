@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_aggregate_nulls.surql", "mysql/_collection_values.surql"]
+
+[test]
+reason = "GROUP_CONCAT joins the non-NULL values of a group with commas, and is NULL over no row"
+
+[[test.results]]
+value = "[{ names: 'ada,bob,cy,dan' }]"
+
+[[test.results]]
+value = "[{ grp: 'x', names: 'ada,bob' }, { grp: 'y', names: 'cy' }, { grp: 'z', names: 'dan' }]"
+
+[[test.results]]
+value = "[{ names: NULL }]"
+
+[[test.results]]
+value = "[{ grp: 'x', aged: 'ada' }, { grp: 'y', aged: 'cy' }, { grp: 'z', aged: NULL }]"
+
+[[test.results]]
+value = "[{ exact: '1.25,2.5,3' }]"
+*/
+
+SELECT GROUP_CONCAT(name) AS names FROM agg_t;
+SELECT grp, GROUP_CONCAT(name) AS names FROM agg_t GROUP BY grp ORDER BY grp;
+SELECT GROUP_CONCAT(name) AS names FROM agg_t WHERE k > 100;
+SELECT grp, GROUP_CONCAT(CASE WHEN age IS NULL THEN NULL ELSE name END) AS aged FROM agg_t GROUP BY grp ORDER BY grp;
+SELECT GROUP_CONCAT(exact) AS exact FROM vals;
