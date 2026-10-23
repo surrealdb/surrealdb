@@ -32,6 +32,8 @@ use self::runner::{
 	Budget, ROUND_L_ITERATIONS, ROUND_P_ITERATIONS, RoundReport, TierFilter, resaturate_needed,
 	saturate,
 };
+use crate::exec::ir::analysis::cx::structural_cx;
+use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::Limit;
@@ -556,9 +558,20 @@ fn prepare_copy(
 	eg: &EGraph<ENode, IrAnalysis>,
 	cand: &Candidate,
 	surgery: &dyn StatementSurgery,
+	effects: &EffectCx<'_>,
 ) -> Result<Prepared, IrError> {
 	let (mut copy, map) = surgery.copy_statement(ir, stmt)?;
 	let mut copy_facts = FactCache::new();
+	let mut all_ops = Vec::new();
+	copy.walk(copy.top(), WalkOrder::PostOrder, &mut |op| {
+		all_ops.push(op);
+		Walk::Continue
+	});
+	let structural = structural_cx(effects.registry, &copy);
+	for op in all_ops {
+		let _ = effects::of_with(&copy, &mut copy_facts, &structural, op);
+		let _ = effects::of_with(&copy, &mut copy_facts, effects, op);
+	}
 	let mut created = HashMap::new();
 	if cand.index != 0 {
 		let built = plan(eg, &cand.term, &map, &copy, &Basis::LOGICAL)
@@ -633,16 +646,23 @@ fn seed_mask(eg: &EGraph<ENode, IrAnalysis>, node: &ENodeSnapshot) -> u8 {
 /// The candidate whose converted copy the physical plan is patched into: the one whose seed
 /// stands at more island roots, and candidate 0 when the roots tie or no root stands on a seed.
 fn winning_candidate(eg: &EGraph<ENode, IrAnalysis>, choice: &PhysChoice) -> u8 {
-	let (mut zero, mut one) = (0usize, 0usize);
-	for root in &choice.term.roots {
-		let Some(node) = choice.term.chosen.get(root) else {
-			continue;
-		};
-		match seed_mask(eg, node) {
-			0b01 => zero += 1,
-			0b10 => one += 1,
-			_ => {}
+	let tally = |classes: &[ClassRef]| {
+		let (mut zero, mut one) = (0usize, 0usize);
+		for class in classes {
+			let Some(node) = choice.term.chosen.get(class) else {
+				continue;
+			};
+			match seed_mask(eg, node) {
+				0b01 => zero += 1,
+				0b10 => one += 1,
+				_ => {}
+			}
 		}
+		(zero, one)
+	};
+	let (mut zero, mut one) = tally(&choice.term.roots);
+	if zero == one {
+		(zero, one) = tally(&choice.term.order);
 	}
 	u8::from(one > zero)
 }
@@ -729,7 +749,7 @@ async fn plan_seeded(
 			map,
 			facts: mut copy_facts,
 			created,
-		} = match prepare_copy(ir, stmt, &imported.eg, cand, cx.surgery) {
+		} = match prepare_copy(ir, stmt, &imported.eg, cand, cx.surgery, &cx.effects) {
 			Ok(prepared) => prepared,
 			Err(_) if cand.index != 0 => continue,
 			Err(_) => {
@@ -926,3 +946,64 @@ async fn plan_seeded(
 		Err(fallback) => outcome(mode, &budget, &imported.eg, stopped_by, false, Some(fallback)),
 	}
 }
+
+#[cfg(test)]
+mod unit_tests {
+	use std::collections::HashMap;
+
+	use egg::EGraph;
+	use smallvec::smallvec;
+
+	use super::analysis::{IrAnalysis, SeedInfo};
+	use super::decl::{ClassRef, LeafId, NodeIdentity, NodeShape, OrderSig};
+	use super::extract::{PhysChoice, Term};
+	use super::lang::{ENode, snapshot_of};
+	use super::winning_candidate;
+	use crate::exec::ir::iface::ids::{FrameId, OpId, SnapshotId, WriteEpoch};
+
+	fn leaf_node(leaf: u32) -> ENode {
+		ENode {
+			id: NodeIdentity {
+				shape: NodeShape::Opaque {
+					leaf: LeafId(leaf),
+				},
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				epoch: WriteEpoch::INITIAL,
+			},
+			kids: smallvec![],
+		}
+	}
+
+	#[test]
+	fn winning_candidate_falls_back_to_term_order_when_roots_tie() {
+		let mut eg: EGraph<ENode, IrAnalysis> = EGraph::new(IrAnalysis::new());
+		let root_node = leaf_node(0);
+		let child_node = leaf_node(1);
+		// Root node is unseeded (e.g. a rule-built wrapper at the island root), while the
+		// child node inside `term.order` comes exclusively from candidate 1's seed copy.
+		eg.analysis.seeds.insert(
+			child_node.clone(),
+			smallvec![SeedInfo {
+				candidate: 1,
+				op: OpId::default(),
+				order: OrderSig::Unordered,
+			}],
+		);
+
+		let root_class = ClassRef(0);
+		let child_class = ClassRef(1);
+		let mut chosen = HashMap::new();
+		chosen.insert(root_class, snapshot_of(&root_node));
+		chosen.insert(child_class, snapshot_of(&child_node));
+		let choice = PhysChoice {
+			term: Term {
+				roots: smallvec![root_class],
+				order: vec![root_class, child_class],
+				chosen,
+			},
+		};
+		assert_eq!(winning_candidate(&eg, &choice), 1);
+	}
+}
+

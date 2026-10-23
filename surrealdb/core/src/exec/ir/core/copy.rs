@@ -25,7 +25,7 @@ use super::location::{LocOrigin, Location};
 use super::op::OpData;
 use super::region::RegionData;
 use super::rewriter::Provenance;
-use super::value::{Use, ValueData, ValueDef};
+use super::value::{TOKEN_SLOT_BASE, Use, ValueData, ValueDef};
 use crate::exec::ir::core::fxhash::{FxHashMap, FxHashSet, map_with_capacity};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
@@ -715,6 +715,18 @@ impl Ir {
 				value.uses.remove(held);
 			}
 		}
+		let Some(tokens) = self.op_tokens.get(op) else {
+			return;
+		};
+		for (slot, operand) in tokens.operands.iter().enumerate() {
+			let Some(value) = self.values.get_mut(*operand) else {
+				continue;
+			};
+			let at = TOKEN_SLOT_BASE + index_u16(slot);
+			if let Some(held) = value.uses.iter().position(|u| u.user == op && u.operand == at) {
+				value.uses.remove(held);
+			}
+		}
 	}
 }
 
@@ -1393,5 +1405,89 @@ impl<'s, 'd> Transplant<'s, 'd> {
 		if let Some(held) = self.dst.blocks.get_mut(block) {
 			held.ops.clear();
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::ir::core::facts::FactCache;
+	use crate::exec::ir::core::ir::IrScope;
+	use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+	use crate::exec::ir::iface::region_kind::StatementCommit;
+	use crate::exec::ir::iface::types::{TokenClass, TypeKnowledge};
+	use crate::val::Value;
+
+	fn spec(kind: OpKind, operands: &[ValueId], results: usize) -> OpSpec {
+		OpSpec {
+			kind,
+			operands: operands.iter().copied().collect(),
+			results: (0..results).map(|_| TypeKnowledge::Unknown).collect(),
+			frame: FrameId::new(0),
+			snapshot: SnapshotId::new(0),
+			loc: Location {
+				stmt: 0,
+				span: None,
+				origin: LocOrigin::Synthesized,
+			},
+		}
+	}
+
+	#[test]
+	fn adopt_statement_drops_token_operand_uses_of_erased_ops() {
+		let mut ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let mut facts = FactCache::new();
+		let (stmt, token_arg, old_op) = {
+			let mut rw = Rewriter::new(&mut ir, &mut facts);
+			let top_block = rw.ir().region(rw.ir().top()).expect("top region").blocks[0];
+			let stmt = rw
+				.create(
+					InsertPoint::End(top_block),
+					spec(
+						OpKind::Logical(LogOp::Stmt {
+							commit: StatementCommit::Auto,
+							control: None,
+						}),
+						&[],
+						0,
+					),
+				)
+				.expect("stmt created");
+			let (_, stmt_block) = rw
+				.create_region(stmt, RegionKind::Statement(StatementCommit::Auto), &[])
+				.expect("stmt region created");
+			let token_arg =
+				rw.add_token_arg(stmt_block, TokenClass::Store).expect("token arg created");
+			let lit = rw
+				.create(
+					InsertPoint::End(stmt_block),
+					spec(OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))), &[], 1),
+				)
+				.expect("lit created");
+			rw.add_token_operand(lit, token_arg).expect("token operand added");
+			let lit_val = rw.ir().op(lit).expect("lit").results[0];
+			let _ = rw
+				.create(
+					InsertPoint::End(stmt_block),
+					spec(OpKind::Logical(LogOp::Yield), &[lit_val], 0),
+				)
+				.expect("yield created");
+			(stmt, token_arg, lit)
+		};
+		assert_eq!(ir.uses(token_arg).len(), 1);
+		assert_eq!(ir.uses(token_arg)[0].user, old_op);
+
+		let (copied, copy_token) = ir.copy_statement(stmt).expect("statement copied");
+		ir.adopt_statement(copied, &copy_token).expect("statement adopted");
+
+		assert!(
+			ir.uses(token_arg).is_empty(),
+			"erasing old ops during adopt_statement must drop their token operand uses"
+		);
 	}
 }

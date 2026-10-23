@@ -9,9 +9,11 @@
 
 use surrealdb_strand::TableName;
 
+use crate::exec::ir::analysis::cx::structural_cx;
+use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::convert::convert_logged;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::egraph::decl::{CostHook, OrderSig, PhysTableFacts};
 use crate::exec::ir::egraph::{SeedFuture, SeedHost};
 use crate::exec::ir::error::IrError;
@@ -105,6 +107,16 @@ impl SeedHost for PhysSeedHost<'_> {
 		facts: &'a mut FactCache,
 	) -> SeedFuture<'a, Vec<(ValueId, ValueId)>> {
 		Box::pin(async move {
+			let mut all_ops = Vec::new();
+			copy.walk(copy.top(), WalkOrder::PostOrder, &mut |op| {
+				all_ops.push(op);
+				Walk::Continue
+			});
+			let structural = structural_cx(self.cx.effects.registry, copy);
+			for op in all_ops {
+				let _ = effects::of_with(copy, facts, &structural, op);
+				let _ = effects::of_with(copy, facts, &self.cx.effects, op);
+			}
 			let (report, log) = convert_logged(
 				copy,
 				facts,
@@ -292,5 +304,58 @@ mod tests {
 		let _ = host.convert_copy(&mut copy, &mut facts).await;
 		assert_eq!(print(&original, original.top(), PrintOpts::default()), before);
 		assert_eq!(print(&copy, copy.top(), PrintOpts::default()), before);
+	}
+
+	#[tokio::test]
+	async fn convert_copy_retires_logical_facts_for_replaced_ops() {
+		use crate::exec::ir::core::location::{LocOrigin, Location};
+		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+		use crate::exec::ir::iface::ids::FrameId;
+		use crate::exec::ir::iface::types::TypeKnowledge;
+		use crate::exec::ir::logical::ops::LogOp;
+		use crate::exec::ir::op_kind::OpKind;
+
+		let parts = Parts::new();
+		let host = PhysSeedHost::new(parts.cx(), &NotYetFolder);
+		let mut copy = empty_ir();
+		let mut facts = FactCache::new();
+		{
+			let mut rw = Rewriter::new(&mut copy, &mut facts);
+			let top_block = rw.ir().region(rw.ir().top()).expect("top region").blocks[0];
+			let _ = rw
+				.create(
+					InsertPoint::End(top_block),
+					OpSpec {
+						kind: OpKind::Logical(LogOp::UnionAll),
+						operands: Default::default(),
+						results: std::iter::once(TypeKnowledge::Unknown).collect(),
+						frame: FrameId::new(0),
+						snapshot: SnapshotId::new(0),
+						loc: Location {
+							stmt: 0,
+							span: None,
+							origin: LocOrigin::Synthesized,
+						},
+					},
+				)
+				.expect("union_all created");
+		}
+		// Start with a fresh FactCache, just as `prepare_copy` does before `convert_copy`.
+		let mut fresh_facts = FactCache::new();
+		let log = host
+			.convert_copy(&mut copy, &mut fresh_facts)
+			.await
+			.expect("union_all converts to phys.union");
+		assert_eq!(log.len(), 1);
+		let top_block = copy.region(copy.top()).expect("top region").blocks[0];
+		let phys_op = copy.block(top_block).expect("top block").ops[0];
+		let structural = structural_cx(parts.cx().effects.registry, &copy);
+		let structural_effects = effects::of_with(&copy, &mut fresh_facts, &structural, phys_op);
+		assert!(
+			!structural_effects.set.mutates_state(),
+			"converted phys.union must inherit pure effects from retired logical.union_all"
+		);
+		let full_effects = effects::of_with(&copy, &mut fresh_facts, &parts.cx().effects, phys_op);
+		assert!(!full_effects.set.mutates_state());
 	}
 }

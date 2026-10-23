@@ -577,13 +577,6 @@ impl<'a> Planner<'a> {
 		});
 		self.order = order;
 		self.yields = yields;
-		for op in self.order.clone() {
-			let class = self.anchors[&op].class;
-			self.by_class.entry(class).or_default().push(op);
-			if self.keeps(&self.anchors[&op]) {
-				self.kept.insert(op);
-			}
-		}
 		for node in self.term.chosen.values() {
 			if let NodeShape::Op {
 				payload,
@@ -594,6 +587,13 @@ impl<'a> Planner<'a> {
 				let regions = entry.kind.region_kinds().len();
 				let operands = node.kids.len().saturating_sub(regions);
 				self.region_classes.extend(node.kids[operands..].iter().copied());
+			}
+		}
+		for op in self.order.clone() {
+			let class = self.anchors[&op].class;
+			self.by_class.entry(class).or_default().push(op);
+			if self.keeps(&self.anchors[&op]) && self.user_alive(op) {
+				self.kept.insert(op);
 			}
 		}
 		Ok(())
@@ -613,7 +613,10 @@ impl<'a> Planner<'a> {
 			return true;
 		}
 		self.homes.iter().any(|(class, homes)| {
-			self.region_classes.contains(class) && homes.iter().any(|home| home.region == region)
+			self.region_classes.contains(class)
+				&& homes.iter().any(|home| {
+					home.region == region && self.term.chosen.get(class) == Some(&home.node)
+				})
 		})
 	}
 
@@ -1402,3 +1405,99 @@ pub(crate) fn write_seeded(
 	super::note_adopted();
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use std::collections::HashMap;
+
+	use egg::EGraph;
+	use smallvec::smallvec;
+
+	use super::{Basis, Planner, RegionHome};
+	use crate::exec::ir::core::ir::{Ir, IrScope};
+	use crate::exec::ir::egraph::analysis::IrAnalysis;
+	use crate::exec::ir::egraph::decl::{
+		BinderId, ClassRef, ENodeSnapshot, LeafId, NodeIdentity, NodeShape, StmtMap,
+	};
+	use crate::exec::ir::egraph::extract::Term;
+	use crate::exec::ir::egraph::lang::ENode;
+	use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, SnapshotId, WriteEpoch};
+	use crate::exec::ir::iface::region_kind::RegionKind;
+
+	fn dummy_snapshot(shape: NodeShape) -> ENodeSnapshot {
+		ENodeSnapshot {
+			identity: NodeIdentity {
+				shape,
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				epoch: WriteEpoch::INITIAL,
+			},
+			kids: smallvec![],
+		}
+	}
+
+	#[test]
+	fn region_survives_requires_chosen_node_to_match_home_node() {
+		let eg: EGraph<ENode, IrAnalysis> = EGraph::new(IrAnalysis::new());
+		let ir = Ir::new(
+			IrScope::Request {
+				fragment: None,
+			},
+			RegionKind::Request,
+		);
+		let map = StmtMap::default();
+		let region_class = ClassRef(0);
+		let home_node = dummy_snapshot(NodeShape::Opaque {
+			leaf: LeafId(0),
+		});
+		let built_region_node = dummy_snapshot(NodeShape::Region {
+			kind_key: 0,
+			binder: BinderId(0),
+			results: 1,
+		});
+		let owner = OpId::default();
+		let region = RegionId::default();
+
+		// When the term chose a newly built Region node for `region_class` instead of `home.node`,
+		// the incumbent `home.region` is not moved and does not survive its replaced owner.
+		let mut chosen = HashMap::new();
+		chosen.insert(region_class, built_region_node);
+		let term = Term {
+			roots: smallvec![region_class],
+			order: vec![region_class],
+			chosen,
+		};
+		let mut planner = Planner::new(&eg, &term, &map, &ir, &Basis::LOGICAL);
+		planner.region_classes.insert(region_class);
+		planner.homes.insert(
+			region_class,
+			smallvec![RegionHome {
+				owner,
+				region,
+				node: home_node.clone(),
+			}],
+		);
+		assert!(!planner.region_survives(region, owner));
+
+		// When the term chose `home.node` for `region_class`, `home.region` is moved and survives.
+		let mut chosen_home = HashMap::new();
+		chosen_home.insert(region_class, home_node);
+		let term_home = Term {
+			roots: smallvec![region_class],
+			order: vec![region_class],
+			chosen: chosen_home,
+		};
+		let mut planner_home = Planner::new(&eg, &term_home, &map, &ir, &Basis::LOGICAL);
+		planner_home.region_classes.insert(region_class);
+		planner_home.homes.insert(
+			region_class,
+			smallvec![RegionHome {
+				owner,
+				region,
+				node: term_home.chosen[&region_class].clone(),
+			}],
+		);
+		assert!(planner_home.region_survives(region, owner));
+	}
+}
+
