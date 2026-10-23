@@ -335,23 +335,25 @@ impl SkipCheckRevisioned for AggregationStat {
 	}
 }
 
-/// Widen an integer difference so that squaring it cannot overflow.
+/// Subtract `b` from `a` in a representation whose difference and square cannot
+/// overflow `i64`.
 ///
-/// `Number::Int * Number::Int` is a checked `i64` multiply, so squaring a
-/// difference larger than `sqrt(i64::MAX)` (~3.04e9) fails the whole statement:
-/// `math::variance` over a group holding `0` and `4_000_000_000` would error
-/// rather than return 8e18. Integer inputs therefore accumulate as `f64`, which
-/// is what the scalar `math::variance` already does -- it subtracts a `Float`
-/// mean, so its differences are never `Int`.
+/// `Number::Int - Number::Int` and `Number::Int * Number::Int` are checked `i64`
+/// operations, so subtracting integers whose spread exceeds `i64::MAX` (e.g.
+/// `i64::MIN` and `i64::MAX`) or squaring a difference larger than
+/// `sqrt(i64::MAX)` (~3.04e9) would fail with overflow. Integer pairs are
+/// therefore widened to `f64` before subtracting, which is what the scalar
+/// `math::variance` already does -- it subtracts a `Float` mean, so its
+/// differences are never `Int`.
 ///
-/// `Decimal` and `Float` differences are returned untouched, so a `Decimal`
-/// group keeps full precision. Nothing is lost by widening: the overflow
-/// threshold (~3.04e9) is far below the point where an `f64` stops representing
-/// integers exactly (2^53 ≈ 9.01e15).
-fn widen_difference(delta: Number) -> Number {
-	match delta {
-		Number::Int(v) => Number::Float(v as f64),
-		other @ Number::Float(_) | other @ Number::Decimal(_) => other,
+/// `Decimal` and `Float` differences go through `Number::try_sub` (which widens
+/// an `Int` operand to `Decimal` or `Float` before subtracting), so a `Decimal`
+/// group keeps full precision.
+fn shifted_difference(a: Number, b: Number) -> Result<Number> {
+	if let (Number::Int(v), Number::Int(w)) = (&a, &b) {
+		Ok(Number::Float(*v as f64 - *w as f64))
+	} else {
+		a.try_sub(b).map_err(Into::into)
 	}
 }
 
@@ -382,12 +384,18 @@ pub fn shifted_accumulate(
 	count: &mut i64,
 	x: Number,
 ) -> Result<()> {
-	if *count == 0 {
-		*shift = x;
-	}
-	let delta = widen_difference(x.try_sub(*shift)?);
-	*sum = (*sum).try_add(delta)?;
-	*sum_of_squares = (*sum_of_squares).try_add(delta.try_mul(delta)?)?;
+	let next_shift = if *count == 0 {
+		x
+	} else {
+		*shift
+	};
+	let delta = shifted_difference(x, next_shift)?;
+	let sq = delta.try_mul(delta)?;
+	let next_sum = (*sum).try_add(delta)?;
+	let next_sum_of_squares = (*sum_of_squares).try_add(sq)?;
+	*shift = next_shift;
+	*sum = next_sum;
+	*sum_of_squares = next_sum_of_squares;
 	*count += 1;
 	Ok(())
 }
@@ -414,7 +422,7 @@ pub fn shifted_rebase(
 	to_shift: Number,
 ) -> Result<(Number, Number)> {
 	let n = Number::from(count);
-	let d = widen_difference(from_shift.try_sub(to_shift)?);
+	let d = shifted_difference(from_shift, to_shift)?;
 	let rebased_sum = sum.try_add(n.try_mul(d)?)?;
 	let rebased_sum_of_squares = sum_of_squares
 		.try_add(Number::from(2).try_mul(d)?.try_mul(sum)?)?
@@ -433,9 +441,12 @@ pub fn shifted_remove(
 	count: &mut i64,
 	x: Number,
 ) -> Result<()> {
-	let delta = widen_difference(x.try_sub(*shift)?);
-	*sum = (*sum).try_sub(delta)?;
-	*sum_of_squares = (*sum_of_squares).try_sub(delta.try_mul(delta)?)?;
+	let delta = shifted_difference(x, *shift)?;
+	let sq = delta.try_mul(delta)?;
+	let next_sum = (*sum).try_sub(delta)?;
+	let next_sum_of_squares = (*sum_of_squares).try_sub(sq)?;
+	*sum = next_sum;
+	*sum_of_squares = next_sum_of_squares;
 	*count -= 1;
 	if *count == 0 {
 		*shift = 0.0.into();
@@ -2320,6 +2331,10 @@ pub enum BackfillValue {
 	/// running total, widening integers to `Decimal` before summing so totals
 	/// outside `i64` do not overflow `math::sum`.
 	MeanSum(usize),
+	/// The count of numeric values of aggregate argument `n`, which is the
+	/// denominator of `math::mean` and the sample size of `math::variance` and
+	/// `math::stddev` over a group where non-numeric values are skipped.
+	NumberCount(usize),
 	/// The accurate two-pass sample variance of aggregate argument `n`, from
 	/// which a variance or deviation's shifted state is reconstructed
 	/// ([`shifted_state_from_summary`]).
@@ -2358,6 +2373,17 @@ impl BackfillValue {
 				Expr::FunctionCall(Box::new(FunctionCall {
 					receiver: Function::Normal("math::sum".to_string()),
 					arguments: vec![widened],
+				}))
+			}
+			BackfillValue::NumberCount(arg) => {
+				let arg = analysis.aggregate_arguments[*arg].clone();
+				let is_number = Expr::FunctionCall(Box::new(FunctionCall {
+					receiver: Function::Normal("type::is_number".to_string()),
+					arguments: vec![arg],
+				}));
+				Expr::FunctionCall(Box::new(FunctionCall {
+					receiver: Function::Normal("count".to_string()),
+					arguments: vec![is_number],
 				}))
 			}
 			BackfillValue::SampleVariance(arg) => call("math::variance", Some(*arg)),
@@ -2406,12 +2432,12 @@ impl AggregationAnalysis {
 				}
 				Aggregation::Mean(arg) => {
 					want(BackfillValue::MeanSum(*arg));
-					want(BackfillValue::Aggregate(Aggregation::Count));
+					want(BackfillValue::NumberCount(*arg));
 				}
 				Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
 					want(BackfillValue::Aggregate(Aggregation::Mean(*arg)));
 					want(BackfillValue::SampleVariance(*arg));
-					want(BackfillValue::Aggregate(Aggregation::Count));
+					want(BackfillValue::NumberCount(*arg));
 				}
 				Aggregation::Accumulate(_) => {
 					fail!("Accumulate aggregation is not supported in materialized views")
@@ -2506,17 +2532,24 @@ pub fn backfill_stats(
 		};
 		Ok(*count)
 	};
+	let number_count_of = |arg: usize| -> Result<i64> {
+		let Value::Number(Number::Int(count)) = at(BackfillValue::NumberCount(arg))? else {
+			fail!("initial select statement did not return the right value")
+		};
+		Ok(*count)
+	};
 	let number_of = |value: BackfillValue| -> Result<Number> {
 		let Value::Number(n) = at(value)? else {
 			fail!("initial select statement did not return the right value")
 		};
 		Ok(*n)
 	};
-	let datetime_of = |value: BackfillValue| -> Result<Datetime> {
-		let Value::Datetime(d) = at(value)? else {
-			fail!("initial select statement did not return the right value")
-		};
-		Ok(*d)
+	let datetime_of = |value: BackfillValue, empty: Datetime| -> Result<Datetime> {
+		match at(value)? {
+			Value::Datetime(d) => Ok(*d),
+			Value::None | Value::Null => Ok(empty),
+			_ => fail!("initial select statement did not return the right value"),
+		}
 	};
 	if !values.contains(&BackfillValue::Aggregate(Aggregation::Count)) {
 		fail!("a materialised view's aggregations did not include a count");
@@ -2572,21 +2605,27 @@ pub fn backfill_stats(
 				AggregationStat::Mean {
 					arg,
 					sum,
-					count: count_of()?,
+					count: number_count_of(arg)?,
 				}
 			}
 			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
 				arg,
-				max: datetime_of(BackfillValue::Aggregate(Aggregation::DatetimeMax(arg)))?,
+				max: datetime_of(
+					BackfillValue::Aggregate(Aggregation::DatetimeMax(arg)),
+					Datetime::MIN_UTC,
+				)?,
 			},
 			Aggregation::DatetimeMin(arg) => AggregationStat::TimeMin {
 				arg,
-				min: datetime_of(BackfillValue::Aggregate(Aggregation::DatetimeMin(arg)))?,
+				min: datetime_of(
+					BackfillValue::Aggregate(Aggregation::DatetimeMin(arg)),
+					Datetime::MAX_UTC,
+				)?,
 			},
 			Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
 				let mean = number_of(BackfillValue::Aggregate(Aggregation::Mean(arg)))?;
 				let variance = number_of(BackfillValue::SampleVariance(arg))?;
-				let count = count_of()?;
+				let count = number_count_of(arg)?;
 				let (shift, sum, sum_of_squares) =
 					shifted_state_from_summary(mean, variance, count)?;
 				if matches!(a, Aggregation::StdDev(_)) {
@@ -2688,8 +2727,8 @@ mod analysis_tests {
 mod backfill_tests {
 	use super::*;
 
-	/// A variance needs the mean, the sample variance and the count behind
-	/// it, each once, and a mean needs the sum and the count.
+	/// A variance needs the mean, the sample variance and the numeric count behind
+	/// it, each once, and a mean needs the sum and the numeric count.
 	#[test]
 	fn a_backfill_computes_each_value_the_stats_are_made_from_once() {
 		let analysis = AggregationAnalysis {
@@ -2704,8 +2743,9 @@ mod backfill_tests {
 			vec![
 				BackfillValue::Aggregate(Aggregation::Mean(0)),
 				BackfillValue::SampleVariance(0),
-				BackfillValue::Aggregate(Aggregation::Count),
+				BackfillValue::NumberCount(0),
 				BackfillValue::MeanSum(0),
+				BackfillValue::Aggregate(Aggregation::Count),
 			]
 		);
 	}
@@ -2725,5 +2765,128 @@ mod backfill_tests {
 				count: 3
 			}]
 		));
+	}
+
+	/// Mean and variance backfill stats use the argument's numeric count rather than
+	/// the group record count when some rows have NULL/NONE values for the argument.
+	#[test]
+	fn backfill_stats_uses_number_count_for_mean_and_variance() {
+		let aggregations = vec![Aggregation::Mean(0), Aggregation::Variance(0), Aggregation::Count];
+		let values = vec![
+			BackfillValue::MeanSum(0),
+			BackfillValue::NumberCount(0),
+			BackfillValue::Aggregate(Aggregation::Mean(0)),
+			BackfillValue::SampleVariance(0),
+			BackfillValue::Aggregate(Aggregation::Count),
+		];
+		// Group of 5 records, only 2 numeric values [2, 4] -> sum = 6, mean = 3, sample variance = 2
+		let computed = vec![
+			Value::from(6i64),
+			Value::from(2i64),
+			Value::from(3.0f64),
+			Value::from(2.0f64),
+			Value::from(5i64),
+		];
+		let mut stats = backfill_stats(&aggregations, &values, &computed, false)
+			.expect("backfill stats succeed")
+			.expect("non-empty group");
+		assert!(matches!(
+			stats.as_slice(),
+			[
+				AggregationStat::Mean {
+					count: 2,
+					..
+				},
+				AggregationStat::Variance {
+					count: 2,
+					..
+				},
+				AggregationStat::Count {
+					count: 5
+				},
+			]
+		));
+		// Adding another numeric value (6) should yield mean = 4, variance = 4
+		add_to_aggregation_stats(&[Value::from(6i64)], &mut stats).expect("accumulate succeeds");
+		let doc = create_field_document(&[], &stats);
+		assert_eq!(doc.get(&aggregate_field_name(0)), Some(&Value::from(4.0f64)));
+		assert_eq!(doc.get(&aggregate_field_name(1)), Some(&Value::from(4.0f64)));
+		assert_eq!(doc.get(&aggregate_field_name(2)), Some(&Value::from(6i64)));
+	}
+
+	/// DatetimeMin and DatetimeMax backfill stats accept NONE/NULL when no row in a
+	/// non-empty group had a datetime value.
+	#[test]
+	fn backfill_stats_accepts_none_for_datetime_min_and_max() {
+		let aggregations =
+			vec![Aggregation::DatetimeMin(0), Aggregation::DatetimeMax(0), Aggregation::Count];
+		let values = vec![
+			BackfillValue::Aggregate(Aggregation::DatetimeMin(0)),
+			BackfillValue::Aggregate(Aggregation::DatetimeMax(0)),
+			BackfillValue::Aggregate(Aggregation::Count),
+		];
+		let computed = vec![Value::None, Value::Null, Value::from(2i64)];
+		let stats = backfill_stats(&aggregations, &values, &computed, true)
+			.expect("backfill stats succeed for empty datetime aggregates")
+			.expect("non-empty group");
+		assert_eq!(
+			stats[0],
+			AggregationStat::TimeMin {
+				arg: 0,
+				min: Datetime::MAX_UTC,
+			}
+		);
+		assert_eq!(
+			stats[1],
+			AggregationStat::TimeMax {
+				arg: 0,
+				max: Datetime::MIN_UTC,
+			}
+		);
+		let doc = create_field_document(&[], &stats);
+		assert_eq!(doc.get(&aggregate_field_name(0)), Some(&Value::None));
+		assert_eq!(doc.get(&aggregate_field_name(1)), Some(&Value::None));
+	}
+
+	/// `shifted_accumulate` and `shifted_rebase` widen integer differences to `f64`
+	/// before subtracting so extreme `i64` ranges do not overflow `i64::try_sub`.
+	#[test]
+	fn shifted_accumulate_and_rebase_handle_extreme_i64_spread() {
+		let mut shift = Number::Int(0);
+		let mut sum = Number::Int(0);
+		let mut sum_of_squares = Number::Int(0);
+		let mut count = 0;
+
+		shifted_accumulate(
+			&mut shift,
+			&mut sum,
+			&mut sum_of_squares,
+			&mut count,
+			Number::Int(i64::MIN),
+		)
+		.expect("first value sets shift");
+		shifted_accumulate(
+			&mut shift,
+			&mut sum,
+			&mut sum_of_squares,
+			&mut count,
+			Number::Int(i64::MAX),
+		)
+		.expect("extreme i64 difference widens to f64 without overflow");
+		assert_eq!(count, 2);
+
+		let variance = shifted_sample_variance(sum, sum_of_squares, count);
+		assert!(variance.to_float().is_finite() && variance.to_float() > 0.0);
+
+		let (rebased_sum, rebased_ss) = shifted_rebase(
+			Number::Int(0),
+			Number::Int(0),
+			1,
+			Number::Int(i64::MIN),
+			Number::Int(i64::MAX),
+		)
+		.expect("rebase across extreme i64 shift succeeds");
+		assert!(rebased_sum.to_float().is_finite());
+		assert!(rebased_ss.to_float().is_finite());
 	}
 }

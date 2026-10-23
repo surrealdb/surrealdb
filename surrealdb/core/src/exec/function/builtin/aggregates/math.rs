@@ -642,14 +642,16 @@ impl Accumulator for SpreadAccumulator {
 	}
 
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Some(n) = self.rejected.number(self.spread.function_name(), &value) {
-			aggregation::shifted_accumulate(
+		if let Some(n) = self.rejected.number(self.spread.function_name(), &value)
+			&& let Err(e) = aggregation::shifted_accumulate(
 				&mut self.shift,
 				&mut self.sum,
 				&mut self.sum_of_squares,
 				&mut self.count,
 				n,
-			)?;
+			)
+		{
+			self.rejected.fail(&e);
 		}
 		Ok(())
 	}
@@ -683,17 +685,26 @@ impl Accumulator for SpreadAccumulator {
 
 		// The two halves were shifted against different assumed means, so
 		// re-base `other` onto ours before adding.
-		let (rebased_sum, rebased_sum_of_squares) = aggregation::shifted_rebase(
+		let rebased = aggregation::shifted_rebase(
 			other.sum,
 			other.sum_of_squares,
 			other.count,
 			other.shift,
 			self.shift,
-		)?;
-
-		self.sum = self.sum.try_add(rebased_sum)?;
-		self.sum_of_squares = self.sum_of_squares.try_add(rebased_sum_of_squares)?;
-		self.count += other.count;
+		)
+		.and_then(|(rebased_sum, rebased_sum_of_squares)| {
+			let next_sum = self.sum.try_add(rebased_sum)?;
+			let next_sum_of_squares = self.sum_of_squares.try_add(rebased_sum_of_squares)?;
+			Ok((next_sum, next_sum_of_squares))
+		});
+		match rebased {
+			Ok((next_sum, next_sum_of_squares)) => {
+				self.sum = next_sum;
+				self.sum_of_squares = next_sum_of_squares;
+				self.count += other.count;
+			}
+			Err(e) => self.rejected.fail(&e),
+		}
 		Ok(())
 	}
 
@@ -1100,6 +1111,28 @@ mod tests {
 		let result = acc.finalize().unwrap();
 		// stddev of [1, 2, 3] offset by 1e9 should still be 1.0
 		assert!(approx_eq(as_float(&result), 1.0, 1e-6));
+	}
+
+	#[test]
+	fn stddev_extreme_i64_spread() {
+		let func = MathStddev;
+		let mut acc = func.create_accumulator();
+		acc.update(Value::Number(Number::Int(i64::MIN))).unwrap();
+		acc.update(Value::Number(Number::Int(i64::MAX))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert!(as_float(&result).is_finite() && as_float(&result) > 0.0);
+	}
+
+	#[test]
+	fn variance_decimal_overflow_propagates_to_finalize() {
+		use rust_decimal::Decimal;
+		let func = MathVariance;
+		let mut acc = func.create_accumulator();
+		acc.update(Value::Number(Number::Decimal(Decimal::ZERO))).unwrap();
+		// Updating with Decimal::MAX causes delta * delta to overflow Decimal in shifted_accumulate.
+		// Even when callers ignore the update() result (as the VM does), finalize() must fail.
+		let _ = acc.update(Value::Number(Number::Decimal(Decimal::MAX)));
+		assert!(acc.finalize().is_err());
 	}
 
 	// -------------------------------------------------------------------------

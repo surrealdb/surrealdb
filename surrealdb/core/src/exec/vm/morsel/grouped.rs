@@ -123,7 +123,14 @@ impl Pending {
 				results.iter_mut().filter_map(|result| result.groups[at].take()).collect();
 			let folded = merged(parts, policy, state, ctx).await;
 			self.asking.note(state);
-			for part in folded? {
+			let folded = folded?;
+			for result in &mut results {
+				if let Some(account) = result.group_accounts.get_mut(at) {
+					state.group_accounts[at].adopt(account);
+					account.clear();
+				}
+			}
+			for part in folded {
 				merge_groups(&mut state.groups[at], Some(part))?;
 			}
 		}
