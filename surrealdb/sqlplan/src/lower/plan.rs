@@ -79,6 +79,9 @@ fn lower_bound_select_internal(
 	}
 
 	// 3. GROUP BY & Aggregation
+	if select.group_by.iter().any(bound_expr_contains_aggregate) {
+		return Err(PlanError::AggregateNotAllowed("GROUP BY".into()));
+	}
 	let grouped = !select.group_by.is_empty();
 	let has_aggregates = select.targets.iter().any(|t| bound_expr_contains_aggregate(&t.expr));
 	let has_having_agg = select.having.as_ref().is_some_and(bound_expr_contains_aggregate);

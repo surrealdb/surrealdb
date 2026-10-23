@@ -407,18 +407,16 @@ fn record_id_key_is_row_independent(
 	}
 }
 
-/// Find the index of the group-by key for an expression: the expression is a
-/// path named in `GROUP BY`, or its alias is. A key and an alias are the same
-/// name when they render the same, which is how a key spelled as an alias
+/// Find the index of the group-by key for an expression: the expression is
+/// one written in `GROUP BY` (a path, or any other expression), or its alias is. A key and an alias
+/// are the same name when they render the same, which is how a key spelled as an alias
 /// (`GROUP BY total` for `… AS total`) is matched.
 pub(super) fn find_group_key_index(
 	expr: &LogicalExpr,
 	alias: Option<&OutputPath>,
 	group_by: &[LogicalExpr],
 ) -> Option<usize> {
-	if expr.is_path()
-		&& let Some(idx) = group_by.iter().position(|g| g == expr)
-	{
+	if let Some(idx) = group_by.iter().position(|g| g == expr) {
 		return Some(idx);
 	}
 

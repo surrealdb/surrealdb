@@ -10,9 +10,9 @@
 //!
 //! [`plan`] reads each field in this order, as the aggregate operator plans it:
 //!
-//! - **A group key.** The field is a path that a written key also is, or it is aliased under the
-//!   text of a key. A key that names the alias of a field is evaluated as that field's expression.
-//!   The group answers the field by its key.
+//! - **A group key.** The field is an expression that a written key also is, or it is aliased under
+//!   the text of a key. A key that names the alias of a field is evaluated as that field's
+//!   expression. The group answers the field by its key.
 //! - **Aggregate calls.** The field holds `expr.agg` ops, outside any statement in value position.
 //!   Each call folds the value of its first argument for every row. The arguments after the first
 //!   are evaluated once for the group, over an object that holds each key as `_gN`; one that raises
@@ -24,12 +24,15 @@
 //!   group's first row.
 //! - **A value the row cannot influence.** Such a field is evaluated once for the group, as the
 //!   group finishes where there is one group, and with the first row of each group otherwise.
+//! - **An expression over expression keys.** The field holds no aggregate call and reads the row
+//!   only through values that a key written as an expression also is. It has one value for the
+//!   group, which the host evaluates over an object that holds each key as `_gN`.
 //! - **Anything else** reads the row, so each row's value is collected, duplicates kept.
 //!
-//! A value reads a key where it is a path that a written key is. A path of fields, positions and
-//! every-element steps from the row is compared step by step; a path of another form (a method
-//! call, a destructure, a computed index) is compared as written, op by op, as the planner compares
-//! two path expressions.
+//! A value reads a key where it is an expression that a written key is. A path of fields,
+//! positions and every-element steps from the row is compared step by step; any other expression (a
+//! path of another form such as a method call or a destructure, or an operator or a call over the
+//! row) is compared as written, op by op, as the planner compares two expressions.
 //!
 //! The rows fold in the body of the pipeline that feeds the aggregate: each key is set, the group
 //! is selected, and each call's first argument or each first value is folded or set. An error
@@ -143,10 +146,9 @@ enum Step {
 enum Written {
 	/// A path of plain steps.
 	Plain(Vec<Step>),
-	/// A path of another form, which a value matches when it is written the same way.
+	/// A key that is not a plain path: a path of another form, or an expression over the row. A
+	/// value matches it when it is written the same way.
 	Other(Eval),
-	/// Not a path: no field reads the key.
-	Not,
 }
 
 impl Written {
@@ -154,7 +156,7 @@ impl Written {
 	fn plain(&self) -> Option<&[Step]> {
 		match self {
 			Written::Plain(steps) => Some(steps),
-			Written::Other(_) | Written::Not => None,
+			Written::Other(_) => None,
 		}
 	}
 }
@@ -173,10 +175,10 @@ fn written_key(
 		PathForm::Plain(steps) if whole_row || !steps.is_empty() => {
 			written.iter().position(|key| key.plain() == Some(steps.as_slice()))
 		}
-		PathForm::Plain(_) | PathForm::Not => None,
-		PathForm::Other => written.iter().position(|key| match key {
+		PathForm::Plain(_) => None,
+		PathForm::Other | PathForm::Not => written.iter().position(|key| match key {
 			Written::Other(eval) => Congruence::new(ir).same((row, value), (eval.row, eval.value)),
-			Written::Plain(_) | Written::Not => false,
+			Written::Plain(_) => false,
 		}),
 	}
 }
@@ -202,8 +204,33 @@ impl<'i> Congruence<'i> {
 
 	/// Whether `a`, read from its row, is written as `b` is, read from its own.
 	fn same(&mut self, (row_a, a): (ValueId, ValueId), (row_b, b): (ValueId, ValueId)) -> bool {
+		if !self.roots_comparable(a, b) {
+			return false;
+		}
 		self.map.insert(row_a, row_b);
 		self.values(a, b)
+	}
+
+	/// Whether the ops that define `a` and `b` have the same kind and attributes, which settles
+	/// most comparisons before any map is built. A value that is no op result is not ruled out.
+	fn roots_comparable(&self, a: ValueId, b: ValueId) -> bool {
+		let defining = |value: ValueId| {
+			let ValueDef::OpResult {
+				op,
+				..
+			} = self.ir.value(value)?.def
+			else {
+				return None;
+			};
+			match &self.ir.op(op)?.kind {
+				OpKind::Expr(kind) => Some(kind),
+				OpKind::Logical(_) | OpKind::Phys(_) => None,
+			}
+		};
+		match (defining(a), defining(b)) {
+			(Some(left), Some(right)) => same_attrs(left, right),
+			_ => true,
+		}
 	}
 
 	fn values(&mut self, a: ValueId, b: ValueId) -> bool {
@@ -239,10 +266,7 @@ impl<'i> Congruence<'i> {
 		let (OpKind::Expr(kind_a), OpKind::Expr(kind_b)) = (&left.kind, &right.kind) else {
 			return false;
 		};
-		let digest = kind_a.attr_digest();
-		if digest == AttrDigest::OPAQUE
-			|| digest != kind_b.attr_digest()
-			|| !kind_a.attrs_eq(kind_b)
+		if !same_attrs(kind_a, kind_b)
 			|| left.operands.len() != right.operands.len()
 			|| left.regions.len() != right.regions.len()
 			|| left.results.len() != right.results.len()
@@ -284,6 +308,20 @@ impl<'i> Congruence<'i> {
 			}
 		}
 		true
+	}
+}
+
+/// Whether two expression ops have the same attributes. A conversion is the same wherever it is
+/// written: its site only names the error it raises, and an error in a key reads as `NONE`.
+fn same_attrs(a: &ExprOp, b: &ExprOp) -> bool {
+	match (a, b) {
+		(ExprOp::Convert(x), ExprOp::Convert(y)) => {
+			x.mode == y.mode && x.kind == y.kind && x.on_fail == y.on_fail
+		}
+		_ => {
+			let digest = a.attr_digest();
+			digest != AttrDigest::OPAQUE && digest == b.attr_digest() && a.attrs_eq(b)
+		}
 	}
 }
 
@@ -557,19 +595,25 @@ fn key_reads(
 /// `<|..|>` operators. A builtin call is free of the row where its arguments are, unless it is a
 /// projection or an index function, an aggregate, a writer, or it changes state the statement
 /// outlives.
+///
+/// The values `keyed` are the group's keys the field reads: they have one value for the group, so
+/// the row does not influence them.
 fn reads_row(
 	ir: &Ir,
 	registry: &FunctionRegistry,
 	region: RegionId,
 	row: ValueId,
 	value: ValueId,
+	keyed: &[(ValueId, usize)],
+	through_if: bool,
 ) -> bool {
 	let mut inside = FxHashSet::default();
 	visit_ops(ir, region, &mut |_, data| {
 		inside.extend(data.results.iter().copied());
 	});
-	let mut seen = FxHashSet::default();
-	depends(ir, registry, &inside, &mut seen, row, value)
+	// A value already seen is not followed again, which is how the keys stop the walk.
+	let mut seen: FxHashSet<ValueId> = keyed.iter().map(|(value, _)| *value).collect();
+	depends(ir, registry, &inside, &mut seen, row, value, through_if)
 }
 
 fn depends(
@@ -579,6 +623,7 @@ fn depends(
 	seen: &mut FxHashSet<ValueId>,
 	row: ValueId,
 	value: ValueId,
+	through_if: bool,
 ) -> bool {
 	if value == row {
 		return true;
@@ -604,7 +649,9 @@ fn depends(
 		return true;
 	};
 	let operands_depend = |seen: &mut FxHashSet<ValueId>| {
-		data.operands.iter().any(|operand| depends(ir, registry, inside, seen, row, *operand))
+		data.operands
+			.iter()
+			.any(|operand| depends(ir, registry, inside, seen, row, *operand, through_if))
 	};
 	match kind {
 		ExprOp::Literal(_)
@@ -662,8 +709,19 @@ fn depends(
 			}
 			operands_depend(seen)
 				|| data.regions.iter().any(|region| {
-					yielded(ir, *region)
-						.is_none_or(|held| depends(ir, registry, inside, seen, row, held))
+					yielded(ir, *region).is_none_or(|held| {
+						depends(ir, registry, inside, seen, row, held, through_if)
+					})
+				})
+		}
+		// A conditional is free of the row where its condition and both arms are, which a field
+		// built from expression keys relies on; elsewhere it is read as the row's.
+		ExprOp::If if through_if => {
+			operands_depend(seen)
+				|| data.regions.iter().any(|region| {
+					yielded(ir, *region).is_none_or(|held| {
+						depends(ir, registry, inside, seen, row, held, through_if)
+					})
 				})
 		}
 		ExprOp::Call(call) => match &call.function {
@@ -778,8 +836,7 @@ pub(super) fn plan(
 		};
 		written.push(match path_of(ir, row, value) {
 			PathForm::Plain(steps) => Written::Plain(steps),
-			PathForm::Other => Written::Other(eval),
-			PathForm::Not => Written::Not,
+			PathForm::Other | PathForm::Not => Written::Other(eval),
 		});
 		written_evals.push(eval);
 	}
@@ -831,16 +888,26 @@ pub(super) fn plan(
 						calls,
 						post,
 					}
-				} else if reads_row(
-					ir,
-					registry,
-					field.eval.region,
-					field.eval.row,
-					field.eval.value,
-				) {
-					Column::Collect
 				} else {
-					Column::Constant
+					let keyed = key_reads(ir, field.eval.region, field.eval.row, &written);
+					let over_expression_key =
+						keyed.iter().any(|(_, key)| matches!(written[*key], Written::Other(_)));
+					let (region, row, value) =
+						(field.eval.region, field.eval.row, field.eval.value);
+					if over_expression_key
+						&& !reads_row(ir, registry, region, row, value, &keyed, true)
+					{
+						// Built from the group's keys alone: one value for the group, read from
+						// the keys as an expression over the aggregate calls is.
+						Column::Calls {
+							calls: Vec::new(),
+							post: true,
+						}
+					} else if reads_row(ir, registry, region, row, value, &[], false) {
+						Column::Collect
+					} else {
+						Column::Constant
+					}
 				}
 			}
 		};

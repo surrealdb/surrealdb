@@ -181,6 +181,28 @@ fn test_positional_group_by_and_order_by() {
 }
 
 #[test]
+fn test_an_aggregate_in_group_by_is_refused() {
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	for sql in [
+		"SELECT count(*) FROM t GROUP BY count(*);",
+		"SELECT sum(max(x)) AS s FROM t GROUP BY sum(max(x));",
+		"SELECT x FROM t GROUP BY x, max(x);",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		let refused = lower_bound_select(&bound, &policy);
+		assert!(
+			matches!(refused, Err(crate::error::PlanError::AggregateNotAllowed(ref place)) if place == "GROUP BY"),
+			"{sql}: {refused:?}"
+		);
+	}
+}
+
+#[test]
 fn test_order_by_target_alias() {
 	let sql = "SELECT id AS user_id FROM users ORDER BY user_id DESC;";
 	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");

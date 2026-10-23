@@ -7340,7 +7340,9 @@ impl Finish<'_> {
 		let Some(aggregate) = &spec.aggregate else {
 			return Ok(first);
 		};
-		if aggregate.calls.is_empty() {
+		// A field with no call answers by its expression over the group's keys alone, or `NULL`
+		// where it has none.
+		if aggregate.calls.is_empty() && aggregate.post.is_none() {
 			return Ok(Value::Null);
 		}
 		// A failure to finalize is raised: an accumulator fails when handed a
