@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::{Action, Kind, RecordId, Value, vars};
+use surrealdb_types::{Action, Kind, RecordId, ToSql, Value, vars};
 
 use crate::helpers::{new_ds, skip_ok};
 
@@ -1202,6 +1202,67 @@ async fn live_diff_notifications_carry_value_diff_operations() -> Result<()> {
 		)
 		.unwrap()
 	);
+	Ok(())
+}
+
+/// Whether any statement of a transaction block lost a commit conflict.
+fn block_conflicted(responses: &[surrealdb_rpc::QueryResult]) -> bool {
+	responses.iter().any(|r| {
+		r.result.as_ref().is_err_and(|e| {
+			e.query_details() == Some(&surrealdb_types::QueryError::TransactionConflict)
+				|| e.to_string().to_lowercase().contains("resource busy")
+		})
+	})
+}
+
+// A `LIVE` that registers while a `REMOVE TABLE` of its table is in flight
+// must not outlive the table unannounced: it is refused, the removal loses
+// the conflict, or the subscriber receives its `Killed`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_registered_during_a_remove_table_is_killed_or_refused() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut dbs.execute("DEFINE TABLE tb", &ses, None).await?, 1)?;
+
+	let block = tokio::spawn({
+		let dbs = dbs.clone();
+		let ses = ses.clone();
+		async move { dbs.execute("BEGIN; REMOVE TABLE tb; SLEEP 500ms; COMMIT;", &ses, None).await }
+	});
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	let live = dbs.execute("LIVE SELECT * FROM tb", &ses, None).await?.remove(0).result;
+	let responses = block.await??;
+
+	let removed = !block_conflicted(&responses);
+	let Ok(id) = live else {
+		// The registration was refused: the removal is what stands.
+		assert!(removed, "a refused LIVE leaves nothing for the removal to lose to");
+		for response in responses {
+			response.result?;
+		}
+		let info = dbs.execute("INFO FOR DB", &ses, None).await?.remove(0).result?;
+		assert!(!info.to_sql().contains("tb:"), "the table must be gone: {}", info.to_sql());
+		return Ok(());
+	};
+	if !removed {
+		// The removal lost the conflict: the table and its subscription stand,
+		// and the subscription is still served.
+		skip_ok(&mut dbs.execute("CREATE tb:1", &ses, None).await?, 1)?;
+		let notification = tokio::time::timeout(Duration::from_secs(2), channel.recv())
+			.await
+			.map_err(|_| anyhow::anyhow!("the surviving live query was never notified"))??;
+		assert_eq!(notification.action, Action::Create);
+		assert_eq!(Value::Uuid(notification.id), id);
+		return Ok(());
+	}
+	for response in responses {
+		response.result?;
+	}
+	let notification = tokio::time::timeout(Duration::from_secs(2), channel.recv())
+		.await
+		.map_err(|_| anyhow::anyhow!("the live query on a removed table was never told"))??;
+	assert_eq!(notification.action, Action::Killed);
+	assert_eq!(Value::Uuid(notification.id), id);
 	Ok(())
 }
 

@@ -162,3 +162,79 @@ async fn an_async_event_write_notifies_a_live_query() -> Result<()> {
 	assert_eq!(updated.action, Action::Update);
 	Ok(())
 }
+
+/// Two transactions that each append to the same array through an event
+/// overlap, and run the schema of issue 6246 with the event `kind` given.
+///
+/// The event body sleeps after its write, so two runs of it overlap whichever
+/// transaction they belong to: under `ASYNC` both queued runs have written the
+/// shared record before either commits. Answers how many writing transactions
+/// lost a conflict, and the shared array, sorted, as SurrealQL.
+async fn concurrent_appends_through_an_event(kind: &str) -> Result<(usize, String)> {
+	use surrealdb_core::dbs::Session;
+	use surrealdb_types::{QueryError, ToSql};
+
+	let (_notify, ds) = crate::helpers::new_ds("test", "test", false).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let setup = format!(
+		"DEFINE TABLE user SCHEMALESS;
+		 DEFINE TABLE spaceevent SCHEMALESS;
+		 DEFINE EVENT link ON spaceevent {kind} WHEN $before.author != $after.author THEN {{
+			IF $after.author {{ UPDATE $after.author SET events += $after.id }};
+			SLEEP 200ms;
+		 }};
+		 CREATE user:1 SET events = [];"
+	);
+	for res in ds.execute(&setup, &ses, None).await? {
+		res.result?;
+	}
+	let tasks: Vec<_> = ["a", "b"]
+		.into_iter()
+		.map(|id| {
+			let ds = ds.clone();
+			let ses = ses.clone();
+			let sql =
+				format!("BEGIN; CREATE spaceevent:{id} SET author = user:1; SLEEP 300ms; COMMIT;");
+			tokio::spawn(async move { ds.execute(&sql, &ses, None).await })
+		})
+		.collect();
+	let mut conflicts = 0;
+	for task in tasks {
+		let responses = task.await??;
+		if responses.iter().any(|r| {
+			r.result
+				.as_ref()
+				.is_err_and(|e| e.query_details() == Some(&QueryError::TransactionConflict))
+		}) {
+			conflicts += 1;
+		}
+	}
+	wait_for_events_processing(&ds).await?;
+	let events =
+		ds.execute("RETURN array::sort(user:1.events)", &ses, None).await?.remove(0).result?;
+	Ok((conflicts, events.to_sql()))
+}
+
+/// A synchronous event's write is part of the writing transaction, so two
+/// transactions that append to the same record through one conflict at commit,
+/// and the loser is told so that it can run again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_event_appending_to_a_shared_record_conflicts() -> Result<()> {
+	let (conflicts, events) = concurrent_appends_through_an_event("").await?;
+	assert_eq!(conflicts, 1, "exactly one of two overlapping transactions loses");
+	assert!(
+		events == "[spaceevent:a]" || events == "[spaceevent:b]",
+		"only the winner's append is stored: {events}"
+	);
+	Ok(())
+}
+
+/// An `ASYNC` event runs in a transaction of its own, which is run again in
+/// place when it loses a conflict, so both appends land.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_async_event_appending_to_a_shared_record_applies_both() -> Result<()> {
+	let (conflicts, events) = concurrent_appends_through_an_event("ASYNC").await?;
+	assert_eq!(conflicts, 0, "the writing transactions do not touch the shared record");
+	assert_eq!(events, "[spaceevent:a, spaceevent:b]", "each event's append is applied once");
+	Ok(())
+}
