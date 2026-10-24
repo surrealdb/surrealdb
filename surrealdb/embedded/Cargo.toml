@@ -44,6 +44,7 @@ surrealdb-core = { workspace = true, features = [
     "search",
     "encoding",
     "egraph",
+    "http",
 ] }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
@@ -54,16 +55,10 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 web-time = { workspace = true }
 
-# The `http` functions (reqwest) are everywhere but emscripten: reqwest treats it as a native target,
-# which brings Tokio's `net` into the build, and with it the I/O driver, whose epoll readiness
-# listener turns every wake of the host's event loop into a timer on the platform's quota.
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-surrealdb-core = { workspace = true, features = ["http"] }
-
 # A query stream's execution is driven by a task of its own, so that it is
 # finished and its transaction finalised whether or not anyone is still reading.
-# The browser drives it on the JavaScript microtask queue; every other target,
-# emscripten included, on tokio.
+# The browser drives it on the JavaScript microtask queue; every other target on
+# tokio.
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 wasm-bindgen-futures = { workspace = true }
 

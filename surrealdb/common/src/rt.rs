@@ -4,11 +4,11 @@
 //! so the choice of executor is made once per target rather than per file.
 //!
 //! - **Native.** Tokio. The caller runs inside a tokio runtime, multi- or current-thread.
-//! - **Emscripten and the other non-browser wasm targets.** Tokio's current-thread runtime, which
-//!   the host drives from its own event loop. There are no worker threads, so a spawned task makes
-//!   progress only while the host polls that runtime, and the caller must be inside it (a runtime
-//!   context, as for [`tokio::spawn`]). [`spawn`] still returns a [`JoinHandle`], so code that
-//!   joins or aborts its tasks is the same code as on native.
+//! - **Non-browser wasm targets** (WASI). Tokio's current-thread runtime, which the host drives
+//!   from its own event loop. There are no worker threads, so a spawned task makes progress only
+//!   while the host polls that runtime, and the caller must be inside it (a runtime context, as for
+//!   [`tokio::spawn`]). [`spawn`] still returns a [`JoinHandle`], so code that joins or aborts its
+//!   tasks is the same code as on native.
 //! - **Browser wasm** (`wasm32-unknown-unknown`). `wasm_bindgen_futures` on the JavaScript
 //!   microtask queue. That executor has no join handle, so only [`spawn_detached`] exists there,
 //!   and it accepts a future that is not `Send`.

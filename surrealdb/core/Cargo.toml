@@ -318,8 +318,7 @@ tokio = { workspace = true, default-features = false, features = [
 tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
-# Browser wasm only: entropy and UUIDs come from JavaScript. Emscripten needs
-# no backend here, since getrandom reads `getentropy` from its libc.
+# Browser wasm only: entropy and UUIDs come from JavaScript.
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }

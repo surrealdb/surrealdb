@@ -8,9 +8,9 @@ Output is tab-separated `<bytes>\t<name>`, one line per defined function, where
 and <name> comes from the module's name section, or `func[<index>]` when the
 section has none for it. A summary of the section sizes goes to stderr.
 
-`twiggy` cannot read the modules emcc writes: their imports use the compact
-import encoding and declare exception tags. This reads only the import, code
-and name sections, and skips the rest by length.
+This reads only the import, code and name sections, and skips the rest by
+length, so it needs nothing beyond Python and tolerates the compact import
+encoding and exception tags.
 """
 
 import sys

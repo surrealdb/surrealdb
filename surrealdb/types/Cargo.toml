@@ -71,8 +71,7 @@ prost = { workspace = true, optional = true }
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
-# Browser wasm only. Emscripten needs none of this: both getrandom majors read
-# `getentropy` from its libc, and uuid draws from getrandom.
+# Browser wasm only.
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 uuid = { workspace = true, features = ["js"] }
 # Two majors of getrandom, because two majors of `rand` are in the graph and

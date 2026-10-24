@@ -66,7 +66,7 @@ const FRAME_BUFFER: usize = 1;
 /// Runs the driver on the runtime the stream was opened on.
 ///
 /// Off the browser that is tokio's: a multi-thread runtime natively, or the
-/// current-thread runtime an emscripten host drives from its event loop.
+/// current-thread runtime a WASI host drives from its event loop.
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn spawn(task: impl Future<Output = ()> + Send + 'static) {
 	tokio::spawn(task);

@@ -3,9 +3,9 @@
 //! Tokio's timers read the clock through `std::time`, which has no
 //! implementation on browser wasm (`wasm32-unknown-unknown`) and panics with
 //! "time not implemented on this platform" the first time one is polled.
-//! Emscripten and the other non-browser wasm targets have a `std::time` clock,
-//! so they use tokio's timers like native, driven by the runtime the host
-//! polls (see [`crate::rt`]).
+//! The non-browser wasm targets (WASI) have a `std::time` clock, so they use
+//! tokio's timers like native, driven by the runtime the host polls (see
+//! [`crate::rt`]).
 //!
 //! Excluding tokio's `time` feature for a browser target does not keep it out of
 //! the build: `surrealdb-core` omits it from its wasm dependency block, but
@@ -18,9 +18,6 @@
 //! needs to sleep, tick, or bound a future by time takes it from here, so the
 //! choice is made once rather than at each call site — and off the browser
 //! these are `tokio::time`'s own items.
-//!
-//! `wasm32-unknown-emscripten` is the exception among the wasm targets: it has a clock behind
-//! `std::time` and a Tokio runtime with working timers, so it takes `tokio::time` as native does.
 //!
 //! [`std::time::Duration`] is a plain value with no clock behind it and is used
 //! directly. For wall-clock timestamps rather than timers, use

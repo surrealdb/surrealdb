@@ -88,11 +88,17 @@ yanked = "warn"
 #   server itself supplies — no attacker-controlled input, and nothing `unsafe` of ours. Every
 #   published release of the exporter requires `smartstring = "^1.0.1"`, so clearing this
 #   means the exporter migrating to `compact_str` or `smol_str`.
+# - for RUSTSEC-2026-0387, `crypto-bigint 0.5.5` has operations that are not constant-time on
+#   every compiler and target. It reaches us only through `elliptic-curve 0.13`, which `p256`,
+#   `p384` and `ssh-key` use in `surrealism-verify` to check the signature of a module against a
+#   public key: public inputs, no secret scalar. Clearing it means the RustCrypto elliptic-curve
+#   crates moving to a release built on a patched `crypto-bigint`.
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
     "RUSTSEC-2026-0249",
+    "RUSTSEC-2026-0387",
 ]
 
 # --------------------------------------------------

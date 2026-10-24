@@ -163,7 +163,7 @@ fn std_error_to_types_error(error: impl std::fmt::Display) -> surrealdb_types::E
 ///
 /// Nothing joins one of these, which is what lets the browser's `spawn_local`
 /// -- which returns no handle at all -- stand in for `tokio::spawn`. Every
-/// other target, emscripten included, spawns on the ambient tokio runtime.
+/// other target spawns on the ambient tokio runtime.
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn spawn<F>(future: F)
 where

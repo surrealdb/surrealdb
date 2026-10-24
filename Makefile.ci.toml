@@ -665,11 +665,9 @@ script = '''
 # fails when a bundle is over its budget. A bundle whose budget is 0 is
 # reported and not checked. Needs binaryen's `wasm-opt` and a clang that
 # targets wasm32 (see `ci-check-wasm`). `cargo make ci-wasm-size-budget --
-# --toolchain nightly` checks the Cloudflare build with the pinned nightly;
-# `--target emscripten` reports the size of the build SurrealDB Earth ships
-# (emcc, as `worker-build --emscripten` links it), and `--names` writes each
-# function's size alongside. The budgets and flags are documented in the
-# script.
+# --toolchain nightly` checks the Cloudflare build with the pinned nightly, and
+# `--names` writes each function's size alongside. The budgets and flags are
+# documented in the script.
 category = "CI - CHECK"
 description = "Check the edge wasm bundles against their size budgets"
 command = "scripts/wasm-size-budget.sh"

@@ -32,8 +32,8 @@ sysinfo = { workspace = true, optional = true }
 # crate never adds tokio's `time` feature to a browser build. That does not
 # keep the feature out — `surrealdb-datastore` requests it unconditionally and
 # cargo unifies — which is exactly why `crate::time` picks the timer rather
-# than trusting the feature set. Emscripten and the other non-browser wasm
-# targets take the tokio half.
+# than trusting the feature set. The non-browser wasm targets (WASI) take the
+# tokio half.
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 tokio = { workspace = true, default-features = false, features = ["rt", "time"] }
 

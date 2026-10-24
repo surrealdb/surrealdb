@@ -3,9 +3,9 @@
 # wasm-size-budget.sh — build the engine as an edge worker bundles it and fail
 # when a bundle grows past its budget.
 #
-#   scripts/wasm-size-budget.sh [--toolchain stable|nightly] [--target unknown|emscripten]
+#   scripts/wasm-size-budget.sh [--toolchain stable|nightly]
 #                               [--names] [--variant lean|full|edge|all]
-#   scripts/wasm-size-budget.sh [--toolchain stable|nightly] [--target unknown|emscripten]
+#   scripts/wasm-size-budget.sh [--toolchain stable|nightly]
 #                               [--names] --features <list>
 #
 # Each variant is `surrealdb-edge-size-probe` built for wasm32-unknown-unknown
@@ -76,27 +76,6 @@
 #
 # A budget of 0 reports the size and checks nothing.
 #
-# Targets:
-#
-#   unknown     wasm32-unknown-unknown through `wasm-bindgen`, as above. The
-#               budgets apply to this target alone.
-#   emscripten  wasm32-unknown-emscripten, linked by emcc as Cloudflare's
-#               `worker-build --emscripten` links a Workers module, which is how
-#               SurrealDB Earth ships the engine. The probe is built as a
-#               staticlib (worker-build links only a bin target, and a cdylib
-#               cannot be linked for this target) and emcc links it with `run`
-#               as its one export. The codegen and link settings are
-#               worker-build's (exnref exception handling, a static relocation
-#               model, a Node-environment ES module that grows its memory),
-#               leaving out `-sWASM_BINDGEN`, which has no bindings to process
-#               here, and with Earth's 8 MiB stack placed first. The post-link
-#               pass is Earth's, `wasm-opt -Oz` alone: no `--converge`, and no
-#               `--low-memory-unused`, since the stack placed first holds the
-#               lowest addresses. No `simd128`, which neither worker-build nor
-#               Earth enables. Sizes are reported, not checked.
-#               Needs emsdk 6.0.10 (the version worker-build pins) in EMSDK,
-#               default `~/emsdk`, and the target installed for the toolchain.
-#
 # `--names` keeps the function-names section: each variant also writes
 # `<bundle>.names.wasm` (optimised, names kept) and `<bundle>.functions.tsv`
 # (each function's body size and name, largest first, from
@@ -107,21 +86,19 @@
 # WASM_BINDGEN (the `wasm-bindgen` CLI, the version `Cargo.lock` pins),
 # CC_wasm32_unknown_unknown and AR_wasm32_unknown_unknown (a clang that targets
 # wasm32; on macOS Homebrew's LLVM is used when present, as Apple's clang
-# cannot), EMSDK (the emscripten SDK, for `--target emscripten`).
+# cannot).
 set -euo pipefail
 
 # `cargo make <task> -- <args>` forwards the `--` separator as an argument.
 if [[ "${1:-}" == "--" ]]; then shift; fi
 
 toolchain=stable
-target=unknown
 names=0
 variant=all
 custom_features=
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--toolchain) toolchain="$2"; shift 2 ;;
-	--target) target="$2"; shift 2 ;;
 	--names) names=1; shift ;;
 	--variant) variant="$2"; shift 2 ;;
 	--features) variant=custom; custom_features="$2"; shift 2 ;;
@@ -150,37 +127,13 @@ budget_nightly_full=${WASM_BUDGET_NIGHTLY_FULL:-13228000}
 budget_stable_edge=${WASM_BUDGET_STABLE_EDGE:-0}
 budget_nightly_edge=${WASM_BUDGET_NIGHTLY_EDGE:-8350000}
 
-case "$target" in
-unknown | emscripten) ;;
-*) echo "--target must be unknown or emscripten" >&2; exit 2 ;;
-esac
-
 wasm_opt=${WASM_OPT:-wasm-opt}
-if [[ "$target" == emscripten ]]; then
-	emsdk=${EMSDK:-$HOME/emsdk}
-	emcc="$emsdk/upstream/emscripten/emcc"
-	if [[ ! -x "$emcc" ]]; then
-		echo "::error::emcc not found under $emsdk; install emsdk 6.0.10 or set EMSDK" >&2
-		exit 1
-	fi
-	# emcc needs Python 3.10 or later, which emsdk ships.
-	for py in "$emsdk"/python/*/bin; do
-		[[ -d "$py" ]] && PATH="$py:$PATH"
-	done
-	export PATH="$emsdk:$emsdk/upstream/emscripten:$PATH"
-	export EM_CONFIG="$emsdk/.emscripten"
-	# The binaryen emsdk ships, so the post-link pass reads what emcc wrote.
-	wasm_opt="$emsdk/upstream/bin/wasm-opt"
-	emcc_version=$("$emcc" --version | sed -n '1s/.* \([0-9][0-9.]*\).*/\1/p')
-	[[ "$emcc_version" == 6.0.10 ]] ||
-		echo "warning: emcc $emcc_version; worker-build pins 6.0.10, so sizes may not match Earth's" >&2
-fi
 if ! command -v "$wasm_opt" >/dev/null; then
 	echo "::error::wasm-opt not found; install binaryen or set WASM_OPT" >&2
 	exit 1
 fi
 wasm_bindgen=${WASM_BINDGEN:-wasm-bindgen}
-if [[ "$target" == unknown ]] && ! command -v "$wasm_bindgen" >/dev/null; then
+if ! command -v "$wasm_bindgen" >/dev/null; then
 	echo "::error::wasm-bindgen not found; install wasm-bindgen-cli or set WASM_BINDGEN" >&2
 	exit 1
 fi
@@ -190,30 +143,16 @@ if [[ -z "${CC_wasm32_unknown_unknown:-}" && -x /opt/homebrew/opt/llvm/bin/clang
 	export AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar
 fi
 
-case "$target" in
-unknown)
-	# `RUSTFLAGS` replaces `.cargo/config.toml`'s target rustflags rather than
-	# extending them, so the getrandom backend cfg and the 4 MiB stack (the
-	# parser's recursion at its depth limits needs most of the 1 MiB default)
-	# are carried here.
-	rustflags='--cfg getrandom_backend="wasm_js" -C link-arg=-zstack-size=4194304 -C target-feature=+simd128'
-	cargo_args=(build --locked -p surrealdb-edge-size-probe --target wasm32-unknown-unknown --profile edge)
-	wasm_features=(--enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int
-		--enable-mutable-globals --enable-multivalue --enable-reference-types --enable-simd)
-	# rustc lays the shadow stack out first, above 1 KiB of static data.
-	opt_flags=(-Oz --low-memory-unused --converge)
-	;;
-emscripten)
-	# worker-build's codegen flags. The stack is set at the link below.
-	rustflags='-Crelocation-model=static -Cllvm-args=-wasm-use-legacy-eh=false'
-	cargo_args=(rustc --locked -p surrealdb-edge-size-probe --lib --crate-type staticlib
-		--target wasm32-unknown-emscripten --profile edge)
-	wasm_features=(-all)
-	# Earth's own pass. `--low-memory-unused` is left out: with the stack
-	# placed first, the lowest addresses are the stack's.
-	opt_flags=(-Oz)
-	;;
-esac
+# `RUSTFLAGS` replaces `.cargo/config.toml`'s target rustflags rather than
+# extending them, so the getrandom backend cfg and the 4 MiB stack (the
+# parser's recursion at its depth limits needs most of the 1 MiB default)
+# are carried here.
+rustflags='--cfg getrandom_backend="wasm_js" -C link-arg=-zstack-size=4194304 -C target-feature=+simd128'
+cargo_args=(build --locked -p surrealdb-edge-size-probe --target wasm32-unknown-unknown --profile edge)
+wasm_features=(--enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int
+	--enable-mutable-globals --enable-multivalue --enable-reference-types --enable-simd)
+# rustc lays the shadow stack out first, above 1 KiB of static data.
+opt_flags=(-Oz --low-memory-unused --converge)
 case "$toolchain" in
 stable) cargo=(cargo) ;;
 nightly)
@@ -224,23 +163,7 @@ nightly)
 *) echo "--toolchain must be stable or nightly" >&2; exit 2 ;;
 esac
 
-# Links the staticlib `$1` into the module `$2` as worker-build links a Workers
-# module, with Earth's stack: 8 MiB, placed first, every stack-pointer
-# assignment checked.
-emcc_link() {
-	local profiling=()
-	((names)) && profiling=(--profiling-funcs)
-	"$emcc" "$1" -o "${2%.wasm}.mjs" --no-entry -sEXPORTED_FUNCTIONS=_run -Oz \
-		-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0 \
-		-sBINARYEN_EXTRA_PASSES=--translate-to-exnref \
-		-sMODULARIZE=instance -sEXPORT_ES6 -sENVIRONMENT=node \
-		-sASSERTIONS=0 -sALLOW_MEMORY_GROWTH=1 \
-		-sSTACK_SIZE=8388608 -Wl,--stack-first -sSTACK_OVERFLOW_CHECK=2 \
-		${profiling[@]+"${profiling[@]}"}
-}
-
 target_dir="$repo_root/target/wasm-size/$toolchain"
-[[ "$target" == emscripten ]] && target_dir="$repo_root/target/wasm-size/$toolchain-emscripten"
 failed=0
 printf '%-8s %-10s %-6s %12s %12s %12s\n' toolchain target bundle size budget gzip
 for v in "${variants[@]}"; do
@@ -254,19 +177,10 @@ for v in "${variants[@]}"; do
 	env ${strip[@]+"${strip[@]}"} RUSTFLAGS="$rustflags" CARGO_TARGET_DIR="$target_dir" \
 		"${cargo[@]}" "${cargo_args[@]}" ${features[@]+"${features[@]}"} >&2
 	out="$target_dir/surrealdb_edge_size_probe.$v.wasm"
-	case "$target" in
-	unknown)
-		raw="$target_dir/wasm32-unknown-unknown/edge/surrealdb_edge_size_probe.wasm"
-		rm -rf "$target_dir/bindgen"
-		"$wasm_bindgen" --target web --out-dir "$target_dir/bindgen" "$raw"
-		linked=$(find "$target_dir/bindgen" -name '*.wasm' ! -name '*.d.ts' | head -n 1)
-		;;
-	emscripten)
-		linked="$target_dir/linked.$v.wasm"
-		rm -f "$linked"
-		emcc_link "$target_dir/wasm32-unknown-emscripten/edge/libsurrealdb_edge_size_probe.a" "$linked" >&2
-		;;
-	esac
+	raw="$target_dir/wasm32-unknown-unknown/edge/surrealdb_edge_size_probe.wasm"
+	rm -rf "$target_dir/bindgen"
+	"$wasm_bindgen" --target web --out-dir "$target_dir/bindgen" "$raw"
+	linked=$(find "$target_dir/bindgen" -name '*.wasm' ! -name '*.d.ts' | head -n 1)
 	if ((names)); then
 		named="$target_dir/surrealdb_edge_size_probe.$v.names.wasm"
 		"$wasm_opt" "${opt_flags[@]}" "${wasm_features[@]}" -g "$linked" -o "$named"
@@ -278,18 +192,18 @@ for v in "${variants[@]}"; do
 	fi
 	size=$(wc -c <"$out" | tr -d ' ')
 	gz=$(gzip -9c "$out" | wc -c | tr -d ' ')
-	if [[ "$v" == custom || "$target" == emscripten ]]; then
-		printf '%-8s %-10s %-6s %12d %12s %12d  %s\n' "$toolchain" "$target" "$v" "$size" - "$gz" "$custom_features"
+	if [[ "$v" == custom ]]; then
+		printf '%-8s %-10s %-6s %12d %12s %12d  %s\n' "$toolchain" unknown "$v" "$size" - "$gz" "$custom_features"
 		continue
 	fi
 	budget_var="budget_${toolchain}_${v}"
 	budget=${!budget_var}
 	if ((budget == 0)); then
-		printf '%-8s %-10s %-6s %12d %12s %12d\n' "$toolchain" "$target" "$v" "$size" - "$gz"
+		printf '%-8s %-10s %-6s %12d %12s %12d\n' "$toolchain" unknown "$v" "$size" - "$gz"
 		echo "note: no $v budget set" >&2
 		continue
 	fi
-	printf '%-8s %-10s %-6s %12d %12d %12d\n' "$toolchain" "$target" "$v" "$size" "$budget" "$gz"
+	printf '%-8s %-10s %-6s %12d %12d %12d\n' "$toolchain" unknown "$v" "$size" "$budget" "$gz"
 	if ((size > budget)); then
 		echo "::error::the $toolchain $v wasm bundle is $size bytes, over its budget of $budget" >&2
 		failed=1
