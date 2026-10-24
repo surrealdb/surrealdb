@@ -7598,6 +7598,180 @@ async fn distributed_fulltext_index_replays_second_node_update() -> Result<()> {
 	Ok(())
 }
 
+/// The ids `t`'s full-text index `ft` matches for `term`.
+async fn fulltext_matches(ds: &Datastore, session: &Session, term: &str) -> Result<Vec<String>> {
+	use surrealdb_types::ToSql;
+	let sql = format!("SELECT VALUE id FROM t WITH INDEX ft WHERE content @@ '{term}' ORDER BY id");
+	let mut results = ds.execute(&sql, session, None).await?;
+	let value = results.remove(0).result?;
+	let surrealdb_types::Value::Array(rows) = value else {
+		anyhow::bail!("query returned non-array value: {value:?}");
+	};
+	rows.into_iter()
+		.map(|row| {
+			if let surrealdb_types::Value::RecordId(rid) = row {
+				Ok(rid.to_sql())
+			} else {
+				Err(anyhow::anyhow!("query returned a non-record value: {row:?}"))
+			}
+		})
+		.collect()
+}
+
+/// Run `stale` in a writer whose snapshot predates the final replay of a
+/// full-text build of `t.content`, and require its commit to conflict.
+///
+/// `setup` runs before the index is defined and `queued` while the build is
+/// `Building`, so the build queues it. The writer opens its transaction and
+/// reads `t` before the build replays `queued`, closes and publishes; `stale`
+/// then runs in it against the `Online` index. Its snapshot holds `queued` on
+/// the record but none of the index state the replay wrote for it.
+async fn fulltext_write_from_a_snapshot_before_the_final_replay_conflicts(
+	ds: &Arc<Datastore>,
+	session: &Session,
+	setup: &str,
+	queued: &str,
+	stale: &str,
+) -> Result<()> {
+	execute_all(
+		ds,
+		session,
+		&format!(
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			DEFINE TABLE t SCHEMALESS;
+			{setup}
+			DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;"
+		),
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(ds, "t", "ft").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// A `Building` generation whose initial scan is complete, taken over by a
+	// builder this test drives by hand.
+	const GENERATION: BuildGeneration = 3;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, GENERATION, None);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(ds, &ikb, state).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(&ikb.new_bt_key(GENERATION), &0u64).await?;
+	tx.commit().await?;
+	let build = new_building_for_index(ds, session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, GENERATION);
+
+	execute_all(ds, session, queued).await?;
+
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await?);
+	for result in ds
+		.run(
+			crate::kvs::QueryRequest::new("SELECT * FROM t", session)
+				.with_transaction(Arc::clone(&writer)),
+		)
+		.await?
+	{
+		result.result.map_err(|e| anyhow::anyhow!("{e}"))?;
+	}
+
+	let mut updates = 0;
+	let mut last_check = Instant::now();
+	build
+		.index_appending_loop(super::replay::ReplayUntil::Drained, 1, &mut updates, &mut last_check)
+		.await?;
+	assert_eq!(updates, 1, "the queued write is replayed");
+	build.mark_durable_closing(GENERATION).await?;
+	build
+		.index_appending_loop(super::replay::ReplayUntil::Drained, 1, &mut updates, &mut last_check)
+		.await?;
+	build.mark_durable_online(GENERATION, 1, updates, true).await?;
+
+	for result in ds
+		.run(crate::kvs::QueryRequest::new(stale, session).with_transaction(Arc::clone(&writer)))
+		.await?
+	{
+		result.result.map_err(|e| anyhow::anyhow!("{e}"))?;
+	}
+	match writer.commit().await {
+		Err(err) => assert!(
+			is_retryable_transaction_conflict(&err),
+			"the stale writer must fail with a retryable conflict, not {err:#}"
+		),
+		Ok(()) => panic!(
+			"`{stale}` committed from a snapshot that predates the final replay; \
+			 'bravo' matches {:?}",
+			fulltext_matches(ds, session, "bravo").await?
+		),
+	}
+	Ok(())
+}
+
+/// An update of a record the build indexed from the snapshot of a writer that
+/// predates the replay of the record's last change.
+#[tokio::test(flavor = "multi_thread")]
+async fn fulltext_update_from_a_snapshot_before_the_final_replay_conflicts() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	fulltext_write_from_a_snapshot_before_the_final_replay_conflicts(
+		&ds,
+		&session,
+		"CREATE t:1 SET content = 'alpha' RETURN NONE;",
+		"UPDATE t:1 SET content = 'bravo' RETURN NONE",
+		"UPDATE t:1 SET content = 'charlie' RETURN NONE",
+	)
+	.await?;
+	execute_all(&ds, &session, "UPDATE t:1 SET content = 'charlie' RETURN NONE").await?;
+	assert!(fulltext_matches(&ds, &session, "alpha").await?.is_empty());
+	assert!(fulltext_matches(&ds, &session, "bravo").await?.is_empty());
+	assert_eq!(fulltext_matches(&ds, &session, "charlie").await?, ["t:1"]);
+	Ok(())
+}
+
+/// An update of a record whose creation the build queued, from a writer whose
+/// snapshot holds the record but no doc-ID for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn fulltext_update_of_a_queued_create_from_a_stale_snapshot_conflicts() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	fulltext_write_from_a_snapshot_before_the_final_replay_conflicts(
+		&ds,
+		&session,
+		"CREATE t:1 SET content = 'alpha' RETURN NONE;",
+		"CREATE t:2 SET content = 'bravo' RETURN NONE",
+		"UPDATE t:2 SET content = 'charlie' RETURN NONE",
+	)
+	.await?;
+	execute_all(&ds, &session, "UPDATE t:2 SET content = 'charlie' RETURN NONE").await?;
+	assert!(fulltext_matches(&ds, &session, "bravo").await?.is_empty());
+	assert_eq!(fulltext_matches(&ds, &session, "charlie").await?, ["t:2"]);
+	Ok(())
+}
+
+/// A delete of a record whose creation the build queued, from a writer whose
+/// snapshot holds no doc-ID for it. Committed, it would leave the record's
+/// mapping and postings behind, and the record created again under the same id
+/// would adopt the doc-ID and match the deleted content's terms.
+#[tokio::test(flavor = "multi_thread")]
+async fn fulltext_delete_of_a_queued_create_from_a_stale_snapshot_conflicts() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	fulltext_write_from_a_snapshot_before_the_final_replay_conflicts(
+		&ds,
+		&session,
+		"CREATE t:1 SET content = 'alpha' RETURN NONE;",
+		"CREATE t:2 SET content = 'bravo' RETURN NONE",
+		"DELETE t:2 RETURN NONE",
+	)
+	.await?;
+	execute_all(&ds, &session, "DELETE t:2 RETURN NONE").await?;
+	execute_all(&ds, &session, "CREATE t:2 SET content = 'charlie' RETURN NONE").await?;
+	assert!(fulltext_matches(&ds, &session, "bravo").await?.is_empty());
+	assert_eq!(fulltext_matches(&ds, &session, "charlie").await?, ["t:2"]);
+	assert_eq!(fulltext_matches(&ds, &session, "alpha").await?, ["t:1"]);
+	Ok(())
+}
+
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn distributed_hnsw_index_replays_second_node_insert() -> Result<()> {

@@ -542,6 +542,26 @@ impl FullTextDocIds {
 		}
 	}
 
+	async fn lock_unmapped(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		id: &crate::val::RecordIdKey,
+	) -> Result<()> {
+		match self {
+			Self::Shared => {
+				TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+					.lock_unmapped(tx, id)
+					.await
+			}
+			Self::Legacy => {
+				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+					.lock_unmapped(tx, id)
+					.await
+			}
+		}
+	}
+
 	fn uses_shared(self) -> bool {
 		matches!(self, Self::Shared)
 	}
@@ -822,6 +842,13 @@ impl FullTextIndex {
 	/// Removes a document's postings, length and term memberships from the
 	/// index, returning its doc id, or `None` for a record with none.
 	///
+	/// A record with no doc-ID has nothing to remove, and that absence is read
+	/// under a commit-time conflict registration: an index build replaying the
+	/// write that created the record can map and index it after this
+	/// transaction's snapshot, and a removal that registered nothing would commit
+	/// beside that content — leaving the record matched by terms it no longer
+	/// holds. Registered, the commit fails as a retryable conflict.
+	///
 	/// A removal is recorded only for a term the index holds for the document,
 	/// because a term's changes within one transaction sum: a removal of a term
 	/// the document never carried would cancel the re-addition an `UPDATE`
@@ -849,6 +876,7 @@ impl FullTextIndex {
 		let tx = env.tx();
 		let nid = env.node_id();
 		let Some(doc_id) = self.get_doc_id(&tx, rid).await? else {
+			self.doc_ids.lock_unmapped(&self.ikb, &tx, &rid.key).await?;
 			return Ok(None);
 		};
 		let dl_key = self.ikb.new_dl(doc_id);

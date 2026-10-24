@@ -434,6 +434,20 @@ impl LegacyFullTextDocIds {
 		tx.get_key(&key, None).await
 	}
 
+	/// Reads `id`'s forward mapping under a commit-time conflict registration.
+	///
+	/// See [`TableDocIds::lock_unmapped`].
+	pub async fn lock_unmapped(&self, tx: &Transaction, id: &RecordIdKey) -> Result<()> {
+		let key = FtDocLookupKey::new(
+			self.ns,
+			self.db,
+			Cow::Borrowed(&self.tb),
+			self.ix,
+			Cow::Borrowed(id),
+		);
+		tx.getu_key(&key).await.map(drop)
+	}
+
 	pub async fn resolve_or_assign(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
 		let tx = env.tx();
 		let key = FtDocLookupKey::new(
@@ -541,6 +555,19 @@ impl TableDocIds {
 	/// is; see `Transaction::resolve_doc_id`.
 	pub async fn get_doc_id(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
 		tx.resolve_doc_id(self.ns, self.db, &self.tb, id, None).await
+	}
+
+	/// Reads `id`'s forward mapping under a commit-time conflict registration.
+	///
+	/// For a caller that has found `id` unmapped and acts on that: an index
+	/// removing a record's content finds nothing to remove. The answer is judged
+	/// on this transaction's snapshot, and a mapping can be written after it — by
+	/// an index build replaying the write that created the record, which indexes
+	/// its content under a new doc-ID. Registered, that write fails this
+	/// transaction's commit as a retryable conflict rather than leaving the
+	/// replayed content indexed for a record this transaction changed.
+	pub async fn lock_unmapped(&self, tx: &Transaction, id: &RecordIdKey) -> Result<()> {
+		tx.getu_key(&self.identity_key(id)).await.map(drop)
 	}
 
 	/// Returns the existing doc-ID for `id`, or allocates, persists, and returns a
