@@ -196,9 +196,9 @@ follows the store's record.
 a store that records no level at Legacy. Nothing raises it: neither the
 single-writer raise nor a pin. The store gets no records in the new format, no
 layout descriptors and no ledger entry for the format, so a 3.3.x build that
-carries the readers for ledger ids 4 and 6, and knows entries 8 and 9, can
-still open it. Stock 3.3 is refused by those four ids, which every 4.0 startup
-records, whatever the hold.
+carries the readers for ledger ids 4 and 6, and knows entries 8, 9 and 10
+(`0x40000008`, `0x40000009`, `0x4000000a`), can still open it. Stock 3.3 is
+refused by those five ids, which every 4.0 startup records, whatever the hold.
 
 The hold applies only to a store at Legacy when it is opened. A store the build
 creates is created at this build's release, and a store that already records a
@@ -377,7 +377,7 @@ they become, and removing a field removes its stored values.
   Incompatible entry 7, which 3.3 does not know, so 3.3 refuses to start with
   `MigratedBeyondStorageVersion` naming the entry, before it reads any record.
   Stock 3.3 also refuses every 4.0 store, whatever its level, because the 4.0
-  startup migrations record ids 4, 6, 8 and 9.
+  startup migrations record ids 4, 6, 8, 9 and 10 (`0x40000008`, `0x40000009`, `0x4000000a`).
 - **3.0 through 3.2** have no ledger and check only the storage version stamp
   (`!v`). A store carries stamp 4 from the moment it is created above Legacy,
   and from the transaction that raises its level or commits its first
