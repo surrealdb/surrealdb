@@ -95,6 +95,15 @@ pub enum LogicalLiteral {
 	Uuid(Uuid),
 	Geometry(Geometry),
 	File(File),
+	I8(i8),
+	U8(u8),
+	I16(i16),
+	U16(u16),
+	I32(i32),
+	U32(u32),
+	U64(u64),
+	F16(half::f16),
+	F32(f32),
 }
 
 impl LogicalLiteral {
@@ -117,6 +126,15 @@ impl LogicalLiteral {
 			LogicalLiteral::Uuid(x) => Literal::Uuid(*x),
 			LogicalLiteral::Geometry(x) => Literal::Geometry(x.clone()),
 			LogicalLiteral::File(x) => Literal::File(x.clone()),
+			LogicalLiteral::I8(x) => Literal::I8(*x),
+			LogicalLiteral::U8(x) => Literal::U8(*x),
+			LogicalLiteral::I16(x) => Literal::I16(*x),
+			LogicalLiteral::U16(x) => Literal::U16(*x),
+			LogicalLiteral::I32(x) => Literal::I32(*x),
+			LogicalLiteral::U32(x) => Literal::U32(*x),
+			LogicalLiteral::U64(x) => Literal::U64(*x),
+			LogicalLiteral::F16(x) => Literal::F16(*x),
+			LogicalLiteral::F32(x) => Literal::F32(*x),
 		}
 	}
 }
@@ -139,6 +157,15 @@ impl PartialEq for LogicalLiteral {
 			(LogicalLiteral::Uuid(a), LogicalLiteral::Uuid(b)) => a == b,
 			(LogicalLiteral::Geometry(a), LogicalLiteral::Geometry(b)) => a == b,
 			(LogicalLiteral::File(a), LogicalLiteral::File(b)) => a == b,
+			(LogicalLiteral::I8(a), LogicalLiteral::I8(b)) => a == b,
+			(LogicalLiteral::U8(a), LogicalLiteral::U8(b)) => a == b,
+			(LogicalLiteral::I16(a), LogicalLiteral::I16(b)) => a == b,
+			(LogicalLiteral::U16(a), LogicalLiteral::U16(b)) => a == b,
+			(LogicalLiteral::I32(a), LogicalLiteral::I32(b)) => a == b,
+			(LogicalLiteral::U32(a), LogicalLiteral::U32(b)) => a == b,
+			(LogicalLiteral::U64(a), LogicalLiteral::U64(b)) => a == b,
+			(LogicalLiteral::F16(a), LogicalLiteral::F16(b)) => a.to_bits() == b.to_bits(),
+			(LogicalLiteral::F32(a), LogicalLiteral::F32(b)) => a.to_bits() == b.to_bits(),
 			// Mismatched variants only. Every variant has an arm above; the
 			// `every_literal_variant_equals_itself` test is what keeps that
 			// true, since a variant that fell through here would compare
@@ -167,6 +194,15 @@ impl Hash for LogicalLiteral {
 			LogicalLiteral::Uuid(x) => x.hash(state),
 			LogicalLiteral::Geometry(x) => x.hash(state),
 			LogicalLiteral::File(x) => x.hash(state),
+			LogicalLiteral::I8(x) => x.hash(state),
+			LogicalLiteral::U8(x) => x.hash(state),
+			LogicalLiteral::I16(x) => x.hash(state),
+			LogicalLiteral::U16(x) => x.hash(state),
+			LogicalLiteral::I32(x) => x.hash(state),
+			LogicalLiteral::U32(x) => x.hash(state),
+			LogicalLiteral::U64(x) => x.hash(state),
+			LogicalLiteral::F16(x) => x.to_bits().hash(state),
+			LogicalLiteral::F32(x) => x.to_bits().hash(state),
 		}
 	}
 }
@@ -3133,6 +3169,11 @@ impl LogicalExpr {
 			LogicalExpr::Literal(LogicalLiteral::Integer(x)) => x.is_negative(),
 			LogicalExpr::Literal(LogicalLiteral::Float(x)) => x.is_sign_negative(),
 			LogicalExpr::Literal(LogicalLiteral::Decimal(x)) => x.is_sign_negative(),
+			LogicalExpr::Literal(LogicalLiteral::I8(x)) => x.is_negative(),
+			LogicalExpr::Literal(LogicalLiteral::I16(x)) => x.is_negative(),
+			LogicalExpr::Literal(LogicalLiteral::I32(x)) => x.is_negative(),
+			LogicalExpr::Literal(LogicalLiteral::F16(x)) => x.is_finite() && x.is_sign_negative(),
+			LogicalExpr::Literal(LogicalLiteral::F32(x)) => x.is_finite() && x.is_sign_negative(),
 			// A path starting with an outgoing lookup renders `->` first.
 			LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -3427,7 +3468,12 @@ enum BodyRoot {
 fn fmt_start(start: &LogicalExpr, f: &mut String, fmt: SqlFormat) {
 	let negative_number = matches!(start, LogicalExpr::Literal(LogicalLiteral::Decimal(d)) if d.is_sign_negative())
 		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::Integer(i)) if i.is_negative())
-		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::Float(x)) if x.is_sign_negative());
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::Float(x)) if x.is_sign_negative())
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::I8(i)) if i.is_negative())
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::I16(i)) if i.is_negative())
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::I32(i)) if i.is_negative())
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::F16(x)) if x.is_finite() && x.is_sign_negative())
+		|| matches!(start, LogicalExpr::Literal(LogicalLiteral::F32(x)) if x.is_finite() && x.is_sign_negative());
 	if start.needs_parentheses()
 		|| matches!(
 			start,
@@ -4665,7 +4711,16 @@ mod tests {
 				| LogicalLiteral::Datetime(_)
 				| LogicalLiteral::Uuid(_)
 				| LogicalLiteral::Geometry(_)
-				| LogicalLiteral::File(_) => {}
+				| LogicalLiteral::File(_)
+				| LogicalLiteral::I8(_)
+				| LogicalLiteral::U8(_)
+				| LogicalLiteral::I16(_)
+				| LogicalLiteral::U16(_)
+				| LogicalLiteral::I32(_)
+				| LogicalLiteral::U32(_)
+				| LogicalLiteral::U64(_)
+				| LogicalLiteral::F16(_)
+				| LogicalLiteral::F32(_) => {}
 			}
 		}
 		let samples = [
@@ -4685,6 +4740,17 @@ mod tests {
 			LogicalLiteral::Uuid(Uuid::nil()),
 			LogicalLiteral::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 			LogicalLiteral::File(File::new("b".to_owned(), "p".to_owned())),
+			LogicalLiteral::I8(-5),
+			LogicalLiteral::U8(5),
+			LogicalLiteral::I16(-500),
+			LogicalLiteral::U16(500),
+			LogicalLiteral::I32(-50000),
+			LogicalLiteral::U32(50000),
+			LogicalLiteral::U64(500000),
+			LogicalLiteral::F16(half::f16::from_f32(1.5)),
+			LogicalLiteral::F16(half::f16::NAN),
+			LogicalLiteral::F32(1.5),
+			LogicalLiteral::F32(f32::NAN),
 		];
 		for sample in samples {
 			assert_eq!(sample, sample.clone(), "{sample:?} must equal itself");

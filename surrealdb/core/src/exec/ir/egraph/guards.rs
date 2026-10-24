@@ -117,7 +117,18 @@ pub(crate) fn kind_admits(class: KindClass, kind: &Kind) -> bool {
 	match kind {
 		Kind::Bool => class == KindClass::Bool,
 		Kind::Int => matches!(class, KindClass::Int | KindClass::Number),
-		Kind::Float | Kind::Decimal | Kind::Number => class == KindClass::Number,
+		Kind::Float
+		| Kind::Decimal
+		| Kind::Number
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32 => class == KindClass::Number,
 		Kind::String => class == KindClass::String,
 		Kind::Object => class == KindClass::Object,
 		Kind::Array(..) => class == KindClass::Array,

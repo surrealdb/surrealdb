@@ -63,6 +63,11 @@ async fn post_handler(
 				.map_err(anyhow::Error::msg)
 				.map_err(ResponseError)?
 		}
+		Format::Cbor2 => {
+			surrealdb_core::rpc::format::cbor::decode_request_v2(&body, rec_limit as usize)
+				.map_err(anyhow::Error::msg)
+				.map_err(ResponseError)?
+		}
 		// FIXME: Add flatbuffer recursion limit.
 		Format::Flatbuffers => {
 			surrealdb_types::decode(&body).map_err(anyhow::Error::msg).map_err(ResponseError)?

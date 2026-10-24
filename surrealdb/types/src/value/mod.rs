@@ -42,7 +42,7 @@ pub use self::datetime::{Datetime, fmt_datetime_sql};
 pub use self::duration::{Duration, fmt_duration_sql};
 pub use self::file::File;
 pub use self::geometry::Geometry;
-pub use self::number::Number;
+pub use self::number::{Number, NumberKind, Wide};
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
@@ -120,6 +120,9 @@ pub enum Value {
 	/// A set of values
 	Set(Set),
 }
+
+#[cfg(all(target_pointer_width = "64", feature = "regex-unicode"))]
+const _: () = assert!(std::mem::size_of::<Value>() == 56);
 
 impl Eq for Value {}
 
@@ -609,6 +612,15 @@ impl Value {
 			Kind::Duration => self.is_duration(),
 			Kind::Float => self.is_float(),
 			Kind::Int => self.is_int(),
+			Kind::I8 => self.is_i8(),
+			Kind::U8 => self.is_u8(),
+			Kind::I16 => self.is_i16(),
+			Kind::U16 => self.is_u16(),
+			Kind::I32 => self.is_i32(),
+			Kind::U32 => self.is_u32(),
+			Kind::U64 => self.is_u64(),
+			Kind::F16 => self.is_f16(),
+			Kind::F32 => self.is_f32(),
 			Kind::Number => self.is_number(),
 			Kind::Object => self.is_object(),
 			Kind::String => self.is_string(),
@@ -1117,6 +1129,25 @@ mod tests {
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(5, 0))), "5dec")]
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(-5, 0))), "-5dec")]
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(12345, 2))), "123.45dec")]
+	// Numbers - sized
+	#[case::number_i8(Value::Number(Number::I8(-128)), "-128i8")]
+	#[case::number_u8(Value::Number(Number::U8(5)), "5u8")]
+	#[case::number_i16(Value::Number(Number::I16(-3)), "-3i16")]
+	#[case::number_u16(Value::Number(Number::U16(65535)), "65535u16")]
+	#[case::number_i32(Value::Number(Number::I32(-42)), "-42i32")]
+	#[case::number_u32(Value::Number(Number::U32(42)), "42u32")]
+	#[case::number_u64(Value::Number(Number::U64(u64::MAX)), "18446744073709551615u64")]
+	#[case::number_f16(Value::Number(Number::F16(half::f16::from_f64(0.1))), "0.1f16")]
+	#[case::number_f16_nan(Value::Number(Number::F16(half::f16::NAN)), "<f16>NaN")]
+	#[case::number_f16_inf(Value::Number(Number::F16(half::f16::INFINITY)), "<f16>Infinity")]
+	#[case::number_f16_neg_inf(
+		Value::Number(Number::F16(half::f16::NEG_INFINITY)),
+		"<f16>-Infinity"
+	)]
+	#[case::number_f32(Value::Number(Number::F32(1.5)), "1.5f32")]
+	#[case::number_f32_nan(Value::Number(Number::F32(f32::NAN)), "<f32>NaN")]
+	#[case::number_f32_inf(Value::Number(Number::F32(f32::INFINITY)), "<f32>Infinity")]
+	#[case::number_f32_neg_inf(Value::Number(Number::F32(f32::NEG_INFINITY)), "<f32>-Infinity")]
 	// Strings - basic
 	#[case::string(Value::String("".to_string()), "''")]
 	#[case::string(Value::String("hello".to_string()), "'hello'")]
@@ -1271,6 +1302,26 @@ mod tests {
 			Kind::Literal(KindLiteral::Decimal(Decimal::default()))
 		],
 		vec![Kind::None, Kind::Null]
+	)]
+	#[case::u8(
+		Value::Number(Number::U8(2)),
+		vec![
+			Kind::U8,
+			Kind::Number,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Integer(2))
+		],
+		vec![Kind::Int, Kind::Float, Kind::I8, Kind::Literal(KindLiteral::Integer(1))]
+	)]
+	#[case::f32(
+		Value::Number(Number::F32(1.5)),
+		vec![
+			Kind::F32,
+			Kind::Number,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Float(1.5))
+		],
+		vec![Kind::Float, Kind::F16, Kind::Int]
 	)]
 	#[case::string(
 		Value::String("".to_string()),

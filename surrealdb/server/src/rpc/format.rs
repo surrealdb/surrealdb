@@ -17,6 +17,7 @@ impl From<&Accept> for Format {
 			Accept::TextPlain => Format::Unsupported,
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
+			Accept::ApplicationCbor2 => Format::Cbor2,
 			Accept::ApplicationOctetStream => Format::Unsupported,
 			Accept::ApplicationFlatbuffers => Format::Flatbuffers,
 			Accept::ApplicationShaped => Format::shaped(),
@@ -30,6 +31,7 @@ impl From<&ContentType> for Format {
 			ContentType::TextPlain => Format::Unsupported,
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
+			ContentType::ApplicationCbor2 => Format::Cbor2,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
 			ContentType::ApplicationSurrealDBFlatbuffers => Format::Flatbuffers,
 			ContentType::ApplicationSurrealDBShaped => Format::shaped(),
@@ -42,6 +44,7 @@ impl From<&Format> for ContentType {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
+			Format::Cbor2 => ContentType::ApplicationCbor2,
 			Format::Flatbuffers => ContentType::ApplicationSurrealDBFlatbuffers,
 			Format::Shaped => ContentType::ApplicationSurrealDBShaped,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
@@ -87,7 +90,7 @@ impl WsFormat for Format {
 		match self {
 			Format::Json => surrealdb_core::rpc::format::json::request_id(data),
 			// A shaped connection's requests are CBOR.
-			Format::Cbor | Format::Shaped => {
+			Format::Cbor | Format::Cbor2 | Format::Shaped => {
 				surrealdb_core::rpc::format::cbor::request_id(data, recursion_limit)
 			}
 			Format::Flatbuffers | Format::Unsupported => None,
@@ -107,10 +110,20 @@ impl WsFormat for Format {
 					Err(parse_error())
 				}
 			}
-			// A shaped connection's requests are CBOR.
-			Format::Cbor | Format::Shaped => {
+			Format::Cbor => {
 				let val = surrealdb_core::rpc::format::cbor::decode_request(&val, recursion_limit)
 					.map_err(|_| parse_error())?;
+				if let Value::Object(obj) = val {
+					Ok(Request::from_object(obj)?)
+				} else {
+					Err(parse_error())
+				}
+			}
+			// A shaped connection's requests are CBOR v2.
+			Format::Cbor2 | Format::Shaped => {
+				let val =
+					surrealdb_core::rpc::format::cbor::decode_request_v2(&val, recursion_limit)
+						.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -149,7 +162,9 @@ impl WsFormat for Format {
 				let text = String::from_utf8(bytes).map_err(|_| parse_error())?;
 				Ok((text.len(), Message::Text(text.into())))
 			}
-			RowFormat::Cbor | RowFormat::Shaped => Ok((bytes.len(), Message::Binary(bytes.into()))),
+			RowFormat::Cbor | RowFormat::Cbor2 | RowFormat::Shaped => {
+				Ok((bytes.len(), Message::Binary(bytes.into())))
+			}
 		}))
 	}
 
@@ -162,6 +177,10 @@ impl WsFormat for Format {
 			}
 			Format::Cbor => {
 				let val = encode_response(RowFormat::Cbor, res)?;
+				Ok((val.len(), Message::Binary(val.into())))
+			}
+			Format::Cbor2 => {
+				let val = encode_response(RowFormat::Cbor2, res)?;
 				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Shaped => {
@@ -198,10 +217,20 @@ impl HttpFormat for Format {
 					Err(parse_error())
 				}
 			}
-			// A shaped request is CBOR.
-			Format::Cbor | Format::Shaped => {
+			Format::Cbor => {
 				let val = surrealdb_core::rpc::format::cbor::decode_request(&body, recursion_limit)
 					.map_err(|_| parse_error())?;
+				if let Value::Object(obj) = val {
+					Ok(Request::from_object(obj)?)
+				} else {
+					Err(parse_error())
+				}
+			}
+			// A shaped request is CBOR v2.
+			Format::Cbor2 | Format::Shaped => {
+				let val =
+					surrealdb_core::rpc::format::cbor::decode_request_v2(&body, recursion_limit)
+						.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -225,6 +254,7 @@ impl HttpFormat for Format {
 		let val = match self {
 			Format::Json => encode_response(RowFormat::Json, res)?,
 			Format::Cbor => encode_response(RowFormat::Cbor, res)?,
+			Format::Cbor2 => encode_response(RowFormat::Cbor2, res)?,
 			Format::Shaped => encode_response(RowFormat::Shaped, res)?,
 			Format::Flatbuffers => {
 				let res_value = res.into_value();
@@ -265,5 +295,22 @@ mod tests {
 		);
 		assert_eq!(Format::Shaped.row_format(), Some(surrealdb_rpc::RowFormat::Shaped));
 		assert_eq!(Format::Cbor.row_format(), Some(surrealdb_rpc::RowFormat::Cbor));
+		assert_eq!(Format::Cbor2.row_format(), Some(surrealdb_rpc::RowFormat::Cbor2));
+	}
+
+	#[test]
+	fn cbor2_is_negotiated_as_the_other_formats_are() {
+		assert!(PROTOCOLS.contains(&"cbor.2"));
+		assert_eq!(Format::from("cbor.2"), Format::Cbor2);
+		let value = HeaderValue::from_static(surrealdb_rpc::format::CBOR2);
+		let accept = Accept::decode(&mut std::iter::once(&value)).expect("decodes");
+		assert_eq!(Format::from(&accept), Format::Cbor2);
+		let content_type = ContentType::decode(&mut std::iter::once(&value)).expect("decodes");
+		assert_eq!(Format::from(&content_type), Format::Cbor2);
+		assert_eq!(
+			HeaderValue::from(ContentType::from(&Format::Cbor2)),
+			HeaderValue::from_static(surrealdb_rpc::format::CBOR2)
+		);
+		assert_eq!(Format::Cbor2.row_format(), Some(surrealdb_rpc::RowFormat::Cbor2));
 	}
 }

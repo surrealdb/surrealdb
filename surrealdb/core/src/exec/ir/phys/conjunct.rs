@@ -766,8 +766,8 @@ mod tests {
 	use super::*;
 	use crate::exec::ir::core::facts::FactCache;
 	use crate::exec::ir::core::ir::IrScope;
-	use crate::exec::ir::expr::ops::{ConvertAttrs, ConvertMode, ConvertSite, OnFail};
 	use crate::exec::ir::core::location::{LocOrigin, Location};
+	use crate::exec::ir::expr::ops::{ConvertAttrs, ConvertMode, ConvertSite, OnFail};
 	use crate::exec::ir::iface::ids::{BlockId, FrameId, SnapshotId};
 	use crate::exec::ir::iface::types::TypeKnowledge;
 	use crate::expr::Kind;
@@ -819,11 +819,7 @@ mod tests {
 		};
 		let mut rw = Rewriter::new(&mut ir, &mut facts);
 		let (_, block) = rw
-			.create_region(
-				filter,
-				RegionKind::Clause(ClauseRole::Where),
-				&[TypeKnowledge::Unknown],
-			)
+			.create_region(filter, RegionKind::Clause(ClauseRole::Where), &[TypeKnowledge::Unknown])
 			.expect("where region");
 		let row = rw.ir().block(block).expect("where block").args[0];
 		(ir, block, row)
@@ -859,10 +855,18 @@ mod tests {
 			},
 			&[row],
 		);
-		let one =
-			emit(&mut ir, InsertPoint::End(block), ExprOp::Literal(Box::new(Value::from(1i64))), &[]);
-		let zero =
-			emit(&mut ir, InsertPoint::End(block), ExprOp::Literal(Box::new(Value::from(0i64))), &[]);
+		let one = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Literal(Box::new(Value::from(1i64))),
+			&[],
+		);
+		let zero = emit(
+			&mut ir,
+			InsertPoint::End(block),
+			ExprOp::Literal(Box::new(Value::from(0i64))),
+			&[],
+		);
 		let eq_a = emit(
 			&mut ir,
 			InsertPoint::End(block),
@@ -892,9 +896,8 @@ mod tests {
 					},
 				)
 				.expect("or op");
-			let (_, rhs_block) = rw
-				.create_region(or_op, RegionKind::LazyOperand, &[])
-				.expect("lazy region");
+			let (_, rhs_block) =
+				rw.create_region(or_op, RegionKind::LazyOperand, &[]).expect("lazy region");
 			let div = rw
 				.create(
 					InsertPoint::End(rhs_block),

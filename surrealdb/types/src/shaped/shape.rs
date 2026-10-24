@@ -74,9 +74,11 @@ pub enum Kind {
 	U16,
 	/// `u32`: an unsigned integer of 4 bytes.
 	U32,
-	/// `u64`: an unsigned integer of 8 bytes; above `i64::MAX` it reads as a decimal.
+	/// `u64`: an unsigned integer of 8 bytes.
 	U64,
-	/// `f32`: binary32 bits, read as a float.
+	/// `f16`: binary16 bits.
+	F16,
+	/// `f32`: binary32 bits.
 	F32,
 	/// `datetime_ns`: `i64` nanoseconds since the epoch; `i64::MIN` and `i64::MAX` say the value is
 	/// in the column's overflow slot.
@@ -111,6 +113,7 @@ impl Kind {
 			Kind::U16 => 0x0c,
 			Kind::U32 => 0x0d,
 			Kind::U64 => 0x0e,
+			Kind::F16 => 0x17,
 			Kind::F32 => 0x0f,
 			Kind::DatetimeNs => 0x18,
 			Kind::DurationNs => 0x19,
@@ -141,6 +144,7 @@ impl Kind {
 			0x0c => Kind::U16,
 			0x0d => Kind::U32,
 			0x0e => Kind::U64,
+			0x17 => Kind::F16,
 			0x0f => Kind::F32,
 			0x18 => Kind::DatetimeNs,
 			0x19 => Kind::DurationNs,
@@ -153,7 +157,7 @@ impl Kind {
 	pub const fn fixed_width(self) -> Option<u32> {
 		match self {
 			Kind::Bool | Kind::I8 | Kind::U8 => Some(1),
-			Kind::I16 | Kind::U16 => Some(2),
+			Kind::I16 | Kind::U16 | Kind::F16 => Some(2),
 			Kind::I32 | Kind::U32 | Kind::F32 => Some(4),
 			Kind::U64 | Kind::DatetimeNs | Kind::DurationNs => Some(8),
 			Kind::Int | Kind::Float => Some(8),
@@ -171,18 +175,25 @@ impl Kind {
 	}
 
 	/// The kind a value of this kind is written as by a [`ValueShaper`](super::ValueShaper): a
-	/// stored width widened, a bit as a byte.
+	/// compact timestamp or bit widened to its value kind, and every number kind preserved at its
+	/// own width.
 	pub const fn value_kind(self) -> Kind {
 		match self {
 			Kind::Bit => Kind::Bool,
-			Kind::I8 | Kind::I16 | Kind::I32 | Kind::U8 | Kind::U16 | Kind::U32 => Kind::Int,
-			Kind::U64 => Kind::Dynamic,
-			Kind::F32 => Kind::Float,
 			Kind::DatetimeNs => Kind::Datetime,
 			Kind::DurationNs => Kind::Duration,
 			other @ (Kind::Bool
 			| Kind::Int
 			| Kind::Float
+			| Kind::I8
+			| Kind::I16
+			| Kind::I32
+			| Kind::U8
+			| Kind::U16
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Datetime
 			| Kind::Duration
 			| Kind::Uuid
@@ -204,8 +215,12 @@ impl Kind {
 				| Kind::Bytes
 				| Kind::Decimal
 				| Kind::Int | Kind::Float
-				| Kind::Bool | Kind::Uuid
-				| Kind::Datetime
+				| Kind::I8 | Kind::I16
+				| Kind::I32 | Kind::U8
+				| Kind::U16 | Kind::U32
+				| Kind::U64 | Kind::F16
+				| Kind::F32 | Kind::Bool
+				| Kind::Uuid | Kind::Datetime
 				| Kind::Duration
 		)
 	}

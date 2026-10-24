@@ -93,8 +93,11 @@ async fn post_handler(
 	let encoded = match output.as_deref() {
 		None | Some(Accept::ApplicationJson) => Some(RowFormat::Json),
 		Some(Accept::ApplicationCbor) => Some(RowFormat::Cbor),
+		Some(Accept::ApplicationCbor2) => Some(RowFormat::Cbor2),
 		Some(Accept::ApplicationShaped) => Some(RowFormat::Shaped),
-		_ => None,
+		Some(Accept::TextPlain)
+		| Some(Accept::ApplicationOctetStream)
+		| Some(Accept::ApplicationFlatbuffers) => None,
 	};
 	if let Some(format) = encoded {
 		let run = surrealdb_core::rpc::format::encoded::execute_encoded(
@@ -113,6 +116,7 @@ async fn post_handler(
 					Ok(()) => Ok(match format {
 						RowFormat::Json => Output::Json(bytes),
 						RowFormat::Cbor => Output::Cbor(bytes),
+						RowFormat::Cbor2 => Output::Cbor2(bytes),
 						RowFormat::Shaped => Output::Shaped(bytes),
 					}),
 					Err(_) => Ok(Output::Fail),
@@ -135,7 +139,13 @@ async fn post_handler(
 			}
 			// An unsupported content-type was requested; JSON and CBOR are
 			// answered above.
-			_ => Err(NetError::InvalidType.into()),
+			None
+			| Some(Accept::ApplicationJson)
+			| Some(Accept::ApplicationCbor)
+			| Some(Accept::ApplicationCbor2)
+			| Some(Accept::ApplicationShaped)
+			| Some(Accept::TextPlain)
+			| Some(Accept::ApplicationOctetStream) => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(ResponseError(err.into())),

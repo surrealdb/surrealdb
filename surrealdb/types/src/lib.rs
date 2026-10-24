@@ -27,6 +27,7 @@ mod variables;
 
 pub use error::*;
 pub use flatbuffers::*;
+pub use half::f16;
 pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;

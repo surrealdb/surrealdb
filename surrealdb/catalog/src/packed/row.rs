@@ -1266,7 +1266,16 @@ impl<'a> CheckedPackedRow<'a> {
 				FieldRef::Null
 				| FieldRef::Object
 				| FieldRef::Bool(_)
+				| FieldRef::I8(_)
+				| FieldRef::I16(_)
+				| FieldRef::I32(_)
 				| FieldRef::Int(_)
+				| FieldRef::U8(_)
+				| FieldRef::U16(_)
+				| FieldRef::U32(_)
+				| FieldRef::U64(_)
+				| FieldRef::F16(_)
+				| FieldRef::F32(_)
 				| FieldRef::Float(_)
 				| FieldRef::Decimal(_)
 				| FieldRef::Uuid(_)
@@ -1350,9 +1359,18 @@ pub enum FieldRef<'a> {
 	/// An object node that is present; its fields are columns of their own.
 	Object,
 	Bool(bool),
+	I8(i8),
+	I16(i16),
+	I32(i32),
 	Int(i64),
+	U8(u8),
+	U16(u16),
+	U32(u32),
+	U64(u64),
+	F16(crate::half::f16),
+	F32(f32),
 	Float(f64),
-	/// A `Decimal16` or `DecimalVar` value, or a `U64` value above `i64::MAX`.
+	/// A `Decimal16` or `DecimalVar` value.
 	Decimal(Decimal),
 	Uuid(uuid::Uuid),
 	Datetime(DateTime<Utc>),

@@ -346,14 +346,8 @@ fn inline_at(cx: &mut LoCx<'_>, op: OpId, region: RegionId, site: &Site) -> Resu
 		if yielded.iter().all(|value| same_error_scope(rw.ir(), op, *value)) {
 			return rw.replace_op(op, &yielded);
 		}
-		let results: SmallVec<[ValueId; 2]> = rw
-			.ir()
-			.op(op)
-			.ok_or(IrError::Stale("op"))?
-			.results
-			.iter()
-			.copied()
-			.collect();
+		let results: SmallVec<[ValueId; 2]> =
+			rw.ir().op(op).ok_or(IrError::Stale("op"))?.results.iter().copied().collect();
 		for (result, value) in results.iter().zip(&yielded) {
 			rw.replace_all_uses(*result, *value)?;
 		}

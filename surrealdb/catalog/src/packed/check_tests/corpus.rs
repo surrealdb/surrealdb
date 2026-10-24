@@ -6,14 +6,13 @@
 use chrono::{DateTime, Utc};
 use surrealdb_types::Decimal;
 
-use super::super::kind::widen_f32;
 use super::super::tests::{
 	Pres, Rng, Spec, at, bytes, datetime, decimal, duration, float, int, leap_second, point,
 	record, string, uuid, wide_literals,
 };
 use super::super::{DATETIME_ABOVE, DATETIME_BELOW, DURATION_ESCAPE};
 use crate::layout::PhysicalKind;
-use crate::val::{self, Array, Object, RecordId, RecordIdKey, Strand, TableName, Value};
+use crate::val::{self, Array, Number, Object, RecordId, RecordIdKey, Strand, TableName, Value};
 
 const ALL_PRES: [Pres; 4] = [Pres::Required, Pres::Optional, Pres::Nullable, Pres::Both];
 
@@ -59,6 +58,7 @@ pub(super) const LEAF_KINDS: &[PhysicalKind] = &[
 	PhysicalKind::U16,
 	PhysicalKind::U32,
 	PhysicalKind::U64,
+	PhysicalKind::F16,
 	PhysicalKind::F32,
 	PhysicalKind::F64,
 	PhysicalKind::Decimal16,
@@ -137,6 +137,7 @@ fn gen_leaf(rng: &mut Rng, presence: Pres) -> Spec {
 		| PhysicalKind::U16
 		| PhysicalKind::U32
 		| PhysicalKind::U64
+		| PhysicalKind::F16
 		| PhysicalKind::F32
 		| PhysicalKind::F64
 		| PhysicalKind::Decimal16
@@ -311,7 +312,7 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 			PhysicalKind::Bool => int(1),
 			PhysicalKind::I8 => int(1_000),
 			PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => int(-1),
-			PhysicalKind::F32 => float(0.1),
+			PhysicalKind::F16 | PhysicalKind::F32 => float(0.1),
 			PhysicalKind::Datetime => datetime(leap_second()),
 			PhysicalKind::LiteralCode(_) => string("not a literal"),
 			PhysicalKind::RecordKey => record("elsewhere", RecordIdKey::Number(1)),
@@ -334,15 +335,24 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 	}
 	match kind {
 		PhysicalKind::Bool => Value::Bool(rng.one_in(2)),
-		PhysicalKind::I8 => int(gen_int_in(rng, i8::MIN.into(), i8::MAX.into())),
-		PhysicalKind::I16 => int(gen_int_in(rng, i16::MIN.into(), i16::MAX.into())),
-		PhysicalKind::I32 => int(gen_int_in(rng, i32::MIN.into(), i32::MAX.into())),
+		PhysicalKind::I8 => {
+			Value::Number(Number::I8(gen_int_in(rng, i8::MIN.into(), i8::MAX.into()) as i8))
+		}
+		PhysicalKind::I16 => {
+			Value::Number(Number::I16(gen_int_in(rng, i16::MIN.into(), i16::MAX.into()) as i16))
+		}
+		PhysicalKind::I32 => {
+			Value::Number(Number::I32(gen_int_in(rng, i32::MIN.into(), i32::MAX.into()) as i32))
+		}
 		PhysicalKind::I64 => int(gen_int_in(rng, i64::MIN, i64::MAX)),
-		PhysicalKind::U8 => int(gen_int_in(rng, 0, u8::MAX.into())),
-		PhysicalKind::U16 => int(gen_int_in(rng, 0, u16::MAX.into())),
-		PhysicalKind::U32 => int(gen_int_in(rng, 0, u32::MAX.into())),
-		PhysicalKind::U64 => int(gen_int_in(rng, 0, i64::MAX)),
-		PhysicalKind::F32 => float(widen_f32(rng.next() as u32)),
+		PhysicalKind::U8 => Value::Number(Number::U8(gen_int_in(rng, 0, u8::MAX.into()) as u8)),
+		PhysicalKind::U16 => Value::Number(Number::U16(gen_int_in(rng, 0, u16::MAX.into()) as u16)),
+		PhysicalKind::U32 => Value::Number(Number::U32(gen_int_in(rng, 0, u32::MAX.into()) as u32)),
+		PhysicalKind::U64 => Value::Number(Number::U64(rng.next())),
+		PhysicalKind::F16 => {
+			Value::Number(Number::F16(crate::half::f16::from_bits(rng.next() as u16)))
+		}
+		PhysicalKind::F32 => Value::Number(Number::F32(f32::from_bits(rng.next() as u32))),
 		PhysicalKind::F64 => float(f64::from_bits(rng.next())),
 		PhysicalKind::Decimal16 | PhysicalKind::DecimalVar => decimal(gen_decimal(rng)),
 		PhysicalKind::Fixed(width) => bytes(&gen_bytes(rng, width as usize)),

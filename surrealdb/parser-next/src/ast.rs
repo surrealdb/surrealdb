@@ -20,6 +20,28 @@
 pub type NodeId = u32;
 pub const NONE: NodeId = u32::MAX;
 
+/// A source span: start and end byte offsets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Span {
+	pub start: u32,
+	pub end: u32,
+}
+
+impl From<(u32, u32)> for Span {
+	fn from((start, end): (u32, u32)) -> Self {
+		Span {
+			start,
+			end,
+		}
+	}
+}
+
+impl From<Span> for (u32, u32) {
+	fn from(span: Span) -> Self {
+		(span.start, span.end)
+	}
+}
+
 /// A node tag. The meaning of `op`, `a` and `b` per tag is documented on each
 /// variant; `start..end` is always the node's source span.
 #[repr(u8)]
@@ -40,6 +62,15 @@ pub enum Tag {
 	Infinity,
 	/// Value decoded from the span.
 	Decimal,
+	I8,
+	U8,
+	I16,
+	U16,
+	I32,
+	U32,
+	U64,
+	F16,
+	F32,
 	/// Value decoded from the span.
 	Duration,
 	/// A string; `op` is its prefix byte (`0`, `s`, `d`, `u`, `b`, `r`, `f`).
@@ -651,6 +682,16 @@ pub mod kind {
 	/// alternating component `Name`s and kinds. Only [`crate::Entry::IdKind`]
 	/// and the `TYPE` clause of a field named `id` produce it.
 	pub const LIT_KEYED: u8 = 29;
+	pub const I8: u8 = 30;
+	pub const U8: u8 = 31;
+	pub const I16: u8 = 32;
+	pub const U16: u8 = 33;
+	pub const I32: u8 = 34;
+	pub const U32: u8 = 35;
+	pub const U64: u8 = 36;
+	pub const F16: u8 = 37;
+	pub const F32: u8 = 38;
+	pub const SIMPLE_LIMIT: u8 = 39;
 }
 
 #[repr(u8)]
@@ -827,6 +868,71 @@ pub struct Node {
 
 const _: () = assert!(core::mem::size_of::<Node>() == 20);
 
+impl Node {
+	#[inline]
+	pub fn span(&self) -> Span {
+		Span {
+			start: self.start,
+			end: self.end,
+		}
+	}
+
+	#[inline]
+	pub fn as_i8(&self) -> i8 {
+		self.a as i8
+	}
+
+	#[inline]
+	pub fn as_u8(&self) -> u8 {
+		self.a as u8
+	}
+
+	#[inline]
+	pub fn as_i16(&self) -> i16 {
+		self.a as i16
+	}
+
+	#[inline]
+	pub fn as_u16(&self) -> u16 {
+		self.a as u16
+	}
+
+	#[inline]
+	pub fn as_i32(&self) -> i32 {
+		self.a as i32
+	}
+
+	#[inline]
+	pub fn as_u32(&self) -> u32 {
+		self.a
+	}
+
+	#[inline]
+	pub fn as_i64(&self) -> i64 {
+		(self.a as u64 | ((self.b as u64) << 32)) as i64
+	}
+
+	#[inline]
+	pub fn as_u64(&self) -> u64 {
+		self.a as u64 | ((self.b as u64) << 32)
+	}
+
+	#[inline]
+	pub fn as_f16(&self) -> half::f16 {
+		half::f16::from_bits(self.a as u16)
+	}
+
+	#[inline]
+	pub fn as_f32(&self) -> f32 {
+		f32::from_bits(self.a)
+	}
+
+	#[inline]
+	pub fn as_f64(&self) -> f64 {
+		f64::from_bits(self.a as u64 | ((self.b as u64) << 32))
+	}
+}
+
 /// The arena. Reuse one across parses to stop allocating.
 #[derive(Default)]
 pub struct Ast {
@@ -882,5 +988,99 @@ impl Ast {
 
 	pub fn text<'s>(n: &Node, src: &'s str) -> &'s str {
 		&src[n.start as usize..n.end as usize]
+	}
+
+	pub fn push_leaf(&mut self, tag: Tag, op: u8, a: u32, b: u32, span: Span) -> NodeId {
+		let id = self.nodes.len() as NodeId;
+		self.nodes.push(Node {
+			tag,
+			op,
+			depth: 1,
+			a,
+			b,
+			start: span.start,
+			end: span.end,
+		});
+		id
+	}
+
+	pub fn i8(&mut self, v: i8, span: Span) -> NodeId {
+		self.push_leaf(Tag::I8, 0, v as u8 as u32, 0, span)
+	}
+
+	pub fn u8(&mut self, v: u8, span: Span) -> NodeId {
+		self.push_leaf(Tag::U8, 0, v as u32, 0, span)
+	}
+
+	pub fn i16(&mut self, v: i16, span: Span) -> NodeId {
+		self.push_leaf(Tag::I16, 0, v as u16 as u32, 0, span)
+	}
+
+	pub fn u16(&mut self, v: u16, span: Span) -> NodeId {
+		self.push_leaf(Tag::U16, 0, v as u32, 0, span)
+	}
+
+	pub fn i32(&mut self, v: i32, span: Span) -> NodeId {
+		self.push_leaf(Tag::I32, 0, v as u32, 0, span)
+	}
+
+	pub fn u32(&mut self, v: u32, span: Span) -> NodeId {
+		self.push_leaf(Tag::U32, 0, v, 0, span)
+	}
+
+	pub fn u64(&mut self, v: u64, span: Span) -> NodeId {
+		self.push_leaf(Tag::U64, 0, v as u32, (v >> 32) as u32, span)
+	}
+
+	pub fn f16(&mut self, v: half::f16, span: Span) -> NodeId {
+		self.push_leaf(Tag::F16, 0, v.to_bits() as u32, 0, span)
+	}
+
+	pub fn f32(&mut self, v: f32, span: Span) -> NodeId {
+		self.push_leaf(Tag::F32, 0, v.to_bits(), 0, span)
+	}
+
+	pub fn val_i8(&self, id: NodeId) -> i8 {
+		self.node(id).as_i8()
+	}
+
+	pub fn val_u8(&self, id: NodeId) -> u8 {
+		self.node(id).as_u8()
+	}
+
+	pub fn val_i16(&self, id: NodeId) -> i16 {
+		self.node(id).as_i16()
+	}
+
+	pub fn val_u16(&self, id: NodeId) -> u16 {
+		self.node(id).as_u16()
+	}
+
+	pub fn val_i32(&self, id: NodeId) -> i32 {
+		self.node(id).as_i32()
+	}
+
+	pub fn val_u32(&self, id: NodeId) -> u32 {
+		self.node(id).as_u32()
+	}
+
+	pub fn val_i64(&self, id: NodeId) -> i64 {
+		self.node(id).as_i64()
+	}
+
+	pub fn val_u64(&self, id: NodeId) -> u64 {
+		self.node(id).as_u64()
+	}
+
+	pub fn val_f16(&self, id: NodeId) -> half::f16 {
+		self.node(id).as_f16()
+	}
+
+	pub fn val_f32(&self, id: NodeId) -> f32 {
+		self.node(id).as_f32()
+	}
+
+	pub fn val_f64(&self, id: NodeId) -> f64 {
+		self.node(id).as_f64()
 	}
 }

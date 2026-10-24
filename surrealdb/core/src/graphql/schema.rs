@@ -315,6 +315,8 @@ pub async fn generate_schema(
 
 	scalar_debug_validated!(schema, "decimal", Kind::Decimal);
 	scalar_debug_validated!(schema, "number", Kind::Number);
+	scalar_debug_validated!(schema, "u32", Kind::U32);
+	scalar_debug_validated!(schema, "u64", Kind::U64);
 	scalar_debug_validated!(schema, "null", Kind::Null);
 	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
 	scalar_debug_validated!(schema, "duration", Kind::Duration);
@@ -358,11 +360,31 @@ pub(crate) fn sql_value_to_graphql_value(v: SurValue) -> Result<GraphqlValue, Gr
 		SurValue::Bool(b) => GraphqlValue::Boolean(b),
 		SurValue::Number(n) => match n {
 			SurNumber::Int(i) => GraphqlValue::Number(i.into()),
+			SurNumber::I8(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::I16(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::I32(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::U8(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::U16(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::U32(i) => GraphqlValue::Number((i as i64).into()),
+			SurNumber::U64(i) => GraphqlValue::Number(i.into()),
 			// GraphQL numbers are finite, and `NaN`, `Infinity` and
 			// `-Infinity` are all answers SurrealQL gives — the extremes of no
 			// values, a mean of none. None of them has a number to send, so
 			// they are sent as null rather than failing the whole query.
 			SurNumber::Float(f) => match Number::from_f64(f) {
+				Some(n) => GraphqlValue::Number(n),
+				None => GraphqlValue::Null,
+			},
+			SurNumber::F16(f) => match Number::from_f64(f.to_f64()) {
+				Some(n) => GraphqlValue::Number(n),
+				None => GraphqlValue::Null,
+			},
+			SurNumber::F32(f) => match f
+				.is_finite()
+				.then(|| f.to_string().parse::<f64>().ok())
+				.flatten()
+				.and_then(Number::from_f64)
+			{
 				Some(n) => GraphqlValue::Number(n),
 				None => GraphqlValue::Null,
 			},
@@ -584,8 +606,12 @@ fn kind_to_type_inner(
 		Kind::Datetime => TypeRef::named("datetime"),
 		Kind::Decimal => TypeRef::named("decimal"),
 		Kind::Duration => TypeRef::named("duration"),
-		Kind::Float => TypeRef::named(TypeRef::FLOAT),
-		Kind::Int => TypeRef::named(TypeRef::INT),
+		Kind::Float | Kind::F16 | Kind::F32 => TypeRef::named(TypeRef::FLOAT),
+		Kind::Int | Kind::I8 | Kind::I16 | Kind::I32 | Kind::U8 | Kind::U16 => {
+			TypeRef::named(TypeRef::INT)
+		}
+		Kind::U32 => TypeRef::named("u32"),
+		Kind::U64 => TypeRef::named("u64"),
 		Kind::Number => TypeRef::named("number"),
 		Kind::Object => TypeRef::named("object"),
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
@@ -832,7 +858,16 @@ macro_rules! either_try_kind {
 	};
 	($ks:ident, $val:expr_2021, AllNumbers) => {
 		either_try_kind!($ks, $val, Kind::Int);
+		either_try_kind!($ks, $val, Kind::I8);
+		either_try_kind!($ks, $val, Kind::I16);
+		either_try_kind!($ks, $val, Kind::I32);
+		either_try_kind!($ks, $val, Kind::U8);
+		either_try_kind!($ks, $val, Kind::U16);
+		either_try_kind!($ks, $val, Kind::U32);
+		either_try_kind!($ks, $val, Kind::U64);
 		either_try_kind!($ks, $val, Kind::Float);
+		either_try_kind!($ks, $val, Kind::F16);
+		either_try_kind!($ks, $val, Kind::F32);
 		either_try_kind!($ks, $val, Kind::Decimal);
 		either_try_kind!($ks, $val, Kind::Number);
 	};
@@ -924,6 +959,15 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GraphqlError> {
 		Literal::Float(f) => Ok(SurValue::Number(SurNumber::Float(f))),
 		Literal::Integer(i) => Ok(SurValue::Number(SurNumber::Int(i))),
 		Literal::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
+		Literal::I8(v) => Ok(SurValue::Number(SurNumber::I8(v))),
+		Literal::I16(v) => Ok(SurValue::Number(SurNumber::I16(v))),
+		Literal::I32(v) => Ok(SurValue::Number(SurNumber::I32(v))),
+		Literal::U8(v) => Ok(SurValue::Number(SurNumber::U8(v))),
+		Literal::U16(v) => Ok(SurValue::Number(SurNumber::U16(v))),
+		Literal::U32(v) => Ok(SurValue::Number(SurNumber::U32(v))),
+		Literal::U64(v) => Ok(SurValue::Number(SurNumber::U64(v))),
+		Literal::F16(v) => Ok(SurValue::Number(SurNumber::F16(v))),
+		Literal::F32(v) => Ok(SurValue::Number(SurNumber::F32(v))),
 		Literal::String(s) => Ok(SurValue::String(s)),
 		Literal::Bytes(b) => Ok(SurValue::Bytes(b)),
 		Literal::Regex(r) => Ok(SurValue::Regex(r)),
@@ -981,6 +1025,43 @@ pub(crate) fn graphql_to_sql_kind(
 	kind: Kind,
 ) -> Result<SurValue, GraphqlError> {
 	graphql_to_sql_kind_with_scope(val, kind, None)
+}
+
+fn gql_int_input<T>(
+	val: &GraphqlValue,
+	kind: Kind,
+	lit_extract: impl FnOnce(Literal) -> Option<T>,
+	wrap: impl FnOnce(T) -> SurNumber,
+) -> Result<SurValue, GraphqlError>
+where
+	T: TryFrom<i64> + TryFrom<u64>,
+{
+	use crate::syn;
+	if let GraphqlValue::Number(n) = val {
+		if let Some(v) = n
+			.as_i64()
+			.and_then(|i| T::try_from(i).ok())
+			.or_else(|| n.as_u64().and_then(|u| T::try_from(u).ok()))
+		{
+			Ok(SurValue::Number(wrap(v)))
+		} else {
+			Err(type_error(kind, val))
+		}
+	} else if let GraphqlValue::String(s) = val {
+		let Expr::Literal(lit) = syn::expr(s)? else {
+			return Err(type_error(kind, val));
+		};
+		if let Literal::Integer(i) = lit {
+			let v = T::try_from(i).map_err(|_| type_error(kind, val))?;
+			Ok(SurValue::Number(wrap(v)))
+		} else if let Some(v) = lit_extract(lit) {
+			Ok(SurValue::Number(wrap(v)))
+		} else {
+			Err(type_error(kind, val))
+		}
+	} else {
+		Err(type_error(kind, val))
+	}
 }
 
 /// Like [`graphql_to_sql_kind`], but with an optional `enum_scope` for precise
@@ -1123,25 +1204,143 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				Err(type_error(kind, val))
 			}
 		}
-		Kind::Int => {
-			if let GraphqlValue::Number(n) = val {
-				if let Some(i) = n.as_i64() {
-					Ok(SurValue::Number(SurNumber::Int(i)))
+		Kind::F16 => {
+			let f = if let GraphqlValue::Number(n) = val {
+				let num = if let Some(i) = n.as_i64() {
+					SurNumber::Int(i)
+				} else if let Some(f) = n.as_f64() {
+					SurNumber::Float(f)
+				} else if let Some(uint) = n.as_u64() {
+					SurNumber::U64(uint)
 				} else {
-					Err(type_error(kind, val))
-				}
+					unreachable!("serde_json::Number must be either i64, u64 or f64")
+				};
+				num.as_f16().ok_or_else(|| type_error(kind, val))?
 			} else if let GraphqlValue::String(s) = val {
-				let int_expr: Expr = syn::expr(s)?;
-
-				if let Expr::Literal(Literal::Integer(i)) = int_expr {
-					Ok(SurValue::Number(SurNumber::Int(i)))
+				let float_expr: Expr = syn::expr(s)?;
+				if let Expr::Literal(Literal::F16(f)) = float_expr {
+					f
+				} else if let Expr::Literal(Literal::Float(f)) = float_expr {
+					SurNumber::Float(f).as_f16().ok_or_else(|| type_error(kind, val))?
 				} else {
-					Err(type_error(kind, val))
+					return Err(type_error(kind, val));
 				}
 			} else {
-				Err(type_error(kind, val))
-			}
+				return Err(type_error(kind, val));
+			};
+			Ok(SurValue::Number(SurNumber::F16(f)))
 		}
+		Kind::F32 => {
+			let f = if let GraphqlValue::Number(n) = val {
+				let num = if let Some(i) = n.as_i64() {
+					SurNumber::Int(i)
+				} else if let Some(f) = n.as_f64() {
+					SurNumber::Float(f)
+				} else if let Some(uint) = n.as_u64() {
+					SurNumber::U64(uint)
+				} else {
+					unreachable!("serde_json::Number must be either i64, u64 or f64")
+				};
+				num.as_f32().ok_or_else(|| type_error(kind, val))?
+			} else if let GraphqlValue::String(s) = val {
+				let float_expr: Expr = syn::expr(s)?;
+				if let Expr::Literal(Literal::F32(f)) = float_expr {
+					f
+				} else if let Expr::Literal(Literal::Float(f)) = float_expr {
+					SurNumber::Float(f).as_f32().ok_or_else(|| type_error(kind, val))?
+				} else {
+					return Err(type_error(kind, val));
+				}
+			} else {
+				return Err(type_error(kind, val));
+			};
+			Ok(SurValue::Number(SurNumber::F32(f)))
+		}
+		Kind::I8 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::I8(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::I8,
+		),
+		Kind::I16 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::I16(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::I16,
+		),
+		Kind::I32 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::I32(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::I32,
+		),
+		Kind::Int => gql_int_input(val, kind, |_| None, SurNumber::Int),
+		Kind::U8 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::U8(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::U8,
+		),
+		Kind::U16 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::U16(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::U16,
+		),
+		Kind::U32 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::U32(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::U32,
+		),
+		Kind::U64 => gql_int_input(
+			val,
+			kind,
+			|l| {
+				if let Literal::U64(v) = l {
+					Some(v)
+				} else {
+					None
+				}
+			},
+			SurNumber::U64,
+		),
 		Kind::Number => {
 			if let GraphqlValue::Number(n) = val {
 				if let Some(i) = n.as_i64() {
@@ -1162,6 +1361,24 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 					Ok(SurValue::Number(SurNumber::Float(f)))
 				} else if let Expr::Literal(Literal::Decimal(d)) = number_expr {
 					Ok(SurValue::Number(SurNumber::Decimal(d)))
+				} else if let Expr::Literal(Literal::I8(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::I8(v)))
+				} else if let Expr::Literal(Literal::I16(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::I16(v)))
+				} else if let Expr::Literal(Literal::I32(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::I32(v)))
+				} else if let Expr::Literal(Literal::U8(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::U8(v)))
+				} else if let Expr::Literal(Literal::U16(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::U16(v)))
+				} else if let Expr::Literal(Literal::U32(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::U32(v)))
+				} else if let Expr::Literal(Literal::U64(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::U64(v)))
+				} else if let Expr::Literal(Literal::F16(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::F16(v)))
+				} else if let Expr::Literal(Literal::F32(v)) = number_expr {
+					Ok(SurValue::Number(SurNumber::F32(v)))
 				} else {
 					Err(type_error(kind, val))
 				}
@@ -1801,5 +2018,26 @@ mod tests {
 
 		let literal = GraphqlValue::String("19.99dec".to_owned());
 		assert_eq!(graphql_to_sql_kind(&literal, Kind::Decimal).unwrap(), decimal);
+	}
+
+	#[test]
+	fn u32_and_u64_use_custom_scalars_and_round_trip_full_range() {
+		let mut types = Vec::new();
+
+		let u32_ty = kind_to_type(Kind::U32, &mut types, false).unwrap();
+		assert_eq!(u32_ty.to_string(), "u32!");
+
+		let u64_ty = kind_to_type(Kind::U64, &mut types, false).unwrap();
+		assert_eq!(u64_ty.to_string(), "u64!");
+
+		let u32_max = SurValue::Number(SurNumber::U32(u32::MAX));
+		let gql_u32 = sql_value_to_graphql_value(u32_max.clone()).unwrap();
+		assert_eq!(gql_u32, GraphqlValue::Number(Number::from(u32::MAX)));
+		assert_eq!(graphql_to_sql_kind(&gql_u32, Kind::U32).unwrap(), u32_max);
+
+		let u64_max = SurValue::Number(SurNumber::U64(u64::MAX));
+		let gql_u64 = sql_value_to_graphql_value(u64_max.clone()).unwrap();
+		assert_eq!(gql_u64, GraphqlValue::Number(Number::from(u64::MAX)));
+		assert_eq!(graphql_to_sql_kind(&gql_u64, Kind::U64).unwrap(), u64_max);
 	}
 }

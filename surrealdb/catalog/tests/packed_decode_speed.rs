@@ -69,6 +69,7 @@ impl Layout {
 			| PhysicalKind::U16
 			| PhysicalKind::U32
 			| PhysicalKind::U64
+			| PhysicalKind::F16
 			| PhysicalKind::F32
 			| PhysicalKind::F64
 			| PhysicalKind::Decimal16

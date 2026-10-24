@@ -207,7 +207,10 @@ fn checking_a_packed_row_allocates_nothing() {
 		("l", Value::String(Strand::new("green"))),
 		(
 			"n",
-			Value::Object(object(vec![("x", int(7)), ("extra", Value::String(Strand::new("e")))])),
+			Value::Object(object(vec![
+				("x", Value::Number(Number::I32(7))),
+				("extra", Value::String(Strand::new("e"))),
+			])),
 		),
 		("s", Value::String(Strand::new("a string that is longer than twelve bytes"))),
 		("u", Value::Uuid(val::Uuid(uuid::Uuid::from_u128(9)))),

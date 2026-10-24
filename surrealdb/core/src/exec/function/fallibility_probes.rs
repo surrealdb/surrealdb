@@ -96,10 +96,28 @@ fn corpus(kind: &Kind) -> Vec<String> {
 		Kind::Int => lits(&["0", "1", "-1", "9223372036854775807", "-9223372036854775808"]),
 		Kind::Float => lits(&["0.0f", "-0.0f", "1.5f", "NaN", "Infinity", "-Infinity"]),
 		Kind::Decimal => lits(&["0dec", "1.5dec", "-1.5dec", "79228162514264337593543950335dec"]),
+		Kind::I8 => lits(&["0i8", "1i8", "-1i8", "127i8", "-128i8"]),
+		Kind::U8 => lits(&["0u8", "1u8", "255u8"]),
+		Kind::I16 => lits(&["0i16", "1i16", "-1i16", "32767i16", "-32768i16"]),
+		Kind::U16 => lits(&["0u16", "1u16", "65535u16"]),
+		Kind::I32 => lits(&["0i32", "1i32", "-1i32", "2147483647i32", "-2147483648i32"]),
+		Kind::U32 => lits(&["0u32", "1u32", "4294967295u32"]),
+		Kind::U64 => lits(&["0u64", "1u64", "18446744073709551615u64"]),
+		Kind::F16 => lits(&["0.0f16", "-0.0f16", "1.5f16"]),
+		Kind::F32 => lits(&["0.0f32", "-0.0f32", "1.5f32"]),
 		Kind::Number => {
 			let mut all = corpus(&Kind::Int);
 			all.extend(corpus(&Kind::Float));
 			all.extend(corpus(&Kind::Decimal));
+			all.extend(corpus(&Kind::I8));
+			all.extend(corpus(&Kind::U8));
+			all.extend(corpus(&Kind::I16));
+			all.extend(corpus(&Kind::U16));
+			all.extend(corpus(&Kind::I32));
+			all.extend(corpus(&Kind::U32));
+			all.extend(corpus(&Kind::U64));
+			all.extend(corpus(&Kind::F16));
+			all.extend(corpus(&Kind::F32));
 			all
 		}
 		Kind::String => {

@@ -127,6 +127,15 @@ fn sample_value(kind: &Kind) -> Option<Value> {
 		Kind::None
 		| Kind::Null
 		| Kind::Decimal
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Regex
 		| Kind::Table(_)
 		| Kind::Record(_)
@@ -150,6 +159,15 @@ fn kind_matches(value: &Value, kind: &Kind) -> bool {
 		Kind::Int => matches!(value, Value::Number(Number::Int(_))),
 		Kind::Float => matches!(value, Value::Number(Number::Float(_))),
 		Kind::Decimal => matches!(value, Value::Number(Number::Decimal(_))),
+		Kind::I8 => matches!(value, Value::Number(Number::I8(_))),
+		Kind::U8 => matches!(value, Value::Number(Number::U8(_))),
+		Kind::I16 => matches!(value, Value::Number(Number::I16(_))),
+		Kind::U16 => matches!(value, Value::Number(Number::U16(_))),
+		Kind::I32 => matches!(value, Value::Number(Number::I32(_))),
+		Kind::U32 => matches!(value, Value::Number(Number::U32(_))),
+		Kind::U64 => matches!(value, Value::Number(Number::U64(_))),
+		Kind::F16 => matches!(value, Value::Number(Number::F16(_))),
+		Kind::F32 => matches!(value, Value::Number(Number::F32(_))),
 		Kind::Number => matches!(value, Value::Number(_)),
 		Kind::String => matches!(value, Value::String(_)),
 		Kind::Datetime => matches!(value, Value::Datetime(_)),

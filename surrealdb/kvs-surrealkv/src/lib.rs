@@ -1853,10 +1853,7 @@ mod commit_error_test {
 		let dir = std::env::temp_dir().join(format!(
 			"surrealkv_visit_key_ranges_{}_{}",
 			std::process::id(),
-			std::time::SystemTime::now()
-				.duration_since(std::time::UNIX_EPOCH)
-				.unwrap()
-				.as_nanos()
+			std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
 		));
 		let path = dir.to_string_lossy().into_owned();
 		let ds = Datastore::new(&path, SurrealKvConfig::default()).await.unwrap();
@@ -1872,15 +1869,10 @@ mod commit_error_test {
 		];
 		let mut visited = Vec::new();
 		let stats = rd
-			.visit_key_ranges(
-				&ranges,
-				10,
-				None,
-				&mut |at: usize, key: &[u8]| {
-					visited.push((at, key.to_vec()));
-					Ok(std::ops::ControlFlow::Continue(()))
-				},
-			)
+			.visit_key_ranges(&ranges, 10, None, &mut |at: usize, key: &[u8]| {
+				visited.push((at, key.to_vec()));
+				Ok(std::ops::ControlFlow::Continue(()))
+			})
 			.await
 			.unwrap();
 		assert_eq!(stats.rows, 1);

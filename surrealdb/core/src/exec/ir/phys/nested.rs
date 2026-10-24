@@ -1073,8 +1073,17 @@ fn stand_in_literal_for_kind(kind: &crate::expr::Kind) -> Option<LogicalLiteral>
 		Kind::None | Kind::Regex | Kind::Function(..) => None,
 		Kind::Null => Some(LogicalLiteral::Null),
 		Kind::Bool => Some(LogicalLiteral::Bool(false)),
-		Kind::Int | Kind::Number | Kind::Any => Some(LogicalLiteral::Integer(0)),
-		Kind::Float => Some(LogicalLiteral::Float(0.0)),
+		Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::Int
+		| Kind::Number
+		| Kind::Any => Some(LogicalLiteral::Integer(0)),
+		Kind::F16 | Kind::F32 | Kind::Float => Some(LogicalLiteral::Float(0.0)),
 		Kind::Decimal => Some(LogicalLiteral::Decimal(rust_decimal::Decimal::ZERO)),
 		Kind::String => Some(LogicalLiteral::String(Strand::default())),
 		Kind::Bytes => Some(LogicalLiteral::Bytes(crate::val::Bytes::default())),

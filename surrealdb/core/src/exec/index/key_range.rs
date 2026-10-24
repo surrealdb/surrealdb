@@ -824,10 +824,28 @@ fn int_bound(value: &Value, using: Use, inclusive: bool) -> Option<(Value, bool)
 		(Use::Equality, _) => return None,
 		(Use::Low(_), Number::Float(f)) => Number::Float(f.ceil()),
 		(Use::High(_), Number::Float(f)) => Number::Float(f.floor()),
+		(Use::Low(_), Number::F32(f)) => Number::F32(f.ceil()),
+		(Use::High(_), Number::F32(f)) => Number::F32(f.floor()),
+		(Use::Low(_), Number::F16(f)) => {
+			Number::F16(surrealdb_types::f16::from_f64(f.to_f64().ceil()))
+		}
+		(Use::High(_), Number::F16(f)) => {
+			Number::F16(surrealdb_types::f16::from_f64(f.to_f64().floor()))
+		}
 		(Use::Low(_), Number::Decimal(d)) => Number::Decimal(d.ceil()),
 		(Use::High(_), Number::Decimal(d)) => Number::Decimal(d.floor()),
-		// An int is lossless, so it never reaches here.
-		(_, Number::Int(_)) => return None,
+		// An integer within `i64` was returned above; a `u64` above `i64::MAX` has no `i64` bound.
+		(
+			_,
+			Number::Int(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_),
+		) => return None,
 	};
 	// Rounding a fractional bound inwards admits the rounded value itself.
 	rounded.as_int_lossless().map(|int| (Value::Number(Number::Int(int)), true))

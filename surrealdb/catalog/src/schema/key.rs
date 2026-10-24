@@ -77,6 +77,15 @@ impl ComponentKind {
 			| Kind::Float
 			| Kind::Decimal
 			| Kind::Number
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Object
 			| Kind::Array(..)
 			| Kind::Geometry(..)
@@ -125,7 +134,17 @@ impl ComponentKind {
 				Number::Decimal(_) if n.as_int_lossless().is_some() => {
 					Some("is a decimal; an int component holds only ints")
 				}
-				Number::Float(_) | Number::Decimal(_) => Some("is not an int"),
+				Number::Float(_)
+				| Number::Decimal(_)
+				| Number::I8(_)
+				| Number::I16(_)
+				| Number::I32(_)
+				| Number::U8(_)
+				| Number::U16(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_) => Some("is not an int"),
 			},
 			(Self::Int, _) => Some("is not an int"),
 			(Self::Datetime, Value::Datetime(d)) => {
@@ -659,6 +678,15 @@ fn group_component_kind(expr: &Expr) -> ComponentKind {
 		| Kind::Float
 		| Kind::Decimal
 		| Kind::Number
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Object
 		| Kind::Array(..)
 		| Kind::Geometry(..)

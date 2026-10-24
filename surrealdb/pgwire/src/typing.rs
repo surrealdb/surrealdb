@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use surrealdb_types::{Number, Value};
+use surrealdb_types::{Value, Wide};
 
 /// The Postgres wire types emitted by the listener, with their catalog OIDs.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -245,9 +245,11 @@ pub(super) fn base_type(value: &Value) -> Option<PgType> {
 	match value {
 		Value::None | Value::Null => None,
 		Value::Bool(_) => Some(PgType::Bool),
-		Value::Number(Number::Int(_)) => Some(PgType::Int8),
-		Value::Number(Number::Float(_)) => Some(PgType::Float8),
-		Value::Number(Number::Decimal(_)) => Some(PgType::Numeric),
+		Value::Number(n) => match n.wide() {
+			Wide::Int(_) => Some(PgType::Int8),
+			Wide::Float(_) => Some(PgType::Float8),
+			Wide::Decimal(_) => Some(PgType::Numeric),
+		},
 		Value::String(_) => Some(PgType::Text),
 		Value::Datetime(_) => Some(PgType::Timestamptz),
 		Value::Duration(_) => Some(PgType::Interval),
@@ -500,7 +502,7 @@ pub(super) fn shape_result_jsonb(value: Value) -> ResultShape {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_types::{Object, Value};
+	use surrealdb_types::{Number, Object, Value};
 
 	use super::*;
 

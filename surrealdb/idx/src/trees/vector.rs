@@ -971,7 +971,7 @@ impl Vector {
 		}
 		let res = match t {
 			VectorType::F64 => Vector::F64(collect(v)?),
-			VectorType::F16 => Vector::F16(convert(v, |n| f32::try_from(n).map(f16::from_f32))?),
+			VectorType::F16 => Vector::F16(collect(v)?),
 			VectorType::F32 => Vector::F32(collect(v)?),
 			VectorType::I64 => Vector::I64(collect(v)?),
 			VectorType::I32 => Vector::I32(collect(v)?),

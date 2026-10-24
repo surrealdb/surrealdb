@@ -1023,10 +1023,27 @@ pub(crate) fn exact_across_kinds(n: &Number) -> bool {
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 	match n {
-		Number::Int(_) => true,
+		Number::Int(_)
+		| Number::I8(_)
+		| Number::U8(_)
+		| Number::I16(_)
+		| Number::U16(_)
+		| Number::I32(_)
+		| Number::U32(_)
+		| Number::U64(_) => true,
 		Number::Float(f) => {
 			f.is_finite()
 				&& Decimal::from_f64_retain(*f).is_some_and(|d| Decimal::from_f64(*f) == Some(d))
+		}
+		Number::F32(f) => {
+			let f = f64::from(*f);
+			f.is_finite()
+				&& Decimal::from_f64_retain(f).is_some_and(|d| Decimal::from_f64(f) == Some(d))
+		}
+		Number::F16(f) => {
+			let f = (*f).to_f64();
+			f.is_finite()
+				&& Decimal::from_f64_retain(f).is_some_and(|d| Decimal::from_f64(f) == Some(d))
 		}
 		Number::Decimal(d) => d.to_f64().is_some_and(|f| Decimal::from_f64_retain(f) == Some(*d)),
 	}
@@ -1273,6 +1290,15 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 						crate::expr::Literal::Integer(_)
 							| crate::expr::Literal::Float(_)
 							| crate::expr::Literal::Decimal(_)
+							| crate::expr::Literal::I8(_)
+							| crate::expr::Literal::U8(_)
+							| crate::expr::Literal::I16(_)
+							| crate::expr::Literal::U16(_)
+							| crate::expr::Literal::I32(_)
+							| crate::expr::Literal::U32(_)
+							| crate::expr::Literal::U64(_)
+							| crate::expr::Literal::F16(_)
+							| crate::expr::Literal::F32(_)
 					))
 				) {
 				kind_at_admits_set(element, rest)
@@ -1326,6 +1352,15 @@ fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -1351,6 +1386,13 @@ fn tuple_position(part: &Part, len: usize) -> Option<Option<usize>> {
 		Part::First => Some(Some(0)),
 		Part::Last => Some(len.checked_sub(1)),
 		Part::Value(Expr::Literal(Literal::Integer(i))) => Some(usize::try_from(*i).ok()),
+		Part::Value(Expr::Literal(Literal::I8(i))) => Some(usize::try_from(*i).ok()),
+		Part::Value(Expr::Literal(Literal::U8(u))) => Some(Some(usize::from(*u))),
+		Part::Value(Expr::Literal(Literal::I16(i))) => Some(usize::try_from(*i).ok()),
+		Part::Value(Expr::Literal(Literal::U16(u))) => Some(Some(usize::from(*u))),
+		Part::Value(Expr::Literal(Literal::I32(i))) => Some(usize::try_from(*i).ok()),
+		Part::Value(Expr::Literal(Literal::U32(u))) => Some(usize::try_from(*u).ok()),
+		Part::Value(Expr::Literal(Literal::U64(u))) => Some(usize::try_from(*u).ok()),
 		Part::All | Part::Value(_) => Some(None),
 		Part::Flatten
 		| Part::Field(_)
@@ -1382,6 +1424,15 @@ fn kind_admits_set(kind: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -1786,6 +1837,15 @@ fn links_along<'a>(
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -1905,6 +1965,27 @@ fn declared_kind<'a>(col: &[Part], fields: &'a [FieldDefinition]) -> Option<&'a 
 				Part::Last => tuple_element(kind, |len| len.checked_sub(1)),
 				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::Integer(i))) => {
 					tuple_element(kind, |_| usize::try_from(*i).ok())
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::I8(i))) => {
+					tuple_element(kind, |_| usize::try_from(*i).ok())
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::U8(u))) => {
+					tuple_element(kind, |_| Some(usize::from(*u)))
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::I16(i))) => {
+					tuple_element(kind, |_| usize::try_from(*i).ok())
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::U16(u))) => {
+					tuple_element(kind, |_| Some(usize::from(*u)))
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::I32(i))) => {
+					tuple_element(kind, |_| usize::try_from(*i).ok())
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::U32(u))) => {
+					tuple_element(kind, |_| usize::try_from(*u).ok())
+				}
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::U64(u))) => {
+					tuple_element(kind, |_| usize::try_from(*u).ok())
 				}
 				Part::All => collection_element(kind),
 				Part::Flatten

@@ -9,7 +9,8 @@
 //! |---|---|---|
 //! | `Value` | 1, 2 | 1: discriminant varint; 2: `optimised` tag, inline `None`/`Null`, fixed(1) `Bool`, every other variant `varlen` |
 //! | `Array`, `Set`, `Object` | 1, 2 | 1: length and items; 2: `optimised` struct around an indexed sequence, set or map |
-//! | `Number`, `RecordIdKey`, `Geometry` | 1 | plain enums |
+//! | `Number` | 1, 2 | 1: `Int`, `Float`, `Decimal`; 2 adds sized number variants |
+//! | `RecordIdKey`, `Geometry` | 1 | plain enums |
 //! | `Duration`, `Datetime`, `Uuid`, `Bytes`, `Regex`, `File`, `Range`, `RecordId`, `RecordIdKeyRange` | 1 | plain structs |
 //!
 //! An indexed map sorts its entries by their encoded key bytes, an indexed
@@ -165,13 +166,23 @@ fn decode_uuid(r: &mut Reader<'_>) -> Result<Uuid> {
 }
 
 pub(super) fn decode_number(r: &mut Reader<'_>) -> Result<Number> {
-	revision(r, "Number", 1)?;
-	Ok(match r.varint()? {
-		0 => Number::Int(i64::try_from(r.zigzag()?)?),
-		1 => Number::Float(f64::from_le_bytes(r.array()?)),
-		2 => Number::Decimal(Decimal::deserialize(r.array()?)),
-		v => bail!("no Number variant {v}"),
-	})
+	let rev = revision(r, "Number", 2)?;
+	let variant = r.varint()?;
+	match (rev, variant) {
+		(1, 0) | (2, 0) => Ok(Number::Int(i64::try_from(r.zigzag()?)?)),
+		(1, 1) | (2, 1) => Ok(Number::Float(f64::from_le_bytes(r.array()?))),
+		(1, 2) | (2, 2) => Ok(Number::Decimal(Decimal::deserialize(r.array()?))),
+		(2, 3) => Ok(Number::I8(r.u8()? as i8)),
+		(2, 4) => Ok(Number::U8(r.u8()?)),
+		(2, 5) => Ok(Number::I16(i16::try_from(r.zigzag()?)?)),
+		(2, 6) => Ok(Number::U16(u16::try_from(r.varint()?)?)),
+		(2, 7) => Ok(Number::I32(i32::try_from(r.zigzag()?)?)),
+		(2, 8) => Ok(Number::U32(u32::try_from(r.varint()?)?)),
+		(2, 9) => Ok(Number::U64(u64::try_from(r.varint()?)?)),
+		(2, 10) => Ok(Number::F16(surrealdb_types::f16::from_bits(u16::try_from(r.varint()?)?))),
+		(2, 11) => Ok(Number::F32(f32::from_le_bytes(r.array()?))),
+		_ => bail!("no Number variant {variant} at revision {rev}"),
+	}
 }
 
 /// The items of a revision-1 sequence, or of the body an indexed sequence
@@ -483,19 +494,66 @@ fn encode_uuid(u: &Uuid, w: &mut Writer) {
 }
 
 pub(super) fn encode_number(n: &Number, w: &mut Writer) {
-	w.varint(1);
 	match n {
 		Number::Int(v) => {
+			w.varint(1);
 			w.varint(0);
 			w.zigzag(*v as i128);
 		}
 		Number::Float(v) => {
 			w.varint(1);
+			w.varint(1);
 			w.raw(&v.to_le_bytes());
 		}
 		Number::Decimal(d) => {
+			w.varint(1);
 			w.varint(2);
 			w.raw(&d.serialize());
+		}
+		Number::I8(v) => {
+			w.varint(2);
+			w.varint(3);
+			w.u8(*v as u8);
+		}
+		Number::U8(v) => {
+			w.varint(2);
+			w.varint(4);
+			w.u8(*v);
+		}
+		Number::I16(v) => {
+			w.varint(2);
+			w.varint(5);
+			w.zigzag(*v as i128);
+		}
+		Number::U16(v) => {
+			w.varint(2);
+			w.varint(6);
+			w.varint(*v as u128);
+		}
+		Number::I32(v) => {
+			w.varint(2);
+			w.varint(7);
+			w.zigzag(*v as i128);
+		}
+		Number::U32(v) => {
+			w.varint(2);
+			w.varint(8);
+			w.varint(*v as u128);
+		}
+		Number::U64(v) => {
+			w.varint(2);
+			w.varint(9);
+			w.varint(*v as u128);
+		}
+		Number::F16(v) => {
+			w.varint(2);
+			w.varint(10);
+			w.varint(v.to_bits() as u128);
+		}
+		Number::F32(v) => {
+			w.varint(2);
+			w.varint(11);
+			w.raw(&v.to_le_bytes());
 		}
 	}
 }

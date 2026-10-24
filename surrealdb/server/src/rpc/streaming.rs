@@ -633,7 +633,11 @@ impl StreamDriver<'_> {
 	fn encode(&mut self, frame: OutgoingFrame) -> Result<(usize, Message), TypesError> {
 		let frame = match self.rpc.format {
 			Format::Shaped => shaped_outgoing(frame, &mut self.shaper)?,
-			Format::Json | Format::Cbor | Format::Flatbuffers | Format::Unsupported => frame,
+			Format::Json
+			| Format::Cbor
+			| Format::Cbor2
+			| Format::Flatbuffers
+			| Format::Unsupported => frame,
 		};
 		let frame = match frame {
 			OutgoingFrame::Frame(frame) => frame,

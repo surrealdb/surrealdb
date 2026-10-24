@@ -1091,7 +1091,7 @@ fn a_literal_names_a_record_by_the_rule_that_judges_a_key_at_run_time() {
 	use surrealdb_expr::expr::logical::LogicalLiteral;
 	use surrealdb_expr::val::{Bytes, Datetime, Duration, Uuid};
 	use surrealdb_strand::Strand;
-	use surrealdb_types::Decimal;
+	use surrealdb_types::{Decimal, f16};
 
 	use crate::lower::id_key::record_of;
 
@@ -1102,6 +1102,15 @@ fn a_literal_names_a_record_by_the_rule_that_judges_a_key_at_run_time() {
 	let record = |key: &str| format!("type::record('emp', {key})");
 
 	assert_eq!(probe(LogicalLiteral::Integer(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::I8(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::U8(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::I16(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::U16(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::I32(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::U32(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::U64(7)), record("7"));
+	assert_eq!(probe(LogicalLiteral::F16(f16::from_f32(3.0))), record("3"));
+	assert_eq!(probe(LogicalLiteral::F32(3.0)), record("3"));
 	assert_eq!(probe(LogicalLiteral::String(Strand::from("k"))), record("'k'"));
 	assert_eq!(probe(LogicalLiteral::Uuid(uuid)), record(&uuid_text));
 	assert_eq!(probe(LogicalLiteral::Float(3.0)), record("3"));
@@ -1118,6 +1127,9 @@ fn a_literal_names_a_record_by_the_rule_that_judges_a_key_at_run_time() {
 		LogicalLiteral::Float(f64::INFINITY),
 		LogicalLiteral::Float(f64::NEG_INFINITY),
 		LogicalLiteral::Float(-(i64::MIN as f64)),
+		LogicalLiteral::F16(f16::from_f32(1.5)),
+		LogicalLiteral::F32(1.5),
+		LogicalLiteral::U64(u64::MAX),
 		LogicalLiteral::Decimal(Decimal::new(15, 1)),
 		LogicalLiteral::Decimal(Decimal::MAX),
 		LogicalLiteral::String(Strand::from("")),

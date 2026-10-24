@@ -576,6 +576,15 @@ fn literal_release(literal: &Literal) -> Release {
 		| Literal::Float(..)
 		| Literal::Integer(..)
 		| Literal::Decimal(..)
+		| Literal::I8(..)
+		| Literal::U8(..)
+		| Literal::I16(..)
+		| Literal::U16(..)
+		| Literal::I32(..)
+		| Literal::U32(..)
+		| Literal::U64(..)
+		| Literal::F16(..)
+		| Literal::F32(..)
 		| Literal::String(..)
 		| Literal::Bytes(..)
 		| Literal::Regex(..)
@@ -636,6 +645,15 @@ fn kind_release(kind: &Kind) -> Release {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String

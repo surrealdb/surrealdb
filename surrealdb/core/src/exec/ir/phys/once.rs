@@ -372,11 +372,11 @@ mod tests {
 	use super::*;
 	use crate::exec::function::FunctionRegistry;
 	use crate::exec::ir::core::ir::IrScope;
+	use crate::exec::ir::core::location::{LocOrigin, Location};
 	use crate::exec::ir::expr::ops::ShortCircuitOp;
 	use crate::exec::ir::iface::catalog::{
 		EffectCx, PhysicalCatalog, SemanticCatalog, default_config,
 	};
-	use crate::exec::ir::core::location::{LocOrigin, Location};
 	use crate::exec::ir::iface::frame::FrameTable;
 	use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
 	use crate::expr::BinaryOperator;
@@ -392,7 +392,13 @@ mod tests {
 	impl SemanticCatalog for EmptyCatalog {}
 	impl PhysicalCatalog for EmptyCatalog {}
 
-	fn build_filter_with_rhs(rhs_kind: ExprOp, rhs_operands_fn: impl FnOnce(&mut Rewriter<'_>, crate::exec::ir::iface::ids::BlockId) -> SmallVec<[ValueId; 4]>) -> (Ir, OpId) {
+	fn build_filter_with_rhs(
+		rhs_kind: ExprOp,
+		rhs_operands_fn: impl FnOnce(
+			&mut Rewriter<'_>,
+			crate::exec::ir::iface::ids::BlockId,
+		) -> SmallVec<[ValueId; 4]>,
+	) -> (Ir, OpId) {
 		let mut ir = Ir::new(
 			IrScope::Request {
 				fragment: None,
@@ -430,11 +436,7 @@ mod tests {
 			)
 			.expect("filter");
 		let (_, block) = rw
-			.create_region(
-				filter,
-				RegionKind::Clause(ClauseRole::Where),
-				&[TypeKnowledge::Unknown],
-			)
+			.create_region(filter, RegionKind::Clause(ClauseRole::Where), &[TypeKnowledge::Unknown])
 			.expect("where region");
 		let row = rw.ir().block(block).expect("where block").args[0];
 		let field_a = rw
@@ -498,9 +500,7 @@ mod tests {
 				},
 			)
 			.expect("and");
-		let (_, lazy_block) = rw
-			.create_region(and_op, RegionKind::LazyOperand, &[])
-			.expect("lazy");
+		let (_, lazy_block) = rw.create_region(and_op, RegionKind::LazyOperand, &[]).expect("lazy");
 		let rhs_operands = rhs_operands_fn(&mut rw, lazy_block);
 		let rhs = rw
 			.create(
@@ -559,8 +559,8 @@ mod tests {
 			config: default_config(),
 		};
 
-		// `row.a = 1 AND (1 / 0)`: `1 / 0` is row-independent but fallible, and follows `row.a = 1`,
-		// so it must not move to the `once` region ahead of `row.a = 1`.
+		// `row.a = 1 AND (1 / 0)`: `1 / 0` is row-independent but fallible, and follows `row.a =
+		// 1`, so it must not move to the `once` region ahead of `row.a = 1`.
 		let (mut ir, filter) = build_filter_with_rhs(
 			ExprOp::Binary {
 				op: BinaryOperator::Divide,

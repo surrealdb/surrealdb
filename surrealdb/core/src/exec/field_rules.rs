@@ -240,6 +240,15 @@ impl Step {
 			| Kind::Float
 			| Kind::Int
 			| Kind::Number
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::String
 			| Kind::Uuid
 			| Kind::Regex
@@ -339,6 +348,15 @@ fn holds_elements_no_collection_describes(kind: &Kind) -> bool {
 		| Kind::Float
 		| Kind::Int
 		| Kind::Number
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::String
 		| Kind::Uuid
 		| Kind::Regex
@@ -684,6 +702,15 @@ pub(crate) fn define_field_statement_validate_reference_options(
 				| Kind::Float
 				| Kind::Int
 				| Kind::Number
+				| Kind::I8
+				| Kind::U8
+				| Kind::I16
+				| Kind::U16
+				| Kind::I32
+				| Kind::U32
+				| Kind::U64
+				| Kind::F16
+				| Kind::F32
 				| Kind::Object
 				| Kind::String
 				| Kind::Uuid

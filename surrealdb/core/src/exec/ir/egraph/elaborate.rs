@@ -1500,4 +1500,3 @@ mod tests {
 		assert!(planner_home.region_survives(region, owner));
 	}
 }
-

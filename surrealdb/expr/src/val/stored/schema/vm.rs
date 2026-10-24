@@ -26,14 +26,24 @@ pub fn int(v: i128) -> Result<Value, SchemaError> {
 
 /// The integer a VM value holds: an `Int`, or an integral `Decimal`.
 pub fn integer(value: &Value) -> Result<i128, SchemaError> {
-	if let Value::Number(Number::Int(v)) = value {
-		Ok(i128::from(*v))
-	} else if let Value::Number(Number::Decimal(d)) = value
-		&& d.fract().is_zero()
-	{
-		d.mantissa()
-			.checked_div(10i128.pow(d.scale()))
-			.ok_or(SchemaError::vm("int", "an integer decimal"))
+	if let Value::Number(n) = value {
+		match n {
+			Number::Int(v) => Ok(i128::from(*v)),
+			Number::I8(v) => Ok(i128::from(*v)),
+			Number::U8(v) => Ok(i128::from(*v)),
+			Number::I16(v) => Ok(i128::from(*v)),
+			Number::U16(v) => Ok(i128::from(*v)),
+			Number::I32(v) => Ok(i128::from(*v)),
+			Number::U32(v) => Ok(i128::from(*v)),
+			Number::U64(v) => Ok(i128::from(*v)),
+			Number::Decimal(d) if d.fract().is_zero() => d
+				.mantissa()
+				.checked_div(10i128.pow(d.scale()))
+				.ok_or(SchemaError::vm("int", "an integer decimal")),
+			Number::Decimal(_) | Number::Float(_) | Number::F16(_) | Number::F32(_) => {
+				Err(SchemaError::vm("int", "expected an integer"))
+			}
+		}
 	} else {
 		Err(SchemaError::vm("int", "expected an integer"))
 	}
@@ -41,8 +51,21 @@ pub fn integer(value: &Value) -> Result<i128, SchemaError> {
 
 /// The float a VM value holds.
 pub fn float(value: &Value) -> Result<f64, SchemaError> {
-	if let Value::Number(Number::Float(v)) = value {
-		Ok(*v)
+	if let Value::Number(n) = value {
+		match n {
+			Number::Float(v) => Ok(*v),
+			Number::F16(v) => Ok(v.to_f64()),
+			Number::F32(v) => Ok(*v as f64),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => Err(SchemaError::vm("float", "expected a float")),
+		}
 	} else {
 		Err(SchemaError::vm("float", "expected a float"))
 	}

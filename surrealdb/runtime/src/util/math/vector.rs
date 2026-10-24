@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use surrealdb_expr::expr::Error;
-use surrealdb_expr::val::{Number, Value};
+use surrealdb_expr::val::{Number, TryAdd, TryMul, TrySub, Value, Wide};
 
 use crate::util::math::ToFloat;
 
@@ -199,7 +199,7 @@ pub fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 pub fn add_assign(fnc: &str, acc: &mut [Number], other: &[Number]) -> Result<()> {
 	check_same_dimension(fnc, acc, other)?;
 	for (a, b) in acc.iter_mut().zip(other.iter()) {
-		*a = *a + *b;
+		*a = (*a).try_add(*b)?;
 	}
 	Ok(())
 }
@@ -212,7 +212,7 @@ pub trait Add {
 impl Add for Vec<Number> {
 	fn add(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::add", self, other)?;
-		Ok(self.iter().zip(other.iter()).map(|(a, b)| a + b).collect())
+		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_add(*b)).collect()
 	}
 }
 
@@ -466,16 +466,28 @@ impl<T: AsNumber> ManhattanDistance for [T] {
 		}
 		Ok(self.iter().zip(other.iter()).fold(Number::Int(0), |acc, (a, b)| {
 			let (a, b) = (a.as_number(), b.as_number());
-			match (acc, int_abs_diff(a, b)) {
-				// An integer sum stays an integer while it fits in an `i64`.
-				(Number::Int(acc), Some(d)) => {
-					match i64::try_from(d).ok().and_then(|d| acc.checked_add(d)) {
-						Some(sum) => Number::Int(sum),
-						None => Number::Float(acc as f64 + d as f64),
+			if let Some(d) = int_abs_diff(a, b) {
+				match acc {
+					Number::Int(acc) => {
+						match i64::try_from(d).ok().and_then(|d| acc.checked_add(d)) {
+							Some(sum) => Number::Int(sum),
+							None => Number::Float(acc as f64 + d as f64),
+						}
 					}
+					Number::Decimal(acc) => Number::Decimal(acc + rust_decimal::Decimal::from(d)),
+					Number::Float(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_) => acc + Number::Float(d as f64),
 				}
-				(acc, Some(d)) => acc + Number::Float(d as f64),
-				(acc, None) => acc + (a - b).abs(),
+			} else {
+				acc + (a.widened() - b.widened()).abs()
 			}
 		}))
 	}
@@ -485,18 +497,25 @@ impl<T: AsNumber> ManhattanDistance for [T] {
 /// subtraction overflows and an `f64` subtraction rounds above 2^53; `None`
 /// unless both are integers.
 fn int_abs_diff(a: &Number, b: &Number) -> Option<u64> {
-	match (a, b) {
-		(Number::Int(a), Number::Int(b)) => Some(a.abs_diff(*b)),
-		_ => None,
+	match (a.wide(), b.wide()) {
+		(Wide::Int(a), Wide::Int(b)) => Some(a.abs_diff(b)),
+		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
+		| (Wide::Float(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_))
+		| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => None,
 	}
 }
 
 /// `|a − b|` as a float: exact for two integers, taken in floats otherwise.
 #[inline(always)]
 fn abs_diff(a: &Number, b: &Number) -> f64 {
-	match (a, b) {
-		(Number::Float(a), Number::Float(b)) => (a - b).abs(),
-		_ => int_abs_diff(a, b).map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64),
+	match (a.wide(), b.wide()) {
+		(Wide::Float(a), Wide::Float(b)) => (a - b).abs(),
+		(Wide::Int(a), Wide::Int(b)) => a.abs_diff(b) as f64,
+		(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
+		| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_))
+		| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => {
+			(a.to_float() - b.to_float()).abs()
+		}
 	}
 }
 
@@ -521,7 +540,7 @@ pub trait Multiply {
 impl Multiply for Vec<Number> {
 	fn multiply(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::multiply", self, other)?;
-		Ok(self.iter().zip(other.iter()).map(|(a, b)| a * b).collect())
+		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_mul(*b)).collect()
 	}
 }
 
@@ -531,7 +550,7 @@ pub trait Scale {
 
 impl Scale for Vec<Number> {
 	fn scale(&self, other: &Number) -> Result<Vec<Number>> {
-		Ok(self.iter().map(|a| a * other).collect())
+		self.iter().map(|a| (*a).try_mul(*other)).collect()
 	}
 }
 
@@ -581,7 +600,7 @@ pub trait Subtract {
 impl Subtract for Vec<Number> {
 	fn subtract(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::subtract", self, other)?;
-		Ok(self.iter().zip(other.iter()).map(|(a, b)| a - b).collect())
+		self.iter().zip(other.iter()).map(|(a, b)| (*a).try_sub(*b)).collect()
 	}
 }
 
@@ -652,9 +671,14 @@ impl<T: AsNumber> EuclideanDistance for [T] {
 		check_same_dimension("vector::distance::euclidean", self, other)?;
 		Ok(lane_sum(self, other, |a, b| {
 			let (a, b) = (a.as_number(), b.as_number());
-			match (a, b) {
-				(Number::Float(a), Number::Float(b)) => (a - b).powi(2),
-				_ => int_abs_diff(a, b).map_or_else(|| (a - b).to_float(), |d| d as f64).powi(2),
+			match (a.wide(), b.wide()) {
+				(Wide::Float(a), Wide::Float(b)) => (a - b).powi(2),
+				(Wide::Int(a), Wide::Int(b)) => (a.abs_diff(b) as f64).powi(2),
+				(Wide::Int(_), Wide::Float(_) | Wide::Decimal(_))
+				| (Wide::Float(_), Wide::Int(_) | Wide::Decimal(_))
+				| (Wide::Decimal(_), Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_)) => {
+					(a.widened() - b.widened()).to_float().powi(2)
+				}
 			}
 		})
 		.sqrt()
@@ -693,5 +717,51 @@ impl Normalize for Vec<Number> {
 			}
 		);
 		Ok(self.iter().map(|a| a / &m).collect())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rust_decimal::Decimal;
+
+	use super::*;
+
+	#[test]
+	fn manhattan_distance_preserves_decimal_precision_for_large_integer_diffs() {
+		let a = [Number::Decimal(Decimal::new(5, 1)), Number::U64(u64::MAX)];
+		let b = [Number::Decimal(Decimal::ZERO), Number::U64(0)];
+		let dist = a.manhattan_distance(&b).unwrap();
+		assert_eq!(dist, Number::Decimal(Decimal::new(5, 1) + Decimal::from(u64::MAX)));
+
+		let a = [Number::U64(1)];
+		let b = [Number::U64(u64::MAX)];
+		assert_eq!(a.manhattan_distance(&b).unwrap(), Number::Decimal(Decimal::from(u64::MAX - 1)));
+	}
+
+	#[test]
+	fn euclidean_distance_does_not_wrap_on_u64_underflow() {
+		let a = [Number::U64(1)];
+		let b = [Number::U64(2)];
+		assert_eq!(a.euclidean_distance(&b).unwrap(), Number::Float(1.0));
+
+		let a = [Number::U64(1)];
+		let b = [Number::U64(u64::MAX)];
+		assert_eq!(a.euclidean_distance(&b).unwrap(), Number::Float((u64::MAX - 1) as f64));
+	}
+
+	#[test]
+	fn vector_elementwise_arithmetic_checks_narrow_overflow() {
+		let max_u8 = vec![Number::U8(255)];
+		let one_u8 = vec![Number::U8(1)];
+		let two_u8 = vec![Number::U8(2)];
+		let zero_u8 = vec![Number::U8(0)];
+
+		assert!(max_u8.add(&one_u8).is_err());
+		assert!(max_u8.multiply(&two_u8).is_err());
+		assert!(max_u8.scale(&Number::U8(2)).is_err());
+		assert!(zero_u8.subtract(&one_u8).is_err());
+
+		let mut acc = vec![Number::U8(255)];
+		assert!(add_assign("vector::add", &mut acc, &one_u8).is_err());
 	}
 }

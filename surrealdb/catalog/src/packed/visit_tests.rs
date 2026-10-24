@@ -17,7 +17,7 @@ use super::tests::{
 use super::{FieldRef, PackedError, PackedRow, PackedVisitor, Packing, pack};
 use crate::Generation;
 use crate::record::{RowFlags, StoredRecord};
-use crate::val::{Object, RecordId, RecordIdKey, Strand, TableName, Value, stored};
+use crate::val::{Number, Object, RecordId, RecordIdKey, Strand, TableName, Value, stored};
 
 /// The record's own id in these tests.
 fn id() -> Value {
@@ -78,7 +78,16 @@ impl<'a> PackedVisitor<'a> for Rebuild {
 			FieldRef::Absent | FieldRef::Object => panic!("a visit hands no {field:?}"),
 			FieldRef::Null => Value::Null,
 			FieldRef::Bool(v) => Value::Bool(v),
+			FieldRef::I8(v) => Value::Number(Number::I8(v)),
+			FieldRef::I16(v) => Value::Number(Number::I16(v)),
+			FieldRef::I32(v) => Value::Number(Number::I32(v)),
 			FieldRef::Int(v) => Value::from(v),
+			FieldRef::U8(v) => Value::Number(Number::U8(v)),
+			FieldRef::U16(v) => Value::Number(Number::U16(v)),
+			FieldRef::U32(v) => Value::Number(Number::U32(v)),
+			FieldRef::U64(v) => Value::Number(Number::U64(v)),
+			FieldRef::F16(v) => Value::Number(Number::F16(v)),
+			FieldRef::F32(v) => Value::Number(Number::F32(v)),
 			FieldRef::Float(v) => Value::from(v),
 			FieldRef::Decimal(v) => Value::from(v),
 			FieldRef::Uuid(v) => Value::Uuid(crate::val::Uuid(v)),

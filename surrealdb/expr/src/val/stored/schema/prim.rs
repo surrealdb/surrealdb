@@ -67,7 +67,10 @@ macro_rules! small_int {
 	};
 }
 
+small_int!(i8, "int:i8");
+small_int!(i16, "int:i16");
 small_int!(u16, "int:u16");
+small_int!(i32, "int:i32");
 small_int!(u32, "int:u32");
 
 impl StoredField for bool {
@@ -553,7 +556,7 @@ impl StoredField for BoundedDuration {
 	}
 }
 
-/// INT, FLOAT or DECIMAL.
+/// Any number representation: INT, FLOAT, DECIMAL, or a sized number.
 impl StoredField for Number {
 	fn encode_item(&self, enc: &mut Encoder, _prior: Option<Item<'_>>) -> Result<(), SchemaError> {
 		enc.number(self);
@@ -568,10 +571,37 @@ impl StoredField for Number {
 		if let Some(v) = strict::float(tag, payload)? {
 			return Ok(Number::Float(v));
 		}
-		match strict::decimal(tag, payload)? {
-			Some(v) => Ok(Number::Decimal(v)),
-			None => Err(SchemaError::wrong_kind()),
+		if let Some(v) = strict::decimal(tag, payload)? {
+			return Ok(Number::Decimal(v));
 		}
+		if let Some(v) = strict::i8(tag, payload)? {
+			return Ok(Number::I8(v));
+		}
+		if let Some(v) = strict::u8(tag, payload)? {
+			return Ok(Number::U8(v));
+		}
+		if let Some(v) = strict::i16(tag, payload)? {
+			return Ok(Number::I16(v));
+		}
+		if let Some(v) = strict::u16(tag, payload)? {
+			return Ok(Number::U16(v));
+		}
+		if let Some(v) = strict::i32(tag, payload)? {
+			return Ok(Number::I32(v));
+		}
+		if let Some(v) = strict::u32(tag, payload)? {
+			return Ok(Number::U32(v));
+		}
+		if let Some(v) = strict::u64(tag, payload)? {
+			return Ok(Number::U64(v));
+		}
+		if let Some(v) = strict::f16(tag, payload)? {
+			return Ok(Number::F16(v));
+		}
+		if let Some(v) = strict::f32(tag, payload)? {
+			return Ok(Number::F32(v));
+		}
+		Err(SchemaError::wrong_kind())
 	}
 
 	fn into_vm_value(self) -> Result<Value, SchemaError> {

@@ -179,6 +179,17 @@ pub enum NumKind {
 	Float,
 	Decimal,
 	Duration,
+	I8,
+	U8,
+	I16,
+	U16,
+	I32,
+	U32,
+	I64,
+	U64,
+	F16,
+	F32,
+	F64,
 }
 
 impl<'a> Lexer<'a> {
@@ -569,10 +580,12 @@ impl<'a> Lexer<'a> {
 			return Ok(NumKind::Duration);
 		}
 		let mut kind = NumKind::Int;
+		let mut is_int = true;
 		if self.peek_at(0) == b'.' && self.peek_at(1).is_ascii_digit() {
 			self.pos += 1;
 			self.digits();
 			kind = NumKind::Float;
+			is_int = false;
 		}
 		if matches!(self.peek_at(0), b'e' | b'E') {
 			let sign = matches!(self.peek_at(1), b'+' | b'-') as u32;
@@ -580,14 +593,75 @@ impl<'a> Lexer<'a> {
 				self.pos += 1 + sign;
 				self.digits();
 				kind = NumKind::Float;
+				is_int = false;
 			}
 		}
-		if self.peek_at(0) == b'f' {
-			self.pos += 1;
-			kind = NumKind::Float;
-		} else if self.peek_at(0) == b'd' && self.peek_at(1) == b'e' && self.peek_at(2) == b'c' {
+		let b0 = self.peek_at(0);
+		let b1 = self.peek_at(1);
+		let b2 = self.peek_at(2);
+		if b0 == b'd' && b1 == b'e' && b2 == b'c' {
 			self.pos += 3;
 			kind = NumKind::Decimal;
+		} else if b0 == b'f' && b1 == b'1' && b2 == b'6' {
+			self.pos += 3;
+			kind = NumKind::F16;
+		} else if b0 == b'f' && b1 == b'3' && b2 == b'2' {
+			self.pos += 3;
+			kind = NumKind::F32;
+		} else if b0 == b'f' && b1 == b'6' && b2 == b'4' {
+			self.pos += 3;
+			kind = NumKind::F64;
+		} else if b0 == b'i' && b1 == b'1' && b2 == b'6' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::I16;
+		} else if b0 == b'u' && b1 == b'1' && b2 == b'6' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::U16;
+		} else if b0 == b'i' && b1 == b'3' && b2 == b'2' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::I32;
+		} else if b0 == b'u' && b1 == b'3' && b2 == b'2' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::U32;
+		} else if b0 == b'i' && b1 == b'6' && b2 == b'4' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::I64;
+		} else if b0 == b'u' && b1 == b'6' && b2 == b'4' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 3;
+			kind = NumKind::U64;
+		} else if b0 == b'i' && b1 == b'8' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 2;
+			kind = NumKind::I8;
+		} else if b0 == b'u' && b1 == b'8' {
+			if !is_int {
+				return Err(LexError::InvalidNumber);
+			}
+			self.pos += 2;
+			kind = NumKind::U8;
+		} else if b0 == b'f' {
+			self.pos += 1;
+			kind = NumKind::Float;
 		}
 		// Only a letter ends a literal in error: digits and `_` after a
 		// suffix start the next token.
@@ -837,7 +911,14 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 		|| (mode == Compound::Numeric
 			&& !signed
 			&& match at(pos) {
-				Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u' | 0xC2) => true,
+				Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | 0xC2) => true,
+				Some(b'u') => !matches!(
+					(at(pos + 1), at(pos + 2)),
+					(Some(b'8'), _)
+						| (Some(b'1'), Some(b'6'))
+						| (Some(b'3'), Some(b'2'))
+						| (Some(b'6'), Some(b'4'))
+				),
 				Some(b'd') => at(pos + 1) != Some(b'e'),
 				_ => false,
 			});
@@ -1016,8 +1097,18 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 		float = true;
 	}
 	if mode == Compound::Float {
-		if at(pos) == Some(b'f') {
-			pos += 1;
+		let b0 = at(pos);
+		let b1 = at(pos + 1);
+		let b2 = at(pos + 2);
+		if b0 == Some(b'f') {
+			if (b1 == Some(b'1') && b2 == Some(b'6'))
+				|| (b1 == Some(b'3') && b2 == Some(b'2'))
+				|| (b1 == Some(b'6') && b2 == Some(b'4'))
+			{
+				pos += 3;
+			} else {
+				pos += 1;
+			}
 		}
 		if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
 			return Some(Diag::message(
@@ -1028,10 +1119,22 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 		}
 		return None;
 	}
-	if at(pos) == Some(b'f') {
-		pos += 1;
+	let mut int_limit: Option<(u64, bool, &'static str)> = None;
+	let b0 = at(pos);
+	let b1 = at(pos + 1);
+	let b2 = at(pos + 2);
+	let digit_end = pos;
+	if b0 == Some(b'f') {
+		if (b1 == Some(b'1') && b2 == Some(b'6'))
+			|| (b1 == Some(b'3') && b2 == Some(b'2'))
+			|| (b1 == Some(b'6') && b2 == Some(b'4'))
+		{
+			pos += 3;
+		} else {
+			pos += 1;
+		}
 		float = true;
-	} else if at(pos) == Some(b'd') {
+	} else if b0 == Some(b'd') {
 		pos += 1;
 		if let Some(d) = expect(&mut pos, b'e') {
 			return Some(d);
@@ -1040,6 +1143,69 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 			return Some(d);
 		}
 		float = true;
+	} else if !float && (b0 == Some(b'i') || b0 == Some(b'u')) {
+		let is_i = b0 == Some(b'i');
+		if b1 == Some(b'8') {
+			pos += 2;
+			int_limit = Some(if is_i {
+				(
+					i8::MAX as u64,
+					true,
+					"Failed to parse number: number cannot fit within an 8bit signed integer",
+				)
+			} else {
+				(
+					u8::MAX as u64,
+					false,
+					"Failed to parse number: number cannot fit within an 8bit unsigned integer",
+				)
+			});
+		} else if b1 == Some(b'1') && b2 == Some(b'6') {
+			pos += 3;
+			int_limit = Some(if is_i {
+				(
+					i16::MAX as u64,
+					true,
+					"Failed to parse number: number cannot fit within a 16bit signed integer",
+				)
+			} else {
+				(
+					u16::MAX as u64,
+					false,
+					"Failed to parse number: number cannot fit within a 16bit unsigned integer",
+				)
+			});
+		} else if b1 == Some(b'3') && b2 == Some(b'2') {
+			pos += 3;
+			int_limit = Some(if is_i {
+				(
+					i32::MAX as u64,
+					true,
+					"Failed to parse number: number cannot fit within a 32bit signed integer",
+				)
+			} else {
+				(
+					u32::MAX as u64,
+					false,
+					"Failed to parse number: number cannot fit within a 32bit unsigned integer",
+				)
+			});
+		} else if b1 == Some(b'6') && b2 == Some(b'4') {
+			pos += 3;
+			int_limit = Some(if is_i {
+				(
+					i64::MAX as u64,
+					true,
+					"Failed to parse number: number cannot fit within a 64bit signed integer",
+				)
+			} else {
+				(
+					u64::MAX,
+					false,
+					"Failed to parse number: number cannot fit within a 64bit unsigned integer",
+				)
+			});
+		}
 	}
 	if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
 		return Some(Diag::message(
@@ -1049,15 +1215,22 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 		));
 	}
 	if !float {
-		let body = &src[(start + signed as u32) as usize..pos as usize];
+		let (max, allow_neg, msg) = int_limit.unwrap_or((
+			i64::MAX as u64,
+			true,
+			"Failed to parse number: number cannot fit within a 64bit signed integer",
+		));
+		let body = &src[(start + signed as u32) as usize..digit_end as usize];
 		let neg = at(start) == Some(b'-');
-		let fits = decode_uint(body).is_some_and(|u| u <= i64::MAX as u64 + (neg as u64));
+		let fits = decode_uint(body).is_some_and(|u| {
+			if allow_neg {
+				u <= max + (neg as u64)
+			} else {
+				(!neg || u == 0) && u <= max
+			}
+		});
 		if !fits {
-			return Some(Diag::message(
-				start,
-				pos,
-				"Failed to parse number: number cannot fit within a 64bit signed integer",
-			));
+			return Some(Diag::message(start, pos, msg));
 		}
 	}
 	None
@@ -1156,6 +1329,186 @@ pub fn decode_uint(text: &[u8]) -> Option<u64> {
 	Some(v)
 }
 
+/// Parses a 32-bit float literal span: digits with `_` separators, an optional
+/// fraction and exponent, and an optional `f` suffix.
+pub fn parse_float32(text: &[u8]) -> f32 {
+	let digits = |b: &&u8| **b != b'_' && **b != b'f';
+	let mut buf = [0u8; 64];
+	let n = text.iter().filter(digits).count();
+	if n > buf.len() {
+		let s: String = text.iter().filter(digits).map(|&b| b as char).collect();
+		return s.parse().unwrap_or(f32::NAN);
+	}
+	for (slot, &b) in buf.iter_mut().zip(text.iter().filter(digits)) {
+		*slot = b;
+	}
+	core::str::from_utf8(&buf[..n]).ok().and_then(|s| s.parse().ok()).unwrap_or(f32::NAN)
+}
+
+/// Parses a float literal span: digits with `_` separators, an optional
+/// fraction and exponent, and an optional `f` suffix.
+pub fn parse_float(text: &[u8]) -> f64 {
+	let digits = |b: &&u8| **b != b'_' && **b != b'f';
+	let mut buf = [0u8; 64];
+	let n = text.iter().filter(digits).count();
+	if n > buf.len() {
+		// A literal written out in full, such as `f64::MAX` without an
+		// exponent, is read whole; only these allocate.
+		let s: String = text.iter().filter(digits).map(|&b| b as char).collect();
+		return s.parse().unwrap_or(f64::NAN);
+	}
+	for (slot, &b) in buf.iter_mut().zip(text.iter().filter(digits)) {
+		*slot = b;
+	}
+	core::str::from_utf8(&buf[..n]).ok().and_then(|s| s.parse().ok()).unwrap_or(f64::NAN)
+}
+
+/// A decoded numeric literal value (excluding `Decimal` and `Duration`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DecodedNumber {
+	Int(i64),
+	I8(i8),
+	U8(u8),
+	I16(i16),
+	U16(u16),
+	I32(i32),
+	U32(u32),
+	U64(u64),
+	Float(f64),
+	F16(half::f16),
+	F32(f32),
+}
+
+/// Decodes a lexed numeric literal `text` of the given `kind` (including an
+/// optional leading `+` or `-` sign and trailing type suffix). Returns `None`
+/// if `kind` is `Decimal` or `Duration`, or if the literal overflows its
+/// target type.
+pub fn decode_number(kind: NumKind, text: &[u8]) -> Option<DecodedNumber> {
+	let (neg, body) = match text.strip_prefix(b"-") {
+		Some(b) => (true, b),
+		None => (false, text.strip_prefix(b"+").unwrap_or(text)),
+	};
+	match kind {
+		NumKind::Int => {
+			let u = decode_uint(body)?;
+			let max = (i64::MAX as u64) + (neg as u64);
+			if u > max {
+				return None;
+			}
+			let v = if neg {
+				(u as i64).wrapping_neg()
+			} else {
+				u as i64
+			};
+			Some(DecodedNumber::Int(v))
+		}
+		NumKind::I8 => {
+			let u = decode_uint(&body[..body.len() - 2])?;
+			let max = (i8::MAX as u64) + (neg as u64);
+			if u > max {
+				return None;
+			}
+			let v = if neg {
+				(u as i8).wrapping_neg()
+			} else {
+				u as i8
+			};
+			Some(DecodedNumber::I8(v))
+		}
+		NumKind::U8 => {
+			let u = decode_uint(&body[..body.len() - 2])?;
+			if (neg && u != 0) || u > u8::MAX as u64 {
+				return None;
+			}
+			Some(DecodedNumber::U8(u as u8))
+		}
+		NumKind::I16 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			let max = (i16::MAX as u64) + (neg as u64);
+			if u > max {
+				return None;
+			}
+			let v = if neg {
+				(u as i16).wrapping_neg()
+			} else {
+				u as i16
+			};
+			Some(DecodedNumber::I16(v))
+		}
+		NumKind::U16 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			if (neg && u != 0) || u > u16::MAX as u64 {
+				return None;
+			}
+			Some(DecodedNumber::U16(u as u16))
+		}
+		NumKind::I32 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			let max = (i32::MAX as u64) + (neg as u64);
+			if u > max {
+				return None;
+			}
+			let v = if neg {
+				(u as i32).wrapping_neg()
+			} else {
+				u as i32
+			};
+			Some(DecodedNumber::I32(v))
+		}
+		NumKind::U32 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			if (neg && u != 0) || u > u32::MAX as u64 {
+				return None;
+			}
+			Some(DecodedNumber::U32(u as u32))
+		}
+		NumKind::I64 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			let max = (i64::MAX as u64) + (neg as u64);
+			if u > max {
+				return None;
+			}
+			let v = if neg {
+				(u as i64).wrapping_neg()
+			} else {
+				u as i64
+			};
+			Some(DecodedNumber::Int(v))
+		}
+		NumKind::U64 => {
+			let u = decode_uint(&body[..body.len() - 3])?;
+			if neg && u != 0 {
+				return None;
+			}
+			Some(DecodedNumber::U64(u))
+		}
+		NumKind::Float => Some(DecodedNumber::Float(parse_float(text))),
+		NumKind::F16 => {
+			let f = parse_float(&text[..text.len() - 3]);
+			let h = half::f16::from_f64(f);
+			if !h.is_finite() {
+				return None;
+			}
+			Some(DecodedNumber::F16(h))
+		}
+		NumKind::F32 => {
+			let f = parse_float32(&text[..text.len() - 3]);
+			if !f.is_finite() {
+				return None;
+			}
+			Some(DecodedNumber::F32(f))
+		}
+		NumKind::F64 => {
+			let f = parse_float(&text[..text.len() - 3]);
+			if !f.is_finite() {
+				return None;
+			}
+			Some(DecodedNumber::Float(f))
+		}
+		NumKind::Decimal | NumKind::Duration => None,
+	}
+}
+
 /// Decodes a lexed duration span to `(seconds, nanoseconds)`.
 pub fn decode_duration(text: &[u8]) -> Option<(u64, u32)> {
 	let mut secs: u64 = 0;
@@ -1245,11 +1598,32 @@ mod test {
 			("3dec", NumKind::Decimal),
 			("1h30m", NumKind::Duration),
 			("5ms", NumKind::Duration),
+			("5us", NumKind::Duration),
 			("2d", NumKind::Duration),
+			("5i8", NumKind::I8),
+			("5u8", NumKind::U8),
+			("5i16", NumKind::I16),
+			("5u16", NumKind::U16),
+			("5i32", NumKind::I32),
+			("5u32", NumKind::U32),
+			("5i64", NumKind::I64),
+			("5u64", NumKind::U64),
+			("1.5f16", NumKind::F16),
+			("5f16", NumKind::F16),
+			("1.5f32", NumKind::F32),
+			("5f32", NumKind::F32),
+			("1.5f64", NumKind::F64),
+			("5f64", NumKind::F64),
+			("1_000u32", NumKind::U32),
+			("1e3f32", NumKind::F32),
 		] {
 			let mut l = Lexer::new(src.as_bytes());
 			assert_eq!(l.numeric(0), Ok(kind), "{src}");
 			assert_eq!(l.pos as usize, src.len(), "{src}");
+		}
+		for src in ["1.5u8", "1e3i32", "1.5i16", "1e3u64"] {
+			let mut l = Lexer::new(src.as_bytes());
+			assert_eq!(l.numeric(0), Err(LexError::InvalidNumber), "{src}");
 		}
 		assert_eq!(decode_duration(b"1h30m"), Some((5400, 0)));
 		assert_eq!(decode_duration(b"1s500ms"), Some((1, 500_000_000)));

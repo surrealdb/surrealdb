@@ -410,6 +410,15 @@ impl LogicalLiteral {
 			LogicalLiteral::Float(_) => Kind::Float,
 			LogicalLiteral::Integer(_) => Kind::Int,
 			LogicalLiteral::Decimal(_) => Kind::Decimal,
+			LogicalLiteral::I8(_) => Kind::I8,
+			LogicalLiteral::U8(_) => Kind::U8,
+			LogicalLiteral::I16(_) => Kind::I16,
+			LogicalLiteral::U16(_) => Kind::U16,
+			LogicalLiteral::I32(_) => Kind::I32,
+			LogicalLiteral::U32(_) => Kind::U32,
+			LogicalLiteral::U64(_) => Kind::U64,
+			LogicalLiteral::F16(_) => Kind::F16,
+			LogicalLiteral::F32(_) => Kind::F32,
 			LogicalLiteral::String(_) => Kind::String,
 			LogicalLiteral::Bytes(_) => Kind::Bytes,
 			LogicalLiteral::Regex(_) => Kind::Regex,
@@ -424,7 +433,7 @@ impl LogicalLiteral {
 
 /// Whether a kind admits only numbers.
 pub fn is_numeric(kind: &Kind) -> bool {
-	matches!(kind, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
+	kind.is_numeric()
 }
 
 /// Whether a value of `kind` may be a record id, the one value a field read
@@ -447,6 +456,15 @@ pub fn kind_may_be_record(kind: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -477,7 +495,7 @@ pub fn kind_may_be_record(kind: &Kind) -> bool {
 pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 	match declared {
 		Kind::Any => true,
-		Kind::Number => matches!(actual, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number),
+		Kind::Number => actual.is_numeric(),
 		Kind::Either(kinds) => match kinds.as_slice() {
 			[Kind::None, inner] => {
 				matches!(actual, Kind::None) || coercion_is_identity(inner, actual)
@@ -504,6 +522,15 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 			| Kind::Duration
 			| Kind::Float
 			| Kind::Int
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Number
 			| Kind::Object
 			| Kind::String
@@ -531,6 +558,15 @@ pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Object
 		| Kind::String
 		| Kind::Uuid
@@ -561,6 +597,15 @@ fn each_keeps_element_kind(kind: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String

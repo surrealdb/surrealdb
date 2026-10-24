@@ -223,8 +223,21 @@ fn literal_key(literal: &LogicalLiteral) -> Option<LogicalLiteral> {
 	match literal {
 		LogicalLiteral::Integer(_) | LogicalLiteral::Uuid(_) => Some(literal.clone()),
 		LogicalLiteral::String(text) if !text.as_str().is_empty() => Some(literal.clone()),
+		LogicalLiteral::I8(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::U8(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::I16(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::U16(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::I32(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::U32(v) => Some(LogicalLiteral::Integer(i64::from(*v))),
+		LogicalLiteral::U64(v) => i64::try_from(*v).ok().map(LogicalLiteral::Integer),
 		LogicalLiteral::Float(float) => {
 			Number::Float(*float).as_int_lossless().map(LogicalLiteral::Integer)
+		}
+		LogicalLiteral::F16(v) => {
+			surrealdb_expr::val::Number::F16(*v).as_int_lossless().map(LogicalLiteral::Integer)
+		}
+		LogicalLiteral::F32(v) => {
+			surrealdb_expr::val::Number::F32(*v).as_int_lossless().map(LogicalLiteral::Integer)
 		}
 		LogicalLiteral::Decimal(decimal) => {
 			Number::Decimal(*decimal).as_int_lossless().map(LogicalLiteral::Integer)

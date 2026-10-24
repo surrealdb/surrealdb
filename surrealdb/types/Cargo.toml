@@ -50,6 +50,7 @@ papaya.workspace = true
 chrono = { workspace = true, features = ["serde", "now", "wasmbind"] }
 flatbuffers.workspace = true
 geo-types = { workspace = true, features = ["serde"] }
+half.workspace = true
 hex.workspace = true
 http.workspace = true
 regex = { workspace = true, optional = true }

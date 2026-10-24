@@ -100,12 +100,35 @@ impl Lower<'_> {
 
 	fn number(&self, id: NodeId) -> R<surrealdb_types::Number> {
 		if let Expr::Literal(lit) = self.expr(id)? {
-			if let Literal::Integer(i) = lit {
-				return Ok(surrealdb_types::Number::Int(i));
-			} else if let Literal::Float(f) = lit {
-				return Ok(surrealdb_types::Number::Float(f));
-			} else if let Literal::Decimal(d) = lit {
-				return Ok(surrealdb_types::Number::Decimal(d));
+			match lit {
+				Literal::Integer(i) => return Ok(surrealdb_types::Number::Int(i)),
+				Literal::Float(f) => return Ok(surrealdb_types::Number::Float(f)),
+				Literal::Decimal(d) => return Ok(surrealdb_types::Number::Decimal(d)),
+				Literal::I8(i) => return Ok(surrealdb_types::Number::I8(i)),
+				Literal::U8(u) => return Ok(surrealdb_types::Number::U8(u)),
+				Literal::I16(i) => return Ok(surrealdb_types::Number::I16(i)),
+				Literal::U16(u) => return Ok(surrealdb_types::Number::U16(u)),
+				Literal::I32(i) => return Ok(surrealdb_types::Number::I32(i)),
+				Literal::U32(u) => return Ok(surrealdb_types::Number::U32(u)),
+				Literal::U64(u) => return Ok(surrealdb_types::Number::U64(u)),
+				Literal::F16(f) => return Ok(surrealdb_types::Number::F16(f)),
+				Literal::F32(f) => return Ok(surrealdb_types::Number::F32(f)),
+				Literal::None
+				| Literal::Null
+				| Literal::UnboundedRange
+				| Literal::Bool(_)
+				| Literal::String(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::RecordId(_)
+				| Literal::Array(_)
+				| Literal::Set(_)
+				| Literal::Object(_)
+				| Literal::Duration(_)
+				| Literal::Datetime(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_) => {}
 			}
 		}
 		Err(Reject::new("not a number"))

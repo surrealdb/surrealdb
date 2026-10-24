@@ -21,9 +21,14 @@ define_pure_function!(TypeBytes, "type::bytes", effects: EffectSet::PURE, fallib
 define_pure_function!(TypeDatetime, "type::datetime", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Datetime, crate::fnc::r#type::datetime);
 define_pure_function!(TypeDecimal, "type::decimal", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Decimal, crate::fnc::r#type::decimal);
 define_pure_function!(TypeDuration, "type::duration", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Duration, crate::fnc::r#type::duration);
+define_pure_function!(TypeF16, "type::f16", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> F16, crate::fnc::r#type::f16);
+define_pure_function!(TypeF32, "type::f32", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> F32, crate::fnc::r#type::f32);
 define_pure_function!(TypeFile, "type::file", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (bucket: String, key: String) -> Any, crate::fnc::r#type::file);
 define_pure_function!(TypeFloat, "type::float", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Float, crate::fnc::r#type::float);
 define_pure_function!(TypeGeometry, "type::geometry", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Any, crate::fnc::r#type::geometry);
+define_pure_function!(TypeI16, "type::i16", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> I16, crate::fnc::r#type::i16);
+define_pure_function!(TypeI32, "type::i32", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> I32, crate::fnc::r#type::i32);
+define_pure_function!(TypeI8, "type::i8", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> I8, crate::fnc::r#type::i8);
 define_pure_function!(TypeInt, "type::int", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Int, crate::fnc::r#type::int);
 define_pure_function!(TypeNumber, "type::number", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Number, crate::fnc::r#type::number);
 define_pure_function!(TypeOf, "type::of", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> String, crate::fnc::r#type::type_of);
@@ -34,6 +39,10 @@ define_pure_function!(TypeSet, "type::set", effects: EffectSet::PURE, fallibilit
 define_pure_function!(TypeString, "type::string", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> String, crate::fnc::r#type::string);
 define_pure_function!(TypeStringLossy, "type::string_lossy", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> String, crate::fnc::r#type::string_lossy);
 define_pure_function!(TypeTable, "type::table", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Any, crate::fnc::r#type::table);
+define_pure_function!(TypeU16, "type::u16", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> U16, crate::fnc::r#type::u16);
+define_pure_function!(TypeU32, "type::u32", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> U32, crate::fnc::r#type::u32);
+define_pure_function!(TypeU64, "type::u64", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> U64, crate::fnc::r#type::u64);
+define_pure_function!(TypeU8, "type::u8", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> U8, crate::fnc::r#type::u8);
 define_pure_function!(TypeUuid, "type::uuid", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (value: Any) -> Uuid, crate::fnc::r#type::uuid);
 
 // Type checking functions
@@ -44,8 +53,13 @@ define_pure_function!(TypeIsCollection, "type::is_collection", effects: EffectSe
 define_pure_function!(TypeIsDatetime, "type::is_datetime", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::datetime);
 define_pure_function!(TypeIsDecimal, "type::is_decimal", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::decimal);
 define_pure_function!(TypeIsDuration, "type::is_duration", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::duration);
+define_pure_function!(TypeIsF16, "type::is_f16", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::f16);
+define_pure_function!(TypeIsF32, "type::is_f32", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::f32);
 define_pure_function!(TypeIsFloat, "type::is_float", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::float);
 define_pure_function!(TypeIsGeometry, "type::is_geometry", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::geometry);
+define_pure_function!(TypeIsI16, "type::is_i16", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::i16);
+define_pure_function!(TypeIsI32, "type::is_i32", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::i32);
+define_pure_function!(TypeIsI8, "type::is_i8", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::i8);
 define_pure_function!(TypeIsInt, "type::is_int", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::int);
 define_pure_function!(TypeIsLine, "type::is_line", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::line);
 define_pure_function!(TypeIsMultiline, "type::is_multiline", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::multiline);
@@ -61,6 +75,10 @@ define_pure_function!(TypeIsRange, "type::is_range", effects: EffectSet::PURE, f
 define_pure_function!(TypeIsRecord, "type::is_record", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any, ?table: String) -> Bool, crate::fnc::r#type::is::record);
 define_pure_function!(TypeIsSet, "type::is_set", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::set);
 define_pure_function!(TypeIsString, "type::is_string", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::string);
+define_pure_function!(TypeIsU16, "type::is_u16", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::u16);
+define_pure_function!(TypeIsU32, "type::is_u32", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::u32);
+define_pure_function!(TypeIsU64, "type::is_u64", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::u64);
+define_pure_function!(TypeIsU8, "type::is_u8", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::u8);
 define_pure_function!(TypeIsUuid, "type::is_uuid", effects: EffectSet::PURE, fallibility: Fallibility::INFALLIBLE, (value: Any) -> Bool, crate::fnc::r#type::is::uuid);
 
 // =========================================================================
@@ -230,9 +248,14 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeDatetime,
 	&TypeDecimal,
 	&TypeDuration,
+	&TypeF16,
+	&TypeF32,
 	&TypeFile,
 	&TypeFloat,
 	&TypeGeometry,
+	&TypeI16,
+	&TypeI32,
+	&TypeI8,
 	&TypeInt,
 	&TypeIsArray,
 	&TypeIsBool,
@@ -241,8 +264,13 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeIsDatetime,
 	&TypeIsDecimal,
 	&TypeIsDuration,
+	&TypeIsF16,
+	&TypeIsF32,
 	&TypeIsFloat,
 	&TypeIsGeometry,
+	&TypeIsI16,
+	&TypeIsI32,
+	&TypeIsI8,
 	&TypeIsInt,
 	&TypeIsLine,
 	&TypeIsMultiline,
@@ -258,6 +286,10 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeIsRecord,
 	&TypeIsSet,
 	&TypeIsString,
+	&TypeIsU16,
+	&TypeIsU32,
+	&TypeIsU64,
+	&TypeIsU8,
 	&TypeIsUuid,
 	&TypeNumber,
 	&TypeOf,
@@ -268,6 +300,10 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&TypeString,
 	&TypeStringLossy,
 	&TypeTable,
+	&TypeU16,
+	&TypeU32,
+	&TypeU64,
+	&TypeU8,
 	&TypeUuid,
 ];
 

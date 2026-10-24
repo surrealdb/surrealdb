@@ -1977,7 +1977,7 @@ fn filter_from_type(
 			filter_impl!(filter, matches_ty, "matches");
 		}
 		// Numeric types: gt, gte, lt, lte, in
-		Kind::Int => {
+		Kind::Int | Kind::I8 | Kind::I16 | Kind::I32 | Kind::U8 | Kind::U16 => {
 			let num_ty = TypeRef::named(TypeRef::INT);
 			filter_impl!(filter, num_ty, "gt");
 			filter_impl!(filter, num_ty, "gte");
@@ -1986,7 +1986,25 @@ fn filter_from_type(
 			let list_ty = TypeRef::named_nn_list(TypeRef::INT);
 			filter_impl!(filter, list_ty, "in");
 		}
-		Kind::Float => {
+		Kind::U32 => {
+			let num_ty = TypeRef::named("u32");
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list("u32");
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::U64 => {
+			let num_ty = TypeRef::named("u64");
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list("u64");
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::Float | Kind::F16 | Kind::F32 => {
 			let num_ty = TypeRef::named(TypeRef::FLOAT);
 			filter_impl!(filter, num_ty, "gt");
 			filter_impl!(filter, num_ty, "gte");
@@ -2735,14 +2753,12 @@ fn strip_option(kind: &Kind) -> Kind {
 /// element kind is numeric, return the inner numeric kind.
 fn numeric_array_inner(kind: &Kind) -> Option<Kind> {
 	if let Kind::Array(inner, _) = kind {
-		if matches!(inner.as_ref(), Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+		if inner.is_numeric() {
 			Some(*inner.clone())
 		} else if let Kind::Either(ks) = inner.as_ref() {
 			let non_none: Vec<&Kind> =
 				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1
-				&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
-			{
+			if non_none.len() == 1 && non_none[0].is_numeric() {
 				Some(non_none[0].clone())
 			} else {
 				None
@@ -2986,16 +3002,15 @@ fn aggregate_field_value(v: Value) -> Result<Option<FieldValue<'static>>, async_
 	}
 }
 
-/// Return `true` if `kind` is numeric (Float/Int/Number/Decimal), recursing
+/// Return `true` if `kind` is numeric (Float/Int/Number/Decimal and sized variants), recursing
 /// through `Either`/`Option` once.
 fn is_numeric_kind(kind: &Kind) -> bool {
-	if matches!(kind, Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+	if kind.is_numeric() {
 		true
 	} else if let Kind::Either(ks) = kind {
 		let non_none: Vec<&Kind> =
 			ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-		non_none.len() == 1
-			&& matches!(non_none[0], Kind::Float | Kind::Int | Kind::Number | Kind::Decimal)
+		non_none.len() == 1 && non_none[0].is_numeric()
 	} else {
 		false
 	}
@@ -3004,7 +3019,7 @@ fn is_numeric_kind(kind: &Kind) -> bool {
 /// Return the field's effective numeric kind (stripping `option<…>`), or
 /// `Kind::Number` as a fallback.
 fn numeric_kind(kind: &Kind) -> Kind {
-	if matches!(kind, Kind::Float | Kind::Int | Kind::Number | Kind::Decimal) {
+	if kind.is_numeric() {
 		kind.clone()
 	} else if let Kind::Either(ks) = kind {
 		let non_none: Vec<Kind> =

@@ -175,6 +175,15 @@ enum ConstKey {
 	Int(i64),
 	Float(u64),
 	Decimal([u8; 16]),
+	I8(i8),
+	U8(u8),
+	I16(i16),
+	U16(u16),
+	I32(i32),
+	U32(u32),
+	U64(u64),
+	F16(u16),
+	F32(u32),
 	Strand(String),
 	Text(String),
 }
@@ -189,6 +198,19 @@ impl ConstKey {
 			Value::Number(Number::Float(f)) if f.is_nan() => Self::Float(f64::NAN.to_bits()),
 			Value::Number(Number::Float(f)) => Self::Float(f.to_bits()),
 			Value::Number(Number::Decimal(d)) => Self::Decimal(d.serialize()),
+			Value::Number(Number::I8(i)) => Self::I8(*i),
+			Value::Number(Number::U8(u)) => Self::U8(*u),
+			Value::Number(Number::I16(i)) => Self::I16(*i),
+			Value::Number(Number::U16(u)) => Self::U16(*u),
+			Value::Number(Number::I32(i)) => Self::I32(*i),
+			Value::Number(Number::U32(u)) => Self::U32(*u),
+			Value::Number(Number::U64(u)) => Self::U64(*u),
+			Value::Number(Number::F16(f)) if f.is_nan() => {
+				Self::F16(surrealdb_types::f16::NAN.to_bits())
+			}
+			Value::Number(Number::F16(f)) => Self::F16(f.to_bits()),
+			Value::Number(Number::F32(f)) if f.is_nan() => Self::F32(f32::NAN.to_bits()),
+			Value::Number(Number::F32(f)) => Self::F32(f.to_bits()),
 			Value::String(s) => Self::Strand(s.as_str().to_owned()),
 			other @ (Value::Duration(_)
 			| Value::Datetime(_)

@@ -211,7 +211,17 @@ impl Coerce for f64 {
 			return false;
 		};
 		match n {
-			Number::Int(_) | Number::Float(_) => true,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => true,
 			Number::Decimal(d) => f64::try_from(*d).is_ok(),
 		}
 	}
@@ -233,8 +243,18 @@ impl Coerce for Decimal {
 			return false;
 		};
 		match n {
-			Number::Int(_) | Number::Decimal(_) => true,
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => true,
 			Number::Float(f) => Decimal::try_from(*f).is_ok(),
+			Number::F16(f) => Decimal::try_from(f.to_f64()).is_ok(),
+			Number::F32(f) => Decimal::try_from(*f as f64).is_ok(),
 		}
 	}
 
@@ -245,6 +265,73 @@ impl Coerce for Decimal {
 				into: "decimal".into(),
 			},
 		)
+	}
+}
+
+macro_rules! impl_int_coerce {
+	($($ty:ident),* $(,)?) => {
+		$(
+			impl Coerce for $ty {
+				fn can_coerce(v: &Value) -> bool {
+					matches!(v, Value::Number(n) if n.as_int_lossless().and_then(|x| $ty::try_from(x).ok()).is_some())
+				}
+
+				fn coerce(val: Value) -> Result<Self, CoerceError> {
+					val.try_into_number()
+						.and_then(|n| n.as_int_lossless().and_then(|x| $ty::try_from(x).ok()).ok_or(Value::Number(n)))
+						.map_err(|from| CoerceError::InvalidKind {
+							from,
+							into: stringify!($ty).into(),
+						})
+				}
+			}
+		)*
+	};
+}
+impl_int_coerce!(i8, u8, i16, u16, i32, u32);
+
+impl Coerce for u64 {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Number(n) if n.as_u64_lossless().is_some())
+	}
+
+	fn coerce(val: Value) -> Result<Self, CoerceError> {
+		val.try_into_number().and_then(|n| n.as_u64_lossless().ok_or(Value::Number(n))).map_err(
+			|from| CoerceError::InvalidKind {
+				from,
+				into: "u64".into(),
+			},
+		)
+	}
+}
+
+impl Coerce for half::f16 {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Number(n) if n.as_f16().is_some())
+	}
+
+	fn coerce(val: Value) -> Result<Self, CoerceError> {
+		val.try_into_number().and_then(|n| n.as_f16().ok_or(Value::Number(n))).map_err(|from| {
+			CoerceError::InvalidKind {
+				from,
+				into: "f16".into(),
+			}
+		})
+	}
+}
+
+impl Coerce for f32 {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Number(n) if n.as_f32().is_some())
+	}
+
+	fn coerce(val: Value) -> Result<Self, CoerceError> {
+		val.try_into_number().and_then(|n| n.as_f32().ok_or(Value::Number(n))).map_err(|from| {
+			CoerceError::InvalidKind {
+				from,
+				into: "f32".into(),
+			}
+		})
 	}
 }
 
@@ -517,9 +604,43 @@ impl Value {
 	}
 
 	/// Whether taking this value as `kind` turns it into another value: an
-	/// object read as the geometry it describes.
+	/// object read as the geometry it describes, or a number converted across
+	/// a sized numeric boundary (preserving a sized number whose exact kind is
+	/// a union member while keeping declared-member order among `int`, `float`,
+	/// and `decimal`).
 	pub fn converts_to(&self, kind: &Kind) -> bool {
-		matches!((self, kind), (Value::Object(_), Kind::Geometry(_)))
+		match (self, kind) {
+			(Value::Object(_), Kind::Geometry(_)) => true,
+			(
+				Value::Number(Number::Int(_) | Number::Float(_) | Number::Decimal(_)),
+				Kind::Int | Kind::Float | Kind::Decimal,
+			) => false,
+			(Value::Number(Number::I8(_)), Kind::I8)
+			| (Value::Number(Number::U8(_)), Kind::U8)
+			| (Value::Number(Number::I16(_)), Kind::I16)
+			| (Value::Number(Number::U16(_)), Kind::U16)
+			| (Value::Number(Number::I32(_)), Kind::I32)
+			| (Value::Number(Number::U32(_)), Kind::U32)
+			| (Value::Number(Number::U64(_)), Kind::U64)
+			| (Value::Number(Number::F16(_)), Kind::F16)
+			| (Value::Number(Number::F32(_)), Kind::F32) => false,
+			(
+				Value::Number(_),
+				Kind::Int
+				| Kind::Float
+				| Kind::Decimal
+				| Kind::I8
+				| Kind::U8
+				| Kind::I16
+				| Kind::U16
+				| Kind::I32
+				| Kind::U32
+				| Kind::U64
+				| Kind::F16
+				| Kind::F32,
+			) => true,
+			_ => false,
+		}
 	}
 
 	/// The member of the union `members` this value is taken as, of those
@@ -548,6 +669,15 @@ impl Value {
 			Kind::Float => self.can_coerce_to::<f64>(),
 			Kind::Decimal => self.can_coerce_to::<Decimal>(),
 			Kind::Number => self.can_coerce_to::<Number>(),
+			Kind::I8 => self.can_coerce_to::<i8>(),
+			Kind::U8 => self.can_coerce_to::<u8>(),
+			Kind::I16 => self.can_coerce_to::<i16>(),
+			Kind::U16 => self.can_coerce_to::<u16>(),
+			Kind::I32 => self.can_coerce_to::<i32>(),
+			Kind::U32 => self.can_coerce_to::<u32>(),
+			Kind::U64 => self.can_coerce_to::<u64>(),
+			Kind::F16 => self.can_coerce_to::<half::f16>(),
+			Kind::F32 => self.can_coerce_to::<f32>(),
 			Kind::String => self.can_coerce_to::<String>(),
 			Kind::Datetime => self.can_coerce_to::<Datetime>(),
 			Kind::Duration => self.can_coerce_to::<Duration>(),
@@ -698,6 +828,15 @@ impl Value {
 			Kind::Float => self.coerce_to::<f64>().map(Value::from),
 			Kind::Decimal => self.coerce_to::<Decimal>().map(Value::from),
 			Kind::Number => self.coerce_to::<Number>().map(Value::from),
+			Kind::I8 => self.coerce_to::<i8>().map(|v| Value::Number(Number::I8(v))),
+			Kind::U8 => self.coerce_to::<u8>().map(|v| Value::Number(Number::U8(v))),
+			Kind::I16 => self.coerce_to::<i16>().map(|v| Value::Number(Number::I16(v))),
+			Kind::U16 => self.coerce_to::<u16>().map(|v| Value::Number(Number::U16(v))),
+			Kind::I32 => self.coerce_to::<i32>().map(|v| Value::Number(Number::I32(v))),
+			Kind::U32 => self.coerce_to::<u32>().map(|v| Value::Number(Number::U32(v))),
+			Kind::U64 => self.coerce_to::<u64>().map(|v| Value::Number(Number::U64(v))),
+			Kind::F16 => self.coerce_to::<half::f16>().map(|v| Value::Number(Number::F16(v))),
+			Kind::F32 => self.coerce_to::<f32>().map(|v| Value::Number(Number::F32(v))),
 			Kind::String => self.coerce_to::<String>().map(Value::from),
 			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
@@ -1201,7 +1340,7 @@ mod tests {
 		// accepts and treats a failure there as unreachable, so the two must
 		// never disagree.
 		for value in number_battery() {
-			for kind in [Kind::Int, Kind::Float, Kind::Decimal, Kind::Number] {
+			for kind in Kind::NUMERIC {
 				assert_eq!(
 					value.can_coerce_to_kind(&kind),
 					value.clone().coerce_to_kind(&kind).is_ok(),
@@ -1242,10 +1381,20 @@ mod tests {
 			fractional.coerce_to_kind(&either).unwrap(),
 			Value::Number(Number::Float(f)) if f == 1.5
 		));
-		// An in-range whole float is the first member's int
+		// When the first member can hold the value, it still wins
 		assert!(matches!(
 			float(5.0).coerce_to_kind(&either).unwrap(),
 			Value::Number(Number::Int(5))
+		));
+		assert!(matches!(
+			decimal(5, 0).coerce_to_kind(&either).unwrap(),
+			Value::Number(Number::Int(5))
+		));
+		// A sized number whose exact kind is in the union keeps its width
+		let sized_either = Kind::Either(vec![Kind::Int, Kind::I8]);
+		assert!(matches!(
+			Value::Number(Number::I8(5)).coerce_to_kind(&sized_either).unwrap(),
+			Value::Number(Number::I8(5))
 		));
 	}
 }

@@ -174,9 +174,27 @@ fn side_element(
 			let rounded = match (*n, side) {
 				(Number::Float(f), Side::Low) => Number::Float(f.ceil()),
 				(Number::Float(f), Side::High) => Number::Float(f.floor()),
+				(Number::F32(f), Side::Low) => Number::F32(f.ceil()),
+				(Number::F32(f), Side::High) => Number::F32(f.floor()),
+				(Number::F16(f), Side::Low) => {
+					Number::F16(surrealdb_types::f16::from_f64(f.to_f64().ceil()))
+				}
+				(Number::F16(f), Side::High) => {
+					Number::F16(surrealdb_types::f16::from_f64(f.to_f64().floor()))
+				}
 				(Number::Decimal(d), Side::Low) => Number::Decimal(d.ceil()),
 				(Number::Decimal(d), Side::High) => Number::Decimal(d.floor()),
-				(Number::Int(_), _) => return None,
+				(
+					Number::Int(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_),
+					_,
+				) => return None,
 			};
 			rounded.as_int_lossless().map(|int| (Value::Number(Number::Int(int)), true))
 		}

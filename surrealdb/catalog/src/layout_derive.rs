@@ -264,6 +264,15 @@ impl<'k> Flat<'k> {
 				| other @ Kind::Duration
 				| other @ Kind::Float
 				| other @ Kind::Int
+				| other @ Kind::I8
+				| other @ Kind::I16
+				| other @ Kind::I32
+				| other @ Kind::U8
+				| other @ Kind::U16
+				| other @ Kind::U32
+				| other @ Kind::U64
+				| other @ Kind::F16
+				| other @ Kind::F32
 				| other @ Kind::Number
 				| other @ Kind::Object
 				| other @ Kind::String
@@ -430,6 +439,15 @@ fn leaf_column(path: &[&str], flat: &Flat<'_>, presence: Shape) -> Draft {
 	}
 	let single = match flat.members.as_slice() {
 		[Kind::Int] => Some(PhysicalKind::I64),
+		[Kind::I8] => Some(PhysicalKind::I8),
+		[Kind::I16] => Some(PhysicalKind::I16),
+		[Kind::I32] => Some(PhysicalKind::I32),
+		[Kind::U8] => Some(PhysicalKind::U8),
+		[Kind::U16] => Some(PhysicalKind::U16),
+		[Kind::U32] => Some(PhysicalKind::U32),
+		[Kind::U64] => Some(PhysicalKind::U64),
+		[Kind::F16] => Some(PhysicalKind::F16),
+		[Kind::F32] => Some(PhysicalKind::F32),
 		[Kind::Float] => Some(PhysicalKind::F64),
 		[Kind::Bool] => Some(PhysicalKind::Bool),
 		[Kind::Decimal] => Some(PhysicalKind::DecimalVar),
@@ -928,5 +946,26 @@ mod tests {
 		let fields = vec![definition("p", Some("geometry<point>"))];
 		let derived = derive(schemafull(&TableType::Normal), &fields);
 		assert_eq!(packed_of(&derived).columns[0].kind, PhysicalKind::Point);
+	}
+
+	#[test]
+	fn sized_number_kinds_derive_leaf_columns() {
+		for (name, expected) in [
+			("i8", PhysicalKind::I8),
+			("i16", PhysicalKind::I16),
+			("i32", PhysicalKind::I32),
+			("int", PhysicalKind::I64),
+			("u8", PhysicalKind::U8),
+			("u16", PhysicalKind::U16),
+			("u32", PhysicalKind::U32),
+			("u64", PhysicalKind::U64),
+			("f16", PhysicalKind::F16),
+			("f32", PhysicalKind::F32),
+			("float", PhysicalKind::F64),
+		] {
+			let fields = vec![definition("n", Some(name))];
+			let derived = derive(schemafull(&TableType::Normal), &fields);
+			assert_eq!(packed_of(&derived).columns[0].kind, expected, "{name}");
+		}
 	}
 }

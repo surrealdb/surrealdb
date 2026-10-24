@@ -39,6 +39,17 @@ const TAG_BOUND_EXCLUDED: u64 = 51;
 // A shaped block, accepted in requests only (`decode_request`)
 const TAG_SHAPED_BLOCK: u64 = surrealdb_types::shaped::CBOR_TAG;
 
+// Sized number tags (IANA unassigned 180..=188)
+pub const TAG_I8: u64 = 180;
+pub const TAG_U8: u64 = 181;
+pub const TAG_I16: u64 = 182;
+pub const TAG_U16: u64 = 183;
+pub const TAG_I32: u64 = 184;
+pub const TAG_U32: u64 = 185;
+pub const TAG_U64: u64 = 186;
+pub const TAG_F16: u64 = 187;
+pub const TAG_F32: u64 = 188;
+
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
 const TAG_SET: u64 = 56;
@@ -386,6 +397,69 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 						Err(anyhow!("Expected a CBOR array with Set values"))
 					}
 				}
+				TAG_I8 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::I8(to_i8(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_I8}"))
+					}
+				}
+				TAG_U8 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::U8(to_u8(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_U8}"))
+					}
+				}
+				TAG_I16 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::I16(to_i16(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_I16}"))
+					}
+				}
+				TAG_U16 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::U16(to_u16(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_U16}"))
+					}
+				}
+				TAG_I32 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::I32(to_i32(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_I32}"))
+					}
+				}
+				TAG_U32 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::U32(to_u32(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_U32}"))
+					}
+				}
+				TAG_U64 if ctx.v2 => {
+					if let CborValue::Integer(i) = *v {
+						Ok(PublicValue::Number(PublicNumber::U64(to_u64(i)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR integer under tag {TAG_U64}"))
+					}
+				}
+				TAG_F16 if ctx.v2 => {
+					if let CborValue::Float(f) = *v {
+						Ok(PublicValue::Number(PublicNumber::F16(to_f16(f)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR float under tag {TAG_F16}"))
+					}
+				}
+				TAG_F32 if ctx.v2 => {
+					if let CborValue::Float(f) = *v {
+						Ok(PublicValue::Number(PublicNumber::F32(to_f32(f)?)))
+					} else {
+						Err(anyhow!("Expected a CBOR float under tag {TAG_F32}"))
+					}
+				}
 				// A tag this format does not read
 				t => Err(unsupported_tag(t)),
 			}
@@ -408,6 +482,7 @@ fn unsupported_tag(tag: u64) -> anyhow::Error {
 			"CBOR tag 13 (a duration as text) is not accepted: send tag {TAG_CUSTOM_DURATION} [seconds, nanos]"
 		),
 		TAG_SHAPED_BLOCK => anyhow!("CBOR tag 57 (a shaped block) is not accepted here"),
+		TAG_I8..=TAG_F32 => anyhow!("CBOR tag {tag} is not accepted here: use cbor.2"),
 		_ => anyhow!("Encountered an unknown CBOR tag"),
 	}
 }
@@ -425,6 +500,7 @@ pub struct Ctx<'a> {
 	blocks: Option<&'a mut RequestBlocks>,
 	/// The number of arrays, maps and tags around the item.
 	depth: usize,
+	pub v2: bool,
 }
 
 impl<'a> Ctx<'a> {
@@ -433,15 +509,25 @@ impl<'a> Ctx<'a> {
 		Ctx {
 			blocks: None,
 			depth: 0,
+			v2: false,
+		}
+	}
+
+	fn strict_v2() -> Ctx<'static> {
+		Ctx {
+			blocks: None,
+			depth: 0,
+			v2: true,
 		}
 	}
 
 	/// The context of a value that accepts blocks within `blocks`.
 	#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
-	pub fn requests(blocks: &'a mut RequestBlocks) -> Self {
+	pub fn requests(blocks: &'a mut RequestBlocks, v2: bool) -> Self {
 		Ctx {
 			blocks: Some(blocks),
 			depth: 0,
+			v2,
 		}
 	}
 
@@ -450,6 +536,7 @@ impl<'a> Ctx<'a> {
 		Ctx {
 			blocks: self.blocks.as_deref_mut(),
 			depth: self.depth + 1,
+			v2: self.v2,
 		}
 	}
 }
@@ -461,6 +548,10 @@ fn sub(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 
 pub fn to_value(val: CborValue) -> Result<PublicValue> {
 	value(val, &mut Ctx::strict())
+}
+
+pub fn to_value_v2(val: CborValue) -> Result<PublicValue> {
+	value(val, &mut Ctx::strict_v2())
 }
 
 /// A decoded request item, where a shaped block is the array of its rows.
@@ -490,12 +581,17 @@ fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 		Some(room) => room - 1,
 		None => return Err(anyhow!("a shaped block nested too deep")),
 	};
+	let v2 = ctx.v2;
 	let mut dynamic = |slice: &[u8], shape_depth: usize| -> Result<PublicValue, String> {
 		let room = limit
 			.checked_sub(depth + 2 + shape_depth)
 			.filter(|room| *room > 0)
 			.ok_or_else(|| "a shaped block nested too deep".to_owned())?;
-		super::decode_exact(slice, room).map_err(|e| e.to_string())
+		if v2 {
+			super::decode_exact_v2(slice, room).map_err(|e| e.to_string())
+		} else {
+			super::decode_exact(slice, room).map_err(|e| e.to_string())
+		}
 	};
 	let rows = surrealdb_types::shaped::BlockReader::new()
 		.read_block_within(&contents, &mut dynamic, &mut blocks.budget)
@@ -504,6 +600,14 @@ fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 }
 
 pub fn from_value(val: PublicValue) -> Result<CborValue> {
+	from_value_inner(val, false)
+}
+
+pub fn from_value_v2(val: PublicValue) -> Result<CborValue> {
+	from_value_inner(val, true)
+}
+
+fn from_value_inner(val: PublicValue, v2: bool) -> Result<CborValue> {
 	match val {
 		PublicValue::None => Ok(CborValue::Tag(TAG_NONE, Box::new(CborValue::Null))),
 		PublicValue::Null => Ok(CborValue::Null),
@@ -513,6 +617,71 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 			PublicNumber::Float(v) => Ok(CborValue::Float(v)),
 			PublicNumber::Decimal(v) => {
 				Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
+			}
+			PublicNumber::I8(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_I8, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::U8(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_U8, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::I16(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_I16, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::U16(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_U16, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::I32(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_I32, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::U32(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_U32, Box::new(CborValue::Integer(i64::from(v).into()))))
+				} else {
+					Ok(CborValue::Integer(i64::from(v).into()))
+				}
+			}
+			PublicNumber::U64(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_U64, Box::new(CborValue::Integer(v.into()))))
+				} else if v <= i64::MAX as u64 {
+					Ok(CborValue::Integer(v.into()))
+				} else {
+					Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
+				}
+			}
+			PublicNumber::F16(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_F16, Box::new(CborValue::Float(v.to_f64()))))
+				} else {
+					Ok(CborValue::Float(v.to_f64()))
+				}
+			}
+			PublicNumber::F32(v) => {
+				if v2 {
+					Ok(CborValue::Tag(TAG_F32, Box::new(CborValue::Float(f64::from(v)))))
+				} else {
+					Ok(CborValue::Float(f64::from(v)))
+				}
 			}
 		},
 		PublicValue::String(v) => Ok(CborValue::Text(v)),
@@ -546,8 +715,8 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::Uuid(v) => {
 			Ok(CborValue::Tag(TAG_SPEC_UUID, Box::new(CborValue::Bytes(v.into_bytes().into()))))
 		}
-		PublicValue::Array(v) => from_array(v),
-		PublicValue::Object(v) => from_object(v),
+		PublicValue::Array(v) => from_array(v, v2),
+		PublicValue::Object(v) => from_object(v, v2),
 		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into_inner().to_vec())),
 		PublicValue::Table(v) => {
 			Ok(CborValue::Tag(TAG_TABLE, Box::new(CborValue::Text(v.into_string()))))
@@ -563,16 +732,16 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 					PublicRecordIdKey::Number(v) => CborValue::Integer(v.into()),
 					PublicRecordIdKey::String(v) => CborValue::Text(v),
 					PublicRecordIdKey::Uuid(v) => from_uuid(v),
-					PublicRecordIdKey::Array(v) => from_array(v)?,
-					PublicRecordIdKey::Object(v) => from_object(v)?,
+					PublicRecordIdKey::Array(v) => from_array(v, v2)?,
+					PublicRecordIdKey::Object(v) => from_object(v, v2)?,
 					PublicRecordIdKey::Range(v) => {
-						CborValue::Tag(TAG_RANGE, Box::new(from_record_id_key_range(*v)?))
+						CborValue::Tag(TAG_RANGE, Box::new(from_record_id_key_range(*v, v2)?))
 					}
 				},
 			])),
 		)),
 		PublicValue::Geometry(v) => from_geometry(v),
-		PublicValue::Range(v) => Ok(CborValue::Tag(TAG_RANGE, Box::new(from_range(*v)?))),
+		PublicValue::Range(v) => Ok(CborValue::Tag(TAG_RANGE, Box::new(from_range(*v, v2)?))),
 		PublicValue::File(file) => Ok(CborValue::Tag(
 			TAG_FILE,
 			Box::new(CborValue::Array(vec![
@@ -583,7 +752,9 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::Set(v) => Ok(CborValue::Tag(
 			TAG_SET,
 			Box::new(CborValue::Array(
-				v.into_iter().map(from_value).collect::<Result<Vec<CborValue>>>()?,
+				v.into_iter()
+					.map(|item| from_value_inner(item, v2))
+					.collect::<Result<Vec<CborValue>>>()?,
 			)),
 		)),
 		PublicValue::Regex(_) => {
@@ -671,33 +842,38 @@ fn to_range(val: CborValue, ctx: &mut Ctx) -> Result<PublicRange> {
 	}
 }
 
-fn from_range(r: PublicRange) -> Result<CborValue> {
-	fn encode(b: Bound<PublicValue>) -> Result<CborValue> {
-		match b {
-			Bound::Included(v) => Ok(CborValue::Tag(TAG_BOUND_INCLUDED, Box::new(from_value(v)?))),
-			Bound::Excluded(v) => Ok(CborValue::Tag(TAG_BOUND_EXCLUDED, Box::new(from_value(v)?))),
-			Bound::Unbounded => Ok(CborValue::Null),
-		}
-	}
+fn from_range(r: PublicRange, v2: bool) -> Result<CborValue> {
 	let (start, end) = r.into_inner();
-	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
+	Ok(CborValue::Array(vec![encode_bound(start, v2)?, encode_bound(end, v2)?]))
 }
 
-fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
-	fn encode(b: Bound<PublicRecordIdKey>) -> Result<CborValue> {
-		match b {
-			Bound::Included(v) => {
-				Ok(CborValue::Tag(TAG_BOUND_INCLUDED, Box::new(from_record_id_key(v)?)))
-			}
-			Bound::Excluded(v) => {
-				Ok(CborValue::Tag(TAG_BOUND_EXCLUDED, Box::new(from_record_id_key(v)?)))
-			}
-			Bound::Unbounded => Ok(CborValue::Null),
+fn encode_bound(b: Bound<PublicValue>, v2: bool) -> Result<CborValue> {
+	match b {
+		Bound::Included(v) => {
+			Ok(CborValue::Tag(TAG_BOUND_INCLUDED, Box::new(from_value_inner(v, v2)?)))
 		}
+		Bound::Excluded(v) => {
+			Ok(CborValue::Tag(TAG_BOUND_EXCLUDED, Box::new(from_value_inner(v, v2)?)))
+		}
+		Bound::Unbounded => Ok(CborValue::Null),
 	}
+}
 
+fn from_record_id_key_range(r: PublicRecordIdKeyRange, v2: bool) -> Result<CborValue> {
 	let (start, end) = r.into_inner();
-	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
+	Ok(CborValue::Array(vec![encode_key_bound(start, v2)?, encode_key_bound(end, v2)?]))
+}
+
+fn encode_key_bound(b: Bound<PublicRecordIdKey>, v2: bool) -> Result<CborValue> {
+	match b {
+		Bound::Included(v) => {
+			Ok(CborValue::Tag(TAG_BOUND_INCLUDED, Box::new(from_record_id_key(v, v2)?)))
+		}
+		Bound::Excluded(v) => {
+			Ok(CborValue::Tag(TAG_BOUND_EXCLUDED, Box::new(from_record_id_key(v, v2)?)))
+		}
+		Bound::Unbounded => Ok(CborValue::Null),
+	}
 }
 
 fn to_record_id_key_range(val: CborValue, ctx: &mut Ctx) -> Result<PublicRecordIdKeyRange> {
@@ -728,14 +904,14 @@ fn to_record_id_key_range(val: CborValue, ctx: &mut Ctx) -> Result<PublicRecordI
 	}
 }
 
-fn from_record_id_key(v: PublicRecordIdKey) -> Result<CborValue> {
+fn from_record_id_key(v: PublicRecordIdKey, v2: bool) -> Result<CborValue> {
 	match v {
 		PublicRecordIdKey::Number(v) => Ok(CborValue::Integer(v.into())),
 		PublicRecordIdKey::String(v) => Ok(CborValue::Text(v)),
-		PublicRecordIdKey::Array(v) => from_array(v),
-		PublicRecordIdKey::Object(v) => from_object(v),
+		PublicRecordIdKey::Array(v) => from_array(v, v2),
+		PublicRecordIdKey::Object(v) => from_object(v, v2),
 		PublicRecordIdKey::Range(v) => {
-			Ok(CborValue::Tag(TAG_RANGE, Box::new(from_record_id_key_range(*v)?)))
+			Ok(CborValue::Tag(TAG_RANGE, Box::new(from_record_id_key_range(*v, v2)?)))
 		}
 		PublicRecordIdKey::Uuid(v) => {
 			Ok(CborValue::Tag(TAG_SPEC_UUID, Box::new(CborValue::Bytes(v.into_bytes().into()))))
@@ -753,7 +929,59 @@ fn to_record_id_key(val: CborValue, ctx: &mut Ctx) -> Result<PublicRecordIdKey> 
 			Ok(PublicRecordIdKey::Range(Box::new(to_record_id_key_range(*v, &mut ctx.child())?)))
 		}
 		CborValue::Tag(TAG_SPEC_UUID, v) => to_uuid(*v).map(PublicRecordIdKey::Uuid),
-		CborValue::Tag(t @ (0 | 9 | 13), _) => Err(unsupported_tag(t)),
+		CborValue::Tag(TAG_I8, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_i8(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_I8}"))
+			}
+		}
+		CborValue::Tag(TAG_U8, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_u8(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_U8}"))
+			}
+		}
+		CborValue::Tag(TAG_I16, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_i16(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_I16}"))
+			}
+		}
+		CborValue::Tag(TAG_U16, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_u16(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_U16}"))
+			}
+		}
+		CborValue::Tag(TAG_I32, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_i32(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_I32}"))
+			}
+		}
+		CborValue::Tag(TAG_U32, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				Ok(PublicRecordIdKey::Number(i64::from(to_u32(i)?)))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_U32}"))
+			}
+		}
+		CborValue::Tag(TAG_U64, v) if ctx.v2 => {
+			if let CborValue::Integer(i) = *v {
+				let n = to_u64(i)?;
+				let signed = i64::try_from(n)
+					.map_err(|_| anyhow!("integer {n} is outside the 64-bit signed range"))?;
+				Ok(PublicRecordIdKey::Number(signed))
+			} else {
+				Err(anyhow!("Expected a CBOR integer under tag {TAG_U64}"))
+			}
+		}
+		CborValue::Tag(t @ (0 | 9 | 13 | TAG_I8..=TAG_F32), _) => Err(unsupported_tag(t)),
 		CborValue::Bytes(_)
 		| CborValue::Float(_)
 		| CborValue::Bool(_)
@@ -781,13 +1009,10 @@ fn to_uuid(val: CborValue) -> Result<PublicUuid> {
 	}
 }
 
-fn from_array(array: PublicArray) -> Result<CborValue> {
+fn from_array(array: PublicArray, v2: bool) -> Result<CborValue> {
 	array
 		.into_iter()
-		.map(|v| {
-			let v = from_value(v)?;
-			Ok(v)
-		})
+		.map(|v| from_value_inner(v, v2))
 		.collect::<Result<Vec<CborValue>>>()
 		.map(CborValue::Array)
 }
@@ -799,15 +1024,68 @@ fn to_i64(v: ciborium::value::Integer) -> Result<i64> {
 		.map_err(|_| anyhow!("integer {} is outside the 64-bit signed range", i128::from(v)))
 }
 
+fn to_i8(v: ciborium::value::Integer) -> Result<i8> {
+	let n = i128::from(v);
+	i8::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 8-bit signed range"))
+}
+
+fn to_u8(v: ciborium::value::Integer) -> Result<u8> {
+	let n = i128::from(v);
+	u8::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 8-bit unsigned range"))
+}
+
+fn to_i16(v: ciborium::value::Integer) -> Result<i16> {
+	let n = i128::from(v);
+	i16::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 16-bit signed range"))
+}
+
+fn to_u16(v: ciborium::value::Integer) -> Result<u16> {
+	let n = i128::from(v);
+	u16::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 16-bit unsigned range"))
+}
+
+fn to_i32(v: ciborium::value::Integer) -> Result<i32> {
+	let n = i128::from(v);
+	i32::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 32-bit signed range"))
+}
+
+fn to_u32(v: ciborium::value::Integer) -> Result<u32> {
+	let n = i128::from(v);
+	u32::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 32-bit unsigned range"))
+}
+
+fn to_u64(v: ciborium::value::Integer) -> Result<u64> {
+	let n = i128::from(v);
+	u64::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 64-bit unsigned range"))
+}
+
+fn to_f16(f: f64) -> Result<surrealdb_types::f16> {
+	let val = surrealdb_types::f16::from_f64(f);
+	if f.is_nan() || val.to_f64().to_bits() == f.to_bits() {
+		Ok(val)
+	} else {
+		Err(anyhow!("float {f} cannot be losslessly represented as f16"))
+	}
+}
+
+fn to_f32(f: f64) -> Result<f32> {
+	let val = f as f32;
+	if f.is_nan() || (val as f64).to_bits() == f.to_bits() {
+		Ok(val)
+	} else {
+		Err(anyhow!("float {f} cannot be losslessly represented as f32"))
+	}
+}
+
 fn to_array(array: Vec<CborValue>, ctx: &mut Ctx) -> Result<PublicArray> {
 	Ok(array.into_iter().map(|v| sub(v, ctx)).collect::<Result<Vec<PublicValue>, _>>()?.into())
 }
 
-fn from_object(obj: PublicObject) -> Result<CborValue> {
+fn from_object(obj: PublicObject, v2: bool) -> Result<CborValue> {
 	obj.into_iter()
 		.map(|(k, v)| {
 			let k = CborValue::Text(k);
-			let v = from_value(v)?;
+			let v = from_value_inner(v, v2)?;
 			Ok((k, v))
 		})
 		.collect::<Result<Vec<(CborValue, CborValue)>>>()

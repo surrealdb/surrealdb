@@ -539,7 +539,7 @@ fn surreal_value_integers_wider_than_i64_roundtrip() {
 
 	// Stored intact, as a Decimal, rather than wrapped to a negative Int.
 	assert!(matches!(object.get("u64_max"), Some(Value::Number(Number::Decimal(_)))));
-	// A value that still fits stays an Int.
+	assert!(matches!(object.get("usize_max"), Some(Value::Number(Number::Decimal(_)))));
 	assert_eq!(object.get("u32_max"), Some(&Value::Number(Number::Int(u32::MAX as i64))));
 
 	let output = Nums::from_value(value).expect("wide integers should convert back");

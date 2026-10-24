@@ -93,7 +93,7 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 }
 
 /// The kind, or data type, of a value or field.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2, serialize = false)]
 #[derive(Debug, Default, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
@@ -159,6 +159,207 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
+	#[revision(start = 2)]
+	I8,
+	#[revision(start = 2)]
+	U8,
+	#[revision(start = 2)]
+	I16,
+	#[revision(start = 2)]
+	U16,
+	#[revision(start = 2)]
+	I32,
+	#[revision(start = 2)]
+	U32,
+	#[revision(start = 2)]
+	U64,
+	#[revision(start = 2)]
+	F16,
+	#[revision(start = 2)]
+	F32,
+}
+
+impl ::revision::SerializeRevisioned for Kind {
+	fn serialize_revisioned<W: ::std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), ::revision::Error> {
+		match self {
+			Kind::Any => {
+				1u16.serialize_revisioned(writer)?;
+				0u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::None => {
+				1u16.serialize_revisioned(writer)?;
+				1u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Null => {
+				1u16.serialize_revisioned(writer)?;
+				2u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Bool => {
+				1u16.serialize_revisioned(writer)?;
+				3u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Bytes => {
+				1u16.serialize_revisioned(writer)?;
+				4u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Datetime => {
+				1u16.serialize_revisioned(writer)?;
+				5u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Decimal => {
+				1u16.serialize_revisioned(writer)?;
+				6u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Duration => {
+				1u16.serialize_revisioned(writer)?;
+				7u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Float => {
+				1u16.serialize_revisioned(writer)?;
+				8u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Int => {
+				1u16.serialize_revisioned(writer)?;
+				9u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Number => {
+				1u16.serialize_revisioned(writer)?;
+				10u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Object => {
+				1u16.serialize_revisioned(writer)?;
+				11u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::String => {
+				1u16.serialize_revisioned(writer)?;
+				12u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Uuid => {
+				1u16.serialize_revisioned(writer)?;
+				13u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Regex => {
+				1u16.serialize_revisioned(writer)?;
+				14u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Table(v) => {
+				1u16.serialize_revisioned(writer)?;
+				15u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::Record(v) => {
+				1u16.serialize_revisioned(writer)?;
+				16u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::Geometry(v) => {
+				1u16.serialize_revisioned(writer)?;
+				17u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::Either(v) => {
+				1u16.serialize_revisioned(writer)?;
+				18u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::Set(v0, v1) => {
+				1u16.serialize_revisioned(writer)?;
+				19u32.serialize_revisioned(writer)?;
+				v0.serialize_revisioned(writer)?;
+				v1.serialize_revisioned(writer)
+			}
+			Kind::Array(v0, v1) => {
+				1u16.serialize_revisioned(writer)?;
+				20u32.serialize_revisioned(writer)?;
+				v0.serialize_revisioned(writer)?;
+				v1.serialize_revisioned(writer)
+			}
+			Kind::Function(v0, v1) => {
+				1u16.serialize_revisioned(writer)?;
+				21u32.serialize_revisioned(writer)?;
+				v0.serialize_revisioned(writer)?;
+				v1.serialize_revisioned(writer)
+			}
+			Kind::Range => {
+				1u16.serialize_revisioned(writer)?;
+				22u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::Literal(v) => {
+				1u16.serialize_revisioned(writer)?;
+				23u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::File(v) => {
+				1u16.serialize_revisioned(writer)?;
+				24u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Kind::I8 => {
+				2u16.serialize_revisioned(writer)?;
+				25u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::U8 => {
+				2u16.serialize_revisioned(writer)?;
+				26u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::I16 => {
+				2u16.serialize_revisioned(writer)?;
+				27u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::U16 => {
+				2u16.serialize_revisioned(writer)?;
+				28u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::I32 => {
+				2u16.serialize_revisioned(writer)?;
+				29u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::U32 => {
+				2u16.serialize_revisioned(writer)?;
+				30u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::U64 => {
+				2u16.serialize_revisioned(writer)?;
+				31u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::F16 => {
+				2u16.serialize_revisioned(writer)?;
+				32u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+			Kind::F32 => {
+				2u16.serialize_revisioned(writer)?;
+				33u32.serialize_revisioned(writer)?;
+				Ok(())
+			}
+		}
+	}
 }
 
 /// One body for every clone of a kind, whichever crate clones it: a derived
@@ -199,6 +400,15 @@ fn clone_kind(kind: &Kind) -> Kind {
 		Kind::Range => Kind::Range,
 		Kind::Literal(literal) => Kind::Literal(literal.clone()),
 		Kind::File(buckets) => Kind::File(buckets.clone()),
+		Kind::I8 => Kind::I8,
+		Kind::U8 => Kind::U8,
+		Kind::I16 => Kind::I16,
+		Kind::U16 => Kind::U16,
+		Kind::I32 => Kind::I32,
+		Kind::U32 => Kind::U32,
+		Kind::U64 => Kind::U64,
+		Kind::F16 => Kind::F16,
+		Kind::F32 => Kind::F32,
 	}
 }
 
@@ -262,7 +472,21 @@ impl Kind {
 				}
 				false
 			}
-			(Kind::Int | Kind::Float | Kind::Decimal, Kind::Number) => true,
+			(
+				Kind::Int
+				| Kind::Float
+				| Kind::Decimal
+				| Kind::I8
+				| Kind::U8
+				| Kind::I16
+				| Kind::U16
+				| Kind::I32
+				| Kind::U32
+				| Kind::U64
+				| Kind::F16
+				| Kind::F32,
+				Kind::Number,
+			) => true,
 			(Kind::Array(old, old_len), Kind::Array(new, new_len))
 			| (Kind::Set(old, old_len), Kind::Set(new, new_len)) => {
 				(new_len.is_none() || old_len == new_len) && old.widens_to(new)
@@ -305,7 +529,19 @@ impl Kind {
 			Kind::None => d::NONE,
 			Kind::Null => d::NULL,
 			Kind::Bool => d::BOOL,
-			Kind::Int | Kind::Float | Kind::Decimal | Kind::Number => d::NUMBER,
+			Kind::Int
+			| Kind::Float
+			| Kind::Decimal
+			| Kind::Number
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => d::NUMBER,
 			Kind::String => d::STRING,
 			// A string coerces to a table name.
 			Kind::Table(_) => d::STRING | d::TABLE,
@@ -331,6 +567,55 @@ impl Kind {
 	/// Returns the kind of a type.
 	pub fn of<T: HasKind>() -> Kind {
 		T::kind()
+	}
+
+	/// All sized numeric kinds (`i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `u64`, `f16`, `f32`).
+	pub const SIZED: [Kind; 9] = [
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// All numeric kinds (`int`, `float`, `decimal`, `number`, and all [`Self::SIZED`] kinds).
+	pub const NUMERIC: [Kind; 13] = [
+		Kind::Int,
+		Kind::Float,
+		Kind::Decimal,
+		Kind::Number,
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// Returns `true` if this kind is one of the sized numeric kinds (`i8`..`f32`).
+	pub const fn is_sized_number(&self) -> bool {
+		matches!(
+			self,
+			Kind::I8
+				| Kind::U8 | Kind::I16
+				| Kind::U16 | Kind::I32
+				| Kind::U32 | Kind::U64
+				| Kind::F16 | Kind::F32
+		)
+	}
+
+	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `number`, or a
+	/// sized numeric kind).
+	pub const fn is_numeric(&self) -> bool {
+		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
+			|| self.is_sized_number()
 	}
 
 	/// Returns true if this type is an `any`
@@ -389,6 +674,15 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Literal(
 				KindLiteral::String(_)
 				| KindLiteral::Integer(_)
@@ -457,6 +751,15 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Literal(
 				KindLiteral::String(_)
 				| KindLiteral::Integer(_)
@@ -495,7 +798,16 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::Literal(_)
-			| Kind::File(_) => false,
+			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => false,
 		}
 	}
 
@@ -526,7 +838,16 @@ impl Kind {
 			| Kind::Array(_, _)
 			| Kind::Function(_, _)
 			| Kind::Range
-			| Kind::File(_) => false,
+			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => false,
 		}
 	}
 
@@ -560,6 +881,15 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Literal(
 				KindLiteral::String(_)
 				| KindLiteral::Integer(_)
@@ -598,7 +928,16 @@ impl Kind {
 			| Kind::Function(_, _)
 			| Kind::Range
 			| Kind::Literal(_)
-			| Kind::File(_) => None,
+			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => None,
 			Kind::Array(x, _) | Kind::Set(x, _) => Some(x.as_ref().clone()),
 			Kind::Either(x) => {
 				// a either shouldn't be able to contain a either itself so recursing here
@@ -662,7 +1001,16 @@ impl Kind {
 				| Kind::Function(_, _)
 				| Kind::Range
 				| Kind::Literal(_)
-				| Kind::File(_) => (),
+				| Kind::File(_)
+				| Kind::I8
+				| Kind::U8
+				| Kind::I16
+				| Kind::U16
+				| Kind::I32
+				| Kind::U32
+				| Kind::U64
+				| Kind::F16
+				| Kind::F32 => (),
 			}
 		}
 
@@ -700,7 +1048,16 @@ impl Kind {
 			| Kind::Array(_, _)
 			| Kind::Function(_, _)
 			| Kind::Range
-			| Kind::File(_) => false,
+			| Kind::File(_)
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => false,
 		}
 	}
 
@@ -826,7 +1183,15 @@ macro_rules! impl_basic_has_kind{
 impl_basic_has_kind! {
 	bool => Bool,
 
+	i8 => I8,
+	u8 => U8,
+	i16 => I16,
+	u16 => U16,
+	i32 => I32,
+	u32 => U32,
 	i64 => Int,
+	u64 => U64,
+	f32 => F32,
 	f64 => Float,
 	Decimal => Decimal,
 
@@ -837,6 +1202,12 @@ impl_basic_has_kind! {
 	Duration => Duration,
 	Uuid => Uuid,
 	Range => Range,
+}
+
+impl HasKind for half::f16 {
+	fn kind() -> Kind {
+		Kind::F16
+	}
 }
 
 impl HasKind for crate::val::Object {
@@ -951,6 +1322,15 @@ impl ToSql for Kind {
 					);
 				}
 			}
+			Kind::I8 => f.push_str("i8"),
+			Kind::U8 => f.push_str("u8"),
+			Kind::I16 => f.push_str("i16"),
+			Kind::U16 => f.push_str("u16"),
+			Kind::I32 => f.push_str("i32"),
+			Kind::U32 => f.push_str("u32"),
+			Kind::U64 => f.push_str("u64"),
+			Kind::F16 => f.push_str("f16"),
+			Kind::F32 => f.push_str("f32"),
 		}
 	}
 }
@@ -1010,6 +1390,15 @@ impl From<crate::types::PublicKind> for Kind {
 			),
 			crate::types::PublicKind::File(bucket) => Kind::File(bucket),
 			crate::types::PublicKind::Literal(lit) => Kind::Literal(lit.into()),
+			crate::types::PublicKind::I8 => Kind::I8,
+			crate::types::PublicKind::U8 => Kind::U8,
+			crate::types::PublicKind::I16 => Kind::I16,
+			crate::types::PublicKind::U16 => Kind::U16,
+			crate::types::PublicKind::I32 => Kind::I32,
+			crate::types::PublicKind::U32 => Kind::U32,
+			crate::types::PublicKind::U64 => Kind::U64,
+			crate::types::PublicKind::F16 => Kind::F16,
+			crate::types::PublicKind::F32 => Kind::F32,
 		}
 	}
 }
@@ -1055,6 +1444,15 @@ impl From<Kind> for crate::types::PublicKind {
 			),
 			Kind::File(bucket) => crate::types::PublicKind::File(bucket),
 			Kind::Literal(lit) => crate::types::PublicKind::Literal(lit.into()),
+			Kind::I8 => crate::types::PublicKind::I8,
+			Kind::U8 => crate::types::PublicKind::U8,
+			Kind::I16 => crate::types::PublicKind::I16,
+			Kind::U16 => crate::types::PublicKind::U16,
+			Kind::I32 => crate::types::PublicKind::I32,
+			Kind::U32 => crate::types::PublicKind::U32,
+			Kind::U64 => crate::types::PublicKind::U64,
+			Kind::F16 => crate::types::PublicKind::F16,
+			Kind::F32 => crate::types::PublicKind::F32,
 		}
 	}
 }
@@ -1627,6 +2025,15 @@ mod round_trip_tests {
 	#[case::duration(Kind::Duration)]
 	#[case::float(Kind::Float)]
 	#[case::int(Kind::Int)]
+	#[case::i8(Kind::I8)]
+	#[case::u8(Kind::U8)]
+	#[case::i16(Kind::I16)]
+	#[case::u16(Kind::U16)]
+	#[case::i32(Kind::I32)]
+	#[case::u32(Kind::U32)]
+	#[case::u64(Kind::U64)]
+	#[case::f16(Kind::F16)]
+	#[case::f32(Kind::F32)]
 	#[case::number(Kind::Number)]
 	#[case::object(Kind::Object)]
 	#[case::string(Kind::String)]
@@ -1689,7 +2096,16 @@ mod widening_tests {
 		"null",
 		"bool",
 		"int",
+		"i8",
+		"u8",
+		"i16",
+		"u16",
+		"i32",
+		"u32",
+		"u64",
 		"float",
+		"f16",
+		"f32",
 		"decimal",
 		"number",
 		"string",
@@ -1827,6 +2243,51 @@ mod widening_tests {
 			("1 | 2", "2"),
 		] {
 			assert!(!kind(old).widens_to(&kind(new)), "{old} -> {new}");
+		}
+	}
+}
+
+#[cfg(test)]
+mod kind_revision_tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
+
+	use super::*;
+
+	#[test]
+	fn kind_revision_round_trip() {
+		let kinds = [
+			Kind::Any,
+			Kind::None,
+			Kind::Null,
+			Kind::Bool,
+			Kind::Bytes,
+			Kind::Datetime,
+			Kind::Decimal,
+			Kind::Duration,
+			Kind::Float,
+			Kind::Int,
+			Kind::Number,
+			Kind::Object,
+			Kind::String,
+			Kind::Uuid,
+			Kind::Regex,
+			Kind::Range,
+			Kind::I8,
+			Kind::U8,
+			Kind::I16,
+			Kind::U16,
+			Kind::I32,
+			Kind::U32,
+			Kind::U64,
+			Kind::F16,
+			Kind::F32,
+		];
+		for k in &kinds {
+			let mut buf = Vec::new();
+			k.serialize_revisioned(&mut buf).unwrap();
+			let mut slice = buf.as_slice();
+			let decoded = Kind::deserialize_revisioned(&mut slice).unwrap();
+			assert_eq!(k, &decoded);
 		}
 	}
 }

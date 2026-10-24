@@ -397,12 +397,12 @@ pub(crate) fn of_with(
 		})
 		.class();
 	let consumers = consumers_of(ir, loop_op);
-	let compute_reads_data = held.compute.iter().any(|op| {
-		slice::judged_effects(ir, facts, cx, loop_op, *op).contains(EffectSet::READS_DATA)
-	}) || transitive_set(ir, facts, cx, consumer_layer_ops.iter().copied())
-		.contains(EffectSet::READS_DATA);
-	let cut_at_marks =
-		compute_stages_in_slice(ir, facts, cx, loop_op, &held, &consumer_layer_ops);
+	let compute_reads_data =
+		held.compute.iter().any(|op| {
+			slice::judged_effects(ir, facts, cx, loop_op, *op).contains(EffectSet::READS_DATA)
+		}) || transitive_set(ir, facts, cx, consumer_layer_ops.iter().copied())
+			.contains(EffectSet::READS_DATA);
+	let cut_at_marks = compute_stages_in_slice(ir, facts, cx, loop_op, &held, &consumer_layer_ops);
 	let writes_subjects = matches!(sink, LoopSink::Write(_));
 	let carried = if sink == LoopSink::Fold || kind == LoopKind::Recurse {
 		Carried::Accumulator {
@@ -1572,7 +1572,8 @@ mod tests {
 		use crate::exec::ir::iface::types::TypeKnowledge;
 		use crate::expr::Function;
 
-		let (ir, loop_op, _) = bind_write_loop("UPDATE t SET x = 1 RETURN x + 1, time::now()").await;
+		let (ir, loop_op, _) =
+			bind_write_loop("UPDATE t SET x = 1 RETURN x + 1, time::now()").await;
 		let held = of_with(&ir, &mut FactCache::new(), &default_cx(&ir), loop_op).expect("judged");
 		assert_eq!(held.effects, ChainLegality::RowLocal);
 		assert_eq!(held.apply_effects, ApplyEffects::Admitted);
@@ -1601,8 +1602,8 @@ mod tests {
 		assert_eq!(held.barrier, Some(BarrierCause::CatalogChange));
 
 		// A `COMPUTED` field region on the consuming `LogOp::Write` runs inside `cx.snapshot()`
-		// during compute stages: a data read in it sets `compute_reads_data`, and an order-dependent
-		// effect in it invalidates `cut_at_marks` and refuses the compute slice.
+		// during compute stages: a data read in it sets `compute_reads_data`, and an
+		// order-dependent effect in it invalidates `cut_at_marks` and refuses the compute slice.
 		let (mut ir, loop_op, write_op) = bind_write_loop("UPDATE t SET x = 1").await;
 		let mut facts = FactCache::new();
 		let loc = Location {

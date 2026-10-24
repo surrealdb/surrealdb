@@ -300,6 +300,15 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 		| Kind::String
 		| Kind::Uuid
 		| Kind::Regex
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Geometry(_) => {}
 		Kind::Table(ts) => {
 			for table in ts {

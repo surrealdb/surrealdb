@@ -28,17 +28,7 @@ pub fn convert_public_value_to_internal(value: surrealdb_types::Value) -> crate:
 		surrealdb_types::Value::None => crate::val::Value::None,
 		surrealdb_types::Value::Null => crate::val::Value::Null,
 		surrealdb_types::Value::Bool(b) => crate::val::Value::Bool(b),
-		surrealdb_types::Value::Number(n) => match n {
-			surrealdb_types::Number::Int(i) => {
-				crate::val::Value::Number(crate::val::Number::Int(i))
-			}
-			surrealdb_types::Number::Float(f) => {
-				crate::val::Value::Number(crate::val::Number::Float(f))
-			}
-			surrealdb_types::Number::Decimal(d) => {
-				crate::val::Value::Number(crate::val::Number::Decimal(d))
-			}
-		},
+		surrealdb_types::Value::Number(n) => crate::val::Value::Number(crate::val::Number::from(n)),
 		surrealdb_types::Value::String(s) => crate::val::Value::String(s.into()),
 		surrealdb_types::Value::Duration(d) => {
 			crate::val::Value::Duration(crate::val::Duration(d.into_inner()))

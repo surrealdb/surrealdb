@@ -202,7 +202,7 @@ fn column(
 }
 
 fn leaf_kind(g: &mut Gen<'_, '_>) -> PhysicalKind {
-	match g.below(24) {
+	match g.below(25) {
 		0 => PhysicalKind::Bool,
 		1 => PhysicalKind::I8,
 		2 => PhysicalKind::I16,
@@ -212,20 +212,21 @@ fn leaf_kind(g: &mut Gen<'_, '_>) -> PhysicalKind {
 		6 => PhysicalKind::U16,
 		7 => PhysicalKind::U32,
 		8 => PhysicalKind::U64,
-		9 => PhysicalKind::F32,
-		10 => PhysicalKind::F64,
-		11 => PhysicalKind::Decimal16,
-		12 => PhysicalKind::Fixed(1 + g.below(24) as u32),
-		13 => PhysicalKind::Uuid,
-		14 => PhysicalKind::Datetime,
-		15 => PhysicalKind::DatetimeWide,
-		16 => PhysicalKind::Duration,
-		17 => PhysicalKind::Point,
-		18 => PhysicalKind::LiteralCode(1 + g.below(2) as u32),
-		19 => PhysicalKind::String,
-		20 => PhysicalKind::Bytes,
-		21 => PhysicalKind::RecordKey,
-		22 => PhysicalKind::DecimalVar,
+		9 => PhysicalKind::F16,
+		10 => PhysicalKind::F32,
+		11 => PhysicalKind::F64,
+		12 => PhysicalKind::Decimal16,
+		13 => PhysicalKind::Fixed(1 + g.below(24) as u32),
+		14 => PhysicalKind::Uuid,
+		15 => PhysicalKind::Datetime,
+		16 => PhysicalKind::DatetimeWide,
+		17 => PhysicalKind::Duration,
+		18 => PhysicalKind::Point,
+		19 => PhysicalKind::LiteralCode(1 + g.below(2) as u32),
+		20 => PhysicalKind::String,
+		21 => PhysicalKind::Bytes,
+		22 => PhysicalKind::RecordKey,
+		23 => PhysicalKind::DecimalVar,
 		_ => PhysicalKind::Value,
 	}
 }
@@ -352,19 +353,21 @@ fn fitting(g: &mut Gen<'_, '_>, column: &Column) -> Value {
 	if g.below(16) == 0 {
 		return g.value(1);
 	}
-	let int = |v: i64| Value::Number(Number::Int(v));
 	match column.kind {
 		PhysicalKind::Bool => Value::Bool(g.below(2) == 0),
-		PhysicalKind::I8 => int(g.bits() as i8 as i64),
-		PhysicalKind::I16 => int(g.bits() as i16 as i64),
-		PhysicalKind::I32 => int(g.bits() as i32 as i64),
-		PhysicalKind::I64 => int(g.int()),
-		PhysicalKind::U8 => int(g.bits() as u8 as i64),
-		PhysicalKind::U16 => int(g.bits() as u16 as i64),
-		PhysicalKind::U32 => int(g.bits() as u32 as i64),
-		PhysicalKind::U64 => int((g.bits() >> 1) as i64),
+		PhysicalKind::I8 => Value::Number(Number::I8(g.bits() as i8)),
+		PhysicalKind::I16 => Value::Number(Number::I16(g.bits() as i16)),
+		PhysicalKind::I32 => Value::Number(Number::I32(g.bits() as i32)),
+		PhysicalKind::I64 => Value::Number(Number::Int(g.int())),
+		PhysicalKind::U8 => Value::Number(Number::U8(g.bits() as u8)),
+		PhysicalKind::U16 => Value::Number(Number::U16(g.bits() as u16)),
+		PhysicalKind::U32 => Value::Number(Number::U32(g.bits() as u32)),
+		PhysicalKind::U64 => Value::Number(Number::U64(g.bits())),
+		PhysicalKind::F16 => {
+			Value::Number(Number::F16(surrealdb_types::f16::from_bits(g.bits() as u16)))
+		}
 		PhysicalKind::F32 => {
-			Value::Number(Number::Float(f64::from(f32::from_bits(g.bits() as u32))))
+			Value::Number(Number::F32(f32::from_bits(g.bits() as u32)))
 		}
 		PhysicalKind::F64 => Value::Number(Number::Float(g.float())),
 		PhysicalKind::Decimal16 | PhysicalKind::DecimalVar => {
@@ -417,7 +420,16 @@ fn owned(column: &Column, field: FieldRef<'_>) -> Result<Read, stored::Error> {
 		FieldRef::Null => Read::Null,
 		FieldRef::Object => Read::Object,
 		FieldRef::Bool(v) => Read::Value(Value::Bool(v)),
+		FieldRef::I8(v) => number(Number::I8(v)),
+		FieldRef::I16(v) => number(Number::I16(v)),
+		FieldRef::I32(v) => number(Number::I32(v)),
 		FieldRef::Int(v) => number(Number::Int(v)),
+		FieldRef::U8(v) => number(Number::U8(v)),
+		FieldRef::U16(v) => number(Number::U16(v)),
+		FieldRef::U32(v) => number(Number::U32(v)),
+		FieldRef::U64(v) => number(Number::U64(v)),
+		FieldRef::F16(v) => number(Number::F16(v)),
+		FieldRef::F32(v) => number(Number::F32(v)),
 		FieldRef::Float(v) => number(Number::Float(v)),
 		FieldRef::Decimal(v) => number(Number::Decimal(v)),
 		FieldRef::Uuid(v) => Read::Value(Value::Uuid(Uuid(v))),
@@ -538,15 +550,7 @@ fn read_row(layout: &Arc<LayoutDescriptor>, bytes: &[u8]) -> Option<Object> {
 			}
 		}
 		Ok(Packing::Misfit) => {
-			// A `U64` slot above `i64::MAX` reads as a decimal, which the writer does not narrow.
-			let wide = packed.columns.iter().enumerate().any(|(index, column)| {
-				column.kind == PhysicalKind::U64
-					&& matches!(
-						expected(packed, &data, index),
-						Some(Value::Number(Number::Decimal(_)))
-					)
-			});
-			assert!(wide, "a row that decodes does not pack again\nrow {}", hex(bytes));
+			panic!("a row that decodes does not pack again\nrow {}", hex(bytes));
 		}
 		Err(error) => panic!("a decoded row does not pack: {error}"),
 	}

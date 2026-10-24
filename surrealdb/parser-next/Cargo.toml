@@ -17,6 +17,7 @@ categories.workspace = true
 wasm-probe = []
 
 [dependencies]
+half = { workspace = true }
 
 [lints]
 workspace = true

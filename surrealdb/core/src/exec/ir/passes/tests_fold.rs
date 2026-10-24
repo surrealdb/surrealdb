@@ -665,13 +665,8 @@ async fn cross_error_scope_fold_rules_preserve_provenance() {
 		// 5. TruthyOfFact (`truthy_of_fact`): operand is defined outside the ErrorScope.
 		let (_, r5) = create(&mut rw, inner_at, OpKind::Expr(ExprOp::Truthy), &[outer_true], 1);
 
-		let (_, arr) = create(
-			&mut rw,
-			inner_at,
-			OpKind::Expr(ExprOp::Array),
-			&[r1, r2, r3, r4[0], r5[0]],
-			1,
-		);
+		let (_, arr) =
+			create(&mut rw, inner_at, OpKind::Expr(ExprOp::Array), &[r1, r2, r3, r4[0], r5[0]], 1);
 		rw.replace_all_uses(old_val, arr[0]).expect("the yield reads the array");
 		rw.erase(old_lit, EliminationReason::DeadPure).expect("the old literal is erased");
 	}
@@ -700,8 +695,7 @@ async fn non_collapsible_statement_if_leaves_container_untouched() {
 	let mut facts = FactCache::new();
 	{
 		let mut rw = Rewriter::new(&mut ir, &mut facts);
-		let tok =
-			rw.add_token_arg(taken_block, TokenClass::Store).expect("the token arg is added");
+		let tok = rw.add_token_arg(taken_block, TokenClass::Store).expect("the token arg is added");
 		// `eval_op` reads `tok`, while the enclosing `IF` holds no `Store` token operand of its
 		// own, so `tokens_collapsible` refuses the arm upfront without failing the pass.
 		rw.add_token_operand(eval_op, tok).expect("the token operand is added");
@@ -832,4 +826,3 @@ async fn cross_error_scope_inline_calls_preserves_provenance() {
 	assert!(ops_of_tag(&ir, OpTag::Expr(ExprTag::Call)).is_empty());
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the inlined container verifies");
 }
-

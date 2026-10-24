@@ -190,6 +190,15 @@ pub fn zero_volatile_system_block(value: &mut Value) {
 					Number::Int(_) => Number::Int(0),
 					Number::Float(_) => Number::Float(0.0),
 					Number::Decimal(_) => Number::Decimal(0.into()),
+					Number::I8(_) => Number::I8(0),
+					Number::U8(_) => Number::U8(0),
+					Number::I16(_) => Number::I16(0),
+					Number::U16(_) => Number::U16(0),
+					Number::I32(_) => Number::I32(0),
+					Number::U32(_) => Number::U32(0),
+					Number::U64(_) => Number::U64(0),
+					Number::F16(_) => Number::F16(surrealdb_types::f16::ZERO),
+					Number::F32(_) => Number::F32(0.0),
 				}
 			}
 			// `load_average` is an array of three floats.

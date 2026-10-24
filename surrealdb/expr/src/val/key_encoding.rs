@@ -780,12 +780,25 @@ mod key_order {
 				let point = digits.len() as i64;
 				Some(Exact::new(v < 0, &digits, point))
 			}
+			Number::I8(v) => exact_of(&Number::Int(v as i64)),
+			Number::U8(v) => exact_of(&Number::Int(v as i64)),
+			Number::I16(v) => exact_of(&Number::Int(v as i64)),
+			Number::U16(v) => exact_of(&Number::Int(v as i64)),
+			Number::I32(v) => exact_of(&Number::Int(v as i64)),
+			Number::U32(v) => exact_of(&Number::Int(v as i64)),
+			Number::U64(v) => {
+				let digits = v.to_string();
+				let point = digits.len() as i64;
+				Some(Exact::new(false, &digits, point))
+			}
 			Number::Decimal(d) => {
 				let mantissa = d.mantissa();
 				let digits = mantissa.unsigned_abs().to_string();
 				let point = digits.len() as i64 - i64::from(d.scale());
 				Some(Exact::new(mantissa < 0, &digits, point))
 			}
+			Number::F16(v) => exact_of(&Number::Float(v.to_f64())),
+			Number::F32(v) => exact_of(&Number::Float(v as f64)),
 			Number::Float(f) => {
 				if !f.is_finite() {
 					return None;

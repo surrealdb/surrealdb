@@ -27,7 +27,7 @@ use crate::Generation;
 use crate::layout::{LayoutDescriptor, PhysicalKind, RowLayout};
 use crate::packed::{Packing, pack};
 use crate::record::{RowFlags, StoredRecord};
-use crate::val::{Array, Object, RecordIdKey, TableName, Value};
+use crate::val::{Array, Number, Object, RecordIdKey, TableName, Value};
 
 /// One frozen row: its descriptor, the generation and flags it is stamped with, and the record it
 /// was packed from, whose root `id` the row leaves out.
@@ -120,15 +120,15 @@ fn cases() -> Vec<Case> {
 			RowFlags::NONE,
 			object(vec![
 				("a", Value::Bool(true)),
-				("b", int(-128)),
-				("c", int(12_345)),
+				("b", Value::Number(Number::I8(-128))),
+				("c", Value::Number(Number::I16(12_345))),
 				("d", Value::Null),
 				("e", int(-1)),
-				("f", int(255)),
-				("g", int(65_535)),
-				("h", int(4_294_967_295)),
-				("i", int(i64::MAX)),
-				("j", float(1.5)),
+				("f", Value::Number(Number::U8(255))),
+				("g", Value::Number(Number::U16(65_535))),
+				("h", Value::Number(Number::U32(4_294_967_295))),
+				("i", Value::Number(Number::U64(i64::MAX as u64))),
+				("j", Value::Number(Number::F32(1.5))),
 				("k", float(-0.0)),
 				("l", decimal(Decimal::new(1_234_500, 4))),
 				("m", bytes(&[1, 2, 3])),
@@ -266,6 +266,14 @@ fn cases() -> Vec<Case> {
 			300,
 			RowFlags::EDGE,
 			object(vec![("in", int(7)), ("out", string("o"))]),
+		),
+		case(
+			"f16_kind",
+			false,
+			vec![("h", leaf(K::F16, Required))],
+			1,
+			RowFlags::NONE,
+			object(vec![("h", Value::Number(Number::F16(crate::half::f16::from_f32(1.5))))]),
 		),
 	]
 }
@@ -468,6 +476,13 @@ const FROZEN: &[(&str, &str, &str)] = &[
 		0002810a2601000100260500080e181e02140100076f75740426010017000626\
 		01000226010002800826010003800a26010001000481068008890a81",
 		"ff09ac02010700000000000000016f",
+	),
+	(
+		"f16_kind",
+		"fe00808010260200090207666978747572650426010002260500292b2d2f0214\
+		0100260500060c1218021401000768042601000a000626010001000826010002\
+		800a26010001000480068008820a80",
+		"ff0101003e",
 	),
 ];
 

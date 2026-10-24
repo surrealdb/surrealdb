@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::ops::Bound;
 
 use super::tag::*;
-use super::{DEPTH_LIMIT, Error, geometry, int_width, varint};
+use super::{DEPTH_LIMIT, Error, geometry, int_width, uint_width, varint};
 use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
 
 /// Writes stored encodings back to front.
@@ -398,13 +398,85 @@ impl Encoder {
 		self.put_u8(DECIMAL);
 	}
 
-	/// Prepends `n` as INT, FLOAT or DECIMAL.
+	/// Prepends the `i8` `v`.
+	#[inline]
+	pub fn i8(&mut self, v: i8) {
+		self.put_u8(v as u8);
+		self.put_u8(I8);
+	}
+
+	/// Prepends the `u8` `v`.
+	#[inline]
+	pub fn u8(&mut self, v: u8) {
+		self.put_u8(v);
+		self.put_u8(U8);
+	}
+
+	/// Prepends the `i16` `v` in the fewest bytes that hold it.
+	#[inline]
+	pub fn i16(&mut self, v: i16) {
+		self.put(&v.to_le_bytes()[..int_width(v as i64)]);
+		self.put_u8(I16);
+	}
+
+	/// Prepends the `u16` `v` in the fewest bytes that hold it.
+	#[inline]
+	pub fn u16(&mut self, v: u16) {
+		self.put(&v.to_le_bytes()[..uint_width(v as u64)]);
+		self.put_u8(U16);
+	}
+
+	/// Prepends the `i32` `v` in the fewest bytes that hold it.
+	#[inline]
+	pub fn i32(&mut self, v: i32) {
+		self.put(&v.to_le_bytes()[..int_width(v as i64)]);
+		self.put_u8(I32);
+	}
+
+	/// Prepends the `u32` `v` in the fewest bytes that hold it.
+	#[inline]
+	pub fn u32(&mut self, v: u32) {
+		self.put(&v.to_le_bytes()[..uint_width(v as u64)]);
+		self.put_u8(U32);
+	}
+
+	/// Prepends the `u64` `v` in the fewest bytes that hold it.
+	#[inline]
+	pub fn u64(&mut self, v: u64) {
+		self.put(&v.to_le_bytes()[..uint_width(v)]);
+		self.put_u8(U64);
+	}
+
+	/// Prepends the `f16` `f`.
+	#[inline]
+	pub fn f16(&mut self, f: half::f16) {
+		self.put(&f.to_bits().to_le_bytes());
+		self.put_u8(F16);
+	}
+
+	/// Prepends the `f32` `f`.
+	#[inline]
+	pub fn f32(&mut self, f: f32) {
+		self.put(&f.to_bits().to_le_bytes());
+		self.put_u8(F32);
+	}
+
+	/// Prepends `n`.
 	#[inline]
 	pub fn number(&mut self, n: &Number) {
 		match n {
 			Number::Int(i) => self.int(*i),
 			Number::Float(f) => self.float(*f),
 			Number::Decimal(d) => self.decimal(d),
+			Number::I8(v) => self.i8(*v),
+			Number::U8(v) => self.u8(*v),
+			Number::I16(v) => self.i16(*v),
+			Number::U16(v) => self.u16(*v),
+			Number::I32(v) => self.i32(*v),
+			Number::U32(v) => self.u32(*v),
+			Number::U64(v) => self.u64(*v),
+			Number::F16(v) => self.f16(*v),
+			Number::F32(v) => self.f32(*v),
 		}
 	}
 

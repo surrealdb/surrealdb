@@ -401,21 +401,27 @@ fn decimal_to_int_error<T>(d: Decimal) -> Error {
 
 impl_surreal_value!(
 	i64 as kind!(int),
-	is_int, is_i64(value) => matches!(value, Value::Number(Number::Int(_))),
+	(value) => value.is_i64_and(|_| true),
 	from_int, from_i64(self) => Value::Number(Number::Int(self)),
 	into_int, into_i64(value) => {
-		if let Value::Number(Number::Int(n)) = value {
-			Ok(n)
-		} else if let Value::Number(Number::Decimal(d)) = value {
-			// A whole-number Decimal converts when it fits, as it does for the other
-			// integer types
-			whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<i64>(d))
+		if let Value::Number(n) = value {
+			match n.wide() {
+				crate::Wide::Int(n) => Ok(n),
+				crate::Wide::Decimal(d) => {
+					// A whole-number Decimal converts when it fits, as it does for the other
+					// integer types
+					whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<i64>(d))
+				}
+				crate::Wide::Float(_) => {
+					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+				}
+			}
 		} else {
 			Err(ConversionError::from_value(Self::kind_of(), &value).into())
 		}
 	},
 	// A reference into the value, so only an `Int` is returned. `into_i64` and
-	// `is_i64_and` also accept a whole-number Decimal that fits.
+	// `is_i64_and` also accept sized integers and a whole-number Decimal that fits.
 	as_ty => as_int, as_i64(self) => {
 		if let Value::Number(Number::Int(n)) = self {
 			Some(n)
@@ -424,25 +430,45 @@ impl_surreal_value!(
 		}
 	},
 	is_ty_and => is_int_and, is_i64_and(self, callback) => {
-		if let Value::Number(Number::Int(n)) = self {
-			callback(n)
-		} else if let Value::Number(Number::Decimal(d)) = self {
-			whole_decimal_to::<i64>(d).is_some_and(|n| callback(&n))
+		if let Value::Number(n) = self {
+			match n.wide() {
+				crate::Wide::Int(n) => callback(&n),
+				crate::Wide::Decimal(d) => whole_decimal_to::<i64>(&d).is_some_and(|n| callback(&n)),
+				crate::Wide::Float(_) => false,
+			}
 		} else {
 			false
 		}
 	}
 );
 
+impl Value {
+	/// Checks if this value is `Value::Number(Number::Int(_))`
+	pub fn is_int(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+
+	/// Checks if this value is `Value::Number(Number::Int(_))`
+	pub fn is_i64(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+}
+
 impl_surreal_value!(
 	f64 as kind!(float),
-	is_float, is_f64(value) => matches!(value, Value::Number(Number::Float(_))),
+	(value) => matches!(value, Value::Number(Number::Float(_) | Number::F32(_) | Number::F16(_))),
 	from_float, from_f64(self) => Value::Number(Number::Float(self)),
 	into_float, into_f64(value) => {
-		let Value::Number(Number::Float(n)) = value else {
-			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
-		};
-		Ok(n)
+		if let Value::Number(n) = value {
+			match n.wide() {
+				crate::Wide::Float(n) => Ok(n),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+				}
+			}
+		} else {
+			Err(ConversionError::from_value(Self::kind_of(), &value).into())
+		}
 	},
 	as_ty => as_float, as_f64(self) => {
 		if let Value::Number(Number::Float(n)) = self {
@@ -452,13 +478,28 @@ impl_surreal_value!(
 		}
 	},
 	is_ty_and => is_float_and, is_f64_and(self, callback) => {
-		if let Value::Number(Number::Float(n)) = self {
-			callback(n)
+		if let Value::Number(n) = self {
+			match n.wide() {
+				crate::Wide::Float(n) => callback(&n),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => false,
+			}
 		} else {
 			false
 		}
 	}
 );
+
+impl Value {
+	/// Checks if this value is `Value::Number(Number::Float(_))`
+	pub fn is_float(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+
+	/// Checks if this value is `Value::Number(Number::Float(_))`
+	pub fn is_f64(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+}
 
 impl_surreal_value!(
 	Decimal as kind!(decimal),
@@ -1272,10 +1313,10 @@ impl_tuples! {
 	10 => (A, B, C, D, E, F, G, H, I, J)
 }
 
-/// Non-standard numeric implementations, such as u8, u16, u32, u64, i8, i16, i32, isize, f32
+/// Numeric implementations for sized integers, pointer-width integers, and sized floats
 macro_rules! impl_numeric {
-	// Integer types that need checked conversion from i64
-	(int: $($k:ty => ($is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
+	// Sized integer types with their own Kind and Number variant
+	(sized_int: $($k:ty => ($variant:ident, $is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
 		$(
 			impl SurrealValue for $k {
 				fn kind_of() -> Kind {
@@ -1283,7 +1324,86 @@ macro_rules! impl_numeric {
 				}
 
 				fn is_value(value: &Value) -> bool {
-					matches!(value, Value::Number(_))
+					value.$as_fn().is_some()
+				}
+
+				fn into_value(self) -> Value {
+					// A value that does not fit in `i64` is stored as a whole-number
+					// Decimal, the same form the serde serializer writes, so embedded
+					// and remote engines produce identical schemaless values.
+					match i64::try_from(self) {
+						Ok(n) => Value::Number(Number::Int(n)),
+						Err(_) => Value::Number(Number::Decimal(Decimal::from(self))),
+					}
+				}
+
+				fn from_value(value: Value) -> Result<Self, Error> {
+					match value {
+						Value::Number(n) => match n.wide() {
+							crate::Wide::Int(i) => <$k>::try_from(i)
+								.map_err(|_| OutOfRangeError::new(n, std::any::type_name::<$k>()).into()),
+							crate::Wide::Decimal(d) => {
+								whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
+							}
+							crate::Wide::Float(_) => {
+								Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+							}
+						},
+						value => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
+					}
+				}
+			}
+
+			impl Value {
+				/// Checks if this value has the exact sized integer variant
+				pub fn $is_fn(&self) -> bool {
+					matches!(self, Value::Number(Number::$variant(_)))
+				}
+
+				/// Converts the given value into a `Value`
+				pub fn $from_fn(value: $k) -> Value {
+					<$k>::into_value(value)
+				}
+
+				/// Attempts to convert a SurrealDB value into the given type
+				pub fn $into_fn(self) -> Result<$k, Error> {
+					<$k>::from_value(self)
+				}
+
+				/// Checks if this value converts to the type and passes the callback check
+				pub fn $is_and_fn(&self, callback: impl FnOnce(&$k) -> bool) -> bool {
+					match self.$as_fn() {
+						Some(v) => callback(&v),
+						None => false,
+					}
+				}
+
+				/// Returns the value as this type when it is an integer or a whole-number
+				/// Decimal that fits in it, and `None` otherwise
+				pub fn $as_fn(&self) -> Option<$k> {
+					match self {
+						Value::Number(n) => match n.wide() {
+							crate::Wide::Int(i) => <$k>::try_from(i).ok(),
+							crate::Wide::Decimal(d) => whole_decimal_to(&d),
+							crate::Wide::Float(_) => None,
+						},
+						_ => None,
+					}
+				}
+			}
+		)+
+	};
+
+	// Pointer-width integer types (isize, usize) that map to `int` (or `decimal` above i64::MAX)
+	(ptr_int: $($k:ty => ($is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
+		$(
+			impl SurrealValue for $k {
+				fn kind_of() -> Kind {
+					kind!(number)
+				}
+
+				fn is_value(value: &Value) -> bool {
+					value.$as_fn().is_some()
 				}
 
 				fn into_value(self) -> Value {
@@ -1297,13 +1417,18 @@ macro_rules! impl_numeric {
 
 				fn from_value(value: Value) -> Result<Self, Error> {
 					match value {
-						Value::Number(Number::Int(n)) => <$k>::try_from(n)
-							.map_err(|_| OutOfRangeError::new(n, std::any::type_name::<$k>()).into()),
-						// A whole-number Decimal, which `into_value` writes for a value that
-						// does not fit in `i64`, converts when it fits in this type
-						Value::Number(Number::Decimal(d)) => {
-							whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
-						}
+						Value::Number(n) => match n.wide() {
+							crate::Wide::Int(i) => <$k>::try_from(i)
+								.map_err(|_| OutOfRangeError::new(n, std::any::type_name::<$k>()).into()),
+							// A whole-number Decimal, which `into_value` writes for a value that
+							// does not fit in `i64`, converts when it fits in this type
+							crate::Wide::Decimal(d) => {
+								whole_decimal_to(&d).ok_or_else(|| decimal_to_int_error::<$k>(d))
+							}
+							crate::Wide::Float(_) => {
+								Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+							}
+						},
 						value => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
 					}
 				}
@@ -1333,103 +1458,163 @@ macro_rules! impl_numeric {
 					}
 				}
 
-				/// Returns the value as this type when it is an `Int` or a whole-number
+				/// Returns the value as this type when it is an integer or a whole-number
 				/// Decimal that fits in it, and `None` otherwise
 				pub fn $as_fn(&self) -> Option<$k> {
 					match self {
-						Value::Number(Number::Int(n)) => <$k>::try_from(*n).ok(),
-						Value::Number(Number::Decimal(d)) => whole_decimal_to(d),
+						Value::Number(n) => match n.wide() {
+							crate::Wide::Int(i) => <$k>::try_from(i).ok(),
+							crate::Wide::Decimal(d) => whole_decimal_to(&d),
+							crate::Wide::Float(_) => None,
+						},
 						_ => None,
 					}
 				}
 			}
 		)+
 	};
-
-	// Float types
-	(float: $($k:ty => ($is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
-		$(
-			impl SurrealValue for $k {
-				fn kind_of() -> Kind {
-					kind!(number)
-				}
-
-				fn is_value(value: &Value) -> bool {
-					matches!(value, Value::Number(_))
-				}
-
-				fn into_value(self) -> Value {
-					Value::Number(Number::Float(self as f64))
-				}
-
-				fn from_value(value: Value) -> Result<Self, Error> {
-					let Value::Number(Number::Float(n)) = value else {
-						return Err(ConversionError::from_value(Self::kind_of(), &value).into());
-					};
-					Ok(n as $k)
-				}
-			}
-
-			impl Value {
-				/// Checks if this value can be converted to the given type
-				pub fn $is_fn(&self) -> bool {
-					<$k>::is_value(self)
-				}
-
-				/// Converts the given value into a `Value`
-				pub fn $from_fn(value: $k) -> Value {
-					<$k>::into_value(value)
-				}
-
-				/// Attempts to convert a SurrealDB value into the given type
-				pub fn $into_fn(self) -> Result<$k, Error> {
-					<$k>::from_value(self)
-				}
-
-				/// Checks if this value matches the type and passes the callback check
-				pub fn $is_and_fn(&self, callback: impl FnOnce(&$k) -> bool) -> bool {
-					if let Value::Number(Number::Float(n)) = self {
-						let v = *n as $k;
-						callback(&v)
-					} else {
-						false
-					}
-				}
-
-				/// Returns the converted value if it matches the expected type
-				/// Note: For float types, this returns a converted value, not a reference
-				pub fn $as_fn(&self) -> Option<$k> {
-					if let Value::Number(Number::Float(n)) = self {
-						Some(*n as $k)
-					} else {
-						None
-					}
-				}
-			}
-		)+
-	};
 }
 
-// Non-primary integer types with conversion
+// Sized integer types
 impl_numeric! {
-	int:
-		i8 => (is_i8, from_i8, into_i8, is_i8_and, as_i8),
-		i16 => (is_i16, from_i16, into_i16, is_i16_and, as_i16),
-		i32 => (is_i32, from_i32, into_i32, is_i32_and, as_i32),
+	sized_int:
+		i8 => (I8, is_i8, from_i8, into_i8, is_i8_and, as_i8),
+		i16 => (I16, is_i16, from_i16, into_i16, is_i16_and, as_i16),
+		i32 => (I32, is_i32, from_i32, into_i32, is_i32_and, as_i32),
 		// i64 is implemented with the impl_surreal_value! macro
+		u8 => (U8, is_u8, from_u8, into_u8, is_u8_and, as_u8),
+		u16 => (U16, is_u16, from_u16, into_u16, is_u16_and, as_u16),
+		u32 => (U32, is_u32, from_u32, into_u32, is_u32_and, as_u32),
+		u64 => (U64, is_u64, from_u64, into_u64, is_u64_and, as_u64),
+}
+
+// Pointer-width integer types
+impl_numeric! {
+	ptr_int:
 		isize => (is_isize, from_isize, into_isize, is_isize_and, as_isize),
-		u8 => (is_u8, from_u8, into_u8, is_u8_and, as_u8),
-		u16 => (is_u16, from_u16, into_u16, is_u16_and, as_u16),
-		u32 => (is_u32, from_u32, into_u32, is_u32_and, as_u32),
-		u64 => (is_u64, from_u64, into_u64, is_u64_and, as_u64),
 		usize => (is_usize, from_usize, into_usize, is_usize_and, as_usize),
 }
 
-// Non-primary float types with conversion
-impl_numeric! {
-	float:
-		f32 => (is_f32, from_f32, into_f32, is_f32_and, as_f32),
-		// f64 is implemented with the impl_surreal_value! macro
+impl SurrealValue for f32 {
+	fn kind_of() -> Kind {
+		kind!(float)
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Number(Number::Float(_) | Number::F32(_) | Number::F16(_)))
+	}
+
+	fn into_value(self) -> Value {
+		Value::Number(Number::Float(self as f64))
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error> {
+		if let Value::Number(n) = value {
+			match n.wide() {
+				crate::Wide::Float(n) => Ok(n as f32),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+				}
+			}
+		} else {
+			Err(ConversionError::from_value(Self::kind_of(), &value).into())
+		}
+	}
+}
+
+impl Value {
+	/// Checks if this value is an `F32`
+	pub fn is_f32(&self) -> bool {
+		matches!(self, Value::Number(Number::F32(_)))
+	}
+
+	/// Converts the given value into a `Value`
+	pub fn from_f32(value: f32) -> Value {
+		f32::into_value(value)
+	}
+
+	/// Attempts to convert a SurrealDB value into `f32`
+	pub fn into_f32(self) -> Result<f32, Error> {
+		f32::from_value(self)
+	}
+
+	/// Checks if this value converts to `f32` and passes the callback check
+	pub fn is_f32_and(&self, callback: impl FnOnce(&f32) -> bool) -> bool {
+		self.as_f32().is_some_and(|v| callback(&v))
+	}
+
+	/// Returns the value as `f32` if it is a float (`F16`, `F32`, or `Float`)
+	pub fn as_f32(&self) -> Option<f32> {
+		if let Value::Number(n) = self {
+			match n.wide() {
+				crate::Wide::Float(n) => Some(n as f32),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => None,
+			}
+		} else {
+			None
+		}
+	}
+}
+
+impl SurrealValue for half::f16 {
+	fn kind_of() -> Kind {
+		kind!(float)
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Number(Number::Float(_) | Number::F32(_) | Number::F16(_)))
+	}
+
+	fn into_value(self) -> Value {
+		Value::Number(Number::Float(f64::from(self)))
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error> {
+		if let Value::Number(n) = value {
+			match n.wide() {
+				crate::Wide::Float(n) => Ok(half::f16::from_f64(n)),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => {
+					Err(ConversionError::from_value(Self::kind_of(), &Value::Number(n)).into())
+				}
+			}
+		} else {
+			Err(ConversionError::from_value(Self::kind_of(), &value).into())
+		}
+	}
+}
+
+impl Value {
+	/// Checks if this value is an `F16`
+	pub fn is_f16(&self) -> bool {
+		matches!(self, Value::Number(Number::F16(_)))
+	}
+
+	/// Converts the given value into a `Value`
+	pub fn from_f16(value: half::f16) -> Value {
+		half::f16::into_value(value)
+	}
+
+	/// Attempts to convert a SurrealDB value into `half::f16`
+	pub fn into_f16(self) -> Result<half::f16, Error> {
+		half::f16::from_value(self)
+	}
+
+	/// Checks if this value converts to `half::f16` and passes the callback check
+	pub fn is_f16_and(&self, callback: impl FnOnce(&half::f16) -> bool) -> bool {
+		self.as_f16().is_some_and(|v| callback(&v))
+	}
+
+	/// Returns the value as `half::f16` if it is a float (`F16`, `F32`, or `Float`)
+	pub fn as_f16(&self) -> Option<half::f16> {
+		if let Value::Number(n) = self {
+			match n.wide() {
+				crate::Wide::Float(n) => Some(half::f16::from_f64(n)),
+				crate::Wide::Int(_) | crate::Wide::Decimal(_) => None,
+			}
+		} else {
+			None
+		}
+	}
 }
 
 impl SurrealValue for serde_json::Value {

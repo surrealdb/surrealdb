@@ -344,8 +344,17 @@ fn value_key_encoding_is_exact(value: &Value) -> bool {
 		}
 	}
 	match value {
-		Value::Number(Number::Int(_)) => true,
-		Value::Number(Number::Float(_) | Number::Decimal(_))
+		Value::Number(
+			Number::Int(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_),
+		) => true,
+		Value::Number(Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_))
 		| Value::Geometry(_)
 		| Value::Closure(_) => false,
 		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
@@ -539,6 +548,13 @@ impl RecordIdKey {
 		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
+			Value::Number(Number::I8(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U8(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::I16(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U16(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::I32(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U32(i)) => Some(RecordIdKey::Number(i as i64)),
+			Value::Number(Number::U64(i)) => i64::try_from(i).ok().map(RecordIdKey::Number),
 			Value::String(strand) => Some(RecordIdKey::String(strand)),
 			// NOTE: This was previously (before expr inversion pr) also rejected in this
 			// conversion, a bug I assume.
@@ -551,7 +567,9 @@ impl RecordIdKey {
 			Value::None
 			| Value::Null
 			| Value::Bool(_)
-			| Value::Number(Number::Float(_) | Number::Decimal(_))
+			| Value::Number(
+				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+			)
 			| Value::Duration(_)
 			| Value::Datetime(_)
 			| Value::Set(_)

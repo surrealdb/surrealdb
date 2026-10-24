@@ -52,6 +52,17 @@ const TAG_STRING_DECIMAL: u64 = 10;
 const TAG_CUSTOM_DATETIME: u64 = 12;
 const TAG_CUSTOM_DURATION: u64 = 14;
 
+// Sized number tags (IANA unassigned 180..=188)
+const TAG_I8: u64 = 180;
+const TAG_U8: u64 = 181;
+const TAG_I16: u64 = 182;
+const TAG_U16: u64 = 183;
+const TAG_I32: u64 = 184;
+const TAG_U32: u64 = 185;
+const TAG_U64: u64 = 186;
+const TAG_F16: u64 = 187;
+const TAG_F32: u64 = 188;
+
 // CBOR major types.
 const MAJOR_POSITIVE: u8 = 0;
 const MAJOR_NEGATIVE: u8 = 1;
@@ -332,7 +343,8 @@ impl RowFrame {
 	/// Append `value` as a row.
 	pub(crate) fn push_value(&mut self, value: &Value) -> anyhow::Result<()> {
 		self.row_with(|frame| match frame.format {
-			RowFormat::Cbor => encode_value(&mut frame.data, value, 1),
+			RowFormat::Cbor => encode_value(&mut frame.data, value, 1, false),
+			RowFormat::Cbor2 => encode_value(&mut frame.data, value, 1, true),
 			RowFormat::Json => {
 				super::row_json::encode_json(&mut frame.data, value, 1, &mut frame.text)
 			}
@@ -377,7 +389,14 @@ impl RowFrame {
 					head(data, MAJOR_MAP, fields.len() as u64);
 					for (key, value) in fields {
 						text(data, key);
-						encode_scalar(data, None, value, 2)?;
+						encode_scalar(data, None, value, 2, false)?;
+					}
+				}
+				RowFormat::Cbor2 => {
+					head(data, MAJOR_MAP, fields.len() as u64);
+					for (key, value) in fields {
+						text(data, key);
+						encode_scalar(data, None, value, 2, true)?;
 					}
 				}
 				RowFormat::Json => {
@@ -388,7 +407,7 @@ impl RowFrame {
 						}
 						super::row_json::json_string(data, key)?;
 						data.push(b':');
-						encode_scalar(data, Some(text_buf), value, 2)?;
+						encode_scalar(data, Some(text_buf), value, 2, false)?;
 					}
 					data.push(b'}');
 				}
@@ -439,6 +458,7 @@ impl RowFrame {
 				scratch,
 				id_text,
 				json: (*format == RowFormat::Json).then_some(text),
+				v2: *format == RowFormat::Cbor2,
 			};
 			let record = StoredRecord::parse(value)?;
 			if let Some(record) = &record
@@ -581,6 +601,7 @@ impl RowFrame {
 				scratch,
 				id_text,
 				json: None,
+				v2: true,
 			};
 			super::row_shaped::write_document(&shape, key, object, &mut stored)?;
 			return shaped.note(&shape);
@@ -756,7 +777,12 @@ fn too_deep(depth: usize) -> anyhow::Result<()> {
 
 /// Encode `value`, at nesting depth `depth`, as the RPC layer encodes the
 /// public value it converts to.
-pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> anyhow::Result<()> {
+pub(super) fn encode_value(
+	out: &mut Vec<u8>,
+	value: &Value,
+	depth: usize,
+	v2: bool,
+) -> anyhow::Result<()> {
 	too_deep(depth)?;
 	match value {
 		Value::None => {
@@ -769,7 +795,7 @@ pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> an
 		} else {
 			0xf4
 		}),
-		Value::Number(n) => number(out, *n),
+		Value::Number(n) => number(out, *n, v2),
 		Value::String(s) => text(out, s.as_str()),
 		Value::Duration(d) => duration(out, d.0.as_secs(), d.0.subsec_nanos()),
 		Value::Datetime(d) => datetime(out, d),
@@ -777,14 +803,14 @@ pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> an
 		Value::Array(a) => {
 			head(out, MAJOR_ARRAY, a.len() as u64);
 			for v in a.iter() {
-				encode_value(out, v, depth + 1)?;
+				encode_value(out, v, depth + 1, v2)?;
 			}
 		}
 		Value::Object(o) => {
 			head(out, MAJOR_MAP, o.len() as u64);
 			for (k, v) in o.iter() {
 				text(out, k.as_str());
-				encode_value(out, v, depth + 1)?;
+				encode_value(out, v, depth + 1, v2)?;
 			}
 		}
 		Value::Bytes(b) => bytes(out, &b.0),
@@ -793,7 +819,7 @@ pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> an
 			text(out, t.as_str());
 		}
 		Value::RecordId(rid) => {
-			encode_record_id(out, rid.table.as_str(), &rid.key, depth, || value.clone())?
+			encode_record_id(out, rid.table.as_str(), &rid.key, depth, v2, || value.clone())?
 		}
 		// Kinds rare in result rows go through the public conversion.
 		Value::Set(_)
@@ -801,7 +827,7 @@ pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> an
 		| Value::File(_)
 		| Value::Regex(_)
 		| Value::Range(_)
-		| Value::Closure(_) => public(out, value, depth)?,
+		| Value::Closure(_) => public(out, value, depth, v2)?,
 	}
 	Ok(())
 }
@@ -810,20 +836,84 @@ pub(super) fn encode_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> an
 /// the definition the direct encoding answers to, for the kinds it does not
 /// write itself.
 #[cold]
-fn public(out: &mut Vec<u8>, value: &Value, depth: usize) -> anyhow::Result<()> {
+fn public(out: &mut Vec<u8>, value: &Value, depth: usize, v2: bool) -> anyhow::Result<()> {
 	too_deep(depth)?;
 	let converted = crate::val::convert_value_to_public_value(value.clone())?;
-	out.extend_from_slice(&crate::rpc::format::cbor::encode(converted)?);
+	let encoded = if v2 {
+		crate::rpc::format::cbor::encode_v2(converted)?
+	} else {
+		crate::rpc::format::cbor::encode(converted)?
+	};
+	out.extend_from_slice(&encoded);
 	Ok(())
 }
 
-fn number(out: &mut Vec<u8>, n: Number) {
+fn number(out: &mut Vec<u8>, n: Number, v2: bool) {
 	match n {
 		Number::Int(v) => int(out, v),
 		Number::Float(v) => float(out, v),
 		Number::Decimal(v) => {
 			tag(out, TAG_STRING_DECIMAL);
 			decimal_text(out, v);
+		}
+		Number::I8(v) => {
+			if v2 {
+				tag(out, TAG_I8);
+			}
+			int(out, i64::from(v));
+		}
+		Number::U8(v) => {
+			if v2 {
+				tag(out, TAG_U8);
+			}
+			int(out, i64::from(v));
+		}
+		Number::I16(v) => {
+			if v2 {
+				tag(out, TAG_I16);
+			}
+			int(out, i64::from(v));
+		}
+		Number::U16(v) => {
+			if v2 {
+				tag(out, TAG_U16);
+			}
+			int(out, i64::from(v));
+		}
+		Number::I32(v) => {
+			if v2 {
+				tag(out, TAG_I32);
+			}
+			int(out, i64::from(v));
+		}
+		Number::U32(v) => {
+			if v2 {
+				tag(out, TAG_U32);
+			}
+			int(out, i64::from(v));
+		}
+		Number::U64(v) => {
+			if v2 {
+				tag(out, TAG_U64);
+				head(out, MAJOR_POSITIVE, v);
+			} else if v <= i64::MAX as u64 {
+				head(out, MAJOR_POSITIVE, v);
+			} else {
+				tag(out, TAG_STRING_DECIMAL);
+				decimal_text(out, rust_decimal::Decimal::from(v));
+			}
+		}
+		Number::F16(v) => {
+			if v2 {
+				tag(out, TAG_F16);
+			}
+			float(out, v.to_f64());
+		}
+		Number::F32(v) => {
+			if v2 {
+				tag(out, TAG_F32);
+			}
+			float(out, f64::from(v));
 		}
 	}
 }
@@ -863,6 +953,7 @@ fn encode_record_id(
 	table: &str,
 	key: &RecordIdKey,
 	depth: usize,
+	v2: bool,
 	whole: impl FnOnce() -> Value,
 ) -> anyhow::Result<()> {
 	let key_depth = depth + 1;
@@ -883,7 +974,7 @@ fn encode_record_id(
 		RecordIdKey::Array(a) => record_id(out, table, |out| {
 			head(out, MAJOR_ARRAY, a.len() as u64);
 			for v in a.iter() {
-				encode_value(out, v, key_depth + 1)?;
+				encode_value(out, v, key_depth + 1, v2)?;
 			}
 			Ok(())
 		}),
@@ -891,11 +982,11 @@ fn encode_record_id(
 			head(out, MAJOR_MAP, o.len() as u64);
 			for (k, v) in o.iter() {
 				text(out, k.as_str());
-				encode_value(out, v, key_depth + 1)?;
+				encode_value(out, v, key_depth + 1, v2)?;
 			}
 			Ok(())
 		}),
-		RecordIdKey::Range(_) => public(out, &whole(), depth),
+		RecordIdKey::Range(_) => public(out, &whole(), depth, v2),
 	}
 }
 
@@ -917,12 +1008,13 @@ pub(super) fn encode_scalar(
 	json: Option<&mut String>,
 	scalar: &Scalar<'_>,
 	depth: usize,
+	v2: bool,
 ) -> anyhow::Result<()> {
 	if let Some(text_buf) = json {
 		return super::row_json::encode_json_scalar(out, scalar, depth, text_buf);
 	}
 	match scalar {
-		Scalar::Value(value) => return encode_value(out, value, depth),
+		Scalar::Value(value) => return encode_value(out, value, depth, v2),
 		Scalar::None => {
 			tag(out, TAG_NONE);
 			out.push(0xf6);
@@ -933,7 +1025,7 @@ pub(super) fn encode_scalar(
 		} else {
 			0xf4
 		}),
-		Scalar::Number(n) => number(out, *n),
+		Scalar::Number(n) => number(out, *n, v2),
 		Scalar::Str(s) => text(out, s),
 		Scalar::Bytes(b) => bytes(out, b),
 		Scalar::Duration(d) => duration(out, d.0.as_secs(), d.0.subsec_nanos()),
@@ -958,6 +1050,7 @@ pub(super) struct Stored<'b, 'o> {
 	/// For JSON rows, the scratch text renderings are written into; `None`
 	/// for CBOR.
 	pub(super) json: Option<&'o mut String>,
+	pub(super) v2: bool,
 }
 
 /// The payload of a rev-2 `Value` wire of variant `want`, past its rev, tag
@@ -1005,13 +1098,13 @@ impl<'b> Stored<'b, '_> {
 	fn encoded(&mut self, value: &Value, depth: usize) -> anyhow::Result<()> {
 		match &mut self.json {
 			Some(text) => super::row_json::encode_json(self.out, value, depth, text),
-			None => encode_value(self.out, value, depth),
+			None => encode_value(self.out, value, depth, self.v2),
 		}
 	}
 
 	/// Write `scalar` at depth `depth`.
 	fn scalar(&mut self, scalar: &Scalar<'_>, depth: usize) -> anyhow::Result<()> {
-		encode_scalar(self.out, self.json.as_deref_mut(), scalar, depth)
+		encode_scalar(self.out, self.json.as_deref_mut(), scalar, depth, self.v2)
 	}
 
 	/// Open a map of `count` entries.
@@ -1309,7 +1402,9 @@ impl<'b> Stored<'b, '_> {
 					}
 				}
 			}
-			None => encode_record_id(self.out, decoded.tb.as_str(), &decoded.id, depth, whole),
+			None => {
+				encode_record_id(self.out, decoded.tb.as_str(), &decoded.id, depth, self.v2, whole)
+			}
 		}
 	}
 
@@ -1457,6 +1552,15 @@ impl<'b> Stored<'b, '_> {
 						| Kind::Array
 						| Kind::Set
 						| Kind::Object
+						| Kind::I8
+						| Kind::U8
+						| Kind::I16
+						| Kind::U16
+						| Kind::I32
+						| Kind::U32
+						| Kind::U64
+						| Kind::F16
+						| Kind::F32
 						| Kind::Unknown => None,
 					};
 					if let Some(key) = key {
@@ -1472,6 +1576,15 @@ impl<'b> Stored<'b, '_> {
 			| Kind::Int
 			| Kind::Float
 			| Kind::Decimal
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::String
 			| Kind::Duration
 			| Kind::Datetime
@@ -1599,6 +1712,7 @@ impl Stored<'_, '_> {
 				scratch: &mut *self.scratch,
 				id_text: &mut *self.id_text,
 				json: self.json.as_deref_mut(),
+				v2: self.v2,
 			},
 			key,
 			table,
@@ -1679,7 +1793,16 @@ impl<'a> PackedVisitor<'a> for PackedSink<'a, '_> {
 					int(out, v.timestamp());
 					int(out, v.timestamp_subsec_nanos() as i64);
 				}
-				FieldRef::Absent
+				FieldRef::I8(_)
+				| FieldRef::I16(_)
+				| FieldRef::I32(_)
+				| FieldRef::U8(_)
+				| FieldRef::U16(_)
+				| FieldRef::U32(_)
+				| FieldRef::U64(_)
+				| FieldRef::F16(_)
+				| FieldRef::F32(_)
+				| FieldRef::Absent
 				| FieldRef::Object
 				| FieldRef::Decimal(_)
 				| FieldRef::Uuid(_)
@@ -1749,6 +1872,15 @@ impl<'a> PackedSink<'a, '_> {
 					| Kind::Bool
 					| Kind::Float
 					| Kind::Decimal
+					| Kind::I8
+					| Kind::U8
+					| Kind::I16
+					| Kind::U16
+					| Kind::I32
+					| Kind::U32
+					| Kind::U64
+					| Kind::F16
+					| Kind::F32
 					| Kind::Duration
 					| Kind::Datetime
 					| Kind::Bytes
@@ -1776,7 +1908,16 @@ impl<'a> PackedSink<'a, '_> {
 			}
 			FieldRef::Null => Scalar::Null,
 			FieldRef::Bool(v) => Scalar::Bool(v),
+			FieldRef::I8(v) => Scalar::Number(Number::I8(v)),
+			FieldRef::I16(v) => Scalar::Number(Number::I16(v)),
+			FieldRef::I32(v) => Scalar::Number(Number::I32(v)),
 			FieldRef::Int(v) => Scalar::Number(Number::Int(v)),
+			FieldRef::U8(v) => Scalar::Number(Number::U8(v)),
+			FieldRef::U16(v) => Scalar::Number(Number::U16(v)),
+			FieldRef::U32(v) => Scalar::Number(Number::U32(v)),
+			FieldRef::U64(v) => Scalar::Number(Number::U64(v)),
+			FieldRef::F16(v) => Scalar::Number(Number::F16(v)),
+			FieldRef::F32(v) => Scalar::Number(Number::F32(v)),
 			FieldRef::Float(v) => Scalar::Number(Number::Float(v)),
 			FieldRef::Decimal(v) => Scalar::Number(Number::Decimal(v)),
 			FieldRef::Uuid(v) => Scalar::Uuid(crate::val::Uuid(v)),
@@ -1856,6 +1997,7 @@ mod tests {
 		let public = crate::val::convert_value_to_public_value(value.clone()).expect("converts");
 		match format {
 			RowFormat::Cbor => crate::rpc::format::cbor::encode(public).expect("encodes"),
+			RowFormat::Cbor2 => crate::rpc::format::cbor::encode_v2(public).expect("encodes"),
 			RowFormat::Json => {
 				crate::rpc::format::json::encode_str(public).expect("encodes").into_bytes()
 			}
@@ -2164,11 +2306,9 @@ mod tests {
 		.encode_key()
 		.expect("encodes");
 
-		for expected_bits in [
-			0x7ff0_0000_2000_0000u64,
-			0xfff0_0000_2000_0000u64,
-			0x7ff8_0000_2000_0000u64,
-		] {
+		for expected_bits in
+			[0x7ff0_0000_2000_0000u64, 0xfff0_0000_2000_0000u64, 0x7ff8_0000_2000_0000u64]
+		{
 			let mut obj = Object::default();
 			obj.insert("id".to_owned(), Value::RecordId(rid.clone()));
 			obj.insert("f".to_owned(), Value::Number(Number::Float(f64::from_bits(expected_bits))));

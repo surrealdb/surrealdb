@@ -23,25 +23,213 @@ pub enum Number {
 	Float(f64),
 	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
+	/// An 8-bit signed integer
+	I8(i8),
+	/// An 8-bit unsigned integer
+	U8(u8),
+	/// A 16-bit signed integer
+	I16(i16),
+	/// A 16-bit unsigned integer
+	U16(u16),
+	/// A 32-bit signed integer
+	I32(i32),
+	/// A 32-bit unsigned integer
+	U32(u32),
+	/// A 64-bit unsigned integer
+	U64(u64),
+	/// A 16-bit IEEE 754 floating-point number
+	#[serde(with = "serde_f16")]
+	F16(#[cfg_attr(feature = "arbitrary", arbitrary(with = arbitrary_f16))] half::f16),
+	/// A 32-bit IEEE 754 floating-point number
+	F32(f32),
+}
+
+const _: () = assert!(std::mem::size_of::<Number>() == 24);
+
+mod serde_f16 {
+	use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+	#[allow(clippy::trivially_copy_pass_by_ref)]
+	pub fn serialize<S: Serializer>(v: &half::f16, serializer: S) -> Result<S::Ok, S::Error> {
+		v.to_f32().serialize(serializer)
+	}
+
+	pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<half::f16, D::Error> {
+		f32::deserialize(deserializer).map(half::f16::from_f32)
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+fn arbitrary_f16(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<half::f16> {
+	<u16 as arbitrary::Arbitrary>::arbitrary(u).map(half::f16::from_bits)
+}
+
+/// A number with its width dropped onto one of the three full-width representations.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Wide {
+	/// A 64-bit signed integer
+	Int(i64),
+	/// A 64-bit floating-point number
+	Float(f64),
+	/// A decimal number
+	Decimal(Decimal),
+}
+
+/// The kind of a [`Number`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NumberKind {
+	/// `i8`
+	I8,
+	/// `u8`
+	U8,
+	/// `i16`
+	I16,
+	/// `u16`
+	U16,
+	/// `i32`
+	I32,
+	/// `u32`
+	U32,
+	/// `int` (`i64`)
+	Int,
+	/// `u64`
+	U64,
+	/// `f16`
+	F16,
+	/// `f32`
+	F32,
+	/// `float` (`f64`)
+	Float,
+	/// `decimal`
+	Decimal,
+}
+
+impl NumberKind {
+	/// The [`Kind`] corresponding to this [`NumberKind`].
+	pub const fn to_kind(self) -> Kind {
+		match self {
+			Self::I8 => Kind::I8,
+			Self::U8 => Kind::U8,
+			Self::I16 => Kind::I16,
+			Self::U16 => Kind::U16,
+			Self::I32 => Kind::I32,
+			Self::U32 => Kind::U32,
+			Self::Int => Kind::Int,
+			Self::U64 => Kind::U64,
+			Self::F16 => Kind::F16,
+			Self::F32 => Kind::F32,
+			Self::Float => Kind::Float,
+			Self::Decimal => Kind::Decimal,
+		}
+	}
+
+	/// The arithmetic join (`⊔`) of two number kinds.
+	pub const fn join(self, other: Self) -> Self {
+		use NumberKind::{Decimal, F16, F32, Float, I8, I16, I32, Int, U8, U16, U32, U64};
+		match (self, other) {
+			(Decimal, _) | (_, Decimal) => Decimal,
+			(Float, _) | (_, Float) => Float,
+			(F32, F32 | F16 | I8 | U8 | I16 | U16) | (F16 | I8 | U8 | I16 | U16, F32) => F32,
+			(F32, I32 | U32 | Int | U64) | (I32 | U32 | Int | U64, F32) => Float,
+			(F16, F16 | I8 | U8) | (I8 | U8, F16) => F16,
+			(F16, I16 | U16) | (I16 | U16, F16) => F32,
+			(F16, I32 | U32 | Int | U64) | (I32 | U32 | Int | U64, F16) => Float,
+			(U64, U64 | U8 | U16 | U32) | (U8 | U16 | U32, U64) => U64,
+			(U64, I8 | I16 | I32 | Int) | (I8 | I16 | I32 | Int, U64) => Decimal,
+			(Int, Int | I8 | U8 | I16 | U16 | I32 | U32)
+			| (I8 | U8 | I16 | U16 | I32 | U32, Int) => Int,
+			(U32, I8 | I16 | I32) | (I8 | I16 | I32, U32) => Int,
+			(U32, U32 | U8 | U16) | (U8 | U16, U32) => U32,
+			(I32, I32 | I8 | U8 | I16 | U16) | (I8 | U8 | I16 | U16, I32) => I32,
+			(U16, I8 | I16) | (I8 | I16, U16) => I32,
+			(U16, U16 | U8) | (U8, U16) => U16,
+			(I16, I16 | I8 | U8) | (I8 | U8, I16) => I16,
+			(U8, I8) | (I8, U8) => I16,
+			(U8, U8) => U8,
+			(I8, I8) => I8,
+		}
+	}
 }
 
 impl Number {
 	/// A NaN number
 	pub const NAN: Self = Self::Float(f64::NAN);
 
+	/// The value with its width dropped. Exact for every kind: sized integers become `Int`,
+	/// a `u64` above `i64::MAX` becomes `Decimal`, `f16` and `f32` become the `Float` they equal.
+	pub fn wide(self) -> Wide {
+		match self {
+			Number::Int(v) => Wide::Int(v),
+			Number::Float(v) => Wide::Float(v),
+			Number::Decimal(v) => Wide::Decimal(v),
+			Number::I8(v) => Wide::Int(i64::from(v)),
+			Number::U8(v) => Wide::Int(i64::from(v)),
+			Number::I16(v) => Wide::Int(i64::from(v)),
+			Number::U16(v) => Wide::Int(i64::from(v)),
+			Number::I32(v) => Wide::Int(i64::from(v)),
+			Number::U32(v) => Wide::Int(i64::from(v)),
+			Number::U64(v) => match i64::try_from(v) {
+				Ok(i) => Wide::Int(i),
+				Err(_) => Wide::Decimal(Decimal::from(v)),
+			},
+			Number::F16(v) => Wide::Float(v.to_f64()),
+			Number::F32(v) => Wide::Float(f64::from(v)),
+		}
+	}
+
+	/// `self.wide()` as a [`Number`].
+	pub fn widened(self) -> Number {
+		match self.wide() {
+			Wide::Int(v) => Number::Int(v),
+			Wide::Float(v) => Number::Float(v),
+			Wide::Decimal(v) => Number::Decimal(v),
+		}
+	}
+
+	/// The number's kind as a [`NumberKind`].
+	pub const fn number_kind(self) -> NumberKind {
+		match self {
+			Number::Int(_) => NumberKind::Int,
+			Number::Float(_) => NumberKind::Float,
+			Number::Decimal(_) => NumberKind::Decimal,
+			Number::I8(_) => NumberKind::I8,
+			Number::U8(_) => NumberKind::U8,
+			Number::I16(_) => NumberKind::I16,
+			Number::U16(_) => NumberKind::U16,
+			Number::I32(_) => NumberKind::I32,
+			Number::U32(_) => NumberKind::U32,
+			Number::U64(_) => NumberKind::U64,
+			Number::F16(_) => NumberKind::F16,
+			Number::F32(_) => NumberKind::F32,
+		}
+	}
+
 	/// Checks if this number is NaN.
 	pub fn is_nan(&self) -> bool {
-		matches!(self, Number::Float(v) if v.is_nan())
+		match self {
+			Number::Float(v) => v.is_nan(),
+			Number::F16(v) => v.is_nan(),
+			Number::F32(v) => v.is_nan(),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => false,
+		}
 	}
 
 	/// Converts this number into an i64.
 	///
 	/// Returns 0 if the number cannot be converted.
 	pub fn to_int(&self) -> Option<i64> {
-		match self {
-			Number::Int(v) => Some(*v),
-			Number::Float(v) => Some(*v as i64),
-			Number::Decimal(v) => v.to_i64(),
+		match self.wide() {
+			Wide::Int(v) => Some(v),
+			Wide::Float(v) => Some(v as i64),
+			Wide::Decimal(v) => v.to_i64(),
 		}
 	}
 
@@ -49,11 +237,71 @@ impl Number {
 	///
 	/// Returns 0.0 if the number cannot be converted.
 	pub fn to_f64(&self) -> Option<f64> {
-		match self {
-			Number::Int(v) => Some(*v as f64),
-			Number::Float(v) => Some(*v),
-			Number::Decimal(v) => v.to_f64(),
+		match self.wide() {
+			Wide::Int(v) => Some(v as f64),
+			Wide::Float(v) => Some(v),
+			Wide::Decimal(v) => v.to_f64(),
 		}
+	}
+}
+
+/// Formats a `half::f16` value using the shortest decimal string that parses back to the same
+/// bits, followed by `f16` (or `<f16>NaN` / `<f16>Infinity` / `<f16>-Infinity` when non-finite).
+pub fn fmt_f16_sql(v: half::f16, f: &mut String) {
+	if v.is_nan() {
+		f.push_str("<f16>NaN");
+		return;
+	}
+	if v.is_infinite() {
+		if v.is_sign_positive() {
+			f.push_str("<f16>Infinity");
+		} else {
+			f.push_str("<f16>-Infinity");
+		}
+		return;
+	}
+	if v.to_bits() == 0 {
+		f.push_str("0f16");
+		return;
+	}
+	if v.to_bits() == 0x8000 {
+		f.push_str("-0f16");
+		return;
+	}
+	let f64_val = v.to_f64();
+	for prec in 0..=9 {
+		let mut s = format!("{f64_val:.prec$}");
+		if s.contains('.') {
+			let trimmed_len = s.trim_end_matches('0').trim_end_matches('.').len();
+			s.truncate(trimmed_len);
+		}
+		#[allow(clippy::disallowed_methods)]
+		if <f64 as std::str::FromStr>::from_str(&s)
+			.is_ok_and(|parsed| half::f16::from_f64(parsed).to_bits() == v.to_bits())
+		{
+			f.push_str(&s);
+			f.push_str("f16");
+			return;
+		}
+	}
+	f.push_str(&v.to_f32().to_string());
+	f.push_str("f16");
+}
+
+/// Formats an `f32` value followed by `f32` (or `<f32>NaN` / `<f32>Infinity` / `<f32>-Infinity`
+/// when non-finite).
+pub fn fmt_f32_sql(v: f32, f: &mut String) {
+	if v.is_nan() {
+		f.push_str("<f32>NaN");
+	} else if v.is_infinite() {
+		if v.is_sign_positive() {
+			f.push_str("<f32>Infinity");
+		} else {
+			f.push_str("<f32>-Infinity");
+		}
+	} else {
+		f.push_str(&v.to_string());
+		f.push_str("f32");
 	}
 }
 
@@ -61,6 +309,13 @@ impl Display for Number {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
+			Number::I8(v) => write!(f, "{v}i8"),
+			Number::U8(v) => write!(f, "{v}u8"),
+			Number::I16(v) => write!(f, "{v}i16"),
+			Number::U16(v) => write!(f, "{v}u16"),
+			Number::I32(v) => write!(f, "{v}i32"),
+			Number::U32(v) => write!(f, "{v}u32"),
+			Number::U64(v) => write!(f, "{v}u64"),
 			Number::Float(v) => {
 				match fmt_non_finite_f64(*v) {
 					// Special case: Infinity, -Infinity or NaN
@@ -68,6 +323,16 @@ impl Display for Number {
 					// Regular float: add f to distinguish between int and float
 					None => write!(f, "{v}f"),
 				}
+			}
+			Number::F16(v) => {
+				let mut buf = String::new();
+				fmt_f16_sql(*v, &mut buf);
+				f.write_str(&buf)
+			}
+			Number::F32(v) => {
+				let mut buf = String::new();
+				fmt_f32_sql(*v, &mut buf);
+				f.write_str(&buf)
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
@@ -78,6 +343,34 @@ impl ToSql for Number {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Number::Int(v) => f.push_str(&v.to_string()),
+			Number::I8(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i8");
+			}
+			Number::U8(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u8");
+			}
+			Number::I16(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i16");
+			}
+			Number::U16(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u16");
+			}
+			Number::I32(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i32");
+			}
+			Number::U32(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u32");
+			}
+			Number::U64(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u64");
+			}
 			Number::Float(v) => {
 				match fmt_non_finite_f64(*v) {
 					// Special case: Infinity, -Infinity or NaN
@@ -89,6 +382,8 @@ impl ToSql for Number {
 					}
 				}
 			}
+			Number::F16(v) => fmt_f16_sql(*v, f),
+			Number::F32(v) => fmt_f32_sql(*v, f),
 			Number::Decimal(v) => v.fmt_sql(f, fmt),
 		}
 	}
@@ -134,6 +429,15 @@ impl_number! (
 	Int(i64) => (is_int, into_int, from_int),
 	Float(f64) => (is_float, into_float, from_float),
 	Decimal(Decimal) => (is_decimal, into_decimal, from_decimal),
+	I8(i8) => (is_i8, into_i8, from_i8),
+	U8(u8) => (is_u8, into_u8, from_u8),
+	I16(i16) => (is_i16, into_i16, from_i16),
+	U16(u16) => (is_u16, into_u16, from_u16),
+	I32(i32) => (is_i32, into_i32, from_i32),
+	U32(u32) => (is_u32, into_u32, from_u32),
+	U64(u64) => (is_u64, into_u64, from_u64),
+	F16(half::f16) => (is_f16, into_f16, from_f16),
+	F32(f32) => (is_f32, into_f32, from_f32),
 );
 
 impl Default for Number {
@@ -188,12 +492,12 @@ impl Ord for Number {
 			};
 		}
 
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.cmp(w),
-			(Number::Float(v), Number::Float(w)) => total_cmp_f64(*v, *w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
+		match (self.wide(), other.wide()) {
+			(Wide::Int(v), Wide::Int(w)) => v.cmp(&w),
+			(Wide::Float(v), Wide::Float(w)) => total_cmp_f64(v, w),
+			(Wide::Decimal(v), Wide::Decimal(w)) => v.cmp(&w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => {
+			(Wide::Int(v), Wide::Float(w)) => {
 				// A NaN is above every integer.
 				if w.is_nan() {
 					return Ordering::Less;
@@ -203,9 +507,9 @@ impl Ord for Number {
 					return greater!(w).reverse();
 				}
 				// Cast int to i128 to avoid saturating.
-				let l = *v as i128;
+				let l = v as i128;
 				// Cast the integer-part of the float to i128 to avoid saturating.
-				let r = *w as i128;
+				let r = w as i128;
 				// Compare both integer parts.
 				match l.cmp(&r) {
 					// If the integer parts are equal then we need to compare the mantissa.
@@ -214,13 +518,13 @@ impl Ord for Number {
 					ordering @ (Ordering::Less | Ordering::Greater) => ordering,
 				}
 			}
-			(v @ Number::Float(_), w @ Number::Int(_)) => w.cmp(v).reverse(),
+			(Wide::Float(v), Wide::Int(w)) => Number::Int(w).cmp(&Number::Float(v)).reverse(),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.cmp(&Decimal::from(*w)),
+			(Wide::Int(v), Wide::Decimal(w)) => Decimal::from(v).cmp(&w),
+			(Wide::Decimal(v), Wide::Int(w)) => v.cmp(&Decimal::from(w)),
 			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => cmp_float_decimal(*v, *w),
-			(v @ Number::Decimal(..), w @ Number::Float(..)) => w.cmp(v).reverse(),
+			(Wide::Float(v), Wide::Decimal(w)) => cmp_float_decimal(v, w),
+			(Wide::Decimal(v), Wide::Float(w)) => cmp_float_decimal(w, v).reverse(),
 		}
 	}
 }
@@ -339,12 +643,12 @@ enum Canonical {
 
 impl Canonical {
 	fn of(n: Number) -> Self {
-		match n {
-			Number::Int(v) => Canonical::Int(v),
-			Number::Float(v) if v.is_nan() => Canonical::Float(f64::NAN.to_bits()),
-			Number::Float(v) if v.is_infinite() => Canonical::Float(v.to_bits()),
-			Number::Float(0.0) => Canonical::Int(0),
-			Number::Float(v) => {
+		match n.wide() {
+			Wide::Int(v) => Canonical::Int(v),
+			Wide::Float(v) if v.is_nan() => Canonical::Float(f64::NAN.to_bits()),
+			Wide::Float(v) if v.is_infinite() => Canonical::Float(v.to_bits()),
+			Wide::Float(0.0) => Canonical::Int(0),
+			Wide::Float(v) => {
 				let negative = v < 0.0;
 				let (a, e) = float_parts(v);
 				if e < 0 {
@@ -365,7 +669,7 @@ impl Canonical {
 				}
 				Canonical::integer(negative, (a as u128) << e)
 			}
-			Number::Decimal(w) => {
+			Wide::Decimal(w) => {
 				let negative = w.mantissa() < 0;
 				let mut m = w.mantissa().unsigned_abs();
 				let mut s = w.scale();
@@ -416,19 +720,23 @@ impl PartialEq for Number {
 			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0) || (a.is_nan() && b.is_nan())
 		}
 
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.eq(w),
-			(Number::Float(v), Number::Float(w)) => total_eq_f64(*v, *w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
+		match (self.wide(), other.wide()) {
+			(Wide::Int(v), Wide::Int(w)) => v.eq(&w),
+			(Wide::Float(v), Wide::Float(w)) => total_eq_f64(v, w),
+			(Wide::Decimal(v), Wide::Decimal(w)) => v.eq(&w),
 			// ------------------------------
-			(v @ Number::Int(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
-			(v @ Number::Float(_), w @ Number::Int(_)) => v.cmp(w) == Ordering::Equal,
+			(Wide::Int(v), Wide::Float(w)) => {
+				Number::Int(v).cmp(&Number::Float(w)) == Ordering::Equal
+			}
+			(Wide::Float(v), Wide::Int(w)) => {
+				Number::Float(v).cmp(&Number::Int(w)) == Ordering::Equal
+			}
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
-			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
+			(Wide::Int(v), Wide::Decimal(w)) => Decimal::from(v).eq(&w),
+			(Wide::Decimal(v), Wide::Int(w)) => v.eq(&Decimal::from(w)),
 			// ------------------------------
-			(v @ Number::Float(_), w @ Number::Decimal(_)) => v.cmp(w) == Ordering::Equal,
-			(v @ Number::Decimal(_), w @ Number::Float(_)) => v.cmp(w) == Ordering::Equal,
+			(Wide::Float(v), Wide::Decimal(w)) => cmp_float_decimal(v, w) == Ordering::Equal,
+			(Wide::Decimal(v), Wide::Float(w)) => cmp_float_decimal(w, v) == Ordering::Equal,
 		}
 	}
 }
@@ -439,9 +747,39 @@ impl PartialOrd for Number {
 	}
 }
 
-// From implementations for common numeric types
+// From implementations for numeric types
+impl From<i8> for Number {
+	fn from(value: i8) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<u8> for Number {
+	fn from(value: u8) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<i16> for Number {
+	fn from(value: i16) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<u16> for Number {
+	fn from(value: u16) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
 impl From<i32> for Number {
 	fn from(value: i32) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<u32> for Number {
+	fn from(value: u32) -> Self {
 		Number::Int(value as i64)
 	}
 }
@@ -449,6 +787,36 @@ impl From<i32> for Number {
 impl From<i64> for Number {
 	fn from(value: i64) -> Self {
 		Number::Int(value)
+	}
+}
+
+impl From<u64> for Number {
+	fn from(value: u64) -> Self {
+		match i64::try_from(value) {
+			Ok(v) => Number::Int(v),
+			Err(_) => Number::Decimal(Decimal::from(value)),
+		}
+	}
+}
+
+impl From<isize> for Number {
+	fn from(value: isize) -> Self {
+		Number::Int(value as i64)
+	}
+}
+
+impl From<usize> for Number {
+	fn from(value: usize) -> Self {
+		match i64::try_from(value) {
+			Ok(v) => Number::Int(v),
+			Err(_) => Number::Decimal(Decimal::from(value)),
+		}
+	}
+}
+
+impl From<half::f16> for Number {
+	fn from(value: half::f16) -> Self {
+		Number::Float(f64::from(value))
 	}
 }
 
@@ -480,20 +848,29 @@ mod tests {
 	#[test]
 	fn every_nan_is_one_value_above_every_number() {
 		let hasher = RandomState::new();
-		let nans = [f64::NAN, -f64::NAN, f64::from_bits(0x7ff0_0000_0000_0001)];
+		let nans = [
+			Number::Float(f64::NAN),
+			Number::Float(-f64::NAN),
+			Number::Float(f64::from_bits(0x7ff0_0000_0000_0001)),
+			Number::F32(f32::NAN),
+			Number::F32(-f32::NAN),
+			Number::F16(half::f16::NAN),
+			Number::F16(-half::f16::NAN),
+		];
 		let numbers = [
 			Number::Float(f64::INFINITY),
 			Number::Float(f64::NEG_INFINITY),
+			Number::F32(f32::INFINITY),
+			Number::F16(half::f16::INFINITY),
 			Number::Float(0.0),
 			Number::Int(i64::MAX),
 			Number::Int(i64::MIN),
+			Number::U64(u64::MAX),
 			Number::Decimal(Decimal::MAX),
 			Number::Decimal(Decimal::MIN),
 		];
 		for x in nans {
-			let x = Number::Float(x);
 			for y in nans {
-				let y = Number::Float(y);
 				assert_eq!(x, y);
 				assert_eq!(x.cmp(&y), Ordering::Equal);
 				assert_eq!(hasher.hash_one(x), hasher.hash_one(y));
@@ -514,14 +891,55 @@ mod tests {
 	fn equal_numbers_of_every_kind_hash_alike() {
 		let hasher = RandomState::new();
 		let groups = [
-			vec![Number::Int(1), Number::Float(1.0), dec("1"), dec("1.00")],
-			vec![Number::Float(-0.0), Number::Int(0), dec("0"), dec("-0.000")],
-			vec![Number::Float(0.5), dec("0.5"), dec("0.50")],
-			vec![Number::Float(-2.5), dec("-2.5"), dec("-2.500")],
+			vec![
+				Number::Int(1),
+				Number::I8(1),
+				Number::U8(1),
+				Number::I16(1),
+				Number::U16(1),
+				Number::I32(1),
+				Number::U32(1),
+				Number::U64(1),
+				Number::F16(half::f16::from_f32(1.0)),
+				Number::F32(1.0),
+				Number::Float(1.0),
+				dec("1"),
+				dec("1.00"),
+			],
+			vec![
+				Number::Float(-0.0),
+				Number::F32(-0.0),
+				Number::F16(half::f16::from_f32(-0.0)),
+				Number::Int(0),
+				Number::I8(0),
+				Number::U8(0),
+				Number::U64(0),
+				dec("0"),
+				dec("-0.000"),
+			],
+			vec![
+				Number::Float(0.5),
+				Number::F32(0.5),
+				Number::F16(half::f16::from_f32(0.5)),
+				dec("0.5"),
+				dec("0.50"),
+			],
+			vec![
+				Number::Float(-2.5),
+				Number::F32(-2.5),
+				Number::F16(half::f16::from_f32(-2.5)),
+				dec("-2.5"),
+				dec("-2.500"),
+			],
+			vec![
+				Number::U64(u64::MAX),
+				dec("18446744073709551615"),
+				dec("18446744073709551615.00"),
+			],
 			vec![Number::Float(2f64.powi(70)), dec("1180591620717411303424")],
 			vec![Number::Float(2f64.powi(-20)), dec("0.00000095367431640625")],
 			vec![Number::Float(2f64.powi(-28)), dec("0.0000000037252902984619140625")],
-			vec![Number::Float(2f64.powi(63)), dec("9223372036854775808")],
+			vec![Number::Float(2f64.powi(63)), Number::U64(1u64 << 63), dec("9223372036854775808")],
 			vec![
 				Number::Float(-(2f64.powi(63))),
 				Number::Int(i64::MIN),
@@ -598,7 +1016,22 @@ mod tests {
 			if f.is_finite() {
 				numbers.push(Number::Float(f));
 			}
+			let f32_val = f32::from_bits(next() as u32);
+			if f32_val.is_finite() {
+				numbers.push(Number::F32(f32_val));
+			}
+			let f16_val = half::f16::from_bits(next() as u16);
+			if f16_val.is_finite() {
+				numbers.push(Number::F16(f16_val));
+			}
 			numbers.push(Number::Int(next() as i64 >> (r % 64)));
+			numbers.push(Number::U64(next() >> (r % 64)));
+			numbers.push(Number::I32(next() as i32));
+			numbers.push(Number::U32(next() as u32));
+			numbers.push(Number::I16(next() as i16));
+			numbers.push(Number::U16(next() as u16));
+			numbers.push(Number::I8(next() as i8));
+			numbers.push(Number::U8(next() as u8));
 		}
 		for a in &numbers {
 			for b in &numbers {

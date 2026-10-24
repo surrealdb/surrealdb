@@ -61,7 +61,6 @@ pub const MAX_PATH_DEPTH: usize = crate::val::MAX_VALUE_DEPTH;
 /// A planned code is a gap in [`PhysicalKind`]: it decodes as an unknown variant, which is a
 /// refusal, and it is given only to the kind it names.
 pub const PLANNED_PHYSICAL_KINDS: &[(u32, &str)] = &[
-	(10, "F16"),
 	(11, "BF16"),
 	(20, "DurationWide"),
 	(28, "DictionaryString"),
@@ -625,6 +624,9 @@ pub enum PhysicalKind {
 	/// An unsigned integer of 8 bytes.
 	#[stored(n = 9)]
 	U64,
+	/// A float of 2 bytes.
+	#[stored(n = 10)]
+	F16,
 	/// A float of 4 bytes.
 	#[stored(n = 12)]
 	F32,
@@ -681,7 +683,7 @@ impl PhysicalKind {
 	pub const fn fixed_width(self) -> Option<u32> {
 		match self {
 			Self::I8 | Self::U8 => Some(1),
-			Self::I16 | Self::U16 => Some(2),
+			Self::I16 | Self::U16 | Self::F16 => Some(2),
 			Self::I32 | Self::U32 | Self::F32 => Some(4),
 			Self::I64 | Self::U64 | Self::F64 | Self::Datetime | Self::Duration => Some(8),
 			Self::DatetimeWide => Some(12),
@@ -710,6 +712,7 @@ impl PhysicalKind {
 			| Self::U16
 			| Self::U32
 			| Self::U64
+			| Self::F16
 			| Self::F32
 			| Self::F64
 			| Self::Decimal16
@@ -1846,6 +1849,7 @@ pub(crate) mod tests {
 			PhysicalKind::U16,
 			PhysicalKind::U32,
 			PhysicalKind::U64,
+			PhysicalKind::F16,
 			PhysicalKind::F32,
 			PhysicalKind::F64,
 			PhysicalKind::Decimal16,

@@ -21,7 +21,6 @@ use std::sync::Arc;
 use chrono::{DateTime, NaiveDate, Utc};
 use surrealdb_types::Decimal;
 
-use super::kind::widen_f32;
 use super::{
 	DATETIME_ABOVE, DATETIME_BELOW, DURATION_ESCAPE, FieldRef, PackedError, PackedRow, Packing,
 	check_packed, pack,
@@ -399,7 +398,16 @@ pub(super) fn read(
 		FieldRef::Null => Read::Null,
 		FieldRef::Object => Read::Object,
 		FieldRef::Bool(v) => Read::Value(Value::Bool(v)),
+		FieldRef::I8(v) => Read::Value(Value::Number(Number::I8(v))),
+		FieldRef::I16(v) => Read::Value(Value::Number(Number::I16(v))),
+		FieldRef::I32(v) => Read::Value(Value::Number(Number::I32(v))),
 		FieldRef::Int(v) => Read::Value(int(v)),
+		FieldRef::U8(v) => Read::Value(Value::Number(Number::U8(v))),
+		FieldRef::U16(v) => Read::Value(Value::Number(Number::U16(v))),
+		FieldRef::U32(v) => Read::Value(Value::Number(Number::U32(v))),
+		FieldRef::U64(v) => Read::Value(Value::Number(Number::U64(v))),
+		FieldRef::F16(v) => Read::Value(Value::Number(Number::F16(v))),
+		FieldRef::F32(v) => Read::Value(Value::Number(Number::F32(v))),
 		FieldRef::Float(v) => Read::Value(float(v)),
 		FieldRef::Decimal(v) => Read::Value(decimal(v)),
 		FieldRef::Uuid(v) => Read::Value(Value::Uuid(val::Uuid(v))),
@@ -537,6 +545,7 @@ const LEAF_KINDS: &[PhysicalKind] = &[
 	PhysicalKind::U16,
 	PhysicalKind::U32,
 	PhysicalKind::U64,
+	PhysicalKind::F16,
 	PhysicalKind::F32,
 	PhysicalKind::F64,
 	PhysicalKind::Decimal16,
@@ -567,6 +576,7 @@ fn kind_name(kind: PhysicalKind) -> &'static str {
 		PhysicalKind::U16 => "U16",
 		PhysicalKind::U32 => "U32",
 		PhysicalKind::U64 => "U64",
+		PhysicalKind::F16 => "F16",
 		PhysicalKind::F32 => "F32",
 		PhysicalKind::F64 => "F64",
 		PhysicalKind::Decimal16 => "Decimal16",
@@ -652,6 +662,7 @@ fn gen_leaf(rng: &mut Rng, presence: Pres) -> Spec {
 		| PhysicalKind::U16
 		| PhysicalKind::U32
 		| PhysicalKind::U64
+		| PhysicalKind::F16
 		| PhysicalKind::F32
 		| PhysicalKind::F64
 		| PhysicalKind::Decimal16
@@ -826,7 +837,7 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 			PhysicalKind::Bool => int(1),
 			PhysicalKind::I8 => int(1_000),
 			PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => int(-1),
-			PhysicalKind::F32 => float(0.1),
+			PhysicalKind::F16 | PhysicalKind::F32 => float(0.1),
 			PhysicalKind::Datetime => datetime(leap_second()),
 			PhysicalKind::LiteralCode(_) => string("not a literal"),
 			PhysicalKind::RecordKey => record("elsewhere", RecordIdKey::Number(1)),
@@ -849,15 +860,24 @@ fn gen_value(rng: &mut Rng, kind: PhysicalKind, literals: &[Value], tables: &[Ta
 	}
 	match kind {
 		PhysicalKind::Bool => Value::Bool(rng.one_in(2)),
-		PhysicalKind::I8 => int(gen_int_in(rng, i8::MIN.into(), i8::MAX.into())),
-		PhysicalKind::I16 => int(gen_int_in(rng, i16::MIN.into(), i16::MAX.into())),
-		PhysicalKind::I32 => int(gen_int_in(rng, i32::MIN.into(), i32::MAX.into())),
+		PhysicalKind::I8 => {
+			Value::Number(Number::I8(gen_int_in(rng, i8::MIN.into(), i8::MAX.into()) as i8))
+		}
+		PhysicalKind::I16 => {
+			Value::Number(Number::I16(gen_int_in(rng, i16::MIN.into(), i16::MAX.into()) as i16))
+		}
+		PhysicalKind::I32 => {
+			Value::Number(Number::I32(gen_int_in(rng, i32::MIN.into(), i32::MAX.into()) as i32))
+		}
 		PhysicalKind::I64 => int(gen_int_in(rng, i64::MIN, i64::MAX)),
-		PhysicalKind::U8 => int(gen_int_in(rng, 0, u8::MAX.into())),
-		PhysicalKind::U16 => int(gen_int_in(rng, 0, u16::MAX.into())),
-		PhysicalKind::U32 => int(gen_int_in(rng, 0, u32::MAX.into())),
-		PhysicalKind::U64 => int(gen_int_in(rng, 0, i64::MAX)),
-		PhysicalKind::F32 => float(widen_f32(rng.next() as u32)),
+		PhysicalKind::U8 => Value::Number(Number::U8(gen_int_in(rng, 0, u8::MAX.into()) as u8)),
+		PhysicalKind::U16 => Value::Number(Number::U16(gen_int_in(rng, 0, u16::MAX.into()) as u16)),
+		PhysicalKind::U32 => Value::Number(Number::U32(gen_int_in(rng, 0, u32::MAX.into()) as u32)),
+		PhysicalKind::U64 => Value::Number(Number::U64(rng.next())),
+		PhysicalKind::F16 => {
+			Value::Number(Number::F16(crate::half::f16::from_bits(rng.next() as u16)))
+		}
+		PhysicalKind::F32 => Value::Number(Number::F32(f32::from_bits(rng.next() as u32))),
 		PhysicalKind::F64 => float(f64::from_bits(rng.next())),
 		PhysicalKind::Decimal16 | PhysicalKind::DecimalVar => decimal(gen_decimal(rng)),
 		PhysicalKind::Fixed(width) => bytes(&gen_bytes(rng, width as usize)),
@@ -952,7 +972,6 @@ struct Coverage {
 	widths: [usize; 3],
 	mutants: usize,
 	mutants_decoded: usize,
-	mutants_misfit: usize,
 }
 
 /// Packs `data` as a row of `layout`, and checks every way of reading it back. Answers the row, or
@@ -1034,28 +1053,33 @@ fn check_mutant(layout: &Arc<LayoutDescriptor>, bytes: &[u8], coverage: &mut Cov
 	match pack(packed, generation, RowFlags::edge(record.is_edge()), &decoded)
 		.expect("a decoded record packs")
 	{
-		Packing::Packed(again) => assert_eq!(
-			hex(&again),
-			hex(bytes),
-			"a row that decodes is not the packed form of what it decodes to\ndecoded {decoded:?}"
-		),
-		// A `U64` slot above `i64::MAX` reads as a decimal, which the writer does not narrow. No
-		// other row that decodes is a record the descriptor cannot hold.
-		Packing::Misfit => {
-			let wide = packed.columns.iter().enumerate().any(|(index, column)| {
-				column.kind == PhysicalKind::U64
-					&& matches!(
-						expected(packed, &decoded, index),
-						Some(Value::Number(Number::Decimal(_)))
-					)
-			});
-			assert!(
-				wide,
-				"a row that decodes does not pack again\nrow     {}\ndecoded {decoded:?}",
-				hex(bytes)
-			);
-			coverage.mutants_misfit += 1;
+		Packing::Packed(again) => {
+			if again != bytes {
+				// A mutant inside a stored value or remainder slice may hold a non-canonical
+				// stored encoding (such as an untyped array of integers) or a remainder key for an
+				// absent column; re-packing canonicalizes it.
+				assert!(
+					packed.columns.iter().any(|c| {
+						c.role == ColumnRole::Remainder
+							|| matches!(c.kind, PhysicalKind::Value | PhysicalKind::RecordKey)
+					}),
+					"a row that decodes is not the packed form of what it decodes to\nrow     {}\nagain   {}\ndecoded {decoded:?}",
+					hex(bytes),
+					hex(&again),
+				);
+				let again_record = StoredRecord::parse(&again).expect("parses").expect("v1");
+				let again_row = PackedRow::new(&again_record, packed).expect("a row");
+				let again_decoded = again_row.decode(None).expect("decodes");
+				assert!(
+					same(&again_decoded, &decoded),
+					"a re-packed mutant decodes to another record\ndecoded {decoded:?}\nagain   {again_decoded:?}"
+				);
+			}
 		}
+		Packing::Misfit => panic!(
+			"a row that decodes does not pack again\nrow     {}\ndecoded {decoded:?}",
+			hex(bytes)
+		),
 	}
 }
 
@@ -1566,7 +1590,10 @@ fn escapes_must_agree_with_the_trailer() {
 fn a_row_of_the_wrong_shape_is_refused() {
 	let layout = corrupt_layout();
 	let packed = packed_of(&layout);
-	let row = packed_row(&layout, &object(vec![("s", string("abc")), ("a", int(1))]));
+	let row = packed_row(
+		&layout,
+		&object(vec![("s", string("abc")), ("a", Value::Number(Number::I32(1)))]),
+	);
 	// A bit past the presence count.
 	let mut bytes = row.clone();
 	let bits = packed.presence_bits;
@@ -1831,10 +1858,10 @@ fn a_remainder_is_a_non_empty_object_of_values_without_a_root_id() {
 #[test]
 fn a_read_of_a_column_past_the_descriptor_is_refused() {
 	let layout = corrupt_layout();
-	let bytes = packed_row(&layout, &object(vec![("a", int(1))]));
+	let bytes = packed_row(&layout, &object(vec![("a", Value::Number(Number::I32(1)))]));
 	let record = StoredRecord::parse(&bytes).expect("parses").expect("v1");
 	let row = record.checked_packed(packed_of(&layout)).expect("a row");
-	assert!(matches!(row.read_column(A), Ok(FieldRef::Int(1))));
+	assert!(matches!(row.read_column(A), Ok(FieldRef::I32(1))));
 	let count = packed_of(&layout).columns.len();
 	assert!(matches!(row.read_column(count), Err(PackedError::NoColumn { .. })));
 }
@@ -1849,19 +1876,22 @@ fn a_document_is_not_a_packed_row() {
 
 #[test]
 fn kinds_read_the_bytes_no_writer_writes() {
-	// A `U64` slot above `i64::MAX` reads as the decimal it is, and does not pack again.
+	// A `U64` slot reads as `Number::U64` and packs again.
 	let l = layout(descriptor(false, &named(vec![("u", leaf(PhysicalKind::U64, Pres::Required))])));
 	let packed = packed_of(&l);
-	let mut bytes = packed_row(&l, &object(vec![("u", int(0))]));
+	let mut bytes = packed_row(&l, &object(vec![("u", Value::Number(Number::U64(0)))]));
 	let at = slot_at(&l, 0);
 	bytes[at..at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
 	let stored = StoredRecord::parse(&bytes).expect("parses").expect("v1");
 	let row = PackedRow::new(&stored, packed).expect("a row");
 	let decoded = row.decode(None).expect("decodes");
-	let want = decimal(Decimal::from(u64::MAX));
+	let want = Value::Number(Number::U64(u64::MAX));
 	assert!(same(&decoded, &object(vec![("u", want)])));
 	check_fields(&l, &row, &decoded, &bytes);
-	assert_eq!(pack(packed, Generation::FIRST, RowFlags::NONE, &decoded), Ok(Packing::Misfit));
+	assert!(matches!(
+		pack(packed, Generation::FIRST, RowFlags::NONE, &decoded),
+		Ok(Packing::Packed(_))
+	));
 	// A `Decimal16` slot with a flag bit no decimal sets, or a scale past 28.
 	let l = layout(descriptor(
 		false,

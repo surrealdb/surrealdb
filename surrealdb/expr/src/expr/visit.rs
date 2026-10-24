@@ -315,6 +315,15 @@ implement_visitor! {
 			Literal::Float(_) |
 			Literal::Integer(_) |
 			Literal::Decimal(_) |
+			Literal::I8(_) |
+			Literal::U8(_) |
+			Literal::I16(_) |
+			Literal::U16(_) |
+			Literal::I32(_) |
+			Literal::U32(_) |
+			Literal::U64(_) |
+			Literal::F16(_) |
+			Literal::F32(_) |
 			Literal::String(_) |
 			Literal::Bytes(_) |
 			Literal::Regex(_) |
@@ -1407,6 +1416,15 @@ implement_visitor! {
 				Kind::Float |
 				Kind::Int |
 				Kind::Number |
+				Kind::I8 |
+				Kind::U8 |
+				Kind::I16 |
+				Kind::U16 |
+				Kind::I32 |
+				Kind::U32 |
+				Kind::U64 |
+				Kind::F16 |
+				Kind::F32 |
 				Kind::Object |
 				Kind::String |
 				Kind::Uuid |
@@ -1877,6 +1895,15 @@ implement_visitor_mut! {
 			Literal::Float(_) |
 			Literal::Integer(_) |
 			Literal::Decimal(_) |
+			Literal::I8(_) |
+			Literal::U8(_) |
+			Literal::I16(_) |
+			Literal::U16(_) |
+			Literal::I32(_) |
+			Literal::U32(_) |
+			Literal::U64(_) |
+			Literal::F16(_) |
+			Literal::F32(_) |
 			Literal::String(_) |
 			Literal::Bytes(_) |
 			Literal::Regex(_) |
@@ -2975,6 +3002,15 @@ implement_visitor_mut! {
 				Kind::Float |
 				Kind::Int |
 				Kind::Number |
+				Kind::I8 |
+				Kind::U8 |
+				Kind::I16 |
+				Kind::U16 |
+				Kind::I32 |
+				Kind::U32 |
+				Kind::U64 |
+				Kind::F16 |
+				Kind::F32 |
 				Kind::Object |
 				Kind::String |
 				Kind::Uuid |

@@ -18,7 +18,7 @@ use surrealdb_parser_next::lex::{
 };
 use surrealdb_parser_next::parse::starts_expression;
 use surrealdb_types::{
-	Array, Geometry, Number, Object, Range, RecordId, RecordIdKey, Regex, Set, Table, Value,
+	Array, Geometry, Number, Object, Range, RecordId, RecordIdKey, Regex, Set, Table, Value, Wide,
 };
 
 use super::entry::{Error, Settings};
@@ -51,10 +51,6 @@ pub fn record_id(src: &str, settings: &Settings) -> Result<RecordId, Error> {
 }
 
 type R<T> = Result<T, Error>;
-
-fn fail<T>(msg: &'static str) -> R<T> {
-	Err(Error::Lower(Reject::new(msg)))
-}
 
 /// A value under construction, waiting for its next element.
 /// Each collection frame holds the position of its opening delimiter, which
@@ -567,20 +563,36 @@ impl<'a> Parser<'a> {
 					// The key is spelled as written, but must be a valid
 					// number.
 					match kind {
-						NumKind::Int => {
-							// A key's magnitude is bounded by `i64::MIN`'s.
-							let digits: String = text.chars().filter(|&c| c != '_').collect();
-							if let Ok(u) = digits.parse::<u64>()
-								&& u <= i64::MAX as u64 + 1
-							{
-							} else {
+						NumKind::Int
+						| NumKind::I8
+						| NumKind::U8
+						| NumKind::I16
+						| NumKind::U16
+						| NumKind::I32
+						| NumKind::U32
+						| NumKind::I64
+						| NumKind::U64
+						| NumKind::Float
+						| NumKind::F16
+						| NumKind::F32
+						| NumKind::F64 => {
+							if kind == NumKind::Int {
+								// A key's magnitude is bounded by `i64::MIN`'s.
+								let digits: String = text.chars().filter(|&c| c != '_').collect();
+								if let Ok(u) = digits.parse::<u64>()
+									&& u <= i64::MAX as u64 + 1
+								{
+								} else {
+									return Err(self.number_err(t.start, Compound::Number));
+								}
+							} else if parse_number_kind(kind, text).is_none() {
 								return Err(self.number_err(t.start, Compound::Number));
 							}
 						}
 						NumKind::Decimal => {
 							lit::decimal(text).map_err(Error::Lower)?;
 						}
-						NumKind::Float | NumKind::Duration => {}
+						NumKind::Duration => {}
 					}
 					Ok(text.to_owned())
 				}
@@ -615,11 +627,6 @@ impl<'a> Parser<'a> {
 		};
 		let end = l.pos;
 		let text = &self.src[t.start as usize..end as usize];
-		if let NumKind::Int = kind
-			&& int(text).is_err()
-		{
-			return Err(self.number_err(t.start, Compound::Numeric));
-		}
 		if kind == NumKind::Duration && t.kind != T::Digits {
 			return Err(self.number_err(t.start, Compound::Numeric));
 		}
@@ -629,9 +636,26 @@ impl<'a> Parser<'a> {
 			end,
 			..t
 		};
+		let parsed_num = match kind {
+			NumKind::Decimal | NumKind::Duration => None,
+			NumKind::Int
+			| NumKind::Float
+			| NumKind::I8
+			| NumKind::U8
+			| NumKind::I16
+			| NumKind::U16
+			| NumKind::I32
+			| NumKind::U32
+			| NumKind::I64
+			| NumKind::U64
+			| NumKind::F16
+			| NumKind::F32
+			| NumKind::F64 => match parse_number_kind(kind, text) {
+				Some(n) => Some(n),
+				None => return Err(self.number_err(t.start, Compound::Numeric)),
+			},
+		};
 		Ok(match kind {
-			NumKind::Int => Value::Number(Number::Int(int(text)?)),
-			NumKind::Float => Value::Number(Number::Float(float(text))),
 			NumKind::Decimal => {
 				let Literal::Decimal(d) = lit::decimal(text).map_err(Error::Lower)? else {
 					unreachable!("a decimal literal");
@@ -643,6 +667,19 @@ impl<'a> Parser<'a> {
 					.ok_or_else(|| self.number_err(t.start, Compound::Numeric))?;
 				Value::Duration(Duration::new(s, ns).into())
 			}
+			NumKind::Int
+			| NumKind::I8
+			| NumKind::U8
+			| NumKind::I16
+			| NumKind::U16
+			| NumKind::I32
+			| NumKind::U32
+			| NumKind::I64
+			| NumKind::U64
+			| NumKind::Float
+			| NumKind::F16
+			| NumKind::F32
+			| NumKind::F64 => Value::Number(parsed_num.expect("parsed above")),
 		})
 	}
 
@@ -668,6 +705,10 @@ impl<'a> Parser<'a> {
 		} else if t.kind == T::Infinity {
 			self.bump();
 			done(Value::Number(Number::Float(f64::INFINITY)))
+		} else if t.kind == T::Lt
+			&& let Some(v) = self.try_nonfinite_float_cast()
+		{
+			done(v)
 		} else if t.kind == T::LBrace {
 			self.bump();
 			if self.eat(T::RBrace) {
@@ -777,12 +818,20 @@ impl<'a> Parser<'a> {
 				let n = self.number()?;
 				let num_end = self.prev_end();
 				if self.eat(T::Comma) {
-					let x = if let Value::Number(Number::Int(i)) = n {
-						i as f64
-					} else if let Value::Number(Number::Float(f)) = n
-						&& !f.is_nan()
-					{
-						f
+					let x = if let Value::Number(num) = n {
+						match num.wide() {
+							Wide::Int(i) => i as f64,
+							Wide::Float(f) if !f.is_nan() => f,
+							Wide::Float(_) | Wide::Decimal(_) => {
+								return Err(Error::Lower(
+									Reject::new(
+										"Unexpected token, expected a non-decimal, non-NaN, number",
+									)
+									.at(num_start, num_end)
+									.with_label("Coordinate numbers can't be NaN or a decimal"),
+								));
+							}
+						}
 					} else {
 						return Err(Error::Lower(
 							Reject::new(
@@ -856,12 +905,29 @@ impl<'a> Parser<'a> {
 				return Err(self.number_err(t.start, Compound::Float));
 			}
 			let mut l = self.lex;
-			if let Ok(NumKind::Int | NumKind::Float) = l.numeric(t.start) {
+			if let Ok(
+				NumKind::Int
+				| NumKind::I8
+				| NumKind::U8
+				| NumKind::I16
+				| NumKind::U16
+				| NumKind::I32
+				| NumKind::U32
+				| NumKind::I64
+				| NumKind::U64
+				| NumKind::Float
+				| NumKind::F16
+				| NumKind::F32
+				| NumKind::F64,
+			) = l.numeric(t.start)
+			{
 				let val = self.number()?;
-				if let Value::Number(Number::Int(i)) = val {
-					Ok(i as f64)
-				} else if let Value::Number(Number::Float(f)) = val {
-					Ok(f)
+				if let Value::Number(num) = val {
+					match num.wide() {
+						Wide::Int(i) => Ok(i as f64),
+						Wide::Float(f) => Ok(f),
+						Wide::Decimal(_) => Err(self.number_err(t.start, Compound::Float)),
+					}
 				} else {
 					Err(self.number_err(t.start, Compound::Float))
 				}
@@ -1122,6 +1188,73 @@ impl<'a> Parser<'a> {
 		l.pos = pos;
 		l.next_token()
 	}
+
+	/// Parses `<f16>NaN`, `<f16>Infinity`, `<f16>-Infinity`, `<f32>NaN`,
+	/// `<f32>Infinity` or `<f32>-Infinity` at `<`, restoring the lexer when
+	/// the tokens do not form one.
+	fn try_nonfinite_float_cast(&mut self) -> Option<Value> {
+		let saved = (self.lex.pos, self.tok, self.prev);
+		self.bump(); // `<`
+		let kind_tok = self.tok;
+		let is_f16 = if kind_tok.kind == T::Ident {
+			let ktext = self.text(kind_tok);
+			if ktext.eq_ignore_ascii_case("f16") {
+				true
+			} else if ktext.eq_ignore_ascii_case("f32") {
+				false
+			} else {
+				(self.lex.pos, self.tok, self.prev) = saved;
+				return None;
+			}
+		} else {
+			(self.lex.pos, self.tok, self.prev) = saved;
+			return None;
+		};
+		self.bump();
+		if !self.eat(T::Gt) {
+			(self.lex.pos, self.tok, self.prev) = saved;
+			return None;
+		}
+		let v = if self.eat(T::NaN) {
+			if is_f16 {
+				Value::Number(Number::F16(half::f16::NAN))
+			} else {
+				Value::Number(Number::F32(f32::NAN))
+			}
+		} else if self.eat(T::Infinity) {
+			if is_f16 {
+				Value::Number(Number::F16(half::f16::INFINITY))
+			} else {
+				Value::Number(Number::F32(f32::INFINITY))
+			}
+		} else if matches!(self.tok.kind, T::Minus | T::Plus) {
+			let neg = self.tok.kind == T::Minus;
+			self.bump();
+			if self.tok.kind == T::Infinity && !self.tok.ws() {
+				self.bump();
+				if is_f16 {
+					Value::Number(Number::F16(if neg {
+						half::f16::NEG_INFINITY
+					} else {
+						half::f16::INFINITY
+					}))
+				} else {
+					Value::Number(Number::F32(if neg {
+						f32::NEG_INFINITY
+					} else {
+						f32::INFINITY
+					}))
+				}
+			} else {
+				(self.lex.pos, self.tok, self.prev) = saved;
+				return None;
+			}
+		} else {
+			(self.lex.pos, self.tok, self.prev) = saved;
+			return None;
+		};
+		Some(v)
+	}
 }
 
 /// A string under `legacy_strands` in a value: a record id when one starts
@@ -1145,25 +1278,19 @@ fn legacy_strand(s: String) -> Value {
 	}
 }
 
-fn int(text: &str) -> R<i64> {
-	let digits: String = text.chars().filter(|&c| c != '_').collect();
-	let (neg, body) = match digits.strip_prefix('-') {
-		Some(b) => (true, b),
-		None => (false, digits.strip_prefix('+').unwrap_or(&digits)),
-	};
-	let u: u64 =
-		body.parse().map_err(|_| Error::Lower(Reject::new("number does not fit in an i64")))?;
-	if neg {
-		if u > i64::MAX as u64 + 1 {
-			return fail("number does not fit in an i64");
-		}
-		Ok((u as i64).wrapping_neg())
-	} else {
-		i64::try_from(u).map_err(|_| Error::Lower(Reject::new("number does not fit in an i64")))
-	}
-}
-
-fn float(text: &str) -> f64 {
-	let s: String = text.chars().filter(|&c| c != '_' && c != 'f').collect();
-	s.parse().unwrap_or(f64::NAN)
+fn parse_number_kind(kind: NumKind, text: &str) -> Option<Number> {
+	use surrealdb_parser_next::lex::DecodedNumber;
+	Some(match surrealdb_parser_next::lex::decode_number(kind, text.as_bytes())? {
+		DecodedNumber::Int(v) => Number::Int(v),
+		DecodedNumber::I8(v) => Number::I8(v),
+		DecodedNumber::U8(v) => Number::U8(v),
+		DecodedNumber::I16(v) => Number::I16(v),
+		DecodedNumber::U16(v) => Number::U16(v),
+		DecodedNumber::I32(v) => Number::I32(v),
+		DecodedNumber::U32(v) => Number::U32(v),
+		DecodedNumber::U64(v) => Number::U64(v),
+		DecodedNumber::Float(v) => Number::Float(v),
+		DecodedNumber::F16(v) => Number::F16(v),
+		DecodedNumber::F32(v) => Number::F32(v),
+	})
 }

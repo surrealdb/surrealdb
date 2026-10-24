@@ -30,6 +30,10 @@ extern crate tracing;
 pub use surrealdb_expr::{expr, parser as syn, val};
 pub use surrealdb_iam as iam;
 
+pub(crate) mod half {
+	pub use surrealdb_types::f16;
+}
+
 pub(crate) mod types {
 	//! The public type surface, re-exported with `Public` prefixes so internal
 	//! and public forms stay visually distinct at use sites.

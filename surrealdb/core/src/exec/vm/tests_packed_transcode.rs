@@ -544,7 +544,7 @@ async fn streamed(
 					if let Ok((rows, text)) = answers.entry(index).or_insert(Ok(Default::default()))
 					{
 						match frame.format() {
-							RowFormat::Cbor | RowFormat::Shaped => {
+							RowFormat::Cbor | RowFormat::Cbor2 | RowFormat::Shaped => {
 								rows.extend(frame.to_values().expect("decodes"))
 							}
 							RowFormat::Json => {

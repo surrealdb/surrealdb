@@ -28,9 +28,27 @@ pub enum Leaf<'v> {
 	Null,
 	/// A bool.
 	Bool(bool),
-	/// An integer.
+	/// An `i8`.
+	I8(i8),
+	/// A `u8`.
+	U8(u8),
+	/// An `i16`.
+	I16(i16),
+	/// A `u16`.
+	U16(u16),
+	/// An `i32`.
+	I32(i32),
+	/// A `u32`.
+	U32(u32),
+	/// An `int` (`i64`).
 	Int(i64),
-	/// A float.
+	/// A `u64`.
+	U64(u64),
+	/// An `f16`.
+	F16(half::f16),
+	/// An `f32`.
+	F32(f32),
+	/// A `float` (`f64`).
 	Float(f64),
 	/// A decimal.
 	Decimal(Decimal),
@@ -86,7 +104,16 @@ fn kind_of(leaf: &Leaf<'_>) -> Option<Kind> {
 	Some(match leaf {
 		Leaf::None | Leaf::Null => return None,
 		Leaf::Bool(_) => Kind::Bool,
+		Leaf::I8(_) => Kind::I8,
+		Leaf::U8(_) => Kind::U8,
+		Leaf::I16(_) => Kind::I16,
+		Leaf::U16(_) => Kind::U16,
+		Leaf::I32(_) => Kind::I32,
+		Leaf::U32(_) => Kind::U32,
 		Leaf::Int(_) => Kind::Int,
+		Leaf::U64(_) => Kind::U64,
+		Leaf::F16(_) => Kind::F16,
+		Leaf::F32(_) => Kind::F32,
 		Leaf::Float(_) => Kind::Float,
 		Leaf::Decimal(_) => Kind::Decimal,
 		Leaf::String(_) => Kind::String,
@@ -289,6 +316,7 @@ pub fn fits<'v, V: ShapedValue<'v>>(shape: &Shape, node: Option<usize>, value: V
 					| Kind::U16
 					| Kind::U32
 					| Kind::U64
+					| Kind::F16
 					| Kind::F32
 					| Kind::DatetimeNs
 					| Kind::DurationNs) => leaf_fits(kind, &leaf),
@@ -393,7 +421,16 @@ fn derive_column<'v, V: ShapedValue<'v>>(
 		Leaf::None
 		| Leaf::Null
 		| Leaf::Bool(_)
+		| Leaf::I8(_)
+		| Leaf::U8(_)
+		| Leaf::I16(_)
+		| Leaf::U16(_)
+		| Leaf::I32(_)
+		| Leaf::U32(_)
 		| Leaf::Int(_)
+		| Leaf::U64(_)
+		| Leaf::F16(_)
+		| Leaf::F32(_)
 		| Leaf::Float(_)
 		| Leaf::Decimal(_)
 		| Leaf::String(_)
@@ -480,7 +517,16 @@ fn write_column<'v, V: ShapedValue<'v>>(
 		Leaf::None => row.set_presence(column, STATE_NONE),
 		Leaf::Null => row.set_presence(column, STATE_NULL),
 		leaf @ (Leaf::Bool(_)
+		| Leaf::I8(_)
+		| Leaf::U8(_)
+		| Leaf::I16(_)
+		| Leaf::U16(_)
+		| Leaf::I32(_)
+		| Leaf::U32(_)
 		| Leaf::Int(_)
+		| Leaf::U64(_)
+		| Leaf::F16(_)
+		| Leaf::F32(_)
 		| Leaf::Float(_)
 		| Leaf::Decimal(_)
 		| Leaf::String(_)
@@ -512,14 +558,15 @@ fn write_leaf<'v, V: ShapedValue<'v>>(
 	match (column.kind, leaf) {
 		(Kind::Bool, Leaf::Bool(v)) => row.fixed(slot, &[u8::from(v)]),
 		(Kind::Bit, Leaf::Bool(v)) => row.fixed_bit(slot, v),
-		(Kind::I8, Leaf::Int(v)) => row.fixed(slot, &(v as i8).to_le_bytes()),
-		(Kind::I16, Leaf::Int(v)) => row.fixed(slot, &(v as i16).to_le_bytes()),
-		(Kind::I32, Leaf::Int(v)) => row.fixed(slot, &(v as i32).to_le_bytes()),
-		(Kind::U8, Leaf::Int(v)) => row.fixed(slot, &(v as u8).to_le_bytes()),
-		(Kind::U16, Leaf::Int(v)) => row.fixed(slot, &(v as u16).to_le_bytes()),
-		(Kind::U32, Leaf::Int(v)) => row.fixed(slot, &(v as u32).to_le_bytes()),
-		(Kind::U64, Leaf::Int(v)) => row.fixed(slot, &(v as u64).to_le_bytes()),
-		(Kind::F32, Leaf::Float(v)) => row.fixed(slot, &(v as f32).to_bits().to_le_bytes()),
+		(Kind::I8, Leaf::I8(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::I16, Leaf::I16(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::I32, Leaf::I32(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::U8, Leaf::U8(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::U16, Leaf::U16(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::U32, Leaf::U32(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::U64, Leaf::U64(v)) => row.fixed(slot, &v.to_le_bytes()),
+		(Kind::F16, Leaf::F16(v)) => row.fixed(slot, &v.to_bits().to_le_bytes()),
+		(Kind::F32, Leaf::F32(v)) => row.fixed(slot, &v.to_bits().to_le_bytes()),
 		(Kind::DatetimeNs, Leaf::Datetime(secs, nanos)) => match datetime_ns(secs, nanos) {
 			Some(ns) => row.fixed(slot, &ns.to_le_bytes()),
 			None => {
@@ -652,19 +699,11 @@ fn duration_ns(secs: u64, nanos: u32) -> Option<u64> {
 	u64::try_from(ns).ok().filter(|ns| *ns != u64::MAX)
 }
 
-/// Whether `leaf` can be written in a column of `kind`: its own kind, or a stored width that holds
-/// it exactly.
+/// Whether `leaf` can be written in a column of `kind`: its own kind, or a compact timestamp or bit
+/// representation that holds it.
 fn leaf_fits(kind: Kind, leaf: &Leaf<'_>) -> bool {
 	match (kind, leaf) {
 		(Kind::Bit, Leaf::Bool(_)) => true,
-		(Kind::I8, Leaf::Int(v)) => i8::try_from(*v).is_ok(),
-		(Kind::I16, Leaf::Int(v)) => i16::try_from(*v).is_ok(),
-		(Kind::I32, Leaf::Int(v)) => i32::try_from(*v).is_ok(),
-		(Kind::U8, Leaf::Int(v)) => u8::try_from(*v).is_ok(),
-		(Kind::U16, Leaf::Int(v)) => u16::try_from(*v).is_ok(),
-		(Kind::U32, Leaf::Int(v)) => u32::try_from(*v).is_ok(),
-		(Kind::U64, Leaf::Int(v)) => *v >= 0,
-		(Kind::F32, Leaf::Float(v)) => f64::from(*v as f32).to_bits() == v.to_bits(),
 		(Kind::DatetimeNs, Leaf::Datetime(..)) | (Kind::DurationNs, Leaf::Duration(..)) => true,
 		(kind, leaf) => kind_of(leaf) == Some(kind),
 	}
@@ -702,7 +741,16 @@ fn write_array<'v, V: ShapedValue<'v>>(
 				Leaf::None
 				| Leaf::Null
 				| Leaf::Bool(_)
+				| Leaf::I8(_)
+				| Leaf::U8(_)
+				| Leaf::I16(_)
+				| Leaf::U16(_)
+				| Leaf::I32(_)
+				| Leaf::U32(_)
 				| Leaf::Int(_)
+				| Leaf::U64(_)
+				| Leaf::F16(_)
+				| Leaf::F32(_)
 				| Leaf::Float(_)
 				| Leaf::Datetime(..)
 				| Leaf::Duration(..)
@@ -720,7 +768,16 @@ fn write_array<'v, V: ShapedValue<'v>>(
 	}
 	for element in value.elements() {
 		match element.leaf() {
+			Leaf::I8(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::U8(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::I16(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::U16(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::I32(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::U32(v) => out.extend_from_slice(&v.to_le_bytes()),
 			Leaf::Int(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::U64(v) => out.extend_from_slice(&v.to_le_bytes()),
+			Leaf::F16(v) => out.extend_from_slice(&v.to_bits().to_le_bytes()),
+			Leaf::F32(v) => out.extend_from_slice(&v.to_bits().to_le_bytes()),
 			Leaf::Float(v) => out.extend_from_slice(&v.to_bits().to_le_bytes()),
 			Leaf::Bool(v) => out.push(u8::from(v)),
 			Leaf::Uuid(v) => out.extend_from_slice(&v),
@@ -831,7 +888,16 @@ impl<'v> ShapedValue<'v> for PublicShaped<'v> {
 			Value::None => Leaf::None,
 			Value::Null => Leaf::Null,
 			Value::Bool(v) => Leaf::Bool(*v),
+			Value::Number(Number::I8(v)) => Leaf::I8(*v),
+			Value::Number(Number::U8(v)) => Leaf::U8(*v),
+			Value::Number(Number::I16(v)) => Leaf::I16(*v),
+			Value::Number(Number::U16(v)) => Leaf::U16(*v),
+			Value::Number(Number::I32(v)) => Leaf::I32(*v),
+			Value::Number(Number::U32(v)) => Leaf::U32(*v),
 			Value::Number(Number::Int(v)) => Leaf::Int(*v),
+			Value::Number(Number::U64(v)) => Leaf::U64(*v),
+			Value::Number(Number::F16(v)) => Leaf::F16(*v),
+			Value::Number(Number::F32(v)) => Leaf::F32(*v),
 			Value::Number(Number::Float(v)) => Leaf::Float(*v),
 			Value::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
 			Value::String(v) => Leaf::String(v),

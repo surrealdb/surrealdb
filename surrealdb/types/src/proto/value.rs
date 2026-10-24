@@ -9,6 +9,7 @@ use surrealdb_protocol::proto::v1::value_bound::Bound as ValueBoundInner;
 
 use crate::{
 	Array, Bytes, Datetime, Duration, File, Number, Object, Range, Regex, Set, Table, Uuid, Value,
+	Wide,
 };
 
 impl TryFrom<Value> for proto::Value {
@@ -23,9 +24,11 @@ impl TryFrom<Value> for proto::Value {
 			Value::None => proto::Value::none(),
 			Value::Null => proto::Value::null(),
 			Value::Bool(b) => proto::Value::bool(b),
-			Value::Number(Number::Int(i)) => proto::Value::int64(i),
-			Value::Number(Number::Float(f)) => proto::Value::float64(f),
-			Value::Number(Number::Decimal(d)) => proto::Value::decimal(d.into()),
+			Value::Number(n) => match n.wide() {
+				Wide::Int(i) => proto::Value::int64(i),
+				Wide::Float(f) => proto::Value::float64(f),
+				Wide::Decimal(d) => proto::Value::decimal(d.into()),
+			},
 			Value::String(s) => proto::Value::string(s),
 			Value::Bytes(b) => proto::Value::bytes(b.0),
 			Value::Duration(d) => proto::Value::duration(d.0.try_into()?),

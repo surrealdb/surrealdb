@@ -11,8 +11,9 @@ pub use encoded::decode_rows;
 
 /// The WebSocket subprotocols this build serves.
 #[cfg(feature = "shaped")]
-pub const PROTOCOLS: [&str; 4] = [
+pub const PROTOCOLS: [&str; 5] = [
 	"json",        // For basic JSON serialisation
+	"cbor.2",      // For CBOR v2 serialisation
 	"cbor",        // For basic CBOR serialisation
 	"flatbuffers", // For flatbuffers serialisation
 	"shaped",      // For CBOR with row results as shaped frames
@@ -20,8 +21,9 @@ pub const PROTOCOLS: [&str; 4] = [
 
 /// The WebSocket subprotocols this build serves.
 #[cfg(not(feature = "shaped"))]
-pub const PROTOCOLS: [&str; 3] = [
+pub const PROTOCOLS: [&str; 4] = [
 	"json",        // For basic JSON serialisation
+	"cbor.2",      // For CBOR v2 serialisation
 	"cbor",        // For basic CBOR serialisation
 	"flatbuffers", // For flatbuffers serialisation
 ];
@@ -30,6 +32,7 @@ pub const PROTOCOLS: [&str; 3] = [
 pub enum Format {
 	Json,        // For basic JSON serialisation
 	Cbor,        // For basic CBOR serialisation
+	Cbor2,       // For CBOR v2 serialisation
 	Flatbuffers, // For flatbuffers serialisation
 	/// CBOR, with every list of result rows written as a shaped block
 	/// (`surrealdb_types::shaped`).
@@ -44,6 +47,7 @@ impl Format {
 		match self {
 			Format::Json => Some(surrealdb_rpc::RowFormat::Json),
 			Format::Cbor => Some(surrealdb_rpc::RowFormat::Cbor),
+			Format::Cbor2 => Some(surrealdb_rpc::RowFormat::Cbor2),
 			#[cfg(feature = "shaped")]
 			Format::Shaped => Some(surrealdb_rpc::RowFormat::Shaped),
 			#[cfg(not(feature = "shaped"))]
@@ -71,6 +75,7 @@ impl From<&str> for Format {
 		match v {
 			"json" => Format::Json,
 			"cbor" => Format::Cbor,
+			"cbor.2" => Format::Cbor2,
 			"flatbuffers" => Format::Flatbuffers,
 			"shaped" => Format::shaped(),
 			_ => Format::Unsupported,

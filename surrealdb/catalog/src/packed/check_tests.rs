@@ -460,7 +460,8 @@ fn targeted() -> Vec<Targeted> {
 	push("remainder_with_root_id", &l, remainder(obj(vec![("id", int(1))])), false);
 	push("remainder_with_none", &l, remainder(obj(vec![("k", Value::None)])), false);
 	push("remainder_with_bad_bytes", &l, with_raw_slice(&l, &row, 0, &[0xEE, 0x01]), false);
-	let present_a = packed_row(&l, &object(vec![("a", int(5)), ("extra", int(1))]));
+	let present_a =
+		packed_row(&l, &object(vec![("a", Value::Number(Number::I32(5))), ("extra", int(1))]));
 	push(
 		"key_in_column_and_remainder",
 		&l,
@@ -505,7 +506,10 @@ fn targeted() -> Vec<Targeted> {
 		false,
 	);
 	// A collision and a later bad slot: the slot's refusal is the answer.
-	let both = packed_row(&l, &object(vec![("a", int(5)), ("extra", int(1)), ("s", string("hi"))]));
+	let both = packed_row(
+		&l,
+		&object(vec![("a", Value::Number(Number::I32(5))), ("extra", int(1)), ("s", string("hi"))]),
+	);
 	let mut parts = split(&l, &both);
 	parts.slices[0] = stored::encode(&obj(vec![("a", int(1))])).expect("encodes");
 	parts.slices[3] = vec![0xFF, 0xFE];
@@ -738,7 +742,16 @@ fn field_value(
 			Value::Object(node)
 		}
 		FieldRef::Bool(v) => Value::Bool(v),
+		FieldRef::I8(v) => Value::Number(Number::I8(v)),
+		FieldRef::I16(v) => Value::Number(Number::I16(v)),
+		FieldRef::I32(v) => Value::Number(Number::I32(v)),
 		FieldRef::Int(v) => int(v),
+		FieldRef::U8(v) => Value::Number(Number::U8(v)),
+		FieldRef::U16(v) => Value::Number(Number::U16(v)),
+		FieldRef::U32(v) => Value::Number(Number::U32(v)),
+		FieldRef::U64(v) => Value::Number(Number::U64(v)),
+		FieldRef::F16(v) => Value::Number(Number::F16(v)),
+		FieldRef::F32(v) => Value::Number(Number::F32(v)),
 		FieldRef::Float(v) => Value::Number(Number::Float(v)),
 		FieldRef::Decimal(v) => Value::Number(Number::Decimal(v)),
 		FieldRef::Uuid(v) => Value::Uuid(val::Uuid(v)),
@@ -887,8 +900,8 @@ fn check_reads(
 						column: Some(at),
 					} if at == index
 				),
-				matches!(expected, Some(Value::Object(_))),
-				"an object node reads as an object, with its column, exactly when the decode holds one"
+				matches!(checked.read_column(index), Ok(FieldRef::Object)),
+				"an object node reads as an object, with its column, exactly when the column holds one"
 			);
 		}
 		if let [name] = column.path.as_slice() {

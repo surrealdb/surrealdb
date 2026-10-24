@@ -25,19 +25,22 @@ use crate::{QueryResult, QueryType};
 pub enum RowFormat {
 	/// Each row is one CBOR data item; rows are concatenated.
 	Cbor,
+	/// Each row is one CBOR v2 data item; rows are concatenated.
+	Cbor2,
 	/// Each row is one JSON text; rows are joined by `,`.
 	Json,
 	/// Each row is one shaped row (`surrealdb_types::shaped`) of the shape the rows name for it;
-	/// rows are concatenated. Everything around the rows is CBOR.
+	/// rows are concatenated. Everything around the rows is CBOR v2.
 	Shaped,
 }
 
 impl RowFormat {
-	/// The format everything but the rows is written in: CBOR for a shaped response.
+	/// The format everything but the rows is written in: CBOR v2 for a shaped response.
 	pub fn envelope(self) -> RowFormat {
 		match self {
-			RowFormat::Shaped => RowFormat::Cbor,
+			RowFormat::Shaped => RowFormat::Cbor2,
 			RowFormat::Cbor => RowFormat::Cbor,
+			RowFormat::Cbor2 => RowFormat::Cbor2,
 			RowFormat::Json => RowFormat::Json,
 		}
 	}

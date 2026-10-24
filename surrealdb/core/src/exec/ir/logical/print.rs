@@ -926,7 +926,18 @@ macro_rules! text_int {
 	};
 }
 
-text_int!(u8, u16, u32, u64, i64, usize);
+text_int!(i8, u8, i16, u16, i32, u32, i64, u64, usize);
+
+impl Text for surrealdb_types::f16 {
+	fn put(&self, out: &mut String) {
+		let _ = write!(out, "{self}");
+	}
+
+	fn get(c: &mut Cursor<'_>) -> Result<Self, ParseError> {
+		let token = c.token()?;
+		token.parse().map_err(|_| c.err(format!("`{token}` is not an f16")))
+	}
+}
 
 // ---------------------------------------------------------------------------------------------
 // Scalars and containers
@@ -1212,6 +1223,51 @@ impl Text for PublicNumber {
 				put_str(out, &n.to_string());
 				out.push(')');
 			}
+			PublicNumber::I8(n) => {
+				out.push_str("I8(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::U8(n) => {
+				out.push_str("U8(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::I16(n) => {
+				out.push_str("I16(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::U16(n) => {
+				out.push_str("U16(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::I32(n) => {
+				out.push_str("I32(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::U32(n) => {
+				out.push_str("U32(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::U64(n) => {
+				out.push_str("U64(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::F16(n) => {
+				out.push_str("F16(");
+				n.put(out);
+				out.push(')');
+			}
+			PublicNumber::F32(n) => {
+				out.push_str("F32(");
+				n.put(out);
+				out.push(')');
+			}
 		}
 	}
 
@@ -1228,6 +1284,15 @@ impl Text for PublicNumber {
 					Err(_) => return c.fail(format!("`{text}` is not a decimal")),
 				}
 			}
+			"I8" => PublicNumber::I8(<i8 as Text>::get(c)?),
+			"U8" => PublicNumber::U8(<u8 as Text>::get(c)?),
+			"I16" => PublicNumber::I16(<i16 as Text>::get(c)?),
+			"U16" => PublicNumber::U16(<u16 as Text>::get(c)?),
+			"I32" => PublicNumber::I32(<i32 as Text>::get(c)?),
+			"U32" => PublicNumber::U32(<u32 as Text>::get(c)?),
+			"U64" => PublicNumber::U64(<u64 as Text>::get(c)?),
+			"F16" => PublicNumber::F16(<surrealdb_types::f16 as Text>::get(c)?),
+			"F32" => PublicNumber::F32(<f32 as Text>::get(c)?),
 			other => return c.unknown("Number", other),
 		};
 		c.expect(')')?;

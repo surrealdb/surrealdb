@@ -32,6 +32,15 @@ fn proven_kind(value: &Value) -> Kind {
 		Value::Number(Number::Int(_)) => Kind::Int,
 		Value::Number(Number::Float(_)) => Kind::Float,
 		Value::Number(Number::Decimal(_)) => Kind::Decimal,
+		Value::Number(Number::I8(_)) => Kind::I8,
+		Value::Number(Number::U8(_)) => Kind::U8,
+		Value::Number(Number::I16(_)) => Kind::I16,
+		Value::Number(Number::U16(_)) => Kind::U16,
+		Value::Number(Number::I32(_)) => Kind::I32,
+		Value::Number(Number::U32(_)) => Kind::U32,
+		Value::Number(Number::U64(_)) => Kind::U64,
+		Value::Number(Number::F16(_)) => Kind::F16,
+		Value::Number(Number::F32(_)) => Kind::F32,
 		Value::String(_) => Kind::String,
 		Value::Object(_) => Kind::Object,
 		Value::Array(array) => {
@@ -64,6 +73,15 @@ fn conforms(value: &Value, kind: &Kind) -> bool {
 		(Kind::Int, Value::Number(Number::Int(_)))
 		| (Kind::Float, Value::Number(Number::Float(_)))
 		| (Kind::Decimal, Value::Number(Number::Decimal(_)))
+		| (Kind::I8, Value::Number(Number::I8(_)))
+		| (Kind::U8, Value::Number(Number::U8(_)))
+		| (Kind::I16, Value::Number(Number::I16(_)))
+		| (Kind::U16, Value::Number(Number::U16(_)))
+		| (Kind::I32, Value::Number(Number::I32(_)))
+		| (Kind::U32, Value::Number(Number::U32(_)))
+		| (Kind::U64, Value::Number(Number::U64(_)))
+		| (Kind::F16, Value::Number(Number::F16(_)))
+		| (Kind::F32, Value::Number(Number::F32(_)))
 		| (Kind::Number, Value::Number(_))
 		| (Kind::String, Value::String(_))
 		| (Kind::Object, Value::Object(_)) => true,
@@ -78,6 +96,15 @@ fn conforms(value: &Value, kind: &Kind) -> bool {
 			| Kind::Int
 			| Kind::Float
 			| Kind::Decimal
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32
 			| Kind::Number
 			| Kind::String
 			| Kind::Object

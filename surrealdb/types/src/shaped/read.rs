@@ -411,20 +411,27 @@ impl Row<'_> {
 				column.element.ok_or_else(|| bad("an array of no element kind"))?,
 				budget,
 			)?,
-			Kind::I8 => int(i64::from(i8::from_le_bytes(array(self.fixed(slot, 1)?)))),
-			Kind::I16 => int(i64::from(i16::from_le_bytes(array(self.fixed(slot, 2)?)))),
-			Kind::I32 => int(i64::from(i32::from_le_bytes(array(self.fixed(slot, 4)?)))),
-			Kind::U8 => int(i64::from(u8::from_le_bytes(array(self.fixed(slot, 1)?)))),
-			Kind::U16 => int(i64::from(u16::from_le_bytes(array(self.fixed(slot, 2)?)))),
-			Kind::U32 => int(i64::from(u32::from_le_bytes(array(self.fixed(slot, 4)?)))),
-			Kind::U64 => {
-				let v = u64::from_le_bytes(array(self.fixed(slot, 8)?));
-				match i64::try_from(v) {
-					Ok(v) => int(v),
-					Err(_) => Value::Number(Number::Decimal(Decimal::from(v))),
-				}
+			Kind::I8 => Value::Number(Number::I8(i8::from_le_bytes(array(self.fixed(slot, 1)?)))),
+			Kind::I16 => {
+				Value::Number(Number::I16(i16::from_le_bytes(array(self.fixed(slot, 2)?))))
 			}
-			Kind::F32 => Value::Number(Number::Float(widen_f32(u32::from_le_bytes(array(
+			Kind::I32 => {
+				Value::Number(Number::I32(i32::from_le_bytes(array(self.fixed(slot, 4)?))))
+			}
+			Kind::U8 => Value::Number(Number::U8(u8::from_le_bytes(array(self.fixed(slot, 1)?)))),
+			Kind::U16 => {
+				Value::Number(Number::U16(u16::from_le_bytes(array(self.fixed(slot, 2)?))))
+			}
+			Kind::U32 => {
+				Value::Number(Number::U32(u32::from_le_bytes(array(self.fixed(slot, 4)?))))
+			}
+			Kind::U64 => {
+				Value::Number(Number::U64(u64::from_le_bytes(array(self.fixed(slot, 8)?))))
+			}
+			Kind::F16 => Value::Number(Number::F16(half::f16::from_bits(u16::from_le_bytes(
+				array(self.fixed(slot, 2)?),
+			)))),
+			Kind::F32 => Value::Number(Number::F32(f32::from_bits(u32::from_le_bytes(array(
 				self.fixed(slot, 4)?,
 			))))),
 			Kind::DatetimeNs => {
@@ -505,46 +512,63 @@ fn array_of(slice: &[u8], kind: Kind, budget: &mut Budget) -> Result<Value, Shap
 		}
 		return Ok(Value::Array(out.into()));
 	}
-	let width = if kind == Kind::Bool {
-		1
-	} else if matches!(kind, Kind::Int | Kind::Float) {
-		8
-	} else if kind == Kind::Uuid {
-		16
-	} else {
-		12
-	};
+	let width = kind.fixed_width().ok_or_else(|| bad("an invalid array element kind"))? as usize;
 	if r.0.len() != count.checked_mul(width).ok_or_else(|| bad("an array too long"))? {
 		return Err(bad("an array of the wrong length"));
 	}
 	budget.charge((count as u64).saturating_mul(VALUE_UNITS))?;
 	let mut out = Vec::with_capacity(count.min(slice.len()));
 	for element in r.0.chunks_exact(width) {
-		out.push(if kind == Kind::Bool {
-			match element[0] {
+		out.push(match kind {
+			Kind::Bool => match element[0] {
 				0 => Value::Bool(false),
 				1 => Value::Bool(true),
 				_ => return Err(bad("a bool that is neither 0 nor 1")),
+			},
+			Kind::I8 => Value::Number(Number::I8(i8::from_le_bytes(array(element)))),
+			Kind::U8 => Value::Number(Number::U8(u8::from_le_bytes(array(element)))),
+			Kind::I16 => Value::Number(Number::I16(i16::from_le_bytes(array(element)))),
+			Kind::U16 => Value::Number(Number::U16(u16::from_le_bytes(array(element)))),
+			Kind::I32 => Value::Number(Number::I32(i32::from_le_bytes(array(element)))),
+			Kind::U32 => Value::Number(Number::U32(u32::from_le_bytes(array(element)))),
+			Kind::Int => int(i64::from_le_bytes(array(element))),
+			Kind::U64 => Value::Number(Number::U64(u64::from_le_bytes(array(element)))),
+			Kind::F16 => {
+				Value::Number(Number::F16(half::f16::from_bits(u16::from_le_bytes(array(element)))))
 			}
-		} else if kind == Kind::Int {
-			int(i64::from_le_bytes(array(element)))
-		} else if kind == Kind::Float {
-			Value::Number(Number::Float(f64::from_bits(u64::from_le_bytes(array(element)))))
-		} else if kind == Kind::Uuid {
-			Value::Uuid(Uuid(::uuid::Uuid::from_bytes(array(element))))
-		} else if kind == Kind::Datetime {
-			let secs = i64::from_le_bytes(array(&element[..8]));
-			let nanos = u32::from_le_bytes(array(&element[8..]));
-			Value::Datetime(
-				Datetime::try_from((secs, nanos)).map_err(|_| bad("a datetime out of range"))?,
-			)
-		} else {
-			let secs = u64::from_le_bytes(array(&element[..8]));
-			let nanos = u32::from_le_bytes(array(&element[8..]));
-			if nanos >= 1_000_000_000 {
-				return Err(bad("a duration's nanoseconds out of range"));
+			Kind::F32 => {
+				Value::Number(Number::F32(f32::from_bits(u32::from_le_bytes(array(element)))))
 			}
-			Value::Duration(Duration(std::time::Duration::new(secs, nanos)))
+			Kind::Float => {
+				Value::Number(Number::Float(f64::from_bits(u64::from_le_bytes(array(element)))))
+			}
+			Kind::Uuid => Value::Uuid(Uuid(::uuid::Uuid::from_bytes(array(element)))),
+			Kind::Datetime => {
+				let secs = i64::from_le_bytes(array(&element[..8]));
+				let nanos = u32::from_le_bytes(array(&element[8..]));
+				Value::Datetime(
+					Datetime::try_from((secs, nanos))
+						.map_err(|_| bad("a datetime out of range"))?,
+				)
+			}
+			Kind::Duration => {
+				let secs = u64::from_le_bytes(array(&element[..8]));
+				let nanos = u32::from_le_bytes(array(&element[8..]));
+				if nanos >= 1_000_000_000 {
+					return Err(bad("a duration's nanoseconds out of range"));
+				}
+				Value::Duration(Duration(std::time::Duration::new(secs, nanos)))
+			}
+			Kind::String
+			| Kind::Bytes
+			| Kind::Decimal
+			| Kind::Record
+			| Kind::Dynamic
+			| Kind::Object
+			| Kind::Bit
+			| Kind::Array
+			| Kind::DatetimeNs
+			| Kind::DurationNs => return Err(bad("an invalid array element kind")),
 		});
 	}
 	Ok(Value::Array(out.into()))
@@ -552,17 +576,6 @@ fn array_of(slice: &[u8], kind: Kind, budget: &mut Budget) -> Result<Value, Shap
 
 fn int(v: i64) -> Value {
 	Value::Number(Number::Int(v))
-}
-
-fn widen_f32(bits: u32) -> f64 {
-	let mantissa = bits & 0x007F_FFFF;
-	if (bits & 0x7F80_0000) == 0x7F80_0000 && mantissa != 0 {
-		f64::from_bits(
-			(u64::from(bits >> 31) << 63) | 0x7FF0_0000_0000_0000 | (u64::from(mantissa) << 29),
-		)
-	} else {
-		f64::from(f32::from_bits(bits))
-	}
 }
 
 fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
@@ -642,8 +655,7 @@ mod tests {
 	use crate::shaped::shape::{ColumnDef, Shape, ShapeDef};
 	use crate::shaped::write::RowWriter;
 
-	/// A narrowed `F32` slot widens a signaling NaN bit-for-bit without quietening its payload,
-	/// matching `surrealdb_catalog::packed::widen_f32`.
+	/// An `F32` slot decodes to `Number::F32` preserving signaling NaN bits verbatim.
 	#[test]
 	fn f32_leaf_preserves_signaling_nan_bits() {
 		let shape = Shape::new(ShapeDef::object(
@@ -660,25 +672,22 @@ mod tests {
 		))
 		.expect("shape");
 
-		for (f32_bits, expected_f64_bits) in [
-			(0x7f80_0001u32, 0x7ff0_0000_2000_0000u64),
-			(0xff80_0001u32, 0xfff0_0000_2000_0000u64),
-			(0x7fc0_0001u32, 0x7ff8_0000_2000_0000u64),
-		] {
+		for f32_bits in [0x7f80_0001u32, 0xff80_0001u32, 0x7fc0_0001u32] {
 			let mut row = Vec::new();
 			let mut writer = RowWriter::begin(&mut row, &shape);
 			writer.fixed(0, &f32_bits.to_le_bytes());
 			writer.finish().expect("finishes");
 
-			let (decoded, len) = decode_row(&shape, &row, &mut |_| unreachable!()).expect("decodes");
+			let (decoded, len) =
+				decode_row(&shape, &row, &mut |_| unreachable!()).expect("decodes");
 			assert_eq!(len, row.len());
 			let Value::Object(obj) = decoded else {
 				panic!("expected object, got {decoded:?}");
 			};
-			let Some(Value::Number(Number::Float(v))) = obj.get("f") else {
-				panic!("expected float field f, got {obj:?}");
+			let Some(Value::Number(Number::F32(v))) = obj.get("f") else {
+				panic!("expected f32 field f, got {obj:?}");
 			};
-			assert_eq!(v.to_bits(), expected_f64_bits, "f32 bits {f32_bits:#010x}");
+			assert_eq!(v.to_bits(), f32_bits, "f32 bits {f32_bits:#010x}");
 		}
 	}
 }

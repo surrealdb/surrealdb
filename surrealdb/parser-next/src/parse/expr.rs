@@ -2022,10 +2022,67 @@ impl<'a, 's> Parser<'a, 's> {
 				let v = v as u64;
 				Ok(self.leaf_span(Tag::Int, 0, v as u32, (v >> 32) as u32, start, end))
 			}
-			NumKind::Float => {
-				let f = parse_float(text);
-				let bits = f.to_bits();
-				Ok(self.leaf_span(Tag::Float, 0, bits as u32, (bits >> 32) as u32, start, end))
+			NumKind::I8
+			| NumKind::U8
+			| NumKind::I16
+			| NumKind::U16
+			| NumKind::I32
+			| NumKind::U32
+			| NumKind::I64
+			| NumKind::U64
+			| NumKind::Float
+			| NumKind::F16
+			| NumKind::F32
+			| NumKind::F64 => {
+				use crate::lex::DecodedNumber;
+				let Some(dec) = crate::lex::decode_number(kind, text) else {
+					let err = match kind {
+						NumKind::Float | NumKind::F16 | NumKind::F32 | NumKind::F64 => {
+							LexError::InvalidNumber
+						}
+						NumKind::Int
+						| NumKind::I8
+						| NumKind::U8
+						| NumKind::I16
+						| NumKind::U16
+						| NumKind::I32
+						| NumKind::U32
+						| NumKind::I64
+						| NumKind::U64
+						| NumKind::Decimal
+						| NumKind::Duration => LexError::IntOverflow,
+					};
+					return Err(self.number_error(start, err, mode, origin));
+				};
+				Ok(match dec {
+					DecodedNumber::I8(v) => {
+						self.leaf_span(Tag::I8, 0, v as u8 as u32, 0, start, end)
+					}
+					DecodedNumber::U8(v) => self.leaf_span(Tag::U8, 0, v as u32, 0, start, end),
+					DecodedNumber::I16(v) => {
+						self.leaf_span(Tag::I16, 0, v as u16 as u32, 0, start, end)
+					}
+					DecodedNumber::U16(v) => self.leaf_span(Tag::U16, 0, v as u32, 0, start, end),
+					DecodedNumber::I32(v) => self.leaf_span(Tag::I32, 0, v as u32, 0, start, end),
+					DecodedNumber::U32(v) => self.leaf_span(Tag::U32, 0, v, 0, start, end),
+					DecodedNumber::Int(v) => {
+						let v = v as u64;
+						self.leaf_span(Tag::Int, 0, v as u32, (v >> 32) as u32, start, end)
+					}
+					DecodedNumber::U64(u) => {
+						self.leaf_span(Tag::U64, 0, u as u32, (u >> 32) as u32, start, end)
+					}
+					DecodedNumber::Float(f) => {
+						let bits = f.to_bits();
+						self.leaf_span(Tag::Float, 0, bits as u32, (bits >> 32) as u32, start, end)
+					}
+					DecodedNumber::F16(h) => {
+						self.leaf_span(Tag::F16, 0, h.to_bits() as u32, 0, start, end)
+					}
+					DecodedNumber::F32(f) => {
+						self.leaf_span(Tag::F32, 0, f.to_bits(), 0, start, end)
+					}
+				})
 			}
 			NumKind::Decimal => Ok(self.leaf_span(Tag::Decimal, 0, 0, 0, start, end)),
 			NumKind::Duration => {
@@ -2054,22 +2111,4 @@ pub(crate) enum PartStep {
 	Pushed,
 	/// No more parts.
 	Finished,
-}
-
-/// Parses a float literal span: digits with `_` separators, an optional
-/// fraction and exponent, and an optional `f` suffix.
-pub(crate) fn parse_float(text: &[u8]) -> f64 {
-	let digits = |b: &&u8| **b != b'_' && **b != b'f';
-	let mut buf = [0u8; 64];
-	let n = text.iter().filter(digits).count();
-	if n > buf.len() {
-		// A literal written out in full, such as `f64::MAX` without an
-		// exponent, is read whole; only these allocate.
-		let s: String = text.iter().filter(digits).map(|&b| b as char).collect();
-		return s.parse().unwrap_or(f64::NAN);
-	}
-	for (slot, &b) in buf.iter_mut().zip(text.iter().filter(digits)) {
-		*slot = b;
-	}
-	core::str::from_utf8(&buf[..n]).ok().and_then(|s| s.parse().ok()).unwrap_or(f64::NAN)
 }

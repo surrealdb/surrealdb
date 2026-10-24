@@ -254,6 +254,15 @@ fn checks_only(kind: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String

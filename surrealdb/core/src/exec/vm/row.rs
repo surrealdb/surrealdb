@@ -50,10 +50,19 @@ pub(super) trait RowReader {
 	fn field_int(&self, name: &FieldName) -> anyhow::Result<Option<i64>> {
 		Ok(match self.field(name)? {
 			Scalar::Number(Number::Int(v)) => Some(v),
+			Scalar::Number(Number::I8(v)) => Some(v as i64),
+			Scalar::Number(Number::U8(v)) => Some(v as i64),
+			Scalar::Number(Number::I16(v)) => Some(v as i64),
+			Scalar::Number(Number::U16(v)) => Some(v as i64),
+			Scalar::Number(Number::I32(v)) => Some(v as i64),
+			Scalar::Number(Number::U32(v)) => Some(v as i64),
+			Scalar::Number(Number::U64(v)) => i64::try_from(v).ok(),
+			Scalar::Number(
+				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+			) => None,
 			Scalar::None
 			| Scalar::Null
 			| Scalar::Bool(_)
-			| Scalar::Number(_)
 			| Scalar::Str(_)
 			| Scalar::Duration(_)
 			| Scalar::Datetime(_)
@@ -459,6 +468,21 @@ pub(super) fn stored_numbers(value: ValueRef<'_>, out: &mut Vec<Number>) -> anyh
 			Kind::Int => element.as_int()?.map(Number::Int),
 			Kind::Float => element.as_float()?.map(Number::Float),
 			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => {
+				if let Value::Number(n) = element.decode()? {
+					Some(n)
+				} else {
+					None
+				}
+			}
 			Kind::None
 			| Kind::Null
 			| Kind::Bool
@@ -527,6 +551,21 @@ fn flatten_stored(
 			Kind::Int => element.as_int()?.map(Number::Int),
 			Kind::Float => element.as_float()?.map(Number::Float),
 			Kind::Decimal => element.as_decimal()?.map(Number::Decimal),
+			Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
+			| Kind::U64
+			| Kind::F16
+			| Kind::F32 => {
+				if let Value::Number(n) = element.decode()? {
+					Some(n)
+				} else {
+					None
+				}
+			}
 			Kind::Array => match element.as_array()? {
 				Some(inner) => {
 					if !flatten_stored(inner, out, limit)? {
@@ -578,6 +617,21 @@ pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> 
 		Kind::Int => Scalar::Number(Number::Int(some(v.as_int()?)?)),
 		Kind::Float => Scalar::Number(Number::Float(some(v.as_float()?)?)),
 		Kind::Decimal => Scalar::Number(Number::Decimal(some(v.as_decimal()?)?)),
+		Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32 => {
+			if let Value::Number(n) = v.decode()? {
+				Scalar::Number(n)
+			} else {
+				return Err(anyhow::anyhow!("a stored value whose kind and tag disagree"));
+			}
+		}
 		Kind::String => Scalar::Str(some(v.as_str()?)?),
 		Kind::Duration => Scalar::Duration(Duration(some(v.as_duration()?)?)),
 		Kind::Datetime => Scalar::Datetime(Datetime(some(v.as_datetime()?)?)),
@@ -662,10 +716,19 @@ impl RowReader for StoredRow<'_> {
 			Some(None) => Ok(None),
 			None => Ok(match self.field(name)? {
 				Scalar::Number(Number::Int(v)) => Some(v),
+				Scalar::Number(Number::I8(v)) => Some(v as i64),
+				Scalar::Number(Number::U8(v)) => Some(v as i64),
+				Scalar::Number(Number::I16(v)) => Some(v as i64),
+				Scalar::Number(Number::U16(v)) => Some(v as i64),
+				Scalar::Number(Number::I32(v)) => Some(v as i64),
+				Scalar::Number(Number::U32(v)) => Some(v as i64),
+				Scalar::Number(Number::U64(v)) => i64::try_from(v).ok(),
+				Scalar::Number(
+					Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+				) => None,
 				Scalar::None
 				| Scalar::Null
 				| Scalar::Bool(_)
-				| Scalar::Number(_)
 				| Scalar::Str(_)
 				| Scalar::Duration(_)
 				| Scalar::Datetime(_)
@@ -991,10 +1054,22 @@ mod tests {
 				}
 				let int = match stored {
 					Value::Number(crate::val::Number::Int(i)) => Some(*i),
-					Value::None
+					Value::Number(crate::val::Number::I8(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::U8(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::I16(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::U16(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::I32(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::U32(i)) => Some(*i as i64),
+					Value::Number(crate::val::Number::U64(i)) => i64::try_from(*i).ok(),
+					Value::Number(
+						crate::val::Number::F16(_)
+						| crate::val::Number::F32(_)
+						| crate::val::Number::Float(_)
+						| crate::val::Number::Decimal(_),
+					)
+					| Value::None
 					| Value::Null
 					| Value::Bool(_)
-					| Value::Number(_)
 					| Value::String(_)
 					| Value::Duration(_)
 					| Value::Datetime(_)

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Result, ensure};
-use surrealdb_types::{Number, ToSql, Value};
+use surrealdb_types::{Number, ToSql, Value, Wide};
 
 use crate::codec::{read_lenenc_bytes, write_lenenc_str};
 use crate::constants::*;
@@ -14,9 +14,11 @@ pub fn infer_mysql_type(value: &Value) -> u8 {
 	match value {
 		Value::None | Value::Null => MYSQL_TYPE_NULL,
 		Value::Bool(_) => MYSQL_TYPE_TINY,
-		Value::Number(Number::Int(_)) => MYSQL_TYPE_LONGLONG,
-		Value::Number(Number::Float(_)) => MYSQL_TYPE_DOUBLE,
-		Value::Number(Number::Decimal(_)) => MYSQL_TYPE_NEWDECIMAL,
+		Value::Number(n) => match n.wide() {
+			Wide::Int(_) => MYSQL_TYPE_LONGLONG,
+			Wide::Float(_) => MYSQL_TYPE_DOUBLE,
+			Wide::Decimal(_) => MYSQL_TYPE_NEWDECIMAL,
+		},
 		Value::String(_) => MYSQL_TYPE_VAR_STRING,
 		Value::Datetime(_) => MYSQL_TYPE_DATETIME,
 		Value::Duration(_) => MYSQL_TYPE_TIME,
@@ -175,9 +177,17 @@ pub fn value_to_text(value: &Value) -> Option<String> {
 			}
 			.to_string(),
 		),
-		Value::Number(Number::Int(i)) => Some(i.to_string()),
-		Value::Number(Number::Float(f)) => Some(f.to_string()),
-		Value::Number(Number::Decimal(d)) => Some(d.to_string()),
+		Value::Number(n) => {
+			if let Number::F32(f) = n {
+				Some(f.to_string())
+			} else {
+				match n.wide() {
+					Wide::Int(i) => Some(i.to_string()),
+					Wide::Float(f) => Some(f.to_string()),
+					Wide::Decimal(d) => Some(d.to_string()),
+				}
+			}
+		}
 		Value::String(s) => Some(s.clone()),
 		Value::Datetime(dt) => Some(datetime_text(dt)),
 		Value::Duration(d) => Some(time_text(d)),
@@ -460,10 +470,12 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		MYSQL_TYPE_TINY => {
 			let byte = match val {
 				Value::Bool(b) => u8::from(*b),
-				Value::Number(Number::Int(i)) => *i as u8,
+				Value::Number(n) => match n.wide() {
+					Wide::Int(i) => i as u8,
+					Wide::Float(_) | Wide::Decimal(_) => 0u8,
+				},
 				Value::None
 				| Value::Null
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)
@@ -483,11 +495,13 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_SHORT | MYSQL_TYPE_YEAR => {
 			let n = match val {
-				Value::Number(Number::Int(i)) => *i as i16,
+				Value::Number(n) => match n.wide() {
+					Wide::Int(i) => i as i16,
+					Wide::Float(_) | Wide::Decimal(_) => 0i16,
+				},
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)
@@ -507,11 +521,13 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_LONG | MYSQL_TYPE_INT24 => {
 			let n = match val {
-				Value::Number(Number::Int(i)) => *i as i32,
+				Value::Number(n) => match n.wide() {
+					Wide::Int(i) => i as i32,
+					Wide::Float(_) | Wide::Decimal(_) => 0i32,
+				},
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)
@@ -531,11 +547,13 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_LONGLONG => {
 			let n = match val {
-				Value::Number(Number::Int(i)) => *i,
+				Value::Number(n) => match n.wide() {
+					Wide::Int(i) => i,
+					Wide::Float(_) | Wide::Decimal(_) => 0i64,
+				},
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)
@@ -555,11 +573,13 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_FLOAT => {
 			let f = match val {
-				Value::Number(Number::Float(fl)) => *fl as f32,
+				Value::Number(n) => match n.wide() {
+					Wide::Float(fl) => fl as f32,
+					Wide::Int(_) | Wide::Decimal(_) => 0.0f32,
+				},
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)
@@ -579,11 +599,13 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_DOUBLE => {
 			let f = match val {
-				Value::Number(Number::Float(fl)) => *fl,
+				Value::Number(n) => match n.wide() {
+					Wide::Float(fl) => fl,
+					Wide::Int(_) | Wide::Decimal(_) => 0.0f64,
+				},
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
-				| Value::Number(_)
 				| Value::String(_)
 				| Value::Bytes(_)
 				| Value::Duration(_)

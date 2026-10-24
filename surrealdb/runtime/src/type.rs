@@ -50,12 +50,56 @@ pub fn float((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<f64>()?.into())
 }
 
+pub fn f16((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::F16(val.cast_to::<surrealdb_types::f16>()?)))
+}
+
+pub fn f32((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::F32(val.cast_to::<f32>()?)))
+}
+
+pub fn f64(args: (Value,)) -> Result<Value> {
+	float(args)
+}
+
 pub fn geometry((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Geometry>()?.into())
 }
 
 pub fn int((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<i64>()?.into())
+}
+
+pub fn i8((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::I8(val.cast_to::<i8>()?)))
+}
+
+pub fn u8((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::U8(val.cast_to::<u8>()?)))
+}
+
+pub fn i16((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::I16(val.cast_to::<i16>()?)))
+}
+
+pub fn u16((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::U16(val.cast_to::<u16>()?)))
+}
+
+pub fn i32((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::I32(val.cast_to::<i32>()?)))
+}
+
+pub fn u32((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::U32(val.cast_to::<u32>()?)))
+}
+
+pub fn i64(args: (Value,)) -> Result<Value> {
+	int(args)
+}
+
+pub fn u64((val,): (Value,)) -> Result<Value> {
+	Ok(Value::Number(Number::U64(val.cast_to::<u64>()?)))
 }
 
 pub fn number((val,): (Value,)) -> Result<Value> {
@@ -149,8 +193,22 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 				Value::Object(v) => v.into(),
 				Value::Number(v) => match v {
 					Number::Int(x) => x.into(),
+					Number::I8(x) => i64::from(x).into(),
+					Number::U8(x) => i64::from(x).into(),
+					Number::I16(x) => i64::from(x).into(),
+					Number::U16(x) => i64::from(x).into(),
+					Number::I32(x) => i64::from(x).into(),
+					Number::U32(x) => i64::from(x).into(),
+					Number::U64(x) => match i64::try_from(x) {
+						Ok(i) => RecordIdKey::Number(i),
+						Err(_) => bail!(ExprError::IdInvalid {
+							value: v.to_string(),
+						}),
+					},
 					// Safety: float -> string conversion cannot contain a null byte.
 					Number::Float(x) => x.to_string().into(),
+					Number::F16(x) => x.to_string().into(),
+					Number::F32(x) => x.to_string().into(),
 					// Safety: decimal -> string conversion cannot contain a null byte.
 					Number::Decimal(x) => x.to_string().into(),
 				},
@@ -208,7 +266,7 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 
 pub mod is {
 	use anyhow::Result;
-	use surrealdb_expr::val::{Geometry, TableName, Value};
+	use surrealdb_expr::val::{Geometry, Number, TableName, Value};
 
 	use crate::args::Optional;
 
@@ -248,12 +306,56 @@ pub mod is {
 		Ok(arg.is_float().into())
 	}
 
+	pub fn f16((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::F16(_))).into())
+	}
+
+	pub fn f32((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::F32(_))).into())
+	}
+
+	pub fn f64((arg,): (Value,)) -> Result<Value> {
+		float((arg,))
+	}
+
 	pub fn geometry((arg,): (Value,)) -> Result<Value> {
 		Ok(arg.is_geometry().into())
 	}
 
 	pub fn int((arg,): (Value,)) -> Result<Value> {
 		Ok(arg.is_int().into())
+	}
+
+	pub fn i8((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::I8(_))).into())
+	}
+
+	pub fn u8((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::U8(_))).into())
+	}
+
+	pub fn i16((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::I16(_))).into())
+	}
+
+	pub fn u16((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::U16(_))).into())
+	}
+
+	pub fn i32((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::I32(_))).into())
+	}
+
+	pub fn u32((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::U32(_))).into())
+	}
+
+	pub fn i64((arg,): (Value,)) -> Result<Value> {
+		int((arg,))
+	}
+
+	pub fn u64((arg,): (Value,)) -> Result<Value> {
+		Ok(matches!(arg, Value::Number(Number::U64(_))).into())
 	}
 
 	pub fn line((arg,): (Value,)) -> Result<Value> {
@@ -323,7 +425,7 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use surrealdb_expr::expr::Error as ExprError;
-	use surrealdb_expr::val::Value;
+	use surrealdb_expr::val::{Number, Value};
 	use surrealdb_strand::Strand;
 
 	use crate::args::Optional;
@@ -359,5 +461,20 @@ mod tests {
 		if !matches!(value, Err(_expected)) {
 			panic!("An empty record id part should result in an error");
 		}
+	}
+
+	#[test]
+	fn sized_number_types() {
+		let v = super::i8((Value::from(42),)).unwrap();
+		assert_eq!(v, Value::Number(Number::I8(42)));
+		assert_eq!(super::is::i8((v.clone(),)).unwrap(), Value::Bool(true));
+		assert_eq!(super::is::int((v.clone(),)).unwrap(), Value::Bool(false));
+
+		let v_u64 = super::u64((Value::from(100),)).unwrap();
+		assert_eq!(v_u64, Value::Number(Number::U64(100)));
+		assert_eq!(super::is::u64((v_u64,)).unwrap(), Value::Bool(true));
+
+		let r = super::record(("person".into(), Optional(Some(v)))).unwrap();
+		assert_eq!(r, Value::RecordId(super::RecordId::new("person".into(), 42i64)));
 	}
 }

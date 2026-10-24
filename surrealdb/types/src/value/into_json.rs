@@ -27,10 +27,36 @@ impl Value {
 			Value::Bool(boolean) => JsonValue::Bool(boolean),
 			Value::Number(number) => match number {
 				Number::Int(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::I8(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::U8(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::I16(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::U16(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::I32(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::U32(int) => JsonValue::Number(JsonNumber::from(int)),
+				Number::U64(int) => JsonValue::Number(JsonNumber::from(int)),
 				Number::Float(float) => {
 					// This is replicating serde_json::to_string default behavior.
 					// f64 will convert to null if it is either NaN of infinity.
 					if let Some(number) = JsonNumber::from_f64(float) {
+						JsonValue::Number(number)
+					} else {
+						JsonValue::Null
+					}
+				}
+				Number::F16(float) => {
+					if let Some(number) = JsonNumber::from_f64(float.to_f64()) {
+						JsonValue::Number(number)
+					} else {
+						JsonValue::Null
+					}
+				}
+				Number::F32(float) => {
+					if let Some(number) = float
+						.is_finite()
+						.then(|| float.to_string().parse::<f64>().ok())
+						.flatten()
+						.and_then(JsonNumber::from_f64)
+					{
 						JsonValue::Number(number)
 					} else {
 						JsonValue::Null
@@ -93,7 +119,28 @@ impl Value {
 			Value::Bool(true) => out.extend_from_slice(b"true"),
 			Value::Bool(false) => out.extend_from_slice(b"false"),
 			Value::Number(Number::Int(int)) => put(out, int),
+			Value::Number(Number::I8(int)) => put(out, int),
+			Value::Number(Number::U8(int)) => put(out, int),
+			Value::Number(Number::I16(int)) => put(out, int),
+			Value::Number(Number::U16(int)) => put(out, int),
+			Value::Number(Number::I32(int)) => put(out, int),
+			Value::Number(Number::U32(int)) => put(out, int),
+			Value::Number(Number::U64(int)) => put(out, int),
 			Value::Number(Number::Float(float)) => {
+				if float.is_finite() {
+					put(out, float)
+				} else {
+					out.extend_from_slice(b"null")
+				}
+			}
+			Value::Number(Number::F16(float)) => {
+				if float.is_finite() {
+					put(out, &float.to_f64())
+				} else {
+					out.extend_from_slice(b"null")
+				}
+			}
+			Value::Number(Number::F32(float)) => {
 				if float.is_finite() {
 					put(out, float)
 				} else {
@@ -229,6 +276,10 @@ mod write_json_tests {
 		let mut obj = BTreeMap::new();
 		obj.insert("b\"q\u{1}".to_owned(), Value::Number(Number::Float(1.5)));
 		obj.insert("a".to_owned(), Value::Number(Number::Int(-7)));
+		obj.insert("i8".to_owned(), Value::Number(Number::I8(-8)));
+		obj.insert("u64".to_owned(), Value::Number(Number::U64(u64::MAX)));
+		obj.insert("f16".to_owned(), Value::Number(Number::F16(half::f16::from_f32(1.5))));
+		obj.insert("f32".to_owned(), Value::Number(Number::F32(0.1)));
 		obj.insert("n".to_owned(), Value::Number(Number::Float(f64::NAN)));
 		obj.insert("f".to_owned(), Value::Number(Number::Float(1e300)));
 		obj.insert("z".to_owned(), Value::Number(Number::Float(-0.0)));
@@ -257,6 +308,10 @@ mod write_json_tests {
 		assert_eq!(
 			String::from_utf8(out).unwrap(),
 			serde_json::to_string(&v.into_json_value()).unwrap()
+		);
+		assert_eq!(
+			serde_json::to_string(&Value::Number(Number::F32(0.1)).into_json_value()).unwrap(),
+			"0.1"
 		);
 	}
 }

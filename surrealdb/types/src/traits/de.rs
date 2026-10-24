@@ -41,6 +41,15 @@ where
 {
 	match n {
 		Number::Int(v) => visitor.visit_i64(*v),
+		Number::I8(v) => visitor.visit_i8(*v),
+		Number::U8(v) => visitor.visit_u8(*v),
+		Number::I16(v) => visitor.visit_i16(*v),
+		Number::U16(v) => visitor.visit_u16(*v),
+		Number::I32(v) => visitor.visit_i32(*v),
+		Number::U32(v) => visitor.visit_u32(*v),
+		Number::U64(v) => visitor.visit_u64(*v),
+		Number::F16(v) => visitor.visit_f32(f32::from(*v)),
+		Number::F32(v) => visitor.visit_f32(*v),
 		Number::Float(v) => visitor.visit_f64(*v),
 		Number::Decimal(decimal) => {
 			// A whole Decimal is offered as the narrowest of `u64`, `i64`, `u128` and

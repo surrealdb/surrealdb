@@ -1809,9 +1809,7 @@ mod tests {
 		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
 		use crate::exec::ir::iface::region_kind::ClauseRole;
-		use crate::exec::ir::iface::statements::{
-			OutputShape, WriteFlags, WriteForm,
-		};
+		use crate::exec::ir::iface::statements::{OutputShape, WriteFlags, WriteForm};
 		use crate::exec::ir::iface::types::TypeKnowledge;
 		use crate::exec::ir::logical::ops::{
 			WriteAttrs, WriteBody, WriteDerived, WriteGates, WriteImage, WriteStored,

@@ -242,8 +242,19 @@ pub(super) fn json_string(out: &mut Vec<u8>, s: &str) -> anyhow::Result<()> {
 fn number(out: &mut Vec<u8>, n: Number, scratch: &mut String) -> anyhow::Result<()> {
 	match n {
 		Number::Int(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::I8(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::U8(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::I16(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::U16(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::I32(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::U32(v) => serde_json::to_writer(&mut *out, &v)?,
+		Number::U64(v) => serde_json::to_writer(&mut *out, &v)?,
 		Number::Float(v) if v.is_finite() => serde_json::to_writer(&mut *out, &v)?,
 		Number::Float(_) => out.extend_from_slice(b"null"),
+		Number::F16(v) if v.is_finite() => serde_json::to_writer(&mut *out, &v.to_f64())?,
+		Number::F16(_) => out.extend_from_slice(b"null"),
+		Number::F32(v) if v.is_finite() => serde_json::to_writer(&mut *out, &v)?,
+		Number::F32(_) => out.extend_from_slice(b"null"),
 		Number::Decimal(d) => {
 			use std::fmt::Write as _;
 			scratch.clear();

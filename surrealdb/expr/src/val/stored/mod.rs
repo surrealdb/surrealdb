@@ -52,6 +52,15 @@
 //!                   holds every element
 //! 21-25  reserved   arrays of future u8, u16, u32, f16 and bf16 value kinds
 //! 26-28  MAP        schema-only container of entries `number, item`, offset width 1, 2, 4
+//! 29     I8         1 byte, two's complement
+//! 2A     U8         1 byte
+//! 2B     I16        1..=2 bytes, little-endian two's complement, the fewest that hold it
+//! 2C     U16        1..=2 bytes, little-endian, the fewest that hold it
+//! 2D     I32        1..=4 bytes, as I16
+//! 2E     U32        1..=4 bytes, as U16
+//! 2F     U64        1..=8 bytes, as U16
+//! 30     F16        2 bytes, IEEE binary16 bits
+//! 31     F32        4 bytes, IEEE binary32 bits
 //! 80-FE  INT        the integer tag − 0x80, 0 to 126
 //! others reserved
 //!
@@ -165,9 +174,26 @@ pub mod tag {
 	pub const I32_ARRAY: u8 = 0x1F;
 	/// A non-empty array of integers held as little-endian `i64`s.
 	pub const I64_ARRAY: u8 = 0x20;
-	/// The schema-only map tag for offset width 1; +1 for width 2, +2 for width 4. Tags `0x29`
-	/// and up are unassigned.
+	/// The schema-only map tag for offset width 1; +1 for width 2, +2 for width 4.
 	pub const MAP: u8 = 0x26;
+	/// A signed 8-bit integer.
+	pub const I8: u8 = 0x29;
+	/// An unsigned 8-bit integer.
+	pub const U8: u8 = 0x2A;
+	/// A signed 16-bit integer.
+	pub const I16: u8 = 0x2B;
+	/// An unsigned 16-bit integer.
+	pub const U16: u8 = 0x2C;
+	/// A signed 32-bit integer.
+	pub const I32: u8 = 0x2D;
+	/// An unsigned 32-bit integer.
+	pub const U32: u8 = 0x2E;
+	/// An unsigned 64-bit integer.
+	pub const U64: u8 = 0x2F;
+	/// An IEEE 754 half-precision float.
+	pub const F16: u8 = 0x30;
+	/// An IEEE 754 single-precision float.
+	pub const F32: u8 = 0x31;
 	/// The tag of the integer 0; the integer `n` in `0..=SMALL_INT_MAX` is
 	/// `SMALL_INT + n`.
 	pub const SMALL_INT: u8 = 0x80;
@@ -299,4 +325,30 @@ pub(crate) fn read_int(p: &[u8]) -> Result<i64, Error> {
 #[inline(always)]
 pub(crate) const fn int_width(v: i64) -> usize {
 	((65 - (v ^ (v >> 63)).leading_zeros()) as usize).div_ceil(8)
+}
+
+/// A little-endian unsigned integer of 1 to 8 bytes.
+///
+/// Accepts any width from 1 to 8 bytes, not only the fewest that hold the
+/// value.
+#[inline(always)]
+pub(crate) fn read_uint(p: &[u8]) -> Result<u64, Error> {
+	let wrong = Error::Malformed("an unsigned integer of the wrong width");
+	if p.is_empty() || p.len() > 8 {
+		return Err(wrong);
+	}
+	let mut b = [0u8; 8];
+	b[..p.len()].copy_from_slice(p);
+	Ok(u64::from_le_bytes(b))
+}
+
+/// The number of bytes [`read_uint`] needs for `v`.
+#[inline(always)]
+pub(crate) const fn uint_width(v: u64) -> usize {
+	let bits = 64 - v.leading_zeros() as usize;
+	if bits == 0 {
+		1
+	} else {
+		bits.div_ceil(8)
+	}
 }

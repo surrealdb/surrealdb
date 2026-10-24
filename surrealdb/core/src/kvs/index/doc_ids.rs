@@ -108,6 +108,21 @@ pub(super) fn number_variants(n: Number) -> Vec<Number> {
 			None => return vec![n],
 		},
 		Number::Decimal(d) => d,
+		Number::I8(i) => Decimal::from(i),
+		Number::U8(u) => Decimal::from(u),
+		Number::I16(i) => Decimal::from(i),
+		Number::U16(u) => Decimal::from(u),
+		Number::I32(i) => Decimal::from(i),
+		Number::U32(u) => Decimal::from(u),
+		Number::U64(u) => Decimal::from(u),
+		Number::F16(f) => match Decimal::from_f64(f.to_f64()) {
+			Some(d) => d,
+			None => return vec![n],
+		},
+		Number::F32(f) => match Decimal::from_f32(f) {
+			Some(d) => d,
+			None => return vec![n],
+		},
 	};
 	let mut out = Vec::with_capacity(3);
 	if exact.is_integer()

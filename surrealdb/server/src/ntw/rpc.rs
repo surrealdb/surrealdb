@@ -164,9 +164,9 @@ async fn post_handler(
 
 	let rec_limit = db.parser_config().max_object_parsing_depth as usize;
 	// Get the input format from the Content-Type header
-	let fmt: Format = (&content_type).into();
+	let in_fmt: Format = (&content_type).into();
 	// Check that the input format is a valid format
-	if matches!(fmt, Format::Unsupported) {
+	if matches!(in_fmt, Format::Unsupported) {
 		return Err(NetError::InvalidType.into());
 	}
 	// Get the output format from the Accept header
@@ -174,25 +174,28 @@ async fn post_handler(
 	// Check that the input format and the output format match. A shaped response answers a
 	// CBOR request: shaped is CBOR with result rows as shaped blocks.
 	if let Some(out) = out
-		&& fmt != out
-		&& !(fmt == Format::Cbor && out == Format::Shaped)
-	{
+		&& in_fmt != out
+		&& !matches!(
+			(in_fmt, out),
+			(Format::Cbor, Format::Cbor2 | Format::Shaped)
+				| (Format::Cbor2, Format::Cbor2 | Format::Shaped)
+		) {
 		return Err(NetError::InvalidType.into());
 	}
-	let fmt = out.unwrap_or(fmt);
+	let out_fmt = out.unwrap_or(in_fmt);
 	// Check to see available memory
 	if crate::ntw::memory_guard::admit(RefusalSite::Http).is_some() {
 		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
-	let req = fmt.req_http(body, rec_limit)?;
+	let req = in_fmt.req_http(body, rec_limit)?;
 	// Echo back the request id and client-supplied session id (if any) so
 	// HTTP responses match the WebSocket convention.
 	let req_id = req.id;
 	let client_session: Option<Uuid> = req.session_id.map(Into::into);
-	// The shared transport answers this request in `fmt`.
+	// The shared transport answers this request in `out_fmt`.
 	let res = surrealdb_core::rpc::with_response_format(
-		fmt.row_format(),
+		out_fmt.row_format(),
 		rpc_state.http.handle(
 			session,
 			req.txn.map(Into::into),
@@ -206,5 +209,5 @@ async fn post_handler(
 		Ok(result) => DbResponse::success(req_id, client_session, result),
 		Err(err) => DbResponse::failure(req_id, client_session, err),
 	};
-	Ok(fmt.res_http(db_response)?)
+	Ok(out_fmt.res_http(db_response)?)
 }

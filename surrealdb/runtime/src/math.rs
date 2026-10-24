@@ -98,9 +98,8 @@ pub fn ceil((arg,): (Number,)) -> Result<Value> {
 /// `arg` held within `min..=max`. Fails when the bounds are not ordered, and a NaN bound is
 /// ordered with nothing.
 pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value> {
-	let is_nan = |bound: &Number| matches!(bound, Number::Float(f) if f.is_nan());
 	ensure!(
-		min <= max && !is_nan(&min) && !is_nan(&max),
+		min <= max && !min.is_nan() && !max.is_nan(),
 		Error::InvalidFunctionArguments {
 			name: "math::clamp".to_string(),
 			message: "Lowerbound for clamp must be smaller than the upperbound".to_string(),
@@ -238,7 +237,9 @@ pub fn pow((arg, pow): (Number, Number)) -> Result<Value> {
 }
 
 pub async fn product_walk((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(fuel::try_fold(array, Number::Int(1), |product, n| product.try_mul(n)).await?.into())
+	Ok(fuel::try_fold(array, Number::Int(1), |product, n| product.try_mul(n.widened()))
+		.await?
+		.into())
 }
 
 pub fn rad2deg((arg,): (Number,)) -> Result<Value> {
@@ -283,7 +284,7 @@ pub async fn stddev_walk((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub async fn sum_walk((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(fuel::try_fold(array, Number::Int(0), |sum, n| sum.try_add(n)).await?.into())
+	Ok(fuel::try_fold(array, Number::Int(0), |sum, n| sum.try_add(n.widened())).await?.into())
 }
 pub fn tan((arg,): (Number,)) -> Result<Value> {
 	Ok(arg.tan().into())

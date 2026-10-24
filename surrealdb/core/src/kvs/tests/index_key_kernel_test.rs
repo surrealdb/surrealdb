@@ -586,6 +586,15 @@ async fn a_range_crossing_special_numbers_agrees(unique: bool) {
 				Number::Int(i) => *i == 0,
 				Number::Float(f) => *f == 0.0,
 				Number::Decimal(d) => d.is_zero(),
+				Number::I8(i) => *i == 0,
+				Number::U8(u) => *u == 0,
+				Number::I16(i) => *i == 0,
+				Number::U16(u) => *u == 0,
+				Number::I32(i) => *i == 0,
+				Number::U32(u) => *u == 0,
+				Number::U64(u) => *u == 0,
+				Number::F16(f) => f.to_bits() == 0 || f.to_bits() == 0x8000,
+				Number::F32(f) => *f == 0.0,
 			}
 		} else {
 			false

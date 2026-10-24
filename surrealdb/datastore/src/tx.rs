@@ -4966,15 +4966,9 @@ impl Transaction {
 				k.strip_prefix(prefix.as_slice()),
 				None | Some(
 					b"!ia"
-						| b"!ir"
-						| b"!it"
-						| b"!iv"
-						| b"!tv"
-						| b"!hs"
-						| b"!hg"
-						| b"!hY"
-						| b"!ds"
-						| b"!dg"
+						| b"!ir" | b"!it" | b"!iv"
+						| b"!tv" | b"!hs" | b"!hg"
+						| b"!hY" | b"!ds" | b"!dg"
 						| b"!dY"
 				)
 			)
@@ -5003,6 +4997,7 @@ impl Transaction {
 		tb: &TableName,
 	) -> Result<Vec<RecordIdKey>> {
 		let raw = self.written_records.lock();
+		#[expect(clippy::mutable_key_type)]
 		let mut seen = HashSet::new();
 		let mut out = Vec::new();
 		for encoded in raw.iter() {

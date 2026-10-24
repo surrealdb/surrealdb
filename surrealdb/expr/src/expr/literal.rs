@@ -48,6 +48,15 @@ pub enum Literal {
 	Uuid(Uuid),
 	Geometry(Geometry),
 	File(File),
+	I8(i8),
+	U8(u8),
+	I16(i16),
+	U16(u16),
+	I32(i32),
+	U32(u32),
+	U64(u64),
+	F16(half::f16),
+	F32(f32),
 }
 
 impl Literal {
@@ -67,7 +76,16 @@ impl Literal {
 			| Literal::Datetime(_)
 			| Literal::Uuid(_)
 			| Literal::File(_)
-			| Literal::Geometry(_) => true,
+			| Literal::Geometry(_)
+			| Literal::I8(_)
+			| Literal::U8(_)
+			| Literal::I16(_)
+			| Literal::U16(_)
+			| Literal::I32(_)
+			| Literal::U32(_)
+			| Literal::U64(_)
+			| Literal::F16(_)
+			| Literal::F32(_) => true,
 			Literal::RecordId(record_id_lit) => record_id_lit.is_static(),
 			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Set(exprs) => exprs.iter().all(|x| x.is_static()),
@@ -94,7 +112,16 @@ impl Literal {
 			| Literal::Datetime(_)
 			| Literal::Uuid(_)
 			| Literal::File(_)
-			| Literal::Geometry(_) => true,
+			| Literal::Geometry(_)
+			| Literal::I8(_)
+			| Literal::U8(_)
+			| Literal::I16(_)
+			| Literal::U16(_)
+			| Literal::I32(_)
+			| Literal::U32(_)
+			| Literal::U64(_)
+			| Literal::F16(_)
+			| Literal::F32(_) => true,
 			Literal::RecordId(record_id_lit) => record_id_lit.read_only(),
 			Literal::Array(exprs) => exprs.iter().all(|x| x.read_only()),
 			Literal::Set(exprs) => exprs.iter().all(|x| x.read_only()),
@@ -140,6 +167,15 @@ impl Literal {
 			Literal::Uuid(x) => Value::Uuid(*x),
 			Literal::Geometry(x) => Value::Geometry(x.clone()),
 			Literal::File(x) => Value::File(x.clone()),
+			Literal::I8(x) => Value::Number(crate::val::Number::I8(*x)),
+			Literal::U8(x) => Value::Number(crate::val::Number::U8(*x)),
+			Literal::I16(x) => Value::Number(crate::val::Number::I16(*x)),
+			Literal::U16(x) => Value::Number(crate::val::Number::U16(*x)),
+			Literal::I32(x) => Value::Number(crate::val::Number::I32(*x)),
+			Literal::U32(x) => Value::Number(crate::val::Number::U32(*x)),
+			Literal::U64(x) => Value::Number(crate::val::Number::U64(*x)),
+			Literal::F16(x) => Value::Number(crate::val::Number::F16(*x)),
+			Literal::F32(x) => Value::Number(crate::val::Number::F32(*x)),
 			// Only the key forms that are values in their own right. A
 			// generated key is allocated during evaluation, and the compound
 			// keys hold expressions.
@@ -209,6 +245,15 @@ impl PartialEq for Literal {
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
+			(Literal::I8(a), Literal::I8(b)) => a == b,
+			(Literal::U8(a), Literal::U8(b)) => a == b,
+			(Literal::I16(a), Literal::I16(b)) => a == b,
+			(Literal::U16(a), Literal::U16(b)) => a == b,
+			(Literal::I32(a), Literal::I32(b)) => a == b,
+			(Literal::U32(a), Literal::U32(b)) => a == b,
+			(Literal::U64(a), Literal::U64(b)) => a == b,
+			(Literal::F16(a), Literal::F16(b)) => a.to_bits() == b.to_bits(),
+			(Literal::F32(a), Literal::F32(b)) => a.to_bits() == b.to_bits(),
 			// Every variant must appear above. This arm is for mismatched
 			// variants only: a variant missing from the list falls through to
 			// it and compares unequal to itself, which breaks the `Eq` asserted
@@ -243,6 +288,15 @@ impl Hash for Literal {
 			Literal::Uuid(x) => x.hash(state),
 			Literal::Geometry(x) => x.hash(state),
 			Literal::File(x) => x.hash(state),
+			Literal::I8(x) => x.hash(state),
+			Literal::U8(x) => x.hash(state),
+			Literal::I16(x) => x.hash(state),
+			Literal::U16(x) => x.hash(state),
+			Literal::I32(x) => x.hash(state),
+			Literal::U32(x) => x.hash(state),
+			Literal::U64(x) => x.hash(state),
+			Literal::F16(x) => x.to_bits().hash(state),
+			Literal::F32(x) => x.to_bits().hash(state),
 		}
 	}
 }
@@ -262,6 +316,36 @@ impl ToSql for Literal {
 			}
 			Literal::Float(float) => write_sql!(f, fmt, "{}", Float(*float)),
 			Literal::Integer(x) => f.push_str(&x.to_string()),
+			Literal::I8(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i8");
+			}
+			Literal::U8(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u8");
+			}
+			Literal::I16(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i16");
+			}
+			Literal::U16(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u16");
+			}
+			Literal::I32(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("i32");
+			}
+			Literal::U32(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u32");
+			}
+			Literal::U64(v) => {
+				f.push_str(&v.to_string());
+				f.push_str("u64");
+			}
+			Literal::F16(v) => surrealdb_types::number::fmt_f16_sql(*v, f),
+			Literal::F32(v) => surrealdb_types::number::fmt_f32_sql(*v, f),
 			Literal::Decimal(d) => d.fmt_sql(f, fmt),
 			Literal::String(strand) => write_sql!(f, fmt, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write_sql!(f, fmt, "b\"{}\"", hex::encode_upper(&bytes.0)),
@@ -440,7 +524,16 @@ mod equality_tests {
 				| Literal::Datetime(_)
 				| Literal::Uuid(_)
 				| Literal::Geometry(_)
-				| Literal::File(_) => {}
+				| Literal::File(_)
+				| Literal::I8(_)
+				| Literal::U8(_)
+				| Literal::I16(_)
+				| Literal::U16(_)
+				| Literal::I32(_)
+				| Literal::U32(_)
+				| Literal::U64(_)
+				| Literal::F16(_)
+				| Literal::F32(_) => {}
 			}
 		}
 		let samples = [
@@ -467,6 +560,17 @@ mod equality_tests {
 			Literal::Uuid(crate::val::Uuid::nil()),
 			Literal::Geometry(crate::val::Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 			Literal::File(crate::val::File::new("b".to_owned(), "p".to_owned())),
+			Literal::I8(1),
+			Literal::U8(1),
+			Literal::I16(1),
+			Literal::U16(1),
+			Literal::I32(1),
+			Literal::U32(1),
+			Literal::U64(1),
+			Literal::F16(half::f16::from_f32(1.5)),
+			Literal::F16(half::f16::from_f32(-0.0)),
+			Literal::F32(1.5),
+			Literal::F32(-0.0),
 		];
 		for s in samples {
 			assert_eq!(s, s.clone(), "{s:?} must equal itself");
@@ -479,6 +583,8 @@ mod equality_tests {
 	#[test]
 	fn signed_zero_is_not_equal_to_zero() {
 		assert_ne!(Literal::Float(-0.0), Literal::Float(0.0));
+		assert_ne!(Literal::F16(half::f16::from_f32(-0.0)), Literal::F16(half::f16::from_f32(0.0)));
+		assert_ne!(Literal::F32(-0.0), Literal::F32(0.0));
 	}
 }
 

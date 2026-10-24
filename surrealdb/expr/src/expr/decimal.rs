@@ -840,6 +840,15 @@ mod tests {
 			Ok(Number::Int(v)) => format!("i:{v}"),
 			Ok(Number::Float(v)) => format!("f:{:x}", v.to_bits()),
 			Ok(Number::Decimal(d)) => format!("d:{}:{}", d.mantissa(), d.scale()),
+			Ok(Number::I8(v)) => format!("i8:{v}"),
+			Ok(Number::U8(v)) => format!("u8:{v}"),
+			Ok(Number::I16(v)) => format!("i16:{v}"),
+			Ok(Number::U16(v)) => format!("u16:{v}"),
+			Ok(Number::I32(v)) => format!("i32:{v}"),
+			Ok(Number::U32(v)) => format!("u32:{v}"),
+			Ok(Number::U64(v)) => format!("u64:{v}"),
+			Ok(Number::F16(v)) => format!("f16:{:x}", v.to_bits()),
+			Ok(Number::F32(v)) => format!("f32:{:x}", v.to_bits()),
 			Err(_) => "err".to_string(),
 		}
 	}
@@ -860,6 +869,15 @@ mod tests {
 				Number::Int(_) => NumberKind::Int,
 				Number::Float(_) => NumberKind::Float,
 				Number::Decimal(_) => NumberKind::Decimal,
+				Number::I8(_) => NumberKind::I8,
+				Number::U8(_) => NumberKind::U8,
+				Number::I16(_) => NumberKind::I16,
+				Number::U16(_) => NumberKind::U16,
+				Number::I32(_) => NumberKind::I32,
+				Number::U32(_) => NumberKind::U32,
+				Number::U64(_) => NumberKind::U64,
+				Number::F16(_) => NumberKind::F16,
+				Number::F32(_) => NumberKind::F32,
 			};
 			assert_eq!(
 				repr(&Number::from_decimal_buf_kind(&c.key, kind)),

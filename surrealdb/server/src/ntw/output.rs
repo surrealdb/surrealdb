@@ -12,6 +12,7 @@ pub enum Output {
 	Text(String),
 	Json(Vec<u8>),
 	Cbor(Vec<u8>),
+	Cbor2(Vec<u8>),
 	Flatbuffers(Vec<u8>),
 	/// CBOR whose result rows are shaped blocks.
 	Shaped(Vec<u8>),
@@ -77,6 +78,9 @@ impl IntoResponse for Output {
 			}
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
+			}
+			Output::Cbor2(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor2))], v).into_response()
 			}
 			Output::Shaped(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationShaped))], v).into_response()

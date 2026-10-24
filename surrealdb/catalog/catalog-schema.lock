@@ -325,6 +325,7 @@ type PhysicalKind enum since=4.0 reserved=[]
   7 U16 unit since=4.0
   8 U32 unit since=4.0
   9 U64 unit since=4.0
+  10 F16 unit since=4.0
   12 F32 unit since=4.0
   13 F64 unit since=4.0
   14 Decimal16 unit since=4.0
@@ -515,6 +516,10 @@ type StoredIndexDefinition struct since=4.0 reserved=[]
   12 prepare_remove bool critical since=4.0 absent=required
   14 format_version int:u16 critical since=4.0 absent=required
   16 nulls_not_distinct bool critical since=4.0 absent=default(bool::default)
+type StoredMaterialize struct since=4.0 reserved=[]
+  2 table string critical since=4.0 absent=required
+  4 field text:idiom critical since=4.0 absent=required
+  6 filter option<text:expr> critical since=4.0 absent=none
 type StoredMlModelDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 hash string critical since=4.0 absent=required
@@ -546,6 +551,7 @@ type StoredPermissions struct since=4.0 reserved=[]
   8 delete StoredPermission critical since=4.0 absent=required
 type StoredReference struct since=4.0 reserved=[]
   2 on_delete StoredReferenceDeleteStrategy critical since=4.0 absent=required
+  4 materialize option<StoredMaterialize> critical since=4.0 absent=none
 type StoredReferenceDeleteStrategy enum since=4.0 reserved=[]
   1 Reject unit since=4.0
   2 Ignore unit since=4.0

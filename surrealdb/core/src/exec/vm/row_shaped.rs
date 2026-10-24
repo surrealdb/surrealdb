@@ -33,7 +33,16 @@ impl<'v> CoreShaped<'v> {
 			Value::None => Leaf::None,
 			Value::Null => Leaf::Null,
 			Value::Bool(v) => Leaf::Bool(*v),
+			Value::Number(Number::I8(v)) => Leaf::I8(*v),
+			Value::Number(Number::U8(v)) => Leaf::U8(*v),
+			Value::Number(Number::I16(v)) => Leaf::I16(*v),
+			Value::Number(Number::U16(v)) => Leaf::U16(*v),
+			Value::Number(Number::I32(v)) => Leaf::I32(*v),
+			Value::Number(Number::U32(v)) => Leaf::U32(*v),
 			Value::Number(Number::Int(v)) => Leaf::Int(*v),
+			Value::Number(Number::U64(v)) => Leaf::U64(*v),
+			Value::Number(Number::F16(v)) => Leaf::F16(*v),
+			Value::Number(Number::F32(v)) => Leaf::F32(*v),
 			Value::Number(Number::Float(v)) => Leaf::Float(*v),
 			Value::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
 			Value::String(v) => Leaf::String(v.as_str()),
@@ -74,7 +83,16 @@ impl<'v> ShapedValue<'v> for CoreShaped<'v> {
 				Scalar::None => Leaf::None,
 				Scalar::Null => Leaf::Null,
 				Scalar::Bool(v) => Leaf::Bool(*v),
+				Scalar::Number(Number::I8(v)) => Leaf::I8(*v),
+				Scalar::Number(Number::U8(v)) => Leaf::U8(*v),
+				Scalar::Number(Number::I16(v)) => Leaf::I16(*v),
+				Scalar::Number(Number::U16(v)) => Leaf::U16(*v),
+				Scalar::Number(Number::I32(v)) => Leaf::I32(*v),
+				Scalar::Number(Number::U32(v)) => Leaf::U32(*v),
 				Scalar::Number(Number::Int(v)) => Leaf::Int(*v),
+				Scalar::Number(Number::U64(v)) => Leaf::U64(*v),
+				Scalar::Number(Number::F16(v)) => Leaf::F16(*v),
+				Scalar::Number(Number::F32(v)) => Leaf::F32(*v),
 				Scalar::Number(Number::Float(v)) => Leaf::Float(*v),
 				Scalar::Number(Number::Decimal(v)) => Leaf::Decimal(*v),
 				Scalar::Str(v) => Leaf::String(v),
@@ -132,16 +150,18 @@ impl<'v> ShapedValue<'v> for CoreShaped<'v> {
 
 	fn write_dynamic(self, out: &mut Vec<u8>) -> Result<(), ShapedError> {
 		match self {
-			CoreShaped::Value(value) => encode_value(out, value, 1).map_err(|e| dynamic_error(&e)),
+			CoreShaped::Value(value) => {
+				encode_value(out, value, 1, true).map_err(|e| dynamic_error(&e))
+			}
 			CoreShaped::Scalar(scalar) => {
-				encode_scalar(out, None, scalar, 1).map_err(|e| dynamic_error(&e))
+				encode_scalar(out, None, scalar, 1, true).map_err(|e| dynamic_error(&e))
 			}
 			CoreShaped::Fields(fields) => {
 				cbor_head(out, 5, fields.len() as u64);
 				for (key, value) in fields {
 					cbor_head(out, 3, key.len() as u64);
 					out.extend_from_slice(key.as_bytes());
-					encode_scalar(out, None, value, 2).map_err(|e| dynamic_error(&e))?;
+					encode_scalar(out, None, value, 2, true).map_err(|e| dynamic_error(&e))?;
 				}
 				Ok(())
 			}
@@ -283,6 +303,15 @@ pub(super) fn write_packed(
 						| FieldRef::Int(_)
 						| FieldRef::Float(_)
 						| FieldRef::Decimal(_)
+						| FieldRef::I8(_)
+						| FieldRef::I16(_)
+						| FieldRef::I32(_)
+						| FieldRef::U8(_)
+						| FieldRef::U16(_)
+						| FieldRef::U32(_)
+						| FieldRef::U64(_)
+						| FieldRef::F16(_)
+						| FieldRef::F32(_)
 						| FieldRef::Uuid(_)
 						| FieldRef::Point(..)
 						| FieldRef::String(_)
@@ -406,13 +435,55 @@ fn native_array(
 	for item in array.iter() {
 		let item = item?;
 		match element {
-			Wire::Int => match item.as_int()? {
-				Some(v) => out.extend_from_slice(&v.to_le_bytes()),
-				None => anyhow::bail!("an array element of another kind"),
+			Wire::Int => match (item.kind(), item.as_int()?) {
+				(StoredKind::Int, Some(v)) => out.extend_from_slice(&v.to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
 			},
-			Wire::Float => match item.as_float()? {
-				Some(v) => out.extend_from_slice(&v.to_bits().to_le_bytes()),
-				None => anyhow::bail!("an array element of another kind"),
+			Wire::I8 => match (item.kind(), item.as_int()?) {
+				(StoredKind::I8, Some(v)) => out.extend_from_slice(&(v as i8).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::I16 => match (item.kind(), item.as_int()?) {
+				(StoredKind::I16, Some(v)) => out.extend_from_slice(&(v as i16).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::I32 => match (item.kind(), item.as_int()?) {
+				(StoredKind::I32, Some(v)) => out.extend_from_slice(&(v as i32).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::U8 => match (item.kind(), item.as_int()?) {
+				(StoredKind::U8, Some(v)) => out.extend_from_slice(&(v as u8).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::U16 => match (item.kind(), item.as_int()?) {
+				(StoredKind::U16, Some(v)) => out.extend_from_slice(&(v as u16).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::U32 => match (item.kind(), item.as_int()?) {
+				(StoredKind::U32, Some(v)) => out.extend_from_slice(&(v as u32).to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::U64 => match (item.kind(), item.decode()?) {
+				(StoredKind::U64, Value::Number(Number::U64(v))) => {
+					out.extend_from_slice(&v.to_le_bytes())
+				}
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::Float => match (item.kind(), item.as_float()?) {
+				(StoredKind::Float, Some(v)) => out.extend_from_slice(&v.to_bits().to_le_bytes()),
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::F16 => match (item.kind(), item.decode()?) {
+				(StoredKind::F16, Value::Number(Number::F16(v))) => {
+					out.extend_from_slice(&v.to_bits().to_le_bytes())
+				}
+				_ => anyhow::bail!("an array element of another kind"),
+			},
+			Wire::F32 => match (item.kind(), item.decode()?) {
+				(StoredKind::F32, Value::Number(Number::F32(v))) => {
+					out.extend_from_slice(&v.to_bits().to_le_bytes())
+				}
+				_ => anyhow::bail!("an array element of another kind"),
 			},
 			Wire::Bool => match item.as_bool() {
 				Some(v) => out.push(u8::from(v)),
@@ -444,14 +515,6 @@ fn native_array(
 			| Wire::Object
 			| Wire::Bit
 			| Wire::Array
-			| Wire::I8
-			| Wire::I16
-			| Wire::I32
-			| Wire::U8
-			| Wire::U16
-			| Wire::U32
-			| Wire::U64
-			| Wire::F32
 			| Wire::DatetimeNs
 			| Wire::DurationNs => anyhow::bail!("an array element kind not written natively"),
 		}
@@ -490,6 +553,7 @@ fn remainder(
 			scratch: &mut *scratch,
 			id_text: &mut *id_text,
 			json: None,
+			v2: true,
 		}
 		.stored_value(value, depth + 2)?;
 	}
@@ -513,12 +577,22 @@ fn dynamic(
 				scratch,
 				id_text,
 				json: None,
+				v2: true,
 			}
 			.stored_value(value, depth);
 		}
+		FieldRef::I8(v) => Scalar::Number(Number::I8(v)),
+		FieldRef::I16(v) => Scalar::Number(Number::I16(v)),
+		FieldRef::I32(v) => Scalar::Number(Number::I32(v)),
 		FieldRef::Int(v) => Scalar::Number(Number::Int(v)),
-		FieldRef::Decimal(v) => Scalar::Number(Number::Decimal(v)),
+		FieldRef::U8(v) => Scalar::Number(Number::U8(v)),
+		FieldRef::U16(v) => Scalar::Number(Number::U16(v)),
+		FieldRef::U32(v) => Scalar::Number(Number::U32(v)),
+		FieldRef::U64(v) => Scalar::Number(Number::U64(v)),
+		FieldRef::F16(v) => Scalar::Number(Number::F16(v)),
+		FieldRef::F32(v) => Scalar::Number(Number::F32(v)),
 		FieldRef::Float(v) => Scalar::Number(Number::Float(v)),
+		FieldRef::Decimal(v) => Scalar::Number(Number::Decimal(v)),
 		FieldRef::Bool(v) => Scalar::Bool(v),
 		FieldRef::String(v) => Scalar::Str(v),
 		FieldRef::Bytes(v) => Scalar::Bytes(v),
@@ -540,7 +614,7 @@ fn dynamic(
 			anyhow::bail!("a dynamic column handed a field with no value")
 		}
 	};
-	encode_scalar(out, None, &scalar, depth)
+	encode_scalar(out, None, &scalar, depth, true)
 }
 
 /// Writes a record link column's slice for the record id of `table` and the stored key `key`.
@@ -560,6 +634,15 @@ fn write_link(
 		| StoredKind::Bool
 		| StoredKind::Float
 		| StoredKind::Decimal
+		| StoredKind::I8
+		| StoredKind::U8
+		| StoredKind::I16
+		| StoredKind::U16
+		| StoredKind::I32
+		| StoredKind::U32
+		| StoredKind::U64
+		| StoredKind::F16
+		| StoredKind::F32
 		| StoredKind::Duration
 		| StoredKind::Datetime
 		| StoredKind::Uuid
@@ -586,7 +669,7 @@ fn write_link(
 				key,
 			});
 			out.push(3);
-			encode_value(out, &whole, depth)
+			encode_value(out, &whole, depth, true)
 		}
 	}
 }
@@ -656,6 +739,7 @@ pub(super) fn write_document(
 		scratch: &mut *stored.scratch,
 		id_text: &mut *stored.id_text,
 		json: None,
+		v2: true,
 	}
 	.stored_object_rest(object, 1)?;
 	w.close_var()?;
@@ -690,7 +774,7 @@ fn write_key_id(
 			key: decoded.id.as_ref().clone(),
 		});
 		out.push(3);
-		return encode_value(out, &whole, 2);
+		return encode_value(out, &whole, 2, true);
 	}
 	out.push(match id {
 		KeyIdRef::Number(_) => 0,

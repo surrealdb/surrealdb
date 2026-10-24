@@ -5,9 +5,7 @@
 use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport};
 use super::reg::lo_passes;
 use super::rehome::copy_tree_bound;
-use super::tests_support::{
-	Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens,
-};
+use super::tests_support::{Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens};
 use super::unswitch::{UNSWITCH_MAX_OPS, Unswitch};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -439,12 +437,10 @@ async fn unswitch_and_rehome_copy_operands_read_inside_nested_regions() {
 		let (_, leaf) = create(rw, at, literal(1), &[], 1);
 		let (_, cond) = create(rw, at, literal(1), &[], 1);
 		let (_, cond_truth) = create(rw, at, OpKind::Expr(ExprOp::Truthy), &[cond[0]], 1);
-		let (expr_if, chosen) =
-			create(rw, at, OpKind::Expr(ExprOp::If), &[cond_truth[0]], 1);
+		let (expr_if, chosen) = create(rw, at, OpKind::Expr(ExprOp::If), &[cond_truth[0]], 1);
 		for _ in 0..2 {
-			let (_, arm) = rw
-				.create_region(expr_if, RegionKind::ValueIf, &[])
-				.expect("the arm is created");
+			let (_, arm) =
+				rw.create_region(expr_if, RegionKind::ValueIf, &[]).expect("the arm is created");
 			create(rw, InsertPoint::End(arm), yield_op(), &[leaf[0]], 0);
 		}
 		let (_, truth) = create(rw, at, OpKind::Expr(ExprOp::Truthy), &[chosen[0]], 1);

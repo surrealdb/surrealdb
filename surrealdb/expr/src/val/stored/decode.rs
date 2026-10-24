@@ -7,7 +7,7 @@ use surrealdb_strand::Strand;
 
 use super::read::{Container, Kind};
 use super::tag::*;
-use super::{DEPTH_LIMIT, Error, geometry, read_int, split_clen, utf8};
+use super::{DEPTH_LIMIT, Error, geometry, read_int, read_uint, split_clen, utf8};
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Number, Object, Range, RecordId, RecordIdKey,
 	RecordIdKeyRange, Regex, Set, TableName, Uuid, Value,
@@ -306,6 +306,54 @@ pub(super) fn parts<M: Mode>(t: u8, p: &[u8], depth: usize) -> Result<M::Out<Val
 			let d = decimal(p)?;
 			M::make(|| Value::Number(Number::Decimal(d)))
 		}
+		I8 => {
+			let [b] = fixed(p)?;
+			M::make(|| Value::Number(Number::I8(b as i8)))
+		}
+		U8 => {
+			let [b] = fixed(p)?;
+			M::make(|| Value::Number(Number::U8(b)))
+		}
+		I16 => {
+			if p.is_empty() || p.len() > 2 {
+				return Err(Error::Malformed("an i16 of the wrong width"));
+			}
+			let i = read_int(p)? as i16;
+			M::make(|| Value::Number(Number::I16(i)))
+		}
+		U16 => {
+			if p.is_empty() || p.len() > 2 {
+				return Err(Error::Malformed("a u16 of the wrong width"));
+			}
+			let u = read_uint(p)? as u16;
+			M::make(|| Value::Number(Number::U16(u)))
+		}
+		I32 => {
+			if p.is_empty() || p.len() > 4 {
+				return Err(Error::Malformed("an i32 of the wrong width"));
+			}
+			let i = read_int(p)? as i32;
+			M::make(|| Value::Number(Number::I32(i)))
+		}
+		U32 => {
+			if p.is_empty() || p.len() > 4 {
+				return Err(Error::Malformed("a u32 of the wrong width"));
+			}
+			let u = read_uint(p)? as u32;
+			M::make(|| Value::Number(Number::U32(u)))
+		}
+		U64 => {
+			let u = read_uint(p)?;
+			M::make(|| Value::Number(Number::U64(u)))
+		}
+		F16 => {
+			let b = fixed(p)?;
+			M::make(|| Value::Number(Number::F16(half::f16::from_bits(u16::from_le_bytes(b)))))
+		}
+		F32 => {
+			let b = fixed(p)?;
+			M::make(|| Value::Number(Number::F32(f32::from_le_bytes(b))))
+		}
 		STRING => {
 			let s = utf8(p)?;
 			M::make(|| Value::String(Strand::new(s)))
@@ -395,7 +443,7 @@ pub(crate) mod strict {
 
 	use super::{empty, fixed};
 	use crate::val::stored::tag::*;
-	use crate::val::stored::{Error, read_int, utf8};
+	use crate::val::stored::{Error, read_int, read_uint, utf8};
 
 	/// NONE, whose payload is empty.
 	#[inline(always)]
@@ -476,6 +524,119 @@ pub(crate) mod strict {
 	pub(crate) fn datetime(t: u8, p: &[u8]) -> Result<Option<DateTime<Utc>>, Error> {
 		match t {
 			DATETIME => super::datetime(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// An I8 of 1 byte.
+	#[inline(always)]
+	pub(crate) fn i8(t: u8, p: &[u8]) -> Result<Option<i8>, Error> {
+		match t {
+			I8 => {
+				let [b] = fixed(p)?;
+				Ok(Some(b as i8))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// A U8 of 1 byte.
+	#[inline(always)]
+	pub(crate) fn u8(t: u8, p: &[u8]) -> Result<Option<u8>, Error> {
+		match t {
+			U8 => {
+				let [b] = fixed(p)?;
+				Ok(Some(b))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// An I16 of 1 to 2 bytes.
+	#[inline(always)]
+	pub(crate) fn i16(t: u8, p: &[u8]) -> Result<Option<i16>, Error> {
+		match t {
+			I16 => {
+				if p.is_empty() || p.len() > 2 {
+					return Err(Error::Malformed("an i16 of the wrong width"));
+				}
+				read_int(p).map(|i| Some(i as i16))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// A U16 of 1 to 2 bytes.
+	#[inline(always)]
+	pub(crate) fn u16(t: u8, p: &[u8]) -> Result<Option<u16>, Error> {
+		match t {
+			U16 => {
+				if p.is_empty() || p.len() > 2 {
+					return Err(Error::Malformed("a u16 of the wrong width"));
+				}
+				read_uint(p).map(|u| Some(u as u16))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// An I32 of 1 to 4 bytes.
+	#[inline(always)]
+	pub(crate) fn i32(t: u8, p: &[u8]) -> Result<Option<i32>, Error> {
+		match t {
+			I32 => {
+				if p.is_empty() || p.len() > 4 {
+					return Err(Error::Malformed("an i32 of the wrong width"));
+				}
+				read_int(p).map(|i| Some(i as i32))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// A U32 of 1 to 4 bytes.
+	#[inline(always)]
+	pub(crate) fn u32(t: u8, p: &[u8]) -> Result<Option<u32>, Error> {
+		match t {
+			U32 => {
+				if p.is_empty() || p.len() > 4 {
+					return Err(Error::Malformed("a u32 of the wrong width"));
+				}
+				read_uint(p).map(|u| Some(u as u32))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// A U64 of 1 to 8 bytes.
+	#[inline(always)]
+	pub(crate) fn u64(t: u8, p: &[u8]) -> Result<Option<u64>, Error> {
+		match t {
+			U64 => read_uint(p).map(Some),
+			_ => Ok(None),
+		}
+	}
+
+	/// An F16 of 2 bytes.
+	#[inline(always)]
+	pub(crate) fn f16(t: u8, p: &[u8]) -> Result<Option<half::f16>, Error> {
+		match t {
+			F16 => {
+				let b = fixed(p)?;
+				Ok(Some(half::f16::from_bits(u16::from_le_bytes(b))))
+			}
+			_ => Ok(None),
+		}
+	}
+
+	/// An F32 of 4 bytes.
+	#[inline(always)]
+	pub(crate) fn f32(t: u8, p: &[u8]) -> Result<Option<f32>, Error> {
+		match t {
+			F32 => {
+				let b = fixed(p)?;
+				Ok(Some(f32::from_le_bytes(b)))
+			}
 			_ => Ok(None),
 		}
 	}

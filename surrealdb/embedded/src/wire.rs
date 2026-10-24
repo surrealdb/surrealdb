@@ -24,6 +24,7 @@ use surrealdb_types::Value;
 pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Value> {
 	match format {
 		Format::Cbor => cbor::decode_request(bytes, recursion_limit),
+		Format::Cbor2 => cbor::decode_request_v2(bytes, recursion_limit),
 		// Flatbuffers is length-prefixed and self-describing, so nesting is
 		// bounded by the buffer rather than by a configured depth.
 		Format::Flatbuffers => surrealdb_types::decode(bytes),
@@ -37,6 +38,7 @@ pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Va
 pub fn encode(format: Format, value: Value) -> Result<Vec<u8>> {
 	match format {
 		Format::Cbor => cbor::encode(value),
+		Format::Cbor2 => cbor::encode_v2(value),
 		Format::Flatbuffers => surrealdb_types::encode(&value),
 		Format::Json => json::encode(value),
 		Format::Shaped | Format::Unsupported => bail!("unsupported wire format"),
@@ -49,6 +51,10 @@ pub fn encode_into(format: Format, value: &Value, out: &mut Vec<u8>) -> Result<(
 	match format {
 		Format::Cbor => {
 			out.extend_from_slice(&cbor::encode(value.clone())?);
+			Ok(())
+		}
+		Format::Cbor2 => {
+			out.extend_from_slice(&cbor::encode_v2(value.clone())?);
 			Ok(())
 		}
 		Format::Json => {

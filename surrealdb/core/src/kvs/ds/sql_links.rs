@@ -92,7 +92,16 @@ fn link_target(kind: &Kind) -> Option<&str> {
 		| Kind::Decimal
 		| Kind::Duration
 		| Kind::Float
+		| Kind::F16
+		| Kind::F32
 		| Kind::Int
+		| Kind::I8
+		| Kind::I16
+		| Kind::I32
+		| Kind::U8
+		| Kind::U16
+		| Kind::U32
+		| Kind::U64
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -166,7 +175,16 @@ fn scalar_type(kind: &Kind) -> surrealdb_sqlplan::SqlType {
 		Kind::Decimal => SqlType::Numeric,
 		Kind::Duration => SqlType::Interval,
 		Kind::Float => SqlType::Float8,
+		Kind::F16 => SqlType::Float4,
+		Kind::F32 => SqlType::Float4,
 		Kind::Int => SqlType::Int8,
+		Kind::I8 => SqlType::Int2,
+		Kind::I16 => SqlType::Int2,
+		Kind::I32 => SqlType::Int4,
+		Kind::U8 => SqlType::Int2,
+		Kind::U16 => SqlType::Int4,
+		Kind::U32 => SqlType::Int8,
+		Kind::U64 => SqlType::Numeric,
 		Kind::String => SqlType::Text,
 		Kind::Uuid => SqlType::Uuid,
 		Kind::Object => SqlType::Json,

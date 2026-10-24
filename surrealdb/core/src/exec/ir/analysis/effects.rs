@@ -998,9 +998,7 @@ mod tests {
 			let rebound = of_with(&ir, &mut facts, &cx, invoke_op);
 			assert!(rebound.set.contains(EffectSet::OPAQUE_BODY));
 			assert!(
-				summary_with(&ir, &mut facts, &cx, invoke_op)
-					.set
-					.contains(EffectSet::OPAQUE_BODY)
+				summary_with(&ir, &mut facts, &cx, invoke_op).set.contains(EffectSet::OPAQUE_BODY)
 			);
 		}
 

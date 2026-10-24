@@ -25,7 +25,7 @@ use surrealdb_expr::val::{
 	Array, Number, RecordId, RecordIdKey, RecordIdKeyRange, Strand, TableName, Value,
 	check_value_depth,
 };
-use surrealdb_types::Decimal;
+use surrealdb_types::{Decimal, f16};
 
 mod stored_value;
 
@@ -362,9 +362,18 @@ fn stat(g: &mut Gen<'_, '_>) -> AggregationStat {
 }
 
 fn number(g: &mut Gen<'_, '_>) -> Number {
-	match g.below(3) {
+	match g.below(12) {
 		0 => Number::Int(g.int()),
-		1 => Number::Float(g.float()),
+		1 => Number::I8(g.bits() as i8),
+		2 => Number::U8(g.bits() as u8),
+		3 => Number::I16(g.bits() as i16),
+		4 => Number::U16(g.bits() as u16),
+		5 => Number::I32(g.bits() as i32),
+		6 => Number::U32(g.bits() as u32),
+		7 => Number::U64(g.bits()),
+		8 => Number::F16(f16::from_bits(g.bits() as u16)),
+		9 => Number::F32(f32::from_bits(g.bits() as u32)),
+		10 => Number::Float(g.float()),
 		_ => Number::Decimal(g.decimal()),
 	}
 }

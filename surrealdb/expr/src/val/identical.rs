@@ -84,11 +84,19 @@ pub fn same_object_except(a: &Object, b: &Object, skip: &str) -> bool {
 
 /// Two numbers of one kind that are the same under that kind's identity.
 fn same_number(a: &Number, b: &Number) -> bool {
-	match (a, b) {
-		(Number::Int(x), Number::Int(y)) => x == y,
-		(Number::Float(x), Number::Float(y)) => x.to_bits() == y.to_bits(),
-		(Number::Decimal(x), Number::Decimal(y)) => x.serialize() == y.serialize(),
-		_ => false,
+	match a {
+		Number::Int(x) => matches!(b, Number::Int(y) if x == y),
+		Number::Float(x) => matches!(b, Number::Float(y) if x.to_bits() == y.to_bits()),
+		Number::Decimal(x) => matches!(b, Number::Decimal(y) if x.serialize() == y.serialize()),
+		Number::I8(x) => matches!(b, Number::I8(y) if x == y),
+		Number::U8(x) => matches!(b, Number::U8(y) if x == y),
+		Number::I16(x) => matches!(b, Number::I16(y) if x == y),
+		Number::U16(x) => matches!(b, Number::U16(y) if x == y),
+		Number::I32(x) => matches!(b, Number::I32(y) if x == y),
+		Number::U32(x) => matches!(b, Number::U32(y) if x == y),
+		Number::U64(x) => matches!(b, Number::U64(y) if x == y),
+		Number::F16(x) => matches!(b, Number::F16(y) if x.to_bits() == y.to_bits()),
+		Number::F32(x) => matches!(b, Number::F32(y) if x.to_bits() == y.to_bits()),
 	}
 }
 

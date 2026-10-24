@@ -488,3 +488,47 @@ fn the_edge_and_full_codecs_index_every_type_alike() {
 		assert_eq!(full, edge);
 	}
 }
+
+/// The VM codec writes and reads every `Number` variant identically to its
+/// `revision` implementation, including multi-byte varint payloads for sized
+/// integers and `f16`.
+#[test]
+fn vm_value_codec_matches_revision_encoding_for_all_number_variants() {
+	use crate::val::{Number, Value};
+
+	let numbers = [
+		Number::Int(-123_456_789),
+		Number::Float(1234.5678),
+		Number::Decimal(rust_decimal::Decimal::new(987654321, 5)),
+		Number::I8(-42),
+		Number::I8(i8::MIN),
+		Number::U8(200),
+		Number::U8(u8::MAX),
+		Number::I16(-300),
+		Number::I16(i16::MIN),
+		Number::U16(1_000),
+		Number::U16(u16::MAX),
+		Number::I32(-100_000),
+		Number::I32(i32::MIN),
+		Number::U32(100_000),
+		Number::U32(u32::MAX),
+		Number::U64(1_000_000_000_000),
+		Number::U64(u64::MAX),
+		Number::F16(surrealdb_types::f16::from_f32(1.5)),
+		Number::F16(surrealdb_types::f16::from_f32(-1024.0)),
+		Number::F32(2.75),
+	];
+	for n in numbers {
+		let val = Value::Number(n);
+		let rust = revision::to_vec(&val).unwrap();
+		let mut w = wire::Writer::default();
+		value::encode(&val, &mut w).unwrap();
+		let vm_bytes = w.into_bytes();
+		assert_eq!(vm_bytes, rust, "VM encode mismatch for {n:?}");
+
+		let mut r = wire::Reader::new(&rust);
+		let decoded = value::decode(&mut r).unwrap();
+		assert_eq!(decoded, val, "VM decode mismatch for {n:?}");
+		assert!(r.is_empty(), "trailing bytes after decoding {n:?}");
+	}
+}

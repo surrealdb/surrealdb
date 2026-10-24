@@ -410,9 +410,6 @@ mod tests {
 		let new_facts = sample_facts(EffectSet::PURE);
 		cache.insert(op, 2, key, new_facts.clone());
 		assert_eq!(cache.summary(op, 1, &key), None);
-		assert_eq!(
-			cache.last_under(op, &key).map(|held| &held.effects),
-			Some(&new_facts.effects)
-		);
+		assert_eq!(cache.last_under(op, &key).map(|held| &held.effects), Some(&new_facts.effects));
 	}
 }

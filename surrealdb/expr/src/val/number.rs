@@ -34,32 +34,289 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use anyhow::{Result, bail, ensure};
-use revision::revisioned;
+use revision::{
+	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipCheckRevisioned, SkipRevisioned,
+	WalkRevisioned,
+};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
+use surrealdb_collections::bounded;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::{IndexFormat, IndexIdFormat};
 use crate::expr::Error;
 use crate::expr::decimal::{DecimalLexEncoder, LexDecimal};
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
-#[derive(Copy, Clone, Encode, BorrowDecode)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 pub enum NumberKind {
-	Int,
-	Float,
-	Decimal,
+	Int = 0,
+	Float = 1,
+	Decimal = 2,
+	I8 = 3,
+	U8 = 4,
+	I16 = 5,
+	U16 = 6,
+	I32 = 7,
+	U32 = 8,
+	U64 = 9,
+	F16 = 10,
+	F32 = 11,
 }
 
-#[revisioned(revision = 1)]
+impl NumberKind {
+	#[must_use]
+	pub const fn to_types(self) -> surrealdb_types::NumberKind {
+		match self {
+			Self::Int => surrealdb_types::NumberKind::Int,
+			Self::Float => surrealdb_types::NumberKind::Float,
+			Self::Decimal => surrealdb_types::NumberKind::Decimal,
+			Self::I8 => surrealdb_types::NumberKind::I8,
+			Self::U8 => surrealdb_types::NumberKind::U8,
+			Self::I16 => surrealdb_types::NumberKind::I16,
+			Self::U16 => surrealdb_types::NumberKind::U16,
+			Self::I32 => surrealdb_types::NumberKind::I32,
+			Self::U32 => surrealdb_types::NumberKind::U32,
+			Self::U64 => surrealdb_types::NumberKind::U64,
+			Self::F16 => surrealdb_types::NumberKind::F16,
+			Self::F32 => surrealdb_types::NumberKind::F32,
+		}
+	}
+
+	#[must_use]
+	pub const fn from_types(k: surrealdb_types::NumberKind) -> Self {
+		match k {
+			surrealdb_types::NumberKind::Int => Self::Int,
+			surrealdb_types::NumberKind::Float => Self::Float,
+			surrealdb_types::NumberKind::Decimal => Self::Decimal,
+			surrealdb_types::NumberKind::I8 => Self::I8,
+			surrealdb_types::NumberKind::U8 => Self::U8,
+			surrealdb_types::NumberKind::I16 => Self::I16,
+			surrealdb_types::NumberKind::U16 => Self::U16,
+			surrealdb_types::NumberKind::I32 => Self::I32,
+			surrealdb_types::NumberKind::U32 => Self::U32,
+			surrealdb_types::NumberKind::U64 => Self::U64,
+			surrealdb_types::NumberKind::F16 => Self::F16,
+			surrealdb_types::NumberKind::F32 => Self::F32,
+		}
+	}
+
+	/// Result kind of a binary arithmetic operator over `self` and `other`.
+	///
+	/// Delegates to [`surrealdb_types::NumberKind::join`].
+	#[must_use]
+	pub const fn join(self, other: Self) -> Self {
+		Self::from_types(self.to_types().join(other.to_types()))
+	}
+}
+
+impl From<surrealdb_types::NumberKind> for NumberKind {
+	fn from(k: surrealdb_types::NumberKind) -> Self {
+		Self::from_types(k)
+	}
+}
+
+impl From<NumberKind> for surrealdb_types::NumberKind {
+	fn from(k: NumberKind) -> Self {
+		k.to_types()
+	}
+}
+
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(Decimal),
-	// Add new variants here
+	I8(i8),
+	U8(u8),
+	I16(i16),
+	U16(u16),
+	I32(i32),
+	U32(u32),
+	U64(u64),
+	F16(#[cfg_attr(feature = "arbitrary", arbitrary(with = arbitrary_f16))] half::f16),
+	F32(f32),
+}
+
+const _: () = assert!(std::mem::size_of::<Number>() == 24);
+
+#[cfg(feature = "arbitrary")]
+fn arbitrary_f16(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<half::f16> {
+	<u16 as arbitrary::Arbitrary>::arbitrary(u).map(half::f16::from_bits)
+}
+
+impl Revisioned for Number {
+	#[inline]
+	fn revision() -> u16 {
+		2
+	}
+}
+
+impl SerializeRevisioned for Number {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		match self {
+			Self::Int(v) => {
+				1u16.serialize_revisioned(writer)?;
+				0u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::Float(v) => {
+				1u16.serialize_revisioned(writer)?;
+				1u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::Decimal(v) => {
+				1u16.serialize_revisioned(writer)?;
+				2u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::I8(v) => {
+				2u16.serialize_revisioned(writer)?;
+				3u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::U8(v) => {
+				2u16.serialize_revisioned(writer)?;
+				4u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::I16(v) => {
+				2u16.serialize_revisioned(writer)?;
+				5u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::U16(v) => {
+				2u16.serialize_revisioned(writer)?;
+				6u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::I32(v) => {
+				2u16.serialize_revisioned(writer)?;
+				7u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::U32(v) => {
+				2u16.serialize_revisioned(writer)?;
+				8u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::U64(v) => {
+				2u16.serialize_revisioned(writer)?;
+				9u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+			Self::F16(v) => {
+				2u16.serialize_revisioned(writer)?;
+				10u32.serialize_revisioned(writer)?;
+				v.to_bits().serialize_revisioned(writer)
+			}
+			Self::F32(v) => {
+				2u16.serialize_revisioned(writer)?;
+				11u32.serialize_revisioned(writer)?;
+				v.serialize_revisioned(writer)
+			}
+		}
+	}
+}
+
+impl DeserializeRevisioned for Number {
+	fn deserialize_revisioned<R: std::io::Read>(
+		reader: &mut R,
+	) -> std::result::Result<Self, revision::Error> {
+		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let variant = u32::deserialize_revisioned(reader)?;
+		match (rev, variant) {
+			(1, 0) | (2, 0) => Ok(Self::Int(i64::deserialize_revisioned(reader)?)),
+			(1, 1) | (2, 1) => Ok(Self::Float(f64::deserialize_revisioned(reader)?)),
+			(1, 2) | (2, 2) => Ok(Self::Decimal(Decimal::deserialize_revisioned(reader)?)),
+			(2, 3) => Ok(Self::I8(i8::deserialize_revisioned(reader)?)),
+			(2, 4) => Ok(Self::U8(u8::deserialize_revisioned(reader)?)),
+			(2, 5) => Ok(Self::I16(i16::deserialize_revisioned(reader)?)),
+			(2, 6) => Ok(Self::U16(u16::deserialize_revisioned(reader)?)),
+			(2, 7) => Ok(Self::I32(i32::deserialize_revisioned(reader)?)),
+			(2, 8) => Ok(Self::U32(u32::deserialize_revisioned(reader)?)),
+			(2, 9) => Ok(Self::U64(u64::deserialize_revisioned(reader)?)),
+			(2, 10) => Ok(Self::F16(half::f16::from_bits(u16::deserialize_revisioned(reader)?))),
+			(2, 11) => Ok(Self::F32(f32::deserialize_revisioned(reader)?)),
+			_ => Err(revision::Error::Deserialize(format!(
+				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
+			))),
+		}
+	}
+}
+
+impl SkipRevisioned for Number {
+	fn skip_revisioned<R: std::io::Read>(
+		reader: &mut R,
+	) -> std::result::Result<(), revision::Error> {
+		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let variant = u32::deserialize_revisioned(reader)?;
+		match (rev, variant) {
+			(1, 0) | (2, 0) => i64::skip_revisioned(reader),
+			(1, 1) | (2, 1) => f64::skip_revisioned(reader),
+			(1, 2) | (2, 2) => Decimal::skip_revisioned(reader),
+			(2, 3) => i8::skip_revisioned(reader),
+			(2, 4) => u8::skip_revisioned(reader),
+			(2, 5) => i16::skip_revisioned(reader),
+			(2, 6) => u16::skip_revisioned(reader),
+			(2, 7) => i32::skip_revisioned(reader),
+			(2, 8) => u32::skip_revisioned(reader),
+			(2, 9) => u64::skip_revisioned(reader),
+			(2, 10) => u16::skip_revisioned(reader),
+			(2, 11) => f32::skip_revisioned(reader),
+			_ => Err(revision::Error::Deserialize(format!(
+				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
+			))),
+		}
+	}
+
+	fn skip_revisioned_slice(
+		reader: &mut revision::SliceReader<'_>,
+	) -> std::result::Result<(), revision::Error> {
+		let rev = bounded::read_revision(reader, "Number", 2)?;
+		let variant = u32::deserialize_revisioned(reader)?;
+		match (rev, variant) {
+			(1, 0) | (2, 0) => i64::skip_revisioned_slice(reader),
+			(1, 1) | (2, 1) => f64::skip_revisioned_slice(reader),
+			(1, 2) | (2, 2) => Decimal::skip_revisioned_slice(reader),
+			(2, 3) => i8::skip_revisioned_slice(reader),
+			(2, 4) => u8::skip_revisioned_slice(reader),
+			(2, 5) => i16::skip_revisioned_slice(reader),
+			(2, 6) => u16::skip_revisioned_slice(reader),
+			(2, 7) => i32::skip_revisioned_slice(reader),
+			(2, 8) => u32::skip_revisioned_slice(reader),
+			(2, 9) => u64::skip_revisioned_slice(reader),
+			(2, 10) => u16::skip_revisioned_slice(reader),
+			(2, 11) => f32::skip_revisioned_slice(reader),
+			_ => Err(revision::Error::Deserialize(format!(
+				"Invalid enum variant `{variant}` for type `Number` at revision `{rev}`"
+			))),
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Number {
+	fn skip_check_revisioned<R: std::io::Read>(
+		reader: &mut R,
+	) -> std::result::Result<(), revision::Error> {
+		Self::skip_revisioned(reader)
+	}
+}
+
+impl WalkRevisioned for Number {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Number, R>;
+
+	#[inline]
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> std::result::Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
 }
 
 impl Default for Number {
@@ -80,33 +337,28 @@ macro_rules! from_prim_ints {
 	};
 }
 
-// Only integer types that always fit losslessly into an i64 are converted
-// infallibly here. Wider types are handled below so they store the value
-// correctly (as a Decimal when it exceeds i64) instead of truncating.
 from_prim_ints!(i8, i16, i32, i64, isize, u8, u16, u32);
 
-// `u64`/`usize` can exceed i64::MAX but always fit within Decimal's 96-bit
-// mantissa, so the conversion is lossless and infallible: store as an Int when
-// it fits, otherwise as a Decimal.
 impl From<u64> for Number {
-	fn from(i: u64) -> Self {
-		match i64::try_from(i) {
-			Ok(v) => Self::Int(v),
-			Err(_) => Self::Decimal(Decimal::from(i)),
+	fn from(v: u64) -> Self {
+		if v <= i64::MAX as u64 {
+			Self::Int(v as i64)
+		} else {
+			Self::Decimal(v.into())
 		}
 	}
 }
 
 impl From<usize> for Number {
-	fn from(i: usize) -> Self {
-		// usize is at most 64 bits wide on every supported target.
-		Self::from(i as u64)
+	fn from(v: usize) -> Self {
+		if v <= i64::MAX as usize {
+			Self::Int(v as i64)
+		} else {
+			Self::Decimal(v.into())
+		}
 	}
 }
 
-// `i128`/`u128` can exceed Decimal's range (2^96), so the conversion is
-// fallible: store as an Int when it fits in i64, otherwise as a Decimal, and
-// error rather than silently truncate when the value is too large for either.
 impl TryFrom<i128> for Number {
 	type Error = Error;
 	fn try_from(i: i128) -> Result<Self, Self::Error> {
@@ -130,6 +382,12 @@ impl TryFrom<u128> for Number {
 		} else {
 			Err(Error::TryFrom(i.to_string(), "Number"))
 		}
+	}
+}
+
+impl From<half::f16> for Number {
+	fn from(f: half::f16) -> Self {
+		Self::Float(f.to_f64())
 	}
 }
 
@@ -157,6 +415,15 @@ impl From<surrealdb_types::Number> for Number {
 			surrealdb_types::Number::Int(i) => Self::Int(i),
 			surrealdb_types::Number::Float(f) => Self::Float(f),
 			surrealdb_types::Number::Decimal(d) => Self::Decimal(d),
+			surrealdb_types::Number::I8(i) => Self::I8(i),
+			surrealdb_types::Number::U8(u) => Self::U8(u),
+			surrealdb_types::Number::I16(i) => Self::I16(i),
+			surrealdb_types::Number::U16(u) => Self::U16(u),
+			surrealdb_types::Number::I32(i) => Self::I32(i),
+			surrealdb_types::Number::U32(u) => Self::U32(u),
+			surrealdb_types::Number::U64(u) => Self::U64(u),
+			surrealdb_types::Number::F16(f) => Self::F16(f),
+			surrealdb_types::Number::F32(f) => Self::F32(f),
 		}
 	}
 }
@@ -167,6 +434,15 @@ impl From<Number> for surrealdb_types::Number {
 			Number::Int(i) => Self::Int(i),
 			Number::Float(f) => Self::Float(f),
 			Number::Decimal(d) => Self::Decimal(d),
+			Number::I8(i) => Self::I8(i),
+			Number::U8(u) => Self::U8(u),
+			Number::I16(i) => Self::I16(i),
+			Number::U16(u) => Self::U16(u),
+			Number::I32(i) => Self::I32(i),
+			Number::U32(u) => Self::U32(u),
+			Number::U64(u) => Self::U64(u),
+			Number::F16(f) => Self::F16(f),
+			Number::F32(f) => Self::F32(f),
 		}
 	}
 }
@@ -209,6 +485,42 @@ macro_rules! try_into_prim {
 							Some(v) => Ok(v),
 							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
+						Number::I8(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::U8(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::I16(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::U16(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::I32(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::U32(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::U64(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::F16(v) => match v.to_f32().$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
+						Number::F32(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
+						},
 					}
 				}
 			}
@@ -221,6 +533,13 @@ try_into_prim!(
 	u8 => to_u8, u16 => to_u16, u32 => to_u32, u64 => to_u64, u128 => to_u128,
 	f32 => to_f32, f64 => to_f64
 );
+
+impl TryFrom<Number> for half::f16 {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		value.as_f16().ok_or_else(|| Error::TryFrom(value.to_sql(), "f16"))
+	}
+}
 
 impl TryFrom<Number> for Decimal {
 	type Error = Error;
@@ -235,6 +554,21 @@ impl TryFrom<Number> for Decimal {
 				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
 			},
 			Number::Decimal(x) => Ok(x),
+			Number::I8(v) => Ok(Decimal::from(v)),
+			Number::U8(v) => Ok(Decimal::from(v)),
+			Number::I16(v) => Ok(Decimal::from(v)),
+			Number::U16(v) => Ok(Decimal::from(v)),
+			Number::I32(v) => Ok(Decimal::from(v)),
+			Number::U32(v) => Ok(Decimal::from(v)),
+			Number::U64(v) => Ok(Decimal::from(v)),
+			Number::F16(v) => match Decimal::try_from(v.to_f64()) {
+				Ok(v) => Ok(v),
+				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
+			},
+			Number::F32(v) => match Decimal::try_from(v as f64) {
+				Ok(v) => Ok(v),
+				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
+			},
 		}
 	}
 }
@@ -245,26 +579,32 @@ impl Display for Number {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => Display::fmt(v, f),
 			Number::Decimal(v) => Display::fmt(v, f),
+			Number::I8(v) => Display::fmt(v, f),
+			Number::U8(v) => Display::fmt(v, f),
+			Number::I16(v) => Display::fmt(v, f),
+			Number::U16(v) => Display::fmt(v, f),
+			Number::I32(v) => Display::fmt(v, f),
+			Number::U32(v) => Display::fmt(v, f),
+			Number::U64(v) => Display::fmt(v, f),
+			Number::F16(v) => {
+				if !v.is_finite() {
+					return Display::fmt(v, f);
+				}
+				let s = surrealdb_types::Number::F16(*v).to_sql();
+				f.write_str(s.strip_suffix("f16").unwrap_or(&s))
+			}
+			Number::F32(v) => Display::fmt(v, f),
 		}
 	}
 }
 
 impl ToSql for Number {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		match self {
-			Number::Int(v) => v.fmt_sql(f, sql_fmt),
-			Number::Float(v) => {
-				match fmt_non_finite_f64(*v) {
-					// Special case: Infinity, -Infinity or NaN
-					Some(special) => write_sql!(f, sql_fmt, "{}", special),
-					// Regular float: add f to distinguish between int and float
-					None => write_sql!(f, sql_fmt, "{v}f"),
-				}
-			}
-			Number::Decimal(v) => v.fmt_sql(f, sql_fmt),
-		}
+		surrealdb_types::Number::from(*self).fmt_sql(f, sql_fmt);
 	}
 }
+
+pub use surrealdb_types::Wide;
 
 impl Number {
 	// -----------------------------------
@@ -281,6 +621,68 @@ impl Number {
 		matches!(self, Number::Int(_))
 	}
 
+	pub fn wide(self) -> Wide {
+		match self {
+			Number::Int(v) => Wide::Int(v),
+			Number::Float(v) => Wide::Float(v),
+			Number::Decimal(v) => Wide::Decimal(v),
+			Number::I8(v) => Wide::Int(v as i64),
+			Number::U8(v) => Wide::Int(v as i64),
+			Number::I16(v) => Wide::Int(v as i64),
+			Number::U16(v) => Wide::Int(v as i64),
+			Number::I32(v) => Wide::Int(v as i64),
+			Number::U32(v) => Wide::Int(v as i64),
+			Number::U64(v) => match i64::try_from(v) {
+				Ok(i) => Wide::Int(i),
+				Err(_) => Wide::Decimal(Decimal::from(v)),
+			},
+			Number::F16(v) => Wide::Float(v.to_f64()),
+			Number::F32(v) => Wide::Float(v as f64),
+		}
+	}
+
+	pub fn widened(self) -> Number {
+		match self.wide() {
+			Wide::Int(v) => Number::Int(v),
+			Wide::Float(v) => Number::Float(v),
+			Wide::Decimal(v) => Number::Decimal(v),
+		}
+	}
+
+	pub fn number_kind(&self) -> NumberKind {
+		match self {
+			Number::Int(_) => NumberKind::Int,
+			Number::Float(_) => NumberKind::Float,
+			Number::Decimal(_) => NumberKind::Decimal,
+			Number::I8(_) => NumberKind::I8,
+			Number::U8(_) => NumberKind::U8,
+			Number::I16(_) => NumberKind::I16,
+			Number::U16(_) => NumberKind::U16,
+			Number::I32(_) => NumberKind::I32,
+			Number::U32(_) => NumberKind::U32,
+			Number::U64(_) => NumberKind::U64,
+			Number::F16(_) => NumberKind::F16,
+			Number::F32(_) => NumberKind::F32,
+		}
+	}
+
+	pub fn is_nan(&self) -> bool {
+		match self {
+			Number::Float(f) => f.is_nan(),
+			Number::F16(f) => f.is_nan(),
+			Number::F32(f) => f.is_nan(),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => false,
+		}
+	}
+
 	/// Adds `other` to a running total that must stay exact.
 	///
 	/// Two integers whose sum does not fit an `i64` are summed as a `Decimal`
@@ -291,15 +693,20 @@ impl Number {
 	/// (`math::mean`), where an intermediate total may leave `i64` range and
 	/// come back.
 	pub fn add_exact(self, other: Number) -> Result<Number> {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Ok(match v.checked_add(w) {
+		match (self.wide(), other.wide()) {
+			(Wide::Int(v), Wide::Int(w)) => Ok(match v.checked_add(w) {
 				Some(sum) => Number::Int(sum),
 				None => Number::Decimal(Decimal::from(v) + Decimal::from(w)),
 			}),
-			(Number::Decimal(d), Number::Float(f)) | (Number::Float(f), Number::Decimal(d)) => {
+			(Wide::Decimal(d), Wide::Float(f)) | (Wide::Float(f), Wide::Decimal(d)) => {
 				Ok(Number::Float(d.to_f64().unwrap_or(f64::NAN) + f))
 			}
-			(v, w) => v.try_add(w),
+			(Wide::Int(_), Wide::Float(_))
+			| (Wide::Float(_), Wide::Int(_))
+			| (Wide::Float(_), Wide::Float(_))
+			| (Wide::Int(_), Wide::Decimal(_))
+			| (Wide::Decimal(_), Wide::Int(_))
+			| (Wide::Decimal(_), Wide::Decimal(_)) => self.widened().try_add(other.widened()),
 		}
 	}
 
@@ -307,18 +714,23 @@ impl Number {
 	/// the same widening: two integers whose difference does not fit an `i64`
 	/// are subtracted as a `Decimal`, and a float makes the result a float.
 	pub fn sub_exact(self, other: Number) -> Result<Number> {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Ok(match v.checked_sub(w) {
+		match (self.wide(), other.wide()) {
+			(Wide::Int(v), Wide::Int(w)) => Ok(match v.checked_sub(w) {
 				Some(difference) => Number::Int(difference),
 				None => Number::Decimal(Decimal::from(v) - Decimal::from(w)),
 			}),
-			(Number::Decimal(d), Number::Float(f)) => {
+			(Wide::Decimal(d), Wide::Float(f)) => {
 				Ok(Number::Float(d.to_f64().unwrap_or(f64::NAN) - f))
 			}
-			(Number::Float(f), Number::Decimal(d)) => {
+			(Wide::Float(f), Wide::Decimal(d)) => {
 				Ok(Number::Float(f - d.to_f64().unwrap_or(f64::NAN)))
 			}
-			(v, w) => v.try_sub(w),
+			(Wide::Int(_), Wide::Float(_))
+			| (Wide::Float(_), Wide::Int(_))
+			| (Wide::Float(_), Wide::Float(_))
+			| (Wide::Int(_), Wide::Decimal(_))
+			| (Wide::Decimal(_), Wide::Int(_))
+			| (Wide::Decimal(_), Wide::Decimal(_)) => self.widened().try_sub(other.widened()),
 		}
 	}
 
@@ -328,17 +740,35 @@ impl Number {
 
 	pub fn is_truthy(&self) -> bool {
 		match self {
-			Number::Int(v) => v != &0,
-			Number::Float(v) => v != &0.0,
-			Number::Decimal(v) => v != &Decimal::ZERO,
+			Number::Int(v) => *v != 0,
+			Number::Float(v) => *v != 0.0,
+			Number::Decimal(v) => *v != Decimal::ZERO,
+			Number::I8(v) => *v != 0,
+			Number::U8(v) => *v != 0,
+			Number::I16(v) => *v != 0,
+			Number::U16(v) => *v != 0,
+			Number::I32(v) => *v != 0,
+			Number::U32(v) => *v != 0,
+			Number::U64(v) => *v != 0,
+			Number::F16(v) => *v != half::f16::ZERO && *v != half::f16::NEG_ZERO,
+			Number::F32(v) => *v != 0.0,
 		}
 	}
 
 	pub fn is_zero(&self) -> bool {
 		match self {
-			Number::Int(v) => v == &0,
-			Number::Float(v) => v == &0.0,
-			Number::Decimal(v) => v == &Decimal::ZERO,
+			Number::Int(v) => *v == 0,
+			Number::Float(v) => *v == 0.0,
+			Number::Decimal(v) => *v == Decimal::ZERO,
+			Number::I8(v) => *v == 0,
+			Number::U8(v) => *v == 0,
+			Number::I16(v) => *v == 0,
+			Number::U16(v) => *v == 0,
+			Number::I32(v) => *v == 0,
+			Number::U32(v) => *v == 0,
+			Number::U64(v) => *v == 0,
+			Number::F16(v) => *v == half::f16::ZERO || *v == half::f16::NEG_ZERO,
+			Number::F32(v) => *v == 0.0,
 		}
 	}
 
@@ -351,6 +781,15 @@ impl Number {
 			Number::Int(v) => v as usize,
 			Number::Float(v) => v as usize,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::I8(v) => v as usize,
+			Number::U8(v) => v as usize,
+			Number::I16(v) => v as usize,
+			Number::U16(v) => v as usize,
+			Number::I32(v) => v as usize,
+			Number::U32(v) => v as usize,
+			Number::U64(v) => v as usize,
+			Number::F16(v) => v.to_f64() as usize,
+			Number::F32(v) => v as usize,
 		}
 	}
 
@@ -359,6 +798,15 @@ impl Number {
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::I8(v) => v as i64,
+			Number::U8(v) => v as i64,
+			Number::I16(v) => v as i64,
+			Number::U16(v) => v as i64,
+			Number::I32(v) => v as i64,
+			Number::U32(v) => v as i64,
+			Number::U64(v) => v as i64,
+			Number::F16(v) => v.to_f64() as i64,
+			Number::F32(v) => v as i64,
 		}
 	}
 
@@ -367,6 +815,15 @@ impl Number {
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::I8(v) => v as f64,
+			Number::U8(v) => v as f64,
+			Number::I16(v) => v as f64,
+			Number::U16(v) => v as f64,
+			Number::I32(v) => v as f64,
+			Number::U32(v) => v as f64,
+			Number::U64(v) => v as f64,
+			Number::F16(v) => v.to_f64(),
+			Number::F32(v) => v as f64,
 		}
 	}
 
@@ -375,6 +832,15 @@ impl Number {
 			Number::Int(v) => Decimal::from(v),
 			Number::Float(v) => Decimal::try_from(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
+			Number::I8(v) => Decimal::from(v),
+			Number::U8(v) => Decimal::from(v),
+			Number::I16(v) => Decimal::from(v),
+			Number::U16(v) => Decimal::from(v),
+			Number::I32(v) => Decimal::from(v),
+			Number::U32(v) => Decimal::from(v),
+			Number::U64(v) => Decimal::from(v),
+			Number::F16(v) => Decimal::try_from(v.to_f64()).unwrap_or_default(),
+			Number::F32(v) => Decimal::try_from(v as f64).unwrap_or_default(),
 		}
 	}
 
@@ -412,6 +878,30 @@ impl Number {
 					None
 				}
 			}
+			Number::I8(v) => Some(v as i64),
+			Number::U8(v) => Some(v as i64),
+			Number::I16(v) => Some(v as i64),
+			Number::U16(v) => Some(v as i64),
+			Number::I32(v) => Some(v as i64),
+			Number::U32(v) => Some(v as i64),
+			Number::U64(v) => i64::try_from(v).ok(),
+			Number::F16(v) => {
+				let f = v.to_f32();
+				if !f.is_finite() || f.fract() != 0.0 {
+					return None;
+				}
+				Some(f as i64)
+			}
+			Number::F32(v) => {
+				if !v.is_finite() || v.fract() != 0.0 {
+					return None;
+				}
+				let f = v as f64;
+				if f < i64::MIN as f64 || f >= -(i64::MIN as f64) {
+					return None;
+				}
+				Some(v as i64)
+			}
 		}
 	}
 
@@ -421,6 +911,79 @@ impl Number {
 			Number::Int(v) => Some(v as f64),
 			Number::Float(v) => Some(v),
 			Number::Decimal(v) => f64::try_from(v).ok(),
+			Number::I8(v) => Some(v as f64),
+			Number::U8(v) => Some(v as f64),
+			Number::I16(v) => Some(v as f64),
+			Number::U16(v) => Some(v as f64),
+			Number::I32(v) => Some(v as f64),
+			Number::U32(v) => Some(v as f64),
+			Number::U64(v) => Some(v as f64),
+			Number::F16(v) => Some(v.to_f64()),
+			Number::F32(v) => Some(v as f64),
+		}
+	}
+
+	/// Convert to a `u64` only when the value represents an exact integer in `0..=u64::MAX`.
+	pub fn as_u64_lossless(self) -> Option<u64> {
+		const TWO_POW_64: f64 = f64::from_bits(0x43f0_0000_0000_0000);
+		match self {
+			Number::Int(v) => u64::try_from(v).ok(),
+			Number::Float(v) => {
+				if !v.is_finite() || v < 0.0 || v.fract() != 0.0 || v >= TWO_POW_64 {
+					return None;
+				}
+				let val = v as u64;
+				((val as f64) == v).then_some(val)
+			}
+			Number::Decimal(v) => {
+				use rust_decimal::prelude::ToPrimitive;
+				if v.fract().is_zero() {
+					v.to_u64()
+				} else {
+					None
+				}
+			}
+			Number::I8(v) => u64::try_from(v).ok(),
+			Number::U8(v) => Some(v as u64),
+			Number::I16(v) => u64::try_from(v).ok(),
+			Number::U16(v) => Some(v as u64),
+			Number::I32(v) => u64::try_from(v).ok(),
+			Number::U32(v) => Some(v as u64),
+			Number::U64(v) => Some(v),
+			Number::F16(v) => {
+				let f = v.to_f64();
+				(f.is_finite() && f >= 0.0 && f.fract() == 0.0).then_some(f as u64)
+			}
+			Number::F32(v) => {
+				let f = v as f64;
+				if !f.is_finite() || f < 0.0 || f.fract() != 0.0 || f >= TWO_POW_64 {
+					return None;
+				}
+				let val = f as u64;
+				((val as f64) == f).then_some(val)
+			}
+		}
+	}
+
+	/// Convert to an `f32`, refusing finite inputs that overflow to infinity.
+	pub fn as_f32(self) -> Option<f32> {
+		let f = self.as_float_lossless()?;
+		let res = f as f32;
+		if f.is_finite() && !res.is_finite() {
+			None
+		} else {
+			Some(res)
+		}
+	}
+
+	/// Convert to an `f16`, refusing finite inputs that overflow to infinity.
+	pub fn as_f16(self) -> Option<half::f16> {
+		let f = self.as_float_lossless()?;
+		let res = half::f16::from_f64(f);
+		if f.is_finite() && !res.is_finite() {
+			None
+		} else {
+			Some(res)
 		}
 	}
 
@@ -430,6 +993,15 @@ impl Number {
 			Number::Int(v) => Some(Decimal::from(v)),
 			Number::Float(v) => Decimal::try_from(v).ok(),
 			Number::Decimal(v) => Some(v),
+			Number::I8(v) => Some(Decimal::from(v)),
+			Number::U8(v) => Some(Decimal::from(v)),
+			Number::I16(v) => Some(Decimal::from(v)),
+			Number::U16(v) => Some(Decimal::from(v)),
+			Number::I32(v) => Some(Decimal::from(v)),
+			Number::U32(v) => Some(Decimal::from(v)),
+			Number::U64(v) => Some(Decimal::from(v)),
+			Number::F16(v) => Decimal::try_from(v.to_f64()).ok(),
+			Number::F32(v) => Decimal::try_from(v as f64).ok(),
 		}
 	}
 
@@ -458,6 +1030,27 @@ impl Number {
 					None
 				}
 			}
+			Number::I8(v) => usize::try_from(v).ok(),
+			Number::U8(v) => Some(v as usize),
+			Number::I16(v) => usize::try_from(v).ok(),
+			Number::U16(v) => Some(v as usize),
+			Number::I32(v) => usize::try_from(v).ok(),
+			Number::U32(v) => Some(v as usize),
+			Number::U64(v) => usize::try_from(v).ok(),
+			Number::F16(v) => {
+				let f = v.to_f32();
+				if !f.is_finite() || f < 0.0 || f.fract() != 0.0 {
+					return None;
+				}
+				Some(f as usize)
+			}
+			Number::F32(v) => {
+				if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
+					return None;
+				}
+				let idx = v as usize;
+				(idx as f32 == v).then_some(idx)
+			}
 		}
 	}
 
@@ -466,6 +1059,15 @@ impl Number {
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+			Number::I8(v) => v as i64,
+			Number::U8(v) => v as i64,
+			Number::I16(v) => v as i64,
+			Number::U16(v) => v as i64,
+			Number::I32(v) => v as i64,
+			Number::U32(v) => v as i64,
+			Number::U64(v) => v as i64,
+			Number::F16(v) => v.to_f64() as i64,
+			Number::F32(v) => v as i64,
 		}
 	}
 
@@ -478,6 +1080,15 @@ impl Number {
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
 			Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::I8(v) => v as f64,
+			Number::U8(v) => v as f64,
+			Number::I16(v) => v as f64,
+			Number::U16(v) => v as f64,
+			Number::I32(v) => v as f64,
+			Number::U32(v) => v as f64,
+			Number::U64(v) => v as f64,
+			Number::F16(v) => v.to_f64(),
+			Number::F32(v) => v as f64,
 		}
 	}
 
@@ -486,6 +1097,15 @@ impl Number {
 			Number::Int(v) => Decimal::from(v),
 			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
+			Number::I8(v) => Decimal::from(v),
+			Number::U8(v) => Decimal::from(v),
+			Number::I16(v) => Decimal::from(v),
+			Number::U16(v) => Decimal::from(v),
+			Number::I32(v) => Decimal::from(v),
+			Number::U32(v) => Decimal::from(v),
+			Number::U64(v) => Decimal::from(v),
+			Number::F16(v) => Decimal::from_f32(v.to_f32()).unwrap_or_default(),
+			Number::F32(v) => Decimal::from_f32(v).unwrap_or_default(),
 		}
 	}
 
@@ -522,6 +1142,18 @@ impl Number {
 			Self::Int(v) => LexDecimal::from_i64(*v),
 			Self::Float(v) => LexDecimal::from_f64(*v),
 			Self::Decimal(v) => LexDecimal::from_decimal(*v),
+			Self::I8(v) => LexDecimal::from_i64(*v as i64),
+			Self::U8(v) => LexDecimal::from_i64(*v as i64),
+			Self::I16(v) => LexDecimal::from_i64(*v as i64),
+			Self::U16(v) => LexDecimal::from_i64(*v as i64),
+			Self::I32(v) => LexDecimal::from_i64(*v as i64),
+			Self::U32(v) => LexDecimal::from_i64(*v as i64),
+			Self::U64(v) => match i64::try_from(*v) {
+				Ok(i) => LexDecimal::from_i64(i),
+				Err(_) => LexDecimal::from_decimal(Decimal::from(*v)),
+			},
+			Self::F16(v) => LexDecimal::from_f64(f64::from(*v)),
+			Self::F32(v) => LexDecimal::from_f64(*v as f64),
 		}
 	}
 
@@ -578,6 +1210,43 @@ impl Number {
 				ensure!(dec.is_finite(), format!("Invalid decimal value: {dec}"));
 				Ok(Number::Decimal(dec.to_decimal_exact()?))
 			}
+			NumberKind::I8 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::I8(i8::try_from(val)?))
+			}
+			NumberKind::U8 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::U8(u8::try_from(val)?))
+			}
+			NumberKind::I16 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::I16(i16::try_from(val)?))
+			}
+			NumberKind::U16 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::U16(u16::try_from(val)?))
+			}
+			NumberKind::I32 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::I32(i32::try_from(val)?))
+			}
+			NumberKind::U32 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let val = dec.to_i64_positional()?;
+				Ok(Number::U32(u32::try_from(val)?))
+			}
+			NumberKind::U64 => {
+				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
+				let d = dec.to_decimal_exact()?;
+				Ok(Number::U64(u64::try_from(d)?))
+			}
+			NumberKind::F16 => Ok(Number::F16(half::f16::from_f32(dec.to_f64() as f32))),
+			NumberKind::F32 => Ok(Number::F32(dec.to_f64() as f32)),
 		}
 	}
 
@@ -587,41 +1256,171 @@ impl Number {
 
 	pub fn abs(self) -> Self {
 		match self {
-			Number::Int(v) => v.abs().into(),
-			Number::Float(v) => v.abs().into(),
-			Number::Decimal(v) => v.abs().into(),
+			Number::Int(v) => Number::Int(v.abs()),
+			Number::Float(v) => Number::Float(v.abs()),
+			Number::Decimal(v) => Number::Decimal(v.abs()),
+			Number::I8(v) => Number::I8(v.abs()),
+			Number::U8(v) => Number::U8(v),
+			Number::I16(v) => Number::I16(v.abs()),
+			Number::U16(v) => Number::U16(v),
+			Number::I32(v) => Number::I32(v.abs()),
+			Number::U32(v) => Number::U32(v),
+			Number::U64(v) => Number::U64(v),
+			Number::F16(v) => Number::F16(half::f16::from_bits(v.to_bits() & 0x7fff)),
+			Number::F32(v) => Number::F32(v.abs()),
 		}
 	}
 
 	pub fn checked_abs(self) -> Option<Self> {
 		match self {
-			Number::Int(v) => v.checked_abs().map(|x| x.into()),
-			Number::Float(v) => Some(v.abs().into()),
-			Number::Decimal(v) => Some(v.abs().into()),
+			Number::Int(v) => v.checked_abs().map(Number::Int),
+			Number::Float(v) => Some(Number::Float(v.abs())),
+			Number::Decimal(v) => Some(Number::Decimal(v.abs())),
+			Number::I8(v) => v.checked_abs().map(Number::I8),
+			Number::U8(v) => Some(Number::U8(v)),
+			Number::I16(v) => v.checked_abs().map(Number::I16),
+			Number::U16(v) => Some(Number::U16(v)),
+			Number::I32(v) => v.checked_abs().map(Number::I32),
+			Number::U32(v) => Some(Number::U32(v)),
+			Number::U64(v) => Some(Number::U64(v)),
+			Number::F16(v) => Some(Number::F16(half::f16::from_bits(v.to_bits() & 0x7fff))),
+			Number::F32(v) => Some(Number::F32(v.abs())),
+		}
+	}
+
+	fn map_float_fn(self, f: impl FnOnce(f64) -> f64) -> Self {
+		match self {
+			Number::F16(v) => Number::F16(half::f16::from_f64(f(v.to_f64()))),
+			Number::F32(v) => Number::F32(f(v as f64) as f32),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => Number::Float(f(self.to_float())),
+		}
+	}
+
+	pub(crate) fn as_i128(self) -> Option<i128> {
+		match self {
+			Number::Int(v) => Some(v as i128),
+			Number::I8(v) => Some(v as i128),
+			Number::U8(v) => Some(v as i128),
+			Number::I16(v) => Some(v as i128),
+			Number::U16(v) => Some(v as i128),
+			Number::I32(v) => Some(v as i128),
+			Number::U32(v) => Some(v as i128),
+			Number::U64(v) => Some(v as i128),
+			Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_) => None,
+		}
+	}
+
+	pub(crate) fn from_i128_in_kind(v: i128, kind: NumberKind) -> Option<Self> {
+		match kind {
+			NumberKind::I8 => i8::try_from(v).ok().map(Number::I8),
+			NumberKind::U8 => u8::try_from(v).ok().map(Number::U8),
+			NumberKind::I16 => i16::try_from(v).ok().map(Number::I16),
+			NumberKind::U16 => u16::try_from(v).ok().map(Number::U16),
+			NumberKind::I32 => i32::try_from(v).ok().map(Number::I32),
+			NumberKind::U32 => u32::try_from(v).ok().map(Number::U32),
+			NumberKind::Int => i64::try_from(v).ok().map(Number::Int),
+			NumberKind::U64 => u64::try_from(v).ok().map(Number::U64),
+			NumberKind::Decimal => Decimal::from_i128(v).map(Number::Decimal),
+			NumberKind::F16 => Some(Number::F16(half::f16::from_f64(v as f64))),
+			NumberKind::F32 => Some(Number::F32(v as f32)),
+			NumberKind::Float => Some(Number::Float(v as f64)),
+		}
+	}
+
+	fn from_i128_wrapping_in_kind(v: i128, kind: NumberKind) -> Self {
+		match kind {
+			NumberKind::I8 => Number::I8(v as i8),
+			NumberKind::U8 => Number::U8(v as u8),
+			NumberKind::I16 => Number::I16(v as i16),
+			NumberKind::U16 => Number::U16(v as u16),
+			NumberKind::I32 => Number::I32(v as i32),
+			NumberKind::U32 => Number::U32(v as u32),
+			NumberKind::Int => Number::Int(v as i64),
+			NumberKind::U64 => Number::U64(v as u64),
+			NumberKind::Decimal => Number::Decimal(Decimal::from_i128(v).unwrap_or_default()),
+			NumberKind::F16 => Number::F16(half::f16::from_f64(v as f64)),
+			NumberKind::F32 => Number::F32(v as f32),
+			NumberKind::Float => Number::Float(v as f64),
+		}
+	}
+
+	fn from_f64_in_kind(v: f64, kind: NumberKind) -> Self {
+		match kind {
+			NumberKind::F16 => Number::F16(half::f16::from_f64(v)),
+			NumberKind::F32 => Number::F32(v as f32),
+			NumberKind::Float
+			| NumberKind::Int
+			| NumberKind::Decimal
+			| NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::U64 => Number::Float(v),
+		}
+	}
+
+	fn to_decimal_for_op(self) -> Option<Decimal> {
+		self.as_decimal_lossless()
+	}
+
+	fn op_err_string(self) -> String {
+		match self {
+			Number::Decimal(d) => d.to_string(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => self.to_sql(),
 		}
 	}
 
 	pub fn acos(self) -> Self {
-		self.to_float().acos().into()
+		self.map_float_fn(f64::acos)
 	}
 
 	pub fn asin(self) -> Self {
-		self.to_float().asin().into()
+		self.map_float_fn(f64::asin)
 	}
 
 	pub fn atan(self) -> Self {
-		self.to_float().atan().into()
+		self.map_float_fn(f64::atan)
 	}
 
 	pub fn acot(self) -> Self {
-		(PI / 2.0 - self.atan().to_float()).into()
+		self.map_float_fn(|x| PI / 2.0 - x.atan())
 	}
 
 	pub fn ceil(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => v.ceil().into(),
+			Number::Int(v) => Number::Int(v),
+			Number::Float(v) => Number::Float(v.ceil()),
+			Number::Decimal(v) => Number::Decimal(v.ceil()),
+			Number::I8(v) => Number::I8(v),
+			Number::U8(v) => Number::U8(v),
+			Number::I16(v) => Number::I16(v),
+			Number::U16(v) => Number::U16(v),
+			Number::I32(v) => Number::I32(v),
+			Number::U32(v) => Number::U32(v),
+			Number::U64(v) => Number::U64(v),
+			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().ceil())),
+			Number::F32(v) => Number::F32((v as f64).ceil() as f32),
 		}
 	}
 
@@ -641,39 +1440,71 @@ impl Number {
 		}
 		let exact = |bound: Self| match bound {
 			Number::Float(f) => Decimal::from_f64(f),
-			other @ (Number::Int(_) | Number::Decimal(_)) => Some(other.to_decimal()),
+			Number::F16(f) => Decimal::from_f64(f.to_f64()),
+			Number::F32(f) => Decimal::from_f64(f as f64),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => Some(bound.to_decimal()),
 		};
+		if let (Some(n), Some(low), Some(high)) = (self.as_i128(), min.as_i128(), max.as_i128())
+			&& low <= high
+			&& let Some(res) = Self::from_i128_in_kind(n.clamp(low, high), self.number_kind())
+		{
+			return res;
+		}
 		match (self, min, max) {
-			(Number::Int(n), Number::Int(min), Number::Int(max)) if min <= max => {
-				n.clamp(min, max).into()
-			}
 			(Number::Decimal(n), min, max) => match (exact(min), exact(max)) {
-				(Some(low), Some(high)) if low <= high => n.clamp(low, high).into(),
-				_ => {
-					clamp_f64(Number::Decimal(n).to_float(), min.to_float(), max.to_float()).into()
-				}
+				(Some(low), Some(high)) if low <= high => Number::Decimal(n.clamp(low, high)),
+				_ => Number::Float(clamp_f64(
+					Number::Decimal(n).to_float(),
+					min.to_float(),
+					max.to_float(),
+				)),
 			},
-			(n, min, max) => clamp_f64(n.to_float(), min.to_float(), max.to_float()).into(),
+			(Number::F16(n), min, max) => Number::F16(half::f16::from_f64(clamp_f64(
+				n.to_f64(),
+				min.to_float(),
+				max.to_float(),
+			))),
+			(Number::F32(n), min, max) => {
+				Number::F32(clamp_f64(n as f64, min.to_float(), max.to_float()) as f32)
+			}
+			(n, min, max) => Number::Float(clamp_f64(n.to_float(), min.to_float(), max.to_float())),
 		}
 	}
 
 	pub fn cos(self) -> Self {
-		self.to_float().cos().into()
+		self.map_float_fn(f64::cos)
 	}
 
 	pub fn cot(self) -> Self {
-		(1.0 / self.to_float().tan()).into()
+		self.map_float_fn(|x| 1.0 / x.tan())
 	}
 
 	pub fn deg2rad(self) -> Self {
-		self.to_float().to_radians().into()
+		self.map_float_fn(f64::to_radians)
 	}
 
 	pub fn floor(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => v.floor().into(),
+			Number::Int(v) => Number::Int(v),
+			Number::Float(v) => Number::Float(v.floor()),
+			Number::Decimal(v) => Number::Decimal(v.floor()),
+			Number::I8(v) => Number::I8(v),
+			Number::U8(v) => Number::U8(v),
+			Number::I16(v) => Number::I16(v),
+			Number::U16(v) => Number::U16(v),
+			Number::I32(v) => Number::I32(v),
+			Number::U32(v) => Number::U32(v),
+			Number::U64(v) => Number::U64(v),
+			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().floor())),
+			Number::F32(v) => Number::F32((v as f64).floor() as f32),
 		}
 	}
 
@@ -691,7 +1522,21 @@ impl Number {
 				Self::lerp_decimal(from.to_decimal(), to.to_decimal(), val).into()
 			}
 			(val, from, to) => {
-				Self::lerp_f64(from.to_float(), to.to_float(), val.to_float()).into()
+				let res = Self::lerp_f64(from.to_float(), to.to_float(), val.to_float());
+				match val.number_kind().join(from.number_kind()).join(to.number_kind()) {
+					NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
+					NumberKind::F32 => Number::F32(res as f32),
+					NumberKind::Int
+					| NumberKind::Float
+					| NumberKind::Decimal
+					| NumberKind::I8
+					| NumberKind::U8
+					| NumberKind::I16
+					| NumberKind::U16
+					| NumberKind::I32
+					| NumberKind::U32
+					| NumberKind::U64 => Number::Float(res),
+				}
 			}
 		}
 	}
@@ -716,87 +1561,190 @@ impl Number {
 				Self::lerp_decimal(from, from + dt, val).into()
 			}
 			(val, from, to) => {
-				let val = val.to_float();
-				let from = from.to_float();
-				let to = to.to_float();
-				let mut dt = Self::repeat_f64(to - from, 360.0);
+				let v_f = val.to_float();
+				let from_f = from.to_float();
+				let to_f = to.to_float();
+				let mut dt = Self::repeat_f64(to_f - from_f, 360.0);
 				if dt > 180.0 {
 					dt = 360.0 - dt;
 				}
-				Self::lerp_f64(from, from + dt, val).into()
+				let res = Self::lerp_f64(from_f, from_f + dt, v_f);
+				match val.number_kind().join(from.number_kind()).join(to.number_kind()) {
+					NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
+					NumberKind::F32 => Number::F32(res as f32),
+					NumberKind::Int
+					| NumberKind::Float
+					| NumberKind::Decimal
+					| NumberKind::I8
+					| NumberKind::U8
+					| NumberKind::I16
+					| NumberKind::U16
+					| NumberKind::I32
+					| NumberKind::U32
+					| NumberKind::U64 => Number::Float(res),
+				}
 			}
 		}
 	}
 
 	pub fn ln(self) -> Self {
-		self.to_float().ln().into()
+		self.map_float_fn(f64::ln)
 	}
 
 	pub fn log(self, base: Self) -> Self {
-		self.to_float().log(base.to_float()).into()
+		let res = self.to_float().log(base.to_float());
+		match self.number_kind().join(base.number_kind()) {
+			NumberKind::F16 => Number::F16(half::f16::from_f64(res)),
+			NumberKind::F32 => Number::F32(res as f32),
+			NumberKind::Int
+			| NumberKind::Float
+			| NumberKind::Decimal
+			| NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::U64 => Number::Float(res),
+		}
 	}
 
 	pub fn log2(self) -> Self {
-		self.to_float().log2().into()
+		self.map_float_fn(f64::log2)
 	}
 
 	pub fn log10(self) -> Self {
-		self.to_float().log10().into()
+		self.map_float_fn(f64::log10)
 	}
 
 	pub fn rad2deg(self) -> Self {
-		self.to_float().to_degrees().into()
+		self.map_float_fn(f64::to_degrees)
 	}
 
 	pub fn round(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => v.round().into(),
+			Number::Int(v) => Number::Int(v),
+			Number::Float(v) => Number::Float(v.round()),
+			Number::Decimal(v) => Number::Decimal(v.round()),
+			Number::I8(v) => Number::I8(v),
+			Number::U8(v) => Number::U8(v),
+			Number::I16(v) => Number::I16(v),
+			Number::U16(v) => Number::U16(v),
+			Number::I32(v) => Number::I32(v),
+			Number::U32(v) => Number::U32(v),
+			Number::U64(v) => Number::U64(v),
+			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().round())),
+			Number::F32(v) => Number::F32((v as f64).round() as f32),
 		}
 	}
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			Number::Int(v) => v.into(),
+			Number::Int(v) => Number::Int(v),
 			// Truncate via the formatter so subnormals and very large
 			// magnitudes (which would overflow a `10^precision` multiplier)
 			// stay representable; non-finite f64s round-trip too.
-			Number::Float(v) => format!("{v:.precision$}")
-				.parse::<f64>()
-				.expect("formatted f64 always parses back as f64")
-				.into(),
-			Number::Decimal(v) => v.round_dp(precision as u32).into(),
+			Number::Float(v) => Number::Float(
+				format!("{v:.precision$}")
+					.parse::<f64>()
+					.expect("formatted f64 always parses back as f64"),
+			),
+			Number::Decimal(v) => Number::Decimal(v.round_dp(precision as u32)),
+			Number::I8(v) => Number::I8(v),
+			Number::U8(v) => Number::U8(v),
+			Number::I16(v) => Number::I16(v),
+			Number::U16(v) => Number::U16(v),
+			Number::I32(v) => Number::I32(v),
+			Number::U32(v) => Number::U32(v),
+			Number::U64(v) => Number::U64(v),
+			Number::F16(v) => {
+				let f = v.to_f64();
+				let parsed = format!("{f:.precision$}")
+					.parse::<f64>()
+					.expect("formatted f64 always parses back as f64");
+				Number::F16(half::f16::from_f64(parsed))
+			}
+			Number::F32(v) => {
+				let f = v as f64;
+				let parsed = format!("{f:.precision$}")
+					.parse::<f64>()
+					.expect("formatted f64 always parses back as f64");
+				Number::F32(parsed as f32)
+			}
 		}
 	}
 
 	pub fn sign(self) -> Self {
 		match self {
-			Number::Int(n) => n.signum().into(),
+			Number::Int(n) => Number::Int(n.signum()),
 			// Either zero signs to zero, as an integer or a decimal zero does.
-			Number::Float(n) => if n == 0.0 {
+			Number::Float(n) => Number::Float(if n == 0.0 {
 				0.0
 			} else {
 				n.signum()
+			}),
+			Number::Decimal(n) => Number::Decimal(n.signum()),
+			Number::I8(n) => Number::I8(n.signum()),
+			Number::U8(n) => Number::U8(if n == 0 {
+				0
+			} else {
+				1
+			}),
+			Number::I16(n) => Number::I16(n.signum()),
+			Number::U16(n) => Number::U16(if n == 0 {
+				0
+			} else {
+				1
+			}),
+			Number::I32(n) => Number::I32(n.signum()),
+			Number::U32(n) => Number::U32(if n == 0 {
+				0
+			} else {
+				1
+			}),
+			Number::U64(n) => Number::U64(if n == 0 {
+				0
+			} else {
+				1
+			}),
+			Number::F16(n) => {
+				let f = n.to_f32();
+				Number::F16(if f == 0.0 {
+					half::f16::ZERO
+				} else {
+					half::f16::from_f32(f.signum())
+				})
 			}
-			.into(),
-			Number::Decimal(n) => n.signum().into(),
+			Number::F32(n) => Number::F32(if n == 0.0 {
+				0.0f32
+			} else {
+				n.signum()
+			}),
 		}
 	}
 
 	pub fn sin(self) -> Self {
-		self.to_float().sin().into()
+		self.map_float_fn(f64::sin)
 	}
 
 	pub fn tan(self) -> Self {
-		self.to_float().tan().into()
+		self.map_float_fn(f64::tan)
 	}
 
 	pub fn sqrt(self) -> Self {
 		match self {
-			Number::Int(v) => (v as f64).sqrt().into(),
-			Number::Float(v) => v.sqrt().into(),
-			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
+			Number::Int(v) => Number::Float((v as f64).sqrt()),
+			Number::Float(v) => Number::Float(v.sqrt()),
+			Number::Decimal(v) => Number::Decimal(v.sqrt().unwrap_or_default()),
+			Number::I8(v) => Number::Float((v as f64).sqrt()),
+			Number::U8(v) => Number::Float((v as f64).sqrt()),
+			Number::I16(v) => Number::Float((v as f64).sqrt()),
+			Number::U16(v) => Number::Float((v as f64).sqrt()),
+			Number::I32(v) => Number::Float((v as f64).sqrt()),
+			Number::U32(v) => Number::Float((v as f64).sqrt()),
+			Number::U64(v) => Number::Float((v as f64).sqrt()),
+			Number::F16(v) => Number::F16(half::f16::from_f64(v.to_f64().sqrt())),
+			Number::F32(v) => Number::F32((v as f64).sqrt() as f32),
 		}
 	}
 }
@@ -861,22 +1809,38 @@ macro_rules! impl_simple_try_op {
 		impl $trt for Number {
 			type Output = Self;
 			fn $fn(self, other: Self) -> Result<Self> {
-				Ok(match (self, other) {
-					(Number::Int(v), Number::Int(w)) => Number::Int(
-						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
-					),
-					(Number::Float(v), Number::Float(w)) => Number::Float(v.$unchecked(w)),
-					(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(
-						v.$checked(w).ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
-					),
-					(Number::Int(v), Number::Float(w)) => Number::Float((v as f64).$unchecked(w)),
-					(Number::Float(v), Number::Int(w)) => Number::Float(v.$unchecked(w as f64)),
-					(v, w) => Number::Decimal(
-						v.to_decimal()
-							.$checked(w.to_decimal())
-							.ok_or_else(|| Error::$trt(v.to_sql(), w.to_sql()))?,
-					),
-				})
+				let target = self.number_kind().join(other.number_kind());
+				match target {
+					NumberKind::I8
+					| NumberKind::U8
+					| NumberKind::I16
+					| NumberKind::U16
+					| NumberKind::I32
+					| NumberKind::U32
+					| NumberKind::Int
+					| NumberKind::U64 => {
+						let v = self.as_i128().unwrap_or_default();
+						let w = other.as_i128().unwrap_or_default();
+						let res = v.$checked(w).and_then(|r| Self::from_i128_in_kind(r, target));
+						res.ok_or_else(|| {
+							Error::$trt(self.op_err_string(), other.op_err_string()).into()
+						})
+					}
+					NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+						let res = self.as_float().$unchecked(other.as_float());
+						Ok(Self::from_f64_in_kind(res, target))
+					}
+					NumberKind::Decimal => {
+						let res = self
+							.to_decimal_for_op()
+							.zip(other.to_decimal_for_op())
+							.and_then(|(v, w)| v.$checked(w))
+							.ok_or_else(|| {
+								Error::$trt(self.op_err_string(), other.op_err_string())
+							})?;
+						Ok(Number::Decimal(res))
+					}
+				}
 			}
 		}
 	};
@@ -891,45 +1855,92 @@ impl_simple_try_op!(TryRem, try_rem, rem, checked_rem);
 impl TryPow for Number {
 	type Output = Self;
 	fn try_pow(self, power: Self) -> Result<Self> {
-		Ok(match (self, power) {
-			(Self::Int(v), Self::Int(p)) => Self::Int(match v {
-				0 => match p.cmp(&0) {
-					// 0^(-x)
-					Ordering::Less => bail!(Error::TryPow(v.to_string(), p.to_string())),
-					// 0^0
-					Ordering::Equal => 1,
-					// 0^x
-					Ordering::Greater => 0,
-				},
-				// 1^p
-				1 => 1,
-				-1 => {
-					if p % 2 == 0 {
-						// (-1)^even
-						1
+		let target = self.number_kind().join(power.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let p = power.as_i128().unwrap_or_default();
+				let res: i128 = match v {
+					0 => match p.cmp(&0) {
+						// 0^(-x)
+						Ordering::Less => {
+							bail!(Error::TryPow(self.op_err_string(), power.op_err_string()))
+						}
+						// 0^0
+						Ordering::Equal => 1,
+						// 0^x
+						Ordering::Greater => 0,
+					},
+					// 1^p
+					1 => 1,
+					-1 => {
+						if p % 2 == 0 {
+							// (-1)^even
+							1
+						} else {
+							// (-1)^odd
+							-1
+						}
+					}
+					// try_into may cause an error, which would be wrong for the above cases.
+					_ => p.try_into().ok().and_then(|exp| v.checked_pow(exp)).ok_or_else(|| {
+						Error::TryPow(self.op_err_string(), power.op_err_string())
+					})?,
+				};
+				Ok(Self::from_i128_in_kind(res, target)
+					.ok_or_else(|| Error::TryPow(self.op_err_string(), power.op_err_string()))?)
+			}
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+				let res = self.as_float().powf(power.as_float());
+				Ok(Self::from_f64_in_kind(res, target))
+			}
+			NumberKind::Decimal => match (self.wide(), power.wide()) {
+				(Wide::Decimal(v), Wide::Int(p)) => {
+					Ok(Self::Decimal(v.checked_powi(p).ok_or_else(|| {
+						Error::TryPow(self.op_err_string(), power.op_err_string())
+					})?))
+				}
+				(Wide::Decimal(v), Wide::Float(p)) => {
+					Ok(Self::Decimal(v.checked_powf(p).ok_or_else(|| {
+						Error::TryPow(self.op_err_string(), power.op_err_string())
+					})?))
+				}
+				(Wide::Decimal(v), Wide::Decimal(p)) => {
+					Ok(Self::Decimal(v.checked_powd(p).ok_or_else(|| {
+						Error::TryPow(self.op_err_string(), power.op_err_string())
+					})?))
+				}
+				(Wide::Int(_), Wide::Decimal(_))
+				| (Wide::Float(_), Wide::Decimal(_))
+				| (Wide::Int(_), Wide::Int(_)) => {
+					if let (Some(v), Some(p_dec), Some(p)) =
+						(self.to_decimal_for_op(), power.to_decimal_for_op(), power.as_i128())
+						&& self.as_i128().is_some()
+					{
+						let res = match i64::try_from(p) {
+							Ok(pi) => v.checked_powi(pi),
+							Err(_) => v.checked_powd(p_dec),
+						}
+						.ok_or_else(|| {
+							Error::TryPow(self.op_err_string(), power.op_err_string())
+						})?;
+						Ok(Self::Decimal(res))
 					} else {
-						// (-1)^odd
-						-1
+						Ok(self.as_float().powf(power.as_float()).into())
 					}
 				}
-				// try_into may cause an error, which would be wrong for the above cases.
-				_ => p
-					.try_into()
-					.ok()
-					.and_then(|p| v.checked_pow(p))
-					.ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			}),
-			(Self::Decimal(v), Self::Int(p)) => Self::Decimal(
-				v.checked_powi(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Float(p)) => Self::Decimal(
-				v.checked_powf(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(Self::Decimal(v), Self::Decimal(p)) => Self::Decimal(
-				v.checked_powd(p).ok_or_else(|| Error::TryPow(v.to_string(), p.to_string()))?,
-			),
-			(v, p) => v.as_float().powf(p.as_float()).into(),
-		})
+				(Wide::Int(_), Wide::Float(_))
+				| (Wide::Float(_), Wide::Int(_))
+				| (Wide::Float(_), Wide::Float(_)) => Ok(self.as_float().powf(power.as_float()).into()),
+			},
+		}
 	}
 }
 
@@ -939,10 +1950,49 @@ impl TryNeg for Number {
 	fn try_neg(self) -> Result<Self::Output> {
 		Ok(match self {
 			Self::Int(n) => {
-				Number::Int(n.checked_neg().ok_or_else(|| Error::TryNeg(n.to_string()))?)
+				Number::Int(n.checked_neg().ok_or_else(|| Error::TryNeg(self.op_err_string()))?)
 			}
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
+			Self::I8(n) => {
+				Number::I8(n.checked_neg().ok_or_else(|| Error::TryNeg(self.op_err_string()))?)
+			}
+			Self::U8(n) => {
+				if n == 0 {
+					Number::U8(0)
+				} else {
+					bail!(Error::TryNeg(self.op_err_string()))
+				}
+			}
+			Self::I16(n) => {
+				Number::I16(n.checked_neg().ok_or_else(|| Error::TryNeg(self.op_err_string()))?)
+			}
+			Self::U16(n) => {
+				if n == 0 {
+					Number::U16(0)
+				} else {
+					bail!(Error::TryNeg(self.op_err_string()))
+				}
+			}
+			Self::I32(n) => {
+				Number::I32(n.checked_neg().ok_or_else(|| Error::TryNeg(self.op_err_string()))?)
+			}
+			Self::U32(n) => {
+				if n == 0 {
+					Number::U32(0)
+				} else {
+					bail!(Error::TryNeg(self.op_err_string()))
+				}
+			}
+			Self::U64(n) => {
+				if n == 0 {
+					Number::U64(0)
+				} else {
+					bail!(Error::TryNeg(self.op_err_string()))
+				}
+			}
+			Self::F16(n) => Number::F16(-n),
+			Self::F32(n) => Number::F32(-n),
 		})
 	}
 }
@@ -950,18 +2000,33 @@ impl TryNeg for Number {
 impl TryFloatDiv for Number {
 	type Output = Self;
 	fn try_float_div(self, other: Self) -> Result<Self> {
-		Ok(match (self, other) {
-			(Number::Int(v), Number::Int(w)) => {
-				let quotient = (v as f64).div(w as f64);
-				if quotient.fract() != 0.0 {
-					return Ok(Number::Float(quotient));
+		let target = self.number_kind().join(other.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let w = other.as_i128().unwrap_or_default();
+				match v.checked_rem(w) {
+					Some(0) => {
+						let res = v.checked_div(w).and_then(|q| Self::from_i128_in_kind(q, target));
+						Ok(res.ok_or_else(|| {
+							Error::TryDiv(self.op_err_string(), other.op_err_string())
+						})?)
+					}
+					Some(_) => Ok(Number::Float((v as f64).div(w as f64))),
+					None => bail!(Error::TryDiv(self.op_err_string(), other.op_err_string())),
 				}
-				Number::Int(
-					v.checked_div(w).ok_or_else(|| Error::TryDiv(v.to_string(), w.to_string()))?,
-				)
 			}
-			(v, w) => v.try_div(w)?,
-		})
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float | NumberKind::Decimal => {
+				self.try_div(other)
+			}
+		}
 	}
 }
 
@@ -970,35 +2035,42 @@ impl TryFloatDiv for Number {
 // division; a decimal result that overflows or divides by zero is the float of the operation. The
 // checked forms that raise instead are `TryAdd`, `TrySub`, `TryMul` and `TryDiv`.
 
-/// `exact` of `v` and `w` as a decimal, or `float` of the two as floats where the decimal
-/// overflows.
+/// `exact` of `lhs` and `rhs` as a decimal, or `float` of the two as floats where either operand
+/// or the result cannot be represented as a decimal.
 fn decimal_or_float(
-	v: Decimal,
-	w: Decimal,
+	lhs: Number,
+	rhs: Number,
 	exact: fn(Decimal, Decimal) -> Option<Decimal>,
 	float: fn(f64, f64) -> f64,
 ) -> Number {
-	match exact(v, w) {
+	match lhs.to_decimal_for_op().zip(rhs.to_decimal_for_op()).and_then(|(v, w)| exact(v, w)) {
 		Some(result) => Number::Decimal(result),
-		None => {
-			Number::Float(float(v.to_f64().unwrap_or_default(), w.to_f64().unwrap_or_default()))
-		}
+		None => Number::Float(float(lhs.to_float(), rhs.to_float())),
 	}
 }
 
 impl ops::Add for Number {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_add(w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(v, w, Decimal::checked_add, |a, b| a + b)
+		let target = self.number_kind().join(other.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let w = other.as_i128().unwrap_or_default();
+				Self::from_i128_wrapping_in_kind(v.wrapping_add(w), target)
 			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 + w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v + w as f64),
-			(v, w) => {
-				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_add, |a, b| a + b)
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+				Self::from_f64_in_kind(self.as_float() + other.as_float(), target)
+			}
+			NumberKind::Decimal => {
+				decimal_or_float(self, other, Decimal::checked_add, |a, b| a + b)
 			}
 		}
 	}
@@ -1007,34 +2079,32 @@ impl ops::Add for Number {
 impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
 	fn add(self, other: &'b Number) -> Number {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_add(*w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(*v, *w, Decimal::checked_add, |a, b| a + b)
-			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 + w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v + *w as f64),
-			(v, w) => {
-				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_add, |a, b| a + b)
-			}
-		}
+		(*self).add(*other)
 	}
 }
 
 impl ops::Sub for Number {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_sub(w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(v, w, Decimal::checked_sub, |a, b| a - b)
+		let target = self.number_kind().join(other.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let w = other.as_i128().unwrap_or_default();
+				Self::from_i128_wrapping_in_kind(v.wrapping_sub(w), target)
 			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 - w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v - w as f64),
-			(v, w) => {
-				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_sub, |a, b| a - b)
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+				Self::from_f64_in_kind(self.as_float() - other.as_float(), target)
+			}
+			NumberKind::Decimal => {
+				decimal_or_float(self, other, Decimal::checked_sub, |a, b| a - b)
 			}
 		}
 	}
@@ -1043,34 +2113,32 @@ impl ops::Sub for Number {
 impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
 	fn sub(self, other: &'b Number) -> Number {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_sub(*w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(*v, *w, Decimal::checked_sub, |a, b| a - b)
-			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 - w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v - *w as f64),
-			(v, w) => {
-				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_sub, |a, b| a - b)
-			}
-		}
+		(*self).sub(*other)
 	}
 }
 
 impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_mul(w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(v, w, Decimal::checked_mul, |a, b| a * b)
+		let target = self.number_kind().join(other.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let w = other.as_i128().unwrap_or_default();
+				Self::from_i128_wrapping_in_kind(v.wrapping_mul(w), target)
 			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v * w as f64),
-			(v, w) => {
-				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_mul, |a, b| a * b)
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+				Self::from_f64_in_kind(self.as_float() * other.as_float(), target)
+			}
+			NumberKind::Decimal => {
+				decimal_or_float(self, other, Decimal::checked_mul, |a, b| a * b)
 			}
 		}
 	}
@@ -1079,37 +2147,35 @@ impl ops::Mul for Number {
 impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_mul(*w)),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(*v, *w, Decimal::checked_mul, |a, b| a * b)
-			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 * w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v * *w as f64),
-			(v, w) => {
-				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_mul, |a, b| a * b)
-			}
-		}
+		(*self).mul(*other)
 	}
 }
 
 impl ops::Div for Number {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => match v.checked_div(w) {
-				Some(quotient) => Number::Int(quotient),
-				None => Number::Float(v as f64 / w as f64),
-			},
-			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(v, w, Decimal::checked_div, |a, b| a / b)
+		let target = self.number_kind().join(other.number_kind());
+		match target {
+			NumberKind::I8
+			| NumberKind::U8
+			| NumberKind::I16
+			| NumberKind::U16
+			| NumberKind::I32
+			| NumberKind::U32
+			| NumberKind::Int
+			| NumberKind::U64 => {
+				let v = self.as_i128().unwrap_or_default();
+				let w = other.as_i128().unwrap_or_default();
+				match v.checked_div(w).and_then(|q| Self::from_i128_in_kind(q, target)) {
+					Some(quotient) => quotient,
+					None => Number::Float(v as f64 / w as f64),
+				}
 			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 / w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v / w as f64),
-			(v, w) => {
-				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_div, |a, b| a / b)
+			NumberKind::F16 | NumberKind::F32 | NumberKind::Float => {
+				Self::from_f64_in_kind(self.as_float() / other.as_float(), target)
+			}
+			NumberKind::Decimal => {
+				decimal_or_float(self, other, Decimal::checked_div, |a, b| a / b)
 			}
 		}
 	}
@@ -1118,21 +2184,7 @@ impl ops::Div for Number {
 impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
-		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => match v.checked_div(*w) {
-				Some(quotient) => Number::Int(quotient),
-				None => Number::Float(*v as f64 / *w as f64),
-			},
-			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
-			(Number::Decimal(v), Number::Decimal(w)) => {
-				decimal_or_float(*v, *w, Decimal::checked_div, |a, b| a / b)
-			}
-			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v / *w as f64),
-			(v, w) => {
-				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_div, |a, b| a / b)
-			}
-		}
+		(*self).div(*other)
 	}
 }
 
@@ -1145,6 +2197,15 @@ impl Neg for Number {
 			Self::Int(n) => Number::Int(n.wrapping_neg()),
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
+			Self::I8(n) => Number::I8(n.wrapping_neg()),
+			Self::U8(n) => Number::U8(n.wrapping_neg()),
+			Self::I16(n) => Number::I16(n.wrapping_neg()),
+			Self::U16(n) => Number::U16(n.wrapping_neg()),
+			Self::I32(n) => Number::I32(n.wrapping_neg()),
+			Self::U32(n) => Number::U32(n.wrapping_neg()),
+			Self::U64(n) => Number::U64(n.wrapping_neg()),
+			Self::F16(n) => Number::F16(-n),
+			Self::F32(n) => Number::F32(-n),
 		}
 	}
 }
@@ -1152,38 +2213,78 @@ impl Neg for Number {
 // ------------------------------
 
 impl Sum<Self> for Number {
-	fn sum<I>(iter: I) -> Number
+	fn sum<I>(mut iter: I) -> Number
 	where
 		I: Iterator<Item = Self>,
 	{
-		iter.fold(Number::Int(0), |a, b| a + b)
+		let Some(first) = iter.next() else {
+			return Number::Int(0);
+		};
+		let seed = match first {
+			Self::Float(f) => Self::Float(f + 0.0),
+			Self::F32(f) => Self::F32(f + 0.0),
+			Self::F16(f) => Self::F16(f + half::f16::ZERO),
+			Self::Int(_)
+			| Self::Decimal(_)
+			| Self::I8(_)
+			| Self::U8(_)
+			| Self::I16(_)
+			| Self::U16(_)
+			| Self::I32(_)
+			| Self::U32(_)
+			| Self::U64(_) => first,
+		};
+		iter.fold(seed, |a, b| a + b)
 	}
 }
 
 impl<'a> Sum<&'a Self> for Number {
-	fn sum<I>(iter: I) -> Number
+	fn sum<I>(mut iter: I) -> Number
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		iter.fold(Number::Int(0), |a, b| &a + b)
+		let Some(&first) = iter.next() else {
+			return Number::Int(0);
+		};
+		let seed = match first {
+			Self::Float(f) => Self::Float(f + 0.0),
+			Self::F32(f) => Self::F32(f + 0.0),
+			Self::F16(f) => Self::F16(f + half::f16::ZERO),
+			Self::Int(_)
+			| Self::Decimal(_)
+			| Self::I8(_)
+			| Self::U8(_)
+			| Self::I16(_)
+			| Self::U16(_)
+			| Self::I32(_)
+			| Self::U32(_)
+			| Self::U64(_) => first,
+		};
+		iter.fold(seed, |a, b| &a + b)
 	}
 }
 
 impl Product<Self> for Number {
-	fn product<I>(iter: I) -> Number
+	fn product<I>(mut iter: I) -> Number
 	where
 		I: Iterator<Item = Self>,
 	{
-		iter.fold(Number::Int(1), |a, b| a * b)
+		let Some(first) = iter.next() else {
+			return Number::Int(1);
+		};
+		iter.fold(first, |a, b| a * b)
 	}
 }
 
 impl<'a> Product<&'a Self> for Number {
-	fn product<I>(iter: I) -> Number
+	fn product<I>(mut iter: I) -> Number
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		iter.fold(Number::Int(1), |a, b| &a * b)
+		let Some(&first) = iter.next() else {
+			return Number::Int(1);
+		};
+		iter.fold(first, |a, b| &a * b)
 	}
 }
 
@@ -1216,11 +2317,7 @@ impl Encode<()> for Number {
 	) -> std::result::Result<(), storekey::EncodeError> {
 		let slice = self.as_decimal_buf();
 		w.write_slice(&slice)?;
-		let kind = match self {
-			Number::Int(_) => NumberKind::Int,
-			Number::Float(_) => NumberKind::Float,
-			Number::Decimal(_) => NumberKind::Decimal,
-		};
+		let kind = self.number_kind();
 		Encode::<()>::encode(&kind, w)?;
 		Ok(())
 	}
@@ -1330,6 +2427,27 @@ impl ToFloat for i8 {
 	}
 }
 
+impl ToFloat for u64 {
+	#[inline]
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u32 {
+	#[inline]
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u16 {
+	#[inline]
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
 impl ToFloat for u8 {
 	#[inline]
 	fn to_float(&self) -> f64 {
@@ -1427,6 +2545,25 @@ mod tests {
 
 		let (sum_three, count_three) = (Number::Float(6.3), Number::Int(3));
 		assert_eq!(sum_three.try_float_div(count_three).unwrap(), Number::Float(2.1));
+
+		// Above 2^53, exactness must use integer remainder rather than f64 rounding.
+		assert_eq!(
+			Number::U64(u64::MAX).try_float_div(Number::U64(3)).unwrap(),
+			Number::U64(u64::MAX / 3)
+		);
+		assert_eq!(
+			Number::U64(u64::MAX - 1).try_float_div(Number::U64(3)).unwrap(),
+			Number::Float(((u64::MAX - 1) as f64) / 3.0)
+		);
+	}
+
+	#[test]
+	fn test_sum_and_product_preserve_u64_kind() {
+		let nums = [Number::U64(2), Number::U64(3)];
+		assert_eq!(nums.into_iter().sum::<Number>(), Number::U64(5));
+		assert_eq!(nums.iter().sum::<Number>(), Number::U64(5));
+		assert_eq!(nums.into_iter().product::<Number>(), Number::U64(6));
+		assert_eq!(nums.iter().product::<Number>(), Number::U64(6));
 	}
 
 	#[test]
@@ -1588,7 +2725,17 @@ mod tests {
 		fn key(n: Number) -> Vec<u8> {
 			match n {
 				Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
-				n @ (Number::Int(_) | Number::Float(_)) => n.as_decimal_buf(),
+				n @ (Number::Int(_)
+				| Number::Float(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_)) => n.as_decimal_buf(),
 			}
 		}
 		let mut rng = rand::rng();
@@ -1676,12 +2823,32 @@ mod tests {
 						padded.rescale(d.scale() + 2);
 						vec![n, Number::Decimal(padded)]
 					}
-					n @ (Number::Int(_) | Number::Float(_)) => vec![n],
+					n @ (Number::Int(_)
+					| Number::Float(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_)) => vec![n],
 				})
 				.map(|n| {
 					let key = match n {
 						Number::Decimal(d) => Number::Decimal(d.normalize()).as_decimal_buf(),
-						n @ (Number::Int(_) | Number::Float(_)) => n.as_decimal_buf(),
+						n @ (Number::Int(_)
+						| Number::Float(_)
+						| Number::I8(_)
+						| Number::U8(_)
+						| Number::I16(_)
+						| Number::U16(_)
+						| Number::I32(_)
+						| Number::U32(_)
+						| Number::U64(_)
+						| Number::F16(_)
+						| Number::F32(_)) => n.as_decimal_buf(),
 					};
 					(n, key)
 				})
@@ -1790,7 +2957,17 @@ mod tests {
 	fn assert_decimal(decoded: Number, mantissa: i128, scale: u32) {
 		match decoded {
 			Number::Decimal(d) => assert_eq!((d.mantissa(), d.scale()), (mantissa, scale), "{d}"),
-			other @ (Number::Int(_) | Number::Float(_)) => {
+			other @ (Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_)) => {
 				panic!("decoded as {other:?}, not the decimal {mantissa}e-{scale}")
 			}
 		}
@@ -1814,7 +2991,17 @@ mod tests {
 					Number::Float(g) => {
 						assert_eq!(g.to_bits(), f.to_bits(), "{f:e} decoded as {g:e}")
 					}
-					other @ (Number::Int(_) | Number::Decimal(_)) => {
+					other @ (Number::Int(_)
+					| Number::Decimal(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_)) => {
 						panic!("{f:e} decoded as {other:?}, not a float")
 					}
 				}
@@ -1871,7 +3058,17 @@ mod tests {
 			let nearest: f64 = float.parse().unwrap();
 			match through_index_key(&Number::Decimal(decimal(text))) {
 				Number::Float(g) => assert_eq!(g.to_bits(), nearest.to_bits(), "{text}: {g:e}"),
-				other @ (Number::Int(_) | Number::Decimal(_)) => {
+				other @ (Number::Int(_)
+				| Number::Decimal(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_)) => {
 					panic!("{text} decoded as {other:?}, not a float")
 				}
 			}
@@ -1919,7 +3116,16 @@ mod tests {
 				Number::Decimal(_) => {
 					assert!(agrees(original, &decoded, 22), "{f:e} decoded as {decoded:?}");
 				}
-				Number::Int(_) => panic!("{f:e} decoded as an int"),
+				Number::Int(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_) => panic!("{f:e} decoded as {decoded:?}"),
 			}
 		}
 
@@ -1959,7 +3165,17 @@ mod tests {
 					Number::Decimal(g) => {
 						assert_eq!(g.serialize(), d.serialize(), "{d} decoded as {g}")
 					}
-					other @ (Number::Int(_) | Number::Float(_)) => {
+					other @ (Number::Int(_)
+					| Number::Float(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_)) => {
 						panic!("{d} decoded as {other:?}")
 					}
 				}
@@ -1969,7 +3185,17 @@ mod tests {
 						let original = LexDecimal::from_decimal(d);
 						assert!(agrees(original, &decoded, 15), "{d} decoded as {g:e}");
 					}
-					other @ (Number::Int(_) | Number::Decimal(_)) => {
+					other @ (Number::Int(_)
+					| Number::Decimal(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_)) => {
 						panic!("{d} decoded as {other:?}, not a float")
 					}
 				}
@@ -2010,7 +3236,17 @@ mod tests {
 			checked += 1;
 			match through_index_key(&Number::Float(f)) {
 				Number::Decimal(d) => assert_eq!(d.serialize(), parsed.serialize(), "{text}: {d}"),
-				other @ (Number::Int(_) | Number::Float(_)) => {
+				other @ (Number::Int(_)
+				| Number::Float(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_)) => {
 					panic!("{f:e} decoded as {other:?}, not the decimal {parsed}")
 				}
 			}
@@ -2060,7 +3296,32 @@ mod tests {
 			let same = match (&decoded, &read) {
 				(Number::Decimal(a), Number::Decimal(b)) => a.serialize() == b.serialize(),
 				(Number::Float(a), Number::Float(b)) => a.to_bits() == b.to_bits() || a == b,
-				_ => false,
+				(
+					Number::Int(_)
+					| Number::Float(_)
+					| Number::Decimal(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_),
+					Number::Int(_)
+					| Number::Float(_)
+					| Number::Decimal(_)
+					| Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_),
+				) => false,
 			};
 			if same {
 				continue;
@@ -2342,5 +3603,129 @@ mod tests {
 			let key = storekey::encode_vec(&n).unwrap();
 			assert_eq!(hex(&key), stored, "{n:?}");
 		}
+	}
+
+	#[test]
+	fn number_kind_discriminants_are_stable() {
+		assert_eq!(NumberKind::Int as u8, 0);
+		assert_eq!(NumberKind::Float as u8, 1);
+		assert_eq!(NumberKind::Decimal as u8, 2);
+		assert_eq!(NumberKind::I8 as u8, 3);
+		assert_eq!(NumberKind::U8 as u8, 4);
+		assert_eq!(NumberKind::I16 as u8, 5);
+		assert_eq!(NumberKind::U16 as u8, 6);
+		assert_eq!(NumberKind::I32 as u8, 7);
+		assert_eq!(NumberKind::U32 as u8, 8);
+		assert_eq!(NumberKind::U64 as u8, 9);
+		assert_eq!(NumberKind::F16 as u8, 10);
+		assert_eq!(NumberKind::F32 as u8, 11);
+	}
+
+	#[test]
+	fn through_record_key_handles_all_extended_number_types() {
+		let cases = [
+			Number::Int(-123456789),
+			Number::Float(1234.5678),
+			Number::Decimal(Decimal::from_str_normalized("9876.54321").unwrap()),
+			Number::I8(-42),
+			Number::U8(200),
+			Number::I16(-1234),
+			Number::U16(54321),
+			Number::I32(-100000),
+			Number::U32(2000000),
+			Number::U64(1000000000000),
+			Number::F16(half::f16::from_f32(1.5)),
+			Number::F32(2.75),
+		];
+		for n in cases {
+			let (key, back) = through_record_key(&n);
+			assert_eq!(back, n, "failed roundtrip for {n:?}");
+			assert_eq!(through_record_key(&back).0, key);
+		}
+	}
+
+	#[test]
+	fn revision_round_trips_and_freezes_wire_bytes_for_all_variants() {
+		let dec = Decimal::from_str_normalized("9876.54321").unwrap();
+		let mut dec_expected = vec![1, 2];
+		dec.serialize_revisioned(&mut dec_expected).unwrap();
+
+		let cases: &[(Number, &[u8])] = &[
+			// Revision 1 (discriminants 0, 1, 2):
+			(Number::Int(0), &[1, 0, 0]),
+			(Number::Int(-1), &[1, 0, 1]),
+			(Number::Int(42), &[1, 0, 84]),
+			(Number::Float(1.5), &[1, 1, 0, 0, 0, 0, 0, 0, 0xf8, 0x3f]),
+			(Number::Decimal(dec), &dec_expected),
+			// Revision 2 (discriminants 3..=11):
+			(Number::I8(-42), &[2, 3, (-42i8) as u8]),
+			(Number::U8(200), &[2, 4, 200]),
+			(Number::I16(-1), &[2, 5, 1]),
+			(Number::I16(-300), &[2, 5, 251, 87, 2]),
+			(Number::U16(200), &[2, 6, 200]),
+			(Number::U16(1000), &[2, 6, 251, 232, 3]),
+			(Number::I32(-1), &[2, 7, 1]),
+			(Number::U32(200), &[2, 8, 200]),
+			(Number::U64(200), &[2, 9, 200]),
+			(Number::F16(half::f16::from_f32(1.5)), &[2, 10, 251, 0x00, 0x3e]),
+			(Number::F32(2.75), &[2, 11, 0x00, 0x00, 0x30, 0x40]),
+		];
+		for (n, expected) in cases {
+			let mut buf = Vec::new();
+			n.serialize_revisioned(&mut buf).unwrap();
+			assert_eq!(buf.as_slice(), *expected, "frozen revision bytes changed for {n:?}");
+			let mut reader = buf.as_slice();
+			let back = Number::deserialize_revisioned(&mut reader).unwrap();
+			assert_eq!(back, *n, "failed revision roundtrip for {n:?}");
+			assert!(reader.is_empty(), "trailing bytes after decoding {n:?}");
+		}
+
+		// Revision 2 also accepts discriminants 0, 1, 2 (`Int`, `Float`, `Decimal`):
+		let rev2_int = [2u8, 0, 84];
+		assert_eq!(Number::deserialize_revisioned(&mut &rev2_int[..]).unwrap(), Number::Int(42));
+
+		// Revision 1 rejects sized discriminants 3..=11:
+		for disc in 3u8..=11 {
+			let bad = [1u8, disc, 0, 0, 0, 0];
+			assert!(
+				Number::deserialize_revisioned(&mut &bad[..]).is_err(),
+				"revision 1 should reject discriminant {disc}"
+			);
+		}
+	}
+
+	#[test]
+	fn decimal_arithmetic_rejects_non_finite_and_out_of_range_floats() {
+		let dec_one = Number::Decimal(Decimal::ONE);
+		let unrepresentable = [
+			Number::F16(half::f16::INFINITY),
+			Number::F16(half::f16::NEG_INFINITY),
+			Number::F16(half::f16::NAN),
+			Number::F32(f32::INFINITY),
+			Number::F32(f32::NEG_INFINITY),
+			Number::F32(f32::NAN),
+			Number::F32(f32::MAX),
+			Number::F32(f32::MIN),
+		];
+		for x in unrepresentable {
+			assert!(dec_one.try_add(x).is_err(), "expected try_add error for {x:?}");
+			assert!(x.try_add(dec_one).is_err(), "expected try_add error for {x:?}");
+			assert!(dec_one.try_sub(x).is_err(), "expected try_sub error for {x:?}");
+			assert!(dec_one.try_mul(x).is_err(), "expected try_mul error for {x:?}");
+			assert!(dec_one.try_div(x).is_err(), "expected try_div error for {x:?}");
+			assert!(dec_one.try_pow(x).is_err(), "expected try_pow error for {x:?}");
+		}
+
+		// Infallible operators fall back to f64 arithmetic when Decimal conversion fails:
+		assert_eq!(dec_one + Number::F32(f32::INFINITY), Number::Float(f64::INFINITY));
+		assert_eq!(
+			dec_one * Number::F16(half::f16::NEG_INFINITY),
+			Number::Float(f64::NEG_INFINITY)
+		);
+		let Number::Float(nan) = dec_one + Number::F32(f32::NAN) else {
+			panic!("expected Number::Float(NaN)");
+		};
+		assert!(nan.is_nan());
+		assert_eq!(dec_one + Number::F32(f32::MAX), Number::Float(1.0 + f32::MAX as f64));
 	}
 }

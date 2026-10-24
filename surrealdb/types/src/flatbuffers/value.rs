@@ -33,16 +33,16 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::Bool,
 				value: Some(b.to_fb(builder)?.as_union_value()),
 			},
-			Self::Number(n) => match n {
-				crate::Number::Int(i) => proto_fb::ValueArgs {
+			Self::Number(n) => match n.wide() {
+				crate::Wide::Int(i) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Int64,
 					value: Some(i.to_fb(builder)?.as_union_value()),
 				},
-				crate::Number::Float(f) => proto_fb::ValueArgs {
+				crate::Wide::Float(f) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Float64,
 					value: Some(f.to_fb(builder)?.as_union_value()),
 				},
-				crate::Number::Decimal(d) => proto_fb::ValueArgs {
+				crate::Wide::Decimal(d) => proto_fb::ValueArgs {
 					value_type: proto_fb::ValueType::Decimal,
 					value: Some(d.to_fb(builder)?.as_union_value()),
 				},

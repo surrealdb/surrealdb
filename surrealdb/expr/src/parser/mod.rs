@@ -465,6 +465,24 @@ impl<'a> Lower<'a> {
 			Expr::Literal(Literal::Integer(Ast::int(n)))
 		} else if n.tag == Tag::Float {
 			Expr::Literal(Literal::Float(Ast::float(n)))
+		} else if n.tag == Tag::I8 {
+			Expr::Literal(Literal::I8(n.as_i8()))
+		} else if n.tag == Tag::U8 {
+			Expr::Literal(Literal::U8(n.as_u8()))
+		} else if n.tag == Tag::I16 {
+			Expr::Literal(Literal::I16(n.as_i16()))
+		} else if n.tag == Tag::U16 {
+			Expr::Literal(Literal::U16(n.as_u16()))
+		} else if n.tag == Tag::I32 {
+			Expr::Literal(Literal::I32(n.as_i32()))
+		} else if n.tag == Tag::U32 {
+			Expr::Literal(Literal::U32(n.as_u32()))
+		} else if n.tag == Tag::U64 {
+			Expr::Literal(Literal::U64(n.as_u64()))
+		} else if n.tag == Tag::F16 {
+			Expr::Literal(Literal::F16(n.as_f16()))
+		} else if n.tag == Tag::F32 {
+			Expr::Literal(Literal::F32(n.as_f32()))
 		} else if n.tag == Tag::NaN {
 			Expr::Literal(Literal::Float(f64::NAN))
 		} else if n.tag == Tag::Infinity {
@@ -782,6 +800,15 @@ impl<'a> Lower<'a> {
 			k::DURATION => Kind::Duration,
 			k::FLOAT => Kind::Float,
 			k::INT => Kind::Int,
+			k::I8 => Kind::I8,
+			k::U8 => Kind::U8,
+			k::I16 => Kind::I16,
+			k::U16 => Kind::U16,
+			k::I32 => Kind::I32,
+			k::U32 => Kind::U32,
+			k::U64 => Kind::U64,
+			k::F16 => Kind::F16,
+			k::F32 => Kind::F32,
 			k::NUMBER => Kind::Number,
 			k::OBJECT => Kind::Object,
 			k::POINT => Kind::Geometry(vec![GeometryKind::Point]),
@@ -843,18 +870,40 @@ impl<'a> Lower<'a> {
 				Kind::Literal(KindLiteral::String(Strand::new(s)))
 			}
 			k::LITERAL => Kind::Literal(if let Expr::Literal(lit) = self.expr(n.a)? {
-				if let Literal::Integer(i) = lit {
-					KindLiteral::Integer(i)
-				} else if let Literal::Float(f) = lit {
-					KindLiteral::Float(f)
-				} else if let Literal::Decimal(d) = lit {
-					KindLiteral::Decimal(d)
-				} else if let Literal::Duration(d) = lit {
-					KindLiteral::Duration(d)
-				} else if let Literal::Bool(b) = lit {
-					KindLiteral::Bool(b)
-				} else {
-					return Err(Reject::new("not a literal kind"));
+				match lit {
+					Literal::Integer(i) => KindLiteral::Integer(i),
+					Literal::Float(f) => KindLiteral::Float(f),
+					Literal::Decimal(d) => KindLiteral::Decimal(d),
+					Literal::I8(i) => KindLiteral::Integer(i as i64),
+					Literal::U8(u) => KindLiteral::Integer(u as i64),
+					Literal::I16(i) => KindLiteral::Integer(i as i64),
+					Literal::U16(u) => KindLiteral::Integer(u as i64),
+					Literal::I32(i) => KindLiteral::Integer(i as i64),
+					Literal::U32(u) => KindLiteral::Integer(u as i64),
+					Literal::U64(u) => match i64::try_from(u) {
+						Ok(i) => KindLiteral::Integer(i),
+						Err(_) => KindLiteral::Decimal(rust_decimal::Decimal::from(u)),
+					},
+					Literal::F16(f) => KindLiteral::Float(f.to_f64()),
+					Literal::F32(f) => KindLiteral::Float(f as f64),
+					Literal::Duration(d) => KindLiteral::Duration(d),
+					Literal::Bool(b) => KindLiteral::Bool(b),
+					Literal::None
+					| Literal::Null
+					| Literal::UnboundedRange
+					| Literal::String(_)
+					| Literal::Bytes(_)
+					| Literal::Regex(_)
+					| Literal::RecordId(_)
+					| Literal::Array(_)
+					| Literal::Set(_)
+					| Literal::Object(_)
+					| Literal::Datetime(_)
+					| Literal::Uuid(_)
+					| Literal::Geometry(_)
+					| Literal::File(_) => {
+						return Err(Reject::new("not a literal kind"));
+					}
 				}
 			} else {
 				return Err(Reject::new("not a literal kind"));

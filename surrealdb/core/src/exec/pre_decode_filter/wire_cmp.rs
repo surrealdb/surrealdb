@@ -91,21 +91,21 @@ fn peek_value(bytes: &[u8]) -> Option<ValuePeek<'_>> {
 /// [`Value::Number(_)`]'s already-located payload.
 ///
 /// `peek.payload` for a `Varlen` `Value::Number(_)` is positioned at the
-/// `u32_le payload_length` prefix; the inner `Number` rev-1 wire follows.
+/// `u32_le payload_length` prefix; the inner `Number` wire follows.
 /// Under the default (non-`fixed-width-encoding`) varint codec the next
-/// two values are both 1-byte varints (`u16` Number rev = `0x01`,
-/// `u32` discriminant ∈ `{0, 1, 2}`), so `peek.payload[5]` is the
-/// sub-variant id.
+/// two values are both 1-byte varints (`u16` Number rev ∈ `{0x01, 0x02}`,
+/// `u32` discriminant ∈ `0..=2` for rev 1 or `3..=11` for rev 2), so
+/// `peek.payload[5]` is the sub-variant id.
 ///
 /// Returns [`None`] for truncated payloads or a non-canonical
 /// sub-variant byte (so the caller bails to fallback rather than
 /// claiming a same-sub-variant match against garbage).
 ///
 /// **Wire-layout invariant.** The fixed offset assumes
-/// `<u16 as DeserializeRevisioned>` emits a single byte for `rev = 1`
+/// `<u16 as DeserializeRevisioned>` emits a single byte for `rev ∈ {1, 2}`
 /// and `<u32 as DeserializeRevisioned>` emits a single byte for
 /// discriminants `< 251`. Both hold under the default codec and the
-/// three Number variants present today. A `debug_assert!` cross-checks
+/// twelve Number variants present today. A `debug_assert!` cross-checks
 /// the offset against a proper deserialise in dev builds; if the
 /// underlying varint shape ever changes the test suite will surface it
 /// loudly.
@@ -115,20 +115,28 @@ fn peek_number_sub_variant(payload: &[u8]) -> Option<NumberSubVariant> {
 	if payload.len() < 6 {
 		return None;
 	}
-	let sv = NumberSubVariant::from_wire_byte(payload[5])?;
+	let sv = match (payload[4], payload[5]) {
+		(1, 0..=2) | (2, 3..=11) => NumberSubVariant::from_wire_byte(payload[5])?,
+		_ => return None,
+	};
 	#[cfg(debug_assertions)]
 	{
 		// Cross-check against a proper varint deserialise of the inner
 		// Number wire — catches any future varint-encoding drift.
-		let proper = (|| -> Option<u32> {
+		let proper = (|| -> Option<(u16, u32)> {
 			let mut r: &[u8] = &payload[4..];
-			let _rev =
+			let rev =
 				<u16 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
-			<u32 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()
+			let disc =
+				<u32 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
+			Some((rev, disc))
 		})();
 		debug_assert_eq!(
-			proper,
-			Some(sv as u32),
+			proper.and_then(|(rev, d)| match (rev, u8::try_from(d).ok()?) {
+				(1, b @ 0..=2) | (2, b @ 3..=11) => NumberSubVariant::from_wire_byte(b),
+				_ => None,
+			}),
+			Some(sv),
 			"peek_number_sub_variant: fast-path byte at offset 5 disagrees with varint decode",
 		);
 	}
@@ -413,6 +421,7 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 				}
 				// A Float byte miss is inconclusive (NaN / ±0).
 				NumberSubVariant::Float => None,
+				NumberSubVariant::Sized => None,
 			}
 		}
 		_ => None,
@@ -492,6 +501,7 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 				// a byte match is equal; a mismatch is left to the full
 				// decode (`+0.0` ↔ `-0.0`, NaN payloads).
 				NumberSubVariant::Float => (value_bytes == full_wire.as_slice()).then_some(true),
+				NumberSubVariant::Sized => None,
 			}
 		}
 		LiteralWire::Canonical {

@@ -730,6 +730,15 @@ fn number_from_public(number: &PublicNumber) -> Number {
 		PublicNumber::Int(i) => Number::Int(*i),
 		PublicNumber::Float(f) => Number::Float(*f),
 		PublicNumber::Decimal(d) => Number::Decimal(*d),
+		PublicNumber::I8(i) => Number::I8(*i),
+		PublicNumber::U8(u) => Number::U8(*u),
+		PublicNumber::I16(i) => Number::I16(*i),
+		PublicNumber::U16(u) => Number::U16(*u),
+		PublicNumber::I32(i) => Number::I32(*i),
+		PublicNumber::U32(u) => Number::U32(*u),
+		PublicNumber::U64(u) => Number::U64(*u),
+		PublicNumber::F16(f) => Number::F16(*f),
+		PublicNumber::F32(f) => Number::F32(*f),
 	}
 }
 
@@ -738,6 +747,15 @@ fn number_to_public(number: &Number) -> PublicNumber {
 		Number::Int(i) => PublicNumber::Int(*i),
 		Number::Float(f) => PublicNumber::Float(*f),
 		Number::Decimal(d) => PublicNumber::Decimal(*d),
+		Number::I8(i) => PublicNumber::I8(*i),
+		Number::U8(u) => PublicNumber::U8(*u),
+		Number::I16(i) => PublicNumber::I16(*i),
+		Number::U16(u) => PublicNumber::U16(*u),
+		Number::I32(i) => PublicNumber::I32(*i),
+		Number::U32(u) => PublicNumber::U32(*u),
+		Number::U64(u) => PublicNumber::U64(*u),
+		Number::F16(f) => PublicNumber::F16(*f),
+		Number::F32(f) => PublicNumber::F32(*f),
 	}
 }
 

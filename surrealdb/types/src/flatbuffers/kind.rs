@@ -67,7 +67,7 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Float => proto_fb::KindArgs {
+			Self::F16 | Self::F32 | Self::Float => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Float,
 				kind: Some(
 					proto_fb::FloatKind::create(builder, &proto_fb::FloatKindArgs {})
@@ -80,7 +80,14 @@ impl ToFlatbuffers for Kind {
 					proto_fb::IntKind::create(builder, &proto_fb::IntKindArgs {}).as_union_value(),
 				),
 			},
-			Self::Number => proto_fb::KindArgs {
+			Self::I8
+			| Self::U8
+			| Self::I16
+			| Self::U16
+			| Self::I32
+			| Self::U32
+			| Self::U64
+			| Self::Number => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Number,
 				kind: Some(
 					proto_fb::NumberKind::create(builder, &proto_fb::NumberKindArgs {})

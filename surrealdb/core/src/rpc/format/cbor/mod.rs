@@ -1,8 +1,14 @@
 mod convert;
 
+pub use convert::{TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64};
+
 /// A decoded CBOR item as a public value.
 pub(crate) fn to_value(item: ciborium::Value) -> anyhow::Result<Value> {
 	convert::to_value(item).map_err(|e| anyhow::anyhow!(e))
+}
+
+pub(crate) fn to_value_v2(item: ciborium::Value) -> anyhow::Result<Value> {
+	convert::to_value_v2(item).map_err(|e| anyhow::anyhow!(e))
 }
 
 use surrealdb_types::Value;
@@ -21,10 +27,24 @@ pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {
 	Ok(res)
 }
 
+pub fn encode_v2(v: Value) -> anyhow::Result<Vec<u8>> {
+	let encoding = convert::from_value_v2(v).map_err(|e| anyhow::anyhow!(e))?;
+	let mut res = Vec::new();
+	ciborium::into_writer(&encoding, &mut res)
+		.map_err(|e| anyhow::anyhow!("failed to encode CBOR: {e}"))?;
+	Ok(res)
+}
+
 pub fn decode(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
 	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
 		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
 	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
+}
+
+pub fn decode_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
+	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
+		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+	convert::to_value_v2(encoding).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// A client request: the CBOR item at the start of `bytes` (trailing bytes as `decode`), where
@@ -44,11 +64,27 @@ pub fn decode_request(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Va
 			budget: surrealdb_types::shaped::Budget::new(128 * bytes.len() as u64 + (1 << 20)),
 			limit: recursion_limit,
 		};
-		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks))
+		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks, false))
 			.map_err(|e| anyhow::anyhow!(e))
 	}
 	#[cfg(not(feature = "shaped"))]
 	decode(bytes, recursion_limit)
+}
+
+pub fn decode_request_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
+	#[cfg(feature = "shaped")]
+	{
+		let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
+			.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+		let mut blocks = convert::RequestBlocks {
+			budget: surrealdb_types::shaped::Budget::new(128 * bytes.len() as u64 + (1 << 20)),
+			limit: recursion_limit,
+		};
+		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks, true))
+			.map_err(|e| anyhow::anyhow!(e))
+	}
+	#[cfg(not(feature = "shaped"))]
+	decode_v2(bytes, recursion_limit)
 }
 
 /// Decode `bytes` as exactly one CBOR item: bytes after the item are an error.
@@ -58,6 +94,14 @@ pub fn decode_exact(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Valu
 		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
 	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
 	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
+}
+
+pub fn decode_exact_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
+	let mut reader = bytes;
+	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
+		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
+	convert::to_value_v2(encoding).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// The `id` of a request envelope whose decoding failed.
@@ -96,7 +140,7 @@ pub fn request_id(bytes: &[u8], recursion_limit: usize) -> Option<Value> {
 				recursion_limit,
 			)
 			.ok()?;
-			let val = convert::to_value(id).ok()?;
+			let val = convert::to_value_v2(id).ok()?;
 			return if matches!(
 				val,
 				Value::Null
@@ -379,6 +423,166 @@ mod tests {
 			Ok(Value::None)
 		));
 		assert!(refusal(&Cbor::Tag(6, Box::new(1.into()))).contains("NONE"));
+	}
+
+	#[test]
+	fn sized_number_tags_refused_in_v1_and_accepted_in_v2() {
+		use surrealdb_types::{Number, f16};
+
+		let cases: &[(u64, Number, Value)] = &[
+			(TAG_I8, Number::I8(-128), Value::Number(Number::Int(-128))),
+			(TAG_U8, Number::U8(255), Value::Number(Number::Int(255))),
+			(TAG_I16, Number::I16(-32768), Value::Number(Number::Int(-32768))),
+			(TAG_U16, Number::U16(65535), Value::Number(Number::Int(65535))),
+			(TAG_I32, Number::I32(-2_147_483_648), Value::Number(Number::Int(-2_147_483_648))),
+			(TAG_U32, Number::U32(4_294_967_295), Value::Number(Number::Int(4_294_967_295))),
+			(TAG_U64, Number::U64(42), Value::Number(Number::Int(42))),
+			(TAG_F16, Number::F16(f16::from_f32(1.5)), Value::Number(Number::Float(1.5))),
+			(TAG_F32, Number::F32(2.5), Value::Number(Number::Float(2.5))),
+		];
+
+		for (tag, num, widened) in cases {
+			let v = Value::Number(*num);
+			let v2_bytes = encode_v2(v.clone()).unwrap();
+			assert_eq!(
+				decode(&v2_bytes, 64).expect_err("v1 must refuse sized tag").to_string(),
+				format!("CBOR tag {tag} is not accepted here: use cbor.2")
+			);
+			let decoded_v2 = decode_v2(&v2_bytes, 64).unwrap();
+			assert_eq!(decoded_v2, v);
+			if let (Value::Number(got), Value::Number(exp)) = (&decoded_v2, &v) {
+				assert_eq!(got.kind(), exp.kind());
+			}
+
+			let v1_bytes = encode(v).unwrap();
+			let decoded_v1 = decode(&v1_bytes, 64).unwrap();
+			assert_eq!(&decoded_v1, widened);
+			if let (Value::Number(got), Value::Number(exp)) = (&decoded_v1, widened) {
+				assert_eq!(got.kind(), exp.kind());
+			}
+		}
+
+		// u64::MAX round-trips in v2 with its width intact, and widens to Decimal in v1.
+		let max_u64 = Value::Number(Number::U64(u64::MAX));
+		let max_u64_bytes = encode_v2(max_u64.clone()).unwrap();
+		let decoded_max = decode_v2(&max_u64_bytes, 64).unwrap();
+		assert_eq!(decoded_max, max_u64);
+		if let Value::Number(n) = decoded_max {
+			assert_eq!(n.kind(), surrealdb_types::Kind::U64);
+		}
+		let max_u64_v1_bytes = encode(max_u64).unwrap();
+		let decoded_max_v1 = decode(&max_u64_v1_bytes, 64).unwrap();
+		assert_eq!(
+			decoded_max_v1,
+			Value::Number(Number::Decimal(rust_decimal::Decimal::from(u64::MAX)))
+		);
+	}
+
+	#[test]
+	fn sized_number_tags_refuse_out_of_range_and_inexact_payloads() {
+		let bad = [
+			(
+				Cbor::Tag(TAG_I8, Box::new(Cbor::Integer(128.into()))),
+				"outside the 8-bit signed range",
+			),
+			(
+				Cbor::Tag(TAG_I8, Box::new(Cbor::Integer((-129).into()))),
+				"outside the 8-bit signed range",
+			),
+			(
+				Cbor::Tag(TAG_U8, Box::new(Cbor::Integer(256.into()))),
+				"outside the 8-bit unsigned range",
+			),
+			(
+				Cbor::Tag(TAG_U8, Box::new(Cbor::Integer((-1).into()))),
+				"outside the 8-bit unsigned range",
+			),
+			(
+				Cbor::Tag(TAG_I16, Box::new(Cbor::Integer(32768.into()))),
+				"outside the 16-bit signed range",
+			),
+			(
+				Cbor::Tag(TAG_U16, Box::new(Cbor::Integer(65536.into()))),
+				"outside the 16-bit unsigned range",
+			),
+			(
+				Cbor::Tag(TAG_I32, Box::new(Cbor::Integer(2_147_483_648i64.into()))),
+				"outside the 32-bit signed range",
+			),
+			(
+				Cbor::Tag(TAG_U32, Box::new(Cbor::Integer(4_294_967_296i64.into()))),
+				"outside the 32-bit unsigned range",
+			),
+			(
+				Cbor::Tag(TAG_U64, Box::new(Cbor::Integer((-1).into()))),
+				"outside the 64-bit unsigned range",
+			),
+			(
+				Cbor::Tag(TAG_F16, Box::new(Cbor::Float(0.1))),
+				"cannot be losslessly represented as f16",
+			),
+			(
+				Cbor::Tag(TAG_F32, Box::new(Cbor::Float(0.1))),
+				"cannot be losslessly represented as f32",
+			),
+		];
+		for (item, expected_msg) in bad {
+			let err = decode_v2(&encode_cbor(&item), 64).expect_err("must be refused").to_string();
+			assert!(err.contains(expected_msg), "expected {expected_msg:?} in {err:?}");
+		}
+	}
+
+	#[test]
+	fn frozen_cbor_and_cbor_v2_are_byte_identical_for_pre_existing_kinds() {
+		use std::collections::{BTreeMap, BTreeSet};
+		use std::ops::Bound;
+
+		use rust_decimal::Decimal;
+		use surrealdb_types::{
+			Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
+			RecordIdKey, Set, Table, Uuid,
+		};
+
+		let samples = vec![
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::Bool(false),
+			Value::Number(Number::Int(-9_007_199_254_740_991)),
+			Value::Number(Number::Float(3.125)),
+			Value::Number(Number::Decimal(Decimal::new(12345, 2))),
+			Value::String("surrealdb".to_owned()),
+			Value::Bytes(Bytes::from(vec![1u8, 2, 3, 4])),
+			Value::Duration(Duration::new(60, 500)),
+			Value::Datetime(Datetime::try_from((1_700_000_000, 123_456_789)).unwrap()),
+			Value::Uuid(Uuid::nil()),
+			Value::Table(Table::new("person")),
+			Value::RecordId(RecordId {
+				table: Table::new("person"),
+				key: RecordIdKey::Number(42),
+			}),
+			Value::Geometry(Geometry::Point((1.25, -2.5).into())),
+			Value::Range(Box::new(Range::new(
+				Bound::Included(Value::Number(Number::Int(1))),
+				Bound::Excluded(Value::Number(Number::Int(10))),
+			))),
+			Value::File(File::new("bucket".to_owned(), "key".to_owned())),
+			Value::Set(Set::from(BTreeSet::from([
+				Value::Number(Number::Int(1)),
+				Value::String("a".to_owned()),
+			]))),
+			Value::Array(Array::from(vec![Value::Bool(true), Value::Number(Number::Int(7))])),
+			Value::Object(Object::from(BTreeMap::from([(
+				"k".to_owned(),
+				Value::Number(Number::Float(0.5)),
+			)]))),
+		];
+
+		for v in samples {
+			let v1 = encode(v.clone()).unwrap();
+			let v2 = encode_v2(v.clone()).unwrap();
+			assert_eq!(v1, v2, "pre-existing value {v:?} changed bytes between cbor and cbor.2");
+		}
 	}
 
 	#[cfg(not(feature = "shaped"))]

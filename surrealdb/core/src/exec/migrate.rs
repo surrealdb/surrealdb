@@ -420,6 +420,15 @@ fn may_link(kind: &Kind) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -461,6 +470,15 @@ fn field_kind(kind: &Kind, name: &str) -> Kind {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::String
 		| Kind::Uuid
@@ -490,6 +508,15 @@ fn element_kind(kind: &Kind) -> Kind {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -1491,9 +1518,7 @@ async fn proven_total(
 	} = using
 		&& is_value(expr)
 	{
-		let numeric =
-			|kind: &Kind| matches!(kind, Kind::Int | Kind::Float | Kind::Number | Kind::Decimal);
-		numeric(old)
+		old.is_numeric()
 			&& matches!(target, Kind::Float | Kind::Number)
 			&& new.is_none_or(|new| target.widens_to(new))
 	} else {
@@ -1647,6 +1672,15 @@ fn holds(kind: &Kind, segment: &Part, flexible: bool) -> bool {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::String
 		| Kind::Uuid
@@ -1687,6 +1721,15 @@ fn literal_slot<'a>(kind: &'a Kind, segment: &Part) -> Option<&'a Kind> {
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::Object
 		| Kind::String
@@ -1862,6 +1905,15 @@ fn fold_children(
 		| Kind::Duration
 		| Kind::Float
 		| Kind::Int
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64
+		| Kind::F16
+		| Kind::F32
 		| Kind::Number
 		| Kind::String
 		| Kind::Uuid

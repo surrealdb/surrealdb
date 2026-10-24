@@ -45,22 +45,22 @@ impl KindLiteral {
 				}
 			}
 			KindLiteral::Integer(i) => {
-				if let Value::Number(crate::Number::Int(v)) = value {
-					i == v
+				if let Value::Number(v) = value {
+					*v == crate::Number::Int(*i)
 				} else {
 					false
 				}
 			}
 			KindLiteral::Float(f) => {
-				if let Value::Number(crate::Number::Float(v)) = value {
-					f.to_bits() == v.to_bits()
+				if let Value::Number(v) = value {
+					*v == crate::Number::Float(*f)
 				} else {
 					false
 				}
 			}
 			KindLiteral::Decimal(d) => {
-				if let Value::Number(crate::Number::Decimal(v)) = value {
-					d == v
+				if let Value::Number(v) = value {
+					*v == crate::Number::Decimal(*d)
 				} else {
 					false
 				}

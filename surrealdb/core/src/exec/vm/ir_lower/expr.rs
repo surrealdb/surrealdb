@@ -2732,9 +2732,34 @@ impl<'a> Lowerer<'a> {
 						{
 							n as u8
 						}
+						crate::val::Number::I8(n) if n >= 0 => n as u8,
+						crate::val::Number::U8(n) => n,
+						crate::val::Number::I16(n) if (0..=255).contains(&n) => n as u8,
+						crate::val::Number::U16(n) if n <= 255 => n as u8,
+						crate::val::Number::I32(n) if (0..=255).contains(&n) => n as u8,
+						crate::val::Number::U32(n) if n <= 255 => n as u8,
+						crate::val::Number::U64(n) if n <= 255 => n as u8,
+						crate::val::Number::F16(n)
+							if (0.0..=255.0).contains(&n.to_f32()) && n.to_f32().fract() == 0.0 =>
+						{
+							n.to_f32() as u8
+						}
+						crate::val::Number::F32(n)
+							if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
+						{
+							n as u8
+						}
 						crate::val::Number::Int(_)
 						| crate::val::Number::Float(_)
-						| crate::val::Number::Decimal(_) => {
+						| crate::val::Number::Decimal(_)
+						| crate::val::Number::I8(_)
+						| crate::val::Number::I16(_)
+						| crate::val::Number::U16(_)
+						| crate::val::Number::I32(_)
+						| crate::val::Number::U32(_)
+						| crate::val::Number::U64(_)
+						| crate::val::Number::F16(_)
+						| crate::val::Number::F32(_) => {
 							return Err(self.unbound_index_call(
 								name,
 								&written,
@@ -2881,45 +2906,74 @@ impl<'a> Lowerer<'a> {
 		let Some(function) = self.registry.get_index_function(name) else {
 			return IrError::Stale("ir_lower::expr: an index function");
 		};
-		let message =
-			match function.index_context_kind() {
-				IndexContextKind::Knn => {
-					format!("Index function '{name}': no KNN operator found in WHERE condition")
+		let message = match function.index_context_kind() {
+			IndexContextKind::Knn => {
+				format!("Index function '{name}': no KNN operator found in WHERE condition")
+			}
+			IndexContextKind::FullText => {
+				let rf = function.index_ref_arg_index().and_then(|at| args.get(at)).and_then(
+					|reference| match query_operand(self.ir, *reference) {
+						QueryOperand::Literal(Value::Number(number)) => match number {
+							crate::val::Number::Int(n) if (0..=255).contains(&n) => Some(n as u8),
+							crate::val::Number::Float(n)
+								if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
+							{
+								Some(n as u8)
+							}
+							crate::val::Number::I8(n) if n >= 0 => Some(n as u8),
+							crate::val::Number::U8(n) => Some(n),
+							crate::val::Number::I16(n) if (0..=255).contains(&n) => Some(n as u8),
+							crate::val::Number::U16(n) if n <= 255 => Some(n as u8),
+							crate::val::Number::I32(n) if (0..=255).contains(&n) => Some(n as u8),
+							crate::val::Number::U32(n) if n <= 255 => Some(n as u8),
+							crate::val::Number::U64(n) if n <= 255 => Some(n as u8),
+							crate::val::Number::F16(n)
+								if (0.0..=255.0).contains(&n.to_f32())
+									&& n.to_f32().fract() == 0.0 =>
+							{
+								Some(n.to_f32() as u8)
+							}
+							crate::val::Number::F32(n)
+								if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
+							{
+								Some(n as u8)
+							}
+							crate::val::Number::Int(_)
+							| crate::val::Number::Float(_)
+							| crate::val::Number::Decimal(_)
+							| crate::val::Number::I8(_)
+							| crate::val::Number::I16(_)
+							| crate::val::Number::U16(_)
+							| crate::val::Number::I32(_)
+							| crate::val::Number::U32(_)
+							| crate::val::Number::U64(_)
+							| crate::val::Number::F16(_)
+							| crate::val::Number::F32(_) => None,
+						},
+						QueryOperand::Literal(_) | QueryOperand::Named(_) | QueryOperand::Other => {
+							None
+						}
+					},
+				);
+				let mut available: Vec<u8> = scope
+					.map(|scope| scope.clauses.iter().map(|clause| clause.rf).collect())
+					.unwrap_or_default();
+				available.sort_unstable();
+				available.dedup();
+				match rf {
+					None => format!(
+						"Index function '{name}': index_ref argument must be a literal integer in range 0..255"
+					),
+					Some(_) if available.is_empty() => format!(
+						"Index function '{name}': no MATCHES clause found in WHERE condition"
+					),
+					Some(rf) => format!(
+						"Index function '{name}': no MATCHES clause found for match_ref {rf} (available: {:?})",
+						available.iter().collect::<Vec<_>>()
+					),
 				}
-				IndexContextKind::FullText => {
-					let rf =
-						function.index_ref_arg_index().and_then(|at| args.get(at)).and_then(
-							|reference| match query_operand(self.ir, *reference) {
-								QueryOperand::Literal(Value::Number(crate::val::Number::Int(
-									n,
-								))) if (0..=255).contains(&n) => Some(n as u8),
-								QueryOperand::Literal(Value::Number(
-									crate::val::Number::Float(n),
-								)) if (0.0..=255.0).contains(&n) && n.fract() == 0.0 => Some(n as u8),
-								QueryOperand::Literal(_)
-								| QueryOperand::Named(_)
-								| QueryOperand::Other => None,
-							},
-						);
-					let mut available: Vec<u8> = scope
-						.map(|scope| scope.clauses.iter().map(|clause| clause.rf).collect())
-						.unwrap_or_default();
-					available.sort_unstable();
-					available.dedup();
-					match rf {
-						None => format!(
-							"Index function '{name}': index_ref argument must be a literal integer in range 0..255"
-						),
-						Some(_) if available.is_empty() => format!(
-							"Index function '{name}': no MATCHES clause found in WHERE condition"
-						),
-						Some(rf) => format!(
-							"Index function '{name}': no MATCHES clause found for match_ref {rf} (available: {:?})",
-							available.iter().collect::<Vec<_>>()
-						),
-					}
-				}
-			};
+			}
+		};
 		IrError::Rejected(Box::new(crate::exec::vm::payload::Refusal::Query {
 			message,
 		}))

@@ -228,10 +228,8 @@ impl Cast for i64 {
 
 impl Cast for f64 {
 	fn can_cast(v: &Value) -> bool {
-		v.is_number_and(|n| match n {
-			Number::Int(_) | Number::Float(_) => true,
-			Number::Decimal(v) => v.is_integer() || i64::try_from(*v).is_ok(),
-		}) || v.is_strand_and(|v| v.parse::<f64>().is_ok())
+		v.is_number_and(|n| n.as_float_lossless().is_some())
+			|| v.is_strand_and(|v| v.parse::<f64>().is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
@@ -257,7 +255,8 @@ impl Cast for f64 {
 
 impl Cast for Decimal {
 	fn can_cast(v: &Value) -> bool {
-		v.is_number() || v.is_strand_and(|v| v.parse::<f64>().is_ok())
+		v.is_number_and(|n| n.as_decimal_lossless().is_some())
+			|| v.is_strand_and(|v| Decimal::from_str_normalized(v).is_ok())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
@@ -303,6 +302,117 @@ impl Cast for Number {
 	}
 }
 
+macro_rules! impl_int_cast {
+	($($ty:ident),* $(,)?) => {
+		$(
+			impl Cast for $ty {
+				fn can_cast(v: &Value) -> bool {
+					v.is_number_and(|n| n.as_int_lossless().and_then(|x| $ty::try_from(x).ok()).is_some())
+						|| v.is_strand_and(|v| v.parse::<$ty>().is_ok())
+				}
+
+				fn cast(v: Value) -> Result<Self, CastError> {
+					if let Value::Number(n) = v {
+						return n.as_int_lossless().and_then(|x| $ty::try_from(x).ok()).ok_or_else(|| CastError::InvalidKind {
+							from: v,
+							into: stringify!($ty).into(),
+						});
+					}
+					if let Value::String(ref s) = v
+						&& let Ok(i) = s.parse::<$ty>()
+					{
+						return Ok(i);
+					}
+					Err(CastError::InvalidKind {
+						from: v,
+						into: stringify!($ty).into(),
+					})
+				}
+			}
+		)*
+	};
+}
+impl_int_cast!(i8, u8, i16, u16, i32, u32);
+
+impl Cast for u64 {
+	fn can_cast(v: &Value) -> bool {
+		v.is_number_and(|n| n.as_u64_lossless().is_some())
+			|| v.is_strand_and(|v| v.parse::<u64>().is_ok())
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		if let Value::Number(n) = v {
+			return n.as_u64_lossless().ok_or_else(|| CastError::InvalidKind {
+				from: v,
+				into: "u64".into(),
+			});
+		}
+		if let Value::String(ref s) = v
+			&& let Ok(i) = s.parse::<u64>()
+		{
+			return Ok(i);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "u64".into(),
+		})
+	}
+}
+
+impl Cast for half::f16 {
+	fn can_cast(v: &Value) -> bool {
+		v.is_number_and(|n| n.as_f16().is_some())
+			|| v.is_strand_and(|s| {
+				s.parse::<f64>().ok().and_then(|f| Number::Float(f).as_f16()).is_some()
+			})
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		if let Value::Number(n) = v {
+			return n.as_f16().ok_or_else(|| CastError::InvalidKind {
+				from: v,
+				into: "f16".into(),
+			});
+		}
+		if let Value::String(ref s) = v
+			&& let Some(f) = s.parse::<f64>().ok().and_then(|f| Number::Float(f).as_f16())
+		{
+			return Ok(f);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "f16".into(),
+		})
+	}
+}
+
+impl Cast for f32 {
+	fn can_cast(v: &Value) -> bool {
+		v.is_number_and(|n| n.as_f32().is_some())
+			|| v.is_strand_and(|s| {
+				s.parse::<f64>().ok().and_then(|f| Number::Float(f).as_f32()).is_some()
+			})
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		if let Value::Number(n) = v {
+			return n.as_f32().ok_or_else(|| CastError::InvalidKind {
+				from: v,
+				into: "f32".into(),
+			});
+		}
+		if let Value::String(ref s) = v
+			&& let Some(f) = s.parse::<f64>().ok().and_then(|f| Number::Float(f).as_f32())
+		{
+			return Ok(f);
+		}
+		Err(CastError::InvalidKind {
+			from: v,
+			into: "f32".into(),
+		})
+	}
+}
+
 impl Cast for String {
 	fn can_cast(v: &Value) -> bool {
 		if v.is_nullish() {
@@ -331,7 +441,19 @@ impl Cast for String {
 			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			Value::Bool(_)
-			| Value::Number(Number::Int(_) | Number::Float(_))
+			| Value::Number(
+				Number::Int(_)
+				| Number::Float(_)
+				| Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_),
+			)
 			| Value::Duration(_)
 			| Value::Array(_)
 			| Value::Set(_)
@@ -449,13 +571,7 @@ impl Cast for Bytes {
 // would reintroduce the truncation bug this helper is here to prevent.
 fn value_to_byte(v: &Value) -> Option<u8> {
 	if let Value::Number(n) = v {
-		return match n {
-			Number::Int(x) => u8::try_from(*x).ok(),
-			Number::Float(f) if f.fract() == 0.0 => u8::try_from(*f as i64).ok(),
-			Number::Float(_) => None,
-			Number::Decimal(d) if d.is_integer() => u8::try_from(i64::try_from(*d).ok()?).ok(),
-			Number::Decimal(_) => None,
-		};
+		return n.as_int_lossless().and_then(|x| u8::try_from(x).ok());
 	}
 	if let Value::String(s) = v {
 		return s.parse::<u8>().ok();
@@ -775,6 +891,15 @@ impl Value {
 			Kind::Float => self.can_cast_to::<f64>(),
 			Kind::Decimal => self.can_cast_to::<Decimal>(),
 			Kind::Number => self.can_cast_to::<Number>(),
+			Kind::I8 => self.can_cast_to::<i8>(),
+			Kind::U8 => self.can_cast_to::<u8>(),
+			Kind::I16 => self.can_cast_to::<i16>(),
+			Kind::U16 => self.can_cast_to::<u16>(),
+			Kind::I32 => self.can_cast_to::<i32>(),
+			Kind::U32 => self.can_cast_to::<u32>(),
+			Kind::U64 => self.can_cast_to::<u64>(),
+			Kind::F16 => self.can_cast_to::<half::f16>(),
+			Kind::F32 => self.can_cast_to::<f32>(),
 			Kind::String => self.can_cast_to::<String>(),
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
@@ -887,6 +1012,15 @@ impl Value {
 			Kind::Float => self.cast_to::<f64>().map(Value::from),
 			Kind::Decimal => self.cast_to::<Decimal>().map(Value::from),
 			Kind::Number => self.cast_to::<Number>().map(Value::from),
+			Kind::I8 => self.cast_to::<i8>().map(|v| Value::Number(Number::I8(v))),
+			Kind::U8 => self.cast_to::<u8>().map(|v| Value::Number(Number::U8(v))),
+			Kind::I16 => self.cast_to::<i16>().map(|v| Value::Number(Number::I16(v))),
+			Kind::U16 => self.cast_to::<u16>().map(|v| Value::Number(Number::U16(v))),
+			Kind::I32 => self.cast_to::<i32>().map(|v| Value::Number(Number::I32(v))),
+			Kind::U32 => self.cast_to::<u32>().map(|v| Value::Number(Number::U32(v))),
+			Kind::U64 => self.cast_to::<u64>().map(|v| Value::Number(Number::U64(v))),
+			Kind::F16 => self.cast_to::<half::f16>().map(|v| Value::Number(Number::F16(v))),
+			Kind::F32 => self.cast_to::<f32>().map(|v| Value::Number(Number::F32(v))),
 			Kind::String => self.cast_to::<String>().map(Value::from),
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
@@ -1338,6 +1472,8 @@ mod tests {
 			Value::Number(Number::Decimal(Decimal::MIN)),
 			Value::String(Strand::new_static("5")),
 			Value::String(Strand::new_static("1.5")),
+			Value::String(Strand::new_static("1e10")),
+			Value::String(Strand::new_static("1e40")),
 			Value::String(Strand::new_static("9223372036854775808")),
 			Value::String(Strand::new_static("abc")),
 		];
@@ -1366,11 +1502,14 @@ mod tests {
 		// and treats a failure there as unreachable, so the two must never
 		// disagree.
 		for value in cast_battery() {
-			assert_eq!(
-				value.can_cast_to_kind(&Kind::Int),
-				value.clone().cast_to_kind(&Kind::Int).is_ok(),
-				"can_cast and cast disagree for {value:?} into int"
-			);
+			for kind in Kind::NUMERIC {
+				assert_eq!(
+					value.can_cast_to_kind(&kind),
+					value.clone().cast_to_kind(&kind).is_ok(),
+					"can_cast and cast disagree for {value:?} into {}",
+					kind.to_sql()
+				);
+			}
 		}
 	}
 
@@ -1388,8 +1527,22 @@ mod tests {
 			huge.cast_to_kind(&either).unwrap(),
 			Value::Number(Number::Float(f)) if f == 1e30
 		));
-		// An in-range whole float is the first member's int
+		// When the first member can hold the value, it still wins
 		assert!(matches!(float(5.0).cast_to_kind(&either).unwrap(), Value::Number(Number::Int(5))));
+		assert!(matches!(
+			decimal(5, 0).cast_to_kind(&either).unwrap(),
+			Value::Number(Number::Int(5))
+		));
+		// A sized number whose exact kind is in the union keeps its width
+		let sized_either = Kind::Either(vec![Kind::Int, Kind::I8]);
+		assert!(matches!(
+			Value::Number(Number::I8(5)).cast_to_kind(&sized_either).unwrap(),
+			Value::Number(Number::I8(5))
+		));
+		// Finite string literals that overflow `f32` or `f16` are refused
+		assert!(Value::String(Strand::new_static("1e40")).cast_to_kind(&Kind::F32).is_err());
+		assert!(Value::String(Strand::new_static("1e40")).cast_to_kind(&Kind::F16).is_err());
+		assert!(Value::String(Strand::new_static("1e10")).cast_to_kind(&Kind::F16).is_err());
 		// No alternative takes the value: an error, not a panic
 		let none = Kind::Either(vec![Kind::Int, Kind::Bool]);
 		assert!(decimal(15, 1).cast_to_kind(&none).is_err());

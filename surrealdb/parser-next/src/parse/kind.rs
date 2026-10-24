@@ -472,7 +472,20 @@ impl<'a, 's> Parser<'a, 's> {
 				self.push_alts(false)?;
 				return Ok(None);
 			} else {
-				return Err(self.unexpected("a kind name"));
+				match &self.text[t.start as usize..t.end as usize] {
+					s if s.eq_ignore_ascii_case("i8") => k::I8,
+					s if s.eq_ignore_ascii_case("u8") => k::U8,
+					s if s.eq_ignore_ascii_case("i16") => k::I16,
+					s if s.eq_ignore_ascii_case("u16") => k::U16,
+					s if s.eq_ignore_ascii_case("i32") => k::I32,
+					s if s.eq_ignore_ascii_case("u32") => k::U32,
+					s if s.eq_ignore_ascii_case("i64") => k::INT,
+					s if s.eq_ignore_ascii_case("u64") => k::U64,
+					s if s.eq_ignore_ascii_case("f16") => k::F16,
+					s if s.eq_ignore_ascii_case("f32") => k::F32,
+					s if s.eq_ignore_ascii_case("f64") => k::FLOAT,
+					_ => return Err(self.unexpected("a kind name")),
+				}
 			}
 		} else {
 			return Err(self.unexpected("a kind name"));

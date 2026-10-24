@@ -104,12 +104,176 @@ fn all_identical(a: &[Value], b: &[Value]) -> bool {
 }
 
 fn same_number(a: &Number, b: &Number) -> bool {
-	match (a, b) {
-		(Number::Int(a), Number::Int(b)) => a == b,
-		(Number::Float(a), Number::Float(b)) => a.to_bits() == b.to_bits(),
-		// The serialized form holds the sign and scale as well as the mantissa.
-		(Number::Decimal(a), Number::Decimal(b)) => a.serialize() == b.serialize(),
-		_ => false,
+	match a {
+		Number::Int(a) => match b {
+			Number::Int(b) => a == b,
+			Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::Float(a) => match b {
+			Number::Float(b) => a.to_bits() == b.to_bits(),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::Decimal(a) => match b {
+			// The serialized form holds the sign and scale as well as the mantissa.
+			Number::Decimal(b) => a.serialize() == b.serialize(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::I8(a) => match b {
+			Number::I8(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::U8(a) => match b {
+			Number::U8(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::I16(a) => match b {
+			Number::I16(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::U16(a) => match b {
+			Number::U16(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::I32(a) => match b {
+			Number::I32(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::U32(a) => match b {
+			Number::U32(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::U64(a) => match b {
+			Number::U64(b) => a == b,
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::F16(_)
+			| Number::F32(_) => false,
+		},
+		Number::F16(a) => match b {
+			Number::F16(b) => a.to_bits() == b.to_bits(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F32(_) => false,
+		},
+		Number::F32(a) => match b {
+			Number::F32(b) => a.to_bits() == b.to_bits(),
+			Number::Int(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_) => false,
+		},
 	}
 }
 
@@ -210,22 +374,77 @@ fn read_in_place(r: ValueRef<'_>, v: &Value, canonical: bool) {
 			None
 		}
 	);
-	assert_eq!(
-		r.as_int().unwrap(),
-		if let Value::Number(Number::Int(i)) = v {
-			Some(*i)
-		} else {
-			None
-		}
-	);
-	assert_eq!(
-		r.as_float().unwrap().map(f64::to_bits),
-		if let Value::Number(Number::Float(f)) = v {
-			Some(f.to_bits())
-		} else {
-			None
-		}
-	);
+	let expected_int = match v {
+		Value::Number(n) => match n {
+			Number::Int(i) => Some(*i),
+			Number::I8(i) => Some(*i as i64),
+			Number::U8(u) => Some(*u as i64),
+			Number::I16(i) => Some(*i as i64),
+			Number::U16(u) => Some(*u as i64),
+			Number::I32(i) => Some(*i as i64),
+			Number::U32(u) => Some(*u as i64),
+			Number::U64(u) if *u <= i64::MAX as u64 => Some(*u as i64),
+			Number::U64(_)
+			| Number::Float(_)
+			| Number::Decimal(_)
+			| Number::F16(_)
+			| Number::F32(_) => None,
+		},
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::Range(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => None,
+	};
+	assert_eq!(r.as_int().unwrap(), expected_int);
+	let expected_float = match v {
+		Value::Number(n) => match n {
+			Number::Float(f) => Some(f.to_bits()),
+			Number::F16(f) => Some(f.to_f64().to_bits()),
+			Number::F32(f) => Some((*f as f64).to_bits()),
+			Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_) => None,
+		},
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::Range(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => None,
+	};
+	assert_eq!(r.as_float().unwrap().map(f64::to_bits), expected_float);
 	assert_eq!(
 		r.as_decimal().unwrap().map(|d| d.serialize()),
 		if let Value::Number(Number::Decimal(d)) = v {
@@ -465,9 +684,20 @@ fn kind(v: &Value) -> Kind {
 		Value::None => Kind::None,
 		Value::Null => Kind::Null,
 		Value::Bool(_) => Kind::Bool,
-		Value::Number(Number::Int(_)) => Kind::Int,
-		Value::Number(Number::Float(_)) => Kind::Float,
-		Value::Number(Number::Decimal(_)) => Kind::Decimal,
+		Value::Number(n) => match n {
+			Number::Int(_) => Kind::Int,
+			Number::Float(_) => Kind::Float,
+			Number::Decimal(_) => Kind::Decimal,
+			Number::I8(_) => Kind::I8,
+			Number::U8(_) => Kind::U8,
+			Number::I16(_) => Kind::I16,
+			Number::U16(_) => Kind::U16,
+			Number::I32(_) => Kind::I32,
+			Number::U32(_) => Kind::U32,
+			Number::U64(_) => Kind::U64,
+			Number::F16(_) => Kind::F16,
+			Number::F32(_) => Kind::F32,
+		},
 		Value::String(_) => Kind::String,
 		Value::Duration(_) => Kind::Duration,
 		Value::Datetime(_) => Kind::Datetime,
@@ -903,6 +1133,32 @@ fn scalars_encode_to_their_documented_bytes() {
 			vec![0x06, 0x80, 0x2C, 0x01],
 		),
 		(Value::Number(Number::Decimal(Decimal::ZERO)), vec![0x06, 0x00]),
+		(Value::Number(Number::I8(0)), vec![I8, 0x00]),
+		(Value::Number(Number::I8(-1)), vec![I8, 0xFF]),
+		(Value::Number(Number::I8(127)), vec![I8, 0x7F]),
+		(Value::Number(Number::I8(-128)), vec![I8, 0x80]),
+		(Value::Number(Number::U8(0)), vec![U8, 0x00]),
+		(Value::Number(Number::U8(255)), vec![U8, 0xFF]),
+		(Value::Number(Number::I16(0)), vec![I16, 0x00]),
+		(Value::Number(Number::I16(-1)), vec![I16, 0xFF]),
+		(Value::Number(Number::I16(128)), vec![I16, 0x80, 0x00]),
+		(Value::Number(Number::I16(-129)), vec![I16, 0x7F, 0xFF]),
+		(Value::Number(Number::U16(0)), vec![U16, 0x00]),
+		(Value::Number(Number::U16(256)), vec![U16, 0x00, 0x01]),
+		(Value::Number(Number::I32(0)), vec![I32, 0x00]),
+		(Value::Number(Number::I32(i32::MAX)), vec![I32, 0xFF, 0xFF, 0xFF, 0x7F]),
+		(Value::Number(Number::U32(0)), vec![U32, 0x00]),
+		(Value::Number(Number::U32(u32::MAX)), vec![U32, 0xFF, 0xFF, 0xFF, 0xFF]),
+		(Value::Number(Number::U64(0)), vec![U64, 0x00]),
+		(
+			Value::Number(Number::U64(u64::MAX)),
+			vec![U64, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+		),
+		(
+			Value::Number(Number::F16(half::f16::from_f32(1.5))),
+			[&[F16][..], &half::f16::from_f32(1.5).to_le_bytes()].concat(),
+		),
+		(Value::Number(Number::F32(1.5)), [&[F32][..], &1.5f32.to_le_bytes()].concat()),
 		(string(""), vec![0x07]),
 		(string("ab"), vec![0x07, b'a', b'b']),
 		(
@@ -1396,9 +1652,33 @@ fn a_value_whose_tag_is_the_whole_value_has_no_payload() {
 fn every_tag_has_a_kind() {
 	for t in 0..=0xFFu8 {
 		let k = Kind::of(t);
-		let known = t <= I64_ARRAY || (0x80..=0xFE).contains(&t);
+		let known = t <= I64_ARRAY || (I8..=F32).contains(&t) || (0x80..=0xFE).contains(&t);
 		assert_eq!(k != Kind::Unknown, known, "{t:#04x}");
 	}
+}
+
+#[test]
+fn sized_numbers_decode_wider_and_refuse_malformed() {
+	assert_eq!(decode(&[I16, 0x00, 0x00]).unwrap(), Value::Number(Number::I16(0)));
+	assert_eq!(decode(&[U16, 0x00, 0x00]).unwrap(), Value::Number(Number::U16(0)));
+	assert_eq!(decode(&[I32, 0x00, 0x00, 0x00, 0x00]).unwrap(), Value::Number(Number::I32(0)));
+	assert_eq!(decode(&[U32, 0x00, 0x00, 0x00, 0x00]).unwrap(), Value::Number(Number::U32(0)));
+	assert_eq!(
+		decode(&[U64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).unwrap(),
+		Value::Number(Number::U64(0))
+	);
+
+	assert!(decode(&[I8, 0x00, 0x00]).is_err());
+	assert!(decode(&[U8, 0x00, 0x00]).is_err());
+	assert!(decode(&[I16, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[U16, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[I32, 0x00, 0x00, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[U32, 0x00, 0x00, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[U64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[F16, 0x00]).is_err());
+	assert!(decode(&[F16, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[F32, 0x00, 0x00, 0x00]).is_err());
+	assert!(decode(&[F32, 0x00, 0x00, 0x00, 0x00, 0x00]).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,6 +1693,19 @@ fn malformed_bytes_are_refused() {
 		("an int of no bytes", vec![INT]),
 		("an int of nine bytes", vec![INT, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
 		("a float of three bytes", vec![FLOAT, 1, 2, 3]),
+		("an i8 of no bytes", vec![I8]),
+		("an i8 of two bytes", vec![I8, 1, 2]),
+		("a u8 of no bytes", vec![U8]),
+		("a u8 of two bytes", vec![U8, 1, 2]),
+		("an i16 of three bytes", vec![I16, 1, 2, 3]),
+		("a u16 of three bytes", vec![U16, 1, 2, 3]),
+		("an i32 of five bytes", vec![I32, 1, 2, 3, 4, 5]),
+		("a u32 of five bytes", vec![U32, 1, 2, 3, 4, 5]),
+		("a u64 of nine bytes", vec![U64, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+		("an f16 of one byte", vec![F16, 1]),
+		("an f16 of three bytes", vec![F16, 1, 2, 3]),
+		("an f32 of three bytes", vec![F32, 1, 2, 3]),
+		("an f32 of five bytes", vec![F32, 1, 2, 3, 4, 5]),
 		("a decimal of thirteen bytes", [&[DECIMAL, 0][..], &[1; 13]].concat()),
 		("a decimal with no head", vec![DECIMAL]),
 		("a decimal scale past 28", vec![DECIMAL, 29, 1]),

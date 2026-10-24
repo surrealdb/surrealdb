@@ -32,11 +32,29 @@ pub enum Kind {
 	Decimal,
 	/// Duration type.
 	Duration,
+	/// 16-bit floating point type.
+	F16,
+	/// 32-bit floating point type.
+	F32,
 	/// 64-bit floating point type.
 	Float,
+	/// 8-bit signed integer type.
+	I8,
+	/// 16-bit signed integer type.
+	I16,
+	/// 32-bit signed integer type.
+	I32,
 	/// 64-bit signed integer type.
 	Int,
-	/// Number type, can be either a float, int or decimal.
+	/// 8-bit unsigned integer type.
+	U8,
+	/// 16-bit unsigned integer type.
+	U16,
+	/// 32-bit unsigned integer type.
+	U32,
+	/// 64-bit unsigned integer type.
+	U64,
+	/// Number type, can be any integer, float or decimal kind.
 	/// This is the most generic type for numbers.
 	Number,
 	/// Object type.
@@ -111,6 +129,55 @@ impl Kind {
 	pub fn option(kind: Kind) -> Kind {
 		Kind::either(vec![Kind::None, kind])
 	}
+
+	/// All sized numeric kinds (`i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `u64`, `f16`, `f32`).
+	pub const SIZED: [Kind; 9] = [
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// All numeric kinds (`int`, `float`, `decimal`, `number`, and all [`Self::SIZED`] kinds).
+	pub const NUMERIC: [Kind; 13] = [
+		Kind::Int,
+		Kind::Float,
+		Kind::Decimal,
+		Kind::Number,
+		Kind::I8,
+		Kind::U8,
+		Kind::I16,
+		Kind::U16,
+		Kind::I32,
+		Kind::U32,
+		Kind::U64,
+		Kind::F16,
+		Kind::F32,
+	];
+
+	/// Returns `true` if this kind is one of the sized numeric kinds (`i8`..`f32`).
+	pub const fn is_sized_number(&self) -> bool {
+		matches!(
+			self,
+			Kind::I8
+				| Kind::U8 | Kind::I16
+				| Kind::U16 | Kind::I32
+				| Kind::U32 | Kind::U64
+				| Kind::F16 | Kind::F32
+		)
+	}
+
+	/// Returns `true` if this kind admits only numbers (`int`, `float`, `decimal`, `number`, or a
+	/// sized numeric kind).
+	pub const fn is_numeric(&self) -> bool {
+		matches!(self, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
+			|| self.is_sized_number()
+	}
 }
 
 impl ToSql for Kind {
@@ -124,8 +191,17 @@ impl ToSql for Kind {
 			Kind::Datetime => f.push_str("datetime"),
 			Kind::Decimal => f.push_str("decimal"),
 			Kind::Duration => f.push_str("duration"),
+			Kind::F16 => f.push_str("f16"),
+			Kind::F32 => f.push_str("f32"),
 			Kind::Float => f.push_str("float"),
+			Kind::I8 => f.push_str("i8"),
+			Kind::I16 => f.push_str("i16"),
+			Kind::I32 => f.push_str("i32"),
 			Kind::Int => f.push_str("int"),
+			Kind::U8 => f.push_str("u8"),
+			Kind::U16 => f.push_str("u16"),
+			Kind::U32 => f.push_str("u32"),
+			Kind::U64 => f.push_str("u64"),
 			Kind::Number => f.push_str("number"),
 			Kind::Object => f.push_str("object"),
 			Kind::String => f.push_str("string"),

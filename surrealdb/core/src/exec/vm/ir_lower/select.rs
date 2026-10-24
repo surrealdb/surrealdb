@@ -177,10 +177,38 @@ fn int_literal(ir: &crate::exec::ir::core::ir::Ir, value: ValueId) -> Option<i64
 	else {
 		return None;
 	};
-	if let OpKind::Expr(ExprOp::Literal(literal)) = &ir.op(op)?.kind
-		&& let Value::Number(Number::Int(n)) = &**literal
-	{
-		return Some(*n);
+	if let OpKind::Expr(ExprOp::Literal(literal)) = &ir.op(op)?.kind {
+		return match &**literal {
+			Value::Number(Number::Int(n)) => Some(*n),
+			Value::Number(Number::I8(n)) => Some(*n as i64),
+			Value::Number(Number::U8(n)) => Some(*n as i64),
+			Value::Number(Number::I16(n)) => Some(*n as i64),
+			Value::Number(Number::U16(n)) => Some(*n as i64),
+			Value::Number(Number::I32(n)) => Some(*n as i64),
+			Value::Number(Number::U32(n)) => Some(*n as i64),
+			Value::Number(Number::U64(n)) => i64::try_from(*n).ok(),
+			Value::Number(
+				Number::Float(_) | Number::Decimal(_) | Number::F16(_) | Number::F32(_),
+			) => None,
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
+		};
 	}
 	None
 }
@@ -208,7 +236,16 @@ pub(super) fn admits_int(ty: &TypeKnowledge) -> bool {
 /// Whether a value of `kind` can be an integer.
 fn kind_admits_int(kind: &Kind) -> bool {
 	match kind {
-		Kind::Any | Kind::Int | Kind::Number => true,
+		Kind::Any
+		| Kind::Int
+		| Kind::Number
+		| Kind::I8
+		| Kind::U8
+		| Kind::I16
+		| Kind::U16
+		| Kind::I32
+		| Kind::U32
+		| Kind::U64 => true,
 		Kind::Either(kinds) => kinds.iter().any(kind_admits_int),
 		Kind::None
 		| Kind::Null
@@ -218,6 +255,8 @@ fn kind_admits_int(kind: &Kind) -> bool {
 		| Kind::Decimal
 		| Kind::Duration
 		| Kind::Float
+		| Kind::F16
+		| Kind::F32
 		| Kind::Object
 		| Kind::String
 		| Kind::Uuid
@@ -262,7 +301,18 @@ mod tests {
 	fn main_may_hold_int(kind: Option<&Kind>) -> bool {
 		match kind {
 			None => true,
-			Some(Kind::Any | Kind::Int | Kind::Number) => true,
+			Some(
+				Kind::Any
+				| Kind::Int
+				| Kind::Number
+				| Kind::I8
+				| Kind::U8
+				| Kind::I16
+				| Kind::U16
+				| Kind::I32
+				| Kind::U32
+				| Kind::U64,
+			) => true,
 			Some(Kind::Either(kinds)) => kinds.iter().any(|kind| main_may_hold_int(Some(kind))),
 			Some(_) => false,
 		}

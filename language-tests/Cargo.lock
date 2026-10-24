@@ -5832,6 +5832,9 @@ dependencies = [
 [[package]]
 name = "surrealdb-parser-next"
 version = "3.4.0-nightly"
+dependencies = [
+ "half",
+]
 
 [[package]]
 name = "surrealdb-pgsql"
@@ -5997,6 +6000,7 @@ dependencies = [
  "geo-types",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
+ "half",
  "hex",
  "http",
  "papaya",

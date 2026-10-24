@@ -43,12 +43,12 @@ use std::hash::Hash;
 use std::mem;
 
 use ahash::HashMap;
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use common::fail;
 use revision::{DeserializeRevisioned, SkipCheckRevisioned, revisioned};
 use surrealdb_collections::bounded;
 use surrealdb_strand::Strand;
-use surrealdb_types::ToSql;
+use surrealdb_types::{ToSql, Wide};
 
 use crate::catalog::Error;
 use crate::expr::field::Selector;
@@ -350,10 +350,12 @@ impl SkipCheckRevisioned for AggregationStat {
 /// an `Int` operand to `Decimal` or `Float` before subtracting), so a `Decimal`
 /// group keeps full precision.
 fn shifted_difference(a: Number, b: Number) -> Result<Number> {
-	if let (Number::Int(v), Number::Int(w)) = (&a, &b) {
-		Ok(Number::Float(*v as f64 - *w as f64))
+	let a = a.widened();
+	let b = b.widened();
+	if let (Wide::Int(v), Wide::Int(w)) = (a.wide(), b.wide()) {
+		Ok(Number::Float(v as f64 - w as f64))
 	} else {
-		a.try_sub(b).map_err(Into::into)
+		a.try_sub(b)
 	}
 }
 
@@ -384,6 +386,7 @@ pub fn shifted_accumulate(
 	count: &mut i64,
 	x: Number,
 ) -> Result<()> {
+	let x = x.widened();
 	let next_shift = if *count == 0 {
 		x
 	} else {
@@ -441,6 +444,7 @@ pub fn shifted_remove(
 	count: &mut i64,
 	x: Number,
 ) -> Result<()> {
+	let x = x.widened();
 	let delta = shifted_difference(x, *shift)?;
 	let sq = delta.try_mul(delta)?;
 	let next_sum = (*sum).try_sub(delta)?;
@@ -738,7 +742,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).try_sub(*n)?;
+				*sum = (*sum).try_sub(n.widened())?;
 			}
 			AggregationStat::Mean {
 				arg,
@@ -748,7 +752,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).sub_exact(*n)?;
+				*sum = (*sum).sub_exact(n.widened())?;
 				*count -= 1;
 			}
 			AggregationStat::TimeMax {
@@ -798,7 +802,7 @@ pub fn remove_from_aggregation_stats(
 				let Value::Number(n) = &arguments[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				shifted_remove(shift, sum, sum_of_squares, count, *n)?;
+				shifted_remove(shift, sum, sum_of_squares, count, n.widened())?;
 			}
 			AggregationStat::Accumulate {
 				..
@@ -898,14 +902,16 @@ pub fn update_aggregation_stats(
 				arg,
 				sum,
 			} => {
-				let after = number(&after_args[*arg], "math::sum")?;
+				let after = number(&after_args[*arg], "math::sum")?.widened();
 				let Value::Number(before) = &before_args[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).sub_exact(*before)?;
-				*sum = match *sum {
-					Number::Decimal(d)
-						if matches!(before, Number::Int(_)) && matches!(after, Number::Int(_)) =>
+				let before = before.widened();
+				*sum = (*sum).sub_exact(before)?;
+				*sum = match sum.wide() {
+					Wide::Decimal(d)
+						if matches!(before.wide(), Wide::Int(_))
+							&& matches!(after.wide(), Wide::Int(_)) =>
 					{
 						let total = d
 							.checked_add(after.to_decimal())
@@ -915,9 +921,7 @@ pub fn update_aggregation_stats(
 								.map_err(|_| ExprError::TryAdd(d.to_string(), after.to_sql()))?,
 						)
 					}
-					s @ Number::Int(_) | s @ Number::Float(_) | s @ Number::Decimal(_) => {
-						s.try_add(after)?
-					}
+					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) => sum.try_add(after)?,
 				};
 			}
 			AggregationStat::Mean {
@@ -925,11 +929,12 @@ pub fn update_aggregation_stats(
 				sum,
 				..
 			} => {
-				let after = number(&after_args[*arg], "math::mean")?;
+				let after = number(&after_args[*arg], "math::mean")?.widened();
 				let Value::Number(before) = &before_args[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				*sum = (*sum).sub_exact(*before)?;
+				let before = before.widened();
+				*sum = (*sum).sub_exact(before)?;
 				*sum = sum.add_exact(after)?;
 			}
 			AggregationStat::TimeMax {
@@ -988,8 +993,8 @@ pub fn update_aggregation_stats(
 				let Value::Number(after) = &after_args[*arg] else {
 					fail!("Old record wasn't a number but was created with a number");
 				};
-				shifted_remove(shift, sum, sum_of_squares, count, *before)?;
-				shifted_accumulate(shift, sum, sum_of_squares, count, *after)?;
+				shifted_remove(shift, sum, sum_of_squares, count, before.widened())?;
+				shifted_accumulate(shift, sum, sum_of_squares, count, after.widened())?;
 			}
 			AggregationStat::Accumulate {
 				..
@@ -1231,13 +1236,13 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 		AggregationStat::Sum {
 			sum,
 			..
-		} => *sum = (*sum).try_add(number(value, function)?)?,
+		} => *sum = (*sum).try_add(number(value, function)?.widened())?,
 		AggregationStat::Mean {
 			sum,
 			count,
 			..
 		} => {
-			*sum = sum.add_exact(number(value, function)?)?;
+			*sum = sum.add_exact(number(value, function)?.widened())?;
 			*count += 1;
 		}
 		AggregationStat::StdDev {
@@ -1253,7 +1258,13 @@ fn fold_in(stat: &mut AggregationStat, value: &Value, function: &str) -> Result<
 			sum_of_squares,
 			count,
 			..
-		} => shifted_accumulate(shift, sum, sum_of_squares, count, number(value, function)?)?,
+		} => shifted_accumulate(
+			shift,
+			sum,
+			sum_of_squares,
+			count,
+			number(value, function)?.widened(),
+		)?,
 		AggregationStat::TimeMax {
 			max,
 			..
@@ -1346,7 +1357,7 @@ fn fold_out(
 				..
 			},
 			Value::Number(n),
-		) => *sum = (*sum).try_sub(*n)?,
+		) => *sum = (*sum).try_sub(n.widened())?,
 		(
 			AggregationStat::Mean {
 				sum,
@@ -1355,7 +1366,7 @@ fn fold_out(
 			},
 			Value::Number(n),
 		) => {
-			*sum = (*sum).sub_exact(*n)?;
+			*sum = (*sum).sub_exact(n.widened())?;
 			*count -= 1;
 		}
 		(
@@ -1374,7 +1385,7 @@ fn fold_out(
 				..
 			},
 			Value::Number(n),
-		) => shifted_remove(shift, sum, sum_of_squares, count, *n)?,
+		) => shifted_remove(shift, sum, sum_of_squares, count, n.widened())?,
 		_ => {}
 	}
 	if let Some((arg, function)) = held_extreme {
@@ -1491,7 +1502,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						),
 					})
 				};
-				*sum = (*sum).try_add(*n)?;
+				*sum = (*sum).try_add(n.widened())?;
 			}
 			AggregationStat::Mean {
 				arg,
@@ -1508,7 +1519,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				*sum = (*sum).add_exact(*n)?;
+				*sum = (*sum).add_exact(n.widened())?;
 				*count += 1;
 			}
 			AggregationStat::StdDev {
@@ -1528,7 +1539,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				shifted_accumulate(shift, sum, sum_of_squares, count, *n)?;
+				shifted_accumulate(shift, sum, sum_of_squares, count, n.widened())?;
 			}
 			AggregationStat::Variance {
 				arg,
@@ -1547,7 +1558,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				shifted_accumulate(shift, sum, sum_of_squares, count, *n)?;
+				shifted_accumulate(shift, sum, sum_of_squares, count, n.widened())?;
 			}
 			AggregationStat::TimeMax {
 				arg,
@@ -1630,16 +1641,16 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				if *count == 0 {
 					f64::NAN.into()
 				} else {
-					match sum {
+					match sum.wide() {
 						// An integer total (or one widened to an integer-scale
 						// decimal on i64 overflow) has a float mean, divided
 						// once in f64 as scalar and ad-hoc math::mean do.
-						Number::Int(x) => Number::Float(*x as f64 / *count as f64).into(),
-						Number::Float(x) => Number::Float(*x / *count as f64).into(),
-						Number::Decimal(d) if d.scale() == 0 => {
+						Wide::Int(x) => Number::Float(x as f64 / *count as f64).into(),
+						Wide::Float(x) => Number::Float(x / *count as f64).into(),
+						Wide::Decimal(d) if d.scale() == 0 => {
 							Number::Float(sum.to_float() / *count as f64).into()
 						}
-						Number::Decimal(_) => {
+						Wide::Decimal(_) => {
 							sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into()
 						}
 					}
@@ -2526,11 +2537,16 @@ pub fn backfill_stats(
 		Ok(value)
 	};
 	let count_of = || -> Result<i64> {
-		let Value::Number(Number::Int(count)) = at(BackfillValue::Aggregate(Aggregation::Count))?
-		else {
+		let Value::Number(n) = at(BackfillValue::Aggregate(Aggregation::Count))? else {
 			fail!("initial select statement did not return the right value")
 		};
-		Ok(*count)
+		match n.wide() {
+			Wide::Int(count) => Ok(count),
+			Wide::Float(_) => fail!("Count was not representable as an integer"),
+			Wide::Decimal(d) => {
+				i64::try_from(d).map_err(|_| anyhow!("Count was not representable as an integer"))
+			}
+		}
 	};
 	let number_count_of = |arg: usize| -> Result<i64> {
 		let Value::Number(Number::Int(count)) = at(BackfillValue::NumberCount(arg))? else {
@@ -2548,7 +2564,22 @@ pub fn backfill_stats(
 		match at(value)? {
 			Value::Datetime(d) => Ok(*d),
 			Value::None | Value::Null => Ok(empty),
-			_ => fail!("initial select statement did not return the right value"),
+			Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Uuid(_)
+			| Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => fail!("initial select statement did not return the right value"),
 		}
 	};
 	if !values.contains(&BackfillValue::Aggregate(Aggregation::Count)) {
@@ -2567,14 +2598,19 @@ pub fn backfill_stats(
 				count: count_of()?,
 			},
 			Aggregation::CountValue(arg) => {
-				let Value::Number(Number::Int(count)) =
-					at(BackfillValue::Aggregate(Aggregation::CountValue(arg)))?
+				let Value::Number(n) = at(BackfillValue::Aggregate(Aggregation::CountValue(arg)))?
 				else {
 					fail!("initial select statement did not return the right value")
 				};
+				let count = match n.wide() {
+					Wide::Int(count) => count,
+					Wide::Float(_) => fail!("Count was not representable as an integer"),
+					Wide::Decimal(d) => i64::try_from(d)
+						.map_err(|_| anyhow!("Count was not representable as an integer"))?,
+				};
 				AggregationStat::CountValue {
 					arg,
-					count: *count,
+					count,
 				}
 			}
 			Aggregation::NumberMax(arg) => AggregationStat::NumberMax {
@@ -2594,12 +2630,13 @@ pub fn backfill_stats(
 					.try_add(number_of(BackfillValue::Aggregate(Aggregation::Sum(arg)))?)?,
 			},
 			Aggregation::Mean(arg) => {
-				let sum = match number_of(BackfillValue::MeanSum(arg))? {
-					Number::Decimal(d) if d.scale() == 0 => {
+				let sum_n = number_of(BackfillValue::MeanSum(arg))?;
+				let sum = match sum_n.wide() {
+					Wide::Decimal(d) if d.scale() == 0 => {
 						i64::try_from(d).map(Number::Int).unwrap_or(Number::Decimal(d))
 					}
-					n @ Number::Int(_) | n @ Number::Float(_) | n @ Number::Decimal(_) => {
-						Number::Int(0).add_exact(n)?
+					Wide::Int(_) | Wide::Float(_) | Wide::Decimal(_) => {
+						Number::Int(0).add_exact(sum_n.widened())?
 					}
 				};
 				AggregationStat::Mean {
@@ -2779,7 +2816,8 @@ mod backfill_tests {
 			BackfillValue::SampleVariance(0),
 			BackfillValue::Aggregate(Aggregation::Count),
 		];
-		// Group of 5 records, only 2 numeric values [2, 4] -> sum = 6, mean = 3, sample variance = 2
+		// Group of 5 records, only 2 numeric values [2, 4] -> sum = 6, mean = 3, sample variance =
+		// 2
 		let computed = vec![
 			Value::from(6i64),
 			Value::from(2i64),

@@ -195,10 +195,10 @@ fn settle_thresholds(
 			Some(PhysOp::IndexUnion(attrs)) => attrs.topk.as_ref().map(|(key, _)| key),
 			Some(_) | None => None,
 		};
-		let keep_coarse = key
-			.is_some_and(|key| key.coarse_cutoff.is_some())
+		let keep_coarse = key.is_some_and(|key| key.coarse_cutoff.is_some())
 			&& pipeline_keeps_coarse_cutoff(ir, *pipeline, source);
-		if key.is_some_and(|key| key.rejects_entries || (key.coarse_cutoff.is_some() && !keep_coarse))
+		if key
+			.is_some_and(|key| key.rejects_entries || (key.coarse_cutoff.is_some() && !keep_coarse))
 		{
 			keyed.push((source, keep_coarse));
 		}
@@ -1509,10 +1509,7 @@ fn coarse_cutoff_safe(
 	let Some(sort_data) = ir.op(sort) else {
 		return false;
 	};
-	sort_data
-		.regions
-		.iter()
-		.all(|region| region_is_total_on_key_range(ir, *region, *region, key))
+	sort_data.regions.iter().all(|region| region_is_total_on_key_range(ir, *region, *region, key))
 }
 
 /// Whether every op in `region` (whose outer row-binding region is `root_region`) is total and
@@ -1535,22 +1532,14 @@ fn region_is_total_on_key_range(
 			if !data.regions.is_empty() {
 				return matches!(expr, ExprOp::ShortCircuit { .. })
 					&& data.regions.iter().all(|sub| {
-						ir.region(*sub)
-							.is_some_and(|info| info.kind == RegionKind::LazyOperand)
+						ir.region(*sub).is_some_and(|info| info.kind == RegionKind::LazyOperand)
 							&& region_is_total_on_key_range(ir, *sub, root_region, key)
 					});
 			}
 			if matches!(expr, ExprOp::Yield) {
 				true
-			} else if matches!(
-				expr,
-				ExprOp::Field {
-					..
-				} | ExprOp::Doc
-			) {
-				data.operands
-					.first()
-					.is_some_and(|row| is_row_of(ir, *row, root_region))
+			} else if matches!(expr, ExprOp::Field { .. } | ExprOp::Doc) {
+				data.operands.first().is_some_and(|row| is_row_of(ir, *row, root_region))
 			} else if matches!(expr, ExprOp::Index) {
 				matches!(
 					data.operands.as_slice(),

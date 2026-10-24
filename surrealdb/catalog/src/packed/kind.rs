@@ -134,6 +134,13 @@ pub(crate) fn ops(kind: PhysicalKind) -> &'static KindOps {
 			decode: decode_unsigned::<Build>,
 			check: decode_unsigned::<Check>,
 		},
+		PhysicalKind::F16 => &KindOps {
+			escape: None,
+			write: write_f16,
+			read: read_f16,
+			decode: decode_f16::<Build>,
+			check: decode_f16::<Check>,
+		},
 		PhysicalKind::F32 => &KindOps {
 			escape: None,
 			write: write_f32,
@@ -271,6 +278,7 @@ pub(crate) fn read<'a>(
 		PhysicalKind::U8 | PhysicalKind::U16 | PhysicalKind::U32 | PhysicalKind::U64 => {
 			read_unsigned(column, index, slot)
 		}
+		PhysicalKind::F16 => read_f16(column, index, slot),
 		PhysicalKind::F32 => read_f32(column, index, slot),
 		PhysicalKind::F64 => read_f64(column, index, slot),
 		PhysicalKind::Decimal16 => read_decimal16(column, index, slot),
@@ -325,35 +333,6 @@ pub(crate) fn duration_slot(d: &std::time::Duration) -> SlotFit<u64> {
 		Ok(ns) if ns != DURATION_ESCAPE => SlotFit::Fits(ns),
 		_ => SlotFit::Escape(DURATION_ESCAPE),
 	}
-}
-
-/// The `f64` an `F32` slot's bits stand for.
-///
-/// A NaN keeps its sign and mantissa bits, as the top of the `f64`'s, instead of going through a
-/// float conversion, whose treatment of a NaN's payload is unspecified.
-pub(crate) fn widen_f32(bits: u32) -> f64 {
-	let mantissa = bits & 0x007F_FFFF;
-	if (bits & 0x7F80_0000) == 0x7F80_0000 && mantissa != 0 {
-		f64::from_bits(
-			(u64::from(bits >> 31) << 63) | 0x7FF0_0000_0000_0000 | (u64::from(mantissa) << 29),
-		)
-	} else {
-		f64::from(f32::from_bits(bits))
-	}
-}
-
-/// The `F32` slot bits that stand for exactly `f`, when there are any: those whose widening has
-/// `f`'s own bits. A NaN keeps its sign and the top 23 bits of its mantissa, and fits only when the
-/// rest of its mantissa is zero; any other value fits when an `f32` holds it exactly.
-pub(crate) fn narrow_f32(f: f64) -> Option<u32> {
-	let bits = f.to_bits();
-	let candidate = if f.is_nan() {
-		// The mask keeps 23 bits, so the cast loses nothing.
-		(u32::from((bits >> 63) != 0) << 31) | 0x7F80_0000 | (((bits >> 29) & 0x007F_FFFF) as u32)
-	} else {
-		(f as f32).to_bits()
-	};
-	(widen_f32(candidate).to_bits() == bits).then_some(candidate)
 }
 
 /// The narrowest end-offset width in bytes, of 1, 2 and 4, whose maximum is at least `len`; `None`
@@ -444,34 +423,19 @@ fn decode_bool<M: Mode>(
 
 // Integers
 
-/// A little-endian two's complement integer of 1, 2, 4 or 8 bytes.
-fn le_signed(bytes: &[u8]) -> Option<i64> {
-	Some(match bytes.len() {
-		1 => i64::from(i8::from_le_bytes(array(bytes)?)),
-		2 => i64::from(i16::from_le_bytes(array(bytes)?)),
-		4 => i64::from(i32::from_le_bytes(array(bytes)?)),
-		8 => i64::from_le_bytes(array(bytes)?),
-		_ => return None,
-	})
-}
-
-/// A little-endian unsigned integer of 1, 2, 4 or 8 bytes.
-fn le_unsigned(bytes: &[u8]) -> Option<u64> {
-	Some(match bytes.len() {
-		1 => u64::from(u8::from_le_bytes(array(bytes)?)),
-		2 => u64::from(u16::from_le_bytes(array(bytes)?)),
-		4 => u64::from(u32::from_le_bytes(array(bytes)?)),
-		8 => u64::from_le_bytes(array(bytes)?),
-		_ => return None,
-	})
-}
-
 fn read_signed<'a>(
 	_column: &'a Column,
 	index: u32,
 	slot: Slot<'a>,
 ) -> Result<FieldRef<'a>, PackedError> {
-	le_signed(fixed(index, slot)?).map(FieldRef::Int).ok_or_else(|| wrong_shape(index))
+	let bytes = fixed(index, slot)?;
+	match bytes.len() {
+		1 => Ok(FieldRef::I8(i8::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		2 => Ok(FieldRef::I16(i16::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		4 => Ok(FieldRef::I32(i32::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		8 => Ok(FieldRef::Int(i64::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		_ => Err(wrong_shape(index)),
+	}
 }
 
 fn decode_signed<M: Mode>(
@@ -480,22 +444,41 @@ fn decode_signed<M: Mode>(
 	slot: Slot<'_>,
 	_depth: usize,
 ) -> Result<M::Out<Value>, PackedError> {
-	let v = le_signed(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?;
-	Ok(M::make(|| Value::Number(Number::Int(v))))
+	let bytes = fixed(index, slot)?;
+	match bytes.len() {
+		1 => {
+			let v = i8::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::I8(v))))
+		}
+		2 => {
+			let v = i16::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::I16(v))))
+		}
+		4 => {
+			let v = i32::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::I32(v))))
+		}
+		8 => {
+			let v = i64::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::Int(v))))
+		}
+		_ => Err(wrong_shape(index)),
+	}
 }
 
-/// Reads `U8` to `U64`. A value above `i64::MAX`, which only a `U64` slot can hold, is the exactly
-/// equal decimal.
 fn read_unsigned<'a>(
 	_column: &'a Column,
 	index: u32,
 	slot: Slot<'a>,
 ) -> Result<FieldRef<'a>, PackedError> {
-	let v = le_unsigned(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?;
-	Ok(match i64::try_from(v) {
-		Ok(int) => FieldRef::Int(int),
-		Err(_) => FieldRef::Decimal(Decimal::from(v)),
-	})
+	let bytes = fixed(index, slot)?;
+	match bytes.len() {
+		1 => Ok(FieldRef::U8(u8::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		2 => Ok(FieldRef::U16(u16::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		4 => Ok(FieldRef::U32(u32::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		8 => Ok(FieldRef::U64(u64::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?))),
+		_ => Err(wrong_shape(index)),
+	}
 }
 
 fn decode_unsigned<M: Mode>(
@@ -504,20 +487,47 @@ fn decode_unsigned<M: Mode>(
 	slot: Slot<'_>,
 	_depth: usize,
 ) -> Result<M::Out<Value>, PackedError> {
-	let v = le_unsigned(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?;
-	Ok(M::make(|| {
-		Value::Number(match i64::try_from(v) {
-			Ok(int) => Number::Int(int),
-			Err(_) => Number::Decimal(Decimal::from(v)),
-		})
-	}))
+	let bytes = fixed(index, slot)?;
+	match bytes.len() {
+		1 => {
+			let v = u8::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::U8(v))))
+		}
+		2 => {
+			let v = u16::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::U16(v))))
+		}
+		4 => {
+			let v = u32::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::U32(v))))
+		}
+		8 => {
+			let v = u64::from_le_bytes(array(bytes).ok_or_else(|| wrong_shape(index))?);
+			Ok(M::make(|| Value::Number(Number::U64(v))))
+		}
+		_ => Err(wrong_shape(index)),
+	}
 }
 
 // Floats
 
-fn f32_of(index: u32, slot: Slot<'_>) -> Result<f64, PackedError> {
-	let bits = u32::from_le_bytes(array(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?);
-	Ok(widen_f32(bits))
+fn read_f16<'a>(
+	_column: &'a Column,
+	index: u32,
+	slot: Slot<'a>,
+) -> Result<FieldRef<'a>, PackedError> {
+	let bits = u16::from_le_bytes(array(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?);
+	Ok(FieldRef::F16(crate::half::f16::from_bits(bits)))
+}
+
+fn decode_f16<M: Mode>(
+	_column: &Column,
+	index: u32,
+	slot: Slot<'_>,
+	_depth: usize,
+) -> Result<M::Out<Value>, PackedError> {
+	let bits = u16::from_le_bytes(array(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?);
+	Ok(M::make(|| Value::Number(Number::F16(crate::half::f16::from_bits(bits)))))
 }
 
 fn f64_of(index: u32, slot: Slot<'_>) -> Result<f64, PackedError> {
@@ -530,7 +540,8 @@ fn read_f32<'a>(
 	index: u32,
 	slot: Slot<'a>,
 ) -> Result<FieldRef<'a>, PackedError> {
-	f32_of(index, slot).map(FieldRef::Float)
+	let bits = u32::from_le_bytes(array(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?);
+	Ok(FieldRef::F32(f32::from_bits(bits)))
 }
 
 fn decode_f32<M: Mode>(
@@ -539,8 +550,8 @@ fn decode_f32<M: Mode>(
 	slot: Slot<'_>,
 	_depth: usize,
 ) -> Result<M::Out<Value>, PackedError> {
-	let v = f32_of(index, slot)?;
-	Ok(M::make(|| Value::Number(Number::Float(v))))
+	let bits = u32::from_le_bytes(array(fixed(index, slot)?).ok_or_else(|| wrong_shape(index))?);
+	Ok(M::make(|| Value::Number(Number::F32(f32::from_bits(bits)))))
 }
 
 fn read_f64<'a>(
@@ -1100,30 +1111,34 @@ fn write_bool(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written
 	}
 }
 
-/// Writes an `Int` into a slot of 1, 2, 4 or 8 bytes when it is in the slot's range.
+/// Writes a signed integer into its fixed slot.
 fn write_signed(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written, stored::Error> {
 	let slot = slot_of(dest)?;
 	let width = slot.len();
-	let Value::Number(Number::Int(v)) = value else {
+	let Value::Number(num) = value else {
 		return Ok(Written::Misfit);
 	};
-	let in_range = match width {
-		1 => i8::try_from(*v).is_ok(),
-		2 => i16::try_from(*v).is_ok(),
-		4 => i32::try_from(*v).is_ok(),
-		8 => true,
-		_ => return Err(wrong_dest()),
-	};
-	if !in_range {
-		return Ok(Written::Misfit);
+	match num {
+		Number::I8(v) if width == 1 => put(slot, &v.to_le_bytes()),
+		Number::I16(v) if width == 2 => put(slot, &v.to_le_bytes()),
+		Number::I32(v) if width == 4 => put(slot, &v.to_le_bytes()),
+		Number::Int(v) if width == 8 => put(slot, &v.to_le_bytes()),
+		Number::I8(_)
+		| Number::I16(_)
+		| Number::I32(_)
+		| Number::Int(_)
+		| Number::U8(_)
+		| Number::U16(_)
+		| Number::U32(_)
+		| Number::U64(_)
+		| Number::F16(_)
+		| Number::F32(_)
+		| Number::Float(_)
+		| Number::Decimal(_) => Ok(Written::Misfit),
 	}
-	// In range, the low bytes of the little-endian two's complement are the narrow integer's.
-	let bytes = v.to_le_bytes();
-	put(slot, bytes.get(..width).ok_or_else(wrong_dest)?)
 }
 
-/// Writes a non-negative `Int` into a slot of 1, 2, 4 or 8 bytes when it is in the slot's range. A
-/// decimal is never written, even an integral one: it would read back as an `Int`.
+/// Writes an unsigned integer into its fixed slot.
 fn write_unsigned(
 	_column: &Column,
 	value: &Value,
@@ -1131,34 +1146,68 @@ fn write_unsigned(
 ) -> Result<Written, stored::Error> {
 	let slot = slot_of(dest)?;
 	let width = slot.len();
-	let Value::Number(Number::Int(v)) = value else {
+	let Value::Number(num) = value else {
 		return Ok(Written::Misfit);
 	};
-	let Ok(v) = u64::try_from(*v) else {
-		return Ok(Written::Misfit);
-	};
-	let in_range = match width {
-		1 => u8::try_from(v).is_ok(),
-		2 => u16::try_from(v).is_ok(),
-		4 => u32::try_from(v).is_ok(),
-		8 => true,
-		_ => return Err(wrong_dest()),
-	};
-	if !in_range {
-		return Ok(Written::Misfit);
+	match num {
+		Number::U8(v) if width == 1 => put(slot, &v.to_le_bytes()),
+		Number::U16(v) if width == 2 => put(slot, &v.to_le_bytes()),
+		Number::U32(v) if width == 4 => put(slot, &v.to_le_bytes()),
+		Number::U64(v) if width == 8 => put(slot, &v.to_le_bytes()),
+		Number::I8(_)
+		| Number::I16(_)
+		| Number::I32(_)
+		| Number::Int(_)
+		| Number::U8(_)
+		| Number::U16(_)
+		| Number::U32(_)
+		| Number::U64(_)
+		| Number::F16(_)
+		| Number::F32(_)
+		| Number::Float(_)
+		| Number::Decimal(_) => Ok(Written::Misfit),
 	}
-	let bytes = v.to_le_bytes();
-	put(slot, bytes.get(..width).ok_or_else(wrong_dest)?)
+}
+
+fn write_f16(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written, stored::Error> {
+	let slot = slot_of(dest)?;
+	let Value::Number(num) = value else {
+		return Ok(Written::Misfit);
+	};
+	match num {
+		Number::F16(v) => put(slot, &v.to_bits().to_le_bytes()),
+		Number::I8(_)
+		| Number::I16(_)
+		| Number::I32(_)
+		| Number::Int(_)
+		| Number::U8(_)
+		| Number::U16(_)
+		| Number::U32(_)
+		| Number::U64(_)
+		| Number::F32(_)
+		| Number::Float(_)
+		| Number::Decimal(_) => Ok(Written::Misfit),
+	}
 }
 
 fn write_f32(_column: &Column, value: &Value, dest: Dest<'_>) -> Result<Written, stored::Error> {
 	let slot = slot_of(dest)?;
-	let Value::Number(Number::Float(f)) = value else {
+	let Value::Number(num) = value else {
 		return Ok(Written::Misfit);
 	};
-	match narrow_f32(*f) {
-		Some(bits) => put(slot, &bits.to_le_bytes()),
-		None => Ok(Written::Misfit),
+	match num {
+		Number::F32(v) => put(slot, &v.to_le_bytes()),
+		Number::I8(_)
+		| Number::I16(_)
+		| Number::I32(_)
+		| Number::Int(_)
+		| Number::U8(_)
+		| Number::U16(_)
+		| Number::U32(_)
+		| Number::U64(_)
+		| Number::F16(_)
+		| Number::Float(_)
+		| Number::Decimal(_) => Ok(Written::Misfit),
 	}
 }
 

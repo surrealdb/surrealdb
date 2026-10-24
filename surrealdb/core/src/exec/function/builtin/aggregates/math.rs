@@ -62,7 +62,7 @@ impl SumAccumulator {
 	/// Fold `n` into the total. A total leaving `i64` fails the group when it
 	/// is finalised: wrapping would answer with a number that is not the sum.
 	fn add(&mut self, n: Number) {
-		match self.sum.try_add(n) {
+		match self.sum.try_add(n.widened()) {
 			Ok(sum) => self.sum = sum,
 			Err(e) => self.rejected.fail(&e),
 		}
@@ -177,7 +177,7 @@ impl MeanAccumulator {
 	/// continue as a decimal. A total no decimal holds fails the group when it
 	/// is finalised.
 	fn add(&mut self, n: Number) {
-		match self.sum.add_exact(n) {
+		match self.sum.add_exact(n.widened()) {
 			Ok(sum) => self.sum = sum,
 			Err(e) => self.rejected.fail(&e),
 		}
@@ -648,9 +648,8 @@ impl Accumulator for SpreadAccumulator {
 				&mut self.sum,
 				&mut self.sum_of_squares,
 				&mut self.count,
-				n,
-			)
-		{
+				n.widened(),
+			) {
 			self.rejected.fail(&e);
 		}
 		Ok(())
@@ -818,7 +817,7 @@ impl Accumulator for MedianAccumulator {
 			Number::Float((a + b) / 2.0)
 		} else {
 			// Odd number of elements: middle value
-			sorted[len / 2]
+			sorted[len / 2].widened()
 		};
 
 		Ok(Value::Number(median))
@@ -1129,8 +1128,9 @@ mod tests {
 		let func = MathVariance;
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Number(Number::Decimal(Decimal::ZERO))).unwrap();
-		// Updating with Decimal::MAX causes delta * delta to overflow Decimal in shifted_accumulate.
-		// Even when callers ignore the update() result (as the VM does), finalize() must fail.
+		// Updating with Decimal::MAX causes delta * delta to overflow Decimal in
+		// shifted_accumulate. Even when callers ignore the update() result (as the VM does),
+		// finalize() must fail.
 		let _ = acc.update(Value::Number(Number::Decimal(Decimal::MAX)));
 		assert!(acc.finalize().is_err());
 	}

@@ -163,19 +163,13 @@ fn discards_statement_in_body(ir: &Ir, body: RegionId) -> bool {
 		let is_statement = matches!(
 			&data.kind,
 			OpKind::Logical(
-				LogOp::Statement {
-					..
-				}
-				| LogOp::Info {
-					..
-				}
-				| LogOp::Stmt {
-					..
-				}
-				| LogOp::Loop {
-					kind: LoopKind::Select | LoopKind::Write,
-					..
-				}
+				LogOp::Statement { .. }
+					| LogOp::Info { .. }
+					| LogOp::Stmt { .. }
+					| LogOp::Loop {
+						kind: LoopKind::Select | LoopKind::Write,
+						..
+					}
 			)
 		);
 		if !is_statement {
@@ -255,7 +249,8 @@ struct Plan {
 	elements: Vec<Value>,
 	/// Whether the sink is `Discard`; the sink is `Output` otherwise.
 	discard: bool,
-	/// The parameter name the loop binds its element to, when it is a `FOR` with a named parameter.
+	/// The parameter name the loop binds its element to, when it is a `FOR` with a named
+	/// parameter.
 	param: Option<Strand>,
 	/// The kind of the region of each iteration's block.
 	arms: RegionKind,

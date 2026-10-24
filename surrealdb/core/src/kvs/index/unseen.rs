@@ -58,6 +58,7 @@ impl IndexBuilder {
 	/// The future is built here and returned boxed, so that a caller on a deep
 	/// path holds a pointer to it, not its size.
 	#[inline(never)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn note_unseen_definition<'a>(
 		&'a self,
 		ctx: &'a FrozenContext,
@@ -71,6 +72,7 @@ impl IndexBuilder {
 		Box::pin(self.note_unseen_definition_body(ctx, opt, txn, at, ix, fresh, blocking))
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	async fn note_unseen_definition_body(
 		&self,
 		ctx: &FrozenContext,

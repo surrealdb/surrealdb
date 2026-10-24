@@ -66,6 +66,19 @@ pub fn decode_rows(rows: &EncodedRows) -> Result<Vec<Value>, TypesError> {
 			}
 			Ok(values)
 		}
+		RowFormat::Cbor2 => {
+			let mut reader = bytes;
+			let mut values = Vec::with_capacity(count);
+			for _ in 0..count {
+				let item: ciborium::Value = ciborium::de::from_reader_with_recursion_limit(
+					&mut reader,
+					DECODE_RECURSION_LIMIT,
+				)
+				.map_err(|e| fail(e.to_string()))?;
+				values.push(super::cbor::to_value_v2(item).map_err(|e| fail(e.to_string()))?);
+			}
+			Ok(values)
+		}
 		RowFormat::Json => {
 			let mut text = Vec::with_capacity(bytes.len() + 2);
 			text.push(b'[');
@@ -86,14 +99,14 @@ pub fn decode_rows(rows: &EncodedRows) -> Result<Vec<Value>, TypesError> {
 /// A dynamic slice of a shaped row: one CBOR item, read as the CBOR format
 /// reads one.
 pub fn decode_dynamic(bytes: &[u8]) -> Result<Value, String> {
-	super::cbor::decode_exact(bytes, DECODE_RECURSION_LIMIT).map_err(|e| e.to_string())
+	super::cbor::decode_exact_v2(bytes, DECODE_RECURSION_LIMIT).map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "shaped")]
 /// Write `value` as a dynamic slice of a shaped row: one CBOR item, as the
 /// CBOR format encodes it.
 pub fn encode_dynamic(value: &Value, out: &mut Vec<u8>) -> Result<(), ShapedError> {
-	let bytes = super::cbor::encode(value.clone()).map_err(|e| ShapedError(e.to_string()))?;
+	let bytes = super::cbor::encode_v2(value.clone()).map_err(|e| ShapedError(e.to_string()))?;
 	out.extend_from_slice(&bytes);
 	Ok(())
 }
@@ -130,7 +143,7 @@ fn shaped_item(
 					.map_err(|e| anyhow::anyhow!(e))?;
 				Ok(Value::Array(rows.into()))
 			} else {
-				super::cbor::to_value(ciborium::Value::Tag(tag, inner))
+				super::cbor::to_value_v2(ciborium::Value::Tag(tag, inner))
 			}
 		}
 		ciborium::Value::Map(entries) => {
@@ -150,22 +163,23 @@ fn shaped_item(
 				.collect::<anyhow::Result<Vec<_>>>()?
 				.into(),
 		)),
-		ciborium::Value::Integer(v) => super::cbor::to_value(ciborium::Value::Integer(v)),
-		ciborium::Value::Bytes(v) => super::cbor::to_value(ciborium::Value::Bytes(v)),
-		ciborium::Value::Float(v) => super::cbor::to_value(ciborium::Value::Float(v)),
-		ciborium::Value::Text(v) => super::cbor::to_value(ciborium::Value::Text(v)),
-		ciborium::Value::Bool(v) => super::cbor::to_value(ciborium::Value::Bool(v)),
-		ciborium::Value::Null => super::cbor::to_value(ciborium::Value::Null),
+		ciborium::Value::Integer(v) => super::cbor::to_value_v2(ciborium::Value::Integer(v)),
+		ciborium::Value::Bytes(v) => super::cbor::to_value_v2(ciborium::Value::Bytes(v)),
+		ciborium::Value::Float(v) => super::cbor::to_value_v2(ciborium::Value::Float(v)),
+		ciborium::Value::Text(v) => super::cbor::to_value_v2(ciborium::Value::Text(v)),
+		ciborium::Value::Bool(v) => super::cbor::to_value_v2(ciborium::Value::Bool(v)),
+		ciborium::Value::Null => super::cbor::to_value_v2(ciborium::Value::Null),
 		_ => anyhow::bail!("Encountered an unknown CBOR data type"),
 	}
 }
 
 /// Encode a public value in `format`, as the response encoder does.
 fn encode_public(format: RowFormat, value: Value, out: &mut Vec<u8>) -> anyhow::Result<()> {
-	if format.envelope() == RowFormat::Json {
-		out.extend_from_slice(super::json::encode_str(value)?.as_bytes());
-	} else {
-		out.extend_from_slice(&super::cbor::encode(value)?);
+	match format.envelope() {
+		RowFormat::Json => out.extend_from_slice(super::json::encode_str(value)?.as_bytes()),
+		RowFormat::Cbor => out.extend_from_slice(&super::cbor::encode(value)?),
+		RowFormat::Cbor2 => out.extend_from_slice(&super::cbor::encode_v2(value)?),
+		RowFormat::Shaped => unreachable!("envelope is never shaped"),
 	}
 	Ok(())
 }
@@ -352,7 +366,7 @@ fn write_rows(
 	out: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
 	match format {
-		RowFormat::Cbor => {
+		RowFormat::Cbor | RowFormat::Cbor2 => {
 			cbor_head(out, 4, rows.len() as u64);
 			out.extend_from_slice(rows.bytes());
 		}
@@ -598,8 +612,8 @@ pub fn encode_shaped_notification(
 		anyhow::bail!("a notification that is not an object");
 	};
 	let object = object.into_inner();
-	write_envelope(RowFormat::Cbor, id, session_id, |out| {
-		let mut writer = ObjectWriter::open(RowFormat::Cbor, out, object.len());
+	write_envelope(RowFormat::Cbor2, id, session_id, |out| {
+		let mut writer = ObjectWriter::open(RowFormat::Cbor2, out, object.len());
 		for (key, value) in object {
 			writer.key(&key)?;
 			if key == "result" {
@@ -922,6 +936,7 @@ pub(crate) mod tests {
 	fn encode_values(format: RowFormat, value: Value) -> Vec<u8> {
 		match format {
 			RowFormat::Cbor => super::super::cbor::encode(value).expect("encodes"),
+			RowFormat::Cbor2 => super::super::cbor::encode_v2(value).expect("encodes"),
 			RowFormat::Json => super::super::json::encode_str(value).expect("encodes").into_bytes(),
 			RowFormat::Shaped => unreachable!("shaped rows are compared decoded"),
 		}
@@ -933,7 +948,7 @@ pub(crate) mod tests {
 	#[tokio::test]
 	async fn an_encoded_response_is_byte_identical_to_one_built_from_values() {
 		let ds = datastore().await;
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		for format in [RowFormat::Cbor, RowFormat::Cbor2, RowFormat::Json] {
 			for sql in QUERIES {
 				let values =
 					untimed(ds.execute(sql, &session(), None).await.expect("the query runs"));
@@ -1028,7 +1043,7 @@ pub(crate) mod tests {
 			)
 			.expect("encodes")
 		};
-		for format in [RowFormat::Cbor, RowFormat::Json] {
+		for format in [RowFormat::Cbor, RowFormat::Cbor2, RowFormat::Json] {
 			for sql in QUERIES {
 				let mut by_value = StreamFrames::new();
 				for item in items(&ds, sql, None).await {

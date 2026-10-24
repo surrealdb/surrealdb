@@ -141,7 +141,16 @@ fn packed_numbers(
 		| FieldRef::Null
 		| FieldRef::Object
 		| FieldRef::Bool(_)
+		| FieldRef::I8(_)
+		| FieldRef::I16(_)
+		| FieldRef::I32(_)
 		| FieldRef::Int(_)
+		| FieldRef::U8(_)
+		| FieldRef::U16(_)
+		| FieldRef::U32(_)
+		| FieldRef::U64(_)
+		| FieldRef::F16(_)
+		| FieldRef::F32(_)
 		| FieldRef::Float(_)
 		| FieldRef::Decimal(_)
 		| FieldRef::Uuid(_)
@@ -178,7 +187,16 @@ fn packed_knn_vector(
 		FieldRef::Absent
 		| FieldRef::Null
 		| FieldRef::Bool(_)
+		| FieldRef::I8(_)
+		| FieldRef::I16(_)
+		| FieldRef::I32(_)
 		| FieldRef::Int(_)
+		| FieldRef::U8(_)
+		| FieldRef::U16(_)
+		| FieldRef::U32(_)
+		| FieldRef::U64(_)
+		| FieldRef::F16(_)
+		| FieldRef::F32(_)
 		| FieldRef::Float(_)
 		| FieldRef::Decimal(_)
 		| FieldRef::Uuid(_)
@@ -196,7 +214,16 @@ fn packed_knn_vector(
 		FieldRef::Absent
 		| FieldRef::Null
 		| FieldRef::Bool(_)
+		| FieldRef::I8(_)
+		| FieldRef::I16(_)
+		| FieldRef::I32(_)
 		| FieldRef::Int(_)
+		| FieldRef::U8(_)
+		| FieldRef::U16(_)
+		| FieldRef::U32(_)
+		| FieldRef::U64(_)
+		| FieldRef::F16(_)
+		| FieldRef::F32(_)
 		| FieldRef::Float(_)
 		| FieldRef::Decimal(_)
 		| FieldRef::Uuid(_)
@@ -483,7 +510,16 @@ impl RowReader for PackedRowReader<'_> {
 				Scalar::Value(Cow::Owned(Value::Object(self.row.decode_node(column)?)))
 			}
 			FieldRef::Bool(v) => Scalar::Bool(v),
+			FieldRef::I8(v) => Scalar::Number(Number::I8(v)),
+			FieldRef::I16(v) => Scalar::Number(Number::I16(v)),
+			FieldRef::I32(v) => Scalar::Number(Number::I32(v)),
 			FieldRef::Int(v) => Scalar::Number(Number::Int(v)),
+			FieldRef::U8(v) => Scalar::Number(Number::U8(v)),
+			FieldRef::U16(v) => Scalar::Number(Number::U16(v)),
+			FieldRef::U32(v) => Scalar::Number(Number::U32(v)),
+			FieldRef::U64(v) => Scalar::Number(Number::U64(v)),
+			FieldRef::F16(v) => Scalar::Number(Number::F16(v)),
+			FieldRef::F32(v) => Scalar::Number(Number::F32(v)),
 			FieldRef::Float(v) => Scalar::Number(Number::Float(v)),
 			FieldRef::Decimal(v) => Scalar::Number(Number::Decimal(v)),
 			FieldRef::Uuid(v) => Scalar::Uuid(Uuid(v)),
@@ -513,13 +549,52 @@ impl RowReader for PackedRowReader<'_> {
 		}
 		Ok(match self.read(name)?.1 {
 			FieldRef::Int(v) => Some(v),
+			FieldRef::I8(v) => Some(v as i64),
+			FieldRef::U8(v) => Some(v as i64),
+			FieldRef::I16(v) => Some(v as i64),
+			FieldRef::U16(v) => Some(v as i64),
+			FieldRef::I32(v) => Some(v as i64),
+			FieldRef::U32(v) => Some(v as i64),
+			FieldRef::U64(v) => i64::try_from(v).ok(),
 			// An integer a `Value` column holds, or a literal union's literal, is an integer.
 			FieldRef::Stored(v) => v.as_int()?,
-			FieldRef::Literal(Value::Number(Number::Int(v))) => Some(*v),
+			FieldRef::Literal(lit) => match lit {
+				Value::Number(Number::Int(v)) => Some(*v),
+				Value::Number(Number::I8(v)) => Some(*v as i64),
+				Value::Number(Number::U8(v)) => Some(*v as i64),
+				Value::Number(Number::I16(v)) => Some(*v as i64),
+				Value::Number(Number::U16(v)) => Some(*v as i64),
+				Value::Number(Number::I32(v)) => Some(*v as i64),
+				Value::Number(Number::U32(v)) => Some(*v as i64),
+				Value::Number(Number::U64(v)) => i64::try_from(*v).ok(),
+				Value::Number(
+					Number::F16(_) | Number::F32(_) | Number::Float(_) | Number::Decimal(_),
+				)
+				| Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Set(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Regex(_)
+				| Value::Range(_)
+				| Value::Closure(_) => None,
+			},
 			FieldRef::Absent
 			| FieldRef::Null
 			| FieldRef::Object
 			| FieldRef::Bool(_)
+			| FieldRef::F16(_)
+			| FieldRef::F32(_)
 			| FieldRef::Float(_)
 			| FieldRef::Decimal(_)
 			| FieldRef::Uuid(_)
@@ -528,7 +603,6 @@ impl RowReader for PackedRowReader<'_> {
 			| FieldRef::Point(..)
 			| FieldRef::String(_)
 			| FieldRef::Bytes(_)
-			| FieldRef::Literal(_)
 			| FieldRef::RecordId(..) => None,
 		})
 	}

@@ -977,7 +977,7 @@ impl WriteState {
 				}) => ControlFlow::Err(crate::dbs::executor::held_create_exists(key)),
 				_ => ControlFlow::Err(err),
 			},
-			other => other,
+			other @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => other,
 		};
 		if let Some(handler) = self.handlers.pop() {
 			self.failure = Some(failure);

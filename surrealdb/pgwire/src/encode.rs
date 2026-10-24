@@ -5,7 +5,7 @@ use std::str::FromStr;
 use chrono::Timelike as _;
 use rust_decimal::Decimal;
 use surrealdb_sqlplan::array_literal::{ArrayElement, is_array_space, parse_array_literal};
-use surrealdb_types::{Bytes, Datetime, Number, ToSql, Uuid, Value};
+use surrealdb_types::{Bytes, Datetime, Number, ToSql, Uuid, Value, Wide};
 
 use super::error::PgError;
 use super::typing::{PgType, base_type};
@@ -93,8 +93,11 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Int2 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as i16).to_string().into_bytes())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as i16).to_string().into_bytes()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<i16>().is_ok()
 			{
@@ -104,8 +107,11 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Int4 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as i32).to_string().into_bytes())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as i32).to_string().into_bytes()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<i32>().is_ok()
 			{
@@ -115,8 +121,11 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Int8 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok(i.to_string().into_bytes())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok(i.to_string().into_bytes()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<i64>().is_ok()
 			{
@@ -126,8 +135,11 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Oid | PgType::Regclass => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as u32).to_string().into_bytes())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as u32).to_string().into_bytes()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(s) = value {
 				Ok(s.into_bytes())
 			} else {
@@ -135,10 +147,16 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Float4 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok(float_text(i as f64))
-			} else if let Value::Number(Number::Float(f)) = value {
-				Ok(float_text(f))
+			if let Value::Number(n) = value {
+				if let Number::F32(f) = n {
+					Ok(float32_text(f))
+				} else {
+					match n.wide() {
+						Wide::Int(i) => Ok(float_text(i as f64)),
+						Wide::Float(f) => Ok(float_text(f)),
+						Wide::Decimal(_) => Err(mismatch(&value, ty)),
+					}
+				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<f32>().is_ok()
 			{
@@ -148,10 +166,16 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Float8 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok(float_text(i as f64))
-			} else if let Value::Number(Number::Float(f)) = value {
-				Ok(float_text(f))
+			if let Value::Number(n) = value {
+				if let Number::F32(f) = n {
+					Ok(float32_text(f))
+				} else {
+					match n.wide() {
+						Wide::Int(i) => Ok(float_text(i as f64)),
+						Wide::Float(f) => Ok(float_text(f)),
+						Wide::Decimal(_) => Err(mismatch(&value, ty)),
+					}
+				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<f64>().is_ok()
 			{
@@ -162,10 +186,14 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 		}
 		PgType::Numeric => {
 			if let Value::Number(n) = value {
-				match n {
-					Number::Int(i) => Ok(i.to_string().into_bytes()),
-					Number::Decimal(d) => Ok(d.to_string().into_bytes()),
-					Number::Float(f) => Ok(numeric_float_text(f)),
+				if let Number::F32(f) = n {
+					Ok(numeric_float32_text(f))
+				} else {
+					match n.wide() {
+						Wide::Int(i) => Ok(i.to_string().into_bytes()),
+						Wide::Decimal(d) => Ok(d.to_string().into_bytes()),
+						Wide::Float(f) => Ok(numeric_float_text(f)),
+					}
 				}
 			} else if let Value::String(s) = value {
 				Ok(s.into_bytes())
@@ -177,8 +205,11 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			if let Value::String(s) = value {
 				let first = s.chars().next().unwrap_or('\0');
 				Ok(first.to_string().into_bytes())
-			} else if let Value::Number(Number::Int(i)) = value {
-				Ok(vec![i as u8])
+			} else if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok(vec![i as u8]),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else {
 				Err(mismatch(&value, ty))
 			}
@@ -444,8 +475,24 @@ fn float_display(f: f64) -> String {
 	}
 }
 
+fn float32_display(f: f32) -> String {
+	if f.is_nan() {
+		"NaN".to_string()
+	} else if f == f32::INFINITY {
+		"Infinity".to_string()
+	} else if f == f32::NEG_INFINITY {
+		"-Infinity".to_string()
+	} else {
+		format!("{f}")
+	}
+}
+
 fn float_text(f: f64) -> Vec<u8> {
 	float_display(f).into_bytes()
+}
+
+fn float32_text(f: f32) -> Vec<u8> {
+	float32_display(f).into_bytes()
 }
 
 /// Render a float for a `numeric` column. Non-finite values fall back to
@@ -453,6 +500,14 @@ fn float_text(f: f64) -> Vec<u8> {
 fn numeric_float_text(f: f64) -> Vec<u8> {
 	if f.is_finite() {
 		float_display(f).into_bytes()
+	} else {
+		b"NaN".to_vec()
+	}
+}
+
+fn numeric_float32_text(f: f32) -> Vec<u8> {
+	if f.is_finite() {
+		float32_display(f).into_bytes()
 	} else {
 		b"NaN".to_vec()
 	}
@@ -776,8 +831,11 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Int2 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as i16).to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as i16).to_be_bytes().to_vec()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(s) = value {
 				match s.parse::<i16>() {
 					Ok(i) => Ok(i.to_be_bytes().to_vec()),
@@ -788,8 +846,11 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Int4 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as i32).to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as i32).to_be_bytes().to_vec()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(s) = value {
 				match s.parse::<i32>() {
 					Ok(i) => Ok(i.to_be_bytes().to_vec()),
@@ -800,8 +861,11 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Int8 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok(i.to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok(i.to_be_bytes().to_vec()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(s) = value {
 				match s.parse::<i64>() {
 					Ok(i) => Ok(i.to_be_bytes().to_vec()),
@@ -812,8 +876,11 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Oid | PgType::Regclass => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as u32).to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as u32).to_be_bytes().to_vec()),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else if let Value::String(s) = value {
 				match s.parse::<u32>() {
 					Ok(u) => Ok(u.to_be_bytes().to_vec()),
@@ -824,29 +891,37 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Float4 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as f32).to_be_bytes().to_vec())
-			} else if let Value::Number(Number::Float(f)) = value {
-				Ok((f as f32).to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as f32).to_be_bytes().to_vec()),
+					Wide::Float(f) => Ok((f as f32).to_be_bytes().to_vec()),
+					Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else {
 				Err(mismatch(&value, ty))
 			}
 		}
 		PgType::Float8 => {
-			if let Value::Number(Number::Int(i)) = value {
-				Ok((i as f64).to_be_bytes().to_vec())
-			} else if let Value::Number(Number::Float(f)) = value {
-				Ok(f.to_be_bytes().to_vec())
+			if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok((i as f64).to_be_bytes().to_vec()),
+					Wide::Float(f) => Ok(f.to_be_bytes().to_vec()),
+					Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else {
 				Err(mismatch(&value, ty))
 			}
 		}
 		PgType::Numeric => {
 			if let Value::Number(n) = value {
-				match n {
-					Number::Decimal(d) => Ok(encode_numeric_binary(&d.to_string())),
-					Number::Int(i) => Ok(encode_numeric_binary(&i.to_string())),
-					Number::Float(f) => Ok(encode_numeric_binary(&float_display(f))),
+				if let Number::F32(f) = n {
+					Ok(encode_numeric_binary(&float32_display(f)))
+				} else {
+					match n.wide() {
+						Wide::Decimal(d) => Ok(encode_numeric_binary(&d.to_string())),
+						Wide::Int(i) => Ok(encode_numeric_binary(&i.to_string())),
+						Wide::Float(f) => Ok(encode_numeric_binary(&float_display(f))),
+					}
 				}
 			} else if let Value::String(s) = value {
 				Ok(encode_numeric_binary(&s))
@@ -857,8 +932,11 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 		PgType::Char => {
 			if let Value::String(s) = value {
 				Ok(vec![s.bytes().next().unwrap_or(0)])
-			} else if let Value::Number(Number::Int(i)) = value {
-				Ok(vec![i as u8])
+			} else if let Value::Number(n) = value {
+				match n.wide() {
+					Wide::Int(i) => Ok(vec![i as u8]),
+					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
+				}
 			} else {
 				Err(mismatch(&value, ty))
 			}
@@ -1059,8 +1137,6 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 	}
 }
 
-/// Encode a decimal string (e.g. `-123.45`, `0.001`, `42`) into the Postgres
-/// `numeric` binary wire format: ndigits, weight, sign, dscale, then the
 /// Encode a decimal string (e.g. `-123.45`, `0.001`, `42`) into the Postgres
 /// `numeric` binary wire format: ndigits, weight, sign, dscale, then the
 /// base-10000 digit groups (most significant first). Non-finite forms

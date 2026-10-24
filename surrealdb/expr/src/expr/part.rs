@@ -55,6 +55,15 @@ impl Part {
 			Literal::Integer(i) => Some(*i as usize),
 			Literal::Float(f) => Some(*f as usize),
 			Literal::Decimal(d) => Some(usize::try_from(*d).unwrap_or_default()),
+			Literal::I8(i) => Some(*i as usize),
+			Literal::U8(u) => Some(*u as usize),
+			Literal::I16(i) => Some(*i as usize),
+			Literal::U16(u) => Some(*u as usize),
+			Literal::I32(i) => Some(*i as usize),
+			Literal::U32(u) => Some(*u as usize),
+			Literal::U64(u) => Some(*u as usize),
+			Literal::F16(f) => Some(f.to_f32() as usize),
+			Literal::F32(f) => Some(*f as usize),
 			Literal::None
 			| Literal::Null
 			| Literal::UnboundedRange

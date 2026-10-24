@@ -331,6 +331,15 @@ impl Expr {
 				surrealdb_types::Number::Int(i) => Expr::Literal(Literal::Integer(i)),
 				surrealdb_types::Number::Float(f) => Expr::Literal(Literal::Float(f)),
 				surrealdb_types::Number::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+				surrealdb_types::Number::I8(i) => Expr::Literal(Literal::I8(i)),
+				surrealdb_types::Number::U8(u) => Expr::Literal(Literal::U8(u)),
+				surrealdb_types::Number::I16(i) => Expr::Literal(Literal::I16(i)),
+				surrealdb_types::Number::U16(u) => Expr::Literal(Literal::U16(u)),
+				surrealdb_types::Number::I32(i) => Expr::Literal(Literal::I32(i)),
+				surrealdb_types::Number::U32(u) => Expr::Literal(Literal::U32(u)),
+				surrealdb_types::Number::U64(u) => Expr::Literal(Literal::U64(u)),
+				surrealdb_types::Number::F16(f) => Expr::Literal(Literal::F16(f)),
+				surrealdb_types::Number::F32(f) => Expr::Literal(Literal::F32(f)),
 			},
 			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s.into())),
 			surrealdb_types::Value::Bytes(b) => {
@@ -537,6 +546,15 @@ impl Expr {
 				| Literal::Float(_)
 				| Literal::Integer(_)
 				| Literal::Decimal(_)
+				| Literal::I8(_)
+				| Literal::U8(_)
+				| Literal::I16(_)
+				| Literal::U16(_)
+				| Literal::I32(_)
+				| Literal::U32(_)
+				| Literal::U64(_)
+				| Literal::F16(_)
+				| Literal::F32(_)
 				| Literal::Bytes(_)
 				| Literal::Regex(_)
 				| Literal::RecordId(_)
@@ -682,6 +700,15 @@ impl Expr {
 				| Literal::Float(_)
 				| Literal::Integer(_)
 				| Literal::Decimal(_)
+				| Literal::I8(_)
+				| Literal::U8(_)
+				| Literal::I16(_)
+				| Literal::U16(_)
+				| Literal::I32(_)
+				| Literal::U32(_)
+				| Literal::U64(_)
+				| Literal::F16(_)
+				| Literal::F32(_)
 				| Literal::String(_)
 				| Literal::Bytes(_)
 				| Literal::Regex(_)
@@ -749,6 +776,11 @@ impl Expr {
 			Expr::Literal(Literal::Integer(x)) => x.is_negative(),
 			Expr::Literal(Literal::Float(x)) => x.is_sign_negative(),
 			Expr::Literal(Literal::Decimal(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::I8(x)) => x.is_negative(),
+			Expr::Literal(Literal::I16(x)) => x.is_negative(),
+			Expr::Literal(Literal::I32(x)) => x.is_negative(),
+			Expr::Literal(Literal::F16(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::F32(x)) => x.is_sign_negative(),
 			Expr::Idiom(x) => {
 				if let Some(x) = x.0.first()
 					&& let Part::Lookup(lookup) = x
@@ -762,6 +794,10 @@ impl Expr {
 				Literal::None
 				| Literal::Null
 				| Literal::Bool(_)
+				| Literal::U8(_)
+				| Literal::U16(_)
+				| Literal::U32(_)
+				| Literal::U64(_)
 				| Literal::String(_)
 				| Literal::Bytes(_)
 				| Literal::Regex(_)

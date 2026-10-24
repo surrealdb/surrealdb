@@ -284,15 +284,7 @@ fn regions_are_repeatable(
 
 /// Whether `data` is a total expression op within a right-chain region.
 fn is_total_region_op(ir: &Ir, data: &OpData, kind: &ExprOp) -> bool {
-	is_total_form(ir, data)
-		|| matches!(
-			kind,
-			ExprOp::If
-				| ExprOp::Doc
-				| ExprOp::SetField {
-					..
-				}
-		)
+	is_total_form(ir, data) || matches!(kind, ExprOp::If | ExprOp::Doc | ExprOp::SetField { .. })
 }
 
 /// The ops of `block` that stand for the ops `chain` names, each once, in the order the block

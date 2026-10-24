@@ -152,6 +152,13 @@ pub(crate) fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 		LogicalExpr::Array(_) => true,
 		LogicalExpr::Literal(
 			LogicalLiteral::Integer(_)
+			| LogicalLiteral::I8(_)
+			| LogicalLiteral::U8(_)
+			| LogicalLiteral::I16(_)
+			| LogicalLiteral::U16(_)
+			| LogicalLiteral::I32(_)
+			| LogicalLiteral::U32(_)
+			| LogicalLiteral::U64(_)
 			| LogicalLiteral::Bool(_)
 			| LogicalLiteral::String(_)
 			| LogicalLiteral::Duration(_)
@@ -160,7 +167,9 @@ pub(crate) fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 			| LogicalLiteral::None
 			| LogicalLiteral::Null
 			| LogicalLiteral::Decimal(_)
-			| LogicalLiteral::Float(_),
+			| LogicalLiteral::Float(_)
+			| LogicalLiteral::F16(_)
+			| LogicalLiteral::F32(_),
 		) => true,
 		LogicalExpr::RecordId(_) => true,
 		LogicalExpr::Param(_) | LogicalExpr::Call(_) => true,
@@ -302,7 +311,17 @@ pub(crate) fn is_rankable_query_vector(vector: &[Number]) -> bool {
 	!vector.is_empty()
 		&& vector.iter().all(|n| match n {
 			Number::Float(f) => f.is_finite(),
-			Number::Int(_) | Number::Decimal(_) => true,
+			Number::F16(f) => f.is_finite(),
+			Number::F32(f) => f.is_finite(),
+			Number::Int(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::Decimal(_) => true,
 		})
 }
 
@@ -984,7 +1003,16 @@ fn extract_literal_vector(expr: &LogicalExpr) -> Option<Vec<Number>> {
 	for elem in items {
 		match elem {
 			LogicalExpr::Literal(LogicalLiteral::Integer(i)) => nums.push(Number::Int(*i)),
+			LogicalExpr::Literal(LogicalLiteral::I8(i)) => nums.push(Number::I8(*i)),
+			LogicalExpr::Literal(LogicalLiteral::U8(u)) => nums.push(Number::U8(*u)),
+			LogicalExpr::Literal(LogicalLiteral::I16(i)) => nums.push(Number::I16(*i)),
+			LogicalExpr::Literal(LogicalLiteral::U16(u)) => nums.push(Number::U16(*u)),
+			LogicalExpr::Literal(LogicalLiteral::I32(i)) => nums.push(Number::I32(*i)),
+			LogicalExpr::Literal(LogicalLiteral::U32(u)) => nums.push(Number::U32(*u)),
+			LogicalExpr::Literal(LogicalLiteral::U64(u)) => nums.push(Number::U64(*u)),
 			LogicalExpr::Literal(LogicalLiteral::Float(f)) => nums.push(Number::Float(*f)),
+			LogicalExpr::Literal(LogicalLiteral::F16(f)) => nums.push(Number::F16(*f)),
+			LogicalExpr::Literal(LogicalLiteral::F32(f)) => nums.push(Number::F32(*f)),
 			LogicalExpr::Literal(LogicalLiteral::Decimal(d)) => nums.push(Number::Decimal(*d)),
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Array(_)

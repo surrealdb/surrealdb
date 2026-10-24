@@ -70,7 +70,7 @@ pub use self::identical::{same_object_except, same_record_id, same_record_key, s
 pub use self::key_encoding::{
 	encode_datetime_second_prefix, try_array_key_prefix, try_encode_component,
 };
-pub use self::number::Number;
+pub use self::number::{Number, NumberKind, Wide};
 pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordAddress, RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
@@ -520,6 +520,15 @@ impl Value {
 			Self::Number(Number::Int(_)) => "int",
 			Self::Number(Number::Float(_)) => "float",
 			Self::Number(Number::Decimal(_)) => "decimal",
+			Self::Number(Number::I8(_)) => "i8",
+			Self::Number(Number::U8(_)) => "u8",
+			Self::Number(Number::I16(_)) => "i16",
+			Self::Number(Number::U16(_)) => "u16",
+			Self::Number(Number::I32(_)) => "i32",
+			Self::Number(Number::U32(_)) => "u32",
+			Self::Number(Number::U64(_)) => "u64",
+			Self::Number(Number::F16(_)) => "f16",
+			Self::Number(Number::F32(_)) => "f32",
 			Self::Geometry(Geometry::Point(_)) => "geometry<point>",
 			Self::Geometry(Geometry::Line(_)) => "geometry<line>",
 			Self::Geometry(Geometry::Polygon(_)) => "geometry<polygon>",
@@ -916,6 +925,15 @@ impl Value {
 			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
 			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
 			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
+			Value::Number(Number::I8(i)) => expr::Expr::Literal(expr::Literal::I8(i)),
+			Value::Number(Number::U8(u)) => expr::Expr::Literal(expr::Literal::U8(u)),
+			Value::Number(Number::I16(i)) => expr::Expr::Literal(expr::Literal::I16(i)),
+			Value::Number(Number::U16(u)) => expr::Expr::Literal(expr::Literal::U16(u)),
+			Value::Number(Number::I32(i)) => expr::Expr::Literal(expr::Literal::I32(i)),
+			Value::Number(Number::U32(u)) => expr::Expr::Literal(expr::Literal::U32(u)),
+			Value::Number(Number::U64(u)) => expr::Expr::Literal(expr::Literal::U64(u)),
+			Value::Number(Number::F16(f)) => expr::Expr::Literal(expr::Literal::F16(f)),
+			Value::Number(Number::F32(f)) => expr::Expr::Literal(expr::Literal::F32(f)),
 			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand)),
 			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
 			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
@@ -1065,49 +1083,51 @@ impl TryMul for Value {
 	fn try_mul(self, other: Self) -> Result<Self> {
 		match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_mul(w)?)),
-			(Self::Duration(d), Self::Number(Number::Int(i))) => {
-				if i < 0 {
-					bail!("Cannot multiply a duration with a negative number");
+			(Self::Duration(d), Self::Number(n)) => match n.wide() {
+				crate::val::number::Wide::Int(i) => {
+					if i < 0 {
+						bail!("Cannot multiply a duration with a negative number");
+					}
+
+					let overflow = || Error::ArithmeticOverflow(format!("{d} * {n}"));
+					let nanos = d.0.as_nanos().checked_mul(i as u128).ok_or_else(overflow)?;
+					let secs = u64::try_from(nanos / 1_000_000_000).map_err(|_| overflow())?;
+					let res = StdDuration::new(secs, (nanos % 1_000_000_000) as u32);
+
+					Ok(Value::Duration(Duration(res)))
 				}
+				crate::val::number::Wide::Float(f) => {
+					if !(f.is_finite() && f >= 0.0) {
+						bail!("Cannot multiply a duration with a non-finite or negative number");
+					}
 
-				let overflow = || Error::ArithmeticOverflow(format!("{d} * {i}"));
-				let nanos = d.0.as_nanos().checked_mul(i as u128).ok_or_else(overflow)?;
-				let secs = u64::try_from(nanos / 1_000_000_000).map_err(|_| overflow())?;
-				let res = StdDuration::new(secs, (nanos % 1_000_000_000) as u32);
+					let secs = d.0.as_secs_f64() * f;
+					let res = StdDuration::try_from_secs_f64(secs)
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
 
-				Ok(Value::Duration(Duration(res)))
-			}
-			(Self::Duration(d), Self::Number(Number::Float(f))) => {
-				if !(f.is_finite() && f >= 0.0) {
-					bail!("Cannot multiply a duration with a non-finite or negative number");
+					Ok(Value::Duration(Duration(res)))
 				}
+				crate::val::number::Wide::Decimal(dec) => {
+					if !dec.is_sign_positive() && !dec.is_zero() {
+						bail!("Cannot multiply a duration with a negative number");
+					}
 
-				let secs = d.0.as_secs_f64() * f;
-				let res = StdDuration::try_from_secs_f64(secs)
-					.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {f}")))?;
+					let nanos: Decimal = d.nanos().into();
+					let scaled = (nanos * dec).trunc();
 
-				Ok(Value::Duration(Duration(res)))
-			}
-			(Self::Duration(d), Self::Number(Number::Decimal(dec))) => {
-				if !dec.is_sign_positive() && !dec.is_zero() {
-					bail!("Cannot multiply a duration with a negative number");
+					let scaled_nanos: u128 = scaled
+						.to_u128()
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
+
+					let secs: u64 = (scaled_nanos / 1_000_000_000)
+						.try_into()
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
+
+					let subsec_nanos: u32 = (scaled_nanos % 1_000_000_000).try_into()?;
+
+					Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 				}
-
-				let nanos: Decimal = d.nanos().into();
-				let scaled = (nanos * dec).trunc();
-
-				let scaled_nanos: u128 = scaled
-					.to_u128()
-					.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
-
-				let secs: u64 = (scaled_nanos / 1_000_000_000)
-					.try_into()
-					.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
-
-				let subsec_nanos: u32 = (scaled_nanos % 1_000_000_000).try_into()?;
-
-				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
-			}
+			},
 			(v, w) => bail!(Error::TryMul(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		}
 	}
@@ -1125,45 +1145,47 @@ impl TryDiv for Value {
 	fn try_div(self, other: Self) -> Result<Self> {
 		match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_div(w)?)),
-			(Self::Duration(d), Self::Number(Number::Int(i))) => {
-				if i <= 0 {
-					bail!("A duration can only be divided by a value greater than 0.");
+			(Self::Duration(d), Self::Number(n)) => match n.wide() {
+				crate::val::number::Wide::Int(i) => {
+					if i <= 0 {
+						bail!("A duration can only be divided by a value greater than 0.");
+					}
+
+					let denom: u32 = i.try_into()?;
+					let res = d.0 / denom;
+					Ok(Value::Duration(Duration(res)))
 				}
+				crate::val::number::Wide::Float(f) => {
+					if !(f.is_finite() && f > 0.0) {
+						bail!("A duration can only be divided by a finite value greater than 0.");
+					}
+					let secs = d.as_secs_f64() / f;
 
-				let denom: u32 = i.try_into()?;
-				let res = d.0 / denom;
-				Ok(Value::Duration(Duration(res)))
-			}
-			(Self::Duration(d), Self::Number(Number::Float(f))) => {
-				if !(f.is_finite() && f > 0.0) {
-					bail!("A duration can only be divided by a finite value greater than 0.");
+					let res = StdDuration::try_from_secs_f64(secs)?;
+					Ok(Value::Duration(Duration(res)))
 				}
-				let secs = d.as_secs_f64() / f;
+				crate::val::number::Wide::Decimal(dec) => {
+					if !dec.is_sign_positive() || dec.is_zero() {
+						bail!("A duration can only be divided by a value greater than 0.");
+					}
 
-				let res = StdDuration::try_from_secs_f64(secs)?;
-				Ok(Value::Duration(Duration(res)))
-			}
-			(Self::Duration(d), Self::Number(Number::Decimal(dec))) => {
-				if !dec.is_sign_positive() || dec.is_zero() {
-					bail!("A duration can only be divided by a value greater than 0.");
+					let nanos: Decimal = d.nanos().into();
+
+					let divided = (nanos / dec).trunc();
+
+					let divided_nanos: u128 = divided
+						.to_u128()
+						.ok_or_else(|| anyhow::anyhow!("Resulting duration is out of range"))?;
+
+					let secs: u64 = (divided_nanos / 1_000_000_000)
+						.try_into()
+						.map_err(|_| anyhow::anyhow!("Resulting duration seconds out of range"))?;
+
+					let subsec_nanos: u32 = (divided_nanos % 1_000_000_000).try_into()?;
+
+					Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 				}
-
-				let nanos: Decimal = d.nanos().into();
-
-				let divided = (nanos / dec).trunc();
-
-				let divided_nanos: u128 = divided
-					.to_u128()
-					.ok_or_else(|| anyhow::anyhow!("Resulting duration is out of range"))?;
-
-				let secs: u64 = (divided_nanos / 1_000_000_000)
-					.try_into()
-					.map_err(|_| anyhow::anyhow!("Resulting duration seconds out of range"))?;
-
-				let subsec_nanos: u32 = (divided_nanos % 1_000_000_000).try_into()?;
-
-				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
-			}
+			},
 
 			(v, w) => bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		}
@@ -1389,6 +1411,12 @@ macro_rules! impl_from_number {
 	};
 }
 impl_from_number!(i8, i16, i32, i64, u8, u16, u32, isize, f32, f64, Decimal);
+
+impl From<half::f16> for Value {
+	fn from(v: half::f16) -> Self {
+		Value::Number(Number::from(v))
+	}
+}
 
 impl From<Vec<Value>> for Value {
 	fn from(value: Vec<Value>) -> Self {
@@ -1821,12 +1849,7 @@ fn convert_value_to_public_value_at(
 }
 
 fn convert_number_to_public(value: crate::val::Number) -> Result<surrealdb_types::Value> {
-	let number = match value {
-		crate::val::Number::Int(i) => surrealdb_types::Number::Int(i),
-		crate::val::Number::Float(f) => surrealdb_types::Number::Float(f),
-		crate::val::Number::Decimal(d) => surrealdb_types::Number::Decimal(d),
-	};
-	Ok(surrealdb_types::Value::Number(number))
+	Ok(surrealdb_types::Value::Number(surrealdb_types::Number::from(value)))
 }
 
 fn convert_datetime_to_public(value: crate::val::Datetime) -> Result<surrealdb_types::Value> {

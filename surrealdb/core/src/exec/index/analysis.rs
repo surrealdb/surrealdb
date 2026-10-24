@@ -4433,7 +4433,8 @@ mod tests {
 				}
 			);
 
-			// `b != 99` or `b > 0` before `b = 5` must still extend the equality prefix through `b` and `c`.
+			// `b != 99` or `b > 0` before `b = 5` must still extend the equality prefix through `b`
+			// and `c`.
 			for text in [
 				"a != 99 AND a = 1 AND b != 99 AND b = 5 AND c = 3",
 				"a = 1 AND b > 0 AND b = 5 AND c = 3",

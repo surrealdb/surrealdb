@@ -25,10 +25,10 @@ use rust_decimal::Decimal;
 
 use crate::val::{Number, Value};
 
-/// Inner [`Number`] discriminant on the rev-1 wire. Mirrors the
+/// Inner [`Number`] discriminant on the rev-1 / rev-2 wire. Mirrors the
 /// declaration order of [`crate::val::Number`] and is what
 /// `<Number as SerializeRevisioned>` emits as a single varint byte for
-/// values `< 251` (which the three variants we have today always satisfy).
+/// values `< 251` (which the twelve variants we have today always satisfy).
 ///
 /// Used by [`LiteralWire::Number`] to pre-extract the literal's
 /// sub-variant at plan time, so the wire comparator can decide a
@@ -39,6 +39,7 @@ pub(crate) enum NumberSubVariant {
 	Int = 0,
 	Float = 1,
 	Decimal = 2,
+	Sized = 3,
 }
 
 impl NumberSubVariant {
@@ -48,11 +49,20 @@ impl NumberSubVariant {
 			Number::Int(_) => NumberSubVariant::Int,
 			Number::Float(_) => NumberSubVariant::Float,
 			Number::Decimal(_) => NumberSubVariant::Decimal,
+			Number::I8(_)
+			| Number::I16(_)
+			| Number::I32(_)
+			| Number::U8(_)
+			| Number::U16(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_) => NumberSubVariant::Sized,
 		}
 	}
 
 	/// Decode a sub-variant from a raw wire byte, returning [`None`] for
-	/// any value not in `{0, 1, 2}`. Hardens against truncated /
+	/// any value not in `0..=11`. Hardens against truncated /
 	/// corrupted Number payloads — a non-matching byte means we can't
 	/// claim same-sub-variant safely.
 	#[inline]
@@ -61,6 +71,7 @@ impl NumberSubVariant {
 			0 => Some(NumberSubVariant::Int),
 			1 => Some(NumberSubVariant::Float),
 			2 => Some(NumberSubVariant::Decimal),
+			3..=11 => Some(NumberSubVariant::Sized),
 			_ => None,
 		}
 	}
@@ -121,8 +132,8 @@ pub(crate) enum LiteralWire {
 	/// only short-circuits when the runtime value's variant matches the
 	/// literal's. The fallback path catches cross-variant cases.
 	///
-	/// `sub_variant_id` is the inner [`crate::val::Number`] discriminant
-	/// (`0 = Int`, `1 = Float`, `2 = Decimal`), pre-extracted at plan time
+	/// `sub_variant_id` is the inner [`crate::val::Number`] sub-variant class
+	/// (`Int`, `Float`, `Decimal`, or `Sized`), pre-extracted at plan time
 	/// so the per-row wire comparator can peek the runtime value's
 	/// sub-variant in one byte read and decide:
 	///
@@ -225,20 +236,48 @@ impl LiteralWire {
 					utf8_range: start..end,
 				}
 			}
-			Value::Number(n) => {
+			Value::Number(
+				Number::I8(_)
+				| Number::U8(_)
+				| Number::I16(_)
+				| Number::U16(_)
+				| Number::I32(_)
+				| Number::U32(_)
+				| Number::U64(_)
+				| Number::F16(_)
+				| Number::F32(_),
+			) => LiteralWire::Other,
+			Value::Number(Number::Int(i)) => {
 				let mut full = Vec::new();
 				lit.serialize_revisioned(&mut full)
 					.expect("serialize Value::Number never errors into Vec");
-				let (int_value, decimal_value) = match n {
-					Number::Int(i) => (Some(*i), None),
-					Number::Float(_) => (None, None),
-					Number::Decimal(d) => (None, Some(*d)),
-				};
 				LiteralWire::Number {
 					full_wire: full,
-					sub_variant_id: NumberSubVariant::from_number(n),
-					int_value,
-					decimal_value,
+					sub_variant_id: NumberSubVariant::Int,
+					int_value: Some(*i),
+					decimal_value: None,
+				}
+			}
+			Value::Number(Number::Float(_)) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Number never errors into Vec");
+				LiteralWire::Number {
+					full_wire: full,
+					sub_variant_id: NumberSubVariant::Float,
+					int_value: None,
+					decimal_value: None,
+				}
+			}
+			Value::Number(Number::Decimal(d)) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Number never errors into Vec");
+				LiteralWire::Number {
+					full_wire: full,
+					sub_variant_id: NumberSubVariant::Decimal,
+					int_value: None,
+					decimal_value: Some(*d),
 				}
 			}
 			Value::None
@@ -331,7 +370,7 @@ pub(crate) struct LiteralSet {
 	/// [`hash_miss_is_decisive`] does not trust that path's miss either.
 	strand_asymmetric: bool,
 	/// Bitmask of [`NumberSubVariant`]s present in [`Self::numbers`]
-	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`).
+	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`, bit 3 = `Sized`).
 	///
 	/// `Number::PartialEq` is cross-variant — `Int(1) == Float(1.0) ==
 	/// Decimal(1)` — so one equivalence class can be spelled three ways and a
@@ -364,13 +403,29 @@ impl LiteralSet {
 				v.serialize_revisioned(&mut full).expect("serialize Strand into Vec");
 				out.strands.insert(full);
 			} else if let Value::Number(n) = v {
-				out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
-				if let Number::Decimal(d) = n {
-					out.decimals.insert(*d);
+				match n {
+					Number::I8(_)
+					| Number::U8(_)
+					| Number::I16(_)
+					| Number::U16(_)
+					| Number::I32(_)
+					| Number::U32(_)
+					| Number::U64(_)
+					| Number::F16(_)
+					| Number::F32(_) => {
+						out.number_sub_variants |= 1u8 << (NumberSubVariant::Sized as u8);
+						out.fallback.insert(v.clone());
+					}
+					Number::Int(_) | Number::Float(_) | Number::Decimal(_) => {
+						out.number_sub_variants |= 1u8 << (NumberSubVariant::from_number(n) as u8);
+						if let Number::Decimal(d) = n {
+							out.decimals.insert(*d);
+						}
+						let mut full = Vec::new();
+						v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
+						out.numbers.insert(full);
+					}
 				}
-				let mut full = Vec::new();
-				v.serialize_revisioned(&mut full).expect("serialize Number into Vec");
-				out.numbers.insert(full);
 			} else if let Value::Regex(_) = v {
 				// Defense-in-depth only: the planner's
 				// `literal_hashset_element_safe` (see
@@ -431,7 +486,7 @@ impl LiteralSet {
 	/// can match a Number-tagged value.
 	#[inline]
 	pub(crate) fn has_no_numbers(&self) -> bool {
-		self.numbers.is_empty()
+		self.number_sub_variants == 0
 	}
 
 	/// Whether the set holds no top-level `String`, in which case no stored

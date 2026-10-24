@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use super::decode::{self, fixed, int_array_element_width};
 use super::tag::*;
-use super::{DEPTH_LIMIT, Error, read_int, read_width, split_clen, utf8};
+use super::{DEPTH_LIMIT, Error, read_int, read_uint, read_width, split_clen, utf8};
 use crate::val::Value;
 
 /// The kind of a stored value, from its tag.
@@ -14,6 +14,15 @@ pub enum Kind {
 	Int,
 	Float,
 	Decimal,
+	I8,
+	U8,
+	I16,
+	U16,
+	I32,
+	U32,
+	U64,
+	F16,
+	F32,
 	String,
 	Duration,
 	Datetime,
@@ -42,6 +51,15 @@ impl Kind {
 			INT | 0x80..=0xFE => Self::Int,
 			FLOAT => Self::Float,
 			DECIMAL => Self::Decimal,
+			I8 => Self::I8,
+			U8 => Self::U8,
+			I16 => Self::I16,
+			U16 => Self::U16,
+			I32 => Self::I32,
+			U32 => Self::U32,
+			U64 => Self::U64,
+			F16 => Self::F16,
+			F32 => Self::F32,
 			STRING => Self::String,
 			DURATION => Self::Duration,
 			DATETIME => Self::Datetime,
@@ -171,6 +189,42 @@ impl<'a> ValueRef<'a> {
 		match self.tag {
 			0x80..=0xFE => Ok(Some((self.tag - SMALL_INT) as i64)),
 			INT => read_int(self.payload).map(Some),
+			I8 => {
+				let [b] = fixed(self.payload)?;
+				Ok(Some(b as i8 as i64))
+			}
+			U8 => {
+				let [b] = fixed(self.payload)?;
+				Ok(Some(b as i64))
+			}
+			I16 => {
+				if self.payload.is_empty() || self.payload.len() > 2 {
+					return Err(Error::Malformed("an i16 of the wrong width"));
+				}
+				read_int(self.payload).map(|i| Some(i as i16 as i64))
+			}
+			U16 => {
+				if self.payload.is_empty() || self.payload.len() > 2 {
+					return Err(Error::Malformed("a u16 of the wrong width"));
+				}
+				read_uint(self.payload).map(|u| Some(u as u16 as i64))
+			}
+			I32 => {
+				if self.payload.is_empty() || self.payload.len() > 4 {
+					return Err(Error::Malformed("an i32 of the wrong width"));
+				}
+				read_int(self.payload).map(|i| Some(i as i32 as i64))
+			}
+			U32 => {
+				if self.payload.is_empty() || self.payload.len() > 4 {
+					return Err(Error::Malformed("a u32 of the wrong width"));
+				}
+				read_uint(self.payload).map(|u| Some(u as u32 as i64))
+			}
+			U64 => {
+				let u = read_uint(self.payload)?;
+				Ok(i64::try_from(u).ok())
+			}
 			_ => Ok(None),
 		}
 	}
@@ -180,6 +234,14 @@ impl<'a> ValueRef<'a> {
 	pub fn as_float(&self) -> Result<Option<f64>, Error> {
 		match self.tag {
 			FLOAT => decode::float(self.payload).map(Some),
+			F16 => {
+				let b = fixed(self.payload)?;
+				Ok(Some(half::f16::from_bits(u16::from_le_bytes(b)).to_f64()))
+			}
+			F32 => {
+				let b = fixed(self.payload)?;
+				Ok(Some(f32::from_le_bytes(b) as f64))
+			}
 			_ => Ok(None),
 		}
 	}

@@ -1006,4 +1006,3 @@ mod unit_tests {
 		assert_eq!(winning_candidate(&eg, &choice), 1);
 	}
 }
-

@@ -1614,15 +1614,10 @@ mod tests {
 		];
 		let mut visited = Vec::new();
 		let stats = rd
-			.visit_key_ranges(
-				&ranges,
-				10,
-				None,
-				&mut |at: usize, key: &[u8]| {
-					visited.push((at, key.to_vec()));
-					Ok(std::ops::ControlFlow::Continue(()))
-				},
-			)
+			.visit_key_ranges(&ranges, 10, None, &mut |at: usize, key: &[u8]| {
+				visited.push((at, key.to_vec()));
+				Ok(std::ops::ControlFlow::Continue(()))
+			})
 			.await
 			.unwrap();
 		assert_eq!(stats.rows, 1);
