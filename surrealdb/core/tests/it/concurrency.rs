@@ -2,13 +2,13 @@
 //!
 //! A statement outside a transaction block runs in a transaction of its own.
 //! Two such transactions that both write one key conflict at commit: the second
-//! to commit loses with a retryable `TransactionConflict`, and the caller retries
-//! it. A retry starts a fresh transaction, which sees what the winner committed.
+//! to commit loses with a retryable `TransactionConflict`, and the executor
+//! re-runs it in a fresh transaction, which sees what the winner committed.
 
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_types::{QueryError, Value};
+use surrealdb_types::Value;
 
 use crate::helpers::new_ds;
 
@@ -26,20 +26,14 @@ async fn overlap(dbs: &Datastore, sql: &str) -> Result<[Result<Value, surrealdb_
 	Ok([one(a?)?, one(b?)?])
 }
 
-/// Exactly one of `results` succeeded and the other lost a retryable conflict;
-/// answers the success.
-fn one_wins(results: [Result<Value, surrealdb_types::Error>; 2]) -> Value {
+/// Both of `results` succeeded after the loser was automatically re-run on
+/// conflict; answers both values.
+fn both_succeed(results: [Result<Value, surrealdb_types::Error>; 2]) -> [Value; 2] {
 	let [a, b] = results;
-	let (won, lost) = match (a, b) {
-		(Ok(won), Err(lost)) | (Err(lost), Ok(won)) => (won, lost),
-		other => panic!("expected one success and one conflict, got {other:?}"),
-	};
-	assert_eq!(
-		lost.query_details(),
-		Some(&QueryError::TransactionConflict),
-		"the loser is told it can retry: {lost}"
-	);
-	won
+	match (a, b) {
+		(Ok(a), Ok(b)) => [a, b],
+		other => panic!("expected both runs to succeed after conflict retry, got {other:?}"),
+	}
 }
 
 async fn run(dbs: &Datastore, sql: &str) -> Result<Value> {
@@ -50,29 +44,33 @@ async fn run(dbs: &Datastore, sql: &str) -> Result<Value> {
 
 /// Two overlapping `INSERT IGNORE`s of one new record both find it absent, so
 /// both write it, and the second to commit loses with a retryable conflict.
-/// Retried, it finds the record the winner stored and ignores it.
+/// Re-run automatically, it finds the record the winner stored and ignores it.
 #[tokio::test(flavor = "current_thread")]
 async fn overlapping_insert_ignores_of_one_record_conflict_and_a_retry_ignores_it() -> Result<()> {
 	const SQL: &str = "INSERT IGNORE INTO t { id: 1, at: sleep(20ms) } RETURN id;";
 	let (_, dbs) = new_ds("test", "test", true).await?;
 	run(&dbs, "DEFINE TABLE t;").await?;
-	let won = one_wins(overlap(&dbs, SQL).await?);
-	assert_eq!(won, run(&dbs, "[{ id: t:1 }]").await?);
-	assert_eq!(run(&dbs, SQL).await?, run(&dbs, "[]").await?);
+	let [a, b] = both_succeed(overlap(&dbs, SQL).await?);
+	let inserted = run(&dbs, "[{ id: t:1 }]").await?;
+	let ignored = run(&dbs, "[]").await?;
+	assert!(
+		(a == inserted && b == ignored) || (a == ignored && b == inserted),
+		"one inserts and the retried loser ignores: got {a:?} and {b:?}"
+	);
+	assert_eq!(run(&dbs, SQL).await?, ignored);
 	assert_eq!(run(&dbs, "SELECT VALUE id FROM t").await?, run(&dbs, "[t:1]").await?);
 	Ok(())
 }
 
 /// Two overlapping first writes to a table that is not defined both define it,
 /// so they write the same definition and the second to commit loses with a
-/// retryable conflict. Retried, it finds the table the winner defined.
+/// retryable conflict. Re-run automatically, it finds the table the winner defined.
 #[tokio::test(flavor = "current_thread")]
 async fn overlapping_first_writes_to_an_undefined_table_conflict_and_a_retry_succeeds() -> Result<()>
 {
 	const SQL: &str = "CREATE |u:3| CONTENT { at: sleep(20ms) } RETURN NONE;";
 	let (_, dbs) = new_ds("test", "test", true).await?;
-	let _ = one_wins(overlap(&dbs, SQL).await?);
-	run(&dbs, SQL).await?;
+	let _ = both_succeed(overlap(&dbs, SQL).await?);
 	assert_eq!(run(&dbs, "count(SELECT * FROM u)").await?, Value::from_t(6i64));
 	Ok(())
 }

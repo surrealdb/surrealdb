@@ -97,9 +97,9 @@ impl IndexBuilder {
 		}
 		let view = Arc::new(self.tf.transaction(TransactionType::Read, txn.sequences()).await?);
 		let res: Result<bool> = async {
-			let _ = (ctx, opt, tb, fresh);
+			let _ = (ctx, opt, tb);
 			let holds_record = view.holds_record(ns, db, table).await?;
-			let holds_index = view.holds_index(ns, db, table, ix_id).await?;
+			let holds_index = !fresh && view.holds_index(ns, db, table, ix_id).await?;
 			if !holds_record && !holds_index {
 				return Ok(false);
 			}

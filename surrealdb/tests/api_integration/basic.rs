@@ -2312,6 +2312,7 @@ pub async fn client_accessor_clones_from_begin(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("DEFINE TABLE item").await.unwrap().check().unwrap();
 	db.set("session_var", "inherited").await.unwrap();
 
 	let begin = db.begin();

@@ -156,7 +156,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			if should_succeed {
 				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			} else {
-				assert_write_refused(&level, ns, db, res, msg);
+				let err = res.unwrap_err();
+				assert!(err.is_not_allowed(), "{msg}: expected NotAllowed, got {err}");
 			}
 		}
 
@@ -274,13 +275,8 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		// With auth enabled, anonymous users can create tables (implicitly creating them)
-		// but get empty results due to default permissions
-		assert_eq!(
-			res.unwrap(),
-			Value::Array(Array::new()),
-			"anonymous user should get empty result when creating table with auth enabled"
-		);
+		// With auth enabled, anonymous users cannot implicitly define a table.
+		assert!(res.unwrap_err().is_not_allowed());
 	}
 
 	// When the table grants no permissions

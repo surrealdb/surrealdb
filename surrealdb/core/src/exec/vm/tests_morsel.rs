@@ -122,7 +122,19 @@ pub(super) async fn outcome(
 	ctx: &ExecutionContext,
 ) -> Result<Vec<Value>, String> {
 	use crate::expr::ControlFlow;
-	match try_collect(op, ctx).await {
+	let result = try_collect(op, ctx).await;
+	let result = match ctx.try_txn() {
+		Some(txn) => match txn.take_absence_violation().await {
+			Ok(None) => result,
+			Ok(Some(key)) => Err(ControlFlow::Err(crate::dbs::executor::held_create_exists(&key))),
+			Err(e) => match result {
+				Ok(_) => Err(ControlFlow::Err(e.into())),
+				Err(prior) => Err(prior),
+			},
+		},
+		None => result,
+	};
+	match result {
 		Ok(rows) => Ok(rows),
 		Err(ControlFlow::Return(value)) => Ok(vec![value]),
 		Err(ControlFlow::Err(e)) => Err(format!("{e:#}")),

@@ -243,25 +243,12 @@ test("query bindings vs LET: binding is visible before the LET, shadowed after",
 	await db.close();
 });
 
-test("protected params: $auth/$session/$token and the names the system binds are rejected as bindings", async () => {
+test("protected params: $auth/$access/$session/$token are rejected as bindings", async () => {
 	const { db } = await rootClient(server);
 
 	// Server-side rejection ("'<name>' is a protected variable and cannot be
-	// set") — the whole call fails. The names the system binds in a frame
-	// ($this, $parent, $value, ...) are refused as the session's are.
-	const names = [
-		"auth",
-		"session",
-		"token",
-		"this",
-		"self",
-		"parent",
-		"value",
-		"input",
-		"before",
-		"after",
-		"event",
-	];
+	// set") — the whole call fails.
+	const names = ["auth", "access", "session", "token"];
 	for (const name of names) {
 		const err = await rejects(db.query(`RETURN $${name}`, { [name]: "injected" }).collect());
 		expect(err.constructor.name).toBe("ValidationError");

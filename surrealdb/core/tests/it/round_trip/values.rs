@@ -118,7 +118,7 @@ async fn float_extremes_survive() -> Result<()> {
 ///
 /// `-0f` and `0f` are one magnitude, so nothing that compares numbers can tell a
 /// restore that dropped the sign from one that kept it — only the rendering and
-/// the sign bit can, and the sign bit is observable through `math::sign`.
+/// the sign bit can, and the sign bit is observable through reciprocal infinity.
 #[tokio::test]
 async fn negative_zero_keeps_its_sign() -> Result<()> {
 	let round_trip = RoundTrip::run("CREATE num:zero SET neg = -0.0f, pos = 0.0f;").await?;
@@ -126,11 +126,8 @@ async fn negative_zero_keeps_its_sign() -> Result<()> {
 	round_trip.assert_all().await?;
 	assert_target_renders(&round_trip, "RETURN [(num:zero).neg, (num:zero).pos]", "[-0f, 0f]")
 		.await?;
-	assert_target_true(
-		&round_trip,
-		"RETURN math::sign((num:zero).neg) < 0 AND math::sign((num:zero).pos) > 0",
-	)
-	.await?;
+	assert_target_true(&round_trip, "RETURN 1f / (num:zero).neg < 0 AND 1f / (num:zero).pos > 0")
+		.await?;
 	// And the two really are one magnitude, so the assertion above is reading the
 	// sign rather than a difference it could have found in the value.
 	assert_target_true(&round_trip, "RETURN (num:zero).neg = (num:zero).pos").await

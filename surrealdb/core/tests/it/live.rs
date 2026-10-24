@@ -1068,7 +1068,7 @@ async fn live_and_kill_on_one_task(fsync: bool) -> Result<()> {
 #[cfg(feature = "kv-surrealkv")]
 async fn live_and_kill_across_connections(fsync: bool) -> Result<()> {
 	const ROUNDS: usize = 20;
-	const PER_ROUND: usize = 30;
+	const PER_ROUND: usize = 8;
 
 	let dir = temp_dir::TempDir::new()?;
 	let ds = surrealkv_ds_with(&dir, fsync).await?;

@@ -2435,7 +2435,7 @@ pub(super) async fn run_storage_source(
 				// over before anything else is read of them.
 				let threshold = topk.as_ref().and_then(|topk| {
 					let cell = state.topk_cells.get(topk.sort as usize)?.as_ref()?;
-					Some(super::fulltext::Threshold::Clause(topk, cell.snapshot()?))
+					Some(super::fulltext::Threshold::Single(topk, cell.snapshot()?))
 				});
 				// Until the sort publishes a threshold, a batch stays as large as the
 				// sort keeps, so it publishes one after as few records as it can.

@@ -540,7 +540,7 @@ fn subquery_target(cx: &mut LoCx<'_>, filter: &WhereFilter) -> Option<Target> {
 			});
 		(project, beneath, inner, identity, inner_loop_op)
 	};
-	if reads_past_row_set_change(cx, inner_loop_op) {
+	if reads_past_row_set_change(cx, inner_loop_op, beneath) {
 		return None;
 	}
 	let shape = if identity {
@@ -905,10 +905,21 @@ fn is_comparison_or_logical(op: &BinaryOperator) -> bool {
 /// take, and ends at any other op: a read of storage, a subquery or loop whose rows its own body
 /// has already paged, or an op that holds no rows. Every logical op is classified by name, so a
 /// new one is placed in one of the three before the pass compiles.
-fn reads_past_row_set_change(cx: &mut LoCx<'_>, loop_op: OpId) -> bool {
-	let mut next = cx.ir.op(loop_op).and_then(|data| data.operands.first().copied());
+fn reads_past_row_set_change(cx: &mut LoCx<'_>, loop_op: OpId, beneath: ValueId) -> bool {
+	let loop_region = cx.ir.op(loop_op).and_then(|data| data.regions.first().copied());
+	let mut next = Some(beneath);
 	while let Some(value) = next {
 		let Some(op_id) = def_op(cx.ir, value) else {
+			if let Some(crate::exec::ir::core::value::ValueDef::BlockArg {
+				block,
+				..
+			}) = cx.ir.value(value).map(|data| data.def)
+				&& loop_region.is_some()
+				&& cx.ir.block(block).map(|data| data.parent) == loop_region
+			{
+				next = cx.ir.op(loop_op).and_then(|data| data.operands.first().copied());
+				continue;
+			}
 			return false;
 		};
 		let Some((kind, first_operand)) =

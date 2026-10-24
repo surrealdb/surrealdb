@@ -194,7 +194,7 @@ pub(super) enum Threshold<'a> {
 	/// The score of the clause the listing answers ([`Source::FullText`]).
 	///
 	/// [`Source::FullText`]: super::program::Source::FullText
-	Clause(&'a TopKScan, Arc<Value>),
+	Single(&'a TopKScan, Arc<Value>),
 	/// A sum of clause scores an index union's branches compare
 	/// ([`UnionScores`]), with the clause the listing's branch answers.
 	Sum(&'a UnionScores, Arc<Value>, Option<MatchRef>),
@@ -468,7 +468,7 @@ pub(super) async fn next_records(
 	// hits whose posting blocks bound their score below its threshold are
 	// passed over a range of blocks at a time, before they are taken.
 	let bounded = match (&threshold, shared) {
-		(Some(Threshold::Clause(topk, threshold)), Some(shared))
+		(Some(Threshold::Single(topk, threshold)), Some(shared))
 			if shared.scored && topk.direction == SortDirection::Desc =>
 		{
 			shared
@@ -483,7 +483,7 @@ pub(super) async fn next_records(
 				)
 				.await?
 		}
-		(Some(Threshold::Clause(..) | Threshold::Sum(..)) | None, Some(_) | None) => None,
+		(Some(Threshold::Single(..) | Threshold::Sum(..)) | None, Some(_) | None) => None,
 	};
 	let doc_ids = match bounded {
 		Some((doc_ids, passed)) => {
@@ -512,7 +512,7 @@ pub(super) async fn next_records(
 			BLOCK_SKIPS.with(|skips| skips.set(skips.get() + taken - kept.len()));
 			kept
 		}
-		Some(Threshold::Sum(..) | Threshold::Clause(..)) | None => doc_ids,
+		Some(Threshold::Sum(..) | Threshold::Single(..)) | None => doc_ids,
 	};
 	if doc_ids.is_empty() {
 		return Ok(Some(Vec::new()));
@@ -522,7 +522,7 @@ pub(super) async fn next_records(
 		Some(_) | None => None,
 	};
 	let (doc_ids, scores) = match (threshold, scores) {
-		(Some(Threshold::Clause(topk, threshold)), Some(scores)) => {
+		(Some(Threshold::Single(topk, threshold)), Some(scores)) => {
 			let (doc_ids, scores) =
 				admitted(doc_ids, scores, &threshold, topk.direction, topk.single_key);
 			(doc_ids, Some(scores))
@@ -560,7 +560,7 @@ pub(super) async fn next_records(
 				None => (doc_ids, scores),
 			}
 		}
-		(Some(Threshold::Clause(..)) | None, scores) => (doc_ids, scores),
+		(Some(Threshold::Single(..)) | None, scores) => (doc_ids, scores),
 	};
 	if doc_ids.is_empty() {
 		return Ok(Some(Vec::new()));

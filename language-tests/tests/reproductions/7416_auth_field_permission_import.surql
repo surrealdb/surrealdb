@@ -1,5 +1,6 @@
 /**
 [test]
+run = false
 reason = "Setup for 7416_auth_field_permission_skips_computed_fields: a field permission over $auth next to a COMPUTED field that errors if it is ever evaluated"
 */
 

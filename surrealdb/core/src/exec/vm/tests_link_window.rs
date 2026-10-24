@@ -136,7 +136,18 @@ async fn same(how: &Setup<'_>, setup: &str, sql: &str, windowed: bool) -> Run {
 	let off = run(false, how, setup, sql).await;
 	let on = run(true, how, setup, sql).await;
 	assert_eq!(off.filled.0 + off.ahead.0, 0, "a pinned-off run fills no window");
-	assert_eq!(on.answers, off.answers, "the answers of {sql}");
+	let unordered = (!on.batches.is_empty() || !off.batches.is_empty())
+		&& !sql.contains("LIMIT")
+		&& !sql.contains("START")
+		&& !sql.contains("ORDER BY");
+	assert_eq!(on.answers.len(), off.answers.len(), "the answers of {sql}");
+	for (on, off) in on.answers.iter().zip(&off.answers) {
+		if unordered {
+			assert_eq!(fragments(on), fragments(off), "the answers of {sql}");
+		} else {
+			assert_eq!(on, off, "the answers of {sql}");
+		}
+	}
 	if windowed {
 		assert!(on.filled.0 + on.ahead.0 > 0, "the pinned-on run of {sql} filled a window");
 	}

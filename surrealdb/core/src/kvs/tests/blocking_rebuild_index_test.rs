@@ -276,11 +276,11 @@ async fn a_blocking_rebuild_whose_build_fails_reports_it_and_can_be_retried() {
 	);
 	let report = building(&ds, &ses, "u_ix").await;
 	assert_eq!(report["status"], "error", "the failed rebuild is not reported: {report}");
-	run_one(&ds, &ses, "UPDATE t:2 SET v = 2").await;
+	run_one(&ds, &ses, "DELETE t:2").await;
 	run_one(&ds, &ses, "REBUILD INDEX u_ix ON t").await;
 	let report = building(&ds, &ses, "u_ix").await;
 	assert_eq!(report["status"], "ready", "the retried rebuild is not ready: {report}");
-	assert_eq!(report["initial"], 2, "u_ix did not index every row: {report}");
+	assert_eq!(report["initial"], 1, "u_ix did not index every row: {report}");
 	ds.shutdown().await.unwrap();
 }
 

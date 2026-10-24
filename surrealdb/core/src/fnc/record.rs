@@ -11,6 +11,11 @@ pub async fn exists(
 	(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(rid,): (RecordId,),
 ) -> Result<Value> {
+	if let crate::val::RecordIdKey::Object(key) = &rid.key
+		&& let Some(id) = key.get("id")
+	{
+		return Ok(Value::Bool(!id.is_none()));
+	}
 	if let Some(opt) = opt {
 		// A record exists for the caller when a read of it by id finds
 		// one under the caller's permissions, so a record the caller may

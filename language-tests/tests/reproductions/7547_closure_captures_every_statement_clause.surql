@@ -58,7 +58,7 @@ value = "[[1]]"
 DEFINE TABLE t SCHEMALESS;
 CREATE t:1;
 LET $st = 2;
-LET $to = 1ms;
+LET $to = 10s;
 LET $big = 1d;
 
 -- Captured in START and TIMEOUT.

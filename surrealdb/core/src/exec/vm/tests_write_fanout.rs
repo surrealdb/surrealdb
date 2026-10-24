@@ -463,7 +463,7 @@ async fn the_change_feed_holds_the_records_in_serial_order() {
 	);
 	let serial = TestDb::new_with_config(&feed, whole()).await;
 	let wide = TestDb::new_with_config(&feed, tiny()).await;
-	let sql = "UPDATE t SET name = name + '!' WHERE n >= 1100";
+	let sql = "UPDATE t SET name = name + '!' WHERE math::abs(n) >= 1100";
 	assert!(fans_out(&verdicts(&wide, sql).await), "`{sql}` fans out");
 	let mark = Mark::of(&wide).await;
 	assert_eq!(answered(&wide, sql).await, answered(&serial, sql).await);
@@ -1136,7 +1136,7 @@ async fn a_resumed_record_leaves_the_write_state_the_serial_run_leaves() {
 	for sql in [
 		"UPDATE t SET name = name + '!' RETURN AFTER",
 		"UPDATE t SET n = n + 1 WHERE n % 3 = 0 RETURN DIFF",
-		"UPDATE ONLY t SET s = 'only' WHERE s = '11' RETURN BEFORE",
+		"UPDATE ONLY t SET s = 'only' WHERE string::len(s) > 0 AND s = '11' RETURN BEFORE",
 		"DELETE t WHERE n % 4 = 0 RETURN BEFORE",
 	] {
 		let (before_serial, before_wide) = (

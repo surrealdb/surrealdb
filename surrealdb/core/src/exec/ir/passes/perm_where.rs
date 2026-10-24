@@ -1109,7 +1109,7 @@ fn push_below_layer(cx: &mut LoCx<'_>, op: OpId, report: &mut PassReport) -> Res
 			Reads::Keys(_) => can_move(cx.ir, &filter, *value, layer, source),
 			Reads::Held => false,
 		};
-		if movable && !raising_stands && (stays == 0 && falses.is_empty() || infallible) {
+		if movable && !raising_stands && (falses.is_empty() || infallible) {
 			moved.push(at);
 		} else {
 			stays += 1;

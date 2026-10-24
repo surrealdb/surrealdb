@@ -57,4 +57,10 @@ impl StatementCounters {
 	pub(crate) fn affected(&self) -> u64 {
 		self.affected.load(Ordering::Relaxed)
 	}
+
+	/// Reset the affected-row count to zero before a statement is re-run
+	/// after a retryable commit conflict.
+	pub(crate) fn reset(&self) {
+		self.affected.store(0, Ordering::Relaxed);
+	}
 }

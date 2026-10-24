@@ -181,7 +181,7 @@ impl LeafError for Error {
 			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			Error::IndexBuildFailed {
 				..
-			} => TypesError::internal(message),
+			} => TypesError::query(message, None),
 		}
 	}
 }

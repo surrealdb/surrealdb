@@ -522,17 +522,20 @@ async fn a_search_no_index_answers_over_a_list_is_refused() {
 			 RETURN VALUE id",
 			"[doc:1, doc:3, doc:3]",
 		),
-		("UPDATE { id: doc:3 } SET k = true WHERE txt @@ 'hello' RETURN VALUE id", "[]"),
+		("UPDATE { id: doc:3 } SET k = true WHERE txt @@ 'hello' RETURN VALUE id", "[doc:3]"),
 		(
 			"LET $a = { id: doc:1 }; LET $b = { id: doc:3 }; \
 			 UPDATE $a, $b SET k = true WHERE txt @@ 'hello' RETURN VALUE id",
-			"[NONE, NONE]",
+			"[NONE, NONE, doc:1, doc:3]",
 		),
-		("UPDATE doc:1, { id: doc:3 } SET k = true WHERE txt @@ 'hello' RETURN VALUE id", "[]"),
+		(
+			"UPDATE doc:1, { id: doc:3 } SET k = true WHERE txt @@ 'hello' RETURN VALUE id",
+			"[doc:1, doc:3]",
+		),
 		(
 			"UPDATE (SELECT VALUE doc:1 FROM ONLY 1) SET k = true WHERE txt @@ 'hello' \
 			 RETURN VALUE id",
-			"[]",
+			"[doc:1]",
 		),
 		(
 			"UPDATE { id: pts:1 } SET k = true WHERE point <|1,EUCLIDEAN|> [0, 0] RETURN VALUE id",

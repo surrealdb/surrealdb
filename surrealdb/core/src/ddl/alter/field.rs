@@ -500,7 +500,7 @@ async fn alter_field_write(
 	// reference keys as they were stored.
 	if !opt.import {
 		crate::exec::reference_purge::reconcile_reference_keys(
-			&txn,
+			&exec,
 			ns,
 			db,
 			what,

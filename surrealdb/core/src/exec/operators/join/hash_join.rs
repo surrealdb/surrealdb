@@ -411,43 +411,50 @@ mod tests {
 	#[test]
 	fn build_table_nan_and_closure_keys_do_not_match() {
 		let mut table = BuildTable::new();
-		let nan = Value::from(f64::NAN);
-		let nested_nan = Value::Array(vec![nan.clone()].into());
-		let closure = Value::Closure(Box::new(crate::val::Closure::Expr {
-			args: vec![],
+		let nan_pt =
+			Value::Geometry(crate::val::Geometry::Point(geo_types::Point::new(f64::NAN, 2.0)));
+		let nested_nan = Value::Array(vec![nan_pt.clone()].into());
+		let closure_a = Value::Closure(Box::new(crate::val::Closure::Expr {
+			args: vec![(crate::expr::Param::from("a".to_owned()), crate::expr::Kind::Any)],
 			returns: None,
-			body: crate::expr::Expr::Literal(crate::expr::Literal::None),
+			body: crate::expr::Expr::Literal(crate::expr::Literal::Integer(1)),
 			captures: Default::default(),
 		}));
-		assert!(table.insert(vec![nan.clone()], Value::from(1), 10).is_ok());
+		let closure_b = Value::Closure(Box::new(crate::val::Closure::Expr {
+			args: vec![(crate::expr::Param::from("b".to_owned()), crate::expr::Kind::Any)],
+			returns: None,
+			body: crate::expr::Expr::Literal(crate::expr::Literal::Integer(2)),
+			captures: Default::default(),
+		}));
+		assert!(table.insert(vec![nan_pt.clone()], Value::from(1), 10).is_ok());
 		assert!(table.insert(vec![nested_nan.clone()], Value::from(2), 10).is_ok());
-		assert!(table.insert(vec![closure.clone()], Value::from(3), 10).is_ok());
+		assert!(table.insert(vec![closure_a], Value::from(3), 10).is_ok());
 
-		assert_eq!(table.matches(&vec![nan]).count(), 0);
+		assert_eq!(table.matches(&vec![nan_pt]).count(), 0);
 		assert_eq!(table.matches(&vec![nested_nan]).count(), 0);
-		assert_eq!(table.matches(&vec![closure]).count(), 0);
+		assert_eq!(table.matches(&vec![closure_b]).count(), 0);
 	}
 
 	#[test]
 	fn build_table_nested_regex_matches_either_side() {
 		let re = Value::Regex("a.*".parse().unwrap());
-		let nested_re = vec![Value::Array(vec![re].into())];
-		let nested_match = vec![Value::Array(vec![Value::from("abc")].into())];
-		let nested_miss = vec![Value::Array(vec![Value::from("xyz")].into())];
+		let composite_re = vec![Value::from(1), re];
+		let composite_match = vec![Value::from(1), Value::from("abc")];
+		let composite_miss = vec![Value::from(1), Value::from("xyz")];
 
 		let mut build_re = BuildTable::new();
-		assert!(build_re.insert(nested_re.clone(), Value::from(10), 10).is_ok());
+		assert!(build_re.insert(composite_re.clone(), Value::from(10), 10).is_ok());
 		assert_eq!(
-			build_re.matches(&nested_match).cloned().collect::<Vec<_>>(),
+			build_re.matches(&composite_match).cloned().collect::<Vec<_>>(),
 			vec![Value::from(10)]
 		);
-		assert_eq!(build_re.matches(&nested_miss).count(), 0);
+		assert_eq!(build_re.matches(&composite_miss).count(), 0);
 
 		let mut probe_re = BuildTable::new();
-		assert!(probe_re.insert(nested_match, Value::from(20), 10).is_ok());
-		assert!(probe_re.insert(nested_miss, Value::from(30), 10).is_ok());
+		assert!(probe_re.insert(composite_match, Value::from(20), 10).is_ok());
+		assert!(probe_re.insert(composite_miss, Value::from(30), 10).is_ok());
 		assert_eq!(
-			probe_re.matches(&nested_re).cloned().collect::<Vec<_>>(),
+			probe_re.matches(&composite_re).cloned().collect::<Vec<_>>(),
 			vec![Value::from(20)]
 		);
 	}

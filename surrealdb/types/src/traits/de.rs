@@ -371,10 +371,26 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		if let Value::String(v) = self {
-			visitor.visit_string(v)
-		} else {
-			Err(self.invalid_type(&visitor))
+		match self {
+			Value::String(v) => visitor.visit_string(v),
+			Value::Number(Number::Decimal(d)) => visitor.visit_string(d.to_string()),
+			other @ Value::None
+			| other @ Value::Null
+			| other @ Value::Bool(_)
+			| other @ Value::Number(_)
+			| other @ Value::Bytes(_)
+			| other @ Value::Duration(_)
+			| other @ Value::Datetime(_)
+			| other @ Value::Uuid(_)
+			| other @ Value::Geometry(_)
+			| other @ Value::Table(_)
+			| other @ Value::RecordId(_)
+			| other @ Value::File(_)
+			| other @ Value::Range(_)
+			| other @ Value::Regex(_)
+			| other @ Value::Array(_)
+			| other @ Value::Object(_)
+			| other @ Value::Set(_) => Err(other.invalid_type(&visitor)),
 		}
 	}
 

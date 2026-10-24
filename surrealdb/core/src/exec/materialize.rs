@@ -257,8 +257,10 @@ mod tests {
 		ds.execute(
 			"DEFINE FUNCTION fn::check($v: bool) -> bool { RETURN $v; };
 			 DEFINE TABLE author SCHEMALESS;
+			 DEFINE FIELD posts ON author TYPE array<record<post>> READONLY DEFAULT [];
 			 DEFINE TABLE post SCHEMALESS;
-			 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author FIELD posts WHERE fn::check(published = true);
+			 DEFINE TABLE audit SCHEMALESS;
+			 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author.posts WHERE fn::check(published = true);
 			 DEFINE FUNCTION OVERWRITE fn::check($v: bool) -> bool { CREATE audit:1 SET seen = $v; RETURN $v; };",
 			&ses,
 			None,
@@ -293,8 +295,9 @@ mod tests {
 		let res = ds
 			.execute(
 				"DEFINE TABLE author SCHEMALESS;
+				 DEFINE FIELD posts ON author TYPE array<record<post>> READONLY DEFAULT [];
 				 DEFINE TABLE post SCHEMALESS;
-				 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author FIELD posts;
+				 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author.posts;
 				 CREATE author:a SET name = 'Alice';
 				 CREATE post:1 SET author = author:a;
 				 UPDATE author:a REPLACE { name: 'Alicia' };

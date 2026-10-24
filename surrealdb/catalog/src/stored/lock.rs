@@ -63,6 +63,7 @@ use surrealdb_expr::val::stored::schema::{
 };
 
 use super::vtable::CATALOG_TYPES;
+use crate::ViewState;
 use crate::conformance::TableConformance;
 use crate::feature::StoredFeatureLevel;
 use crate::generation::{GenerationMark, TableMigrations};
@@ -154,6 +155,7 @@ pub fn all_schemas() -> Vec<&'static TypeSchema> {
 	TableMigrations::collect_schemas(&mut found);
 	TableConformance::collect_schemas(&mut found);
 	MigrationRun::collect_schemas(&mut found);
+	ViewState::collect_schemas(&mut found);
 	let mut seen: Vec<(&str, TypeLine)> = Vec::new();
 	let mut unique = Vec::new();
 	for schema in found {

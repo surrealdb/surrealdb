@@ -3085,8 +3085,6 @@ mod tests {
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
 	#[cfg(feature = "cjk-embed-korean")]
-	use crate::expr::operator::BooleanOperator;
-	#[cfg(feature = "cjk-embed-korean")]
 	use crate::expr::tokenizer::SegmentLanguage;
 	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
 	use crate::ft::offset::Offset;

@@ -390,9 +390,11 @@ impl CommitAction for ObserveStoredFormat {
 	}
 }
 
-/// A transaction's view of the layouts of the tables it has read or written, by namespace and
-/// database and then by table, so a lookup borrows the table's name instead of cloning it.
-type LayoutMemo = HashMap<(NamespaceId, DatabaseId), HashMap<TableName, Arc<TableLayouts>>>;
+/// A transaction's view of the layouts of the tables it has read or written, by namespace,
+/// database and version (`None` for the transaction's current state) and then by table, so a
+/// lookup borrows the table's name instead of cloning it.
+type LayoutMemo =
+	HashMap<(NamespaceId, DatabaseId, Option<u64>), HashMap<TableName, Arc<TableLayouts>>>;
 
 /// The keys a range delete must not remove unnoticed from a table whose layouts this transaction
 /// holds: `[start, end)` covers the table's `!fc`, `!lg` and `!mi` keys
@@ -4863,7 +4865,8 @@ impl Transaction {
 		self.put_compare_key(&migrations_key, &migrations, prior.as_ref()).await?;
 		self.set_key(&mark_key, &GenerationMark::new(next)).await?;
 		let minted = layouts.with_minted(minted_ring, minted).map_err(CatalogError::Layout)?;
-		self.memoise_layouts(Arc::new(minted));
+		self.layout_memo.lock().retain(|&(_, _, version), _| version.is_none());
+		self.memoise_layouts(Arc::new(minted), None);
 		self.layout_epoch.fetch_add(1, Ordering::Release);
 		if let Some(stored) = first {
 			self.note_ring_minted(ns, db, tb, stored);
@@ -4962,16 +4965,20 @@ impl Transaction {
 		let prefix = root.encode_bound()?;
 		let keys = self.keys_raw(root.range()?, 16, 0, None).await?;
 		Ok(keys.iter().any(|k| {
+			let Some(suffix) = k.strip_prefix(prefix.as_slice()) else {
+				return false;
+			};
 			!matches!(
-				k.strip_prefix(prefix.as_slice()),
-				None | Some(
-					b"!ia"
-						| b"!ir" | b"!it" | b"!iv"
-						| b"!tv" | b"!hs" | b"!hg"
-						| b"!hY" | b"!ds" | b"!dg"
-						| b"!dY"
-				)
-			)
+				suffix,
+				b"!ia"
+					| b"!ir" | b"!it"
+					| b"!iv" | b"!tv"
+					| b"!hs" | b"!hg"
+					| b"!hY" | b"!hd"
+					| b"!ds" | b"!dg"
+					| b"!dY" | b"!dc"
+					| b"!dv"
+			) && !suffix.starts_with(b"!is")
 		}))
 	}
 
@@ -5134,6 +5141,7 @@ impl Transaction {
 				self.clrr(part).await?;
 			}
 			self.put_compare_key(&migrations_key, &migrations, Some(&prior)).await?;
+			self.layout_memo.lock().retain(|&(_, _, version), _| version.is_none());
 			self.reload_table_layouts(ns, db, tb, None).await?;
 			self.layout_epoch.fetch_add(1, Ordering::Release);
 			self.bump_catalog_version(ns, db, tb).await?;
@@ -8678,38 +8686,39 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Option<Arc<TableLayouts>> {
-		self.memoised_layouts(ns, db, tb)
+		self.memoised_layouts(ns, db, tb, None)
 	}
 
-	/// What this transaction holds of `tb`'s layouts, if it holds any.
+	/// What this transaction holds of `tb`'s layouts at `version`, if it holds any.
 	fn memoised_layouts(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Option<Arc<TableLayouts>> {
-		self.layout_memo.lock().get(&(ns, db)).and_then(|tables| tables.get(tb)).cloned()
+		self.layout_memo.lock().get(&(ns, db, version)).and_then(|tables| tables.get(tb)).cloned()
 	}
 
-	/// Holds `layouts` as this transaction's view of their table, with the table's span.
-	fn memoise_layouts(&self, layouts: Arc<TableLayouts>) {
+	/// Holds `layouts` as this transaction's view of their table at `version`, with the table's
+	/// span.
+	fn memoise_layouts(&self, layouts: Arc<TableLayouts>, version: Option<u64>) {
 		self.hold_span(layouts.namespace(), layouts.database(), layouts.table());
 		self.layout_memo
 			.lock()
-			.entry((layouts.namespace(), layouts.database()))
+			.entry((layouts.namespace(), layouts.database(), version))
 			.or_default()
 			.insert(layouts.table().clone(), layouts);
 	}
 
 	/// The layouts of `tb` as this transaction sees them, or as of `version`.
 	///
-	/// A current read (`version` of `None`) is held for the rest of the transaction until a range
+	/// A read is held for `(ns, db, version, tb)` for the rest of the transaction until a range
 	/// delete over the table's layout keys or a save point rollback that undid a mint or a range
 	/// delete clears it, so a table's layouts cost one point read and one range read per
-	/// transaction. A read-only transaction under a catalog epoch is answered the layouts another
-	/// transaction of that epoch read, and keeps those it reads for that epoch
-	/// ([`crate::cache::epoch`]), so it reads none. A versioned read is never held: it reads the
-	/// table's `!mi` and `!lg` keys at `version`, the version the caller reads the table's rows at.
+	/// `(table, version)` in a transaction. A current read (`version` of `None`) in a read-only
+	/// transaction under a catalog epoch is answered the layouts another transaction of that epoch
+	/// read, and keeps those it reads for that epoch ([`crate::cache::epoch`]), so it reads none.
 	///
 	/// A table that has no `!mi` answers empty layouts. The load fails only on a storage error: a
 	/// key or descriptor this build cannot read is counted or listed as a refused generation in the
@@ -8722,10 +8731,10 @@ impl Transaction {
 		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<TableLayouts>> {
+		if let Some(held) = self.memoised_layouts(ns, db, tb, version) {
+			return Ok(held);
+		}
 		if version.is_none() {
-			if let Some(held) = self.memoised_layouts(ns, db, tb) {
-				return Ok(held);
-			}
 			// Only a transaction that is not writeable: a writer's reads must see its own
 			// writes, so it neither reads nor keeps layouts here.
 			if !self.writeable()
@@ -8735,7 +8744,7 @@ impl Transaction {
 			{
 				// Answered as the read it stands for: open recordings note the dependency.
 				self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
-				self.memoise_layouts(Arc::clone(&layouts));
+				self.memoise_layouts(Arc::clone(&layouts), None);
 				return Ok(layouts);
 			}
 		}
@@ -8751,7 +8760,7 @@ impl Transaction {
 
 	/// The layouts of `tb` read from storage, bypassing what this transaction holds.
 	///
-	/// A current read replaces what the transaction holds of the table's layouts.
+	/// Replaces what the transaction holds of the table's layouts at `version`.
 	#[inline(never)]
 	pub fn reload_table_layouts(
 		&self,
@@ -8771,9 +8780,7 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Arc<TableLayouts>> {
 		let layouts = Arc::new(self.read_table_layouts(ns, db, tb, version).await?);
-		if version.is_none() {
-			self.memoise_layouts(Arc::clone(&layouts));
-		}
+		self.memoise_layouts(Arc::clone(&layouts), version);
 		Ok(layouts)
 	}
 
@@ -8880,10 +8887,10 @@ impl Transaction {
 		}
 		self.hold_span(ns, db, tb);
 		let mut memo = self.layout_memo.lock();
-		if memo.get(&(ns, db)).is_some_and(|tables| tables.contains_key(tb)) {
+		if memo.get(&(ns, db, None)).is_some_and(|tables| tables.contains_key(tb)) {
 			return;
 		}
-		memo.entry((ns, db)).or_default().insert(tb.clone(), Arc::clone(layouts));
+		memo.entry((ns, db, None)).or_default().insert(tb.clone(), Arc::clone(layouts));
 	}
 
 	/// The format this transaction writes a record of `tb` in, with the stored-format ledger
@@ -9083,9 +9090,9 @@ impl Transaction {
 		self.restamp_defined(defined).await
 	}
 
-	/// [`Self::admit_record_bytes`] where it needs no read: the answer is `None` for a read at a
-	/// `version`, for a table whose layouts the transaction does not hold, and for a generation
-	/// those layouts do not list, which a reload of them may settle. Every other answer is the one
+	/// [`Self::admit_record_bytes`] where it needs no read: the answer is `None` for a table whose
+	/// layouts at `version` the transaction does not hold, and for a generation those layouts do
+	/// not list, which a reload of them may settle. Every other answer is the one
 	/// [`Self::admit_record_bytes`] gives: both run [`stamped_envelope`] and then
 	/// [`admit_with_layouts`].
 	fn admit_resident(
@@ -9101,10 +9108,7 @@ impl Transaction {
 			Ok(None) => return Some(Ok(Admitted::UNSTAMPED)),
 			Err(e) => return Some(Err(e)),
 		};
-		if version.is_some() {
-			return None;
-		}
-		let layouts = self.memoised_layouts(ns, db, tb)?;
+		let layouts = self.memoised_layouts(ns, db, tb, version)?;
 		match admit_with_layouts(ns, db, tb, generation, packed, layouts) {
 			Ok(admitted) => Some(Ok(admitted)),
 			Err(

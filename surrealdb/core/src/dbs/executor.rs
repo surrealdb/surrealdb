@@ -500,6 +500,11 @@ fn slot_outcome(slot: &SlotValue) -> std::result::Result<surrealdb_types::Value,
 /// only through [`Executor::finalise_results`], once the transaction resolves.
 struct StreamSink {
 	items: Sender<QueryStreamItem>,
+	/// Items produced by a write statement running in a transaction of its own,
+	/// held back until its commit succeeds so a retryable commit conflict can
+	/// discard the failed attempt's rows before re-running.
+	staged: Vec<QueryStreamItem>,
+	staging: bool,
 	/// Statements whose rows have already been sent, and how many went out.
 	///
 	/// Keyed by statement index rather than held in a single slot because
@@ -522,8 +527,35 @@ impl StreamSink {
 	/// A closed channel is not an error here: the caller has already been told
 	/// to stop by [`Self::is_closed`], and an item produced in the meantime has
 	/// nowhere to go.
-	async fn send(&self, item: QueryStreamItem) {
-		let _ = self.items.send(item).await;
+	async fn send(&mut self, item: QueryStreamItem) {
+		if self.staging {
+			self.staged.push(item);
+		} else {
+			let _ = self.items.send(item).await;
+		}
+	}
+
+	/// Hold back items produced by a write statement running in a transaction
+	/// of its own until its commit outcome is known.
+	fn begin_staging(&mut self) {
+		self.staging = true;
+		self.staged.clear();
+	}
+
+	/// Send all staged items to the stream once the attempt stops staging.
+	async fn flush_staged(&mut self) {
+		self.staging = false;
+		for item in self.staged.drain(..) {
+			let _ = self.items.send(item).await;
+		}
+	}
+
+	/// Discard staged items and the streamed row count for `index` after an
+	/// attempt that failed, whether it is run again or its error is final.
+	fn discard_staged(&mut self, index: usize) {
+		self.staging = false;
+		self.staged.clear();
+		self.streamed.remove(&index);
 	}
 
 	/// Whether the consumer has gone away.
@@ -1471,6 +1503,8 @@ impl Executor {
 		let mut this = Self::new(kvs, ctx, opt);
 		this.stream = Some(StreamSink {
 			items,
+			staged: Vec::new(),
+			staging: false,
 			row_format,
 			streamed: HashMap::new(),
 			finalised: 0,
@@ -2278,9 +2312,10 @@ impl Executor {
 			match batch_result {
 				Ok(batch) => {
 					if streaming {
-						let sink = self.stream.as_ref().expect("streaming implies a sink");
+						let row_format =
+							self.stream.as_ref().expect("streaming implies a sink").row_format;
 						let mut batch = batch;
-						let item = match sink.row_format {
+						let item = match row_format {
 							// Rows the operators encoded, then any they handed on
 							// as values, encoded here: no public value is built
 							// for them.
@@ -2326,6 +2361,7 @@ impl Executor {
 						// A row leaves only once the creates held before it are checked, so
 						// no row follows a create that fails.
 						txn.flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
+						let sink = self.stream.as_mut().expect("streaming implies a sink");
 						sink.send(item).await;
 						// A consumer that stopped reading wants no more rows, and
 						// the statement is about to be abandoned anyway.
@@ -3175,6 +3211,7 @@ impl Executor {
 	) -> Result<Value> {
 		let mut budget = kvs.transaction_timeout();
 		let mut attempt = 1;
+		let index = self.current_index();
 		loop {
 			// What a further attempt runs from, taken before this one consumes the
 			// statement: the source text of a compiled statement, which is
@@ -3185,6 +3222,10 @@ impl Executor {
 				(TopLevelStatement::Ast(expr), _) => Some(Rerun::Copy(expr.clone())),
 				(TopLevelStatement::Plan(_), _) => None,
 			};
+			let staging = source.is_some();
+			if staging && let Some(sink) = self.stream.as_mut() {
+				sink.begin_staging();
+			}
 			let mut rerunnable = false;
 			let e = match self
 				.execute_in_own_transaction(
@@ -3197,15 +3238,26 @@ impl Executor {
 				)
 				.await
 			{
-				Ok(value) => return Ok(value),
+				Ok(value) => {
+					if let Some(sink) = self.stream.as_mut() {
+						sink.flush_staged().await;
+					}
+					return Ok(value);
+				}
 				Err(e) => e,
 			};
+			// A failed attempt's staged rows never reach the consumer: its
+			// statement finishes with an error, which retracts any rows it
+			// produced, and a further attempt produces its own.
+			if staging && let Some(sink) = self.stream.as_mut() {
+				sink.discard_staged(index);
+			}
 			// A commit whose outcome is unknown is not a retryable conflict,
 			// so a statement that may have applied is never run again.
-			if attempt == STATEMENT_CONFLICT_ATTEMPTS
-				|| !rerunnable
-				|| !crate::kvs::is_retryable_transaction_conflict(&e)
-			{
+			if !rerunnable || !crate::kvs::is_retryable_transaction_conflict(&e) {
+				return Err(e);
+			}
+			if attempt == STATEMENT_CONFLICT_ATTEMPTS {
 				return Err(e);
 			}
 			let Some(next) = source.and_then(Rerun::statement) else {
@@ -3321,6 +3373,9 @@ impl Executor {
 		// The lost attempt's transaction has ended, and with it what it held.
 		if let Some(memory) = self.ctx.memory() {
 			memory.transaction_ended();
+		}
+		if let Some(counters) = self.ctx.statement_counters() {
+			counters.reset();
 		}
 		self.bail_if_done()?;
 		// `attempt` is below `STATEMENT_CONFLICT_ATTEMPTS`, so the doubling

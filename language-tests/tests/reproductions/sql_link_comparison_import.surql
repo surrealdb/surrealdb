@@ -1,3 +1,8 @@
+/**
+[test]
+run = false
+*/
+
 DEFINE TABLE link_cmp SCHEMALESS;
 DEFINE FIELD dept ON link_cmp TYPE option<record<dept>>;
 CREATE link_cmp:1 SET dept = dept:1;

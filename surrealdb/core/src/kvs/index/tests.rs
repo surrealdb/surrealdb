@@ -10872,14 +10872,17 @@ async fn a_diskann_frame_outlives_its_phase_two_wait() -> Result<()> {
 				.await
 			}
 		});
-		// The definition is visible once it has committed, which is when phase 2 starts.
+		// The definition is visible once it has committed; phase 2 is under way
+		// once phase 1 has transitioned the index to Online (`compacting`).
 		timeout(Duration::from_secs(30), async {
-			while get_table_index(&ds, "t", "dx").await.is_err() {
+			while get_table_index(&ds, "t", "dx").await.is_err()
+				|| !compacting(&ds, &session, "dx").await.unwrap_or(false)
+			{
 				sleep(Duration::from_millis(5)).await;
 			}
 		})
 		.await?;
-		sleep(Duration::from_millis(100)).await;
+		sleep(Duration::from_millis(20)).await;
 		if cancelled {
 			cancel.trip();
 			let errors = timeout(Duration::from_secs(30), run).await???;
@@ -11074,7 +11077,7 @@ async fn settled_fulltext_index(ds: &Arc<Datastore>, session: &Session) -> Resul
 		ds,
 		session,
 		"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
-		 DEFINE INDEX ft ON t FIELDS text FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft ON t FIELDS text FULLTEXT ANALYZER simple;
 		 CREATE t:1 SET text = 'alpha beta';
 		 CREATE t:2 SET text = 'beta gamma';
 		 CREATE t:3 SET text = 'beta delta';",

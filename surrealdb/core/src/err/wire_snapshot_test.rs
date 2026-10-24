@@ -305,6 +305,13 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 			},
 		),
 		(
+			"IndexBuildFailed",
+			IdxError::IndexBuildFailed {
+				table: "sample".to_string(),
+				index: "sample".to_string(),
+			},
+		),
+		(
 			"NoIndexFoundForMatch",
 			IdxError::NoIndexFoundForMatch {
 				exp: "sample".to_string(),
@@ -503,6 +510,28 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			"StoreReadOnly",
 			DatastoreError::StoreReadOnly {
 				features: "sample".to_string(),
+			},
+		),
+		(
+			"StalenessAboveMaximum",
+			DatastoreError::StalenessAboveMaximum {
+				bound: std::time::Duration::from_secs(1),
+				maximum: std::time::Duration::from_secs(1),
+			},
+		),
+		("SerializableStaleRead", DatastoreError::SerializableStaleRead),
+		(
+			"IsolationNotSupported",
+			DatastoreError::IsolationNotSupported {
+				requested: "sample".to_string(),
+				supported: "sample".to_string(),
+			},
+		),
+		(
+			"ReadSnapshotTooStale",
+			DatastoreError::ReadSnapshotTooStale {
+				bound: std::time::Duration::from_secs(1),
+				newest_age: std::time::Duration::from_secs(1),
 			},
 		),
 	]
@@ -1139,6 +1168,13 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		),
 		("ComputationDepthExceeded", ExecError::ComputationDepthExceeded),
 		("InvalidStatement", ExecError::InvalidStatement("sample".to_string())),
+		(
+			"CorruptView",
+			ExecError::CorruptView {
+				table: "sample".to_string(),
+				reason: "sample",
+			},
+		),
 		(
 			"InvalidStatementTarget",
 			ExecError::InvalidStatementTarget {

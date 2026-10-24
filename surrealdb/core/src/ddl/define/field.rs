@@ -282,8 +282,9 @@ pub(crate) async fn define_field_definition_apply(
 	// stored records gets the keys of the links they hold. Skipped during
 	// import, which restores reference keys verbatim.
 	if !opt.import {
+		let frame = crate::ddl::frame(ctx, opt, None).await;
 		crate::exec::reference_purge::reconcile_reference_keys(
-			&txn,
+			&frame,
 			ns,
 			db,
 			&tb_name,
@@ -291,7 +292,6 @@ pub(crate) async fn define_field_definition_apply(
 			definition,
 		)
 		.await?;
-		let frame = crate::ddl::frame(ctx, opt, None).await;
 		crate::exec::materialize::backfill(&frame, existing.as_deref(), definition, true).await?;
 	}
 

@@ -453,7 +453,9 @@ fn order_delivered(ir: &Ir, sort: OpId) -> bool {
 			}
 			let forward = scan.direction == Direction::Forward;
 			let eq_len = match &scan.access {
-				crate::exec::index::access_path::BTreeAccess::Equality(_) => 1,
+				crate::exec::index::access_path::BTreeAccess::Equality(_) => {
+					usize::from(scan.pinned.is_some() || scan.stated.is_some())
+				}
 				crate::exec::index::access_path::BTreeAccess::Compound {
 					prefix,
 					..
@@ -468,8 +470,23 @@ fn order_delivered(ir: &Ir, sort: OpId) -> bool {
 					..
 				} => 0,
 			};
-			let eq_pinned =
-				scan.pinned.as_deref().and_then(|pinned| pinned.get(..eq_len)).unwrap_or(&[]);
+			if eq_len > 0 && scan.pinned.is_none() && scan.stated.is_none() {
+				return false;
+			}
+			let eq_pinned: Vec<FieldPath> = match scan.pinned.as_deref() {
+				Some(pinned) => pinned.get(..eq_len).unwrap_or(&[]).to_vec(),
+				None => {
+					let Some(stated) = scan.stated.as_deref().and_then(|s| s.get(..eq_len)) else {
+						return false;
+					};
+					stated
+						.iter()
+						.filter_map(|col| {
+							crate::exec::field_path_convert::field_path_from_idiom(col).ok()
+						})
+						.collect()
+				}
+			};
 			if !attrs
 				.keys
 				.iter()
@@ -478,15 +495,12 @@ fn order_delivered(ir: &Ir, sort: OpId) -> bool {
 			{
 				return false;
 			}
-			if eq_len > 0 && scan.pinned.is_none() && scan.stated.is_none() {
-				return false;
-			}
 			if let Some(stated) = scan.stated.as_deref() {
 				let rest: Vec<&FieldPath> =
 					fields.iter().skip_while(|field| eq_pinned.contains(field)).collect();
 				let stated_paths: Option<Vec<FieldPath>> = stated
 					.iter()
-					.skip(eq_pinned.len())
+					.skip(eq_len)
 					.map(|col| crate::exec::field_path_convert::field_path_from_idiom(col).ok())
 					.collect();
 				let Some(mut allowed) = stated_paths else {
@@ -828,7 +842,8 @@ fn reads_id_of_row(ir: &Ir, value: ValueId, region: RegionId) -> bool {
 }
 
 /// Whether any layer among `crossed` writes to the root field of `path`, shadowing the stored
-/// value on the row.
+/// value on the row. A column of the key part derives the record id component the index already
+/// orders by, and does not shadow it.
 fn layer_writes_field(ir: &Ir, crossed: &[OpId], path: &FieldPath) -> bool {
 	let Some(FieldPathPart::Field(root)) = path.0.first() else {
 		return false;
@@ -843,26 +858,48 @@ fn layer_writes_field(ir: &Ir, crossed: &[OpId], path: &FieldPath) -> bool {
 			} => true,
 			FieldsShape::Select(fields) => {
 				let mut unaliased = attrs.names.iter();
+				let mut nth = 0usize;
 				fields.iter().any(|field| match field {
 					FieldShape::Single {
 						alias,
 						..
-					} => alias
-						.as_ref()
-						.or_else(|| unaliased.next())
-						.and_then(|out| out.parts.first())
-						.is_some_and(|part| {
+					} => {
+						let col_nth = nth;
+						nth += 1;
+						let out = alias.as_ref().or_else(|| unaliased.next());
+						out.and_then(|out| out.parts.first()).is_some_and(|part| {
 							matches!(
 								part,
 								crate::expr::logical::OutputPathPart::Field(name)
 									if name.as_str() == root.as_str()
 							)
-						}),
+						}) && !layer_column_is_key_part(ir, *layer, col_nth)
+					}
 					FieldShape::All => false,
 				})
 			}
 		}
 	})
+}
+
+/// Whether the `nth` column of the layer `layer` is evaluated under a key-part frame.
+fn layer_column_is_key_part(ir: &Ir, layer: OpId, nth: usize) -> bool {
+	let Some(region) = ir
+		.op(layer)
+		.into_iter()
+		.flat_map(|data| data.regions.iter().copied())
+		.filter(|region| {
+			ir.region(*region)
+				.is_some_and(|data| data.kind == RegionKind::FieldFrame(FieldRole::Computed))
+		})
+		.nth(nth)
+	else {
+		return false;
+	};
+	let Some(first) = ops_in_region(ir, region).first().copied() else {
+		return false;
+	};
+	ir.op(first).and_then(|op| ir.frame(op.frame)).is_some_and(|frame| frame.eval.key_part)
 }
 
 /// Whether the keys of the sort `op` read the field paths `fields`, in order, as plain paths

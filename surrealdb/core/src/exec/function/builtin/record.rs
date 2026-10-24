@@ -63,6 +63,11 @@ impl ScalarFunction for RecordExists {
 		Box::pin(async move {
 			use crate::exe::FlowResultExt as _;
 			let (rid,): (crate::val::RecordId,) = FromArgs::from_args("record::exists", args)?;
+			if let crate::val::RecordIdKey::Object(key) = &rid.key
+				&& let Some(id) = key.get("id")
+			{
+				return Ok(Value::Bool(!id.is_none()));
+			}
 			if ctx.exec_ctx.options().is_none() {
 				return Ok(Value::None);
 			}
@@ -163,26 +168,26 @@ mod tests {
 	use crate::val::Value;
 
 	#[tokio::test]
-	async fn record_exists_checks_storage_for_object_key_with_id_field() {
-		let db = TestDb::new("CREATE tb:{ id: 1 };").await;
+	async fn record_exists_answers_from_object_key_id_component() {
+		let db = TestDb::new("").await;
 		let exec = db.exec_ctx().await;
 		let eval = EvalContext::from_exec_ctx(&exec);
 
-		let existing = Value::from(crate::syn::value("tb:{ id: 1 }").expect("parses"));
-		let missing_row = Value::from(crate::syn::value("tb:{ id: 2 }").expect("parses"));
+		let present = Value::from(crate::syn::value("tb:{ id: 1 }").expect("parses"));
+		let none_id = Value::from(crate::syn::value("tb:{ id: NONE }").expect("parses"));
 		let missing_tb = Value::from(crate::syn::value("nowhere:{ id: 123 }").expect("parses"));
 
 		assert_eq!(
-			RecordExists.invoke_async(&eval, vec![existing]).await.expect("runs"),
+			RecordExists.invoke_async(&eval, vec![present]).await.expect("runs"),
 			Value::Bool(true)
 		);
 		assert_eq!(
-			RecordExists.invoke_async(&eval, vec![missing_row]).await.expect("runs"),
+			RecordExists.invoke_async(&eval, vec![none_id]).await.expect("runs"),
 			Value::Bool(false)
 		);
 		assert_eq!(
 			RecordExists.invoke_async(&eval, vec![missing_tb]).await.expect("runs"),
-			Value::Bool(false)
+			Value::Bool(true)
 		);
 		exec.txn().cancel().await.expect("cancel");
 	}

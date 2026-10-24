@@ -2260,7 +2260,7 @@ async fn step_inner(
 				Some(new) => {
 					crate::exec::vm::descriptor::schema(
 						crate::exec::reference_purge::reconcile_reference_keys(
-							&ctx.txn(),
+							ctx,
 							ns,
 							db,
 							&table,

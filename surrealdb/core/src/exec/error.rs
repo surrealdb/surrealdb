@@ -844,10 +844,10 @@ impl LeafError for Error {
 			// A gap in the engine rather than a fault in the query: there is
 			// nothing for a client to correct, so it stays internal.
 			Error::Unimplemented(_) => TypesError::internal(message),
-			// Storage that is not what the maintenance wrote is no fault of the statement.
+			// Storage that is not what the maintenance wrote cannot be read as a group.
 			Error::CorruptView {
 				..
-			} => TypesError::internal(message),
+			} => TypesError::serialization(message, None),
 
 			// A cross-tenant namespace/database refusal: the authenticated auth
 			// level is not permitted to reach the selected ns/db. This is an

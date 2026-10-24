@@ -2584,7 +2584,7 @@ mod tests {
 	async fn a_later_table_target_passes_over_a_record_an_earlier_target_created() {
 		let db = TestDb::new(SETUP).await;
 		let sql = "
-			UPSERT plain:new, plain SET n = (n ?? 0) + 1;
+			UPSERT plain:new, plain SET n = (n ?? 0) + 1 WHERE true;
 			SELECT id, n FROM plain ORDER BY id;
 		";
 		let held = answers(&db, &TestDb::owner(), sql).await;

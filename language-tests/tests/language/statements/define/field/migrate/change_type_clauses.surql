@@ -108,6 +108,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 error = "Cannot change field `a` of table `e`: its VALUE reads `$value`: restate or drop it with the new TYPE"
 
 [[test.results]]
@@ -234,6 +237,7 @@ ALTER FIELD d ON p TYPE option<string> DEFAULT ALWAYS 'y' MIGRATE EXISTING ROWS 
 -- A TYPE that does not change is never checked.
 ALTER FIELD f ON p DEFAULT 'text';
 (INFO FOR TABLE p).fields.f;
+ALTER FIELD f ON p DROP DEFAULT;
 -- Enforced table with no rows: the checks run all the same.
 DEFINE TABLE e SCHEMAFULL;
 DEFINE FIELD a ON e TYPE int VALUE $value * 2;

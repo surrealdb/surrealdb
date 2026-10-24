@@ -78,6 +78,7 @@ InvalidVectorDimension	{ cause: NONE, code: -32000, kind: 'Internal', message: '
 InvalidVectorValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The value cannot be converted to a vector: sample' }
 IndexExists	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` already contains sample, with record `t:`1``' }
 IndexExistsHidden	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Database index `sample` already contains a conflicting value in another record' }
+IndexBuildFailed	{ cause: NONE, code: -32000, kind: 'Query', message: 'Database index `sample` on table `sample` failed to build, so it cannot enforce UNIQUE for this write: fix the duplicate values and run REBUILD INDEX, or REMOVE INDEX' }
 NoIndexFoundForMatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was no suitable index supporting the expression: sample' }
 AnalyzerError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be analyzed: sample" }
 HighlightError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be highlighted: sample" }
@@ -121,6 +122,10 @@ NoGeneration	{ cause: NONE, code: -32000, kind: 'Query', message: "Table 'sample
 FloorOutsideWindow	{ cause: NONE, code: -32000, kind: 'Query', message: "Table 'sample' cannot move its floor to generation 1: its generations are 2 to 3" }
 ConformanceStale	{ cause: NONE, code: -32000, kind: 'Query', message: "The definition of field 'sample' of table 'sample' changed since its conformance was checked" }
 StoreReadOnly	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The store is open read-only: it records features this build does not maintain (sample). Run a release that knows them to write to it' }
+StalenessAboveMaximum	{ cause: NONE, code: -32000, kind: 'Query', message: 'The requested MAX STALENESS of 1s is above the maximum of 1s this datastore allows' }
+SerializableStaleRead	{ cause: NONE, code: -32000, kind: 'Query', message: 'ISOLATION LEVEL SERIALIZABLE cannot be combined with a MAX STALENESS above zero' }
+IsolationNotSupported	{ cause: NONE, code: -32000, kind: 'Query', message: 'The isolation level sample is not available on this datastore; it offers sample' }
+ReadSnapshotTooStale	{ cause: NONE, code: -32000, kind: 'Query', message: 'ReadSnapshotTooStale: no snapshot within MAX STALENESS 1s; the newest is 1s old' }
 BucketPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to get this file in the `sample` bucket" }
 ObsError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Operation not supported: sample' }, code: -32000, kind: 'Internal', message: 'Object Store error: Operation not supported: sample' }
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
@@ -250,6 +255,7 @@ NsNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "You don'
 DbNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "You don't have permission to change to the sample database" }
 ComputationDepthExceeded	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Reached excessive computation depth due to functions, subqueries, or computed values' }
 InvalidStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid statement: sample' }
+CorruptView	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'The view `sample` is corrupt: sample' }
 InvalidStatementTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute statement using value: sample' }
 CreateStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute CREATE statement using value: sample' }
 UpsertStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute UPSERT statement using value: sample' }
