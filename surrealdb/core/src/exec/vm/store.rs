@@ -2510,6 +2510,12 @@ async fn step_inner(
 					"No Index Builder",
 				)))
 			})?;
+			// A datastore that leaves builds to bounded passes waits for none.
+			// A deferred build its statement awaits after its commit runs there, on the
+			// statement's budget, where the datastore gives it one.
+			let awaits_inline =
+				*blocking && builder.defers_builds() && builder.inline_batches() > 0;
+			let blocking = *blocking && !builder.defers_builds();
 			if *fresh {
 				let txn = ctx.txn();
 				txn.on_rollback(crate::kvs::index::CleanUncommittedBuild::boxed(
@@ -2544,7 +2550,7 @@ async fn step_inner(
 				// An earlier rebuild of the index in this transaction staged the generation, and
 				// starts its build once the transaction commits. A blocking rebuild still waits for
 				// that build, as for one it staged itself; another has nothing more to do.
-				crate::kvs::index::RebuildStaging::AlreadyStaged(generation) if *blocking => {
+				crate::kvs::index::RebuildStaging::AlreadyStaged(generation) if blocking => {
 					Some(generation)
 				}
 				crate::kvs::index::RebuildStaging::AlreadyStaged(_) => return Ok(None),
@@ -2563,7 +2569,7 @@ async fn step_inner(
 			// engine's conflict window, and which a failed build rolls back with
 			// the definition.
 			let after_commit = match prior {
-				_ if !*blocking || !txn.accepts_after_commit_waits() => None,
+				_ if !(blocking || awaits_inline) || !txn.accepts_after_commit_waits() => None,
 				None if !*fresh => Some(None),
 				Some((existing, prior_table))
 					if !read(regs, *existing).is_truthy()
@@ -2583,7 +2589,7 @@ async fn step_inner(
 			let index_id = index.index_id;
 			let unique = matches!(index.index, crate::catalog::Index::Uniq);
 			let materialise =
-				(*blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())
+				(blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())
 					.then(|| {
 						crate::kvs::index::materialise::MaterialiseAfterCommit::new(
 							std::sync::Arc::clone(frozen),
@@ -2610,7 +2616,7 @@ async fn step_inner(
 					// A staged build starts only once the transaction has committed, wherever the
 					// statement sits, so its owner awaits it after the commit whenever it awaits
 					// anything there, and reports how it ends as the statement's result.
-					if *blocking && txn.accepts_materialise_waits() {
+					if blocking && txn.accepts_materialise_waits() {
 						if txn.wait_after_commit(rebuild.awaited()).await.is_some() {
 							return Err(ControlFlow::Err(anyhow::Error::new(
 								crate::err::EngineError::unreachable(
@@ -2619,7 +2625,7 @@ async fn step_inner(
 							)));
 						}
 					} else {
-						txn.on_commit(rebuild.on_commit(*blocking)).await;
+						txn.on_commit(rebuild.on_commit(blocking)).await;
 					}
 					Ok(())
 				}
@@ -2635,9 +2641,7 @@ async fn step_inner(
 						)
 						.await
 				}
-				(None, None) => {
-					builder.run(frozen, options, table.table_id, index, *blocking).await
-				}
+				(None, None) => builder.run(frozen, options, table.table_id, index, blocking).await,
 			}
 			.map_err(ControlFlow::Err)?;
 			// A build that ran inside this transaction wrote its entries in
@@ -2650,7 +2654,7 @@ async fn step_inner(
 						&table.name,
 						index_id,
 						unique,
-						*blocking,
+						blocking,
 					)
 					.await
 					.map_err(ControlFlow::Err)?;

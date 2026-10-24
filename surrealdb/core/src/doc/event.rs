@@ -25,9 +25,8 @@ use crate::kvs::testing::{
 	maybe_inject_panic, maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	Datastore, EVENT_CLAIM_TTL, NORMAL_BATCH_SIZE, Transaction, TransactionFactory,
-	TransactionType, is_conditional_write_conflict, is_indeterminate_commit,
-	is_retryable_transaction_conflict,
+	Datastore, EVENT_CLAIM_TTL, Transaction, TransactionFactory, TransactionType,
+	is_conditional_write_conflict, is_indeterminate_commit, is_retryable_transaction_conflict,
 };
 /// How many times a queued event is re-run in place after its transaction lost
 /// a retryable conflict, or its commit ended with an unknown outcome.
@@ -135,8 +134,8 @@ impl EventBatch {
 	/// the last one fetched. Whether anything in it ran is a separate question:
 	/// a full batch none of whose entries this binary can run is still full,
 	/// and the entries behind it are only reached by resuming past it.
-	pub fn is_full(&self) -> bool {
-		self.fetched >= NORMAL_BATCH_SIZE as usize
+	pub fn is_full(&self, size: u32) -> bool {
+		self.fetched >= size as usize
 	}
 }
 
@@ -259,7 +258,7 @@ async fn fetch_batch(
 	range: &TypedRange<AsyncEventRecord>,
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let res = catch!(tx, tx.scan_raw(range.clone(), NORMAL_BATCH_SIZE, 0, None).await);
+	let res = catch!(tx, tx.scan_raw(range.clone(), ds.event_batch_size(), 0, None).await);
 	tx.cancel().await?;
 	Ok(res)
 }
@@ -468,6 +467,11 @@ pub(crate) async fn process_events_batch(
 	res: Vec<(Vec<u8>, Vec<u8>)>,
 	lh: Option<&LeaseHandler>,
 ) -> Result<EventBatch> {
+	if lh.is_none()
+		&& let Some(limit) = ds.joined_event_workers()
+	{
+		return process_events_joined(ds, res, limit).await;
+	}
 	let mut batch = EventBatch {
 		fetched: res.len(),
 		last_key: res.last().map(|(k, _)| k.clone()),
@@ -563,6 +567,11 @@ pub(crate) async fn process_events_batch(
 	res: Vec<(Vec<u8>, Vec<u8>)>,
 	lh: Option<&LeaseHandler>,
 ) -> Result<EventBatch> {
+	if lh.is_none()
+		&& let Some(limit) = ds.joined_event_workers()
+	{
+		return process_events_joined(ds, res, limit).await;
+	}
 	let mut batch = EventBatch {
 		fetched: res.len(),
 		last_key: res.last().map(|(k, _)| k.clone()),
@@ -589,6 +598,51 @@ pub(crate) async fn process_events_batch(
 	.await;
 	let tallied = tally.add_to(&mut batch);
 	match ran.and(tallied) {
+		Ok(()) => Ok(batch),
+		Err(e) => Err(e.context(FailedBatch(batch))),
+	}
+}
+
+/// Runs the entries of one fetched batch, at most `limit` at once (at least one), all polled on the
+/// calling task: nothing is spawned, so whatever the caller set up for its task reaches every
+/// event's transactions, on a target without a task spawner too. Reports and fails as
+/// [`process_events_batch`] does, once every entry it started has finished. Each entry is claimed
+/// by the future about to run it, so no more than `limit` entries are claimed at a time.
+async fn process_events_joined(
+	ds: &Datastore,
+	res: Vec<(Vec<u8>, Vec<u8>)>,
+	limit: usize,
+) -> Result<EventBatch> {
+	use futures::StreamExt;
+	let mut batch = EventBatch {
+		fetched: res.len(),
+		last_key: res.last().map(|(k, _)| k.clone()),
+		..EventBatch::default()
+	};
+	let mut events = Vec::with_capacity(res.len());
+	let mut built: Result<()> = Ok(());
+	for (k, v) in res {
+		let Some((key, ev)) = decode_queued(&k, &v) else {
+			continue;
+		};
+		batch.oldest_age = batch.oldest_age.max(Some(key.age()));
+		match AsyncEventContext::new(ds, k, v, key, ev) {
+			Ok(event_context) => events.push(event_context),
+			Err(e) => {
+				built = Err(e);
+				break;
+			}
+		}
+	}
+	let mut tally = WorkerTally::default();
+	let mut running = futures::stream::iter(events)
+		.map(AsyncEventContext::run_event_checked)
+		.buffer_unordered(limit.max(1));
+	while let Some(outcome) = running.next().await {
+		tally.record(outcome);
+	}
+	let tallied = tally.add_to(&mut batch);
+	match built.and(tallied) {
 		Ok(()) => Ok(batch),
 		Err(e) => Err(e.context(FailedBatch(batch))),
 	}

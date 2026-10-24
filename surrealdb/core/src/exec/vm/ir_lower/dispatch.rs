@@ -737,6 +737,7 @@ fn statement_program(
 	if let Some(pipeline) = program.pipelines.get(own) {
 		check_claims(ir, &claims, &pipeline.code, &program, cx.registry())?;
 	}
+	super::super::morsel::wire::attach_units(&mut program);
 	Ok(Lowered {
 		program,
 		provenance,

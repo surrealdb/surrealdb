@@ -424,6 +424,9 @@ pub struct CommitTriggers {
 	/// by a concurrent write — possibly behind the scan's position, so the
 	/// queue is not at rest.
 	async_events_queued: AtomicU64,
+	/// Bounded index-build passes, notified when a statement leaves an index
+	/// build for them to run.
+	pub index_build: Notify,
 	/// Index compaction, notified when a commit queues compaction work so the
 	/// compactor runs on the write instead of waiting out its interval.
 	pub index_compaction: Notify,

@@ -300,6 +300,35 @@ pub async fn wipe_index_data(
 	Ok(())
 }
 
+/// Deletes, in `tx`, at most `limit` of the keys the index `ikb` names holds, other than the
+/// compaction generations [`wipe_index_data`] reads and writes back, and answers how many it
+/// deleted.
+///
+/// A wipe too large for one transaction runs this, a transaction at a time, until it answers
+/// zero, and then [`wipe_index_data`], which then has only the generations and what was written
+/// meanwhile left to delete. A deleted key stays deleted, so a caller that stops between pages
+/// resumes where the index's keys begin. A DiskANN index is not wiped this way: its wipe also
+/// forgets the pending-state guards its datastore knows of, which only [`wipe_index_data`] does.
+pub async fn wipe_index_page(tx: &Transaction, ikb: &IndexKeyBase, limit: u32) -> Result<usize> {
+	#[cfg_attr(not(diskann), allow(unused_mut))]
+	#[cfg_attr(not(diskann), allow(unused_mut))]
+	let mut kept = Vec::from([
+		ikb.new_hg_key().encode_key()?,
+		ikb.new_tv_key().encode_key()?,
+		ikb.new_dv_key().encode_key()?,
+		ikb.new_iv_key().encode_key()?,
+	]);
+	#[cfg(diskann)]
+	kept.push(ikb.new_dg_key().encode_key()?);
+	let keys = tx.keys_raw(ikb.new_idx_root().raw_range()?, limit, 0, None).await?;
+	let mut deleted = 0;
+	for key in keys.into_iter().filter(|key| !kept.iter().any(|k| k.as_slice() == key.as_slice())) {
+		tx.del(surrealdb_kvs::Key::from(key)).await?;
+		deleted += 1;
+	}
+	Ok(deleted)
+}
+
 /// A primary-appending marker's key as a previous release spelled it: the
 /// generation's prefix, then the record id under the index format.
 ///

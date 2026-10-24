@@ -22259,3 +22259,671 @@ async fn a_transaction_reads_its_own_write_through_an_index_changed_after_it_beg
 	}
 	Ok(())
 }
+
+/// A datastore whose statements leave index builds to bounded passes.
+#[cfg(feature = "kv-mem")]
+async fn new_index_pass_test_ds() -> Result<(Arc<Datastore>, Session)> {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.without_index_build_tasks()
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	Ok((ds, session))
+}
+
+/// The writes made while the pass-driven build in [`passes_build_the_index_an_ordinary_build_does`]
+/// runs, the `step`th of them: an update that moves a record between keys, a new record, and a
+/// deleted one.
+#[cfg(feature = "kv-mem")]
+fn write_during_build(step: usize) -> String {
+	format!(
+		"UPDATE t:{a} SET n = {n}; CREATE t:{c} SET n = {m}; DELETE t:{d};",
+		a = step % 40,
+		n = (step * 3) % 7,
+		c = 1000 + step,
+		m = step % 7,
+		d = 40 + (step % 20),
+	)
+}
+
+/// Runs passes of `budget` batches until none is left, between passes running `between`, and
+/// answers how many passes ran.
+#[cfg(feature = "kv-mem")]
+async fn run_passes_to_end(
+	ds: &Datastore,
+	session: &Session,
+	budget: usize,
+	mut between: impl FnMut(usize) -> Option<String>,
+) -> Result<usize> {
+	let mut passes = 0;
+	loop {
+		let run = ds.run_index_builds(budget).await?;
+		passes += 1;
+		assert!(
+			run.batches <= budget,
+			"a pass ran {} batches over a budget of {budget}",
+			run.batches
+		);
+		if !run.more {
+			return Ok(passes);
+		}
+		assert!(passes < 1000, "the build did not finish under passes of {budget} batches");
+		if let Some(sql) = between(passes) {
+			execute_all(ds, session, &sql).await?;
+		}
+	}
+}
+
+/// A build left to bounded passes, with writes between every pass, ends with the index an
+/// ordinary build of the same records writes, reporting `ready` only once the passes are done.
+#[cfg(feature = "kv-mem")]
+async fn assert_passes_build_the_index_an_ordinary_build_does(
+	define: &str,
+	budget: usize,
+) -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(&ds, &session, "FOR $i IN 0..60 { CREATE type::record('t', $i) SET n = $i % 7 };")
+		.await?;
+	execute_all(&ds, &session, define).await?;
+	assert_ne!(
+		index_building_status(&ds, &session, "t", "ix").await?,
+		"ready",
+		"the statement returns before any pass has run"
+	);
+	let mut writes = 0;
+	let passes = run_passes_to_end(&ds, &session, budget, |_| {
+		writes += 1;
+		Some(write_during_build(writes))
+	})
+	.await?;
+	assert!(passes > 2, "the build ran in {passes} passes, so no pass was bounded");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+
+	// The same records, written directly, and indexed by an ordinary build.
+	let (reference, session_ref) = new_index_test_ds().await?;
+	execute_all(
+		&reference,
+		&session_ref,
+		"FOR $i IN 0..60 { CREATE type::record('t', $i) SET n = $i % 7 };",
+	)
+	.await?;
+	let mut sql = String::new();
+	for step in 1..=writes {
+		sql.push_str(&write_during_build(step));
+	}
+	execute_all(&reference, &session_ref, &sql).await?;
+	execute_all(&reference, &session_ref, "DEFINE INDEX ix ON t FIELDS n;").await?;
+	assert_eq!(
+		index_entry_keys(&ds, "t", "ix").await?,
+		index_entry_keys(&reference, "t", "ix").await?,
+		"the passes wrote the index an ordinary build writes"
+	);
+	for n in 0..7 {
+		let sql = format!("SELECT VALUE id FROM t WHERE n = {n} ORDER BY id");
+		let unindexed = format!("SELECT VALUE id FROM t WITH NOINDEX WHERE n = {n} ORDER BY id");
+		let mut indexed = ds.execute(&sql, &session, None).await?;
+		let mut scanned = ds.execute(&unindexed, &session, None).await?;
+		assert_eq!(indexed.remove(0).result?, scanned.remove(0).result?, "n = {n}");
+	}
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn passes_build_the_index_an_ordinary_build_does() -> Result<()> {
+	assert_passes_build_the_index_an_ordinary_build_does(
+		"DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;",
+		3,
+	)
+	.await
+}
+
+/// A blocking `DEFINE INDEX` on a populated table returns with the index building, as
+/// `CONCURRENTLY` does, and passes of one batch each, with writes queued between every one of
+/// them, still carry it to the end.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_blocking_define_is_left_to_passes_of_one_batch() -> Result<()> {
+	assert_passes_build_the_index_an_ordinary_build_does("DEFINE INDEX ix ON t FIELDS n;", 1).await
+}
+
+/// A pass stopped after any batch — handed back as a pass that spends its budget does, or left
+/// claimed by a pass whose process died — is resumed by later passes, which end with the index
+/// whole.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_pass_stopped_after_any_batch_resumes() -> Result<()> {
+	for stop_after in [1, 2, 3, 5, 8, 13] {
+		let (ds, session) = new_index_pass_test_ds().await?;
+		let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 3);
+		execute_all(
+			&ds,
+			&session,
+			"FOR $i IN 0..40 { CREATE type::record('t', $i) SET n = $i % 5 };",
+		)
+		.await?;
+		execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;").await?;
+		let first = ds.run_index_builds(stop_after).await?;
+		assert_eq!(first.batches, stop_after, "the first pass spends its budget");
+		assert!(first.more, "and hands the build back");
+
+		// A pass that claims the build and dies holds it, as far as the store says, until its
+		// lease lapses.
+		let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+		let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+		let mut state = durable_build_state(&ds, &ikb).await?;
+		assert_eq!(state.owner, None, "a handed-back build names no owner");
+		state.owner = Some(Uuid::now_v7());
+		state.owner_heartbeat_at = Some(Utc::now());
+		set_durable_build_state(&ds, &ikb, state.clone()).await?;
+		execute_all(&ds, &session, &write_during_build(stop_after)).await?;
+		let held = ds.run_index_builds(100).await?;
+		assert_eq!((held.batches, held.more), (0, false), "a held build is not claimed");
+		assert!(
+			held.retry_after.is_some_and(|after| after > Duration::from_secs(50)),
+			"the pass says when the lease lapses: {held:?}"
+		);
+		assert_ne!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+
+		state.owner_heartbeat_at = Some(Utc::now() - chrono::Duration::seconds(61));
+		set_durable_build_state(&ds, &ikb, state).await?;
+		run_passes_to_end(&ds, &session, 2, |_| None).await?;
+		assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+		for n in 0..5 {
+			let sql = format!("SELECT VALUE id FROM t WHERE n = {n} ORDER BY id");
+			let unindexed =
+				format!("SELECT VALUE id FROM t WITH NOINDEX WHERE n = {n} ORDER BY id");
+			let mut indexed = ds.execute(&sql, &session, None).await?;
+			let mut scanned = ds.execute(&unindexed, &session, None).await?;
+			assert_eq!(
+				indexed.remove(0).result?,
+				scanned.remove(0).result?,
+				"n = {n}, stopped after {stop_after}"
+			);
+		}
+	}
+	Ok(())
+}
+
+/// A statement that leaves a build to passes wakes `index_build` once it commits, and writes a
+/// key the build-state predicate matches; a record key does not match.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_deferred_build_is_signalled_and_its_state_key_recognised() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	execute_all(&ds, &session, "CREATE t:1 SET n = 1; DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;")
+		.await?;
+	timeout(Duration::from_secs(5), ds.commit_triggers().index_build.notified())
+		.await
+		.map_err(|_| anyhow::anyhow!("the statement did not wake the index build passes"))?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	assert!(Datastore::is_index_build_state_key(&ikb.new_bs_key().encode_key()?));
+	let record = crate::key::schema::RecordKey {
+		ns,
+		db,
+		tb: Cow::Borrowed(&table),
+		id: Cow::Owned(RecordIdKey::Number(1)),
+	}
+	.encode_key()?;
+	assert!(!Datastore::is_index_build_state_key(&record));
+	assert!(!Datastore::is_index_build_state_key(&ikb.new_bt_key(1).encode_key()?));
+	let run = ds.run_index_builds(10).await?;
+	assert!(!run.more, "{run:?}");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	Ok(())
+}
+
+/// A build whose statement is cancelled is not left for passes, and a datastore with nothing
+/// pending reads as such.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_cancelled_definition_leaves_no_build_for_passes() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let idle = ds.run_index_builds(10).await?;
+	assert_eq!((idle.batches, idle.more, idle.retry_after), (0, false, None));
+	execute_all(&ds, &session, "CREATE t:1 SET n = 1;").await?;
+	execute_cancelled_transaction(
+		&ds,
+		&session,
+		"BEGIN; DEFINE INDEX ix ON t FIELDS n CONCURRENTLY; CANCEL;",
+	)
+	.await?;
+	let run = ds.run_index_builds(10).await?;
+	assert_eq!((run.batches, run.more, run.retry_after), (0, false, None), "{run:?}");
+	assert!(get_table_index(&ds, "t", "ix").await.is_err());
+	Ok(())
+}
+
+/// `REBUILD INDEX` on a datastore that leaves builds to passes returns with the index building,
+/// and passes bring it back to `ready` with the index whole; one whose transaction is cancelled
+/// leaves no build for passes and the ready index as it was.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_rebuild_is_left_to_passes_and_a_cancelled_one_is_not() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(&ds, &session, "FOR $i IN 0..30 { CREATE type::record('t', $i) SET n = $i % 3 };")
+		.await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n;").await?;
+	run_passes_to_end(&ds, &session, 100, |_| None).await?;
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	let built = index_entry_keys(&ds, "t", "ix").await?;
+
+	execute_cancelled_transaction(&ds, &session, "BEGIN; REBUILD INDEX ix ON t; CANCEL;").await?;
+	let run = ds.run_index_builds(100).await?;
+	assert_eq!((run.batches, run.more), (0, false), "{run:?}");
+
+	execute_all(&ds, &session, "REBUILD INDEX ix ON t;").await?;
+	assert_ne!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	let passes = run_passes_to_end(&ds, &session, 2, |_| None).await?;
+	assert!(passes > 1, "{passes}");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	assert_eq!(index_entry_keys(&ds, "t", "ix").await?, built);
+	Ok(())
+}
+
+/// The writes made between passes in [`assert_passes_build_a_kind`]: one record moved between
+/// values, one created and one deleted.
+#[cfg(feature = "kv-mem")]
+fn kind_write_during_build(step: usize) -> String {
+	let word = ["alpha", "beta", "gamma"][step % 3];
+	format!(
+		"UPDATE t:{a} SET n = {n}, body = '{word} moved'; CREATE t:{c} SET n = {m}, body = '{word} new'; DELETE t:{d};",
+		a = step % 20,
+		n = step % 5,
+		c = 1000 + step,
+		m = (step * 2) % 5,
+		d = 20 + (step % 20),
+	)
+}
+
+/// Builds the index `define` declares on `t` with passes of two batches, writing between every
+/// pass, and checks it ends `ready`, released by its last owner, answering each of `queries`
+/// as `WITH NOINDEX` answers it.
+#[cfg(feature = "kv-mem")]
+async fn assert_passes_build_a_kind(define: &str, queries: &[&str]) -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		 FOR $i IN 0..40 {
+			CREATE type::record('t', $i) SET n = $i % 5, body = ['alpha', 'beta', 'gamma'][$i % 3] + ' old';
+		 };",
+	)
+	.await?;
+	execute_all(&ds, &session, define).await?;
+	let mut writes = 0;
+	let passes = run_passes_to_end(&ds, &session, 2, |_| {
+		writes += 1;
+		Some(kind_write_during_build(writes))
+	})
+	.await?;
+	assert!(passes > 2, "{define}: the build ran in {passes} passes");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready", "{define}");
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let state = durable_build_state(&ds, &IndexKeyBase::new(ns, db, table, ix.index_id)).await?;
+	assert_eq!(state.owner, None, "{define}: the last pass released the build");
+	for query in queries {
+		let unindexed = query.replacen("FROM t", "FROM t WITH NOINDEX", 1);
+		let mut indexed = ds.execute(query, &session, None).await?;
+		let mut scanned = ds.execute(&unindexed, &session, None).await?;
+		assert_eq!(indexed.remove(0).result?, scanned.remove(0).result?, "{query}");
+	}
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn passes_build_each_index_kind_and_release_it() -> Result<()> {
+	assert_passes_build_a_kind(
+		"DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;",
+		&["SELECT VALUE id FROM t WHERE n = 2 ORDER BY id"],
+	)
+	.await?;
+	assert_passes_build_a_kind(
+		"DEFINE INDEX ix ON t FIELDS body FULLTEXT ANALYZER simple BM25 CONCURRENTLY;",
+		&[
+			"SELECT VALUE id FROM t WHERE body @@ 'alpha' ORDER BY id",
+			"SELECT VALUE id FROM t WHERE body @@ 'gamma' ORDER BY id",
+		],
+	)
+	.await?;
+	assert_passes_build_a_kind(
+		"DEFINE INDEX ix ON t COUNT CONCURRENTLY;",
+		&["SELECT count() FROM t GROUP ALL"],
+	)
+	.await
+}
+
+/// A unique index left to passes refuses no duplicate written while it is pending: the duplicate
+/// commits, and the build that replays it ends in `error`, as a `CONCURRENTLY` unique build over
+/// such writes does.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_pending_unique_index_admits_a_duplicate_and_its_build_fails() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS email UNIQUE;").await?;
+	let mut first = ds.execute("CREATE t:1 SET email = 'a'", &session, None).await?;
+	let mut second = ds.execute("CREATE t:2 SET email = 'a'", &session, None).await?;
+	let first = first.remove(0).result.map(|_| ()).map_err(|e| e.to_string());
+	let second = second.remove(0).result.map(|_| ()).map_err(|e| e.to_string());
+	assert_eq!((first, second), (Ok(()), Ok(())), "both writes commit while the build is pending");
+	run_passes_to_end(&ds, &session, 10, |_| None).await?;
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "error");
+	Ok(())
+}
+
+/// A duplicate written while a unique build runs on its own task commits, and the build that
+/// replays it ends in `error`: a running build admits writes without judging them, which is
+/// what a build left to passes does too
+/// ([`a_pending_unique_index_admits_a_duplicate_and_its_build_fails`]).
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
+async fn a_running_unique_build_admits_a_duplicate_and_fails() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "CREATE t:1 SET email = 'a';").await?;
+	let guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX ix ON t FIELDS email UNIQUE CONCURRENTLY;",
+	)
+	.await?;
+	let mut second = ds.execute("CREATE t:2 SET email = 'a'", &session, None).await?;
+	let second = second.remove(0).result.map(|_| ()).map_err(|e| e.to_string());
+	drop(guard);
+	let status = timeout(Duration::from_secs(10), async {
+		loop {
+			let status = index_building_status(&ds, &session, "t", "ix").await?;
+			if status == "ready" || status == "error" {
+				return Ok::<_, anyhow::Error>(status);
+			}
+			sleep(Duration::from_millis(20)).await;
+		}
+	})
+	.await??;
+	assert_eq!((second, status.as_str()), (Ok(()), "error"));
+	Ok(())
+}
+
+/// A datastore that leaves builds to passes, but has a blocking statement run up to `batches`
+/// batches of its own build once it commits.
+#[cfg(feature = "kv-mem")]
+async fn new_inline_pass_test_ds(batches: usize) -> Result<(Arc<Datastore>, Session)> {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.without_index_build_tasks()
+		.with_inline_index_build_batches(batches)
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	Ok((ds, session))
+}
+
+/// A blocking `DEFINE INDEX` whose build ends within the inline budget returns with the index
+/// ready, as where builds run on tasks: a unique index refuses a duplicate from then on, and a
+/// unique build over duplicates fails the statement and takes its definition back.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_blocking_define_runs_its_build_within_the_inline_budget() -> Result<()> {
+	let (ds, session) = new_inline_pass_test_ds(100).await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(&ds, &session, "FOR $i IN 0..20 { CREATE type::record('t', $i) SET email = $i };")
+		.await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS email UNIQUE;").await?;
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	let mut dup = ds.execute("CREATE t:99 SET email = 3", &session, None).await?;
+	let err = dup.remove(0).result.expect_err("the ready unique index refuses a duplicate");
+	assert!(err.to_string().contains("already contains"), "{err}");
+	let run = ds.run_index_builds(10).await?;
+	assert_eq!((run.batches, run.more), (0, false), "{run:?}");
+
+	execute_all(&ds, &session, "CREATE u:1 SET email = 'a'; CREATE u:2 SET email = 'a';").await?;
+	let mut define =
+		ds.execute("DEFINE INDEX ux ON u FIELDS email UNIQUE;", &session, None).await?;
+	let err = define.remove(0).result.expect_err("the build over duplicates fails the statement");
+	assert!(err.to_string().contains("already contains"), "{err}");
+	assert!(get_table_index(&ds, "u", "ux").await.is_err(), "its definition is taken back");
+	Ok(())
+}
+
+/// A blocking `DEFINE INDEX` whose build outlasts the inline budget returns with the index
+/// building and wakes the passes, which finish it.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_blocking_define_leaves_what_outlasts_the_inline_budget_to_passes() -> Result<()> {
+	let (ds, session) = new_inline_pass_test_ds(2).await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(&ds, &session, "FOR $i IN 0..40 { CREATE type::record('t', $i) SET n = $i % 5 };")
+		.await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n;").await?;
+	assert_ne!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	timeout(Duration::from_secs(5), ds.commit_triggers().index_build.notified())
+		.await
+		.map_err(|_| anyhow::anyhow!("the statement did not wake the passes"))?;
+	run_passes_to_end(&ds, &session, 2, |_| None).await?;
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	Ok(())
+}
+
+/// The writes made between passes in [`assert_passes_build_a_vector_index`]: a vector moved, one
+/// created and one deleted.
+#[cfg(feature = "kv-mem")]
+fn vector_write_during_build(step: usize) -> String {
+	format!(
+		"UPDATE t:{a} SET vec = [{x}f, {y}f]; CREATE t:{c} SET vec = [{y}f, {x}f]; DELETE t:{d};",
+		a = step % 20,
+		x = (step * 7 % 31) as f64 + 0.25,
+		y = (step * 3 % 17) as f64 + 0.5,
+		c = 1000 + step,
+		d = 20 + (step % 20),
+	)
+}
+
+/// Builds the vector index `kind` declares with passes of two batches, writing between every
+/// pass, and checks it answers nearest-neighbour queries as an ordinary build over the same
+/// records does, and as the exact search does.
+#[cfg(feature = "kv-mem")]
+async fn assert_passes_build_a_vector_index(kind: &str) -> Result<()> {
+	const SEED: &str = "FOR $i IN 0..40 {
+		CREATE type::record('t', $i) SET vec = [<float> $i + 0.1, <float> ($i * $i % 13) + 0.3];
+	};";
+	let queries = ["[3.3f, 1.7f]", "[17.9f, 6.2f]", "[39.1f, 12.4f]"];
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 4);
+	execute_all(&ds, &session, SEED).await?;
+	execute_all(&ds, &session, &format!("DEFINE INDEX ix ON t FIELDS vec {kind} CONCURRENTLY;"))
+		.await?;
+	let mut writes = 0;
+	let passes = run_passes_to_end(&ds, &session, 2, |_| {
+		writes += 1;
+		Some(vector_write_during_build(writes))
+	})
+	.await?;
+	assert!(passes > 2, "{kind}: the build ran in {passes} passes");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready", "{kind}");
+
+	let (reference, session_ref) = new_index_test_ds().await?;
+	execute_all(&reference, &session_ref, SEED).await?;
+	let sql: String = (1..=writes).map(vector_write_during_build).collect();
+	execute_all(&reference, &session_ref, &sql).await?;
+	execute_all(&reference, &session_ref, &format!("DEFINE INDEX ix ON t FIELDS vec {kind};"))
+		.await?;
+	for at in queries {
+		let knn = format!("SELECT VALUE id FROM t WITH INDEX ix WHERE vec <|4,40|> {at}");
+		let exact = format!("SELECT VALUE id FROM t WITH NOINDEX WHERE vec <|4,EUCLIDEAN|> {at}");
+		let passed = ds.execute(&knn, &session, None).await?.remove(0).result?;
+		let ordinary = reference.execute(&knn, &session_ref, None).await?.remove(0).result?;
+		let scanned = ds.execute(&exact, &session, None).await?.remove(0).result?;
+		assert_eq!(passed, ordinary, "{kind} at {at}: passes and an ordinary build agree");
+		assert_eq!(passed, scanned, "{kind} at {at}: the index answers the exact search");
+	}
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn passes_build_an_hnsw_index() -> Result<()> {
+	assert_passes_build_a_vector_index("HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32").await
+}
+
+#[cfg(all(feature = "kv-mem", diskann))]
+#[test_log::test(tokio::test)]
+async fn passes_build_a_diskann_index() -> Result<()> {
+	assert_passes_build_a_vector_index("DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32").await
+}
+
+/// A `REBUILD INDEX` that moves an index to the current format stages its generation in its
+/// transaction and, on a datastore that leaves builds to passes, leaves the committed generation
+/// to them: they build it in the new layout, and the index answers as before.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn passes_build_a_format_moving_rebuild() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 2);
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	run_passes_to_end(&ds, &session, 10, |_| None).await?;
+	downgrade_index_format(&ds, "t", "ft", 0).await?;
+	let creates: String =
+		(1..=12).map(|i| format!("CREATE t:{i} SET content = 'bravo {i}' RETURN NONE;")).collect();
+	execute_all(&ds, &session, &creates).await?;
+	execute_all(&ds, &session, "REBUILD INDEX ft ON t;").await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+	assert_eq!(ix.format_version, INDEX_FORMAT_VERSION, "the rebuild commits its format");
+	assert_ne!(index_building_status(&ds, &session, "t", "ft").await?, "ready");
+	let passes = run_passes_to_end(&ds, &session, 2, |_| None).await?;
+	assert!(passes > 1, "{passes}");
+	assert_eq!(index_building_status(&ds, &session, "t", "ft").await?, "ready");
+	assert_eq!(planner_result_ids(&ds, BRAVO).await?, bravo_carriers(12));
+	Ok(())
+}
+
+/// Inserts records `t:{from}` to `t:{from + count - 1}`, `n` cycling through seven values, ten
+/// thousand to a statement.
+#[cfg(feature = "kv-mem")]
+async fn insert_numbered(
+	ds: &Datastore,
+	session: &Session,
+	from: usize,
+	count: usize,
+) -> Result<()> {
+	let mut at = from;
+	while at < from + count {
+		let to = (at + 10_000).min(from + count);
+		execute_all(
+			ds,
+			session,
+			&format!(
+				"INSERT INTO t (array::range({at}, {to}).map(|$i| {{ id: $i, n: $i % 7 }})) RETURN NONE;"
+			),
+		)
+		.await?;
+		at = to;
+	}
+	Ok(())
+}
+
+/// The time a pass spends on the steps its budget does not bound, at a million records: the
+/// wipe that starts a restarted scan, as a `REBUILD INDEX` of a built index runs it, and a
+/// `COUNT` index's tail over the records created past the scan's end while it ran. A
+/// measurement, run by hand: `cargo test --profile devopt ... -- --ignored --nocapture`.
+#[cfg(feature = "kv-mem")]
+#[ignore]
+#[test_log::test(tokio::test)]
+async fn measure_the_steps_a_pass_budget_does_not_bound() -> Result<()> {
+	const RECORDS: usize = 1_000_000;
+	const PAST_END: usize = 100_000;
+	let (ds, session) = new_index_pass_test_ds().await?;
+	let started = Instant::now();
+	insert_numbered(&ds, &session, 0, RECORDS).await?;
+	eprintln!("inserted {RECORDS} records in {:?}", started.elapsed());
+
+	// The wipe: a REBUILD of a built index restarts its scan, wiping the entries first.
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;").await?;
+	let started = Instant::now();
+	run_passes_to_end(&ds, &session, usize::MAX, |_| None).await?;
+	eprintln!("built ix over {RECORDS} records in {:?}", started.elapsed());
+	execute_all(&ds, &session, "REBUILD INDEX ix ON t;").await?;
+	let started = Instant::now();
+	let first = ds.run_index_builds(1).await?;
+	eprintln!(
+		"REBUILD: first pass (wipe of {RECORDS} entries + one batch) took {:?}: {first:?}",
+		started.elapsed()
+	);
+	run_passes_to_end(&ds, &session, usize::MAX, |_| None).await?;
+	execute_all(&ds, &session, "REMOVE INDEX ix ON t;").await?;
+
+	// The COUNT tail: records created past the scan's end while it runs.
+	execute_all(&ds, &session, "DEFINE INDEX cx ON t COUNT CONCURRENTLY;").await?;
+	let first = ds.run_index_builds(1).await?;
+	assert!(first.more);
+	insert_numbered(&ds, &session, 10 * RECORDS, PAST_END).await?;
+	let mut slowest = Duration::ZERO;
+	let mut passes = 0;
+	loop {
+		let started = Instant::now();
+		let run = ds.run_index_builds(64).await?;
+		slowest = slowest.max(started.elapsed());
+		passes += 1;
+		if !run.more {
+			break;
+		}
+	}
+	eprintln!(
+		"COUNT over {RECORDS} records, {PAST_END} created past the scan's end: {passes} passes \
+		 of 64 batches, slowest {slowest:?}"
+	);
+	let count = query_json(&ds, &session, "SELECT VALUE count() FROM t GROUP ALL").await?;
+	assert_eq!(count, serde_json::json!([RECORDS + PAST_END]));
+	Ok(())
+}
+
+/// A pass wipes a rebuilt index's entries a page to a batch of its budget, so a `REBUILD INDEX`
+/// of a large index starts with passes no longer than any other, and later passes carry the wipe
+/// on and rebuild the index whole.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_rebuild_wipes_its_index_a_page_to_a_batch() -> Result<()> {
+	let (ds, session) = new_index_pass_test_ds().await?;
+	insert_numbered(&ds, &session, 0, 25_000).await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n;").await?;
+	run_passes_to_end(&ds, &session, usize::MAX, |_| None).await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+	let held = || index_prefix_key_count(&ds, ns, db, &table, ix.index_id);
+	let built = held().await?;
+	assert!(built >= 25_000, "{built}");
+	let first = index_entry_keys(&ds, "t", "ix").await?;
+
+	execute_all(&ds, &session, "REBUILD INDEX ix ON t;").await?;
+	let mut left = built;
+	for _ in 0..2 {
+		let run = ds.run_index_builds(1).await?;
+		assert_eq!((run.batches, run.more), (1, true), "{run:?}");
+		let now = held().await?;
+		// A page reads 10,000 keys and keeps the compaction generations among them.
+		assert!((left - 10_000..=left - 9_990).contains(&now), "{left} -> {now}");
+		left = now;
+	}
+	let passes = run_passes_to_end(&ds, &session, 4, |_| None).await?;
+	assert!(passes > 1, "{passes}");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	assert_eq!(held().await?, built, "the rebuilt index holds as many keys");
+	assert_eq!(index_entry_keys(&ds, "t", "ix").await?, first);
+	Ok(())
+}

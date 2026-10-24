@@ -756,6 +756,7 @@ impl Emitter {
 			frontier_rows: None,
 			read_ahead: false,
 			rows_ahead: None,
+			unit: None,
 		})
 	}
 

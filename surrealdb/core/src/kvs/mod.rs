@@ -50,8 +50,8 @@ pub(crate) use consts::{
 	RECLAIM_PASS_KEY_BUDGET, RECLAIM_PASS_WALK_BATCHES, RPC_SESSION_GC_SLICE_BATCHES,
 };
 pub use ds::{
-	Builder, Datastore, LiveQueryEngine, StatementCacheStats, TransactionBuilderFactory,
-	TransactionBuilderParts,
+	Builder, Datastore, IndexBuildsRun, LiveQueryEngine, StatementCacheStats,
+	TransactionBuilderFactory, TransactionBuilderParts,
 };
 pub(crate) use err::Error;
 pub use request::{

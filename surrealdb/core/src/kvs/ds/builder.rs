@@ -66,6 +66,12 @@ pub struct Builder {
 	/// Whether to start the maintenance tasks. On by default; see
 	/// [`Builder::without_maintenance_tasks`].
 	maintenance: bool,
+	/// Whether a statement runs the index build it starts on a task of its own;
+	/// see [`Builder::without_index_build_tasks`].
+	index_build_tasks: bool,
+	/// The batches a blocking statement runs of a deferred build itself; see
+	/// [`Builder::with_inline_index_build_batches`].
+	inline_index_build_batches: usize,
 	/// Whether building opens transactions; see
 	/// [`Builder::without_startup_transactions`].
 	startup_transactions: bool,
@@ -77,6 +83,13 @@ pub struct Builder {
 	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
 	/// The store a query's breakers spill to; see [`Builder::with_temp_store`].
 	temp_store: Option<Arc<dyn crate::exec::memory::TempStore>>,
+	/// The host's places morsels run at; see [`Builder::with_morsel_places`].
+	morsel_places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	/// The most async events a batch runs at once on the task that runs it; see
+	/// [`Builder::with_joined_event_workers`].
+	joined_event_workers: Option<usize>,
+	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
+	event_batch_size: Option<u32>,
 	/// Whether queries spill nowhere even where the platform has a default
 	/// store; see [`Builder::without_temp_store`].
 	#[cfg(test)]
@@ -158,11 +171,16 @@ impl Builder {
 			engine_options: EngineOptions::default(),
 			// A build without `maintenance-tasks` leaves that work to its host.
 			maintenance: cfg!(feature = "maintenance-tasks"),
+			index_build_tasks: true,
+			inline_index_build_batches: 0,
 			startup_transactions: true,
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
 			memory_governor: None,
+			morsel_places: None,
+			joined_event_workers: None,
+			event_batch_size: None,
 			temp_store: None,
 			#[cfg(test)]
 			no_temp_store: false,
@@ -312,6 +330,52 @@ impl Builder {
 		self
 	}
 
+	/// Builds a datastore whose statements leave the index builds they start to
+	/// [`Datastore::run_index_builds`] instead of running them on a task.
+	///
+	/// `DEFINE INDEX` (with or without `CONCURRENTLY`) and `REBUILD INDEX` then
+	/// record the build as pending and return without waiting for it: the
+	/// index reads as building until passes have run it to its end, and the
+	/// query planner does not use it until then. Writes made meanwhile queue
+	/// for the build as they do for any build. Once the statement's
+	/// transaction commits, the build is handed back for any pass to claim, and
+	/// [`CommitTriggers::index_build`](surrealdb_datastore::triggers::CommitTriggers::index_build)
+	/// on [`Datastore::commit_triggers`] is notified.
+	///
+	/// For a host that cannot keep a task running for the length of a build.
+	/// Independent of [`Builder::without_maintenance_tasks`], which leaves
+	/// statements building on their own tasks.
+	pub fn without_index_build_tasks(mut self) -> Self {
+		self.index_build_tasks = false;
+		self
+	}
+
+	/// Where statements leave index builds to passes
+	/// ([`Builder::without_index_build_tasks`]), has a blocking `DEFINE INDEX`
+	/// or `REBUILD INDEX` run at most `batches` batches of its build itself once
+	/// its transaction has committed, on the calling task, before it returns.
+	///
+	/// A build that ends within them settles the statement as it does where
+	/// builds run on tasks: the statement returns once the index is ready, and
+	/// a build that fails fails the statement, a new definition taken back with
+	/// it. One that does not end is handed back for
+	/// [`Datastore::run_index_builds`], and the statement returns with the
+	/// index building, as a `CONCURRENTLY` one does. That is the one way such a
+	/// statement differs from one whose datastore runs builds on tasks, which
+	/// returns only once its index is ready or its build has failed: the
+	/// statements that follow it can write while the index is still building,
+	/// so a duplicate of a unique index's value commits and fails the build
+	/// rather than the write, and `INFO FOR INDEX` reports the index building
+	/// until passes finish it. Only a statement whose
+	/// transaction awaits work after its commit runs its build: a statement in
+	/// an explicit transaction, one replacing an index, or one defining an
+	/// index on a table it creates leaves the whole build to passes. Zero, the
+	/// default, leaves every build to passes.
+	pub fn with_inline_index_build_batches(mut self, batches: usize) -> Self {
+		self.inline_index_build_batches = batches;
+		self
+	}
+
 	/// Builds a datastore without opening a transaction, for a backend that
 	/// may not serve one until it reports serve-readiness.
 	///
@@ -408,6 +472,38 @@ impl Builder {
 	/// temporary directory, or the system's.
 	pub fn with_temp_store(mut self, store: Arc<dyn crate::exec::memory::TempStore>) -> Self {
 		self.temp_store = Some(store);
+		self
+	}
+
+	/// Set the places a host runs the morsels of a morsel pipeline at
+	/// ([`MorselPlaces`](crate::exec::places::MorselPlaces)). Without them, morsels run on the
+	/// node's own places, and on the loopback places `morsel_loopback_places` asks for.
+	pub fn with_morsel_places(
+		mut self,
+		places: Arc<dyn crate::exec::places::MorselPlaces>,
+	) -> Self {
+		self.morsel_places = Some(places);
+		self
+	}
+
+	/// Run the async events of a batch that no lease guards, at most `limit` at once (at least
+	/// one), all polled on the task that runs the batch: nothing is spawned, so state the host set
+	/// up for its task reaches every event's transactions, and a target without a task spawner
+	/// runs events concurrently. The batches of the node's own queue
+	/// ([`Datastore::process_async_events`]) are the ones no lease guards. Without it, a batch
+	/// runs on spawned workers, one per CPU, and one event after another where the target has no
+	/// spawner.
+	pub fn with_joined_event_workers(mut self, limit: usize) -> Self {
+		self.joined_event_workers = Some(limit.max(1));
+		self
+	}
+
+	/// Fetch at most `entries` (at least one) async events a batch, where a batch is the unit the
+	/// node's event passes run and count their budget in (a pass of
+	/// [`Datastore::process_async_events`] runs at most four of them), so a host sizes the work
+	/// of one pass. Without it a batch holds [`NORMAL_BATCH_SIZE`] entries.
+	pub fn with_event_batch_size(mut self, entries: u32) -> Self {
+		self.event_batch_size = Some(entries.max(1));
 		self
 	}
 
@@ -615,6 +711,7 @@ impl Builder {
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			host_maintenance: tokio::sync::Mutex::new(None),
 			resume_walk: parking_lot::Mutex::new(None),
+			build_walk: parking_lot::Mutex::new(None),
 			rpc_session_cursor: parking_lot::Mutex::new(None),
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
@@ -641,6 +738,11 @@ impl Builder {
 			changefeed_source: self.changefeed_source,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: None,
+			joined_event_workers: self.joined_event_workers,
+			event_batch_size: self.event_batch_size.unwrap_or(crate::kvs::NORMAL_BATCH_SIZE),
+			morsel_places: self
+				.morsel_places
+				.or_else(|| crate::exec::places::loopback(config.exec.morsel_loopback_places)),
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
 			#[cfg(test)]
@@ -655,7 +757,11 @@ impl Builder {
 				config.idx.fulltext_cache_size,
 				config.idx.segment_dictionary_path.clone(),
 			),
-			index_builder: IndexBuilder::new(tf.clone()),
+			index_builder: IndexBuilder::new(
+				tf.clone(),
+				!self.index_build_tasks,
+				self.inline_index_build_batches,
+			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]

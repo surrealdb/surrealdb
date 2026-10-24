@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
@@ -22,10 +22,11 @@ use super::count::CountPrimaryProgress;
 use super::kind::{BaselinePolicy, BatchContext, BatchRange, Kind};
 use super::replay::{InitialBatch, ReplayUntil};
 use super::state::{
-	BuildOwner, analyzers_analyse_alike, build_basis_is_stale, build_owner, build_owner_expired,
-	clear_lapsed_online_owner, delete_durable_build_artifacts, delete_stale_build_queues,
-	durable_index_error_reason, durable_report_count, is_condition_not_met, online_owner_lapsed,
-	report_status_from_phase, withdraw_stale_lapsed_build,
+	BuildOwner, analyzers_analyse_alike, build_basis_is_stale, build_claimable, build_owner,
+	build_owner_expired, clear_lapsed_online_owner, delete_durable_build_artifacts,
+	delete_stale_build_queues, durable_index_error_reason, durable_report_count,
+	is_condition_not_met, online_owner_lapsed, report_status_from_phase,
+	withdraw_stale_lapsed_build,
 };
 use super::{
 	AcquiredBuild, BUILD_CLOSING_SLEEP, BUILD_OWNER_LEASE_SECS, BUILD_WAITING_HEARTBEAT,
@@ -83,6 +84,9 @@ const BUILD_CONFLICT_RETRY_MAX: Duration = Duration::from_millis(100);
 /// build retries it at once, so the statement waits for little more than its
 /// own work.
 const BUILD_CONFLICT_RETRY_MIN: Duration = Duration::from_millis(2);
+/// The keys one page of a bounded pass's wipe of an index deletes
+/// ([`Building::wipe_index_pages`]).
+const WIPE_PAGE_KEYS: u32 = 10_000;
 
 /// How long an owned state transition waits before retrying a conflict or a
 /// missed compare-and-swap. Matches the pause of the builder's other retries.
@@ -409,11 +413,47 @@ pub(crate) struct IndexBuilder {
 	/// `Closing` build, so a test can tell a writer has reached the wait.
 	#[cfg(test)]
 	pub(super) closing_waits: Arc<AtomicU64>,
+	/// Whether a statement leaves the build it starts to bounded passes
+	/// ([`Self::run_pass`]) instead of running it on a task of its own; see
+	/// [`Builder::without_index_build_tasks`](crate::kvs::Builder::without_index_build_tasks).
+	defers: bool,
+	/// Where builds are deferred, the batches a blocking statement that awaits
+	/// its build after its commit runs of that build itself, before it leaves
+	/// the rest to passes; zero leaves all of it to them. See
+	/// [`Builder::with_inline_index_build_batches`](crate::kvs::Builder::with_inline_index_build_batches).
+	inline_batches: usize,
 }
 
 enum BuildStart {
 	Started(IndexBuilding),
 	RemoteOwner(IndexBuilding),
+	/// Acquired and left for bounded passes, which the statement does not wait
+	/// for ([`IndexBuilder::defers`]).
+	Deferred,
+	/// Acquired for the statement to run at most [`IndexBuilder::inline_batches`]
+	/// of once it has committed, leaving the rest to bounded passes.
+	Inline(IndexBuilding, AcquiredBuild),
+}
+
+/// What one bounded pass did with the build of one index
+/// ([`IndexBuilder::run_pass`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuildPass {
+	/// No build is pending: there is none, it has ended, or the catalog does not
+	/// hold its definition (yet).
+	Idle,
+	/// A build is pending and a pass may claim it now. Reported only by a pass
+	/// given no budget, which claims nothing.
+	Pending,
+	/// A live owner holds a pending build: a builder in this process, with
+	/// `None`, or one whose lease lapses after the given time.
+	Held(Option<Duration>),
+	/// The pass ran `batches` batches of the build, which then `finished`:
+	/// published, failed or aborted, or, when not, was handed back.
+	Ran {
+		batches: usize,
+		finished: bool,
+	},
 }
 
 /// Why the query a blocking statement waits for its build in has ended, if it
@@ -490,6 +530,13 @@ impl BuildCompletion {
 	#[cfg_attr(not(test), allow(dead_code))]
 	pub(crate) fn started_here(&self) -> bool {
 		self.started_here
+	}
+
+	/// Whether the build was handed back unfinished for bounded passes to
+	/// carry on: the statement awaiting it ran its budget of batches
+	/// ([`IndexBuilder::inline_batches`]) and returns with the index building.
+	pub(crate) fn handed_back(&self) -> bool {
+		self.building.handed_back.load(Ordering::Acquire)
 	}
 
 	/// Whether this build's generation is known to be `Online`.
@@ -586,7 +633,7 @@ pub(crate) struct IndexMutation<'a> {
 }
 
 impl IndexBuilder {
-	pub(in crate::kvs) fn new(tf: TransactionFactory) -> Self {
+	pub(in crate::kvs) fn new(tf: TransactionFactory, defers: bool, inline_batches: usize) -> Self {
 		Self {
 			tf,
 			indexes: Default::default(),
@@ -597,6 +644,8 @@ impl IndexBuilder {
 			closing_poll: Default::default(),
 			#[cfg(test)]
 			closing_waits: Default::default(),
+			defers,
+			inline_batches,
 		}
 	}
 
@@ -608,6 +657,18 @@ impl IndexBuilder {
 			return poll;
 		}
 		BUILD_CLOSING_SLEEP
+	}
+
+	/// The batches a blocking statement awaiting its build after its commit
+	/// runs of a deferred build itself ([`Self::inline_batches`]).
+	pub(crate) fn inline_batches(&self) -> usize {
+		self.inline_batches
+	}
+
+	/// Whether a statement leaves the build it starts to bounded passes
+	/// ([`Self::run_pass`]) rather than running it, and does not wait for it.
+	pub(crate) fn defers_builds(&self) -> bool {
+		self.defers
 	}
 
 	/// The process-local mutex the materialiser's passes over `ikb` take.
@@ -696,6 +757,14 @@ impl IndexBuilder {
 		if sdr.is_some() {
 			building.analyzer = building.statement_analyzer(ctx).await?;
 		}
+		// A deferred build its statement awaits after its commit runs there, on
+		// the statement's budget.
+		let inline = self.defers && self.inline_batches > 0 && sdr.is_some() && waits_for_statement;
+		building.to_passes = self.defers;
+		if inline {
+			building.inline_run = true;
+			building.budget = Some(BatchBudget::new(self.inline_batches));
+		}
 		let building = Arc::new(building);
 		building.read_key_structure_in(ctx).await?;
 		let acquired = match building.acquire_build_state().await {
@@ -704,9 +773,43 @@ impl IndexBuilder {
 			Err(err) => return Err(err),
 		};
 		building.defer_ownership_release(ctx).await;
+		if inline {
+			return Ok(BuildStart::Inline(building, acquired));
+		}
+		if self.defers {
+			// No task runs this build, so its half of the release gate arrives at once and the
+			// statement's close hands the build to passes ([`Building::release_owned`]); a
+			// statement already closed hands it back now.
+			if building.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
+				building.release_build_ownership(acquired.generation, None).await;
+			}
+			return Ok(BuildStart::Deferred);
+		}
 		self.start_acquired_building(Arc::clone(&building), acquired, sdr, waits_for_statement)
 			.await?;
 		Ok(BuildStart::Started(building))
+	}
+
+	/// Register `building` as this process's build of its index, rejecting it
+	/// while another build of the index here has not finished.
+	async fn register(&self, building: &IndexBuilding) -> Result<()> {
+		let mut indexes = self.indexes.write().await;
+		if let Some(existing) = indexes.get(&building.ix_key) {
+			ensure!(
+				existing.is_finished(),
+				DatastoreError::IndexAlreadyBuilding {
+					name: building.ix.name.to_string(),
+				}
+			);
+			// A finished build may still keep its published generation for a
+			// statement that is open ([`Building::keep_online_ownership`]).
+			// This build replaces that generation, so its keeper stops rather
+			// than finding its ownership gone and cancelling that statement,
+			// which may be the one starting this build.
+			existing.abort();
+		}
+		indexes.insert(Arc::clone(&building.ix_key), Arc::clone(building));
+		Ok(())
 	}
 
 	/// Register `building` and spawn its task, which reports its result to
@@ -724,24 +827,7 @@ impl IndexBuilder {
 		sdr: Option<Sender<Result<()>>>,
 		waits_for_statement: bool,
 	) -> Result<()> {
-		{
-			let mut indexes = self.indexes.write().await;
-			if let Some(existing) = indexes.get(&building.ix_key) {
-				ensure!(
-					existing.is_finished(),
-					DatastoreError::IndexAlreadyBuilding {
-						name: building.ix.name.to_string(),
-					}
-				);
-				// A finished build may still keep its published generation for a
-				// statement that is open ([`Building::keep_online_ownership`]).
-				// This build replaces that generation, so its keeper stops rather
-				// than finding its ownership gone and cancelling that statement,
-				// which may be the one starting this build.
-				existing.abort();
-			}
-			indexes.insert(Arc::clone(&building.ix_key), Arc::clone(&building));
-		}
+		self.register(&building).await?;
 		let b = Arc::clone(&building);
 		// Created before the spawn and moved in, so a task the executor drops
 		// without ever polling it still marks the build finished. Waiters in
@@ -919,8 +1005,9 @@ impl IndexBuilder {
 				}
 				IndexBuildPhase::Building | IndexBuildPhase::Closing => {
 					if build_owner_expired(&state, Utc::now())
-						&& let Some(acquired) =
-							building.takeover_expired_build_state(Some(joined), false).await?
+						&& let Some(acquired) = building
+							.takeover_expired_build_state(Some(joined), false, false)
+							.await?
 					{
 						let (s, r) = channel();
 						building.defer_ownership_release(ctx).await;
@@ -1034,6 +1121,19 @@ impl IndexBuilder {
 				})
 				.with_parked(parked)
 			})),
+			BuildStart::Deferred => Ok(None),
+			BuildStart::Inline(building, acquired) => {
+				let builder = self.clone();
+				let run = Arc::clone(&building);
+				Ok(Some(BuildCompletion::new(building, true, async move {
+					let ran = builder.run_claimed(&run, acquired).await?;
+					if !ran.finished {
+						run.tf.triggers().index_build.notify_one();
+					}
+					ran.failure.map_or(Ok(()), Err)
+				})))
+			}
+			BuildStart::RemoteOwner(_) if self.defers => Ok(None),
 			BuildStart::RemoteOwner(building) if blocking => {
 				let builder = self.clone();
 				let ctx = Arc::clone(ctx);
@@ -1163,6 +1263,11 @@ impl IndexBuilder {
 		blocking: bool,
 	) -> Result<Option<BuildCompletion>> {
 		crate::idx::check_index_kernel(&ix.index)?;
+		// The staged generation stands ownerless, which a bounded pass claims.
+		if self.defers {
+			self.tf.triggers().index_build.notify_one();
+			return Ok(None);
+		}
 		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		// A local build already building the staged generation — the resume scan adopted it
 		// first, or another statement's start of it ran first — is joined, and one building a
@@ -1358,7 +1463,7 @@ impl IndexBuilder {
 		}
 		// Claim the expired generation and spawn the resume task. A no-op result
 		// (`None`) means another scanner or a concurrent statement won the race.
-		match building.takeover_expired_build_state(None, true).await? {
+		match building.takeover_expired_build_state(None, true, false).await? {
 			Some(acquired) => {
 				self.start_acquired_building(building, acquired, None, true).await?;
 				Ok(true)
@@ -1366,6 +1471,138 @@ impl IndexBuilder {
 			None => Ok(false),
 		}
 	}
+
+	/// Run at most `budget` batches of the pending build of index `ix`, on the
+	/// calling task.
+	///
+	/// A build is pending while its state is `Building` or `Closing`. One that
+	/// no live owner holds — handed back by its statement or by an earlier
+	/// pass, or left by an owner whose lease lapsed — is claimed and run as a
+	/// build taken over runs ([`Building::run_acquired`]): from its last
+	/// committed batch, each batch committing its own checkpoint, so a pass
+	/// stopped anywhere loses at most the batch it was in. A pass that spends
+	/// its budget before the build ends hands the build back, for the next pass
+	/// to claim at once ([`Building::spend_batch`]). A `budget` of zero claims
+	/// nothing and only reports.
+	///
+	/// The build fails as a spawned build fails: an error of its own ends the
+	/// generation in `Error`, reported here as finished. One that leaves the
+	/// build resumable — the memory threshold — hands it back, and a datastore
+	/// shutdown is returned with the build left to its lease.
+	///
+	/// `tb` and `ix` come from a catalog snapshot the caller took. The claim
+	/// checks that the catalog still holds them, as [`Self::resume_stalled`]
+	/// does, so an index whose definition has not committed reads as idle.
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) async fn run_pass(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		budget: usize,
+	) -> Result<BuildPass> {
+		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
+		if let Some(existing) = self.indexes.read().await.get(&key)
+			&& !existing.is_finished()
+		{
+			return Ok(BuildPass::Held(None));
+		}
+		let mut building = Building::new(ctx, self.tf.clone(), opt, tb, ix, key)?;
+		building.budget = Some(BatchBudget::new(budget));
+		let building = Arc::new(building);
+		let Some(state) = building.read_durable_build_state().await? else {
+			return Ok(BuildPass::Idle);
+		};
+		let now = Utc::now();
+		match state.phase {
+			IndexBuildPhase::Building | IndexBuildPhase::Closing => {}
+			IndexBuildPhase::Online => {
+				if budget > 0 && online_owner_lapsed(&state, now) {
+					building.clear_lapsed_owner().await?;
+				}
+				return Ok(BuildPass::Idle);
+			}
+			IndexBuildPhase::Error => return Ok(BuildPass::Idle),
+		}
+		if !build_claimable(&state, now) {
+			let lapses = state.owner_heartbeat_at.unwrap_or(state.updated_at)
+				+ chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS);
+			return Ok(BuildPass::Held(Some((lapses - now).to_std().unwrap_or_default())));
+		}
+		if budget == 0 {
+			return Ok(BuildPass::Pending);
+		}
+		let Some(acquired) = building.takeover_expired_build_state(None, true, true).await? else {
+			return Ok(BuildPass::Idle);
+		};
+		let ran = self.run_claimed(&building, acquired).await?;
+		Ok(BuildPass::Ran {
+			batches: ran.batches,
+			finished: ran.finished,
+		})
+	}
+
+	/// Run the build `building` has claimed, on the calling task, until it ends
+	/// or spends its budget, and settle it as a spawned build is settled: an
+	/// error of its own ends the generation in `Error`, an abort in `aborted`,
+	/// and a build that spent its budget or met the memory threshold is handed
+	/// back. A datastore shutdown is returned with the build left to its lease.
+	async fn run_claimed(
+		&self,
+		building: &IndexBuilding,
+		acquired: AcquiredBuild,
+	) -> Result<ClaimedRun> {
+		let generation = acquired.generation;
+		self.register(building).await?;
+		// Marks the build finished however the run leaves, so a later build of
+		// the index here is not refused as one still running.
+		let guard = BuildingFinishGuard(Arc::clone(building));
+		let res = building.run_acquired(acquired).await;
+		let batches = building.budget.as_ref().map_or(0, BatchBudget::spent);
+		let (finished, failure) = match res {
+			Ok(()) => {
+				if building.aborted.load(Ordering::Acquire) {
+					let _ = building.mark_durable_aborted(generation).await;
+				}
+				(true, None)
+			}
+			Err(err) if err.is::<BuildYielded>() || is_memory_threshold_error(&err) => {
+				building.hand_back(generation).await?;
+				building.handed_back.store(true, Ordering::Release);
+				(false, None)
+			}
+			Err(err) if is_shutdown_error(&err) => return Err(err),
+			Err(err) => {
+				warn!(
+					index = %building.ix.name,
+					table = %building.ix.table_name,
+					error = %err,
+					"index build failed"
+				);
+				let _ = building.mark_durable_error(generation, err.to_string()).await;
+				(true, Some(err))
+			}
+		};
+		drop(guard);
+		Ok(ClaimedRun {
+			batches,
+			finished,
+			failure,
+		})
+	}
+}
+
+/// How [`IndexBuilder::run_claimed`] left a build.
+struct ClaimedRun {
+	/// The batches it ran.
+	batches: usize,
+	/// Whether the build ended, rather than being handed back.
+	finished: bool,
+	/// The error the build failed with, if it did.
+	failure: Option<anyhow::Error>,
 }
 
 /// The most keys one transaction of [`Building::delete_range_in_batches`]
@@ -1568,7 +1805,57 @@ pub(super) struct Building {
 	memory: Option<MemoryHost>,
 	/// Signalled whenever this build commits a transition out of `Closing`.
 	closing_settled: Arc<Notify>,
+	/// Whether this build is left to bounded passes ([`IndexBuilder::run_pass`]) rather than
+	/// run by a task of its own: its ownership is handed back, not kept, when it is released
+	/// ([`Self::release_owned`]).
+	to_passes: bool,
+	/// Whether the statement that started this build runs its first batches itself, once it has
+	/// committed ([`BuildStart::Inline`]): a rollback then finds no task to run the build, and
+	/// arrives at the release gate in its place.
+	inline_run: bool,
+	/// The batches this build may start, where a bounded pass runs it
+	/// ([`IndexBuilder::run_pass`]); `None` for a build that runs to its end.
+	budget: Option<BatchBudget>,
+	/// Set once a run bounded by [`Self::budget`] handed the build back unfinished
+	/// ([`Building::hand_back`]), for a statement awaiting it to return with the
+	/// index building.
+	handed_back: AtomicBool,
 }
+
+/// The batches a bounded pass lets one build start ([`Building::spend_batch`]).
+struct BatchBudget {
+	/// The batches the build may still start.
+	left: AtomicUsize,
+	/// The batches it has started.
+	spent: AtomicUsize,
+}
+
+impl BatchBudget {
+	fn new(batches: usize) -> Self {
+		Self {
+			left: AtomicUsize::new(batches),
+			spent: AtomicUsize::new(0),
+		}
+	}
+
+	fn spent(&self) -> usize {
+		self.spent.load(Ordering::Acquire)
+	}
+}
+
+/// The error a build bounded by a pass stops with once it has spent its budget
+/// ([`Building::spend_batch`]). Every batch before it has committed and nothing
+/// of the next has begun.
+#[derive(Debug)]
+pub(super) struct BuildYielded;
+
+impl std::fmt::Display for BuildYielded {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("the index build pass spent its batch budget")
+	}
+}
+
+impl std::error::Error for BuildYielded {}
 
 /// The ticket of a build, through its life.
 ///
@@ -1656,6 +1943,10 @@ impl Building {
 			places: parking_lot::Mutex::new(places),
 			memory: ctx.memory().map(|memory| memory.host().clone()),
 			closing_settled: Default::default(),
+			to_passes: false,
+			inline_run: false,
+			budget: None,
+			handed_back: AtomicBool::new(false),
 		})
 	}
 
@@ -1672,6 +1963,62 @@ impl Building {
 	pub(super) fn signalling(mut self, settled: &Arc<Notify>) -> Self {
 		self.closing_settled = Arc::clone(settled);
 		self
+	}
+
+	/// Spend one batch of a bounded pass's budget, before a batch that writes,
+	/// failing with [`BuildYielded`] once the budget is spent.
+	///
+	/// Called only between committed transactions: before a scan batch that
+	/// found records, a replay batch that found queued writes, and a drain of
+	/// writer reservations that found some. A probe that finds nothing to do
+	/// spends nothing, so every pass that claims a build reaches a batch that
+	/// advances it. A restarted scan's wipe of the index's data spends one per
+	/// page it deletes ([`Self::wipe_index_pages`]), and a pass resuming a scan
+	/// skips the rebuild of its primary-append markers
+	/// ([`Self::markers_need_no_rebuild`]). What runs whole wherever a build
+	/// reaches it spends nothing: a `COUNT` scan's tail, one transaction that
+	/// grows with the records written past the scan's end while it ran, and a
+	/// DiskANN index's post-scan pass and wipe, which no WebAssembly build has.
+	/// A build no pass bounds spends nothing.
+	pub(super) fn spend_batch(&self) -> Result<()> {
+		let Some(budget) = &self.budget else {
+			return Ok(());
+		};
+		if budget
+			.left
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |left| left.checked_sub(1))
+			.is_err()
+		{
+			return Err(anyhow::Error::new(BuildYielded));
+		}
+		budget.spent.fetch_add(1, Ordering::AcqRel);
+		Ok(())
+	}
+
+	/// Hand the build of `generation` back: clear its owner, so that any
+	/// builder may claim the generation at once ([`build_claimable`]) and
+	/// continue it from its last committed batch. Answers whether it did.
+	///
+	/// Nothing is handed back where this builder no longer owns the
+	/// generation, or where it is neither `Building` nor `Closing`.
+	pub(super) async fn hand_back(&self, generation: BuildGeneration) -> Result<bool> {
+		let handed = self
+			.transition_owned_build_state(
+				generation,
+				TransitionMode::BestEffort,
+				false,
+				|state| {
+					if !matches!(state.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
+					{
+						return false;
+					}
+					state.owner = None;
+					true
+				},
+				no_staged_writes,
+			)
+			.await?;
+		Ok(handed.is_some())
 	}
 
 	/// The analyzer a blocking full-text build analyses with: the one its index
@@ -2292,7 +2639,10 @@ impl Building {
 		}
 	}
 
-	/// Take over an existing active generation after its owner lease expires.
+	/// Take over an existing active generation once its owner's lease has
+	/// expired, or, with `ownerless`, once it names no owner: handed back by a
+	/// bounded pass or a statement ([`Building::hand_back`]), or staged by a
+	/// committed `REBUILD INDEX` ([`IndexBuilder::stage_rebuild`]).
 	///
 	/// This is intentionally narrower than `acquire_build_state`: it never
 	/// creates a fresh generation. Blocking callers use it only after they have
@@ -2313,6 +2663,7 @@ impl Building {
 		&self,
 		only: Option<BuildGeneration>,
 		catalog: bool,
+		ownerless: bool,
 	) -> Result<Option<AcquiredBuild>> {
 		loop {
 			let ctx = self.new_write_tx_ctx().await?;
@@ -2323,8 +2674,11 @@ impl Building {
 				return Ok(None);
 			};
 			if !matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
-				|| !build_owner_expired(&current, Utc::now())
-				|| only.is_some_and(|only| current.generation != only)
+				|| !if ownerless {
+					build_claimable(&current, Utc::now())
+				} else {
+					build_owner_expired(&current, Utc::now())
+				} || only.is_some_and(|only| current.generation != only)
 			{
 				tx.cancel().await?;
 				return Ok(None);
@@ -3488,6 +3842,95 @@ impl Building {
 		Ok(())
 	}
 
+	/// Delete what the index holds, a page of [`WIPE_PAGE_KEYS`] keys to a transaction and each
+	/// page a batch of a bounded pass's budget ([`Self::spend_batch`]), so the wipe that starts a
+	/// restarted scan leaves only its last step to one transaction: the index's compaction
+	/// generations, which that step reads and writes back one above.
+	///
+	/// A build no pass bounds wipes in that one transaction, as does a DiskANN index, whose wipe
+	/// also forgets the pending-state guards this datastore knows of. Pages need no record of
+	/// their own: a deleted key stays deleted, so a pass stopped anywhere resumes the wipe where
+	/// the index's keys begin. Nothing reads the index meanwhile: it is `Building`, which the
+	/// planner does not use, writers queue for, and compaction is fenced off. Answers `false`
+	/// when the build was aborted.
+	async fn wipe_index_pages(&self, generation: BuildGeneration) -> Result<bool> {
+		if self.budget.is_none() || matches!(self.ix.index, crate::catalog::Index::DiskAnn(_)) {
+			return Ok(true);
+		}
+		loop {
+			if self.is_aborted().await {
+				return Ok(false);
+			}
+			let tx = self.new_write_tx().await?;
+			let staged = async {
+				self.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
+					.await?;
+				crate::idx::wipe_index_page(&tx, &self.ikb, WIPE_PAGE_KEYS).await
+			}
+			.await;
+			let deleted = match staged {
+				Ok(deleted) => deleted,
+				Err(err) => {
+					if self
+						.cancel_and_retryable_conflict(
+							&tx,
+							&err,
+							"transient conflict wiping a page of index data, retrying",
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(err);
+				}
+			};
+			// A page that found nothing to delete spends nothing.
+			if deleted == 0 {
+				tx.cancel().await?;
+				return Ok(true);
+			}
+			if let Err(err) = self.spend_batch() {
+				tx.cancel().await?;
+				return Err(err);
+			}
+			if let Err(err) = tx.commit().await {
+				if self
+					.cancel_and_retryable_conflict(
+						&tx,
+						&err,
+						"transient conflict committing a page of index data, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
+		}
+	}
+
+	/// Whether a build bounded by a pass resumes `generation` with its `!bp` markers already at the
+	/// keys this release looks them up by, so the rebuild that starts a resumed scan
+	/// ([`Self::rebuild_primary_appendings`]) has nothing to move.
+	///
+	/// The write barrier's proof for the generation (`!bw`) says its owner was a release that
+	/// spells markers as this one does: only such a release records it. Writers spell their own
+	/// markers, so this holds only where one release serves every writer, which is where builds
+	/// are left to passes
+	/// ([`Builder::without_index_build_tasks`](crate::kvs::Builder::without_index_build_tasks)).
+	/// Skipping it is what keeps a resumed scan's first step from growing with the writes queued
+	/// during the build, which a pass's budget does not bound. Any other build rebuilds them.
+	async fn markers_need_no_rebuild(&self, generation: BuildGeneration) -> Result<bool> {
+		if self.budget.is_none() {
+			return Ok(false);
+		}
+		let tx = self.new_read_tx().await?;
+		let proof: Option<BuildGeneration> =
+			catch!(tx, tx.get_key(&self.ikb.new_bw_key(), None).await);
+		tx.cancel().await?;
+		Ok(proof == Some(generation))
+	}
+
 	/// Record that this build waited at the write barrier for `generation` (`!bw`), so a takeover
 	/// of its completed scan need not rescan ([`Self::rescan_without_barrier_proof`]). Recorded
 	/// with a heartbeat of the build's ownership, so a build whose generation another replaced
@@ -3667,6 +4110,23 @@ impl Building {
 	/// The ordinary release of [`Self::release_build_ownership`], logging a
 	/// failure.
 	async fn release_owned(&self, generation: BuildGeneration) {
+		// A build left to passes that has not published is handed back for them to claim, and
+		// wakes what drives them; one that has published is released as any other.
+		if self.to_passes {
+			match self.hand_back(generation).await {
+				Ok(true) => {
+					self.tf.triggers().index_build.notify_one();
+					return;
+				}
+				Ok(false) => {}
+				Err(err) => warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					error = %err,
+					"could not hand an index build back; a pass claims it once its owner lease lapses"
+				),
+			}
+		}
 		if let Err(err) = self.try_release_build_ownership(generation).await {
 			warn!(
 				index = %self.ix.name,
@@ -4321,6 +4781,9 @@ impl Building {
 			if !self.wait_for_older_writes(generation).await? {
 				return Ok(());
 			}
+			if !self.wipe_index_pages(generation).await? {
+				return Ok(());
+			}
 			loop {
 				if self.is_aborted().await {
 					return Ok(());
@@ -4415,7 +4878,9 @@ impl Building {
 			// that owner's generation and the markers it spelled differently;
 			// they are rebuilt from the queued mutations, which carry the ids
 			// losslessly.
-			self.rebuild_primary_appendings().await?;
+			if !self.markers_need_no_rebuild(generation).await? {
+				self.rebuild_primary_appendings().await?;
+			}
 			// First pass: index every record, resuming immediately after the
 			// checkpointed record when the previous owner committed batches.
 			let mut range = RecordPrefix {
@@ -4505,6 +4970,7 @@ impl Building {
 					// If not, initial indexing is complete.
 					break;
 				}
+				self.spend_batch()?;
 				// Size the next batch from the average record size seen in this
 				// one, so the scan converges on the byte budget within one batch.
 				{
@@ -5065,6 +5531,19 @@ impl RollbackAction for ReleaseBuildOwnership {
 		Box::pin(async move {
 			let deadline = Some(build_abort_deadline(drain_started_at));
 			self.0.settle_uncommitted_statement(deadline).await;
+			// A build left to passes has no task to end a generation the rollback aborted, so
+			// the rollback records it, as a task would; one that goes on is handed back below.
+			if self.0.to_passes && self.0.aborted.load(Ordering::Acquire) {
+				let generation = self.0.build_generation.load(Ordering::Acquire);
+				if generation != 0 {
+					let _ = self.0.mark_durable_aborted(generation).await;
+				}
+			}
+			// The statement that was to run the build's first batches after its commit will
+			// not: no task is left to arrive in its place.
+			if self.0.inline_run {
+				self.0.arrive_at_release_gate(RELEASE_GATE_BUILDER);
+			}
 			(*self).release(deadline).await;
 			Ok(())
 		})

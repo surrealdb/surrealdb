@@ -521,9 +521,7 @@ use surrealdb_kvs::Snapshot;
 use super::super::host::{admit_row, in_place_row_admitted};
 use super::metrics::{MorselMetrics, MorselStat};
 use super::outbox::Outbox;
-#[cfg(not(target_family = "wasm"))]
-use super::run::Paged;
-use super::run::RangeEnd;
+use super::run::{Paged, RangeEnd};
 use super::steal::{self, Gate, Origin, Progress, Registered, Slot};
 use crate::err::EngineError;
 use crate::exec::planner::placement::{Combine, MergeOrder, MorselPlan, Parallel, Split};
@@ -613,7 +611,7 @@ pub(super) struct Table {
 }
 
 /// What a worker finds in the table.
-enum Claim {
+pub(super) enum Claim {
 	/// The earliest waiting morsel, now the worker's, with the outbox its rows leave through where
 	/// the scan streams them.
 	Morsel(OrderKey, RawRange, Option<Arc<Outbox>>),
@@ -676,6 +674,11 @@ impl Shared {
 		}
 	}
 
+	/// Whether the morsels hand their rows to the coordinator as they produce them.
+	pub(super) fn streams(&self) -> bool {
+		self.streams
+	}
+
 	/// This scan with its morsels handing their rows to the coordinator as they produce them.
 	pub(super) fn streaming(mut self) -> Self {
 		self.streams = true;
@@ -736,13 +739,13 @@ impl Shared {
 
 	/// Whether the morsel at `key` is no longer needed: the statement is done, or an earlier
 	/// morsel has failed.
-	fn cancelled(&self, key: &OrderKey) -> bool {
+	pub(super) fn cancelled(&self, key: &OrderKey) -> bool {
 		self.stopped() || self.table().failed.as_ref().is_some_and(|failed| key > failed)
 	}
 
 	/// Take the earliest waiting morsel for a worker, unless `most` morsels are already running
 	/// or finished and waiting for the merge. Morsels a failure has made unneeded are dropped.
-	fn claim(&self, most: usize) -> Claim {
+	pub(super) fn claim(&self, most: usize) -> Claim {
 		if self.stopped() {
 			return Claim::Empty;
 		}
@@ -774,7 +777,7 @@ impl Shared {
 	}
 
 	/// A worker's morsel at `key` ended with `end`.
-	fn complete(&self, key: OrderKey, end: FlowResult<RangeEnd>) {
+	pub(super) fn complete(&self, key: OrderKey, end: FlowResult<RangeEnd>) {
 		let mut table = self.table();
 		match end {
 			Ok(RangeEnd::Done(result)) => {
@@ -1183,8 +1186,16 @@ pub(in crate::exec::vm) struct RangeSet<'p> {
 	/// The transaction's read view, asked for once the range is first split.
 	view: Option<Arc<dyn Snapshot>>,
 	view_asked: bool,
+	/// The host's places the scan's morsels also run at, asked for once the range is first split;
+	/// `None` where the host gives none or the pipeline has no unit.
+	remote: Option<super::remote::Remote>,
+	remote_asked: bool,
 	#[cfg(not(target_family = "wasm"))]
 	workers: Vec<tokio::task::JoinHandle<()>>,
+	/// The scan's workers at the host's places, which a target without a task spawner polls
+	/// beside the coordinator ([`super::remote::HostTasks`]).
+	#[cfg(target_family = "wasm")]
+	hosts: Arc<super::remote::HostTasks>,
 }
 
 impl Drop for RangeSet<'_> {
@@ -1240,8 +1251,12 @@ impl<'p> RangeSet<'p> {
 			unplaced: 0,
 			view: None,
 			view_asked: false,
+			remote: None,
+			remote_asked: false,
 			#[cfg(not(target_family = "wasm"))]
 			workers: Vec::new(),
+			#[cfg(target_family = "wasm")]
+			hosts: Arc::default(),
 		}
 	}
 
@@ -1258,7 +1273,19 @@ impl<'p> RangeSet<'p> {
 		flush_at: usize,
 	) -> FlowResult<bool> {
 		self.shared.metrics().initial += 1;
+		#[cfg(not(target_family = "wasm"))]
 		let outcome = self.drive(range, hint, state, ctx, yielder, flush_at).await;
+		// The workers at the host's places run while the coordinator does, polled beside it.
+		#[cfg(target_family = "wasm")]
+		let outcome = {
+			let hosts = Arc::clone(&self.hosts);
+			let drive = std::pin::pin!(self.drive(range, hint, state, ctx, yielder, flush_at));
+			let hosted = std::pin::pin!(hosts.drive());
+			match futures::future::select(drive, hosted).await {
+				futures::future::Either::Left((outcome, _)) => outcome,
+				futures::future::Either::Right(((), drive)) => drive.await,
+			}
+		};
 		self.shutdown().await;
 		self.report(ctx);
 		outcome
@@ -1273,6 +1300,8 @@ impl<'p> RangeSet<'p> {
 			// learn from it.
 			let _ = worker.await;
 		}
+		#[cfg(target_family = "wasm")]
+		self.hosts.finish().await;
 	}
 
 	/// Hand what the scan's morsels did to the readers of it: the tests, and the analysis of a
@@ -1582,6 +1611,7 @@ impl<'p> RangeSet<'p> {
 	/// wait to the coordinator.
 	#[cfg(not(target_family = "wasm"))]
 	async fn top_up(&mut self, state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+		self.top_up_host(state, ctx);
 		if !self.policy.may_use_workers() {
 			return Ok(());
 		}
@@ -1657,8 +1687,75 @@ impl<'p> RangeSet<'p> {
 	}
 
 	#[cfg(target_family = "wasm")]
-	async fn top_up(&mut self, _state: &mut State, _ctx: &ExecutionContext) -> FlowResult<()> {
+	async fn top_up(&mut self, state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+		self.top_up_host(state, ctx);
 		Ok(())
+	}
+
+	/// Hand waiting morsels to the host's places, as many as the host takes and fit among the
+	/// morsels in flight. The morsels go to the host as they would to the node's workers, which
+	/// take the rest; a host place takes no place of the node's pool and no grant of the lease,
+	/// since it copies nothing of the statement's state.
+	fn top_up_host(&mut self, state: &mut State, ctx: &ExecutionContext) {
+		if !self.remote_asked {
+			self.remote_asked = true;
+			self.remote = super::remote::Remote::of(&self.program.pipelines[self.at], state, ctx);
+			if let Some(remote) = &self.remote {
+				self.policy = self.policy.with_host_width(remote.width());
+			}
+		}
+		let Some(remote) = self.remote.clone() else {
+			return;
+		};
+		let (queued, room) = self.shared.open(self.policy.read_ahead());
+		let want = queued.min(room).min(remote.room());
+		if want == 0 {
+			return;
+		}
+		let Some(view) = self.read_view(ctx) else {
+			return;
+		};
+		let paged = self.breakers.paged.map(|limit| {
+			let paging = state.paging[limit as usize];
+			Paged {
+				limit,
+				needed: paging.remaining.map(|remaining| paging.skip.saturating_add(remaining)),
+			}
+		});
+		let Some(request) = super::remote::request(
+			remote.maps(),
+			self.dir,
+			self.version,
+			paged,
+			self.policy.owner_chunk(self.policy.scan_chunk()),
+			self.shared.streams(),
+			self.layouts.as_ref(),
+		) else {
+			// The scan's layouts cannot be written for a leaf: its morsels stay on the node.
+			self.remote = None;
+			return;
+		};
+		for _ in 0..want {
+			remote.started();
+			let worker = super::remote::HostWorker {
+				remote: remote.clone(),
+				shared: Arc::clone(&self.shared),
+				view: Arc::clone(&view),
+				program: Arc::clone(self.program),
+				policy: self.policy,
+				request: request.clone(),
+				aggregates: Arc::clone(&state.aggregates),
+				lease: Arc::clone(&self.lease),
+				// The statement's context holds no read buffer, so a host worker reads nothing
+				// the coordinator buffered.
+				ctx: ctx.clone(),
+			};
+			let run = crate::exec::compiles::while_running_task(worker.run());
+			#[cfg(not(target_family = "wasm"))]
+			self.workers.push(tokio::spawn(run));
+			#[cfg(target_family = "wasm")]
+			self.hosts.push(Box::pin(run));
+		}
 	}
 
 	/// Run the part of the scan that lies in `span` on the statement's state, reading through the
@@ -2329,7 +2426,8 @@ impl Worker {
 				window: self.policy.window_bytes(),
 				lease: &self.lease,
 				outbox,
-				donor: steal::Donor {
+				chunks: None,
+				donor: Some(steal::Donor {
 					gate: Gate {
 						shared: &self.shared,
 						slot,
@@ -2340,7 +2438,7 @@ impl Worker {
 					statement: &self.statement,
 					#[cfg(test)]
 					ctx: &self.ctx,
-				},
+				}),
 			},
 			self.under.clone(),
 			&self.ctx,
@@ -2375,6 +2473,8 @@ mod tests {
 			bytes: 0,
 			chunks: 0,
 			held: 0,
+			scanned: [0; 3],
+			decoded: 0,
 		}))
 	}
 

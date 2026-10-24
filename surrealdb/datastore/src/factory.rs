@@ -498,9 +498,7 @@ impl TransactionFactory {
 		self.triggers.write_fence()
 	}
 
-	/// The commit triggers of the datastore this factory belongs to, for the
-	/// tests that drive them.
-	#[cfg(any(test, feature = "test-hooks"))]
+	/// The commit triggers of the datastore this factory belongs to.
 	pub fn triggers(&self) -> &Arc<CommitTriggers> {
 		&self.triggers
 	}

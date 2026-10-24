@@ -163,7 +163,7 @@ impl AwaitBuildAfterCommit {
 					}
 					return Err(WaitEnded::Failed(err));
 				}
-				if self.completion.is_online() {
+				if self.completion.is_online() || self.completion.handed_back() {
 					return Ok(());
 				}
 				// A build that ends without publishing its index was stopped:

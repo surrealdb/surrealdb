@@ -243,6 +243,9 @@ pub struct Context {
 	/// quantum; the default scheduler when `None`. A child context carries
 	/// its parent's.
 	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	/// The host's places a morsel pipeline's morsels may run at besides the node's own; none
+	/// when `None`. A child context carries its parent's.
+	morsel_places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
 	/// The query's memory: its lease from the node's governor and the store
 	/// its breakers spill to. `None` outside a datastore query, where nothing
 	/// is bounded. A child context carries its parent's.
@@ -341,6 +344,7 @@ impl Context {
 			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -415,6 +419,7 @@ impl Context {
 			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
 		}
@@ -478,6 +483,7 @@ impl Context {
 			live_recheck: parent.live_recheck.clone(),
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
+			morsel_places: parent.morsel_places.clone(),
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
 		}
@@ -567,6 +573,7 @@ impl Context {
 			live_recheck: from.live_recheck.clone(),
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
+			morsel_places: from.morsel_places.clone(),
 			memory: from.memory.clone(),
 			index_places: Arc::clone(&from.index_places),
 		}
@@ -662,6 +669,7 @@ impl Context {
 			live_recheck: None,
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
+			morsel_places: from.morsel_places.clone(),
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -743,6 +751,7 @@ impl Context {
 			live_recheck: None,
 			changefeed_source: None,
 			scheduler: None,
+			morsel_places: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		};
@@ -819,6 +828,7 @@ impl Context {
 			live_recheck: None,
 			changefeed_source: None,
 			scheduler: None,
+			morsel_places: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -998,6 +1008,19 @@ impl Context {
 		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
 	) {
 		self.scheduler = scheduler;
+	}
+
+	/// The host's places a morsel pipeline's morsels may run at, `None` where the host gives
+	/// none.
+	pub(crate) fn morsel_places(&self) -> Option<&Arc<dyn crate::exec::places::MorselPlaces>> {
+		self.morsel_places.as_ref()
+	}
+
+	pub(crate) fn set_morsel_places(
+		&mut self,
+		places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	) {
+		self.morsel_places = places;
 	}
 
 	/// The ticket the index engines' parallel work takes its places through,

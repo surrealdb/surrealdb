@@ -88,6 +88,7 @@ pub(crate) mod ordering;
 pub(crate) mod packed_view;
 pub(crate) mod parts;
 pub(crate) mod permission;
+pub mod places;
 pub(crate) mod planner;
 pub(crate) mod pre_decode_filter;
 pub(crate) mod reference_purge;

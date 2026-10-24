@@ -1074,6 +1074,7 @@ fn the_effective_mode_narrows_by_the_emitted_body() {
 			frontier_rows: None,
 			read_ahead: false,
 			rows_ahead: None,
+			unit: None,
 		};
 		assert_eq!(effective_input(&pipeline(Parallel::Serial)), None);
 		let range = Parallel::Morsels(MorselPlan {

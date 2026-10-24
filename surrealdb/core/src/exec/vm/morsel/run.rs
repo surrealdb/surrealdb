@@ -51,6 +51,35 @@ pub(super) struct MorselResult {
 	pub(super) bytes: u64,
 	pub(super) chunks: u64,
 	pub(super) held: usize,
+	/// What a morsel that read a key range through a view read: the entries, and their key and
+	/// value bytes. Zero for a batch.
+	pub(super) scanned: [u64; 3],
+	/// The records the morsel's body left pending and the morsel decoded whole.
+	pub(super) decoded: u64,
+}
+
+impl MorselResult {
+	/// The result of a morsel of `program` that ran no row.
+	pub(super) fn empty(program: &Program) -> Self {
+		Self {
+			output: Vec::new(),
+			sorts: (0..program.sorts.len()).map(|_| Vec::new()).collect(),
+			slabs: (0..program.sorts.len()).map(|_| Vec::new()).collect(),
+			arrivals: vec![Arrivals::default(); program.sorts.len()],
+			groups: (0..program.aggregates.len()).map(|_| None).collect(),
+			spilled: Vec::new(),
+			sort_accounts: Vec::new(),
+			group_accounts: Vec::new(),
+			ends: Vec::new(),
+			rows: 0,
+			elapsed: std::time::Duration::ZERO,
+			bytes: 0,
+			chunks: 0,
+			held: 0,
+			scanned: [0; 3],
+			decoded: 0,
+		}
+	}
 }
 
 /// How the rows of a paged body's morsel ended: a row that left something for the merge to replay,
@@ -414,6 +443,7 @@ pub(super) async fn finish(
 	}
 	#[cfg(test)]
 	super::test_hooks::note_partials(&state, &spilled);
+	let decoded = state.decoded;
 	Ok(MorselResult {
 		output: state.take_output(),
 		sorts: std::mem::take(&mut state.sorts),
@@ -429,6 +459,8 @@ pub(super) async fn finish(
 		bytes: 0,
 		chunks: 0,
 		held: 0,
+		scanned: [0; 3],
+		decoded,
 	})
 }
 
@@ -568,8 +600,13 @@ pub(super) struct RangeRun<'a> {
 	/// Where the morsel puts the rows of each chunk for the coordinator to take as they are
 	/// produced, when the scan streams its rows ([`Outbox`]).
 	pub(super) outbox: Option<&'a Outbox>,
-	/// How the morsel gives part of its range away, or returns its place, at a chunk boundary.
-	pub(super) donor: super::steal::Donor<'a>,
+	/// How the morsel gives part of its range away, or returns its place, at a chunk boundary;
+	/// `None` for a morsel with no other morsel to give to, a leaf's, which reads its range to
+	/// the end.
+	pub(super) donor: Option<super::steal::Donor<'a>>,
+	/// Where the rows of each chunk go as they are produced when the morsel has no outbox: a
+	/// leaf's frames, which the statement takes in the order the chunks produced them.
+	pub(super) chunks: Option<&'a (dyn Fn(Vec<Value>) + Sync)>,
 }
 
 /// Run the entries of `run.span` that `cursor` reads, as one morsel of pipeline `run.at` of
@@ -609,6 +646,7 @@ pub(super) async fn run_range(
 		lease,
 		outbox,
 		donor,
+		chunks: on_chunk,
 	} = run;
 	let started = web_time::Instant::now();
 	let fold = under.fold.clone();
@@ -638,6 +676,7 @@ pub(super) async fn run_range(
 	let mut bytes = 0u64;
 	let mut chunks = 0u64;
 	let mut held_most = 0usize;
+	let mut scanned = [0u64; 3];
 	loop {
 		if cancelled() {
 			return Ok(RangeEnd::Cancelled);
@@ -798,6 +837,9 @@ pub(super) async fn run_range(
 		// The view's cursor is not the transaction's, so the chunk is counted into the
 		// transaction's scan metrics here, as its own cursors count theirs.
 		ctx.txn().record_view_scan(stats.rows, stats.key_bytes, stats.value_bytes);
+		scanned[0] += stats.rows;
+		scanned[1] += stats.key_bytes;
+		scanned[2] += stats.value_bytes;
 		if let Some(e) = failed {
 			return Err(ControlFlow::Err(e));
 		}
@@ -848,8 +890,18 @@ pub(super) async fn run_range(
 					}
 				}
 				outbox.put(rows, bytes, grant);
-				donor.gate.shared.fed.notify_one();
+				if let Some(donor) = &donor {
+					donor.gate.shared.fed.notify_one();
+				}
 				outbox.held()
+			}
+			None if on_chunk.is_some() => {
+				if let Some(on_chunk) = on_chunk
+					&& !state.output.is_empty()
+				{
+					on_chunk(std::mem::take(&mut state.output));
+				}
+				0
 			}
 			None => {
 				for row in &state.output[sized..] {
@@ -868,7 +920,11 @@ pub(super) async fn run_range(
 		let yielded = if held + waiting >= window || lease.revoked() {
 			false
 		} else {
-			match donor.boundary(cursor, &mut own, dir, &progress).await? {
+			let boundary = match &donor {
+				Some(donor) => donor.boundary(cursor, &mut own, dir, &progress).await?,
+				None => super::steal::Boundary::Go,
+			};
+			match boundary {
 				super::steal::Boundary::Go => continue,
 				super::steal::Boundary::Donated => {
 					progress.since_cut = 0;
@@ -886,7 +942,10 @@ pub(super) async fn run_range(
 				super::test_hooks::note_parked_after_refusal(ctx);
 			}
 		}
-		if yielded && resume.is_some() {
+		if yielded
+			&& resume.is_some()
+			&& let Some(donor) = &donor
+		{
 			donor.gate.shared.metrics().yielded += 1;
 		}
 		parked = resume.map(|resume| {
@@ -909,6 +968,7 @@ pub(super) async fn run_range(
 	result.bytes = bytes;
 	result.chunks = chunks;
 	result.held = held_most;
+	result.scanned = scanned;
 	Ok(match parked {
 		Some(rest) => RangeEnd::Parked(result, rest),
 		None => RangeEnd::Done(result),

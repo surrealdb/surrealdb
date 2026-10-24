@@ -478,6 +478,9 @@ pub(crate) struct Policy {
 	needs_view: bool,
 	/// The most rows in a million of a range its filters may pass for the range to be cut.
 	split_pass_ppm: u32,
+	/// The morsels a host's places run at once for the scan this policy serves; `0` where the
+	/// scan's morsels run only on the node.
+	host_width: usize,
 }
 
 impl Policy {
@@ -494,6 +497,15 @@ impl Policy {
 			explain_analyze: config.morsel_explain_analyze,
 			needs_view: config.morsel_needs_view,
 			split_pass_ppm: config.morsel_split_pass_ppm,
+			host_width: 0,
+		}
+	}
+
+	/// This policy for a scan whose morsels also run at a host's places, `width` at once.
+	pub(crate) fn with_host_width(self, width: usize) -> Self {
+		Self {
+			host_width: width,
+			..self
 		}
 	}
 
@@ -1111,16 +1123,14 @@ impl Policy {
 		holds_place && rows >= self.split_rows
 	}
 
-	/// Run time: how many batches may be in flight ahead of the one the merge waits for.
+	/// Run time: how many batches may be in flight ahead of the one the merge waits for: twice the
+	/// node's cores, and at least as many as the host's places run at once for the scan.
 	pub(crate) fn read_ahead(self) -> usize {
 		#[cfg(not(target_family = "wasm"))]
-		{
-			2 * std::thread::available_parallelism().map_or(1, |cores| cores.get())
-		}
+		let node = 2 * std::thread::available_parallelism().map_or(1, |cores| cores.get());
 		#[cfg(target_family = "wasm")]
-		{
-			1
-		}
+		let node = 1;
+		node.max(self.host_width)
 	}
 
 	/// Run time: the cost of a row, in nanoseconds, once a batch that took `cost` per row has

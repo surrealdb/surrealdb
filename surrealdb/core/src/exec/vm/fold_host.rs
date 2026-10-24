@@ -550,6 +550,7 @@ pub(in crate::exec::vm) mod tests {
 				frontier_rows: None,
 				read_ahead: false,
 				rows_ahead: None,
+				unit: None,
 			}],
 			consts: ValueData::new(consts, "the constant pool").expect("the pool holds no closure"),
 			fields: Vec::new(),

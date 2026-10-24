@@ -3998,6 +3998,7 @@ pub(super) fn in_place_row_admitted(
 			let row = super::row_packed::LazyPackedRow::new(key, value, layouts, admitted);
 			let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 			if state.pending.is_some() {
+				state.decoded += 1;
 				match row.into_parts() {
 					(Some(row), _) => state.settle(program, row),
 					(None, admitted) => {
@@ -4017,6 +4018,7 @@ pub(super) fn in_place_row_admitted(
 		};
 		let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 		if state.pending.is_some() {
+			state.decoded += 1;
 			state.settle(program, row.into_value()?);
 		}
 		return Ok(stop);
@@ -4024,6 +4026,7 @@ pub(super) fn in_place_row_admitted(
 	let row = StoredRow::new(key, value);
 	let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 	if state.pending.is_some() {
+		state.decoded += 1;
 		state.settle_stored(program, key, value)?;
 	}
 	Ok(stop)

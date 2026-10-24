@@ -224,6 +224,8 @@ mod merge;
 mod metrics;
 mod outbox;
 pub(crate) mod places;
+mod remote;
+pub(crate) use self::remote::run_leaf;
 mod run;
 mod set;
 mod sorted;
@@ -232,6 +234,7 @@ mod steal;
 mod test_hooks;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_lease;
+pub(crate) mod wire;
 mod write_compute;
 mod write_set;
 

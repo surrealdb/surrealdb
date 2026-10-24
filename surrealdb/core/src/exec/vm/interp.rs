@@ -394,6 +394,9 @@ pub(crate) struct State {
 	pub(super) tries: Vec<Region>,
 	pub(super) output: Vec<Value>,
 	pub(super) pending: Option<Pending>,
+	/// The records a body run in the storage cursor left pending and the run decoded whole, since
+	/// the state was started.
+	pub(super) decoded: u64,
 	/// Whether the statement's permissions are not checked, so a permission
 	/// the bodies apply admits every row.
 	pub(super) permissions_bypassed: bool,
@@ -1115,6 +1118,7 @@ impl State {
 			tries,
 			output,
 			pending,
+			decoded,
 			permissions_bypassed,
 			read_in_place_permission_errors,
 			frames,
@@ -1210,6 +1214,7 @@ impl State {
 		emptied(tries);
 		emptied(output);
 		*pending = None;
+		*decoded = 0;
 		*permissions_bypassed = false;
 		*read_in_place_permission_errors = false;
 		emptied(frames);
@@ -1614,6 +1619,7 @@ impl State {
 			tries: Vec::new(),
 			output: Vec::new(),
 			pending: None,
+			decoded: 0,
 			permissions_bypassed: false,
 			read_in_place_permission_errors: false,
 			frames: Vec::new(),
@@ -4652,6 +4658,28 @@ pub(super) struct Merge {
 	pace: usize,
 	/// The rows the arrivals since the last moves have to place.
 	owed: usize,
+}
+
+impl Merge {
+	/// The merge's counters, in field order, for another engine to resume it from
+	/// ([`Self::from_words`]).
+	pub(super) fn words(&self) -> [usize; 7] {
+		[self.kept, self.run, self.run_at, self.len, self.cut, self.pace, self.owed]
+	}
+
+	/// The merge whose counters [`Self::words`] answered.
+	pub(super) fn from_words(words: [usize; 7]) -> Self {
+		let [kept, run, run_at, len, cut, pace, owed] = words;
+		Self {
+			kept,
+			run,
+			run_at,
+			len,
+			cut,
+			pace,
+			owed,
+		}
+	}
 }
 
 impl Merge {

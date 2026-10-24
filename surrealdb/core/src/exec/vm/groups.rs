@@ -825,6 +825,161 @@ impl KeyIndex {
 	}
 }
 
+impl Groups {
+	/// Write these groups for the merge of another engine to read back ([`Self::get_wire`]): the
+	/// kind of key, every group's key, its accumulators' saved states and its first values, and
+	/// the values `GROUP ALL` keeps for the merge to fold. `None`, with nothing written, when an
+	/// accumulator's state cannot be saved.
+	pub(super) fn put_wire(&self) -> Option<Vec<u8>> {
+		let mut w = super::morsel::wire::Writer::default();
+		w.usize(self.key.len());
+		w.usize(self.len);
+		w.usize(self.bytes);
+		let keyed: Vec<(Vec<Value>, usize)> = match &self.index {
+			KeyIndex::All => (0..self.len).map(|at| (Vec::new(), at)).collect(),
+			KeyIndex::One(index) => index.iter().map(|(k, &i)| (vec![k.clone()], i)).collect(),
+			KeyIndex::Many(index) => index.iter().map(|(k, &i)| (k.clone(), i)).collect(),
+		};
+		w.usize(keyed.len());
+		for (key, at) in &keyed {
+			for value in key {
+				w.value(value).ok()?;
+			}
+			w.usize(*at);
+		}
+		w.usize(self.accumulators.len());
+		for state in &self.accumulators {
+			w.value(&state.save()?).ok()?;
+		}
+		w.usize(self.firsts.len());
+		for first in &self.firsts {
+			match first {
+				None => w.u8(0),
+				Some(value) => {
+					w.u8(1);
+					w.value(value).ok()?;
+				}
+			}
+		}
+		match &self.logged {
+			None => w.u8(0),
+			Some(logged) => {
+				w.u8(1);
+				w.usize(logged.slots.len());
+				for (at, slot) in logged.slots.iter().enumerate() {
+					w.usize(*slot);
+					let numbers: usize = logged.numbers[at].iter().map(Vec::len).sum();
+					w.usize(numbers);
+					for number in logged.numbers[at].iter().flatten() {
+						w.value(&Value::Number(*number)).ok()?;
+					}
+				}
+				w.usize(logged.bytes);
+			}
+		}
+		Some(w.into_bytes())
+	}
+
+	/// The groups [`Self::put_wire`] wrote, whose accumulators are those of `functions`, by field
+	/// and call.
+	pub(super) fn get_wire(
+		bytes: &[u8],
+		functions: &[Vec<Arc<dyn AggregateFunction>>],
+	) -> anyhow::Result<Self> {
+		let mut r = super::morsel::wire::Reader::raw(bytes);
+		let keys = r.usize()?;
+		let mut groups = Self::new(keys, functions);
+		// `GROUP ALL` opens its one group from the start; the written groups replace it.
+		groups.accumulators.clear();
+		groups.firsts.clear();
+		groups.len = r.usize()?;
+		groups.bytes = r.usize()?;
+		for _ in 0..r.usize()? {
+			let key = (0..keys).map(|_| r.value()).collect::<anyhow::Result<Vec<_>>>()?;
+			let at = r.usize()?;
+			anyhow::ensure!(at < groups.len, "a morsel's group lies past its groups");
+			match &mut groups.index {
+				KeyIndex::All => {}
+				KeyIndex::One(index) => {
+					let key = key.into_iter().next().unwrap_or(Value::None);
+					index.insert(key, at);
+				}
+				KeyIndex::Many(index) => {
+					index.insert(key, at);
+				}
+			}
+		}
+		let width = groups.width();
+		let states = r.usize()?;
+		anyhow::ensure!(states == width * groups.len, "a morsel's groups hold other accumulators");
+		for _ in 0..groups.len {
+			for calls in functions {
+				for function in calls {
+					let mut state = function.accumulator_state();
+					state.load(r.value()?)?;
+					groups.accumulators.push(state);
+				}
+			}
+		}
+		let firsts = r.usize()?;
+		anyhow::ensure!(
+			firsts == groups.fields() * groups.len,
+			"a morsel's groups hold other first values"
+		);
+		for _ in 0..firsts {
+			let first = match r.u8()? {
+				0 => None,
+				_ => Some(r.value()?),
+			};
+			groups.firsts.push(first);
+		}
+		if r.u8()? == 1 {
+			let kept = r.usize()?;
+			let mut slots = Vec::with_capacity(kept);
+			let mut numbers = Vec::with_capacity(kept);
+			for _ in 0..kept {
+				slots.push(r.usize()?);
+				let count = r.usize()?;
+				let mut block = Vec::with_capacity(count);
+				for _ in 0..count {
+					match r.value()? {
+						Value::Number(number) => block.push(number),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Object(_)
+						| Value::Geometry(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::RecordId(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => anyhow::bail!("a morsel's kept term is not a number"),
+					}
+				}
+				numbers.push(vec![block]);
+			}
+			let bytes = r.usize()?;
+			groups.logged = Some(Box::new(Logged {
+				slots: slots.into(),
+				numbers,
+				block: 0,
+				bytes,
+				holds: Vec::new(),
+			}));
+		}
+		r.done()?;
+		Ok(groups)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

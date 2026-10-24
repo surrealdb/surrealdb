@@ -284,8 +284,8 @@ pub(crate) fn while_running(stream: ValueBatchStream) -> ValueBatchStream {
 
 /// `future`, work a running program hands to another task, marking this
 /// thread as running the program while it is polled, under the run-time seal
-/// ([`sealed`]). A program hands no work to another task on wasm.
-#[cfg(not(target_family = "wasm"))]
+/// ([`sealed`]): a worker's task on a target with a spawner, and a host place's worker that the
+/// scan polls beside its coordinator on one without.
 pub(crate) fn while_running_task<'a, F: std::future::Future + Send + 'a>(
 	future: F,
 ) -> impl std::future::Future<Output = F::Output> + Send + 'a {
@@ -403,9 +403,7 @@ impl<T> std::future::Future for Scoped<'_, T> {
 	}
 }
 
-/// `future`, polled under the run-time seal. Its one caller outside tests,
-/// `while_running_task`, does not exist on wasm.
-#[cfg(any(test, not(target_family = "wasm")))]
+/// `future`, polled under the run-time seal.
 pub(crate) fn sealed<'a, F: std::future::Future + Send + 'a>(
 	future: F,
 ) -> impl std::future::Future<Output = F::Output> + Send + 'a {

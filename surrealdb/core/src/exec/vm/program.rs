@@ -7174,6 +7174,9 @@ pub(crate) struct Pipeline {
 	/// The links of the pipeline's `FETCH` read for a batch of source rows before the rows run,
 	/// as the physical plan decided.
 	pub(super) rows_ahead: Option<RowsAheadSpec>,
+	/// The half of the pipeline a morsel runs, encoded for a host's places
+	/// ([`super::morsel::wire`]); `None` for a pipeline whose morsels run only on the node.
+	pub(super) unit: Option<crate::exec::places::MorselUnit>,
 }
 
 impl Pipeline {
@@ -7622,6 +7625,80 @@ fn row_use(instr: &Instr) -> RowUse {
 /// is a function of the emitted code alone: the instructions are classified by [`row_use`].
 pub(super) fn reads_row(code: &[Instr]) -> bool {
 	code.iter().fold(RowUse::Neither, |used, instr| used.and(row_use(instr))) == RowUse::Fields
+}
+
+impl Program {
+	/// The program a leaf runs a morsel unit as ([`super::morsel::wire`]): `pipeline`, whose body
+	/// runs in the storage cursor, and the tables its body names. It holds nothing else, reads no
+	/// storage but the key range it is given and runs at the root, as a body that runs in the
+	/// cursor reaches no namespace, database or catalog entry.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "a program of the one pipeline and the tables its body names"
+	)]
+	pub(super) fn leaf(
+		pipeline: Pipeline,
+		consts: super::plain::ValueData<Vec<Value>>,
+		fields: Vec<FieldName>,
+		paths: Vec<FieldPath>,
+		limits: usize,
+		sorts: Vec<SortSpec>,
+		aggregates: Vec<AggregateSink>,
+		kinds: Vec<crate::expr::Kind>,
+	) -> Self {
+		Program {
+			pipelines: vec![pipeline],
+			consts,
+			fields,
+			paths,
+			limits: super::morsel::wire::leaf_limits(limits),
+			sorts,
+			splits: Vec::new(),
+			joins: Vec::new(),
+			distincts: Vec::new(),
+			verdicts: Vec::new(),
+			fetches: Vec::new(),
+			aggregates,
+			permissions: Vec::new(),
+			computed_names: Vec::new(),
+			shaped_seed: None,
+			table: None,
+			write: None,
+			scalar: false,
+			rows: false,
+			groups: Vec::new(),
+			analyses: Vec::new(),
+			served: Vec::new(),
+			kinds,
+			params: Vec::new(),
+			calls: Vec::new(),
+			matches: Vec::new(),
+			externals: Vec::new(),
+			degrees: Vec::new(),
+			methods: Vec::new(),
+			record_ids: Vec::new(),
+			subqueries: Vec::new(),
+			nested: Vec::new(),
+			probes: Vec::new(),
+			lookups: Vec::new(),
+			functions: Vec::new(),
+			closures: Vec::new(),
+			closure_values: Vec::new(),
+			host_code: Vec::new(),
+			reservations: Vec::new(),
+			implicit_tables: Vec::new(),
+			units: Vec::<Arc<Program>>::new().into(),
+			reach: None,
+			dispatch: None,
+			unit: None,
+			tail: None,
+			events: None,
+			access_mode: AccessMode::ReadOnly,
+			required_context: ContextLevel::Root,
+			keeps_row_order: false,
+			request: None,
+		}
+	}
 }
 
 impl Program {

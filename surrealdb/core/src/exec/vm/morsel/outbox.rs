@@ -30,6 +30,8 @@ pub(super) struct Outbox {
 	queue: Mutex<Queue>,
 	/// The bytes the chunks in the queue weigh, which the morsel holds against its window.
 	held: AtomicUsize,
+	/// Rung when the coordinator takes chunks, for a producer that waits for room in the window.
+	taken: tokio::sync::Notify,
 }
 
 #[derive(Default)]
@@ -71,6 +73,7 @@ impl Outbox {
 		let (chunk, bytes, grant) = self.queue().chunks.pop_front()?;
 		self.held.fetch_sub(bytes, Ordering::Release);
 		drop(grant);
+		self.taken.notify_waiters();
 		Some(chunk)
 	}
 
@@ -89,7 +92,14 @@ impl Outbox {
 		}
 		all.append(&mut last);
 		self.held.store(0, Ordering::Release);
+		self.taken.notify_waiters();
 		all
+	}
+
+	/// The signal that the coordinator has taken chunks, to be enabled before [`Self::held`] is
+	/// read so that a take in between is not missed.
+	pub(super) fn taken(&self) -> tokio::sync::futures::Notified<'_> {
+		self.taken.notified()
 	}
 
 	/// Return an emptied chunk buffer for the morsel's next chunk.

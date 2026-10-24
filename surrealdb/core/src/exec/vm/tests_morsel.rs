@@ -4417,3 +4417,226 @@ async fn the_select_all_bench_statement_stays_serial_under_the_default_settings(
 		"an unfiltered scan was cut under the default settings"
 	);
 }
+
+/// The corpora run through a host's places: every morsel the node would hand a worker goes to
+/// loopback places, which encode its unit, its request and every frame and run it in a second
+/// engine, and the answers are the serial run's. The node's own pool holds no place, so a morsel
+/// runs at the host or on the coordinator.
+#[cfg(all(feature = "kv-surrealkv", feature = "kv-mem"))]
+mod through_host_places {
+	use super::*;
+	use crate::exec::places::{LoopbackPlaces, MorselPlaces};
+
+	/// A SurrealKV datastore set up with `setup`, whose morsels run at `places` and never on the
+	/// node's pool.
+	async fn hosted(setup: &str, dir: &std::path::Path, places: &Arc<LoopbackPlaces>) -> TestDb {
+		hosted_with(setup, dir, places, tiny()).await
+	}
+
+	/// [`hosted`] under `config`.
+	async fn hosted_with(
+		setup: &str,
+		dir: &std::path::Path,
+		places: &Arc<LoopbackPlaces>,
+		config: surrealdb_cnf::ConfigMap,
+	) -> TestDb {
+		let builder = crate::kvs::Datastore::builder()
+			.with_morsel_places(Arc::clone(places) as Arc<dyn MorselPlaces>);
+		TestDb::new_on_surrealkv_over(
+			builder,
+			setup,
+			dir,
+			config.with_key_value("morsel_places", "0"),
+		)
+		.await
+	}
+
+	/// The rows of a scan whose morsels run at a host reach the reader of the statement's result
+	/// stream while the scan runs: with a stream that holds one item, a statement that sends more
+	/// rows than that cannot have finished when its first rows are read.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn host_morsel_rows_reach_the_result_stream_before_the_scan_ends() {
+		let dir = tempfile::tempdir().expect("temporary directory");
+		let places = Arc::new(LoopbackPlaces::new(4));
+		let config = tiny().with_key_value("scan_batch_size", "64");
+		let wide = hosted_with(&setup(), dir.path(), &places, config).await;
+		let ds = Arc::clone(wide.datastore());
+		let session = crate::dbs::Session::owner().with_ns("test").with_db("test");
+		let (tx, rx) = async_channel::bounded(1);
+		let sql = "SELECT n, s FROM t WHERE n % 3 = 0";
+		let job = ds
+			.run_streaming(crate::kvs::QueryRequest::new(sql, &session), tx)
+			.expect("the statement parses");
+		let run = tokio::spawn(job.run);
+		let first = rx.recv().await.expect("a first item");
+		assert!(
+			matches!(
+				first,
+				surrealdb_rpc::stream::QueryStreamItem::Rows { .. }
+					| surrealdb_rpc::stream::QueryStreamItem::Frame { .. }
+			),
+			"the first item is rows"
+		);
+		assert!(!run.is_finished(), "the statement finished before its first rows were read");
+		let mut rows_items = 1;
+		while let Ok(item) = rx.recv().await {
+			if matches!(
+				item,
+				surrealdb_rpc::stream::QueryStreamItem::Rows { .. }
+					| surrealdb_rpc::stream::QueryStreamItem::Frame { .. }
+			) {
+				rows_items += 1;
+			}
+		}
+		run.await.expect("the statement's task").expect("the statement runs");
+		assert!(rows_items >= 3, "the rows came in {rows_items} items");
+		assert!(places.runs() > 0, "no morsel ran at the host");
+	}
+
+	/// Where the merge keeps the serial order, a host morsel behind a slow front waits with no
+	/// more than a window of rows in its outbox: the next frame is read only once the coordinator
+	/// takes from it. The rows are the serial run's.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_host_morsel_behind_a_slow_front_holds_no_more_than_its_window() {
+		let (serial_dir, wide_dir) = (
+			tempfile::tempdir().expect("temporary directory"),
+			tempfile::tempdir().expect("temporary directory"),
+		);
+		const WINDOW: usize = 2048;
+		let places = Arc::new(LoopbackPlaces::new(4));
+		// Morsels of many entries, read an entry a chunk, so a morsel answers many frames.
+		let config = tiny()
+			.with_key_value("morsel_window_bytes", WINDOW.to_string())
+			.with_key_value("morsel_target_bytes", "16384")
+			.with_key_value("morsel_steal_always", "true");
+		let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+		let wide = hosted_with(&setup(), wide_dir.path(), &places, config).await;
+		let select = "SELECT n, s FROM t WHERE n % 3 = 0";
+		assert_eq!(binding_merges_of(&wide, select).await, [MergeOrder::Serial]);
+		let sql = "LET $rows = SELECT n, s FROM t WHERE n % 3 = 0; RETURN $rows";
+		let expected = answered(&serial, sql).await;
+		let ctx = wide.exec_ctx().await;
+		let before = counts_of(&ctx).most_held;
+		// The first morsel the host claims runs for a long time while the others stream.
+		delay_morsels(&ctx, &[1500]);
+		assert_equivalent(sql, &answered(&wide, sql).await, &expected);
+		delay_morsels(&ctx, &[]);
+		let held = counts_of(&ctx).most_held;
+		assert!(places.runs() > 1, "no morsel ran at the host behind the slow one");
+		assert!(held > before, "no host morsel streamed into its outbox");
+		assert!(held < WINDOW, "a host morsel held {held} bytes, past its window of {WINDOW}");
+	}
+
+	/// Run every statement of `corpora` over a serial datastore and one whose morsels run at
+	/// loopback places, each corpus over its own setup, and assert the answers equal as each
+	/// statement's contract says. Answers the morsels the places ran for each corpus.
+	async fn through_places(corpora: &[(&str, &[&str])]) -> Vec<usize> {
+		let mut ran = Vec::new();
+		for (setup, statements) in corpora {
+			let (serial_dir, wide_dir) = (
+				tempfile::tempdir().expect("temporary directory"),
+				tempfile::tempdir().expect("temporary directory"),
+			);
+			let places = Arc::new(LoopbackPlaces::new(4));
+			let serial = TestDb::new_on_surrealkv(setup, serial_dir.path(), whole()).await;
+			let wide = hosted(setup, wide_dir.path(), &places).await;
+			let before = places.runs();
+			run_all_unproved(&serial, &wide, statements).await;
+			ran.push(places.runs() - before);
+		}
+		ran
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn scans_answer_through_host_places() {
+		let setup = setup();
+		let ran = through_places(&[(&setup, SCANS), (&setup, UNORDERED), (&setup, COUNTS)]).await;
+		assert!(ran.iter().all(|&ran| ran > 0), "morsels run at the host, by corpus: {ran:?}");
+	}
+
+	/// A leaf's end frame states what it read and ran: a filtering scan's leaves judge more rows
+	/// than they emit, and a body that reads fields reads its rows by their columns.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_leaf_states_what_it_read_and_ran() {
+		let (serial_dir, wide_dir) = (
+			tempfile::tempdir().expect("temporary directory"),
+			tempfile::tempdir().expect("temporary directory"),
+		);
+		let places = Arc::new(LoopbackPlaces::new(4));
+		let sql = "SELECT n FROM t WHERE n % 7 = 0";
+		let serial = TestDb::new_on_surrealkv(&setup(), serial_dir.path(), whole()).await;
+		let wide = hosted(&setup(), wide_dir.path(), &places).await;
+		run_all_unproved(&serial, &wide, &[sql]).await;
+		let stats = places.stats();
+		assert!(places.runs() > 0, "no morsel ran at the host");
+		assert!(stats.entries > 0 && stats.entries == stats.rows_judged, "{stats:?}");
+		assert!(stats.rows_emitted > 0 && stats.rows_emitted < stats.rows_judged, "{stats:?}");
+		assert!(stats.reads_row && stats.column_reads == stats.rows_judged, "{stats:?}");
+		// A row the filter refuses is judged in its stored bytes; only the rows a projection of
+		// fields builds its own value for are ever read, and none is decoded whole.
+		assert_eq!(stats.decoded, 0, "{stats:?}");
+		// A body that hands its row on whole decodes exactly the rows it emits.
+		let before = places.stats();
+		run_all_unproved(&serial, &wide, &["SELECT * FROM t WHERE n % 7 = 0"]).await;
+		let after = places.stats();
+		let (decoded, emitted) =
+			(after.decoded - before.decoded, after.rows_emitted - before.rows_emitted);
+		assert!(decoded > 0 && decoded == emitted, "{before:?} {after:?}");
+		let program = super::lowered(&wide.exec_ctx().await, sql).await;
+		let unit = program.pipelines.iter().find_map(|p| p.unit.as_ref()).expect("a unit");
+		assert!(crate::exec::places::unit_reads_row(unit.bytes()).expect("the unit reads"));
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn float_folds_answer_through_host_places() {
+		let ran = through_places(&[(&float_setup(), FLOAT_FOLDS)]).await;
+		assert!(ran.iter().all(|&ran| ran > 0), "morsels run at the host, by corpus: {ran:?}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn sorts_and_groups_answer_through_host_places() {
+		let setup = merge_setup();
+		let ran = through_places(&[
+			(&setup, SORT_RUNS),
+			(&setup, TOP_K),
+			(&setup, TOP_K_FILTERED),
+			(&setup, TOP_K_THAT_FAIL),
+			(&setup, GROUP_PARTITIONS),
+			(&setup, ORDER_SENSITIVE_GROUPS),
+		])
+		.await;
+		assert!(ran.iter().all(|&ran| ran > 0), "morsels run at the host, by corpus: {ran:?}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn paging_and_failures_answer_through_host_places() {
+		let ran = through_places(&[
+			(&overflow_setup(), PAGED),
+			(&failing_merge_setup(), DISTINCTS),
+			(&failing_merge_setup(), FAILING_DISTINCTS),
+		])
+		.await;
+		assert!(ran[0] > 0, "morsels run at the host, by corpus: {ran:?}");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn the_corpus_answers_through_host_places() {
+		let ran = through_places(&[(CORPUS_SETUP, CORPUS)]).await;
+		assert!(ran.iter().all(|&ran| ran > 0), "morsels run at the host, by corpus: {ran:?}");
+	}
+
+	/// A failing scan raises one of its failures through host places as on the node: the error a
+	/// leaf raises reaches the statement as the leaf rendered it.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_failing_scan_fails_through_host_places() {
+		let (serial_dir, wide_dir) = (
+			tempfile::tempdir().expect("temporary directory"),
+			tempfile::tempdir().expect("temporary directory"),
+		);
+		let places = Arc::new(LoopbackPlaces::new(4));
+		let serial = TestDb::new_on_surrealkv(&failing_setup(), serial_dir.path(), whole()).await;
+		let wide = hosted(&failing_setup(), wide_dir.path(), &places).await;
+		a_failing_scan_fails(&serial, &wide).await;
+		assert!(places.runs() > 0, "no morsel ran at the host");
+	}
+}

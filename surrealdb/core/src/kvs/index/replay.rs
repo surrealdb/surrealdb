@@ -163,6 +163,7 @@ impl Building {
 				.await?;
 				break;
 			}
+			self.spend_batch()?;
 			self.mark_durable_report(
 				generation,
 				IndexBuildReportStatus::Indexing,
@@ -342,6 +343,7 @@ impl Building {
 			if keys.is_empty() {
 				return Ok(());
 			}
+			self.spend_batch()?;
 			let now = Utc::now();
 			let mut blocked = false;
 			let ctx = self.new_write_tx_ctx().await?;

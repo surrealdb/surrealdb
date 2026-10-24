@@ -191,6 +191,19 @@ pub(super) fn build_owner_expired(state: &IndexBuildState, now: DateTime<Utc>) -
 		<= now
 }
 
+/// Whether a builder may claim the build `state` names, as a takeover of its
+/// generation: it names no owner, or its owner's lease has lapsed by `now`.
+///
+/// A `Building` or `Closing` state with no owner is one handed back for any
+/// builder to continue ([`super::builder::Building::hand_back`]), or a
+/// generation a committed `REBUILD INDEX` staged. It still fences compaction
+/// ([`build_owner_holds`]), since its index is half built. Only a bounded pass
+/// claims on this; every other claim waits out the lease
+/// ([`build_owner_expired`]).
+pub(super) fn build_claimable(state: &IndexBuildState, now: DateTime<Utc>) -> bool {
+	state.owner.is_none() || build_owner_expired(state, now)
+}
+
 /// Who holds an index's build, as a compaction pass acts on it.
 pub(crate) enum BuildOwner {
 	/// No live owner: no build state, or one released, ended or failed.

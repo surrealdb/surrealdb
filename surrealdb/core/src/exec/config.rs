@@ -216,6 +216,11 @@ pub(crate) struct ExecConfig {
 	/// hold at once (default: unbounded). `0` runs every morsel on the
 	/// statement's own task.
 	pub morsel_places: usize,
+	/// The width of the loopback host places a datastore installs when the host supplies none
+	/// (default: 0, none): every morsel handed to them, its unit and its frames, is encoded and
+	/// run by a second engine of the process, as a host's leaf runs it. A conformance setting for
+	/// the host-place contract.
+	pub morsel_loopback_places: usize,
 	/// The places of the node's worker pool that morsel workers never take
 	/// (default: 1), so that short statements keep a core.
 	pub morsel_oltp_reserve: usize,
@@ -343,6 +348,7 @@ impl Default for ExecConfig {
 			morsel_split_pass_ppm: DEFAULT_MORSEL_SPLIT_PASS_PPM,
 			morsel_target_bytes: DEFAULT_MORSEL_TARGET_BYTES,
 			morsel_places: usize::MAX,
+			morsel_loopback_places: 0,
 			morsel_oltp_reserve: DEFAULT_MORSEL_OLTP_RESERVE,
 			morsel_window_bytes: DEFAULT_MORSEL_WINDOW_BYTES,
 			morsel_steal_always: false,
@@ -390,6 +396,7 @@ impl cnf::Config for ExecConfig {
 				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
 			})
 			.parse_key("morsel_places", &mut self.morsel_places)
+			.parse_key("morsel_loopback_places", &mut self.morsel_loopback_places)
 			.parse_key("morsel_oltp_reserve", &mut self.morsel_oltp_reserve)
 			.parse_key_with("morsel_window_bytes", &mut self.morsel_window_bytes, |x| {
 				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)

@@ -123,7 +123,7 @@ use crate::kvs::index::materialise::{
 };
 #[cfg(all(test, feature = "kv-surrealkv"))]
 use crate::kvs::index::materialise::{CompactionWriteGuard, compaction_write_guard};
-use crate::kvs::index::{IndexBuilder, ResumeScope};
+use crate::kvs::index::{BuildPass, IndexBuilder, ResumeScope};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions};
 use crate::kvs::sequences::Sequences;
@@ -824,6 +824,8 @@ pub struct Datastore {
 	/// runs under a lease, and a node the lease moves to begins a sweep of
 	/// its own. See [`IndexWalk`].
 	resume_walk: parking_lot::Mutex<Option<IndexWalk>>,
+	/// Where the next [`Self::run_index_builds`] resumes its walk over the catalog's indexes.
+	build_walk: parking_lot::Mutex<Option<IndexWalk>>,
 	/// The scan of the durable RPC sessions a purge pass stopped in when it
 	/// spent its slice with pages still to read; `None` between scans. This
 	/// node's alone: the purge runs under a lease, and a node the lease
@@ -949,6 +951,14 @@ pub struct Datastore {
 	/// How a running program gives up its thread once it has spent its
 	/// quantum; the default scheduler when `None`.
 	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	/// The host's places a morsel pipeline's morsels may run at besides the node's own; see
+	/// [`Self::with_morsel_places`].
+	morsel_places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	/// The most async events an unleased batch runs at once on the task that runs it; see
+	/// [`Builder::with_joined_event_workers`].
+	joined_event_workers: Option<usize>,
+	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
+	event_batch_size: u32,
 	/// The memory governor and temporary store a host supplied; see
 	/// [`Self::memory_host`] for what applies without them.
 	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
@@ -1340,6 +1350,22 @@ enum CompactionCleanupEnd {
 	Contended,
 	/// The cleanup failed on anything else.
 	Failed,
+}
+
+/// What one bounded pass of index builds did: see [`Datastore::run_index_builds`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IndexBuildsRun {
+	/// The build batches the pass ran.
+	pub batches: usize,
+	/// Whether a pending build is left that a pass may claim now: one this pass handed back
+	/// with its budget spent, or one it did not reach.
+	pub more: bool,
+	/// Where a pending build is held by an owner other than this process's builders, the
+	/// longest a pass waits before it may claim one: the soonest any such owner's lease lapses.
+	/// An owner that is running passes hands its build back sooner, and wakes
+	/// [`CommitTriggers::index_build`] when a statement hands one back.
+	pub retry_after: Option<Duration>,
 }
 
 /// What one drain of the compaction queue has left queued so far, which its
@@ -1799,6 +1825,7 @@ impl Datastore {
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			host_maintenance: tokio::sync::Mutex::new(None),
 			resume_walk: parking_lot::Mutex::new(None),
+			build_walk: parking_lot::Mutex::new(None),
 			rpc_session_cursor: parking_lot::Mutex::new(None),
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
@@ -1823,6 +1850,9 @@ impl Datastore {
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler,
+			morsel_places: self.morsel_places,
+			joined_event_workers: self.joined_event_workers,
+			event_batch_size: self.event_batch_size,
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
 			#[cfg(test)]
@@ -1836,7 +1866,11 @@ impl Datastore {
 				self.config.idx.fulltext_cache_size,
 				self.config.idx.segment_dictionary_path.clone(),
 			),
-			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
+			index_builder: IndexBuilder::new(
+				self.transaction_factory.clone(),
+				self.index_builder.defers_builds(),
+				self.index_builder.inline_batches(),
+			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]
@@ -1897,6 +1931,7 @@ impl Datastore {
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
 			host_maintenance: tokio::sync::Mutex::new(None),
 			resume_walk: parking_lot::Mutex::new(None),
+			build_walk: parking_lot::Mutex::new(None),
 			rpc_session_cursor: parking_lot::Mutex::new(None),
 			node_expire_cursor: parking_lot::Mutex::new(None),
 			node_cleanup_cursor: parking_lot::Mutex::new(None),
@@ -1921,6 +1956,9 @@ impl Datastore {
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler.clone(),
+			morsel_places: self.morsel_places.clone(),
+			joined_event_workers: self.joined_event_workers,
+			event_batch_size: self.event_batch_size,
 			memory_governor: self.memory_governor.clone(),
 			temp_store: self.temp_store.clone(),
 			#[cfg(test)]
@@ -1934,7 +1972,11 @@ impl Datastore {
 				self.config.idx.fulltext_cache_size,
 				self.config.idx.segment_dictionary_path.clone(),
 			),
-			index_builder: IndexBuilder::new(transaction_factory.clone()),
+			index_builder: IndexBuilder::new(
+				transaction_factory.clone(),
+				self.index_builder.defers_builds(),
+				self.index_builder.inline_batches(),
+			),
 			compaction_swept_at: parking_lot::Mutex::new(None),
 			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]
@@ -1984,7 +2026,11 @@ impl Datastore {
 		self.triggers.assume_shared_store();
 		let transaction_factory = self.transaction_factory.with_triggers(Arc::clone(&triggers));
 		let mut fork = self.fork_for_test_with_node_id(id);
-		fork.index_builder = IndexBuilder::new(transaction_factory.clone());
+		fork.index_builder = IndexBuilder::new(
+			transaction_factory.clone(),
+			self.index_builder.defers_builds(),
+			self.index_builder.inline_batches(),
+		);
 		fork.sequences = Sequences::new(transaction_factory.clone(), id);
 		fork.transaction_factory = transaction_factory;
 		fork.triggers = triggers;
@@ -2062,6 +2108,65 @@ impl Datastore {
 	pub fn with_scheduler(mut self, scheduler: Arc<dyn crate::exec::scheduler::Scheduler>) -> Self {
 		self.scheduler = Some(scheduler);
 		self
+	}
+
+	/// Set the places a host runs the morsels of a morsel pipeline at, for a host that fans a
+	/// scan out beyond the node ([`MorselPlaces`](crate::exec::places::MorselPlaces)). Without
+	/// one, morsels run on the node's own places.
+	pub fn with_morsel_places(
+		mut self,
+		places: Arc<dyn crate::exec::places::MorselPlaces>,
+	) -> Self {
+		self.morsel_places = Some(places);
+		self
+	}
+
+	/// Run `morsel` of the morsel unit `unit` as a host's leaf does, reading the morsel's range
+	/// from `reader`, and answer its frames ([`crate::exec::places`]). The leaf's own engine reads
+	/// nothing: the run reads only the morsel's range, from `reader`, which answers what the read
+	/// view of the transaction that handed the morsel out answers. A unit or morsel this build
+	/// does not run is answered as a failure of the place.
+	pub async fn run_morsel(
+		&self,
+		unit: &[u8],
+		morsel: &crate::exec::places::Morsel,
+		reader: Arc<dyn surrealdb_kvs::Snapshot>,
+	) -> crate::exec::places::MorselFrames {
+		match self.leaf_context().await {
+			Ok(ctx) => crate::exec::vm::morsel::run_leaf(unit, morsel, reader, ctx),
+			Err(e) => Box::pin(futures::stream::once(async move { Err(e) })),
+		}
+	}
+
+	/// The root context a leaf runs a morsel in: this engine's, over a read transaction the run
+	/// never reads through.
+	async fn leaf_context(&self) -> Result<crate::exec::ExecutionContext> {
+		use crate::exec::context::RootContext;
+		let txn = self.transaction(TransactionType::Read).await?;
+		let mut ctx = self.setup_ctx()?;
+		ctx.set_transaction(Arc::new(txn));
+		Ok(crate::exec::ExecutionContext::Root(RootContext {
+			ctx: ctx.freeze(),
+			options: None,
+			datastore: None,
+			cancellation: Arc::new(tokio_util::sync::CancellationToken::new()),
+			auth: Arc::new(crate::iam::Auth::default()),
+			session: None,
+			current_value: None,
+			current_row: None,
+			forbidden_row: None,
+			inherited_knn: None,
+			skip_fetch_perms: false,
+			perms_suppressed: false,
+			caller_perms_suppressed: false,
+			caller_view_checked: false,
+			computing_record: None,
+			no_write: None,
+			version_stamp: None,
+			guard_verdicts: Default::default(),
+			writing: false,
+			session_effects: None,
+		}))
 	}
 
 	/// Set the governor that grants each query its memory, for a host that
@@ -2144,6 +2249,7 @@ impl Datastore {
 			("morsel_split_pass_ppm", exec.morsel_split_pass_ppm.to_string()),
 			("morsel_target_bytes", exec.morsel_target_bytes.to_string()),
 			("morsel_places", exec.morsel_places.to_string()),
+			("morsel_loopback_places", exec.morsel_loopback_places.to_string()),
 			("morsel_oltp_reserve", exec.morsel_oltp_reserve.to_string()),
 			("morsel_window_bytes", exec.morsel_window_bytes.to_string()),
 			("morsel_steal_always", exec.morsel_steal_always.to_string()),
@@ -8712,6 +8818,175 @@ impl Datastore {
 		*self.compaction_swept_at.lock() = None;
 	}
 
+	/// The most async events an unleased batch runs at once on the task that runs it, where the
+	/// datastore was built with [`Builder::with_joined_event_workers`].
+	pub(crate) fn joined_event_workers(&self) -> Option<usize> {
+		self.joined_event_workers
+	}
+
+	/// The entries a batch of async events fetches.
+	pub(crate) fn event_batch_size(&self) -> u32 {
+		self.event_batch_size
+	}
+
+	/// One bounded pass over the async events this node has queued, for a host that drives the
+	/// queue itself: [`Self::event_processing_local`] without a canceller, which runs at most
+	/// [`EVENT_PROCESSING_SLICE_BATCHES`] batches of [`Self::event_batch_size`] entries. The pass
+	/// reports [`Progress::More`] while entries remain that a pass run at once owes a run, and the
+	/// host calls again; [`Pass::ran`] counts the entries it ran.
+	///
+	/// [`CommitTriggers::async_event`](surrealdb_datastore::triggers::CommitTriggers::async_event)
+	/// is notified after every commit that queued an event, and every key such a commit writes to
+	/// queue it lies within [`Self::async_event_queue_bounds`].
+	pub async fn process_async_events(&self) -> Result<Pass> {
+		self.event_processing_local(&CancellationToken::new()).await
+	}
+
+	/// The key bounds `[start, end)` of this node's async event queue: a commit of this node that
+	/// queues an `ASYNC` event writes a key within them.
+	pub fn async_event_queue_bounds(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+		let range = NodeEventQueuePrefix {
+			nd: self.id,
+		}
+		.range()?;
+		Ok((range.start().as_slice().to_vec(), range.end().as_slice().to_vec()))
+	}
+
+	/// Runs at most `budget` batches of pending index builds and reports what is left.
+	///
+	/// A build is pending from the statement that starts it until it is published, fails or is
+	/// aborted. Every step of it is a transaction that commits its own progress in the build's
+	/// state, so the pass is the build resumed: it claims a pending build that no live owner holds,
+	/// runs its batches from the last one committed, and hands it back when the budget is spent,
+	/// for the next pass to continue at once. A pass stopped anywhere — its future dropped, its
+	/// process gone — loses at most the batch it was in, and leaves the build to its owner lease,
+	/// after which a pass claims it again.
+	///
+	/// A call walks one page of the catalog's indexes ([`IndexWalk`]) in catalog order, and
+	/// continues the walk where the previous call stopped, so a call reads a bounded part of the
+	/// catalog however many indexes it holds; the walk begins afresh once a call reaches its end.
+	/// A call that has not reached the end reports [`IndexBuildsRun::more`], so a host that calls
+	/// again while it is set has visited every index.
+	///
+	/// Nothing is spawned and no lease is taken: the batches run on the calling task, and passes
+	/// that overlap claim each build once, the losing claim reading the build as held. Each batch
+	/// is bounded as a spawned build's is, by its record count and bytes, and so is each page of
+	/// the wipe that starts a restarted scan. A `COUNT` index's tail runs whole in the pass that
+	/// reaches it, one transaction growing with the records written past the scan's end while it
+	/// ran, and is not counted against `budget` (see `Building::spend_batch`). A pass with a
+	/// budget of one still advances its build by a batch.
+	///
+	/// A host that builds the datastore
+	/// [`without_index_build_tasks`](self::builder::Builder::without_index_build_tasks) runs this
+	/// itself: when
+	/// [`CommitTriggers::index_build`](surrealdb_datastore::triggers::CommitTriggers::index_build)
+	/// on [`Self::commit_triggers`] is notified, when a commit wrote a key
+	/// [`Self::is_index_build_state_key`] matches, again while [`IndexBuildsRun::more`] is set, and
+	/// after [`IndexBuildsRun::retry_after`].
+	pub async fn run_index_builds(&self, budget: usize) -> Result<IndexBuildsRun> {
+		let mut walk = self.build_walk.lock().take().unwrap_or_default();
+		let run = self.run_index_builds_page(&mut walk, budget).await;
+		let unwalked = walk.has_more();
+		if unwalked {
+			*self.build_walk.lock() = Some(walk);
+		}
+		let mut run = run?;
+		run.more |= unwalked;
+		Ok(run)
+	}
+
+	/// The page of `walk` that [`Self::run_index_builds`] runs: the candidates it does not reach,
+	/// because a build is left that a pass may claim, are given back to `walk`.
+	async fn run_index_builds_page(
+		&self,
+		walk: &mut IndexWalk,
+		budget: usize,
+	) -> Result<IndexBuildsRun> {
+		let page = self.resume_page(walk).await?;
+		let skipped = walk.take_refused();
+		if skipped > 0 {
+			warn!(
+				target: TARGET,
+				skipped,
+				"A pass of index builds skipped catalog entries that need a newer release than \
+				 this build"
+			);
+		}
+		let mut left = budget;
+		let mut run = IndexBuildsRun {
+			batches: 0,
+			more: false,
+			retry_after: None,
+		};
+		let mut candidates = page.into_iter();
+		while let Some(candidate) = candidates.next() {
+			// The index as the catalog holds it now; a candidate that no longer names the index
+			// the walk reached is dropped.
+			let Some(ix) = self.resume_candidate_as_defined(&candidate).await? else {
+				continue;
+			};
+			let ctx = self.setup_ctx()?.freeze();
+			let opt = self.setup_options(
+				&Session::owner().with_ns(&candidate.ns_name).with_db(&candidate.db_name),
+			);
+			let pass = match self
+				.index_builder
+				.run_pass(
+					&ctx,
+					opt,
+					candidate.ns,
+					candidate.db,
+					candidate.tb,
+					Arc::clone(&ix),
+					left,
+				)
+				.await
+			{
+				Ok(pass) => pass,
+				Err(err) if crate::kvs::is_shutdown_error(&err) => {
+					walk.give_back(std::iter::once(candidate).chain(candidates));
+					return Err(err);
+				}
+				Err(err) => {
+					warn!(
+						target: TARGET,
+						"Failed to run a pass of index build '{}' on table '{}': {err}",
+						ix.name,
+						ix.table_name
+					);
+					continue;
+				}
+			};
+			match pass {
+				BuildPass::Idle | BuildPass::Held(None) => {}
+				BuildPass::Pending => {
+					run.more = true;
+					walk.give_back(std::iter::once(candidate).chain(candidates));
+					break;
+				}
+				BuildPass::Held(Some(after)) => {
+					run.retry_after = Some(run.retry_after.map_or(after, |at| at.min(after)));
+				}
+				BuildPass::Ran {
+					batches,
+					finished,
+				} => {
+					run.batches += batches;
+					left = left.saturating_sub(batches);
+					run.more |= !finished;
+				}
+			}
+		}
+		Ok(run)
+	}
+
+	/// Whether `key` is the key of an index's build state, which every statement that starts an
+	/// index build writes, as does every batch of the build. A commit that wrote no such key
+	/// started no build.
+	pub fn is_index_build_state_key(key: &[u8]) -> bool {
+		crate::key::schema::BuildStateKey::decode_key(key).is_ok()
+	}
+
 	/// Runs the async events this node has queued, without a lease.
 	///
 	/// The queue under this node's id is written only by this node's own
@@ -9319,7 +9594,7 @@ impl Datastore {
 				self.event_laps.lock().insert(queue, lap);
 				return Ok(Drained::LeaseLost);
 			}
-			let full = batch.is_full();
+			let full = batch.is_full(self.event_batch_size());
 			let Some(last) = batch.last_key.filter(|_| full) else {
 				let queued = queued();
 				if !own || queued == lap.queued {
@@ -10918,6 +11193,7 @@ impl Datastore {
 			Arc::clone(&self.surrealism_cache),
 		)?;
 		ctx.set_scheduler(self.scheduler.clone());
+		ctx.set_morsel_places(self.morsel_places.clone());
 		ctx.set_changefeed_source(self.changefeed_source.clone());
 		ctx.set_memory(Some(self.memory_host().query()));
 		Ok(ctx)
@@ -16777,6 +17053,92 @@ pub(crate) mod test {
 		assert_eq!(pass.items, 50, "every fetched entry is reported");
 		assert_eq!(pass.progress, Progress::Done);
 		assert_eq!(pass.lease, TaskLeaseState::NotLeased);
+		Ok(())
+	}
+
+	/// A host that drives the queue calls the public pass until it reports no more, and every
+	/// queued event runs once.
+	#[test_log::test(tokio::test)]
+	async fn process_async_events_drains_this_nodes_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 10).await?;
+		let mut ran = 0;
+		let mut passes = 0;
+		loop {
+			let pass = ds.process_async_events().await?;
+			ran += pass.ran;
+			passes += 1;
+			assert!(passes < 10, "the queue did not drain");
+			if pass.progress == Progress::Done {
+				break;
+			}
+		}
+		assert_eq!(ran, 10, "every queued event ran once");
+		assert_eq!(logged_count(&ds, &session).await?, 10);
+		let last = ds.process_async_events().await?;
+		assert_eq!((last.ran, last.progress), (0, Progress::Done), "an empty queue reads as empty");
+		Ok(())
+	}
+
+	/// Events of one batch run several at once on the calling task when the datastore asks for
+	/// joined workers, and each runs once.
+	#[test_log::test(tokio::test)]
+	async fn joined_event_workers_run_a_batch_on_the_calling_task() -> Result<()> {
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_joined_event_workers(8)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		queue_async_events(&ds, &session, 20).await?;
+		let pass = ds.process_async_events().await?;
+		assert_eq!((pass.ran, pass.progress), (20, Progress::Done));
+		assert_eq!(logged_count(&ds, &session).await?, 20, "every event ran once");
+		Ok(())
+	}
+
+	/// A pass runs at most four batches of the size the datastore was built with, and reports
+	/// that entries remain until a caller that repeats it has drained the queue.
+	#[test_log::test(tokio::test)]
+	async fn process_async_events_is_bounded_by_the_event_batch_size() -> Result<()> {
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_event_batch_size(2)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		queue_async_events(&ds, &session, 10).await?;
+		let first = ds.process_async_events().await?;
+		assert_eq!((first.ran, first.progress), (8, Progress::More), "{first:?}");
+		assert_eq!(logged_count(&ds, &session).await?, 8, "a pass runs at most its batches");
+		let second = ds.process_async_events().await?;
+		assert_eq!((second.ran, second.progress), (2, Progress::Done), "{second:?}");
+		assert_eq!(logged_count(&ds, &session).await?, 10, "every event runs once");
+		Ok(())
+	}
+
+	/// A commit that queues an event writes a key within the bounds of this node's queue.
+	#[test_log::test(tokio::test)]
+	async fn a_queued_event_lies_within_the_queue_bounds() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 1).await?;
+		let (start, end) = ds.async_event_queue_bounds()?;
+		let range = NodeEventQueuePrefix {
+			nd: ds.id,
+		}
+		.range()?;
+		let tx = ds.transaction(Read).await?;
+		let keys = tx.keys(range, 10, 0, None).await;
+		tx.cancel().await?;
+		let keys = keys?;
+		assert_eq!(keys.len(), 1, "one event is queued");
+		assert!(keys.iter().all(|k| *k >= start && *k < end), "{keys:?} lies outside the bounds");
 		Ok(())
 	}
 

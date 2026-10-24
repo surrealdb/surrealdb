@@ -487,6 +487,7 @@ pub(super) fn program_of(
 	for (pipeline, claimed) in program.pipelines.iter().zip(&claims) {
 		check_claims(ir, claimed, &pipeline.code, &program, registry)?;
 	}
+	super::super::morsel::wire::attach_units(&mut program);
 	Ok((program, provenance))
 }
 
