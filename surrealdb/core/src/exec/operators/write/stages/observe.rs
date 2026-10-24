@@ -94,7 +94,7 @@ pub(crate) async fn queue_async_event(
 ) -> Result<(), ControlFlow> {
 	let queued = queued_payload(row, frame, event, subject, action)?;
 	let key = NodeEventQueueKey {
-		nd: frame.ctx().node_id(),
+		nd: frame.ctx().event_queue_node(),
 		ns: ctx.db.namespace_id,
 		db: ctx.db.database_id,
 		tb: Cow::Borrowed(&event.target_table),

@@ -959,6 +959,9 @@ pub struct Datastore {
 	joined_event_workers: Option<usize>,
 	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
 	event_batch_size: u32,
+	/// The node whose async event queue this datastore's writes queue under, when it is not this
+	/// datastore's own; see [`Builder::with_event_queue_node`].
+	event_queue_node: Option<Uuid>,
 	/// The memory governor and temporary store a host supplied; see
 	/// [`Self::memory_host`] for what applies without them.
 	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
@@ -1853,6 +1856,7 @@ impl Datastore {
 			morsel_places: self.morsel_places,
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size,
+			event_queue_node: self.event_queue_node,
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
 			#[cfg(test)]
@@ -1959,6 +1963,7 @@ impl Datastore {
 			morsel_places: self.morsel_places.clone(),
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size,
+			event_queue_node: self.event_queue_node,
 			memory_governor: self.memory_governor.clone(),
 			temp_store: self.temp_store.clone(),
 			#[cfg(test)]
@@ -8829,6 +8834,23 @@ impl Datastore {
 		self.event_batch_size
 	}
 
+	/// The node whose async event queue this datastore's writes queue under and its local drain
+	/// runs: this datastore's own unless [`Builder::with_event_queue_node`] named another.
+	pub(crate) fn event_queue_node(&self) -> Uuid {
+		self.event_queue_node.unwrap_or(self.id)
+	}
+
+	/// The pass of [`Job::EventProcessing`](crate::kvs::tasks::Job::EventProcessing):
+	/// [`Self::event_processing_local`] on a node that owns the queue its writes join, and nothing
+	/// on a node that only writes to another's ([`Builder::with_event_queue_node`]), whose owner
+	/// drains it.
+	pub(crate) async fn event_processing_job(&self, canceller: &CancellationToken) -> Result<Pass> {
+		if self.event_queue_node() != self.id {
+			return Ok(Pass::done(TaskLeaseState::NotLeased));
+		}
+		self.event_processing_local(canceller).await
+	}
+
 	/// One bounded pass over the async events this node has queued, for a host that drives the
 	/// queue itself: [`Self::event_processing_local`] without a canceller, which runs at most
 	/// [`EVENT_PROCESSING_SLICE_BATCHES`] batches of [`Self::event_batch_size`] entries. The pass
@@ -8846,7 +8868,7 @@ impl Datastore {
 	/// queues an `ASYNC` event writes a key within them.
 	pub fn async_event_queue_bounds(&self) -> Result<(Vec<u8>, Vec<u8>)> {
 		let range = NodeEventQueuePrefix {
-			nd: self.id,
+			nd: self.event_queue_node(),
 		}
 		.range()?;
 		Ok((range.start().as_slice().to_vec(), range.end().as_slice().to_vec()))
@@ -9024,12 +9046,12 @@ impl Datastore {
 	) -> Result<Pass> {
 		trace!(target: TARGET, "Running event processing for this node's queue");
 		let range = NodeEventQueuePrefix {
-			nd: self.id,
+			nd: self.event_queue_node(),
 		}
 		.range()?;
 		let mut pass = Pass::done(TaskLeaseState::NotLeased);
 		let mut budget = EVENT_PROCESSING_SLICE_BATCHES;
-		let queue = EventQueue::Node(self.id);
+		let queue = EventQueue::Node(self.event_queue_node());
 		// Unleased, so the lease cannot pass elsewhere.
 		match self.drain_event_range(queue, &range, None, &mut budget, canceller, &mut pass).await {
 			Ok(Drained::Backlog) => pass.progress = Progress::More,
@@ -9207,7 +9229,8 @@ impl Datastore {
 				// other queue — its owner live again, or its entries gone — is
 				// stale. The local queue's lap belongs to the local drain.
 				self.event_laps.lock().retain(|queue, _| {
-					*queue == EventQueue::Node(self.id) || sweep.swept.contains(queue)
+					*queue == EventQueue::Node(self.event_queue_node())
+						|| sweep.swept.contains(queue)
 				});
 				None
 			}
@@ -9292,7 +9315,7 @@ impl Datastore {
 			let queue = EventQueue::Node(state.nd);
 			// The local queue is the local drain's, lap included, so the local
 			// node costs a step and nothing more.
-			let local = state.nd == self.id;
+			let local = state.nd == self.event_queue_node();
 			if !local && state.queued && state.owned {
 				// An owned queue is its owner's to drain, so a lap this sweep
 				// left on it is stale.
@@ -9534,7 +9557,7 @@ impl Datastore {
 		// by a concurrent write on this node; see [`EventLap::queued`]. The
 		// count is read before the queue, so an entry queued between the two
 		// reads as queued during the lap.
-		let own = queue == EventQueue::Node(self.id);
+		let own = queue == EventQueue::Node(self.event_queue_node());
 		let queued = || self.commit_triggers().async_events_queued();
 		let resumed = self.event_laps.lock().get(&queue).cloned();
 		let mut lap = match resumed {
@@ -9671,7 +9694,7 @@ impl Datastore {
 	)]
 	pub async fn drain_async_events(&self) -> Result<u64> {
 		let canceller = CancellationToken::new();
-		let queue = EventQueue::Node(self.id);
+		let queue = EventQueue::Node(self.event_queue_node());
 		let mut items = 0;
 		loop {
 			// The passes up to the next rest finish the lap in progress, if
@@ -11194,6 +11217,7 @@ impl Datastore {
 		)?;
 		ctx.set_scheduler(self.scheduler.clone());
 		ctx.set_morsel_places(self.morsel_places.clone());
+		ctx.set_event_queue_node(self.event_queue_node);
 		ctx.set_changefeed_source(self.changefeed_source.clone());
 		ctx.set_memory(Some(self.memory_host().query()));
 		Ok(ctx)
@@ -17120,6 +17144,54 @@ pub(crate) mod test {
 		let second = ds.process_async_events().await?;
 		assert_eq!((second.ran, second.progress), (2, Progress::Done), "{second:?}");
 		assert_eq!(logged_count(&ds, &session).await?, 10, "every event runs once");
+		Ok(())
+	}
+
+	/// A datastore told to queue under another node's queue writes its events there, names that
+	/// queue's bounds, and drains it as its own.
+	#[test_log::test(tokio::test)]
+	async fn a_datastore_queues_and_drains_under_the_node_it_was_given() -> Result<()> {
+		let own = Uuid::from_u128(1);
+		let queue_node = Uuid::from_u128(2);
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_id(own)
+			.with_event_queue_node(queue_node)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		queue_async_events(&ds, &session, 3).await?;
+
+		let queued_under = |nd: Uuid| {
+			let ds = &ds;
+			async move {
+				let range = NodeEventQueuePrefix {
+					nd,
+				}
+				.range()?;
+				let tx = ds.transaction(Read).await?;
+				let keys = tx.keys(range, 10, 0, None).await;
+				tx.cancel().await?;
+				anyhow::Ok(keys?.len())
+			}
+		};
+		assert_eq!(queued_under(queue_node).await?, 3, "the events join the named node's queue");
+		assert_eq!(queued_under(own).await?, 0, "none joins the datastore's own");
+		let (start, _) = ds.async_event_queue_bounds()?;
+		let named = NodeEventQueuePrefix {
+			nd: queue_node,
+		}
+		.range()?;
+		assert_eq!(start, named.start().as_slice().to_vec(), "the bounds are the named queue's");
+		let idle = ds.event_processing_job(&CancellationToken::new()).await?;
+		assert_eq!(idle.items, 0, "the background job drains only a queue the node owns");
+		assert_eq!(queued_under(queue_node).await?, 3, "so it leaves the named queue to its owner");
+		let pass = ds.process_async_events().await?;
+		assert_eq!((pass.ran, pass.progress), (3, Progress::Done));
+		assert_eq!(logged_count(&ds, &session).await?, 3, "the datastore drains that queue");
 		Ok(())
 	}
 

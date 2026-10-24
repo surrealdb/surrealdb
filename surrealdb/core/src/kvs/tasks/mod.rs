@@ -422,7 +422,7 @@ async fn run_job(
 	let unleased = |res: anyhow::Result<()>| res.map(|()| Pass::done(TaskLeaseState::NotLeased));
 	match job {
 		Job::Heartbeat => unleased(heartbeat(dbs, NODE_MEMBERSHIP_UPDATE_TIMEOUT, canceller).await),
-		Job::EventProcessing => dbs.event_processing_local(canceller).await,
+		Job::EventProcessing => dbs.event_processing_job(canceller).await,
 		Job::EventAdoption => {
 			dbs.event_processing_adopt(opts.event_processing_interval, canceller).await
 		}

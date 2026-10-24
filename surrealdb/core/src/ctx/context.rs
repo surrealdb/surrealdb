@@ -246,6 +246,9 @@ pub struct Context {
 	/// The host's places a morsel pipeline's morsels may run at besides the node's own; none
 	/// when `None`. A child context carries its parent's.
 	morsel_places: Option<Arc<dyn crate::exec::places::MorselPlaces>>,
+	/// The node whose async event queue an event queued by a write in this context joins; `None`
+	/// for this context's own node ([`Self::node_id`]).
+	event_queue_node: Option<Uuid>,
 	/// The query's memory: its lease from the node's governor and the store
 	/// its breakers spill to. `None` outside a datastore query, where nothing
 	/// is bounded. A child context carries its parent's.
@@ -345,6 +348,7 @@ impl Context {
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -420,6 +424,7 @@ impl Context {
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
 		}
@@ -484,6 +489,7 @@ impl Context {
 			changefeed_source: parent.changefeed_source.clone(),
 			scheduler: parent.scheduler.clone(),
 			morsel_places: parent.morsel_places.clone(),
+			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
 		}
@@ -574,6 +580,7 @@ impl Context {
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			morsel_places: from.morsel_places.clone(),
+			event_queue_node: from.event_queue_node,
 			memory: from.memory.clone(),
 			index_places: Arc::clone(&from.index_places),
 		}
@@ -670,6 +677,7 @@ impl Context {
 			changefeed_source: from.changefeed_source.clone(),
 			scheduler: from.scheduler.clone(),
 			morsel_places: from.morsel_places.clone(),
+			event_queue_node: from.event_queue_node,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -752,6 +760,7 @@ impl Context {
 			changefeed_source: None,
 			scheduler: None,
 			morsel_places: None,
+			event_queue_node: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		};
@@ -829,6 +838,7 @@ impl Context {
 			changefeed_source: None,
 			scheduler: None,
 			morsel_places: None,
+			event_queue_node: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
 		}
@@ -1014,6 +1024,16 @@ impl Context {
 	/// none.
 	pub(crate) fn morsel_places(&self) -> Option<&Arc<dyn crate::exec::places::MorselPlaces>> {
 		self.morsel_places.as_ref()
+	}
+
+	/// The node whose async event queue an event queued by a write in this context joins: the
+	/// node the datastore was told to queue under, else this context's own.
+	pub(crate) fn event_queue_node(&self) -> Uuid {
+		self.event_queue_node.unwrap_or(self.node_id)
+	}
+
+	pub(crate) fn set_event_queue_node(&mut self, node: Option<Uuid>) {
+		self.event_queue_node = node;
 	}
 
 	pub(crate) fn set_morsel_places(

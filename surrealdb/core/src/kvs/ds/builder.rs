@@ -90,6 +90,9 @@ pub struct Builder {
 	joined_event_workers: Option<usize>,
 	/// The entries a batch of async events fetches; see [`Builder::with_event_batch_size`].
 	event_batch_size: Option<u32>,
+	/// The node whose async event queue the datastore's writes queue under; see
+	/// [`Builder::with_event_queue_node`].
+	event_queue_node: Option<Uuid>,
 	/// Whether queries spill nowhere even where the platform has a default
 	/// store; see [`Builder::without_temp_store`].
 	#[cfg(test)]
@@ -181,6 +184,7 @@ impl Builder {
 			morsel_places: None,
 			joined_event_workers: None,
 			event_batch_size: None,
+			event_queue_node: None,
 			temp_store: None,
 			#[cfg(test)]
 			no_temp_store: false,
@@ -507,6 +511,19 @@ impl Builder {
 		self
 	}
 
+	/// Queue the async events this datastore's writes raise under the queue of `node` instead of
+	/// this datastore's own node, and drain that queue where this datastore drains its own
+	/// ([`Datastore::process_async_events`], [`Datastore::async_event_queue_bounds`]).
+	///
+	/// A host whose nodes are not all running when their events are due, because they exist only
+	/// while a request does, gives every node the id of the one node that drains: the others
+	/// only write to its queue. Without it each node queues under its own id and drains its own
+	/// queue, which a node that is no longer running cannot do.
+	pub fn with_event_queue_node(mut self, node: Uuid) -> Self {
+		self.event_queue_node = Some(node);
+		self
+	}
+
 	/// Make queries spill nowhere, even where the platform has a default store to spill to.
 	#[cfg(all(test, feature = "kv-surrealkv"))]
 	pub(crate) fn without_temp_store(mut self) -> Self {
@@ -740,6 +757,7 @@ impl Builder {
 			scheduler: None,
 			joined_event_workers: self.joined_event_workers,
 			event_batch_size: self.event_batch_size.unwrap_or(crate::kvs::NORMAL_BATCH_SIZE),
+			event_queue_node: self.event_queue_node,
 			morsel_places: self
 				.morsel_places
 				.or_else(|| crate::exec::places::loopback(config.exec.morsel_loopback_places)),
