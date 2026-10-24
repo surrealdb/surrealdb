@@ -11,7 +11,6 @@
 //! | --- | --- |
 //! | a leaf statement | falls through |
 //! | `RETURN`, `THROW`, `BREAK`, `CONTINUE` | that signal only |
-//! | an expression statement whose evaluation always reaches a `THROW`, `BREAK` or `CONTINUE` | those signals, not falling through |
 //! | a block | each statement in order, until the first that cannot fall through; the union of those |
 //! | `IF` | the union of its arms; falls through when it has no `ELSE` |
 //! | `FOR` | its body's, with `BREAK` and `CONTINUE` absorbed into falling through |
@@ -24,10 +23,8 @@
 //! statement's own where they may leave it.
 
 use super::{
-	LogicalEval, LogicalExpr, LogicalForeach, LogicalIfOp, LogicalLet, LogicalOp, LogicalReturn,
-	LogicalSequence,
+	LogicalExpr, LogicalForeach, LogicalIfOp, LogicalLet, LogicalOp, LogicalReturn, LogicalSequence,
 };
-use crate::expr::operator::BinaryOperator;
 
 /// How control may leave a statement; each flag means "may".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -141,16 +138,6 @@ impl LogicalOp {
 				value,
 				..
 			}) => value.exits().absorbing(true, false),
-			LogicalOp::Eval(LogicalEval {
-				expr,
-			}) => {
-				let exits = expr_exits(expr);
-				if always_leaves(expr) {
-					exits.without_falling_through()
-				} else {
-					exits
-				}
-			}
 			other @ (LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
@@ -172,6 +159,7 @@ impl LogicalOp {
 			| LogicalOp::VersionScope(_)
 			| LogicalOp::Only(_)
 			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Sleep(_)) => {
 				// A leaf, or a statement whose inputs are pipelines: control
@@ -233,119 +221,6 @@ fn if_exits(ifs: &LogicalIfOp) -> Exits {
 		..exits.union(arms)
 	};
 	exits
-}
-
-/// Whether evaluating `expr` always reaches a `THROW`, `BREAK` or `CONTINUE`
-/// (or a statement that cannot fall through) before it yields a value. Only
-/// the parts every evaluation of `expr` evaluates are followed: the elements
-/// of an array, set or object, the operand of a prefix or postfix operator,
-/// the left operand of a binary operator and the right operand of one that
-/// does not short-circuit, the base of an access chain, a call
-/// target and a call's arguments, and an `IF` every path of which leaves.
-/// Anything else may yield a value, so the answer is `false`.
-fn always_leaves(expr: &LogicalExpr) -> bool {
-	match expr {
-		LogicalExpr::Throw(_) | LogicalExpr::Break | LogicalExpr::Continue => true,
-		LogicalExpr::Array(items) | LogicalExpr::Set(items) => items.iter().any(always_leaves),
-		LogicalExpr::Object(fields) => fields.iter().any(|(_, value)| always_leaves(value)),
-		LogicalExpr::Prefix {
-			expr,
-			..
-		}
-		| LogicalExpr::Postfix {
-			expr,
-			..
-		}
-		| LogicalExpr::Access {
-			base: expr,
-			..
-		}
-		| LogicalExpr::Index {
-			base: expr,
-			..
-		}
-		| LogicalExpr::First(expr)
-		| LogicalExpr::Last(expr)
-		| LogicalExpr::Each(expr)
-		| LogicalExpr::Flatten {
-			base: expr,
-			..
-		}
-		| LogicalExpr::Optional {
-			base: expr,
-			..
-		} => always_leaves(expr),
-		// The left operand is always evaluated; the right one is too unless
-		// the operator short-circuits on the left operand's value.
-		LogicalExpr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			always_leaves(left)
-				|| (!matches!(
-					op,
-					BinaryOperator::And
-						| BinaryOperator::Or
-						| BinaryOperator::NullCoalescing
-						| BinaryOperator::TenaryCondition
-				) && always_leaves(right))
-		}
-		// A call's arguments are evaluated in order before the call, so an
-		// argument that always leaves stops it.
-		LogicalExpr::Method {
-			base,
-			args,
-			..
-		} => always_leaves(base) || args.iter().any(always_leaves),
-		LogicalExpr::Invoke {
-			target,
-			args,
-		} => always_leaves(target) || args.iter().any(always_leaves),
-		LogicalExpr::Call(call) => call.args.iter().any(always_leaves),
-		// Each condition is evaluated in turn: one that always leaves ends the
-		// `IF`; otherwise its arm may run, so it must leave too, and the `ELSE`
-		// is reached when every condition is false.
-		LogicalExpr::If(conditional) => {
-			for (condition, arm) in &conditional.branches {
-				if always_leaves(condition) {
-					return true;
-				}
-				if !always_leaves(arm) {
-					return false;
-				}
-			}
-			conditional.otherwise.as_ref().is_some_and(always_leaves)
-		}
-		LogicalExpr::Subquery(op) => !op.exits().absorbing(true, false).falls_through,
-		LogicalExpr::Literal(_)
-		| LogicalExpr::RecordId(_)
-		| LogicalExpr::Param(_)
-		| LogicalExpr::Table(_)
-		| LogicalExpr::Mock(_)
-		| LogicalExpr::Constant(_)
-		| LogicalExpr::Field(_)
-		| LogicalExpr::Doc
-		| LogicalExpr::Current
-		| LogicalExpr::Filter {
-			..
-		}
-		| LogicalExpr::Destructure {
-			..
-		}
-		| LogicalExpr::Lookup {
-			..
-		}
-		| LogicalExpr::Recurse(_)
-		| LogicalExpr::RepeatRecurse(_)
-		| LogicalExpr::Broadcast {
-			..
-		}
-		| LogicalExpr::SetField {
-			..
-		}
-		| LogicalExpr::Closure(_) => false,
-	}
 }
 
 /// The signals a statement nested in `expr` may leave it with: a `BREAK` or
@@ -445,51 +320,6 @@ mod tests {
 		assert_eq!(reached("{ RETURN 1; LET $auth = 2 }"), 1);
 		assert_eq!(reached("{ THROW 'a'; LET $session = 1 }"), 1);
 		assert_eq!(reached("{ IF $a { RETURN 1 }; 2 }"), 2);
-	}
-
-	#[test]
-	fn an_expression_statement_that_is_a_terminator_does_not_fall_through() {
-		let eval = |expr| {
-			LogicalOp::Eval(LogicalEval {
-				expr,
-			})
-		};
-		let throw = eval(LogicalExpr::Throw(Box::new(LogicalExpr::Literal(
-			super::super::LogicalLiteral::Null,
-		))));
-		assert_eq!(throw.exits(), of(false, false, false, false, true));
-		assert_eq!(eval(LogicalExpr::Break).exits(), of(false, false, true, false, false));
-		assert_eq!(eval(LogicalExpr::Continue).exits(), of(false, false, false, true, false));
-		let nested = eval(LogicalExpr::Array(vec![LogicalExpr::Throw(Box::new(
-			LogicalExpr::Literal(super::super::LogicalLiteral::Null),
-		))]));
-		assert_eq!(nested.exits(), of(false, false, false, false, true));
-		// A call's arguments are evaluated before the call.
-		assert!(!exits("array::len([THROW 'x'])").falls_through);
-		assert!(!exits("$a.concat(THROW 'x')").falls_through);
-		assert!(exits("array::len([1])").falls_through);
-		// The right operand of an eager operator is always evaluated; that of
-		// a short-circuiting one may not be.
-		assert!(!exits("1 + (THROW 'x')").falls_through);
-		assert!(exits("$c OR (THROW 'x')").falls_through);
-		assert!(exits("$c ?? (THROW 'x')").falls_through);
-		// An `IF` leaves when every path through it does.
-		assert!(!exits("IF $c THEN THROW 'x' ELSE THROW 'y' END").falls_through);
-		assert!(exits("IF $c THEN THROW 'x' END").falls_through);
-		assert!(exits("IF $c THEN THROW 'x' ELSE 1 END").falls_through);
-		// The same `IF` in expression position.
-		assert!(!exits("[IF $c THEN THROW 'x' ELSE THROW 'y' END]").falls_through);
-		assert!(exits("[IF $c THEN THROW 'x' ELSE 1 END]").falls_through);
-		assert!(!exits("[IF THROW 'x' THEN 1 ELSE 2 END]").falls_through);
-		let guarded = eval(LogicalExpr::If(Box::new(super::super::LogicalIf {
-			branches: vec![(LogicalExpr::Field("a".into()), LogicalExpr::Break)],
-			otherwise: None,
-		})));
-		assert!(guarded.exits().falls_through);
-		let block = LogicalSequence {
-			stmts: vec![throw, eval(LogicalExpr::Literal(super::super::LogicalLiteral::None))],
-		};
-		assert_eq!(block.reachable_prefix().len(), 1);
 	}
 
 	#[test]
