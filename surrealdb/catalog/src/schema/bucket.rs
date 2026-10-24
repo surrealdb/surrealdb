@@ -43,33 +43,135 @@ pub struct StoredBucketDefinition {
 impl_kv_value_catalog!(StoredBucketDefinition);
 
 impl BucketDefinition {
+	/// Redacts inline credentials embedded in the bucket backend URL so that
+	/// `INFO FOR DB` and `EXPORT` do not expose secret keys, tokens, or passwords.
+	pub fn redacted(mut self) -> Self {
+		if let Some(ref backend) = self.backend
+			&& let Some(redacted) = redact_backend_url(backend.as_str())
+		{
+			self.backend = Some(Strand::new(redacted));
+		}
+		self
+	}
+
 	fn to_runtime_definition(&self) -> DefineBucketStatement {
+		let redacted = self.clone().redacted();
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
-			backend: self
-				.backend
-				.clone()
-				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v))),
-			permissions: self.permissions.clone(),
-			readonly: self.readonly,
-			comment: self
+			name: runtime::Expr::Idiom(runtime::Idiom::field(redacted.name)),
+			backend: redacted.backend.map(|v| runtime::Expr::Literal(runtime::Literal::String(v))),
+			permissions: redacted.permissions,
+			readonly: redacted.readonly,
+			comment: redacted
 				.comment
-				.clone()
 				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v.into())))
 				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 		}
 	}
 }
 
+/// Redacts userinfo passwords (`scheme://user:password@host`) and sensitive
+/// query parameters (`secret_key`, `access_key`, `service_account_key`,
+/// `sas_token`, etc.) in a bucket backend URL, returning `None` if no
+/// credentials are present.
+fn redact_backend_url(url: &str) -> Option<String> {
+	let mut changed = false;
+
+	let (before_query, query_and_fragment) = match url.find('?') {
+		Some(idx) => (&url[..idx], Some(&url[idx + 1..])),
+		None => (url, None),
+	};
+
+	let redacted_base = if let Some((scheme, rest)) = before_query.split_once("://") {
+		let authority_end = rest.find('/').unwrap_or(rest.len());
+		let authority = &rest[..authority_end];
+		let path = &rest[authority_end..];
+		if let Some((userinfo, host)) = authority.rsplit_once('@') {
+			changed = true;
+			if let Some((user, _pass)) = userinfo.split_once(':') {
+				format!("{scheme}://{user}:[REDACTED]@{host}{path}")
+			} else {
+				format!("{scheme}://[REDACTED]@{host}{path}")
+			}
+		} else {
+			before_query.to_string()
+		}
+	} else {
+		before_query.to_string()
+	};
+
+	let Some(qf) = query_and_fragment else {
+		return changed.then_some(redacted_base);
+	};
+
+	let (query, fragment) = match qf.find('#') {
+		Some(idx) => (&qf[..idx], Some(&qf[idx..])),
+		None => (qf, None),
+	};
+
+	let mut redacted_pairs = Vec::new();
+	for pair in query.split('&') {
+		if let Some((k, _v)) = pair.split_once('=')
+			&& is_sensitive_query_param(k)
+		{
+			changed = true;
+			redacted_pairs.push(format!("{k}=[REDACTED]"));
+		} else {
+			redacted_pairs.push(pair.to_string());
+		}
+	}
+
+	if !changed {
+		return None;
+	}
+
+	let mut out = format!("{redacted_base}?{}", redacted_pairs.join("&"));
+	if let Some(frag) = fragment {
+		out.push_str(frag);
+	}
+	Some(out)
+}
+
+fn is_sensitive_query_param(key: &str) -> bool {
+	let k = key.to_ascii_lowercase();
+	let k = k.as_str();
+	k.starts_with("x-amz-")
+		|| k.starts_with("x-goog-")
+		|| k.contains("secret")
+		|| k.contains("token")
+		|| k.contains("sig")
+		|| k.contains("key")
+		|| k.contains("pass")
+		|| k.contains("cred")
+		|| k.contains("auth")
+		|| matches!(
+			k,
+			"access_key"
+				| "access_key_id"
+				| "aws_access_key_id"
+				| "secret_key"
+				| "secret_access_key"
+				| "aws_secret_access_key"
+				| "session_token"
+				| "aws_session_token"
+				| "service_account_key"
+				| "account_key"
+				| "sas" | "sas_token"
+				| "sig" | "signature"
+				| "password" | "token"
+				| "key" | "secret"
+		)
+}
+
 impl InfoStructure for BucketDefinition {
 	fn structure(self) -> Value {
+		let redacted = self.redacted();
 		Value::from(map! {
-			"name" => self.name.into(),
-			"permissions" => self.permissions.structure(),
-			"backend", if let Some(backend) = self.backend => backend.into(),
-			"readonly" => self.readonly.into(),
-			"comment", if let Some(comment) = self.comment => comment.into(),
+			"name" => redacted.name.into(),
+			"permissions" => redacted.permissions.structure(),
+			"backend", if let Some(backend) = redacted.backend => backend.into(),
+			"readonly" => redacted.readonly.into(),
+			"comment", if let Some(comment) = redacted.comment => comment.into(),
 		})
 	}
 }
@@ -121,5 +223,53 @@ impl BucketDefinition {
 			readonly: self.readonly,
 			comment: self.comment.clone(),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::redact_backend_url;
+
+	#[test]
+	fn redacts_s3_gcs_azure_credentials_in_backend_urls() {
+		assert_eq!(redact_backend_url("memory"), None);
+		assert_eq!(redact_backend_url("file:/some_directory"), None);
+		assert_eq!(redact_backend_url("s3://host/bucket?region=us-east-1"), None);
+
+		assert_eq!(
+			redact_backend_url(
+				"s3://AKIA123:supersecret@s3.amazonaws.com/my-bucket?region=us-east-1"
+			),
+			Some("s3://AKIA123:[REDACTED]@s3.amazonaws.com/my-bucket?region=us-east-1".to_string())
+		);
+		assert_eq!(
+			redact_backend_url("s3://s3.amazonaws.com/my-bucket?access_key=AKIA123&secret_key=shh&region=eu-west-1"),
+			Some("s3://s3.amazonaws.com/my-bucket?access_key=[REDACTED]&secret_key=[REDACTED]&region=eu-west-1".to_string())
+		);
+		assert_eq!(
+			redact_backend_url("gs://my-bucket/prefix?service_account_key=/etc/key.json"),
+			Some("gs://my-bucket/prefix?service_account_key=[REDACTED]".to_string())
+		);
+		assert_eq!(
+			redact_backend_url("azure://acct/container?sas_token=sv%3D2022&prefix=data"),
+			Some("azure://acct/container?sas_token=[REDACTED]&prefix=data".to_string())
+		);
+		assert_eq!(
+			redact_backend_url(
+				"s3://s3.amazonaws.com/my-bucket?X-Amz-Credential=AKIA123%2F20260101&X-Amz-Signature=deadbeef&aws_session_token=tok&region=us-east-1"
+			),
+			Some(
+				"s3://s3.amazonaws.com/my-bucket?X-Amz-Credential=[REDACTED]&X-Amz-Signature=[REDACTED]&aws_session_token=[REDACTED]&region=us-east-1".to_string()
+			)
+		);
+		assert_eq!(
+			redact_backend_url(
+				"gs://my-bucket/prefix?X-Goog-Credential=svc%40proj&X-Goog-Signature=sig123"
+			),
+			Some(
+				"gs://my-bucket/prefix?X-Goog-Credential=[REDACTED]&X-Goog-Signature=[REDACTED]"
+					.to_string()
+			)
+		);
 	}
 }

@@ -259,20 +259,33 @@ async fn http_request(
 				Ok(res) => match res.headers().get(CONTENT_TYPE) {
 					Some(mime) => match mime.to_str() {
 						Ok(v) if v.starts_with("application/json") => {
-							let txt = res.text().await.map_err(Error::from)?;
-							let json: serde_json::Value = serde_json::from_str(&txt)
+							let bytes = crate::fnc::util::http::read_response_bytes(
+								res,
+								crate::fnc::util::http::MAX_HTTP_RESPONSE_BYTES,
+							)
+							.await?;
+							let json: serde_json::Value = serde_json::from_slice(&bytes)
 								.map_err(|e| Error::Http(format!("Failed to parse JSON: {}", e)))?;
 							let val = crate::rpc::format::json::json_to_value(json);
 							Ok(convert_public_value_to_internal(val))
 						}
 						Ok(v) if v.starts_with("application/octet-stream") => {
-							let bytes = res.bytes().await.map_err(Error::from)?;
+							let bytes = crate::fnc::util::http::read_response_bytes(
+								res,
+								crate::fnc::util::http::MAX_HTTP_RESPONSE_BYTES,
+							)
+							.await?;
 							Ok(convert_public_value_to_internal(PublicValue::Bytes(
 								PublicBytes::from(bytes),
 							)))
 						}
 						Ok(v) if v.starts_with("text") => {
-							let txt = res.text().await.map_err(Error::from)?;
+							let bytes = crate::fnc::util::http::read_response_bytes(
+								res,
+								crate::fnc::util::http::MAX_HTTP_RESPONSE_BYTES,
+							)
+							.await?;
+							let txt = String::from_utf8_lossy(&bytes).into_owned();
 							Ok(convert_public_value_to_internal(PublicValue::String(txt)))
 						}
 						_ => Ok(Value::None),

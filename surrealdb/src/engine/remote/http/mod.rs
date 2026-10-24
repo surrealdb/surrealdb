@@ -681,15 +681,18 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 
 /// Record a command that succeeded on `session_state` in its replay log.
 ///
-/// A refresh, and an authenticate the router refreshed on the way, leave the
-/// session holding an access token that no logged command produces. Both are
-/// logged as an authenticate with the token the session holds afterwards, so
-/// a replay ends with the credential the session has now.
+/// A refresh, a signup, and an authenticate the router refreshed on the way,
+/// leave the session holding an access token that no logged command produces
+/// without side effects. They are logged as an authenticate with the token the
+/// session holds afterwards, so a replay ends with the credential the session
+/// has now without re-executing `SIGNUP`.
 async fn record_replay(session_state: &SessionState, command: Command) {
-	if matches!(command, Command::Refresh { .. } | Command::Authenticate { .. })
-		&& let Some(Auth::Bearer {
-			token,
-		}) = &*session_state.auth.read().await
+	if matches!(
+		command,
+		Command::Refresh { .. } | Command::Authenticate { .. } | Command::Signup { .. }
+	) && let Some(Auth::Bearer {
+		token,
+	}) = &*session_state.auth.read().await
 	{
 		session_state.replay.push(Command::Authenticate {
 			token: CoreToken::Access(token.as_insecure_token().to_owned()),

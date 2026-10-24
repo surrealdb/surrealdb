@@ -785,6 +785,50 @@ async fn export_refuses_a_permission_checked_principal() -> Result<()> {
 	Ok(())
 }
 
+/// Only a principal holding `Edit` on `Actor` in the database (`Owner` at or
+/// above the database level) receives real `PASSHASH` and `PASSSCRAM` values in
+/// `/export`; `Viewer` and `Editor` principals receive `[REDACTED]`.
+#[tokio::test]
+async fn export_redacts_user_secrets_for_non_owners() -> Result<()> {
+	let ds = ds_with_batch_size(None).await?;
+	let owner =
+		Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), Role::Owner)
+			.with_ns("test")
+			.with_db("test");
+	ds.execute("DEFINE USER alice ON DATABASE PASSWORD 'supersecret' ROLES VIEWER;", &owner, None)
+		.await?;
+
+	let owner_sql = export_text(&ds, &owner).await?;
+	assert!(
+		owner_sql.contains("PASSHASH '$argon2"),
+		"database owner export must preserve PASSHASH: {owner_sql}"
+	);
+	assert!(
+		!owner_sql.contains("PASSHASH '[REDACTED]'"),
+		"database owner export must not redact PASSHASH: {owner_sql}"
+	);
+
+	for role in [Role::Viewer, Role::Editor] {
+		let ses = Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), role)
+			.with_ns("test")
+			.with_db("test");
+		let sql = export_text(&ds, &ses).await?;
+		assert!(
+			!sql.contains("PASSHASH '$argon2"),
+			"{role:?} export must not disclose PASSHASH: {sql}"
+		);
+		assert!(
+			sql.contains("PASSHASH '[REDACTED]'"),
+			"{role:?} export must redact PASSHASH: {sql}"
+		);
+		assert!(
+			sql.contains("PASSSCRAM '[REDACTED]'"),
+			"{role:?} export must redact PASSSCRAM: {sql}"
+		);
+	}
+	Ok(())
+}
+
 /// One record holding a value of every kind a record can store, each under a field
 /// named for it, so a value that is lost or reshaped on the way back is reported
 /// by the field that held it.

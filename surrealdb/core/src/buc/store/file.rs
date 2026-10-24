@@ -558,6 +558,20 @@ impl ObjectStore for FileStore {
 				return Err(format!("Source key does not exist: {}", source_key.display()));
 			}
 
+			// Copying a file onto itself must be a no-op; `tokio::fs::copy` opens
+			// the destination with `O_TRUNC`, which would zero out the source file.
+			if source_key == target_key {
+				return Ok(());
+			}
+			if Self::path_exists(&target_key).await?
+				&& let (Ok(src_canon), Ok(dst_canon)) = (
+					tokio::fs::canonicalize(&source_key).await,
+					tokio::fs::canonicalize(&target_key).await,
+				) && src_canon == dst_canon
+			{
+				return Ok(());
+			}
+
 			Self::ensure_parent_dirs(&target_key).await?;
 
 			tokio::fs::copy(&source_key, &target_key)
@@ -1191,5 +1205,17 @@ mod tests {
 		let mut keys: Vec<String> = listed.iter().map(|m| m.key.to_string()).collect();
 		keys.sort();
 		assert_eq!(keys, vec!["/inner.txt".to_string(), "/real.txt".to_string()]);
+	}
+
+	#[tokio::test]
+	async fn copy_onto_same_key_preserves_contents() {
+		let dir = TempDir::new().unwrap();
+		let (store, _root) = open_store(dir.path(), "").await;
+		let key = ObjectKey::new("/doc.txt".to_string());
+		let payload = Bytes::from_static(b"important payload");
+		store.put(&key, payload.clone()).await.unwrap();
+
+		store.copy(&key, &key).await.unwrap();
+		assert_eq!(store.get(&key).await.unwrap(), Some(payload));
 	}
 }

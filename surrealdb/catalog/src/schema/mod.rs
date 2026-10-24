@@ -49,18 +49,13 @@ use crate::val::Value;
 /// and issuer keys) are offline-crackable or directly replayable, so metadata
 /// surfaces must never return their real values.
 ///
-/// Export does not treat its two kinds of secret alike, and a reader deciding
-/// whether a dump carries real key material has to know which:
+/// Export treats its two kinds of secret as follows:
 ///
 /// - an access is redacted (`kvs::export` calls [`DefineAccessStatement::redact`]), so a dump names
-///   this placeholder as the signing secret and a database restored from it verifies tokens anyone
-///   can forge;
-/// - a user is not, so a dump carries the real `PASSHASH` and `PASSSCRAM` — to any principal
-///   holding `View` on the database, which is less than `INFO FOR DB` requires of the same values.
-///
-/// Neither half is the intended end state: the first trades disclosure for
-/// forgery, and the second discloses to a lower bar than the metadata surface
-/// it mirrors.
+///   this placeholder as the signing secret;
+/// - a user's `PASSHASH` and `PASSSCRAM` are included only when the exporting principal holds
+///   `Edit` permission on `Actor` in the database (`Owner` at or above the database level), and are
+///   redacted to this placeholder for `Viewer` and `Editor` principals.
 pub const REDACTED: &str = "[REDACTED]";
 
 #[revisioned(revision = 1)]

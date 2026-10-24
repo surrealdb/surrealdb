@@ -35,23 +35,71 @@ fn encode_body(req: RequestBuilder, body: PublicValue) -> RequestBuilder {
 	}
 }
 
+/// Maximum HTTP response body size (64 MiB) accepted by SurrealQL `http::*`
+/// functions, enforced incrementally as chunks arrive so an oversized response
+/// is rejected before being buffered in full.
+pub(crate) const MAX_HTTP_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Reads an HTTP response body into memory while enforcing `max_bytes`.
+pub(crate) async fn read_response_bytes(
+	#[allow(unused_mut)] mut res: Response,
+	max_bytes: u64,
+) -> Result<bytes::Bytes> {
+	if let Some(len) = res.content_length()
+		&& len > max_bytes
+	{
+		bail!(Error::Http(format!(
+			"HTTP response body of {len} bytes exceeds the {max_bytes} byte limit"
+		)));
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	{
+		let mut body = bytes::BytesMut::with_capacity(
+			res.content_length().unwrap_or(0).min(max_bytes) as usize,
+		);
+		while let Some(chunk) = res.chunk().await.map_err(Error::from)? {
+			if (body.len() as u64).saturating_add(chunk.len() as u64) > max_bytes {
+				bail!(Error::Http(format!(
+					"HTTP response body exceeds the {max_bytes} byte limit"
+				)));
+			}
+			body.extend_from_slice(&chunk);
+		}
+		Ok(body.freeze())
+	}
+
+	#[cfg(target_family = "wasm")]
+	{
+		let bytes = res.bytes().await.map_err(Error::from)?;
+		if (bytes.len() as u64) > max_bytes {
+			bail!(Error::Http(format!(
+				"HTTP response body of {} bytes exceeds the {max_bytes} byte limit",
+				bytes.len()
+			)));
+		}
+		Ok(bytes)
+	}
+}
+
 async fn decode_response(res: Response) -> Result<PublicValue> {
 	match res.error_for_status() {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await.map_err(Error::from)?;
-					let json: serde_json::Value = serde_json::from_str(&txt)
+					let bytes = read_response_bytes(res, MAX_HTTP_RESPONSE_BYTES).await?;
+					let json: serde_json::Value = serde_json::from_slice(&bytes)
 						.context("Failed to parse JSON response")
 						.map_err(|e| Error::Http(e.to_string()))?;
 					Ok(crate::rpc::format::json::json_to_value(json))
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
-					let bytes = res.bytes().await.map_err(Error::from)?;
+					let bytes = read_response_bytes(res, MAX_HTTP_RESPONSE_BYTES).await?;
 					Ok(PublicValue::Bytes(PublicBytes::from(bytes)))
 				}
 				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await.map_err(Error::from)?;
+					let bytes = read_response_bytes(res, MAX_HTTP_RESPONSE_BYTES).await?;
+					let txt = String::from_utf8_lossy(&bytes).into_owned();
 					let val = PublicValue::String(txt);
 					Ok(val)
 				}

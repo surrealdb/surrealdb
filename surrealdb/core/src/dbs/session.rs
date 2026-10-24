@@ -297,11 +297,19 @@ impl Session {
 	/// Reimplementing it against the public `exp` field is what lets the two
 	/// drift.
 	pub fn expired(&self) -> bool {
-		match self.exp {
-			Some(exp) => Utc::now().timestamp() > exp,
-			// It is currently possible to have sessions without expiration.
-			None => false,
+		let now = Utc::now().timestamp();
+		if let Some(exp) = self.exp
+			&& now > exp
+		{
+			return true;
 		}
+		if let Some(crate::types::PublicValue::Object(tk)) = &self.tk
+			&& let Some(crate::types::PublicValue::Number(surrealdb_types::Number::Int(exp))) =
+				tk.get("exp")
+		{
+			return now > *exp;
+		}
+		false
 	}
 
 	/// The ambient parameters this session contributes to a query's context.

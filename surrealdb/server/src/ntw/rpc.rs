@@ -43,6 +43,7 @@ async fn get_handler(
 	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
 	Extension(mut session): Extension<Session>,
+	cookie_policy: Option<Extension<super::auth::CookiePolicy>>,
 	State(rpc_state): State<Arc<RpcState>>,
 	headers: HeaderMap,
 ) -> Result<impl IntoResponse, impl IntoResponse> {
@@ -52,6 +53,19 @@ async fn get_handler(
 	if !db.allows_http_route(&RouteTarget::Rpc) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()));
+	}
+	// Enforce the configured origin allow-list on WebSocket upgrades from
+	// browsers or requests carrying an explicit Origin header.
+	if let Some(Extension(cookie_policy)) = cookie_policy
+		&& !cookie_policy.origins.is_empty()
+		&& !cookie_policy.origins.iter().any(|o| o.as_bytes() == b"*")
+	{
+		let gate = super::auth::browser_origin_allowed(&headers, &cookie_policy.origins);
+		if gate == super::auth::Gate::Denied
+			|| (gate == super::auth::Gate::NotBrowser && headers.contains_key(http::header::ORIGIN))
+		{
+			return Err(NetError::ForbiddenOrigin);
+		}
 	}
 	// Check that a valid header has been specified
 	if headers.get(SEC_WEBSOCKET_PROTOCOL).is_none() {

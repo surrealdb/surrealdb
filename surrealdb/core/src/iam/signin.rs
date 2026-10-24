@@ -19,7 +19,7 @@ use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::catalog;
 use crate::catalog::providers::{
-	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
+	AuthorisationProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::dbs::Session;
@@ -887,6 +887,31 @@ pub(crate) async fn signin_bearer(
 		tx.cancel().await?;
 		user.roles.clone()
 	} else {
+		if matches!(at.kind, catalog::BearerAccessType::Refresh)
+			&& av.authenticate.is_none()
+			&& let catalog::Subject::Record(ref rid) = gr.subject
+		{
+			let (Some(ns), Some(db)) = (&ns, &db) else {
+				bail!(AuthError::InvalidAuth);
+			};
+			let tx = kvs.transaction(Read).await?;
+			let exists = catch!(
+				tx,
+				tx.record_exists(ns.namespace_id, db.database_id, &rid.table, &rid.key, None)
+					.await
+					.map_err(|e| {
+						debug!(
+							"Error checking record existence for refresh access to database `{}/{}`: {e}",
+							ns.name, db.name
+						);
+						anyhow::Error::new(AuthError::InvalidAuth)
+					})
+			);
+			tx.cancel().await?;
+			if !exists {
+				bail!(AuthError::InvalidAuth);
+			}
+		}
 		vec![]
 	};
 	// Create the authentication key.
@@ -924,6 +949,7 @@ pub(crate) async fn signin_bearer(
 		.then(|| gr.id.clone()),
 		..Claims::default()
 	};
+	let mut subject = gr.subject.clone();
 	// AUTHENTICATE clause
 	if let Some(au) = &av.authenticate {
 		// Setup the system session for executing the clause.
@@ -937,7 +963,18 @@ pub(crate) async fn signin_bearer(
 			crate::val::convert_value_to_public_value(claims.clone().into_claims_object().into())
 				.expect("claims conversion should succeed"),
 		);
-		authenticate_generic(kvs, &sess, au).await?;
+		if matches!(av.access_type, catalog::AccessType::Record(_))
+			&& let catalog::Subject::Record(ref rid) = subject
+		{
+			sess.rd = Some(
+				crate::val::convert_value_to_public_value(Value::from(rid.clone()))
+					.expect("record id conversion should succeed"),
+			);
+			let settled = authenticate_record(kvs, &sess, au).await?;
+			subject = catalog::Subject::Record(settled.into());
+		} else {
+			authenticate_generic(kvs, &sess, au).await?;
+		}
 	}
 	// CONTEXT clause. A bearer grant whose subject is a record settles on an
 	// identity here just as signin/signup/token verification do, so it gets the
@@ -948,7 +985,7 @@ pub(crate) async fn signin_bearer(
 	// A grant whose subject is a system user has no record identity for `$auth`
 	// to name, which is why `CONTEXT` is rejected at definition time for every
 	// access method that cannot authenticate a record.
-	let data = match (&gr.subject, &ns, &db) {
+	let data = match (&subject, &ns, &db) {
 		(catalog::Subject::Record(rid), Some(ns), Some(db)) => {
 			session_data_for_record(
 				kvs,
@@ -967,7 +1004,7 @@ pub(crate) async fn signin_bearer(
 	// If the bearer grant is a refresh token.
 	let refresh = match at.kind {
 		catalog::BearerAccessType::Refresh => {
-			match &gr.subject {
+			match &subject {
 				catalog::Subject::Record(rid) => {
 					if let (Some(ns), Some(db)) = (&ns, &db) {
 						// Revoke the used refresh token.
@@ -1019,7 +1056,7 @@ pub(crate) async fn signin_bearer(
 	// instead of a failed signin extending its expiry and scrambling its
 	// scope.
 	let session_exp = expiration(av.session_duration)?;
-	let (au, rd) = match &gr.subject {
+	let (au, rd) = match &subject {
 		catalog::Subject::User(user) => {
 			let level = match (ns, db) {
 				(Some(ns), Some(db)) => Level::Database(ns.name.to_string(), db.name.to_string()),

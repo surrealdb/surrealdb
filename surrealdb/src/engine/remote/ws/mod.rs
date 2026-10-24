@@ -648,8 +648,19 @@ where
 				} = &command
 				{
 					value = token.clone().into_value();
+					super::record_replayable(&session_state.replay, command);
+				} else if matches!(command, Command::Signup { .. }) {
+					if let Ok(token) = Token::from_value(value.clone()) {
+						super::record_replayable(
+							&session_state.replay,
+							Command::Authenticate {
+								token,
+							},
+						);
+					}
+				} else {
+					super::record_replayable(&session_state.replay, command);
 				}
-				super::record_replayable(&session_state.replay, command);
 			}
 			let result = QueryResultBuilder::started_now().finish_with_result(Ok(value));
 			if let Err(err) = pending.response_channel.send(Ok(vec![result])).await {

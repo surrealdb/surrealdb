@@ -65,11 +65,9 @@ impl Resolve for FilteringResolver {
 			// Check the domain name (if any) matches the allowlist. The name is
 			// read as a host, never through the rule parser, so a name spelled
 			// like a wildcard rule is matched as the one host it is.
-			let name_target = NetTarget::Host(
-				url::Host::parse(&name_str)
-					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?,
-				None,
-			);
+			let parsed_host = url::Host::parse(&name_str)
+				.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
+			let name_target = NetTarget::Host(NetTarget::canonical_host(parsed_host), None);
 			let name_is_allowed =
 				filter.allow.matches(&name_target) && !filter.deny.matches(&name_target);
 			// If the domain name itself is not allowed, return an error
@@ -89,7 +87,8 @@ impl Resolve for FilteringResolver {
 			let mut allowed = Vec::new();
 			let mut first_denied = None;
 			for addr in addrs {
-				let target = IpNet::from(addr.ip());
+				let ip = addr.ip().to_canonical();
+				let target = IpNet::from(ip);
 				let ip_target = NetTarget::IPNet(target);
 				if filter.deny.matches(&ip_target) {
 					// Explicitly denied by configuration.
@@ -165,7 +164,7 @@ pub(crate) async fn resolve_net_target(
 			let port = p.unwrap_or(80);
 			let mut out = Vec::new();
 			for a in tokio::net::lookup_host((h.to_string(), port)).await? {
-				let ip = a.ip();
+				let ip = a.ip().to_canonical();
 				out.push(NetTarget::IPNet(ip.into()));
 				out.push(NetTarget::Host(net_target_host_from_ip(ip), Some(port)));
 			}

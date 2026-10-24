@@ -152,8 +152,8 @@ impl NetRule {
 fn normalise_name(name: &str) -> String {
 	url::Url::parse(&format!("http://{name}"))
 		.ok()
-		.and_then(|u| u.host_str().map(str::to_ascii_lowercase))
-		.unwrap_or_else(|| name.to_ascii_lowercase())
+		.and_then(|u| u.host_str().map(|h| common::net::trim_root_dot(h).to_ascii_lowercase()))
+		.unwrap_or_else(|| common::net::trim_root_dot(name).to_ascii_lowercase())
 }
 
 /// The address a connection to `ip` reaches.
@@ -744,7 +744,7 @@ fn parse_one(entry: &str) -> anyhow::Result<NetRule> {
 			None => NetRule::Net(IpNet::from(IpAddr::from(ip))),
 		},
 		url::Host::Domain(domain) => NetRule::Host {
-			host: domain.to_ascii_lowercase(),
+			host: common::net::trim_root_dot(domain).to_ascii_lowercase(),
 			port,
 		},
 	})

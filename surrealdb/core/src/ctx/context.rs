@@ -1957,7 +1957,8 @@ impl Context {
 		};
 		match url.host() {
 			Some(host) => {
-				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+				let target =
+					NetTarget::Host(NetTarget::canonical_host(host), url.port_or_known_default());
 				// Check the domain name (if any) matches the allow list
 				let host_allowed = self.capabilities.matches_any_allow_net(&target);
 				if !host_allowed {

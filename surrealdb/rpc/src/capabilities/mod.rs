@@ -214,6 +214,62 @@ impl NetTarget {
 			Some(port) => target == Some(port),
 		}
 	}
+
+	/// Canonicalises a [`url::Host`] so equivalent host spellings compare equal:
+	/// domain names are lowercased with trailing root dots stripped, and
+	/// IPv4-mapped IPv6 literals (`::ffff:a.b.c.d`) unwrap to their IPv4 form.
+	pub fn canonical_host<S: AsRef<str>>(host: url::Host<S>) -> url::Host<String> {
+		match host {
+			url::Host::Domain(domain) => {
+				url::Host::Domain(common::net::trim_root_dot(domain.as_ref()).to_ascii_lowercase())
+			}
+			url::Host::Ipv4(v4) => url::Host::Ipv4(v4),
+			url::Host::Ipv6(v6) => match IpAddr::V6(v6).to_canonical() {
+				IpAddr::V4(v4) => url::Host::Ipv4(v4),
+				IpAddr::V6(v6) => url::Host::Ipv6(v6),
+			},
+		}
+	}
+
+	/// Canonicalises an [`IpNet`] by unwrapping IPv4-mapped IPv6 networks
+	/// (`::ffff:a.b.c.d/96..=128`) into their IPv4 network equivalents.
+	fn canonical_ipnet(ipnet: IpNet) -> IpNet {
+		match ipnet {
+			IpNet::V4(_) => ipnet,
+			IpNet::V6(v6) => {
+				if let Some(v4) = v6.addr().to_ipv4_mapped()
+					&& v6.prefix_len() >= 96
+					&& let Ok(v4_net) = ipnet::Ipv4Net::new(v4, v6.prefix_len() - 96)
+				{
+					IpNet::V4(v4_net)
+				} else {
+					IpNet::V6(v6)
+				}
+			}
+		}
+	}
+
+	/// Extracts the canonical [`IpAddr`] when `host` is an IP literal.
+	fn canonical_host_ip(host: &url::Host<String>) -> Option<IpAddr> {
+		match host {
+			url::Host::Ipv4(ip) => Some(IpAddr::V4(*ip)),
+			url::Host::Ipv6(ip) => Some(IpAddr::V6(*ip).to_canonical()),
+			url::Host::Domain(_) => None,
+		}
+	}
+
+	/// Compares two [`url::Host`] values after canonicalising domain case,
+	/// trailing root dots, and IPv4-mapped IPv6 literals.
+	fn hosts_match(a: &url::Host<String>, b: &url::Host<String>) -> bool {
+		match (a, b) {
+			(url::Host::Domain(a), url::Host::Domain(b)) => {
+				common::net::trim_root_dot(a).eq_ignore_ascii_case(common::net::trim_root_dot(b))
+			}
+			(a, b) => Self::canonical_host_ip(a)
+				.zip(Self::canonical_host_ip(b))
+				.is_some_and(|(a, b)| a == b),
+		}
+	}
 }
 
 impl fmt::Display for NetTarget {
@@ -245,7 +301,9 @@ impl Target for NetTarget {
 		match self {
 			// If self contains a host and port, the elem must match both the host and port
 			Self::Host(host, Some(port)) => match tgt {
-				Self::Host(tgt_host, Some(tgt_port)) => host == tgt_host && port == tgt_port,
+				Self::Host(tgt_host, Some(tgt_port)) => {
+					Self::hosts_match(host, tgt_host) && port == tgt_port
+				}
 				Self::Host(..)
 				| Self::IPNet(_)
 				| Self::Wildcard {
@@ -254,25 +312,27 @@ impl Target for NetTarget {
 			},
 			// If self contains a host but no port, the elem must match the host only
 			Self::Host(host, None) => match tgt {
-				Self::Host(tgt_host, _) => host == tgt_host,
-				Self::IPNet(_)
-				| Self::Wildcard {
+				Self::Host(tgt_host, _) => Self::hosts_match(host, tgt_host),
+				Self::IPNet(tgt_ipnet) => Self::canonical_host_ip(host)
+					.is_some_and(|ip| IpNet::from(ip).contains(&Self::canonical_ipnet(*tgt_ipnet))),
+				Self::Wildcard {
 					..
 				} => false,
 			},
 			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
 			// IPAddr
-			Self::IPNet(ipnet) => match tgt {
-				Self::IPNet(tgt_ipnet) => ipnet.contains(tgt_ipnet),
-				Self::Host(host, _) => match host {
-					url::Host::Ipv4(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
-					url::Host::Ipv6(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
-					_ => false,
-				},
-				Self::Wildcard {
-					..
-				} => false,
-			},
+			Self::IPNet(ipnet) => {
+				let ipnet = Self::canonical_ipnet(*ipnet);
+				match tgt {
+					Self::IPNet(tgt_ipnet) => ipnet.contains(&Self::canonical_ipnet(*tgt_ipnet)),
+					Self::Host(host, _) => {
+						Self::canonical_host_ip(host).is_some_and(|ip| ipnet.contains(&ip))
+					}
+					Self::Wildcard {
+						..
+					} => false,
+				}
+			}
 			// A wildcard matches domain names below its suffix, and narrower
 			// wildcards, never an IP address
 			Self::Wildcard {
@@ -357,12 +417,12 @@ impl std::str::FromStr for NetTarget {
 
 		// If it's a valid IPNet, return it
 		if let Ok(ipnet) = s.parse::<IpNet>() {
-			return Ok(NetTarget::IPNet(ipnet));
+			return Ok(NetTarget::IPNet(Self::canonical_ipnet(ipnet)));
 		}
 
 		// If it's a valid IPAddr, return it as an IPNet
 		if let Ok(ipnet) = s.parse::<IpAddr>() {
-			return Ok(NetTarget::IPNet(IpNet::from(ipnet)));
+			return Ok(NetTarget::IPNet(IpNet::from(ipnet.to_canonical())));
 		}
 
 		// Parse the host and port parts from a string in the form of 'host' or
@@ -370,12 +430,13 @@ impl std::str::FromStr for NetTarget {
 		if let Ok(url) = Url::parse(format!("http://{s}").as_str())
 			&& let Some(host) = url.host()
 		{
+			let host = Self::canonical_host(host);
 			// Url::parse will return port=None if the provided port was 80 (given we are
 			// using the http scheme). Get the original port from the string.
 			if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
-				return Ok(NetTarget::Host(host.to_owned(), Some(port)));
+				return Ok(NetTarget::Host(host, Some(port)));
 			} else {
-				return Ok(NetTarget::Host(host.to_owned(), None));
+				return Ok(NetTarget::Host(host, None));
 			}
 		}
 
@@ -1436,6 +1497,37 @@ mod tests {
 		assert!(NetTarget::from_str("11111.3.4.5").is_err());
 		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
+	}
+
+	#[test]
+	fn test_net_target_ipv4_mapped_ipv6_and_trailing_dot_canonicalisation() {
+		// IPv4-mapped IPv6 targets match IPv4 rules and vice versa
+		assert!(net("127.0.0.1").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("127.0.0.0/8").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("169.254.0.0/16").matches(&net("[::ffff:169.254.169.254]:80")));
+		assert!(net("127.0.0.1:80").matches(&net("[::ffff:127.0.0.1]:80")));
+		assert!(net("[::ffff:127.0.0.1]:80").matches(&net("127.0.0.1:80")));
+
+		// Even when a request target is constructed with a raw IPv4-mapped IPv6 Host
+		let raw_mapped =
+			NetTarget::Host(url::Host::Ipv6("::ffff:169.254.169.254".parse().unwrap()), Some(80));
+		assert!(net("169.254.169.254").matches(&raw_mapped));
+		assert!(net("169.254.0.0/16").matches(&raw_mapped));
+		assert!(net("169.254.169.254:80").matches(&raw_mapped));
+
+		// Trailing root dots on exact host rules and request targets match
+		assert!(net("example.com").matches(&net("example.com.")));
+		assert!(net("example.com.").matches(&net("example.com")));
+		assert!(net("example.com:443").matches(&net("example.com.:443")));
+		let raw_trailing = NetTarget::Host(url::Host::Domain("example.com.".to_string()), Some(80));
+		assert!(net("example.com").matches(&raw_trailing));
+		assert!(net("example.com:80").matches(&raw_trailing));
+		assert!(
+			net("*.example.com").matches(&NetTarget::Host(
+				url::Host::Domain("api.example.com..".to_string()),
+				None,
+			))
+		);
 	}
 
 	fn net(s: &str) -> NetTarget {

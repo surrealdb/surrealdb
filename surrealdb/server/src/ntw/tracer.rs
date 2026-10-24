@@ -43,7 +43,6 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			http.request.method = req.method().as_str(),
 			http.request.body.size = field::Empty,
 			url.path = req.uri().path(),
-			url.query = field::Empty,
 			url.scheme = field::Empty,
 			http.request.id = field::Empty,
 			user_agent.original = field::Empty,
@@ -62,8 +61,7 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			error = field::Empty,
 			error_message = field::Empty,
 		);
-		// Record the basic request query information
-		req.uri().query().map(|v| span.record("url.query", v));
+		// Record the basic request URI information
 		req.uri().scheme().map(|v| span.record("url.scheme", v.as_str()));
 		req.uri().host().map(|v| span.record("server.address", v));
 		req.uri().port_u16().map(|v| span.record("server.port", v));

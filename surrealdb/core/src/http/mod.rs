@@ -81,7 +81,7 @@ impl HttpClient {
 				}
 			};
 			let port = url.port_or_known_default();
-			let target = NetTarget::Host(host.to_owned(), port);
+			let target = NetTarget::Host(NetTarget::canonical_host(host), port);
 
 			if !filter_clone.allow.matches(&target) || filter_clone.deny.matches(&target) {
 				return attempt.error(crate::dbs::capabilities::Error::NetTargetNotAllowed(

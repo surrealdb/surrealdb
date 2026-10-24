@@ -184,7 +184,8 @@ pub struct StartCommandArguments {
 		short = 'u',
 		long = "username",
 		visible_alias = "user",
-		requires = "password"
+		requires = "password",
+		value_parser = clap::builder::NonEmptyStringValueParser::new()
 	)]
 	username: Option<String>,
 	#[arg(
@@ -198,7 +199,8 @@ pub struct StartCommandArguments {
 		short = 'p',
 		long = "password",
 		visible_alias = "pass",
-		requires = "username"
+		requires = "username",
+		value_parser = clap::builder::NonEmptyStringValueParser::new()
 	)]
 	password: Option<String>,
 	//

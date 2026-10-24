@@ -47,6 +47,7 @@ struct StreamingBucketOps<'a> {
 	frozen_ctx: &'a crate::ctx::FrozenContext,
 	exec_ctx: &'a ExecutionContext,
 	opt: &'a crate::dbs::Options,
+	skip_fetch_perms: bool,
 }
 
 impl<'a> StreamingBucketOps<'a> {
@@ -86,11 +87,15 @@ impl<'a> StreamingBucketOps<'a> {
 			frozen_ctx,
 			exec_ctx: ctx.exec_ctx,
 			opt,
+			skip_fetch_perms: ctx.skip_fetch_perms,
 		})
 	}
 
-	/// Checks if the bucket allows writes.
+	/// Checks if the bucket and execution context allow writes.
 	fn require_writeable(&self) -> Result<()> {
+		if let Some(frame) = self.exec_ctx.root().no_write.or(self.opt.no_write) {
+			bail!(frame.side_effect_error("file write"));
+		}
 		ensure!(!self.bucket.readonly, BucError::ReadonlyBucket(self.bucket.name.to_string()));
 		Ok(())
 	}
@@ -102,8 +107,11 @@ impl<'a> StreamingBucketOps<'a> {
 		key: Option<&ObjectKey>,
 		target: Option<&ObjectKey>,
 	) -> Result<()> {
-		// Permissions are checked only when the options require it.
-		if self.frozen_ctx.check_perms(self.opt, op.into())? {
+		// Permissions are checked only when the execution context and options require it.
+		if !self.skip_fetch_perms
+			&& self.exec_ctx.should_check_perms(op.into())?
+			&& self.frozen_ctx.check_perms(self.opt, op.into())?
+		{
 			// Guest and Record users are not allowed to list files in buckets
 			ensure!(
 				!op.is_list(),
@@ -169,6 +177,7 @@ impl<'a> StreamingBucketOps<'a> {
 					// judged with enforcement off, so a write issued from it is refused, as it
 					// is for a table's `select` guard.
 					let exec_ctx = exec_ctx
+						.dive()?
 						.with_skip_fetch_perms(true)
 						.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
 					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx);

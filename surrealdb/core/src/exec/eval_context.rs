@@ -411,7 +411,7 @@ impl<'a> EvalContext<'a> {
 		// Check if the URL host is allowed
 		let host = url.host().ok_or_else(|| Error::InvalidUrl(url.to_string()))?;
 
-		let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
+		let target = NetTarget::Host(NetTarget::canonical_host(host), url.port_or_known_default());
 
 		// Check the domain name (if any) matches the allow list
 		if !capabilities.matches_any_allow_net(&target) {

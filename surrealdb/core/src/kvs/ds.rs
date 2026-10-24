@@ -3266,6 +3266,10 @@ impl Datastore {
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
 	)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
+		ensure!(
+			!user.trim().is_empty() && !pass.trim().is_empty(),
+			"Initial root username and password must not be empty"
+		);
 		// Retry because concurrent instances may conflict when creating the root user
 		Self::retry("Initialise credentials", || self.initialise_credentials_attempt(user, pass))
 			.await
@@ -11158,7 +11162,18 @@ impl Datastore {
 		let batch_size = self.config.datastore.export_batch_size;
 		// The frame the rows are read in: the export's own transaction, with
 		// the authority of root, because a dump is the rows as stored and
-		// permissions are judged by the check above.
+		// permissions are judged by the check above. User password hashes and
+		// SCRAM verifiers are included only when the caller holds `Edit` on
+		// `Actor` in the database (`Owner` at or above the database level, or
+		// an anonymous session when authentication is disabled).
+		let include_user_secrets = (!self.auth_enabled && sess.au.is_anon())
+			|| sess
+				.au
+				.is_allowed(
+					Action::Edit,
+					&crate::iam::ResourceKind::Actor.on_db(ns.as_str(), db.as_str()),
+				)
+				.is_ok();
 		let mut ctx = self.setup_ctx()?;
 		ctx.set_transaction(Arc::clone(&txn));
 		let frame = super::export::RowFrame {
@@ -11167,6 +11182,7 @@ impl Datastore {
 				.with_ns(Some(ns.as_str().into()))
 				.with_db(Some(db.as_str().into()))
 				.with_auth(Arc::new(crate::iam::Auth::for_root(crate::iam::Role::Owner))),
+			include_user_secrets,
 		};
 		// Return an async export job
 		Ok(async move {
@@ -20096,6 +20112,20 @@ pub(crate) mod test {
 			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
 			txn.cancel().await.unwrap();
 		}
+	}
+
+	#[tokio::test]
+	async fn initial_credentials_that_are_empty_or_whitespace_are_refused() {
+		let ds = Datastore::new("memory").await.unwrap();
+		for (user, pass) in [("", "root"), ("root", ""), ("   ", "root"), ("root", " \t\n")] {
+			assert!(
+				ds.initialise_credentials(user, pass).await.is_err(),
+				"credentials {user:?} / {pass:?} should be refused"
+			);
+		}
+		let txn = ds.transaction(Read).await.unwrap();
+		assert!(txn.all_root_users(None).await.unwrap().is_empty());
+		txn.cancel().await.unwrap();
 	}
 
 	#[tokio::test]

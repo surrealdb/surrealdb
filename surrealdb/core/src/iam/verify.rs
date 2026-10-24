@@ -7,7 +7,6 @@ use chrono::Utc;
 use jsonwebtoken::{DecodingKey, TokenData, Validation, decode};
 use surrealdb_types::ToSql;
 
-use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
 };
@@ -202,7 +201,12 @@ pub async fn basic(
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!(
+					"Failed to verify basic credentials for user `{user}` in database `{ns}/{db}`: {err}"
+				);
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		// NS signin
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
@@ -222,7 +226,12 @@ pub async fn basic(
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!(
+					"Failed to verify basic credentials for user `{user}` in namespace `{ns}`: {err}"
+				);
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		// Root signin
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
@@ -239,7 +248,10 @@ pub async fn basic(
 				session.au = Arc::new(au);
 				Ok(())
 			}
-			Err(err) => Err(err),
+			Err(err) => {
+				debug!("Failed to verify basic credentials for root user `{user}`: {err}");
+				Err(AuthError::InvalidAuth.into())
+			}
 		},
 		(None, Some(db)) => {
 			debug!(
@@ -291,10 +303,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(CatalogError::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
+					debug!("Database `{db}` not found during record access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Get the database access method
@@ -303,12 +313,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await
 			) else {
 				let _ = tx.cancel().await;
-				return Err(CatalogError::AccessDbNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-					db: db.clone(),
-				}
-				.into());
+				debug!("Database access method `{ac}` not found in `{ns}/{db}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
@@ -453,10 +459,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(CatalogError::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
+					debug!("Database `{db}` not found during database access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -469,12 +473,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(CatalogError::AccessDbNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-					db: db.clone(),
-				}
-				.into());
+				debug!("Database access method `{ac}` not found in `{ns}/{db}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
 			// Obtain the configuration to verify the token based on the access method
@@ -581,10 +581,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(CatalogError::DbNotFound {
-						name: db.clone(),
-					}
-					.into());
+					debug!("Database `{db}` not found during database user authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -650,10 +648,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(CatalogError::NsNotFound {
-						name: ns.clone(),
-					}
-					.into());
+					debug!("Namespace `{ns}` not found during namespace access authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 
@@ -663,11 +659,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(CatalogError::AccessNsNotFound {
-					ac: ac.clone(),
-					ns: ns.clone(),
-				}
-				.into());
+				debug!("Namespace access method `{ac}` not found in `{ns}`");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
 			// Verify the token and authenticate the session
@@ -709,10 +702,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(CatalogError::NsNotFound {
-						name: ns.clone(),
-					}
-					.into());
+					debug!("Namespace `{ns}` not found during namespace user authentication");
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Get the namespace user
@@ -773,10 +764,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(CatalogError::AccessRootNotFound {
-					ac: ac.clone(),
-				}
-				.into());
+				debug!("Root access method `{ac}` not found");
+				return Err(AuthError::InvalidAuth.into());
 			};
 
 			// Verify the token and authenticate the session
@@ -889,10 +878,8 @@ pub async fn verify_ns_creds(
 		Some(ns) => ns,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(CatalogError::NsNotFound {
-				name: ns.to_string(),
-			}
-			.into());
+			debug!("Namespace `{ns}` not found during credential verification");
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 
@@ -935,10 +922,8 @@ pub async fn verify_db_creds(
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(CatalogError::DbNotFound {
-				name: db.to_string(),
-			}
-			.into());
+			debug!("Database `{ns}/{db}` not found during credential verification");
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 

@@ -54,12 +54,8 @@ pub(crate) enum Error {
 	#[error("Bucket is unavailable")]
 	GlobalBucketEnforced,
 
-	/// The `BACKEND` url could not be parsed, or names an unusable location
-	///
-	/// Every construction site sits in a backend module that is compiled out on
-	/// wasm, so the variant is unreachable there.
+	/// The `BACKEND` url or bucket name could not be parsed, or names an unusable location
 	#[error("Bucket url could not be processed: {0}")]
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	InvalidBucketUrl(String),
 
 	/// The `BACKEND` url names a scheme no backend claims

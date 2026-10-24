@@ -18,7 +18,7 @@ pub struct Signin;
 pub trait Credentials<Action>: SurrealValue {}
 
 /// Credentials for the root user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Root {
 	/// The username of the root user
@@ -29,10 +29,19 @@ pub struct Root {
 	pub password: String,
 }
 
+impl fmt::Debug for Root {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Root")
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Root {}
 
 /// Credentials for the namespace user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Namespace {
 	/// The namespace the user has access to
@@ -46,10 +55,20 @@ pub struct Namespace {
 	pub password: String,
 }
 
+impl fmt::Debug for Namespace {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Namespace")
+			.field("namespace", &self.namespace)
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Namespace {}
 
 /// Credentials for the database user
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Clone, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct Database {
 	/// The namespace the user has access to
@@ -66,10 +85,20 @@ pub struct Database {
 	pub password: String,
 }
 
+impl fmt::Debug for Database {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Database")
+			.field("namespace", &self.namespace)
+			.field("database", &self.database)
+			.field("username", &self.username)
+			.field("password", &"[REDACTED]")
+			.finish()
+	}
+}
+
 impl Credentials<Signin> for Database {}
 
 /// Credentials for the record user
-#[derive(Debug)]
 pub struct Record<P: SurrealValue> {
 	/// The namespace the user has access to
 	pub namespace: String,
@@ -79,6 +108,17 @@ pub struct Record<P: SurrealValue> {
 	pub access: String,
 	/// The additional params to use
 	pub params: P,
+}
+
+impl<P: SurrealValue> fmt::Debug for Record<P> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("Record")
+			.field("namespace", &self.namespace)
+			.field("database", &self.database)
+			.field("access", &self.access)
+			.field("params", &"[REDACTED]")
+			.finish()
+	}
 }
 
 impl<P: SurrealValue> SurrealValue for Record<P> {

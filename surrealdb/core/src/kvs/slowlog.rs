@@ -11,7 +11,8 @@
 //!   references. For each parameter, we lookup its value in the current `Context`.
 //! - Optional filters can be applied to control which parameters are logged:
 //!   - `param_deny` takes precedence and excludes any matching parameter names.
-//!   - If `param_allow` is non-empty, only those parameter names are included.
+//!   - Only parameter names explicitly listed in `param_allow` are included; when `param_allow` is
+//!     empty, no parameters are logged.
 //! - For readability, both the SQL statement and parameter values are rendered to SQL and
 //!   whitespace is collapsed so the entire log fits on one line.
 //!
@@ -37,8 +38,8 @@ use crate::expr::visit::{Visit, Visitor};
 /// - an optional deny-list of parameter names to exclude from logs.
 ///
 /// Deny rules take precedence over allow rules. When the allow-list is empty,
-/// all parameters are allowed by default (subject to the deny-list). When not
-/// empty, only parameters present in the allow-list will be logged.
+/// no parameters are logged by default. Only parameters present in the
+/// allow-list (and not present in the deny-list) will be logged.
 pub(crate) struct SlowLog(Arc<Inner>);
 
 struct Inner {
@@ -117,11 +118,11 @@ impl SlowLog {
 		if !self.0.param_deny.is_empty() && self.0.param_deny.iter().any(|s| s == name) {
 			return false;
 		}
-		// If allow list is empty, everything is allowed by default
+		// If allow list is empty, no parameters are logged by default
 		if self.0.param_allow.is_empty() {
-			return true;
+			return false;
 		}
-		// Otherwise only names in the allow list are allowed
+		// Only names in the allow list are allowed
 		self.0.param_allow.iter().any(|s| s == name)
 	}
 
@@ -219,10 +220,10 @@ mod tests {
 	}
 
 	#[test]
-	fn defaults_allow_all() {
+	fn defaults_deny_all() {
 		let s = slowlog(&[], &[]);
-		assert!(s.is_param_allowed("a"));
-		assert!(s.is_param_allowed("any"));
+		assert!(!s.is_param_allowed("a"));
+		assert!(!s.is_param_allowed("any"));
 	}
 
 	#[test]
@@ -234,11 +235,11 @@ mod tests {
 	}
 
 	#[test]
-	fn deny_list_only_excludes() {
+	fn deny_list_without_allow_denies_all() {
 		let s = slowlog(&[], &["secret", "token"]);
 		assert!(!s.is_param_allowed("secret"));
 		assert!(!s.is_param_allowed("token"));
-		assert!(s.is_param_allowed("other"));
+		assert!(!s.is_param_allowed("other"));
 	}
 
 	#[test]
@@ -249,9 +250,9 @@ mod tests {
 	}
 
 	#[test]
-	fn allow_list_empty_means_all_except_denied() {
+	fn allow_list_empty_denies_all() {
 		let s = slowlog(&[], &["nope"]);
-		assert!(s.is_param_allowed("ok"));
+		assert!(!s.is_param_allowed("ok"));
 		assert!(!s.is_param_allowed("nope"));
 	}
 }

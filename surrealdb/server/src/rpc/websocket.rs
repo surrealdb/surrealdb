@@ -451,12 +451,22 @@ impl Websocket {
 					let out_bytes = Self::payload_len(&res);
 					// And whether this is the last frame the wire may carry.
 					let terminal = Self::ends_the_connection(&res);
-					// Check if the socket is buffered
+					// Check if the socket is buffered; bound the write so a
+					// stalled peer cannot hold the write task indefinitely.
+					let send_timeout = std::time::Duration::from_secs(30);
 					let result = match buffer {
 						// Send the message to the socket buffer
-						true => socket.feed(res).await,
+						true => tokio::time::timeout(send_timeout, socket.feed(res)).await,
 						// Send the message direct to the socket
-						false => socket.send(res).await
+						false => tokio::time::timeout(send_timeout, socket.send(res)).await,
+					};
+					let result = match result {
+						Ok(res) => res,
+						Err(_) => {
+							trace!("WebSocket write timed out");
+							rpc.cancel_all();
+							break;
+						}
 					};
 					// Check if there was an error
 					if let Err(err) = result {
@@ -482,17 +492,26 @@ impl Websocket {
 				},
 				// Wait for a short period of time
 				_ = tokio::time::sleep(period), if buffer => {
-					// Flush the WebSocket socket buffer
-					if let Err(err) = socket.flush().await {
-						// Output any errors if not a close error
-						if err.to_string() != CONN_CLOSED_ERR {
-							trace!("WebSocket error: {err}");
+					// Flush the WebSocket socket buffer within a bounded timeout
+					let flush_timeout = std::time::Duration::from_secs(30);
+					match tokio::time::timeout(flush_timeout, socket.flush()).await {
+						Ok(Ok(())) => {}
+						Ok(Err(err)) => {
+							// Output any errors if not a close error
+							if err.to_string() != CONN_CLOSED_ERR {
+								trace!("WebSocket error: {err}");
+							}
+							// Cancel the WebSocket tasks AND the executor cancel
+							// flag so in-flight queries return early.
+							rpc.cancel_all();
+							// Exit out of the loop
+							break;
 						}
-						// Cancel the WebSocket tasks AND the executor cancel
-						// flag so in-flight queries return early.
-						rpc.cancel_all();
-						// Exit out of the loop
-						break;
+						Err(_) => {
+							trace!("WebSocket flush timed out");
+							rpc.cancel_all();
+							break;
+						}
 					}
 				}
 			}
@@ -729,9 +748,9 @@ impl Websocket {
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Wait for the next received message
-				Some(msg) = socket.next() => match msg {
+				msg = socket.next() => match msg {
 					// We've received a message from the client
-					Ok(msg) => match msg {
+					Some(Ok(msg)) => match msg {
 						Message::Text(_) | Message::Binary(_) => {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
@@ -767,13 +786,18 @@ impl Websocket {
 							// Pong messages are handled automatically
 						}
 					},
-					Err(err) => {
+					Some(Err(err)) => {
 						// There was an error with the WebSocket
 						trace!("WebSocket error: {err}");
 						// Cancel the WebSocket tasks AND the executor cancel
 						// flag so in-flight queries return early.
 						rpc.cancel_all();
 						// Exit out of the loop
+						break;
+					}
+					None => {
+						// The stream reached EOF without a Close frame
+						rpc.cancel_all();
 						break;
 					}
 				}

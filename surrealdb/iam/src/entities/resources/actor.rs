@@ -116,15 +116,13 @@ impl Actor {
 		};
 
 		let mut roles = self.roles.clone();
-		if let Some(role) = limit.role.as_ref() {
+		if !roles.is_empty()
+			&& let Some(role) = limit.role.as_ref()
+		{
 			roles.retain(|r| r <= role);
 			if roles.is_empty() {
 				roles.push(*role);
 			}
-		}
-
-		if roles.is_empty() {
-			roles.push(Role::Viewer);
 		}
 
 		Self::new(self.res.id().to_string(), roles, level)
@@ -149,5 +147,43 @@ impl Deref for Actor {
 	type Target = Resource;
 	fn deref(&self) -> &Self::Target {
 		&self.res
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{Actor, Level};
+	use crate::{AuthLimit, Role};
+
+	#[test]
+	fn empty_role_actor_is_not_elevated_by_auth_limit() {
+		let actor = Actor::new(
+			"token_user".to_string(),
+			Vec::new(),
+			Level::Database("ns".to_string(), "db".to_string()),
+		);
+
+		let owner_limit =
+			AuthLimit::new(Level::Database("ns".to_string(), "db".to_string()), Some(Role::Owner));
+		let limited = actor.new_limited(&owner_limit);
+		assert!(limited.roles().is_empty());
+		assert!(!limited.has_viewer_role());
+		assert!(!limited.has_editor_role());
+		assert!(!limited.has_owner_role());
+
+		let uncapped_limit =
+			AuthLimit::new(Level::Database("ns".to_string(), "db".to_string()), None);
+		let limited_uncapped = actor.new_limited(&uncapped_limit);
+		assert!(limited_uncapped.roles().is_empty());
+	}
+
+	#[test]
+	fn roled_actor_is_capped_by_auth_limit() {
+		let actor = Actor::new("root".to_string(), vec![Role::Owner], Level::Root);
+		let editor_limit =
+			AuthLimit::new(Level::Database("ns".to_string(), "db".to_string()), Some(Role::Editor));
+		let limited = actor.new_limited(&editor_limit);
+		assert_eq!(limited.roles(), &[Role::Editor]);
+		assert_eq!(limited.level(), &Level::Database("ns".to_string(), "db".to_string()));
 	}
 }

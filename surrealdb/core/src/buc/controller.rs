@@ -65,9 +65,11 @@ impl<'a> BucketController<'a> {
 		})
 	}
 
-	/// Checks if the bucket allows writes, and if not, return an
-	/// `Error::ReadonlyBucket`
+	/// Checks if the bucket and execution options allow writes.
 	fn require_writeable(&self) -> Result<()> {
+		if let Some(frame) = self.opt.no_write {
+			bail!(frame.side_effect_error("file write"));
+		}
 		ensure!(!self.bucket.readonly, Error::ReadonlyBucket(self.bucket.name.to_string()));
 		Ok(())
 	}

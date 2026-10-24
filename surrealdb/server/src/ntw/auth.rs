@@ -121,9 +121,10 @@ where
 					Ok(response)
 				}
 				Err(err) => {
+					debug!("Request authentication failed: {err}");
 					let unauthorized = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
-						.body(Body::new(err.to_string()))
+						.body(Body::from("There was a problem with authentication"))
 						.unwrap_or_else(|_| {
 							let mut resp = Response::new(Body::empty());
 							*resp.status_mut() = StatusCode::UNAUTHORIZED;

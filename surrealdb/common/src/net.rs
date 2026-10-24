@@ -212,10 +212,10 @@ pub fn check_wildcard_suffix(suffix: &str) -> Result<&str, WildcardHostError> {
 	Ok(suffix)
 }
 
-/// A DNS name without the trailing dot of its fully-qualified spelling, so
-/// `example.com.` and `example.com` compare equal.
+/// A DNS name without any trailing root dots of its fully-qualified spelling,
+/// so `example.com.` and `example.com` compare equal.
 pub fn trim_root_dot(name: &str) -> &str {
-	name.strip_suffix('.').unwrap_or(name)
+	name.trim_end_matches('.')
 }
 
 /// Whether `host` lies strictly below `suffix`: it ends in `.<suffix>` and has

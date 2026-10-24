@@ -37,6 +37,23 @@ fn backend_label(url: &str) -> &'static str {
 	}
 }
 
+/// Validates that a bucket name is a single non-empty segment that cannot
+/// traverse out of the `/{ns}/{db}/{bu}` prefix used for global buckets, and
+/// contains no control characters, path separators, or leading hyphens.
+fn validate_bucket_name(bu: &str) -> Result<()> {
+	if bu.is_empty()
+		|| bu == "."
+		|| bu == ".."
+		|| bu.starts_with('-')
+		|| bu.contains('/')
+		|| bu.contains('\\')
+		|| bu.chars().any(|c| c.is_control())
+	{
+		bail!(Error::InvalidBucketUrl(format!("Invalid bucket name `{bu}`")));
+	}
+	Ok(())
+}
+
 /// Manages bucket storage connections with caching.
 ///
 /// The `BucketsManager` is responsible for:
@@ -112,6 +129,7 @@ impl BucketsManager {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
+		validate_bucket_name(bu)?;
 		// Obtain the URL for the global bucket
 		let Some(ref url) = self.0.config.global_bucket else {
 			bail!(Error::NoGlobalBucket);
@@ -149,6 +167,7 @@ impl BucketsManager {
 			let _ = (tx, ns, db, bu);
 			bail!(crate::buc::Error::FeatureDisabled)
 		}
+		validate_bucket_name(bu)?;
 		let key = BucketConnectionKey::new(ns, db, bu);
 		// Attempt to obtain an existing bucket connection, dropping the guard
 		// before the connect below.
@@ -201,6 +220,7 @@ impl BucketsManager {
 			let _ = (ns, db, bu, read_only, backend);
 			bail!(crate::buc::Error::FeatureDisabled)
 		}
+		validate_bucket_name(bu)?;
 		// Validate the store
 		let store = if let Some(backend) = backend {
 			self.connect(backend, false, read_only).await?
@@ -352,6 +372,59 @@ mod tests {
 		let cached = buckets.get_bucket_store(&tx, ns, db, "b").await?;
 		assert!(Arc::ptr_eq(&cached, &second), "later callers are served from the cache");
 		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[test]
+	fn rejects_bucket_names_with_path_separators_or_traversal() {
+		assert!(super::validate_bucket_name("valid_bucket-1").is_ok());
+		for invalid in [
+			"",
+			".",
+			"..",
+			"../other",
+			"a/b",
+			"a\\b",
+			"bad\0name",
+			"bad\nname",
+			"bad\rname",
+			"bad\x7fname",
+			"-leading-hyphen",
+		] {
+			assert!(
+				super::validate_bucket_name(invalid).is_err(),
+				"bucket name {invalid:?} must be rejected"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn bucket_permission_clause_reading_same_bucket_does_not_recurse() -> Result<()> {
+		let caps = Capabilities::all().with_experimental(Targets::All);
+		let ds = Datastore::builder()
+			.with_capabilities(caps)
+			.with_auth(true)
+			.build_with_path("memory")
+			.await?;
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let setup = "
+			DEFINE BUCKET b BACKEND 'memory' PERMISSIONS WHERE f'b:/allow' != NONE AND f'b:/allow'.exists();
+			f'b:/allow'.put('ok');
+			f'b:/hello'.put('world');
+		";
+		for res in ds.execute(setup, &owner, None).await? {
+			res.result?;
+		}
+		let record_user = Session::for_record(
+			"test",
+			"test",
+			"ac",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "u1")),
+		);
+		let mut results =
+			ds.execute("RETURN <string> f'b:/hello'.get();", &record_user, None).await?;
+		let val = results.remove(0).result?;
+		assert_eq!(val, surrealdb_types::Value::String("world".to_owned()));
 		Ok(())
 	}
 }

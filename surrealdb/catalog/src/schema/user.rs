@@ -56,10 +56,11 @@ impl UserDefinition {
 	/// it is structured rather than a string, so its presence is signalled as
 	/// [`REDACTED`](super::REDACTED) by the serialisers below.
 	///
-	/// Export (`surreal export`) goes through
-	/// [`crate::expr::statements::DefineUserStatement::from_definition`] and is
-	/// intentionally NOT routed through this redaction, so privileged
-	/// hash-preserving exports still round-trip the real secrets.
+	/// Export (`surreal export`) builds [`crate::expr::statements::DefineUserStatement`]
+	/// from the stored definition and preserves `PASSHASH` and `PASSSCRAM` only when
+	/// the exporting principal holds `Edit` permission on `Actor` in the database
+	/// (`Owner` at or above the database level), formatting with
+	/// [`crate::expr::statements::DefineUserStatement::fmt_redacted_sql`] otherwise.
 	fn redacted(mut self) -> Self {
 		if !self.hash.is_empty() {
 			self.hash = super::REDACTED.to_string();

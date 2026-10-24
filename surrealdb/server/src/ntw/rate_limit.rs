@@ -249,6 +249,14 @@ fn auth_endpoint(path: &str) -> Option<&'static str> {
 	}
 }
 
+fn has_basic_auth(request: &Request) -> bool {
+	request
+		.headers()
+		.get(http::header::AUTHORIZATION)
+		.and_then(|v| v.as_bytes().get(..6))
+		.is_some_and(|p| p.eq_ignore_ascii_case(b"basic "))
+}
+
 /// Applies the limiter to `request` when it is an authentication attempt with
 /// a derivable client address and the limiter is enabled. Every other request
 /// is admitted untouched.
@@ -256,10 +264,13 @@ fn admit(request: &Request) -> Result<(), NetError> {
 	let Some(limiter) = LIMITER.as_ref() else {
 		return Ok(());
 	};
-	if request.method() != Method::POST {
-		return Ok(());
-	}
-	let Some(endpoint) = auth_endpoint(request.uri().path()) else {
+	let endpoint = if request.method() == Method::POST
+		&& let Some(ep) = auth_endpoint(request.uri().path())
+	{
+		ep
+	} else if has_basic_auth(request) {
+		"signin"
+	} else {
 		return Ok(());
 	};
 	let Some(key) = request_key(request) else {
@@ -450,5 +461,20 @@ mod tests {
 		// The most recently tracked address is still resident, so its spent
 		// bucket keeps denying instead of being recreated with a fresh burst.
 		assert!(matches!(l.check_at(ip("10.0.0.63"), now), Decision::Limited { .. }));
+	}
+
+	#[test]
+	fn has_basic_auth_handles_multibyte_utf8_at_prefix_boundary() {
+		let make_req = |auth: &str| {
+			http::Request::builder()
+				.header(http::header::AUTHORIZATION, auth)
+				.body(axum::body::Body::empty())
+				.unwrap()
+		};
+		assert!(has_basic_auth(&make_req("Basic dXNlcjpwYXNz")));
+		assert!(has_basic_auth(&make_req("basic dXNlcjpwYXNz")));
+		// Byte index 6 falls inside the two-byte UTF-8 sequence for U+00E9.
+		assert!(!has_basic_auth(&make_req("Basic\u{00e9}")));
+		assert!(!has_basic_auth(&make_req("Bearer token")));
 	}
 }

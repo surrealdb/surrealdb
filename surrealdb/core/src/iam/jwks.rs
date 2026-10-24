@@ -284,7 +284,9 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 	// rather than re-parsed as a rule, so a host spelled like a wildcard rule is
 	// checked as the one host it is.
 	let target = match url_parsed.host() {
-		Some(host) => NetTarget::Host(host.to_owned(), url_parsed.port_or_known_default()),
+		Some(host) => {
+			NetTarget::Host(NetTarget::canonical_host(host), url_parsed.port_or_known_default())
+		}
 		None => {
 			bail!(Error::InvalidUrl(url.to_string()));
 		}
@@ -346,10 +348,9 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 		// `port_or_known_default` for the same reason as the initial check: an
 		// implicit default port must still be matched against port-specific
 		// deny rules.
-		let target = attempt
-			.url()
-			.host()
-			.map(|host| NetTarget::Host(host.to_owned(), attempt.url().port_or_known_default()));
+		let target = attempt.url().host().map(|host| {
+			NetTarget::Host(NetTarget::canonical_host(host), attempt.url().port_or_known_default())
+		});
 		match target {
 			Some(target) if capabilities.allows_network_target(&target) => attempt.follow(),
 			_ => {

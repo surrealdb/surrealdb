@@ -89,12 +89,31 @@ impl ToSql for DefineConfig<'_> {
 	}
 }
 
+/// Renders a `DEFINE USER` statement for export, preserving or redacting
+/// password hashes and SCRAM verifiers according to the exporting principal's
+/// privileges on `Actor` in the database.
+struct ExportUser {
+	stmt: DefineUserStatement,
+	include_secrets: bool,
+}
+
+impl ToSql for ExportUser {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		if self.include_secrets {
+			self.stmt.fmt_sql(f, fmt);
+		} else {
+			self.stmt.fmt_redacted_sql(f, fmt);
+		}
+	}
+}
+
 /// What an export reads a table's rows in: the context a row is brought
 /// through its table's pending migration steps in, and the options it runs
 /// with. `ctx` carries the transaction the export reads in.
 pub(crate) struct RowFrame {
 	pub(crate) ctx: crate::ctx::FrozenContext,
 	pub(crate) opt: crate::dbs::Options,
+	pub(crate) include_user_secrets: bool,
 }
 
 /// Writes the full database contents as binary SQL.
@@ -122,6 +141,7 @@ pub(crate) async fn export(
 			name: db.to_owned(),
 		})
 	})?;
+	let include_user_secrets = frame.include_user_secrets;
 	let exec = ExecutionContext::privileged_database(
 		frame.ctx,
 		frame.opt,
@@ -130,7 +150,7 @@ pub(crate) async fn export(
 	);
 
 	// Output OPTIONS, DATABASE, USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
-	export_metadata(tx, &cfg, &chn, &db).await?;
+	export_metadata(tx, &cfg, &chn, &db, include_user_secrets).await?;
 	// Output TABLES
 	export_tables(tx, &exec, &cfg, &chn, db.namespace_id, db.database_id, batch_size).await?;
 	Ok(())
@@ -202,6 +222,7 @@ async fn export_metadata(
 	cfg: &Config,
 	chn: &Sender<Vec<u8>>,
 	def: &catalog::DatabaseDefinition,
+	include_user_secrets: bool,
 ) -> Result<()> {
 	let (ns, db) = (def.namespace_id, def.database_id);
 
@@ -224,7 +245,10 @@ async fn export_metadata(
 		let users = tx.all_db_users(ns, db, None).await?;
 		export_section(
 			"USERS",
-			users.iter().map(|x| define_user_statement_from_definition(Base::Db, x)),
+			users.iter().map(|x| ExportUser {
+				stmt: define_user_statement_from_definition(Base::Db, x),
+				include_secrets: include_user_secrets,
+			}),
 			chn,
 		)
 		.await?;
@@ -1629,6 +1653,56 @@ mod tests {
 		assert_eq!(
 			line(&database(DatabaseCompatibility::LEVEL_4, true)).as_deref(),
 			Some("DEFINE DATABASE OVERWRITE $session.db STRICT COMPATIBILITY 4")
+		);
+	}
+
+	/// `ExportUser` preserves `PASSHASH` and `PASSSCRAM` when `include_secrets`
+	/// is true, and redacts both to `[REDACTED]` when `include_secrets` is false.
+	#[test]
+	fn export_user_redacts_secrets_unless_permitted() {
+		use surrealdb_types::ToSql;
+
+		use crate::catalog::UserDefinition;
+		use crate::catalog::base::Base;
+		use crate::iam::ScramCredential;
+
+		let def = UserDefinition {
+			name: "alice".into(),
+			hash: "$argon2id$v=19$m=19456,t=2,p=1$salt$hash".to_owned(),
+			code: String::new(),
+			roles: vec!["viewer".to_owned()],
+			token_duration: None,
+			session_duration: None,
+			comment: None,
+			base: Base::Db,
+			scram: Some(ScramCredential::generate("secret")),
+		};
+		let stmt = super::define_user_statement_from_definition(super::Base::Db, &def);
+
+		let unredacted = super::ExportUser {
+			stmt: stmt.clone(),
+			include_secrets: true,
+		}
+		.to_sql();
+		assert!(unredacted.contains("$argon2id$"), "owner export must preserve PASSHASH");
+		assert!(!unredacted.contains("[REDACTED]"), "owner export must not redact secrets");
+
+		let redacted = super::ExportUser {
+			stmt,
+			include_secrets: false,
+		}
+		.to_sql();
+		assert!(
+			!redacted.contains("$argon2id$"),
+			"non-owner export must not include PASSHASH: {redacted}"
+		);
+		assert!(
+			redacted.contains("PASSHASH '[REDACTED]'"),
+			"non-owner export must redact PASSHASH: {redacted}"
+		);
+		assert!(
+			redacted.contains("PASSSCRAM '[REDACTED]'"),
+			"non-owner export must redact PASSSCRAM: {redacted}"
 		);
 	}
 }
