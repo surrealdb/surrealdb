@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -91,13 +92,27 @@ impl Document {
 			Action::Update => (Value::from("UPDATE").into(), false),
 		};
 
+		// Normalise top-level `id` on object documents so view-table records
+		// (stored without an `id` field in `Record.data`) carry their `RecordId`
+		// during LIVE evaluation without mutating `self` for subsequent hooks.
+		let initial_doc = match self.id.as_deref() {
+			Some(rid) => self.initial.with_record_id(rid),
+			None => Cow::Borrowed(&self.initial),
+		};
+		let current_doc = match self.id.as_deref() {
+			Some(rid) => self.current.with_record_id(rid),
+			None => Cow::Borrowed(&self.current),
+		};
+
 		// Get the current and initial docs
 		// These are only used for EVENTS, so they should not be reduced
-		let initial = self.initial.doc.as_arc();
-		let current = self.current.doc.as_arc();
+		let initial = initial_doc.doc.as_arc();
+		let current = current_doc.doc.as_arc();
 
-		// Move self to a shared reference
+		// Move self and normalized cursors to shared references
 		let doc: &Self = &*self;
+		let initial_doc: &CursorDoc = &initial_doc;
+		let current_doc: &CursorDoc = &current_doc;
 
 		let mut tasks = Vec::with_capacity(live_subscriptions.len());
 		// Loop through all index statements
@@ -120,6 +135,7 @@ impl Document {
 							lqopt,
 							ctx.tx(),
 							(met, initial, current),
+							(initial_doc, current_doc),
 							is_delete,
 						)
 					})
@@ -158,6 +174,7 @@ impl Document {
 		opt: Options,
 		tx: Arc<Transaction>,
 		(met, initial, current): (Arc<Value>, Arc<Value>, Arc<Value>),
+		(initial_doc, current_doc): (&CursorDoc, &CursorDoc),
 		is_delete: bool,
 	) -> Result<()> {
 		// Ensure that a session exists on the LIVE query
@@ -239,9 +256,9 @@ impl Document {
 		// `None` if any step fails so the notification is skipped rather
 		// than the triggering write being aborted.
 		let source = if is_delete {
-			&self.initial
+			initial_doc
 		} else {
-			&self.current
+			current_doc
 		};
 		let Some(doc) = self.prepare_live_doc(stk, &ctx, &opt, source).await else {
 			return Ok(());
@@ -267,7 +284,7 @@ impl Document {
 		// clause for this table allows this document to
 		// be viewed by the user who created this LIVE
 		// query. If it does, then we can continue.
-		match self.lq_allow(stk, &ctx, &opt, is_delete).await {
+		match self.lq_allow(stk, &ctx, &opt, source).await {
 			Err(IgnoreError::Ignore) => return Ok(()),
 			Err(IgnoreError::Error(e)) => {
 				tracing::debug!(
@@ -321,8 +338,7 @@ impl Document {
 					// restricted stored fields or COMPUTED fields. Any
 					// evaluation error skips this notification rather than
 					// aborting the triggering write.
-					let Some(previous) =
-						self.prepare_live_doc(stk, &ctx, &opt, &self.initial).await
+					let Some(previous) = self.prepare_live_doc(stk, &ctx, &opt, initial_doc).await
 					else {
 						return Ok(());
 					};
@@ -554,7 +570,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		is_delete: bool,
+		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?
 		// Live queries are always
@@ -566,13 +582,6 @@ impl Document {
 				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
-					// Retrieve the document to check permissions against
-					let doc = if is_delete {
-						&self.initial
-					} else {
-						&self.current
-					};
-
 					// Disable permission recursion and block side effects
 					let opt = &opt.new_for_permission_predicate();
 					// Process the PERMISSION clause
@@ -1244,5 +1253,69 @@ mod tests {
 		let mut res =
 			ds.execute("DELETE person:3", &ses_write, None).await.expect("execute should not Err");
 		res.remove(0).result.expect("DELETE should succeed");
+	}
+
+	/// Regression test for #7607: view-table records store `Record.data`
+	/// without a top-level `id` field; LIVE notifications on a view table must
+	/// still include `id` in `result` and match `WHERE` predicates on `id`
+	/// across CREATE, UPDATE, and DELETE.
+	#[tokio::test]
+	async fn test_live_view_table_carries_id_and_filters_by_id() {
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db) = ("test", "test");
+		setup_ns_db_table(&ds, ns, db, "src").await;
+
+		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		let mut res = ds
+			.execute(
+				"CREATE src:1 SET g = 'a';
+				 DEFINE TABLE w AS SELECT g, count() AS n FROM src GROUP BY g;
+				 LIVE SELECT * FROM w;
+				 LIVE SELECT * FROM w WHERE id = w:['a'];
+				 LIVE SELECT * FROM w WHERE g = 'a';",
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		let _ = res.remove(0).result.unwrap();
+		let _ = res.remove(0).result.unwrap();
+		let subs: [_; 3] = std::array::from_fn(|_| match res.remove(0).result.unwrap() {
+			PublicValue::Uuid(id) => id,
+			v => panic!("expected uuid, got {v:?}"),
+		});
+
+		let expected_record = PublicValue::RecordId(PublicRecordId {
+			table: "w".to_string().into(),
+			key: PublicRecordIdKey::Array(vec![PublicValue::String("a".to_string())].into()),
+		});
+
+		for (stmt, expected_action, expected_n) in [
+			("CREATE src:2 SET g = 'a'", PublicAction::Update, 2),
+			("DELETE src:2", PublicAction::Update, 1),
+			("DELETE src:1", PublicAction::Delete, 1),
+			("CREATE src:3 SET g = 'a'", PublicAction::Create, 1),
+		] {
+			ds.execute(stmt, &ses, None).await.unwrap().remove(0).result.unwrap();
+			let mut got = Vec::with_capacity(3);
+			for _ in 0..3 {
+				let n = tokio::time::timeout(tokio::time::Duration::from_secs(2), recv.recv())
+					.await
+					.unwrap_or_else(|_| panic!("timed out waiting for notifications on `{stmt}`"))
+					.unwrap();
+				got.push(n);
+			}
+			let expected_result =
+				crate::syn::value(&format!("{{ id: w:['a'], g: 'a', n: {expected_n} }}")).unwrap();
+			for id in subs {
+				let n = got
+					.iter()
+					.find(|n| n.id == id)
+					.unwrap_or_else(|| panic!("missing notification for {id} on `{stmt}`"));
+				assert_eq!(n.action, expected_action, "stmt: {stmt}");
+				assert_eq!(n.record, expected_record, "stmt: {stmt}");
+				assert_eq!(n.result, expected_result, "stmt: {stmt}");
+			}
+		}
 	}
 }
