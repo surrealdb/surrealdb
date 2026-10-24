@@ -1169,6 +1169,19 @@ jobs:
         working-directory: tests/sdk/remote
         run: cargo build --locked
 
+      # A default `surrealdb` dependency is a remote client: it must not
+      # compile the SurrealQL parser, the storage layer or the database core.
+      - name: Check the default remote build carries no engine crates
+        working-directory: tests/sdk/remote
+        run: |
+          banned=$(cargo tree --locked -e normal --prefix none --format '{p}' \
+            | sed -E 's/ v[0-9].*//' | sort -u \
+            | grep -E '^surrealdb-(catalog|core|datastore|engine-local|expr|kvs|kvs-.*|parser|parser-next)$' || true)
+          if [[ -n "$banned" ]]; then
+            echo "::error::The default remote build depends on: $(echo $banned)"
+            exit 1
+          fi
+
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
     needs: changes

@@ -1,6 +1,12 @@
 
 # cargo-vet audits file
 
+[[audits.ctutils]]
+who = "Stuart Harris <stuart.harris@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.4.4"
+notes = "RUSTSEC-2026-0385 fix."
+
 [[audits.wasm-bindgen-test]]
 who = "Mees Delzenne <mees.delzenne@gmail.com>"
 criteria = "safe-to-run"
@@ -219,7 +225,7 @@ end = "2027-10-15"
 
 [[trusted.bzip2-sys]]
 criteria = "safe-to-deploy"
-user-id = 256011 # Folkert de Vries (folkertdev)
+user-id = 256011
 start = "2025-02-11"
 end = "2026-05-06"
 

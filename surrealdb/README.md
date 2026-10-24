@@ -49,7 +49,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [x] Allows picking any protocol or storage engine at run-time (`Surreal<Any>`)
 - [x] Compiles to WebAssembly
 - [x] Supports typed SQL statements
-- [x] Invalid SQL queries are never sent to the server, the client uses the same parser the server uses
+- [x] Parses SurrealQL values offline with the server's own parser (the `parse` feature)
 - [x] Clonable connections with auto-reconnect capabilities, no need for a connection pool
 - [x] Range queries
 - [x] Consistent API across all supported protocols and storage engines

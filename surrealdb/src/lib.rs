@@ -43,6 +43,7 @@ pub mod channel {
 }
 
 #[cfg(feature = "parse")]
+#[cfg_attr(docsrs, doc(cfg(feature = "parse")))]
 pub mod parse {
 	//! Parse SurrealQL text without connecting to a database.
 

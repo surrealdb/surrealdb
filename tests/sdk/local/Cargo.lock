@@ -4163,7 +4163,6 @@ dependencies = [
  "serde_json",
  "surrealdb-engine-api",
  "surrealdb-engine-local",
- "surrealdb-expr",
  "surrealdb-iam",
  "surrealdb-rpc",
  "surrealdb-types",
