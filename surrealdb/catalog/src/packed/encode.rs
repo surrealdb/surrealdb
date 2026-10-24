@@ -331,29 +331,24 @@ impl Packer<'_, '_> {
 		let columns = descriptor.columns.as_slice();
 		// The names of the node's direct child fields, ascending. A child node's own remainder has
 		// the child's path, and would repeat its name.
-		let mut names: Vec<&str> = Vec::new();
-		for child in columns.iter().skip(at.saturating_add(1)) {
-			if child.path.len() <= path.len() || !child.path.starts_with(path) {
-				break;
-			}
-			if child.role == ColumnRole::Field
-				&& child.path.len() == path.len().saturating_add(1)
-				&& let Some(name) = child.path.last()
-			{
-				names.push(name.as_str());
-			}
-		}
+		let child_len = path.len().saturating_add(1);
+		let mut names = columns
+			.iter()
+			.skip(at.saturating_add(1))
+			.take_while(|child| child.path.len() > path.len() && child.path.starts_with(path))
+			.filter(|child| child.role == ColumnRole::Field && child.path.len() == child_len)
+			.filter_map(|child| child.path.last().map(String::as_str))
+			.peekable();
 		let mut rest: Vec<(&str, &Value)> = Vec::new();
-		let mut next = 0usize;
 		for (key, value) in object.0.iter() {
 			let key = key.as_str();
 			if path.is_empty() && key == "id" {
 				continue;
 			}
-			while names.get(next).is_some_and(|name| *name < key) {
-				next += 1;
+			while names.peek().is_some_and(|name| *name < key) {
+				names.next();
 			}
-			if names.get(next).is_some_and(|name| *name == key) {
+			if names.peek().is_some_and(|name| *name == key) {
 				continue;
 			}
 			// A remainder holds no NONE: a read of its key says so.

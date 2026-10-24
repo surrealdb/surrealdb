@@ -36,7 +36,7 @@ use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::exec::pre_decode_filter::{int_on_wire, strand_payload_str};
 use crate::key::KVKeyDecode as _;
 use crate::val::field_path::{FieldPath, FieldPathPart};
-use crate::val::stored::{ArrayRef, Kind, ObjectRef, OrderedObjectRef, ValueRef};
+use crate::val::stored::{ArrayRef, Kind, OrderedObjectRef, ValueRef};
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 /// The fields of one row, as the caller may see them.
@@ -220,15 +220,12 @@ pub(super) struct StoredRow<'a> {
 	/// The record's `id`, read from its key alone, for a record whose data is
 	/// an object read in place.
 	id: OnceCell<Value>,
-	/// The object read in place with its key order confirmed, set at the first
-	/// field read.
-	ordered: OnceCell<OrderedObjectRef<'a>>,
 }
 
 /// How a record's fields are read in place.
 enum Layout<'a> {
-	/// The stored-value encoding, whose data is an object.
-	Stored(ObjectRef<'a>),
+	/// The stored-value encoding, whose data is a validated object.
+	Stored(OrderedObjectRef<'a>),
 	/// The `data` field of a record in the current `revision` revision.
 	Revision {
 		data: &'a [u8],
@@ -256,7 +253,7 @@ impl<'a> Layout<'a> {
 			return match StoredRecord::parse(value) {
 				Ok(Some(record)) => match record.checked_document() {
 					Ok(Some(document)) => match document.value().and_then(|v| v.as_object()) {
-						Ok(Some(object)) => Self::Stored(object),
+						Ok(Some(object)) => Self::Stored(object.validated()),
 						_ => Self::Whole,
 					},
 					_ => Self::Whole,
@@ -282,19 +279,7 @@ impl<'a> StoredRow<'a> {
 			layout: Layout::of(value),
 			decoded: OnceCell::new(),
 			id: OnceCell::new(),
-			ordered: OnceCell::new(),
 		}
-	}
-
-	/// `object`, the row's [`Layout::Stored`] object, with its key order
-	/// confirmed once per row. An object whose keys do not ascend is refused,
-	/// as a whole decode refuses it.
-	fn ordered(&self, object: &ObjectRef<'a>) -> anyhow::Result<OrderedObjectRef<'a>> {
-		if let Some(ordered) = self.ordered.get() {
-			return Ok(*ordered);
-		}
-		let ordered = object.ordered()?;
-		Ok(*self.ordered.get_or_init(|| ordered))
 	}
 
 	/// The `id` of a record whose data is an object: its key, decoded alone.
@@ -636,14 +621,13 @@ impl RowReader for StoredRow<'_> {
 	fn field(&self, name: &FieldName) -> anyhow::Result<Scalar<'_>> {
 		// A record's `id` is its key, whatever the stored value holds.
 		if name.as_str() == "id" {
-			if let Layout::Stored(object) = &self.layout {
-				self.ordered(object)?;
+			if let Layout::Stored(_) = &self.layout {
 				return Ok(Scalar::of(self.key_id()?));
 			}
 			return self.decoded_field("id");
 		}
 		match &self.layout {
-			Layout::Stored(object) => match stored_field(&self.ordered(object)?, name)? {
+			Layout::Stored(object) => match stored_field(object, name)? {
 				Some(v) => scalar_from_stored(v),
 				None => Ok(Scalar::None),
 			},
@@ -662,21 +646,13 @@ impl RowReader for StoredRow<'_> {
 		// A record's `id` is a record id, never an integer; the read still refuses a record the
 		// whole decode refuses.
 		if name.as_str() == "id" {
-			match &self.layout {
-				Layout::Stored(object) => {
-					self.ordered(object)?;
-				}
-				Layout::Whole => {
-					self.decoded()?;
-				}
-				Layout::Revision {
-					..
-				} => {}
+			if let Layout::Whole = &self.layout {
+				self.decoded()?;
 			}
 			return Ok(None);
 		}
 		if let Layout::Stored(object) = &self.layout {
-			return Ok(match stored_field(&self.ordered(object)?, name)? {
+			return Ok(match stored_field(object, name)? {
 				Some(v) => v.as_int()?,
 				None => None,
 			});
@@ -714,7 +690,7 @@ impl RowReader for StoredRow<'_> {
 			&& name.as_str() != "id"
 			&& let Layout::Stored(object) = &self.layout
 		{
-			return match stored_field(&self.ordered(object)?, name)? {
+			return match stored_field(object, name)? {
 				Some(value) => stored_numbers(value, out),
 				None => {
 					out.clear();
@@ -746,7 +722,7 @@ impl RowReader for StoredRow<'_> {
 		if let Layout::Stored(object) = &self.layout
 			&& name.as_str() != "id"
 		{
-			let Some(value) = stored_field(&self.ordered(object)?, name)? else {
+			let Some(value) = stored_field(object, name)? else {
 				out.clear();
 				return Ok(false);
 			};
@@ -759,7 +735,6 @@ impl RowReader for StoredRow<'_> {
 
 	fn has_any_field(&self, names: &[Strand]) -> anyhow::Result<bool> {
 		if let Layout::Stored(object) = &self.layout {
-			let object = self.ordered(object)?;
 			// The record is an object, so a read gives it the key's `id`.
 			for name in names {
 				if name.as_str() == "id" || object.get(name.as_str())?.is_some() {

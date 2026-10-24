@@ -170,7 +170,14 @@ fn gen_any(rng: &mut Rng, depth: u32, vars: &mut Variables, n: &mut usize) -> St
 			format!("$v{n}")
 		}
 		4 => rng.pick(&["NULL", "true", "false", "d'2020-01-01T00:00:00Z'", "1h2m3s"]).to_owned(),
-		5 => rng.pick(&["g:1", "h:k", "u'0189f5c4-0000-7000-8000-000000000001'"]).to_owned(),
+		5 => rng
+			.pick(&[
+				"g:1",
+				"h:k",
+				"g:u'0189f5c4-0000-7000-8000-000000000001'",
+				"u'0189f5c4-0000-7000-8000-000000000001'",
+			])
+			.to_owned(),
 		6 | 7 => {
 			let wide = rng.one_in(4);
 			let len = rng.below(if wide {
@@ -262,7 +269,19 @@ fn generated(seed: u64, count: usize) -> (String, Variables) {
 				],
 			),
 			("by", &["<bytes>'ab'", "<bytes>''", "<bytes>'a longer byte string than most'"]),
-			("link", &["g:1", "g:-7", "h:k", "h:⟨a b⟩", "h:⟨k'ey⟩", "g:[1, 'a']", "h:{ a: 1 }"]),
+			(
+				"link",
+				&[
+					"g:1",
+					"g:-7",
+					"h:k",
+					"h:⟨a b⟩",
+					"h:⟨k'ey⟩",
+					"g:u'0189f5c4-0000-7000-8000-000000000001'",
+					"g:[1, 'a']",
+					"h:{ a: 1 }",
+				],
+			),
 			("pt", &["(1.0, 2.0)", "(-0.5, 1e10)"]),
 			("z", &["0", "-1", "9223372036854775807"]),
 		];

@@ -997,12 +997,12 @@ fn decode_value<M: Mode>(
 ) -> Result<M::Out<Value>, PackedError> {
 	let bytes = var(index, slot)?;
 	let value = M::value(bytes, depth).map_err(stored_error(index))?;
-	match ValueRef::new(bytes).map_err(stored_error(index))?.tag() {
-		stored::tag::NONE => Err(PackedError::Slot {
+	match bytes.first().copied() {
+		Some(stored::tag::NONE) => Err(PackedError::Slot {
 			column: index,
 			reason: "NONE in a value column",
 		}),
-		stored::tag::NULL if holds_null(column.presence) => Err(PackedError::Slot {
+		Some(stored::tag::NULL) if holds_null(column.presence) => Err(PackedError::Slot {
 			column: index,
 			reason: "NULL in a value column whose presence bits hold it",
 		}),

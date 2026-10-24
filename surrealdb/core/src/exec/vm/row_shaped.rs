@@ -176,7 +176,7 @@ pub(super) fn write_packed(
 	}
 	if let Some((index, slot)) = plan.root_rest {
 		w.open_var(slot)?;
-		remainder(row, index, 0, true, base, w.out(), scratch)?;
+		remainder(row, index, 0, true, base, w.out(), scratch, id_text)?;
 		w.close_var()?;
 	}
 	// Escapes are read in column order, so one cursor takes each trailer entry once.
@@ -243,7 +243,7 @@ pub(super) fn write_packed(
 			} => {
 				if let Some(index) = rest {
 					w.open_var(op.rest_slot)?;
-					remainder(row, index, depth, false, base, w.out(), scratch)?;
+					remainder(row, index, depth, false, base, w.out(), scratch, id_text)?;
 					w.close_var()?;
 				}
 			}
@@ -317,7 +317,9 @@ pub(super) fn write_packed(
 					(Fill::Array(element), FieldRef::Stored(value)) => {
 						native_array(w.out(), element, value)?
 					}
-					(Fill::Dynamic, field) => dynamic(field, base, w.out(), scratch, depth)?,
+					(Fill::Dynamic, field) => {
+						dynamic(field, base, w.out(), scratch, id_text, depth)?
+					}
 					_ => anyhow::bail!("a packed column read as another kind than its plan's"),
 				}
 				w.close_var()?;
@@ -459,6 +461,7 @@ fn native_array(
 
 /// Writes the remainder of an open node, descriptor column `index` at depth `depth`: nothing when
 /// the node holds no key beyond its columns, else one CBOR map.
+#[allow(clippy::too_many_arguments)]
 fn remainder(
 	row: &PackedRow<'_>,
 	index: usize,
@@ -467,6 +470,7 @@ fn remainder(
 	base: &[u8],
 	out: &mut Vec<u8>,
 	scratch: &mut Vec<Entry>,
+	id_text: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
 	let Some(object) = row.column_remainder(index, depth)? else {
 		return Ok(());
@@ -484,6 +488,7 @@ fn remainder(
 			base,
 			out: &mut *out,
 			scratch: &mut *scratch,
+			id_text: &mut *id_text,
 			json: None,
 		}
 		.stored_value(value, depth + 2)?;
@@ -497,6 +502,7 @@ fn dynamic(
 	base: &[u8],
 	out: &mut Vec<u8>,
 	scratch: &mut Vec<Entry>,
+	id_text: &mut Vec<u8>,
 	depth: usize,
 ) -> anyhow::Result<()> {
 	let scalar = match field {
@@ -505,6 +511,7 @@ fn dynamic(
 				base,
 				out,
 				scratch,
+				id_text,
 				json: None,
 			}
 			.stored_value(value, depth);
@@ -637,7 +644,6 @@ pub(super) fn write_document(
 	key: &[u8],
 	object: crate::val::stored::OrderedObjectRef<'_>,
 	stored: &mut Stored<'_, '_>,
-	id_text: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
 	let rest = shape.def().root_rest;
 	let id = shape.columns()[0].slot;
@@ -648,6 +654,7 @@ pub(super) fn write_document(
 		base,
 		out: w.out(),
 		scratch: &mut *stored.scratch,
+		id_text: &mut *stored.id_text,
 		json: None,
 	}
 	.stored_object_rest(object, 1)?;
@@ -656,7 +663,7 @@ pub(super) fn write_document(
 		anyhow::bail!("a record key that does not decode");
 	};
 	w.open_var(id)?;
-	write_key_id(key, &key_id, Some(table), w.out(), id_text)?;
+	write_key_id(key, &key_id, Some(table), w.out(), stored.id_text)?;
 	w.close_var()?;
 	w.finish()?;
 	Ok(())

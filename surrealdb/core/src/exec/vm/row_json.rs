@@ -117,8 +117,10 @@ pub(super) fn encode_json(
 				crate::val::RecordIdKey::String(s) => {
 					record_id_text_str(out, rid.table.as_str(), s.as_str(), scratch)?
 				}
-				crate::val::RecordIdKey::Uuid(_)
-				| crate::val::RecordIdKey::Array(_)
+				crate::val::RecordIdKey::Uuid(u) => {
+					record_id_text_uuid(out, rid.table.as_str(), u.0, scratch)?
+				}
+				crate::val::RecordIdKey::Array(_)
 				| crate::val::RecordIdKey::Object(_)
 				| crate::val::RecordIdKey::Range(_) => public(out, value, depth)?,
 			}
@@ -167,8 +169,8 @@ pub(super) fn encode_json_scalar(
 	Ok(())
 }
 
-/// Write a record id of table `table` and key `key` (a number or a string)
-/// as JSON text: the public record id's SurrealQL rendering, as a string.
+/// Write a record id of table `table` and key `key` (a number, a string or a
+/// uuid) as JSON text: the public record id's SurrealQL rendering, as a string.
 pub(super) fn record_id_text(
 	out: &mut Vec<u8>,
 	table: &str,
@@ -178,12 +180,12 @@ pub(super) fn record_id_text(
 	match key {
 		crate::val::RecordIdKey::Number(n) => record_id_text_int(out, table, *n, scratch),
 		crate::val::RecordIdKey::String(s) => record_id_text_str(out, table, s.as_str(), scratch),
-		crate::val::RecordIdKey::Uuid(_)
-		| crate::val::RecordIdKey::Array(_)
+		crate::val::RecordIdKey::Uuid(u) => record_id_text_uuid(out, table, u.0, scratch),
+		crate::val::RecordIdKey::Array(_)
 		| crate::val::RecordIdKey::Object(_)
-		| crate::val::RecordIdKey::Range(_) => {
-			anyhow::bail!("a record id key rendered in place that is not a number or a string")
-		}
+		| crate::val::RecordIdKey::Range(_) => anyhow::bail!(
+			"a record id key rendered in place that is not a number, a string or a uuid"
+		),
 	}
 }
 

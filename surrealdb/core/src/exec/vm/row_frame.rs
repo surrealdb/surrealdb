@@ -40,7 +40,7 @@ use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, s
 use crate::exec::pre_decode_filter::strand_payload_str;
 use crate::key::KVKeyDecode as _;
 use crate::val::key_read::KeyIdRef;
-use crate::val::stored::{Kind, OrderedObjectRef, ValueRef};
+use crate::val::stored::{Kind, ObjectRef, OrderedObjectRef, ValueRef};
 use crate::val::{Number, RecordIdKey, Value};
 
 // CBOR tags the RPC layer's encoder writes (`rpc::format::cbor::convert`).
@@ -437,6 +437,7 @@ impl RowFrame {
 				base: value,
 				out: data,
 				scratch,
+				id_text,
 				json: (*format == RowFormat::Json).then_some(text),
 			};
 			let record = StoredRecord::parse(value)?;
@@ -445,7 +446,7 @@ impl RowFrame {
 				&& let Some(layouts) = layouts
 			{
 				let start = stored.out.len();
-				if stored.packed(key, record, layouts, id_text).is_ok() {
+				if stored.packed(key, record, layouts).is_ok() {
 					#[cfg(test)]
 					PACKED_VISITS.with(|n| n.set(n.get() + 1));
 					return Ok(());
@@ -455,7 +456,7 @@ impl RowFrame {
 			// A document the whole decode refuses falls through to that decode, which reports it.
 			if let Some(record) = record
 				&& let Ok(Some(document)) = record.checked_document()
-				&& let Some(object) = document.value()?.as_ordered_object()?
+				&& let Some(object) = document.value()?.as_object()?.map(ObjectRef::validated)
 			{
 				return stored.stored_object(object, Some(key), 1);
 			}
@@ -578,9 +579,10 @@ impl RowFrame {
 				base: value,
 				out: data,
 				scratch,
+				id_text,
 				json: None,
 			};
-			super::row_shaped::write_document(&shape, key, object, &mut stored, id_text)?;
+			super::row_shaped::write_document(&shape, key, object, &mut stored)?;
 			return shaped.note(&shape);
 		}
 		#[cfg(test)]
@@ -951,6 +953,8 @@ pub(super) struct Stored<'b, 'o> {
 	pub(super) base: &'b [u8],
 	pub(super) out: &'o mut Vec<u8>,
 	pub(super) scratch: &'o mut Vec<Entry>,
+	/// The scratch an escaped string id is unescaped into.
+	pub(super) id_text: &'o mut Vec<u8>,
 	/// For JSON rows, the scratch text renderings are written into; `None`
 	/// for CBOR.
 	pub(super) json: Option<&'o mut String>,
@@ -1210,6 +1214,75 @@ impl<'b> Stored<'b, '_> {
 
 	/// Write the `id` entry, the map's `at`th, for the record key `key`.
 	fn record_key(&mut self, at: usize, key: &[u8], depth: usize) -> anyhow::Result<()> {
+		if let Some((table, id)) = super::row_packed::read_key_id(key) {
+			let raw = table.as_bytes();
+			let raw = raw.get(..raw.len().saturating_sub(1)).unwrap_or_default();
+			if !raw.contains(&1)
+				&& let Ok(table) = std::str::from_utf8(raw)
+			{
+				return self.key_id(at, table, &id, key, depth);
+			}
+		}
+		self.decoded_record_key(at, key, depth)
+	}
+
+	/// Write the `id` entry, the map's `at`th, for `table` and `id` read from `key` in place.
+	fn key_id(
+		&mut self,
+		at: usize,
+		table: &str,
+		id: &KeyIdRef<'_>,
+		key: &[u8],
+		depth: usize,
+	) -> anyhow::Result<()> {
+		match id {
+			KeyIdRef::Number(n) => {
+				self.map_key(at, ID_KEY)?;
+				too_deep(depth + 1)?;
+				self.record_id_in_place(table, StoredKey::Number(*n))
+			}
+			KeyIdRef::String(escaped) => {
+				self.map_key(at, ID_KEY)?;
+				too_deep(depth + 1)?;
+				let raw = escaped.as_bytes();
+				let raw = raw.get(..raw.len().saturating_sub(1)).unwrap_or_default();
+				// The key escapes a byte with a 1 before it; most strings hold neither.
+				let utf8 = if raw.contains(&1) {
+					self.id_text.clear();
+					self.id_text.extend(escaped.iter());
+					&self.id_text[..]
+				} else {
+					raw
+				};
+				// The key read proved the id UTF-8; CBOR copies its bytes, JSON escapes its text.
+				match &mut self.json {
+					Some(text_buf) => {
+						let s = std::str::from_utf8(utf8)
+							.map_err(|_| anyhow::anyhow!("a record key id that is not UTF-8"))?;
+						super::row_json::record_id_text_str(self.out, table, s, text_buf)
+					}
+					None => {
+						let out = &mut *self.out;
+						tag(out, TAG_RECORDID);
+						head(out, MAJOR_ARRAY, 2);
+						text(out, table);
+						head(out, MAJOR_TEXT, utf8.len() as u64);
+						out.extend_from_slice(utf8);
+						Ok(())
+					}
+				}
+			}
+			KeyIdRef::Uuid(u) => {
+				self.map_key(at, ID_KEY)?;
+				too_deep(depth + 1)?;
+				self.record_id_in_place(table, StoredKey::Uuid(u.0))
+			}
+			KeyIdRef::Other => self.decoded_record_key(at, key, depth),
+		}
+	}
+
+	/// Write the `id` entry, the map's `at`th, by decoding the record key `key`.
+	fn decoded_record_key(&mut self, at: usize, key: &[u8], depth: usize) -> anyhow::Result<()> {
 		self.map_key(at, ID_KEY)?;
 		let decoded = crate::key::schema::RecordKey::decode_key(key)
 			.map_err(|e| anyhow::anyhow!("Failed to decode record key: {e}"))?;
@@ -1223,7 +1296,7 @@ impl<'b> Stored<'b, '_> {
 			Some(text_buf) => {
 				too_deep(depth + 1)?;
 				match decoded.id.as_ref() {
-					RecordIdKey::Number(_) | RecordIdKey::String(_) => {
+					RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => {
 						super::row_json::record_id_text(
 							self.out,
 							decoded.tb.as_str(),
@@ -1231,10 +1304,9 @@ impl<'b> Stored<'b, '_> {
 							text_buf,
 						)
 					}
-					RecordIdKey::Uuid(_)
-					| RecordIdKey::Array(_)
-					| RecordIdKey::Object(_)
-					| RecordIdKey::Range(_) => super::row_json::encode_json(self.out, &whole(), depth, text_buf),
+					RecordIdKey::Array(_) | RecordIdKey::Object(_) | RecordIdKey::Range(_) => {
+						super::row_json::encode_json(self.out, &whole(), depth, text_buf)
+					}
 				}
 			}
 			None => encode_record_id(self.out, decoded.tb.as_str(), &decoded.id, depth, whole),
@@ -1323,6 +1395,36 @@ impl<'b> Stored<'b, '_> {
 			}
 			Kind::Array => {
 				if let Some(array) = value.as_array()? {
+					if !array.is_empty() {
+						too_deep(depth + 1)?;
+					}
+					if let Some(ints) = array.ints() {
+						self.open_array(ints.len());
+						for (at, v) in ints.enumerate() {
+							self.element(at);
+							match &mut self.json {
+								Some(_) => serde_json::to_writer(&mut *self.out, &v)?,
+								None => int(self.out, v),
+							}
+						}
+						self.close_array();
+						return Ok(());
+					}
+					if let Some(floats) = array.floats() {
+						self.open_array(floats.len());
+						for (at, v) in floats.enumerate() {
+							self.element(at);
+							match &mut self.json {
+								Some(_) if v.is_finite() => {
+									serde_json::to_writer(&mut *self.out, &v)?
+								}
+								Some(_) => self.out.extend_from_slice(b"null"),
+								None => float(self.out, v),
+							}
+						}
+						self.close_array();
+						return Ok(());
+					}
 					self.open_array(array.len());
 					for (at, element) in array.iter().enumerate() {
 						self.element(at);
@@ -1337,6 +1439,7 @@ impl<'b> Stored<'b, '_> {
 					let key = match key.kind() {
 						Kind::Int => key.as_int()?.map(StoredKey::Number),
 						Kind::String => key.as_str()?.map(StoredKey::String),
+						Kind::Uuid => key.as_uuid()?.map(StoredKey::Uuid),
 						Kind::None
 						| Kind::Null
 						| Kind::Bool
@@ -1344,7 +1447,6 @@ impl<'b> Stored<'b, '_> {
 						| Kind::Decimal
 						| Kind::Duration
 						| Kind::Datetime
-						| Kind::Uuid
 						| Kind::Bytes
 						| Kind::Table
 						| Kind::RecordId
@@ -1477,7 +1579,6 @@ impl Stored<'_, '_> {
 		key: &[u8],
 		record: &StoredRecord<'_>,
 		layouts: &TableLayouts,
-		id_text: &mut Vec<u8>,
 	) -> anyhow::Result<()> {
 		let Ok(Some(generation)) = record.generation() else {
 			anyhow::bail!("a packed row whose stamp names no generation");
@@ -1496,12 +1597,12 @@ impl Stored<'_, '_> {
 				base: self.base,
 				out: &mut *self.out,
 				scratch: &mut *self.scratch,
+				id_text: &mut *self.id_text,
 				json: self.json.as_deref_mut(),
 			},
 			key,
 			table,
 			id,
-			id_text,
 			depth: 0,
 		};
 		row.visit(&mut sink)
@@ -1517,8 +1618,6 @@ struct PackedSink<'a, 'o> {
 	table: &'a str,
 	/// The record's id, read from the key in place.
 	id: KeyIdRef<'a>,
-	/// The scratch an escaped string id is unescaped into.
-	id_text: &'o mut Vec<u8>,
 	/// The depth of the open object: 1 for the record.
 	depth: usize,
 }
@@ -1543,42 +1642,7 @@ impl<'a> PackedVisitor<'a> for PackedSink<'a, '_> {
 	}
 
 	fn id(&mut self, at: usize) -> anyhow::Result<()> {
-		let key = match self.id {
-			KeyIdRef::Number(n) => StoredKey::Number(n),
-			KeyIdRef::String(escaped) => {
-				let raw = escaped.as_bytes();
-				let raw = raw.get(..raw.len().saturating_sub(1)).unwrap_or_default();
-				// The key escapes a byte with a 1 before it; most strings hold neither.
-				let utf8 = if raw.contains(&1) {
-					self.id_text.clear();
-					self.id_text.extend(escaped.iter());
-					&self.id_text[..]
-				} else {
-					raw
-				};
-				// The key read proved the id UTF-8; CBOR copies its bytes, JSON escapes its text.
-				if self.stored.json.is_none() {
-					self.stored.map_key(at, ID_KEY)?;
-					too_deep(self.depth + 2)?;
-					let out = &mut *self.stored.out;
-					tag(out, TAG_RECORDID);
-					head(out, MAJOR_ARRAY, 2);
-					text(out, self.table);
-					head(out, MAJOR_TEXT, utf8.len() as u64);
-					out.extend_from_slice(utf8);
-					return Ok(());
-				}
-				StoredKey::String(
-					std::str::from_utf8(utf8)
-						.map_err(|_| anyhow::anyhow!("a record key id that is not UTF-8"))?,
-				)
-			}
-			KeyIdRef::Uuid(u) => StoredKey::Uuid(u.0),
-			KeyIdRef::Other => return self.stored.record_key(at, self.key, self.depth + 1),
-		};
-		self.stored.map_key(at, ID_KEY)?;
-		too_deep(self.depth + 2)?;
-		self.stored.record_id_in_place(self.table, key)
+		self.stored.key_id(at, self.table, &self.id, self.key, self.depth + 1)
 	}
 
 	/// CBOR text is copied from storage as written: a string is checked to be UTF-8 when it is
@@ -1679,6 +1743,7 @@ impl<'a> PackedSink<'a, '_> {
 				let in_place = match link.kind() {
 					Kind::Int => link.as_int()?.map(StoredKey::Number),
 					Kind::String => link.as_str()?.map(StoredKey::String),
+					Kind::Uuid => link.as_uuid()?.map(StoredKey::Uuid),
 					Kind::None
 					| Kind::Null
 					| Kind::Bool
@@ -1686,7 +1751,6 @@ impl<'a> PackedSink<'a, '_> {
 					| Kind::Decimal
 					| Kind::Duration
 					| Kind::Datetime
-					| Kind::Uuid
 					| Kind::Bytes
 					| Kind::Table
 					| Kind::RecordId
@@ -1738,7 +1802,7 @@ enum StoredKey<'b> {
 }
 
 /// The table and key of a stored `RecordId` wire (revision 1: `rev, table
-/// strand, key`), for a key that is a number or a string.
+/// strand, key`), for a key that is a number, a string or a uuid.
 fn stored_record_id(wire: &[u8]) -> Option<(&str, StoredKey<'_>)> {
 	use revision::DeserializeRevisioned as _;
 	let mut r = wire;
@@ -1752,6 +1816,7 @@ fn stored_record_id(wire: &[u8]) -> Option<(&str, StoredKey<'_>)> {
 	let key = match u32::deserialize_revisioned(&mut r).ok()? {
 		0 => StoredKey::Number(i64::deserialize_revisioned(&mut r).ok()?),
 		1 => StoredKey::String(strand_str(&mut r)?),
+		2 => StoredKey::Uuid(crate::val::Uuid::deserialize_revisioned(&mut r).ok()?.0),
 		_ => return None,
 	};
 	r.is_empty().then_some((table, key))
@@ -1885,11 +1950,15 @@ mod tests {
 			"{}",
 			"{ a: 1 }",
 			"{ id: 'ignored', b: 'x' }",
-			"{ f: t:1, g: t:abc, h: other:-5, i: [t:2] }",
+			"{ f: t:1, g: t:abc, h: other:-5, u: t:u'018f9b8e-0000-7000-8000-000000000000', \
+			   i: [t:2, t:u'018f9b8e-0000-7000-8000-000000000000'] }",
 			"{ a: t:⟨with space⟩, b: t:⟨123⟩, c: `select`:x, d: t:⟨a\"b⟩, e: 'q\"\\\\x\\té', \
 			   f: 1h30m, g: d'2024-01-02T03:04:05.006Z', h: u'018f9b8e-0000-7000-8000-000000000000', \
 			   i: 1.5f, j: 2.25dec, l: NONE, m: NULL, n: false }",
 			"{ zz: 1, a: [1, 2, { q: 'r', p: NONE }], m: { k: true, kk: 1.5f, kkk: 2dec } }",
+			"{ i8s: [-128, 0, 127], i16s: [-1000, 1000], i32s: [-100000, 100000], \
+			   i64s: [-5000000000, 5000000000], f32s: [0.0f, -0.0f, 1.5f, Infinity], \
+			   f64s: [0.1f, 1.5f, -Infinity, NaN] }",
 		] {
 			datas.push(val(src));
 		}
@@ -1900,57 +1969,66 @@ mod tests {
 		}
 		datas.push(Value::Object(wide));
 		for (i, data) in datas.into_iter().enumerate() {
-			let rid = crate::val::RecordId {
-				table: "t".into(),
-				key: RecordIdKey::Number(i as i64),
-			};
-			let key = crate::key::schema::RecordKey::new(
-				crate::catalog::NamespaceId(1),
-				crate::catalog::DatabaseId(2),
-				std::borrow::Cow::Borrowed(&rid.table),
-				std::borrow::Cow::Borrowed(&rid.key),
-			)
-			.encode_key()
-			.expect("encodes");
-			// The record as a writer holds it: its `id` the key's, unless the
-			// data names another.
-			let mut held = data.clone();
-			if let Value::Object(object) = &mut held
-				&& !object.contains_key("id")
-			{
-				object.insert("id".to_owned(), Value::RecordId(rid.clone()));
-			}
-			let legacy = revision::to_vec(&crate::catalog::Record::new(data)).expect("encodes");
-			let decoded =
-				crate::exec::operators::scan::pipeline::decode_record(&key, &legacy, None)
-					.expect("decodes");
-			let keyed =
-				crate::catalog::encode_record(DOCUMENT, None, &held, Some(&rid)).expect("encodes");
-			let unkeyed =
-				crate::catalog::encode_record(DOCUMENT, None, &held, None).expect("encodes");
-			for value in [&legacy, &keyed, &unkeyed] {
-				assert_eq!(
-					crate::exec::operators::scan::pipeline::decode_record(&key, value, None)
-						.expect("decodes"),
-					decoded,
-					"{i}: every encoding decodes alike"
-				);
-				for format in [RowFormat::Cbor, RowFormat::Json] {
-					let mut frame = RowFrame::with_format(format);
-					let before = WHOLE_DECODES.with(|n| n.get());
-					let values_before = VALUE_DECODES.with(|n| n.get());
-					frame.push_stored(&key, value, None).expect("transcodes");
-					assert_eq!(WHOLE_DECODES.with(|n| n.get()), before, "transcoded in place");
+			let keys = [
+				RecordIdKey::Number(i as i64),
+				RecordIdKey::String(format!("k_{i}").into()),
+				RecordIdKey::String(format!("a\0b\u{1}c_{i}").into()),
+				RecordIdKey::Uuid(crate::val::Uuid(uuid::Uuid::from_u128(i as u128 + 1))),
+			];
+			for rid_key in keys {
+				let rid = crate::val::RecordId {
+					table: "t".into(),
+					key: rid_key,
+				};
+				let key = crate::key::schema::RecordKey::new(
+					crate::catalog::NamespaceId(1),
+					crate::catalog::DatabaseId(2),
+					std::borrow::Cow::Borrowed(&rid.table),
+					std::borrow::Cow::Borrowed(&rid.key),
+				)
+				.encode_key()
+				.expect("encodes");
+				// The record as a writer holds it: its `id` the key's, unless the
+				// data names another.
+				let mut held = data.clone();
+				if let Value::Object(object) = &mut held
+					&& !object.contains_key("id")
+				{
+					object.insert("id".to_owned(), Value::RecordId(rid.clone()));
+				}
+				let legacy =
+					revision::to_vec(&crate::catalog::Record::new(data.clone())).expect("encodes");
+				let decoded =
+					crate::exec::operators::scan::pipeline::decode_record(&key, &legacy, None)
+						.expect("decodes");
+				let keyed = crate::catalog::encode_record(DOCUMENT, None, &held, Some(&rid))
+					.expect("encodes");
+				let unkeyed =
+					crate::catalog::encode_record(DOCUMENT, None, &held, None).expect("encodes");
+				for value in [&legacy, &keyed, &unkeyed] {
 					assert_eq!(
-						VALUE_DECODES.with(|n| n.get()),
-						values_before,
-						"{i}: leaves in place"
+						crate::exec::operators::scan::pipeline::decode_record(&key, value, None)
+							.expect("decodes"),
+						decoded,
+						"{i}: every encoding decodes alike"
 					);
-					assert_eq!(
-						String::from_utf8_lossy(frame.row(0)),
-						String::from_utf8_lossy(&expected_in(format, &decoded)),
-						"{format:?} {decoded:?}"
-					);
+					for format in [RowFormat::Cbor, RowFormat::Json] {
+						let mut frame = RowFrame::with_format(format);
+						let before = WHOLE_DECODES.with(|n| n.get());
+						let values_before = VALUE_DECODES.with(|n| n.get());
+						frame.push_stored(&key, value, None).expect("transcodes");
+						assert_eq!(WHOLE_DECODES.with(|n| n.get()), before, "transcoded in place");
+						assert_eq!(
+							VALUE_DECODES.with(|n| n.get()),
+							values_before,
+							"{i}: leaves in place"
+						);
+						assert_eq!(
+							String::from_utf8_lossy(frame.row(0)),
+							String::from_utf8_lossy(&expected_in(format, &decoded)),
+							"{format:?} {decoded:?}"
+						);
+					}
 				}
 			}
 		}
