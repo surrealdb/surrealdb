@@ -117,6 +117,38 @@ are **empty**, and numeric expectations are type-blind: `3` is satisfied by
 `3f` and `3dec`, so pin a type with `type::is_int(...)` rather than by writing
 the number.
 
+### Testing denied permissions
+
+**Permission tests must assert the effect on state, never the mere absence of an
+error.** A write denied by table-level `PERMISSIONS` returns `OK` with an
+empty/filtered result — it does not throw (see `SECURITY_GUIDE.md` § Data Write
+Operations). A test that discards the result and checks only "did it throw" cannot
+tell that response apart from a `WHERE` that matched nothing, or (since `SELECT`
+permission on a write is checked after the write completes) a write that succeeded
+but is unreadable to the caller — so such a test passes in all of these cases,
+including the one it means to catch. Assert what the write actually did instead.
+A test session is fixed for the whole file (`[env].auth`/`signin`), so re-reading
+as a different, more privileged principal isn't available mid-test. Use one of:
+- grant the test principal itself enough `SELECT` permission to observe the
+  written record or field directly (e.g.
+  `access/record/create_permission_vs_data_clause.surql` does this with
+  `SELECT * FROM pcond` to confirm a conditionally-denied create left no row),
+  or
+- a side effect that only runs *after* the write is stored, such as a
+  `DEFINE EVENT` on the target table: the `Create` pipeline runs table-level
+  `PERMISSIONS FOR create` (`CheckCreatePermissions`) and stores the record
+  (`StoreRecordData`) before firing events (`ProcessTableEvents`), so a
+  denied create cannot trigger one. Prefer this when granting the principal
+  `SELECT` on the target would itself change the scenario under test.
+
+Either way, a side effect is only as good as *when* it runs. A `VALUE`/`SET`
+data clause with a side effect (e.g. `CREATE pnone:1 SET spawn = (CREATE
+log).id`) is not a substitute for either technique above: a conditional
+(`WHERE`-based) permission evaluates its predicate only after the data clause
+has already run, so the side effect fires whether the write is ultimately
+denied or accepted (see the same test's `pcond` case) — it proves the data
+clause ran, never whether the target write took effect.
+
 ## Upgrade Tests (`language-tests/tests/upgrade/*.surql`)
 
 `tests/upgrade/README.md` is the full description of the harness: the axes, the

@@ -987,6 +987,100 @@ relate), Key API, field evaluation, events, views, cascades
 
 - All write operations must enforce the appropriate table-level permission (create,
   update, or delete) for the authenticated principal.
+- A candidate row that table-level `PERMISSIONS` denies must be filtered from
+  the result the same way as one a `WHERE` clause rejected, not surfaced with
+  an error — table-level permission enforcement is a per-record filter, not a
+  statement-level gate. This is what a rows-shaped `UPDATE`/`DELETE`/`UPSERT`-
+  update reduces to when every candidate row is denied (`[]`, the same shape
+  as a `WHERE` that matched nothing or a target record that does not exist);
+  a statement whose predicate accepts some rows and denies others returns the
+  accepted subset that survives the statement's own subsequent output
+  filtering (table-level `SELECT` permission, `RETURN NONE`, `OPTION IMPORT`),
+  not necessarily `[]` and not necessarily every accepted row either — those
+  same filters can still reduce a partially-accepted write down to `[]`.
+  `CREATE` and `UPSERT`'s create branch have no
+  "record does not exist" comparator — targeting a nonexistent record is their
+  normal, successful case (`StoreRecordData` in `exec/vm/write_storage.rs`
+  stores it and `OutputWrite` returns the new
+  row) — so denial for them means returning `OK` with an empty/filtered result
+  (`[]`, or `NONE` for an `ONLY` form), never the new row. Denial itself must
+  never raise an error: erroring would let a caller distinguish "record exists
+  but is denied" from "record does not exist," the same existence-oracle
+  `SELECT` permission enforcement already closes (see Access Control
+  Enforcement, above). This covers only how the permission engine itself signals
+  a denial — a write can still error for an unrelated reason reached before the
+  permission engine ever runs, e.g. a `CREATE ... SET x = THROW 'boom'` against
+  a *conditional* (`Specific`) create permission: `CheckPermissionsQuickCreate`
+  (`exec/vm/ir_lower/stage.rs`, `exec/vm/write_gate.rs`) can only short-circuit
+  a `GateClause::None` before the data
+  clause runs, because a `Specific` predicate typically reads the record's own
+  fields and needs the data clause to have populated them first, so the `THROW`
+  in the data clause runs — and propagates — before `CheckCreatePermissions`
+  gets a chance to deny the write.
+
+  The guarantee also covers only a `Specific` predicate that itself evaluates
+  cleanly to true or false — not one that errors. `GateInstr::Judge`
+  (`exec/vm/write_gate.rs`) propagates a predicate's own error (a `THROW` in the
+  `PERMISSIONS FOR update`/`delete` clause, or a computed field the predicate
+  reads that throws) rather than converting it to a denial. `UPDATE` and
+  `DELETE` reach `CheckRecordExists` (`exec/vm/ir_lower/stage.rs`,
+  `exec/vm/write_storage.rs`) directly, which has
+  already discarded a nonexistent target by branching to the stage's `skip`
+  target the same way denial does, *before* the permission predicate runs —
+  so an erroring predicate on an existing record propagates a real error where
+  the identical write against a nonexistent record stays silent, reopening the
+  existence oracle this invariant otherwise closes for any schema whose
+  `PERMISSIONS FOR update`/`delete` clause (or a field it reads) can throw.
+  `UPSERT` and `RELATE` do not share this: both dispatch on whether the target
+  already exists (`Upsert` and `Relate` in `exec/operators/write/plan.rs`) and
+  route a missing one to their create branch instead, so their update branch's
+  own `CheckRecordExists` only ever runs against a target already confirmed (or,
+  for `UPSERT`, a create attempt that failed because the target turned out to
+  exist) to exist.
+
+  A caller cannot treat "no error" as "the write took effect": because
+  `SELECT` permission on the written record is checked *after* the write
+  completes, a denied write and a write that succeeded but is unreadable to
+  the caller produce the same empty/filtered response. A test asserting only
+  that a write "did not throw" therefore proves nothing about whether it was
+  actually applied, denied, or matched no rows — it must assert the effect on
+  state instead.
+- Field-level `PERMISSIONS FOR create`/`update` denial is not the empty-result
+  case above: `SchemaInstr::Permit` (`exec/vm/write_schema.rs`, emitted by
+  `ProcessTableFields` in `exec/vm/ir_lower/stage.rs`) reverts only the
+  denied field to its prior value (or leaves it absent on create) and lets the
+  rest of the write proceed — the field denial by itself does not discard the
+  row. Whether the row appears in the response at all, and whether the
+  written field's own value is even present to inspect, is governed
+  separately: table-level `SELECT` permission is still checked post-write
+  (`CheckSelectPermissions`, `exec/vm/ir_lower/stage.rs`) and can filter the row
+  entirely, `RETURN NONE` or `OPTION IMPORT` suppress row output regardless
+  (`OutputWrite`, `exec/vm/ir_lower/stage.rs`), and `WriteInstr::ShowImage`
+  (`exec/vm/write.rs`, lowered by `OutputWrite`) strips the written field itself
+  when it carries its own
+  `PERMISSIONS FOR select NONE`, independent of the row's own visibility.
+  Comparing the field's returned value therefore distinguishes field-level
+  denial from an accepted write on any post-mutation output where the caller
+  can select that field: `RETURN AFTER` (the default), an explicit projection
+  naming the field (`WriteOutput::Projection`, `exec/vm/ir_lower/stage.rs`,
+  evaluated against the post-mutation document even without `AFTER`), a direct
+  re-read, or `RETURN DIFF` (whose patch names the field only if its value
+  actually changed). `RETURN BEFORE` is the one output that cannot be used this
+  way — it shows the pre-write value whether the field write was accepted or
+  reverted. Where no post-mutation output is available, use a different
+  observable post-write state check instead. Table-level predicates
+  re-evaluated against the record *after* the field-level revert can also
+  flip which write is visible, rather than just which field value comes
+  back: with `PERMISSIONS FOR select WHERE flag = false`, a denied update
+  that would have set `flag = true` reverts it to `false` and the row stays
+  visible, while the same update *accepted* makes the row disappear.
+  `update`'s own table permission recheck (`RecheckUpdatePermissions`,
+  `exec/vm/ir_lower/stage.rs`, evaluated after field processing for a `Specific`
+  predicate) behaves the same way for the opposite reason: with
+  `PERMISSIONS FOR update WHERE flag = false`, accepting a field write that
+  sets `flag = true` now fails this recheck and drops the row, while denying
+  that write reverts `flag` to `false`, passes the recheck, and can return
+  the row.
 - Execution context (NS/DB/session) must be resolved at write initiation and cannot
   drift during the document processing pipeline, including retry paths.
 - Field-level PERMISSIONS FOR create/update must be evaluated for every field on
