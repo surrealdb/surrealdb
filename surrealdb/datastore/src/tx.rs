@@ -17540,6 +17540,7 @@ mod save_point_buffer_tests {
 			&record(key),
 			Value::None,
 			Value::from(key),
+			0,
 		);
 	}
 
@@ -17569,7 +17570,9 @@ mod save_point_buffer_tests {
 				.changes()
 				.unwrap()
 				.into_iter()
-				.flat_map(|(_, _, _, value)| LiveEvents::kv_decode_value(&value, ()).unwrap().0)
+				.flat_map(|(_, _, _, value)| {
+					LiveEvents::kv_decode_value(&value, ()).unwrap().events
+				})
 				.map(|event| event.id)
 				.collect(),
 			None => Vec::new(),

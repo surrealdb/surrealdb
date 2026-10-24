@@ -146,6 +146,17 @@ impl LiveEvents {
 			after,
 		});
 	}
+
+	/// Append `other`'s events and registrations after `self`'s, shifting each
+	/// registration's prefix count by the events already in `self`.
+	pub fn extend(&mut self, other: Self) {
+		let base = u32::try_from(self.events.len()).unwrap_or(u32::MAX);
+		self.events.extend(other.events);
+		self.registered.extend(other.registered.into_iter().map(|reg| Registration {
+			id: reg.id,
+			after: reg.after.saturating_add(base),
+		}));
+	}
 }
 
 /// A prepared write: (namespace, database, table, serialized [`LiveEvents`]).
@@ -216,14 +227,15 @@ impl LiveEventBuffer {
 	/// buffered for the table so far. Nothing is noted for a table with no
 	/// change buffered: no change precedes the subscription then.
 	pub fn note_registration(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, id: Uuid) {
-		let mut buffer = self.buffer.lock();
-		if let Some(events) = buffer.get_mut(&BufferKey {
+		let mut frames = self.buffer.lock();
+		let key = BufferKey {
 			ns,
 			db,
 			tb: tb.clone(),
-		}) && !events.events.is_empty()
-		{
-			events.note_registration(id);
+		};
+		if frames.iter().any(|frame| frame.get(&key).is_some_and(|e| !e.events.is_empty())) {
+			let frame = frames.last_mut().expect("the transaction frame is always present");
+			frame.entry(key).or_default().note_registration(id);
 		}
 	}
 
@@ -236,7 +248,7 @@ impl LiveEventBuffer {
 	/// buffered in.
 	pub fn changes(&self) -> Result<Vec<PreparedWrite>> {
 		let mut frames = self.buffer.lock();
-		fold_frames(&mut frames, |entry: &mut LiveEvents, events| entry.0.extend(events.0));
+		fold_frames(&mut frames, LiveEvents::extend);
 		let buffer = frames.first().expect("the transaction frame is always present");
 		if buffer.is_empty() {
 			return Ok(Vec::new());
@@ -268,7 +280,7 @@ impl LiveEventBuffer {
 			let parent = frames.last_mut().expect("popping left at least one frame");
 			for (key, events) in top {
 				match parent.get_mut(&key) {
-					Some(entry) => entry.0.extend(events.0),
+					Some(entry) => entry.extend(events),
 					None => {
 						parent.insert(key, events);
 					}
@@ -301,7 +313,15 @@ mod tests {
 
 	/// Buffer the creation of `t:key`.
 	fn create(buffer: &LiveEventBuffer, key: &str) {
-		buffer.buffer_record_change(NS, DB, &table(), record(key), Value::None, Value::from(key));
+		buffer.buffer_record_change(
+			NS,
+			DB,
+			&table(),
+			record(key),
+			Value::None,
+			Value::from(key),
+			0,
+		);
 	}
 
 	/// The records the buffer would flush an event for, in the order it holds
@@ -311,7 +331,7 @@ mod tests {
 			.changes()
 			.unwrap()
 			.into_iter()
-			.flat_map(|(_, _, _, value)| LiveEvents::kv_decode_value(&value, ()).unwrap().0)
+			.flat_map(|(_, _, _, value)| LiveEvents::kv_decode_value(&value, ()).unwrap().events)
 			.map(|event| event.id)
 			.collect()
 	}
@@ -381,5 +401,48 @@ mod tests {
 		buffer.clear();
 		assert_eq!(buffer.buffer.lock().len(), 1);
 		assert!(flushed(&buffer).is_empty());
+	}
+
+	/// A subscription registered inside a save point counts the surviving
+	/// events that preceded it across enclosing frames, and a rolled-back save
+	/// point drops the registrations made inside it along with its events.
+	#[test]
+	fn registrations_in_save_points_count_surviving_preceding_events() {
+		let buffer = LiveEventBuffer::new();
+		let discarded = Uuid::from_u128(1);
+		let survived_before_child_write = Uuid::from_u128(2);
+		let survived_after_child_write = Uuid::from_u128(3);
+
+		create(&buffer, "first");
+		buffer.push_save_point();
+		create(&buffer, "undone");
+		buffer.note_registration(NS, DB, &table(), discarded);
+		buffer.rollback_save_point();
+
+		buffer.push_save_point();
+		buffer.note_registration(NS, DB, &table(), survived_before_child_write);
+		create(&buffer, "second");
+		buffer.note_registration(NS, DB, &table(), survived_after_child_write);
+		buffer.release_save_point();
+		create(&buffer, "third");
+
+		let writes = buffer.changes().unwrap();
+		assert_eq!(writes.len(), 1);
+		let decoded = LiveEvents::kv_decode_value(&writes[0].3, ()).unwrap();
+		let ids: Vec<RecordId> = decoded.events.into_iter().map(|e| e.id).collect();
+		assert_eq!(ids, vec![record("first"), record("second"), record("third")]);
+		assert_eq!(
+			decoded.registered,
+			vec![
+				Registration {
+					id: survived_before_child_write,
+					after: 1,
+				},
+				Registration {
+					id: survived_after_child_write,
+					after: 2,
+				},
+			]
+		);
 	}
 }

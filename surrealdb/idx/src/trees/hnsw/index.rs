@@ -1735,22 +1735,22 @@ impl HnswIndex {
 		// before its documents are read. Where the `ef` candidates still name
 		// fewer than `k` records, the walk is retried with a doubled `ef` until
 		// the builder holds `k`, the walk keeps fewer candidates than asked, or
-		// the retry ceiling is reached. A walk that keeps fewer than `ef` never
-		// evicted one, so a wider pass would repeat it: the unfiltered walk
-		// has reached every element it can, and the filtered walk, which keeps
-		// admitted elements only, stops once its next candidate is farther than
-		// its farthest admission, a rule that does not involve `ef` while it
-		// holds fewer than `ef`. A retry re-offers the earlier candidates, which
-		// the builder and the filter's verdict cache absorb without a second
-		// slot or a second evaluation.
+		// the retry ceiling is reached. Both chains end the walk on distance only
+		// once `ef` candidates are held, so a walk that keeps fewer than `ef`
+		// never stopped on distance and never evicted a candidate: it has
+		// expanded every reachable element and a wider pass would repeat it. A
+		// retry re-offers the earlier candidates, which the builder and the
+		// filter's verdict cache absorb without a second slot or a second
+		// evaluation.
 		let ceiling = search.ef.saturating_mul(OVERQUERY_CEILING_FACTOR);
 		let mut ef = search.ef;
 		loop {
 			let pass = HnswSearch::new(search.pt.clone(), search.k.max(ef), ef);
 			// The allow-list routes through the filtered chain even without a
-			// truthy filter: the unfiltered chain suppresses elements from the
-			// traversal frontier itself, which is fine for a handful of pending
-			// docs but would disconnect the walk under a selective bitmap.
+			// truthy filter: only that chain admits candidates document by
+			// document, which a bitmap over doc-IDs needs. Both chains expand
+			// through the elements they do not admit and stop on distance only
+			// once `ef` results are held.
 			let neighbours = if filter.is_some() || allow_list.is_some() {
 				hnsw.knn_search_with_filter(ctx, &pass, filter, pending_docs.as_ref(), allow_list)
 					.await?
