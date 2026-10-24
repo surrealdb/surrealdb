@@ -1809,13 +1809,15 @@ mod tests {
 		use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 		use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
 		use crate::exec::ir::iface::region_kind::ClauseRole;
-		use crate::exec::ir::iface::statements::{WriteForm, WriteOutput};
+		use crate::exec::ir::iface::statements::{
+			OutputShape, WriteFlags, WriteForm,
+		};
 		use crate::exec::ir::iface::types::TypeKnowledge;
 		use crate::exec::ir::logical::ops::{
-			LoopSink, WriteAttrs, WriteBody, WriteBranching, WriteStored,
+			WriteAttrs, WriteBody, WriteDerived, WriteGates, WriteImage, WriteStored,
 		};
 		use crate::exec::ir::phys::ops::{
-			PhysWriteAttrs, PipelineAttrs, WriteCut, WriteSubjectsShape,
+			Batch, PhysWriteAttrs, PipelineAttrs, PipelineId, WriteSubjectsShape,
 		};
 
 		let mut ir = Ir::new(
@@ -1841,7 +1843,7 @@ mod tests {
 					results: smallvec![TypeKnowledge::Unknown],
 					frame: FrameId::new(0),
 					snapshot: SnapshotId::new(0),
-					loc,
+					loc: loc.clone(),
 				},
 			)
 			.expect("scan");
@@ -1850,36 +1852,41 @@ mod tests {
 			.create(
 				InsertPoint::End(top),
 				OpSpec {
-					kind: OpKind::Phys(PhysOp::Pipeline(Box::new(PipelineAttrs::default()))),
+					kind: OpKind::Phys(PhysOp::Pipeline(Box::new(PipelineAttrs {
+						id: PipelineId(0),
+						edges: SmallVec::new(),
+						logical: None,
+					}))),
 					operands: SmallVec::new(),
 					results: smallvec![TypeKnowledge::Unknown],
 					frame: FrameId::new(0),
 					snapshot: SnapshotId::new(0),
-					loc,
+					loc: loc.clone(),
 				},
 			)
 			.expect("pipeline");
-		let pipe_region =
+		let (_, pipe_block) =
 			rw.create_region(pipeline, RegionKind::Pipeline, &[]).expect("pipe region");
-		let pipe_block = rw.ir().region(pipe_region).expect("pipe region").blocks[0];
 		let loop_op = rw
 			.create(
 				InsertPoint::End(pipe_block),
 				OpSpec {
 					kind: OpKind::Phys(PhysOp::Loop {
 						kind: LoopKind::Write,
-						sink: LoopSink::Write(WriteForm::Update),
-						cut: Some(WriteCut {
-							stage: 1,
-							compute_reads_data: false,
-							encode_at_cut: true,
-						}),
+						first: false,
+						batch: Batch {
+							max_iterations: 1,
+							max_bytes: 1,
+						},
+						unroll: 1,
+						value: false,
+						step: None,
 					}),
 					operands: smallvec![scan_rows],
 					results: smallvec![TypeKnowledge::Unknown],
 					frame: FrameId::new(0),
 					snapshot: SnapshotId::new(0),
-					loc,
+					loc: loc.clone(),
 				},
 			)
 			.expect("loop");
@@ -1893,7 +1900,7 @@ mod tests {
 				results: SmallVec::new(),
 				frame: FrameId::new(0),
 				snapshot: SnapshotId::new(0),
-				loc,
+				loc: loc.clone(),
 			},
 		)
 		.expect("yield");
@@ -1905,21 +1912,17 @@ mod tests {
 					kind: OpKind::Phys(PhysOp::Write(Box::new(PhysWriteAttrs {
 						write: WriteAttrs {
 							form: WriteForm::Update,
-							return_output: WriteOutput::Project,
-							has_data_expr: false,
-							data_patch: false,
-							has_where_cond: false,
-							where_is_truthy_const: false,
 							only: false,
-							retry: false,
-							timeout: false,
-							relation: false,
-							body: WriteBody {
-								branching: WriteBranching::Sole,
-								first: Vec::new(),
-								second: Vec::new(),
-							},
+							output: OutputShape::Fields,
+							with: None,
+							explain: None,
+							flags: WriteFlags::default(),
+							body: WriteBody::default(),
+							gates: WriteGates::default(),
+							image: WriteImage::default(),
 							stored: WriteStored::default(),
+							derived: WriteDerived::default(),
+							into_text: None,
 							statement: None,
 						},
 						subjects: WriteSubjectsShape::Rows,
@@ -1928,14 +1931,13 @@ mod tests {
 					results: smallvec![TypeKnowledge::Unknown],
 					frame: FrameId::new(0),
 					snapshot: SnapshotId::new(0),
-					loc,
+					loc: loc.clone(),
 				},
 			)
 			.expect("write");
-		let ret_region = rw
+		let (_, ret_block) = rw
 			.create_region(write_op, RegionKind::Clause(ClauseRole::ReturnClause), &[])
 			.expect("return region");
-		let ret_block = rw.ir().region(ret_region).expect("return region").blocks[0];
 		let subquery = rw
 			.create(
 				InsertPoint::End(ret_block),

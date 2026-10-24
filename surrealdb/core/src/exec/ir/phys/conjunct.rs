@@ -767,11 +767,17 @@ mod tests {
 	use crate::exec::ir::core::facts::FactCache;
 	use crate::exec::ir::core::ir::IrScope;
 	use crate::exec::ir::expr::ops::{ConvertAttrs, ConvertMode, ConvertSite, OnFail};
+	use crate::exec::ir::core::location::{LocOrigin, Location};
 	use crate::exec::ir::iface::ids::{BlockId, FrameId, SnapshotId};
-	use crate::exec::ir::iface::loc::SourceLoc;
 	use crate::exec::ir::iface::types::TypeKnowledge;
 	use crate::expr::Kind;
 	use crate::expr::logical::LogicalPostfixOperator;
+
+	const LOC: Location = Location {
+		stmt: 0,
+		span: None,
+		origin: LocOrigin::Synthesized,
+	};
 
 	fn make_where_ir() -> (Ir, BlockId, ValueId) {
 		let mut ir = Ir::new(
@@ -791,9 +797,9 @@ mod tests {
 						kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true)))),
 						operands: SmallVec::new(),
 						results: smallvec![TypeKnowledge::Unknown],
-						frame: FrameId::ROOT,
-						snapshot: SnapshotId::CURRENT,
-						loc: SourceLoc::NONE,
+						frame: FrameId::new(0),
+						snapshot: SnapshotId::new(0),
+						loc: LOC,
 					},
 				)
 				.expect("src");
@@ -804,9 +810,9 @@ mod tests {
 					kind: OpKind::Phys(PhysOp::Filter),
 					operands: smallvec![src_val],
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("filter")
@@ -833,9 +839,9 @@ mod tests {
 					kind: OpKind::Expr(kind),
 					operands: operands.iter().copied().collect(),
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("emit op");
@@ -880,9 +886,9 @@ mod tests {
 						}),
 						operands: smallvec![eq_a],
 						results: smallvec![TypeKnowledge::Unknown],
-						frame: FrameId::ROOT,
-						snapshot: SnapshotId::CURRENT,
-						loc: SourceLoc::NONE,
+						frame: FrameId::new(0),
+						snapshot: SnapshotId::new(0),
+						loc: LOC,
 					},
 				)
 				.expect("or op");
@@ -898,9 +904,9 @@ mod tests {
 						}),
 						operands: smallvec![one, zero],
 						results: smallvec![TypeKnowledge::Unknown],
-						frame: FrameId::ROOT,
-						snapshot: SnapshotId::CURRENT,
-						loc: SourceLoc::NONE,
+						frame: FrameId::new(0),
+						snapshot: SnapshotId::new(0),
+						loc: LOC,
 					},
 				)
 				.expect("div");
@@ -911,9 +917,9 @@ mod tests {
 					kind: OpKind::Expr(ExprOp::Yield),
 					operands: smallvec![div_val],
 					results: SmallVec::new(),
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("yield");

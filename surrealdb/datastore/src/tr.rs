@@ -633,6 +633,11 @@ impl Transactor {
 		self.absence.flush_all(self.inner.as_ref()).await
 	}
 
+	/// Whether this transaction holds deferred create checks ([`crate::absence`]).
+	pub fn holds_creates(&self) -> bool {
+		self.absence.holds()
+	}
+
 	/// Update a key in the datastore if the current value matches a condition.
 	#[cfg_attr(
 		feature = "observability",

@@ -1417,11 +1417,11 @@ mod tests {
 	use crate::exec::ir::core::ir::{Ir, IrScope};
 	use crate::exec::ir::egraph::analysis::IrAnalysis;
 	use crate::exec::ir::egraph::decl::{
-		BinderId, ClassRef, ENodeSnapshot, LeafId, NodeIdentity, NodeShape, StmtMap,
+		BinderId, ClassRef, ENodeSnapshot, EpochKey, LeafId, NodeIdentity, NodeShape, StmtMap,
 	};
 	use crate::exec::ir::egraph::extract::Term;
 	use crate::exec::ir::egraph::lang::ENode;
-	use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, SnapshotId, WriteEpoch};
+	use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId, SnapshotId};
 	use crate::exec::ir::iface::region_kind::RegionKind;
 
 	fn dummy_snapshot(shape: NodeShape) -> ENodeSnapshot {
@@ -1430,7 +1430,7 @@ mod tests {
 				shape,
 				frame: FrameId::new(0),
 				snapshot: SnapshotId::new(0),
-				epoch: WriteEpoch::INITIAL,
+				epoch: EpochKey::None,
 			},
 			kids: smallvec![],
 		}

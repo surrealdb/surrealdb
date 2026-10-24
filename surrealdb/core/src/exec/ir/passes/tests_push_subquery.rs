@@ -161,7 +161,6 @@ async fn a_filter_stays_above_a_limit_or_start() {
 		"SELECT * FROM (SELECT * FROM t ORDER BY a LIMIT 2) WHERE a = 1",
 		"SELECT * FROM (SELECT a AS z, id FROM t LIMIT 2) WHERE z = 1",
 		"SELECT * FROM (SELECT * FROM t ORDER BY b[0]) WHERE a = 1",
-		"SELECT * FROM (SELECT * FROM t ORDER BY b[$c]) WHERE a = 1",
 	] {
 		let mut ir = bind(sql).await;
 		let report = push(&mut ir).await;

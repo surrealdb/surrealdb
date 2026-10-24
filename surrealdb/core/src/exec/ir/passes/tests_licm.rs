@@ -370,6 +370,22 @@ async fn a_field_guard_holds_no_candidate() {
 	assert!(candidates(&ir, &mut FactCache::new(), &env.cx(), stmt).is_empty());
 }
 
+/// Whether `value` or any operand of the op defining `value` is a block argument (the row).
+fn reads_row(ir: &Ir, value: ValueId) -> bool {
+	match ir.value(value).map(|data| data.def) {
+		Some(ValueDef::BlockArg {
+			..
+		}) => true,
+		Some(ValueDef::OpResult {
+			op,
+			..
+		}) => ir
+			.op(op)
+			.is_some_and(|data| data.operands.iter().any(|operand| reads_row(ir, *operand))),
+		None => false,
+	}
+}
+
 /// An infallible invariant conjunct moves in front of a total row conjunct written before it,
 /// rebuilding the predicate as a lazy `AND` chain.
 #[tokio::test]
@@ -378,16 +394,15 @@ async fn hoist_leading_reorders_infallible_invariant_ahead_of_total_row_conjunct
 	let mut ir = bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 1").await;
 	let before = where_chain(&ir);
 	assert_eq!(before.len(), 2);
-	let doc = OpTag::Expr(ExprTag::Doc);
-	assert!(computes(&ir, before[0], doc));
-	assert!(!computes(&ir, before[1], doc));
+	assert!(reads_row(&ir, before[0]));
+	assert!(!reads_row(&ir, before[1]));
 
 	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 1);
 	let after = where_chain(&ir);
 	assert_eq!(after.len(), 2);
-	assert!(!computes(&ir, after[0], doc));
-	assert!(computes(&ir, after[1], doc));
+	assert!(!reads_row(&ir, after[0]));
+	assert!(reads_row(&ir, after[1]));
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 
 	let again = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
@@ -431,15 +446,14 @@ async fn hoist_leading_keeps_a_guarding_conjunct_ahead() {
 		bind("SELECT VALUE $this FROM [1] WHERE $this = 2 AND 1 = 0 AND <int>'x' = 1").await;
 	let before = where_chain(&ir);
 	assert_eq!(before.len(), 3);
-	let doc = OpTag::Expr(ExprTag::Doc);
 
 	let report = run(&HoistLeadingConjuncts, &mut ir, &PassConfig::RELEASE).await;
 	assert_eq!(report.rewrites, 1);
 	let after = where_chain(&ir);
 	assert_eq!(after.len(), 3);
-	assert!(!computes(&ir, after[0], doc));
+	assert!(!reads_row(&ir, after[0]));
 	assert!(!computes(&ir, after[0], CONVERT));
-	assert!(computes(&ir, after[1], doc));
+	assert!(reads_row(&ir, after[1]));
 	assert!(computes(&ir, after[2], CONVERT));
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the container verifies");
 }

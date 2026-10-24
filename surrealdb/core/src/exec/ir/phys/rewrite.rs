@@ -453,7 +453,7 @@ fn order_delivered(ir: &Ir, sort: OpId) -> bool {
 			}
 			let forward = scan.direction == Direction::Forward;
 			let eq_len = match &scan.access {
-				crate::exec::index::access_path::BTreeAccess::Equality(values) => values.len(),
+				crate::exec::index::access_path::BTreeAccess::Equality(_) => 1,
 				crate::exec::index::access_path::BTreeAccess::Compound {
 					prefix,
 					..
@@ -1497,6 +1497,9 @@ fn coarse_cutoff_safe(
 					}
 				})
 			}
+			Some(PhysOp::Enforced {
+				..
+			}) => true,
 			Some(_) | None => false,
 		}
 	});
@@ -1537,7 +1540,9 @@ fn region_is_total_on_key_range(
 							&& region_is_total_on_key_range(ir, *sub, root_region, key)
 					});
 			}
-			if matches!(
+			if matches!(expr, ExprOp::Yield) {
+				true
+			} else if matches!(
 				expr,
 				ExprOp::Field {
 					..
@@ -1949,7 +1954,7 @@ mod tests {
 		assert_eq!(
 			key_range_coarse_cutoff(
 				setup,
-				"SELECT n FROM tick WHERE feed = 'f' ORDER BY at LIMIT 2"
+				"SELECT n FROM tick WHERE id[0] = 'f' ORDER BY id[1] LIMIT 2"
 			)
 			.await,
 			Some(CoarseCutoff {
@@ -1960,7 +1965,7 @@ mod tests {
 		assert_eq!(
 			key_range_coarse_cutoff(
 				setup,
-				"SELECT n FROM tick WHERE feed = 'f' AND <int>bad > 0 ORDER BY at LIMIT 2"
+				"SELECT n FROM tick WHERE id[0] = 'f' AND <int>bad > 0 ORDER BY id[1] LIMIT 2"
 			)
 			.await,
 			None
@@ -1968,7 +1973,7 @@ mod tests {
 		assert_eq!(
 			key_range_coarse_cutoff(
 				setup,
-				"SELECT n FROM tick WHERE feed = 'f' AND 1 / n > 0 ORDER BY at LIMIT 2"
+				"SELECT n FROM tick WHERE id[0] = 'f' AND 1 / n > 0 ORDER BY id[1] LIMIT 2"
 			)
 			.await,
 			None
@@ -1976,7 +1981,7 @@ mod tests {
 		assert_eq!(
 			key_range_coarse_cutoff(
 				setup,
-				"SELECT n FROM tick WHERE feed = 'f' ORDER BY at, <int>bad LIMIT 2"
+				"SELECT n, <int>bad AS k FROM tick WHERE id[0] = 'f' ORDER BY id[1], k LIMIT 2"
 			)
 			.await,
 			None

@@ -1583,7 +1583,7 @@ mod tests {
 			("UPDATE t SET x = 1 RETURN rand()", ChainRefusal::Entropy),
 			("UPDATE t SET x = 1 RETURN sequence::nextval('s')", ChainRefusal::AdvancesState),
 			("UPDATE t SET x = 1 RETURN sleep(1ms)", ChainRefusal::Blocks),
-			("UPDATE t SET x = 1 RETURN fn::f()", ChainRefusal::Opaque),
+			("UPDATE t SET x = 1 RETURN fn::f()", ChainRefusal::Writes),
 			("UPDATE t SET x = 1 RETURN http::get('http://localhost/')", ChainRefusal::External),
 			("UPDATE t SET x = 1 RETURN (CREATE log:1)", ChainRefusal::Writes),
 		] {
@@ -1610,29 +1610,28 @@ mod tests {
 			span: None,
 			origin: LocOrigin::Synthesized,
 		};
-		let computed_region = {
+		let (computed_region, deref) = {
 			let mut rw = Rewriter::new(&mut ir, &mut facts);
-			let region = rw
+			let (region, block) = rw
 				.create_region(
 					write_op,
 					RegionKind::FieldFrame(FieldRole::Computed),
 					&[TypeKnowledge::Unknown],
 				)
 				.expect("computed region");
-			let block = rw.ir().region(region).expect("region").blocks[0];
 			let doc = rw.ir().block(block).expect("block").args[0];
 			let deref = rw
 				.create(
 					InsertPoint::End(block),
 					OpSpec {
 						kind: OpKind::Expr(ExprOp::Deref {
-							fields: None,
+							table_hint: None,
 						}),
 						operands: smallvec::smallvec![doc],
 						results: smallvec::smallvec![TypeKnowledge::Unknown],
 						frame: FrameId::new(0),
 						snapshot: SnapshotId::new(0),
-						loc,
+						loc: loc.clone(),
 					},
 				)
 				.expect("deref");
@@ -1645,25 +1644,27 @@ mod tests {
 					results: SmallVec::new(),
 					frame: FrameId::new(0),
 					snapshot: SnapshotId::new(0),
-					loc,
+					loc: loc.clone(),
 				},
 			)
 			.expect("yield");
-			region
+			(region, deref)
 		};
 		let held = of_with(&ir, &mut facts, &default_cx(&ir), loop_op).expect("judged");
 		assert!(held.compute_reads_data, "the computed field reads stored data");
 		assert!(held.cut_at_marks, "a data read alone keeps the cut at the marks");
 
 		{
+			let _ = computed_region;
 			let mut rw = Rewriter::new(&mut ir, &mut facts);
-			let block = rw.ir().region(computed_region).expect("region").blocks[0];
 			rw.create(
-				InsertPoint::Start(block),
+				InsertPoint::Before(deref),
 				OpSpec {
-					kind: OpKind::Expr(ExprOp::Call(Box::new(Function::Normal(
-						"rand".to_owned(),
-					)))),
+					kind: OpKind::Expr(ExprOp::Call(Box::new(
+						crate::exec::ir::expr::ops::CallAttrs::of(Function::Normal(
+							"rand".to_owned(),
+						)),
+					))),
 					operands: SmallVec::new(),
 					results: smallvec::smallvec![TypeKnowledge::Unknown],
 					frame: FrameId::new(0),

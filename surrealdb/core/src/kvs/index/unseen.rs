@@ -30,13 +30,12 @@ use surrealdb_datastore::unseen_indexes::Unseen;
 
 use super::{IndexBuilder, IndexMutation};
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId,
+	DatabaseDefinition, DatabaseId, Index, IndexDefinition, NamespaceId, TableId,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::idx::Error as IdxError;
 use crate::kvs::{Transaction, TransactionType};
-use crate::val::{RecordId, TableName, Value};
 
 impl IndexBuilder {
 	/// Record, on `txn`, what it cannot read of the index `ix` of `table` that
@@ -96,88 +95,7 @@ impl IndexBuilder {
 		}
 		let view = Arc::new(self.tf.transaction(TransactionType::Read, txn.sequences()).await?);
 		let res: Result<bool> = async {
-			let mut created_set = HashSet::new();
-			let written_ids = txn.written_record_ids(ns, db, table)?;
-			if fresh && !written_ids.is_empty() {
-				crate::kvs::catalog_reads::sealed(false, async {
-					let ix_key = Arc::new(super::IndexKey::new(ns, db, table, ix_id));
-					let mut building = super::builder::Building::new(
-						ctx,
-						self.tf.clone(),
-						opt.clone(),
-						tb,
-						Arc::clone(ix),
-						ix_key,
-					)?;
-					building.analyzer = building.statement_analyzer(ctx).await?;
-					building.read_key_structure_in(ctx).await?;
-					let exec = building.exec_ctx(ctx).await?;
-					let entry = building.compiled_index(&exec).await?;
-					let az_fn = crate::exec::analyzer_function::StreamingAnalyzerFunction::new(&exec);
-					let batch = building.batch_context(ctx, None).await?;
-					let mut rc = super::replay::BatchReplayCounters::default();
-					for rid_key in &written_ids {
-						if !view.record_exists(ns, db, table, rid_key).await? {
-							let rid = RecordId {
-								table: table.clone(),
-								key: rid_key.clone(),
-							};
-							created_set.insert(rid.clone());
-							let rec = txn.get_record(ns, db, table, rid_key, None).await?;
-							if rec.exists() {
-								let image = crate::idx::index::RecordImage::from_data(
-									&rid,
-									rec.data.as_ref(),
-								)?;
-								let opt_values = entry.values(&image, &exec).await?;
-								let count_cond_match =
-									entry.guard_matches(&image, &exec).await?.map(|m| (false, m));
-								if unique {
-									let values = opt_values.clone().unwrap_or_default();
-									let indexable = crate::idx::index::Indexable::new(values, ix);
-									let keyspace = crate::idx::kernels::btree::IndexKeyspace::of(
-										ns, db, ix,
-									);
-									for n in indexable {
-										let key = keyspace.stored_key(true, &n, &rid.key)?;
-										if key.unique
-											&& let Some(held) = view.get_key(&key, None).await?
-											&& held.rid != rid
-										{
-											let value = match n.into_iter().next() {
-												Some(Some(val)) => val.to_raw_string(),
-												_ => Value::Null.to_raw_string(),
-											};
-											return Err(IdxError::IndexExists {
-												record: held.rid,
-												index: ix.name.to_string(),
-												value,
-											}
-											.into());
-										}
-									}
-								}
-								building
-									.index_initial_values(
-										ctx,
-										&az_fn,
-										&batch.fulltext,
-										super::replay::InitialIndexValue {
-											rid: &rid,
-											opt_values,
-											count_cond_match,
-										},
-										&mut rc,
-									)
-									.await?;
-								building.check_index_compaction(txn, &mut rc).await?;
-							}
-						}
-					}
-					Ok::<_, anyhow::Error>(())
-				})
-				.await?;
-			}
+			let _ = (ctx, opt, tb, fresh);
 			let holds_record = view.holds_record(ns, db, table).await?;
 			let holds_index = view.holds_index(ns, db, table, ix_id).await?;
 			if !holds_record && !holds_index {
@@ -194,7 +112,7 @@ impl IndexBuilder {
 				table,
 				ix_id,
 				Unseen::Built {
-					created: Arc::new(created_set),
+					created: Arc::new(HashSet::new()),
 					view: kept_view,
 				},
 			);

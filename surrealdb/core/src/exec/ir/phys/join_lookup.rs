@@ -62,7 +62,8 @@ use super::ops::{IndexLookupAttrs, JoinAttrs, LookupKeyShape, PhysOp, TableScanA
 use super::rewrite::{beneath, keeps_order};
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::core::facts::FactCache;
-use crate::exec::ir::core::ir::{Ir, OpData, Walk, WalkOrder};
+use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
+use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;

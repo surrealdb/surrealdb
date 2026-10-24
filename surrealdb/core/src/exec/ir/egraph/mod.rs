@@ -955,11 +955,11 @@ mod unit_tests {
 	use smallvec::smallvec;
 
 	use super::analysis::{IrAnalysis, SeedInfo};
-	use super::decl::{ClassRef, LeafId, NodeIdentity, NodeShape, OrderSig};
+	use super::decl::{ClassRef, EpochKey, LeafId, NodeIdentity, NodeShape, OrderSig};
 	use super::extract::{PhysChoice, Term};
 	use super::lang::{ENode, snapshot_of};
 	use super::winning_candidate;
-	use crate::exec::ir::iface::ids::{FrameId, OpId, SnapshotId, WriteEpoch};
+	use crate::exec::ir::iface::ids::{FrameId, OpId, SnapshotId};
 
 	fn leaf_node(leaf: u32) -> ENode {
 		ENode {
@@ -969,7 +969,7 @@ mod unit_tests {
 				},
 				frame: FrameId::new(0),
 				snapshot: SnapshotId::new(0),
-				epoch: WriteEpoch::INITIAL,
+				epoch: EpochKey::None,
 			},
 			kids: smallvec![],
 		}

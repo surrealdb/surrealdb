@@ -303,9 +303,9 @@ impl EffectCx<'_> {
 /// lives for the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CxKey {
-	registry: usize,
-	catalog: (u64, &'static str),
-	frames: (u64, usize),
+	pub(crate) registry: usize,
+	pub(crate) catalog: (u64, &'static str),
+	pub(crate) frames: (u64, usize),
 }
 
 /// A lineage no earlier call answered: the identity a catalog or frame table takes when it is

@@ -708,7 +708,19 @@ async fn non_collapsible_statement_if_leaves_container_untouched() {
 	}
 
 	let blocks_before = ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len();
-	fold(&mut ir, &ScriptedFolder::new(), &mut RecordingObserver::default()).await;
+	let env = Env::new();
+	let effects = env.cx();
+	let folder = ScriptedFolder::new();
+	let mut observer = RecordingObserver::default();
+	let mut cx = super::driver::LoCx {
+		ir: &mut ir,
+		facts: &mut facts,
+		folder: &folder,
+		effects: &effects,
+		cfg: &PassConfig::RELEASE,
+		observer: &mut observer,
+	};
+	FoldPass.run(&mut cx).await.expect("FoldPass runs without failing");
 	assert_eq!(ifs(&ir), 1, "the non-collapsible IF stays in place");
 	assert_eq!(ops_of_tag(&ir, OpTag::Logical(LogTag::Block)).len(), blocks_before);
 }
@@ -723,13 +735,12 @@ async fn cross_error_scope_inline_calls_preserves_provenance() {
 
 	use super::driver::NoObserver;
 	use super::inline::InlineCalls;
-	use super::tests_support::literal;
+	use super::tests_support::{literal, request_scope};
 	use crate::catalog::{FunctionDefinition, LogicalBlockBody, LogicalPermissionBody};
+	use crate::exec::ir::build::logical::bind_request;
 	use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, SemanticCatalog};
 	use crate::exec::ir::iface::conversion::EliminationReason;
-	use crate::exec::ir::iface::region_kind::RegionKind;
-	use crate::exec::ir::logical::verify::timestamp_arg;
-	use crate::expr::Function;
+	use crate::exec::ir::{RequestInput, RequestStatement};
 	use crate::expr::statements::DefineStatement;
 
 	struct IdCatalog(Arc<FunctionDefinition>);
@@ -763,17 +774,29 @@ async fn cross_error_scope_inline_calls_preserves_provenance() {
 		permissions_body: LogicalPermissionBody::of(&stmt.permissions),
 		returns: stmt.returns,
 		comment: None,
-		auth_limit: crate::catalog::auth::AuthLimit::default(),
+		auth_limit: crate::catalog::auth::AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	});
 
-	let mut ir = bind("SELECT count(1) FROM [1] GROUP ALL").await;
+	let env = Env::new();
+	let catalog = IdCatalog(def);
+	let base_cx = env.cx();
+	let cx = EffectCx {
+		registry: base_cx.registry,
+		catalog: &catalog,
+		frames: base_cx.frames,
+	};
+	let req_parsed = crate::syn::parse("SELECT count(fn::id(1)) FROM [1] GROUP ALL")
+		.expect("the request parses")
+		.expressions;
+	let request_statements = RequestStatement::of(&req_parsed);
+	let input = RequestInput::request(&request_statements, request_scope());
+	let mut ir = bind_request(&input, &cx).await.expect("the request binds");
+
 	let agg = ops_of_tag(&ir, OpTag::Expr(ExprTag::Agg))[0];
-	let scope_region = ir.op(agg).expect("the agg exists").regions[0];
-	let scope_block = ir.region(scope_region).expect("the error scope exists").blocks[0];
-	let yield_op = *ir.block(scope_block).expect("the block exists").ops.last().expect("a yield");
-	let old_val = ir.op(yield_op).expect("the yield exists").operands[0];
+	let call_op = ops_of_tag(&ir, OpTag::Expr(ExprTag::Call))[0];
+	let old_val = ir.op(call_op).expect("the call exists").operands[0];
 	let old_lit = match ir.value(old_val).expect("the value exists").def {
 		crate::exec::ir::core::value::ValueDef::OpResult {
 			op,
@@ -788,31 +811,11 @@ async fn cross_error_scope_inline_calls_preserves_provenance() {
 	{
 		let mut rw = Rewriter::new(&mut ir, &mut facts);
 		let (_, outer_val) = create(&mut rw, InsertPoint::Before(agg), literal(42), &[], 1);
-		let call_kind = OpKind::Expr(ExprOp::call(Function::Custom("id".to_owned())));
-		let (call_op, call_res) =
-			create(&mut rw, InsertPoint::Before(yield_op), call_kind, &[outer_val[0]], 1);
-		let (_, fn_block) = rw
-			.create_region(
-				call_op,
-				RegionKind::FunctionBody,
-				&[timestamp_arg(), TypeKnowledge::Unknown],
-			)
-			.expect("the function body region is created");
-		let param = rw.ir().block(fn_block).expect("the block exists").args[1];
-		create(&mut rw, InsertPoint::End(fn_block), OpKind::Expr(ExprOp::Yield), &[param], 0);
-		rw.replace_all_uses(old_val, call_res[0]).expect("the yield reads the call");
+		rw.replace_all_uses(old_val, outer_val[0]).expect("the call reads the outer literal");
 		rw.erase(old_lit, EliminationReason::DeadPure).expect("the old literal is erased");
 	}
 
-	let env = Env::new();
 	verify_logical(&ir, &mut FactCache::new(), &env).expect("the initial container verifies");
-	let catalog = IdCatalog(def);
-	let base_cx = env.cx();
-	let cx = EffectCx {
-		registry: base_cx.registry,
-		catalog: &catalog,
-		frames: base_cx.frames,
-	};
 	let passes: Vec<Box<dyn LoPass>> = vec![Box::new(InlineCalls)];
 	let reports = run_passes(
 		&passes,

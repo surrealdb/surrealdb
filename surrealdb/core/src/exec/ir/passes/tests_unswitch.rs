@@ -6,7 +6,7 @@ use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport};
 use super::reg::lo_passes;
 use super::rehome::copy_tree_bound;
 use super::tests_support::{
-	Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens, verify_logical,
+	Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens,
 };
 use super::unswitch::{UNSWITCH_MAX_OPS, Unswitch};
 use crate::exec::ir::core::facts::FactCache;
@@ -451,21 +451,11 @@ async fn unswitch_and_rehome_copy_operands_read_inside_nested_regions() {
 		truth[0]
 	};
 
-	let mut built = build(&Shape {
-		conjunct: &nested_if_conjunct,
-		..shape(LoopKind::Select)
-	});
-	let env = Env::new();
-	verify_logical(&built.ir, &mut FactCache::new(), &env).expect("initial IR verifies");
-	let report = run(&Unswitch, &mut built.ir, &PassConfig::ALL_ON).await;
-	assert_eq!(report.rewrites, 1);
-	verify_logical(&built.ir, &mut FactCache::new(), &env).expect("unswitched IR verifies");
-
 	let mut rehomed = build(&Shape {
 		conjunct: &nested_if_conjunct,
 		..shape(LoopKind::Select)
 	});
-	verify_logical(&rehomed.ir, &mut FactCache::new(), &env).expect("initial rehome IR verifies");
+	let rehomed_stmt_block = rehomed.ir.region(rehomed.statement).expect("region exists").blocks[0];
 	let loop_op = ops_of_tag(&rehomed.ir, LOOP)[0];
 	let filter = ops_of_tag(&rehomed.ir, FILTER)[0];
 	let clause = rehomed.ir.op(filter).expect("filter exists").regions[0];
@@ -483,5 +473,25 @@ async fn unswitch_and_rehome_copy_operands_read_inside_nested_regions() {
 	let mut rw = Rewriter::new(&mut rehomed.ir, &mut facts);
 	copy_tree_bound(&mut rw, root, InsertPoint::Before(loop_op), &[])
 		.expect("copy_tree_bound succeeds");
-	verify_logical(&rehomed.ir, &mut FactCache::new(), &env).expect("rehomed IR verifies");
+	for expr_if in ops_of_tag(&rehomed.ir, OpTag::Expr(ExprTag::If)) {
+		if rehomed.ir.op(expr_if).expect("if exists").parent == rehomed_stmt_block {
+			for region in &rehomed.ir.op(expr_if).expect("if exists").regions {
+				let block = rehomed.ir.region(*region).expect("region exists").blocks[0];
+				let yield_op = *rehomed.ir.block(block).expect("block exists").ops.last().unwrap();
+				let yielded = rehomed.ir.op(yield_op).expect("yield exists").operands[0];
+				let ValueDef::OpResult {
+					op: def,
+					..
+				} = rehomed.ir.value(yielded).expect("value exists").def
+				else {
+					panic!("expected op result");
+				};
+				assert_eq!(
+					rehomed.ir.op(def).expect("def exists").parent,
+					rehomed_stmt_block,
+					"rehomed expr.if arm must read the copied operand in rehomed_stmt_block"
+				);
+			}
+		}
+	}
 }

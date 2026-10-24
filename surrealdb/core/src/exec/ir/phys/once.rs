@@ -376,11 +376,17 @@ mod tests {
 	use crate::exec::ir::iface::catalog::{
 		EffectCx, PhysicalCatalog, SemanticCatalog, default_config,
 	};
+	use crate::exec::ir::core::location::{LocOrigin, Location};
 	use crate::exec::ir::iface::frame::FrameTable;
 	use crate::exec::ir::iface::ids::{FrameId, SnapshotId};
-	use crate::exec::ir::iface::loc::SourceLoc;
 	use crate::expr::BinaryOperator;
 	use crate::val::Value;
+
+	const LOC: Location = Location {
+		stmt: 0,
+		span: None,
+		origin: LocOrigin::Synthesized,
+	};
 
 	struct EmptyCatalog;
 	impl SemanticCatalog for EmptyCatalog {}
@@ -403,9 +409,9 @@ mod tests {
 					kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::Bool(true)))),
 					operands: SmallVec::new(),
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("src");
@@ -417,9 +423,9 @@ mod tests {
 					kind: OpKind::Phys(PhysOp::Filter),
 					operands: smallvec![src_val],
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("filter");
@@ -440,9 +446,9 @@ mod tests {
 					}),
 					operands: smallvec![row],
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("field");
@@ -454,9 +460,9 @@ mod tests {
 					kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
 					operands: SmallVec::new(),
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("one");
@@ -470,9 +476,9 @@ mod tests {
 					}),
 					operands: smallvec![field_a_val, one_val],
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("lhs");
@@ -486,9 +492,9 @@ mod tests {
 					}),
 					operands: smallvec![lhs_val],
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("and");
@@ -503,9 +509,9 @@ mod tests {
 					kind: OpKind::Expr(rhs_kind),
 					operands: rhs_operands,
 					results: smallvec![TypeKnowledge::Unknown],
-					frame: FrameId::ROOT,
-					snapshot: SnapshotId::CURRENT,
-					loc: SourceLoc::NONE,
+					frame: FrameId::new(0),
+					snapshot: SnapshotId::new(0),
+					loc: LOC,
 				},
 			)
 			.expect("rhs");
@@ -516,9 +522,9 @@ mod tests {
 				kind: OpKind::Expr(ExprOp::Yield),
 				operands: smallvec![rhs_val],
 				results: SmallVec::new(),
-				frame: FrameId::ROOT,
-				snapshot: SnapshotId::CURRENT,
-				loc: SourceLoc::NONE,
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc: LOC,
 			},
 		)
 		.expect("lazy yield");
@@ -529,9 +535,9 @@ mod tests {
 				kind: OpKind::Expr(ExprOp::Yield),
 				operands: smallvec![and_val],
 				results: SmallVec::new(),
-				frame: FrameId::ROOT,
-				snapshot: SnapshotId::CURRENT,
-				loc: SourceLoc::NONE,
+				frame: FrameId::new(0),
+				snapshot: SnapshotId::new(0),
+				loc: LOC,
 			},
 		)
 		.expect("where yield");
@@ -542,7 +548,7 @@ mod tests {
 	fn once_keeps_fallible_conjunct_per_row_after_kept_conjunct() {
 		let registry = FunctionRegistry::new();
 		let catalog = EmptyCatalog;
-		let frames = FrameTable::new();
+		let frames = FrameTable::default();
 		let cx = PhysCx {
 			effects: EffectCx {
 				registry: &registry,
@@ -567,9 +573,9 @@ mod tests {
 							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
 							operands: SmallVec::new(),
 							results: smallvec![TypeKnowledge::Unknown],
-							frame: FrameId::ROOT,
-							snapshot: SnapshotId::CURRENT,
-							loc: SourceLoc::NONE,
+							frame: FrameId::new(0),
+							snapshot: SnapshotId::new(0),
+							loc: LOC,
 						},
 					)
 					.expect("n1");
@@ -580,9 +586,9 @@ mod tests {
 							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(0i64)))),
 							operands: SmallVec::new(),
 							results: smallvec![TypeKnowledge::Unknown],
-							frame: FrameId::ROOT,
-							snapshot: SnapshotId::CURRENT,
-							loc: SourceLoc::NONE,
+							frame: FrameId::new(0),
+							snapshot: SnapshotId::new(0),
+							loc: LOC,
 						},
 					)
 					.expect("n0");
@@ -602,7 +608,7 @@ mod tests {
 	fn once_moves_infallible_conjunct_ahead_of_total_kept_conjunct() {
 		let registry = FunctionRegistry::new();
 		let catalog = EmptyCatalog;
-		let frames = FrameTable::new();
+		let frames = FrameTable::default();
 		let cx = PhysCx {
 			effects: EffectCx {
 				registry: &registry,
@@ -627,9 +633,9 @@ mod tests {
 							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1i64)))),
 							operands: SmallVec::new(),
 							results: smallvec![TypeKnowledge::Unknown],
-							frame: FrameId::ROOT,
-							snapshot: SnapshotId::CURRENT,
-							loc: SourceLoc::NONE,
+							frame: FrameId::new(0),
+							snapshot: SnapshotId::new(0),
+							loc: LOC,
 						},
 					)
 					.expect("n1");
@@ -640,9 +646,9 @@ mod tests {
 							kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(2i64)))),
 							operands: SmallVec::new(),
 							results: smallvec![TypeKnowledge::Unknown],
-							frame: FrameId::ROOT,
-							snapshot: SnapshotId::CURRENT,
-							loc: SourceLoc::NONE,
+							frame: FrameId::new(0),
+							snapshot: SnapshotId::new(0),
+							loc: LOC,
 						},
 					)
 					.expect("n2");
