@@ -48,16 +48,19 @@ pub fn bind_select(
 			let mut bound_query =
 				bind_select(&cte.query, catalog, policy, Some(Arc::new(scope.clone())))?;
 
-			if !cte.columns.is_empty() {
-				if cte.columns.len() != bound_query.targets.len() {
+			let folded_cte_name = policy.fold_identifier(&cte.name).into_owned();
+			let folded_cte_columns: Vec<String> =
+				cte.columns.iter().map(|c| policy.fold_identifier(c).into_owned()).collect();
+			if !folded_cte_columns.is_empty() {
+				if folded_cte_columns.len() != bound_query.targets.len() {
 					return Err(PlanError::Custom(format!(
 						"CTE '{}' specifies {} column aliases, but query returns {} columns",
 						cte.name,
-						cte.columns.len(),
+						folded_cte_columns.len(),
 						bound_query.targets.len()
 					)));
 				}
-				for (i, col_name) in cte.columns.iter().enumerate() {
+				for (i, col_name) in folded_cte_columns.iter().enumerate() {
 					bound_query.targets[i].alias = Some(col_name.clone());
 				}
 			} else {
@@ -74,8 +77,8 @@ pub fn bind_select(
 			}
 
 			let bound_cte = BoundCte {
-				name: cte.name.clone(),
-				columns: cte.columns.clone(),
+				name: folded_cte_name,
+				columns: folded_cte_columns,
 				materialized: None,
 				query: Box::new(bound_query),
 			};
@@ -299,7 +302,10 @@ fn bind_table_ref(
 			if name.parts.len() == 1
 				&& let Some(cte) = scope.get_cte(raw_name, policy).cloned()
 			{
-				let exposed_name = alias.clone().unwrap_or_else(|| cte.name.clone());
+				let exposed_name = alias
+					.as_ref()
+					.map(|a| policy.fold_identifier(a).into_owned())
+					.unwrap_or_else(|| cte.name.clone());
 
 				let columns =
 					if cte.query.targets.iter().any(crate::ir::BoundTarget::is_unlisted_wildcard) {
@@ -337,7 +343,7 @@ fn bind_table_ref(
 			}
 
 			let (schema, table_name) = resolve_table_qualified_name(name, policy, Some(catalog))?;
-			let alias_name = alias.clone();
+			let alias_name = alias.as_ref().map(|a| policy.fold_identifier(a).into_owned());
 
 			let relation_index = scope.register_relation(
 				schema.clone(),
@@ -361,14 +367,15 @@ fn bind_table_ref(
 			alias,
 			..
 		} => {
+			let folded_alias = policy.fold_identifier(alias).into_owned();
 			let bound_sub = bind_select(subquery, catalog, policy, scope.parent.clone())?;
-			let relation_index = scope.register_subquery(alias, policy);
+			let relation_index = scope.register_subquery(&folded_alias, policy);
 			scope.relations[relation_index].source_query = Some(Arc::new(bound_sub.clone()));
 
 			Ok(BoundTableSource::Subquery {
 				query: Box::new(bound_sub),
 				relation_index,
-				alias: alias.clone(),
+				alias: folded_alias,
 			})
 		}
 		TableRef::Join {
@@ -385,9 +392,9 @@ fn bind_table_ref(
 					Some(JoinCondition::On(expr)) => {
 						Some(BoundJoinCondition::On(bind_expr(expr, scope, catalog, policy)?))
 					}
-					Some(JoinCondition::Using(cols)) => {
-						Some(BoundJoinCondition::Using(cols.clone()))
-					}
+					Some(JoinCondition::Using(cols)) => Some(BoundJoinCondition::Using(
+						cols.iter().map(|c| policy.fold_identifier(c).into_owned()).collect(),
+					)),
 					None => None,
 				};
 				return Ok(BoundTableSource::Join {
@@ -412,7 +419,9 @@ fn bind_table_ref(
 				Some(JoinCondition::On(expr)) => {
 					Some(BoundJoinCondition::On(bind_expr(expr, scope, catalog, policy)?))
 				}
-				Some(JoinCondition::Using(cols)) => Some(BoundJoinCondition::Using(cols.clone())),
+				Some(JoinCondition::Using(cols)) => Some(BoundJoinCondition::Using(
+					cols.iter().map(|c| policy.fold_identifier(c).into_owned()).collect(),
+				)),
 				None => None,
 			};
 
@@ -433,6 +442,11 @@ pub fn resolve_table_qualified_name(
 ) -> Result<(Option<String>, String), PlanError> {
 	let folded_parts: Vec<String> =
 		name.parts.iter().map(|p| policy.fold_identifier(p).into_owned()).collect();
+	if folded_parts.len() == 2
+		&& crate::catalog::system::is_system_catalog_table(Some(&folded_parts[0]), &folded_parts[1])
+	{
+		return Ok((Some(folded_parts[0].clone()), folded_parts[1].clone()));
+	}
 	crate::namespace::resolve_mysql_table_name(&folded_parts, catalog)
 }
 

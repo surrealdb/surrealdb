@@ -4,7 +4,9 @@ use std::str::FromStr;
 
 use chrono::Timelike as _;
 use rust_decimal::Decimal;
-use surrealdb_sqlplan::array_literal::{ArrayElement, is_array_space, parse_array_literal};
+use surrealdb_sqlplan::array_literal::{
+	ArrayElement, MAX_ARRAY_DIMENSIONS, is_array_space, parse_array_literal,
+};
 use surrealdb_types::{Bytes, Datetime, Number, ToSql, Uuid, Value, Wide};
 
 use super::error::PgError;
@@ -1346,9 +1348,18 @@ fn decode_text(text: &str, oid: i32) -> Result<Value, PgError> {
 	}
 }
 
+const MAX_BINARY_DECODE_DEPTH: usize = MAX_ARRAY_DIMENSIONS;
+
 fn decode_binary(bytes: &[u8], oid: i32) -> Result<Value, PgError> {
+	decode_binary_at(bytes, oid, 0)
+}
+
+fn decode_binary_at(bytes: &[u8], oid: i32, depth: usize) -> Result<Value, PgError> {
+	if depth > MAX_BINARY_DECODE_DEPTH {
+		return Err(param_err(oid, "binary parameter nesting exceeds maximum depth"));
+	}
 	if let Some(elem_oid) = is_array_oid(oid) {
-		return decode_array_binary(bytes, elem_oid);
+		return decode_array_binary(bytes, elem_oid, depth + 1);
 	}
 	let int = |n: usize| -> Result<i64, PgError> {
 		match (n, bytes) {
@@ -1396,7 +1407,11 @@ fn decode_binary(bytes: &[u8], oid: i32) -> Result<Value, PgError> {
 			let days = i32::from_be_bytes(raw);
 			let pg_epoch_date =
 				chrono::NaiveDate::from_ymd_opt(2000, 1, 1).expect("valid epoch date");
-			let nd = pg_epoch_date + chrono::Duration::days(i64::from(days));
+			let delta = chrono::TimeDelta::try_days(i64::from(days))
+				.ok_or_else(|| param_err(oid, "out of range"))?;
+			let nd = pg_epoch_date
+				.checked_add_signed(delta)
+				.ok_or_else(|| param_err(oid, "out of range"))?;
 			let dt = nd.and_hms_opt(0, 0, 0).expect("valid time").and_utc();
 			utc_datetime(dt).ok_or_else(|| param_err(oid, "out of range"))
 		}
@@ -1460,7 +1475,11 @@ fn decode_binary(bytes: &[u8], oid: i32) -> Result<Value, PgError> {
 			}
 			let raw_hdr: [u8; 4] =
 				bytes[0..4].try_into().map_err(|_| param_err(oid, "truncated record header"))?;
-			let nfields = i32::from_be_bytes(raw_hdr) as usize;
+			let nfields = usize::try_from(i32::from_be_bytes(raw_hdr))
+				.map_err(|_| param_err(oid, "negative record field count"))?;
+			if nfields > bytes.len().saturating_sub(4) / 8 {
+				return Err(param_err(oid, "truncated record field header"));
+			}
 			let mut obj = surrealdb_types::Object::new();
 			let mut offset = 4;
 			for idx in 0..nfields {
@@ -1487,7 +1506,7 @@ fn decode_binary(bytes: &[u8], oid: i32) -> Result<Value, PgError> {
 					}
 					let val_bytes = &bytes[offset..offset + field_len];
 					offset += field_len;
-					decode_binary(val_bytes, field_oid)?
+					decode_binary_at(val_bytes, field_oid, depth + 1)?
 				};
 				obj.insert(format!("f{idx}"), val);
 			}
@@ -1706,7 +1725,11 @@ fn decode_array_elements(items: Vec<ArrayElement>, elem_oid: i32) -> Result<Valu
 	Ok(Value::Array(values.into()))
 }
 
-fn decode_array_binary(bytes: &[u8], expected_elem_oid: i32) -> Result<Value, PgError> {
+fn decode_array_binary(
+	bytes: &[u8],
+	expected_elem_oid: i32,
+	depth: usize,
+) -> Result<Value, PgError> {
 	if bytes.len() < 12 {
 		return Err(param_err(expected_elem_oid, "array binary header too short"));
 	}
@@ -1724,10 +1747,17 @@ fn decode_array_binary(bytes: &[u8], expected_elem_oid: i32) -> Result<Value, Pg
 		expected_elem_oid
 	};
 
+	if ndim < 0 {
+		return Err(param_err(target_oid, "negative array dimensions"));
+	}
 	if ndim == 0 {
 		return Ok(Value::Array(Vec::<Value>::new().into()));
 	}
-	if bytes.len() < 12 + (ndim as usize) * 8 {
+	let ndim = ndim as usize;
+	if ndim > MAX_ARRAY_DIMENSIONS {
+		return Err(param_err(target_oid, "array dimensions exceed limit"));
+	}
+	if bytes.len() < 12 + ndim * 8 {
 		return Err(param_err(target_oid, "array binary dimensions header too short"));
 	}
 
@@ -1743,11 +1773,16 @@ fn decode_array_binary(bytes: &[u8], expected_elem_oid: i32) -> Result<Value, Pg
 			total_elems = total_elems
 				.checked_mul(dim_len as usize)
 				.ok_or_else(|| param_err(target_oid, "array dimensions overflow"))?;
-		} else {
+		} else if dim_len == 0 {
 			return Ok(Value::Array(Vec::<Value>::new().into()));
+		} else {
+			return Err(param_err(target_oid, "negative array dimension length"));
 		}
 	}
 
+	if total_elems > (bytes.len() - offset) / 4 {
+		return Err(param_err(target_oid, "array binary element length truncated"));
+	}
 	let mut elements = Vec::with_capacity(total_elems);
 	for _ in 0..total_elems {
 		if offset + 4 > bytes.len() {
@@ -1769,7 +1804,7 @@ fn decode_array_binary(bytes: &[u8], expected_elem_oid: i32) -> Result<Value, Pg
 			}
 			let elem_bytes = &bytes[offset..offset + elem_len];
 			offset += elem_len;
-			elements.push(decode_binary(elem_bytes, target_oid)?);
+			elements.push(decode_binary_at(elem_bytes, target_oid, depth)?);
 		}
 	}
 
@@ -2620,5 +2655,54 @@ mod tests {
 		assert_eq!(String::from_utf8(text_rec).unwrap(), "(1,test)");
 		let bin_rec = encode_binary(val, &PgType::Record).unwrap();
 		assert!(!bin_rec.is_empty());
+	}
+
+	#[test]
+	fn binary_date_out_of_range_returns_error() {
+		assert!(decode_param(Some(&i32::MAX.to_be_bytes()), OID_DATE, 1).is_err());
+		assert!(decode_param(Some(&i32::MIN.to_be_bytes()), OID_DATE, 1).is_err());
+	}
+
+	#[test]
+	fn binary_array_huge_dimensions_do_not_panic() {
+		let mut wire = Vec::new();
+		wire.extend_from_slice(&2i32.to_be_bytes()); // ndim = 2
+		wire.extend_from_slice(&0i32.to_be_bytes()); // flags
+		wire.extend_from_slice(&OID_INT4.to_be_bytes()); // elem_oid
+		wire.extend_from_slice(&i32::MAX.to_be_bytes()); // dim 0 = 2^31 - 1
+		wire.extend_from_slice(&1i32.to_be_bytes()); // lbound 0
+		wire.extend_from_slice(&i32::MAX.to_be_bytes()); // dim 1 = 2^31 - 1
+		wire.extend_from_slice(&1i32.to_be_bytes()); // lbound 1
+		assert!(decode_param(Some(&wire), OID_ARRAY_INT4, 1).is_err());
+
+		// Negative ndim is also rejected cleanly.
+		let mut neg_ndim = Vec::new();
+		neg_ndim.extend_from_slice(&(-1i32).to_be_bytes());
+		neg_ndim.extend_from_slice(&0i32.to_be_bytes());
+		neg_ndim.extend_from_slice(&OID_INT4.to_be_bytes());
+		assert!(decode_param(Some(&neg_ndim), OID_ARRAY_INT4, 1).is_err());
+	}
+
+	#[test]
+	fn binary_nested_array_and_record_recursion_is_bounded() {
+		// Build a deeply nested binary array payload where each outer array has elem_oid =
+		// OID_ARRAY_INT4.
+		let mut payload = Vec::new();
+		payload.extend_from_slice(&0i32.to_be_bytes()); // innermost: ndim = 0
+		payload.extend_from_slice(&0i32.to_be_bytes());
+		payload.extend_from_slice(&OID_INT4.to_be_bytes());
+
+		for _ in 0..(MAX_BINARY_DECODE_DEPTH + 2) {
+			let mut outer = Vec::new();
+			outer.extend_from_slice(&1i32.to_be_bytes()); // ndim = 1
+			outer.extend_from_slice(&0i32.to_be_bytes()); // flags
+			outer.extend_from_slice(&OID_ARRAY_INT4.to_be_bytes()); // elem_oid = int4[]
+			outer.extend_from_slice(&1i32.to_be_bytes()); // dim_len = 1
+			outer.extend_from_slice(&1i32.to_be_bytes()); // lbound = 1
+			outer.extend_from_slice(&(payload.len() as i32).to_be_bytes());
+			outer.extend_from_slice(&payload);
+			payload = outer;
+		}
+		assert!(decode_param(Some(&payload), OID_ARRAY_INT4, 1).is_err());
 	}
 }

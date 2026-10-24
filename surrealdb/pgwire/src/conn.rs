@@ -20,7 +20,7 @@ use surrealdb_datastore::Transaction;
 use surrealdb_iam::{Actor, Auth, Level, Role};
 use surrealdb_kvs::TransactionType;
 use surrealdb_pgsql::ast::stmt::{
-	CopyDirection, CopyFormat, CopyStmt, CopyTarget, Statement as PgStatement,
+	CopyDirection, CopyFormat, CopyStmt, CopyTarget, Statement as PgStatement, TableRef,
 };
 use surrealdb_pgsql::printer::{print_ident, print_string_literal};
 use surrealdb_rpc::capabilities::RouteTarget;
@@ -1401,16 +1401,38 @@ impl Connection {
 							PgStatement::Truncate(truncate) => {
 								kind = StatementKind::Truncate;
 								returns_rows = false;
-								if let Ok(expr) = lower_pgsql_truncate(truncate) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if surrealdb_sqlplan::resolve_pgsql_table_name(
+									&truncate.table.parts,
+									Some(&catalog),
+								)
+								.is_ok() && let Ok(expr) = lower_pgsql_truncate(truncate)
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: vec![TopLevelExpr::Expr(expr)],
 									}));
 								}
 							}
-							PgStatement::CreateTable(_) => {
+							PgStatement::CreateTable(create) => {
 								kind = StatementKind::CreateTable;
 								returns_rows = false;
-								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if surrealdb_sqlplan::resolve_pgsql_table_name(
+									&create.name.parts,
+									Some(&catalog),
+								)
+								.is_ok() && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
 											.into_iter()
@@ -1419,10 +1441,21 @@ impl Connection {
 									}));
 								}
 							}
-							PgStatement::CreateIndex(_) => {
+							PgStatement::CreateIndex(idx) => {
 								kind = StatementKind::CreateIndex;
 								returns_rows = false;
-								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if surrealdb_sqlplan::resolve_pgsql_table_name(
+									&idx.table.parts,
+									Some(&catalog),
+								)
+								.is_ok() && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
 											.into_iter()
@@ -1431,10 +1464,35 @@ impl Connection {
 									}));
 								}
 							}
-							PgStatement::CreateView(_) => {
+							PgStatement::CreateView(view) => {
 								kind = StatementKind::CreateView;
 								returns_rows = false;
-								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if surrealdb_sqlplan::resolve_pgsql_table_name(
+									&view.name.parts,
+									Some(&catalog),
+								)
+								.is_ok() && view.query.from.iter().all(|tr| {
+									if let TableRef::Table {
+										name,
+										..
+									} = tr
+									{
+										surrealdb_sqlplan::resolve_pgsql_table_name(
+											&name.parts,
+											Some(&catalog),
+										)
+										.is_ok()
+									} else {
+										true
+									}
+								}) && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
 											.into_iter()
@@ -1443,10 +1501,21 @@ impl Connection {
 									}));
 								}
 							}
-							PgStatement::AlterTable(_) => {
+							PgStatement::AlterTable(alter) => {
 								kind = StatementKind::AlterTable;
 								returns_rows = false;
-								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if surrealdb_sqlplan::resolve_pgsql_table_name(
+									&alter.name.parts,
+									Some(&catalog),
+								)
+								.is_ok() && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
 											.into_iter()
@@ -1455,10 +1524,23 @@ impl Connection {
 									}));
 								}
 							}
-							PgStatement::Drop(_) => {
+							PgStatement::Drop(drop) => {
 								kind = StatementKind::DropTable;
 								returns_rows = false;
-								if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								let cur_db = self
+									.session
+									.db
+									.clone()
+									.unwrap_or_else(|| "postgres".to_string());
+								let catalog = MemoryCatalog::new().with_database(&cur_db);
+								if drop.names.iter().all(|n| {
+									surrealdb_sqlplan::resolve_pgsql_table_name(
+										&n.parts,
+										Some(&catalog),
+									)
+									.is_ok()
+								}) && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
+								{
 									cached_plan = Some(CachedPlan::PgAst(Ast {
 										expressions: exprs
 											.into_iter()
@@ -2316,10 +2398,49 @@ impl Connection {
 							}
 						}
 					}
+					PgStatement::CreateIndex(idx) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&idx.table.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::CreateView(view) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&view.name.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+						for tr in &view.query.from {
+							if let TableRef::Table {
+								name,
+								..
+							} = tr && let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+								&name.parts,
+								Some(&catalog),
+							) {
+								self.note_simple_error(
+									&PgError::undefined_table(e.to_string()),
+									out,
+								);
+								return Ok(());
+							}
+						}
+					}
+					PgStatement::AlterTable(alter) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&alter.name.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
 					PgStatement::Copy(_)
-					| PgStatement::CreateIndex(_)
-					| PgStatement::CreateView(_)
-					| PgStatement::AlterTable(_)
 					| PgStatement::CreateSchema(_)
 					| PgStatement::Transaction(_)
 					| PgStatement::Set(_)
@@ -3701,6 +3822,10 @@ impl Connection {
 			.and_then(|b| b.rd.clone())
 			.or_else(|| self.session.rd.clone());
 
+		let is_system_session =
+			matches!(base_au.level(), Level::Root | Level::Namespace(..) | Level::Database(..))
+				&& !matches!(self.session.au.level(), Level::No);
+
 		if name.eq_ignore_ascii_case("request.jwt.claims") {
 			let parsed_val: serde_json::Value = serde_json::from_str(clean).map_err(|err| {
 				PgError::invalid_parameter_value(format!(
@@ -3714,16 +3839,37 @@ impl Connection {
 				));
 			};
 
+			if !is_system_session {
+				for key in claims_obj.keys() {
+					if !key.eq_ignore_ascii_case("role")
+						&& !key.eq_ignore_ascii_case("sub")
+						&& !key.eq_ignore_ascii_case("id")
+					{
+						return Err(PgError::insufficient_privilege(format!(
+							"permission denied: non-system session cannot set JWT claim \"{key}\""
+						)));
+					}
+				}
+			}
+
+			let mut narrowed_to_anon = false;
+
 			// Role claim check
-			if let Some(serde_json::Value::String(role)) = claims_obj.get("role") {
+			if let Some(role_val) = claims_obj.get("role") {
+				let Some(role) = role_val.as_str() else {
+					return Err(PgError::insufficient_privilege(
+						"permission denied: invalid role claim in request.jwt.claims",
+					));
+				};
 				if role.eq_ignore_ascii_case("anon") || role.eq_ignore_ascii_case("anonymous") {
 					self.session.au =
 						Arc::new(Auth::new(Actor::new("anon".to_string(), vec![], Level::No)));
-				} else if matches!(self.session.au.level(), Level::No)
-					|| matches!(base_au.level(), Level::No)
-				{
+					self.session.rd = None;
+					self.session.tk = None;
+					narrowed_to_anon = true;
+				} else if !is_system_session {
 					return Err(PgError::insufficient_privilege(
-						"permission denied: unauthenticated session cannot elevate via request.jwt.claims",
+						"permission denied: non-system session cannot elevate via request.jwt.claims",
 					));
 				}
 			}
@@ -3752,7 +3898,7 @@ impl Connection {
 							"permission denied: cannot impersonate a different user via request.jwt.claims",
 						));
 					}
-				} else if matches!(base_au.level(), Level::Root | Level::Database(..)) {
+				} else if is_system_session {
 					let ns = self.session.ns.clone().unwrap_or_else(|| "test".to_string());
 					let db = self.session.db.clone().unwrap_or_else(|| "test".to_string());
 					let ac = self.session.ac.clone().unwrap_or_else(|| "jwt".to_string());
@@ -3765,25 +3911,32 @@ impl Connection {
 				}
 			}
 
-			self.session.tk = Some(parsed_val.into_value());
+			if is_system_session && !narrowed_to_anon {
+				self.session.tk = Some(parsed_val.into_value());
+			}
 			let _ = self.gucs.set(name, clean, is_local, in_txn)?;
 			return Ok(());
 		}
 
 		if let Some(claim_key) = name.strip_prefix("request.jwt.claim.") {
+			let mut narrowed_to_anon = false;
 			if claim_key.eq_ignore_ascii_case("role") {
 				if clean.eq_ignore_ascii_case("anon") || clean.eq_ignore_ascii_case("anonymous") {
 					self.session.au =
 						Arc::new(Auth::new(Actor::new("anon".to_string(), vec![], Level::No)));
-				} else if matches!(self.session.au.level(), Level::No)
-					|| matches!(base_au.level(), Level::No)
-				{
+					self.session.rd = None;
+					self.session.tk = None;
+					narrowed_to_anon = true;
+				} else if !is_system_session {
 					return Err(PgError::insufficient_privilege(
-						"permission denied: unauthenticated session cannot elevate via request.jwt.claim.role",
+						"permission denied: non-system session cannot elevate via request.jwt.claim.role",
 					));
 				}
-			} else if claim_key.eq_ignore_ascii_case("sub") {
-				if matches!(base_au.level(), Level::No) {
+			} else if claim_key.eq_ignore_ascii_case("sub") || claim_key.eq_ignore_ascii_case("id")
+			{
+				if matches!(self.session.au.level(), Level::No)
+					|| matches!(base_au.level(), Level::No)
+				{
 					return Err(PgError::insufficient_privilege(
 						"permission denied: unauthenticated session cannot set identity via request.jwt.claim.sub",
 					));
@@ -3794,7 +3947,7 @@ impl Connection {
 							"permission denied: cannot impersonate a different user via request.jwt.claim.sub",
 						));
 					}
-				} else if matches!(base_au.level(), Level::Root | Level::Database(..)) {
+				} else if is_system_session {
 					let ns = self.session.ns.clone().unwrap_or_else(|| "test".to_string());
 					let db = self.session.db.clone().unwrap_or_else(|| "test".to_string());
 					let ac = self.session.ac.clone().unwrap_or_else(|| "jwt".to_string());
@@ -3805,14 +3958,20 @@ impl Connection {
 					self.session.rd = Some(Value::RecordId(rid.clone()));
 					self.session.au = Arc::new(Auth::for_record(rid.to_sql(), &ns, &db, &ac));
 				}
+			} else if !is_system_session {
+				return Err(PgError::insufficient_privilege(format!(
+					"permission denied: non-system session cannot set request.jwt.claim.{claim_key}"
+				)));
 			}
 
-			let mut obj = match self.session.tk.take() {
-				Some(Value::Object(map)) => map,
-				_ => surrealdb_types::Object::default(),
-			};
-			obj.insert(claim_key.to_string(), Value::String(clean.to_string()));
-			self.session.tk = Some(Value::Object(obj));
+			if is_system_session && !narrowed_to_anon {
+				let mut obj = match self.session.tk.take() {
+					Some(Value::Object(map)) => map,
+					_ => surrealdb_types::Object::default(),
+				};
+				obj.insert(claim_key.to_string(), Value::String(clean.to_string()));
+				self.session.tk = Some(Value::Object(obj));
+			}
 			let _ = self.gucs.set(name, clean, is_local, in_txn)?;
 			return Ok(());
 		}

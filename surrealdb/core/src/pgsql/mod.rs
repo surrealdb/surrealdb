@@ -89,16 +89,68 @@ pub(crate) fn lower_statements(
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Truncate(truncate) => {
+				surrealdb_sqlplan::resolve_pgsql_table_name(&truncate.table.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
 				let expr = surrealdb_sqlplan::lower_pgsql_truncate(truncate)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
-			surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
-			| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
-			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
-			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
-			| surrealdb_pgsql::ast::stmt::Statement::Drop(_) => {
+			surrealdb_pgsql::ast::stmt::Statement::CreateTable(create) => {
+				surrealdb_sqlplan::resolve_pgsql_table_name(&create.name.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
+				}
+			}
+			surrealdb_pgsql::ast::stmt::Statement::CreateIndex(idx) => {
+				surrealdb_sqlplan::resolve_pgsql_table_name(&idx.table.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
+				}
+			}
+			surrealdb_pgsql::ast::stmt::Statement::CreateView(view) => {
+				surrealdb_sqlplan::resolve_pgsql_table_name(&view.name.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for tr in &view.query.from {
+					if let surrealdb_pgsql::ast::stmt::TableRef::Table {
+						name,
+						..
+					} = tr
+					{
+						surrealdb_sqlplan::resolve_pgsql_table_name(&name.parts, Some(catalog))
+							.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+					}
+				}
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
+				}
+			}
+			surrealdb_pgsql::ast::stmt::Statement::AlterTable(alter) => {
+				surrealdb_sqlplan::resolve_pgsql_table_name(&alter.name.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
+				}
+			}
+			surrealdb_pgsql::ast::stmt::Statement::Drop(drop) => {
+				for name in &drop.names {
+					surrealdb_sqlplan::resolve_pgsql_table_name(&name.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				}
 				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
 				for expr in exprs {

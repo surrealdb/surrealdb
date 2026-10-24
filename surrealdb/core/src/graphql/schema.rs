@@ -18,7 +18,7 @@
 //! - **Custom scalars** -- registers scalars like `uuid`, `decimal`, `datetime`, `duration`,
 //!   `bytes`, `object`, `any`, `JSON`, and `null`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -57,6 +57,67 @@ use crate::val::{
 	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,
 	Value as SurValue,
 };
+
+/// Default maximum query nesting depth when `DEFINE CONFIG GRAPHQL` leaves `DEPTH` unset.
+pub(crate) const DEFAULT_DEPTH_LIMIT: usize = 16;
+
+/// Default maximum query complexity when `DEFINE CONFIG GRAPHQL` leaves `COMPLEXITY` unset.
+pub(crate) const DEFAULT_COMPLEXITY_LIMIT: usize = 1000;
+
+/// Set of table names exposed by the generated GraphQL schema, stored in schema data
+/// so runtime resolvers can refuse to dereference or return records from unexposed tables.
+#[derive(Clone)]
+pub(crate) struct ExposedTables(pub(crate) Arc<HashSet<TableName>>);
+
+/// Rewrites `Kind::Record(tables)` variants so that only tables present in
+/// `exposed_tables` are retained as concrete GraphQL table types.
+///
+/// When any referenced table is excluded from the GraphQL schema, the record
+/// kind becomes nullable (wrapping in `Kind::Either` with `Kind::None`) so runtime
+/// resolvers can return `null` for records belonging to excluded tables, and
+/// widens to `Kind::Record(vec![])` when all target tables are excluded rather
+/// than referencing an unregistered GraphQL object type.
+#[allow(clippy::wildcard_enum_match_arm)]
+pub(crate) fn sanitize_kind_for_exposed_tables(
+	kind: Kind,
+	exposed_tables: &HashSet<TableName>,
+) -> Kind {
+	match kind {
+		Kind::Record(mut tables) => {
+			if !tables.is_empty() {
+				let prev_len = tables.len();
+				tables.retain(|t| exposed_tables.contains(t));
+				if tables.len() < prev_len {
+					return Kind::Either(vec![Kind::None, Kind::Record(tables)]);
+				}
+			}
+			Kind::Record(tables)
+		}
+		Kind::Array(inner, len) => {
+			Kind::Array(Box::new(sanitize_kind_for_exposed_tables(*inner, exposed_tables)), len)
+		}
+		Kind::Set(inner, len) => {
+			Kind::Set(Box::new(sanitize_kind_for_exposed_tables(*inner, exposed_tables)), len)
+		}
+		Kind::Either(kinds) => {
+			let mut out = Vec::with_capacity(kinds.len());
+			for k in kinds {
+				let sanitized = sanitize_kind_for_exposed_tables(k, exposed_tables);
+				if let Kind::Either(inner) = sanitized {
+					for ik in inner {
+						if !out.contains(&ik) {
+							out.push(ik);
+						}
+					}
+				} else if !out.contains(&sanitized) {
+					out.push(sanitized);
+				}
+			}
+			Kind::Either(out)
+		}
+		other => other,
+	}
+}
 
 /// Shared context for accessing table metadata during schema generation.
 ///
@@ -185,6 +246,9 @@ pub async fn generate_schema(
 
 	let mut mutation_obj: Option<Object> = None;
 	let mut subscription_obj = None;
+	let exposed_table_names: Arc<HashSet<TableName>> = Arc::new(
+		tbs.as_ref().map_or_else(HashSet::new, |tbs| tbs.iter().map(|t| t.name.clone()).collect()),
+	);
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
@@ -217,7 +281,7 @@ pub async fn generate_schema(
 	}
 
 	if let Some(fns) = fns {
-		query = process_fns(fns, query, &mut types, datastore).await?;
+		query = process_fns(fns, query, &mut types, datastore, &exposed_table_names).await?;
 	}
 
 	// Register all geometry-related types (enum, object types, union, input types)
@@ -243,13 +307,15 @@ pub async fn generate_schema(
 
 	let mut schema = Schema::build("Query", mutation_name, subscription_name).register(query);
 
-	// Apply depth and complexity limits from the GraphQL config
-	if let Some(depth) = graphql_config.depth_limit {
-		schema = schema.limit_depth(depth as usize);
-	}
-	if let Some(complexity) = graphql_config.complexity_limit {
-		schema = schema.limit_complexity(complexity as usize);
-	}
+	// Apply depth and complexity limits from the GraphQL config, falling back
+	// to bounded defaults when unset.
+	let depth = graphql_config.depth_limit.map_or(DEFAULT_DEPTH_LIMIT, |d| d as usize);
+	let complexity =
+		graphql_config.complexity_limit.map_or(DEFAULT_COMPLEXITY_LIMIT, |c| c as usize);
+	schema = schema
+		.limit_depth(depth)
+		.limit_complexity(complexity)
+		.data(ExposedTables(exposed_table_names));
 	// Disable introspection when configured to do so
 	if matches!(graphql_config.introspection, GraphQLIntrospectionConfig::None) {
 		schema = schema.disable_introspection();
@@ -2039,5 +2105,75 @@ mod tests {
 		let gql_u64 = sql_value_to_graphql_value(u64_max.clone()).unwrap();
 		assert_eq!(gql_u64, GraphqlValue::Number(Number::from(u64::MAX)));
 		assert_eq!(graphql_to_sql_kind(&gql_u64, Kind::U64).unwrap(), u64_max);
+	}
+
+	#[test]
+	fn sanitize_kind_strips_unexposed_record_tables() {
+		let mut exposed = HashSet::new();
+		exposed.insert(TableName::from("public"));
+
+		let secret_only = Kind::Record(vec![TableName::from("secret")]);
+		assert_eq!(
+			sanitize_kind_for_exposed_tables(secret_only, &exposed),
+			Kind::Either(vec![Kind::None, Kind::Record(vec![])]),
+		);
+
+		let mixed = Kind::Record(vec![TableName::from("public"), TableName::from("secret")]);
+		assert_eq!(
+			sanitize_kind_for_exposed_tables(mixed, &exposed),
+			Kind::Either(vec![Kind::None, Kind::Record(vec![TableName::from("public")])]),
+		);
+
+		let option_secret =
+			Kind::Either(vec![Kind::None, Kind::Record(vec![TableName::from("secret")])]);
+		assert_eq!(
+			sanitize_kind_for_exposed_tables(option_secret, &exposed),
+			Kind::Either(vec![Kind::None, Kind::Record(vec![])]),
+		);
+	}
+
+	#[tokio::test]
+	async fn excluded_table_record_references_build_and_do_not_leak_at_runtime() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		for res in ds
+			.execute(
+				"
+				DEFINE NAMESPACE test;
+				DEFINE DATABASE test;
+				DEFINE TABLE secret SCHEMAFULL;
+				DEFINE FIELD token ON secret TYPE string;
+				DEFINE TABLE public SCHEMAFULL;
+				DEFINE FIELD title ON public TYPE string;
+				DEFINE FIELD secret_ref ON public TYPE option<record<secret>>;
+				DEFINE FUNCTION fn::get_secret() -> record<secret> { RETURN secret:1; };
+				DEFINE CONFIG GRAPHQL TABLES EXCLUDE secret FUNCTIONS AUTO;
+				CREATE secret:1 SET token = 'top-secret';
+				CREATE public:1 SET title = 'hello', secret_ref = secret:1;
+				",
+				&sess,
+				None,
+			)
+			.await
+			.unwrap()
+		{
+			res.result.unwrap();
+		}
+
+		let resp = crate::graphql::exec::execute_request(
+			&ds,
+			&sess,
+			"{ public(id: \"1\") { title secret_ref { id } } _get(id: \"secret:1\") { id } fn_get_secret { id } }".to_string(),
+			serde_json::Value::Null,
+			None,
+		)
+		.await
+		.unwrap();
+		assert!(resp.get("errors").is_none(), "unexpected GraphQL errors: {resp}");
+		let data = &resp["data"];
+		assert_eq!(data["public"]["title"], serde_json::json!("hello"));
+		assert_eq!(data["public"]["secret_ref"], serde_json::Value::Null);
+		assert_eq!(data["_get"], serde_json::Value::Null);
+		assert_eq!(data["fn_get_secret"], serde_json::Value::Null);
 	}
 }

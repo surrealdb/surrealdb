@@ -82,31 +82,155 @@ pub struct SelectParams {
 	pub scope: super::ToolScope,
 }
 
+/// Build [`surrealdb_core::syn::ParserSettings`] from the running datastore's
+/// [`surrealdb_core::syn::ParserConfig`].
+fn parser_settings(session: &McpSession) -> surrealdb_core::syn::ParserSettings {
+	let core = session.datastore().parser_config();
+	surrealdb_core::syn::ParserSettings::from_config(core.as_ref())
+}
+
+/// Validate a `SELECT` projection list (`fields`) before interpolating it into a
+/// `SELECT` statement.
+///
+/// Rejects empty fragments, trailing clauses (`OMIT`, `FROM`, `WHERE`, `;`),
+/// non-read-only expressions, and unclosed comments.
+fn validate_fields_clause(session: &McpSession, fields: &str) -> Result<(), ErrorData> {
+	if fields.trim().is_empty() {
+		return Err(crate::error::invalid_params("SELECT fields clause cannot be empty"));
+	}
+	let parsed =
+		surrealdb_core::syn::runtime::fields_with_settings(fields, parser_settings(session), true)
+			.map_err(|e| {
+				crate::error::invalid_params(format!("Invalid SELECT fields clause: {e}"))
+			})?;
+	if !parsed.read_only() {
+		return Err(crate::error::invalid_params("SELECT fields clause must be read-only"));
+	}
+	validate_select_probe(session, "SELECT fields", &format!("SELECT {fields}\nFROM __mcp_probe"))
+}
+
+/// Validate a `WHERE` expression fragment before interpolating it into a
+/// `SELECT`, `UPSERT`, `UPDATE`, or `DELETE` statement.
+///
+/// The fragment must parse as a single complete read-only expression with no
+/// trailing clauses (`ORDER BY`, `LIMIT`, `RETURN`, `TIMEOUT`, `;`) or statement
+/// keywords.
+fn validate_where_clause(session: &McpSession, where_clause: &str) -> Result<(), ErrorData> {
+	if where_clause.trim().is_empty() {
+		return Err(crate::error::invalid_params("WHERE clause cannot be empty"));
+	}
+	let parsed = surrealdb_core::syn::runtime::expr_with_settings(
+		where_clause,
+		parser_settings(session),
+		true,
+	)
+	.map_err(|e| crate::error::invalid_params(format!("Invalid WHERE clause: {e}")))?;
+	if !parsed.read_only() {
+		return Err(crate::error::invalid_params("WHERE clause must be a read-only expression"));
+	}
+	validate_select_probe(
+		session,
+		"WHERE",
+		&format!("SELECT * FROM __mcp_probe\nWHERE (\n{where_clause}\n)\nORDER BY __mcp_probe"),
+	)
+}
+
+/// Parse `probe_sql` as a SurrealQL query and verify that it resolves to a
+/// single read-only statement.
+fn validate_select_probe(
+	session: &McpSession,
+	clause_name: &str,
+	probe_sql: &str,
+) -> Result<(), ErrorData> {
+	let ast =
+		surrealdb_core::syn::runtime::query_with_settings(probe_sql, parser_settings(session))
+			.map_err(|e| {
+				crate::error::invalid_params(format!("Invalid {clause_name} clause: {e}"))
+			})?;
+	if ast.expressions.len() != 1 || !ast.expressions[0].read_only() {
+		return Err(crate::error::invalid_params(format!(
+			"{clause_name} clause must be a single read-only clause"
+		)));
+	}
+	Ok(())
+}
+
+/// Parse `query_sql` as a SurrealQL query and verify that it resolves to a
+/// single statement.
+fn validate_single_statement(session: &McpSession, query_sql: &str) -> Result<(), ErrorData> {
+	let ast =
+		surrealdb_core::syn::runtime::query_with_settings(query_sql, parser_settings(session))
+			.map_err(|e| crate::error::invalid_params(format!("Invalid statement: {e}")))?;
+	if ast.expressions.len() != 1 {
+		return Err(crate::error::invalid_params(
+			"Structured CRUD tool must resolve to a single statement",
+		));
+	}
+	Ok(())
+}
+
 pub async fn select(session: &McpSession, p: SelectParams) -> Result<CallToolResult, ErrorData> {
 	validate_identifier(&p.target)?;
+	if let Some(f) = &p.fields {
+		validate_fields_clause(session, f)?;
+	}
 	let fields = p.fields.as_deref().unwrap_or("*");
-	let mut q = format!("SELECT {fields} FROM {}", p.target);
+	let mut q = format!("SELECT {fields}\nFROM {}", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
 	if let Some(s) = &p.split_clause {
-		q.push_str(&format!(" SPLIT {s}"));
+		if s.trim().is_empty() {
+			return Err(crate::error::invalid_params("SPLIT clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"SPLIT",
+			&format!("SELECT {fields}\nFROM {}\nSPLIT {s}\nORDER BY __mcp_probe", p.target),
+		)?;
+		q.push_str(&format!("\nSPLIT {s}"));
 	}
 	if let Some(g) = &p.group_clause {
-		q.push_str(&format!(" GROUP BY {g}"));
+		if g.trim().is_empty() {
+			return Err(crate::error::invalid_params("GROUP BY clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"GROUP BY",
+			&format!("SELECT {fields}\nFROM {}\nGROUP BY {g}\nORDER BY __mcp_probe", p.target),
+		)?;
+		q.push_str(&format!("\nGROUP BY {g}"));
 	}
 	if let Some(o) = &p.order_clause {
-		q.push_str(&format!(" ORDER BY {o}"));
+		if o.trim().is_empty() {
+			return Err(crate::error::invalid_params("ORDER BY clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"ORDER BY",
+			&format!("SELECT * FROM {}\nORDER BY {o}\nLIMIT 1\nSTART 0", p.target),
+		)?;
+		q.push_str(&format!("\nORDER BY {o}"));
 	}
 	if let Some(l) = p.limit_clause {
-		q.push_str(&format!(" LIMIT {l}"));
+		q.push_str(&format!("\nLIMIT {l}"));
 	}
 	if let Some(s) = p.start_clause {
-		q.push_str(&format!(" START {s}"));
+		q.push_str(&format!("\nSTART {s}"));
 	}
 	if let Some(f) = &p.fetch_clause {
-		q.push_str(&format!(" FETCH {f}"));
+		if f.trim().is_empty() {
+			return Err(crate::error::invalid_params("FETCH clause cannot be empty"));
+		}
+		validate_select_probe(
+			session,
+			"FETCH",
+			&format!("SELECT * FROM {}\nFETCH {f}\nVERSION d'1970-01-01T00:00:00Z'", p.target),
+		)?;
+		q.push_str(&format!("\nFETCH {f}"));
 	}
+	validate_select_probe(session, "SELECT", &q)?;
 	let results = session.execute(&q, None).await?;
 	Ok(collapse_single(session, results))
 }
@@ -213,8 +337,10 @@ pub async fn upsert(session: &McpSession, p: UpsertParams) -> Result<CallToolRes
 		resolve_update_mode(p.content_data.as_ref(), p.merge_data.as_ref(), p.patch_data.as_ref())?;
 	let mut q = format!("UPSERT {} {mode} $data", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, Some(bind_data(session, data)?)).await?;
 	Ok(collapse_single(session, results))
 }
@@ -247,8 +373,10 @@ pub async fn update(session: &McpSession, p: UpdateParams) -> Result<CallToolRes
 		resolve_update_mode(p.content_data.as_ref(), p.merge_data.as_ref(), p.patch_data.as_ref())?;
 	let mut q = format!("UPDATE {} {mode} $data", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, Some(bind_data(session, data)?)).await?;
 	Ok(collapse_single(session, results))
 }
@@ -271,8 +399,10 @@ pub async fn delete(session: &McpSession, p: DeleteParams) -> Result<CallToolRes
 	validate_identifier(&p.target)?;
 	let mut q = format!("DELETE FROM {}", p.target);
 	if let Some(w) = &p.where_clause {
-		q.push_str(&format!(" WHERE {w}"));
+		validate_where_clause(session, w)?;
+		q.push_str(&format!("\nWHERE {w}"));
 	}
+	validate_single_statement(session, &q)?;
 	let results = session.execute(&q, None).await?;
 	Ok(collapse_single(session, results))
 }
@@ -664,5 +794,119 @@ mod tests {
 		)
 		.await;
 		assert!(rejected.is_err(), "an array key reached the statement");
+	}
+
+	#[tokio::test]
+	async fn crud_clauses_reject_statement_injection_and_mutations() {
+		let session = session().await;
+		session
+			.execute("CREATE person:alice SET name = 'Alice', age = 30;", None)
+			.await
+			.expect("seed");
+
+		// Injecting a second statement or FROM clause via `fields` must be rejected.
+		let bad_fields = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: Some("* FROM person; DELETE person; --".into()),
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_fields.is_err(), "fields clause smuggling FROM/statement must fail");
+
+		// Injecting a mutation expression via `fields` must be rejected.
+		let mut_fields = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: Some("(DELETE person)".into()),
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(mut_fields.is_err(), "mutating fields clause must fail");
+
+		// Injecting a second statement or trailing clause via `where_clause` must be rejected.
+		let bad_where = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: Some("age > 10; DELETE person".into()),
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_where.is_err(), "where_clause smuggling statement must fail");
+
+		let bad_where_mut = delete(
+			&session,
+			DeleteParams {
+				target: "person".into(),
+				where_clause: Some("(CREATE secret:1) IS NOT NONE".into()),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_where_mut.is_err(), "mutating where_clause in delete must fail");
+
+		// Injecting trailing clauses via `order_clause` or `fetch_clause` must be rejected.
+		let bad_order = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: None,
+				order_clause: Some("name ASC LIMIT 1".into()),
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: None,
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_order.is_err(), "order_clause smuggling LIMIT must fail");
+
+		let bad_fetch = select(
+			&session,
+			SelectParams {
+				target: "person".into(),
+				fields: None,
+				where_clause: None,
+				order_clause: None,
+				limit_clause: None,
+				start_clause: None,
+				group_clause: None,
+				split_clause: None,
+				fetch_clause: Some("name; DELETE person".into()),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(bad_fetch.is_err(), "fetch_clause smuggling statement must fail");
 	}
 }

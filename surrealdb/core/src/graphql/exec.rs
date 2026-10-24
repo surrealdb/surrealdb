@@ -34,6 +34,12 @@ pub async fn execute_request(
 	variables: JsonValue,
 	operation: Option<String>,
 ) -> Result<JsonValue, GraphqlError> {
+	if !ds.allows_query_by_subject(session.au.as_ref()) {
+		return Err(GraphqlError::AuthError(
+			"GraphQL query execution is not allowed by subject capabilities".to_string(),
+		));
+	}
+
 	let schema = ds.graphql_schema(session).await?;
 
 	// Build the request from its standard JSON envelope so parsing matches the

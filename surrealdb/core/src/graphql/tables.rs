@@ -67,7 +67,8 @@ pub(crate) struct RelationFieldInfo {
 	pub dir: Dir,
 }
 use super::schema::{
-	SchemaContext, graphql_to_sql_kind, graphql_to_sql_kind_with_scope, sql_value_to_graphql_value,
+	ExposedTables, SchemaContext, graphql_to_sql_kind, graphql_to_sql_kind_with_scope,
+	sanitize_kind_for_exposed_tables, sql_value_to_graphql_value,
 	sql_value_to_graphql_value_with_kind,
 };
 use crate::catalog::providers::TableProvider;
@@ -695,6 +696,7 @@ fn extract_literal_object(
 fn make_nested_object_type(
 	type_name: &str,
 	sub_fields: &[NestedSubField],
+	exposed_table_names: &HashSet<TableName>,
 	types: &mut Vec<Type>,
 ) -> Result<Object, GraphqlError> {
 	let mut obj = Object::new(type_name);
@@ -704,6 +706,7 @@ fn make_nested_object_type(
 		let Some(ref kind) = sf.kind else {
 			continue;
 		};
+		let kind = sanitize_kind_for_exposed_tables(kind.clone(), exposed_table_names);
 		if let Some(prior) = seen.insert(sf.graphql_name.as_str(), sf.name.as_str()) {
 			return Err(super::error::schema_error(format!(
 				"GraphQL naming collision on `{}` in `{type_name}` — fields `{prior}` and `{}` \
@@ -713,7 +716,7 @@ fn make_nested_object_type(
 		}
 		let enum_scope = format!("{type_name}_{}", sf.graphql_name);
 		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
-		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone(), Some(enum_scope));
+		let resolver = make_sub_field_resolver(sf.name.clone(), Some(kind), Some(enum_scope));
 		let mut field = Field::new(&sf.graphql_name, fd_type, resolver);
 		if let Some(ref comment) = sf.comment {
 			field = field.description(comment.clone());
@@ -744,16 +747,30 @@ fn make_sub_field_resolver(
 				Some(val) => match val {
 					Value::None | Value::Null => Ok(None),
 					Value::RecordId(rid) => {
+						if ctx
+							.data_opt::<ExposedTables>()
+							.is_some_and(|et| !et.0.contains(&rid.table))
+						{
+							return Ok(None);
+						}
 						// Record-link: store as owned_any for dereferencing
 						let field_val = FieldValue::owned_any(VersionedRecord {
 							rid: rid.clone(),
 							version: None,
 						});
-						let field_val = match field_kind {
-							Some(Kind::Record(ref ts)) if ts.is_empty() || ts.len() > 1 => {
-								field_val.with_type(rid.table.clone())
-							}
-							_ => field_val,
+						let needs_type = if let Some(Kind::Record(ts)) = &field_kind {
+							ts.is_empty() || ts.len() > 1
+						} else if let Some(Kind::Either(ks)) = &field_kind {
+							ks.iter().any(
+								|k| matches!(k, Kind::Record(ts) if ts.is_empty() || ts.len() > 1),
+							)
+						} else {
+							false
+						};
+						let field_val = if needs_type {
+							field_val.with_type(rid.table.clone())
+						} else {
+							field_val
 						};
 						Ok(Some(field_val))
 					}
@@ -1083,6 +1100,9 @@ fn make_generic_get_field(kvs: Arc<Datastore>) -> Field {
 					return Err(resolver_error("Invalid record ID format").into());
 				}
 			};
+			if ctx.data_opt::<ExposedTables>().is_some_and(|et| !et.0.contains(&record_id.table)) {
+				return Ok(None);
+			}
 
 			let stmt = select_all_from_record(&record_id, &version);
 			let res = execute_select(&kvs, sess, stmt).await?;
@@ -1195,6 +1215,7 @@ fn build_table_type(
 		let Some(kind) = fd.field_kind.clone() else {
 			continue;
 		};
+		let kind = sanitize_kind_for_exposed_tables(kind, exposed_table_names);
 		if fd.name.is_id() {
 			continue;
 		}
@@ -1216,8 +1237,12 @@ fn build_table_type(
 		// alias, so two columns aliased the same way would conflict — that's
 		// caught at schema build time by async-graphql.
 		if let Some(nested) = nested_objects.get(lookup_name.as_str()) {
-			let nested_type =
-				make_nested_object_type(&nested.graphql_type_name, &nested.sub_fields, types)?;
+			let nested_type = make_nested_object_type(
+				&nested.graphql_type_name,
+				&nested.sub_fields,
+				exposed_table_names,
+				types,
+			)?;
 			types.push(Type::Object(nested_type));
 
 			let fd_type = if nested.is_array {
@@ -1263,6 +1288,7 @@ fn build_table_type(
 				type_filter_name.clone(),
 				types,
 				Some(&enum_scope),
+				exposed_table_names,
 			)?);
 			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
@@ -1545,7 +1571,8 @@ pub async fn process_tbs(
 		// Aggregation query field — `<table_plural>_aggregate` returns
 		// `[{Table}AggregateRow!]!` with count + per-numeric-field stats and
 		// optional groupBy.  See `register_filter_helper_types` / Stage E.
-		let (agg_obj, agg_enum) = build_aggregate_type(tb.name.as_str(), &fds, types);
+		let (agg_obj, agg_enum) =
+			build_aggregate_type(tb.name.as_str(), &fds, &exposed_table_names, types);
 		types.push(Type::Object(agg_obj));
 		types.push(Type::Enum(agg_enum));
 		query = query.field(make_table_aggregate_field(
@@ -1661,6 +1688,9 @@ async fn resolve_field_value(
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	match val {
 		Value::RecordId(target_rid) if fd_name != "id" => {
+			if ctx.data_opt::<ExposedTables>().is_some_and(|et| !et.0.contains(&target_rid.table)) {
+				return Ok(None);
+			}
 			// Record-link dereferencing: fetch the full target record and
 			// wrap it as CachedRecord so the target's field resolvers can
 			// also benefit from caching.
@@ -1676,9 +1706,15 @@ async fn resolve_field_value(
 					version: *version,
 					data: obj,
 				});
-				if let Some(Kind::Record(ts)) = &field_kind
-					&& (ts.is_empty() || ts.len() > 1)
-				{
+				let needs_type = if let Some(Kind::Record(ts)) = &field_kind {
+					ts.is_empty() || ts.len() > 1
+				} else if let Some(Kind::Either(ks)) = &field_kind {
+					ks.iter()
+						.any(|k| matches!(k, Kind::Record(ts) if ts.is_empty() || ts.len() > 1))
+				} else {
+					false
+				};
+				if needs_type {
 					field_val = field_val.with_type(target_rid.table);
 				}
 				Ok(Some(field_val))
@@ -1896,6 +1932,7 @@ fn filter_from_type(
 	filter_name: String,
 	types: &mut Vec<Type>,
 	enum_scope: Option<&str>,
+	exposed_table_names: &HashSet<TableName>,
 ) -> Result<InputObject, GraphqlError> {
 	// Normalise `option<record<T>>` (Kind::Either([None, Record([T])])) down to the
 	// inner record kind so filters are generated correctly with ID-based filtering.
@@ -1917,7 +1954,7 @@ fn filter_from_type(
 	// entirely — comparing full record arrays by content rarely makes sense and
 	// would otherwise pull an output Object type into input position.
 	let (eq_ne_ty, supports_eq_ne) = if let Kind::Record(ts) = &effective_kind {
-		if ts.len() == 1 {
+		if ts.len() == 1 && exposed_table_names.contains(&ts[0]) {
 			(
 				TypeRef::named(filter_name_from_table(
 					ts.first().expect("ts should have exactly one element").as_str(),
@@ -3053,6 +3090,7 @@ fn aggregate_groupable_enum_name(tb: &str) -> String {
 fn build_aggregate_type(
 	tb_name: &str,
 	fds: &[FieldDefinition],
+	exposed_table_names: &HashSet<TableName>,
 	types: &mut Vec<Type>,
 ) -> (Object, Enum) {
 	let obj_name = aggregate_object_type_name(tb_name);
@@ -3078,7 +3116,11 @@ fn build_aggregate_type(
 		let fname = idiom_to_graphql_name(&fd.name);
 		// Fields without an explicit type fall back to `Any` so the aggregate
 		// type-check below treats them as non-numeric.
-		let kind: Kind = fd.field_kind.clone().unwrap_or(Kind::Any);
+		let kind: Kind = fd
+			.field_kind
+			.clone()
+			.map(|k| sanitize_kind_for_exposed_tables(k, exposed_table_names))
+			.unwrap_or(Kind::Any);
 		if is_numeric_kind(&kind) {
 			let inner = numeric_kind(&kind);
 			let ty_min_max = match kind_to_type(inner.clone(), types, false) {

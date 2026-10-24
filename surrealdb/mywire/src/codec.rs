@@ -10,6 +10,9 @@ pub const MAX_PACKET_SIZE: usize = 16_777_215; // 2^24 - 1
 /// `@@max_allowed_packet`.
 pub const MAX_ALLOWED_PACKET: usize = 64 * 1024 * 1024;
 
+/// Maximum packet payload accepted during the pre-authentication handshake.
+pub const MAX_HANDSHAKE_PACKET_SIZE: usize = 64 * 1024;
+
 /// A peer sent a packet larger than [`MAX_ALLOWED_PACKET`]. `seq` is the sequence
 /// id of the continuation packet that crossed the limit; the error reply
 /// follows it.
@@ -158,12 +161,30 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
 	/// Returns (sequence_id, payload) where sequence_id is the ID of the first packet.
 	/// A reassembled payload larger than [`MAX_ALLOWED_PACKET`] fails with [`PacketTooLarge`].
 	pub async fn read_packet(&mut self) -> Result<(u8, Vec<u8>)> {
+		self.read_packet_with_limit(MAX_ALLOWED_PACKET).await
+	}
+
+	/// Read a pre-authentication handshake packet, rejecting any payload larger than
+	/// [`MAX_HANDSHAKE_PACKET_SIZE`] before allocating.
+	pub async fn read_handshake_packet(&mut self) -> Result<(u8, Vec<u8>)> {
+		self.read_packet_with_limit(MAX_HANDSHAKE_PACKET_SIZE).await
+	}
+
+	/// Read a MySQL packet whose total payload must not exceed `max_allowed` bytes.
+	pub async fn read_packet_with_limit(&mut self, max_allowed: usize) -> Result<(u8, Vec<u8>)> {
 		let mut header = [0u8; 4];
 		self.reader.read_exact(&mut header).await?;
 
 		let payload_len =
 			(header[0] as usize) | ((header[1] as usize) << 8) | ((header[2] as usize) << 16);
 		let seq = header[3];
+
+		if payload_len > max_allowed {
+			return Err(PacketTooLarge {
+				seq,
+			}
+			.into());
+		}
 
 		let mut payload = vec![0u8; payload_len];
 		self.reader.read_exact(&mut payload).await?;
@@ -181,7 +202,7 @@ impl<R: AsyncRead + Unpin> PacketReader<R> {
 				| ((next_header[1] as usize) << 8)
 				| ((next_header[2] as usize) << 16);
 			let start = payload.len();
-			if start.saturating_add(next_len) > MAX_ALLOWED_PACKET {
+			if start.saturating_add(next_len) > max_allowed {
 				return Err(PacketTooLarge {
 					seq: next_header[3],
 				}
@@ -319,5 +340,24 @@ mod tests {
 		let (seq, read_payload) = reader.read_packet().await.unwrap();
 		assert_eq!(seq, 42);
 		assert_eq!(&read_payload, payload);
+	}
+
+	#[tokio::test]
+	async fn read_handshake_packet_rejects_oversized_header_before_reading_body() {
+		let oversized_len = MAX_HANDSHAKE_PACKET_SIZE + 1;
+		let header = [
+			(oversized_len & 0xff) as u8,
+			((oversized_len >> 8) & 0xff) as u8,
+			((oversized_len >> 16) & 0xff) as u8,
+			1,
+		];
+		let mut reader = PacketReader::new(&header[..]);
+		let err = reader
+			.read_handshake_packet()
+			.await
+			.expect_err("oversized handshake packet must be rejected");
+		let too_large =
+			err.downcast_ref::<PacketTooLarge>().expect("error must downcast to PacketTooLarge");
+		assert_eq!(too_large.seq, 1);
 	}
 }

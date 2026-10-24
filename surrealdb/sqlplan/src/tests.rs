@@ -2504,3 +2504,58 @@ fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
 		);
 	}
 }
+
+#[test]
+fn test_mysql_case_folding_cte_aliases_and_using() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(TableSchema::new(
+		"users",
+		vec![
+			ColumnInfo::new("id", 0).with_type("int8"),
+			ColumnInfo::new("dept_id", 1).with_type("int8"),
+		],
+	));
+	catalog.add_table(TableSchema::new(
+		"orders",
+		vec![
+			ColumnInfo::new("id", 0).with_type("int8"),
+			ColumnInfo::new("dept_id", 1).with_type("int8"),
+		],
+	));
+	let policy = DialectPolicy::mysql();
+
+	let sql = "WITH MyCte (ColA) AS (SELECT id FROM users) SELECT m.cola, u.dept_id FROM MyCte AS M JOIN users AS U ON M.ColA = U.id JOIN orders AS O USING (DEPT_ID);";
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
+	let with = bound.with.as_ref().unwrap();
+	assert_eq!(with.ctes[0].name, "mycte");
+	assert_eq!(with.ctes[0].columns, vec!["cola".to_string()]);
+	let op = lower_bound_select(&bound, &policy).unwrap();
+	assert!(matches!(op, LogicalOp::Project(_)));
+}
+
+#[test]
+fn test_mysql_system_catalog_select_allowed_with_active_database() {
+	let catalog = MemoryCatalog::new().with_database("mydb");
+	let policy = DialectPolicy::mysql();
+	for sql in [
+		"SELECT * FROM pg_catalog.pg_namespace WHERE nspname = 'public';",
+		"SELECT * FROM information_schema.tables;",
+	] {
+		let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+		let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
+		assert!(lower_bound_select(&bound, &policy).is_ok());
+	}
+
+	let cross_db = surrealdb_mysql::parse_statements("SELECT * FROM otherdb.users;").unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &cross_db[0] else {
+		panic!("expected SELECT");
+	};
+	assert!(binder::mysql::bind_select(select, &catalog, &policy, None).is_err());
+}

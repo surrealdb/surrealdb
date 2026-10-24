@@ -157,7 +157,8 @@ pub(crate) fn single_statement_result(
 /// successful statement) or a labelled list when there's more than one /
 /// any statement failed. `is_error` is only set when every statement failed —
 /// partial success stays `false` so the LLM sees what went through.
-/// `max_bytes` is forwarded to [`cap_value`] for each per-statement payload.
+/// `max_bytes` bounds the total serialized payload size across all statements
+/// in the batch.
 pub(crate) fn multi_statement_result(
 	results: Vec<QueryResult>,
 	max_bytes: Option<usize>,
@@ -170,6 +171,7 @@ pub(crate) fn multi_statement_result(
 	let mut text_blocks = Vec::with_capacity(results.len());
 	let mut ok_count = 0usize;
 	let mut err_count = 0usize;
+	let mut remaining_bytes = max_bytes;
 
 	for (i, response) in results.into_iter().enumerate() {
 		let time_ms = duration_to_millis(response.time);
@@ -177,7 +179,25 @@ pub(crate) fn multi_statement_result(
 			Ok(value) => {
 				ok_count += 1;
 				let raw = value.into_json_value();
-				let (json, truncated) = cap_value(raw, max_bytes);
+				let (json, truncated) = match (max_bytes, remaining_bytes.as_mut()) {
+					(Some(limit), Some(rem)) => {
+						let size = serde_json::to_string(&raw).map(|s| s.len()).unwrap_or(0);
+						if size <= *rem {
+							*rem -= size;
+							(raw, false)
+						} else {
+							*rem = 0;
+							tracing::warn!(
+								target: "surrealdb::mcp",
+								bytes = size,
+								limit = limit,
+								"truncating large MCP tool result"
+							);
+							(truncation_marker(size, limit), true)
+						}
+					}
+					_ => (raw, false),
+				};
 				let pretty = pretty_json(&json);
 				entries.push(json!({
 					"index": i,
@@ -345,5 +365,26 @@ mod tests {
 		let value = structured.get("value").and_then(|v| v.as_object()).expect("marker object");
 		assert_eq!(value.get("$truncated").and_then(|v| v.as_bool()), Some(true));
 		assert!(value.get("truncated").is_none(), "marker must not shadow envelope flag");
+	}
+
+	/// `multi_statement_result` enforces `max_bytes` across the batch as a
+	/// whole rather than independently per statement.
+	#[test]
+	fn multi_statement_result_caps_total_bytes_across_statements() {
+		use surrealdb_rpc::QueryResultBuilder;
+		let limit = 100usize;
+		let first = QueryResultBuilder::started_now()
+			.finish_with_result(Ok(surrealdb_types::Value::String("a".repeat(60))));
+		let second = QueryResultBuilder::started_now()
+			.finish_with_result(Ok(surrealdb_types::Value::String("b".repeat(60))));
+		let call = multi_statement_result(vec![first, second], Some(limit));
+		let structured = call.structured_content.expect("structured content");
+		let results = structured.get("results").and_then(|v| v.as_array()).expect("results array");
+		assert_eq!(results.len(), 2);
+		assert_eq!(results[0].get("truncated").and_then(|v| v.as_bool()), Some(false));
+		assert_eq!(results[1].get("truncated").and_then(|v| v.as_bool()), Some(true));
+		let marker = results[1].get("value").and_then(|v| v.as_object()).expect("marker");
+		assert_eq!(marker.get("$truncated").and_then(|v| v.as_bool()), Some(true));
+		assert_eq!(marker.get("limit_bytes").and_then(|v| v.as_u64()), Some(limit as u64));
 	}
 }

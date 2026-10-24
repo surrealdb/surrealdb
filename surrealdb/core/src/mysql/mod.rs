@@ -94,13 +94,28 @@ pub(crate) fn lower_statements(
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Truncate(truncate) => {
+				surrealdb_sqlplan::resolve_mysql_table_name(&truncate.table.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("MySQL TRUNCATE lowering error: {e}"))?;
 				let expr = surrealdb_sqlplan::lower_mysql_truncate(truncate)
 					.map_err(|e| anyhow::anyhow!("MySQL TRUNCATE lowering error: {e}"))?;
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
-			surrealdb_mysql::ast::stmt::Statement::CreateTable(_)
-			| surrealdb_mysql::ast::stmt::Statement::DropTable(_) => {
+			surrealdb_mysql::ast::stmt::Statement::CreateTable(create) => {
+				surrealdb_sqlplan::resolve_mysql_table_name(&create.name.parts, Some(catalog))
+					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				let exprs = surrealdb_sqlplan::lower_mysql_ddl(stmt)
+					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
+				}
+			}
+			surrealdb_mysql::ast::stmt::Statement::DropTable(drop) => {
+				for name in &drop.names {
+					surrealdb_sqlplan::resolve_mysql_table_name(&name.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				}
 				let exprs = surrealdb_sqlplan::lower_mysql_ddl(stmt)
 					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
 				for expr in exprs {
@@ -135,6 +150,44 @@ pub(crate) fn lower_statements(
 			| surrealdb_mysql::ast::stmt::Statement::Describe(_)
 			| surrealdb_mysql::ast::stmt::Statement::Explain(_)
 			| surrealdb_mysql::ast::stmt::Statement::Transaction(_) => {
+				if let surrealdb_mysql::ast::stmt::Statement::CreateIndex(idx) = stmt {
+					surrealdb_sqlplan::resolve_mysql_table_name(&idx.table.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				} else if let surrealdb_mysql::ast::stmt::Statement::DropIndex(drop) = stmt {
+					surrealdb_sqlplan::resolve_mysql_table_name(&drop.table.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				} else if let surrealdb_mysql::ast::stmt::Statement::CreateView(view) = stmt {
+					surrealdb_sqlplan::resolve_mysql_table_name(&view.name.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+					if let Some(surrealdb_mysql::ast::stmt::TableRef::Table {
+						name,
+						..
+					}) = &view.query.from
+					{
+						surrealdb_sqlplan::resolve_mysql_table_name(&name.parts, Some(catalog))
+							.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+					}
+				} else if let surrealdb_mysql::ast::stmt::Statement::DropView(drop) = stmt {
+					for name in &drop.names {
+						surrealdb_sqlplan::resolve_mysql_table_name(&name.parts, Some(catalog))
+							.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+					}
+				} else if let surrealdb_mysql::ast::stmt::Statement::AlterTable(alter) = stmt {
+					surrealdb_sqlplan::resolve_mysql_table_name(&alter.table.parts, Some(catalog))
+						.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+					for action in &alter.actions {
+						if let surrealdb_mysql::ast::stmt::AlterTableAction::RenameTable {
+							new_name,
+						} = action
+						{
+							surrealdb_sqlplan::resolve_mysql_table_name(
+								&new_name.parts,
+								Some(catalog),
+							)
+							.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+						}
+					}
+				}
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(
 					stmt,

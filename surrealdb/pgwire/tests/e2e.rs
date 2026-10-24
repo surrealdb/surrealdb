@@ -2273,6 +2273,11 @@ async fn test_pgwire_claims_subject_must_match_session_identity_exactly() {
 		// The setting name is case-insensitive.
 		r#"SET LOCAL "Request.JWT.Claim.Sub" = 'alice';"#,
 		r#"SET LOCAL "REQUEST.JWT.CLAIMS" = '{"sub": "alice"}';"#,
+		// Record users cannot forge custom JWT claims or non-anonymous role claims.
+		r#"SET LOCAL "request.jwt.claim.tenant" = 'other';"#,
+		r#"SET LOCAL "request.jwt.claims" = '{"sub": "user:malice", "tenant": "other"}';"#,
+		r#"SET LOCAL "request.jwt.claims" = '{"role": "owner"}';"#,
+		r#"SET LOCAL "request.jwt.claim.role" = 'owner';"#,
 	] {
 		assert_eq!(
 			set_local_refused_with(&mut stream, set).await.as_deref(),

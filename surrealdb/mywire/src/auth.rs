@@ -178,6 +178,7 @@ pub fn verify_caching_sha2_password_fast_auth(
 #[derive(Debug, Clone)]
 pub struct CachedCredential {
 	pub username: String,
+	pub password: Option<String>,
 	pub sha2_stage2: [u8; 32],
 	pub native_stage2: [u8; 20],
 	pub session_auth: Option<Arc<Auth>>,
@@ -190,14 +191,30 @@ pub struct FastAuthCache {
 	entries: RwLock<HashMap<String, CachedCredential>>,
 }
 
+/// Return the current UNIX epoch timestamp in seconds.
+pub(crate) fn unix_timestamp_secs() -> i64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_or(0, |d| d.as_secs() as i64)
+}
+
 impl FastAuthCache {
 	pub fn new() -> Self {
 		Self::default()
 	}
 
 	pub fn get(&self, username: &str) -> Option<CachedCredential> {
-		let lock = self.entries.read().ok()?;
-		lock.get(username).cloned()
+		let entry = {
+			let lock = self.entries.read().ok()?;
+			lock.get(username).cloned()?
+		};
+		if let Some(exp) = entry.session_exp
+			&& exp <= unix_timestamp_secs()
+		{
+			self.invalidate(username);
+			return None;
+		}
+		Some(entry)
 	}
 
 	pub fn insert(
@@ -218,6 +235,7 @@ impl FastAuthCache {
 				username.to_string(),
 				CachedCredential {
 					username: username.to_string(),
+					password: Some(password.to_string()),
 					sha2_stage2,
 					native_stage2,
 					session_auth: auth,
@@ -240,6 +258,7 @@ impl FastAuthCache {
 				username.to_string(),
 				CachedCredential {
 					username: username.to_string(),
+					password: None,
 					sha2_stage2,
 					native_stage2,
 					session_auth: auth,
@@ -307,10 +326,12 @@ mod tests {
 		let cache = FastAuthCache::new();
 		assert!(cache.get("alice").is_none());
 
-		cache.insert("alice", "pass123", None, Some(123456789));
+		let future_exp = unix_timestamp_secs() + 3600;
+		cache.insert("alice", "pass123", None, Some(future_exp));
 		let entry = cache.get("alice").expect("entry should exist");
 		assert_eq!(entry.username, "alice");
-		assert_eq!(entry.session_exp, Some(123456789));
+		assert_eq!(entry.password.as_deref(), Some("pass123"));
+		assert_eq!(entry.session_exp, Some(future_exp));
 
 		// Verify scramble against cached stage2
 		let salt = generate_auth_salt();
@@ -319,5 +340,10 @@ mod tests {
 
 		cache.invalidate("alice");
 		assert!(cache.get("alice").is_none());
+
+		// Expired entries are evicted on read
+		let past_exp = unix_timestamp_secs() - 1;
+		cache.insert("bob", "pass456", None, Some(past_exp));
+		assert!(cache.get("bob").is_none());
 	}
 }

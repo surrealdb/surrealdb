@@ -121,6 +121,12 @@ where
 			let session =
 				req.extensions().get::<Session>().expect("session extractor should always succeed");
 
+			if !datastore.allows_query_by_subject(session.au.as_ref()) {
+				return Ok(
+					NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response()
+				);
+			}
+
 			let Some(_ns) = session.ns.as_ref() else {
 				return Ok(graphql_error_response(
 					"No namespace specified. Set the `surreal-ns` header on the request.",

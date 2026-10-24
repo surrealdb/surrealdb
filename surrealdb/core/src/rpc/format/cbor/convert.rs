@@ -156,7 +156,14 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 							_ => 0,
 						};
 
-						Ok(PublicValue::Duration(PublicDuration::new(seconds, nanos)))
+						let seconds = seconds
+							.checked_add(u64::from(nanos / 1_000_000_000))
+							.ok_or_else(|| anyhow!("Expected a valid Duration value"))?;
+
+						Ok(PublicValue::Duration(PublicDuration::new(
+							seconds,
+							nanos % 1_000_000_000,
+						)))
 					} else {
 						Err(anyhow!("Expected a CBOR array with at most 2 elements"))
 					}

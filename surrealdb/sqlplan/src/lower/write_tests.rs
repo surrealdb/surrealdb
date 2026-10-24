@@ -720,9 +720,55 @@ fn mysql_on_duplicate_key_update_reads_the_existing_key() {
 
 #[test]
 fn mysql_a_multi_table_update_leaves_id_as_written() {
-	let upd =
-		my_update("UPDATE users u JOIN orders o ON u.id = o.user_id SET n = 1 WHERE u.id = 1");
-	assert!(!where_sql(&upd.cond).contains("record::id"), "{}", where_sql(&upd.cond));
+	let stmts = surrealdb_mysql::parse_statements(
+		"UPDATE users u JOIN orders o ON u.id = o.user_id SET n = 1 WHERE u.id = 1",
+	)
+	.unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Update(update) = &stmts[0] else {
+		panic!("Expected Update statement");
+	};
+	assert!(matches!(
+		lower_mysql_update(update, &EmptyCatalog),
+		Err(crate::PlanError::UnsupportedStatement(_))
+	));
+}
+
+#[test]
+fn mysql_update_and_delete_reject_order_by_and_limit() {
+	for sql in [
+		"UPDATE users SET n = 1 ORDER BY id LIMIT 1",
+		"UPDATE users SET n = 1 LIMIT 5",
+		"UPDATE users SET n = 1 ORDER BY id",
+	] {
+		let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+		let surrealdb_mysql::ast::stmt::Statement::Update(update) = &stmts[0] else {
+			panic!("Expected Update statement");
+		};
+		assert!(
+			matches!(
+				lower_mysql_update(update, &EmptyCatalog),
+				Err(crate::PlanError::UnsupportedStatement(_))
+			),
+			"{sql}"
+		);
+	}
+	for sql in [
+		"DELETE FROM users ORDER BY id LIMIT 1",
+		"DELETE FROM users LIMIT 5",
+		"DELETE FROM users ORDER BY id",
+	] {
+		let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+		let surrealdb_mysql::ast::stmt::Statement::Delete(delete) = &stmts[0] else {
+			panic!("Expected Delete statement");
+		};
+		assert!(
+			matches!(
+				lower_mysql_delete(delete, &EmptyCatalog),
+				Err(crate::PlanError::UnsupportedStatement(_))
+			),
+			"{sql}"
+		);
+	}
 }
 
 const PARENT_RECORD: &str = "IF parent = '' OR !(type::is_int(parent) OR type::is_string(parent) OR type::is_uuid(parent) OR type::is_array(parent) OR type::is_object(parent) OR type::is_record(parent)) THEN NONE ELSE type::record('users', parent) END";
@@ -889,4 +935,69 @@ fn pgsql_conditional_upsert_evaluates_each_proposed_value_once() {
 	.unwrap();
 	let sql = expr.to_sql();
 	assert_eq!(sql.matches("::uuid::v4").count(), 1, "{sql}");
+}
+
+#[test]
+fn insert_select_rejects_complex_select_clauses() {
+	for sql in [
+		"INSERT INTO dst (id) SELECT id FROM src LIMIT 1",
+		"INSERT INTO dst (id) SELECT id FROM src ORDER BY id",
+		"INSERT INTO dst (id) SELECT id FROM src GROUP BY id",
+		"INSERT INTO dst (id) SELECT DISTINCT id FROM src",
+		"INSERT INTO dst (id) SELECT a.id FROM src a JOIN src b ON a.id = b.id",
+	] {
+		assert!(
+			matches!(pg_insert_expr(sql), Err(crate::PlanError::UnsupportedStatement(_))),
+			"pgsql: {sql}"
+		);
+		let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+		let surrealdb_mysql::ast::stmt::Statement::Insert(ins) = &stmts[0] else {
+			panic!("Expected Insert");
+		};
+		assert!(
+			matches!(
+				lower_mysql_insert(ins, &EmptyCatalog),
+				Err(crate::PlanError::UnsupportedStatement(_))
+			),
+			"mysql: {sql}"
+		);
+	}
+}
+
+#[test]
+#[allow(clippy::wildcard_enum_match_arm)]
+fn dml_rejects_cross_database_targets() {
+	let catalog = crate::catalog::MemoryCatalog::new().with_database("db1");
+	for sql in [
+		"INSERT INTO db2.public.users (id) VALUES (1)",
+		"INSERT INTO users (id) SELECT id FROM db2.public.src",
+		"UPDATE db2.public.users SET name = 'a'",
+		"DELETE FROM db2.public.users",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let res = match &stmts[0] {
+			surrealdb_pgsql::ast::stmt::Statement::Insert(s) => lower_pgsql_insert(s, &catalog),
+			surrealdb_pgsql::ast::stmt::Statement::Update(s) => lower_pgsql_update(s, &catalog),
+			surrealdb_pgsql::ast::stmt::Statement::Delete(s) => lower_pgsql_delete(s, &catalog),
+			_ => unreachable!(),
+		};
+		assert!(res.is_err(), "pgsql should reject cross-database target: {sql}");
+	}
+	for sql in [
+		"INSERT INTO db2.users (id) VALUES (1)",
+		"INSERT INTO db1.users (id) SELECT id FROM db2.src",
+		"REPLACE INTO db2.users (id) VALUES (1)",
+		"UPDATE db2.users SET name = 'a'",
+		"DELETE FROM db2.users",
+	] {
+		let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+		let res = match &stmts[0] {
+			surrealdb_mysql::ast::stmt::Statement::Insert(s) => lower_mysql_insert(s, &catalog),
+			surrealdb_mysql::ast::stmt::Statement::Replace(s) => lower_mysql_replace(s, &catalog),
+			surrealdb_mysql::ast::stmt::Statement::Update(s) => lower_mysql_update(s, &catalog),
+			surrealdb_mysql::ast::stmt::Statement::Delete(s) => lower_mysql_delete(s, &catalog),
+			_ => unreachable!(),
+		};
+		assert!(res.is_err(), "mysql should reject cross-database target: {sql}");
+	}
 }

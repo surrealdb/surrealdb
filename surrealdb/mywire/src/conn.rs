@@ -12,7 +12,7 @@ use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
-use surrealdb_mysql::ast::stmt::{Statement as MyStatement, TableRef};
+use surrealdb_mysql::ast::stmt::{AlterTableAction, Statement as MyStatement, TableRef};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::SqlDialect;
 use surrealdb_sqlplan::binder::mysql::bind_select;
@@ -71,6 +71,7 @@ pub struct Connection {
 	savepoints: Vec<String>,
 	autocommit: bool,
 	_permit: OwnedSemaphorePermit,
+	auth_cache: Arc<FastAuthCache>,
 	prepared_statements: HashMap<u32, PreparedStatement>,
 	next_statement_id: u32,
 }
@@ -160,6 +161,42 @@ async fn verify_credentials(
 	basic(ds, session, username, password, None, None).await.is_ok()
 }
 
+/// Apply a matched [`CachedCredential`] to `session`, re-verifying against `ds` when a
+/// plaintext password was cached so dropped users, changed passwords, and updated grants
+/// take effect immediately without requiring an extra wire round-trip.
+async fn verify_fast_auth_entry(
+	ds: &Datastore,
+	session: &mut Session,
+	auth_cache: &FastAuthCache,
+	cached: &CachedCredential,
+	ns_opt: Option<&str>,
+	db_opt: Option<&str>,
+) -> bool {
+	if let Some(ref password) = cached.password {
+		if verify_credentials(ds, session, &cached.username, password, ns_opt, db_opt).await {
+			auth_cache.insert(
+				&cached.username,
+				password,
+				Some(Arc::clone(&session.au)),
+				session.exp,
+			);
+			true
+		} else {
+			auth_cache.invalidate(&cached.username);
+			false
+		}
+	} else if cached.session_exp.is_none_or(|exp| exp > crate::auth::unix_timestamp_secs()) {
+		if let Some(ref au) = cached.session_auth {
+			session.au = Arc::clone(au);
+		}
+		session.exp = cached.session_exp;
+		true
+	} else {
+		auth_cache.invalidate(&cached.username);
+		false
+	}
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn perform_handshake(
 	mut stream: TcpStream,
@@ -199,7 +236,7 @@ async fn perform_handshake(
 	// 2. Read first response packet (seq 1)
 	let (first_seq, payload) = {
 		let mut reader = PacketReader::new(&mut stream);
-		reader.read_packet().await?
+		reader.read_handshake_packet().await?
 	};
 
 	// 3. Negotiate TLS upgrade if SSL requested
@@ -220,7 +257,7 @@ async fn perform_handshake(
 			let (read_half, write_half) = split(my_stream);
 			let mut reader = PacketReader::new(read_half);
 			let writer = PacketWriter::new(write_half);
-			let (hs_seq, hs_payload) = reader.read_packet().await?;
+			let (hs_seq, hs_payload) = reader.read_handshake_packet().await?;
 			(reader, writer, hs_payload, hs_seq, true)
 		} else {
 			let my_stream = Either::Left(stream);
@@ -286,14 +323,18 @@ async fn perform_handshake(
 				&auth_salt,
 				&cached.sha2_stage2,
 			) {
-			if let Some(ref au) = cached.session_auth {
-				session.au = Arc::clone(au);
-			}
-			session.exp = cached.session_exp;
-			fast_auth_succeeded = true;
+			fast_auth_succeeded =
+				verify_fast_auth_entry(&ds, &mut session, &auth_cache, &cached, ns_opt, db_opt)
+					.await;
 		}
 
 		if fast_auth_succeeded {
+			if !ds.allows_query_by_subject(session.au.as_ref()) {
+				let err =
+					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
+				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
+				return Ok(None);
+			}
 			let more_data = AuthMoreData::fast_auth_success();
 			writer.write_packet(cur_seq, &more_data.serialize()).await?;
 			cur_seq = cur_seq.wrapping_add(1);
@@ -314,14 +355,14 @@ async fn perform_handshake(
 			let more_data = AuthMoreData::perform_full_authentication();
 			writer.write_packet(cur_seq, &more_data.serialize()).await?;
 
-			let (resp_seq, pass_payload) = reader.read_packet().await?;
+			let (resp_seq, pass_payload) = reader.read_handshake_packet().await?;
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
 			let ok =
 				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
 
-			if !ok {
+			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
 					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
 				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
@@ -342,14 +383,18 @@ async fn perform_handshake(
 				&auth_salt,
 				&cached.native_stage2,
 			) {
-			if let Some(ref au) = cached.session_auth {
-				session.au = Arc::clone(au);
-			}
-			session.exp = cached.session_exp;
-			fast_auth_succeeded = true;
+			fast_auth_succeeded =
+				verify_fast_auth_entry(&ds, &mut session, &auth_cache, &cached, ns_opt, db_opt)
+					.await;
 		}
 
 		if fast_auth_succeeded {
+			if !ds.allows_query_by_subject(session.au.as_ref()) {
+				let err =
+					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
+				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
+				return Ok(None);
+			}
 			let ok = OkPacket::new(0, 0);
 			writer.write_packet(cur_seq, &ok.serialize()).await?;
 		} else {
@@ -366,14 +411,14 @@ async fn perform_handshake(
 			let auth_switch = AuthSwitchRequest::clear_password();
 			writer.write_packet(cur_seq, &auth_switch.serialize()).await?;
 
-			let (resp_seq, pass_payload) = reader.read_packet().await?;
+			let (resp_seq, pass_payload) = reader.read_handshake_packet().await?;
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
 			let ok =
 				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
 
-			if !ok {
+			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
 					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
 				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
@@ -402,13 +447,13 @@ async fn perform_handshake(
 			let auth_switch = AuthSwitchRequest::clear_password();
 			writer.write_packet(cur_seq, &auth_switch.serialize()).await?;
 
-			let (resp_seq, pass_payload) = reader.read_packet().await?;
+			let (resp_seq, pass_payload) = reader.read_handshake_packet().await?;
 			cur_seq = resp_seq.wrapping_add(1);
 			clean_password(&pass_payload)
 		};
 
 		let ok = verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
-		if !ok {
+		if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 			let err = ErrPacket::access_denied(format!("Access denied for user '{}'", username));
 			let _ = writer.write_packet(cur_seq, &err.serialize()).await;
 			return Ok(None);
@@ -422,7 +467,7 @@ async fn perform_handshake(
 		let auth_switch = AuthSwitchRequest::caching_sha2_password(&auth_salt);
 		writer.write_packet(cur_seq, &auth_switch.serialize()).await?;
 
-		let (resp_seq, switch_resp) = reader.read_packet().await?;
+		let (resp_seq, switch_resp) = reader.read_handshake_packet().await?;
 		cur_seq = resp_seq.wrapping_add(1);
 
 		let mut fast_auth_succeeded = false;
@@ -430,14 +475,18 @@ async fn perform_handshake(
 			&& let Some(cached) = auth_cache.get(&username)
 			&& verify_caching_sha2_password_fast_auth(&switch_resp, &auth_salt, &cached.sha2_stage2)
 		{
-			if let Some(ref au) = cached.session_auth {
-				session.au = Arc::clone(au);
-			}
-			session.exp = cached.session_exp;
-			fast_auth_succeeded = true;
+			fast_auth_succeeded =
+				verify_fast_auth_entry(&ds, &mut session, &auth_cache, &cached, ns_opt, db_opt)
+					.await;
 		}
 
 		if fast_auth_succeeded {
+			if !ds.allows_query_by_subject(session.au.as_ref()) {
+				let err =
+					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
+				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
+				return Ok(None);
+			}
 			let more_data = AuthMoreData::fast_auth_success();
 			writer.write_packet(cur_seq, &more_data.serialize()).await?;
 			cur_seq = cur_seq.wrapping_add(1);
@@ -458,14 +507,14 @@ async fn perform_handshake(
 			let more_data = AuthMoreData::perform_full_authentication();
 			writer.write_packet(cur_seq, &more_data.serialize()).await?;
 
-			let (resp_seq, pass_payload) = reader.read_packet().await?;
+			let (resp_seq, pass_payload) = reader.read_handshake_packet().await?;
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
 			let ok =
 				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
 
-			if !ok {
+			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
 					ErrPacket::access_denied(format!("Access denied for user '{}'", username));
 				let _ = writer.write_packet(cur_seq, &err.serialize()).await;
@@ -502,6 +551,7 @@ async fn perform_handshake(
 		savepoints: Vec::new(),
 		autocommit: true,
 		_permit: permit,
+		auth_cache,
 		prepared_statements: HashMap::new(),
 		next_statement_id: 1,
 	};
@@ -557,6 +607,9 @@ impl Connection {
 	}
 
 	fn check_dialect(&self, dialect: Dialect) -> Result<()> {
+		if !self.ds.allows_query_by_subject(self.session.au.as_ref()) {
+			anyhow::bail!("Forbidden: this user is not allowed to query the database");
+		}
 		let allowed = match dialect {
 			Dialect::MySql => self.ds.allows_http_route(&RouteTarget::MySql),
 			Dialect::PgSql => self.ds.allows_http_route(&RouteTarget::Postgres),
@@ -583,10 +636,9 @@ impl Connection {
 			(self.current_ns.clone().unwrap_or_else(|| "test".to_string()), db_name.to_string())
 		};
 
-		self.current_ns = Some(ns.clone());
-		self.current_db = Some(db.clone());
-
-		self.ds.process_use(None, &mut self.session, Some(ns), Some(db)).await?;
+		self.ds.process_use(None, &mut self.session, Some(ns.clone()), Some(db.clone())).await?;
+		self.current_ns = Some(ns);
+		self.current_db = Some(db);
 		Ok(())
 	}
 
@@ -933,7 +985,7 @@ impl Connection {
 		// Cross-database and namespace validation for MySQL dialect
 		if self.dialect == Dialect::MySql {
 			let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
-			let catalog = MemoryCatalog::new().with_database(&cur_db);
+			let mut catalog = MemoryCatalog::new().with_database(&cur_db);
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				for stmt in &stmts {
 					match stmt {
@@ -1056,13 +1108,104 @@ impl Connection {
 								}
 							}
 						}
+						MyStatement::CreateIndex(idx) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&idx.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::DropIndex(drop) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&drop.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::CreateView(view) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&view.name.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+							if let Some(TableRef::Table {
+								name,
+								..
+							}) = &view.query.from && let Err(e) =
+								surrealdb_sqlplan::resolve_mysql_table_name(
+									&name.parts,
+									Some(&catalog),
+								) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::DropView(drop) => {
+							for name in &drop.names {
+								if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+									&name.parts,
+									Some(&catalog),
+								) {
+									let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+									self.writer
+										.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+										.await?;
+									return Ok(());
+								}
+							}
+						}
+						MyStatement::AlterTable(alter) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&alter.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+							for action in &alter.actions {
+								if let AlterTableAction::RenameTable {
+									new_name,
+								} = action && let Err(e) =
+									surrealdb_sqlplan::resolve_mysql_table_name(
+										&new_name.parts,
+										Some(&catalog),
+									) {
+									let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+									self.writer
+										.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+										.await?;
+									return Ok(());
+								}
+							}
+						}
+						MyStatement::Use(use_stmt) => {
+							if !use_stmt.database.trim().is_empty() {
+								catalog.set_database(Some(use_stmt.database.clone()));
+							}
+						}
 						MyStatement::CreateDatabase(_)
 						| MyStatement::DropDatabase(_)
-						| MyStatement::CreateIndex(_)
-						| MyStatement::DropIndex(_)
-						| MyStatement::CreateView(_)
-						| MyStatement::DropView(_)
-						| MyStatement::AlterTable(_)
 						| MyStatement::CreateUser(_)
 						| MyStatement::DropUser(_)
 						| MyStatement::Grant(_)
@@ -1072,7 +1215,6 @@ impl Connection {
 						| MyStatement::Prepare(_)
 						| MyStatement::Execute(_)
 						| MyStatement::Deallocate(_)
-						| MyStatement::Use(_)
 						| MyStatement::Set(_)
 						| MyStatement::Show(_)
 						| MyStatement::Describe(_)
@@ -1134,6 +1276,9 @@ impl Connection {
 		}
 		.with_optional_transaction(self.transaction.clone());
 		let res = self.ds.run(req).await.map(|results| self.present_all(results));
+		if may_mutate_credentials(trimmed) {
+			self.auth_cache.clear();
+		}
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);
@@ -1759,6 +1904,12 @@ impl Connection {
 		vars: surrealdb_types::Variables,
 		seq: u8,
 	) -> Result<()> {
+		if let Err(e) = self.check_dialect(self.dialect) {
+			let err_pkt = ErrPacket::general(1045, b"28000", e.to_string());
+			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
+
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				if let Some(MyStatement::Select(select)) = stmts.first() {
@@ -1808,6 +1959,9 @@ impl Connection {
 		.with_optional_transaction(self.transaction.clone());
 
 		let res = self.ds.run(req).await.map(|results| self.present_all(results));
+		if may_mutate_credentials(trimmed) {
+			self.auth_cache.clear();
+		}
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);
@@ -2139,6 +2293,40 @@ fn is_ddl_statement(sql: &str) -> bool {
 	matches!(first_upper.as_str(), "CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "RENAME")
 }
 
+/// Returns `true` when `sql` contains a statement that may create, modify, or
+/// remove user credentials or access grants, requiring the fast-auth cache to
+/// be invalidated.
+fn may_mutate_credentials(sql: &str) -> bool {
+	let stripped = strip_sql_comments(sql);
+	for stmt in stripped.split(';') {
+		let mut tokens = stmt.split_whitespace();
+		let Some(first) = tokens.next() else {
+			continue;
+		};
+		let first_upper = first.to_ascii_uppercase();
+		match first_upper.as_str() {
+			"GRANT" | "REVOKE" => return true,
+			"CREATE" | "DROP" | "ALTER" | "DEFINE" | "REMOVE" | "OVERWRITE" => {
+				let Some(mut second) = tokens.next() else {
+					continue;
+				};
+				if second.eq_ignore_ascii_case("OR") {
+					let _ = tokens.next();
+					let Some(after_replace) = tokens.next() else {
+						continue;
+					};
+					second = after_replace;
+				}
+				if second.eq_ignore_ascii_case("USER") || second.eq_ignore_ascii_case("ACCESS") {
+					return true;
+				}
+			}
+			_ => {}
+		}
+	}
+	false
+}
+
 fn extract_id_u64(id_val: &surrealdb_types::Value) -> Option<u64> {
 	if let surrealdb_types::Value::Number(n) = id_val {
 		let int_val = n.to_int()?;
@@ -2298,6 +2486,19 @@ mod tests {
 		assert!(is_ddl_statement("/* comment */ CREATE TABLE t1 (id int)"));
 		assert!(!is_ddl_statement("SELECT * FROM users"));
 		assert!(!is_ddl_statement("INSERT INTO users VALUES (1)"));
+	}
+
+	#[test]
+	fn test_may_mutate_credentials() {
+		assert!(may_mutate_credentials("CREATE USER 'alice'@'%' IDENTIFIED BY 'pw'"));
+		assert!(may_mutate_credentials("DROP USER 'alice'@'%'"));
+		assert!(may_mutate_credentials("ALTER USER 'alice'@'%' IDENTIFIED BY 'newpw'"));
+		assert!(may_mutate_credentials("GRANT ALL ON *.* TO 'alice'@'%'"));
+		assert!(may_mutate_credentials("REVOKE ALL ON *.* FROM 'alice'@'%'"));
+		assert!(may_mutate_credentials("DEFINE USER alice ON ROOT PASSWORD 'pw' ROLES OWNER"));
+		assert!(may_mutate_credentials("REMOVE USER alice ON ROOT"));
+		assert!(!may_mutate_credentials("CREATE TABLE users (id int)"));
+		assert!(!may_mutate_credentials("SELECT * FROM users"));
 	}
 
 	#[test]

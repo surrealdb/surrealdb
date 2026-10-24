@@ -8,20 +8,24 @@
 //! Functions without a return type annotation are skipped since GraphQL requires
 //! a known output type for every field.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
 use surrealdb_expr::parser::TopLevelExpr;
 
 use super::GraphqlError;
-use super::schema::{graphql_to_sql_kind_with_scope, sql_value_to_graphql_value_with_kind};
+use super::schema::{
+	ExposedTables, graphql_to_sql_kind_with_scope, sanitize_kind_for_exposed_tables,
+	sql_value_to_graphql_value_with_kind,
+};
 use super::utils::execute_statement;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
 use crate::expr::{Expr, Function, FunctionCall, Kind};
 use crate::graphql::schema::kind_to_type_with_enum_prefix;
 use crate::kvs::Datastore;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 /// Process all exposed functions and add them as Query root fields.
 ///
@@ -36,13 +40,21 @@ pub async fn process_fns(
 	mut query: Object,
 	types: &mut Vec<Type>,
 	datastore: &Arc<Datastore>,
+	exposed_table_names: &HashSet<TableName>,
 ) -> Result<Object, GraphqlError> {
 	for fnd in fns.iter() {
 		// Skip functions without a declared return type
 		let Some(return_kind) = fnd.returns.clone() else {
 			continue;
 		};
-		let arg_kinds: Vec<(String, Kind)> = fnd.args.clone();
+		let return_kind = sanitize_kind_for_exposed_tables(return_kind, exposed_table_names);
+		let arg_kinds: Vec<(String, Kind)> = fnd
+			.args
+			.iter()
+			.map(|(name, kind)| {
+				(name.clone(), sanitize_kind_for_exposed_tables(kind.clone(), exposed_table_names))
+			})
+			.collect();
 
 		// SECURITY: do NOT close over the schema-generation-time session. The
 		// schema is cached per (ns, db, graphql-config), so a session captured here
@@ -110,15 +122,29 @@ pub async fn process_fns(
 					let graphql_res = if let Value::None = res {
 						None
 					} else if let Value::RecordId(rid) = res {
-						let mut field_val = FieldValue::owned_any(rid.clone());
-						// Untyped record returns need `.with_type()` for
-						// interface resolution; typed `record<T>` do not.
-						if let Kind::Record(ts) = &return_kind1
-							&& ts.is_empty()
+						if ctx
+							.data_opt::<ExposedTables>()
+							.is_some_and(|et| !et.0.contains(&rid.table))
 						{
-							field_val = field_val.with_type(rid.table);
+							None
+						} else {
+							let mut field_val = FieldValue::owned_any(rid.clone());
+							// Untyped or union record returns need `.with_type()` for
+							// interface/union resolution; single-table `record<T>` do not.
+							let needs_type = if let Kind::Record(ts) = &return_kind1 {
+								ts.is_empty() || ts.len() > 1
+							} else if let Kind::Either(ks) = &return_kind1 {
+								ks.iter().any(
+									|k| matches!(k, Kind::Record(ts) if ts.is_empty() || ts.len() > 1),
+								)
+							} else {
+								false
+							};
+							if needs_type {
+								field_val = field_val.with_type(rid.table);
+							}
+							Some(field_val)
 						}
-						Some(field_val)
 					} else {
 						Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
 							res,

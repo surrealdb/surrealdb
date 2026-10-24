@@ -475,9 +475,17 @@ fn a_link_assigned_from_a_column_is_left_as_the_record_it_is() {
 
 #[test]
 fn a_mysql_update_over_a_join_converts_nothing() {
-	let expr = my("UPDATE emp JOIN dept ON emp.dept = dept.id SET dept = 2 WHERE emp.dept = 1");
-	assert_eq!(set(expr.clone()), [pair("dept", "2")]);
-	assert_eq!(cond(expr), "emp.dept = 1");
+	let stmts = surrealdb_mysql::parse_statements(
+		"UPDATE emp JOIN dept ON emp.dept = dept.id SET dept = 2 WHERE emp.dept = 1",
+	)
+	.unwrap();
+	let surrealdb_mysql::ast::stmt::Statement::Update(s) = &stmts[0] else {
+		panic!("expected Update");
+	};
+	assert!(matches!(
+		lower_mysql_update(s, &catalog()),
+		Err(crate::PlanError::UnsupportedStatement(_))
+	));
 }
 
 #[test]
@@ -934,10 +942,6 @@ fn a_column_that_is_no_link_is_read_as_it_is_in_an_expression() {
 			&["record::id", "type::record"],
 		);
 	}
-	assert_eq!(
-		cond(my("UPDATE emp JOIN dept ON emp.dept = dept.id SET age = 2 WHERE emp.dept > 1")),
-		"emp.dept > 1"
-	);
 }
 
 #[test]

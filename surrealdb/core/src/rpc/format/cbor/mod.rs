@@ -394,6 +394,33 @@ mod tests {
 	}
 
 	#[test]
+	fn duration_overflow_in_nanosecond_carry_is_refused() {
+		let overflow = Cbor::Tag(
+			14,
+			Box::new(Cbor::Array(vec![
+				Cbor::Integer(u64::MAX.into()),
+				Cbor::Integer(1_000_000_000u32.into()),
+			])),
+		);
+		assert_eq!(refusal(&overflow), "Expected a valid Duration value");
+
+		let raw = [
+			0xd8, 0x0e, 0x82, 0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1a, 0x3b,
+			0x9a, 0xca, 0x00,
+		];
+		assert!(decode(&raw, 64).is_err());
+
+		let max_valid = Cbor::Tag(
+			14,
+			Box::new(Cbor::Array(vec![
+				Cbor::Integer(u64::MAX.into()),
+				Cbor::Integer(999_999_999u32.into()),
+			])),
+		);
+		assert!(matches!(decode(&encode_cbor(&max_valid), 64), Ok(Value::Duration(_))));
+	}
+
+	#[test]
 	fn integers_outside_the_signed_64_bit_range_are_refused() {
 		let big = Cbor::Integer(u64::MAX.into());
 		assert_eq!(

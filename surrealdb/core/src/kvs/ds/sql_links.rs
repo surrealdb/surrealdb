@@ -32,9 +32,17 @@ use crate::val::TableName;
 #[derive(Default)]
 pub(super) struct RecordingCatalog {
 	tables: Mutex<BTreeSet<String>>,
+	database: Option<String>,
 }
 
 impl RecordingCatalog {
+	pub(super) fn with_database(database: Option<&str>) -> Self {
+		Self {
+			tables: Mutex::new(BTreeSet::new()),
+			database: database.map(str::to_owned),
+		}
+	}
+
 	fn note(&self, table: &str) {
 		self.tables.lock().unwrap_or_else(PoisonError::into_inner).insert(table.to_owned());
 	}
@@ -47,6 +55,10 @@ impl RecordingCatalog {
 }
 
 impl BinderCatalog for RecordingCatalog {
+	fn current_database(&self) -> Option<&str> {
+		self.database.as_deref()
+	}
+
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
 		let system = EmptyCatalog.get_table(schema, name);
 		if system.is_none() {
@@ -150,13 +162,22 @@ pub(super) async fn link_columns(
 
 /// A catalog naming `links`, as [`link_columns`] returns them, or `None` when
 /// there are none.
-pub(super) fn link_catalog(links: &[(String, String, String)]) -> Option<MemoryCatalog> {
+pub(super) fn link_catalog(
+	links: &[(String, String, String)],
+	database: Option<&str>,
+) -> Option<MemoryCatalog> {
 	if links.is_empty() {
 		return None;
 	}
-	Some(links.iter().fold(MemoryCatalog::new(), |catalog, (table, column, target)| {
-		catalog.with_link(table, column, target)
-	}))
+	let mut catalog = MemoryCatalog::new();
+	if let Some(db) = database {
+		catalog.set_database(Some(db.to_owned()));
+	}
+	Some(
+		links.iter().fold(catalog, |catalog, (table, column, target)| {
+			catalog.with_link(table, column, target)
+		}),
+	)
 }
 
 /// The SQL type of a field of `kind`, where it has one wire representation. Optionality does not

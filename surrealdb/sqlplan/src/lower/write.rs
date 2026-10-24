@@ -1642,24 +1642,59 @@ fn lower_pgsql_select_stmt(
 	catalog: &dyn BinderCatalog,
 	into: Option<(&IdScope<'_>, &[String])>,
 ) -> Result<SelectStatement, PlanError> {
+	if select.with.is_some()
+		|| select.distinct.is_some()
+		|| !select.group_by.is_empty()
+		|| select.having.is_some()
+		|| !select.window.is_empty()
+		|| !select.order_by.is_empty()
+		|| select.limit.is_some()
+		|| select.offset.is_some()
+		|| select.set_op.is_some()
+		|| select.from.len() > 1
+	{
+		return Err(PlanError::UnsupportedStatement(
+			"INSERT ... SELECT with complex SELECT clauses is not supported".into(),
+		));
+	}
+
 	let mut what = Vec::new();
 	let mut scope = None;
 	for t in &select.from {
-		if let surrealdb_pgsql::ast::stmt::TableRef::Table {
-			name,
-			alias,
-			..
-		} = t
-		{
-			let (schema, t_name) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)?;
-			if select.from.len() == 1 {
-				let mut id_scope = pgsql_scope(name, schema, &t_name, catalog);
-				if let Some(alias) = alias {
-					id_scope.qualifiers.push(alias.name.clone());
+		match t {
+			surrealdb_pgsql::ast::stmt::TableRef::Table {
+				name,
+				alias,
+				..
+			} => {
+				let (schema, t_name) =
+					crate::namespace::resolve_pgsql_table_name(&name.parts, Some(catalog))?;
+				if select.from.len() == 1 {
+					let mut id_scope = pgsql_scope(name, schema, &t_name, catalog);
+					if let Some(alias) = alias {
+						id_scope.qualifiers.push(alias.name.clone());
+					}
+					scope = Some(id_scope);
 				}
-				scope = Some(id_scope);
+				what.push(Expr::Table(TableName::from(t_name)));
 			}
-			what.push(Expr::Table(TableName::from(t_name)));
+			surrealdb_pgsql::ast::stmt::TableRef::Subquery {
+				..
+			}
+			| surrealdb_pgsql::ast::stmt::TableRef::Join {
+				..
+			}
+			| surrealdb_pgsql::ast::stmt::TableRef::Function {
+				..
+			}
+			| surrealdb_pgsql::ast::stmt::TableRef::GraphTable {
+				..
+			}
+			| surrealdb_pgsql::ast::stmt::TableRef::JsonTable(_) => {
+				return Err(PlanError::UnsupportedStatement(
+					"INSERT ... SELECT over a join or subquery is not supported".into(),
+				));
+			}
 		}
 	}
 
@@ -1708,7 +1743,7 @@ pub fn lower_pgsql_insert(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
 	let (schema, table_name) =
-		crate::namespace::resolve_pgsql_table_name(&insert.relation.parts, None)?;
+		crate::namespace::resolve_pgsql_table_name(&insert.relation.parts, Some(catalog))?;
 	let mut scope = pgsql_scope(&insert.relation, schema, &table_name, catalog);
 	if let Some(alias) = &insert.alias {
 		scope.qualifiers.push(alias.clone());
@@ -1963,7 +1998,7 @@ pub fn lower_pgsql_update(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
 	let (schema, table_name) =
-		crate::namespace::resolve_pgsql_table_name(&update.relation.parts, None)?;
+		crate::namespace::resolve_pgsql_table_name(&update.relation.parts, Some(catalog))?;
 	let scope = pgsql_scope(&update.relation, schema, &table_name, catalog);
 	let what = vec![Expr::Table(TableName::from(table_name))];
 
@@ -2012,7 +2047,7 @@ pub fn lower_pgsql_delete(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
 	let (schema, table_name) =
-		crate::namespace::resolve_pgsql_table_name(&delete.relation.parts, None)?;
+		crate::namespace::resolve_pgsql_table_name(&delete.relation.parts, Some(catalog))?;
 	let scope = pgsql_scope(&delete.relation, schema, &table_name, catalog);
 	let what = vec![Expr::Table(TableName::from(table_name))];
 
@@ -2695,25 +2730,6 @@ fn mysql_link_membership(
 	Ok(Some(link_in(column, records, negated)))
 }
 
-/// The scope of the `id` column and the link columns of the single table `tref` reads, or `None`
-/// when it is a join or a derived table, whose columns are ambiguous.
-fn mysql_scope<'a>(
-	tref: &surrealdb_mysql::ast::stmt::TableRef,
-	catalog: &'a dyn BinderCatalog,
-) -> Option<IdScope<'a>> {
-	let surrealdb_mysql::ast::stmt::TableRef::Table {
-		name,
-		alias,
-		..
-	} = tref
-	else {
-		return None;
-	};
-	let (schema, table_name) =
-		crate::namespace::resolve_mysql_table_name(&name.parts, None).ok()?;
-	Some(mysql_name_scope(name, schema, &table_name, alias.as_deref(), catalog))
-}
-
 /// The scope of the `id` column and the link columns of the table `name` resolves to in `schema`,
 /// read as `alias` when it has one.
 fn mysql_name_scope<'a>(
@@ -2734,30 +2750,6 @@ fn mysql_name_scope<'a>(
 	IdScope::new(table_name, schema, &qualifiers, true, catalog)
 }
 
-fn collect_mysql_tables(tref: &surrealdb_mysql::ast::stmt::TableRef, out: &mut Vec<Expr>) {
-	match tref {
-		surrealdb_mysql::ast::stmt::TableRef::Table {
-			name,
-			..
-		} => {
-			if let Ok((_, t_name)) = crate::namespace::resolve_mysql_table_name(&name.parts, None) {
-				out.push(Expr::Table(TableName::from(t_name)));
-			}
-		}
-		surrealdb_mysql::ast::stmt::TableRef::Join {
-			left,
-			right,
-			..
-		} => {
-			collect_mysql_tables(left, out);
-			collect_mysql_tables(right, out);
-		}
-		surrealdb_mysql::ast::stmt::TableRef::Subquery {
-			..
-		} => {}
-	}
-}
-
 /// Lower the `SELECT` that is the source of `INSERT` or `REPLACE`. `into` is the target of the
 /// statement and its columns: the item at a position of the projection is written to the column at
 /// that position (see [`wrap_positional_links`]).
@@ -2766,7 +2758,45 @@ fn lower_mysql_select_stmt(
 	catalog: &dyn BinderCatalog,
 	into: Option<(&IdScope<'_>, &[String])>,
 ) -> Result<SelectStatement, PlanError> {
-	let scope = select.from.as_ref().and_then(|from| mysql_scope(from, catalog));
+	if select.with.is_some()
+		|| select.distinct
+		|| !select.group_by.is_empty()
+		|| select.having.is_some()
+		|| !select.window.is_empty()
+		|| !select.order_by.is_empty()
+		|| select.limit.is_some()
+		|| select.set_op.is_some()
+	{
+		return Err(PlanError::UnsupportedStatement(
+			"INSERT ... SELECT with complex SELECT clauses is not supported".into(),
+		));
+	}
+
+	let (what, scope) = match &select.from {
+		None => (Vec::new(), None),
+		Some(surrealdb_mysql::ast::stmt::TableRef::Table {
+			name,
+			alias,
+			..
+		}) => {
+			let (schema, t_name) =
+				crate::namespace::resolve_mysql_table_name(&name.parts, Some(catalog))?;
+			let scope = mysql_name_scope(name, schema, &t_name, alias.as_deref(), catalog);
+			(vec![Expr::Table(TableName::from(t_name))], Some(scope))
+		}
+		Some(
+			surrealdb_mysql::ast::stmt::TableRef::Join {
+				..
+			}
+			| surrealdb_mysql::ast::stmt::TableRef::Subquery {
+				..
+			},
+		) => {
+			return Err(PlanError::UnsupportedStatement(
+				"INSERT ... SELECT over a join or subquery is not supported".into(),
+			));
+		}
+	};
 
 	let mut f_vec = Vec::with_capacity(select.projection.len());
 	for item in &select.projection {
@@ -2810,11 +2840,6 @@ fn lower_mysql_select_stmt(
 		wrap_positional_links(target, columns, has_wildcard, &mut fields);
 	}
 
-	let mut what = Vec::new();
-	if let Some(from_table) = &select.from {
-		collect_mysql_tables(from_table, &mut what);
-	}
-
 	let cond = match &select.where_clause {
 		Some(w) => Some(Cond(lower_mysql_expr_in(w, scope.as_ref())?)),
 		None => None,
@@ -2854,7 +2879,7 @@ pub fn lower_mysql_insert(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
 	let (schema, table_name) =
-		crate::namespace::resolve_mysql_table_name(&insert.table.parts, None)?;
+		crate::namespace::resolve_mysql_table_name(&insert.table.parts, Some(catalog))?;
 	let scope = mysql_name_scope(&insert.table, schema, &table_name, None, catalog);
 	let into = Some(Expr::Table(TableName::from(table_name)));
 
@@ -2915,7 +2940,7 @@ pub fn lower_mysql_replace(
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
 	let (schema, table_name) =
-		crate::namespace::resolve_mysql_table_name(&replace.table.parts, None)?;
+		crate::namespace::resolve_mysql_table_name(&replace.table.parts, Some(catalog))?;
 	let scope = mysql_name_scope(&replace.table, schema, &table_name, None, catalog);
 	let into = Some(Expr::Table(TableName::from(table_name)));
 
@@ -2978,23 +3003,38 @@ pub fn lower_mysql_replace(
 ///
 /// `catalog` says which columns of the target table hold record links: a value assigned to one is
 /// converted by [`link_value`], and a comparison of one in the `WHERE` clause names the record of
-/// its table. Any other expression reads a link column as the key of its link. An update over a
-/// join or a derived table has no single target table, and converts nothing.
+/// its table. Any other expression reads a link column as the key of its link. Updates over a join
+/// or subquery and updates with `ORDER BY` or `LIMIT` are rejected with
+/// [`PlanError::UnsupportedStatement`].
 pub fn lower_mysql_update(
 	update: &surrealdb_mysql::ast::stmt::UpdateStmt,
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
-	let mut what = Vec::new();
-	collect_mysql_tables(&update.table, &mut what);
-	let scope = mysql_scope(&update.table, catalog);
+	let surrealdb_mysql::ast::stmt::TableRef::Table {
+		name,
+		alias,
+		..
+	} = &update.table
+	else {
+		return Err(PlanError::UnsupportedStatement(
+			"UPDATE over a join or subquery requires join-based write lowering".into(),
+		));
+	};
+	if !update.order_by.is_empty() || update.limit.is_some() {
+		return Err(PlanError::UnsupportedStatement(
+			"UPDATE with ORDER BY or LIMIT is not supported".into(),
+		));
+	}
+
+	let (schema, table_name) =
+		crate::namespace::resolve_mysql_table_name(&name.parts, Some(catalog))?;
+	let scope = mysql_name_scope(name, schema, &table_name, alias.as_deref(), catalog);
+	let what = vec![Expr::Table(TableName::from(table_name))];
 
 	let mut assignments = Vec::with_capacity(update.assignments.len());
 	for (col, expr) in &update.assignments {
-		let val = lower_mysql_stored_in(expr, scope.as_ref())?;
-		let value = match scope.as_ref() {
-			Some(scope) => assigned_value(scope, col, val),
-			None => val,
-		};
+		let val = lower_mysql_stored_in(expr, Some(&scope))?;
+		let value = assigned_value(&scope, col, val);
 		assignments.push(Assignment {
 			place: Idiom::field(col.clone()),
 			operator: AssignOperator::Assign,
@@ -3003,7 +3043,7 @@ pub fn lower_mysql_update(
 	}
 
 	let cond = match &update.where_clause {
-		Some(w) => Some(Cond(lower_mysql_expr_in(w, scope.as_ref())?)),
+		Some(w) => Some(Cond(lower_mysql_expr_in(w, Some(&scope))?)),
 		None => None,
 	};
 
@@ -3011,7 +3051,7 @@ pub fn lower_mysql_update(
 		what,
 		data: Some(Data::SetExpression(assignments)),
 		cond,
-		output: Some(scope.as_ref().map_or(Output::After, IdScope::echo)),
+		output: Some(scope.echo()),
 		..Default::default()
 	})))
 }
@@ -3020,13 +3060,19 @@ pub fn lower_mysql_update(
 ///
 /// `catalog` says which columns of the target table hold record links: a comparison of one in the
 /// `WHERE` clause names the record of its table, and any other expression reads one as the key of
-/// its link.
+/// its link. Deletes with `ORDER BY` or `LIMIT` are rejected with
+/// [`PlanError::UnsupportedStatement`].
 pub fn lower_mysql_delete(
 	delete: &surrealdb_mysql::ast::stmt::DeleteStmt,
 	catalog: &dyn BinderCatalog,
 ) -> Result<Expr, PlanError> {
+	if !delete.order_by.is_empty() || delete.limit.is_some() {
+		return Err(PlanError::UnsupportedStatement(
+			"DELETE with ORDER BY or LIMIT is not supported".into(),
+		));
+	}
 	let (schema, table_name) =
-		crate::namespace::resolve_mysql_table_name(&delete.table.parts, None)?;
+		crate::namespace::resolve_mysql_table_name(&delete.table.parts, Some(catalog))?;
 	let scope = mysql_name_scope(&delete.table, schema, &table_name, None, catalog);
 	let what = vec![Expr::Table(TableName::from(table_name))];
 

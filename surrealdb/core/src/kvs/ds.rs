@@ -10469,14 +10469,15 @@ impl Datastore {
 		lower: impl Fn(&dyn surrealdb_sqlplan::BinderCatalog) -> anyhow::Result<Vec<TopLevelStatement>>,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
 		let invalid = |e: anyhow::Error| TypesError::validation(e.to_string(), None);
-		let recorder = sql_links::RecordingCatalog::default();
+		let active_db = database.or(session.db.as_deref());
+		let recorder = sql_links::RecordingCatalog::with_database(active_db);
 		let statements = lower(&recorder).map_err(invalid)?;
 		let tables = recorder.into_tables();
 		if tables.is_empty() {
 			return Ok(statements);
 		}
 		let links = self.link_columns(session, database, transaction, &tables).await?;
-		match sql_links::link_catalog(&links) {
+		match sql_links::link_catalog(&links, active_db) {
 			Some(catalog) => lower(&catalog).map_err(invalid),
 			None => Ok(statements),
 		}
