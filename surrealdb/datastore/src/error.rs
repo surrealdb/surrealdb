@@ -116,11 +116,12 @@ pub enum DatastoreError {
 	)]
 	SequenceReset,
 
-	/// A sequence has no value left to issue below `i64::MAX`.
-	///
-	/// Raised when the next window would start at or past `i64::MAX`, so no
-	/// value is issued and the sequence stays where it was.
-	#[error("The sequence is exhausted: no value can be issued below i64::MAX")]
+	/// A sequence has no value left to issue: the next one, or the first for a
+	/// sequence whose `START` is already at the top, would not fit below
+	/// `i64::MAX`. Not retryable, though redefining the sequence revives it.
+	#[error(
+		"The sequence has no values left to issue: its values cannot exceed 9223372036854775806"
+	)]
 	SequenceExhausted,
 
 	/// The index has been found to be inconsistent

@@ -52,7 +52,7 @@ value = "1f"
 value = "NONE"
 
 [[test.results]]
-error = "The sequence is exhausted: no value can be issued below i64::MAX"
+error = "The sequence has no values left to issue: its values cannot exceed 9223372036854775806"
 
 [[test.results]]
 value = "NONE"
@@ -61,7 +61,7 @@ value = "NONE"
 value = "9223372036854775806"
 
 [[test.results]]
-error = "The sequence is exhausted: no value can be issued below i64::MAX"
+error = "The sequence has no values left to issue: its values cannot exceed 9223372036854775806"
 
 [[test.results]]
 value = "NONE"

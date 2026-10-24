@@ -266,6 +266,29 @@ impl<'a> AllocatorTx<'a> {
 	}
 }
 
+/// Delete the batch rows this node retires: each through its decoded key,
+/// which re-encodes to the bytes it came from — the round trip every declared
+/// key upholds. A key that does not decode has no such guarantee and cannot be
+/// addressed any other way, so it is retired by its bytes: the alternative is
+/// to fail, and every failure of a claim is swallowed and retried by
+/// `find_batch_allocation`, so one unreadable entry would stall the domain's
+/// allocation for as long as the caller waits.
+async fn retire_batches(
+	tx: &Transaction,
+	retired: Vec<(&[u8], Result<SequenceBatchKey<'_>>)>,
+) -> SequenceResult<()> {
+	for (bytes, decoded) in retired {
+		match decoded {
+			Ok(batch_key) => tx.del_key(&batch_key).await?,
+			Err(e) => {
+				warn!("Retiring an undecodable sequence batch key: {e}");
+				tx.del(bytes.into()).await?
+			}
+		}
+	}
+	Ok(())
+}
+
 /// What an allocator's own operations fail with.
 ///
 /// The variant exists so that the one failure a caller must not simply
@@ -285,8 +308,12 @@ enum SequenceError {
 	/// would have made the cursor durable is the one that failed or was
 	/// cancelled.
 	Reset,
-	/// No window can start at the cursor without passing `i64::MAX`. Not
-	/// transient: no allocation attempt can change it, so it is never retried.
+	/// The sequence has no value left to issue.
+	///
+	/// A window ends no later than `i64::MAX`, exclusive, so the last value a
+	/// sequence issues is `i64::MAX - 1` and the cursor one past it still fits.
+	/// A claim that would start at `i64::MAX` has nothing to claim. Not
+	/// transient: no waiting or rebuilding gives the sequence more values.
 	Exhausted,
 	Other(anyhow::Error),
 }
@@ -300,7 +327,7 @@ impl std::fmt::Display for SequenceError {
 			Self::Reset => f.write_str(
 				"the sequence was redefined or removed while this allocator was serving it",
 			),
-			Self::Exhausted => f.write_str("the sequence is exhausted"),
+			Self::Exhausted => f.write_str("the sequence has no values left to issue"),
 			Self::Other(e) => write!(f, "{e}"),
 		}
 	}
@@ -1561,6 +1588,8 @@ impl Sequence {
 			.await?;
 		}
 		let v = self.st.next;
+		// Cannot overflow: `v` lies below the window's end, which is at most
+		// `i64::MAX`.
 		self.st.next += 1;
 		if !seq.requires_dense_ids() {
 			// The claim that reserved this window already committed its end, so
@@ -1762,6 +1791,7 @@ impl Sequence {
 				// and retrying would claim a window under a definition that has
 				// been removed. The caller rebuilds instead.
 				Err(SequenceError::Reset) => return Err(SequenceError::Reset),
+				// Nor is running out of values: no claim will ever find more.
 				Err(SequenceError::Exhausted) => return Err(SequenceError::Exhausted),
 				// Also not transient. What the backoff waits for is the state
 				// another transaction holds to change, and a provisional claim
@@ -1875,6 +1905,10 @@ impl Sequence {
 			let batch_range = seq.new_batch_range_keys()?;
 			let batches = tx.getr(batch_range, None).await?;
 			let mut next_start = next;
+			// This node's spent windows, retired once a window is resumed or
+			// claimed in their place, and not before: see the exhaustion check
+			// below.
+			let mut retired = Vec::new();
 			// Scan every existing batch
 			for (key, ba) in batches.iter() {
 				next_start = next_start.max(ba.to);
@@ -1896,6 +1930,7 @@ impl Sequence {
 					};
 					if resume < ba.to {
 						let owned = decoded.as_ref().map(|k| k.start()).unwrap_or(resume);
+						retire_batches(tx, retired).await?;
 						if !dense {
 							tx.set_key(
 								&state_key,
@@ -1911,23 +1946,8 @@ impl Sequence {
 							window: owned,
 						});
 					}
-					// Otherwise we can remove this old batch and create a new one.
-					//
-					// Deleted through the decoded key, which re-encodes to the bytes
-					// it came from — the round trip every declared key upholds. A key
-					// that does not decode has no such guarantee and cannot be
-					// addressed any other way, so it is retired by its bytes: the
-					// alternative is to fail, and every failure here is swallowed and
-					// retried by `find_batch_allocation`, so one unreadable entry
-					// would stall this domain's allocation for as long as the caller
-					// waits.
-					match decoded {
-						Ok(batch_key) => tx.del_key(&batch_key).await?,
-						Err(e) => {
-							warn!("Retiring an undecodable sequence batch key: {e}");
-							tx.del(key.as_slice().into()).await?
-						}
-					}
+					// Otherwise this old batch is replaced by a new one.
+					retired.push((key.as_slice(), decoded));
 				}
 			}
 			// We compute the new batch
@@ -1939,13 +1959,18 @@ impl Sequence {
 			// `batch` reaches here straight from configuration, which sets no
 			// lower bound of its own.
 			//
-			// The window's end saturates at `i64::MAX`, so a window never
-			// overflows and `i64::MAX` itself is never issued. A start with no
-			// room for even one id means the sequence is exhausted.
-			let next_to = next_start.saturating_add(batch.max(1) as i64);
-			if next_to <= next_start {
+			// And at most up to `i64::MAX`, exclusive: every id the window yields,
+			// and the cursor one past it, stay in range. A window that would
+			// start there has no id left to give. See `SequenceError::Exhausted`.
+			// Nothing is retired on that path: a provisional claim runs in the
+			// caller's transaction, which goes on whatever this returns, and the
+			// window ending at the top is the durable record that every id below
+			// it was claimed.
+			if next_start == i64::MAX {
 				return Err(SequenceError::Exhausted);
 			}
+			retire_batches(tx, retired).await?;
+			let next_to = next_start.saturating_add(i64::from(batch.max(1)));
 			// And store it in the KV store
 			let bv = BatchValue {
 				to: next_to,
@@ -2159,6 +2184,181 @@ mod tests {
 
 		let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
 		assert_eq!(unique.len(), ids.len(), "a zero batch reissued an id across a reload: {ids:?}");
+	}
+
+	/// A sequence at the top of the range issues every value up to
+	/// `i64::MAX - 1` and then fails with `SequenceExhausted` on every draw,
+	/// whatever its batch, rather than overflowing its window or cursor.
+	///
+	/// Bounded, because the claim loop retries every error it does not know to
+	/// be permanent: an exhaustion it took for a transient failure would spin
+	/// instead of failing.
+	#[tokio::test]
+	async fn a_sequence_at_the_top_of_the_range_is_exhausted_rather_than_overflowing() {
+		let (tf, seqs) = factory().await;
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		for (name, batch) in [("one", 1), ("many", 100)] {
+			define_sequence(&tf, &seqs, ns, db, name, i64::MAX - 2, batch).await.unwrap();
+			let draws = async {
+				let mut draws = Vec::new();
+				for _ in 0..4 {
+					let tx = tf.transaction(TransactionType::Read, seqs.clone()).await.unwrap();
+					draws.push(seqs.next_user_sequence_id(None, &tx, ns, db, name).await);
+					tx.cancel().await.unwrap();
+				}
+				draws
+			};
+			let draws = tokio::time::timeout(Duration::from_secs(10), draws)
+				.await
+				.expect("an exhausted sequence stalled instead of failing");
+			let issued: Vec<i64> = draws.iter().filter_map(|d| d.as_ref().ok().copied()).collect();
+			assert_eq!(issued, [i64::MAX - 2, i64::MAX - 1], "batch {batch}");
+			for draw in &draws[2..] {
+				let err = draw.as_ref().expect_err("past the last value");
+				assert!(
+					err.chain().any(|e| matches!(
+						e.downcast_ref::<crate::error::DatastoreError>(),
+						Some(crate::error::DatastoreError::SequenceExhausted)
+					)),
+					"batch {batch}: {err}"
+				);
+			}
+		}
+	}
+
+	/// Whether `draw` failed because its sequence is exhausted.
+	fn is_exhausted(draw: &Result<i64>) -> bool {
+		draw.as_ref().is_err_and(|err| {
+			err.chain().any(|e| {
+				matches!(
+					e.downcast_ref::<crate::error::DatastoreError>(),
+					Some(crate::error::DatastoreError::SequenceExhausted)
+				)
+			})
+		})
+	}
+
+	/// Once a sequence is exhausted on one node, a draw fails promptly on any
+	/// other node and on the same node after a reload, rather than claiming
+	/// past the top or retrying until the timeout: the window ending at the top
+	/// stays as the record that every id below it was claimed.
+	#[tokio::test]
+	async fn an_exhausted_sequence_fails_on_every_node_and_after_a_reload() {
+		let (tf, _) = factory().await;
+		let nid = Uuid::from_u128(41);
+		let first = Sequences::new(tf.clone(), nid);
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let name = "sq";
+		define_sequence(&tf, &first, ns, db, name, i64::MAX - 1, 100).await.unwrap();
+		let draw = |seqs: Sequences| {
+			let tf = tf.clone();
+			async move {
+				let tx = tf.transaction(TransactionType::Read, seqs.clone()).await.unwrap();
+				let drawn = seqs.next_user_sequence_id(None, &tx, ns, db, name).await;
+				tx.cancel().await.unwrap();
+				drawn
+			}
+		};
+		let draws = async {
+			let mut draws = vec![draw(first.clone()).await, draw(first.clone()).await];
+			// Another node, and this node's allocator rebuilt from storage.
+			draws.push(draw(Sequences::new(tf.clone(), Uuid::from_u128(42))).await);
+			draws.push(draw(Sequences::new(tf.clone(), nid)).await);
+			draws
+		};
+		let draws = tokio::time::timeout(Duration::from_secs(10), draws)
+			.await
+			.expect("an exhausted sequence stalled instead of failing");
+		assert_eq!(draws[0].as_ref().ok(), Some(&(i64::MAX - 1)));
+		for (at, draw) in draws.iter().enumerate().skip(1) {
+			assert!(is_exhausted(draw), "draw {at}: {draw:?}");
+		}
+	}
+
+	/// A sequence exhausted inside the transaction that defined it keeps the
+	/// window that ends at the top. Its claim runs in that transaction, which
+	/// goes on whatever the claim returns, so the window this node retires in
+	/// favour of a new one is only retired once the new one is claimed.
+	#[tokio::test]
+	async fn an_exhausted_provisional_sequence_keeps_its_last_window() {
+		use std::borrow::Cow;
+
+		use crate::key::schema::SeqBatchPrefix;
+
+		let (tf, seqs) = factory().await;
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let name = "sq";
+		let tx = tf.transaction(TransactionType::Write, seqs.clone()).await.unwrap();
+		define_sequence_in(&tx, ns, db, name, i64::MAX - 1, 100).await.unwrap();
+		tx.sequence_defined_here(ns, db, name.to_string()).await;
+		assert_eq!(
+			seqs.next_user_sequence_id(None, &tx, ns, db, name).await.unwrap(),
+			i64::MAX - 1
+		);
+		let draw = tokio::time::timeout(
+			Duration::from_secs(10),
+			seqs.next_user_sequence_id(None, &tx, ns, db, name),
+		)
+		.await
+		.expect("an exhausted sequence stalled instead of failing");
+		assert!(is_exhausted(&draw), "{draw:?}");
+		let windows: Vec<(Vec<u8>, super::BatchValue)> = tx
+			.getr(
+				SeqBatchPrefix {
+					ns,
+					db,
+					sq: Cow::Borrowed(name),
+				}
+				.range()
+				.unwrap(),
+				None,
+			)
+			.await
+			.unwrap();
+		assert_eq!(windows.iter().map(|(_, w)| w.to).collect::<Vec<_>>(), [i64::MAX]);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A gap-tolerant domain — the table doc ids, which persist each window's
+	/// end rather than a cursor — stops at the top of the range the same way,
+	/// whatever position its persisted window end left it at.
+	#[tokio::test]
+	async fn a_gap_tolerant_domain_at_the_top_of_the_range_is_exhausted() {
+		let (tf, _) = factory().await;
+		let nid = Uuid::from_u128(43);
+		let seqs = Sequences::new(tf.clone(), nid);
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb = TableName::from("t");
+		let domain = SequenceDomain::new_table_doc_ids(ns, db, tb.clone());
+		let tx = tf.transaction(TransactionType::Write, seqs.clone()).await.unwrap();
+		tx.set_key(
+			&domain.new_state_key(nid),
+			&super::SequenceState {
+				next: i64::MAX - 1,
+			},
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+		let draws = async {
+			let mut draws = Vec::new();
+			for _ in 0..3 {
+				draws.push(
+					seqs.next_table_doc_id(None, ns, db, tb.clone(), 100).await.map(|id| id as i64),
+				);
+			}
+			draws
+		};
+		let draws = tokio::time::timeout(Duration::from_secs(10), draws)
+			.await
+			.expect("an exhausted domain stalled instead of failing");
+		assert_eq!(draws[0].as_ref().ok(), Some(&(i64::MAX - 1)));
+		assert!(is_exhausted(&draws[1]), "{:?}", draws[1]);
+		assert!(is_exhausted(&draws[2]), "{:?}", draws[2]);
 	}
 
 	/// A held catalog id released before any definition confirms it is the

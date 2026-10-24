@@ -381,6 +381,7 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			},
 		),
 		("SequenceReset", DatastoreError::SequenceReset),
+		("SequenceExhausted", DatastoreError::SequenceExhausted),
 		("CorruptedIndex", DatastoreError::CorruptedIndex("sample")),
 		(
 			"IndexAlreadyBuilding",
