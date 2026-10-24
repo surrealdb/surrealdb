@@ -579,9 +579,10 @@ impl<'a> IndexOperation<'a> {
 
 	/// Triggers index compaction.
 	///
-	/// This method adds an entry to the index compaction queue by creating an
-	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction via
+	/// Registers a compaction request for the index with the transaction,
+	/// which writes one `Ic` key for it at commit however many documents the
+	/// transaction mutates under the index. The index compaction task later
+	/// drains the queue and performs the actual compaction via
 	/// [`Datastore::index_compaction`].
 	///
 	/// Every request writes its own unique key (node id plus a fresh UUIDv7)
@@ -589,8 +590,9 @@ impl<'a> IndexOperation<'a> {
 	/// distinct keys never contend, whereas a shared key would put every
 	/// concurrent transaction touching the same index into write-write
 	/// conflict (and a read-modify-write dedup would be worse on
-	/// last-writer-wins backends). The queue therefore grows with indexed
-	/// write activity, and deduplication happens at drain time instead:
+	/// last-writer-wins backends). The queue therefore grows with the number
+	/// of committed transactions touching each index, and deduplication
+	/// across transactions happens at drain time instead:
 	/// [`Datastore::index_compaction`] compacts each distinct index per
 	/// batch and deletes the batch's entries in bounded transactions.
 	///

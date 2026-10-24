@@ -170,10 +170,15 @@ pub(crate) struct DatastoreConfig {
 	pub export_batch_size: u32,
 	/// Selects the live-query execution engine (default: [`LiveQueryEngine::Inline`]).
 	pub live_query_engine: LiveQueryEngine,
-	/// Retention window for the dedicated live-query event keyspace (only used when
-	/// `live_query_engine` is `Router`). Sized to cover subscriber reconnect and
-	/// rolling-upgrade windows during which a subscriber may need to replay missed
-	/// events. Independent of any user-defined `CHANGEFEED` retention (default: 1h).
+	/// Retention window for the dedicated live-query event keyspace, which only
+	/// the `Router` engine writes to and which is collected whichever engine
+	/// runs, so entries captured before a switch of engine age out. Sized to
+	/// cover subscriber reconnect and rolling-upgrade windows during which a
+	/// subscriber may need to replay missed events. It also bounds how far
+	/// behind the writes a node's router may fall: an event the router has yet
+	/// to deliver when the window passes it is collected before delivery, and
+	/// the router reports a lap found behind the window. Independent of any
+	/// user-defined `CHANGEFEED` retention (default: 1h).
 	pub live_query_retention: Duration,
 	/// The feature level a new datastore is created at, and that an existing one
 	/// is raised to when it is opened (default: none, which creates a new

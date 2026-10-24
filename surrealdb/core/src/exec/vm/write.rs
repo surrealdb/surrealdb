@@ -57,11 +57,11 @@ mod view;
 pub(super) use cascade::{MaterializeStep, ReferenceInstr, RepairStrategy, TableRepairs};
 pub(super) use data::DataInstr;
 pub(super) use gate::GateInstr;
-pub(crate) use observe::notify_at;
 pub(super) use observe::{
 	Admission, ClauseDepth, EventClauses, LoweredEvents, LoweredSubscription, ObserveInstr,
 	SubscriptionFieldsLowered,
 };
+pub(crate) use observe::{notify_at, notify_unit};
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
 #[cfg(not(target_family = "wasm"))]
 pub(super) use storage::encode_ahead;

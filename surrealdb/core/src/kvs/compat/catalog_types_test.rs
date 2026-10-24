@@ -86,7 +86,8 @@ use crate::val::{Datetime, TableName, Value};
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 96)]
+	watermark: 0,
+}, 97)]
 #[case::access(StoredAccessDefinition {
 	name: "access".into(),
 	access_type: AccessType::Bearer(BearerAccess {

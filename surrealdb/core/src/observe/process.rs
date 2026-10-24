@@ -133,7 +133,10 @@ impl RefreshClaim {
 		Self::on(&PROCESS_REFRESH_CLAIMED)
 	}
 
-	fn on(slot: &'static AtomicBool) -> Self {
+	/// A holder competing for `slot`, not yet holding it. Tests compete for a
+	/// slot of their own rather than the process-wide one, which every
+	/// datastore built anywhere in a test binary contends for.
+	pub(crate) fn on(slot: &'static AtomicBool) -> Self {
 		Self(Arc::new(Holder {
 			slot,
 			held: AtomicBool::new(false),

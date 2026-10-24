@@ -112,7 +112,12 @@ jobs:
         run: bun install
 
       - name: Run JavaScript tests (${{ matrix.protocol }})
-        run: bun test --timeout 10000 --reporter=junit --reporter-outfile=junit.xml
+        # The binary under test is a `devopt` build, with debug assertions and
+        # little optimisation; the suite's own CI runs released binaries under
+        # bun's default per-test timeout. A test that batches work through one
+        # request, such as an import of thousands of statements, takes several
+        # times longer here, and the per-test timeout carries that margin.
+        run: bun test --timeout 60000 --reporter=junit --reporter-outfile=junit.xml
         env:
           SURREAL_PROTOCOL: ${{ matrix.protocol }}
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal

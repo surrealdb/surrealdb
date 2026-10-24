@@ -335,8 +335,10 @@ thread_local! {
 /// it gets none: the record and its counterpart reduced to the subscriber's
 /// view in the frame binding the unreduced records, then the `WHERE`, the
 /// projection and `FETCH` in the frame binding the reduced ones. Every failure
-/// is the subscription's: it is skipped, and the write is unaffected.
-async fn notify_unit(
+/// is the subscription's: it is skipped, and the write is unaffected. A write
+/// reaches this through [`notify_at`]; the live-query router's replay calls
+/// it with the unit it holds for a subscription it read itself.
+pub(crate) async fn notify_unit(
 	unit: &LiveUnit,
 	subscription: &crate::catalog::SubscriptionDefinition,
 	ctx: &WriteCtx,

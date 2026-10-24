@@ -83,7 +83,7 @@ pub(crate) mod row_frame;
 mod row_json;
 #[cfg(feature = "shaped")]
 mod row_shaped;
-pub(crate) use write::notify_at;
+pub(crate) use write::{notify_at, notify_unit};
 #[cfg(test)]
 mod golden;
 pub(crate) mod live;

@@ -52,12 +52,22 @@ use surrealdb_core::observe::process_snapshot;
 use surrealdb_observe::{
 	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
 	NetworkBytesEvent, NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent,
-	StatementEvent, TransactionEvent,
+	StatementEvent, TaskPassEvent, TransactionEvent,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
 use super::provider::PipelineCounters;
 use super::runtime::ObservabilityRuntime;
+
+/// Bucket boundaries, in seconds, of the age of a background queue's oldest
+/// entry. A queue age is no `.duration` and matches none of the provider's
+/// views, so it carries its own: from the sub-second wait of a queue kept up
+/// with to the day a stuck one reaches, where the latency buckets stop at
+/// thirty seconds.
+const TASK_QUEUE_AGE_BUCKETS: &[f64] = &[
+	0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0,
+	3600.0, 7200.0, 21600.0, 86400.0,
+];
 
 /// Resolve an `Option<&str>` ctx field into a stable attribute value.
 ///
@@ -152,6 +162,12 @@ pub struct MetricsObserver {
 	mcp_tool_invocation: Counter<u64>,
 	mcp_tool_duration: Histogram<f64>,
 	mcp_session_active: UpDownCounter<i64>,
+	// Background tasks (scope: surrealdb.task)
+	task_pass: Counter<u64>,
+	task_pass_duration: Histogram<f64>,
+	task_items: Counter<u64>,
+	task_queue_age: Histogram<f64>,
+	task_backlog: Counter<u64>,
 }
 
 impl MetricsObserver {
@@ -179,6 +195,7 @@ impl MetricsObserver {
 		let slow = runtime.meter(scope::SLOW_QUERY);
 		let gql = runtime.meter(scope::GRAPHQL);
 		let mcp = runtime.meter(scope::MCP);
+		let task = runtime.meter(scope::TASK);
 
 		Ok(Self {
 			statement_total: stmt
@@ -386,6 +403,41 @@ impl MetricsObserver {
 			mcp_session_active: mcp
 				.i64_up_down_counter(names::MCP_SESSION_ACTIVE)
 				.with_description("Number of currently-active MCP sessions")
+				.build(),
+			task_pass: task
+				.u64_counter(names::TASK_PASS)
+				.with_description(
+					"Cumulative count of background maintenance job passes, by job, \
+					 outcome and lease standing",
+				)
+				.build(),
+			task_pass_duration: task
+				.f64_histogram(names::TASK_PASS_DURATION)
+				.with_description("Distribution of background maintenance pass duration")
+				.with_unit("s")
+				.build(),
+			task_items: task
+				.u64_counter(names::TASK_ITEMS)
+				.with_description(
+					"Cumulative count of queue entries or work units handled by background \
+					 maintenance passes",
+				)
+				.build(),
+			task_queue_age: task
+				.f64_histogram(names::TASK_QUEUE_AGE)
+				.with_description(
+					"Distribution of the age of the oldest queued entry when a background \
+					 pass started, for passes that found work queued",
+				)
+				.with_unit("s")
+				.with_boundaries(TASK_QUEUE_AGE_BUCKETS.to_vec())
+				.build(),
+			task_backlog: task
+				.u64_counter(names::TASK_BACKLOG)
+				.with_description(
+					"Cumulative count of background maintenance passes that stopped at their \
+					 budget with work still pending",
+				)
 				.build(),
 		})
 	}
@@ -898,6 +950,28 @@ impl ExecutionObserver for MetricsObserver {
 		}
 		if event.safe.received > 0 {
 			self.bucket_received.add(event.safe.received, &attrs);
+		}
+	}
+
+	fn on_task_pass(&self, event: &TaskPassEvent) {
+		let attrs = [
+			KeyValue::new(attrs::JOB, event.safe.job),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+			KeyValue::new(attrs::LEASE, event.safe.lease.as_label()),
+		];
+		self.task_pass.add(1, &attrs);
+		// Duration, throughput and lag are per job: the lease and outcome
+		// labels would only split their distributions.
+		let job = [KeyValue::new(attrs::JOB, event.safe.job)];
+		self.task_pass_duration.record(event.safe.duration.as_secs_f64(), &job);
+		if event.safe.items > 0 {
+			self.task_items.add(event.safe.items, &job);
+		}
+		if let Some(age) = event.safe.oldest_age {
+			self.task_queue_age.record(age.as_secs_f64(), &job);
+		}
+		if event.safe.backlog {
+			self.task_backlog.add(1, &job);
 		}
 	}
 
@@ -1626,6 +1700,47 @@ mod tests {
 				}
 			}
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// A queue age is recorded against boundaries of its own: the default
+	/// ones would put every age under five seconds in a single bucket.
+	#[tokio::test]
+	async fn task_queue_age_records_against_its_own_buckets() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		use surrealdb_observe::{
+			TaskLeaseState, TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe,
+		};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		obs.on_task_pass(&TaskPassEvent {
+			safe: TaskPassEventSafe {
+				job: "event_processing",
+				outcome: Outcome::Success,
+				duration: Duration::from_millis(3),
+				items: 1,
+				oldest_age: Some(Duration::from_millis(400)),
+				lease: TaskLeaseState::Held,
+				backlog: false,
+			},
+			ctx: TaskPassEventCtx {},
+		});
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let bounds: Vec<f64> = rm
+			.scope_metrics()
+			.flat_map(|sm| sm.metrics())
+			.filter(|m| m.name() == names::TASK_QUEUE_AGE)
+			.find_map(|m| match m.data() {
+				AggregatedMetrics::F64(MetricData::Histogram(h)) => {
+					h.data_points().next().map(|dp| dp.bounds().collect())
+				}
+				AggregatedMetrics::F64(_)
+				| AggregatedMetrics::U64(_)
+				| AggregatedMetrics::I64(_) => None,
+			})
+			.expect("the queue age is recorded");
+		assert_eq!(bounds, TASK_QUEUE_AGE_BUCKETS);
 		provider.shutdown().expect("shutdown");
 	}
 }

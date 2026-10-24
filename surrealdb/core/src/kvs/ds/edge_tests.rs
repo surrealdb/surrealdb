@@ -440,6 +440,15 @@ async fn a_new_store_is_baselined_and_stamped_by_the_edge_attach() {
 	}
 }
 
+/// An edge datastore never runs `check_version`, so its attach is what releases the jobs a host
+/// drives: without it the host's every maintenance slice is refused.
+#[tokio::test]
+async fn an_attached_edge_store_takes_host_driven_maintenance() {
+	let b = Builder::for_edge().build_with_path("memory").await.expect("the edge datastore opens");
+	assert!(b.is_migrated());
+	b.run_maintenance_slice().await.expect("the host drives a slice");
+}
+
 #[tokio::test]
 async fn a_store_with_a_pending_migration_is_refused_by_the_edge_attach() {
 	let b = Builder::for_edge().build_with_path("memory").await.expect("the edge datastore opens");

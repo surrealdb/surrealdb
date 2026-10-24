@@ -38,8 +38,7 @@ use crate::exec::operators::write::ctx::WriteCtx;
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::{Error as ExecError, ExecutionContext};
 use crate::expr::{ChangeFeed, ControlFlow};
-use crate::key::schema::EventQueueKey;
-use crate::kvs::Transaction;
+use crate::key::schema::NodeEventQueueKey;
 use crate::val::Value;
 
 /// Whether this statement replays a dump.
@@ -67,11 +66,17 @@ pub(crate) fn is_observed(row: &WriteRow, ctx: &WriteCtx) -> bool {
 /// makes the record readable is the one that makes the entry drainable, and a
 /// statement that fails afterwards leaves neither behind.
 ///
-/// The key orders the queue and makes the entry unique: an HLC timestamp and
-/// this node's id, under the namespace and database ids the write resolved and
-/// the table and event names the definition carries. The table named is the
-/// event's own `target_table`, the table the definition is attached to, so the
-/// entry addresses the definition rather than the statement that fired it.
+/// The entry goes under this node's own queue, which this node drains on the
+/// commit wake without a lease; the HLC timestamp orders the queue and makes
+/// the entry unique within it. Beneath the node the key carries the namespace
+/// and database ids the write resolved and the table and event names the
+/// definition carries. The table named is the event's own `target_table`, the
+/// table the definition is attached to, so the entry addresses the definition
+/// rather than the statement that fired it. The previous release neither scans
+/// this queue nor decodes its entries: a node rolled back to it among peers on
+/// this release has the queue adopted by them, and one rolled back with no
+/// such peer left keeps what is queued here until a node on this release is
+/// back.
 ///
 /// `trigger_async_event` marks the transaction so the drain is woken once the
 /// commit publishes the entry, rather than waiting for its next poll.
@@ -88,13 +93,13 @@ pub(crate) async fn queue_async_event(
 	action: Action,
 ) -> Result<(), ControlFlow> {
 	let queued = queued_payload(row, frame, event, subject, action)?;
-	let key = EventQueueKey {
+	let key = NodeEventQueueKey {
+		nd: frame.ctx().node_id(),
 		ns: ctx.db.namespace_id,
 		db: ctx.db.database_id,
 		tb: Cow::Borrowed(&event.target_table),
 		ev: Cow::Borrowed(&event.name),
 		ts: HlcTimeStamp::next().0,
-		node_id: frame.ctx().node_id(),
 	};
 	let txn = ctx.txn();
 	txn.put_key(&key, &queued).await.map_err(ControlFlow::Err)?;
@@ -182,6 +187,7 @@ fn queued_payload(
 		values: frame.ctx().collect_values(HashMap::new()),
 		auth_with_limit: Arc::clone(&frame.root().auth),
 		event_definition: definition.clone().into(),
+		claim: None,
 	})
 }
 
@@ -258,8 +264,9 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	}
 	// The live-query capture is independent of the feed above and
 	// runs whether or not one is defined.
-	if captures_live_events(ctx, &txn).await? {
+	if captures_live_events(ctx) {
 		held(memory.as_ref(), &[&row.initial, &row.current], ctx).await?;
+		let captured = txn.timestamp().await.map_err(ControlFlow::Err)?.as_versionstamp();
 		txn.live_event_buffer_record_change(
 			ctx.db.namespace_id,
 			ctx.db.database_id,
@@ -267,6 +274,7 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 			id,
 			row.initial.clone(),
 			row.current.clone(),
+			captured,
 		);
 	}
 	Ok(())
@@ -278,16 +286,12 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 /// change of it. Those are what the stages of that order maintain
 /// (`view_maintenance_order` in `write/plan.rs`), so a view row deleted from
 /// such a table removes its record and nothing else.
-pub(crate) async fn view_row_reaches_nothing(ctx: &WriteCtx) -> Result<bool, ControlFlow> {
-	if !ctx.indexes.is_empty()
-		|| !ctx.views.is_empty()
-		|| !ctx.events.is_empty()
-		|| !ctx.lives.is_empty()
-		|| changefeed_definition(ctx).is_some()
-	{
-		return Ok(false);
-	}
-	Ok(!captures_live_events(ctx, &ctx.txn()).await?)
+pub(crate) fn view_row_reaches_nothing(ctx: &WriteCtx) -> bool {
+	ctx.indexes.is_empty()
+		&& ctx.views.is_empty()
+		&& ctx.events.is_empty()
+		&& !ctx.live_observed
+		&& changefeed_definition(ctx).is_none()
 }
 
 /// Whether this write captures its record change into the live-query keyspace
@@ -300,18 +304,19 @@ pub(crate) async fn view_row_reaches_nothing(ctx: &WriteCtx) -> Result<bool, Con
 ///
 /// It happens only under the router engine, and only for a table some node is
 /// subscribed to — which is what keeps the write path's added cost
-/// proportional to demand. The subscription test reads the committed
+/// proportional to demand. Whether one is subscribed is the context's
+/// `live_observed`, read once when the context is resolved from the committed
 /// subscription rows within this write's own snapshot rather than a
-/// node-local cache, so a subscriber registered on another node counts; it is
-/// a limit-one key scan, so its cost is independent of how many subscribers
-/// there are.
-async fn captures_live_events(ctx: &WriteCtx, txn: &Transaction) -> Result<bool, ControlFlow> {
-	if !ctx.exec().ctx().config.datastore.live_query_engine.captures_events() {
-		return Ok(false);
-	}
-	txn.table_has_live_query(ctx.db.namespace_id, ctx.db.database_id, &ctx.table.name)
-		.await
-		.map_err(ControlFlow::Err)
+/// node-local cache, so a subscriber registered on another node counts, and
+/// shared by every record of the statement.
+///
+/// The test is judged by this write's snapshot, not at its commit: a write
+/// whose snapshot found no subscription captures nothing, so a table's first
+/// subscription, registered while the write runs, misses the write although
+/// it commits above the subscription's watermark. A write that found any
+/// subscription captures, and such a subscription receives it.
+fn captures_live_events(ctx: &WriteCtx) -> bool {
+	ctx.live_observed && ctx.exec().ctx().config.datastore.live_query_engine.captures_events()
 }
 
 #[cfg(all(test, feature = "kv-mem"))]

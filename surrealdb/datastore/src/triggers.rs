@@ -417,6 +417,13 @@ pub struct CommitTriggers {
 	pub(crate) pending_guard_fences: PendingGuardFences,
 	/// Async event processing, notified when a commit queues events.
 	pub async_event: Notify,
+	/// How many commits have queued async events on this datastore, counted
+	/// as each such commit notifies. A drain compares the count at the end of
+	/// a lap over its queue with the count the lap began at: a higher count
+	/// means an entry was queued during the lap — by an event the lap ran, or
+	/// by a concurrent write — possibly behind the scan's position, so the
+	/// queue is not at rest.
+	async_events_queued: AtomicU64,
 	/// Index compaction, notified when a commit queues compaction work so the
 	/// compactor runs on the write instead of waiting out its interval.
 	pub index_compaction: Notify,
@@ -471,6 +478,16 @@ pub type BeforeCommitHook =
 impl CommitTriggers {
 	pub fn new() -> Self {
 		Self::default()
+	}
+
+	/// Count one commit that queued async events, after the commit.
+	pub fn async_event_queued(&self) {
+		self.async_events_queued.fetch_add(1, Ordering::Release);
+	}
+
+	/// How many commits have queued async events so far.
+	pub fn async_events_queued(&self) -> u64 {
+		self.async_events_queued.load(Ordering::Acquire)
 	}
 
 	/// Run the DiskANN writer-lease protocol, which a store this datastore is

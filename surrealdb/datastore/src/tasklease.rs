@@ -14,10 +14,27 @@ use tracing::trace;
 use uuid::Uuid;
 use web_time::Instant;
 
+use crate::clock::{SystemWallClock, WallClock};
 use crate::factory::TransactionFactory;
 use crate::key::schema::TaskLeaseKey;
 use crate::sequences::Sequences;
 use crate::{Error as KvsError, Transaction, TransactionType, storage_error};
+
+/// Marks an error as a lease check's own — [`LeaseHandler::has_lease`] or
+/// [`LeaseHandler::try_maintain_lease`] failing to reach a verdict — as
+/// opposed to a failure of the work done under the lease. A pass that fails
+/// on one never established its standing, or lost track of it, and is
+/// reported so rather than as a failure of the lease's holder. Carried as
+/// `anyhow` context, so the error underneath — a timeout, or a cancellation
+/// — still reads as what it is.
+#[derive(Debug, Clone, Copy)]
+pub struct LeaseCheckFailed;
+
+impl std::fmt::Display for LeaseCheckFailed {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("the task lease could not be checked")
+	}
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TaskLeaseType {
@@ -40,6 +57,12 @@ pub enum TaskLeaseType {
 	/// Rewriting a table's rows through its migration steps, and verifying
 	/// that its stored values conform to their fields
 	TableMigration,
+	/// Collecting the live-query events the router engine captured once their
+	/// retention has passed. A lease of its own, apart from changefeed cleanup,
+	/// because each collector runs on its own cadence, which each node may
+	/// disable: a node holding a lease the two shared for the one job it runs
+	/// would keep every other node from running the other.
+	LiveQueryCleanup,
 }
 
 impl Encode for TaskLeaseType {
@@ -54,6 +77,7 @@ impl Encode for TaskLeaseType {
 			TaskLeaseType::DataMigration => w.write_u16(7),
 			TaskLeaseType::GraphFold => w.write_u16(8),
 			TaskLeaseType::TableMigration => w.write_u16(9),
+			TaskLeaseType::LiveQueryCleanup => w.write_u16(10),
 		}
 	}
 }
@@ -70,6 +94,7 @@ impl<'de> BorrowDecode<'de> for TaskLeaseType {
 			7 => TaskLeaseType::DataMigration,
 			8 => TaskLeaseType::GraphFold,
 			9 => TaskLeaseType::TableMigration,
+			10 => TaskLeaseType::LiveQueryCleanup,
 			_ => return Err(DecodeError::InvalidFormat),
 		})
 	}
@@ -142,6 +167,10 @@ pub struct LeaseHandler {
 	last_maintain_check: Arc<AtomicI64>,
 	/// Maintenance period in seconds used to throttle lease checks
 	maintain_period: i64,
+	/// The clock every lease status is judged against. Lease expirations are
+	/// stored as wall-clock instants, so a node's reading of this clock decides
+	/// whether it may take over a lease another node holds.
+	clock: Arc<dyn WallClock>,
 }
 
 impl LeaseHandler {
@@ -204,7 +233,18 @@ impl LeaseHandler {
 			canceller,
 			last_maintain_check: Arc::new(AtomicI64::new(0)),
 			maintain_period: ((lease_duration.as_secs() / 8) as i64).max(1),
+			clock: Arc::new(SystemWallClock),
 		})
+	}
+
+	/// Judges lease status against `clock` instead of the system clock.
+	///
+	/// Every node sharing a lease must read clocks that agree to well within
+	/// the lease duration; the system clock is the only reading that holds
+	/// across processes, so this exists for tests and for hosts that own time.
+	pub fn with_clock(mut self, clock: Arc<dyn WallClock>) -> Self {
+		self.clock = clock;
+		self
 	}
 
 	fn ensure_not_cancelled(&self) -> Result<()> {
@@ -238,8 +278,13 @@ impl LeaseHandler {
 	/// # Returns
 	/// * `Ok(true)` - If the node successfully acquired or already owns the lease
 	/// * `Ok(false)` - If another node owns the lease
-	/// * `Err` - If the operation timed out or encountered other errors
+	/// * `Err` - If the operation timed out or was cancelled, marked with [`LeaseCheckFailed`]
 	pub async fn has_lease(&self) -> Result<bool> {
+		self.check_lease_with_backoff().await.map_err(|e| e.context(LeaseCheckFailed))
+	}
+
+	/// [`Self::has_lease`] before its errors are marked as the check's.
+	async fn check_lease_with_backoff(&self) -> Result<bool> {
 		self.ensure_not_cancelled()?;
 		// Initial backoff time in milliseconds
 		let mut tempo = 4;
@@ -324,9 +369,18 @@ impl LeaseHandler {
 	///     process_item(item).await?;
 	/// }
 	/// ```
+	///
+	/// An error is marked with [`LeaseCheckFailed`]: the check reached no
+	/// verdict, and the caller's standing is unknown from here.
 	pub async fn try_maintain_lease(&self) -> Result<bool> {
+		self.maintain_lease().await.map_err(|e| e.context(LeaseCheckFailed))
+	}
+
+	/// [`Self::try_maintain_lease`] before its errors are marked as the
+	/// check's.
+	async fn maintain_lease(&self) -> Result<bool> {
 		self.ensure_not_cancelled()?;
-		let now = Utc::now();
+		let now = self.clock.now();
 		let now_ts = now.timestamp();
 		let last = self.last_maintain_check.load(Ordering::Relaxed);
 		if (now_ts < last || now_ts - last > self.maintain_period)
@@ -360,7 +414,7 @@ impl LeaseHandler {
 	/// * `Err` - If database operations fail
 	async fn check_lease(&self) -> Result<bool> {
 		self.ensure_not_cancelled()?;
-		let now = Utc::now();
+		let now = self.clock.now();
 		// First check if there's already a valid lease
 		if let Some((current_lease, lease_status)) = self.read_lease(now).await? {
 			// If another node owns a non-expired lease, we cannot acquire it
@@ -556,12 +610,12 @@ mod tests {
 	use chrono::Utc;
 	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::TransactionBuilder;
-	use tokio::time::sleep;
 	use uuid::Uuid;
 
+	use crate::clock::{ManualClock, WallClock};
 	use crate::factory::TransactionFactory;
 	use crate::sequences::Sequences;
-	use crate::tasklease::{LeaseHandler, LeaseStatus, TaskLeaseType};
+	use crate::tasklease::{LeaseCheckFailed, LeaseHandler, LeaseStatus, TaskLeaseType};
 
 	/// Tracks the results of lease acquisition attempts by a node.
 	///
@@ -722,25 +776,34 @@ mod tests {
 		task_lease_concurrency(builder).await;
 	}
 
+	/// A transaction factory over a fresh in-memory store, for the tests that
+	/// drive lease state through a manual clock.
+	async fn mem_factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+		(tf, sequences)
+	}
+
 	/// Tests the lease renewal behavior when a node already owns a lease.
 	///
 	/// This test verifies that:
 	/// 1. A node that owns a lease doesn't try to re-acquire it if more than half the lease
 	///    duration remains (status: Valid)
-	/// 2. After waiting for more than half the lease duration, the lease enters the Renewable state
+	/// 2. Once more than half the lease duration has elapsed, the lease enters the Renewable state
 	///    and `check_lease()` triggers a renewal
 	/// 3. After renewal, the lease is Valid again with a later expiration time
+	///
+	/// Time is driven by a manual clock, so each transition is observed at an
+	/// exact offset rather than after a real wait.
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
-		let builder = surrealdb_kvs_any::Backends::community()
-			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
-			.await
-			.unwrap();
-		// Create an async event trigger
-		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
-		// Create the transaction factory
-		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
-		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+		let (tf, sequences) = mem_factory().await;
+		let clock = Arc::new(ManualClock::new(Utc::now()));
 
 		// Set lease duration to 10 seconds
 		let lease_duration = Duration::from_secs(10);
@@ -754,14 +817,15 @@ mod tests {
 			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
-		.unwrap();
+		.unwrap()
+		.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>);
 
 		// PART 1: Initial lease acquisition
 		// Initially acquire the lease
 		let has_lease = lh.check_lease().await.unwrap();
 		assert!(has_lease, "Should successfully acquire the lease initially");
 
-		let (initial_lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (initial_lease, status) = lh.read_lease(clock.now()).await.unwrap().unwrap();
 		assert_eq!(initial_lease.owner, node_id);
 		assert!(
 			matches!(status, LeaseStatus::Valid),
@@ -773,7 +837,7 @@ mod tests {
 		let has_lease = lh.check_lease().await.unwrap();
 		assert!(has_lease, "Should still have the lease without re-acquiring");
 
-		let (lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (lease, status) = lh.read_lease(clock.now()).await.unwrap().unwrap();
 		// Verify the status
 		assert!(
 			matches!(status, LeaseStatus::Valid),
@@ -782,12 +846,18 @@ mod tests {
 		// Verify the expiration hasn't changed (no renewal)
 		assert_eq!(lease.expiration, initial_lease.expiration);
 
+		// Just under half the duration: still valid, still not renewed.
+		clock.advance(chrono::Duration::milliseconds(4_999));
+		let (lease, status) = lh.read_lease(clock.now()).await.unwrap().unwrap();
+		assert!(matches!(status, LeaseStatus::Valid), "Lease should be valid - {status:?}");
+		assert_eq!(lease.expiration, initial_lease.expiration);
+
 		// PART 3: Verify the condition for renewal
-		// Wait half the lease duration
-		sleep(Duration::from_secs(7)).await;
+		// Past the half-life the lease becomes renewable.
+		clock.advance(chrono::Duration::seconds(2));
 
 		// Get the current lease status
-		let (_, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (_, status) = lh.read_lease(clock.now()).await.unwrap().unwrap();
 		assert!(matches!(status, LeaseStatus::Renewable), "Lease should be renewable - {status:?}");
 
 		// Now trigger the renewal
@@ -795,9 +865,11 @@ mod tests {
 		assert!(has_lease, "Should still have the lease after renewal");
 
 		// Get the renewed lease
-		let (new_lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (new_lease, status) = lh.read_lease(clock.now()).await.unwrap().unwrap();
 		assert!(matches!(status, LeaseStatus::Valid), "Lease should be valid - {status:?}");
 		assert!(new_lease.expiration > initial_lease.expiration, "Lease should have been renewed");
+		// Renewed from the clock's reading, for the full duration.
+		assert_eq!(new_lease.expiration, clock.now() + chrono::Duration::seconds(10));
 	}
 
 	/// Tests that another node cannot acquire a lease while a valid lease is held.
@@ -1020,13 +1092,10 @@ mod tests {
 	/// 5. Node A is now rejected when trying to re-acquire
 	#[tokio::test]
 	async fn test_lease_expiration_and_takeover() {
-		let builder = surrealdb_kvs_any::Backends::community()
-			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
-			.await
-			.unwrap();
-		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
-		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
-		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+		let (tf, sequences) = mem_factory().await;
+		// Both nodes read one clock, as cluster members reading synchronised
+		// system clocks would.
+		let clock = Arc::new(ManualClock::new(Utc::now()));
 
 		// Use the minimum lease duration (8 seconds due to the floor)
 		let lease_duration = Duration::from_secs(1); // Will be clamped to 8 seconds
@@ -1040,7 +1109,8 @@ mod tests {
 			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
-		.unwrap();
+		.unwrap()
+		.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>);
 		let lh_b = LeaseHandler::new(
 			sequences.clone(),
 			node_b,
@@ -1048,7 +1118,8 @@ mod tests {
 			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
-		.unwrap();
+		.unwrap()
+		.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>);
 
 		// Node A acquires the lease
 		let acquired = lh_a.check_lease().await.unwrap();
@@ -1058,11 +1129,19 @@ mod tests {
 		let acquired = lh_b.check_lease().await.unwrap();
 		assert!(!acquired, "Node B should be rejected while Node A holds the lease");
 
-		// Wait for the lease to expire (8 seconds + small margin)
-		sleep(Duration::from_secs(9)).await;
+		// Renewable is not expired: B is still rejected while A merely ought to
+		// renew, which is what keeps a slow holder from being displaced early.
+		clock.advance(chrono::Duration::seconds(7));
+		let (_, status) = lh_a.read_lease(clock.now()).await.unwrap().unwrap();
+		assert!(matches!(status, LeaseStatus::Renewable), "Lease should be renewable - {status:?}");
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(!acquired, "Node B should be rejected while Node A's lease is only renewable");
+
+		// Past the expiration.
+		clock.advance(chrono::Duration::seconds(2));
 
 		// Verify the lease is now expired
-		let (_, status) = lh_a.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (_, status) = lh_a.read_lease(clock.now()).await.unwrap().unwrap();
 		assert!(
 			matches!(status, LeaseStatus::Expired),
 			"Lease should be expired after waiting - {status:?}"
@@ -1073,7 +1152,7 @@ mod tests {
 		assert!(acquired, "Node B should acquire the expired lease");
 
 		// Verify Node B now owns the lease
-		let (lease, status) = lh_b.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (lease, status) = lh_b.read_lease(clock.now()).await.unwrap().unwrap();
 		assert_eq!(lease.owner, node_b, "Node B should now own the lease");
 		assert!(matches!(status, LeaseStatus::Valid), "New lease should be valid - {status:?}");
 
@@ -1089,13 +1168,8 @@ mod tests {
 	/// owned by the current node.
 	#[tokio::test]
 	async fn test_try_maintain_lease_reports_lost_lease() {
-		let builder = surrealdb_kvs_any::Backends::community()
-			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
-			.await
-			.unwrap();
-		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
-		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
-		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+		let (tf, sequences) = mem_factory().await;
+		let clock = Arc::new(ManualClock::new(Utc::now()));
 
 		// Use minimum lease duration (clamped to 8 seconds)
 		let lease_duration = Duration::from_secs(1);
@@ -1109,7 +1183,8 @@ mod tests {
 			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
-		.unwrap();
+		.unwrap()
+		.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>);
 		let lh_b = LeaseHandler::new(
 			sequences.clone(),
 			node_b,
@@ -1117,7 +1192,8 @@ mod tests {
 			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
-		.unwrap();
+		.unwrap()
+		.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>);
 
 		// Node A acquires the lease
 		let acquired = lh_a.check_lease().await.unwrap();
@@ -1127,18 +1203,16 @@ mod tests {
 		let result = lh_a.try_maintain_lease().await.unwrap();
 		assert!(result, "Node A should maintain the lease");
 
-		// Wait for the lease to expire
-		sleep(Duration::from_secs(9)).await;
+		// The lease expires without A maintaining it.
+		clock.advance(chrono::Duration::seconds(9));
 
 		// Node B acquires the expired lease
 		let acquired = lh_b.check_lease().await.unwrap();
 		assert!(acquired, "Node B should acquire the expired lease");
 
-		// Force Node A's throttle to allow a real check by advancing last_maintain_check
-		// far into the past
-		lh_a.last_maintain_check.store(0, Ordering::Relaxed);
-
-		// Node A's try_maintain_lease should now report the lease is lost
+		// The throttle follows the same clock, so the elapsed time alone is
+		// enough for A's next maintenance call to reach the datastore, where it
+		// finds the lease lost.
 		let result = lh_a.try_maintain_lease().await.unwrap();
 		assert!(!result, "Node A should detect that it lost the lease");
 	}
@@ -1192,5 +1266,35 @@ mod tests {
 		.unwrap();
 		let acquired = lh2.has_lease().await.unwrap();
 		assert!(acquired, "has_lease should acquire from empty state");
+	}
+
+	/// A lease check that fails is marked as the check's failure, and what
+	/// failed it still reads as itself underneath the mark, so a caller that
+	/// classifies the error — as cancellation, say — is not misled by it.
+	#[tokio::test]
+	async fn a_failed_lease_check_is_marked_and_still_reads_as_what_failed_it() {
+		let (tf, sequences) = mem_factory().await;
+		let canceller = tokio_util::sync::CancellationToken::new();
+		canceller.cancel();
+		let lh = LeaseHandler::new_with_canceller(
+			sequences,
+			Uuid::new_v4(),
+			tf,
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(1),
+			canceller,
+		)
+		.unwrap();
+		for res in [lh.has_lease().await, lh.try_maintain_lease().await] {
+			let e = res.expect_err("a cancelled check fails");
+			assert!(e.downcast_ref::<LeaseCheckFailed>().is_some(), "marked as the check's: {e:#}");
+			assert!(
+				matches!(
+					e.downcast_ref::<common::EngineError>(),
+					Some(common::EngineError::QueryCancelled)
+				),
+				"and still the cancellation it was: {e:#}"
+			);
+		}
 	}
 }

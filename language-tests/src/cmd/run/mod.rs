@@ -1236,7 +1236,8 @@ pub async fn schedule_run_remote(
 async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// `/!tl` are task-lease keys (e.g. written when the tombstone-reclaim task
 	// acquires its lease during cleanup); like `/!ic` they are background-task
-	// infrastructure that legitimately persists, not leaked test data.
+	// infrastructure that legitimately persists, not leaked test data. `/!nq`
+	// is the drain heartbeat the datastore writes beside its node row `/!nd`.
 	//
 	// `!fl` is the store's feature-level record, which every new store writes when it is
 	// created. It sits beside the version keys, outside the `/` root, so unlike the others its
@@ -1255,8 +1256,8 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// migration records for a store an earlier release created. It sits outside the `/` root
 	// like `!fl`.
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[
-		b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!wa", b"/!wb", b"/!wh", b"/!wt", b"/!mg", b"/!ic",
-		b"/!tl", b"!fl", b"!df",
+		b"/!ni", b"/!nh", b"/!nd", b"/!nq", b"/!nr", b"/!wa", b"/!wb", b"/!wh", b"/!wt", b"/!mg",
+		b"/!ic", b"/!tl", b"!fl", b"!df",
 	];
 
 	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;

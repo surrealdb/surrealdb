@@ -18,6 +18,11 @@
 //! section, so packing would discard the rest) until a build that
 //! interprets the section folds them.
 //!
+//! A pass examines at most its delta budget of the scope's keys, packable
+//! or not, and reports the key the next pass scans after, so a scope whose
+//! unpackable keys outnumber the budget is still crossed a budget at a time
+//! rather than scanned whole by every pass; see [`FoldOutcome::resume`].
+//!
 //! The first fold against a vertex table sets the table's `graph_folded`
 //! marker in the same transaction, which is what switches edge deletion
 //! on that table from key deletion to tombstone writes; see
@@ -58,7 +63,7 @@ use crate::docids::{DocId, TableDocIds};
 use crate::env::IndexEnv;
 use crate::expr::Dir;
 use crate::key::schema::{AdjacencyEdgeTablePrefix, AdjacencyKey, DecodedGraph, GraphDirPrefix};
-use crate::key::{KVKey, KVKeyDecode, KVValue};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
 /// Split threshold: a rewritten chunk closes once it reaches this many
@@ -79,14 +84,20 @@ pub(super) const CHUNK_MAX_BYTES: usize = 8 * 1024;
 const MAX_CHUNKS_PER_PASS: usize = 64;
 
 /// What one fold pass over a scope did.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct FoldOutcome {
 	/// Pointer keys consumed into blocks (tombstones consumed count too).
 	pub folded: usize,
-	/// Whether foldable keys remained beyond the pass's capture or
-	/// chunk-rewrite bounds; the scope needs another pass (in a fresh
+	/// Whether keys remained beyond the pass's budget of examined keys or
+	/// its chunk-rewrite bound; the scope needs another pass (in a fresh
 	/// transaction) to drain.
 	pub has_more: bool,
+	/// Where that pass continues, when `has_more`: the key it scans after,
+	/// or `None` for the scope's start. Every key at or before it is
+	/// consumed, or cannot be packed, so a pass that continues there
+	/// examines none of them again, while a pass that starts over examines
+	/// the unpackable ones once more. Meaningless without `has_more`.
+	pub resume: Option<Vec<u8>>,
 }
 
 /// Folds one (vertex, direction) scope inside the environment's
@@ -100,46 +111,65 @@ pub struct FoldOutcome {
 /// transaction. The caller owns commit and the retry on a conflicting
 /// concurrent write.
 ///
-/// `ns_name` / `db_name` address the catalog writes that set the fold
-/// markers.
-#[allow(clippy::too_many_arguments)]
+/// The catalog writes that set the fold markers address the vertex table
+/// by id, so the fold needs no name for the namespace or database.
+///
+/// A pass from the scope's start. A scope whose unpackable keys outnumber
+/// `max_deltas` is never crossed by passes that each start over; drain such
+/// a scope with [`fold_scope_from`], continuing each pass where the
+/// previous one's [`FoldOutcome::resume`] says.
 pub async fn fold_scope(
 	env: &dyn IndexEnv,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ns_name: &str,
-	db_name: &str,
 	vertex: &RecordId,
 	dir: Dir,
 	max_deltas: usize,
 ) -> Result<FoldOutcome> {
-	fold_scope_bounded(env, ns, db, ns_name, db_name, vertex, dir, max_deltas, MAX_CHUNKS_PER_PASS)
-		.await
+	fold_scope_from(env, ns, db, vertex, dir, max_deltas, None).await
 }
 
-/// As [`fold_scope`], with the per-edge-table chunk-rewrite bound explicit
-/// instead of fixed at [`MAX_CHUNKS_PER_PASS`].
+/// As [`fold_scope`], scanning after `after` rather than from the scope's
+/// start: the previous pass's [`FoldOutcome::resume`].
+pub async fn fold_scope_from(
+	env: &dyn IndexEnv,
+	ns: NamespaceId,
+	db: DatabaseId,
+	vertex: &RecordId,
+	dir: Dir,
+	max_deltas: usize,
+	after: Option<&[u8]>,
+) -> Result<FoldOutcome> {
+	fold_scope_bounded(env, ns, db, vertex, dir, max_deltas, MAX_CHUNKS_PER_PASS, after).await
+}
+
+/// As [`fold_scope_from`], with the per-edge-table chunk-rewrite bound
+/// explicit instead of fixed at [`MAX_CHUNKS_PER_PASS`].
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn fold_scope_bounded(
 	env: &dyn IndexEnv,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ns_name: &str,
-	db_name: &str,
 	vertex: &RecordId,
 	dir: Dir,
 	max_deltas: usize,
 	max_chunks: usize,
+	after: Option<&[u8]>,
 ) -> Result<FoldOutcome> {
 	let txn = env.tx();
 	// Capture the scope's foldable pointer keys: raw key, raw value, and
-	// the decoded fields the block entries need. Bounded by `max_deltas`;
-	// a zero bound would report `has_more` forever without progressing.
+	// the decoded fields the block entries need. `max_deltas` bounds the
+	// keys examined, packable or not, so a pass costs at most that many
+	// keys however many of the scope's it cannot pack; a zero bound would
+	// report `has_more` forever without progressing.
 	let max_deltas = max_deltas.max(1);
 	let mut captured: Vec<CapturedDelta> = Vec::new();
 	let mut has_more = false;
+	let mut examined = 0;
+	// The last key examined, which the next pass scans after.
+	let mut last_examined: Option<Vec<u8>> = None;
 	{
-		let range = GraphDirPrefix {
+		let mut range = GraphDirPrefix {
 			ns,
 			db,
 			tb: Cow::Borrowed(&vertex.table),
@@ -147,6 +177,9 @@ pub(super) async fn fold_scope_bounded(
 			dir,
 		}
 		.range()?;
+		if let Some(after) = after {
+			range = range.resume_after(after, Direction::Forward);
+		}
 		let mut cursor = txn.open_vals_cursor_raw(range, Direction::Forward, 0, None).await?;
 		'scan: loop {
 			let batch = cursor
@@ -157,6 +190,13 @@ pub(super) async fn fold_scope_bounded(
 				break;
 			}
 			for (key, val) in &batch {
+				// The budget is spent: whatever follows is the next pass's.
+				if examined >= max_deltas {
+					has_more = true;
+					break 'scan;
+				}
+				examined += 1;
+				let preceded_by = last_examined.replace(key.to_vec());
 				let decoded = DecodedGraph::decode(key)?;
 				// Legacy-format keys carry no target and cannot be packed.
 				let Some(target) = decoded.target else {
@@ -175,16 +215,13 @@ pub(super) async fn fold_scope_bounded(
 				{
 					continue;
 				}
-				if captured.len() >= max_deltas {
-					has_more = true;
-					break 'scan;
-				}
 				captured.push(CapturedDelta {
 					key: key.to_vec(),
 					value_bytes: val.to_vec(),
 					value,
 					edge: decoded.edge,
 					target,
+					preceded_by,
 				});
 			}
 		}
@@ -193,6 +230,7 @@ pub(super) async fn fold_scope_bounded(
 		return Ok(FoldOutcome {
 			folded: 0,
 			has_more,
+			resume: last_examined,
 		});
 	}
 
@@ -207,10 +245,8 @@ pub(super) async fn fold_scope_bounded(
 	let mut folded = 0;
 	let mut consumed_counts: Vec<usize> = Vec::with_capacity(groups.len());
 	for (edge_table, deltas) in &groups {
-		let consumed = fold_edge_table(
-			env, &txn, ns, db, ns_name, db_name, vertex, dir, edge_table, deltas, max_chunks,
-		)
-		.await?;
+		let consumed =
+			fold_edge_table(env, &txn, ns, db, vertex, dir, edge_table, deltas, max_chunks).await?;
 		if consumed < deltas.len() {
 			has_more = true;
 		}
@@ -221,8 +257,8 @@ pub(super) async fn fold_scope_bounded(
 	// The first fold against this vertex table flips its `graph_folded`
 	// marker, transactionally with the blocks it justifies. `tb` above may
 	// come from the transaction's cache rather than a read of the
-	// underlying key, so the flip goes through `replace_tb`, whose locked
-	// read of the exact table-definition key serializes it against every
+	// underlying key, so the flip goes through `replace_tb_by_id`, whose
+	// locked read of the exact table-definition key serializes it against every
 	// concurrent writer of that key on every backend: two racing first
 	// folds cannot both commit the flip, and a racing catalog refresh
 	// (DDL rewriting the definition from a pre-flip snapshot) cannot
@@ -236,7 +272,7 @@ pub(super) async fn fold_scope_bounded(
 		let mut updated = (*tb).clone();
 		updated.graph_folded = true;
 		updated.cache_tables_ts = Uuid::now_v7();
-		txn.replace_tb(ns_name, db_name, &updated).await?;
+		txn.replace_tb_by_id(&updated).await?;
 	}
 
 	// Delete exactly the keys the rewrite consumed (the merged prefix of
@@ -249,9 +285,24 @@ pub(super) async fn fold_scope_bounded(
 		}
 	}
 
+	// Where the next pass continues: after the last key examined, unless
+	// the chunk bound left a captured key unconsumed, in which case after
+	// the key examined before the first such key, since every key before
+	// that one is consumed or unpackable and that one is still to fold.
+	let first_unconsumed = groups
+		.values()
+		.zip(&consumed_counts)
+		.filter_map(|(group, consumed)| group.get(*consumed))
+		.min_by(|a, b| a.key.cmp(&b.key));
+	let resume = match first_unconsumed {
+		Some(delta) => delta.preceded_by.clone().or_else(|| after.map(<[u8]>::to_vec)),
+		None => last_examined,
+	};
+
 	Ok(FoldOutcome {
 		folded,
 		has_more,
+		resume,
 	})
 }
 
@@ -261,6 +312,9 @@ struct CapturedDelta {
 	value: AdjacencyValue,
 	edge: RecordId,
 	target: RecordId,
+	/// The key the pass examined before this one, packable or not; `None`
+	/// for the first key the pass examined.
+	preceded_by: Option<Vec<u8>>,
 }
 
 /// One merged entry awaiting repacking, in the pointer-key byte domain.
@@ -290,8 +344,6 @@ async fn fold_edge_table(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ns_name: &str,
-	db_name: &str,
 	vertex: &RecordId,
 	dir: Dir,
 	edge_table: &TableName,
@@ -574,8 +626,8 @@ async fn fold_edge_table(
 						claim == DocIdsReclaimClaim::Available,
 						"a probed doc-ID reclaim became unclaimable within one snapshot"
 					);
-					// Record the marker through `replace_tb`, whose locked
-					// read of the exact table-definition key serializes this
+					// Record the marker through `replace_tb_by_id`, whose
+					// locked read of the exact table-definition key serializes this
 					// read-modify-write against every concurrent writer of
 					// that key on every backend: a racing catalog refresh
 					// from a pre-marker snapshot conflicts instead of
@@ -584,7 +636,7 @@ async fn fold_edge_table(
 					let mut updated = (*tb).clone();
 					updated.graph_doc_ids = true;
 					updated.cache_tables_ts = Uuid::now_v7();
-					txn.replace_tb(ns_name, db_name, &updated).await?;
+					txn.replace_tb_by_id(&updated).await?;
 				}
 			}
 		}

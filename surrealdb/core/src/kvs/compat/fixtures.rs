@@ -374,6 +374,7 @@ pub fn subscription_basic() -> StoredSubscriptionDefinition {
 		auth: None,
 		session: None,
 		vars: BTreeMap::new(),
+		watermark: 0,
 	}
 }
 
@@ -399,6 +400,7 @@ pub fn subscription_with_filters() -> StoredSubscriptionDefinition {
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
 		vars: BTreeMap::new(),
+		watermark: 0,
 	}
 }
 
@@ -419,6 +421,7 @@ pub fn subscription_with_vars() -> StoredSubscriptionDefinition {
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
 		vars,
+		watermark: 0,
 	}
 }
 

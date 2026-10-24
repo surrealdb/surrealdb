@@ -1,20 +1,16 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use surrealdb_core::doc::process_next_events_batch;
 use surrealdb_core::kvs::Datastore;
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 use crate::helpers::Test;
 
+/// Drains this node's async event queue: one drain runs the events an event
+/// queues as it runs, so it returns with the queue empty.
 async fn wait_for_events_processing(ds: &Datastore) -> Result<()> {
-	timeout(Duration::from_secs(10), async {
-		while process_next_events_batch(ds, None).await? != 0 {
-			sleep(Duration::from_millis(100)).await;
-		}
-		Ok::<_, anyhow::Error>(())
-	})
-	.await?
+	timeout(Duration::from_secs(10), ds.drain_async_events()).await??;
+	Ok(())
 }
 
 #[tokio::test]
@@ -43,8 +39,12 @@ async fn test_async_event() -> Result<()> {
 	// Process the event asynchronously
 	wait_for_events_processing(&t.ds).await?;
 
-	let mut t =
-		t.new_sql("(SELECT * FROM activity ORDER BY time).{ action, user, value };").await?;
+	// The three events run on concurrent workers, so the order their bodies
+	// evaluate `time::now()` in is not fixed; the rows are ordered by what
+	// each event recorded instead.
+	let mut t = t
+		.new_sql("(SELECT * FROM activity ORDER BY action, value).{ action, user, value };")
+		.await?;
 	t.expect_size(1)?;
 	t.expect_val(
 		"[{ action: 'CREATE', user: user:test, value: 'info@surrealdb.com' }, { action: 'UPDATE', user: user:test, value: 'info@surrealdb.com' }, { action: 'UPDATE', user: user:test, value: 'test@surrealdb.com' }]",

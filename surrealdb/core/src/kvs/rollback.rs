@@ -42,8 +42,8 @@ use std::borrow::Cow;
 use anyhow::Result;
 use surrealdb_catalog::stored::{CATALOG_MARKER, EntryError, StoredType, parse_header};
 use surrealdb_catalog::{
-	DatabaseDefinition, Generation, LayoutDescriptor, NamespaceDefinition, StoredFeatureLevel,
-	TableConformance, TableMigrations, ViewState,
+	DatabaseDefinition, Generation, LayoutDescriptor, NamespaceDefinition, NodeLiveQuery,
+	StoredFeatureLevel, TableConformance, TableMigrations, ViewState,
 };
 use surrealdb_strand::TableName;
 use surrealdb_types::ToSql;
@@ -55,13 +55,13 @@ use crate::key::schema::{
 	FeatureLevelKey, FieldKey, FieldPrefix, ForeignTableKey, ForeignTablePrefix, FunctionKey,
 	FunctionPrefix, GenerationMarkKey, GenerationMarkPrefix, IndexDefKey, IndexDefPrefix,
 	LayoutKey, LayoutPrefix, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
-	NamespacePrefix, NodeKey, NodeLiveQueryKey, NodePrefix, NodeReleaseKey, NodeReleasePrefix,
-	NodeStatePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessPrefix, NsGrantKey, NsPrefix,
-	NsRoot, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, RootAccessMethodKey,
-	RootAccessMethodPrefix, RootAccessPrefix, RootConfigKey, RootConfigPrefix, RootGrantKey,
-	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionKey, SubscriptionPrefix,
-	TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix, TaskLeaseKey, TaskLeasePrefix,
-	TblPrefix, TblRoot, ViewStateKey, ViewStatePrefix,
+	NamespacePrefix, NodeEventQueueKey, NodeKey, NodeLiveQueryKey, NodePrefix, NodeReleaseKey,
+	NodeReleasePrefix, NodeStatePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessPrefix,
+	NsGrantKey, NsPrefix, NsRoot, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix,
+	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessPrefix, RootConfigKey, RootConfigPrefix,
+	RootGrantKey, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionKey,
+	SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix,
+	TaskLeaseKey, TaskLeasePrefix, TblPrefix, TblRoot, ViewStateKey, ViewStatePrefix,
 };
 use crate::key::{
 	AnyRange, KVKeyDecode, KVSubspace, KVValue, Key, RawRange, Resumable, TypedRange,
@@ -70,6 +70,7 @@ use crate::kvs::ds::Datastore;
 use crate::kvs::migration::{self, is_downward_note, release_of};
 use crate::kvs::version::VersionHistoryEntry;
 use crate::kvs::version::ledger::{LedgerClass, LedgerId};
+use crate::kvs::walk::{database_subtree, decode_after, holds, namespace_subtree};
 use crate::kvs::{Direction, FeatureLevelState, Release, Transaction, TransactionType};
 
 /// The number of keys one page of the catalog walk reads.
@@ -391,18 +392,6 @@ async fn subtrees<T>(
 	}
 }
 
-/// The `T` encoded in `key` right after `prefix`, the encoded bound of the band it sits in.
-fn decode_after<'k, T: storekey::BorrowDecode<'k, ()>>(prefix: &[u8], key: &'k [u8]) -> Option<T> {
-	let mut reader = storekey::BorrowReader::new(key.strip_prefix(prefix)?);
-	T::borrow_decode(&mut reader).ok()
-}
-
-/// `Some` when `range` holds `key`.
-fn holds(range: &RawRange, key: &[u8]) -> Option<()> {
-	let (start, end) = range.bounds();
-	(start <= key && key < end).then_some(())
-}
-
 /// The subtrees `found`, each named by the definition in `named` with its id, or by its id when
 /// no definition read.
 fn named_by<Id: Copy + PartialEq + std::fmt::Display>(
@@ -665,29 +654,34 @@ impl Audit {
 			|_| {},
 		)
 		.await?;
-		// Every key under a node's state is a live query: the band is walked whole, so a live query
-		// whose node row is missing or malformed is still judged.
-		self.family(
-			txn,
-			NodeStatePrefix {}.range()?,
-			false,
-			&scope,
-			namer!(NodeLiveQueryKey, k => k.lq.to_string()),
-			|_| {},
-		)
-		.await?;
+		// Every key under a node's state is a live query or a queued asynchronous event: the band
+		// is walked whole, so a live query whose node row is missing or malformed is still judged.
+		// A queued event is a `revision` container holding its definition, not a catalog entry
+		// of its own, and is passed over as the root-level queue is. Neither its place nor its
+		// revision needs a release the target lacks: every target this check accepts is at or
+		// above `Release::FIRST_STORED`, the first release whose drain reads per-node queues and
+		// decodes the record at its current revision. A release below that is refused as a target
+		// rather than judged.
+		{
+			let target = self.target;
+			let kind = <NodeLiveQuery as StoredType>::SCHEMA.name;
+			let name = namer!(NodeLiveQueryKey, k => k.lq.to_string());
+			scan_pages(txn, NodeStatePrefix {}.range()?, |key, value| {
+				if NodeEventQueueKey::decode_key(key).is_ok() {
+					return;
+				}
+				let judgement = judge::<NodeLiveQuery>(value, target);
+				self.record(judgement, kind, false, &scope, key, name);
+			})
+			.await?;
+		}
 
 		// Namespaces are found from the keys under the namespaces' band, so the subtree of one
 		// whose definition is missing or malformed is still walked. It is named by its id.
 		let band = NsPrefix {};
 		let prefix = KVSubspace::encode_bound(&band)?;
 		let found = subtrees(txn, band.range()?, &mut self.unreadable, |key| {
-			let ns = decode_after::<crate::catalog::NamespaceId>(&prefix, key)?;
-			let root = NsRoot {
-				ns,
-			};
-			holds(&root.range_subtree().ok()?, key)?;
-			Some((ns, root.skip_extensions().ok()?))
+			namespace_subtree(&prefix, key)
 		})
 		.await?;
 		self.unknown_families(txn, b"/").await?;
@@ -768,13 +762,7 @@ impl Audit {
 		};
 		let prefix = KVSubspace::encode_bound(&band)?;
 		let found = subtrees(txn, band.range()?, &mut self.unreadable, |key| {
-			let db = decode_after::<crate::catalog::DatabaseId>(&prefix, key)?;
-			let root = DbRoot {
-				ns,
-				db,
-			};
-			holds(&root.range_subtree().ok()?, key)?;
-			Some((db, root.skip_extensions().ok()?))
+			database_subtree(ns, &prefix, key)
 		})
 		.await?;
 		let level = KVSubspace::encode_bound(&NsRoot {
@@ -1264,7 +1252,7 @@ impl Audit {
 mod tests {
 	use std::borrow::Cow;
 
-	use surrealdb_catalog::stored::{CATALOG_MARKER, StoredType};
+	use surrealdb_catalog::stored::StoredType;
 	use surrealdb_catalog::{StoredFieldDefinition, ViewState};
 	use uuid::Uuid;
 
@@ -1277,7 +1265,8 @@ mod tests {
 	use crate::key::{KVKey, KVSubspace, KVValue, Key};
 	use crate::kvs::compat::v3_3_0;
 	use crate::kvs::ds::Datastore;
-	use crate::kvs::{Release, TransactionType};
+	use crate::kvs::test_support::with_future_floor;
+	use crate::kvs::{DatastoreError, Release, TransactionType};
 	use crate::val::{Array, RecordIdKey, TableName, Value};
 
 	/// A datastore holding table `person` with field `name`, and its namespace and database ids.
@@ -1311,23 +1300,20 @@ mod tests {
 		txn.commit().await.unwrap();
 	}
 
-	/// An entry in the stored grammar whose floor is one release above this build, with `body`
-	/// after the header and floor.
-	fn with_future_floor(body: &[u8]) -> Vec<u8> {
-		let future = Release::new(Release::CURRENT.major(), Release::CURRENT.minor() + 1);
-		let mut out = vec![CATALOG_MARKER, 0];
-		let mut value = u64::from(future.to_u32());
-		loop {
-			let byte = (value & 0x7f) as u8;
-			value >>= 7;
-			if value == 0 {
-				out.push(byte);
-				break;
-			}
-			out.push(byte | 0x80);
-		}
-		out.extend_from_slice(body);
-		out
+	/// A release before the first stored one drains neither per-node event queues nor the
+	/// record revision they hold, so the check refuses it as a target instead of reporting a
+	/// rollback to it.
+	#[tokio::test]
+	async fn a_release_before_the_first_stored_one_is_not_a_target() {
+		let (ds, _, _) = with_person().await;
+		let err = ds.rollback_check(Release::new(3, 3)).await.unwrap_err();
+		assert!(
+			matches!(
+				err.downcast_ref::<DatastoreError>(),
+				Some(DatastoreError::FeatureLevelBelowFirst { .. })
+			),
+			"{err}"
+		);
 	}
 
 	#[tokio::test]

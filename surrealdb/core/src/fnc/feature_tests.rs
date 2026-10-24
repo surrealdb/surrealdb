@@ -267,7 +267,7 @@ async fn encoding_functions_name_the_missing_feature() {
 async fn a_datastore_starts_no_maintenance_tasks() {
 	let ds = std::sync::Arc::new(Datastore::new("memory").await.unwrap());
 	assert!(!ds.maintenance_tasks_running());
-	ds.start_maintenance_tasks();
+	ds.start_maintenance_tasks().unwrap();
 	assert!(!ds.maintenance_tasks_running());
 }
 

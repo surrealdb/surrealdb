@@ -49,9 +49,9 @@ pub use events::{
 	HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
 	Outcome, QueryCounters, QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent, RpcEventCtx,
 	RpcEventSafe, SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
-	StatementEvent, StatementEventCtx, StatementEventSafe, StatementType, TenantIdentity,
-	TransactionEvent, TransactionEventCtx, TransactionEventSafe, TransactionMetrics,
-	TransactionMetricsSnapshot,
+	StatementEvent, StatementEventCtx, StatementEventSafe, StatementType, TaskLeaseState,
+	TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe, TenantIdentity, TransactionEvent,
+	TransactionEventCtx, TransactionEventSafe, TransactionMetrics, TransactionMetricsSnapshot,
 };
 pub use fan_out::FanOutObserver;
 pub use observer::{ExecutionObserver, NoopObserver};

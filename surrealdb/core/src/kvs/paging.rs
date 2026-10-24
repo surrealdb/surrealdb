@@ -68,17 +68,23 @@ pub(crate) enum PageCompanion<'a> {
 		/// concurrent cancellation or page wins instead of being overwritten.
 		state: ReclaimState,
 	},
-	/// A changefeed retention watermark. The window's upper bound is only the
-	/// keys the database's retention has made stale, and that policy is catalog
-	/// state a concurrent `DEFINE DATABASE` or `DEFINE TABLE` can extend. The
-	/// watermark is therefore recomputed inside every page transaction, and the
-	/// delete stops if the policy now reaches below the bound the window was
-	/// built from — a deleted changefeed entry cannot be recovered.
+	/// A changefeed retention fence. The window's upper bound is only the keys
+	/// the database's retention has made stale, and that policy is catalog
+	/// state a concurrent `DEFINE DATABASE`, `DEFINE TABLE` or `ALTER TABLE`
+	/// can extend. Every such write bumps the database's fence, so the fence is
+	/// armed inside every page transaction and compared with the value the
+	/// sweep discovered the retention under, and the delete stops if it has
+	/// moved — a deleted changefeed entry cannot be recovered.
 	ChangefeedRetention {
 		ns: NamespaceId,
 		db: DatabaseId,
-		/// The encoded watermark this window's upper bound was built from.
-		watermark: &'a [u8],
+		/// The names the database is defined under, resolved again by every
+		/// page: a database removed, or defined again under them, is reclaimed
+		/// rather than collected.
+		ns_name: &'a str,
+		db_name: &'a str,
+		/// The fence as the sweep read it when it discovered the retention.
+		fence: Option<u64>,
 	},
 }
 
@@ -141,20 +147,24 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 			if let PageCompanion::ChangefeedRetention {
 				ns,
 				db,
-				watermark,
+				ns_name,
+				db_name,
+				fence,
 			} = &self.companion
 			{
-				// The retention that made this window stale is read inside every
-				// page transaction, so a policy extended before this read stops
-				// the delete here rather than deleting entries the new policy
-				// keeps. Reading the catalog here is also what arms the
-				// write-conflict check on a conflict-serializing backend, for a
-				// policy committed between this read and the commit below; on a
-				// last-writer-wins backend the window is only as fresh as this
-				// read.
+				// The fence of the retention that made this window stale is
+				// armed inside every page transaction, so a policy extended
+				// before this read stops the delete here rather than deleting
+				// entries the new policy keeps, and one committed between this
+				// read and the commit below rejects the page on a
+				// conflict-serializing backend; on a last-writer-wins backend
+				// the window is only as fresh as this read.
 				let covered = catch!(
 					txn,
-					crate::cf::gc::retention_still_reaches(&txn, *ns, *db, watermark).await
+					crate::cf::gc::retention_still_reaches(
+						&txn, ns_name, db_name, *ns, *db, *fence
+					)
+					.await
 				);
 				if !covered {
 					let _ = txn.cancel().await;
@@ -237,4 +247,65 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 			yield_now!();
 		}
 	}
+}
+
+/// Deletes the range of each of `targets` in committed pages, sharing `budget`
+/// across them, and reports whether the lease is still held.
+///
+/// Every target is granted a share of what the budget has left, across the
+/// targets still to spend from it, so each makes progress however many there
+/// are. A share is floored at one key rather than one page: the page size caps
+/// a transaction rather than setting a minimum, and flooring at a page would
+/// let the leading `budget / page` targets spend the whole budget and leave
+/// the rest unvisited.
+///
+/// What a target does not spend of its share stays in the budget, and the
+/// targets that spent the whole of theirs with keys still in range are visited
+/// again with what is left, round after round. A pass therefore ends with keys
+/// in range only once its budget is spent, so a caller reads an unspent budget
+/// as every range emptied or withdrawn. A target is revisited only after
+/// spending at least one key, so the rounds end.
+///
+/// `budget` is decremented by what was deleted. A lost lease ends the pass at
+/// once and is reported as `false`: the delete's own outcome is the only fresh
+/// answer to it (see [`PagedOutcome::LeaseLost`]).
+pub(crate) async fn delete_sharing_budget<T, R>(
+	ds: &Datastore,
+	lh: &LeaseHandler,
+	canceller: &CancellationToken,
+	budget: &mut u64,
+	targets: Vec<T>,
+	delete: impl for<'t> Fn(&'t T) -> PagedDelete<'t, R>,
+) -> Result<bool>
+where
+	R: AnyRange + Resumable + Clone,
+{
+	let mut pending = targets;
+	while !pending.is_empty() && *budget > 0 {
+		let mut remaining = pending.len() as u64;
+		let mut unfinished = Vec::new();
+		for target in pending {
+			Datastore::ensure_not_cancelled(canceller)?;
+			// This target's slice of what the budget has left, across the
+			// targets still to spend from it, capped at the budget so the tail
+			// of a round hands out only what remains.
+			let share = (*budget / remaining.max(1)).max(1).min(*budget);
+			remaining = remaining.saturating_sub(1);
+			let mut left = share;
+			let outcome = delete(&target).run(ds, lh, canceller, &mut left).await?;
+			// Charge what the target deleted, not what it was offered.
+			*budget = budget.saturating_sub(share.saturating_sub(left));
+			match outcome {
+				PagedOutcome::LeaseLost => return Ok(false),
+				PagedOutcome::Incomplete => unfinished.push(target),
+				PagedOutcome::Complete | PagedOutcome::Cancelled => {}
+			}
+			if *budget == 0 {
+				return Ok(true);
+			}
+			yield_now!();
+		}
+		pending = unfinished;
+	}
+	Ok(true)
 }

@@ -402,6 +402,39 @@ pub(crate) async fn run(ds: &Datastore, is_new: bool) -> Result<()> {
 	run_with(ds, MIGRATIONS, RECHECKS, &StorageVersion::current(), is_new).await
 }
 
+/// Whether the datastore owes this build nothing: stamped at its version, with
+/// every migration the build ships in its ledger and none the build lacks.
+///
+/// True exactly when [`run`] would find nothing to apply and nothing to stamp.
+/// Read without a lease, so a datastore another node is migrating reads as
+/// unsettled until that node stamps it, which is the answer a caller deferring
+/// work until the migrations have run wants.
+pub(crate) async fn settled(ds: &Datastore) -> Result<bool> {
+	settled_with(ds, MIGRATIONS, &StorageVersion::current()).await
+}
+
+/// [`settled`] against an explicit registry and running version.
+async fn settled_with(
+	ds: &Datastore,
+	registry: &[Migration],
+	current: &StorageVersion,
+) -> Result<bool> {
+	if ds.storage_version().await?.as_ref() != Some(current) {
+		return Ok(false);
+	}
+	// A migration in the ledger that this build lacks is what `check_downgrade`
+	// refuses the start over; the datastore is not this build's to run.
+	let unknown = ds
+		.applied_migration_ids()
+		.await?
+		.iter()
+		.any(|(id, _)| !registry.iter().any(|m| m.id == *id));
+	if unknown {
+		return Ok(false);
+	}
+	Ok(unapplied(ds, &candidate_ids(registry, current)).await?.is_empty())
+}
+
 /// [`run`] against an explicit registry and running version, so the driver can
 /// be exercised without depending on what the shipped registry happens to
 /// contain or on what version the tree is currently at.
@@ -726,13 +759,7 @@ async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Resul
 /// Every handle names the same stored lease, so a migration that runs long can
 /// renew it from a handle of its own between batches.
 pub(super) fn lease(ds: &Datastore) -> Result<LeaseHandler> {
-	LeaseHandler::new(
-		ds.sequences().clone(),
-		ds.id(),
-		ds.transaction_factory().clone(),
-		TaskLeaseType::DataMigration,
-		LEASE_DURATION,
-	)
+	ds.lease_handler(TaskLeaseType::DataMigration, LEASE_DURATION, None)
 }
 
 /// The stored migration lease, if any.

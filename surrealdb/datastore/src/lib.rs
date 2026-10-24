@@ -53,6 +53,7 @@ pub(crate) mod obs {
 pub mod absence;
 pub mod cache;
 pub mod catalog_reads;
+pub mod clock;
 pub mod close;
 pub mod config;
 pub mod creations;

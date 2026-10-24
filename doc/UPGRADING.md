@@ -1026,6 +1026,13 @@ included, as before.
   range open at its upper end (`WHERE time > $since`) reads the table rather
   than the index. Rows are unchanged. `REBUILD INDEX`, once every node runs this
   release, restores the index plans for a field that never held an array.
+- A `LIVE` query registered on a node running this release is stored in a
+  form a node on an earlier release cannot read, and such a node reads every
+  subscription on a table before it writes to the table. During a rolling
+  upgrade, writes to a table with such a subscription fail on the nodes not
+  yet upgraded. Under the opt-in router engine, the events an upgraded node
+  captures are likewise unreadable by an earlier node's router, which then
+  delivers nothing to that node's subscriptions. See below.
 - A pre-filtered HNSW KNN search no longer widens its `ef`: it reads the new
   `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, where it read
   `SURREAL_KNN_PREFILTER_EF_BOOST` (`4`), which now applies to DiskANN alone.
@@ -1946,6 +1953,55 @@ recording them, so an index rebuilt while such a node is still writing can
 plan a column that holds an array as one that never has, and order or bound it
 by element. For a KNN query with a selective range condition on an index not
 yet rebuilt, a larger `ef` recovers recall at some cost.
+
+### Live queries in a mixed-version cluster
+
+A subscription row, which `LIVE` writes and the write path reads to notify the
+subscribers of a table, now records the datastore watermark the registering
+transaction observed (revision 3 of the stored definition; a row written by an
+earlier release reads as zero). A node on an earlier release reads the row at
+revision 2 and refuses one at revision 3, and it reads every subscription on a
+table whenever it writes to that table, so one such row makes every write to
+the table fail on that node with a decoding error.
+
+Under the router engine (`live_query_engine=router` in the datastore
+configuration; the default engine is unaffected), the entry an upgraded node
+captures for a transaction's changes to a table likewise moves to revision 2,
+to record the subscriptions the transaction registered among them. A router on
+an earlier release fails its pass on an entry it cannot read rather than
+passing it over, and keeps failing while any such entry is retained
+(`live_query_retention`, one hour by default), so it delivers nothing to the
+subscriptions its node holds from the first such entry on. Once that node runs
+this release, its router starts from the present, so the events captured in
+the meantime are never delivered to those subscriptions.
+
+What still works during a mixed-version rollout:
+
+- Subscriptions registered before the rollout, on nodes of either version:
+  their rows stay at revision 2, nothing rewrites them, and both versions read
+  them.
+- Writes to a table with no subscription registered on an upgraded node.
+- Under the default engine, the notifications an upgraded node sends for its
+  own writes, to subscriptions held by nodes of either version.
+
+What doesn't:
+
+- **A `LIVE` registered on an upgraded node fails every write to its table on
+  every node still on an earlier release**, until those nodes are upgraded or
+  the subscription is killed.
+- **Under the router engine, the subscriptions held by a node on an earlier
+  release receive nothing from its router** once an upgraded node has
+  captured an entry, and the events of that window are lost to them.
+- Rolling a node back to an earlier release while a subscription registered
+  on this release exists, which fails its writes the same way.
+
+**What to do**: register no `LIVE` queries on upgraded nodes until every node
+runs this release: keep live-query clients on the nodes not yet upgraded, or
+have them connect once the rollout is complete. A subscription registered on
+an upgraded node during the rollout is removed by `KILL`, or by closing the
+connection that registered it. Under the router engine, upgrade every node
+before live-query clients connect to the upgraded ones, or accept that the
+subscriptions held by the remaining nodes miss the events of the rollout.
 
 ### Why an element definition of a keyword-named field could not be reached
 

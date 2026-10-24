@@ -294,7 +294,7 @@ fn dml_inner(
 		| StoreInstr::SessionNs {
 			..
 		}
-		| StoreInstr::Increment {
+		| StoreInstr::BumpChangefeedFence {
 			..
 		}
 		| StoreInstr::ClearDatastoreCache
@@ -770,24 +770,13 @@ async fn step_inner(
 				.ok_or_else(|| ControlFlow::Err(anyhow::Error::new(crate::exec::Error::NsEmpty)))?;
 			write(regs, *dst, Value::String(ns.as_ref().into()));
 		}
-		StoreInstr::Increment {
-			route,
-			key,
+		StoreInstr::BumpChangefeedFence {
+			ns,
+			db,
 		} => {
-			let key = codec::key::encode_id(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
-			let txn = ctx.txn();
-			let current = match txn.get(key.clone().into(), None).await.map_err(ControlFlow::Err)? {
-				Some(bytes) => u64::from_be_bytes(
-					bytes
-						.as_slice()
-						.try_into()
-						.map_err(|_| anyhow!("a counter that is not 8 bytes"))?,
-				),
-				None => 0,
-			};
-			txn.set(key.into(), current.wrapping_add(1).to_be_bytes().to_vec())
-				.await
-				.map_err(ControlFlow::Err)?;
+			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
+			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
+			ctx.txn().bump_changefeed_retention_fence(ns, db).await.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::SessionDb {
 			dst,

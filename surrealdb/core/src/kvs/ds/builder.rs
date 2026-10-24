@@ -611,13 +611,27 @@ impl Builder {
 
 		let datastore = Datastore {
 			shutdown,
-			maintenance: parking_lot::Mutex::new(None),
+			maintenance: parking_lot::Mutex::new(super::MaintenanceDriver::Undriven),
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
+			host_maintenance: tokio::sync::Mutex::new(None),
+			resume_walk: parking_lot::Mutex::new(None),
+			rpc_session_cursor: parking_lot::Mutex::new(None),
+			node_expire_cursor: parking_lot::Mutex::new(None),
+			node_cleanup_cursor: parking_lot::Mutex::new(None),
+			reclaim_cursor: parking_lot::Mutex::new(None),
+			changefeed_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
+			live_event_sweep: parking_lot::Mutex::new(crate::cf::gc::ChangefeedSweep::default()),
+			compaction_cursor: parking_lot::Mutex::new(super::CompactionCursor::default()),
+			fold_cursor: parking_lot::Mutex::new(super::FoldCursor::default()),
+			adoption_rotation: parking_lot::Mutex::new(None),
+			event_laps: parking_lot::Mutex::new(std::collections::HashMap::new()),
 			engine_options: options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			migrated: tokio::sync::watch::channel(false).0,
 			feature_level_settled: std::sync::atomic::AtomicBool::new(false),
 			id,
+			running_events: crate::doc::RunningEvents::default(),
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,
 			dynamic_configuration,
@@ -643,6 +657,7 @@ impl Builder {
 			),
 			index_builder: IndexBuilder::new(tf.clone()),
 			compaction_swept_at: parking_lot::Mutex::new(None),
+			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),
@@ -754,13 +769,26 @@ impl Builder {
 			// set below.
 			let (_, is_new) = datastore.settle_storage_version().await?;
 			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
+			// Every job but the heartbeat waits for the migrations `check_version`
+			// runs, so none reads persisted data while a migration rewrites it.
+			// A datastore this process created has nothing to migrate, and one
+			// already stamped at this build with every migration in its ledger
+			// has nothing left, so for those the wait is released here and the
+			// tasks run without `check_version`; any other datastore holds every
+			// job but the heartbeat until that call has run the migrations.
+			if is_new || crate::kvs::migration::settled(&datastore).await? {
+				datastore.mark_migrated();
+			}
 			// A read-only store runs the membership refresh alone: every other task
 			// writes.
 			datastore.check_heartbeat_interval(options.node_membership_refresh_interval).await?;
 			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
 			// This is the only writer, and it runs before the datastore is
-			// handed to anyone.
-			*datastore.maintenance.lock() = Some(tasks);
+			// handed to anyone. It records tasks only where the feature started
+			// some: `maintenance` defaults to the `maintenance-tasks` feature,
+			// so a build without it never reaches here and leaves the datastore
+			// undriven, for a host to drive through `run_maintenance_slice`.
+			*datastore.maintenance.lock() = super::MaintenanceDriver::Tasks(tasks);
 		}
 		Ok(datastore)
 	}

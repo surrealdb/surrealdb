@@ -16,7 +16,8 @@ use web_time::Duration;
 use crate::dbs::{Capabilities, DurableSession, Session, durable_session};
 use crate::key::schema::{SessionKey, SessionPrefix};
 use crate::key::{AnyRange, KVKey};
-use crate::kvs::Datastore;
+use crate::kvs::tasks::Progress;
+use crate::kvs::{Datastore, NORMAL_BATCH_SIZE, RPC_SESSION_GC_SLICE_BATCHES};
 
 async fn mem_ds() -> Arc<Datastore> {
 	Datastore::builder()
@@ -302,4 +303,148 @@ async fn purge_deletes_only_expired_entries() {
 	assert!(durable_session_entry(&ds, live).await.is_some());
 	assert!(durable_session_entry(&ds, expired_a).await.is_none());
 	assert!(durable_session_entry(&ds, expired_b).await.is_none());
+}
+
+/// A purge scans a slice of pages per pass, and a pass that stops with pages
+/// still to scan keeps its position and reports more: the next pass continues
+/// after the page it stopped at rather than from the head, so an entry behind
+/// the position waits for the scan after this one, and the scan ends at the
+/// last page however many passes it spans.
+#[tokio::test]
+async fn purge_is_paged_across_passes() {
+	let ds = mem_ds().await;
+	let slice = RPC_SESSION_GC_SLICE_BATCHES as u64 * NORMAL_BATCH_SIZE as u64;
+	// A slice's worth of expired sessions and one more, in key order, then a
+	// live one sorting after them all.
+	for n in 0..=slice {
+		let id = Uuid::from_u128(1_000_000 + u128::from(n));
+		put_entry_with_expiry(&ds, id, &sample_session(id), 1).await;
+	}
+	let live = Uuid::from_u128(u128::MAX);
+	ds.persist_rpc_session(live, &sample_session(live), Duration::from_secs(3600)).await.unwrap();
+	assert_eq!(durable_session_count(&ds).await as u64, slice + 2);
+
+	let first = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(first.progress, Progress::More, "the pass stopped at its slice");
+	assert_eq!(first.items, slice, "having purged the slice's worth");
+	assert_eq!(durable_session_count(&ds).await as u64, 2);
+
+	// An expired session sorting before the position: behind the scan, so
+	// the pass that continues it leaves the entry for the next scan.
+	let behind = Uuid::from_u128(5);
+	put_entry_with_expiry(&ds, behind, &sample_session(behind), 1).await;
+
+	let second = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(second.progress, Progress::Done, "the scan reached its last page");
+	assert_eq!(second.items, 1, "the one expired session past the position");
+	assert!(durable_session_entry(&ds, behind).await.is_some(), "the one behind it waits");
+	assert!(durable_session_entry(&ds, live).await.is_some());
+
+	let third = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(third.progress, Progress::Done);
+	assert_eq!(third.items, 1, "the next scan starts from the head");
+	assert_eq!(durable_session_count(&ds).await, 1);
+	assert!(durable_session_entry(&ds, live).await.is_some());
+}
+
+/// A scan ends at the last session there was when it began: sessions created
+/// past that key while the scan runs are the next scan's, so a scan ends
+/// however fast sessions are created, and the sessions behind its position —
+/// scanned while live, expired since — are reached by the next scan rather
+/// than left behind a suffix that keeps growing.
+#[tokio::test]
+async fn purge_scan_ends_at_the_sessions_there_were_when_it_began() {
+	let ds = mem_ds().await;
+	let slice = RPC_SESSION_GC_SLICE_BATCHES as u64 * NORMAL_BATCH_SIZE as u64;
+	let page = u64::from(NORMAL_BATCH_SIZE);
+	for n in 0..=slice {
+		let id = Uuid::from_u128(1_000_000 + u128::from(n));
+		put_entry_with_expiry(&ds, id, &sample_session(id), 1).await;
+	}
+	let first = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(first.progress, Progress::More, "the scan stopped with one session past its slice");
+	assert_eq!(first.items, slice);
+
+	// More than a slice's worth of expired sessions, created past the end
+	// of the scan while it is stopped.
+	let created = slice + page;
+	for n in 0..created {
+		let id = Uuid::from_u128(2_000_000 + u128::from(n));
+		put_entry_with_expiry(&ds, id, &sample_session(id), 1).await;
+	}
+
+	let second = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(second.progress, Progress::Done, "the scan ends at the page that reaches its end");
+	assert_eq!(second.items, page, "having purged that page, and no more");
+	assert_eq!(durable_session_count(&ds).await as u64, created + 1 - page);
+
+	// The next scan begins at the head, over what was created.
+	let third = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(third.progress, Progress::More);
+	assert_eq!(third.items, slice);
+	let fourth = ds.purge_expired_rpc_sessions(&Duration::from_secs(60)).await.unwrap();
+	assert_eq!(fourth.progress, Progress::Done);
+	assert_eq!(durable_session_count(&ds).await, 0);
+}
+
+/// A purge that finds its lease passed to another node stops there, purging
+/// nothing further, and reports the lease elsewhere, so the former holder
+/// does not purge alongside the new one; its scan keeps its place for this
+/// node's next pass, which continues after it once the lease is back.
+#[tokio::test]
+async fn a_purge_that_finds_its_lease_taken_stops_and_keeps_its_place() {
+	use surrealdb_datastore::clock::{ManualClock, WallClock};
+	use surrealdb_observe::TaskLeaseState;
+
+	use crate::kvs::tasklease::TaskLeaseType;
+
+	// Without the datastore's own purge task, which would hold the lease.
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await
+		.unwrap();
+	let slice = RPC_SESSION_GC_SLICE_BATCHES as u64 * NORMAL_BATCH_SIZE as u64;
+	for n in 0..=slice {
+		let id = Uuid::from_u128(1_000_000 + u128::from(n));
+		put_entry_with_expiry(&ds, id, &sample_session(id), 1).await;
+	}
+	// Every handler reads one clock, which a lease lapses on when advanced
+	// past its duration.
+	let clock = Arc::new(ManualClock::new(chrono::Utc::now()));
+	let lease = |ds: &Datastore| {
+		ds.lease_handler(TaskLeaseType::RpcSessionCleanup, Duration::from_secs(60), None)
+			.unwrap()
+			.with_clock(Arc::clone(&clock) as Arc<dyn WallClock>)
+	};
+	let lapse = || clock.advance(chrono::Duration::seconds(61));
+
+	let first = ds.purge_rpc_session_slice(&lease(&ds)).await.unwrap();
+	assert_eq!(first.progress, Progress::More, "the scan stopped at its slice");
+	assert_eq!(first.items, slice);
+	// An expired session sorting before the scan's position.
+	let behind = Uuid::from_u128(5);
+	put_entry_with_expiry(&ds, behind, &sample_session(behind), 1).await;
+
+	// Another node takes the lapsed lease.
+	lapse();
+	let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+	assert!(lease(&other).has_lease().await.unwrap(), "the other node takes the lease");
+
+	// A handler's first check reads the lease rather than answering from its
+	// throttle, and finds it taken.
+	let second = ds.purge_rpc_session_slice(&lease(&ds)).await.unwrap();
+	assert_eq!(second.lease, TaskLeaseState::Elsewhere, "the pass reports the lease lost");
+	assert_eq!(second.progress, Progress::Done, "the next pass is the interval's");
+	assert_eq!(second.items, 0);
+	assert_eq!(durable_session_count(&ds).await, 2, "nothing is purged without the lease");
+
+	// Once the lease is back, the scan continues after its place: the one
+	// session past it is purged, and the one behind it waits.
+	lapse();
+	let third = ds.purge_rpc_session_slice(&lease(&ds)).await.unwrap();
+	assert_eq!(third.lease, TaskLeaseState::Held);
+	assert_eq!(third.items, 1, "the session past the place the scan kept");
+	assert!(durable_session_entry(&ds, behind).await.is_some(), "the one behind it waits");
 }

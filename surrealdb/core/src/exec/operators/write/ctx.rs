@@ -23,7 +23,7 @@ use crate::doc::{FieldEvalOrder, NsDbCtx, NsDbTbMutCtx};
 use crate::exec::ExecutionContext;
 use crate::expr::computed_deps::ComputedDeps;
 use crate::expr::{ControlFlow, ControlFlowExt};
-use crate::kvs::Transaction;
+use crate::kvs::{LiveQueryEngine, Transaction};
 use crate::val::TableName;
 
 /// Whether the statement's table must already exist.
@@ -233,6 +233,24 @@ impl RecordFormatSlot {
 	}
 }
 
+/// What a resolved [`WriteCtx`] reads of its table's live-query
+/// subscriptions.
+#[derive(Clone, Copy)]
+enum LiveReads {
+	/// Every subscription, each with its unit: an inline-engine write notifies
+	/// each of them on the write path.
+	All,
+	/// Only whether one exists, read from the committed subscription rows in
+	/// the write's snapshot with a limit-one key scan, so a subscription
+	/// another node registered counts and the cost is independent of how many
+	/// there are. A router-engine write needs no more: it captures its changes
+	/// when one exists, and the router notifies each subscription off the
+	/// write path.
+	Presence,
+	/// Nothing: a reader that reads the subscriptions itself.
+	None,
+}
+
 /// The indexes in `fields` of the definitions of places inside the `id` field
 /// (`id.name`, `id[0]`), in field order. A named record id component is a
 /// derived field rather than a place in `id`, so it is never among them.
@@ -275,10 +293,18 @@ pub(crate) struct WriteCtx {
 	pub(crate) views_observe: bool,
 	/// The indexes this write maintains.
 	pub(crate) indexes: Arc<[IndexDefinition]>,
-	/// The live-query subscriptions this write notifies.
+	/// The live-query subscriptions this write notifies. Empty under the
+	/// router engine, which notifies them off the write path, and for a
+	/// context resolved by [`Self::resolve_without_lives`], whose holder reads
+	/// them itself.
 	pub(crate) lives: Arc<[SubscriptionDefinition]>,
 	/// The VM's units of `lives`, one for each.
 	pub(crate) live_units: crate::exec::vm::live::LiveUnitList,
+	/// Whether a live-query subscription observes the records this write
+	/// changes, judged once, in this write's snapshot, when the context is
+	/// resolved; see [`LiveReads`]. Every record of the statement shares the
+	/// answer.
+	pub(crate) live_observed: bool,
 
 	/// The order the field clauses are applied in, so a clause that reads
 	/// another field of the same record sees the written value rather than the
@@ -356,6 +382,41 @@ impl WriteCtx {
 		table: &TableName,
 		existence: TableExistence,
 	) -> Result<Self, ControlFlow> {
+		let reads = match exec.ctx().config.datastore.live_query_engine {
+			LiveQueryEngine::Router => LiveReads::Presence,
+			LiveQueryEngine::Inline => LiveReads::All,
+			LiveQueryEngine::External => LiveReads::None,
+		};
+		Self::resolve_with(exec, table, existence, reads).await
+	}
+
+	/// [`Self::resolve`] for a caller outside a write statement that evaluates
+	/// every subscription's unit, such as [`crate::kvs::Datastore::live_notifications`].
+	pub(crate) async fn resolve_with_lives(
+		exec: &ExecutionContext,
+		table: &TableName,
+	) -> Result<Self, ControlFlow> {
+		Self::resolve_with(exec, table, TableExistence::Required, LiveReads::All).await
+	}
+
+	/// [`Self::resolve`] for a reader of the table's catalog that is not a
+	/// write: the table must exist, and the subscriptions are left unread —
+	/// `lives` and `live_units` are empty, and `live_observed` is `false` —
+	/// for a holder that reads them itself a page at a time, as the live-query
+	/// router's replay does.
+	pub(crate) async fn resolve_without_lives(
+		exec: &ExecutionContext,
+		table: &TableName,
+	) -> Result<Self, ControlFlow> {
+		Self::resolve_with(exec, table, TableExistence::Required, LiveReads::None).await
+	}
+
+	async fn resolve_with(
+		exec: &ExecutionContext,
+		table: &TableName,
+		existence: TableExistence,
+		reads: LiveReads,
+	) -> Result<Self, ControlFlow> {
 		let db_ctx = exec.database().context("a write requires a database context")?;
 		let parent = NsDbCtx {
 			ns: Arc::clone(&db_ctx.ns_ctx.ns),
@@ -399,9 +460,24 @@ impl WriteCtx {
 			.catalog_version(parent.ns.namespace_id, parent.db.database_id, table)
 			.await
 			.map_err(ControlFlow::Err)?;
-		let catalog = NsDbTbMutCtx::load(exec.ctx(), &parent, tb, table, version)
-			.await
-			.map_err(ControlFlow::Err)?;
+		let catalog = match reads {
+			LiveReads::All => NsDbTbMutCtx::load(exec.ctx(), &parent, tb, table, version).await,
+			LiveReads::Presence | LiveReads::None => {
+				NsDbTbMutCtx::load_without_lives(exec.ctx(), &parent, tb, table, version).await
+			}
+		}
+		.map_err(ControlFlow::Err)?;
+		let live_observed = match reads {
+			LiveReads::All => !catalog.lives.is_empty(),
+			LiveReads::Presence => {
+				#[cfg(test)]
+				test::PRESENCE_READS.with(|reads| reads.set(reads.get() + 1));
+				txn.table_has_live_query(parent.ns.namespace_id, parent.db.database_id, table)
+					.await
+					.map_err(ControlFlow::Err)?
+			}
+			LiveReads::None => false,
+		};
 		let key = catalog
 			.id_field_idx
 			.and_then(|index| catalog.fields.get(index))
@@ -431,6 +507,7 @@ impl WriteCtx {
 			indexes: catalog.indexes,
 			lives: catalog.lives,
 			live_units: catalog.live_units,
+			live_observed,
 			field_order: catalog.field_order,
 			computed_deps: catalog.computed_deps,
 			id_field: catalog.id_field_idx,
@@ -463,6 +540,7 @@ impl WriteCtx {
 			indexes: Arc::clone(&self.indexes),
 			lives: Arc::clone(&self.lives),
 			live_units: Arc::clone(&self.live_units),
+			live_observed: self.live_observed,
 			field_order: Arc::clone(&self.field_order),
 			computed_deps: self.computed_deps.clone(),
 			id_field: self.id_field,
@@ -503,5 +581,119 @@ impl WriteCtx {
 				"a write stage asked for its statement scope, which is not set"
 			)))
 		})
+	}
+}
+
+#[cfg(test)]
+pub(crate) mod test {
+	thread_local! {
+		/// Subscription-presence reads resolution made, for tests that check a
+		/// statement makes one rather than one per record.
+		pub(crate) static PRESENCE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use std::cell::Cell;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::TransactionType::Read;
+
+	use super::{TableExistence, WriteCtx};
+	use crate::catalog::providers::DatabaseProvider;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::key::schema::LiveEventsPrefix;
+	use crate::val::TableName;
+
+	/// A database holding table `doc` with ten records, under `engine`, with
+	/// a subscription to `doc` when `subscribed`.
+	async fn database(engine: &str, subscribed: bool) -> TestDb {
+		let setup: String = std::iter::once("DEFINE TABLE doc;".to_string())
+			.chain((1..=10).map(|i| format!("CREATE doc:{i};")))
+			.collect();
+		let config = ConfigMap::empty().with_key_value("live_query_engine", engine);
+		let db = TestDb::new_with_config(&setup, config).await;
+		if subscribed {
+			db.run_as(&TestDb::owner().with_rt(true), "LIVE SELECT * FROM doc").await;
+		}
+		db
+	}
+
+	/// The context a write to `doc` resolves.
+	async fn resolved(db: &TestDb) -> WriteCtx {
+		let exec = db.exec_ctx().await;
+		let ctx = match WriteCtx::resolve(&exec, &TableName::from("doc"), TableExistence::Required)
+			.await
+		{
+			Ok(ctx) => ctx,
+			Err(_) => panic!("the table `doc` resolves"),
+		};
+		exec.txn().cancel().await.expect("the read transaction ends");
+		ctx
+	}
+
+	/// The live-query events the database holds.
+	async fn captured(db: &TestDb) -> usize {
+		let txn = db.datastore().transaction(Read).await.expect("a read transaction");
+		let database = txn
+			.get_db_by_name("test", "test", None)
+			.await
+			.expect("the database reads")
+			.expect("the database exists");
+		let range = LiveEventsPrefix {
+			ns: database.namespace_id,
+			db: database.database_id,
+		}
+		.range()
+		.expect("the range encodes");
+		let n = txn.keys_raw(range, 1000, 0, None).await.expect("the events read").len();
+		txn.cancel().await.expect("the read transaction ends");
+		n
+	}
+
+	/// A router-engine write reads whether its table has a subscription and
+	/// none of the subscriptions themselves: the router notifies them off the
+	/// write path, so the write's setup does not grow with their number.
+	#[tokio::test]
+	async fn a_router_write_reads_only_whether_a_subscription_exists() {
+		let ctx = resolved(&database("router", true).await).await;
+		assert!(ctx.live_observed, "the subscription observes the write");
+		assert!(ctx.lives.is_empty(), "no subscription is read");
+		assert!(ctx.live_units.is_empty(), "no subscription's unit is lowered");
+
+		let ctx = resolved(&database("router", false).await).await;
+		assert!(!ctx.live_observed, "nothing observes the write");
+	}
+
+	/// An inline-engine write reads every subscription, which it notifies.
+	#[tokio::test]
+	async fn an_inline_write_reads_every_subscription() {
+		let ctx = resolved(&database("inline", true).await).await;
+		assert!(ctx.live_observed, "the subscription observes the write");
+		assert_eq!(ctx.lives.len(), 1, "the subscription is read");
+
+		let ctx = resolved(&database("inline", false).await).await;
+		assert!(!ctx.live_observed, "nothing observes the write");
+		assert!(ctx.lives.is_empty());
+	}
+
+	/// A router-engine statement that changes many records reads whether its
+	/// table has a subscription once, not once per record, and still captures
+	/// the change.
+	#[tokio::test]
+	async fn a_router_statement_reads_the_subscription_gate_once() {
+		let db = database("router", true).await;
+		let events = captured(&db).await;
+		let reads = super::test::PRESENCE_READS.with(Cell::get);
+
+		db.run("UPDATE doc SET seen = true RETURN NONE").await;
+
+		assert_eq!(
+			super::test::PRESENCE_READS.with(Cell::get) - reads,
+			1,
+			"ten records share one read of the gate"
+		);
+		assert!(captured(&db).await > events, "the change is captured");
 	}
 }

@@ -2,7 +2,7 @@
 
 use super::events::{
 	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
+	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
 };
 
 /// Hook surface for receiving structured observability events from the core
@@ -64,6 +64,14 @@ pub trait ExecutionObserver: Send + Sync + 'static {
 	/// the same request.
 	fn on_http_request_complete(&self, _event: &HttpRequestEvent) {}
 
+	/// Called once per pass of a background maintenance job — a queue drain,
+	/// a garbage-collection sweep, a cluster-membership scan. Carries the
+	/// job's bounded name, the pass outcome and duration, how much it did,
+	/// how far behind its queue was, and its lease standing, so observers can
+	/// maintain `surrealdb.task.*` throughput and lag instruments. The event
+	/// has no tenant `ctx` — passes run below the session layer.
+	fn on_task_pass(&self, _event: &TaskPassEvent) {}
+
 	/// Returns `true` when the observer is a no-op shell that ignores
 	/// every event. The only implementation that should override this
 	/// is [`NoopObserver`]; downstream emit sites use it to short-circuit
@@ -111,8 +119,9 @@ mod tests {
 		NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters, QueryEvent, QueryEventCtx,
 		QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
 		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementEvent, StatementEventCtx,
-		StatementEventSafe, StatementType, TransactionEvent, TransactionEventCtx,
-		TransactionEventSafe, TransactionMetricsSnapshot,
+		StatementEventSafe, StatementType, TaskLeaseState, TaskPassEvent, TaskPassEventCtx,
+		TaskPassEventSafe, TransactionEvent, TransactionEventCtx, TransactionEventSafe,
+		TransactionMetricsSnapshot,
 	};
 	use super::*;
 
@@ -221,6 +230,18 @@ mod tests {
 				error_class: None,
 			},
 			ctx: HttpRequestEventCtx::default(),
+		});
+		obs.on_task_pass(&TaskPassEvent {
+			safe: TaskPassEventSafe {
+				job: "event_processing",
+				outcome: Outcome::Success,
+				duration: Duration::from_millis(6),
+				items: 12,
+				oldest_age: Some(Duration::from_millis(40)),
+				lease: TaskLeaseState::NotLeased,
+				backlog: false,
+			},
+			ctx: TaskPassEventCtx::default(),
 		});
 		// Default answer for `needs_statement_text` is critical: enabling it on a
 		// community build would cause the executor to populate `StatementEventCtx`

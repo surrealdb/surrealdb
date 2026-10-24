@@ -339,10 +339,6 @@ fn test_parse_subqueries() {
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 	let beyond_a_double = format!("0x{}", "F".repeat(300));
 	for literal in [
@@ -362,21 +358,19 @@ fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 		("0o777777777777777777777", i64::MAX),
 		("0b0111111111111111111111111111111111111111111111111111111111111111", i64::MAX),
 	] {
-		match parse_expr(literal).expect(literal) {
-			Expr::Literal {
-				lit: Literal::Integer(parsed),
-				..
-			} => assert_eq!(parsed, value, "{literal}"),
-			other => panic!("{literal}: expected an integer, got {other:?}"),
-		}
+		let expr = parse_expr(literal).expect(literal);
+		let Expr::Literal {
+			lit: Literal::Integer(parsed),
+			..
+		} = expr
+		else {
+			panic!("{literal}: expected an integer, got {expr:?}")
+		};
+		assert_eq!(parsed, value, "{literal}");
 	}
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
 	for literal in [
 		"9223372036854775808",
@@ -387,13 +381,15 @@ fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
 		"000000000000000000009223372036854775808",
 	] {
 		let expected = literal.replace('_', "").parse::<f64>().expect(literal);
-		match parse_expr(literal).expect(literal) {
-			Expr::Literal {
-				lit: Literal::Float(parsed),
-				..
-			} => assert_eq!(parsed, expected, "{literal}"),
-			other => panic!("{literal}: expected a float, got {other:?}"),
-		}
+		let expr = parse_expr(literal).expect(literal);
+		let Expr::Literal {
+			lit: Literal::Float(parsed),
+			..
+		} = expr
+		else {
+			panic!("{literal}: expected a float, got {expr:?}")
+		};
+		assert_eq!(parsed, expected, "{literal}");
 	}
 	let beyond_a_double = "9".repeat(400);
 	let err = parse_expr(&beyond_a_double).expect_err("a literal beyond a double has no value");
@@ -401,10 +397,6 @@ fn test_a_decimal_integer_literal_that_does_not_fit_64_bits_is_a_float() {
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 	for sql in [
 		"-9223372036854775808",
@@ -414,21 +406,19 @@ fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 		"-9_223_372_036_854_775_808",
 		"-09223372036854775808",
 	] {
-		match parse_expr(sql).expect(sql) {
-			Expr::Literal {
-				lit: Literal::Integer(parsed),
-				..
-			} => assert_eq!(parsed, i64::MIN, "{sql}"),
-			other => panic!("{sql}: expected the int8 minimum, got {other:?}"),
-		}
+		let expr = parse_expr(sql).expect(sql);
+		let Expr::Literal {
+			lit: Literal::Integer(parsed),
+			..
+		} = expr
+		else {
+			panic!("{sql}: expected the int8 minimum, got {expr:?}")
+		};
+		assert_eq!(parsed, i64::MIN, "{sql}");
 	}
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 	for sql in [
 		"-9223372036854775809",
@@ -457,27 +447,25 @@ fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 			Err(err) => assert!(sql.starts_with("-0x") && err.to_string().contains("overflow")),
 		}
 	}
-	match parse_expr("- -9223372036854775808").expect("a negated int8 minimum") {
-		Expr::UnaryOp {
-			op: UnaryOperator::Minus,
-			expr,
+	let negation = parse_expr("- -9223372036854775808").expect("a negated int8 minimum");
+	let Expr::UnaryOp {
+		op: UnaryOperator::Minus,
+		expr,
+		..
+	} = &negation
+	else {
+		panic!("expected a negation of the int8 minimum, got {negation:?}")
+	};
+	assert!(matches!(
+		**expr,
+		Expr::Literal {
+			lit: Literal::Integer(i64::MIN),
 			..
-		} => assert!(matches!(
-			*expr,
-			Expr::Literal {
-				lit: Literal::Integer(i64::MIN),
-				..
-			}
-		)),
-		other => panic!("expected a negation of the int8 minimum, got {other:?}"),
-	}
+		}
+	));
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 	for (sql, operator) in [
 		("x = -9223372036854775808", BinaryOperator::Eq),
@@ -489,76 +477,74 @@ fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 		("x - -9223372036854775808", BinaryOperator::Sub),
 		("x * -9223372036854775808", BinaryOperator::Mul),
 	] {
-		match parse_expr(sql).expect(sql) {
-			Expr::BinaryOp {
-				op,
-				right,
-				..
-			} => {
-				assert_eq!(op, operator, "{sql}");
-				assert!(
-					matches!(
-						*right,
-						Expr::Literal {
-							lit: Literal::Integer(i64::MIN),
-							..
-						}
-					),
-					"{sql}: {right:?}"
-				);
-			}
-			other => panic!("{sql}: expected a binary operator, got {other:?}"),
-		}
-	}
-	match parse_expr("-9223372036854775808 / -1").expect("a quotient") {
-		Expr::BinaryOp {
-			left,
-			op: BinaryOperator::Div,
+		let expr = parse_expr(sql).expect(sql);
+		let Expr::BinaryOp {
+			op,
+			right,
 			..
-		} => assert!(matches!(
-			*left,
-			Expr::Literal {
-				lit: Literal::Integer(i64::MIN),
-				..
-			}
-		)),
-		other => panic!("expected a quotient, got {other:?}"),
+		} = expr
+		else {
+			panic!("{sql}: expected a binary operator, got {expr:?}")
+		};
+		assert_eq!(op, operator, "{sql}");
+		assert!(
+			matches!(
+				*right,
+				Expr::Literal {
+					lit: Literal::Integer(i64::MIN),
+					..
+				}
+			),
+			"{sql}: {right:?}"
+		);
 	}
+	let quotient = parse_expr("-9223372036854775808 / -1").expect("a quotient");
+	let Expr::BinaryOp {
+		left,
+		op: BinaryOperator::Div,
+		..
+	} = &quotient
+	else {
+		panic!("expected a quotient, got {quotient:?}")
+	};
+	assert!(matches!(
+		**left,
+		Expr::Literal {
+			lit: Literal::Integer(i64::MIN),
+			..
+		}
+	));
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_json_operator_followed_by_a_negative_integer_is_one_operator_and_a_negation() {
 	for (sql, operator) in [
 		("data->>-1", BinaryOperator::LongArrow),
 		("data->-1", BinaryOperator::Arrow),
 		("data ->> -1", BinaryOperator::LongArrow),
 	] {
-		match parse_expr(sql).expect(sql) {
-			Expr::BinaryOp {
-				op,
-				right,
-				..
-			} => {
-				assert_eq!(op, operator, "{sql}");
-				assert!(
-					matches!(
-						*right,
-						Expr::UnaryOp {
-							op: UnaryOperator::Minus,
-							..
-						} | Expr::Literal {
-							lit: Literal::Integer(-1),
-							..
-						}
-					),
-					"{sql}: {right:?}"
-				);
-			}
-			other => panic!("{sql}: expected a binary operator, got {other:?}"),
-		}
+		let expr = parse_expr(sql).expect(sql);
+		let Expr::BinaryOp {
+			op,
+			right,
+			..
+		} = expr
+		else {
+			panic!("{sql}: expected a binary operator, got {expr:?}")
+		};
+		assert_eq!(op, operator, "{sql}");
+		assert!(
+			matches!(
+				*right,
+				Expr::UnaryOp {
+					op: UnaryOperator::Minus,
+					..
+				} | Expr::Literal {
+					lit: Literal::Integer(-1),
+					..
+				}
+			),
+			"{sql}: {right:?}"
+		);
 	}
 }

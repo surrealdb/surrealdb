@@ -327,7 +327,7 @@ enum Admission {
 /// Whether a failure to decode a catalog entry is a refusal because a newer
 /// release wrote it ([`EntryError::NeedsRelease`]), found anywhere in the
 /// failure's source chain.
-pub(crate) fn refused_by_release(err: &anyhow::Error) -> bool {
+pub fn refused_by_release(err: &anyhow::Error) -> bool {
 	err.chain()
 		.any(|cause| matches!(EntryError::of_cause(cause), Some(EntryError::NeedsRelease { .. })))
 }
@@ -2815,6 +2815,7 @@ impl Transaction {
 		self.run_commit_actions().await;
 		if self.trigger_async_event.load(Ordering::Relaxed) {
 			// Notify after commit so queued events are visible to workers.
+			self.triggers.async_event_queued();
 			self.triggers.async_event.notify_one();
 		}
 		if self.trigger_index_compaction.load(Ordering::Relaxed) {
@@ -3824,9 +3825,81 @@ impl Transaction {
 		self.put_tb(ns, db, tb).await
 	}
 
+	/// [`Self::replace_tb`] for a transaction that addresses the table by id
+	/// alone: the same locked read of the definition key, and the same write,
+	/// without the names of the namespace and database. The write is keyed
+	/// by id; the names only cache the definition for a later read by name
+	/// in this transaction, so a transaction that reads it by name before
+	/// this write keeps the definition it read. A caller that reads by id,
+	/// as a background fold does, has no such read, and resolving the names
+	/// from the ids would cost it a listing of the catalog.
+	pub async fn replace_tb_by_id(&self, tb: &TableDefinition) -> Result<Arc<TableDefinition>> {
+		let key = TableKey {
+			ns: tb.namespace_id,
+			db: tb.database_id,
+			tb: Cow::Borrowed(&tb.name),
+		};
+		let _ = self.getu_key(&key).await?;
+		self.put_tb_keyed(None, tb).await
+	}
+
+	/// Writes `tb`'s definition under its ids, bumps the table's catalog
+	/// version and caches the definition in this transaction under its ids,
+	/// and under `names`, the namespace and database names, when they are
+	/// given.
+	async fn put_tb_keyed(
+		&self,
+		names: Option<(&str, &str)>,
+		tb: &TableDefinition,
+	) -> Result<Arc<TableDefinition>> {
+		let stored = tb.to_stored();
+		let tb_name = tb.name.clone();
+		let key = TableKey {
+			ns: tb.namespace_id,
+			db: tb.database_id,
+			tb: Cow::Borrowed(&tb_name),
+		};
+		match self.set_key(&key, &stored).await {
+			Ok(_) => {}
+			Err(e) => {
+				if matches!(storage_error(&e), Some(surrealdb_kvs::Error::TransactionReadonly)) {
+					return Err(CatalogError::TbNotFound {
+						name: tb_name,
+					}
+					.into());
+				}
+				return Err(e);
+			}
+		}
+
+		self.bump_catalog_version(tb.namespace_id, tb.database_id, &tb_name).await?;
+
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(&list_key);
+
+		// Populate cache
+		let cached_tb = Arc::new(tb.clone());
+		let cached_entry =
+			cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
+
+		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, tb.name.as_str());
+		self.cache.insert(qey, cached_entry.clone());
+
+		if let Some((ns, db)) = names {
+			let qey = cache::tx::Lookup::TbByName(ns, db, tb.name.as_str());
+			self.cache.insert(qey, cached_entry);
+		}
+
+		Ok(cached_tb)
+	}
+
 	/// Register this database's changefeed-retention fence for commit-time
 	/// conflict detection, so this transaction cannot commit if a retention
-	/// change lands first.
+	/// change lands first, and report the fence's value as armed: `None` while
+	/// no retention has ever been written under the database. The collector
+	/// compares the value with the one it discovered the retention under, since
+	/// every retention written in between has replaced it.
 	///
 	/// Read through [`Self::getu_key`] rather than written: the fence exists only
 	/// to give the changefeed collector and the statements that set a retention a
@@ -3840,22 +3913,30 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-	) -> Result<()> {
+	) -> Result<Option<u64>> {
 		let key = ChangefeedFenceKey {
 			ns,
 			db,
 		};
-		let _ = self.getu_key(&key).await?;
-		Ok(())
+		self.getu_key(&key).await
 	}
 
 	/// Bump this database's changefeed-retention fence, so a collection page that
-	/// armed against it cannot commit.
+	/// armed against it cannot commit, and so a page that discovered the
+	/// retention before this write can tell the write has landed.
 	///
-	/// Called by every path that writes a changefeed retention. The count carries
-	/// no meaning beyond changing, and over-bumping costs only a retried page, so
-	/// it is bumped whenever a written definition carries a retention rather than
-	/// only when one is extended.
+	/// Called by every path that writes a changefeed retention. The value
+	/// carries no meaning beyond differing from every value the fence has held:
+	/// it is a fresh random nonce, written without reading the fence, rather than
+	/// a count. Two retention writes counting from one snapshot would both write
+	/// the same next value, and on a backend that lets two blind writes of one
+	/// key both commit, a collector that discovered the retention under the
+	/// first could not tell the second had landed. A nonce differs from anything
+	/// a collector can have discovered under, whichever order the writes commit
+	/// in, and reading nothing, the write neither conflicts with nor waits on
+	/// another retention write. Over-bumping costs only a retried page, so the
+	/// fence is bumped whenever a written definition carries a retention rather
+	/// than only when one is extended.
 	pub async fn bump_changefeed_retention_fence(
 		&self,
 		ns: NamespaceId,
@@ -3865,8 +3946,7 @@ impl Transaction {
 			ns,
 			db,
 		};
-		let next = self.get_key(&key, None).await?.unwrap_or(0).wrapping_add(1);
-		self.set_key(&key, &next).await
+		self.set_key(&key, &rand::random::<u64>()).await
 	}
 
 	/// The identity of `tb`'s catalog entry as this transaction sees it, or
@@ -11193,6 +11273,7 @@ impl Transaction {
 	///
 	/// Independent of the changefeed: it always retains full before/after values
 	/// and is flushed to the `lqe` keyspace at commit (see [`Self::store_changes`]).
+	#[expect(clippy::too_many_arguments)]
 	pub fn live_event_buffer_record_change(
 		&self,
 		ns: NamespaceId,
@@ -11201,6 +11282,7 @@ impl Transaction {
 		id: &RecordId,
 		previous: Value,
 		current: Value,
+		captured: u128,
 	) {
 		self.live_events.get_or_init(LiveEventBuffer::new).buffer_record_change(
 			ns,
@@ -11209,7 +11291,25 @@ impl Transaction {
 			id.clone(),
 			previous,
 			current,
+			captured,
 		)
+	}
+
+	/// Notes that this transaction registered the live-query subscription `id`
+	/// on `tb` after the record changes it has buffered for the table so far,
+	/// so the router notifies it of the later ones alone, as the inline
+	/// engine does. A transaction with no change buffered for the table notes
+	/// nothing: no change of its precedes the subscription.
+	pub fn live_event_buffer_note_subscription(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: Uuid,
+	) {
+		if let Some(live_events) = self.live_events.get() {
+			live_events.note_registration(ns, db, tb, id);
+		}
 	}
 
 	/// complete_changes will complete the changefeed recording for the given
@@ -12918,47 +13018,7 @@ impl TableProvider for Transaction {
 		db: &'a str,
 		tb: &'a TableDefinition,
 	) -> BoxProviderFut<'a, Result<Arc<TableDefinition>>> {
-		Box::pin(async move {
-			let stored = tb.to_stored();
-			let tb_name = tb.name.clone();
-			let key = TableKey {
-				ns: tb.namespace_id,
-				db: tb.database_id,
-				tb: Cow::Borrowed(&tb_name),
-			};
-			match self.set_key(&key, &stored).await {
-				Ok(_) => {}
-				Err(e) => {
-					if matches!(storage_error(&e), Some(surrealdb_kvs::Error::TransactionReadonly))
-					{
-						return Err(CatalogError::TbNotFound {
-							name: tb_name,
-						}
-						.into());
-					}
-					return Err(e);
-				}
-			}
-
-			self.bump_catalog_version(tb.namespace_id, tb.database_id, &tb_name).await?;
-
-			// Invalidate the cached list of all tables for this database
-			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
-			self.cache.remove(&list_key);
-
-			// Populate cache
-			let cached_tb = Arc::new(tb.clone());
-			let cached_entry =
-				cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
-
-			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, tb.name.as_str());
-			self.cache.insert(qey, cached_entry.clone());
-
-			let qey = cache::tx::Lookup::TbByName(ns, db, tb.name.as_str());
-			self.cache.insert(qey, cached_entry);
-
-			Ok(cached_tb)
-		})
+		Box::pin(self.put_tb_keyed(Some((ns, db)), tb))
 	}
 
 	fn del_tb<'a>(

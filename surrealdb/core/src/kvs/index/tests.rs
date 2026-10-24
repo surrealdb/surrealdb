@@ -2771,7 +2771,7 @@ async fn take_a_held_build_over_on_node_b(
 	set_durable_build_state(&ds_a, &ikb, state).await?;
 	let adopted =
 		ds_b.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(adopted, 1, "`{statement}`: node B takes the lapsed build over");
+	assert_eq!(adopted.items, 1, "`{statement}`: node B takes the lapsed build over");
 	wait_for_durable_online(&ds_b, &ikb)
 		.await
 		.map_err(|err| anyhow::anyhow!("`{statement}`: node B's takeover: {err}"))?;
@@ -2916,7 +2916,7 @@ async fn rebuild_index_blocking_does_not_take_a_later_generation_for_its_own() -
 		let adopted = ds_b
 			.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
 			.await?;
-		assert_eq!(adopted, 1, "node B takes the lapsed build over");
+		assert_eq!(adopted.items, 1, "node B takes the lapsed build over");
 		timeout(Duration::from_secs(10), async {
 			while durable_build_state(&ds_b, &ikb).await?.phase != IndexBuildPhase::Error {
 				sleep(Duration::from_millis(20)).await;
@@ -5167,7 +5167,7 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed, 1, "scan should adopt the stalled build");
+	assert_eq!(resumed.items, 1, "scan should adopt the stalled build");
 
 	// The adopted build runs asynchronously; wait for it to reach `Online`.
 	let deadline = Instant::now() + Duration::from_secs(30);
@@ -5193,7 +5193,7 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed_again, 0, "healthy index must not be re-adopted");
+	assert_eq!(resumed_again.items, 0, "healthy index must not be re-adopted");
 
 	Ok(())
 }
@@ -9321,7 +9321,7 @@ async fn takeover_of_a_scan_without_barrier_proof(checkpointed: bool) -> Result<
 
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(resumed, 1, "the resume scan adopts the generation");
+	assert_eq!(resumed.items, 1, "the resume scan adopts the generation");
 	wait_for_index_ready(&ds, &session, "t", "ix").await?;
 	let (indexed, rows) = count_against_rows(&ds, &session).await?;
 	assert_eq!(
@@ -9876,7 +9876,7 @@ async fn resumed_format_rebuild_indexes_the_rest_in_the_old_layout() -> Result<(
 		let resumed = ds
 			.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
 			.await?;
-		assert_eq!(resumed, 1, "the resume scan adopts the stalled rebuild");
+		assert_eq!(resumed.items, 1, "the resume scan adopts the stalled rebuild");
 		wait_for_a_build_at_the_write_barrier(ds.id(), waited).await?;
 		open.cancel().await?;
 		wait_for_index_ready(&ds, &session, "t", "ft").await?;
@@ -9977,7 +9977,7 @@ async fn a_format_rebuild_joins_its_generation_adopted_by_the_resume_scan() -> R
 	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(resumed, 1, "the resume scan adopts the staged generation");
+	assert_eq!(resumed.items, 1, "the resume scan adopts the staged generation");
 	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
 
 	let ctx = ds.setup_ctx()?.freeze();
@@ -11826,13 +11826,15 @@ async fn a_rolled_back_build_of_an_uncommitted_definition_is_withdrawn() -> Resu
 /// stalled build through a builder of its own. Answers how many builds the
 /// scan carried on.
 #[cfg(feature = "kv-mem")]
-async fn lapse_and_run_the_resume_scan(ds: &Arc<Datastore>, ikb: &IndexKeyBase) -> Result<usize> {
+async fn lapse_and_run_the_resume_scan(ds: &Arc<Datastore>, ikb: &IndexKeyBase) -> Result<u64> {
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let mut lapsed = durable_build_state(ds, ikb).await?;
 	lapsed.updated_at = expired;
 	lapsed.owner_heartbeat_at = lapsed.owner_heartbeat_at.map(|_| expired);
 	set_durable_build_state(ds, ikb, lapsed).await?;
-	ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await
+	ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
+		.await
+		.map(|pass| pass.items)
 }
 
 /// An HNSW index stamped at format 0, published `Online` by a build at the
@@ -12665,7 +12667,7 @@ async fn a_rolled_back_build_stopped_by_the_memory_threshold_is_withdrawn() -> R
 	set_durable_build_state(&ds, &ikb, lapsed.clone()).await?;
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(resumed, 0, "the resume scan carried on the rolled-back build: {lapsed:?}");
+	assert_eq!(resumed.items, 0, "the resume scan carried on the rolled-back build: {lapsed:?}");
 	let state = durable_build_state(&ds, &ikb).await?;
 	assert_eq!(
 		(state.phase, state.report_status, state.owner),
@@ -15548,7 +15550,7 @@ async fn shutdown_error_does_not_poison_durable_build_state() -> Result<()> {
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed, 1, "the interrupted build should be adopted");
+	assert_eq!(resumed.items, 1, "the interrupted build should be adopted");
 	wait_for_index_ready(&ds, &session, "user", "test").await?;
 	Ok(())
 }
@@ -15605,7 +15607,7 @@ async fn shutdown_error_in_a_diskann_sink_batch_does_not_poison_durable_build_st
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed, 1, "the interrupted build should be adopted");
+	assert_eq!(resumed.items, 1, "the interrupted build should be adopted");
 	wait_for_index_ready(&ds, &session, "t", "dx").await?;
 	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WHERE vec <|2,40|> [1.0, 0.0]", 2)
 		.await
@@ -15748,7 +15750,7 @@ async fn memory_threshold_error_does_not_poison_durable_build_state() -> Result<
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed, 1, "the interrupted build should be adopted");
+	assert_eq!(resumed.items, 1, "the interrupted build should be adopted");
 	wait_for_index_ready(&ds, &session, "user", "test").await?;
 	Ok(())
 }
@@ -15830,7 +15832,7 @@ async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed, 1, "a pass must adopt at most one stalled build");
+	assert_eq!(resumed.items, 1, "a pass must adopt at most one stalled build");
 
 	// Wait until the adopted build is demonstrably mid-scan (it consumed an
 	// injected conflict), then verify a pass adopts nothing while it runs.
@@ -15849,7 +15851,7 @@ async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
 			tokio_util::sync::CancellationToken::new(),
 		)
 		.await?;
-	assert_eq!(resumed_while_running, 0, "no adoption while a local build is running");
+	assert_eq!(resumed_while_running.items, 0, "no adoption while a local build is running");
 
 	// Un-park the running build and let recovery converge: a later pass
 	// adopts the second build, and both indexes come back ready.
@@ -15876,6 +15878,98 @@ async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
 	}
 	assert_eq!(index_building_status(&ds, &session, "user", "test_email").await?, "ready");
 	assert_eq!(index_building_status(&ds, &session, "user", "test_name").await?, "ready");
+	Ok(())
+}
+
+/// A candidate the scan gave back to the walk is checked against the catalog
+/// as it stands before its takeover: an index marked for removal since the
+/// walk reached it is dropped, as the walk passes one it reaches so marked.
+///
+/// A candidate given back is reached again from the walk's record of it, a
+/// pass or more after the catalog was read, so what it names may have gone.
+/// An index pending removal keeps its stranded build state until the reaper
+/// clears it, and adopting that would build an index about to be cleared.
+#[tokio::test(flavor = "multi_thread")]
+async fn resume_scan_drops_a_retained_candidate_marked_for_removal() -> Result<()> {
+	use crate::kvs::tasks::Progress;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com', name = 'One' RETURN NONE;
+			DEFINE INDEX test_email ON user FIELDS email;
+			DEFINE INDEX test_name ON user FIELDS name;
+			",
+	)
+	.await?;
+
+	// Strand both indexes as expired `Building` generations.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let stranded_owner = Uuid::new_v4();
+	let mut indexes = Vec::new();
+	for index in ["test_email", "test_name"] {
+		let (ns, db, table, ix) = get_table_index(&ds, "user", index).await?;
+		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_prefix_key(&IdxRoot {
+			ns,
+			db,
+			tb: Cow::Borrowed(&table),
+			ix: ix.index_id,
+		})
+		.await?;
+		tx.set_key(
+			&ikb.new_bs_key(),
+			&IndexBuildState {
+				generation: 2,
+				phase: IndexBuildPhase::Building,
+				owner: Some(stranded_owner),
+				next_ticket: 0,
+				initial_complete: false,
+				updated_at: expired,
+				owner_heartbeat_at: Some(expired),
+				error: None,
+				report_status: Some(IndexBuildReportStatus::Indexing),
+				initial: Some(0),
+				updated: None,
+				pending: None,
+				initial_cursor: None,
+				basis: None,
+			},
+		)
+		.await?;
+		tx.commit().await?;
+		indexes.push((ns, db, table, ix.index_id, ikb));
+	}
+
+	// The first pass adopts the first index in catalog order and gives the
+	// second back to the walk for the next pass.
+	let scan = || ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new());
+	let first = scan().await?;
+	assert_eq!(first.items, 1, "a pass adopts one stalled build");
+	assert_eq!(first.progress, Progress::More, "the other candidate is kept for the next pass");
+	let (ns, db, table, ix, _) = &indexes[0];
+	let adopted = local_builder_for_key(&ds, *ns, *db, table, *ix)
+		.await?
+		.ok_or_else(|| anyhow::anyhow!("the adopted build should have a local builder"))?;
+	wait_for_finished_builder(&adopted).await?;
+	wait_for_index_ready(&ds, &session, "user", "test_email").await?;
+
+	// Before the next pass, the retained candidate's index is marked for
+	// removal; its stranded build state stays until the reaper clears it.
+	execute_all(&ds, &session, "ALTER INDEX test_name ON user PREPARE REMOVE").await?;
+	let (_, _, _, _, retained) = &indexes[1];
+	assert!(durable_build_state_exists(&ds, retained).await?);
+
+	// The next pass reaches the retained candidate first, and drops it.
+	let second = scan().await?;
+	assert_eq!(second.items, 0, "an index marked for removal is not adopted");
+	let state = durable_build_state(&ds, retained).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	assert_eq!(state.owner, Some(stranded_owner), "no builder took the stranded generation over");
 	Ok(())
 }
 
@@ -20486,7 +20580,7 @@ async fn the_resume_scan_clears_a_stranded_online_owner() -> Result<()> {
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
 
-	assert_eq!(resumed, 0, "an Online generation is cleared, not resumed");
+	assert_eq!(resumed.items, 0, "an Online generation is cleared, not resumed");
 	let state = durable_build_state(&ds, &ikb).await?;
 	assert_eq!(state.owner, None, "the scan cleared the lapsed owner: {state:?}");
 	assert_eq!(compaction_requests(&ds, &ikb).await?, requests + 1);
@@ -21747,13 +21841,13 @@ async fn a_running_build_defers_stalled_scans_but_not_a_stalled_closing() -> Res
 	let iy_ikb = strand(IndexBuildPhase::Building, iy.index_id).await?;
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(resumed, 0, "a stalled scan waits for the running build");
+	assert_eq!(resumed.items, 0, "a stalled scan waits for the running build");
 
 	let (_, _, _, ix) = get_table_index(&ds, "t", "ix").await?;
 	let ix_ikb = strand(IndexBuildPhase::Closing, ix.index_id).await?;
 	let resumed =
 		ds.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new()).await?;
-	assert_eq!(resumed, 1, "a stalled Closing build is adopted while another build runs");
+	assert_eq!(resumed.items, 1, "a stalled Closing build is adopted while another build runs");
 	timeout(Duration::from_secs(30), async {
 		while durable_build_state(&ds, &ix_ikb).await?.phase != IndexBuildPhase::Online {
 			sleep(Duration::from_millis(20)).await;

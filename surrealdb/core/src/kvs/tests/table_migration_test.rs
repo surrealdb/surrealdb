@@ -1093,3 +1093,121 @@ async fn a_table_made_schemaless_drops_its_check() {
 	run(&ds, "ALTER TABLE t SCHEMAFULL;").await;
 	assert_eq!(undeclared(&ds, "t").await, report(&ds, 0, false).await, "queued again");
 }
+
+/// A pass runs a bounded number of pages and keeps its place: a table whose rows outnumber a
+/// pass's pages is worked through over several passes, each continuing where the last stopped,
+/// and counted once, by the pass that finishes it.
+#[tokio::test]
+async fn a_pass_stops_at_its_pages_and_the_next_continues() {
+	use crate::kvs::tasks::Progress;
+
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE tb SCHEMAFULL;
+		 DEFINE FIELD f ON tb TYPE string;
+		 CREATE |tb:1..1000| SET f = '1';
+		 ALTER FIELD f ON tb TYPE int MIGRATE EXISTING ROWS AS to_int USING <int>$value FALLBACK 0;",
+	)
+	.await;
+	let interval = Duration::from_secs(60);
+
+	let first = Datastore::table_migration_with_pages(Arc::clone(&ds), interval, 2).await.unwrap();
+	assert_eq!(first.progress, Progress::More, "the pass stopped at its pages: {first:?}");
+	assert_ne!(stamp(&ds, "tb", 999).await, head(&ds, "tb").await, "the rows past it wait");
+
+	let mut items = first.items;
+	for _ in 0..64 {
+		let pass =
+			Datastore::table_migration_with_pages(Arc::clone(&ds), interval, 2).await.unwrap();
+		items += pass.items;
+		if pass.progress == Progress::Done {
+			break;
+		}
+	}
+	assert_eq!(items, 1, "the table is counted once");
+	assert_eq!(stamp(&ds, "tb", 1).await, head(&ds, "tb").await);
+	assert_eq!(stamp(&ds, "tb", 999).await, head(&ds, "tb").await);
+}
+
+/// The requests queued for `tb` in `test`/`test`, by the database's ids.
+async fn queued_requests(
+	ds: &Datastore,
+	(ns, db): (crate::catalog::NamespaceId, crate::catalog::DatabaseId),
+	tb: &str,
+) -> usize {
+	let txn = ds.transaction(Read).await.unwrap();
+	let requests = txn.tb_migration_requests(ns, db, &TableName::from(tb), u32::MAX).await.unwrap();
+	txn.cancel().await.unwrap();
+	requests.len()
+}
+
+/// A queue key names a table's database by id, so the job reads the catalog's lists for its
+/// names a page at a time, each page one of the pass's. A pass over a catalog larger than a
+/// page stops part-way through the lookup, and the next continues it rather than reading the
+/// lists again.
+#[tokio::test]
+async fn naming_a_table_s_database_spends_the_pass_s_pages() {
+	use crate::kvs::tasks::Progress;
+
+	let ds = ds().await;
+	// A page of namespaces sorting before `test`, which the lookup finds on the second page.
+	let mut sql = String::new();
+	for n in 0..crate::kvs::NORMAL_BATCH_SIZE {
+		sql.push_str(&format!("DEFINE NAMESPACE a{n:04};"));
+	}
+	run(&ds, &sql).await;
+	run(
+		&ds,
+		"DEFINE TABLE tb SCHEMAFULL;
+		 DEFINE FIELD f ON tb TYPE string;
+		 CREATE tb:1 SET f = '1';
+		 ALTER FIELD f ON tb TYPE int MIGRATE EXISTING ROWS AS to_int USING <int>$value FALLBACK 0;",
+	)
+	.await;
+	let ids = ids(&ds).await;
+	let interval = Duration::from_secs(60);
+	let queued = queued_requests(&ds, ids, "tb").await;
+	assert!(queued > 0);
+
+	// The queue's batch, and the namespace list's first page.
+	let first = Datastore::table_migration_with_pages(Arc::clone(&ds), interval, 2).await.unwrap();
+	assert_eq!(first.progress, Progress::More, "{first:?}");
+	assert_eq!(queued_requests(&ds, ids, "tb").await, queued, "the table's work has not begun");
+	// The namespace list's second page, which holds `test`, and the database list's page.
+	let second = Datastore::table_migration_with_pages(Arc::clone(&ds), interval, 2).await.unwrap();
+	assert_eq!(second.progress, Progress::More, "{second:?}");
+	assert_eq!(queued_requests(&ds, ids, "tb").await, queued, "the table's work has not begun");
+	// The names are found: the table's first page folds its request.
+	let third = Datastore::table_migration_with_pages(Arc::clone(&ds), interval, 1).await.unwrap();
+	assert_eq!(third.progress, Progress::More, "{third:?}");
+	assert_eq!(queued_requests(&ds, ids, "tb").await, 0, "the request is folded");
+
+	drain(&ds).await;
+	assert_eq!(stamp(&ds, "tb", 1).await, head(&ds, "tb").await);
+}
+
+/// A table whose database is gone has nothing left to work through: the job deletes its
+/// progress and requests.
+#[tokio::test]
+async fn a_table_whose_database_is_gone_is_forgotten() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE tb SCHEMAFULL;
+		 DEFINE FIELD f ON tb TYPE string;
+		 CREATE tb:1 SET f = '1';
+		 ALTER FIELD f ON tb TYPE int MIGRATE EXISTING ROWS AS to_int USING <int>$value FALLBACK 0;",
+	)
+	.await;
+	let (ns, db) = ids(&ds).await;
+	assert!(queued_requests(&ds, (ns, db), "tb").await > 0);
+	run(&ds, "REMOVE DATABASE test;").await;
+
+	drain(&ds).await;
+	assert_eq!(queued_requests(&ds, (ns, db), "tb").await, 0, "the requests are deleted");
+	let txn = ds.transaction(Read).await.unwrap();
+	let progress = txn.get_tb_migration_job(ns, db, &TableName::from("tb")).await.unwrap();
+	txn.cancel().await.unwrap();
+	assert!(progress.is_none(), "the progress is deleted: {progress:?}");
+}

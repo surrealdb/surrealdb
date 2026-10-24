@@ -660,6 +660,7 @@ impl VersionRanges {
 	/// Whether any requirement admits `version` under
 	/// [`crate::version::version_matches`], which lets a prerelease satisfy a
 	/// requirement that does not name its own release.
+	#[cfg(any(feature = "upgrade", test))]
 	pub fn version_matches(&self, version: &semver::Version) -> bool {
 		self.requirements().iter().any(|req| crate::version::version_matches(req, version))
 	}

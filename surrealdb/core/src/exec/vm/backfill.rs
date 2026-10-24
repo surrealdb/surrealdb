@@ -270,7 +270,7 @@ pub(super) async fn step(
 		| StoreInstr::SessionNs {
 			..
 		}
-		| StoreInstr::Increment {
+		| StoreInstr::BumpChangefeedFence {
 			..
 		}
 		| StoreInstr::ClearDatastoreCache
@@ -595,7 +595,7 @@ async fn retire(state: &mut State, ctx: &ExecutionContext, table: &TableName) ->
 		return txn.delr(range).await.map_err(ControlFlow::Err);
 	}
 	let write_ctx = scope(state, ctx).write_ctx_for(table, WritePurpose::ViewMaintenance).await?;
-	if view_row_reaches_nothing(&write_ctx).await? {
+	if view_row_reaches_nothing(&write_ctx) {
 		let range = records.range().map_err(ControlFlow::Err)?;
 		return txn.delr(range).await.map_err(ControlFlow::Err);
 	}

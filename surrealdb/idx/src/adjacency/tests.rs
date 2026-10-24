@@ -11,7 +11,7 @@ use std::ops::Bound;
 use surrealdb_datastore::values::graph::AdjacencyValue;
 use surrealdb_kvs::TransactionType::{Read, Write};
 
-use super::fold::{fold_scope, fold_scope_bounded};
+use super::fold::{fold_scope, fold_scope_bounded, fold_scope_from};
 use super::merge::{AdjacencyScope, MergedAdjacencyCursor, MergedAdjacencyEdge, scope_degree};
 use crate::catalog::providers::{BoxProviderFut, CancellationProbe, TableProvider};
 use crate::catalog::{
@@ -193,16 +193,19 @@ fn keys_of(items: Vec<MergedAdjacencyEdge>) -> Vec<Vec<u8>> {
 async fn fold_all(store: &TestIndexStore, max_deltas: usize) -> usize {
 	let vertex = vertex();
 	let mut total = 0;
+	let mut after: Option<Vec<u8>> = None;
 	loop {
 		let env = store.env(Write).await;
-		let outcome = fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, max_deltas)
-			.await
-			.unwrap();
+		let outcome =
+			fold_scope_from(&env, NS, DB, &vertex, Dir::Out, max_deltas, after.as_deref())
+				.await
+				.unwrap();
 		env.tx().commit().await.unwrap();
 		total += outcome.folded;
 		if !outcome.has_more {
 			return total;
 		}
+		after = outcome.resume;
 	}
 }
 
@@ -372,10 +375,11 @@ async fn scattered_deltas_fold_over_bounded_chunk_passes() {
 	// chunk, so the first pass must stop at its chunk boundary and report
 	// more work.
 	let mut passes = 0;
+	let mut after: Option<Vec<u8>> = None;
 	loop {
 		let env = store.env(Write).await;
 		let outcome =
-			fold_scope_bounded(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 1024, 1)
+			fold_scope_bounded(&env, NS, DB, &vertex, Dir::Out, 1024, 1, after.as_deref())
 				.await
 				.unwrap();
 		env.tx().commit().await.unwrap();
@@ -387,6 +391,9 @@ async fn scattered_deltas_fold_over_bounded_chunk_passes() {
 		if !outcome.has_more {
 			break;
 		}
+		// Continue where the pass stopped: before the first captured key it
+		// left unconsumed, so nothing is skipped.
+		after = outcome.resume;
 	}
 	assert!(passes > 1, "the drain must take several bounded passes");
 	assert_eq!(count_delta(&store).await, 0, "the drain must consume every delta");
@@ -483,9 +490,7 @@ async fn randomized_operations_match_the_model() {
 				// Fold one bounded pass.
 				_ => {
 					let env = store.env(Write).await;
-					fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 16)
-						.await
-						.unwrap();
+					fold_scope(&env, NS, DB, &vertex, Dir::Out, 16).await.unwrap();
 					env.tx().commit().await.unwrap();
 				}
 			}
@@ -943,8 +948,7 @@ async fn a_fold_racing_a_delete_loses_instead_of_losing_the_delete() {
 
 	// The fold captures both live keys...
 	let fold_env = store.env(Write).await;
-	let outcome =
-		fold_scope(&fold_env, NS, DB, NS_NAME, DB_NAME, &vertex(), Dir::Out, 1024).await.unwrap();
+	let outcome = fold_scope(&fold_env, NS, DB, &vertex(), Dir::Out, 1024).await.unwrap();
 	assert_eq!(outcome.folded, 2);
 
 	// ...then a concurrent deletion tombstones one of them and commits
@@ -1227,6 +1231,63 @@ async fn legacy_keys_stay_in_the_delta_layer() {
 	);
 }
 
+/// A pass charges every key it examines, packable or not, and names where
+/// the next pass continues: a scope whose unpackable keys outnumber the
+/// budget is crossed a budget at a time, and the packable key behind them
+/// is reached by the pass whose budget covers it.
+#[tokio::test]
+async fn a_pass_charges_the_keys_it_cannot_pack_and_continues_past_them() {
+	let store = TestIndexStore::new().await;
+	// One packable edge, sorting after five legacy keys of the same scope.
+	seed(&store, &[(edge("z"), target("t"))]).await;
+	let vertex = vertex();
+	let txn = store.transaction(Write).await.unwrap();
+	for i in 0..5 {
+		let e = edge(&format!("a{i}"));
+		let key = GraphKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&e.table),
+			foreign_key: Cow::Borrowed(&e.key),
+		};
+		txn.set_key(&key, &()).await.unwrap();
+	}
+	txn.commit().await.unwrap();
+	assert_eq!(count_delta(&store).await, 6);
+
+	// A budget of two keys: the first pass examines two legacy keys, packs
+	// nothing, and reports more past them.
+	let env = store.env(Write).await;
+	let first = fold_scope(&env, NS, DB, &vertex, Dir::Out, 2).await.unwrap();
+	env.tx().commit().await.unwrap();
+	assert_eq!(first.folded, 0);
+	assert!(first.has_more);
+	let resume =
+		first.resume.clone().expect("a pass stopped by its budget names where to continue");
+
+	// The next pass continues there rather than examining the same two
+	// keys again.
+	let env = store.env(Write).await;
+	let second = fold_scope_from(&env, NS, DB, &vertex, Dir::Out, 2, Some(&resume)).await.unwrap();
+	env.tx().commit().await.unwrap();
+	assert_eq!(second.folded, 0);
+	assert!(second.has_more);
+	assert!(second.resume.as_deref() > Some(resume.as_slice()), "the scan advanced");
+
+	// The third pass's budget covers the last legacy key and the edge.
+	let env = store.env(Write).await;
+	let third = fold_scope_from(&env, NS, DB, &vertex, Dir::Out, 2, second.resume.as_deref())
+		.await
+		.unwrap();
+	env.tx().commit().await.unwrap();
+	assert_eq!(third.folded, 1);
+	assert!(!third.has_more);
+	assert_eq!(count_delta(&store).await, 5, "the legacy keys stay; the edge is packed");
+}
+
 /// A chunk whose `involved` tables include one undefined table always falls
 /// back to Plain, and — regardless of which of the *defined* tables the
 /// (unspecified-order) scan happens to visit first — none of them gets
@@ -1272,7 +1333,7 @@ async fn undefined_target_table_marks_no_table_numeric() {
 		txn.commit().await.unwrap();
 
 		let env = store.env(Write).await;
-		fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 1024).await.unwrap();
+		fold_scope(&env, NS, DB, &vertex, Dir::Out, 1024).await.unwrap();
 		env.tx().commit().await.unwrap();
 
 		let txn = store.transaction(Read).await.unwrap();

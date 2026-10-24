@@ -63,6 +63,8 @@ fn subscription_of(
 			auth: None,
 			session: None,
 			vars: Default::default(),
+			// Set by the registration, inside its transaction.
+			watermark: 0,
 		},
 		ctx,
 		opt,
@@ -219,6 +221,20 @@ pub(crate) async fn live_register(
 			bail!("LIVE query WHERE clause is invalid and will never match: {e}");
 		}
 	}
+	// The router delivers the subscription from captured events, which
+	// a lap on any node may reach after this transaction commits
+	// though they were captured before it, so the subscription is
+	// stored with the timestamp minted when it was registered: every
+	// event committed or captured at or below it preceded the
+	// registration, so a write executed before `LIVE SELECT` in
+	// another open transaction is excluded even when that transaction
+	// commits after this one; see [`TableReplay`](crate::lq::subscriber::TableReplay).
+	subscription_definition.watermark = txn.timestamp().await?.as_versionstamp();
+	// The changes this transaction has already captured on the table
+	// precede the subscription too, and commit above the watermark
+	// with the ones after it: the entry notes the subscription among
+	// them, so the router notifies it of the later ones alone.
+	txn.live_event_buffer_note_subscription(ns, db, &tb, live_query_id);
 	// Insert the node live query
 	let key = NodeLiveQueryKey {
 		nd: nid,

@@ -212,6 +212,55 @@ impl StoredField for u64 {
 	}
 }
 
+/// INT where the value fits `i64`, and DECIMAL above that: the decimal's
+/// 96-bit mantissa holds every value a 10-byte versionstamp takes, and a
+/// value past it is refused rather than truncated.
+impl StoredField for u128 {
+	fn encode_item(&self, enc: &mut Encoder, _prior: Option<Item<'_>>) -> Result<(), SchemaError> {
+		match i64::try_from(*self) {
+			Ok(v) => enc.int(v),
+			Err(_) => {
+				let v = i128::try_from(*self).map_err(|_| SchemaError::out_of_range())?;
+				let d = Decimal::try_from_i128_with_scale(v, 0)
+					.map_err(|_| SchemaError::out_of_range())?;
+				enc.decimal(&d);
+			}
+		}
+		Ok(())
+	}
+
+	fn decode_item(item: Item<'_>, _depth: u32) -> Result<Self, SchemaError> {
+		let (tag, payload) = parts(item)?;
+		if let Some(v) = strict::int(tag, payload)? {
+			return u128::try_from(v).map_err(|_| SchemaError::out_of_range());
+		}
+		match strict::decimal(tag, payload)? {
+			Some(d) if d.fract().is_zero() => {
+				let d = d.normalize();
+				if d.scale() != 0 {
+					return Err(SchemaError::out_of_range());
+				}
+				u128::try_from(d.mantissa()).map_err(|_| SchemaError::out_of_range())
+			}
+			Some(_) => Err(SchemaError::out_of_range()),
+			None => Err(SchemaError::wrong_kind()),
+		}
+	}
+
+	fn into_vm_value(self) -> Result<Value, SchemaError> {
+		vm::int(i128::try_from(self).map_err(|_| SchemaError::out_of_range())?)
+	}
+
+	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
+		u128::try_from(vm::integer(&value)?)
+			.map_err(|_| SchemaError::vm("int:u128", "an integer out of range"))
+	}
+
+	fn write_type_name(out: &mut String) {
+		out.push_str("int:u128");
+	}
+}
+
 /// FLOAT in its 4-byte form holding the `f32`'s own bits.
 impl StoredField for f32 {
 	fn encode_item(&self, enc: &mut Encoder, _prior: Option<Item<'_>>) -> Result<(), SchemaError> {
@@ -895,3 +944,37 @@ macro_rules! tuple {
 
 tuple!(2; (A a 0 2), (B b 1 4); put (1 4), (0 2));
 tuple!(3; (A a 0 2), (B b 1 4), (C c 2 6); put (2 6), (1 4), (0 2));
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::val::stored::encode::with_encoder;
+
+	fn round_trip(value: u128) -> Result<u128, SchemaError> {
+		let bytes = with_encoder(|enc| -> Result<Vec<u8>, SchemaError> {
+			value.encode_item(enc, None)?;
+			Ok(enc.as_bytes().to_vec())
+		})?;
+		u128::decode_item(Item::new(&bytes), 0)
+	}
+
+	/// A 128-bit unsigned field is INT where it fits `i64` and DECIMAL above
+	/// that, up to the decimal's 96-bit mantissa: a versionstamp's 80 bits
+	/// fit, and a value past the mantissa is refused rather than truncated.
+	#[test]
+	fn a_u128_round_trips_up_to_the_decimal_mantissa() {
+		for value in [
+			0,
+			1,
+			i64::MAX as u128,
+			i64::MAX as u128 + 1,
+			u64::MAX as u128,
+			1u128 << 79,
+			(1u128 << 96) - 1,
+		] {
+			assert_eq!(round_trip(value).unwrap(), value);
+		}
+		assert!(round_trip(1u128 << 96).is_err());
+		assert!(round_trip(u128::MAX).is_err());
+	}
+}

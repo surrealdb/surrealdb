@@ -46,7 +46,7 @@ impl InfoStructure for SubscriptionFields {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredSubscriptionDefinition {
@@ -86,6 +86,14 @@ pub struct StoredSubscriptionDefinition {
 	// and store the variables that are used in the query.
 	#[stored(n = 18)]
 	pub vars: BTreeMap<String, Value>,
+	/// The safe watermark the registering transaction observed, as a
+	/// versionstamp: every captured event at or below it was final before
+	/// the subscription existed, and is delivered to it by no node's
+	/// router. Zero for a subscription stored before the watermark was
+	/// kept, which no captured event precedes.
+	#[revision(start = 3)]
+	#[stored(n = 20, default = "u128::default")]
+	pub watermark: u128,
 }
 
 impl_kv_value_catalog!(StoredSubscriptionDefinition);
@@ -228,6 +236,8 @@ pub struct SubscriptionDefinition {
 	pub auth: Option<Auth>,
 	pub session: Option<Value>,
 	pub vars: BTreeMap<String, Value>,
+	/// See [`StoredSubscriptionDefinition::watermark`].
+	pub watermark: u128,
 	pub query: SubscriptionQuery,
 }
 
@@ -309,6 +319,7 @@ impl SubscriptionDefinition {
 			auth: stored.auth.clone(),
 			session: stored.session.clone(),
 			vars: stored.vars.clone(),
+			watermark: stored.watermark,
 			query: match compile_query(stored) {
 				Ok(q) => SubscriptionQuery::Compiled(q),
 				Err(reason) => SubscriptionQuery::Uncompilable {
@@ -359,6 +370,7 @@ impl SubscriptionDefinition {
 			auth: self.auth.clone(),
 			session: self.session.clone(),
 			vars: self.vars.clone(),
+			watermark: self.watermark,
 		}
 	}
 }
@@ -428,6 +440,7 @@ mod tests {
 			auth: None,
 			session: None,
 			vars: BTreeMap::new(),
+			watermark: 0,
 		}
 	}
 
@@ -530,6 +543,7 @@ mod tests {
 				auth: None,
 				session: None,
 				vars: BTreeMap::new(),
+				watermark: 0,
 			};
 
 			// It compiles, so a real subscription is never inert.

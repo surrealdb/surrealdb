@@ -142,6 +142,16 @@ keyspace! {
 		/// A cluster node's heartbeat and metadata.
 		node = ["!nd", @, nd: Uuid] => surrealdb_catalog::node::Node;
 
+		/// The heartbeat a node last wrote on a release that drains its own
+		/// `node_event_queue`, written in the transaction that writes the node
+		/// row. It equals the row's heartbeat while such a release keeps the row
+		/// fresh; a row refreshed by a release that queues at the root — the node
+		/// rolled back with its id kept — moves ahead of it, which is how the
+		/// adoption sweep tells a live owner that cannot run its queue from one
+		/// that will. Beside the row rather than under the node's state, so the
+		/// sweep's walk over that state steps over queues and live queries only.
+		node_drain_heartbeat = ["!nq", nd: Uuid] => u64;
+
 		/// The release the node last recorded beside its heartbeat.
 		///
 		/// Written in the stored-value grammar at every feature level, because no 3.x
@@ -190,7 +200,11 @@ keyspace! {
 		ns_id_batch = ["!nh", @, start: i64] => crate::sequences::BatchValue;
 		ns_id_state = ["!ni", @, nid: Uuid] => crate::sequences::SequenceState;
 
-		/// Queued asynchronous events.
+		/// Queued asynchronous events, cluster-wide.
+		///
+		/// A node queues under its own `node_event_queue`; this range holds what
+		/// nodes on a release that queues at the root write, and is drained under
+		/// the event-processing lease until empty.
 		///
 		/// The namespace, database and table are spelled out as fields rather than
 		/// inherited from a level, so a queued entry survives the deletion of the
@@ -236,9 +250,22 @@ keyspace! {
 				   tb: Table, @, ix: IndexId, expunge: Expunge, uid: Uuid] => ReclaimState;
 
 		/// Per-node state. The node's own bytes address nothing; only the keys
-		/// beneath them do.
+		/// beneath them do. The bound before the node id spans every node's
+		/// state, so a sweep can find the nodes that left state behind without
+		/// knowing their ids.
 		node_state = ["$", @, nd: Uuid] {
 			node_live_query = ["!lq", @, lq: Uuid] => surrealdb_catalog::NodeLiveQuery;
+
+			/// Asynchronous events queued by this node, drained by this node
+			/// without a lease.
+			///
+			/// The node is the level, so one prefix scan reads exactly the entries a
+			/// node owns, and the queue sorts first within the node's state, so the
+			/// first key under a node says whether it has one. Entries left by a
+			/// node that is archived or gone are adopted under the event-processing
+			/// lease. The remaining fields follow the root-level queue.
+			node_event_queue = ["!eq", @, ns: NamespaceId, db: DatabaseId, tb: Table, ev: Str,
+								ts: u64] => crate::values::event_queue::AsyncEventRecord;
 		}
 
 		/// Grants issued against a root-level access method.
@@ -2535,7 +2562,10 @@ mod tests {
 		// reported, and they are the whole answer.
 		let (matched, candidates) = unknown(b"/!nx");
 		assert_eq!(matched, 3);
-		assert_eq!(candidates, ["/!ns{ns}", "/!nd{nd}", "/!nr{nd}", "/!nh{start}", "/!ni{nid}"]);
+		assert_eq!(
+			candidates,
+			["/!ns{ns}", "/!nd{nd}", "/!nq{nd}", "/!nr{nd}", "/!nh{start}", "/!ni{nid}"]
+		);
 
 		// A well-formed table-level prefix with an undeclared tag after it. The
 		// namespace and database ids are stepped over rather than compared, so the

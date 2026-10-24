@@ -266,7 +266,7 @@ steps appear when it is lowered, as instructions:
 | `Get`, `Scan` | catalog reads: one key, or every value beneath a truncation point |
 | `Lock` | a locked read, so a concurrent writer of the key cannot also commit |
 | `Put`, `Replace`, `Delete`, `DeleteRange` | the catalog writes; `Clear` and `ClearRange` under `EXPUNGE` also drop every earlier version |
-| `Increment` | a counter, such as the changefeed retention fence |
+| `BumpChangefeedFence` | the changefeed retention fence moved to a fresh random value, so a collection page armed against it cannot commit |
 | `Next`, `Push`, `DropMethods` | step through a scanned list; edit a stored list |
 | `Raise`, `JumpIfImport` | the statement's errors; an import passing over an existence error |
 | `ClearCache`, `ClearDatastoreCache` | evict the transaction's, or the datastore's, cached definitions |

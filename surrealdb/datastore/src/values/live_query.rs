@@ -23,6 +23,7 @@ use surrealdb_catalog::{DatabaseId, NamespaceId};
 use surrealdb_expr::val::{RecordId, TableName, Value};
 use surrealdb_kvs::value::KVValue;
 use surrealdb_kvs::{Val, impl_kv_value_revisioned};
+use uuid::Uuid;
 
 /// The kind of mutation that produced a [`LiveEvent`].
 #[revisioned(revision = 1)]
@@ -42,7 +43,7 @@ pub enum LiveAction {
 /// representation is to store them outright. This is the deliberate decoupling
 /// from the changefeed format: live queries always retain before-values,
 /// independent of any user `CHANGEFEED ... [INCLUDE ORIGINAL]` setting.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveEvent {
 	/// The mutation kind.
@@ -53,15 +54,43 @@ pub struct LiveEvent {
 	pub before: Value,
 	/// The document after the change (`Value::None` for a delete).
 	pub after: Value,
+	/// The versionstamp minted when the write was captured (`0` for entries
+	/// written before revision 2). Checked alongside the commit versionstamp
+	/// against each subscription's watermark so a write captured before a
+	/// subscription was registered is not delivered to it even when its
+	/// transaction commits after the registration.
+	#[revision(start = 2)]
+	pub captured: u128,
 }
 
 /// All live-query events for a single table within one committed transaction.
 ///
 /// One entry per (table, commit), mirroring how the change feed groups per-table
 /// mutations, so the write cost stays O(1) per modified table per transaction.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq)]
-pub struct LiveEvents(pub Vec<LiveEvent>);
+pub struct LiveEvents {
+	/// The changes, in the order the transaction made them.
+	pub events: Vec<LiveEvent>,
+	/// The subscriptions the transaction registered on the table once it had
+	/// made some of the changes, each with the number it had made by then.
+	/// The commit stamps every change alike, so this is what tells the
+	/// router which of them precede a subscription: it is notified of the
+	/// changes after its registration alone, as the inline engine notifies
+	/// it. Empty for a transaction that registered none, and for an entry
+	/// written before the field existed.
+	#[revision(start = 2)]
+	pub registered: Vec<Registration>,
+}
+
+/// A subscription a transaction registered on a table after making `after`
+/// of the changes its entry holds.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Registration {
+	pub id: Uuid,
+	pub after: u32,
+}
 
 impl_kv_value_revisioned!(LiveEvents);
 
@@ -73,14 +102,23 @@ impl Default for LiveEvents {
 
 impl LiveEvents {
 	pub fn new() -> Self {
-		Self(Vec::new())
+		Self {
+			events: Vec::new(),
+			registered: Vec::new(),
+		}
 	}
 
 	/// Append a record change, deriving the action from the before/after values.
 	///
 	/// Matches the changefeed's classification: a nullish `after` is a delete, an
 	/// absent `before` is a create, otherwise it is an update.
-	pub fn push_record_change(&mut self, id: RecordId, before: Value, after: Value) {
+	pub fn push_record_change(
+		&mut self,
+		id: RecordId,
+		before: Value,
+		after: Value,
+		captured: u128,
+	) {
 		let action = if after.is_nullish() {
 			LiveAction::Delete
 		} else if before.is_none() {
@@ -88,10 +126,21 @@ impl LiveEvents {
 		} else {
 			LiveAction::Update
 		};
-		self.0.push(LiveEvent {
+		self.events.push(LiveEvent {
 			action,
 			id,
 			before,
+			after,
+			captured,
+		});
+	}
+
+	/// Note that the subscription `id` was registered after the changes made
+	/// so far, which the router then does not notify it of.
+	pub fn note_registration(&mut self, id: Uuid) {
+		let after = u32::try_from(self.events.len()).unwrap_or(u32::MAX);
+		self.registered.push(Registration {
+			id,
 			after,
 		});
 	}
@@ -135,6 +184,7 @@ impl LiveEventBuffer {
 	}
 
 	/// Record a record modification or deletion for live-query routing.
+	#[allow(clippy::too_many_arguments)]
 	pub fn buffer_record_change(
 		&self,
 		ns: NamespaceId,
@@ -143,6 +193,7 @@ impl LiveEventBuffer {
 		id: RecordId,
 		before: Value,
 		after: Value,
+		captured: u128,
 	) {
 		let mut buffer = self.buffer.lock();
 		buffer
@@ -152,7 +203,22 @@ impl LiveEventBuffer {
 				tb: tb.clone(),
 			})
 			.or_default()
-			.push_record_change(id, before, after);
+			.push_record_change(id, before, after, captured);
+	}
+
+	/// Note that the subscription `id` on `tb` was registered after the changes
+	/// buffered for the table so far. Nothing is noted for a table with no
+	/// change buffered: no change precedes the subscription then.
+	pub fn note_registration(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, id: Uuid) {
+		let mut buffer = self.buffer.lock();
+		if let Some(events) = buffer.get_mut(&BufferKey {
+			ns,
+			db,
+			tb: tb.clone(),
+		}) && !events.events.is_empty()
+		{
+			events.note_registration(id);
+		}
 	}
 
 	/// Returns all buffered events as prepared writes. The commit versionstamp is

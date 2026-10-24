@@ -71,6 +71,9 @@ pub mod scope {
 	pub static GRAPHQL: &str = "surrealdb.graphql";
 	/// MCP (Model Context Protocol) tool invocation counters / histograms.
 	pub static MCP: &str = "surrealdb.mcp";
+	/// Background maintenance job passes: throughput, duration, queue lag,
+	/// lease standing.
+	pub static TASK: &str = "surrealdb.task";
 
 	/// Every scope known to the unified provider. Tests assert this list
 	/// matches what observers actually register.
@@ -91,6 +94,7 @@ pub mod scope {
 		SLOW_QUERY,
 		STATEMENT,
 		STORAGE,
+		TASK,
 		TENANT,
 		TRANSACTION,
 	];
@@ -206,6 +210,24 @@ pub mod names {
 	pub static MCP_TOOL_INVOCATION: &str = "surrealdb.mcp.tool.invocation";
 	pub static MCP_TOOL_DURATION: &str = "surrealdb.mcp.tool.duration";
 	pub static MCP_SESSION_ACTIVE: &str = "surrealdb.mcp.session.active";
+
+	// --- Background tasks (scope: TASK) --------------------------------
+
+	/// Cumulative count of background job passes, labelled by job, outcome
+	/// and lease standing. A pass under `lease="elsewhere"` did no work.
+	pub static TASK_PASS: &str = "surrealdb.task.pass";
+	/// Distribution of pass duration, labelled by job.
+	pub static TASK_PASS_DURATION: &str = "surrealdb.task.pass.duration";
+	/// Cumulative count of queue entries or work units handled, by job.
+	pub static TASK_ITEMS: &str = "surrealdb.task.items";
+	/// Distribution of the age of the oldest queued entry at the start of a
+	/// pass, by job: how long the head of the queue had waited. Recorded only
+	/// for passes that found their queue non-empty.
+	pub static TASK_QUEUE_AGE: &str = "surrealdb.task.queue.age";
+	/// Cumulative count of passes that stopped at their budget with work
+	/// still pending, by job. A sustained rate means the job is not keeping
+	/// up with its queue.
+	pub static TASK_BACKLOG: &str = "surrealdb.task.backlog";
 }
 
 /// Attribute keys recorded on labelled instruments. Centralised here so
@@ -256,6 +278,11 @@ pub mod attrs {
 	pub static BACKEND: &str = "backend";
 	/// Bucket object-store operation (`put` / `get` / `list` / …).
 	pub static BUCKET_OP: &str = "op";
+	/// Background job name (from the engine's fixed job set).
+	pub static JOB: &str = "job";
+	/// Lease standing of a background pass (`none` / `held` / `elsewhere` /
+	/// `unknown`, from [`surrealdb_observe::TaskLeaseState::as_label`]).
+	pub static LEASE: &str = "lease";
 	/// Bounded error classification recorded only when `outcome="error"`. Sourced
 	/// from [`error_class`] constants so cardinality stays closed.
 	pub static ERROR_CLASS: &str = "error_class";
@@ -330,6 +357,11 @@ mod tests {
 			names::STATEMENT_DURATION,
 			names::STATEMENT_ROWS,
 			names::STATEMENT_TOTAL,
+			names::TASK_BACKLOG,
+			names::TASK_ITEMS,
+			names::TASK_PASS,
+			names::TASK_PASS_DURATION,
+			names::TASK_QUEUE_AGE,
 			names::TRANSACTION_CONFLICTS,
 			names::TRANSACTION_DURATION,
 			names::TRANSACTION_KEYS_READ,

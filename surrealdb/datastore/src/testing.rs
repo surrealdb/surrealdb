@@ -45,6 +45,9 @@ pub enum RetryableConflictSite {
 	/// transition, raised in place of that read.
 	ConcurrentIndexBuildStateRead,
 	IndexCompactionQueueCleanup,
+	/// A conflict on the commit that deletes a batch's drained graph-fold
+	/// queue entries, raised in place of that commit.
+	GraphFoldQueueCleanup,
 	FullTextCompaction,
 	CountCompaction,
 	HnswCompaction,
@@ -130,6 +133,13 @@ pub enum NonRetryableErrorSite {
 	/// its sentinel and stamping `!v`, which is the half-initialised state a
 	/// later start has to recognise and finish.
 	VersionBootstrapStamp,
+	/// Simulates the transaction that claims a queued async event failing at
+	/// its commit for a reason other than a conflict: a storage fault.
+	AsyncEventClaim,
+	/// Simulates the transaction that settles a queued async event — the
+	/// requeue or the delete after a failed run — failing at its commit for
+	/// a reason other than a conflict.
+	AsyncEventSettle,
 	/// Simulates the commit that ends a queued async event applying but
 	/// reporting `CommitOutcomeUnknown`: raised after that commit succeeds, so
 	/// the event's writes and the removal of its queue entry are durable.
@@ -138,6 +148,10 @@ pub enum NonRetryableErrorSite {
 	/// applied: raised in place of it, leaving the transaction finished and its
 	/// writes discarded.
 	AsyncEventCommitDiscardedUnknown,
+	/// Simulates a live-query router pass failing after it delivered an
+	/// event, as a storage fault reading the next would: raised once the lap
+	/// has recorded the event as delivered.
+	LiveQueryRouterAfterEvent,
 	/// Simulates the commit that queues a compaction pass's fresh request for
 	/// its index failing: raised in place of that commit.
 	IndexCompactionRequeue,
@@ -268,7 +282,10 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 		| NonRetryableErrorSite::IndexCompactionRequeue
 		| NonRetryableErrorSite::FullTextCompaction
 		| NonRetryableErrorSite::HnswCompaction
-		| NonRetryableErrorSite::DiskAnnCompaction => {
+		| NonRetryableErrorSite::DiskAnnCompaction
+		| NonRetryableErrorSite::AsyncEventClaim
+		| NonRetryableErrorSite::AsyncEventSettle
+		| NonRetryableErrorSite::LiveQueryRouterAfterEvent => {
 			Err(surrealdb_kvs::Error::Internal(format!("injected non-retryable error at {site:?}"))
 				.into())
 		}
@@ -294,5 +311,62 @@ pub struct NonRetryableErrorGuard {
 impl Drop for NonRetryableErrorGuard {
 	fn drop(&mut self) {
 		non_retryable_errors().lock().unwrap().remove(&(self.site, self.node_id));
+	}
+}
+
+/// Where a test can make a task panic, standing in for a bug in the code that
+/// runs there: the process survives, the task does not, and whatever the task
+/// was to settle is left as it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PanicSite {
+	/// A worker of an async event batch, once its claim on the entry has
+	/// landed and before the body runs.
+	AsyncEventWorker,
+}
+
+static PANICS: OnceLock<Mutex<HashMap<(PanicSite, Uuid), usize>>> = OnceLock::new();
+
+fn panics() -> &'static Mutex<HashMap<(PanicSite, Uuid), usize>> {
+	PANICS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Arms `site` to panic once for `node_id`, until the guard drops.
+pub fn inject_panic(site: PanicSite, node_id: Uuid) -> PanicGuard {
+	panics().lock().unwrap().insert((site, node_id), 1);
+	PanicGuard {
+		site,
+		node_id,
+	}
+}
+
+/// Panics if an injection is pending at `site` for `node_id`, spending it.
+/// The map's lock is released first, so the panic poisons nothing.
+pub fn maybe_inject_panic(site: PanicSite, node_id: Uuid) {
+	let fire = {
+		let mut panics = panics().lock().unwrap();
+		match panics.get_mut(&(site, node_id)) {
+			Some(remaining) => {
+				*remaining -= 1;
+				if *remaining == 0 {
+					panics.remove(&(site, node_id));
+				}
+				true
+			}
+			None => false,
+		}
+	};
+	if fire {
+		panic!("injected panic at {site:?}");
+	}
+}
+
+pub struct PanicGuard {
+	site: PanicSite,
+	node_id: Uuid,
+}
+
+impl Drop for PanicGuard {
+	fn drop(&mut self) {
+		panics().lock().unwrap().remove(&(self.site, self.node_id));
 	}
 }

@@ -601,6 +601,7 @@ type StoredSubscriptionDefinition struct since=4.0 reserved=[]
   14 auth option<Auth> critical since=4.0 absent=none
   16 session option<value> critical since=4.0 absent=none
   18 vars object<value> critical since=4.0 absent=required
+  20 watermark int:u128 critical since=4.0 absent=default(u128::default)
 type StoredSubscriptionFields enum since=4.0 reserved=[]
   1 Diff unit since=4.0
   2 Select item:text:fields since=4.0

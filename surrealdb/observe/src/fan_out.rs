@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use super::events::{
 	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
+	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
 };
 use super::observer::ExecutionObserver;
 
@@ -131,6 +131,10 @@ impl ExecutionObserver for FanOutObserver {
 		fan_out!(self, on_http_request_complete, event);
 	}
 
+	fn on_task_pass(&self, event: &TaskPassEvent) {
+		fan_out!(self, on_task_pass, event);
+	}
+
 	/// Reads a cached value populated in [`Self::new`].
 	fn needs_statement_text(&self) -> bool {
 		self.needs_statement_text
@@ -163,8 +167,9 @@ mod tests {
 		HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx,
 		NetworkBytesEventSafe, NetworkDirection, QueryCounters, QueryEvent, QueryEventCtx,
 		QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
-		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementType, TransactionEvent,
-		TransactionEventCtx, TransactionEventSafe, TransactionMetricsSnapshot,
+		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementType, TaskLeaseState,
+		TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe, TransactionEvent, TransactionEventCtx,
+		TransactionEventSafe, TransactionMetricsSnapshot,
 	};
 
 	struct Counting {
@@ -227,7 +232,7 @@ mod tests {
 	/// [`forwards_every_hook`] drives each one exactly once and requires the
 	/// fan-out to have delivered all of them; a new hook must be added here
 	/// and to the driving loop at the same time as it is added to the trait.
-	const EVENT_HOOKS: [&str; 10] = [
+	const EVENT_HOOKS: [&str; 11] = [
 		"on_statement_complete",
 		"on_query_complete",
 		"on_transaction_complete",
@@ -238,6 +243,7 @@ mod tests {
 		"on_bucket_operation",
 		"on_http_request_started",
 		"on_http_request_complete",
+		"on_task_pass",
 	];
 
 	/// Records the name of every hook it receives, so a test can assert on
@@ -296,6 +302,10 @@ mod tests {
 
 		fn on_http_request_complete(&self, _event: &HttpRequestEvent) {
 			self.record("on_http_request_complete");
+		}
+
+		fn on_task_pass(&self, _event: &TaskPassEvent) {
+			self.record("on_task_pass");
 		}
 	}
 
@@ -436,6 +446,18 @@ mod tests {
 				error_class: None,
 			},
 			ctx: HttpRequestEventCtx::default(),
+		});
+		f.on_task_pass(&TaskPassEvent {
+			safe: TaskPassEventSafe {
+				job: "event_processing",
+				outcome: Outcome::Success,
+				duration: Duration::from_millis(1),
+				items: 1,
+				oldest_age: None,
+				lease: TaskLeaseState::Held,
+				backlog: false,
+			},
+			ctx: TaskPassEventCtx::default(),
 		});
 
 		// Each hook was driven exactly once, so every observer must have seen

@@ -2165,10 +2165,9 @@ impl Ddl<'_, '_> {
 		// A retention written here makes the changefeed collector's watermark stale, so its fence
 		// moves in the same transaction.
 		if changefeed.is_some() {
-			let fence = self.object(&[("ns", Operand::Reg(ns)), ("db", Operand::Reg(id))])?;
-			self.store(StoreInstr::Increment {
-				route: RouteId::named("ChangefeedFenceKey"),
-				key: fence,
+			self.store(StoreInstr::BumpChangefeedFence {
+				ns,
+				db: id,
 			});
 		}
 		self.store(StoreInstr::ClearDatastoreCache);

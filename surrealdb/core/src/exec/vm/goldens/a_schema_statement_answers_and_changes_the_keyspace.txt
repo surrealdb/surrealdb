@@ -48,7 +48,7 @@ keyspace:
 NONE
 keyspace:
 /*\x00\x00\x00\x00!dbfeed\x00 => 53a5502ddfd0bbf8 (44 bytes)
-/*\x00\x00\x00\x00*\x00\x00\x00\x02!cf => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x02!cf => <nonce> (8 bytes)
 ### DEFINE DATABASE ('fr' + 'esh')
 NONE
 keyspace:
@@ -104,7 +104,7 @@ keyspace:
 ### DEFINE TABLE feed CHANGEFEED 3d
 NONE
 keyspace:
-/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => a8c7f632281a365f (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfeed\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!gnfeed\x00 => a30e117dd8876ce9 (10 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfeed\x00 => 726ddd204b5ddc6f (190 bytes)
@@ -919,7 +919,7 @@ keyspace:
 ### DEFINE TABLE sale_feed CHANGEFEED 1d AS SELECT region, count() AS n FROM sale GROUP BY region
 NONE
 keyspace:
-/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => a8c7f632281a365f (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvsale_feed\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!gnsale_feed\x00 => a30e0e7dd88767d0 (10 bytes)
@@ -1447,13 +1447,13 @@ keyspace:
 ### ALTER TABLE person CHANGEFEED 1h
 NONE
 keyspace:
-/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => a8c7f632281a365f (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => bcc9a6e04a001f7c (192 bytes)
 ### ALTER TABLE feedful CHANGEFEED 2h INCLUDE ORIGINAL
 NONE
 keyspace:
-/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => a8c7f632281a365f (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cf => <nonce> (8 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfeedful\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfeedful\x00 => 1b7e103f50e5eeb8 (193 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00#*feedful\x00 => 20cc89aa2a03b603 (133 bytes)

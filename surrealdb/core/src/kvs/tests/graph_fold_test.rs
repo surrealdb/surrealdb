@@ -46,9 +46,7 @@ async fn fold_vertex(ds: &Datastore, rid: &RecordId) {
 			env.set_transaction(Arc::clone(&txn));
 			let env = env.freeze();
 			let outcome =
-				fold_scope(&env, db.namespace_id, db.database_id, "test", "test", rid, dir, 1024)
-					.await
-					.unwrap();
+				fold_scope(&env, db.namespace_id, db.database_id, rid, dir, 1024).await.unwrap();
 			txn.commit().await.unwrap();
 			if !outcome.has_more {
 				break;
@@ -499,6 +497,108 @@ async fn a_failed_fold_keeps_its_queue_entries() {
 	.unwrap();
 	assert_eq!(errors, 1, "the failed fold must be counted");
 	assert_eq!(fold_queue_len(&ds).await, 1, "the failed scope's entry must stay queued");
+}
+
+/// A scope whose table definition needs a newer release than this build
+/// keeps its queue entries too, for a build that can fold it, and neither a
+/// drain nor a slice counts it as progress: the drain ends its rotation at
+/// the range, and a slice that finds nothing else to do reports the queue
+/// at rest rather than a backlog, which would run it again at once.
+#[tokio::test]
+async fn a_scope_whose_table_needs_a_newer_release_is_left_without_a_backlog() {
+	use std::borrow::Cow;
+
+	use surrealdb_datastore::values::graph::AdjacencyValue;
+	use surrealdb_strand::TableName;
+	use tokio_util::sync::CancellationToken;
+	use uuid::Uuid;
+
+	use crate::key::KVKey;
+	use crate::key::schema::{GraphFoldKey, GraphPointerKey, TableKey};
+	use crate::kvs::tasks::Progress;
+	use crate::kvs::test_support::with_future_floor;
+	use crate::kvs::{GRAPH_FOLD_SLICE_BATCHES, GRAPH_FOLD_SLICE_PASSES_PER_SCOPE};
+
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses).await;
+	let (ns, db) = {
+		let txn = ds.transaction(Read).await.unwrap();
+		let dbdef = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+		let ids = (dbdef.namespace_id, dbdef.database_id);
+		txn.cancel().await.unwrap();
+		ids
+	};
+
+	// A table whose definition this build cannot read, a pointer key under
+	// it, and a queue entry naming its scope.
+	let future = RecordId::new("future".into(), "f0".to_string());
+	let edge = RecordId::new("likes".into(), "fx".to_string());
+	let target = RecordId::new("person".into(), "p1".to_string());
+	{
+		let txn = ds.transaction(Write).await.unwrap();
+		let table = TableKey {
+			ns,
+			db,
+			tb: Cow::Owned(TableName::new("future")),
+		}
+		.encode_key()
+		.unwrap();
+		txn.set(table, with_future_floor(&[0x00])).await.unwrap();
+		let pointer = GraphPointerKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&future.table),
+			id: Cow::Borrowed(&future.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+			target_table: Cow::Borrowed(&target.table),
+			target_key: Cow::Borrowed(&target.key),
+		};
+		txn.set_key(&pointer, &AdjacencyValue::live()).await.unwrap();
+		let queued = GraphFoldKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&future.table),
+			id: Cow::Borrowed(&future.key),
+			dir: Dir::Out,
+			nid: Uuid::new_v4(),
+			uid: Uuid::now_v7(),
+		};
+		txn.put_key(&queued, &()).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	assert_eq!(fold_queue_len(&ds).await, 1);
+
+	// A slice: the scope is left, not an error, and not a backlog.
+	let pass = Datastore::graph_fold_bounded(
+		Arc::clone(&ds),
+		std::time::Duration::from_secs(60),
+		CancellationToken::new(),
+		Some(GRAPH_FOLD_SLICE_BATCHES),
+		Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+	)
+	.await
+	.unwrap();
+	assert_eq!(pass.1, 0, "a refused scope is not a failed one");
+	assert_eq!(pass.2.progress, Progress::Done, "and not a backlog: {:?}", pass.2);
+	assert_eq!(fold_queue_len(&ds).await, 1, "its entry stays queued for a build that can fold it");
+
+	// The unbounded drain ends its rotation at the range the same way.
+	let (_, errors) = tokio::time::timeout(
+		std::time::Duration::from_secs(60),
+		Datastore::graph_fold(
+			Arc::clone(&ds),
+			std::time::Duration::from_secs(5),
+			CancellationToken::new(),
+		),
+	)
+	.await
+	.expect("a refused scope must not loop the drain")
+	.unwrap();
+	assert_eq!(errors, 0);
+	assert_eq!(fold_queue_len(&ds).await, 1);
 }
 
 async fn fold_queue_len(ds: &Datastore) -> usize {
@@ -1174,7 +1274,7 @@ async fn a_stale_catalog_refresh_cannot_unset_graph_folded() {
 	let mut env_a = ds.setup_ctx().unwrap();
 	env_a.set_transaction(Arc::clone(&txn_a));
 	let env_a = env_a.freeze();
-	fold_scope(&env_a, ns, db, "test", "test", &person(0), Dir::Out, 1024).await.unwrap();
+	fold_scope(&env_a, ns, db, &person(0), Dir::Out, 1024).await.unwrap();
 	txn_a.commit().await.unwrap();
 
 	// The refresh writes the definition back from its stale snapshot — the
@@ -1280,7 +1380,7 @@ mod tikv_concurrency {
 		let mut env_a = ds.setup_ctx().unwrap();
 		env_a.set_transaction(Arc::clone(&txn_a));
 		let env_a = env_a.freeze();
-		fold_scope(&env_a, ns, db, "test", "test", &person(3), Dir::Out, 1024).await.unwrap();
+		fold_scope(&env_a, ns, db, &person(3), Dir::Out, 1024).await.unwrap();
 		txn_a.commit().await.unwrap();
 
 		// B folds its own disjoint vertex (p1's one outgoing edge) on its
@@ -1288,7 +1388,7 @@ mod tikv_concurrency {
 		let mut env_b = ds.setup_ctx().unwrap();
 		env_b.set_transaction(Arc::clone(&txn_b));
 		let env_b = env_b.freeze();
-		fold_scope(&env_b, ns, db, "test", "test", &person(1), Dir::Out, 1024).await.unwrap();
+		fold_scope(&env_b, ns, db, &person(1), Dir::Out, 1024).await.unwrap();
 		let b_result = txn_b.commit().await;
 		assert!(
 			b_result.is_err(),
@@ -1304,7 +1404,7 @@ mod tikv_concurrency {
 		let mut env_b2 = ds.setup_ctx().unwrap();
 		env_b2.set_transaction(Arc::clone(&txn_b2));
 		let env_b2 = env_b2.freeze();
-		fold_scope(&env_b2, ns, db, "test", "test", &person(1), Dir::Out, 1024).await.unwrap();
+		fold_scope(&env_b2, ns, db, &person(1), Dir::Out, 1024).await.unwrap();
 		txn_b2.commit().await.unwrap();
 
 		// Both vertices' adjacency survived the race intact.
@@ -1352,7 +1452,7 @@ mod tikv_concurrency {
 		let mut env_a = ds.setup_ctx().unwrap();
 		env_a.set_transaction(Arc::clone(&txn_a));
 		let env_a = env_a.freeze();
-		fold_scope(&env_a, ns, db, "test", "test", &person(3), Dir::Out, 1024).await.unwrap();
+		fold_scope(&env_a, ns, db, &person(3), Dir::Out, 1024).await.unwrap();
 		txn_a.commit().await.unwrap();
 
 		// The refresh writes the definition back from its stale snapshot —

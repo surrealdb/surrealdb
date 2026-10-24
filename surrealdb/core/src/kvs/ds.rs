@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::collections::hash_map::Entry;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -27,6 +27,7 @@ use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::index_state::index_has_unmaterialised_updates;
 use surrealdb_datastore::out_of_line::OutOfLine;
 use surrealdb_datastore::triggers::CommitTriggers;
+use surrealdb_datastore::values::event_queue::AsyncEventRecord;
 use surrealdb_datastore::values::graph::GraphFoldScope;
 use surrealdb_datastore::{FeatureLevelCell, FeatureLevelState, ReadRequest};
 use surrealdb_expr::parser::Query as Ast;
@@ -36,6 +37,7 @@ use surrealdb_kvs::{
 	DestroyRange, DestroyRangeHandle, FeatureLevel, Isolation, Release, SnapshotInfo,
 	TransactionType,
 };
+use surrealdb_observe::TaskLeaseState;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace, warn};
@@ -43,7 +45,11 @@ use uuid::Uuid;
 
 use super::tx::Transaction;
 use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
-use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, migration};
+use super::{
+	EVENT_PROCESSING_SLICE_BATCHES, GRAPH_FOLD_SLICE_BATCHES, GRAPH_FOLD_SLICE_PASSES_PER_SCOPE,
+	INDEX_COMPACTION_QUEUE_BATCH_SIZE, INDEX_COMPACTION_SLICE_BATCHES, INDEX_RESUME_PAGE_SIZE,
+	QUEUE_CLEANUP_CONFLICT_RETRIES, migration,
+};
 use crate::api::err::ApiError;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
@@ -53,7 +59,8 @@ use crate::catalog::Index;
 use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider,
 };
-use crate::catalog::{FromStored, NodeLiveQuery, StoredFeatureLevel};
+use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId, NodeLiveQuery, StoredFeatureLevel};
+use crate::cf::gc::{ChangefeedSweep, Discovered, SweepReads};
 use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context, FrozenContext};
 #[cfg(feature = "jwks")]
@@ -68,7 +75,7 @@ use crate::dbs::{
 	QueryResult, QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, StoredRpcSession,
 	TopLevelStatement, durable_session, restore_session,
 };
-use crate::doc::process_next_events_batch;
+use crate::doc::{EventBatch, FailedBatch, RunningEvents, process_next_events_batch};
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
@@ -94,16 +101,17 @@ use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::idx::trees::store::IndexStores;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	BootstrapKey, DatabasePrefix, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix,
-	DocPendingPrefix, FeatureLevelKey, GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot,
-	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, IndexDefPrefix,
-	MigrationKey, MigrationPrefix, NamespacePrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix,
-	NodeReleaseKey, NodeReleasePrefix, NsRoot, ReclaimKey, ReclaimPrefix, RootUserPrefix,
-	SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey, TablePrefix,
-	VersionHistoryPrefix, VersionKey,
+	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix, DocPendingPrefix,
+	EventQueuePrefix, FeatureLevelKey, GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot,
+	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, MigrationKey,
+	MigrationPrefix, NodeDrainHeartbeatKey, NodeEventQueueKey, NodeEventQueuePrefix, NodeKey,
+	NodeLiveQueryKey, NodeLiveQueryPrefix, NodePrefix, NodeReleaseKey, NodeReleasePrefix,
+	NodeStatePrefix, NodeStateRoot, NsRoot, ReclaimKey, ReclaimPrefix, RootUserPrefix, SessionKey,
+	SessionPrefix, StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
+	TypedRange,
 };
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
@@ -120,15 +128,19 @@ use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::request::{Dialect, QueryRequest, QuerySource, ReadOnlyOptions};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
-use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+use crate::kvs::tasklease::{LeaseCheckFailed, LeaseHandler, TaskLeaseType};
+use crate::kvs::tasks::{HostMaintenance, MaintenanceSlice, Pass, Progress};
 #[cfg(test)]
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
 	maybe_inject_retryable_conflict,
 };
+use crate::kvs::walk::{IndexWalk, Step, WalkedIndex};
 use crate::kvs::{
-	CHANGEFEED_GC_PASS_KEY_BUDGET, DatastoreError, Direction, NORMAL_BATCH_SIZE,
-	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET, TransactionFactory,
+	CHANGEFEED_GC_PASS_KEY_BUDGET, CHANGEFEED_GC_SLICE_STEPS, DatastoreError, Direction,
+	EVENT_ADOPTION_PAGE_SIZE, NODE_CLEANUP_SLICE_BATCHES, NODE_EXPIRE_SLICE_BATCHES,
+	NORMAL_BATCH_SIZE, RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET,
+	RECLAIM_PASS_WALK_BATCHES, RPC_SESSION_GC_SLICE_BATCHES, TransactionFactory,
 	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
@@ -254,6 +266,27 @@ const INITIAL_USER_ROLE: &str = "owner";
 /// consulted when the feature level is raised.
 pub(crate) const NODE_LIVENESS: Duration = Duration::from_secs(30);
 
+/// What a drain did with one queued graph-fold scope; see
+/// [`Datastore::fold_queued_scope`].
+#[derive(Debug, PartialEq, Eq)]
+enum FoldOutcome {
+	/// The scope is drained, and its queue entries are consumed.
+	Folded,
+	/// The passes ran out with keys left to examine: the entries stay queued
+	/// as the slice's backlog, which the next slice reaches again.
+	Unfinished,
+	/// The table's definition needs a newer release than this build, so the
+	/// scope cannot be folded here. The entries stay queued, for a build that
+	/// can, and the rotation does not count the scope as progress: a slice
+	/// that finds nothing else to do yields to its interval rather than run
+	/// again at once on a scope it cannot fold.
+	Refused,
+	/// Another node took the lease before a pass, so the scope was left
+	/// where its last committed pass stopped. The entries stay queued, and the
+	/// drain leaves its batch to the holder.
+	LeaseLost,
+}
+
 /// Whether a reclaim pass emptied the prefix it was given.
 ///
 /// `Complete` licenses the caller to retire the queue entry. `Incomplete` means
@@ -371,6 +404,311 @@ fn archive_node_for_shutdown(
 	}
 }
 
+/// Where the graph fold drain's rotation stands between slices.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FoldCursor {
+	/// The queue position the last slice covered, or `None` at the head.
+	resume_at: Option<Vec<u8>>,
+	/// Whether the rotation since it last began at the head has deleted a
+	/// queue entry or folded a scope.
+	progressed: bool,
+	/// For each scope a pass has left with keys still to examine, where its
+	/// next pass continues, so the passes of later slices cross a scope
+	/// whose unpackable keys outnumber a slice's budget rather than examine
+	/// the same keys each time. A scope's entry goes when its fold ends or
+	/// the scope is dropped, and every entry goes when the queue is found
+	/// empty.
+	scans: HashMap<GraphFoldScope, ScopeScan>,
+}
+
+/// Where a scope's next fold pass continues, and the queue entries that
+/// continuation answers for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ScopeScan {
+	/// The key the next pass scans after: every key at or before it was
+	/// folded or could not be packed by the passes that led here.
+	after: Vec<u8>,
+	/// The queue entries whose writes those passes saw: the entries naming
+	/// the scope in the batch whose fold began at the scope's start. A write
+	/// since may have put a key before `after` — a tombstone over a packed
+	/// edge, or an edge whose key sorts early — and queued an entry outside
+	/// this set, so a batch holding such an entry folds the scope from its
+	/// start: continuing would declare the scope folded with that key
+	/// unexamined, and the cleanup would delete the entry that named it.
+	entries: HashSet<Vec<u8>>,
+}
+
+/// One async event queue, as the drains name it: the one every node drains
+/// for itself, the ones the adoption sweep drains for nodes that are gone, and
+/// the position each drain keeps in it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum EventQueue {
+	/// The root-level queue that nodes queueing at the root still write.
+	Root,
+	/// The per-node queue of the node with this id.
+	Node(Uuid),
+}
+
+/// Where a drain of one event queue stands between passes: one lap over the
+/// queue as it stood when the lap began at the head.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EventLap {
+	/// The key of the last entry fetched, which the next fetch resumes after;
+	/// `None` at the head.
+	after: Option<Vec<u8>>,
+	/// The last key the queue held when the lap began. Once the scan has
+	/// passed it, what lies beyond was queued since, and the next lap starts
+	/// from the head so that the entries there — requeued for another attempt,
+	/// or queued since for an earlier-sorting event — get their turn.
+	end: Vec<u8>,
+	/// Whether an attempt in this lap failed and was requeued. A requeued
+	/// entry sits behind `after`, so when the lap ends at the queue's end it
+	/// is what the next pass owes a run; kept with the lap so a requeue in the
+	/// batch that spent the last of one pass's budget is still known to the
+	/// pass that finds the end.
+	requeued: bool,
+	/// How many commits had queued async events on this datastore when the
+	/// lap began; meaningful for the local queue alone. An event runs on the
+	/// node that drains it and queues what it queues under that node's own
+	/// queue, after the fetch that would have found the entry and, when its
+	/// table sorts earlier, behind the scan's position too; a concurrent
+	/// write on this node queues the same way. So a lap that finds the
+	/// queue's end at a higher count than it began with ends at the head
+	/// rather than at rest, and the drain ends with a lap during which
+	/// nothing was queued. Kept with the lap for the same reason as
+	/// `requeued`.
+	queued: u64,
+}
+
+/// One leg of a rotation of the adoption sweep over the queues: the
+/// root-level queue, or a stretch of the per-node queues in id order.
+enum AdoptionLeg {
+	/// The root-level queue.
+	Root,
+	/// The per-node queues of the nodes with state in `window`, in id order,
+	/// up to and including `until`'s when given. The window advances as the
+	/// walk steps over nodes, so a leg left unfinished resumes where it
+	/// stopped.
+	Nodes {
+		window: RawRange,
+		until: Option<Uuid>,
+	},
+}
+
+/// A scan of a key range that a paged pass stopped in, kept for the pass that
+/// continues it; see [`Datastore::purge_expired_rpc_sessions`],
+/// [`Datastore::expire_nodes`] and [`Datastore::remove_nodes`].
+#[derive(Clone, Debug)]
+struct KeyScan {
+	/// The last key of the page the previous pass read, which the next read
+	/// resumes after.
+	after: Vec<u8>,
+	/// The last key there was when the scan began. The page that reaches it
+	/// ends the scan, so keys written past it while the scan runs are the
+	/// next scan's, and the scan ends however fast they are written.
+	end: Vec<u8>,
+}
+
+/// Where a node cleanup pass stopped, kept for the pass that continues it;
+/// see [`Datastore::remove_nodes`].
+#[derive(Clone, Debug)]
+enum NodeCleanupScan {
+	/// In the scan of the node rows.
+	Rows(KeyScan),
+	/// In the sweep of the release records, which follows the row scan: the
+	/// last key of the page read last, `None` before the first, and the last
+	/// key there was when the sweep began.
+	Releases {
+		after: Option<Vec<u8>>,
+		end: Vec<u8>,
+	},
+}
+
+/// A scan of the reclaim queue that a reclaim pass stopped in, kept for the
+/// pass that continues it; see [`Datastore::reclaim_tombstones`].
+#[derive(Clone, Debug)]
+struct ReclaimScan {
+	/// The last key of the batch the previous pass read, which the next read
+	/// resumes after.
+	after: Vec<u8>,
+	/// The last key there was when the scan began. The batch that reaches it
+	/// ends the scan, so entries queued past it while the scan runs are the
+	/// next scan's, and the scan ends however fast removals are queued.
+	end: Vec<u8>,
+}
+
+/// A rotation of the adoption sweep over the queues between passes: the legs
+/// still to walk, and the queues drained so far. A rotation covers the root
+/// queue and every node once; a pass walks a page of it, and the rotation is
+/// kept while a pass ends at its page with legs left, so a cluster with more
+/// owners than one pass steps over is covered a page per pass and the
+/// rotation still ends. A pass that spends its fetch budget ends the rotation
+/// early, and the next begins one after the queue it was spent in and ending
+/// with it, so a queue refilled as fast as it drains cannot hold the sweep on
+/// itself.
+struct AdoptionRotation {
+	legs: VecDeque<AdoptionLeg>,
+	/// The queues drained so far in this rotation. When the rotation ends,
+	/// the lap of any other queue is stale.
+	swept: HashSet<EventQueue>,
+}
+
+impl AdoptionRotation {
+	/// The rotation from the ring's start: the root queue, then every node.
+	fn fresh() -> Result<Self> {
+		Ok(Self {
+			legs: VecDeque::from([
+				AdoptionLeg::Root,
+				AdoptionLeg::Nodes {
+					window: NodeStatePrefix {}.raw_range()?,
+					until: None,
+				},
+			]),
+			swept: HashSet::new(),
+		})
+	}
+
+	/// The rotation starting after `queue` and ending with it.
+	fn after(queue: EventQueue) -> Result<Self> {
+		let nodes = NodeStatePrefix {}.raw_range()?;
+		let legs = match queue {
+			EventQueue::Root => VecDeque::from([
+				AdoptionLeg::Nodes {
+					window: nodes,
+					until: None,
+				},
+				AdoptionLeg::Root,
+			]),
+			EventQueue::Node(nd) => {
+				let subtree = NodeStateRoot {
+					nd,
+				}
+				.raw_range()?;
+				VecDeque::from([
+					AdoptionLeg::Nodes {
+						window: nodes.clone().resume_after(subtree.end(), Direction::Forward),
+						until: None,
+					},
+					AdoptionLeg::Root,
+					AdoptionLeg::Nodes {
+						window: nodes,
+						until: Some(nd),
+					},
+				])
+			}
+		};
+		Ok(Self {
+			legs,
+			swept: HashSet::new(),
+		})
+	}
+}
+
+/// Why a pass stopped before the end of its rotation.
+enum SweepStop {
+	/// The fetch budget was spent in this queue.
+	Budget(EventQueue),
+	/// The page of nodes was walked.
+	Page,
+	/// The lease passed to another node, which sweeps from here.
+	LeaseLost,
+}
+
+/// Where [`Datastore::drain_event_range`] left a queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Drained {
+	/// The next pass owes the queue nothing.
+	Clear,
+	/// The queue holds entries the next pass owes a run.
+	Backlog,
+	/// The lease the drain ran under passed to another node, which drains
+	/// the queue from here.
+	LeaseLost,
+}
+
+impl Drained {
+	/// [`Self::Backlog`] when the next pass owes the queue a run, else
+	/// [`Self::Clear`].
+	const fn owed(backlog: bool) -> Self {
+		if backlog {
+			Self::Backlog
+		} else {
+			Self::Clear
+		}
+	}
+}
+
+/// One adoption pass's running state, shared by the legs of its rotation.
+struct AdoptionSweep<'a> {
+	lh: &'a LeaseHandler,
+	canceller: &'a CancellationToken,
+	/// Fetches that find an entry the pass may still make.
+	budget: usize,
+	/// Nodes with state the pass may still step over.
+	steps: usize,
+	pass: Pass,
+	/// The queues drained so far.
+	swept: HashSet<EventQueue>,
+	/// The queue whose drain failed the pass, when one did.
+	failed: Option<EventQueue>,
+}
+
+/// The first node with state at or after a walk's position.
+struct NodeState {
+	nd: Uuid,
+	/// Whether that state includes an event queue.
+	queued: bool,
+	/// Whether the queue has an owner that drains it: the node has a row that
+	/// is not archived, and the row's heartbeat is the one its owner wrote
+	/// beside it, which only a release that drains per-node queues does. A
+	/// row kept fresh by a release that queues at the root — the node rolled
+	/// back with its id kept — is live, but its owner cannot see this queue.
+	owned: bool,
+}
+
+/// The node a key beneath the node-state prefix belongs to: the level puts
+/// the node id, sixteen raw bytes, right after its prefix and before anything
+/// a key beneath the node adds. `None` for bytes too short to hold one.
+fn node_of_state_key(key: &[u8]) -> Result<Option<Uuid>> {
+	let prefix = NodeStatePrefix {}.encode_bound()?;
+	let Some(rest) = key.strip_prefix(prefix.as_ref()) else {
+		return Ok(None);
+	};
+	Ok(rest.get(..16).and_then(|id| Uuid::from_slice(id).ok()))
+}
+
+/// What drives a datastore's maintenance jobs.
+///
+/// Whichever of [`Datastore::start_maintenance_tasks`] and
+/// [`Datastore::run_maintenance_slice`] is called first chooses, and the choice
+/// holds for the life of the datastore: two drivers would run every job twice,
+/// and the jobs that take no lease — the live-query router among them — would
+/// then deliver the same work twice. Recorded under one lock so the two entry
+/// points cannot both find the datastore undriven.
+enum MaintenanceDriver {
+	/// Neither entry point has been called.
+	Undriven,
+	/// The datastore's own tasks, started by the builder or by
+	/// [`Datastore::start_maintenance_tasks`].
+	Tasks(crate::kvs::tasks::Tasks),
+	/// A host calling [`Datastore::run_maintenance_slice`] on its own schedule.
+	Host,
+}
+
+impl MaintenanceDriver {
+	/// Takes the task handles, leaving the datastore undriven. A host-driven
+	/// or undriven datastore is left as it is and has none to give.
+	fn take_tasks(&mut self) -> Option<crate::kvs::tasks::Tasks> {
+		match std::mem::replace(self, Self::Undriven) {
+			Self::Tasks(tasks) => Some(tasks),
+			driver @ (Self::Undriven | Self::Host) => {
+				*self = driver;
+				None
+			}
+		}
+	}
+}
+
 /// How a conditional write to a durable RPC session ended.
 enum ConditionalWrite {
 	/// The write committed.
@@ -456,20 +794,88 @@ pub struct Datastore {
 	/// Cancellation for this datastore's own background work, tripped by
 	/// [`Self::shutdown`].
 	pub(super) shutdown: CancellationToken,
-	/// Handles for this datastore's maintenance tasks, so [`Self::shutdown`]
-	/// can wait for them to stop.
+	/// What drives this datastore's maintenance jobs, and the task handles
+	/// when it is the datastore's own tasks, so [`Self::shutdown`] can wait
+	/// for them to stop.
 	///
-	/// A datastore is not a working database without them — index compaction,
-	/// tombstone reclaim, changefeed GC, index-build recovery and the cluster
-	/// heartbeat all live there — so the builder starts them rather than
-	/// leaving it to the embedder. `None` for a datastore built with
-	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
-	/// until [`Self::start_maintenance_tasks`] is called on it.
-	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
+	/// A datastore is not a working database without a driver — index
+	/// compaction, tombstone reclaim, changefeed GC, index-build recovery and
+	/// the cluster heartbeat all live there — so the builder starts the tasks
+	/// rather than leaving it to the embedder. A datastore built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)
+	/// is undriven until [`Self::start_maintenance_tasks`] or
+	/// [`Self::run_maintenance_slice`] is called on it.
+	maintenance: parking_lot::Mutex<MaintenanceDriver>,
 	/// Whether this datastore answers write barriers and keeps its write fence armed
 	/// ([`Self::begin_answering_write_barriers`]), and so records that it does
-	/// ([`Self::advertises_write_barrier`]).
+	/// ([`Self::advertises_write_barrier`]). Only the datastore's own tasks answer them: a
+	/// datastore a host drives answers none.
 	pub(super) answers_write_barriers: std::sync::atomic::AtomicBool,
+	/// The schedule a host drives through [`Self::run_maintenance_slice`].
+	/// Built on the first slice; `None` until then, for every datastore whose
+	/// tasks run themselves, and again after [`Self::shutdown`], which drops
+	/// it once the slice in flight has ended: its runner holds this
+	/// datastore's claim on the process metrics refresh, which another
+	/// datastore in the process can take only once the runner is gone. Held
+	/// for the length of a slice, so shutdown can wait for one in flight.
+	host_maintenance: tokio::sync::Mutex<Option<HostMaintenance>>,
+	/// The walk the stalled-index-build sweep in progress is making over the
+	/// catalog's indexes; `None` between sweeps. This node's alone: the sweep
+	/// runs under a lease, and a node the lease moves to begins a sweep of
+	/// its own. See [`IndexWalk`].
+	resume_walk: parking_lot::Mutex<Option<IndexWalk>>,
+	/// The scan of the durable RPC sessions a purge pass stopped in when it
+	/// spent its slice with pages still to read; `None` between scans. This
+	/// node's alone: the purge runs under a lease, and a node the lease
+	/// moves to scans from the head, which purges nothing twice. See
+	/// [`KeyScan`].
+	rpc_session_cursor: parking_lot::Mutex<Option<KeyScan>>,
+	/// The scan of the node rows an expiry pass stopped in when it spent its
+	/// slice with pages still to read; `None` between scans. This node's
+	/// alone: every node runs expiry, and archiving is conditional on the
+	/// heartbeat the scan saw, so a scan another node runs alongside archives
+	/// nothing twice. See [`KeyScan`].
+	node_expire_cursor: parking_lot::Mutex<Option<KeyScan>>,
+	/// The scan of the node rows a cleanup pass stopped in when it spent its
+	/// slice with pages still to read; `None` between scans. This node's
+	/// alone: every node runs cleanup, and a node is re-read as archived in
+	/// the transaction that cleans it, so a scan another node runs alongside
+	/// cleans nothing twice. See [`KeyScan`].
+	node_cleanup_cursor: parking_lot::Mutex<Option<NodeCleanupScan>>,
+	/// The scan of the reclaim queue a reclaim pass stopped in when it walked
+	/// its share of batches with entries still to walk; `None` between scans.
+	/// This node's alone: the pass runs under a lease, and a node the lease
+	/// moves to scans from the head. See [`ReclaimScan`].
+	reclaim_cursor: parking_lot::Mutex<Option<ReclaimScan>>,
+	/// The changefeed-collection sweep in progress, or one not begun between
+	/// sweeps. This node's alone: the sweep runs under a lease, and a node the
+	/// lease moves to begins a sweep of its own. See [`ChangefeedSweep`].
+	changefeed_sweep: parking_lot::Mutex<ChangefeedSweep>,
+	/// As `changefeed_sweep`, for the live-query event collector, which sweeps
+	/// the catalog on its own cadence.
+	live_event_sweep: parking_lot::Mutex<ChangefeedSweep>,
+	/// Where the index-compaction drain stands between slices: where its
+	/// rotating window resumes, and what it has kept queued so far. Kept across
+	/// slices so a slice that stops at its budget continues the drain rather
+	/// than restarting it, which is what keeps a later-sorting index from
+	/// starving behind ones that keep refilling. See [`CompactionCursor`].
+	compaction_cursor: parking_lot::Mutex<CompactionCursor>,
+	/// As `compaction_cursor`, for the graph fold drain, together with whether
+	/// the rotation since it last began at the head has made progress. A
+	/// rotation over scopes that all fail spans as many slices as its budget
+	/// dictates, and that flag is what lets the slice reaching the end tell a
+	/// failed rotation, which yields, from one that has merely not finished.
+	fold_cursor: parking_lot::Mutex<FoldCursor>,
+	/// The event-adoption sweep's rotation in progress, or `None` when the
+	/// last pass ended one: the next then begins from the ring's start. See
+	/// [`AdoptionRotation`].
+	adoption_rotation: parking_lot::Mutex<Option<AdoptionRotation>>,
+	/// Where each event queue's drain stands: the lap in progress over it,
+	/// kept while a pass ends at its budget or is cancelled with the queue
+	/// still full, and dropped once a pass reaches the queue's end. A pass
+	/// that continues past the entries it could not run reaches the ones
+	/// behind them without reading the same prefix again.
+	event_laps: parking_lot::Mutex<HashMap<EventQueue, EventLap>>,
 	/// The cadences the maintenance tasks run at, kept so
 	/// [`Self::start_maintenance_tasks`] starts them on the same schedule the
 	/// builder was given rather than on whatever its caller passes in.
@@ -484,6 +890,13 @@ pub struct Datastore {
 	shutdown_lock: tokio::sync::Mutex<()>,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
+	/// The queued async events a worker of this process is running, by the
+	/// entry's key, from its claim to its settlement. A second worker of this
+	/// process is refused an entry marked here, and a claim this node wrote
+	/// on an entry not marked here is void; see
+	/// [`crate::doc::process_next_events_batch`]. A restart or a fork starts
+	/// with none marked, so the claims of the process before are void to it.
+	running_events: RunningEvents,
 	/// Whether this process created the datastore's storage.
 	///
 	/// Latched by [`Self::check_version`], because the underlying signal is
@@ -491,6 +904,20 @@ pub struct Datastore {
 	/// retries after a later failure would otherwise see the key already there
 	/// and be told the datastore is pre-existing.
 	created_here: std::sync::atomic::AtomicBool,
+	/// Whether this datastore's data migrations have run, which every
+	/// maintenance job but the cluster heartbeat waits for before its first
+	/// pass.
+	///
+	/// A migration rewrites persisted data under a lease, and a pass that ran
+	/// alongside it would read that data mid-rewrite: act on half of it, or
+	/// write back the shape the migration is retiring. The heartbeat is exempt
+	/// because the migration's lease is this node's, and holding it depends on
+	/// the node's membership row staying fresh. Raised by
+	/// [`Self::check_version`] once the migrations have run, and by the builder
+	/// for a datastore this process created or found already migrated, so a
+	/// datastore that owes nothing runs its maintenance without that call. A
+	/// `watch` channel, so a task waits on it without polling.
+	migrated: tokio::sync::watch::Sender<bool>,
 	/// Whether [`Self::settle_feature_level`] has read the store's feature
 	/// level into the shared cell, so [`Self::check_version`] reads it at most
 	/// once whether or not the builder did.
@@ -569,6 +996,9 @@ pub struct Datastore {
 	/// unmaterialised updates on finding its queue empty, or `None` before the
 	/// first sweep.
 	compaction_swept_at: parking_lot::Mutex<Option<Instant>>,
+	/// Where the table migration job's walk of its queues stands between
+	/// passes; see [`table_migration::TableMigrationLap`].
+	table_migration_lap: parking_lot::Mutex<table_migration::TableMigrationLap>,
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -886,6 +1316,9 @@ struct CompactionBatchCleanup {
 	errors: usize,
 	/// Whether the cleanup committed.
 	deleted: bool,
+	/// Whether a cleanup that did not commit gave up on retryable conflicts
+	/// that outlasted its retries, rather than failing on anything else.
+	contended: bool,
 	/// The batch's keys the committed cleanup left queued.
 	kept: Vec<Vec<u8>>,
 	/// The indexes of which the committed cleanup kept one request, as their
@@ -898,20 +1331,21 @@ struct CompactionBatchCleanup {
 	passed: Vec<IndexKeyBase>,
 }
 
-/// One index definition the catalog holds, with where it is defined.
-struct DefinedIndex {
-	ns: crate::catalog::NamespaceId,
-	ns_name: surrealdb_strand::Strand,
-	db: crate::catalog::DatabaseId,
-	db_name: surrealdb_strand::Strand,
-	tb: crate::catalog::TableId,
-	ix: Arc<crate::catalog::IndexDefinition>,
+/// How [`Datastore::delete_index_compaction_batch`] ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CompactionCleanupEnd {
+	/// The cleanup committed.
+	Committed,
+	/// Retryable conflicts outlasted the cleanup's retries.
+	Contended,
+	/// The cleanup failed on anything else.
+	Failed,
 }
 
 /// What one drain of the compaction queue has left queued so far, which its
 /// later batches do not pass again, so a drain passes each index's kept
 /// requests at most once.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CompactionDrain {
 	/// The keys earlier batches left queued.
 	kept: HashSet<Vec<u8>>,
@@ -923,10 +1357,45 @@ struct CompactionDrain {
 	/// one the batch kept, or a failure left to the index's next write — is
 	/// settled for this drain.
 	passed: HashSet<IndexKeyBase>,
-	/// Whether this drain has swept the defined indexes, which it does at most
+	/// How far this drain has swept the defined indexes, which it does at most
 	/// once whatever the sweep's throttle allows.
-	swept: bool,
+	sweep: DrainSweep,
 }
+
+/// How far a compaction drain's sweep of the defined indexes has got.
+///
+/// The sweep walks the catalog a page of [`INDEX_COMPACTION_SWEEP_STEPS`] steps
+/// at a time, each page charged to the slice as a queue batch is, so a slice
+/// reads a bounded part of the catalog however many indexes it holds, and the
+/// walk keeps its place between the slices of a drain.
+#[derive(Clone, Default)]
+enum DrainSweep {
+	/// The drain has not yet reached a queue drained as far as it can be.
+	#[default]
+	Unbegun,
+	/// The walk, as far as the pages so far have taken it.
+	Walking(Box<IndexWalk>),
+	/// The walk reached the end of the catalog, failed, or was skipped by the
+	/// throttle.
+	Done,
+}
+
+/// What a drain's sweep left the drain to do.
+enum Swept {
+	/// A page queued requests, which the drain acts on.
+	Queued,
+	/// The slice's budget was spent with catalog still to walk.
+	Spent,
+	/// The sweep is over and queued nothing on its last page.
+	Done,
+	/// Another node took the lease before a page; the walk stays where it was.
+	LeaseLost,
+}
+
+/// Catalog steps one page of a compaction drain's sweep takes; see
+/// [`INDEX_RESUME_PAGE_SIZE`], which bounds the stalled-build scan's pages the
+/// same way. Every index a page reaches costs up to two probes besides.
+const INDEX_COMPACTION_SWEEP_STEPS: usize = 256;
 
 impl CompactionDrain {
 	/// Whether a batch passes the index `key` names: an undecodable key never
@@ -935,6 +1404,26 @@ impl CompactionDrain {
 	fn passes(&self, key: &[u8], ikb: Option<&IndexKeyBase>) -> bool {
 		ikb.is_some_and(|ikb| !self.kept.contains(key) && !self.retained.contains(ikb))
 	}
+}
+
+/// Where the index-compaction drain stands between the calls that run it.
+///
+/// A drain is one run of the queue's rotation until it ends: on a lap that
+/// acted on nothing, or once a sole writer's pass has covered the whole queue,
+/// in either case with a sweep of the defined indexes that queued nothing.
+/// A call that stops before then — at its batch budget, at a cleanup that did
+/// not commit, or at a lease another node took — leaves the drain here for the
+/// next call to continue; the call that ends it resets this, so the next call
+/// begins a drain of its own from the head of the queue.
+#[derive(Clone, Default)]
+struct CompactionCursor {
+	/// The queue position the last batch covered, or `None` at the head.
+	resume_at: Option<Vec<u8>>,
+	/// What the drain has kept, passed and swept so far.
+	drain: CompactionDrain,
+	/// Whether the current lap of the queue acted on a request: passed it, or
+	/// deleted it.
+	lap_passed: bool,
 }
 
 /// The index each queue key names, or `None` for a key that does not decode,
@@ -1306,11 +1795,24 @@ impl Datastore {
 		let function_registry = Arc::new(FunctionRegistry::with_builtins());
 		Self {
 			shutdown: CancellationToken::new(),
-			maintenance: parking_lot::Mutex::new(None),
+			maintenance: parking_lot::Mutex::new(MaintenanceDriver::Undriven),
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
+			host_maintenance: tokio::sync::Mutex::new(None),
+			resume_walk: parking_lot::Mutex::new(None),
+			rpc_session_cursor: parking_lot::Mutex::new(None),
+			node_expire_cursor: parking_lot::Mutex::new(None),
+			node_cleanup_cursor: parking_lot::Mutex::new(None),
+			reclaim_cursor: parking_lot::Mutex::new(None),
+			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
+			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
+			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
+			fold_cursor: parking_lot::Mutex::new(FoldCursor::default()),
+			adoption_rotation: parking_lot::Mutex::new(None),
+			event_laps: parking_lot::Mutex::new(HashMap::new()),
 			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id: self.id,
+			running_events: RunningEvents::default(),
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
@@ -1336,6 +1838,7 @@ impl Datastore {
 			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			compaction_swept_at: parking_lot::Mutex::new(None),
+			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
@@ -1353,6 +1856,7 @@ impl Datastore {
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			migrated: self.migrated,
 			feature_level_settled: std::sync::atomic::AtomicBool::new(
 				self.feature_level_settled.load(std::sync::atomic::Ordering::Acquire),
 			),
@@ -1389,11 +1893,24 @@ impl Datastore {
 		Self {
 			// A fork is unshared, so it carries no maintenance tasks.
 			shutdown: CancellationToken::new(),
-			maintenance: parking_lot::Mutex::new(None),
+			maintenance: parking_lot::Mutex::new(MaintenanceDriver::Undriven),
 			answers_write_barriers: std::sync::atomic::AtomicBool::new(false),
+			host_maintenance: tokio::sync::Mutex::new(None),
+			resume_walk: parking_lot::Mutex::new(None),
+			rpc_session_cursor: parking_lot::Mutex::new(None),
+			node_expire_cursor: parking_lot::Mutex::new(None),
+			node_cleanup_cursor: parking_lot::Mutex::new(None),
+			reclaim_cursor: parking_lot::Mutex::new(None),
+			changefeed_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
+			live_event_sweep: parking_lot::Mutex::new(ChangefeedSweep::default()),
+			compaction_cursor: parking_lot::Mutex::new(CompactionCursor::default()),
+			fold_cursor: parking_lot::Mutex::new(FoldCursor::default()),
+			adoption_rotation: parking_lot::Mutex::new(None),
+			event_laps: parking_lot::Mutex::new(HashMap::new()),
 			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id,
+			running_events: RunningEvents::default(),
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: self.dynamic_configuration.clone(),
 			slow_log: self.slow_log.clone(),
@@ -1419,6 +1936,7 @@ impl Datastore {
 			),
 			index_builder: IndexBuilder::new(transaction_factory.clone()),
 			compaction_swept_at: parking_lot::Mutex::new(None),
+			table_migration_lap: parking_lot::Mutex::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory.clone(),
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
@@ -1436,6 +1954,7 @@ impl Datastore {
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			migrated: tokio::sync::watch::channel(self.is_migrated()).0,
 			feature_level_settled: std::sync::atomic::AtomicBool::new(
 				self.feature_level_settled.load(std::sync::atomic::Ordering::Acquire),
 			),
@@ -1510,6 +2029,12 @@ impl Datastore {
 	/// Returns the broker used to flush live-query notifications after commit.
 	pub(crate) fn live_query_broker(&self) -> Option<Arc<OrderedBroker>> {
 		self.live_query_broker.clone()
+	}
+
+	/// This node's live-query router; see [`crate::lq`].
+	#[cfg(test)]
+	pub(crate) fn live_query_router(&self) -> &LiveQueryRouter {
+		&self.live_query_router
 	}
 
 	/// Looks up the public HTTP endpoint that the cluster member with `node_id`
@@ -1775,8 +2300,13 @@ impl Datastore {
 		&self.function_registry
 	}
 
-	pub(super) fn clock_now(&self) -> Timestamp {
+	pub(crate) fn clock_now(&self) -> Timestamp {
 		SystemClock::new().now()
+	}
+
+	/// When this datastore was opened, on the clock [`Self::clock_now`] reads.
+	pub(crate) fn running_events(&self) -> &RunningEvents {
+		&self.running_events
 	}
 
 	/// Verifies the datastore's storage version and applies any data migrations
@@ -1848,6 +2378,8 @@ impl Datastore {
 			// itself.
 			self.raise_sole_writer_store().await?;
 		}
+		// Every maintenance job but the heartbeat waits for this.
+		self.mark_migrated();
 		// Everything ok
 		Ok((version, is_new))
 	}
@@ -1900,9 +2432,14 @@ impl Datastore {
 		} = verdict
 		{
 			self.open_read_only(features);
-			return Ok(());
+		} else {
+			migration::attach(self, is_new).await?;
 		}
-		migration::attach(self, is_new).await
+		// The store is attached only once it owes this build no migration, or
+		// opened read-only where none could run, so the jobs a host drives through
+		// `run_maintenance_slice` are released as `check_version` releases them.
+		self.mark_migrated();
+		Ok(())
 	}
 
 	/// Settles the datastore's major storage version, stamping it if it carries
@@ -1920,6 +2457,28 @@ impl Datastore {
 	/// found — want [`Self::check_version`].
 	pub(crate) async fn settle_storage_version(&self) -> Result<(MajorVersion, bool)> {
 		Self::retry_bootstrap("Check version", || self.get_version()).await
+	}
+
+	/// Records that the datastore's data migrations have run, releasing the
+	/// maintenance jobs waiting for them. See [`Self::is_migrated`].
+	pub(crate) fn mark_migrated(&self) {
+		self.migrated.send_replace(true);
+	}
+
+	/// Whether the datastore's data migrations have run.
+	///
+	/// Every maintenance job but the cluster heartbeat waits for this before
+	/// its first pass, and a host-driven slice is refused until then. Set by
+	/// [`Self::check_version`], and already set on a datastore this process
+	/// created or opened to find fully migrated.
+	pub(crate) fn is_migrated(&self) -> bool {
+		*self.migrated.borrow()
+	}
+
+	/// A receiver that resolves once [`Self::is_migrated`] does, for a task to
+	/// wait on.
+	pub(crate) fn subscribe_migrated(&self) -> tokio::sync::watch::Receiver<bool> {
+		self.migrated.subscribe()
 	}
 
 	/// The full semantic version the datastore has been advanced to.
@@ -2705,6 +3264,9 @@ impl Datastore {
 	/// out of date. Call this only once [`Datastore::check_version`] has
 	/// returned.
 	///
+	/// Every job but the heartbeat also waits for that call to have run the
+	/// datastore's migrations, so a datastore that owes them runs no other
+	/// maintenance until it returns, however early the tasks are started.
 	/// A datastore that is open read-only ([`Self::is_read_only`]) starts only the
 	/// node-membership refresh, because every other task writes state it refuses.
 	///
@@ -2712,15 +3274,27 @@ impl Datastore {
 	///
 	/// It does not check the node membership refresh interval against the write fence these
 	/// tasks arm on a store other nodes write; [`Self::start_maintenance_tasks_checked`] does.
-	pub fn start_maintenance_tasks(self: &Arc<Self>) {
-		let mut maintenance = self.maintenance.lock();
-		if maintenance.is_some() {
-			return;
-		}
-		let tasks = crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options);
-		// A build without `maintenance-tasks` started none, and records none.
-		if cfg!(feature = "maintenance-tasks") {
-			*maintenance = Some(tasks);
+	///
+	/// Refused once a host has driven a slice through
+	/// [`Self::run_maintenance_slice`]: the tasks would run every job a second
+	/// time alongside it.
+	pub fn start_maintenance_tasks(self: &Arc<Self>) -> Result<()> {
+		let mut driver = self.maintenance.lock();
+		match &*driver {
+			MaintenanceDriver::Tasks(_) => Ok(()),
+			MaintenanceDriver::Host => bail!(
+				"A host drives this datastore's maintenance; its own tasks would run every job twice"
+			),
+			MaintenanceDriver::Undriven => {
+				let tasks =
+					crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options);
+				// A build without `maintenance-tasks` started none, and records
+				// none, so a host may still drive the datastore's maintenance.
+				if cfg!(feature = "maintenance-tasks") {
+					*driver = MaintenanceDriver::Tasks(tasks);
+				}
+				Ok(())
+			}
 		}
 	}
 
@@ -2731,13 +3305,30 @@ impl Datastore {
 	/// A node registered before this ([`Self::insert_node`]) records, before it returns, that it
 	/// answers write barriers ([`Self::publish_write_barrier_support`]), so it serves no write a
 	/// build elsewhere would take for one from a node without the barrier.
+	///
+	/// Refused, before anything is recorded, once a host drives the datastore's maintenance, as
+	/// [`Self::start_maintenance_tasks`] is. A datastore whose heartbeat is disabled records
+	/// nothing either: its tasks answer no barriers, since the write fence they would arm lapses
+	/// without a heartbeat.
 	pub async fn start_maintenance_tasks_checked(self: &Arc<Self>) -> Result<()> {
 		self.check_heartbeat_interval(self.engine_options.node_membership_refresh_interval).await?;
-		if self.maintenance.lock().is_none() {
+		let answers = !self.engine_options.node_membership_refresh_interval.is_zero()
+			&& !self.is_read_only()
+			&& cfg!(feature = "maintenance-tasks");
+		match &*self.maintenance.lock() {
+			MaintenanceDriver::Tasks(_) => return Ok(()),
+			MaintenanceDriver::Host => bail!(
+				"A host drives this datastore's maintenance; its own tasks would run every job twice"
+			),
+			// Begun under the lock a host's first slice takes, so that slice is refused rather
+			// than taking over a datastore that has begun recording that it answers barriers.
+			MaintenanceDriver::Undriven if answers => self.begin_answering_write_barriers(),
+			MaintenanceDriver::Undriven => {}
+		}
+		if answers {
 			self.publish_write_barrier_support().await?;
 		}
-		self.start_maintenance_tasks();
-		Ok(())
+		self.start_maintenance_tasks()
 	}
 
 	/// Whether this datastore's maintenance tasks are running.
@@ -2749,7 +3340,106 @@ impl Datastore {
 	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)
 	/// has this to assert against.
 	pub fn maintenance_tasks_running(&self) -> bool {
-		self.maintenance.lock().is_some()
+		matches!(&*self.maintenance.lock(), MaintenanceDriver::Tasks(_))
+	}
+
+	/// Runs one bounded slice of this node's background maintenance, for a host
+	/// that drives it itself instead of running the datastore's own tasks.
+	///
+	/// The datastore's tasks are the normal driver, and this is refused once
+	/// they run: two drivers would run every job twice and contend for their
+	/// own leases. The first slice makes the host the driver for the life of
+	/// the datastore, and [`Self::start_maintenance_tasks`] is refused from
+	/// then on for the same reason. It exists for a host built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)
+	/// that cannot run free-running tasks — a runtime with no timers between
+	/// requests — and calls this from its own schedule: on a request, on a host
+	/// timer, or as soon as the returned `next_due` allows. Each call runs at
+	/// most one job pass, bounded by that job's slice budget, and never waits
+	/// for a job that is not yet due. A result of [`Progress::More`] means the
+	/// job stopped at its budget with work still queued; call again at once.
+	///
+	/// Every job the tasks would run is on this schedule at the same cadence,
+	/// the cluster heartbeat included, so a host calling this as often as
+	/// `next_due` asks keeps its membership row fresh. Answering write
+	/// barriers is not ([`crate::kvs::write_barrier`]): it arms a fence that
+	/// refuses this node's writes once its heartbeat lapses, which a host's
+	/// schedule does not promise to prevent. A host-driven node answers none,
+	/// and records none, so builds elsewhere take it for a node that predates
+	/// the barrier and do not wait for its writes. Refused once a checked start
+	/// of the datastore's own tasks has begun answering them
+	/// ([`Self::start_maintenance_tasks_checked`]).
+	///
+	/// Refused until [`Self::check_version`] has run the datastore's
+	/// migrations: every job but the heartbeat waits for them, and a host
+	/// drives its jobs synchronously, so there is nothing to park a slice on
+	/// until then.
+	///
+	/// After [`Self::shutdown`] nothing is scheduled: a slice then runs no job
+	/// and reports no `next_due`, which is the host's cue to stop calling. A
+	/// slice that shutdown began during ends the same way once its job has
+	/// run.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub async fn run_maintenance_slice(self: &Arc<Self>) -> Result<MaintenanceSlice> {
+		// Checked before the driver is taken, so a host refused here can still
+		// start the datastore's own tasks instead.
+		if !self.is_migrated() {
+			bail!(
+				"The datastore's migrations have not run; call `check_version` before driving its maintenance"
+			);
+		}
+		{
+			let mut driver = self.maintenance.lock();
+			match &*driver {
+				MaintenanceDriver::Tasks(_) => bail!(
+					"The datastore runs its own maintenance tasks; a host-driven slice would run every job twice"
+				),
+				MaintenanceDriver::Host => {}
+				// A checked start of the datastore's own tasks has begun answering write
+				// barriers: a host driving the jobs instead would leave them unanswered, and
+				// every build elsewhere waiting for this node.
+				MaintenanceDriver::Undriven
+					if self.answers_write_barriers.load(std::sync::atomic::Ordering::SeqCst) =>
+				{
+					bail!(
+						"The datastore is starting its own maintenance tasks; a host-driven slice would run every job twice"
+					)
+				}
+				MaintenanceDriver::Undriven => *driver = MaintenanceDriver::Host,
+			}
+		}
+		let mut host = self.host_maintenance.lock().await;
+		if self.shutdown.is_cancelled() {
+			// Checked under the lock, so a slice that arrives once shutdown has
+			// dropped the schedule does not build it again.
+			return Ok(MaintenanceSlice {
+				job: None,
+				progress: Progress::Done,
+				next_due: None,
+			});
+		}
+		let slice = host
+			.get_or_insert_with(|| {
+				HostMaintenance::new(self, self.shutdown.clone(), &self.engine_options)
+			})
+			.step(self)
+			.await;
+		if self.shutdown.is_cancelled() {
+			// Shutdown began during this slice, and may have stopped waiting
+			// for it: the schedule goes with the slice either way, so the claim
+			// its runner holds on the process metrics refresh is released now
+			// rather than with the datastore, and nothing is scheduled again.
+			*host = None;
+			return Ok(MaintenanceSlice {
+				job: slice.job,
+				progress: Progress::Done,
+				next_due: None,
+			});
+		}
+		Ok(slice)
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -2776,7 +3466,7 @@ impl Datastore {
 		self.shutdown.cancel();
 		// Taken rather than borrowed: the guard must not be held across the
 		// await, and the handles are consumed by resolving them.
-		let tasks = self.maintenance.lock().take();
+		let tasks = self.maintenance.lock().take_tasks();
 		if let Some(tasks) = tasks {
 			// Bounded: a pass runs user-defined SurrealQL in the async event
 			// case, so waiting for one to finish cannot be waiting forever.
@@ -2787,6 +3477,24 @@ impl Datastore {
 					 continuing shutdown without them"
 				);
 			}
+		}
+		// A host driving maintenance through `run_maintenance_slice` holds this
+		// lock for the length of one pass, so taking it waits for a pass in
+		// flight to end — for the same reason, and with the same bound, as the
+		// tasks above. The cancellation above ends the pass at its next
+		// boundary. The schedule goes with the pass: its runner holds this
+		// datastore's claim on the process metrics refresh, and a datastore
+		// that stays referenced after shutting down must not keep that claim
+		// from the others in the process. A pass that outlives the wait fails
+		// at its next transaction, as the index builds below do, and drops the
+		// schedule itself when it returns.
+		match timeout(MAINTENANCE_SHUTDOWN_TIMEOUT, self.host_maintenance.lock()).await {
+			Ok(mut host) => *host = None,
+			Err(_) => warn!(
+				target: TARGET,
+				"A host-driven maintenance pass did not stop within {MAINTENANCE_SHUTDOWN_TIMEOUT:?}; \
+				 continuing shutdown without it"
+			),
 		}
 		// Local index builder tasks are deliberately left running: the storage
 		// engine shutdown below closes commit admission first, after which
@@ -2829,6 +3537,9 @@ impl Datastore {
 			NODE_DELETE_TIMEOUT,
 			self.delete_node_with_timeout(NODE_DELETE_TIMEOUT).await,
 		);
+		if let Err(err) = self.hand_back_event_queues_if_last_upgraded().await {
+			warn!(target: TARGET, "Could not hand back per-node event queues on shutdown: {err}");
+		}
 		// Run any storage engine shutdown tasks
 		self.transaction_factory.shutdown().await
 	}
@@ -3465,20 +4176,14 @@ impl Datastore {
 		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(
-			txn,
-			async {
-				self.write_node(&txn, &key, &node, false).await?;
-				// Registered before this node opens a transaction of its own, so it answers every
-				// write barrier asked so far (see `crate::kvs::write_barrier`). A node that answers
-				// none records no answer, and builds take it for one that predates the barrier.
-				if self.advertises_write_barrier() {
-					self.register_write_barrier_answer(&txn).await?;
-				}
-				Ok(())
-			}
-			.await
-		)
+		catch!(txn, self.write_node(&txn, &key, &node, false).await);
+		// Registered before this node opens a transaction of its own, so it answers every write
+		// barrier asked so far (see `crate::kvs::write_barrier`). A node that answers none records
+		// no answer, and builds take it for one that predates the barrier.
+		if self.advertises_write_barrier() {
+			catch!(txn, self.register_write_barrier_answer(&txn).await);
+		}
+		run!(txn, self.stamp_drain_heartbeat(&txn, now).await)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -3502,7 +4207,8 @@ impl Datastore {
 		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, self.write_node(&txn, &key, &node, true).await)
+		catch!(txn, self.write_node(&txn, &key, &node, true).await);
+		run!(txn, self.stamp_drain_heartbeat(&txn, now).await)
 	}
 
 	/// Updates this node, bounding each step and explicitly cancelling any
@@ -3546,7 +4252,26 @@ impl Datastore {
 			self.write_node(&txn, &key, &node, true),
 		)
 		.await?;
+		await_node_tx_step(
+			&txn,
+			deadline,
+			timeout_duration,
+			Some(canceller),
+			self.stamp_drain_heartbeat(&txn, now),
+		)
+		.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, Some(canceller), txn.commit()).await
+	}
+
+	/// Writes the drain heartbeat beside this node's row, in the transaction
+	/// that writes the row with the same `heartbeat`. Every write of the row
+	/// by this release goes through here, so the two read equal for as long
+	/// as this release keeps the row fresh; see [`NodeDrainHeartbeatKey`].
+	async fn stamp_drain_heartbeat(&self, txn: &Transaction, heartbeat: Timestamp) -> Result<()> {
+		let key = NodeDrainHeartbeatKey {
+			nd: self.id,
+		};
+		txn.set_key(&key, &heartbeat.value).await
 	}
 
 	/// Deletes a node from the cluster.
@@ -3615,244 +4340,536 @@ impl Datastore {
 		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.commit()).await
 	}
 
-	/// Expires nodes which have timedout from the cluster.
+	/// Expires nodes which have timed out from the cluster.
 	///
 	/// This function should be run periodically at an interval.
 	///
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
+	///
+	/// Runs [`Self::expire_nodes_slice`] until a pass reports
+	/// [`Progress::Done`], so every expired node is archived however many rows
+	/// the cluster holds: the passes are bounded, the call is not.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
 	)]
 	pub async fn expire_nodes(&self) -> Result<()> {
+		while self.expire_nodes_slice().await?.progress == Progress::More {}
+		Ok(())
+	}
+
+	/// One pass of [`Self::expire_nodes`] as a job pass.
+	///
+	/// Bounded: a pass scans at most [`NODE_EXPIRE_SLICE_BATCHES`] pages of
+	/// node rows, archives the expired nodes on each page in a commit of its
+	/// own, and one that stops with pages still to scan keeps its position and
+	/// reports [`Progress::More`], so the next pass continues after the page
+	/// it stopped at. A scan ends at the last row there was when it began:
+	/// rows registered past that key while it runs are the next scan's, so a
+	/// scan ends however fast nodes register.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub(crate) async fn expire_nodes_slice(&self) -> Result<Pass> {
+		self.expire_nodes_bounded(NODE_EXPIRE_SLICE_BATCHES).await
+	}
+
+	/// [`Self::expire_nodes_slice`] with the per-pass page budget lowered, so
+	/// a test can drive a pass that stops mid-scan and inspect what it left.
+	#[cfg(test)]
+	pub(crate) async fn expire_nodes_with_budget(&self, pages: usize) -> Result<Pass> {
+		self.expire_nodes_bounded(pages).await
+	}
+
+	/// One node expiry pass, scanning at most `pages` pages of node rows.
+	async fn expire_nodes_bounded(&self, pages: usize) -> Result<Pass> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
-		// Fetch all of the inactive nodes
-		let inactive = {
-			let txn = self.transaction(Read).await?;
-			let nds = catch!(txn, txn.all_nodes().await);
-			let now = self.clock_now();
-			catch!(txn, txn.cancel().await);
-			// Filter the inactive nodes
-			nds.iter()
-				.filter_map(|n| {
-					// Check that the node is active and has expired
-					match n.is_active() && n.heartbeat < now - NODE_LIVENESS {
-						true => Some(n.to_owned()),
-						false => None,
-					}
-				})
-				.collect::<Vec<_>>()
+		let mut budget = pages;
+		let full = NodePrefix {}.range()?;
+		// Continue the scan the previous pass stopped in, or begin one over
+		// the rows there are now.
+		let resumed = self.node_expire_cursor.lock().take();
+		let (mut after, end) = match resumed {
+			Some(scan) => (Some(scan.after), scan.end),
+			None => match self.range_end(full.clone()).await? {
+				Some(end) => (None, end),
+				// No node is registered.
+				None => return Ok(Pass::done(TaskLeaseState::NotLeased)),
+			},
 		};
-		// Check if there are inactive nodes
-		if !inactive.is_empty() {
-			// Open a writeable transaction
-			let txn = self.transaction(Write).await?;
-			// Whether any candidate still qualified once re-read below.
-			let mut expired = false;
-			// Archive the inactive nodes
-			for nd in inactive.iter() {
-				// Get the key for the node entry
-				let key = NodeKey {
-					nd: nd.id,
-				};
-				// The candidate set was sampled in an earlier transaction. A node
-				// id that survives a restart can be re-registered inside that
-				// window — `insert_node` upserts an active row under the same id,
-				// with a fresh heartbeat — and archiving it here would retire a
-				// live member. The write is therefore conditional on the heartbeat
-				// the scan saw: a row whose heartbeat has moved has re-registered
-				// or refreshed itself, and is not the row that expired.
-				//
-				// That closes the window in both directions. A commit that landed
-				// before this transaction's snapshot is visible to this re-read,
-				// and one racing this transaction writes the same key, which the
-				// engine's write-conflict detection rejects.
-				let current = catch!(txn, txn.get_key(&key, None).await);
-				let Some(current) =
-					current.filter(|n| n.is_active() && n.heartbeat == nd.heartbeat)
-				else {
-					trace!(target: TARGET, id = %nd.id, "Skipping node that is no longer expired");
-					continue;
-				};
-				// Log the node archival
-				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
-				// Mark the node as archived, carrying the re-read row forward so
-				// no field of the stale snapshot is written back
-				let node = current.archive();
-				// Update the node entry
-				catch!(txn, txn.replace_key(&key, &node).await);
-				expired = true;
+		// The nodes this pass archived.
+		let mut items = 0;
+		loop {
+			if budget == 0 {
+				// Spent with a page still to scan: the next pass resumes here.
+				if let Some(after) = after {
+					*self.node_expire_cursor.lock() = Some(KeyScan {
+						after,
+						end,
+					});
+				}
+				return Ok(Pass {
+					progress: Progress::More,
+					items,
+					oldest_age: None,
+					held: 0,
+					ran: items,
+					lease: TaskLeaseState::NotLeased,
+				});
 			}
-			// Commit the changes, or release the transaction when every candidate
-			// turned out to be live after all
-			match expired {
-				true => catch!(txn, txn.commit().await),
-				false => catch!(txn, txn.cancel().await),
+			budget -= 1;
+			let range = match &after {
+				Some(after) => full.clone().resume_after(after, Direction::Forward),
+				None => full.clone(),
+			};
+			// One page of node rows, read in a short-lived read transaction.
+			let batch = {
+				let txn = self.transaction(Read).await?;
+				let res = txn.batch_keys_vals(range, NORMAL_BATCH_SIZE, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			let now = self.clock_now();
+			// The expired nodes on the page: active, and silent for longer
+			// than the heartbeat allows.
+			let mut inactive = Vec::new();
+			for (_, v) in batch.result.iter() {
+				let node: Node = KVValue::kv_decode_value(v, ())?;
+				if node.is_active() && node.heartbeat < now - Duration::from_secs(30) {
+					inactive.push(node);
+				}
+			}
+			// Check if there are inactive nodes
+			if !inactive.is_empty() {
+				// Open a writeable transaction
+				let txn = self.transaction(Write).await?;
+				// How many candidates still qualified once re-read below.
+				let mut archived = 0;
+				// Archive the inactive nodes
+				for nd in inactive.iter() {
+					// Get the key for the node entry
+					let key = NodeKey {
+						nd: nd.id,
+					};
+					// The candidate set was sampled in an earlier transaction. A node
+					// id that survives a restart can be re-registered inside that
+					// window — `insert_node` upserts an active row under the same id,
+					// with a fresh heartbeat — and archiving it here would retire a
+					// live member. The write is therefore conditional on the heartbeat
+					// the scan saw: a row whose heartbeat has moved has re-registered
+					// or refreshed itself, and is not the row that expired.
+					//
+					// That closes the window in both directions. A commit that landed
+					// before this transaction's snapshot is visible to this re-read,
+					// and one racing this transaction writes the same key, which the
+					// engine's write-conflict detection rejects.
+					let current = catch!(txn, txn.get_key(&key, None).await);
+					let Some(current) =
+						current.filter(|n| n.is_active() && n.heartbeat == nd.heartbeat)
+					else {
+						trace!(target: TARGET, id = %nd.id, "Skipping node that is no longer expired");
+						continue;
+					};
+					// Log the node archival
+					trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+					// Mark the node as archived, carrying the re-read row forward so
+					// no field of the stale snapshot is written back
+					let node = current.archive();
+					// Update the node entry
+					catch!(txn, txn.replace_key(&key, &node).await);
+					archived += 1;
+				}
+				// Commit the changes, or release the transaction when every candidate
+				// turned out to be live after all
+				match archived {
+					0 => catch!(txn, txn.cancel().await),
+					_ => catch!(txn, txn.commit().await),
+				}
+				items += archived;
+			}
+			// A full page carries a continuation: the next read resumes after
+			// the last key this page returned. The page that reaches the end
+			// the scan began with ends it: what lies past that key was
+			// registered since, and is the next scan's.
+			let more = match (&batch.next, batch.result.last()) {
+				(Some(_), Some((k, _))) if *k < end => {
+					after = Some(k.clone());
+					true
+				}
+				_ => false,
+			};
+			if !more {
+				break;
 			}
 		}
 		// Everything was successful
-		Ok(())
+		Ok(Pass {
+			progress: Progress::Done,
+			items,
+			oldest_age: None,
+			held: 0,
+			ran: items,
+			lease: TaskLeaseState::NotLeased,
+		})
 	}
 
 	/// Removes and cleans up nodes which are not in this cluster any more.
 	///
 	/// This function should be run periodically at an interval.
 	///
-	/// This function clears up all nodes which have been marked as archived.
-	/// When a matching node is found, all node queries, and table queries are
-	/// garbage collected, before the node itself is completely deleted.
+	/// Every node marked archived has its live queries deleted, both the
+	/// node's registrations and the tables' entries for them, and then its
+	/// row, with the drain heartbeat, release record and write barrier keys
+	/// written beside it, once its heartbeat is
+	/// [`WRITE_BARRIER_EXCLUDE_AFTER`](crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER)
+	/// old: until then a build may wait for its write barrier answer, and finds
+	/// the node only through its row. A
+	/// node's queued async events are left in place: the event adoption sweep
+	/// ([`Self::event_processing_adopt`]) finds a queue by its own prefix,
+	/// whether or not a row for its owner remains, and drains it. The release
+	/// records of nodes whose row is gone are swept once the rows are scanned.
+	///
+	/// Runs [`Self::remove_nodes_slice`] until a pass reports
+	/// [`Progress::Done`], so every archived node is cleaned up however many
+	/// live queries it left behind, and every orphaned record swept: the
+	/// passes are bounded, the call is not.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
 	)]
 	pub async fn remove_nodes(&self) -> Result<()> {
-		// Log when this method is run
-		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
-		// Fetch all of the archived nodes
-		let archived = {
-			let txn = self.transaction(Read).await?;
-			let nds = catch!(txn, txn.all_nodes().await);
-			catch!(txn, txn.cancel().await);
-			// Filter the archived nodes
-			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
-		};
-		// Loop over the archived nodes
-		for id in archived.iter() {
-			// Open a writeable transaction
-			let mut next = Some(
-				NodeLiveQueryPrefix {
-					nd: *id,
-				}
-				.range()?,
-			);
-			let txn = self.transaction(Write).await?;
-			{
-				// The archived set was sampled in an earlier transaction. A node
-				// id that survives a restart can be re-registered inside that
-				// window — `insert_node` upserts an active row under the same id
-				// — and reaping it here would delete a live member along with the
-				// live queries it has already registered. Re-read the row in this
-				// transaction and only proceed while it is still archived.
-				let key = NodeKey {
-					nd: *id,
-				};
-				let node = catch!(txn, txn.get_key(&key, None).await);
-				let Some(node) = node.filter(|nd| nd.is_archived()) else {
-					trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
-					catch!(txn, txn.cancel().await);
-					continue;
-				};
-				// A build waits for an archived node's write barrier answer until its heartbeat is
-				// `WRITE_BARRIER_EXCLUDE_AFTER` old, and finds the node only through its row, so
-				// the row stays until then.
-				let excluded_before =
-					self.clock_now() - crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
-				if node.heartbeat >= excluded_before {
-					trace!(target: TARGET, id = %id, "Keeping archived node a build may still wait for");
-					catch!(txn, txn.cancel().await);
-					continue;
-				}
-			}
-			{
-				// Log the live query scanning
-				trace!(target: TARGET, id = %id, "Deleting live queries for node");
-				// Scan the live queries for this node
-				while let Some(rng) = next {
-					// Fetch the next batch of keys and values
-					let res = catch!(
-						txn,
-						txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await
-					);
-					// A full page carries a continuation: resume the range after
-					// the last key this page returned.
-					next = match (&res.next, res.result.last()) {
-						(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
-						_ => None,
-					};
-					for (k, v) in res.result.iter() {
-						// Decode the data for this live query
-						let val: NodeLiveQuery = KVValue::kv_decode_value(v, ())?;
-						// Get the key for this node live query
-						let nlq = catch!(txn, NodeLiveQueryKey::decode_key(k));
-						// Check that the node for this query is archived
-						if archived.contains(&nlq.nd) {
-							// Get the key for this table live query
-							let tlq = SubscriptionKey {
-								ns: val.ns,
-								db: val.db,
-								tb: Cow::Borrowed(&val.tb),
-								lq: nlq.lq,
-							};
-							// Delete the table live query
-							catch!(txn, txn.clr_key(&tlq).await);
-							// Delete the node live query
-							catch!(txn, txn.clr_key(&nlq).await);
-						}
-					}
-					// Pause and yield execution
-					yield_now!();
-				}
-			}
-			{
-				// Log the node deletion
-				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
-				// Get the key for the node entry
-				let key = NodeKey {
-					nd: *id,
-				};
-				// Delete the cluster node entry, and the release it recorded
-				catch!(txn, txn.clr_key(&key).await);
-				catch!(
-					txn,
-					txn.clr_key(&NodeReleaseKey {
-						nd: *id,
-					})
-					.await
-				);
-				catch!(
-					txn,
-					txn.clr_key(&crate::key::schema::WriteBarrierAckKey {
-						nd: *id,
-					})
-					.await
-				);
-				catch!(
-					txn,
-					txn.clr_key(&crate::key::schema::WriteBarrierHeartbeatKey {
-						nd: *id,
-					})
-					.await
-				);
-			}
-			// Commit the changes
-			catch!(txn, txn.commit().await);
-		}
-		// Release records whose node row is gone
-		self.remove_orphaned_node_releases().await?;
-		// Everything was successful
+		while self.remove_nodes_slice().await?.progress == Progress::More {}
 		Ok(())
 	}
 
-	/// Deletes the release records whose node row does not exist.
+	/// One pass of [`Self::remove_nodes`] as a job pass.
 	///
-	/// A release that does not know the records removes a node's row without removing its
-	/// record, so the record outlives the node. The records are read in batches without a write
-	/// transaction, and a batch with orphans is deleted in a write transaction that checks each
-	/// candidate again, so a node that registers in between keeps its record.
-	async fn remove_orphaned_node_releases(&self) -> Result<()> {
-		let mut next = Some(NodeReleasePrefix {}.range()?);
-		while let Some(rng) = next {
-			let candidates = {
+	/// Bounded: a pass reads at most [`NODE_CLEANUP_SLICE_BATCHES`] pages —
+	/// of node rows, then of the release records whose node row is gone,
+	/// which it sweeps with the pages left once the rows are scanned — and
+	/// deletes at most as many pages of keys, the archived nodes' live
+	/// queries a page per commit and then their rows, and the orphaned
+	/// records a page per commit. A pass that stops with rows or records
+	/// still to read, or a node still to clean, keeps its position and
+	/// reports [`Progress::More`]. What a pass deleted is committed, so the
+	/// next pass finds what remains of a node, or of a page of records, at
+	/// the head of what it reads. A scan ends at the last key there was when
+	/// it began: rows and records written past it while the scan runs are
+	/// the next scan's, so a scan ends however fast nodes register.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub(crate) async fn remove_nodes_slice(&self) -> Result<Pass> {
+		self.remove_nodes_bounded(
+			NODE_CLEANUP_SLICE_BATCHES,
+			NODE_CLEANUP_SLICE_BATCHES as u64 * u64::from(NORMAL_BATCH_SIZE),
+		)
+		.await
+	}
+
+	/// [`Self::remove_nodes_slice`] with the per-pass page and key budgets
+	/// lowered, so a test can drive a pass that stops mid-scan or mid-node and
+	/// inspect what it left behind.
+	#[cfg(test)]
+	pub(crate) async fn remove_nodes_with_budget(&self, pages: usize, budget: u64) -> Result<Pass> {
+		self.remove_nodes_bounded(pages, budget).await
+	}
+
+	/// One node cleanup pass, scanning at most `pages` pages of node rows and
+	/// deleting at most `budget` keys: an archived node's live queries a page
+	/// per commit, then its row.
+	async fn remove_nodes_bounded(&self, pages: usize, budget: u64) -> Result<Pass> {
+		// Log when this method is run
+		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
+		let mut pages = pages;
+		// Keys this pass may still delete, and the keys it has deleted.
+		let mut budget = budget;
+		let mut items = 0;
+		let full = NodePrefix {}.range()?;
+		// Continue the scan the previous pass stopped in, or begin one over
+		// the rows there are now.
+		let resumed = self.node_cleanup_cursor.lock().take();
+		let (mut after, end) = match resumed {
+			Some(NodeCleanupScan::Rows(scan)) => (Some(scan.after), scan.end),
+			// The rows were scanned by an earlier pass: the sweep continues.
+			Some(NodeCleanupScan::Releases {
+				after,
+				end,
+			}) => return self.sweep_node_releases(pages, budget, 0, Some((after, end))).await,
+			None => match self.range_end(full.clone()).await? {
+				Some(end) => (None, end),
+				// No node is registered: only release records can be left.
+				None => return self.sweep_node_releases(pages, budget, 0, None).await,
+			},
+		};
+		loop {
+			if pages == 0 || budget == 0 {
+				// Spent with a page still to scan: the next pass resumes here.
+				return Ok(self.node_cleanup_stopped(after, end, items));
+			}
+			pages -= 1;
+			// Where this page is read from. A pass that spends its keys among
+			// the page's archived nodes resumes here: a cleaned node's row is
+			// gone, so the page read again holds only what is left to clean.
+			let page_after = after.clone();
+			let range = match &after {
+				Some(after) => full.clone().resume_after(after, Direction::Forward),
+				None => full.clone(),
+			};
+			// One page of node rows, read in a short-lived read transaction.
+			let batch = {
 				let txn = self.transaction(Read).await?;
-				let res =
-					catch!(txn, txn.batch_keys_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await);
-				next = match (&res.next, res.result.last()) {
-					(Some(_), Some(last)) => Some(rng.resume_after(last, Direction::Forward)),
-					_ => None,
-				};
+				let res = txn.batch_keys_vals(range, NORMAL_BATCH_SIZE, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			// The archived nodes on the page
+			let mut archived = Vec::new();
+			for (_, v) in batch.result.iter() {
+				let node: Node = KVValue::kv_decode_value(v, ())?;
+				if let Some(id) = node.archived() {
+					archived.push(id);
+				}
+			}
+			// Loop over the archived nodes
+			'nodes: for id in archived.iter() {
+				let range = NodeLiveQueryPrefix {
+					nd: *id,
+				}
+				.range()?;
+				// Delete the node's live queries a page per commit, then its row.
+				loop {
+					if budget == 0 {
+						// Spent with this node still to clean. Every page deleted
+						// so far is committed, so the next pass finds what remains
+						// at the head of the node's range, reading this page of
+						// rows again.
+						return Ok(self.node_cleanup_stopped(page_after, end, items));
+					}
+					// Open a writeable transaction
+					let txn = self.transaction(Write).await?;
+					{
+						// The archived set was sampled in an earlier transaction. A node
+						// id that survives a restart can be re-registered inside that
+						// window — `insert_node` upserts an active row under the same id
+						// — and reaping it here would delete a live member along with the
+						// live queries it has already registered. Re-read the row in this
+						// transaction and only proceed while it is still archived.
+						let key = NodeKey {
+							nd: *id,
+						};
+						let node = catch!(txn, txn.get_key(&key, None).await);
+						let Some(node) = node.filter(|nd| nd.is_archived()) else {
+							trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
+							catch!(txn, txn.cancel().await);
+							continue 'nodes;
+						};
+						// A build waits for an archived node's write barrier answer until its
+						// heartbeat is `WRITE_BARRIER_EXCLUDE_AFTER` old, and finds the node only
+						// through its row, so the row stays until then.
+						let excluded_before = self.clock_now()
+							- crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
+						if node.heartbeat >= excluded_before {
+							trace!(target: TARGET, id = %id, "Keeping archived node a build may still wait for");
+							catch!(txn, txn.cancel().await);
+							continue 'nodes;
+						}
+					}
+					// Log the live query scanning
+					trace!(target: TARGET, id = %id, "Deleting live queries for node");
+					// One page of the node's live queries, bounded by what the budget
+					// has left. What an earlier page deleted is committed and gone, so
+					// every page is read from the head of the range.
+					let limit = budget.min(u64::from(NORMAL_BATCH_SIZE)) as u32;
+					let res = catch!(txn, txn.batch_keys_vals(range.clone(), limit, None).await);
+					for (k, v) in res.result.iter() {
+						// Decode the data for this live query
+						let val: NodeLiveQuery = catch!(txn, KVValue::kv_decode_value(v, ()));
+						// Get the key for this node live query
+						let nlq = catch!(txn, NodeLiveQueryKey::decode_key(k));
+						// Get the key for this table live query
+						let tlq = SubscriptionKey {
+							ns: val.ns,
+							db: val.db,
+							tb: Cow::Borrowed(&val.tb),
+							lq: nlq.lq,
+						};
+						// Delete the table live query
+						catch!(txn, txn.clr_key(&tlq).await);
+						// Delete the node live query
+						catch!(txn, txn.clr_key(&nlq).await);
+					}
+					let deleted = res.result.len() as u64;
+					budget -= deleted;
+					items += deleted;
+					if res.next.is_some() {
+						// A full page carries a continuation: commit it, and read the
+						// next from the head of what remains.
+						catch!(txn, txn.commit().await);
+						// Pause and yield execution
+						yield_now!();
+						continue;
+					}
+					// Log the node deletion
+					trace!(target: TARGET, id = %id, "Deleting node from the cluster");
+					// Get the key for the node entry
+					let key = NodeKey {
+						nd: *id,
+					};
+					// Delete the cluster node entry. The node's queued async events, if
+					// any, are not gated on this: the adoption sweep finds a queue by its
+					// own prefix, whether or not a row for its owner remains.
+					catch!(txn, txn.clr_key(&key).await);
+					// The drain heartbeat and the release record were written beside
+					// the row and go with it.
+					let stamp = NodeDrainHeartbeatKey {
+						nd: *id,
+					};
+					catch!(txn, txn.clr_key(&stamp).await);
+					let release = NodeReleaseKey {
+						nd: *id,
+					};
+					catch!(txn, txn.clr_key(&release).await);
+					// So were its write barrier answer and heartbeat mark.
+					catch!(
+						txn,
+						txn.clr_key(&crate::key::schema::WriteBarrierAckKey {
+							nd: *id,
+						})
+						.await
+					);
+					catch!(
+						txn,
+						txn.clr_key(&crate::key::schema::WriteBarrierHeartbeatKey {
+							nd: *id,
+						})
+						.await
+					);
+					// Commit the changes
+					catch!(txn, txn.commit().await);
+					// The row is a key of the budget too, so a pass over archived nodes
+					// that left no live queries behind is bounded as well.
+					budget = budget.saturating_sub(1);
+					items += 1;
+					break;
+				}
+			}
+			// A full page carries a continuation: the next read resumes after
+			// the last key this page returned. The page that reaches the end
+			// the scan began with ends it: what lies past that key was
+			// registered since, and is the next scan's.
+			let more = match (&batch.next, batch.result.last()) {
+				(Some(_), Some((k, _))) if *k < end => {
+					after = Some(k.clone());
+					true
+				}
+				_ => false,
+			};
+			if !more {
+				break;
+			}
+		}
+		// The rows are scanned: the release records whose node row is gone
+		// are swept with what the pass has left.
+		self.sweep_node_releases(pages, budget, items, None).await
+	}
+
+	/// The pass a node cleanup reports when it stops with rows still to scan,
+	/// its scan kept at `after` for the next pass to resume; a scan stopped at
+	/// its head is begun again, over the rows there are then.
+	fn node_cleanup_stopped(&self, after: Option<Vec<u8>>, end: Vec<u8>, items: u64) -> Pass {
+		if let Some(after) = after {
+			*self.node_cleanup_cursor.lock() = Some(NodeCleanupScan::Rows(KeyScan {
+				after,
+				end,
+			}));
+		}
+		Self::node_cleanup_more(items)
+	}
+
+	/// The pass a node cleanup reports when it stops with work still to do,
+	/// having deleted `items` keys.
+	fn node_cleanup_more(items: u64) -> Pass {
+		Pass {
+			progress: Progress::More,
+			items,
+			oldest_age: None,
+			held: 0,
+			ran: items,
+			lease: TaskLeaseState::NotLeased,
+		}
+	}
+
+	/// The pass a node cleanup reports when it has scanned every row and
+	/// swept every record, having deleted `items` keys.
+	fn node_cleanup_done(items: u64) -> Pass {
+		Pass {
+			progress: Progress::Done,
+			items,
+			oldest_age: None,
+			held: 0,
+			ran: items,
+			lease: TaskLeaseState::NotLeased,
+		}
+	}
+
+	/// The release-record sweep of a node cleanup pass, after its row scan:
+	/// deletes the release records whose node row does not exist, a page of
+	/// records per step, with the `pages` and `budget` the pass has left and
+	/// `items` the keys it has deleted. `scan` is where the previous pass
+	/// stopped in the sweep, or `None` to begin one over the records there
+	/// are now.
+	///
+	/// A release that does not know the records removes a node's row without
+	/// removing its record, so the record outlives the node. A page of records
+	/// is read without a write transaction, and its orphans are deleted in a
+	/// write transaction that checks each again, so a node that registers in
+	/// between keeps its record. A sweep that stops with pages still to read,
+	/// or orphans on a page beyond the keys left, keeps its position and the
+	/// pass reports [`Progress::More`]; what it deleted is committed, so the
+	/// page read again holds only what is left. A sweep ends at the last
+	/// record there was when it began, so records written past that key while
+	/// it runs are the next sweep's.
+	async fn sweep_node_releases(
+		&self,
+		mut pages: usize,
+		mut budget: u64,
+		mut items: u64,
+		scan: Option<(Option<Vec<u8>>, Vec<u8>)>,
+	) -> Result<Pass> {
+		let full = NodeReleasePrefix {}.range()?;
+		let (mut after, end) = match scan {
+			Some(scan) => scan,
+			None => match self.range_end(full.clone()).await? {
+				Some(end) => (None, end),
+				// No record is left.
+				None => return Ok(Self::node_cleanup_done(items)),
+			},
+		};
+		loop {
+			if pages == 0 || budget == 0 {
+				// Spent with a page still to read: the next pass resumes here.
+				*self.node_cleanup_cursor.lock() = Some(NodeCleanupScan::Releases {
+					after,
+					end,
+				});
+				return Ok(Self::node_cleanup_more(items));
+			}
+			pages -= 1;
+			let range = match &after {
+				Some(after) => full.clone().resume_after(after, Direction::Forward),
+				None => full.clone(),
+			};
+			// One page of records, read in a short-lived read transaction, and
+			// the nodes among them without a row.
+			let (batch, candidates) = {
+				let txn = self.transaction(Read).await?;
+				let res = catch!(txn, txn.batch_keys_raw(range, NORMAL_BATCH_SIZE, None).await);
 				// A key that does not spell a node id holds no record of a node, and is left alone
 				let nodes: Vec<Uuid> = res
 					.result
@@ -3862,26 +4879,52 @@ impl Datastore {
 					.collect();
 				let orphans = catch!(txn, Self::nodes_without_row(&txn, nodes).await);
 				catch!(txn, txn.cancel().await);
-				orphans
+				(res, orphans)
 			};
-			if candidates.is_empty() {
-				continue;
+			if !candidates.is_empty() {
+				let txn = self.transaction(Write).await?;
+				let orphans = catch!(txn, Self::nodes_without_row(&txn, candidates).await);
+				// As many of the page's orphans as the budget has left.
+				let within =
+					usize::try_from(budget).map_or(orphans.len(), |b| b.min(orphans.len()));
+				for nd in &orphans[..within] {
+					trace!(target: TARGET, id = %nd, "Deleting release record of a node that is gone");
+					catch!(
+						txn,
+						txn.clr_key(&NodeReleaseKey {
+							nd: *nd,
+						})
+						.await
+					);
+				}
+				catch!(txn, txn.commit().await);
+				budget -= within as u64;
+				items += within as u64;
+				if within < orphans.len() {
+					// Spent with orphans left on the page: the next pass reads
+					// it again, and finds only what is left.
+					*self.node_cleanup_cursor.lock() = Some(NodeCleanupScan::Releases {
+						after,
+						end,
+					});
+					return Ok(Self::node_cleanup_more(items));
+				}
 			}
-			let txn = self.transaction(Write).await?;
-			let orphans = catch!(txn, Self::nodes_without_row(&txn, candidates).await);
-			for nd in orphans {
-				trace!(target: TARGET, id = %nd, "Deleting release record of a node that is gone");
-				catch!(
-					txn,
-					txn.clr_key(&NodeReleaseKey {
-						nd,
-					})
-					.await
-				);
+			// A full page carries a continuation: the next read resumes after
+			// the last key this page returned. The page that reaches the end
+			// the sweep began with ends it: what lies past that key was
+			// written since, and is the next sweep's.
+			let more = match (&batch.next, batch.result.last()) {
+				(Some(_), Some(k)) if *k < end => {
+					after = Some(k.clone());
+					true
+				}
+				_ => false,
+			};
+			if !more {
+				return Ok(Self::node_cleanup_done(items));
 			}
-			catch!(txn, txn.commit().await);
 		}
-		Ok(())
 	}
 
 	/// The nodes of `nodes` that have no membership row, in one batched read.
@@ -4246,32 +5289,92 @@ impl Datastore {
 	/// decode (for example one written by a newer node during a rolling
 	/// upgrade) is skipped, never deleted.
 	///
+	/// Bounded: a pass scans at most [`RPC_SESSION_GC_SLICE_BATCHES`] pages,
+	/// and one that stops with pages still to scan keeps its position and
+	/// reports [`Progress::More`], so the next pass — run at once by the
+	/// datastore's own task, or by a host calling for another slice —
+	/// continues after the page it stopped at rather than from the head, and
+	/// the scan ends however many pages the sessions span. A scan ends at
+	/// the last session there was when it began: sessions created past that
+	/// key while it runs are the next scan's, so a scan ends however fast
+	/// sessions are created, and the sessions behind its position — scanned
+	/// while live, expired since — are reached by the scan after it rather
+	/// than left behind a suffix that keeps growing.
+	///
+	/// Reports the number of sessions purged as the pass's items. The lease
+	/// is checked before each entry: a pass that finds it passed to another
+	/// node stops there; see [`Self::purge_rpc_session_slice_with`].
+	///
 	/// # Arguments
 	/// * `interval` - The interval between purge runs, to calculate the lease duration
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
 	)]
-	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
+	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<Pass> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting expired RPC session purge");
-		if !self.is_read_only() {
+		let lh = if self.is_read_only() {
+			None
+		} else {
 			// Create a new lease handler
-			let lh = LeaseHandler::new(
-				self.sequences.clone(),
-				self.id,
-				self.transaction_factory.clone(),
-				TaskLeaseType::RpcSessionCleanup,
-				*interval * 2,
-			)?;
+			let lh = self.lease_handler(TaskLeaseType::RpcSessionCleanup, *interval * 2, None)?;
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
-				return Ok(());
+				return Ok(Pass::elsewhere());
 			}
-		}
+			Some(lh)
+		};
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Purging expired RPC sessions");
+		self.purge_rpc_session_slice_with(lh.as_ref()).await
+	}
+
+	/// One pass of [`Self::purge_expired_rpc_sessions`], under the lease `lh`.
+	///
+	/// The lease is checked before each entry. A check that finds it passed
+	/// to another node stops the pass there without failing it: the new
+	/// holder purges from its own scan, this node's scan keeps its place
+	/// after the last entry handled for its next pass should it hold the
+	/// lease again, and the pass reports [`TaskLeaseState::Elsewhere`] with
+	/// the sessions purged until then, due at the interval rather than at
+	/// once. The verdict is read rather than discarded because the check is
+	/// throttled to one datastore read per maintenance period: a check that
+	/// dropped it would leave the next answering from the throttle.
+	#[cfg(test)]
+	pub(crate) async fn purge_rpc_session_slice(&self, lh: &LeaseHandler) -> Result<Pass> {
+		self.purge_rpc_session_slice_with(Some(lh)).await
+	}
+
+	async fn purge_rpc_session_slice_with(&self, lh: Option<&LeaseHandler>) -> Result<Pass> {
 		let now = self.clock_now().value;
+		let mut purged: u64 = 0;
+		let held = if lh.is_some() {
+			TaskLeaseState::Held
+		} else {
+			TaskLeaseState::NotLeased
+		};
+		let report = |progress, purged, lease| Pass {
+			progress,
+			items: purged,
+			oldest_age: None,
+			held: 0,
+			ran: purged,
+			lease,
+		};
+		let mut budget = RPC_SESSION_GC_SLICE_BATCHES;
+		let full = SessionPrefix {}.range()?;
+		// Continue the scan the previous pass stopped in, or begin one over
+		// the sessions there are now.
+		let resumed = self.rpc_session_cursor.lock().take();
+		let (mut after, end) = match resumed {
+			Some(scan) => (Some(scan.after), scan.end),
+			None => match self.range_end(full.clone()).await? {
+				Some(end) => (None, end),
+				// Nothing stored.
+				None => return Ok(report(Progress::Done, 0, held)),
+			},
+		};
 		// Scan the durable session entries in batches under read transactions,
 		// deleting each expired entry in its own conditional-delete write
 		// transaction. The delete is guarded by the value read
@@ -4279,23 +5382,61 @@ impl Datastore {
 		// the scan read the old expired value is not clobbered — a blind `clr`
 		// is last-writer-wins on TiKV. A per-entry transaction keeps one such
 		// conflict from aborting the whole purge.
-		let mut next = Some(SessionPrefix {}.range()?);
-		while let Some(rng) = next {
+		loop {
+			if budget == 0 {
+				// Spent with a page still to scan: the next pass resumes here.
+				if let Some(after) = after {
+					*self.rpc_session_cursor.lock() = Some(KeyScan {
+						after,
+						end,
+					});
+				}
+				return Ok(report(Progress::More, purged, held));
+			}
+			let rng = match &after {
+				Some(k) => full.clone().resume_after(k, Direction::Forward),
+				None => full.clone(),
+			};
 			// Fetch the next batch of keys and values under a read transaction.
 			let batch = {
 				let txn = self.transaction(Read).await?;
-				let res =
-					catch!(txn, txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await);
+				let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
 				catch!(txn, txn.cancel().await);
 				res
 			};
-			// A full page carries a continuation: resume the range after the last
-			// key this page returned.
-			next = match (&batch.next, batch.result.last()) {
-				(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
-				_ => None,
+			budget -= 1;
+			// The key the page resumed after, which a lease lost on its first
+			// entry leaves the scan after.
+			let start = after.clone();
+			// A full page carries a continuation: the next read resumes after
+			// the last key this page returned. The page that reaches the end
+			// the scan began with ends it: what lies past that key was
+			// created since, and is the next scan's.
+			let more = match (&batch.next, batch.result.last()) {
+				(Some(_), Some((k, _))) if *k < end => {
+					after = Some(k.clone());
+					true
+				}
+				_ => false,
 			};
-			for (k, v) in batch.result.iter() {
+			for (i, (k, v)) in batch.result.iter().enumerate() {
+				if let Some(lh) = lh
+					&& !lh.try_maintain_lease().await?
+				{
+					// Another node holds the lease: the scan keeps its place
+					// after the last entry handled.
+					let handled = match i {
+						0 => start,
+						i => Some(batch.result[i - 1].0.clone()),
+					};
+					if let Some(after) = handled {
+						*self.rpc_session_cursor.lock() = Some(KeyScan {
+							after,
+							end,
+						});
+					}
+					return Ok(report(Progress::Done, purged, TaskLeaseState::Elsewhere));
+				}
 				// Decode the data for this session entry. Skip (but never
 				// delete) an entry we cannot decode: it may have been written
 				// by a newer node during a rolling upgrade.
@@ -4314,7 +5455,7 @@ impl Datastore {
 					let txn = self.bookkeeping_transaction().await?;
 					match txn.del_compare_key(&key, Some(&val)).await {
 						Ok(()) => match txn.commit().await {
-							Ok(()) => {}
+							Ok(()) => purged += 1,
 							// Refreshed concurrently at commit (TiKV): leave it.
 							Err(e) if super::is_conditional_write_conflict(&e) => {
 								let _ = txn.cancel().await;
@@ -4333,11 +5474,13 @@ impl Datastore {
 					}
 				}
 			}
+			if !more {
+				break;
+			}
 			// Pause and yield execution
 			yield_now!();
 		}
-		// Everything was successful
-		Ok(())
+		Ok(report(Progress::Done, purged, held))
 	}
 
 	// --------------------------------------------------
@@ -4408,7 +5551,19 @@ impl Datastore {
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Cleaning up old changefeed data from all databases
+	/// 2. Cleaning up old changefeed data from the databases one page of steps through the catalog
+	///    reaches
+	///
+	/// A sweep visits every database of the catalog at most
+	/// [`CHANGEFEED_GC_SLICE_STEPS`] steps per pass — a namespace entered, a
+	/// database reached or a page of a database's tables read — keeping its
+	/// place between passes, so a pass reads the pages of the catalog its
+	/// steps move through rather than the whole catalog. The next sweep begins
+	/// once it has visited them all.
+	///
+	/// Reports the entries deleted as the pass's items, and [`Progress::More`]
+	/// when the sweep has databases still to visit or a key budget ran out
+	/// before the backlog did.
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
@@ -4420,8 +5575,14 @@ impl Datastore {
 		&self,
 		interval: &Duration,
 		canceller: &CancellationToken,
-	) -> Result<()> {
-		self.changefeed_process_bounded(interval, CHANGEFEED_GC_PASS_KEY_BUDGET, canceller).await
+	) -> Result<Pass> {
+		self.changefeed_process_bounded(
+			interval,
+			CHANGEFEED_GC_PASS_KEY_BUDGET,
+			CHANGEFEED_GC_SLICE_STEPS,
+			canceller,
+		)
+		.await
 	}
 
 	/// [`Self::changefeed_process`] with the per-pass key budget lowered, so a
@@ -4434,71 +5595,223 @@ impl Datastore {
 		interval: &Duration,
 		budget: u64,
 		canceller: &CancellationToken,
-	) -> Result<()> {
-		self.changefeed_process_bounded(interval, budget, canceller).await
+	) -> Result<Pass> {
+		self.changefeed_process_bounded(interval, budget, CHANGEFEED_GC_SLICE_STEPS, canceller)
+			.await
 	}
 
-	/// One changefeed-collection pass, deleting at most `budget` entries from
-	/// each keyspace it collects.
+	/// [`Self::changefeed_process`] with the page of steps a pass takes
+	/// through the catalog lowered, so a test can drive a sweep that spans
+	/// several passes.
+	#[cfg(test)]
+	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
+	pub(crate) async fn changefeed_gc_with_page(
+		&self,
+		interval: &Duration,
+		steps: usize,
+		canceller: &CancellationToken,
+	) -> Result<Pass> {
+		self.changefeed_process_bounded(interval, CHANGEFEED_GC_PASS_KEY_BUDGET, steps, canceller)
+			.await
+	}
+
+	/// One changefeed-collection pass, taking at most `steps` steps through
+	/// the catalog — a namespace entered, a database reached or a page of a
+	/// database's tables read — and deleting at most `budget` entries.
 	///
-	/// The changefeed backlog and, under the Router engine, the live-query event
-	/// backlog are both sized by write throughput rather than by the catalog, so
-	/// neither is deleted in one transaction: each is paged behind committed
-	/// transactions of at most one page (see [`crate::kvs::paging`]). A pass
-	/// therefore costs a bounded amount of work however far either backlog has
-	/// run ahead, and the next tick resumes at the head of what survives.
-	///
-	/// The two keyspaces share this pass's lease but hold separate budgets. The
-	/// same writes fill both, so a budget spanning them would let whichever is
-	/// collected first spend it whenever the write rate outran it, leaving the
-	/// other uncollected on every pass and growing on disk without limit.
+	/// The changefeed backlog is sized by write throughput rather than by the
+	/// catalog, so it is not deleted in one transaction: it is paged behind
+	/// committed transactions of at most one page (see [`crate::kvs::paging`]).
+	/// A pass therefore costs a bounded amount of work however far the backlog
+	/// has run ahead, and the next tick resumes at the head of what survives.
 	async fn changefeed_process_bounded(
 		&self,
 		interval: &Duration,
 		budget: u64,
+		steps: usize,
 		canceller: &CancellationToken,
-	) -> Result<()> {
+	) -> Result<Pass> {
 		// An engine that writes no change feed has nothing to collect.
 		if !self.config.datastore.live_query_engine.writes_changefeed() {
-			return Ok(());
+			return Ok(Pass::done(TaskLeaseState::NotLeased));
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting changefeed garbage collection");
 		// Create a new lease handler
-		let lh = LeaseHandler::new(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::ChangeFeedCleanup,
-			*interval * 2,
-		)?;
-		// If we don't get the lease, another node is handling this task
+		let lh = self.lease_handler(TaskLeaseType::ChangeFeedCleanup, *interval * 2, None)?;
+		// If we don't get the lease, another node is handling this task. The
+		// sweep this node was making is dropped with it: the one it begins
+		// when the lease returns lists the catalog as it then stands.
 		if !lh.has_lease().await? {
-			return Ok(());
+			*self.changefeed_sweep.lock() = ChangefeedSweep::default();
+			return Ok(Pass::elsewhere());
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Entries this pass may delete from the changefeed keyspace, shared out
-		// across the databases it visits.
-		let mut cf_budget = budget;
-		// Perform the changefeed garbage collection. A pass that lost the lease
-		// ends this one: the live-query collector below shares the lease, and its
-		// own first check would be answered from the maintenance throttle by the
-		// very check that lost it — so it would delete alongside the new holder.
-		if !crate::cf::gc_all_at(self, &lh, canceller, &mut cf_budget).await? {
-			return Ok(());
+		let mut pass = Pass::done(TaskLeaseState::Held);
+		// The databases this pass collects: those the next page of steps of
+		// the sweep the previous pass left, or of one begun now, discovers.
+		// The sweep is taken from the datastore for the pass, and put back
+		// only if it has catalog left, so a pass that ends early drops it.
+		let mut sweep = std::mem::take(&mut *self.changefeed_sweep.lock());
+		let page = self.changefeed_page(&mut sweep, steps, SweepReads::Retention).await?;
+		// The databases the sweep reported by id have no changefeed retention
+		// this build can read, so their entries are retained. Only the
+		// live-event collector, whose window is the datastore's, collects them.
+		sweep.take_unknown();
+		let skipped = sweep.take_skipped();
+		if skipped > 0 {
+			warn!(
+				target: TARGET,
+				skipped,
+				"Changefeed garbage collection skipped catalog entries that need a newer release \
+				 than this build; their changefeed entries are retained"
+			);
 		}
-		// When the Router engine is active, also garbage-collect the dedicated
-		// live-query event keyspace, retaining entries for the configured window so
-		// reconnecting/lagging subscribers can still replay. This shares the
-		// pass's lease with the changefeed GC above and spends its own budget.
-		if self.config.datastore.live_query_engine == LiveQueryEngine::Router {
-			let retention = self.config.datastore.live_query_retention;
-			let mut lq_budget = budget;
-			crate::lq::gc::gc_all_at(self, &lh, retention, canceller, &mut lq_budget).await?;
+		// Entries this pass may delete, shared out across the databases it
+		// visits.
+		let mut left = budget;
+		let kept_lease = crate::cf::gc_databases(self, &lh, canceller, &mut left, &page).await?;
+		pass.items += budget - left;
+		if !kept_lease {
+			// Another node holds the lease now: the rest of the pass is its,
+			// and this one is reported under its standing.
+			pass.lease = TaskLeaseState::Elsewhere;
+			return Ok(pass);
 		}
-		// Everything ok
-		Ok(())
+		if left == 0 {
+			pass.progress = Progress::More;
+		}
+		// A sweep with databases still to visit keeps its place for the next
+		// pass, which is due at once; one that has visited them all is dropped,
+		// and the next pass begins a sweep over the catalog as it then stands.
+		if sweep.has_more() {
+			*self.changefeed_sweep.lock() = sweep;
+			pass.progress = Progress::More;
+		}
+		Ok(pass)
+	}
+
+	/// Garbage-collects the dedicated live-query event keyspace as a
+	/// background task, deleting the events older than the datastore's
+	/// `live_query_retention` so reconnecting or lagging subscribers can
+	/// still replay the window and no more.
+	///
+	/// Scheduled on its own interval, independently of
+	/// [`Self::changefeed_process`], so the window holds whether or not
+	/// changefeed collection runs. It runs whichever engine delivers live
+	/// queries: the events the Router engine captured before the datastore was
+	/// restarted under another engine age out all the same, and a database
+	/// that never captured one scans an empty range. A zero retention collects
+	/// nothing, and the pass takes no lease.
+	///
+	/// Leased under [`TaskLeaseType::LiveQueryCleanup`], a lease of its own:
+	/// this job and changefeed collection each run on a cadence a node may
+	/// disable, so a lease the two shared would let a node running one of
+	/// them keep every other node from running the other. A node on a release
+	/// that collects live events within its changefeed pass, under the
+	/// changefeed lease, may collect them alongside this job while the cluster
+	/// is upgraded. Each deletes only the events past its own retention, so
+	/// the overlap costs pages that conflict, which the next pass retries.
+	///
+	/// Its own sweep visits every database of the catalog at most
+	/// [`CHANGEFEED_GC_SLICE_STEPS`] steps per pass, keeping its place between
+	/// passes and reading no table definition, and collects as well the
+	/// database subtrees its probe of the keyspace reached where a namespace
+	/// or database definition it cannot read hid their ids. The window is the
+	/// datastore's, so no catalog definition bears on their events.
+	///
+	/// Reports the entries deleted as the pass's items, and [`Progress::More`]
+	/// when the sweep has databases still to visit or the key budget ran out
+	/// before the backlog did.
+	///
+	/// # Arguments
+	/// * `interval` - The interval between passes, to calculate the lease duration
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub async fn live_query_gc_process(
+		&self,
+		interval: &Duration,
+		canceller: &CancellationToken,
+	) -> Result<Pass> {
+		self.live_query_gc_process_bounded(
+			interval,
+			CHANGEFEED_GC_PASS_KEY_BUDGET,
+			CHANGEFEED_GC_SLICE_STEPS,
+			canceller,
+		)
+		.await
+	}
+
+	/// One live-event collection pass, taking at most `steps` steps through
+	/// the catalog and deleting at most `budget` events.
+	///
+	/// The backlog is sized by write throughput rather than by the catalog, so
+	/// it is paged behind committed transactions of at most one page (see
+	/// [`crate::kvs::paging`]), and the next tick resumes at the head of what
+	/// survives.
+	async fn live_query_gc_process_bounded(
+		&self,
+		interval: &Duration,
+		budget: u64,
+		steps: usize,
+		canceller: &CancellationToken,
+	) -> Result<Pass> {
+		trace!(target: TARGET, "Attempting live-query event garbage collection");
+		let retention = self.config.datastore.live_query_retention;
+		if retention.is_zero() {
+			return Ok(Pass::done(TaskLeaseState::NotLeased));
+		}
+		let lh = self.lease_handler(TaskLeaseType::LiveQueryCleanup, *interval * 2, None)?;
+		// Without the lease, the sweep this node was making is dropped, as the
+		// changefeed collector's is.
+		if !lh.has_lease().await? {
+			*self.live_event_sweep.lock() = ChangefeedSweep::default();
+			return Ok(Pass::elsewhere());
+		}
+		trace!(target: TARGET, "Running live-query event garbage collection");
+		let mut pass = Pass::done(TaskLeaseState::Held);
+		let mut sweep = std::mem::take(&mut *self.live_event_sweep.lock());
+		let page = self.changefeed_page(&mut sweep, steps, SweepReads::Database).await?;
+		let ids: Vec<(NamespaceId, DatabaseId)> =
+			page.iter().map(|db| (db.ns, db.db)).chain(sweep.take_unknown()).collect();
+		let mut left = budget;
+		let kept_lease =
+			crate::lq::gc::gc_databases(self, &lh, retention, canceller, &mut left, &ids).await?;
+		pass.items += budget - left;
+		if !kept_lease {
+			pass.lease = TaskLeaseState::Elsewhere;
+			return Ok(pass);
+		}
+		if left == 0 {
+			pass.progress = Progress::More;
+		}
+		if sweep.has_more() {
+			*self.live_event_sweep.lock() = sweep;
+			pass.progress = Progress::More;
+		}
+		Ok(pass)
+	}
+
+	/// One page of a changefeed-collection sweep: the databases the next
+	/// `steps` steps of `sweep` through the catalog discover, in catalog
+	/// order, each with its retention.
+	///
+	/// Read in one short transaction, and only the pages of the catalog the
+	/// steps move through; see [`ChangefeedSweep`]. An empty page with
+	/// nothing more to sweep means the sweep has visited every database.
+	async fn changefeed_page(
+		&self,
+		sweep: &mut ChangefeedSweep,
+		steps: usize,
+		reads: SweepReads,
+	) -> Result<Vec<Discovered>> {
+		let txn = self.transaction(Read).await?;
+		let res = sweep.page(&txn, steps, reads).await;
+		let _ = txn.cancel().await;
+		res
 	}
 
 	/// Run one live-query router pass.
@@ -4510,16 +5823,31 @@ impl Datastore {
 	/// cheap no-op, so the engine's background task can call it unconditionally.
 	/// Unlike changefeed GC this runs on every node without a lease: each node
 	/// delivers only to the subscriptions it owns.
+	///
+	/// Bounded: a pass delivers at most a slice of the captured entries, and
+	/// one that stops with entries still to deliver keeps its lap and reports
+	/// [`Progress::More`], so the next pass continues it.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::lq", skip(self))
 	)]
-	pub(crate) async fn live_query_router_process(&self) -> Result<()> {
+	pub(crate) async fn live_query_router_process(&self) -> Result<Pass> {
 		// Only the Router engine delivers via the router.
 		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
-			return Ok(());
+			return Ok(Pass::done(TaskLeaseState::NotLeased));
 		}
 		crate::lq::router::process(self, &self.live_query_router).await
+	}
+
+	/// [`Self::live_query_router_process`] with the per-pass event budget
+	/// lowered, so a test can drive a pass that stops mid-lap and inspect what
+	/// it left behind.
+	#[cfg(test)]
+	pub(crate) async fn live_query_router_process_with_budget(&self, budget: u64) -> Result<Pass> {
+		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
+			return Ok(Pass::done(TaskLeaseState::NotLeased));
+		}
+		crate::lq::router::process_bounded(self, &self.live_query_router, budget).await
 	}
 
 	// --------------------------------------------------
@@ -4533,114 +5861,47 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Every index definition in the catalog that is not pending removal, with
-	/// the namespace, database and table it is defined on.
-	///
-	/// Read in one short read transaction, with the definitions cloned out so
-	/// a caller's per-index work does not hold the catalog transaction open.
-	///
-	/// # Returns
-	/// The definitions, and how many catalog entries a newer release wrote that
-	/// this build cannot read, which are skipped.
-	async fn defined_indexes(&self) -> Result<(Vec<DefinedIndex>, usize)> {
-		let mut defined = Vec::new();
-		let mut skipped = 0usize;
-		let txn = self.transaction(Read).await?;
-		let res: Result<()> = async {
-			let nss = txn.all_readable(NamespacePrefix {}.range()?).await?;
-			skipped += nss.refused;
-			for ns in &nss.values {
-				let dbs = txn
-					.all_readable(
-						DatabasePrefix {
-							ns: ns.namespace_id,
-						}
-						.range()?,
-					)
-					.await?;
-				skipped += dbs.refused;
-				for db in &dbs.values {
-					let tbs = txn
-						.all_readable(
-							TablePrefix {
-								ns: ns.namespace_id,
-								db: db.database_id,
-							}
-							.range()?,
-						)
-						.await?;
-					skipped += tbs.refused;
-					for tb in &tbs.values {
-						let tb_name = crate::val::TableName::from(tb.name.clone());
-						let ixs = txn
-							.all_readable(
-								IndexDefPrefix {
-									ns: ns.namespace_id,
-									db: db.database_id,
-									tb: Cow::Borrowed(&tb_name),
-								}
-								.range()?,
-							)
-							.await?;
-						skipped += ixs.refused;
-						for ix in &ixs.values {
-							// An index pending removal is cleared by the
-							// tombstone reaper.
-							if ix.prepare_remove {
-								continue;
-							}
-							defined.push(DefinedIndex {
-								ns: ns.namespace_id,
-								ns_name: ns.name.clone(),
-								db: db.database_id,
-								db_name: db.name.clone(),
-								tb: tb.table_id,
-								ix: Arc::new(crate::catalog::IndexDefinition::from_stored(ix)?),
-							});
-						}
-					}
-				}
-			}
-			Ok(())
+	/// A handler for the cluster-wide lease on `task`, held by this node for
+	/// `duration` after each acquisition and stopping its retries when
+	/// `canceller` trips.
+	pub(crate) fn lease_handler(
+		&self,
+		task: TaskLeaseType,
+		duration: Duration,
+		canceller: Option<&CancellationToken>,
+	) -> Result<LeaseHandler> {
+		match canceller {
+			Some(canceller) => LeaseHandler::new_with_canceller(
+				self.sequences.clone(),
+				self.id,
+				self.transaction_factory.clone(),
+				task,
+				duration,
+				canceller.clone(),
+			),
+			None => LeaseHandler::new(
+				self.sequences.clone(),
+				self.id,
+				self.transaction_factory.clone(),
+				task,
+				duration,
+			),
 		}
-		.await;
-		let _ = txn.cancel().await;
-		res?;
-		Ok((defined, skipped))
 	}
 
-	/// Processes the index compaction queue.
-	///
-	/// This method is called periodically by the index compaction thread to
-	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to coordinate compaction across the cluster. Once a
-	/// batch starts it runs to completion even if the lease expires, so brief
-	/// overlap is possible.
-	///
-	/// The method scans the index compaction queue (stored as `Ic` keys) and
-	/// delegates to [`Self::index_compaction_loop`], which compacts each
-	/// distinct index exactly once — duplicate queue entries for the same
-	/// index are skipped. On native targets the indexes are compacted in
-	/// parallel as far as one compaction ticket is granted places of the
-	/// node's pool, while on wasm they run sequentially.
-	/// Indexes that support compaction include full-text, count, and HNSW.
-	///
-	/// The queue is read in a short-lived read transaction so that user
-	/// transactions enqueueing new compaction requests do not conflict with
-	/// the compaction cycle. Each index compaction runs on its own write
-	/// transaction. Once all compactions have completed, a separate write
-	/// transaction removes the processed queue entries. Compaction failures
-	/// are logged but do not prevent other indexes from being processed.
-	///
-	/// # Arguments
-	/// * `dbs` - The shared datastore instance, cloned into each compaction task
-	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
-	/// * `canceller` - Token checked before starting each lease, batch, and compaction unit
-	///
-	/// # Returns
-	/// A tuple `(iterations, errors)` where `iterations` is the number of
-	/// compaction batches processed and `errors` is the total number of
-	/// individual index compaction failures across all batches.
+	/// Age of the oldest of the given queue entries, each stamped with a
+	/// time-ordered UUID when it was enqueued. `None` when there are none, or
+	/// none carries a timestamp.
+	fn oldest_queued_age(uids: impl Iterator<Item = Uuid>) -> Option<Duration> {
+		let now =
+			web_time::SystemTime::now().duration_since(web_time::SystemTime::UNIX_EPOCH).ok()?;
+		uids.filter_map(|uid| {
+			let (secs, nanos) = uid.get_timestamp()?.to_unix();
+			Some(now.saturating_sub(Duration::new(secs, nanos)))
+		})
+		.max()
+	}
+
 	/// Resume index builds stranded by a crashed or expired owner node.
 	///
 	/// A `CONCURRENTLY` index build runs as a detached task. If its owning node
@@ -4655,20 +5916,38 @@ impl Datastore {
 	///
 	/// The scan is lease-guarded so a single node runs it per cluster; the
 	/// per-index takeover is additionally CAS-guarded, so correctness does not
-	/// depend on the lease. Enumeration walks the catalog, so cost is
-	/// proportional to the total index count; operators who prefer to recover
-	/// stalled builds manually (with `REBUILD INDEX`) can disable the scan by
-	/// setting its interval to zero.
+	/// depend on the lease. The scan is paged: a pass takes at most
+	/// [`INDEX_RESUME_PAGE_SIZE`] steps through the catalog in catalog order,
+	/// checking at most an index per step, continuing the walk where the
+	/// previous pass stopped and beginning afresh once one reaches the end,
+	/// and reads only the pages of the catalog its steps move through, so one
+	/// pass costs a bounded amount of work however many indexes, tables,
+	/// databases and namespaces the datastore holds. A candidate is checked
+	/// against the catalog as it stands immediately before its takeover: the
+	/// page is read in a transaction of its own, and a candidate given back
+	/// to the walk is reached again a pass or more later, so the index a
+	/// candidate names may since have been removed, defined again under the
+	/// same names with new ids, or marked for removal; such a candidate is
+	/// dropped, and a takeover is given the definition the catalog holds now.
+	/// Operators who prefer to recover stalled builds manually (with
+	/// `REBUILD INDEX`) can disable the scan by setting its interval to zero.
 	///
 	/// Recovery is serialized: a pass adopts at most one stalled build, and
-	/// no pass adopts anything while a local builder task is still running.
+	/// while a local builder task is still running a pass adopts only a
+	/// stalled `Closing` build, which has no scan left to run.
 	/// A restart with several stranded builds (for example multiple full-text
 	/// indexes on a small instance) therefore rebuilds them one at a time
 	/// instead of multiplying the node's memory and CPU footprint; every
 	/// stalled build is still recovered, one scan pass after the previous one
 	/// finishes. User-initiated `REBUILD INDEX` is not throttled by this.
 	///
-	/// Returns the number of stalled builds adopted this pass.
+	/// Reports the stalled builds adopted as the pass's items, and
+	/// [`Progress::More`] when the walk has catalog left beyond the steps this
+	/// pass took. A pass that finds the lease passed to another node stops at
+	/// the candidate it found so, gives that candidate back to the walk with
+	/// the rest unchecked, and reports [`TaskLeaseState::Elsewhere`]: the new
+	/// holder adopts from here, and this node's walk is kept for its next
+	/// pass, due at the interval.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -4681,21 +5960,16 @@ impl Datastore {
 		&self,
 		interval: Duration,
 		canceller: CancellationToken,
-	) -> Result<usize> {
+	) -> Result<Pass> {
 		Self::ensure_not_cancelled(&canceller)?;
 		// Single-node-per-cluster guard. The lease lasts two intervals so an
 		// in-flight scan isn't preempted between ticks.
-		let lh = LeaseHandler::new_with_canceller(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::IndexBuildResume,
-			interval * 2,
-			canceller.clone(),
-		)?;
+		let lh =
+			self.lease_handler(TaskLeaseType::IndexBuildResume, interval * 2, Some(&canceller))?;
 		if !lh.has_lease().await? {
-			return Ok(0);
+			return Ok(Pass::elsewhere());
 		}
+		let mut pass = Pass::done(TaskLeaseState::Held);
 		// Serialize recovery: while any local builder task is still running
 		// (an already adopted build or a user-started one), defer adopting
 		// builds that still scan to a later pass. Without this, a restart with
@@ -4713,10 +5987,18 @@ impl Datastore {
 		} else {
 			ResumeScope::Any
 		};
-		// An entry a newer release wrote, which this build cannot read, is
-		// skipped and counted: an index this build cannot read is not adopted,
-		// and the pass reports the count once.
-		let (candidates, skipped) = self.defined_indexes().await?;
+		// The page this pass checks: the indexes the next page of steps of
+		// the walk reaches. The walk is taken from the datastore for the pass
+		// and put back only with catalog left, so a pass that reaches the end
+		// drops it and the next begins a walk over the catalog as it then
+		// stands.
+		let mut walk = self.resume_walk.lock().take().unwrap_or_default();
+		let page = self.resume_page(&mut walk).await?;
+		// An index whose definition, or whose table's, database's or
+		// namespace's, a newer release wrote is one this build cannot read,
+		// and so does not adopt: the walk passes it, and the pass reports the
+		// count once.
+		let skipped = walk.take_refused();
 		if skipped > 0 {
 			warn!(
 				target: TARGET,
@@ -4725,43 +6007,90 @@ impl Datastore {
 				 this build"
 			);
 		}
-		// Attempt a takeover for each candidate. `resume_stalled` is a cheap
-		// no-op for healthy/online/live builds, so this is safe to call for
-		// every index every pass. The snapshot may be stale by the time a
-		// candidate is taken up; `resume_stalled` adopts a build only while the
-		// catalog still holds the candidate's table and definition.
+		self.adopt_stalled_build(&lh, &canceller, page, scope, &mut walk, &mut pass).await?;
+		// A walk with catalog left keeps its place for the next pass, due at
+		// once while this node holds the lease and at the interval once
+		// another does; one that has reached the end is dropped.
+		if walk.has_more() {
+			*self.resume_walk.lock() = Some(walk);
+			if pass.lease == TaskLeaseState::Held {
+				pass.progress = Progress::More;
+			}
+		}
+		Ok(pass)
+	}
+
+	/// Attempts a takeover, limited to the builds `scope` admits, for each
+	/// candidate of `page`, under the lease `lh`, until one is adopted, which
+	/// `pass` counts, and gives the candidates it did not check back to
+	/// `walk`, which reaches them again first. A lease found passed to another
+	/// node stops the attempts at the candidate it was found on, which goes
+	/// back unchecked, and is reported in `pass` as
+	/// [`TaskLeaseState::Elsewhere`].
+	async fn adopt_stalled_build(
+		&self,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		page: Vec<WalkedIndex>,
+		scope: ResumeScope,
+		walk: &mut IndexWalk,
+		pass: &mut Pass,
+	) -> Result<()> {
+		// Attempt a takeover for each candidate on the page. `resume_stalled`
+		// is a cheap no-op for healthy/online/live builds, so this is safe to
+		// call for every index. The page may be stale by the time a candidate
+		// is taken up; `resume_stalled` adopts a build only while the catalog
+		// still holds the candidate's table and definition.
 		let index_builder = &self.index_builder;
-		let mut resumed = 0;
-		for DefinedIndex {
-			ns: ns_id,
-			ns_name,
-			db: db_id,
-			db_name,
-			tb: tb_id,
-			ix,
-		} in candidates
-		{
-			Self::ensure_not_cancelled(&canceller)?;
+		let mut candidates = page.into_iter();
+		// The candidate the lease was found lost on, unchecked.
+		let mut lost_on = None;
+		for candidate in candidates.by_ref() {
+			Self::ensure_not_cancelled(canceller)?;
 			#[cfg(test)]
 			if let Some(hook) = test::take_before_resume_candidate(self.id) {
 				hook().await;
 			}
-			// A scan that has lost its lease adopts nothing more: the node now
-			// holding it recovers the stalled builds, one at a time.
+			// The new holder adopts from here. The verdict has to be read
+			// rather than discarded: the check is throttled to one datastore
+			// read per maintenance period, so the next one answers from the
+			// throttle.
 			if !lh.try_maintain_lease().await? {
 				trace!(target: TARGET, "Index build resume lease lost, stopping the scan");
+				lost_on = Some(candidate);
+				pass.lease = TaskLeaseState::Elsewhere;
 				break;
 			}
+			// The index as the catalog holds it now, which the takeover keeps; a
+			// candidate that no longer names the index the walk reached is
+			// dropped. See [`Self::resume_candidate_as_defined`].
+			let Some(ix) = self.resume_candidate_as_defined(&candidate).await? else {
+				trace!(
+					target: TARGET,
+					"Dropping stalled index build candidate '{}' on table '{}': not the index the walk reached",
+					candidate.index.name,
+					candidate.index.table_name
+				);
+				continue;
+			};
 			let ctx = self.setup_ctx()?.freeze();
 			let opt = self.setup_options(
-				&Session::owner().with_ns(ns_name.as_str()).with_db(db_name.as_str()),
+				&Session::owner().with_ns(&candidate.ns_name).with_db(&candidate.db_name),
 			);
 			match index_builder
-				.resume_stalled(&ctx, opt, ns_id, db_id, tb_id, Arc::clone(&ix), scope)
+				.resume_stalled(
+					&ctx,
+					opt,
+					candidate.ns,
+					candidate.db,
+					candidate.tb,
+					Arc::clone(&ix),
+					scope,
+				)
 				.await
 			{
 				Ok(true) => {
-					resumed += 1;
+					pass.items += 1;
 					info!(
 						target: TARGET,
 						"Resuming stalled index build '{}' on table '{}'",
@@ -4782,7 +6111,87 @@ impl Datastore {
 				}
 			}
 		}
-		Ok(resumed)
+		// The candidates an adoption or the lease left unchecked are the
+		// walk's to reach again first, so the next pass checks them before it
+		// walks on.
+		walk.give_back(lost_on.into_iter().chain(candidates));
+		Ok(())
+	}
+
+	/// One page of the stalled-build scan: the indexes the next
+	/// [`INDEX_RESUME_PAGE_SIZE`] steps of `walk` reach, in catalog order.
+	///
+	/// Read in one short transaction, and only the pages of the catalog the
+	/// steps move through; see [`IndexWalk`]. The per-index build-state
+	/// checks run after it, with no catalog transaction open, and the
+	/// definitions on the page are the only ones kept.
+	async fn resume_page(&self, walk: &mut IndexWalk) -> Result<Vec<WalkedIndex>> {
+		let txn = self.transaction(Read).await?;
+		let res: Result<Vec<WalkedIndex>> = async {
+			let mut page = Vec::new();
+			for _ in 0..INDEX_RESUME_PAGE_SIZE {
+				match walk.next(&txn).await? {
+					Some(Step::Reached(index)) => page.push(index),
+					Some(Step::Passed) => {}
+					None => break,
+				}
+			}
+			Ok(page)
+		}
+		.await;
+		let _ = txn.cancel().await;
+		res
+	}
+
+	/// The index `candidate` names, as the catalog holds it when the takeover
+	/// is attempted; `None` when it is no longer the index the walk reached.
+	///
+	/// A candidate carries the names and ids the walk read, in the page's
+	/// transaction or, for one given back to the walk, a pass or more
+	/// earlier. A namespace, database, table or index removed since and
+	/// defined again under the same names has new ids, so the candidate's
+	/// ids are checked against the ones its names resolve to now, and an
+	/// index marked for removal since is dropped as the walk passes one it
+	/// reaches so marked. The definition returned is the current one, which
+	/// the takeover builds to.
+	async fn resume_candidate_as_defined(
+		&self,
+		candidate: &WalkedIndex,
+	) -> Result<Option<Arc<IndexDefinition>>> {
+		let txn = self.transaction(Read).await?;
+		let res: Result<Option<Arc<IndexDefinition>>> = async {
+			let (ns_name, db_name) = (&*candidate.ns_name, &*candidate.db_name);
+			let table = &candidate.index.table_name;
+			let Some(ns) = txn.get_ns_by_name(ns_name, None).await? else {
+				return Ok(None);
+			};
+			let Some(db) = txn.get_db_by_name(ns_name, db_name, None).await? else {
+				return Ok(None);
+			};
+			let Some(tb) = txn.get_tb_by_name(ns_name, db_name, table, None).await? else {
+				return Ok(None);
+			};
+			let Some(ix) = txn
+				.get_tb_index(ns.namespace_id, db.database_id, table, &candidate.index.name, None)
+				.await?
+			else {
+				return Ok(None);
+			};
+			let same = ns.namespace_id == candidate.ns
+				&& db.database_id == candidate.db
+				&& tb.table_id == candidate.tb
+				&& ix.index_id == candidate.index.index_id;
+			Ok((same && !ix.prepare_remove).then_some(ix))
+		}
+		.await;
+		let _ = txn.cancel().await;
+		match res {
+			// A definition a newer release wrote since the walk read the
+			// candidate is not this build's to adopt under, as the walk skips
+			// one it finds so written.
+			Err(e) if surrealdb_datastore::tx::refused_by_release(&e) => Ok(None),
+			res => res,
+		}
 	}
 
 	/// Drains the index-compaction queue (`/!ic` keys) in bounded batches.
@@ -4820,8 +6229,8 @@ impl Datastore {
 	///
 	/// A drain that finds the queue empty, or ends with a batch that held the
 	/// whole queue, sweeps the defined indexes for work no request names, at
-	/// most once per lease period (see [`Self::sweep_unmaterialised_indexes`]),
-	/// and drains what the sweep queued.
+	/// most once per lease period and a page of the catalog at a time (see
+	/// [`Self::sweep_page`]), and drains what the sweep queued.
 	///
 	/// Coordinated across the cluster by a [`TaskLeaseType::IndexCompaction`]
 	/// lease. Returns the number of processed batches and the number of
@@ -4839,19 +6248,66 @@ impl Datastore {
 		interval: Duration,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
+		let (iterations, errors, _) =
+			Self::index_compaction_bounded(dbs, interval, canceller, None).await?;
+		Ok((iterations, errors))
+	}
+
+	/// One slice of [`Self::index_compaction`]: at most
+	/// [`INDEX_COMPACTION_SLICE_BATCHES`] queue batches and pages of the drain's
+	/// sweep together, each of whose passes applies at most
+	/// [`INDEX_COMPACTION_PASS_PLAN_BUDGET`] plans, reporting
+	/// [`Progress::More`] when the drain has batches left to read or catalog
+	/// left to sweep, or when a
+	/// batch's cleanup gave up on conflicts that outlasted its retries and left
+	/// the batch queued for the drain to reach again. The keys of the batches
+	/// the slice acted on are the pass's items, and the oldest entry among them
+	/// its queue age.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(dbs, canceller)
+		)
+	)]
+	pub(crate) async fn index_compaction_slice(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<Pass> {
+		let (_, _, pass) = Self::index_compaction_bounded(
+			dbs,
+			interval,
+			canceller,
+			Some(INDEX_COMPACTION_SLICE_BATCHES),
+		)
+		.await?;
+		Ok(pass)
+	}
+
+	/// The drain behind [`Self::index_compaction`] and
+	/// [`Self::index_compaction_slice`], stopping after `max_batches` queue
+	/// batches when given one, whether or not they held a request to act on.
+	/// The call continues the drain [`CompactionCursor`] holds, and leaves it
+	/// there unless the call ends it. Returns the batches acted on, the indexes
+	/// that failed to compact, and the pass report.
+	async fn index_compaction_bounded(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+		max_batches: Option<usize>,
+	) -> Result<(usize, usize, Pass)> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
-		let lh = LeaseHandler::new_with_canceller(
-			dbs.sequences.clone(),
-			dbs.id,
-			dbs.transaction_factory.clone(),
-			TaskLeaseType::IndexCompaction,
-			interval * 2,
-			canceller.clone(),
-		)?;
+		let lh =
+			dbs.lease_handler(TaskLeaseType::IndexCompaction, interval * 2, Some(&canceller))?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
+		// The batches this call has read, which its budget counts.
+		let mut read = 0;
+		let mut pass = Pass::elsewhere();
 		// The queue range and a rotating window within it. After each batch
 		// the window resumes past the last index that batch covered, so
 		// indexes later in the keyspace are reached even while an
@@ -4861,33 +6317,43 @@ impl Datastore {
 		// the scan reaches the end of the range it wraps to the start, and
 		// a wrap that finds nothing means the queue is drained.
 		let queue = IndexCompactionPrefix {}.range()?;
-		let mut window = queue.clone();
-		// What this drain's batches left queued, which later batches do not pass
-		// again (see `CompactionDrain`). A lap of the queue that finds nothing
-		// else ends the drain with those requests still queued. Keeping a
-		// request writes nothing and wakes nothing, so it waits for the next
-		// drain.
-		let mut drain = CompactionDrain::default();
-		// Whether the current lap of the queue acted on a request: passed it, or
-		// deleted it.
-		let mut lap_passed = false;
+		// The drain continues from where the previous call stopped, so a
+		// budget-bounded slice is one stretch of the same rotation rather than a
+		// fresh scan from the head that would never reach the later indexes, and
+		// passes none of the requests the drain has kept so far again (see
+		// `CompactionDrain`). A call that fails leaves the drain where the
+		// previous call did.
+		let mut cursor = dbs.compaction_cursor.lock().clone();
+		let mut window = match &cursor.resume_at {
+			Some(after) => queue.clone().resume_after(after, Direction::Forward),
+			None => queue.clone(),
+		};
 		// We continue without interruptions while there are keys and the lease
 		'compaction: loop {
 			Self::ensure_not_cancelled(&canceller)?;
+			// The slice budget: a pass that has read its share of batches
+			// reports the rest as backlog and yields, so a driver running the
+			// drain a slice at a time can interleave other work.
+			if max_batches.is_some_and(|max| read >= max) {
+				pass.progress = Progress::More;
+				break 'compaction;
+			}
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
-				return Ok((count_iteration, count_error));
+				pass.lease = TaskLeaseState::Elsewhere;
+				break 'compaction;
 			}
+			pass.lease = TaskLeaseState::Held;
 			Self::ensure_not_cancelled(&canceller)?;
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
 			// Read one bounded batch of queue keys in a short-lived read
-			// transaction. The queue holds one entry per indexed record
-			// write since it last drained, so an unbounded snapshot would
-			// make the cleanup transaction below arbitrarily large — every
-			// key it deletes is a per-replica write reservation on
-			// distributed backends. Queue values carry no payload, so a
+			// transaction. The queue holds one entry per index each write
+			// transaction touched since it last drained, so an unbounded
+			// snapshot would make the cleanup transaction below arbitrarily
+			// large — every key it deletes is a per-replica write reservation
+			// on distributed backends. Queue values carry no payload, so a
 			// keys-only scan suffices.
 			let (keys, sole_writer) = {
 				let txn = dbs.transaction(Read).await?;
@@ -4916,53 +6382,105 @@ impl Datastore {
 				&& window.start() == queue.start()
 				&& keys.len() < INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
 			if keys.is_empty() {
-				if window.start() == queue.start() {
-					// Nothing left anywhere in the queue. An index can still hold
-					// work no request names, so the queue is swept for it, and a
-					// sweep that queued requests is drained by this same call.
-					if Self::sweep_after_drain(&dbs, interval, &canceller, &mut drain).await {
-						continue;
+				if window.start() == queue.start() || !cursor.lap_passed {
+					// Nothing left anywhere in the queue, or nothing but the
+					// requests this drain already kept: a queue drained as far as
+					// this drain can. An index can still hold work no request
+					// names, so the defined indexes are swept for it, and a sweep
+					// that queued requests is drained by this same drain.
+					match Self::sweep_after_drain(
+						&dbs,
+						interval,
+						&lh,
+						&canceller,
+						&mut cursor.drain,
+						&mut read,
+						max_batches,
+					)
+					.await?
+					{
+						Swept::Queued => {
+							cursor.resume_at = None;
+							cursor.lap_passed = false;
+							window = queue.clone();
+							continue;
+						}
+						// The next slice continues the sweep, after reading the
+						// queue again for what was queued meanwhile.
+						Swept::Spent => {
+							cursor.resume_at = None;
+							cursor.lap_passed = false;
+							pass.progress = Progress::More;
+							break 'compaction;
+						}
+						Swept::Done => {
+							cursor = CompactionCursor::default();
+							break 'compaction;
+						}
+						// The holder sweeps for itself; this node's drain stays
+						// where it stopped.
+						Swept::LeaseLost => {
+							pass.lease = TaskLeaseState::Elsewhere;
+							break 'compaction;
+						}
 					}
-					return Ok((count_iteration, count_error));
-				}
-				if !lap_passed {
-					// Nothing but the requests this drain already kept, which is
-					// a queue drained as far as this drain can: swept as an
-					// empty one is.
-					if Self::sweep_after_drain(&dbs, interval, &canceller, &mut drain).await {
-						window = queue.clone();
-						continue;
-					}
-					return Ok((count_iteration, count_error));
 				}
 				// End of the range: wrap to re-scan entries that were
 				// skipped when the window seeked past a partially-drained
 				// index.
+				cursor.resume_at = None;
+				cursor.lap_passed = false;
 				window = queue.clone();
-				lap_passed = false;
 				continue;
 			}
+			read += 1;
 			// Every key the drain has not kept is either passed or deleted.
-			let acts = keys.iter().any(|k| !drain.kept.contains(k));
+			let acts = keys.iter().any(|k| !cursor.drain.kept.contains(k));
 			if acts {
-				let Some(cleanup) =
-					Self::index_compaction_batch(Arc::clone(&dbs), &lh, &keys, &drain, &canceller)
-						.await?
+				pass.items += keys.len() as u64;
+				if let Some(age) = Self::oldest_queued_age(
+					keys.iter()
+						.filter_map(|k| IndexCompactionKey::decode_key(k).ok().map(|k| k.uid)),
+				) {
+					pass.observe_age(age);
+				}
+				#[cfg(test)]
+				if let Some(hook) = test::take_compaction_batch_hook(dbs.id, test::BatchStage::Read)
+				{
+					hook().await;
+				}
+				let Some(cleanup) = Self::index_compaction_batch(
+					Arc::clone(&dbs),
+					&lh,
+					&keys,
+					&cursor.drain,
+					&canceller,
+				)
+				.await?
 				else {
-					// Another node holds the lease now, and the batch's requests
-					// are its to act on.
-					return Ok((count_iteration, count_error));
+					// Another node holds the lease now. The batch's requests are
+					// its to act on, and this node's rotation stays where the
+					// batch began.
+					pass.lease = TaskLeaseState::Elsewhere;
+					break 'compaction;
 				};
 				count_iteration += 1;
-				lap_passed = true;
+				cursor.lap_passed = true;
 				count_error += cleanup.errors;
 				if !cleanup.deleted {
+					// The batch stays queued, and the rotation stays where it
+					// began. Conflicts that outlasted the cleanup's retries leave
+					// a backlog the next slice reaches again at once; any other
+					// failure waits for the next drain.
+					if cleanup.contended {
+						pass.progress = Progress::More;
+					}
 					break 'compaction;
 				}
 				whole_queue &= !cleanup.budgeted;
-				drain.kept.extend(cleanup.kept);
-				drain.retained.extend(cleanup.retained);
-				drain.passed.extend(cleanup.passed);
+				cursor.drain.kept.extend(cleanup.kept);
+				cursor.drain.retained.extend(cleanup.retained);
+				cursor.drain.passed.extend(cleanup.passed);
 			}
 			// Seek the next batch past the last index this batch covered.
 			// Entries of that index beyond this batch are picked up again
@@ -4974,42 +6492,75 @@ impl Datastore {
 			// no valid index, so deleting it cannot violate the
 			// compact-before-delete invariant).
 			if let Some(last_key) = keys.last() {
-				window = match IndexCompactionKey::decode_key(last_key) {
+				let after = match IndexCompactionKey::decode_key(last_key) {
 					Ok(last) => {
 						// The first key ordering after the whole index's run of
 						// queue entries.
-						let covered = IndexCompactionIxPrefix {
+						IndexCompactionIxPrefix {
 							ns: last.ns,
 							db: last.db,
 							tb: Cow::Owned(last.tb.into_owned()),
 							ix: last.ix,
 						}
-						.skip_extensions()?;
-						queue.clone().resume_after(&covered, Direction::Forward)
+						.skip_extensions()?
+						.to_vec()
 					}
 					Err(e) => {
 						warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
-						queue.clone().resume_after(last_key, Direction::Forward)
+						last_key.clone()
 					}
 				};
+				window = queue.clone().resume_after(&after, Direction::Forward);
+				cursor.resume_at = Some(after);
 			}
 			#[cfg(test)]
-			if acts && let Some(hook) = test::take_after_compaction_batch(dbs.id) {
+			if acts
+				&& let Some(hook) =
+					test::take_compaction_batch_hook(dbs.id, test::BatchStage::Cleared)
+			{
 				hook().await;
 			}
 			if whole_queue {
 				// The batch held the whole queue, so the queue this drain
 				// leaves is empty but for what it kept and what was queued
 				// meanwhile: swept, as a drain that reads it empty sweeps it.
-				if Self::sweep_after_drain(&dbs, interval, &canceller, &mut drain).await {
-					window = queue.clone();
-					lap_passed = false;
-					continue;
+				match Self::sweep_after_drain(
+					&dbs,
+					interval,
+					&lh,
+					&canceller,
+					&mut cursor.drain,
+					&mut read,
+					max_batches,
+				)
+				.await?
+				{
+					Swept::Queued => {
+						cursor.resume_at = None;
+						cursor.lap_passed = false;
+						window = queue.clone();
+						continue;
+					}
+					Swept::Spent => {
+						cursor.resume_at = None;
+						cursor.lap_passed = false;
+						pass.progress = Progress::More;
+						break;
+					}
+					// The sweep queued nothing, which ends the drain.
+					Swept::Done => {
+						cursor = CompactionCursor::default();
+						break;
+					}
+					Swept::LeaseLost => {
+						pass.lease = TaskLeaseState::Elsewhere;
+						break;
+					}
 				}
-				break;
 			}
 		}
-		Ok((count_iteration, count_error))
+		*dbs.compaction_cursor.lock() = cursor;
+		Ok((count_iteration, count_error, pass))
 	}
 
 	/// Runs one pass over every distinct index a batch of queue keys names, and
@@ -5072,11 +6623,12 @@ impl Datastore {
 				.await?;
 		let (deletes, still_queued) =
 			Self::partition_index_compaction_batch(keys, &decoded, drain, &report);
-		let deleted = Self::delete_index_compaction_batch(&dbs, &deletes, canceller).await?;
-		Ok(Some(if deleted {
+		let end = Self::delete_index_compaction_batch(&dbs, &deletes, canceller).await?;
+		Ok(Some(if end == CompactionCleanupEnd::Committed {
 			CompactionBatchCleanup {
 				errors: report.errors,
-				deleted,
+				deleted: true,
+				contended: false,
 				kept: still_queued,
 				retained: report.retained,
 				budgeted: report.budgeted,
@@ -5085,7 +6637,8 @@ impl Datastore {
 		} else {
 			CompactionBatchCleanup {
 				errors: report.errors,
-				deleted,
+				deleted: false,
+				contended: end == CompactionCleanupEnd::Contended,
 				kept: Vec::new(),
 				retained: HashSet::new(),
 				budgeted: false,
@@ -5161,25 +6714,26 @@ impl Datastore {
 	/// decoded key, because a batch deliberately includes entries that do not
 	/// decode, which a typed delete could never address.
 	///
-	/// Returns whether the cleanup committed. A retryable conflict on a delete
-	/// or the commit is retried, at most [`INDEX_COMPACTION_PASS_MAX_RETRIES`]
-	/// times and after the same wait as a pass's retries. A failure on
-	/// anything else, or a conflict that outlasts the retries, is logged and
+	/// Returns how the cleanup ended. A retryable conflict on a delete or the
+	/// commit is retried, at most [`INDEX_COMPACTION_PASS_MAX_RETRIES`] times
+	/// and after the same wait as a pass's retries. A conflict that outlasts
+	/// the retries ends it [`CompactionCleanupEnd::Contended`], and a failure
+	/// on anything else [`CompactionCleanupEnd::Failed`]; either is logged and
 	/// leaves every entry queued, as the cleanup's transaction is discarded:
 	/// the cleanup never loses a request, and the drain that ran it stops.
 	async fn delete_index_compaction_batch(
 		dbs: &Datastore,
 		deletes: &[&[u8]],
 		canceller: &CancellationToken,
-	) -> Result<bool> {
+	) -> Result<CompactionCleanupEnd> {
 		if deletes.is_empty() {
 			Self::ensure_not_cancelled(canceller)?;
-			return Ok(true);
+			return Ok(CompactionCleanupEnd::Committed);
 		}
 		let mut retries = 0;
 		loop {
 			match Self::try_delete_index_compaction_batch(dbs, deletes, canceller).await? {
-				Ok(()) => return Ok(true),
+				Ok(()) => return Ok(CompactionCleanupEnd::Committed),
 				Err(e) => {
 					if retries < INDEX_COMPACTION_PASS_MAX_RETRIES
 						&& Self::retry_index_operation_conflict(
@@ -5192,7 +6746,11 @@ impl Datastore {
 						continue;
 					}
 					warn!(target: TARGET, "Failed to clean up the compaction queue: {e}");
-					return Ok(false);
+					return Ok(if is_retryable_transaction_conflict(&e) {
+						CompactionCleanupEnd::Contended
+					} else {
+						CompactionCleanupEnd::Failed
+					});
 				}
 			}
 		}
@@ -5255,13 +6813,19 @@ impl Datastore {
 	/// of at most [`RECLAIM_BATCH_SIZE`] entries, each read in a short-lived
 	/// read transaction and each retired or stamped in one write transaction of
 	/// its own, so neither the pass's snapshot nor its queue update grows with
-	/// the number of pending removals. Each prefix is then destroyed
-	/// independently and idempotently — in one out-of-transaction call on a
-	/// backend offering [`DestroyRange`], otherwise in bounded pages, each
-	/// committed together with the resume cursor that accounts for it. A queue
-	/// entry is retired only once its prefix is empty, so a crash or an
-	/// exhausted budget mid-reclaim resumes from the committed cursor on a later
-	/// pass instead of restarting the prefix.
+	/// the number of pending removals. A pass walks at most
+	/// [`RECLAIM_PASS_WALK_BATCHES`] of them, so a queue that has grown long
+	/// is walked over several passes rather than whole in one: a pass that
+	/// stops with entries still to walk keeps its position for the next, and
+	/// the scan they make up ends at the last entry there was when it began,
+	/// so entries queued while it runs are the next scan's. Each prefix is
+	/// then destroyed independently and idempotently — in one
+	/// out-of-transaction call on a backend offering [`DestroyRange`],
+	/// otherwise in bounded pages, each committed together with the resume
+	/// cursor that accounts for it. A queue entry is retired only once its
+	/// prefix is empty, so a crash or an exhausted budget mid-reclaim resumes
+	/// from the committed cursor on a later pass instead of restarting the
+	/// prefix.
 	///
 	/// One pass deletes at most [`RECLAIM_PASS_KEY_BUDGET`] data keys in total,
 	/// so a prefix larger than that is finished over several ticks rather than
@@ -5304,13 +6868,48 @@ impl Datastore {
 		grace: Duration,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
-		Self::reclaim_tombstones_bounded(dbs, interval, grace, RECLAIM_PASS_KEY_BUDGET, canceller)
-			.await
+		let (iterations, errors, _) = Self::reclaim_tombstones_bounded(
+			dbs,
+			interval,
+			grace,
+			RECLAIM_PASS_KEY_BUDGET,
+			canceller,
+		)
+		.await?;
+		Ok((iterations, errors))
+	}
+
+	/// One pass of [`Self::reclaim_tombstones`] as a job pass: the keys
+	/// deleted are its items, and a spent key budget, or a walk stopped with
+	/// entries still to walk, reports [`Progress::More`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(dbs, canceller)
+		)
+	)]
+	pub(crate) async fn reclaim_tombstones_slice(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		grace: Duration,
+		canceller: CancellationToken,
+	) -> Result<Pass> {
+		let (_, _, pass) = Self::reclaim_tombstones_bounded(
+			dbs,
+			interval,
+			grace,
+			RECLAIM_PASS_KEY_BUDGET,
+			canceller,
+		)
+		.await?;
+		Ok(pass)
 	}
 
 	/// [`Self::reclaim_tombstones`] with the per-pass key budget lowered, so a
 	/// test can drive a pass that stops mid-prefix and inspect what it left
-	/// behind.
+	/// behind, and what it reported.
 	#[cfg(test)]
 	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-surrealkv")), allow(dead_code))]
 	pub(crate) async fn reclaim_tombstones_with_budget(
@@ -5319,52 +6918,55 @@ impl Datastore {
 		grace: Duration,
 		budget: u64,
 		canceller: CancellationToken,
-	) -> Result<(usize, usize)> {
+	) -> Result<(usize, usize, Pass)> {
 		Self::reclaim_tombstones_bounded(dbs, interval, grace, budget, canceller).await
 	}
 
 	/// One reclaim pass, deleting at most `budget` data keys in total.
 	///
-	/// The pass walks the whole queue and spends its key budget on part of it,
-	/// which are two different bounds and are enforced separately.
+	/// A scan walks the whole queue, in passes of at most
+	/// [`RECLAIM_PASS_WALK_BATCHES`] batches, and each pass spends its key budget
+	/// on part of what it walked. The walk and the spend are two different bounds
+	/// and are enforced separately.
 	///
-	/// The walk is unconditional. Stamping an entry's first sighting and ageing it
-	/// against the grace costs at most one write per entry, so that work scales
-	/// with the number of pending removals — catalog scale — and not with the data
-	/// they name. Gating it on the key budget would leave an entry beyond the
-	/// budget's reach unstamped, and an unstamped entry has `observed_ms == 0`, so
-	/// its grace has not started and it is not yet even a candidate for reclaim.
-	/// The queue is walked in bounded batches, each batch's stamps committed in one
-	/// transaction, so the walk's memory and write batches stay proportional to one
-	/// batch however long the queue is.
+	/// The walk is not gated on the key budget. Stamping an entry's first sighting
+	/// and ageing it against the grace costs at most one write per entry, so that
+	/// work scales with the number of pending removals — catalog scale — and not
+	/// with the data they name. Gating it on the key budget would leave an entry
+	/// beyond the budget's reach unstamped, and an unstamped entry has
+	/// `observed_ms == 0`, so its grace has not started and it is not yet even a
+	/// candidate for reclaim. The queue is walked in bounded batches, each batch's
+	/// stamps committed in one transaction, so the walk's memory and write batches
+	/// stay proportional to one batch however long the queue is; and a pass walks
+	/// at most its share of batches, so what it reads and stamps is bounded too. A
+	/// pass that stops with entries still to walk keeps the scan's position for
+	/// the next pass, and a scan ends at the last entry there was when it began,
+	/// so entries queued past that while it runs are the next scan's and a scan
+	/// ends however fast removals are queued.
 	///
 	/// The key budget is then spent on the [`RECLAIM_PASS_ENTRY_QUOTA`]
-	/// longest-observed eligible entries, selected while walking so only that many
-	/// are ever held. Oldest-first rather than queue order: key order makes the
-	/// entries that happen to sort lowest the only ones ever served while they hold
-	/// data, whereas the wait an operator cares about is how long a removal has
-	/// gone unreclaimed. Spreading the budget across every eligible entry instead
-	/// would shrink each share towards one key as the queue grows.
+	/// longest-observed eligible entries the pass walked, selected while walking
+	/// so only that many are ever held. Oldest-first rather than queue order: key
+	/// order makes the entries that happen to sort lowest the only ones ever
+	/// served while they hold data, whereas the wait an operator cares about is
+	/// how long a removal has gone unreclaimed. Spreading the budget across every
+	/// eligible entry instead would shrink each share towards one key as the
+	/// queue grows.
 	async fn reclaim_tombstones_bounded(
 		dbs: Arc<Datastore>,
 		interval: Duration,
 		grace: Duration,
 		budget: u64,
 		canceller: CancellationToken,
-	) -> Result<(usize, usize)> {
+	) -> Result<(usize, usize, Pass)> {
 		trace!(target: TARGET, "Attempting tombstone reclaim process");
 		// Data keys this pass may still delete, shared out across the entries it
 		// serves. Spent to zero ends the spend with every cursor committed.
+		let limit = budget;
 		let mut budget = budget;
 		// Coordinate across the cluster so only one node reclaims at a time.
-		let lh = LeaseHandler::new_with_canceller(
-			dbs.sequences.clone(),
-			dbs.id,
-			dbs.transaction_factory.clone(),
-			TaskLeaseType::ReclaimTombstones,
-			interval * 2,
-			canceller.clone(),
-		)?;
+		let lh =
+			dbs.lease_handler(TaskLeaseType::ReclaimTombstones, interval * 2, Some(&canceller))?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
 		// The queue range and a window within it, advanced past each batch the
@@ -5372,7 +6974,13 @@ impl Datastore {
 		// snapshot the pass holds and the write transaction that updates it
 		// proportional to one batch rather than to the number of pending removals.
 		let queue = ReclaimPrefix {}.range()?;
-		let mut window = queue.clone();
+		// The scan this pass continues, or `None` to begin one over the entries
+		// there are now, once the lease is confirmed held.
+		let mut scan = dbs.reclaim_cursor.lock().take();
+		// Batches this pass may still walk. Spent with entries still to walk,
+		// the pass keeps the scan for the next one and reports `More`.
+		let mut walk = RECLAIM_PASS_WALK_BATCHES;
+		let mut walk_stopped = false;
 		// The longest-observed eligible entries seen so far, at most
 		// `RECLAIM_PASS_ENTRY_QUOTA` of them. A max-heap ordered oldest-first, so
 		// the entry discarded when the quota is exceeded is the newest held.
@@ -5381,354 +6989,412 @@ impl Datastore {
 		// pass: the deletes below would otherwise run against a prefix the node
 		// that holds the lease now is already working on.
 		let mut lease_held = true;
-		// Walk the queue: stamp, age, and select. No deletes, so no budget.
-		loop {
-			Self::ensure_not_cancelled(&canceller)?;
-			// If we don't hold the lease, another node is handling this task.
-			if !lh.has_lease().await? {
-				lease_held = false;
-				break;
-			}
-			Self::ensure_not_cancelled(&canceller)?;
-			// Read one bounded batch of queue entries in a short-lived read
-			// transaction, to avoid holding a write lock across the entire
-			// reclaim cycle. Values are read as bytes so that an entry this node
-			// cannot decode is skipped with a warning rather than failing the
-			// whole pass.
-			let items = {
-				let txn = dbs.transaction(Read).await?;
-				let res = txn.scan_raw(window.clone(), RECLAIM_BATCH_SIZE, 0, None).await;
-				let _ = txn.cancel().await;
-				res?
-			};
-			Self::ensure_not_cancelled(&canceller)?;
-			let Some((last, _)) = items.last().cloned() else {
-				// The window has run off the end of the queue: everything queued
-				// has been walked.
-				break;
-			};
-			count_iteration += 1;
-			// Current wall-clock time (unix millis), used to age each entry
-			// against `grace` and to stamp first observations.
-			let now_ms = web_time::SystemTime::now()
-				.duration_since(web_time::SystemTime::UNIX_EPOCH)
-				.map(|d| d.as_millis() as u64)
-				.unwrap_or(0);
-			let grace_ms = grace.as_millis() as u64;
-			// Queue states to initialise or repair. The raw value read with each
-			// one is the compare-and-set guard, so a concurrent cursor advance or
-			// cancellation cannot be overwritten by this batch.
-			let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
-			for (k, v) in items.iter() {
+		'pass: {
+			// Walk the queue: stamp, age, and select. No deletes, so no budget.
+			loop {
 				Self::ensure_not_cancelled(&canceller)?;
-				if let Err(e) = ReclaimKey::decode_key(k) {
-					count_error += 1;
-					warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
-					continue;
+				// If we don't hold the lease, another node is handling this task.
+				if !lh.has_lease().await? {
+					lease_held = false;
+					break;
 				}
-				// The state carries both the observation stamp the grace is
-				// measured from and the resume cursor a partly-reclaimed prefix
-				// continues at, so it is read before either is consulted.
-				// A value this node cannot read still names a prefix whose catalog
-				// entry is committed-removed, so the entry is restarted rather than
-				// skipped: skipping it strands data that nothing else can reach,
-				// because the queue entry is the only remaining name for it.
-				// Restarting is safe in both fields — treating the entry as never
-				// observed keeps the grace gate conservative, and discarding an
-				// unreadable cursor only re-scans pages that may already be empty,
-				// which a delete tolerates.
-				let state = match ReclaimState::kv_decode_value(v, ()) {
-					Ok(s) => s,
-					Err(e) => {
+				Self::ensure_not_cancelled(&canceller)?;
+				// The window to read: after the batch the scan last read, or from
+				// the head of a scan begun now, which ends at the last entry there
+				// is. Nothing queued at all ends the walk.
+				let (window, end) = match scan.take() {
+					Some(scan) => {
+						(queue.clone().resume_after(&scan.after, Direction::Forward), scan.end)
+					}
+					None => match dbs.range_end(queue.clone()).await? {
+						Some(end) => (queue.clone(), end),
+						None => break,
+					},
+				};
+				// Read one bounded batch of queue entries in a short-lived read
+				// transaction, to avoid holding a write lock across the entire
+				// reclaim cycle. Values are read as bytes so that an entry this node
+				// cannot decode is skipped with a warning rather than failing the
+				// whole pass.
+				let items = {
+					let txn = dbs.transaction(Read).await?;
+					let res = txn.scan_raw(window, RECLAIM_BATCH_SIZE, 0, None).await;
+					let _ = txn.cancel().await;
+					res?
+				};
+				Self::ensure_not_cancelled(&canceller)?;
+				let Some((last, _)) = items.last().cloned() else {
+					// The window has run off the end of the queue: everything queued
+					// has been walked.
+					break;
+				};
+				count_iteration += 1;
+				// Current wall-clock time (unix millis), used to age each entry
+				// against `grace` and to stamp first observations.
+				let now_ms = web_time::SystemTime::now()
+					.duration_since(web_time::SystemTime::UNIX_EPOCH)
+					.map(|d| d.as_millis() as u64)
+					.unwrap_or(0);
+				let grace_ms = grace.as_millis() as u64;
+				// Queue states to initialise or repair. The raw value read with each
+				// one is the compare-and-set guard, so a concurrent cursor advance or
+				// cancellation cannot be overwritten by this batch.
+				let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
+				for (k, v) in items.iter() {
+					Self::ensure_not_cancelled(&canceller)?;
+					if let Err(e) = ReclaimKey::decode_key(k) {
 						count_error += 1;
-						warn!(
-							target: TARGET,
-							"Restarting a reclaim queue entry whose state could not be read: {e}",
-						);
-						// Repair the unreadable state conditionally before attempting
-						// the reclaim. A typed cursor CAS cannot use unreadable bytes as
-						// its expected value, and a blind repair could resurrect a claim
-						// concurrently cancelled on another node.
-						let repaired = ReclaimState {
-							observed_ms: if grace.is_zero() {
-								0
-							} else {
-								now_ms
-							},
-							cursor: None,
+						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
+						continue;
+					}
+					// The state carries both the observation stamp the grace is
+					// measured from and the resume cursor a partly-reclaimed prefix
+					// continues at, so it is read before either is consulted.
+					// A value this node cannot read still names a prefix whose catalog
+					// entry is committed-removed, so the entry is restarted rather than
+					// skipped: skipping it strands data that nothing else can reach,
+					// because the queue entry is the only remaining name for it.
+					// Restarting is safe in both fields — treating the entry as never
+					// observed keeps the grace gate conservative, and discarding an
+					// unreadable cursor only re-scans pages that may already be empty,
+					// which a delete tolerates.
+					let state = match ReclaimState::kv_decode_value(v, ()) {
+						Ok(s) => s,
+						Err(e) => {
+							count_error += 1;
+							warn!(
+								target: TARGET,
+								"Restarting a reclaim queue entry whose state could not be read: {e}",
+							);
+							// Repair the unreadable state conditionally before attempting
+							// the reclaim. A typed cursor CAS cannot use unreadable bytes as
+							// its expected value, and a blind repair could resurrect a claim
+							// concurrently cancelled on another node.
+							let repaired = ReclaimState {
+								observed_ms: if grace.is_zero() {
+									0
+								} else {
+									now_ms
+								},
+								cursor: None,
+							};
+							to_stamp.push((k.clone(), v.clone(), repaired.clone()));
+							// Zero-grace callers may reclaim immediately after the
+							// conditional repair commits. If that repair loses a race, the
+							// page's own CAS sees that `repaired` is not current and stops.
+							if grace.is_zero() {
+								candidates.push(ReclaimCandidate {
+									observed_ms: repaired.observed_ms,
+									key: k.clone(),
+									state: repaired,
+								});
+								if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+									candidates.pop();
+								}
+							}
+							continue;
+						}
+					};
+					// A zero grace reclaims immediately, skipping the
+					// observe-then-age dance (tests / harness teardown — no
+					// concurrent readers).
+					if !grace.is_zero() {
+						if state.observed_ms == 0 {
+							// First sighting of this committed entry — record an
+							// observation time (>= commit) and defer reclaim. Aging
+							// is measured from here, never from the pre-commit
+							// `uid`. Not a candidate this pass: its grace starts now.
+							to_stamp.push((
+								k.clone(),
+								v.clone(),
+								ReclaimState {
+									observed_ms: now_ms,
+									cursor: state.cursor.clone(),
+								},
+							));
+							continue;
+						}
+						// Snapshot-safety gate: only destroy data once it has been
+						// observed for at least `grace`, by which point any
+						// transaction that could still read it is behind the MVCC
+						// GC safepoint.
+						if now_ms.saturating_sub(state.observed_ms) < grace_ms {
+							continue;
+						}
+					}
+					candidates.push(ReclaimCandidate {
+						observed_ms: state.observed_ms,
+						key: k.clone(),
+						state,
+					});
+					if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+						// The newest held entry gives up its place: it has waited
+						// least, so it loses to every other candidate. Held up to one
+						// batch rather than up to the share divisor, because an entry
+						// whose reclaim spends nothing — an already-empty prefix, or a
+						// backend that drops the range in one call — costs no budget,
+						// and the spend below walks through as many of those as it
+						// finds. Capping the set at the divisor would stop that at the
+						// divisor and throttle the backends where reclaim is cheapest.
+						// One batch of candidates is the memory the pass already holds
+						// for one batch of scanned entries.
+						candidates.pop();
+					}
+				}
+				// Persist this batch's stamps in one write transaction, bounded by the
+				// batch as the paged data delete is bounded by the page. Done
+				// separately from the read scan so we don't conflict with concurrent
+				// enqueues.
+				if !to_stamp.is_empty() {
+					let txn = dbs.transaction(Write).await?;
+					if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+					let mut condition_failed = false;
+					for (k, expected, state) in &to_stamp {
+						let value = match state.kv_encode_value() {
+							Ok(value) => value,
+							Err(e) => {
+								let _ = txn.cancel().await;
+								return Err(e);
+							}
 						};
-						to_stamp.push((k.clone(), v.clone(), repaired.clone()));
-						// Zero-grace callers may reclaim immediately after the
-						// conditional repair commits. If that repair loses a race, the
-						// page's own CAS sees that `repaired` is not current and stops.
-						if grace.is_zero() {
-							candidates.push(ReclaimCandidate {
-								observed_ms: repaired.observed_ms,
-								key: k.clone(),
-								state: repaired,
-							});
-							if candidates.len() > RECLAIM_BATCH_SIZE as usize {
-								candidates.pop();
+						match txn
+							.put_compare(Key::from(k.clone()), value, Some(expected.clone()))
+							.await
+						{
+							Ok(()) => {}
+							Err(e) if super::is_conditional_write_conflict(&e) => {
+								condition_failed = true;
+								break;
+							}
+							Err(e) => {
+								warn!(target: TARGET, "Failed to stamp reclaim queue entry: {e}");
 							}
 						}
+					}
+					if condition_failed {
+						let _ = txn.cancel().await;
+					} else {
+						// A stamp that does not land leaves the entry unobserved, so the
+						// next pass starts its grace instead. Counted rather than silent:
+						// an uncounted failure here reports as a healthy pass while the
+						// entry's clock never starts.
+						if let Err(e) = txn.commit().await {
+							let _ = txn.cancel().await;
+							if !super::is_conditional_write_conflict(&e) {
+								count_error += 1;
+								warn!(target: TARGET, "Failed to commit reclaim queue stamps: {e}");
+								break 'pass;
+							}
+						}
+					}
+				}
+				// The batch that reaches the end the scan began with ends it: what
+				// lies past that key was queued since, and is the next scan's.
+				if last >= end {
+					break;
+				}
+				// Seek past the batch just walked.
+				scan = Some(ReclaimScan {
+					after: last,
+					end,
+				});
+				walk -= 1;
+				if walk == 0 {
+					// Spent with entries still to walk: the next pass resumes here.
+					*dbs.reclaim_cursor.lock() = scan.take();
+					walk_stopped = true;
+					break;
+				}
+			}
+			if !lease_held {
+				break 'pass;
+			}
+			// Spend the key budget on the selected entries, longest-observed first.
+			// `into_sorted_vec` is ascending in the candidate order, which is the
+			// oldest observation first and the queue's key order between entries
+			// observed in the same millisecond.
+			let selected = candidates.into_sorted_vec();
+			// Entries whose prefix this pass emptied, to delete from the queue. An
+			// entry the pass only partly emptied is left queued for a later pass.
+			let mut done: Vec<Vec<u8>> = Vec::with_capacity(selected.len());
+			// How many of the selected entries are still to spend from the budget, so
+			// each takes its slice of what is left rather than all of it.
+			let mut remaining = selected.len() as u64;
+			for candidate in selected {
+				Self::ensure_not_cancelled(&canceller)?;
+				// Stop at the entry the lease was lost on, and report the pass
+				// as run under another node's lease, as the walk does. The queue
+				// update below still commits what this pass emptied, and
+				// whichever node holds the lease now continues from the durable
+				// cursors. The answer has to be read rather than discarded: a
+				// lease check is throttled to one datastore read per maintenance
+				// period, so a call that drops it consumes the read the page
+				// loop's own check depends on and leaves that check answering
+				// affirmatively without asking.
+				if !lh.try_maintain_lease().await? {
+					lease_held = false;
+					break;
+				}
+				let ReclaimCandidate {
+					key,
+					state,
+					..
+				} = candidate;
+				// Decoded during the walk that selected it, so this cannot fail; a
+				// failure is still counted rather than panicking on it.
+				let rc = match ReclaimKey::decode_key(&key) {
+					Ok(rc) => rc,
+					Err(e) => {
+						count_error += 1;
+						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
+						remaining = remaining.saturating_sub(1);
 						continue;
 					}
 				};
-				// A zero grace reclaims immediately, skipping the
-				// observe-then-age dance (tests / harness teardown — no
-				// concurrent readers).
-				if !grace.is_zero() {
-					if state.observed_ms == 0 {
-						// First sighting of this committed entry — record an
-						// observation time (>= commit) and defer reclaim. Aging
-						// is measured from here, never from the pre-commit
-						// `uid`. Not a candidate this pass: its grace starts now.
-						to_stamp.push((
-							k.clone(),
-							v.clone(),
-							ReclaimState {
-								observed_ms: now_ms,
-								cursor: state.cursor.clone(),
-							},
-						));
-						continue;
+				// Keys this entry may delete before the pass moves on: its share of
+				// what the budget has left, across the entries still to spend from
+				// it, capped at the budget so the tail of a pass hands out only what
+				// remains. An entry naming a prefix larger than its share therefore
+				// cannot take the whole budget and leave its siblings untouched.
+				// Floored at one key rather than one page: a share below a page
+				// still deletes, since the page size caps a transaction rather than
+				// setting a minimum.
+				// The divisor is the entries still to spend, capped at the quota: a
+				// pass holding a batch of candidates would otherwise cut every share
+				// to a thousandth of the budget, so no entry would delete a useful
+				// amount. Capped, each served entry gets about a page and the pass
+				// stops when the budget runs out — which is what makes the
+				// oldest-first order above decide who is served.
+				let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
+				let share = (budget / divisor.max(1)).max(1).min(budget);
+				remaining = remaining.saturating_sub(1);
+				let mut left = share;
+				// Whether the lease passed to another node mid-entry. Recorded
+				// rather than broken on directly, so the budget below is charged
+				// for the pages this entry did commit before the pass ends.
+				let mut lease_lost = false;
+				match dbs.reclaim_decoded(&rc, &state, &lh, &canceller, &mut left).await {
+					// The prefix is empty, so the entry has nothing left to
+					// name and can be retired.
+					Ok(ReclaimOutcome::Complete) => done.push(key),
+					// Progress is durable but keys remain: leaving the entry
+					// queued is what lets a later pass resume it.
+					Ok(ReclaimOutcome::Incomplete) => {}
+					// The entry is already gone, so it must not be added to
+					// `done`: that would delete whatever a concurrent writer
+					// put at the same key.
+					Ok(ReclaimOutcome::Cancelled) => {}
+					// Whichever node holds the lease now resumes from the
+					// cursors this pass committed, and the pass reports the
+					// lease elsewhere, as it does when the check before the
+					// entry loses it.
+					Ok(ReclaimOutcome::LeaseLost) => {
+						lease_lost = true;
+						lease_held = false;
 					}
-					// Snapshot-safety gate: only destroy data once it has been
-					// observed for at least `grace`, by which point any
-					// transaction that could still read it is behind the MVCC
-					// GC safepoint.
-					if now_ms.saturating_sub(state.observed_ms) < grace_ms {
-						continue;
+					// Shutdown. Not a failure of this entry, so it is neither
+					// counted nor logged; the queue update below refuses to
+					// commit and the pass ends there.
+					Err(e)
+						if matches!(
+							crate::err::engine_error(&e),
+							Some(EngineError::QueryCancelled)
+						) =>
+					{
+						break;
+					}
+					Err(e) => {
+						count_error += 1;
+						warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
 					}
 				}
-				candidates.push(ReclaimCandidate {
-					observed_ms: state.observed_ms,
-					key: k.clone(),
-					state,
-				});
-				if candidates.len() > RECLAIM_BATCH_SIZE as usize {
-					// The newest held entry gives up its place: it has waited
-					// least, so it loses to every other candidate. Held up to one
-					// batch rather than up to the share divisor, because an entry
-					// whose reclaim spends nothing — an already-empty prefix, or a
-					// backend that drops the range in one call — costs no budget,
-					// and the spend below walks through as many of those as it
-					// finds. Capping the set at the divisor would stop that at the
-					// divisor and throttle the backends where reclaim is cheapest.
-					// One batch of candidates is the memory the pass already holds
-					// for one batch of scanned entries.
-					candidates.pop();
+				// Charge what the entry deleted, not what it was offered.
+				budget = budget.saturating_sub(share.saturating_sub(left));
+				if lease_lost {
+					// The queue update below still commits what this pass
+					// emptied; the node holding the lease now takes the rest.
+					break;
+				}
+				if budget == 0 {
+					// The pass has spent its key budget. Every cursor it
+					// advanced is committed, so the next tick continues from
+					// there rather than repeating this work.
+					break;
 				}
 			}
-			// Persist this batch's stamps in one write transaction, bounded by the
-			// batch as the paged data delete is bounded by the page. Done
-			// separately from the read scan so we don't conflict with concurrent
-			// enqueues.
-			if !to_stamp.is_empty() {
+			// Retire the entries this pass emptied, in one write transaction bounded
+			// by the entry quota.
+			if !done.is_empty() {
 				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
+				// Retire only the value currently stored. This prevents a stale
+				// completion from deleting a state advanced by another node, and
+				// makes a concurrent cancellation win cleanly on TiKV.
 				let mut condition_failed = false;
-				for (k, expected, state) in &to_stamp {
-					let value = match state.kv_encode_value() {
-						Ok(value) => value,
+				for k in &done {
+					let current = match txn.get(Key::from(k), None).await {
+						Ok(Some(current)) => current,
+						Ok(None) => continue,
 						Err(e) => {
-							let _ = txn.cancel().await;
-							return Err(e);
+							warn!(target: TARGET, "Failed to read reclaim queue entry: {e}");
+							continue;
 						}
 					};
-					match txn.put_compare(Key::from(k.clone()), value, Some(expected.clone())).await
-					{
+					match txn.del_compare(Key::from(k), Some(&current)).await {
 						Ok(()) => {}
 						Err(e) if super::is_conditional_write_conflict(&e) => {
 							condition_failed = true;
 							break;
 						}
 						Err(e) => {
-							warn!(target: TARGET, "Failed to stamp reclaim queue entry: {e}");
+							warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
 						}
 					}
 				}
 				if condition_failed {
 					let _ = txn.cancel().await;
-				} else {
-					// A stamp that does not land leaves the entry unobserved, so the
-					// next pass starts its grace instead. Counted rather than silent:
-					// an uncounted failure here reports as a healthy pass while the
-					// entry's clock never starts.
-					if let Err(e) = txn.commit().await {
-						let _ = txn.cancel().await;
-						if !super::is_conditional_write_conflict(&e) {
-							count_error += 1;
-							warn!(target: TARGET, "Failed to commit reclaim queue stamps: {e}");
-							return Ok((count_iteration, count_error));
-						}
+					break 'pass;
+				}
+				// A pass whose queue update does not land has reclaimed data
+				// without recording that it did, so it is counted: an uncounted
+				// failure here reports as a healthy pass and leaves nothing for an
+				// operator to see but the next tick repeating the same work.
+				if let Err(e) = txn.commit().await {
+					let _ = txn.cancel().await;
+					if !super::is_conditional_write_conflict(&e) {
+						count_error += 1;
+						warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
 					}
 				}
 			}
-			// Seek past the batch just walked; the window advancing is also what
-			// terminates the walk, at the end of the queue.
-			window = queue.clone().resume_after(&last, Direction::Forward);
 		}
-		if !lease_held {
-			return Ok((count_iteration, count_error));
-		}
-		// Spend the key budget on the selected entries, longest-observed first.
-		// `into_sorted_vec` is ascending in the candidate order, which is the
-		// oldest observation first and the queue's key order between entries
-		// observed in the same millisecond.
-		let selected = candidates.into_sorted_vec();
-		// Entries whose prefix this pass emptied, to delete from the queue. An
-		// entry the pass only partly emptied is left queued for a later pass.
-		let mut done: Vec<Vec<u8>> = Vec::with_capacity(selected.len());
-		// How many of the selected entries are still to spend from the budget, so
-		// each takes its slice of what is left rather than all of it.
-		let mut remaining = selected.len() as u64;
-		for candidate in selected {
-			Self::ensure_not_cancelled(&canceller)?;
-			// Stop at the entry the lease was lost on. The queue update below
-			// still commits what this pass emptied, and whichever node holds
-			// the lease now continues from the durable cursors. The answer has
-			// to be read rather than discarded: a lease check is throttled to
-			// one datastore read per maintenance period, so a call that drops
-			// it consumes the read the page loop's own check depends on and
-			// leaves that check answering affirmatively without asking.
-			if !lh.try_maintain_lease().await? {
-				break;
-			}
-			let ReclaimCandidate {
-				key,
-				state,
-				..
-			} = candidate;
-			// Decoded during the walk that selected it, so this cannot fail; a
-			// failure is still counted rather than panicking on it.
-			let rc = match ReclaimKey::decode_key(&key) {
-				Ok(rc) => rc,
-				Err(e) => {
-					count_error += 1;
-					warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
-					remaining = remaining.saturating_sub(1);
-					continue;
-				}
-			};
-			// Keys this entry may delete before the pass moves on: its share of
-			// what the budget has left, across the entries still to spend from
-			// it, capped at the budget so the tail of a pass hands out only what
-			// remains. An entry naming a prefix larger than its share therefore
-			// cannot take the whole budget and leave its siblings untouched.
-			// Floored at one key rather than one page: a share below a page
-			// still deletes, since the page size caps a transaction rather than
-			// setting a minimum.
-			// The divisor is the entries still to spend, capped at the quota: a
-			// pass holding a batch of candidates would otherwise cut every share
-			// to a thousandth of the budget, so no entry would delete a useful
-			// amount. Capped, each served entry gets about a page and the pass
-			// stops when the budget runs out — which is what makes the
-			// oldest-first order above decide who is served.
-			let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
-			let share = (budget / divisor.max(1)).max(1).min(budget);
-			remaining = remaining.saturating_sub(1);
-			let mut left = share;
-			// Whether the lease passed to another node mid-entry. Recorded
-			// rather than broken on directly, so the budget below is charged
-			// for the pages this entry did commit before the pass ends.
-			let mut lease_lost = false;
-			match dbs.reclaim_decoded(&rc, &state, &lh, &canceller, &mut left).await {
-				// The prefix is empty, so the entry has nothing left to
-				// name and can be retired.
-				Ok(ReclaimOutcome::Complete) => done.push(key),
-				// Progress is durable but keys remain: leaving the entry
-				// queued is what lets a later pass resume it.
-				Ok(ReclaimOutcome::Incomplete) => {}
-				// The entry is already gone, so it must not be added to
-				// `done`: that would delete whatever a concurrent writer
-				// put at the same key.
-				Ok(ReclaimOutcome::Cancelled) => {}
-				// Whichever node holds the lease now resumes from the
-				// cursors this pass committed.
-				Ok(ReclaimOutcome::LeaseLost) => lease_lost = true,
-				// Shutdown. Not a failure of this entry, so it is neither
-				// counted nor logged; the queue update below refuses to
-				// commit and the pass ends there.
-				Err(e)
-					if matches!(
-						crate::err::engine_error(&e),
-						Some(EngineError::QueryCancelled)
-					) =>
-				{
-					break;
-				}
-				Err(e) => {
-					count_error += 1;
-					warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
-				}
-			}
-			// Charge what the entry deleted, not what it was offered.
-			budget = budget.saturating_sub(share.saturating_sub(left));
-			if lease_lost {
-				// The queue update below still commits what this pass
-				// emptied; the node holding the lease now takes the rest.
-				break;
-			}
-			if budget == 0 {
-				// The pass has spent its key budget. Every cursor it
-				// advanced is committed, so the next tick continues from
-				// there rather than repeating this work.
-				break;
-			}
-		}
-		// Retire the entries this pass emptied, in one write transaction bounded
-		// by the entry quota.
-		if !done.is_empty() {
-			let txn = dbs.transaction(Write).await?;
-			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
-				let _ = txn.cancel().await;
-				return Err(e);
-			}
-			// Retire only the value currently stored. This prevents a stale
-			// completion from deleting a state advanced by another node, and
-			// makes a concurrent cancellation win cleanly on TiKV.
-			let mut condition_failed = false;
-			for k in &done {
-				let current = match txn.get(Key::from(k), None).await {
-					Ok(Some(current)) => current,
-					Ok(None) => continue,
-					Err(e) => {
-						warn!(target: TARGET, "Failed to read reclaim queue entry: {e}");
-						continue;
-					}
-				};
-				match txn.del_compare(Key::from(k), Some(&current)).await {
-					Ok(()) => {}
-					Err(e) if super::is_conditional_write_conflict(&e) => {
-						condition_failed = true;
-						break;
-					}
-					Err(e) => {
-						warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
-					}
-				}
-			}
-			if condition_failed {
-				let _ = txn.cancel().await;
-				return Ok((count_iteration, count_error));
-			}
-			// A pass whose queue update does not land has reclaimed data
-			// without recording that it did, so it is counted: an uncounted
-			// failure here reports as a healthy pass and leaves nothing for an
-			// operator to see but the next tick repeating the same work.
-			if let Err(e) = txn.commit().await {
-				let _ = txn.cancel().await;
-				if !super::is_conditional_write_conflict(&e) {
-					count_error += 1;
-					warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
-				}
-			}
-		}
-		Ok((count_iteration, count_error))
+		// A spent key budget, or a walk stopped with entries still to walk, are
+		// what end a pass with work still queued: every other exit has either
+		// walked its scan to the end or handed the rest to the node that holds
+		// the lease now.
+		let pass = Pass {
+			progress: if budget == 0 || walk_stopped {
+				Progress::More
+			} else {
+				Progress::Done
+			},
+			items: limit - budget,
+			oldest_age: None,
+			held: 0,
+			ran: limit - budget,
+			lease: if lease_held {
+				TaskLeaseState::Held
+			} else {
+				TaskLeaseState::Elsewhere
+			},
+		};
+		Ok((count_iteration, count_error, pass))
 	}
 
 	/// Whether the table a queue entry names still has a consumer of the
@@ -5992,33 +7658,107 @@ impl Datastore {
 		interval: Duration,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
+		let (iterations, errors, _) =
+			Self::graph_fold_bounded(dbs, interval, canceller, None, None).await?;
+		Ok((iterations, errors))
+	}
+
+	/// One slice of [`Self::graph_fold`]: at most [`GRAPH_FOLD_SLICE_BATCHES`]
+	/// batches, running at most [`GRAPH_FOLD_SLICE_PASSES_PER_SCOPE`] fold
+	/// passes on any scope a batch names, and reporting [`Progress::More`]
+	/// when the queue may hold more — or when a scope's fold outlasted its
+	/// passes, or a batch's cleanup its [`QUEUE_CLEANUP_CONFLICT_RETRIES`],
+	/// and the slice kept its entries for the rotation to reach again. The
+	/// keys read are the pass's items, and the oldest entry read its queue
+	/// age.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(dbs, canceller)
+		)
+	)]
+	pub(crate) async fn graph_fold_slice(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<Pass> {
+		let (_, _, pass) = Self::graph_fold_bounded(
+			dbs,
+			interval,
+			canceller,
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+		)
+		.await?;
+		Ok(pass)
+	}
+
+	/// The drain behind [`Self::graph_fold`] and [`Self::graph_fold_slice`],
+	/// stopping after `max_batches` batches when given one, and running at
+	/// most `passes_per_scope` fold passes on any scope a batch names when
+	/// given one: a scope whose fold outlasts them keeps its queue entries,
+	/// for the rotation to reach again once the later scopes have had their
+	/// passes, and the drain stops at that batch to report them as its
+	/// backlog. A batch whose cleanup commit keeps losing conflicts keeps its
+	/// entries the same way once [`QUEUE_CLEANUP_CONFLICT_RETRIES`] retries
+	/// are spent.
+	///
+	/// A batch of many scopes can outlast the lease, so the lease is renewed
+	/// before each scope's fold and before each of its passes. A drain that
+	/// finds another node holding it stops at that scope: it deletes nothing of
+	/// the batch, which is the holder's to drain, leaves its rotation where the
+	/// batch began, and reports the lease as held elsewhere. A renewal that
+	/// reaches no verdict fails the drain.
+	///
+	/// Returns the batches processed, the scopes that failed to fold, and the
+	/// pass report.
+	pub(crate) async fn graph_fold_bounded(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+		max_batches: Option<usize>,
+		passes_per_scope: Option<usize>,
+	) -> Result<(usize, usize, Pass)> {
 		trace!(target: TARGET, "Attempting graph fold process");
 		Self::flush_graph_fold_observations(&dbs).await?;
-		let lh = LeaseHandler::new_with_canceller(
-			dbs.sequences.clone(),
-			dbs.id,
-			dbs.transaction_factory.clone(),
-			TaskLeaseType::GraphFold,
-			interval * 2,
-			canceller.clone(),
-		)?;
+		let lh = dbs.lease_handler(TaskLeaseType::GraphFold, interval * 2, Some(&canceller))?;
 		let batch = dbs.config.idx.graph_fold_batch;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
+		let mut pass = Pass::elsewhere();
 		let queue = GraphFoldPrefix {}.range()?;
-		let mut window = queue.clone();
-		// Whether the sweep since the last window wrap deleted a queue entry
-		// or folded a scope. A wrap-around re-scan retries entries retained
-		// by failed folds; without progress between two wraps every remaining
-		// entry has just failed again, so the call yields to the next
-		// interval instead of hot-looping on a poison scope.
-		let mut progressed = false;
+		// The rotation continues from where the previous slice stopped, with
+		// what it had achieved so far; see `index_compaction_bounded`.
+		// `progressed` is whether the rotation since it last began at the
+		// head has deleted a queue entry or folded a scope. A wrap-around
+		// re-scan retries entries retained by failed folds; a rotation that
+		// reaches the end of the range without progress has just failed every
+		// remaining entry again, so the call yields to the next interval
+		// instead of hot-looping on a poison scope — whether the rotation ran
+		// in one call or, slice by slice, across several.
+		let (mut resume_at, mut progressed) = {
+			let cursor = dbs.fold_cursor.lock();
+			(cursor.resume_at.clone(), cursor.progressed)
+		};
+		let mut window = match &resume_at {
+			Some(after) => queue.clone().resume_after(after, Direction::Forward),
+			None => queue.clone(),
+		};
 		'fold: loop {
 			Self::ensure_not_cancelled(&canceller)?;
-			// Without the lease, another node is draining the queue.
-			if !lh.has_lease().await? {
+			// The slice budget; see `index_compaction_bounded`.
+			if max_batches.is_some_and(|max| count_iteration >= max) {
+				pass.progress = Progress::More;
 				break 'fold;
 			}
+			// Without the lease, another node is draining the queue.
+			if !lh.has_lease().await? {
+				pass.lease = TaskLeaseState::Elsewhere;
+				break 'fold;
+			}
+			pass.lease = TaskLeaseState::Held;
 			Self::ensure_not_cancelled(&canceller)?;
 			trace!(target: TARGET, "Running graph fold process");
 			// One bounded, keys-only batch of queue entries per iteration,
@@ -6032,38 +7772,57 @@ impl Datastore {
 			};
 			Self::ensure_not_cancelled(&canceller)?;
 			if keys.is_empty() {
-				if window.start() == queue.start() || !progressed {
-					// Nothing left anywhere in the queue, or everything left
-					// belongs to scopes that failed this sweep.
+				if window.start() == queue.start() {
+					// Nothing left anywhere in the queue, so no scope has a
+					// pass to continue.
+					progressed = false;
+					dbs.fold_cursor.lock().scans.clear();
+					break 'fold;
+				}
+				if !progressed {
+					// Everything left belongs to scopes that failed this
+					// rotation. The next interval starts a fresh rotation from
+					// the head; resuming here would only read nothing again.
+					resume_at = None;
 					break 'fold;
 				}
 				// End of the range: wrap to re-scan entries skipped when the
 				// window seeked past a partially-drained scope, or retained
 				// when a scope's fold failed.
 				progressed = false;
+				resume_at = None;
 				window = queue.clone();
 				continue;
 			}
 			count_iteration += 1;
-			// The distinct scopes this batch names, in queue order, and each
-			// entry's scope for the cleanup below. Entries that fail to
-			// decode name nothing foldable; the cleanup removes them.
-			let mut scopes: Vec<GraphFoldScope> = Vec::new();
-			let mut seen: HashSet<GraphFoldScope> = HashSet::new();
+			pass.items += keys.len() as u64;
+			if let Some(age) = Self::oldest_queued_age(
+				keys.iter().filter_map(|k| GraphFoldKey::decode_key(k).ok().map(|k| k.uid)),
+			) {
+				pass.observe_age(age);
+			}
+			// The distinct scopes this batch names, in queue order, each with
+			// the entries naming it, and each entry's scope for the cleanup
+			// below. Entries that fail to decode name nothing foldable; the
+			// cleanup removes them.
+			let mut scopes: Vec<(GraphFoldScope, Vec<&[u8]>)> = Vec::new();
+			let mut seen: HashMap<GraphFoldScope, usize> = HashMap::new();
 			let mut key_scopes: Vec<Option<GraphFoldScope>> = Vec::with_capacity(keys.len());
 			for key in &keys {
 				match GraphFoldKey::decode_key(key) {
-					Ok(key) => {
+					Ok(decoded) => {
 						let scope = GraphFoldScope {
-							ns: key.ns,
-							db: key.db,
-							tb: key.tb.into_owned(),
-							id: key.id.into_owned(),
-							dir: key.dir,
+							ns: decoded.ns,
+							db: decoded.db,
+							tb: decoded.tb.into_owned(),
+							id: decoded.id.into_owned(),
+							dir: decoded.dir,
 						};
-						if seen.insert(scope.clone()) {
-							scopes.push(scope.clone());
-						}
+						let index = *seen.entry(scope.clone()).or_insert_with(|| {
+							scopes.push((scope.clone(), Vec::new()));
+							scopes.len() - 1
+						});
+						scopes[index].1.push(key.as_slice());
 						key_scopes.push(Some(scope));
 					}
 					Err(e) => {
@@ -6074,15 +7833,43 @@ impl Datastore {
 			}
 			// The scopes whose drain completed; only their queue entries are
 			// deleted below. A failed scope keeps its entries, so its fold
-			// debt survives for the wrap-around re-scan and later calls.
+			// debt survives for the wrap-around re-scan and later calls, and
+			// so do a scope whose fold outlasted its passes and one whose
+			// table definition this build cannot read — the latter without
+			// counting as progress, so a rotation left with nothing but such
+			// scopes ends at the range like one left with failed ones.
 			let mut folded: HashSet<GraphFoldScope> = HashSet::with_capacity(scopes.len());
-			for scope in scopes {
-				match Self::fold_queued_scope(&dbs, &scope, batch, &canceller).await {
-					Ok(()) => {
+			let mut unfinished = false;
+			for (scope, entries) in scopes {
+				#[cfg(test)]
+				if let Some(hook) = test::take_before_fold_scope(dbs.id) {
+					hook().await;
+				}
+				match Self::fold_queued_scope(
+					&dbs,
+					&lh,
+					&scope,
+					&entries,
+					batch,
+					passes_per_scope,
+					&canceller,
+				)
+				.await
+				{
+					Ok(FoldOutcome::Folded) => {
 						folded.insert(scope);
 					}
+					Ok(FoldOutcome::Unfinished) => unfinished = true,
+					Ok(FoldOutcome::Refused) => {}
+					Ok(FoldOutcome::LeaseLost) => {
+						trace!(target: TARGET, "Graph fold lease lost, leaving the batch to its holder");
+						pass.lease = TaskLeaseState::Elsewhere;
+						break 'fold;
+					}
 					Err(e) => {
-						if canceller.is_cancelled() {
+						if canceller.is_cancelled()
+							|| e.downcast_ref::<LeaseCheckFailed>().is_some()
+						{
 							return Err(e);
 						}
 						count_error += 1;
@@ -6093,20 +7880,20 @@ impl Datastore {
 			// Seek the next batch past the last scope's run of queue entries,
 			// so a scope that keeps re-enqueueing cannot pin the window.
 			if let Some(last_key) = keys.last() {
-				window = match GraphFoldKey::decode_key(last_key) {
-					Ok(last) => {
-						let covered = GraphFoldDirPrefix {
-							ns: last.ns,
-							db: last.db,
-							tb: Cow::Owned(last.tb.into_owned()),
-							id: Cow::Owned(last.id.into_owned()),
-							dir: last.dir,
-						}
-						.skip_extensions()?;
-						queue.clone().resume_after(&covered, Direction::Forward)
+				let after = match GraphFoldKey::decode_key(last_key) {
+					Ok(last) => GraphFoldDirPrefix {
+						ns: last.ns,
+						db: last.db,
+						tb: Cow::Owned(last.tb.into_owned()),
+						id: Cow::Owned(last.id.into_owned()),
+						dir: last.dir,
 					}
-					Err(_) => queue.clone().resume_after(last_key, Direction::Forward),
+					.skip_extensions()?
+					.to_vec(),
+					Err(_) => last_key.clone(),
 				};
+				window = queue.clone().resume_after(&after, Direction::Forward);
+				resume_at = Some(after);
 			}
 			// Delete this batch's consumed queue entries in a separate bounded
 			// write transaction: entries whose scope folded, and undecodable
@@ -6118,38 +7905,74 @@ impl Datastore {
 				.filter(|(_, scope)| scope.as_ref().is_none_or(|s| folded.contains(s)))
 				.map(|(k, _)| k)
 				.collect();
-			if deletable.is_empty() {
-				continue;
+			if !deletable.is_empty() {
+				progressed = true;
+				let mut retries = 0;
+				loop {
+					let txn = dbs.transaction(Write).await?;
+					if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+					for k in &deletable {
+						if let Err(e) = txn.del(Key::from(k.as_slice())).await {
+							warn!(target: TARGET, "Failed to delete graph fold queue entry: {e}");
+						}
+					}
+					let committed = async {
+						#[cfg(test)]
+						maybe_inject_retryable_conflict(
+							RetryableConflictSite::GraphFoldQueueCleanup,
+							dbs.id,
+						)?;
+						txn.commit().await
+					}
+					.await;
+					if let Err(e) = committed {
+						if retries < QUEUE_CLEANUP_CONFLICT_RETRIES
+							&& Self::cancel_and_retry_index_operation_conflict(
+								&txn,
+								&e,
+								"Retryable conflict committing graph fold queue cleanup, retrying",
+							)
+							.await
+						{
+							retries += 1;
+							continue;
+						}
+						let _ = txn.cancel().await;
+						if is_retryable_transaction_conflict(&e) {
+							// See the index compaction queue cleanup: the entries
+							// stay queued as the slice's backlog.
+							warn!(
+								target: TARGET,
+								"Graph fold queue cleanup kept losing conflicts, leaving its entries queued: {e}"
+							);
+							pass.progress = Progress::More;
+						} else {
+							warn!(target: TARGET, "Failed to commit graph fold queue cleanup: {e}");
+						}
+						break 'fold;
+					}
+					break;
+				}
 			}
-			progressed = true;
-			loop {
-				let txn = dbs.transaction(Write).await?;
-				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
-					let _ = txn.cancel().await;
-					return Err(e);
-				}
-				for k in &deletable {
-					if let Err(e) = txn.del(Key::from(k.as_slice())).await {
-						warn!(target: TARGET, "Failed to delete graph fold queue entry: {e}");
-					}
-				}
-				if let Err(e) = txn.commit().await {
-					if Self::cancel_and_retry_index_operation_conflict(
-						&txn,
-						&e,
-						"Retryable conflict committing graph fold queue cleanup, retrying",
-					)
-					.await
-					{
-						continue;
-					}
-					warn!(target: TARGET, "Failed to commit graph fold queue cleanup: {e}");
-					break 'fold;
-				}
-				break;
+			// A scope whose fold outlasted its passes is progress the rotation
+			// made, and the slice ends at its batch: the entries it kept are
+			// its backlog, and the next slice reaches them after the scopes
+			// the rotation has yet to visit.
+			if unfinished {
+				progressed = true;
+				pass.progress = Progress::More;
+				break 'fold;
 			}
 		}
-		Ok((count_iteration, count_error))
+		{
+			let mut cursor = dbs.fold_cursor.lock();
+			cursor.resume_at = resume_at;
+			cursor.progressed = progressed;
+		}
+		Ok((count_iteration, count_error, pass))
 	}
 
 	/// Writes this node's read-path fold observations into the durable
@@ -6180,65 +8003,107 @@ impl Datastore {
 
 	/// Drains one queued scope: bounded fold passes, each in its own
 	/// transaction, retrying a bounded number of times when a concurrent
-	/// edge write conflicts with a pass.
+	/// edge write conflicts with a pass. Runs at most `passes` of them when a
+	/// bound is given, and reports whether the scope is drained, unfinished
+	/// — the passes ran out with keys left to examine — or refused, its
+	/// table's definition needing a newer release; see [`FoldOutcome`]. Each
+	/// pass continues where the last committed one stopped, within this call
+	/// and across calls through the fold cursor, so the passes cross the
+	/// scope's keys once however many of them cannot be packed. `entries`
+	/// are the queue entries naming the scope in the batch being drained,
+	/// which the drain consumes once the scope is folded: a continuation
+	/// taken before one of them was queued is dropped and the scope scanned
+	/// from its start, so that no entry is consumed without the write it
+	/// names having been examined; see [`ScopeScan`].
+	///
+	/// The lease `lh` is renewed before the scope is examined and before each
+	/// pass; a scope reached after another node took it reports
+	/// [`FoldOutcome::LeaseLost`] with no further pass run.
 	async fn fold_queued_scope(
 		dbs: &Arc<Datastore>,
+		lh: &LeaseHandler,
 		scope: &GraphFoldScope,
+		entries: &[&[u8]],
 		batch: usize,
+		passes: Option<usize>,
 		canceller: &CancellationToken,
-	) -> Result<()> {
-		// The catalog write that marks the vertex table folded addresses the
-		// namespace and database by name. A namespace or database dropped
-		// since the entry was queued leaves nothing to fold.
-		//
-		// A namespace or database this build cannot read, because a newer
-		// release wrote its definition, leaves nothing it can fold either. The
-		// scope is left, with a warning, and a later observation queues it again.
-		let (ns_name, db_name) = {
+	) -> Result<FoldOutcome> {
+		if !lh.try_maintain_lease().await? {
+			return Ok(FoldOutcome::LeaseLost);
+		}
+		// A table, database or namespace removed since the entry was queued
+		// leaves nothing to fold: the removal deletes the table's definition
+		// and the scope's pointer keys with it. Both are read by id, so the
+		// check costs two keys however large the catalog is. Pointer keys
+		// under no definition are fold debt, taxing every read of the scope
+		// until the table is defined or they are removed, so such a scope is
+		// folded, and the fold's failure keeps its entries.
+		{
 			let txn = dbs.transaction(Read).await?;
-			let found = async {
-				let nss = txn.all_readable(NamespacePrefix {}.range()?).await?;
-				let ns = nss
-					.values
-					.iter()
-					.find(|n| n.namespace_id == scope.ns)
-					.map(|n| n.name.to_string());
-				let dbs = txn
-					.all_readable(
-						DatabasePrefix {
-							ns: scope.ns,
-						}
-						.range()?,
-					)
-					.await?;
-				let db = dbs
-					.values
-					.iter()
-					.find(|d| d.database_id == scope.db)
-					.map(|d| d.name.to_string());
-				Ok::<_, anyhow::Error>((ns, db, nss.refused + dbs.refused))
+			let foldable = async {
+				match txn.get_tb(scope.ns, scope.db, &scope.tb, None).await {
+					Ok(Some(_)) => return Ok(Some(true)),
+					Ok(None) => {}
+					// A table definition a newer release wrote is one this build
+					// cannot fold under: the scope is left queued, with a
+					// warning, for a build that can.
+					Err(e) if surrealdb_datastore::tx::refused_by_release(&e) => {
+						warn!(
+							target: TARGET,
+							"A graph fold scope was left because its table's definition needs a \
+							 newer release than this build"
+						);
+						return Ok(None);
+					}
+					Err(e) => return Err(e),
+				}
+				let range = crate::key::schema::GraphDirPrefix {
+					ns: scope.ns,
+					db: scope.db,
+					tb: Cow::Borrowed(&scope.tb),
+					id: Cow::Borrowed(&scope.id),
+					dir: scope.dir,
+				}
+				.range()?;
+				anyhow::Ok(Some(!txn.keys_raw(range, 1, 0, None).await?.is_empty()))
 			}
 			.await;
 			let _ = txn.cancel().await;
-			match found? {
-				(Some(ns), Some(db), _) => (ns, db),
-				(_, _, refused) => {
-					if refused > 0 {
-						warn!(
-							target: TARGET,
-							refused,
-							"A graph fold scope was left because a catalog entry on its path needs \
-							 a newer release than this build"
-						);
-					}
-					return Ok(());
+			match foldable? {
+				Some(true) => {}
+				Some(false) => {
+					dbs.fold_cursor.lock().scans.remove(scope);
+					return Ok(FoldOutcome::Folded);
 				}
+				None => return Ok(FoldOutcome::Refused),
 			}
-		};
+		}
 		let vertex = crate::val::RecordId::new(scope.tb.clone(), scope.id.clone());
 		let mut retries = 0;
+		let mut done = 0;
+		// The key the next pass scans after: where the last committed pass
+		// stopped, in this call or an earlier one, unless an entry of this
+		// batch was queued since that position was taken, in which case the
+		// write it names may precede the position and the scan starts over.
+		// A pass that fails to commit is retried from the same key.
+		let mut after: Option<Vec<u8>> = {
+			let mut cursor = dbs.fold_cursor.lock();
+			match cursor.scans.get(scope) {
+				Some(scan) if entries.iter().all(|entry| scan.entries.contains(*entry)) => {
+					Some(scan.after.clone())
+				}
+				Some(_) => {
+					cursor.scans.remove(scope);
+					None
+				}
+				None => None,
+			}
+		};
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
+			if !lh.try_maintain_lease().await? {
+				return Ok(FoldOutcome::LeaseLost);
+			}
 			let txn = Arc::new(dbs.transaction(Write).await?);
 			// The environment the fold's doc-ID assignment reads: the
 			// production `IndexEnv` is the query context, built the same way
@@ -6246,8 +8111,14 @@ impl Datastore {
 			let mut env = dbs.setup_ctx()?;
 			env.set_transaction(Arc::clone(&txn));
 			let env = env.freeze();
-			let outcome = match crate::idx::adjacency::fold_scope(
-				&env, scope.ns, scope.db, &ns_name, &db_name, &vertex, scope.dir, batch,
+			let outcome = match crate::idx::adjacency::fold_scope_from(
+				&env,
+				scope.ns,
+				scope.db,
+				&vertex,
+				scope.dir,
+				batch,
+				after.as_deref(),
 			)
 			.await
 			{
@@ -6261,7 +8132,39 @@ impl Datastore {
 				Ok(()) => {
 					retries = 0;
 					if !outcome.has_more {
-						return Ok(());
+						dbs.fold_cursor.lock().scans.remove(scope);
+						return Ok(FoldOutcome::Folded);
+					}
+					after = outcome.resume;
+					{
+						let mut cursor = dbs.fold_cursor.lock();
+						match &after {
+							// A continuation answers for the entries it already
+							// did; a scan begun at the scope's start answers for
+							// this batch's.
+							Some(key) => match cursor.scans.get_mut(scope) {
+								Some(scan) => scan.after.clone_from(key),
+								None => {
+									cursor.scans.insert(
+										scope.clone(),
+										ScopeScan {
+											after: key.clone(),
+											entries: entries
+												.iter()
+												.map(|entry| entry.to_vec())
+												.collect(),
+										},
+									);
+								}
+							},
+							None => {
+								cursor.scans.remove(scope);
+							}
+						}
+					}
+					done += 1;
+					if passes.is_some_and(|passes| done >= passes) {
+						return Ok(FoldOutcome::Unfinished);
 					}
 				}
 				Err(e) => {
@@ -6651,34 +8554,76 @@ impl Datastore {
 		Materialiser::new(&self.setup_ctx()?.freeze())
 	}
 
-	/// Runs [`Self::sweep_unmaterialised_indexes`] for `drain`, a drain of the
-	/// compaction queue whose lease period is twice `interval`, and answers
-	/// whether it queued a request for the drain to act on.
+	/// Continues `drain`'s sweep of the defined indexes, a drain of the
+	/// compaction queue whose lease period is twice `interval`, a page at a time
+	/// until a page queues a request for the drain to act on, the sweep ends,
+	/// `max_batches` is reached, or `lh` finds the lease taken by another node,
+	/// each page counting one of `read`. The lease is renewed before every page,
+	/// so a sweep that spans pages never queues requests once another node holds
+	/// it.
 	///
 	/// A drain sweeps at most once, and its sweep skips every index the drain
-	/// ran a pass over ([`CompactionDrain::passed`]). A sweep that fails is
-	/// logged, and queued nothing.
+	/// ran a pass over ([`CompactionDrain::passed`]). A sweep begins only once
+	/// the throttle allows ([`Self::sweep_page`]), and the end of its walk is
+	/// what the throttle counts from. A sweep that fails is logged, ends, and
+	/// is not counted, so the next drain sweeps again. A lease check that fails
+	/// is returned.
 	async fn sweep_after_drain(
 		dbs: &Datastore,
 		interval: Duration,
+		lh: &LeaseHandler,
 		canceller: &CancellationToken,
 		drain: &mut CompactionDrain,
-	) -> bool {
-		if std::mem::replace(&mut drain.swept, true) {
-			return false;
+		read: &mut usize,
+		max_batches: Option<usize>,
+	) -> Result<Swept> {
+		if matches!(drain.sweep, DrainSweep::Unbegun) {
+			let period = interval * 2;
+			if dbs.compaction_swept_at.lock().is_some_and(|at| at.elapsed() < period) {
+				drain.sweep = DrainSweep::Done;
+				return Ok(Swept::Done);
+			}
+			drain.sweep = DrainSweep::Walking(Box::default());
 		}
-		match dbs.sweep_unmaterialised_indexes(interval * 2, canceller, &drain.passed).await {
-			Ok(queued) => queued > 0,
-			Err(e) => {
-				warn!(target: TARGET, "Failed to sweep indexes for unmaterialised updates: {e}");
-				false
+		let DrainSweep::Walking(walk) = &mut drain.sweep else {
+			return Ok(Swept::Done);
+		};
+		loop {
+			if max_batches.is_some_and(|max| *read >= max) {
+				return Ok(Swept::Spent);
+			}
+			if !lh.try_maintain_lease().await? {
+				return Ok(Swept::LeaseLost);
+			}
+			*read += 1;
+			match dbs.sweep_page(walk, canceller, &drain.passed).await {
+				Ok(queued) => {
+					if !walk.has_more() {
+						drain.sweep = DrainSweep::Done;
+						*dbs.compaction_swept_at.lock() = Some(Instant::now());
+						return Ok(if queued > 0 {
+							Swept::Queued
+						} else {
+							Swept::Done
+						});
+					}
+					if queued > 0 {
+						return Ok(Swept::Queued);
+					}
+				}
+				Err(e) => {
+					warn!(target: TARGET, "Failed to sweep indexes for unmaterialised updates: {e}");
+					drain.sweep = DrainSweep::Done;
+					return Ok(Swept::Done);
+				}
 			}
 		}
 	}
 
-	/// Queues one compaction request for every defined index of a queued kind
-	/// that holds updates waiting to be folded and no request in the queue, and
-	/// answers how many it queued.
+	/// One page of a compaction drain's sweep: queues one compaction request
+	/// for every index the next [`INDEX_COMPACTION_SWEEP_STEPS`] steps of `walk`
+	/// reach that is of a queued kind, holds updates waiting to be folded, and
+	/// has no request in the queue, and answers how many it queued.
 	///
 	/// A request is how the compactor learns an index has work, and an index
 	/// can hold work no request names. A full-text compactor that predates the
@@ -6690,49 +8635,50 @@ impl Datastore {
 	/// finds it, through the same probe `INFO FOR INDEX` reports as
 	/// `compacting` ([`index_has_unmaterialised_updates`]).
 	///
-	/// Throttled: a sweep runs at most once per `period`, measured from the
-	/// last sweep that completed, so an idle store pays one existence probe per
-	/// queued-kind index per period. A sweep that fails is not counted, and the
-	/// next empty queue sweeps again.
+	/// Throttled by [`Self::sweep_after_drain`]: a sweep begins at most once per
+	/// lease period, measured from the end of the last sweep that completed, so
+	/// an idle store pays one existence probe per queued-kind index per period.
+	/// An index a newer release wrote, or whose table, database or namespace
+	/// one wrote, cannot be read by this build and is passed.
 	///
 	/// # Arguments
-	/// * `period` - the least time between two sweeps: the compaction lease's.
-	/// * `canceller` - ends the sweep between indexes.
+	/// * `walk` - the sweep's walk of the catalog, moved on by the page.
+	/// * `canceller` - ends the page between indexes.
 	/// * `passed` - indexes the sweep leaves alone: those the calling drain ran a pass over.
-	///
-	/// # Returns
-	/// The number of requests queued, zero when the sweep was throttled.
-	async fn sweep_unmaterialised_indexes(
+	async fn sweep_page(
 		&self,
-		period: Duration,
+		walk: &mut IndexWalk,
 		canceller: &CancellationToken,
 		passed: &HashSet<IndexKeyBase>,
 	) -> Result<usize> {
-		if self.compaction_swept_at.lock().is_some_and(|at| at.elapsed() < period) {
-			return Ok(0);
-		}
-		let (defined, _) = self.defined_indexes().await?;
 		let mut owed = Vec::new();
 		{
 			let txn = self.transaction(Read).await?;
 			let res: Result<()> = async {
-				for DefinedIndex {
-					ns,
-					db,
-					ix,
-					..
-				} in defined.iter().filter(|d| d.ix.index.queues_compaction())
-				{
+				for _ in 0..INDEX_COMPACTION_SWEEP_STEPS {
 					Self::ensure_not_cancelled(canceller)?;
-					let ikb = IndexKeyBase::new(*ns, *db, ix.table_name.clone(), ix.index_id);
+					let WalkedIndex {
+						ns,
+						db,
+						index: ix,
+						..
+					} = match walk.next(&txn).await? {
+						Some(Step::Reached(index)) => index,
+						Some(Step::Passed) => continue,
+						None => break,
+					};
+					if !ix.index.queues_compaction() {
+						continue;
+					}
+					let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 					if passed.contains(&ikb) {
 						continue;
 					}
 					// An index with a request queued — one a write queued, a
 					// pass requeued or a drain kept — is the queue's already.
 					let requested = IndexCompactionIxPrefix {
-						ns: *ns,
-						db: *db,
+						ns,
+						db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 					}
@@ -6740,7 +8686,7 @@ impl Datastore {
 					if !txn.keys(requested, 1, 0, None).await?.is_empty() {
 						continue;
 					}
-					if index_has_unmaterialised_updates(&txn, *ns, *db, ix).await? {
+					if index_has_unmaterialised_updates(&txn, ns, db, &ix).await? {
 						owed.push(ikb);
 					}
 				}
@@ -6750,12 +8696,12 @@ impl Datastore {
 			let _ = txn.cancel().await;
 			res?;
 		}
+		walk.take_refused();
 		let materialiser = self.materialiser()?;
 		for ikb in &owed {
 			Self::ensure_not_cancelled(canceller)?;
 			materialiser.requeue_index_compaction(ikb).await?;
 		}
-		*self.compaction_swept_at.lock() = Some(Instant::now());
 		Ok(owed.len())
 	}
 
@@ -6766,15 +8712,29 @@ impl Datastore {
 		*self.compaction_swept_at.lock() = None;
 	}
 
-	/// Process queued async events using a distributed lease to coordinate batches.
-	/// Once a batch starts it runs to completion even if the lease expires, so
-	/// brief overlap is possible.
+	/// Runs the async events this node has queued, without a lease.
 	///
-	/// Returns as soon as `canceller` is tripped, at the next batch boundary. The
-	/// events themselves are user-defined SurrealQL that nothing here bounds, so
-	/// this bounds the wait to one batch rather than to the whole queue — which
-	/// is what stops a busy queue from holding [`Self::shutdown`] open for as
-	/// long as writes keep arriving.
+	/// The queue under this node's id is written only by this node's own
+	/// commits, so nothing has to be coordinated to drain it: every node drains
+	/// its own queue, woken by the commit that filled it, and the cluster's
+	/// event throughput scales with its node count rather than serialising
+	/// through one lease holder. Entries of a node that dies are adopted by
+	/// [`Self::event_processing_adopt`] once the node is no longer live.
+	///
+	/// One pass runs at most [`EVENT_PROCESSING_SLICE_BATCHES`] full batches,
+	/// resuming where the previous pass over the queue stopped, and reports
+	/// [`Progress::More`] when the last of them was full. Returns as
+	/// soon as `canceller` is tripped, at the next batch boundary: the events
+	/// themselves are user-defined SurrealQL that nothing here bounds, so this
+	/// bounds the wait to one batch rather than to the whole queue — which is
+	/// what stops a busy queue from holding [`Self::shutdown`] open for as long
+	/// as writes keep arriving. Cancellation is not a failure: the queue is
+	/// durable, so whatever is left is processed by the next pass on this node,
+	/// or adopted. A pass that fails — on a batch whose entry could not be
+	/// claimed or settled, see [`crate::doc::process_next_events_batch`] —
+	/// attaches what it did to its error with [`Pass::failed`]: the batches
+	/// settled before, which stand, and a backlog, since the entry left in
+	/// place is still queued.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -6783,41 +8743,689 @@ impl Datastore {
 			skip(self, canceller)
 		)
 	)]
-	pub(crate) async fn event_processing(
+	pub(crate) async fn event_processing_local(
+		&self,
+		canceller: &CancellationToken,
+	) -> Result<Pass> {
+		trace!(target: TARGET, "Running event processing for this node's queue");
+		let range = NodeEventQueuePrefix {
+			nd: self.id,
+		}
+		.range()?;
+		let mut pass = Pass::done(TaskLeaseState::NotLeased);
+		let mut budget = EVENT_PROCESSING_SLICE_BATCHES;
+		let queue = EventQueue::Node(self.id);
+		// Unleased, so the lease cannot pass elsewhere.
+		match self.drain_event_range(queue, &range, None, &mut budget, canceller, &mut pass).await {
+			Ok(Drained::Backlog) => pass.progress = Progress::More,
+			Ok(Drained::Clear | Drained::LeaseLost) => {}
+			Err(e) => return Err(pass.failed(e)),
+		}
+		Ok(pass)
+	}
+
+	/// Runs the async events left by nodes that can no longer run them, under
+	/// the [`TaskLeaseType::EventProcessing`] lease.
+	///
+	/// Two queues qualify: the per-node queue of every node whose owner does
+	/// not drain it — archived, with no row at all, or with a row kept live by
+	/// a release that queues at the root, as a node rolled back to one with its
+	/// id kept is (see [`NodeState::owned`]) — and the root-level queue that
+	/// nodes on such a release write. Owners are found from the queues
+	/// themselves, not from node rows, so a queue outlives its owner's row
+	/// however that row went. One node in the cluster sweeps them per
+	/// interval.
+	///
+	/// Each entry is claimed by the worker about to run it, immediately before
+	/// its body is evaluated, and deleted in the same transaction as its
+	/// event's writes, only while it still reads as claimed, so an owner still
+	/// alive after being archived and the adopter that read its queue neither
+	/// both evaluate an event nor both land its writes; see
+	/// [`crate::doc::process_next_events_batch`] for how long a claim holds.
+	///
+	/// Bounded like [`Self::event_processing_local`]: at most
+	/// [`EVENT_PROCESSING_SLICE_BATCHES`] fetches that find an entry per pass
+	/// across every queue swept, reporting [`Progress::More`] when the budget
+	/// ran out or a queue still owes an entry a run. The sweep walks the
+	/// per-node state in rotations that cover the root queue and every node
+	/// once, adopting queues as it finds them, and a pass stops once that
+	/// budget is spent or it has stepped over [`EVENT_ADOPTION_PAGE_SIZE`]
+	/// nodes, so a pass reads in proportion to the queues it drains and a page
+	/// of the nodes it steps over, not to every owner in the cluster: a backlog
+	/// of many short queues costs one walk over them in total, not one per
+	/// pass. A rotation left unfinished at a page continues on the next pass,
+	/// run at once, and the sweep goes idle when the rotation ends, so a large
+	/// live cluster costs one walk per interval however many pages it spans.
+	/// A pass that spends its budget ends the rotation, and the next begins one
+	/// after the queue it was spent in and ending with it, which keeps a queue
+	/// refilled as fast as it drains from holding the sweep on itself; each
+	/// queue is drained from where the last pass over it stopped. That next
+	/// pass is due at once only if this one got somewhere: an entry ran, or a
+	/// queue still owes one a run. A budget spent on short fetches that ran
+	/// nothing — entries a newer release wrote, or another processor holds,
+	/// in as many queues as the budget has fetches — would be spent the same
+	/// way by a pass run at once, so the sweep goes idle until its interval
+	/// and resumes the rotation there. A pass that fails attaches what it did
+	/// to its error with [`Pass::failed`], as the local drain does, under the
+	/// lease it held: the queues drained before the failure are settled. Its
+	/// rotation is kept, past the queue it failed in, so the next pass
+	/// continues with the queues after it and a queue whose drain keeps
+	/// failing cannot hold the sweep at itself.
+	///
+	/// A pass that finds the lease passed to another node stops there, at
+	/// the batch that found it so, which hands out no further entry, and
+	/// reports [`TaskLeaseState::Elsewhere`] with what it settled until then:
+	/// the new holder sweeps from here, so the two nodes do not both adopt
+	/// queues. The rotation is kept for this node's next pass to continue,
+	/// due at the interval rather than at once.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, canceller)
+		)
+	)]
+	pub(crate) async fn event_processing_adopt(
 		&self,
 		interval: Duration,
 		canceller: &CancellationToken,
-	) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Attempting event processing process");
-		// Create a new lease handler
-		let lh = LeaseHandler::new(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::EventProcessing,
-			interval * 2,
-		)?;
-		// We continue while there are keys, the lease, and no cancellation
+	) -> Result<Pass> {
+		trace!(target: TARGET, "Attempting event adoption");
+		let lh =
+			self.lease_handler(TaskLeaseType::EventProcessing, interval * 2, Some(canceller))?;
+		if !lh.has_lease().await? {
+			return Ok(Pass::elsewhere());
+		}
+		trace!(target: TARGET, "Running event adoption");
+		let rotation = match self.adoption_rotation.lock().take() {
+			Some(rotation) => rotation,
+			None => AdoptionRotation::fresh()?,
+		};
+		let AdoptionRotation {
+			mut legs,
+			swept,
+		} = rotation;
+		let mut sweep = AdoptionSweep {
+			lh: &lh,
+			canceller,
+			budget: EVENT_PROCESSING_SLICE_BATCHES,
+			steps: EVENT_ADOPTION_PAGE_SIZE,
+			pass: Pass::done(TaskLeaseState::Held),
+			swept,
+			failed: None,
+		};
+		let root = EventQueuePrefix {}.range()?;
+		let mut stop = None;
+		while let Some(leg) = legs.front_mut() {
+			let res = match leg {
+				AdoptionLeg::Root => self.adopt_queue(EventQueue::Root, &root, &mut sweep).await,
+				AdoptionLeg::Nodes {
+					window,
+					until,
+				} => self.adopt_node_queues(window, *until, &mut sweep).await,
+			};
+			stop = match res {
+				Ok(stop) => stop,
+				Err(e) => {
+					// The rotation outlives the failure, past the queue it
+					// failed in: the node walk has already stepped past that
+					// queue's node, and a root leg that failed is dropped. The
+					// next pass continues with the queues after it, and the next
+					// rotation comes back to it with its lap kept, so a queue
+					// whose drain keeps failing is retried once a rotation
+					// rather than holding the sweep at itself.
+					if sweep.failed == Some(EventQueue::Root) {
+						legs.pop_front();
+					}
+					*self.adoption_rotation.lock() = Some(AdoptionRotation {
+						legs,
+						swept: sweep.swept,
+					});
+					return Err(sweep.pass.failed(e));
+				}
+			};
+			if stop.is_some() || canceller.is_cancelled() {
+				break;
+			}
+			legs.pop_front();
+		}
+		let next = match stop {
+			Some(SweepStop::Budget(queue)) => {
+				// Spent: the next pass begins a rotation after this queue and
+				// ending with it, and resumes it where this one stopped when
+				// the rotation comes back round. It is due at once if this
+				// pass ran anything; a queue that owes an entry a run has
+				// reported so already, and a budget spent on nothing that ran
+				// would be spent so again.
+				if sweep.pass.ran > 0 {
+					sweep.pass.progress = Progress::More;
+				}
+				Some(AdoptionRotation::after(queue).map_err(|e| sweep.pass.failed(e))?)
+			}
+			Some(SweepStop::Page) => {
+				// The page is walked and the rotation is not: the next pass
+				// continues it at once, so the rotation ends however many
+				// pages it spans, and the sweep goes idle when it does.
+				sweep.pass.progress = Progress::More;
+				Some(AdoptionRotation {
+					legs,
+					swept: sweep.swept,
+				})
+			}
+			Some(SweepStop::LeaseLost) => {
+				// The new holder sweeps from here. A pass run at once would
+				// find the lease elsewhere, so the next is the interval's.
+				sweep.pass.lease = TaskLeaseState::Elsewhere;
+				sweep.pass.progress = Progress::Done;
+				Some(AdoptionRotation {
+					legs,
+					swept: sweep.swept,
+				})
+			}
+			None if canceller.is_cancelled() => Some(AdoptionRotation {
+				legs,
+				swept: sweep.swept,
+			}),
+			None => {
+				// The rotation visited every queue there is, so a lap for any
+				// other queue — its owner live again, or its entries gone — is
+				// stale. The local queue's lap belongs to the local drain.
+				self.event_laps.lock().retain(|queue, _| {
+					*queue == EventQueue::Node(self.id) || sweep.swept.contains(queue)
+				});
+				None
+			}
+		};
+		*self.adoption_rotation.lock() = next;
+		Ok(sweep.pass)
+	}
+
+	/// Drains `queue` for the sweep. Returns why the sweep stops in it: the
+	/// lease found passed to another node, or the sweep's budget spent on it.
+	async fn adopt_queue(
+		&self,
+		queue: EventQueue,
+		range: &TypedRange<AsyncEventRecord>,
+		sweep: &mut AdoptionSweep<'_>,
+	) -> Result<Option<SweepStop>> {
+		sweep.swept.insert(queue);
+		let drained = self
+			.drain_event_range(
+				queue,
+				range,
+				Some(sweep.lh),
+				&mut sweep.budget,
+				sweep.canceller,
+				&mut sweep.pass,
+			)
+			.await;
+		match drained.inspect_err(|_| sweep.failed = Some(queue))? {
+			Drained::LeaseLost => return Ok(Some(SweepStop::LeaseLost)),
+			// Entries remain in this queue that the next pass owes a run.
+			Drained::Backlog => sweep.pass.progress = Progress::More,
+			Drained::Clear => {}
+		}
+		Ok((sweep.budget == 0).then_some(SweepStop::Budget(queue)))
+	}
+
+	/// Walks the per-node state from `window`'s start, one node at a time and
+	/// in id order, up to and including node `until`'s when given, and drains
+	/// the queue of every node found whose owner does not drain it, until the
+	/// sweep's fetch budget is spent, its page of nodes is walked, the lease
+	/// passes to another node, or the pass is cancelled.
+	/// Returns why the pass stopped when it did not finish the leg, whose
+	/// window is then advanced past the last node stepped over, or, for a
+	/// lease found lost in a node's queue, left at that node.
+	///
+	/// The queue sorts first within a node's state, so the first key under a
+	/// node is a queue entry exactly when the node has a queue; the walk then
+	/// resumes past the node's whole subtree. One read per node with any state,
+	/// one more for the row of a node with a queue, and one more for the drain
+	/// heartbeat beside a row that is not archived. The reads share a
+	/// transaction until a drain, which runs user-defined events of unbounded
+	/// duration; the step after it opens a fresh one, so no read transaction
+	/// outlives the events.
+	async fn adopt_node_queues(
+		&self,
+		window: &mut RawRange,
+		until: Option<Uuid>,
+		sweep: &mut AdoptionSweep<'_>,
+	) -> Result<Option<SweepStop>> {
+		let mut txn: Option<Transaction> = None;
 		loop {
-			// Stop between batches once shutdown starts. Cancellation is not a
-			// failure: the queue is durable, so whatever is left is processed by
-			// the next pass on this node or another.
-			if canceller.is_cancelled() {
-				return Ok(());
+			if sweep.canceller.is_cancelled() {
+				break;
 			}
-			// Attempt to acquire a lease for the EventProcessing task
-			// If we don't get the lease, another node is handling this task
-			if !lh.has_lease().await? {
-				return Ok(());
+			let t = match txn.take() {
+				Some(t) => t,
+				None => self.transaction(Read).await?,
+			};
+			// The window as it stood before this node, which a pass that finds
+			// the lease lost in the node's queue is left at, so the rotation
+			// resumes at the queue it stopped in.
+			let at = window.clone();
+			let Some(state) = catch!(t, self.next_node_state(&t, window).await) else {
+				let _ = t.cancel().await;
+				break;
+			};
+			if until.is_some_and(|until| state.nd > until) {
+				let _ = t.cancel().await;
+				break;
 			}
-			// Output function invocation details to logs
-			trace!(target: TARGET, "Running event processing process");
-			if process_next_events_batch(self, Some(&lh)).await? == 0 {
-				// The last batch didn't have any events to process,
-				// we can sleep until the next wake-up call
-				return Ok(());
+			sweep.steps = sweep.steps.saturating_sub(1);
+			let queue = EventQueue::Node(state.nd);
+			// The local queue is the local drain's, lap included, so the local
+			// node costs a step and nothing more.
+			let local = state.nd == self.id;
+			if !local && state.queued && state.owned {
+				// An owned queue is its owner's to drain, so a lap this sweep
+				// left on it is stale.
+				self.event_laps.lock().remove(&queue);
 			}
+			if !local && state.queued && !state.owned {
+				let _ = t.cancel().await;
+				let range = NodeEventQueuePrefix {
+					nd: state.nd,
+				}
+				.range()?;
+				match self.adopt_queue(queue, &range, sweep).await? {
+					Some(SweepStop::LeaseLost) => {
+						*window = at;
+						return Ok(Some(SweepStop::LeaseLost));
+					}
+					Some(stop) => return Ok(Some(stop)),
+					None => {}
+				}
+			} else {
+				txn = Some(t);
+			}
+			if sweep.steps == 0 {
+				// The page is walked: the next pass resumes after this node.
+				if let Some(t) = txn.take() {
+					let _ = t.cancel().await;
+				}
+				return Ok(Some(SweepStop::Page));
+			}
+		}
+		if let Some(t) = txn {
+			let _ = t.cancel().await;
+		}
+		Ok(None)
+	}
+
+	/// The first node with state in `window`, which is then moved past that
+	/// node's whole subtree; `None` once the window holds no node.
+	///
+	/// A key beneath a node that this release cannot decode — a newer
+	/// release's state, left by a node since rolled back — still names its
+	/// node, which the level puts before anything beneath it. Such a key is
+	/// placed against the node's queue: before it, the walk resumes at the
+	/// queue, so a queue behind such keys is still found; in it, the node has
+	/// a queue, whose entries the drain reads for itself; past it, the node
+	/// has none. A node therefore costs at most two reads however many such
+	/// keys it holds, and the page bound holds. A key too short to name a
+	/// node is outside what the level describes and is stepped over alone.
+	async fn next_node_state(
+		&self,
+		txn: &Transaction,
+		window: &mut RawRange,
+	) -> Result<Option<NodeState>> {
+		loop {
+			let keys = txn.keys_raw(window.clone(), 1, 0, None).await?;
+			let Some(key) = keys.first() else {
+				return Ok(None);
+			};
+			let (nd, queued) = match NodeEventQueueKey::decode_key(key) {
+				Ok(k) => (k.nd, true),
+				Err(_) => match NodeLiveQueryKey::decode_key(key) {
+					Ok(k) => (k.nd, false),
+					Err(_) => {
+						let Some(nd) = node_of_state_key(key)? else {
+							*window = window.clone().resume_after(key, Direction::Forward);
+							continue;
+						};
+						let queue = NodeEventQueuePrefix {
+							nd,
+						}
+						.range()?;
+						if key.as_slice() < queue.start().as_ref() {
+							*window =
+								window.clone().resume_after(queue.start(), Direction::Forward);
+							continue;
+						}
+						(nd, key.as_slice() < queue.end().as_ref())
+					}
+				},
+			};
+			let subtree = NodeStateRoot {
+				nd,
+			}
+			.raw_range()?;
+			*window = window.clone().resume_after(subtree.end(), Direction::Forward);
+			let owned = queued && self.queue_owned(txn, nd).await?;
+			return Ok(Some(NodeState {
+				nd,
+				queued,
+				owned,
+			}));
+		}
+	}
+
+	/// Whether node `nd`'s queue has an owner that drains it; see
+	/// [`NodeState::owned`]. One read for the row, and one for the drain
+	/// heartbeat beside a row that is not archived.
+	async fn queue_owned(&self, txn: &Transaction, nd: Uuid) -> Result<bool> {
+		let Some(node) = txn.get_node(nd).await?.filter(|node| !node.is_archived()) else {
+			return Ok(false);
+		};
+		let stamp = NodeDrainHeartbeatKey {
+			nd,
+		};
+		Ok(txn.get_key(&stamp, None).await?.is_some_and(|beat| beat >= node.heartbeat.value))
+	}
+
+	/// When the last node on a release that drains per-node event queues shuts
+	/// down, moves any remaining [`NodeEventQueueKey`] entries back to the
+	/// root-level [`EventQueueKey`] range with `claim: None` (encoded at
+	/// revision 1), so a cluster rolled back to an older release can still find
+	/// and drain them.
+	async fn hand_back_event_queues_if_last_upgraded(&self) -> Result<()> {
+		use crate::key::schema::EventQueueKey;
+
+		let txn = self.transaction(Read).await?;
+		let queued_nodes: Result<Vec<Uuid>> = async {
+			let mut window = NodeStatePrefix {}.raw_range()?;
+			let mut nodes = Vec::new();
+			while let Some(state) = self.next_node_state(&txn, &mut window).await? {
+				if state.queued {
+					if state.owned && state.nd != self.id {
+						return Ok(Vec::new());
+					}
+					nodes.push(state.nd);
+				}
+			}
+			if nodes.is_empty() {
+				return Ok(Vec::new());
+			}
+			for node in txn.all_nodes().await?.iter() {
+				if node.id == self.id || node.is_archived() {
+					continue;
+				}
+				let stamp = NodeDrainHeartbeatKey {
+					nd: node.id,
+				};
+				if txn.get_key(&stamp, None).await?.is_some_and(|beat| beat >= node.heartbeat.value)
+				{
+					return Ok(Vec::new());
+				}
+			}
+			Ok(nodes)
+		}
+		.await;
+		let _ = txn.cancel().await;
+		let queued_nodes = queued_nodes?;
+		for nd in queued_nodes {
+			let range = NodeEventQueuePrefix {
+				nd,
+			}
+			.range()?;
+			loop {
+				let txn = self.bookkeeping_transaction().await?;
+				let entries =
+					catch!(txn, txn.scan_raw(range.clone(), NORMAL_BATCH_SIZE, 0, None).await);
+				if entries.is_empty() {
+					let _ = txn.cancel().await;
+					break;
+				}
+				let full = entries.len() >= NORMAL_BATCH_SIZE as usize;
+				for (k, v) in entries {
+					let Ok(key) = NodeEventQueueKey::decode_key(&k) else {
+						continue;
+					};
+					let Ok(mut record) = <AsyncEventRecord as KVValue>::kv_decode_value(&v, ())
+					else {
+						continue;
+					};
+					record.claim = None;
+					let legacy = EventQueueKey {
+						ns: key.ns,
+						db: key.db,
+						tb: Cow::Owned(key.tb.into_owned()),
+						ev: Cow::Owned(key.ev.into_owned()),
+						ts: key.ts,
+						node_id: key.nd,
+					};
+					catch!(txn, txn.put_key(&legacy, &record).await);
+					catch!(txn, txn.del(Key::from(k.as_slice())).await);
+				}
+				catch!(txn, txn.commit().await);
+				if !full {
+					break;
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// Runs batches of `range`, which is `queue`'s, until one is short, the
+	/// pass is cancelled, `budget` is spent, or the lease `lh` passes to
+	/// another node. Returns [`Drained::Backlog`] when the queue still holds
+	/// entries the next pass owes a run: the budget ran out with entries
+	/// beyond the last fetched, or an attempt in this lap failed and was
+	/// requeued for another. Returns [`Drained::LeaseLost`] when a batch found
+	/// the lease passed to another node: the lap is kept where that batch
+	/// began, so the entries it fetched but did not hand out are not stepped
+	/// over should this node hold the lease again. Retries are immediate, without backoff, so a
+	/// requeue is a backlog however short the batch it came from, and the
+	/// entry gets its next attempt on the pass run at once rather than at the
+	/// next tick. The lap remembers the requeue across the passes it spans, so
+	/// one in the batch that spent the last of a pass's budget is still a
+	/// backlog when a later pass finds the queue's end.
+	///
+	/// The drain continues the lap the previous pass over the queue left, and
+	/// each fetch resumes after the last entry of the one before, so entries
+	/// this binary cannot run — left in place for a node that can — are
+	/// stepped over once per lap rather than read again on every pass, and the
+	/// entries behind them are reached. Every fetch that finds an entry spends
+	/// one unit of budget, full or not, which is what bounds a pass however
+	/// many entries it cannot run and however many short queues it sweeps; a
+	/// queue that turns out empty costs nothing. A short batch is the queue's
+	/// end and ends the lap. So does passing the last key the queue held when
+	/// the lap began: the next lap starts from the head, so entries requeued
+	/// for another attempt and entries queued since for an earlier-sorting
+	/// event get their turn however fast the queue's tail grows. A lap of the
+	/// local queue during which this node queued an event ends the same way,
+	/// at the head, since the entry can sit behind the scan's position (see
+	/// [`EventLap::queued`]); the drain ends with a lap during which nothing
+	/// was queued, so a chain of events runs to its end within one drain
+	/// rather than one hop per pass, and entries this binary cannot run are
+	/// read again only when something was queued behind them.
+	///
+	/// A batch that fails ends the drain with its error, after the pass has
+	/// accounted the batch's report — the entries it ran are settled — so a
+	/// pass that fails still reports what it did; see
+	/// [`crate::doc::FailedBatch`].
+	async fn drain_event_range(
+		&self,
+		queue: EventQueue,
+		range: &TypedRange<AsyncEventRecord>,
+		lh: Option<&LeaseHandler>,
+		budget: &mut usize,
+		canceller: &CancellationToken,
+		pass: &mut Pass,
+	) -> Result<Drained> {
+		// Only the local drain can be handed entries by the events it runs, or
+		// by a concurrent write on this node; see [`EventLap::queued`]. The
+		// count is read before the queue, so an entry queued between the two
+		// reads as queued during the lap.
+		let own = queue == EventQueue::Node(self.id);
+		let queued = || self.commit_triggers().async_events_queued();
+		let resumed = self.event_laps.lock().get(&queue).cloned();
+		let mut lap = match resumed {
+			Some(lap) => lap,
+			None => {
+				let queued = queued();
+				match self.queue_end(range).await? {
+					Some(end) => EventLap {
+						after: None,
+						end,
+						requeued: false,
+						queued,
+					},
+					// Nothing queued.
+					None => return Ok(Drained::Clear),
+				}
+			}
+		};
+		loop {
+			if canceller.is_cancelled() || *budget == 0 {
+				self.event_laps.lock().insert(queue, lap);
+				return Ok(Drained::owed(*budget == 0));
+			}
+			if lap.after.as_ref().is_some_and(|after| *after > lap.end) {
+				// Past the end the lap began with: the head's turn.
+				let queued = queued();
+				let Some(end) = self.queue_end(range).await? else {
+					self.event_laps.lock().remove(&queue);
+					return Ok(Drained::Clear);
+				};
+				lap = EventLap {
+					after: None,
+					end,
+					requeued: false,
+					queued,
+				};
+			}
+			let window = match &lap.after {
+				Some(after) => range.clone().resume_after(after, Direction::Forward),
+				None => range.clone(),
+			};
+			let batch = match process_next_events_batch(self, &window, lh).await {
+				Ok(batch) => batch,
+				Err(e) => {
+					if let Some(failed) = e.downcast_ref::<FailedBatch>() {
+						Self::account_event_batch(pass, &failed.0);
+					}
+					return Err(e);
+				}
+			};
+			Self::account_event_batch(pass, &batch);
+			if batch.fetched > 0 {
+				*budget = budget.saturating_sub(1);
+			}
+			lap.requeued |= batch.requeued > 0;
+			if batch.lease_lost {
+				self.event_laps.lock().insert(queue, lap);
+				return Ok(Drained::LeaseLost);
+			}
+			let full = batch.is_full();
+			let Some(last) = batch.last_key.filter(|_| full) else {
+				let queued = queued();
+				if !own || queued == lap.queued {
+					self.event_laps.lock().remove(&queue);
+					return Ok(Drained::owed(lap.requeued));
+				}
+				// This node queued an entry during the lap, possibly behind
+				// the scan: the head's turn, and the drain ends with a lap
+				// during which nothing was queued.
+				let Some(end) = self.queue_end(range).await? else {
+					self.event_laps.lock().remove(&queue);
+					return Ok(Drained::Clear);
+				};
+				lap = EventLap {
+					after: None,
+					end,
+					requeued: false,
+					queued,
+				};
+				continue;
+			};
+			lap.after = Some(last);
+		}
+	}
+
+	/// The last key `range` holds, or `None` when it holds nothing.
+	async fn queue_end(&self, range: &TypedRange<AsyncEventRecord>) -> Result<Option<Vec<u8>>> {
+		self.range_end(range.clone()).await
+	}
+
+	/// The last key `range` holds, or `None` when it holds nothing.
+	async fn range_end<V>(&self, range: TypedRange<V>) -> Result<Option<Vec<u8>>> {
+		let txn = self.transaction(Read).await?;
+		let res = txn.keysr(range, 1, 0, None).await;
+		let _ = txn.cancel().await;
+		Ok(res?.into_iter().next())
+	}
+
+	/// How long [`Self::drain_async_events`] waits before looking again at
+	/// entries another processor holds.
+	const EVENT_DRAIN_HELD_WAIT: Duration = Duration::from_millis(50);
+
+	/// Runs every async event this node has queued, to empty, and returns how
+	/// many entries it fetched that were this drain's to run.
+	///
+	/// The event task does this on its own after every commit that queues an
+	/// event; this is for an embedder or a test that needs the queue drained
+	/// now rather than on that task's schedule. Events queued by other nodes
+	/// are not run: those belong to their owners, or to the leased adoption
+	/// sweep once their owners are archived.
+	///
+	/// Entries a concurrent processor holds — the event task's workers, or
+	/// another caller of this method — are that processor's to settle, and
+	/// their bodies may still be running, so this waits for them to be
+	/// settled or their claims to expire, and looks again: it returns only
+	/// once a lap over the whole queue found nothing held, which is what
+	/// makes it a flush of the queue rather than of this drain's own share.
+	/// A lap can span passes — each pass is budgeted, and a pass that spends
+	/// its budget leaves the lap's cursor for the next — so what a pass found
+	/// held is carried across the passes of its lap rather than read from the
+	/// pass that finds the queue's end, which sees only what lies past the
+	/// cursor. And a lap in progress when this begins, left by a pass of the
+	/// event task or of an earlier caller, is finished from where it stood:
+	/// what its earlier passes found held is not this drain's to know, so it
+	/// does not end the drain, whatever the passes that finish it find.
+	/// Entries this binary cannot decode are not waited for; they are a
+	/// newer release's to run. An entry left in place by an error — its
+	/// claim's or its settlement's transaction failing — fails the pass and
+	/// so this, rather than being counted and passed over, so `Ok` means the
+	/// queue was flushed.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub async fn drain_async_events(&self) -> Result<u64> {
+		let canceller = CancellationToken::new();
+		let queue = EventQueue::Node(self.id);
+		let mut items = 0;
+		loop {
+			// The passes up to the next rest finish the lap in progress, if
+			// there is one, and otherwise run one from the head.
+			let from_head = !self.event_laps.lock().contains_key(&queue);
+			let mut held = 0;
+			loop {
+				let pass = self.event_processing_local(&canceller).await?;
+				items += pass.items.saturating_sub(pass.held);
+				held += pass.held;
+				if pass.progress != Progress::More {
+					break;
+				}
+			}
+			if held > 0 {
+				sleep(Self::EVENT_DRAIN_HELD_WAIT).await;
+			} else if from_head {
+				return Ok(items);
+			}
+		}
+	}
+
+	/// Adds one fetched batch to a pass's report.
+	fn account_event_batch(pass: &mut Pass, batch: &EventBatch) {
+		pass.items += batch.fetched as u64;
+		pass.held += batch.held as u64;
+		pass.ran += batch.ran as u64;
+		if let Some(age) = batch.oldest_age {
+			pass.observe_age(age);
 		}
 	}
 
@@ -8895,6 +11503,7 @@ pub(crate) mod test {
 	use surrealdb_datastore::values::diskann::{
 		DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
 	};
+	use surrealdb_datastore::values::event_queue::EventClaim;
 	use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 	use surrealdb_strand::TableName;
 
@@ -8910,27 +11519,40 @@ pub(crate) mod test {
 		DocKeyPrefix, DocLookupIdentityPrefix, DocStatsBatchPrefix, IndexCountKey,
 		IndexCountPrefix, TaskLeaseKey, TermChangeBatchPrefix,
 	};
+	use crate::kvs::EVENT_CLAIM_TTL;
+	use crate::kvs::tasks::PassFailure;
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
-		NonRetryableErrorSite, RetryableConflictSite, inject_non_retryable_error,
-		inject_non_retryable_errors, inject_retryable_conflict, inject_retryable_conflicts,
-		retryable_conflict_count,
+		NonRetryableErrorSite, PanicSite, RetryableConflictSite, inject_non_retryable_error,
+		inject_non_retryable_errors, inject_panic, inject_retryable_conflict,
+		inject_retryable_conflicts, retryable_conflict_count,
 	};
 	use crate::types::{PublicValue, PublicVariables};
 
-	/// Work a test runs once a compaction pass of the node has compacted a batch
-	/// and deleted its queue entries.
+	/// Work a test runs at a stage of a compaction pass's batch.
 	type CompactionBatchHook =
 		Box<dyn FnOnce() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
 
-	static AFTER_COMPACTION_BATCH: std::sync::LazyLock<
-		std::sync::Mutex<HashMap<Uuid, CompactionBatchHook>>,
+	/// The stage of a compaction pass's batch a test hook runs at.
+	#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+	pub(super) enum BatchStage {
+		/// The batch is read and the lease held, and no compaction has started.
+		Read,
+		/// The batch is compacted and its queue entries deleted.
+		Cleared,
+	}
+
+	static COMPACTION_BATCH_HOOKS: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<(Uuid, BatchStage), CompactionBatchHook>>,
 	> = std::sync::LazyLock::new(Default::default);
 
-	/// The hook a test set for the node's next compacted batch, taken so it runs
-	/// once.
-	pub(super) fn take_after_compaction_batch(node: Uuid) -> Option<CompactionBatchHook> {
-		AFTER_COMPACTION_BATCH.lock().unwrap().remove(&node)
+	/// The hook a test set for the stage of the node's next batch, taken so it
+	/// runs once.
+	pub(super) fn take_compaction_batch_hook(
+		node: Uuid,
+		stage: BatchStage,
+	) -> Option<CompactionBatchHook> {
+		COMPACTION_BATCH_HOOKS.lock().unwrap().remove(&(node, stage))
 	}
 
 	/// Work a test runs in a resume scan of the node, before the scan takes up
@@ -8943,6 +11565,18 @@ pub(crate) mod test {
 	/// runs once.
 	pub(super) fn take_before_resume_candidate(node: Uuid) -> Option<CompactionBatchHook> {
 		BEFORE_RESUME_CANDIDATE.lock().unwrap().remove(&node)
+	}
+
+	/// Work a test runs in a graph fold drain of the node, before the drain
+	/// folds its next queued scope.
+	static BEFORE_FOLD_SCOPE: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<Uuid, CompactionBatchHook>>,
+	> = std::sync::LazyLock::new(Default::default);
+
+	/// The hook a test set for the node's next queued scope, taken so it runs
+	/// once.
+	pub(super) fn take_before_fold_scope(node: Uuid) -> Option<CompactionBatchHook> {
+		BEFORE_FOLD_SCOPE.lock().unwrap().remove(&node)
 	}
 
 	/// A resume scan that loses its lease to another node before it takes up a
@@ -9007,7 +11641,12 @@ pub(crate) mod test {
 		let resumed = ds
 			.resume_stalled_index_builds(Duration::from_secs(30), CancellationToken::new())
 			.await?;
-		assert_eq!(resumed, 0, "a scan that lost its lease adopts nothing");
+		assert_eq!(resumed.items, 0, "a scan that lost its lease adopts nothing");
+		assert_eq!(
+			resumed.lease,
+			TaskLeaseState::Elsewhere,
+			"the scan reports the lease elsewhere"
+		);
 		let txn = ds.transaction(Read).await?;
 		let state = catch!(txn, txn.get_key(&ikb.new_bs_key(), None).await);
 		txn.cancel().await?;
@@ -12167,6 +14806,90 @@ pub(crate) mod test {
 		.await
 	}
 
+	/// An index that keeps losing its commit to conflicts ends its pass once
+	/// the pass's retries are spent, and the pass queues a fresh request for
+	/// the index: the slice returns rather than retrying until a commit wins,
+	/// and the next slice compacts the index from that request once its commit
+	/// goes through.
+	async fn assert_index_compaction_slice_yields_under_sustained_conflict(
+		site: RetryableConflictSite,
+		sql: &str,
+	) -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, sql).await?;
+		assert!(compaction_queue_len(&ds).await? > 0, "the writes queued a compaction");
+		let node_id = ds.id();
+		// More conflicts than any slice can consume, so no attempt commits.
+		let guard = inject_retryable_conflicts(site, node_id, usize::MAX);
+
+		let (batches, errors, first) = tokio::time::timeout(
+			Duration::from_secs(30),
+			Datastore::index_compaction_bounded(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+				Some(INDEX_COMPACTION_SLICE_BATCHES),
+			),
+		)
+		.await
+		.expect("a slice under sustained conflicts must return")?;
+		assert_eq!(batches, 1);
+		assert_eq!(errors, 1, "a pass that runs out of retries fails");
+		assert_eq!(
+			first.progress,
+			Progress::Done,
+			"the fresh request's commit wakes the next slice"
+		);
+		assert_eq!(
+			retryable_conflict_count(site, node_id),
+			usize::MAX - (INDEX_COMPACTION_PASS_MAX_RETRIES + 1),
+			"the pass makes its attempt and its retries, and the slice no more"
+		);
+		assert_eq!(compaction_queue_len(&ds).await?, 1, "the pass queued one fresh request");
+
+		// With the contention gone, the next slice compacts the index from the
+		// request the pass queued.
+		drop(guard);
+		let (_, errors, second) = Datastore::index_compaction_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(INDEX_COMPACTION_SLICE_BATCHES),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(compaction_queue_len(&ds).await?, 0, "the queue is drained");
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn count_index_compaction_slice_yields_under_sustained_conflict() -> Result<()> {
+		assert_index_compaction_slice_yields_under_sustained_conflict(
+			RetryableConflictSite::CountCompaction,
+			COUNT_COMPACTION_SQL,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn fulltext_index_compaction_slice_yields_under_sustained_conflict() -> Result<()> {
+		assert_index_compaction_slice_yields_under_sustained_conflict(
+			RetryableConflictSite::FullTextCompaction,
+			FULLTEXT_COMPACTION_SQL,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn hnsw_index_compaction_slice_yields_under_sustained_conflict() -> Result<()> {
+		assert_index_compaction_slice_yields_under_sustained_conflict(
+			RetryableConflictSite::HnswCompaction,
+			HNSW_COMPACTION_SQL,
+		)
+		.await
+	}
+
 	/// The process-local HNSW wrapper for one index, resolved the way the query
 	/// path resolves it, so a test holds the same instance the compaction and
 	/// the executor reach for.
@@ -12578,6 +15301,58 @@ pub(crate) mod test {
 		Ok(())
 	}
 
+	/// A batch whose queue cleanup keeps losing its commit to conflicts is
+	/// left where it is once the cleanup's retries are spent: the slice keeps
+	/// the batch's entries, reports them as its backlog and returns, rather
+	/// than retrying until a commit wins. The next slice reaches the entries
+	/// again, finds their index with nothing pending, and deletes them once
+	/// its commit goes through.
+	#[tokio::test]
+	async fn index_compaction_slice_leaves_a_batch_whose_cleanup_keeps_conflicting() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let queued = compaction_queue_len(&ds).await?;
+		assert!(queued > 0, "the writes queued a compaction");
+		let site = RetryableConflictSite::IndexCompactionQueueCleanup;
+		let node_id = ds.id();
+		// More conflicts than any slice can consume, so no cleanup commits.
+		let guard = inject_retryable_conflicts(site, node_id, usize::MAX);
+
+		let (batches, errors, first) = tokio::time::timeout(
+			Duration::from_secs(30),
+			Datastore::index_compaction_bounded(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+				Some(INDEX_COMPACTION_SLICE_BATCHES),
+			),
+		)
+		.await
+		.expect("a slice whose cleanup keeps conflicting must return")?;
+		assert_eq!(errors, 0, "the index compacted; only the cleanup was lost");
+		assert_eq!(batches, 1, "the slice ends at the batch that kept entries");
+		assert_eq!(first.progress, Progress::More);
+		assert_eq!(
+			retryable_conflict_count(site, node_id),
+			usize::MAX - (INDEX_COMPACTION_PASS_MAX_RETRIES + 1),
+			"the cleanup is attempted once and retried its bound"
+		);
+		assert_eq!(compaction_queue_len(&ds).await?, queued, "the batch keeps its entries");
+
+		drop(guard);
+		let (_, errors, second) = Datastore::index_compaction_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(INDEX_COMPACTION_SLICE_BATCHES),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(compaction_queue_len(&ds).await?, 0, "the queue is drained");
+		Ok(())
+	}
+
 	/// Runs one compaction pass over a short queue, with two more entries queued
 	/// once its first batch is compacted, as a write landing during the pass
 	/// would, and returns the pass's batches and the entries left after it.
@@ -12607,8 +15382,8 @@ pub(crate) mod test {
 		};
 		enqueue(Arc::clone(&ds), ikb.clone(), 3).await?;
 		let (hook_ds, hook_ikb) = (Arc::clone(&ds), ikb.clone());
-		AFTER_COMPACTION_BATCH.lock().unwrap().insert(
-			node_id,
+		COMPACTION_BATCH_HOOKS.lock().unwrap().insert(
+			(node_id, BatchStage::Cleared),
 			Box::new(move || {
 				Box::pin(async move {
 					enqueue(hook_ds, hook_ikb, 2).await.expect("queueing during the pass");
@@ -12622,7 +15397,10 @@ pub(crate) mod test {
 		)
 		.await?;
 		assert_eq!(errors, 0);
-		assert!(take_after_compaction_batch(node_id).is_none(), "the pass ran the hook");
+		assert!(
+			take_compaction_batch_hook(node_id, BatchStage::Cleared).is_none(),
+			"the pass ran the hook"
+		);
 		let remaining = {
 			let txn = ds.transaction(Read).await?;
 			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
@@ -12958,6 +15736,90 @@ pub(crate) mod test {
 		Ok(())
 	}
 
+	/// The sweep a drain runs on an empty queue walks the catalog a page at a
+	/// time, each page charged to the slice as a queue batch is: a catalog of
+	/// more steps than the slice's batches leaves the slice reporting more,
+	/// with the walk kept, and the next slice continues the walk to its end
+	/// rather than reading the catalog from its start.
+	#[tokio::test]
+	async fn a_compaction_sweep_walks_the_catalog_a_page_per_batch() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// Every table entered is a step of the walk.
+		let mut sql = String::new();
+		for n in 0..INDEX_COMPACTION_SWEEP_STEPS {
+			sql.push_str(&format!("DEFINE TABLE t{n:04}; "));
+		}
+		execute_all(&ds, &session, &sql).await?;
+		ds.expire_compaction_sweep();
+
+		let (_, _, first) = Datastore::index_compaction_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(1),
+		)
+		.await?;
+		assert_eq!(first.progress, Progress::More, "the walk outlasts the slice's one page");
+		assert!(
+			matches!(ds.compaction_cursor.lock().drain.sweep, DrainSweep::Walking(_)),
+			"the walk is kept for the next slice"
+		);
+
+		let (_, _, second) = Datastore::index_compaction_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(INDEX_COMPACTION_SLICE_BATCHES),
+		)
+		.await?;
+		assert_eq!(second.progress, Progress::Done, "the next slice finishes the walk");
+		assert!(
+			matches!(ds.compaction_cursor.lock().drain.sweep, DrainSweep::Unbegun),
+			"and the drain ends with it"
+		);
+		assert!(ds.compaction_swept_at.lock().is_some(), "the completed sweep is throttled");
+		Ok(())
+	}
+
+	/// A sweep that finds its lease taken by another node before a page stops
+	/// there, reading no page, so the former holder probes and queues nothing
+	/// once the lease is the new holder's; its walk stays where it stopped.
+	#[tokio::test]
+	async fn a_compaction_sweep_stops_at_a_lease_another_node_took() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, "DEFINE TABLE t; DEFINE INDEX i ON t FIELDS f;").await?;
+		ds.expire_compaction_sweep();
+		let interval = Duration::from_secs(60);
+		let lease =
+			|ds: &Datastore| ds.lease_handler(TaskLeaseType::IndexCompaction, interval * 2, None);
+		// The sweep's handler, whose first check reads the lease rather than
+		// answering from its throttle, and another node that takes the lease.
+		let lh = lease(&ds)?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		assert!(lease(&other)?.has_lease().await?, "the other node takes the lease");
+
+		let mut drain = CompactionDrain::default();
+		let mut read = 0;
+		let swept = Datastore::sweep_after_drain(
+			&ds,
+			interval,
+			&lh,
+			&CancellationToken::new(),
+			&mut drain,
+			&mut read,
+			None,
+		)
+		.await?;
+		assert!(matches!(swept, Swept::LeaseLost), "the sweep reports the lease lost");
+		assert_eq!(read, 0, "no page was read");
+		assert!(
+			matches!(&drain.sweep, DrainSweep::Walking(walk) if walk.has_more()),
+			"the walk stays where it stopped"
+		);
+		assert!(ds.compaction_swept_at.lock().is_none(), "an unfinished sweep is not counted");
+		Ok(())
+	}
+
 	#[tokio::test]
 	async fn index_compaction_folds_a_multi_batch_backlog_of_kept_requests_to_one() -> Result<()> {
 		assert_a_multi_batch_backlog_of_kept_requests_folds_to_one(false).await
@@ -13003,11 +15865,76 @@ pub(crate) mod test {
 		Ok(())
 	}
 
+	/// A pass whose batch finds the lease passed to another node before its
+	/// compactions start reports the lease elsewhere and leaves the batch's
+	/// entries queued for the new holder: deleting them would drop requests
+	/// for indexes the pass never compacted.
+	#[tokio::test]
+	async fn a_compaction_pass_keeps_its_batch_at_a_lease_another_node_took() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		{
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..3 {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await?;
+		}
+		let queued = compaction_queue_len(&ds).await?;
+		assert!(queued >= 3);
+		// Another node takes the lease once the pass has read its batch.
+		let hook_ds = Arc::clone(&ds);
+		COMPACTION_BATCH_HOOKS.lock().unwrap().insert(
+			(node_id, BatchStage::Read),
+			Box::new(move || {
+				Box::pin(async move {
+					let lease = crate::catalog::TaskLease {
+						owner: Uuid::from_u128(2),
+						expiration: chrono::Utc::now() + chrono::Duration::seconds(120),
+					};
+					let key = crate::key::schema::TaskLeaseKey {
+						task_id: TaskLeaseType::IndexCompaction,
+					};
+					let txn = hook_ds.transaction(Write).await.expect("a write transaction");
+					txn.set_key(&key, &lease).await.expect("planting the lease");
+					txn.commit().await.expect("committing the lease");
+				})
+			}),
+		);
+
+		let (batches, errors, pass) = Datastore::index_compaction_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(INDEX_COMPACTION_SLICE_BATCHES),
+		)
+		.await?;
+		assert!(take_compaction_batch_hook(node_id, BatchStage::Read).is_none());
+		assert_eq!((batches, errors), (0, 0), "the batch is left to the lease holder");
+		assert_eq!(pass.lease, TaskLeaseState::Elsewhere);
+		assert_eq!(pass.progress, Progress::Done);
+		assert_eq!(compaction_queue_len(&ds).await?, queued, "the batch's entries stay queued");
+		assert!(
+			ds.compaction_cursor.lock().resume_at.is_none(),
+			"the rotation stays where the batch began"
+		);
+		Ok(())
+	}
+
 	/// The compaction-queue drain must never delete more than one batch of
 	/// `/!ic` entries per write transaction: the queue grows by one entry per
-	/// indexed record write, so an unbounded cleanup transaction would carry
-	/// one write per accumulated entry — the per-key reservation profile that
-	/// can starve distributed backends.
+	/// index each committed write transaction touched, so an unbounded cleanup
+	/// transaction would carry one write per accumulated entry — the per-key
+	/// reservation profile that can starve distributed backends.
 	#[tokio::test]
 	async fn index_compaction_queue_cleanup_is_bounded() -> Result<()> {
 		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
@@ -13196,12 +16123,12 @@ pub(crate) mod test {
 	/// count-delta entry and one `/!ic` compaction request, not one of each per
 	/// document.
 	///
-	/// Reads of a COUNT index sum every un-compacted `!iu` entry, so the
-	/// per-document fan-out made `count()` cost scale with write volume and made
-	/// the compaction queue grow at the same rate. Aggregating per transaction
-	/// keeps the contention-free property the delta log exists for (the entry is
-	/// still a blind write under a key no other transaction shares) while
-	/// removing that scaling.
+	/// Reads of a COUNT index sum every un-compacted `!iu` entry, so a
+	/// per-document fan-out would make `count()` cost scale with write volume
+	/// and the compaction queue grow at the same rate. Aggregating per
+	/// transaction keeps the contention-free property the delta log exists for
+	/// (the entry is still a blind write under a key no other transaction
+	/// shares) without that scaling.
 	#[tokio::test]
 	async fn count_index_writes_one_delta_per_transaction() -> Result<()> {
 		const ROWS: usize = 500;
@@ -13353,6 +16280,212 @@ pub(crate) mod test {
 		Ok(a.len())
 	}
 
+	/// Fills this node's own queue with `count` entries this binary cannot
+	/// decode, as a node on a newer release would leave behind. Their
+	/// timestamps are the lowest possible, so they sort ahead of every event
+	/// queued for the same table.
+	async fn queue_undecodable_events(ds: &Datastore, count: u64) -> Result<()> {
+		let txn = ds.transaction(Write).await?;
+		let ns = txn.get_ns_by_name("test", None).await?.expect("the test namespace exists");
+		let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database exists");
+		for ts in 0..count {
+			let key = NodeEventQueueKey {
+				nd: ds.id(),
+				ns: ns.namespace_id,
+				db: db.database_id,
+				tb: Cow::Owned("person".into()),
+				ev: Cow::Owned("log".into()),
+				ts,
+			};
+			txn.set(key.encode_key()?, b"not-an-async-event-record".to_vec()).await?;
+		}
+		txn.commit().await
+	}
+
+	/// Every key in the graph fold queue, in queue order.
+	async fn fold_queue_keys(ds: &Datastore) -> Result<Vec<Vec<u8>>> {
+		let txn = ds.transaction(Read).await?;
+		let res = txn.keys(GraphFoldPrefix {}.range()?, u32::MAX, 0, None).await;
+		let _ = txn.cancel().await;
+		res
+	}
+
+	/// How many entries the index compaction queue holds.
+	async fn compaction_queue_len(ds: &Datastore) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let res = txn.count(IndexCompactionPrefix {}.range()?, None).await;
+		let _ = txn.cancel().await;
+		res
+	}
+
+	/// How many unfolded adjacency keys one vertex's outgoing scope holds.
+	async fn pointer_keys(ds: &Datastore, vertex: &crate::val::RecordId) -> Result<usize> {
+		use crate::key::schema::GraphDirPrefix;
+		let txn = ds.transaction(Read).await?;
+		let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+		let range = GraphDirPrefix {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: crate::expr::Dir::Out,
+		}
+		.range()?;
+		let res = txn.count(range, None).await;
+		let _ = txn.cancel().await;
+		res
+	}
+
+	/// How many entries node `nd`'s event queue holds, up to two.
+	async fn queued_events(ds: &Datastore, nd: Uuid) -> Result<usize> {
+		let range = NodeEventQueuePrefix {
+			nd,
+		}
+		.range()?;
+		let txn = ds.transaction(Read).await?;
+		let n = txn.keys_raw(range, 2, 0, None).await?.len();
+		txn.cancel().await?;
+		Ok(n)
+	}
+
+	/// Whether the cluster still carries a row for `id`.
+	async fn node_exists(ds: &Datastore, id: Uuid) -> Result<bool> {
+		let txn = ds.transaction(Read).await?;
+		let node = txn
+			.get_key(
+				&NodeKey {
+					nd: id,
+				},
+				None,
+			)
+			.await?;
+		txn.cancel().await?;
+		Ok(node.is_some())
+	}
+
+	/// A heartbeat old enough that node cleanup removes an archived node's row
+	/// rather than keeping it for a build that may still wait for the node's
+	/// write barrier answer.
+	fn lapsed_heartbeat(ds: &Datastore) -> Timestamp {
+		ds.clock_now()
+			- crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER
+			- Duration::from_secs(1)
+	}
+
+	/// Archives `id`, as the membership scan does once its heartbeat has gone
+	/// stale, with its heartbeat past the write barrier's window.
+	async fn archive_node(ds: &Datastore, id: Uuid) -> Result<()> {
+		let key = NodeKey {
+			nd: id,
+		};
+		let txn = ds.transaction(Write).await?;
+		let node = txn.get_key(&key, None).await?.expect("the node is registered");
+		let mut archived = node.archive();
+		archived.heartbeat = lapsed_heartbeat(ds);
+		txn.replace_key(&key, &archived).await?;
+		txn.commit().await
+	}
+
+	/// Register `count` live queries for node `nd`, on a table that need not
+	/// exist: cleanup deletes registrations, not subscriptions it looks up.
+	async fn plant_node_live_queries(ds: &Datastore, nd: Uuid, count: usize) -> Result<()> {
+		let txn = ds.transaction(Write).await?;
+		for n in 0..count {
+			let key = NodeLiveQueryKey {
+				nd,
+				lq: Uuid::from_u128(n as u128 + 1),
+			};
+			txn.set_key(
+				&key,
+				&NodeLiveQuery {
+					ns: NamespaceId(1),
+					db: DatabaseId(1),
+					tb: TableName::from("doc"),
+				},
+			)
+			.await?;
+		}
+		txn.commit().await
+	}
+
+	/// How many live queries node `nd` has registered.
+	async fn node_live_query_count(ds: &Datastore, nd: Uuid) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let count = txn
+			.count(
+				NodeLiveQueryPrefix {
+					nd,
+				}
+				.range()?,
+				None,
+			)
+			.await?;
+		txn.cancel().await?;
+		Ok(count)
+	}
+
+	/// The heartbeat node `id`'s row carries, if it has one.
+	async fn node_heartbeat(ds: &Datastore, id: Uuid) -> Result<Option<u64>> {
+		let txn = ds.transaction(Read).await?;
+		let node = txn.get_node(id).await?;
+		txn.cancel().await?;
+		Ok(node.map(|node| node.heartbeat.value))
+	}
+
+	/// The drain heartbeat written beside node `id`'s row, if any.
+	async fn drain_heartbeat(ds: &Datastore, id: Uuid) -> Result<Option<u64>> {
+		let key = NodeDrainHeartbeatKey {
+			nd: id,
+		};
+		let txn = ds.transaction(Read).await?;
+		let stamp = txn.get_key(&key, None).await?;
+		txn.cancel().await?;
+		Ok(stamp)
+	}
+
+	/// Refreshes this node's row the way a release that queues at the root
+	/// does: a later heartbeat, and nothing written beside it.
+	async fn heartbeat_without_drain_stamp(ds: &Datastore) -> Result<()> {
+		let key = NodeKey {
+			nd: ds.id(),
+		};
+		let txn = ds.transaction(Write).await?;
+		let node = txn.get_key(&key, None).await?.expect("the node is registered");
+		let later = Node::new(node.id, node.heartbeat + Duration::from_millis(1), false);
+		txn.replace_key(&key, &later).await?;
+		txn.commit().await
+	}
+
+	/// Rewrites this node's queued events under the root-level layout, as a
+	/// node running the layout that preceded per-node queues would have written
+	/// them.
+	async fn relocate_queue_to_root(ds: &Datastore) -> Result<usize> {
+		use crate::key::schema::EventQueueKey;
+
+		let range = NodeEventQueuePrefix {
+			nd: ds.id(),
+		}
+		.range()?;
+		let txn = ds.transaction(Write).await?;
+		let entries = txn.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await?;
+		for (k, v) in &entries {
+			let key = NodeEventQueueKey::decode_key(k)?;
+			let record: AsyncEventRecord = KVValue::kv_decode_value(v, ())?;
+			let legacy = EventQueueKey {
+				ns: key.ns,
+				db: key.db,
+				tb: Cow::Owned(key.tb.into_owned()),
+				ev: Cow::Owned(key.ev.into_owned()),
+				ts: key.ts,
+				node_id: key.nd,
+			};
+			txn.put_key(&legacy, &record).await?;
+			txn.del(Key::from(k.as_slice())).await?;
+		}
+		txn.commit().await?;
+		Ok(entries.len())
+	}
+
 	/// Defines an async event with the given `RETRY` budget and queues exactly
 	/// one of it.
 	async fn queue_one_async_event(ds: &Datastore, session: &Session, retry: u16) -> Result<()> {
@@ -13370,12 +16503,12 @@ pub(crate) mod test {
 		execute_all(ds, session, "CREATE person:1 RETURN NONE;").await
 	}
 
-	/// Drains the queue the way [`Datastore::event_processing`] does, but with a
-	/// bound, so a queue that stops draining fails the test instead of hanging
-	/// it — which is the shape the failures under test take.
+	/// Drains this node's queue the way the event task does, but with a bound,
+	/// so a queue that stops draining fails the test instead of hanging it —
+	/// which is the shape the failures under test take.
 	async fn drain_event_queue(ds: &Datastore) -> Result<()> {
 		for _ in 0..20 {
-			if process_next_events_batch(ds, None).await? == 0 {
+			if ds.event_processing_local(&CancellationToken::new()).await?.items == 0 {
 				return Ok(());
 			}
 		}
@@ -13410,12 +16543,12 @@ pub(crate) mod test {
 		// for a later pass to fetch and fail again, and the second pass would
 		// still find it.
 		assert_eq!(
-			process_next_events_batch(&ds, None).await?,
+			ds.event_processing_local(&CancellationToken::new()).await?.items,
 			1,
 			"the queued event must be the one entry this pass picks up"
 		);
 		assert_eq!(
-			process_next_events_batch(&ds, None).await?,
+			ds.event_processing_local(&CancellationToken::new()).await?.items,
 			0,
 			"the entry must be gone: its conflicts belong to the pass that ran it"
 		);
@@ -13457,18 +16590,22 @@ pub(crate) mod test {
 		Ok(())
 	}
 
-	/// Reads the queue the way a batch does, without running anything.
+	/// Reads this node's queue the way a batch does, without running anything.
 	async fn fetch_event_queue(ds: &Datastore) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+		let range = NodeEventQueuePrefix {
+			nd: ds.id(),
+		}
+		.range()?;
 		let tx = ds.transaction(Read).await?;
-		let res =
-			tx.scan_raw(crate::key::schema::EventQueuePrefix {}.range()?, 1000, 0, None).await;
+		let res = tx.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await;
 		tx.cancel().await?;
 		res
 	}
 
 	/// A batch that fetched an entry another consumer has since run must not
-	/// run it again. Batches overlap once the event-processing lease lapses, so
-	/// two nodes can hold the same entry; only the first to commit runs it.
+	/// run it again. Two processors can hold one entry — an adopter and an
+	/// owner archived while still running, or the event task and a caller of
+	/// `drain_async_events` — and only the one whose claim lands runs it.
 	#[test_log::test(tokio::test)]
 	async fn an_event_run_by_an_overlapping_batch_is_not_run_again() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -13479,13 +16616,9 @@ pub(crate) mod test {
 		drain_event_queue(&ds).await?;
 		assert_eq!(logged_count(&ds, &session).await?, 1, "the first batch runs the event");
 
-		crate::doc::process_events_batch(&ds, stale, None).await?;
-
-		assert_eq!(
-			logged_count(&ds, &session).await?,
-			1,
-			"the overlapping batch must find the entry gone rather than run it again"
-		);
+		let batch = crate::doc::process_events_batch(&ds, stale, None).await?;
+		assert_eq!(batch.held, 1, "the overlapping batch finds the entry gone rather than run it");
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event ran once");
 		assert!(
 			fetch_event_queue(&ds).await?.is_empty(),
 			"the overlapping batch must not requeue an entry that already ran"
@@ -13496,7 +16629,8 @@ pub(crate) mod test {
 	/// A commit that applied but reported an unknown outcome has run the event
 	/// and removed its entry. Requeueing on that report would run the event
 	/// twice: `RETRY 1` is what makes that observable, since a charged attempt
-	/// would put the entry back for a second pass to run.
+	/// would put the entry back for a second pass to run. The re-run that
+	/// resolves the outcome finds the entry gone before evaluating the body.
 	#[test_log::test(tokio::test)]
 	async fn an_event_whose_commit_applied_unknown_is_not_run_again() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -13505,9 +16639,9 @@ pub(crate) mod test {
 		let site = NonRetryableErrorSite::AsyncEventCommitAppliedUnknown;
 		let _guard = inject_non_retryable_error(site, ds.id());
 
-		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(ds.event_processing_local(&CancellationToken::new()).await?.items, 1);
 		assert_eq!(
-			process_next_events_batch(&ds, None).await?,
+			ds.event_processing_local(&CancellationToken::new()).await?.items,
 			0,
 			"the applied commit removed the entry, so nothing may have put it back"
 		);
@@ -13515,10 +16649,47 @@ pub(crate) mod test {
 		Ok(())
 	}
 
+	/// A re-run whose previous attempt applied finds the entry gone and ends
+	/// without evaluating the body. The event's own writes cannot show the
+	/// difference: a re-run that evaluated the body would lose the conditional
+	/// delete and discard them. An effect the body has outside its
+	/// transaction can. A sequence draw is one — the allocator advances
+	/// whether or not the transaction that drew commits — so the draw after
+	/// the pass counts the evaluations before it.
+	#[test_log::test(tokio::test)]
+	async fn a_re_run_that_finds_its_entry_gone_does_not_evaluate_the_body() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE SEQUENCE draws START 0;
+			 DEFINE EVENT log ON person ASYNC RETRY 0 \
+			 THEN (CREATE logged SET draw = sequence::nextval('draws'));",
+		)
+		.await?;
+		execute_all(&ds, &session, "CREATE person:1 RETURN NONE;").await?;
+
+		let site = NonRetryableErrorSite::AsyncEventCommitAppliedUnknown;
+		let _guard = inject_non_retryable_error(site, ds.id());
+
+		assert_eq!(ds.event_processing_local(&CancellationToken::new()).await?.items, 1);
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event's writes landed once");
+		let mut res = ds.execute("RETURN sequence::nextval('draws');", &session, None).await?;
+		assert_eq!(
+			res.remove(0).result?,
+			PublicValue::Number(surrealdb_types::Number::Int(1)),
+			"the body drew once, so the re-run did not evaluate it"
+		);
+		Ok(())
+	}
+
 	/// A commit that reported an unknown outcome without applying has neither
 	/// run the event nor removed its entry. Deleting the entry on that report
 	/// would lose the event: `RETRY 0` is what makes that observable, since a
-	/// charged attempt would exhaust the budget and delete it.
+	/// charged attempt would exhaust the budget and delete it. The re-run that
+	/// resolves the outcome finds the entry still as claimed and runs it.
 	#[test_log::test(tokio::test)]
 	async fn an_event_whose_commit_was_discarded_unknown_still_runs() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -13527,9 +16698,9 @@ pub(crate) mod test {
 		let site = NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown;
 		let _guard = inject_non_retryable_error(site, ds.id());
 
-		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(ds.event_processing_local(&CancellationToken::new()).await?.items, 1);
 		assert_eq!(
-			process_next_events_batch(&ds, None).await?,
+			ds.event_processing_local(&CancellationToken::new()).await?.items,
 			0,
 			"the unknown outcome belongs to the pass that ran the event"
 		);
@@ -13538,9 +16709,11 @@ pub(crate) mod test {
 	}
 
 	/// An outcome that stays unknown past the in-place bound is never charged
-	/// to the `RETRY` budget: the entry is left as the last commit left it, and
-	/// a later pass runs it or finds it gone. `RETRY 0` is what makes that
-	/// observable, since a charged attempt would delete the entry.
+	/// to the `RETRY` budget: the entry is left as the last commit left it,
+	/// with its claim released, and the pass fails with the unknown outcome
+	/// rather than report the entry drained; a later pass runs it or finds it
+	/// gone. `RETRY 0` is what makes that observable, since a charged attempt
+	/// would delete the entry.
 	#[test_log::test(tokio::test)]
 	async fn an_event_whose_commit_outcome_stays_unknown_is_left_queued() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -13550,13 +16723,15 @@ pub(crate) mod test {
 		// Every attempt of the first pass: the first run and each in-place re-run.
 		let _guard = inject_non_retryable_errors(site, ds.id(), 4);
 
-		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
-		assert_eq!(logged_count(&ds, &session).await?, 0, "no attempt of the first pass applied");
-		assert_eq!(
-			fetch_event_queue(&ds).await?.len(),
-			1,
-			"an unknown outcome must leave the entry queued rather than delete it"
+		assert!(
+			ds.event_processing_local(&CancellationToken::new()).await.is_err(),
+			"the pass fails with the unknown outcome"
 		);
+		assert_eq!(logged_count(&ds, &session).await?, 0, "no attempt of the first pass applied");
+		let left = fetch_event_queue(&ds).await?;
+		assert_eq!(left.len(), 1, "an unknown outcome must leave the entry queued, not delete it");
+		let record = <AsyncEventRecord as KVValue>::kv_decode_value(&left[0].1, ())?;
+		assert_eq!(record.claim, None, "with its claim released for the next pass");
 
 		drain_event_queue(&ds).await?;
 		assert_eq!(logged_count(&ds, &session).await?, 1, "a later pass runs the event");
@@ -13576,7 +16751,7 @@ pub(crate) mod test {
 		canceller.cancel();
 		// Cancellation is not an error: the queue is durable, so what is left is
 		// picked up by the next pass here or on another node.
-		ds.event_processing(Duration::from_secs(1), &canceller).await?;
+		ds.event_processing_local(&canceller).await?;
 		assert_eq!(
 			logged_count(&ds, &session).await?,
 			0,
@@ -13586,18 +16761,2524 @@ pub(crate) mod test {
 	}
 
 	/// The control for the test above: with a live token the same queue drains,
-	/// so the early return is cancellation and not a broken pass.
+	/// so the early return is cancellation and not a broken pass. This node's
+	/// own queue needs no lease.
 	#[test_log::test(tokio::test)]
 	async fn event_processing_drains_the_queue_when_not_cancelled() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
 		queue_async_events(&ds, &session, 50).await?;
 
-		ds.event_processing(Duration::from_secs(1), &CancellationToken::new()).await?;
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
 		assert_eq!(
 			logged_count(&ds, &session).await?,
 			50,
 			"an uncancelled pass must drain the queue"
 		);
+		assert_eq!(pass.items, 50, "every fetched entry is reported");
+		assert_eq!(pass.progress, Progress::Done);
+		assert_eq!(pass.lease, TaskLeaseState::NotLeased);
+		Ok(())
+	}
+
+	/// Entries this binary cannot run stay in place, so a pass that ends at a
+	/// full batch of them and reports a backlog must not have the drain task,
+	/// or [`Datastore::drain_async_events`], fetch the same batch without end:
+	/// the pass moves past them to the queue's end, and reports it drained.
+	#[test_log::test(tokio::test)]
+	async fn a_full_batch_of_unrunnable_entries_is_not_a_backlog() -> Result<()> {
+		let (ds, _session) = new_index_compaction_test_ds().await?;
+		queue_undecodable_events(&ds, NORMAL_BATCH_SIZE as u64).await?;
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, NORMAL_BATCH_SIZE as u64, "the entries were fetched");
+		assert_eq!(pass.progress, Progress::Done, "but nothing ran, so there is no backlog");
+		assert_eq!(ds.drain_async_events().await?, NORMAL_BATCH_SIZE as u64, "and a drain returns");
+		Ok(())
+	}
+
+	/// Entries this binary cannot run stay in place for a node that can, so a
+	/// full batch of them reads the same on every fetch. The drain must resume
+	/// past such a batch rather than start over, or the events queued behind
+	/// it — as an older node adopting a newer node's queue finds them — would
+	/// never run.
+	#[test_log::test(tokio::test)]
+	async fn event_processing_reaches_events_behind_a_full_undecodable_batch() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		queue_undecodable_events(&ds, NORMAL_BATCH_SIZE as u64).await?;
+		execute_all(&ds, &session, "CREATE person RETURN NONE;").await?;
+		// The runnable event sorts behind the full batch.
+		let entries = {
+			let txn = ds.transaction(Read).await?;
+			let range = NodeEventQueuePrefix {
+				nd: ds.id(),
+			}
+			.range()?;
+			let res = txn.scan_raw(range, NORMAL_BATCH_SIZE + 1, 0, None).await;
+			txn.cancel().await?;
+			res?
+		};
+		assert_eq!(entries.len(), NORMAL_BATCH_SIZE as usize + 1);
+		let decodes = |v: &[u8]| <AsyncEventRecord as KVValue>::kv_decode_value(v, ()).is_ok();
+		assert!(!decodes(&entries[0].1), "the batch ahead must be undecodable");
+		assert!(decodes(&entries[NORMAL_BATCH_SIZE as usize].1), "the event behind it decodes");
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, NORMAL_BATCH_SIZE as u64 + 1, "both batches were fetched");
+		assert_eq!(pass.progress, Progress::Done, "a batch nothing ran in is no backlog");
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event behind the batch ran");
+		Ok(())
+	}
+
+	/// A pass over entries this binary cannot run is bounded like any other:
+	/// every full batch spends budget, so more than a budget's worth of them
+	/// ends the pass with a backlog. The next pass then resumes where that one
+	/// stopped rather than at the head, so it reaches the event behind them
+	/// instead of reading the same prefix again.
+	#[test_log::test(tokio::test)]
+	async fn a_pass_over_unrunnable_entries_is_bounded_and_resumed() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		let budget = (EVENT_PROCESSING_SLICE_BATCHES * NORMAL_BATCH_SIZE as usize) as u64;
+		queue_undecodable_events(&ds, budget + 1).await?;
+		execute_all(&ds, &session, "CREATE person RETURN NONE;").await?;
+
+		let first = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(first.items, budget, "the pass stopped at its budget");
+		assert_eq!(first.progress, Progress::More, "with the queue still full");
+		assert_eq!(logged_count(&ds, &session).await?, 0);
+
+		let second = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(second.items, 2, "the next pass resumed past the entries already read");
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(logged_count(&ds, &session).await?, 1, "and ran the event behind them");
+		assert!(ds.event_laps.lock().is_empty(), "reaching the end ends the lap");
+		Ok(())
+	}
+
+	/// An event that fails with retries left is written back in place, and its
+	/// next attempt is owed at once: the pass that requeued it reports a
+	/// backlog, so the drain runs another pass now rather than at the next
+	/// tick, and keeps doing so until the entry runs or its retries are spent.
+	#[test_log::test(tokio::test)]
+	async fn a_requeued_event_is_run_again_on_the_next_pass() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE EVENT fail ON person ASYNC RETRY 2 THEN { THROW 'every time' };
+			 CREATE person:1 RETURN NONE;",
+		)
+		.await?;
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, 1);
+		assert_eq!(pass.progress, Progress::More, "the requeued entry is owed another attempt");
+		assert_eq!(queued_events(&ds, ds.id()).await?, 1, "the entry was written back in place");
+
+		// The two attempts left: one more requeue, then the retries are spent
+		// and the entry leaves the queue.
+		assert_eq!(ds.drain_async_events().await?, 2);
+		assert_eq!(queued_events(&ds, ds.id()).await?, 0);
+		assert!(ds.event_laps.lock().is_empty());
+		Ok(())
+	}
+
+	/// A requeue in the batch that spends the last of a pass's budget, at the
+	/// end of the lap, is still owed its next attempt: the lap carries the
+	/// requeue to the next pass, which finds the queue's end, reports the
+	/// backlog, and the pass after that starts from the head and runs it.
+	#[test_log::test(tokio::test)]
+	async fn a_requeue_is_remembered_across_the_passes_of_a_lap() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// Exactly a budget's worth of full batches, the last of them failing
+		// events: keys sort by table name, so the `b` events come last.
+		let ok = (EVENT_PROCESSING_SLICE_BATCHES - 1) * NORMAL_BATCH_SIZE as usize;
+		execute_all(
+			&ds,
+			&session,
+			&format!(
+				"DEFINE TABLE a SCHEMALESS;
+				 DEFINE TABLE b SCHEMALESS;
+				 DEFINE TABLE logged SCHEMALESS;
+				 DEFINE EVENT log ON a ASYNC THEN (CREATE logged SET who = $after.id);
+				 DEFINE EVENT fail ON b ASYNC RETRY 1 THEN {{ THROW 'every time' }};
+				 CREATE |a:{ok}| RETURN NONE;
+				 CREATE |b:{}| RETURN NONE;",
+				NORMAL_BATCH_SIZE
+			),
+		)
+		.await?;
+
+		let first = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(first.items, (ok + NORMAL_BATCH_SIZE as usize) as u64, "every batch fetched");
+		assert_eq!(first.progress, Progress::More, "the budget is spent");
+		assert_eq!(logged_count(&ds, &session).await?, ok);
+
+		let second = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(second.items, 0, "the lap's end holds nothing new");
+		assert_eq!(second.progress, Progress::More, "but the lap's requeues are owed a run");
+
+		let third = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(third.items, NORMAL_BATCH_SIZE as u64, "the requeued entries, from the head");
+		assert_eq!(third.progress, Progress::Done, "their retries are spent");
+		assert_eq!(queued_events(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A requeue in a full batch is owed its next attempt even when the short
+	/// batch that ends the pass requeued nothing: the backlog is the pass's,
+	/// not the last batch's.
+	#[test_log::test(tokio::test)]
+	async fn a_requeue_behind_a_full_batch_is_a_backlog() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// Queue keys sort by table name, so a full batch of failing `a` events
+		// is fetched before the one `b` event that runs.
+		execute_all(
+			&ds,
+			&session,
+			&format!(
+				"DEFINE TABLE a SCHEMALESS;
+				 DEFINE TABLE b SCHEMALESS;
+				 DEFINE TABLE logged SCHEMALESS;
+				 DEFINE EVENT fail ON a ASYNC RETRY 1 THEN {{ THROW 'every time' }};
+				 DEFINE EVENT log ON b ASYNC THEN (CREATE logged SET who = $after.id);
+				 CREATE |a:{}| RETURN NONE;
+				 CREATE b:1 RETURN NONE;",
+				NORMAL_BATCH_SIZE
+			),
+		)
+		.await?;
+
+		let first = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(first.items, NORMAL_BATCH_SIZE as u64 + 1, "both batches were fetched");
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the short batch's event ran");
+		assert_eq!(first.progress, Progress::More, "the full batch's requeues are a backlog");
+
+		// The next pass starts a lap from the head, spends the failing events'
+		// last retry, and finds the queue at rest.
+		let second = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(second.items, NORMAL_BATCH_SIZE as u64);
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(queued_events(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// An event runs on the node that drains it and queues what it queues
+	/// under that node's own queue: after the fetch that would have found the
+	/// entry and, when its table sorts earlier, behind the scan's position
+	/// too. A lap during which this node queued an entry therefore ends at
+	/// the head rather than at rest, so one pass runs a chain of events to
+	/// its end and `drain_async_events` returns with the queue empty.
+	#[test_log::test(tokio::test)]
+	async fn a_drain_runs_the_events_its_events_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// Each hop queues an event on a table that sorts before its own.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE x SCHEMALESS;
+			 DEFINE TABLE y SCHEMALESS;
+			 DEFINE TABLE z SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE EVENT hop ON z ASYNC MAXDEPTH 3 THEN (CREATE y:1);
+			 DEFINE EVENT hop ON y ASYNC MAXDEPTH 3 THEN (CREATE x:1);
+			 DEFINE EVENT hop ON x ASYNC MAXDEPTH 3 THEN (CREATE logged SET who = $after.id);
+			 CREATE z:1 RETURN NONE;",
+		)
+		.await?;
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3, "each hop's entry, found at the head once the last settled");
+		assert_eq!(pass.progress, Progress::Done);
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the chain ran to its end");
+		assert_eq!(queued_events(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A queue whose tail grows at least as fast as the drain reads it never
+	/// yields a short batch, so the lap's end is what gives the head its turn:
+	/// once the scan has passed the last key the queue held when the lap
+	/// began, the next lap starts from the head, where entries requeued for
+	/// another attempt and entries queued since for an earlier-sorting event
+	/// wait.
+	#[test_log::test(tokio::test)]
+	async fn an_event_lap_wraps_to_the_head_once_past_the_end_it_began_with() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// A full batch at the head this binary cannot run, then two full
+		// batches of events behind it.
+		queue_undecodable_events(&ds, NORMAL_BATCH_SIZE as u64).await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE |person:{}| RETURN NONE;", 2 * NORMAL_BATCH_SIZE),
+		)
+		.await?;
+		let keys = {
+			let txn = ds.transaction(Read).await?;
+			let range = NodeEventQueuePrefix {
+				nd: ds.id(),
+			}
+			.range()?;
+			let res = txn.keys(range, u32::MAX, 0, None).await;
+			txn.cancel().await?;
+			res?
+		};
+		let batch = NORMAL_BATCH_SIZE as usize;
+		assert_eq!(keys.len(), 3 * batch);
+		// The lap began when the queue held the head and the first batch of
+		// events, and the previous pass read the head; the second batch of
+		// events arrived since.
+		ds.event_laps.lock().insert(
+			EventQueue::Node(ds.id()),
+			EventLap {
+				after: Some(keys[batch - 1].clone()),
+				end: keys[2 * batch - 1].clone(),
+				requeued: false,
+				queued: 0,
+			},
+		);
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(logged_count(&ds, &session).await?, 2 * batch, "every event ran");
+		assert_eq!(
+			pass.items,
+			3 * batch as u64,
+			"the two batches of events, then the head again once the lap's end was passed"
+		);
+		assert_eq!(pass.progress, Progress::Done);
+		assert!(ds.event_laps.lock().is_empty(), "the queue's end ends the lap");
+		Ok(())
+	}
+
+	/// The stalled-build scan pages through the catalog in catalog order
+	/// across passes: a pass stops at its page of steps with the rest left for
+	/// the next, which continues the walk where it stopped, and the pass that
+	/// reaches the end drops the walk for the one after to begin afresh.
+	#[test_log::test(tokio::test)]
+	async fn stalled_build_scan_pages_through_the_catalog() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// A page and a few more, split unevenly across two tables so the page
+		// boundary falls inside the second: the namespace, the database and
+		// each table entered are steps of the page too.
+		let per_table = INDEX_RESUME_PAGE_SIZE / 2 + 2;
+		let mut sql = String::from("DEFINE TABLE aaa SCHEMALESS; DEFINE TABLE zzz SCHEMALESS;");
+		for table in ["aaa", "zzz"] {
+			for n in 0..per_table {
+				sql.push_str(&format!(" DEFINE INDEX i{n} ON {table} FIELDS f{n};"));
+			}
+		}
+		execute_all(&ds, &session, &sql).await?;
+
+		let scan =
+			|| ds.resume_stalled_index_builds(Duration::from_secs(60), CancellationToken::new());
+		let first = scan().await?;
+		assert_eq!(first.progress, Progress::More, "a page was left for the next pass");
+		assert!(
+			ds.resume_walk.lock().as_ref().is_some_and(IndexWalk::has_more),
+			"the walk is kept for the sweep's next page"
+		);
+		let second = scan().await?;
+		assert_eq!(second.progress, Progress::Done, "the rest fits in one page");
+		assert!(ds.resume_walk.lock().is_none(), "reaching the end drops the walk");
+		let third = scan().await?;
+		assert_eq!(third.progress, Progress::More, "the scan starts over");
+		assert!(ds.resume_walk.lock().is_some());
+		Ok(())
+	}
+
+	/// A resume pass that finds its lease passed to another node stops at the
+	/// candidate it found so and reports the lease elsewhere, so the former
+	/// holder does not adopt builds alongside the new one; the candidates it
+	/// did not check go back to its walk, which reaches them first.
+	#[test_log::test(tokio::test)]
+	async fn a_resume_pass_stops_at_a_lease_another_node_took() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE t SCHEMALESS; DEFINE INDEX a ON t FIELDS a; DEFINE INDEX b ON t FIELDS b;",
+		)
+		.await?;
+		let mut walk = IndexWalk::default();
+		let page = ds.resume_page(&mut walk).await?;
+		let names = |page: &[WalkedIndex]| -> Vec<String> {
+			page.iter().map(|candidate| candidate.index.name.to_string()).collect()
+		};
+		assert_eq!(names(&page), ["a", "b"]);
+
+		let lease = |ds: &Datastore| {
+			ds.lease_handler(TaskLeaseType::IndexBuildResume, Duration::from_secs(60), None)
+		};
+		// The pass's handler, whose first check reads the lease rather than
+		// answering from its throttle, and another node that takes the lease.
+		let lh = lease(&ds)?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		assert!(lease(&other)?.has_lease().await?, "the other node takes the lease");
+
+		let mut pass = Pass::done(TaskLeaseState::Held);
+		ds.adopt_stalled_build(
+			&lh,
+			&CancellationToken::new(),
+			page,
+			ResumeScope::Any,
+			&mut walk,
+			&mut pass,
+		)
+		.await?;
+		assert_eq!(pass.lease, TaskLeaseState::Elsewhere, "the pass reports the lease lost");
+		assert_eq!(pass.items, 0);
+		assert_eq!(
+			names(&ds.resume_page(&mut walk).await?),
+			["a", "b"],
+			"the unchecked candidates go back to the walk"
+		);
+		Ok(())
+	}
+
+	/// A live node's queue is its own to drain: the leased adoption sweep on
+	/// another node leaves it untouched, so a cluster's event throughput does
+	/// not serialise through one lease holder.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_leaves_a_live_nodes_queue_alone() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.lease, TaskLeaseState::Held);
+		assert_eq!(pass.items, 0, "a live node's queue is not adopted");
+		assert_eq!(logged_count(&ds, &session).await?, 0);
+		// The owner drains it.
+		ds.drain_async_events().await?;
+		assert_eq!(logged_count(&ds, &session).await?, 5);
+		Ok(())
+	}
+
+	/// Once a node is archived, the sweep adopts its queue.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_drains_an_archived_nodes_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.lease, TaskLeaseState::Held);
+		assert_eq!(pass.items, 5);
+		assert_eq!(logged_count(&other, &session).await?, 5);
+		Ok(())
+	}
+
+	/// The sweep finds a queue by its own prefix, not through its owner's row,
+	/// so a queue whose owner's row is already gone — deleted by cleanup on
+	/// this release, or by a node on a release that knows nothing of per-node
+	/// queues — is still adopted rather than orphaned.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_drains_the_queue_of_a_node_whose_row_is_gone() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		other.remove_nodes().await?;
+		assert!(!node_exists(&other, ds.id()).await?, "cleanup does not wait for the queue");
+
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.lease, TaskLeaseState::Held);
+		assert_eq!(pass.items, 5);
+		assert_eq!(logged_count(&other, &session).await?, 5);
+		Ok(())
+	}
+
+	/// Node cleanup deletes at most a slice of an archived node's live queries
+	/// per pass, a page per commit, and a pass that stops with a node still to
+	/// clean reports `More`.
+	///
+	/// A departed node can leave any number of live queries behind, and
+	/// deleting them all in one transaction per node makes one pass as long,
+	/// and as large, as the node's registrations, in a slice a host driving
+	/// maintenance itself waits on. What a pass deleted is committed, so the
+	/// next pass continues from the head of what remains, and the node's row
+	/// goes only with its last live queries.
+	#[test_log::test(tokio::test)]
+	async fn node_cleanup_is_paged_across_passes() -> Result<()> {
+		let (ds, _) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		let page = NORMAL_BATCH_SIZE as usize;
+		// One live query more than a page.
+		plant_node_live_queries(&ds, ds.id(), page + 1).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		// A budget of one page: the pass stops with a live query, and the row,
+		// still to delete.
+		let first = ds.remove_nodes_with_budget(NODE_CLEANUP_SLICE_BATCHES, page as u64).await?;
+		assert_eq!(first.progress, Progress::More, "the pass stopped with the node still to clean");
+		assert_eq!(first.items, page as u64);
+		assert_eq!(node_live_query_count(&ds, ds.id()).await?, 1);
+		assert!(node_exists(&ds, ds.id()).await?, "a node with live queries left keeps its row");
+
+		let second = ds.remove_nodes_with_budget(NODE_CLEANUP_SLICE_BATCHES, page as u64).await?;
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(second.items, 2, "the last live query, and the row");
+		assert_eq!(node_live_query_count(&ds, ds.id()).await?, 0);
+		assert!(!node_exists(&ds, ds.id()).await?);
+		Ok(())
+	}
+
+	/// Register `count` archived nodes with no live queries, their heartbeats
+	/// past the write barrier's window. Their ids sort before any node id
+	/// drawn from the clock, so they fill the head of the node range.
+	async fn plant_archived_nodes(ds: &Datastore, count: usize) -> Result<()> {
+		let now = lapsed_heartbeat(ds);
+		let txn = ds.transaction(Write).await?;
+		for n in 0..count {
+			let id = Uuid::from_u128(n as u128 + 1);
+			let key = NodeKey {
+				nd: id,
+			};
+			txn.set_key(&key, &Node::new(id, now, false).archive()).await?;
+		}
+		txn.commit().await
+	}
+
+	/// How many node rows the cluster carries.
+	async fn node_row_count(ds: &Datastore) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let nodes = txn.all_nodes().await?;
+		txn.cancel().await?;
+		Ok(nodes.len())
+	}
+
+	/// Node cleanup scans at most a slice of node rows per pass, so a pass
+	/// over archived nodes that left nothing behind is bounded by the rows it
+	/// reads as well as by the keys it deletes, and a pass that stops with
+	/// rows still to scan reports `More`.
+	///
+	/// The archived nodes were listed from every row of the cluster on every
+	/// pass, so the listing alone was as long as the membership, in a slice a
+	/// host driving maintenance itself waits on. A pass now keeps its
+	/// position between passes, and a row registered while the scan runs is
+	/// the next scan's.
+	#[test_log::test(tokio::test)]
+	async fn node_cleanup_discovery_is_paged_across_passes() -> Result<()> {
+		let (ds, _) = new_index_compaction_test_ds().await?;
+		let page = NORMAL_BATCH_SIZE as usize;
+		let rows = node_row_count(&ds).await?;
+		// One archived node more than a page, none with a live query.
+		plant_archived_nodes(&ds, page + 1).await?;
+
+		// One page of rows, and keys enough for every node: the pass stops
+		// with a page still to scan.
+		let first = ds.remove_nodes_with_budget(1, u64::MAX).await?;
+		assert_eq!(first.progress, Progress::More, "the pass stopped with a page still to scan");
+		assert_eq!(first.items, page as u64, "the archived nodes on the page are cleaned");
+		assert_eq!(node_row_count(&ds).await?, rows + 1);
+
+		let second = ds.remove_nodes_with_budget(1, u64::MAX).await?;
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(second.items, 1);
+		assert_eq!(node_row_count(&ds).await?, rows);
+		Ok(())
+	}
+
+	/// Write `count` release records for nodes that have no row. Their ids
+	/// sort before any node id drawn from the clock, so they fill the head of
+	/// the record range.
+	async fn plant_orphaned_node_releases(ds: &Datastore, count: usize) -> Result<()> {
+		let now = ds.clock_now();
+		let txn = ds.transaction(Write).await?;
+		for n in 0..count {
+			let key = NodeReleaseKey {
+				nd: Uuid::from_u128(n as u128 + 1),
+			};
+			let record = NodeRelease {
+				release: Release::CURRENT,
+				heartbeat: now,
+			};
+			txn.set_key(&key, &record).await?;
+		}
+		txn.commit().await
+	}
+
+	/// How many node release records the cluster carries.
+	async fn node_release_count(ds: &Datastore) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let mut count = 0;
+		let mut range = Some(NodeReleasePrefix {}.range()?);
+		while let Some(rng) = range {
+			let res = txn.batch_keys_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await?;
+			count += res.result.len();
+			range = match (&res.next, res.result.last()) {
+				(Some(_), Some(last)) => Some(rng.resume_after(last, Direction::Forward)),
+				_ => None,
+			};
+		}
+		txn.cancel().await?;
+		Ok(count)
+	}
+
+	/// The sweep of release records whose node row is gone reads at most the
+	/// pages a node cleanup pass has left once its rows are scanned, so a
+	/// pass over a cluster that left many records behind is bounded by the
+	/// pages it reads, and a pass that stops with records still to read
+	/// reports `More` and continues the sweep, not the row scan, next.
+	///
+	/// The sweep ran whole at the end of the row scan, so a pass bounded in
+	/// the rows it read was as long as the record range, in a slice a host
+	/// driving maintenance itself waits on.
+	#[test_log::test(tokio::test)]
+	async fn node_cleanup_release_sweep_is_paged_across_passes() -> Result<()> {
+		let (ds, _) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		let page = NORMAL_BATCH_SIZE as usize;
+		let records = node_release_count(&ds).await?;
+		// One orphaned record more than a page.
+		plant_orphaned_node_releases(&ds, page + 1).await?;
+
+		// One page a pass: the first reads the node rows and has none left
+		// for the records.
+		let first = ds.remove_nodes_with_budget(1, u64::MAX).await?;
+		assert_eq!(first.progress, Progress::More, "the pass stopped with the records to sweep");
+		assert_eq!(first.items, 0);
+		assert_eq!(node_release_count(&ds).await?, records + page + 1);
+
+		let second = ds.remove_nodes_with_budget(1, u64::MAX).await?;
+		assert_eq!(second.progress, Progress::More, "the pass stopped with a page still to read");
+		assert_eq!(second.items, page as u64, "the orphaned records on the page are deleted");
+		assert_eq!(node_release_count(&ds).await?, records + 1);
+
+		let third = ds.remove_nodes_with_budget(1, u64::MAX).await?;
+		assert_eq!(third.progress, Progress::Done);
+		assert_eq!(third.items, 1);
+		assert_eq!(node_release_count(&ds).await?, records, "a live node keeps its record");
+		Ok(())
+	}
+
+	/// The sweep deletes no more orphaned records than the keys a pass has
+	/// left, and a pass that stops with orphans left on a page reads the page
+	/// again next, finding only what is left.
+	#[test_log::test(tokio::test)]
+	async fn node_cleanup_release_sweep_is_bounded_by_keys() -> Result<()> {
+		let (ds, _) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		let records = node_release_count(&ds).await?;
+		plant_orphaned_node_releases(&ds, 3).await?;
+
+		// Keys for two records a pass.
+		let first = ds.remove_nodes_with_budget(NODE_CLEANUP_SLICE_BATCHES, 2).await?;
+		assert_eq!(first.progress, Progress::More, "the pass stopped with a record left");
+		assert_eq!(first.items, 2);
+		assert_eq!(node_release_count(&ds).await?, records + 1);
+
+		let second = ds.remove_nodes_with_budget(NODE_CLEANUP_SLICE_BATCHES, 2).await?;
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(second.items, 1);
+		assert_eq!(node_release_count(&ds).await?, records);
+		Ok(())
+	}
+
+	/// Register `count` nodes whose heartbeats are a minute old, so every one
+	/// of them is expired. Their ids sort before any node id drawn from the
+	/// clock, so they fill the head of the node range.
+	async fn plant_expired_nodes(ds: &Datastore, count: usize) -> Result<()> {
+		let stale = Timestamp {
+			value: ds.clock_now().value.saturating_sub(60_000),
+		};
+		let txn = ds.transaction(Write).await?;
+		for n in 0..count {
+			let id = Uuid::from_u128(n as u128 + 1);
+			let key = NodeKey {
+				nd: id,
+			};
+			txn.set_key(&key, &Node::new(id, stale, false)).await?;
+		}
+		txn.commit().await
+	}
+
+	/// How many registered nodes are active.
+	async fn active_node_count(ds: &Datastore) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let nodes = txn.all_nodes().await?;
+		txn.cancel().await?;
+		Ok(nodes.iter().filter(|n| n.is_active()).count())
+	}
+
+	/// Node expiry scans at most a slice of node rows per pass, archiving the
+	/// expired nodes on each page in a commit of its own, and a pass that
+	/// stops with pages still to scan reports `More`.
+	///
+	/// Every registered node keeps a row until cleanup removes it, and expiry
+	/// read them all and archived every expired one in one transaction, so a
+	/// pass was as long as the membership, in a slice a host driving
+	/// maintenance itself waits on. A pass now keeps its position between
+	/// passes, and a row registered while the scan runs is the next scan's.
+	#[test_log::test(tokio::test)]
+	async fn node_expiry_is_paged_across_passes() -> Result<()> {
+		let (ds, _) = new_index_compaction_test_ds().await?;
+		let page = NORMAL_BATCH_SIZE as usize;
+		let live = active_node_count(&ds).await?;
+		// One expired node more than a page.
+		plant_expired_nodes(&ds, page + 1).await?;
+
+		// A budget of one page: the pass stops with a page still to scan.
+		let first = ds.expire_nodes_with_budget(1).await?;
+		assert_eq!(first.progress, Progress::More, "the pass stopped with a page still to scan");
+		assert_eq!(first.items, page as u64, "the expired nodes on the page are archived");
+		assert_eq!(active_node_count(&ds).await?, live + 1);
+
+		let second = ds.expire_nodes_with_budget(1).await?;
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(second.items, 1);
+		assert_eq!(active_node_count(&ds).await?, live);
+		Ok(())
+	}
+
+	/// The node-state level puts the node id right after its prefix, whatever
+	/// key lies beneath the node, which is what lets the sweep name the node
+	/// of a key it cannot decode.
+	#[test]
+	fn a_node_state_key_names_its_node_first() -> Result<()> {
+		let nd = Uuid::from_u128(7);
+		let queue = NodeEventQueueKey {
+			nd,
+			ns: NamespaceId(1),
+			db: DatabaseId(2),
+			tb: Cow::Owned("t".into()),
+			ev: Cow::Owned("e".into()),
+			ts: 3,
+		}
+		.encode_key()?;
+		assert_eq!(node_of_state_key(&queue)?, Some(nd));
+		let live = NodeLiveQueryKey {
+			nd,
+			lq: Uuid::from_u128(9),
+		}
+		.encode_key()?;
+		assert_eq!(node_of_state_key(&live)?, Some(nd));
+		let mut unknown = NodeStateRoot {
+			nd,
+		}
+		.encode_bound()?
+		.to_vec();
+		unknown.extend_from_slice(b"!zz");
+		assert_eq!(node_of_state_key(&unknown)?, Some(nd));
+		let mut short = NodeStatePrefix {}.encode_bound()?.to_vec();
+		short.push(b'!');
+		assert_eq!(node_of_state_key(&short)?, None, "too short to name a node");
+		Ok(())
+	}
+
+	/// Wide enough to read a queue whose lap spans passes in one scan.
+	const QUEUE_SCAN_LIMIT: u32 =
+		2 * crate::kvs::EVENT_PROCESSING_SLICE_BATCHES as u32 * NORMAL_BATCH_SIZE;
+	/// Claims every entry of `nd`'s queue for `holder` as of now, as the
+	/// workers about to run them would, and returns how many. When the holder
+	/// is `ds` itself the entries are marked running as well, which is what
+	/// keeps this node's own claims: they stand until `settle_queue`, as a
+	/// worker's do until it settles.
+	async fn hold_queue(ds: &Datastore, nd: Uuid, holder: Uuid) -> Result<usize> {
+		let range = NodeEventQueuePrefix {
+			nd,
+		}
+		.range()?;
+		let now = ds.clock_now().value;
+		let txn = ds.transaction(Write).await?;
+		let mut held = 0;
+		for (k, v) in txn.scan_raw(range, QUEUE_SCAN_LIMIT, 0, None).await? {
+			let mut ev = <AsyncEventRecord as KVValue>::kv_decode_value(&v, ())?;
+			ev.claim = Some(EventClaim {
+				node: holder,
+				at: now,
+			});
+			if holder == ds.id() {
+				ds.running_events().lock().insert(k.clone());
+			}
+			txn.set(Key::from(k.as_slice()), ev.kv_encode_value()?).await?;
+			held += 1;
+		}
+		txn.commit().await?;
+		Ok(held)
+	}
+
+	/// Removes every entry of `nd`'s queue, as their holder settling them
+	/// would, and no longer marks them running here once the removal has
+	/// committed. The order is the worker's, whose mark outlives its
+	/// settlement's commit: an entry unmarked while still stored reads, to
+	/// a drain of this node, as a void claim of its own, and its takeover
+	/// conflicts with the removal.
+	async fn settle_queue(ds: &Datastore, nd: Uuid) -> Result<()> {
+		let range = NodeEventQueuePrefix {
+			nd,
+		}
+		.range()?;
+		let txn = ds.transaction(Write).await?;
+		let mut settled = Vec::new();
+		for (k, _) in txn.scan_raw(range, QUEUE_SCAN_LIMIT, 0, None).await? {
+			txn.del(Key::from(k.as_slice())).await?;
+			settled.push(k);
+		}
+		txn.commit().await?;
+		let mut running = ds.running_events().lock();
+		for k in settled {
+			running.remove(&k);
+		}
+		Ok(())
+	}
+
+	/// Backdates every claim on `nd`'s queue by `by`, as the passage of that
+	/// much time would.
+	async fn age_claims(ds: &Datastore, nd: Uuid, by: Duration) -> Result<()> {
+		let range = NodeEventQueuePrefix {
+			nd,
+		}
+		.range()?;
+		let delta = by.as_millis() as u64;
+		let txn = ds.transaction(Write).await?;
+		for (k, v) in txn.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await? {
+			let mut ev = <AsyncEventRecord as KVValue>::kv_decode_value(&v, ())?;
+			let claim = ev.claim.as_mut().expect("every entry is claimed");
+			claim.at = claim.at.saturating_sub(delta);
+			txn.set(Key::from(k.as_slice()), ev.kv_encode_value()?).await?;
+		}
+		let stamp = NodeDrainHeartbeatKey {
+			nd,
+		};
+		if let Some(beat) = txn.get_key(&stamp, None).await? {
+			txn.set_key(&stamp, &beat.saturating_sub(delta)).await?;
+		}
+		txn.commit().await
+	}
+
+	/// How many entries `nd`'s queue holds, up to a batch.
+	async fn queue_len(ds: &Datastore, nd: Uuid) -> Result<usize> {
+		let range = NodeEventQueuePrefix {
+			nd,
+		}
+		.range()?;
+		let txn = ds.transaction(Read).await?;
+		let n = txn.keys_raw(range, QUEUE_SCAN_LIMIT, 0, None).await?.len();
+		txn.cancel().await?;
+		Ok(n)
+	}
+
+	/// An adopter that finds entries a departed owner had claimed leaves them
+	/// to it for [`EVENT_CLAIM_TTL`]: the owner may be paused rather than
+	/// gone, still inside those bodies, whose effects outside their
+	/// transactions cannot be taken back. Once the window has passed the
+	/// owner is taken for dead with its claims, and the entries are taken
+	/// over and run.
+	#[test_log::test(tokio::test)]
+	async fn an_adopter_waits_out_a_departed_owners_claims() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 3).await?;
+		// The owner's workers claim their entries and stop before running them.
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 3);
+		archive_node(&ds, ds.id()).await?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3, "the held entries are fetched");
+		assert_eq!(pass.held, 3, "and reported as held");
+		assert_eq!(logged_count(&other, &session).await?, 0, "but left to the owner holding them");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 3, "and stay queued");
+
+		age_claims(&ds, ds.id(), EVENT_CLAIM_TTL).await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3);
+		assert_eq!(logged_count(&other, &session).await?, 3, "taken over once the window passed");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// This node's own claims hold against a concurrent drain of its queue
+	/// for as long as its workers run the entries, and no longer than the
+	/// process that made them: a restarted process is running nothing, so a
+	/// node restarted with its id kept runs the batch it was in the middle
+	/// of at once rather than waiting out a window on it.
+	#[test_log::test(tokio::test)]
+	async fn a_restarted_node_runs_the_entries_it_had_claimed_at_once() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 3).await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 3);
+
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3, "the held entries are fetched");
+		assert_eq!(pass.held, 3, "and reported as held");
+		assert_eq!(logged_count(&ds, &session).await?, 0, "but left to the drain holding them");
+
+		let ds = Arc::new(Arc::into_inner(ds).expect("sole owner of the datastore").restart());
+		let pass = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3);
+		assert_eq!(logged_count(&ds, &session).await?, 3, "the restarted node runs them at once");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// `drain_async_events` is a flush: it returns once nothing this node
+	/// queued is left to run, including the entries a concurrent processor —
+	/// the event task's workers — holds. Those are their holder's to settle
+	/// and their bodies may still be running, so the drain waits for that
+	/// rather than reporting the queue drained of its own share only.
+	#[test_log::test(tokio::test)]
+	async fn an_explicit_drain_waits_for_the_entries_another_processor_holds() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 2);
+		// The holder settles its entries a little later.
+		let holder = {
+			let ds = Arc::clone(&ds);
+			spawn(async move {
+				sleep(Duration::from_millis(300)).await;
+				settle_queue(&ds, ds.id()).await
+			})
+		};
+
+		let started = Instant::now();
+		let drained = ds.drain_async_events().await?;
+		assert!(
+			started.elapsed() >= Duration::from_millis(300),
+			"the drain waited for the holder to settle its entries"
+		);
+		holder.await??;
+		assert_eq!(drained, 0, "the held entries were the holder's to run, not this drain's");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A body this node's worker has been running for longer than the claim
+	/// window is still that worker's: the window bounds another node's
+	/// claims, whose workers cannot be asked, while this node knows which
+	/// entries its own workers are running. A drain of the same node finds the
+	/// claims older than the window and still waits, rather than take the
+	/// entries over and evaluate the bodies a second time.
+	#[test_log::test(tokio::test)]
+	async fn an_explicit_drain_waits_for_a_body_this_node_has_run_past_the_window() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 2);
+		age_claims(&ds, ds.id(), EVENT_CLAIM_TTL).await?;
+		let holder = {
+			let ds = Arc::clone(&ds);
+			spawn(async move {
+				sleep(Duration::from_millis(300)).await;
+				settle_queue(&ds, ds.id()).await
+			})
+		};
+
+		let started = Instant::now();
+		let drained = ds.drain_async_events().await?;
+		assert!(
+			started.elapsed() >= Duration::from_millis(300),
+			"the drain waited for this node's worker however old its claim"
+		);
+		holder.await??;
+		assert_eq!(drained, 0, "the entries were the worker's to run, not this drain's");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A lap spans passes when the queue holds `EVENT_PROCESSING_SLICE_BATCHES`
+	/// full batches: the first pass spends its budget with the lap's cursor
+	/// at the queue's end, and the next finds the end from there, seeing
+	/// nothing. What the first pass found held is still held, so the drain
+	/// carries the count across the lap's passes rather than trust the one
+	/// that found the end.
+	#[test_log::test(tokio::test)]
+	async fn an_explicit_drain_carries_held_entries_across_the_passes_of_a_lap() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		let count = crate::kvs::EVENT_PROCESSING_SLICE_BATCHES * NORMAL_BATCH_SIZE as usize;
+		queue_async_events(&ds, &session, count).await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, count);
+		let holder = {
+			let ds = Arc::clone(&ds);
+			spawn(async move {
+				sleep(Duration::from_millis(300)).await;
+				settle_queue(&ds, ds.id()).await
+			})
+		};
+
+		let started = Instant::now();
+		let drained = ds.drain_async_events().await?;
+		assert!(
+			started.elapsed() >= Duration::from_millis(300),
+			"the drain waited for the entries the lap's first pass found held"
+		);
+		holder.await??;
+		assert_eq!(drained, 0, "the held entries were the holder's to run, not this drain's");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A drain that begins while a lap is in progress — left by a pass that
+	/// spent its budget, the event task's or an earlier caller's — finishes
+	/// that lap from its cursor, and what the passes before it found held is
+	/// not this drain's to know. The drain ends only with a lap it began at
+	/// the head.
+	#[test_log::test(tokio::test)]
+	async fn an_explicit_drain_ends_only_with_a_lap_it_began_at_the_head() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 2);
+		// A lap whose cursor stands at the queue's end, the held entries
+		// behind it.
+		let range = NodeEventQueuePrefix {
+			nd: ds.id(),
+		}
+		.range()?;
+		let end = ds.queue_end(&range).await?.expect("the queue holds entries");
+		ds.event_laps.lock().insert(
+			EventQueue::Node(ds.id()),
+			EventLap {
+				after: Some(end.clone()),
+				end,
+				requeued: false,
+				queued: ds.commit_triggers().async_events_queued(),
+			},
+		);
+		let holder = {
+			let ds = Arc::clone(&ds);
+			spawn(async move {
+				sleep(Duration::from_millis(300)).await;
+				settle_queue(&ds, ds.id()).await
+			})
+		};
+
+		let started = Instant::now();
+		let drained = ds.drain_async_events().await?;
+		assert!(
+			started.elapsed() >= Duration::from_millis(300),
+			"the drain did not end with the lap it resumed"
+		);
+		holder.await??;
+		assert_eq!(drained, 0, "the held entries were the holder's to run, not this drain's");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// An entry an explicit drain could not claim — the claim's transaction
+	/// failing, not losing to another processor — fails the drain rather than
+	/// being counted and passed over, so `Ok` means the queue was flushed.
+	#[test_log::test(tokio::test)]
+	async fn an_explicit_drain_fails_rather_than_pass_an_entry_it_could_not_claim() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 1).await?;
+		let fault = crate::kvs::testing::inject_non_retryable_error(
+			crate::kvs::testing::NonRetryableErrorSite::AsyncEventClaim,
+			ds.id(),
+		);
+
+		assert!(ds.drain_async_events().await.is_err(), "the drain fails with the claim's error");
+		assert_eq!(logged_count(&ds, &session).await?, 0, "the body did not run");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 1, "and the entry is still queued");
+
+		drop(fault);
+		assert_eq!(ds.drain_async_events().await?, 1, "the next drain runs it");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		Ok(())
+	}
+
+	/// A worker that panics — a bug in what it runs — settles nothing: its
+	/// entry stays claimed, and the mark that made the claim hold went with
+	/// the worker, so the next pass takes the entry over. The batch the
+	/// worker was part of fails, and with it the pass and the drain, rather
+	/// than report the queue flushed past the entry.
+	#[test_log::test(tokio::test)]
+	async fn a_worker_that_panics_fails_the_pass_rather_than_pass_its_entry() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 0).await?;
+		{
+			let _panic = inject_panic(PanicSite::AsyncEventWorker, ds.id());
+			assert!(ds.drain_async_events().await.is_err(), "the drain fails with the worker");
+		}
+		assert_eq!(logged_count(&ds, &session).await?, 0, "the event did not run");
+		assert_eq!(queue_len(&ds, ds.id()).await?, 1, "and its entry stays queued");
+		assert_eq!(ds.drain_async_events().await?, 1, "the next drain takes it over and runs it");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// A pass that fails after settling some entries — one worker's claim
+	/// failing while another's held — attaches what it did to its error: the
+	/// entries fetched and run, the queue's age, and a backlog, since the
+	/// entry the failure left in place is still queued. The observer reports
+	/// those rather than a pass that did nothing.
+	#[test_log::test(tokio::test)]
+	async fn a_pass_that_fails_reports_what_it_settled_before_failing() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		let _fault = inject_non_retryable_error(NonRetryableErrorSite::AsyncEventClaim, ds.id());
+
+		let e = ds
+			.event_processing_local(&CancellationToken::new())
+			.await
+			.expect_err("the claim that fails fails the pass");
+		let PassFailure(pass) = e.downcast_ref::<PassFailure>().expect("the pass is attached");
+		assert_eq!(pass.items, 2, "both entries were fetched");
+		assert_eq!(pass.ran, 1, "the entry whose claim held ran");
+		assert!(pass.oldest_age.is_some(), "the queue's age is reported");
+		assert_eq!(pass.progress, Progress::More, "the entry left in place is a backlog");
+		assert_eq!(pass.lease, TaskLeaseState::NotLeased);
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(queue_len(&ds, ds.id()).await?, 1, "the entry whose claim failed stays queued");
+		Ok(())
+	}
+
+	/// The adoption sweep attaches the same under the lease it held: the
+	/// entries it settled before the failure stand.
+	#[test_log::test(tokio::test)]
+	async fn an_adoption_pass_that_fails_reports_what_it_settled_before_failing() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let _fault = inject_non_retryable_error(NonRetryableErrorSite::AsyncEventClaim, other.id());
+
+		let e = other
+			.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new())
+			.await
+			.expect_err("the claim that fails fails the pass");
+		let PassFailure(pass) = e.downcast_ref::<PassFailure>().expect("the pass is attached");
+		assert_eq!(pass.lease, TaskLeaseState::Held, "under the lease the sweep held");
+		assert_eq!((pass.items, pass.ran), (2, 1));
+		assert_eq!(pass.progress, Progress::More);
+		assert_eq!(logged_count(&other, &session).await?, 1);
+		assert_eq!(
+			queue_len(&other, ds.id()).await?,
+			1,
+			"the entry whose claim failed stays queued"
+		);
+		Ok(())
+	}
+
+	/// A pass that fails in a queue keeps its rotation, past that queue: the
+	/// next pass continues with the queues after it, and the next rotation
+	/// retries it, so a queue whose drain keeps failing does not starve the
+	/// queues behind it.
+	#[test_log::test(tokio::test)]
+	async fn an_adoption_pass_that_fails_in_a_queue_continues_past_it() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 1).await?;
+		assert_eq!(relocate_queue_to_root(&ds).await?, 1);
+		// Two departed nodes, one event each, in id order.
+		let ids: Vec<Uuid> = (10..12u128).map(Uuid::from_u128).collect();
+		for &id in &ids {
+			let node = ds.fork_for_test_with_node_id(id);
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+			archive_node(&node, node.id()).await?;
+		}
+		let root_queued = || async {
+			let txn = ds.transaction(Read).await?;
+			let n = txn.count(EventQueuePrefix {}.range()?, None).await;
+			txn.cancel().await?;
+			n
+		};
+		let canceller = CancellationToken::new();
+		let adopt = || ds.event_processing_adopt(Duration::from_secs(1), &canceller);
+		// The first claim of a pass fails it.
+		let failing =
+			|| inject_non_retryable_error(NonRetryableErrorSite::AsyncEventClaim, ds.id());
+
+		// The rotation begins with the root queue, whose claim fails.
+		{
+			let _fault = failing();
+			adopt().await.expect_err("the root queue's claim fails the pass");
+		}
+		assert_eq!(root_queued().await?, 1);
+		// The next pass continues with the nodes, and fails in the first.
+		{
+			let _fault = failing();
+			adopt().await.expect_err("the first node's claim fails the pass");
+		}
+		assert_eq!(queued_events(&ds, ids[0]).await?, 1);
+		// The next continues past that node, and ends the rotation.
+		let third = adopt().await?;
+		assert_eq!(third.items, 1);
+		assert_eq!(queued_events(&ds, ids[1]).await?, 0, "the second node was swept");
+		assert_eq!(root_queued().await?, 1, "the root queue waits for the next rotation");
+		assert_eq!(queued_events(&ds, ids[0]).await?, 1, "so does the first node's");
+		assert!(ds.adoption_rotation.lock().is_none(), "the rotation ended");
+		// The next rotation retries the two.
+		let fourth = adopt().await?;
+		assert_eq!(fourth.items, 2);
+		assert_eq!(root_queued().await?, 0);
+		assert_eq!(queued_events(&ds, ids[0]).await?, 0);
+		assert_eq!(logged_count(&ds, &session).await?, 3);
+		Ok(())
+	}
+
+	/// An adoption sweep that finds the lease passed to another node stops in
+	/// the queue it found so, adopting nothing further, so the former holder
+	/// does not sweep alongside the new one; the queue's lap stays where the
+	/// batch began.
+	#[test_log::test(tokio::test)]
+	async fn an_adoption_sweep_stops_at_a_lease_another_node_took() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let lease = |ds: &Datastore| {
+			ds.lease_handler(TaskLeaseType::EventProcessing, Duration::from_secs(60), None)
+		};
+		// The sweep's handler, whose first check reads the lease rather than
+		// answering from its throttle, and a third node that takes the lease.
+		let lh = lease(&other)?;
+		let third = ds.fork_for_test_with_node_id(Uuid::from_u128(3));
+		assert!(lease(&third)?.has_lease().await?, "the third node takes the lease");
+
+		let canceller = CancellationToken::new();
+		let mut sweep = AdoptionSweep {
+			lh: &lh,
+			canceller: &canceller,
+			budget: EVENT_PROCESSING_SLICE_BATCHES,
+			steps: EVENT_ADOPTION_PAGE_SIZE,
+			pass: Pass::done(TaskLeaseState::Held),
+			swept: HashSet::new(),
+			failed: None,
+		};
+		let queue = EventQueue::Node(ds.id());
+		let range = NodeEventQueuePrefix {
+			nd: ds.id(),
+		}
+		.range()?;
+		let stop = other.adopt_queue(queue, &range, &mut sweep).await?;
+		assert!(matches!(stop, Some(SweepStop::LeaseLost)), "the sweep stops in the queue");
+		assert_eq!(sweep.pass.items, 0, "nothing is adopted without the lease");
+		assert_eq!(logged_count(&other, &session).await?, 0);
+		assert_eq!(queue_len(&other, ds.id()).await?, 5);
+		assert!(
+			other.event_laps.lock().get(&queue).is_some_and(|lap| lap.after.is_none()),
+			"the lap stays at the queue's head"
+		);
+		Ok(())
+	}
+
+	/// A sweep that finds the lease lost in a node's queue leaves its walk at
+	/// that node, so the rotation it keeps resumes at the queue it stopped in
+	/// rather than past it.
+	#[test_log::test(tokio::test)]
+	async fn a_lease_lost_in_a_nodes_queue_leaves_the_walk_at_that_node() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+		archive_node(&ds, ds.id()).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let lease = |ds: &Datastore| {
+			ds.lease_handler(TaskLeaseType::EventProcessing, Duration::from_secs(60), None)
+		};
+		// The sweep's handler, whose first check reads the lease rather than
+		// answering from its throttle, and a third node that takes the lease.
+		let lh = lease(&other)?;
+		let third = ds.fork_for_test_with_node_id(Uuid::from_u128(3));
+		assert!(lease(&third)?.has_lease().await?, "the third node takes the lease");
+
+		let canceller = CancellationToken::new();
+		let mut sweep = AdoptionSweep {
+			lh: &lh,
+			canceller: &canceller,
+			budget: EVENT_PROCESSING_SLICE_BATCHES,
+			steps: EVENT_ADOPTION_PAGE_SIZE,
+			pass: Pass::done(TaskLeaseState::Held),
+			swept: HashSet::new(),
+			failed: None,
+		};
+		let mut window = NodeStatePrefix {}.raw_range()?;
+		let stop = other.adopt_node_queues(&mut window, None, &mut sweep).await?;
+		assert!(matches!(stop, Some(SweepStop::LeaseLost)), "the sweep stops in the queue");
+		let txn = other.transaction(Read).await?;
+		let next = other.next_node_state(&txn, &mut window).await?;
+		txn.cancel().await?;
+		assert_eq!(next.map(|state| state.nd), Some(ds.id()), "the walk resumes at its queue");
+		Ok(())
+	}
+
+	/// The local queue is the local drain's, but the local node is a step of
+	/// the walk like any other: a page whose last step is the local node ends
+	/// there, rather than stepping over a node more than the page.
+	#[test_log::test(tokio::test)]
+	async fn a_page_whose_last_step_is_the_local_node_ends_there() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// A page of nodes with a queued event each: live owners, then the
+		// local node last, and a departed node beyond the page.
+		let page = EVENT_ADOPTION_PAGE_SIZE as u128;
+		for n in 0..page - 1 {
+			let node = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000 + n));
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+		}
+		let local = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000 + page - 1));
+		local.insert_node().await?;
+		execute_all(&local, &session, "CREATE person RETURN NONE;").await?;
+		let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(9_000));
+		departed.insert_node().await?;
+		execute_all(&departed, &session, "CREATE person RETURN NONE;").await?;
+		archive_node(&departed, departed.id()).await?;
+
+		let first =
+			local.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.items, 0, "the page ends at the local node");
+		assert_eq!(first.progress, Progress::More, "the walk stopped at its page");
+		assert_eq!(queued_events(&local, departed.id()).await?, 1, "not reached yet");
+
+		let second =
+			local.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.items, 1, "the departed node beyond the page is reached");
+		Ok(())
+	}
+
+	/// Counts the scans of every transaction completed on the datastore.
+	#[derive(Default)]
+	struct ScanCounter(std::sync::atomic::AtomicU32);
+
+	impl ExecutionObserver for ScanCounter {
+		fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
+			self.0.fetch_add(event.safe.metrics.ops_scan, std::sync::atomic::Ordering::Relaxed);
+		}
+	}
+
+	/// Keys beneath a node that this release cannot decode — a newer
+	/// release's state, left by a node since rolled back — do not cost the
+	/// sweep a read each: the walk names their node from the key and places
+	/// them against its queue, so the queue behind them is still adopted and
+	/// a node costs a fixed few reads however many such keys it holds.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_reads_past_a_nodes_unknown_state_in_bounded_reads() -> Result<()> {
+		let observer = Arc::new(ScanCounter::default());
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 1).await?;
+		// As many unknown keys before the node's queue as after it, each side
+		// well over the reads a pass makes.
+		let unknown: u32 = 100;
+		{
+			let root = NodeStateRoot {
+				nd: ds.id(),
+			}
+			.encode_bound()?;
+			let txn = ds.transaction(Write).await?;
+			for i in 0..unknown {
+				for tag in [b"!aa", b"!zz"] {
+					let mut key = root.to_vec();
+					key.extend_from_slice(tag);
+					key.extend_from_slice(&i.to_be_bytes());
+					txn.set(Key::from(key.as_slice()), b"state this release cannot read".to_vec())
+						.await?;
+				}
+			}
+			txn.commit().await?;
+		}
+		archive_node(&ds, ds.id()).await?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+
+		observer.0.store(0, std::sync::atomic::Ordering::Relaxed);
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 1, "the queue behind the unknown keys is adopted");
+		assert_eq!(logged_count(&other, &session).await?, 1);
+		let scans = observer.0.load(std::sync::atomic::Ordering::Relaxed);
+		assert!(scans > 0, "the pass's transactions are observed");
+		assert!(
+			scans < unknown,
+			"the pass scanned {scans} times over {unknown} unknown keys a side"
+		);
+		Ok(())
+	}
+
+	/// A node that keeps its id across a rollback to a release that queues at
+	/// the root keeps heartbeating, so its row stays live, but nothing on it
+	/// drains the per-node queue it left. Such a release refreshes the row
+	/// without the drain heartbeat this one writes beside it, and a row that
+	/// has moved ahead of that stamp tells the sweep the owner cannot run its
+	/// queue: the queue is adopted, as it is once the owner is archived.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_drains_the_queue_of_a_live_owner_on_an_older_release() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 5).await?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+
+		// Heartbeating on this release, the queue is the owner's.
+		ds.update_node().await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.lease, TaskLeaseState::Held);
+		assert_eq!(pass.items, 0, "a queue its live owner drains is not adopted");
+
+		// Heartbeating on the older release, it is nobody's.
+		heartbeat_without_drain_stamp(&ds).await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 5);
+		assert_eq!(logged_count(&other, &session).await?, 5);
+		assert_eq!(queued_events(&other, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// Every write of the node row by this release stamps the drain heartbeat
+	/// beside it with the same value, so the two read equal for as long as
+	/// this release keeps the row fresh, and cleanup of an archived node takes
+	/// the stamp with the row.
+	#[test_log::test(tokio::test)]
+	async fn the_drain_heartbeat_follows_the_node_row() -> Result<()> {
+		let (ds, _session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		let registered = node_heartbeat(&ds, ds.id()).await?.expect("registered");
+		assert_eq!(drain_heartbeat(&ds, ds.id()).await?, Some(registered));
+
+		ds.update_node().await?;
+		let refreshed = node_heartbeat(&ds, ds.id()).await?.expect("still registered");
+		assert_eq!(drain_heartbeat(&ds, ds.id()).await?, Some(refreshed));
+
+		ds.update_node_with_timeout(Duration::from_secs(5), &CancellationToken::new()).await?;
+		let refreshed = node_heartbeat(&ds, ds.id()).await?.expect("still registered");
+		assert_eq!(drain_heartbeat(&ds, ds.id()).await?, Some(refreshed));
+
+		heartbeat_without_drain_stamp(&ds).await?;
+		let moved = node_heartbeat(&ds, ds.id()).await?.expect("still registered");
+		assert_ne!(drain_heartbeat(&ds, ds.id()).await?, Some(moved), "the stamp stays behind");
+
+		archive_node(&ds, ds.id()).await?;
+		ds.remove_nodes().await?;
+		assert!(!node_exists(&ds, ds.id()).await?);
+		assert_eq!(drain_heartbeat(&ds, ds.id()).await?, None, "gone with the row");
+		Ok(())
+	}
+
+	/// Every queue with an entry costs the sweep one unit of budget, however
+	/// short, so a cluster with more departed nodes than the budget covers is
+	/// swept a budget's worth of queues per pass, each pass continuing where
+	/// the one before stopped. The empty root-level queue costs nothing, which
+	/// is what lets a full budget's worth of node queues fit in the first pass.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_over_many_short_queues_is_bounded_and_continues() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// Two more departed nodes than the budget covers, one event each.
+		let departed = EVENT_PROCESSING_SLICE_BATCHES + 2;
+		for n in 0..departed as u128 {
+			let node = ds.fork_for_test_with_node_id(Uuid::from_u128(10 + n));
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+			archive_node(&node, node.id()).await?;
+		}
+
+		let first =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.items, EVENT_PROCESSING_SLICE_BATCHES as u64, "one queue per unit");
+		assert_eq!(first.progress, Progress::More, "queues are left for the next pass");
+		let second =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.items, 2, "the next pass starts at the first queue left");
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(logged_count(&ds, &session).await?, departed);
+		Ok(())
+	}
+
+	/// Entries under the root-level queue — written by a node running the layout
+	/// that preceded per-node queues — are not this node's own, and are adopted
+	/// by the sweep.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_drains_the_root_level_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 3).await?;
+		assert_eq!(relocate_queue_to_root(&ds).await?, 3);
+
+		let local = ds.event_processing_local(&CancellationToken::new()).await?;
+		assert_eq!(local.items, 0, "the root-level queue is not this node's own");
+
+		let pass =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3);
+		assert_eq!(logged_count(&ds, &session).await?, 3);
+		Ok(())
+	}
+
+	/// Root-level `!eq` entries queued by a live node on an older release —
+	/// whose `!nd` row is active and ahead of [`NodeDrainHeartbeatKey`] — are
+	/// left to that node to drain, and adopted only once the node is archived
+	/// or upgraded.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_leaves_root_queue_entries_of_a_live_legacy_owner_alone() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 3).await?;
+		assert_eq!(relocate_queue_to_root(&ds).await?, 3);
+		heartbeat_without_drain_stamp(&ds).await?;
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3, "the legacy entries are fetched");
+		assert_eq!(pass.held, 3, "and reported as held by their live legacy owner");
+		assert_eq!(logged_count(&other, &session).await?, 0);
+
+		archive_node(&ds, ds.id()).await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 3);
+		assert_eq!(pass.ran, 3, "adopted once the legacy owner is archived");
+		assert_eq!(logged_count(&other, &session).await?, 3);
+		Ok(())
+	}
+
+	/// A worker running an event body past [`EVENT_CLAIM_TTL`] after its node
+	/// was archived keeps renewing [`NodeDrainHeartbeatKey`], so an adopter
+	/// leaves the entry to the worker rather than re-running the body.
+	#[test_log::test(tokio::test)]
+	async fn an_adopter_respects_a_running_workers_renewed_drain_heartbeat_past_claim_ttl()
+	-> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE EVENT log ON person ASYNC THEN {
+			 	sleep(250ms);
+			 	CREATE logged SET who = $after.id;
+			 };
+			 CREATE person:1 RETURN NONE;",
+		)
+		.await?;
+		let stamp = NodeDrainHeartbeatKey {
+			nd: ds.id(),
+		};
+		let read_beat = || async {
+			let txn = ds.transaction(Read).await?;
+			let beat = txn.get_key(&stamp, None).await?;
+			txn.cancel().await?;
+			Ok::<_, anyhow::Error>(beat)
+		};
+
+		// 1. Verify that a running worker actively renews `NodeDrainHeartbeatKey`
+		// while the event body is executing, without conflicting with settlement.
+		let owner = {
+			let ds = Arc::clone(&ds);
+			spawn(async move { ds.event_processing_local(&CancellationToken::new()).await })
+		};
+		while ds.running_events().lock().is_empty() {
+			sleep(Duration::from_millis(10)).await;
+		}
+		let initial_beat = read_beat().await?.expect("drain heartbeat recorded");
+		sleep(Duration::from_millis(150)).await;
+		let renewed_beat = read_beat().await?.expect("drain heartbeat renewed");
+		assert!(
+			renewed_beat > initial_beat,
+			"the running worker's ClaimRenewalGuard advances NodeDrainHeartbeatKey ({renewed_beat} > {initial_beat})"
+		);
+		let owner_pass = owner.await??;
+		assert_eq!(owner_pass.ran, 1, "the worker settles the entry without write conflict");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+
+		// 2. Verify that an adopter respects a renewed `NodeDrainHeartbeatKey`
+		// even after the owner is archived and the entry's `EventClaim::at` is
+		// older than `EVENT_CLAIM_TTL`.
+		execute_all(&ds, &session, "CREATE person:2 RETURN NONE;").await?;
+		assert_eq!(hold_queue(&ds, ds.id(), ds.id()).await?, 1);
+		archive_node(&ds, ds.id()).await?;
+		age_claims(&ds, ds.id(), EVENT_CLAIM_TTL).await?;
+		// Simulate the running worker's renewal of `NodeDrainHeartbeatKey`.
+		{
+			let txn = ds.transaction(Write).await?;
+			ds.stamp_drain_heartbeat(&txn, ds.clock_now()).await?;
+			txn.commit().await?;
+		}
+
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 1, "the entry is fetched");
+		assert_eq!(pass.held, 1, "and held by the worker's renewed drain heartbeat");
+		assert_eq!(pass.ran, 0, "the adopter does not evaluate the body a second time");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+
+		// Once the renewed heartbeat also ages past `EVENT_CLAIM_TTL`, the
+		// adopter takes over the entry and runs it.
+		age_claims(&ds, ds.id(), EVENT_CLAIM_TTL).await?;
+		let pass =
+			other.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 1);
+		assert_eq!(pass.ran, 1, "taken over once the drain heartbeat expires too");
+		assert_eq!(logged_count(&ds, &session).await?, 2);
+		assert_eq!(queue_len(&ds, ds.id()).await?, 0);
+		Ok(())
+	}
+
+	/// Shutting down the last upgraded node moves any remaining per-node queue
+	/// entries back to the root `!eq` queue encoded at revision 1, so a cluster
+	/// rolled back to an older release can decode and drain them.
+	#[test_log::test(tokio::test)]
+	async fn shutting_down_the_last_upgraded_node_hands_event_queues_back_to_root_at_revision_1()
+	-> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 2).await?;
+		// Claim one entry (revision 2) so shutdown must clear the claim too.
+		assert_eq!(hold_queue(&ds, ds.id(), Uuid::from_u128(99)).await?, 2);
+
+		let peer = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		peer.insert_node().await?;
+
+		// While `peer` is an active upgraded node, `ds` shutting down leaves
+		// its per-node queue in place for `peer` to adopt.
+		ds.shutdown().await?;
+		assert_eq!(queue_len(&peer, ds.id()).await?, 2, "kept while an upgraded peer is active");
+
+		// When the last upgraded node (`peer`) shuts down, the entries are
+		// handed back to the root queue at revision 1.
+		peer.shutdown().await?;
+		let inspect = peer.fork_for_test_with_node_id(Uuid::from_u128(3));
+		assert_eq!(queue_len(&inspect, ds.id()).await?, 0, "per-node queue emptied");
+		let txn = inspect.transaction(Read).await?;
+		let root = txn.scan_raw(EventQueuePrefix {}.range()?, NORMAL_BATCH_SIZE, 0, None).await?;
+		txn.cancel().await?;
+		assert_eq!(root.len(), 2, "moved to the root `!eq` queue");
+		for (_, bytes) in &root {
+			assert_eq!(bytes[0], 1, "encoded at revision 1 for older releases");
+			let decoded = <AsyncEventRecord as KVValue>::kv_decode_value(bytes, ())?;
+			assert_eq!(decoded.claim, None);
+		}
+		Ok(())
+	}
+
+	/// A live owner costs the sweep a step — the read of the first key under
+	/// its node and one of its row — but no fetch budget, so the walk is
+	/// bounded by a page of nodes as well: a pass steps over at most
+	/// [`EVENT_ADOPTION_PAGE_SIZE`] of them before it yields with its position,
+	/// and the departed node beyond the page is reached by the next pass rather
+	/// than every live owner being walked on every pass.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_walks_a_page_of_owners_per_pass() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// Two more live nodes than a page, each with a queued event of its
+		// own, then a departed node beyond them all.
+		let live = EVENT_ADOPTION_PAGE_SIZE + 2;
+		for n in 0..live as u128 {
+			let node = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000 + n));
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+		}
+		let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(9_000));
+		departed.insert_node().await?;
+		execute_all(&departed, &session, "CREATE person RETURN NONE;").await?;
+		archive_node(&departed, departed.id()).await?;
+
+		let first =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.items, 0, "a page of live owners holds nothing to adopt");
+		assert_eq!(first.progress, Progress::More, "the walk stopped at its page");
+		assert!(ds.adoption_rotation.lock().is_some(), "the rotation is kept for the next pass");
+		assert_eq!(queued_events(&ds, departed.id()).await?, 1, "not reached yet");
+
+		let second =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.items, 1, "the departed node beyond the page is reached");
+		assert_eq!(second.progress, Progress::Done, "and the rotation ends at the last node");
+		assert!(ds.adoption_rotation.lock().is_none());
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(queued_events(&ds, Uuid::from_u128(1_000)).await?, 1, "live queues are left");
+		Ok(())
+	}
+
+	/// A budget spent on fetches that ran nothing is not a backlog: as many
+	/// departed nodes as the budget has fetches, each with an entry this
+	/// binary cannot run, would have every pass run at once spend its budget
+	/// on the same entries. The sweep goes idle until its interval instead,
+	/// keeping its place in the rotation, and a pass that does run something
+	/// is followed at once.
+	#[test_log::test(tokio::test)]
+	async fn a_sweep_whose_budget_ran_nothing_goes_idle_until_its_interval() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		for n in 0..EVENT_PROCESSING_SLICE_BATCHES as u128 {
+			let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000 + n));
+			departed.insert_node().await?;
+			queue_undecodable_events(&departed, 1).await?;
+			archive_node(&departed, departed.id()).await?;
+		}
+
+		let pass =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items as usize, EVENT_PROCESSING_SLICE_BATCHES, "the budget was spent");
+		assert_eq!(pass.ran, 0, "on entries that could not be run");
+		assert_eq!(pass.progress, Progress::Done, "so a pass run at once would find no more");
+		assert!(ds.adoption_rotation.lock().is_some(), "the rotation is kept for the next pass");
+
+		// A departed node beyond them with an entry that runs: the next pass
+		// reaches it, and having run something, is followed at once.
+		let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(9_000));
+		departed.insert_node().await?;
+		execute_all(&departed, &session, "CREATE person RETURN NONE;").await?;
+		archive_node(&departed, departed.id()).await?;
+		let pass =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.ran, 1, "the entry ran");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(pass.progress, Progress::More, "and the pass is followed at once");
+		Ok(())
+	}
+
+	/// A budget spent on full batches that ran nothing is a backlog all the
+	/// same: the batches were full, so the queue holds entries beyond them,
+	/// and the lap keeps its place after them, so the pass run at once reads
+	/// on from there rather than the same entries again. It reaches the event
+	/// behind them, and the queue's end ends the lap, so the sweep goes idle.
+	#[test_log::test(tokio::test)]
+	async fn a_sweep_whose_budget_ran_nothing_past_full_batches_continues_after_them() -> Result<()>
+	{
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// A budget's worth of full batches this binary cannot run, one more
+		// such entry, then an event that runs, in a departed node's queue.
+		let budget = (EVENT_PROCESSING_SLICE_BATCHES * NORMAL_BATCH_SIZE as usize) as u64;
+		let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000));
+		departed.insert_node().await?;
+		queue_undecodable_events(&departed, budget + 1).await?;
+		execute_all(&departed, &session, "CREATE person RETURN NONE;").await?;
+		archive_node(&departed, departed.id()).await?;
+		let queue = EventQueue::Node(departed.id());
+
+		let first =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.items, budget, "the budget was spent on full batches");
+		assert_eq!(first.ran, 0, "none of which could be run");
+		assert_eq!(first.progress, Progress::More, "which the queue holds entries beyond");
+		assert!(ds.event_laps.lock().contains_key(&queue), "the lap keeps its place in the queue");
+		assert_eq!(logged_count(&ds, &session).await?, 0);
+
+		let second =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.items, 2, "the next pass read on from where the lap stopped");
+		assert_eq!(second.ran, 1, "and ran the event behind the entries it cannot run");
+		assert_eq!(logged_count(&ds, &session).await?, 1);
+		assert_eq!(second.progress, Progress::Done, "the queue's end ends the lap");
+		assert!(!ds.event_laps.lock().contains_key(&queue));
+		Ok(())
+	}
+
+	/// The local queue's lap belongs to the local drain: the sweep, which
+	/// steps over this node as any other live one, must leave it in place,
+	/// or a host interleaving the sweep between local slices would start
+	/// each slice from the head again and never reach the entries behind the
+	/// ones it cannot run. A lap left on another live node's queue is stale
+	/// and dropped.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_leaves_the_local_queues_lap_alone() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 1).await?;
+		let other = ds.fork_for_test_with_node_id(Uuid::from_u128(2));
+		other.insert_node().await?;
+		execute_all(&other, &session, "CREATE person RETURN NONE;").await?;
+		let lap = || EventLap {
+			after: None,
+			end: vec![0],
+			requeued: false,
+			queued: 0,
+		};
+		ds.event_laps.lock().insert(EventQueue::Node(ds.id()), lap());
+		ds.event_laps.lock().insert(EventQueue::Node(other.id()), lap());
+
+		let pass =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(pass.items, 0, "both queues belong to live nodes");
+		let laps = ds.event_laps.lock();
+		assert!(laps.contains_key(&EventQueue::Node(ds.id())), "the local lap is kept");
+		assert!(!laps.contains_key(&EventQueue::Node(other.id())), "the other node's is stale");
+		Ok(())
+	}
+
+	/// A rotation that finds nothing to adopt still ends: with more live owners
+	/// than a page, the first pass yields at its page and the next completes
+	/// the rotation and reports it done, so the sweep waits for its interval
+	/// rather than walking the cluster without end. The pass after that begins
+	/// a rotation of its own.
+	#[test_log::test(tokio::test)]
+	async fn a_page_only_rotation_goes_idle_at_its_end() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		for n in 0..(EVENT_ADOPTION_PAGE_SIZE + 1) as u128 {
+			let node = ds.fork_for_test_with_node_id(Uuid::from_u128(1_000 + n));
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+		}
+
+		let canceller = CancellationToken::new();
+		let adopt = || ds.event_processing_adopt(Duration::from_secs(1), &canceller);
+		assert_eq!(adopt().await?.progress, Progress::More, "a page walked, one node left");
+		assert_eq!(adopt().await?.progress, Progress::Done, "the rotation ends");
+		assert!(ds.adoption_rotation.lock().is_none());
+		assert_eq!(adopt().await?.progress, Progress::More, "the next rotation begins");
+		assert_eq!(logged_count(&ds, &session).await?, 0, "nothing was adopted");
+		Ok(())
+	}
+
+	/// A rotation begun after the queue a pass spent its budget in wraps from
+	/// the last node to the root and on through the first nodes, and a pass
+	/// stops walking once its budget is spent: the queues it has not reached
+	/// wait for the next pass, which begins after the queue it stopped in.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_resumes_after_the_queue_the_last_pass_stopped_in() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		queue_async_events(&ds, &session, 0).await?;
+		// Six departed nodes, one event each, in id order.
+		let ids: Vec<Uuid> = (10..16u128).map(Uuid::from_u128).collect();
+		for &id in &ids {
+			let node = ds.fork_for_test_with_node_id(id);
+			node.insert_node().await?;
+			execute_all(&node, &session, "CREATE person RETURN NONE;").await?;
+			archive_node(&node, node.id()).await?;
+		}
+		// The previous pass spent its budget in the third.
+		*ds.adoption_rotation.lock() = Some(AdoptionRotation::after(EventQueue::Node(ids[2]))?);
+
+		let first =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.items, EVENT_PROCESSING_SLICE_BATCHES as u64);
+		assert_eq!(first.progress, Progress::More);
+		// The three after it, the root, then the first from the head.
+		for &id in &[ids[3], ids[4], ids[5], ids[0]] {
+			assert_eq!(queued_events(&ds, id).await?, 0, "{id} was swept");
+		}
+		for &id in &[ids[1], ids[2]] {
+			assert_eq!(queued_events(&ds, id).await?, 1, "{id} was not reached");
+		}
+
+		// The next rotation begins after the first node, where the budget went.
+		let second =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.items, 2);
+		assert_eq!(second.progress, Progress::Done);
+		assert!(ds.adoption_rotation.lock().is_none(), "the rotation ended");
+		assert_eq!(logged_count(&ds, &session).await?, 6);
+		Ok(())
+	}
+
+	/// A queue batch bounds the entries a slice reads, not the folding they
+	/// call for: a scope can hold more adjacency keys than a slice should
+	/// fold. The slice runs its passes on the scope, keeps the scope's entry
+	/// and reports the backlog; the next slice reaches it again and folds the
+	/// rest.
+	#[tokio::test]
+	async fn graph_fold_slice_bounds_the_passes_on_one_scope() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::val::RecordId;
+
+		// Two keys per fold pass, and a scope of six.
+		let (ds, session) = new_index_compaction_test_ds_with("graph_fold_batch", "2").await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person;
+			 DEFINE TABLE likes TYPE RELATION;
+			 CREATE person:p0, person:p1, person:p2, person:p3, person:p4, person:p5, person:p6;
+			 RELATE person:p0->likes->person:p1;
+			 RELATE person:p0->likes->person:p2;
+			 RELATE person:p0->likes->person:p3;
+			 RELATE person:p0->likes->person:p4;
+			 RELATE person:p0->likes->person:p5;
+			 RELATE person:p0->likes->person:p6;",
+		)
+		.await?;
+		let vertex = RecordId::new("person".into(), "p0".to_string());
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 6);
+		{
+			let txn = ds.transaction(Write).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			let key = GraphFoldKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(&vertex.table),
+				id: Cow::Borrowed(&vertex.key),
+				dir: Dir::Out,
+				nid: ds.id(),
+				uid: Uuid::now_v7(),
+			};
+			txn.put_key(&key, &()).await?;
+			txn.commit().await?;
+		}
+
+		// Two passes per scope: the first slice folds four keys and keeps the
+		// scope's entry.
+		let (batches, errors, first) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(2),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(batches, 1, "the slice ends at the batch that kept entries");
+		assert_eq!(first.progress, Progress::More);
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 2, "two passes of two keys");
+		assert_eq!(fold_queue_keys(&ds).await?.len(), 1, "an unfinished scope keeps its entry");
+
+		// The next slice reaches the entry again and finishes the scope.
+		let (_, errors, second) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(2),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(second.progress, Progress::Done);
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 0, "the scope is folded");
+		assert!(fold_queue_keys(&ds).await?.is_empty(), "the queue is drained");
+		Ok(())
+	}
+
+	/// A batch of many scopes can outlast the graph fold lease. A drain that
+	/// finds another node took the lease after it read its batch folds no
+	/// further scope and deletes nothing of the batch: the scopes and their
+	/// entries are the holder's to drain, and two nodes must not fold the same
+	/// scopes at once.
+	#[tokio::test]
+	async fn a_graph_fold_that_loses_its_lease_leaves_its_batch_to_the_holder() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::val::RecordId;
+
+		let (ds, session) = new_index_compaction_test_ds_with("graph_fold_batch", "2").await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person;
+			 DEFINE TABLE likes TYPE RELATION;
+			 CREATE person:p0, person:p1, person:p2, person:p3;
+			 RELATE person:p0->likes->person:p2;
+			 RELATE person:p0->likes->person:p3;
+			 RELATE person:p1->likes->person:p2;
+			 RELATE person:p1->likes->person:p3;",
+		)
+		.await?;
+		let vertices = [
+			RecordId::new("person".into(), "p0".to_string()),
+			RecordId::new("person".into(), "p1".to_string()),
+		];
+		{
+			let txn = ds.transaction(Write).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			for vertex in &vertices {
+				let key = GraphFoldKey {
+					ns: db.namespace_id,
+					db: db.database_id,
+					tb: Cow::Borrowed(&vertex.table),
+					id: Cow::Borrowed(&vertex.key),
+					dir: Dir::Out,
+					nid: ds.id(),
+					uid: Uuid::now_v7(),
+				};
+				txn.put_key(&key, &()).await?;
+			}
+			txn.commit().await?;
+		}
+		for vertex in &vertices {
+			assert_eq!(pointer_keys(&ds, vertex).await?, 2, "{vertex:?} must hold fold debt");
+		}
+		let queued = fold_queue_keys(&ds).await?;
+		assert_eq!(queued.len(), 2);
+		// Another node takes the lease once the drain has read its batch.
+		let node_id = ds.id();
+		let hook_ds = Arc::clone(&ds);
+		BEFORE_FOLD_SCOPE.lock().unwrap().insert(
+			node_id,
+			Box::new(move || {
+				Box::pin(async move {
+					let lease = crate::catalog::TaskLease {
+						owner: Uuid::from_u128(2),
+						expiration: chrono::Utc::now() + chrono::Duration::seconds(120),
+					};
+					let key = crate::key::schema::TaskLeaseKey {
+						task_id: TaskLeaseType::GraphFold,
+					};
+					let txn = hook_ds.transaction(Write).await.expect("a write transaction");
+					txn.set_key(&key, &lease).await.expect("planting the lease");
+					txn.commit().await.expect("committing the lease");
+				})
+			}),
+		);
+
+		let (_, errors, pass) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+		)
+		.await?;
+		assert!(take_before_fold_scope(node_id).is_none(), "the hook must have run");
+		assert_eq!(errors, 0);
+		assert_eq!(pass.lease, TaskLeaseState::Elsewhere);
+		assert_eq!(pass.progress, Progress::Done);
+		for vertex in &vertices {
+			assert_eq!(pointer_keys(&ds, vertex).await?, 2, "{vertex:?} must be left unfolded");
+		}
+		assert_eq!(fold_queue_keys(&ds).await?, queued, "the batch's entries stay queued");
+		assert!(
+			ds.fold_cursor.lock().resume_at.is_none(),
+			"the rotation stays where the batch began"
+		);
+		Ok(())
+	}
+
+	/// A scope's continuation answers only for the queue entries that were
+	/// there when its passes began at the scope's start. A write to the scope
+	/// after a slice left its position can put a key before that position —
+	/// here a tombstone over an edge the slice packed — and queue an entry for
+	/// it. The slice that reaches the scope again must fold it from the start:
+	/// continuing would declare the scope folded with the tombstone unexamined,
+	/// and the cleanup would delete the entry that named it, leaving the
+	/// tombstone in the delta layer with nothing queued to fold it.
+	#[tokio::test]
+	async fn graph_fold_restarts_a_scope_whose_entry_was_queued_after_its_position() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::val::RecordId;
+
+		// Two keys per fold pass, and a scope of four edges in key order.
+		let (ds, session) = new_index_compaction_test_ds_with("graph_fold_batch", "2").await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person;
+			 DEFINE TABLE likes TYPE RELATION;
+			 CREATE person:p0, person:p1, person:p2, person:p3, person:p4;
+			 RELATE person:p0->likes:m0->person:p1;
+			 RELATE person:p0->likes:m1->person:p2;
+			 RELATE person:p0->likes:m2->person:p3;
+			 RELATE person:p0->likes:m3->person:p4;",
+		)
+		.await?;
+		let vertex = RecordId::new("person".into(), "p0".to_string());
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 4);
+		{
+			let txn = ds.transaction(Write).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			let key = GraphFoldKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(&vertex.table),
+				id: Cow::Borrowed(&vertex.key),
+				dir: Dir::Out,
+				nid: ds.id(),
+				uid: Uuid::now_v7(),
+			};
+			txn.put_key(&key, &()).await?;
+			txn.commit().await?;
+		}
+
+		// One pass per slice: the first packs the two earliest edges and
+		// leaves its position after the second.
+		let (_, errors, first) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(1),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(first.progress, Progress::More);
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 2, "the two earliest edges are packed");
+		assert_eq!(fold_queue_keys(&ds).await?.len(), 1, "an unfinished scope keeps its entry");
+
+		// Deleting a packed edge writes a tombstone at its pointer key, before
+		// the position, and queues an entry for each of its vertices.
+		execute_all(&ds, &session, "DELETE likes:m0;").await?;
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 3, "the tombstone joins the delta layer");
+		assert_eq!(fold_queue_keys(&ds).await?.len(), 3, "both vertices are queued");
+
+		// The slices that follow drain the queue, and the tombstone with it.
+		let mut slices = 0;
+		loop {
+			let (_, errors, pass) = Datastore::graph_fold_bounded(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+				Some(GRAPH_FOLD_SLICE_BATCHES),
+				Some(1),
+			)
+			.await?;
+			slices += 1;
+			assert_eq!(errors, 0, "slice {slices}");
+			if pass.progress == Progress::Done {
+				break;
+			}
+			assert!(slices < 10, "the drain must end");
+		}
+		assert!(fold_queue_keys(&ds).await?.is_empty(), "the queue is drained");
+		assert_eq!(
+			pointer_keys(&ds, &vertex).await?,
+			0,
+			"the tombstone is folded, not left behind"
+		);
+		assert!(ds.fold_cursor.lock().scans.is_empty(), "a drained scope keeps no position");
+		Ok(())
+	}
+
+	/// The graph-fold counterpart of
+	/// [`index_compaction_slice_leaves_a_batch_whose_cleanup_keeps_conflicting`]:
+	/// a batch whose queue cleanup keeps losing its commit is left where it is
+	/// once the cleanup's retries are spent, and the next slice deletes its
+	/// entry once the commit goes through.
+	#[tokio::test]
+	async fn graph_fold_slice_leaves_a_batch_whose_cleanup_keeps_conflicting() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::val::RecordId;
+
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person;
+			 DEFINE TABLE likes TYPE RELATION;
+			 CREATE person:p0, person:p1;
+			 RELATE person:p0->likes->person:p1;",
+		)
+		.await?;
+		let vertex = RecordId::new("person".into(), "p0".to_string());
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 1);
+		{
+			let txn = ds.transaction(Write).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			let key = GraphFoldKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(&vertex.table),
+				id: Cow::Borrowed(&vertex.key),
+				dir: Dir::Out,
+				nid: ds.id(),
+				uid: Uuid::now_v7(),
+			};
+			txn.put_key(&key, &()).await?;
+			txn.commit().await?;
+		}
+		let site = RetryableConflictSite::GraphFoldQueueCleanup;
+		let node_id = ds.id();
+		// More conflicts than any slice can consume, so no cleanup commits.
+		let guard = inject_retryable_conflicts(site, node_id, usize::MAX);
+
+		let (batches, errors, first) = tokio::time::timeout(
+			Duration::from_secs(30),
+			Datastore::graph_fold_bounded(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+				Some(GRAPH_FOLD_SLICE_BATCHES),
+				Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+			),
+		)
+		.await
+		.expect("a slice whose cleanup keeps conflicting must return")?;
+		assert_eq!(errors, 0, "the scope folded; only the cleanup was lost");
+		assert_eq!(batches, 1, "the slice ends at the batch that kept entries");
+		assert_eq!(first.progress, Progress::More);
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 0, "the scope is folded");
+		assert_eq!(
+			retryable_conflict_count(site, node_id),
+			usize::MAX - (QUEUE_CLEANUP_CONFLICT_RETRIES + 1),
+			"the cleanup is attempted once and retried its bound"
+		);
+		assert_eq!(fold_queue_keys(&ds).await?.len(), 1, "the batch keeps its entry");
+
+		drop(guard);
+		let (_, errors, second) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(GRAPH_FOLD_SLICE_PASSES_PER_SCOPE),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(second.progress, Progress::Done);
+		assert!(fold_queue_keys(&ds).await?.is_empty(), "the queue is drained");
+		Ok(())
+	}
+
+	/// A pass charges the keys it cannot pack as well as those it folds, and
+	/// the slices continue a scope where its last pass stopped: a scope whose
+	/// legacy keys outnumber a slice's budget is crossed a slice at a time,
+	/// and the packable key behind them is folded by the slice whose budget
+	/// reaches it. Slices that each started the scope over would examine the
+	/// same legacy keys every time and never reach it.
+	#[tokio::test]
+	async fn graph_fold_slices_continue_a_scope_past_the_keys_they_cannot_pack() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::key::schema::GraphKey;
+		use crate::val::RecordId;
+
+		// Two keys per fold pass, one pass per slice.
+		let (ds, session) = new_index_compaction_test_ds_with("graph_fold_batch", "2").await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE person;
+			 DEFINE TABLE likes TYPE RELATION;
+			 CREATE person:p0, person:p1;
+			 RELATE person:p0->likes:z->person:p1;",
+		)
+		.await?;
+		let vertex = RecordId::new("person".into(), "p0".to_string());
+		let (ns, db) = {
+			let txn = ds.transaction(Read).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			let ids = (db.namespace_id, db.database_id);
+			txn.cancel().await?;
+			ids
+		};
+		// Five legacy-format keys, which cannot be packed, sorting before the
+		// packable edge, and the scope's queue entry.
+		{
+			let txn = ds.transaction(Write).await?;
+			for i in 0..5 {
+				let edge = RecordId::new("likes".into(), format!("a{i}"));
+				let key = GraphKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(&vertex.table),
+					id: Cow::Borrowed(&vertex.key),
+					dir: Dir::Out,
+					foreign_table: Cow::Borrowed(&edge.table),
+					foreign_key: Cow::Borrowed(&edge.key),
+				};
+				txn.set_key(&key, &()).await?;
+			}
+			let key = GraphFoldKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&vertex.table),
+				id: Cow::Borrowed(&vertex.key),
+				dir: Dir::Out,
+				nid: ds.id(),
+				uid: Uuid::now_v7(),
+			};
+			txn.put_key(&key, &()).await?;
+			txn.commit().await?;
+		}
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 6);
+
+		// Two slices of one pass each examine two legacy keys apiece and
+		// fold nothing; each keeps the entry and reports the backlog.
+		for slice in 1..=2 {
+			let (_, errors, pass) = Datastore::graph_fold_bounded(
+				Arc::clone(&ds),
+				Duration::from_secs(60),
+				CancellationToken::new(),
+				Some(GRAPH_FOLD_SLICE_BATCHES),
+				Some(1),
+			)
+			.await?;
+			assert_eq!(errors, 0, "slice {slice}");
+			assert_eq!(pass.progress, Progress::More, "slice {slice}");
+			assert_eq!(pointer_keys(&ds, &vertex).await?, 6, "slice {slice} packs nothing");
+			assert_eq!(fold_queue_keys(&ds).await?.len(), 1, "slice {slice} keeps the entry");
+		}
+		// The third slice's pass reaches the last legacy key and the edge.
+		let (_, errors, third) = Datastore::graph_fold_bounded(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+			Some(GRAPH_FOLD_SLICE_BATCHES),
+			Some(1),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(third.progress, Progress::Done);
+		assert_eq!(pointer_keys(&ds, &vertex).await?, 5, "the edge is packed; legacy keys stay");
+		assert!(fold_queue_keys(&ds).await?.is_empty(), "the queue is drained");
+		assert!(ds.fold_cursor.lock().scans.is_empty(), "a drained scope keeps no position");
+		Ok(())
+	}
+
+	/// A slice can run out of budget with its window past the last queue
+	/// entry. The next call resumes there and reads nothing, and must wrap to
+	/// the head rather than end: the entries before the cursor — retained by
+	/// failed folds, or queued since — are its work, and an end-of-range cursor
+	/// left in place would hide them from every later call.
+	#[test_log::test(tokio::test)]
+	async fn graph_fold_resumed_past_the_last_entry_wraps_to_the_head() -> Result<()> {
+		use crate::expr::Dir;
+		use crate::val::RecordId;
+
+		let (ds, _session) = new_index_compaction_test_ds().await?;
+		// Entries for a namespace nothing has defined: they leave nothing to
+		// fold, so the drain's only work is reaching them.
+		{
+			let txn = ds.transaction(Write).await?;
+			for n in 0..3 {
+				let vertex = RecordId::new("person".into(), format!("p{n}"));
+				let key = GraphFoldKey {
+					ns: NamespaceId(999),
+					db: DatabaseId(999),
+					tb: Cow::Borrowed(&vertex.table),
+					id: Cow::Borrowed(&vertex.key),
+					dir: Dir::Out,
+					nid: ds.id(),
+					uid: Uuid::now_v7(),
+				};
+				txn.put_key(&key, &()).await?;
+			}
+			txn.commit().await?;
+		}
+		let keys = fold_queue_keys(&ds).await?;
+		assert_eq!(keys.len(), 3);
+		// The previous slice folded scopes and stopped after the last entry.
+		*ds.fold_cursor.lock() = FoldCursor {
+			resume_at: keys.last().cloned(),
+			progressed: true,
+			scans: HashMap::new(),
+		};
+
+		let pass = Datastore::graph_fold_slice(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(pass.items, 3, "the entries before the cursor must be reached");
+		assert!(fold_queue_keys(&ds).await?.is_empty(), "the queue must be drained");
+		assert_eq!(
+			*ds.fold_cursor.lock(),
+			FoldCursor::default(),
+			"a drained queue leaves no cursor"
+		);
+		Ok(())
+	}
+
+	/// A rotation over scopes that all fail can span several slices, each
+	/// ending at its budget with a backlog. The slice that reaches the end of
+	/// the range must know the whole rotation made no progress — not only its
+	/// own share of it — and yield with the cursor cleared, or the drain would
+	/// wrap and report a backlog for as long as the scopes keep failing.
+	#[test_log::test(tokio::test)]
+	async fn graph_fold_rotation_without_progress_yields_at_the_range_end() -> Result<()> {
+		use surrealdb_datastore::values::graph::AdjacencyValue;
+
+		use crate::expr::Dir;
+		use crate::key::schema::GraphPointerKey;
+		use crate::val::RecordId;
+
+		let (ds, _session) = new_index_compaction_test_ds().await?;
+		let (ns, db) = {
+			let txn = ds.transaction(Read).await?;
+			let db = txn.get_db_by_name("test", "test", None).await?.expect("the test database");
+			txn.cancel().await?;
+			(db.namespace_id, db.database_id)
+		};
+		// Three scopes whose folds fail: a pointer key under a table nothing
+		// has defined, and a queue entry naming its scope, so the fold reads
+		// the catalog for the missing vertex table and errors.
+		{
+			let txn = ds.transaction(Write).await?;
+			for n in 0..3 {
+				let ghost = RecordId::new("ghost".into(), format!("g{n}"));
+				let edge = RecordId::new("likes".into(), format!("e{n}"));
+				let target = RecordId::new("person".into(), format!("p{n}"));
+				let pointer = GraphPointerKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(&ghost.table),
+					id: Cow::Borrowed(&ghost.key),
+					dir: Dir::Out,
+					foreign_table: Cow::Borrowed(&edge.table),
+					foreign_key: Cow::Borrowed(&edge.key),
+					target_table: Cow::Borrowed(&target.table),
+					target_key: Cow::Borrowed(&target.key),
+				};
+				txn.set_key(&pointer, &AdjacencyValue::live()).await?;
+				let queued = GraphFoldKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(&ghost.table),
+					id: Cow::Borrowed(&ghost.key),
+					dir: Dir::Out,
+					nid: ds.id(),
+					uid: Uuid::now_v7(),
+				};
+				txn.put_key(&queued, &()).await?;
+			}
+			txn.commit().await?;
+		}
+		let keys = fold_queue_keys(&ds).await?;
+		assert_eq!(keys.len(), 3);
+		// The previous slice of this rotation failed the first scope and
+		// stopped at its budget with nothing to show for it.
+		*ds.fold_cursor.lock() = FoldCursor {
+			resume_at: Some(keys[0].clone()),
+			progressed: false,
+			scans: HashMap::new(),
+		};
+
+		let pass = Datastore::graph_fold_slice(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(pass.items, 2, "only the entries after the cursor are read; no wrap");
+		assert_eq!(pass.progress, Progress::Done, "a failed rotation is no backlog");
+		assert_eq!(fold_queue_keys(&ds).await?.len(), 3, "failed scopes keep their entries");
+		assert_eq!(
+			*ds.fold_cursor.lock(),
+			FoldCursor::default(),
+			"the next interval starts a fresh rotation from the head"
+		);
+		Ok(())
+	}
+
+	/// A queue that refills at least as fast as one pass drains it must not pin
+	/// the sweep: the pass after one that ran out of budget in the root queue
+	/// starts at the next queue, so a departed node's events still run.
+	#[test_log::test(tokio::test)]
+	async fn event_adoption_rotates_past_a_queue_that_exhausts_its_budget() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		ds.insert_node().await?;
+		// Two passes' worth of full batches in the root queue, and one more.
+		let root = 2 * EVENT_PROCESSING_SLICE_BATCHES * NORMAL_BATCH_SIZE as usize + 1;
+		queue_async_events(&ds, &session, root).await?;
+		while relocate_queue_to_root(&ds).await? > 0 {}
+		let departed = ds.fork_for_test_with_node_id(Uuid::from_u128(10));
+		departed.insert_node().await?;
+		execute_all(&departed, &session, "CREATE person RETURN NONE;").await?;
+		archive_node(&departed, departed.id()).await?;
+
+		let first =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(first.progress, Progress::More, "the root queue outlasts the budget");
+		assert_eq!(
+			queued_events(&ds, departed.id()).await?,
+			1,
+			"the first pass stayed in the root"
+		);
+
+		let second =
+			ds.event_processing_adopt(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(second.progress, Progress::More, "the root queue is still full");
+		assert_eq!(queued_events(&ds, departed.id()).await?, 0, "the second pass moved on");
+		Ok(())
+	}
+
+	/// A host's schedule owns this datastore's claim on the process metrics
+	/// refresh once the refresh has run under it. Shutdown drops the schedule
+	/// once the slice in flight has ended, which releases the claim to any
+	/// other datastore in the process, and a slice driven after that reports
+	/// nothing scheduled rather than building the schedule again.
+	#[test_log::test(tokio::test)]
+	async fn shutdown_drops_a_hosts_schedule_and_its_metrics_claim() -> Result<()> {
+		let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+		ds.check_version().await?;
+		let first = ds.run_maintenance_slice().await?;
+		assert_eq!(first.job, Some(crate::kvs::tasks::Job::SystemMetricsRefresh));
+		assert!(ds.host_maintenance.lock().await.is_some(), "built on the first slice");
+
+		ds.shutdown().await?;
+		assert!(ds.host_maintenance.lock().await.is_none(), "dropped, and its claim with it");
+
+		let after = ds.run_maintenance_slice().await?;
+		assert_eq!(after.job, None);
+		assert_eq!(after.next_due, None, "nothing is scheduled after shutdown");
+		assert!(ds.host_maintenance.lock().await.is_none(), "and it is not built again");
+		Ok(())
+	}
+
+	/// A slice that shutdown begins during drops the schedule itself when its
+	/// job returns, whether or not shutdown was still waiting for it, so the
+	/// claim the schedule's runner holds is released with the slice rather
+	/// than with the datastore, and the host is told nothing is scheduled.
+	#[test_log::test(tokio::test)]
+	async fn a_slice_shutdown_begins_during_drops_the_schedule_when_it_returns() -> Result<()> {
+		let opts = crate::options::EngineOptions::default()
+			.with_event_processing_interval(Duration::from_millis(1));
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_engine_options(opts)
+			.build_with_path("memory")
+			.await?;
+		ds.check_version().await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE NAMESPACE test; DEFINE DATABASE test;
+			 DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE EVENT log ON person ASYNC THEN {
+			 	sleep(500ms);
+			 	CREATE logged SET who = $after.id;
+			 };
+			 CREATE person:1 RETURN NONE;",
+		)
+		.await?;
+		// The metrics refresh is due at registration; the event drain is due
+		// next, and its slice runs the sleeping event.
+		let first = ds.run_maintenance_slice().await?;
+		assert_eq!(first.job, Some(crate::kvs::tasks::Job::SystemMetricsRefresh));
+		tokio::time::sleep(Duration::from_millis(5)).await;
+
+		// Shutdown begins, without waiting, while the event is running.
+		let (slice, ()) = tokio::join!(ds.run_maintenance_slice(), async {
+			tokio::time::sleep(Duration::from_millis(100)).await;
+			ds.shutdown.cancel();
+		});
+		let slice = slice?;
+		assert_eq!(slice.job, Some(crate::kvs::tasks::Job::EventProcessing));
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event ran to its end");
+		assert_eq!(slice.next_due, None, "nothing is scheduled after shutdown");
+		assert!(ds.host_maintenance.lock().await.is_none(), "the schedule went with the slice");
 		Ok(())
 	}
 

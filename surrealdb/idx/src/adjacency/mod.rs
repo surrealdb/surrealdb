@@ -24,7 +24,7 @@ mod tests;
 use anyhow::Result;
 use surrealdb_datastore::Transaction;
 
-pub use self::fold::{FoldOutcome, fold_scope};
+pub use self::fold::{FoldOutcome, fold_scope, fold_scope_from};
 pub use self::merge::{
 	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VisitFlow, scope_degree,
 };

@@ -753,10 +753,6 @@ fn test_a_minus_applied_to_the_magnitude_of_the_int8_minimum_is_that_integer() {
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 	let two_pow_63 = 2f64.powi(63);
 	for (sql, operator, operand) in [
@@ -767,25 +763,21 @@ fn test_a_minus_applied_to_anything_else_is_not_folded_into_the_int8_minimum() {
 		("+9223372036854775808", UnaryOperator::Plus, Literal::Float(two_pow_63)),
 		("- -9223372036854775808", UnaryOperator::Minus, Literal::Integer(i64::MIN)),
 	] {
-		match parse_expr(sql).expect(sql) {
-			Expr::UnaryOp {
-				op,
-				expr,
-				..
-			} => {
-				assert_eq!(op, operator, "{sql}");
-				assert_eq!(*expr, Expr::Literal(operand, expr.span()), "{sql}");
-			}
-			other => panic!("{sql}: expected a negation, got {other:?}"),
-		}
+		let negation = parse_expr(sql).expect(sql);
+		let Expr::UnaryOp {
+			op,
+			expr,
+			..
+		} = negation
+		else {
+			panic!("{sql}: expected a negation, got {negation:?}")
+		};
+		assert_eq!(op, operator, "{sql}");
+		assert_eq!(*expr, Expr::Literal(operand, expr.span()), "{sql}");
 	}
 }
 
 #[test]
-#[expect(
-	clippy::wildcard_enum_match_arm,
-	reason = "a test asserts one shape and fails on any other"
-)]
 fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 	for (sql, operator) in [
 		("x = -9223372036854775808", BinaryOperator::Equal),
@@ -798,43 +790,38 @@ fn test_the_int8_minimum_is_the_operand_of_a_comparison_and_of_arithmetic() {
 		("x - -9223372036854775808", BinaryOperator::Sub),
 		("x * -9223372036854775808", BinaryOperator::Mul),
 	] {
-		match parse_expr(sql).expect(sql) {
-			Expr::BinaryOp {
-				op,
-				right,
-				..
-			} => {
-				assert_eq!(op, operator, "{sql}");
-				assert_eq!(
-					*right,
-					Expr::Literal(Literal::Integer(i64::MIN), right.span()),
-					"{sql}"
-				);
-			}
-			other => panic!("{sql}: expected a binary operator, got {other:?}"),
-		}
-	}
-	match parse_expr("-9223372036854775808 DIV -1").expect("a quotient") {
-		Expr::BinaryOp {
-			left,
-			op: BinaryOperator::IntDiv,
+		let expr = parse_expr(sql).expect(sql);
+		let Expr::BinaryOp {
+			op,
+			right,
 			..
-		} => assert_eq!(*left, Expr::Literal(Literal::Integer(i64::MIN), left.span())),
-		other => panic!("expected a quotient, got {other:?}"),
+		} = expr
+		else {
+			panic!("{sql}: expected a binary operator, got {expr:?}")
+		};
+		assert_eq!(op, operator, "{sql}");
+		assert_eq!(*right, Expr::Literal(Literal::Integer(i64::MIN), right.span()), "{sql}");
 	}
+	let quotient = parse_expr("-9223372036854775808 DIV -1").expect("a quotient");
+	let Expr::BinaryOp {
+		left,
+		op: BinaryOperator::IntDiv,
+		..
+	} = quotient
+	else {
+		panic!("expected a quotient, got {quotient:?}")
+	};
+	assert_eq!(*left, Expr::Literal(Literal::Integer(i64::MIN), left.span()));
 }
 
 #[test]
 fn test_parse_qualified_wildcard_and_a_column_named_star() {
-	#[expect(
-		clippy::wildcard_enum_match_arm,
-		reason = "a test asserts one shape and fails on any other"
-	)]
 	fn projection(sql: &str) -> Vec<SelectItem> {
-		match parse_statement(sql).expect("parse") {
-			Statement::Select(select) => select.projection,
-			other => panic!("expected SELECT, got {other:?}"),
-		}
+		let statement = parse_statement(sql).expect("parse");
+		let Statement::Select(select) = statement else {
+			panic!("expected SELECT, got {statement:?}")
+		};
+		select.projection
 	}
 
 	let items = projection("SELECT t.*, u.name FROM t JOIN u");

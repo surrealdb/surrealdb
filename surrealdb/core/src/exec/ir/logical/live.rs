@@ -61,6 +61,8 @@ pub(crate) fn plan_live<'e>(
 		auth: None,
 		session: None,
 		vars: BTreeMap::new(),
+		// Set by the registration, inside its transaction.
+		watermark: 0,
 		query: crate::catalog::SubscriptionQuery::Compiled(crate::catalog::CompiledSubscription {
 			fields: query_fields,
 			what: statement.what.clone(),

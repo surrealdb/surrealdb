@@ -37,10 +37,12 @@ use crate::key::schema::{
 	NsRoot, ReclaimKey, ReclaimPrefix, ReclaimTbPrefix,
 };
 use crate::key::{AnyRange, KVKeyDecode, KVSubspace, Key, RawRange};
+use crate::kvs::tasks::{Pass, Progress};
 use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 use crate::kvs::tx::DocIdsReclaimClaim;
 use crate::kvs::{
-	Datastore, RECLAIM_BATCH_SIZE, TransactionBuilderFactory, TransactionBuilderParts,
+	Datastore, RECLAIM_BATCH_SIZE, RECLAIM_PASS_KEY_BUDGET, RECLAIM_PASS_WALK_BATCHES,
+	TransactionBuilderFactory, TransactionBuilderParts,
 };
 use crate::observe::ExecutionObserver;
 
@@ -2561,4 +2563,101 @@ async fn the_budget_goes_to_the_longest_waiting_entry() {
 		[0, 0, 1],
 		"the budget must go to the oldest observation, not the lowest key: {deleted:?}"
 	);
+}
+
+/// Queue one database-reclaim entry per id in `dbs`, none yet observed and each
+/// naming an empty prefix, in one transaction.
+async fn queue_database_entries(ds: &Datastore, dbs: std::ops::RangeInclusive<u32>) {
+	let tx = ds.transaction(Write).await.unwrap();
+	for db in dbs {
+		let rc = ReclaimKey::database(NamespaceId(1), DatabaseId(db), false, Uuid::now_v7());
+		tx.set_key(
+			&rc,
+			&ReclaimState {
+				observed_ms: 0,
+				cursor: None,
+			},
+		)
+		.await
+		.unwrap();
+	}
+	tx.commit().await.unwrap();
+}
+
+/// One reclaim pass with the full key budget: the batches it walked, and what
+/// it reported.
+async fn walk_pass(ds: &Arc<Datastore>, grace: Duration) -> (usize, Pass) {
+	let (batches, errors, pass) = Datastore::reclaim_tombstones_with_budget(
+		Arc::clone(ds),
+		Duration::from_secs(1),
+		grace,
+		RECLAIM_PASS_KEY_BUDGET,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(errors, 0);
+	(batches, pass)
+}
+
+/// How many of `observed` are stamped.
+fn stamped(observed: &[u64]) -> usize {
+	observed.iter().filter(|&&ms| ms != 0).count()
+}
+
+/// A pass walks at most `RECLAIM_PASS_WALK_BATCHES` batches of the queue, and
+/// the scan it continues ends at the last entry there was when it began.
+///
+/// The walk reads every entry it passes and stamps or ages it, which is bounded
+/// by the number of pending removals rather than by the key budget, so a queue
+/// that has grown long would otherwise be read and stamped whole in one pass, in
+/// a slice the sweep's other jobs and shutdown wait on. A pass that stops with
+/// entries still to walk keeps its position and reports `More`, so the scan
+/// continues across passes; it ends at the entry that was last when it began, so
+/// entries queued past that while it runs are the next scan's and a scan ends
+/// however fast removals are queued.
+#[tokio::test]
+async fn the_walk_is_paged_across_passes() {
+	let ds = mem_ds().await;
+	let grace = Duration::from_secs(600);
+	let batch = RECLAIM_BATCH_SIZE as usize;
+	let slice = RECLAIM_PASS_WALK_BATCHES * batch;
+
+	// One entry more than a pass walks, none yet observed.
+	queue_database_entries(&ds, 1..=(slice as u32 + 1)).await;
+	let (batches, first) = walk_pass(&ds, grace).await;
+	assert_eq!(first.progress, Progress::More, "the walk stopped with an entry still to walk");
+	assert_eq!(batches, RECLAIM_PASS_WALK_BATCHES);
+	assert_eq!(
+		stamped(&queue_observations(&ds).await),
+		slice,
+		"the pass stamps what it walked, and no more"
+	);
+
+	// More than a pass walks, queued past the end of the scan while it is
+	// stopped.
+	let queued = slice + batch;
+	let from = slice as u32 + 2;
+	queue_database_entries(&ds, from..=(from + queued as u32 - 1)).await;
+	let (batches, second) = walk_pass(&ds, grace).await;
+	assert_eq!(second.progress, Progress::Done, "the scan ends at the batch that reaches its end");
+	assert_eq!(batches, 1);
+	assert_eq!(
+		stamped(&queue_observations(&ds).await),
+		slice + batch,
+		"having stamped that batch, and no more"
+	);
+
+	// The next scan begins at the head, over everything queued: two passes of
+	// entries already stamped, then the batch that reaches its end.
+	let (_, third) = walk_pass(&ds, grace).await;
+	assert_eq!(third.progress, Progress::More);
+	let (_, fourth) = walk_pass(&ds, grace).await;
+	assert_eq!(fourth.progress, Progress::More);
+	let (batches, fifth) = walk_pass(&ds, grace).await;
+	assert_eq!(fifth.progress, Progress::Done);
+	assert_eq!(batches, 2);
+	let total = slice + 1 + queued;
+	assert_eq!(stamped(&queue_observations(&ds).await), total, "every entry is stamped");
+	assert_eq!(reclaim_queue_len(&ds).await, total, "none within the grace is retired");
 }

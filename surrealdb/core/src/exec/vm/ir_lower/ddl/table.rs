@@ -274,10 +274,9 @@ impl Ddl<'_, '_> {
 				tb: name_reg,
 				definition,
 			});
-			let fence = self.object(&[("ns", ns_op), ("db", db_op)])?;
-			self.store(StoreInstr::Increment {
-				route: RouteId::named("ChangefeedFenceKey"),
-				key: fence,
+			self.store(StoreInstr::BumpChangefeedFence {
+				ns,
+				db,
 			});
 		}
 
@@ -791,10 +790,9 @@ impl Ddl<'_, '_> {
 		});
 		self.stamp(ns, db, tb)?;
 		if changefeed_set {
-			let fence = self.object(&[("ns", ns_op), ("db", db_op)])?;
-			self.store(StoreInstr::Increment {
-				route: RouteId::named("ChangefeedFenceKey"),
-				key: fence,
+			self.store(StoreInstr::BumpChangefeedFence {
+				ns,
+				db,
 			});
 		}
 		// A cache built under one cap regime is not trusted under another.

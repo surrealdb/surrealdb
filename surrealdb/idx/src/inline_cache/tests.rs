@@ -294,8 +294,7 @@ async fn backfill_reads_blocks_and_subtracts_tombstones() {
 	}
 	// Fold the scope into packed blocks.
 	let env = store.env(Write).await;
-	let outcome =
-		fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex(), Dir::Out, 1024).await.unwrap();
+	let outcome = fold_scope(&env, NS, DB, &vertex(), Dir::Out, 1024).await.unwrap();
 	env.tx().commit().await.unwrap();
 	assert_eq!(outcome.folded, 3);
 

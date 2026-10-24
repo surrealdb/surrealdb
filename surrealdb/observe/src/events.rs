@@ -985,6 +985,73 @@ pub struct HttpRequestEvent {
 	pub ctx: HttpRequestEventCtx,
 }
 
+// --- TaskPassEvent ---
+
+/// The standing of a background job's pass with respect to the cluster-wide
+/// lease for that job.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum TaskLeaseState {
+	/// The job needs no lease: it works on state only this node owns.
+	NotLeased,
+	/// This node held the lease for the pass.
+	Held,
+	/// Another node held the lease, so the pass did no work.
+	Elsewhere,
+	/// The pass failed on the lease check itself, before it established its
+	/// standing or after it lost track of it, so the failure is neither the
+	/// holder's nor another node's.
+	Unknown,
+}
+
+impl TaskLeaseState {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::NotLeased => "none",
+			Self::Held => "held",
+			Self::Elsewhere => "elsewhere",
+			Self::Unknown => "unknown",
+		}
+	}
+}
+
+/// Safe portion of a [`TaskPassEvent`]. `job` is one of a fixed set of
+/// engine-defined names; every other field is a bounded enum or a scalar that
+/// counts or times engine work. Nothing here derives from user data.
+#[derive(Clone, Copy, Debug)]
+pub struct TaskPassEventSafe {
+	/// The job that ran, by its engine-defined name.
+	pub job: &'static str,
+	/// Whether the pass completed, failed, or was cancelled.
+	pub outcome: Outcome,
+	/// Wall-clock time the pass took.
+	pub duration: Duration,
+	/// Queue entries or work units the pass handled.
+	pub items: u64,
+	/// Age of the oldest queued entry when the pass started, for a job that
+	/// drains a queue and found it non-empty. This is the job's lag: how long
+	/// the entry at the head of the queue has waited.
+	pub oldest_age: Option<Duration>,
+	/// The pass's standing with respect to the job's lease.
+	pub lease: TaskLeaseState,
+	/// Whether the pass stopped with work still pending — at its budget rather
+	/// than at an empty queue, or by failing before it reached one.
+	pub backlog: bool,
+}
+
+/// Contextual portion of a [`TaskPassEvent`]. Background passes run below
+/// the session layer, so no tenant identity is attached.
+#[derive(Clone, Debug, Default)]
+pub struct TaskPassEventCtx {}
+
+/// Emitted once per pass of a background maintenance job. See
+/// [`ExecutionObserver::on_task_pass`](super::observer::ExecutionObserver::on_task_pass).
+#[derive(Clone, Debug)]
+pub struct TaskPassEvent {
+	pub safe: TaskPassEventSafe,
+	pub ctx: TaskPassEventCtx,
+}
+
 #[cfg(test)]
 mod tests {
 	use std::sync::Arc;

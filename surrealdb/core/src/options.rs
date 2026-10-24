@@ -14,6 +14,17 @@ pub struct EngineOptions {
 	pub node_membership_cleanup_interval: Duration,
 	/// Interval for garbage collecting expired changefeed data
 	pub changefeed_gc_interval: Duration,
+	/// Interval for garbage collecting live-query events older than the
+	/// datastore's `live_query_retention` from the dedicated event keyspace
+	/// the Router engine captures into.
+	///
+	/// Scheduled independently of `changefeed_gc_interval`, so the retention
+	/// window holds whether or not changefeed collection runs. The job runs
+	/// whichever live-query engine is configured, so events captured before a
+	/// switch of engine still age out. Zero disables the job.
+	///
+	/// Default: 30 seconds
+	pub live_query_gc_interval: Duration,
 	/// Interval for running the index compaction process
 	///
 	/// The index compaction thread runs at this interval to process indexes
@@ -145,6 +156,13 @@ pub struct EngineOptions {
 	///
 	/// Default: 30 seconds
 	pub system_metrics_refresh_interval: Duration,
+	/// How often this node releases the writer leases it no longer
+	/// writes under (`Datastore::release_idle_writer_leases`). A lease
+	/// is only ever held on a store this datastore is not the sole writer of, so
+	/// elsewhere the job finds nothing to do. Zero disables the job.
+	///
+	/// Default: 5 seconds
+	pub diskann_writer_lease_release_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -154,6 +172,7 @@ impl Default for EngineOptions {
 			node_membership_check_interval: Duration::from_secs(15),
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
+			live_query_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
 			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
@@ -167,6 +186,7 @@ impl Default for EngineOptions {
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
 			rpc_session_gc_interval: Duration::from_secs(60 * 60),
 			system_metrics_refresh_interval: Duration::from_secs(30),
+			diskann_writer_lease_release_interval: Duration::from_secs(5),
 		}
 	}
 }
@@ -186,6 +206,12 @@ impl EngineOptions {
 	}
 	pub fn with_changefeed_gc_interval(mut self, interval: Duration) -> Self {
 		self.changefeed_gc_interval = interval;
+		self
+	}
+
+	/// Set the live-query event garbage collection interval
+	pub fn with_live_query_gc_interval(mut self, interval: Duration) -> Self {
+		self.live_query_gc_interval = interval;
 		self
 	}
 
@@ -253,6 +279,11 @@ impl EngineOptions {
 
 	pub fn with_system_metrics_refresh_interval(mut self, interval: Duration) -> Self {
 		self.system_metrics_refresh_interval = interval;
+		self
+	}
+
+	pub fn with_diskann_writer_lease_release_interval(mut self, interval: Duration) -> Self {
+		self.diskann_writer_lease_release_interval = interval;
 		self
 	}
 }

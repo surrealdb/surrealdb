@@ -364,7 +364,7 @@ pub(crate) fn has_record_observers(ctx: &WriteCtx) -> bool {
 		return false;
 	}
 	!ctx.events.is_empty()
-		|| !ctx.lives.is_empty()
+		|| ctx.live_observed
 		|| ctx.table.changefeed.is_some()
 		|| ctx.db.changefeed.is_some()
 		|| ctx.views_observe

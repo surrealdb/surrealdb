@@ -73,6 +73,21 @@ mod datastore {
 		txn.commit().await.unwrap();
 	}
 
+	/// A datastore is settled exactly when `run` would find nothing to do:
+	/// not before it is stamped, and not once its stamp is gone.
+	#[tokio::test]
+	async fn settled_is_what_run_would_find_nothing_to_do_for() {
+		let ds = mem().await;
+		assert!(!settled(&ds).await.unwrap(), "unstamped, so it owes the stamp");
+		ds.check_version().await.unwrap();
+		assert!(settled(&ds).await.unwrap(), "stamped, with the ledger full");
+
+		let txn = ds.transaction(TransactionType::Write).await.unwrap();
+		txn.del_key(&StorageVersionKey {}).await.unwrap();
+		txn.commit().await.unwrap();
+		assert!(!settled(&ds).await.unwrap(), "the stamp is owed again");
+	}
+
 	/// Puts the store at the legacy feature level, which records no level, as
 	/// a store upgraded from a release without feature levels stays until it is
 	/// raised.

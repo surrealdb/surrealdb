@@ -1454,10 +1454,17 @@ pub(crate) enum StoreInstr {
 	SessionNs {
 		dst: Reg,
 	},
-	/// Add one to the counter at the key, wrapping; an absent counter is 0.
-	Increment {
-		route: RouteId,
-		key: Reg,
+	/// Move the changefeed-retention fence of database `db` of namespace `ns`
+	/// to a fresh random value, reading nothing. Every statement that writes a
+	/// changefeed retention emits this in the same transaction, so a
+	/// collection page armed against the fence cannot commit, and a page that
+	/// discovered the retention before the write can tell it has landed. The
+	/// value is a nonce rather than a count so that two such statements from
+	/// one snapshot leave two values; see
+	/// `Transaction::bump_changefeed_retention_fence`, which makes the write.
+	BumpChangefeedFence {
+		ns: Reg,
+		db: Reg,
 	},
 	/// Evict every definition the datastore has cached.
 	ClearDatastoreCache,

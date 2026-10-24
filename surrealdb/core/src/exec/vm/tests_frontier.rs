@@ -806,18 +806,9 @@ async fn run_folded(windowed: bool, setup: &str, sql: &str) -> Run {
 				let mut env = ds.setup_ctx().unwrap();
 				env.set_transaction(Arc::clone(&txn));
 				let env = env.freeze();
-				let outcome = fold_scope(
-					&env,
-					db.namespace_id,
-					db.database_id,
-					"test",
-					"test",
-					&rid,
-					dir,
-					1024,
-				)
-				.await
-				.unwrap();
+				let outcome = fold_scope(&env, db.namespace_id, db.database_id, &rid, dir, 1024)
+					.await
+					.unwrap();
 				txn.commit().await.unwrap();
 				if !outcome.has_more {
 					break;

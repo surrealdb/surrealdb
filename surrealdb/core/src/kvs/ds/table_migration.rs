@@ -8,7 +8,9 @@
 //! ([`TableMigrationState`]), a key no statement writes, so a statement and a page of the job never
 //! write the same queue key and neither can fail the other's commit through it. The job holds one
 //! lease ([`TaskLeaseType::TableMigration`]) for every table, visits each table with requests and
-//! then each whose progress asks for work, and works through each table in laps of pages:
+//! then each whose progress asks for work, and works through each table in laps of pages. A pass
+//! runs at most [`SLICE_PAGES`] pages, and one that stops at them keeps its place in the queues
+//! for the next ([`TableMigrationLap`]):
 //!
 //! - A page that finds requests folds them into the progress, in the order made, deletes them, and
 //!   commits nothing else. A request committed after the page's snapshot is not deleted, so a later
@@ -53,29 +55,34 @@
 //! changefeed writes: a rewrite changes what a row costs to read, never what it reads as.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use surrealdb_datastore::tx::refused_by_release;
+use surrealdb_observe::TaskLeaseState;
 use tokio_util::sync::CancellationToken;
 use web_time::Instant;
 
 use super::Datastore;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
-	Conformance, DatabaseId, FieldCandidate, Generation, NamespaceId, TableLayouts, birth_claims_of,
+	Conformance, DatabaseDefinition, DatabaseId, FieldCandidate, Generation, NamespaceDefinition,
+	NamespaceId, TableLayouts, birth_claims_of,
 };
 use crate::exec::ExecutionContext;
 use crate::exec::migrate::{Replay, into_error};
 use crate::iam::{Auth, Role};
 use crate::key::schema::{
-	DatabaseKey, NamespaceKey, RecordKey, RecordPrefix, TableKey, TableMigrationKey,
-	TableMigrationPrefix, TableMigrationRequestKey, TableMigrationRequestPrefix,
+	DatabaseKey, DatabasePrefix, NamespaceKey, NamespacePrefix, RecordKey, RecordPrefix, TableKey,
+	TableMigrationKey, TableMigrationPrefix, TableMigrationRequestKey, TableMigrationRequestPrefix,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState};
 use crate::key::{KVKeyDecode, Key, Resumable};
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+use crate::kvs::tasks::{Pass, Progress};
+use crate::kvs::walk::ListScan;
 use crate::kvs::{DatastoreError, Direction, Transaction, TransactionType};
 use crate::val::{RecordId, TableName, Value};
 
@@ -94,6 +101,8 @@ const SETTLE_POLL: Duration = Duration::from_millis(10);
 enum TableOutcome {
 	/// The table has nothing left for this pass.
 	Done,
+	/// The pass's pages are spent with the table's work unfinished.
+	Spent,
 	/// Another node holds the job's lease.
 	LeaseLost,
 }
@@ -117,16 +126,155 @@ impl Target {
 	}
 }
 
+/// Pages one table migration pass runs before it yields; see
+/// [`crate::kvs::INDEX_COMPACTION_SLICE_BATCHES`]. A page is a transaction of a
+/// table's work, folding its requests or rewriting or verifying up to [`PAGE_ROWS`]
+/// of its rows, a batch of either queue read, or a page of the catalog's
+/// namespace or database list read to name a table's database, so a pass costs a
+/// bounded amount of work however many tables are queued, however many rows they
+/// hold, and however large the catalog is.
+const SLICE_PAGES: usize = 16;
+
+/// Where the table migration job's walk of its queues stands between passes.
+///
+/// A lap visits each table with requests, then each whose progress asks for work,
+/// each table once. A pass that spends its pages part-way through keeps the lap
+/// here, with the table it stopped inside, which the next pass continues first:
+/// a table's progress is durable, so the table resumes where its last committed
+/// page left it. A pass that ends the lap, loses the lease, finds it elsewhere or
+/// fails drops it, and the next pass begins a lap over the queues as they then
+/// stand.
+#[derive(Default)]
+pub(super) struct TableMigrationLap {
+	/// The table the last pass stopped inside, and whether its entry asked for work.
+	current: Option<(TableRef, bool)>,
+	/// The queue the lap is reading, with the last key it took from it.
+	queue: LapQueue,
+	/// The tables the lap has visited.
+	visited: HashSet<TableRef>,
+	/// The names of the databases the lap's tables are in.
+	names: LapNames,
+}
+
+/// The names the databases of a lap's tables are addressed by, keyed by the ids
+/// their queue keys name them by, and the lookup a pass stopped part-way through.
+///
+/// A queue key names a table's database by id, and the catalog lists namespaces
+/// and databases by name, so a database's names are found by reading its
+/// namespace's list and then the namespace's database list, a page of at most
+/// [`crate::kvs::NORMAL_BATCH_SIZE`] definitions at a time, each page spending
+/// one of the pass's budget. A lookup the budget stops is continued by the next
+/// pass. Names found are a hint for the rest of the lap: each use reads the
+/// database under them again, and names that no longer address the ids are
+/// looked up afresh.
+#[derive(Default)]
+struct LapNames {
+	/// The namespace and database names found, by database.
+	found: HashMap<(NamespaceId, DatabaseId), (String, String)>,
+	/// The databases found to be removed during this lap.
+	gone: HashSet<(NamespaceId, DatabaseId)>,
+	/// The lookup a pass stopped part-way through, and the database it is for.
+	pending: Option<((NamespaceId, DatabaseId), Lookup)>,
+}
+
+/// A lookup of a database's names, part-way through the catalog's lists.
+enum Lookup {
+	/// Reading the namespace list for the namespace with the id.
+	Namespace(ListScan<NamespaceDefinition>),
+	/// Reading the database list of the namespace found, by name, for the
+	/// database with the id.
+	Database(String, ListScan<DatabaseDefinition>),
+}
+
+/// How a lookup of a database's names ended.
+enum Names {
+	/// The namespace's name and the database's.
+	Found(String, String),
+	/// The pass's budget ran out first; the lookup is kept for the next pass.
+	Spent,
+	/// Another node holds the job's lease.
+	LeaseLost,
+	/// No namespace or database has the ids: it was removed.
+	Gone,
+	/// Not found among the definitions this build reads, where the list held
+	/// definitions a newer release wrote, which it may be among.
+	Unread,
+}
+
+/// A table by the ids its queue keys name it by.
+type TableRef = (NamespaceId, DatabaseId, TableName);
+
+/// The queue a [`TableMigrationLap`] is reading, with the last key it took from
+/// it: `None` at the queue's head.
+enum LapQueue {
+	Requests(Option<Vec<u8>>),
+	Progress(Option<Vec<u8>>),
+}
+
+impl Default for LapQueue {
+	fn default() -> Self {
+		Self::Requests(None)
+	}
+}
+
+/// How a pass's walk of the queues stopped.
+enum LapStop {
+	/// Both queues are read to their end.
+	Ended,
+	/// The pass's pages are spent with the lap unfinished.
+	Spent,
+	/// Another node holds the job's lease.
+	LeaseLost,
+}
+
 impl Datastore {
 	/// Work through every table queued for the table migration job, under the job's lease:
 	/// rewrite the rows its steps have not reached, and verify the fields queued for
-	/// verification. The tables with requests are visited first, then the tables whose progress
-	/// asks for work, or whose database or namespace is gone, that this pass has not visited.
+	/// verification. Runs [`Self::table_migration_pass`] until a pass finishes its lap.
 	pub async fn table_migration(
 		dbs: Arc<Datastore>,
 		interval: Duration,
 		canceller: CancellationToken,
 	) -> Result<()> {
+		while Self::table_migration_pass(Arc::clone(&dbs), interval, canceller.clone())
+			.await?
+			.progress == Progress::More
+		{}
+		Ok(())
+	}
+
+	/// One bounded pass of the table migration job: at most [`SLICE_PAGES`] pages of the
+	/// lap [`TableMigrationLap`] holds, the tables with requests visited first, then the
+	/// tables whose progress asks for work that the lap has not visited. Reports the tables
+	/// worked through as its items, and [`Progress::More`] when it stopped at its pages
+	/// with the lap unfinished, which the next pass continues. A pass that finds the lease
+	/// held by another node, or finds it passed to one part-way, reports
+	/// [`TaskLeaseState::Elsewhere`]: the holder works through the rest of the queue.
+	pub(crate) async fn table_migration_pass(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<Pass> {
+		Self::table_migration_bounded(dbs, interval, canceller, SLICE_PAGES).await
+	}
+
+	/// [`Self::table_migration_pass`] with its page budget lowered, so a test can drive a
+	/// pass that stops part-way through a table or a queue.
+	#[cfg(test)]
+	pub(crate) async fn table_migration_with_pages(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		pages: usize,
+	) -> Result<Pass> {
+		Self::table_migration_bounded(dbs, interval, CancellationToken::new(), pages).await
+	}
+
+	async fn table_migration_bounded(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+		pages: usize,
+	) -> Result<Pass> {
 		let lh = LeaseHandler::new_with_canceller(
 			dbs.sequences.clone(),
 			dbs.id,
@@ -136,133 +284,226 @@ impl Datastore {
 			canceller.clone(),
 		)?;
 		if !lh.has_lease().await? {
-			return Ok(());
+			*dbs.table_migration_lap.lock() = TableMigrationLap::default();
+			return Ok(Pass::elsewhere());
 		}
-		let mut visited = HashSet::new();
-		// The tables with requests, each once: a table's requests sort together.
-		let mut range = TableMigrationRequestPrefix {}.range()?;
+		let mut pass = Pass::done(TaskLeaseState::Held);
+		let mut budget = pages;
+		// Taken for the pass, and put back only by a pass that stops at its pages.
+		let mut lap = std::mem::take(&mut *dbs.table_migration_lap.lock());
+		match Self::walk_lap(&dbs, &lh, &canceller, interval, &mut lap, &mut budget, &mut pass)
+			.await?
+		{
+			LapStop::Spent => {
+				*dbs.table_migration_lap.lock() = lap;
+				pass.progress = Progress::More;
+			}
+			LapStop::Ended | LapStop::LeaseLost => {}
+		}
+		Ok(pass)
+	}
+
+	/// Continue `lap`: the table it stopped inside, then each queue from the key it last
+	/// took, a batch of keys at a time, each batch and each page of a table's work spending
+	/// one of `budget`.
+	async fn walk_lap(
+		dbs: &Arc<Datastore>,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		interval: Duration,
+		lap: &mut TableMigrationLap,
+		budget: &mut usize,
+		pass: &mut Pass,
+	) -> Result<LapStop> {
+		if let Some((table, has_work)) = lap.current.take() {
+			match Self::visit_table(
+				dbs,
+				lh,
+				canceller,
+				&table,
+				has_work,
+				&mut lap.names,
+				interval,
+				budget,
+				pass,
+			)
+			.await?
+			{
+				TableOutcome::Done => {}
+				TableOutcome::Spent => {
+					lap.current = Some((table, has_work));
+					return Ok(LapStop::Spent);
+				}
+				TableOutcome::LeaseLost => return Ok(LapStop::LeaseLost),
+			}
+		}
 		loop {
-			let keys = {
-				let txn = dbs.transaction(TransactionType::Read).await?;
-				let res = txn.keys(range.clone(), QUEUE_BATCH, 0, None).await;
-				let _ = txn.cancel().await;
-				res?
-			};
-			let Some(last) = keys.last() else {
-				break;
-			};
-			let last = last.clone();
-			let full = keys.len() >= QUEUE_BATCH as usize;
-			for key in keys {
-				Self::ensure_not_cancelled(&canceller)?;
-				let key = match TableMigrationRequestKey::decode_key(&key) {
-					Ok(key) => key,
-					Err(e) => {
-						warn!("Skipping undecodable table migration request: {e}");
-						continue;
+			if *budget == 0 {
+				return Ok(LapStop::Spent);
+			}
+			*budget -= 1;
+			let requests = matches!(lap.queue, LapQueue::Requests(_));
+			let (entries, full) = match &lap.queue {
+				// The tables with requests, each once: a table's requests sort together.
+				LapQueue::Requests(after) => {
+					let mut range = TableMigrationRequestPrefix {}.range()?;
+					if let Some(after) = after {
+						range = range.resume_after(after, Direction::Forward);
 					}
+					let txn = dbs.transaction(TransactionType::Read).await?;
+					let res = txn.keys(range, QUEUE_BATCH, 0, None).await;
+					let _ = txn.cancel().await;
+					let keys = res?;
+					let full = keys.len() >= QUEUE_BATCH as usize;
+					let entries = keys
+						.into_iter()
+						.map(|key| {
+							let table = match TableMigrationRequestKey::decode_key(&key) {
+								Ok(k) => Some(((k.ns, k.db, k.tb.into_owned()), true)),
+								Err(e) => {
+									warn!("Skipping undecodable table migration request: {e}");
+									None
+								}
+							};
+							(key, table)
+						})
+						.collect::<Vec<_>>();
+					(entries, full)
+				}
+				// The tables whose progress asks for work, as a pass that stopped left them, and
+				// those whose database or namespace was removed, whose progress is deleted on the
+				// visit.
+				LapQueue::Progress(after) => {
+					let mut range = TableMigrationPrefix {}.range()?;
+					if let Some(after) = after {
+						range = range.resume_after(after, Direction::Forward);
+					}
+					let txn = dbs.transaction(TransactionType::Read).await?;
+					let res = txn.scan(range, QUEUE_BATCH, 0, None).await;
+					let _ = txn.cancel().await;
+					let scanned = res?;
+					let full = scanned.len() >= QUEUE_BATCH as usize;
+					let entries = scanned
+						.into_iter()
+						.map(|(key, state)| {
+							let table = match TableMigrationKey::decode_key(&key) {
+								Ok(k) => Some(((k.ns, k.db, k.tb.into_owned()), state.has_work())),
+								Err(e) => {
+									warn!("Skipping undecodable table migration queue entry: {e}");
+									None
+								}
+							};
+							(key, table)
+						})
+						.collect::<Vec<_>>();
+					(entries, full)
+				}
+			};
+			for (key, entry) in entries {
+				Self::ensure_not_cancelled(canceller)?;
+				// The key is taken, so a pass that resumes the queue reads after it; a table
+				// it stops inside is continued first.
+				lap.queue = if requests {
+					LapQueue::Requests(Some(key))
+				} else {
+					LapQueue::Progress(Some(key))
 				};
-				let table = (key.ns, key.db, key.tb.into_owned());
-				if visited.contains(&table) {
+				let Some((table, has_work)) = entry else {
+					continue;
+				};
+				if !lap.visited.insert(table.clone()) {
 					continue;
 				}
-				visited.insert(table.clone());
-				let (ns, db, tb) = table;
-				if !Self::visit_table(&dbs, &lh, &canceller, ns, db, tb, interval).await? {
-					return Ok(());
+				match Self::visit_table(
+					dbs,
+					lh,
+					canceller,
+					&table,
+					has_work,
+					&mut lap.names,
+					interval,
+					budget,
+					pass,
+				)
+				.await?
+				{
+					TableOutcome::Done => {}
+					TableOutcome::Spent => {
+						lap.current = Some((table, has_work));
+						return Ok(LapStop::Spent);
+					}
+					TableOutcome::LeaseLost => return Ok(LapStop::LeaseLost),
 				}
 			}
 			if !full {
-				break;
-			}
-			range = range.resume_after(&last, Direction::Forward);
-		}
-		// The tables whose progress asks for work, as a pass that stopped left them, and those
-		// whose database or namespace was removed, whose progress is deleted on the visit.
-		let mut live = None;
-		let mut range = TableMigrationPrefix {}.range()?;
-		loop {
-			let entries = {
-				let txn = dbs.transaction(TransactionType::Read).await?;
-				let res = txn.scan(range.clone(), QUEUE_BATCH, 0, None).await;
-				let _ = txn.cancel().await;
-				res?
-			};
-			let Some((last, _)) = entries.last() else {
-				return Ok(());
-			};
-			let last = last.clone();
-			let full = entries.len() >= QUEUE_BATCH as usize;
-			for (key, state) in entries {
-				Self::ensure_not_cancelled(&canceller)?;
-				let key = match TableMigrationKey::decode_key(&key) {
-					Ok(key) => key,
-					Err(e) => {
-						warn!("Skipping undecodable table migration queue entry: {e}");
-						continue;
-					}
-				};
-				if !state.has_work() {
-					let live = match &live {
-						Some(live) => live,
-						None => live.insert(Self::live_databases(&dbs).await?),
-					};
-					if live.contains(&(key.ns, key.db)) {
-						continue;
-					}
+				if !requests {
+					return Ok(LapStop::Ended);
 				}
-				let table = (key.ns, key.db, key.tb.into_owned());
-				if visited.contains(&table) {
-					continue;
-				}
-				let (ns, db, tb) = table;
-				if !Self::visit_table(&dbs, &lh, &canceller, ns, db, tb, interval).await? {
-					return Ok(());
-				}
+				lap.queue = LapQueue::Progress(None);
 			}
-			if !full {
-				return Ok(());
-			}
-			range = range.resume_after(&last, Direction::Forward);
 		}
 	}
 
-	/// The databases that exist, by the ids of their namespace and their own.
-	async fn live_databases(dbs: &Datastore) -> Result<HashSet<(NamespaceId, DatabaseId)>> {
-		let txn = dbs.transaction(TransactionType::Read).await?;
-		let live = async {
-			let mut live = HashSet::new();
-			for ns in txn.all_ns(None).await?.iter() {
-				for db in txn.all_db(ns.namespace_id, None).await?.iter() {
-					live.insert((ns.namespace_id, db.database_id));
-				}
-			}
-			Ok(live)
-		}
-		.await;
-		let _ = txn.cancel().await;
-		live
-	}
-
-	/// Work through table `tb` of database `db` of namespace `ns`, as [`Self::migrate_table`]
-	/// does. Answers whether the pass goes on: `false` once another node holds the job's lease. A
-	/// table whose pass fails is logged and left for the next pass.
+	/// Work through `table`, as [`Self::migrate_table`] does, spending one of `budget` per
+	/// page, once its database's names are found ([`Self::database_names`]). A table worked
+	/// through counts as one of `pass`'s items; a table whose pass fails is logged and left for
+	/// the next lap. A lease found held by another node is reported in `pass`. A table whose
+	/// namespace or database is gone has its progress and requests deleted.
 	#[allow(clippy::too_many_arguments)]
 	async fn visit_table(
 		dbs: &Arc<Datastore>,
 		lh: &LeaseHandler,
 		canceller: &CancellationToken,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: TableName,
+		(ns, db, tb): &TableRef,
+		has_work: bool,
+		names: &mut LapNames,
 		interval: Duration,
-	) -> Result<bool> {
-		let Some(target) = Self::migration_target(dbs, ns, db, tb).await? else {
-			return Ok(true);
+		budget: &mut usize,
+		pass: &mut Pass,
+	) -> Result<TableOutcome> {
+		let (ns_name, db_name) =
+			match Self::database_names(dbs, lh, canceller, (*ns, *db), names, budget).await? {
+				Names::Found(ns_name, db_name) => {
+					if !has_work {
+						return Ok(TableOutcome::Done);
+					}
+					(ns_name, db_name)
+				}
+				Names::Spent => return Ok(TableOutcome::Spent),
+				Names::LeaseLost => {
+					pass.lease = TaskLeaseState::Elsewhere;
+					return Ok(TableOutcome::LeaseLost);
+				}
+				Names::Gone => {
+					Self::forget_table(dbs, *ns, *db, tb).await?;
+					return Ok(TableOutcome::Done);
+				}
+				Names::Unread => {
+					if has_work {
+						warn!(
+							"Table migration of `{tb}` is left: its database is not one this build reads"
+						);
+					}
+					return Ok(TableOutcome::Done);
+				}
+			};
+		let target = Target {
+			ns: *ns,
+			db: *db,
+			tb: tb.clone(),
+			ns_name,
+			db_name,
 		};
-		match Self::migrate_table(dbs, lh, canceller, &target, interval).await {
-			Ok(TableOutcome::Done) => Ok(true),
-			Ok(TableOutcome::LeaseLost) => Ok(false),
+		match Self::migrate_table(dbs, lh, canceller, &target, interval, budget).await {
+			Ok(TableOutcome::Done) => {
+				pass.items += 1;
+				Ok(TableOutcome::Done)
+			}
+			Ok(TableOutcome::LeaseLost) => {
+				pass.lease = TaskLeaseState::Elsewhere;
+				Ok(TableOutcome::LeaseLost)
+			}
+			Ok(TableOutcome::Spent) => Ok(TableOutcome::Spent),
 			Err(e) => {
 				if canceller.is_cancelled() {
 					return Err(e);
@@ -274,81 +515,170 @@ impl Datastore {
 						"Table migration of `{}` in {}/{} lost a conflict, retrying on the next pass: {e}",
 						target.tb, target.ns_name, target.db_name
 					);
-					return Ok(true);
+					return Ok(TableOutcome::Done);
 				}
 				warn!(
 					"Table migration of `{}` in {}/{} failed: {e}",
 					target.tb, target.ns_name, target.db_name
 				);
-				Ok(true)
+				Ok(TableOutcome::Done)
 			}
 		}
 	}
 
-	/// The table a queue entry names, with its namespace and database names; `None` when the
-	/// namespace or database is gone, in which case the table's progress and requests are deleted.
-	async fn migration_target(
+	/// The names the database `(ns, db)` is addressed by: the names `names` found earlier in
+	/// the lap, while the database under them still has the ids, and otherwise those a lookup
+	/// reads from the catalog's lists, a page per one of `budget`, continuing the lookup a pass
+	/// stopped part-way through for the same database. The lease is renewed before every
+	/// page.
+	async fn database_names(
+		dbs: &Datastore,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		(ns, db): (NamespaceId, DatabaseId),
+		names: &mut LapNames,
+		budget: &mut usize,
+	) -> Result<Names> {
+		if names.gone.contains(&(ns, db)) {
+			return Ok(Names::Gone);
+		}
+		if let Some((ns_name, db_name)) = names.found.get(&(ns, db)) {
+			let txn = dbs.transaction(TransactionType::Read).await?;
+			let current = txn.get_db_by_name(ns_name, db_name, None).await;
+			let _ = txn.cancel().await;
+			match current {
+				Ok(Some(def)) if def.namespace_id == ns && def.database_id == db => {
+					return Ok(Names::Found(ns_name.clone(), db_name.clone()));
+				}
+				Ok(_) => {}
+				Err(e) if refused_by_release(&e) => {}
+				Err(e) => return Err(e),
+			}
+			names.found.remove(&(ns, db));
+		}
+		let mut lookup = match names.pending.take() {
+			Some((of, lookup)) if of == (ns, db) => lookup,
+			_ => Lookup::Namespace(ListScan::new(NamespacePrefix {}.range()?)),
+		};
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			if *budget == 0 {
+				names.pending = Some(((ns, db), lookup));
+				return Ok(Names::Spent);
+			}
+			*budget -= 1;
+			if !lh.try_maintain_lease().await? {
+				return Ok(Names::LeaseLost);
+			}
+			let txn = dbs.transaction(TransactionType::Read).await?;
+			let read = match &mut lookup {
+				Lookup::Namespace(scan) => scan.next_page(&txn).await.map(|page| {
+					page.map(|page| {
+						page.into_iter().find(|n| n.namespace_id == ns).map(|n| n.name.to_string())
+					})
+				}),
+				Lookup::Database(_, scan) => scan.next_page(&txn).await.map(|page| {
+					page.map(|page| {
+						page.into_iter().find(|d| d.database_id == db).map(|d| d.name.to_string())
+					})
+				}),
+			};
+			let _ = txn.cancel().await;
+			match (read?, lookup) {
+				(Some(Some(ns_name)), Lookup::Namespace(_)) => {
+					lookup = Lookup::Database(
+						ns_name,
+						ListScan::new(
+							DatabasePrefix {
+								ns,
+							}
+							.range()?,
+						),
+					);
+				}
+				(Some(Some(db_name)), Lookup::Database(ns_name, _)) => {
+					names.found.insert((ns, db), (ns_name.clone(), db_name.clone()));
+					return Ok(Names::Found(ns_name, db_name));
+				}
+				// The page did not hold it; the next may.
+				(Some(None), unfinished) => lookup = unfinished,
+				// The list ended without it.
+				(None, Lookup::Namespace(mut scan)) => {
+					return Ok(Self::not_found(&mut scan, (ns, db), names));
+				}
+				(None, Lookup::Database(_, mut scan)) => {
+					return Ok(Self::not_found(&mut scan, (ns, db), names));
+				}
+			}
+		}
+	}
+
+	/// How a lookup whose list `scan` ended without the definition sought ended: the
+	/// definition is gone, unless the list held definitions this build skipped because a
+	/// newer release wrote them.
+	fn not_found<T: crate::key::KVValue<KeyContext = ()>>(
+		scan: &mut ListScan<T>,
+		id: (NamespaceId, DatabaseId),
+		names: &mut LapNames,
+	) -> Names {
+		if scan.take_refused() > 0 {
+			Names::Unread
+		} else {
+			names.gone.insert(id);
+			Names::Gone
+		}
+	}
+
+	/// Delete the progress of the table `(ns, db, tb)`, whose database is gone, and up to
+	/// [`QUEUE_BATCH`] of its requests; a table with requests left is reached again by the
+	/// next lap, which deletes the next batch.
+	async fn forget_table(
 		dbs: &Datastore,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: TableName,
-	) -> Result<Option<Target>> {
+		tb: &TableName,
+	) -> Result<()> {
 		let txn = dbs.transaction(TransactionType::Write).await?;
-		let ns_name = txn
-			.all_ns(None)
-			.await?
-			.iter()
-			.find(|n| n.namespace_id == ns)
-			.map(|n| n.name.to_string());
-		let db_name = match ns_name {
-			Some(_) => txn
-				.all_db(ns, None)
-				.await?
-				.iter()
-				.find(|d| d.database_id == db)
-				.map(|d| d.name.to_string()),
-			None => None,
+		let key = TableMigrationKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
 		};
-		match (ns_name, db_name) {
-			(Some(ns_name), Some(db_name)) => {
-				let _ = txn.cancel().await;
-				Ok(Some(Target {
-					ns,
-					db,
-					tb,
-					ns_name,
-					db_name,
-				}))
+		let deleted = async {
+			txn.del_key(&key).await?;
+			for (request, _) in txn.tb_migration_requests(ns, db, tb, QUEUE_BATCH).await? {
+				txn.del(Key::from(request)).await?;
 			}
-			_ => {
-				let key = TableMigrationKey {
-					ns,
-					db,
-					tb: Cow::Borrowed(&tb),
-				};
-				txn.del_key(&key).await?;
-				for (request, _) in txn.tb_migration_requests(ns, db, &tb, u32::MAX).await? {
-					txn.del(Key::from(request)).await?;
-				}
-				txn.commit().await?;
-				Ok(None)
+			Ok::<_, anyhow::Error>(())
+		}
+		.await;
+		match deleted {
+			Ok(()) => txn.commit().await,
+			Err(e) => {
+				let _ = txn.cancel().await;
+				Err(e)
 			}
 		}
 	}
 
 	/// Work through `target` in pages until its progress asks for nothing more and it has no
-	/// request left, the lease is lost, or a verification must wait for older transactions longer
-	/// than one interval.
+	/// request left, the lease is lost, a verification must wait for older transactions longer
+	/// than one interval, or `budget` is spent, each page spending one.
 	async fn migrate_table(
 		dbs: &Arc<Datastore>,
 		lh: &LeaseHandler,
 		canceller: &CancellationToken,
 		target: &Target,
 		interval: Duration,
+		budget: &mut usize,
 	) -> Result<TableOutcome> {
 		let mut page = PAGE_ROWS;
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
+			if *budget == 0 {
+				return Ok(TableOutcome::Spent);
+			}
+			*budget -= 1;
 			if !lh.try_maintain_lease().await? {
 				return Ok(TableOutcome::LeaseLost);
 			}

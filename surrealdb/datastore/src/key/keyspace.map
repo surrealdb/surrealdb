@@ -18,6 +18,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!ns                                                                                                  NamespacePrefix ->  (range)
 /!nd{nd}                                                                                                      NodeKey ->  surrealdb_catalog::node::Node
 /!nd                                                                                                       NodePrefix ->  (range)
+/!nq{nd}                                                                                        NodeDrainHeartbeatKey ->  u64
 /!nr{nd}                                                                                               NodeReleaseKey ->  surrealdb_catalog::node::NodeRelease
 /!nr                                                                                                NodeReleasePrefix ->  (range)
 /!us{user}                                                                                                RootUserKey ->  surrealdb_catalog::UserDefinition
@@ -68,6 +69,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /$                                                                                                    NodeStatePrefix ->  (range)
 /${nd}!lq{lq}                                                                                        NodeLiveQueryKey ->  surrealdb_catalog::NodeLiveQuery
 /${nd}!lq                                                                                         NodeLiveQueryPrefix ->  (range)
+/${nd}!eq{ns}{db}{tb}{ev}{ts}                                                                       NodeEventQueueKey ->  crate::values::event_queue::AsyncEventRecord
+/${nd}!eq                                                                                        NodeEventQueuePrefix ->  (range)
 /&{ac}                                                                                                 RootAccessRoot ->  (subtree)
 /&                                                                                                   RootAccessPrefix ->  (range)
 /&{ac}!gr{gr}                                                                                            RootGrantKey ->  surrealdb_catalog::AccessGrant

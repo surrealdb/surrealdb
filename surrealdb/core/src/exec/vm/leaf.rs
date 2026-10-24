@@ -415,7 +415,7 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::SessionNs {
 			..
 		}
-		| StoreInstr::Increment {
+		| StoreInstr::BumpChangefeedFence {
 			..
 		}
 		| StoreInstr::ClearDatastoreCache

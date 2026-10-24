@@ -294,6 +294,31 @@ impl NsDbTbMutCtx {
 		table: &TableName,
 		version: Option<u64>,
 	) -> Result<Self> {
+		Self::load_with(ctx, parent, tb, table, version, true).await
+	}
+
+	/// [`Self::load`] with the table's live queries left unread: `lives` and
+	/// `live_units` are empty, for a holder that does not notify them on the
+	/// write path — a write under the router engine, which notifies them off
+	/// it, and the router's replay, which reads them itself a page at a time.
+	pub(crate) async fn load_without_lives(
+		ctx: &FrozenContext,
+		parent: &NsDbCtx,
+		tb: Arc<TableDefinition>,
+		table: &TableName,
+		version: Option<u64>,
+	) -> Result<Self> {
+		Self::load_with(ctx, parent, tb, table, version, false).await
+	}
+
+	async fn load_with(
+		ctx: &FrozenContext,
+		parent: &NsDbCtx,
+		tb: Arc<TableDefinition>,
+		table: &TableName,
+		version: Option<u64>,
+		with_lives: bool,
+	) -> Result<Self> {
 		use crate::kvs::cache;
 		// Get the transaction
 		let txn = ctx.tx();
@@ -363,7 +388,10 @@ impl NsDbTbMutCtx {
 			// like fields/events/indexes above — so the cache key travels in the
 			// same snapshot as the read and cannot be poisoned by a concurrent
 			// writer holding a pre-commit snapshot.
-			let lives = async || -> Result<_> {
+			let lives = async || -> Result<Arc<[SubscriptionDefinition]>> {
+				if !with_lives {
+					return Ok(Arc::from(Vec::new()));
+				}
 				let key = cache::ds::Lookup::Lvs(ns, db, table.as_str(), tb.cache_lives_ts);
 				match cache.get(&key) {
 					Some(val) => Ok(val.try_into_lvs()?),
@@ -409,7 +437,13 @@ impl NsDbTbMutCtx {
 				txn.all_tb_events(ns, db, table, version),
 				txn.all_tb_views(ns, db, table, version),
 				txn.all_tb_indexes(ns, db, table, version),
-				txn.all_tb_lives(ns, db, table, version),
+				async {
+					if with_lives {
+						txn.all_tb_lives(ns, db, table, version).await
+					} else {
+						Ok(Arc::from(Vec::new()))
+					}
+				},
 			)?;
 			// Locate the id field once for the write path
 			let id_field_idx = id_field_index(&fields);

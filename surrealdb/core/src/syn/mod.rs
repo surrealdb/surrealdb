@@ -239,17 +239,11 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 /// strings.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len())))]
 pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
-	// The settings below are fixed; `config` does not shape this parse.
-	let _ = config;
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
-	// Inert JSON parsing takes no limits from the config; only the
-	// observability build's instrument attribute reads it.
-	let _ = config;
 
 	let settings = ParserSettings {
-		// Values are unused on the value parsing path.
-		object_recursion_limit: 0,
-		query_recursion_limit: 0,
+		object_recursion_limit: config.max_object_parsing_depth as usize,
+		query_recursion_limit: config.max_query_parsing_depth as usize,
 		legacy_strands: true,
 		json_string_escapes: true,
 		import: false,
@@ -378,5 +372,23 @@ mod tests {
 			expected_tables.into_iter().map(|s| s.to_string()).collect();
 		let extracted = extract_tables_from_kind(sql).unwrap();
 		assert_eq!(extracted, expected_tables);
+	}
+
+	/// An inert JSON value nests as deep as the config's object depth allows,
+	/// and no deeper: the depth bounds the parse of a JSON body as it does a
+	/// SurrealQL value's.
+	#[test]
+	fn json_legacy_strand_nests_to_the_configured_depth() {
+		let config = ParserConfig::default();
+		let nested = r#"{"a": [1, {"b": "2020-01-01T00:00:00Z"}]}"#;
+		let value = json_legacy_strand(nested, &config).unwrap();
+		assert!(matches!(value, PublicValue::Object(_)), "{value:?}");
+
+		let shallow = ParserConfig {
+			max_object_parsing_depth: 1,
+			..config
+		};
+		json_legacy_strand(r#"{"a": 1}"#, &shallow).unwrap();
+		assert!(json_legacy_strand(r#"{"a": [1]}"#, &shallow).is_err(), "two levels under one");
 	}
 }

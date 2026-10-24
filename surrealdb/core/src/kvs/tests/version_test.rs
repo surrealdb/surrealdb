@@ -211,9 +211,9 @@ async fn held_back_maintenance_tasks_write_nothing_until_they_are_started() {
 	tokio::time::sleep(Duration::from_millis(100)).await;
 	assert_eq!(count_node_rows(&ds).await, 0, "a held-back maintenance task wrote to storage");
 
-	ds.start_maintenance_tasks();
+	ds.start_maintenance_tasks().unwrap();
 	// Idempotent: the second call must not start a second set of tasks.
-	ds.start_maintenance_tasks();
+	ds.start_maintenance_tasks().unwrap();
 
 	let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 	while count_node_rows(&ds).await == 0 && tokio::time::Instant::now() < deadline {

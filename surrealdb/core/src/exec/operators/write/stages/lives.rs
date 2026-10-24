@@ -4,7 +4,7 @@
 //! computed as, and for, a different principal. The computation is the
 //! subscription's unit, which the write's context holds one entry for per
 //! subscription (`crate::exec::vm::live`), run by
-//! [`crate::exec::vm::notify_at`]; this module holds the stage and the parts
+//! [`crate::exec::vm::notify_unit`]; this module holds the stage and the parts
 //! of a notification that are not the unit's program: who is served, the frame
 //! the unit runs in, and the envelope it is delivered in.
 //!

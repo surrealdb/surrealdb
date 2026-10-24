@@ -4,9 +4,10 @@
 
 pub(crate) use self::document::*;
 pub(crate) use self::error::Error;
+pub(crate) use self::event::RunningEvents;
 #[cfg(test)]
 pub(crate) use self::event::process_events_batch;
-pub use self::event::process_next_events_batch;
+pub use self::event::{EventBatch, FailedBatch, process_next_events_batch};
 
 mod document; // The record cursor and the catalog scopes a write resolves
 mod error; // The failures raised while validating and writing a document
