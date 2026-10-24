@@ -37,7 +37,8 @@ struct AdmittedMutation {
 }
 
 /// Whether `mutation` adds a unique key to the UNIQUE index `ix`: one of its
-/// new value combinations holds no `NONE` or `NULL` and is not among the old
+/// new value combinations has no value exempt from uniqueness
+/// ([`IndexDefinition::exempts_from_uniqueness`]) and is not among the old
 /// combinations. Only such a write can create a duplicate, so only it is
 /// refused while the index's build has failed.
 fn refuses_on_failed_build(ix: &IndexDefinition, mutation: Option<&IndexMutation<'_>>) -> bool {
@@ -53,7 +54,7 @@ fn refuses_on_failed_build(ix: &IndexDefinition, mutation: Option<&IndexMutation
 	let unique_keys = |values: &Vec<Value>| {
 		Indexable::new(values.clone(), ix)
 			.into_iter()
-			.filter(|combination| !combination.iter().any(Value::is_nullish))
+			.filter(|combination| !combination.iter().any(|v| ix.exempts_from_uniqueness(v)))
 	};
 	let old: Vec<Array> = mutation
 		.old_values

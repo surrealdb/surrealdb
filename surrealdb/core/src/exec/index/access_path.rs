@@ -428,6 +428,16 @@ impl BoundOperand {
 		}
 	}
 
+	/// Whether this operand can resolve to a value that `ix` exempts from
+	/// uniqueness ([`IndexDefinition::exempts_from_uniqueness`]). The statement
+	/// clock always resolves to a [`Datetime`], which is never exempt.
+	pub(crate) fn is_exempt_from_uniqueness(&self, ix: &IndexDefinition) -> bool {
+		match self {
+			BoundOperand::Literal(value) => ix.exempts_from_uniqueness(value),
+			BoundOperand::StatementClock(_) => false,
+		}
+	}
+
 	/// Whether this operand reads the statement clock.
 	pub(crate) fn is_clock(&self) -> bool {
 		matches!(self, BoundOperand::StatementClock(_))

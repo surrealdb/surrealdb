@@ -940,6 +940,20 @@ impl IndexDefinition {
 	pub fn uses_shared_doc_ids(&self) -> bool {
 		self.uses_doc_ids() && self.format_version >= DOC_IDS_FORMAT_VERSION
 	}
+
+	/// Whether a tuple holding `v` takes no part in uniqueness on a `UNIQUE`
+	/// index: `NONE` never does, and `NULL` does only under
+	/// `NULLS NOT DISTINCT`.
+	pub fn exempts_from_uniqueness(&self, v: &Value) -> bool {
+		exempts_from_uniqueness(self.nulls_not_distinct, v)
+	}
+}
+
+/// Whether a tuple holding `v` takes no part in uniqueness on a `UNIQUE`
+/// index with the given `nulls_not_distinct` setting: `NONE` never does, and
+/// `NULL` does only under `NULLS NOT DISTINCT`.
+pub fn exempts_from_uniqueness(nulls_not_distinct: bool, v: &Value) -> bool {
+	matches!(v, Value::None) || (!nulls_not_distinct && matches!(v, Value::Null))
 }
 
 /// Whether an index with the given stored format version reads and writes the

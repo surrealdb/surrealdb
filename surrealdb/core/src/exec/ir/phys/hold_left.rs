@@ -52,7 +52,6 @@ use crate::exec::ir::iface::catalog::{CatalogAnswer, PhysCx, SourceKey};
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::vm::payload::{CountSelect, JoinBuild, JoinMatch, Spill};
-use crate::val::Value;
 
 /// How many ops of a chain a walk follows before it gives up.
 const MAX_DEPTH: usize = 256;
@@ -175,10 +174,10 @@ fn step(ir: &Ir, value: ValueId) -> Option<(&OpData, &PhysOp)> {
 }
 
 /// Whether the rows of `from` are at most one whatever the data: a read of one record by a literal
-/// record id, an equality on every column of a `UNIQUE` index with a key that is neither `NONE`
-/// nor `NULL` (the index lists such keys of several records) and no array or object, a `GROUP
-/// ALL`, a `LIMIT` of at most one, or a statement that yields at most one, beneath ops that yield
-/// at most one row per row they are handed.
+/// record id, an equality on every column of a `UNIQUE` index with no key exempt from uniqueness
+/// ([`crate::catalog::IndexDefinition::exempts_from_uniqueness`] — the index lists exempt keys of
+/// several records), a `GROUP ALL`, a `LIMIT` of at most one, or a statement that yields at most
+/// one, beneath ops that yield at most one row per row they are handed.
 fn at_most_one_row(ir: &Ir, cx: &PhysCx<'_>, from: ValueId) -> bool {
 	let mut value = from;
 	for _ in 0..MAX_DEPTH {
@@ -270,12 +269,7 @@ fn unique_equality(cx: &PhysCx<'_>, attrs: &IndexScanAttrs) -> bool {
 	};
 	matches!(definition.index, Index::Uniq)
 		&& pinned.len() == definition.cols.len()
-		&& pinned.iter().all(|key| {
-			!matches!(
-				key.as_literal(),
-				Some(Value::None | Value::Null | Value::Array(_) | Value::Object(_))
-			)
-		})
+		&& pinned.iter().all(|key| !key.is_exempt_from_uniqueness(definition))
 }
 
 /// Whether reading the rows of `from` raises no error and has no effect: a scan of a table, an
@@ -457,4 +451,133 @@ fn reads_alias(ir: &Ir, base: Option<ValueId>, aliases: &[&str]) -> bool {
 	base.and_then(|base| def_op(ir, base)).and_then(|op| ir.op(op)).is_some_and(|data| {
 		matches!(&data.kind, OpKind::Expr(ExprOp::Field { name }) if aliases.contains(&name.as_str()))
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use std::str::FromStr;
+	use std::sync::Arc;
+
+	use surrealdb_strand::Strand;
+
+	use super::*;
+	use crate::catalog::{IndexDefinition, IndexId};
+	use crate::exec::function::FunctionRegistry;
+	use crate::exec::ir::iface::IndexRef;
+	use crate::exec::ir::iface::catalog::{EffectCx, PhysicalCatalog, SemanticCatalog};
+	use crate::exec::ir::iface::frame::FrameTable;
+	use crate::exec::ir::phys::access::TableAnswers;
+	use crate::exec::ir::phys::ops::ReadClauses;
+	use crate::expr::Idiom;
+	use crate::kvs::Direction;
+	use crate::val::Value;
+
+	struct NoCatalog;
+
+	impl SemanticCatalog for NoCatalog {}
+
+	struct Held(Vec<(SourceKey, CatalogAnswer<Arc<TableAnswers>>)>);
+
+	impl PhysicalCatalog for Held {
+		fn table_answers(&self, key: &SourceKey) -> CatalogAnswer<Arc<TableAnswers>> {
+			self.0
+				.iter()
+				.find(|(held, _)| held == key)
+				.map_or(CatalogAnswer::NotLoaded, |(_, answer)| answer.clone())
+		}
+	}
+
+	fn uniq_def(name: &str, cols: &[&str], nulls_not_distinct: bool) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(1),
+			name: Strand::from(name),
+			table_name: "t".into(),
+			cols: cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect(),
+			index: Index::Uniq,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			format_version: 2,
+			nulls_not_distinct,
+		}
+	}
+
+	fn scan_with_access(index: &str, access: BTreeAccess) -> IndexScanAttrs {
+		IndexScanAttrs {
+			table: "t".into(),
+			index: IndexRef {
+				table: "t".into(),
+				index: Strand::from(index),
+				position: 0,
+				scalar: Box::default(),
+			},
+			access,
+			direction: Direction::Forward,
+			ordered_by: None,
+			pinned: None,
+			stated: None,
+			rechecked: false,
+			decode: None,
+			read: ReadClauses::default(),
+		}
+	}
+
+	fn scan(index: &str, key: Value) -> IndexScanAttrs {
+		scan_with_access(index, BTreeAccess::literal_equality(key))
+	}
+
+	fn compound_scan(index: &str, keys: Vec<Value>) -> IndexScanAttrs {
+		scan_with_access(
+			index,
+			BTreeAccess::Compound {
+				prefix: keys.into_iter().map(Into::into).collect(),
+				range: None,
+				upper: None,
+			},
+		)
+	}
+
+	#[test]
+	fn unique_equality_respects_nulls_not_distinct() {
+		let answers = TableAnswers::plain("t".into(), true).with_indexes(vec![
+			uniq_def("u", &["a"], false),
+			uniq_def("u_nnd", &["a"], true),
+			uniq_def("cu", &["a", "b"], false),
+			uniq_def("cu_nnd", &["a", "b"], true),
+		]);
+		let held = Held(vec![(
+			("t".into(), None, ReadVersion::Current),
+			CatalogAnswer::Found(Arc::new(answers)),
+		)]);
+		let registry = FunctionRegistry::with_builtins();
+		let frames = FrameTable::default();
+		let cx = PhysCx {
+			effects: EffectCx {
+				registry: &registry,
+				catalog: &NoCatalog,
+				frames: &frames,
+			},
+			physical: &held,
+			config: crate::exec::ir::iface::catalog::default_config(),
+		};
+
+		// Default `UNIQUE`: non-nullish key (including an object) is ≤1 row;
+		// `NULL` and `NONE` are exempt.
+		assert!(unique_equality(&cx, &scan("u", Value::from(1))));
+		assert!(unique_equality(&cx, &scan("u", Value::Object(Default::default()))));
+		assert!(!unique_equality(&cx, &scan("u", Value::Null)));
+		assert!(!unique_equality(&cx, &scan("u", Value::None)));
+
+		// `UNIQUE NULLS NOT DISTINCT`: `NULL` is ≤1 row; `NONE` remains exempt.
+		assert!(unique_equality(&cx, &scan("u_nnd", Value::from(1))));
+		assert!(unique_equality(&cx, &scan("u_nnd", Value::Null)));
+		assert!(!unique_equality(&cx, &scan("u_nnd", Value::None)));
+
+		// Compound unique prefix: `(1, NULL)` is ≤1 row only under
+		// `NULLS NOT DISTINCT`, and `(1, NONE)` is never ≤1 row.
+		assert!(unique_equality(&cx, &compound_scan("cu", vec![Value::from(1), Value::from(2)])));
+		assert!(!unique_equality(&cx, &compound_scan("cu", vec![Value::from(1), Value::Null])));
+		assert!(unique_equality(&cx, &compound_scan("cu_nnd", vec![Value::from(1), Value::Null])));
+		assert!(!unique_equality(&cx, &compound_scan("cu_nnd", vec![Value::from(1), Value::None])));
+	}
 }

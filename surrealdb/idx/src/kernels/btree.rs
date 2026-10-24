@@ -7,8 +7,8 @@
 //!   share the same values;
 //! - a unique entry at `UniqueKey`: the values alone, so a second record with the same values
 //!   collides;
-//! - a unique entry any of whose values is `NONE` or `NULL` at `EntryKey`, as a non-unique entry
-//!   is, so such entries coexist (`NULL` equals no other `NULL` for uniqueness).
+//! - a unique entry any of whose values is `NONE` (or `NULL` unless the index is `NULLS NOT
+//!   DISTINCT`) at `EntryKey`, as a non-unique entry is, so such entries coexist.
 //!
 //! The values are encoded under the index format, which orders numbers of
 //! every kind as one: `0`, `0f` and `0dec` share key bytes, and a range over
@@ -59,7 +59,7 @@ use anyhow::Result;
 
 use crate::catalog::{
 	DATETIME_ORDER_FORMAT_VERSION, DatabaseId, IndexDefinition, IndexId, NamespaceId,
-	spells_identity_entry_ids, spells_normalised_decimal_keys,
+	exempts_from_uniqueness, spells_identity_entry_ids, spells_normalised_decimal_keys,
 };
 use crate::entry::IndexEntryValue;
 use crate::expr::BinaryOperator;
@@ -254,7 +254,7 @@ impl<'a> IndexKeyspace<'a> {
 	/// index: `NONE` never does, and `NULL` does only under
 	/// `NULLS NOT DISTINCT`.
 	fn exempt(&self, v: &Value) -> bool {
-		matches!(v, Value::None) || (!self.nulls_not_distinct && matches!(v, Value::Null))
+		exempts_from_uniqueness(self.nulls_not_distinct, v)
 	}
 
 	/// Where the entry for values `fd` of the record keyed `id` is stored, on

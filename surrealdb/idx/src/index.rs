@@ -266,8 +266,9 @@ impl<'a> IndexOperation<'a> {
 				self.checkpoint(&txn, entry).await?;
 				let key = self.stored_key(true, &n)?;
 				if !key.unique {
-					// A tuple holding NONE or NULL names the record and is
-					// checked for no uniqueness: NULL equals no other NULL.
+					// A tuple exempt from uniqueness (holding `NONE`, or `NULL`
+					// unless `NULLS NOT DISTINCT`) names the record and is
+					// checked for no uniqueness.
 					txn.set_key(&key, &value).await?;
 				} else {
 					match txn.put_compare_key(&key, &value, None).await {

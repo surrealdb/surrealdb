@@ -806,18 +806,24 @@ impl<'a> IndexAnalyzer<'a> {
 	/// it pins the entire key of a unique index, either as a single-column
 	/// equality (multi-column indexes always surface as `Compound`, see
 	/// [`Self::try_match_comparison`]) or as a rangeless compound prefix
-	/// covering every column.
+	/// covering every column, and none of the pinned values is exempt from
+	/// uniqueness ([`IndexDefinition::exempts_from_uniqueness`]).
 	fn candidate_returns_at_most_one_row(c: &IndexCandidate) -> bool {
 		if !c.index_ref.is_unique() {
 			return false;
 		}
+		let def = c.index_ref.definition();
 		match &c.access {
-			BTreeAccess::Equality(_) => true,
+			BTreeAccess::Equality(v) => def.cols.len() == 1 && !v.is_exempt_from_uniqueness(def),
 			BTreeAccess::Compound {
 				prefix,
 				range,
 				..
-			} => range.is_none() && prefix.len() >= c.index_ref.definition().cols.len(),
+			} => {
+				range.is_none()
+					&& prefix.len() >= def.cols.len()
+					&& !prefix.iter().any(|v| v.is_exempt_from_uniqueness(def))
+			}
 			BTreeAccess::Range {
 				..
 			}
@@ -2769,8 +2775,8 @@ impl IndexCandidate {
 	/// | Access pattern                          | Score | Why                                  |
 	/// |-----------------------------------------|------:|--------------------------------------|
 	/// | Provably empty                          |  MAX  | No rows to read — zero cost          |
-	/// | Unique equality                         | 1_000 | Returns at most one row              |
-	/// | Non-unique equality                     |   500 | Returns a small bucket               |
+	/// | Unique equality, non-exempt key         | 1_000 | Returns at most one row              |
+	/// | Non-unique, or exempt key               |   500 | Returns a small bucket               |
 	/// | Compound prefix len N (capped at 6)     | 400+50N | Each pinned column shrinks scan    |
 	/// | Compound prefix + range on next col     |   +25 | Slight further narrowing             |
 	/// | FullText / KNN                          |   800 | Specialised; only applies for MATCHES/<\|N\|> |
@@ -2778,6 +2784,9 @@ impl IndexCandidate {
 	/// | Half-bounded range                      |   200 | One side bounded                     |
 	/// | Full range (covers ORDER BY only)       |    50 | Sort-elim worth more than table scan |
 	/// | Plus: `covers_order` bonus              |  +100 | Avoids in-memory Sort                |
+	///
+	/// An equality is scored as unique when its key takes part in uniqueness
+	/// (see [`IndexAnalyzer::candidate_returns_at_most_one_row`]).
 	///
 	/// The compound prefix bonus is capped so a 12-column prefix doesn't
 	/// silently outscore a unique equality. Selectivity is not actually
@@ -2795,7 +2804,7 @@ impl IndexCandidate {
 		let mut score = 0u32;
 		match &self.access {
 			BTreeAccess::Equality(_) => {
-				score += if self.index_ref.is_unique() {
+				score += if IndexAnalyzer::candidate_returns_at_most_one_row(self) {
 					1000
 				} else {
 					500
@@ -2880,7 +2889,8 @@ impl IndexCandidate {
 	///
 	/// - a provably empty candidate reads nothing, and wins;
 	/// - a full-text or ANN candidate answers an operator nothing else answers, and wins;
-	/// - a unique index pinned on every column returns at most one row, and wins;
+	/// - a unique equality whose key takes part in uniqueness (see
+	///   [`IndexAnalyzer::candidate_returns_at_most_one_row`]) returns at most one row, and wins;
 	/// - an index pinning strictly more columns than the key range wins: each pinned column narrows
 	///   the scan more than the key range's next one can;
 	/// - at an equal count, under a `LIMIT`, an index that covers the `ORDER BY` wins over a key
@@ -2896,23 +2906,23 @@ impl IndexCandidate {
 		if self.empty {
 			return true;
 		}
-		let (equalities, whole) = match &self.access {
+		let equalities = match &self.access {
 			BTreeAccess::FullText {
 				..
 			}
 			| BTreeAccess::Knn {
 				..
 			} => return true,
-			BTreeAccess::Equality(_) => (1, self.index_ref.cols.len() == 1),
+			BTreeAccess::Equality(_) => 1,
 			BTreeAccess::Compound {
 				prefix,
 				..
-			} => (prefix.len(), prefix.len() == self.index_ref.cols.len()),
+			} => prefix.len(),
 			BTreeAccess::Range {
 				..
-			} => (0, false),
+			} => 0,
 		};
-		if self.index_ref.is_unique() && whole {
+		if IndexAnalyzer::candidate_returns_at_most_one_row(self) {
 			return true;
 		}
 		if equalities > pinned {
@@ -3554,6 +3564,26 @@ mod tests {
 			let az = analyzer(vec![idx_uniq_v2(1, "idx_a", &["a"])], None);
 			let cond = parse_cond("a = 1 AND ->wrote->doc CONTAINS doc:x");
 			assert!(fuse(&az, &cond, false).is_none(), "unique anchor keeps the streaming plan");
+			// `NONE` and `NULL` are exempt from uniqueness on a default UNIQUE
+			// index, so they can match multiple rows and must keep the graph leaf.
+			for nullish in ["a = NONE", "a = NULL"] {
+				let cond = parse_cond(&format!("{nullish} AND ->wrote->doc CONTAINS doc:x"));
+				let plan = fuse(&az, &cond, false).expect("exempt equality keeps the graph leaf");
+				assert!(matches!(plan, BitmapPlan::And(ref c) if c.len() == 2), "{nullish}");
+			}
+			// Under `NULLS NOT DISTINCT`, `NULL` is unique (≤1 row) while `NONE`
+			// remains exempt.
+			let mut nnd = idx_uniq_v2(1, "idx_a", &["a"]);
+			nnd.nulls_not_distinct = true;
+			let az_nnd = analyzer(vec![nnd], None);
+			let cond_null = parse_cond("a = NULL AND ->wrote->doc CONTAINS doc:x");
+			assert!(
+				fuse(&az_nnd, &cond_null, false).is_none(),
+				"NULL on UNIQUE NULLS NOT DISTINCT guarantees ≤1 row"
+			);
+			let cond_none = parse_cond("a = NONE AND ->wrote->doc CONTAINS doc:x");
+			let plan = fuse(&az_nnd, &cond_none, false).expect("NONE remains exempt under NND");
+			assert!(matches!(plan, BitmapPlan::And(ref c) if c.len() == 2));
 		}
 
 		/// The guard only drops the graph leaf: sibling index branches still
@@ -5205,6 +5235,88 @@ mod tests {
 				uniq_cand.score() > nonunique_cand.score(),
 				"unique equality must outscore non-unique"
 			);
+			// `NONE` and `NULL` are not unique on a default UNIQUE index, while
+			// `NULL` is unique on a `UNIQUE NULLS NOT DISTINCT` index.
+			let uniq_null = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_uniq(1, "u", &["a"])], 0),
+				access: BTreeAccess::Equality(crate::val::Value::Null.into()),
+				covers_order: false,
+				empty: false,
+			};
+			assert_eq!(uniq_null.score(), nonunique_cand.score());
+			let mut nnd_def = idx_uniq(1, "u_nnd", &["a"]);
+			nnd_def.nulls_not_distinct = true;
+			let nnd_null = IndexCandidate {
+				index_ref: IndexRef::new(&[nnd_def.clone()], 0),
+				access: BTreeAccess::Equality(crate::val::Value::Null.into()),
+				covers_order: false,
+				empty: false,
+			};
+			let nnd_none = IndexCandidate {
+				index_ref: IndexRef::new(&[nnd_def], 0),
+				access: BTreeAccess::Equality(crate::val::Value::None.into()),
+				covers_order: false,
+				empty: false,
+			};
+			assert_eq!(nnd_null.score(), uniq_cand.score());
+			assert_eq!(nnd_none.score(), nonunique_cand.score());
+
+			// Compound unique prefix: `(1, NULL)` is ≤1 row only under
+			// `NULLS NOT DISTINCT`, and `(1, NONE)` is never ≤1 row.
+			let comp_uniq_def = idx_uniq(1, "cu", &["a", "b"]);
+			let mut comp_nnd_def = idx_uniq(1, "cu_nnd", &["a", "b"]);
+			comp_nnd_def.nulls_not_distinct = true;
+			let make_comp = |def: IndexDefinition, b: crate::val::Value| IndexCandidate {
+				index_ref: IndexRef::new(&[def], 0),
+				access: BTreeAccess::Compound {
+					prefix: vec![crate::val::Value::from(1).into(), b.into()],
+					range: None,
+					upper: None,
+				},
+				covers_order: false,
+				empty: false,
+			};
+			assert!(!IndexAnalyzer::candidate_returns_at_most_one_row(&make_comp(
+				comp_uniq_def,
+				crate::val::Value::Null,
+			)));
+			assert!(IndexAnalyzer::candidate_returns_at_most_one_row(&make_comp(
+				comp_nnd_def.clone(),
+				crate::val::Value::Null,
+			)));
+			assert!(!IndexAnalyzer::candidate_returns_at_most_one_row(&make_comp(
+				comp_nnd_def,
+				crate::val::Value::None,
+			)));
+
+			// An object key is not exempt from uniqueness.
+			let uniq_obj = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_uniq(1, "u", &["a"])], 0),
+				access: BTreeAccess::Equality(crate::val::Value::Object(Default::default()).into()),
+				covers_order: false,
+				empty: false,
+			};
+			assert_eq!(uniq_obj.score(), uniq_cand.score());
+		}
+
+		#[test]
+		fn outranks_key_range_respects_nulls_not_distinct() {
+			let mut nnd_def = idx_uniq(1, "u_nnd", &["a"]);
+			nnd_def.nulls_not_distinct = true;
+			let make = |def: IndexDefinition, v: crate::val::Value| IndexCandidate {
+				index_ref: IndexRef::new(&[def], 0),
+				access: BTreeAccess::Equality(v.into()),
+				covers_order: false,
+				empty: false,
+			};
+			// Against a 1-component key range (`pinned = 1`), an equality only
+			// outranks when it returns at most one row.
+			let uniq_null = make(idx_uniq(1, "u", &["a"]), crate::val::Value::Null);
+			let nnd_null = make(nnd_def.clone(), crate::val::Value::Null);
+			let nnd_none = make(nnd_def, crate::val::Value::None);
+			assert!(!uniq_null.outranks_key_range(1, false, false));
+			assert!(nnd_null.outranks_key_range(1, false, false));
+			assert!(!nnd_none.outranks_key_range(1, false, false));
 		}
 
 		#[test]

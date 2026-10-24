@@ -5855,13 +5855,21 @@ async fn recheck_cached_admission_skips_a_retired_index_instead_of_failing_the_w
 }
 
 /// A write that adds a key to a UNIQUE index whose build failed is refused,
-/// naming the index, while a write that adds no key to it is admitted.
+/// naming the index, while a write that adds no key to it is admitted. Under
+/// `NULLS NOT DISTINCT`, `NULL` is a unique key and is refused too, while
+/// `NONE` remains exempt.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_unique_index_in_error_refuses_a_write_that_adds_a_key() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
-	execute_all(&ds, &session, "DEFINE INDEX ux ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1;")
-		.await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX ux ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1; \
+		 DEFINE INDEX ux_nnd ON u FIELDS n UNIQUE NULLS NOT DISTINCT; \
+		 CREATE u:0 SET n = NULL; CREATE u:1 SET n = 1;",
+	)
+	.await?;
 	let (ns, db, table, ix) = get_table_index(&ds, "t", "ux").await?;
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
@@ -5874,7 +5882,39 @@ async fn a_unique_index_in_error_refuses_a_write_that_adds_a_key() -> Result<()>
 		message.contains("`ux`") && message.contains("failed to build"),
 		"unexpected error: {message}"
 	);
-	execute_all(&ds, &session, "CREATE t:3 SET m = 3").await?;
+	execute_all(
+		&ds,
+		&session,
+		"CREATE t:3 SET m = 3; CREATE t:4 SET n = NULL; CREATE t:5 SET n = [];",
+	)
+	.await?;
+
+	let (ns, db, table_u, ix_u) = get_table_index(&ds, "u", "ux_nnd").await?;
+	let ikb_u = IndexKeyBase::new(ns, db, table_u, ix_u.index_id);
+	seed_build_state(&ds, &ikb_u, IndexBuildPhase::Error, 1).await?;
+
+	let err = execute_all(&ds, &session, "CREATE u:2 SET n = NULL")
+		.await
+		.expect_err("a write adding NULL to a failed UNIQUE NULLS NOT DISTINCT index must fail");
+	let message = err.to_string();
+	assert!(
+		message.contains("`ux_nnd`") && message.contains("failed to build"),
+		"unexpected error: {message}"
+	);
+	let err = execute_all(&ds, &session, "CREATE u:5 SET n = []")
+		.await
+		.expect_err("Indexable keys [] as NULL, so UNIQUE NULLS NOT DISTINCT must refuse it");
+	let message = err.to_string();
+	assert!(
+		message.contains("`ux_nnd`") && message.contains("failed to build"),
+		"unexpected error: {message}"
+	);
+	execute_all(
+		&ds,
+		&session,
+		"CREATE u:3 SET m = 3; CREATE u:4 SET n = NONE; UPDATE u:0 SET m = 10;",
+	)
+	.await?;
 	Ok(())
 }
 
