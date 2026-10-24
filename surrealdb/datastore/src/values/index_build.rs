@@ -232,3 +232,18 @@ pub struct PrimaryAppendingTicket {
 }
 
 impl_kv_value_revisioned!(PrimaryAppendingTicket);
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_kvs::value::KVValue;
+
+	use super::*;
+
+	/// A `!bs` value at revision 5, which a 4.0 build writes with `basis`, is refused as an error.
+	/// Reading it as revision 4 would drop the basis that write admission checks, so no write to
+	/// the index could be admitted safely.
+	#[test]
+	fn a_revision_5_index_build_state_is_refused() {
+		assert!(IndexBuildState::kv_decode_value(&[5, 0, 0, 0], ()).is_err());
+	}
+}

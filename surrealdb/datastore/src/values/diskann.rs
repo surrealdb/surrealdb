@@ -337,3 +337,16 @@ impl KVValue for DiskAnnElementDocs {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A `!ds` value written at revision 2, which a 4.0 build writes with `start_points`, is
+	/// refused as an error rather than read as revision 1: dropping the field would lose the start
+	/// points, and a compaction on this build would then write the graph back without them.
+	#[test]
+	fn a_revision_2_diskann_state_is_refused() {
+		assert!(DiskAnnState::kv_decode_value(&[2, 1, 7, 251, 44, 1], ()).is_err());
+	}
+}
