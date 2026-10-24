@@ -119,7 +119,10 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 			}
 
 			if let Some(v) = v.as_typed_array::<u8>() {
-				let Some(data) = v.as_bytes() else {
+				// SAFETY: the slice aliases memory owned by the JS engine and is copied
+				// out below before any JavaScript can run, so it cannot be detached or
+				// reallocated while it is borrowed.
+				let Some(data) = (unsafe { v.as_bytes() }) else {
 					return Err(Error::new_from_js_message(
 						"Uint8Array",
 						"Bytes",

@@ -28,9 +28,13 @@ fn append_blob_part<'js>(
 			return Ok(());
 		}
 		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
-			data.extend_from_slice(x.as_bytes().ok_or_else(|| {
+			// SAFETY: the slice aliases memory owned by the JS engine and is copied
+			// into `data` before any JavaScript can run, so it cannot be detached or
+			// reallocated while it is borrowed.
+			let bytes = unsafe { x.as_bytes() }.ok_or_else(|| {
 				Exception::throw_type(ctx, "Tried to construct blob with detached buffer")
-			})?);
+			})?;
+			data.extend_from_slice(bytes);
 			return Ok(());
 		}
 	}

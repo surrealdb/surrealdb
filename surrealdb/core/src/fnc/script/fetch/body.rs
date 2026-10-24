@@ -130,6 +130,17 @@ impl Body {
 	}
 }
 
+/// Copies the bytes of a typed array or array buffer out of the JS engine's
+/// memory, evaluating to `None` when it is detached.
+macro_rules! copy_bytes {
+	($array:expr) => {
+		// SAFETY: the slice aliases memory owned by the JS engine and is copied
+		// before any JavaScript can run, so the backing store cannot be detached or
+		// reallocated while it is borrowed.
+		unsafe { $array.as_bytes() }.map(Bytes::copy_from_slice)
+	};
+}
+
 impl<'js> FromJs<'js> for Body {
 	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
@@ -166,58 +177,49 @@ impl<'js> FromJs<'js> for Body {
 			return Ok(Body::buffer(BodyKind::Blob(borrow.mime.clone()), borrow.data.clone()));
 		}
 		if let Ok(x) = TypedArray::<i8>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<u8>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<i16>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<u16>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<i32>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<u32>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<i64>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Ok(x) = TypedArray::<u64>::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 		if let Some(x) = ArrayBuffer::from_object(object.clone()) {
-			let bytes = x
-				.as_bytes()
+			let bytes = copy_bytes!(x)
 				.ok_or_else(|| Exception::throw_type(ctx, "Buffer is already detached"))?;
-			return Ok(Body::buffer(BodyKind::Buffer, Bytes::copy_from_slice(bytes)));
+			return Ok(Body::buffer(BodyKind::Buffer, bytes));
 		}
 
 		Err(Error::FromJs {

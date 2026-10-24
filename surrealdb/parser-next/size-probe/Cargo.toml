@@ -20,7 +20,7 @@ categories.workspace = true
 next = ["dep:surrealdb-parser-next"]
 
 [dependencies]
-surrealdb-parser-next = { path = "..", optional = true }
+surrealdb-parser-next = { workspace = true, optional = true }
 
 [lints]
 workspace = true

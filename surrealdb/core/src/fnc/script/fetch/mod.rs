@@ -55,7 +55,7 @@ mod test {
 				let rt = js::AsyncRuntime::new().unwrap();
 				let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
-				js::async_with!(ctx => |$ctx|{
+				ctx.async_with(async |$ctx| {
 					crate::fnc::script::fetch::register(&$ctx).unwrap();
 
 					$ctx.eval::<(),_>(r"

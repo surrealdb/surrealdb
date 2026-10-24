@@ -11,9 +11,9 @@ categories.workspace = true
 license-file.workspace = true
 
 [dependencies]
-quote = "1.0"
-syn = { version = "2.0", features = ["full"] }
-proc-macro2 = "1.0"
+quote.workspace = true
+syn = { workspace = true, features = ["full"] }
+proc-macro2.workspace = true
 
 [lib]
 proc-macro = true

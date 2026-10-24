@@ -24,7 +24,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 # Constructs the `tonic::Status` values that `kvs_error`'s gRPC arm classifies.
 # Test-only, so the shipped dependency graph is unchanged.
-tonic = { version = "0.14", default-features = false }
+tonic.workspace = true
 
 [lints]
 workspace = true

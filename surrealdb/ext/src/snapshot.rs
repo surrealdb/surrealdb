@@ -595,7 +595,7 @@ fn strip_export(wasm: &[u8], name: &str) -> Result<Vec<u8>> {
 				return Err(not_last());
 			}
 			let entries = reader.clone().into_iter_with_offsets().collect::<Result<Vec<_>, _>>()?;
-			if let Some(pos) = entries.iter().position(|(_, export)| export.name.0 == name) {
+			if let Some(pos) = entries.iter().position(|(_, export)| export.name.name == name) {
 				if pos + 1 != entries.len() {
 					return Err(not_last());
 				}

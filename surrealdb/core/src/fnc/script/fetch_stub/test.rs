@@ -5,7 +5,7 @@ macro_rules! create_test_context{
 		let rt = js::AsyncRuntime::new().unwrap();
 		let ctx = js::AsyncContext::full(&rt).await.unwrap();
 
-		js::async_with!(ctx => |$ctx|{
+		ctx.async_with(async |$ctx| {
 			super::register(&$ctx).unwrap();
 			$($t)*
 		}).await;

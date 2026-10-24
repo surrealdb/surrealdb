@@ -116,15 +116,15 @@ parse-common.workspace = true
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 async-trait.workspace = true
-axum = { version = "0.8.9", features = ["tracing", "ws"] }
+axum = { workspace = true, features = ["tracing", "ws"] }
 blake3.workspace = true
-axum-extra = { version = "0.12.6", features = [
+axum-extra = { workspace = true, features = [
     "query",
     "typed-routing",
     "typed-header",
 ] }
-axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
-console-subscriber = { version = "0.5.0", optional = true }
+axum-server.workspace = true
+console-subscriber = { workspace = true, optional = true }
 clap = { workspace = true, features = [
     "env",
     "derive",
@@ -132,21 +132,21 @@ clap = { workspace = true, features = [
     "unicode",
 ] }
 dashmap.workspace = true
-glob = "0.3.3"
-http-body = "1.0.1"
+glob.workspace = true
+http-body.workspace = true
 hyper.workspace = true
-opentelemetry = { version = "0.32.0" }
-opentelemetry-http = { version = "0.32.0" }
-opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "tls", "tls-roots", "trace", "metrics", "logs", "internal-logs"] }
+opentelemetry.workspace = true
+opentelemetry-http.workspace = true
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "tls-ring", "tls-roots", "trace", "metrics", "logs", "internal-logs"] }
 opentelemetry-prometheus-text-exporter.workspace = true
-opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime", "logs"] }
-rustyline = { version = "17.0.2", default-features = false, features = [
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime", "logs"] }
+rustyline = { workspace = true, features = [
     "derive",
     "with-dirs",
     "with-file-history",
 ], optional = true }
-tower = { version = "0.5.3", features = ["limit", "load-shed"] }
-tower-http = { version = "0.6.8", features = [
+tower = { workspace = true, features = ["limit", "load-shed"] }
+tower-http = { workspace = true, features = [
     "trace",
     "sensitive-headers",
     "auth",
@@ -159,11 +159,11 @@ tower-http = { version = "0.6.8", features = [
     "add-extension",
     "compression-full",
 ] }
-tonic = { version = "0.14.5", features = ["tls-native-roots", "gzip", "zstd"] }
-tower-service = "0.3.3"
-tracing-appender = "0.2.5"
-tracing-opentelemetry = "0.33.0"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+tonic = { workspace = true, features = ["default", "tls-native-roots", "gzip", "zstd"] }
+tower-service.workspace = true
+tracing-appender.workspace = true
+tracing-opentelemetry.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
@@ -196,7 +196,7 @@ web-time.workspace = true
 surrealdb-mcp = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-nu-ansi-term = "0.50.3"
+nu-ansi-term.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "user"] }
@@ -206,13 +206,13 @@ nix = { workspace = true, features = ["signal", "user"] }
 
 [dev-dependencies]
 # Crates only used by the root surrealdb crate
-assert_fs = "1.1.3"
-opentelemetry-proto = { version = "0.32.0", features = [
+assert_fs.workspace = true
+opentelemetry-proto = { workspace = true, features = [
     "gen-tonic",
     "metrics",
     "logs",
 ] }
-rcgen = "0.14.7"
+rcgen.workspace = true
 
 # Other crates
 env_logger.workspace = true

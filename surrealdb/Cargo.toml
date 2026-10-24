@@ -138,15 +138,15 @@ rustls = { workspace = true, optional = true, features = ["ring"] }
 # crates import, so they are left out of its builds.
 [target.'cfg(all(target_family = "wasm", not(target_os = "wasi")))'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
-js-sys = "0.3"
-rustls-pki-types = { version = "1.14.0", features = ["web"] }
+js-sys = { workspace = true, features = ["default"] }
+rustls-pki-types = { workspace = true, features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio-tungstenite-wasm.workspace = true
 uuid = { workspace = true, features = ["js"] }
-wasm-bindgen = "0.2"
+wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
-web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response"] }
+web-sys = { workspace = true, features = ["default", "Window", "Request", "RequestInit", "Response"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rustls = { workspace = true, optional = true, features = ["aws_lc_rs"] }
@@ -161,11 +161,11 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
-tonic = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true, features = ["default"] }
 # A `grpcs://` connection made with a caller's own `rustls` configuration does
 # its TLS handshake outside tonic, which cannot adopt one; tonic depends on both.
-hyper-util = { version = "0.1.20", default-features = false, features = ["tokio"], optional = true }
-tokio-rustls = { version = "0.26.4", default-features = false, optional = true }
+hyper-util = { workspace = true, features = ["tokio"], optional = true }
+tokio-rustls = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]

@@ -30,12 +30,12 @@ wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
 bytes.workspace = true
 http.workspace = true
-http-body = "1.0.1"
+http-body.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1"] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
-tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws_lc_rs"] }
-webpki-roots = "1.0.7"
+tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+webpki-roots.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
 tempfile.workspace = true
