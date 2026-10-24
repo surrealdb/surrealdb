@@ -3,7 +3,7 @@ use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_rpc::error::{invalid_request, parse_error};
+use surrealdb_rpc::error::{decode_error, invalid_request, parse_error};
 use surrealdb_rpc::request::Request;
 use surrealdb_rpc::{DbResponse, EncodedRows, RowFormat};
 use surrealdb_types::shaped::ShapeScope;
@@ -112,7 +112,7 @@ impl WsFormat for Format {
 			}
 			Format::Cbor => {
 				let val = surrealdb_core::rpc::format::cbor::decode_request(&val, recursion_limit)
-					.map_err(|_| parse_error())?;
+					.map_err(|e| decode_error(e.to_string()))?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -123,7 +123,7 @@ impl WsFormat for Format {
 			Format::Cbor2 | Format::Shaped => {
 				let val =
 					surrealdb_core::rpc::format::cbor::decode_request_v2(&val, recursion_limit)
-						.map_err(|_| parse_error())?;
+						.map_err(|e| decode_error(e.to_string()))?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -219,7 +219,7 @@ impl HttpFormat for Format {
 			}
 			Format::Cbor => {
 				let val = surrealdb_core::rpc::format::cbor::decode_request(&body, recursion_limit)
-					.map_err(|_| parse_error())?;
+					.map_err(|e| decode_error(e.to_string()))?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -230,7 +230,7 @@ impl HttpFormat for Format {
 			Format::Cbor2 | Format::Shaped => {
 				let val =
 					surrealdb_core::rpc::format::cbor::decode_request_v2(&body, recursion_limit)
-						.map_err(|_| parse_error())?;
+						.map_err(|e| decode_error(e.to_string()))?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -312,5 +312,30 @@ mod tests {
 			HeaderValue::from_static(surrealdb_rpc::format::CBOR2)
 		);
 		assert_eq!(Format::Cbor2.row_format(), Some(surrealdb_rpc::RowFormat::Cbor2));
+	}
+
+	/// A CBOR request the decoder refuses fails over HTTP `/rpc` as a parse error carrying the
+	/// decoder's message: tag 0 around a datetime as text, refused naming tag 12.
+	#[test]
+	fn a_refused_cbor_request_over_http_carries_the_decoder_message() {
+		use surrealdb_types::ValidationError;
+
+		use super::HttpFormat as _;
+
+		// {"id": "1", "method": "query", "params": ["RETURN $d", {"d": 0("x")}]}
+		let mut body = vec![0xa3, 0x62, b'i', b'd', 0x61, b'1', 0x66];
+		body.extend_from_slice(b"method");
+		body.push(0x65);
+		body.extend_from_slice(b"query");
+		body.push(0x66);
+		body.extend_from_slice(b"params");
+		body.extend_from_slice(&[0x82, 0x69]);
+		body.extend_from_slice(b"RETURN $d");
+		body.extend_from_slice(&[0xa1, 0x61, b'd', 0xc0, 0x61, b'x']);
+		for format in [Format::Cbor, Format::Cbor2] {
+			let err = format.req_http(body.clone().into(), 64).expect_err("refused");
+			assert_eq!(err.validation_details(), Some(&ValidationError::Parse));
+			assert!(err.message().contains("send tag 12"), "{format:?}: {}", err.message());
+		}
 	}
 }

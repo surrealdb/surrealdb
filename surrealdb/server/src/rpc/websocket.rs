@@ -2046,6 +2046,88 @@ mod tests {
 		assert_eq!(values(&shaped), values(&cbor));
 	}
 
+	/// A CBOR text string, of the lengths the requests below use.
+	fn cbor_text(s: &str) -> Vec<u8> {
+		let mut out = if s.len() < 24 {
+			vec![0x60 | s.len() as u8]
+		} else {
+			vec![0x78, s.len() as u8]
+		};
+		out.extend_from_slice(s.as_bytes());
+		out
+	}
+
+	/// A CBOR `query` request whose one parameter is `item`.
+	fn query_request(item: &[u8]) -> Vec<u8> {
+		let mut bytes = vec![0xa3];
+		for part in [
+			cbor_text("id"),
+			cbor_text("1"),
+			cbor_text("method"),
+			cbor_text("query"),
+			cbor_text("params"),
+			vec![0x82],
+			cbor_text("RETURN $d"),
+			vec![0xa1],
+			cbor_text("d"),
+		] {
+			bytes.extend(part);
+		}
+		bytes.extend_from_slice(item);
+		bytes
+	}
+
+	/// The reply to a binary request on a connection speaking `format`.
+	async fn cbor_reply(format: Format, request: Vec<u8>) -> Vec<u8> {
+		let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+		let (tx, _rx) = channel::<Message>(8);
+		let (notifier, _notify_rx) = channel::<Message>(8);
+		let (closer, _close_rx) = channel::<Message>(1);
+		let rpc = Arc::new(Websocket {
+			id: Uuid::new_v4(),
+			format,
+			state: Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds))),
+			datastore: ds,
+			sessions: HashMap::new(),
+			transactions: DashMap::new(),
+			counters: DashMap::new(),
+			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
+			shutdown: CancellationToken::new(),
+			cancel: surrealdb_core::ctx::CancelHandle::new(),
+			channel: tx,
+			notifications: notifier,
+			lagging_close: closer,
+			live_shapes: Default::default(),
+		});
+		rpc.set_session(rpc.id, Arc::new(RwLock::new(Session::owner())));
+		let (chn, mut replies) = channel::<Message>(8);
+		Websocket::handle_message(&rpc, Message::Binary(request.into()), chn, 1024).await;
+		match replies.recv().await {
+			Some(Message::Binary(reply)) => reply.to_vec(),
+			other => panic!("a binary reply, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn a_cbor_request_the_decoder_refuses_is_answered_with_the_decoder_message() {
+		// Tag 0, a datetime as text, which the decoder refuses naming tag 12.
+		let mut datetime = vec![0xc0];
+		datetime.extend(cbor_text("2020-01-01T00:00:00Z"));
+		for (format, v2) in [(Format::Cbor, false), (Format::Cbor2, true)] {
+			let reply = cbor_reply(format, query_request(&datetime)).await;
+			let reply = if v2 {
+				surrealdb_core::rpc::format::cbor::decode_v2(&reply, 64)
+			} else {
+				surrealdb_core::rpc::format::cbor::decode(&reply, 64)
+			}
+			.expect("decodes");
+			let reply = format!("{reply:?}");
+			assert!(reply.contains("send tag 12"), "{format:?}: {reply}");
+			assert!(!reply.contains("Parse error"), "{format:?}: {reply}");
+		}
+	}
+
 	/// A request whose data is a shaped block stores what the same request with a CBOR array
 	/// stores, and fails as it fails, over both CBOR subprotocols.
 	#[tokio::test]

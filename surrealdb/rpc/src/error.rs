@@ -15,6 +15,12 @@ pub fn parse_error() -> TypesError {
 	TypesError::validation("Parse error".to_string(), ValidationError::Parse)
 }
 
+/// A request the CBOR decoder rejected. The decoder's message describes the bytes the client
+/// sent and is returned to the client; it is still a parse error on the wire.
+pub fn decode_error(message: String) -> TypesError {
+	TypesError::validation(message, ValidationError::Parse)
+}
+
 /// Too many open transactions for the session or connection.
 pub fn too_many_transactions() -> TypesError {
 	TypesError::validation("Too many open transactions".to_string(), ValidationError::InvalidParams)
