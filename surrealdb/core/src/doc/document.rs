@@ -634,6 +634,21 @@ impl CursorDoc {
 			fields_computed: false,
 		}
 	}
+
+	/// Returns a borrow of `self` when `doc` is not an `Object` or already
+	/// carries `rid` as its top-level `id` field; otherwise clones the cursor
+	/// and sets `id` to `rid` (matching [`Record::kv_decode_value`]).
+	pub(crate) fn with_record_id(&self, rid: &RecordId) -> Cow<'_, Self> {
+		match self.doc.as_ref() {
+			Value::Object(obj) if !matches!(obj.0.get("id"), Some(Value::RecordId(existing)) if existing == rid) =>
+			{
+				let mut owned = self.clone();
+				owned.doc.to_mut().def(rid.clone());
+				Cow::Owned(owned)
+			}
+			_ => Cow::Borrowed(self),
+		}
+	}
 }
 
 impl From<Record> for CursorRecord {

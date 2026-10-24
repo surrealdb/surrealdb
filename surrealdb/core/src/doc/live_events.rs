@@ -57,14 +57,19 @@ impl Document {
 			return Ok(());
 		}
 		// Buffer the before/after for this record; flushed at commit.
+		// Normalise top-level `id` on object documents so view-table records
+		// (stored without an `id` field in `Record.data`) carry their `RecordId`
+		// in captured live events without mutating `self` for subsequent hooks.
 		if let Some(id) = &self.id {
+			let initial = self.initial.with_record_id(id);
+			let current = self.current.with_record_id(id);
 			ctx.tx().live_event_buffer_record_change(
 				ns.namespace_id,
 				db.database_id,
 				&tb.name,
 				id.as_ref(),
-				self.initial.doc.clone(),
-				self.current.doc.clone(),
+				initial.doc.clone(),
+				current.doc.clone(),
 			);
 		}
 		Ok(())
