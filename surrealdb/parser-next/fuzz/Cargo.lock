@@ -1955,7 +1955,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-cnf"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "num-traits",
  "path-clean",
@@ -1966,7 +1966,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-collections"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "revision",
  "storekey",
@@ -1974,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "chrono",
  "futures",
@@ -1992,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-expr"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-iam"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "affinitypool",
  "anyhow",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parse-common"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "chrono",
  "logos",
@@ -2079,7 +2079,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parser-next"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "half",
 ]
@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-stored-derive"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-strand"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "revision",
  "serde",
@@ -2133,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2162,7 +2162,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.4.0-nightly"
+version = "4.0.0-nightly"
 dependencies = [
  "heck",
  "proc-macro2",
