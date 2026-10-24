@@ -61,5 +61,6 @@ pub mod index_build;
 pub mod index_delta;
 pub mod inline_cache;
 pub mod live_query;
+pub(crate) mod save_point;
 pub mod session;
 pub mod vector;

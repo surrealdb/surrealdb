@@ -53,9 +53,9 @@
 //!
 //! The frames mirror the storage save-point stack: [`IndexDeltaBuffer::push_save_point`]
 //! opens one, [`IndexDeltaBuffer::release_save_point`] folds it into its parent,
-//! and [`IndexDeltaBuffer::rollback_save_point`] discards it. The bottom frame is
-//! the transaction's own and is never popped — the storage layer has no save point
-//! matching it.
+//! and [`IndexDeltaBuffer::rollback_save_point`] discards it. The stack's contract
+//! is [`crate::values::save_point`]; every family here is one of its stacks, and
+//! each release folds its frame by whatever combining that family's values means.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -69,6 +69,7 @@ use uuid::Uuid;
 use crate::pending_guard::GuardedIndex;
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::GraphFoldScope;
+use crate::values::save_point::{pop_save_point, reset_frames};
 
 /// Identifies one index within the transaction's buffers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -243,16 +244,6 @@ fn fold_term_changes(
 	}
 }
 
-/// Drops every save-point frame and empties the transaction's own, leaving the
-/// stack at the floor depth every other operation assumes.
-fn reset_frames<K, V>(frames: &mut Vec<HashMap<K, V>>) {
-	frames.truncate(1);
-	match frames.first_mut() {
-		Some(frame) => frame.clear(),
-		None => frames.push(HashMap::new()),
-	}
-}
-
 /// Folds one document-statistics contribution into a frame's entry for an index.
 ///
 /// The fields sum, so folding is addition; the node id is carried so the flushed
@@ -267,15 +258,6 @@ fn fold_doc_stats(
 	entry.0.total_docs_length += stats.total_docs_length;
 	entry.0.doc_count += stats.doc_count;
 	entry.1 = nid;
-}
-
-/// Pops a save-point frame off `frames`, or `None` when only the transaction's
-/// own frame remains.
-///
-/// The transaction frame is never popped: it is the buffer's floor, and the
-/// storage layer has no save point matching it.
-fn pop_save_point<K, V>(frames: &mut Vec<HashMap<K, V>>) -> Option<HashMap<K, V>> {
-	(frames.len() > 1).then(|| frames.pop()).flatten()
 }
 
 /// Per-transaction buffer of count deltas and compaction triggers.

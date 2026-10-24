@@ -9858,8 +9858,13 @@ impl Transaction {
 		// Initialised rather than merely inspected: the save point is opened
 		// before the mutations it scopes, so waiting for the buffer to exist
 		// would leave the first mutation in the transaction's own frame, where a
-		// rollback cannot reach it.
+		// rollback cannot reach it. The change feed and the live-query events
+		// describe this transaction's writes as the index deltas do, so a
+		// rollback owes them the same reach: a reader of either must never be
+		// shown a change the transaction took back.
 		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
+		self.changefeed.get_or_init(Changefeed::new).push_save_point();
+		self.live_events.get_or_init(LiveEventBuffer::new).push_save_point();
 		self.cache.push_save_point();
 		self.creations.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
@@ -9887,6 +9892,12 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.release_save_point();
 		}
+		if let Some(changefeed) = self.changefeed.get() {
+			changefeed.release_save_point();
+		}
+		if let Some(live_events) = self.live_events.get() {
+			live_events.release_save_point();
+		}
 		self.cache.release_save_point();
 		self.creations.release_save_point();
 		// Released, the scope folds into the enclosing one, whose snapshot
@@ -9908,6 +9919,17 @@ impl Transaction {
 		}
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.rollback_save_point();
+		}
+		// The writes these describe are undone, so the descriptions go with
+		// them: a mutation left behind would be flushed by `store_changes` and
+		// reported by `SHOW CHANGES`, and an event left behind would be
+		// delivered to a live subscriber — a change that never happened, in a
+		// transaction that still commits.
+		if let Some(changefeed) = self.changefeed.get() {
+			changefeed.rollback_save_point();
+		}
+		if let Some(live_events) = self.live_events.get() {
+			live_events.rollback_save_point();
 		}
 		// A record or definition cached since the save point may describe a
 		// write the rollback undid, and a read must not be answered from it.
@@ -17450,5 +17472,144 @@ mod table_definition_key_tests {
 			let layouts = &keys[2];
 			assert!(!range_may_hold_definitions(layouts), "{tb:?}: {layouts:?}");
 		}
+	}
+}
+
+/// That a save-point operation reaches the change feed and the live-query event
+/// buffer, and in step with the storage stack.
+///
+/// The buffers' own framing is covered where they live
+/// ([`crate::values::save_point`]); what these cover is the wiring, which a
+/// buffer cannot test for itself.
+#[cfg(test)]
+mod save_point_buffer_tests {
+	use std::sync::Arc;
+
+	use surrealdb_catalog::{DatabaseId, NamespaceId, Record};
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_expr::val::{RecordId, TableName, Value};
+	use surrealdb_kvs::TransactionType;
+	use surrealdb_kvs::value::KVValue;
+
+	use super::*;
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+	use crate::values::changefeed::{TableMutation, TableMutations};
+	use crate::values::live_query::LiveEvents;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	fn table() -> TableName {
+		"t".into()
+	}
+
+	fn record(key: &str) -> RecordId {
+		RecordId::new(table(), key.to_owned())
+	}
+
+	/// Buffer the creation of `t:key` into both buffers, as a write does.
+	fn create(tx: &Transaction, key: &str) {
+		tx.changefeed_buffer_record_change(
+			NS,
+			DB,
+			&table(),
+			&record(key),
+			Arc::new(Record::new(Value::None)),
+			Arc::new(Record::new(Value::from(key))),
+			false,
+		);
+		tx.live_event_buffer_record_change(
+			NS,
+			DB,
+			&table(),
+			&record(key),
+			Value::None,
+			Value::from(key),
+		);
+	}
+
+	/// The records each buffer would flush, in order: the change feed's
+	/// mutations first, then the live-query events.
+	fn flushed(tx: &Transaction) -> (Vec<RecordId>, Vec<RecordId>) {
+		let mutations = match tx.changefeed.get() {
+			Some(changefeed) => changefeed
+				.changes()
+				.unwrap()
+				.into_iter()
+				.flat_map(|(_, _, _, value)| TableMutations::kv_decode_value(&value, ()).unwrap().1)
+				.map(|mutation| match mutation {
+					TableMutation::Set(id, _) => id,
+					other @ (TableMutation::Del(_)
+					| TableMutation::Def(_)
+					| TableMutation::SetWithDiff(..)
+					| TableMutation::DelWithOriginal(..)) => {
+						panic!("the test buffers creates, not {other:?}")
+					}
+				})
+				.collect(),
+			None => Vec::new(),
+		};
+		let events = match tx.live_events.get() {
+			Some(live_events) => live_events
+				.changes()
+				.unwrap()
+				.into_iter()
+				.flat_map(|(_, _, _, value)| LiveEvents::kv_decode_value(&value, ()).unwrap().0)
+				.map(|event| event.id)
+				.collect(),
+			None => Vec::new(),
+		};
+		(mutations, events)
+	}
+
+	/// A rollback undoes the writes a scope made, so the buffered descriptions
+	/// of them go with it: a mutation left behind is reported by `SHOW CHANGES`
+	/// and an event left behind is delivered to a live subscriber — a change
+	/// that never happened, in a transaction that still commits.
+	#[tokio::test]
+	async fn a_rollback_reaches_both_change_buffers() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq).await.unwrap();
+		create(&tx, "kept");
+		tx.new_save_point().await.unwrap();
+		create(&tx, "undone");
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(flushed(&tx), (vec![record("kept")], vec![record("kept")]));
+		tx.cancel().await.unwrap();
+	}
+
+	/// A rollback unwinds a scope that absorbed a released one, so a release the
+	/// buffers do not see leaves a frame behind — and that stale frame is the
+	/// one the rollback discards, in place of its own. The outer scope's own
+	/// writes would then outlive the rollback that undid them, so it has to
+	/// have buffered some before the inner save point opened.
+	#[tokio::test]
+	async fn a_rollback_unwinds_the_save_points_a_release_folded_into_it() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq).await.unwrap();
+		create(&tx, "kept");
+		tx.new_save_point().await.unwrap();
+		create(&tx, "undone outside");
+		tx.new_save_point().await.unwrap();
+		create(&tx, "undone inside");
+		tx.release_last_save_point().await.unwrap();
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(flushed(&tx), (vec![record("kept")], vec![record("kept")]));
+		tx.cancel().await.unwrap();
 	}
 }

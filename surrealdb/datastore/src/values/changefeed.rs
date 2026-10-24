@@ -32,6 +32,8 @@ use surrealdb_expr::val::{Array, Object, RecordId, TableName, Value};
 use surrealdb_kvs::Val;
 use surrealdb_kvs::value::KVValue;
 
+use crate::values::save_point::{fold_frames, pop_save_point, reset_frames};
+
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -240,8 +242,12 @@ pub struct ChangeKey {
 /// Changefeed is a per-transaction buffer of table mutations that are
 /// persisted to the database at commit time.
 pub struct Changefeed {
-	/// The buffer of table mutations to be written to the database.
-	buffer: Mutex<HashMap<ChangeKey, TableMutations>>,
+	/// The buffer of table mutations to be written to the database, as the
+	/// save-point frame stack ([`crate::values::save_point`]). Every mutation is
+	/// buffered into the top frame, so a rollback discards exactly the mutations
+	/// the writes it undid produced — a feed reader is never shown a change the
+	/// transaction took back.
+	buffer: Mutex<Vec<HashMap<ChangeKey, TableMutations>>>,
 }
 
 impl Default for Changefeed {
@@ -254,7 +260,7 @@ impl Changefeed {
 	/// Create a new changefeed buffer
 	pub fn new() -> Self {
 		Self {
-			buffer: Mutex::new(HashMap::new()),
+			buffer: Mutex::new(vec![HashMap::new()]),
 		}
 	}
 
@@ -267,9 +273,10 @@ impl Changefeed {
 		dt: &StoredTableDefinition,
 	) {
 		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
+		let mut frames = self.buffer.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
 		// Get or create the entry for the change key and push the table change
-		buffer
+		frame
 			.entry(ChangeKey {
 				ns,
 				db,
@@ -292,9 +299,10 @@ impl Changefeed {
 		store_difference: bool,
 	) {
 		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
+		let mut frames = self.buffer.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
 		// Get or create the entry for the change key and push the record change
-		buffer
+		frame
 			.entry(ChangeKey {
 				ns,
 				db,
@@ -306,9 +314,18 @@ impl Changefeed {
 
 	// get returns all the mutations buffered for this transaction.
 	// The timestamp will be provided at commit time.
+	//
+	// A scope still open here belongs to the transaction — the writes it
+	// describes are the ones about to be committed — so the stack is folded down
+	// before the mutations are read, which also restores the order they were
+	// buffered in.
 	pub fn changes(&self) -> Result<Vec<PreparedWrite>> {
 		// Acquire the buffer lock
-		let buffer = self.buffer.lock();
+		let mut frames = self.buffer.lock();
+		fold_frames(&mut frames, |entry: &mut TableMutations, mutations| {
+			entry.1.extend(mutations.1)
+		});
+		let buffer = frames.first().expect("the transaction frame is always present");
 		// For zero-length changes, return early
 		if buffer.is_empty() {
 			return Ok(Vec::new());
@@ -326,11 +343,154 @@ impl Changefeed {
 		Ok(res)
 	}
 
-	// get returns all the mutations buffered for this transaction.
-	// The timestamp will be provided at commit time.
+	/// Clear the buffer (used on transaction cancel/rollback).
 	pub fn clear(&self) {
-		// Clear the internal buffer
-		self.buffer.lock().clear();
+		reset_frames(&mut self.buffer.lock());
+	}
+
+	/// Open a save-point scope: the mutations buffered from here on are its own.
+	pub fn push_save_point(&self) {
+		self.buffer.lock().push(HashMap::new());
+	}
+
+	/// Fold the save point's frame into the one beneath it: its writes survived,
+	/// so the mutations describing them belong to the enclosing scope, after
+	/// whatever that scope had already buffered.
+	pub fn release_save_point(&self) {
+		let mut frames = self.buffer.lock();
+		if let Some(top) = pop_save_point(&mut frames) {
+			let parent = frames.last_mut().expect("popping left at least one frame");
+			for (key, mutations) in top {
+				match parent.get_mut(&key) {
+					Some(entry) => entry.1.extend(mutations.1),
+					None => {
+						parent.insert(key, mutations);
+					}
+				}
+			}
+		}
+	}
+
+	/// Discard the save point's frame: the writes it described were undone, so
+	/// `SHOW CHANGES` must never report them.
+	pub fn rollback_save_point(&self) {
+		pop_save_point(&mut self.buffer.lock());
+	}
+}
+
+#[cfg(test)]
+mod save_point_tests {
+	use super::*;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+
+	fn table() -> TableName {
+		"t".into()
+	}
+
+	fn record(key: &str) -> RecordId {
+		RecordId::new(table(), key.to_owned())
+	}
+
+	/// Buffer the creation of `t:key`.
+	fn create(changefeed: &Changefeed, key: &str) {
+		changefeed.buffer_record_change(
+			NS,
+			DB,
+			&table(),
+			record(key),
+			Arc::new(Record::new(Value::None)),
+			Arc::new(Record::new(Value::from(key))),
+			false,
+		);
+	}
+
+	/// The records the buffer would flush a mutation for, in the order it holds
+	/// them — which is the order a feed reader replays them in.
+	fn flushed(changefeed: &Changefeed) -> Vec<RecordId> {
+		changefeed
+			.changes()
+			.unwrap()
+			.into_iter()
+			.flat_map(|(_, _, _, value)| TableMutations::kv_decode_value(&value, ()).unwrap().1)
+			.map(|mutation| match mutation {
+				TableMutation::Set(id, _) => id,
+				other @ (TableMutation::Del(_)
+				| TableMutation::Def(_)
+				| TableMutation::SetWithDiff(..)
+				| TableMutation::DelWithOriginal(..)) => {
+					panic!("the test buffers creates, not {other:?}")
+				}
+			})
+			.collect()
+	}
+
+	/// A rolled-back save point's writes are undone, so `SHOW CHANGES` must
+	/// never report them: the transaction still commits, and the feed is the
+	/// record a reader replays history from.
+	#[test]
+	fn a_rolled_back_save_point_reports_none_of_its_mutations() {
+		let changefeed = Changefeed::new();
+		create(&changefeed, "kept");
+		changefeed.push_save_point();
+		create(&changefeed, "undone");
+		changefeed.rollback_save_point();
+		assert_eq!(flushed(&changefeed), vec![record("kept")]);
+	}
+
+	/// A released save point's writes survived, so its mutations belong to the
+	/// enclosing scope, after whatever that scope had already buffered.
+	#[test]
+	fn a_released_save_point_hands_its_mutations_up_in_order() {
+		let changefeed = Changefeed::new();
+		create(&changefeed, "first");
+		changefeed.push_save_point();
+		create(&changefeed, "second");
+		changefeed.release_save_point();
+		create(&changefeed, "third");
+		assert_eq!(flushed(&changefeed), vec![record("first"), record("second"), record("third")]);
+	}
+
+	/// Nested, because a single scope cannot tell framing apart from one flat
+	/// map: either discards the same mutations. What distinguishes them is an
+	/// inner rollback under an outer scope that survives — the inner mutations
+	/// have to go and the outer ones have to stay, which one map cannot do.
+	#[test]
+	fn nested_save_points_keep_only_the_mutations_that_survived() {
+		let changefeed = Changefeed::new();
+		create(&changefeed, "transaction");
+		changefeed.push_save_point();
+		create(&changefeed, "outer");
+		changefeed.push_save_point();
+		create(&changefeed, "inner");
+		changefeed.rollback_save_point();
+		changefeed.release_save_point();
+		assert_eq!(flushed(&changefeed), vec![record("transaction"), record("outer")]);
+	}
+
+	/// A scope still open at the flush belongs to the transaction: the writes it
+	/// describes are the ones about to be committed.
+	#[test]
+	fn an_open_save_point_is_flushed_with_the_transaction() {
+		let changefeed = Changefeed::new();
+		create(&changefeed, "first");
+		changefeed.push_save_point();
+		create(&changefeed, "second");
+		assert_eq!(flushed(&changefeed), vec![record("first"), record("second")]);
+	}
+
+	/// Cancelling drops the open scopes along with their mutations, and leaves
+	/// the stack at the floor depth every other operation assumes.
+	#[test]
+	fn clearing_drops_every_open_scope() {
+		let changefeed = Changefeed::new();
+		create(&changefeed, "a");
+		changefeed.push_save_point();
+		create(&changefeed, "b");
+		changefeed.clear();
+		assert_eq!(changefeed.buffer.lock().len(), 1);
+		assert!(flushed(&changefeed).is_empty());
 	}
 }
 

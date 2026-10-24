@@ -25,6 +25,8 @@ use surrealdb_kvs::value::KVValue;
 use surrealdb_kvs::{Val, impl_kv_value_revisioned};
 use uuid::Uuid;
 
+use crate::values::save_point::{fold_frames, pop_save_point, reset_frames};
+
 /// The kind of mutation that produced a [`LiveEvent`].
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -167,7 +169,10 @@ struct BufferKey {
 /// changefeeds share no semantics (`store_diff`, retention, visibility) and only
 /// the lower-level versionstamp/commit plumbing is reused.
 pub struct LiveEventBuffer {
-	buffer: Mutex<HashMap<BufferKey, LiveEvents>>,
+	/// The save-point frame stack ([`crate::values::save_point`]). Every change
+	/// is buffered into the top frame, so a rollback discards exactly the
+	/// events the writes it undid produced.
+	buffer: Mutex<Vec<HashMap<BufferKey, LiveEvents>>>,
 }
 
 impl Default for LiveEventBuffer {
@@ -179,7 +184,7 @@ impl Default for LiveEventBuffer {
 impl LiveEventBuffer {
 	pub fn new() -> Self {
 		Self {
-			buffer: Mutex::new(HashMap::new()),
+			buffer: Mutex::new(vec![HashMap::new()]),
 		}
 	}
 
@@ -195,8 +200,9 @@ impl LiveEventBuffer {
 		after: Value,
 		captured: u128,
 	) {
-		let mut buffer = self.buffer.lock();
-		buffer
+		let mut frames = self.buffer.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
+		frame
 			.entry(BufferKey {
 				ns,
 				db,
@@ -223,8 +229,15 @@ impl LiveEventBuffer {
 
 	/// Returns all buffered events as prepared writes. The commit versionstamp is
 	/// added by the caller at flush time.
+	///
+	/// A scope still open here belongs to the transaction — the writes it
+	/// describes are the ones about to be committed — so the stack is folded
+	/// down before the events are read, which also restores the order they were
+	/// buffered in.
 	pub fn changes(&self) -> Result<Vec<PreparedWrite>> {
-		let buffer = self.buffer.lock();
+		let mut frames = self.buffer.lock();
+		fold_frames(&mut frames, |entry: &mut LiveEvents, events| entry.0.extend(events.0));
+		let buffer = frames.first().expect("the transaction frame is always present");
 		if buffer.is_empty() {
 			return Ok(Vec::new());
 		}
@@ -238,6 +251,135 @@ impl LiveEventBuffer {
 
 	/// Clear the buffer (used on transaction cancel/rollback).
 	pub fn clear(&self) {
-		self.buffer.lock().clear();
+		reset_frames(&mut self.buffer.lock());
+	}
+
+	/// Open a save-point scope: the events buffered from here on are its own.
+	pub fn push_save_point(&self) {
+		self.buffer.lock().push(HashMap::new());
+	}
+
+	/// Fold the save point's frame into the one beneath it: its writes survived,
+	/// so the events describing them belong to the enclosing scope, after
+	/// whatever that scope had already buffered.
+	pub fn release_save_point(&self) {
+		let mut frames = self.buffer.lock();
+		if let Some(top) = pop_save_point(&mut frames) {
+			let parent = frames.last_mut().expect("popping left at least one frame");
+			for (key, events) in top {
+				match parent.get_mut(&key) {
+					Some(entry) => entry.0.extend(events.0),
+					None => {
+						parent.insert(key, events);
+					}
+				}
+			}
+		}
+	}
+
+	/// Discard the save point's frame: the writes it described were undone, so a
+	/// subscriber must never be told they happened.
+	pub fn rollback_save_point(&self) {
+		pop_save_point(&mut self.buffer.lock());
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+
+	fn table() -> TableName {
+		"t".into()
+	}
+
+	fn record(key: &str) -> RecordId {
+		RecordId::new(table(), key.to_owned())
+	}
+
+	/// Buffer the creation of `t:key`.
+	fn create(buffer: &LiveEventBuffer, key: &str) {
+		buffer.buffer_record_change(NS, DB, &table(), record(key), Value::None, Value::from(key));
+	}
+
+	/// The records the buffer would flush an event for, in the order it holds
+	/// them — which is the order a subscriber replays them in.
+	fn flushed(buffer: &LiveEventBuffer) -> Vec<RecordId> {
+		buffer
+			.changes()
+			.unwrap()
+			.into_iter()
+			.flat_map(|(_, _, _, value)| LiveEvents::kv_decode_value(&value, ()).unwrap().0)
+			.map(|event| event.id)
+			.collect()
+	}
+
+	/// A rolled-back save point's writes are undone, so a subscriber must never
+	/// be told they happened: the transaction still commits, and nothing later
+	/// retracts a notification.
+	#[test]
+	fn a_rolled_back_save_point_delivers_none_of_its_events() {
+		let buffer = LiveEventBuffer::new();
+		create(&buffer, "kept");
+		buffer.push_save_point();
+		create(&buffer, "undone");
+		buffer.rollback_save_point();
+		assert_eq!(flushed(&buffer), vec![record("kept")]);
+	}
+
+	/// A released save point's writes survived, so its events belong to the
+	/// enclosing scope, after whatever that scope had already buffered.
+	#[test]
+	fn a_released_save_point_hands_its_events_up_in_order() {
+		let buffer = LiveEventBuffer::new();
+		create(&buffer, "first");
+		buffer.push_save_point();
+		create(&buffer, "second");
+		buffer.release_save_point();
+		create(&buffer, "third");
+		assert_eq!(flushed(&buffer), vec![record("first"), record("second"), record("third")]);
+	}
+
+	/// Nested, because a single scope cannot tell framing apart from one flat
+	/// map: either discards the same events. What distinguishes them is an inner
+	/// rollback under an outer scope that survives — the inner events have to go
+	/// and the outer ones have to stay, which one map cannot do.
+	#[test]
+	fn nested_save_points_keep_only_the_events_that_survived() {
+		let buffer = LiveEventBuffer::new();
+		create(&buffer, "transaction");
+		buffer.push_save_point();
+		create(&buffer, "outer");
+		buffer.push_save_point();
+		create(&buffer, "inner");
+		buffer.rollback_save_point();
+		buffer.release_save_point();
+		assert_eq!(flushed(&buffer), vec![record("transaction"), record("outer")]);
+	}
+
+	/// A scope still open at the flush belongs to the transaction: the writes it
+	/// describes are the ones about to be committed.
+	#[test]
+	fn an_open_save_point_is_flushed_with_the_transaction() {
+		let buffer = LiveEventBuffer::new();
+		create(&buffer, "first");
+		buffer.push_save_point();
+		create(&buffer, "second");
+		assert_eq!(flushed(&buffer), vec![record("first"), record("second")]);
+	}
+
+	/// Cancelling drops the open scopes along with their events, and leaves the
+	/// stack at the floor depth every other operation assumes.
+	#[test]
+	fn clearing_drops_every_open_scope() {
+		let buffer = LiveEventBuffer::new();
+		create(&buffer, "a");
+		buffer.push_save_point();
+		create(&buffer, "b");
+		buffer.clear();
+		assert_eq!(buffer.buffer.lock().len(), 1);
+		assert!(flushed(&buffer).is_empty());
 	}
 }
