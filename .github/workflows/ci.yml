@@ -254,6 +254,35 @@ jobs:
       - name: Run clippy
         run: cargo make ci-clippy
 
+  # Lints the `cfg(not(feature = "surrealism"))` arms that `clippy` compiles out.
+  # Its feature set recompiles `surrealdb-core` and `surrealdb-expr`, so it
+  # shares no build with `clippy` and runs beside it as its own job.
+  clippy-no-surrealism:
+    name: Check clippy (surrealism off)
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
       - name: Run clippy (surrealism off)
         run: cargo make ci-clippy-no-surrealism
 
@@ -1844,6 +1873,7 @@ jobs:
       # Quality checks
       - format
       - clippy
+      - clippy-no-surrealism
       - clippy-release
       - check-debug
       - check-release
@@ -1904,6 +1934,7 @@ jobs:
             "${{ needs.build.result }}"
             "${{ needs.format.result }}"
             "${{ needs.clippy.result }}"
+            "${{ needs.clippy-no-surrealism.result }}"
             "${{ needs.clippy-release.result }}"
             "${{ needs.check-debug.result }}"
             "${{ needs.check-release.result }}"
