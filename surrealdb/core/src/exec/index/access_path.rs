@@ -2601,6 +2601,7 @@ mod range_comparison_tests {
 			comment: None,
 			prepare_remove: false,
 			format_version,
+			nulls_not_distinct: false,
 		}
 	}
 

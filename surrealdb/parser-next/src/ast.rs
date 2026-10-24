@@ -412,6 +412,7 @@ pub enum Cl {
 	Computed,
 	/// `a`: list of expressions.
 	Fields,
+	/// `a`: 1 with `NULLS NOT DISTINCT`.
 	Unique,
 	/// `a`: condition or `NONE`.
 	Count,

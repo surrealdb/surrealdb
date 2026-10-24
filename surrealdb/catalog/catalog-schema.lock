@@ -514,6 +514,7 @@ type StoredIndexDefinition struct since=4.0 reserved=[]
   10 index Index critical since=4.0 absent=required
   12 prepare_remove bool critical since=4.0 absent=required
   14 format_version int:u16 critical since=4.0 absent=required
+  16 nulls_not_distinct bool critical since=4.0 absent=default(bool::default)
 type StoredMlModelDefinition struct since=4.0 reserved=[]
   1 comment option<string> ignorable since=4.0 absent=none independent="a comment is text for people and no other field reads it"
   2 hash string critical since=4.0 absent=required

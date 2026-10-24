@@ -883,7 +883,9 @@ impl Lower<'_> {
 				s.cols = self.exprs(c.a)?;
 				fields = Some(self.last_tok(c.start, c.end));
 			} else if kind == Cl::Unique {
-				s.index = Index::Uniq;
+				s.index = Index::Uniq {
+					nulls_not_distinct: c.a == 1,
+				};
 			} else if kind == Cl::Count {
 				s.index = Index::Count(self.opt(c.a)?.map(Cond));
 			} else if kind == Cl::Fulltext {

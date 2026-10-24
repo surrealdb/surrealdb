@@ -262,6 +262,7 @@ mod tests {
 			comment: None,
 			prepare_remove: false,
 			format_version: crate::catalog::INDEX_FORMAT_VERSION,
+			nulls_not_distinct: false,
 		}
 	}
 

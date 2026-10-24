@@ -1117,6 +1117,7 @@ pub fn index_basic() -> StoredIndexDefinition {
 		comment: None,
 		prepare_remove: false,
 		format_version: 0,
+		nulls_not_distinct: false,
 	}
 }
 
@@ -1131,6 +1132,7 @@ pub fn index_unique() -> StoredIndexDefinition {
 		comment: Some("Unique email constraint".to_string()),
 		prepare_remove: false,
 		format_version: 0,
+		nulls_not_distinct: false,
 	}
 }
 
@@ -1156,6 +1158,7 @@ pub fn index_hnsw() -> StoredIndexDefinition {
 		comment: Some("Vector similarity search index".to_string()),
 		prepare_remove: false,
 		format_version: 0,
+		nulls_not_distinct: false,
 	}
 }
 
@@ -1177,6 +1180,7 @@ pub fn index_fulltext() -> StoredIndexDefinition {
 		comment: Some("Full-text search on articles".to_string()),
 		prepare_remove: false,
 		format_version: 0,
+		nulls_not_distinct: false,
 	}
 }
 
@@ -1194,6 +1198,7 @@ pub fn index_count() -> StoredIndexDefinition {
 		comment: None,
 		prepare_remove: true,
 		format_version: 0,
+		nulls_not_distinct: false,
 	}
 }
 

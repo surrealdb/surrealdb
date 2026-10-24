@@ -1214,6 +1214,7 @@ fn the_columns_and_guards_of_the_maintained_indexes_are_regions_of_the_stage() {
 			prepare_remove: removed,
 			format_version: 3,
 			comment: None,
+			nulls_not_distinct: false,
 		};
 	let defs: std::sync::Arc<[IndexDefinition]> = std::sync::Arc::from(vec![
 		index(1, &["a", "b.c"], Index::Idx, None, false),
@@ -1256,6 +1257,7 @@ fn the_definitions_of_an_index_set_read_back_from_their_text() {
 		prepare_remove: removed,
 		format_version: 3,
 		comment: Some("kept".to_owned()),
+		nulls_not_distinct: false,
 	};
 	let set = IndexDefs::new(std::sync::Arc::from(vec![
 		def(1, "first", Index::Idx, false),

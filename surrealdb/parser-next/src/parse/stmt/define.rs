@@ -1270,7 +1270,22 @@ impl<'a, 's> Parser<'a, 's> {
 				self.push_clause(Cl::Fields, list, 0, t.start, first)?;
 				fields = true;
 			} else if t.kw == Kw::Unique {
-				self.flag_clause(Cl::Unique)?;
+				self.bump();
+				let first = self.ast.nodes.len();
+				// `NULLS NOT DISTINCT`, whose words are not reserved: a NULL member of a
+				// tuple collides as any other value does.
+				let nulls_not_distinct = if self.ident_is(self.tok, "NULLS", true) {
+					self.bump();
+					self.expect_kw(Kw::Not, "NOT")?;
+					if !self.ident_is(self.tok, "DISTINCT", true) {
+						return Err(self.unexpected("DISTINCT"));
+					}
+					self.bump();
+					1
+				} else {
+					0
+				};
+				self.push_clause(Cl::Unique, nulls_not_distinct, 0, t.start, first)?;
 				(one_column, needs_columns) = (false, true);
 			} else if t.kw == Kw::Count {
 				(one_column, needs_columns) = (false, false);

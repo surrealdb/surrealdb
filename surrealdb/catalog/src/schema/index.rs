@@ -222,7 +222,7 @@ pub const HNSW_PENDING_GUARDS_FORMAT_VERSION: u16 = 6;
 /// allow-list scoring reads the records instead until the index is rebuilt.
 pub const VECTOR_DOC_ELEMENTS_FORMAT_VERSION: u16 = 3;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredIndexDefinition {
@@ -255,6 +255,14 @@ pub struct StoredIndexDefinition {
 	#[revision(start = 2)]
 	#[stored(n = 14)]
 	pub format_version: u16,
+	/// Whether a `UNIQUE` index stores a tuple holding `NULL` (and no `NONE`)
+	/// at its unique slot, so that it collides as a complete tuple does
+	/// (`UNIQUE NULLS NOT DISTINCT`). Otherwise such a tuple is a non-unique
+	/// entry naming its record. `false` for every other index kind, and for a
+	/// definition written before the clause existed.
+	#[revision(start = 3)]
+	#[stored(n = 16, default = "bool::default")]
+	pub nulls_not_distinct: bool,
 }
 
 impl_kv_value_catalog!(StoredIndexDefinition);
@@ -264,10 +272,14 @@ impl IndexDefinition {
 	/// comes from the compiled `count_cond`; every other kind is plain data
 	/// and lowers via [`Index::to_runtime_definition`].
 	fn index_to_runtime_definition(&self) -> runtime::index_kind::Index {
-		if let Index::Count(_) = &self.index {
-			runtime::index_kind::Index::Count(self.count_cond.clone())
-		} else {
-			self.index.to_runtime_definition()
+		match &self.index {
+			Index::Uniq => runtime::index_kind::Index::Uniq {
+				nulls_not_distinct: self.nulls_not_distinct,
+			},
+			Index::Count(_) => runtime::index_kind::Index::Count(self.count_cond.clone()),
+			other @ (Index::Idx | Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)) => {
+				other.to_runtime_definition()
+			}
 		}
 	}
 
@@ -377,7 +389,11 @@ impl Index {
 	pub fn to_runtime_definition(&self) -> runtime::index_kind::Index {
 		match self {
 			Self::Idx => runtime::index_kind::Index::Idx,
-			Self::Uniq => runtime::index_kind::Index::Uniq,
+			// The definition carries `NULLS NOT DISTINCT`; this kind alone
+			// spells `UNIQUE` without it.
+			Self::Uniq => runtime::index_kind::Index::Uniq {
+				nulls_not_distinct: false,
+			},
 			Self::Hnsw(params) => runtime::index_kind::Index::Hnsw(params.clone().into()),
 			Self::DiskAnn(params) => runtime::index_kind::Index::DiskAnn(params.clone().into()),
 			Self::FullText(params) => runtime::index_kind::Index::FullText(params.clone().into()),
@@ -424,7 +440,9 @@ impl From<Index> for runtime::index_kind::Index {
 	fn from(v: Index) -> Self {
 		match v {
 			Index::Idx => Self::Idx,
-			Index::Uniq => Self::Uniq,
+			Index::Uniq => Self::Uniq {
+				nulls_not_distinct: false,
+			},
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
@@ -899,6 +917,8 @@ pub struct IndexDefinition {
 	pub prepare_remove: bool,
 	pub format_version: u16,
 	pub comment: Option<String>,
+	/// See [`StoredIndexDefinition::nulls_not_distinct`].
+	pub nulls_not_distinct: bool,
 }
 
 impl IndexDefinition {
@@ -1021,6 +1041,7 @@ impl FromStored for IndexDefinition {
 				prepare_remove: stored.prepare_remove,
 				format_version: stored.format_version,
 				comment: stored.comment.clone(),
+				nulls_not_distinct: stored.nulls_not_distinct,
 			})
 		}
 		build(stored).with_context(|| {
@@ -1049,6 +1070,7 @@ impl IndexDefinition {
 			comment: self.comment.clone(),
 			prepare_remove: self.prepare_remove,
 			format_version: self.format_version,
+			nulls_not_distinct: self.nulls_not_distinct,
 		}
 	}
 }
@@ -1057,7 +1079,9 @@ impl From<crate::expr::index_kind::Index> for Index {
 	fn from(v: crate::expr::index_kind::Index) -> Self {
 		match v {
 			crate::expr::index_kind::Index::Idx => Self::Idx,
-			crate::expr::index_kind::Index::Uniq => Self::Uniq,
+			crate::expr::index_kind::Index::Uniq {
+				..
+			} => Self::Uniq,
 			crate::expr::index_kind::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::expr::index_kind::Index::FullText(p) => Self::FullText(p.into()),
 			crate::expr::index_kind::Index::Count(c) => {

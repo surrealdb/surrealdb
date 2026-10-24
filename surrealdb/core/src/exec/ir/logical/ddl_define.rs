@@ -538,7 +538,9 @@ pub(super) fn plan_define<'e>(
 			let comment = s.comment(&stmt.comment)?;
 			let index = match &stmt.index {
 				Index::Idx => IndexSpec::Idx,
-				Index::Uniq => IndexSpec::Uniq,
+				Index::Uniq {
+					..
+				} => IndexSpec::Uniq,
 				Index::Hnsw(params) => IndexSpec::Hnsw(params.clone()),
 				Index::FullText(params) => IndexSpec::FullText(params.clone()),
 				Index::Count(condition) => IndexSpec::Count(
@@ -563,6 +565,12 @@ pub(super) fn plan_define<'e>(
 				comment: comment_text(&stmt.comment),
 				prepare_remove: false,
 				format_version: crate::catalog::INDEX_FORMAT_VERSION,
+				nulls_not_distinct: matches!(
+					stmt.index,
+					Index::Uniq {
+						nulls_not_distinct: true
+					}
+				),
 			};
 			(
 				DdlForm::DefineIndex,

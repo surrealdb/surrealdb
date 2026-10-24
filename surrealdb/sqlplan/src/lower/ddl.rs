@@ -274,7 +274,9 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 						cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(
 							col.name.as_str(),
 						))]))],
-						index: Index::Uniq,
+						index: Index::Uniq {
+							nulls_not_distinct: false,
+						},
 						kind: if create.if_not_exists {
 							DefineKind::IfNotExists
 						} else {
@@ -295,7 +297,9 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 						cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(
 							col.name.as_str(),
 						))]))],
-						index: Index::Uniq,
+						index: Index::Uniq {
+							nulls_not_distinct: false,
+						},
 						kind: if create.if_not_exists {
 							DefineKind::IfNotExists
 						} else {
@@ -330,7 +334,9 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					kind: if create.if_not_exists {
 						DefineKind::IfNotExists
 					} else {
@@ -350,7 +356,9 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					kind: if create.if_not_exists {
 						DefineKind::IfNotExists
 					} else {
@@ -424,7 +432,9 @@ pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, Plan
 		what: Expr::Table(TableName::from(tbl)),
 		cols,
 		index: if idx.unique {
-			Index::Uniq
+			Index::Uniq {
+				nulls_not_distinct: false,
+			}
 		} else {
 			Index::Idx
 		},
@@ -627,7 +637,9 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					..Default::default()
 				};
 				exprs.push(Expr::Define(Box::new(DefineStatement::Index(idx))));
@@ -640,7 +652,9 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					..Default::default()
 				};
 				exprs.push(Expr::Define(Box::new(DefineStatement::Index(idx))));
@@ -799,7 +813,9 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 				name: Expr::Idiom(Idiom::field(format!("{tbl_name}_{}_pk", col.name))),
 				what: Expr::Table(TableName::from(tbl_name)),
 				cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.name.as_str()))]))],
-				index: Index::Uniq,
+				index: Index::Uniq {
+					nulls_not_distinct: false,
+				},
 				kind: if create.if_not_exists {
 					DefineKind::IfNotExists
 				} else {
@@ -815,7 +831,9 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 				name: Expr::Idiom(Idiom::field(format!("{tbl_name}_{}_uniq", col.name))),
 				what: Expr::Table(TableName::from(tbl_name)),
 				cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.name.as_str()))]))],
-				index: Index::Uniq,
+				index: Index::Uniq {
+					nulls_not_distinct: false,
+				},
 				kind: if create.if_not_exists {
 					DefineKind::IfNotExists
 				} else {
@@ -843,7 +861,9 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					kind: if create.if_not_exists {
 						DefineKind::IfNotExists
 					} else {
@@ -869,7 +889,9 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 						.iter()
 						.map(|c| Expr::Idiom(Idiom(vec![Part::Field(Strand::from(c.as_str()))])))
 						.collect(),
-					index: Index::Uniq,
+					index: Index::Uniq {
+						nulls_not_distinct: false,
+					},
 					kind: if create.if_not_exists {
 						DefineKind::IfNotExists
 					} else {
@@ -975,7 +997,9 @@ pub fn lower_mysql_create_index(idx: &MyCreateIndexStmt) -> Result<Vec<Expr>, Pl
 		what: Expr::Table(TableName::from(tbl)),
 		cols,
 		index: if idx.unique {
-			Index::Uniq
+			Index::Uniq {
+				nulls_not_distinct: false,
+			}
 		} else {
 			Index::Idx
 		},
@@ -1202,7 +1226,9 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 								Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.as_str()))]))
 							})
 							.collect(),
-						index: Index::Uniq,
+						index: Index::Uniq {
+							nulls_not_distinct: false,
+						},
 						kind: DefineKind::Default,
 						..Default::default()
 					};
@@ -1223,7 +1249,9 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 								Expr::Idiom(Idiom(vec![Part::Field(Strand::from(col.as_str()))]))
 							})
 							.collect(),
-						index: Index::Uniq,
+						index: Index::Uniq {
+							nulls_not_distinct: false,
+						},
 						kind: DefineKind::Default,
 						..Default::default()
 					};

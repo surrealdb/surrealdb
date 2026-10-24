@@ -101,6 +101,7 @@ async fn test_single_tx_cache_invalidation_on_index_put() {
 		comment: None,
 		prepare_remove: false,
 		format_version: 1,
+		nulls_not_distinct: false,
 	};
 	tx.put_tb_index(ns, db, &tb, &ix_def).await.unwrap();
 
@@ -136,6 +137,7 @@ async fn test_single_tx_cache_invalidation_on_index_delete() {
 		comment: None,
 		prepare_remove: false,
 		format_version: 1,
+		nulls_not_distinct: false,
 	};
 	tx.put_tb_index(ns, db, &tb, &ix_def).await.unwrap();
 

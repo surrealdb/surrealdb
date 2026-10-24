@@ -6696,6 +6696,7 @@ mod tests {
 			prepare_remove: false,
 			format_version: 3,
 			comment: None,
+			nulls_not_distinct: false,
 		}
 	}
 

@@ -2653,6 +2653,7 @@ ac995684f0ab81d7 language-tests/tests/language/statements/define/index/on_schema
 4f53ec962226030d language-tests/tests/language/statements/define/index/unique_and_fulltext_on_one_field.surql
 0689855bacbec67b language-tests/tests/language/statements/define/index/unique_constraint_index.surql
 40f5006e3eaf8c6d language-tests/tests/language/statements/define/index/unique_index.surql
+ca4c62439e4587bb language-tests/tests/language/statements/define/index/unique_nulls_not_distinct.surql
 e98e88550149e328 language-tests/tests/language/statements/define/index/with_non_boolean_expression.surql
 44b631b874dab090 language-tests/tests/language/statements/define/index/with_non_boolean_expression_new_executor.surql
 c5f980e2d2b4017d language-tests/tests/language/statements/define/module/as_rejected.surql

@@ -2868,6 +2868,7 @@ mod tests {
 			comment: None,
 			prepare_remove: false,
 			format_version: 1,
+			nulls_not_distinct: false,
 		}
 	}
 
@@ -3816,6 +3817,7 @@ mod convert_tests {
 			comment: None,
 			prepare_remove: false,
 			format_version: 1,
+			nulls_not_distinct: false,
 		}
 	}
 

@@ -2423,7 +2423,8 @@ async fn step_inner(
 			let mut reuses = !existing.prepare_remove
 				&& existing.table_name.as_str() == template.table_name.as_str()
 				&& existing.cols == template.cols
-				&& existing.index == template.index;
+				&& existing.index == template.index
+				&& existing.nulls_not_distinct == template.nulls_not_distinct;
 			if reuses && *healthy {
 				// An index is current when its stamp already gives it the layout a
 				// definition written now would have: its kind's current layout, as

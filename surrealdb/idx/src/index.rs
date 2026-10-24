@@ -156,8 +156,9 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	/// Where the entry for values `v` of this record is stored: the unique
-	/// slot on a `UNIQUE` index for a tuple holding no `NONE` or `NULL`, and
-	/// otherwise the non-unique key naming the record
+	/// slot on a `UNIQUE` index for a tuple holding no `NONE`, and no `NULL`
+	/// unless the index is `NULLS NOT DISTINCT`, and otherwise the non-unique
+	/// key naming the record
 	/// ([`IndexKeyspace::stored_key`], which the read path's ranges agree
 	/// with). Numbers of every kind share key bytes, so `0`, `0f` and `0dec`
 	/// collide on a `UNIQUE` index.
@@ -1067,6 +1068,7 @@ mod interrupted_fan_out {
 			prepare_remove: false,
 			format_version: INDEX_FORMAT_VERSION,
 			comment: None,
+			nulls_not_distinct: false,
 		}
 	}
 
@@ -1229,6 +1231,7 @@ mod value_shapes {
 			prepare_remove: false,
 			format_version: INDEX_FORMAT_VERSION,
 			comment: None,
+			nulls_not_distinct: false,
 		}
 	}
 

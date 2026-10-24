@@ -80,7 +80,8 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// `StoredFieldDefinition` gained `inline` (5 -> 6) and `conformance`
 	/// (6 -> 7), `DatabaseDefinition` gained `compatibility` (1 -> 2),
 	/// `StoredSubscriptionDefinition` gained the registration watermark
-	/// (2 -> 3), and `StoredApiDefinition` gained `security` (2 -> 3).
+	/// (2 -> 3), `StoredApiDefinition` gained `security` (2 -> 3), and
+	/// `StoredIndexDefinition` gained `nulls_not_distinct` (2 -> 3).
 	/// Their fixtures still decode — the field defaults in — but re-encode a
 	/// revision higher. Each name drops off this list once a snapshot taken
 	/// after its bump exists to pin it, exactly as `V3_3_0_BUMPED` did at
@@ -93,6 +94,7 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 		"StoredSubscriptionDefinition",
 		"DatabaseDefinition",
 		"StoredApiDefinition",
+		"StoredIndexDefinition",
 	];
 	/// Fixtures of a type not itself bumped after the newest snapshot that
 	/// nonetheless *embed* one that was, so they carry its revision byte:

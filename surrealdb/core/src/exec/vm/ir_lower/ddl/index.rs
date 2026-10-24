@@ -182,8 +182,9 @@ impl Ddl<'_, '_> {
 			self.set_field(definition, "cols", Operand::Reg(list))?;
 		}
 
-		// A definition that leaves its index unchanged (the same table, columns and kind) keeps the
-		// index's id, data and on-disk format, and refreshes the definition alone, so its comment.
+		// A definition that leaves its index unchanged (the same table, columns, kind and
+		// `NULLS NOT DISTINCT`) keeps the index's id, data and on-disk format, and refreshes the
+		// definition alone, so its comment.
 		// An import replaying it keeps any such index. `OVERWRITE` keeps only an index fit to serve
 		// as it stands (`IndexReplayReuses`'s `healthy`); one still building, failed, or stored in
 		// an older format is retired and rebuilt below.

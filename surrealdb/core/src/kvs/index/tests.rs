@@ -4326,6 +4326,7 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 			comment: None,
 			prepare_remove: false,
 			format_version: 1,
+			nulls_not_distinct: false,
 		};
 		tx.put_tb_index(ns.namespace_id, db.database_id, &table_name, &index).await?;
 		tx.commit().await?;
@@ -11289,6 +11290,7 @@ async fn assert_uncommitted_definition_keeps_a_request(kind: UnfencedKind) -> Re
 		comment: None,
 		prepare_remove: false,
 		format_version: template.format_version,
+		nulls_not_distinct: false,
 	});
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 
@@ -13160,6 +13162,7 @@ async fn new_index_definition(
 		comment: None,
 		prepare_remove: false,
 		format_version: INDEX_FORMAT_VERSION,
+		nulls_not_distinct: false,
 	}))
 }
 
@@ -19517,6 +19520,7 @@ async fn planning_shares_the_shapes_of_finished_builds_only() -> Result<()> {
 		prepare_remove: false,
 		format_version: crate::catalog::INDEX_FORMAT_VERSION,
 		comment: None,
+		nulls_not_distinct: false,
 	};
 	let (finished, building) = (index(1, "finished"), index(2, "building"));
 	let indexes = [finished.clone(), building.clone()];

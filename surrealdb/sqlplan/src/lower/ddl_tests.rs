@@ -160,7 +160,12 @@ fn test_lower_pgsql_create_table_simple() {
 	let DefineStatement::Index(idx) = &**d else {
 		panic!("Expected DefineIndex for primary key");
 	};
-	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(
+		idx.index,
+		surrealdb_expr::expr::index_kind::Index::Uniq {
+			nulls_not_distinct: false
+		}
+	);
 
 	// Index 2: email unique index
 	let Expr::Define(d) = &exprs[6] else {
@@ -169,7 +174,12 @@ fn test_lower_pgsql_create_table_simple() {
 	let DefineStatement::Index(idx) = &**d else {
 		panic!("Expected DefineIndex for unique");
 	};
-	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(
+		idx.index,
+		surrealdb_expr::expr::index_kind::Index::Uniq {
+			nulls_not_distinct: false
+		}
+	);
 }
 
 #[test]
@@ -215,7 +225,12 @@ fn test_lower_pgsql_create_index() {
 	let DefineStatement::Index(idx) = &**d else {
 		panic!("Expected DefineIndex");
 	};
-	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(
+		idx.index,
+		surrealdb_expr::expr::index_kind::Index::Uniq {
+			nulls_not_distinct: false
+		}
+	);
 	assert_eq!(idx.kind, DefineKind::IfNotExists);
 	assert_eq!(idx.cols.len(), 1);
 
@@ -541,7 +556,12 @@ fn test_lower_pgsql_alter_table_constraints() {
 	let DefineStatement::Index(idx) = &**d else {
 		panic!("Expected DefineIndex");
 	};
-	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(
+		idx.index,
+		surrealdb_expr::expr::index_kind::Index::Uniq {
+			nulls_not_distinct: false
+		}
+	);
 	assert_eq!(idx.cols.len(), 2);
 
 	let add_uq =
@@ -555,7 +575,12 @@ fn test_lower_pgsql_alter_table_constraints() {
 	let DefineStatement::Index(idx) = &**d else {
 		panic!("Expected DefineIndex");
 	};
-	assert_eq!(idx.index, surrealdb_expr::expr::index_kind::Index::Uniq);
+	assert_eq!(
+		idx.index,
+		surrealdb_expr::expr::index_kind::Index::Uniq {
+			nulls_not_distinct: false
+		}
+	);
 	assert_eq!(idx.cols.len(), 2);
 
 	let drop_con = surrealdb_pgsql::parse_statement(

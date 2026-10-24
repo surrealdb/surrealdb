@@ -177,8 +177,9 @@ impl IndexEqualIterator {
 
 /// Iterator for equality lookups on unique (`Uniq`) indexes.
 ///
-/// For non-nullish values this is a single point-get (one KV entry per
-/// value).  NONE/NULL tuples are stored with the non-unique key format
+/// For a value that takes part in uniqueness this is a single point-get (one
+/// KV entry per value). NONE, and NULL unless the index is
+/// `NULLS NOT DISTINCT`, are stored with the non-unique key format
 /// (record-ID suffix) so they require a prefix range scan instead.
 #[cfg(test)]
 pub(crate) struct UniqueEqualIterator {

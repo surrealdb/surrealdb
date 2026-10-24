@@ -154,12 +154,25 @@ pub struct IndexKeyspace<'a> {
 	/// Whether the stamp spells a non-unique entry's record id as a
 	/// `RecordIdentity`.
 	identity_ids: bool,
+	/// Whether a `NULL` value takes part in uniqueness on a `UNIQUE` index
+	/// (`NULLS NOT DISTINCT`). `NONE` never does.
+	nulls_not_distinct: bool,
 }
 
 impl<'a> IndexKeyspace<'a> {
 	/// The keyspace of index `ix`, defined in database `db` of namespace `ns`.
 	pub fn of(ns: NamespaceId, db: DatabaseId, ix: &'a IndexDefinition) -> Self {
 		Self::new(ns, db, &ix.table_name, ix.index_id, ix.format_version)
+			.with_nulls_not_distinct(ix.nulls_not_distinct)
+	}
+
+	/// This keyspace with `NULL` taking part in uniqueness, or not, on a
+	/// `UNIQUE` index. [`Self::new`] keyspaces exempt it.
+	pub fn with_nulls_not_distinct(self, nulls_not_distinct: bool) -> Self {
+		Self {
+			nulls_not_distinct,
+			..self
+		}
 	}
 
 	/// The keyspace of index `ix` on table `tb` in database `db` of namespace
@@ -180,6 +193,7 @@ impl<'a> IndexKeyspace<'a> {
 			spelling: DatetimeSpelling::of(format_version),
 			normalised_decimals: spells_normalised_decimal_keys(format_version),
 			identity_ids: spells_identity_entry_ids(format_version),
+			nulls_not_distinct: false,
 		}
 	}
 
@@ -236,10 +250,19 @@ impl<'a> IndexKeyspace<'a> {
 		})
 	}
 
+	/// Whether a tuple holding `v` takes no part in uniqueness on a `UNIQUE`
+	/// index: `NONE` never does, and `NULL` does only under
+	/// `NULLS NOT DISTINCT`.
+	fn exempt(&self, v: &Value) -> bool {
+		matches!(v, Value::None) || (!self.nulls_not_distinct && matches!(v, Value::Null))
+	}
+
 	/// Where the entry for values `fd` of the record keyed `id` is stored, on
-	/// an index that is `unique` or not.
+	/// an index that is `unique` or not. On a `UNIQUE` index a tuple holding
+	/// an exempt value ([`Self::exempt`]) is stored under the non-unique key,
+	/// which names the record, so any number of them coexist.
 	pub fn stored_key(&self, unique: bool, fd: &[Value], id: &RecordIdKey) -> Result<StoredKey> {
-		if unique && !fd.iter().any(Value::is_nullish) {
+		if unique && !fd.iter().any(|v| self.exempt(v)) {
 			Ok(StoredKey {
 				key: self.unique_key(fd)?,
 				unique: true,
@@ -262,7 +285,7 @@ impl<'a> IndexKeyspace<'a> {
 	/// The entries whose values are exactly `[value]`.
 	pub fn equality(&self, unique: bool, value: &Value) -> Result<TypedRange<IndexEntryValue>> {
 		let fd = slice::from_ref(value);
-		if unique && !value.is_nullish() {
+		if unique && !self.exempt(value) {
 			// A unique slot is a complete key, so the range holding it alone
 			// ends at its immediate successor.
 			let key = self.unique_key(fd)?;
@@ -643,6 +666,33 @@ mod tests {
 		}
 		let stored = ks.stored_key(true, &[Value::from(1)], &id).unwrap();
 		assert!(stored.unique);
+	}
+
+	#[test]
+	fn nulls_not_distinct_stores_a_null_tuple_at_its_unique_slot() {
+		let tb = TableName::from("t");
+		let ks = space(&tb).with_nulls_not_distinct(true);
+		let id = RecordIdKey::from("r".to_owned());
+		// NULL collides as a value does.
+		let fd = [Value::from(1), Value::Null];
+		let stored = ks.stored_key(true, &fd, &id).unwrap();
+		assert!(stored.unique);
+		assert_eq!(stored.key, ks.unique_key(&fd).unwrap());
+		// NONE still takes no part, alone or beside a NULL.
+		for fd in [[Value::from(1), Value::None], [Value::Null, Value::None]] {
+			let stored = ks.stored_key(true, &fd, &id).unwrap();
+			assert!(!stored.unique, "{fd:?} is stored as an entry");
+			assert_eq!(stored.key, ks.entry_key(&fd, &id).unwrap());
+		}
+		// An equality read on NULL is the slot alone; on NONE, every entry.
+		let null = ks.equality(true, &Value::Null).unwrap();
+		let slot = ks.unique_key(&[Value::Null]).unwrap();
+		assert!(contains(&null, &slot));
+		assert!(!contains(&null, &ks.entry_key(&[Value::Null], &id).unwrap()));
+		let none = ks.equality(true, &Value::None).unwrap();
+		assert!(contains(&none, &ks.entry_key(&[Value::None], &id).unwrap()));
+		// A non-unique index stores every tuple as an entry, the clause or not.
+		assert!(!ks.stored_key(false, &fd, &id).unwrap().unique);
 	}
 
 	#[test]

@@ -231,7 +231,8 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	prepare_remove: false,
 	format_version: 1,
-}, 35)]
+	nulls_not_distinct: false,
+}, 36)]
 #[case::model(StoredMlModelDefinition {
 	name: "model".into(),
 	hash: "hash".into(),

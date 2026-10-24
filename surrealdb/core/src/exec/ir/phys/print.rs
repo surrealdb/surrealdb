@@ -4386,6 +4386,7 @@ mod tests {
 			prepare_remove: removed,
 			format_version: 3,
 			comment: Some("a `quoted` \"comment\"".to_owned()),
+			nulls_not_distinct: false,
 		};
 		let set = WriteIndexes {
 			defs: IndexDefs::new(std::sync::Arc::from(vec![

@@ -888,8 +888,9 @@ async fn index_step(
 ///
 /// Each value list is taken as its combinations: every array value that is
 /// not a flattened column's stands for each of its elements in turn. A
-/// combination holding a `NONE` or `NULL` is stored under the non-unique key,
-/// which names the record, so any number of them coexist on a `UNIQUE` index.
+/// combination holding a `NONE`, or a `NULL` on an index without
+/// `NULLS NOT DISTINCT`, is stored under the non-unique key, which names the
+/// record, so any number of them coexist on a `UNIQUE` index.
 /// An entry is deleted only while it names this record, and an entry of the
 /// index's doc-id format may be stored without its doc-id.
 async fn move_entries(

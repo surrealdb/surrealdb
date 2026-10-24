@@ -15,8 +15,12 @@ pub enum Index {
 	/// (Basic) non unique
 	#[default]
 	Idx,
-	/// Unique index
-	Uniq,
+	/// Unique index. A tuple holding `NONE` takes no part in uniqueness, and
+	/// neither does one holding `NULL` unless `nulls_not_distinct`, in which
+	/// case `NULL` collides as any other value does.
+	Uniq {
+		nulls_not_distinct: bool,
+	},
 	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
@@ -31,7 +35,14 @@ impl ToSql for Index {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Idx => {}
-			Self::Uniq => f.push_str("UNIQUE"),
+			Self::Uniq {
+				nulls_not_distinct,
+			} => {
+				f.push_str("UNIQUE");
+				if *nulls_not_distinct {
+					f.push_str(" NULLS NOT DISTINCT");
+				}
+			}
 			Self::Count(c) => {
 				f.push_str("COUNT");
 				if let Some(v) = c {
