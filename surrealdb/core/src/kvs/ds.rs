@@ -8864,6 +8864,32 @@ impl Datastore {
 		self.event_processing_local(&CancellationToken::new()).await
 	}
 
+	/// One bounded pass over the root-level async event queue, which a release that preceded
+	/// per-node queues wrote and a host that has since moved to them still owes a run: entries
+	/// queued before the move and not yet run. [`Self::process_async_events`] reads only a node's
+	/// queue, so a host calls this beside it until the root queue is empty.
+	///
+	/// No lease is taken. Each entry is claimed by the worker about to run it, and an entry whose
+	/// writer is a node that is still live is left to it, as in the adoption sweep, so the pass
+	/// reports it as held and does not run it. Bounded as [`Self::process_async_events`] is, by
+	/// four batches of [`Builder::with_event_batch_size`] entries, and reports [`Progress::More`]
+	/// while entries remain that a pass run at once owes a run.
+	pub async fn process_legacy_async_events(&self) -> Result<Pass> {
+		let range = EventQueuePrefix {}.range()?;
+		let mut pass = Pass::done(TaskLeaseState::NotLeased);
+		let mut budget = EVENT_PROCESSING_SLICE_BATCHES;
+		let canceller = CancellationToken::new();
+		match self
+			.drain_event_range(EventQueue::Root, &range, None, &mut budget, &canceller, &mut pass)
+			.await
+		{
+			Ok(Drained::Backlog) => pass.progress = Progress::More,
+			Ok(Drained::Clear | Drained::LeaseLost) => {}
+			Err(e) => return Err(pass.failed(e)),
+		}
+		Ok(pass)
+	}
+
 	/// The key bounds `[start, end)` of this node's async event queue: a commit of this node that
 	/// queues an `ASYNC` event writes a key within them.
 	pub fn async_event_queue_bounds(&self) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -17192,6 +17218,25 @@ pub(crate) mod test {
 		let pass = ds.process_async_events().await?;
 		assert_eq!((pass.ran, pass.progress), (3, Progress::Done));
 		assert_eq!(logged_count(&ds, &session).await?, 3, "the datastore drains that queue");
+		Ok(())
+	}
+
+	/// Entries a release that queued at the root left are run by the legacy pass, which a node's
+	/// own pass does not reach.
+	#[test_log::test(tokio::test)]
+	async fn the_legacy_pass_runs_the_entries_queued_at_the_root() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 3).await?;
+		assert_eq!(relocate_queue_to_root(&ds).await?, 3);
+
+		let own = ds.process_async_events().await?;
+		assert_eq!((own.ran, own.progress), (0, Progress::Done), "the node's queue is empty");
+		assert_eq!(logged_count(&ds, &session).await?, 0, "the root queue is not the node's");
+		let legacy = ds.process_legacy_async_events().await?;
+		assert_eq!((legacy.ran, legacy.progress), (3, Progress::Done), "{legacy:?}");
+		assert_eq!(logged_count(&ds, &session).await?, 3, "each entry runs once");
+		let again = ds.process_legacy_async_events().await?;
+		assert_eq!((again.items, again.progress), (0, Progress::Done), "the root queue is empty");
 		Ok(())
 	}
 
