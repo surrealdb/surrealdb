@@ -28,6 +28,7 @@ pub mod auth;
 pub mod codec;
 pub mod conn;
 pub mod constants;
+mod error;
 pub mod msg;
 pub mod query;
 pub mod typing;

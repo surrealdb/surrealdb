@@ -992,7 +992,7 @@ impl Connection {
 						MyStatement::Select(select) => {
 							let policy = DialectPolicy::mysql();
 							if let Err(e) = bind_select(select, &catalog, &policy, None) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1004,7 +1004,7 @@ impl Connection {
 								&insert.table.parts,
 								Some(&catalog),
 							) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1016,7 +1016,7 @@ impl Connection {
 								&replace.table.parts,
 								Some(&catalog),
 							) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1051,7 +1051,7 @@ impl Connection {
 								Ok(())
 							}
 							if let Err(e) = check_tref(&update.table, &catalog) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1063,7 +1063,7 @@ impl Connection {
 								&delete.table.parts,
 								Some(&catalog),
 							) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1075,7 +1075,7 @@ impl Connection {
 								&truncate.table.parts,
 								Some(&catalog),
 							) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1087,7 +1087,7 @@ impl Connection {
 								&create.name.parts,
 								Some(&catalog),
 							) {
-								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								let err_pkt = ErrPacket::from(&e);
 								self.writer
 									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 									.await?;
@@ -1100,7 +1100,7 @@ impl Connection {
 									&name.parts,
 									Some(&catalog),
 								) {
-									let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+									let err_pkt = ErrPacket::from(&e);
 									self.writer
 										.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
 										.await?;
@@ -1291,7 +1291,7 @@ impl Connection {
 				// Check for errors first across all execution results
 				for r in &results {
 					if let Err(e) = &r.result {
-						let err_pkt = ErrPacket::general(1064, b"42000", e.to_string());
+						let err_pkt = ErrPacket::from(e);
 						self.writer.write_packet(res_seq, &err_pkt.serialize()).await?;
 						return Ok(());
 					}
@@ -1383,7 +1383,7 @@ impl Connection {
 				Ok(())
 			}
 			Err(err) => {
-				let err_pkt = ErrPacket::general(1064, b"42000", err.to_string());
+				let err_pkt = ErrPacket::from(&err);
 				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
 				Ok(())
 			}
@@ -1973,7 +1973,7 @@ impl Connection {
 
 				for r in &results {
 					if let Err(e) = &r.result {
-						let err_pkt = ErrPacket::general(1064, b"42000", e.to_string());
+						let err_pkt = ErrPacket::from(e);
 						self.writer.write_packet(res_seq, &err_pkt.serialize()).await?;
 						return Ok(());
 					}
@@ -2026,7 +2026,7 @@ impl Connection {
 				Ok(())
 			}
 			Err(err) => {
-				let err_pkt = ErrPacket::general(1064, b"42000", err.to_string());
+				let err_pkt = ErrPacket::from(&err);
 				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
 				Ok(())
 			}
