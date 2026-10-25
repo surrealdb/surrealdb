@@ -913,22 +913,43 @@ a count is a scan as long as the backlog it counts.
 
 ## Not covered here
 
-- **Writes missed while a definition is invisible to other sessions.** [V]
-  A writer takes the table's index list from its own snapshot
-  (`surrealdb/core/src/doc/document.rs:350-360`). A writer that cannot see a
-  definition never consults admission, so it neither indexes nor queues for
-  it.
-  - This is orthogonal to the build and materialise split. Closing it takes a
-    fence on writers by catalog epoch or snapshot, not a change to `!bg`
-    replay or to materialisation.
-  - Part of the window is closed by waiting for the statement's transaction to
-    close before the build reads anything, so that writers which begin after
-    the commit see the definition. [V] A `CONCURRENTLY` build waits so
-    (`Building::await_statement_closed`, `builder.rs:2346-2414`), and so does
-    a blocking build awaited after its statement commits.
-  - Still open: writers whose snapshot predates the commit, and a blocking
-    build inside `BEGIN…COMMIT`, which is awaited inside the transaction and
-    cannot wait for it to close.
+- **Writes missed while a definition is invisible to other sessions.**
+  A writer takes the table's index list from its own snapshot. A writer that
+  cannot see a definition never consults admission, so it neither indexes nor
+  queues for it.
+  - This is orthogonal to the build and materialise split. It is closed by
+    what a build waits for before it reads, not by `!bg` replay or by
+    materialisation.
+  - A build that reads once the definition has committed waits for the
+    statement's transaction to close, so that writers which begin after the
+    commit see the definition (`Building::await_statement_closed`), and then
+    for every write transaction older than the commit
+    (`WriteBarrier`, `kvs/write_barrier.rs`, counting the node's own
+    transactions through `LiveWrites`, `datastore/src/triggers.rs`). A writer
+    older than the commit commits and is indexed exactly once: it maintains
+    the index as its snapshot shows it, and the build reads past it. Every
+    `CONCURRENTLY` build is of this kind, and so is a blocking build awaited
+    after its statement commits.
+  - A blocking build inside `BEGIN…COMMIT` is awaited inside the transaction
+    and reads before the definition has committed. It waits for the writers
+    older than itself, but writers that begin after it started waiting cannot
+    see the definition either, and it cannot wait for them. They are held
+    back instead: from the moment the build begins waiting
+    (`LiveWrites::advance_holding`), a write through the same datastore that
+    reaches a record of the table waits for the transaction to end
+    (`DefinitionHold`, `WriteCtx::wait_for_definitions`) and is refused with a
+    retryable conflict if the transaction committed, since its snapshot lacks
+    the index; its retry sees the index. The defining transaction is not held
+    back, and neither are the maintenance transactions that write under the
+    table without writing its records, such as a build's, which never pass
+    through the record write path. A write that waits for longer than
+    `DEFINITION_HOLD_WAIT` is refused as well, so an open transaction holds a
+    table's writes back for a bounded time.
+  - Still open: the hold is kept in memory by the datastore that runs the
+    definition. On a store several nodes write, a write through another node
+    that begins after the build started waiting is not held back, and a
+    blocking build inside `BEGIN…COMMIT` can miss it. Covering it takes a
+    persisted entry that the nodes answering the write barrier watch.
 - **`REBUILD INDEX` racing writers that index normally.** [V] A writer that
   finds the index `Online` holds no reservation, so a delta it writes can
   outlive the rebuild's wipe. This is the same kind of race as the one

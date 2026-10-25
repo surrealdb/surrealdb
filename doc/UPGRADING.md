@@ -59,6 +59,12 @@ is in, and a store may hold both side by side.
   its index was defined or its rebuild committed has ended, on every node, so
   a long-held write transaction delays it. On a store several nodes write, a
   node whose heartbeat has lapsed for 30 s refuses its own write commits.
+- A `DEFINE INDEX` that builds inside its own transaction, such as one inside
+  `BEGIN … COMMIT` or a `DEFINE INDEX OVERWRITE` that replaces an index, holds
+  back the writes other sessions of the same node make to its table until that
+  transaction ends, for at most 60 s each. A write that waited is refused with
+  a retryable conflict if the transaction committed, and goes on if it rolled
+  back.
 - A `DEFINE INDEX OVERWRITE` that restates the definition of a ready index in
   the current format keeps the index and rewrites only its definition, rather
   than rebuilding it.
@@ -524,6 +530,23 @@ cleaning, and a blocking statement keeps waiting, within its timeout.
 - **A build inside `BEGIN … COMMIT`** does not wait for its own transaction.
   If another build starts waiting while it runs, the transaction's `COMMIT`
   fails with a retryable conflict, since that build may not have waited for it.
+- **A build inside its own transaction holds back the table's writes.** A
+  new index built inside `BEGIN … COMMIT`, in a transaction a client holds
+  open, in a block, a function or an `IF`, or by a `DEFINE INDEX OVERWRITE`
+  that replaces an index, reads before its transaction commits. A write
+  transaction that begins after the build started waiting cannot see the new
+  index, and the build would not read what it writes. While the transaction is
+  open, a write of another session of the same node that reaches a record of
+  the table waits for the transaction to end. If the transaction committed, the
+  write is refused with a retryable conflict, and its retry sees the index; if
+  it rolled back, the write goes on. A write that has waited 60 s is refused as
+  well, so a transaction a client leaves open holds the table's writes back for
+  at most that long at a time, and a build that outlasts it refuses the writes
+  that wait for it again and again. Reads, the writes of other tables, and the
+  defining transaction itself are not held back. The hold is kept in the memory
+  of the node that runs the definition: on a store several nodes write, a write
+  through another node that begins after the build started waiting is not held
+  back, and the index can miss it.
 - **On a store several nodes write** (TiKV), each node answers for its own
   write transactions through new keys (`!wb`, `!wa`, `!wh`, and `!wt`, which
   names the table of each of the newest 1024 barriers), and a build
@@ -555,6 +578,14 @@ cleaning, and a blocking statement keeps waiting, within its timeout.
 - holds write transactions open for more than a minute on a table while an
   index on it is defined or rebuilt: such a transaction is refused at commit
   and must be retried;
+- defines indexes inside `BEGIN … COMMIT`, or replaces them with
+  `DEFINE INDEX OVERWRITE`, on tables other sessions write: retry the conflicts
+  those writes meet while the transaction is open and when it commits, do not
+  leave such a transaction open longer than it takes to build, and expect the
+  table's writes to wait for as long as the build runs. On a store several
+  nodes write, define a new index on its own or `CONCURRENTLY` instead, whose
+  build reads only once the definition has committed and the writes older than
+  that commit have ended, on every node;
 - sets the node membership refresh interval above 10 s on a store several
   nodes write: lower it to 10 s or less.
 

@@ -571,6 +571,35 @@ impl WriteCtx {
 		}
 	}
 
+	/// Wait, before a record of the table is written, for the definitions that hold this write back
+	/// to end ([`Transaction::wait_for_definition_holds`]).
+	///
+	/// Called for every record, and costs a handle to the transaction and one atomic load while no
+	/// definition holds any write back. A write
+	/// whose transaction cannot see an index being built inside another transaction waits for that
+	/// transaction to end, then fails as a retryable conflict if it committed, and its retry sees
+	/// the index. The wait ends early with the context's own error when the query is cancelled or
+	/// runs out of time.
+	pub(crate) async fn wait_for_definitions(&self) -> Result<(), ControlFlow> {
+		let txn = self.exec.txn();
+		if !txn.definitions_hold_writes() {
+			return Ok(());
+		}
+		let frozen = self.exec.ctx();
+		Box::pin(txn.wait_for_definition_holds(
+			self.ns.namespace_id,
+			self.db.database_id,
+			&self.table.name,
+			|| match frozen.done(true) {
+				Ok(None) => None,
+				Ok(Some(reason)) => Some(crate::err::Error::from(reason).into()),
+				Err(err) => Some(err),
+			},
+		))
+		.await
+		.map_err(ControlFlow::Err)
+	}
+
 	/// The transaction the stages write through.
 	///
 	/// Read from the execution context on every call rather than cached beside

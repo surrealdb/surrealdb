@@ -48,7 +48,7 @@
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use surrealdb_datastore::triggers::FencedTable;
+use surrealdb_datastore::triggers::{DefinitionHold, FencedTable};
 use surrealdb_kvs::key::Resumable;
 use uuid::Uuid;
 
@@ -164,15 +164,21 @@ pub(crate) struct WriteBarrier {
 impl WriteBarrier {
 	/// Begin a wait for the write transactions that opened before now. On a store other nodes
 	/// write too, this raises the barrier every live node must answer.
+	///
+	/// A build that reads before its definition commits, inside the transaction that defines the
+	/// index, passes that transaction's `hold`, which begins with the wait: the writes of the table
+	/// that open after it cannot see the index, and are held back until the transaction ends
+	/// ([`surrealdb_datastore::triggers::DefinitionHold`]).
 	pub(crate) async fn start(
 		tf: &TransactionFactory,
 		sequences: &Sequences,
 		node: Uuid,
 		target: FencedTable,
+		hold: Option<&DefinitionHold>,
 	) -> Result<Self> {
 		// Counted before the epoch is read, so a transaction set aside after that read sees it.
 		let running = tf.begin_write_wait(Some(std::slice::from_ref(&target)));
-		let since = tf.live_writes().advance();
+		let since = tf.live_writes().advance_holding(hold);
 		let tx = tf.transaction(TransactionType::Read, sequences.clone()).await?;
 		let sole_writer = tx.sole_writer();
 		tx.cancel().await?;

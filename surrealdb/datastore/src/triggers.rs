@@ -793,11 +793,106 @@ pub struct LiveWrites {
 	/// answer while it reads the barrier and judges whose it is, so no answer sees a barrier this
 	/// datastore raised before it is recorded as its own.
 	raises: tokio::sync::Mutex<()>,
+	/// The definitions whose transactions have not ended, each holding back the writes of its
+	/// table that cannot see its index ([`DefinitionHold`]).
+	holds: Mutex<Vec<Arc<DefinitionHold>>>,
+	/// Whether [`Self::holds`] holds any, so a write reads nothing of them while there are none.
+	has_holds: AtomicBool,
+	/// How long a write waits for a definition's transaction to end, in milliseconds, or 0 for
+	/// [`DEFINITION_HOLD_WAIT`] ([`Self::set_definition_hold_wait`]).
+	hold_wait_ms: AtomicU64,
 }
 
 /// A table a fence refuses the writes of.
 pub type FencedTable =
 	(surrealdb_catalog::NamespaceId, surrealdb_catalog::DatabaseId, surrealdb_expr::val::TableName);
+
+/// How long a write waits for the transaction of a definition that holds its table back before it
+/// is refused with a retryable conflict ([`DefinitionHold`]): a transaction a client leaves open
+/// holds a table's writes back for no longer than this at a time.
+pub const DEFINITION_HOLD_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A new index that is built inside the transaction that defines it, until that transaction ends.
+///
+/// A write maintains, or queues for the build of, only the indexes its own snapshot shows, so a
+/// write that cannot see the definition is in neither the index nor its build. A build that reads
+/// only once the definition has committed waits for every write older than that commit, so no such
+/// write is left out ([`LiveWrites::advance`]); one that reads before the commit, inside its own
+/// transaction, cannot wait for a commit that has not happened. This holds back, until that
+/// transaction ends, the writes that began after the build began waiting and that write the table:
+/// a write that reaches the table meanwhile waits for the transaction to end
+/// ([`Self::ended`]), and is refused if the transaction was committing, since its snapshot lacks
+/// the index.
+///
+/// The transaction itself is never held back, and neither are the writes that began before the
+/// build began waiting, which the build waits for and then reads past.
+///
+/// The holds live in the datastore that runs the definition: a write through another datastore on
+/// a shared store is not held back by it.
+pub struct DefinitionHold {
+	table: FencedTable,
+	/// The defining transaction ([`crate::tx::Transaction::serial`]), which is not held back.
+	owner: u64,
+	/// The epoch of [`LiveWrites`] the hold's first build began waiting through: a write counted
+	/// into a later one is held back. [`u64::MAX`] until that wait begins
+	/// ([`LiveWrites::advance_holding`]), so no write is.
+	from: AtomicU64,
+	phase: tokio::sync::watch::Sender<HoldPhase>,
+}
+
+/// Where a [`DefinitionHold`]'s transaction stands.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HoldPhase {
+	/// Open, or not yet committing.
+	Open,
+	/// Handing its commit to the storage engine, which may land it.
+	Committing,
+	/// Ended, having been committing or not.
+	Ended {
+		committing: bool,
+	},
+}
+
+/// How a wait for a [`DefinitionHold`] ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HoldVerdict {
+	/// The transaction ended without committing: the index it defined does not exist.
+	Released,
+	/// The transaction ended having handed a commit to the storage engine, which may have landed
+	/// it: the index may exist, and a write that cannot see it must not commit.
+	Committing,
+	/// The transaction was still open when the wait ran out.
+	TimedOut,
+}
+
+impl DefinitionHold {
+	/// The table whose writes this holds back.
+	pub fn table(&self) -> &FencedTable {
+		&self.table
+	}
+
+	/// Wait for the defining transaction to end, for at most `bound`.
+	pub async fn ended(&self, bound: std::time::Duration) -> HoldVerdict {
+		let mut phase = self.phase.subscribe();
+		let ended = phase.wait_for(|phase| matches!(phase, HoldPhase::Ended { .. }));
+		match common::time::timeout(bound, ended).await {
+			// `wait_for` returns once the phase has ended: an answer for one that has not is the
+			// conservative one, the write is refused rather than let through.
+			Ok(Ok(phase)) => match *phase {
+				HoldPhase::Ended {
+					committing: true,
+				} => HoldVerdict::Committing,
+				HoldPhase::Ended {
+					committing: false,
+				} => HoldVerdict::Released,
+				HoldPhase::Open | HoldPhase::Committing => HoldVerdict::TimedOut,
+			},
+			// The sender lives as long as the hold, so it is gone only once the hold is.
+			Ok(Err(_)) => HoldVerdict::Released,
+			Err(_) => HoldVerdict::TimedOut,
+		}
+	}
+}
 
 /// The tables a transaction has written keys of, read off each key it writes: a key in a table's
 /// subtree (`/*{ns}*{db}*{tb}`) writes that table. A write that may reach a table's subtree but
@@ -1269,8 +1364,19 @@ impl LiveWrites {
 	/// Begin a wait: move new write transactions to the next epoch, and answer the epoch the wait
 	/// waits through ([`Self::ended_since`]).
 	pub fn advance(&self) -> u64 {
+		self.advance_holding(None)
+	}
+
+	/// [`Self::advance`], which also begins `hold`, if its first build has not begun waiting yet:
+	/// from the epoch answered on, the writes of its table that cannot see its index are held back.
+	/// Begun under the lock a write counts itself in under, so a write counted into a later epoch
+	/// finds the hold begun, and one counted into an earlier epoch is the build's to wait for.
+	pub fn advance_holding(&self, hold: Option<&DefinitionHold>) -> u64 {
 		let mut epochs = self.epochs.lock();
 		let since = self.epoch.fetch_add(1, Ordering::SeqCst);
+		if let Some(hold) = hold {
+			hold.from.fetch_min(since, Ordering::SeqCst);
+		}
 		self.forget_if_settled(&mut epochs, since);
 		since
 	}
@@ -1434,6 +1540,120 @@ impl LiveWrites {
 	/// Forget the barriers this datastore raised through `answered`, whose answer is recorded.
 	pub fn forget_own_barriers_through(&self, answered: u64) {
 		self.own_barriers.lock().retain(|barrier| *barrier > answered);
+	}
+
+	/// Register the definition of an index on `table`, which the transaction numbered `owner`
+	/// builds inside itself, as holding back the table's writes that cannot see the index
+	/// ([`DefinitionHold`]), and answer whether this registered it rather than finding it. The
+	/// hold holds nothing back until a build of the definition begins waiting for the writes older
+	/// than itself ([`Self::advance_holding`]), and ends with [`Self::end_hold`].
+	pub fn hold_table(&self, table: FencedTable, owner: u64) -> (Arc<DefinitionHold>, bool) {
+		let mut holds = self.holds.lock();
+		if let Some(held) = holds.iter().find(|hold| hold.owner == owner && hold.table == table) {
+			return (Arc::clone(held), false);
+		}
+		let (phase, _) = tokio::sync::watch::channel(HoldPhase::Open);
+		let hold = Arc::new(DefinitionHold {
+			table,
+			owner,
+			from: AtomicU64::new(u64::MAX),
+			phase,
+		});
+		holds.push(Arc::clone(&hold));
+		self.has_holds.store(true, Ordering::SeqCst);
+		(hold, true)
+	}
+
+	/// Whether any definition holds back writes now. A write asks before it asks which
+	/// ([`Self::hold_on`]), so it costs one load while none does.
+	pub fn holds_writes(&self) -> bool {
+		self.has_holds.load(Ordering::SeqCst)
+	}
+
+	/// The hold of `owner`'s definition of an index on `table`, if it has one.
+	pub fn hold_of(&self, table: &FencedTable, owner: u64) -> Option<Arc<DefinitionHold>> {
+		self.holds.lock().iter().find(|hold| hold.owner == owner && hold.table == *table).cloned()
+	}
+
+	/// The definition that holds back a write counted into `epoch`, which writes `table` and is
+	/// the transaction numbered `writer`: one of another transaction, whose build began waiting for
+	/// the writes older than itself before this one was counted in.
+	pub fn hold_on(
+		&self,
+		table: &FencedTable,
+		epoch: u64,
+		writer: u64,
+	) -> Option<Arc<DefinitionHold>> {
+		self.holds
+			.lock()
+			.iter()
+			.find(|hold| {
+				hold.owner != writer
+					&& hold.table == *table
+					&& epoch > hold.from.load(Ordering::SeqCst)
+			})
+			.cloned()
+	}
+
+	/// Note that the transaction numbered `owner` hands its commit to the storage engine, which
+	/// may land it. A write held back by its definitions is refused once it has ended, since
+	/// the index may exist where the write's snapshot cannot see it.
+	pub fn begin_definition_commit(&self, owner: u64) {
+		let holds = self.holds.lock();
+		for hold in holds.iter().filter(|hold| hold.owner == owner) {
+			hold.phase.send_if_modified(|phase| {
+				let open = *phase == HoldPhase::Open;
+				if open {
+					*phase = HoldPhase::Committing;
+				}
+				open
+			});
+		}
+	}
+
+	/// End a definition's hold: its transaction has committed, rolled back or been dropped.
+	/// Idempotent.
+	///
+	/// A transaction that handed a commit to the storage engine may have landed it. Every write
+	/// counted in so far, that writes the table, is then fenced, since none of them can see the
+	/// index: those that were held back are refused as they learn it ([`HoldVerdict::Committing`]),
+	/// and one that has not reached the table yet when its commit comes. A write counted in after
+	/// this took its snapshot after the commit landed, and sees the index.
+	pub fn end_hold(&self, hold: &Arc<DefinitionHold>) {
+		{
+			let mut holds = self.holds.lock();
+			holds.retain(|held| !Arc::ptr_eq(held, hold));
+			self.has_holds.store(!holds.is_empty(), Ordering::SeqCst);
+		}
+		let mut committing = false;
+		hold.phase.send_if_modified(|phase| {
+			if matches!(phase, HoldPhase::Ended { .. }) {
+				return false;
+			}
+			committing = *phase == HoldPhase::Committing;
+			*phase = HoldPhase::Ended {
+				committing,
+			};
+			true
+		});
+		if committing {
+			let since = self.advance();
+			self.fence_tables_through(since, std::slice::from_ref(&hold.table));
+		}
+	}
+
+	/// How long a write waits for a definition's transaction to end.
+	pub fn definition_hold_wait(&self) -> std::time::Duration {
+		match self.hold_wait_ms.load(Ordering::Relaxed) {
+			0 => DEFINITION_HOLD_WAIT,
+			ms => std::time::Duration::from_millis(ms),
+		}
+	}
+
+	/// Shorten, or with a zero restore, how long a write waits for a definition's transaction to
+	/// end, for tests of what a wait that runs out does.
+	pub fn set_definition_hold_wait(&self, wait: std::time::Duration) {
+		self.hold_wait_ms.store(wait.as_millis() as u64, Ordering::Relaxed);
 	}
 }
 
@@ -2159,6 +2379,142 @@ mod tests {
 		);
 		live.end_commit(later);
 	}
+
+	use std::time::Duration;
+
+	const BOUND: Duration = Duration::from_millis(50);
+
+	/// Whether a commit of a transaction of `epoch` that writes a record of table `tb` is refused.
+	fn commit_refused(live: &LiveWrites, epoch: u64, tb: &str) -> bool {
+		let writes = parking_lot::Mutex::new(written(&[&record_key(1, 2, tb)]));
+		let refused = live.begin_commit(epoch, &writes);
+		live.end_commit(epoch);
+		refused
+	}
+
+	#[test]
+	fn a_hold_holds_back_only_the_writes_counted_in_after_its_wait_began() {
+		let live = LiveWrites::default();
+		let t = table(1, 2, "t");
+		assert!(!live.holds_writes());
+		let (hold, registered) = live.hold_table(t.clone(), OWNER);
+		assert!(registered && live.holds_writes());
+		let older = live.open();
+		assert!(live.hold_on(&t, older, WRITER).is_none(), "no wait has begun");
+		assert!(
+			live.hold_on(&t, older + 1, WRITER).is_none(),
+			"and none is held for one that will"
+		);
+		// A wait that is not the definition's build's does not begin the hold.
+		live.advance();
+		let newer = live.open();
+		assert!(live.hold_on(&t, newer, WRITER).is_none(), "another wait did not begin it");
+		let since = live.advance_holding(Some(&hold));
+		assert!(live.hold_on(&t, older, WRITER).is_none(), "a write the wait waits for");
+		assert!(live.hold_on(&t, since, WRITER).is_none(), "the epoch the wait waits through");
+		let later = live.open();
+		assert!(later > since);
+		assert!(live.hold_on(&t, later, WRITER).is_some(), "a write that opened after it");
+		assert!(live.hold_on(&t, later, OWNER).is_none(), "the defining transaction");
+		assert!(live.hold_on(&table(1, 2, "u"), later, WRITER).is_none(), "another table");
+		assert!(live.hold_on(&table(1, 3, "t"), later, WRITER).is_none(), "another database");
+		// A second build of the definition waits through a later epoch; the first stands.
+		let again = live.advance_holding(Some(&hold));
+		assert!(again > since);
+		assert!(live.hold_on(&t, later, WRITER).is_some(), "the first wait's epoch stands");
+		live.close(older);
+		live.close(newer);
+		live.close(later);
+	}
+
+	#[test]
+	fn a_hold_is_registered_once_per_transaction_and_table() {
+		let live = LiveWrites::default();
+		let t = table(1, 2, "t");
+		let (first, registered) = live.hold_table(t.clone(), OWNER);
+		assert!(registered);
+		let (again, registered) = live.hold_table(t.clone(), OWNER);
+		assert!(!registered && Arc::ptr_eq(&first, &again), "one per transaction and table");
+		let (other, registered) = live.hold_table(t.clone(), WRITER);
+		assert!(registered && !Arc::ptr_eq(&first, &other), "another transaction's");
+		let (other_table, registered) = live.hold_table(table(1, 2, "u"), OWNER);
+		assert!(registered && !Arc::ptr_eq(&first, &other_table), "another table's");
+		assert!(live.hold_of(&t, OWNER).is_some_and(|held| Arc::ptr_eq(&held, &first)));
+		assert!(live.hold_of(&t, 9).is_none());
+		assert_eq!(first.table(), &t);
+		live.end_hold(&first);
+		assert!(live.hold_of(&t, OWNER).is_none(), "an ended hold is gone");
+		assert!(live.holds_writes(), "the others remain");
+		live.end_hold(&other);
+		live.end_hold(&other_table);
+		assert!(!live.holds_writes());
+	}
+
+	#[tokio::test]
+	async fn a_hold_that_ends_without_committing_releases_what_it_held_back() {
+		let live = LiveWrites::default();
+		let t = table(1, 2, "t");
+		let (hold, _) = live.hold_table(t.clone(), OWNER);
+		live.advance_holding(Some(&hold));
+		let held = live.open();
+		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "open");
+		live.begin_definition_commit(WRITER);
+		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "another transaction commits");
+		live.end_hold(&hold);
+		live.end_hold(&hold);
+		assert_eq!(hold.ended(BOUND).await, HoldVerdict::Released);
+		assert!(live.hold_on(&t, held, WRITER).is_none() && !live.holds_writes());
+		assert!(!commit_refused(&live, held, "t"), "a rollback leaves the index undefined");
+		live.close(held);
+	}
+
+	#[tokio::test]
+	async fn a_hold_that_ends_committing_refuses_the_writes_that_could_not_see_its_index() {
+		let live = LiveWrites::default();
+		let t = table(1, 2, "t");
+		let (hold, _) = live.hold_table(t.clone(), OWNER);
+		live.advance_holding(Some(&hold));
+		let held = live.open();
+		live.begin_definition_commit(OWNER);
+		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "committing is not ended");
+		live.end_hold(&hold);
+		live.end_hold(&hold);
+		assert_eq!(hold.ended(BOUND).await, HoldVerdict::Committing);
+		assert!(commit_refused(&live, held, "t"), "a write of the table that began before it");
+		assert!(!commit_refused(&live, held, "u"), "another table's");
+		let after = live.open();
+		assert!(!commit_refused(&live, after, "t"), "a write that began after sees the index");
+		live.close(held);
+		live.close(after);
+	}
+
+	#[tokio::test]
+	async fn a_write_waiting_for_a_hold_is_woken_when_it_ends() {
+		let live = LiveWrites::default();
+		let (hold, _) = live.hold_table(table(1, 2, "t"), OWNER);
+		let waiting = tokio::spawn({
+			let hold = Arc::clone(&hold);
+			async move { hold.ended(Duration::from_secs(60)).await }
+		});
+		for _ in 0..10 {
+			tokio::task::yield_now().await;
+		}
+		assert!(!waiting.is_finished());
+		live.begin_definition_commit(OWNER);
+		live.end_hold(&hold);
+		assert_eq!(waiting.await.unwrap(), HoldVerdict::Committing);
+	}
+
+	#[test]
+	fn a_hold_wait_can_be_shortened_and_restored() {
+		let live = LiveWrites::default();
+		assert_eq!(live.definition_hold_wait(), DEFINITION_HOLD_WAIT);
+		live.set_definition_hold_wait(Duration::from_millis(20));
+		assert_eq!(live.definition_hold_wait(), Duration::from_millis(20));
+		live.set_definition_hold_wait(Duration::ZERO);
+		assert_eq!(live.definition_hold_wait(), DEFINITION_HOLD_WAIT);
+	}
+
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::pending_guard::GuardedIndex;
 

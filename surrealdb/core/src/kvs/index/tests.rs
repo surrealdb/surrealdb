@@ -8781,27 +8781,151 @@ async fn concurrent_define_index_misses_writes_from_an_older_snapshot() -> Resul
 	Ok(())
 }
 
-/// A `DEFINE INDEX` inside `BEGIN … COMMIT` publishes an index that answers as
-/// a table scan does, whatever another session on the same node writes while
-/// the transaction is open.
+/// [`WRITES_BEHIND_THE_SCAN`], made one after another by a task of its own, each made again when
+/// it meets a transaction conflict.
+#[cfg(feature = "kv-mem")]
+fn spawn_writes_behind_the_scan(
+	ds: &Arc<Datastore>,
+	session: &Session,
+) -> tokio::task::JoinHandle<Result<()>> {
+	tokio::spawn({
+		let (ds, session) = (Arc::clone(ds), session.clone());
+		async move {
+			for write in WRITES_BEHIND_THE_SCAN {
+				execute_all_retrying_conflicts(&ds, &session, write).await?;
+			}
+			Ok(())
+		}
+	})
+}
+
+/// How long a write that is held back is given to commit before it is taken to be waiting.
+#[cfg(feature = "kv-mem")]
+const HELD_WRITE_GRACE: Duration = Duration::from_millis(400);
+
+/// A `DEFINE INDEX` inside `BEGIN … COMMIT` publishes an index that answers as a table scan does,
+/// whatever another session on the same node writes while the transaction is open. The build reads
+/// before the transaction commits, so a write that opens after the build began waiting for the
+/// writes older than itself cannot see the index, and would be left out of it: it waits for the
+/// transaction to end, is refused as a conflict once that has committed, and its retry sees the
+/// index. Checked for every kind such a write can go missing from.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "reproduces #1961; fails until fixed"]
-async fn define_index_in_a_transaction_misses_a_concurrent_sessions_writes() -> Result<()> {
+async fn define_index_in_a_transaction_holds_back_a_concurrent_sessions_writes() -> Result<()> {
+	let mut wrong = Vec::new();
+	for kind in RacedIndexKind::ALL {
+		let (ds, session) = new_index_test_ds().await?;
+		seed_raced_table(&ds, &session).await?;
+		let sql = format!("BEGIN; {}; COMMIT;", kind.define());
+		let held = HeldScan::start(&ds, &session, &sql).await?;
+		let writes = spawn_writes_behind_the_scan(&ds, &session);
+		sleep(HELD_WRITE_GRACE).await;
+		assert!(
+			!held.statement.is_finished(),
+			"the defining transaction must still be open when the writes would commit"
+		);
+		if writes.is_finished() {
+			wrong.push(format!(
+				"{kind:?}: the writes committed while the defining transaction was open"
+			));
+		}
+		held.finish(&ds, &session).await?;
+		timeout(Duration::from_secs(30), writes)
+			.await
+			.map_err(|_| anyhow::anyhow!("timed out waiting for the held back writes"))???;
+		let (indexed, scanned) = kind.answers(&ds, &session).await?;
+		if indexed != scanned {
+			wrong.push(format!(
+				"{kind:?}: the index answers {indexed} where a scan answers {scanned}"
+			));
+		}
+		ds.shutdown().await?;
+	}
+	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A write held back by a definition whose transaction is then rolled back goes on and commits:
+/// the index it could not see does not exist, so it is left out of nothing.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_held_back_by_a_definition_that_rolls_back_commits() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
+	seed_raced_table(&ds, &session).await?;
+	let HeldScan {
+		statement,
+		guard,
+		..
+	} = HeldScan::start(&ds, &session, "BEGIN; DEFINE INDEX ix ON t FIELDS f; CANCEL;").await?;
+	let writes = spawn_writes_behind_the_scan(&ds, &session);
+	sleep(HELD_WRITE_GRACE).await;
+	assert!(!writes.is_finished(), "the writes wait for the defining transaction");
+	drop(guard);
+	let cancelled = timeout(Duration::from_secs(30), statement)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the transaction to be cancelled"))??;
+	if let Err(err) = cancelled {
+		assert!(err.to_string().contains("cancelled transaction"), "{err}");
+	}
+	timeout(Duration::from_secs(30), writes)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the held back writes"))???;
+	let records =
+		query_json(&ds, &session, "SELECT VALUE record::id(id) FROM t ORDER BY id").await?;
+	let records: Vec<_> =
+		records.as_array().into_iter().flatten().filter_map(|id| id.as_str()).collect();
+	assert!(records.contains(&"fresh"), "{records:?}");
+	assert!(!records.contains(&"gone") && !records.contains(&"back"), "{records:?}");
+	ds.shutdown().await?;
+	Ok(())
+}
+
+/// A definition inside a transaction holds back the writes of its table only: another table's
+/// writes, and every read, go on while it is open.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_definition_in_a_transaction_holds_back_only_the_writes_of_its_table() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	seed_raced_table(&ds, &session).await?;
+	execute_all(&ds, &session, "DEFINE TABLE other SCHEMALESS").await?;
+	let held =
+		HeldScan::start(&ds, &session, "BEGIN; DEFINE INDEX ix ON t FIELDS f; COMMIT;").await?;
+	let others = timeout(Duration::from_secs(10), async {
+		execute_all(&ds, &session, "CREATE other:1 SET f = 'v1' RETURN NONE").await?;
+		execute_all(&ds, &session, "SELECT * FROM t").await?;
+		execute_all(&ds, &session, "SELECT * FROM other").await
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("a statement waited for a definition of another table"))?;
+	assert!(!held.statement.is_finished(), "the defining transaction must still be open");
+	held.finish(&ds, &session).await?;
+	others?;
+	ds.shutdown().await?;
+	Ok(())
+}
+
+/// A write that waits for a definition is refused as a retryable conflict once it has waited the
+/// bound, though the definition's transaction is still open, rather than holding the table's writes
+/// back for as long as a client leaves that transaction open.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_waits_for_a_definition_in_a_transaction_for_a_bounded_time() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	ds.transaction_factory().live_writes().set_definition_hold_wait(Duration::from_millis(300));
 	seed_raced_table(&ds, &session).await?;
 	let held =
 		HeldScan::start(&ds, &session, "BEGIN; DEFINE INDEX ix ON t FIELDS f; COMMIT;").await?;
-	for write in WRITES_BEHIND_THE_SCAN {
-		execute_all_retrying_conflicts(&ds, &session, write).await?;
-	}
-	assert!(
-		!held.statement.is_finished(),
-		"the defining transaction must still be open when the writes commit"
-	);
+	let began = Instant::now();
+	let err = execute_all(&ds, &session, "UPDATE t:twice SET f = 'v1' RETURN NONE")
+		.await
+		.expect_err("the definition's transaction stays open");
+	assert!(began.elapsed() >= Duration::from_millis(300), "{:?}", began.elapsed());
+	assert!(is_retryable_statement_conflict(&err), "{err}");
+	assert!(err.to_string().contains("stayed open"), "{err}");
+	assert!(!held.statement.is_finished(), "the defining transaction must still be open");
 	held.finish(&ds, &session).await?;
-	let (indexed, scanned) = RacedIndexKind::Standard.answers(&ds, &session).await?;
-	assert_eq!(indexed, scanned, "the index must name the records a scan finds");
+	execute_all(&ds, &session, "UPDATE t:twice SET f = 'v1' RETURN NONE").await?;
+	ds.shutdown().await?;
 	Ok(())
 }
 

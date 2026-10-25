@@ -1396,6 +1396,55 @@ impl Drop for ParkedWrite {
 	}
 }
 
+/// The end of a definition's hold on its table's writes
+/// ([`Transaction::hold_writes_for_definition`]): registered for both outcomes of the transaction,
+/// and run by whichever follows, or by dropping the transaction.
+struct ReleaseDefinitionHold(Arc<DefinitionHoldEnd>);
+
+struct DefinitionHoldEnd {
+	hold: Arc<crate::triggers::DefinitionHold>,
+	triggers: Arc<CommitTriggers>,
+}
+
+impl DefinitionHoldEnd {
+	/// End the hold. Idempotent, so whichever of the actions runs first ends it, and the last
+	/// reference to be dropped ends it if none did.
+	fn end(&self) {
+		self.triggers.live_writes.end_hold(&self.hold);
+	}
+}
+
+impl Drop for DefinitionHoldEnd {
+	fn drop(&mut self) {
+		self.end();
+	}
+}
+
+impl CommitAction for ReleaseDefinitionHold {
+	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move { self.0.end() })
+	}
+
+	/// The commit half of a pair registered on both outcomes, which a rollback of a save point
+	/// must not discard, or the transaction's end would not release the hold
+	/// ([`CommitAction::answers_to_scope`]).
+	fn answers_to_scope(&self) -> bool {
+		false
+	}
+}
+
+impl RollbackAction for ReleaseDefinitionHold {
+	fn run(
+		self: Box<Self>,
+		_drain_started_at: Instant,
+	) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			self.0.end();
+			Ok(())
+		})
+	}
+}
+
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		if self.live_bucket != crate::triggers::NO_LIVE_BUCKET {
@@ -7024,10 +7073,16 @@ impl Transaction {
 	/// starts until it has returned, where it stamped a catalog version, and
 	/// among the build-state commits ([`crate::triggers::BuildEpoch`]) in the same
 	/// way where it may have written a durable index build state key.
+	///
+	/// A transaction that holds writes back for an index it defines notes that it is handing its
+	/// commit to the storage engine first ([`Self::hold_writes_for_definition`]).
 	async fn commit_store(&self) -> std::result::Result<(), KvsError> {
 		let _counted = self.changed_catalog().then(|| self.triggers.catalog_epoch.committing());
 		let _build_counted =
 			self.tr.wrote_build_state().then(|| self.triggers.build_epoch.committing());
+		if self.triggers.live_writes.holds_writes() {
+			self.triggers.live_writes.begin_definition_commit(self.serial);
+		}
 		let committed = self.tr.commit().await;
 		self.end_live_write();
 		committed
@@ -8594,6 +8649,120 @@ impl Transaction {
 		if !passed.is_empty() {
 			self.passed_waits.lock().merge(passed);
 		}
+	}
+
+	/// Hold back, until this transaction ends, the writes to `tb` that cannot see the index it
+	/// defines on it and builds inside itself ([`crate::triggers::DefinitionHold`]): a definition
+	/// whose build reads before the transaction commits. One that reads only once it has committed
+	/// is not held back, since the build waits for every write older than the commit instead.
+	///
+	/// The hold begins when the first build of the definition begins waiting for the writes older
+	/// than itself ([`Self::definition_hold`]), and ends however the transaction ends: its commit
+	/// and its rollback each carry the end, and dropping the transaction carries it too. This
+	/// transaction is never held back by it. Registered once per table, whatever the number of
+	/// definitions on it.
+	pub async fn hold_writes_for_definition(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) {
+		let (hold, registered) =
+			self.triggers.live_writes.hold_table((ns, db, tb.clone()), self.serial);
+		if !registered {
+			return;
+		}
+		let end = Arc::new(DefinitionHoldEnd {
+			hold,
+			triggers: Arc::clone(&self.triggers),
+		});
+		self.on_commit(Box::new(ReleaseDefinitionHold(Arc::clone(&end)))).await;
+		self.on_rollback(Box::new(ReleaseDefinitionHold(end))).await;
+	}
+
+	/// The hold of the definitions this transaction makes of indexes on `tb`, if it holds writes
+	/// back for them ([`Self::hold_writes_for_definition`]).
+	pub fn definition_hold(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Option<Arc<crate::triggers::DefinitionHold>> {
+		let live = &self.triggers.live_writes;
+		if !live.holds_writes() {
+			return None;
+		}
+		live.hold_of(&(ns, db, tb.clone()), self.serial)
+	}
+
+	/// Whether any definition holds back writes now, which a write asks before it asks whether it
+	/// is one ([`Self::wait_for_definition_holds`]).
+	pub fn definitions_hold_writes(&self) -> bool {
+		self.triggers.live_writes.holds_writes()
+	}
+
+	/// Wait, before this transaction writes a record of `tb`, for the definitions that hold the
+	/// write back to end, and fail as a retryable conflict if one may have committed, or is still
+	/// open once the wait has run [`crate::triggers::DEFINITION_HOLD_WAIT`]: the transaction's
+	/// snapshot lacks the index, which the write would leave unmaintained and the build, which has
+	/// read what it did, could not have indexed. A definition that rolled back holds nothing back,
+	/// and the write goes on.
+	///
+	/// A definition holds back a write counted in after its first build began waiting for the
+	/// writes older than itself, which that build waits for and then reads past
+	/// ([`Self::hold_writes_for_definition`]). The transaction is set aside from the writes a build
+	/// waits for while it waits here, so none of them waits for it. `interrupted` is asked between
+	/// short waits, and its error ends the wait.
+	pub async fn wait_for_definition_holds(
+		self: &Arc<Self>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		mut interrupted: impl FnMut() -> Option<anyhow::Error> + Send,
+	) -> Result<()> {
+		use crate::triggers::HoldVerdict;
+		/// How often a write waiting for a definition asks whether it has been interrupted.
+		const POLL: Duration = Duration::from_millis(100);
+		let live = &self.triggers.live_writes;
+		// A transaction that is not counted among the writes, a read transaction, writes nothing.
+		let Some(epoch) = self.live_write_epoch() else {
+			return Ok(());
+		};
+		let table = (ns, db, tb.clone());
+		while let Some(hold) = live.hold_on(&table, epoch, self.serial) {
+			let bound = live.definition_hold_wait();
+			let began = Instant::now();
+			let verdict = {
+				let _parked = self.park_live_write();
+				loop {
+					if let Some(err) = interrupted() {
+						return Err(err);
+					}
+					let left = bound.saturating_sub(began.elapsed());
+					let verdict = hold.ended(left.min(POLL)).await;
+					if verdict != HoldVerdict::TimedOut || began.elapsed() >= bound {
+						break verdict;
+					}
+				}
+			};
+			match verdict {
+				HoldVerdict::Released => {}
+				HoldVerdict::Committing => {
+					return Err(KvsError::TransactionConflict(format!(
+						"an index was defined on table `{tb}` after this transaction began"
+					))
+					.into());
+				}
+				HoldVerdict::TimedOut => {
+					return Err(KvsError::TransactionConflict(format!(
+						"an index is being defined on table `{tb}` in a transaction that has stayed \
+						 open for {bound:?}"
+					))
+					.into());
+				}
+			}
+		}
+		Ok(())
 	}
 
 	/// The count of events that change which generation of a table is current, what the
@@ -17408,6 +17577,232 @@ mod parked_write_tests {
 		drop(parked);
 		tx.set(record("b"), b"v".to_vec()).await.unwrap();
 		assert!(tx.commit().await.is_err());
+	}
+
+	const NS: crate::catalog::NamespaceId = crate::catalog::NamespaceId(1);
+	const DB: crate::catalog::DatabaseId = crate::catalog::DatabaseId(2);
+
+	fn name(tb: &str) -> crate::val::TableName {
+		tb.into()
+	}
+
+	async fn writer(tf: &TransactionFactory, sq: &Sequences) -> Arc<super::Transaction> {
+		Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap())
+	}
+
+	/// A transaction that defines an index on table `tb` and builds it inside itself, whose build
+	/// has begun waiting for the writes older than itself.
+	async fn defining(
+		tf: &TransactionFactory,
+		sq: &Sequences,
+		tb: &str,
+	) -> Arc<super::Transaction> {
+		let definer = writer(tf, sq).await;
+		definer.hold_writes_for_definition(NS, DB, &name(tb)).await;
+		let hold = definer.definition_hold(NS, DB, &name(tb)).expect("the definition holds writes");
+		tf.live_writes().advance_holding(Some(&hold));
+		definer
+	}
+
+	/// `tx`, about to write a record of table `tb`, waiting for the definitions that hold it back.
+	fn waiting(
+		tx: &Arc<super::Transaction>,
+		tb: &str,
+	) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+		let (tx, tb) = (Arc::clone(tx), name(tb));
+		tokio::spawn(async move { tx.wait_for_definition_holds(NS, DB, &tb, || None).await })
+	}
+
+	/// Let the tasks that are going to wait begin to.
+	async fn settle() {
+		for _ in 0..20 {
+			tokio::task::yield_now().await;
+		}
+	}
+
+	fn is_retryable_conflict(err: &anyhow::Error) -> bool {
+		err.downcast_ref::<super::KvsError>().is_some_and(|err| err.is_retryable())
+	}
+
+	/// A definition holds back the writes of its table that opened after its build began waiting,
+	/// and no others: not the writes that build waits for, not another table's, not its own.
+	#[tokio::test]
+	async fn a_definition_holds_back_only_the_writes_that_opened_after_its_build_began_waiting() {
+		let (tf, sq) = factory().await;
+		let older = writer(&tf, &sq).await;
+		let definer = defining(&tf, &sq, "a").await;
+		let newer = writer(&tf, &sq).await;
+		for (tx, tb) in [(&older, "a"), (&definer, "a"), (&newer, "b")] {
+			tx.wait_for_definition_holds(NS, DB, &name(tb), || None).await.unwrap();
+		}
+		let held = waiting(&newer, "a");
+		settle().await;
+		assert!(!held.is_finished(), "a write that could not see the index waits for it");
+		definer.cancel().await.unwrap();
+		held.await.unwrap().expect("a definition that rolled back holds nothing back");
+		newer.set(record("a"), b"v".to_vec()).await.unwrap();
+		newer.commit().await.expect("and its write commits");
+		older.cancel().await.unwrap();
+	}
+
+	/// A write held back by a definition that commits is refused: its snapshot lacks the index, so
+	/// the write would leave it out; the retry, which opens after the commit, sees it. A write that
+	/// opened before the commit and reaches the table after is refused at its commit.
+	#[tokio::test]
+	async fn a_definition_that_commits_refuses_the_writes_it_held_back() {
+		let (tf, sq) = factory().await;
+		let definer = defining(&tf, &sq, "a").await;
+		let held = writer(&tf, &sq).await;
+		let late = writer(&tf, &sq).await;
+		let waiting = waiting(&held, "a");
+		settle().await;
+		assert!(!waiting.is_finished());
+		definer.commit().await.unwrap();
+		let err = waiting.await.unwrap().expect_err("a write that could not see the index");
+		assert!(is_retryable_conflict(&err), "{err}");
+		assert!(err.to_string().contains("an index was defined on table `a`"), "{err}");
+		held.cancel().await.unwrap();
+		late.wait_for_definition_holds(NS, DB, &name("a"), || None).await.unwrap();
+		late.set(record("a"), b"v".to_vec()).await.unwrap();
+		let err = late.commit().await.expect_err("it began before the index was visible");
+		assert!(is_retryable_conflict(&err), "{err}");
+		let retry = writer(&tf, &sq).await;
+		retry.wait_for_definition_holds(NS, DB, &name("a"), || None).await.unwrap();
+		retry.set(record("a"), b"v".to_vec()).await.unwrap();
+		retry.commit().await.expect("a write that opens after the commit sees the index");
+	}
+
+	/// A write to another table of the definition's database commits as it would without one.
+	#[tokio::test]
+	async fn a_definition_does_not_refuse_the_writes_of_other_tables() {
+		let (tf, sq) = factory().await;
+		let definer = defining(&tf, &sq, "a").await;
+		let other = writer(&tf, &sq).await;
+		other.wait_for_definition_holds(NS, DB, &name("b"), || None).await.unwrap();
+		other.set(record("b"), b"v".to_vec()).await.unwrap();
+		definer.commit().await.unwrap();
+		other.commit().await.expect("its table has no new index");
+	}
+
+	/// The hold ends with the transaction however that is done: a dropped transaction releases
+	/// what it held back as a rolled back one does.
+	#[tokio::test]
+	async fn dropping_the_defining_transaction_releases_the_writes_it_held_back() {
+		let (tf, sq) = factory().await;
+		let definer = defining(&tf, &sq, "a").await;
+		let newer = writer(&tf, &sq).await;
+		let held = waiting(&newer, "a");
+		settle().await;
+		assert!(!held.is_finished());
+		assert!(tf.live_writes().holds_writes());
+		drop(definer);
+		held.await.unwrap().expect("nothing committed");
+		assert!(!tf.live_writes().holds_writes());
+	}
+
+	/// Two definitions on a table, and one on another, in one transaction hold it once each, and a
+	/// commit ends them all.
+	#[tokio::test]
+	async fn a_transaction_holds_each_table_it_defines_on_once() {
+		let (tf, sq) = factory().await;
+		let definer = writer(&tf, &sq).await;
+		for tb in ["a", "a", "b"] {
+			definer.hold_writes_for_definition(NS, DB, &name(tb)).await;
+		}
+		assert!(definer.definitions_hold_writes());
+		assert!(definer.definition_hold(NS, DB, &name("a")).is_some());
+		assert!(definer.definition_hold(NS, DB, &name("c")).is_none());
+		definer.commit().await.unwrap();
+		assert!(!tf.live_writes().holds_writes(), "the commit ends every hold");
+		let after = writer(&tf, &sq).await;
+		assert!(!after.definitions_hold_writes());
+		after.wait_for_definition_holds(NS, DB, &name("a"), || None).await.unwrap();
+	}
+
+	/// A rollback to a save point does not end a hold: the definition may have been undone, but the
+	/// transaction, which may still commit, ends it.
+	#[tokio::test]
+	async fn a_save_point_rollback_does_not_end_a_hold() {
+		let (tf, sq) = factory().await;
+		let definer = writer(&tf, &sq).await;
+		definer.new_save_point().await.unwrap();
+		definer.hold_writes_for_definition(NS, DB, &name("a")).await;
+		definer.rollback_to_save_point().await.unwrap();
+		assert!(tf.live_writes().holds_writes());
+		definer.commit().await.unwrap();
+		assert!(!tf.live_writes().holds_writes());
+	}
+
+	/// A write that waits for a definition that stays open is refused once the wait has run its
+	/// bound, and the definition goes on holding the table back.
+	#[tokio::test]
+	async fn a_write_waits_for_a_definition_for_a_bounded_time() {
+		let (tf, sq) = factory().await;
+		tf.live_writes().set_definition_hold_wait(std::time::Duration::from_millis(150));
+		let definer = defining(&tf, &sq, "a").await;
+		let newer = writer(&tf, &sq).await;
+		let began = web_time::Instant::now();
+		let err = newer
+			.wait_for_definition_holds(NS, DB, &name("a"), || None)
+			.await
+			.expect_err("the definition stays open");
+		assert!(began.elapsed() >= std::time::Duration::from_millis(150), "{:?}", began.elapsed());
+		assert!(is_retryable_conflict(&err), "{err}");
+		assert!(err.to_string().contains("stayed open"), "{err}");
+		assert!(tf.live_writes().holds_writes());
+		definer.cancel().await.unwrap();
+		newer.cancel().await.unwrap();
+	}
+
+	/// A write waiting for a definition ends its wait with the error its query is interrupted by.
+	#[tokio::test]
+	async fn a_write_waiting_for_a_definition_can_be_interrupted() {
+		let (tf, sq) = factory().await;
+		let definer = defining(&tf, &sq, "a").await;
+		let newer = writer(&tf, &sq).await;
+		let interrupted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let waiting = tokio::spawn({
+			let (newer, interrupted) = (Arc::clone(&newer), Arc::clone(&interrupted));
+			async move {
+				newer
+					.wait_for_definition_holds(NS, DB, &name("a"), || {
+						interrupted
+							.load(std::sync::atomic::Ordering::SeqCst)
+							.then(|| anyhow::anyhow!("the query was cancelled"))
+					})
+					.await
+			}
+		});
+		settle().await;
+		assert!(!waiting.is_finished());
+		interrupted.store(true, std::sync::atomic::Ordering::SeqCst);
+		let ended = tokio::time::timeout(std::time::Duration::from_secs(10), waiting)
+			.await
+			.expect("the wait is asked again within a poll")
+			.unwrap();
+		assert_eq!(ended.expect_err("interrupted").to_string(), "the query was cancelled");
+		definer.cancel().await.unwrap();
+	}
+
+	/// A write waiting for a definition is set aside from the writes a build waits for, so a build
+	/// that began after it opened does not wait for a write that waits for a definition.
+	#[tokio::test]
+	async fn a_write_waiting_for_a_definition_does_not_hold_up_a_build() {
+		let (tf, sq) = factory().await;
+		let definer = defining(&tf, &sq, "a").await;
+		let parked_definer = definer.park_live_write().expect("a write transaction is counted");
+		let newer = writer(&tf, &sq).await;
+		assert!(!tf.live_writes().ended_since(tf.live_writes().advance()), "a write is open");
+		let held = waiting(&newer, "a");
+		settle().await;
+		assert!(!held.is_finished());
+		assert!(
+			tf.live_writes().ended_since(tf.live_writes().advance()),
+			"the write waiting for the definition is not waited for"
+		);
+		definer.cancel().await.unwrap();
+		held.await.unwrap().unwrap();
+		drop(parked_definer);
 	}
 }
 

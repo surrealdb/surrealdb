@@ -2587,6 +2587,16 @@ async fn step_inner(
 				_ => None,
 			};
 			let built_inside = after_commit.is_none();
+			// A new blocking index built inside this transaction reads the table before the
+			// transaction commits. A write that opens after the build began waiting for the older
+			// writes cannot see the index, and the build would not read what it writes, so the
+			// table's writes are held back until this transaction ends
+			// ([`surrealdb_datastore::triggers::DefinitionHold`]). A build that reads after the
+			// commit waits for every write older than the commit instead.
+			if *fresh && blocking && built_inside {
+				txn.hold_writes_for_definition(table.namespace_id, table.database_id, &table.name)
+					.await;
+			}
 			let unstaged = staged.is_none();
 			let materialise =
 				(blocking && index.index.queues_compaction() && txn.accepts_materialise_waits())

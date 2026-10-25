@@ -129,12 +129,23 @@ impl WriteScope {
 		&self.exec
 	}
 
-	/// The write context for one table and one purpose, resolved on first use.
+	/// The write context for one table and one purpose, resolved on first use, after the
+	/// definitions that hold the write back have ended ([`WriteCtx::wait_for_definitions`]).
 	///
 	/// Resolution reads the catalog and compiles expressions, which must not
 	/// happen per record; a statement that writes to more than one table — an
 	/// `INSERT` whose rows name their own — holds one of these per table.
 	pub(crate) async fn write_ctx_for(
+		self: &Arc<Self>,
+		table: &TableName,
+		purpose: WritePurpose,
+	) -> Result<Arc<WriteCtx>, ControlFlow> {
+		let resolved = self.resolved_ctx_for(table, purpose).await?;
+		resolved.wait_for_definitions().await?;
+		Ok(resolved)
+	}
+
+	async fn resolved_ctx_for(
 		self: &Arc<Self>,
 		table: &TableName,
 		purpose: WritePurpose,

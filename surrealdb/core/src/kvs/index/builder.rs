@@ -3785,11 +3785,20 @@ impl Building {
 		// Counted as this build's own before the wait begins, for a statement that set its
 		// transaction aside for this build.
 		self.write_barrier_waits_begun.fetch_add(1, Ordering::SeqCst);
+		// A definition built inside its own transaction holds back the writes that open after this
+		// wait begins, until that transaction ends: they cannot see the index, and this build
+		// reads before it commits. The build's own context carries no transaction, so the
+		// statement's is the one found through [`Self::statement_tx`].
+		let hold =
+			self.statement_tx.get().and_then(std::sync::Weak::upgrade).and_then(|txn| {
+				txn.definition_hold(self.ix_key.ns, self.ix_key.db, &self.ix_key.tb)
+			});
 		let mut barrier = crate::kvs::write_barrier::WriteBarrier::start(
 			&self.tf,
 			&sequences,
 			self.ctx.node_id(),
 			(self.ix_key.ns, self.ix_key.db, self.ix_key.tb.clone()),
+			hold.as_deref(),
 		)
 		.await?;
 		let every = self.ownership_heartbeat_every();
