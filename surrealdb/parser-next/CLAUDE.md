@@ -12,13 +12,14 @@ corpus:
   grammar corners, including inputs that must be rejected.
 
 ```bash
-# Every entry point's tree or rendered error, digested per corpus file
-cargo run --locked --release -p surrealdb-expr --example golden
+# Every entry point's tree (plain and pretty-printed) or rendered error,
+# digested per corpus file and checked against entries.txt and entries-pretty.txt
+cargo run --locked --profile golden -p surrealdb-expr --example golden
 # After an intended change, record the new digests (review the inputs first)
-cargo run --locked --release -p surrealdb-expr --example golden -- --show FILE
-cargo run --locked --release -p surrealdb-expr --example golden -- --bless
-# One input through every entry point
-cargo run --locked --release -p surrealdb-expr --example golden -- --check 'SELECT * FROM'
+cargo run --locked --profile golden -p surrealdb-expr --example golden -- --show FILE
+cargo run --locked --profile golden -p surrealdb-expr --example golden -- --bless
+# One input through every entry point (add --pretty for pretty-printed trees)
+cargo run --locked --profile golden -p surrealdb-expr --example golden -- --check 'SELECT * FROM'
 
 # Streaming, round trips, depth ceilings and tree invariants under mutation
 cargo run --locked --release -p surrealdb-expr --example invariants -- --stream
@@ -27,9 +28,13 @@ cargo run --locked --release -p surrealdb-expr --example invariants -- --depth-p
 cargo run --locked --release -p surrealdb-expr --example invariants -- --fuzz
 ```
 
-`cargo make ci-parser` runs all of the above. A changed digest means the
-parser's output changed on some input drawn from that file: confirm the change
-is intended (error wording is a product contract) before blessing.
+`cargo make ci-parser` runs all of the above. Pull requests that touch the
+parser, its dependencies or the corpus run the golden check
+(`cargo make ci-parser-golden`); the unit tests and invariant harnesses run
+after merge. A changed digest means the parser's output changed on some input
+drawn from that file: confirm the change is intended (error wording is a
+product contract) before blessing. A new corpus file is reported but does not
+fail the check until it is blessed.
 
 Unit tests next to the code cover what the harnesses cannot: depth budgets,
 recovery, arena reuse and the settings' budget accounting.

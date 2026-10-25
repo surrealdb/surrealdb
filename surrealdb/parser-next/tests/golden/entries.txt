@@ -2373,6 +2373,7 @@ fb8159a9a467dc47 language-tests/tests/language/statements/create/input_computes_
 acce80aff01b3bd7 language-tests/tests/language/statements/create/mock_lazy_iteration.surql
 89c7a662c9d0fa68 language-tests/tests/language/statements/create/mock_lazy_iteration_streaming.surql
 848b2524cfb99e11 language-tests/tests/language/statements/create/mock_start_limit.surql
+5775baa3f0173bc8 language-tests/tests/language/statements/create/return_none_reads_back.surql
 977783e47656f80c language-tests/tests/language/statements/create/with_id.surql
 c8f67aa1420a3443 language-tests/tests/language/statements/define/analyzer/basic.surql
 bfe9da52ea99f328 language-tests/tests/language/statements/define/analyzer/extension_function.surql
@@ -3199,6 +3200,7 @@ c1ef14331be14ee8 language-tests/tests/language/statements/select/join/filter_spl
 6d7eee2ca0ffad28 language-tests/tests/language/statements/select/join/in_subquery.surql
 4be3b90a2f93858c language-tests/tests/language/statements/select/join/in_subquery_plan.surql
 3de6278fd1683c85 language-tests/tests/language/statements/select/limit_start_with_computed.surql
+f5fd03ac1fc4915a language-tests/tests/language/statements/select/literal_record_sources_answer_their_own_rows.surql
 87804c718de435b7 language-tests/tests/language/statements/select/missing_table_limit_zero.surql
 f79594fd9d0a1db3 language-tests/tests/language/statements/select/multi_aggregate.surql
 b04f6b359cb71c04 language-tests/tests/language/statements/select/mutating_clause_gets_write_txn.surql
@@ -3513,6 +3515,7 @@ e2fa12b3be987528 language-tests/tests/language/write/self_insert_not_reobserved.
 50e8390218679e6d language-tests/tests/language/write/set_and_unset_at_array_paths.surql
 667770e813c456b3 language-tests/tests/language/write/set_assign_operators_at_nested_paths.surql
 facbfd40393a0308 language-tests/tests/language/write/set_through_absent_intermediates.surql
+36051400f49da159 language-tests/tests/language/write/stages_follow_ddl_between_identical_writes.surql
 806d5e16bd4f00e4 language-tests/tests/language/write/subquery_rows_keep_hidden_fields.surql
 c1a2b48352f52783 language-tests/tests/language/write/subquery_rows_keep_hidden_fields_import.surql
 65a8ff001729fbc6 language-tests/tests/language/write/subquery_rows_name_their_records.surql
@@ -4351,6 +4354,7 @@ c6792e85c7760e01 language-tests/tests/reproductions/an_element_field_declared_sc
 59267bd0d7b5fb0f language-tests/tests/reproductions/an_element_filter_in_a_write_where_reads_the_record_through_an_argument.surql
 386783f8feff225d language-tests/tests/reproductions/an_error_names_what_failed_as_main_names_it.surql
 b7fd33a5406b6240 language-tests/tests/reproductions/an_evaluated_alter_timeout_is_cast_when_it_runs.surql
+c704019f1ce7aa39 language-tests/tests/reproductions/an_event_failing_in_an_upsert_of_a_computed_table_raises_its_error.surql
 51933ecf57a2dfba language-tests/tests/reproductions/an_event_write_hitting_a_unique_index_raises_the_index_error.surql
 ffe71875f58aecd1 language-tests/tests/reproductions/an_exact_equality_names_no_number_index_scan_matches_noindex.surql
 74dd41f20ad77b16 language-tests/tests/reproductions/an_exact_equality_names_no_number_the_comparison_equates_apart.surql

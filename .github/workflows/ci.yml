@@ -37,10 +37,11 @@ permissions:
 
 jobs:
   # Pull requests and the merge queue run the fast gate: format, clippy, the
-  # Wasm check, Miri, the SDK build, the lockfile check and the language tests
-  # on mem, all in parallel once `changes` has classified the diff. Every other
-  # job runs on pushes to main and release branches and on workflow_dispatch,
-  # and reports as skipped to `required-checks` elsewhere.
+  # Wasm check, Miri, the SDK build, the lockfile check, the parser's golden
+  # corpus check and the language tests on mem, all in parallel once `changes`
+  # has classified the diff. Every other job runs on pushes to main and release
+  # branches and on workflow_dispatch, and reports as skipped to
+  # `required-checks` elsewhere.
   #
   # Build/test lanes use the pinned nightly parallel frontend. MSRV and Clippy
   # keep the stable compatibility/lint signal; shipping workflows use stable.
@@ -58,6 +59,7 @@ jobs:
       pull-requests: read
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
+      parser: ${{ steps.diff.outputs.parser }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -66,6 +68,13 @@ jobs:
 
       # Markdown inside a crate can be compiled into rustdoc (`include_str!`), so
       # only top-level Markdown, doc/, docs/, img/ and LICENSE count as docs.
+      #
+      # `parser` is true when the change can alter the SurrealQL parser's golden
+      # digests: its corpus, the golden example and every workspace crate
+      # surrealdb-expr builds on, the dependency lockfile (a dependency bump
+      # can change a rendered error), the toolchain and the CI wiring. The crate
+      # list is the closure of surrealdb-expr's workspace dependencies; extend
+      # it when that closure grows. Push runs check the digests regardless.
       - name: Classify changed files
         id: diff
         env:
@@ -73,14 +82,19 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           docs_only=false
+          parser=true
           if [[ -n "$PR" ]]; then
             if files=$(gh api "repos/${{ github.repository }}/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
               if [[ -n "$files" ]] && ! grep -qvE '(^(doc|docs|img)/|^LICENSE$|^[^/]+\.md$)' <<<"$files"; then
                 docs_only=true
               fi
+              if [[ -n "$files" ]] && ! grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/ci\.yml$|actions/)|language-tests/tests/|surrealdb/(cnf|collections|common|expr|iam|kvs|parse-common|parser-next|stored-derive|strand|types)/)' <<<"$files"; then
+                parser=false
+              fi
             fi
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "parser=$parser" >> "$GITHUB_OUTPUT"
 
   # Every consumer of this job's binary runs on arm on pull requests, and the
   # job gates all of them, so an amd64 leg there would hold them back for a
@@ -657,6 +671,42 @@ jobs:
       - name: Run doctests
         run: cargo make ci-doctests
 
+  # The golden digest of every parser entry point over the corpus. It gates
+  # pull requests and the merge queue, so it is kept to the one check whose
+  # failure is caught only by the digests, built without LTO (see
+  # `ci-parser-golden`). It also runs on pushes so that main publishes the
+  # compile cache this job's pull request runs read.
+  parser-golden:
+    name: Check SurrealQL parser golden corpus
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.parser == 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: build-nightly
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check the parser's golden corpus
+        run: cargo make ci-parser-golden
+
+  # The parser's unit tests and its invariant harnesses, which take longer
+  # than the golden check and run after merge.
   parser:
     name: Check SurrealQL parser
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
@@ -682,8 +732,8 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
 
-      - name: Check the parser's golden corpus and invariants
-        run: cargo make ci-parser
+      - name: Check the parser's invariants
+        run: cargo make ci-parser-invariants
 
   feature-check:
     name: Check feature combinations (${{ matrix.package }})
@@ -1897,6 +1947,7 @@ jobs:
       - check-revision
       - check-catalog-schema
       - check-docs
+      - parser-golden
       - parser
       - feature-check
       - check-tokio-console
@@ -1958,6 +2009,7 @@ jobs:
             "${{ needs.check-revision.result }}"
             "${{ needs.check-catalog-schema.result }}"
             "${{ needs.check-docs.result }}"
+            "${{ needs.parser-golden.result }}"
             "${{ needs.parser.result }}"
             "${{ needs.feature-check.result }}"
             "${{ needs.check-tokio-console.result }}"

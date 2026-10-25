@@ -852,6 +852,18 @@ opt-level = 3
 panic = 'abort'
 strip = true
 
+# The SurrealQL parser's golden corpus check (`cargo make ci-parser-golden`),
+# which gates pull requests. It runs optimised code, as the check parses every
+# corpus input through every entry point, but drops `release`'s whole-program
+# LTO and single codegen unit: those roughly double its build from cold and
+# triple its rebuild after a parser change, for little gain in its run.
+# Debug assertions and overflow checks stay off, as in `release`, so the check
+# runs the parser as it ships.
+[profile.golden]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # Faster release-mode checks/lints in CI (no whole-crate LTO)
 [profile.clippy-release]
 inherits = "release"

@@ -1277,14 +1277,27 @@ dependencies = [
 [tasks.ci-parser]
 category = "CI - CHECK"
 description = "Run the SurrealQL parser's golden corpus check and its invariant harnesses"
-# The golden check pins every entry point's tree or rendered error on the
-# corpus; the invariant harnesses check streaming, round-tripping, the depth
-# ceilings and the tree invariants under mutation.
+run_task = { name = ["ci-parser-golden", "ci-parser-invariants"] }
+
+[tasks.ci-parser-golden]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's golden corpus check"
+# Pins every entry point's tree, plain and pretty-printed, or its rendered
+# error on the corpus. The `golden` profile drops the release profile's LTO,
+# which the check does not need and which dominates its build time.
+script = """
+#!/bin/bash -ex
+cargo run --locked --profile golden -p surrealdb-expr --example golden
+"""
+
+[tasks.ci-parser-invariants]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's unit tests and invariant harnesses"
+# The invariant harnesses check streaming, round-tripping, the depth ceilings
+# and the tree invariants under mutation.
 script = """
 #!/bin/bash -ex
 cargo test --locked -p surrealdb-parser-next -p surrealdb-expr
-cargo run --locked --release -p surrealdb-expr --example golden
-cargo run --locked --release -p surrealdb-expr --example golden -- --pretty
 for mode in --fuzz --stream --round-trip --depth-probe --logical; do
     cargo run --locked --release -p surrealdb-expr --example invariants -- "$mode"
 done
