@@ -10,6 +10,7 @@ pub mod lexer;
 pub mod mode;
 pub mod parser;
 pub mod printer;
+pub mod system_vars;
 pub mod translate;
 
 pub use lexer::{Token, TokenKind, tokenize, tokenize_with_settings};

@@ -26,6 +26,7 @@ use crate::lower::plan::lower_bound_subquery;
 use crate::lower::quote_ident::{lower_quote_ident, quote_ident_str};
 use crate::lower::sql_like::like_pattern_regex;
 use crate::semantics::sql_like_to_regex;
+use crate::system_vars::{MYSQL_SERVER_VERSION, SystemVariable, mysql_system_variable};
 
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
 pub fn lower_bound_expr(
@@ -273,7 +274,7 @@ pub fn lower_bound_expr(
 				}
 				"version" => {
 					let ver = match policy.dialect {
-						SqlDialect::MySql => "8.0.36-SurrealDB",
+						SqlDialect::MySql => MYSQL_SERVER_VERSION,
 						SqlDialect::Postgres => "PostgreSQL 16.0 (SurrealDB)",
 					};
 					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(ver))));
@@ -2261,62 +2262,13 @@ fn lower_system_var(
 	_is_global: bool,
 	_policy: &DialectPolicy,
 ) -> Result<LogicalExpr, PlanError> {
-	let clean_name = name.to_ascii_lowercase();
-	let val = match clean_name.as_str() {
-		"version" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("8.0.36-SurrealDB"))),
-		"version_comment" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("SurrealDB")))
-		}
-		"version_compile_os" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from(std::env::consts::OS)))
-		}
-		"version_compile_machine" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from(std::env::consts::ARCH)))
-		}
-		"sql_mode" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
-			"ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
-		))),
-		"autocommit" => LogicalExpr::Literal(LogicalLiteral::Integer(1)),
-		"character_set_client"
-		| "character_set_connection"
-		| "character_set_results"
-		| "character_set_server"
-		| "character_set_database" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("utf8mb4")))
-		}
-		"collation_connection" | "collation_server" | "collation_database" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("utf8mb4_0900_ai_ci")))
-		}
-		"time_zone" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("SYSTEM"))),
-		"system_time_zone" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from("UTC"))),
-		"max_allowed_packet" => LogicalExpr::Literal(LogicalLiteral::Integer(67108864)),
-		"interactive_timeout" | "wait_timeout" => {
-			LogicalExpr::Literal(LogicalLiteral::Integer(28800))
-		}
-		"net_write_timeout" => LogicalExpr::Literal(LogicalLiteral::Integer(60)),
-		"net_read_timeout" => LogicalExpr::Literal(LogicalLiteral::Integer(30)),
-		"lower_case_table_names" => LogicalExpr::Literal(LogicalLiteral::Integer(0)),
-		"auto_increment_increment" | "auto_increment_offset" => {
-			LogicalExpr::Literal(LogicalLiteral::Integer(1))
-		}
-		"tx_isolation" | "transaction_isolation" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("REPEATABLE-READ")))
-		}
-		"tx_read_only" | "transaction_read_only" => {
-			LogicalExpr::Literal(LogicalLiteral::Integer(0))
-		}
-		"init_connect" => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(""))),
-		"query_cache_size" | "query_cache_type" | "performance_schema" => {
-			LogicalExpr::Literal(LogicalLiteral::Integer(0))
-		}
-		"session_track_schema" => LogicalExpr::Literal(LogicalLiteral::Integer(1)),
-		"session_track_system_variables" => {
-			LogicalExpr::Literal(LogicalLiteral::String(Strand::from("")))
-		}
-		"session_track_state_change" => LogicalExpr::Literal(LogicalLiteral::Integer(0)),
-		_ => LogicalExpr::Literal(LogicalLiteral::Null),
+	let literal = match mysql_system_variable(name) {
+		Some(SystemVariable::Int(value)) => LogicalLiteral::Integer(value),
+		Some(SystemVariable::Flag(on)) => LogicalLiteral::Integer(i64::from(on)),
+		Some(SystemVariable::Text(value)) => LogicalLiteral::String(Strand::from(value)),
+		None => LogicalLiteral::Null,
 	};
-	Ok(val)
+	Ok(LogicalExpr::Literal(literal))
 }
 
 fn current_item(index: i64) -> LogicalExpr {

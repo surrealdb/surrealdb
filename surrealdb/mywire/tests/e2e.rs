@@ -793,13 +793,24 @@ async fn test_mywire_honest_session_fail_closed() {
 	};
 	assert_eq!(code, 1235);
 
+	// A variable MySQL does not have is an unknown system variable, not an unsupported SET.
 	let res = query_mysql(&mut stream, "SET unknown_variable = 1;").await;
 	let QueryResult::Error {
 		code,
 		..
 	} = res
 	else {
-		panic!("Expected Error 1235 for unknown SET, got {res:?}");
+		panic!("Expected Error 1193 for unknown SET, got {res:?}");
+	};
+	assert_eq!(code, 1193);
+
+	let res = query_mysql(&mut stream, "SET @@max_connections = 1;").await;
+	let QueryResult::Error {
+		code,
+		..
+	} = res
+	else {
+		panic!("Expected Error 1235 for a SET the server cannot honour, got {res:?}");
 	};
 	assert_eq!(code, 1235);
 

@@ -17,6 +17,7 @@ mod output_keys;
 pub mod presentation;
 pub mod scope;
 pub mod semantics;
+mod system_vars;
 
 pub use catalog::{BinderCatalog, ColumnInfo, EmptyCatalog, MemoryCatalog, TableSchema};
 pub use descriptor::{
@@ -51,6 +52,10 @@ pub use semantics::{fold_expr, fold_select};
 pub use surrealdb_expr::expr::logical::LogicalOp;
 use surrealdb_mysql::ast::stmt::SelectStmt as MySelectStmt;
 use surrealdb_pgsql::ast::stmt::SelectStmt as PgSelectStmt;
+pub use system_vars::{
+	MYSQL_SERVER_VERSION, SystemVariable, SystemVariableError, check_mysql_system_variable,
+	mysql_system_variable,
+};
 
 /// Bind, fold, and lower a PostgreSQL `SelectStmt` directly to a `LogicalOp`.
 pub fn bind_and_lower_pgsql(

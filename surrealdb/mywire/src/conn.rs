@@ -219,7 +219,7 @@ async fn perform_handshake(
 
 	// 1. Send HandshakeV10 packet (seq 0)
 	let handshake = HandshakeV10 {
-		server_version: "8.0.35-SurrealDB".to_string(),
+		server_version: surrealdb_sqlplan::MYSQL_SERVER_VERSION.to_string(),
 		connection_id,
 		auth_plugin_data: auth_salt,
 		capabilities: server_capabilities,
@@ -923,6 +923,12 @@ impl Connection {
 		}
 
 		if trimmed.starts_with("SET ") || trimmed.starts_with("set ") {
+			if self.dialect == Dialect::MySql
+				&& let Some(err_pkt) = crate::query::system_variable_refusal(trimmed)
+			{
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(());
+			}
 			if is_mysql_driver_noise_set(trimmed) {
 				let ok = self.ok_packet(0, 0);
 				self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
@@ -940,10 +946,6 @@ impl Connection {
 
 		// Handle common introspection queries from drivers
 		let lower = trimmed.to_ascii_lowercase();
-		if lower.starts_with("select @@") {
-			return self.handle_variable_select(trimmed, seq).await;
-		}
-
 		if lower == "select database()" {
 			let db_name = self.current_db.clone().unwrap_or_else(|| "test".to_string());
 			let mut res_seq = seq.wrapping_add(1);
@@ -959,7 +961,7 @@ impl Connection {
 		}
 
 		if lower == "select version()" {
-			let ver = "8.0.35-SurrealDB";
+			let ver = surrealdb_sqlplan::MYSQL_SERVER_VERSION;
 			let mut res_seq = seq.wrapping_add(1);
 			self.emit_scalar_result("VERSION()", ver, &mut res_seq).await?;
 			return Ok(());
@@ -987,6 +989,29 @@ impl Connection {
 		if let Err(e) = self.check_dialect(self.dialect) {
 			let err_pkt = ErrPacket::general(1045, b"28000", e.to_string());
 			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
+
+		// MySQL refuses a system variable it does not have as it reads the statement.
+		if self.dialect == Dialect::MySql
+			&& let Some(err_pkt) = crate::query::system_variable_refusal(trimmed)
+		{
+			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
+
+		// With no database selected the engine has none to run a statement in, yet a driver reads
+		// its settings, with a `SELECT` of system variables, before it selects one.
+		if self.session.db.is_none()
+			&& self.dialect == Dialect::MySql
+			&& trimmed.contains("@@")
+			&& let Some(shape) = crate::query::system_variable_answer(
+				trimmed,
+				self.current_db.as_deref().unwrap_or("test"),
+			) {
+			let mut res_seq = seq.wrapping_add(1);
+			let status = self.status_flags();
+			self.emit_shape_result(&shape, &mut res_seq, status).await?;
 			return Ok(());
 		}
 
@@ -1401,32 +1426,6 @@ impl Connection {
 		}
 	}
 
-	async fn handle_variable_select(&mut self, sql: &str, seq: u8) -> Result<()> {
-		let mut res_seq = seq.wrapping_add(1);
-		// Return friendly defaults for common MySQL variables
-		if sql.contains("version_comment") {
-			self.emit_scalar_result("@@version_comment", "SurrealDB", &mut res_seq).await?;
-		} else if sql.contains("sql_mode") {
-			self.emit_scalar_result(
-				"@@sql_mode",
-				"ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
-				&mut res_seq,
-			).await?;
-		} else if sql.contains("character_set") {
-			self.emit_scalar_result("@@character_set_client", "utf8mb4", &mut res_seq).await?;
-		} else if sql.contains("max_allowed_packet") {
-			self.emit_scalar_result(
-				"@@max_allowed_packet",
-				&MAX_ALLOWED_PACKET.to_string(),
-				&mut res_seq,
-			)
-			.await?;
-		} else {
-			self.emit_scalar_result("@@var", "1", &mut res_seq).await?;
-		}
-		Ok(())
-	}
-
 	async fn emit_shape_result(
 		&mut self,
 		shape: &ResultShape,
@@ -1645,6 +1644,13 @@ impl Connection {
 		} else {
 			0
 		};
+
+		if self.dialect == Dialect::MySql
+			&& let Some(err_pkt) = crate::query::system_variable_refusal(trimmed)
+		{
+			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
 
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {

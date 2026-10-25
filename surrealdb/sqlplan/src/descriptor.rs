@@ -618,21 +618,12 @@ impl BoundSelect {
 			BoundExpr::SystemVar {
 				name,
 				..
-			} => match name.to_ascii_lowercase().as_str() {
-				"autocommit"
-				| "max_allowed_packet"
-				| "interactive_timeout"
-				| "wait_timeout"
-				| "net_write_timeout"
-				| "net_read_timeout"
-				| "lower_case_table_names"
-				| "auto_increment_increment"
-				| "auto_increment_offset"
-				| "query_cache_size"
-				| "query_cache_type"
-				| "tx_read_only"
-				| "transaction_read_only" => SqlType::Int8,
-				_ => SqlType::Text,
+			} => match crate::system_vars::mysql_system_variable(name) {
+				Some(
+					crate::system_vars::SystemVariable::Int(_)
+					| crate::system_vars::SystemVariable::Flag(_),
+				) => SqlType::Int8,
+				Some(crate::system_vars::SystemVariable::Text(_)) | None => SqlType::Text,
 			},
 		}
 	}

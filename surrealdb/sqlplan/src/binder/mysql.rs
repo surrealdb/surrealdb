@@ -756,10 +756,19 @@ pub fn bind_expr(
 			name,
 			is_global,
 			..
-		} => Ok(BoundExpr::SystemVar {
-			name: name.clone(),
-			is_global: *is_global,
-		}),
+		} => {
+			// Only a name MySQL does not have is refused here: the bound expression keeps no
+			// record of the scope the variable was written with.
+			if let Err(crate::system_vars::SystemVariableError::Unknown(shown)) =
+				crate::system_vars::check_mysql_system_variable(name, false)
+			{
+				return Err(PlanError::UndefinedObject(shown));
+			}
+			Ok(BoundExpr::SystemVar {
+				name: name.clone(),
+				is_global: *is_global,
+			})
+		}
 		Expr::Quantified {
 			expr,
 			op,

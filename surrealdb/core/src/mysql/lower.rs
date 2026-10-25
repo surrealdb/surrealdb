@@ -22,6 +22,11 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 				LowerError::UnsupportedExpr(s)
 			}
 			surrealdb_sqlplan::PlanError::UnsupportedStatement(s) => LowerError::UnsupportedStmt(s),
+			// The MySQL binder raises this for a system variable MySQL does not have, which MySQL
+			// reports in its own words.
+			surrealdb_sqlplan::PlanError::UndefinedObject(name) => LowerError::Custom(
+				surrealdb_sqlplan::SystemVariableError::Unknown(name).to_string(),
+			),
 			other @ (surrealdb_sqlplan::PlanError::UndefinedTable(_)
 			| surrealdb_sqlplan::PlanError::UndefinedColumn(_)
 			| surrealdb_sqlplan::PlanError::AmbiguousColumn(_)
@@ -46,7 +51,6 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::InFailedTransaction
 			| surrealdb_sqlplan::PlanError::SavepointDoesNotExist(_)
 			| surrealdb_sqlplan::PlanError::ActiveTransactionAlreadyInProgress
-			| surrealdb_sqlplan::PlanError::UndefinedObject(_)
 			| surrealdb_sqlplan::PlanError::Custom(_)) => LowerError::Custom(other.to_string()),
 		}
 	}
