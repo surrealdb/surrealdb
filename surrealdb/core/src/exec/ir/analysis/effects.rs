@@ -43,7 +43,7 @@ use crate::exec::ir::iface::effects::{
 };
 use crate::exec::ir::iface::fallibility::{ContextDep, Fallibility};
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
-use crate::exec::ir::iface::region_kind::RegionKind;
+use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
 use crate::exec::ir::logical::ops::{LogOp, LogTag, LoopKind};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::ops::PhysTag;
@@ -206,10 +206,35 @@ pub(crate) fn local(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: OpId)
 			{
 				visible_invocation(data.kind.local_effects(cx))
 			}
+			OpKind::Expr(ExprOp::Access {
+				field,
+			}) if data.operands.first().is_some_and(|base| is_write_image(ir, *base)) => {
+				OpKind::Expr(ExprOp::Field {
+					name: field.clone(),
+				})
+				.local_effects(cx)
+			}
 			OpKind::Expr(_) | OpKind::Logical(_) => data.kind.local_effects(cx),
 		},
 		None => OpEffects::top(),
 	}
+}
+
+/// Whether `value` is an image of the record a write's `RETURN` clause is evaluated against
+/// (`$after`, `$before`): an argument of a block of a `RETURN` region. An image is the record's
+/// object, or `NONE`, and never a record id, so the field of it a path reads is read off the value
+/// as a field of the row is, and fetches nothing.
+fn is_write_image(ir: &Ir, value: ValueId) -> bool {
+	let Some(ValueDef::BlockArg {
+		block,
+		..
+	}) = ir.value(value).map(|data| data.def)
+	else {
+		return false;
+	};
+	ir.block(block)
+		.and_then(|data| ir.region(data.parent))
+		.is_some_and(|region| region.kind == RegionKind::Clause(ClauseRole::ReturnClause))
 }
 
 /// The answer of an invocation whose closure the container holds: the failures and context

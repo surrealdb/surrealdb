@@ -294,7 +294,9 @@ mod tests {
 
 		let res = ds
 			.execute(
-				"DEFINE TABLE author SCHEMALESS;
+				"DEFINE NAMESPACE test;
+				 DEFINE DATABASE test;
+				 DEFINE TABLE author SCHEMALESS;
 				 DEFINE FIELD posts ON author TYPE array<record<post>> READONLY DEFAULT [];
 				 DEFINE TABLE post SCHEMALESS;
 				 DEFINE FIELD author ON post TYPE option<record<author>> REFERENCE MATERIALIZE INTO author.posts;

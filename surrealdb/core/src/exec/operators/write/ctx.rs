@@ -321,6 +321,11 @@ pub(crate) struct WriteCtx {
 	/// `TYPE` is held against the key where the record id is settled, so the
 	/// list is found once rather than per record. See [`id_subfield_indexes`].
 	pub(crate) id_subfields: Arc<[usize]>,
+	/// Indexes into `fields` of the definitions a `MATERIALIZE INTO` clause of
+	/// a `REFERENCE` field fills ([`materialized_destinations`]). The engine
+	/// keeps such a list, so a place of one a `REPLACE` leaves empty keeps the
+	/// list the record holds.
+	pub(crate) materialized: Arc<[usize]>,
 	/// What the array keys of the table are made of, when the `id` field's type
 	/// names their components (`TYPE [city: string, time: datetime]`); `None`
 	/// for every other table. The record id stages consult it to build the key
@@ -495,6 +500,15 @@ impl WriteCtx {
 		let views_observe =
 			views_can_observe(&catalog.tables, &catalog.fields, exec.function_registry());
 		let id_subfields = id_subfield_indexes(&catalog.fields);
+		let materialized = materialized_destinations(
+			&txn,
+			parent.ns.namespace_id,
+			parent.db.database_id,
+			table,
+			&catalog.fields,
+		)
+		.await
+		.map_err(ControlFlow::Err)?;
 		Ok(Self {
 			ns: catalog.ns,
 			db: catalog.db,
@@ -512,6 +526,7 @@ impl WriteCtx {
 			computed_deps: catalog.computed_deps,
 			id_field: catalog.id_field_idx,
 			id_subfields,
+			materialized,
 			key,
 			exec: exec.clone(),
 			scope: Weak::new(),
@@ -545,6 +560,7 @@ impl WriteCtx {
 			computed_deps: self.computed_deps.clone(),
 			id_field: self.id_field,
 			id_subfields: Arc::clone(&self.id_subfields),
+			materialized: Arc::clone(&self.materialized),
 			key: self.key.clone(),
 			exec: exec.clone(),
 			scope: Weak::new(),
@@ -582,6 +598,47 @@ impl WriteCtx {
 			)))
 		})
 	}
+}
+
+/// The indexes into `fields`, the field definitions of `table`, of those a
+/// `MATERIALIZE INTO` clause fills.
+///
+/// A destination is a `READONLY` top-level field, so a table that declares
+/// none is filled by no clause and the database-wide read of the `REFERENCE`
+/// fields is not made. Otherwise the read is noted as the references that can
+/// name a record of `table`, with the catalog of each table that defines one,
+/// which is what the answer depends on.
+async fn materialized_destinations(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	fields: &[FieldDefinition],
+) -> anyhow::Result<Arc<[usize]>> {
+	if !fields.iter().any(|fd| fd.readonly && fd.name.len() == 1) {
+		return Ok(Arc::from([]));
+	}
+	let read = txn.reference_fields(ns, db, None).await?;
+	let referencing = crate::exec::catalog_deps::references_to(&read, Some(table));
+	txn.note_references_read(ns, db, Some(table));
+	for (defining, _) in referencing.iter() {
+		txn.note_table_read(ns, db, defining);
+	}
+	let fills = |fd: &FieldDefinition| {
+		referencing.iter().flat_map(|(_, declared)| declared.iter()).any(|field| {
+			field
+				.reference
+				.as_ref()
+				.and_then(|reference| reference.materialize.as_ref())
+				.is_some_and(|m| m.table == *table && m.field == fd.name)
+		})
+	};
+	Ok(fields
+		.iter()
+		.enumerate()
+		.filter(|(_, fd)| fd.readonly && fd.name.len() == 1 && fills(fd))
+		.map(|(index, _)| index)
+		.collect())
 }
 
 #[cfg(test)]

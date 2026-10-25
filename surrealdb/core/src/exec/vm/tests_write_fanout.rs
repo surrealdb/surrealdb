@@ -216,6 +216,23 @@ async fn writes_over_a_scan_fan_out_without_a_read_view() {
 	assert!(handed > 0, "no batch went to a worker");
 }
 
+/// A `RETURN` clause that reads a field of the record's images (`$before`, `$after`) reads it off
+/// the image, which is the record's object, and fetches nothing: the write fans out. One that reads
+/// through a record id an image holds fetches that record, and the write runs serially.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_return_that_reads_the_images_fans_out() {
+	let _turn = TURNS.lock().await;
+	let statements = [
+		("UPDATE t SET n = n + 1 RETURN VALUE $before.n", true),
+		("UPDATE t SET name = name + '!' RETURN $before.name, $after.name", true),
+		("UPDATE t SET s = 'z' WHERE n % 3 = 0 RETURN VALUE [$before.s, $after.s]", true),
+		("DELETE t WHERE n % 4 = 0 RETURN VALUE $before.id", true),
+		("UPDATE t SET s = 'y' RETURN VALUE $after.id.n", false),
+	];
+	let handed = same_answers(&setup(), &statements, &[]).await;
+	assert!(handed > 0, "no batch went to a worker");
+}
+
 /// The same statements on a coordinator that may take no place answer the same.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn writes_run_on_the_coordinator_alone_when_no_place_is_free() {
@@ -1921,14 +1938,12 @@ async fn the_range_create_of_the_placement_corpus_answers_as_the_serial_run() {
 }
 
 /// A record a write creates in the table it reads, sorting after every record the write read
-/// before creating it, is never visited by the write, whether its row reaches a worker or the
-/// statement's task: the coordinator, which holds the statement's watches on the tables it reads,
-/// passes over it as the serial run's gate does. Each shape here fans out, and creates the record
-/// from the apply half of an earlier record: its `RETURN` clause, directly, through a function, or
-/// through the event of another table a nested write triggers. These shapes fan out because the
-/// refusal of a write to the table its source reads does not see the writes of the `RETURN`
-/// clause; a refusal that does leaves this test to find another route that fans out. A record
-/// whose compute half would fail is passed over before anything of it runs.
+/// before creating it, is never visited by the write. Each shape here creates the record from the
+/// apply half of an earlier record: its `RETURN` clause, directly, through a function, or through
+/// the event of another table a nested write triggers. The judgement of whether a write fans out
+/// reads the effects of the write's `RETURN` clause, which writes, so each shape runs serially, and
+/// the serial run's gate passes over the record. A record whose compute half would fail is passed
+/// over before anything of it runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_record_the_write_creates_in_the_table_it_reads_is_never_visited() {
 	let _turn = TURNS.lock().await;
@@ -1982,8 +1997,7 @@ async fn a_record_the_write_creates_in_the_table_it_reads_is_never_visited() {
 		let schema = format!("{} {extra}", setup());
 		let serial = TestDb::new_with_config(&schema, whole()).await;
 		let wide = TestDb::new_with_config(&schema, tiny()).await;
-		let handed = same_answers_over(&serial, &wide, &[(sql.as_str(), true)], &[check]).await;
-		assert!(handed > 0, "{what}: no batch went to a worker");
+		same_answers_over(&serial, &wide, &[(sql.as_str(), false)], &[check]).await;
 		// The created record is left as its creation left it: unwritten by the statement, and not
 		// deleted by a `DELETE`.
 		let untouched = if check.contains("touched") {

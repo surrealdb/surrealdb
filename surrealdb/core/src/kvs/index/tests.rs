@@ -11010,20 +11010,13 @@ async fn info_for_index_reports_an_undrained_count_backlog() -> Result<()> {
 	Ok(())
 }
 
-/// The residual and compacted bitmap of one term of a full-text index.
+/// The compacted documents and residual of one term of a full-text index.
 #[cfg(feature = "kv-mem")]
 async fn term_docs_and_residual(
 	ds: &Datastore,
 	ikb: &IndexKeyBase,
 	term: &str,
 ) -> Result<(Option<roaring::RoaringTreemap>, Option<TermDocsResidual>)> {
-	let docs = crate::key::schema::TermDocsKey {
-		ns: ikb.ns(),
-		db: ikb.db(),
-		tb: Cow::Borrowed(ikb.table()),
-		ix: ikb.index(),
-		term: Cow::Borrowed(term),
-	};
 	let residual = crate::key::schema::TermDocsResidualKey {
 		ns: ikb.ns(),
 		db: ikb.db(),
@@ -11032,28 +11025,73 @@ async fn term_docs_and_residual(
 		term: Cow::Borrowed(term),
 	};
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let docs = catch!(tx, tx.get_key(&docs, None).await);
+	let docs = catch!(tx, compacted_term_docs(&tx, ikb, term).await);
 	let residual = catch!(tx, tx.get_key(&residual, None).await);
 	tx.cancel().await?;
 	Ok((docs, residual))
 }
 
-/// A full-text index whose backlog is folded, with no request queued, and a
-/// residual written for `term` with nothing beside it: the state a compactor
-/// that predates the residual family leaves, once it has folded the term's
-/// deltas into its bitmap and deleted the request that led to its pass.
-///
-/// The residual takes `doc`, which the term's bitmap holds, back out of the
-/// term, so a fold that ignored it would answer differently.
+/// The documents `term`'s compacted state holds, as the index's format keeps
+/// them: the term's bitmap (`!td`), or the documents of its posting blocks
+/// (`!tk`, `!tp`) on an index that keeps its postings in blocks. `None` where
+/// the term holds neither.
 #[cfg(feature = "kv-mem")]
-async fn strand_a_residual(ds: &Datastore, ikb: &IndexKeyBase, term: &str, doc: u64) -> Result<()> {
-	let docs = crate::key::schema::TermDocsKey {
+async fn compacted_term_docs(
+	tx: &crate::kvs::Transaction,
+	ikb: &IndexKeyBase,
+	term: &str,
+) -> Result<Option<roaring::RoaringTreemap>> {
+	let bitmap = crate::key::schema::TermDocsKey {
 		ns: ikb.ns(),
 		db: ikb.db(),
 		tb: Cow::Borrowed(ikb.table()),
 		ix: ikb.index(),
 		term: Cow::Borrowed(term),
 	};
+	if let Some(docs) = tx.get_key(&bitmap, None).await? {
+		return Ok(Some(docs));
+	}
+	let listed = crate::key::schema::TermBlocksKey {
+		ns: ikb.ns(),
+		db: ikb.db(),
+		tb: Cow::Borrowed(ikb.table()),
+		ix: ikb.index(),
+		term: Cow::Borrowed(term),
+	};
+	let Some(listed) = tx.get_key(&listed, None).await? else {
+		return Ok(None);
+	};
+	let mut docs = roaring::RoaringTreemap::new();
+	for summary in &listed.blocks {
+		let key = crate::key::schema::TermBlockKey {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+			term: Cow::Borrowed(term),
+			start: summary.start,
+		};
+		let block = tx
+			.get_key(&key, None)
+			.await?
+			.ok_or_else(|| anyhow::anyhow!("a listed posting block is missing"))?;
+		let entries =
+			block.entries().ok_or_else(|| anyhow::anyhow!("failed to decode a posting block"))?;
+		docs.extend(entries.into_iter().map(|(doc, _, _)| doc));
+	}
+	Ok(Some(docs))
+}
+
+/// A full-text index whose backlog is folded, with no request queued, and a
+/// residual written for `term` with nothing beside it: the state a compactor
+/// that predates the residual family leaves, once it has folded the term's
+/// deltas into its compacted state and deleted the request that led to its
+/// pass.
+///
+/// The residual takes `doc`, which the term's compacted state holds, back out
+/// of the term, so a fold that ignored it would answer differently.
+#[cfg(feature = "kv-mem")]
+async fn strand_a_residual(ds: &Datastore, ikb: &IndexKeyBase, term: &str, doc: u64) -> Result<()> {
 	let residual = crate::key::schema::TermDocsResidualKey {
 		ns: ikb.ns(),
 		db: ikb.db(),
@@ -11062,8 +11100,8 @@ async fn strand_a_residual(ds: &Datastore, ikb: &IndexKeyBase, term: &str, doc: 
 		term: Cow::Borrowed(term),
 	};
 	let tx = ds.transaction(TransactionType::Write).await?;
-	let held = catch!(tx, tx.get_key(&docs, None).await).unwrap_or_default();
-	assert!(held.contains(doc), "the stranded residual must take back a document the bitmap holds");
+	let held = catch!(tx, compacted_term_docs(&tx, ikb, term).await).unwrap_or_default();
+	assert!(held.contains(doc), "the stranded residual must take back a document the term holds");
 	catch!(tx, tx.set_key(&residual, &TermDocsResidual::new([(doc, -1)])).await);
 	tx.commit().await?;
 	Ok(())
@@ -11103,7 +11141,7 @@ async fn index_compaction_sweeps_up_a_stranded_residual() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
 	let ikb = settled_fulltext_index(&ds, &session).await?;
 	let (held, _) = term_docs_and_residual(&ds, &ikb, "beta").await?;
-	let held = held.expect("the folded term has a bitmap");
+	let held = held.expect("the folded term holds documents");
 	let doc = held.iter().next().expect("the bitmap holds a document");
 	strand_a_residual(&ds, &ikb, "beta", doc).await?;
 
@@ -11125,7 +11163,7 @@ async fn index_compaction_sweeps_up_a_stranded_residual() -> Result<()> {
 	assert!(residual.is_none(), "the residual must be folded and removed");
 	let mut expected = held;
 	expected.remove(doc);
-	assert_eq!(docs, Some(expected), "the bitmap must hold the residual's total");
+	assert_eq!(docs, Some(expected), "the compacted documents must hold the residual's total");
 	assert_eq!(compaction_requests(&ds, &ikb).await?, 0, "the sweep's request is drained");
 	let building = index_building_json(&ds, &session, "t", "ft").await?;
 	assert_eq!(building.get("compacting").and_then(|v| v.as_bool()), Some(false), "{building}");
@@ -18939,7 +18977,9 @@ async fn online_decision_holds_for_a_transaction_that_straddles_a_remote_rebuild
 
 /// A transaction that writes to an indexed table, rebuilds the index and
 /// writes again leaves the index agreeing with the rows, whether it commits
-/// or the rebuild's own writes conflict with its own and it does not.
+/// or it does not: the rebuild's own writes conflict with its own, or the
+/// write after the rebuild changes a record the rebuild indexed in a
+/// transaction of its own, which is refused where it is made.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn same_transaction_rebuild_between_writes_leaves_index_matching_rows() -> Result<()> {
@@ -18970,7 +19010,12 @@ async fn same_transaction_rebuild_between_writes_leaves_index_matching_rows() ->
 		.await?;
 	let committed = match transaction_failure(results) {
 		None => true,
-		Some(error) if error.contains("Transaction conflict:") => false,
+		Some(error)
+			if error.contains("Transaction conflict:")
+				|| error.contains("index `ix` was defined by this transaction") =>
+		{
+			false
+		}
 		Some(error) => anyhow::bail!("the transaction failed: {error}"),
 	};
 	wait_for_index_ready(&ds, &session, "u", "ix").await?;

@@ -708,12 +708,15 @@ pub(super) async fn step(
 		SchemaInstr::NextPlace {
 			done,
 		} => {
-			let content = matches!(spec_of(program, state)?.shape.data, Some(DataShape::Content));
+			let data = &spec_of(program, state)?.shape.data;
+			let content = matches!(data, Some(DataShape::Content));
+			let replace = matches!(data, Some(DataShape::Replace));
 			loop {
 				let write = write_state(state)?;
+				let ctx = write.in_flight()?.1;
 				// A write that maintains a `MATERIALIZE INTO` list may change its `READONLY`
 				// destination.
-				let maintaining = crate::exec::materialize::is_marked(write.in_flight()?.1.exec());
+				let maintaining = crate::exec::materialize::is_marked(ctx.exec());
 				let schema = record(write)?;
 				let creating = schema.creating;
 				let table = Arc::clone(&schema.table);
@@ -747,12 +750,14 @@ pub(super) async fn step(
 				}
 				// A `READONLY` field may not change once the record exists; a
 				// place a `CONTENT` clause left empty is the clause restating the
-				// record, and is restored.
+				// record, and is restored. So is the place of a `MATERIALIZE INTO`
+				// destination a `REPLACE` left empty: the engine keeps that list,
+				// and no statement restates it.
 				if fd.readonly && !creating && !maintaining {
 					if val == old {
 						continue;
 					}
-					if val.is_none() && content {
+					if val.is_none() && (content || replace && ctx.materialized.contains(&index)) {
 						restore_place(&mut row.current, &row.initial, &path, old);
 						continue;
 					}

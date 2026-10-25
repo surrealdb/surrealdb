@@ -54,6 +54,7 @@ use surrealdb_strand::{Strand, TableName};
 use super::access::ReadVersion;
 use super::conjunct::{def_op, is_row, is_total_form};
 use super::duplicate;
+use super::hold_left::enforcement_is_total;
 use super::nested::{
 	enclosing_statement, holds_version, impure, in_stored_clause, index_for, index_operator,
 	runs_once, statement_writes, yielded,
@@ -227,12 +228,16 @@ fn chain_is_repeatable(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, chain: &
 		#[allow(clippy::wildcard_enum_match_arm)]
 		match kind {
 			PhysOp::TableScan(_) => true,
+			// Enforcement that evaluates nothing (literal permissions, no computed field) judges
+			// every row alike however often the chain runs.
 			PhysOp::Enforced {
 				table,
-			} => matches!(
-				cx.physical.table_answers(&(table.clone(), None, ReadVersion::Current)),
-				CatalogAnswer::Found(answers) if !answers.enforces
-			),
+			} => {
+				matches!(
+					cx.physical.table_answers(&(table.clone(), None, ReadVersion::Current)),
+					CatalogAnswer::Found(answers) if !answers.enforces
+				) || enforcement_is_total(cx, table)
+			}
 			PhysOp::PermissionFilter(attrs) => {
 				attrs.computed.is_none() && regions_are_repeatable(ir, facts, cx, &data.regions)
 			}

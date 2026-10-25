@@ -2244,11 +2244,14 @@ mod tests {
 		assert_eq!(frame.len(), 1, "the failed row is not kept");
 	}
 
-	/// A packed row with a narrowed `F32` column holding a signaling NaN preserves its exact
-	/// `f64` bit pattern when transcoded into both CBOR and shaped row frames.
+	/// A packed row with an `F32` column holding a NaN, signaling or quiet, is transcoded without
+	/// a whole decode into every row frame. A shaped frame copies the slot, so it preserves the
+	/// exact `f32` bit pattern. A CBOR frame carries the value as a float, which CBOR v2 tags as
+	/// an `f32`: it keeps a NaN of the same sign, and the payload only as far as the platform's
+	/// conversion between `f32` and `f64` keeps it.
 	#[cfg(feature = "shaped")]
 	#[test]
-	fn a_packed_f32_signaling_nan_preserves_bits_in_shaped_and_cbor_frames() {
+	fn a_packed_f32_nan_keeps_its_bits_in_a_shaped_frame_and_its_sign_in_cbor() {
 		use std::sync::Arc;
 
 		use crate::catalog::{
@@ -2306,12 +2309,10 @@ mod tests {
 		.encode_key()
 		.expect("encodes");
 
-		for expected_bits in
-			[0x7ff0_0000_2000_0000u64, 0xfff0_0000_2000_0000u64, 0x7ff8_0000_2000_0000u64]
-		{
+		for expected_bits in [0x7f80_0001u32, 0xff80_0001u32, 0x7fc0_0001u32] {
 			let mut obj = Object::default();
 			obj.insert("id".to_owned(), Value::RecordId(rid.clone()));
-			obj.insert("f".to_owned(), Value::Number(Number::Float(f64::from_bits(expected_bits))));
+			obj.insert("f".to_owned(), Value::Number(Number::F32(f32::from_bits(expected_bits))));
 			let packed_bytes = encode_record_with(
 				RecordFormat::Packed {
 					generation,
@@ -2324,7 +2325,7 @@ mod tests {
 			.expect("encodes packed");
 			assert!(
 				StoredRecord::parse(&packed_bytes).expect("parses").expect("v1").is_packed(),
-				"expected F32 NaN with 23-bit payload to fit in PhysicalKind::F32"
+				"expected an f32 NaN to fit in PhysicalKind::F32"
 			);
 
 			let whole = crate::exec::operators::scan::pipeline::decode_record_value(
@@ -2336,12 +2337,12 @@ mod tests {
 			let Value::Object(whole_obj) = &whole else {
 				panic!("expected object, got {whole:?}");
 			};
-			let Some(Value::Number(Number::Float(whole_f))) = whole_obj.get("f") else {
-				panic!("expected float field f in {whole_obj:?}");
+			let Some(Value::Number(Number::F32(whole_f))) = whole_obj.get("f") else {
+				panic!("expected f32 field f in {whole_obj:?}");
 			};
 			assert_eq!(whole_f.to_bits(), expected_bits, "whole decode preserves NaN bits");
 
-			for format in [RowFormat::Cbor, RowFormat::Shaped] {
+			for format in [RowFormat::Cbor, RowFormat::Cbor2, RowFormat::Shaped] {
 				let mut frame = RowFrame::with_format(format);
 				let whole_before = WHOLE_DECODES.with(|n| n.get());
 				let visits_before = PACKED_VISITS.with(|n| n.get());
@@ -2354,16 +2355,30 @@ mod tests {
 				let surrealdb_types::Value::Object(decoded_obj) = &values[0] else {
 					panic!("expected object in {format:?}, got {:?}", values[0]);
 				};
-				let Some(surrealdb_types::Value::Number(surrealdb_types::Number::Float(f))) =
-					decoded_obj.get("f")
-				else {
-					panic!("expected float field f in {format:?}, got {decoded_obj:?}");
-				};
-				assert_eq!(
-					f.to_bits(),
-					expected_bits,
-					"{format:?} preserves signaling NaN bits {expected_bits:#018x}"
-				);
+				let negative = expected_bits >> 31 == 1;
+				match (format, decoded_obj.get("f")) {
+					(
+						RowFormat::Shaped,
+						Some(surrealdb_types::Value::Number(surrealdb_types::Number::F32(f))),
+					) => assert_eq!(
+						f.to_bits(),
+						expected_bits,
+						"{format:?} preserves NaN bits {expected_bits:#010x}"
+					),
+					(
+						RowFormat::Cbor2,
+						Some(surrealdb_types::Value::Number(surrealdb_types::Number::F32(f))),
+					) => {
+						assert!(f.is_nan() && f.is_sign_negative() == negative, "{format:?}: {f}");
+					}
+					(
+						RowFormat::Cbor,
+						Some(surrealdb_types::Value::Number(surrealdb_types::Number::Float(f))),
+					) => {
+						assert!(f.is_nan() && f.is_sign_negative() == negative, "{format:?}: {f}");
+					}
+					(_, other) => panic!("unexpected field f in {format:?}: {other:?}"),
+				}
 			}
 		}
 	}

@@ -2,7 +2,7 @@
 [env]
 
 [test]
-reason = "A conjunct that reads no computed field moves below the layer that derives them even when another conjunct of the predicate holds the same literal, so the scan serves it and the layer derives its fields only for the rows it admits"
+reason = "A conjunct that reads no computed field moves below the layer that derives them even when another conjunct of the predicate holds the same literal, so the scan serves it and the layer derives its fields only for the rows it admits. A conjunct that may raise and follows one that stays above the layer stays above it too, since AND reaches the one that stays first"
 
 [[test.results]]
 value = "NONE"
@@ -31,10 +31,9 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: ag2 = 2]
+    Filter [ctx: Db] [predicate: ag2 = 2 AND math::abs(age) > 2]
         ProjectLayer [ctx: Db] [columns: ag2 = age * 2 : int @computed]
-            Filter [ctx: Db] [predicate: math::abs(age) > 2]
-                TableScan [ctx: Db] [table: p, direction: Forward]
+            TableScan [ctx: Db] [table: p, direction: Forward]
 ''''
 
 [[test.results]]
@@ -49,10 +48,9 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: ag2 = 3]
+    Filter [ctx: Db] [predicate: ag2 = 3 AND string::len(name) > 3]
         ProjectLayer [ctx: Db] [columns: ag2 = age * 2 : int @computed]
-            Filter [ctx: Db] [predicate: string::len(name) > 3]
-                IndexScan [ctx: Db] [table: p, index: p_age, access: = 3, direction: Forward]
+            IndexScan [ctx: Db] [table: p, index: p_age, access: = 3, direction: Forward]
 ''''
 
 */

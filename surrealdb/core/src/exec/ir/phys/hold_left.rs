@@ -383,7 +383,7 @@ fn inert_tables(ir: &Ir, cx: &PhysCx<'_>, from: ValueId) -> Vec<TableName> {
 /// field that is computed (other than a component of the record id, which is read from the id) or
 /// carries a field permission predicate. A table the catalog does not state, or does not define, is
 /// not total.
-fn enforcement_is_total(cx: &PhysCx<'_>, table: &TableName) -> bool {
+pub(super) fn enforcement_is_total(cx: &PhysCx<'_>, table: &TableName) -> bool {
 	let key: SourceKey = (table.clone(), None, ReadVersion::Current);
 	let CatalogAnswer::Found(answers) = cx.physical.table_answers(&key) else {
 		return false;
