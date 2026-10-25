@@ -465,8 +465,15 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse `FROM` table references.
+	///
+	/// gram.y: from_clause, from_list
+	///
+	/// The binder joins the listed references one after another, so each reference after the
+	/// first is a level of the tree later stages walk and counts against the recursion limit
+	/// until the list is complete.
 	pub fn parse_from_clause(&mut self) -> ParseResult<Vec<TableRef>> {
 		let mut refs = Vec::new();
+		let mut list_depth: u32 = 0;
 
 		loop {
 			let table_ref = self.parse_table_ref()?;
@@ -474,8 +481,11 @@ impl<'a> Parser<'a> {
 			if !self.eat(&TokenKind::Comma)? {
 				break;
 			}
+			self.enter_recursion(self.peek().span)?;
+			list_depth += 1;
 		}
 
+		self.leave_recursion_by(list_depth);
 		Ok(refs)
 	}
 
@@ -630,9 +640,17 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a single table reference or join chain.
+	///
+	/// gram.y: table_ref, joined_table
+	///
+	/// The reference counts one level against the recursion limit, and so does each join chained
+	/// onto it, until the reference is complete. A parenthesised reference holds a reference of
+	/// its own, so it nests as deep as it is written; each join is a level of the tree later
+	/// stages walk.
 	pub fn parse_table_ref(&mut self) -> ParseResult<TableRef> {
+		self.enter_recursion(self.peek().span)?;
+		let mut join_depth: u32 = 1;
 		let mut left = self.parse_table_factor()?;
-		let mut join_depth: u32 = 0;
 
 		// Parse joined relations
 		while let Some(join_type) = self.peek_join_type()? {
