@@ -556,7 +556,7 @@ pub(in crate::exec::vm) fn fail_splits(ctx: &ExecutionContext) -> Failing {
 
 /// Every narrowing of a cursor the morsels of the datastore `ctx` runs under ask for fails, until
 /// the answer is dropped.
-#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
+#[cfg(feature = "kv-surrealkv")]
 pub(in crate::exec::vm) fn fail_narrows(ctx: &ExecutionContext) -> Failing {
 	failing(ctx, |faults, on| faults.narrows = on)
 }
