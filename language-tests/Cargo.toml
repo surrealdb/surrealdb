@@ -142,6 +142,10 @@ panic = "unwind"
 lto = "thin"
 codegen-units = 16
 
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
 # Password-hashing primitives are deliberately expensive by iteration count, so
 # their cost scales directly with how well the inner compression loop is
 # compiled. At `opt-level = 0` that loop runs one to two orders of magnitude
@@ -188,6 +192,65 @@ opt-level = 3
 [profile.dev.package.generic-array]
 opt-level = 3
 [profile.dev.package.typenum]
+opt-level = 3
+
+# Signature verification (extension signatures, JWTs) spends its time in
+# elliptic-curve field arithmetic, which at `opt-level = 0` runs one to two
+# orders of magnitude slower than optimised.
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+[profile.dev.package.elliptic-curve]
+opt-level = 3
+[profile.dev.package.primeorder]
+opt-level = 3
+[profile.dev.package.p256]
+opt-level = 3
+[profile.dev.package.p384]
+opt-level = 3
+[profile.dev.package.ecdsa]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+
+# Surrealism extensions are compiled to native code by Cranelift when they are
+# defined or first loaded. Mirror the root manifest's Cranelift overrides so
+# extension-defining language tests compile modules at release speed.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+debug-assertions = false
+[profile.dev.package.cranelift-codegen-shared]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+[profile.dev.package.cranelift-control]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-native]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.gimli]
+opt-level = 3
+
+# Regular-expression compilation and NFA/DFA search.
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
 opt-level = 3
 
 # `dev` with optimised code, for the CI language-test lanes, which run thousands

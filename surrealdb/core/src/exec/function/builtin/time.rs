@@ -62,49 +62,25 @@ macro_rules! define_clock_function {
 		() -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				$crate::expr::logical::EffectSet::CLOCK
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires context", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				let result =
-					match $crate::exec::function::check_arity($func_name, &args, 0, Some(0)) {
-						Ok(()) => $impl_path(statement_clock(ctx)),
-						Err(e) => Err(e),
-					};
-				$crate::exec::function::ready_boxed(result)
-			}
-		}
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: $crate::expr::logical::EffectSet::CLOCK,
+				fallibility: {
+					#[allow(unused_imports)]
+					use $crate::exec::ir::iface::Fallibility;
+					$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+				},
+				closure_args: &[],
+				signature: || {
+					$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+				},
+				exec: $crate::exec::function::ScalarExec::Context(|ctx, args| {
+					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
+					$impl_path(statement_clock(ctx))
+				}),
+			};
 	};
 
 	// One optional datetime: (?name: Datetime) -> ReturnType
@@ -115,55 +91,29 @@ macro_rules! define_clock_function {
 		(? $arg_name:ident : Datetime) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				$crate::expr::logical::EffectSet::CLOCK
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.optional(stringify!($arg_name), $crate::expr::Kind::Datetime)
-					.returns($crate::expr::Kind::$ret)
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires context", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				let decoded: anyhow::Result<(Optional<Datetime>,)> =
-					$crate::fnc::args::FromArgs::from_args($func_name, args);
-				let result = match decoded {
-					Ok((Optional(value),)) => {
-						let value = value.unwrap_or_else(|| statement_clock(ctx));
-						$impl_path((Optional(Some(value)),))
-					}
-					Err(e) => Err(e),
-				};
-				$crate::exec::function::ready_boxed(result)
-			}
-		}
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: $crate::expr::logical::EffectSet::CLOCK,
+				fallibility: {
+					#[allow(unused_imports)]
+					use $crate::exec::ir::iface::Fallibility;
+					$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+				},
+				closure_args: &[],
+				signature: || {
+					$crate::exec::function::Signature::new()
+						.optional(stringify!($arg_name), $crate::expr::Kind::Datetime)
+						.returns($crate::expr::Kind::$ret)
+				},
+				exec: $crate::exec::function::ScalarExec::Context(|ctx, args| {
+					let (Optional(value),): (Optional<Datetime>,) =
+						$crate::fnc::args::FromArgs::from_args($func_name, args)?;
+					let value = value.unwrap_or_else(|| statement_clock(ctx));
+					$impl_path((Optional(Some(value)),))
+				}),
+			};
 	};
 }
 

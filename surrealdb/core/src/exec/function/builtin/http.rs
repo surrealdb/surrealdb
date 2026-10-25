@@ -56,133 +56,62 @@ fn extract_body(args: &[Value], index: usize) -> Option<Value> {
 	args.get(index).cloned()
 }
 
-// =========================================================================
-// HTTP HEAD
-// =========================================================================
+#[derive(Clone, Copy)]
+enum HttpVerb {
+	Head,
+	Get,
+	Put,
+	Post,
+	Patch,
+	Delete,
+}
 
 #[cfg(feature = "http")]
-async fn http_head_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::head")?;
-	let opts = extract_opts(&args, 1, "http::head")?;
+impl HttpVerb {
+	const fn method(self) -> reqwest::Method {
+		match self {
+			Self::Head => reqwest::Method::HEAD,
+			Self::Get => reqwest::Method::GET,
+			Self::Put => reqwest::Method::PUT,
+			Self::Post => reqwest::Method::POST,
+			Self::Patch => reqwest::Method::PATCH,
+			Self::Delete => reqwest::Method::DELETE,
+		}
+	}
+
+	const fn has_body(self) -> bool {
+		matches!(self, Self::Put | Self::Post | Self::Patch)
+	}
+}
+
+#[cfg(feature = "http")]
+async fn http_dispatch(
+	ctx: &EvalContext<'_>,
+	fn_name: &'static str,
+	verb: HttpVerb,
+	args: Vec<Value>,
+) -> Result<Value> {
+	let uri = extract_uri(&args, fn_name)?;
+	let (body, opts) = if verb.has_body() {
+		(extract_body(&args, 1), extract_opts(&args, 2, fn_name)?)
+	} else {
+		(None, extract_opts(&args, 1, fn_name)?)
+	};
 
 	// Check if URL is allowed
 	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
 	ctx.check_allowed_net(&url).await?;
 
-	// Make the request using reqwest directly
-	http_request(ctx, reqwest::Method::HEAD, uri, None, opts).await
+	http_request(ctx, verb.method(), uri, body, opts).await
 }
 
 #[cfg(not(feature = "http"))]
-async fn http_head_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
-	http_disabled().await
-}
-
-// =========================================================================
-// HTTP GET
-// =========================================================================
-
-#[cfg(feature = "http")]
-async fn http_get_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::get")?;
-	let opts = extract_opts(&args, 1, "http::get")?;
-
-	// Check if URL is allowed
-	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
-
-	http_request(ctx, reqwest::Method::GET, uri, None, opts).await
-}
-
-#[cfg(not(feature = "http"))]
-async fn http_get_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
-	http_disabled().await
-}
-
-// =========================================================================
-// HTTP PUT
-// =========================================================================
-
-#[cfg(feature = "http")]
-async fn http_put_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::put")?;
-	let body = extract_body(&args, 1);
-	let opts = extract_opts(&args, 2, "http::put")?;
-
-	// Check if URL is allowed
-	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
-
-	http_request(ctx, reqwest::Method::PUT, uri, body, opts).await
-}
-
-#[cfg(not(feature = "http"))]
-async fn http_put_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
-	http_disabled().await
-}
-
-// =========================================================================
-// HTTP POST
-// =========================================================================
-
-#[cfg(feature = "http")]
-async fn http_post_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::post")?;
-	let body = extract_body(&args, 1);
-	let opts = extract_opts(&args, 2, "http::post")?;
-
-	// Check if URL is allowed
-	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
-
-	http_request(ctx, reqwest::Method::POST, uri, body, opts).await
-}
-
-#[cfg(not(feature = "http"))]
-async fn http_post_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
-	http_disabled().await
-}
-
-// =========================================================================
-// HTTP PATCH
-// =========================================================================
-
-#[cfg(feature = "http")]
-async fn http_patch_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::patch")?;
-	let body = extract_body(&args, 1);
-	let opts = extract_opts(&args, 2, "http::patch")?;
-
-	// Check if URL is allowed
-	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
-
-	http_request(ctx, reqwest::Method::PATCH, uri, body, opts).await
-}
-
-#[cfg(not(feature = "http"))]
-async fn http_patch_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
-	http_disabled().await
-}
-
-// =========================================================================
-// HTTP DELETE
-// =========================================================================
-
-#[cfg(feature = "http")]
-async fn http_delete_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let uri = extract_uri(&args, "http::delete")?;
-	let opts = extract_opts(&args, 1, "http::delete")?;
-
-	// Check if URL is allowed
-	let url = url::Url::parse(&uri).map_err(|_| crate::err::Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
-
-	http_request(ctx, reqwest::Method::DELETE, uri, None, opts).await
-}
-
-#[cfg(not(feature = "http"))]
-async fn http_delete_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
+async fn http_dispatch(
+	_ctx: &EvalContext<'_>,
+	_fn_name: &'static str,
+	_verb: HttpVerb,
+	_args: Vec<Value>,
+) -> Result<Value> {
 	http_disabled().await
 }
 
@@ -310,12 +239,12 @@ async fn http_request(
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(HttpHead, "http::head", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_head_impl);
-define_async_function!(HttpGet, "http::get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_get_impl);
-define_async_function!(HttpPut, "http::put", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_put_impl);
-define_async_function!(HttpPost, "http::post", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_post_impl);
-define_async_function!(HttpPatch, "http::patch", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_patch_impl);
-define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_delete_impl);
+define_async_function!(HttpHead, "http::head", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::head", HttpVerb::Head, args));
+define_async_function!(HttpGet, "http::get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::get", HttpVerb::Get, args));
+define_async_function!(HttpPut, "http::put", effects: EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL), fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::put", HttpVerb::Put, args));
+define_async_function!(HttpPost, "http::post", effects: EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL), fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::post", HttpVerb::Post, args));
+define_async_function!(HttpPatch, "http::patch", effects: EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL), fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::patch", HttpVerb::Patch, args));
+define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL), fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, |ctx, args| http_dispatch(ctx, "http::delete", HttpVerb::Delete, args));
 
 // =========================================================================
 // Registration

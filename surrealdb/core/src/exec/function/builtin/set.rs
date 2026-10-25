@@ -1,16 +1,13 @@
 //! Set functions
 
-use anyhow::Result;
-
 use crate::define_pure_function;
-use crate::exec::EvalContext;
 use crate::exec::function::{ScalarFunction, Signature};
 use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
-use crate::val::{ClosureEvaluator, Value};
+use crate::val::ClosureEvaluator;
 
 // Single set argument functions
 define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::first);
@@ -49,117 +46,53 @@ define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, fallibil
 /// those of the builtin alone: `PURE`. A trailing `, fallibility: <class>` declares
 /// [`ScalarFunction::fallibility`].
 macro_rules! define_set_closure_function {
-	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ ?|$carg:ident: $ckind:ident| => $ret:ident $(, fallibility: $fallibility:expr)?) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> EffectSet {
-				EffectSet::PURE
-			}
-
-			$(fn fallibility(&self) -> crate::exec::ir::iface::Fallibility {
-				crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			})?
-
-			fn closure_args(&self) -> &'static [usize] {
-				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
-				&SLOTS
-			}
-
-			fn signature(&self) -> Signature {
-				Signature::new()
-					$(.arg(stringify!($arg), Kind::$kind))+
-					.optional(stringify!($carg), Kind::$ckind)
-					.returns(Kind::$ret)
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a EvalContext<'_>,
-				args: Vec<Value>,
-			) -> crate::exec::BoxFut<'a, Result<Value>> {
-				Box::pin(async move {
-					let args = FromArgs::from_args($func_name, args)?;
-					let evaluator = StreamingClosureEvaluator::new(ctx);
-					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					$impl_path(ev, args)
-						.await
-				})
-			}
-		}
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ ?|$carg:ident: $ckind:ident| => $ret:ident, fallibility: $fallibility:expr) => {
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: EffectSet::PURE,
+				fallibility: crate::declare_fallibility!(Scalar, $func_name, $fallibility),
+				closure_args: &[[$(stringify!($arg)),+].len()],
+				signature: || {
+					Signature::new()
+						$(.arg(stringify!($arg), Kind::$kind))+
+						.optional(stringify!($carg), Kind::$ckind)
+						.returns(Kind::$ret)
+				},
+				exec: $crate::exec::function::ScalarExec::Async(|ctx, args| {
+					Box::pin(async move {
+						let args = FromArgs::from_args($func_name, args)?;
+						let evaluator = StreamingClosureEvaluator::new(ctx);
+						let ev = Some(&evaluator as &dyn ClosureEvaluator);
+						$impl_path(ev, args).await
+					})
+				}),
+			};
 	};
-	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ |$carg:ident: $ckind:ident| => $ret:ident $(, fallibility: $fallibility:expr)?) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> EffectSet {
-				EffectSet::PURE
-			}
-
-			$(fn fallibility(&self) -> crate::exec::ir::iface::Fallibility {
-				crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			})?
-
-			fn closure_args(&self) -> &'static [usize] {
-				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
-				&SLOTS
-			}
-
-			fn signature(&self) -> Signature {
-				Signature::new()
-					$(.arg(stringify!($arg), Kind::$kind))+
-					.arg(stringify!($carg), Kind::$ckind)
-					.returns(Kind::$ret)
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a EvalContext<'_>,
-				args: Vec<Value>,
-			) -> crate::exec::BoxFut<'a, Result<Value>> {
-				Box::pin(async move {
-					let args = FromArgs::from_args($func_name, args)?;
-					let evaluator = StreamingClosureEvaluator::new(ctx);
-					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					$impl_path(ev, args)
-						.await
-				})
-			}
-		}
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ |$carg:ident: $ckind:ident| => $ret:ident, fallibility: $fallibility:expr) => {
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: EffectSet::PURE,
+				fallibility: crate::declare_fallibility!(Scalar, $func_name, $fallibility),
+				closure_args: &[[$(stringify!($arg)),+].len()],
+				signature: || {
+					Signature::new()
+						$(.arg(stringify!($arg), Kind::$kind))+
+						.arg(stringify!($carg), Kind::$ckind)
+						.returns(Kind::$ret)
+				},
+				exec: $crate::exec::function::ScalarExec::Async(|ctx, args| {
+					Box::pin(async move {
+						let args = FromArgs::from_args($func_name, args)?;
+						let evaluator = StreamingClosureEvaluator::new(ctx);
+						let ev = Some(&evaluator as &dyn ClosureEvaluator);
+						$impl_path(ev, args).await
+					})
+				}),
+			};
 	};
 }
 

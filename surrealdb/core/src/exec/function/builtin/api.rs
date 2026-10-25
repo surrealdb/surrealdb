@@ -99,49 +99,23 @@ impl ScalarFunction for ApiInvoke {
 /// engine's closure evaluator. A trailing `, fallibility: <class>` declares
 /// [`ScalarFunction::fallibility`].
 macro_rules! define_api_middleware_function {
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $sig:expr $(, fallibility: $fallibility:expr)?) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> EffectSet {
-				$effects
-			}
-
-			$(fn fallibility(&self) -> crate::exec::ir::iface::Fallibility {
-				crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			})?
-
-			fn signature(&self) -> Signature {
-				$sig
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a EvalContext<'_>,
-				args: Vec<Value>,
-			) -> crate::exec::BoxFut<'a, Result<Value>> {
-				Box::pin(
-					async move { $impl_path(ctx, FromArgs::from_args($func_name, args)?).await },
-				)
-			}
-		}
+	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $sig:expr, fallibility: $fallibility:expr) => {
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: $effects,
+				fallibility: crate::declare_fallibility!(Scalar, $func_name, $fallibility),
+				closure_args: &[],
+				signature: || $sig,
+				exec: $crate::exec::function::ScalarExec::Async(|ctx, args| {
+					let decoded = match FromArgs::from_args($func_name, args) {
+						Ok(v) => v,
+						Err(e) => return $crate::exec::function::ready_boxed(Err(e)),
+					};
+					Box::pin($impl_path(ctx, decoded))
+				}),
+			};
 	};
 }
 

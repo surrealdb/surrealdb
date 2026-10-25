@@ -4460,29 +4460,38 @@ mod kv {
 	/// - a change feed's versionstamp, which the process-wide oracle numbers across datastores, by
 	///   its rank among the versionstamps of `answers`, so their order is kept.
 	fn without_generated_ids(answers: &Result<Vec<Result<String, String>>, String>) -> String {
-		let generated = regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*):[0-9a-z]{20}\b")
-			.expect("the pattern compiles");
-		let uuid =
+		use std::sync::LazyLock;
+
+		static GENERATED: LazyLock<regex::Regex> = LazyLock::new(|| {
+			regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*):[0-9a-z]{20}\b")
+				.expect("the pattern compiles")
+		});
+		static UUID: LazyLock<regex::Regex> = LazyLock::new(|| {
 			regex::Regex::new(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
-				.expect("the pattern compiles");
-		let elapsed =
-			regex::Regex::new(r"elapsed: [0-9.]+(?:ns|µs|ms|s)\b").expect("the pattern compiles");
-		let elapsed_ns =
-			regex::Regex::new(r"\belapsed_ns: [0-9]+\b").expect("the pattern compiles");
-		let versionstamp =
-			regex::Regex::new(r"\bversionstamp: ([0-9]+)\b").expect("the pattern compiles");
+				.expect("the pattern compiles")
+		});
+		static ELAPSED: LazyLock<regex::Regex> = LazyLock::new(|| {
+			regex::Regex::new(r"elapsed: [0-9.]+(?:ns|µs|ms|s)\b").expect("the pattern compiles")
+		});
+		static ELAPSED_NS: LazyLock<regex::Regex> = LazyLock::new(|| {
+			regex::Regex::new(r"\belapsed_ns: [0-9]+\b").expect("the pattern compiles")
+		});
+		static VERSIONSTAMP: LazyLock<regex::Regex> = LazyLock::new(|| {
+			regex::Regex::new(r"\bversionstamp: ([0-9]+)\b").expect("the pattern compiles")
+		});
+
 		let answers = format!("{answers:?}");
-		let answers = generated.replace_all(&answers, "$1:<generated>");
-		let answers = uuid.replace_all(&answers, "<uuid>");
-		let answers = elapsed.replace_all(&answers, "elapsed: <elapsed>");
-		let answers = elapsed_ns.replace_all(&answers, "elapsed_ns: <elapsed>");
-		let stamps: std::collections::BTreeSet<u128> = versionstamp
+		let answers = GENERATED.replace_all(&answers, "$1:<generated>");
+		let answers = UUID.replace_all(&answers, "<uuid>");
+		let answers = ELAPSED.replace_all(&answers, "elapsed: <elapsed>");
+		let answers = ELAPSED_NS.replace_all(&answers, "elapsed_ns: <elapsed>");
+		let stamps: std::collections::BTreeSet<u128> = VERSIONSTAMP
 			.captures_iter(&answers)
 			.filter_map(|stamp| stamp[1].parse().ok())
 			.collect();
 		let rank: BTreeMap<u128, usize> =
 			stamps.into_iter().enumerate().map(|(rank, stamp)| (stamp, rank)).collect();
-		versionstamp
+		VERSIONSTAMP
 			.replace_all(&answers, |stamp: &regex::Captures<'_>| {
 				let at = stamp[1].parse::<u128>().ok().and_then(|value| rank.get(&value));
 				format!(

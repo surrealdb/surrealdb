@@ -96,6 +96,105 @@ pub(crate) fn check_arity(
 /// See [`ScalarFunction::metered`] for when a function provides one.
 pub type MeteredFn = fn(Vec<Value>) -> BoxFut<'static, Result<Value>>;
 
+/// An async scalar function implementation taking the evaluation context and raw arguments.
+pub type AsyncScalarFn = for<'a> fn(&'a EvalContext<'_>, Vec<Value>) -> BoxFut<'a, Result<Value>>;
+
+/// How a [`BuiltinScalarFn`] executes.
+#[derive(Clone, Copy)]
+pub enum ScalarExec {
+	/// A synchronous context-free function.
+	Pure(fn(Vec<Value>) -> Result<Value>),
+	/// A metered context-free function whose work grows with its input.
+	Metered(MeteredFn),
+	/// A synchronous function that reads from [`EvalContext`].
+	Context(fn(&EvalContext<'_>, Vec<Value>) -> Result<Value>),
+	/// An asynchronous function that takes [`EvalContext`].
+	Async(AsyncScalarFn),
+}
+
+/// Table-driven descriptor for a built-in scalar function.
+///
+/// Builtin macro definitions expand to a `const` of this type so the
+/// [`ScalarFunction`] vtable and dispatch methods are compiled once rather than
+/// per builtin struct.
+#[derive(Clone, Copy)]
+pub struct BuiltinScalarFn {
+	pub name: &'static str,
+	pub effects: EffectSet,
+	pub fallibility: Fallibility,
+	pub closure_args: &'static [usize],
+	pub signature: fn() -> Signature,
+	pub exec: ScalarExec,
+}
+
+impl Debug for BuiltinScalarFn {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("BuiltinScalarFn").field("name", &self.name).finish()
+	}
+}
+
+impl ScalarFunction for BuiltinScalarFn {
+	fn name(&self) -> &'static str {
+		self.name
+	}
+
+	fn signature(&self) -> Signature {
+		(self.signature)()
+	}
+
+	fn effects(&self) -> EffectSet {
+		self.effects
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		self.fallibility
+	}
+
+	fn closure_args(&self) -> &'static [usize] {
+		self.closure_args
+	}
+
+	fn is_pure(&self) -> bool {
+		matches!(self.exec, ScalarExec::Pure(_) | ScalarExec::Metered(_))
+	}
+
+	fn is_async(&self) -> bool {
+		matches!(self.exec, ScalarExec::Async(_))
+	}
+
+	fn invoke(&self, args: Vec<Value>) -> Result<Value> {
+		match self.exec {
+			ScalarExec::Pure(f) => f(args),
+			ScalarExec::Metered(walk) => run_walk(walk(args).as_mut()),
+			ScalarExec::Context(_) => {
+				Err(anyhow::anyhow!("Function '{}' requires context", self.name))
+			}
+			ScalarExec::Async(_) => {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name))
+			}
+		}
+	}
+
+	fn metered(&self) -> Option<MeteredFn> {
+		match self.exec {
+			ScalarExec::Metered(walk) => Some(walk),
+			ScalarExec::Pure(_) | ScalarExec::Context(_) | ScalarExec::Async(_) => None,
+		}
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> BoxFut<'a, Result<Value>> {
+		match self.exec {
+			ScalarExec::Pure(_) | ScalarExec::Metered(_) => ready_boxed(self.invoke(args)),
+			ScalarExec::Context(f) => ready_boxed(f(ctx, args)),
+			ScalarExec::Async(f) => f(ctx, args),
+		}
+	}
+}
+
 /// A future that is ready with `result`: the `invoke_async` of a builtin whose
 /// work is synchronous. The work runs before the future is made; polling only
 /// hands over the result.

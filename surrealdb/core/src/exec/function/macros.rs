@@ -19,51 +19,73 @@ macro_rules! declare_fallibility {
 	}};
 }
 
-/// The `invoke` (and, for a metered function, `metered`) items of a
-/// [`define_pure_function!`] expansion, written inside the `ScalarFunction`
-/// impl.
+/// The [`ScalarExec`](crate::exec::function::ScalarExec) of a
+/// [`define_pure_function!`] expansion.
 ///
-/// Without a walk, `invoke` decodes the arguments and calls the implementation.
-/// With one, `invoke` runs the walk to its end through
-/// [`run_walk`](crate::exec::function::run_walk) and `metered` hands the
-/// executor the same walk; both go through `metered_walk`, which
-/// `__pure_walk!` defines.
+/// Without a walk, `Pure` decodes the arguments and calls the implementation.
+/// With one, `Metered` decodes the arguments and returns the boxed walk; both
+/// `invoke` (via [`run_walk`](crate::exec::function::run_walk)) and `metered`
+/// dispatch through that single walk pointer.
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __pure_invoke {
+macro_rules! __pure_exec {
 	($func_name:literal, $impl_path:path, []) => {
-		fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+		$crate::exec::function::ScalarExec::Pure(|args| {
 			let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 			$impl_path(args)
-		}
+		})
 	};
 	($func_name:literal, $impl_path:path, [$metered:path]) => {
-		fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-			$crate::exec::function::run_walk(::std::pin::pin!(Self::metered_walk(args)))
-		}
-
-		fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
-			Some(|args| Box::pin(Self::metered_walk(args)))
-		}
+		$crate::exec::function::ScalarExec::Metered(|args| {
+			let args = match $crate::fnc::args::FromArgs::from_args($func_name, args) {
+				Ok(v) => v,
+				Err(e) => return $crate::exec::function::ready_boxed(Err(e)),
+			};
+			Box::pin($metered(args))
+		})
 	};
 }
 
-/// The `metered_walk` of a metered [`define_pure_function!`] expansion, written
-/// after the `ScalarFunction` impl; nothing for a function without a walk.
+/// Internal helper that constructs a `const`
+/// [`BuiltinScalarFn`](crate::exec::function::BuiltinScalarFn) for a [`define_pure_function!`] arm.
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __pure_walk {
-	($struct_name:ident, $func_name:literal, []) => {};
-	($struct_name:ident, $func_name:literal, [$metered:path]) => {
-		impl $struct_name {
-			/// The builtin's walk over its arguments, as `metered` and `invoke` run it.
-			async fn metered_walk(
-				args: Vec<$crate::val::Value>,
-			) -> anyhow::Result<$crate::val::Value> {
-				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
-				$metered(args).await
-			}
-		}
+macro_rules! __define_pure_scalar {
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		effects: $effects:expr,
+		fallibility: $fallibility:expr,
+		sig: $sig:expr,
+		$(rule: $rule:expr,)?
+		metered: [$($metered:path)?],
+		$impl_path:path
+	) => {
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: {
+					#[allow(unused_imports)]
+					use $crate::expr::logical::EffectSet;
+					$effects
+				},
+				fallibility: {
+					#[allow(unused_imports)]
+					use $crate::exec::ir::iface::Fallibility;
+					$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+				},
+				closure_args: &[],
+				signature: || {
+					$sig
+						$(.rule({
+							#[allow(unused_imports)]
+							use $crate::exec::function::ReturnRule;
+							$rule
+						}))?
+				},
+				exec: $crate::__pure_exec!($func_name, $impl_path, [$($metered)?]),
+			};
 	};
 }
 
@@ -74,7 +96,7 @@ macro_rules! __pure_walk {
 /// ```ignore
 /// // Simple function with one argument
 /// define_pure_function!(
-///     MathAbs,                        // Struct name
+///     MathAbs,                        // Descriptor name
 ///     "math::abs",                    // Function name
 ///     (value: Number) -> Number,      // Signature: (args) -> return
 ///     crate::fnc::math::abs           // Implementation path
@@ -139,39 +161,16 @@ macro_rules! define_pure_function {
 		() -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Single required argument: (name: Type) -> ReturnType
@@ -185,41 +184,18 @@ macro_rules! define_pure_function {
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Two required arguments: (a: Type1, b: Type2) -> ReturnType
@@ -233,42 +209,19 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Three required arguments
@@ -282,43 +235,20 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.arg(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.arg(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Variadic: (...name: Type) -> ReturnType
@@ -332,41 +262,18 @@ macro_rules! define_pure_function {
 		(... $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.variadic($crate::expr::Kind::$arg_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.variadic($crate::expr::Kind::$arg_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// One required + variadic: (first: Type1, ...rest: Type2) -> ReturnType
@@ -380,42 +287,19 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, ... $rest_name:ident : $rest_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.variadic($crate::expr::Kind::$rest_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.variadic($crate::expr::Kind::$rest_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Single optional argument: (?name: Type) -> ReturnType
@@ -429,41 +313,18 @@ macro_rules! define_pure_function {
 		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.optional(stringify!($arg_name), $crate::expr::Kind::$arg_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.optional(stringify!($arg_name), $crate::expr::Kind::$arg_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// One required + one optional: (req: Type1, ?opt: Type2) -> ReturnType
@@ -477,42 +338,19 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Two required + one optional: (a: T1, b: T2, ?c: T3) -> ReturnType
@@ -526,43 +364,20 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// One required + two optional: (a: T1, ?b: T2, ?c: T3) -> ReturnType
@@ -576,43 +391,20 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Two required + two optional: (a: T1, b: T2, ?c: T3, ?d: T4) -> ReturnType
@@ -626,44 +418,21 @@ macro_rules! define_pure_function {
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
-					.optional(stringify!($arg4_name), $crate::expr::Kind::$arg4_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.optional(stringify!($arg4_name), $crate::expr::Kind::$arg4_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 
 	// Two optional arguments: (?a: T1, ?b: T2) -> ReturnType
@@ -677,42 +446,19 @@ macro_rules! define_pure_function {
 		(? $arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.optional(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			$crate::__pure_invoke!($func_name, $impl_path, [$($metered)?]);
-		}
-
-		$crate::__pure_walk!($struct_name, $func_name, [$($metered)?]);
+		$crate::__define_pure_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.optional(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			metered: [$($metered)?],
+			$impl_path
+		);
 	};
 }
 
@@ -727,7 +473,7 @@ macro_rules! define_pure_function {
 /// ```ignore
 /// // Function with no arguments that reads from context
 /// define_context_function!(
-///     SessionNs,                      // Struct name
+///     SessionNs,                      // Descriptor name
 ///     "session::ns",                  // Function name
 ///     () -> Any,                      // Signature: () -> return type
 ///     session_ns_impl                 // Implementation function
@@ -745,55 +491,77 @@ macro_rules! define_context_function {
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: {
+					#[allow(unused_imports)]
+					use $crate::expr::logical::EffectSet;
+					$effects
+				},
+				fallibility: {
+					#[allow(unused_imports)]
+					use $crate::exec::ir::iface::Fallibility;
+					$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+				},
+				closure_args: &[],
+				signature: || {
+					$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+						$(.rule({
+							#[allow(unused_imports)]
+							use $crate::exec::function::ReturnRule;
+							$rule
+						}))?
+				},
+				exec: $crate::exec::function::ScalarExec::Context(|ctx, args| {
+					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
+					$impl_fn(ctx)
+				}),
+			};
+	};
+}
 
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
-			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires context", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				let result = match $crate::exec::function::check_arity($func_name, &args, 0, Some(0)) {
-					Ok(()) => $impl_fn(ctx),
-					Err(e) => Err(e),
-				};
-				$crate::exec::function::ready_boxed(result)
-			}
-		}
+/// Internal helper that constructs a `const`
+/// [`BuiltinScalarFn`](crate::exec::function::BuiltinScalarFn) for a [`define_async_function!`]
+/// arm.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __define_async_scalar {
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		effects: $effects:expr,
+		fallibility: $fallibility:expr,
+		sig: $sig:expr,
+		$(rule: $rule:expr,)?
+		exec: $exec:expr
+	) => {
+		#[allow(non_upper_case_globals)]
+		pub const $struct_name: $crate::exec::function::BuiltinScalarFn =
+			$crate::exec::function::BuiltinScalarFn {
+				name: $func_name,
+				effects: {
+					#[allow(unused_imports)]
+					use $crate::expr::logical::EffectSet;
+					$effects
+				},
+				fallibility: {
+					#[allow(unused_imports)]
+					use $crate::exec::ir::iface::Fallibility;
+					$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+				},
+				closure_args: &[],
+				signature: || {
+					$sig
+						$(.rule({
+							#[allow(unused_imports)]
+							use $crate::exec::function::ReturnRule;
+							$rule
+						}))?
+				},
+				exec: $crate::exec::function::ScalarExec::Async($exec),
+			};
 	};
 }
 
@@ -809,7 +577,7 @@ macro_rules! define_context_function {
 /// ```ignore
 /// // Async function with one argument
 /// define_async_function!(
-///     Sleep,                          // Struct name
+///     Sleep,                          // Descriptor name
 ///     "sleep",                        // Function name
 ///     (duration: Duration) -> None,   // Signature
 ///     sleep_impl                      // Async implementation function
@@ -835,58 +603,20 @@ macro_rules! define_async_function {
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 0, Some(0)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx))
 			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
-					$impl_fn(ctx).await
-				})
-			}
-		}
+		);
 	};
 
 	// Single required argument: (name: Type) -> ReturnType
@@ -899,60 +629,22 @@ macro_rules! define_async_function {
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 1, Some(1)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx, args))
 			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 1, Some(1))?;
-					$impl_fn(ctx, args).await
-				})
-			}
-		}
+		);
 	};
 
 	// Two required arguments: (a: Type1, b: Type2) -> ReturnType
@@ -965,61 +657,23 @@ macro_rules! define_async_function {
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 2, Some(2)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx, args))
 			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 2, Some(2))?;
-					$impl_fn(ctx, args).await
-				})
-			}
-		}
+		);
 	};
 
 	// One required + one optional: (req: Type1, ?opt: Type2) -> ReturnType
@@ -1032,61 +686,23 @@ macro_rules! define_async_function {
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 1, Some(2)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx, args))
 			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 1, Some(2))?;
-					$impl_fn(ctx, args).await
-				})
-			}
-		}
+		);
 	};
 
 	// One required + two optional: (req: Type1, ?opt1: Type2, ?opt2: Type3) -> ReturnType
@@ -1099,62 +715,24 @@ macro_rules! define_async_function {
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
-		#[derive(Debug, Clone, Copy, Default)]
-		pub struct $struct_name;
-
-		impl $crate::exec::function::ScalarFunction for $struct_name {
-			fn name(&self) -> &'static str {
-				$func_name
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 1, Some(3)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx, args))
 			}
-
-			fn effects(&self) -> $crate::expr::logical::EffectSet {
-				#[allow(unused_imports)]
-				use $crate::expr::logical::EffectSet;
-				$effects
-			}
-
-			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
-				#[allow(unused_imports)]
-				use $crate::exec::ir::iface::Fallibility;
-				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
-			}
-
-			fn signature(&self) -> $crate::exec::function::Signature {
-				$crate::exec::function::Signature::new()
-					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
-					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
-					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
-					.returns($crate::expr::Kind::$ret)
-					$(.rule({
-						#[allow(unused_imports)]
-						use $crate::exec::function::ReturnRule;
-						$rule
-					}))?
-			}
-
-			fn is_pure(&self) -> bool {
-				false
-			}
-
-			fn is_async(&self) -> bool {
-				true
-			}
-
-			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
-				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
-			}
-
-			fn invoke_async<'a>(
-				&'a self,
-				ctx: &'a $crate::exec::EvalContext<'_>,
-				args: Vec<$crate::val::Value>,
-			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move {
-					$crate::exec::function::check_arity($func_name, &args, 1, Some(3))?;
-					$impl_fn(ctx, args).await
-				})
-			}
-		}
+		);
 	};
 }
 

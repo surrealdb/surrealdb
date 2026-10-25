@@ -822,6 +822,15 @@ opt-level = 3
 [profile.dev.package.gimli]
 opt-level = 3
 
+# Regular-expression compilation and NFA/DFA search run inside the parser,
+# `string::matches`, `regex::*` builtins and test-output canonicalisation.
+# Optimising the automata and syntax crates speeds up regex construction and
+# matching without changing results.
+[profile.dev.package.regex-automata]
+opt-level = 3
+[profile.dev.package.regex-syntax]
+opt-level = 3
+
 # `dev` with optimised workspace code, for binaries CI builds only to execute
 # queries against: the `surreal` server the integration lanes share and the
 # language-test runner. Debug assertions, overflow checks and unwinding stay

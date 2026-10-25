@@ -549,10 +549,14 @@ impl<'o> Fields<'o> {
 		self.first = false;
 	}
 
-	fn field<T: Text>(&mut self, name: &str, value: &T) {
+	fn begin_field(&mut self, name: &str) {
 		self.separate();
 		self.out.push_str(name);
 		self.out.push_str(" = ");
+	}
+
+	fn field<T: Text>(&mut self, name: &str, value: &T) {
+		self.begin_field(name);
 		value.put(self.out);
 	}
 
@@ -709,21 +713,28 @@ impl<'a> Cursor<'a> {
 		}
 	}
 
-	/// A field `name = value`, after a comma unless it is the first of its list.
-	fn field<T: Text>(&mut self, name: &str, first: &mut bool) -> Result<T, ParseError> {
+	fn begin_elem(&mut self, first: &mut bool) -> Result<(), ParseError> {
 		if !std::mem::replace(first, false) {
 			self.expect(',')?;
 		}
+		Ok(())
+	}
+
+	fn begin_field(&mut self, name: &str, first: &mut bool) -> Result<(), ParseError> {
+		self.begin_elem(first)?;
 		self.keyword(name)?;
-		self.expect('=')?;
+		self.expect('=')
+	}
+
+	/// A field `name = value`, after a comma unless it is the first of its list.
+	fn field<T: Text>(&mut self, name: &str, first: &mut bool) -> Result<T, ParseError> {
+		self.begin_field(name, first)?;
 		T::get(self)
 	}
 
 	/// A positional element, after a comma unless it is the first of its list.
 	fn elem<T: Text>(&mut self, first: &mut bool) -> Result<T, ParseError> {
-		if !std::mem::replace(first, false) {
-			self.expect(',')?;
-		}
+		self.begin_elem(first)?;
 		T::get(self)
 	}
 
