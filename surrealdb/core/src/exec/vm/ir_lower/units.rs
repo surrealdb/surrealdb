@@ -168,6 +168,17 @@ pub(crate) enum UnitRequest {
 		table: TableName,
 		action: Action,
 	},
+	/// The bundle of the stages `set` a write whose stages are linked applies to the records of
+	/// `table`, for the frame the requesting container is lowered for and on behalf of `actor`:
+	/// served from the compile cache under the table's catalog version, or compiled on a miss,
+	/// before the container is lowered. It holds no slot: the write's stage tables hold the bundle.
+	LinkedStages {
+		table: TableName,
+		set: std::sync::Arc<crate::exec::vm::units::StageSetUnit>,
+		/// The enforcement of the actor the requesting container runs on behalf of, where it
+		/// differs from its frame's ([`LowerCx::actor`]).
+		actor: Option<bool>,
+	},
 	/// The events of `table` that fire for `action`: the `WHEN` and `THEN` clauses of each event,
 	/// as host pipelines over the image the event is about. The unit's head names `frame`, the
 	/// frame of the write that fires the events, which the run admits the unit against, so the
@@ -246,6 +257,9 @@ impl UnitRequest {
 			| UnitRequest::StageBundle {
 				..
 			}
+			| UnitRequest::LinkedStages {
+				..
+			}
 			| UnitRequest::Events {
 				..
 			}
@@ -295,6 +309,9 @@ impl UnitRequest {
 				..
 			} => true,
 			UnitRequest::TableUnit {
+				..
+			}
+			| UnitRequest::LinkedStages {
 				..
 			}
 			| UnitRequest::ServedStatement {
@@ -393,6 +410,10 @@ pub(crate) struct LowerCx<'a> {
 	fresh: Vec<Needed>,
 	/// The requests interned that hold no slot, which dedupe as slotted ones do.
 	slotless: std::collections::HashSet<Key>,
+	/// The bundle of the stages of each write whose stages are linked, by its table and the stages
+	/// its sites run, resolved by the compile driver before the container that holds the write is
+	/// lowered ([`LowerCx::link_stages`]).
+	linked: HashMap<(TableName, crate::exec::vm::units::StageSetUnit), std::sync::Arc<Program>>,
 }
 
 impl<'a> LowerCx<'a> {
@@ -428,6 +449,7 @@ impl<'a> LowerCx<'a> {
 			index: HashMap::new(),
 			fresh: Vec::new(),
 			slotless: std::collections::HashSet::new(),
+			linked: HashMap::new(),
 		}
 	}
 
@@ -484,6 +506,36 @@ impl<'a> LowerCx<'a> {
 	/// The lowering of `EXPLAIN`, if this context serves it.
 	pub(crate) fn explain(&self) -> Option<&'static (dyn ExplainLowering + Sync)> {
 		self.explain
+	}
+
+	/// Holds `bundle` as the bundle of the stages `set` runs over the records of `table`, which a
+	/// write of a container this context lowers links.
+	pub(crate) fn link_stages(
+		&mut self,
+		table: TableName,
+		set: crate::exec::vm::units::StageSetUnit,
+		bundle: std::sync::Arc<Program>,
+	) {
+		self.linked.insert((table, set), bundle);
+	}
+
+	/// Whether the bundle of the stages `set` runs over the records of `table` is held.
+	pub(crate) fn links_stages(
+		&self,
+		table: &TableName,
+		set: &crate::exec::vm::units::StageSetUnit,
+	) -> bool {
+		self.linked.contains_key(&(table.clone(), set.clone()))
+	}
+
+	/// The bundle of the stages `set` runs over the records of `table`, held by
+	/// [`Self::link_stages`].
+	pub(crate) fn linked_stages(
+		&self,
+		table: &TableName,
+		set: &crate::exec::vm::units::StageSetUnit,
+	) -> Option<std::sync::Arc<Program>> {
+		self.linked.get(&(table.clone(), set.clone())).cloned()
 	}
 
 	/// Whether the container being lowered is a unit (a function or closure body, a subquery, a
@@ -658,6 +710,12 @@ impl<'a> LowerCx<'a> {
 	/// and answers the one it replaces ([`Self::actor_suppressed`]).
 	pub(crate) fn reactor(&mut self, actor: Option<bool>) -> Option<bool> {
 		std::mem::replace(&mut self.actor_suppressed, actor)
+	}
+
+	/// The enforcement of the actor the container being lowered runs on behalf of, where it
+	/// differs from the frame's; `None` where the actor is the frame's.
+	pub(crate) fn actor(&self) -> Option<bool> {
+		self.actor_suppressed.filter(|actor| *actor != self.frame.perms_suppressed)
 	}
 
 	/// Whether the actor the container being lowered runs on behalf of suppresses enforcement:

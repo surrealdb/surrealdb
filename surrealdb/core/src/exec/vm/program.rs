@@ -4075,6 +4075,23 @@ pub(crate) struct StageTables {
 	/// it runs, so its run checks each write context it keeps, and each bundle
 	/// of stages it loaded, against the catalog before taking it again.
 	pub(super) revalidates: bool,
+	/// For a write that names its one table and runs the bundle of that
+	/// table's stages, the bundle the compile linked before the program runs;
+	/// such a write holds no `tables`, `default` or `by_name`.
+	pub(super) linked: Option<LinkedBundle>,
+}
+
+/// The bundle of the stages a write that names its one table applies to its
+/// records, linked from the compile cache when the statement was compiled
+/// (`ExecConfig::compiled_unit_cache_size`), or compiled for the statement
+/// alone where the node keeps no unit. Its pipelines number the sites of the
+/// write's body, and it holds the units its stages run.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LinkedBundle {
+	/// The table the write writes.
+	pub(super) table: surrealdb_strand::TableName,
+	/// The bundle.
+	pub(super) bundle: Arc<Program>,
 }
 
 assert_plain!(StageTables);

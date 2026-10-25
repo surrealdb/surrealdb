@@ -50,15 +50,16 @@ use super::ops::{
 	AccessAttrs, AggregateShape, AlterAttrs, AssignAttrs, ClosureLoopAttrs, ComputedReadsShape,
 	DecisiveKind, DefineAttrs, DerivedField, DerivedReads, EventClause, EventDefs, EventShape,
 	EventsAttrs, FieldClause, FieldClauses, FieldGate, FieldShape, FieldStep, FieldsShape,
-	GateClause, ImageLayers, ImageView, IndexDefs, LetAttrs, LetBinding, LiveAttrs, LogOp, LogTag,
-	LookupAttrs, LookupSubjectShape, LoopKind, LoopSink, MatchInsertAttrs, MatchUpdateAttrs,
-	ProjectAttrs, RebuildAttrs, RecurseAttrs, RecurseInstructionShape, RecursePathForm,
-	RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortAttrs, SortKeyShape,
-	SortShape, SourceAttrs, SourceOrder, SourceRefShape, StepAttrs, Stored, SubscriberAdmission,
-	SubscriberAttrs, SubscriberLayer, SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd,
-	TxnRegionMode, TxnStart, UseTarget, WriteAttrs, WriteBody, WriteBranching, WriteDerived,
-	WriteGates, WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs, WriteRetry,
-	WriteSchema, WriteStageKind, WriteStages, WriteStored, WriteViews,
+	GateClause, ImageLayers, ImageView, IndexDefs, LetAttrs, LetBinding, LinkedStages, LiveAttrs,
+	LogOp, LogTag, LookupAttrs, LookupSubjectShape, LoopKind, LoopSink, MatchInsertAttrs,
+	MatchUpdateAttrs, ProjectAttrs, RebuildAttrs, RecurseAttrs, RecurseInstructionShape,
+	RecursePathForm, RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortAttrs,
+	SortKeyShape, SortShape, SourceAttrs, SourceOrder, SourceRefShape, StepAttrs, Stored,
+	SubscriberAdmission, SubscriberAttrs, SubscriberLayer, SubscriberProjection, TableDefs,
+	TxnControl, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget, WriteAttrs, WriteBody,
+	WriteBranching, WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark,
+	WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind, WriteStages,
+	WriteStored, WriteViews,
 };
 use crate::doc::Action as DocAction;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -2866,7 +2867,12 @@ text_struct!(WriteAttrs {
 	stored: WriteStored,
 	derived: WriteDerived,
 	into_text: Option<Box<str>>,
-	statement: Option<Arc<crate::expr::logical::LogicalWrite>>
+	statement: Option<Arc<crate::expr::logical::LogicalWrite>>,
+	linked: Option<Box<LinkedStages>>
+});
+text_struct!(LinkedStages {
+	table: TableName,
+	run: Box<[WriteStageKind]>
 });
 text_struct!(WriteBody {
 	branching: WriteBranching,

@@ -1808,7 +1808,10 @@ pub(in crate::exec::vm) fn decode_request(bytes: &[u8]) -> Result<Request> {
 /// runs, or the morsel's end.
 pub(super) enum Frame {
 	Rows(Vec<Value>),
-	End(Box<std::result::Result<super::run::MorselResult, anyhow::Error>>),
+	End {
+		result: Box<std::result::Result<super::run::MorselResult, anyhow::Error>>,
+		emitted: u64,
+	},
 }
 
 const ROWS: u8 = 0;
@@ -2054,7 +2057,10 @@ pub(super) fn decode_frame(
 		END_ERR => {
 			let e = get_error(&mut r)?;
 			r.done()?;
-			Ok(Frame::End(Box::new(Err(e))))
+			Ok(Frame::End {
+				result: Box::new(Err(e)),
+				emitted: 0,
+			})
 		}
 		END_OK => {
 			let stats = get_stats(&mut r)?;
@@ -2135,24 +2141,27 @@ pub(super) fn decode_frame(
 			let scanned = [stats.entries, stats.key_bytes, stats.value_bytes];
 			let decoded = stats.decoded;
 			r.done()?;
-			Ok(Frame::End(Box::new(Ok(MorselResult {
-				output,
-				sorts,
-				slabs,
-				arrivals,
-				groups,
-				spilled: Vec::new(),
-				sort_accounts: Vec::new(),
-				group_accounts: Vec::new(),
-				ends,
-				rows,
-				elapsed,
-				bytes,
-				chunks,
-				held,
-				scanned,
-				decoded,
-			}))))
+			Ok(Frame::End {
+				result: Box::new(Ok(MorselResult {
+					output,
+					sorts,
+					slabs,
+					arrivals,
+					groups,
+					spilled: Vec::new(),
+					sort_accounts: Vec::new(),
+					group_accounts: Vec::new(),
+					ends,
+					rows,
+					elapsed,
+					bytes,
+					chunks,
+					held,
+					scanned,
+					decoded,
+				})),
+				emitted: stats.rows_emitted,
+			})
 		}
 		other => bail!("a morsel frame of kind {other}"),
 	}

@@ -95,11 +95,11 @@ use crate::exec::ir::iface::types::TypeKnowledge;
 use crate::exec::ir::logical::constraints::{RegionRejection, rejection_of};
 use crate::exec::ir::logical::ops::{
 	AggregateShape, AssignAttrs, ClosureLoopAttrs, ComputedReadsShape, DecisiveKind, DerivedReads,
-	FieldShape, FieldsShape, ImageLayers, ImageView, LetAttrs, LetBinding, LogOp, LookupAttrs,
-	LookupSubjectShape, LoopKind, LoopSink, ProjectAttrs, RecurseAttrs, RecurseInstructionShape,
-	RecursePathForm, SortAttrs, SortKeyShape, SortShape, SourceAttrs, SourceOrder, SourceRefShape,
-	StepAttrs, Stored, TxnControl, TxnRegionMode, WriteAttrs, WriteDerived, WriteGates, WriteImage,
-	WriteStageKind, WriteStages, WriteStored,
+	FieldShape, FieldsShape, ImageLayers, ImageView, LetAttrs, LetBinding, LinkedStages, LogOp,
+	LookupAttrs, LookupSubjectShape, LoopKind, LoopSink, ProjectAttrs, RecurseAttrs,
+	RecurseInstructionShape, RecursePathForm, SortAttrs, SortKeyShape, SortShape, SourceAttrs,
+	SourceOrder, SourceRefShape, StepAttrs, Stored, TxnControl, TxnRegionMode, WriteAttrs,
+	WriteDerived, WriteGates, WriteImage, WriteStageKind, WriteStages, WriteStored,
 };
 use crate::exec::ir::logical::scope::return_target;
 use crate::exec::ir::logical::seam::{
@@ -295,6 +295,10 @@ fn bind_requested(
 		cx.set_serves_late(input.serves_late);
 		cx.set_late_bound(input.late_bound);
 		cx.set_surface(surface);
+		cx.set_links_stages(
+			matches!(input.unit, UnitKind::Request | UnitKind::RequestStatement { .. })
+				&& effects.catalog.links_stages(),
+		);
 		for region in &regions {
 			bind_region(&mut cx, input.statements, base, region)?;
 		}
@@ -3541,7 +3545,10 @@ fn bind_join(cx: &mut BindCx<'_>, join: &LogicalJoin) -> Result<Flow, IrError> {
 /// of the write.
 fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Result<Flow, IrError> {
 	let bundle = cx.take_bundle_table();
-	let named = cx.take_named_table().or_else(|| written_table(write));
+	let named = cx
+		.take_named_table()
+		.or_else(|| written_table(write))
+		.or_else(|| target_variable_table(cx.catalog(), write));
 	// As for a `LET` of a protected name ([`bind_let`]): where the write is planned with its
 	// top-level statement the refusal is the whole statement's, raised before any of it runs.
 	if let Some(refusal) = upsert_knn_refusal(write).or_else(|| mixed_targets_search_refusal(write))
@@ -3568,9 +3575,18 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 	// bundle of the table each record is written to, served for the definitions that record's
 	// write context reads.
 	let may_meet_change = !cx.eager() || cx.catalog_may_change() || cx.after_stored_code();
+	// A write of request code that names its one table, whose definitions it reads as the bind
+	// does, runs its stages as the bundle the compile links for that table rather than binding them
+	// as ops of its own.
+	let linked = match (&bundle, &named) {
+		(None, Some(named)) if !may_meet_change && links_stages(cx, op, write, facts, named) => {
+			Some(named.clone())
+		}
+		_ => None,
+	};
 	let table = match bundle {
 		Some(bundle) => Some(bundle.table),
-		None if may_meet_change => None,
+		None if may_meet_change || linked.is_some() => None,
 		None => named.clone(),
 	};
 	// Such a write may meet definitions that change between its runs as well, so it checks the
@@ -3581,6 +3597,12 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 	let gates = gates_of(cx.catalog(), table.as_ref());
 	let mut attrs = write_attrs_of(write, facts, &run)?;
 	attrs.statement = table.is_none().then(|| Arc::new(write.clone()));
+	attrs.linked = linked.map(|table| {
+		Box::new(LinkedStages {
+			table,
+			run: run.clone().into_boxed_slice(),
+		})
+	});
 	attrs.gates = gates.gates;
 	attrs.image = image_of(cx.catalog(), table.as_ref());
 	attrs.stored = stored_of(cx.catalog(), table.as_ref(), catalog_fixed);
@@ -3640,6 +3662,7 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 			(source, order, Vec::new())
 		}
 	};
+	let linked = attrs.linked.is_some();
 	let sink = LoopSink::Write(Box::new(WriteStages(run.clone().into_boxed_slice())));
 	let entry = vec![TypeKnowledge::Unknown; loop_body_args(&sink)];
 	let subject_loop = cx.emit(
@@ -3671,7 +3694,9 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 			views: &views,
 			repairs: &repairs,
 		};
-		bind_stages(cx, write, &run, &gates, observed.as_deref(), &stored)?;
+		if !linked {
+			bind_stages(cx, write, &run, &gates, observed.as_deref(), &stored)?;
+		}
 		cx.yield_logical(&[element])
 	})?;
 	let subjects = first_result(cx, subject_loop)?;
@@ -3704,6 +3729,135 @@ fn bind_write(cx: &mut BindCx<'_>, op: &LogicalOp, write: &LogicalWrite) -> Resu
 		}
 	}
 	first_result(cx, op).map(Flow::Value)
+}
+
+/// The table the one target of `write` names records of, where the target is a request variable
+/// the plan is kept for a class of ([`SemanticCatalog::target_table`]): the variable is read when
+/// the write runs, and holds a record, records or the table of that one table in every run.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn target_variable_table(catalog: &dyn SemanticCatalog, write: &LogicalWrite) -> Option<TableName> {
+	match &write.source {
+		LogicalWriteSource::Targets(targets) => match targets.as_slice() {
+			[LogicalExpr::Param(param)]
+				if !matches!(write.statement, LogicalWriteStatement::Relate(_)) =>
+			{
+				catalog.target_table(param.as_str())
+			}
+			_ => None,
+		},
+		LogicalWriteSource::Rows(rows) => match rows.as_ref() {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::Param(param),
+				..
+			}) => catalog.target_table(param.as_str()),
+			_ => None,
+		},
+		LogicalWriteSource::Inserts(_) => None,
+	}
+}
+
+/// Whether `write`, the write `op` is, of form `facts.form` and naming the one table `table`, runs
+/// its stages as the bundle the compile links for that table ([`LinkedStages`]).
+///
+/// Only a write of request code the container links for ([`BindCx::links_stages`]) does, and only
+/// one whose subjects are the records it names one by one: its targets, where no target is a mock
+/// the plan may fan out and a whole table only where the write creates one record of it (a
+/// `CREATE` or a `RELATE`'s edge table), or the rows of one record id or of a variable, never a
+/// scan. The table is one the catalog defines, and its definitions fix what the write runs
+/// ([`catalog_fixed_of`]). An `UPSERT` under a condition reads its subjects, and a condition no
+/// record satisfies has its stages pruned by the physical phase, so neither is linked. Nor is a
+/// write whose clauses hold a statement or a closure, whose code the region constraints judge
+/// where the request wrote it.
+#[allow(clippy::wildcard_enum_match_arm)]
+fn links_stages(
+	cx: &BindCx<'_>,
+	op: &LogicalOp,
+	write: &LogicalWrite,
+	facts: WriteFacts,
+	table: &TableName,
+) -> bool {
+	if !cx.links_stages() || facts.form == PlanForm::View {
+		return false;
+	}
+	// A `CREATE` writes one record of a table it names, and a `RELATE` one record of its edge
+	// table.
+	let creates = matches!(
+		write.statement,
+		LogicalWriteStatement::Create(_) | LogicalWriteStatement::Relate(_)
+	);
+	let points = match &write.source {
+		// Records the targets name one by one: no mock, whose records the plan may fan out, and
+		// a whole table only where the write creates one record of it.
+		LogicalWriteSource::Targets(targets) => targets.iter().all(|target| match target {
+			LogicalExpr::Mock(_) => false,
+			LogicalExpr::Table(_) => creates,
+			_ => true,
+		}),
+		// The rows of a record, or of records a variable names: no scan the plan may cut.
+		LogicalWriteSource::Rows(rows) => {
+			matches!(
+				rows.as_ref(),
+				LogicalOp::Source(LogicalSource {
+					source: SourceRef::Param(_),
+					with: None,
+					for_update: false,
+					..
+				})
+			) || matches!(
+				rows.as_ref(),
+				LogicalOp::Source(LogicalSource {
+					source: SourceRef::RecordId(rid),
+					with: None,
+					for_update: false,
+					..
+				}) if !matches!(rid.key, crate::expr::logical::LogicalRecordIdKey::Range(_))
+			)
+		}
+		LogicalWriteSource::Inserts(_) => false,
+	};
+	if !points
+		|| (matches!(write.statement, LogicalWriteStatement::Upsert(_)) && write.cond.is_some())
+		|| cond_verdict(write.cond.as_ref()) == CondVerdict::Never
+		|| !catalog_fixed_of(write, cx.registry())
+		|| !matches!(cx.catalog().table(table), CatalogAnswer::Found(_))
+	{
+		return false;
+	}
+	let mut plain = true;
+	let mut judge = |expr: &LogicalExpr| {
+		let _ = expr.visit_deep(&mut |node| match node {
+			LogicalExpr::Subquery(_) | LogicalExpr::Closure(_) => {
+				plain = false;
+				std::ops::ControlFlow::Break(())
+			}
+			_ => std::ops::ControlFlow::Continue(()),
+		});
+	};
+	let _ = op.visit_scalars(&mut |scalar| {
+		judge(scalar);
+		Ok::<(), std::convert::Infallible>(())
+	});
+	if let Some(Output::Fields(fields)) = write.statement.output() {
+		match lower_fields(fields.clone()) {
+			Ok(LogicalFields::Value {
+				expr,
+				..
+			}) => judge(&expr),
+			Ok(LogicalFields::Select(fields)) => {
+				for field in &fields {
+					if let LogicalField::Single {
+						expr,
+						..
+					} = field
+					{
+						judge(expr);
+					}
+				}
+			}
+			Err(_) => plain = false,
+		}
+	}
+	plain
 }
 
 /// What a write states of how its table's field view is applied to an image: the attribute, and
@@ -3823,6 +3977,7 @@ fn write_attrs_of(
 		derived: WriteDerived::default(),
 		into_text: into_text_of(write),
 		statement: None,
+		linked: None,
 	})
 }
 

@@ -380,6 +380,9 @@ async fn prepare(
 				crate::exec::planner::PlanTimeVersion::At(stamp) => Some(stamp),
 			})
 			.with_request_root(planner.is_request_root());
+	if matches!(input.unit, UnitKind::Request | UnitKind::RequestStatement { .. }) {
+		memo = memo.with_targets(planner.named_targets()).with_links(planner.links_stages());
+	}
 	if let (Some(ns), Some(db)) = (planner.ns(), planner.db()) {
 		memo = memo.with_database_names(ns, db);
 	}

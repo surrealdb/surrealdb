@@ -26,8 +26,9 @@
 //! request for it while that compilation runs waits for it and takes its
 //! result, so concurrent requests compile once. A compilation that requests
 //! another unit while it compiles never waits on a flight it does not lead:
-//! it takes a unit already compiled, or compiles one for itself, so two
-//! compilations that request each other's units never wait on each other.
+//! it takes a unit already compiled, or compiles one itself and keeps it as a
+//! flight's leader would, so two compilations that request each other's units
+//! never wait on each other.
 //!
 //! **What else a unit depends on.** A unit's code may hold what its
 //! compilation read of catalog objects other than its own — the tables its
@@ -89,9 +90,10 @@ pub(crate) enum ObjectVersion {
 }
 
 /// The class of the value a kept request statement reads as its source when
-/// it runs (`FROM $name`): what the statement is kept under besides its text,
-/// so a value of another class is never served the compilation kept for this
-/// one. The compilation reads the value when it runs and holds none of it.
+/// it runs (`FROM $name`), or as the target of its write (`UPDATE $name`):
+/// what the statement is kept under besides its text, so a value of another
+/// class is never served the compilation kept for this one. The compilation
+/// reads the value when it runs and holds none of it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SourceClass {
 	/// A record id of the table, whose key names one record.
@@ -99,6 +101,21 @@ pub(crate) enum SourceClass {
 	/// An array whose every element is such a record id, by the tables they
 	/// name, sorted and each named once; empty for an empty array.
 	Records(Vec<crate::val::TableName>),
+	/// The table itself, which a `CREATE` generates the id of a record in.
+	Table(crate::val::TableName),
+}
+
+impl SourceClass {
+	/// The one table every value of the class names a record of, or is.
+	pub(crate) fn table(&self) -> Option<&crate::val::TableName> {
+		match self {
+			SourceClass::Record(table) | SourceClass::Table(table) => Some(table),
+			SourceClass::Records(tables) => match tables.as_slice() {
+				[table] => Some(table),
+				_ => None,
+			},
+		}
+	}
 }
 
 /// The catalog object a unit is compiled from.
@@ -426,8 +443,8 @@ pub(crate) struct Stats {
 	pub(crate) waits: u64,
 	/// Found the kept unit's dependencies changed, and compiled again.
 	pub(crate) stale: u64,
-	/// Compiled a unit that could not be kept, or compiled for itself inside
-	/// another compilation.
+	/// Compiled a unit that could not be kept, or that a unit kept meanwhile
+	/// already stood for.
 	pub(crate) private: u64,
 }
 
@@ -609,7 +626,42 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 		// finds the replacement stale too compiles for itself.
 		for _ in 0..2 {
 			if nested && !flight.cell.initialized() {
-				break;
+				// Inside another compilation: compile without waiting on the
+				// flight, and keep what compiles for the requests after.
+				let Some(compile) = compile.take() else {
+					unreachable!("a request that has not compiled yet")
+				};
+				let (value, deps) = compile().await?;
+				// A concurrent request may have kept a unit that holds for this one meanwhile;
+				// a second copy would push out a variant kept for another state.
+				let (_, kept) = entry.flight(frame);
+				let mut held = false;
+				for kept in kept.iter().rev() {
+					if kept.context.hold(ctx) && kept.deps.hold(txn).await {
+						held = true;
+						break;
+					}
+				}
+				match deps {
+					Some(_) if held => {
+						self.counters.private.fetch_add(1, Ordering::Relaxed);
+					}
+					Some((deps, context)) => {
+						entry.keep(
+							frame,
+							Arc::new(Kept {
+								value: value.clone(),
+								deps: Arc::new(deps),
+								context: Arc::new(context),
+							}),
+						);
+						self.counters.compiles.fetch_add(1, Ordering::Relaxed);
+					}
+					None => {
+						self.counters.private.fetch_add(1, Ordering::Relaxed);
+					}
+				}
+				return Ok(value);
 			}
 			let ready = flight.cell.initialized();
 			let mut led: Option<V> = None;

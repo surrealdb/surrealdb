@@ -1288,7 +1288,8 @@ async fn define_shared_table(
 /// for its table applies them, and answer whether they kept it.
 ///
 /// The unit is the one the statement's [`super::program::StageTables`] holds
-/// for the table the record is written to, or, for a write that may reach any
+/// for the table the record is written to: the bundle the compile linked for
+/// a write that names its one table, or, for a write that may reach any
 /// table, the bundle of the table's stages the run loads by the table's name
 /// ([`super::fault::serve_stage_bundle`]); a table the statement cannot reach
 /// is an error. It runs over the statement's write
@@ -1302,15 +1303,21 @@ async fn run_stages(program: &Program, site: u16, state: &mut State) -> FlowResu
 	let (_, ctx) = write.in_flight()?;
 	let exec = ctx.exec();
 	let outside = || internal(&format!("a table outside the dispatch set: {}", ctx.table.name));
-	let (stages, units) = match &tables.by_name {
-		Some(named) => {
+	let (stages, units) = match (&tables.linked, &tables.by_name) {
+		(Some(linked), _) => {
+			if linked.table != ctx.table.name {
+				return Err(outside());
+			}
+			(Arc::clone(&linked.bundle), Arc::clone(&linked.bundle.units))
+		}
+		(None, Some(named)) => {
 			let bundle = write.bundle_for(named, &ctx).await?;
 			// The bundle is the program of the stages and the root of the arena
 			// that holds what they run.
 			let units = Arc::clone(&bundle.units);
 			(bundle, units)
 		}
-		None => {
+		(None, None) => {
 			let unit = tables.unit(&ctx.table.name).ok_or_else(outside)?;
 			write_unit(program, unit, state, exec)?
 		}
@@ -1319,9 +1326,10 @@ async fn run_stages(program: &Program, site: u16, state: &mut State) -> FlowResu
 		.pipelines
 		.get(site as usize)
 		.ok_or_else(|| internal("a run of stages the stage program does not hold"))?;
-	let (mut nested, group) = enter_unit(&stages, units, state, exec)?;
+	let (mut nested, entered) = enter_unit(&stages, units, state, exec)?;
+	// The caller already boxes this future (`DispatchTable`), so the row runs inline in it.
 	let ran = run_value_row(&stages, pipeline, Value::None, &mut nested, exec).await;
-	leave_unit(&mut nested, group, state);
+	leave_unit(&mut nested, entered, state);
 	ran?;
 	match nested.take_output().pop() {
 		Some(Value::Bool(kept)) => Ok(kept),
@@ -1372,15 +1380,24 @@ pub(super) fn arena_of(units: &super::UnitTable) -> usize {
 	Arc::as_ptr(units).cast::<()>() as usize
 }
 
+/// What [`enter_unit`] took of a write that [`leave_unit`] gives back: the
+/// block statement it was running for, and whether it was already running
+/// inside a unit, which a unit entered from a unit leaves it doing.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Entered {
+	group: Option<u16>,
+	nested: bool,
+}
+
 /// A state of `unit`'s own, over the unit table `units`, that holds the write
-/// of `state` while the unit runs, and the block statement the write was
-/// running for; [`leave_unit`] gives both back.
+/// of `state` while the unit runs, and what of the write [`leave_unit`] gives
+/// back.
 pub(super) fn enter_unit(
 	unit: &Program,
 	units: super::UnitTable,
 	state: &mut State,
 	exec: &ExecutionContext,
-) -> FlowResult<(PooledState, Option<u16>)> {
+) -> FlowResult<(PooledState, Entered)> {
 	let mut nested = State::new(unit, Vec::new(), exec.function_registry())?;
 	nested.frames = unit.permissions.iter().map(|spec| spec.context(exec)).collect();
 	nested.permissions_bypassed = state.permissions_bypassed;
@@ -1389,21 +1406,24 @@ pub(super) fn enter_unit(
 	nested.units = Some(units);
 	// The unit's write is its own, whichever statement's this is.
 	let mut held = state.write.take();
-	let mut group = None;
+	let mut entered = Entered {
+		group: None,
+		nested: false,
+	};
 	if let Some(write) = held.as_deref_mut() {
-		write.nested = true;
-		group = write.group.take();
+		entered.nested = std::mem::replace(&mut write.nested, true);
+		entered.group = write.group.take();
 	}
 	nested.write = held;
-	Ok((nested, group))
+	Ok((nested, entered))
 }
 
-/// Give the write [`enter_unit`] took back to `state`.
-pub(super) fn leave_unit(nested: &mut State, group: Option<u16>, state: &mut State) {
+/// Give the write [`enter_unit`] took back to `state`, as it was entered.
+pub(super) fn leave_unit(nested: &mut State, entered: Entered, state: &mut State) {
 	let mut held = nested.write.take();
 	if let Some(write) = held.as_deref_mut() {
-		write.nested = false;
-		write.group = group;
+		write.nested = entered.nested;
+		write.group = entered.group;
 	}
 	state.write = held;
 }

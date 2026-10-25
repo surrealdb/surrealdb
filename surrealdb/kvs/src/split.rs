@@ -25,7 +25,7 @@ use crate::types::{Key, KeyRange};
 pub const ESTIMATE_BUDGET: u32 = 1024;
 
 /// Most parts one split answers, whatever it is asked.
-pub const MAX_SPLIT_PARTS: u32 = 1024;
+pub const MAX_SPLIT_PARTS: u32 = 10_000;
 
 /// What a range holds, as an estimate answers it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -353,6 +353,15 @@ mod tests {
 		// One key, or one part: nothing to cut.
 		assert!(default_split(first, first, 8, &rng).is_empty());
 		assert!(default_split(first, last, 1, &rng).is_empty());
+	}
+
+	#[test]
+	fn ten_thousand_parts_tile_the_range() {
+		let lo = b"k\x00\x00\x00\x00";
+		let hi = b"k\xff\xff\xff\xff";
+		let extents = split_range(lo, hi, parts_for(SplitTarget::Parts(10_000), || 0) as usize);
+		assert_eq!(extents.len(), 10_000);
+		assert_tiles(lo, hi, &extents);
 	}
 
 	#[test]

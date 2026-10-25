@@ -501,10 +501,18 @@ fn slot_outcome(slot: &SlotValue) -> std::result::Result<surrealdb_types::Value,
 struct StreamSink {
 	items: Sender<QueryStreamItem>,
 	/// Items produced by a write statement running in a transaction of its own,
-	/// held back until its commit succeeds so a retryable commit conflict can
-	/// discard the failed attempt's rows before re-running.
+	/// held back while [`Self::stage`] is [`Stage::Holding`] so that a
+	/// retryable commit conflict can discard the failed attempt's rows before
+	/// the statement runs again.
 	staged: Vec<QueryStreamItem>,
-	staging: bool,
+	/// The estimated bytes of the rows in [`Self::staged`].
+	staged_bytes: usize,
+	/// The most estimated bytes [`Self::staged`] holds: past it the held items
+	/// are sent and the attempt's later items go out as they are produced
+	/// (`stream_stage_bytes`).
+	stage_max: usize,
+	/// Whether the attempt running holds its items back.
+	stage: Stage,
 	/// Statements whose rows have already been sent, and how many went out.
 	///
 	/// Keyed by statement index rather than held in a single slot because
@@ -521,6 +529,18 @@ struct StreamSink {
 	finalised: usize,
 }
 
+/// Whether a [`StreamSink`] holds back the items of the attempt running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+	/// Items go out as they are produced.
+	Off,
+	/// Items are held until the attempt's commit outcome is known.
+	Holding,
+	/// The attempt's items passed the staging bound and went out: the
+	/// consumer has seen rows of this attempt, so it is not run again.
+	Released,
+}
+
 impl StreamSink {
 	/// Send one item, ignoring a consumer that has stopped reading.
 	///
@@ -528,34 +548,71 @@ impl StreamSink {
 	/// to stop by [`Self::is_closed`], and an item produced in the meantime has
 	/// nowhere to go.
 	async fn send(&mut self, item: QueryStreamItem) {
-		if self.staging {
-			self.staged.push(item);
-		} else {
+		self.send_rows(item, 0).await;
+	}
+
+	/// Send one item of rows whose estimated size is `bytes`, holding it back
+	/// while the attempt is staging. The item that takes the held bytes past
+	/// the staging bound sends every held item, and the attempt is
+	/// [`Stage::Released`].
+	async fn send_rows(&mut self, item: QueryStreamItem, bytes: usize) {
+		if self.stage != Stage::Holding {
 			let _ = self.items.send(item).await;
+			return;
 		}
+		self.staged.push(item);
+		self.staged_bytes = self.staged_bytes.saturating_add(bytes);
+		if self.staged_bytes > self.stage_max {
+			self.stage = Stage::Released;
+			self.send_staged().await;
+		}
+	}
+
+	/// Whether items are being held back.
+	fn holding(&self) -> bool {
+		self.stage == Stage::Holding
+	}
+
+	/// Whether an item's size is wanted: items are held back under a bound.
+	/// With no bound (`usize::MAX`) nothing is measured.
+	fn measuring(&self) -> bool {
+		self.holding() && self.stage_max != usize::MAX
 	}
 
 	/// Hold back items produced by a write statement running in a transaction
-	/// of its own until its commit outcome is known.
+	/// of its own until its commit outcome is known or they pass the staging
+	/// bound.
 	fn begin_staging(&mut self) {
-		self.staging = true;
+		self.stage = Stage::Holding;
 		self.staged.clear();
+		self.staged_bytes = 0;
 	}
 
-	/// Send all staged items to the stream once the attempt stops staging.
+	/// Send every held item once the attempt has committed, and stop staging.
 	async fn flush_staged(&mut self) {
-		self.staging = false;
-		for item in self.staged.drain(..) {
+		self.stage = Stage::Off;
+		self.send_staged().await;
+	}
+
+	/// Send every held item, in the order it was produced.
+	async fn send_staged(&mut self) {
+		self.staged_bytes = 0;
+		for item in std::mem::take(&mut self.staged) {
 			let _ = self.items.send(item).await;
 		}
 	}
 
-	/// Discard staged items and the streamed row count for `index` after an
-	/// attempt that failed, whether it is run again or its error is final.
-	fn discard_staged(&mut self, index: usize) {
-		self.staging = false;
+	/// Discard held items and the streamed row count for `index` after an
+	/// attempt that failed, whether it is run again or its error is final,
+	/// and stop staging. Answers whether any of the attempt's items had
+	/// already reached the consumer, in which case it must not run again.
+	fn discard_staged(&mut self, index: usize) -> bool {
+		let released = self.stage == Stage::Released;
+		self.stage = Stage::Off;
 		self.staged.clear();
+		self.staged_bytes = 0;
 		self.streamed.remove(&index);
+		released
 	}
 
 	/// Whether the consumer has gone away.
@@ -1234,6 +1291,13 @@ pub(crate) fn install_statement_state(ctx: &mut FrozenContext) -> Arc<StatementC
 	counters
 }
 
+/// Whether `op` is a write statement, bare or under its `TIMEOUT`: one the
+/// cache of compiled statements may keep ([`crate::exec::vm::serve::kept_for_requests`]).
+fn is_write_statement(op: &LogicalOp) -> bool {
+	matches!(op, LogicalOp::Write(_))
+		|| matches!(op, LogicalOp::Timeout(timeout) if matches!(timeout.input.as_ref(), LogicalOp::Write(_)))
+}
+
 /// Guard that stops the timeout task when dropped, so it does not
 /// outlive the execution it was bounding.
 ///
@@ -1504,7 +1568,9 @@ impl Executor {
 		this.stream = Some(StreamSink {
 			items,
 			staged: Vec::new(),
-			staging: false,
+			staged_bytes: 0,
+			stage_max: kvs.config().exec.stream_stage_bytes,
+			stage: Stage::Off,
 			row_format,
 			streamed: HashMap::new(),
 			finalised: 0,
@@ -2312,10 +2378,12 @@ impl Executor {
 			match batch_result {
 				Ok(batch) => {
 					if streaming {
-						let row_format =
-							self.stream.as_ref().expect("streaming implies a sink").row_format;
+						let sink = self.stream.as_ref().expect("streaming implies a sink");
+						let row_format = sink.row_format;
+						// Measured only while the sink holds rows back, against its bound.
+						let measuring = sink.measuring();
 						let mut batch = batch;
-						let item = match row_format {
+						let (item, bytes) = match row_format {
 							// Rows the operators encoded, then any they handed on
 							// as values, encoded here: no public value is built
 							// for them.
@@ -2340,33 +2408,48 @@ impl Executor {
 									}
 								};
 								streamed += rows.len() as u64;
-								QueryStreamItem::Frame {
-									index,
-									rows,
-								}
+								let bytes = rows.bytes().len();
+								(
+									QueryStreamItem::Frame {
+										index,
+										rows,
+									},
+									bytes,
+								)
 							}
 							None => {
+								let bytes = if measuring {
+									batch.values().iter().map(estimate_bytes).sum()
+								} else {
+									0
+								};
 								let values = batch
 									.into_iter()
 									.map(convert_value_to_public_value)
 									.collect::<Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
 								streamed += values.len() as u64;
-								QueryStreamItem::Rows {
-									index,
-									values,
-								}
+								(
+									QueryStreamItem::Rows {
+										index,
+										values,
+									},
+									bytes,
+								)
 							}
 						};
 						// A row leaves only once the creates held before it are checked, so
 						// no row follows a create that fails.
 						txn.flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
 						let sink = self.stream.as_mut().expect("streaming implies a sink");
-						sink.send(item).await;
-						// A consumer that stopped reading wants no more rows, and
-						// the statement is about to be abandoned anyway.
+						sink.send_rows(item, bytes).await;
+						// A consumer that stopped reading wants no more rows. The
+						// statement fails rather than ends, so that its transaction
+						// is cancelled and nothing it wrote commits for a consumer
+						// that is no longer listening; the rows it held back, if
+						// any, go nowhere.
 						if sink.is_closed() {
-							break;
+							return Err(ControlFlow::Err(EngineError::QueryCancelled.into()));
 						}
 					} else {
 						results.extend(batch.into_values());
@@ -3196,7 +3279,9 @@ impl Executor {
 	///   work's, and the commit stands;
 	/// - is a read: it has no commit to lose;
 	/// - was supplied as a plan rather than as SurrealQL text, which keeps no source to run again
-	///   from.
+	///   from;
+	/// - streamed rows past the staging bound (`stream_stage_bytes`): they have reached the
+	///   consumer, which a second attempt's rows would be sent to as well.
 	///
 	/// When the attempts or the timeout run out, the last conflict is returned
 	/// unchanged. Inside a transaction block or a caller-owned transaction a
@@ -3246,15 +3331,17 @@ impl Executor {
 				}
 				Err(e) => e,
 			};
-			// A failed attempt's staged rows never reach the consumer: its
+			// A failed attempt's held rows never reach the consumer: its
 			// statement finishes with an error, which retracts any rows it
-			// produced, and a further attempt produces its own.
-			if staging && let Some(sink) = self.stream.as_mut() {
-				sink.discard_staged(index);
-			}
+			// produced, and a further attempt produces its own. An attempt
+			// whose rows passed the staging bound has sent them, and the
+			// consumer, which may already have acted on them, is not sent a
+			// second attempt's.
+			let released =
+				staging && self.stream.as_mut().is_some_and(|sink| sink.discard_staged(index));
 			// A commit whose outcome is unknown is not a retryable conflict,
 			// so a statement that may have applied is never run again.
-			if !rerunnable || !crate::kvs::is_retryable_transaction_conflict(&e) {
+			if released || !rerunnable || !crate::kvs::is_retryable_transaction_conflict(&e) {
 				return Err(e);
 			}
 			if attempt == STATEMENT_CONFLICT_ATTEMPTS {
@@ -5667,7 +5754,7 @@ impl Executor {
 									lowered,
 									&mut plan_session,
 									inline,
-									*read_only,
+									*read_only || is_write_statement(lowered),
 									keep_logged,
 									false,
 									&mut builder,
@@ -5821,10 +5908,13 @@ impl Executor {
 	/// the statements before it leave, into the request `builder` builds;
 	/// or, where it is not `inline`, or where it reads a parameter only the run
 	/// computes, leave it to be served when it is reached. A `cacheable`
-	/// statement that reads the request's variables only as the key of a record
-	/// of a constant table ([`crate::exec::vm::serve::kept_for_requests`]) is served here, as
-	/// the request arrives, from the cache of compiled statements, when the
-	/// node keeps one. `binds_rows` is whether the statement is the value of a
+	/// statement — one that only reads, or a write — that reads the request's
+	/// variables only where one compilation serves every value of them
+	/// ([`crate::exec::vm::serve::kept_for_requests`]), or whose literals in
+	/// those places are freed as such variables
+	/// ([`crate::exec::vm::serve::free_literals`]), is served here, as the
+	/// request arrives, from the cache of compiled statements, when the node
+	/// keeps one. `binds_rows` is whether the statement is the value of a
 	/// top-level `LET`, whose rows are read in the order they were bound.
 	#[expect(
 		clippy::too_many_arguments,
@@ -5851,12 +5941,16 @@ impl Executor {
 		}
 		let ctx = compile_phase!("bind", planning.bound_context(&self.ctx, txn));
 		let opt = &planning.opt;
-		if cacheable
+		let caches = cacheable
 			&& self.ctx.compiled_units().is_some_and(|units| units.caches_statements())
 			&& !crate::exec::planner::fold::changes_the_catalog(op)
-			&& !op.any(|node| matches!(node, LogicalOp::Explain(_)))
-			&& crate::exec::vm::serve::kept_for_requests(op, &ctx)
-		{
+			&& !op.any(|node| matches!(node, LogicalOp::Explain(_)));
+		let freed = caches.then(|| crate::exec::vm::serve::free_literals(op, &ctx)).flatten();
+		let (kept, literals) = match &freed {
+			Some((kept, literals)) => (kept, literals.as_slice()),
+			None => (op, &[][..]),
+		};
+		if caches && crate::exec::vm::serve::kept_for_requests(kept, &ctx, literals) {
 			// Served from the cache of compiled statements as the request
 			// arrives, in a context of the session the statements before it
 			// leave. One whose compilation fails is served when it is reached,
@@ -5876,12 +5970,19 @@ impl Executor {
 				&& let Ok(plan) = crate::exec::vm::out_of_line(|| {
 					crate::exec::vm::serve::kept_request_statement(
 						&probe,
-						op.clone(),
+						kept.clone(),
 						Some(Arc::clone(&opt.auth)),
+						literals,
 					)
 				})
 				.await
 			{
+				let plan: Arc<dyn crate::exec::ExecOperator> = match freed {
+					Some((_, literals)) => {
+						Arc::new(crate::exec::vm::serve::LiteralBound::new(plan, literals))
+					}
+					None => plan,
+				};
 				return PlannedStatement {
 					entry: Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(plan))),
 					logged,
@@ -7606,6 +7707,294 @@ mod tests {
 				"a block's commit is not a statement's own"
 			);
 			assert_eq!(counter(&ds, &ses).await, Value::Number(surrealdb_types::Number::Int(1)));
+		}
+	}
+
+	/// A streamed write statement running in a transaction of its own holds
+	/// its rows back until its commit while they stay within
+	/// `stream_stage_bytes`, so a lost commit runs it again without the
+	/// consumer seeing the failed attempt's rows. Past the bound its rows reach
+	/// the consumer as they are produced: the consumer can stop it before it
+	/// commits, and it is not run again.
+	mod streamed_write_staging {
+		use std::collections::HashMap;
+		use std::sync::Arc;
+		use std::time::Duration;
+
+		use surrealdb_cnf::ConfigMap;
+		use surrealdb_rpc::QUERY_STREAM_BUFFER;
+		use surrealdb_types::Value;
+
+		use super::super::{Stage, StreamSink};
+		use crate::dbs::{QueryStreamItem, Session};
+		use crate::kvs::testing::{
+			RetryableConflictSite, inject_retryable_conflicts, retryable_conflict_count,
+		};
+		use crate::kvs::{Datastore, QueryRequest};
+
+		const SITE: RetryableConflictSite = RetryableConflictSite::StatementCommit;
+
+		/// A statement whose returned rows are well past the default bound.
+		const LARGE: &str = "CREATE |big:5000| SET pad = 'xxxxxxxxxxxxxxxx'";
+
+		async fn new_ds(config: ConfigMap) -> (Arc<Datastore>, Session) {
+			let ds = Datastore::builder()
+				.without_maintenance_tasks()
+				.with_config(config)
+				.build_with_path("memory")
+				.await
+				.expect("datastore should open");
+			let ses = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				"DEFINE NAMESPACE test; USE NS test; DEFINE DATABASE test",
+				&Session::owner(),
+				None,
+			)
+			.await
+			.expect("the namespace and database should be defined");
+			for res in ds
+				.execute("DEFINE TABLE big; DEFINE TABLE t; CREATE t:counter SET n = 0", &ses, None)
+				.await
+				.expect("the seed should run")
+			{
+				res.result.expect("every seed statement succeeds");
+			}
+			(ds, ses)
+		}
+
+		/// Every item a consumer that reads to the end receives.
+		async fn streamed_items(
+			ds: &Arc<Datastore>,
+			ses: &Session,
+			sql: &str,
+		) -> Vec<QueryStreamItem> {
+			let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
+			let job = ds.run_streaming(QueryRequest::new(sql, ses), tx).expect("the query parses");
+			let drain = async {
+				let mut items = Vec::new();
+				while let Ok(item) = rx.recv().await {
+					items.push(item);
+				}
+				items
+			};
+			let (outcome, items) = futures::future::join(job.run, drain).await;
+			outcome.expect("the execution completes");
+			items
+		}
+
+		/// The rows statement 0 sent, and its `Finished` error, if any.
+		fn statement_zero(items: Vec<QueryStreamItem>) -> (Vec<Value>, Option<String>) {
+			let mut rows = Vec::new();
+			let mut error = None;
+			for item in items {
+				match item {
+					QueryStreamItem::Rows {
+						index: 0,
+						values,
+					} => rows.extend(values),
+					QueryStreamItem::Frame {
+						index: 0,
+						rows: frame,
+					} => rows.extend(frame.to_values().expect("rows decode")),
+					QueryStreamItem::Finished {
+						index: 0,
+						error: e,
+						..
+					} => error = e.map(|e| e.to_string()),
+					QueryStreamItem::Rows {
+						..
+					}
+					| QueryStreamItem::Frame {
+						..
+					}
+					| QueryStreamItem::Value {
+						..
+					}
+					| QueryStreamItem::Finished {
+						..
+					} => {}
+				}
+			}
+			(rows, error)
+		}
+
+		async fn count(ds: &Datastore, ses: &Session, table: &str) -> Value {
+			let mut res = ds
+				.execute(&format!("RETURN count(SELECT VALUE id FROM {table})"), ses, None)
+				.await
+				.expect("the count should run");
+			res.remove(0).result.expect("the count")
+		}
+
+		fn int(n: i64) -> Value {
+			Value::Number(surrealdb_types::Number::Int(n))
+		}
+
+		/// A small write that loses its commit runs again, and the consumer
+		/// receives the rows of the attempt that committed alone.
+		#[tokio::test]
+		async fn a_small_write_that_loses_its_commit_sends_only_the_final_attempts_rows() {
+			let (ds, ses) = new_ds(ConfigMap::empty()).await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 2);
+			let items =
+				streamed_items(&ds, &ses, "UPDATE t:counter SET n += 1 RETURN VALUE n").await;
+			assert_eq!(retryable_conflict_count(SITE, ds.id()), 0, "every conflict is consumed");
+			let (rows, error) = statement_zero(items);
+			assert_eq!(error, None, "the third attempt commits");
+			assert_eq!(rows, vec![int(1)], "only the committed attempt's row is sent");
+			assert_eq!(count(&ds, &ses, "t").await, int(1));
+			let counter = ds
+				.execute("SELECT VALUE n FROM ONLY t:counter", &ses, None)
+				.await
+				.expect("the read")
+				.remove(0)
+				.result;
+			assert_eq!(counter, Ok(int(1)), "the write applied once");
+		}
+
+		/// A write whose rows pass the bound sends them before its commit: a
+		/// lost commit then fails the statement, which is not run again.
+		#[tokio::test]
+		async fn a_large_write_sends_its_rows_before_its_commit_and_is_not_run_again() {
+			let (ds, ses) =
+				new_ds(ConfigMap::empty().with_key_value("stream_stage_bytes", "64KiB")).await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 2);
+			let items = streamed_items(&ds, &ses, LARGE).await;
+			assert_eq!(retryable_conflict_count(SITE, ds.id()), 1, "one attempt was made");
+			let (rows, error) = statement_zero(items);
+			let error = error.expect("the lost commit fails the statement");
+			assert!(error.contains("can be retried"), "the conflict is reported: {error}");
+			assert!(!rows.is_empty(), "rows reached the consumer before the commit");
+			assert!(rows.len() <= 5000, "no second attempt's rows were sent");
+			assert_eq!(count(&ds, &ses, "big").await, int(0), "nothing committed");
+		}
+
+		/// With no bound, the default, the same statement is held back whole,
+		/// and runs again after a lost commit.
+		#[tokio::test]
+		async fn by_default_a_large_write_is_held_back_and_runs_again() {
+			let (ds, ses) = new_ds(ConfigMap::empty()).await;
+			let _guard = inject_retryable_conflicts(SITE, ds.id(), 1);
+			let (rows, error) = statement_zero(streamed_items(&ds, &ses, LARGE).await);
+			assert_eq!(error, None, "the second attempt commits");
+			assert_eq!(rows.len(), 5000, "only the committed attempt's rows are sent");
+			assert_eq!(count(&ds, &ses, "big").await, int(5000));
+		}
+
+		/// A consumer that goes away while a large write is still sending its
+		/// rows stops it before its commit, and nothing it wrote is kept.
+		#[tokio::test]
+		async fn a_consumer_that_stops_reading_stops_a_large_write_uncommitted() {
+			let (ds, ses) =
+				new_ds(ConfigMap::empty().with_key_value("stream_stage_bytes", "64KiB")).await;
+			let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
+			let sql = format!("{LARGE}; CREATE t:after");
+			let job = ds
+				.run_streaming(QueryRequest::new(sql.as_str(), &ses), tx)
+				.expect("the query parses");
+			let running = tokio::spawn(job.run);
+			let first = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+				.await
+				.expect("rows arrive before the statement commits")
+				.expect("at least one item");
+			assert!(
+				matches!(
+					first,
+					QueryStreamItem::Rows {
+						index: 0,
+						..
+					}
+				),
+				"the write's rows arrive first, got {first:?}"
+			);
+			assert_eq!(count(&ds, &ses, "big").await, int(0), "the write has not committed");
+			drop(rx);
+			running
+				.await
+				.expect("the execution task completes")
+				.expect("abandoning the results is not itself an error");
+			assert_eq!(count(&ds, &ses, "big").await, int(0), "nothing the write wrote is kept");
+			assert_eq!(count(&ds, &ses, "t").await, int(1), "the statement after it never ran");
+		}
+
+		fn rows(index: usize) -> QueryStreamItem {
+			QueryStreamItem::Rows {
+				index,
+				values: vec![Value::None],
+			}
+		}
+
+		fn sink(items: async_channel::Sender<QueryStreamItem>, stage_max: usize) -> StreamSink {
+			StreamSink {
+				items,
+				staged: Vec::new(),
+				staged_bytes: 0,
+				stage_max,
+				stage: Stage::Off,
+				streamed: HashMap::new(),
+				row_format: None,
+				finalised: 0,
+			}
+		}
+
+		/// The held items never pass the bound by more than the item that
+		/// crossed it: that item sends them all, and the rest go out as they
+		/// come.
+		#[tokio::test]
+		async fn held_rows_stay_within_the_bound() {
+			let (tx, rx) = async_channel::unbounded();
+			let mut sink = sink(tx, 1000);
+			sink.begin_staging();
+			for sent in 1..=3 {
+				sink.send_rows(rows(0), 300).await;
+				assert_eq!(sink.staged.len(), sent);
+				assert!(sink.holding());
+			}
+			assert!(rx.is_empty(), "nothing goes out under the bound");
+			sink.send_rows(rows(0), 300).await;
+			assert_eq!(sink.stage, Stage::Released);
+			assert!(sink.staged.is_empty(), "crossing the bound sends what was held");
+			assert_eq!(sink.staged_bytes, 0);
+			assert_eq!(rx.len(), 4);
+			for _ in 0..100 {
+				sink.send_rows(rows(0), 300).await;
+				assert!(sink.staged.is_empty(), "past the bound nothing is held");
+			}
+			assert_eq!(rx.len(), 104);
+			assert!(sink.discard_staged(0), "the attempt's rows reached the consumer");
+			assert_eq!(sink.stage, Stage::Off);
+		}
+
+		/// A bound of zero holds back no rows, and an attempt that sent none is
+		/// still one that may run again.
+		#[tokio::test]
+		async fn a_zero_bound_holds_back_no_rows() {
+			let (tx, rx) = async_channel::unbounded();
+			let mut sink = sink(tx, 0);
+			sink.begin_staging();
+			assert!(!sink.discard_staged(0), "an attempt that sent nothing may run again");
+			sink.begin_staging();
+			sink.send_rows(rows(0), 1).await;
+			assert!(sink.staged.is_empty());
+			assert_eq!(rx.len(), 1);
+			assert!(sink.discard_staged(0));
+		}
+
+		/// Rows held under the bound go out when the attempt commits, and are
+		/// dropped when it fails.
+		#[tokio::test]
+		async fn held_rows_go_out_on_commit_and_are_dropped_on_failure() {
+			let (tx, rx) = async_channel::unbounded();
+			let mut sink = sink(tx, 1000);
+			sink.begin_staging();
+			sink.send_rows(rows(0), 10).await;
+			assert!(!sink.discard_staged(0), "held rows never reached the consumer");
+			assert!(rx.is_empty(), "a failed attempt's held rows are dropped");
+			sink.begin_staging();
+			sink.send_rows(rows(0), 10).await;
+			sink.flush_staged().await;
+			assert_eq!(sink.stage, Stage::Off);
+			assert_eq!(rx.len(), 1, "a committed attempt's held rows go out");
 		}
 	}
 

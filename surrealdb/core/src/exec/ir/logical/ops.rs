@@ -558,11 +558,25 @@ pub(crate) struct WriteAttrs {
 	/// The `INTO` expression of an `INSERT` as written, which the refusal of a value that names no
 	/// table quotes. `None` for a statement with no `INTO`.
 	pub(crate) into_text: Option<Box<str>>,
-	/// For a write that names no one table, the statement as written, which the stage bundle of
-	/// each table a run reaches binds again with that table
-	/// ([`UnitKind::StageBundle`](crate::exec::ir::unit::UnitKind)). `None` for a write that names
-	/// its table.
+	/// For a write that names no one table, or whose stages are [`Self::linked`], the statement as
+	/// written, which the stage bundle of each table it writes binds again with that table
+	/// ([`UnitKind::StageBundle`](crate::exec::ir::unit::UnitKind)). `None` for a write whose
+	/// stages are its own ops.
 	pub(crate) statement: Option<std::sync::Arc<crate::expr::logical::LogicalWrite>>,
+	/// For a write that names its one table and runs the bundle of that table's stages the compile
+	/// links before the statement runs, the table and the stages of the write's orders. The
+	/// subject loop's body holds no stage op. `None` for any other write.
+	pub(crate) linked: Option<Box<LinkedStages>>,
+}
+
+/// The stages of a write that runs them as the bundle the compile links for its one table
+/// ([`WriteAttrs::linked`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct LinkedStages {
+	/// The table the write writes.
+	pub(crate) table: TableName,
+	/// The stages of the write's orders, which the positions of its body name.
+	pub(crate) run: Box<[WriteStageKind]>,
 }
 
 /// The `COMPUTED` fields the stages of a write derive onto a copy of a record's image, by the

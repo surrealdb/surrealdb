@@ -310,7 +310,9 @@ pub(super) struct Decided {
 
 /// The request `op` plans to, or `None` where the plan is declined.
 async fn planned_of(ctx: &ExecutionContext, op: &LogicalOp) -> Option<PlannedRequest> {
-	let planner = planner(ctx);
+	// The container is planned alone, with no compile to link a write's stages, so each write
+	// binds its stages as ops of its own.
+	let planner = planner(ctx).inlining_stages();
 	let session = super::compile::session_of(&planner);
 	let statements = [RequestStatement::Logical(op)];
 	let input = RequestInput::request(

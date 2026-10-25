@@ -1924,6 +1924,7 @@ mod tests {
 							derived: WriteDerived::default(),
 							into_text: None,
 							statement: None,
+							linked: None,
 						},
 						subjects: WriteSubjectsShape::Rows,
 					}))),

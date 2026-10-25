@@ -112,7 +112,22 @@ pub(crate) struct StageSetUnit {
 	pub(super) sites: Vec<Vec<crate::exec::operators::write::stage::StageId>>,
 }
 
+/// The name a linked write's stage set reads its subjects by in place of its targets
+/// ([`StageSetUnit::linked`]). No statement can spell it, so it names nothing a statement reads.
+pub(super) const LINKED_SUBJECT: &str = "linked subject";
+
 impl StageSetUnit {
+	/// The stage set of a write whose stages are linked, `write` with its subjects read through
+	/// [`LINKED_SUBJECT`] in place of the targets it names: the targets decide which records the
+	/// statement writes and nothing its stages apply, so every statement of one shape shares one
+	/// bundle of a table's stages whatever records it names.
+	pub(super) fn linked(
+		write: &crate::expr::logical::LogicalWrite,
+		sites: Vec<Vec<crate::exec::operators::write::stage::StageId>>,
+	) -> Self {
+		Self::new(Arc::new(subjects_erased(write)), sites)
+	}
+
 	pub(super) fn new(
 		write: Arc<crate::expr::logical::LogicalWrite>,
 		sites: Vec<Vec<crate::exec::operators::write::stage::StageId>>,
@@ -125,6 +140,49 @@ impl StageSetUnit {
 			write,
 			sites,
 		}
+	}
+
+	/// The names of every parameter the statement reads, in its clauses,
+	/// its targets and its `RETURN` fields. A bundle compiled with them read
+	/// when its stages run serves every value they hold.
+	pub(super) fn read_names(&self) -> std::collections::BTreeSet<String> {
+		use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, LogicalOp};
+		let mut names = std::collections::BTreeSet::new();
+		let mut read = |expr: &LogicalExpr| {
+			let _ = expr.visit_deep(&mut |node| {
+				if let LogicalExpr::Param(param) = node {
+					names.insert(param.as_str().to_owned());
+				}
+				std::ops::ControlFlow::<()>::Continue(())
+			});
+		};
+		let _ = LogicalOp::Write((*self.write).clone()).visit_scalars_deep(&mut |scalar| {
+			read(scalar);
+			Ok::<(), std::convert::Infallible>(())
+		});
+		if let Some(crate::expr::output::Output::Fields(fields)) = self.write.statement.output()
+			&& let Ok(fields) = crate::expr::logical::lower_fields(fields.clone())
+		{
+			match fields {
+				LogicalFields::Value {
+					expr,
+					..
+				} => read(&expr),
+				LogicalFields::Select(fields) => {
+					for field in &fields {
+						if let LogicalField::Single {
+							expr,
+							..
+						} = field
+						{
+							read(expr);
+						}
+					}
+				}
+			}
+		}
+		names.extend(self.param_names());
+		names
 	}
 
 	/// The names of the parameters the statement reads inside a part that a
@@ -180,6 +238,120 @@ impl PartialEq for StageSetUnit {
 }
 
 impl Eq for StageSetUnit {}
+
+/// `write` reading its subjects through [`LINKED_SUBJECT`]: each target, the one record or
+/// variable whose rows it writes, and the targets its statement holds as written.
+fn subjects_erased(
+	write: &crate::expr::logical::LogicalWrite,
+) -> crate::expr::logical::LogicalWrite {
+	use crate::expr::logical::{
+		LogicalExpr, LogicalOp, LogicalSource, LogicalWrite, LogicalWriteSource,
+		LogicalWriteStatement, SourceRef,
+	};
+	let subject = || crate::expr::Param::from(LINKED_SUBJECT.to_owned());
+	let written = || crate::expr::Expr::Param(subject());
+	let source = match &write.source {
+		LogicalWriteSource::Targets(targets) => match &write.statement {
+			// The edge table of a `RELATE` is the table its stages apply to.
+			LogicalWriteStatement::Relate(_) => LogicalWriteSource::Targets(
+				targets
+					.iter()
+					.enumerate()
+					.map(|(at, target)| match at {
+						1 => target.clone(),
+						_ => LogicalExpr::Param(subject()),
+					})
+					.collect(),
+			),
+			LogicalWriteStatement::Create(_)
+			| LogicalWriteStatement::Update(_)
+			| LogicalWriteStatement::Upsert(_)
+			| LogicalWriteStatement::Delete(_)
+			| LogicalWriteStatement::Insert(_) => LogicalWriteSource::Targets(
+				targets.iter().map(|_| LogicalExpr::Param(subject())).collect(),
+			),
+		},
+		LogicalWriteSource::Rows(rows) => match rows.as_ref() {
+			LogicalOp::Source(source) => {
+				// What the catalog declares for the subject's rows is the subject's: the stages
+				// read their table's definitions where they are compiled.
+				LogicalWriteSource::Rows(Box::new(LogicalOp::Source(LogicalSource {
+					source: SourceRef::Param(subject()),
+					schema: None,
+					..source.clone()
+				})))
+			}
+			LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => write.source.clone(),
+		},
+		LogicalWriteSource::Inserts(_) => write.source.clone(),
+	};
+	let statement = match &write.statement {
+		LogicalWriteStatement::Create(stmt) => {
+			let mut stmt = stmt.clone();
+			stmt.what = stmt.what.iter().map(|_| written()).collect();
+			LogicalWriteStatement::Create(stmt)
+		}
+		LogicalWriteStatement::Update(stmt) => {
+			let mut stmt = stmt.clone();
+			stmt.what = stmt.what.iter().map(|_| written()).collect();
+			LogicalWriteStatement::Update(stmt)
+		}
+		LogicalWriteStatement::Upsert(stmt) => {
+			let mut stmt = stmt.clone();
+			stmt.what = stmt.what.iter().map(|_| written()).collect();
+			LogicalWriteStatement::Upsert(stmt)
+		}
+		LogicalWriteStatement::Delete(stmt) => {
+			let mut stmt = stmt.clone();
+			stmt.what = stmt.what.iter().map(|_| written()).collect();
+			LogicalWriteStatement::Delete(stmt)
+		}
+		LogicalWriteStatement::Relate(stmt) => {
+			let mut stmt = stmt.clone();
+			stmt.from = written();
+			stmt.to = written();
+			LogicalWriteStatement::Relate(stmt)
+		}
+		LogicalWriteStatement::Insert(_) => write.statement.clone(),
+	};
+	LogicalWrite {
+		statement,
+		source,
+		data: write.data.clone(),
+		duplicate_update: write.duplicate_update.clone(),
+		cond: write.cond.clone(),
+	}
+}
 
 /// The values the planning context held, when a unit was lowered, for every
 /// name the definitions its lowering read refer to; `None` for a name it
@@ -359,6 +531,16 @@ thread_local! {
 	/// How many catalog units this thread lowered that no kept unit stood
 	/// for, and how many it took from kept units.
 	pub(crate) static CATALOG_UNITS: std::cell::Cell<(usize, usize)> =
+		const { std::cell::Cell::new((0, 0)) };
+	/// Whether compiles on this thread bind every write's stages as its own ops, as main does,
+	/// for tests that compare a linked write with the inline one.
+	pub(crate) static INLINE_STAGES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+	/// How many write statements this thread compiled again with their stages inline after a
+	/// compile that linked them failed.
+	pub(crate) static INLINED_AGAIN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// How many bundles of linked stages this thread's compiles compiled, and
+	/// how many they took from the compile cache.
+	pub(crate) static LINKED: std::cell::Cell<(usize, usize)> =
 		const { std::cell::Cell::new((0, 0)) };
 	/// Whether plans on this thread compile every body with the plan, as a
 	/// node keeping no units does, for measurements that compare the two.

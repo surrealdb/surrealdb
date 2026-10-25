@@ -1851,7 +1851,10 @@ impl<'p> RangeSet<'p> {
 		let mut last: Vec<u8> = Vec::new();
 		// The far end of the range, read once: the last key a forward scan reaches, the first a
 		// backward one does; `None` inside when the range holds nothing past what was read.
+		// Both it and `stored_size`, what the storage's metadata says `own` holds, are read only
+		// while the policy's first split is unasked, so `own` has not been cut when they are.
 		let mut far: Option<Option<Vec<u8>>> = None;
+		let mut stored_size: Option<Option<surrealdb_kvs::Estimate>> = None;
 		// The source ends its producer on every exit path, so the loop runs in a block whose
 		// result is returned once the source has finished.
 		let outcome: FlowResult<bool> = async {
@@ -1992,27 +1995,42 @@ impl<'p> RangeSet<'p> {
 					};
 					if self.policy.may_split(&signals) && progress.visited >= Policy::MEASURED_FROM
 					{
-						let far = match &far {
-							Some(far) => far.clone(),
-							None => {
-								let found = far_key(&txn, &rest, self.dir, self.version)
-									.await
-									.context("Failed to read the far end of the scan")?;
-								far = Some(found.clone());
-								found
-							}
-						};
-						signals.remaining_estimate = Some(match far {
-							Some(far) => steal::remaining_to(
-								&far,
-								self.dir,
-								&progress.first,
-								&last,
-								progress.visited,
-								progress.bytes,
-							),
-							None => surrealdb_kvs::Estimate::default(),
-						});
+						if stored_size.is_none() {
+							stored_size = Some(
+								txn.approximate(own.clone(), self.version).await.unwrap_or_else(
+									|failure| {
+										tracing::debug!(%failure, "a scan could not size its range for a measured split");
+										None
+									},
+								),
+							);
+						}
+						if let Some(Some(size)) = stored_size {
+							signals.remaining_estimate =
+								Some(steal::remaining_from_size(size, progress.visited));
+						} else {
+							let far = match &far {
+								Some(far) => far.clone(),
+								None => {
+									let found = far_key(&txn, &rest, self.dir, self.version)
+										.await
+										.context("Failed to read the far end of the scan")?;
+									far = Some(found.clone());
+									found
+								}
+							};
+							signals.remaining_estimate = Some(match far {
+								Some(far) => steal::remaining_to(
+									&far,
+									self.dir,
+									&progress.first,
+									&last,
+									progress.visited,
+									progress.bytes,
+								),
+								None => surrealdb_kvs::Estimate::default(),
+							});
+						}
 					}
 					match self.policy.split(&signals) {
 						Split::Split {

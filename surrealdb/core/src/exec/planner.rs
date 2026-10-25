@@ -301,6 +301,17 @@ pub struct Planner<'ctx> {
 	/// statements after the `LET` read in the order they were bound
 	/// ([`Self::binding_rows`]).
 	binds_rows: bool,
+	/// The table of the records each request variable names that a statement of a request reads
+	/// as the one target of its write, by the variable's name: the class the statement cache keeps
+	/// the statement under ([`Self::naming_targets`]). Read only by the bind of a request's own
+	/// statement.
+	named_targets: Arc<[(String, surrealdb_strand::TableName)]>,
+	/// Whether a write of a request's statement binds its table's stages as ops of its own rather
+	/// than running the bundle the compile links for the table ([`Self::inlining_stages`]).
+	stages_inline: bool,
+	/// Whether this planner plans a statement the statement cache keeps, whose write may link
+	/// its table's stages ([`Self::linking_stages`]).
+	stages_linked: bool,
 }
 
 /// How a statement reaches the catalog objects that code it runs may redefine
@@ -379,6 +390,9 @@ impl<'ctx> Planner<'ctx> {
 			trusts_index_shapes: false,
 			request_root: false,
 			binds_rows: false,
+			named_targets: Arc::from(Vec::new()),
+			stages_inline: false,
+			stages_linked: false,
 		}
 	}
 
@@ -425,6 +439,9 @@ impl<'ctx> Planner<'ctx> {
 			trusts_index_shapes: false,
 			request_root: false,
 			binds_rows: false,
+			named_targets: Arc::from(Vec::new()),
+			stages_inline: false,
+			stages_linked: false,
 		}
 	}
 
@@ -1105,6 +1122,9 @@ impl<'ctx> Planner<'ctx> {
 			trusts_index_shapes: false,
 			request_root: false,
 			binds_rows: false,
+			named_targets: Arc::from(Vec::new()),
+			stages_inline: false,
+			stages_linked: false,
 		}
 	}
 
@@ -1158,6 +1178,9 @@ impl<'ctx> Planner<'ctx> {
 			trusts_index_shapes: self.trusts_index_shapes,
 			request_root: self.request_root,
 			binds_rows: self.binds_rows,
+			named_targets: Arc::clone(&self.named_targets),
+			stages_inline: self.stages_inline,
+			stages_linked: self.stages_linked,
 		}
 	}
 
@@ -1204,6 +1227,54 @@ impl<'ctx> Planner<'ctx> {
 	/// runs ([`Self::late_binding`]).
 	pub(crate) fn is_late_bound(&self) -> bool {
 		self.late_bound
+	}
+
+	/// This planner naming, for each `(name, table)` of `targets`, `table` as the table the write
+	/// of a request's statement writes where its one target is the variable `name`: the variable
+	/// holds a record of the table, or records of it alone, or the table itself, in every request
+	/// the plan serves.
+	pub(crate) fn naming_targets(
+		mut self,
+		targets: Vec<(String, surrealdb_strand::TableName)>,
+	) -> Self {
+		self.named_targets = Arc::from(targets);
+		self
+	}
+
+	/// This planner binding the stages of every write as ops of the write's own, as a statement
+	/// whose linked stages did not compile is planned again.
+	pub(crate) fn inlining_stages(&self) -> Planner<'ctx> {
+		let mut inline = self.shadowing(std::iter::empty());
+		inline.stages_inline = true;
+		inline
+	}
+
+	/// This planner planning a statement the statement cache keeps: its write may run the bundle
+	/// of its table's stages the compile links, which serves every statement of its shape for as
+	/// long as the table's definitions hold. A statement planned for one request alone binds its
+	/// stages as its own ops, compiling no bundle it would not reuse.
+	pub(crate) fn linking_stages(mut self) -> Planner<'ctx> {
+		self.stages_linked = true;
+		self
+	}
+
+	/// Whether a write of a request's statement this planner plans may run the bundle of its
+	/// table's stages the compile links ([`Self::linking_stages`], [`Self::inlining_stages`]).
+	pub(crate) fn links_stages(&self) -> bool {
+		#[cfg(test)]
+		if crate::exec::vm::units::INLINE_STAGES.with(std::cell::Cell::get) {
+			return false;
+		}
+		self.stages_linked && !self.stages_inline
+	}
+
+	/// The tables [`Self::naming_targets`] named for the targets of a request's statement; none
+	/// for a planner that plans no statement of a request.
+	pub(crate) fn named_targets(&self) -> &[(String, surrealdb_strand::TableName)] {
+		match self.request_root {
+			true => &self.named_targets,
+			false => &[],
+		}
 	}
 
 	/// This planner, trusting the value shapes the indexes have recorded when
@@ -1651,6 +1722,7 @@ pub(crate) async fn plan_statement_on(
 		&[],
 		false,
 		false,
+		Vec::new(),
 	)
 	.await
 }
@@ -1665,7 +1737,21 @@ pub(crate) async fn plan_binding_value(
 	auth: Option<Arc<crate::iam::Auth>>,
 	speculation: Option<Arc<crate::dbs::Options>>,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	plan_statement_with(op, ctx, registry, txn, auth, 0, speculation, false, &[], false, true).await
+	plan_statement_with(
+		op,
+		ctx,
+		registry,
+		txn,
+		auth,
+		0,
+		speculation,
+		false,
+		&[],
+		false,
+		true,
+		Vec::new(),
+	)
+	.await
 }
 
 /// [`plan_statement_on`] for a statement whose parameters `shadowed` names
@@ -1700,6 +1786,7 @@ pub(crate) async fn plan_statement_scoped(
 		shadowed,
 		false,
 		binds_rows,
+		Vec::new(),
 	)
 	.await
 }
@@ -1707,7 +1794,9 @@ pub(crate) async fn plan_statement_scoped(
 /// [`plan_statement_scoped`] for a top-level statement of a request, planned
 /// as the statement of a request it is ([`Planner::at_request_root`]): the
 /// request's own frame runs it. `binds_rows` is as [`plan_statement_scoped`]
-/// takes it.
+/// takes it, and `named_targets` names the table of each variable among
+/// `shadowed` that the statement's write reads as its one target
+/// ([`Planner::naming_targets`]).
 #[expect(
 	clippy::too_many_arguments,
 	reason = "the arguments of plan_statement_scoped without the depth a request's statement starts at"
@@ -1721,6 +1810,7 @@ pub(crate) async fn plan_request_statement_scoped(
 	perms_suppressed: bool,
 	shadowed: &[String],
 	binds_rows: bool,
+	named_targets: Vec<(String, surrealdb_strand::TableName)>,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	plan_statement_with(
 		op,
@@ -1734,6 +1824,7 @@ pub(crate) async fn plan_request_statement_scoped(
 		shadowed,
 		true,
 		binds_rows,
+		named_targets,
 	)
 	.await
 }
@@ -1845,6 +1936,7 @@ async fn plan_statement_with(
 	shadowed: &[String],
 	request_root: bool,
 	binds_rows: bool,
+	named_targets: Vec<(String, surrealdb_strand::TableName)>,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	// A `LET` no statement may hold is refused from the text written, before
 	// binding folds any of it away and before a write is declined, so the
@@ -1878,10 +1970,13 @@ async fn plan_statement_with(
 		planner = planner.with_auth(auth);
 	}
 	if request_root {
-		planner = planner.at_request_root();
+		planner = planner.at_request_root().linking_stages();
 	}
 	if !shadowed.is_empty() {
 		planner = planner.shadowing(shadowed.iter().cloned());
+	}
+	if !named_targets.is_empty() {
+		planner = planner.naming_targets(named_targets);
 	}
 	planner.speculate_with(speculation);
 	let within = compile_phase!(

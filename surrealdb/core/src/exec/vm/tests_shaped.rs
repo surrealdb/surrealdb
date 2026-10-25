@@ -257,9 +257,24 @@ async fn a_row_dependent_field_is_absent_and_zero_where_it_is_hidden() {
 	let hidden = stream(&db, &alice, "SELECT * FROM d:2", RowFormat::Shaped).await;
 	db.run_as(&owner, "UPDATE d:2 SET mine = NONE").await;
 	let none = stream(&db, &alice, "SELECT * FROM d:2", RowFormat::Shaped).await;
-	let (hidden, _, _) = column_in_row(&hidden[0].frames[0], 0, "mine");
-	let (none, _, _) = column_in_row(&none[0].frames[0], 0, "mine");
-	assert_eq!(hidden, none, "absent by permission is a field the row does not hold");
+	// A statement kept for its record's table shapes the row when it runs, naming only the
+	// fields the row holds; either way the two rows are written alike.
+	let written = |answer: &Answer| {
+		let frame = &answer.frames[0];
+		let shape = &frame.shapes()[frame.row_shapes()[0] as usize];
+		let names: Vec<String> = shape.columns().iter().map(|c| c.name.clone()).collect();
+		let row = if shape.columns().iter().any(|c| c.name == "mine") {
+			column_in_row(frame, 0, "mine").0.to_vec()
+		} else {
+			frame.bytes()[..frame.ends()[0] as usize].to_vec()
+		};
+		(names, row)
+	};
+	assert_eq!(
+		written(&hidden[0]),
+		written(&none[0]),
+		"absent by permission is a field the row does not hold"
+	);
 }
 
 /// A packed row whose absent fixed column holds stray bytes is written with that column absent and

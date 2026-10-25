@@ -176,6 +176,26 @@ pub(super) fn cut(rest: &RawRange, dir: Direction, bounds: Vec<Vec<u8>>) -> Cut 
 	}
 }
 
+/// The remainder of a range whose metadata sized it before its first split. A known key count
+/// removes the visited entries and scales bytes by their share, independent of key encoding.
+/// Without a key count, the metadata's byte size bounds the remainder without subtracting the
+/// scan's uncompressed bytes from a possibly compressed storage size.
+pub(super) fn remaining_from_size(size: Estimate, visited: u64) -> Estimate {
+	let keys = size.keys.map(|keys| keys.saturating_sub(visited));
+	let bytes = match (size.keys, keys) {
+		(Some(total), Some(left)) if total > 0 => {
+			(u128::from(size.bytes) * u128::from(left) / u128::from(total)) as u64
+		}
+		(Some(0), _) => 0,
+		_ => size.bytes,
+	};
+	Estimate {
+		keys,
+		bytes,
+		exact: false,
+	}
+}
+
 /// What a morsel has left, estimated from what it has read: the entries `visited` and their
 /// `bytes`, the first key it read, `first`, and where reading continues, `at`, within `span`, the
 /// range the morsel is reading. See [`remaining_between`]; the far end of the range is taken to be

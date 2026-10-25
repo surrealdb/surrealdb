@@ -3500,16 +3500,21 @@ impl Body<'_, '_, '_> {
 		let OpKind::Phys(PhysOp::Write(attrs)) = &data.kind else {
 			return Err(invariant("a write sink that is not a write"));
 		};
-		let run = StageRun::of(ir, data, self.cx.reads_checked())?;
 		let entry = WriteEntry {
 			from_row: true,
 			gated: true,
 		};
-		if attrs.write.statement.is_some() {
+		if let Some(linked) = &attrs.write.linked {
+			// A write whose stages are linked holds no stage op: it runs each run of the stages it
+			// states as a site, applied by the bundle its spec holds.
+			write_body(self.em, &attrs.write.body, &linked.run, entry, &mut SiteSink::default())?;
+		} else if attrs.write.statement.is_some() {
 			// A write that names no one table runs each run of stages as a site, which its spec
 			// dispatches by the table a record is written to.
+			let run = StageRun::of(ir, data, self.cx.reads_checked())?;
 			write_body(self.em, &attrs.write.body, &run.stages, entry, &mut SiteSink::default())?;
 		} else {
+			let run = StageRun::of(ir, data, self.cx.reads_checked())?;
 			let mut stages = Stages::new(&run, ir, self.cx.limits(), self.cx.registry())
 				.in_context(&mut *self.cx);
 			let cut = cut_of_rows(ir, data);

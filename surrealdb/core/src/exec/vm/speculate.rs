@@ -263,7 +263,277 @@ pub(super) async fn runs_unseen_schema(
 	op: &crate::expr::logical::LogicalOp,
 	closures_from_outside: bool,
 ) -> bool {
-	reached(planner, op, closures_from_outside).await.is_none()
+	reached(planner, op, closures_from_outside, None).await.is_none()
+}
+
+/// The tables each variable the write `op` is (under its `TIMEOUT` at most) names
+/// as a target holds in every run of the plan `planner` makes: the table a kept statement's class
+/// of value names ([`Planner::named_targets`]), or the tables the value the planning
+/// context binds the name to names, which the bind folds into the plan. A name
+/// read when the plan runs, whose value the plan does not fix, holds none.
+fn variable_targets(
+	planner: &Planner<'_>,
+	op: &crate::expr::logical::LogicalOp,
+) -> std::collections::BTreeMap<String, Vec<surrealdb_strand::TableName>> {
+	use crate::expr::logical::LogicalOp;
+	fn tables(value: &Value) -> Option<Vec<surrealdb_strand::TableName>> {
+		match value {
+			Value::RecordId(rid) => Some(vec![rid.table.clone()]),
+			Value::Table(table) => Some(vec![table.clone()]),
+			Value::Array(items) => items
+				.iter()
+				.map(|item| match item {
+					Value::RecordId(rid) => Some(rid.table.clone()),
+					Value::Table(table) => Some(table.clone()),
+					Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::Bytes(_)
+					| Value::File(_)
+					| Value::Regex(_)
+					| Value::Range(_)
+					| Value::Closure(_) => None,
+				})
+				.collect(),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Geometry(_)
+			| Value::Bytes(_)
+			| Value::File(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => None,
+		}
+	}
+	let root = match op {
+		LogicalOp::Write(write) => write,
+		LogicalOp::Timeout(timeout) => match timeout.input.as_ref() {
+			LogicalOp::Write(write) => write,
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => return std::collections::BTreeMap::new(),
+		},
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => return std::collections::BTreeMap::new(),
+	};
+	let mut out = std::collections::BTreeMap::new();
+	for name in target_variables(&root.source) {
+		let held = match planner.named_targets().iter().find(|(named, _)| named == name) {
+			Some((_, table)) => Some(vec![table.clone()]),
+			None if planner.param_is_shadowed(name) => None,
+			None => planner.frozen().value(name).and_then(tables),
+		};
+		if let Some(held) = held {
+			out.insert(name.to_owned(), held);
+		}
+	}
+	// A write nested in the statement may name its target by a variable a `LET` or a `FOR` of the
+	// statement binds, which the request's value does not fix: a name such a write reads reaches
+	// every table.
+	let _ = op.visit_ops_deep(&mut |node| {
+		if let LogicalOp::Write(write) = node
+			&& !std::ptr::eq(write, root)
+		{
+			for name in target_variables(&write.source) {
+				out.remove(name);
+			}
+		}
+		std::ops::ControlFlow::<()>::Continue(())
+	});
+	out
+}
+
+/// The variables `source` names its subjects by: a target that is a variable, or the variable
+/// the one source of the rows a write writes reads.
+fn target_variables(source: &crate::expr::logical::LogicalWriteSource) -> Vec<&str> {
+	use crate::expr::logical::{
+		LogicalExpr, LogicalOp, LogicalSource, LogicalWriteSource, SourceRef,
+	};
+	match source {
+		LogicalWriteSource::Targets(targets) => targets
+			.iter()
+			.filter_map(|target| match target {
+				LogicalExpr::Param(param) => Some(param.as_str()),
+				LogicalExpr::Literal(_)
+				| LogicalExpr::Array(_)
+				| LogicalExpr::Set(_)
+				| LogicalExpr::Object(_)
+				| LogicalExpr::RecordId(_)
+				| LogicalExpr::Table(_)
+				| LogicalExpr::Mock(_)
+				| LogicalExpr::Constant(_)
+				| LogicalExpr::Field(_)
+				| LogicalExpr::Doc
+				| LogicalExpr::Current
+				| LogicalExpr::Access {
+					..
+				}
+				| LogicalExpr::Index {
+					..
+				}
+				| LogicalExpr::First(_)
+				| LogicalExpr::Last(_)
+				| LogicalExpr::Each(_)
+				| LogicalExpr::Flatten {
+					..
+				}
+				| LogicalExpr::Filter {
+					..
+				}
+				| LogicalExpr::Method {
+					..
+				}
+				| LogicalExpr::Destructure {
+					..
+				}
+				| LogicalExpr::Optional {
+					..
+				}
+				| LogicalExpr::Lookup {
+					..
+				}
+				| LogicalExpr::Recurse(_)
+				| LogicalExpr::RepeatRecurse(_)
+				| LogicalExpr::Broadcast {
+					..
+				}
+				| LogicalExpr::SetField {
+					..
+				}
+				| LogicalExpr::Prefix {
+					..
+				}
+				| LogicalExpr::Postfix {
+					..
+				}
+				| LogicalExpr::Invoke {
+					..
+				}
+				| LogicalExpr::Binary {
+					..
+				}
+				| LogicalExpr::Call(_)
+				| LogicalExpr::Closure(_)
+				| LogicalExpr::If(_)
+				| LogicalExpr::Throw(_)
+				| LogicalExpr::Break
+				| LogicalExpr::Continue
+				| LogicalExpr::Subquery(_) => None,
+			})
+			.collect(),
+		LogicalWriteSource::Rows(rows) => match rows.as_ref() {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::Param(param),
+				..
+			}) => vec![param.as_str()],
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => Vec::new(),
+		},
+		LogicalWriteSource::Inserts(_) => Vec::new(),
+	}
 }
 
 /// What [`reached`] found running a statement reaches, when none of it may
@@ -276,10 +546,13 @@ async fn reached(
 	planner: &Planner<'_>,
 	op: &crate::expr::logical::LogicalOp,
 	closures_from_outside: bool,
+	root_table: Option<&surrealdb_strand::TableName>,
 ) -> Option<Reached> {
 	use crate::catalog::providers::{DatabaseProvider, TableProvider};
 	let mut reach = Reach {
 		closures_from_outside,
+		variables: variable_targets(planner, op),
+		root_table: root_table.cloned(),
 		..Reach::default()
 	};
 	reach.op(op);
@@ -311,9 +584,10 @@ async fn reached(
 		}
 		if reach.deletes && !references {
 			references = true;
-			let all = txn.all_tb(ns, db, None).await.ok()?;
-			for tb in all.iter() {
-				let fields = txn.all_tb_fields(ns, db, &tb.name, None).await.ok()?;
+			// The `REFERENCE` fields of every table, read as one entry a compilation can name.
+			let referencing = txn.reference_fields(ns, db, None).await.ok()?;
+			txn.note_references_read(ns, db, None);
+			for (tb, fields) in referencing.tables.iter() {
 				for field in fields.iter() {
 					use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
 					match &field.reference {
@@ -329,7 +603,7 @@ async fn reached(
 								ReferenceDeleteStrategy::Cascade | ReferenceDeleteStrategy::Unset,
 							..
 						}) => {
-							reach.written.insert(tb.name.clone());
+							reach.written.insert(tb.clone());
 						}
 						_ => {}
 					}
@@ -446,6 +720,12 @@ struct Reach {
 	written: std::collections::BTreeSet<surrealdb_strand::TableName>,
 	/// Whether a write's table is evaluated, so it may be any table.
 	every_table: bool,
+	/// The tables each variable a write of the statement names as a target holds, where the plan
+	/// is made for them ([`variable_targets`]).
+	variables: std::collections::BTreeMap<String, Vec<surrealdb_strand::TableName>>,
+	/// The table the statement's own write writes, whatever its targets name: the table of the
+	/// stage bundle being planned ([`catalog_within_writing`]). Taken by the first write reached.
+	root_table: Option<surrealdb_strand::TableName>,
 	/// Whether a delete was reached, which runs the reference actions of the
 	/// tables referencing what it deletes.
 	deletes: bool,
@@ -463,7 +743,12 @@ impl Reach {
 				return;
 			}
 			LogicalOp::Write(write) => {
-				match crate::exec::logical::footprint::write_targets(&write.source) {
+				let written = match self.root_table.take() {
+					Some(table) => Some(vec![table]),
+					None => crate::exec::logical::footprint::write_targets(&write.source)
+						.or_else(|| self.variable_written(&write.source)),
+				};
+				match written {
 					Some(tables) => self.written.extend(tables),
 					None => self.every_table = true,
 				}
@@ -507,6 +792,106 @@ impl Reach {
 		for child in op.children() {
 			self.op(child);
 		}
+	}
+
+	/// The tables the targets `source` names, where each is a table, a record id, or a variable
+	/// whose tables [`Self::variables`] holds, or the tables of such a variable the rows a write
+	/// writes are read from; `None` otherwise.
+	fn variable_written(
+		&self,
+		source: &crate::expr::logical::LogicalWriteSource,
+	) -> Option<Vec<surrealdb_strand::TableName>> {
+		use crate::expr::logical::{
+			LogicalExpr, LogicalOp, LogicalSource, LogicalWriteSource, SourceRef,
+		};
+		let targets = match source {
+			LogicalWriteSource::Targets(targets) => targets,
+			LogicalWriteSource::Rows(rows) => {
+				let LogicalOp::Source(LogicalSource {
+					source: SourceRef::Param(param),
+					..
+				}) = rows.as_ref()
+				else {
+					return None;
+				};
+				return self.variables.get(param.as_str()).cloned();
+			}
+			LogicalWriteSource::Inserts(_) => return None,
+		};
+		let mut out = Vec::new();
+		for target in targets {
+			match target {
+				LogicalExpr::Table(table) => out.push(table.clone()),
+				LogicalExpr::RecordId(rid) => out.push(rid.table.clone()),
+				LogicalExpr::Param(param) => {
+					out.extend(self.variables.get(param.as_str())?.iter().cloned());
+				}
+				LogicalExpr::Literal(_)
+				| LogicalExpr::Array(_)
+				| LogicalExpr::Set(_)
+				| LogicalExpr::Object(_)
+				| LogicalExpr::Mock(_)
+				| LogicalExpr::Constant(_)
+				| LogicalExpr::Field(_)
+				| LogicalExpr::Doc
+				| LogicalExpr::Current
+				| LogicalExpr::Access {
+					..
+				}
+				| LogicalExpr::Index {
+					..
+				}
+				| LogicalExpr::First(_)
+				| LogicalExpr::Last(_)
+				| LogicalExpr::Each(_)
+				| LogicalExpr::Flatten {
+					..
+				}
+				| LogicalExpr::Filter {
+					..
+				}
+				| LogicalExpr::Method {
+					..
+				}
+				| LogicalExpr::Destructure {
+					..
+				}
+				| LogicalExpr::Optional {
+					..
+				}
+				| LogicalExpr::Lookup {
+					..
+				}
+				| LogicalExpr::Recurse(_)
+				| LogicalExpr::RepeatRecurse(_)
+				| LogicalExpr::Broadcast {
+					..
+				}
+				| LogicalExpr::SetField {
+					..
+				}
+				| LogicalExpr::Prefix {
+					..
+				}
+				| LogicalExpr::Postfix {
+					..
+				}
+				| LogicalExpr::Invoke {
+					..
+				}
+				| LogicalExpr::Binary {
+					..
+				}
+				| LogicalExpr::Call(_)
+				| LogicalExpr::Closure(_)
+				| LogicalExpr::If(_)
+				| LogicalExpr::Throw(_)
+				| LogicalExpr::Break
+				| LogicalExpr::Continue
+				| LogicalExpr::Subquery(_) => return None,
+			}
+		}
+		Some(out)
 	}
 
 	/// A scalar, closure bodies and the statements it holds included.
@@ -906,6 +1291,25 @@ pub(crate) async fn catalog_within(
 	op: &LogicalOp,
 	bound: &[String],
 ) -> crate::exec::planner::CatalogWithin {
+	catalog_within_reaching(planner, op, bound, None).await
+}
+
+/// [`catalog_within`] for `op`, a write planned as the stage bundle of `table`: the write writes
+/// `table`, whatever its targets name.
+pub(crate) async fn catalog_within_writing(
+	planner: &Planner<'_>,
+	op: &LogicalOp,
+	table: &surrealdb_strand::TableName,
+) -> crate::exec::planner::CatalogWithin {
+	catalog_within_reaching(planner, op, &[], Some(table)).await
+}
+
+async fn catalog_within_reaching(
+	planner: &Planner<'_>,
+	op: &LogicalOp,
+	bound: &[String],
+	root_table: Option<&surrealdb_strand::TableName>,
+) -> crate::exec::planner::CatalogWithin {
 	if planner.is_late_bound()
 		|| planner.txn().is_none()
 		|| matches!(op, LogicalOp::Ddl(_) | LogicalOp::Explain(_))
@@ -917,7 +1321,7 @@ pub(crate) async fn catalog_within(
 	let holds_schema = !block && crate::exec::planner::fold::changes_the_catalog(op);
 	let may_redefine = holds_schema || {
 		let outside = closures_from_outside(planner, [op], bound);
-		runs_unseen_schema(planner, op, outside).await
+		reached(planner, op, outside, root_table).await.is_none()
 	};
 	if !may_redefine {
 		return crate::exec::planner::CatalogWithin::default();

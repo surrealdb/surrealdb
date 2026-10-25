@@ -80,9 +80,12 @@ pub(in crate::exec::vm) enum StorageInstr {
 	Clear,
 	/// Store the post-image and its marker at the record's key: create-only
 	/// when `create`, failing as a duplicate naming the record where one is
-	/// stored, and an overwrite otherwise. Counts the record as written.
+	/// stored, and an overwrite otherwise. Counts the record as written. A
+	/// create leaves its post-image in the transaction's record cache when
+	/// `cache`; otherwise a later read of the record decodes it from storage.
 	Store {
 		create: bool,
+		cache: bool,
 	},
 	/// Fail the statement unless both of the edge's endpoints exist.
 	RequireEndpoints,
@@ -537,8 +540,9 @@ pub(super) async fn step(
 		}
 		StorageInstr::Store {
 			create,
+			cache,
 		} => {
-			store(row, &ctx, *create).await?;
+			store(row, &ctx, *create, *cache).await?;
 			Ok(next)
 		}
 		StorageInstr::RequireEndpoints => {
@@ -1458,6 +1462,7 @@ async fn store(
 	row: &mut WriteRow,
 	ctx: &crate::exec::operators::write::ctx::WriteCtx,
 	create: bool,
+	cache: bool,
 ) -> FlowResult<()> {
 	let rid = row.id.clone().ok_or_else(|| {
 		ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
@@ -1550,10 +1555,12 @@ async fn store(
 		// The transaction holds the record it just put, as a record put
 		// through its record API is held, once its absence in storage has
 		// been checked; while the check is held, a read goes through the
-		// transactor so the check runs first.
+		// transactor so the check runs first. A create-only put that is not
+		// kept (`cache`) finds no record at the key, so the cache holds none
+		// to drop.
 		if txn.holds_creates() {
 			txn.forget_record(ns, db, &rid.table, &rid.key);
-		} else {
+		} else if cache {
 			txn.cache_record(
 				ns,
 				db,

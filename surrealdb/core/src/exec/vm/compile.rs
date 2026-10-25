@@ -233,10 +233,60 @@ fn statement_body_by_copy(planned: Planned) -> Lowered<Planned> {
 /// statements the program serves: each is planned for the catalog its transaction reads when the
 /// list reaches it, served from the compile cache by its text.
 pub(super) async fn compile(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Compiled> {
-	compile_with(planner, op, statement_body).await
+	match compile_with(planner, op, statement_body).await {
+		// A write that is the statement may have linked the bundle of its stages; a compile of
+		// one that fails for any reason but a refusal of the statement is planned again with its
+		// stages its own ops, so the statement fails as it does inline.
+		Err(e) if planner.links_stages() && is_write_statement(op) && e.refusal.is_none() => {
+			#[cfg(test)]
+			super::units::INLINED_AGAIN.with(|again| again.set(again.get() + 1));
+			Box::pin(compile_with(&planner.inlining_stages(), op, statement_body)).await
+		}
+		compiled => compiled,
+	}
 }
 
-/// [`compile`], taking the body of the planned statement by `body`.
+/// Whether `op` is a write, under its `TIMEOUT` at most: the one statement whose stages a compile
+/// links.
+fn is_write_statement(op: &LogicalOp) -> bool {
+	match op {
+		LogicalOp::Write(_) => true,
+		LogicalOp::Timeout(timeout) => matches!(*timeout.input, LogicalOp::Write(_)),
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => false,
+	}
+}
+
+/// [`compile`], with the writes it holds linking their stages as `planner` says, taking the body
+/// of the planned statement by `body`.
 async fn compile_with(
 	planner: &Planner<'_>,
 	op: &LogicalOp,
@@ -308,7 +358,7 @@ pub(super) async fn compile_stage_bundle(
 	let op = LogicalOp::Write(write.clone());
 	// The stages reach what the write's own expressions may redefine as the write's statement
 	// does: each call runs the definition the transaction holds when it is made.
-	let within = super::speculate::catalog_within(planner, &op, &[]).await;
+	let within = super::speculate::catalog_within_writing(planner, &op, table).await;
 	let planner = &planner.shadowing(std::iter::empty()).reaching(within);
 	let session = session_of(planner);
 	let indexes = SharedIndexes::new();
@@ -661,6 +711,9 @@ impl<'a> StatementPlanner<'a> {
 					..
 				}
 				| UnitRequest::StageBundle {
+					..
+				}
+				| UnitRequest::LinkedStages {
 					..
 				}
 				| UnitRequest::Events {
@@ -1259,6 +1312,140 @@ impl StatementPlanner<'_> {
 	}
 }
 
+impl StatementPlanner<'_> {
+	/// The bundle of the stages `set`, a write whose stages are linked, applies to the records of
+	/// `table`, for the frame the statement is planned for, on behalf of an actor whose
+	/// enforcement is `actor` where it differs from the frame's: served from the compile cache
+	/// under the table's catalog version and the frame, as a write that may reach any table loads
+	/// it ([`super::fault::serve_stage_bundle`]), or compiled now ([`compile_stage_bundle`]) and
+	/// kept. The bundle reads the request's variables its write reads when it runs, so one
+	/// compilation serves every value of them. A table with no catalog version, a speculating
+	/// transaction, or a node that keeps no unit compiles the bundle for this statement alone.
+	///
+	/// The compile is recorded with the statement's own catalog reads, and a bundle served from the
+	/// cache notes what it depends on into them as its dependencies are checked
+	/// ([`crate::exec::catalog_deps::CatalogDeps::hold`]), so a statement kept with the bundle is
+	/// compiled again whenever the bundle would be.
+	async fn linked_stages(
+		&self,
+		table: &TableName,
+		set: &Arc<super::units::StageSetUnit>,
+		actor: Option<bool>,
+	) -> Lowered<Resolved> {
+		use super::compile_cache::{BuildId, ObjectVersion, UnitKey, UnitObject};
+		let planner = self.planner;
+		let (Some(txn), Some((ns, db)), Some(ns_name), Some(db_name)) =
+			(planner.txn().cloned(), planner.ns_db_ids().await, planner.ns(), planner.db())
+		else {
+			return Err(NotCovered::internal("the stages of a write linked outside a database"));
+		};
+		let version = txn.catalog_version(ns, db, table).await.map_err(|e| {
+			NotCovered::internal(format!("the catalog version of {table} could not be read: {e}"))
+		})?;
+		let frame = super::statement_frame(planner);
+		// Every name the stage set reads is shadowed, so the bundle reads each when its stages run
+		// and folds no request's value: one key is one compilation whichever request compiles it.
+		let mut names: BTreeSet<String> = set.read_names();
+		names.insert(super::units::LINKED_SUBJECT.to_owned());
+		let compile = || async {
+			let bundler = Planner::with_txn(
+				planner.frozen(),
+				planner.function_registry(),
+				Arc::clone(&txn),
+				Some(ns_name.to_owned()),
+				Some(db_name.to_owned()),
+			);
+			let bundler = match &planner.auth {
+				Some(auth) => bundler.with_auth(Arc::clone(auth)),
+				None => bundler,
+			}
+			.with_perms_suppressed(frame.perms_suppressed)
+			.reading_session_values()
+			.shadowing(names.iter().cloned());
+			let recording = (!txn.speculating()).then(|| txn.record_catalog_reads());
+			let program =
+				super::out_of_line(|| compile_stage_bundle(&bundler, &set.write, table, actor))
+					.await;
+			let reads = recording.map(|recording| recording.finish());
+			let program = program?;
+			// The write's sites index the bundle's pipelines.
+			if program.pipelines.len() != set.sites.len() {
+				return Err(NotCovered::internal(
+					"the linked stages of a table that do not number the sites of their write",
+				));
+			}
+			let deps = match reads {
+				Some(reads) => {
+					match crate::exec::catalog_deps::CatalogDeps::resolve(&txn, &reads).await {
+						Some(deps) => super::units::ContextDeps::resolve(
+							&txn,
+							&reads,
+							bundler.frozen(),
+							Default::default(),
+						)
+						.await
+						.map(|context| {
+							(deps, context.without(crate::exec::planner::UNIT_RUNTIME_PARAMS))
+						}),
+						None => None,
+					}
+				}
+				None => None,
+			};
+			Ok::<_, NotCovered>((Arc::new(program), deps))
+		};
+		let cache = planner.frozen().compiled_units().filter(|_| !txn.speculating());
+		let bundle = match (cache, version) {
+			(Some(cache), Some(version)) => {
+				let key = UnitKey {
+					ns: ns_name.to_owned(),
+					db: db_name.to_owned(),
+					ids: (ns, db),
+					object: UnitObject::StageBundle {
+						set: Arc::clone(set),
+						table: table.clone(),
+						generic: false,
+						actor,
+					},
+					version: ObjectVersion::Stamped(version),
+					build: BuildId::current(planner.frozen().get_capabilities()),
+				};
+				let compiled = std::sync::atomic::AtomicBool::new(false);
+				let bundle = cache
+					.stage_bundles()
+					.get_or_compile(&key, &frame, &txn, planner.frozen(), || {
+						compiled.store(true, std::sync::atomic::Ordering::Relaxed);
+						compile()
+					})
+					.await?;
+				note_linked(compiled.load(std::sync::atomic::Ordering::Relaxed));
+				bundle
+			}
+			_ => {
+				note_linked(true);
+				compile().await?.0
+			}
+		};
+		Ok(Resolved::Linked(bundle))
+	}
+}
+
+/// Count one bundle of linked stages this thread compiled, or took from the compile cache, for
+/// tests that count them ([`super::units::LINKED`]).
+fn note_linked(compiled: bool) {
+	#[cfg(test)]
+	super::units::LINKED.with(|units| {
+		let (c, l) = units.get();
+		units.set(if compiled {
+			(c + 1, l)
+		} else {
+			(c, l + 1)
+		});
+	});
+	#[cfg(not(test))]
+	let _ = compiled;
+}
+
 impl UnitPlanner for StatementPlanner<'_> {
 	fn plan<'a>(&'a mut self, ask: Ask<'a>) -> BoxFut<'a, Result<Resolved, NotCovered>> {
 		Box::pin(async move {
@@ -1362,6 +1549,11 @@ impl UnitPlanner for StatementPlanner<'_> {
 				UnitRequest::StageBundle {
 					..
 				} => Err(NotCovered::not_yet("the stage bundle of a write")),
+				UnitRequest::LinkedStages {
+					table,
+					set,
+					actor,
+				} => self.linked_stages(table, set, *actor).await,
 				UnitRequest::Events {
 					table,
 					action,

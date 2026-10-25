@@ -95,6 +95,19 @@ pub(crate) trait SemanticCatalog: Send + Sync {
 		None
 	}
 
+	/// Whether a write of the container's request code that names its one table may run the bundle
+	/// of that table's stages the compile links, rather than binding them as its own ops.
+	fn links_stages(&self) -> bool {
+		false
+	}
+
+	/// The table whose records, or which itself, the request variable `name` holds in every run of
+	/// the plan, where a request's statement reads it as the one target of its write and the plan
+	/// is kept for that class of value. `None` for any other name.
+	fn target_table(&self, _name: &str) -> Option<TableName> {
+		None
+	}
+
 	/// The table `name` with its fields and indexes. `Absent` for a table the catalog does not
 	/// define.
 	fn table(&self, _name: &TableName) -> CatalogAnswer<Arc<TableSnapshot>> {

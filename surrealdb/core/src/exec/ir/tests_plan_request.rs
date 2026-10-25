@@ -105,11 +105,14 @@ async fn plan_on_in(
 	.with_auth(Arc::clone(&ctx.root().auth))
 	.trusting_index_shapes(true);
 	let session = test_session();
+	// The container is planned alone, with no compile to link a write's stages, so each write
+	// binds its stages as ops of its own.
 	let planner = if request_root {
 		planner.at_request_root()
 	} else {
 		planner
-	};
+	}
+	.inlining_stages();
 	let planning = PlanningInput {
 		planner: &planner,
 		capabilities: Arc::new(Capabilities::all()),

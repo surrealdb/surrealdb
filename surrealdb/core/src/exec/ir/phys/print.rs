@@ -101,14 +101,14 @@ use crate::exec::ir::logical::ops::{
 	AccessAttrs, AlterAttrs, AssignAttrs, ClosureLoopAttrs, DefineAttrs, DerivedField,
 	DerivedReads, EventClause, EventDefs, EventShape, EventsAttrs, FieldClause, FieldClauses,
 	FieldGate, FieldShape, FieldStep, FieldsShape, GateClause, ImageLayers, ImageView, IndexDefs,
-	LetAttrs, LetBinding, LiveAttrs, LookupAttrs, LookupSubjectShape, LoopKind, MatchInsertAttrs,
-	MatchUpdateAttrs, RebuildAttrs, RecurseAttrs, RecurseInstructionShape, RecursePathForm,
-	RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortKeyShape, SortShape,
-	SourceRefShape, StepAttrs, Stored, SubscriberAdmission, SubscriberAttrs, SubscriberLayer,
-	SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd, TxnRegionMode, TxnStart, UseTarget,
-	WriteAttrs, WriteBody, WriteBranching, WriteDerived, WriteGates, WriteImage, WriteIndexes,
-	WriteMark, WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema, WriteStageKind,
-	WriteStored, WriteViews,
+	LetAttrs, LetBinding, LinkedStages, LiveAttrs, LookupAttrs, LookupSubjectShape, LoopKind,
+	MatchInsertAttrs, MatchUpdateAttrs, RebuildAttrs, RecurseAttrs, RecurseInstructionShape,
+	RecursePathForm, RemoveAttrs, RepairField, RepairKind, RepairTable, ShowAttrs, SortKeyShape,
+	SortShape, SourceRefShape, StepAttrs, Stored, SubscriberAdmission, SubscriberAttrs,
+	SubscriberLayer, SubscriberProjection, TableDefs, TxnControl, TxnRegionEnd, TxnRegionMode,
+	TxnStart, UseTarget, WriteAttrs, WriteBody, WriteBranching, WriteDerived, WriteGates,
+	WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs, WriteRetry, WriteSchema,
+	WriteStageKind, WriteStored, WriteViews,
 };
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::object_extract::PathSegment;
@@ -1951,7 +1951,12 @@ text_struct!(WriteAttrs {
 	stored: WriteStored,
 	derived: WriteDerived,
 	into_text: Option<Box<str>>,
-	statement: Option<Arc<crate::expr::logical::LogicalWrite>>
+	statement: Option<Arc<crate::expr::logical::LogicalWrite>>,
+	linked: Option<Box<LinkedStages>>
+});
+text_struct!(LinkedStages {
+	table: TableName,
+	run: Box<[WriteStageKind]>
 });
 text_struct!(WriteBody {
 	branching: WriteBranching,
@@ -3443,6 +3448,7 @@ mod tests {
 			derived: Default::default(),
 			into_text: None,
 			statement: None,
+			linked: None,
 		}
 	}
 

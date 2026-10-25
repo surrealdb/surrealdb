@@ -81,6 +81,11 @@ const DEFAULT_SPILL_MERGE_FAN_IN: usize = 8;
 const DEFAULT_MEMORY_RESERVE_CHUNK: usize = 256 << 10;
 const DEFAULT_MEMORY_WAIT_MS: u64 = 1000;
 
+/// Default bytes of rows a streamed write statement holds back until its
+/// commit: no bound, so a retried conflict never sends a failed attempt's rows.
+/// A host with a reply or memory bound sets the `stream_stage_bytes` key.
+const DEFAULT_STREAM_STAGE_BYTES: usize = usize::MAX;
+
 /// Default number of compiled units of each kind a node keeps. Overridable
 /// per deployment via the `compiled_unit_cache_size` key.
 const DEFAULT_COMPILED_UNIT_CACHE_SIZE: usize = 1024;
@@ -303,6 +308,18 @@ pub(crate) struct ExecConfig {
 	/// bounds the query's own state alone: no other query's use counts toward
 	/// it.
 	pub query_memory_max: usize,
+	/// The bytes of rows, as estimated, that a streamed write statement
+	/// running in a transaction of its own holds back from its consumer until
+	/// its commit. Held rows let a statement that loses a
+	/// retryable commit conflict run again without the consumer seeing the
+	/// failed attempt's rows. Past the bound the held rows are sent and the
+	/// rest stream as they are produced, so the consumer can stop the
+	/// statement before it commits; a statement whose rows have reached its
+	/// consumer is not run again. A host that stops a statement once its reply
+	/// passes a bound sets this at or below that bound. Accepts a byte count or
+	/// a size such as `16KiB`; `0` holds nothing back. By default nothing bounds
+	/// it: every row of the statement is held back until its commit.
+	pub stream_stage_bytes: usize,
 }
 
 impl ExecConfig {
@@ -367,6 +384,7 @@ impl Default for ExecConfig {
 			memory_reserve_chunk: DEFAULT_MEMORY_RESERVE_CHUNK,
 			memory_wait: DEFAULT_MEMORY_WAIT_MS,
 			query_memory_max: 0,
+			stream_stage_bytes: DEFAULT_STREAM_STAGE_BYTES,
 		}
 	}
 }
@@ -427,6 +445,9 @@ impl cnf::Config for ExecConfig {
 			.parse_key_with("query_memory_max", &mut self.query_memory_max, |x| {
 				x.parse_bytes::<usize>().ok()
 			})
+			.parse_key_with("stream_stage_bytes", &mut self.stream_stage_bytes, |x| {
+				x.parse_bytes::<usize>().ok()
+			})
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,
@@ -453,6 +474,18 @@ mod tests {
 		let map = ConfigMap::empty().with_key_value("topk_threshold_pushdown_enabled", "false");
 		config.parse(&map);
 		assert!(!config.topk_threshold_pushdown_enabled, "config map disables the feature");
+	}
+
+	/// The bound on a streamed write's held-back rows defaults to none,
+	/// parses a byte count or a size with a suffix, and accepts zero.
+	#[test]
+	fn stream_stage_bytes_parses() {
+		let mut config = ExecConfig::default();
+		assert_eq!(config.stream_stage_bytes, usize::MAX, "no bound by default");
+		config.parse(&ConfigMap::empty().with_key_value("stream_stage_bytes", "16KiB"));
+		assert_eq!(config.stream_stage_bytes, 16 << 10);
+		config.parse(&ConfigMap::empty().with_key_value("stream_stage_bytes", "0"));
+		assert_eq!(config.stream_stage_bytes, 0, "zero holds nothing back");
 	}
 
 	/// The scan batch byte budget defaults to 2 MiB, parses a byte count or a

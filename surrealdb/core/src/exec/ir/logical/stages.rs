@@ -22,8 +22,8 @@ use surrealdb_types::ToSql as _;
 
 use super::ops::{
 	DerivedField, EventClause, EventDefs, EventShape, EventsAttrs, FieldClause, FieldClauses,
-	FieldGate, FieldStep, GateClause, ImageLayers, ImageView, IndexDefs, LogOp, LoopKind,
-	RepairField, RepairKind, RepairTable, Stored, TableDefs, WriteBody, WriteBranching,
+	FieldGate, FieldStep, GateClause, ImageLayers, ImageView, IndexDefs, LinkedStages, LogOp,
+	LoopKind, RepairField, RepairKind, RepairTable, Stored, TableDefs, WriteBody, WriteBranching,
 	WriteDerived, WriteGates, WriteImage, WriteIndexes, WriteMark, WriteMaterialized, WriteRepairs,
 	WriteRetry, WriteSchema, WriteStageKind, WriteStored, WriteViews,
 };
@@ -1097,9 +1097,24 @@ pub(crate) fn write_stage_ops(ir: &Ir, write: &OpData) -> Option<Vec<(OpId, Writ
 	)
 }
 
-/// The stages [`write_stage_ops`] finds, without the ops that hold them.
+/// The stages of the orders of the write `write`: those [`write_stage_ops`] finds, without the
+/// ops that hold them, or, for a write whose stages are linked ([`linked_of`]), the stages it
+/// states.
 pub(crate) fn write_run(ir: &Ir, write: &OpData) -> Option<Vec<WriteStageKind>> {
+	if let Some(linked) = linked_of(write) {
+		return Some(linked.run.to_vec());
+	}
 	write_stage_ops(ir, write).map(|ops| ops.into_iter().map(|(_, stage)| stage).collect())
+}
+
+/// The table and stages of the write `write`, logical or physical, where it runs them as the
+/// bundle the compile links for its table ([`WriteAttrs::linked`]).
+pub(crate) fn linked_of(write: &OpData) -> Option<&LinkedStages> {
+	match &write.kind {
+		OpKind::Logical(LogOp::Write(attrs)) => attrs.linked.as_deref(),
+		OpKind::Phys(PhysOp::Write(attrs)) => attrs.write.linked.as_deref(),
+		OpKind::Logical(_) | OpKind::Expr(_) | OpKind::Phys(_) => None,
+	}
 }
 
 /// Why `body` does not describe a write whose loop body holds `stages` stage ops, or `None` when it

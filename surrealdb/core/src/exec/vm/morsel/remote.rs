@@ -175,6 +175,7 @@ impl HostWorker {
 		};
 		let mut frames = self.remote.places.run(&self.remote.unit, morsel, &self.view);
 		let mut taken = false;
+		let mut received = 0u64;
 		loop {
 			if self.shared.cancelled(key) {
 				return Ok(RangeEnd::Cancelled);
@@ -198,6 +199,7 @@ impl HostWorker {
 			};
 			match frame {
 				Ok(Frame::Rows(rows)) => {
+					received = received.saturating_add(rows.len() as u64);
 					let Some(outbox) = outbox else {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"a host place streamed the rows of a morsel that does not stream"
@@ -211,11 +213,20 @@ impl HostWorker {
 					outbox.put(rows, bytes, grant);
 					self.shared.fed.notify_one();
 				}
-				Ok(Frame::End(end)) => {
-					let mut result = match *end {
+				Ok(Frame::End {
+					result,
+					emitted,
+				}) => {
+					let mut result = match *result {
 						Ok(result) => result,
 						Err(e) => return Err(ControlFlow::Err(e)),
 					};
+					let actual = received.saturating_add(result.output.len() as u64);
+					if actual != emitted {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"a host place answered {actual} rows but its morsel emitted {emitted}"
+						)));
+					}
 					if let Some(outbox) = outbox {
 						let last = std::mem::take(&mut result.output);
 						result.output = outbox.finish(last);

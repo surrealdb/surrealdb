@@ -141,3 +141,4 @@ pub(crate) use units::{
 pub(in crate::exec::vm) use write::{
 	WriteCutEmit, emit_cut, emit_off_path, emit_resume, emit_skip, guard_writing_morsels,
 };
+pub(crate) use write_stmt::linked_stage_sets;

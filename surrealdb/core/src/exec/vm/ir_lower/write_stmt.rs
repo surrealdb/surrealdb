@@ -549,13 +549,80 @@ fn tables_by_name(
 			sites,
 		))),
 		revalidates: !write.stored.catalog_fixed,
+		linked: None,
 	})
 }
 
-/// The stage tables of the write `write` states: by name for a write that names no one table, and
-/// none for one whose stages are inline.
-fn tables_of(write: &WriteAttrs, run: &[WriteStageKind]) -> Result<Option<StageTables>, IrError> {
-	write.statement.as_ref().map(|statement| tables_by_name(write, statement, run)).transpose()
+/// The stage set of a write whose stages are linked, whose statement is `statement` and whose
+/// orders, over the stages `run`, are `body`: the statement with its subjects erased
+/// ([`crate::exec::vm::units::StageSetUnit::linked`]) and the stages of each site its body
+/// numbers, which the bundle of its table is compiled for and kept under.
+pub(crate) fn stage_set(
+	statement: &crate::expr::logical::LogicalWrite,
+	body: &WriteBody,
+	run: &[WriteStageKind],
+) -> Result<crate::exec::vm::units::StageSetUnit, IrError> {
+	let sites = sites_of(body, run)?
+		.into_iter()
+		.map(|stages| stages.into_iter().map(stage_id).collect())
+		.collect();
+	Ok(crate::exec::vm::units::StageSetUnit::linked(statement, sites))
+}
+
+/// The table and stage set of each write of `ir` whose stages are linked, which the compile driver
+/// resolves the bundle of before the container is lowered ([`LowerCx::link_stages`]).
+pub(crate) fn linked_stage_sets(
+	ir: &Ir,
+) -> Result<Vec<(surrealdb_strand::TableName, crate::exec::vm::units::StageSetUnit)>, IrError> {
+	let mut sets = Vec::new();
+	let mut failed = None;
+	ir.walk(ir.top(), crate::exec::ir::core::ir::WalkOrder::PreOrder, &mut |op| {
+		let Some(OpKind::Phys(PhysOp::Write(attrs))) = ir.op(op).map(|data| &data.kind) else {
+			return crate::exec::ir::core::ir::Walk::Continue;
+		};
+		if let (Some(linked), Some(statement)) = (&attrs.write.linked, &attrs.write.statement) {
+			match stage_set(statement, &attrs.write.body, &linked.run) {
+				Ok(set) => sets.push((linked.table.clone(), set)),
+				Err(e) => failed = Some(e),
+			}
+		}
+		crate::exec::ir::core::ir::Walk::Continue
+	});
+	match failed {
+		Some(e) => Err(e),
+		None => Ok(sets),
+	}
+}
+
+/// The stage tables of the write `write` states: the bundle the compile linked for a write whose
+/// stages are linked, by name for a write that names no one table, and none for one whose stages
+/// are inline.
+fn tables_of(
+	cx: &LowerCx<'_>,
+	write: &WriteAttrs,
+	run: &[WriteStageKind],
+) -> Result<Option<StageTables>, IrError> {
+	let Some(statement) = &write.statement else {
+		return Ok(None);
+	};
+	let Some(linked) = &write.linked else {
+		return tables_by_name(write, statement, run).map(Some);
+	};
+	let set = stage_set(statement, &write.body, run)?;
+	let bundle = cx.linked_stages(&linked.table, &set).ok_or(IrError::Invariant {
+		what: "ir_lower::write_stmt: a write whose linked stages the compile did not resolve",
+	})?;
+	Ok(Some(StageTables {
+		tables: Vec::new(),
+		default: None,
+		reach: crate::exec::vm::dispatch::Reach::any(),
+		by_name: None,
+		revalidates: false,
+		linked: Some(crate::exec::vm::program::LinkedBundle {
+			table: linked.table.clone(),
+			bundle,
+		}),
+	}))
 }
 
 /// The write a stage bundle's container `ir` binds: the write the region of the statement its top
@@ -705,7 +772,6 @@ pub(super) fn lower_write(
 			return lower_write_over_rows(cx, em, ir, data, attrs, ir.top(), PoolBase::default());
 		}
 	};
-	let run = StageRun::of(ir, data, cx.reads_checked())?;
 	let named = subjects_of(ir, data)?;
 
 	let (source, source_needs) = {
@@ -738,14 +804,20 @@ pub(super) fn lower_write(
 		from_row: false,
 		gated,
 	};
+	// A write whose stages are linked holds no stage op: its stages are those it states.
+	let run_stages = match &attrs.write.linked {
+		Some(linked) => linked.run.to_vec(),
+		None => StageRun::of(ir, data, cx.reads_checked())?.stages,
+	};
 	let (pipeline, body_needs) = match &attrs.write.statement {
 		Some(_) => {
 			let mut sites = SiteSink::default();
 			let pipeline =
-				write_pipeline(em, &attrs.write.body, &run.stages, entry, &mut sites, source)?;
+				write_pipeline(em, &attrs.write.body, &run_stages, entry, &mut sites, source)?;
 			(pipeline, None)
 		}
 		None => {
+			let run = StageRun::of(ir, data, cx.reads_checked())?;
 			let mut stages = Stages::new(&run, ir, cx.limits(), cx.registry()).in_context(cx);
 			// A write over the ids of a range, which the plan cuts, runs its compute half as
 			// morsels under the decision the plan states for its pipeline.
@@ -784,7 +856,7 @@ pub(super) fn lower_write(
 		shape,
 		output: attrs.write.output,
 		only: attrs.write.only,
-		tables: tables_of(&attrs.write, &run.stages)?,
+		tables: tables_of(cx, &attrs.write, &run_stages)?,
 	};
 	let mut needs = source_needs.merged(&shape_needs);
 	if let Some(body) = body_needs {
@@ -926,9 +998,12 @@ fn lower_write_over_rows(
 		let shape = write_shape(ir, data, &mut HostPlaces::new(&mut lowerer))?;
 		(shape, lowerer.needs())
 	};
-	let tables = match &attrs.write.statement {
-		Some(_) => tables_of(&attrs.write, &StageRun::of(ir, data, cx.reads_checked())?.stages)?,
-		None => None,
+	let tables = match (&attrs.write.linked, &attrs.write.statement) {
+		(Some(linked), Some(_)) => tables_of(cx, &attrs.write, &linked.run)?,
+		(None, Some(_)) => {
+			tables_of(cx, &attrs.write, &StageRun::of(ir, data, cx.reads_checked())?.stages)?
+		}
+		(_, None) => None,
 	};
 	let spec = WriteSpec {
 		form: plan_form(attrs.write.form),
@@ -1356,6 +1431,7 @@ mod tests {
 				derived: Default::default(),
 				into_text: None,
 				statement: None,
+				linked: None,
 			}
 		}
 

@@ -930,7 +930,15 @@ async fn a_vector_measure_runs_in_place_and_reads_its_table_in_range_morsels() {
 		assert_eq!(fan_out_of(&wide, measured).await, FanOut::Range, "`{measured}`");
 		let expected = answered(&serial, called).await;
 		assert!(expected.as_ref().is_ok_and(|rows| !rows.is_empty()), "`{called}`: {expected:?}");
-		assert_eq!(answered(&wide, measured).await, expected, "`{measured}`");
+		// A statement that no clause orders or pages arrives free: its morsels merge as they
+		// finish, so its rows are the serial run's as a multiset.
+		let owed = |rows: Result<Vec<Value>, String>| match rows_of(measured) {
+			Rows::Free => rows.map(|rows| multiset(&rows)),
+			Rows::Ordered | Rows::Paged => {
+				rows.map(|rows| rows.iter().map(|row| format!("{row:?}")).collect())
+			}
+		};
+		assert_eq!(owed(answered(&wide, measured).await), owed(expected.clone()), "`{measured}`");
 		assert_eq!(answered(&serial, measured).await, expected, "`{measured}` serially");
 	}
 	let parameter =
@@ -1579,7 +1587,10 @@ async fn float_folds_over_key_ranges_answer_the_serial_fold() {
 	let serial_dir = tempfile::tempdir().expect("temporary directory");
 	let serial = TestDb::new_on_surrealkv(&float_setup(), serial_dir.path(), whole()).await;
 	let mut parked = Vec::new();
-	for config in window_settings() {
+	// The smallest window parks a morsel only where the morsel holds more than one entry.
+	let mut settings = window_settings();
+	settings[0] = stealing_few().with_key_value("morsel_window_bytes", "1");
+	for config in settings {
 		let dir = tempfile::tempdir().expect("temporary directory");
 		let wide = TestDb::new_on_surrealkv(&float_setup(), dir.path(), config).await;
 		float_folds_answer_the_serial_fold(&serial, &wide, FLOAT_FOLDS, true).await;
@@ -2100,6 +2111,44 @@ fn stealing() -> surrealdb_cnf::ConfigMap {
 	tiny().with_key_value("morsel_steal_always", "true")
 }
 
+/// [`stealing`], with morsels of a few entries each rather than one. [`tiny`] asks a split for a
+/// part per byte, which a split answers with up to [`surrealdb_kvs::split::MAX_SPLIT_PARTS`] parts:
+/// over a table of a few thousand rows, a morsel of a single entry. A test of what a morsel does
+/// with several entries of its own -- sort them into a run, fill a window of kept terms -- asks for
+/// parts of a few hundred bytes, which cuts such a table into hundreds of morsels.
+fn stealing_few() -> surrealdb_cnf::ConfigMap {
+	stealing().with_key_value("morsel_target_bytes", "256")
+}
+
+/// A range a split cuts into more parts than the 1024 a split once answered at most -- here one
+/// part per entry of a table of [`ROWS`] rows -- answers what the serial run answers: the same rows
+/// in the same order where `ORDER BY` or paging fixes it, and the same rows as a multiset where the
+/// statement arrives free. A part per entry puts every boundary next to a key, where an off-by-one
+/// in the cut, the queue of morsels or their merge would lose, repeat or misplace a row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_range_cut_into_more_than_a_thousand_parts_answers_the_serial_run() {
+	let _turn = TURNS.lock().await;
+	let serial = TestDb::new_with_config(&setup(), whole()).await;
+	let wide = TestDb::new_with_config(&setup(), stealing()).await;
+	for sql in [
+		"SELECT VALUE id FROM t",
+		"SELECT n, s FROM t WHERE n % 3 = 0",
+		"SELECT VALUE n FROM t WHERE n > 100 LIMIT 2500",
+		"SELECT VALUE n FROM t START 10 LIMIT 2900",
+		"SELECT n FROM t ORDER BY n DESC",
+	] {
+		let expected = answered(&serial, sql).await.expect("the serial run answers");
+		let before = counts_of(&wide.exec_ctx().await).split;
+		let rows = answered(&wide, sql).await.expect("the wide run answers");
+		let parts = counts_of(&wide.exec_ctx().await).split - before;
+		assert!(parts > 1024, "`{sql}` was cut into {parts} parts");
+		match rows_of(sql) {
+			Rows::Free => assert_eq!(multiset(&rows), multiset(&expected), "`{sql}`"),
+			Rows::Ordered | Rows::Paged => assert_eq!(rows, expected, "`{sql}`"),
+		}
+	}
+}
+
 const STEALS: &[&str] = &[
 	"SELECT * FROM t",
 	"SELECT * FROM t ORDER BY id",
@@ -2470,7 +2519,7 @@ async fn runs_merge_in_serial_order(serial: &TestDb, wide: &TestDb, workers_run:
 #[tokio::test]
 async fn sorted_runs_merge_to_the_serial_order_on_the_coordinator() {
 	let serial = TestDb::new_with_config(&merge_setup(), whole()).await;
-	let wide = TestDb::new_with_config(&merge_setup(), stealing()).await;
+	let wide = TestDb::new_with_config(&merge_setup(), stealing_few()).await;
 	runs_merge_in_serial_order(&serial, &wide, false).await;
 }
 
@@ -2483,7 +2532,7 @@ async fn sorted_runs_merge_to_the_serial_order() {
 		tempfile::tempdir().expect("temporary directory"),
 	);
 	let serial = TestDb::new_on_surrealkv(&merge_setup(), serial_dir.path(), whole()).await;
-	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), stealing()).await;
+	let wide = TestDb::new_on_surrealkv(&merge_setup(), wide_dir.path(), stealing_few()).await;
 	runs_merge_in_serial_order(&serial, &wide, true).await;
 }
 

@@ -231,6 +231,7 @@ mod tests {
 				derived: Default::default(),
 				into_text: None,
 				statement: None,
+				linked: None,
 			},
 			subjects: WriteSubjectsShape::Targets,
 		}))

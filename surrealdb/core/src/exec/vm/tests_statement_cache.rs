@@ -547,7 +547,8 @@ async fn a_kept_statement_is_served_when_its_request_arrives_and_binds_nothing_a
 	let responses = ds.execute(sql, &owner, Some(number(2))).await.expect("the request runs");
 	let read = responses.into_iter().nth(2).expect("the second select");
 	assert_eq!(read.result.expect("answers").to_sql(), "['bob']");
-	assert_eq!(now(), stats(0, 1, 0), "the statement is missed and kept");
+	// Each select is missed and kept: the first for the table its record names.
+	assert_eq!(now(), stats(0, 2, 0), "the statements are missed and kept");
 	assert_eq!(
 		crate::exec::compiles::statements_after_arrival(),
 		served,
@@ -559,7 +560,7 @@ async fn a_kept_statement_is_served_when_its_request_arrives_and_binds_nothing_a
 	};
 	let binds = crate::exec::planner::COMPILES.with(std::cell::Cell::get);
 	assert_eq!(read(3).await, "['cat']");
-	assert_eq!(now(), stats(1, 1, 0));
+	assert_eq!(now(), stats(1, 2, 0));
 	assert_eq!(
 		crate::exec::planner::COMPILES.with(std::cell::Cell::get),
 		binds,
@@ -781,7 +782,6 @@ async fn a_source_variable_is_kept_for_the_table_its_record_names() {
 	let base = ds.statement_cache_stats();
 	let now = || since(base, ds.statement_cache_stats());
 	for sql in ["SELECT * FROM $id", "SELECT name FROM ONLY $id"] {
-		let before = now();
 		let mut seen = Vec::new();
 		for (value, served) in [
 			(record("pk", 1), stats(0, 1, 0)),
@@ -790,15 +790,16 @@ async fn a_source_variable_is_kept_for_the_table_its_record_names() {
 			(record("pk", 1), stats(1, 0, 0)),
 			(record("ls", 2), stats(1, 0, 0)),
 		] {
+			// The statement written with the value in place is kept apart from this one.
+			let want = either_as(ds, &owner, &written(sql, &value), None).await;
 			let at = now();
 			let got = either_as(ds, &owner, sql, bound("id", value.clone())).await;
-			assert_eq!(got, either_as(ds, &owner, &written(sql, &value), None).await, "{sql}");
+			assert_eq!(got, want, "{sql}");
 			assert_eq!(since(at, now()), served, "{sql} with {}", value.to_sql());
 			seen.push(got);
 		}
 		assert_ne!(seen[0], seen[1], "each record answers its own row");
 		assert_eq!(seen[0], seen[3]);
-		assert_eq!(since(before, now()), stats(3, 2, 0));
 	}
 }
 

@@ -141,6 +141,12 @@ mod tests_stack;
 mod tests_statement_cache;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
+mod tests_statement_cache_literals;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests_statement_cache_writes;
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_fanout;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]

@@ -84,6 +84,12 @@ pub(crate) struct PlanningCatalog {
 	session: SessionValues,
 	/// The names read at run time: the names bound around a unit.
 	shadowed: BTreeSet<String>,
+	/// The table each request variable a request's statement writes as its one target names
+	/// ([`SemanticCatalog::target_table`]).
+	targets: Vec<(String, TableName)>,
+	/// Whether a write of the container's request code may run linked stages
+	/// ([`SemanticCatalog::links_stages`]).
+	links: bool,
 	/// Whether each call of a user-defined function runs the definition read when it is made
 	/// ([`SemanticCatalog::calls_current`]).
 	calls_current: bool,
@@ -240,6 +246,8 @@ impl PlanningCatalog {
 			ns_db_names: None,
 			session,
 			shadowed: BTreeSet::new(),
+			targets: Vec::new(),
+			links: false,
 			calls_current: false,
 			caller: None,
 			read_stamp: None,
@@ -276,6 +284,20 @@ impl PlanningCatalog {
 	/// The names bound around the unit, which are read when it runs.
 	pub(crate) fn with_shadowed(mut self, names: impl IntoIterator<Item = String>) -> Self {
 		self.shadowed = names.into_iter().collect();
+		self
+	}
+
+	/// The tables `targets` names for the request variables a request's statement writes as its
+	/// one target, answered by [`SemanticCatalog::target_table`].
+	pub(crate) fn with_targets(mut self, targets: &[(String, TableName)]) -> Self {
+		self.targets = targets.to_vec();
+		self
+	}
+
+	/// Whether a write of the container's request code may run linked stages, answered by
+	/// [`SemanticCatalog::links_stages`].
+	pub(crate) fn with_links(mut self, links: bool) -> Self {
+		self.links = links;
 		self
 	}
 
@@ -1321,6 +1343,14 @@ impl SemanticCatalog for PlanningCatalog {
 
 	fn param(&self, name: &str) -> CatalogAnswer<Arc<ParamDefinition>> {
 		PlanningCatalog::param(self, name)
+	}
+
+	fn links_stages(&self) -> bool {
+		self.links
+	}
+
+	fn target_table(&self, name: &str) -> Option<TableName> {
+		self.targets.iter().find(|(target, _)| target == name).map(|(_, table)| table.clone())
 	}
 
 	fn free_name(&self, name: &str, at: FrameId) -> FreeName {

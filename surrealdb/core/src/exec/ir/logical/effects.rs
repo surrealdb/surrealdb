@@ -184,6 +184,13 @@ impl LogOp {
 				..
 			} => (EffectSet::WRITES_SESSION, Rollback::Survives),
 			LogOp::Sleep => (EffectSet::BLOCKING, Rollback::NoEffects),
+			// A write whose stages are linked runs the code its table stores, which no op of the
+			// plan shows: a body whose effects are not stated, as a write that names no one table
+			// runs.
+			LogOp::Write(attrs) if attrs.linked.is_some() => (
+				WRITE_SET.union(EffectSet::NOTIFY).union(EffectSet::OPAQUE_BODY),
+				Rollback::Survives,
+			),
 			LogOp::Write(..) => (WRITE_SET.union(EffectSet::NOTIFY), Rollback::Survives),
 			LogOp::WriteStage {
 				..

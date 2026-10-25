@@ -232,6 +232,9 @@ pub(crate) struct BindCx<'a> {
 	bundle_table: Option<BundleTable>,
 	/// The table the next write bound writes to, which its statement names only through a value.
 	named_table: Option<surrealdb_strand::TableName>,
+	/// Whether a write of request code that names its one table runs its stages as the bundle the
+	/// compile links for that table ([`Self::links_stages`]).
+	links_stages: bool,
 }
 
 /// The table a stage bundle or a view table's order is bound for.
@@ -305,6 +308,7 @@ impl<'a> BindCx<'a> {
 			notes: BindNotes::default(),
 			bundle_table: None,
 			named_table: None,
+			links_stages: false,
 		})
 	}
 
@@ -618,6 +622,32 @@ impl<'a> BindCx<'a> {
 	/// Whether the statement bound now is planned with its top-level statement.
 	pub(crate) fn eager(&self) -> bool {
 		self.eager
+	}
+
+	/// Sets whether a write of the container's request code that names its one table may run its
+	/// stages as the bundle the compile links for that table.
+	pub(crate) fn set_links_stages(&mut self, links: bool) {
+		self.links_stages = links;
+	}
+
+	/// Whether the write bound now may run its stages as the bundle the compile links for its
+	/// table: the container is request code that sets it, the write is not under an `EXPLAIN`,
+	/// which prints the stages it runs, and the write is a statement of the request itself, under
+	/// its `TIMEOUT` at most. A write in a block, a branch, a loop or an expression spends the
+	/// computation-depth budget from where it stands and may run once per iteration, so it binds
+	/// its stages as its own.
+	pub(crate) fn links_stages(&self) -> bool {
+		self.links_stages
+			&& !self.writing
+			&& self.kinds.iter().all(|kind| {
+				matches!(
+					kind,
+					RegionKind::Request
+						| RegionKind::Transaction(_)
+						| RegionKind::Statement(_)
+						| RegionKind::Deadline
+				)
+			})
 	}
 
 	/// Sets whether a statement that is not planned eagerly and runs as a group is bound as one

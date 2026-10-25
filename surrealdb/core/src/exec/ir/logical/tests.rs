@@ -141,6 +141,7 @@ fn write_attrs() -> WriteAttrs {
 		derived: Default::default(),
 		into_text: None,
 		statement: None,
+		linked: None,
 	}
 }
 
@@ -1972,6 +1973,7 @@ fn rich_fixtures() -> Vec<LogOp> {
 			derived: Default::default(),
 			into_text: None,
 			statement: None,
+			linked: None,
 		})),
 		LogOp::Let(Box::new(LetAttrs {
 			binding: LetBinding::Session,

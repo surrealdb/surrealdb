@@ -3297,9 +3297,11 @@ mod tests {
 				}
 			}
 		};
+		// The statements written with the record in place are kept apart from the RPC's.
+		let (one, two) = (written(owner, "doc:1").await, written(owner, "doc:2").await);
 		let base = ds.statement_cache_stats();
-		assert_eq!(selected(owner, "doc:1").await, written(owner, "doc:1").await);
-		assert_eq!(selected(owner, "doc:2").await, written(owner, "doc:2").await);
+		assert_eq!(selected(owner, "doc:1").await, one);
+		assert_eq!(selected(owner, "doc:2").await, two);
 		let kept = ds.statement_cache_stats();
 		assert_eq!((kept.hits - base.hits, kept.misses - base.misses), (1, 1));
 		for (sid, id) in [

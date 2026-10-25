@@ -678,6 +678,8 @@ pub(crate) enum Resolved {
 	/// The reach of the read unit of a table, which the planner has lowered and the compile cache
 	/// holds; `None` for a table the catalog does not hold.
 	Table(Option<Reach>),
+	/// The bundle of a linked write's stages, which the write's stage tables hold.
+	Linked(Arc<Program>),
 }
 
 /// The container that made a request, which the planner reads.
@@ -1225,6 +1227,7 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 		// statements before it, whose programs are final.
 		let first_slot = self.cx.slots();
 		let root = self.take(root, Arc::from([]), None, Arc::from([]))?;
+		self.link_stages(root).await?;
 		let lowered = self.lower_held(root, shape)?;
 		let mut program = lowered.program;
 		let mut served: Vec<Option<Arc<LogicalOp>>> = Vec::new();
@@ -1266,6 +1269,59 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 		self.slots.push(None);
 		self.guards.push(guards);
 		Ok(ContainerId(id))
+	}
+
+	/// Resolves, through the planner, the bundle of the stages of each write of container `id`, the
+	/// root of the compile, whose stages are linked, and holds it for the container's lowering
+	/// ([`LowerCx::link_stages`]): the bundles are in the program before it runs, so its run
+	/// loads none.
+	async fn link_stages(&mut self, id: ContainerId) -> Result<(), NotCovered> {
+		let sets = {
+			let planned = self
+				.held
+				.get(id.0 as usize)
+				.ok_or_else(|| NotCovered::internal("a container the compile does not hold"))?;
+			super::ir_lower::linked_stage_sets(&planned.ir)?
+		};
+		for (table, set) in sets {
+			if self.cx.links_stages(&table, &set) {
+				continue;
+			}
+			let request = UnitRequest::LinkedStages {
+				table: table.clone(),
+				set: Arc::new(set.clone()),
+				actor: self.cx.actor(),
+			};
+			let resolved = {
+				let (held, path, guards) = self
+					.held
+					.get(id.0 as usize)
+					.zip(self.paths.get(id.0 as usize))
+					.zip(self.guards.get(id.0 as usize))
+					.map(|((held, path), guards)| (held, path, guards))
+					.ok_or_else(|| NotCovered::internal("a container the compile does not hold"))?;
+				let ask = Ask {
+					request: &request,
+					by: Requester {
+						id,
+						ir: &held.ir,
+						facts: &held.facts,
+					},
+					over: held.planned_over.as_ref(),
+					path,
+					session: &self.session,
+					held: guards,
+				};
+				self.planner.plan(ask).await?
+			};
+			let Resolved::Linked(bundle) = resolved else {
+				return Err(NotCovered::internal(
+					"a linked write's stages answered as another unit",
+				));
+			};
+			self.cx.link_stages(table, set, bundle);
+		}
+		Ok(())
 	}
 
 	/// [`Self::lower_held`] for the frame and depth `scope` names, where it names one; the
@@ -1382,6 +1438,11 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 				Resolved::Table(_) => {
 					return Err(NotCovered::internal("a table unit answered a request for a unit"));
 				}
+				Resolved::Linked(_) => {
+					return Err(NotCovered::internal(
+						"a linked bundle answered a request for a unit",
+					));
+				}
 			};
 			let Some(id) = need.id else {
 				return Err(NotCovered::internal("a unit answered a request with no slot"));
@@ -1409,6 +1470,15 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 			} else {
 				Default::default()
 			};
+			// Only a statement of a request links a write's stages; a unit that holds one
+			// declines, and the statement is compiled again with its stages inline.
+			let planned = self
+				.held
+				.get(container.0 as usize)
+				.ok_or_else(|| NotCovered::internal("a container the compile does not hold"))?;
+			if !super::ir_lower::linked_stage_sets(&planned.ir)?.is_empty() {
+				return Err(NotCovered::internal("a unit of a statement holds a linked write"));
+			}
 			let outer = self.cx.renest(nesting);
 			let lowered = self.lower_scoped(container, shape, scope);
 			self.cx.renest(outer);
@@ -1650,7 +1720,8 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 			| Resolved::Closure {
 				..
 			}
-			| Resolved::Served(_) => {
+			| Resolved::Served(_)
+			| Resolved::Linked(_) => {
 				Err(NotCovered::internal("a request for a table unit answered another unit"))
 			}
 		}
@@ -1754,6 +1825,9 @@ pub(crate) fn held_for(
 			..
 		}
 		| UnitRequest::StageBundle {
+			..
+		}
+		| UnitRequest::LinkedStages {
 			..
 		}
 		| UnitRequest::Cascade {
@@ -1869,6 +1943,9 @@ pub(crate) fn region_unit(ask: &Ask<'_>) -> Result<Option<Resolved>, NotCovered>
 		| UnitRequest::StageBundle {
 			..
 		}
+		| UnitRequest::LinkedStages {
+			..
+		}
 		| UnitRequest::Events {
 			..
 		}
@@ -1944,6 +2021,9 @@ pub(crate) fn region_limit(ask: &Ask<'_>) -> Result<Option<crate::iam::AuthLimit
 			..
 		}
 		| UnitRequest::StageBundle {
+			..
+		}
+		| UnitRequest::LinkedStages {
 			..
 		}
 		| UnitRequest::Events {
@@ -2338,6 +2418,9 @@ mod tests {
 						..
 					}
 					| UnitRequest::StageBundle {
+						..
+					}
+					| UnitRequest::LinkedStages {
 						..
 					}
 					| UnitRequest::Events {

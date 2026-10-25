@@ -1390,6 +1390,7 @@ pub(super) fn emit_stage(
 			jump_if(em, StorageFact::IterationInitial, false, overwrite);
 			em.emit(storage(StorageInstr::Store {
 				create: true,
+				cache: keeps_created(run),
 			}));
 			em.emit(Instr::Jump {
 				target: unwritten,
@@ -1397,6 +1398,7 @@ pub(super) fn emit_stage(
 			em.bind(overwrite)?;
 			em.emit(storage(StorageInstr::Store {
 				create: false,
+				cache: false,
 			}));
 			em.bind(unwritten)?;
 		}
@@ -2286,6 +2288,19 @@ fn events_stage(
 		depth,
 	})));
 	Ok(())
+}
+
+/// Whether a record the write creates is left in the transaction's record cache.
+///
+/// A statement that returns nothing and whose table runs no event has no clause that reads the
+/// records it creates while it runs, so a bulk create pays no cache insert per record. Every other
+/// create keeps the record, which a later read in the statement may take from the cache. A record
+/// left out is read from storage, which holds the transaction's writes, so the choice never
+/// changes what a read returns.
+fn keeps_created(run: &StageRun) -> bool {
+	!(matches!(run.output, OutputShape::None)
+		&& matches!(run.stored.events, Stored::Nothing)
+		&& run.stored.catalog_fixed)
 }
 
 /// The refusal for a stage whose clause the lowering has no form for.
@@ -3809,16 +3824,62 @@ mod tests {
 				jump(StorageFact::IterationInitial, false, 6),
 				storage(StorageInstr::Store {
 					create: true,
+					cache: true,
 				}),
 				Instr::Jump {
 					target: 7,
 				},
 				storage(StorageInstr::Store {
 					create: false,
+					cache: false,
 				}),
 				Instr::EndRow,
 			]
 		);
+	}
+
+	/// The cache flag of the one create-only store `run`'s `StoreRecordData` lowers to.
+	fn created_cache(run: &StageRun) -> bool {
+		let code = match emitted(run, WriteStageKind::StoreRecordData) {
+			Ok(code) => code,
+			Err(error) => panic!("StoreRecordData lowers: {error}"),
+		};
+		let mut creates = code.iter().filter_map(|instr| {
+			if let Instr::Write(WriteInstr::Storage(StorageInstr::Store {
+				create: true,
+				cache,
+			})) = instr
+			{
+				Some(*cache)
+			} else {
+				None
+			}
+		});
+		let cache = creates.next().expect("a create-only store");
+		assert_eq!(creates.next(), None, "one create-only store");
+		cache
+	}
+
+	#[test]
+	fn a_create_returning_nothing_on_a_table_without_events_keeps_no_record_cached() {
+		let quiet = |output, events| StageRun {
+			output,
+			..stored_run(storing(events))
+		};
+		assert!(!created_cache(&quiet(OutputShape::None, Stored::Nothing)));
+		assert!(created_cache(&quiet(OutputShape::None, Stored::Declared)));
+		assert!(created_cache(&quiet(OutputShape::Null, Stored::Nothing)));
+		assert!(created_cache(&quiet(OutputShape::After, Stored::Nothing)));
+		assert!(created_cache(&quiet(OutputShape::Default, Stored::Nothing)));
+		let unfixed = StageRun {
+			output: OutputShape::None,
+			stored: WriteStored {
+				catalog_fixed: false,
+				..storing(Stored::Nothing)
+			},
+			..run()
+		};
+		assert!(created_cache(&unfixed));
 	}
 
 	#[test]
