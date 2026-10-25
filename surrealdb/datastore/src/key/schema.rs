@@ -187,6 +187,13 @@ keyspace! {
 		/// refreshed by a release without the barrier, whose answer (`!wa`) nothing maintains.
 		write_barrier_heartbeat = ["!wh", @, nd: Uuid] => u64;
 
+		/// The heartbeat node `nd` last recorded as a release whose write transactions read each
+		/// table's catalog version as a locked read, on a store that fences catalog changes, in the
+		/// transaction of that heartbeat. A build asks no other node to answer its write barrier
+		/// only while every live node's current heartbeat (`!nd`) carries this mark: a node last
+		/// refreshed by a release without the fence reads the version plainly.
+		catalog_fence_heartbeat = ["!wf", @, nd: Uuid] => u64;
+
 		/// The table a build that raised write barrier `seq` builds an index of, so a node answering
 		/// the barrier fences, of the write transactions it stops waiting for, only those writing
 		/// that table. Kept for a bounded run of the newest barriers.

@@ -773,6 +773,9 @@ impl IndexBuilder {
 			Err(err) => return Err(err),
 		};
 		building.defer_ownership_release(ctx).await;
+		if waits_for_statement && acquired.staged {
+			building.reads_after_its_stamp.store(true, Ordering::Release);
+		}
 		if inline {
 			return Ok(BuildStart::Inline(building, acquired));
 		}
@@ -1813,6 +1816,13 @@ pub(super) struct Building {
 	/// committed ([`BuildStart::Inline`]): a rollback then finds no task to run the build, and
 	/// arrives at the release gate in its place.
 	inline_run: bool,
+	/// Whether this build builds a generation the statement that started it staged, and reads
+	/// only once that statement's transaction has closed. The statement's commit stamps the
+	/// table's catalog version (`DEFINE INDEX` and `REBUILD INDEX` both do), so on a store that
+	/// fences catalog changes ([`Transaction::fences_catalog_changes`]) no write older than that
+	/// commit lands after it, and the build's wait for older writes need not ask the other nodes
+	/// ([`crate::kvs::write_barrier::WriteBarrier::start`]).
+	reads_after_its_stamp: AtomicBool,
 	/// The batches this build may start, where a bounded pass runs it
 	/// ([`IndexBuilder::run_pass`]); `None` for a build that runs to its end.
 	budget: Option<BatchBudget>,
@@ -1945,6 +1955,7 @@ impl Building {
 			closing_settled: Default::default(),
 			to_passes: false,
 			inline_run: false,
+			reads_after_its_stamp: AtomicBool::new(false),
 			budget: None,
 			handed_back: AtomicBool::new(false),
 		})
@@ -2375,6 +2386,7 @@ impl Building {
 							initial_count: durable_report_count(next.initial),
 							updates_count: durable_report_count(next.updated),
 							initial_cursor: next.initial_cursor.clone(),
+							staged: false,
 						}));
 					}
 					Err(err) if is_condition_not_met(&err) => {
@@ -2461,6 +2473,7 @@ impl Building {
 				initial_count: 0,
 				updates_count: 0,
 				initial_cursor: None,
+				staged: true,
 			}));
 		}
 	}
@@ -2625,6 +2638,7 @@ impl Building {
 						initial_count: durable_report_count(next.initial),
 						updates_count: durable_report_count(next.updated),
 						initial_cursor: next.initial_cursor.clone(),
+						staged: false,
 					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
@@ -2751,6 +2765,7 @@ impl Building {
 						initial_count: durable_report_count(next.initial),
 						updates_count: durable_report_count(next.updated),
 						initial_cursor: next.initial_cursor.clone(),
+						staged: false,
 					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
@@ -3799,6 +3814,7 @@ impl Building {
 			self.ctx.node_id(),
 			(self.ix_key.ns, self.ix_key.db, self.ix_key.tb.clone()),
 			hold.as_deref(),
+			self.reads_after_its_stamp.load(Ordering::Acquire),
 		)
 		.await?;
 		let every = self.ownership_heartbeat_every();

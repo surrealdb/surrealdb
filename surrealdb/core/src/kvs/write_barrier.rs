@@ -32,6 +32,19 @@
 //! the current barrier when it registers, before it opens a transaction of its own, so a node that
 //! joins later is never waited for.
 //!
+//! On a store that fences catalog changes ([`Transaction::fences_catalog_changes`]) a build
+//! that reads against a commit stamping its table's catalog version asks no other node: every
+//! write of a table's records reads that table's version as a locked read first, so a write
+//! whose snapshot predates the stamp either committed before it, and the build, which reads
+//! after it, finds the write, or fails its commit. A build of a generation the statement that
+//! started it staged, and that reads once that statement's transaction has closed, reads against
+//! such a commit: `DEFINE INDEX` and `REBUILD INDEX` stamp the table. It asks no other node only
+//! while every other live node's current heartbeat carries the mark of a release with the fence
+//! (`!wf{nd}`, [`CatalogFenceHeartbeatKey`]), which a node records beside its barrier mark when
+//! its own writes are fenced: a node last refreshed by a release without the fence reads catalog
+//! versions plainly, and its writes conflict with no stamp. Every other build, a build that reads
+//! inside the transaction that defines its index above all, still raises the barrier.
+//!
 //! The build waits for every node other than its own whose heartbeat is within
 //! [`WRITE_BARRIER_EXCLUDE_AFTER`] to answer, archived or not, and for its own node's transactions
 //! directly. A release with the
@@ -55,9 +68,9 @@ use uuid::Uuid;
 use crate::catalog::providers::NodeProvider;
 use crate::key::KVKeyDecode;
 use crate::key::schema::{
-	WriteBarrierAckKey, WriteBarrierAckPrefix, WriteBarrierHeartbeatKey,
-	WriteBarrierHeartbeatPrefix, WriteBarrierKey, WriteBarrierTargetKey,
-	WriteBarrierTargetSeqPrefix,
+	CatalogFenceHeartbeatKey, CatalogFenceHeartbeatPrefix, WriteBarrierAckKey,
+	WriteBarrierAckPrefix, WriteBarrierHeartbeatKey, WriteBarrierHeartbeatPrefix, WriteBarrierKey,
+	WriteBarrierTargetKey, WriteBarrierTargetSeqPrefix,
 };
 use crate::kvs::clock::SystemClock;
 use crate::kvs::sequences::Sequences;
@@ -163,7 +176,10 @@ pub(crate) struct WriteBarrier {
 
 impl WriteBarrier {
 	/// Begin a wait for the write transactions that opened before now. On a store other nodes
-	/// write too, this raises the barrier every live node must answer.
+	/// write too, this raises the barrier every live node must answer, unless the build reads
+	/// against a commit that stamped its table's catalog version (`stamped`) on a store that
+	/// fences catalog changes ([`Transaction::fences_catalog_changes`]): the wait is then for
+	/// this datastore's own transactions alone (see the module documentation).
 	///
 	/// A build that reads before its definition commits, inside the transaction that defines the
 	/// index, passes that transaction's `hold`, which begins with the wait: the writes of the table
@@ -175,14 +191,21 @@ impl WriteBarrier {
 		node: Uuid,
 		target: FencedTable,
 		hold: Option<&DefinitionHold>,
+		stamped: bool,
 	) -> Result<Self> {
 		// Counted before the epoch is read, so a transaction set aside after that read sees it.
 		let running = tf.begin_write_wait(Some(std::slice::from_ref(&target)));
 		let since = tf.live_writes().advance_holding(hold);
 		let tx = tf.transaction(TransactionType::Read, sequences.clone()).await?;
-		let sole_writer = tx.sole_writer();
+		let local_only = if tx.sole_writer() {
+			true
+		} else if stamped && tx.fences_catalog_changes() {
+			catch!(tx, every_live_node_fences(&tx, node).await)
+		} else {
+			false
+		};
 		tx.cancel().await?;
-		let asked = if sole_writer {
+		let asked = if local_only {
 			None
 		} else {
 			Some(raise(tf, sequences, &target).await?)
@@ -289,6 +312,28 @@ enum Answers {
 	Pending,
 	/// One has never answered a barrier, so it runs a release without them.
 	Unsupported(Uuid),
+}
+
+/// Whether every live node other than `node` last recorded its heartbeat as a release whose writes
+/// the store fences against a later change to their table's catalog (`!wf`,
+/// [`CatalogFenceHeartbeatKey`]). A node whose heartbeat is older than
+/// [`WRITE_BARRIER_EXCLUDE_AFTER`] is left out, as a build's wait leaves it out ([`answers`]).
+async fn every_live_node_fences(tx: &Transaction, node: Uuid) -> Result<bool> {
+	let now = SystemClock::new().now();
+	let mut marks = std::collections::HashMap::new();
+	for (key, value) in tx.scan(CatalogFenceHeartbeatPrefix {}.range()?, u32::MAX, 0, None).await? {
+		marks.insert(CatalogFenceHeartbeatKey::decode_key(&key)?.nd, value);
+	}
+	for nd in tx.all_nodes().await?.iter() {
+		if nd.id == node || nd.heartbeat < now - WRITE_BARRIER_EXCLUDE_AFTER {
+			continue;
+		}
+		// A node last refreshed by a release without the fence reads catalog versions plainly.
+		if marks.get(&nd.id) != Some(&nd.heartbeat.value) {
+			return Ok(false);
+		}
+	}
+	Ok(true)
 }
 
 async fn answers(tx: &Transaction, node: Uuid, asked: u64) -> Result<Answers> {

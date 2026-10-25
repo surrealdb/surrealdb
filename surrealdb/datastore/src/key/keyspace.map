@@ -34,6 +34,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!wa                                                                                            WriteBarrierAckPrefix ->  (range)
 /!wh{nd}                                                                                     WriteBarrierHeartbeatKey ->  u64
 /!wh                                                                                      WriteBarrierHeartbeatPrefix ->  (range)
+/!wf{nd}                                                                                     CatalogFenceHeartbeatKey ->  u64
+/!wf                                                                                      CatalogFenceHeartbeatPrefix ->  (range)
 /!wt{seq}{ns}{db}{tb}                                                                           WriteBarrierTargetKey ->  ()
 /!wt                                                                                         WriteBarrierTargetPrefix ->  (range)
 /!wt{seq}                                                                                 WriteBarrierTargetSeqPrefix ->  (range)

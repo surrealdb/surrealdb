@@ -2044,6 +2044,15 @@ impl Datastore {
 		fork
 	}
 
+	/// Leave this datastore's writes unfenced against later catalog changes, as on a store whose
+	/// locked reads conflict with one another, so its builds ask every other live node to answer
+	/// their write barriers as builds on such a store do
+	/// ([`surrealdb_datastore::tx::Transaction::fences_catalog_changes`]).
+	#[cfg(test)]
+	pub(crate) fn assume_unfenced_catalog_for_test(&self) {
+		self.triggers.assume_unfenced_catalog();
+	}
+
 	/// Set the node id for this datastore.
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
@@ -4255,6 +4264,18 @@ impl Datastore {
 				&node.heartbeat.value,
 			)
 			.await?;
+			// Marks it too as one from a node whose writes the store fences against a later
+			// change to their table's catalog, which lets a build leave this node out of its
+			// barrier ([`crate::kvs::write_barrier::WriteBarrier::start`]).
+			if txn.fences_catalog_changes() {
+				txn.set_key(
+					&crate::key::schema::CatalogFenceHeartbeatKey {
+						nd: key.nd,
+					},
+					&node.heartbeat.value,
+				)
+				.await?;
+			}
 		}
 		txn.set_key(
 			&NodeReleaseKey {
@@ -4852,7 +4873,7 @@ impl Datastore {
 						nd: *id,
 					};
 					catch!(txn, txn.clr_key(&release).await);
-					// So were its write barrier answer and heartbeat mark.
+					// So were its write barrier answer and heartbeat marks.
 					catch!(
 						txn,
 						txn.clr_key(&crate::key::schema::WriteBarrierAckKey {
@@ -4863,6 +4884,13 @@ impl Datastore {
 					catch!(
 						txn,
 						txn.clr_key(&crate::key::schema::WriteBarrierHeartbeatKey {
+							nd: *id,
+						})
+						.await
+					);
+					catch!(
+						txn,
+						txn.clr_key(&crate::key::schema::CatalogFenceHeartbeatKey {
 							nd: *id,
 						})
 						.await

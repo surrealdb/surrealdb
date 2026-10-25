@@ -143,6 +143,11 @@ pub(crate) struct PendingGuardFences {
 	/// validates every read, as the tests of that path need.
 	#[cfg(any(test, feature = "test-hooks"))]
 	assume_validated_reads: std::sync::atomic::AtomicBool,
+	/// Whether this datastore leaves its writes unfenced against later catalog changes, as on a
+	/// store whose locked reads conflict with one another, as the tests of the write barrier's
+	/// answers from other nodes need.
+	#[cfg(any(test, feature = "test-hooks"))]
+	assume_unfenced_catalog: std::sync::atomic::AtomicBool,
 	/// How many guards compaction found `Empty` over pending entries and
 	/// repaired, which the tests of the covering protocol expect to stay zero.
 	#[cfg(any(test, feature = "test-hooks"))]
@@ -280,6 +285,8 @@ impl Default for PendingGuardFences {
 			#[cfg(any(test, feature = "test-hooks"))]
 			assume_validated_reads: std::sync::atomic::AtomicBool::new(false),
 			#[cfg(any(test, feature = "test-hooks"))]
+			assume_unfenced_catalog: std::sync::atomic::AtomicBool::new(false),
+			#[cfg(any(test, feature = "test-hooks"))]
 			repairs: std::sync::atomic::AtomicUsize::new(0),
 		}
 	}
@@ -320,6 +327,19 @@ impl PendingGuardFences {
 		#[cfg(any(test, feature = "test-hooks"))]
 		{
 			self.assume_validated_reads.load(Ordering::Acquire)
+		}
+		#[cfg(not(any(test, feature = "test-hooks")))]
+		{
+			false
+		}
+	}
+
+	/// Whether this datastore leaves its writes unfenced against later catalog changes although
+	/// the store would fence them ([`crate::tx::Transaction::fences_catalog_changes`]).
+	pub(crate) fn assumes_unfenced_catalog(&self) -> bool {
+		#[cfg(any(test, feature = "test-hooks"))]
+		{
+			self.assume_unfenced_catalog.load(Ordering::Acquire)
 		}
 		#[cfg(not(any(test, feature = "test-hooks")))]
 		{
@@ -508,6 +528,15 @@ impl CommitTriggers {
 	#[cfg(any(test, feature = "test-hooks"))]
 	pub fn assume_validated_reads(&self) {
 		self.pending_guard_fences.assume_validated_reads.store(true, Ordering::Release);
+	}
+
+	/// Leave this datastore's writes unfenced against later catalog changes, as on a store whose
+	/// locked reads conflict with one another, although the store would fence them
+	/// ([`crate::tx::Transaction::fences_catalog_changes`]). For the tests of the write barrier's
+	/// answers from other nodes, which such a store relies on.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn assume_unfenced_catalog(&self) {
+		self.pending_guard_fences.assume_unfenced_catalog.store(true, Ordering::Release);
 	}
 
 	/// How many pending-state guards this datastore's compaction has repaired

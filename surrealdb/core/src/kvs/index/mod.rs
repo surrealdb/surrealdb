@@ -133,6 +133,9 @@ struct AcquiredBuild {
 	/// acquired. A same-generation takeover resumes the scan after this record
 	/// instead of wiping the partial index data and rescanning.
 	initial_cursor: Option<crate::val::RecordIdKey>,
+	/// Whether this acquisition staged the generation, rather than taking over one an earlier
+	/// build staged.
+	staged: bool,
 }
 
 struct DurableAdmission {

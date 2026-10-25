@@ -2253,6 +2253,21 @@ impl Transaction {
 		self.tr.shared_locked_reads()
 	}
 
+	/// Whether the store refuses the commit of a write transaction that read a table's catalog
+	/// version ([`Self::catalog_version`]) when a change to that table's catalog committed after
+	/// the transaction's snapshot: a store other datastores write ([`Self::sole_writer`] is
+	/// `false`) whose locked reads conflict only with writes ([`Self::shared_locked_reads`]).
+	///
+	/// A write transaction there reads each table's catalog version as a locked read, and every
+	/// write of a table's records reads that table's version first (`WriteCtx::resolve`). So a
+	/// write whose snapshot predates a definition stamped on its table, through any node, cannot
+	/// commit after that definition has, and its retry sees the definition.
+	pub fn fences_catalog_changes(&self) -> bool {
+		!self.sole_writer()
+			&& self.shared_locked_reads()
+			&& !self.triggers.pending_guard_fences.assumes_unfenced_catalog()
+	}
+
 	/// Queue work to run once this transaction commits.
 	///
 	/// See [`Self::commit_actions`] for why an effect waits.
@@ -4062,7 +4077,13 @@ impl Transaction {
 		if let Some(entry) = self.cache.get(&qey) {
 			return Ok(*entry.try_into_type::<Option<Uuid>>()?);
 		}
-		if let Some((epoch, shared)) = self.epoch_catalog()
+		// A write transaction on a store that fences catalog changes reads the version from the
+		// store as a locked read, so a later change to the table's catalog fails its commit
+		// ([`Self::fences_catalog_changes`]); a version kept for the catalog epoch carries no
+		// such read.
+		let locked = self.writeable() && self.fences_catalog_changes();
+		if !locked
+			&& let Some((epoch, shared)) = self.epoch_catalog()
 			&& let Some(version) =
 				shared.get::<Option<Uuid>>(&crate::cache::epoch::Lookup::Version(epoch, ns, db, tb))
 		{
@@ -4074,7 +4095,12 @@ impl Transaction {
 			db,
 			tb: Cow::Borrowed(tb),
 		};
-		let version = match self.get_key(&key, None).await? {
+		let stamped = if locked {
+			self.getu_key(&key).await?
+		} else {
+			self.get_key(&key, None).await?
+		};
+		let version = match stamped {
 			Some(stamped) => stamped.proven(self.table_stored_held(ns, db, tb).await?.as_deref()),
 			None => None,
 		};
@@ -17335,6 +17361,89 @@ mod older_build_write_tests {
 		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
 		assert!(listed.tables.is_empty() && listed.versions.is_empty());
 		tx.cancel().await.unwrap();
+	}
+
+	/// A record of `tb` with id 1.
+	fn record_key(tb: &TableName) -> Key<'static> {
+		crate::key::schema::RecordKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Owned(crate::val::RecordIdKey::Number(1)),
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	/// Whether a write transaction that reads `tb`'s catalog version and writes one of its
+	/// records commits when a change to `tb`'s catalog commits in between.
+	async fn write_commits_across_a_stamp(tf: &TransactionFactory, sq: &Sequences) -> bool {
+		let tb = TableName::new("person");
+		let tx = txn(tf, sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		tx.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let writer = txn(tf, sq).await;
+		assert!(writer.catalog_version(NS, DB, &tb).await.unwrap().is_some());
+		writer.tr.set(record_key(&tb), b"v".to_vec()).await.unwrap();
+
+		let definer = txn(tf, sq).await;
+		definer.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		definer.commit().await.unwrap();
+
+		match writer.commit().await {
+			Ok(()) => true,
+			Err(err) => {
+				assert!(
+					err.downcast_ref::<super::KvsError>().is_some_and(|err| err.is_retryable()),
+					"{err}"
+				);
+				false
+			}
+		}
+	}
+
+	/// On a store other datastores write whose locked reads conflict only with writes, a write
+	/// transaction reads a table's catalog version as a locked read, so one whose snapshot
+	/// predates a change to the table's catalog fails its commit once that change has committed,
+	/// whichever datastore made it.
+	#[tokio::test]
+	async fn a_write_is_refused_once_its_tables_catalog_changes_on_a_fenced_store() {
+		let (tf, sq) = factory().await;
+		tf.triggers().assume_shared_store();
+		let tx = txn(&tf, &sq).await;
+		assert!(tx.fences_catalog_changes());
+		tx.cancel().await.unwrap();
+		assert!(!write_commits_across_a_stamp(&tf, &sq).await);
+	}
+
+	/// The datastore that writes a store alone keeps the read plain: it learns of a change to the
+	/// catalog through its own commits ([`Transaction::catalog_epoch`]).
+	#[tokio::test]
+	async fn a_write_reads_its_tables_catalog_version_plainly_on_a_store_written_alone() {
+		let (tf, sq) = factory().await;
+		let tx = txn(&tf, &sq).await;
+		assert!(!tx.fences_catalog_changes());
+		tx.cancel().await.unwrap();
+		assert!(write_commits_across_a_stamp(&tf, &sq).await);
+	}
+
+	/// A read transaction reads the version plainly on a fenced store too: it commits nothing a
+	/// change to the catalog could leave unindexed, and takes no locked read.
+	#[tokio::test]
+	async fn a_read_takes_no_locked_read_of_a_tables_catalog_version() {
+		let (tf, sq) = factory().await;
+		tf.triggers().assume_shared_store();
+		let tb = TableName::new("person");
+		let tx = txn(&tf, &sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		tx.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		tx.commit().await.unwrap();
+		let reader = tf.transaction(TransactionType::Read, sq.clone()).await.unwrap();
+		assert!(reader.fences_catalog_changes());
+		assert!(reader.catalog_version(NS, DB, &tb).await.unwrap().is_some());
+		reader.cancel().await.unwrap();
 	}
 
 	/// A function stamped by this build and then redefined by an older build

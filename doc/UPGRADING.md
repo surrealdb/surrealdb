@@ -560,6 +560,20 @@ cleaning, and a blocking statement keeps waiting, within its timeout.
   10 s is the margin within which the nodes' clocks must agree. A heartbeat gets at
   most 14 s, so two in a row fit within those 30 s, and one that cannot commit
   in time leaves the node refusing its writes until one does.
+- **On a store that fences catalog changes** (SurrealDS, and SurrealDB Earth),
+  a write transaction reads the catalog version of each table it writes as a
+  locked read. A write whose snapshot predates a `DEFINE INDEX` or
+  `REBUILD INDEX` of its table, through any node, is refused at commit with a
+  retryable conflict once that statement has committed, and its retry sees the
+  index. A build started by such a statement that reads only once the
+  statement's transaction has closed — the statement on its own, or
+  `CONCURRENTLY` — then waits for its own node's write transactions and asks no
+  other node, once every live node records its heartbeat as a release with
+  this fence (`!wf`, beside the barrier's `!wh`). While a node last refreshed
+  by an earlier release is live, the build waits for every node's answer as
+  before. A build that reads inside its own transaction (a blocking
+  definition in `BEGIN … COMMIT`), a rebuild that moves the index's format, and
+  a build taken over from another owner still wait for every node's answer. TiKV has no such fence and keeps the barrier above.
 - **A cluster running mixed releases.** While a live node runs a release
   without this barrier — including a node rolled back to one, or a node that
   runs no maintenance tasks and so answers no barriers — builds read without
@@ -578,6 +592,10 @@ cleaning, and a blocking statement keeps waiting, within its timeout.
 - holds write transactions open for more than a minute on a table while an
   index on it is defined or rebuilt: such a transaction is refused at commit
   and must be retried;
+- writes a table on SurrealDS or SurrealDB Earth while an index on it is
+  defined or rebuilt: a write transaction that began before the statement
+  committed and commits after it is refused with a retryable conflict, and
+  must be retried;
 - defines indexes inside `BEGIN … COMMIT`, or replaces them with
   `DEFINE INDEX OVERWRITE`, on tables other sessions write: retry the conflicts
   those writes meet while the transaction is open and when it commits, do not

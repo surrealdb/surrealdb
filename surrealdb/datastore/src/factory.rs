@@ -215,7 +215,7 @@ impl TransactionFactory {
 				return Err(e.into());
 			}
 		};
-		let sole_writer = inner.sole_writer();
+		let sole_writer = self.engine_is_sole_writer(inner.sole_writer());
 		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		let build_epoch =
 			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
@@ -350,7 +350,8 @@ impl TransactionFactory {
 				// A stale snapshot may predate catalog changes the settled epoch
 				// counts, so it is never identified as reading the current catalog
 				// and never trusted as the sole writer's view.
-				let sole_writer = transaction.sole_writer() && !info.stale;
+				let sole_writer =
+					self.engine_is_sole_writer(transaction.sole_writer()) && !info.stale;
 				let catalog_epoch =
 					settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 				let build_epoch =
@@ -421,7 +422,7 @@ impl TransactionFactory {
 				return Err(e.into());
 			}
 		};
-		let sole_writer = inner.sole_writer();
+		let sole_writer = self.engine_is_sole_writer(inner.sole_writer());
 		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		let build_epoch =
 			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
@@ -501,6 +502,14 @@ impl TransactionFactory {
 	/// The commit triggers of the datastore this factory belongs to.
 	pub fn triggers(&self) -> &Arc<CommitTriggers> {
 		&self.triggers
+	}
+
+	/// Whether a transaction the engine reports the store's sole writer (`engine`) reads the
+	/// catalog as the datastore's own commits left it: not when this datastore stands for one of
+	/// several processes writing the store, as the tests of that case have it, whose catalog the
+	/// other processes change without this datastore's commits counting it.
+	fn engine_is_sole_writer(&self, engine: bool) -> bool {
+		engine && !self.triggers.pending_guard_fences.assumes_shared_store()
 	}
 
 	/// A factory over the same store with its own commit triggers, as a second

@@ -9106,12 +9106,15 @@ async fn rebuild_index_double_applies_direct_writes_that_outlive_its_wipe() -> R
 
 /// Seeds `t` with a COUNT index on `ds`, registers `ds` and a second process writing the same
 /// store as nodes, and answers that second node's write barriers in the background until the
-/// returned token is cancelled.
+/// returned token is cancelled. Both leave their writes unfenced against catalog changes, as on a
+/// store whose builds rely on the other nodes' answers.
 #[cfg(feature = "kv-mem")]
 async fn two_nodes_with_a_count_index()
 -> Result<(Arc<Datastore>, Arc<Datastore>, Session, CancellationToken)> {
 	let (ds_a, session) = new_index_test_ds().await?;
 	let ds_b = Arc::new(ds_a.fork_for_test_as_another_process(Uuid::new_v4()));
+	ds_a.assume_unfenced_catalog_for_test();
+	ds_b.assume_unfenced_catalog_for_test();
 	// Both answer write barriers — node B below, node A where a test answers for it — so both
 	// record that they do as they register.
 	ds_a.begin_answering_write_barriers();
@@ -9180,6 +9183,159 @@ async fn a_rebuild_waits_for_another_nodes_older_writes() -> Result<()> {
 	let (indexed, rows) = count_against_rows(&ds_a, &session).await?;
 	assert_eq!(indexed, rows, "the index counts each row once");
 	answering.cancel();
+	Ok(())
+}
+
+/// Registers a datastore and a second process writing the same store as nodes that answer write
+/// barriers, of which only the first ever answers one: the second stands for a live node whose
+/// answer a build waits for and never gets.
+#[cfg(feature = "kv-mem")]
+async fn two_nodes_the_second_never_answering() -> Result<(Arc<Datastore>, Arc<Datastore>, Session)>
+{
+	let (ds_a, session) = new_index_test_ds().await?;
+	let ds_b = Arc::new(ds_a.fork_for_test_as_another_process(Uuid::new_v4()));
+	ds_a.begin_answering_write_barriers();
+	ds_b.begin_answering_write_barriers();
+	ds_a.insert_node().await?;
+	ds_b.insert_node().await?;
+	execute_all(&ds_a, &session, "DEFINE TABLE t SCHEMALESS; CREATE t:1 SET n = 1;").await?;
+	Ok((ds_a, ds_b, session))
+}
+
+/// On a store that fences catalog changes, a new index built once its definition has committed
+/// asks no other node to answer its write barrier. A write another node opened before the
+/// definition and commits after it is refused at its commit, as a retryable conflict, rather than
+/// waited for, and its retry is indexed.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_definition_built_after_its_commit_asks_no_other_node_on_a_fenced_store() -> Result<()> {
+	let (ds_a, ds_b, session) = two_nodes_the_second_never_answering().await?;
+	let writer = Arc::new(ds_b.transaction(TransactionType::Write).await?);
+	let request = QueryRequest::new("CREATE t:2 SET n = 2 RETURN NONE", &session)
+		.with_transaction(Arc::clone(&writer));
+	for result in ds_b.run(request).await? {
+		result.result?;
+	}
+	timeout(Duration::from_secs(20), execute_all(&ds_a, &session, "DEFINE INDEX ix ON t FIELDS n"))
+		.await
+		.map_err(|_| {
+			anyhow::anyhow!("the build waited for a node whose writes the store fences")
+		})??;
+	let err =
+		writer.commit().await.expect_err("a write older than the definition commits after it");
+	assert!(crate::kvs::is_retryable_transaction_conflict(&err), "{err}");
+	execute_all(&ds_b, &session, "CREATE t:2 SET n = 2").await?;
+	wait_for_index_ready(&ds_a, &session, "t", "ix").await?;
+	for n in [1, 2] {
+		let sql = format!("RETURN array::len(SELECT VALUE id FROM t WITH INDEX ix WHERE n = {n})");
+		assert_eq!(query_json(&ds_a, &session, &sql).await?, serde_json::json!(1), "n = {n}");
+	}
+	Ok(())
+}
+
+/// On a store that fences catalog changes, a new index built inside the transaction that defines
+/// it still waits for every other live node to answer its write barrier: it reads before its
+/// definition commits, so a write another node commits meanwhile conflicts with nothing.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_definition_built_inside_its_transaction_asks_the_other_nodes_on_a_fenced_store()
+-> Result<()> {
+	let (ds_a, ds_b, session) = two_nodes_the_second_never_answering().await?;
+	let waited = super::builder::write_barrier_waits::count(ds_a.id());
+	let define = tokio::spawn({
+		let (ds, session) = (Arc::clone(&ds_a), session.clone());
+		async move { execute_all(&ds, &session, "BEGIN; DEFINE INDEX ix ON t FIELDS n; COMMIT;").await }
+	});
+	wait_for_a_build_at_the_write_barrier(ds_a.id(), waited).await?;
+	sleep(Duration::from_millis(500)).await;
+	assert!(!define.is_finished(), "the build waits for the other node's answer");
+	let answering = CancellationToken::new();
+	tokio::spawn({
+		let (ds, answering) = (Arc::clone(&ds_b), answering.clone());
+		async move {
+			while !answering.is_cancelled() {
+				let _ = ds.answer_write_barrier(&answering).await;
+				sleep(Duration::from_millis(20)).await;
+			}
+		}
+	});
+	timeout(Duration::from_secs(20), define)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the definition"))???;
+	answering.cancel();
+	Ok(())
+}
+
+/// On a store that fences catalog changes, a definition built after its commit still waits for
+/// every other live node to answer its write barrier while one of them was last refreshed by a
+/// release without the fence, whose writes read catalog versions plainly: one that never marked
+/// its heartbeat as fenced, and one whose heartbeat a release with the barrier but without the
+/// fence recorded after the mark.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_definition_built_after_its_commit_asks_a_node_on_a_release_without_the_fence()
+-> Result<()> {
+	use crate::dbs::node::{Node, Timestamp};
+	for case in ["never marked", "refreshed without the mark"] {
+		let (ds_a, session) = new_index_test_ds().await?;
+		let ds_b = Arc::new(ds_a.fork_for_test_as_another_process(Uuid::new_v4()));
+		if case == "never marked" {
+			ds_b.assume_unfenced_catalog_for_test();
+		}
+		ds_a.begin_answering_write_barriers();
+		ds_b.begin_answering_write_barriers();
+		ds_a.insert_node().await?;
+		ds_b.insert_node().await?;
+		if case == "refreshed without the mark" {
+			let tx = ds_a.transaction(TransactionType::Write).await?;
+			let now = crate::kvs::clock::SystemClock::new().now().value;
+			let fresh = Node::new(
+				ds_b.id(),
+				Timestamp {
+					value: now + 1,
+				},
+				false,
+			);
+			tx.set_key(
+				&crate::key::schema::NodeKey {
+					nd: ds_b.id(),
+				},
+				&fresh,
+			)
+			.await?;
+			tx.set_key(
+				&crate::key::schema::WriteBarrierHeartbeatKey {
+					nd: ds_b.id(),
+				},
+				&fresh.heartbeat.value,
+			)
+			.await?;
+			tx.commit().await?;
+		}
+		execute_all(&ds_a, &session, "DEFINE TABLE t SCHEMALESS; CREATE t:1 SET n = 1;").await?;
+		let waited = super::builder::write_barrier_waits::count(ds_a.id());
+		let define = tokio::spawn({
+			let (ds, session) = (Arc::clone(&ds_a), session.clone());
+			async move { execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n").await }
+		});
+		wait_for_a_build_at_the_write_barrier(ds_a.id(), waited).await?;
+		sleep(Duration::from_millis(500)).await;
+		assert!(!define.is_finished(), "{case}: the build waits for the other node's answer");
+		let answering = CancellationToken::new();
+		tokio::spawn({
+			let (ds, answering) = (Arc::clone(&ds_b), answering.clone());
+			async move {
+				while !answering.is_cancelled() {
+					let _ = ds.answer_write_barrier(&answering).await;
+					sleep(Duration::from_millis(20)).await;
+				}
+			}
+		});
+		timeout(Duration::from_secs(20), define)
+			.await
+			.map_err(|_| anyhow::anyhow!("{case}: timed out waiting for the definition"))???;
+		answering.cancel();
+	}
 	Ok(())
 }
 
