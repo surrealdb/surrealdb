@@ -141,6 +141,14 @@ SurrealDB's security model rests on four pillars:
   and access method must be confirmed by the grant record, not unverified JWT claims.
 - Every session and token must have a finite expiration. Missing duration
   configuration must result in a secure default, never unbounded validity.
+- A session established with a token (RPC `authenticate`, an HTTP `Bearer`
+  header, a JWT presented as a pgwire password) must end no later than that
+  token's `exp`, whatever its SESSION duration: `iam::verify::token` bounds
+  `Session::exp` by it. A session signed in with credentials lasts for its
+  SESSION duration alone, not bounded by the token issued alongside it, and
+  `Session::expired` reads `Session::exp` only, never the `$token` claims.
+  Verified by `a_token_session_ends_with_its_token` and
+  `a_credential_signin_is_not_bound_by_its_token` (`iam/verify.rs`).
 - Authentication errors must not contain internal query errors, table names, field
   names, or stack traces unless an explicitly-opted-in insecure mode is enabled.
 - Bearer token comparison must use constant-time comparison. Grant identifiers must

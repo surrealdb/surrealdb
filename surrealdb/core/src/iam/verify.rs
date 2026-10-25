@@ -262,11 +262,36 @@ pub async fn basic(
 	}
 }
 
+/// Authenticates `session` with `token`.
+///
+/// A session established with a token lasts for the SESSION duration of the
+/// user or access method the token names, but never past the token's own
+/// `exp`: a bearer token must not keep working through a session derived from
+/// it once the token itself has expired. Sessions established with
+/// credentials (`signin`, `signup`, basic auth) are not bound this way. The
+/// token those issue is a by-product, and their session lasts for its SESSION
+/// duration alone.
 pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
 	// Decode the token without verifying to extract routing claims
 	let token_data = decode_claims_unverified(token)?;
+	let token_exp = token_data.claims.exp;
+	token_principal(kvs, session, token, token_data).await?;
+	if let Some(token_exp) = token_exp {
+		session.exp = Some(session.exp.map_or(token_exp, |exp| exp.min(token_exp)));
+	}
+	Ok(())
+}
+
+/// Verifies `token` and establishes its principal on `session`, with the
+/// session's expiry taken from the SESSION duration alone (see [`token`]).
+async fn token_principal(
+	kvs: &Datastore,
+	session: &mut Session,
+	token: &str,
+	token_data: TokenData<Claims>,
+) -> Result<()> {
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used. A token is honoured up to
@@ -1621,11 +1646,11 @@ mod tests {
 
 			// Ensure that the expiration is set correctly
 			let exp = sess.exp.unwrap();
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 		}
 	}
@@ -1916,11 +1941,11 @@ mod tests {
 
 				// Ensure that the expiration is set correctly
 				let exp = sess.exp.unwrap();
-				let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-				let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+				let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 				assert!(
 					exp > min_exp && exp < max_exp,
-					"Session expiration is expected to match the defined duration in case"
+					"Session expiration is expected to be bounded by the token's exp in case"
 				);
 			}
 		}
@@ -2012,11 +2037,11 @@ mod tests {
 			// Session expiration has been set explicitly
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to match the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 			let tk = match sess.tk {
 				Some(crate::types::PublicValue::Object(tk)) => tk,
@@ -2186,7 +2211,10 @@ mod tests {
 			assert!(!sess.au.has_role(Role::Viewer), "Auth user expected to not have Viewer role");
 			assert!(!sess.au.has_role(Role::Editor), "Auth user expected to not have Editor role");
 			assert!(!sess.au.has_role(Role::Owner), "Auth user expected to not have Owner role");
-			assert_eq!(sess.exp, None, "Default session expiration is expected to be None");
+			assert_eq!(
+				sess.exp, claims.exp,
+				"With no session duration the token's exp bounds the session"
+			);
 		}
 
 		//
@@ -2670,12 +2698,12 @@ mod tests {
 					// Check expiration
 					let exp = sess.exp.unwrap();
 					let min_exp =
-						(Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
+						(Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
 					let max_exp =
-						(Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+						(Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 					assert!(
 						exp > min_exp && exp < max_exp,
-						"Session expiration is expected to match the defined duration in case: {:?}",
+						"Session expiration is expected to be bounded by the token's exp in case: {:?}",
 						case
 					);
 				}
@@ -3019,11 +3047,11 @@ mod tests {
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 		}
 
@@ -3100,11 +3128,11 @@ mod tests {
 			// Expiration should match the defined duration
 			let exp = sess.exp.unwrap();
 			// Expiration should match the current time plus session duration with some margin
-			let min_exp = (Utc::now() + Duration::hours(2) - Duration::seconds(10)).timestamp();
-			let max_exp = (Utc::now() + Duration::hours(2) + Duration::seconds(10)).timestamp();
+			let min_exp = (Utc::now() + Duration::hours(1) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::hours(1) + Duration::seconds(10)).timestamp();
 			assert!(
 				exp > min_exp && exp < max_exp,
-				"Session expiration is expected to follow the defined duration"
+				"Session expiration is expected to be bounded by the token's exp"
 			);
 		}
 
@@ -3435,5 +3463,85 @@ mod context_clause_tests {
 		let mut sess = Session::default();
 		token(&ds, &mut sess, &signed("secret", &claims)).await.expect("token verification");
 		assert!(sess.data.is_none());
+	}
+}
+
+/// How long a session lives against the token it came with: a session
+/// established with a token ends at the token's `exp`, while a session signed
+/// in with credentials lasts for its SESSION duration alone.
+#[cfg(test)]
+mod token_expiry_tests {
+	use surrealdb_rpc::Token;
+
+	use super::*;
+	use crate::iam::signin::root_user;
+
+	fn access(token: Token) -> String {
+		match token {
+			Token::Access(access) => access,
+			Token::WithRefresh {
+				access,
+				..
+			} => access,
+		}
+	}
+
+	/// The `exp` claim of a server-issued token.
+	fn claimed_exp(token: &str) -> i64 {
+		decode_claims_unverified(token).unwrap().claims.exp.expect("the token has an exp")
+	}
+
+	async fn datastore(sql: &str) -> Arc<Datastore> {
+		let ds = Datastore::new("memory").await.unwrap();
+		ds.execute(sql, &Session::owner(), None).await.unwrap();
+		ds
+	}
+
+	#[tokio::test]
+	async fn a_credential_signin_is_not_bound_by_its_token() {
+		let ds = datastore(
+			"DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s;
+			DEFINE USER long ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s, FOR SESSION 1d;",
+		)
+		.await;
+		// No SESSION duration: the session never expires, and outlives the
+		// token whose claims it holds as `$token`
+		let mut sess = Session::default();
+		root_user(&ds, &mut sess, "short".into(), "pass".into()).await.unwrap();
+		assert_eq!(sess.exp, None);
+		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+		assert!(!sess.expired(), "an expired `$token` must not expire a credential session");
+		// A SESSION duration: the session expires with it, not with the token
+		let mut sess = Session::default();
+		let tk = access(root_user(&ds, &mut sess, "long".into(), "pass".into()).await.unwrap());
+		let exp = sess.exp.expect("the session expires");
+		assert!(exp > claimed_exp(&tk) + 3600, "session exp {exp} is bound by the token");
+	}
+
+	#[tokio::test]
+	async fn a_token_session_ends_with_its_token() {
+		let ds = datastore(
+			"DEFINE USER none ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h;
+			DEFINE USER long ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1d;
+			DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1m;",
+		)
+		.await;
+		for (user, bound_by_token) in [("none", true), ("long", true), ("short", false)] {
+			let tk = access(
+				root_user(&ds, &mut Session::default(), user.into(), "pass".into()).await.unwrap(),
+			);
+			let mut sess = Session::default();
+			token(&ds, &mut sess, &tk).await.unwrap();
+			let exp = sess.exp.expect("a token session always expires");
+			if bound_by_token {
+				assert_eq!(
+					exp,
+					claimed_exp(&tk),
+					"user `{user}`: the token's exp bounds the session"
+				);
+			} else {
+				assert!(exp < claimed_exp(&tk), "user `{user}`: the shorter SESSION duration wins");
+			}
+		}
 	}
 }

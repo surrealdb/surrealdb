@@ -296,20 +296,17 @@ impl Session {
 	/// session is accepted, including the embedded engine outside this crate.
 	/// Reimplementing it against the public `exp` field is what lets the two
 	/// drift.
+	///
+	/// Only `exp` decides. A session established with a token already has its
+	/// `exp` bound by the token's own (see [`crate::iam::verify::token`]); the
+	/// token claims in `tk` are not consulted here, because a session signed
+	/// in with credentials outlives the token issued alongside it.
 	pub fn expired(&self) -> bool {
-		let now = Utc::now().timestamp();
-		if let Some(exp) = self.exp
-			&& now > exp
-		{
-			return true;
+		match self.exp {
+			Some(exp) => Utc::now().timestamp() > exp,
+			// It is currently possible to have sessions without expiration.
+			None => false,
 		}
-		if let Some(crate::types::PublicValue::Object(tk)) = &self.tk
-			&& let Some(crate::types::PublicValue::Number(surrealdb_types::Number::Int(exp))) =
-				tk.get("exp")
-		{
-			return now > *exp;
-		}
-		false
 	}
 
 	/// The ambient parameters this session contributes to a query's context.

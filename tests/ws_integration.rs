@@ -1879,6 +1879,80 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	server.finish().unwrap();
 }
 
+/// A session signed in with credentials lasts for the user's SESSION duration
+/// (none by default), however short-lived the token issued alongside it. The
+/// token is a by-product of signin; the session was not established with it.
+pub async fn session_credential_signin_outlives_token(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// One user with no session duration, one whose session ends after 3s,
+	// both issued tokens that expire after 1s
+	socket
+		.send_message_query(
+			r#"
+			DEFINE USER unbounded ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s;
+			DEFINE USER bounded ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1s, FOR SESSION 3s;
+			"#,
+		)
+		.await
+		.unwrap();
+	let mut unbounded = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	unbounded.send_message_signin("unbounded", "pass", None, None, None).await.unwrap();
+	let mut bounded = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	bounded.send_message_signin("bounded", "pass", None, None, None).await.unwrap();
+	// Wait for both tokens to expire: both sessions still work
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	let res = unbounded.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	let res = bounded.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Wait for the bounded session to expire: only it is refused
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	let res = bounded.send_request("query", json!(["INFO FOR ROOT"])).await.unwrap();
+	assert_eq!(res["error"]["message"], "The session has expired", "result: {res:?}");
+	let res = unbounded.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+/// A session established with `authenticate` ends when the token it was
+/// established with expires, even when the user's SESSION duration is longer:
+/// a bearer token must not keep working through a session derived from it.
+pub async fn session_token_authentication_bounded_by_token(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	socket
+		.send_message_query(
+			"DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 2s, FOR SESSION 1d",
+		)
+		.await
+		.unwrap();
+	let token = socket.send_message_signin("short", "pass", None, None, None).await.unwrap();
+	// Authenticate a second connection with the token
+	let mut bearer = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	let res = bearer.send_request("authenticate", json!([token])).await.unwrap();
+	assert!(res["error"].is_null(), "result: {res:?}");
+	let res = bearer.send_message_query("INFO FOR ROOT").await.unwrap();
+	assert_eq!(res[0]["status"], "OK", "result: {res:?}");
+	// Wait for the token to expire: the session derived from it ends too
+	tokio::time::sleep(Duration::from_secs(3)).await;
+	let res = bearer.send_request("query", json!(["INFO FOR ROOT"])).await.unwrap();
+	assert_eq!(res["error"]["message"], "The session has expired", "result: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
 pub async fn session_failed_reauthentication(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server without authentication
 	let (addr, mut server) = common::start_server_without_auth().await.unwrap();
@@ -3189,6 +3263,10 @@ define_include_tests! {
 	session_reauthentication,
 	#[test_log::test(tokio::test)]
 	session_reauthentication_expired,
+	#[test_log::test(tokio::test)]
+	session_credential_signin_outlives_token,
+	#[test_log::test(tokio::test)]
+	session_token_authentication_bounded_by_token,
 	#[test_log::test(tokio::test)]
 	session_failed_reauthentication,
 	#[test_log::test(tokio::test)]
