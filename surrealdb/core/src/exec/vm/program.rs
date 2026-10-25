@@ -6310,6 +6310,9 @@ pub(super) enum CountVia {
 /// index, whether an ordinary pipeline stands beside it — is resolved when
 /// the program is lowered; the run reads only the table's existence and its
 /// lightweight relation kind, as of the statement's version.
+// `CountSource` lives inline inside `Source::Count`, and `Source` is already
+// sized to `Source::Index` (which also carries an inline `IndexRef`).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum CountSource {
 	/// Every record the evaluated `source` names: a table, a record id or a

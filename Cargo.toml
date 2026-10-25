@@ -873,9 +873,12 @@ opt-level = 'z'
 # Keeps the symbol names a browser stack trace needs, and the panic messages
 # `panic = "abort"` would otherwise let the runtime discard. Paired with the
 # crate's `debug` feature, which installs the console panic hook that reports
-# them.
+# them. Disables whole-program LTO and enables parallel codegen units so debug
+# Wasm builds do not serialize on a single fat-LTO codegen unit.
 [profile.wasm-release-debug]
 inherits = "wasm-release"
+lto = false
+codegen-units = 16
 strip = false
 panic = 'unwind'
 

@@ -26,7 +26,13 @@ mod err;
 mod debug {
 	use std::panic;
 
-	use wasm_bindgen::prelude::wasm_bindgen;
+	use wasm_bindgen::prelude::{JsValue, wasm_bindgen};
+
+	#[wasm_bindgen]
+	extern "C" {
+		#[wasm_bindgen(js_namespace = console, js_name = error)]
+		fn console_error(msg: &JsValue);
+	}
 
 	#[wasm_bindgen(start)]
 	fn init_panic_hook() {
@@ -37,9 +43,9 @@ mod debug {
 			// error carries the message as well and reaches hosts whose console
 			// renders only an error's message.
 			let error = js_sys::Error::new(&info.to_string());
-			let stack = js_sys::Reflect::get(&error, &wasm_bindgen::JsValue::from_str("stack"))
+			let stack = js_sys::Reflect::get(&error, &JsValue::from_str("stack"))
 				.unwrap_or_else(|_| error.into());
-			web_sys::console::error_1(&stack);
+			console_error(&stack);
 		}));
 	}
 }

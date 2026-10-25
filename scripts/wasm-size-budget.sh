@@ -158,7 +158,7 @@ stable) cargo=(cargo) ;;
 nightly)
 	cargo=(cargo "+$(tr -d '[:space:]' <rust-toolchain.nightly)")
 	cargo_args+=(-Zbuild-std=std,panic_abort -Zbuild-std-features=optimize_for_size)
-	rustflags+=" -Zunstable-options -Cpanic=immediate-abort -Zlocation-detail=none -Zfmt-debug=shallow"
+	rustflags+=" -Zunstable-options -Cpanic=immediate-abort -Zlocation-detail=none -Zfmt-debug=shallow${SURREAL_NIGHTLY_RUSTFLAGS:+ $SURREAL_NIGHTLY_RUSTFLAGS}"
 	;;
 *) echo "--toolchain must be stable or nightly" >&2; exit 2 ;;
 esac

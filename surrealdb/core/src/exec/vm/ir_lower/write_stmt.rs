@@ -716,6 +716,9 @@ pub(super) struct LoweredWrite {
 }
 
 /// The pipelines of a write statement.
+// `WritePipelines` is a stack-only return value of `lower_write`, consumed
+// once to assemble the lowered `Unit`.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum WritePipelines {
 	/// The one pipeline over the subjects the write names.
 	Own(Pipeline),

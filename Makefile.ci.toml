@@ -221,15 +221,15 @@ args = [
 
 # `ci-clippy` lints with `${ALL_FEATURES}`, which enables `surrealism`. Every
 # `cfg(not(feature = "surrealism"))` item is therefore compiled out and never
-# linted by it. This task lints exactly those items by building the crates that
-# carry surrealism-conditional code with the feature off.
+# linted by it. This task lints those items by checking the library targets
+# (`--lib`) of `surrealdb-core` and `surrealdb-expr` with default features off.
 #
 # `--no-default-features` is required, not merely dropping `surrealism` from the
 # feature list: `surrealdb-server`'s default set includes `surrealism`, and the
 # root package's default is `surrealdb-server/default`, so defaults would pull it
-# back in. Clippy only lints the packages named with `--package`, so a crate whose
-# surrealism-off arm needs covering must be listed here even when it is already
-# built as a dependency.
+# back in. Clippy only lints the packages named with `--package`, and
+# `--no-default-features` only applies to the selected root packages, so both
+# `surrealdb-core` and `surrealdb-expr` are listed explicitly.
 [tasks.ci-clippy-no-surrealism]
 category = "CI - CHECK"
 description = "Run clippy linting with surrealism disabled"
@@ -244,7 +244,7 @@ args = [
     "--no-default-features",
     "--features",
     "surrealdb-core/kv-mem",
-    "--all-targets",
+    "--lib",
     "--",
     "-D",
     "warnings",
@@ -610,31 +610,48 @@ script = '''
     # Clippy rather than `cargo check`: the host-target `ci-clippy` never
     # compiles `cfg(target_family = "wasm")` items, so this is the only pass
     # that lints them.
+    #
+    # All browser-targeted crates (`surrealdb`, `surrealdb-core`,
+    # `surrealdb-embedded`, `surrealdb-wasm`, and `surrealism-verify`) are
+    # linted in a unified feature graph with `--no-default-features` and
+    # `surrealdb/default` explicitly enabled so `surrealdb-core`'s default
+    # features (`shaped`, `graphql`, `gql`) remain disabled, matching the
+    # embedded browser engine's feature set while compiling `surrealdb-core`
+    # and its dependency tree once.
+    wasm_features="surrealdb/default,surrealdb/protocol-ws,surrealdb/protocol-http,surrealdb/kv-mem,surrealdb/kv-surrealkv,surrealdb/http,surrealdb/jwks,surrealdb-wasm/kv-mem,surrealdb-wasm/kv-surrealkv"
 
-    # The Rust SDK, compiled for the browser.
-    cargo clippy --locked --package surrealdb \
-        --features protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,jwks \
+    cargo clippy --locked \
+        --package surrealdb \
+        --package surrealdb-core \
+        --package surrealdb-embedded \
+        --package surrealdb-wasm \
+        --package surrealism-verify \
+        --no-default-features \
+        --features "$wasm_features" \
         --target wasm32-unknown-unknown \
         -- -D warnings
 
-    # The core engine on its own, as a downstream wasm build takes it: no
-    # default features and none of the SDK's. The SDK and engine checks pull
-    # other feature sets of `surrealdb-core` into one build, so this
-    # combination is not otherwise compiled.
+    # Re-lint `surrealdb-wasm` with the `debug` console panic hook enabled.
+    # Retaining the same selected package set keeps Cargo's resolved feature
+    # graph identical across shared dependencies so all other workspace crates
+    # remain fresh and only `surrealdb-wasm` is re-checked.
+    cargo clippy --locked \
+        --package surrealdb \
+        --package surrealdb-core \
+        --package surrealdb-embedded \
+        --package surrealdb-wasm \
+        --package surrealism-verify \
+        --no-default-features \
+        --features "$wasm_features,surrealdb-wasm/debug" \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
+
+    # The core engine on its own, as a downstream edge wasm build takes it: no
+    # default features and none of the SDK or embedded engine feature sets.
     cargo clippy --locked --package surrealdb-core \
         --no-default-features --features gql,http \
         --target wasm32-unknown-unknown \
         -- -D warnings
-
-    # The browser engine, which pulls in `surrealdb-embedded` behind it. Neither
-    # is reachable from `surrealdb`, so the check above covers neither. Both
-    # feature sets are built and published, so both are checked.
-    for features in kv-mem,kv-surrealkv kv-mem,kv-surrealkv,debug; do
-        cargo clippy --locked --package surrealdb-wasm \
-            --features "$features" \
-            --target wasm32-unknown-unknown \
-            -- -D warnings
-    done
 
     # The SDK for a WASI host, as a client: the WebSocket engine and TLS, without
     # the SurrealQL parser (its JWT dependency brings in `js-sys` on every wasm
@@ -651,12 +668,6 @@ script = '''
         echo "error: the SDK pulls wasm-bindgen into a wasm32-wasip2 build"
         exit 1
     fi
-
-    # The extension signature verifier. Every build that loads extensions
-    # verifies them, wasm32 hosts included, and nothing above depends on it.
-    cargo clippy --locked --package surrealism-verify \
-        --target wasm32-unknown-unknown \
-        -- -D warnings
 '''
 
 [tasks.ci-wasm-size-budget]

@@ -18,7 +18,7 @@ kv-mem = ["surrealdb-embedded/kv-mem"]
 kv-surrealkv = ["surrealdb-embedded/kv-surrealkv", "dep:surrealdb-kvs-surrealkv"]
 # Reports panics to the browser console. Off in a release build, where the
 # hook's message strings are dead weight.
-debug = ["dep:web-sys"]
+debug = []
 
 [lib]
 crate-type = ["cdylib"]
@@ -35,9 +35,6 @@ wasm-bindgen = { workspace = true }
 # Also reached by the `#[wasm_bindgen]` macro's expansion of every `async fn`.
 wasm-bindgen-futures = { workspace = true }
 wasm-streams = { workspace = true }
-# Only the `debug` panic hook writes to the console, so this is not compiled
-# into a release build at all.
-web-sys = { workspace = true, features = ["console"], optional = true }
 
 [lints]
 workspace = true
