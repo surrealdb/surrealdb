@@ -137,6 +137,12 @@ pub enum BoundJoinCondition {
 }
 
 /// A bound column reference, resolved to a specific relation index and column name.
+///
+/// Equality is that of every field: two references are equal when they were bound to the same
+/// relation and describe the same column. A reference whose relation the schema left open
+/// ([`Self::also_in`]) is therefore not equal to the reference to any relation it may hold.
+/// [`Self::is_compatible_with`] asks the looser question, whether two references may read the same
+/// column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundColumnRef {
 	/// 0-based relation index in the join tree (0 = primary/leftmost table, 1..N = joined tables).
@@ -170,6 +176,160 @@ pub struct BoundColumnRef {
 	/// grouped, which is absent for the group of the null-extended side of an outer join, so the
 	/// key of its record id is read through a guard.
 	pub aggregate_output: bool,
+	/// Further relations of the same FROM clause that may hold this column, when the schema does
+	/// not say which relation does.
+	///
+	/// Only an unqualified column of a join has any: the relations that do not list their columns
+	/// (schemaless tables) and are not ruled out by the schema of another. The column is then the
+	/// value of the first of `relation_index` and these that holds one, and `declared_type` and
+	/// `link_table` are those of `relation_index`. A qualified column, the column of a single
+	/// relation and the `id` column have none, and a column of an outer query
+	/// (`correlation_depth` above 0) is read from the outer row by name, whatever this holds.
+	pub also_in: Vec<usize>,
+}
+
+impl BoundColumnRef {
+	/// The relations that may hold this column, the one it is bound to first.
+	fn relations(&self) -> impl Iterator<Item = usize> + '_ {
+		std::iter::once(self.relation_index).chain(self.also_in.iter().copied())
+	}
+
+	/// Whether the two references may read the same column: they describe the same column, and
+	/// either are bound to the same relation or have a relation in common. A reference whose
+	/// relation the schema left open reads the same column as one of any relation it may hold,
+	/// so the `v` of a statement is its `t.v` when `t` may hold `v`.
+	///
+	/// The relation is reflexive and symmetric but not transitive: `t.v` and `u.v` are both
+	/// compatible with `v` and not with each other. It answers a question about a pair, so a
+	/// caller takes the first reference that matches and never groups references by it; equality
+	/// is [`PartialEq`].
+	pub fn is_compatible_with(&self, other: &Self) -> bool {
+		let same_relation = if self.also_in.is_empty() && other.also_in.is_empty() {
+			self.relation_index == other.relation_index && self.relation_name == other.relation_name
+		} else {
+			self.relations().any(|relation| other.relations().any(|held| held == relation))
+		};
+		same_relation
+			&& self.column == other.column
+			&& self.declared_type == other.declared_type
+			&& self.correlation_depth == other.correlation_depth
+			&& self.id_table == other.id_table
+			&& self.link_table == other.link_table
+			&& self.aggregate_output == other.aggregate_output
+	}
+}
+
+impl BoundExpr {
+	/// Whether the two expressions may read the same value: they are the same expression but for
+	/// their columns, which are compared with [`BoundColumnRef::is_compatible_with`]. A subquery
+	/// and the window specification of a window function are compared as bound, since their
+	/// columns are resolved against their own scope.
+	///
+	/// Like the relation between columns it is no equivalence, so it is applied to a pair and
+	/// never used to group expressions.
+	pub fn is_compatible_with(&self, other: &Self) -> bool {
+		fn all(left: &[BoundExpr], right: &[BoundExpr]) -> bool {
+			left.len() == right.len()
+				&& left.iter().zip(right).all(|(left, right)| left.is_compatible_with(right))
+		}
+		fn optional(left: Option<&BoundExpr>, right: Option<&BoundExpr>) -> bool {
+			match (left, right) {
+				(Some(left), Some(right)) => left.is_compatible_with(right),
+				(None, None) => true,
+				(Some(_), None) | (None, Some(_)) => false,
+			}
+		}
+		match self {
+			BoundExpr::Column(col) => {
+				matches!(other, BoundExpr::Column(o) if col.is_compatible_with(o))
+			}
+			BoundExpr::Access {
+				base,
+				field,
+			} => matches!(other, BoundExpr::Access { base: b, field: f }
+				if field == f && base.is_compatible_with(b)),
+			BoundExpr::Binary {
+				left,
+				op,
+				right,
+			} => matches!(other, BoundExpr::Binary { left: l, op: o, right: r }
+				if op == o && left.is_compatible_with(l) && right.is_compatible_with(r)),
+			BoundExpr::Unary {
+				op,
+				expr,
+			} => matches!(other, BoundExpr::Unary { op: o, expr: e }
+				if op == o && expr.is_compatible_with(e)),
+			BoundExpr::FunctionCall {
+				name,
+				args,
+				distinct,
+			} => matches!(other, BoundExpr::FunctionCall { name: n, args: a, distinct: d }
+				if name == n && distinct == d && all(args, a)),
+			BoundExpr::Case {
+				operand,
+				branches,
+				else_expr,
+			} => matches!(other, BoundExpr::Case { operand: o, branches: b, else_expr: e }
+				if optional(operand.as_deref(), o.as_deref())
+					&& branches.len() == b.len()
+					&& branches.iter().zip(b).all(|(l, r)| {
+						l.0.is_compatible_with(&r.0) && l.1.is_compatible_with(&r.1)
+					})
+					&& optional(else_expr.as_deref(), e.as_deref())),
+			BoundExpr::Between {
+				expr,
+				low,
+				high,
+				negated,
+			} => matches!(other, BoundExpr::Between { expr: e, low: l, high: h, negated: n }
+				if negated == n
+					&& expr.is_compatible_with(e)
+					&& low.is_compatible_with(l)
+					&& high.is_compatible_with(h)),
+			BoundExpr::InList {
+				expr,
+				list,
+				negated,
+			} => matches!(other, BoundExpr::InList { expr: e, list: l, negated: n }
+				if negated == n && expr.is_compatible_with(e) && all(list, l)),
+			BoundExpr::IsNull {
+				expr,
+				negated,
+			} => matches!(other, BoundExpr::IsNull { expr: e, negated: n }
+				if negated == n && expr.is_compatible_with(e)),
+			BoundExpr::Cast {
+				expr,
+				target_type,
+			} => matches!(other, BoundExpr::Cast { expr: e, target_type: t }
+				if target_type == t && expr.is_compatible_with(e)),
+			BoundExpr::InSubquery {
+				expr,
+				subquery,
+				negated,
+			} => matches!(other, BoundExpr::InSubquery { expr: e, subquery: s, negated: n }
+				if negated == n && subquery == s && expr.is_compatible_with(e)),
+			BoundExpr::WindowFunction {
+				name,
+				args,
+				distinct,
+				spec,
+			} => {
+				matches!(other, BoundExpr::WindowFunction { name: n, args: a, distinct: d, spec: s }
+				if name == n && distinct == d && spec == s && all(args, a))
+			}
+			BoundExpr::Literal(_)
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => self == other,
+		}
+	}
 }
 
 /// Bound literal value.

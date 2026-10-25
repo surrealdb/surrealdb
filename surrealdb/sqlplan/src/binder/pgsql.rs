@@ -909,6 +909,7 @@ pub fn bind_expr(
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					also_in: Vec::new(),
 				})]
 			} else {
 				args.iter()

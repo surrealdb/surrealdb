@@ -33,6 +33,8 @@ mod json_tests;
 #[cfg(test)]
 mod link_expr_tests;
 #[cfg(test)]
+mod link_join_columns_tests;
+#[cfg(test)]
 mod link_tests;
 #[cfg(test)]
 mod link_write_tests;

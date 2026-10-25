@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "A column named without its table is refused when more than 64 tables of the FROM clause may hold it, as each is a level of the expression that reads it. The refusal names the column and the limit."
+
+[test.results]
+request-error = "PostgreSQL SELECT lowering error: unsupported expression: column \"v\" may be in more than 64 tables of the FROM clause, qualify it with its table"
+*/
+
+SELECT v FROM ujc_t0, ujc_t1, ujc_t2, ujc_t3, ujc_t4, ujc_t5, ujc_t6, ujc_t7, ujc_t8, ujc_t9, ujc_t10, ujc_t11, ujc_t12, ujc_t13, ujc_t14, ujc_t15, ujc_t16, ujc_t17, ujc_t18, ujc_t19, ujc_t20, ujc_t21, ujc_t22, ujc_t23, ujc_t24, ujc_t25, ujc_t26, ujc_t27, ujc_t28, ujc_t29, ujc_t30, ujc_t31, ujc_t32, ujc_t33, ujc_t34, ujc_t35, ujc_t36, ujc_t37, ujc_t38, ujc_t39, ujc_t40, ujc_t41, ujc_t42, ujc_t43, ujc_t44, ujc_t45, ujc_t46, ujc_t47, ujc_t48, ujc_t49, ujc_t50, ujc_t51, ujc_t52, ujc_t53, ujc_t54, ujc_t55, ujc_t56, ujc_t57, ujc_t58, ujc_t59, ujc_t60, ujc_t61, ujc_t62, ujc_t63, ujc_t64;

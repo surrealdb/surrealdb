@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_unqualified_join_columns.surql"]
+
+[test]
+reason = "A grouped query that names a column of a join with its table in one clause and without it in another reads one expression in each: the GROUP BY key, the HAVING and the ORDER BY find the selected column or aggregate however its table is spelled."
+
+[[test.results]]
+value = "[{ n: 2, u: 'A2' }, { n: 1, u: 'A1' }]"
+
+[[test.results]]
+value = "[{ total: 4, v: 'a2' }, { total: 1, v: 'a1' }]"
+
+[[test.results]]
+value = "[{ total: 4, v: 'a2' }]"
+
+[[test.results]]
+value = "[{ v: 'a2' }]"
+
+[[test.results]]
+value = "[{ n: 1, v: 'a1' }, { n: 1, v: 'a2' }]"
+*/
+
+SELECT upper(ujc_a.v) AS u, count(*) AS n FROM ujc_a JOIN ujc_b ON ujc_a.k = ujc_b.k GROUP BY upper(v) ORDER BY upper(v) DESC;
+SELECT ujc_a.v, sum(ujc_b.bk) AS total FROM ujc_a JOIN ujc_b ON ujc_a.k = ujc_b.k GROUP BY v ORDER BY sum(bk) DESC;
+SELECT v, sum(ujc_b.bk) AS total FROM ujc_a JOIN ujc_b ON ujc_a.k = ujc_b.k GROUP BY ujc_a.v HAVING sum(bk) > 1 AND sum(ujc_b.bk) < 10;
+SELECT ujc_a.v FROM ujc_a JOIN ujc_b ON ujc_a.k = ujc_b.k GROUP BY ujc_a.v HAVING sum(bk) > 1 ORDER BY v;
+SELECT ujc_a.v, count(w) AS n FROM ujc_a LEFT JOIN ujc_b ON ujc_a.k = ujc_b.k GROUP BY v HAVING count(ujc_b.w) >= 1 ORDER BY count(w) DESC, v;

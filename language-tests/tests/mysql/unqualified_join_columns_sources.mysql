@@ -1,0 +1,46 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_unqualified_join_columns.surql"]
+
+[test]
+reason = "A column named without its table is read from the table that holds it when the join has derived tables and CTEs (on either side), USING joins (whose merged column is the value of whichever side has one), and subqueries that are joins or read the outer query."
+
+[[test.results]]
+value = "[{ v: 'a1', w: 'b1' }, { v: 'a2', w: 'b2' }]"
+
+[[test.results]]
+value = "[{ v: 'a1', w: 'b1' }]"
+
+[[test.results]]
+value = "[{ v: 'a2', w: 'b2' }]"
+
+[[test.results]]
+value = "[{ k: 1, v: 'a1', w: 'b1' }, { k: 2, v: 'a2', w: 'b2' }]"
+
+[[test.results]]
+value = "[{ k: 2, v: 'a2' }, { k: 3, v: 'a3' }]"
+
+[[test.results]]
+value = "[{ k: 4, v: NONE, w: 'b4' }]"
+
+[[test.results]]
+value = "[{ k: 1 }]"
+
+[[test.results]]
+value = "[{ v: 'a1' }]"
+
+[[test.results]]
+value = "[{ v: 'a1', w: 'b1' }]"
+*/
+
+SELECT v, w FROM ujc_a JOIN (SELECT k, w FROM ujc_b) d ON ujc_a.k = d.k WHERE w IS NOT NULL ORDER BY v;
+SELECT v, w FROM (SELECT k, w FROM ujc_b) d JOIN ujc_a ON ujc_a.k = d.k WHERE v = 'a1' AND w = 'b1';
+WITH c AS (SELECT k, w FROM ujc_b) SELECT v, w FROM c JOIN ujc_a ON ujc_a.k = c.k WHERE w = 'b2';
+SELECT k, v, w FROM ujc_a JOIN ujc_b USING (k) WHERE w IS NOT NULL ORDER BY k;
+SELECT k, v FROM ujc_a LEFT JOIN ujc_b USING (k) WHERE w IS NULL ORDER BY k;
+SELECT k, v, w FROM ujc_a RIGHT JOIN ujc_b USING (k) WHERE v IS NULL ORDER BY k;
+SELECT k FROM ujc_a JOIN ujc_b USING (k) JOIN ujc_c USING (k);
+SELECT v FROM ujc_a WHERE k IN (SELECT ujc_b.k FROM ujc_b JOIN ujc_c ON ujc_b.k = ujc_c.k WHERE x = 'c1');
+SELECT v, w FROM ujc_a JOIN ujc_b ON ujc_a.k = ujc_b.k WHERE EXISTS (SELECT 1 FROM ujc_c WHERE ujc_c.k = ujc_a.k) AND w = 'b1';

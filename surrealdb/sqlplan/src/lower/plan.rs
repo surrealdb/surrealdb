@@ -153,7 +153,7 @@ fn lower_bound_select_internal(
 	}
 
 	for (index, group) in select.group_by.iter().enumerate() {
-		if !agg_mapping.iter().any(|(expr, _)| expr == group) {
+		if !agg_mapping.iter().any(|(expr, _)| expr.is_compatible_with(group)) {
 			let name = format!("__sql_group_{index}");
 			aggregate_targets.push(BoundTarget {
 				expr: if stored_keys.contains(&group) {
@@ -174,7 +174,7 @@ fn lower_bound_select_internal(
 		let mut having_aggs = Vec::new();
 		collect_aggregate_exprs(having_expr, &mut having_aggs);
 		for agg in having_aggs {
-			if !agg_mapping.iter().any(|(e, _)| e == &agg) {
+			if !agg_mapping.iter().any(|(e, _)| e.is_compatible_with(&agg)) {
 				let syn_name = format!("__sql_having_{}", synthetic_idx);
 				synthetic_idx += 1;
 				aggregate_targets.push(BoundTarget {
@@ -193,7 +193,7 @@ fn lower_bound_select_internal(
 		let mut order_aggs = Vec::new();
 		collect_aggregate_exprs(&o.expr, &mut order_aggs);
 		for agg in order_aggs {
-			if !agg_mapping.iter().any(|(e, _)| e == &agg) {
+			if !agg_mapping.iter().any(|(e, _)| e.is_compatible_with(&agg)) {
 				let syn_name = format!("__sql_order_{}", order_syn_idx);
 				order_syn_idx += 1;
 				aggregate_targets.push(BoundTarget {
@@ -286,7 +286,15 @@ fn lower_bound_select_internal(
 				if stored_keys.contains(&g) {
 					lower_bound_expr(&as_stored(g), policy)
 				} else {
-					lower_stored(g, policy)
+					// A key that is a selected expression is lowered as that expression, which
+					// is how the engine knows the item is the key. The first selected expression
+					// the key is compatible with is that expression.
+					let selected = select
+						.targets
+						.iter()
+						.map(|t| &t.expr)
+						.find(|expr| expr.is_compatible_with(g));
+					lower_stored(selected.unwrap_or(g), policy)
 				}
 			})
 			.collect::<Result<Vec<_>, _>>()?;
@@ -667,7 +675,7 @@ fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {
 			// result is named once and read by a HAVING or an ORDER BY as that column.
 			let aggregates = crate::functions::FunctionRegistry::is_bound_aggregate(name)
 				|| args.iter().any(bound_expr_contains_aggregate);
-			if aggregates && !acc.contains(expr) {
+			if aggregates && !acc.iter().any(|seen| seen.is_compatible_with(expr)) {
 				acc.push(expr.clone());
 			}
 		}
@@ -770,7 +778,7 @@ fn rewrite_aggregates_to_columns(
 	keep_id: bool,
 ) -> BoundExpr {
 	for (agg, col_name) in mapping {
-		if expr == agg {
+		if agg.is_compatible_with(expr) {
 			return BoundExpr::Column(BoundColumnRef {
 				relation_index: 0,
 				relation_name: String::new(),
@@ -779,6 +787,7 @@ fn rewrite_aggregates_to_columns(
 				id_table: id_column(agg).filter(|_| keep_id).map(|(_, table)| table.to_string()),
 				link_table: link_column(agg).map(|(_, table)| table.to_string()),
 				aggregate_output: keep_id,
+				also_in: Vec::new(),
 				declared_type: match agg {
 					BoundExpr::Column(col) => col.declared_type,
 					BoundExpr::Literal(_)
@@ -1027,13 +1036,21 @@ fn lower_table_source(
 						extract_equi_conditions(expr, &mut equi_pairs, &mut residual);
 
 						for (l, r) in equi_pairs {
-							let (probe, build) =
-								if expr_max_relation_index(&l) > expr_max_relation_index(&r) {
-									(r, l)
-								} else {
-									(l, r)
-								};
-							on.push(lower_join_key(&probe, &build, policy)?);
+							match probe_is_right(&l, &r, alias_idx) {
+								Some(swap) => {
+									let (probe, build) = if swap {
+										(r, l)
+									} else {
+										(l, r)
+									};
+									on.push(lower_join_key(&probe, &build, policy)?);
+								}
+								None => residual.push(BoundExpr::Binary {
+									left: Box::new(l),
+									op: BoundBinaryOp::Equal,
+									right: Box::new(r),
+								}),
+							}
 						}
 
 						if !residual.is_empty() {
@@ -1437,9 +1454,32 @@ fn extract_equi_conditions(
 	}
 }
 
-fn expr_max_relation_index(expr: &BoundExpr) -> usize {
+/// Whether the key of the rows on the left is the right side of the equality `l = r` in the
+/// condition of the join whose right relation is `alias_idx + 1`, or `None` when the equality is
+/// no key of the join.
+///
+/// A side orients the pair by the highest relation it reads. A side that reads a column whose
+/// relation the schema left open ([`BoundColumnRef::also_in`]) is the opposite of a side that
+/// names a relation, as the two sides of a key are. When no side names a relation (both are open,
+/// or one is open and the other a literal or a parameter) the equality is judged on the joined
+/// row.
+fn probe_is_right(l: &BoundExpr, r: &BoundExpr, alias_idx: usize) -> Option<bool> {
+	let is_constant =
+		|expr: &BoundExpr| matches!(expr, BoundExpr::Literal(_) | BoundExpr::Param { .. });
+	match (expr_max_relation_index(l), expr_max_relation_index(r)) {
+		(Some(l_max), Some(r_max)) => Some(l_max > r_max),
+		(None, Some(r_max)) if !is_constant(r) => Some(r_max <= alias_idx),
+		(Some(l_max), None) if !is_constant(l) => Some(l_max > alias_idx),
+		(None, _) | (_, None) => None,
+	}
+}
+
+/// The highest relation index of the columns `expr` reads, or `None` when it reads a column whose
+/// relation the schema left open ([`BoundColumnRef::also_in`]).
+fn expr_max_relation_index(expr: &BoundExpr) -> Option<usize> {
 	match expr {
-		BoundExpr::Column(col) => col.relation_index,
+		BoundExpr::Column(col) if col.also_in.is_empty() => Some(col.relation_index),
+		BoundExpr::Column(_) => None,
 		BoundExpr::Access {
 			base,
 			..
@@ -1448,7 +1488,7 @@ fn expr_max_relation_index(expr: &BoundExpr) -> usize {
 			left,
 			right,
 			..
-		} => expr_max_relation_index(left).max(expr_max_relation_index(right)),
+		} => Some(expr_max_relation_index(left)?.max(expr_max_relation_index(right)?)),
 		BoundExpr::Unary {
 			expr,
 			..
@@ -1487,6 +1527,6 @@ fn expr_max_relation_index(expr: &BoundExpr) -> usize {
 		| BoundExpr::UserVar(_)
 		| BoundExpr::SystemVar {
 			..
-		} => 0,
+		} => Some(0),
 	}
 }

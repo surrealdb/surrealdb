@@ -921,13 +921,27 @@ pub(crate) fn lower_column_raw(col: &BoundColumnRef) -> LogicalExpr {
 		}
 	} else if col.column == "*" {
 		LogicalExpr::Field(Strand::from("*"))
-	} else if col.relation_index == 0 {
-		// Base table in join or single-table query: field is directly on the row
-		LogicalExpr::Field(Strand::from(col.column.as_str()))
 	} else {
-		// Joined table at index k >= 1: field is nested under _join{k-1}
-		let alias = RelationAlias::new(col.relation_index - 1);
-		alias.access(Strand::from(col.column.as_str()))
+		// The value of the first relation that holds one: the relations of `also_in` are read
+		// only when the schema left it open which relation owns the column.
+		col.also_in.iter().fold(
+			relation_field(col.relation_index, &col.column),
+			|read, relation| LogicalExpr::Binary {
+				left: Box::new(read),
+				op: BinaryOperator::NullCoalescing,
+				right: Box::new(relation_field(*relation, &col.column)),
+			},
+		)
+	}
+}
+
+/// The field `column` of the relation at `relation` of a FROM clause: a base table's fields are on
+/// the row itself, a joined table's under its alias.
+fn relation_field(relation: usize, column: &str) -> LogicalExpr {
+	if relation == 0 {
+		LogicalExpr::Field(Strand::from(column))
+	} else {
+		RelationAlias::new(relation - 1).access(Strand::from(column))
 	}
 }
 

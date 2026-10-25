@@ -11,6 +11,10 @@ use crate::ir::{
 	BoundWindowSpec,
 };
 
+/// The most relations an unqualified column of a join may be read from. Each is a level of the
+/// lowered expression, so a FROM clause cannot make the expression arbitrarily deep.
+const MAX_COLUMN_HOLDERS: usize = 64;
+
 /// A single relation registered in the current query scope (from a FROM clause or JOIN).
 #[derive(Debug, Clone)]
 pub struct RelationEntry {
@@ -61,6 +65,7 @@ impl RelationEntry {
 			id_table,
 			link_table,
 			aggregate_output: false,
+			also_in: Vec::new(),
 		}
 	}
 }
@@ -410,7 +415,91 @@ impl QueryScope {
 		}
 	}
 
+	/// Resolve a column named without its relation.
+	///
+	/// A relation that does not list its columns (a schemaless table) may hold any column, so a
+	/// column that no relation lists is read from the first of those relations that has a value;
+	/// it is then no error when it is in none of them or in several, as nothing says it is not.
+	/// Every other column is resolved by [`Self::resolve_listed_column`].
 	fn resolve_unqualified_column(
+		&self,
+		col_name: &str,
+		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
+	) -> Result<BoundColumnRef, PlanError> {
+		match self.resolve_open_column(col_name, policy, catalog)? {
+			Some(col) => Ok(col),
+			None => self.resolve_listed_column(col_name, policy, catalog),
+		}
+	}
+
+	/// Resolve a column named without its relation among the relations of a join that do not list
+	/// their columns.
+	///
+	/// The column is bound to the relation that leads and carries the others that may hold it in
+	/// [`BoundColumnRef::also_in`]. A holder whose column the catalog describes (a link, a declared
+	/// type) leads, and the others follow in the order of the FROM clause, as the value of a column
+	/// merged by `USING` is that of whichever side has one. A relation whose columns are known and
+	/// lack the column cannot hold it. The `id` of every base table is its key, so the first of
+	/// these relations holds it and no other is read.
+	///
+	/// Returns `None` when the column is not one of these relations': a single relation or none, a
+	/// relation that lists the column (it binds the column, or the column is ambiguous), or no
+	/// relation that may hold it. More than `MAX_COLUMN_HOLDERS` holders is an error, as each is a
+	/// level of the lowered expression.
+	fn resolve_open_column(
+		&self,
+		col_name: &str,
+		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
+	) -> Result<Option<BoundColumnRef>, PlanError> {
+		let lists_column = |rel: &RelationEntry| {
+			rel.known_columns
+				.as_ref()
+				.is_some_and(|cols| cols.iter().any(|c| policy.idents_match(c, col_name)))
+		};
+		if self.relations.len() < 2 || self.relations.iter().any(lists_column) {
+			return Ok(None);
+		}
+
+		let folded = policy.fold_identifier(col_name).into_owned();
+		let limit = if folded == "id" {
+			1
+		} else {
+			MAX_COLUMN_HOLDERS + 1
+		};
+		let mut holders: Vec<BoundColumnRef> = self
+			.relations
+			.iter()
+			.filter(|rel| rel.known_columns.is_none())
+			.take(limit)
+			.map(|rel| rel.column_ref(folded.clone(), catalog))
+			.collect();
+		if holders.len() > MAX_COLUMN_HOLDERS {
+			return Err(PlanError::UnsupportedExpression(format!(
+				"column \"{col_name}\" may be in more than {MAX_COLUMN_HOLDERS} tables of the FROM clause, qualify it with its table"
+			)));
+		}
+		if holders.is_empty() {
+			return Ok(None);
+		}
+
+		if let Some(described) = holders.iter().position(|col| {
+			col.link_table.is_some() || col.declared_type != crate::SqlType::Unknown
+		}) {
+			holders.swap(0, described);
+			// Each holder is a distinct relation, and `relation_index` is its position in the FROM
+			// clause, so the keys are unique and the order does not depend on the sort's stability.
+			holders[1..].sort_unstable_by_key(|col| col.relation_index);
+		}
+		let mut col = holders.remove(0);
+		col.also_in = holders.iter().map(|other| other.relation_index).collect();
+		Ok(Some(col))
+	}
+
+	/// Resolve a column named without its relation from the columns the relations list and from
+	/// the outer queries.
+	fn resolve_listed_column(
 		&self,
 		col_name: &str,
 		policy: &DialectPolicy,
@@ -513,6 +602,7 @@ impl QueryScope {
 				link_table: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
+				also_in: Vec::new(),
 			}))
 		} else if let BoundExpr::FunctionCall {
 			name,
@@ -528,6 +618,7 @@ impl QueryScope {
 				link_table: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
+				also_in: Vec::new(),
 			}))
 		} else {
 			Ok(target.expr.clone())
@@ -549,6 +640,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					also_in: Vec::new(),
 				}));
 			}
 		}
@@ -588,6 +680,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					also_in: Vec::new(),
 				}),
 				alias: None,
 				is_wildcard: true,
@@ -635,6 +728,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					also_in: Vec::new(),
 				}),
 				alias: None,
 				is_wildcard: true,
