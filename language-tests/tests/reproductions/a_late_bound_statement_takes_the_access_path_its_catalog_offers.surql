@@ -7,28 +7,27 @@ database = true
 reason = """
 A block statement after a schema statement whose effect the block cannot
 know ahead (here, one under IF) is planned for the catalog its transaction
-reads when the block reaches it, as main plans it there: it takes the KNN,
-full-text and B-tree access path an index defined earlier in the
-transaction offers — which, defined in that transaction, lists none of the
-rows the transaction wrote before it — fails over a removed full-text
-index, and honours WITH INDEX and WITH NOINDEX against the indexes it finds.
-EXPLAIN renders the access path chosen there.
+reads when the block reaches it: a write enters the index defined earlier
+in the transaction, and a read takes the KNN, full-text and B-tree access
+path that index offers, fails over a removed full-text index, and honours
+WITH INDEX and WITH NOINDEX against the indexes it finds. EXPLAIN renders
+the access path chosen there.
 """
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[]"
+value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: doc:1 }]"
 
 [[test.results]]
 error = "There was no suitable index supporting the expression: text @@ 'hello'"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: n:1 }]"
 
 [[test.results]]
 value = '''
@@ -37,7 +36,7 @@ value = '''
 ''''
 
 [[test.results]]
-value = "[]"
+value = "[{ id: n:3 }, { id: n:1 }]"
 
 [[test.results]]
 value = "[{ id: n:3 }]"
@@ -52,18 +51,18 @@ value = '''
 
 LET $go = true;
 {
+	IF $go { DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 };
 	CREATE pts:1 SET point = [1,2,3,4];
 	CREATE pts:2 SET point = [4,5,6,7];
-	IF $go { DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 };
 	SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> [2,3,4,5];
 };
 {
-	CREATE doc:1 SET text = 'hello world';
-	CREATE doc:2 SET text = 'goodbye';
 	IF $go {
 		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 		DEFINE INDEX ft ON doc FIELDS text FULLTEXT ANALYZER simple BM25;
 	};
+	CREATE doc:1 SET text = 'hello world';
+	CREATE doc:2 SET text = 'goodbye';
 	SELECT id FROM doc WHERE text @@ 'hello';
 };
 {
@@ -71,14 +70,13 @@ LET $go = true;
 	SELECT id FROM doc WHERE text @@ 'hello';
 };
 {
-	-- The index defined after the block's writes lists none of them, so the
-	-- B-tree access path it offers returns no row. A block that writes plans
-	-- every column as one that may hold an array, whatever `v` is declared, so
-	-- it is an equality that takes the index here: an open range reaching the
-	-- place arrays sort reads the table instead.
+	-- The index is defined before the block's writes, so each of them enters
+	-- it. A block that writes plans every column as one that may hold an array,
+	-- whatever `v` is declared, so it is an equality that takes the index here:
+	-- an open range reaching the place arrays sort reads the table instead.
 	DEFINE FIELD v ON n TYPE option<int>;
-	CREATE n:1 SET v = 3; CREATE n:2 SET v = 1; CREATE n:3 SET v = 2;
 	IF $go { DEFINE INDEX iv ON n FIELDS v };
+	CREATE n:1 SET v = 3; CREATE n:2 SET v = 1; CREATE n:3 SET v = 2;
 	SELECT id FROM n WHERE v = 3 LIMIT 2;
 };
 {

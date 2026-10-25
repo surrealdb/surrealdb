@@ -435,6 +435,9 @@ fn dml_inner(
 		| StoreInstr::FieldAdmitsSubFields {
 			..
 		}
+		| StoreInstr::RefuseBlockingBuild {
+			..
+		}
 		| StoreInstr::BuildIndex {
 			..
 		}
@@ -2468,6 +2471,15 @@ async fn step_inner(
 				Value::Bool(field.field_kind.as_ref().is_none_or(|kind| kind.allows_sub_fields())),
 			);
 		}
+		StoreInstr::RefuseBlockingBuild {
+			ns,
+			db,
+			tb,
+			index,
+		} => {
+			ctx.txn().flush_held().await.map_err(|e| ControlFlow::Err(e.into()))?;
+			refuse_blocking_build(regs, ctx, *ns, *db, *tb, *index)?;
+		}
 		StoreInstr::BuildIndex {
 			table,
 			index,
@@ -3603,6 +3615,42 @@ fn id_of(value: &Value) -> FlowResult<u32> {
 	}
 }
 
+/// Refuse the definition of the index named in register `index` over the table
+/// named in register `tb` when the transaction has written records of the
+/// table: a build the statement waits for would leave them out
+/// ([`StoreInstr::RefuseBlockingBuild`]).
+fn refuse_blocking_build(
+	regs: &[Scalar<'_>],
+	ctx: &ExecutionContext,
+	ns: u16,
+	db: u16,
+	tb: u16,
+	index: u16,
+) -> FlowResult<()> {
+	let tb = table_name_of(&read(regs, tb))?;
+	let wrote = ctx
+		.txn()
+		.wrote_records_of(
+			crate::catalog::NamespaceId(id_of(&read(regs, ns))?),
+			crate::catalog::DatabaseId(id_of(&read(regs, db))?),
+			&tb,
+		)
+		.map_err(ControlFlow::Err)?;
+	if !wrote {
+		return Ok(());
+	}
+	let index = read(regs, index);
+	let index = if let Value::String(name) = &index {
+		name.as_str().to_owned()
+	} else {
+		surrealdb_types::ToSql::to_sql(&index)
+	};
+	Err(ControlFlow::Err(anyhow::Error::new(crate::idx::Error::BlockingBuildAfterWrites {
+		index,
+		table: tb.as_str().to_owned(),
+	})))
+}
+
 /// The catalog id of a sequence's scope, held in a register.
 fn scope(regs: &[Scalar<'_>], reg: Option<u16>, what: &str) -> FlowResult<u32> {
 	let reg = reg.ok_or_else(|| ControlFlow::Err(anyhow!("an id with no {what} scope")))?;
@@ -3621,6 +3669,7 @@ fn speculative_skip(instr: &StoreInstr) -> bool {
 			| StoreInstr::CompactAll
 			| StoreInstr::RetireIndexLocally { .. }
 			| StoreInstr::KillOnCommit { .. }
+			| StoreInstr::RefuseBlockingBuild { .. }
 			| StoreInstr::BuildIndex { .. }
 			| StoreInstr::DeleteModelArtifact { .. }
 			| StoreInstr::LoadAnalyzer { .. }

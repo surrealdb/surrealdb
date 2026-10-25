@@ -37,6 +37,7 @@ use surrealdb_kvs::api::Transactable;
 use surrealdb_kvs::{Key, KeyRange};
 use tokio::sync::Mutex;
 
+use crate::record_writes::{Reached, RecordWrites, record_prefix};
 use crate::{Error, Result};
 
 /// Whether creates are held at all: `SURREAL_HOLD_CREATES=false` makes every create check its key
@@ -199,6 +200,7 @@ impl Absence {
 	pub(crate) async fn hold(
 		&self,
 		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
 		key: Vec<u8>,
 		val: Vec<u8>,
 	) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
@@ -207,22 +209,27 @@ impl Absence {
 			return Err(violation(key));
 		}
 		if self.cursor_may_meet(&key) || list.may_hold(&key) {
-			self.flush(inner, &mut list).await?;
+			self.flush(inner, record_writes, &mut list).await?;
 			return Ok(Some((key, val)));
 		}
 		list.push(key, val);
 		self.held.store(true, Ordering::Release);
 		if list.full() {
-			self.flush(inner, &mut list).await?;
+			self.flush(inner, record_writes, &mut list).await?;
 		}
 		Ok(None)
 	}
 
 	/// Flushes the list when it may hold `key`.
-	pub(crate) async fn guard_key(&self, inner: &dyn Transactable, key: &[u8]) -> Result<()> {
+	pub(crate) async fn guard_key(
+		&self,
+		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
+		key: &[u8],
+	) -> Result<()> {
 		let mut list = self.list.lock().await;
 		if list.may_hold(key) {
-			self.flush(inner, &mut list).await?;
+			self.flush(inner, record_writes, &mut list).await?;
 		}
 		Ok(())
 	}
@@ -231,11 +238,12 @@ impl Absence {
 	pub(crate) async fn guard_keys(
 		&self,
 		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
 		keys: &[Key<'_>],
 	) -> Result<()> {
 		let mut list = self.list.lock().await;
 		if keys.iter().any(|key| list.may_hold(key.as_slice())) {
-			self.flush(inner, &mut list).await?;
+			self.flush(inner, record_writes, &mut list).await?;
 		}
 		Ok(())
 	}
@@ -244,27 +252,36 @@ impl Absence {
 	pub(crate) async fn guard_range(
 		&self,
 		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
 		rng: &KeyRange<'_>,
 	) -> Result<()> {
 		let mut list = self.list.lock().await;
 		if list.may_meet(rng.start.as_slice(), rng.end.as_slice()) {
-			self.flush(inner, &mut list).await?;
+			self.flush(inner, record_writes, &mut list).await?;
 		}
 		Ok(())
 	}
 
 	/// Flushes the list whatever it holds.
-	pub(crate) async fn flush_all(&self, inner: &dyn Transactable) -> Result<()> {
+	pub(crate) async fn flush_all(
+		&self,
+		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
+	) -> Result<()> {
 		let mut list = self.list.lock().await;
-		self.flush(inner, &mut list).await
+		self.flush(inner, record_writes, &mut list).await
 	}
 
 	/// Flushes the list and takes the violation, if any: the key of the earliest held create that
 	/// found its key present. The transaction answers every operation as usual afterwards.
-	pub(crate) async fn take_violation(&self, inner: &dyn Transactable) -> Result<Option<Vec<u8>>> {
+	pub(crate) async fn take_violation(
+		&self,
+		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
+	) -> Result<Option<Vec<u8>>> {
 		let mut list = self.list.lock().await;
 		if list.violation.is_none() {
-			match self.flush(inner, &mut list).await {
+			match self.flush(inner, record_writes, &mut list).await {
 				Ok(()) => return Ok(None),
 				Err(Error::DeferredKeyExists {
 					..
@@ -285,7 +302,12 @@ impl Absence {
 		self.held.store(false, Ordering::Release);
 	}
 
-	async fn flush(&self, inner: &dyn Transactable, list: &mut List) -> Result<()> {
+	async fn flush(
+		&self,
+		inner: &dyn Transactable,
+		record_writes: Option<&parking_lot::Mutex<RecordWrites>>,
+		list: &mut List,
+	) -> Result<()> {
 		if let Some(key) = &list.violation {
 			return Err(violation(key));
 		}
@@ -310,7 +332,27 @@ impl Absence {
 			}
 			None => None,
 		};
+		let tables = match record_writes {
+			Some(writes) => {
+				let writes = writes.lock();
+				entries
+					.iter()
+					.filter_map(|(key, _)| record_prefix(key))
+					.filter(|records| !writes.noted(records))
+					.map(<[u8]>::to_vec)
+					.collect()
+			}
+			None => Vec::new(),
+		};
 		inner.set_many(entries).await?;
+		if let Some(writes) = record_writes
+			&& !tables.is_empty()
+		{
+			let mut writes = writes.lock();
+			for records in tables {
+				writes.note(Reached::Table(records));
+			}
+		}
 		match failed {
 			None => {
 				self.held.store(false, Ordering::Release);

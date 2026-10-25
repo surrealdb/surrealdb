@@ -29,8 +29,8 @@ value = "[{ a: 1, id: t:1 }]"
 */
 CREATE t:1 SET a = 1;
 BEGIN;
-CREATE t:0 SET a = 2;
 (function() { return surrealdb.query("DEFINE INDEX u ON t FIELDS a UNIQUE") });
+CREATE t:0 SET a = 2;
 CREATE t:2 SET a = 1;
 COMMIT;
 SELECT * FROM t;

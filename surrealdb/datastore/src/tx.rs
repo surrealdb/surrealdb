@@ -10096,6 +10096,26 @@ impl Transaction {
 		}
 	}
 
+	/// Whether this transaction has written or deleted a record of table `tb`
+	/// in `ns` and `db`, in a write no save point rollback has undone.
+	///
+	/// A reader that scans the table in transactions of its own reads it as
+	/// last committed, which holds none of those writes.
+	pub fn wrote_records_of(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<bool> {
+		let records = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_bound()?;
+		Ok(self.tr.with_record_writes(|writes| writes.wrote(&records)).unwrap_or(false))
+	}
+
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
@@ -10104,7 +10124,8 @@ impl Transaction {
 	/// The buffered index deltas are scoped alongside the storage save point.
 	/// They describe writes this transaction has made, so a rollback that undoes
 	/// those writes has to undo the buffered description of them too. So are
-	/// the notes of the records it created ([`crate::creations`]) and the
+	/// the tables whose records it has written ([`Self::wrote_records_of`]), the
+	/// notes of the records it created ([`crate::creations`]) and the
 	/// provisional sequences — see [`Self::provisional_save_points`].
 	pub async fn new_save_point(&self) -> Result<()> {
 		// The held creates are written below the save point, which no rollback of it undoes.
@@ -10124,6 +10145,7 @@ impl Transaction {
 		self.changefeed.get_or_init(Changefeed::new).push_save_point();
 		self.live_events.get_or_init(LiveEventBuffer::new).push_save_point();
 		self.cache.push_save_point();
+		self.tr.with_record_writes(|writes| writes.push_save_point());
 		self.creations.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
 		self.provisional_save_points.lock().await.push(snapshot);
@@ -10159,6 +10181,7 @@ impl Transaction {
 			live_events.release_save_point();
 		}
 		self.cache.release_save_point();
+		self.tr.with_record_writes(|writes| writes.release_save_point());
 		self.creations.release_save_point();
 		// Released, the scope folds into the enclosing one, whose snapshot
 		// still describes the state an outer rollback returns to.
@@ -10207,6 +10230,7 @@ impl Transaction {
 		// the writes the rollback undoes, and the journal above reaches only this
 		// transaction's own cache, so none of them may outlive the rollback.
 		self.speculative_caches.lock().await.clear();
+		self.tr.with_record_writes(|writes| writes.rollback_save_point());
 		self.creations.rollback_save_point();
 		// Whether a locked read's conflict registration survives a savepoint
 		// rollback is engine-defined, so no memo of one may outlive it: the
@@ -17456,6 +17480,232 @@ impl WriteBatch {
 	pub fn del_record(&mut self, tb: TableName, id: RecordIdKey, key: Key<'static>) {
 		self.dels.push(key);
 		self.records.push((tb, id));
+	}
+}
+
+#[cfg(test)]
+mod record_writes_tests {
+	use std::borrow::Cow;
+	use std::sync::Arc;
+
+	use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId};
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_expr::val::{RecordIdKey, TableName};
+	use surrealdb_kvs::key::{KVKey, KVSubspace};
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use super::Transaction;
+	use crate::factory::TransactionFactory;
+	use crate::key::schema::{IdxRoot, IndexDefKey, RecordKey, RecordPrefix, TblRoot};
+	use crate::sequences::Sequences;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	fn record(tb: &str, id: i64) -> Key<'static> {
+		let tb = TableName::from(tb);
+		let id = RecordIdKey::Number(id);
+		RecordKey::new(NS, DB, Cow::Borrowed(&tb), Cow::Borrowed(&id)).encode_key().unwrap()
+	}
+
+	fn records(tb: &TableName) -> RecordPrefix<'_> {
+		RecordPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(tb),
+		}
+	}
+
+	fn wrote(tx: &Transaction, tb: &str) -> bool {
+		tx.wrote_records_of(NS, DB, &TableName::from(tb)).unwrap()
+	}
+
+	/// Each way a transaction writes or deletes a key, applied to a record of
+	/// `user` that exists.
+	const WRITES: [&str; 11] = [
+		"set",
+		"put",
+		"put_compare",
+		"replace",
+		"del",
+		"del_compare",
+		"clr",
+		"delr",
+		"clrr",
+		"del_prefix",
+		"clr_prefix",
+	];
+
+	async fn write(tx: &Transaction, how: &str) {
+		let user = TableName::from("user");
+		let fresh = record("user", 2);
+		let stored = record("user", 1);
+		match how {
+			"set" => tx.set(fresh, b"v".to_vec()).await,
+			"put" => tx.put(fresh, b"v".to_vec()).await,
+			"put_compare" => tx.put_compare(stored, b"w".to_vec(), Some(b"v".to_vec())).await,
+			"replace" => tx.replace_raw(stored, b"w".to_vec()).await,
+			"del" => tx.del(stored).await,
+			"del_compare" => tx.del_compare(stored, Some(b"v")).await,
+			"clr" => tx.clr(stored).await,
+			"delr" => tx.delr(records(&user).raw_range().unwrap()).await,
+			"clrr" => tx.clrr(records(&user).raw_range().unwrap()).await,
+			"del_prefix" => tx.del_prefix_key(&records(&user)).await,
+			"clr_prefix" => tx.clr_prefix_key(&records(&user)).await,
+			other => unreachable!("{other}"),
+		}
+		.unwrap()
+	}
+
+	#[tokio::test]
+	async fn every_write_of_a_record_marks_its_table_and_no_other() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		for how in WRITES {
+			let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+			tx.get(record("user", 1), None).await.unwrap();
+			assert!(!wrote(&tx, "user"), "{how}: a read marks nothing");
+			write(&tx, how).await;
+			assert!(wrote(&tx, "user"), "{how}");
+			for other in ["users", "use", "other"] {
+				assert!(!wrote(&tx, other), "{how}: {other}");
+			}
+			assert!(
+				!tx.wrote_records_of(NS, DatabaseId(3), &TableName::from("user")).unwrap(),
+				"{how}: another database's table of the same name"
+			);
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	#[tokio::test]
+	async fn the_other_keys_of_a_table_mark_nothing() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		let user = TableName::from("user");
+		let definition = IndexDefKey::new(NS, DB, Cow::Borrowed(&user), Cow::Borrowed("ix"));
+		tx.set(definition.encode_key().unwrap(), b"v".to_vec()).await.unwrap();
+		let entries = IdxRoot {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&user),
+			ix: IndexId(3),
+		};
+		let mut entry = entries.encode_bound().unwrap().to_vec();
+		entry.extend_from_slice(b"entry");
+		tx.set(Key::from(entry), b"v".to_vec()).await.unwrap();
+		tx.del_prefix_key(&entries).await.unwrap();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_range_delete_of_a_table_marks_it_only_when_it_removes_a_record() {
+		let (tf, sq) = factory().await;
+		let user = TableName::from("user");
+		let table = TblRoot {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&user),
+		};
+		// Removing a table that holds no record removes none, however the clear is made.
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.del_prefix_key(&table).await.unwrap();
+		tx.clr_prefix_key(&table).await.unwrap();
+		tx.delr(records(&user).raw_range().unwrap()).await.unwrap();
+		tx.clrr(records(&user).raw_range().unwrap()).await.unwrap();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+		// Another table's records are not the table's own.
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.set(record("other", 1), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.del_prefix_key(&table).await.unwrap();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+		// Removing a table whose record is stored removes it, whichever table is read.
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		assert!(!wrote(&tx, "user"));
+		tx.del_prefix_key(&table).await.unwrap();
+		assert!(wrote(&tx, "user"));
+		assert!(!wrote(&tx, "other"));
+		tx.cancel().await.unwrap();
+		// A record this transaction deleted before the clear is a write of its own.
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.del(record("user", 1)).await.unwrap();
+		tx.del_prefix_key(&table).await.unwrap();
+		assert!(wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_write_that_fails_marks_nothing() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.put(record("user", 1), b"w".to_vec()).await.unwrap_err();
+		tx.put_compare(record("user", 1), b"w".to_vec(), Some(b"x".to_vec())).await.unwrap_err();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_transaction_that_cannot_write_marks_nothing() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Read, sq.clone()).await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap_err();
+		tx.delr(records(&TableName::from("user")).raw_range().unwrap()).await.unwrap_err();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_save_point_rollback_unmarks_what_it_undid() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		tx.new_save_point().await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap();
+		tx.rollback_to_save_point().await.unwrap();
+		assert!(!wrote(&tx, "user"));
+		tx.new_save_point().await.unwrap();
+		tx.set(record("user", 1), b"v".to_vec()).await.unwrap();
+		tx.release_last_save_point().await.unwrap();
+		assert!(wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_speculations_writes_mark_nothing() {
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		let speculation = tx.speculate(Default::default()).unwrap();
+		speculation.txn().set(record("user", 1), b"v".to_vec()).await.unwrap();
+		assert!(!wrote(speculation.txn(), "user"));
+		speculation.end();
+		assert!(!wrote(&tx, "user"));
+		tx.cancel().await.unwrap();
 	}
 }
 

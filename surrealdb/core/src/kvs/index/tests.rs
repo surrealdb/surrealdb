@@ -9303,7 +9303,9 @@ async fn a_transaction_is_not_refused_for_its_own_nodes_answer_to_its_build() ->
 
 /// Commit a client-owned transaction on node A of two that runs `writes` and then
 /// `DEFINE INDEX ia ON a`, whose build is held while node B rebuilds `ix ON t`, which reads only
-/// once node A has answered its write barrier. Answers the commit's outcome.
+/// once node A has answered its write barrier. Answers the commit's outcome. The `writes` write no
+/// record of `a`, as a blocking build is refused in a transaction that wrote its table's records;
+/// `c` is a table they may write besides `t`.
 #[cfg(feature = "kv-mem")]
 async fn commit_past_another_nodes_build(writes: &str) -> Result<Result<()>> {
 	let (ds_a, ds_b, session, answering) = two_nodes_with_a_count_index().await?;
@@ -9316,7 +9318,7 @@ async fn commit_past_another_nodes_build(writes: &str) -> Result<Result<()>> {
 			}
 		}
 	});
-	execute_all(&ds_a, &session, "DEFINE TABLE a SCHEMALESS;").await?;
+	execute_all(&ds_a, &session, "DEFINE TABLE a SCHEMALESS; DEFINE TABLE c SCHEMALESS;").await?;
 	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
 	let guard = inject_retryable_conflicts(site, ds_a.id(), REPEATED_RETRY_CONFLICTS);
 	let txn = Arc::new(ds_a.transaction(TransactionType::Write).await?);
@@ -9360,7 +9362,7 @@ async fn commit_past_another_nodes_build(writes: &str) -> Result<Result<()>> {
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_transaction_another_nodes_build_passed_is_refused_only_for_its_table() -> Result<()> {
-	commit_past_another_nodes_build("CREATE a:1 SET f = 'y'")
+	commit_past_another_nodes_build("CREATE c:1")
 		.await?
 		.expect("a build of another table on another node passed it");
 	let refused = commit_past_another_nodes_build("CREATE t:9")
@@ -9437,7 +9439,8 @@ async fn a_transaction_counts_again_once_its_own_build_has_ended() -> Result<()>
 /// Commit a client-owned transaction that runs `writes` and then `DEFINE INDEX ia ON a`, whose
 /// build is held while `DEFINE INDEX ib ON b CONCURRENTLY`, run in `elsewhere`, begins its wait
 /// for older write transactions, and a newer writer keeps that wait running past the
-/// transaction's return. Answers the commit's outcome.
+/// transaction's return. Answers the commit's outcome. The `writes` write no record of `a`, as a
+/// blocking build is refused in a transaction that wrote its table's records.
 async fn commit_past_another_build(
 	ds: &Arc<Datastore>,
 	session: &Session,
@@ -9525,17 +9528,25 @@ async fn a_transaction_a_build_of_another_table_passed_commits() -> Result<()> {
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.ensure_ns_db(None, "test", "other").await?;
 	tx.commit().await?;
-	let tables = "DEFINE TABLE a SCHEMALESS; DEFINE TABLE b SCHEMALESS; CREATE b:1 SET f = 'x';";
+	let tables = "
+		DEFINE TABLE a SCHEMALESS;
+		DEFINE TABLE b SCHEMALESS;
+		DEFINE TABLE c SCHEMALESS;
+		CREATE b:1 SET f = 'x';
+	";
 	execute_all(&ds, &session, tables).await?;
 	execute_all(&ds, &other, tables).await?;
 	// The other build in another database, as concurrent tests each in their own database run.
-	commit_past_another_build(&ds, &session, "CREATE a:1 SET f = 'y'", &other)
+	commit_past_another_build(&ds, &session, "CREATE c:1", &other)
 		.await?
 		.expect("a build in another database passed it");
+	// The other build runs on after its statement returns, and removing its index while it runs
+	// can conflict with it.
+	wait_for_index_ready(&ds, &other, "b", "ib").await?;
 	execute_all(&ds, &other, "REMOVE INDEX ib ON b").await?;
 	execute_all(&ds, &session, "REMOVE INDEX ia ON a").await?;
 	// The other build of another table in the same database.
-	commit_past_another_build(&ds, &session, "CREATE a:2 SET f = 'z'", &session)
+	commit_past_another_build(&ds, &session, "CREATE c:2", &session)
 		.await?
 		.expect("a build of another table passed it");
 	Ok(())
@@ -19786,16 +19797,46 @@ async fn a_concurrently_build_indexes_what_its_transaction_wrote_before_it() -> 
 	Ok(())
 }
 
-/// A blocking build misses what its defining transaction wrote before it.
-///
-/// The build reads in transactions of its own while the statement waits on it,
-/// so it indexes the table as last committed: entries for the records the
-/// transaction changed or deleted, none for the ones it created or changed. The
-/// writes themselves maintained no index, as none was defined yet. This pins
-/// that behaviour; the `CONCURRENTLY` counterpart above shows the outcome a
-/// build that sees the transaction's writes reaches.
+/// Whether `error` refuses a blocking build of index `test` on `table` because
+/// the transaction has written the table's records.
+fn is_blocking_build_refusal(error: &str, table: &str) -> bool {
+	error.contains(&format!("Cannot define index `test` on `{table}`"))
+		&& error.contains("CONCURRENTLY")
+}
+
+/// The local part of every address the records of `user` hold, in order.
+async fn user_emails(ds: &Datastore, session: &Session) -> Result<Vec<String>> {
+	let sql = "SELECT VALUE email FROM user ORDER BY email";
+	let json = ds.execute(sql, session, None).await?.remove(0).result?.into_json_value();
+	Ok(json
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|email| Some(email.as_str()?.split('@').next()?.to_owned()))
+		.collect())
+}
+
+/// The names of the indexes `table` defines.
+async fn table_index_names(ds: &Datastore, session: &Session, table: &str) -> Result<Vec<String>> {
+	let sql = format!("INFO FOR TABLE {table}");
+	let json = ds.execute(&sql, session, None).await?.remove(0).result?.into_json_value();
+	Ok(json
+		.pointer("/indexes")
+		.and_then(|indexes| indexes.as_object())
+		.map(|indexes| indexes.keys().cloned().collect())
+		.unwrap_or_default())
+}
+
+/// A blocking build reads the table as last committed, so it cannot see what
+/// its own transaction wrote before it: built there, an index would miss the
+/// records the transaction created or changed, and keep entries for the
+/// values it changed or deleted, which a UNIQUE index then refuses to anyone.
+/// `DEFINE INDEX` without `CONCURRENTLY` is refused in a transaction that has
+/// written the table's records, and the transaction keeps nothing. Committing
+/// the writes first and then defining the index indexes them; the
+/// `CONCURRENTLY` counterpart above defines it in the same transaction.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_blocking_build_misses_what_its_transaction_wrote_before_it() -> Result<()> {
+async fn a_blocking_build_is_refused_after_its_transaction_wrote_the_table() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
 	execute_all(
 		&ds,
@@ -19809,48 +19850,281 @@ async fn a_blocking_build_misses_what_its_transaction_wrote_before_it() -> Resul
 		",
 	)
 	.await?;
+	let writes = "
+		CREATE user:added SET email = 'added@example.com' RETURN NONE;
+		UPDATE user:changed SET email = 'after@example.com' RETURN NONE;
+		DELETE user:gone;
+		UPDATE user:moved SET email = 'moved@example.com' RETURN NONE;
+	";
+	let err = execute_all_reporting(
+		&ds,
+		&session,
+		&format!("BEGIN; {writes} DEFINE INDEX test ON user FIELDS email UNIQUE; COMMIT;"),
+	)
+	.await
+	.expect_err("the definition is refused");
+	assert!(is_blocking_build_refusal(&err.to_string(), "user"), "{err:#}");
+	// The transaction kept nothing it wrote, the definition included.
+	assert_eq!(user_emails(&ds, &session).await?, ["before", "dup", "gone", "kept"]);
+	assert_eq!(table_index_names(&ds, &session, "user").await?, Vec::<String>::new());
+	// Committed first, the writes are what the build reads.
+	execute_all_reporting(&ds, &session, &format!("BEGIN; {writes} COMMIT;")).await?;
+	execute_all_reporting(&ds, &session, "DEFINE INDEX test ON user FIELDS email UNIQUE;").await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	assert_eq!(
+		indexed_email_rows(&ds, &session).await?,
+		[
+			("kept", 1),
+			("added", 1),
+			("after", 1),
+			("moved", 1),
+			("before", 0),
+			("gone", 0),
+			("dup", 0)
+		]
+	);
+	// The value `user:moved` gave up is free.
+	execute_all_reporting(
+		&ds,
+		&session,
+		"CREATE user:taker SET email = 'dup@example.com' RETURN NONE;",
+	)
+	.await?;
+	Ok(())
+}
+
+/// Every statement that writes or deletes a record of the table before a
+/// blocking `DEFINE INDEX` in its transaction refuses the definition: the
+/// table's own writes and deletes, a whole-table delete, a removal of the
+/// table, an edge `RELATE` writes into its edge table, the rows a view's
+/// definition computes, and the records of a table the transaction itself
+/// creates.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_write_of_the_tables_records_refuses_a_blocking_build() -> Result<()> {
+	let cases = [
+		("user", "CREATE user:new SET email = 'new@example.com'"),
+		("user", "UPDATE user:kept SET email = 'new@example.com'"),
+		("user", "UPSERT user:new SET email = 'new@example.com'"),
+		("user", "INSERT INTO user { id: user:new, email: 'new@example.com' }"),
+		("user", "FOR $i IN 1..=3 { CREATE user SET email = 'new@example.com' }"),
+		("user", "DELETE user:kept"),
+		("user", "DELETE user"),
+		("user", "REMOVE TABLE user; DEFINE TABLE user SCHEMALESS"),
+		("likes", "RELATE user:kept->likes->user:kept SET email = 'new@example.com'"),
+		("adult", "DEFINE TABLE adult AS SELECT * FROM user"),
+		("fresh", "CREATE fresh:1 SET email = 'new@example.com'"),
+	];
+	for (table, write) in cases {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE user SCHEMALESS; CREATE user:kept SET email = 'kept@example.com';",
+		)
+		.await?;
+		let sql = format!("BEGIN; {write}; DEFINE INDEX test ON {table} FIELDS email; COMMIT;");
+		let err = execute_all_reporting(&ds, &session, &sql).await.expect_err(write);
+		assert!(is_blocking_build_refusal(&err.to_string(), table), "{write}: {err:#}");
+		assert_eq!(user_emails(&ds, &session).await?, ["kept"], "{write}");
+	}
+	Ok(())
+}
+
+/// A transaction that has written none of the table's records, or whose
+/// definition builds nothing, defines the index: one that only read the
+/// table, one that wrote another table, and one whose `IF NOT EXISTS` finds
+/// the index defined.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blocking_build_is_not_refused_without_a_write_it_would_miss() -> Result<()> {
+	for (write, define) in [
+		("SELECT * FROM user", ""),
+		("CREATE other:1 SET email = 'new@example.com'", ""),
+		("CREATE user:new SET email = 'new@example.com'", "IF NOT EXISTS"),
+	] {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE user SCHEMALESS; CREATE user:kept SET email = 'kept@example.com';",
+		)
+		.await?;
+		if !define.is_empty() {
+			execute_all(&ds, &session, "DEFINE INDEX test ON user FIELDS email;").await?;
+		}
+		let sql = format!(
+			"BEGIN; {write}; DEFINE INDEX {define} test ON user FIELDS email UNIQUE; COMMIT;"
+		);
+		execute_all_reporting(&ds, &session, &sql).await?;
+		wait_for_index_ready(&ds, &session, "user", "test").await?;
+		let kept = "SELECT id FROM user WITH INDEX test WHERE email = 'kept@example.com'";
+		assert_eq!(query_array_len(&ds, &session, kept).await?, 1, "{write}");
+	}
+	Ok(())
+}
+
+/// A definition that builds nothing is not refused, and one that builds is: an
+/// `OVERWRITE` that restates the definition of a ready index keeps the index
+/// and its entries, so the records its transaction wrote are indexed as they
+/// are written and nothing is left out, while an `OVERWRITE` that changes the
+/// definition builds over the committed records and is refused over the writes
+/// its transaction made, as a first definition is.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_overwrite_is_refused_after_a_write_only_when_it_builds() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+		DEFINE TABLE user SCHEMALESS;
+		CREATE user:kept SET email = 'kept@example.com' RETURN NONE;
+		DEFINE INDEX test ON user FIELDS email;
+		",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	let initial = |building: serde_json::Value| building.get("initial").cloned();
+	let first_build = initial(index_building_json(&ds, &session, "user", "test").await?);
+	assert_eq!(first_build, Some(serde_json::json!(1)));
+	// Restated, the definition keeps the index: no build runs, so there is nothing for the
+	// transaction's write to miss, and the index answers for the record it wrote. The build
+	// state still counts the records of the first build alone.
 	execute_all_reporting(
 		&ds,
 		&session,
 		"
 		BEGIN;
-		CREATE user:added SET email = 'added@example.com' RETURN NONE;
-		UPDATE user:changed SET email = 'after@example.com' RETURN NONE;
-		DELETE user:gone;
-		UPDATE user:moved SET email = 'moved@example.com' RETURN NONE;
-		DEFINE INDEX test ON user FIELDS email UNIQUE;
+		CREATE user:new SET email = 'new@example.com' RETURN NONE;
+		DEFINE INDEX OVERWRITE test ON user FIELDS email COMMENT 'restated';
+		COMMIT;
+		",
+	)
+	.await?;
+	assert_eq!(initial(index_building_json(&ds, &session, "user", "test").await?), first_build);
+	let new = "SELECT id FROM user WITH INDEX test WHERE email = 'new@example.com'";
+	assert_eq!(query_array_len(&ds, &session, new).await?, 1);
+	// Changed, the definition builds, and it is refused over what the transaction wrote.
+	let err = execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		CREATE user:newer SET email = 'newer@example.com' RETURN NONE;
+		DEFINE INDEX OVERWRITE test ON user FIELDS email UNIQUE;
+		COMMIT;
+		",
+	)
+	.await
+	.expect_err("a definition that builds is refused");
+	assert!(is_blocking_build_refusal(&err.to_string(), "user"), "{err:#}");
+	// The transaction kept nothing, and the index is the one the restatement left.
+	assert_eq!(user_emails(&ds, &session).await?, ["kept", "new"]);
+	let sql = "RETURN (INFO FOR TABLE user).indexes.test";
+	let defined = ds.execute(sql, &session, None).await?.remove(0).result?.into_json_value();
+	let defined = defined.as_str().unwrap_or_default().to_owned();
+	assert!(defined.contains("COMMENT 'restated'") && !defined.contains("UNIQUE"), "{defined}");
+	assert_eq!(query_array_len(&ds, &session, new).await?, 1);
+	Ok(())
+}
+
+/// Removing a table removes its records, so a blocking build after the removal
+/// in the same transaction would index records the removal took: the definition
+/// is refused when the table held a record, and defined when it held none.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blocking_build_after_a_table_removal_is_refused_only_for_the_records_removed()
+-> Result<()> {
+	let sql = "
+		BEGIN;
+		REMOVE TABLE user;
+		DEFINE TABLE user SCHEMALESS;
+		DEFINE INDEX test ON user FIELDS email;
+		COMMIT;
+	";
+	for (setup, held_a_record) in [
+		("DEFINE TABLE user SCHEMALESS; CREATE user:kept SET email = 'kept@example.com';", true),
+		("DEFINE TABLE user SCHEMALESS;", false),
+	] {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(&ds, &session, setup).await?;
+		let outcome = execute_all_reporting(&ds, &session, sql).await;
+		if held_a_record {
+			let err = outcome.expect_err("the removal took a record");
+			assert!(is_blocking_build_refusal(&err.to_string(), "user"), "{err:#}");
+			assert_eq!(user_emails(&ds, &session).await?, ["kept"]);
+			assert_eq!(table_index_names(&ds, &session, "user").await?, Vec::<String>::new());
+		} else {
+			outcome?;
+			wait_for_index_ready(&ds, &session, "user", "test").await?;
+			assert_eq!(table_index_names(&ds, &session, "user").await?, ["test"]);
+		}
+	}
+	Ok(())
+}
+
+/// A write a save point rolled back is no write the build would miss: an
+/// `INSERT IGNORE` whose row a UNIQUE index refuses writes the record, then
+/// undoes it, and a blocking build after it in the transaction is allowed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_its_save_point_undid_does_not_refuse_a_blocking_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+		DEFINE TABLE user SCHEMALESS;
+		DEFINE INDEX email ON user FIELDS email UNIQUE;
+		CREATE user:kept SET email = 'kept@example.com';
+		",
+	)
+	.await?;
+	execute_all_reporting(
+		&ds,
+		&session,
+		"
+		BEGIN;
+		INSERT IGNORE INTO user { id: user:new, email: 'kept@example.com' };
+		DEFINE INDEX test ON user FIELDS email;
 		COMMIT;
 		",
 	)
 	.await?;
 	wait_for_index_ready(&ds, &session, "user", "test").await?;
-	// The column has never held an array, so a lookup trusts the index rather
-	// than re-checking the condition on each record it fetches: a stale entry
-	// answers the record that gave its value up (`before`, `dup`), unless the
-	// transaction deleted that record (`gone`). The missing entries answer
-	// nothing.
-	assert_eq!(
-		indexed_email_rows(&ds, &session).await?,
-		[
-			("kept", 1),
-			("added", 0),
-			("after", 0),
-			("moved", 0),
-			("before", 1),
-			("gone", 0),
-			("dup", 1)
-		]
-	);
-	// The uniqueness check does not re-read: the stale entry for the value
-	// `user:moved` gave up still holds it.
-	let err = execute_all_reporting(
+	assert_eq!(user_emails(&ds, &session).await?, ["kept"]);
+	let kept = "SELECT id FROM user WITH INDEX test WHERE email = 'kept@example.com'";
+	assert_eq!(query_array_len(&ds, &session, kept).await?, 1);
+	Ok(())
+}
+
+/// A client-owned transaction outlives a statement that fails, and its client
+/// can still commit it. The refusal comes before the definition writes
+/// anything, so the commit keeps the transaction's writes and no index.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_owned_transaction_commits_nothing_of_a_refused_definition() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
 		&ds,
 		&session,
-		"CREATE user:taker SET email = 'dup@example.com' RETURN NONE;",
+		"DEFINE TABLE user SCHEMALESS; CREATE user:kept SET email = 'kept@example.com';",
 	)
-	.await
-	.expect_err("a stale entry holds the value");
-	assert!(err.to_string().contains("user:moved"), "{err:#}");
+	.await?;
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let sql = "
+		CREATE user:new SET email = 'new@example.com' RETURN NONE;
+		DEFINE INDEX test ON user FIELDS email UNIQUE;
+	";
+	let request = crate::kvs::QueryRequest::new(sql, &session).with_transaction(Arc::clone(&tx));
+	let errors: Vec<String> = ds
+		.run(request)
+		.await?
+		.into_iter()
+		.filter_map(|result| result.result.err().map(|err| err.to_string()))
+		.collect();
+	assert!(
+		matches!(errors.as_slice(), [error] if is_blocking_build_refusal(error, "user")),
+		"{errors:#?}"
+	);
+	tx.commit().await?;
+	assert_eq!(user_emails(&ds, &session).await?, ["kept", "new"]);
+	assert_eq!(table_index_names(&ds, &session, "user").await?, Vec::<String>::new());
 	Ok(())
 }
 

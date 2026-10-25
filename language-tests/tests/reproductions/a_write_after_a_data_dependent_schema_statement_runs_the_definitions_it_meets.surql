@@ -31,7 +31,7 @@ value = "NONE"
 value = "[{ id: t:0, m: 0 }, { id: t:1, m: 1 }, { id: t:2, m: 2 }, { id: t:3, m: 3 }]"
 
 [[test.results]]
-error = "Database index `u` already contains 1, with record `uq:1`"
+error = "Database index `u` already contains 0, with record `uq:0`"
 
 [[test.results]]
 error = "The table 'uq' does not exist"
@@ -68,7 +68,7 @@ FOR $i IN 0..4 { IF $i = 2 { DEFINE FIELD n ON t TYPE string }; CREATE type::rec
 SELECT * FROM t ORDER BY id;
 FOR $i IN 0..4 { IF $i = 2 { DEFINE FIELD m ON t TYPE int }; UPDATE type::record('t', $i) SET m = $i };
 SELECT id, m FROM t ORDER BY id;
-FOR $i IN 0..4 { IF $i = 1 { DEFINE INDEX u ON uq FIELDS k UNIQUE }; CREATE type::record('uq', $i) SET k = $i % 2 };
+FOR $i IN 0..4 { IF $i = 0 { DEFINE INDEX u ON uq FIELDS k UNIQUE }; CREATE type::record('uq', $i) SET k = $i % 2 };
 SELECT * FROM uq ORDER BY id;
 FOR $i IN 0..4 { CREATE type::record('ev', $i) SET n = $i; IF $i = 1 { DEFINE EVENT e ON ev THEN (UPSERT log:ev SET n += 1) } };
 SELECT * FROM log;

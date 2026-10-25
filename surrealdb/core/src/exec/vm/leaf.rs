@@ -520,6 +520,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::FieldAdmitsSubFields {
 			..
 		}
+		| StoreInstr::RefuseBlockingBuild {
+			..
+		}
 		| StoreInstr::BuildIndex {
 			..
 		}

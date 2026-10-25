@@ -48,7 +48,9 @@ impl Ddl<'_, '_> {
 	/// lightweight relation. Each column is checked against the catalog before the definition is
 	/// written, and a replaced index is retired. An import that replays an unchanged definition,
 	/// and an `OVERWRITE` that restates the definition of a healthy index, keep the index's data
-	/// and refresh the definition alone.
+	/// and refresh the definition alone. A definition without `CONCURRENTLY` that builds is
+	/// refused when the transaction has written records of the table
+	/// ([`Self::refuse_blocking_build`]).
 	pub(super) fn define_index(
 		&mut self,
 		attrs: &DefineAttrs,
@@ -74,7 +76,12 @@ impl Ddl<'_, '_> {
 			ty: TypeId::named("StoredTableDefinition"),
 			dst: prior_table,
 		});
-		let table_def = self.table_creating((ns, db, database), tb, tb_key)?;
+		let refuse_before_creating = |lowering: &mut Self| match concurrently {
+			true => Ok(()),
+			false => lowering.refuse_blocking_build((ns, db), tb, name.operand),
+		};
+		let table_def =
+			self.table_creating_with((ns, db, database), tb, tb_key, refuse_before_creating)?;
 		self.store(StoreInstr::RefuseLightweight {
 			table: table_def,
 			refusal: StoreRefusal::Index,
@@ -225,6 +232,13 @@ impl Ddl<'_, '_> {
 			self.bind(changed)?;
 		}
 
+		// Over a table that exists nothing on the way here writes, and the exits above that end
+		// the statement without a build are not refused; over a table the statement created, the
+		// same writes were judged before the creation, and this judges them again.
+		if !concurrently {
+			self.refuse_blocking_build((ns, db), tb, name.operand)?;
+		}
+
 		// A definition that consumes the table's shared doc-id space adopts its mappings, so a
 		// queued reclaim of the space is cancelled first.
 		if !is_count {
@@ -274,6 +288,32 @@ impl Ddl<'_, '_> {
 			prior: Some((existing, prior_table)),
 		});
 		self.answer_none()
+	}
+
+	/// Refuses the definition of the index named by `index` over the table `tb` when the
+	/// transaction has written records of the table: a build the statement waits for reads the
+	/// table as last committed, so it would leave those writes out
+	/// ([`StoreInstr::RefuseBlockingBuild`]).
+	///
+	/// The refusal is emitted before the statement writes anything, so that a caller who owns the
+	/// transaction can still commit it: over a table the statement creates, before the creation
+	/// ([`Self::table_creating_with`]); over a table that exists, after the exits that end the
+	/// statement without a build.
+	fn refuse_blocking_build(
+		&mut self,
+		(ns, db): (Reg, Reg),
+		tb: Operand,
+		index: Operand,
+	) -> Result<(), IrError> {
+		let tb = self.load(tb)?;
+		let index = self.load(index)?;
+		self.store(StoreInstr::RefuseBlockingBuild {
+			ns,
+			db,
+			tb,
+			index,
+		});
+		Ok(())
 	}
 
 	/// Checks the columns in `list` against the catalog.

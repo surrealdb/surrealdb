@@ -1233,9 +1233,23 @@ impl Ddl<'_, '_> {
 	/// the table's catalog version bumped.
 	fn table_creating(
 		&mut self,
+		ids: (Reg, Reg, Reg),
+		table: Operand,
+		key: Reg,
+	) -> Result<Reg, IrError> {
+		self.table_creating_with(ids, table, key, |_| Ok(()))
+	}
+
+	/// [`Self::table_creating`] for a statement that refuses on what its transaction has written
+	/// before it writes anything: `refuse` emits the refusal on the path that creates the table,
+	/// after a `STRICT` database has refused the creation and before its first write, so a
+	/// statement refused there leaves no table behind.
+	fn table_creating_with(
+		&mut self,
 		(ns, db, database): (Reg, Reg, Reg),
 		table: Operand,
 		key: Reg,
+		refuse: impl FnOnce(&mut Self) -> Result<(), IrError>,
 	) -> Result<Reg, IrError> {
 		let defined = self.reg()?;
 		self.store(StoreInstr::Get {
@@ -1264,6 +1278,7 @@ impl Ddl<'_, '_> {
 			arg: name,
 		});
 		self.bind(open)?;
+		refuse(self)?;
 		let template = crate::catalog::StoredTableDefinition::new(
 			crate::catalog::NamespaceId(0),
 			crate::catalog::DatabaseId(0),

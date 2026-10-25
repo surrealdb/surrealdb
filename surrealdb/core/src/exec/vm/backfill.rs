@@ -414,6 +414,9 @@ pub(super) async fn step(
 		| StoreInstr::FieldAdmitsSubFields {
 			..
 		}
+		| StoreInstr::RefuseBlockingBuild {
+			..
+		}
 		| StoreInstr::BuildIndex {
 			..
 		}

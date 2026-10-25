@@ -205,20 +205,23 @@ async fn an_option_a_principal_may_not_edit_is_refused() {
 
 /// A `UNIQUE` index whose build finds duplicates has written its definition
 /// when the build is refused. The definition never commits, so it is not
-/// listed, and is not exported over the rows that violate it.
+/// listed, and is not exported over the rows that violate it. The record the
+/// transaction writes before it is another table's: a record of the table
+/// itself is a write the build cannot see, which refuses the definition before
+/// it writes anything.
 #[tokio::test]
 async fn a_unique_definition_whose_build_fails_is_not_committed() {
 	let ds = ds().await;
 	run(
 		&ds,
-		"DEFINE TABLE u SCHEMAFULL; DEFINE FIELD v ON u TYPE string;
+		"DEFINE TABLE u SCHEMAFULL; DEFINE FIELD v ON u TYPE string; DEFINE TABLE w SCHEMALESS;
 		 CREATE u:1 SET v = 'a' RETURN NONE; CREATE u:2 SET v = 'a' RETURN NONE;",
 	)
 	.await;
 	let client = client_answers(
 		&ds,
 		&owner(),
-		"CREATE u:9 SET v = 'b' RETURN NONE; DEFINE INDEX uv ON u FIELDS v UNIQUE;",
+		"CREATE w:9 SET v = 'b' RETURN NONE; DEFINE INDEX uv ON u FIELDS v UNIQUE;",
 	)
 	.await;
 	assert_ok(&client[0]);
@@ -228,6 +231,10 @@ async fn a_unique_definition_whose_build_fails_is_not_committed() {
 	assert_eq!(
 		answer(&ds, "SELECT VALUE id FROM u ORDER BY id;").await,
 		answer(&ds, "RETURN [u:1, u:2];").await,
+	);
+	assert_eq!(
+		answer(&ds, "SELECT VALUE id FROM w;").await,
+		answer(&ds, "RETURN [];").await,
 		"the refused commit takes the statements before the failure with it",
 	);
 	assert_round_trips(&ds).await;
@@ -308,6 +315,66 @@ async fn a_definition_refused_after_creating_its_table_is_not_committed() {
 	assert_err(&client[0], "INLINE requires an existing TYPE RELATION table");
 	assert_err(&client[1], REFUSED_COMMIT);
 	assert_eq!(answer(&ds, "(INFO FOR DB).tables;").await, answer(&ds, "RETURN {};").await);
+}
+
+/// An index definition without `CONCURRENTLY` that the transaction's own record
+/// writes refuse is refused before it writes anything, so the caller commits what
+/// the other statements wrote: over a table that exists, and over a table the
+/// transaction has removed with its records, which the statement would otherwise
+/// create again. A strict database, which cannot create the table, says so before
+/// it judges the writes.
+#[tokio::test]
+async fn a_blocking_definition_refused_for_the_records_written_writes_nothing() {
+	let ds = ds().await;
+	run(
+		&ds,
+		"DEFINE TABLE kept SCHEMALESS; CREATE kept:1 SET a = 1 RETURN NONE;
+		 DEFINE TABLE gone SCHEMALESS; CREATE gone:1 SET a = 1 RETURN NONE;",
+	)
+	.await;
+	let refusal = |table: &str| {
+		format!(
+			"Cannot define index `ix` on `{table}`: this transaction has written records of `{table}`"
+		)
+	};
+
+	let client = client_answers(
+		&ds,
+		&owner(),
+		"CREATE kept:2 SET a = 2 RETURN NONE; DEFINE INDEX ix ON kept FIELDS a;",
+	)
+	.await;
+	assert_ok(&client[0]);
+	assert_err(&client[1], &refusal("kept"));
+	assert_eq!(client[2], Ok(PublicValue::None), "the caller's commit over a table that exists");
+	assert_eq!(
+		answer(&ds, "SELECT VALUE id FROM kept ORDER BY id;").await,
+		answer(&ds, "RETURN [kept:1, kept:2];").await,
+	);
+
+	let client =
+		client_answers(&ds, &owner(), "REMOVE TABLE gone; DEFINE INDEX ix ON gone FIELDS a;").await;
+	assert_ok(&client[0]);
+	assert_err(&client[1], &refusal("gone"));
+	assert_eq!(client[2], Ok(PublicValue::None), "the caller's commit over a table it removed");
+	assert_eq!(
+		answer(&ds, "object::keys((INFO FOR DB).tables);").await,
+		answer(&ds, "RETURN ['kept'];").await,
+		"the removal commits, and the refused statement does not create the table again",
+	);
+
+	run(
+		&ds,
+		"DEFINE DATABASE strict STRICT; USE DB strict;
+		 DEFINE TABLE gone SCHEMALESS; CREATE gone:1 SET a = 1 RETURN NONE;",
+	)
+	.await;
+	let strict = Session::owner().with_ns("test").with_db("strict");
+	let client =
+		client_answers(&ds, &strict, "REMOVE TABLE gone; DEFINE INDEX ix ON gone FIELDS a;").await;
+	assert_ok(&client[0]);
+	assert_err(&client[1], "The table 'gone' does not exist");
+	assert_eq!(client[2], Ok(PublicValue::None), "the caller's commit in a strict database");
 }
 
 /// Statements refused before they write anything leave the transaction as it

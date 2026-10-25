@@ -343,6 +343,13 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 			},
 		),
 		(
+			"BlockingBuildAfterWrites",
+			IdxError::BlockingBuildAfterWrites {
+				index: "sample".to_string(),
+				table: "sample".to_string(),
+			},
+		),
+		(
 			"EntryOfUnseenBuild",
 			IdxError::EntryOfUnseenBuild {
 				index: "sample".to_string(),

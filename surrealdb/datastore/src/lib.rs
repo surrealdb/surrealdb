@@ -66,6 +66,7 @@ pub mod key;
 pub mod layouts;
 pub mod out_of_line;
 pub mod pending_guard;
+mod record_writes;
 pub mod sequences;
 pub mod speculation;
 pub mod tasklease;

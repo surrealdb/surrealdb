@@ -87,6 +87,7 @@ DuplicatedMatchRef	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Du
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
 AnnEntryPointUnreadable	{ cause: NONE, code: -32009, details: { kind: 'TransactionConflict' }, kind: 'Query', message: 'Vector index 1 on table `sample` cannot be searched: entry point element 1 has no vector in this transaction' }
 FeatureDisabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'sample are not available: this build was compiled without the `sample` feature' }
+BlockingBuildAfterWrites	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define index `sample` on `sample`: this transaction has written records of `sample`, which a build without CONCURRENTLY cannot see. Define the index CONCURRENTLY, or commit those writes first.' }
 EntryOfUnseenBuild	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Cannot change record `t:`1``: index `sample` was defined by this transaction, and the build that ran for it wrote an entry for the record that this transaction cannot see. Define the index CONCURRENTLY, or commit the definition before changing the record.' }
 ExpiredSession	{ cause: NONE, code: -32000, details: { details: { kind: 'SessionExpired' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The session has expired' }
 RealtimeDisabled	{ cause: NONE, code: -32604, details: { kind: 'LiveQueryNotSupported' }, kind: 'Configuration', message: 'Unable to perform the realtime query' }

@@ -3,7 +3,8 @@
 //! These cover the whole of indexing: the vector shapes a vector index will
 //! accept, the uniqueness a UNIQUE index enforces, the analyzers, tokenizers
 //! and highlighters behind full-text search, the allowlist a mapper file has to
-//! resolve inside, and the planner's search for an index able to support a
+//! resolve inside, the transactions an index can be built in while its
+//! definition waits, and the planner's search for an index able to support a
 //! given expression.
 
 // The mapper below is the only place this layer's failures become public.
@@ -119,6 +120,17 @@ pub enum Error {
 		element: u64,
 	},
 
+	/// An index whose build its defining statement waits for, defined in a
+	/// transaction that has written records of the index's table. The build
+	/// reads the table as last committed, which holds none of those writes.
+	#[error(
+		"Cannot define index `{index}` on `{table}`: this transaction has written records of `{table}`, which a build without CONCURRENTLY cannot see. Define the index CONCURRENTLY, or commit those writes first."
+	)]
+	BlockingBuildAfterWrites {
+		index: String,
+		table: String,
+	},
+
 	/// A transaction changed a record that an index it defined holds an entry
 	/// for, written by the build the definition ran.
 	///
@@ -162,6 +174,12 @@ impl LeafError for Error {
 			Error::AnnEntryPointUnreadable {
 				..
 			} => TypesError::query(message, QueryError::TransactionConflict),
+			// The statement asks for something its transaction cannot give, and
+			// the caller can change it: define the index CONCURRENTLY, or after
+			// the writes are committed.
+			Error::BlockingBuildAfterWrites {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			Error::InvalidVectorDimension {
 				..
 			}

@@ -10,6 +10,7 @@ use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::{Direction, Estimate, Key, KeyRange, Snapshot, SplitTarget};
 
+use crate::record_writes::{Reached, RecordWrites, among, record_prefix};
 use crate::speculation::{Held, HeldCursor, Overlay};
 use crate::{IntoBytes, Result, Val};
 
@@ -40,6 +41,28 @@ pub struct Transactor {
 	pub(crate) written: parking_lot::Mutex<crate::triggers::WrittenTables>,
 	/// The creates held for one check of their keys ([`crate::absence`]), and the cursors open.
 	pub(crate) absence: crate::absence::Absence,
+	/// Which tables' records the writes that reached the storage have written
+	/// ([`crate::Transaction::wrote_records_of`]). Its save points are opened
+	/// and closed with the storage's, by [`crate::Transaction`].
+	///
+	/// `None` for a transactor no write reaches the storage through: a read-only
+	/// transaction, and a speculation's view, whose writes land in its overlay.
+	/// Out of line, so a transactor, which every transaction holds, stays small
+	/// in the futures that hold one.
+	record_writes: Option<Box<parking_lot::Mutex<RecordWrites>>>,
+}
+
+/// How a clear of a range stands to the records of tables whose writes a
+/// transactor has not noted yet ([`Transactor::clears`]).
+#[derive(Clone, Copy)]
+enum Clears {
+	/// It reaches no such record.
+	Nothing,
+	/// It reaches the records of the one table it lies within, if the range
+	/// holds one.
+	Table,
+	/// It reaches the records of every table it overlaps.
+	Tables,
 }
 
 impl fmt::Display for Transactor {
@@ -65,6 +88,7 @@ impl Drop for Transactor {
 impl Transactor {
 	/// A transactor over `inner`, speculating nothing.
 	pub(crate) fn new(inner: Box<dyn Transactable>) -> Self {
+		let record_writes = inner.writeable().then(Box::default);
 		Self {
 			inner,
 			speculating: false,
@@ -72,6 +96,7 @@ impl Transactor {
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
 			written: Default::default(),
 			absence: Default::default(),
+			record_writes,
 		}
 	}
 
@@ -88,6 +113,7 @@ impl Transactor {
 			writes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
 			written: Default::default(),
 			absence: Default::default(),
+			record_writes: None,
 		}
 	}
 
@@ -180,6 +206,87 @@ impl Transactor {
 				Ok(())
 			}
 			None => Err(crate::Error::TransactionFinished),
+		}
+	}
+
+	/// Run `f` over the tables whose records this transactor has noted writes
+	/// of; `None` when it notes none ([`Self::record_writes`]).
+	pub(crate) fn with_record_writes<R>(
+		&self,
+		f: impl FnOnce(&mut RecordWrites) -> R,
+	) -> Option<R> {
+		self.record_writes.as_ref().map(|writes| f(&mut writes.lock()))
+	}
+
+	/// Whether a write of `key` has no table left to note: `key` is no record's,
+	/// the table it names is noted already, or this transactor notes none.
+	///
+	/// A write that finds a table to note hands the storage a borrow of its key
+	/// and keeps the key, for [`Self::note`] to name the table once the write has
+	/// succeeded. The future then holds nothing across the write beyond the key it
+	/// already holds, and every other write moves its key in, copy-free.
+	fn noted(&self, key: &[u8]) -> bool {
+		let Some(records) = record_prefix(key) else {
+			return true;
+		};
+		self.with_record_writes(|writes| writes.noted(records)).unwrap_or(true)
+	}
+
+	/// Note the table whose record `key` is, once a write of it has succeeded.
+	fn note(&self, key: &[u8]) {
+		if let Some(records) = record_prefix(key) {
+			self.with_record_writes(|writes| writes.note(Reached::Table(records.to_vec())));
+		}
+	}
+
+	/// How a clear of `rng` stands to the records of tables not noted yet.
+	fn clears(&self, rng: &KeyRange<'_>) -> Clears {
+		if self.record_writes.is_none() || rng.is_empty() {
+			return Clears::Nothing;
+		}
+		match Reached::by_range(&rng.start, &rng.end) {
+			None => Clears::Nothing,
+			Some(Reached::Range(..)) => Clears::Tables,
+			Some(Reached::Table(records)) => {
+				match self.with_record_writes(|writes| writes.noted(&records)) {
+					Some(false) => Clears::Table,
+					Some(true) | None => Clears::Nothing,
+				}
+			}
+		}
+	}
+
+	/// Whether a clear of `rng` is to be noted once it has succeeded.
+	///
+	/// A clear within one table reaches it only if the range holds a record this
+	/// transaction can see, which one read of the range's first key settles; a
+	/// clear that spans tables reaches each one it overlaps.
+	async fn notes_clear(&self, rng: &KeyRange<'_>) -> Result<bool> {
+		Ok(match self.clears(rng) {
+			Clears::Nothing => false,
+			Clears::Table => self.holds_record(rng).await?,
+			Clears::Tables => true,
+		})
+	}
+
+	/// Whether the table that `rng` lies within holds a record in `rng`, as this
+	/// transaction sees it.
+	async fn holds_record(&self, rng: &KeyRange<'_>) -> Result<bool> {
+		let Some(Reached::Table(records)) = Reached::by_range(&rng.start, &rng.end) else {
+			return Ok(false);
+		};
+		let (start, end) = among(&rng.start, &rng.end, &records);
+		let range = KeyRange {
+			start: Key::from(start),
+			end: Key::from(end),
+		};
+		Ok(!self.inner.keys(range, 1, 0, None).await?.keys.is_empty())
+	}
+
+	/// Note what a clear of `rng` that has succeeded reached.
+	fn note_clear(&self, rng: &KeyRange<'_>) {
+		if let Some(reached) = Reached::by_range(&rng.start, &rng.end) {
+			self.with_record_writes(|writes| writes.note(reached));
 		}
 	}
 
@@ -343,7 +450,7 @@ impl Transactor {
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
 	)]
 	pub(crate) async fn commit(&self) -> Result<()> {
-		self.absence.flush_all(self.inner.as_ref()).await?;
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await?;
 		self.inner.commit().await
 	}
 
@@ -358,7 +465,7 @@ impl Transactor {
 	/// durable index build state.
 	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
 		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
-		self.absence.flush_all(self.inner.as_ref()).await?;
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await?;
 		self.inner.commit_unsynced().await
 	}
 
@@ -369,7 +476,9 @@ impl Transactor {
 	)]
 	pub async fn exists(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
 		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
 		}
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
@@ -388,7 +497,9 @@ impl Transactor {
 	)]
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
 		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
 		}
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
@@ -408,7 +519,9 @@ impl Transactor {
 	)]
 	pub async fn getu(&self, key: Key<'_>) -> Result<Option<Val>> {
 		if self.absence.holds() {
-			self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+			self.absence
+				.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+				.await?;
 		}
 		if self.speculating() {
 			match self.held(key.as_slice()) {
@@ -427,7 +540,9 @@ impl Transactor {
 	)]
 	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
 		if self.absence.holds() {
-			self.absence.guard_keys(self.inner.as_ref(), keys).await?;
+			self.absence
+				.guard_keys(self.inner.as_ref(), self.record_writes.as_deref(), keys)
+				.await?;
 		}
 		if version.is_none() && self.speculating() {
 			let mut result = GetMultiResult::default();
@@ -454,7 +569,9 @@ impl Transactor {
 	)]
 	pub async fn getr(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			return Ok(scan_result(self.speculative_pairs(&rng, true).await?));
@@ -478,9 +595,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.set(key, val).await
+			if self.noted(&key) {
+				self.inner.set(key, val).await
+			} else {
+				let written = self.inner.set(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -504,7 +631,26 @@ impl Transactor {
 			let mut written = self.written.lock();
 			entries.iter().filter(|(key, _)| written.note_key(key.as_slice())).count()
 		};
+		let tables = match &self.record_writes {
+			Some(writes) => {
+				let writes = writes.lock();
+				entries
+					.iter()
+					.filter_map(|(key, _)| record_prefix(key.as_slice()))
+					.filter(|records| !writes.noted(records))
+					.map(<[u8]>::to_vec)
+					.collect()
+			}
+			None => Vec::new(),
+		};
 		let written = self.inner.setm(entries).await;
+		if written.is_ok() && !tables.is_empty() {
+			self.with_record_writes(|writes| {
+				for records in tables {
+					writes.note(Reached::Table(records));
+				}
+			});
+		}
 		self.end_writes(docs);
 		written
 	}
@@ -526,7 +672,25 @@ impl Transactor {
 			let mut written = self.written.lock();
 			keys.iter().filter(|key| written.note_key(key.as_slice())).count()
 		};
+		let tables = match &self.record_writes {
+			Some(writes) => {
+				let writes = writes.lock();
+				keys.iter()
+					.filter_map(|key| record_prefix(key.as_slice()))
+					.filter(|records| !writes.noted(records))
+					.map(<[u8]>::to_vec)
+					.collect()
+			}
+			None => Vec::new(),
+		};
 		let written = self.inner.delm(keys).await;
+		if written.is_ok() && !tables.is_empty() {
+			self.with_record_writes(|writes| {
+				for records in tables {
+					writes.note(Reached::Table(records));
+				}
+			});
+		}
 		self.end_writes(docs);
 		written
 	}
@@ -547,9 +711,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.replace(key, val).await
+			if self.noted(&key) {
+				self.inner.replace(key, val).await
+			} else {
+				let written = self.inner.replace(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -568,7 +742,9 @@ impl Transactor {
 		let val = val.into_vec();
 		if self.speculating() {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
 			if self.speculative_value(&key).await?.is_some() {
 				return Err(crate::Error::TransactionKeyAlreadyExists);
@@ -578,9 +754,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.put(key, val).await
+			if self.noted(&key) {
+				self.inner.put(key, val).await
+			} else {
+				let written = self.inner.put(key.as_borrowed(), val).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -605,11 +791,27 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = match self
 			.absence
-			.hold(self.inner.as_ref(), key.into_inner().into_owned(), val)
+			.hold(
+				self.inner.as_ref(),
+				self.record_writes.as_deref(),
+				key.into_inner().into_owned(),
+				val,
+			)
 			.await
 		{
 			Ok(None) => Ok(()),
-			Ok(Some((key, val))) => self.inner.put(Key::from(key), val).await,
+			Ok(Some((key, val))) => {
+				let key = Key::from(key);
+				if self.noted(&key) {
+					self.inner.put(key, val).await
+				} else {
+					let written = self.inner.put(key.as_borrowed(), val).await;
+					if written.is_ok() {
+						self.note(&key);
+					}
+					written
+				}
+			}
 			Err(e) => Err(e),
 		};
 		self.end_write(doc);
@@ -622,7 +824,7 @@ impl Transactor {
 		if !self.absence.holds() {
 			return Ok(None);
 		}
-		self.absence.take_violation(self.inner.as_ref()).await
+		self.absence.take_violation(self.inner.as_ref(), self.record_writes.as_deref()).await
 	}
 
 	/// Flush the held creates, failing with the earliest one that found its key present.
@@ -630,7 +832,7 @@ impl Transactor {
 		if !self.absence.holds() {
 			return Ok(());
 		}
-		self.absence.flush_all(self.inner.as_ref()).await
+		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await
 	}
 
 	/// Whether this transaction holds deferred create checks ([`crate::absence`]).
@@ -651,7 +853,9 @@ impl Transactor {
 		let chk = chk.map(|v| v.into_vec());
 		if self.speculating() {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
 			if self.speculative_value(&key).await? != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
@@ -661,9 +865,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.putc(key, val, chk).await
+			if self.noted(&key) {
+				self.inner.putc(key, val, chk).await
+			} else {
+				let written = self.inner.putc(key.as_borrowed(), val, chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -682,9 +896,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.del(key).await
+			if self.noted(&key) {
+				self.inner.del(key).await
+			} else {
+				let written = self.inner.del(key.as_borrowed()).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -700,7 +924,9 @@ impl Transactor {
 	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		if self.speculating() {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
@@ -710,9 +936,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.delc(key, chk).await
+			if self.noted(&key) {
+				self.inner.delc(key, chk).await
+			} else {
+				let written = self.inner.delc(key.as_borrowed(), chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -734,9 +970,21 @@ impl Transactor {
 		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+					.await?;
 			}
-			self.inner.delr(rng).await
+			match self.notes_clear(&rng).await {
+				Ok(false) => self.inner.delr(rng).await,
+				Ok(true) => {
+					let written = self.inner.delr(rng.as_borrowed()).await;
+					if written.is_ok() {
+						self.note_clear(&rng);
+					}
+					written
+				}
+				Err(err) => Err(err),
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -755,9 +1003,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.clr(key).await
+			if self.noted(&key) {
+				self.inner.clr(key).await
+			} else {
+				let written = self.inner.clr(key.as_borrowed()).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -773,7 +1031,9 @@ impl Transactor {
 	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		if self.speculating() {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
 			if self.speculative_value(&key).await?.as_deref() != chk {
 				return Err(crate::Error::TransactionConditionNotMet);
@@ -783,9 +1043,19 @@ impl Transactor {
 		let doc = self.written.lock().note_key(key.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_key(self.inner.as_ref(), key.as_slice()).await?;
+				self.absence
+					.guard_key(self.inner.as_ref(), self.record_writes.as_deref(), key.as_slice())
+					.await?;
 			}
-			self.inner.clrc(key, chk).await
+			if self.noted(&key) {
+				self.inner.clrc(key, chk).await
+			} else {
+				let written = self.inner.clrc(key.as_borrowed(), chk).await;
+				if written.is_ok() {
+					self.note(&key);
+				}
+				written
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -807,9 +1077,21 @@ impl Transactor {
 		let doc = self.written.lock().note_range(rng.start.as_slice(), rng.end.as_slice());
 		let written = async {
 			if self.absence.holds() {
-				self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+					.await?;
 			}
-			self.inner.clrr(rng).await
+			match self.notes_clear(&rng).await {
+				Ok(false) => self.inner.clrr(rng).await,
+				Ok(true) => {
+					let written = self.inner.clrr(rng.as_borrowed()).await;
+					if written.is_ok() {
+						self.note_clear(&rng);
+					}
+					written
+				}
+				Err(err) => Err(err),
+			}
 		}
 		.await;
 		self.end_write(doc);
@@ -838,7 +1120,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<KeysResult> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if rng.is_empty() {
 			return Ok(KeysResult::default());
@@ -868,7 +1152,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<KeysResult> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if rng.is_empty() {
 			return Ok(KeysResult::default());
@@ -900,7 +1186,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<ScanResult> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if rng.is_empty() {
 			return Ok(ScanResult::default());
@@ -930,7 +1218,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<ScanResult> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if rng.is_empty() {
 			return Ok(ScanResult::default());
@@ -954,7 +1244,9 @@ impl Transactor {
 	)]
 	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			return Ok(self.speculative_pairs(&rng, false).await?.len());
@@ -980,7 +1272,9 @@ impl Transactor {
 		budget: u32,
 	) -> Result<(usize, Option<Key<'static>>)> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			return Ok((self.speculative_pairs(&rng, false).await?.len(), None));
@@ -1110,7 +1404,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Box<dyn ScanCursorKeys + 'a>> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, false).await?;
@@ -1143,7 +1439,9 @@ impl Transactor {
 	) -> Result<ScanChunkStats> {
 		if self.absence.holds() {
 			for rng in ranges {
-				self.absence.guard_range(self.inner.as_ref(), rng).await?;
+				self.absence
+					.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), rng)
+					.await?;
 			}
 		}
 		if !self.speculating() {
@@ -1187,7 +1485,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Box<dyn ScanCursorVals + 'a>> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, true).await?;
@@ -1223,7 +1523,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Batch<Vec<u8>>> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			let pairs = self.speculative_pairs(&rng, false).await?;
@@ -1247,7 +1549,9 @@ impl Transactor {
 		version: Option<u64>,
 	) -> Result<Batch<(Vec<u8>, Val)>> {
 		if self.absence.holds() {
-			self.absence.guard_range(self.inner.as_ref(), &rng).await?;
+			self.absence
+				.guard_range(self.inner.as_ref(), self.record_writes.as_deref(), &rng)
+				.await?;
 		}
 		if self.speculated(&rng, version) {
 			return Ok(Batch::new(None, self.speculative_pairs(&rng, true).await?));
@@ -1259,15 +1563,16 @@ impl Transactor {
 	// Savepoint functions
 	// --------------------------------------------------
 	//
-	// A save point covers the storage write set and the buffered index deltas
-	// together, so both are framed at once. Only [`crate::Transaction`] holds
-	// those buffers, so it owns the save-point API and calls the engine through
-	// `inner` directly.
+	// A save point covers the storage write set, the buffered index deltas and
+	// the record writes noted here, so all three are framed at once. Only
+	// [`crate::Transaction`] frames them, so it owns the save-point API and
+	// calls the engine through `inner` directly.
 	//
 	// There is no save-point wrapper here. `Transaction` derefs to `Transactor`,
 	// so a wrapper would be reachable from any `Transaction` and could roll back
-	// storage without the index frames. `inner` stays reachable because
-	// `Transaction` needs it, so callers must not use it to skip those frames.
+	// storage without the index and record-write frames. `inner` stays reachable
+	// because `Transaction` needs it, so callers must not use it to skip those
+	// frames.
 
 	// --------------------------------------------------
 	// Timestamp functions

@@ -1873,6 +1873,17 @@ pub(crate) enum StoreInstr {
 		field: Reg,
 		dst: Reg,
 	},
+	/// Refuse to build an index over table `tb` of namespace `ns` and database
+	/// `db` while the statement waits, when the transaction has written
+	/// records of the table: the build reads the table as last committed, so
+	/// it would leave those writes out. `index` holds the index's name, for
+	/// the refusal.
+	RefuseBlockingBuild {
+		ns: Reg,
+		db: Reg,
+		tb: Reg,
+		index: Reg,
+	},
 	/// Build the index defined in `index` over the table defined in `table`
 	/// with the index builder; when `blocking`, wait for the build to finish.
 	/// When `fresh`, the index is created by this transaction, and its build
