@@ -141,6 +141,13 @@ SurrealDB's security model rests on four pillars:
   and access method must be confirmed by the grant record, not unverified JWT claims.
 - Every session and token must have a finite expiration. Missing duration
   configuration must result in a secure default, never unbounded validity.
+  The one deliberate exception, kept from 3.x: a `DEFINE USER` or
+  `DEFINE ACCESS` with no SESSION duration gives sessions that do not expire,
+  the same as `FOR SESSION NONE` (`UserDuration::default` and
+  `AccessDuration::default`). Tokens still expire after one hour by default.
+  Such a session still ends when its WebSocket connection closes, or after the
+  idle TTL for an attached HTTP RPC session, and a session established with a
+  token ends at the token's `exp` (below).
 - A session established with a token (RPC `authenticate`, an HTTP `Bearer`
   header, a JWT presented as a pgwire password) must end no later than that
   token's `exp`, whatever its SESSION duration: `iam::verify::token` bounds

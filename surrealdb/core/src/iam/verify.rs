@@ -3521,12 +3521,12 @@ mod token_expiry_tests {
 	#[tokio::test]
 	async fn a_token_session_ends_with_its_token() {
 		let ds = datastore(
-			"DEFINE USER none ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h;
+			"DEFINE USER unset ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h;
 			DEFINE USER long ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1d;
 			DEFINE USER short ON ROOT PASSWORD 'pass' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 1m;",
 		)
 		.await;
-		for (user, bound_by_token) in [("none", true), ("long", true), ("short", false)] {
+		for (user, bound_by_token) in [("unset", true), ("long", true), ("short", false)] {
 			let tk = access(
 				root_user(&ds, &mut Session::default(), user.into(), "pass".into()).await.unwrap(),
 			);
