@@ -8,11 +8,11 @@ auth = { level = "owner" }
 reason = """
 The query `doc/UPGRADING.md` gives for finding the duplicates that make a
 `REBUILD INDEX` of a `UNIQUE` index fail lists exactly the values such an index
-refuses. The index keys an array once per element, so two records sharing an
-element collide, a record holding an element twice collides with itself, and an
-array inside an array is one key. It keeps `NULL`, `NONE` and a top-level empty
-array (keyed as `NONE`) as non-unique entries, so those are never listed. The
-table `s` shows what the index refuses; the table `t` holds the same rows
+refuses. The index keys an array once per distinct element, so two records
+sharing an element collide, a record holding an element twice is keyed once, and
+an array inside an array is one key. It keeps `NULL`, `NONE` and a top-level
+empty array (keyed as `NONE`) as non-unique entries, so those are never listed.
+The table `s` shows what the index refuses; the table `t` holds the same rows
 without the index, as a table an old node wrote to would.
 """
 
@@ -65,9 +65,6 @@ error = "Database index `uq` already contains d'2027-01-01T00:00:00Z', with reco
 value = "[]"
 
 [[test.results]]
-error = "Database index `uq` already contains d'2028-01-01T00:00:00Z', with record `s:16`"
-
-[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -116,7 +113,10 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ n: 2, u: d'2026-08-28T09:00:00Z' }, { n: 2, u: d'2027-01-01T00:00:00Z' }, { n: 2, u: d'2028-01-01T00:00:00Z' }, { n: 2, u: [] }, { n: 2, u: [1, 2] }]"
+value = "[]"
+
+[[test.results]]
+value = "[{ n: 2, u: d'2026-08-28T09:00:00Z' }, { n: 2, u: d'2027-01-01T00:00:00Z' }, { n: 2, u: [] }, { n: 2, u: [1, 2] }]"
 */
 
 DEFINE INDEX uq ON s FIELDS u UNIQUE;
@@ -154,8 +154,10 @@ CREATE t:15 SET u = 'q' RETURN NONE;
 CREATE t:16 SET u = [d'2028-01-01T00:00:00Z', d'2028-01-01T00:00:00Z'] RETURN NONE;
 SELECT * FROM (
     SELECT u, count() AS n FROM (
-        SELECT u FROM t WITH NOINDEX
-        WHERE !(type::is_array(u) AND array::len(u) = 0)
-        SPLIT u
+        SELECT id, u FROM (
+            SELECT id, u FROM t WITH NOINDEX
+            WHERE !(type::is_array(u) AND array::len(u) = 0)
+            SPLIT u
+        ) GROUP BY id, u
     ) GROUP BY u
 ) WHERE n > 1 AND u != NONE AND u != NULL;

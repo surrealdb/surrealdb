@@ -7,7 +7,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use filter::Filter;
 use surrealdb_strand::Strand;
-use surrealdb_types::ToSql;
 
 use crate::catalog;
 use crate::ft::analyzer::filter::FilteringStage;
@@ -123,10 +122,10 @@ impl Analyzer {
 			match val {
 				Value::String(s) => tks.push(self.generate_tokens(az_fn, stage, s).await?),
 				Value::Number(n) => {
-					tks.push(self.generate_tokens(az_fn, stage, n.to_sql().into()).await?)
+					tks.push(self.generate_tokens(az_fn, stage, n.to_string().into()).await?)
 				}
 				Value::Bool(b) => {
-					tks.push(self.generate_tokens(az_fn, stage, b.to_sql().into()).await?)
+					tks.push(self.generate_tokens(az_fn, stage, b.to_string().into()).await?)
 				}
 				Value::Array(a) => pending.extend(a.0.into_iter().rev()),
 				Value::Object(o) => {

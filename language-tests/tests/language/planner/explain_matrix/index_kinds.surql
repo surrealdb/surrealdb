@@ -196,13 +196,13 @@ value = "'OK'"
 error = "Database index `fanu_tags` already contains 'p', with record `fanu:1`"
 
 [[test.results]]
-error = "Database index `fanu_tags` already contains 's', with record `fanu:4`"
+value = "[{ id: fanu:4, tags: ['s', 's'] }]"
 
 [[test.results]]
-value = "[{ count: 0 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ count: 0 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
@@ -688,13 +688,9 @@ SELECT count() FROM fanp WITH NOINDEX WHERE tags CONTAINS 'x' GROUP ALL;
 -- second row sharing one element is rejected even though its array differs.
 CREATE fanu:3 SET tags = ['p'];
 
--- DEFECT (4). The element uniqueness check does not deduplicate within the row
--- being written, so an array repeating an element collides with itself and the
--- error names the record being created as the existing holder. One row holding
--- `['s','s']` has one distinct element and violates nothing; the write should
--- succeed.
+-- An array repeating an element within the same row has one distinct element
+-- and does not collide with itself.
 CREATE fanu:4 SET tags = ['s', 's'];
--- The rejected write left nothing behind, on either path.
 SELECT count() FROM fanu WHERE tags CONTAINS 's' GROUP ALL;
 SELECT count() FROM fanu WITH NOINDEX WHERE tags CONTAINS 's' GROUP ALL;
 

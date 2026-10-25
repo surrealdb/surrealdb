@@ -455,6 +455,13 @@ impl DiskAnnProvider {
 		Ok(state)
 	}
 
+	/// Upper bound on the number of elements in the graph, read from the
+	/// element-id allocator in `!ds`.
+	pub(super) async fn element_bound(&self, context: &DiskAnnProviderContext) -> Result<usize> {
+		let state = self.read_state(context).await?;
+		Ok(usize::try_from(state.next_element_id).unwrap_or(usize::MAX))
+	}
+
 	/// Reads persisted graph state for a read-modify-write: the state a frame last wrote, or the
 	/// transaction's — never the cache, and never a frame's read view.
 	///

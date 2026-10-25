@@ -581,8 +581,9 @@ mod tests {
 			let (ds, ns, db) = fixture().await;
 			write_at(&ds, (ns, db), "t", LEGACY_ELEMENT, element("t", STORAGE_ELEMENT)).await;
 
-			// An unstamped datastore carrying data, which is what an upgrade
-			// from a release that predates the stamp looks like.
+			// An unstamped datastore at the legacy level carrying data, which is
+			// what an upgrade from a release that predates the stamp looks like.
+			crate::kvs::migration::tests::at_the_legacy_level(&ds).await;
 			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
 
 			assert_eq!(names(&ds, (ns, db), "t").await, vec![STORAGE_ELEMENT]);
@@ -600,9 +601,6 @@ mod tests {
 		/// repair.
 		#[tokio::test]
 		async fn overwrite_and_remove_reach_a_migrated_definition() {
-			use crate::kvs::migration::{MIGRATIONS, run_with};
-			use crate::kvs::version::StorageVersion;
-
 			let (ds, ns, db) = fixture().await;
 			execute(&ds, "DEFINE FIELD `select` ON t TYPE array<string>;").await;
 			// Move the definition the kind implied to where 3.3 wrote it.
@@ -612,7 +610,7 @@ mod tests {
 			txn.set(key(ns, db, "t", LEGACY_ELEMENT), implied).await.unwrap();
 			txn.commit().await.unwrap();
 
-			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
+			rekey_definitions_to_their_storage_name(&ds).await.unwrap();
 
 			execute(&ds, "DEFINE FIELD OVERWRITE `select`.* ON t TYPE string ASSERT $value != '';")
 				.await;

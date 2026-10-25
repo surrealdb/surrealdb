@@ -378,21 +378,39 @@ pub(crate) async fn notify_unit(
 	state.frames = program.permissions.iter().map(|spec| spec.context(&deriving)).collect();
 	state.permissions_bypassed = deriving.root().skip_fetch_perms;
 
-	let subject = match reduce(unit, &deriving, &mut state, images.subject()).await {
-		Ok(Some(value)) => value,
-		Ok(None) => return Notify::Skip,
-		Err(err) => skip!("the record could not be reduced for this subscriber", err),
-	};
-	// An absent counterpart has no fields to reduce or derive.
-	let counterpart = if images.counterpart().is_nullish() {
-		Value::None
+	// The notification is about `subject` (`current` for `CREATE`/`UPDATE`,
+	// `initial` for `DELETE`) and its counterpart (`initial` for `UPDATE`,
+	// absent for `CREATE`/`DELETE`). An image the subscriber's table permission
+	// or view filter withholds has no reduced document of its own and is bound
+	// to `NONE`. If neither image is visible to the subscriber, no notification
+	// is delivered.
+	let (subject_admitted, subject) =
+		match reduce(unit, &deriving, &mut state, images.subject()).await {
+			Ok(Some(value)) => (true, value),
+			Ok(None) => (false, Value::None),
+			Err(err) => skip!("the record could not be reduced for this subscriber", err),
+		};
+	let (counterpart_admitted, counterpart) = if images.counterpart().is_nullish() {
+		(false, Value::None)
 	} else {
 		match reduce(unit, &deriving, &mut state, images.counterpart()).await {
-			Ok(Some(value)) => value,
-			Ok(None) => return Notify::Skip,
+			Ok(Some(value)) => (true, value),
+			Ok(None) => (false, Value::None),
 			Err(err) => skip!("the counterpart could not be reduced for this subscriber", err),
 		}
 	};
+	if !subject_admitted && !counterpart_admitted {
+		return Notify::Skip;
+	}
+	if images.action == Action::Update
+		&& subject_admitted
+		&& counterpart_admitted
+		&& lowered.view.is_some()
+		&& images.initial != images.current
+		&& subject == counterpart
+	{
+		return Notify::Skip;
+	}
 
 	let (before, after) = match images.action {
 		Action::Delete => (Arc::new(subject.clone()), Arc::new(counterpart)),

@@ -46,6 +46,29 @@ fn ledger_lists_the_rows_of_migrations() {
 	}
 }
 
+/// Puts the store at the legacy feature level, which records no level, as
+/// a store upgraded from a release without feature levels stays until it is
+/// raised.
+///
+/// An unstamped store at this level is one that predates the version stamp,
+/// so [`run_with`] runs the migrations it owes rather than recording them as
+/// a new store's baseline. A store created by this build records this build's
+/// release, and every catalog entry the driver writes there, its lease
+/// included, is in the stored-value grammar and commits the stored-format
+/// ledger entry; a test registry that stands in for another release's registry
+/// carries no row for that entry, so on such a store the driver's own
+/// bookkeeping would read as a migration it does not know. At the legacy level
+/// the driver writes only `revision` encodings and records nothing but what the
+/// registry under test runs.
+#[cfg(feature = "kv-mem")]
+pub(super) async fn at_the_legacy_level(ds: &Datastore) {
+	let txn = ds.transaction(TransactionType::Write).await.unwrap();
+	txn.del_key(&crate::key::schema::FeatureLevelKey {}).await.unwrap();
+	txn.commit().await.unwrap();
+	ds.refresh_feature_level().await.unwrap();
+	assert!(ds.feature_level().await.unwrap().level.is_legacy());
+}
+
 #[cfg(feature = "kv-mem")]
 mod datastore {
 	use std::sync::Arc;
@@ -53,7 +76,7 @@ mod datastore {
 
 	use super::*;
 	use crate::key::KVKey;
-	use crate::key::schema::{FeatureLevelKey, MigrationKey, VersionKey};
+	use crate::key::schema::{MigrationKey, VersionKey};
 	use crate::kvs::version::MajorVersion;
 	use crate::kvs::{Datastore, TransactionType};
 
@@ -86,26 +109,6 @@ mod datastore {
 		txn.del_key(&StorageVersionKey {}).await.unwrap();
 		txn.commit().await.unwrap();
 		assert!(!settled(&ds).await.unwrap(), "the stamp is owed again");
-	}
-
-	/// Puts the store at the legacy feature level, which records no level, as
-	/// a store upgraded from a release without feature levels stays until it is
-	/// raised.
-	///
-	/// A store created by this build records this build's release, and every
-	/// catalog entry the driver writes there, its lease included, is in the
-	/// stored-value grammar and commits the stored-format ledger entry. The
-	/// test registries stand in for other releases' registries and carry no row
-	/// for that entry, so on such a store the driver's own bookkeeping would
-	/// read as a migration they do not know. At the legacy level the driver
-	/// writes only `revision` encodings and records nothing but what the
-	/// registry under test runs.
-	async fn at_the_legacy_level(ds: &Datastore) {
-		let txn = ds.transaction(TransactionType::Write).await.unwrap();
-		txn.del_key(&FeatureLevelKey {}).await.unwrap();
-		txn.commit().await.unwrap();
-		ds.refresh_feature_level().await.unwrap();
-		assert!(ds.feature_level().await.unwrap().level.is_legacy());
 	}
 
 	/// A brand-new datastore is stamped at the running version, which is what

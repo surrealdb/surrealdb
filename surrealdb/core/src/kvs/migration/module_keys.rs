@@ -534,8 +534,9 @@ mod tests {
 			let (ds, ns, db) = fixture().await;
 			write_at(&ds, ns, db, LEGACY_SILO, &silo(1, 2, 3)).await;
 
-			// An unstamped datastore carrying data, which is what an upgrade
-			// from a release that predates the stamp looks like.
+			// An unstamped datastore at the legacy level carrying data, which is
+			// what an upgrade from a release that predates the stamp looks like.
+			crate::kvs::migration::tests::at_the_legacy_level(&ds).await;
 			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
 
 			assert_eq!(names(&ds, ns, db).await, vec![DERIVED_SILO]);
@@ -556,8 +557,6 @@ mod tests {
 			use crate::catalog::providers::CatalogProvider as _;
 			use crate::dbs::Session;
 			use crate::dbs::capabilities::{Capabilities, Targets};
-			use crate::kvs::migration::{MIGRATIONS, run_with};
-			use crate::kvs::version::StorageVersion;
 
 			let ds = crate::kvs::Datastore::builder()
 				.with_capabilities(Capabilities::all().with_experimental(Targets::All))
@@ -584,7 +583,7 @@ mod tests {
 			let named = crate::catalog::extension_name(DERIVED_SILO);
 			assert!(e.to_string().contains(named.as_ref()), "unexpected error: {e}");
 
-			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
+			rekey_definitions_to_their_derived_name(&ds).await.unwrap();
 
 			let after = ds.execute(&remove, &session, None).await.unwrap();
 			after[0].result.as_ref().expect("the migrated definition is addressable by name");

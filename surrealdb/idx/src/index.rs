@@ -283,7 +283,9 @@ impl<'a> IndexOperation<'a> {
 								)
 								.into());
 							};
-							return self.err_index_exists(entry.rid, n);
+							if entry.rid != *self.rid {
+								return self.err_index_exists(entry.rid, n);
+							}
 						}
 						Err(e) => return Err(e),
 					}
@@ -1202,6 +1204,30 @@ mod interrupted_fan_out {
 			assert_commit_refused(&env.tx()).await;
 			assert_eq!(committed_entries(&ds, &ix).await, 0);
 		}
+	}
+
+	#[tokio::test]
+	async fn unique_fan_out_repeating_an_element_within_one_record_succeeds() {
+		let ix = definition(Index::Uniq);
+		let ds = TestIndexStore::new().await;
+		let env = ds.env(TransactionType::Write).await;
+		let dup = Value::Array(Array::from(vec![Value::from("a"), Value::from("a")]));
+		let single = Value::Array(Array::from(vec![Value::from("x")]));
+		write(&env, &ix, None, Some(vec![dup.clone(), single.clone()])).await.unwrap();
+		env.tx().commit().await.unwrap();
+		assert_eq!(committed_entries(&ds, &ix).await, 1);
+
+		// A second distinct record with the same element must still be rejected.
+		let env2 = ds.env(TransactionType::Write).await;
+		let other_rid = RecordId::new(TableName::from("t"), RecordIdKey::from("other".to_owned()));
+		let mut op =
+			IndexOperation::new(&env2, NS, DB, TB, &ix, None, Some(vec![dup, single]), &other_rid);
+		let mut require_compaction = false;
+		let err = op.compute(&NoAnalyzerFunction, &mut require_compaction).await.unwrap_err();
+		assert!(
+			matches!(err.downcast_ref::<crate::Error>(), Some(crate::Error::IndexExists { .. })),
+			"expected IndexExists for another record, got {err:#}"
+		);
 	}
 }
 

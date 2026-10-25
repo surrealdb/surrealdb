@@ -1003,7 +1003,9 @@ impl DiskAnnGraph {
 	{
 		// An index without start points yields no results: the search
 		// accessor resolves them once and the walk then has nothing to expand.
-		let limit = l.max(k).max(1);
+		let requested = l.max(k).max(1);
+		let bound = self.index.provider().element_bound(&ctx.provider_context).await?;
+		let limit = requested.min(bound).max(1);
 		let params = search_params(ctx, limit)?;
 		let mut ids = vec![0; limit];
 		let mut distances = vec![0.0; limit];
@@ -1025,7 +1027,7 @@ impl DiskAnnGraph {
 			.collect();
 		if coded {
 			// A walk that ran dry is not retried wider, so it ranks every live result.
-			let depth = rerank.filter(|_| result_count >= limit).map(|depth| depth.max(k));
+			let depth = rerank.filter(|_| result_count >= requested).map(|depth| depth.max(k));
 			return Ok((self.rerank(ctx, query, results, depth).await?, result_count));
 		}
 		Ok((results, result_count))
@@ -1132,7 +1134,9 @@ impl DiskAnnGraph {
 		C: ElementClassifier,
 	{
 		let provider = self.index.provider();
-		let limit = l.max(k).max(1);
+		let requested = l.max(k).max(1);
+		let bound = provider.element_bound(&ctx.provider_context).await?;
+		let limit = requested.min(bound).max(1);
 		let beam_width = search_params(ctx, limit)?.beam_width().get();
 		let coded = self.coded_walk::<T>(ctx);
 		let mut accessor =
@@ -1186,7 +1190,7 @@ impl DiskAnnGraph {
 				})
 				.await?;
 		}
-		let exhausted = visited.len() < limit;
+		let exhausted = visited.len() < requested;
 		let matched = if coded {
 			// Only the nearest admitted on the coded distances are ranked exactly, unless the walk
 			// ran dry and is not retried wider.
@@ -3607,7 +3611,7 @@ impl DiskAnnIndex {
 						.await?;
 					// A search list shorter than requested means the traversal ran
 					// dry: a wider list cannot surface anything new.
-					let exhausted = walked < l;
+					let exhausted = walked < l.max(state.search.k).max(1);
 					(results, exhausted, None)
 				}
 			};

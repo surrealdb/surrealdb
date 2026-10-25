@@ -366,7 +366,7 @@ pub(crate) static LEDGER: &[LedgerRow] = &[
 pub(crate) async fn attach(ds: &Datastore, is_new: bool) -> Result<()> {
 	let current = StorageVersion::current();
 	let stored = ds.storage_version().await?;
-	if is_new && stored.is_none() {
+	if (is_new || !ds.feature_cell().level().is_legacy()) && stored.is_none() {
 		record_baseline(ds, LEDGER).await?;
 		return advance_stamp(ds, None, &current).await;
 	}
@@ -447,13 +447,14 @@ async fn run_with(
 ) -> Result<()> {
 	let stored = ds.storage_version().await?;
 
-	// A datastore this start created has nothing to migrate, so its whole
-	// registry is recorded as already applied before anything else runs. That
-	// baseline is durable, unlike `is_new` itself, which is true only on the
-	// start that wrote `!v`: without it, a crash between creating the datastore
-	// and stamping it would leave a brand-new store looking like an upgrade from
-	// before the stamp existed.
-	if is_new && stored.is_none() {
+	// A datastore created at a stored feature level has nothing from before the
+	// version stamp to migrate, so its whole registry is recorded as already
+	// applied before anything else runs. Checking the feature level alongside
+	// `is_new` covers a restart or a concurrent node that arrives after `!v` was
+	// committed but before the version stamp advanced: a store that genuinely
+	// predates the stamp also predates stored feature levels and stands at
+	// `FeatureLevel::Legacy` until after migrations complete.
+	if (is_new || !ds.feature_cell().level().is_legacy()) && stored.is_none() {
 		record_baseline(ds, registry).await?;
 	}
 
@@ -499,17 +500,37 @@ async fn run_with(
 	}
 }
 
-/// Records every migration in the registry as applied, without running any.
+/// Records every migration in the registry as applied in a single transaction,
+/// without running any.
 ///
-/// Used only for a datastore this start created: it has never held any layout a
+/// Used only for a newly created datastore: it has never held any layout a
 /// migration exists to repair, so the ledger starts full rather than empty. An
 /// on-demand entry describes bytes the store does not hold yet, so it is not
 /// recorded.
 async fn record_baseline<M: LedgerFacts>(ds: &Datastore, registry: &[M]) -> Result<()> {
-	for migration in registry.iter().filter(|m| !m.on_demand()) {
-		record_applied(ds, migration).await?;
+	let timestamp = ds.clock_now().value;
+	let node = ds.id();
+	let txn = ds.transaction(TransactionType::Write).await?;
+	let result = async {
+		for migration in registry.iter().filter(|m| !m.on_demand()) {
+			let record =
+				MigrationRecord::applied(migration.name(), migration.version(), node, timestamp);
+			txn.set_key(&MigrationKey::new(migration.id()), &record).await?;
+		}
+		txn.commit().await
 	}
-	Ok(())
+	.await;
+	match result {
+		Ok(()) => Ok(()),
+		Err(e) if lost_the_race(&e) => {
+			let _ = txn.cancel().await;
+			Ok(())
+		}
+		Err(e) => {
+			let _ = txn.cancel().await;
+			Err(e)
+		}
+	}
 }
 
 /// What the ledger allows this build to do with a datastore.

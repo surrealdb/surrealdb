@@ -12,6 +12,10 @@ use crate::ft::analyzer::mapper::Mapper;
 use crate::ft::analyzer::tokenizer::Tokens;
 use crate::trees::store::IndexStores;
 
+/// Maximum gram length emitted by `ngram` and `edgengram` filters, bounding per-token
+/// fan-out even when the analyzer definition specifies a larger `max`.
+const MAX_NGRAM_SIZE: u16 = 64;
+
 #[derive(Clone, Copy)]
 pub(in crate::ft) enum FilteringStage {
 	Indexing,
@@ -41,9 +45,11 @@ impl Filter {
 					what: "Analyzers",
 				})
 			}
-			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
+			SqlFilter::EdgeNgram(min, max) => {
+				Filter::EdgeNgram((*min).max(1), (*max).min(MAX_NGRAM_SIZE))
+			}
 			SqlFilter::Lowercase => Filter::Lowercase,
-			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
+			SqlFilter::Ngram(min, max) => Filter::Ngram((*min).max(1), (*max).min(MAX_NGRAM_SIZE)),
 			#[cfg(feature = "fulltext")]
 			SqlFilter::Snowball(l) => {
 				let a = match l {
@@ -167,6 +173,10 @@ impl Filter {
 	#[inline]
 	fn ngram(c: &str, min: u16, max: u16) -> FilterResult {
 		let min = min as usize;
+		let max = max as usize;
+		if min > max {
+			return FilterResult::Ignore;
+		}
 		let c: Vec<char> = c.chars().collect();
 		let l = c.len();
 		if l < min {
@@ -174,7 +184,6 @@ impl Filter {
 		}
 		let mut ng = vec![];
 		let r1 = 0..=(l - min);
-		let max = max as usize;
 		for s in r1 {
 			let e = (s + max).min(l);
 			let r2 = (s + min)..=e;
@@ -199,6 +208,9 @@ impl Filter {
 	fn query_ngram(c: &str, min: u16, max: u16) -> FilterResult {
 		let min = min as usize;
 		let max = max as usize;
+		if min > max {
+			return FilterResult::Ignore;
+		}
 		let c: Vec<char> = c.chars().collect();
 		let l = c.len();
 		if l < min {
@@ -216,12 +228,16 @@ impl Filter {
 	#[inline]
 	fn edgengram(c: &str, min: u16, max: u16) -> FilterResult {
 		let min = min as usize;
+		let max = max as usize;
+		if min > max {
+			return FilterResult::Ignore;
+		}
 		let c: Vec<char> = c.chars().collect();
 		let l = c.len();
 		if l < min {
 			return FilterResult::Ignore;
 		}
-		let max = (max as usize).min(l);
+		let max = max.min(l);
 		let ng = (min..=max)
 			.map(|p| {
 				let n = &c[0..p];
@@ -889,6 +905,20 @@ mod tests {
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
 			"Ālea iacta est",
 			&["āl", "āle", "ia", "iac", "es", "est"],
+		)
+		.await;
+	}
+
+	#[tokio::test]
+	async fn test_ngram_bounds_gram_length() {
+		let input = "a".repeat(200);
+		let expected: Vec<String> =
+			(1..=super::MAX_NGRAM_SIZE as usize).map(|n| "a".repeat(n)).collect();
+		let expected_refs: Vec<&str> = expected.iter().map(String::as_str).collect();
+		test_analyzer(
+			"ANALYZER test TOKENIZERS blank FILTERS edgengram(0, 65535);",
+			&input,
+			&expected_refs,
 		)
 		.await;
 	}

@@ -98,6 +98,24 @@ async fn a_new_store_defaults_to_level_4() {
 	assert_eq!(level_of(&ds, "test", "fresh").await, LEVEL_4);
 }
 
+/// A store whose first start stamped `!v` and stopped before `check_version`
+/// recorded the migration baseline still baselines `STORE_DEFAULTS` on the next
+/// start rather than running it and stamping level 3.
+#[tokio::test]
+async fn a_new_store_reopened_after_version_bootstrap_still_defaults_to_level_4() {
+	let first = unsettled().await;
+	let (_, created) = first.settle_storage_version().await.unwrap();
+	assert!(created);
+	assert_eq!(first.storage_version().await.unwrap(), None);
+
+	let reopened = first.fork_for_test_with_node_id(uuid::Uuid::new_v4());
+	let (_, created_on_reopen) = reopened.check_version().await.unwrap();
+	assert!(!created_on_reopen);
+	assert_eq!(recorded(&reopened).await, None);
+	assert_eq!(default_level(&reopened).await, LEVEL_4);
+	assert!(applied(&reopened, STORE_DEFAULTS.raw()).await);
+}
+
 /// A store an earlier release created defaults to level 3 once this release
 /// has started on it: a database created after the upgrade stands at the
 /// level of the databases created before it. Its existing databases, which

@@ -151,7 +151,7 @@ impl Offseter {
 		for o in os {
 			let (mut start, mut end) = if self.partial {
 				let start = o.gen_start.min(o.end);
-				let end = (start + term_len).min(o.end);
+				let end = start.saturating_add(term_len).min(o.end);
 				(start, end)
 			} else {
 				(o.start, o.end)
@@ -200,5 +200,47 @@ impl From<Offseter> for Value {
 		}
 		// Return the highlights object
 		Value::Object(highlights)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{HighlightParams, Highlighter, Offset, Offseter};
+	use crate::expr::Idiom;
+	use crate::val::{Number, Value};
+
+	#[test]
+	fn offseter_partial_saturates_and_merges_overlapping_ranges() {
+		let mut offseter = Offseter::new(true);
+		offseter.highlight(u32::MAX, &[Offset::new(0, 1, 2, 10), Offset::new(0, 5, 6, 12)]);
+		let val = Value::from(offseter);
+		let Value::Object(map) = val else {
+			panic!("expected Object, got {val:?}");
+		};
+		let Some(Value::Array(spans)) = map.get("0") else {
+			panic!("expected Array, got {:?}", map.get("0"));
+		};
+		assert_eq!(spans.len(), 1);
+		let Value::Object(span) = &spans[0] else {
+			panic!("expected Object span, got {:?}", spans[0]);
+		};
+		assert_eq!(span.get("s"), Some(&Value::from(2u32)));
+		assert_eq!(span.get("e"), Some(&Value::from(12u32)));
+	}
+
+	#[test]
+	fn highlighter_number_display_matches_analyzer_representation() {
+		let params = HighlightParams {
+			prefix: Value::from("["),
+			suffix: Value::from("]"),
+			match_ref: Value::from(0),
+			partial: false,
+		};
+		let val = Value::Number(Number::Float(42.5));
+		let mut hl = Highlighter::new(&params, &Idiom::default(), &val);
+		// "42.5" is 4 bytes (no trailing 'f' from to_sql), so highlighting the whole token works.
+		hl.highlight(4, &[Offset::new(0, 0, 0, 4)]);
+		let res = Value::try_from(hl).unwrap();
+		assert_eq!(res, Value::from("[42.5]"));
 	}
 }

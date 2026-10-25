@@ -980,6 +980,9 @@ async fn move_entries(
 					})?
 				}
 			};
+			if held.rid == *rid {
+				continue;
+			}
 			let mut n = n;
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::idx::Error::IndexExists {
 				record: held.rid,

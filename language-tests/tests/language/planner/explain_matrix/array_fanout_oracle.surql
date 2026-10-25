@@ -253,10 +253,10 @@ error = "Database index `uniqf_labels` already contains 'q', with record `uniqf:
 value = "[{ id: uniqf:3, labels: ['s', 't'] }]"
 
 [[test.results]]
-error = "Database index `uniqf_labels` already contains 'u', with record `uniqf:4`"
+value = "[{ id: uniqf:4, labels: ['u', 'u'] }]"
 
 [[test.results]]
-value = "[uniqf:1, uniqf:3]"
+value = "[uniqf:1, uniqf:3, uniqf:4]"
 
 [[test.results]]
 value = "[uniqf:1]"
@@ -585,12 +585,9 @@ EXPLAIN SELECT count() FROM plainfan WHERE grp = 'g' AND tags = ['x', 'y'] GROUP
 
 -- ---------------------------------------------------------------------------
 -- UNIQUE over a single fanning column. Uniqueness is a property of the keys,
--- so it is enforced per element: a second record sharing one element is
--- rejected. A record whose own array repeats an element is rejected too,
--- naming itself as the holder, and is not stored — which the non-unique dup
--- case below contradicts, where the repeat collapses to one key and the
--- record is stored. The suite records that behaviour rather than deciding it
--- is right, so a change to it shows up here.
+-- so it is enforced per element across distinct records: a second record
+-- sharing one element is rejected, whereas a record whose own array repeats
+-- an element collapses to one key and succeeds.
 -- ---------------------------------------------------------------------------
 DEFINE TABLE uniqf SCHEMALESS;
 DEFINE INDEX uniqf_labels ON uniqf COLUMNS labels.* UNIQUE;
@@ -599,8 +596,8 @@ CREATE uniqf:2 SET labels = ['q', 'r'];
 CREATE uniqf:3 SET labels = ['s', 't'];
 CREATE uniqf:4 SET labels = ['u', 'u'];
 
--- The rejected records are absent: a per-element collision fails the whole
--- CREATE, so neither uniqf:2 nor uniqf:4 contributes any key.
+-- The rejected record is absent: a per-element collision with another record
+-- fails the whole CREATE, so uniqf:2 contributes no key.
 SELECT VALUE id FROM uniqf WITH NOINDEX;
 
 -- A containment leaf pins the one fanning column to a single element, so the

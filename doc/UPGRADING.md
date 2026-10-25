@@ -1456,9 +1456,11 @@ index does not key, so the query leaves those out before splitting:
 ```surql
 SELECT * FROM (
     SELECT u, count() AS n FROM (
-        SELECT u FROM t WITH NOINDEX
-        WHERE !(type::is_array(u) AND array::len(u) = 0)
-        SPLIT u
+        SELECT id, u FROM (
+            SELECT id, u FROM t WITH NOINDEX
+            WHERE !(type::is_array(u) AND array::len(u) = 0)
+            SPLIT u
+        ) GROUP BY id, u
     ) GROUP BY u
 ) WHERE n > 1 AND u != NONE AND u != NULL;
 ```

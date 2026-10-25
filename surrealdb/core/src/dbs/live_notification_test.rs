@@ -987,3 +987,86 @@ async fn live_query_id(ds: &Datastore, ses: &Session) -> crate::types::PublicUui
 	};
 	id
 }
+
+/// An `UPDATE` that transitions a record from hidden under the subscriber's
+/// `PERMISSIONS FOR select` to visible must still deliver the notification even
+/// though the pre-update counterpart is rejected by `reduce`.
+#[tokio::test]
+async fn test_live_update_entering_subscriber_permission_fires_notification() {
+	let (recv, ds) = new_ds_with_broker().await.unwrap();
+	let (ns, db) = ("test", "test");
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.ensure_ns_db(None, ns, db).await.unwrap();
+	tx.commit().await.unwrap();
+
+	let owner_ses = Session::owner().with_ns(ns).with_db(db);
+	ds.execute(
+		"DEFINE ACCESS user ON DATABASE TYPE RECORD; \
+		 DEFINE TABLE user PERMISSIONS FOR select FULL; \
+		 DEFINE TABLE item SCHEMALESS \
+		     PERMISSIONS FOR select WHERE owner = $auth; \
+		 CREATE user:alice, user:bob; \
+		 CREATE item:1 SET owner = user:bob, label = 'moved'",
+		&owner_ses,
+		None,
+	)
+	.await
+	.unwrap();
+
+	let alice_lq = live_query_id(&ds, &record_user_session(ns, db, "alice")).await;
+	while recv.try_recv().is_ok() {}
+
+	// Transfer ownership to alice so the pre-image (`owner = user:bob`) fails
+	// alice's table select permission while the post-image (`owner = user:alice`) passes.
+	ds.execute("UPDATE item:1 SET owner = user:alice", &owner_ses, None).await.unwrap();
+
+	let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+		.await
+		.expect("notification should arrive when record enters subscriber's permission")
+		.expect("channel should not be closed");
+	assert_eq!(notif.id, alice_lq);
+	assert_eq!(notif.action, PublicAction::Update);
+}
+
+/// An `UPDATE` that transitions a record from visible under the subscriber's
+/// `PERMISSIONS FOR select` to hidden must still deliver the notification so
+/// the subscriber sees the record leave their scope, with the post-update
+/// image bound to `NONE`.
+#[tokio::test]
+async fn test_live_update_leaving_subscriber_permission_fires_notification() {
+	let (recv, ds) = new_ds_with_broker().await.unwrap();
+	let (ns, db) = ("test", "test");
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.ensure_ns_db(None, ns, db).await.unwrap();
+	tx.commit().await.unwrap();
+
+	let owner_ses = Session::owner().with_ns(ns).with_db(db);
+	ds.execute(
+		"DEFINE ACCESS user ON DATABASE TYPE RECORD; \
+		 DEFINE TABLE user PERMISSIONS FOR select FULL; \
+		 DEFINE TABLE item SCHEMALESS \
+		     PERMISSIONS FOR select WHERE owner = $auth; \
+		 CREATE user:alice, user:bob; \
+		 CREATE item:1 SET owner = user:alice, label = 'moved'",
+		&owner_ses,
+		None,
+	)
+	.await
+	.unwrap();
+
+	let alice_lq = live_query_id(&ds, &record_user_session(ns, db, "alice")).await;
+	while recv.try_recv().is_ok() {}
+
+	// Transfer ownership from alice to bob so the pre-image (`owner = user:alice`)
+	// passes alice's table select permission while the post-image (`owner = user:bob`)
+	// is withheld and bound to `NONE`.
+	ds.execute("UPDATE item:1 SET owner = user:bob", &owner_ses, None).await.unwrap();
+
+	let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+		.await
+		.expect("notification should arrive when record leaves subscriber's permission")
+		.expect("channel should not be closed");
+	assert_eq!(notif.id, alice_lq);
+	assert_eq!(notif.action, PublicAction::Update);
+	assert_eq!(notif.result, PublicValue::None);
+}

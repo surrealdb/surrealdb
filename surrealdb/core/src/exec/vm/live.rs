@@ -108,8 +108,11 @@ impl LiveUnits {
 		deps: CatalogDeps,
 	) {
 		let mut units = self.units.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-		if units.len() >= CAPACITY {
-			units.clear();
+		if units.len() >= CAPACITY
+			&& !units.contains_key(&key)
+			&& let Some(victim) = units.keys().next().copied()
+		{
+			units.remove(&victim);
 		}
 		units.insert(key, (unit, Arc::new(deps)));
 	}

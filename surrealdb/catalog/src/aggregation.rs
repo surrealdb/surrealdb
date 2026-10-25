@@ -2392,6 +2392,8 @@ impl BackfillValue {
 					receiver: Function::Normal("type::is_number".to_string()),
 					arguments: vec![arg],
 				}));
+				// `count` counts the truthy values it is given, so the group's
+				// non-numeric values (`false` here) are not counted.
 				Expr::FunctionCall(Box::new(FunctionCall {
 					receiver: Function::Normal("count".to_string()),
 					arguments: vec![is_number],
@@ -2421,8 +2423,9 @@ impl BackfillValue {
 impl AggregationAnalysis {
 	/// The values the select that fills the view computes per group, in the
 	/// order of the array it answers them in: each aggregate the view stores
-	/// needs its own value, a mean the sum and the count behind it, and a
-	/// variance or deviation the mean, the sample variance and the count.
+	/// needs its own value, a mean the sum and the numeric count behind it,
+	/// and a variance or deviation the mean, the sample variance and the
+	/// numeric count.
 	pub fn backfill_values(&self) -> Result<Vec<BackfillValue>> {
 		let mut values = Vec::new();
 		let mut want = |value: BackfillValue| {
@@ -2549,10 +2552,16 @@ pub fn backfill_stats(
 		}
 	};
 	let number_count_of = |arg: usize| -> Result<i64> {
-		let Value::Number(Number::Int(count)) = at(BackfillValue::NumberCount(arg))? else {
+		let Value::Number(n) = at(BackfillValue::NumberCount(arg))? else {
 			fail!("initial select statement did not return the right value")
 		};
-		Ok(*count)
+		match n.wide() {
+			Wide::Int(count) => Ok(count),
+			Wide::Float(_) => fail!("Count was not representable as an integer"),
+			Wide::Decimal(d) => {
+				i64::try_from(d).map_err(|_| anyhow!("Count was not representable as an integer"))
+			}
+		}
 	};
 	let number_of = |value: BackfillValue| -> Result<Number> {
 		let Value::Number(n) = at(value)? else {
@@ -2563,6 +2572,8 @@ pub fn backfill_stats(
 	let datetime_of = |value: BackfillValue, empty: Datetime| -> Result<Datetime> {
 		match at(value)? {
 			Value::Datetime(d) => Ok(*d),
+			// No record of the group holds a datetime: the stat is the one a
+			// group that has seen none starts from.
 			Value::None | Value::Null => Ok(empty),
 			Value::Bool(_)
 			| Value::Number(_)
@@ -2785,6 +2796,13 @@ mod backfill_tests {
 				BackfillValue::Aggregate(Aggregation::Count),
 			]
 		);
+		assert_eq!(
+			BackfillValue::NumberCount(0)
+				.expr(&analysis)
+				.expect("numeric count expression builds")
+				.to_sql(),
+			"count(type::is_number(x))"
+		);
 	}
 
 	/// A row with no records in its group stands for no group.
@@ -2926,5 +2944,80 @@ mod backfill_tests {
 		.expect("rebase across extreme i64 shift succeeds");
 		assert!(rebased_sum.to_float().is_finite());
 		assert!(rebased_ss.to_float().is_finite());
+	}
+
+	/// A group whose rows omit the aggregated field keeps the numeric count on
+	/// numeric stats and the empty sentinel on datetime stats, matching the
+	/// incremental path.
+	#[test]
+	fn a_backfill_group_with_missing_values_matches_incremental_stats() {
+		let aggregations = vec![
+			Aggregation::Mean(0),
+			Aggregation::Variance(0),
+			Aggregation::DatetimeMax(1),
+			Aggregation::DatetimeMin(1),
+			Aggregation::Count,
+		];
+		let values = vec![
+			BackfillValue::MeanSum(0),
+			BackfillValue::NumberCount(0),
+			BackfillValue::Aggregate(Aggregation::Mean(0)),
+			BackfillValue::SampleVariance(0),
+			BackfillValue::Aggregate(Aggregation::DatetimeMax(1)),
+			BackfillValue::Aggregate(Aggregation::DatetimeMin(1)),
+			BackfillValue::Aggregate(Aggregation::Count),
+		];
+
+		// Group of 3 records where only 2 have numbers (10 and 20) and none have datetimes.
+		let partial = backfill_stats(
+			&aggregations,
+			&values,
+			&[
+				Value::from(30i64),
+				Value::from(2i64),
+				Value::from(15.0f64),
+				Value::from(50.0f64),
+				Value::None,
+				Value::None,
+				Value::from(3i64),
+			],
+			false,
+		)
+		.expect("backfill succeeds")
+		.expect("three records stand for a group");
+
+		let mut incremental: Vec<AggregationStat> =
+			aggregations.iter().map(Aggregation::to_stat).collect();
+		add_to_aggregation_stats(&[Value::from(10i64), Value::None], &mut incremental).unwrap();
+		add_to_aggregation_stats(&[Value::from(20i64), Value::None], &mut incremental).unwrap();
+		add_to_aggregation_stats(&[Value::None, Value::None], &mut incremental).unwrap();
+
+		assert_eq!(create_field_document(&[], &partial), create_field_document(&[], &incremental),);
+
+		// Group of 2 records where all values are NONE: mean and variance are NaN, datetimes are
+		// NONE.
+		let all_none = backfill_stats(
+			&aggregations,
+			&values,
+			&[
+				Value::from(0i64),
+				Value::from(0i64),
+				Value::from(f64::NAN),
+				Value::from(f64::NAN),
+				Value::None,
+				Value::None,
+				Value::from(2i64),
+			],
+			false,
+		)
+		.expect("backfill succeeds when all values are NONE")
+		.expect("two records stand for a group");
+
+		let mut incremental_none: Vec<AggregationStat> =
+			aggregations.iter().map(Aggregation::to_stat).collect();
+		add_to_aggregation_stats(&[Value::None, Value::None], &mut incremental_none).unwrap();
+		add_to_aggregation_stats(&[Value::None, Value::None], &mut incremental_none).unwrap();
+
+		assert_eq!(all_none, incremental_none);
 	}
 }

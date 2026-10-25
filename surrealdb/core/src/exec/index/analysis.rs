@@ -5860,5 +5860,19 @@ mod tests {
 				assert_eq!(children.len(), 2);
 			}
 		}
+
+		#[test]
+		fn regex_literal_is_not_keyed_as_compared() {
+			let a = permitted(vec![idx_basic(1, "ix_name", &["name"])]);
+			for sql in ["name = /a/", "name IN [/a/, 'b']"] {
+				let cond = parse_cond(sql);
+				let mut cands = Vec::new();
+				a.analyze_condition(&cond, &mut cands);
+				assert!(
+					find_for(&cands, "ix_name").is_none(),
+					"expected no B-tree index candidate for `{sql}`, got {cands:?}"
+				);
+			}
+		}
 	}
 }
