@@ -94,8 +94,8 @@ impl SlowLog {
 	/// Parameters:
 	/// - `duration`: Minimum elapsed time a statement must take before it is considered "slow" and
 	///   logged.
-	/// - `param_allow`: If non-empty, only parameters with names in this list are included in the
-	///   log output.
+	/// - `param_allow`: The names of the parameters whose values are included in the log output.
+	///   When empty, no parameter value is logged.
 	/// - `param_deny`: Parameter names that should never be logged. This list always takes
 	///   precedence over `param_allow`.
 	pub(super) fn new(

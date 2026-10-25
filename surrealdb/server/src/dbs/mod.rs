@@ -73,17 +73,21 @@ pub struct StartCommandDbsOptions {
 	// normalized, single-line SQL rendering. You can control which `$param`
 	// values appear in the log with the following lists:
 	// - `slow_log_param_deny` takes precedence and excludes matches.
-	// - If `slow_log_param_allow` is non-empty, only listed parameter names are included;
-	//   otherwise all parameters are allowed by default (subject to deny).
+	// - Only parameter names listed in `slow_log_param_allow` are included; when it is empty, no
+	//   parameter value is logged.
 	#[arg(help = "The minimum execution time in milliseconds to trigger slow query logging")]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
 	#[arg(value_parser = super::cli::validator::duration)]
 	slow_log_threshold: Option<Duration>,
-	#[arg(help = "A comma-separated list of parameter names to include in slow query logs")]
+	#[arg(
+		help = "A comma-separated list of parameter names to include in the params of slow query logs. No parameter value is logged unless its name is listed here"
+	)]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW", long = "slow-log-param-allow")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_allow: Vec<String>,
-	#[arg(help = "A comma-separated list of parameter names to omit from slow query logs")]
+	#[arg(
+		help = "A comma-separated list of parameter names to leave out of the params of slow query logs, even if they are also allowed"
+	)]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_deny: Vec<String>,

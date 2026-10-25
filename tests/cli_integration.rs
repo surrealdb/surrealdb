@@ -2838,12 +2838,14 @@ mod cli_integration {
 		}
 	}
 
-	#[tokio::test]
-	async fn test_slow_query_logging() {
+	/// Runs a query that outlasts the one-second slow-query threshold and binds
+	/// `$public = 'foo'` and `$secret = 'bar'` on a server started with `args`, and
+	/// returns the line the server logged for it.
+	async fn slow_query_log_entry(args: &str) -> String {
 		// Start the server
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
-			args: "--slow-log-threshold=1s --slow-log-param-deny=secret".to_owned(),
+			args: format!("--slow-log-threshold=1s {args}"),
 			..Default::default()
 		})
 		.await
@@ -2864,13 +2866,47 @@ mod cli_integration {
 
 		// Extract the stderr
 		let stderr = server.finish().unwrap().stderr();
+		println!("{stderr}");
 
 		// Check the log is present
-		assert!(stderr.contains("Slow query detected - time: "));
-		assert!(stderr.contains(
-			"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
-		));
-		println!("{stderr}");
+		stderr
+			.lines()
+			.find(|line| line.contains("Slow query detected - time: "))
+			.unwrap_or_else(|| panic!("no slow query entry in:\n{stderr}"))
+			.to_owned()
+	}
+
+	/// A slow-query entry lists the value of a parameter named by
+	/// `--slow-log-param-allow`, unless `--slow-log-param-deny` names it too.
+	#[tokio::test]
+	async fn test_slow_query_logging() {
+		let entry = slow_query_log_entry(
+			"--slow-log-param-allow=public,secret --slow-log-param-deny=secret",
+		)
+		.await;
+		assert!(
+			entry.contains(
+				"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+			),
+			"{entry}"
+		);
+		assert!(!entry.contains("bar"), "{entry}");
+	}
+
+	/// Without `--slow-log-param-allow` a slow-query entry lists no parameter
+	/// value, with or without a deny list.
+	#[tokio::test]
+	async fn test_slow_query_logging_without_allow_list() {
+		for args in ["", "--slow-log-param-deny=secret"] {
+			let entry = slow_query_log_entry(args).await;
+			assert!(
+				entry.contains(
+					"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [  ]"
+				),
+				"{args}: {entry}"
+			);
+			assert!(!entry.contains("foo") && !entry.contains("bar"), "{args}: {entry}");
+		}
 	}
 
 	/// `SURREAL_MEMORY_THRESHOLD` with a byte-suffix (e.g. `256m`) must start the
