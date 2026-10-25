@@ -5220,7 +5220,7 @@ assert_plain!(RowBits);
 /// unit is lowered to. A kept unit is keyed by it, so a unit lowered for
 /// another version is never linked; it changes whenever an instruction, an
 /// operand or a spec changes what it means.
-pub(crate) const ISA_VERSION: u32 = 5;
+pub(crate) const ISA_VERSION: u32 = 6;
 
 /// The content digest of a closure as written: SHA-256 over the canonical
 /// encoding [`Self::of`] states. It is the code reference a closure value

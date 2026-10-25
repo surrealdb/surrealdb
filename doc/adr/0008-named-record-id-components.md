@@ -72,7 +72,13 @@ silently read `NONE`:
 - evaluation order derives them first and gives them no dependency edge (`field_eval_order`);
 - the binder derives a component in a layer column framed by `EvalFrame::key_part()`, which `EXPLAIN`
   prints as `@key`. A component is never re-derived beneath a field guard, because its body reads
-  `id` alone and the field `SELECT` permission that could cut `id` is refused (see below).
+  `id` alone and the field `SELECT` permission that could cut `id` is refused (see below);
+- a mutation whose caller's reads are unchecked, on a table whose only computed fields are its
+  components, derives the image its `WHERE` and data clause read by copying each element of the
+  key onto the record in place (`DataInstr::SnapshotKeyParts`), coerced to the component's type
+  as the field view would; it runs no host pipeline and copies no record, so a full-scan `UPDATE`
+  or `DELETE` that reads a component costs what it costs when the same value is stored in the body
+  under the same key (`bench/timeseries/retention_delete_full_scan.surql`).
 
 A table whose id names nothing gets the same `Arc` of definitions back, with no key column, rule or
 instruction added for it.

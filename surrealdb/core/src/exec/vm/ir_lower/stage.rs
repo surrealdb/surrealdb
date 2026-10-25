@@ -111,7 +111,8 @@ use super::super::write::{
 use super::emit::Emitter;
 use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope, invariant};
 use super::pipe::{
-	first_arg, lower_layers, lower_stored_guards, project_image, region_frame, yielded_value,
+	first_arg, key_parts, lower_layers, lower_stored_guards, project_image, region_frame,
+	yielded_value,
 };
 use super::read::producer_of;
 use super::units::{CascadeKind, LowerCx, UnitRequest};
@@ -839,6 +840,32 @@ impl Stages<'_, '_> {
 		})
 	}
 
+	/// The instruction that derives the snapshot before the condition or the data clause reads it:
+	/// [`Self::snapshot`], or, for an unchecked caller whose field view is one layer deriving the
+	/// named components of the record id and nothing else, [`DataInstr::SnapshotKeyParts`] over the
+	/// same view.
+	fn deriving_snapshot(&mut self, em: &mut Emitter) -> Result<DataInstr, IrError> {
+		let snapshot = self.snapshot(em)?;
+		let DataInstr::Snapshot {
+			view: Some(view),
+			checked: false,
+			..
+		} = snapshot
+		else {
+			return Ok(snapshot);
+		};
+		let ImageLayers::Stack(layers) = &self.run.stored.image_layers else {
+			return Ok(snapshot);
+		};
+		Ok(match key_parts(self.ir, layers, &self.run.layers) {
+			Some(parts) => DataInstr::SnapshotKeyParts {
+				parts,
+				view: Some(view),
+			},
+			None => snapshot,
+		})
+	}
+
 	/// The host pipeline that cuts from an image of a record with no pre-image each stored field a
 	/// checked caller may not select, deriving nothing: the columns of the layers the write states
 	/// ([`ImageLayers`]) that guard a field the layer's input does not declare `COMPUTED`, or, for
@@ -1461,7 +1488,7 @@ pub(super) fn emit_stage(
 				em.emit(data(DataInstr::Matched));
 			}
 			Some(region) => {
-				let snapshot = cx.snapshot(em)?;
+				let snapshot = cx.deriving_snapshot(em)?;
 				let pipeline = cx.host(em, |lowerer| condition_pipeline(lowerer, region))?;
 				em.emit(data(snapshot));
 				em.emit(data(DataInstr::Where {
@@ -1474,7 +1501,7 @@ pub(super) fn emit_stage(
 		// evaluated again. An `UNSET` evaluates nothing, and a statement with no clause no stage.
 		WriteStageKind::ComputeInputData => {
 			if let Some(clause) = run.data {
-				let snapshot = cx.snapshot(em)?;
+				let snapshot = cx.deriving_snapshot(em)?;
 				let pipeline = match clause.kind {
 					ClauseKind::Unset => None,
 					ClauseKind::Set => {

@@ -17,6 +17,12 @@
 //! with its `COMPUTED` fields derived onto it. Both are memoised on the row —
 //! the reduction on `current_reduced`, the derivation on `fields_computed` —
 //! and every stage that changes the record's field values clears them.
+//!
+//! An unchecked caller's snapshot of a table whose only `COMPUTED` fields are
+//! the named components of its record id is derived by
+//! [`DataInstr::SnapshotKeyParts`]: each component is the element of the
+//! image's `id` at its position, written onto the image in place, which is
+//! what the field view's host pipeline derives, without running it.
 
 use std::sync::Arc;
 
@@ -53,6 +59,17 @@ pub(in crate::exec::vm) enum DataInstr {
 		view: Option<u16>,
 		bare: Option<u16>,
 		checked: bool,
+	},
+	/// [`DataInstr::Snapshot`] for an unchecked caller of a table whose field
+	/// view, host pipeline `view`, is one layer deriving `parts` and nothing
+	/// else. Where the post-image is an object whose `id` is a record id, each
+	/// part is set on it, in place, to `id[position]` held to the part's kind;
+	/// any other post-image is run through `view`. Either is taken only when
+	/// there is a pre-image, and a record already derived, or with no id, is
+	/// left as it is.
+	SnapshotKeyParts {
+		parts: Box<[KeyPart]>,
+		view: Option<u16>,
 	},
 	/// Judge the statement's condition, host pipeline `pipeline` over the
 	/// snapshot: a record it accepts is matched, and one it rejects jumps to
@@ -115,6 +132,22 @@ pub(in crate::exec::vm) enum DataInstr {
 
 assert_plain!(DataInstr);
 
+/// A named component of the record id as a field view derives it: the field
+/// `name`, whose value is `id[position]`, coerced to `kind` where it declares
+/// one.
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::exec::vm) struct KeyPart {
+	pub(in crate::exec::vm) name: surrealdb_strand::Strand,
+	pub(in crate::exec::vm) position: u32,
+	pub(in crate::exec::vm) kind: Option<crate::expr::Kind>,
+}
+
+/// The most parts [`DataInstr::SnapshotKeyParts`] derives in place; a view
+/// deriving more is run as its host pipeline.
+const KEY_PARTS_INLINE: usize = 8;
+
+assert_plain!(KeyPart);
+
 impl DataInstr {
 	/// The jump target the instruction holds, for the lowering to patch.
 	pub(in crate::exec::vm) fn target_mut(&mut self) -> Option<&mut Label> {
@@ -128,6 +161,9 @@ impl DataInstr {
 			} => Some(target),
 			DataInstr::Matched
 			| DataInstr::Snapshot {
+				..
+			}
+			| DataInstr::SnapshotKeyParts {
 				..
 			}
 			| DataInstr::ComputeInput {
@@ -365,6 +401,63 @@ async fn materialise(
 	Ok(())
 }
 
+/// Derive the record's pre-mutation snapshot, as
+/// [`DataInstr::SnapshotKeyParts`] states.
+///
+/// The field view's host pipeline reads `id` from the image, indexes it
+/// ([`evaluate_index`](crate::exec::vm::access::index::evaluate_index): the
+/// element of an array key, `NONE` past its end or for any other key),
+/// coerces the element to the column's kind, failing with `FieldCoerce`
+/// naming the record id, and writes it under the column's name. Over an
+/// image whose `id` is a record id this does the same where the image is,
+/// with nothing written unless every part coerces, and leaves any other
+/// image to the pipeline.
+async fn materialise_key_parts(
+	program: &Program,
+	parts: &[KeyPart],
+	view: Option<u16>,
+	state: &mut State,
+	exec: &ExecutionContext,
+) -> FlowResult<()> {
+	let row = write_state(state)?.row()?;
+	if row.id.is_none() || row.initial.is_none() || row.fields_computed {
+		return Ok(());
+	}
+	let in_place = parts.len() <= KEY_PARTS_INLINE
+		&& matches!(&row.current, Value::Object(image) if matches!(image.get("id"), Some(Value::RecordId(_))));
+	if !in_place {
+		return materialise(program, view, None, false, state, exec).await;
+	}
+	let Value::Object(image) = &mut row.current else {
+		return Err(internal("a key-part snapshot of an image that is no object"));
+	};
+	let Some(Value::RecordId(rid)) = image.get("id") else {
+		return Err(internal("a key-part snapshot of an image with no record id"));
+	};
+	let mut elements = [const { Value::None }; KEY_PARTS_INLINE];
+	let derived = &mut elements[..parts.len()];
+	for (part, slot) in parts.iter().zip(derived.iter_mut()) {
+		let element = crate::exec::operators::scan::key_range::key_element(&rid.key, part.position)
+			.cloned()
+			.unwrap_or(Value::None);
+		*slot = match &part.kind {
+			Some(kind) => element.coerce_to_kind(kind).map_err(|error| {
+				ControlFlow::Err(anyhow::Error::new(DocError::FieldCoerce {
+					record: rid.to_sql(),
+					field_name: part.name.as_str().to_owned(),
+					error: Box::new(error),
+				}))
+			})?,
+			None => element,
+		};
+	}
+	for (part, element) in parts.iter().zip(derived.iter_mut()) {
+		image.insert(part.name.clone(), std::mem::replace(element, Value::None));
+	}
+	row.fields_computed = true;
+	Ok(())
+}
+
 /// `image` as a checked caller may read it: run through `view` where there is
 /// a pre-image to derive `COMPUTED` fields from, and through `bare` where
 /// there is none. An image that is no object, or an absent pipeline, is read
@@ -464,6 +557,13 @@ pub(super) async fn step(
 			checked,
 		} => {
 			materialise(program, *view, *bare, *checked, state, exec).await?;
+			Ok(next)
+		}
+		DataInstr::SnapshotKeyParts {
+			parts,
+			view,
+		} => {
+			materialise_key_parts(program, parts, *view, state, exec).await?;
 			Ok(next)
 		}
 		DataInstr::Where {

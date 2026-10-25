@@ -55,7 +55,7 @@ mod storage;
 mod view;
 
 pub(super) use cascade::{MaterializeStep, ReferenceInstr, RepairStrategy, TableRepairs};
-pub(super) use data::DataInstr;
+pub(super) use data::{DataInstr, KeyPart};
 pub(super) use gate::GateInstr;
 pub(super) use observe::{
 	Admission, ClauseDepth, EventClauses, LoweredEvents, LoweredSubscription, ObserveInstr,
@@ -2574,6 +2574,66 @@ mod tests {
 				],
 				"{session:?}"
 			);
+		}
+	}
+
+	/// Whether `program`, or a unit it holds, derives a write's snapshot by
+	/// reading the components of the record id from its key
+	/// ([`super::DataInstr::SnapshotKeyParts`]).
+	fn snapshots_key_parts(program: &super::Program) -> bool {
+		use super::super::program::{Instr, WriteInstr};
+		use super::DataInstr;
+		program
+			.pipelines
+			.iter()
+			.chain(&program.host_code)
+			.flat_map(|pipeline| pipeline.code.iter())
+			.any(|instr| {
+				matches!(instr, Instr::Write(WriteInstr::Data(DataInstr::SnapshotKeyParts { .. })))
+			}) || program.units.iter().any(|unit| snapshots_key_parts(unit))
+	}
+
+	/// The owner's condition or data clause over a table whose only computed
+	/// fields are the components of its record id reads them from the key, and
+	/// over a table that also computes another field, or computes nothing, it
+	/// derives the snapshot as before.
+	#[tokio::test]
+	async fn a_snapshot_of_components_alone_reads_them_from_the_key() {
+		use super::super::tests_morsel::{bind, planner};
+		let schema = "
+			DEFINE TABLE reading PERMISSIONS FULL;
+			DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+			DEFINE TABLE counter PERMISSIONS FULL;
+			DEFINE FIELD id ON counter TYPE [site: string, n: int];
+			DEFINE TABLE mixed PERMISSIONS FULL;
+			DEFINE FIELD id ON mixed TYPE [city: string, time: datetime];
+			DEFINE FIELD loud ON mixed COMPUTED string::uppercase(city);
+			DEFINE TABLE plain PERMISSIONS FULL;
+		";
+		let db = TestDb::new_with_auth(schema).await;
+		for statement in [
+			"DELETE {} WHERE city = 'London'",
+			"UPDATE {} SET a = 1 WHERE city = 'London'",
+			"UPDATE {} SET copy = city",
+			"UPSERT {} SET a = 1 WHERE city = 'London'",
+		] {
+			for (table, reads_key) in
+				[("reading", true), ("counter", true), ("mixed", false), ("plain", false)]
+			{
+				let sql = statement.replace("{}", table);
+				let ctx =
+					db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+				let bound = bind(&ctx, &sql).await;
+				let mut program = super::super::compile::compile(&planner(&ctx), &bound)
+					.await
+					.expect("compiles")
+					.program;
+				super::super::compile::seed_statement(&planner(&ctx), &mut program)
+					.await
+					.expect("seeds");
+				ctx.txn().cancel().await.expect("cancel");
+				assert_eq!(snapshots_key_parts(&program), reads_key, "`{sql}`");
+			}
 		}
 	}
 

@@ -120,7 +120,7 @@ use std::sync::Arc;
 
 pub(super) use fetch::path_steps;
 pub(super) use knn::gate_code;
-pub(super) use layer::{lower_layers, lower_stored_guards};
+pub(super) use layer::{key_parts, lower_layers, lower_stored_guards};
 pub(super) use projection::project_image;
 use surrealdb_strand::TableName;
 

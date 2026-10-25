@@ -65,6 +65,7 @@ use crate::exec::vm::ir_lower::units::LowerCx;
 use crate::exec::vm::program::{
 	FrameMode, Instr, Operand, PermissionSpec, Pipeline, ROW, Reg, Source,
 };
+use crate::exec::vm::write::KeyPart;
 use crate::expr::Kind;
 use crate::expr::logical::{EvalMode, GuardKind};
 use crate::val::Value;
@@ -577,6 +578,88 @@ pub(in crate::exec::vm::ir_lower) fn lower_stored_guards(
 ) -> Result<Option<(Pipeline, Needs)>, IrError> {
 	let (pipeline, needs, guards) = lower_layer_stack(em, cx, ir, layers, true)?;
 	Ok((guards > 0).then_some((pipeline, needs)))
+}
+
+/// The named components of the record id that field view `layers` derives from the regions `held`,
+/// when it is one layer of `*` and columns each of which is a component's derivation and nothing
+/// else: `id[i]` for a literal position `i`, in the key-part frame, with no guard. `None` for any
+/// other view.
+pub(in crate::exec::vm::ir_lower) fn key_parts(
+	ir: &Ir,
+	layers: &[SubscriberLayer],
+	held: &[Vec<RegionId>],
+) -> Option<Box<[KeyPart]>> {
+	let ([layer], [regions]) = (layers, held) else {
+		return None;
+	};
+	if layer.judged.is_some() {
+		return None;
+	}
+	let FieldsShape::Select(all) = &layer.fields else {
+		return None;
+	};
+	let stars = all.iter().filter(|field| matches!(field, FieldShape::All)).count();
+	if stars != 1 {
+		return None;
+	}
+	let kinds: Vec<&Option<Kind>> = all
+		.iter()
+		.filter_map(|field| match field {
+			FieldShape::Single {
+				kind,
+				..
+			} => Some(kind),
+			FieldShape::All => None,
+		})
+		.collect();
+	let count = kinds.len();
+	if count == 0 || regions.len() != count * 2 {
+		return None;
+	}
+	kinds
+		.into_iter()
+		.enumerate()
+		.map(|(at, kind)| {
+			let (read, region) = (regions[at], regions[count + at]);
+			let frame = &ir.frame(region_frame(ir, region).ok()?)?.eval;
+			if !frame.key_part || frame.mode != EvalMode::Computed {
+				return None;
+			}
+			let (name, _) = field_read(ir, read).ok()?;
+			let row = row_arg(ir, region)?;
+			let index_op = producer_op(ir, yielded_value(ir, region).ok()?).ok()?;
+			let (OpKind::Expr(ExprOp::Index), [base, index]) =
+				(&index_op.kind, index_op.operands.as_slice())
+			else {
+				return None;
+			};
+			let base_op = producer_op(ir, *base).ok()?;
+			let (
+				OpKind::Expr(ExprOp::Field {
+					name: id,
+				}),
+				[arg],
+			) = (&base_op.kind, base_op.operands.as_slice())
+			else {
+				return None;
+			};
+			if id.as_str() != "id" || *arg != row {
+				return None;
+			}
+			let pos_op = producer_op(ir, *index).ok()?;
+			let OpKind::Expr(ExprOp::Literal(value)) = &pos_op.kind else {
+				return None;
+			};
+			let Value::Number(crate::val::Number::Int(position)) = **value else {
+				return None;
+			};
+			Some(KeyPart {
+				name,
+				position: u32::try_from(position).ok()?,
+				kind: kind.clone(),
+			})
+		})
+		.collect()
 }
 
 /// The pipeline of [`lower_layers`], or of [`lower_stored_guards`] where `stored_only`, with the
