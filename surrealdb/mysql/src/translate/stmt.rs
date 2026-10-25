@@ -3,12 +3,13 @@
 use std::fmt::Write;
 
 use crate::ast::stmt::{
-	DescribeStmt, ExplainStmt, JoinType, LimitClause, OrderByExpr, QualifiedName, SelectItem,
-	SelectStmt, SetStmt, ShowStmt, Statement, TableRef, TransactionStmt, UseStmt, VariableTarget,
+	ExplainStmt, JoinType, LimitClause, OrderByExpr, QualifiedName, SelectItem, SelectStmt,
+	SetStmt, Statement, TableRef, TransactionStmt, UseStmt, VariableTarget,
 };
 use crate::translate::context::TranslationContext;
 use crate::translate::error::TranslationError;
 use crate::translate::expr::translate_expr;
+pub use crate::translate::show::{translate_describe, translate_show};
 
 /// Translates a MySQL statement into its SurrealQL string representation.
 pub fn translate_statement(
@@ -307,73 +308,6 @@ pub fn translate_set(
 			}
 		}
 	}
-	Ok(())
-}
-
-pub fn translate_show(show: &ShowStmt, out: &mut String) -> Result<(), TranslationError> {
-	match show {
-		ShowStmt::Tables {
-			..
-		} => out.push_str("INFO FOR DB;"),
-		ShowStmt::Databases {
-			..
-		} => out.push_str("INFO FOR ROOT;"),
-		ShowStmt::Columns {
-			table,
-			..
-		} => {
-			out.push_str("INFO FOR TABLE ");
-			translate_qualified_name(table, out)?;
-			out.push(';');
-		}
-		ShowStmt::CreateTable {
-			table,
-			..
-		} => {
-			out.push_str("INFO FOR TABLE ");
-			translate_qualified_name(table, out)?;
-			out.push(';');
-		}
-		ShowStmt::Variables {
-			..
-		} => out.push_str("SELECT * FROM (SELECT 'character_set_client' AS Variable_name, 'utf8mb4' AS Value);"),
-		ShowStmt::Status {
-			..
-		} => out.push_str("SELECT * FROM (SELECT 'Uptime' AS Variable_name, '3600' AS Value);"),
-		ShowStmt::Processlist {
-			..
-		} => out.push_str("SELECT 1 AS Id, 'root' AS User, 'localhost' AS Host, NULL AS db, 'Query' AS Command, 0 AS Time, 'executing' AS State, 'SHOW PROCESSLIST' AS Info;"),
-		ShowStmt::Warnings {
-			..
-		} => out.push_str("SELECT 'Note' AS Level, 0 AS Code, 'Success' AS Message WHERE false;"),
-		ShowStmt::Errors {
-			..
-		} => out.push_str("SELECT 'Error' AS Level, 0 AS Code, 'None' AS Message WHERE false;"),
-		ShowStmt::Index {
-			table,
-			..
-		} => {
-			out.push_str("INFO FOR TABLE ");
-			translate_qualified_name(table, out)?;
-			out.push(';');
-		}
-		ShowStmt::Engines {
-			..
-		} => out.push_str("SELECT 'InnoDB' AS Engine, 'DEFAULT' AS Support;"),
-		ShowStmt::Collation {
-			..
-		} => out.push_str("SELECT 'utf8mb4_0900_ai_ci' AS Collation, 'utf8mb4' AS Charset, 255 AS Id, 'Yes' AS Compiled, 'Yes' AS Sortlen;"),
-		ShowStmt::Charset {
-			..
-		} => out.push_str("SELECT 'utf8mb4' AS Charset, 'UTF-8 Unicode' AS Description, 'utf8mb4_0900_ai_ci' AS Default_collation, 4 AS Maxlen;"),
-	}
-	Ok(())
-}
-
-pub fn translate_describe(desc: &DescribeStmt, out: &mut String) -> Result<(), TranslationError> {
-	out.push_str("INFO FOR TABLE ");
-	translate_qualified_name(&desc.table, out)?;
-	out.push(';');
 	Ok(())
 }
 

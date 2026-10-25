@@ -1,0 +1,42 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_braces.surql"]
+
+[test]
+reason = "A brace in a LIKE pattern stands for itself, so a pattern that reads as a repetition to a regular expression matches only the name that holds the braces"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{1}' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{2,3}' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: '}' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: '{1}' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{1' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{' }, { Tables_in_shop: 'a{1' }, { Tables_in_shop: 'a{1}' }, { Tables_in_shop: 'a{2,3}' }, { Tables_in_shop: '{1}' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'a{1}' }]"
+*/
+
+SHOW TABLES LIKE 'a{1}';
+SHOW TABLES LIKE 'a{2,3}';
+SHOW TABLES LIKE 'a{';
+SHOW TABLES LIKE '}';
+SHOW TABLES LIKE '{1}';
+SHOW TABLES LIKE 'a{1';
+SHOW TABLES LIKE '%{%';
+SHOW TABLES LIKE 'a_1}';

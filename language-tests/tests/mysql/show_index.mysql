@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_shop.surql"]
+
+[test]
+reason = "SHOW INDEX answers with a row per indexed column, the primary key first, and refuses a missing table or another database"
+
+[[test.results]]
+value = "[{ Cardinality: NULL, Collation: 'A', Column_name: 'id', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'PRIMARY', Non_unique: 0, Null: '', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'email', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_email_uniq', Non_unique: 0, Null: '', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'note', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_note', Non_unique: 1, Null: 'YES', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'balance', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_note', Non_unique: 1, Null: '', Packed: NULL, Seq_in_index: 2, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }]"
+
+[[test.results]]
+value = "[{ Cardinality: NULL, Collation: 'A', Column_name: 'id', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'PRIMARY', Non_unique: 0, Null: '', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'email', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_email_uniq', Non_unique: 0, Null: '', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'note', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_note', Non_unique: 1, Null: 'YES', Packed: NULL, Seq_in_index: 1, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }, { Cardinality: NULL, Collation: 'A', Column_name: 'balance', Comment: '', Expression: NULL, Index_comment: '', Index_type: 'BTREE', Key_name: 'show_accounts_note', Non_unique: 1, Null: '', Packed: NULL, Seq_in_index: 2, Sub_part: NULL, Table: 'show_accounts', Visible: 'YES' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+error = "An error occurred: Table 'show_nosuch' doesn't exist"
+
+[[test.results]]
+error = "An error occurred: cross-database queries not supported: elsewhere.show_accounts"
+*/
+
+SHOW INDEX FROM show_accounts;
+SHOW KEYS FROM show_accounts;
+SHOW INDEXES FROM show_ledger;
+SHOW INDEX FROM show_nosuch;
+SHOW INDEX FROM elsewhere.show_accounts;

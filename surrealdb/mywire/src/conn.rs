@@ -583,6 +583,16 @@ impl Connection {
 		}
 	}
 
+	/// The columns a `SHOW` or `DESCRIBE` statement answers with, in MySQL's order, for the MySQL
+	/// dialect. They are named for the database the session runs in, which is the database the
+	/// statement's own rows are named for.
+	fn show_descriptor(&self, sql: &str) -> Option<surrealdb_sqlplan::ResultDescriptor> {
+		if self.dialect != Dialect::MySql {
+			return None;
+		}
+		crate::show::describe(sql, self.session.db.as_deref().unwrap_or("test"))
+	}
+
 	pub fn client_capabilities(&self) -> u32 {
 		self.client_capabilities
 	}
@@ -1278,6 +1288,7 @@ impl Connection {
 		} else {
 			None
 		};
+		let descriptor = descriptor.or_else(|| self.show_descriptor(trimmed));
 
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
@@ -1670,6 +1681,7 @@ impl Connection {
 		} else {
 			None
 		};
+		let descriptor = descriptor.or_else(|| self.show_descriptor(trimmed));
 
 		let schema = self.current_db.clone().unwrap_or_else(|| "test".to_string());
 		let column_defs: Vec<ColumnDefinition41> = if let Some(desc) = descriptor {
@@ -1945,6 +1957,7 @@ impl Connection {
 		} else {
 			None
 		};
+		let descriptor = descriptor.or_else(|| self.show_descriptor(trimmed));
 
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),

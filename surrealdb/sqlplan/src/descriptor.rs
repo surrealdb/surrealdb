@@ -14,8 +14,9 @@ use crate::ir::{
 use crate::output_keys::output_keys;
 
 /// Abstract strongly-typed SQL data type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SqlType {
+	#[default]
 	Unknown,
 	Bool,
 	Int2,
@@ -279,8 +280,9 @@ impl SqlType {
 	}
 }
 
-/// Description of a single projected output column.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Description of a single projected output column. A statement that is not a select describes
+/// the columns of its result by their name and type and leaves every other field at its default.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ResultColumn {
 	/// Wire name of column (alias, column name, or ?column? in PG / expr in MySQL).
 	pub name: String,

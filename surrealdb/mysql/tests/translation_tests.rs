@@ -77,11 +77,15 @@ fn test_translate_use_and_show() {
 
 	let sql = "SHOW TABLES";
 	let surql = translate_sql(sql).unwrap();
-	assert_eq!(surql, "INFO FOR DB;");
+	assert_eq!(
+		surql,
+		"{ RETURN object::keys((INFO FOR DB).tables)\
+		 .map(|$t| object::from_entries([['Tables_in_' + session::db(), $t]])); }"
+	);
 
 	let sql = "SHOW COLUMNS FROM users";
 	let surql = translate_sql(sql).unwrap();
-	assert_eq!(surql, "INFO FOR TABLE users;");
+	assert!(surql.contains("INFO FOR TABLE `users` STRUCTURE"), "{surql}");
 }
 
 #[test]

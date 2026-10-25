@@ -3,11 +3,13 @@
 pub mod context;
 pub mod error;
 pub mod expr;
+pub mod show;
 pub mod stmt;
 
 pub use context::{ParamStyle, TranslationContext};
 pub use error::TranslationError;
 pub use expr::translate_expr;
+pub use show::{ShowColumn, ShowColumnKind, show_columns};
 pub use stmt::{translate_select, translate_statement};
 
 use crate::ast::stmt::Statement;

@@ -1,6 +1,6 @@
 //! SHOW, DESCRIBE, and EXPLAIN statement parser for MySQL.
 
-use crate::ast::stmt::{DescribeStmt, ExplainStmt, ShowStmt};
+use crate::ast::stmt::{DescribeStmt, ExplainStmt, QualifiedName, ShowStmt};
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
@@ -55,8 +55,7 @@ impl<'a> Parser<'a> {
 
 		if self.peek_keyword() == Some(Keyword::Tables) {
 			self.bump();
-			let database = if self.peek_keyword() == Some(Keyword::From) {
-				self.bump();
+			let database = if self.eat_from_or_in() {
 				Some(self.parse_ident()?.0)
 			} else {
 				None
@@ -83,10 +82,13 @@ impl<'a> Parser<'a> {
 			});
 		}
 
-		if self.peek_keyword() == Some(Keyword::Columns) {
+		if self.peek_keyword() == Some(Keyword::Columns) || self.peek_is_word("FIELDS") {
 			self.bump();
-			self.expect_keyword(Keyword::From, "FROM after SHOW COLUMNS")?;
-			let table = self.parse_qualified_name()?;
+			if !self.eat_from_or_in() {
+				return Err(self.unexpected("FROM or IN after SHOW COLUMNS"));
+			}
+			let mut table = self.parse_qualified_name()?;
+			self.parse_database_after(&mut table)?;
 			let like = self.parse_optional_like()?;
 			let end = self.peek().span;
 			return Ok(ShowStmt::Columns {
@@ -135,15 +137,15 @@ impl<'a> Parser<'a> {
 			});
 		}
 
-		if self.peek_keyword() == Some(Keyword::Index) || self.peek_keyword() == Some(Keyword::Key)
+		if self.peek_keyword() == Some(Keyword::Index)
+			|| self.peek_keyword() == Some(Keyword::Key)
+			|| self.peek_is_word("KEYS")
+			|| self.peek_is_word("INDEXES")
 		{
 			self.bump();
-			if self.peek_keyword() == Some(Keyword::From)
-				|| self.peek_keyword() == Some(Keyword::In)
-			{
-				self.bump();
-			}
-			let table = self.parse_qualified_name()?;
+			self.eat_from_or_in();
+			let mut table = self.parse_qualified_name()?;
+			self.parse_database_after(&mut table)?;
 			let end = self.peek().span;
 			return Ok(ShowStmt::Index {
 				table,
@@ -196,6 +198,54 @@ impl<'a> Parser<'a> {
 				found: self.peek().kind.to_string(),
 			},
 		))
+	}
+
+	/// Whether the next token is the identifier `word`, which MySQL reads as a keyword here.
+	fn peek_is_word(&self, word: &str) -> bool {
+		matches!(&self.peek().kind, TokenKind::Ident(ident) if ident.eq_ignore_ascii_case(word))
+	}
+
+	/// Consume `FROM` or `IN`, which MySQL accepts alike before a table or database name.
+	fn eat_from_or_in(&mut self) -> bool {
+		if matches!(self.peek_keyword(), Some(Keyword::From | Keyword::In)) {
+			self.bump();
+			true
+		} else {
+			false
+		}
+	}
+
+	/// Parse the optional `{FROM | IN} <database>` that follows a table name and put the database
+	/// in front of the table's name, as if it had been written `<database>.<table>`. A database
+	/// named both ways is refused.
+	fn parse_database_after(&mut self, table: &mut QualifiedName) -> ParseResult<()> {
+		if !self.eat_from_or_in() {
+			return Ok(());
+		}
+		let (database, span) = self.parse_ident()?;
+		if table.parts.len() != 1 {
+			return Err(ParseError::new(
+				span,
+				ErrorKind::UnexpectedToken {
+					expected: "a database named once, either before the table name or after it",
+					found: database,
+				},
+			));
+		}
+		table.parts.insert(0, database);
+		table.span = table.span.merge(span);
+		Ok(())
+	}
+
+	fn unexpected(&self, expected: &'static str) -> ParseError {
+		let tok = self.peek();
+		ParseError::new(
+			tok.span,
+			ErrorKind::UnexpectedToken {
+				expected,
+				found: tok.kind.to_string(),
+			},
+		)
 	}
 
 	fn parse_optional_like(&mut self) -> ParseResult<Option<String>> {

@@ -99,6 +99,10 @@ impl<'a> Parser<'a> {
 			Some(Keyword::Describe) | Some(Keyword::Desc) => {
 				Ok(Statement::Describe(self.parse_describe_stmt()?))
 			}
+			// `EXPLAIN <table>` is `DESCRIBE <table>`.
+			Some(Keyword::Explain) if matches!(self.peek_nth(1).kind, TokenKind::Ident(_)) => {
+				Ok(Statement::Describe(self.parse_describe_stmt()?))
+			}
 			Some(Keyword::Explain) => Ok(Statement::Explain(Box::new(self.parse_explain_stmt()?))),
 			Some(Keyword::Start)
 			| Some(Keyword::Begin)

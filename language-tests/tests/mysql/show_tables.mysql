@@ -1,0 +1,42 @@
+/**
+[env]
+namespace = true
+database = "shop"
+imports = ["mysql/_show_shop.surql"]
+
+[test]
+reason = "SHOW TABLES lists the tables of the session's database, filtered by LIKE, and refuses another database"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_accounts' }, { Tables_in_shop: 'show_ledger' }]"
+
+[[test.results]]
+value = "[{ Table_type: 'BASE TABLE', Tables_in_shop: 'show_accounts' }, { Table_type: 'BASE TABLE', Tables_in_shop: 'show_ledger' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_accounts' }, { Tables_in_shop: 'show_ledger' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_accounts' }, { Tables_in_shop: 'show_ledger' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_accounts' }]"
+
+[[test.results]]
+value = "[{ Tables_in_shop: 'show_ledger' }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+error = "An error occurred: cross-database queries not supported: elsewhere"
+*/
+
+SHOW TABLES;
+SHOW FULL TABLES;
+SHOW TABLES FROM shop;
+SHOW TABLES IN shop;
+SHOW TABLES LIKE 'show_a%';
+SHOW TABLES LIKE 'show_l_dger';
+SHOW TABLES LIKE 'SHOW_A%';
+SHOW TABLES FROM elsewhere;

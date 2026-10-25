@@ -31,6 +31,7 @@ pub mod constants;
 mod error;
 pub mod msg;
 pub mod query;
+mod show;
 pub mod typing;
 
 pub use conn::Connection;
