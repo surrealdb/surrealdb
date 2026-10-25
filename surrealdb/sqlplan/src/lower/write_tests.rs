@@ -515,6 +515,7 @@ fn test_lower_mysql_truncate() {
 
 	assert_eq!(del.what, vec![Expr::Table(surrealdb_strand::TableName::from("users"))]);
 	assert!(del.cond.is_none());
+	assert!(del.output.is_none());
 }
 
 // ============================================================================

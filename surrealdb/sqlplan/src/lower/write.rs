@@ -3140,6 +3140,9 @@ pub fn lower_mysql_delete(
 }
 
 /// Lower a MySQL `TruncateStmt` into a SurrealDB `Expr::Delete`.
+///
+/// The statement returns nothing: MySQL answers `TRUNCATE` with an OK packet that reports no
+/// affected rows, so the rows it removes are neither collected nor sent.
 pub fn lower_mysql_truncate(
 	truncate: &surrealdb_mysql::ast::stmt::TruncateStmt,
 ) -> Result<Expr, PlanError> {
@@ -3147,7 +3150,7 @@ pub fn lower_mysql_truncate(
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what: vec![Expr::Table(TableName::from(table_name))],
 		cond: None,
-		output: Some(Output::Before),
+		output: None,
 		..Default::default()
 	})))
 }

@@ -1998,6 +1998,15 @@ impl Connection {
 		};
 		let descriptor = descriptor.or_else(|| self.show_descriptor(trimmed));
 
+		if self.dialect == Dialect::MySql
+			&& let Some(e) =
+				truncate_scope_error(trimmed, self.current_db.as_deref().unwrap_or("test"))
+		{
+			let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
+
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
 			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
@@ -2418,6 +2427,27 @@ fn extract_id_u64(id_val: &surrealdb_types::Value) -> Option<u64> {
 	} else {
 		None
 	}
+}
+
+/// The refusal of a `TRUNCATE` of a table qualified with a database other than `database`, the
+/// connection's; `None` when `sql` holds no such statement.
+///
+/// The text protocol checks the tables a statement names before it runs; this applies the same
+/// check, with the same error, to a prepared statement, so that a `TRUNCATE` is refused in both
+/// forms and never empties a table it did not name.
+fn truncate_scope_error(sql: &str, database: &str) -> Option<surrealdb_sqlplan::PlanError> {
+	// Only a statement that spells the keyword can be a TRUNCATE; skip parsing the others.
+	if !sql.as_bytes().windows(8).any(|word| word.eq_ignore_ascii_case(b"truncate")) {
+		return None;
+	}
+	let stmts = surrealdb_mysql::parse_statements(sql).ok()?;
+	let catalog = MemoryCatalog::new().with_database(database);
+	stmts.iter().find_map(|stmt| {
+		let MyStatement::Truncate(truncate) = stmt else {
+			return None;
+		};
+		surrealdb_sqlplan::resolve_mysql_table_name(&truncate.table.parts, Some(&catalog)).err()
+	})
 }
 
 fn extract_dml_counts(val: &surrealdb_types::Value) -> (u64, u64) {
