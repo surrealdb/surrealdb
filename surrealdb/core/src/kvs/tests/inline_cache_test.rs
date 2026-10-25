@@ -543,6 +543,72 @@ async fn record_delete_purges_its_ref_cache_key() {
 	assert!(!ref_cache_key_present(&ds, &rid).await, "the purge must drop the cache key");
 }
 
+/// Whether the record's `!cr` reference-cache key resolves at `version`, in the
+/// versioned store `ds`.
+#[cfg(feature = "kv-surrealkv")]
+async fn ref_cache_key_present_at(ds: &Datastore, rid: &RecordId, version: u64) -> bool {
+	let txn = ds.transaction(Read).await.unwrap();
+	let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+	let key = crate::key::schema::RefCacheKey {
+		ns: db.namespace_id,
+		db: db.database_id,
+		tb: std::borrow::Cow::Borrowed(&rid.table),
+		id: std::borrow::Cow::Borrowed(&rid.key),
+	};
+	let present = txn.get_key(&key, Some(version)).await.unwrap().is_some();
+	txn.cancel().await.unwrap();
+	present
+}
+
+/// Removing a referencing table invalidates the reference caches of the
+/// tables it referenced. `REMOVE TABLE` leaves the caches' history readable
+/// at an earlier version; `REMOVE TABLE AND EXPUNGE` clears it, since an older
+/// cache entry still names the removed table, field and records — also when
+/// the reference was unset before the removal, leaving no live key behind.
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn remove_table_expunge_clears_reference_cache_history() {
+	for (statement, history_kept) in [
+		("REMOVE TABLE post;", true),
+		("REMOVE TABLE AND EXPUNGE post;", false),
+		("UPDATE post:a UNSET author; REMOVE TABLE AND EXPUNGE post;", false),
+	] {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let path =
+			format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
+		let ds =
+			Datastore::builder().without_maintenance_tasks().build_with_path(&path).await.unwrap();
+		let ses = Session::owner().with_ns("test").with_db("test");
+		run(
+			&ds,
+			&ses,
+			"DEFINE NAMESPACE test;
+			 DEFINE DATABASE test;
+			 DEFINE TABLE person INLINE REFERENCES 8;
+			 DEFINE TABLE post;
+			 DEFINE FIELD author ON post TYPE option<record<person>> REFERENCE ON DELETE UNSET;
+			 CREATE person:p1;
+			 CREATE post:a SET author = person:p1;",
+		)
+		.await;
+		let rid = RecordId::new("person".into(), "p1".to_owned());
+		let before: u64 = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap()
+			.as_nanos()
+			.try_into()
+			.unwrap();
+		assert!(ref_cache_key_present_at(&ds, &rid, before).await, "the cache was materialised");
+		run(&ds, &ses, statement).await;
+		assert!(!ref_cache_key_present(&ds, &rid).await, "`{statement}` invalidates the cache");
+		assert_eq!(
+			ref_cache_key_present_at(&ds, &rid, before).await,
+			history_kept,
+			"`{statement}` and the cache's history"
+		);
+	}
+}
+
 /// Seeded randomized oracle: a cap-on instance and a cap-off twin replay
 /// the same random relate/delete/re-relate sequence, checking the whole
 /// battery for equality along the way. Caps small enough that spill and

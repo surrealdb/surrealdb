@@ -128,13 +128,20 @@ pub(crate) async fn purge_dropped_reference_keys_with(
 		// are now stale. Drop the table's whole cache subspace in this
 		// transaction; caches re-materialise lazily. Invalidate-to-missing
 		// here is one range delete, where cache-accurate maintenance would
-		// be a read-modify-write per orphaned key.
-		if !orphaned.is_empty() {
-			let key = RefCachePrefix {
-				ns,
-				db,
-				tb: Cow::Borrowed(target),
-			};
+		// be a read-modify-write per orphaned key. Under `EXPUNGE` the
+		// caches' history goes too, since an older cache entry still names
+		// the expunged table, field and records. That history outlives the
+		// field's live keys — a reference unset before the removal leaves
+		// none to find — so it is cleared for every table the field could
+		// reference, whether or not a live key was found.
+		let key = RefCachePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(target),
+		};
+		if expunge {
+			txn.clr_prefix_key(&key).await?;
+		} else if !orphaned.is_empty() {
 			txn.del_prefix_key(&key).await?;
 		}
 	}
