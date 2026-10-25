@@ -47,8 +47,9 @@
 //! older one, or to a lease that is running. The oldest waiter, with nothing
 //! that is running left to give memory back, is granted its bytes past the
 //! limit. Every wait is also bounded by the caller, so a query blocked on
-//! something the governor cannot see still ends its wait. Decisions are atomic
-//! under the governor's lock.
+//! something the governor cannot see still ends its wait. Decisions that weigh
+//! the leases together are atomic under the governor's lock; growth that free
+//! memory covers while no lease waits is one atomic step on the grants' sum.
 //!
 //! The governor does not bound what a single query pins: that is the query's
 //! own ceiling ([`super::QueryMemory`]). Memory a borrower holds past its
@@ -59,8 +60,9 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+use dashmap::DashMap;
 use tokio::sync::Notify;
 
 /// A boxed future, as a [`MemoryGovernor`] returns where it must be object
@@ -137,6 +139,14 @@ pub trait MemoryGovernor: Send + Sync + 'static {
 	/// or its wait ran out. The default does nothing.
 	fn unwait(&self, _lease: &Lease) {}
 
+	/// Set `lease`'s grant to `bytes`, or to its minimum where that is higher,
+	/// for [`Lease::set_grant`]. A governor that keeps the grants' sum changes
+	/// it with the grant ([`Lease::store_grant`]), in one step no decision of
+	/// its own interleaves with; a governor that delegates to another forwards
+	/// it. Required, so a governor that wraps one that keeps the sum cannot
+	/// leave it uncounted.
+	fn regrant(&self, lease: &Lease, bytes: usize);
+
 	/// The node limit the governor holds its leases to, if it has one.
 	fn limit(&self) -> Option<usize> {
 		None
@@ -145,6 +155,27 @@ pub trait MemoryGovernor: Send + Sync + 'static {
 
 /// How many times [`Lease::reserve`] asks the governor to grow the grant for one reservation.
 const MOST_GROWTHS: u32 = 16;
+
+/// The bits of [`FairGovernor`]'s 64-bit grants' word that hold the sum: up to
+/// 256 TiB, on every target. Every change to the sum stays within these bits:
+/// what a sum no node reaches holds past them is kept beside the word
+/// ([`FairGovernor::overflow`]), never spilled into the bits above.
+const SUM: u64 = (1 << 48) - 1;
+
+/// One lock-free grant counted in the word but not yet published on its lease.
+/// The bits above [`SUM`] and below [`CLOSED`] count them.
+const IN_FLIGHT: u64 = 1 << 48;
+
+/// The bits that count lock-free grants in flight.
+const IN_FLIGHTS: u64 = ((1 << 15) - 1) << 48;
+
+/// The bit of the grants' word set while lock-free grants are closed: while
+/// the governor decides under its lock, and while a lease waits.
+const CLOSED: u64 = 1 << 63;
+
+/// A growth from free memory raises a grant by at least the grant divided by
+/// this.
+const GROWTH_SHARE: usize = 8;
 
 static NEXT_LEASE: AtomicU64 = AtomicU64::new(1);
 
@@ -253,7 +284,17 @@ impl Lease {
 	/// A grant lowered below what the query holds is observed at its next
 	/// flush, where its breakers spill.
 	pub fn set_grant(&self, bytes: usize) {
-		self.grant.store(bytes.max(self.minimum), Ordering::Release);
+		self.governor.regrant(self, bytes);
+	}
+
+	/// Set the grant to `bytes`, or to the minimum when `bytes` is below it,
+	/// answering the grant it replaced. The step of
+	/// [`MemoryGovernor::regrant`] that changes the lease; a governor that
+	/// keeps the grants' sum changes it with this. Called anywhere else, it
+	/// changes the grant without the lease's governor, whose sums then no longer
+	/// match its leases: use [`Lease::set_grant`].
+	pub fn store_grant(&self, bytes: usize) -> usize {
+		self.grant.swap(bytes.max(self.minimum), Ordering::AcqRel)
 	}
 
 	/// What operators may hold in all: the grant less the headroom.
@@ -416,6 +457,10 @@ impl MemoryGovernor for Unlimited {
 	}
 
 	fn closed(&self, _lease: &Lease) {}
+
+	fn regrant(&self, lease: &Lease, bytes: usize) {
+		lease.store_grant(bytes);
+	}
 }
 
 /// How far [`FairGovernor::reclaim`] lowers a lease's grant.
@@ -430,6 +475,42 @@ enum Reclaim {
 	Guaranteed,
 }
 
+/// How a lock-free open counted its lease's minimum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenedFree {
+	/// Within the limit.
+	WithinLimit,
+	/// Past the limit, on a reading that no lease borrowed.
+	PastLimit,
+}
+
+/// The governor's lock, held. Reopens lock-free grants when it is released
+/// with no lease waiting.
+struct Deciding<'a> {
+	governor: &'a FairGovernor,
+	_guard: MutexGuard<'a, ()>,
+}
+
+impl Drop for Deciding<'_> {
+	fn drop(&mut self) {
+		// Runs before the guard is released: waiters change only under the
+		// lock, so none starts waiting between this read and the release.
+		if self.governor.waiters.load(Ordering::SeqCst) == 0 {
+			self.governor.granted.fetch_and(!CLOSED, Ordering::AcqRel);
+		}
+	}
+}
+
+/// `bytes` as a term of the governor's 64-bit sums.
+fn wide(bytes: usize) -> u64 {
+	u64::try_from(bytes).unwrap_or(u64::MAX)
+}
+
+/// A 64-bit sum as bytes, saturating where `usize` is narrower.
+fn narrow(sum: u64) -> usize {
+	usize::try_from(sum).unwrap_or(usize::MAX)
+}
+
 /// A governor holding the node to `limit` bytes, shared fairly.
 ///
 /// A lease grows from the node's free memory while there is any, so a query
@@ -441,24 +522,72 @@ enum Reclaim {
 /// creates no overcommit; a minimum, and pinned growth within the asker's fair
 /// share, lower a borrower to its fair share whatever it has pinned, and the
 /// bytes it holds past its new grant are its overcommit. Memory a closing lease
-/// held is free for the next to ask. The grants' sum stays within the greater
-/// of the limit and the sum of the minimums, which are guaranteed so that
-/// admission never waits.
+/// held is free for the next to ask. Minimums are guaranteed so that admission
+/// never waits: a minimum counted where the limit has no room for it may take
+/// the grants' sum past the limit, by the minimums and by what borrowers keep
+/// at their fair share.
+///
+/// A growth from free memory raises a grant by at least an eighth of itself
+/// (`GROWTH_SHARE`), more than it asked for where the free memory covers it,
+/// so that the holders of one lease that reserve at once do not each ask for a
+/// growth of their own.
 ///
 /// The memory a lowered lease holds is given back when it next flushes, so
 /// what the node holds may pass the limit by what its queries hold in one
 /// batch. Pinned bytes a lease holds past its grant stay held until the lease
 /// releases them; the bytes all leases hold so are counted by
 /// [`FairGovernor::overcommitted`].
+///
+/// Every query opens a lease, so opening, closing and growing from free
+/// memory are the governor's hot path: while no lease waits, each takes no
+/// lock. Each is a compare-and-swap on the grants' sum
+/// ([`FairGovernor::granted`]) and a few atomic updates beside it (what is
+/// borrowed, a grant, the count of grants in flight), and an open or a close
+/// one entry in a sharded map of the leases. An open past the limit is as
+/// cheap while no lease borrows above its minimum, since no reclaim would give
+/// anything back. The governor takes its lock and weighs the leases together
+/// only where a lease waits, or free memory does not cover a request and a
+/// lease may have memory to give back.
 pub struct FairGovernor {
 	limit: usize,
-	leases: Mutex<Vec<Weak<Lease>>>,
+	/// The open leases, by id.
+	leases: DashMap<u64, Weak<Lease>>,
+	/// The sum of the open leases' grants, with [`CLOSED`] set while the
+	/// governor decides under its lock or a lease waits. Raised before a grant
+	/// rises and lowered after a grant falls, so it never reads below the
+	/// grants it sums; raised past the limit by a minimum counted past it, and by
+	/// what a lowered borrower keeps at its fair share. A grant made without the lock checks the
+	/// flag in the same step as it raises the sum, so it never takes memory a locked decision is
+	/// weighing or a waiting lease was left.
+	granted: AtomicU64,
+	/// What the open leases are granted above their minimums. Raised before a
+	/// lock-free grant is counted in `granted` and lowered after a grant falls,
+	/// so it never reads below what the counted leases borrow; zero means no
+	/// reclaim would give anything back.
+	borrowed: AtomicU64,
+	/// Set, and never cleared, once what is borrowed has passed what
+	/// `borrowed` can count: from then on no open trusts it to read nothing
+	/// borrowed, and every open past the limit takes the lock.
+	borrowed_lost: AtomicBool,
+	/// What the grants sum to past [`SUM`], which the grants' word cannot hold.
+	/// Raised only under the lock, where a minimum or a regrant takes the sum
+	/// past it, and drawn on first as grants are uncounted, so the grants'
+	/// sum is the word's sum and this together.
+	overflow: Mutex<u128>,
+	/// Whether `overflow` may hold anything: set under its lock before the
+	/// word's sum is held at its bound, and cleared there once it is empty.
+	/// A close reads it to know whether to draw on `overflow`.
+	overflowing: AtomicBool,
+	/// Held across every decision that weighs the leases together, so two
+	/// leases cannot both be granted what one lowered lease gave back.
+	deciding: Mutex<()>,
 	/// Moves on a release or close while a lease waits, and on every change in
 	/// who waits or what they want; a waiter whose epoch is behind it decides
 	/// again.
 	epoch: AtomicU64,
 	changed: Notify,
-	/// The leases marked waiting.
+	/// The leases marked waiting. Changed only under the lock, which leaves
+	/// [`CLOSED`] set in `granted` while any lease waits.
 	waiters: AtomicUsize,
 	waits: AtomicU64,
 	overcommits: AtomicU64,
@@ -474,8 +603,14 @@ impl FairGovernor {
 	/// A governor holding its node to `limit` bytes.
 	pub fn new(limit: usize) -> Self {
 		Self {
-			limit,
-			leases: Mutex::new(Vec::new()),
+			limit: narrow(wide(limit).min(SUM)),
+			leases: DashMap::new(),
+			granted: AtomicU64::new(0),
+			borrowed: AtomicU64::new(0),
+			borrowed_lost: AtomicBool::new(false),
+			overflow: Mutex::new(0),
+			overflowing: AtomicBool::new(false),
+			deciding: Mutex::new(()),
 			epoch: AtomicU64::new(0),
 			changed: Notify::new(),
 			waiters: AtomicUsize::new(0),
@@ -491,13 +626,13 @@ impl FairGovernor {
 
 	/// The sum of the open leases' grants.
 	pub fn granted(&self) -> usize {
-		let leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
-		// Summed under the lock, which every change of a grant holds.
-		let granted = open.iter().map(|lease| lease.grant()).sum();
-		drop(leases);
-		drop(open);
-		granted
+		let sum = self.granted.load(Ordering::Acquire) & SUM;
+		let overflow = if self.overflowing.load(Ordering::Acquire) {
+			*self.overflow.lock().unwrap_or_else(|e| e.into_inner())
+		} else {
+			0
+		};
+		usize::try_from(u128::from(sum) + overflow).unwrap_or(usize::MAX)
 	}
 
 	/// How many times a lease has been told to wait, counting each wait once
@@ -515,12 +650,300 @@ impl FairGovernor {
 	/// The bytes the open leases hold past their grants now: the sum, over
 	/// leases whose pinned bytes pass their usable grant, of the difference.
 	pub fn overcommitted(&self) -> usize {
-		let leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
+		let open = self.live();
 		let overcommitted = Self::overcommit_of(&open);
-		drop(leases);
 		drop(open);
 		overcommitted
+	}
+
+	/// The open leases. Dropping the last handle on one closes it, so the
+	/// caller drops them only once it no longer holds the governor's lock.
+	fn live(&self) -> Vec<Arc<Lease>> {
+		self.leases.iter().filter_map(|lease| lease.value().upgrade()).collect()
+	}
+
+	/// The open leases, under the lock, once no lease is part way through
+	/// closing: one whose last handle has dropped is no longer found, but its
+	/// grant is counted until [`MemoryGovernor::closed`] uncounts it and drops
+	/// its record, which it does without the lock. Waiting it out keeps a
+	/// decision from weighing a sum above the grants it can find.
+	///
+	/// Only the leases found part way through closing are waited for: a lease
+	/// that starts closing later is uncounted by its own close. Every close
+	/// finishes without the lock, so the wait ends once their threads run; a
+	/// governor that forwards [`MemoryGovernor::opened`] to this one must
+	/// forward [`MemoryGovernor::closed`] too.
+	fn open(&self) -> Vec<Arc<Lease>> {
+		// Held while the rest are waited out, so none of these starts closing.
+		let mut open = Vec::new();
+		let mut closing = Vec::new();
+		for lease in self.leases.iter() {
+			match lease.value().upgrade() {
+				Some(lease) => open.push(lease),
+				None => closing.push(*lease.key()),
+			}
+		}
+		let mut spins = 0u32;
+		closing.retain(|id| self.leases.get(id).is_some_and(|lease| lease.strong_count() == 0));
+		while !closing.is_empty() {
+			if spins < 64 {
+				std::hint::spin_loop();
+			} else {
+				std::thread::yield_now();
+			}
+			spins = spins.saturating_add(1);
+			closing.retain(|id| self.leases.get(id).is_some_and(|lease| lease.strong_count() == 0));
+		}
+		open
+	}
+
+	/// The governor's lock, taken across a decision that weighs the leases
+	/// together. Lock-free grants are closed until it is released, and stay
+	/// closed then while a lease waits.
+	fn lock(&self) -> Deciding<'_> {
+		let guard = self.deciding.lock().unwrap_or_else(|e| e.into_inner());
+		// Closed first, so no lock-free grant starts; then the ones already
+		// counted are waited out, so every grant the sum counts is on its
+		// lease before the decision reads either.
+		let mut word = self.granted.fetch_or(CLOSED, Ordering::AcqRel);
+		let mut spins = 0u32;
+		while word & IN_FLIGHTS != 0 {
+			if spins < 64 {
+				std::hint::spin_loop();
+			} else {
+				std::thread::yield_now();
+			}
+			spins = spins.saturating_add(1);
+			word = self.granted.load(Ordering::Acquire);
+		}
+		Deciding {
+			governor: self,
+			_guard: guard,
+		}
+	}
+
+	/// Lower the grants' sum by the `lowered` bytes a decision took from other
+	/// leases, and raise it by `want` where the sum then leaves `want` and
+	/// `reserve` more within the limit, in one step: no other request is
+	/// granted memory between the two. Answers whether `want` was added.
+	fn settle(&self, lowered: u128, want: usize, reserve: usize) -> bool {
+		let mut added = false;
+		let lowered = self.draw_overflow(lowered);
+		let (want, reserve, limit) = (wide(want), wide(reserve), wide(self.limit));
+		let beside = self.overflowed();
+		let _ = self.granted.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+			let base = (granted & SUM).saturating_sub(lowered);
+			added =
+				base.saturating_add(beside).saturating_add(want).saturating_add(reserve) <= limit;
+			let sum = if added {
+				base + want
+			} else {
+				base
+			};
+			Some(sum | (granted & !SUM))
+		});
+		added
+	}
+
+	/// [`settle`](Self::settle), adding as much of `want` as the limit leaves
+	/// room for, and answering how much that was.
+	fn settle_upto(&self, lowered: u128, want: usize) -> usize {
+		let mut added = 0;
+		let lowered = self.draw_overflow(lowered);
+		let limit = wide(self.limit);
+		let beside = self.overflowed();
+		let _ = self.granted.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+			let base = (granted & SUM).saturating_sub(lowered);
+			added = want.min(narrow(limit.saturating_sub(base.saturating_add(beside))));
+			Some((base + wide(added)) | (granted & !SUM))
+		});
+		added
+	}
+
+	/// Grant `lease` `bytes` more without the lock, where lock-free grants are
+	/// open and the limit leaves room for them. Answers whether it was granted.
+	///
+	/// The sum rises, and the grant is counted in flight, in one step; the
+	/// grant is then raised on the lease and the count dropped, and the lock
+	/// waits for that before any decision reads the leases.
+	fn grant_free(&self, lease: &Lease, bytes: usize) -> bool {
+		// Counted as borrowed first, so no open that weighs the sum after this
+		// grant reads that nothing is borrowed.
+		if bytes > self.limit {
+			// Never granted without the lock, and never counted as borrowed:
+			// what is counted here stays within the limit, so it cannot wrap.
+			return false;
+		}
+		self.borrow(wide(bytes));
+		let taken = self
+			.granted
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+				let sum = (granted & SUM).saturating_add(wide(bytes));
+				// A full count of grants in flight sends this one to the lock
+				// rather than carry into the flag.
+				let room = granted & IN_FLIGHTS != IN_FLIGHTS;
+				// Read after the flag: a count past the word is made under the
+				// lock, before the lock clears the flag.
+				let whole = !self.overflowing.load(Ordering::Acquire);
+				(granted & CLOSED == 0 && room && whole && sum <= wide(self.limit))
+					.then_some((sum | (granted & !SUM)) + IN_FLIGHT)
+			})
+			.is_ok();
+		if taken {
+			lease.grant.fetch_add(bytes, Ordering::AcqRel);
+			self.granted.fetch_sub(IN_FLIGHT, Ordering::AcqRel);
+		} else {
+			self.borrowed.fetch_sub(wide(bytes), Ordering::AcqRel);
+		}
+		taken
+	}
+
+	/// Count a new lease's `minimum` without the lock, where no lease waits and
+	/// either the limit leaves room for it or no lease is granted above its
+	/// minimum, so that no reclaim would give anything back. Answers whether it
+	/// was counted.
+	///
+	/// What is borrowed is read inside the swap, but is not part of what it
+	/// compares: a growth and a close of the same size between the read and the
+	/// swap leave the word as it was. An open counted past the limit therefore
+	/// reads what is borrowed again once its swap has landed, and reclaims under
+	/// the lock if anything is (see [`MemoryGovernor::opened`]); a growth whose
+	/// swap lands after it finds the sum past the limit and is refused.
+	fn open_free(&self, minimum: usize) -> Option<OpenedFree> {
+		self.granted
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+				if granted & CLOSED != 0 || self.overflowing.load(Ordering::Acquire) {
+					return None;
+				}
+				let counted = granted & SUM;
+				let sum = counted.saturating_add(wide(minimum));
+				let room = sum <= wide(self.limit)
+					|| self.borrowed.load(Ordering::Acquire) == 0
+						&& !self.borrowed_lost.load(Ordering::Acquire)
+						&& sum <= SUM;
+				room.then_some(sum | (granted & !SUM))
+			})
+			.ok()
+			.map(|granted| {
+				if (granted & SUM).saturating_add(wide(minimum)) <= wide(self.limit) {
+					OpenedFree::WithinLimit
+				} else {
+					OpenedFree::PastLimit
+				}
+			})
+	}
+
+	/// Whether any lease may be granted above its minimum.
+	fn may_borrow(&self) -> bool {
+		self.borrowed.load(Ordering::Acquire) != 0 || self.borrowed_lost.load(Ordering::Acquire)
+	}
+
+	/// Lower the grants' sum by `bytes`, to no less than zero, leaving the
+	/// flag and the grants in flight as they are.
+	fn uncount(&self, bytes: u128) {
+		let rest = self.draw_overflow(bytes);
+		self.lower_word(rest);
+	}
+
+	/// Take as much of `bytes` being uncounted as [`FairGovernor::overflow`]
+	/// holds from it, answering what the word's sum must still be lowered by.
+	fn draw_overflow(&self, bytes: u128) -> u64 {
+		if !self.overflowing.load(Ordering::Acquire) {
+			// Nothing past the bound: every grant still counted is in the word.
+			return u64::try_from(bytes).unwrap_or(u64::MAX);
+		}
+		let mut overflow = self.overflow.lock().unwrap_or_else(|e| e.into_inner());
+		let drawn = (*overflow).min(bytes);
+		*overflow -= drawn;
+		if *overflow == 0 {
+			self.overflowing.store(false, Ordering::Release);
+		}
+		u64::try_from(bytes - drawn).unwrap_or(u64::MAX)
+	}
+
+	/// What the grants sum to past the word's bound, held at what a `u64` holds.
+	fn overflowed(&self) -> u64 {
+		if !self.overflowing.load(Ordering::Acquire) {
+			return 0;
+		}
+		let overflow = *self.overflow.lock().unwrap_or_else(|e| e.into_inner());
+		u64::try_from(overflow).unwrap_or(u64::MAX)
+	}
+
+	/// Lower the word's sum by `bytes`, to no less than zero, leaving the flag
+	/// and the grants in flight as they are.
+	fn lower_word(&self, bytes: u64) {
+		let _ = self.granted.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+			Some((granted & SUM).saturating_sub(bytes) | (granted & !SUM))
+		});
+	}
+
+	/// Raise the grants' sum by `bytes` whatever the limit, keeping what the
+	/// word cannot hold in [`FairGovernor::overflow`], which no sum of grants
+	/// passes. Under the lock.
+	fn count(&self, bytes: usize) {
+		let mut overflow = self.overflow.lock().unwrap_or_else(|e| e.into_inner());
+		// Marked first, so a close that finds the word held at its bound draws
+		// on what is kept beside it.
+		self.overflowing.store(true, Ordering::Release);
+		let mut over = 0u128;
+		let _ = self.granted.fetch_update(Ordering::AcqRel, Ordering::Acquire, |granted| {
+			let sum = u128::from(granted & SUM) + u128::from(wide(bytes));
+			over = sum.saturating_sub(u128::from(SUM));
+			Some(u64::try_from(sum.min(u128::from(SUM))).unwrap_or(SUM) | (granted & !SUM))
+		});
+		*overflow += over;
+		if *overflow == 0 {
+			self.overflowing.store(false, Ordering::Release);
+		}
+	}
+
+	/// Count `bytes` more borrowed, holding the count at its bound rather than
+	/// wrapping it to read as nothing borrowed; past the bound the count is
+	/// lost for good, and no open trusts it again.
+	fn borrow(&self, bytes: u64) {
+		let _ = self.borrowed.fetch_update(Ordering::AcqRel, Ordering::Acquire, |borrowed| {
+			if borrowed.checked_add(bytes).is_none() {
+				self.borrowed_lost.store(true, Ordering::Release);
+			}
+			Some(borrowed.saturating_add(bytes))
+		});
+	}
+
+	/// Mark one more lease waiting. Under the lock.
+	fn add_waiter(&self) {
+		self.waiters.fetch_add(1, Ordering::SeqCst);
+	}
+
+	/// Mark one lease fewer waiting. Under the lock.
+	fn drop_waiter(&self) {
+		self.waiters.fetch_sub(1, Ordering::SeqCst);
+	}
+
+	/// Raise `lease`'s grant by `bytes` the grants' sum already counts, under
+	/// the lock.
+	fn raise(&self, lease: &Lease, bytes: usize) {
+		self.borrow(wide(bytes));
+		lease.grant.fetch_add(bytes, Ordering::AcqRel);
+	}
+
+	/// Lower `lease`'s grant to `to`, or to its minimum where that is higher,
+	/// answering by how much it fell. A grant already at or below it is left
+	/// where it is, so a grant lowered at the same time through
+	/// [`Lease::set_grant`] is never raised here. The caller lowers the grants'
+	/// sum.
+	fn lower_grant(&self, lease: &Lease, to: usize) -> usize {
+		let to = to.max(lease.minimum);
+		match lease
+			.grant
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |grant| (grant > to).then_some(to))
+		{
+			Ok(grant) => {
+				self.borrowed.fetch_sub(wide(grant - to), Ordering::AcqRel);
+				grant - to
+			}
+			Err(_) => 0,
+		}
 	}
 
 	/// The sum of the `open` leases' overcommit.
@@ -578,37 +1001,34 @@ impl FairGovernor {
 	/// Free memory the waiting leases have claimed is not free past the lease's
 	/// fair share.
 	fn decide(&self, open: &[Arc<Lease>], lease: &Lease, bytes: usize) -> bool {
-		let mut granted: usize = open.iter().map(|other| other.grant()).sum();
-		let free = self.limit.saturating_sub(granted).saturating_sub(Self::claims(open, lease));
-		if free >= bytes {
-			lease.set_grant(lease.grant() + bytes);
+		if self.settle(0, bytes, Self::claims(open, lease)) {
+			self.raise(lease, bytes);
 			return true;
 		}
 		let fair = self.limit / open.len().max(1);
-		granted = self.reclaim(open, lease.id, fair, granted, Reclaim::Spillable);
-		let free = self.limit.saturating_sub(granted);
-		let room = fair.max(lease.minimum).saturating_sub(lease.grant()).min(free);
-		if room >= bytes {
-			lease.set_grant(lease.grant() + bytes);
-			return true;
+		let lowered = self.reclaim(open, lease.id, fair, Reclaim::Spillable);
+		let room = fair.max(lease.minimum).saturating_sub(lease.grant());
+		let want = if room >= bytes {
+			bytes
+		} else {
+			0
+		};
+		let grown = self.settle(lowered, want, 0) && want > 0;
+		if grown {
+			self.raise(lease, bytes);
 		}
-		false
+		grown
 	}
 }
 
 impl FairGovernor {
 	/// Lower every lease of `open` but `except` that is above `fair` to it, or
-	/// to the floor `mode` names where that is higher, answering the grants'
-	/// sum. A lease the lowering leaves holding pinned bytes its grant does not
-	/// cover has begun an overcommit.
-	fn reclaim(
-		&self,
-		open: &[Arc<Lease>],
-		except: u64,
-		fair: usize,
-		mut granted: usize,
-		mode: Reclaim,
-	) -> usize {
+	/// to the floor `mode` names where that is higher, answering by how much
+	/// the grants fell; the caller lowers the grants' sum by it. A lease the
+	/// lowering leaves holding pinned bytes its grant does not cover has begun
+	/// an overcommit.
+	fn reclaim(&self, open: &[Arc<Lease>], except: u64, fair: usize, mode: Reclaim) -> u128 {
+		let mut lowered = 0u128;
 		for other in open {
 			if other.id == except {
 				continue;
@@ -617,15 +1037,13 @@ impl FairGovernor {
 				Reclaim::Spillable => fair.max(other.floor()),
 				Reclaim::Guaranteed => fair.max(other.minimum),
 			};
-			let grant = other.grant();
-			if grant > floor {
+			if other.grant() > floor {
 				let before = other.overcommit();
-				other.set_grant(floor);
-				granted -= grant - floor;
+				lowered += u128::from(wide(self.lower_grant(other, floor)));
 				self.note(open, other, before);
 			}
 		}
-		granted
+		lowered
 	}
 
 	/// The decision of [`MemoryGovernor::admit`], made under the lock over the
@@ -645,8 +1063,8 @@ impl FairGovernor {
 		let epoch = self.epoch.load(Ordering::Acquire);
 		let before = lease.overcommit();
 		let fair = self.limit / open.len().max(1);
-		let granted: usize = open.iter().map(|other| other.grant()).sum();
-		let free = self.limit.saturating_sub(granted).saturating_sub(Self::claims(open, lease));
+		let claims = Self::claims(open, lease);
+		let free = self.limit.saturating_sub(self.granted()).saturating_sub(claims);
 		let shortfall = lease.held().saturating_add(bytes).saturating_sub(lease.usable());
 		let reach = fair.max(lease.minimum).saturating_sub(lease.grant());
 
@@ -660,12 +1078,13 @@ impl FairGovernor {
 		// back. Where the minimums alone pass the limit there is nothing to give
 		// and the excess is the lease's own overcommit.
 		if shortfall <= reach {
-			let mut take = shortfall;
-			if free < shortfall {
-				let granted = self.reclaim(open, lease.id, fair, granted, Reclaim::Guaranteed);
-				take = shortfall.min(self.limit.saturating_sub(granted));
-			}
-			lease.set_grant(lease.grant() + take);
+			let lowered = if free < shortfall {
+				self.reclaim(open, lease.id, fair, Reclaim::Guaranteed)
+			} else {
+				0
+			};
+			let take = self.settle_upto(lowered, shortfall);
+			self.raise(lease, take);
 			if lease.hold_pinned(bytes) {
 				return Admit::Granted;
 			}
@@ -676,8 +1095,8 @@ impl FairGovernor {
 
 		// Borrow from free memory that no waiting lease has claimed. Others do
 		// not give back for a borrower.
-		if shortfall <= free {
-			lease.set_grant(lease.grant() + shortfall);
+		if shortfall <= free && self.settle(0, shortfall, claims) {
+			self.raise(lease, shortfall);
 			if lease.hold_pinned(bytes) {
 				return Admit::Granted;
 			}
@@ -707,22 +1126,30 @@ impl FairGovernor {
 		let returnable: usize = waitable.iter().map(|(_, above)| *above).sum();
 		let can_return = returnable.saturating_add(free) >= shortfall;
 		if may_wait && (older_waiting || can_return) {
+			// Marked waiting before anything is given back: the lock already
+			// closes lock-free grants, and a lease marked waiting keeps them
+			// closed once the lock is released, so none takes what the reclaim
+			// frees for it.
+			let first = !lease.waiting.swap(true, Ordering::AcqRel);
+			let changed = lease.want.swap(shortfall, Ordering::AcqRel) != shortfall;
+			if first {
+				self.add_waiter();
+				self.waits.fetch_add(1, Ordering::Relaxed);
+			}
 			if can_return {
+				let mut lowered = 0u128;
 				for (other, _) in &waitable {
 					if other.spillable() > 0 {
-						other.set_grant(other.grant().min(fair.max(other.floor())));
+						lowered += u128::from(wide(
+							self.lower_grant(other, other.grant().min(fair.max(other.floor()))),
+						));
 					}
 				}
+				self.settle(lowered, 0, 0);
 			}
 			// A lease that starts waiting changes who is waitable and what is
 			// claimed for every other waiter, as does a changed claim; a lease
 			// that waits again for the same bytes changes nothing.
-			let first = !lease.waiting.swap(true, Ordering::AcqRel);
-			let changed = lease.want.swap(shortfall, Ordering::AcqRel) != shortfall;
-			if first {
-				self.waiters.fetch_add(1, Ordering::SeqCst);
-				self.waits.fetch_add(1, Ordering::Relaxed);
-			}
 			if first || changed {
 				self.bump();
 			}
@@ -738,49 +1165,108 @@ impl FairGovernor {
 		self.note(open, lease, before);
 		Admit::Overcommit
 	}
-}
 
-impl MemoryGovernor for FairGovernor {
-	fn opened(&self, lease: &Arc<Lease>) {
-		let mut leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		leases.retain(|weak| weak.strong_count() > 0);
-		leases.push(Arc::downgrade(lease));
-		// A minimum is granted at once: leases borrowing past their fair
-		// share make room for it, pinned bytes included.
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
-		let granted: usize = open.iter().map(|other| other.grant()).sum();
-		if granted > self.limit {
+	/// Lower the leases borrowing past their fair share, as a minimum counted
+	/// past the limit lowers them, for `lease`, whose minimum is counted.
+	fn reclaim_for(&self, lease: &Arc<Lease>) {
+		let guard = self.lock();
+		let open = self.open();
+		let fair = self.limit / open.len().max(1);
+		let lowered = self.reclaim(&open, lease.id, fair, Reclaim::Guaranteed);
+		self.settle(lowered, 0, 0);
+		drop(guard);
+		drop(open);
+		if self.waiters.load(Ordering::SeqCst) > 0 {
+			self.bump();
+		}
+	}
+
+	/// [`MemoryGovernor::opened`] where free memory does not cover the minimum
+	/// or a lease waits: under the lock, leases borrowing past their fair share
+	/// make room for the minimum, pinned bytes included.
+	fn opened_slowly(&self, lease: &Arc<Lease>) {
+		let guard = self.lock();
+		if !self.settle(0, lease.minimum, 0) {
+			let open = self.open();
 			let fair = self.limit / open.len().max(1);
-			self.reclaim(&open, lease.id, fair, granted, Reclaim::Guaranteed);
+			let lowered = self.reclaim(&open, lease.id, fair, Reclaim::Guaranteed);
+			// A minimum is granted whatever the reclaim gave back, so the sum may
+			// pass the limit by the minimums and by what borrowers keep at
+			// their fair share.
+			// Two steps, under the lock and with lock-free grants closed, so no
+			// grant falls between them.
+			self.uncount(lowered);
+			self.count(lease.minimum);
+			drop(guard);
+			drop(open);
+		} else {
+			drop(guard);
 		}
 		// The fair share has changed for every waiter.
 		if self.waiters.load(Ordering::SeqCst) > 0 {
 			self.bump();
 		}
-		drop(leases);
-		drop(open);
+	}
+}
+
+impl MemoryGovernor for FairGovernor {
+	fn opened(&self, lease: &Arc<Lease>) {
+		// With no lease waiting, an open weighs no other lease where the minimum
+		// is free, or where no lease borrows above its own minimum, so that no
+		// reclaim would give anything back: the minimums alone then pass the
+		// limit, which they are guaranteed to. It counts the minimum and records
+		// the lease.
+		// Recorded before it is counted, so a scan under the lock never weighs
+		// a sum that counts a lease it cannot find.
+		self.leases.insert(lease.id, Arc::downgrade(lease));
+		match self.open_free(lease.minimum) {
+			Some(OpenedFree::WithinLimit) => {}
+			// Counted past the limit on a reading that nothing was borrowed: any
+			// growth whose swap came before this open's is seen now, and is
+			// reclaimed as the open would have reclaimed it under the lock.
+			Some(OpenedFree::PastLimit) if self.may_borrow() => self.reclaim_for(lease),
+			Some(OpenedFree::PastLimit) => {}
+			None => self.opened_slowly(lease),
+		}
 	}
 
 	fn grow(&self, lease: &Lease, bytes: usize) -> bool {
-		let mut leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		leases.retain(|weak| weak.strong_count() > 0);
+		// Free memory no waiting lease has claimed covers the growth: no other
+		// lease is weighed. Where it covers more, the grant rises by an eighth
+		// of itself at least, so the holders of one lease that reserve at once
+		// do not each ask for, and race over, a growth of their own.
+		let ample = bytes.max(lease.grant() / GROWTH_SHARE);
+		if ample > bytes && self.grant_free(lease, ample) {
+			return true;
+		}
+		if self.grant_free(lease, bytes) {
+			return true;
+		}
 		// The lock is held across the decision, so two leases growing at once
-		// cannot both be granted the same free memory. The leases are released
-		// only after it, since dropping the last handle on one closes it, which
-		// takes the lock.
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
+		// cannot both be granted what one lowered lease gave back. The leases
+		// are released only after it, since dropping the last handle on one
+		// closes it, which may take the lock.
+		let guard = self.lock();
+		let open = self.open();
 		let grown = self.decide(&open, lease, bytes);
-		drop(leases);
+		drop(guard);
 		drop(open);
 		grown
 	}
 
 	fn closed(&self, lease: &Lease) {
-		let mut leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		leases.retain(|weak| weak.strong_count() > 0 && !std::ptr::eq(weak.as_ptr(), lease));
-		if lease.waiting.swap(false, Ordering::AcqRel) {
-			lease.want.store(0, Ordering::Release);
-			self.waiters.fetch_sub(1, Ordering::AcqRel);
+		let grant = lease.grant();
+		self.uncount(u128::from(wide(grant)));
+		if grant > lease.minimum {
+			self.borrowed.fetch_sub(wide(grant - lease.minimum), Ordering::AcqRel);
+		}
+		self.leases.remove(&lease.id);
+		if lease.waiting() {
+			let _guard = self.lock();
+			if lease.waiting.swap(false, Ordering::AcqRel) {
+				lease.want.store(0, Ordering::Release);
+				self.drop_waiter();
+			}
 		}
 		if self.waiters.load(Ordering::SeqCst) > 0 {
 			self.bump();
@@ -788,21 +1274,32 @@ impl MemoryGovernor for FairGovernor {
 	}
 
 	fn admit(&self, lease: &Lease, bytes: usize, may_wait: bool) -> Admit {
-		let mut leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		leases.retain(|weak| weak.strong_count() > 0);
+		// A lease that does not wait and whose grant, or the node's free memory
+		// while no lease waits, covers the bytes is granted them without the
+		// lock, as the decision would grant them.
+		if !lease.waiting() {
+			if lease.hold_pinned(bytes) {
+				return Admit::Granted;
+			}
+			let shortfall = lease.held().saturating_add(bytes).saturating_sub(lease.usable());
+			if self.grant_free(lease, shortfall) && lease.hold_pinned(bytes) {
+				return Admit::Granted;
+			}
+		}
 		// Held across the decision, as in `grow`, and the leases dropped only
 		// after it.
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
+		let guard = self.lock();
+		let open = self.open();
 		let was_waiting = lease.waiting();
 		let admitted = self.decide_admit(&open, lease, bytes, may_wait);
 		if was_waiting && !matches!(admitted, Admit::Wait { .. }) {
 			// The set of leases that are not waiting grew, and its claim is gone.
 			lease.waiting.store(false, Ordering::Release);
 			lease.want.store(0, Ordering::Release);
-			self.waiters.fetch_sub(1, Ordering::AcqRel);
+			self.drop_waiter();
 			self.bump();
 		}
-		drop(leases);
+		drop(guard);
 		drop(open);
 		admitted
 	}
@@ -831,21 +1328,36 @@ impl MemoryGovernor for FairGovernor {
 	}
 
 	fn overcommitted(&self, lease: &Lease, _bytes: usize) {
-		let leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-		let open: Vec<Arc<Lease>> = leases.iter().filter_map(Weak::upgrade).collect();
+		let open = self.live();
 		self.episode(&open, lease);
-		drop(leases);
 		drop(open);
 	}
 
 	fn unwait(&self, lease: &Lease) {
-		let leases = self.leases.lock().unwrap_or_else(|e| e.into_inner());
+		let _guard = self.lock();
 		if lease.waiting.swap(false, Ordering::AcqRel) {
 			lease.want.store(0, Ordering::Release);
-			self.waiters.fetch_sub(1, Ordering::AcqRel);
+			self.drop_waiter();
 		}
 		self.bump();
-		drop(leases);
+	}
+
+	fn regrant(&self, lease: &Lease, bytes: usize) {
+		// Under the lock, so no decision weighs the lease between the grant
+		// and the sum.
+		let _deciding = self.lock();
+		// No grant is set past what the grants' word can sum: no node holds
+		// that much, and what is borrowed above it could not be counted.
+		let from = lease.store_grant(bytes.min(narrow(SUM)));
+		let to = lease.grant();
+		self.count(to);
+		self.uncount(u128::from(wide(from)));
+		let (from, to) = (wide(from), wide(to));
+		if to > from {
+			self.borrow(to - from);
+		} else {
+			self.borrowed.fetch_sub(from - to, Ordering::AcqRel);
+		}
 	}
 
 	fn limit(&self) -> Option<usize> {
@@ -948,6 +1460,426 @@ mod tests {
 		for thread in threads {
 			thread.join().expect("a lease thread");
 		}
+	}
+
+	/// Leases opened, grown, lowered by one another and closed from many threads
+	/// at once leave the grants' sum exact: nothing is counted once every lease
+	/// has closed.
+	#[test]
+	fn the_grants_sum_is_exact_under_concurrent_opens_and_closes() {
+		let governor = Arc::new(FairGovernor::new(256 * 1024));
+		let threads: Vec<_> = (0..16)
+			.map(|_| {
+				let governor = Arc::clone(&governor);
+				std::thread::spawn(move || {
+					for round in 0..2000 {
+						let lease = Lease::open(&dynamic(&governor), 1024, 0);
+						if !lease.reserve(512 * (round % 64)) || lease.over() {
+							lease.release(lease.held());
+						}
+						if round % 7 == 0 {
+							let admitted = governor.admit(&lease, 256, false);
+							assert!(!matches!(admitted, Admit::Wait { .. }));
+						}
+						assert!(governor.granted() <= governor.limit());
+					}
+				})
+			})
+			.collect();
+		for thread in threads {
+			thread.join().expect("a lease thread");
+		}
+		assert_eq!(governor.granted(), 0, "a closed lease's grant is still counted");
+		assert!(governor.leases.is_empty(), "a closed lease is still recorded");
+		assert_eq!(governor.borrowed.load(Ordering::Relaxed), 0, "a closed lease still borrows");
+		let lease = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(lease.reserve(1000));
+		assert_eq!(governor.granted(), lease.grant());
+	}
+
+	/// Leases whose minimums alone pass the limit are each granted their
+	/// minimum, and a borrower among them is still lowered when the next lease
+	/// opens.
+	#[test]
+	fn minimums_past_the_limit_are_granted_and_a_borrower_still_gives_back() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let leases: Vec<_> = (0..20).map(|_| Lease::open(&dynamic(&governor), 100, 0)).collect();
+		assert_eq!(governor.granted(), 2000);
+		assert_eq!(governor.borrowed.load(Ordering::Relaxed), 0);
+		drop(leases);
+		assert_eq!(governor.granted(), 0);
+
+		let borrower = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(borrower.reserve(900));
+		assert_eq!(governor.borrowed.load(Ordering::Relaxed), 800);
+		let others: Vec<_> = (0..9).map(|_| Lease::open(&dynamic(&governor), 100, 0)).collect();
+		assert_eq!(borrower.grant(), 100, "the borrower was not lowered to its fair share");
+		assert_eq!(governor.granted(), 1000);
+		assert_eq!(governor.borrowed.load(Ordering::Relaxed), 0);
+		drop(others);
+	}
+
+	/// A reclaim never raises a grant that was lowered below its floor at the
+	/// same time: the lease keeps the lower grant and nothing is counted as
+	/// given back.
+	#[test]
+	fn a_reclaim_never_raises_a_grant() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let lease = Lease::open(&dynamic(&governor), 10, 0);
+		assert!(lease.reserve(90));
+		lease.set_grant(30);
+		assert_eq!(governor.granted(), 30);
+		assert_eq!(governor.lower_grant(&lease, 50), 0);
+		assert_eq!(lease.grant(), 30);
+		assert_eq!(governor.lower_grant(&lease, 20), 10);
+		assert_eq!(lease.grant(), 20);
+	}
+
+	/// While a lease waits no grant is made without the lock, so no growth that
+	/// read the governor before the lease began waiting takes what its reclaim
+	/// freed; once nothing waits, free memory is granted without it again.
+	#[test]
+	fn no_lock_free_grant_while_a_lease_waits() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let holder = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(holder.reserve_pinned(500));
+		let waiter = Lease::open(&dynamic(&governor), 100, 0);
+		let grower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(governor.grant_free(&grower, 1));
+		grower.set_grant(0);
+		assert!(matches!(governor.admit(&waiter, 900, true), Admit::Wait { .. }));
+		assert_eq!(governor.granted(), 600);
+		assert!(!governor.grant_free(&grower, 1), "a lock-free grant while a lease waits");
+		governor.unwait(&waiter);
+		assert!(governor.grant_free(&grower, 1));
+		assert_eq!(governor.granted(), 601);
+	}
+
+	/// A lease part way through closing never lets an open past the limit
+	/// skip the reclaim of a lease that borrows: what is borrowed is counted
+	/// lease by lease, not inferred from the sums.
+	#[test]
+	fn a_closing_lease_does_not_hide_a_borrower() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let borrower = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(borrower.reserve(500));
+		let closing = Lease::open(&dynamic(&governor), 300, 0);
+		assert_eq!(governor.granted(), borrower.grant() + 300);
+		// `closing` has begun to close: its grant is uncounted.
+		governor.granted.fetch_sub(300, Ordering::AcqRel);
+		assert!(governor.open_free(600).is_none(), "an open past the limit skipped the reclaim");
+		governor.granted.fetch_add(300, Ordering::AcqRel);
+		drop(closing);
+		let opened = Lease::open(&dynamic(&governor), 600, 0);
+		assert_eq!(borrower.grant(), 500, "the borrower was not lowered to its fair share");
+		assert_eq!(governor.granted(), borrower.grant() + opened.grant());
+		drop((borrower, opened));
+		assert_eq!(governor.granted(), 0);
+		assert_eq!(governor.borrowed.load(Ordering::Relaxed), 0);
+	}
+
+	/// A grants' sum of 2 GiB, the top bit of a 32-bit `usize`, is an ordinary
+	/// sum: it reads back whole and marks no lease waiting.
+	#[test]
+	fn a_two_gib_sum_is_not_a_waiter() {
+		let governor = Arc::new(FairGovernor::new(1 << 20));
+		let leases: Vec<_> =
+			(0..512).map(|_| Lease::open(&dynamic(&governor), 4 << 20, 0)).collect();
+		assert_eq!(governor.granted(), 2 << 30);
+		assert_eq!(governor.waiters.load(Ordering::Relaxed), 0);
+		assert!(governor.open_free(4 << 20).is_some(), "a phantom waiter sent an open to the lock");
+		governor.settle(4 << 20, 0, 0);
+		drop(leases);
+		assert_eq!(governor.granted(), 0);
+	}
+
+	/// No grant is made without the lock while the governor decides under it,
+	/// so a forced minimum or a reclaim is weighed against a sum no lock-free
+	/// grant moves; the grants reopen with the lock once no lease waits.
+	#[test]
+	fn lock_free_grants_are_closed_while_the_governor_decides() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let lease = Lease::open(&dynamic(&governor), 100, 0);
+		let deciding = governor.lock();
+		assert!(!governor.grant_free(&lease, 1), "a lock-free growth during a decision");
+		assert!(governor.open_free(1).is_none(), "a lock-free open during a decision");
+		assert_eq!(governor.granted(), 100);
+		drop(deciding);
+		assert!(governor.grant_free(&lease, 1));
+		lease.set_grant(0);
+		assert_eq!(governor.granted(), 100);
+		// A minimum that does not fit is forced under the lock: the total is
+		// the leases' minimums, whatever grew while it was weighed.
+		let wide = Lease::open(&dynamic(&governor), 950, 0);
+		assert_eq!(governor.granted(), lease.grant() + wide.grant());
+		assert_eq!(governor.leases.len(), 2);
+	}
+
+	/// The lock waits out a lock-free grant the sum counts and its lease does
+	/// not yet hold, so no decision weighs a sum above the grants it can find.
+	#[test]
+	fn the_lock_waits_out_a_grant_in_flight() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let lease = Lease::open(&dynamic(&governor), 100, 0);
+		// A lock-free growth of 900 counted in the sum, not yet on the lease.
+		governor.borrowed.fetch_add(900, Ordering::AcqRel);
+		governor.granted.fetch_add(900 + IN_FLIGHT, Ordering::AcqRel);
+		let locked = Arc::new(AtomicBool::new(false));
+		let deciding = {
+			let (governor, locked) = (Arc::clone(&governor), Arc::clone(&locked));
+			std::thread::spawn(move || {
+				let _deciding = governor.lock();
+				locked.store(true, Ordering::Release);
+			})
+		};
+		std::thread::sleep(std::time::Duration::from_millis(50));
+		assert!(!locked.load(Ordering::Acquire), "the lock was taken with a grant in flight");
+		lease.grant.fetch_add(900, Ordering::AcqRel);
+		governor.granted.fetch_sub(IN_FLIGHT, Ordering::AcqRel);
+		deciding.join().expect("the deciding thread");
+		assert!(locked.load(Ordering::Acquire));
+		assert_eq!(governor.granted(), lease.grant());
+	}
+
+	/// A grant set through [`Lease::set_grant`] moves the grants' sum with it.
+	#[test]
+	fn set_grant_moves_the_sum_with_the_grant() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let a = Lease::open(&dynamic(&governor), 100, 0);
+		let b = Lease::open(&dynamic(&governor), 100, 0);
+		a.set_grant(900);
+		assert_eq!(governor.granted(), 1000);
+		assert!(b.reserve_pinned(400));
+		assert_eq!(governor.granted(), a.grant() + b.grant());
+		a.set_grant(0);
+		assert_eq!(governor.granted(), a.grant() + b.grant());
+		drop((a, b));
+		assert_eq!(governor.granted(), 0);
+	}
+
+	/// A decision waits out a lease part way through closing, whose grant is
+	/// still counted though the lease can no longer be found, so it weighs
+	/// what the close gives back rather than overcommitting.
+	#[test]
+	fn a_decision_waits_out_a_closing_lease() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let asker = Lease::open(&dynamic(&governor), 100, 0);
+		// A lease of 900 whose last handle has dropped and whose close has not
+		// yet uncounted it.
+		let closing = Lease::open(&dynamic(&governor), 0, 0);
+		let id = closing.id();
+		governor.leases.insert(id, Arc::downgrade(&closing));
+		drop(closing);
+		governor.leases.insert(id, Weak::new());
+		governor.granted.fetch_add(900, Ordering::AcqRel);
+		let closer = {
+			let governor = Arc::clone(&governor);
+			std::thread::spawn(move || {
+				std::thread::sleep(std::time::Duration::from_millis(50));
+				governor.granted.fetch_sub(900, Ordering::AcqRel);
+				governor.leases.remove(&id);
+			})
+		};
+		assert_eq!(governor.admit(&asker, 500, true), Admit::Granted);
+		closer.join().expect("the closing thread");
+		assert_eq!((governor.overcommits(), governor.granted()), (0, asker.grant()));
+	}
+
+	/// Minimums past what the grants' word can sum are counted beside it, so a
+	/// close uncounts only its own grant and leaves the flag and the grants in
+	/// flight untouched: the governor goes on deciding.
+	#[cfg(target_pointer_width = "64")]
+	#[test]
+	fn a_minimum_past_the_sums_bound_saturates() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let huge = Lease::open(&dynamic(&governor), narrow(SUM) + 1, 0);
+		let other = Lease::open(&dynamic(&governor), narrow(SUM), 0);
+		assert_eq!(governor.granted(), 2 * narrow(SUM) + 1);
+		drop(huge);
+		assert_eq!(governor.granted(), narrow(SUM), "a close lost the grants still open");
+		let grower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(!governor.grant_free(&grower, 1), "a growth past the limit");
+		drop((other, grower));
+		assert_eq!(governor.granted.load(Ordering::Acquire), 0);
+		assert_eq!(*governor.overflow.lock().unwrap(), 0);
+		assert!(!governor.overflowing.load(Ordering::Acquire));
+		let lease = Lease::open(&dynamic(&governor), 100, 0);
+		drop(governor.lock());
+		assert!(lease.reserve(500));
+		assert_eq!(governor.granted(), lease.grant());
+	}
+
+	/// A minimum of every byte a `usize` can name, beside a lease already
+	/// open, is counted whole: closing it leaves the other lease's grant.
+	#[cfg(target_pointer_width = "64")]
+	#[test]
+	fn a_largest_minimum_beside_another_lease_is_counted_whole() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let small = Lease::open(&dynamic(&governor), 100, 0);
+		let huge = Lease::open(&dynamic(&governor), usize::MAX, 0);
+		drop(huge);
+		assert_eq!(governor.granted(), small.grant(), "a close took the other lease's grant");
+		let grower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(governor.grant_free(&grower, 900 - grower.grant()));
+		assert!(!governor.grant_free(&grower, 1), "a growth past the limit");
+		drop((small, grower));
+		assert_eq!(governor.granted(), 0);
+	}
+
+	/// A reclaim of a grant counted past the word's bound draws on what is kept
+	/// beside it: once the leases close, nothing is counted.
+	#[cfg(target_pointer_width = "64")]
+	#[test]
+	fn a_reclaim_past_the_bound_draws_on_the_overflow() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let first = Lease::open(&dynamic(&governor), 100, 0);
+		first.set_grant(usize::MAX);
+		let second = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(second.reserve(300));
+		assert!(first.grant() <= 500, "the first lease was not lowered to its fair share");
+		assert_eq!(governor.granted(), first.grant() + second.grant());
+		drop((first, second));
+		assert_eq!(governor.granted(), 0);
+		assert!(!governor.overflowing.load(Ordering::Acquire));
+	}
+
+	/// A lock-free grant is refused while the count of grants in flight is
+	/// full, so the count never carries into the flag.
+	#[test]
+	fn a_full_count_of_grants_in_flight_refuses_another() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let lease = Lease::open(&dynamic(&governor), 100, 0);
+		governor.granted.fetch_add(IN_FLIGHTS, Ordering::AcqRel);
+		let word = governor.granted.load(Ordering::Acquire);
+		assert!(!governor.grant_free(&lease, 1), "a grant past a full count in flight");
+		assert_eq!(governor.granted.load(Ordering::Acquire), word);
+		assert_eq!(word & CLOSED, 0);
+		governor.granted.fetch_sub(IN_FLIGHTS, Ordering::AcqRel);
+		assert!(governor.grant_free(&lease, 1));
+	}
+
+	/// A growth past the limit is refused before it is counted as borrowed, so
+	/// what is borrowed never reads as nothing while a lease borrows.
+	#[test]
+	fn a_growth_past_the_limit_is_never_counted_borrowed() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let borrower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(governor.grant_free(&borrower, 100));
+		let grower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(!governor.grant_free(&grower, usize::MAX - 99));
+		assert_eq!(governor.borrowed.load(Ordering::Acquire), 100);
+		assert!(governor.open_free(1000).is_none(), "an open past the limit skipped the reclaim");
+	}
+
+	/// A grant set past what the grants' word can sum is held there, so what
+	/// is borrowed stays exact: closing one lease leaves another's borrowing.
+	#[cfg(target_pointer_width = "64")]
+	#[test]
+	fn a_regrant_is_held_within_the_sums_bound() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let huge = Lease::open(&dynamic(&governor), 0, 0);
+		let small = Lease::open(&dynamic(&governor), 0, 0);
+		huge.set_grant(usize::MAX);
+		small.set_grant(1);
+		assert_eq!(huge.grant(), narrow(SUM));
+		drop(huge);
+		assert_eq!(governor.borrowed.load(Ordering::Acquire), 1);
+		assert!(governor.open_free(1000).is_none(), "an open past the limit skipped the reclaim");
+	}
+
+	/// Once what is borrowed has passed what the governor can count, no open
+	/// past the limit trusts the count: each takes the lock and reclaims.
+	#[test]
+	fn a_lost_borrowed_count_sends_every_open_past_the_limit_to_the_lock() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let borrower = Lease::open(&dynamic(&governor), 0, 0);
+		borrower.set_grant(1000);
+		{
+			let _deciding = governor.lock();
+			governor.borrow(u64::MAX);
+		}
+		assert!(governor.borrowed_lost.load(Ordering::Acquire));
+		// The count reads nothing borrowed although `borrower` borrows.
+		governor.borrowed.store(0, Ordering::Release);
+		assert!(governor.open_free(1000).is_none(), "an open past the limit trusted a lost count");
+		let opened = Lease::open(&dynamic(&governor), 1000, 0);
+		assert!(borrower.grant() < 1000, "the borrower was not lowered");
+		drop((borrower, opened));
+	}
+
+	/// An open counted past the limit that then finds a lease borrowing lowers
+	/// it to its fair share, as an open under the lock would have.
+	#[test]
+	fn an_open_past_the_limit_reclaims_a_borrower_it_finds_after() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let borrower = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(borrower.reserve(800));
+		let opened = Lease::open(&dynamic(&governor), 100, 0);
+		// As if `opened` had been counted lock-free on a stale reading.
+		borrower.grant.store(900, Ordering::Release);
+		governor.granted.store(1000, Ordering::Release);
+		governor.borrowed.store(800, Ordering::Release);
+		governor.reclaim_for(&opened);
+		assert_eq!(borrower.grant(), 500, "the borrower was not lowered to its fair share");
+		assert_eq!(governor.granted(), borrower.grant() + opened.grant());
+		assert_eq!(governor.borrowed.load(Ordering::Acquire), 400);
+	}
+
+	/// While grants are counted past the word's bound no grant is made without
+	/// the lock, and a locked decision weighs them against the limit: a close
+	/// that lowered only the word leaves no room that is not there.
+	#[test]
+	fn grants_past_the_word_are_weighed_against_the_limit() {
+		let governor = Arc::new(FairGovernor::new(narrow(SUM)));
+		let lease = Lease::open(&dynamic(&governor), 0, 0);
+		// The word held at its bound less 50, with 50 counted beside it.
+		governor.granted.store(SUM - 50, Ordering::Release);
+		*governor.overflow.lock().unwrap() = 50;
+		governor.overflowing.store(true, Ordering::Release);
+		assert!(!governor.grant_free(&lease, 50), "a lock-free grant past the limit");
+		assert!(governor.open_free(50).is_none(), "a lock-free open past the limit");
+		assert!(!governor.settle(0, 50, 0), "a locked grant past the limit");
+		assert_eq!(governor.settle_upto(0, 50), 0);
+	}
+
+	/// What a reclaim lowers is summed wide, so a total past what a `usize`
+	/// holds is drawn from the overflow whole.
+	#[cfg(target_pointer_width = "64")]
+	#[test]
+	fn a_reclaim_past_usize_is_drawn_whole() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		// 65,537 grants at the word's bound sum past what a `usize` holds.
+		let count = 65_537;
+		let leases: Vec<_> = (0..count).map(|_| Lease::open(&dynamic(&governor), 0, 0)).collect();
+		for lease in &leases {
+			lease.set_grant(narrow(SUM));
+		}
+		let lowered = count as u128 * u128::from(SUM);
+		assert!(lowered > u128::from(u64::MAX));
+		let deciding = governor.lock();
+		let open = governor.open();
+		let back = governor.reclaim(&open, u64::MAX, 0, Reclaim::Guaranteed);
+		governor.settle(back, 0, 0);
+		drop(deciding);
+		drop(open);
+		assert_eq!(back, lowered);
+		assert_eq!(governor.granted(), 0);
+		assert!(!governor.overflowing.load(Ordering::Acquire));
+	}
+
+	/// Tentative growths that together pass what the count of what is borrowed
+	/// can hold lose the count for good rather than wrap it to nothing.
+	#[test]
+	fn tentative_growths_past_the_borrowed_bound_lose_the_count() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		let borrower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(governor.grant_free(&borrower, 100));
+		// What tentative growths in flight have counted, all but filling it.
+		governor.borrowed.store(u64::MAX - 50, Ordering::Release);
+		let grower = Lease::open(&dynamic(&governor), 0, 0);
+		assert!(!governor.grant_free(&grower, 1000));
+		assert!(governor.borrowed_lost.load(Ordering::Acquire));
+		assert!(governor.open_free(1000).is_none(), "an open past the limit trusted a lost count");
 	}
 
 	/// Reservations on one lease whose grant another holder keeps lowering never
@@ -1401,6 +2333,10 @@ mod tests {
 		}
 
 		fn closed(&self, _lease: &Lease) {}
+
+		fn regrant(&self, lease: &Lease, bytes: usize) {
+			lease.store_grant(bytes);
+		}
 	}
 
 	/// A reservation whose raised grant another holder uses up asks the governor again for what is
@@ -1477,6 +2413,10 @@ mod tests {
 
 		fn closed(&self, lease: &Lease) {
 			self.inner.closed(lease);
+		}
+
+		fn regrant(&self, lease: &Lease, bytes: usize) {
+			self.inner.regrant(lease, bytes);
 		}
 	}
 

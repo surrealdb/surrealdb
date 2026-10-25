@@ -360,6 +360,10 @@ impl<G: MemoryGovernor> MemoryGovernor for SetUpFreely<G> {
 		self.inner.unwait(lease);
 	}
 
+	fn regrant(&self, lease: &Lease, bytes: usize) {
+		self.inner.regrant(lease, bytes);
+	}
+
 	fn limit(&self) -> Option<usize> {
 		MemoryGovernor::limit(&*self.inner)
 	}
@@ -2843,6 +2847,10 @@ impl MemoryGovernor for Refusing {
 	}
 
 	fn closed(&self, _lease: &Lease) {}
+
+	fn regrant(&self, lease: &Lease, bytes: usize) {
+		lease.store_grant(bytes);
+	}
 }
 
 /// A sort over a datastore with no temporary store to spill to, whose governor grants no growth,

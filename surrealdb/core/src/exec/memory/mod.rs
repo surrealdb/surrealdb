@@ -1173,6 +1173,10 @@ mod tests {
 		fn unwait(&self, lease: &Lease) {
 			self.inner.unwait(lease);
 		}
+
+		fn regrant(&self, lease: &Lease, bytes: usize) {
+			self.inner.regrant(lease, bytes);
+		}
 	}
 
 	/// A context whose deadline is `timeout` away.

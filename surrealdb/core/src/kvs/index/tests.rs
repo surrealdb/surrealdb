@@ -20555,6 +20555,10 @@ impl crate::exec::memory::MemoryGovernor for CountingGovernor {
 		self.inner.unwait(lease);
 	}
 
+	fn regrant(&self, lease: &crate::exec::memory::Lease, bytes: usize) {
+		self.inner.regrant(lease, bytes);
+	}
+
 	fn limit(&self) -> Option<usize> {
 		crate::exec::memory::MemoryGovernor::limit(&self.inner)
 	}
