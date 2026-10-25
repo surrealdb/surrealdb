@@ -120,8 +120,27 @@ async function streamFrames(
 	return frames;
 }
 
+/**
+ * The version the Cargo workspace declares.
+ *
+ * Every crate inherits it from `[workspace.package]`, and it is what the module
+ * reports, so a module built from this checkout must report exactly this. The
+ * manifest is resolved against this file, not the process CWD.
+ */
+async function workspaceVersion(): Promise<string> {
+	const manifest = await Bun.file(`${import.meta.dir}/../../Cargo.toml`).text();
+	const section = manifest.split(/^\[workspace\.package\]\s*$/m)[1]?.split(/^\[/m)[0];
+	const version = section?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+
+	if (!version) {
+		throw new Error("Could not read [workspace.package] version from ../../Cargo.toml");
+	}
+
+	return version;
+}
+
 test("reports the engine version", async () => {
-	expect(SurrealWasmEngine.version()).toStartWith("3.");
+	expect(SurrealWasmEngine.version()).toBe(await workspaceVersion());
 
 	const engine = await connect();
 	expect(await ok(engine, "version")).toMatch(/^surrealdb-/);
