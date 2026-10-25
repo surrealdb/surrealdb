@@ -533,7 +533,11 @@ impl Lower<'_> {
 			} else if tag == Tag::Binary {
 				Shape::Binary(BindingPower::for_binary_operator(&binary(Binary::from_u8(n.op))))
 			} else if tag == Tag::BinaryX {
-				Shape::Binary(BindingPower::Relation)
+				Shape::Binary(if Binary::from_u8(n.op) == Binary::Matches {
+					BindingPower::Equality
+				} else {
+					BindingPower::Relation
+				})
 			} else if tag == Tag::Field {
 				Shape::Idiom(FirstPart::Field)
 			} else if tag == Tag::Idiom {
@@ -826,7 +830,8 @@ impl Lower<'_> {
 						| BindingPower::Relation
 						| BindingPower::Equality
 						| BindingPower::Power
-				);
+				) || matches!(op, BinaryOperator::Matches(_))
+			&& lbp == BindingPower::Relation;
 		self.render_parenthesised(left_paren, left, out)?;
 		if matches!(
 			op,
@@ -841,17 +846,18 @@ impl Lower<'_> {
 			put(out, op);
 			out.push(' ');
 		}
-		let right_paren = rs.needs_parentheses()
-			|| rbp < op_bp
-			|| rbp == op_bp
-				&& matches!(
-					rbp,
-					BindingPower::Range
-						| BindingPower::Relation
-						| BindingPower::Equality
-						| BindingPower::AddSub
-						| BindingPower::MulDiv
-				);
+		let right_paren =
+			rs.needs_parentheses()
+				|| rbp < op_bp
+				|| rbp == op_bp
+					&& matches!(
+						rbp,
+						BindingPower::Nullish
+							| BindingPower::Range | BindingPower::Relation
+							| BindingPower::Equality
+							| BindingPower::AddSub
+							| BindingPower::MulDiv
+					) || matches!(op, BinaryOperator::Matches(_)) && rbp == BindingPower::Relation;
 		self.render_parenthesised(right_paren, right, out)
 	}
 
@@ -3227,5 +3233,29 @@ mod tests {
 		"'a b:1'",
 		"s'a:1' + 1",
 		"1; 2; SELECT * FROM z",
+		"(a = b) @@ c",
+		"a = (b @@ c)",
+		"(a < b) @@ c",
+		"a @@ (b < c)",
 	];
+
+	#[test]
+	fn nullish_and_matches_parentheses_round_trip() {
+		for src in [
+			"published ?? (archived ?: true)",
+			"(published ?? archived) ?: true",
+			"(a = b) @@ c",
+			"a = (b @@ c)",
+			"(a < b) @@ c",
+			"a @@ (b < c)",
+			"(a @@ b) < c",
+			"a < (b @@ c)",
+		] {
+			let first = crate::parser::expr(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+			let rendered = first.to_sql();
+			let second =
+				crate::parser::expr(&rendered).unwrap_or_else(|e| panic!("{rendered}: {e}"));
+			assert_eq!(first, second, "round-trip AST mismatch for {src:?} -> {rendered:?}");
+		}
+	}
 }

@@ -92,7 +92,7 @@ impl Regex {
 
 pub fn regex_new(str: &str) -> Result<regex_engine::Regex, RegexError> {
 	static REGEX_CACHE: LazyLock<Cache<String, regex_engine::Regex>> =
-		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
+		LazyLock::new(|| Cache::new((*REGEX_CACHE_SIZE).clamp(10, 100_000)));
 	match REGEX_CACHE.get_value_or_guard(str, None) {
 		GuardResult::Value(v) => Ok(v),
 		GuardResult::Guard(g) => {

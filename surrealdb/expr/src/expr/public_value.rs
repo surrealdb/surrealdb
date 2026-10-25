@@ -4,7 +4,9 @@ use std::ops::Bound;
 use surrealdb_types::Value as PublicValue;
 
 use super::literal::ObjectEntry;
-use super::{BinaryOperator, Expr, Literal, RecordIdKeyLit, RecordIdLit};
+use super::{
+	BinaryOperator, Expr, Literal, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+};
 use crate::val::convert_public_value_to_internal;
 use crate::val::table_name_public::IntoTableName;
 
@@ -32,24 +34,45 @@ impl Expr {
 				table: id.table.into_table_name(),
 				key: Self::surface_record_id_key(id.key),
 			})),
-			PublicValue::Range(range) => {
-				let (start, end) = range.into_inner();
-				let op = match (&start, &end) {
-					(Bound::Included(_), Bound::Included(_)) => BinaryOperator::RangeInclusive,
-					_ => BinaryOperator::Range,
-				};
-				let bound = |value| match value {
-					Bound::Included(value) | Bound::Excluded(value) => {
-						Self::from_surface_value(value)
-					}
-					Bound::Unbounded => Self::Literal(Literal::None),
-				};
-				Self::Binary {
-					left: Box::new(bound(start)),
-					op,
-					right: Box::new(bound(end)),
-				}
-			}
+			PublicValue::Range(range) => match range.into_inner() {
+				(Bound::Unbounded, Bound::Unbounded) => Self::Literal(Literal::UnboundedRange),
+				(Bound::Unbounded, Bound::Excluded(end)) => Self::Prefix {
+					op: PrefixOperator::Range,
+					expr: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Unbounded, Bound::Included(end)) => Self::Prefix {
+					op: PrefixOperator::RangeInclusive,
+					expr: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Included(start), Bound::Excluded(end)) => Self::Binary {
+					left: Box::new(Self::from_surface_value(start)),
+					op: BinaryOperator::Range,
+					right: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Included(start), Bound::Included(end)) => Self::Binary {
+					left: Box::new(Self::from_surface_value(start)),
+					op: BinaryOperator::RangeInclusive,
+					right: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Excluded(start), Bound::Excluded(end)) => Self::Binary {
+					left: Box::new(Self::from_surface_value(start)),
+					op: BinaryOperator::RangeSkip,
+					right: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Excluded(start), Bound::Included(end)) => Self::Binary {
+					left: Box::new(Self::from_surface_value(start)),
+					op: BinaryOperator::RangeSkipInclusive,
+					right: Box::new(Self::from_surface_value(end)),
+				},
+				(Bound::Included(start), Bound::Unbounded) => Self::Postfix {
+					expr: Box::new(Self::from_surface_value(start)),
+					op: PostfixOperator::Range,
+				},
+				(Bound::Excluded(start), Bound::Unbounded) => Self::Postfix {
+					expr: Box::new(Self::from_surface_value(start)),
+					op: PostfixOperator::RangeSkip,
+				},
+			},
 			value @ (PublicValue::None
 			| PublicValue::Null
 			| PublicValue::Bool(_)
@@ -88,5 +111,85 @@ impl Expr {
 				end: range.end.map(Self::surface_record_id_key),
 			})),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::ops::Bound;
+
+	use surrealdb_types::{
+		Number, Range, RecordId, RecordIdKey, RecordIdKeyRange, ToSql, Value as PublicValue,
+	};
+
+	use super::Expr;
+
+	#[test]
+	fn from_surface_value_preserves_range_bound_kinds() {
+		let full = PublicValue::Range(Box::new(Range {
+			start: Bound::Unbounded,
+			end: Bound::Unbounded,
+		}));
+		assert_eq!(Expr::from_surface_value(full).to_sql(), "..");
+
+		let prefix = PublicValue::Range(Box::new(Range {
+			start: Bound::Unbounded,
+			end: Bound::Excluded(PublicValue::Number(Number::Int(5))),
+		}));
+		assert_eq!(Expr::from_surface_value(prefix).to_sql(), "..5");
+
+		let prefix_inc = PublicValue::Range(Box::new(Range {
+			start: Bound::Unbounded,
+			end: Bound::Included(PublicValue::Number(Number::Int(5))),
+		}));
+		assert_eq!(Expr::from_surface_value(prefix_inc).to_sql(), "..=5");
+
+		let postfix = PublicValue::Range(Box::new(Range {
+			start: Bound::Included(PublicValue::Number(Number::Int(1))),
+			end: Bound::Unbounded,
+		}));
+		assert_eq!(Expr::from_surface_value(postfix).to_sql(), "1..");
+
+		let postfix_skip = PublicValue::Range(Box::new(Range {
+			start: Bound::Excluded(PublicValue::Number(Number::Int(1))),
+			end: Bound::Unbounded,
+		}));
+		assert_eq!(Expr::from_surface_value(postfix_skip).to_sql(), "1>..");
+
+		let skip = PublicValue::Range(Box::new(Range {
+			start: Bound::Excluded(PublicValue::Number(Number::Int(1))),
+			end: Bound::Excluded(PublicValue::Number(Number::Int(5))),
+		}));
+		assert_eq!(Expr::from_surface_value(skip).to_sql(), "1>..5");
+
+		let skip_inc = PublicValue::Range(Box::new(Range {
+			start: Bound::Excluded(PublicValue::Number(Number::Int(1))),
+			end: Bound::Included(PublicValue::Number(Number::Int(5))),
+		}));
+		assert_eq!(Expr::from_surface_value(skip_inc).to_sql(), "1>..=5");
+	}
+
+	#[test]
+	fn from_public_value_preserves_record_id_range_key() {
+		let rid = PublicValue::RecordId(RecordId {
+			table: "t".into(),
+			key: RecordIdKey::Range(Box::new(RecordIdKeyRange {
+				start: Bound::Excluded(RecordIdKey::Number(1)),
+				end: Bound::Included(RecordIdKey::Number(5)),
+			})),
+		});
+		assert_eq!(Expr::from_public_value(rid).to_sql(), "t:1>..=5");
+
+		let postfix_inc = Range {
+			start: Bound::Included(PublicValue::Number(Number::Int(1))),
+			end: Bound::Unbounded,
+		};
+		assert_eq!(Expr::from(postfix_inc).to_sql(), "1..");
+
+		let postfix_skip = Range {
+			start: Bound::Excluded(PublicValue::Number(Number::Int(1))),
+			end: Bound::Unbounded,
+		};
+		assert_eq!(Expr::from(postfix_skip).to_sql(), "1>..");
 	}
 }

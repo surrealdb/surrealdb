@@ -23,7 +23,7 @@ use crate::val::{IndexFormat, IndexIdFormat, RecordId, Strand, Value};
 ///   bracketing `skip_indexed_map` with `BorrowedReader::remaining()` snapshots, no decode +
 ///   re-encode required.
 #[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 #[storekey(format = "IndexIdFormat")]
@@ -46,6 +46,30 @@ impl DeserializeRevisioned for Object {
 				Ok(Self(map))
 			}
 		}
+	}
+}
+
+/// An object is storekey-encoded only inside a key, as a record id's key or an
+/// indexed value. Its entries are written as those of a [`VecMap`], where an
+/// empty field name encodes as the object's terminator and cannot be read back,
+/// so an object holding one is refused with
+/// [`surrealdb_kvs::key::Error::EmptyFieldName`]
+/// instead of being written. Every other object encodes exactly as its map.
+impl<F> Encode<F> for Object
+where
+	VecMap<Strand, Value>: Encode<F>,
+{
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		// Entries are sorted, so an empty name is the first one.
+		if self.0.first_key_value().is_some_and(|(name, _)| name.is_empty()) {
+			return Err(storekey::EncodeError::custom(surrealdb_kvs::key::Error::EmptyFieldName {
+				value: self.to_sql(),
+			}));
+		}
+		Encode::<F>::encode(&self.0, w)
 	}
 }
 

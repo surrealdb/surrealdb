@@ -183,7 +183,16 @@ fn every_engine_variant() -> Vec<(&'static str, EngineError)> {
 
 /// One instance of every [`crate::key::Error`] variant.
 fn every_key_variant() -> Vec<(&'static str, KeyError)> {
-	vec![("Unencodable", KeyError::Unencodable), ("Corrupted", KeyError::Corrupted("sample"))]
+	vec![
+		("Unencodable", KeyError::Unencodable),
+		(
+			"EmptyFieldName",
+			KeyError::EmptyFieldName {
+				value: "sample".to_string(),
+			},
+		),
+		("Corrupted", KeyError::Corrupted("sample")),
+	]
 }
 
 /// One instance of every [`crate::expr::Error`] variant.

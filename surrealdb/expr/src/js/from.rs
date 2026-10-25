@@ -4,27 +4,75 @@ use chrono::{TimeZone, Utc};
 use js::prelude::This;
 use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
 use rust_decimal::Decimal;
+use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 
 use crate::js::classes;
 use crate::val::{Array, Bytes, Datetime, Geometry, Object, Value};
 
+/// Maximum number of value nodes a single [`Value::from_js`] call may materialise.
+///
+/// Capped at `i32::MAX` because QuickJS array indexing asserts that indices fit in `i32`.
+fn max_js_value_nodes() -> usize {
+	(*GENERATION_ALLOCATION_LIMIT).min(i32::MAX as usize)
+}
+
+fn value_too_large_error() -> Error {
+	Error::new_from_js_message(
+		"js value",
+		"value",
+		format!("JavaScript value exceeds maximum size of {} elements", max_js_value_nodes()),
+	)
+}
+
+fn array_from_js<'js>(
+	ctx: &Ctx<'js>,
+	arr: &js::Array<'js>,
+	depth: usize,
+	remaining: &mut usize,
+) -> Result<Value, Error> {
+	// QuickJS tags array lengths above `i32::MAX` as `Float64`, which causes
+	// `rquickjs::Array::len` to panic on its `JS_IsInt` assertion. Read the
+	// `length` property directly as a `js::Value` and reject non-`i32` or
+	// negative lengths before allocating or indexing.
+	let len_val: js::Value<'js> = arr.as_object().get(js::atom::PredefinedAtom::Length)?;
+	let Some(len) = len_val.as_int().and_then(|n| usize::try_from(n).ok()) else {
+		return Err(value_too_large_error());
+	};
+	if len > *remaining {
+		return Err(value_too_large_error());
+	}
+	let mut x = Array::with_capacity(len);
+	for i in 0..len {
+		let v: js::Value<'js> = arr.get(i)?;
+		x.push(value_from_js(ctx, v, depth + 1, remaining)?);
+	}
+	Ok(x.into())
+}
+
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
-		value_from_js(ctx, val, 1)
+		let mut remaining = max_js_value_nodes();
+		value_from_js(ctx, val, 1, &mut remaining)
 	}
 }
 
-/// [`Value::from_js`] carrying the nesting depth of `val`.
+/// [`Value::from_js`] carrying the nesting depth of `val` and remaining node budget.
 ///
-/// SECURITY: a script can return an arbitrarily deeply nested value, and this
-/// conversion is natively recursive, so bound it to the same cap the rest of the
-/// engine uses. Building the deep value needs no JS-side recursion
-/// (`a = [a]` in a flat loop), so the script stack limit never engages; at stock
-/// config a return value of a few thousand levels overflows the host stack here
-/// and aborts the whole process (`panic = "abort"`). A `FromJs` error carries
+/// SECURITY: a script can return an arbitrarily deeply nested value or a shallow
+/// directed acyclic graph with shared references whose tree expansion is
+/// exponential in depth, and this conversion is natively recursive, so bound
+/// both nesting depth and total materialised nodes. Building a deep or wide DAG
+/// needs no JS-side recursion (`a = [a, a]` in a flat loop), so the script stack
+/// limit never engages; at stock config an unbounded return value either overflows
+/// the host stack (`panic = "abort"`) or exhausts memory. A `FromJs` error carries
 /// its message in Rust rather than via a pending JS exception, so it survives the
 /// async promise resolution the return value is converted through.
-fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Result<Value, Error> {
+fn value_from_js<'js>(
+	ctx: &Ctx<'js>,
+	val: js::Value<'js>,
+	depth: usize,
+	remaining: &mut usize,
+) -> Result<Value, Error> {
 	if depth > crate::val::MAX_VALUE_DEPTH {
 		return Err(Error::new_from_js_message(
 			"js value",
@@ -35,6 +83,10 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 			.to_string(),
 		));
 	}
+	let Some(next_remaining) = remaining.checked_sub(1) else {
+		return Err(value_too_large_error());
+	};
+	*remaining = next_remaining;
 	match val.type_of() {
 		js::Type::Undefined => Ok(Value::None),
 		js::Type::Null => Ok(Value::Null),
@@ -46,12 +98,7 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 		}
 		js::Type::Array => {
 			let v = val.as_array().expect("type checked as array");
-			let mut x = Array::with_capacity(v.len());
-			for i in v.iter() {
-				let v = i?;
-				x.push(value_from_js(ctx, v, depth + 1)?);
-			}
-			Ok(x.into())
+			array_from_js(ctx, v, depth, remaining)
 		}
 		js::Type::BigInt => {
 			// TODO: Optimize this if rquickjs ever supports better conversion methods.
@@ -147,13 +194,7 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 
 			// Check to see if this object is an array
 			if let Some(v) = v.as_array() {
-				let mut x = Array::with_capacity(v.len());
-				for i in v.iter() {
-					let v = i?;
-					let v = value_from_js(ctx, v, depth + 1)?;
-					x.push(v);
-				}
-				return Ok(x.into());
+				return array_from_js(ctx, v, depth, remaining);
 			}
 
 			// Check to see if this object is a function
@@ -165,7 +206,7 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 			for i in v.props() {
 				let (k, v) = i?;
 				let k = String::from_atom(k)?;
-				let v = value_from_js(ctx, v, depth + 1)?;
+				let v = value_from_js(ctx, v, depth + 1, remaining)?;
 				x.insert(k, v);
 			}
 
@@ -183,5 +224,39 @@ fn value_from_js<'js>(ctx: &Ctx<'js>, val: js::Value<'js>, depth: usize) -> Resu
 		| js::Type::Proxy
 		| js::Type::Module
 		| js::Type::Unknown => Ok(Value::Null),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use js::{Context, FromJs, Runtime};
+
+	use crate::val::Value;
+
+	#[test]
+	fn sparse_array_with_length_above_i32_max_returns_error() {
+		let rt = Runtime::new().unwrap();
+		let ctx = Context::full(&rt).unwrap();
+		ctx.with(|ctx| {
+			let js_val: js::Value =
+				ctx.eval("(() => { let a = []; a.length = 2147483648; return a; })()").unwrap();
+			let res = Value::from_js(&ctx, js_val);
+			assert!(res.is_err());
+		});
+	}
+
+	#[test]
+	fn shared_reference_dag_with_exponential_expansion_returns_error() {
+		let rt = Runtime::new().unwrap();
+		let ctx = Context::full(&rt).unwrap();
+		ctx.with(|ctx| {
+			let js_val: js::Value = ctx
+				.eval(
+					"(() => { let a = [1, 2]; for (let i = 0; i < 30; i++) a = [a, a]; return a; })()",
+				)
+				.unwrap();
+			let res = Value::from_js(&ctx, js_val);
+			assert!(res.is_err());
+		});
 	}
 }

@@ -83,10 +83,7 @@ impl TryFrom<proto::Value> for Value {
 			ValueInner::StringRecordId(_) => {
 				Err(anyhow!("Unsupported Value type: an unparsed string record id"))
 			}
-			ValueInner::File(f) => Ok(Value::File(File {
-				bucket: f.bucket,
-				key: f.key,
-			})),
+			ValueInner::File(f) => Ok(Value::File(File::new(f.bucket, f.key))),
 			ValueInner::Range(r) => Ok(Value::Range(Box::new((*r).try_into()?))),
 			ValueInner::Regex(s) => Ok(Value::Regex(Regex::from_str(&s)?)),
 			ValueInner::Object(o) => Ok(Value::Object(o.try_into()?)),

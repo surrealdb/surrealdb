@@ -1,11 +1,13 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
+use std::ops::Bound;
+
 use anyhow::{Result, bail, ensure};
 use surrealdb_types::ToSql;
 
 use crate::expr::operation::PatchError;
 use crate::expr::{Error, Operation};
-use crate::val::{Set, Strand, Value};
+use crate::val::{RecordIdKey, Set, Strand, Value};
 
 /// What a write does with the position its pointer's last reference token
 /// names inside an array.
@@ -76,6 +78,62 @@ fn locate<'a>(this: &'a mut Value, path: &[Strand]) -> Located<'a> {
 		};
 	}
 	Located::Found(at)
+}
+
+/// Maximum total number of value nodes that `copy` operations in a single
+/// `Value::patch` invocation may duplicate. Bounding cumulative copied nodes
+/// prevents alternating `copy` operations from doubling container subtrees
+/// exponentially across a small patch array.
+const MAX_PATCH_COPIED_NODES: usize = 65_536;
+
+/// Counts the value nodes in `value` against `remaining`, returning `false` as
+/// soon as the budget is exhausted.
+fn count_nodes_bounded(value: &Value, remaining: &mut usize) -> bool {
+	let Some(next) = remaining.checked_sub(1) else {
+		return false;
+	};
+	*remaining = next;
+	match value {
+		Value::Array(a) => a.iter().all(|v| count_nodes_bounded(v, remaining)),
+		Value::Set(s) => s.iter().all(|v| count_nodes_bounded(v, remaining)),
+		Value::Object(o) => o.iter().all(|(_, v)| count_nodes_bounded(v, remaining)),
+		// A record id's key and a range's bounds can hold arrays and objects of
+		// any size, which a copy duplicates along with them.
+		Value::RecordId(id) => count_key_nodes_bounded(&id.key, remaining),
+		Value::Range(r) => [&r.start, &r.end].into_iter().all(|bound| match bound {
+			Bound::Included(v) | Bound::Excluded(v) => count_nodes_bounded(v, remaining),
+			Bound::Unbounded => true,
+		}),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => true,
+	}
+}
+
+/// Counts the value nodes nested in a record id's `key` against `remaining`,
+/// as [`count_nodes_bounded`] counts a value's, returning `false` as soon as
+/// the budget is exhausted. The key itself is part of the id's own node.
+fn count_key_nodes_bounded(key: &RecordIdKey, remaining: &mut usize) -> bool {
+	match key {
+		RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+		RecordIdKey::Array(a) => a.iter().all(|v| count_nodes_bounded(v, remaining)),
+		RecordIdKey::Object(o) => o.iter().all(|(_, v)| count_nodes_bounded(v, remaining)),
+		RecordIdKey::Range(r) => [&r.start, &r.end].into_iter().all(|bound| match bound {
+			Bound::Included(k) | Bound::Excluded(k) => count_key_nodes_bounded(k, remaining),
+			Bound::Unbounded => true,
+		}),
+	}
 }
 
 /// Restores the sort-and-dedup invariant of every set in `value`.
@@ -213,6 +271,7 @@ impl Value {
 		}
 
 		// Loop over the patch operations and apply them
+		let mut copy_budget = MAX_PATCH_COPIED_NODES;
 		for operation in operations {
 			match operation {
 				// Add a value
@@ -287,7 +346,26 @@ impl Value {
 					path,
 					from,
 				} => {
+					let checked = if let Located::Found(src) = locate(&mut this, &from) {
+						if !count_nodes_bounded(src, &mut copy_budget) {
+							bail!(Error::InvalidPatch(PatchError {
+								message: format!(
+									"'copy' operation exceeded maximum copied value size of {MAX_PATCH_COPIED_NODES} nodes",
+								),
+							}));
+						}
+						true
+					} else {
+						false
+					};
 					let val = this.pick(&Operation::path_to_parts(&from));
+					if !checked && !count_nodes_bounded(&val, &mut copy_budget) {
+						bail!(Error::InvalidPatch(PatchError {
+							message: format!(
+								"'copy' operation exceeded maximum copied value size of {MAX_PATCH_COPIED_NODES} nodes",
+							),
+						}));
+					}
 					write(&mut this, &path, val, Write::Insert)?;
 				}
 				// Move a value from one field to another
@@ -908,5 +986,63 @@ mod tests {
 		let ops = Operation::operations_to_value(start.diff(&after));
 		start.patch(ops).unwrap();
 		assert_eq!(start, after);
+	}
+
+	/// A record id or range counts the values its key or bounds hold, so a
+	/// large array hidden inside one is not copied as a single node.
+	#[test]
+	fn patch_copy_counts_values_inside_record_ids_and_ranges() {
+		use std::ops::Bound;
+
+		use crate::val::{Array, Object, Range, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+
+		let large = || Array(vec![Value::from(1i64); super::MAX_PATCH_COPIED_NODES]);
+		let hidden = [
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Array(large()),
+			}),
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Range(Box::new(RecordIdKeyRange {
+					start: Bound::Included(RecordIdKey::Array(large())),
+					end: Bound::Unbounded,
+				})),
+			}),
+			Value::Range(Box::new(Range {
+				start: Bound::Unbounded,
+				end: Bound::Excluded(Value::Array(large())),
+			})),
+		];
+		for value in hidden {
+			let mut val = Value::Object(Object::from_iter([("a", value)]));
+			let ops = parse_val!("[{ op: 'copy', from: '/a', path: '/b' }]");
+			let err = val.patch(ops).unwrap_err();
+			assert!(
+				err.to_string().contains("exceeded maximum copied value size"),
+				"unexpected error: {err}"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn patch_alternating_copy_blowup_is_bounded() {
+		let mut val = parse_val!("{ a: [1, 2], b: [1, 2] }");
+		let mut ops_sql = String::from("[");
+		for i in 0..30 {
+			if i > 0 {
+				ops_sql.push_str(", ");
+			}
+			ops_sql.push_str(
+				"{ op: 'copy', from: '/a', path: '/b/-' }, { op: 'copy', from: '/b', path: '/a/-' }",
+			);
+		}
+		ops_sql.push(']');
+		let ops = parse_val!(&ops_sql);
+		let err = val.patch(ops).unwrap_err();
+		assert!(
+			err.to_string().contains("exceeded maximum copied value size"),
+			"unexpected error: {err}"
+		);
 	}
 }

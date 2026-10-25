@@ -1003,47 +1003,56 @@ impl ToSql for Geometry {
 	}
 }
 
+#[inline]
+fn norm_zero(v: f64) -> f64 {
+	if v == 0.0 {
+		0.0
+	} else {
+		v
+	}
+}
+
 impl hash::Hash for Geometry {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		match self {
 			Geometry::Point(p) => {
 				"Point".hash(state);
-				p.x().to_bits().hash(state);
-				p.y().to_bits().hash(state);
+				norm_zero(p.x()).to_bits().hash(state);
+				norm_zero(p.y()).to_bits().hash(state);
 			}
 			Geometry::Line(l) => {
 				"Line".hash(state);
 				l.points().for_each(|v| {
-					v.x().to_bits().hash(state);
-					v.y().to_bits().hash(state);
+					norm_zero(v.x()).to_bits().hash(state);
+					norm_zero(v.y()).to_bits().hash(state);
 				});
 			}
 			Geometry::Polygon(p) => {
 				"Polygon".hash(state);
 				p.exterior().points().for_each(|ext| {
-					ext.x().to_bits().hash(state);
-					ext.y().to_bits().hash(state);
+					norm_zero(ext.x()).to_bits().hash(state);
+					norm_zero(ext.y()).to_bits().hash(state);
 				});
 				p.interiors().iter().for_each(|int| {
 					int.points().for_each(|v| {
-						v.x().to_bits().hash(state);
-						v.y().to_bits().hash(state);
+						norm_zero(v.x()).to_bits().hash(state);
+						norm_zero(v.y()).to_bits().hash(state);
 					});
 				});
 			}
 			Geometry::MultiPoint(v) => {
 				"MultiPoint".hash(state);
 				v.0.iter().for_each(|v| {
-					v.x().to_bits().hash(state);
-					v.y().to_bits().hash(state);
+					norm_zero(v.x()).to_bits().hash(state);
+					norm_zero(v.y()).to_bits().hash(state);
 				});
 			}
 			Geometry::MultiLine(ml) => {
 				"MultiLine".hash(state);
 				ml.0.iter().for_each(|ls| {
 					ls.points().for_each(|p| {
-						p.x().to_bits().hash(state);
-						p.y().to_bits().hash(state);
+						norm_zero(p.x()).to_bits().hash(state);
+						norm_zero(p.y()).to_bits().hash(state);
 					});
 				});
 			}
@@ -1051,13 +1060,13 @@ impl hash::Hash for Geometry {
 				"MultiPolygon".hash(state);
 				mp.0.iter().for_each(|p| {
 					p.exterior().points().for_each(|ext| {
-						ext.x().to_bits().hash(state);
-						ext.y().to_bits().hash(state);
+						norm_zero(ext.x()).to_bits().hash(state);
+						norm_zero(ext.y()).to_bits().hash(state);
 					});
 					p.interiors().iter().for_each(|int| {
 						int.points().for_each(|v| {
-							v.x().to_bits().hash(state);
-							v.y().to_bits().hash(state);
+							norm_zero(v.x()).to_bits().hash(state);
+							norm_zero(v.y()).to_bits().hash(state);
 						});
 					});
 				});
@@ -1078,15 +1087,15 @@ impl<F> Encode<F> for Geometry {
 		match self {
 			Geometry::Point(point) => {
 				w.write_u8(2)?;
-				Encode::<F>::encode(&point.x(), w)?;
-				Encode::<F>::encode(&point.y(), w)?;
+				Encode::<F>::encode(&norm_zero(point.x()), w)?;
+				Encode::<F>::encode(&norm_zero(point.y()), w)?;
 			}
 			Geometry::Line(line_string) => {
 				w.write_u8(3)?;
 				for p in line_string.points() {
 					w.mark_terminator();
-					Encode::<F>::encode(&p.x(), w)?;
-					Encode::<F>::encode(&p.y(), w)?;
+					Encode::<F>::encode(&norm_zero(p.x()), w)?;
+					Encode::<F>::encode(&norm_zero(p.y()), w)?;
 				}
 				w.write_terminator()?;
 			}
@@ -1094,15 +1103,15 @@ impl<F> Encode<F> for Geometry {
 				w.write_u8(4)?;
 				for p in polygon.exterior().points() {
 					w.mark_terminator();
-					Encode::<F>::encode(&p.x(), w)?;
-					Encode::<F>::encode(&p.y(), w)?;
+					Encode::<F>::encode(&norm_zero(p.x()), w)?;
+					Encode::<F>::encode(&norm_zero(p.y()), w)?;
 				}
 				w.write_terminator()?;
 				for l in polygon.interiors() {
 					for p in l.points() {
 						w.mark_terminator();
-						Encode::<F>::encode(&p.x(), w)?;
-						Encode::<F>::encode(&p.y(), w)?;
+						Encode::<F>::encode(&norm_zero(p.x()), w)?;
+						Encode::<F>::encode(&norm_zero(p.y()), w)?;
 					}
 					w.write_terminator()?;
 				}
@@ -1112,8 +1121,8 @@ impl<F> Encode<F> for Geometry {
 				w.write_u8(5)?;
 				for p in multi_point.iter() {
 					w.mark_terminator();
-					Encode::<F>::encode(&p.x(), w)?;
-					Encode::<F>::encode(&p.y(), w)?;
+					Encode::<F>::encode(&norm_zero(p.x()), w)?;
+					Encode::<F>::encode(&norm_zero(p.y()), w)?;
 				}
 				w.write_terminator()?;
 			}
@@ -1122,8 +1131,8 @@ impl<F> Encode<F> for Geometry {
 				for l in multi_line_string.iter() {
 					for p in l.points() {
 						w.mark_terminator();
-						Encode::<F>::encode(&p.x(), w)?;
-						Encode::<F>::encode(&p.y(), w)?;
+						Encode::<F>::encode(&norm_zero(p.x()), w)?;
+						Encode::<F>::encode(&norm_zero(p.y()), w)?;
 					}
 					w.write_terminator()?;
 				}
@@ -1134,15 +1143,15 @@ impl<F> Encode<F> for Geometry {
 				for p in multi_polygon.iter() {
 					for p in p.exterior().points() {
 						w.mark_terminator();
-						Encode::<F>::encode(&p.x(), w)?;
-						Encode::<F>::encode(&p.y(), w)?;
+						Encode::<F>::encode(&norm_zero(p.x()), w)?;
+						Encode::<F>::encode(&norm_zero(p.y()), w)?;
 					}
 					w.write_terminator()?;
 					for l in p.interiors() {
 						for p in l.points() {
 							w.mark_terminator();
-							Encode::<F>::encode(&p.x(), w)?;
-							Encode::<F>::encode(&p.y(), w)?;
+							Encode::<F>::encode(&norm_zero(p.x()), w)?;
+							Encode::<F>::encode(&norm_zero(p.y()), w)?;
 						}
 						w.write_terminator()?;
 					}
@@ -1381,5 +1390,23 @@ mod test {
 				],
 			),
 		])));
+	}
+
+	#[test]
+	fn negative_zero_coordinate_matches_positive_zero_in_hash_and_storekey() {
+		use std::collections::hash_map::DefaultHasher;
+		use std::hash::{Hash, Hasher};
+
+		let neg = Geometry::Point(Point::new(-0.0, 1.0));
+		let pos = Geometry::Point(Point::new(0.0, 1.0));
+		assert_eq!(neg, pos);
+
+		let hash_of = |g: &Geometry| {
+			let mut h = DefaultHasher::new();
+			g.hash(&mut h);
+			h.finish()
+		};
+		assert_eq!(hash_of(&neg), hash_of(&pos));
+		assert_eq!(storekey::encode_vec(&neg).unwrap(), storekey::encode_vec(&pos).unwrap());
 	}
 }

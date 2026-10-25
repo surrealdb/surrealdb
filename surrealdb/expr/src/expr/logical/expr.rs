@@ -3966,7 +3966,9 @@ impl ToSql for LogicalExpr {
 							BindingPower::Range
 								| BindingPower::Relation | BindingPower::Equality
 								| BindingPower::Power
-						) {
+						) || matches!(op, BinaryOperator::Matches(_))
+					&& left_bp == BindingPower::Relation
+				{
 					write_sql!(f, fmt, "({left})");
 				} else {
 					write_sql!(f, fmt, "{left}");
@@ -3993,10 +3995,13 @@ impl ToSql for LogicalExpr {
 					|| right_bp == op_bp
 						&& matches!(
 							right_bp,
-							BindingPower::Range
-								| BindingPower::Relation | BindingPower::Equality
-								| BindingPower::AddSub | BindingPower::MulDiv
-						) {
+							BindingPower::Nullish
+								| BindingPower::Range | BindingPower::Relation
+								| BindingPower::Equality | BindingPower::AddSub
+								| BindingPower::MulDiv
+						) || matches!(op, BinaryOperator::Matches(_))
+					&& right_bp == BindingPower::Relation
+				{
 					write_sql!(f, fmt, "({right})");
 				} else {
 					write_sql!(f, fmt, "{right}");

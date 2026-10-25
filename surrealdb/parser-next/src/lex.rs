@@ -714,11 +714,29 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Lexes a JavaScript function body from its `{` at `start`, returning
-	/// the offset after the matching `}`. Strings, comments and nested
-	/// braces are skipped as JavaScript defines them.
+	/// the offset after the matching `}`. Strings, regex literals, comments
+	/// and nested braces are skipped as JavaScript defines them.
+	///
+	/// A `/` starts a regex literal only where an expression may begin, so the
+	/// scan tracks whether the previous token ends an expression. A `}` ends
+	/// one when it closes an object literal or the body of a function or class
+	/// expression, and does not when it closes a statement block, so each
+	/// nested `{` records which it opened. A `{` where a statement may begin
+	/// (after `;`, `)`, `=>`, a block or an identifier, and after `else` or
+	/// `do`) opens a block, unless it is the body of a `function` or `class`
+	/// that stood where an expression is expected; a `{` anywhere else opens an
+	/// object literal.
 	pub fn js_body(&mut self, start: u32) -> Result<u32, LexError> {
 		self.pos = start + 1;
-		let mut depth = 1u32;
+		// Whether each `{` nested in the body opened a statement block, after
+		// whose `}` a statement may begin, innermost last.
+		let mut blocks: Vec<bool> = Vec::new();
+		let mut regex_allowed = true;
+		let mut block_start = true;
+		// A `function` or `class` stood where an expression is expected, so
+		// the next `{` where a statement may begin is its body, and closing that
+		// body ends the expression.
+		let mut expression_body = false;
 		loop {
 			if self.at_end() {
 				return Err(LexError::UnterminatedScript);
@@ -726,19 +744,24 @@ impl<'a> Lexer<'a> {
 			let b = self.peek_at(0);
 			self.pos += 1;
 			match b {
-				b'`' | b'\'' | b'"' => loop {
-					if self.at_end() {
-						return Err(LexError::UnterminatedScript);
+				b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C => {}
+				b'`' | b'\'' | b'"' => {
+					loop {
+						if self.at_end() {
+							return Err(LexError::UnterminatedScript);
+						}
+						let c = self.peek_at(0);
+						self.pos += 1;
+						if c == b {
+							break;
+						}
+						if c == b'\\' {
+							self.pos = (self.pos + 1).min(self.src.len() as u32);
+						}
 					}
-					let c = self.peek_at(0);
-					self.pos += 1;
-					if c == b {
-						break;
-					}
-					if c == b'\\' {
-						self.pos = (self.pos + 1).min(self.src.len() as u32);
-					}
-				},
+					regex_allowed = false;
+					block_start = false;
+				}
 				b'/' if self.peek_at(0) == b'/' => {
 					// To the end of the line: `\n`, `\r`, U+2028 or U+2029.
 					while !self.at_end() {
@@ -770,14 +793,105 @@ impl<'a> Lexer<'a> {
 						self.pos += 1;
 					}
 				}
-				b'{' => depth += 1,
-				b'}' => {
-					depth -= 1;
-					if depth == 0 {
-						return Ok(self.pos);
+				b'/' if regex_allowed => {
+					let mut in_class = false;
+					loop {
+						if self.at_end() {
+							return Err(LexError::UnterminatedScript);
+						}
+						let c = self.peek_at(0);
+						if c == b'\n' || c == b'\r' {
+							return Err(LexError::UnterminatedScript);
+						}
+						self.pos += 1;
+						match c {
+							b'\\' => {
+								if self.at_end() || matches!(self.peek_at(0), b'\n' | b'\r') {
+									return Err(LexError::UnterminatedScript);
+								}
+								self.pos += 1;
+							}
+							b'[' => in_class = true,
+							b']' => in_class = false,
+							b'/' if !in_class => break,
+							_ => {}
+						}
 					}
+					while self.peek_at(0).is_ascii_alphabetic() {
+						self.pos += 1;
+					}
+					regex_allowed = false;
+					block_start = false;
 				}
-				_ => {}
+				b'{' => {
+					let body = block_start && expression_body;
+					if body {
+						expression_body = false;
+					}
+					blocks.push(block_start && !body);
+					regex_allowed = true;
+					block_start = true;
+				}
+				b'}' => {
+					let Some(block) = blocks.pop() else {
+						return Ok(self.pos);
+					};
+					regex_allowed = block;
+					block_start = block;
+				}
+				b')' => {
+					regex_allowed = false;
+					block_start = true;
+				}
+				b']' => {
+					regex_allowed = false;
+					block_start = false;
+				}
+				b'+' | b'-' if self.peek_at(0) == b => {
+					self.pos += 1;
+				}
+				b'0'..=b'9' => {
+					while self.peek_at(0).is_ascii_alphanumeric()
+						|| matches!(self.peek_at(0), b'_' | b'.')
+					{
+						self.pos += 1;
+					}
+					regex_allowed = false;
+					block_start = false;
+				}
+				b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => {
+					let word_start = (self.pos - 1) as usize;
+					while self.peek_at(0).is_ascii_alphanumeric()
+						|| matches!(self.peek_at(0), b'_' | b'$')
+					{
+						self.pos += 1;
+					}
+					let word = &self.src[word_start..self.pos as usize];
+					if matches!(word, b"function" | b"class") && !block_start {
+						expression_body = true;
+					}
+					// `async` leaves the position as it found it, so the
+					// `function` after it is read where the `async` stood.
+					if word == b"async" {
+						regex_allowed = false;
+						continue;
+					}
+					regex_allowed = matches!(
+						word,
+						b"return"
+							| b"throw" | b"case" | b"delete"
+							| b"void" | b"typeof" | b"instanceof"
+							| b"in" | b"of" | b"new"
+							| b"yield" | b"await" | b"else"
+							| b"do"
+					);
+					block_start = !regex_allowed || matches!(word, b"else" | b"do");
+				}
+				_ => {
+					regex_allowed = true;
+					block_start =
+						b == b';' || (b == b'>' && self.src[self.pos as usize - 2] == b'=');
+				}
 			}
 		}
 	}
@@ -1512,7 +1626,7 @@ pub fn decode_number(kind: NumKind, text: &[u8]) -> Option<DecodedNumber> {
 /// Decodes a lexed duration span to `(seconds, nanoseconds)`.
 pub fn decode_duration(text: &[u8]) -> Option<(u64, u32)> {
 	let mut secs: u64 = 0;
-	let mut nanos: u64 = 0;
+	let mut nanos: u128 = 0;
 	let mut i = 0;
 	while i < text.len() {
 		let s = i;
@@ -1521,7 +1635,7 @@ pub fn decode_duration(text: &[u8]) -> Option<(u64, u32)> {
 		}
 		let n = decode_uint(&text[s..i])?;
 		let rest = &text[i..];
-		let (len, mul_s, mul_n): (usize, u64, u64) = match rest {
+		let (len, mul_s, mul_n): (usize, u64, u128) = match rest {
 			[b'n', b's', ..] => (2, 0, 1),
 			[b'u', b's', ..] => (2, 0, 1_000),
 			[0xC2, 0xB5, b's', ..] => (3, 0, 1_000),
@@ -1538,10 +1652,11 @@ pub fn decode_duration(text: &[u8]) -> Option<(u64, u32)> {
 		if mul_s > 0 {
 			secs = secs.checked_add(n.checked_mul(mul_s)?)?;
 		} else {
-			nanos = nanos.checked_add(n.checked_mul(mul_n)?)?;
+			nanos = nanos.checked_add((n as u128).checked_mul(mul_n)?)?;
 		}
 	}
-	secs = secs.checked_add(nanos / 1_000_000_000)?;
+	let extra_secs = u64::try_from(nanos / 1_000_000_000).ok()?;
+	secs = secs.checked_add(extra_secs)?;
 	Some((secs, (nanos % 1_000_000_000) as u32))
 }
 
@@ -1627,5 +1742,46 @@ mod test {
 		}
 		assert_eq!(decode_duration(b"1h30m"), Some((5400, 0)));
 		assert_eq!(decode_duration(b"1s500ms"), Some((1, 500_000_000)));
+		assert_eq!(
+			decode_duration(b"18446744073709551ms"),
+			Some((18_446_744_073_709, 551_000_000))
+		);
+	}
+
+	#[test]
+	fn js_body_divides_after_an_object_literal_and_matches_after_a_block() {
+		for src in [
+			&b"{ const ratio = {} / 2; }"[..],
+			b"{ return { a: 1 }.a / 2 / 3; }",
+			b"{ const o = { a: { b: 1 } } / 2; }",
+			b"{ if (x) { y(); } /}/.test(z); }",
+			b"{ { } /}/.test(z); }",
+			b"{ const f = () => { return 1; }; }",
+			b"{ do { x(); } while (/}/.test(y)); }",
+			b"{ if (x) {} else { y(); } }",
+			b"{ const ratio = function() {} / 2; }",
+			b"{ const ratio = function named(a = {}) { return a; } / 2; }",
+			b"{ const ratio = async function() {} / 2; }",
+			b"{ const ratio = class {} / 2; }",
+			b"{ const ratio = class extends Base { m() {} } / 2; }",
+			b"{ return function() {} / 2; }",
+			b"{ function f() {} /}/.test(z); }",
+			b"{ async function f() {} /}/.test(z); }",
+			b"{ class C {} /}/.test(z); }",
+		] {
+			let mut l = Lexer::new(src);
+			let end = l
+				.js_body(0)
+				.unwrap_or_else(|e| panic!("{} should lex: {e:?}", String::from_utf8_lossy(src)));
+			assert_eq!(end as usize, src.len(), "{}", String::from_utf8_lossy(src));
+		}
+	}
+
+	#[test]
+	fn js_body_skips_braces_and_quotes_inside_regex_literals() {
+		let src = b"{ return /}/.test(x) && /[\"'}]/g.test(y) && (a / b) > 0; }";
+		let mut l = Lexer::new(src);
+		let end = l.js_body(0).expect("js_body with regex literals should lex");
+		assert_eq!(end as usize, src.len());
 	}
 }

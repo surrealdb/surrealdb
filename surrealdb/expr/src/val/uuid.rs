@@ -39,11 +39,11 @@ impl Uuid {
 
 	/// Generate a new V7 UUID
 	pub fn new_v7_from_datetime(timestamp: Datetime) -> Self {
-		let ts = uuid::Timestamp::from_unix(
-			uuid::NoContext,
-			timestamp.0.timestamp() as u64,
-			timestamp.0.timestamp_subsec_nanos(),
-		);
+		let (secs, nanos) = match u64::try_from(timestamp.0.timestamp()) {
+			Ok(secs) => (secs, timestamp.0.timestamp_subsec_nanos()),
+			Err(_) => (0, 0),
+		};
+		let ts = uuid::Timestamp::from_unix(uuid::NoContext, secs, nanos);
 		Self(uuid::Uuid::new_v7(ts))
 	}
 

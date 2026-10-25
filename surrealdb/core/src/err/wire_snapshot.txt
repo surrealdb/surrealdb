@@ -45,6 +45,7 @@ QueryTimedout	{ cause: NONE, code: -32004, details: { details: { duration: 1s },
 QueryCancelled	{ cause: NONE, code: -32005, details: { kind: 'Cancelled' }, kind: 'Query', message: 'The query was not executed due to a cancelled transaction' }
 Internal	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Internal database error: sample' }
 Unencodable	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'Tried to serialize a value which cannot be serialized.' }
+EmptyFieldName	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Found sample in a record id or an indexed value, but an object there cannot have an empty field name' }
 Corrupted	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Encountered KV store corruption: sample' }
 InvalidContent	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidContent' }, kind: 'Validation', message: 'Cannot use NONE in a CONTENT clause' }
 InvalidMerge	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidMerge' }, kind: 'Validation', message: 'Cannot use NONE in a MERGE clause' }

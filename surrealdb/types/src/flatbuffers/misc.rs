@@ -33,10 +33,7 @@ impl FromFlatbuffers for File {
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let bucket = input.bucket().ok_or_else(|| anyhow::anyhow!("Missing bucket in File"))?;
 		let key = input.key().ok_or_else(|| anyhow::anyhow!("Missing key in File"))?;
-		Ok(File {
-			bucket: bucket.to_string(),
-			key: key.to_string(),
-		})
+		Ok(File::new(bucket, key))
 	}
 }
 

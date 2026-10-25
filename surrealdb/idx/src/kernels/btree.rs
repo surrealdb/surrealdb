@@ -122,8 +122,8 @@ impl DatetimeSpelling {
 
 	/// `key`'s bytes, with its indexed values in this spelling. Every key and
 	/// bound in this module is encoded here. A value with no key encoding
-	/// fails as [`surrealdb_kvs::key::Error::Unencodable`], the error every
-	/// other key encoder raises for it.
+	/// fails as every other key encoder fails it
+	/// ([`surrealdb_kvs::key::Error::from_refusal`]).
 	fn encode<K>(self, key: &K) -> Result<Key<'static>>
 	where
 		K: storekey::Encode<IndexFormat> + storekey::Encode<IndexIdFormat>,
@@ -132,7 +132,7 @@ impl DatetimeSpelling {
 			Self::Text => storekey::encode_vec_format::<IndexIdFormat, _>(key),
 			Self::Chronological => storekey::encode_vec_format::<IndexFormat, _>(key),
 		};
-		Ok(Key::from(bytes.map_err(|_| surrealdb_kvs::key::Error::Unencodable)?))
+		Ok(Key::from(bytes.map_err(surrealdb_kvs::key::Error::from_refusal)?))
 	}
 }
 
@@ -235,7 +235,7 @@ impl<'a> IndexKeyspace<'a> {
 		} else {
 			storekey::encode_vec_format::<IndexIdFormat, _>(id)
 		};
-		key.extend(id.map_err(|_| surrealdb_kvs::key::Error::Unencodable)?);
+		key.extend(id.map_err(surrealdb_kvs::key::Error::from_refusal)?);
 		Ok(Key::from(key))
 	}
 

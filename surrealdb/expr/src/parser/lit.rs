@@ -887,6 +887,7 @@ mod decimal_tests {
 			("0.0000000000000000000000000000001dec", 31),
 			("1.2345678901234567890123456789012345dec", 34),
 			("1e-99999999999dec", 99999999999u64),
+			("1e-9223372036854775808dec", 9223372036854775808u64),
 		] {
 			assert_eq!(
 				shown(text).unwrap_err(),
@@ -905,6 +906,14 @@ mod decimal_tests {
 		assert_eq!(
 			shown("1e2000dec").unwrap_err(),
 			"Failed to parse decimal: Magnitude exceeds the maximum value allowed: exponent 2000 > 1024"
+		);
+		assert_eq!(
+			shown("1e1000000000dec").unwrap_err(),
+			"Failed to parse decimal: Magnitude exceeds the maximum value allowed: exponent 1000000000 > 1024"
+		);
+		assert_eq!(
+			shown("1e9223372036854775807dec").unwrap_err(),
+			"Failed to parse decimal: Magnitude exceeds the maximum value allowed: exponent 9223372036854775807 > 1024"
 		);
 	}
 }

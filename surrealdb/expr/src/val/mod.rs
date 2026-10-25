@@ -1113,15 +1113,18 @@ impl TryMul for Value {
 					}
 
 					let nanos: Decimal = d.nanos().into();
-					let scaled = (nanos * dec).trunc();
+					let scaled = nanos
+						.checked_mul(dec)
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?
+						.trunc();
 
 					let scaled_nanos: u128 = scaled
 						.to_u128()
-						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
 
 					let secs: u64 = (scaled_nanos / 1_000_000_000)
 						.try_into()
-						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {n}")))?;
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
 
 					let subsec_nanos: u32 = (scaled_nanos % 1_000_000_000).try_into()?;
 
@@ -1171,15 +1174,18 @@ impl TryDiv for Value {
 
 					let nanos: Decimal = d.nanos().into();
 
-					let divided = (nanos / dec).trunc();
+					let divided = nanos
+						.checked_div(dec)
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} / {dec}")))?
+						.trunc();
 
 					let divided_nanos: u128 = divided
 						.to_u128()
-						.ok_or_else(|| anyhow::anyhow!("Resulting duration is out of range"))?;
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} / {dec}")))?;
 
 					let secs: u64 = (divided_nanos / 1_000_000_000)
 						.try_into()
-						.map_err(|_| anyhow::anyhow!("Resulting duration seconds out of range"))?;
+						.map_err(|_| Error::ArithmeticOverflow(format!("{d} / {dec}")))?;
 
 					let subsec_nanos: u32 = (divided_nanos % 1_000_000_000).try_into()?;
 
@@ -2951,5 +2957,18 @@ mod tests {
 		let deserialized_sql_value =
 			crate::syn::value_legacy_strand(&json_str, &ParserConfig::default()).unwrap();
 		assert_eq!(deserialized_sql_value, expected_deserialized);
+	}
+
+	#[test]
+	fn duration_decimal_mul_and_div_overflow_return_error() {
+		let one_sec = Value::Duration(Duration::new(1, 0));
+		let huge_dec: Decimal = "100000000000000000000".parse().unwrap();
+		let mul_err = one_sec.try_mul(Value::Number(Number::Decimal(huge_dec))).unwrap_err();
+		assert!(matches!(mul_err.downcast_ref::<Error>(), Some(Error::ArithmeticOverflow(_))));
+
+		let max_dur = Value::Duration(Duration::MAX);
+		let tiny_dec: Decimal = "0.0000000000000000000000000001".parse().unwrap();
+		let div_err = max_dur.try_div(Value::Number(Number::Decimal(tiny_dec))).unwrap_err();
+		assert!(matches!(div_err.downcast_ref::<Error>(), Some(Error::ArithmeticOverflow(_))));
 	}
 }

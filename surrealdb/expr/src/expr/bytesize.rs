@@ -65,17 +65,20 @@ impl Bytesize {
 				}
 			}
 
-			let bytesize = match unit {
-				b'b' => Bytesize::b(value),
-				b'k' => Bytesize::kb(value),
-				b'm' => Bytesize::mb(value),
-				b'g' => Bytesize::gb(value),
-				b't' => Bytesize::tb(value),
-				b'p' => Bytesize::pb(value),
+			let unit = match unit {
+				b'b' => 1,
+				b'k' => KIB,
+				b'm' => MIB,
+				b'g' => GIB,
+				b't' => TIB,
+				b'p' => PIB,
 				_ => bail!(Error::InvalidBytesize),
 			};
+			// A component too large for a `u64` is invalid rather than clamped,
+			// so an oversized limit is refused instead of becoming unlimited.
+			let bytes = value.checked_mul(unit).ok_or(Error::InvalidBytesize)?;
 
-			total = total.try_add(bytesize)?;
+			total = total.try_add(Bytesize::new(bytes))?;
 		}
 
 		ensure!(total != Bytesize::new(0), Error::InvalidBytesize);
@@ -88,23 +91,23 @@ impl Bytesize {
 	}
 
 	pub fn kb(kb: u64) -> Self {
-		Bytesize(kb * KIB)
+		Bytesize(kb.saturating_mul(KIB))
 	}
 
 	pub fn mb(mb: u64) -> Self {
-		Bytesize(mb * MIB)
+		Bytesize(mb.saturating_mul(MIB))
 	}
 
 	pub fn gb(gb: u64) -> Self {
-		Bytesize(gb * GIB)
+		Bytesize(gb.saturating_mul(GIB))
 	}
 
 	pub fn tb(tb: u64) -> Self {
-		Bytesize(tb * TIB)
+		Bytesize(tb.saturating_mul(TIB))
 	}
 
 	pub fn pb(pb: u64) -> Self {
-		Bytesize(pb * PIB)
+		Bytesize(pb.saturating_mul(PIB))
 	}
 }
 
@@ -261,7 +264,7 @@ impl InfoStructure for Bytesize {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-	use super::Bytesize;
+	use super::{Bytesize, PIB};
 
 	#[test]
 	fn parse_bytesize() {
@@ -269,5 +272,22 @@ mod tests {
 		let bytesize = Bytesize::parse(str).unwrap();
 		assert_eq!(bytesize, Bytesize::new(1_099_520_016_386));
 		assert_eq!(str, bytesize.to_string());
+	}
+
+	#[test]
+	fn parse_rejects_a_component_that_overflows() {
+		for input in ["18446744073709551615kb", "16384pb", "1b18446744073709551615kb"] {
+			assert!(Bytesize::parse(input).is_err(), "{input} parsed");
+		}
+		assert_eq!(Bytesize::parse("16383pb").unwrap(), Bytesize::new(16_383 * PIB));
+	}
+
+	#[test]
+	fn unit_constructors_saturate_on_overflow() {
+		assert_eq!(Bytesize::kb(u64::MAX), Bytesize::new(u64::MAX));
+		assert_eq!(Bytesize::mb(u64::MAX), Bytesize::new(u64::MAX));
+		assert_eq!(Bytesize::gb(u64::MAX), Bytesize::new(u64::MAX));
+		assert_eq!(Bytesize::tb(u64::MAX), Bytesize::new(u64::MAX));
+		assert_eq!(Bytesize::pb(u64::MAX), Bytesize::new(u64::MAX));
 	}
 }

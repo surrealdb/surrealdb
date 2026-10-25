@@ -118,8 +118,7 @@ fn encode_route(route: &'static KeyRoute, fields: &Value) -> Result<Vec<u8>> {
 				let value = fields
 					.get(name)
 					.with_context(|| format!("key `{}` has no field `{name}`", route.name))?;
-				encode_field(ty, value, &mut out)
-					.with_context(|| format!("field `{name}` of key `{}`", route.name))?;
+				encode_field(ty, value, &mut out).map_err(|e| in_field(e, name, route))?;
 			}
 			KeyStep::List {
 				..
@@ -164,7 +163,7 @@ pub(crate) fn encode_fields(name: &str, fields: &[(&str, KeyField<'_>)]) -> Resu
 				ty,
 			} => {
 				encode_borrowed(ty, find(name)?, indexed, &mut out)
-					.with_context(|| format!("field `{name}` of key `{}`", route.name))?;
+					.map_err(|e| in_field(e, name, route))?;
 			}
 			// An index entry's indexed values are encoded by the B-tree key
 			// kernels (`idx::kernels::btree`), which both write paths and the
@@ -209,24 +208,22 @@ fn encode_borrowed(ty: &str, value: KeyField<'_>, indexed: bool, out: &mut Vec<u
 		// encoded as its indexed values are.
 		KeyField::Id(key) if ty == "Id" && indexed => {
 			storekey::encode_format::<crate::val::IndexFormat, _, _>(&mut *out, key)
-				.map_err(|e| anyhow::anyhow!("{e}"))
+				.map_err(encode_error)
 		}
-		KeyField::Id(key) if ty == "Id" => {
-			storekey::encode(&mut *out, key).map_err(|e| anyhow::anyhow!("{e}"))
-		}
+		KeyField::Id(key) if ty == "Id" => storekey::encode(&mut *out, key).map_err(encode_error),
 		// A record id's key as an identity, which spells the key losslessly
 		// whatever the route's format is.
 		KeyField::Id(key) if ty == "Identity" && indexed => {
 			let identity = crate::val::RecordIdentity(key.clone());
 			storekey::encode_format::<crate::val::IndexFormat, _, _>(&mut *out, &identity)
-				.map_err(|e| anyhow::anyhow!("{e}"))
+				.map_err(encode_error)
 		}
 		KeyField::Id(key) if ty == "Identity" => {
 			let identity = crate::val::RecordIdentity(key.clone());
-			storekey::encode(&mut *out, &identity).map_err(|e| anyhow::anyhow!("{e}"))
+			storekey::encode(&mut *out, &identity).map_err(encode_error)
 		}
 		KeyField::Dir(dir) if ty == "Dir" => {
-			storekey::encode(&mut *out, &dir).map_err(|e| anyhow::anyhow!("{e}"))
+			storekey::encode(&mut *out, &dir).map_err(encode_error)
 		}
 		other @ (KeyField::Str(_) | KeyField::Id(_) | KeyField::Dir(_)) => {
 			bail!("the VM does not encode a `{ty}` key field from {other:?}")
@@ -269,14 +266,41 @@ fn encode_field(ty: &str, value: &Value, out: &mut Vec<u8>) -> Result<()> {
 				"both" => crate::expr::Dir::Both,
 				other => bail!("`{other}` is not a direction"),
 			};
-			storekey::encode(&mut *out, &dir).map_err(|e| anyhow::anyhow!("{e}"))?
+			storekey::encode(&mut *out, &dir).map_err(encode_error)?
 		}
 		("Id", Value::RecordId(rid)) => {
-			storekey::encode(&mut *out, &rid.key).map_err(|e| anyhow::anyhow!("{e}"))?
+			storekey::encode(&mut *out, &rid.key).map_err(encode_error)?
 		}
 		(ty, value) => bail!("the VM does not encode a `{ty}` key field from {value:?}"),
 	}
 	Ok(())
+}
+
+/// A key field's encoding failure. A value's own refusal of its key encoding
+/// ([`surrealdb_kvs::key::Error`], such as an object with an empty field name)
+/// stays that error, so the caller is told what was wrong with the value;
+/// any other failure is its message.
+fn encode_error(error: storekey::EncodeError) -> anyhow::Error {
+	match error {
+		storekey::EncodeError::Custom(reason) => {
+			match reason.downcast::<surrealdb_kvs::key::Error>() {
+				Ok(refusal) => anyhow::Error::new(*refusal),
+				Err(reason) => anyhow::anyhow!("{reason}"),
+			}
+		}
+		error @ storekey::EncodeError::Io(_) => anyhow::anyhow!("{error}"),
+	}
+}
+
+/// `error`, raised encoding field `name` of `route`, located at that field. A
+/// value's own refusal of its key encoding ([`encode_error`]) is reported as
+/// it is: it describes the caller's value, not the key layout.
+fn in_field(error: anyhow::Error, name: &str, route: &KeyRoute) -> anyhow::Error {
+	if error.is::<surrealdb_kvs::key::Error>() {
+		error
+	} else {
+		error.context(format!("field `{name}` of key `{}`", route.name))
+	}
 }
 
 fn escaped(bytes: &[u8], out: &mut Vec<u8>) {

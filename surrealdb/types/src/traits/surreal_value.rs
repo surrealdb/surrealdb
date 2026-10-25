@@ -1633,10 +1633,13 @@ impl SurrealValue for serde_json::Value {
 			serde_json::Value::Number(n) => {
 				if let Some(i) = n.as_i64() {
 					Value::Number(Number::Int(i))
+				} else if let Some(u) = n.as_u64() {
+					Value::Number(Number::Decimal(rust_decimal::Decimal::from(u)))
 				} else if let Some(f) = n.as_f64() {
 					Value::Number(Number::Float(f))
 				} else {
-					// If we can't extract as i64 or f64, try parsing as decimal
+					// If we can't extract as i64, u64, or f64, preserve the representation as a
+					// string
 					Value::String(n.to_string())
 				}
 			}
@@ -2431,5 +2434,20 @@ mod test {
 		let value = Value::Number(Number::Int(42));
 		let result = Cow::<'_, str>::from_value(value);
 		assert!(result.is_err());
+	}
+
+	#[test]
+	fn u64_and_json_u64_above_i64_max_preserve_exact_precision() {
+		let high: u64 = (i64::MAX as u64) + 42;
+		let direct = high.into_value();
+		assert_eq!(direct, Value::Number(Number::Decimal(rust_decimal::Decimal::from(high))));
+		let recovered = u64::from_value(direct).expect("roundtrip u64 > i64::MAX");
+		assert_eq!(recovered, high);
+
+		let json_num = serde_json::Value::Number(serde_json::Number::from(high));
+		let from_json = json_num.into_value();
+		assert_eq!(from_json, Value::Number(Number::Decimal(rust_decimal::Decimal::from(high))));
+		let recovered_from_json = u64::from_value(from_json).expect("u64 from json value");
+		assert_eq!(recovered_from_json, high);
 	}
 }

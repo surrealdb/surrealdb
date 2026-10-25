@@ -372,31 +372,10 @@ impl Expr {
 			surrealdb_types::Value::RecordId(RecordId {
 				table,
 				key,
-			}) => {
-				let key_lit = match key {
-					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s.into()),
-					surrealdb_types::RecordIdKey::Uuid(u) => {
-						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
-					}
-					surrealdb_types::RecordIdKey::Array(a) => {
-						RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
-					}
-					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
-						o.into_iter()
-							.map(|(k, v)| ObjectEntry {
-								key: k.into(),
-								value: Expr::from_public_value(v),
-							})
-							.collect(),
-					),
-					surrealdb_types::RecordIdKey::Range(_) => return Expr::Literal(Literal::None), /* For unsupported key types */
-				};
-				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: table.into_table_name(),
-					key: key_lit,
-				}))
-			}
+			}) => Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: table.into_table_name(),
+				key: Self::public_record_id_key(key),
+			})),
 			surrealdb_types::Value::Geometry(g) => Expr::Literal(Literal::Geometry(g.into())),
 			surrealdb_types::Value::File(f) => {
 				Expr::Literal(Literal::File(crate::val::File::new(f.bucket, f.key)))
@@ -404,6 +383,33 @@ impl Expr {
 			surrealdb_types::Value::Range(r) => Expr::from(*r),
 			surrealdb_types::Value::Regex(r) => {
 				Expr::Literal(Literal::Regex(crate::val::Regex(r.into_inner())))
+			}
+		}
+	}
+
+	fn public_record_id_key(key: surrealdb_types::RecordIdKey) -> RecordIdKeyLit {
+		match key {
+			surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
+			surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s.into()),
+			surrealdb_types::RecordIdKey::Uuid(u) => {
+				RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
+			}
+			surrealdb_types::RecordIdKey::Array(a) => {
+				RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
+			}
+			surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
+				o.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k.into(),
+						value: Expr::from_public_value(v),
+					})
+					.collect(),
+			),
+			surrealdb_types::RecordIdKey::Range(range) => {
+				RecordIdKeyLit::Range(Box::new(super::RecordIdKeyRangeLit {
+					start: range.start.map(Self::public_record_id_key),
+					end: range.end.map(Self::public_record_id_key),
+				}))
 			}
 		}
 	}
@@ -446,11 +452,15 @@ impl From<surrealdb_types::Range> for Expr {
 				op: BinaryOperator::RangeSkipInclusive,
 				right: Box::new(Expr::from_public_value(end)),
 			},
-			// Invalid ranges with unbounded start but bounded in a way we can't represent
-			// start>.. (excluded start with no end) - not valid in SurrealQL
-			(Bound::Excluded(_), Bound::Unbounded) | (Bound::Included(_), Bound::Unbounded) => {
-				Expr::Literal(Literal::None)
-			}
+			// Postfix ranges: start.. or start>..
+			(Bound::Included(start), Bound::Unbounded) => Expr::Postfix {
+				expr: Box::new(Expr::from_public_value(start)),
+				op: PostfixOperator::Range,
+			},
+			(Bound::Excluded(start), Bound::Unbounded) => Expr::Postfix {
+				expr: Box::new(Expr::from_public_value(start)),
+				op: PostfixOperator::RangeSkip,
+			},
 		}
 	}
 }
@@ -974,7 +984,9 @@ impl ToSql for Expr {
 							BindingPower::Range
 								| BindingPower::Relation | BindingPower::Equality
 								| BindingPower::Power
-						) {
+						) || matches!(op, BinaryOperator::Matches(_))
+					&& left_bp == BindingPower::Relation
+				{
 					write_sql!(f, fmt, "({left})");
 				} else {
 					write_sql!(f, fmt, "{left}");
@@ -1000,18 +1012,21 @@ impl ToSql for Expr {
 				// since default left-associative nesting never produces one.
 				// Dropping the parentheses would reparse it left-associatively
 				// instead, changing the value for any non-associative pairing
-				// within the group (`-` vs `+`, `/` vs `*`). `Power` is
-				// right-associative, so its default nesting already matches
-				// and needs no parentheses here.
+				// within the group (`-` vs `+`, `/` vs `*`, `??` vs `?:`).
+				// `Power` is right-associative, so its default nesting already
+				// matches and needs no parentheses here.
 				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
 						&& matches!(
 							right_bp,
-							BindingPower::Range
-								| BindingPower::Relation | BindingPower::Equality
-								| BindingPower::AddSub | BindingPower::MulDiv
-						) {
+							BindingPower::Nullish
+								| BindingPower::Range | BindingPower::Relation
+								| BindingPower::Equality | BindingPower::AddSub
+								| BindingPower::MulDiv
+						) || matches!(op, BinaryOperator::Matches(_))
+					&& right_bp == BindingPower::Relation
+				{
 					write_sql!(f, fmt, "({right})");
 				} else {
 					write_sql!(f, fmt, "{right}");

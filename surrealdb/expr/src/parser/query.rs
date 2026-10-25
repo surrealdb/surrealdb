@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::expr::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
-use crate::expr::{BinaryOperator, Expr, Literal, Param};
+use crate::expr::{BinaryOperator, Expr, Literal, Param, RecordIdKeyLit};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Query {
@@ -312,6 +312,7 @@ fn is_value_literal(lit: &Literal) -> bool {
 	match lit {
 		Literal::Array(items) | Literal::Set(items) => items.iter().all(is_value_expr),
 		Literal::Object(entries) => entries.iter().all(|e| is_value_expr(&e.value)),
+		Literal::RecordId(rec) => is_value_record_id_key(&rec.key),
 		Literal::None
 		| Literal::Null
 		| Literal::UnboundedRange
@@ -330,12 +331,65 @@ fn is_value_literal(lit: &Literal) -> bool {
 		| Literal::F32(_)
 		| Literal::Duration(_)
 		| Literal::String(_)
-		| Literal::RecordId(_)
 		| Literal::Datetime(_)
 		| Literal::Uuid(_)
 		| Literal::Regex(_)
 		| Literal::Geometry(_)
 		| Literal::File(_)
 		| Literal::Bytes(_) => true,
+	}
+}
+
+fn is_value_record_id_key(key: &RecordIdKeyLit) -> bool {
+	use std::ops::Bound;
+	match key {
+		RecordIdKeyLit::Number(_) | RecordIdKeyLit::String(_) | RecordIdKeyLit::Uuid(_) => true,
+		RecordIdKeyLit::Generate(_) => false,
+		RecordIdKeyLit::Array(items) => items.iter().all(is_value_expr),
+		RecordIdKeyLit::Object(entries) => entries.iter().all(|e| is_value_expr(&e.value)),
+		RecordIdKeyLit::Range(range) => {
+			let bound_ok = |b: &Bound<RecordIdKeyLit>| match b {
+				Bound::Included(k) | Bound::Excluded(k) => is_value_record_id_key(k),
+				Bound::Unbounded => true,
+			};
+			bound_ok(&range.start) && bound_ok(&range.end)
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::syn;
+
+	#[test]
+	fn is_value_expression_rejects_executable_record_id_keys() {
+		for forbidden in [
+			"t:[(CREATE pwned:1)]",
+			"t:{a: (DELETE x)}",
+			"t:[fn::evil()]",
+			"{ id: t:[(UPDATE secret SET leaked = true)] }",
+			"t:rand()",
+			"t:[1]..[(CREATE pwned:2)]",
+		] {
+			let parsed = syn::parse(forbidden).expect("query should parse");
+			assert!(
+				!parsed.is_value_expression(),
+				"expected {forbidden:?} to be rejected by is_value_expression"
+			);
+		}
+
+		for allowed in [
+			"t:1",
+			"t:abc",
+			"t:[1, 'a', $param]",
+			"t:{a: 1, b: 'two'}",
+			"{ id: t:[1, 2], nested: [t:{k: 'v'}] }",
+		] {
+			let parsed = syn::parse(allowed).expect("query should parse");
+			assert!(
+				parsed.is_value_expression(),
+				"expected {allowed:?} to be accepted by is_value_expression"
+			);
+		}
 	}
 }

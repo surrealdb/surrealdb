@@ -294,7 +294,6 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
 pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 	let ulid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_family = "wasm")]
 			ensure!(
 				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 				Error::InvalidFunctionArguments {
@@ -316,7 +315,6 @@ pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 	let uuid = match timestamp {
 		Some(timestamp) => {
-			#[cfg(target_family = "wasm")]
 			ensure!(
 				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 				Error::InvalidFunctionArguments {
@@ -360,6 +358,15 @@ mod tests {
 		let res = id((Optional(Some(0)), Optional(Some(0)))).unwrap();
 		assert_eq!(res, Value::from(""));
 	}
+
+	#[test]
+	fn test_rand_uuid_and_ulid_reject_pre_epoch_datetime() {
+		use chrono::{TimeZone, Utc};
+		let pre_epoch = Datetime(Utc.with_ymd_and_hms(1969, 12, 31, 23, 59, 59).unwrap());
+		assert!(ulid((Optional(Some(pre_epoch)),)).is_err());
+		assert!(uuid((Optional(Some(pre_epoch)),)).is_err());
+		assert!(uuid::v7((Optional(Some(pre_epoch)),)).is_err());
+	}
 }
 
 pub mod uuid {
@@ -376,7 +383,6 @@ pub mod uuid {
 	pub fn v7((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 		let uuid = match timestamp {
 			Some(timestamp) => {
-				#[cfg(target_family = "wasm")]
 				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 					surrealdb_expr::expr::Error::InvalidFunctionArguments {

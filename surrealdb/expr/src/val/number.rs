@@ -1512,15 +1512,34 @@ impl Number {
 		from + factor * (to - from)
 	}
 
-	fn lerp_decimal(from: Decimal, to: Decimal, factor: Decimal) -> Decimal {
-		from + factor * (to - from)
+	fn lerp_decimal(from: Decimal, to: Decimal, factor: Decimal) -> Option<Decimal> {
+		to.checked_sub(from)?.checked_mul(factor)?.checked_add(from)
 	}
 
 	pub fn lerp(self, from: Self, to: Self) -> Self {
+		let exact = |n: Self| match n {
+			Number::Float(f) => Decimal::from_f64(f),
+			Number::F16(v) => Decimal::from_f64(v.to_f64()),
+			Number::F32(v) => Decimal::from_f64(v as f64),
+			other @ (Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)) => other.as_decimal_lossless(),
+		};
 		match (self, from, to) {
-			(Number::Decimal(val), from, to) => {
-				Self::lerp_decimal(from.to_decimal(), to.to_decimal(), val).into()
-			}
+			(Number::Decimal(val), from, to) => exact(from)
+				.zip(exact(to))
+				.and_then(|(from, to)| Self::lerp_decimal(from, to, val))
+				.map(Self::Decimal)
+				.unwrap_or_else(|| {
+					Self::lerp_f64(from.to_float(), to.to_float(), Number::Decimal(val).to_float())
+						.into()
+				}),
 			(val, from, to) => {
 				let res = Self::lerp_f64(from.to_float(), to.to_float(), val.to_float());
 				match val.number_kind().join(from.number_kind()).join(to.number_kind()) {
@@ -1545,21 +1564,50 @@ impl Number {
 		(t - (t / m).floor() * m).clamp(0.0, m)
 	}
 
-	fn repeat_decimal(t: Decimal, m: Decimal) -> Decimal {
-		(t - (t / m).floor() * m).clamp(Decimal::ZERO, m)
+	fn repeat_decimal(t: Decimal, m: Decimal) -> Option<Decimal> {
+		let q = t.checked_div(m)?.floor();
+		let prod = q.checked_mul(m)?;
+		Some(t.checked_sub(prod)?.clamp(Decimal::ZERO, m))
 	}
 
 	pub fn lerp_angle(self, from: Self, to: Self) -> Self {
+		let exact = |n: Self| match n {
+			Number::Float(f) => Decimal::from_f64(f),
+			Number::F16(v) => Decimal::from_f64(v.to_f64()),
+			Number::F32(v) => Decimal::from_f64(v as f64),
+			other @ (Number::Int(_)
+			| Number::Decimal(_)
+			| Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)) => other.as_decimal_lossless(),
+		};
 		match (self, from, to) {
-			(Number::Decimal(val), from, to) => {
-				let from = from.to_decimal();
-				let to = to.to_decimal();
-				let mut dt = Self::repeat_decimal(to - from, Decimal::from(360));
-				if dt > Decimal::from(180) {
-					dt = Decimal::from(360) - dt;
-				}
-				Self::lerp_decimal(from, from + dt, val).into()
-			}
+			(Number::Decimal(val), from, to) => exact(from)
+				.zip(exact(to))
+				.and_then(|(from, to)| {
+					let diff = to.checked_sub(from)?;
+					let mut dt = Self::repeat_decimal(diff, Decimal::from(360))?;
+					if dt > Decimal::from(180) {
+						dt = Decimal::from(360).checked_sub(dt)?;
+					}
+					let target = from.checked_add(dt)?;
+					Self::lerp_decimal(from, target, val)
+				})
+				.map(Self::Decimal)
+				.unwrap_or_else(|| {
+					let val = Number::Decimal(val).to_float();
+					let from = from.to_float();
+					let to = to.to_float();
+					let mut dt = Self::repeat_f64(to - from, 360.0);
+					if dt > 180.0 {
+						dt = 360.0 - dt;
+					}
+					Self::lerp_f64(from, from + dt, val).into()
+				}),
 			(val, from, to) => {
 				let v_f = val.to_float();
 				let from_f = from.to_float();
@@ -1903,16 +1951,25 @@ impl TryPow for Number {
 			}
 			NumberKind::Decimal => match (self.wide(), power.wide()) {
 				(Wide::Decimal(v), Wide::Int(p)) => {
+					if v.is_zero() && p < 0 {
+						bail!(Error::TryPow(self.op_err_string(), power.op_err_string()));
+					}
 					Ok(Self::Decimal(v.checked_powi(p).ok_or_else(|| {
 						Error::TryPow(self.op_err_string(), power.op_err_string())
 					})?))
 				}
 				(Wide::Decimal(v), Wide::Float(p)) => {
+					if v.is_zero() && p < 0.0 {
+						bail!(Error::TryPow(self.op_err_string(), power.op_err_string()));
+					}
 					Ok(Self::Decimal(v.checked_powf(p).ok_or_else(|| {
 						Error::TryPow(self.op_err_string(), power.op_err_string())
 					})?))
 				}
 				(Wide::Decimal(v), Wide::Decimal(p)) => {
+					if v.is_zero() && p.is_sign_negative() && !p.is_zero() {
+						bail!(Error::TryPow(self.op_err_string(), power.op_err_string()));
+					}
 					Ok(Self::Decimal(v.checked_powd(p).ok_or_else(|| {
 						Error::TryPow(self.op_err_string(), power.op_err_string())
 					})?))
@@ -1924,6 +1981,9 @@ impl TryPow for Number {
 						(self.to_decimal_for_op(), power.to_decimal_for_op(), power.as_i128())
 						&& self.as_i128().is_some()
 					{
+						if v.is_zero() && p < 0 {
+							bail!(Error::TryPow(self.op_err_string(), power.op_err_string()));
+						}
 						let res = match i64::try_from(p) {
 							Ok(pi) => v.checked_powi(pi),
 							Err(_) => v.checked_powd(p_dec),
@@ -2264,6 +2324,21 @@ impl<'a> Sum<&'a Self> for Number {
 	}
 }
 
+fn mul_product(a: Number, b: Number) -> Number {
+	match (a, b) {
+		(Number::Int(v), Number::Int(w)) => match v.checked_mul(w) {
+			Some(p) => Number::Int(p),
+			None => decimal_or_float(
+				Number::Decimal(Decimal::from(v)),
+				Number::Decimal(Decimal::from(w)),
+				Decimal::checked_mul,
+				|x, y| x * y,
+			),
+		},
+		(a, b) => a * b,
+	}
+}
+
 impl Product<Self> for Number {
 	fn product<I>(mut iter: I) -> Number
 	where
@@ -2272,7 +2347,7 @@ impl Product<Self> for Number {
 		let Some(first) = iter.next() else {
 			return Number::Int(1);
 		};
-		iter.fold(first, |a, b| a * b)
+		iter.fold(first, mul_product)
 	}
 }
 
@@ -2284,7 +2359,7 @@ impl<'a> Product<&'a Self> for Number {
 		let Some(&first) = iter.next() else {
 			return Number::Int(1);
 		};
-		iter.fold(first, |a, b| &a * b)
+		iter.fold(first, |a, b| mul_product(a, *b))
 	}
 }
 
@@ -3727,5 +3802,41 @@ mod tests {
 		};
 		assert!(nan.is_nan());
 		assert_eq!(dec_one + Number::F32(f32::MAX), Number::Float(1.0 + f32::MAX as f64));
+	}
+
+	#[test]
+	fn lerp_and_lerp_angle_decimal_overflow_do_not_panic() {
+		let max = Number::Decimal(Decimal::MAX);
+		let min = Number::Decimal(Decimal::MIN);
+		let half = Number::Decimal("0.5".parse().unwrap());
+		let two = Number::Decimal(Decimal::from(2));
+
+		let res = half.lerp(min, max);
+		assert!(matches!(res, Number::Float(f) if f.is_finite()));
+
+		let res2 = two.lerp(Number::Decimal(Decimal::ZERO), max);
+		assert!(matches!(res2, Number::Float(f) if f.is_finite()));
+
+		let res_angle = half.lerp_angle(min, max);
+		assert!(matches!(res_angle, Number::Float(f) if f.is_finite()));
+	}
+
+	#[test]
+	fn float_decimal_non_finite_pow_zero_negative_and_product_overflow() {
+		let one_dec = Number::Decimal(Decimal::ONE);
+		assert!(matches!(Number::Float(f64::NAN) + one_dec, Number::Float(f) if f.is_nan()));
+		assert!(Number::Float(f64::NAN).try_add(one_dec).is_err());
+		assert_eq!(Number::Float(f64::INFINITY) + one_dec, Number::Float(f64::INFINITY));
+		assert!(Number::Float(f64::INFINITY).try_add(one_dec).is_err());
+		assert_eq!(Number::Float(1e30) + one_dec, Number::Float(1e30));
+		assert!(Number::Float(1e30).try_add(one_dec).is_err());
+
+		let zero_dec = Number::Decimal(Decimal::ZERO);
+		assert!(zero_dec.try_pow(Number::Decimal(-Decimal::ONE)).is_err());
+		assert!(zero_dec.try_pow(Number::Int(-1)).is_err());
+		assert!(zero_dec.try_pow(Number::Float(-1.0)).is_err());
+
+		let prod: Number = [Number::Int(i64::MAX), Number::Int(2)].into_iter().product();
+		assert_eq!(prod, Number::Decimal(Decimal::from(i64::MAX) * Decimal::from(2)));
 	}
 }

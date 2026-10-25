@@ -63,7 +63,9 @@ impl File {
 }
 
 impl From<surrealdb_types::File> for File {
+	/// The file `v` names, its key starting with `/` whether or not `v`'s does.
 	fn from(v: surrealdb_types::File) -> Self {
+		let v = surrealdb_types::File::new(v.bucket, v.key);
 		Self {
 			bucket: v.bucket,
 			key: v.key,

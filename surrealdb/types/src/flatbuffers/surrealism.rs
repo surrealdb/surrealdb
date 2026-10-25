@@ -36,7 +36,8 @@ pub fn encode_argument_list(args: &[(&str, Kind)]) -> anyhow::Result<Vec<u8>> {
 
 /// Decode a FlatBuffers `ArgumentList` into a `Vec<(String, Kind)>`.
 pub fn decode_argument_list(bytes: &[u8]) -> anyhow::Result<Vec<(String, Kind)>> {
-	let root = flatbuffers::root::<proto_fb::ArgumentList>(bytes)
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::ArgumentList>(&opts, bytes)
 		.context("Failed to decode ArgumentList")?;
 	let arguments = root.arguments().context("Missing arguments in ArgumentList")?;
 	arguments
@@ -68,8 +69,9 @@ pub fn encode_value_list(values: &[Value]) -> anyhow::Result<Vec<u8>> {
 
 /// Decode a FlatBuffers `ValueList` into a `Vec<Value>`.
 pub fn decode_value_list(bytes: &[u8]) -> anyhow::Result<Vec<Value>> {
-	let root =
-		flatbuffers::root::<proto_fb::ValueList>(bytes).context("Failed to decode ValueList")?;
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::ValueList>(&opts, bytes)
+		.context("Failed to decode ValueList")?;
 	let values = root.values().context("Missing values in ValueList")?;
 	values.iter().map(Value::from_fb).collect()
 }
@@ -92,8 +94,9 @@ pub fn encode_kind_list(kinds: &[Kind]) -> anyhow::Result<Vec<u8>> {
 
 /// Decode a FlatBuffers `KindList` into a `Vec<Kind>`.
 pub fn decode_kind_list(bytes: &[u8]) -> anyhow::Result<Vec<Kind>> {
-	let root =
-		flatbuffers::root::<proto_fb::KindList>(bytes).context("Failed to decode KindList")?;
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::KindList>(&opts, bytes)
+		.context("Failed to decode KindList")?;
 	let kinds = root.kinds().context("Missing kinds in KindList")?;
 	kinds.iter().map(Kind::from_fb).collect()
 }
@@ -128,7 +131,8 @@ pub fn encode_string_key_values(entries: &[(String, Value)]) -> anyhow::Result<V
 
 /// Decode a FlatBuffers `StringKeyValueList` into a `Vec<(String, Value)>`.
 pub fn decode_string_key_values(bytes: &[u8]) -> anyhow::Result<Vec<(String, Value)>> {
-	let root = flatbuffers::root::<proto_fb::StringKeyValueList>(bytes)
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::StringKeyValueList>(&opts, bytes)
 		.context("Failed to decode StringKeyValueList")?;
 	let entries = root.entries().context("Missing entries in StringKeyValueList")?;
 	entries
@@ -182,7 +186,8 @@ pub fn encode_optional_values(values: &[Option<Value>]) -> anyhow::Result<Vec<u8
 
 /// Decode a FlatBuffers `OptionalValueList` into a `Vec<Option<Value>>`.
 pub fn decode_optional_values(bytes: &[u8]) -> anyhow::Result<Vec<Option<Value>>> {
-	let root = flatbuffers::root::<proto_fb::OptionalValueList>(bytes)
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::OptionalValueList>(&opts, bytes)
 		.context("Failed to decode OptionalValueList")?;
 	let values = root.values().context("Missing values in OptionalValueList")?;
 	values
@@ -247,7 +252,8 @@ pub fn encode_string_range(start: &Bound<String>, end: &Bound<String>) -> anyhow
 
 /// Decode a FlatBuffers `StringRange` into a pair of bounds.
 pub fn decode_string_range(bytes: &[u8]) -> anyhow::Result<(Bound<String>, Bound<String>)> {
-	let root = flatbuffers::root::<proto_fb::StringRange>(bytes)
+	let opts = super::verifier_options(bytes.len());
+	let root = flatbuffers::root_with_opts::<proto_fb::StringRange>(&opts, bytes)
 		.context("Failed to decode StringRange")?;
 	let start = tag_to_bound(root.start_tag(), root.start_value())?;
 	let end = tag_to_bound(root.end_tag(), root.end_value())?;

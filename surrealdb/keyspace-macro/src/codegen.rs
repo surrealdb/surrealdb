@@ -9,7 +9,8 @@
 //!   build.
 //! - `KVValue` — the value trait, for the `KVKey::Value` binding.
 //! - `Key`, `KeyRange` — the byte and byte-range types.
-//! - `KeyError` — the key error enum, with `Unencodable` and `Corrupted` variants.
+//! - `KeyError` — the key error enum, with `Unencodable` and `Corrupted` variants and
+//!   `from_refusal`, which keeps a value's own refusal to encode.
 //!
 //! Everything else is referenced through an absolute path (`::storekey`,
 //! `::anyhow`, `::std`), so the expansion does not depend on any other import.
@@ -312,7 +313,7 @@ fn bound_traits(model: &Model, def: &TypeDef) -> TokenStream {
 		impl #lifetime KVSubspace for #name #lifetime {
 			fn encode_bound(&self) -> ::anyhow::Result<Key<'static>> {
 				let bytes = ::storekey::encode_vec_format::<#fmt, _>(self)
-					.map_err(|_| KeyError::Unencodable)?;
+					.map_err(KeyError::from_refusal)?;
 				Ok(Key::from(bytes))
 			}
 		}
@@ -615,7 +616,7 @@ fn key_impls(def: &TypeDef) -> TokenStream {
 
 			fn encode_buffer(&self, buffer: &mut ::std::vec::Vec<u8>) -> ::anyhow::Result<()> {
 				::storekey::encode_format::<#fmt, _, _>(buffer, self)
-					.map_err(|_| KeyError::Unencodable)?;
+					.map_err(|e| match e { ::storekey::EncodeError::Custom(reason) => KeyError::from_refusal(reason), ::storekey::EncodeError::Io(_) => KeyError::Unencodable })?;
 				Ok(())
 			}
 
@@ -730,7 +731,7 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 		// same one-`u8`-at-a-time form the encoder uses, so a bound built here lands
 		// on the same boundary a stored key does.
 		let lead_writes = lead.iter().map(
-			|b| quote!(::storekey::Encode::<#fmt>::encode(&#b, &mut w).map_err(|_| KeyError::Unencodable)?;),
+			|b| quote!(::storekey::Encode::<#fmt>::encode(&#b, &mut w).map_err(|e| match e { ::storekey::EncodeError::Custom(reason) => KeyError::from_refusal(reason), ::storekey::EncodeError::Io(_) => KeyError::Unencodable })?;),
 		);
 		quote! {
 			/// This bound's bytes, the tag bytes that follow them in the layout, and
@@ -741,10 +742,10 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 				{
 					let mut w = ::storekey::Writer::new(&mut buffer);
 					::storekey::Encode::<#fmt>::encode(self, &mut w)
-						.map_err(|_| KeyError::Unencodable)?;
+						.map_err(|e| match e { ::storekey::EncodeError::Custom(reason) => KeyError::from_refusal(reason), ::storekey::EncodeError::Io(_) => KeyError::Unencodable })?;
 					#(#lead_writes)*
 					::storekey::Encode::<#fmt>::encode(value, &mut w)
-						.map_err(|_| KeyError::Unencodable)?;
+						.map_err(|e| match e { ::storekey::EncodeError::Custom(reason) => KeyError::from_refusal(reason), ::storekey::EncodeError::Io(_) => KeyError::Unencodable })?;
 				}
 				Ok(Key::from(buffer))
 			}

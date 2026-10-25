@@ -319,13 +319,13 @@ impl BindingPower {
 			| BinaryOperator::ExactEqual
 			| BinaryOperator::NotEqual
 			| BinaryOperator::AllEqual
-			| BinaryOperator::AnyEqual => BindingPower::Equality,
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::Matches(_) => BindingPower::Equality,
 
 			BinaryOperator::LessThan
 			| BinaryOperator::LessThanEqual
 			| BinaryOperator::MoreThan
 			| BinaryOperator::MoreThanEqual
-			| BinaryOperator::Matches(_)
 			| BinaryOperator::Contain
 			| BinaryOperator::NotContain
 			| BinaryOperator::ContainAll

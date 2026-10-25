@@ -2298,6 +2298,7 @@ cd07c7894de467f5 language-tests/tests/language/script/catalog/own_write_outlives
 06861ec7e026ba76 language-tests/tests/language/script/catalog/writes_see_redefinition.surql
 5a41ebebd07a48ac language-tests/tests/language/script/computed_script.surql
 0167c07a7f7ed6f6 language-tests/tests/language/script/create_set_script.surql
+f1951dc4f243d46e language-tests/tests/language/script/division_and_regex_after_braces.surql
 99593c106ec6c131 language-tests/tests/language/script/geometry_collection.surql
 d8ab3518bc5eeaa4 language-tests/tests/language/script/geometry_into.surql
 7c65f97f5faff8d9 language-tests/tests/language/script/geometry_line.surql
@@ -4352,6 +4353,7 @@ bc125e7b1076d337 language-tests/tests/reproductions/an_async_event_is_queued_rat
 2c52a955753b74b8 language-tests/tests/reproductions/an_effectful_builtin_in_a_select_runs_in_row_order.surql
 143041dabf2ae5fa language-tests/tests/reproductions/an_element_field_declared_scalar_counts_its_records.surql
 65ee9e84e49a0282 language-tests/tests/reproductions/an_element_filter_in_a_write_where_reads_the_record_through_an_argument.surql
+2f568c8cb238f674 language-tests/tests/reproductions/an_empty_field_name_is_refused_only_where_it_would_be_a_key.surql
 ee5f306c8300ca09 language-tests/tests/reproductions/an_error_names_what_failed_as_main_names_it.surql
 b7fd33a5406b6240 language-tests/tests/reproductions/an_evaluated_alter_timeout_is_cast_when_it_runs.surql
 ba6136745bf6aa41 language-tests/tests/reproductions/an_event_failing_in_an_upsert_of_a_computed_table_raises_its_error.surql
@@ -5303,7 +5305,7 @@ d79ec28589018de7 surrealdb/parser-next/tests/corpus/primitives/float.surql
 13534359caed7e7d surrealdb/parser-next/tests/corpus/primitives/js/basic.surql
 7236f2b5ab390cbd surrealdb/parser-next/tests/corpus/primitives/js/comments.surql
 c26cb679759407bf surrealdb/parser-next/tests/corpus/primitives/js/format_string.surql
-a6c9dc15940395cb surrealdb/parser-next/tests/corpus/primitives/js/regex.surql
+f206d0f649c13a0e surrealdb/parser-next/tests/corpus/primitives/js/regex.surql
 1220b5458d6a948a surrealdb/parser-next/tests/corpus/primitives/js/with_delimiters.surql
 6cac80aee60b31d6 surrealdb/parser-next/tests/corpus/primitives/mock.surql
 40eff9933a6d0b6f surrealdb/parser-next/tests/corpus/primitives/none.surql
