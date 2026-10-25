@@ -106,11 +106,43 @@ enum StatementKind {
 	AlterTable,
 	CreateIndex,
 	CreateView,
+	CreateSchema,
 	Truncate,
 	Other,
 }
 
 impl StatementKind {
+	/// The kind of a parsed PostgreSQL command and whether it answers with
+	/// rows (a `RETURNING` clause), or `None` for a statement that is not a
+	/// command: a query, or a statement the connection answers on its own terms.
+	fn of_pg_command(stmt: &PgStatement) -> Option<(Self, bool)> {
+		match stmt {
+			PgStatement::Insert(insert) => Some((Self::Insert, insert.returning.is_some())),
+			PgStatement::Update(update) => Some((Self::Update, update.returning.is_some())),
+			PgStatement::Delete(delete) => Some((Self::Delete, delete.returning.is_some())),
+			PgStatement::Truncate(_) => Some((Self::Truncate, false)),
+			PgStatement::CreateTable(_) => Some((Self::CreateTable, false)),
+			PgStatement::CreateIndex(_) => Some((Self::CreateIndex, false)),
+			PgStatement::CreateView(_) => Some((Self::CreateView, false)),
+			PgStatement::CreateSchema(_) => Some((Self::CreateSchema, false)),
+			PgStatement::AlterTable(_) => Some((Self::AlterTable, false)),
+			PgStatement::Drop(_) => Some((Self::DropTable, false)),
+			PgStatement::Select(_)
+			| PgStatement::Copy(_)
+			| PgStatement::Transaction(_)
+			| PgStatement::Set(_)
+			| PgStatement::Show(_)
+			| PgStatement::Reset(_)
+			| PgStatement::Explain(_)
+			| PgStatement::Prepare(_)
+			| PgStatement::Execute(_)
+			| PgStatement::Deallocate(_)
+			| PgStatement::CreatePropertyGraph(_)
+			| PgStatement::DropPropertyGraph(_)
+			| PgStatement::Empty => None,
+		}
+	}
+
 	fn command_tag(self, count: usize) -> String {
 		match self {
 			Self::Select => format!("SELECT {count}"),
@@ -122,6 +154,7 @@ impl StatementKind {
 			Self::AlterTable => "ALTER TABLE".to_string(),
 			Self::CreateIndex => "CREATE INDEX".to_string(),
 			Self::CreateView => "CREATE VIEW".to_string(),
+			Self::CreateSchema => "CREATE SCHEMA".to_string(),
 			Self::Truncate => "TRUNCATE TABLE".to_string(),
 			Self::Other => format!("SELECT {count}"),
 		}
@@ -2210,11 +2243,13 @@ impl Connection {
 				}
 			}
 			Dialect::PgSql => {
+				let mut has_statement = false;
 				for stmt in split_statements(remaining) {
 					let trimmed_stmt = stmt.trim();
-					if trimmed_stmt.is_empty() {
+					if is_blank_pg_sql(trimmed_stmt) {
 						continue;
 					}
+					has_statement = true;
 					if let Some(control) = self.classify_control(trimmed_stmt) {
 						if let Err(err) = self.execute_control(control, &mut out).await {
 							msg::write_error_response(&mut out, &err);
@@ -2235,6 +2270,10 @@ impl Connection {
 					if res.is_err() || self.txn_failed {
 						break;
 					}
+				}
+				// A string of only `;` and comments holds no statement.
+				if !has_statement && out.is_empty() {
+					msg::write_empty_query_response(&mut out);
 				}
 			}
 			Dialect::MySql => {
@@ -2290,6 +2329,15 @@ impl Connection {
 			if let Some(PgStatement::Copy(copy)) = stmts.first() {
 				return self.run_copy(copy, out).await;
 			}
+			// Results are matched to statements only for a lone statement: when the
+			// splitter and the parser disagree about where a statement ends, one
+			// string holds several and each is answered as a query.
+			if let [stmt] = stmts.as_slice()
+				&& let Some((kind, rows)) = StatementKind::of_pg_command(stmt)
+			{
+				write_kind = Some(kind);
+				returns_rows = rows;
+			}
 			let mut catalog = MemoryCatalog::new();
 			if let Some(db) = &self.session.db {
 				catalog.set_database(Some(db.clone()));
@@ -2334,8 +2382,6 @@ impl Connection {
 						}
 					}
 					PgStatement::Insert(insert) => {
-						write_kind = Some(StatementKind::Insert);
-						returns_rows = insert.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&insert.relation.parts,
 							Some(&catalog),
@@ -2345,8 +2391,6 @@ impl Connection {
 						}
 					}
 					PgStatement::Update(update) => {
-						write_kind = Some(StatementKind::Update);
-						returns_rows = update.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&update.relation.parts,
 							Some(&catalog),
@@ -2356,8 +2400,6 @@ impl Connection {
 						}
 					}
 					PgStatement::Delete(delete) => {
-						write_kind = Some(StatementKind::Delete);
-						returns_rows = delete.returning.is_some();
 						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
 							&delete.relation.parts,
 							Some(&catalog),
@@ -2462,35 +2504,35 @@ impl Connection {
 			.with_cancel(cancel);
 		match self.ds.run(req).await {
 			Ok(results) => {
+				// A command that returns no rows answers with one CommandComplete,
+				// however many statements it lowers to (none, for one the engine
+				// has nothing to run): the records its lowering answers with are an
+				// implementation detail, and a driver reads the affected-row count
+				// from the tag. Only INSERT, UPDATE and DELETE carry a count, and each
+				// lowers to one statement whose records are the rows written; the
+				// statements a DDL command lowers to change the schema and no tag
+				// counts them, so the counts of several statements are never added
+				// up. A statement that fails answers with its error alone.
+				if let Some(kind) = write_kind
+					&& !returns_rows
+				{
+					let mut affected = 0;
+					for result in results {
+						match result.result {
+							Ok(value) => affected = affected_rows(&value),
+							Err(err) => {
+								self.note_simple_error(&PgError::from(&err), out);
+								return Ok(());
+							}
+						}
+					}
+					msg::write_command_complete(out, &kind.command_tag(affected));
+					return Ok(());
+				}
 				for result in results {
 					match result.result {
 						Ok(value) => {
 							let value = self.present(value);
-							if let Some(kind) = write_kind
-								&& !returns_rows
-							{
-								let count = match &value {
-									Value::Array(rows) => rows.len(),
-									Value::None | Value::Null => 0,
-									Value::Bool(_)
-									| Value::Number(_)
-									| Value::String(_)
-									| Value::Bytes(_)
-									| Value::Duration(_)
-									| Value::Datetime(_)
-									| Value::Uuid(_)
-									| Value::Geometry(_)
-									| Value::Table(_)
-									| Value::RecordId(_)
-									| Value::File(_)
-									| Value::Range(_)
-									| Value::Regex(_)
-									| Value::Object(_)
-									| Value::Set(_) => 1,
-								};
-								msg::write_command_complete(out, &kind.command_tag(count));
-								continue;
-							}
 							if let Some(kind) = write_kind {
 								let shape = if let Some(desc) = &descriptor {
 									shape_result_with_descriptor(desc, value)
@@ -4210,6 +4252,30 @@ impl Connection {
 	}
 }
 
+/// The number of rows a command reports in its command tag: the records its
+/// lowering answers with.
+fn affected_rows(value: &Value) -> usize {
+	match value {
+		Value::Array(rows) => rows.len(),
+		Value::None | Value::Null => 0,
+		Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Object(_)
+		| Value::Set(_) => 1,
+	}
+}
+
 fn format_csv_cell(s: &str, delimiter: u8, quote: u8, escape: u8, null_str: &str) -> String {
 	let delim = delimiter as char;
 	let q = quote as char;
@@ -5185,6 +5251,46 @@ fn split_first_statement(sql: &str) -> (&str, &str) {
 	(sql, "")
 }
 
+/// Whether `sql` holds nothing but whitespace and PostgreSQL comments (`-- …` to
+/// the end of the line, and `/* … */`, which nests): no statement. Whitespace is
+/// what PostgreSQL's lexer skips: space, tab, newline, carriage return, form
+/// feed and vertical tab. An unterminated block comment is not blank, so the
+/// parser reports it.
+fn is_blank_pg_sql(sql: &str) -> bool {
+	let bytes = sql.as_bytes();
+	let mut i = 0;
+	while i < bytes.len() {
+		match bytes[i] {
+			b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c => i += 1,
+			b'-' if bytes.get(i + 1) == Some(&b'-') => {
+				while i < bytes.len() && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'/' if bytes.get(i + 1) == Some(&b'*') => {
+				let mut depth = 1;
+				i += 2;
+				while depth > 0 {
+					match (bytes.get(i), bytes.get(i + 1)) {
+						(Some(b'/'), Some(b'*')) => {
+							depth += 1;
+							i += 2;
+						}
+						(Some(b'*'), Some(b'/')) => {
+							depth -= 1;
+							i += 2;
+						}
+						(Some(_), _) => i += 1,
+						(None, _) => return false,
+					}
+				}
+			}
+			_ => return false,
+		}
+	}
+	true
+}
+
 /// Split a SQL string containing multiple statements separated by semicolons into individual
 /// statement slices, respecting single quotes, double quotes, dollar quotes, and SQL comments.
 fn split_statements(sql: &str) -> Vec<&str> {
@@ -5333,9 +5439,10 @@ mod tests {
 
 	use super::{
 		Dialect, TxnOp, copy_column_lookup_query, dialect_from_options, dialect_name,
-		isolation_setting, parse_database_param, parse_dialect, parse_set, pg_ident,
-		pg_string_literal, rewrite_positional_params, row_within_wire_limit, split_statements,
-		subject_names_record, surql_object_key, transaction_control, wire_row_fits,
+		is_blank_pg_sql, isolation_setting, parse_database_param, parse_dialect, parse_set,
+		pg_ident, pg_string_literal, rewrite_positional_params, row_within_wire_limit,
+		split_statements, subject_names_record, surql_object_key, transaction_control,
+		wire_row_fits,
 	};
 
 	fn rewrite(query: &str) -> String {
@@ -5506,6 +5613,19 @@ mod tests {
 			vec!["BEGIN", "INSERT INTO t VALUES (1)", "COMMIT"]
 		);
 		assert!(split_statements("; ; ; ").is_empty());
+	}
+
+	#[test]
+	fn test_is_blank_pg_sql() {
+		assert!(is_blank_pg_sql(""));
+		assert!(is_blank_pg_sql("-- a\n/* b /* nested */ c */"));
+		// Each character PostgreSQL's lexer skips separates comments.
+		for space in [' ', '\t', '\n', '\r', '\x0b', '\x0c'] {
+			assert!(is_blank_pg_sql(&format!("/* a */{space}/* b */{space}")), "{space:?}");
+		}
+		assert!(!is_blank_pg_sql("/* a */ SELECT 1"));
+		assert!(!is_blank_pg_sql("/* a */\x0b;"));
+		assert!(!is_blank_pg_sql("/* unterminated"));
 	}
 
 	#[test]
