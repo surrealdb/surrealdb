@@ -10,12 +10,6 @@ reason = "PostgreSQL quote_ident applied to column values at run time, including
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "[{ id: 1, n: 'plain' }, { id: 2, n: 'CompatUser' }, { id: 3, n: 'select' }, { id: 4, n: 'has\"quote' }, { id: 5, n: NULL }]"
 
 [[test.results]]

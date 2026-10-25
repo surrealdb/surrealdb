@@ -749,6 +749,14 @@ impl Connection {
 		Ok(true)
 	}
 
+	/// Whether `sql` commits the open interactive transaction before it runs, and then runs
+	/// outside any transaction. Only MySQL does this, and only for its DDL statements.
+	/// PostgreSQL's DDL is transactional, and a SurrealQL statement that starts with `CREATE`
+	/// or `DROP` is a statement of the open transaction like any other.
+	fn commits_implicitly(&self, sql: &str) -> bool {
+		self.dialect == Dialect::MySql && is_ddl_statement(sql)
+	}
+
 	async fn handle_query(&mut self, sql: &str, seq: u8) -> Result<()> {
 		let trimmed = sql.trim().trim_end_matches(';').trim();
 
@@ -1252,13 +1260,16 @@ impl Connection {
 			Dialect::SurrealQl | Dialect::Gql => {}
 		}
 
-		// In MySQL, DDL statements cause an implicit commit of any active interactive transaction
-		if is_ddl_statement(trimmed) && !self.commit_open_transaction(seq).await? {
+		// A statement that commits implicitly ends any active interactive transaction first
+		let implicit_commit = self.commits_implicitly(trimmed);
+		if implicit_commit && !self.commit_open_transaction(seq).await? {
 			return Ok(());
 		}
 
-		// When autocommit is disabled and no transaction is active, start one
-		if !self.autocommit && self.transaction.is_none() {
+		// When autocommit is disabled and no transaction is active, start one. A statement that
+		// commits implicitly does not run in it: it commits on its own, and one whose definitions
+		// fail after some were written would leave a transaction that cannot commit.
+		if !self.autocommit && self.transaction.is_none() && !implicit_commit {
 			let tx = self
 				.ds
 				.transaction(TransactionType::Write)
@@ -1935,11 +1946,12 @@ impl Connection {
 			Dialect::SurrealQl | Dialect::Gql => {}
 		}
 
-		if is_ddl_statement(trimmed) && !self.commit_open_transaction(seq).await? {
+		let implicit_commit = self.commits_implicitly(trimmed);
+		if implicit_commit && !self.commit_open_transaction(seq).await? {
 			return Ok(());
 		}
 
-		if !self.autocommit && self.transaction.is_none() {
+		if !self.autocommit && self.transaction.is_none() && !implicit_commit {
 			let tx = self
 				.ds
 				.transaction(TransactionType::Write)

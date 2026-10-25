@@ -1,0 +1,24 @@
+/**
+[env]
+namespace = true
+database = true
+auth = { level = "viewer" }
+
+[test]
+reason = "A viewer is refused a MySQL statement that defines several things, as it is refused a single definition"
+
+[[test.results]]
+error = "IAM error: Not enough permissions to perform this action"
+
+[[test.results]]
+error = "IAM error: Not enough permissions to perform this action"
+
+[[test.results]]
+error = "IAM error: Not enough permissions to perform this action"
+*/
+
+CREATE TABLE ddl_perm_person (id INT PRIMARY KEY, name VARCHAR(50), age INT);
+
+CREATE TABLE ddl_perm_one (x INT);
+
+DROP TABLE ddl_perm_one, ddl_perm_two;

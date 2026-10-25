@@ -10,15 +10,6 @@ reason = "The id column of a PostgreSQL table is its primary key: a table built 
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "[{ id: 1, name: 'Tobie' }, { id: 2, name: 'Jaime' }]"
 
 [[test.results]]
@@ -38,15 +29,6 @@ value = "[{ name: 'Tobie', pk: 1 }, { name: 'Jaime', pk: 2 }, { name: 'Zed', pk:
 
 [[test.results]]
 value = "[{ id: 1, name: 'Tobie' }, { id: 2, name: 'Jaime' }, { id: 3, name: 'Zed' }, { id: 4, name: 'Dan' }]"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "NONE"

@@ -10,12 +10,6 @@ reason = "PostgreSQL CREATE TABLE, INSERT, and SELECT pipeline"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "[{ id: 1, tag: 'rust' }, { id: 2, tag: 'database' }]"
 
 [[test.results]]

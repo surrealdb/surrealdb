@@ -172,10 +172,9 @@ fn is_serial(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> bool {
 /// that draws its next value. The `id` column's `DEFAULT` is its record key when a write names no
 /// id.
 ///
-/// The sequence is defined only if it does not exist. The statements a `CREATE TABLE` lowers to
-/// run one by one, so a definition that replaced the sequence would reset the numbering of a table
-/// whose own definition failed because it exists. A sequence outlives its table, so a table created
-/// again under a dropped one's name carries on from the last number the old one drew.
+/// The sequence is defined only if it does not exist, so a `CREATE TABLE IF NOT EXISTS` of a table
+/// that exists leaves its numbering alone. A sequence outlives its table, so a table created again
+/// under a dropped one's name carries on from the last number the old one drew.
 fn column_sequence(table: &str, column: &str) -> (Expr, DefineDefault) {
 	let name = format!("{}_{column}_seq", table.replace('.', "_"));
 	let define = DefineSequenceStatement {
@@ -731,7 +730,9 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 }
 
 /// Lower a PostgreSQL DDL statement.
-pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
+///
+/// Returns the definitions it runs, one expression each, in the order they run.
+pub(crate) fn lower_pgsql_ddl_definitions(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
 	match stmt {
 		PgStatement::CreateTable(s) => lower_pgsql_create_table(s),
 		PgStatement::CreateIndex(s) => lower_pgsql_create_index(s),
@@ -1309,7 +1310,9 @@ pub fn lower_mysql_alter_table(alter: &MyAlterTableStmt) -> Result<Vec<Expr>, Pl
 }
 
 /// Lower a MySQL DDL statement.
-pub fn lower_mysql_ddl(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
+///
+/// Returns the definitions it runs, one expression each, in the order they run.
+pub(crate) fn lower_mysql_ddl_definitions(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
 	match stmt {
 		MyStatement::CreateTable(s) => lower_mysql_create_table(s),
 		MyStatement::DropTable(s) => lower_mysql_drop_table(s),
@@ -1345,3 +1348,38 @@ pub fn lower_mysql_ddl(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
 		}
 	}
 }
+
+/// Lower a PostgreSQL DDL statement into the expression that answers it.
+///
+/// The result holds exactly one expression, so a caller that runs every returned expression as a
+/// statement of its own answers the one SQL statement once. A statement that lowers to several
+/// definitions (a table with its fields and indexes, an `ALTER TABLE` with several actions, a
+/// `DROP` of several tables) lowers to a block of them: a definition that fails fails the
+/// statement as a whole, and none of its definitions is committed.
+pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_ddl_definitions(stmt).map(|definitions| vec![one_statement(definitions)])
+}
+
+/// Lower a MySQL DDL statement into the expression that answers it.
+///
+/// The result holds exactly one expression, as [`lower_pgsql_ddl`] does, and a statement that
+/// lowers to several definitions (a table with its fields and indexes, several tables dropped at
+/// once) lowers to a block of them with the same all-or-nothing outcome.
+pub fn lower_mysql_ddl(stmt: &MyStatement) -> Result<Vec<Expr>, PlanError> {
+	lower_mysql_ddl_definitions(stmt).map(|definitions| vec![one_statement(definitions)])
+}
+
+/// The single expression that runs `definitions`: the definition itself when there is exactly
+/// one, otherwise a block of them in order. A statement that lowers to no definition is an empty
+/// block, which answers `NONE`.
+fn one_statement(mut definitions: Vec<Expr>) -> Expr {
+	if definitions.len() == 1
+		&& let Some(definition) = definitions.pop()
+	{
+		return definition;
+	}
+	Expr::Block(Box::new(surrealdb_expr::expr::Block(definitions)))
+}
+
+#[cfg(test)]
+mod statement_tests;

@@ -3,7 +3,9 @@ use surrealdb_expr::expr::statements::remove::RemoveStatement;
 use surrealdb_expr::expr::{Expr, Kind};
 use surrealdb_types::ToSql;
 
-use super::ddl::{lower_mysql_ddl, lower_pgsql_ddl, map_mysql_type, map_pgsql_type};
+use super::ddl::{
+	lower_mysql_ddl_definitions, lower_pgsql_ddl_definitions, map_mysql_type, map_pgsql_type,
+};
 
 #[test]
 fn test_pgsql_type_map() {
@@ -102,7 +104,7 @@ fn test_lower_pgsql_create_table_simple() {
 		"CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL, email VARCHAR(100) UNIQUE, age INT DEFAULT 18);"
 	).expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 4 DefineField + 2 DefineIndex (id PK + email UNIQUE) = 7
 	assert_eq!(exprs.len(), 7);
 
@@ -195,7 +197,7 @@ fn test_lower_pgsql_create_table_composite_keys() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 3 DefineField + 2 TableConstraint indexes = 6
 	assert_eq!(exprs.len(), 6);
 
@@ -216,7 +218,7 @@ fn test_lower_pgsql_create_index() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 
 	let Expr::Define(d) = &exprs[0] else {
@@ -239,7 +241,7 @@ fn test_lower_pgsql_create_index() {
 	)
 	.expect("parse");
 
-	let exprs_multi = lower_pgsql_ddl(&multi_idx).expect("lower");
+	let exprs_multi = lower_pgsql_ddl_definitions(&multi_idx).expect("lower");
 	assert_eq!(exprs_multi.len(), 1);
 	let Expr::Define(d) = &exprs_multi[0] else {
 		panic!("Expected Expr::Define");
@@ -258,7 +260,7 @@ fn test_lower_pgsql_create_view() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 
 	let Expr::Define(d) = &exprs[0] else {
@@ -278,45 +280,45 @@ fn test_lower_pgsql_create_view() {
 fn test_lower_pgsql_alter_table() {
 	let stmt = surrealdb_pgsql::parse_statement("ALTER TABLE users ADD COLUMN phone VARCHAR(20);")
 		.expect("parse");
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 	assert!(matches!(&exprs[0], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
 
 	let drop_col =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users DROP COLUMN IF EXISTS phone;")
 			.expect("parse");
-	let exprs_drop = lower_pgsql_ddl(&drop_col).expect("lower");
+	let exprs_drop = lower_pgsql_ddl_definitions(&drop_col).expect("lower");
 	assert_eq!(exprs_drop.len(), 1);
 	assert!(matches!(&exprs_drop[0], Expr::Remove(r) if matches!(&**r, RemoveStatement::Field(_))));
 
 	let alter_type =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users ALTER COLUMN age TYPE BIGINT;")
 			.expect("parse");
-	let exprs_type = lower_pgsql_ddl(&alter_type).expect("lower");
+	let exprs_type = lower_pgsql_ddl_definitions(&alter_type).expect("lower");
 	assert_eq!(exprs_type.len(), 1);
 
 	let set_def =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users ALTER COLUMN age SET DEFAULT 21;")
 			.expect("parse");
-	let exprs_def = lower_pgsql_ddl(&set_def).expect("lower");
+	let exprs_def = lower_pgsql_ddl_definitions(&set_def).expect("lower");
 	assert_eq!(exprs_def.len(), 1);
 
 	let drop_def =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users ALTER COLUMN age DROP DEFAULT;")
 			.expect("parse");
-	let exprs_drop_def = lower_pgsql_ddl(&drop_def).expect("lower");
+	let exprs_drop_def = lower_pgsql_ddl_definitions(&drop_def).expect("lower");
 	assert_eq!(exprs_drop_def.len(), 1);
 
 	let set_nn =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users ALTER COLUMN age SET NOT NULL;")
 			.expect("parse");
-	let exprs_nn = lower_pgsql_ddl(&set_nn).expect("lower");
+	let exprs_nn = lower_pgsql_ddl_definitions(&set_nn).expect("lower");
 	assert_eq!(exprs_nn.len(), 1);
 
 	let drop_nn =
 		surrealdb_pgsql::parse_statement("ALTER TABLE users ALTER COLUMN age DROP NOT NULL;")
 			.expect("parse");
-	let exprs_drop_nn = lower_pgsql_ddl(&drop_nn).expect("lower");
+	let exprs_drop_nn = lower_pgsql_ddl_definitions(&drop_nn).expect("lower");
 	assert_eq!(exprs_drop_nn.len(), 1);
 }
 
@@ -324,7 +326,7 @@ fn test_lower_pgsql_alter_table() {
 fn test_lower_pgsql_drop() {
 	let stmt =
 		surrealdb_pgsql::parse_statement("DROP TABLE IF EXISTS users, profiles;").expect("parse");
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 2);
 	for e in &exprs {
 		assert!(
@@ -334,14 +336,14 @@ fn test_lower_pgsql_drop() {
 
 	let drop_idx =
 		surrealdb_pgsql::parse_statement("DROP INDEX IF EXISTS idx_users_email;").expect("parse");
-	let exprs_idx = lower_pgsql_ddl(&drop_idx).expect("lower");
+	let exprs_idx = lower_pgsql_ddl_definitions(&drop_idx).expect("lower");
 	assert_eq!(exprs_idx.len(), 1);
 	assert!(
 		matches!(&exprs_idx[0], Expr::Remove(r) if matches!(&**r, RemoveStatement::Index(i) if i.if_exists))
 	);
 
 	let drop_view = surrealdb_pgsql::parse_statement("DROP VIEW active_users;").expect("parse");
-	let exprs_view = lower_pgsql_ddl(&drop_view).expect("lower");
+	let exprs_view = lower_pgsql_ddl_definitions(&drop_view).expect("lower");
 	assert_eq!(exprs_view.len(), 1);
 	assert!(matches!(&exprs_view[0], Expr::Remove(r) if matches!(&**r, RemoveStatement::Table(_))));
 }
@@ -361,7 +363,7 @@ fn test_lower_mysql_create_table() {
 	)
 	.expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 1 DefineSequence (id) + 7 DefineField + 2 DefineIndex (id PK + sku UNIQUE)
 	assert_eq!(exprs.len(), 11);
 
@@ -388,7 +390,7 @@ fn test_lower_mysql_create_table_with_constraints() {
 	)
 	.expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 3 DefineField + 2 TableConstraint indexes = 6
 	assert_eq!(exprs.len(), 6);
 }
@@ -398,7 +400,7 @@ fn test_lower_mysql_drop_table() {
 	let stmt =
 		surrealdb_mysql::parse_statement("DROP TABLE IF EXISTS orders, items;").expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 2);
 	for e in &exprs {
 		assert!(
@@ -418,7 +420,7 @@ fn test_lower_pgsql_foreign_key_column_constraint() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 1 DefineSequence (id) + 3 DefineField + 1 PK Index = 6
 	assert_eq!(exprs.len(), 6);
 
@@ -457,7 +459,7 @@ fn test_lower_pgsql_foreign_key_table_constraint() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 1 DefineSequence (id) + 4 DefineField + 1 PK Index + 2 FK field updates
 	assert_eq!(exprs.len(), 9);
 }
@@ -475,7 +477,7 @@ fn test_lower_pgsql_complex_defaults() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 7);
 
 	for expr in &exprs {
@@ -499,7 +501,7 @@ fn test_lower_pgsql_complex_defaults() {
 fn test_lower_pgsql_add_column_is_nullable_unless_not_null() {
 	let field_kind = |sql: &str| {
 		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
-		let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+		let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 		let Expr::Define(d) = &exprs[0] else {
 			panic!("Expected Expr::Define");
 		};
@@ -527,7 +529,7 @@ fn test_lower_pgsql_alter_table_multiple_actions() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 5);
 
 	// Action 1: Add column status (DefineField)
@@ -548,7 +550,7 @@ fn test_lower_pgsql_alter_table_constraints() {
 		"ALTER TABLE memberships ADD PRIMARY KEY (user_id, team_id);",
 	)
 	.expect("parse");
-	let exprs_pk = lower_pgsql_ddl(&add_pk).expect("lower");
+	let exprs_pk = lower_pgsql_ddl_definitions(&add_pk).expect("lower");
 	assert_eq!(exprs_pk.len(), 1);
 	let Expr::Define(d) = &exprs_pk[0] else {
 		panic!("Expected Expr::Define");
@@ -567,7 +569,7 @@ fn test_lower_pgsql_alter_table_constraints() {
 	let add_uq =
 		surrealdb_pgsql::parse_statement("ALTER TABLE memberships ADD UNIQUE (user_id, role);")
 			.expect("parse");
-	let exprs_uq = lower_pgsql_ddl(&add_uq).expect("lower");
+	let exprs_uq = lower_pgsql_ddl_definitions(&add_uq).expect("lower");
 	assert_eq!(exprs_uq.len(), 1);
 	let Expr::Define(d) = &exprs_uq[0] else {
 		panic!("Expected Expr::Define");
@@ -587,7 +589,7 @@ fn test_lower_pgsql_alter_table_constraints() {
 		"ALTER TABLE memberships DROP CONSTRAINT IF EXISTS uq_user_role;",
 	)
 	.expect("parse");
-	let exprs_drop_con = lower_pgsql_ddl(&drop_con).expect("lower");
+	let exprs_drop_con = lower_pgsql_ddl_definitions(&drop_con).expect("lower");
 	assert_eq!(exprs_drop_con.len(), 1);
 	assert!(
 		matches!(&exprs_drop_con[0], Expr::Remove(r) if matches!(&**r, RemoveStatement::Index(_)))
@@ -601,7 +603,7 @@ fn test_lower_pgsql_create_index_concurrently() {
 	)
 	.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Define(d) = &exprs[0] else {
 		panic!("Expected Expr::Define");
@@ -618,7 +620,7 @@ fn test_lower_pgsql_create_view_wildcard() {
 	let stmt = surrealdb_pgsql::parse_statement("CREATE VIEW v_all_users AS SELECT * FROM users;")
 		.expect("parse");
 
-	let exprs = lower_pgsql_ddl(&stmt).expect("lower");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Define(d) = &exprs[0] else {
 		panic!("Expected Expr::Define");
@@ -662,7 +664,7 @@ fn test_lower_mysql_table_all_datatypes() {
 	)
 	.expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 23 DefineField = 24
 	assert_eq!(exprs.len(), 24);
 }
@@ -680,7 +682,7 @@ fn test_lower_mysql_foreign_keys() {
 	)
 	.expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	// 1 DefineTable + 3 DefineField + 1 PK Index + 2 FK fields = 7
 	assert_eq!(exprs.len(), 7);
 }
@@ -690,7 +692,7 @@ fn test_lower_mysql_drop_multiple_tables() {
 	let stmt =
 		surrealdb_mysql::parse_statement("DROP TABLE IF EXISTS t1, t2, t3, t4;").expect("parse");
 
-	let exprs = lower_mysql_ddl(&stmt).expect("lower");
+	let exprs = lower_mysql_ddl_definitions(&stmt).expect("lower");
 	assert_eq!(exprs.len(), 4);
 	for (i, expr) in exprs.iter().enumerate() {
 		let Expr::Remove(r) = expr else {
@@ -708,7 +710,7 @@ fn test_lower_mysql_drop_multiple_tables() {
 fn test_lower_mysql_database_ddl() {
 	let create_stmt =
 		surrealdb_mysql::parse_statement("CREATE DATABASE IF NOT EXISTS my_db;").expect("parse");
-	let exprs = lower_mysql_ddl(&create_stmt).expect("lower create db");
+	let exprs = lower_mysql_ddl_definitions(&create_stmt).expect("lower create db");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Define(d) = &exprs[0] else {
 		panic!("Expected Expr::Define");
@@ -721,7 +723,7 @@ fn test_lower_mysql_database_ddl() {
 
 	let drop_stmt =
 		surrealdb_mysql::parse_statement("DROP DATABASE IF EXISTS my_db;").expect("parse");
-	let exprs = lower_mysql_ddl(&drop_stmt).expect("lower drop db");
+	let exprs = lower_mysql_ddl_definitions(&drop_stmt).expect("lower drop db");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Remove(r) = &exprs[0] else {
 		panic!("Expected Expr::Remove");
@@ -738,7 +740,7 @@ fn test_lower_mysql_index_ddl() {
 	let create_idx =
 		surrealdb_mysql::parse_statement("CREATE UNIQUE INDEX idx_email ON users (email);")
 			.expect("parse");
-	let exprs = lower_mysql_ddl(&create_idx).expect("lower create index");
+	let exprs = lower_mysql_ddl_definitions(&create_idx).expect("lower create index");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Define(d) = &exprs[0] else {
 		panic!("Expected Expr::Define");
@@ -752,7 +754,7 @@ fn test_lower_mysql_index_ddl() {
 
 	let drop_idx =
 		surrealdb_mysql::parse_statement("DROP INDEX idx_email ON users;").expect("parse");
-	let exprs = lower_mysql_ddl(&drop_idx).expect("lower drop index");
+	let exprs = lower_mysql_ddl_definitions(&drop_idx).expect("lower drop index");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Remove(r) = &exprs[0] else {
 		panic!("Expected Expr::Remove");
@@ -770,7 +772,7 @@ fn test_lower_mysql_view_ddl() {
 		"CREATE OR REPLACE VIEW active_users AS SELECT id, name FROM users WHERE active = 1;",
 	)
 	.expect("parse");
-	let exprs = lower_mysql_ddl(&create_view).expect("lower create view");
+	let exprs = lower_mysql_ddl_definitions(&create_view).expect("lower create view");
 	assert_eq!(exprs.len(), 1);
 	let Expr::Define(d) = &exprs[0] else {
 		panic!("Expected Expr::Define");
@@ -785,7 +787,7 @@ fn test_lower_mysql_view_ddl() {
 	let drop_view =
 		surrealdb_mysql::parse_statement("DROP VIEW IF EXISTS active_users, old_users;")
 			.expect("parse");
-	let exprs = lower_mysql_ddl(&drop_view).expect("lower drop view");
+	let exprs = lower_mysql_ddl_definitions(&drop_view).expect("lower drop view");
 	assert_eq!(exprs.len(), 2);
 	let Expr::Remove(r) = &exprs[0] else {
 		panic!("Expected Expr::Remove");
@@ -803,7 +805,7 @@ fn test_lower_mysql_alter_table() {
 		"ALTER TABLE users ADD COLUMN age INT, DROP COLUMN legacy, RENAME TO customers;",
 	)
 	.expect("parse");
-	let exprs = lower_mysql_ddl(&alter).expect("lower alter table");
+	let exprs = lower_mysql_ddl_definitions(&alter).expect("lower alter table");
 	assert_eq!(exprs.len(), 3);
 	// 1: DefineField (ADD age)
 	assert!(matches!(&exprs[0], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
@@ -888,7 +890,7 @@ fn json_columns_of_a_created_table_are_flexible() {
 	)
 	.expect("parse");
 	assert_eq!(
-		field_flexibility(&lower_pgsql_ddl(&stmt).expect("lower")),
+		field_flexibility(&lower_pgsql_ddl_definitions(&stmt).expect("lower")),
 		[
 			("id".to_string(), false),
 			("a".to_string(), true),
@@ -902,7 +904,7 @@ fn json_columns_of_a_created_table_are_flexible() {
 		surrealdb_mysql::parse_statement("CREATE TABLE docs (id INT PRIMARY KEY, a JSON, b TEXT);")
 			.expect("parse");
 	assert_eq!(
-		field_flexibility(&lower_mysql_ddl(&stmt).expect("lower")),
+		field_flexibility(&lower_mysql_ddl_definitions(&stmt).expect("lower")),
 		[("id".to_string(), false), ("a".to_string(), true), ("b".to_string(), false)]
 	);
 }
@@ -918,7 +920,7 @@ fn serial_and_auto_increment_columns_draw_from_a_sequence_of_their_own() {
 		"CREATE TABLE gen (id SERIAL PRIMARY KEY, n BIGSERIAL, m INT, d SERIAL DEFAULT 7);",
 	)
 	.expect("parse");
-	let sql = statements_sql(&lower_pgsql_ddl(&stmt).expect("lower"));
+	let sql = statements_sql(&lower_pgsql_ddl_definitions(&stmt).expect("lower"));
 	let defines = |name: &str| sql.iter().filter(|s| s.contains(name)).cloned().collect::<Vec<_>>();
 	for column in ["id", "n"] {
 		let sequence = format!("gen_{column}_seq");
@@ -937,7 +939,7 @@ fn serial_and_auto_increment_columns_draw_from_a_sequence_of_their_own() {
 		"CREATE TABLE gen (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT);",
 	)
 	.expect("parse");
-	let sql = statements_sql(&lower_mysql_ddl(&stmt).expect("lower"));
+	let sql = statements_sql(&lower_mysql_ddl_definitions(&stmt).expect("lower"));
 	assert_eq!(sql.iter().filter(|s| s.contains("gen_id_seq")).count(), 2, "{sql:?}");
 	assert!(!sql.iter().any(|s| s.contains("gen_name_seq")), "{sql:?}");
 }
