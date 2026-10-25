@@ -3729,8 +3729,15 @@ async fn the_rows_a_let_binds_keep_the_serial_order_whatever_order_batches_finis
 
 /// A statement evaluated as a value outside the request's own plan hands its rows to a caller that
 /// reads them in order: `eval::surql` returns them to the expression that called it, and an access
-/// method's `SIGNIN` takes the first. Its merge takes the morsels in the order of the serial run
-/// however late the first ones are, as a `LET`'s value does.
+/// method's `SIGNIN` takes the first. Its merge takes the morsels in the order of the serial run.
+///
+/// A request that calls `eval::surql` may write, so it runs in a writable transaction, and a
+/// SurrealKV transaction that may write hands out no read view. Placement decides from what the
+/// datastore offers, never from one transaction, so the scan is still planned as key-range morsels
+/// and its range is cut; with no view for a worker to read a part through, the statement's task
+/// reads every part itself, in the order of the scan. The order the merge keeps when workers finish
+/// out of order is covered over batches, which need no view
+/// ([`the_rows_an_evaluated_statement_answers_keep_the_serial_order_over_batches`]).
 #[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order() {
@@ -3741,14 +3748,19 @@ async fn the_rows_an_evaluated_statement_answers_keep_the_serial_order() {
 	);
 	let serial = evaluating(&format!("surrealkv://{}", serial_dir.path().display()), whole()).await;
 	let wide = evaluating(&format!("surrealkv://{}", wide_dir.path().display()), tiny()).await;
-	let statements = [
+	for sql in [
 		"RETURN eval::surql('SELECT n, s FROM t WHERE n % 3 = 0')",
 		"RETURN eval::surql('SELECT * FROM t')",
-	];
-	assert!(
-		bound_rows_keep_the_order(&serial, &wide, &statements).await > 0,
-		"no morsel went to a worker"
-	);
+	] {
+		let expected = answered(&serial, sql).await.expect("the serial run answers");
+		assert!(expected.len() > 1, "`{sql}` answers no rows");
+		let ctx = wide.exec_ctx().await;
+		let before = counts_of(&ctx);
+		assert_eq!(answered(&wide, sql).await, Ok(expected), "`{sql}`");
+		let after = counts_of(&ctx);
+		assert!(after.split > before.split, "`{sql}` cut no range");
+		assert_eq!(after.handed, before.handed, "`{sql}` handed a morsel to a worker");
+	}
 }
 
 /// The same over batches the coordinator read.
