@@ -64,7 +64,7 @@ use wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 use crate::exec::object_extract::{
 	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr, descend_stored,
 	descend_to_value_walker_parts, extract_field_from_record_bytes, record_data_bytes,
-	scan_record_object_at_path_with_slots, stored_record_object,
+	scan_record_object_at_path_with_slots, stored_record_object_in,
 };
 use crate::exec::packed_view::AdmittedRow;
 use crate::expr::operator::BinaryOperator;
@@ -320,23 +320,39 @@ impl PreDecodeFilter {
 		self.judges_packed
 	}
 
+	/// [`Self::apply_in`] with no layouts, which walks every document it judges.
+	#[cfg(test)]
+	pub(crate) fn apply(&self, row: &AdmittedRow<'_>) -> PreDecodeFilterOutcome {
+		self.apply_in(row, None)
+	}
+
 	/// Judges the stored record `row` from its bytes alone.
 	///
 	/// The caller has admitted the record's generation against its table's
 	/// layouts ([`crate::kvs::RowGate`]) before this reads any field of it: a
 	/// row of a generation the table does not list is refused, never judged
-	/// here. A record this reads in neither encoding is judged unknown, which
-	/// keeps it: a packed row among the bytes, which has not been checked, and
-	/// one the check refused, whose whole decode raises the error. A checked
-	/// packed row is judged from its columns, and is rejected only where the
-	/// predicate is false of the record its whole decode holds.
-	pub(crate) fn apply(&self, row: &AdmittedRow<'_>) -> PreDecodeFilterOutcome {
+	/// here. `layouts` are the layouts that admitted it. A document is judged
+	/// only as one the whole decode accepts: unwalked when `layouts` vouch for
+	/// its generation ([`crate::catalog::StoredRecord::admit_document`]), and
+	/// walked first otherwise. A record this reads in neither encoding is
+	/// judged unknown, which keeps it: a packed row among the bytes, which has
+	/// not been checked, and one the check refused, whose whole decode raises
+	/// the error. A checked packed row is judged from its columns, and is
+	/// rejected only where the predicate is false of the record its whole
+	/// decode holds.
+	pub(crate) fn apply_in(
+		&self,
+		row: &AdmittedRow<'_>,
+		layouts: Option<&crate::catalog::TableLayouts>,
+	) -> PreDecodeFilterOutcome {
 		let ev = match row {
-			AdmittedRow::Bytes(record_bytes) => match stored_record_object(record_bytes) {
-				Some(Some(data)) => self.eval_stored(data, &[], &self.root),
-				Some(None) => Evidence::Unknown,
-				None => self.eval_node(record_bytes, &[], &self.root),
-			},
+			AdmittedRow::Bytes(record_bytes) => {
+				match stored_record_object_in(record_bytes, layouts) {
+					Some(Some(data)) => self.eval_stored(data, &[], &self.root),
+					Some(None) => Evidence::Unknown,
+					None => self.eval_node(record_bytes, &[], &self.root),
+				}
+			}
 			AdmittedRow::Packed {
 				row,
 				..

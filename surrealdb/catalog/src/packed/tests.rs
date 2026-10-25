@@ -283,6 +283,7 @@ pub(super) fn layout(packed: PackedDescriptor) -> Arc<LayoutDescriptor> {
 		layout: RowLayout::Packed(packed),
 		migration: None,
 		migrated: None,
+		verified: None,
 	})
 }
 

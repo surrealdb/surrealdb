@@ -186,6 +186,16 @@ impl<'a> PackedRow<'a> {
 	/// This row, checked: the whole decode of it run to build nothing ([`Check`]), which refuses
 	/// exactly the rows [`decode`](Self::decode) refuses, with the same error. Only
 	/// [`StoredRecord::checked_packed`] calls it.
+	/// The row, admitted without the check walk: for a row of a generation its table's layouts
+	/// vouch for, which is one the whole decode accepts
+	/// ([`StoredRecord::admit_packed`](crate::record::StoredRecord::admit_packed) calls it). The
+	/// structure [`Self::new`] proved is all that is proved of it here.
+	pub(crate) fn vouched(self) -> CheckedPackedRow<'a> {
+		CheckedPackedRow {
+			row: self,
+		}
+	}
+
 	pub(crate) fn checked(self) -> Result<CheckedPackedRow<'a>, PackedError> {
 		// The record's own `id` sits at its place in key order and is never inspected.
 		self.walk::<Check>(Some(()))?;
@@ -1141,8 +1151,11 @@ fn cmp_path<'p>(path: &[String], mut segments: impl Iterator<Item = &'p str>) ->
 /// refuses every row [`PackedRow::decode`] refuses, whichever fields a reader asks of it. A reader
 /// takes a packed row in place only as this.
 ///
-/// Only [`StoredRecord::checked_packed`] makes one, so the reads below follow offsets the check
-/// proved and re-check nothing.
+/// Only [`StoredRecord::checked_packed`] and [`StoredRecord::admit_packed`] make one: the first
+/// by the check, the second unwalked for a row of a verified generation, whose every row is one the
+/// whole decode accepts. So the reads below follow offsets the check proved, or that the encoder
+/// that wrote a verified generation's rows laid out, and re-check nothing; every read stays bounds
+/// checked and fallible all the same.
 #[derive(Clone, Copy, Debug)]
 pub struct CheckedPackedRow<'a> {
 	row: PackedRow<'a>,

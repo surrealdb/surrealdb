@@ -39,7 +39,7 @@ use surrealdb_catalog::{
 	Metadata, Migration, MigrationRun, NamespaceDefinition, NamespaceId, Record, RecordFormat,
 	RecordLayoutError, RecordType, RecordWriter, StoredConfigDefinition, StoredFeatureLevel,
 	StoredFieldDefinition, StoredRecord, StoredTableDefinition, TableConformance, TableDefinition,
-	TableId, TableLayouts, TableMigrations, TableShape, TableType, birth_claims_of,
+	TableId, TableLayouts, TableMigrations, TableShape, TableType, VERIFIED_EPOCH, birth_claims_of,
 	decode_generation, definition_digest, derive_layout,
 };
 use surrealdb_expr::val::stored::schema::Unrevisioned;
@@ -4900,12 +4900,19 @@ impl Transaction {
 		}
 		// The descriptor names the newest generation, up to its own, that carries a migration, so
 		// the head's descriptor alone says which rows may need a step.
+		//
+		// The generation is verified as it is minted. No row carries its number yet: the number
+		// was never given to another descriptor of the table, and a row is stamped with it only by
+		// a record encoder writing into this generation, which writes only rows the whole decode
+		// accepts. So every row the generation will hold is vouched for, and an in-place read
+		// admits its documents without walking them (ADR 0010).
 		let descriptor = LayoutDescriptor {
 			migrated: if descriptor.migration.is_some() {
 				Some(next)
 			} else {
 				layouts.newest_migration()
 			},
+			verified: Some(VERIFIED_EPOCH),
 			..descriptor
 		};
 		// A write of a table's layouts moves the catalog epoch by itself, whatever the statement

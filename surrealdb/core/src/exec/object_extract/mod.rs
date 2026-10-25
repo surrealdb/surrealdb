@@ -22,7 +22,7 @@ use revision::{
 use surrealdb_strand::Strand;
 use wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
-use crate::catalog::{Record, StoredRecord};
+use crate::catalog::{Record, StoredRecord, TableLayouts};
 use crate::val::stored::{OrderedObjectRef, ValueRef};
 use crate::val::{Object, Value};
 
@@ -307,6 +307,16 @@ pub(crate) fn extract_field_from_record_bytes_parts(
 /// answers "unknown", the probe bails, a projection decodes the record).
 #[inline]
 pub(crate) fn stored_record_object(record_bytes: &[u8]) -> Option<Option<OrderedObjectRef<'_>>> {
+	stored_record_object_in(record_bytes, None)
+}
+
+/// [`stored_record_object`] for a record whose generation `layouts` admitted:
+/// a document of a generation they vouch for is admitted without a walk of its
+/// bytes ([`StoredRecord::admit_document`]).
+pub(crate) fn stored_record_object_in<'a>(
+	record_bytes: &'a [u8],
+	layouts: Option<&TableLayouts>,
+) -> Option<Option<OrderedObjectRef<'a>>> {
 	if record_bytes.first() != Some(&StoredRecord::MARKER) {
 		return None;
 	}
@@ -314,9 +324,12 @@ pub(crate) fn stored_record_object(record_bytes: &[u8]) -> Option<Option<Ordered
 		StoredRecord::parse(record_bytes)
 			.ok()
 			.flatten()
-			.and_then(|record| record.checked_document().ok().flatten())
+			.and_then(|record| record.admit_document(layouts).ok().flatten())
 			.and_then(|document| document.value().ok())
-			.and_then(|data| data.as_ordered_object().ok().flatten()),
+			// An admitted document is one the whole decode accepts, which confirms the key order
+			// of every object in it.
+			.and_then(|data| data.as_object().ok().flatten())
+			.map(|object| object.validated()),
 	)
 }
 

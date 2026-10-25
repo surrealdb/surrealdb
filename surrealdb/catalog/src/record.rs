@@ -1120,7 +1120,36 @@ impl<'a> StoredRecord<'a> {
 		Ok(Some(CheckedDocument {
 			body: self.body,
 			keyed: self.is_keyed(),
+			verified: false,
 		}))
+	}
+
+	/// The record's document as an in-place reader takes it, admitted against `layouts`, the
+	/// layouts of its table that admitted its generation. `Ok(None)` for a packed row, which has
+	/// no document.
+	///
+	/// This is where an in-place read of a document decides whether to walk it. A document whose
+	/// generation `layouts` vouch for ([`TableLayouts::vouches_for`]) is admitted as it is: every
+	/// row of a verified generation is one the whole decode accepts, so it answers what
+	/// [`checked_document`](Self::checked_document) answers without the O(bytes) walk. Every other
+	/// document, including every one read without layouts, is checked by
+	/// [`checked_document`](Self::checked_document).
+	#[inline]
+	pub fn admit_document(
+		&self,
+		layouts: Option<&TableLayouts>,
+	) -> Result<Option<CheckedDocument<'a>>, stored::Error> {
+		if self.is_packed() {
+			return Ok(None);
+		}
+		if layouts.is_some_and(|layouts| layouts.vouches_for(self.generation)) {
+			return Ok(Some(CheckedDocument {
+				body: self.body,
+				keyed: self.is_keyed(),
+				verified: true,
+			}));
+		}
+		self.checked_document()
 	}
 
 	/// Whether `bytes` are a v1 record in a packed layout: two byte loads, which prove nothing
@@ -1190,18 +1219,48 @@ impl<'a> StoredRecord<'a> {
 	) -> Result<CheckedPackedRow<'a>, PackedError> {
 		PackedRow::new(self, descriptor)?.checked()
 	}
+
+	/// The record's packed row as an in-place reader takes it, admitted against `layouts`, the
+	/// layouts of its table that admitted its generation, and read through `descriptor`, its
+	/// generation's packed descriptor there.
+	///
+	/// This is where an in-place read of a packed row decides whether to walk it, as
+	/// [`admit_document`](Self::admit_document) decides for a document. A row of a generation
+	/// `layouts` vouch for ([`TableLayouts::vouches_for`]) is admitted once its structure parses
+	/// ([`PackedRow::new`]), without the check walk: every row of a verified generation is one the
+	/// whole decode accepts. Every other row is checked by
+	/// [`checked_packed`](Self::checked_packed).
+	#[inline]
+	pub fn admit_packed(
+		&self,
+		descriptor: &'a PackedDescriptor,
+		layouts: &TableLayouts,
+	) -> Result<CheckedPackedRow<'a>, PackedError> {
+		let row = PackedRow::new(self, descriptor)?;
+		if layouts.vouches_for(self.generation) {
+			return Ok(row.vouched());
+		}
+		row.checked()
+	}
 }
 
-/// A record's document, checked: its body is one value of the stored grammar, as
-/// [`stored::validate`] proves, and, when the record is keyed, an object holding no `"id"`. These
-/// are the bytes [`StoredRecord::decode_document`] accepts, so an in-place reader that takes a
-/// document only as this refuses every record the whole decode refuses.
+/// A record's document, checked: its body is one value of the stored grammar and, when the record
+/// is keyed, an object holding no `"id"`. These are the bytes [`StoredRecord::decode_document`]
+/// accepts, so an in-place reader that takes a document only as this refuses every record the
+/// whole decode refuses.
 ///
-/// Only [`StoredRecord::checked_document`] makes one.
+/// The proof is one of two. [`StoredRecord::checked_document`] walks the body with
+/// [`stored::validate`]. [`StoredRecord::admit_document`] makes one unwalked for a document whose
+/// generation its table's layouts vouch for: every row of a verified generation is one the whole
+/// decode accepts ([`crate::layout::LayoutDescriptor::verified`]).
+///
+/// Only those two make one.
 #[derive(Clone, Copy, Debug)]
 pub struct CheckedDocument<'a> {
 	body: &'a [u8],
 	keyed: bool,
+	/// Whether the document was admitted unwalked, because its generation is verified.
+	verified: bool,
 }
 
 impl<'a> CheckedDocument<'a> {
@@ -1216,6 +1275,13 @@ impl<'a> CheckedDocument<'a> {
 	#[inline]
 	pub fn is_keyed(&self) -> bool {
 		self.keyed
+	}
+
+	/// Whether the document was admitted without a walk because its generation is verified
+	/// ([`StoredRecord::admit_document`]), rather than checked.
+	#[inline]
+	pub fn is_verified(&self) -> bool {
+		self.verified
 	}
 
 	/// The document's root value. The check already proved the bytes are one value, so the error

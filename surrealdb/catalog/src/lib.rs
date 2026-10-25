@@ -106,7 +106,7 @@ pub use generation::{Generation, GenerationMark, GenerationRing, TableMigrations
 pub use layout::{
 	Column, ColumnRole, GenerationLayout, LayoutDescriptor, LayoutRefusal, Location,
 	MAX_PATH_DEPTH, PLANNED_PHYSICAL_KINDS, PackedDescriptor, PhysicalKind, Presence,
-	RecordLayoutError, RowLayout, TableLayouts, decode_generation,
+	RecordLayoutError, RowLayout, TableLayouts, VERIFIED_EPOCH, decode_generation,
 };
 pub use layout_derive::{TableShape, derive_layout};
 pub use migration::{Migration, MigrationRun, MigrationStep, MigrationTest};

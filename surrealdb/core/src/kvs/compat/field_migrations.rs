@@ -59,6 +59,7 @@ fn descriptor(migration: Option<Migration>, migrated: Option<u16>) -> LayoutDesc
 		layout: RowLayout::Document,
 		migration,
 		migrated: migrated.map(|n| Generation::new(n).unwrap()),
+		verified: None,
 	}
 }
 

@@ -6,7 +6,7 @@
 `surrealdb/core/src/exec/pre_decode_filter/`
 
 **Relates to:** ADR 0009 (the 4.0 record format, whose byte grammars this ADR relies on), ADR 0007
-(the VM reads rows through `RowReader`).
+(the VM reads rows through `RowReader`), ADR 0012 (verified generations admit rows unwalked).
 
 ## Context
 
@@ -103,7 +103,10 @@ touches (ADR 0009, Consequences). A document or a packed row is never read this 
   is a verification pass over a table generation: once every row of a generation has been checked
   and the generation is marked verified, admission of a row of that generation can hand readers a
   document without walking it. The `CheckedDocument` constructor is the single place that decision
-  is made, so the change stays local to it and to the marking.
+  is made, so the change stays local to it and to the marking. ADR 0012 takes this route: a
+  generation is verified as it is minted, admission (`StoredRecord::admit_document`,
+  `StoredRecord::admit_packed`) skips the walk for its rows, and the pre-decode filter judges them
+  on the in-place path.
 - The revision exception lasts as long as the revision rows it covers. Its scope does not grow:
   a new in-place reader of revision bytes must follow the rules of the revision section, and a
   reader of documents or packed rows must follow the decision.

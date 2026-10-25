@@ -253,6 +253,7 @@ type LayoutDescriptor struct since=4.0 reserved=[]
   4 layout RowLayout critical since=4.0 absent=required
   6 migration option<Migration> critical since=4.0 absent=none
   8 migrated option<int:u16> critical since=4.0 absent=none
+  9 verified option<int:u32> ignorable since=4.0 absent=none independent="a build that skips it walks every row of the generation before an in-place read, which is what a generation with no verification gets"
 type Level enum since=4.0 reserved=[]
   1 No unit since=4.0
   2 Root unit since=4.0

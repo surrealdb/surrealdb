@@ -458,9 +458,9 @@ pub(super) fn read_key_id_at(key: &[u8], at: usize) -> Option<KeyIdRef<'_>> {
 ///
 /// The steps are those of the whole decode, in its order: the key, read whole as
 /// `RecordKey::decode_key` reads it, then the envelope, the layouts' table against the key's, the
-/// row's generation as `layouts` lists it, and the row itself
-/// ([`StoredRecord::checked_packed`]). A row the whole decode accepts is accepted here, and one it
-/// refuses is refused, whichever fields are read afterwards.
+/// row's generation as `layouts` lists it, and the row itself ([`StoredRecord::admit_packed`]:
+/// checked, or unwalked where `layouts` vouch for its generation). A row the whole decode accepts
+/// is accepted here, and one it refuses is refused, whichever fields are read afterwards.
 pub(in crate::exec) fn admit<'a>(
 	key: &'a [u8],
 	value: &'a [u8],
@@ -476,7 +476,7 @@ pub(in crate::exec) fn admit<'a>(
 		return None;
 	};
 	let descriptor = layouts.admit_packed(generation).ok()?;
-	record.checked_packed(descriptor).ok()
+	record.admit_packed(descriptor, layouts).ok()
 }
 
 /// What the whole decode of `key`'s record at `value` refuses, which a reader that refused the

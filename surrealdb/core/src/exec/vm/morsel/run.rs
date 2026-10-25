@@ -655,6 +655,9 @@ pub(super) async fn run_range(
 		super::super::host::bound_batch(program, &mut state, ctx);
 	}
 	let pipeline = &program.pipelines[at];
+	// A body that is not paged passes over a row the scan's pre-decode filter refuses from its
+	// stored bytes, as a scan in one cursor does.
+	let prefilter = super::super::host::in_place_prefilter(pipeline, ctx);
 	if let Some(fold) = &fold {
 		fold.log(&mut state);
 	}
@@ -772,6 +775,11 @@ pub(super) async fn run_range(
 						value,
 						layouts,
 					);
+					if let Some(filter) = prefilter.as_deref()
+						&& super::super::host::in_place_rejects(filter, &admitted, layouts)
+					{
+						return Ok(next);
+					}
 					if let (Some(probe), Some(threshold)) = (probe, threshold.as_deref())
 						&& probe.rejects(threshold, &admitted)
 					{

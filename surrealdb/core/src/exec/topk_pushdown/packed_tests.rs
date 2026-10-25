@@ -10,7 +10,7 @@ use crate::exec::operators::SortDirection;
 use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::exec::operators::test_util::TestDb;
 use crate::exec::packed_view::AdmittedRow;
-use crate::exec::vm::tests_packed_reads::{dataset, layouts_of, rows};
+use crate::exec::vm::tests_packed_reads::{dataset, layouts_of, rows, unverified_layouts_of};
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 const DEPTH_LIMIT: u32 = 256;
@@ -161,7 +161,7 @@ async fn a_packed_row_is_rejected_as_the_same_record_stored_as_a_document() {
 async fn a_refused_or_unchecked_packed_row_is_not_rejected() {
 	let db = TestDb::new(&dataset()).await;
 	let rows = rows(&db, "p").await;
-	let layouts = layouts_of(&db, "p", &rows).await;
+	let layouts = unverified_layouts_of(&db, "p", &rows).await;
 	let probes: Vec<_> = KEYS
 		.iter()
 		.flat_map(|path| {

@@ -135,6 +135,17 @@ pub(in crate::exec) async fn layouts_of(
 	layouts
 }
 
+/// [`layouts_of`] as a reader that trusts no verification reads them
+/// ([`TableLayouts::without_verification`]): every row is checked before it is read in place, so a
+/// test that damages rows holds the check to the whole decode whatever generation the rows carry.
+pub(in crate::exec) async fn unverified_layouts_of(
+	db: &TestDb,
+	table: &str,
+	rows: &[(Vec<u8>, Vec<u8>)],
+) -> Arc<TableLayouts> {
+	Arc::new(layouts_of(db, table, rows).await.without_verification())
+}
+
 /// A datastore holding `setup` whose scans never split, so every scan runs on the statement's
 /// task and the counters of [`observed`], which each thread keeps, count its rows.
 async fn serial_db(setup: &str) -> TestDb {
@@ -288,7 +299,7 @@ fn refusal(error: &anyhow::Error) -> (String, String) {
 async fn a_refused_packed_row_raises_the_whole_decodes_error() {
 	let db = serial_db(&dataset()).await;
 	let rows = rows(&db, "p").await;
-	let layouts = layouts_of(&db, "p", &rows).await;
+	let layouts = unverified_layouts_of(&db, "p", &rows).await;
 	let names = names(&layouts, &rows);
 	let packed: Vec<&(Vec<u8>, Vec<u8>)> =
 		rows.iter().filter(|(_, value)| StoredRecord::is_packed_bytes(value)).collect();
@@ -984,7 +995,7 @@ async fn an_admitted_row_is_refused_where_the_whole_decode_refuses_it() {
 	use crate::exec::packed_view::AdmittedRow;
 	let db = serial_db(&dataset()).await;
 	let rows = rows(&db, "p").await;
-	let layouts = layouts_of(&db, "p", &rows).await;
+	let layouts = unverified_layouts_of(&db, "p", &rows).await;
 	let other = rows_of_another_table(&db).await;
 	let (mut packed, mut refused, mut bytes) = (0usize, 0usize, 0usize);
 	let mut check = |key: &[u8], value: &[u8], layouts: Option<&TableLayouts>| {
@@ -1383,4 +1394,33 @@ async fn a_brute_force_knn_over_packed_rows_decodes_only_the_rows_it_keeps() {
 	// The rows decoded are the ones the sort kept at some point: a few dozen of 2000, where a
 	// ranking that decoded every row would decode them all.
 	assert!(whole > 0 && whole < ROWS / 10, "{whole} of {ROWS} rows decoded whole");
+}
+
+/// Every generation this build mints is verified as it is minted, so its rows, documents and
+/// packed rows alike, are admitted for an in-place read without a walk; a reader that trusts no
+/// verification vouches for none of them and walks each.
+#[tokio::test]
+async fn the_generations_a_build_mints_are_verified() {
+	let db = serial_db(&dataset()).await;
+	let rows = rows(&db, "p").await;
+	let layouts = layouts_of(&db, "p", &rows).await;
+	let unverified = layouts.without_verification();
+	let (mut documents, mut packed) = (0usize, 0usize);
+	for (_, value) in &rows {
+		let record = StoredRecord::parse(value).expect("parses").expect("a v1 record");
+		assert!(layouts.vouches_for(record.stamp()), "stamp {} is vouched for", record.stamp());
+		assert!(!unverified.vouches_for(record.stamp()));
+		if record.is_packed() {
+			packed += 1;
+		} else {
+			documents += 1;
+			let document =
+				record.admit_document(Some(&layouts)).expect("admitted").expect("a document");
+			assert!(document.is_verified(), "a document of a verified generation is unwalked");
+			let walked =
+				record.admit_document(Some(&unverified)).expect("admitted").expect("a document");
+			assert!(!walked.is_verified(), "without verification the document is walked");
+		}
+	}
+	assert!(documents > 0 && packed > 0, "{documents} documents, {packed} packed rows");
 }

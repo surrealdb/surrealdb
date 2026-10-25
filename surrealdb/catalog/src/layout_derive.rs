@@ -111,6 +111,7 @@ pub fn derive_layout(table: TableShape<'_>, fields: &[&FieldCandidate]) -> Layou
 		layout: RowLayout::Packed(packed),
 		migration: None,
 		migrated: None,
+		verified: None,
 	};
 	match descriptor.validate() {
 		Ok(()) => descriptor,

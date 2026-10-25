@@ -94,7 +94,26 @@ pub struct LayoutDescriptor {
 	/// read.
 	#[stored(n = 8)]
 	pub migrated: Option<Generation>,
+	/// The verification epoch that vouches for every row stamped with this generation: each such
+	/// row is one the whole decode accepts. `None` when nothing vouches for them, and every
+	/// in-place read of a row of the generation walks the row first (ADR 0010).
+	///
+	/// A build sets it on the descriptor of a generation it mints, which no row can carry before
+	/// the mint: every row of the generation is then written by a record encoder, which writes
+	/// only rows the whole decode accepts. A reader trusts an epoch of [`VERIFIED_EPOCH`] or later
+	/// ([`Self::is_verified`]), so a release that finds an encoder that broke that promise
+	/// withdraws the trust in every generation it minted by raising the epoch.
+	#[stored(
+		n = 9,
+		ignorable,
+		independent = "a build that skips it walks every row of the generation before an in-place read, which is what a generation with no verification gets"
+	)]
+	pub verified: Option<u32>,
 }
+
+/// The verification epoch a build stamps on the descriptor of a generation it mints, and the
+/// oldest epoch a reader trusts ([`LayoutDescriptor::is_verified`]).
+pub const VERIFIED_EPOCH: u32 = 1;
 
 impl LayoutDescriptor {
 	/// The descriptor of a generation whose rows are all in the document layout.
@@ -104,7 +123,15 @@ impl LayoutDescriptor {
 			layout: RowLayout::Document,
 			migration: None,
 			migrated: None,
+			verified: None,
 		}
+	}
+
+	/// Whether every row stamped with this generation is vouched for as one the whole decode
+	/// accepts: the descriptor carries a verification epoch this build trusts.
+	#[inline]
+	pub fn is_verified(&self) -> bool {
+		self.verified.is_some_and(|epoch| epoch >= VERIFIED_EPOCH)
 	}
 
 	/// This descriptor for a generation minted by `migration`.
@@ -114,11 +141,14 @@ impl LayoutDescriptor {
 	}
 
 	/// Whether `other` lays rows out as this descriptor does: the same table and the same layout,
-	/// whatever migration either carries. Compared by canonical bytes, so two layouts of the same
-	/// meaning are the same layout.
+	/// whatever migration or verification either carries. Compared by canonical bytes, so two
+	/// layouts of the same meaning are the same layout.
 	pub fn has_layout_of(&self, other: &Self) -> anyhow::Result<bool> {
 		let bare = |descriptor: &Self| -> anyhow::Result<Vec<u8>> {
-			if descriptor.migration.is_none() && descriptor.migrated.is_none() {
+			if descriptor.migration.is_none()
+				&& descriptor.migrated.is_none()
+				&& descriptor.verified.is_none()
+			{
 				return descriptor.kv_canonical();
 			}
 			Self {
@@ -126,6 +156,7 @@ impl LayoutDescriptor {
 				layout: descriptor.layout.clone(),
 				migration: None,
 				migrated: None,
+				verified: None,
 			}
 			.kv_canonical()
 		};
@@ -1312,6 +1343,58 @@ impl TableLayouts {
 		}
 	}
 
+	/// Whether the rows stamped `stamp` are vouched for as rows the whole decode accepts: `stamp`
+	/// names a listed generation whose readable descriptor carries a verification epoch this build
+	/// trusts ([`LayoutDescriptor::is_verified`]). Stamp 0 and every stamp the layouts do not list
+	/// readable are not vouched for.
+	///
+	/// [`StoredRecord::admit_document`](crate::record::StoredRecord::admit_document) asks this for
+	/// a document's stamp, and admits a vouched-for document without walking it. The newest listed
+	/// generation, which most rows of a table carry, is answered without a search.
+	#[inline]
+	pub fn vouches_for(&self, stamp: u64) -> bool {
+		let Ok(Some(generation)) = Generation::of_stamp(stamp) else {
+			return false;
+		};
+		let layout = match self.generations.last() {
+			Some((last, entry)) if *last == generation => Some(entry.layout(&self.table)),
+			_ => self.get(generation),
+		};
+		matches!(layout, Some(GenerationLayout::Readable(descriptor)) if descriptor.is_verified())
+	}
+
+	/// These layouts as a reader that trusts no verification reads them: every listed generation's
+	/// descriptor with its verification dropped, so that no generation is vouched for and every row
+	/// is walked before it is read in place. For a reader that holds the walk to the whole decode
+	/// over rows of any generation, such as a test that damages them.
+	pub fn without_verification(&self) -> Self {
+		let generations = self
+			.generations
+			.iter()
+			.map(|(generation, entry)| {
+				let layout = match entry.layout(&self.table) {
+					GenerationLayout::Readable(descriptor) => {
+						GenerationLayout::Readable(Arc::new(LayoutDescriptor {
+							verified: None,
+							..LayoutDescriptor::clone(descriptor)
+						}))
+					}
+					refused => refused.clone(),
+				};
+				(*generation, Arc::new(GenerationEntry::Decoded(layout)))
+			})
+			.collect();
+		Self {
+			ns: self.ns,
+			db: self.db,
+			table: self.table.clone(),
+			ring: self.ring,
+			ring_refusal: self.ring_refusal.clone(),
+			generations,
+			damaged_keys: self.damaged_keys,
+		}
+	}
+
 	/// [`Self::admit`] for a packed row: the descriptor of `generation` when it lays rows out as
 	/// packed, and [`RecordLayoutError::LayoutMismatch`] when it lays them out as documents.
 	pub fn admit_packed(
@@ -1902,6 +1985,7 @@ pub(crate) mod tests {
 			layout: RowLayout::Packed(packed()),
 			migration: None,
 			migrated: None,
+			verified: None,
 		}
 	}
 
@@ -2014,6 +2098,7 @@ pub(crate) mod tests {
 			layout,
 			migration: None,
 			migrated: None,
+			verified: None,
 		}))
 	}
 
@@ -2030,6 +2115,96 @@ pub(crate) mod tests {
 	fn layouts(ring: GenerationRing, generations: Vec<(u16, GenerationLayout)>) -> TableLayouts {
 		let generations = generations.into_iter().map(|(n, layout)| (g(n), layout)).collect();
 		TableLayouts::new(ns(), db(), t(), ring, generations, 0).expect("layouts")
+	}
+
+	fn document_at(verified: Option<u32>) -> GenerationLayout {
+		GenerationLayout::Readable(Arc::new(LayoutDescriptor {
+			verified,
+			..LayoutDescriptor::document(t())
+		}))
+	}
+
+	/// A document stamped `stamp` whose one string field holds bytes that are not UTF-8: the
+	/// envelope parses, and the whole decode refuses the body.
+	fn damaged_document(stamp: Option<u16>) -> Vec<u8> {
+		use crate::record::{Record, RecordFormat, encode_whole_record};
+		let data = crate::val::Object::from(std::collections::BTreeMap::from([(
+			"a",
+			Value::String(Strand::new("~~~~")),
+		)]));
+		let format = RecordFormat::Document {
+			generation: stamp.map(g),
+		};
+		let mut bytes =
+			encode_whole_record(format, &Record::new(Value::Object(data)), None).expect("encodes");
+		let at = bytes.windows(4).position(|w| w == b"~~~~").expect("the string's bytes");
+		bytes[at] = 0xFF;
+		bytes
+	}
+
+	#[test]
+	fn a_generation_is_vouched_for_only_by_a_trusted_epoch() {
+		let table = layouts(
+			ring(1, 3),
+			vec![
+				(1, document_at(Some(VERIFIED_EPOCH))),
+				(2, document_at(Some(0))),
+				(3, document_at(None)),
+			],
+		);
+		assert!(table.vouches_for(1), "a trusted epoch vouches");
+		assert!(!table.vouches_for(2), "an epoch below the trusted one does not");
+		assert!(!table.vouches_for(3), "no epoch does not");
+		assert!(!table.vouches_for(0), "stamp 0 has no descriptor to vouch");
+		assert!(!table.vouches_for(4), "an unlisted generation is not vouched for");
+		assert!(!table.vouches_for(u64::MAX), "a stamp that names no generation is not");
+		let head = layouts(
+			ring(1, 2),
+			vec![(1, document_at(None)), (2, document_at(Some(VERIFIED_EPOCH)))],
+		);
+		assert!(head.vouches_for(2), "the head is answered on the fast path");
+		assert!(!head.vouches_for(1), "an older generation is looked up");
+		let refused = layouts(ring(1, 1), vec![(1, refused())]);
+		assert!(!refused.vouches_for(1), "a refused descriptor vouches for nothing");
+	}
+
+	#[test]
+	fn a_document_is_walked_unless_its_generation_is_verified() {
+		use crate::record::StoredRecord;
+		let verified = layouts(ring(1, 1), vec![(1, document_at(Some(VERIFIED_EPOCH)))]);
+		let unverified = layouts(ring(1, 1), vec![(1, document_at(None))]);
+		let bytes = damaged_document(Some(1));
+		let record = StoredRecord::parse(&bytes).expect("parses").expect("a v1 record");
+		// The walk refuses the damaged body: no layouts, or layouts that do not vouch.
+		assert!(record.checked_document().is_err());
+		assert!(record.admit_document(None).is_err());
+		assert!(record.admit_document(Some(&unverified)).is_err());
+		// A verified generation admits its document as it is.
+		let document =
+			record.admit_document(Some(&verified)).expect("admitted").expect("a document");
+		assert!(document.is_verified());
+		// Stamp 0 is never vouched for, whatever the layouts say of generation 1.
+		let bytes = damaged_document(None);
+		let record = StoredRecord::parse(&bytes).expect("parses").expect("a v1 record");
+		assert!(record.admit_document(Some(&verified)).is_err());
+		// A sound document is admitted either way, walked where it is not vouched for.
+		let data = crate::val::Object::from(std::collections::BTreeMap::from([(
+			"a",
+			Value::String(Strand::new("~~~~")),
+		)]));
+		let sound = crate::record::encode_whole_record(
+			crate::record::RecordFormat::Document {
+				generation: Some(g(1)),
+			},
+			&crate::record::Record::new(Value::Object(data)),
+			None,
+		)
+		.expect("encodes");
+		let record = StoredRecord::parse(&sound).expect("parses").expect("a v1 record");
+		let walked =
+			record.admit_document(Some(&unverified)).expect("admitted").expect("a document");
+		assert!(!walked.is_verified());
+		assert_eq!(walked.bytes(), record.checked_document().unwrap().unwrap().bytes());
 	}
 
 	#[test]
@@ -2124,6 +2299,7 @@ pub(crate) mod tests {
 				},
 			}),
 			migrated: migrated.map(g),
+			verified: None,
 		}))
 	}
 

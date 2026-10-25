@@ -26,7 +26,7 @@ use revision::optimised::tag::{SizeClass, Tag};
 use surrealdb_strand::Strand;
 
 use super::scalar::Scalar;
-use crate::catalog::StoredRecord;
+use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::object_extract::{
 	PathSegment, indexed_map_walker_from_object_bytes, lookup_value_bytes_in_map,
 	rev2_record_data_bytes,
@@ -252,15 +252,17 @@ impl<'a> Layout<'a> {
 	/// record, or neither.
 	///
 	/// `value` is admitted by the caller ([`StoredRow`]): the generation of a
-	/// document is not read here.
-	fn of(value: &'a [u8]) -> Self {
+	/// document is not read here. `layouts` are the layouts that admitted it: a
+	/// document of a generation they vouch for is read in place unwalked
+	/// ([`StoredRecord::admit_document`]), and any other document is walked first.
+	fn of(value: &'a [u8], layouts: Option<&TableLayouts>) -> Self {
 		if value.first() == Some(&StoredRecord::MARKER) {
 			// A record that does not parse, or whose data is not an object, is
 			// decoded whole, which reports what is wrong with it.
 			// A packed record has no document, and a document a whole decode refuses is
 			// not read in place: either way it is decoded whole.
 			return match StoredRecord::parse(value) {
-				Ok(Some(record)) => match record.checked_document() {
+				Ok(Some(record)) => match record.admit_document(layouts) {
 					Ok(Some(document)) => match document.value().and_then(|v| v.as_object()) {
 						Ok(Some(object)) => Self::Stored(object.validated()),
 						_ => Self::Whole,
@@ -282,10 +284,17 @@ impl<'a> Layout<'a> {
 
 impl<'a> StoredRow<'a> {
 	pub(super) fn new(key: &'a [u8], value: &'a [u8]) -> Self {
+		Self::admitted(key, value, None)
+	}
+
+	/// The row of the record `key` names, whose generation `layouts` admitted:
+	/// a document of a generation they vouch for is read in place without a
+	/// walk of its bytes.
+	pub(super) fn admitted(key: &'a [u8], value: &'a [u8], layouts: Option<&TableLayouts>) -> Self {
 		Self {
 			key,
 			value,
-			layout: Layout::of(value),
+			layout: Layout::of(value, layouts),
 			decoded: OnceCell::new(),
 			id: OnceCell::new(),
 		}

@@ -18,7 +18,7 @@ use super::{
 use crate::catalog::StoredRecord;
 use crate::exec::operators::scan::pipeline::decode_record_value;
 use crate::exec::operators::test_util::TestDb;
-use crate::exec::vm::tests_packed_reads::{dataset, layouts_of, rows};
+use crate::exec::vm::tests_packed_reads::{dataset, layouts_of, rows, unverified_layouts_of};
 use crate::expr::operator::BinaryOperator::{self, *};
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
@@ -275,7 +275,7 @@ async fn a_packed_row_is_judged_as_the_same_record_stored_as_a_document() {
 async fn a_corrupt_packed_row_is_not_rejected() {
 	let db = TestDb::new(&dataset()).await;
 	let rows = rows(&db, "p").await;
-	let layouts = layouts_of(&db, "p", &rows).await;
+	let layouts = unverified_layouts_of(&db, "p", &rows).await;
 	let filters: Vec<(PredNode, PreDecodeFilter)> = predicates()
 		.into_iter()
 		.step_by(7)

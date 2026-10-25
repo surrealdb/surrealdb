@@ -475,7 +475,7 @@ impl RowFrame {
 			}
 			// A document the whole decode refuses falls through to that decode, which reports it.
 			if let Some(record) = record
-				&& let Ok(Some(document)) = record.checked_document()
+				&& let Ok(Some(document)) = record.admit_document(layouts)
 				&& let Some(object) = document.value()?.as_object()?.map(ObjectRef::validated)
 			{
 				return stored.stored_object(object, Some(key), 1);
@@ -584,8 +584,8 @@ impl RowFrame {
 		// A document is written in the document shape, its entries transcoded in place; one the
 		// whole decode refuses falls through to that decode, which reports it.
 		if let Some(record) = record
-			&& let Ok(Some(document)) = record.checked_document()
-			&& let Some(object) = document.value()?.as_ordered_object()?
+			&& let Ok(Some(document)) = record.admit_document(layouts)
+			&& let Some(object) = document.value()?.as_object()?.map(ObjectRef::validated)
 		{
 			let shape = match &shaped.document {
 				Some(shape) => Arc::clone(shape),
@@ -2284,6 +2284,7 @@ mod tests {
 			layout: RowLayout::Packed(packed_descriptor),
 			migration: None,
 			migrated: None,
+			verified: None,
 		});
 		let ring = GenerationRing::new(generation, generation, None).expect("ring");
 		let layouts = TableLayouts::new(

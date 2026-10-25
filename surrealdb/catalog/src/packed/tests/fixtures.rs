@@ -54,6 +54,7 @@ fn case(
 			layout: RowLayout::Packed(descriptor(open, &named(children))),
 			migration: None,
 			migrated: None,
+			verified: None,
 		},
 		generation,
 		flags,

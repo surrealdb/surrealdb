@@ -473,7 +473,7 @@ impl ScanRow<'_> {
 		};
 		if judged
 			&& let Some(pdf) = self.pdf
-			&& pdf.apply(&admitted) == PreDecodeFilterOutcome::Reject
+			&& pdf.apply_in(&admitted, self.layouts) == PreDecodeFilterOutcome::Reject
 		{
 			// A rejected row still counts as scanned: the cursor read it.
 			return Ok(());

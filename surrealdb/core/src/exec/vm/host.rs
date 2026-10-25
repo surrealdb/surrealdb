@@ -48,6 +48,7 @@ use crate::exec::operators::scan::{
 use crate::exec::packed_view::AdmittedRow;
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::planner::placement::MorselInput;
+use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::vm::degree::DegreeCounter;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -3559,7 +3560,6 @@ async fn scan_decoded_cut(
 	flush_at: usize,
 	coarse: &mut CoarseGate,
 ) -> FlowResult<bool> {
-	use crate::exec::pre_decode_filter::PreDecodeFilterOutcome;
 	// The body's first step refuses what the shape judges false, so a record
 	// the stored bytes show it would refuse is not decoded.
 	let prefilter = pipeline
@@ -3623,7 +3623,7 @@ async fn scan_decoded_cut(
 				};
 				if judged
 					&& let Some(filter) = prefilter.as_deref()
-					&& filter.apply(&admitted) == PreDecodeFilterOutcome::Reject
+					&& filter.apply_in(&admitted, Some(layouts)) == PreDecodeFilterOutcome::Reject
 				{
 					return Ok(std::ops::ControlFlow::Continue(()));
 				}
@@ -3668,7 +3668,7 @@ async fn scan_decoded_cut(
 			};
 			let refused = judged
 				&& prefilter.as_deref().is_some_and(|filter| {
-					filter.apply(&admitted) == PreDecodeFilterOutcome::Reject
+					filter.apply_in(&admitted, layouts) == PreDecodeFilterOutcome::Reject
 				});
 			if !refused {
 				decoded.push(admitted.decode(&key, &value, layouts).map_err(ControlFlow::Err)?);
@@ -3732,6 +3732,7 @@ async fn scan_in_place(
 	mut coarse: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	let topk_probe = armed_probe(pipeline, state);
+	let prefilter = in_place_prefilter(pipeline, ctx);
 	let txn = ctx.txn();
 	let reader: Arc<dyn super::read_ahead::Reader> = Arc::clone(&txn) as _;
 	let budget = pipeline.read_ahead.then(|| ctx.root().ctx.config.exec.scan_batch_bytes);
@@ -3808,6 +3809,7 @@ async fn scan_in_place(
 						scan_row(
 							program,
 							pipeline,
+							prefilter.as_deref(),
 							topk_probe.as_ref(),
 							topk_threshold.as_deref(),
 							key,
@@ -3851,6 +3853,7 @@ async fn scan_in_place(
 					scan_row(
 						program,
 						pipeline,
+						prefilter.as_deref(),
 						topk_probe.as_ref(),
 						topk_threshold.as_deref(),
 						&key,
@@ -3891,10 +3894,11 @@ async fn scan_in_place(
 	outcome
 }
 
-/// Run an admitted record of an in-place scan: refused unread when the top-k
-/// probe shows its ORDER BY key cannot beat the sort's worst kept row,
-/// otherwise run through the body ([`in_place_row_admitted`]). Answers whether
-/// the pipeline takes no more rows.
+/// Run an admitted record of an in-place scan: refused unread when the scan's
+/// pre-decode filter judges it false from its stored bytes ([`in_place_rejects`])
+/// or the top-k probe shows its ORDER BY key cannot beat the sort's worst kept
+/// row, otherwise run through the body ([`in_place_row_admitted`]). Answers
+/// whether the pipeline takes no more rows.
 ///
 /// The caller has admitted the record's generation ([`RowGate::admit`]), so
 /// neither the probe nor the body reads a field of a record the table's
@@ -3906,6 +3910,7 @@ async fn scan_in_place(
 fn scan_row(
 	program: &Program,
 	pipeline: &Pipeline,
+	prefilter: Option<&PreDecodeFilter>,
 	probe: Option<&Arc<crate::exec::topk_pushdown::TopKThresholdProbe>>,
 	threshold: Option<&Value>,
 	key: &[u8],
@@ -3914,12 +3919,72 @@ fn scan_row(
 	state: &mut State,
 ) -> anyhow::Result<bool> {
 	let admitted = admit_row(pipeline, probe.zip(threshold), key, value, layouts);
+	if let Some(filter) = prefilter
+		&& in_place_rejects(filter, &admitted, layouts)
+	{
+		return Ok(false);
+	}
 	if let (Some(probe), Some(threshold)) = (probe, threshold)
 		&& probe.rejects(threshold, &admitted)
 	{
 		return Ok(false);
 	}
 	in_place_row_admitted(program, pipeline, key, value, &admitted, layouts, state)
+}
+
+/// The pre-decode filter an in-place scan runs ahead of its body
+/// ([`in_place_rejects`]), compiled once for the scan from the shape its
+/// source carries: `None` when the scan carries none.
+///
+/// The shape is the WHERE the body refuses rows by first, so a record the
+/// filter judges false is one the body would refuse: the scan passes it over
+/// without running the body.
+pub(super) fn in_place_prefilter(
+	pipeline: &Pipeline,
+	ctx: &ExecutionContext,
+) -> Option<Arc<PreDecodeFilter>> {
+	pipeline
+		.source
+		.prefilter()
+		.map(|shape| shape.filter(ctx.root().ctx.config.exec.idiom_recursion_limit))
+}
+
+/// Whether `filter` refuses the admitted record of an in-place scan from its
+/// stored bytes, ahead of the body.
+///
+/// The filter judges a record only where it reads it without a walk of its own:
+/// a packed row the admission checked ([`AdmittedRow::Packed`]), and a document
+/// of a generation `layouts` vouch for ([`TableLayouts::vouches_for`]). Either
+/// is a row the whole decode accepts, so the filter refuses one only where the
+/// predicate is false of the record the decode holds, as ADR 0010 requires.
+/// Any other record is left to the body, which reads it as it would: a
+/// document of an unverified generation is walked once, by the body's
+/// admission, rather than once for the filter and again for the body.
+#[inline]
+pub(super) fn in_place_rejects(
+	filter: &PreDecodeFilter,
+	admitted: &AdmittedRow<'_>,
+	layouts: Option<&TableLayouts>,
+) -> bool {
+	let judged = match admitted {
+		AdmittedRow::Packed {
+			..
+		} => true,
+		AdmittedRow::Bytes(value) => layouts.is_some_and(|layouts| {
+			matches!(
+				StoredRecord::parse(value),
+				Ok(Some(record)) if !record.is_packed() && layouts.vouches_for(record.stamp())
+			)
+		}),
+		AdmittedRow::Refused => false,
+	};
+	let rejects = judged && filter.apply_in(admitted, layouts) == PreDecodeFilterOutcome::Reject;
+	// A packed row the filter refuses has been read in place, by the filter rather than the body.
+	#[cfg(test)]
+	if rejects && matches!(admitted, AdmittedRow::Packed { .. }) {
+		super::row_packed::observed::note_in_place();
+	}
+	rejects
 }
 
 /// The record `value` of `key`, checked when a packed row is read where its columns lie: by the
@@ -4023,7 +4088,7 @@ pub(super) fn in_place_row_admitted(
 		}
 		return Ok(stop);
 	}
-	let row = StoredRow::new(key, value);
+	let row = StoredRow::admitted(key, value, layouts);
 	let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
 	if state.pending.is_some() {
 		state.decoded += 1;

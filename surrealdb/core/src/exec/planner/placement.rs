@@ -1127,7 +1127,7 @@ impl Policy {
 	/// node's cores, and at least as many as the host's places run at once for the scan.
 	pub(crate) fn read_ahead(self) -> usize {
 		#[cfg(not(target_family = "wasm"))]
-		let node = 2 * std::thread::available_parallelism().map_or(1, |cores| cores.get());
+		let node = 2 * node_cores();
 		#[cfg(target_family = "wasm")]
 		let node = 1;
 		node.max(self.host_width)
@@ -1234,6 +1234,18 @@ fn folds_floats(legality: &Legality) -> bool {
 		&legality.sink,
 		SinkCombine::Aggregate(combines) if combines.contains(&AggregateCombine::InexactFloat)
 	)
+}
+
+/// The node's cores, as [`std::thread::available_parallelism`] answers once for the process: 1
+/// when it cannot tell.
+///
+/// The answer is read once and kept. On Linux each call of `available_parallelism` reads the
+/// process's cgroup files (an `open`, a `read` and a `close` apiece), which a scan that asks once
+/// per batch pays on every batch of every concurrent scan.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn node_cores() -> usize {
+	static CORES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+	*CORES.get_or_init(|| std::thread::available_parallelism().map_or(1, |cores| cores.get()))
 }
 
 #[cfg(test)]
