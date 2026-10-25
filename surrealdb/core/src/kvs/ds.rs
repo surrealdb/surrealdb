@@ -156,6 +156,7 @@ use crate::{CommunityComposer, syn};
 
 mod builder;
 pub(crate) mod config;
+mod doc_ids_reclaim;
 mod edge;
 #[cfg(all(test, feature = "kv-mem"))]
 mod edge_tests;
@@ -167,6 +168,7 @@ mod table_migration;
 
 pub use builder::Builder;
 pub use config::LiveQueryEngine;
+pub(crate) use doc_ids_reclaim::{DocIdsReclaimPending, DocIdsReclaimStep};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 

@@ -2349,13 +2349,17 @@ async fn step_inner(
 					.map_err(ControlFlow::Err)?
 					== crate::kvs::tx::DocIdsReclaimClaim::InProgress
 			{
-				return Err(ControlFlow::Err(anyhow::Error::new(
-					crate::kvs::DatastoreError::QueryNotExecuted {
-						message: format!(
-							"The shared document-ID space for table `{tb}` is still being reclaimed; retry {retry} after cleanup completes"
-						),
-					},
-				)));
+				// A retryable conflict: the executor finishes the reclaim and runs
+				// a statement in a transaction of its own again, and a client
+				// retries one it could not.
+				return Err(ControlFlow::Err(
+					crate::kvs::DocIdsReclaimPending {
+						ns,
+						db,
+						tb,
+					}
+					.into_error(retry),
+				));
 			}
 		}
 		StoreInstr::AdmitIndexFormat {

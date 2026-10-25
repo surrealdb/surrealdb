@@ -1393,31 +1393,21 @@ async fn a_doc_id_reclaim_never_takes_the_out_of_transaction_destroy() {
 		);
 	}
 
-	// A started claim cannot be withdrawn or adopted, and the rejected DDL does
-	// not turn the remainder into one unbounded transaction.
-	let left = count_range(&ds, dd.clone()).await + count_range(&ds, di.clone()).await;
-	let mut response =
-		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
-	let error = response.remove(0).result.unwrap_err().to_string();
-	assert!(error.contains("still being reclaimed"));
-	assert_eq!(
-		count_range(&ds, dd.clone()).await + count_range(&ds, di.clone()).await,
-		left,
-		"the rejected DDL must not synchronously purge the remainder"
-	);
-
-	Datastore::reclaim_tombstones(
-		Arc::clone(&ds),
-		Duration::from_secs(1),
-		Duration::ZERO,
-		CancellationToken::new(),
-	)
-	.await
-	.unwrap();
-	assert_eq!(count_range(&ds, dd).await + count_range(&ds, di).await, 0);
+	// A started claim cannot be withdrawn or adopted. The DDL that meets it
+	// finishes the remainder in the same bounded pages, never through the
+	// out-of-transaction destroy, and then defines its index.
 	let mut response =
 		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
 	response.remove(0).result.unwrap();
+	assert_eq!(count_range(&ds, dd.clone()).await + count_range(&ds, di.clone()).await, 0);
+	for (name, range) in [("!dd", &dd), ("!di", &di)] {
+		let bounds = (range.start().as_ref().to_vec(), range.end().as_ref().to_vec());
+		assert!(
+			!destroyed.ranges().contains(&bounds),
+			"{name} must not be handed to the out-of-transaction destroy by the DDL either"
+		);
+	}
+	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), 0);
 }
 
 /// A prefix emptied by the very page that spends the budget is retired there.
@@ -1777,15 +1767,16 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 }
 
 /// A reclaim that has already begun leaves the shared doc-ID space torn, so
-/// defining a consumer waits for the bounded reclaim rather than adopting it or
-/// purging the remainder in the DDL transaction.
+/// defining a consumer finishes the bounded reclaim, in its pages, before it
+/// adopts the space, rather than adopting it torn or purging the remainder in
+/// the DDL transaction.
 ///
 /// The prefixes are reclaimed independently and page by page, so a
 /// surviving `!dj` entry may have lost the `!dd` twin that resolves its id.
 /// Adopting one would give the new index entries pointing at a doc-ID that
 /// resolves to no record.
 #[tokio::test]
-async fn defining_a_doc_id_index_waits_for_a_partly_reclaimed_doc_id_space() {
+async fn defining_a_doc_id_index_finishes_a_partly_reclaimed_doc_id_space() {
 	let page = RECLAIM_BATCH_SIZE as usize;
 	let ds = mem_ds().await;
 	let ses = Session::owner().with_ns("test").with_db("tenant");
@@ -1826,56 +1817,29 @@ async fn defining_a_doc_id_index_waits_for_a_partly_reclaimed_doc_id_space() {
 		"the pass must have torn the space, not finished or skipped it: {left} left"
 	);
 
-	let queue_before = reclaim_queue_len(&ds).await;
-	let mut response =
-		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
-	let error = response.remove(0).result.unwrap_err().to_string();
-	assert!(
-		error.contains("still being reclaimed"),
-		"the DDL must ask the caller to retry while bounded cleanup continues: {error}"
-	);
-
-	assert_eq!(
-		count_range(&ds, di.clone()).await + count_range(&ds, dd.clone()).await,
-		left,
-		"the rejected DDL must not synchronously purge the torn space"
-	);
-	assert_eq!(
-		reclaim_queue_len(&ds).await,
-		queue_before,
-		"the rejected DDL must leave the bounded reclaim resumable"
-	);
-
-	Datastore::reclaim_tombstones(
-		Arc::clone(&ds),
-		Duration::from_secs(1),
-		Duration::ZERO,
-		CancellationToken::new(),
-	)
-	.await
-	.unwrap();
-	assert_eq!(
-		count_range(&ds, di).await + count_range(&ds, dd).await,
-		0,
-		"the background reaper must finish the torn space"
-	);
-	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), 0);
-
+	// The DDL finishes the torn space's reclaim and runs again, so the caller
+	// sees it succeed rather than being asked to retry.
 	let mut response =
 		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
 	response.remove(0).result.unwrap();
+	assert_eq!(
+		count_range(&ds, di).await + count_range(&ds, dd).await,
+		0,
+		"the DDL must finish the torn space before adopting it"
+	);
+	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), 0);
 	let _ = index_id(&ds, ns_id, db_id, "thing", "idx").await;
 }
 
 /// A sibling prefix the reaper drained and retired leaves the space torn, so
-/// defining a consumer waits for the surviving bounded reclaim entries.
+/// defining a consumer finishes the surviving bounded reclaim entries first.
 ///
 /// Retiring an entry destroys the cursor that recorded what it had deleted, so a
 /// torn space can be left with no survivor carrying a cursor. What still says the
 /// space is torn is the count: the entries are enqueued together, so a
 /// strict subset of them surviving means the rest were drained and retired.
 #[tokio::test]
-async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
+async fn defining_a_doc_id_index_finishes_when_a_sibling_entry_has_retired() {
 	let page = RECLAIM_BATCH_SIZE as usize;
 	let ds = mem_ds().await;
 	let ses = Session::owner().with_ns("test").with_db("tenant");
@@ -1945,31 +1909,12 @@ async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
 		"`!dd`'s siblings must be left queued, never having been reached"
 	);
 
-	let queue_before = reclaim_queue_len(&ds).await;
+	// The missing sibling says the space is torn, so the DDL finishes the
+	// surviving entries before it adopts the space.
 	let mut response =
 		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
-	let error = response.remove(0).result.unwrap_err().to_string();
-	assert!(
-		error.contains("still being reclaimed"),
-		"the missing sibling must make the DDL wait for cleanup: {error}"
-	);
-
-	assert_eq!(
-		count_range(&ds, di.clone()).await,
-		page,
-		"the rejected DDL must not synchronously purge surviving mappings"
-	);
-	assert_eq!(reclaim_queue_len(&ds).await, queue_before);
-
-	Datastore::reclaim_tombstones(
-		Arc::clone(&ds),
-		Duration::from_secs(1),
-		Duration::ZERO,
-		CancellationToken::new(),
-	)
-	.await
-	.unwrap();
-	assert_eq!(count_range(&ds, di).await, 0);
+	response.remove(0).result.unwrap();
+	assert_eq!(count_range(&ds, di).await, 0, "the surviving mappings must be reclaimed");
 	let kinds = reclaim_queue_kinds(&ds).await;
 	assert_eq!(count_doc_kinds(&kinds), 0, "the bounded reclaim must finish");
 	assert_eq!(
@@ -1977,10 +1922,6 @@ async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
 		kinds.len(),
 		"only unrelated index-prefix work may remain"
 	);
-
-	let mut response =
-		ds.execute("DEFINE INDEX idx ON thing FIELDS val;", &ses, None).await.unwrap();
-	response.remove(0).result.unwrap();
 	let _ = index_id(&ds, ns_id, db_id, "thing", "idx").await;
 }
 
@@ -2347,10 +2288,10 @@ async fn rebuilding_a_legacy_index_cancels_a_queued_doc_id_reclaim() {
 }
 
 /// A legacy-index rebuild cannot adopt a shared doc-ID space after its bounded
-/// reclaim has started. It leaves both the legacy format and queue intact, then
-/// succeeds after the background task finishes the cleanup.
+/// reclaim has started, so it finishes the reclaim and then stamps the current
+/// format.
 #[tokio::test]
-async fn rebuilding_a_legacy_index_waits_for_a_partly_reclaimed_doc_id_space() {
+async fn rebuilding_a_legacy_index_finishes_a_partly_reclaimed_doc_id_space() {
 	let page = RECLAIM_BATCH_SIZE as usize;
 	let ds = mem_ds().await;
 	let ses = Session::owner().with_ns("test").with_db("tenant");
@@ -2393,36 +2334,80 @@ async fn rebuilding_a_legacy_index_waits_for_a_partly_reclaimed_doc_id_space() {
 	.await
 	.unwrap();
 	let left = count_range(&ds, di.clone()).await + count_range(&ds, dd.clone()).await;
+	assert!(left > 0, "the pass must have left the space torn");
 
 	let mut response = ds.execute("REBUILD INDEX legacy ON thing;", &ses, None).await.unwrap();
-	let error = response.remove(0).result.unwrap_err().to_string();
-	assert!(error.contains("still being reclaimed"));
-	assert_eq!(
-		count_range(&ds, di.clone()).await + count_range(&ds, dd.clone()).await,
-		left,
-		"the rejected rebuild must not synchronously purge the remainder"
-	);
+	response.remove(0).result.unwrap();
+	// What is left is the rebuilt index's own mappings for the table's two
+	// records, not the seeded remainder.
+	let after = count_range(&ds, di).await + count_range(&ds, dd).await;
+	assert!(after <= 4, "the rebuild must finish the reclaim before adopting the space: {after}");
+	assert_eq!(count_doc_kinds(&reclaim_queue_kinds(&ds).await), 0);
 	let txn = ds.transaction(Read).await.unwrap();
 	let legacy = txn.get_tb_index(ns_id, db_id, &tb, "legacy", None).await.unwrap().unwrap();
-	assert!(!legacy.uses_shared_doc_ids(), "the rejected rebuild must not stamp the new format");
+	assert!(legacy.uses_shared_doc_ids(), "the rebuild must stamp the current format");
 	let _ = txn.cancel().await;
+}
 
-	Datastore::reclaim_tombstones(
+/// Inside a transaction block, which the executor cannot run again, a
+/// definition over a torn doc-ID space fails with a retryable transaction
+/// conflict, and the reclaim is finished before the block's result returns, so
+/// the client's retry succeeds at once.
+#[tokio::test]
+async fn a_block_defining_a_doc_id_index_over_a_torn_space_can_be_retried_at_once() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = mem_ds().await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE tenant;
+		 DEFINE TABLE thing SCHEMALESS;
+		 DEFINE INDEX idx ON thing FIELDS val;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let tb = TableName::from("thing");
+	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	let dd = DocKeyPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	seed_range(&ds, &di, page * 2).await;
+	seed_range(&ds, &dd, page * 2).await;
+	ds.execute("REMOVE INDEX idx ON thing;", &ses, None).await.unwrap();
+	Datastore::reclaim_tombstones_with_budget(
 		Arc::clone(&ds),
 		Duration::from_secs(1),
 		Duration::ZERO,
+		page as u64,
 		CancellationToken::new(),
 	)
 	.await
 	.unwrap();
-	assert_eq!(count_range(&ds, di).await + count_range(&ds, dd).await, 0);
+	assert!(count_range(&ds, di.clone()).await + count_range(&ds, dd.clone()).await > 0);
 
-	let mut response = ds.execute("REBUILD INDEX legacy ON thing;", &ses, None).await.unwrap();
-	response.remove(0).result.unwrap();
-	let txn = ds.transaction(Read).await.unwrap();
-	let legacy = txn.get_tb_index(ns_id, db_id, &tb, "legacy", None).await.unwrap().unwrap();
-	assert!(legacy.uses_shared_doc_ids(), "the retry must stamp the current format");
-	let _ = txn.cancel().await;
+	let block = "BEGIN; DEFINE INDEX idx ON thing FIELDS val; COMMIT;";
+	let response = ds.execute(block, &ses, None).await.unwrap();
+	let error = response
+		.into_iter()
+		.find_map(|result| result.result.err())
+		.expect("the block's definition must fail");
+	assert_eq!(
+		error.query_details(),
+		Some(&surrealdb_types::QueryError::TransactionConflict),
+		"the refusal must be a conflict an SDK retries: {error}"
+	);
+	assert!(error.to_string().contains("still being reclaimed"), "{error}");
+	assert_eq!(
+		count_range(&ds, di).await + count_range(&ds, dd).await,
+		0,
+		"the reclaim must be finished before the block's result returns"
+	);
+
+	for result in ds.execute(block, &ses, None).await.unwrap() {
+		result.result.unwrap();
+	}
+	let _ = index_id(&ds, ns_id, db_id, "thing", "idx").await;
 }
 
 /// Queue one database-reclaim entry with its observation stamp staged, and seed
@@ -2660,4 +2645,48 @@ async fn the_walk_is_paged_across_passes() {
 	let total = slice + 1 + queued;
 	assert_eq!(stamped(&queue_observations(&ds).await), total, "every entry is stamped");
 	assert_eq!(reclaim_queue_len(&ds).await, total, "none within the grace is retired");
+}
+
+/// A step of a refused statement's doc-ID reclaim stops at once when its
+/// canceller has tripped, deleting nothing, so a query cancelled or timed out
+/// while it waits is not held by the reclaim.
+#[tokio::test]
+async fn a_cancelled_doc_id_reclaim_step_stops_without_deleting() {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = mem_ds().await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	ds.execute(
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE tenant;
+		 DEFINE TABLE thing SCHEMALESS;
+		 DEFINE INDEX idx ON thing FIELDS val;",
+		&ses,
+		None,
+	)
+	.await
+	.unwrap();
+	let (ns_id, db_id) = ids(&ds, "test", "tenant").await;
+	let tb = TableName::from("thing");
+	let di = DocLookupPrefix::new(ns_id, db_id, Cow::Borrowed(&tb)).raw_range().unwrap();
+	seed_range(&ds, &di, page * 2).await;
+	ds.execute("REMOVE INDEX idx ON thing;", &ses, None).await.unwrap();
+	Datastore::reclaim_tombstones_with_budget(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::ZERO,
+		page as u64,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	let left = count_range(&ds, di.clone()).await;
+	assert!(left > 0, "the pass must have left the space torn");
+
+	let canceller = CancellationToken::new();
+	canceller.cancel();
+	let step = ds
+		.finish_tb_doc_ids_reclaim_step(ns_id, db_id, &tb, RECLAIM_PASS_KEY_BUDGET, &canceller)
+		.await;
+	assert!(step.is_err(), "a cancelled step must stop: {step:?}");
+	assert_eq!(count_range(&ds, di).await, left, "a cancelled step must delete nothing");
 }

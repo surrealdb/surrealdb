@@ -53,6 +53,7 @@ pub use ds::{
 	Builder, Datastore, IndexBuildsRun, LiveQueryEngine, StatementCacheStats,
 	TransactionBuilderFactory, TransactionBuilderParts,
 };
+pub(crate) use ds::{DocIdsReclaimPending, DocIdsReclaimStep};
 pub(crate) use err::Error;
 pub use request::{
 	BeginRequest, Dialect, QueryRequest, QuerySource, ReadOnlyOptions, snapshot_description,

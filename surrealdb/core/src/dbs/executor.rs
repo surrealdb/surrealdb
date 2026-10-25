@@ -46,7 +46,8 @@ use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
 use crate::kvs::{
-	Datastore, DatastoreError, Isolation, ReadOnlyOptions, Transaction, TransactionType,
+	Datastore, DatastoreError, DocIdsReclaimPending, DocIdsReclaimStep, Isolation, ReadOnlyOptions,
+	Transaction, TransactionType,
 };
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
@@ -81,6 +82,15 @@ const STATEMENT_CONFLICT_MIN_BACKOFF: Duration = Duration::from_millis(1);
 /// The longest wait before a re-run of a statement that lost a conflict,
 /// before jitter.
 const STATEMENT_CONFLICT_MAX_BACKOFF: Duration = Duration::from_millis(32);
+
+/// The keys one step of a refused index statement's doc-ID reclaim deletes
+/// before the query's cancellation and timeout are checked again
+/// (`Executor::finish_doc_ids_reclaim`): ten committed pages.
+const DOC_IDS_RECLAIM_STEP_KEYS: u64 = crate::kvs::RECLAIM_BATCH_SIZE as u64 * 10;
+
+/// How long a refused index statement waits between looks at a doc-ID reclaim
+/// that another node's reaper is running.
+const DOC_IDS_RECLAIM_POLL: Duration = Duration::from_millis(100);
 
 /// What a statement that lost a conflict runs again from
 /// (`Executor::execute_rerunning_on_conflict`).
@@ -3339,6 +3349,14 @@ impl Executor {
 			// second attempt's.
 			let released =
 				staging && self.stream.as_mut().is_some_and(|sink| sink.discard_staged(index));
+			// A statement refused because its table's shared doc-ID space is
+			// part-way through a reclaim finishes the reclaim first, so the run
+			// below, or a client's retry where there is none, can claim the space.
+			if let Some(pending) = DocIdsReclaimPending::of(&e).cloned()
+				&& !self.finish_doc_ids_reclaim(kvs, &pending, &mut budget).await?
+			{
+				return Err(e);
+			}
 			// A commit whose outcome is unknown is not a retryable conflict,
 			// so a statement that may have applied is never run again.
 			if released || !rerunnable || !crate::kvs::is_retryable_transaction_conflict(&e) {
@@ -3485,6 +3503,71 @@ impl Executor {
 			}
 		}
 		Ok(true)
+	}
+
+	/// Finish the reclaim of the shared doc-ID space `pending` names, which a
+	/// `DEFINE INDEX` or `REBUILD INDEX` was refused for, so that a claim made
+	/// afterwards finds nothing torn queued.
+	///
+	/// The reclaim is advanced in bounded steps, and between them the query's
+	/// cancellation and timeout are checked and the time spent is taken from
+	/// `budget`; `false` when `budget` runs out first. Where another node holds
+	/// the reclaim lease this waits for that node's reaper to finish instead.
+	async fn finish_doc_ids_reclaim(
+		&self,
+		kvs: &Datastore,
+		pending: &DocIdsReclaimPending,
+		budget: &mut Option<Duration>,
+	) -> Result<bool> {
+		let began = Instant::now();
+		let out_of_time =
+			|budget: &Option<Duration>| budget.is_some_and(|left| began.elapsed() >= left);
+		let finished = loop {
+			self.bail_if_done()?;
+			if out_of_time(budget) {
+				break false;
+			}
+			// A step can wait inside its lease check's retries, so it is held to
+			// the query's cancellation and deadline from outside: polled while it
+			// runs, and stopped through its canceller once either is reached.
+			let canceller = tokio_util::sync::CancellationToken::new();
+			let mut step = pin!(kvs.finish_tb_doc_ids_reclaim_step(
+				pending.ns,
+				pending.db,
+				&pending.tb,
+				DOC_IDS_RECLAIM_STEP_KEYS,
+				&canceller,
+			));
+			let step = loop {
+				tokio::select! {
+					step = &mut step => break step,
+					_ = common::time::sleep(DOC_IDS_RECLAIM_POLL) => {
+						if self.ctx.done(true)?.is_some() || out_of_time(budget) {
+							canceller.cancel();
+						}
+					}
+				}
+			};
+			let step = match step {
+				Ok(step) => step,
+				// Stopped from here: the checks at the top of the loop report why.
+				Err(_) if canceller.is_cancelled() => continue,
+				Err(e) => return Err(e),
+			};
+			match step {
+				DocIdsReclaimStep::Claimable => break true,
+				DocIdsReclaimStep::Progressed => {
+					yield_now!();
+				}
+				DocIdsReclaimStep::Waiting => common::time::sleep(DOC_IDS_RECLAIM_POLL).await,
+			}
+		};
+		// Whether what is left still covers a rerun is the retry's own question
+		// (`before_conflict_retry`), not whether the reclaim finished.
+		if let Some(left) = budget {
+			*left = left.saturating_sub(began.elapsed());
+		}
+		Ok(finished)
 	}
 
 	/// Run `stmt` in a transaction of `transaction_type` opened for it alone,
@@ -4596,6 +4679,7 @@ impl Executor {
 								end: FailedEnd::RequestEnd,
 							});
 							self.rewrite_recorded(start_results, &rewrite);
+							let pending = DocIdsReclaimPending::of(&e).cloned();
 
 							// Convert the anyhow error before pushing so we can both
 							// classify it for the metric attribute and store it on the
@@ -4625,6 +4709,19 @@ impl Executor {
 							);
 
 							let _ = txn.cancel().await;
+
+							// A block cannot be run again here, so its refused index
+							// statement reaches the client as a retryable conflict.
+							// Finishing the reclaim first means that retry can claim
+							// the space; the block has failed whatever this reports.
+							if let Some(pending) = pending {
+								let mut budget = kvs.transaction_timeout();
+								if let Err(e) =
+									self.finish_doc_ids_reclaim(kvs, &pending, &mut budget).await
+								{
+									debug!(target: TARGET, "a doc-ID reclaim was left unfinished: {e}");
+								}
+							}
 
 							// A refused `LET` ends the stream, so nothing after it is pulled.
 							while !self.carry_crossed

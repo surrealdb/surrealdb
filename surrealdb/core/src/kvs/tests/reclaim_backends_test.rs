@@ -240,3 +240,196 @@ async fn surrealkv_reclaim_resumes_across_a_restart() {
 	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
 	reclaim_resumes_across_a_restart(&path).await;
 }
+
+/// The queued doc-ID reclaim entries of table `tb` in `test`/`tenant`.
+async fn doc_id_reclaim_entries(ds: &Datastore, tb: &str) -> usize {
+	use std::borrow::Cow;
+
+	use surrealdb_strand::TableName;
+
+	use crate::key::reclaim::ALL_DOC_ID_KINDS;
+	use crate::key::schema::ReclaimTbPrefix;
+
+	let tx = ds.transaction(Read).await.unwrap();
+	let def = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
+	let tb = TableName::from(tb);
+	let mut count = 0;
+	for kind in ALL_DOC_ID_KINDS {
+		let range = ReclaimTbPrefix {
+			kind,
+			ns: def.namespace_id,
+			db: def.database_id,
+			tb: Cow::Borrowed(&tb),
+		}
+		.range()
+		.unwrap();
+		count += tx.count(range, None).await.unwrap();
+	}
+	let _ = tx.cancel().await;
+	count
+}
+
+/// Run `sql` as one statement and fail on its error, without retrying it: a
+/// statement a client would have to retry is what these tests rule out.
+async fn run_once(ds: &Datastore, ses: &Session, sql: &str) {
+	let mut response = ds.execute(sql, ses, None).await.unwrap();
+	if let Err(e) = response.remove(0).result {
+		panic!("`{sql}` failed: {e}");
+	}
+}
+
+/// Wait until index `ix` on `thing` reports its build ready.
+async fn index_ready(ds: &Datastore, ses: &Session, ix: &str) {
+	let sql = format!("INFO FOR INDEX {ix} ON thing");
+	common::time::timeout(Duration::from_secs(30), async {
+		loop {
+			let mut response = ds.execute(&sql, ses, None).await.unwrap();
+			let json = response.remove(0).result.unwrap().into_json_value();
+			match json.pointer("/building/status").and_then(|s| s.as_str()).unwrap_or_default() {
+				"ready" => return,
+				"error" => panic!("the index build failed: {json}"),
+				_ => common::time::sleep(Duration::from_millis(20)).await,
+			}
+		}
+	})
+	.await
+	.expect("the index build must finish");
+}
+
+/// The number of `thing` rows whose `val` is `v`, through the index or a scan.
+async fn count_val(ds: &Datastore, ses: &Session, v: i64, noindex: bool) -> i64 {
+	let with = if noindex {
+		" WITH NOINDEX"
+	} else {
+		""
+	};
+	let sql = format!("SELECT count() FROM thing{with} WHERE val = {v} GROUP ALL");
+	let mut response = ds.execute(&sql, ses, None).await.unwrap();
+	let json = response.remove(0).result.unwrap().into_json_value();
+	json.pointer("/0/count").and_then(|c| c.as_i64()).unwrap_or(0)
+}
+
+/// `DEFINE INDEX` straight after `REMOVE INDEX` on the same table succeeds
+/// without the client retrying, under concurrent writes to the table, both
+/// before the reclaim of the shared doc-ID space has started (the claim cancels
+/// it) and once a page of it has landed (the statement finishes it).
+///
+/// The second case is what crud-bench met: a removal followed, after the
+/// reclaim grace, by a definition that was refused with "still being
+/// reclaimed". The index built over the reclaimed space must then agree with a
+/// scan of the table.
+async fn define_index_after_remove_index(path: &str) {
+	use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = open(path).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	create_tenant(&ds, &ses).await;
+	run_once(&ds, &ses, "DEFINE TABLE thing SCHEMALESS").await;
+	run_once(&ds, &ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	// Enough records that the doc-ID space spans several reclaim pages.
+	for chunk in 0..3 {
+		let rows: Vec<String> = (chunk * page..(chunk + 1) * page)
+			.map(|i| format!("{{ id: {i}, val: {} }}", i % 10))
+			.collect();
+		run_once(&ds, &ses, &format!("INSERT INTO thing [{}]", rows.join(","))).await;
+	}
+	index_ready(&ds, &ses, "idx").await;
+
+	// Writers that create, update and delete records of the table throughout.
+	let stop = Arc::new(AtomicBool::new(false));
+	let written = Arc::new(AtomicUsize::new(0));
+	let writers: Vec<_> = (0..4)
+		.map(|w| {
+			let ds = Arc::clone(&ds);
+			let ses = ses.clone();
+			let stop = Arc::clone(&stop);
+			let written = Arc::clone(&written);
+			tokio::spawn(async move {
+				let mut n = 0usize;
+				while !stop.load(Ordering::Relaxed) {
+					let id = (w * 7919 + n * 104_729) % (page * 4);
+					let sql = match n % 3 {
+						0 => format!("UPSERT thing:{id} SET val = {}", n % 10),
+						1 => format!("UPDATE thing:{id} SET val = {}", (n + 3) % 10),
+						_ => format!("DELETE thing:{id}"),
+					};
+					if let Ok(mut response) = ds.execute(&sql, &ses, None).await
+						&& response.remove(0).result.is_ok()
+					{
+						written.fetch_add(1, Ordering::Relaxed);
+					}
+					n += 1;
+					tokio::task::yield_now().await;
+				}
+			})
+		})
+		.collect();
+
+	// Before any reclaim page: the definition cancels the queued reclaim.
+	run_once(&ds, &ses, "REMOVE INDEX idx ON thing").await;
+	assert_eq!(
+		doc_id_reclaim_entries(&ds, "thing").await,
+		ALL_DOC_ID_KINDS_LEN,
+		"removing the last doc-ID index queues the shared space"
+	);
+	run_once(&ds, &ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	assert_eq!(doc_id_reclaim_entries(&ds, "thing").await, 0, "the definition claims the space");
+	index_ready(&ds, &ses, "idx").await;
+
+	// After a reclaim page has landed: the space is torn, and the definition
+	// finishes the reclaim itself rather than refusing.
+	run_once(&ds, &ses, "REMOVE INDEX idx ON thing").await;
+	Datastore::reclaim_tombstones_with_budget(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::ZERO,
+		page as u64,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert!(
+		doc_id_reclaim_entries(&ds, "thing").await > 0,
+		"one page must leave the reclaim started but unfinished"
+	);
+	run_once(&ds, &ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	assert_eq!(
+		doc_id_reclaim_entries(&ds, "thing").await,
+		0,
+		"the definition must have finished the reclaim"
+	);
+	index_ready(&ds, &ses, "idx").await;
+
+	stop.store(true, Ordering::Relaxed);
+	for writer in writers {
+		writer.await.unwrap();
+	}
+	assert!(written.load(Ordering::Relaxed) > 0, "the writers must have written");
+	for v in 0..10 {
+		assert_eq!(
+			count_val(&ds, &ses, v, false).await,
+			count_val(&ds, &ses, v, true).await,
+			"the index over the reclaimed space must agree with a scan for val = {v}"
+		);
+	}
+	close(ds).await;
+}
+
+const ALL_DOC_ID_KINDS_LEN: usize = crate::key::reclaim::ALL_DOC_ID_KINDS.len();
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mem_define_index_after_remove_index() {
+	define_index_after_remove_index("memory").await;
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn surrealkv_define_index_after_remove_index() {
+	use temp_dir::TempDir;
+
+	let dir = TempDir::new().unwrap();
+	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
+	define_index_after_remove_index(&path).await;
+}

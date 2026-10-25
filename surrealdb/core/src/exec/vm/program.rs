@@ -1815,12 +1815,15 @@ pub(crate) enum StoreInstr {
 	},
 	/// Cancel the table's queued reclaim of its shared doc-id space, as a
 	/// definition that consumes the space claims it
-	/// (`claim_tb_doc_ids_reclaim`); raises while a reclaim is in progress.
+	/// (`claim_tb_doc_ids_reclaim`); raises a retryable
+	/// `DocIdsReclaimPending` conflict while a reclaim is in progress, which
+	/// the executor answers by finishing the reclaim and running the statement
+	/// again.
 	///
 	/// With `upgrading`, the stored definition of an index about to be
 	/// restamped at the current format: the claim is made only when that
 	/// restamp moves the index from its private layout onto the shared space,
-	/// and the refusal tells the caller to retry `REBUILD INDEX`.
+	/// and the refusal names `REBUILD INDEX`.
 	ClaimDocIdsReclaim {
 		ns: Reg,
 		db: Reg,
