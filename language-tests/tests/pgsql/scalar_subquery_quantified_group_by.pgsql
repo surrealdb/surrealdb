@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_scalar_rows.surql"]
+
+[test]
+reason = "A quantified comparison over a subquery that groups, limits or is a set operation is refused: it is evaluated as a comparison with one aggregate of the subquery's column, which does not read the same"
+
+[test.results]
+request-error = "PostgreSQL SELECT lowering error: unsupported expression: a quantified comparison over a subquery with GROUP BY, HAVING, LIMIT, OFFSET or a set operation"
+*/
+
+SELECT name FROM sr_a WHERE k > ALL (SELECT k2 FROM sr_b GROUP BY k2);

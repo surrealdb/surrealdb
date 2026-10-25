@@ -820,8 +820,16 @@ pub fn lower_bound_expr(
 			})
 		}
 		BoundExpr::ScalarSubquery(subquery) => {
-			let sub_op = lower_bound_subquery(subquery, policy)?;
-			Ok(LogicalExpr::First(Box::new(LogicalExpr::Subquery(Box::new(sub_op)))))
+			// Two rows are enough to tell more than one from one, so a subquery with no LIMIT of
+			// its own yields no more than two, and is copied only to carry that LIMIT. A LIMIT of
+			// its own is kept as bound and the check applies to the rows it leaves: `LIMIT 1`
+			// never fails and `LIMIT 5` over several rows does.
+			let mut sub = std::borrow::Cow::Borrowed(&**subquery);
+			if sub.limit.is_none() {
+				sub.to_mut().limit = Some(BoundExpr::Literal(BoundLiteral::Integer(2)));
+			}
+			let rows = LogicalExpr::Subquery(Box::new(lower_bound_subquery(&sub, policy)?));
+			Ok(one_row_or_error(rows, policy))
 		}
 		BoundExpr::Exists(subquery) => {
 			let mut sub = *subquery.clone();
@@ -864,6 +872,36 @@ pub fn lower_bound_expr(
 				"window functions are not supported in streaming execution engine".into(),
 			))
 		}
+	}
+}
+
+/// The value of a subquery used as a value, from `rows`, the array of its rows: the row when there
+/// is one, NONE when there is none, and an error carrying the dialect's message when there is more
+/// than one. `rows` is evaluated once, as the value the check reads.
+fn one_row_or_error(rows: LogicalExpr, policy: &DialectPolicy) -> LogicalExpr {
+	let more_than_one = LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("array::len".to_string()),
+			args: vec![LogicalExpr::Current],
+		}))),
+		op: BinaryOperator::MoreThan,
+		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(1))),
+	};
+	let message = match policy.dialect {
+		SqlDialect::Postgres => "more than one row returned by a subquery used as an expression",
+		SqlDialect::MySql => "Subquery returns more than 1 row",
+	};
+	LogicalExpr::Optional {
+		base: Box::new(rows),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				more_than_one,
+				LogicalExpr::Throw(Box::new(LogicalExpr::Literal(LogicalLiteral::String(
+					Strand::from(message),
+				)))),
+			)],
+			otherwise: Some(LogicalExpr::First(Box::new(LogicalExpr::Current))),
+		}))),
 	}
 }
 

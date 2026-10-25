@@ -35,4 +35,6 @@ mod link_tests;
 #[cfg(test)]
 mod link_write_tests;
 #[cfg(test)]
+mod scalar_subquery_tests;
+#[cfg(test)]
 mod write_tests;

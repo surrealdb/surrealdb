@@ -719,6 +719,12 @@ pub fn bind_expr(
 		} => {
 			let bound_subquery =
 				bind_select(subquery, catalog, policy, Some(Arc::new(scope.clone())))?;
+			// A wildcard stands for columns that are not known until the rows are read.
+			let columns_known =
+				!bound_subquery.targets.iter().any(|t| t.is_wildcard || t.table_wildcard.is_some());
+			if columns_known && bound_subquery.targets.len() != 1 {
+				return Err(PlanError::Custom("Operand should contain 1 column(s)".into()));
+			}
 			Ok(BoundExpr::ScalarSubquery(Box::new(bound_subquery)))
 		}
 		Expr::Exists {
@@ -833,6 +839,20 @@ pub fn bind_expr(
 						}
 					};
 
+					// The comparison is rewritten over one aggregate of the subquery's column,
+					// which reads the same only where the subquery answers every row of its
+					// source once.
+					if !bound_subquery.group_by.is_empty()
+						|| bound_subquery.having.is_some()
+						|| bound_subquery.set_op.is_some()
+						|| bound_subquery.limit.is_some()
+						|| bound_subquery.offset.is_some()
+					{
+						return Err(PlanError::UnsupportedExpression(
+							"a quantified comparison over a subquery with GROUP BY, HAVING, LIMIT, OFFSET or a set operation"
+								.into(),
+						));
+					}
 					let mut transformed_subquery = bound_subquery;
 					if transformed_subquery.targets.len() == 1 {
 						let original_expr = transformed_subquery.targets[0].expr.clone();
