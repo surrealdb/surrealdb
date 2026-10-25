@@ -25,9 +25,13 @@ pub enum ReturnTypeStrategy {
 	Fixed(SqlType),
 	/// Inherits type from the first argument.
 	FirstArg,
-	/// Inherits type from the second argument (e.g. IF(cond, a, b)).
-	SecondArg,
-	/// Numeric mathematical return type (Float8 if float involved, else Int8).
+	/// The type every argument after the first has (e.g. IF(cond, a, b)): the type they share,
+	/// the widest number when they are all numbers, and unknown otherwise.
+	CommonOfRest,
+	/// The type every argument has (e.g. COALESCE(a, b)), as for `CommonOfRest`.
+	CommonOfAll,
+	/// Numeric mathematical return type: Float8 if a float is involved, else the type of the first
+	/// argument, or Int8 when there is none.
 	NumericMath,
 }
 
@@ -508,7 +512,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: Some(1),
-		return_type: ReturnTypeStrategy::Fixed(SqlType::Int8),
+		return_type: ReturnTypeStrategy::NumericMath,
 		internal_name: Some("math::ceil"),
 		pgsql: true,
 		mysql: true,
@@ -518,7 +522,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: Some(1),
-		return_type: ReturnTypeStrategy::Fixed(SqlType::Int8),
+		return_type: ReturnTypeStrategy::NumericMath,
 		internal_name: Some("math::ceil"),
 		pgsql: true,
 		mysql: true,
@@ -528,7 +532,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: Some(1),
-		return_type: ReturnTypeStrategy::Fixed(SqlType::Int8),
+		return_type: ReturnTypeStrategy::NumericMath,
 		internal_name: Some("math::floor"),
 		pgsql: true,
 		mysql: true,
@@ -921,7 +925,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: None,
-		return_type: ReturnTypeStrategy::FirstArg,
+		return_type: ReturnTypeStrategy::CommonOfAll,
 		internal_name: None,
 		pgsql: true,
 		mysql: true,
@@ -951,7 +955,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: None,
-		return_type: ReturnTypeStrategy::FirstArg,
+		return_type: ReturnTypeStrategy::CommonOfAll,
 		internal_name: None,
 		pgsql: true,
 		mysql: true,
@@ -961,7 +965,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 1,
 		max_args: None,
-		return_type: ReturnTypeStrategy::FirstArg,
+		return_type: ReturnTypeStrategy::CommonOfAll,
 		internal_name: None,
 		pgsql: true,
 		mysql: true,
@@ -971,7 +975,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 3,
 		max_args: Some(3),
-		return_type: ReturnTypeStrategy::SecondArg,
+		return_type: ReturnTypeStrategy::CommonOfRest,
 		internal_name: None,
 		pgsql: false,
 		mysql: true,
@@ -981,7 +985,7 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 2,
 		max_args: Some(2),
-		return_type: ReturnTypeStrategy::FirstArg,
+		return_type: ReturnTypeStrategy::CommonOfAll,
 		internal_name: None,
 		pgsql: false,
 		mysql: true,
@@ -1527,33 +1531,59 @@ impl FunctionRegistry {
 
 	/// Infer the return type for a function call.
 	pub fn infer_return_type(name: &str, dialect: SqlDialect, arg_types: &[SqlType]) -> SqlType {
+		let arg_types: Vec<Option<SqlType>> = arg_types.iter().copied().map(Some).collect();
+		Self::infer_return_type_of_call(name, dialect, &arg_types)
+	}
+
+	/// Infer return type across dialects.
+	pub fn infer_return_type_any(name: &str, arg_types: &[SqlType]) -> SqlType {
+		let arg_types: Vec<Option<SqlType>> = arg_types.iter().copied().map(Some).collect();
+		Self::infer_return_type_of_arguments(name, &arg_types)
+	}
+
+	/// Infer return type across dialects for a call whose argument is the literal `NULL` where
+	/// `arg_types` holds `None`. A `NULL` argument has no value of its own, so it takes no part in
+	/// the type its alternatives share.
+	pub fn infer_return_type_of_arguments(name: &str, arg_types: &[Option<SqlType>]) -> SqlType {
+		let ty = Self::infer_return_type_of_call(name, SqlDialect::Postgres, arg_types);
+		if ty != SqlType::Unknown {
+			ty
+		} else {
+			Self::infer_return_type_of_call(name, SqlDialect::MySql, arg_types)
+		}
+	}
+
+	fn infer_return_type_of_call(
+		name: &str,
+		dialect: SqlDialect,
+		arg_types: &[Option<SqlType>],
+	) -> SqlType {
 		let Some(def) = Self::lookup(name, dialect) else {
 			return SqlType::Unknown;
 		};
 
 		match def.return_type {
 			ReturnTypeStrategy::Fixed(t) => t,
-			ReturnTypeStrategy::FirstArg => arg_types.first().copied().unwrap_or(SqlType::Unknown),
-			ReturnTypeStrategy::SecondArg => arg_types.get(1).copied().unwrap_or(SqlType::Unknown),
+			ReturnTypeStrategy::FirstArg => {
+				arg_types.first().copied().flatten().unwrap_or(SqlType::Unknown)
+			}
+			ReturnTypeStrategy::CommonOfRest => {
+				SqlType::common(arg_types.iter().skip(1).flatten().copied())
+			}
+			ReturnTypeStrategy::CommonOfAll => SqlType::common(arg_types.iter().flatten().copied()),
 			ReturnTypeStrategy::NumericMath => {
-				if arg_types.iter().any(|t| matches!(t, SqlType::Float4 | SqlType::Float8)) {
+				if arg_types
+					.iter()
+					.flatten()
+					.any(|t| matches!(t, SqlType::Float4 | SqlType::Float8))
+				{
 					SqlType::Float8
 				} else if let Some(first) = arg_types.first() {
-					*first
+					first.unwrap_or(SqlType::Unknown)
 				} else {
 					SqlType::Int8
 				}
 			}
-		}
-	}
-
-	/// Infer return type across dialects.
-	pub fn infer_return_type_any(name: &str, arg_types: &[SqlType]) -> SqlType {
-		let ty = Self::infer_return_type(name, SqlDialect::Postgres, arg_types);
-		if ty != SqlType::Unknown {
-			ty
-		} else {
-			Self::infer_return_type(name, SqlDialect::MySql, arg_types)
 		}
 	}
 }

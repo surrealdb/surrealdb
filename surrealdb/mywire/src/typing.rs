@@ -579,10 +579,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_FLOAT => {
 			let f = match val {
-				Value::Number(n) => match n.wide() {
-					Wide::Float(fl) => fl as f32,
-					Wide::Int(_) | Wide::Decimal(_) => 0.0f32,
-				},
+				Value::Number(n) => n.to_f64().unwrap_or(f64::NAN) as f32,
 				Value::None
 				| Value::Null
 				| Value::Bool(_)
@@ -605,10 +602,7 @@ pub fn encode_binary_value(buf: &mut Vec<u8>, col_type: u8, val: &Value) {
 		}
 		MYSQL_TYPE_DOUBLE => {
 			let f = match val {
-				Value::Number(n) => match n.wide() {
-					Wide::Float(fl) => fl,
-					Wide::Int(_) | Wide::Decimal(_) => 0.0f64,
-				},
+				Value::Number(n) => n.to_f64().unwrap_or(f64::NAN),
 				Value::None
 				| Value::Null
 				| Value::Bool(_)

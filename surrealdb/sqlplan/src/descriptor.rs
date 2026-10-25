@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 
+mod common_type;
 pub mod pgsql;
 
+use self::common_type::is_null_literal;
 use crate::catalog::BinderCatalog;
 use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::functions::FunctionRegistry;
@@ -572,9 +574,11 @@ impl BoundSelect {
 				args,
 				..
 			} => {
-				let arg_types: Vec<_> =
-					args.iter().map(|a| self.infer_expr_type(a, catalog)).collect();
-				FunctionRegistry::infer_return_type_any(name, &arg_types)
+				let arg_types: Vec<Option<SqlType>> = args
+					.iter()
+					.map(|a| (!is_null_literal(a)).then(|| self.infer_expr_type(a, catalog)))
+					.collect();
+				FunctionRegistry::infer_return_type_of_arguments(name, &arg_types)
 			}
 			BoundExpr::WindowFunction {
 				name,
@@ -596,13 +600,16 @@ impl BoundSelect {
 				else_expr,
 				..
 			} => {
-				if let Some((_, then_expr)) = branches.first() {
-					self.infer_expr_type(then_expr, catalog)
-				} else if let Some(el) = else_expr {
-					self.infer_expr_type(el, catalog)
-				} else {
-					SqlType::Unknown
-				}
+				// A NULL branch has no value of its own, so it does not take part in the type of
+				// the others.
+				SqlType::common(
+					branches
+						.iter()
+						.map(|(_, then_expr)| then_expr)
+						.chain(else_expr.as_deref())
+						.filter(|branch| !is_null_literal(branch))
+						.map(|branch| self.infer_expr_type(branch, catalog)),
+				)
 			}
 			BoundExpr::ScalarSubquery(sub) => {
 				if let Some(target) = sub.targets.first() {

@@ -152,12 +152,10 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			if let Value::Number(n) = value {
 				if let Number::F32(f) = n {
 					Ok(float32_text(f))
+				} else if let Some(f) = n.to_f64() {
+					Ok(float_text(f))
 				} else {
-					match n.wide() {
-						Wide::Int(i) => Ok(float_text(i as f64)),
-						Wide::Float(f) => Ok(float_text(f)),
-						Wide::Decimal(_) => Err(mismatch(&value, ty)),
-					}
+					Err(mismatch(&value, ty))
 				}
 			} else if let Value::String(ref s) = value
 				&& s.parse::<f32>().is_ok()
@@ -168,16 +166,12 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 			}
 		}
 		PgType::Float8 => {
-			if let Value::Number(n) = value {
-				if let Number::F32(f) = n {
-					Ok(float32_text(f))
-				} else {
-					match n.wide() {
-						Wide::Int(i) => Ok(float_text(i as f64)),
-						Wide::Float(f) => Ok(float_text(f)),
-						Wide::Decimal(_) => Err(mismatch(&value, ty)),
-					}
-				}
+			// Every number is written with the digits of the `f64` it equals, as the binary format
+			// carries it: an `f32` is not shortened to its own digits.
+			if let Value::Number(ref n) = value
+				&& let Some(f) = n.to_f64()
+			{
+				Ok(float_text(f))
 			} else if let Value::String(ref s) = value
 				&& s.parse::<f64>().is_ok()
 			{
@@ -893,23 +887,19 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 			}
 		}
 		PgType::Float4 => {
-			if let Value::Number(n) = value {
-				match n.wide() {
-					Wide::Int(i) => Ok((i as f32).to_be_bytes().to_vec()),
-					Wide::Float(f) => Ok((f as f32).to_be_bytes().to_vec()),
-					Wide::Decimal(_) => Err(mismatch(&value, ty)),
-				}
+			if let Value::Number(n) = value
+				&& let Some(f) = n.to_f64()
+			{
+				Ok((f as f32).to_be_bytes().to_vec())
 			} else {
 				Err(mismatch(&value, ty))
 			}
 		}
 		PgType::Float8 => {
-			if let Value::Number(n) = value {
-				match n.wide() {
-					Wide::Int(i) => Ok((i as f64).to_be_bytes().to_vec()),
-					Wide::Float(f) => Ok(f.to_be_bytes().to_vec()),
-					Wide::Decimal(_) => Err(mismatch(&value, ty)),
-				}
+			if let Value::Number(n) = value
+				&& let Some(f) = n.to_f64()
+			{
+				Ok(f.to_be_bytes().to_vec())
 			} else {
 				Err(mismatch(&value, ty))
 			}
