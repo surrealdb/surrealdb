@@ -11,6 +11,7 @@ use crate::ir::{
 	BoundBinaryOp, BoundExpr, BoundLiteral, BoundSelect, BoundTableSource, BoundTarget,
 	BoundUnaryOp, BoundWindowFrameBound,
 };
+use crate::output_keys::output_keys;
 
 /// Abstract strongly-typed SQL data type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -289,6 +290,12 @@ pub struct ResultColumn {
 	pub table: Option<String>,
 	/// Unqualified original column name if resolved.
 	pub original_column: Option<String>,
+	/// The field of each row of the plan of [`lower_bound_select`](crate::lower_bound_select) that
+	/// holds this column's value, which is not the name a client is shown: two columns may share a
+	/// name and a column may have none. It is distinct among the columns of one result. `None`
+	/// where the rows are read by name: the select has a `*` or `t.*` the planner cannot list, so
+	/// its columns are known only from its rows, or the rows are not those of a select.
+	pub key: Option<String>,
 	/// Whether the column is a `*` or `t.*` whose columns are known only from the rows that come
 	/// back, as opposed to a column that merely has the name `*`.
 	pub dynamic: bool,
@@ -358,13 +365,16 @@ impl BoundSelect {
 		dialect: &DialectPolicy,
 	) -> ResultDescriptor {
 		let mut columns = Vec::with_capacity(self.targets.len());
+		let mut keys = output_keys(&self.targets).map(Vec::into_iter);
 		for target in &self.targets {
+			let key = keys.as_mut().and_then(Iterator::next);
 			if target.is_wildcard {
 				columns.push(ResultColumn {
 					name: "*".to_string(),
 					ty: SqlType::Unknown,
 					table: None,
 					original_column: None,
+					key,
 					dynamic: true,
 				});
 				continue;
@@ -447,6 +457,7 @@ impl BoundSelect {
 				ty,
 				table,
 				original_column: orig_col,
+				key,
 				dynamic,
 			});
 		}

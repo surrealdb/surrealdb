@@ -440,16 +440,24 @@ pub(super) fn shape_result_with_descriptor(
 				.iter()
 				.enumerate()
 				.map(|(i, col)| {
-					let val = obj_map
-						.get(&col.name)
-						.or_else(|| col.original_column.as_ref().and_then(|orig| obj_map.get(orig)))
-						.or_else(|| {
-							if obj_map.len() == descriptor.columns.len() {
-								obj_map.values().nth(i)
-							} else {
-								None
-							}
-						});
+					// A column the planner keyed is read from that field alone: another column
+					// may share its name, and a missing field is an absent value, not a hint to
+					// read a neighbour.
+					let val = match &col.key {
+						Some(key) => obj_map.get(key),
+						None => obj_map
+							.get(&col.name)
+							.or_else(|| {
+								col.original_column.as_ref().and_then(|orig| obj_map.get(orig))
+							})
+							.or_else(|| {
+								if obj_map.len() == descriptor.columns.len() {
+									obj_map.values().nth(i)
+								} else {
+									None
+								}
+							}),
+					};
 					val.cloned().and_then(cell)
 				})
 				.collect();

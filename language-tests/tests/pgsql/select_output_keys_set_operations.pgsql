@@ -1,0 +1,30 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_output_keys.surql"]
+
+[test]
+reason = "The queries of a set operation hold their columns under the fields of the first query, whatever each calls its columns"
+
+[[test.results]]
+value = '[{ "?column?1": 1, "?column?2": 1 }, { "?column?1": 1, "?column?2": 1 }, { "?column?1": 2, "?column?2": 2 }, { "?column?1": 7, "?column?2": 8 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 1, "?column?2": 2 }, { "?column?1": 3, "?column?2": 4 }, { "?column?1": 5, "?column?2": 6 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 1, "?column?2": 1 }, { "?column?1": 1, "?column?2": 100 }, { "?column?1": 1, "?column?2": 200 }, { "?column?1": 2, "?column?2": 2 }, { "?column?1": 2, "?column?2": 300 }, { "?column?1": 3, "?column?2": 3 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 1 }, { "?column?1": 1 }, { "?column?1": 2 }, { "?column?1": 3 }]'
+
+[[test.results]]
+value = "[{ k: 1, n: 10 }, { k: 1, n: 100 }, { k: 1, n: 200 }, { k: 2, n: 20 }, { k: 2, n: 300 }, { k: 3, n: NULL }]"
+*/
+
+SELECT a.k, b.k FROM okey_a a JOIN okey_b b ON a.k = b.k UNION ALL SELECT 7, 8 ORDER BY 1, 2;
+SELECT 1, 2 UNION ALL SELECT 3, 4 UNION ALL SELECT 5, 6;
+SELECT k, k FROM okey_a UNION ALL SELECT k, w FROM okey_b ORDER BY 1, 2;
+SELECT 1 UNION ALL SELECT k FROM okey_a ORDER BY 1;
+SELECT k, n FROM okey_a UNION SELECT k, w FROM okey_b ORDER BY 1, 2;

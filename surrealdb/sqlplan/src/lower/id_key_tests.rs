@@ -302,7 +302,7 @@ fn a_qualified_wildcard_over_a_base_table_is_followed_by_the_key() {
 #[test]
 fn a_column_named_star_is_not_a_wildcard_and_gets_no_key() {
 	let op = my_select("SELECT `*` FROM person");
-	assert_eq!(projection(&op), vec!["`*`".to_string()]);
+	assert_eq!(projection(&op), vec!["`*` AS `?column?1`".to_string()]);
 	let op = my_select("SELECT p.`*`, name FROM person p");
 	let columns = projection(&op);
 	assert!(columns.iter().all(|column| !column.contains("record::id(id)")), "{columns:?}");

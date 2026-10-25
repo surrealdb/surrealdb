@@ -13,6 +13,7 @@ pub mod ir;
 pub mod lower;
 pub mod namespace;
 pub mod observability;
+mod output_keys;
 pub mod presentation;
 pub mod scope;
 pub mod semantics;

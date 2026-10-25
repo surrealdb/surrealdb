@@ -1,5 +1,7 @@
 //! Lowering from BoundSelect to SurrealDB `LogicalOp`.
 
+use std::borrow::Cow;
+
 use surrealdb_expr::expr::BinaryOperator;
 use surrealdb_expr::expr::logical::{
 	EvalFrame, JoinKind, LogicalAggregate, LogicalDistinct, LogicalExpr, LogicalField,
@@ -21,13 +23,18 @@ use crate::lower::expr::{
 };
 use crate::lower::id_key::{id_column, is_key_or_link, key_of, record_of};
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
+use crate::output_keys::output_keys;
 
 /// Lower a fully bound SQL `BoundSelect` into a SurrealDB `LogicalOp` execution plan.
+///
+/// The plan answers the select to a client, which reads each column by position. When the select's
+/// columns are all listed, every row holds each column under its own field, the one the
+/// [`ResultColumn::key`](crate::ResultColumn::key) of the select's descriptor names.
 pub fn lower_bound_select(
 	select: &BoundSelect,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
-	lower_bound_select_internal(select, false, policy)
+	lower_bound_select_internal(select, false, true, policy)
 }
 
 /// Lower a subquery `BoundSelect` where single-column rows should be emitted as bare values.
@@ -35,12 +42,33 @@ pub fn lower_bound_subquery(
 	select: &BoundSelect,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
-	lower_bound_select_internal(select, true, policy)
+	lower_bound_select_internal(select, true, false, policy)
+}
+
+/// The targets as a select's rows hold them: with `keys`, each under its field, which the target
+/// then names as its alias. Without, the rows are read by the names the engine gives their fields:
+/// a derived table is read by the name its enclosing query uses for a column, and a select with a
+/// wildcard has columns that are known only from its rows.
+fn keyed_targets(targets: &[BoundTarget], keys: Option<Vec<String>>) -> Cow<'_, [BoundTarget]> {
+	let Some(keys) = keys else {
+		return Cow::Borrowed(targets);
+	};
+	Cow::Owned(
+		targets
+			.iter()
+			.zip(keys)
+			.map(|(target, key)| BoundTarget {
+				alias: Some(key),
+				..target.clone()
+			})
+			.collect(),
+	)
 }
 
 fn lower_bound_select_internal(
 	select: &BoundSelect,
 	as_value: bool,
+	keyed: bool,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
 	if !select.windows.is_empty() {
@@ -89,7 +117,12 @@ fn lower_bound_select_internal(
 	let is_aggregate =
 		grouped || has_aggregates || has_having_agg || has_order_agg || select.having.is_some();
 
-	let mut aggregate_targets = select.targets.clone();
+	// The select is read by position only if it is asked to be and its columns are all listed;
+	// the queries of its set operations are read the same way.
+	let keys = keyed.then(|| output_keys(&select.targets)).flatten();
+	let keyed = keys.is_some();
+	let targets = keyed_targets(&select.targets, keys);
+	let mut aggregate_targets = targets.to_vec();
 
 	// The engine recognises a projected field as a grouping key only when it is the stored path the
 	// aggregation groups by. Grouping by the stored record ids of a table groups by its keys, so
@@ -104,7 +137,7 @@ fn lower_bound_select_internal(
 		Vec::new()
 	};
 	let mut key_outputs: Vec<String> = Vec::new();
-	for (target, original) in aggregate_targets.iter_mut().zip(&select.targets) {
+	for (target, original) in aggregate_targets.iter_mut().zip(targets.iter()) {
 		if stored_keys.contains(&&original.expr) {
 			let name = target_output_name(original);
 			target.expr = as_stored(&original.expr);
@@ -114,7 +147,7 @@ fn lower_bound_select_internal(
 	}
 
 	let mut agg_mapping: Vec<(BoundExpr, String)> = Vec::new();
-	for t in &select.targets {
+	for t in targets.iter() {
 		let col_name = target_output_name(t);
 		agg_mapping.push((t.expr.clone(), col_name));
 	}
@@ -321,7 +354,7 @@ fn lower_bound_select_internal(
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields: LogicalFields::Value {
-				expr: LogicalExpr::Field(target_output_name(&select.targets[0]).into()),
+				expr: LogicalExpr::Field(target_output_name(&targets[0]).into()),
 				alias: None,
 			},
 			omit: vec![],
@@ -329,8 +362,7 @@ fn lower_bound_select_internal(
 	} else if matches!(fields, LogicalFields::Value { .. }) {
 		// The aggregate already answers with the value of the one column.
 	} else if aggregate_targets.len() > select.targets.len() {
-		let project_fields = select
-			.targets
+		let project_fields = targets
 			.iter()
 			.map(|t| {
 				let col_name = target_output_name(t);
@@ -364,7 +396,7 @@ fn lower_bound_select_internal(
 
 	// 9. Set Operations (UNION, INTERSECT, EXCEPT)
 	if let Some(first) = &select.set_op {
-		op = lower_set_operations(&select.targets, first, op, policy)?;
+		op = lower_set_operations(&targets, first, op, keyed, policy)?;
 
 		// Apply outer ORDER BY after set operation
 		if !rewritten_order_by.is_empty() {
@@ -404,11 +436,13 @@ fn lower_bound_select_internal(
 /// and `UNION ALL` with advice to group it. An operand followed by further links cannot carry its
 /// own ORDER BY, LIMIT or OFFSET for the same reason: only a parenthesised group can hold them.
 ///
-/// A UNION answers rows under the column names of its first query.
+/// A set operation answers rows under the columns of its first query, and each later query is
+/// lowered under the same fields. When `keyed`, those are the keys of the first query.
 fn lower_set_operations(
 	first_targets: &[BoundTarget],
 	first: &BoundSetOperation,
 	left: LogicalOp,
+	keyed: bool,
 	policy: &DialectPolicy,
 ) -> Result<LogicalOp, PlanError> {
 	if first.right.set_op.is_some() {
@@ -448,10 +482,9 @@ fn lower_set_operations(
 				"each query of a set operation must have the same number of columns".into(),
 			));
 		}
-		if link.op == BoundSetOpKind::Union {
-			name_as_first_query(first_targets, &mut branch);
-		}
-		branches.push((lower_bound_select(&branch, policy)?, branch.targets));
+		name_as_first_query(first_targets, &mut branch);
+		branches
+			.push((lower_bound_select_internal(&branch, false, keyed, policy)?, branch.targets));
 	}
 
 	let all = first.all;
@@ -542,12 +575,13 @@ fn column_name(target: &BoundTarget) -> Option<String> {
 	}
 }
 
-/// Name the columns of `branch`, a later query of a UNION, as the columns of the first query are.
+/// Name the columns of `branch`, a later query of a set operation, as the columns of the first
+/// query are.
 ///
-/// A UNION answers rows under the names its first query gives its columns, whatever the later
-/// queries call theirs, and a query over the union reads them under those names. A column is left
-/// as it is where the first query's name for it cannot be told, where the later query's column is
-/// a wildcard, or where the two queries do not have the same number of columns.
+/// A set operation answers rows under the names its first query gives its columns, whatever the
+/// later queries call theirs, and a query over a UNION reads them under those names. A column is
+/// left as it is where the first query's name for it cannot be told, where the later query's
+/// column is a wildcard, or where the two queries do not have the same number of columns.
 fn name_as_first_query(first: &[BoundTarget], branch: &mut BoundSelect) {
 	if first.len() != branch.targets.len() {
 		return;
@@ -961,7 +995,7 @@ fn lower_table_source(
 			query,
 			..
 		} => {
-			let inner = lower_bound_select(query, policy)?;
+			let inner = lower_bound_select_internal(query, false, false, policy)?;
 			Ok(LogicalOp::Subquery(LogicalSubquery {
 				input: Box::new(inner),
 			}))

@@ -189,6 +189,11 @@ impl PgWriteAnalysis {
 			None
 		};
 		let result = result.map(|mut result| {
+			// The rows of a write are named by `returning_name`, whatever the analysis query
+			// would have named its columns, so they are read by name.
+			for column in &mut result.columns {
+				column.key = None;
+			}
 			if result.columns.len() == self.query.targets.len() {
 				for (index, (column, target)) in
 					result.columns.iter_mut().zip(&self.query.targets).enumerate()
@@ -394,6 +399,20 @@ mod tests {
 			columns.iter().map(|c| (c.name.as_str(), c.ty)).collect::<Vec<_>>(),
 			[("years", SqlType::Int8), ("input", SqlType::Int4)]
 		);
+	}
+
+	#[test]
+	fn the_columns_of_a_returning_list_are_read_by_name() {
+		let columns = describe("DELETE FROM people RETURNING id, age::int4, name AS who")
+			.unwrap()
+			.result
+			.unwrap()
+			.columns;
+		assert_eq!(
+			columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+			["id", "age", "who"]
+		);
+		assert!(columns.iter().all(|column| column.key.is_none()));
 	}
 
 	#[test]

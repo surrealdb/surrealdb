@@ -1,0 +1,34 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_output_keys.surql"]
+
+[test]
+reason = "The columns of an aggregation that repeat a name or have none are held under fields of their own, which its HAVING and ORDER BY clauses read"
+
+[[test.results]]
+value = '[{ "?column?2": 1, "?column?3": 1, "?column?4": 1, k: 1 }, { "?column?2": 1, "?column?3": 0, "?column?4": 1, k: 2 }, { "?column?2": 1, "?column?3": 1, "?column?4": 0, k: 3 }]'
+
+[[test.results]]
+value = '[{ "?column?2": 1, "?column?3": 1, k: 1 }, { "?column?2": 1, "?column?3": 1, k: 3 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 0, "?column?2": 1, "?column?3": 1 }, { "?column?1": 1, "?column?2": 2, "?column?3": 2 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 31, "?column?2": 32 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 1, "?column?2": 1 }, { "?column?1": 2, "?column?2": 2 }, { "?column?1": 3, "?column?2": 3 }]'
+
+[[test.results]]
+value = '[{ "?column?1": 1, "?column?2": 1 }, { "?column?1": 2, "?column?2": 2 }, { "?column?1": 3, "?column?2": 3 }]'
+*/
+
+SELECT k, COUNT(*), COUNT(v), COUNT(n) FROM okey_a GROUP BY k ORDER BY k;
+SELECT k, COUNT(*), COUNT(v) FROM okey_a GROUP BY k HAVING COUNT(v) > 0 ORDER BY COUNT(*), k;
+SELECT k % 2, COUNT(*), COUNT(*) FROM okey_a GROUP BY k % 2 ORDER BY 1;
+SELECT SUM(n) + 1, SUM(n) + 2 FROM okey_a;
+SELECT k, k FROM okey_a GROUP BY k ORDER BY k;
+SELECT a.id, a.id FROM okey_a a GROUP BY a.id ORDER BY a.id;

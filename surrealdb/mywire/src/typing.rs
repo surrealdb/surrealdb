@@ -388,16 +388,22 @@ pub fn shape_result_with_descriptor(
 			let mut row = Vec::with_capacity(descriptor.columns.len());
 			let mut raw_row = Vec::with_capacity(descriptor.columns.len());
 			for (i, col) in descriptor.columns.iter().enumerate() {
-				let val = obj
-					.get(&col.name)
-					.or_else(|| col.original_column.as_ref().and_then(|orig| obj.get(orig)))
-					.or_else(|| {
-						if obj.len() == descriptor.columns.len() {
-							obj.values().nth(i)
-						} else {
-							None
-						}
-					});
+				// A column the planner keyed is read from that field alone: another column may
+				// share its name, and a missing field is an absent value, not a hint to read a
+				// neighbour.
+				let val = match &col.key {
+					Some(key) => obj.get(key),
+					None => obj
+						.get(&col.name)
+						.or_else(|| col.original_column.as_ref().and_then(|orig| obj.get(orig)))
+						.or_else(|| {
+							if obj.len() == descriptor.columns.len() {
+								obj.values().nth(i)
+							} else {
+								None
+							}
+						}),
+				};
 				let col_type = columns[i].column_type;
 				row.push(val.and_then(|v| typed_text(col_type, v)));
 				raw_row.push(val.cloned().unwrap_or(Value::None));
