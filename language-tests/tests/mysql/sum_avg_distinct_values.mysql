@@ -1,0 +1,54 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_distinct_sums_values.surql"]
+
+[test]
+reason = "SUM(DISTINCT x) and AVG(DISTINCT x) skip the values that are not numbers as the plain aggregates do, count equal numbers of different types once, add floats in the order they first appear, treat infinity and NaN as numbers, answer NULL for a column with no number, and equal the plain aggregates when no number repeats"
+
+[[test.results]]
+value = "[{ a: 1.5f, s: 3 }]"
+
+[[test.results]]
+value = "[{ a: NULL, s: NULL }]"
+
+[[test.results]]
+match = "$result[0].s == 3 && type::is_int($result[0].s) && $result[0].a == 1.5 && type::is_float($result[0].a)"
+
+[[test.results]]
+value = "[{ a: 0.20000000000000004f, s: 0.6000000000000001f }]"
+
+[[test.results]]
+value = "[{ a: Infinity, s: Infinity }]"
+
+[[test.results]]
+value = "[{ a: NaN, s: NaN }]"
+
+[[test.results]]
+value = "[{ same_avg: true, same_sum: true }]"
+
+[[test.results]]
+value = "[{ same_avg: true, same_sum: true }]"
+
+[[test.results]]
+value = "[{ same_avg: true, same_sum: true }]"
+
+[[test.results]]
+match = "$result[0].s == 23 && type::is_int($result[0].s) && $result[0].a == 7.666666666666667 && type::is_float($result[0].a)"
+
+[[test.results]]
+match = "$result[0].s == 0.6dec && type::is_decimal($result[0].s) && math::abs($result[0].a - 0.2) < 1e-9 && type::is_float($result[0].a)"
+*/
+
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_mixed;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_text;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_same;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_float;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_inf;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_nan;
+SELECT sum(DISTINCT v) = sum(v) AS same_sum, avg(DISTINCT v) = avg(v) AS same_avg FROM dsv_ints;
+SELECT sum(DISTINCT v) = sum(v) AS same_sum, avg(DISTINCT v) = avg(v) AS same_avg FROM dsv_decs;
+SELECT sum(DISTINCT v) = sum(v) AS same_sum, avg(DISTINCT v) = avg(v) AS same_avg FROM dsv_floats;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_ints;
+SELECT sum(DISTINCT v) AS s, avg(DISTINCT v) AS a FROM dsv_decs;

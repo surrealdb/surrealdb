@@ -230,6 +230,8 @@ mod tests {
 			"count",
 			"math::sum",
 			"math::mean",
+			"math::sum_distinct",
+			"math::mean_distinct",
 			"math::min",
 			"math::max",
 			"math::stddev",

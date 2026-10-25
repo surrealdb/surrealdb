@@ -170,13 +170,11 @@ pub fn lower_bound_expr(
 								"SUM(DISTINCT) requires 1 argument".into(),
 							));
 						};
-						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
-							receiver: Function::Normal("array::group".to_string()),
-							args: vec![lowered_arg],
-						}));
+						// The engine's aggregate that folds each distinct number of the group
+						// once, and answers NULL for a group with none.
 						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
-							receiver: Function::Normal("math::sum".to_string()),
-							args: vec![group_call],
+							receiver: Function::Normal("math::sum_distinct".to_string()),
+							args: vec![lowered_arg],
 						})));
 					}
 					"avg" => {
@@ -187,13 +185,11 @@ pub fn lower_bound_expr(
 								"AVG(DISTINCT) requires 1 argument".into(),
 							));
 						};
-						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
-							receiver: Function::Normal("array::group".to_string()),
-							args: vec![lowered_arg],
-						}));
+						// The engine's aggregate that folds each distinct number of the group
+						// once, and answers NULL for a group with none.
 						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
-							receiver: Function::Normal("math::mean".to_string()),
-							args: vec![group_call],
+							receiver: Function::Normal("math::mean_distinct".to_string()),
+							args: vec![lowered_arg],
 						})));
 					}
 					"min" | "max" => {

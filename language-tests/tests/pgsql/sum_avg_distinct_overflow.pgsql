@@ -1,0 +1,34 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["pgsql/_distinct_sums_overflow.surql"]
+
+[test]
+reason = "SUM(DISTINCT x) fails, as the plain SUM does, when the integers it adds leave a 64-bit integer, and answers a total that only reaches the edge; AVG(DISTINCT x) adds exactly and answers the plain AVG over the same numbers"
+
+[[test.results]]
+error = "Cannot perform addition with '9223372036854775807' and '9223372036854775806'"
+
+[[test.results]]
+error = "Cannot perform addition with '9223372036854775807' and '9223372036854775806'"
+
+[[test.results]]
+error = "Cannot perform addition with '-9223372036854775808' and '-1'"
+
+[[test.results]]
+match = "$result[0].s == -1 && type::is_int($result[0].s)"
+
+[[test.results]]
+value = "[{ same_avg: true }]"
+
+[[test.results]]
+value = "[{ a: -0.3333333333333333f }]"
+*/
+
+SELECT sum(v) FROM dso_max;
+SELECT sum(DISTINCT v) FROM dso_max;
+SELECT sum(DISTINCT v) FROM dso_min;
+SELECT sum(DISTINCT v) AS s FROM dso_edge;
+SELECT avg(DISTINCT v) = avg(v) AS same_avg FROM dso_max;
+SELECT avg(DISTINCT v) AS a FROM dso_edge;
