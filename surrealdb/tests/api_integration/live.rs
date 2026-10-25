@@ -752,7 +752,11 @@ pub async fn kill_of_a_live_query_reports_success(new_db: impl CreateDb) {
 
 	let table = format!("table_{}", Ulid::new());
 	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
-	let id: Value = db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap().take(0).unwrap();
+	// The response holds the live query's stream, and a stream that is dropped
+	// kills its live query. The response is kept until the `KILL` below has
+	// run, so that `KILL` is the only one that ends the live query.
+	let mut live = db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap();
+	let id: Value = live.take(0).unwrap();
 
 	let mut response =
 		db.query("KILL $id; RETURN 1").bind(("id", id)).await.unwrap().check().unwrap();
@@ -762,6 +766,7 @@ pub async fn kill_of_a_live_query_reports_success(new_db: impl CreateDb) {
 	let after: Option<i64> = response.take(1).unwrap();
 	assert_eq!(after, Some(1));
 
+	drop(live);
 	drop(permit);
 }
 
