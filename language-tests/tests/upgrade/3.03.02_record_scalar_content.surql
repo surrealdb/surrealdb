@@ -9,6 +9,10 @@ introduced = "3.3.2"
 # released 3.3 writer can produce the state. The gate also keeps the ordinary
 # runner away, since it matches the import's version against its own.
 importing-version = "<3.4.0-a"
+# A released reader leaves the scalar as it is when a data clause sets a field,
+# where this build turns it into an object, so only this build meets the
+# expectations below.
+version = ">=3.4.0-a"
 reason = "A record whose stored content is a scalar, written by 3.3.2, must stay readable, updatable and deletable by this build, and the other rows of its table and the index must keep working. A data clause that edits the scalar record treats its content as the object of its id, so the record ends as an object."
 
 [[test.results]]

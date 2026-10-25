@@ -7,10 +7,11 @@ upgrade = true
 introduced = "3.0.0"
 # Only a binary that does not bound a stored value's nesting depth can write the
 # state, and only one that does can show the bound holding, so the hop is pinned
-# from both ends. The pair together also keeps the ordinary language-test runner
-# away: it matches both fields against its own version, and replaying the import
-# against a build that enforces the bound would fail at the write.
-importing-version = "<3.4.0-0"
+# from both ends. 3.3.0-beta.4 is the first release to refuse the write. The pair
+# together also keeps the ordinary language-test runner away: it matches both
+# fields against its own version, and replaying the import against a build that
+# enforces the bound would fail at the write.
+importing-version = "<3.3.0-beta.4"
 version = ">=3.4.0-a"
 # The depth bound guards the write path only. Reading a record id nested past it
 # recurses once per level through the derived `DeserializeRevisioned` impls for

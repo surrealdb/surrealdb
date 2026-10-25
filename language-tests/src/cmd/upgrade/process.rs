@@ -24,6 +24,29 @@ use super::protocol::{ProxyObject, ProxyValue};
 use crate::cli::{DsVersion, UpgradeBackend};
 use crate::tests::report::TestTaskResult;
 
+/// The WebSocket subprotocol that every connection to a spawned binary asks for.
+///
+/// What the harness assumes, and why it names the subprotocol:
+///
+/// - [`SurrealConnection`] encodes each request and decodes each response as
+///   flatbuffers, so every binary it starts, the releases the suite upgrades from
+///   and the checkout under test alike, has to answer in flatbuffers.
+/// - A server chooses the response format from the subprotocol the client offers,
+///   by name. A release asked for `cbor` answers in CBOR, which the flatbuffers
+///   decoder rejects ("Failed to decode fb value"). The harness therefore assumes
+///   that every release it starts accepts `flatbuffers` by name, and that the
+///   checkout does too (checked by a unit test below).
+/// - It offers the name, not a position in `PROTOCOLS`. The list is a detail of
+///   the checkout and its order changes whenever a format is added, so a position
+///   does not name a format.
+///
+/// The Rust SDK makes the same choice by name (`surrealdb/src/engine/remote/ws`).
+/// Clients that speak CBOR, such as the JavaScript SDK, offer `cbor` or `cbor.2`
+/// and are covered by the server's CBOR end-to-end tests, not by this harness.
+/// This is the short name, not the `application/vnd.surrealdb.flatbuffers` media
+/// type.
+const FLATBUFFERS_SUBPROTOCOL: &str = "flatbuffers";
+
 pub struct ProcessOutput {
 	pub stdout: String,
 	pub stderr: String,
@@ -196,8 +219,7 @@ impl SurrealProcess {
 		self.assert_running_while(async {
 			let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 				.uri(format!("ws://127.0.0.1:{}/rpc", port))
-				// Subprotocol short name (not the `api::format::FLATBUFFERS` MIME).
-				.header(SEC_WEBSOCKET_PROTOCOL, surrealdb_core::rpc::format::PROTOCOLS[2])
+				.header(SEC_WEBSOCKET_PROTOCOL, FLATBUFFERS_SUBPROTOCOL)
 				.header("Upgrade", "websocket")
 				.header(SEC_WEBSOCKET_VERSION, "13")
 				.header(SEC_WEBSOCKET_KEY, generate_key())
@@ -358,5 +380,25 @@ impl SurrealConnection {
 			Ok(_) => bail!("Got invalid response type"),
 			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message().to_string()))),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_core::rpc::format::{Format, PROTOCOLS};
+
+	use super::FLATBUFFERS_SUBPROTOCOL;
+
+	/// The subprotocol the harness asks for must be one the checkout serves, and the
+	/// format it selects must be the one the harness encodes and decodes. A server
+	/// that picks any other format answers in bytes the flatbuffers decoder rejects,
+	/// which fails every case of an upgrade run before a test statement is sent.
+	#[test]
+	fn requested_subprotocol_selects_flatbuffers() {
+		assert!(
+			PROTOCOLS.contains(&FLATBUFFERS_SUBPROTOCOL),
+			"the checkout does not serve the `{FLATBUFFERS_SUBPROTOCOL}` subprotocol"
+		);
+		assert_eq!(Format::from(FLATBUFFERS_SUBPROTOCOL), Format::Flatbuffers);
 	}
 }

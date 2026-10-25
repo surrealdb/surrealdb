@@ -1,6 +1,6 @@
 /**
 [test]
-introduced = ">=3.3.0"
+introduced = ">=3.3.0-beta.5"
 reason = """
 Setup for 3.03.00_doc_ids_numeric_twins: two records whose ids differ only in a
 nested number's kind, and a third, mapped in the table's shared doc-ID space by

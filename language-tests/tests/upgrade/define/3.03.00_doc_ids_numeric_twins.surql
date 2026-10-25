@@ -4,7 +4,10 @@ imports = ["upgrade/define/3.03.00_doc_ids_numeric_twins_import.surql"]
 
 [test]
 upgrade = true
-introduced = ">=3.3.0"
+# Stable 3.3.0 is the first release that writes the injective `!dj` mapping. A
+# plain `>=3.3.0` also admits 3.3.0's pre-releases, and none of them writes it, so
+# the bound is anchored on a 3.3.0 pre-release later than any published one.
+introduced = ">=3.3.0-beta.5"
 reason = """
 Records an earlier release mapped in a table's shared doc-ID space keep their
 doc-IDs on the new binary, which resolves through `!dj` alone, and two whose ids
