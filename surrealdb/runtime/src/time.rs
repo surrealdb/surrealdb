@@ -1,44 +1,61 @@
 use anyhow::{Result, bail};
 use chrono::offset::TimeZone;
-use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use surrealdb_expr::expr::Error as ExprError;
 use surrealdb_expr::val::{Datetime, Duration, Number, Value};
 
 use super::args::Optional;
 
-pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			let floor_to_ceil = |floor: DateTime<Utc>| -> Option<DateTime<Utc>> {
-				if floor == *val {
-					Some(floor)
-				} else {
-					floor.checked_add_signed(d)
-				}
-			};
-			// Check for zero duration.
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			let result = val.duration_trunc(d).ok().and_then(floor_to_ceil);
+const NANOS_PER_SEC: i128 = 1_000_000_000;
 
-			match result {
-				Some(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-					name: String::from("time::ceil"),
-					message: String::from(
-						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
-					),
-				})),
-			}
-		}
-		_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-			name: String::from("time::ceil"),
+fn duration_span_nanos(duration: &Duration, fn_name: &str) -> Result<i128> {
+	let Some(span) = chrono::Duration::from_std(**duration)
+		.ok()
+		.and_then(|d| d.num_nanoseconds())
+		.filter(|&n| n >= 0)
+	else {
+		return Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
+			name: String::from(fn_name),
 			message: String::from(
 				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
 			),
-		})),
+		}));
+	};
+	Ok(i128::from(span))
+}
+
+fn datetime_to_nanos(val: &Datetime) -> i128 {
+	i128::from(val.timestamp()) * NANOS_PER_SEC + i128::from(val.timestamp_subsec_nanos())
+}
+
+fn nanos_to_datetime(nanos: i128, fn_name: &str) -> Result<Value> {
+	let secs = i64::try_from(nanos.div_euclid(NANOS_PER_SEC)).ok();
+	let subsec = nanos.rem_euclid(NANOS_PER_SEC) as u32;
+	if let Some(dt) = secs.and_then(|s| DateTime::from_timestamp(s, subsec)) {
+		Ok(Datetime::from(dt).into())
+	} else {
+		Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
+			name: String::from(fn_name),
+			message: String::from(
+				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
+			),
+		}))
 	}
+}
+
+pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
+	let span = duration_span_nanos(&duration, "time::ceil")?;
+	if span == 0 {
+		return Ok(Value::Datetime(val));
+	}
+	let stamp = datetime_to_nanos(&val);
+	let rem = stamp.rem_euclid(span);
+	let target = if rem == 0 {
+		stamp
+	} else {
+		stamp + (span - rem)
+	};
+	nanos_to_datetime(target, "time::ceil")
 }
 
 pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
@@ -49,29 +66,13 @@ pub fn day((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 }
 
 pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			// Check for zero duration
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			match val.duration_trunc(d) {
-				Ok(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-					name: String::from("time::floor"),
-					message: String::from(
-						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
-					),
-				})),
-			}
-		}
-		_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-			name: String::from("time::floor"),
-			message: String::from(
-				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
-			),
-		})),
+	let span = duration_span_nanos(&duration, "time::floor")?;
+	if span == 0 {
+		return Ok(Value::Datetime(val));
 	}
+	let stamp = datetime_to_nanos(&val);
+	let rem = stamp.rem_euclid(span);
+	nanos_to_datetime(stamp - rem, "time::floor")
 }
 
 pub fn format((val, format): (Datetime, String)) -> Result<Value> {
@@ -196,29 +197,20 @@ pub fn now(_: ()) -> Result<Value> {
 }
 
 pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
-	match chrono::Duration::from_std(*duration) {
-		Ok(d) => {
-			// Check for zero duration
-			if d.is_zero() {
-				return Ok(Value::Datetime(val));
-			}
-			match val.duration_round(d) {
-				Ok(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-					name: String::from("time::round"),
-					message: String::from(
-						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
-					),
-				})),
-			}
-		}
-		_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-			name: String::from("time::round"),
-			message: String::from(
-				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
-			),
-		})),
+	let span = duration_span_nanos(&duration, "time::round")?;
+	if span == 0 {
+		return Ok(Value::Datetime(val));
 	}
+	let stamp = datetime_to_nanos(&val);
+	let rem = stamp.rem_euclid(span);
+	let delta_down = rem;
+	let delta_up = span - rem;
+	let target = if delta_up <= delta_down {
+		stamp + delta_up
+	} else {
+		stamp - delta_down
+	};
+	nanos_to_datetime(target, "time::round")
 }
 
 pub fn second((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
@@ -470,5 +462,60 @@ pub mod from {
 				message: String::from("The first argument must be a v1, v6 or v7 UUID."),
 			})),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration as StdDuration;
+
+	use chrono::{TimeZone, Utc};
+	use surrealdb_expr::val::{Datetime, Duration, Value};
+
+	use super::{ceil, floor, round};
+
+	#[test]
+	fn floor_ceil_round_outside_i64_nanos_range() {
+		let early = Datetime::from(Utc.with_ymd_and_hms(1500, 6, 15, 12, 34, 56).single().unwrap());
+		let late = Datetime::from(Utc.with_ymd_and_hms(2400, 6, 15, 12, 34, 56).single().unwrap());
+		let one_hour = Duration::from(StdDuration::from_secs(3600));
+
+		assert_eq!(
+			floor((early, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(1500, 6, 15, 12, 0, 0).single().unwrap()
+			))
+		);
+		assert_eq!(
+			ceil((early, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(1500, 6, 15, 13, 0, 0).single().unwrap()
+			))
+		);
+		assert_eq!(
+			round((early, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(1500, 6, 15, 13, 0, 0).single().unwrap()
+			))
+		);
+
+		assert_eq!(
+			floor((late, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(2400, 6, 15, 12, 0, 0).single().unwrap()
+			))
+		);
+		assert_eq!(
+			ceil((late, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(2400, 6, 15, 13, 0, 0).single().unwrap()
+			))
+		);
+		assert_eq!(
+			round((late, one_hour)).unwrap(),
+			Value::Datetime(Datetime::from(
+				Utc.with_ymd_and_hms(2400, 6, 15, 13, 0, 0).single().unwrap()
+			))
+		);
 	}
 }

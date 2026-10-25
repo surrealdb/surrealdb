@@ -517,7 +517,7 @@ impl ScalarFunction for SearchRrf {
 				}
 			}
 
-			let mut scored_docs = BinaryHeap::with_capacity(limit);
+			let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 			for (id, (score, objects)) in documents {
 				if scored_docs.len() < limit {
 					scored_docs.push(FusionDoc(score, id, objects));
@@ -654,7 +654,7 @@ impl ScalarFunction for SearchLinear {
 
 			for (list_idx, result_list) in results.into_iter().enumerate() {
 				if let Value::Array(array) = result_list {
-					for doc in array {
+					for (rank, doc) in array.into_iter().enumerate() {
 						if let Value::Object(mut obj) = doc
 							&& let Some(id_value) = obj.remove("id")
 						{
@@ -665,7 +665,7 @@ impl ScalarFunction for SearchLinear {
 							} else if let Some(Value::Number(n)) = obj.get("score") {
 								n.as_float()
 							} else {
-								1.0 / (1.0 + count as f64)
+								1.0 / (1.0 + rank as f64)
 							};
 
 							match documents.entry(id_value) {
@@ -731,7 +731,7 @@ impl ScalarFunction for SearchLinear {
 				}
 			}
 
-			let mut scored_docs = BinaryHeap::with_capacity(limit);
+			let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 			for (id, (scores, objects)) in documents {
 				let mut combined_score = 0.0;
 				for (list_idx, &score) in scores.iter().enumerate() {
@@ -827,4 +827,79 @@ pub fn register(registry: &mut FunctionRegistry) {
 	registry.register_index_function(SearchHighlight);
 	registry.register_index_function(SearchScore);
 	registry.register_index_function(SearchOffsets);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::TestDb;
+
+	fn doc(id: &str) -> Value {
+		let mut obj = Object::default();
+		obj.insert("id", Value::from(id));
+		Value::Object(obj)
+	}
+
+	#[tokio::test]
+	async fn rrf_and_linear_cap_heap_capacity_on_huge_limit() {
+		let db = TestDb::new("").await;
+		let exec = db.exec_ctx().await;
+		let eval = EvalContext::from_exec_ctx(&exec);
+
+		let empty_lists = Value::Array(Array::from(vec![Value::Array(Array::new())]));
+		let rrf_res = SearchRrf
+			.invoke_async(&eval, vec![empty_lists.clone(), Value::from(i64::MAX)])
+			.await
+			.expect("search::rrf succeeds with huge limit");
+		assert_eq!(rrf_res, Value::Array(Array::new()));
+
+		let weights = Value::Array(Array::from(vec![Value::from(1)]));
+		let linear_res = SearchLinear
+			.invoke_async(
+				&eval,
+				vec![empty_lists, weights, Value::from(i64::MAX), Value::from("minmax")],
+			)
+			.await
+			.expect("search::linear succeeds with huge limit");
+		assert_eq!(linear_res, Value::Array(Array::new()));
+
+		exec.txn().cancel().await.expect("cancel");
+	}
+
+	#[tokio::test]
+	async fn linear_rank_fallback_is_per_list() {
+		let db = TestDb::new("").await;
+		let exec = db.exec_ctx().await;
+		let eval = EvalContext::from_exec_ctx(&exec);
+
+		let list0 = Value::Array(Array::from(vec![doc("d1"), doc("d2")]));
+		let list1 = Value::Array(Array::from(vec![doc("d3"), doc("d1"), doc("d4")]));
+		let results = Value::Array(Array::from(vec![list0, list1]));
+		let weights = Value::Array(Array::from(vec![Value::from(1.0), Value::from(1.0)]));
+
+		let Value::Array(out) = SearchLinear
+			.invoke_async(&eval, vec![results, weights, Value::from(10), Value::from("minmax")])
+			.await
+			.expect("search::linear succeeds")
+		else {
+			panic!("expected array output");
+		};
+
+		let d1_score = out
+			.iter()
+			.find_map(|v| {
+				if let Value::Object(obj) = v
+					&& obj.get("id") == Some(&Value::from("d1"))
+					&& let Some(Value::Number(n)) = obj.get("linear_score")
+				{
+					Some(n.as_float())
+				} else {
+					None
+				}
+			})
+			.expect("d1 in output");
+		assert!((d1_score - 1.25).abs() < 1e-12, "expected 1.25, got {d1_score}");
+
+		exec.txn().cancel().await.expect("cancel");
+	}
 }

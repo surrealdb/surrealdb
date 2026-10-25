@@ -13,6 +13,10 @@ use crate::syn;
 use crate::types::PublicKind;
 use crate::val::{Array, Object, Value};
 
+/// The total and per-segment specificity key used to order matching API routes.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct PathSpecificity(pub u16, pub Vec<u8>);
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Path(pub Vec<Segment>);
 
@@ -50,8 +54,10 @@ impl<'a> Path {
 		}
 	}
 
-	pub fn specificity(&self) -> u8 {
-		self.iter().map(|s| s.specificity()).sum()
+	pub fn specificity(&self) -> PathSpecificity {
+		let per_segment: Vec<u8> = self.iter().map(Segment::specificity).collect();
+		let total: u16 = per_segment.iter().copied().map(u16::from).sum();
+		PathSpecificity(total, per_segment)
 	}
 }
 
@@ -296,8 +302,9 @@ impl Segment {
 
 	fn specificity(&self) -> u8 {
 		match self {
-			Self::Fixed(_) => 3,
-			Self::Dynamic(_, _) => 2,
+			Self::Fixed(_) => 4,
+			Self::Dynamic(_, Some(_)) => 3,
+			Self::Dynamic(_, None) => 2,
 			Self::Rest(_) => 1,
 		}
 	}

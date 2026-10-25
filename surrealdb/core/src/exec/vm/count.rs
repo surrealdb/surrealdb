@@ -94,7 +94,7 @@ pub(super) async fn count(
 				match select {
 					crate::exec::vm::payload::CountSelect::Deny => return Ok(Counted::Count(0)),
 					crate::exec::vm::payload::CountSelect::Conditional => {
-						return ordinary_rows(program, units, *ordinary, ctx).await;
+						return ordinary_rows(program, units, *ordinary, version, ctx).await;
 					}
 					crate::exec::vm::payload::CountSelect::Allow => {}
 				}
@@ -132,7 +132,7 @@ pub(super) async fn count(
 				match select {
 					crate::exec::vm::payload::CountSelect::Deny => return Ok(Counted::Count(0)),
 					crate::exec::vm::payload::CountSelect::Conditional => {
-						return ordinary_rows(program, units, *ordinary, ctx).await;
+						return ordinary_rows(program, units, *ordinary, version, ctx).await;
 					}
 					crate::exec::vm::payload::CountSelect::Allow => {}
 				}
@@ -181,6 +181,7 @@ async fn ordinary_rows(
 	program: &Program,
 	units: Option<UnitTable>,
 	unit: Option<UnitId>,
+	version: Option<u64>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Counted> {
 	let internal = |why: &str| {
@@ -201,6 +202,11 @@ async fn ordinary_rows(
 		ctx.with_vm_units(units)
 	} else {
 		ctx.clone()
+	};
+	let ctx = if version.is_some() && ctx.version_stamp() != version {
+		ctx.with_version_stamp(version)
+	} else {
+		ctx
 	};
 	let rows = crate::exec::trampoline::nest(async move {
 		let mut stream = execute_program(&unit, &ctx)?;

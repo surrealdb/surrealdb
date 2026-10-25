@@ -6505,9 +6505,28 @@ async fn run_split(
 	};
 	match &spec.kind {
 		super::program::SplitKind::Targets(targets) => {
+			if targets.len() <= 1 {
+				let mut rows = Vec::new();
+				crate::exec::operators::split_row(row, targets, &mut rows);
+				return below.run(rows, state).await;
+			}
+			let mut stack = vec![(0usize, row)];
 			let mut rows = Vec::new();
-			crate::exec::operators::split_row(row, targets, &mut rows);
-			below.run(rows, state).await
+			while let Some((idx, current)) = stack.pop() {
+				if idx + 1 >= targets.len() {
+					crate::exec::operators::split_row(current, &targets[idx..], &mut rows);
+					if matches!(below.run(std::mem::take(&mut rows), state).await?, Ended::Stop) {
+						return Ok(Ended::Stop);
+					}
+				} else {
+					crate::exec::operators::split_row(current, &targets[idx..idx + 1], &mut rows);
+					super::fuel::tick(ctx, rows.len().clamp(1, u32::MAX as usize) as u32).await?;
+					for next in rows.drain(..).rev() {
+						stack.push((idx + 1, next));
+					}
+				}
+			}
+			Ok(Ended::Next)
 		}
 		super::program::SplitKind::Step(step) => {
 			let row = match super::binding::keep_row(step, split, row, state) {

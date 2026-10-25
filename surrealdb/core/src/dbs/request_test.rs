@@ -908,3 +908,151 @@ async fn a_block_that_cannot_begin_gives_its_terminator_a_slot() {
 	assert!(failure(&answered, 1).contains("Tried to start a transaction"), "{answered:?}");
 	assert_eq!(answered[2], Ok("None".to_string()), "CANCEL answers NONE: {answered:?}");
 }
+
+#[tokio::test]
+async fn split_on_set_and_streaming_cartesian_split() {
+	let ds = datastore().await;
+	let ses = session();
+	let results = ds
+		.execute(
+			"SELECT s[*] FROM [{ s: {1, 2, 3} }] SPLIT s[*]; \
+			 SELECT a, b, c FROM [{ a: <array> (0..500), b: <array> (0..500), c: <array> (0..500) }] SPLIT a, b, c LIMIT 2;",
+			&ses,
+			None,
+		)
+		.await
+		.expect("queries should succeed");
+	let set_split = results[0].result.as_ref().expect("set split should succeed");
+	assert_eq!(
+		format!("{set_split:?}"),
+		"Array(Array([Object(Object({\"s\": Set(Set({Number(Int(1))}))})), Object(Object({\"s\": Set(Set({Number(Int(2))}))})), Object(Object({\"s\": Set(Set({Number(Int(3))}))}))]))"
+	);
+	let cartesian = results[1].result.as_ref().expect("cartesian split with limit should succeed");
+	assert!(format!("{cartesian:?}").contains("\"c\": Number(Int(1))"), "{cartesian:?}");
+}
+
+#[tokio::test]
+async fn order_by_alias_of_call_field_evaluates_once_and_scalar_order_by_succeeds() {
+	let ds = datastore().await;
+	let ses = session();
+	let results = ds
+		.execute(
+			"CREATE counter:1 SET n = 0; \
+			 DEFINE FUNCTION fn::bump() { RETURN (UPDATE ONLY counter:1 SET n += 1); }; \
+			 SELECT (fn::bump()).n AS x FROM [1, 2] ORDER BY x DESC; \
+			 SELECT VALUE n FROM ONLY counter:1; \
+			 SELECT a FROM [1, 2, 3] ORDER BY b;",
+			&ses,
+			None,
+		)
+		.await
+		.expect("queries should execute");
+	let ordered = results[2].result.as_ref().expect("SELECT with ORDER BY alias should succeed");
+	assert_eq!(
+		format!("{ordered:?}"),
+		"Array(Array([Object(Object({\"x\": Number(Int(2))})), Object(Object({\"x\": Number(Int(1))}))]))"
+	);
+	let count = results[3].result.as_ref().expect("counter query should succeed");
+	assert_eq!(format!("{count:?}"), "Number(Int(2))");
+	let scalar_order =
+		results[4].result.as_ref().expect("SELECT a FROM [1, 2, 3] ORDER BY b should succeed");
+	assert_eq!(
+		format!("{scalar_order:?}"),
+		"Array(Array([Number(Int(1)), Number(Int(2)), Number(Int(3))]))"
+	);
+}
+
+#[tokio::test]
+async fn remove_user_and_access_if_exists_on_missing_namespace_do_not_create_it() {
+	let ds = datastore().await;
+	let ses = Session::owner().with_ns("ghost_ns");
+	let results = ds
+		.execute(
+			"REMOVE USER IF EXISTS ghost_user ON NAMESPACE; \
+			 REMOVE ACCESS IF EXISTS ghost_access ON NAMESPACE; \
+			 INFO FOR ROOT;",
+			&ses,
+			None,
+		)
+		.await
+		.expect("queries should execute");
+	results[0].result.as_ref().expect("REMOVE USER IF EXISTS should succeed");
+	results[1].result.as_ref().expect("REMOVE ACCESS IF EXISTS should succeed");
+	let info = results[2].result.as_ref().expect("INFO FOR ROOT should succeed");
+	assert!(!format!("{info:?}").contains("ghost_ns"), "ghost_ns should not be created: {info:?}");
+}
+
+#[tokio::test]
+async fn transaction_timeout_in_begin_block_runs_statements_after_commit() {
+	let ds = Datastore::builder()
+		.with_transaction_timeout(Some(std::time::Duration::from_millis(50)))
+		.build_with_path("memory")
+		.await
+		.expect("a memory datastore");
+	let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
+	tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
+	tx.commit().await.expect("committing the namespace");
+	let ses = session();
+	let results = ds
+		.execute("BEGIN; CREATE a:1; SLEEP 5s; CREATE a:2; COMMIT; RETURN 42;", &ses, None)
+		.await
+		.expect("batch should execute");
+	assert_eq!(results.len(), 6, "every statement should have a result slot: {results:?}");
+	assert!(results[1].result.is_err(), "recorded statement should fail: {results:?}");
+	assert!(results[2].result.is_err(), "timed-out statement should fail: {results:?}");
+	assert!(results[3].result.is_err(), "following statement should fail: {results:?}");
+	assert!(results[4].result.is_err(), "COMMIT should fail: {results:?}");
+	assert_eq!(
+		format!("{:?}", results[5].result.as_ref().expect("post-COMMIT statement should run")),
+		"Number(Int(42))"
+	);
+}
+
+#[tokio::test]
+async fn define_api_specificity_definer_invoke_permissions_and_charset_content_type() {
+	let ds = datastore().await;
+	let ses = session();
+	let results = ds
+		.execute(
+			"DEFINE API '/:a/b' FOR get THEN { RETURN { status: 200, body: 'dynamic_first' }; }; \
+			 DEFINE API '/a/:b' FOR get THEN { RETURN { status: 200, body: 'fixed_first' }; }; \
+			 DEFINE API '/users/:id' FOR get THEN { RETURN { status: 200, body: 'untyped' }; }; \
+			 DEFINE API '/users/:id<int>' FOR get THEN { RETURN { status: 200, body: 'typed' }; }; \
+			 RETURN api::invoke('/a/b').body; \
+			 RETURN api::invoke('/users/42').body; \
+			 DEFINE API '/denied' FOR get PERMISSIONS NONE THEN { RETURN { status: 200, body: 'secret' }; }; \
+			 DEFINE FUNCTION fn::call_denied() { RETURN api::invoke('/denied').status; } PERMISSIONS FULL; \
+			 DEFINE API '/json_charset' FOR post MIDDLEWARE api::req::body('json') THEN { RETURN { status: 200, body: $request.body }; }; \
+			 DEFINE API '/auto_charset' FOR post MIDDLEWARE api::req::body('auto') THEN { RETURN { status: 200, body: $request.body }; }; \
+			 RETURN api::invoke('/json_charset', { method: 'post', headers: { 'content-type': 'application/json; charset=utf-8' }, body: <bytes> '{\"ok\":true}' }).body; \
+			 RETURN api::invoke('/auto_charset', { method: 'post', headers: { 'content-type': 'application/json; charset=utf-8' }, body: <bytes> '{\"ok\":true}' }).body;",
+			&ses,
+			None,
+		)
+		.await
+		.expect("setup and owner queries should succeed");
+	assert_eq!(format!("{:?}", results[4].result.as_ref().unwrap()), "String(\"fixed_first\")");
+	assert_eq!(format!("{:?}", results[5].result.as_ref().unwrap()), "String(\"typed\")");
+	assert_eq!(
+		format!("{:?}", results[10].result.as_ref().unwrap()),
+		"Object(Object({\"ok\": Bool(true)}))"
+	);
+	assert_eq!(
+		format!("{:?}", results[11].result.as_ref().unwrap()),
+		"Object(Object({\"ok\": Bool(true)}))"
+	);
+
+	// A non-admin caller invoking a definer function (`fn::call_denied`) that calls
+	// `api::invoke('/denied')` must still have `/denied`'s `PERMISSIONS NONE` enforced.
+	let unauth = Session::for_record(
+		"test",
+		"test",
+		"user",
+		surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+	);
+	let denied = ds
+		.execute("RETURN fn::call_denied();", &unauth, None)
+		.await
+		.expect("fn::call_denied should run");
+	assert_eq!(format!("{:?}", denied[0].result.as_ref().unwrap()), "Number(Int(403))");
+}

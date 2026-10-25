@@ -275,7 +275,11 @@ pub fn slice(
 	let end = match range.end {
 		Bound::Included(x) => {
 			if x < 0 {
-				str_len().saturating_add(x).max(0) as usize
+				let end = str_len().saturating_add(x);
+				if end < 0 {
+					return Ok(String::new().into());
+				}
+				end as usize
 			} else {
 				x as usize
 			}
@@ -296,6 +300,10 @@ pub fn slice(
 		}
 		Bound::Unbounded => usize::MAX,
 	};
+
+	if end < start {
+		return Ok(String::new().into());
+	}
 
 	let len = end.saturating_add(1).saturating_sub(start);
 
@@ -746,38 +754,45 @@ pub mod semver {
 
 	pub mod inc {
 		use anyhow::Result;
+		use surrealdb_expr::expr::Error;
 		use surrealdb_expr::val::Value;
 
 		use crate::string::semver::parse_version;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
-			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
-				|mut version| {
-					version.major += 1;
-					version.minor = 0;
-					version.patch = 0;
-					version.to_string().into()
-				},
-			)
+			let mut version =
+				parse_version(&version, "string::semver::inc::major", "Invalid semantic version")?;
+			version.major = version.major.checked_add(1).ok_or_else(|| {
+				anyhow::Error::new(Error::ArithmeticOverflow(format!(
+					"string::semver::inc::major({version})"
+				)))
+			})?;
+			version.minor = 0;
+			version.patch = 0;
+			Ok(version.to_string().into())
 		}
 
 		pub fn minor((version,): (String,)) -> Result<Value> {
-			parse_version(&version, "string::semver::inc::minor", "Invalid semantic version").map(
-				|mut version| {
-					version.minor += 1;
-					version.patch = 0;
-					version.to_string().into()
-				},
-			)
+			let mut version =
+				parse_version(&version, "string::semver::inc::minor", "Invalid semantic version")?;
+			version.minor = version.minor.checked_add(1).ok_or_else(|| {
+				anyhow::Error::new(Error::ArithmeticOverflow(format!(
+					"string::semver::inc::minor({version})"
+				)))
+			})?;
+			version.patch = 0;
+			Ok(version.to_string().into())
 		}
 
 		pub fn patch((version,): (String,)) -> Result<Value> {
-			parse_version(&version, "string::semver::inc::patch", "Invalid semantic version").map(
-				|mut version| {
-					version.patch += 1;
-					version.to_string().into()
-				},
-			)
+			let mut version =
+				parse_version(&version, "string::semver::inc::patch", "Invalid semantic version")?;
+			version.patch = version.patch.checked_add(1).ok_or_else(|| {
+				anyhow::Error::new(Error::ArithmeticOverflow(format!(
+					"string::semver::inc::patch({version})"
+				)))
+			})?;
+			Ok(version.to_string().into())
 		}
 	}
 
@@ -955,6 +970,32 @@ mod tests {
 
 		let value = super::semver::inc::patch((String::from("1.2.3"),)).unwrap();
 		assert_eq!(value, Value::from("1.2.4"));
+
+		let max_major = format!("{}.0.0", u64::MAX);
+		assert!(super::semver::inc::major((max_major,)).is_err());
+
+		let max_minor = format!("1.{}.0", u64::MAX);
+		assert!(super::semver::inc::minor((max_minor,)).is_err());
+
+		let max_patch = format!("1.2.{}", u64::MAX);
+		assert!(super::semver::inc::patch((max_patch,)).is_err());
+	}
+
+	#[test]
+	fn string_slice_negative_inclusive_end() {
+		use std::ops::Bound;
+
+		use surrealdb_expr::val::Range;
+
+		use crate::args::Optional;
+
+		let range = Value::Range(Box::new(Range {
+			start: Bound::Included(Value::from(0)),
+			end: Bound::Included(Value::from(-4)),
+		}));
+		let res =
+			super::slice((String::from("abc"), Optional(Some(range)), Optional(None))).unwrap();
+		assert_eq!(res, Value::from(""));
 	}
 
 	#[test]

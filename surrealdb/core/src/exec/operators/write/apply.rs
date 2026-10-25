@@ -482,31 +482,31 @@ fn del<'a, X: PlaceEval>(
 							}
 						}
 						arr.0 = kept;
-					} else if matches!(rest.first(), Some(PlaceStep::Subscript { .. })) {
+					} else if let [
+						PlaceStep::Subscript {
+							expr,
+							..
+						},
+						tail @ ..,
+					] = rest
+					{
 						// A subscript written after the filter counts within
-						// the selection, so the selection is walked as an array
-						// of its own. A member the walk removed from it is
-						// removed from the array too; the others are written
-						// back.
-						let mut accepted = Vec::new();
+						// the selection, and maps the selected index directly
+						// to its position in the array.
 						let mut positions = Vec::new();
 						for (position, element) in arr.iter().enumerate() {
 							if ev.accepts(pred, element).await? {
-								accepted.push(element.clone());
 								positions.push(position);
 							}
 						}
-						let mut selection = Value::from(accepted);
-						del(&mut selection, rest, ev).await?;
-						// Back to front, so a removal does not shift a position
-						// still to be written. What is removed is counted in
-						// the selection, what is written back in the array.
-						for (index, position) in positions.into_iter().enumerate().rev() {
-							let element = element_at(&selection, index);
-							if let Value::None = element {
-								arr.remove(index);
-							} else {
-								arr[position] = element;
+						if let Value::Number(index) = ev.subscript(expr).await?
+							&& let Some(index) = index.as_array_index()
+							&& let Some(&position) = positions.get(index)
+						{
+							if tail.is_empty() {
+								arr.remove(position);
+							} else if let Some(element) = arr.get_mut(position) {
+								del(element, tail, ev).await?;
 							}
 						}
 					} else {
@@ -941,10 +941,6 @@ async fn extend<X: PlaceEval>(
 // ===========================================================================
 
 /// The element at `index` of an array value, or `NONE` where there is none.
-///
-/// The two filter steps walk their selection as an array and read it back
-/// through this, so an index the walk removed reads as absent rather than
-/// shifting the one after it into its place.
 fn element_at(value: &Value, index: usize) -> Value {
 	if let Value::Array(arr) = value {
 		arr.get(index).cloned().unwrap_or(Value::None)
@@ -953,27 +949,127 @@ fn element_at(value: &Value, index: usize) -> Value {
 	}
 }
 
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use super::*;
+	use crate::val::Array;
 
-	// =======================================================================
-	// Assignment
-	// =======================================================================
+	enum StepExpr {
+		Subscript(Value),
+		EvenInt,
+	}
 
-	// =======================================================================
-	// Removal
-	// =======================================================================
+	struct TestEval;
 
-	// =======================================================================
-	// The compound operators
-	// =======================================================================
+	impl PlaceEval for TestEval {
+		type Expr = StepExpr;
 
-	// =======================================================================
-	// The compound read
-	// =======================================================================
+		fn subscript<'a>(
+			&'a mut self,
+			expr: &'a Self::Expr,
+		) -> BoxFut<'a, Result<Value, ControlFlow>> {
+			Box::pin(async move {
+				match expr {
+					StepExpr::Subscript(index) => Ok(index.clone()),
+					StepExpr::EvenInt => Ok(Value::None),
+				}
+			})
+		}
 
-	// =======================================================================
-	// `$input`
-	// =======================================================================
+		fn accepts<'a>(
+			&'a mut self,
+			expr: &'a Self::Expr,
+			element: &'a Value,
+		) -> BoxFut<'a, Result<bool, ControlFlow>> {
+			Box::pin(async move {
+				match expr {
+					StepExpr::EvenInt => {
+						if let Value::Number(Number::Int(n)) = element {
+							Ok(*n % 2 == 0)
+						} else if let Value::Object(obj) = element {
+							Ok(matches!(
+								obj.get("v"),
+								Some(Value::Number(Number::Int(n))) if *n % 2 == 0
+							))
+						} else {
+							Ok(false)
+						}
+					}
+					StepExpr::Subscript(_) => Ok(false),
+				}
+			})
+		}
+	}
+
+	/// `{ a: [1, 2, 3, 4, 6] }` after deleting `a[WHERE even][index]`.
+	async fn del_where_subscript(index: Value) -> Option<Value> {
+		let mut doc = Value::Object(Object::from_iter([(
+			"a".to_string(),
+			Value::Array(Array::from(vec![
+				Value::from(1_i64),
+				Value::from(2_i64),
+				Value::from(3_i64),
+				Value::from(4_i64),
+				Value::from(6_i64),
+			])),
+		)]));
+		let steps = vec![
+			PlaceStep::Field("a".to_string()),
+			PlaceStep::Where(StepExpr::EvenInt),
+			PlaceStep::Subscript {
+				expr: StepExpr::Subscript(index),
+				literal_index: true,
+			},
+		];
+		del(&mut doc, &steps, &mut TestEval).await.unwrap();
+
+		let Value::Object(obj) = &doc else {
+			panic!("expected object");
+		};
+		obj.get("a").cloned()
+	}
+
+	#[tokio::test]
+	async fn del_where_subscript_removes_selected_position_without_corrupting_array() {
+		// Matching positions for EvenInt are [1, 3, 4] (values 2, 4, 6).
+		// Removing selection[0] (value 2 at array position 1) must remove index 1
+		// and leave [1, 3, 4, 6] intact.
+		assert_eq!(
+			del_where_subscript(Value::from(0_i64)).await,
+			Some(Value::Array(Array::from(vec![
+				Value::from(1_i64),
+				Value::from(3_i64),
+				Value::from(4_i64),
+				Value::from(6_i64),
+			])))
+		);
+	}
+
+	#[tokio::test]
+	async fn del_where_subscript_accepts_every_exact_numeric_index() {
+		// selection[1] is value 4 at array position 3, whichever exact numeric
+		// variant names it.
+		let expected = Some(Value::Array(Array::from(vec![
+			Value::from(1_i64),
+			Value::from(2_i64),
+			Value::from(3_i64),
+			Value::from(6_i64),
+		])));
+		assert_eq!(del_where_subscript(Value::from(1.0_f64)).await, expected);
+		assert_eq!(
+			del_where_subscript(Value::Number(Number::Decimal(rust_decimal::Decimal::ONE))).await,
+			expected
+		);
+		// A fractional or negative index names no element, so nothing is removed.
+		let untouched = Some(Value::Array(Array::from(vec![
+			Value::from(1_i64),
+			Value::from(2_i64),
+			Value::from(3_i64),
+			Value::from(4_i64),
+			Value::from(6_i64),
+		])));
+		assert_eq!(del_where_subscript(Value::from(0.5_f64)).await, untouched);
+		assert_eq!(del_where_subscript(Value::from(-1_i64)).await, untouched);
+	}
 }

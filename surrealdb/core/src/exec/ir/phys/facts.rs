@@ -802,9 +802,11 @@ fn rows_of_source(ir: &Ir, source: OpId, depth: usize) -> Rows {
 	}
 	let input = || producer(ir, ir.op(source)?.operands.first().copied()?);
 	if matches!(kind, PhysOp::Sort(..) | PhysOp::KnnTopK(..)) {
+		let objects = matches!(kind, PhysOp::KnnTopK(..))
+			|| input().is_some_and(|input| rows_after(ir, input, depth + 1).objects);
 		let ids = input().is_none_or(|input| rows_after(ir, input, depth + 1).ids);
 		Rows {
-			objects: true,
+			objects,
 			ids,
 		}
 	} else if matches!(kind, PhysOp::Split { .. }) {

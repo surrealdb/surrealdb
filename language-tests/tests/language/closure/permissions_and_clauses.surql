@@ -8,7 +8,8 @@ reason = """
 Closures invoked from stored clauses as a record user: a table's PERMISSIONS
 predicate, a field's VALUE and ASSERT clauses and its PERMISSIONS predicate,
 and an event's THEN clause, each of which invokes a closure it makes and one
-it hands a builtin.
+it hands a builtin. The table's select permission is a predicate, so the
+ASSERT failure redacts the rejected value.
 """
 
 [[test.results]]
@@ -18,7 +19,7 @@ value = "[doc:1]"
 value = "[{ id: doc:3, owner: person:bob, secret: 's', x: 40, y: 1 }]"
 
 [[test.results]]
-error = "Found -1 for field `y`, with record `doc:4`, but field must conform to: (|$v: any| $v > 0)($value)"
+error = "Found [REDACTED] for field `y`, with record `doc:4`, but field must conform to: (|$v: any| $v > 0)($value)"
 
 [[test.results]]
 value = "[[doc:1, 10, 's'], [doc:3, 40, 's']]"

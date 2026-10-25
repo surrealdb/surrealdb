@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
+use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableLayouts};
 use crate::exec::ExecutionContext;
 use crate::expr::paths::{IN, OUT};
@@ -68,6 +69,12 @@ pub(crate) async fn purge_edge_pointers(
 	table: &TableName,
 	expunge: bool,
 ) -> Result<()> {
+	for fd in txn.all_tb_fields(ns, db, table, None).await?.iter() {
+		crate::exec::reference_purge::purge_dropped_reference_keys_with(
+			txn, ns, db, table, fd, None, expunge,
+		)
+		.await?;
+	}
 	let graph = GraphPrefix {
 		ns,
 		db,

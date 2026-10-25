@@ -2649,4 +2649,275 @@ mod tests {
 			]
 		);
 	}
+
+	#[tokio::test]
+	async fn return_before_diff_and_projection_enforce_select_permission_on_initial_image() {
+		let setup = "
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:alice;
+			CREATE user:bob;
+			DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM type::record('user', $id))
+				DURATION FOR TOKEN 1h, FOR SESSION 1h;
+			DEFINE TABLE doc SCHEMALESS
+				PERMISSIONS
+					FOR select WHERE owner = $auth.id
+					FOR create, update FULL;
+			CREATE doc:1 SET owner = user:bob, secret = 'bobs-data';
+			CREATE doc:2 SET owner = user:bob, secret = 'bobs-diff';
+			CREATE doc:3 SET owner = user:bob, secret = 'bobs-proj';
+		";
+		let db = TestDb::new(setup).await;
+		let alice = Session::for_record(
+			"test",
+			"test",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+		);
+		let sql = "
+			UPDATE doc:1 SET owner = user:alice, secret = 'overwritten' RETURN BEFORE;
+			UPDATE doc:2 SET owner = user:alice, secret = 'overwritten' RETURN DIFF;
+			UPDATE doc:3 SET owner = user:alice, secret = 'overwritten' RETURN $before.secret;
+			UPSERT doc:4 SET owner = user:alice, secret = 'created' RETURN BEFORE;
+			SELECT id, secret FROM doc ORDER BY id;
+		";
+		let held = answers(&db, &alice, sql).await;
+		assert_eq!(
+			held,
+			[
+				"[]",
+				"[]",
+				"[]",
+				"[NONE]",
+				"[{ id: doc:1, secret: 'overwritten' }, { id: doc:2, secret: 'overwritten' }, { id: doc:3, secret: 'overwritten' }, { id: doc:4, secret: 'created' }]",
+			]
+		);
+	}
+
+	#[tokio::test]
+	async fn vanished_and_skipped_nested_places_enforce_readonly_and_update_permissions() {
+		let setup = "
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:alice;
+			DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM type::record('user', $id))
+				DURATION FOR TOKEN 1h, FOR SESSION 1h;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FULL;
+			DEFINE FIELD a ON doc TYPE option<object> PERMISSIONS FULL;
+			DEFINE FIELD a.ro ON doc TYPE option<int> READONLY;
+			DEFINE FIELD a.locked ON doc TYPE option<string>
+				PERMISSIONS FOR create FULL, FOR select FULL, FOR update NONE;
+			DEFINE FIELD arr ON doc TYPE option<array<object>> PERMISSIONS FULL;
+			DEFINE FIELD arr.*.locked ON doc TYPE option<string>
+				PERMISSIONS FOR create FULL, FOR select FULL, FOR update NONE;
+			CREATE doc:1 SET a = { ro: 42, locked: 'keep' }, arr = [{ locked: 'elem0' }];
+		";
+		let db = TestDb::new(setup).await;
+		let alice = Session::for_record(
+			"test",
+			"test",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+		);
+		let sql = "
+			UPDATE doc:1 SET a = NONE;
+			UPDATE doc:1 CONTENT { a: { ro: 42 }, arr: [] };
+		";
+		let held = answers(&db, &alice, sql).await;
+		assert!(
+			held[0].contains("Found changed value for field `a.ro`"),
+			"expected readonly error on parent deletion, got: {}",
+			held[0]
+		);
+		assert_eq!(
+			held[1],
+			"[{ a: { locked: 'keep', ro: 42 }, arr: [{ locked: 'elem0' }], id: doc:1 }]"
+		);
+	}
+
+	#[tokio::test]
+	async fn assert_and_coerce_errors_redact_values_when_select_permission_restricted() {
+		let setup = "
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:alice;
+			DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM type::record('user', $id))
+				DURATION FOR TOKEN 1h, FOR SESSION 1h;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FULL;
+			DEFINE FIELD secret_assert ON doc TYPE option<int> ASSERT $value > 100
+				PERMISSIONS FOR select NONE, FOR create, update FULL;
+			DEFINE FIELD secret_coerce ON doc TYPE int
+				PERMISSIONS FOR select NONE, FOR create, update FULL;
+			CREATE doc:1 SET secret_assert = 200, secret_coerce = 10;
+		";
+		let db = TestDb::new(setup).await;
+		let alice = Session::for_record(
+			"test",
+			"test",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+		);
+		let sql = "
+			UPDATE doc:1 SET secret_assert = 42;
+			UPDATE doc:1 SET secret_coerce = 'not-an-int';
+			UPDATE doc:1 SET secret_coerce = secret_coerce;
+		";
+		let held = answers(&db, &alice, sql).await;
+		assert!(
+			held[0].contains("[REDACTED]") && !held[0].contains("42"),
+			"expected assert failure value to be redacted, got: {}",
+			held[0]
+		);
+		assert!(
+			held[1].contains("[REDACTED]") && !held[1].contains("not-an-int"),
+			"expected coerce failure value to be redacted, got: {}",
+			held[1]
+		);
+		assert!(
+			held[2].contains("Expected `int` but found `NONE`"),
+			"expected NONE coerce failure not to be redacted, got: {}",
+			held[2]
+		);
+	}
+
+	#[tokio::test]
+	async fn assert_and_coerce_errors_redact_values_when_table_select_is_restricted() {
+		let setup = "
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:alice;
+			DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN (SELECT * FROM type::record('user', $id))
+				DURATION FOR TOKEN 1h, FOR SESSION 1h;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select NONE, FOR create, update FULL;
+			DEFINE FIELD guarded ON doc TYPE option<int> ASSERT $value > 100;
+			DEFINE FIELD typed ON doc TYPE array<int>;
+			DEFINE TABLE open SCHEMALESS PERMISSIONS FULL;
+			DEFINE FIELD guarded ON open TYPE option<int> ASSERT $value > 100;
+			CREATE doc:1 SET guarded = 200, typed = [1, 2, 3];
+			CREATE open:1 SET guarded = 200;
+		";
+		let db = TestDb::new(setup).await;
+		let alice = Session::for_record(
+			"test",
+			"test",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "alice")),
+		);
+		let sql = "
+			UPDATE doc:1 SET guarded = 42;
+			UPDATE doc:1 SET typed += 'hidden-element';
+			UPDATE open:1 SET guarded = 42;
+		";
+		let held = answers(&db, &alice, sql).await;
+		assert!(
+			held[0].contains("[REDACTED]") && !held[0].contains("42"),
+			"expected assert failure under a table SELECT NONE to be redacted, got: {}",
+			held[0]
+		);
+		assert!(
+			held[1].contains("[REDACTED]")
+				&& !held[1].contains("hidden-element")
+				&& !held[1].contains("index"),
+			"expected coerce failure under a table SELECT NONE to be redacted without its position, got: {}",
+			held[1]
+		);
+		assert!(
+			held[2].contains("42") && !held[2].contains("[REDACTED]"),
+			"expected assert failure on a readable table to show its value, got: {}",
+			held[2]
+		);
+	}
+
+	#[tokio::test]
+	async fn remove_expunge_requires_owner_role() {
+		use crate::iam::{Level, Role};
+
+		let setup = "
+			DEFINE TABLE t1 SCHEMALESS;
+			DEFINE TABLE t2 SCHEMALESS;
+			DEFINE TABLE t3 SCHEMALESS;
+		";
+		let db = TestDb::new(setup).await;
+		let db_editor =
+			Session::for_level(Level::Database("test".into(), "test".into()), Role::Editor);
+		let db_owner =
+			Session::for_level(Level::Database("test".into(), "test".into()), Role::Owner);
+		let ns_editor = Session::for_level(Level::Namespace("test".into()), Role::Editor);
+		let ns_owner = Session::for_level(Level::Namespace("test".into()), Role::Owner);
+		let root_editor = Session::for_level(Level::Root, Role::Editor);
+		let root_owner = Session::for_level(Level::Root, Role::Owner);
+
+		let editor_table =
+			answers(&db, &db_editor, "REMOVE TABLE t1; REMOVE TABLE AND EXPUNGE t2;").await;
+		assert_eq!(editor_table[0], "NONE");
+		assert!(
+			editor_table[1].contains("Not enough permissions to perform this action"),
+			"expected Editor to be denied REMOVE TABLE AND EXPUNGE ..., got: {}",
+			editor_table[1]
+		);
+
+		let owner_table = answers(&db, &db_owner, "REMOVE TABLE AND EXPUNGE t2;").await;
+		assert_eq!(owner_table[0], "NONE");
+
+		let editor_db = answers(&db, &ns_editor, "REMOVE DATABASE AND EXPUNGE test;").await;
+		assert!(
+			editor_db[0].contains("Not enough permissions to perform this action"),
+			"expected Editor to be denied REMOVE DATABASE AND EXPUNGE ..., got: {}",
+			editor_db[0]
+		);
+		let owner_db = answers(&db, &ns_owner, "REMOVE DATABASE AND EXPUNGE test;").await;
+		assert_eq!(owner_db[0], "NONE");
+
+		let editor_ns = answers(&db, &root_editor, "REMOVE NAMESPACE AND EXPUNGE test;").await;
+		assert!(
+			editor_ns[0].contains("Not enough permissions to perform this action"),
+			"expected Editor to be denied REMOVE NAMESPACE AND EXPUNGE ..., got: {}",
+			editor_ns[0]
+		);
+		let owner_ns = answers(&db, &root_owner, "REMOVE NAMESPACE AND EXPUNGE test;").await;
+		assert_eq!(owner_ns[0], "NONE");
+	}
+
+	#[tokio::test]
+	async fn count_index_with_time_now_guard_does_not_use_stale_write_time_deltas() {
+		let setup = "
+			DEFINE TABLE doc SCHEMALESS;
+			DEFINE INDEX idx_past ON doc COUNT WHERE ts <= time::now();
+			CREATE doc:1 SET ts = time::now() + 20ms;
+		";
+		let db = TestDb::new(setup).await;
+		tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		let held = answers(
+			&db,
+			&TestDb::owner(),
+			"SELECT count() FROM doc WHERE ts <= time::now() GROUP ALL;",
+		)
+		.await;
+		assert_eq!(held, ["[{ count: 1 }]"]);
+	}
+
+	#[tokio::test]
+	async fn remove_table_purges_reference_keys_and_caches() {
+		let setup = "
+			DEFINE TABLE parent SCHEMALESS;
+			DEFINE TABLE child SCHEMALESS;
+			DEFINE TABLE sibling SCHEMALESS;
+			DEFINE FIELD ref ON child TYPE record<parent> REFERENCE ON DELETE REJECT;
+			DEFINE FIELD ref ON sibling TYPE option<record<parent>> REFERENCE ON DELETE REJECT;
+			CREATE parent:1;
+			CREATE child:1 SET ref = parent:1;
+		";
+		let db = TestDb::new(setup).await;
+		let held = answers(
+			&db,
+			&TestDb::owner(),
+			"
+				SELECT <~child FROM parent:1;
+				REMOVE TABLE child;
+				SELECT <~child FROM parent:1;
+				DELETE parent:1 RETURN BEFORE;
+			",
+		)
+		.await;
+		assert_eq!(
+			held,
+			["[{ \"<~child\": [child:1] }]", "NONE", "[{ \"<~child\": [] }]", "[{ id: parent:1 }]",]
+		);
+	}
 }

@@ -3186,7 +3186,7 @@ impl Ddl<'_, '_> {
 	}
 
 	/// `REMOVE ACCESS`: the method's definition and everything beneath its root, its grants among
-	/// them. On a namespace the session's namespace is created when it does not exist.
+	/// them.
 	fn remove_access(
 		&mut self,
 		name: OperandSlot,
@@ -3195,10 +3195,29 @@ impl Ddl<'_, '_> {
 	) -> Result<(), IrError> {
 		self.guard()?;
 		let ac = self.name(name, NameClause::Access)?.operand;
+		let no_namespace = self.label()?;
 		let (scope, missing): (Vec<(&str, Operand)>, _) = match base {
 			Base::Root => (Vec::new(), StatementError::AccessRootNotFound),
 			Base::Ns => {
-				let ns = self.namespace_id_creating()?;
+				let ns_name = self.reg()?;
+				self.store(StoreInstr::SessionNs {
+					dst: ns_name,
+				});
+				let ns_key = self.object(&[("ns", Operand::Reg(ns_name))])?;
+				let namespace = self.reg()?;
+				self.store(StoreInstr::Get {
+					route: RouteId::named("NamespaceKey"),
+					key: ns_key,
+					ty: TypeId::named("NamespaceDefinition"),
+					dst: namespace,
+				});
+				self.emit(Instr::JumpIf {
+					cond: Operand::Reg(namespace),
+					truthy: false,
+					target: no_namespace,
+				});
+				let ns = self.reg()?;
+				self.get_field(namespace, "namespace_id", ns)?;
 				(vec![("ns", Operand::Reg(ns))], StatementError::AccessNsNotFound)
 			}
 			Base::Db => {
@@ -3230,6 +3249,7 @@ impl Ddl<'_, '_> {
 			truthy: true,
 			target: present,
 		});
+		self.bind(no_namespace)?;
 		self.missing_at_base(if_exists, base, ("ac", ac), missing)?;
 		self.bind(present)?;
 		let stored_name = self.reg()?;
@@ -3247,8 +3267,7 @@ impl Ddl<'_, '_> {
 	}
 
 	/// `REMOVE USER`: the user's definition, and every subscription running as the user in its
-	/// scope, removed and told. On a namespace the session's namespace is created when it does
-	/// not exist.
+	/// scope, removed and told.
 	fn remove_user(
 		&mut self,
 		name: OperandSlot,
@@ -3257,10 +3276,29 @@ impl Ddl<'_, '_> {
 	) -> Result<(), IrError> {
 		self.guard()?;
 		let user = self.name(name, NameClause::User)?.operand;
+		let no_namespace = self.label()?;
 		let (route, scope, missing) = match base {
 			Base::Root => ("RootUserKey", None, StatementError::UserRootNotFound),
 			Base::Ns => {
-				let ns = self.namespace_id_creating()?;
+				let ns_name = self.reg()?;
+				self.store(StoreInstr::SessionNs {
+					dst: ns_name,
+				});
+				let ns_key = self.object(&[("ns", Operand::Reg(ns_name))])?;
+				let namespace = self.reg()?;
+				self.store(StoreInstr::Get {
+					route: RouteId::named("NamespaceKey"),
+					key: ns_key,
+					ty: TypeId::named("NamespaceDefinition"),
+					dst: namespace,
+				});
+				self.emit(Instr::JumpIf {
+					cond: Operand::Reg(namespace),
+					truthy: false,
+					target: no_namespace,
+				});
+				let ns = self.reg()?;
+				self.get_field(namespace, "namespace_id", ns)?;
 				("NsUserKey", Some((ns, None)), StatementError::UserNsNotFound)
 			}
 			Base::Db => {
@@ -3291,6 +3329,7 @@ impl Ddl<'_, '_> {
 			truthy: true,
 			target: present,
 		});
+		self.bind(no_namespace)?;
 		self.missing_at_base(if_exists, base, ("name", user), missing)?;
 		self.bind(present)?;
 		let actor = self.reg()?;

@@ -1240,8 +1240,40 @@ fn judge(
 				derived,
 				skip,
 			}));
+			if stage == WriteStageKind::CheckSelectPermissions(RecordImage::Current)
+				&& returns_reads_before(cx)
+			{
+				jump_if(em, StorageFact::IterationInitial, true, passed);
+				em.emit(gate(GateInstr::Judge {
+					image: RecordImage::Initial,
+					plain,
+					derived,
+					skip,
+				}));
+			}
 			em.bind(passed)
 		}
+	}
+}
+
+/// Whether the statement's `RETURN` clause reads the pre-mutation image (`$before`).
+///
+/// When it does, `CheckSelectPermissions(RecordImage::Current)` must also judge an existing
+/// record's pre-mutation image against the table's `SELECT` predicate so a mutation that moves a
+/// record into the caller's `SELECT` scope cannot disclose its prior state through `RETURN BEFORE`,
+/// `RETURN DIFF`, or a `RETURN` projection referencing `$before`.
+fn returns_reads_before(cx: &Stages<'_, '_>) -> bool {
+	match cx.run.output {
+		OutputShape::Before | OutputShape::Diff => true,
+		OutputShape::Fields => cx
+			.run
+			.returns
+			.and_then(|region| cx.ir.region(region))
+			.and_then(|r| r.blocks.first())
+			.and_then(|&b| cx.ir.block(b))
+			.and_then(|b| b.args.get(1))
+			.is_some_and(|&before| !cx.ir.uses(before).is_empty()),
+		OutputShape::None | OutputShape::Null | OutputShape::Default | OutputShape::After => false,
 	}
 }
 

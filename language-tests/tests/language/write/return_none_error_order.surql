@@ -9,7 +9,9 @@ When a statement fails on more than one record, the failure it reports is the
 first the records raise, in the order they are written. Record two raises in
 its select permission and record three fails an ASSERT, so the permission's
 error is the one reported under `RETURN NONE`, which shows no record, and under
-`RETURN AFTER`, which does, and the statement leaves nothing stored.
+`RETURN AFTER`, which does, and the statement leaves nothing stored. The
+table's select permission is a predicate, so the ASSERT failure redacts the
+rejected value.
 """
 
 [[test.results]]
@@ -25,7 +27,7 @@ error = "Could not cast into `int` using input `'x'`"
 value = "[{ id: ordered_state:1, n: 1 }, { id: ordered_state:2, n: 2 }, { id: ordered_state:3, n: 3 }]"
 
 [[test.results]]
-error = "Found 99 for field `n`, with record `ordered:3`, but field must conform to: $value != 99"
+error = "Found [REDACTED] for field `n`, with record `ordered:3`, but field must conform to: $value != 99"
 
 [[test.results]]
 error = "Could not cast into `int` using input `'x'`"

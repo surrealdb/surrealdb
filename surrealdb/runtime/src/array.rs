@@ -6,9 +6,14 @@ use std::ops::{Bound, ControlFlow};
 use anyhow::{Result, ensure};
 use common::fail;
 use common::range::TypedRange;
+use geo_types::{Coord, LineString, Point, Polygon};
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_expr::expr::Error;
-use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value, check_value_depth};
+use surrealdb_expr::val::{
+	Array, Closure, ClosureEvaluator, Geometry, RecordIdKey, RecordIdKeyRange, Value,
+	check_value_depth,
+};
+use surrealdb_types::ToSql;
 
 use crate::args::{Optional, Rest};
 use crate::fuel::{self, units};
@@ -102,7 +107,7 @@ async fn position<'a>(values: impl IntoIterator<Item = &'a Value>, value: &Value
 	fuel::find(values.into_iter().enumerate(), |&(_, held)| held == value).await.map(|(at, _)| at)
 }
 
-/// Returns an error if an array of this length is too much to allocate.
+/// Returns an error if an array allocation of `n` bytes exceeds the generation limit.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
 	if n > *GENERATION_ALLOCATION_LIMIT {
 		Err(Error::InvalidFunctionArguments {
@@ -112,6 +117,169 @@ fn limit(name: &str, n: usize) -> Result<(), Error> {
 	} else {
 		Ok(())
 	}
+}
+
+/// Approximate in-memory byte footprint of `value`, short-circuiting once the
+/// generation allocation limit is exceeded.
+///
+/// Every variant whose clone copies an owned payload is charged for that
+/// payload, so a value repeated or combined by a generating function is
+/// counted at what its copies hold, not at the size of the enum alone.
+fn value_byte_size(value: &Value) -> usize {
+	match value {
+		Value::String(s) => return mem::size_of::<Value>().saturating_add(s.len()),
+		Value::Bytes(b) => return mem::size_of::<Value>().saturating_add(b.len()),
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_) => return mem::size_of::<Value>(),
+		Value::Array(_)
+		| Value::Set(_)
+		| Value::Object(_)
+		| Value::Range(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Regex(_)
+		| Value::Geometry(_)
+		| Value::Closure(_) => {}
+	}
+	let cap = *GENERATION_ALLOCATION_LIMIT;
+	let mut total = 0usize;
+	let mut stack = vec![value];
+	while let Some(v) = stack.pop() {
+		total = total.saturating_add(mem::size_of::<Value>());
+		match v {
+			Value::String(s) => total = total.saturating_add(s.len()),
+			Value::Bytes(b) => total = total.saturating_add(b.len()),
+			Value::Array(a) => stack.extend(a.0.iter()),
+			Value::Set(s) => stack.extend(s.0.iter()),
+			Value::Object(o) => {
+				for (k, val) in &o.0 {
+					total = total.saturating_add(k.len());
+					stack.push(val);
+				}
+			}
+			Value::Range(r) => {
+				if let Bound::Included(b) | Bound::Excluded(b) = &r.start {
+					stack.push(b);
+				}
+				if let Bound::Included(b) | Bound::Excluded(b) = &r.end {
+					stack.push(b);
+				}
+			}
+			Value::Table(t) => total = total.saturating_add(t.as_str().len()),
+			Value::RecordId(id) => {
+				total = total
+					.saturating_add(id.table.as_str().len())
+					.saturating_add(record_key_byte_size(&id.key, &mut stack));
+			}
+			Value::File(f) => {
+				total = total.saturating_add(f.bucket.len()).saturating_add(f.key.len());
+			}
+			Value::Regex(r) => total = total.saturating_add(r.0.as_str().len()),
+			Value::Geometry(g) => total = total.saturating_add(geometry_byte_size(g)),
+			Value::Closure(c) => {
+				total = total.saturating_add(mem::size_of::<Closure>());
+				match c.as_ref() {
+					Closure::Expr {
+						body,
+						captures,
+						..
+					} => {
+						total = total.saturating_add(body.to_sql().len());
+						for (k, val) in &captures.0 {
+							total = total.saturating_add(k.len());
+							stack.push(val);
+						}
+					}
+					// A builtin closure is shared behind an `Arc`.
+					Closure::Builtin(_) => {}
+				}
+			}
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_) => {}
+		}
+		if total > cap {
+			return total;
+		}
+	}
+	total
+}
+
+/// The bytes a record id's key owns beyond its enum, pushing the values held by
+/// an array or object key onto `stack` for [`value_byte_size`] to walk.
+fn record_key_byte_size<'a>(key: &'a RecordIdKey, stack: &mut Vec<&'a Value>) -> usize {
+	let mut total = 0usize;
+	let mut keys = vec![key];
+	while let Some(key) = keys.pop() {
+		match key {
+			RecordIdKey::Number(_) | RecordIdKey::Uuid(_) => {}
+			RecordIdKey::String(s) => total = total.saturating_add(s.len()),
+			RecordIdKey::Array(a) => stack.extend(a.0.iter()),
+			RecordIdKey::Object(o) => {
+				for (k, val) in &o.0 {
+					total = total.saturating_add(k.len());
+					stack.push(val);
+				}
+			}
+			RecordIdKey::Range(r) => {
+				total = total.saturating_add(mem::size_of::<RecordIdKeyRange>());
+				if let Bound::Included(b) | Bound::Excluded(b) = &r.start {
+					total = total.saturating_add(mem::size_of::<RecordIdKey>());
+					keys.push(b);
+				}
+				if let Bound::Included(b) | Bound::Excluded(b) = &r.end {
+					total = total.saturating_add(mem::size_of::<RecordIdKey>());
+					keys.push(b);
+				}
+			}
+		}
+	}
+	total
+}
+
+/// The bytes a geometry owns beyond its enum: its coordinates and the vectors
+/// holding them.
+fn geometry_byte_size(geometry: &Geometry) -> usize {
+	fn line(l: &LineString<f64>) -> usize {
+		l.0.len().saturating_mul(mem::size_of::<Coord<f64>>())
+	}
+	fn polygon(p: &Polygon<f64>) -> usize {
+		p.interiors().iter().fold(line(p.exterior()), |acc, l| {
+			acc.saturating_add(mem::size_of::<LineString<f64>>()).saturating_add(line(l))
+		})
+	}
+	let mut total = 0usize;
+	let mut stack = vec![geometry];
+	while let Some(g) = stack.pop() {
+		let owned = match g {
+			Geometry::Point(_) => 0,
+			Geometry::Line(l) => line(l),
+			Geometry::Polygon(p) => polygon(p),
+			Geometry::MultiPoint(m) => m.0.len().saturating_mul(mem::size_of::<Point<f64>>()),
+			Geometry::MultiLine(m) => m.0.iter().fold(0usize, |acc, l| {
+				acc.saturating_add(mem::size_of::<LineString<f64>>()).saturating_add(line(l))
+			}),
+			Geometry::MultiPolygon(m) => m.0.iter().fold(0usize, |acc, p| {
+				acc.saturating_add(mem::size_of::<Polygon<f64>>()).saturating_add(polygon(p))
+			}),
+			Geometry::Collection(c) => {
+				stack.extend(c.iter());
+				c.len().saturating_mul(mem::size_of::<Geometry>())
+			}
+		};
+		total = total.saturating_add(owned);
+	}
+	total
 }
 
 pub async fn add_walk((mut array, value): (Array, Value)) -> Result<Value> {
@@ -286,7 +454,15 @@ pub async fn clump_walk((array, clump_size): (Array, i64)) -> Result<Value> {
 }
 
 pub async fn combine_walk((array, other): (Array, Array)) -> Result<Value> {
-	let mut out = Vec::with_capacity(array.len().saturating_mul(other.len()));
+	let pairs = array.len().saturating_mul(other.len());
+	let array_bytes = array.iter().fold(0usize, |acc, v| acc.saturating_add(value_byte_size(v)));
+	let other_bytes = other.iter().fold(0usize, |acc, v| acc.saturating_add(value_byte_size(v)));
+	let total_bytes = mem::size_of::<Value>()
+		.saturating_mul(pairs)
+		.saturating_add(array_bytes.saturating_mul(other.len()))
+		.saturating_add(other_bytes.saturating_mul(array.len()));
+	limit("array::combine", total_bytes)?;
+	let mut out = Vec::with_capacity(pairs);
 	for a in array.iter() {
 		let pairs = fuel::map(other.iter(), |b| Value::from(vec![a.clone(), b.clone()])).await;
 		out.extend(pairs);
@@ -412,9 +588,16 @@ pub async fn fill_walk(
 	let end = match range.end {
 		Bound::Included(x) => {
 			if x < 0 {
-				array_len.saturating_add(x).clamp(0, array_len) as usize
+				let end = array_len.saturating_add(x).min(array_len - 1);
+				if end < start as i64 {
+					return Ok(array.into());
+				}
+				end as usize
 			} else {
-				x.min(array_len) as usize
+				if x < start as i64 {
+					return Ok(array.into());
+				}
+				x.min(array_len - 1) as usize
 			}
 		}
 		Bound::Excluded(x) => {
@@ -923,7 +1106,7 @@ pub async fn repeat_walk((value, count): (Value, i64)) -> Result<Value> {
 	let count = usize::try_from(count).map_err(|_| {
 		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("array::repeat({count})")))
 	})?;
-	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
+	limit("array::repeat", value_byte_size(&value).saturating_mul(count))?;
 	Ok(fuel::map(0..count, |_| value.clone()).await.into())
 }
 
@@ -1014,7 +1197,11 @@ pub fn slice(
 	let end = match range.end {
 		Bound::Included(x) => {
 			if x < 0 {
-				array_len.saturating_add(x).max(0) as usize
+				let end = array_len.saturating_add(x);
+				if end < start as i64 {
+					return Ok(Value::Array(Array::new()));
+				}
+				end as usize
 			} else {
 				x as usize
 			}
@@ -1147,6 +1334,8 @@ pub async fn transpose_walk((array,): (Array,)) -> Result<Value> {
 		fuel::fold(array.iter(), 0, |height, x| height.max(x.as_array().map_or(1, Array::len)))
 			.await;
 	let width = array.len();
+	let cells = height.saturating_mul(width).saturating_add(height);
+	limit("array::transpose", mem::size_of::<Value>().saturating_mul(cells))?;
 	let mut rows = Vec::with_capacity(height);
 	for _ in 0..height {
 		rows.push(vec![Value::None; width]);
@@ -1180,8 +1369,23 @@ pub async fn windows_walk((array, window_size): (Array, i64)) -> Result<Value> {
 			message: "The second argument must be an integer greater than 0".to_string(),
 		}
 	);
-	let mut out = Vec::with_capacity(array.len().saturating_sub(window_size - 1));
+	let num_windows = if array.len() >= window_size {
+		array.len() - window_size + 1
+	} else {
+		0
+	};
+	limit(
+		"array::windows",
+		mem::size_of::<Value>()
+			.saturating_mul(num_windows.saturating_mul(window_size).saturating_add(num_windows)),
+	)?;
+	let mut total_bytes = mem::size_of::<Value>().saturating_mul(num_windows);
+	let mut out = Vec::with_capacity(num_windows);
 	for window in array.0.windows(window_size) {
+		for v in window {
+			total_bytes = total_bytes.saturating_add(value_byte_size(v));
+		}
+		limit("array::windows", total_bytes)?;
 		out.push(Value::from(window.to_vec()));
 		fuel::tick(units(window.len())).await;
 	}
@@ -1214,10 +1418,83 @@ pub mod sort {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_expr::val::{Array, Value};
+	use std::ops::Bound;
 
-	use super::{at, first, join, last, slice};
+	use geo_types::LineString;
+	use surrealdb_expr::val::{Array, Geometry, Range, RecordId, RecordIdKey, TableName, Value};
+
+	use super::{at, combine, fill, first, join, last, repeat, slice, transpose, windows};
 	use crate::args::Optional;
+
+	#[test]
+	fn array_fill_inclusive_bounds() {
+		let arr: Array = vec![Value::from(1), Value::from(2), Value::from(3)].into();
+		let range = Value::Range(Box::new(Range {
+			start: Bound::Included(Value::from(1)),
+			end: Bound::Included(Value::from(3)),
+		}));
+		let res =
+			fill((arr.clone(), Value::from(0), Optional(Some(range)), Optional(None))).unwrap();
+		assert_eq!(res, Value::from(vec![Value::from(1), Value::from(0), Value::from(0)]));
+
+		let neg_before_start = Value::Range(Box::new(Range {
+			start: Bound::Included(Value::from(0)),
+			end: Bound::Included(Value::from(-4)),
+		}));
+		let res =
+			fill((arr.clone(), Value::from(0), Optional(Some(neg_before_start)), Optional(None)))
+				.unwrap();
+		assert_eq!(res, Value::from(arr));
+	}
+
+	#[test]
+	fn array_slice_negative_inclusive_end() {
+		let arr: Array = vec![Value::from(1), Value::from(2), Value::from(3)].into();
+		let range = Value::Range(Box::new(Range {
+			start: Bound::Included(Value::from(0)),
+			end: Bound::Included(Value::from(-4)),
+		}));
+		let res = slice((arr, Optional(Some(range)), Optional(None))).unwrap();
+		assert_eq!(res, Value::Array(Array::new()));
+	}
+
+	#[test]
+	fn array_amplification_limits() {
+		let big_str = Value::from("x".repeat(4096));
+		assert!(repeat((big_str, 1000)).is_err());
+
+		let a: Array = (0..1500).map(Value::from).collect::<Vec<_>>().into();
+		let b: Array = (0..1500).map(Value::from).collect::<Vec<_>>().into();
+		assert!(combine((a, b)).is_err());
+
+		let mut sparse: Vec<Value> = (0..1500).map(Value::from).collect();
+		sparse[0] = Value::Array((0..1500).map(Value::from).collect::<Vec<_>>().into());
+		assert!(transpose((sparse.into(),)).is_err());
+
+		let win_arr: Array = (0..1500).map(Value::from).collect::<Vec<_>>().into();
+		assert!(windows((win_arr, 750)).is_err());
+	}
+
+	#[test]
+	fn array_amplification_limits_count_heap_backed_values() {
+		// A record id whose key holds a large string owns it in every copy.
+		let id = Value::RecordId(RecordId::new(
+			TableName::from("t"),
+			RecordIdKey::Array(vec![Value::from("x".repeat(4096))].into()),
+		));
+		assert!(repeat((id.clone(), 1000)).is_err());
+		assert!(repeat((id, 1)).is_ok());
+
+		// So does a geometry its coordinates.
+		let line = Value::Geometry(Geometry::Line(LineString::from(vec![(0.0, 0.0); 10_000])));
+		assert!(repeat((line, 100)).is_err());
+
+		let ids: Array = (0..64)
+			.map(|_| Value::RecordId(RecordId::new(TableName::from("x".repeat(4096)), 1_i64)))
+			.collect::<Vec<_>>()
+			.into();
+		assert!(combine((ids.clone(), ids)).is_err());
+	}
 
 	#[test]
 	fn array_slice() {

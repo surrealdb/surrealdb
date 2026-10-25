@@ -303,18 +303,30 @@ pub mod scrypt {
 	use scrypt::password_hash::{PasswordHash, PasswordHasher, SaltString};
 	use surrealdb_expr::val::Value;
 
+	use super::COST_ALLOWANCE;
+
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
 		type Params = <Scrypt as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
 			.filter(|test| {
 				bounded_verify_password!(Scrypt, Scrypt, pass, test, |params: &Params| {
-					// Scrypt is slow, use lower cost allowance.
-					// Also note that the log_n parameter behaves exponentially, so add instead
-					// of multiplying.
-					params.log_n() <= Params::default().log_n().saturating_add(2)
-						&& params.r() <= Params::default().r().saturating_mul(2)
-						&& params.p() <= Params::default().p().saturating_mul(4)
+					let default = Params::default();
+					let max_work = (1u64 << default.log_n())
+						.saturating_mul(u64::from(default.r()))
+						.saturating_mul(u64::from(default.p()))
+						.saturating_mul(u64::from(COST_ALLOWANCE));
+					let work = 1u64
+						.checked_shl(u32::from(params.log_n()))
+						.and_then(|n| n.checked_mul(u64::from(params.r())))
+						.and_then(|nr| nr.checked_mul(u64::from(params.p())));
+					// Cap each parameter individually and bound the combined
+					// `2^log_n * r * p` work factor to `COST_ALLOWANCE` times the
+					// default parameters.
+					params.log_n() <= default.log_n().saturating_add(1)
+						&& params.r() <= default.r().saturating_mul(2)
+						&& params.p() <= default.p().saturating_mul(2)
+						&& work.is_some_and(|w| w <= max_work)
 				})
 			})
 			.is_some()
@@ -328,6 +340,26 @@ pub mod scrypt {
 			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
 			.to_string();
 		Ok(hash.into())
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use surrealdb_expr::val::Value;
+
+		use super::cmp;
+
+		#[test]
+		fn cmp_rejects_excessive_scrypt_cost() {
+			// ln=19,r=16,p=4 is 32x default work and must be rejected without running scrypt.
+			let excessive = "$scrypt$ln=19,r=16,p=4$dGVzdHNhbHR0ZXN0c2FsdA$cL9/VaxqCCkB4xq7mB2I/UgkABJNAFH0Ie4vUFF4JGM";
+			assert_eq!(cmp((excessive.into(), "p4ssw0rd".into())).unwrap(), Value::Bool(false));
+			// ln=18,r=16,p=2 is 8x default work (exceeds 4x cap) even though each axis is <= 2x.
+			let combined_excessive = "$scrypt$ln=18,r=16,p=2$dGVzdHNhbHR0ZXN0c2FsdA$cL9/VaxqCCkB4xq7mB2I/UgkABJNAFH0Ie4vUFF4JGM";
+			assert_eq!(
+				cmp((combined_excessive.into(), "p4ssw0rd".into())).unwrap(),
+				Value::Bool(false)
+			);
+		}
 	}
 }
 

@@ -49,6 +49,20 @@ pub(crate) async fn purge_dropped_reference_keys(
 	old: &catalog::FieldDefinition,
 	new: Option<&catalog::FieldDefinition>,
 ) -> Result<()> {
+	purge_dropped_reference_keys_with(txn, ns, db, ft, old, new, false).await
+}
+
+/// Like [`purge_dropped_reference_keys`], erasing earlier versions of each key
+/// as well when `expunge` is `true`.
+pub(crate) async fn purge_dropped_reference_keys_with(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ft: &TableName,
+	old: &catalog::FieldDefinition,
+	new: Option<&catalog::FieldDefinition>,
+	expunge: bool,
+) -> Result<()> {
 	// Only a field that previously declared a REFERENCE wrote reference keys.
 	if old.reference.is_none() {
 		return Ok(());
@@ -58,9 +72,12 @@ pub(crate) async fn purge_dropped_reference_keys(
 	let ff = old.name.to_sql();
 	let old_kind: Option<&Kind> = old.field_kind.as_ref();
 	let new_kind: Option<&Kind> = new.and_then(|n| n.field_kind.as_ref());
-	for target in txn.all_tb(ns, db, None).await?.iter() {
-		let target = target.name.clone();
-		let target = &target;
+	let mut targets: std::collections::HashSet<TableName> =
+		txn.all_tb(ns, db, None).await?.iter().map(|tb| tb.name.clone()).collect();
+	if let Some(kind) = old_kind {
+		kind.collect_reference_target_tables(&mut targets);
+	}
+	for target in &targets {
 		// Reference keys live under their target table, so only tables the old
 		// kind could hold a record of can carry this field's keys (an untyped
 		// `record` could target any table).
@@ -100,7 +117,11 @@ pub(crate) async fn purge_dropped_reference_keys(
 		drop(cursor);
 		for raw in &orphaned {
 			let key = ReferenceKey::decode_key(raw)?;
-			txn.del_key(&key).await?;
+			if expunge {
+				txn.clr_key(&key).await?;
+			} else {
+				txn.del_key(&key).await?;
+			}
 		}
 		// The deletions above happen behind the target table's inline
 		// reference caches, so those caches — if the table maintains any —

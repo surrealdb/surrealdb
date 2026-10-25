@@ -206,7 +206,7 @@ pub async fn rrf(
 	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
 	// `limit` documents. This avoids sorting all documents when we only need the
 	// top-k results.
-	let mut scored_docs = BinaryHeap::with_capacity(limit);
+	let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
 			// Heap not full yet - add document directly
@@ -370,7 +370,7 @@ pub async fn linear(
 	let mut count = 0;
 	for (list_idx, result_list) in results.into_iter().enumerate() {
 		if let Value::Array(array) = result_list {
-			for doc in array {
+			for (rank, doc) in array.into_iter().enumerate() {
 				if let Value::Object(mut obj) = doc {
 					// Extract the document ID
 					if let Some(id_value) = obj.remove("id") {
@@ -385,7 +385,7 @@ pub async fn linear(
 						} else {
 							// If no score field found, use rank-based scoring (higher rank = lower
 							// score)
-							1.0 / (1.0 + count as f64)
+							1.0 / (1.0 + rank as f64)
 						};
 
 						// Store or merge the document
@@ -460,7 +460,7 @@ pub async fn linear(
 
 	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
 	// `limit` documents.
-	let mut scored_docs = BinaryHeap::with_capacity(limit);
+	let mut scored_docs = BinaryHeap::with_capacity(limit.min(documents.len()));
 
 	for (id, (scores, objects)) in documents {
 		// Compute weighted linear combination of normalized scores

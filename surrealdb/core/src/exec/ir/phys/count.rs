@@ -401,11 +401,15 @@ fn counted_whole(ir: &Ir, m: &Matched, answers: &TableAnswers) -> Option<Decisio
 	if !proven || answers.lightweight {
 		return None;
 	}
-	let deltas = answers
-		.indexes
-		.iter()
-		.find(|index| matches!(&index.index, Index::Count(None)))
-		.map(|index| index.index_id);
+	let deltas = (answers.version == ReadVersion::Current)
+		.then(|| {
+			answers
+				.indexes
+				.iter()
+				.find(|index| matches!(&index.index, Index::Count(None)))
+				.map(|index| index.index_id)
+		})
+		.flatten();
 	Some(Decision {
 		shape: CountShape::All {
 			source: m.source_ref.clone(),
@@ -445,17 +449,20 @@ fn indexed(
 	if answers.restricted.prefixes().cond_touches(&cond) {
 		return Ok(None);
 	}
-	let deltas = answers
-		.indexes
-		.iter()
-		.find(|index| {
-			matches!(&index.index, Index::Count(Some(_)))
-				&& index
-					.count_cond
-					.as_ref()
-					.is_some_and(|guard| guard_counts(answers.key.as_deref(), &guard.0, &cond))
+	let deltas = cond_counts_from_write_deltas(&read, &cond, registry)
+		.then(|| {
+			answers
+				.indexes
+				.iter()
+				.find(|index| {
+					matches!(&index.index, Index::Count(Some(_)))
+						&& index.count_cond.as_ref().is_some_and(|guard| {
+							guard_counts(answers.key.as_deref(), &guard.0, &cond)
+						})
+				})
+				.map(|index| index.index_id)
 		})
-		.map(|index| index.index_id);
+		.flatten();
 	let btree = match deltas {
 		Some(_) => None,
 		None => btree_walk(answers, &cond, m.with.as_ref(), registry),
@@ -478,6 +485,45 @@ fn indexed(
 		deltas,
 		condition: Some(region),
 	}))
+}
+
+/// Whether `cond` is a pure function of the stored record alone, so the count deltas written by a
+/// `COUNT WHERE` index when each record was stored still equal the count of `cond` when the query
+/// runs. A predicate that reads the clock (`time::now()`), draws entropy, reads session or external
+/// state, runs a subquery or lookup, or reads a non-row parameter can change between the write and
+/// the read, and cannot be answered from write-time deltas.
+fn cond_counts_from_write_deltas(
+	read: &Reconstructed,
+	cond: &LogicalExpr,
+	registry: &FunctionRegistry,
+) -> bool {
+	use std::ops::ControlFlow;
+
+	use crate::expr::logical::EffectSet;
+	if !read.operands.is_empty() {
+		return false;
+	}
+	let allowed = EffectSet::READS_ROW.union(EffectSet::MAY_REJECT);
+	let effects = crate::exec::logical::effects::effects_of_expr(cond, registry);
+	if !allowed.contains(effects.set) {
+		return false;
+	}
+	cond.visit_deep(&mut |expr| {
+		if let LogicalExpr::Subquery(_)
+		| LogicalExpr::Lookup {
+			..
+		} = expr
+		{
+			return ControlFlow::Break(());
+		}
+		if let LogicalExpr::Param(name) = expr
+			&& !crate::expr::logical::ROW_PARAMS.contains(&name.as_str())
+		{
+			return ControlFlow::Break(());
+		}
+		ControlFlow::Continue(())
+	})
+	.is_continue()
 }
 
 /// A B-tree index whose walk of keys is the count of `cond`: it covers the whole condition, and

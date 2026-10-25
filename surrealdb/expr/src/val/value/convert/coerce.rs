@@ -43,6 +43,44 @@ pub enum CoerceError {
 	},
 }
 impl std::error::Error for CoerceError {}
+impl CoerceError {
+	/// Redacts the source value from this coercion error so error messages do
+	/// not disclose values held by fields whose `FOR select` permission denies
+	/// the caller. `NONE` carries no stored value and is left as `NONE`. The
+	/// position of a failing element is dropped as well, since an array index
+	/// or object key is structure derived from the hidden value.
+	pub fn redact(self) -> Self {
+		match self {
+			CoerceError::InvalidKind {
+				from: Value::None,
+				into,
+			} => CoerceError::InvalidKind {
+				from: Value::None,
+				into,
+			},
+			CoerceError::InvalidKind {
+				into,
+				..
+			}
+			| CoerceError::InvalidLength {
+				into,
+				..
+			} => CoerceError::InvalidKind {
+				from: Value::from("[REDACTED]"),
+				into,
+			},
+			CoerceError::ElementOf {
+				inner,
+				into,
+				..
+			} => CoerceError::ElementOf {
+				inner: Box::new(inner.redact()),
+				into,
+				position: None,
+			},
+		}
+	}
+}
 impl fmt::Display for CoerceError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -1162,6 +1200,22 @@ mod tests {
 		let err = value.coerce_to::<Vec<i64>>().unwrap_err();
 		let msg = err.to_string();
 		assert!(msg.contains("index 2"), "error message should mention index 2, got: {msg}");
+	}
+
+	#[test]
+	fn test_redacted_coerce_error_drops_value_and_position() {
+		let value = Value::Array(Array(vec![
+			Value::Number(1.into()),
+			Value::Number(2.into()),
+			Value::String(Strand::new_static("secret")),
+		]));
+		let err = value.coerce_to_array_type(&Kind::Int).unwrap_err();
+		assert!(err.to_string().contains("index 2"));
+
+		let msg = err.redact().to_string();
+		assert!(!msg.contains("secret"), "redacted error shows the value: {msg}");
+		assert!(!msg.contains("index"), "redacted error shows the position: {msg}");
+		assert!(msg.contains("[REDACTED]"), "redacted error should say so: {msg}");
 	}
 
 	#[test]

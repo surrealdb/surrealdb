@@ -142,12 +142,11 @@ fn collect_steps<'a>(expr: &'a LogicalExpr, out: &mut Vec<&'a LogicalExpr>) {
 	}
 }
 
-/// Builds a [`FieldPath`] from a path expression, rejecting shapes the
-/// streaming operators cannot express: a `WHERE` filter, a method call, a
-/// wildcard, a computed index, an optional chain, or a recursion. A
-/// destructure and the expression a path starts from do not affect the output
-/// path's structure and are skipped. An expression that is not a path is
-/// rejected.
+/// Builds a [`FieldPath`] from a row-rooted path expression, rejecting shapes
+/// the streaming operators cannot express: a non-row root, a `WHERE` filter, a
+/// method call, a wildcard, a computed index, an optional chain, or a
+/// recursion. A destructure does not affect the output path's structure and is
+/// skipped. An expression that is not a row-rooted path is rejected.
 pub(crate) fn field_path_from_expr(expr: &LogicalExpr) -> Result<FieldPath, Error> {
 	let unsupported = || -> Error {
 		ExecError::Query {
@@ -194,7 +193,6 @@ pub(crate) fn field_path_from_expr(expr: &LogicalExpr) -> Result<FieldPath, Erro
 			LogicalExpr::Destructure {
 				..
 			} => {}
-			start if !start.is_path() => {}
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Array(_)
 			| LogicalExpr::Set(_)

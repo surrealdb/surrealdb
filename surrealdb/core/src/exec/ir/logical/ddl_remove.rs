@@ -21,7 +21,15 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 	let (form, allow, object, if_exists, expunge) = match remove {
 		RemoveStatement::Namespace(stmt) => (
 			DdlForm::RemoveNamespace,
-			(EDIT, ResourceKind::Namespace, Base::Root),
+			(
+				EDIT,
+				if stmt.expunge {
+					ResourceKind::Any
+				} else {
+					ResourceKind::Namespace
+				},
+				Base::Root,
+			),
 			RemoveObject::Namespace {
 				name: s.name(DdlOperand::Name, &stmt.name)?,
 			},
@@ -30,7 +38,15 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 		),
 		RemoveStatement::Database(stmt) => (
 			DdlForm::RemoveDatabase,
-			(EDIT, ResourceKind::Database, Base::Ns),
+			(
+				EDIT,
+				if stmt.expunge {
+					ResourceKind::Any
+				} else {
+					ResourceKind::Database
+				},
+				Base::Ns,
+			),
 			RemoveObject::Database {
 				name: s.name(DdlOperand::Name, &stmt.name)?,
 			},
@@ -76,7 +92,15 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 		),
 		RemoveStatement::Table(stmt) => (
 			DdlForm::RemoveTable,
-			(EDIT, ResourceKind::Table, Base::Db),
+			(
+				EDIT,
+				if stmt.expunge {
+					ResourceKind::Any
+				} else {
+					ResourceKind::Table
+				},
+				Base::Db,
+			),
 			RemoveObject::Table {
 				name: s.name(DdlOperand::Name, &stmt.name)?,
 			},

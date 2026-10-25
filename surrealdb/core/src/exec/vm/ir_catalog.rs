@@ -660,27 +660,50 @@ pub(super) async fn read_answers(
 	};
 	let reads_versioned = *version != ReadVersion::Current;
 	let current = txn.get_tb(ns, db, table, None).await.map_err(|e| unreadable(&e))?;
+	let (stamped, stamped_unreadable) = match version {
+		ReadVersion::Stamped(stamp) => match txn.get_tb(ns, db, table, Some(*stamp)).await {
+			Ok(def) => (def, false),
+			Err(e)
+				if matches!(e.downcast_ref(), Some(crate::catalog::Error::TbNotFound { .. }))
+					|| matches!(
+						surrealdb_datastore::storage_error(&e),
+						Some(surrealdb_kvs::Error::UnsupportedVersionedQueries)
+					) =>
+			{
+				(None, true)
+			}
+			Err(e) => return Err(unreadable(&e)),
+		},
+		ReadVersion::Current | ReadVersion::Deferred => (None, false),
+	};
+	let effective = match version {
+		ReadVersion::Current => current.as_deref(),
+		ReadVersion::Stamped(_) => stamped.as_deref(),
+		ReadVersion::Deferred => None,
+	};
 	let defined = match version {
 		ReadVersion::Current => current.is_some(),
-		ReadVersion::Stamped(stamp) => {
-			current.is_some()
-				|| txn
-					.get_tb(ns, db, table, Some(*stamp))
-					.await
-					.map_err(|e| unreadable(&e))?
-					.is_some()
-		}
+		ReadVersion::Stamped(_) => current.is_some() || stamped.is_some() || stamped_unreadable,
 		ReadVersion::Deferred => true,
 	};
 	let lightweight =
 		is_lightweight(planner, table).await.map_err(|e| unreadable(&anyhow::anyhow!(e.reason)))?;
-	// A late-bound statement meets the table's permission as it stands when it runs, so a count
-	// judges each record rather than trusting the definition read here.
-	let select = match planner.is_late_bound() {
+	// A late-bound statement or a deferred version stamp meets the table's permission as it
+	// stands when it runs, so a count judges each record rather than trusting the definition
+	// read here. A literal version stamp reads the table definition at that stamp when the
+	// backend supports versioned catalog reads.
+	let select = match planner.is_late_bound()
+		|| matches!(version, ReadVersion::Deferred)
+		|| stamped_unreadable
+	{
 		true => CountSelect::Conditional,
-		false => count_select_of(current.as_deref()),
+		false => count_select_of(effective),
 	};
-	let fields = match txn.all_tb_fields(ns, db, table, None).await {
+	let field_version = match version {
+		ReadVersion::Stamped(stamp) => Some(*stamp),
+		ReadVersion::Current | ReadVersion::Deferred => None,
+	};
+	let fields = match txn.all_tb_fields(ns, db, table, field_version).await {
 		Ok(fields) => fields,
 		Err(_) => {
 			return Ok(declined(
@@ -689,6 +712,7 @@ pub(super) async fn read_answers(
 					defined,
 					lightweight,
 					enforces: defined,
+					permissioned: planner.reads_are_checked(),
 					select,
 					..plain
 				},
@@ -699,15 +723,18 @@ pub(super) async fn read_answers(
 		field.computed.is_some()
 			|| (planner.reads_are_checked() && !matches!(field.select_permission, Permission::Full))
 	}) || (planner.reads_are_checked()
-		&& !current.as_ref().is_some_and(|def| matches!(def.permissions.select, Permission::Full)));
-	// A late-bound statement reads the catalog as it stands when it runs, so it enforces whatever
-	// that holds.
-	let enforces = planner.is_late_bound() || (defined && declares);
+		&& !effective.is_some_and(|def| matches!(def.permissions.select, Permission::Full)));
+	// A late-bound statement or a deferred version stamp reads the catalog as it stands when it
+	// runs, so it enforces whatever that holds.
+	let enforces = planner.is_late_bound()
+		|| matches!(version, ReadVersion::Deferred)
+		|| (defined && declares);
 	let restricted: RestrictedSelect =
 		planner.resolve_restricted_select_prefixes(table).await.into();
 	let permissioned = planner.reads_are_checked()
-		&& !current.as_ref().is_some_and(|def| matches!(def.permissions.select, Permission::Full));
-	let inline = current.as_deref().and_then(|def| inline_of(def, &fields));
+		&& (matches!(version, ReadVersion::Deferred)
+			|| !effective.is_some_and(|def| matches!(def.permissions.select, Permission::Full)));
+	let inline = effective.and_then(|def| inline_of(def, &fields));
 	let base = TableAnswers {
 		table: table.clone(),
 		defined,
@@ -1257,5 +1284,38 @@ mod tests {
 				);
 			}
 		}
+	}
+
+	#[tokio::test]
+	async fn versioned_answers_do_not_trust_current_full_select_permission() {
+		let db = TestDb::new("DEFINE TABLE b SCHEMALESS PERMISSIONS FULL;").await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"test",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("users", "alice")),
+		);
+		let ctx = db.exec_ctx_as(&record, TransactionType::Read).await;
+		let txn = ctx.try_txn().expect("a transaction");
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			ctx.function_registry(),
+			txn,
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		)
+		.with_auth(Arc::clone(&ctx.root().auth));
+
+		let deferred: SourceKey = ("b".into(), None, ReadVersion::Deferred);
+		let answers = read_answers(&planner, &deferred).await.expect("deferred answers");
+		assert_eq!(answers.select, CountSelect::Conditional);
+		assert!(answers.enforces);
+		assert!(answers.permissioned);
+
+		let stamped: SourceKey = ("b".into(), None, ReadVersion::Stamped(0));
+		let answers = read_answers(&planner, &stamped).await.expect("stamped answers");
+		assert_ne!(answers.select, CountSelect::Allow);
+		assert!(answers.enforces);
+		assert!(answers.permissioned);
 	}
 }

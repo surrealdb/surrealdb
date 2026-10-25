@@ -20,7 +20,7 @@ use surrealdb_types::ToSql;
 
 use super::data::statement_input;
 use super::{State, WriteState, internal, run_image, spec_of};
-use crate::catalog::{DefineDefault, FieldDefinition};
+use crate::catalog::{DefineDefault, FieldDefinition, TableDefinition};
 use crate::dbs::NoWriteFrame;
 use crate::doc::Error as DocError;
 use crate::exec::operators::write::ctx::WriteCtx;
@@ -33,8 +33,9 @@ use crate::exec::vm::program::{DataShape, Label, Program};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::expr::idiom::Idiom;
+use crate::expr::part::Part;
 use crate::iam::Action;
-use crate::val::{RecordId, TableName, Value};
+use crate::val::{Array, RecordId, Set, TableName, Value};
 
 /// What the schema instructions know of the table, read from the catalog when
 /// the statement was planned: which fields it declared, in the order the
@@ -310,8 +311,9 @@ struct FieldCursor {
 	/// The field's `PERMISSIONS FOR create` and `update`.
 	write: FieldWrite,
 	/// The places the field's path names, as the post-image held them when
-	/// the field was opened.
-	places: std::vec::IntoIter<(Idiom, Value)>,
+	/// the field was opened, followed by any places present in the pre-image
+	/// whose parent container vanished from the post-image (`true`).
+	places: std::vec::IntoIter<(Idiom, Value, bool)>,
 	/// The place stepped to.
 	place: Option<Place>,
 	/// Whether the field landed a value within a set, whose sets are then
@@ -468,6 +470,135 @@ fn governing(schema: &mut SchemaRecord) -> Result<Option<FieldPermission>, Contr
 	}))
 }
 
+/// Restores `val` at `path` within `current`, recreating any intermediate
+/// object, array, or set containers from `initial` when an ancestor was deleted
+/// or replaced.
+fn restore_place(current: &mut Value, initial: &Value, path: &[Part], val: Value) {
+	let Some((first, rest)) = path.split_first() else {
+		*current = val;
+		return;
+	};
+	match first {
+		Part::Field(f) => {
+			if !matches!(current, Value::Object(_)) {
+				*current = Value::empty_object();
+			}
+			let Value::Object(obj) = current else {
+				return;
+			};
+			if rest.is_empty() {
+				if val.is_none() {
+					obj.remove(f.as_str());
+				} else {
+					obj.insert(f.clone(), val);
+				}
+			} else {
+				let init_child = initial.pick(std::slice::from_ref(first));
+				let entry = obj.entry(f.clone()).or_insert_with(|| Value::None);
+				restore_place(entry, &init_child, rest, val);
+			}
+		}
+		Part::All
+		| Part::Flatten
+		| Part::First
+		| Part::Last
+		| Part::Where(_)
+		| Part::Lookup(_)
+		| Part::Value(_)
+		| Part::Start(_)
+		| Part::Method(_, _)
+		| Part::Destructure(_)
+		| Part::Optional
+		| Part::Recurse(_, _, _)
+		| Part::Doc
+		| Part::RepeatRecurse => {
+			let Some(idx) = first.as_old_index() else {
+				return;
+			};
+			let init_child = initial.pick(std::slice::from_ref(first));
+			if !matches!(current, Value::Array(_) | Value::Set(_)) {
+				*current = if matches!(initial, Value::Set(_)) {
+					Value::Set(Set::new())
+				} else {
+					Value::Array(Array::new())
+				};
+			}
+			match current {
+				Value::Array(arr) => {
+					while arr.len() <= idx {
+						let filler =
+							if arr.len() < idx && matches!(rest.first(), Some(Part::Field(_))) {
+								Value::empty_object()
+							} else {
+								Value::None
+							};
+						arr.push(filler);
+					}
+					restore_place(&mut arr[idx], &init_child, rest, val);
+				}
+				Value::Set(set) => {
+					if let Some(slot) = set.nth_mut(idx) {
+						restore_place(slot, &init_child, rest, val);
+					} else {
+						let mut elem = Value::None;
+						restore_place(&mut elem, &init_child, rest, val);
+						set.insert(elem);
+					}
+				}
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Table(_)
+				| Value::Closure(_) => {}
+			}
+		}
+	}
+}
+
+/// Whether the caller's `SELECT` permissions restrict reading `fields[index]`:
+/// the table's own `SELECT` permission, or that of the field or any of its
+/// ancestor fields, is anything but `FULL`. Error messages for `TYPE` coercion
+/// and `ASSERT` failures on that field then redact the rejected value, since
+/// the caller may be able to write a record it cannot read.
+fn select_value_hidden(
+	state: &State,
+	exec: &ExecutionContext,
+	table: &TableDefinition,
+	fields: &[FieldDefinition],
+	index: usize,
+) -> Result<bool, ControlFlow> {
+	if state.permissions_bypassed || state.unchecked_reads {
+		return Ok(false);
+	}
+	let Ok(db_ctx) = exec.database() else {
+		return Ok(false);
+	};
+	if !should_check_perms(db_ctx, Action::View).map_err(|e| ControlFlow::Err(e.into()))? {
+		return Ok(false);
+	}
+	if !matches!(table.permissions.select, crate::catalog::Permission::Full) {
+		return Ok(true);
+	}
+	let target = &fields[index].name.0;
+	Ok(fields.iter().any(|anc| {
+		anc.name.0.len() <= target.len()
+			&& target.starts_with(&anc.name.0)
+			&& !matches!(anc.select_permission, crate::catalog::Permission::Full)
+	}))
+}
+
 /// Take `instr` for the record in flight, and answer the instruction the body
 /// continues at: `next`, or a target the instruction holds.
 pub(super) async fn step(
@@ -538,7 +669,21 @@ pub(super) async fn step(
 				}
 				Vec::new()
 			} else {
-				write.row()?.current.walk(&fd.name)
+				let row = write.row()?;
+				let mut places: Vec<(Idiom, Value, bool)> = row
+					.current
+					.walk(&fd.name)
+					.into_iter()
+					.map(|(path, val)| (path, val, false))
+					.collect();
+				if !row.initial.is_none() {
+					for (path, old) in row.initial.walk(&fd.name) {
+						if !old.is_none() && !places.iter().any(|(p, _, _)| *p == path) {
+							places.push((path, Value::None, true));
+						}
+					}
+				}
+				places
 			};
 			// Every clause of the field, and whether its `PERMISSIONS` are
 			// enforced, is answered under the field's own authority, in a
@@ -576,7 +721,7 @@ pub(super) async fn step(
 				let rid = schema.rid.clone();
 				let cursor = schema.cursor()?;
 				let index = cursor.index;
-				let Some((path, val)) = cursor.places.next() else {
+				let Some((path, val, vanished)) = cursor.places.next() else {
 					cursor.place = None;
 					return Ok(*done as usize);
 				};
@@ -608,7 +753,7 @@ pub(super) async fn step(
 						continue;
 					}
 					if val.is_none() && content {
-						row.current.put(&path, old);
+						restore_place(&mut row.current, &row.initial, &path, old);
 						continue;
 					}
 					return Err(fail(DocError::FieldReadonly {
@@ -622,16 +767,52 @@ pub(super) async fn step(
 					old,
 					supplied,
 				};
-				// A skipped place is neither produced nor written back. Its
-				// permission predicate is judged all the same, as the field
-				// kernel judges it, and the answer is discarded with the value.
-				if skipped {
+				// A skipped place (beneath an absent optional parent) or a place
+				// whose parent container vanished from the post-image does not
+				// run `DEFAULT`, `VALUE`, or `TYPE`, which would fabricate a
+				// value beneath an absent parent. Its write permission is still
+				// enforced: when the caller is denied changing `old` to `NONE`,
+				// `old` is restored into the post-image along with its ancestor
+				// container.
+				if skipped || vanished {
 					let schema = record(write)?;
-					if let Some(FieldPermission::Predicate(pipeline)) = governing(schema)? {
-						let value = place.val.clone();
-						schema.cursor()?.place = Some(place);
-						judged(program, pipeline, state, value).await?;
-						record(write_state(state)?)?.cursor()?.place = None;
+					let mut place = place;
+					let allowed = match governing(schema)? {
+						None | Some(FieldPermission::Allow) => true,
+						Some(FieldPermission::Deny) => false,
+						Some(FieldPermission::Predicate(pipeline)) => {
+							if skipped || place.val != place.old {
+								let value = place.val.clone();
+								schema.cursor()?.place = Some(place);
+								let allowed = judged(program, pipeline, state, value).await?;
+								place = record(write_state(state)?)?
+									.cursor()?
+									.place
+									.take()
+									.ok_or_else(|| internal("no place"))?;
+								allowed
+							} else {
+								true
+							}
+						}
+					};
+					if !allowed && place.val != place.old {
+						let write = write_state(state)?;
+						let fields = Arc::clone(&record(write)?.fields);
+						let fd = &fields[index];
+						let row = write.row()?;
+						restore_place(&mut row.current, &row.initial, &place.path, place.old);
+						let within_set = row.current.path_crosses_set(&place.path);
+						let schema = record(write)?;
+						if within_set {
+							schema.cursor()?.within_set = true;
+						}
+						if fd.assert.is_some() {
+							schema.deferred.push(Deferred {
+								index,
+								path: place.path,
+							});
+						}
 					}
 					continue;
 				}
@@ -671,9 +852,15 @@ pub(super) async fn step(
 			})
 		}
 		SchemaInstr::Coerce => {
-			let schema = record(write_state(state)?)?;
+			let write = write_state(state)?;
+			let (exec, table) = {
+				let ctx = write.in_flight()?.1;
+				(ctx.exec().clone(), Arc::clone(&ctx.table))
+			};
+			let schema = record(write)?;
 			let fields = Arc::clone(&schema.fields);
-			let fd = &fields[schema.cursor()?.index];
+			let index = schema.cursor()?.index;
+			let fd = &fields[index];
 			// The `id` field's kind is enforced where the record id is derived.
 			let (Some(kind), false) = (fd.field_kind.as_ref(), fd.name.is_id()) else {
 				return Ok(next);
@@ -684,10 +871,17 @@ pub(super) async fn step(
 				Ok(val) => place.val = val,
 				// The record and field are rendered only for the error.
 				Err(e) => {
+					let record = schema.rid.to_sql();
+					let field_name = fd.name.to_sql();
+					let error = if select_value_hidden(state, &exec, &table, &fields, index)? {
+						e.redact()
+					} else {
+						e
+					};
 					return Err(fail(DocError::FieldCoerce {
-						record: schema.rid.to_sql(),
-						field_name: fd.name.to_sql(),
-						error: Box::new(e),
+						record,
+						field_name,
+						error: Box::new(error),
 					}));
 				}
 			}
@@ -811,6 +1005,7 @@ pub(super) async fn step(
 				let write = write_state(state)?;
 				let (row, ctx) = write.in_flight()?;
 				let exec = ctx.exec();
+				let table = Arc::clone(&ctx.table);
 				let doc = row.current.clone();
 				// An absent optional value is not judged: the field declared
 				// that absence acceptable.
@@ -828,11 +1023,18 @@ pub(super) async fn step(
 					clause_frame(&frame, &place, &val).refusing_writes(NoWriteFrame::FieldAssert);
 				let answer = run_image(program, pipeline, doc, Some(bound), state, exec).await?;
 				if !answer.is_truthy() {
+					let value = if !val.is_none()
+						&& select_value_hidden(state, exec, &table, &fields, index)?
+					{
+						"[REDACTED]".to_owned()
+					} else {
+						val.to_sql()
+					};
 					return Err(fail(DocError::FieldValue {
 						record: rid.to_sql(),
 						field: fd.name.clone(),
 						check: fd.assert.as_ref().map(ToSql::to_sql).unwrap_or_default(),
-						value: val.to_sql(),
+						value,
 					}));
 				}
 			}

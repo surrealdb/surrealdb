@@ -3988,12 +3988,13 @@ impl Executor {
 		kvs: &Datastore,
 		txn: Arc<Transaction>,
 		waits: &AfterCommitWaits,
-		stream: Pin<&mut S>,
+		mut stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
 	) -> Result<BlockEnd>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
+		let mut in_flight = None;
 		match kvs.transaction_timeout() {
 			Some(timeout) => {
 				let start_results = self.results.len();
@@ -4003,8 +4004,9 @@ impl Executor {
 						kvs,
 						Arc::clone(&txn),
 						waits,
-						stream,
+						stream.as_mut(),
 						grouper,
+						&mut in_flight,
 					),
 				)
 				.await
@@ -4038,11 +4040,71 @@ impl Executor {
 								crate::observe::error_class::TXN_TIMEOUT,
 							);
 						}
-						bail!(DatastoreError::TransactionTimedout(timeout.into()))
+						let reason = Reason::Timedout(timeout.into());
+						let mut first = in_flight.is_some();
+						loop {
+							let (kind, role) = match in_flight.take() {
+								Some(observed) => observed,
+								None => {
+									let Some(stmt) = stream.next().await else {
+										break;
+									};
+									yield_now!();
+									let stmt = stmt?;
+									let place = place_statement(grouper, &stmt);
+									(stmt.statement_type(), place.role)
+								}
+							};
+							let end = match role {
+								StatementRole::Commit
+								| StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock) => InterruptEnd::Commit,
+								StatementRole::Cancel
+								| StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock) => InterruptEnd::Cancel,
+								StatementRole::Run
+								| StatementRole::Option
+								| StatementRole::Begin
+								| StatementRole::Misplaced(
+									MisplacedControl::NestedBegin
+									| MisplacedControl::BeginInSession,
+								) => InterruptEnd::RequestEnd,
+							};
+							let interrupted = BlockEnd::Interrupted {
+								reason,
+								end,
+							};
+							let rewrite = finalise_slots(&interrupted);
+							let terminates = !matches!(end, InterruptEnd::RequestEnd);
+							let slot = if terminates {
+								&rewrite.terminator
+							} else if first {
+								&rewrite.interrupted_statement
+							} else {
+								&rewrite.following
+							};
+							if let Some(slot) = slot {
+								self.results.push(slot_result(slot, Duration::ZERO));
+								self.emit_statement_event_unexecuted(
+									kvs,
+									kind,
+									crate::observe::error_class::TXN_TIMEOUT,
+								);
+							}
+							if terminates {
+								return Ok(interrupted);
+							}
+							first = false;
+						}
+						Ok(BlockEnd::Interrupted {
+							reason,
+							end: InterruptEnd::RequestEnd,
+						})
 					}
 				}
 			}
-			None => self.execute_begin_statement_inner(kvs, txn, waits, stream, grouper).await,
+			None => {
+				self.execute_begin_statement_inner(kvs, txn, waits, stream, grouper, &mut in_flight)
+					.await
+			}
 		}
 	}
 
@@ -4053,6 +4115,7 @@ impl Executor {
 		waits: &AfterCommitWaits,
 		mut stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
+		in_flight: &mut Option<(StatementType, StatementRole)>,
 	) -> Result<BlockEnd>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
@@ -4072,7 +4135,6 @@ impl Executor {
 			if self.consumer_gone() {
 				break;
 			}
-			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -4081,7 +4143,14 @@ impl Executor {
 					return Err(e);
 				}
 			};
+			// The statement is recorded as in flight before the next await: the
+			// transaction timeout can drop this future at any await, and its
+			// recovery answers `in_flight` first and then reads the stream on,
+			// so a statement pulled but not recorded would get no result slot
+			// and a COMMIT or CANCEL pulled that way would not end the block.
 			let place = place_statement(grouper, &stmt);
+			*in_flight = Some((stmt.statement_type(), place.role));
+			yield_now!();
 
 			// check for timeout and cancellation.
 			//
@@ -4128,7 +4197,10 @@ impl Executor {
 				let mut first = true;
 				loop {
 					let (kind, role) = match observed.take() {
-						Some(first) => first,
+						Some(first) => {
+							*in_flight = None;
+							first
+						}
 						None => {
 							let Some(stmt) = stream.next().await else {
 								break;
@@ -4228,6 +4300,7 @@ impl Executor {
 					});
 					self.rewrite_recorded(start_results, &rewrite);
 
+					*in_flight = None;
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(TypesError::internal(misplaced.message().to_string())),
@@ -4283,6 +4356,7 @@ impl Executor {
 					self.rewrite_recorded(start_results, &rewrite);
 
 					// CANCEL returns NONE
+					*in_flight = None;
 					if let Some(slot) = &rewrite.terminator {
 						self.results.push(slot_result(slot, before.elapsed()));
 					}
@@ -4315,6 +4389,7 @@ impl Executor {
 						}
 
 						// COMMIT returns NONE
+						*in_flight = None;
 						if let Some(slot) = &finalise_slots(&BlockEnd::Committed).terminator {
 							self.results.push(slot_result(slot, before.elapsed()));
 						}
@@ -4347,6 +4422,7 @@ impl Executor {
 					};
 					let rewrite = finalise_slots(&commit_failed);
 					self.rewrite_recorded(start_results, &rewrite);
+					*in_flight = None;
 					if let Some(slot) = &rewrite.terminator {
 						self.results.push(slot_result(slot, before.elapsed()));
 					}
@@ -4379,6 +4455,7 @@ impl Executor {
 					match self.execute_option_statement(&option) {
 						Ok(_) => {
 							// OPTION returns NONE
+							*in_flight = None;
 							self.results.push(QueryResult {
 								time: before.elapsed(),
 								result: Ok(convert_value_to_public_value(Value::None)?),
@@ -4442,6 +4519,7 @@ impl Executor {
 
 							// statement return an error. Consume all the other statement until
 							// we hit a cancel or commit.
+							*in_flight = None;
 							self.results.push(QueryResult {
 								time: before.elapsed(),
 								result: Err(typed_err),
@@ -4565,6 +4643,7 @@ impl Executor {
 				);
 			}
 
+			*in_flight = None;
 			self.results.push(QueryResult {
 				time: before.elapsed(),
 				result,

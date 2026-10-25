@@ -188,7 +188,7 @@ impl StoredApiDefinition {
 		&self,
 		segments: &[&str],
 		method: ApiMethod,
-	) -> Result<Option<(crate::val::Object, u8)>> {
+	) -> Result<Option<(crate::val::Object, crate::api_path::PathSpecificity)>> {
 		let path = self.path.compile().with_context(|| {
 			format!("the stored route of API `{}` no longer compiles", self.path)
 		})?;

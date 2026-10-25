@@ -125,7 +125,7 @@ async fn run_chain(
 	let global_entry = ctx.tx().get_db_config(ns, db, "api", None).await?;
 	let global = global_entry.as_ref().map(|v| v.try_as_api()).transpose()?;
 
-	if ctx.check_perms(opt, Action::Edit)? {
+	if ctx.check_perms(&opt.clone().with_perms(true), Action::Edit)? {
 		let permissions = method_config
 			.map(|config| &config.permissions)
 			.into_iter()

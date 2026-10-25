@@ -1582,8 +1582,11 @@ impl Transaction {
 		let stored: Arc<[catalog::StoredApiDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 
-		let mut best: Option<(&catalog::StoredApiDefinition, surrealdb_expr::val::Object, u8)> =
-			None;
+		let mut best: Option<(
+			&catalog::StoredApiDefinition,
+			surrealdb_expr::val::Object,
+			catalog::api_path::PathSpecificity,
+		)> = None;
 		for api in stored.iter() {
 			let Some((params, specificity)) = api.route(segments, method)? else {
 				continue;

@@ -3308,7 +3308,7 @@ impl Body<'_, '_, '_> {
 			self.jumps.other += 1;
 		}
 		if limit.is_some() {
-			let joins = matches!(self.source, Source::Join { .. });
+			let joins = matches!(self.source, Source::Join { .. } | Source::Split { .. });
 			if (!self.objects && !joins) || (self.one_record && !self.emitted.rebound) {
 				// Past the limit a row is judged and not taken: the pipeline reads every row.
 				self.emitted.paging_replayable = false;

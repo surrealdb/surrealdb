@@ -47,6 +47,10 @@ impl SplitTarget {
 					Value::Array(
 						arr.iter().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
 					)
+				} else if let Value::Set(set) = extracted.as_ref() {
+					Value::Array(
+						set.iter().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
+					)
 				} else if let Value::Object(obj) = extracted.as_ref() {
 					Value::Array(
 						obj.values().map(|element| inner.read(element)).collect::<Vec<_>>().into(),
@@ -69,6 +73,12 @@ impl SplitTarget {
 				let extracted = path.extract(value);
 				let filled = if let Value::Array(arr) = extracted.as_ref() {
 					Value::Array(vec![element; arr.len()].into())
+				} else if let Value::Set(set) = extracted.as_ref() {
+					let mut out = crate::val::Set::new();
+					if !set.is_empty() {
+						out.insert(element);
+					}
+					Value::Set(out)
 				} else if let Value::Object(obj) = extracted.as_ref() {
 					let mut out = crate::val::Object::default();
 					for key in obj.keys().cloned().collect::<Vec<_>>() {
@@ -88,6 +98,14 @@ impl SplitTarget {
 					for slot in arr.iter_mut() {
 						inner.write(slot, element.clone());
 					}
+				} else if let Value::Set(set) = &collection {
+					let mut out = crate::val::Set::new();
+					for item in set.iter() {
+						let mut slot = item.clone();
+						inner.write(&mut slot, element.clone());
+						out.insert(slot);
+					}
+					collection = Value::Set(out);
 				} else if let Value::Object(obj) = &mut collection {
 					for slot in obj.values_mut() {
 						inner.write(slot, element.clone());
