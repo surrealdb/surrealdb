@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { rootClient, startServer, type TestServer } from "../src/harness";
+import { idText, rootClient, startServer, type TestServer } from "../src/harness";
 
 // DEFINE EVENT trigger conformance — the CREATE/UPDATE/DELETE side effects a
 // table event fires, and the exact shapes of the $event / $before / $after
@@ -137,7 +137,9 @@ test("full $before / $after / $event shapes across CREATE, UPDATE, DELETE", asyn
 				after?: unknown;
 			}>,
 		];
-		const byId = Object.fromEntries(logs.map((l) => [String(l.id), l]));
+		// The log ids are the event names, which are reserved words: key them by
+		// their bare text, whichever way the SDK escapes them.
+		const byId = Object.fromEntries(logs.map((l) => [idText(l.id), l]));
 
 		// CREATE: no $before; $after / $this / $value are the new record.
 		expect(byId["log:CREATE"].before).toBeUndefined();

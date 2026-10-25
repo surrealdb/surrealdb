@@ -180,6 +180,18 @@ export class EventCollector<T> {
 	}
 }
 
+/**
+ * A record id as `table:key` text with the `⟨ ⟩` escaping removed.
+ *
+ * The SDK escapes a key that is a reserved word (`CREATE`, `before`) or starts
+ * with a digit when it renders an id, while the server's own JSON rendering
+ * (`/sql`, `/key`) leaves the key bare. Compare ids through this function
+ * whenever the two renderings meet or the key is not a plain identifier.
+ */
+export function idText(id: unknown): string {
+	return String(id).replace(/[⟨⟩]/g, "");
+}
+
 /** Unwrap the first result of a query response, asserting it succeeded. */
 export function first<T>(results: T[]): T {
 	if (results.length === 0) throw new Error("empty query response");

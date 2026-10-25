@@ -363,11 +363,13 @@ test("singular lookup takes the BARE record key; a full `table:key` id silently 
 	const got = await gql(server, namespace, database, '{ _get(id: "song:hey") { id } }');
 	expect((got.body.data as any)._get).toEqual({ id: "song:hey" });
 
-	// _get against a nonexistent table leaks an internal execution error.
+	// _get against a table the schema does not expose, such as one that does not
+	// exist, is null with no error: the resolver refuses ids of unexposed tables
+	// without saying why.
 	const bad = await gql(server, namespace, database, '{ _get(id: "nosuch:x") { id } }');
-	expect(bad.body.errors?.[0].message).toBe(
-		"Internal Error: Query execution failed: The table 'nosuch' does not exist",
-	);
+	expect(bad.status).toBe(200);
+	expect(bad.body.errors).toBeUndefined();
+	expect((bad.body.data as any)._get).toBeNull();
 	await db.close();
 });
 

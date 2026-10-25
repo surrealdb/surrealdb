@@ -344,7 +344,7 @@ test("an anonymous caller reading a permissioned table is denied differently per
 // (d) Unauthenticated (bad credentials)
 // ---------------------------------------------------------------------------
 
-test("bad credentials fail with a generic RPC message but a more specific HTTP body", async () => {
+test("bad credentials fail with the same generic message over RPC and HTTP", async () => {
 	const { db, ns, dbName } = await fixture();
 	const rpc = await RpcClient.connect(server);
 	try {
@@ -357,23 +357,23 @@ test("bad credentials fail with a generic RPC message but a more specific HTTP b
 		expect(ws.error?.kind).toBe("NotAllowed");
 		expect(ws.error?.message).toBe("There was a problem with authentication");
 
-		// HTTP /sql: bad Basic auth is HTTP 401 with a BARE plain-text body — and
-		// it leaks the more specific "The password did not verify", even though
-		// Accept: application/json was sent (no JSON problem document here).
+		// HTTP /sql: bad Basic auth is HTTP 401 with a BARE plain-text body — the
+		// same generic message as the WebSocket, even though Accept:
+		// application/json was sent (no JSON problem document here).
 		const s = await sql(ns, dbName, "RETURN 1", { auth: BAD_AUTH });
 		expect(s.status).toBe(401);
-		expect(s.body).toBe("The password did not verify");
+		expect(s.body).toBe("There was a problem with authentication");
 
 		// GraphQL: transport-level Basic auth check fires before the GraphQL
 		// layer, so it matches /sql exactly — 401, plain text, same message.
 		const gql = await graphql(ns, dbName, "{ __typename }", { auth: BAD_AUTH });
 		expect(gql.status).toBe(401);
-		expect(gql.body).toBe("The password did not verify");
+		expect(gql.body).toBe("There was a problem with authentication");
 
 		// ISO /gql: same transport-level 401 plain-text body as /sql and /graphql.
 		const g = await isogql(ns, dbName, "MATCH (n:coin) RETURN n.label", { auth: BAD_AUTH });
 		expect(g.status).toBe(401);
-		expect(g.body).toBe("The password did not verify");
+		expect(g.body).toBe("There was a problem with authentication");
 	} finally {
 		await rpc.close();
 		await db.close();

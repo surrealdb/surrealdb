@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { CborCodec, Duration, RecordId, Uuid } from "surrealdb";
-import { guestClient, rootClient, startServer, type TestServer } from "../src/harness";
+import { guestClient, idText, rootClient, startServer, type TestServer } from "../src/harness";
 
 const ROOT_AUTH = `Basic ${btoa("root:root")}`;
 
@@ -149,11 +149,12 @@ let counter = 0;
 		expect(String(anonBody.information)).toMatch(/Anonymous access not allowed/);
 
 		// Surprising: wrong credentials come back as a bare text/plain body
-		// ("The password did not verify") even with Accept: application/json —
-		// unlike the anonymous 403, which is a JSON problem document.
+		// ("There was a problem with authentication", which does not say what was
+		// wrong) even with Accept: application/json — unlike the anonymous 403,
+		// which is a JSON problem document.
 		const bad = await sql("RETURN 1", { auth: `Basic ${btoa("root:wrong")}`, ns: "nope", db: "nope" });
 		expect(bad.status).toBe(401);
-		expect(await bad.text()).toBe("The password did not verify");
+		expect(await bad.text()).toBe("There was a problem with authentication");
 	});
 
 	test("POST /sql without namespace headers reports a per-statement ERR, not an HTTP error", async () => {
@@ -1567,15 +1568,17 @@ let counter = 0;
 			);
 
 			// Normalize a row to what parity actually depends on: identity, the
-			// visible field, and whether the hidden field leaked.
+			// visible field, and whether the hidden field leaked. Ids go through
+			// `idText` because the SDK and the HTTP routes escape a generated key
+			// that starts with a digit differently.
 			const bearer = `Bearer ${tokensA.access}`;
 			type Row = { id: unknown; label: unknown; owner: unknown; secret?: unknown };
 			const norm = (rows: Row[]) =>
 				rows
 					.map((r) => ({
-						id: String(r.id),
+						id: idText(r.id),
 						label: r.label,
-						owner: String(r.owner),
+						owner: idText(r.owner),
 						hasSecret: "secret" in r,
 					}))
 					.sort((x, y) => x.id.localeCompare(y.id));
@@ -1599,8 +1602,8 @@ let counter = 0;
 
 			// A's rows only, `secret` redacted everywhere.
 			const expected = [
-				{ id: "item:a1", label: "a-one", owner: String(aId), hasSecret: false },
-				{ id: "item:a2", label: "a-two", owner: String(aId), hasSecret: false },
+				{ id: "item:a1", label: "a-one", owner: idText(aId), hasSecret: false },
+				{ id: "item:a2", label: "a-two", owner: idText(aId), hasSecret: false },
 			];
 			const ws = norm(wsRows);
 			const via_sql = norm(sqlRows);

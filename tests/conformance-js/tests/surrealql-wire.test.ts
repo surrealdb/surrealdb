@@ -654,21 +654,19 @@ test("regex is never representable as a wire value; it exists only as an operand
 
 	// A regex parses wherever a value can stand, but CBOR has no encoding for
 	// one, so a result holding a regex cannot be sent. Where the encoding fails
-	// decides the error. A statement whose result is a single value is encoded
-	// with the whole response, and that failure is reported as the response's
-	// `Parse error`. A statement whose result is rows — an array, the records a
-	// write returns — encodes each row as it runs, so the statement itself fails
-	// with an internal error, before its write commits.
-	for (const stmt of ["RETURN /abc/", "RETURN (/abc/)", "RETURN { r: /abc/ }"]) {
+	// decides the error. Over the SDK's default streaming transport, a statement
+	// whose result is a single value, an array included, fails the whole
+	// response as a `Parse error`. A statement whose result is rows — the records
+	// a write returns — fails the statement itself with an internal error,
+	// before its write commits.
+	for (const stmt of ["RETURN /abc/", "RETURN (/abc/)", "RETURN { r: /abc/ }", "RETURN [/abc/]"]) {
 		const err = await rejects(db.query(stmt).collect());
 		expect(err.constructor.name).toBe("ValidationError");
 		expect(String(err)).toMatch(/Parse error/);
 	}
-	for (const stmt of ["RETURN [/abc/]", "CREATE re_probe:one SET r = /abc/"]) {
-		const err = await rejects(db.query(stmt).collect());
-		expect(err.constructor.name).toBe("InternalError");
-		expect(String(err)).toMatch(/Unsupported value type: Regex/);
-	}
+	const written = await rejects(db.query("CREATE re_probe:one SET r = /abc/").collect());
+	expect(written.constructor.name).toBe("InternalError");
+	expect(String(written)).toMatch(/Unsupported value type: Regex/);
 	const unstored = await rejects(db.query("SELECT * FROM re_probe").collect());
 	expect(unstored.constructor.name).toBe("NotFoundError");
 

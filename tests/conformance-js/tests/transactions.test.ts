@@ -184,12 +184,12 @@ test("THROW inside BEGIN/COMMIT rolls back prior statements", async () => {
 	}
 	expect(res[3].success).toBe(false);
 
-	// Surprising but observed: a plain await rejects with the FIRST failed
-	// slot — the NotExecuted QueryError for the rolled-back CREATE — not the
-	// ThrownError itself. Use .responses() to see the actual THROW error.
+	// A plain await rejects with the root cause, the ThrownError, and not with
+	// the NotExecuted QueryError of the rolled-back CREATE that precedes it.
+	// .responses() still shows every slot.
 	const err = await rejects(db.query("BEGIN; CREATE te:2 SET n = 1; THROW 'boom2'; COMMIT").collect());
-	expect(err).toBeInstanceOf(QueryError);
-	expect((err as QueryError).isNotExecuted).toBe(true);
+	expect(err).toBeInstanceOf(ThrownError);
+	expect(err.message).toBe("An error occurred: boom2");
 
 	const [rows] = await db.query<[unknown[]]>("SELECT * FROM te").json();
 	expect(rows).toHaveLength(0);

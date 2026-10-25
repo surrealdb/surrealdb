@@ -48,6 +48,16 @@ build of the current `main` — some tests assert behavior (conflict
 classification, live-notification delivery, ISO GQL enabled by default) that has
 landed on `main` but is not yet in a stable release.
 
+### SDK version
+
+The SDK checks the version a server reports against the range it supports, and
+fails every connection outside it with `UnsupportedVersionError`. It also turns
+features off (sessions, transactions, live queries, refresh tokens) for a server
+outside that range, so switching the check off does not help. `surrealdb` 2.1
+supports servers `>= 2.1.0 < 5.0.0`; 2.0.x stops below 4.0.0 and cannot drive a
+4.x server. When the server moves to a major the pinned SDK does not list, move
+the pin in `package.json` to a release whose range includes it.
+
 ## Conventions
 
 - Assertions pin **observed server behavior** (results accepted from the
@@ -62,6 +72,13 @@ landed on `main` but is not yet in a stable release.
   cases use event-driven waits with generous timeouts — never bare sleeps
   for positive assertions.
 - `.json()` result mapping: SurrealQL `NONE` surfaces as `undefined`.
+- Compare record ids through `idText` (`src/harness.ts`) when a key is a
+  reserved word or starts with a digit, or when an id rendered by the SDK meets
+  one rendered by the server: the SDK writes such a key as `⟨…⟩`
+  (`log:⟨CREATE⟩`), the server's JSON leaves it bare.
+- Queries awaited through the SDK are streamed by default. A statement can
+  report a different error over the streaming transport than over a buffered
+  one; the assertions pin the streaming one.
 - Live subscriptions require `new Table("name")` — a plain string is
   silently accepted by the SDK at runtime but subscribes to nothing.
 - Harness trap: pass variadic capability flags to `startServer({ args })` in

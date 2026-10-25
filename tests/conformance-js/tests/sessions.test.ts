@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Table, type LiveMessage } from "surrealdb";
-import { EventCollector, rootClient, startServer, type TestServer } from "../src/harness";
+import { EventCollector, idText, rootClient, startServer, type TestServer } from "../src/harness";
 
 // Multiplexed sessions: several server-side sessions (each with its own
 // auth, namespace/database selection, and parameters) sharing ONE WebSocket
@@ -295,14 +295,14 @@ test(
 
 		// A write from the PRIMARY session (same socket) reaches the watcher session.
 		await db.query("CREATE watched:before SET v = 1");
-		const before = await events.waitFor((e) => String(e.recordId) === "watched:before");
+		const before = await events.waitFor((e) => idText(e.recordId) === "watched:before");
 		expect(before.action).toBe("CREATE");
 
 		await watcher.closeSession();
 
 		// The live query died with its session: no further notifications.
 		await db.query("CREATE watched:after SET v = 2");
-		await events.assertSilence((e) => String(e.recordId) === "watched:after", 1500);
+		await events.assertSilence((e) => idText(e.recordId) === "watched:after", 1500);
 
 		// The subscription is no longer alive: its owning session was disposed.
 		expect(sub.isAlive).toBe(false);

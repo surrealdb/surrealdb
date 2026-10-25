@@ -807,7 +807,7 @@ test(
 );
 
 test(
-	"a system user's live session outlives its shorter token; the expired token cannot re-authenticate",
+	"a system user's session ends when its shorter token lapses; the expired token cannot re-authenticate",
 	async () => {
 		const { db, namespace, database } = await rootClient(server);
 		await db.query(
@@ -816,7 +816,7 @@ test(
 
 		// Sign in over the raw wire: the SDK renews (and, lacking a refresh token,
 		// invalidates) a password session the moment its token lapses, which would
-		// mask the server's own token/session split. The raw connection does not.
+		// mask the server's own expiry. The raw connection does not.
 		const rc = await RpcClient.connect(server);
 		await rc.use(namespace, database);
 		const token = (await rc.call("signin", [
@@ -843,12 +843,22 @@ test(
 		expect(tokenErr).toBeDefined();
 		expect(tokenErr!.message).toMatch(/token has expired/i);
 
-		// The already-established session is governed by DURATION FOR SESSION, not
-		// FOR TOKEN: it keeps executing queries after its token has lapsed.
-		const res = await rc.rpc("query", ["INFO FOR DB"]);
-		expect(res.error).toBeUndefined();
-		const rows = res.result as Array<{ status: string }>;
-		expect(rows[0].status).toBe("OK");
+		// The already-established session ends with its token: the earlier of
+		// DURATION FOR TOKEN and DURATION FOR SESSION governs, so the one-hour
+		// session does not outlive the one-second token. Poll rather than assume
+		// the session check flips in the same instant as the token check.
+		const sessionDeadline = Date.now() + 5000;
+		let sessionErr: { code: number; message: string } | undefined;
+		while (Date.now() < sessionDeadline) {
+			const res = await rc.rpc("query", ["INFO FOR DB"]);
+			if (res.error) {
+				sessionErr = res.error;
+				break;
+			}
+			await Bun.sleep(200);
+		}
+		expect(sessionErr).toBeDefined();
+		expect(sessionErr!.message).toMatch(/session has expired/i);
 
 		await rc.close();
 		await db.close();
