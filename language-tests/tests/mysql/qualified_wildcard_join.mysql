@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "The t.* of a table whose columns are not known is refused in a query of several tables, where the rows of a join do not hold the fields of one table apart from the others"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: unsupported expression: u.* of a table whose columns are not known, in a query of several tables"
+*/
+
+SELECT u.*, o.total FROM users u JOIN orders o ON u.user_id = o.user_id;

@@ -622,8 +622,9 @@ impl QueryScope {
 				});
 			}
 			Ok(targets)
-		} else {
-			// Schemaless relation wildcard
+		} else if self.relations.len() == 1 {
+			// The one relation of the query, whose columns are not known: its `*` is the `*` of
+			// the query.
 			Ok(vec![BoundTarget {
 				expr: BoundExpr::Column(BoundColumnRef {
 					relation_index: rel.relation_index,
@@ -636,9 +637,15 @@ impl QueryScope {
 					aggregate_output: false,
 				}),
 				alias: None,
-				is_wildcard: false,
+				is_wildcard: true,
 				table_wildcard: Some(table_prefix.to_string()),
 			}])
+		} else {
+			// The rows of a join keep the fields of the relations after the first under internal
+			// names, so the fields of one relation cannot be selected by a wildcard.
+			Err(PlanError::unsupported(format!(
+				"{table_prefix}.* of a table whose columns are not known, in a query of several tables"
+			)))
 		}
 	}
 }

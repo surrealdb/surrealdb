@@ -312,7 +312,18 @@ impl ToPgQueryJson for Expr {
 				..
 			} => lit.to_pg_query_json(),
 			Self::ColumnRef(col) => {
-				let fields: Vec<Value> = col.fields.iter().map(|f| pg_str(f)).collect();
+				// gram.y: target_el: '*' and indirection_el: '.' '*' build an A_Star.
+				let fields: Vec<Value> = col
+					.fields
+					.iter()
+					.map(|f| {
+						if f == "*" {
+							pg_node("A_Star", json!({}))
+						} else {
+							pg_str(f)
+						}
+					})
+					.collect();
 				pg_node("ColumnRef", json!({ "fields": fields }))
 			}
 			Self::Param {

@@ -17,9 +17,13 @@ stored record id. Reading it (projecting it, in `RETURNING`, in the echo of a wr
 over a single base table) yields the key as the integer, string, uuid, array or object it is, and
 comparing, ordering, grouping or computing over it uses the key. The PostgreSQL parser folds an
 unquoted `ID` to `id` and keeps a quoted `"ID"`, which reads as another column than the key in
-both reads and writes. In MySQL, `t.*` over the one
-relation of a query is `*`. Over a join, `*` and `t.*` list the stored rows as they are (the
-PostgreSQL parser does not accept `t.*`).
+both reads and writes. In both dialects, `t.*` over the one
+relation of a query, a table or a derived table, reads what `*` reads, and over a base table is
+followed by the key as `id`. A `t.*` of a table whose columns are not known, in a query of several
+tables, is refused: the rows of a join keep the fields of the tables after the first under internal
+names. `*` over a join lists the stored rows as they are. A PostgreSQL `t.*` is read only as an
+item of the select list of a `SELECT`, which includes the query of an `INSERT`; a view over it is
+refused.
 
 A top-level conjunct of a `WHERE` predicate that is `id = <operand>` or `id IN (<operands>)`, where
 the `id` is that of the table read and an operand is an integer or string literal, a parameter, or

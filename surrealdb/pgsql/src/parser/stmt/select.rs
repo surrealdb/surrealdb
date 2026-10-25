@@ -252,7 +252,7 @@ impl<'a> Parser<'a> {
 		};
 
 		// 2. Target list
-		let targets = self.parse_target_list()?;
+		let targets = self.parse_select_list()?;
 
 		// 3. Optional FROM clause
 		let from = if self.eat(&TokenKind::Keyword(Keyword::From))? {
@@ -421,6 +421,65 @@ impl<'a> Parser<'a> {
 
 	/// Parse projection target list (`col AS alias, *`).
 	pub fn parse_target_list(&mut self) -> ParseResult<Vec<ResTarget>> {
+		self.parse_target_items(false)
+	}
+
+	/// Parse the projection list of a `SELECT`: a target list in which an item may also be the `*`
+	/// of a relation, `t.*` or `schema.t.*`, as a [`ColumnRef`] whose last field is `*`.
+	///
+	/// gram.y: target_list, target_el
+	///
+	/// gram.y reads `.*` as part of any column reference, but only a whole item of a select list
+	/// names the columns of a relation. A `.*` anywhere else, such as an operand or a function
+	/// argument, is not read here and fails as an expression does. `RETURNING` lists do not
+	/// accept it either.
+	fn parse_select_list(&mut self) -> ParseResult<Vec<ResTarget>> {
+		self.parse_target_items(true)
+	}
+
+	/// Parse the `*` of a relation that begins the next projection item: `name.*` or
+	/// `schema.name.*`, where each name is an identifier as [`Parser::parse_ident`] reads it.
+	///
+	/// gram.y: columnref, indirection_el (`'.' '*'`)
+	///
+	/// Returns `None`, with the parser where it was, when the item begins otherwise. Whether it
+	/// begins so is decided on a copy of the parser: the copy ends the search at the first token
+	/// that does not continue the pattern, and the error it meets on the way is met again, in the
+	/// same place, by the expression parser that then reads the item.
+	fn parse_relation_star(&mut self) -> ParseResult<Option<ColumnRef>> {
+		if !matches!(
+			self.peek().kind,
+			TokenKind::Ident(_) | TokenKind::QuotedIdent(_) | TokenKind::Keyword(_)
+		) || self.peek2()?.kind != TokenKind::Dot
+		{
+			return Ok(None);
+		}
+		let mut probe = self.clone();
+		let start = probe.peek().span;
+		let mut fields = Vec::new();
+		loop {
+			let Ok((name, _)) = probe.parse_ident() else {
+				return Ok(None);
+			};
+			fields.push(name);
+			if !matches!(probe.eat(&TokenKind::Dot), Ok(true)) {
+				return Ok(None);
+			}
+			if probe.peek().kind == TokenKind::Operator("*") {
+				let star = probe.bump()?;
+				fields.push("*".to_string());
+				*self = probe;
+				return Ok(Some(ColumnRef {
+					fields,
+					span: start.merge(star.span),
+				}));
+			}
+		}
+	}
+
+	/// Parse the items of a projection list, which may include the `*` of a relation when
+	/// `relation_stars` says so.
+	fn parse_target_items(&mut self, relation_stars: bool) -> ParseResult<Vec<ResTarget>> {
 		let mut targets = Vec::new();
 
 		loop {
@@ -436,7 +495,15 @@ impl<'a> Parser<'a> {
 					span: star_tok.span,
 				});
 			} else {
-				let expr = self.parse_expr()?;
+				let relation_star = if relation_stars {
+					self.parse_relation_star()?
+				} else {
+					None
+				};
+				let expr = match relation_star {
+					Some(star) => Expr::ColumnRef(star),
+					None => self.parse_expr()?,
+				};
 				let mut span = expr.span();
 
 				// Optional AS alias or bare identifier alias

@@ -249,13 +249,6 @@ fn lower_bound_select_internal(
 			.map(|t| lower_bound_target(t, policy))
 			.collect::<Result<Vec<_>, _>>()?;
 		if !is_aggregate && sole_base_table(select).is_some() {
-			// The one relation a `t.*` can name is the one `*` reads, and the engine reads a
-			// field called `*` as nothing, so it is the wildcard field.
-			for (field, target) in lowered.iter_mut().zip(&aggregate_targets) {
-				if target.table_wildcard.is_some() && target.is_unlisted_wildcard() {
-					*field = LogicalField::All;
-				}
-			}
 			let last_wildcard =
 				aggregate_targets.iter().rposition(BoundTarget::is_unlisted_wildcard);
 			read_wildcard_id_as_key(&mut lowered, last_wildcard);

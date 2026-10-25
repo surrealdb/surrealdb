@@ -672,6 +672,17 @@ fn lower_pgsql_expr_as(
 				return Ok(Expr::Literal(Literal::None));
 			}
 
+			// The `*` of a relation selects columns; no value is read from it.
+			if let [qualifier @ .., star] = col.fields.as_slice()
+				&& !qualifier.is_empty()
+				&& star == "*"
+			{
+				return Err(PlanError::UnsupportedExpression(format!(
+					"{}.* is supported only in the select list of a SELECT statement",
+					qualifier.join(".")
+				)));
+			}
+
 			// Check for EXCLUDED.col in ON CONFLICT DO UPDATE
 			if col.fields.len() == 2 && col.fields[0].eq_ignore_ascii_case("EXCLUDED") {
 				return Ok(Expr::Idiom(Idiom(vec![
@@ -1543,6 +1554,20 @@ fn is_wildcard_target(target: &surrealdb_pgsql::ast::stmt::ResTarget) -> bool {
 	}
 }
 
+/// The qualifier of a target that is the `*` of a relation (`s.*`, `schema.s.*`), as the dotted
+/// name the relation is read by.
+fn relation_star_qualifier(target: &surrealdb_pgsql::ast::stmt::ResTarget) -> Option<String> {
+	if let surrealdb_pgsql::ast::expr::Expr::ColumnRef(col) = &target.expr
+		&& let [qualifier @ .., star] = col.fields.as_slice()
+		&& !qualifier.is_empty()
+		&& star == "*"
+	{
+		Some(qualifier.join("."))
+	} else {
+		None
+	}
+}
+
 fn lower_pgsql_returning(
 	targets: &[surrealdb_pgsql::ast::stmt::ResTarget],
 	scope: &IdScope<'_>,
@@ -1588,6 +1613,18 @@ fn lower_pgsql_targets(
 	for item in targets {
 		if is_wildcard_target(item) {
 			fields.push(Field::All);
+		} else if let Some(qualifier) = relation_star_qualifier(item) {
+			// The one table the projection reads is read by every name it can be qualified by, and
+			// its `*` selects what a bare `*` does.
+			match scope {
+				Some(scope) if scope.is_qualifier(&qualifier) => fields.push(Field::All),
+				Some(_) => return Err(PlanError::MissingFromClauseEntry(qualifier)),
+				None => {
+					return Err(PlanError::UnsupportedExpression(format!(
+						"{qualifier}.* in a projection that does not read one table"
+					)));
+				}
+			}
 		} else {
 			let lowered_expr = lower_pgsql_stored_in(&item.expr, scope)?;
 			let alias_idiom = match (&item.alias, &item.expr) {
@@ -1698,9 +1735,22 @@ fn lower_pgsql_select_stmt(
 		}
 	}
 
+	// The positions of the items next to a `*` are not those of the columns of the target, and the
+	// columns the `*` stands for are not known.
+	if select.targets.len() > 1
+		&& select.targets.iter().any(|t| relation_star_qualifier(t).is_some())
+	{
+		return Err(PlanError::UnsupportedStatement(
+			"an INSERT ... SELECT that selects the * of a table together with another item".into(),
+		));
+	}
+
 	let mut fields = lower_pgsql_targets(&select.targets, scope.as_ref())?;
 	if let Some((target, columns)) = into {
-		let has_wildcard = select.targets.iter().any(is_wildcard_target);
+		let has_wildcard = select
+			.targets
+			.iter()
+			.any(|target| is_wildcard_target(target) || relation_star_qualifier(target).is_some());
 		wrap_positional_links(target, columns, has_wildcard, &mut fields);
 	}
 

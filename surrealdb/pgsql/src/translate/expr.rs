@@ -490,6 +490,17 @@ fn translate_column_ref(
 		}
 	}
 
+	// SurrealQL reads `t.*` as the elements of a field `t`, not as the columns of a relation.
+	if let [qualifier @ .., star] = col.fields.as_slice()
+		&& !qualifier.is_empty()
+		&& star == "*"
+	{
+		return Err(TranslationError::Unsupported(format!(
+			"{}.* selects the columns of a relation",
+			qualifier.join(".")
+		)));
+	}
+
 	let mut first = true;
 	for field in &col.fields {
 		if !first {

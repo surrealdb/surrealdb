@@ -1,0 +1,19 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "The t.* of a derived table selects the columns of the derived table, whether the derived table selects * or named columns"
+
+[[test.results]]
+value = "[{ age: 25, id: 2, name: 'Bob', user_id: 2 }, { age: 30, id: 1, name: 'Alice', user_id: 1 }, { age: 35, id: 3, name: 'Charlie', user_id: 3 }]"
+
+[[test.results]]
+value = "[{ age: 25, user_id: 2 }, { age: 30, user_id: 1 }, { age: 35, user_id: 3 }]"
+*/
+
+SELECT d.* FROM (SELECT * FROM users) d ORDER BY d.age;
+
+SELECT d.* FROM (SELECT user_id, age FROM users) d ORDER BY d.age;

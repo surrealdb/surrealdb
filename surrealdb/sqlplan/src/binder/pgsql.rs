@@ -136,8 +136,15 @@ pub fn bind_select(
 			if col.fields.len() == 1 && col.fields[0] == "*" {
 				targets.extend(scope.expand_wildcard(catalog));
 				continue;
-			} else if col.fields.len() == 2 && col.fields[1] == "*" {
-				targets.extend(scope.expand_table_wildcard(&col.fields[0], policy, catalog)?);
+			} else if let [qualifier @ .., star] = col.fields.as_slice()
+				&& !qualifier.is_empty()
+				&& star == "*"
+			{
+				targets.extend(scope.expand_table_wildcard(
+					&qualifier.join("."),
+					policy,
+					catalog,
+				)?);
 				continue;
 			}
 		}

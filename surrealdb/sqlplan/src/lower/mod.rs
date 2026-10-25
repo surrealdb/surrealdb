@@ -23,6 +23,8 @@ pub use write::{
 };
 
 #[cfg(test)]
+mod all_columns_tests;
+#[cfg(test)]
 mod ddl_tests;
 #[cfg(test)]
 mod id_key_tests;
