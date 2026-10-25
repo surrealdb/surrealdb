@@ -4,6 +4,7 @@
 #[cfg(not(target_family = "wasm"))]
 mod background_flusher;
 mod cnf;
+mod cursor;
 mod snapshot;
 
 use std::sync::Arc;
@@ -16,7 +17,8 @@ use chrono::{DateTime, Utc};
 pub use cnf::SurrealKvConfig;
 use snapshot::SurrealKvSnapshot;
 use surrealdb_kvs::api::{
-	BoxFut, GetMultiResult, KeysResult, RangeKeyVisitor, ScanChunkStats, ScanResult, Transactable,
+	BoxFut, GetMultiResult, KeysResult, RangeKeyVisitor, ScanChunkStats, ScanCursorVals,
+	ScanResult, Transactable,
 };
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
@@ -1388,6 +1390,28 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// A cursor that reads each chunk straight from the engine's iterator and hands the visitor
+	/// the entries where the engine holds them, instead of the default cursor's page of owned
+	/// copies. See [`cursor`].
+	fn open_vals_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Box<dyn ScanCursorVals + 'a>>> {
+		Box::pin(async move {
+			// Versioned queries require a versioned datastore
+			self.ensure_versioned(version)?;
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			Ok(Box::new(cursor::SurrealKvValsCursor::new(self, rng, dir, version, skip))
+				as Box<dyn ScanCursorVals + 'a>)
+		})
+	}
+
 	/// Retrieve a range of key-value pairs.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn scan<'a>(
@@ -1715,7 +1739,7 @@ fn history_forward<I: LSMIterator + ?Sized>(
 		key.clear();
 		key.extend_from_slice(entry.user_key());
 		if live && let Some(val) = &mut val {
-			**val = iter.value().map_err(kvs_error)?;
+			iter.value_into(val).map_err(kvs_error)?;
 		}
 		// Skip the remaining older versions of this key
 		loop {
@@ -1750,7 +1774,7 @@ fn history_backward<I: LSMIterator + ?Sized>(
 			if entry.timestamp() <= ts {
 				live = !entry.is_tombstone();
 				if live && let Some(val) = &mut val {
-					**val = iter.value().map_err(kvs_error)?;
+					iter.value_into(val).map_err(kvs_error)?;
 				}
 			}
 			// Continue to the previous version

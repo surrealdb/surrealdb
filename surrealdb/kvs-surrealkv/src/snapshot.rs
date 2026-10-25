@@ -12,9 +12,14 @@
 //! with [`Error::TransactionFinished`]. The view itself holds no guard and never delays `cancel`.
 //!
 //! The engine's iterators are not `Send`, so a cursor keeps none between chunks. Every chunk builds
-//! an iterator at the position the previous chunk stopped at, reads from it on the affinity pool,
+//! an iterator at the position the previous chunk stopped at, reads from it on the caller's thread,
 //! and drops it before returning. The transaction's snapshot is fixed, so the entries read across
 //! chunks are those of one continuous iteration.
+//!
+//! A chunk is not handed to the affinity pool: the caller is already a task of its own (a morsel's
+//! worker, or a scan's read-ahead producer), and a hop to the pool for every chunk costs a wake-up
+//! and a park of a pool worker, whose handshake serialises on one lock when many scans run at once.
+//! The transaction's own cursor reads in place for the same reason, as `scan` always has.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -125,7 +130,7 @@ impl Snapshot for SurrealKvSnapshot {
 }
 
 /// What a chunk hands each entry to.
-enum Sink<'s> {
+pub(super) enum Sink<'s> {
 	/// A visitor, which consumes every entry it is handed.
 	Visit(&'s mut dyn ValVisitor),
 	/// A page, which refuses the entry it cannot hold.
@@ -155,15 +160,14 @@ impl Sink<'_> {
 	}
 }
 
-/// A re-aimable cursor over a [`SurrealKvSnapshot`].
+/// Where a read of a range stands, shared by the cursors that read through a transaction.
 ///
 /// `lo` and `hi` bound the range still to be read, half-open. `resume` is where reading continues
 /// once something has been read: forward, the key of the first entry not yet consumed; backward,
 /// the exclusive upper bound of the entries not yet consumed. Every buffer is allocated once and
-/// refilled in place.
-pub(super) struct SurrealKvRangeCursor {
-	/// The keep-alive, and the engine handle every chunk reads through.
-	guard: OwnedRwLockReadGuard<Tx>,
+/// refilled in place. A position holds no engine iterator: each chunk builds one over what is left
+/// and drops it before returning.
+pub(super) struct Position {
 	/// Inclusive lower bound of the range still to be read.
 	lo: Vec<u8>,
 	/// Exclusive upper bound of the range still to be read.
@@ -174,7 +178,7 @@ pub(super) struct SurrealKvRangeCursor {
 	version: Option<u64>,
 	/// Where reading continues once a chunk has been read; meaningful only when `resumed`.
 	resume: Vec<u8>,
-	/// Whether a chunk has been read since the cursor was aimed.
+	/// Whether a chunk has been read since the position was aimed.
 	resumed: bool,
 	/// Whether nothing is left to read.
 	exhausted: bool,
@@ -184,15 +188,9 @@ pub(super) struct SurrealKvRangeCursor {
 	val: Vec<u8>,
 }
 
-impl SurrealKvRangeCursor {
-	fn new(
-		guard: OwnedRwLockReadGuard<Tx>,
-		rng: &KeyRange<'_>,
-		dir: Direction,
-		version: Option<u64>,
-	) -> Self {
+impl Position {
+	pub(super) fn new(rng: &KeyRange<'_>, dir: Direction, version: Option<u64>) -> Self {
 		Self {
-			guard,
 			lo: rng.start.to_vec(),
 			hi: rng.end.to_vec(),
 			dir,
@@ -205,13 +203,17 @@ impl SurrealKvRangeCursor {
 		}
 	}
 
-	/// Read up to `limit` entries into `sink`, then record where reading continues.
-	fn read(&mut self, limit: u32, sink: &mut Sink<'_>) -> Result<ScanChunkStats> {
+	/// Read up to `limit` entries of `tx` into `sink`, then record where reading continues.
+	pub(super) fn read(
+		&mut self,
+		tx: &Tx,
+		limit: u32,
+		sink: &mut Sink<'_>,
+	) -> Result<ScanChunkStats> {
 		let mut stats = ScanChunkStats::default();
 		if limit == 0 || self.exhausted {
 			return Ok(stats);
 		}
-		let tx: &Tx = &self.guard;
 		let Self {
 			lo,
 			hi,
@@ -222,7 +224,6 @@ impl SurrealKvRangeCursor {
 			exhausted,
 			key,
 			val,
-			..
 		} = self;
 		let dir = *dir;
 		// A chunk reads what is left: past the resume point once there is one.
@@ -259,6 +260,94 @@ impl SurrealKvRangeCursor {
 		}
 		Ok(stats)
 	}
+
+	fn aim(&mut self, rng: &KeyRange<'_>, dir: Direction) {
+		self.lo.clear();
+		self.lo.extend_from_slice(&rng.start);
+		self.hi.clear();
+		self.hi.extend_from_slice(&rng.end);
+		self.dir = dir;
+		self.resumed = false;
+		self.exhausted = rng.is_empty();
+	}
+
+	fn narrow(&mut self, end: &[u8]) -> Result<()> {
+		if self.exhausted {
+			return Err(Error::Internal("cannot narrow a cursor with nothing left to read".into()));
+		}
+		match self.dir {
+			Direction::Forward => {
+				let from = if self.resumed {
+					self.resume.as_slice()
+				} else {
+					self.lo.as_slice()
+				};
+				if end < from || end > self.hi.as_slice() {
+					return Err(Error::Internal(
+						"the narrowed end lies outside the range left to read".into(),
+					));
+				}
+				self.exhausted = end == from;
+				self.hi.clear();
+				self.hi.extend_from_slice(end);
+			}
+			Direction::Backward => {
+				let upto = if self.resumed {
+					self.resume.as_slice()
+				} else {
+					self.hi.as_slice()
+				};
+				if end < self.lo.as_slice() || end > upto {
+					return Err(Error::Internal(
+						"the narrowed start lies outside the range left to read".into(),
+					));
+				}
+				self.exhausted = end == upto;
+				self.lo.clear();
+				self.lo.extend_from_slice(end);
+			}
+		}
+		Ok(())
+	}
+
+	fn resume(&self) -> Option<Resume> {
+		if self.exhausted {
+			return None;
+		}
+		let at = match (self.resumed, self.dir) {
+			(true, _) => &self.resume,
+			(false, Direction::Forward) => &self.lo,
+			(false, Direction::Backward) => &self.hi,
+		};
+		Some(Resume::new(Key::from(at.clone())))
+	}
+}
+
+/// A re-aimable cursor over a [`SurrealKvSnapshot`].
+pub(super) struct SurrealKvRangeCursor {
+	/// The keep-alive, and the engine handle every chunk reads through.
+	guard: OwnedRwLockReadGuard<Tx>,
+	/// Where the read stands.
+	pos: Position,
+}
+
+impl SurrealKvRangeCursor {
+	fn new(
+		guard: OwnedRwLockReadGuard<Tx>,
+		rng: &KeyRange<'_>,
+		dir: Direction,
+		version: Option<u64>,
+	) -> Self {
+		Self {
+			guard,
+			pos: Position::new(rng, dir, version),
+		}
+	}
+
+	/// Read up to `limit` entries into `sink`, then record where reading continues.
+	fn read(&mut self, limit: u32, sink: &mut Sink<'_>) -> Result<ScanChunkStats> {
+		self.pos.read(&self.guard, limit, sink)
+	}
 }
 
 /// Position `iter` on the first entry of its range in `dir`.
@@ -283,7 +372,7 @@ fn step<I: LSMIterator>(iter: &mut I, dir: Direction) -> Result<()> {
 
 /// Read the current state of a range. Returns whether an entry is left to read, and when one is,
 /// leaves its key in `key`.
-fn read_range<I: LSMIterator>(
+pub(super) fn read_range<I: LSMIterator>(
 	iter: &mut I,
 	dir: Direction,
 	limit: u32,
@@ -293,16 +382,22 @@ fn read_range<I: LSMIterator>(
 ) -> Result<bool> {
 	seek(iter, dir)?;
 	while stats.rows < u64::from(limit) && iter.valid() {
-		// The engine's resolved value is owned; nothing of it outlives the entry.
-		let value = iter.value().map_err(kvs_error)?;
-		let entry = iter.key();
-		let user_key = entry.user_key();
-		match sink.take(user_key, &value)? {
-			Taken::Refused => break,
-			Taken::Consumed(flow) => {
+		// The value is borrowed from the engine's block where it is stored inline, and resolved
+		// into a buffer of its own only from the value log; either way it lives until the step.
+		let taken = {
+			let value = iter.value_ref().map_err(kvs_error)?;
+			let user_key = iter.key().user_key();
+			let taken = sink.take(user_key, &value)?;
+			if let Taken::Consumed(_) = taken {
 				stats.rows += 1;
 				stats.key_bytes += user_key.len() as u64;
 				stats.value_bytes += value.len() as u64;
+			}
+			taken
+		};
+		match taken {
+			Taken::Refused => break,
+			Taken::Consumed(flow) => {
 				step(iter, dir)?;
 				if flow.is_break() {
 					break;
@@ -321,7 +416,7 @@ fn read_range<I: LSMIterator>(
 /// Read a range as of version `ts`, one visible entry per user key. Returns and leaves `key` as
 /// [`read_range`] does. An entry the sink refuses is the one left to read.
 #[expect(clippy::too_many_arguments, reason = "the buffers are the cursor's, lent for one chunk")]
-fn read_history<I: LSMIterator>(
+pub(super) fn read_history<I: LSMIterator>(
 	iter: &mut I,
 	dir: Direction,
 	ts: u64,
@@ -363,54 +458,12 @@ fn read_history<I: LSMIterator>(
 
 impl RangeCursor for SurrealKvRangeCursor {
 	fn aim(&mut self, rng: KeyRange<'_>, dir: Direction) -> Result<()> {
-		self.lo.clear();
-		self.lo.extend_from_slice(&rng.start);
-		self.hi.clear();
-		self.hi.extend_from_slice(&rng.end);
-		self.dir = dir;
-		self.resumed = false;
-		self.exhausted = rng.is_empty();
+		self.pos.aim(&rng, dir);
 		Ok(())
 	}
 
 	fn narrow(&mut self, end: Key<'_>) -> Result<()> {
-		let end = end.as_slice();
-		if self.exhausted {
-			return Err(Error::Internal("cannot narrow a cursor with nothing left to read".into()));
-		}
-		match self.dir {
-			Direction::Forward => {
-				let from = if self.resumed {
-					self.resume.as_slice()
-				} else {
-					self.lo.as_slice()
-				};
-				if end < from || end > self.hi.as_slice() {
-					return Err(Error::Internal(
-						"the narrowed end lies outside the range left to read".into(),
-					));
-				}
-				self.exhausted = end == from;
-				self.hi.clear();
-				self.hi.extend_from_slice(end);
-			}
-			Direction::Backward => {
-				let upto = if self.resumed {
-					self.resume.as_slice()
-				} else {
-					self.hi.as_slice()
-				};
-				if end < self.lo.as_slice() || end > upto {
-					return Err(Error::Internal(
-						"the narrowed start lies outside the range left to read".into(),
-					));
-				}
-				self.exhausted = end == upto;
-				self.lo.clear();
-				self.lo.extend_from_slice(end);
-			}
-		}
-		Ok(())
+		self.pos.narrow(end.as_slice())
 	}
 
 	fn for_each<'s>(
@@ -418,14 +471,7 @@ impl RangeCursor for SurrealKvRangeCursor {
 		limit: u32,
 		f: &'s mut dyn ValVisitor,
 	) -> BoxFut<'s, Result<ScanChunkStats>> {
-		Box::pin(async move {
-			// SAFETY: the closure borrows the cursor and the visitor, so the returned future must
-			// not be leaked while those borrows are live. It is awaited inline here and never
-			// stored, so its destructor -- which blocks until the worker has stopped touching the
-			// borrows -- always runs before they expire.
-			unsafe { affinitypool::spawn_local(move || self.read(limit, &mut Sink::Visit(f))) }
-				.await
-		})
+		Box::pin(async move { self.read(limit, &mut Sink::Visit(f)) })
 	}
 
 	fn fill<'s>(
@@ -434,26 +480,12 @@ impl RangeCursor for SurrealKvRangeCursor {
 		limit: u32,
 	) -> BoxFut<'s, Result<ScanChunkStats>> {
 		Box::pin(async move {
-			// SAFETY: as for `for_each`: the future is awaited inline and never stored.
-			unsafe {
-				affinitypool::spawn_local(move || {
-					page.clear();
-					self.read(limit, &mut Sink::Fill(page))
-				})
-			}
-			.await
+			page.clear();
+			self.read(limit, &mut Sink::Fill(page))
 		})
 	}
 
 	fn resume(&self) -> Option<Resume> {
-		if self.exhausted {
-			return None;
-		}
-		let at = match (self.resumed, self.dir) {
-			(true, _) => &self.resume,
-			(false, Direction::Forward) => &self.lo,
-			(false, Direction::Backward) => &self.hi,
-		};
-		Some(Resume::new(Key::from(at.clone())))
+		self.pos.resume()
 	}
 }
