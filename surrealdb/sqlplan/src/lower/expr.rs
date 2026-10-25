@@ -24,6 +24,7 @@ use crate::lower::link::{
 };
 use crate::lower::plan::lower_bound_subquery;
 use crate::lower::quote_ident::{lower_quote_ident, quote_ident_str};
+use crate::lower::sql_like::like_pattern_regex;
 use crate::semantics::sql_like_to_regex;
 
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
@@ -1295,7 +1296,7 @@ fn lower_binary_op(
 			} else {
 				LogicalExpr::Call(Box::new(LogicalCall {
 					receiver: Function::Normal("string::matches".to_string()),
-					args: vec![l, r],
+					args: vec![l, like_pattern_regex(r, case_insensitive)?],
 				}))
 			};
 			Ok(LogicalExpr::If(Box::new(LogicalIf {
@@ -1319,7 +1320,7 @@ fn lower_binary_op(
 			} else {
 				LogicalExpr::Call(Box::new(LogicalCall {
 					receiver: Function::Normal("string::matches".to_string()),
-					args: vec![l, r],
+					args: vec![l, like_pattern_regex(r, true)?],
 				}))
 			};
 			Ok(LogicalExpr::If(Box::new(LogicalIf {

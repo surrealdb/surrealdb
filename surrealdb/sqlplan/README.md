@@ -314,6 +314,27 @@ PostgreSQL write casts now convert their operands, preserving NULL. UPDATE FROM 
 are rejected until join-based write lowering is implemented; source tables must never become
 additional mutation targets.
 
+## `LIKE` patterns
+
+`LIKE` and `ILIKE` read a pattern as both databases do. `%` stands for any run of characters,
+including none, `_` for any one character whatever its width in bytes, and a line break is a
+character like any other. A backslash makes the character after it itself: `\%`, `\_` and `\\` stand
+for a percent sign, an underscore and a backslash, and a backslash before any other character is
+dropped. A backslash that ends the pattern has nothing to escape and stands for itself, where
+PostgreSQL raises an error once a match reaches it. There is no `ESCAPE` clause; both parsers refuse
+it. PostgreSQL `LIKE` is case-sensitive and `ILIKE` is not. MySQL `LIKE` ignores case, as under its
+default collation, whose equal treatment of accented letters is not reproduced.
+
+A MySQL string literal resolves its backslash escapes before the pattern is read, as MySQL does,
+except `\%` and `\_`, which keep their backslash so that the `LIKE` reads an escaped wildcard.
+
+A pattern written as a literal is converted to a regular expression while the statement is lowered.
+Any other pattern, which is every pattern a driver binds (`LIKE $1`, `LIKE ?`), a column or an
+expression, is converted for each row by calls of `string::replace` that build the same expression
+(`lower/sql_like.rs`), so no character of a pattern is ever read as regular expression syntax. A
+pattern with no backslash and no regular expression syntax takes the shorter route of converting
+its wildcards alone.
+
 ## SQL NULL predicates
 
 PostgreSQL writes evaluate comparisons, arithmetic, NOT, AND, OR, BETWEEN and IN with SQL

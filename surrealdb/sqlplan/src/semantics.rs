@@ -555,11 +555,9 @@ pub fn eval_binary_op(
 
 		let matched = if op == BoundBinaryOp::Like {
 			let case_insensitive = policy.dialect == SqlDialect::MySql;
-			let regex_str = sql_like_to_regex(&pattern, case_insensitive);
-			Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
+			like_matches(&sql_like_to_regex(&pattern, case_insensitive), &text)?
 		} else if op == BoundBinaryOp::ILike {
-			let regex_str = sql_like_to_regex(&pattern, true);
-			Regex::new(&regex_str).map(|r| r.is_match(&text)).unwrap_or(false)
+			like_matches(&sql_like_to_regex(&pattern, true), &text)?
 		} else {
 			let pattern = if op == BoundBinaryOp::RegexpCi {
 				format!("(?i){pattern}")
@@ -1042,13 +1040,29 @@ pub fn eval_cast(
 	}
 }
 
+/// Whether `text` matches the expression built from a `LIKE` pattern. A pattern that is too long
+/// for the regular expression engine to compile is an error rather than a mismatch.
+pub(crate) fn like_matches(regex: &str, text: &str) -> Result<bool, PlanError> {
+	Regex::new(regex)
+		.map(|regex| regex.is_match(text))
+		.map_err(|_| PlanError::Custom("LIKE pattern is too complex".to_string()))
+}
+
 /// Convert SQL LIKE pattern (with `%` and `_`) to regular expression string.
+///
+/// A backslash makes the character after it literal, so `\%`, `\_` and `\\` stand for a percent
+/// sign, an underscore and a backslash, and a backslash before any other character is dropped. A
+/// backslash that ends the pattern has nothing to escape and stands for itself. The expression
+/// is anchored at both ends and its `.` matches a line break, as `%` and `_` do in both
+/// dialects. `lower::sql_like::like_pattern_regex` builds the same text for a pattern known only at
+/// run time.
 pub fn sql_like_to_regex(pattern: &str, case_insensitive: bool) -> String {
-	let mut regex = String::with_capacity(pattern.len() + 6);
-	if case_insensitive {
-		regex.push_str("(?i)");
-	}
-	regex.push('^');
+	let mut regex = String::with_capacity(pattern.len() + 7);
+	regex.push_str(if case_insensitive {
+		"(?is)^"
+	} else {
+		"(?s)^"
+	});
 	let mut chars = pattern.chars().peekable();
 	while let Some(c) = chars.next() {
 		match c {

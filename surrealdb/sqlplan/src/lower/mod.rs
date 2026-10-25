@@ -6,6 +6,7 @@ pub(crate) mod id_key;
 pub(crate) mod link;
 pub mod plan;
 mod quote_ident;
+mod sql_like;
 pub mod write;
 mod write_null;
 

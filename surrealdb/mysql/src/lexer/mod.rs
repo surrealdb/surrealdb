@@ -575,6 +575,13 @@ impl<'a> Lexer<'a> {
 						Some((_, 'r')) => content.push('\r'),
 						Some((_, 't')) => content.push('\t'),
 						Some((_, 'Z')) => content.push('\x1a'),
+						// MySQL keeps the backslash of `\%` and `\_` in the string, so that a
+						// `LIKE` that reads the string finds the wildcard escaped; any other
+						// reader of the string sees the two characters.
+						Some((_, esc @ ('%' | '_'))) => {
+							content.push('\\');
+							content.push(esc);
+						}
 						Some((_, esc)) => content.push(esc),
 						None => {
 							return Err(LexError::UnclosedString {
