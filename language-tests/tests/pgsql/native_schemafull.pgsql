@@ -5,10 +5,10 @@ database = true
 imports = ["pgsql/_native_schemafull.surql"]
 
 [test]
-reason = "PostgreSQL reads over schemafull tables: defaults, VALUE and computed fields on the rows of each side of a join, an aggregate and a set operation"
+reason = "PostgreSQL reads over schemafull tables: * is the declared columns, an optional one a row lacks reading as NONE, defaults, VALUE and computed fields on the rows of each side of a join, an aggregate and a set operation"
 
 [[test.results]]
-value = "[{ acct_no: 1, balance: 50, double: 100, id: 1, name: 'Ann', note: 'vip', tier: 'gold' }, { acct_no: 2, balance: 0, double: 0, id: 2, name: 'Ben', tier: 'basic' }, { acct_no: 3, balance: 12.5f, double: 25f, id: 3, name: 'Cy', tier: 'silver' }, { acct_no: 4, balance: 200, double: 400, id: 4, name: 'Di', tier: 'basic' }]"
+value = "[{ acct_no: 1, balance: 50, double: 100, id: 1, name: 'Ann', note: 'vip', tier: 'gold' }, { acct_no: 2, balance: 0, double: 0, id: 2, name: 'Ben', note: NONE, tier: 'basic' }, { acct_no: 3, balance: 12.5f, double: 25f, id: 3, name: 'Cy', note: NONE, tier: 'silver' }, { acct_no: 4, balance: 200, double: 400, id: 4, name: 'Di', note: NONE, tier: 'basic' }]"
 
 [[test.results]]
 value = "[{ double: 100, name: 'Ann', tier: 'gold' }, { double: 0, name: 'Ben', tier: 'basic' }, { double: 25f, name: 'Cy', tier: 'silver' }, { double: 400, name: 'Di', tier: 'basic' }]"

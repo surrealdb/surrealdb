@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_declared_columns.surql"]
+
+[test]
+reason = "A table that another database qualifies is refused, not read as the table of the session's own database that has its name, when the table declares its columns"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: lowering error: planning error: cross-database queries not supported: otherdb.declcol_emp"
+*/
+
+SELECT name FROM otherdb.declcol_emp;

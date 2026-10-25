@@ -385,6 +385,9 @@ fn bind_table_ref(
 			condition,
 			..
 		} => {
+			if let Some(JoinCondition::Using(cols)) = condition {
+				scope.note_using_columns(cols, policy);
+			}
 			if *join_type == JoinType::Right {
 				let bound_left = bind_table_ref(right, scope, catalog, policy)?;
 				let bound_right = bind_table_ref(left, scope, catalog, policy)?;

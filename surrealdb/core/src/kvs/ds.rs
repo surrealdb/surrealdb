@@ -159,6 +159,8 @@ pub(crate) mod config;
 mod edge;
 #[cfg(all(test, feature = "kv-mem"))]
 mod edge_tests;
+#[cfg(all(test, feature = "kv-mem", any(feature = "postgres", feature = "mysql")))]
+mod sql_declared_tests;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 mod sql_links;
 mod table_migration;
@@ -10351,7 +10353,8 @@ impl Datastore {
 		let stmts =
 			crate::pgsql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
 		let capabilities = self.capabilities.load();
-		self.lower_linked(session, None, transaction, |catalog| {
+		let columns_stay = sql_links::pgsql_keeps_columns(&stmts);
+		self.lower_linked(session, None, transaction, columns_stay, |catalog| {
 			crate::pgsql::lower_statements(&stmts, catalog, &capabilities, &self.parser_config)
 		})
 		.await
@@ -10382,6 +10385,7 @@ impl Datastore {
 		let stmts =
 			crate::mysql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
 		let capabilities = self.capabilities.load();
+		let columns_stay = sql_links::mysql_keeps_columns(&stmts);
 		// A `USE` changes the database the statements after it run in, so the
 		// links of their tables are those of that database: each run of statements
 		// up to and including a `USE` is lowered against the database in force
@@ -10398,6 +10402,7 @@ impl Datastore {
 					session,
 					database,
 					transaction,
+					columns_stay,
 					&stmts[start..=end],
 					&capabilities,
 				)
@@ -10412,6 +10417,7 @@ impl Datastore {
 					session,
 					database,
 					transaction,
+					columns_stay,
 					&stmts[start..],
 					&capabilities,
 				)
@@ -10429,10 +10435,11 @@ impl Datastore {
 		session: &Session,
 		database: Option<&str>,
 		transaction: Option<&Arc<Transaction>>,
+		columns_stay: bool,
 		stmts: &[surrealdb_mysql::ast::stmt::Statement],
 		capabilities: &Capabilities,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
-		self.lower_linked(session, database, transaction, |catalog| {
+		self.lower_linked(session, database, transaction, columns_stay, |catalog| {
 			crate::mysql::lower_statements(stmts, catalog, capabilities, &self.parser_config)
 		})
 		.await
@@ -10460,12 +10467,18 @@ impl Datastore {
 	/// read transaction of its own that ends before the statements run. It is
 	/// read for the session's namespace and for `database`, or the session's
 	/// own database when that is `None`.
+	///
+	/// The catalog also describes the tables that declare their columns ([`Self::read_tables`])
+	/// only when `columns_stay`. The statements are all lowered before any runs, so for a request
+	/// that alters, drops or creates a table those columns would be the ones the table had before
+	/// the request; it is lowered against the links alone.
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	async fn lower_linked(
 		&self,
 		session: &Session,
 		database: Option<&str>,
 		transaction: Option<&Arc<Transaction>>,
+		columns_stay: bool,
 		lower: impl Fn(&dyn surrealdb_sqlplan::BinderCatalog) -> anyhow::Result<Vec<TopLevelStatement>>,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
 		let invalid = |e: anyhow::Error| TypesError::validation(e.to_string(), None);
@@ -10475,6 +10488,15 @@ impl Datastore {
 		let tables = recorder.into_tables();
 		if tables.is_empty() {
 			return Ok(statements);
+		}
+		if columns_stay {
+			let purpose = sql_links::Purpose::Lowering;
+			return match self.read_tables(session, database, transaction, &tables, purpose).await? {
+				Some(described) if described.shapes_lowering => {
+					lower(&described.catalog).map_err(invalid)
+				}
+				Some(_) | None => Ok(statements),
+			};
 		}
 		let links = self.link_columns(session, database, transaction, &tables).await?;
 		match sql_links::link_catalog(&links, active_db) {
@@ -10512,14 +10534,9 @@ impl Datastore {
 		transaction: Option<&Arc<Transaction>>,
 		tables: &[String],
 	) -> std::result::Result<Vec<(String, String, String)>, TypesError> {
-		self.check_session(session)?;
-		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
-		else {
+		let Some((ns, db)) = self.catalog_scope(session, database, tables)? else {
 			return Ok(Vec::new());
 		};
-		if tables.is_empty() || !session.au.can_access_ns_db(ns, db) {
-			return Ok(Vec::new());
-		}
 		let links = match transaction {
 			Some(txn) => sql_links::link_columns(txn, ns, db, tables).await,
 			None => {
@@ -10531,6 +10548,67 @@ impl Datastore {
 			}
 		};
 		links.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// The namespace and database whose catalog a lookup of `tables` for `session` reads, or `None`
+	/// when it reads nothing; see [`Self::link_columns`] for each case.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn catalog_scope<'a>(
+		&self,
+		session: &'a Session,
+		database: Option<&'a str>,
+		tables: &[String],
+	) -> std::result::Result<Option<(&'a str, &'a str)>, TypesError> {
+		self.check_session(session)?;
+		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
+		else {
+			return Ok(None);
+		};
+		if tables.is_empty() || !session.au.can_access_ns_db(ns, db) {
+			return Ok(None);
+		}
+		Ok(Some((ns, db)))
+	}
+
+	/// What the catalog says of `tables`, read as [`Self::link_columns`] reads the links and with
+	/// the same refusals, or `None` when nothing is read.
+	///
+	/// Besides the links, the columns the tables declare are described, but only to a session that
+	/// may view the definitions of tables (`Action::View` on the database's tables, which
+	/// `INFO FOR DB` requires). A statement over a table that declares its columns then fails on a
+	/// name outside them and expands `*` to them, which a session that may not see them could use
+	/// to learn their names; it binds as it does against a schemaless table.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn read_tables(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+		tables: &[String],
+		purpose: sql_links::Purpose,
+	) -> std::result::Result<Option<sql_links::Described>, TypesError> {
+		let Some((ns, db)) = self.catalog_scope(session, database, tables)? else {
+			return Ok(None);
+		};
+		let columns =
+			session.au.is_allowed(Action::View, &ResourceKind::Table.on_db(ns, db)).is_ok();
+		let types = purpose.types_columns();
+		let described = match transaction {
+			Some(txn) => sql_links::describe_tables(txn, ns, db, tables, columns, types).await,
+			None => {
+				let txn =
+					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
+				let described =
+					sql_links::describe_tables(&txn, ns, db, tables, columns, types).await;
+				// The transaction wrote nothing, so one that cannot be ended costs the request
+				// nothing and is only noted.
+				if let Err(error) = txn.cancel().await {
+					debug!(target: TARGET, "A catalog read transaction was not cancelled: {error}");
+				}
+				described
+			}
+		};
+		described.map(Some).map_err(crate::err::anyhow_to_types_error)
 	}
 
 	/// The columns of `table` declared as a link to one table, as `(column,
@@ -10552,8 +10630,12 @@ impl Datastore {
 		Ok(links.into_iter().map(|(_, column, target)| (column, target)).collect())
 	}
 
-	/// Read declared scalar types for a PostgreSQL SELECT, through the caller's transaction when
-	/// present. Catalog preflight follows the same session and tenant checks as link lowering.
+	/// The catalog a PostgreSQL SELECT is bound against to describe its result, read through the
+	/// caller's transaction when present: the types of the columns it reads and, for a session
+	/// that may view table definitions, the columns each table declares. It is the catalog the
+	/// statement is lowered against when it runs (see [`Self::lower_linked`]), so a client is
+	/// told the columns the statement answers with. Catalog preflight follows the same session and
+	/// tenant checks as link lowering.
 	#[cfg(feature = "postgres")]
 	#[tracing::instrument(level = "trace", skip_all)]
 	pub async fn pgsql_catalog(
@@ -10562,40 +10644,63 @@ impl Datastore {
 		transaction: Option<&Arc<Transaction>>,
 		select: &surrealdb_pgsql::ast::stmt::SelectStmt,
 	) -> std::result::Result<surrealdb_sqlplan::MemoryCatalog, TypesError> {
-		let mut empty = surrealdb_sqlplan::MemoryCatalog::new();
-		empty.set_database(session.db.clone());
 		let recorder = sql_links::RecordingCatalog::default();
-		if surrealdb_sqlplan::binder::pgsql::bind_select(
+		let tables = surrealdb_sqlplan::binder::pgsql::bind_select(
 			select,
 			&recorder,
 			&surrealdb_sqlplan::DialectPolicy::postgres(),
 			None,
 		)
-		.is_err()
-		{
-			// The caller binds the statement and reports analysis errors with their SQLSTATE.
-			// A failed dependency discovery needs no schema read.
-			return Ok(empty);
-		}
-		let tables = recorder.into_tables();
-		self.check_session(session)?;
-		let (Some(ns), Some(db)) = (session.ns.as_deref(), session.db.as_deref()) else {
-			return Ok(empty);
-		};
-		if tables.is_empty() || !session.au.can_access_ns_db(ns, db) {
-			return Ok(empty);
-		}
-		let catalog = match transaction {
-			Some(txn) => sql_links::column_types(txn, ns, db, &tables).await,
-			None => {
-				let txn =
-					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
-				let catalog = sql_links::column_types(&txn, ns, db, &tables).await;
-				let _ = txn.cancel().await;
-				catalog
+		.is_ok()
+		.then(|| recorder.into_tables());
+		self.wire_catalog(session, transaction, tables).await
+	}
+
+	/// The catalog a MySQL SELECT is bound against to describe its result; see
+	/// [`Self::pgsql_catalog`].
+	#[cfg(feature = "mysql")]
+	#[tracing::instrument(level = "trace", skip_all)]
+	pub async fn mysql_catalog(
+		&self,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+		select: &surrealdb_mysql::ast::stmt::SelectStmt,
+	) -> std::result::Result<surrealdb_sqlplan::MemoryCatalog, TypesError> {
+		let recorder = sql_links::RecordingCatalog::default();
+		let tables = surrealdb_sqlplan::binder::mysql::bind_select(
+			select,
+			&recorder,
+			&surrealdb_sqlplan::DialectPolicy::mysql(),
+			None,
+		)
+		.is_ok()
+		.then(|| recorder.into_tables());
+		self.wire_catalog(session, transaction, tables).await
+	}
+
+	/// The catalog a wire front end describes a SELECT by, given the `tables` it names, or `None`
+	/// when it could not be bound to find them: the caller binds the statement and reports its
+	/// analysis errors with their codes, so a failed discovery needs no schema read.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn wire_catalog(
+		&self,
+		session: &Session,
+		transaction: Option<&Arc<Transaction>>,
+		tables: Option<Vec<String>>,
+	) -> std::result::Result<surrealdb_sqlplan::MemoryCatalog, TypesError> {
+		let described = match tables {
+			Some(tables) => {
+				let purpose = sql_links::Purpose::Describing;
+				self.read_tables(session, None, transaction, &tables, purpose).await?
 			}
+			None => None,
 		};
-		catalog.map_err(crate::err::anyhow_to_types_error)
+		let mut catalog = match described {
+			Some(described) => described.catalog,
+			None => surrealdb_sqlplan::MemoryCatalog::new(),
+		};
+		catalog.set_database(session.db.clone());
+		Ok(catalog)
 	}
 
 	/// Parse and lower PostgreSQL SQL query text to statements and plans.

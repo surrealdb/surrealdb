@@ -165,6 +165,9 @@ impl PgWriteAnalysis {
 				&policy,
 				catalog,
 			)?);
+			if is_default_keyword(value) {
+				continue;
+			}
 			let value = bind_expr(value, &scope, catalog, &policy)?;
 			let constraint = BoundExpr::Binary {
 				left: Box::new(target),
@@ -227,6 +230,17 @@ impl PgWriteAnalysis {
 			result,
 		})
 	}
+}
+
+/// Whether `expr` is the `DEFAULT` keyword of a `VALUES` row or an assignment, which the parser
+/// reads as a column reference of that name. It stands for the column's default and names no
+/// column of the table.
+fn is_default_keyword(expr: &Expr) -> bool {
+	matches!(
+		expr,
+		Expr::ColumnRef(column)
+			if column.fields.len() == 1 && column.fields[0].eq_ignore_ascii_case("DEFAULT")
+	)
 }
 
 /// The label shared by RETURNING metadata and write lowering.

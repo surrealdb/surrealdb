@@ -80,4 +80,6 @@ pub fn bind_and_lower_mysql(
 }
 
 #[cfg(test)]
+mod declared_tests;
+#[cfg(test)]
 mod tests;

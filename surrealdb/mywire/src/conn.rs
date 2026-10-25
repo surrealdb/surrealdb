@@ -12,7 +12,9 @@ use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
-use surrealdb_mysql::ast::stmt::{AlterTableAction, Statement as MyStatement, TableRef};
+use surrealdb_mysql::ast::stmt::{
+	AlterTableAction, SelectStmt, Statement as MyStatement, TableRef,
+};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::SqlDialect;
 use surrealdb_sqlplan::binder::mysql::bind_select;
@@ -1273,8 +1275,15 @@ impl Connection {
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				if let Some(MyStatement::Select(select)) = stmts.first() {
-					let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
-					let catalog = MemoryCatalog::new().with_database(&cur_db);
+					let catalog = match self.select_catalog(select).await {
+						Ok(catalog) => catalog,
+						Err(err_pkt) => {
+							self.writer
+								.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+								.await?;
+							return Ok(());
+						}
+					};
 					let policy = DialectPolicy::mysql();
 					bind_select(select, &catalog, &policy, None)
 						.ok()
@@ -1645,6 +1654,22 @@ impl Connection {
 		self.emit_binary_value_result_with_status(descriptor, val, seq, status).await
 	}
 
+	/// The catalog a SELECT is bound against to describe its result, or the packet that refuses
+	/// the request: the tables of the current database the session may see, with the columns
+	/// they declare.
+	async fn select_catalog(
+		&self,
+		select: &SelectStmt,
+	) -> std::result::Result<MemoryCatalog, ErrPacket> {
+		let mut catalog = self
+			.ds
+			.mysql_catalog(&self.session, self.transaction.as_ref(), select)
+			.await
+			.map_err(|err| ErrPacket::general(1064, b"42000", err.to_string()))?;
+		catalog.set_database(Some(self.current_db.clone().unwrap_or_else(|| "test".to_string())));
+		Ok(catalog)
+	}
+
 	async fn handle_stmt_prepare(&mut self, data: &[u8], seq: u8) -> Result<()> {
 		let query_str = String::from_utf8_lossy(data);
 		let trimmed = query_str.trim().trim_end_matches(';').trim();
@@ -1666,8 +1691,15 @@ impl Connection {
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				if let Some(MyStatement::Select(select)) = stmts.first() {
-					let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
-					let catalog = MemoryCatalog::new().with_database(&cur_db);
+					let catalog = match self.select_catalog(select).await {
+						Ok(catalog) => catalog,
+						Err(err_pkt) => {
+							self.writer
+								.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+								.await?;
+							return Ok(());
+						}
+					};
 					let policy = DialectPolicy::mysql();
 					bind_select(select, &catalog, &policy, None)
 						.ok()
@@ -1942,8 +1974,15 @@ impl Connection {
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				if let Some(MyStatement::Select(select)) = stmts.first() {
-					let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
-					let catalog = MemoryCatalog::new().with_database(&cur_db);
+					let catalog = match self.select_catalog(select).await {
+						Ok(catalog) => catalog,
+						Err(err_pkt) => {
+							self.writer
+								.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+								.await?;
+							return Ok(());
+						}
+					};
 					let policy = DialectPolicy::mysql();
 					bind_select(select, &catalog, &policy, None)
 						.ok()

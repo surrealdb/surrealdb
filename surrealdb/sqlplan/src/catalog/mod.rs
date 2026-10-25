@@ -40,6 +40,10 @@ pub struct TableSchema {
 	pub schema: Option<String>,
 	/// Ordered list of columns.
 	pub columns: Vec<ColumnInfo>,
+	/// Whether `columns` is every column the table has, so that a name outside it is an error.
+	/// A table whose list is a subset of what a client may read (a system catalog table) or that
+	/// declares no columns (a schemaless table) is not closed.
+	pub closed: bool,
 }
 
 impl TableSchema {
@@ -48,7 +52,14 @@ impl TableSchema {
 			name: name.into(),
 			schema: None,
 			columns,
+			closed: false,
 		}
+	}
+
+	/// Declare `columns` to be every column the table has.
+	pub fn as_closed(mut self) -> Self {
+		self.closed = true;
+		self
 	}
 
 	pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
@@ -162,6 +173,12 @@ impl MemoryCatalog {
 
 	/// Supply a field's declared type without treating a schemaless table as a closed schema.
 	pub fn with_column_type(mut self, table: &str, column: &str, ty: crate::SqlType) -> Self {
+		self.add_column_type(table, column, ty);
+		self
+	}
+
+	/// Supply a field's declared type, as [`Self::with_column_type`] does.
+	pub fn add_column_type(&mut self, table: &str, column: &str, ty: crate::SqlType) -> &mut Self {
 		self.column_types.insert((table.to_owned(), column.to_owned()), ty);
 		self
 	}
@@ -241,10 +258,22 @@ impl BinderCatalog for MemoryCatalog {
 		if let Some(tbl) = self.tables.get(&key) {
 			return Some(tbl.clone());
 		}
-		// If schema was not specified, try with None
+		// A closed table is registered without a schema: the datastore holds one namespace of
+		// tables per database, and a qualifier (`public`, the database name) names that same
+		// table.
+		if schema.is_some()
+			&& let Some(tbl) = self.tables.get(&(None, name.to_string()))
+			&& tbl.closed
+		{
+			return Some(tbl.clone());
+		}
+		// If schema was not specified, try with None. A closed table is found under the exact
+		// name only: table names the datastore holds are case-sensitive.
 		if schema.is_none() {
 			for ((s, n), tbl) in &self.tables {
-				if (s.is_none() || s.as_deref() == Some("public")) && n.eq_ignore_ascii_case(name) {
+				if (s.is_none() || s.as_deref() == Some("public"))
+					&& !tbl.closed && n.eq_ignore_ascii_case(name)
+				{
 					return Some(tbl.clone());
 				}
 			}
@@ -253,16 +282,20 @@ impl BinderCatalog for MemoryCatalog {
 	}
 
 	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
-		self.column_types.get(&(table.to_owned(), column.to_owned())).copied().unwrap_or_else(
-			|| {
-				self.get_table(schema, table)
-					.and_then(|table| {
-						table.find_column(column, false).and_then(|column| column.data_type.clone())
-					})
-					.map(|name| crate::SqlType::from_name(&name))
-					.unwrap_or(crate::SqlType::Unknown)
-			},
-		)
+		if let Some(ty) = self.column_types.get(&(table.to_owned(), column.to_owned())) {
+			return *ty;
+		}
+		// A closed table is typed by `column_types` alone, so looking it up would copy its columns
+		// to find none.
+		if self.tables.get(&(None, table.to_owned())).is_some_and(|table| table.closed) {
+			return crate::SqlType::Unknown;
+		}
+		self.get_table(schema, table)
+			.and_then(|table| {
+				table.find_column(column, false).and_then(|column| column.data_type.clone())
+			})
+			.map(|name| crate::SqlType::from_name(&name))
+			.unwrap_or(crate::SqlType::Unknown)
 	}
 
 	fn link_table(&self, schema: Option<&str>, table: &str, column: &str) -> Option<String> {

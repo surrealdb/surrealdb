@@ -28,6 +28,10 @@ pub struct RelationEntry {
 	pub exposed_name: String,
 	/// Known column names from the catalog (if catalog has schema for this table).
 	pub known_columns: Option<Vec<String>>,
+	/// Whether `known_columns` is every column the relation has, so that any other name is an
+	/// error: a table the datastore declares the columns of. A system catalog table's list is a
+	/// subset of what a client may read, and a schemaless table has none.
+	pub closed: bool,
 	/// Whether this relation reads a base table, whose `id` column is the stored record id and
 	/// is read as its key. False for subquery aliases and CTEs, whose `id` is a plain value.
 	pub is_base_table: bool,
@@ -36,6 +40,27 @@ pub struct RelationEntry {
 }
 
 impl RelationEntry {
+	/// Whether this relation is closed and none of its columns is `column`.
+	fn lacks_column(&self, column: &str, policy: &DialectPolicy) -> bool {
+		self.closed
+			&& !self
+				.known_columns
+				.as_ref()
+				.is_some_and(|columns| columns.iter().any(|c| policy.idents_match(c, column)))
+	}
+
+	/// The target a `*` or `t.*` expands to for the declared column `column` of this closed
+	/// relation: the column itself, as if the query had selected it by name, so that every column
+	/// is read and named as declared.
+	fn declared_target(&self, column: &str, catalog: &dyn BinderCatalog) -> BoundTarget {
+		BoundTarget {
+			expr: BoundExpr::Column(self.column_ref(column.to_string(), catalog)),
+			alias: None,
+			is_wildcard: false,
+			table_wildcard: None,
+		}
+	}
+
 	/// A reference to column `column` (already folded) of this relation, bound at
 	/// `correlation_depth` 0.
 	///
@@ -213,6 +238,8 @@ pub struct QueryScope {
 	pub ctes: HashMap<String, BoundCte>,
 	/// Named window specifications defined in WINDOW clause.
 	pub windows: HashMap<String, BoundWindowSpec>,
+	/// The columns a `JOIN ... USING` merges, folded: one column each, whichever side holds it.
+	using_columns: Vec<String>,
 }
 
 impl Default for QueryScope {
@@ -231,6 +258,7 @@ impl QueryScope {
 			targets: Vec::new(),
 			ctes: HashMap::new(),
 			windows: HashMap::new(),
+			using_columns: Vec::new(),
 		}
 	}
 
@@ -243,7 +271,13 @@ impl QueryScope {
 			targets: Vec::new(),
 			ctes: HashMap::new(),
 			windows: HashMap::new(),
+			using_columns: Vec::new(),
 		}
+	}
+
+	/// Note the columns a `JOIN ... USING` merges, which name one column and are never ambiguous.
+	pub fn note_using_columns(&mut self, columns: &[String], policy: &DialectPolicy) {
+		self.using_columns.extend(columns.iter().map(|c| policy.fold_identifier(c).into_owned()));
 	}
 
 	/// Register a named window specification.
@@ -277,8 +311,9 @@ impl QueryScope {
 		let exposed_name = alias.unwrap_or_else(|| table_name.to_string());
 
 		// Query catalog for known columns if available
-		let known_columns =
-			catalog.get_table(schema.as_deref(), table_name).map(|t| t.column_names());
+		let described = catalog.get_table(schema.as_deref(), table_name);
+		let closed = described.as_ref().is_some_and(|table| table.closed);
+		let known_columns = described.map(|table| table.column_names());
 
 		let entry = RelationEntry {
 			relation_index,
@@ -286,6 +321,7 @@ impl QueryScope {
 			schema: schema.clone(),
 			exposed_name: exposed_name.clone(),
 			known_columns,
+			closed,
 			source_query: None,
 			is_base_table: !crate::catalog::system::is_system_catalog_table(
 				schema.as_deref(),
@@ -322,6 +358,7 @@ impl QueryScope {
 			schema: None,
 			exposed_name: alias.to_string(),
 			known_columns: None,
+			closed: false,
 			is_base_table: false,
 			source_query: None,
 		};
@@ -346,6 +383,7 @@ impl QueryScope {
 			schema: None,
 			exposed_name: alias.to_string(),
 			known_columns: columns,
+			closed: false,
 			is_base_table: false,
 			source_query: None,
 		};
@@ -399,10 +437,10 @@ impl QueryScope {
 				// Schema-qualified column name: e.g. `public.users.id`
 				let full_prefix = format!("{}.{}", parts[0], parts[1]);
 				let col_name = &parts[2];
-				if let Ok(col) =
-					self.resolve_qualified_column(&full_prefix, col_name, policy, catalog)
-				{
-					return Ok(col);
+				match self.resolve_qualified_column(&full_prefix, col_name, policy, catalog) {
+					Ok(col) => return Ok(col),
+					Err(err @ PlanError::UndefinedColumn(_)) => return Err(err),
+					Err(_) => {}
 				}
 				// If not matching a schema-qualified table, try prefix as table and parts[1..] as
 				// nested field
@@ -518,6 +556,9 @@ impl QueryScope {
 		// If exactly 1 relation in scope, bind directly to relation 0
 		if self.relations.len() == 1 {
 			let rel = &self.relations[0];
+			if rel.lacks_column(col_name, policy) {
+				return self.resolve_undeclared_column(col_name, policy, catalog);
+			}
 			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		}
 
@@ -537,7 +578,17 @@ impl QueryScope {
 			let rel = matching_relations[0];
 			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		} else if matching_relations.len() > 1 {
+			// A column `JOIN ... USING` merges is one column, which the first relation reads.
+			let folded = policy.fold_identifier(col_name).into_owned();
+			if self.using_columns.contains(&folded) {
+				return Ok(matching_relations[0].column_ref(folded, catalog));
+			}
 			return Err(PlanError::AmbiguousColumn(col_name.to_string()));
+		}
+
+		// Every relation declares its columns and none has this one.
+		if self.relations.iter().all(|rel| rel.closed) {
+			return self.resolve_undeclared_column(col_name, policy, catalog);
 		}
 
 		// If relations have known columns and col was not found, check parent before fallback
@@ -549,9 +600,43 @@ impl QueryScope {
 			return Ok(col);
 		}
 
-		// Fallback when schema is not strictly known (schemaless tables): default to relation 0
-		let rel = &self.relations[0];
+		// Fallback when schema is not strictly known (schemaless tables): default to the first
+		// relation whose columns are not all declared, as the name cannot be a column of one that
+		// declares them.
+		let rel = self.relations.iter().find(|rel| !rel.closed).unwrap_or(&self.relations[0]);
 		Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog))
+	}
+
+	/// Resolve `col_name`, which no relation of this scope has as a column, though each declares
+	/// all of its columns.
+	///
+	/// The name may be an output alias of this query (`HAVING total > 1`), a column of an enclosing
+	/// query, or a relation's name (a whole-row reference), in that order; an alias and a relation
+	/// name read as they would from a table that declares nothing. Otherwise it is no column at
+	/// all.
+	fn resolve_undeclared_column(
+		&self,
+		col_name: &str,
+		policy: &DialectPolicy,
+		catalog: &dyn BinderCatalog,
+	) -> Result<BoundColumnRef, PlanError> {
+		let folded = policy.fold_identifier(col_name).into_owned();
+		let is_alias = self.targets.iter().any(|target| {
+			target.alias.as_deref().is_some_and(|a| policy.idents_match(a, col_name))
+		});
+		if is_alias {
+			return Ok(self.relations[0].column_ref(folded, catalog));
+		}
+		if let Some(parent) = &self.parent
+			&& let Ok(mut col) = parent.resolve_unqualified_column(col_name, policy, catalog)
+		{
+			col.correlation_depth += 1;
+			return Ok(col);
+		}
+		if self.name_to_relation.contains_key(&folded) {
+			return Ok(self.relations[0].column_ref(folded, catalog));
+		}
+		Err(PlanError::UndefinedColumn(col_name.to_string()))
 	}
 
 	fn resolve_qualified_column(
@@ -564,6 +649,9 @@ impl QueryScope {
 		let key = policy.fold_identifier(prefix).into_owned();
 		if let Some(&rel_idx) = self.name_to_relation.get(&key) {
 			let rel = &self.relations[rel_idx];
+			if rel.lacks_column(col_name, policy) {
+				return Err(PlanError::UndefinedColumn(col_name.to_string()));
+			}
 			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		}
 
@@ -656,17 +744,26 @@ impl QueryScope {
 			if let Some(cols) = &rel.known_columns {
 				has_known = true;
 				for col in cols {
-					targets.push(BoundTarget {
-						expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
-						alias: Some(col.clone()),
-						is_wildcard: rel.source_query.is_none(),
-						table_wildcard: None,
+					targets.push(if rel.closed {
+						rel.declared_target(col, catalog)
+					} else {
+						BoundTarget {
+							expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
+							alias: Some(col.clone()),
+							is_wildcard: rel.source_query.is_none(),
+							table_wildcard: None,
+						}
 					});
 				}
 			}
 		}
 
-		if has_known && !targets.is_empty() {
+		// The columns of a join that has a table declaring its columns stay the one wildcard: the
+		// tables may name a column alike, which a flat list cannot keep apart.
+		let joins_declared =
+			self.relations.len() > 1 && self.relations.iter().any(|rel| rel.closed);
+
+		if has_known && !targets.is_empty() && !joins_declared {
 			targets
 		} else {
 			// Schemaless or unknown catalog: retain single wildcard
@@ -707,11 +804,15 @@ impl QueryScope {
 		if let Some(cols) = &rel.known_columns {
 			let mut targets = Vec::new();
 			for col in cols {
-				targets.push(BoundTarget {
-					expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
-					alias: Some(col.clone()),
-					is_wildcard: false,
-					table_wildcard: Some(table_prefix.to_string()),
+				targets.push(if rel.closed {
+					rel.declared_target(col, catalog)
+				} else {
+					BoundTarget {
+						expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
+						alias: Some(col.clone()),
+						is_wildcard: false,
+						table_wildcard: Some(table_prefix.to_string()),
+					}
 				});
 			}
 			Ok(targets)
