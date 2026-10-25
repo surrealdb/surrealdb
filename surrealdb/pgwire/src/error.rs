@@ -406,11 +406,36 @@ fn is_lowering_head(head: &str) -> bool {
 	}
 }
 
+/// How the planner words the errors that name something from the client's statement, with the
+/// code it chose for each (`PlanError::pg_sqlstate`): the text before the name, the text after it,
+/// and the SQLSTATE. A message is one of these when it starts and ends with that text, so what the
+/// name holds does not decide which error it is.
+const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
+	("schema or table \"", "\" does not exist", "42P01"),
+	("missing FROM-clause entry for table \"", "\"", "42P01"),
+	("column \"", "\" does not exist", "42703"),
+	("column reference \"", "\" is ambiguous", "42702"),
+	("GROUP BY position ", " is not in select list", "42P10"),
+	("ORDER BY position ", " is not in select list", "42P10"),
+	(
+		"column \"",
+		"\" must appear in the GROUP BY clause or be used in an aggregate function",
+		"42803",
+	),
+	("aggregate functions are not allowed in ", "", "42803"),
+	("window functions are not allowed in ", "", "42P20"),
+	("function \"", "\" does not exist", "42883"),
+	("function \"", " were provided", "42883"),
+	("function \"", "\" must be called with an OVER clause", "42809"),
+	("unrecognized configuration parameter \"", "\"", "42704"),
+];
+
 /// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
 /// (`PlanError::pg_sqlstate`). A feature the planner does not lower is `0A000`, a text it cannot
 /// read as a value of the type it must have is `22P02`, an operator that has no definition for
-/// its operand types is `42883` and an integer result beyond 64 bits is `22003`. Any other message
-/// gives `None`.
+/// its operand types is `42883` and an integer result beyond 64 bits is `22003`; a table, column,
+/// function or position the statement names wrongly has the code of that kind of error
+/// ([`NAMED_PLANNER_ERRORS`]). Any other message gives `None`.
 fn planner_sqlstate(message: &str) -> Option<&'static str> {
 	let reason = planner_message(message);
 	if unsupported_construct(message).is_some() {
@@ -422,7 +447,12 @@ fn planner_sqlstate(message: &str) -> Option<&'static str> {
 	} else if reason == "bigint out of range" {
 		Some("22003")
 	} else {
-		None
+		NAMED_PLANNER_ERRORS
+			.iter()
+			.find(|(before, after, _)| {
+				reason.strip_prefix(before).is_some_and(|rest| rest.ends_with(after))
+			})
+			.map(|(_, _, code)| *code)
 	}
 }
 
@@ -436,6 +466,36 @@ pub(super) fn unsupported_construct(message: &str) -> Option<&'static str> {
 	["unsupported expression", "unsupported statement"]
 		.into_iter()
 		.find(|kind| reason.strip_prefix(kind).is_some_and(|rest| rest.starts_with(": ")))
+}
+
+/// The SQLSTATE of a write the engine refuses for a constraint of the table. The engine words these
+/// refusals as text that no kind of `ErrorDetails` tells apart from other failures:
+/// - a UNIQUE index that already holds the key, whether the message names the record and value in
+///   conflict or withholds them from a caller who may not read them, is `23505`;
+/// - a NULL, or no value, for a field that admits neither is `23502`;
+/// - any other value that is not of the type of its field is `42804`. The engine refuses a value of
+///   another type even when its text would read as the field's type, so the refusal is a datatype
+///   mismatch and not an invalid text representation.
+///
+/// Any other message gives `None`.
+///
+/// A message is read by the text the engine starts or ends it with, never by a word anywhere in
+/// it: the rest of a message quotes the client's own values, which must not choose the code.
+fn engine_sqlstate(message: &str) -> Option<&'static str> {
+	if message.starts_with("Database index `") && message.contains("` already contains ") {
+		Some("23505")
+	} else if message.starts_with("Couldn't coerce value for field `") {
+		// NULL or NONE ends the message only when it is the whole value written to the field. An
+		// element of an array or an object is followed by where in the field it was found, and is
+		// a value of the wrong type for that element.
+		if message.ends_with(" but found `NULL`") || message.ends_with(" but found `NONE`") {
+			Some("23502")
+		} else {
+			Some("42804")
+		}
+	} else {
+		None
+	}
 }
 
 impl From<&TypesError> for PgError {
@@ -529,6 +589,8 @@ impl From<&TypesError> for PgError {
 				let lower = msg.to_ascii_lowercase();
 				if let Some(code) = planner_sqlstate(msg) {
 					code
+				} else if let Some(code) = engine_sqlstate(msg) {
+					code
 				} else if lower.contains("division by zero") || lower.contains("divide by zero") {
 					"22012"
 				} else if lower.contains("not null") {
@@ -552,7 +614,9 @@ impl From<&TypesError> for PgError {
 			ErrorDetails::Serialization(_) => "40001",
 			ErrorDetails::Connection(_) | ErrorDetails::Internal | ErrorDetails::Context | _ => {
 				let lower = msg.to_ascii_lowercase();
-				if lower.contains("division by zero") || lower.contains("divide by zero") {
+				if let Some(code) = engine_sqlstate(msg) {
+					code
+				} else if lower.contains("division by zero") || lower.contains("divide by zero") {
 					"22012"
 				} else if lower.contains("not null") {
 					"23502"
@@ -697,6 +761,203 @@ mod tests {
 				let message = format!("PostgreSQL {statement} lowering error: {plan}");
 				let err = TypesError::validation(message.clone(), None);
 				assert_eq!(PgError::from(&err).code, plan.pg_sqlstate(), "{message}");
+			}
+		}
+	}
+
+	/// One planner error of every kind that a planner path raises, with the SQLSTATE PostgreSQL
+	/// 17 reports for the equivalent error. The `match` has no wildcard, so a new kind does not
+	/// compile until it is placed here or among those no planner path raises.
+	fn planner_errors_with_postgres_sqlstates() -> Vec<(surrealdb_sqlplan::PlanError, &'static str)>
+	{
+		use surrealdb_sqlplan::PlanError;
+
+		let name = || "t".to_string();
+		let all = vec![
+			PlanError::UndefinedTable(name()),
+			PlanError::UndefinedColumn(name()),
+			PlanError::AmbiguousColumn(name()),
+			PlanError::MissingFromClauseEntry(name()),
+			PlanError::InvalidGroupByPosition(9),
+			PlanError::InvalidOrderByPosition(9),
+			PlanError::ColumnNotInGroupBy(name()),
+			PlanError::AggregateNotAllowed("WHERE".to_string()),
+			PlanError::WindowNotAllowed("WHERE clause".to_string()),
+			PlanError::UndefinedFunction(name()),
+			PlanError::UndefinedOperator("boolean + integer".to_string()),
+			PlanError::FunctionArgumentCountMismatch {
+				name: name(),
+				expected: "at most 1".to_string(),
+				got: 2,
+			},
+			PlanError::WindowFunctionWithoutOver(name()),
+			PlanError::SubqueryMustHaveAlias,
+			PlanError::DivisionByZero,
+			PlanError::NumericValueOutOfRange,
+			PlanError::InvalidTextRepresentation("integer: \"a\"".to_string()),
+			PlanError::UnsupportedStatement("MERGE".to_string()),
+			PlanError::UnsupportedExpression("Row".to_string()),
+			PlanError::UndefinedObject(name()),
+			PlanError::Custom("each query must have the same number of columns".to_string()),
+		];
+		all.into_iter()
+			.filter_map(|plan| {
+				let code = match &plan {
+					PlanError::UndefinedTable(_) | PlanError::MissingFromClauseEntry(_) => "42P01",
+					PlanError::UndefinedColumn(_) => "42703",
+					PlanError::AmbiguousColumn(_) => "42702",
+					PlanError::InvalidGroupByPosition(_) | PlanError::InvalidOrderByPosition(_) => {
+						"42P10"
+					}
+					PlanError::ColumnNotInGroupBy(_) | PlanError::AggregateNotAllowed(_) => "42803",
+					PlanError::WindowNotAllowed(_) => "42P20",
+					PlanError::UndefinedFunction(_)
+					| PlanError::UndefinedOperator(_)
+					| PlanError::FunctionArgumentCountMismatch {
+						..
+					} => "42883",
+					PlanError::WindowFunctionWithoutOver(_) => "42809",
+					PlanError::SubqueryMustHaveAlias => "42601",
+					PlanError::DivisionByZero => "22012",
+					PlanError::NumericValueOutOfRange => "22003",
+					PlanError::InvalidTextRepresentation(_) => "22P02",
+					PlanError::UnsupportedStatement(_) | PlanError::UnsupportedExpression(_) => {
+						"0A000"
+					}
+					PlanError::UndefinedObject(_) => "42704",
+					// A planning error of no kind of its own is a syntax error.
+					PlanError::Custom(_) => "42601",
+					// No planner path raises these: the connection reports the state itself.
+					PlanError::ParameterOutOfRange(_)
+					| PlanError::NoActiveTransaction
+					| PlanError::InFailedTransaction
+					| PlanError::SavepointDoesNotExist(_)
+					| PlanError::ActiveTransactionAlreadyInProgress => return None,
+				};
+				Some((plan, code))
+			})
+			.collect()
+	}
+
+	#[test]
+	fn test_every_planner_error_is_reported_under_the_sqlstate_of_its_kind() {
+		for (plan, code) in planner_errors_with_postgres_sqlstates() {
+			// `Custom` has no code of its own: the planner reports it as a generic error and the
+			// wire, which has nothing more to go by, as a syntax error.
+			if !matches!(plan, surrealdb_sqlplan::PlanError::Custom(_)) {
+				assert_eq!(plan.pg_sqlstate(), code, "{plan}");
+			}
+			// A prepared statement is refused with the message alone at Parse, and with the
+			// statement it belongs to when it is lowered.
+			for head in
+				["PostgreSQL SELECT lowering error: ", "PostgreSQL INSERT lowering error: ", ""]
+			{
+				let message = format!("{head}{plan}");
+				let err = TypesError::validation(message.clone(), None);
+				assert_eq!(PgError::from(&err).code, code, "{message}");
+			}
+		}
+	}
+
+	#[test]
+	fn test_a_name_in_a_planner_error_does_not_choose_its_code() {
+		for (message, code) in [
+			("column \"function \"x\" does not exist\" does not exist", "42703"),
+			("function \"column \"x\" does not exist\" does not exist", "42883"),
+			("schema or table \"division by zero\" does not exist", "42P01"),
+			("function \"not null\" does not exist", "42883"),
+			("column \"foreign key\" does not exist", "42703"),
+			("column reference \"already contains\" is ambiguous", "42702"),
+		] {
+			let err = TypesError::validation(
+				format!("PostgreSQL SELECT lowering error: {message}"),
+				None,
+			);
+			assert_eq!(PgError::from(&err).code, code, "{message}");
+		}
+	}
+
+	#[test]
+	fn test_a_constraint_the_engine_refuses_has_the_sqlstate_of_its_kind() {
+		// A conflict that names the record and value, and one that withholds them from a caller who
+		// may not read them, are both unique violations: the word "Database" in the message does
+		// not make either a missing database.
+		let unique = TypesError::internal(
+			"Database index `t_a_pk` already contains [1, 2], with record `t:x`".to_string(),
+		);
+		let hidden = TypesError::validation(
+			"Database index `t_a_uniq` already contains a conflicting value in another record"
+				.to_string(),
+			ValidationError::InvalidRequest,
+		);
+		for err in [&unique, &hidden] {
+			let pg = PgError::from(err);
+			assert_eq!(pg.code, "23505", "{}", err.message());
+			// The client is told what the engine tells it, and nothing from the row.
+			assert_eq!(pg.message, err.message());
+			assert_eq!(pg.detail(), None);
+		}
+
+		for (message, code) in [
+			// NULL, or no value, for a field that admits neither
+			(
+				"Couldn't coerce value for field `name` of `t:1`: Expected `string` but found `NULL`",
+				"23502",
+			),
+			(
+				"Couldn't coerce value for field `name` of `t:1`: Expected `string` but found `NONE`",
+				"23502",
+			),
+			// a value of another type
+			(
+				"Couldn't coerce value for field `n` of `t:1`: Expected `none | null | int` but found `'abc'`",
+				"42804",
+			),
+			(
+				"Couldn't coerce value for field `flag` of `t:1`: Expected `none | null | bool` but found `5`",
+				"42804",
+			),
+			// a NULL element of a field that is an array: PostgreSQL stores it, the field refuses
+			// it as a value of another type
+			(
+				"Couldn't coerce value for field `tags` of `t:1`: Expected `string` but found `NULL` when coercing element at index 1 of `array<string>`",
+				"42804",
+			),
+		] {
+			let err = TypesError::validation(message.to_string(), ValidationError::InvalidRequest);
+			let pg = PgError::from(&err);
+			assert_eq!(pg.code, code, "{message}");
+			assert_eq!(pg.message, message);
+			assert_eq!(pg.detail(), None);
+		}
+	}
+
+	#[test]
+	fn test_a_value_in_the_message_does_not_choose_the_sqlstate() {
+		// Each message quotes a value the client wrote; the words in it are not the engine's.
+		for value in [
+			"division by zero",
+			"divide by zero",
+			"not null",
+			"check constraint",
+			"foreign key",
+			"already exists",
+			"already contains",
+			"Database index `x` already contains 1",
+			"timed out",
+			"conflict",
+			"database",
+			"Couldn't coerce value for field `x` of `y`: Expected `int` but found `NULL`",
+			"a but found `NULL`",
+		] {
+			let message = format!(
+				"Couldn't coerce value for field `n` of `t:1`: Expected `none | null | int` but found `'{value}'`"
+			);
+			for err in [
+				TypesError::validation(message.clone(), ValidationError::InvalidRequest),
+				TypesError::internal(message.clone()),
+			] {
+				assert_eq!(PgError::from(&err).code, "42804", "{message}");
 			}
 		}
 	}
