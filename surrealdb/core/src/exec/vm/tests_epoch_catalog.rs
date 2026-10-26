@@ -138,8 +138,9 @@ async fn a_definition_read_under_an_epoch_is_served_until_it_changes() {
 	assert!(read(TransactionType::Read).await.ns.is_none(), "a removed namespace is not read");
 }
 
-/// A table's layouts are shared by the read transactions of an epoch, never
-/// kept from a writer, and read again once a definition moves the epoch.
+/// A table's layouts are shared by the transactions of an epoch, writers that
+/// have written no layouts among them, and read again once a definition moves
+/// the epoch.
 #[tokio::test]
 async fn a_tables_layouts_are_served_to_the_epochs_reads() {
 	let db = TestDb::new(
@@ -163,12 +164,10 @@ async fn a_tables_layouts_are_served_to_the_epochs_reads() {
 			layouts
 		}
 	};
-	let written = read(TransactionType::Write).await;
-	let first = read(TransactionType::Read).await;
-	assert!(!Arc::ptr_eq(&written, &first), "a writer's read is not kept for the epoch");
+	let first = read(TransactionType::Write).await;
 	let again = read(TransactionType::Read).await;
-	assert!(Arc::ptr_eq(&first, &again), "the layouts are served to the epoch's reads");
-	assert!(!Arc::ptr_eq(&first, &read(TransactionType::Write).await), "a writer reads the store");
+	assert!(Arc::ptr_eq(&first, &again), "a writer's read is kept for the epoch");
+	assert!(Arc::ptr_eq(&first, &read(TransactionType::Write).await), "a writer is served them");
 
 	run(ds, &owner, "DEFINE FIELD age ON pk TYPE option<int>").await;
 	let changed = read(TransactionType::Read).await;
@@ -190,6 +189,35 @@ async fn a_tables_layouts_are_served_to_the_epochs_reads() {
 	assert_ne!(cached.head(), migrated.head(), "the migration minted a generation");
 	assert_eq!(migrated.head(), stored.head(), "a read after the migration reads its layouts");
 	assert_eq!(migrated.ring(), stored.ring(), "a read after the migration reads its ring");
+}
+
+/// A writer that mints a generation names no epoch from then on: it reads the
+/// layouts it wrote, and the epoch's are untouched by them.
+#[tokio::test]
+async fn a_writer_reads_the_layouts_it_mints() {
+	let db = TestDb::new(
+		"DEFINE TABLE pk SCHEMAFULL;
+		 DEFINE FIELD name ON pk TYPE string;
+		 CREATE pk:1 SET name = 'ann';",
+	)
+	.await;
+	let ds = db.datastore();
+	let pk = TableName::from("pk");
+	let txn = ds.transaction(TransactionType::Write).await.expect("a transaction");
+	let def = txn.get_db_by_name("test", "test", None).await.expect("read").expect("db");
+	let (ns, dbid) = (def.namespace_id, def.database_id);
+	let shared = txn.table_layouts(ns, dbid, &pk, None).await.expect("the layouts are read");
+	assert!(txn.catalog_epoch().is_some(), "a writer that wrote nothing names its epoch");
+	txn.mint_next(ns, dbid, &pk, None, &shared).await.expect("a generation is minted");
+	assert!(txn.catalog_epoch().is_none(), "a writer that minted names no epoch");
+	let own = txn.table_layouts(ns, dbid, &pk, None).await.expect("the layouts are read");
+	assert_ne!(own.head(), shared.head(), "the writer reads the generation it minted");
+	txn.cancel().await.expect("cancelled");
+
+	let txn = ds.transaction(TransactionType::Read).await.expect("a transaction");
+	let after = txn.table_layouts(ns, dbid, &pk, None).await.expect("the layouts are read");
+	txn.cancel().await.expect("cancelled");
+	assert!(Arc::ptr_eq(&shared, &after), "a cancelled mint leaves the epoch's layouts");
 }
 
 #[tokio::test]

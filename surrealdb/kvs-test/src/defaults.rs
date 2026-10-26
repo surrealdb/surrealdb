@@ -133,6 +133,38 @@ async fn assert_absent_across_a_full_span(b: &TestBackend) {
 
 kvs_test!(assert_absent_across_a_full_span);
 
+/// `assert_absent` over keys spread across a span whose keys were all deleted answers as it does
+/// for keys read one at a time: the deleted keys are absent, and a key written past them is found.
+/// This is the shape of a batch of inserts into a table emptied by deletes.
+async fn assert_absent_across_a_deleted_span(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..2000u32 {
+		let key = format!("s{i:05}");
+		tx.set(key.as_bytes().into(), b"v".to_vec()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..2000u32 {
+		let key = format!("s{i:05}");
+		tx.del(key.as_bytes().into()).await.unwrap();
+	}
+	tx.set(b"s01999z".into(), b"v".to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	let deleted = [b"s00000".into(), b"s00999".into(), b"s01999".into(), b"s01000x".into()];
+	assert_eq!(tx.assert_absent(&deleted).await.unwrap(), None, "deleted keys are absent");
+	let past = [b"s00000".into(), b"s01999".into(), b"s01999z".into()];
+	assert_eq!(
+		tx.assert_absent(&past).await.unwrap(),
+		Some(2),
+		"a key past the deleted ones is found"
+	);
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(assert_absent_across_a_deleted_span);
+
 /// `getm` answers each key as `get` does, and a version on a store that keeps none is refused.
 async fn getm_refuses_a_version_without_versioning(b: &TestBackend) {
 	let ds = b.create_ds().await;

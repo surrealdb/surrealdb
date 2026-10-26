@@ -148,7 +148,7 @@ impl LiveRecheck {
 					tb: ctx.table.name.clone(),
 					epoch,
 					writer: ctx.txn().serial(),
-					_pin: EpochPin::new(ctx.txn().commit_triggers(), epoch),
+					_pin: EpochPin::new(ctx.txn().commit_triggers(), epoch, ctx.txn().serial()),
 					seen: Vec::new(),
 					merged: None,
 					detached: Arc::new(detach(ctx)),
@@ -429,21 +429,24 @@ fn stands_as(write: &WriteCtx, kept: &Value, stored: &Value) -> bool {
 struct EpochPin {
 	triggers: Arc<CommitTriggers>,
 	epoch: u64,
+	/// The serial of the transaction that pinned it.
+	by: u64,
 }
 
 impl EpochPin {
-	fn new(triggers: Arc<CommitTriggers>, epoch: u64) -> Self {
-		triggers.live_registrations.pin(epoch);
+	fn new(triggers: Arc<CommitTriggers>, epoch: u64, by: u64) -> Self {
+		triggers.live_registrations.pin(epoch, by);
 		Self {
 			triggers,
 			epoch,
+			by,
 		}
 	}
 }
 
 impl Drop for EpochPin {
 	fn drop(&mut self) {
-		self.triggers.live_registrations.unpin(self.epoch);
+		self.triggers.live_registrations.unpin(self.epoch, self.by);
 	}
 }
 

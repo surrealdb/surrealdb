@@ -1734,9 +1734,19 @@ pub struct LiveRegistrations {
 	count: AtomicUsize,
 	/// The token the next entry takes.
 	next: AtomicU64,
-	/// The epochs pinned by writes that have yet to ask, with how many pin each.
-	pins: Mutex<std::collections::BTreeMap<u64, usize>>,
+	/// The epochs pinned by writes that have yet to ask, with how many pin each, in shards chosen
+	/// by the pinning transaction: every write transaction pins and unpins, and one lock for all
+	/// of them is contended on a machine of many cores. Only a prune reads them all.
+	pins: [PinShard; PIN_SHARDS],
 }
+
+/// How many shards [`LiveRegistrations`] keeps its pins in.
+const PIN_SHARDS: usize = 16;
+
+/// One shard of the pins, on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct PinShard(Mutex<std::collections::BTreeMap<u64, usize>>);
 
 /// One registration entered in [`LiveRegistrations`].
 struct LiveRegistration {
@@ -1853,14 +1863,16 @@ impl LiveRegistrations {
 
 	/// Keep the entries dated with `epoch` or later until the write counted
 	/// into `epoch` has asked ([`Self::unpin`]). Taken while the write is still
-	/// counted into `epoch`, so no such entry has been dropped yet.
-	pub fn pin(&self, epoch: u64) {
-		*self.pins.lock().entry(epoch).or_default() += 1;
+	/// counted into `epoch`, so no such entry has been dropped yet. `by` is the
+	/// [`Transaction::serial`](crate::tx::Transaction::serial) of the pinning
+	/// transaction, which releases the pin with the same.
+	pub fn pin(&self, epoch: u64, by: u64) {
+		*self.pin_shard(by).lock().entry(epoch).or_default() += 1;
 	}
 
-	/// Release a pin of `epoch` ([`Self::pin`]).
-	pub fn unpin(&self, epoch: u64) {
-		let mut pins = self.pins.lock();
+	/// Release a pin of `epoch` the transaction numbered `by` took ([`Self::pin`]).
+	pub fn unpin(&self, epoch: u64, by: u64) {
+		let mut pins = self.pin_shard(by).lock();
 		if let std::collections::btree_map::Entry::Occupied(mut pinned) = pins.entry(epoch) {
 			*pinned.get_mut() -= 1;
 			if *pinned.get() == 0 {
@@ -1869,10 +1881,15 @@ impl LiveRegistrations {
 		}
 	}
 
+	fn pin_shard(&self, by: u64) -> &Mutex<std::collections::BTreeMap<u64, usize>> {
+		&self.pins[(by % PIN_SHARDS as u64) as usize].0
+	}
+
 	/// Drop every dated entry no write can still miss: every write counted
 	/// into an epoch no later than its date has ended, and none pins one.
 	fn prune(&self, entries: &mut Vec<LiveRegistration>, writes: &LiveWrites) {
-		let oldest_pin = self.pins.lock().keys().next().copied();
+		let oldest_pin =
+			self.pins.iter().filter_map(|shard| shard.0.lock().keys().next().copied()).min();
 		entries.retain(|entry| {
 			entry.settled.is_none_or(|settled| {
 				oldest_pin.is_some_and(|pin| pin <= settled) || !writes.ended_since(settled)
@@ -1935,7 +1952,7 @@ mod tests {
 		let registrations = LiveRegistrations::default();
 		let live = uuid::Uuid::from_u128(7);
 		let write = writes.open();
-		registrations.pin(write);
+		registrations.pin(write, WRITER);
 		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
 		registrations.settle(token, &writes);
 		writes.close(write);
@@ -1944,8 +1961,31 @@ mod tests {
 			vec![live],
 			"a write that committed and has not asked is still answered"
 		);
-		registrations.unpin(write);
+		registrations.unpin(write, WRITER);
 		assert!(registrations.candidates(NS, DB, &named("tb"), write, WRITER, &writes).is_empty());
+	}
+
+	#[test]
+	fn a_pin_in_any_shard_keeps_the_registrations_of_its_epoch() {
+		let writes = LiveWrites::default();
+		let registrations = LiveRegistrations::default();
+		let live = uuid::Uuid::from_u128(7);
+		let write = writes.open();
+		// Two writers whose pins fall in different shards: the one still pinned keeps the entry.
+		let (first, second) = (WRITER, WRITER + 1);
+		registrations.pin(write, first);
+		registrations.pin(write, second);
+		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
+		registrations.settle(token, &writes);
+		writes.close(write);
+		registrations.unpin(write, first);
+		assert_eq!(
+			registrations.candidates(NS, DB, &named("tb"), write, second, &writes),
+			vec![live],
+			"the other shard's pin still holds the epoch"
+		);
+		registrations.unpin(write, second);
+		assert!(registrations.candidates(NS, DB, &named("tb"), write, second, &writes).is_empty());
 	}
 
 	#[test]

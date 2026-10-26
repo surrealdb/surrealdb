@@ -561,17 +561,19 @@ pub trait RpcProtocol {
 				} else {
 					None
 				};
-			// Execute the desired method
+			// Execute the desired method. The session methods are boxed: each holds a larger
+			// state than a query (a signin or an authenticate several times one), and inline they
+			// would size the future of every request, which a transport copies per message.
 			let dispatched = match method {
 				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
 				Method::Info => self.info(txn, session).await,
-				Method::Use => self.yuse(session, params).await,
-				Method::Signup => self.signup(session, params).await,
-				Method::Signin => self.signin(session, params).await,
-				Method::Authenticate => self.authenticate(session, params).await,
-				Method::Refresh => self.refresh(session, params).await,
+				Method::Use => Box::pin(self.yuse(session, params)).await,
+				Method::Signup => Box::pin(self.signup(session, params)).await,
+				Method::Signin => Box::pin(self.signin(session, params)).await,
+				Method::Authenticate => Box::pin(self.authenticate(session, params)).await,
+				Method::Refresh => Box::pin(self.refresh(session, params)).await,
 				Method::Invalidate => self.invalidate(session).await,
-				Method::Revoke => self.revoke(params).await,
+				Method::Revoke => Box::pin(self.revoke(params)).await,
 				Method::Reset => self.reset(session).await,
 				Method::Kill => self.kill(txn, session, params).await,
 				Method::Live => self.live(txn, session, params).await,

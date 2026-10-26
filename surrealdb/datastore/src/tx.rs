@@ -1452,7 +1452,7 @@ impl Drop for Transaction {
 		}
 		self.end_live_write();
 		if self.pins_snapshot_epoch.load(Ordering::SeqCst) {
-			self.triggers.live_registrations.unpin(self.snapshot_live_epoch);
+			self.triggers.live_registrations.unpin(self.snapshot_live_epoch, self.serial);
 		}
 	}
 }
@@ -8655,7 +8655,7 @@ impl Transaction {
 		// while the transaction is still counted, so none has been dropped yet, and until it is
 		// dropped, after it has asked for them ([`crate::triggers::LiveRegistrations::pin`]).
 		if !self.pins_snapshot_epoch.swap(true, Ordering::SeqCst) {
-			self.triggers.live_registrations.pin(self.snapshot_live_epoch);
+			self.triggers.live_registrations.pin(self.snapshot_live_epoch, self.serial);
 		}
 		self.end_live_write();
 		Some(ParkedWrite {
@@ -8931,9 +8931,12 @@ impl Transaction {
 	/// A read is held for `(ns, db, version, tb)` for the rest of the transaction until a range
 	/// delete over the table's layout keys or a save point rollback that undid a mint or a range
 	/// delete clears it, so a table's layouts cost one point read and one range read per
-	/// `(table, version)` in a transaction. A current read (`version` of `None`) in a read-only
-	/// transaction under a catalog epoch is answered the layouts another transaction of that epoch
-	/// read, and keeps those it reads for that epoch ([`crate::cache::epoch`]), so it reads none.
+	/// `(table, version)` in a transaction. A current read (`version` of `None`) in a transaction
+	/// served from its catalog epoch ([`Self::epoch_catalog`]) is answered the layouts another
+	/// transaction of that epoch read, and keeps those it reads for that epoch
+	/// ([`crate::cache::epoch`]), so it reads none. A writer is served so until it writes a table's
+	/// layouts: a mint or a migration touches the catalog, and the writer then names no epoch and
+	/// reads its own writes from storage.
 	///
 	/// A table that has no `!mi` answers empty layouts. The load fails only on a storage error: a
 	/// key or descriptor this build cannot read is counted or listed as a refused generation in the
@@ -8950,10 +8953,8 @@ impl Transaction {
 			return Ok(held);
 		}
 		if version.is_none() {
-			// Only a transaction that is not writeable: a writer's reads must see its own
-			// writes, so it neither reads nor keeps layouts here.
-			if !self.writeable()
-				&& let Some((epoch, shared)) = self.epoch_catalog()
+			// A writer that has written layouts names no epoch, so its reads see its own writes.
+			if let Some((epoch, shared)) = self.epoch_catalog()
 				&& let Some(layouts) = shared
 					.get::<TableLayouts>(&crate::cache::epoch::Lookup::Layouts(epoch, ns, db, tb))
 			{
@@ -8964,7 +8965,7 @@ impl Transaction {
 			}
 		}
 		let layouts = self.reload_table_layouts(ns, db, tb, version).await?;
-		if version.is_none() && !self.writeable() && self.epoch_catalog().is_some() {
+		if version.is_none() && self.epoch_catalog().is_some() {
 			self.keep_for_epoch(
 				|epoch| crate::cache::epoch::Lookup::Layouts(epoch, ns, db, tb),
 				&layouts,
