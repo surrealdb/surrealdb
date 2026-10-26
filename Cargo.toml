@@ -145,7 +145,7 @@ humantime = "2.3.0"
 indexmap = "2.14.0"
 ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
-jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "11.0.0", default-features = false, features = ["use_pem"] }
 logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 memchr = "2.8.0"
