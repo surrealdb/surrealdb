@@ -93,12 +93,26 @@ yanked = "warn"
 #   `p384` and `ssh-key` use in `surrealism-verify` to check the signature of a module against a
 #   public key: public inputs, no secret scalar. Clearing it means the RustCrypto elliptic-curve
 #   crates moving to a release built on a patched `crypto-bigint`.
+# - for RUSTSEC-2026-0391, -0398 and -0403, the only vulnerable `zstd 0.13.3` /
+#   `zstd-safe 7.3.0` in the tree is reached by `tonic` (gRPC transport compression),
+#   `surrealkv` (SSTable blocks) and `surrealkv-compat-rocksdb` (legacy RocksDB reads),
+#   and none of them call an affected API. -0391 is the `Encoder`/`Decoder::with_context`
+#   reused-context leak: each path builds a fresh coder (`read::Decoder`/`Encoder::new`,
+#   `stream::encode_all`/`decode_all`, `bulk::decompress`), never `with_context`. -0398 is
+#   the `zstd_safe::seekable` decompress path, which nothing here uses. -0403 is streaming
+#   `write::Decoder` on a legacy frame; that advisory clears `read::Decoder`, `decode_all`
+#   and the bulk API, which are the only forms we use. Clearing these is the zstd 0.14.3 /
+#   zstd-safe 8.2.0 bump, which `tonic` (`zstd = "^0.13"`) and `surrealkv` pin out until an
+#   upstream release carries it.
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
     "RUSTSEC-2026-0249",
     "RUSTSEC-2026-0387",
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0403",
 ]
 
 # --------------------------------------------------
