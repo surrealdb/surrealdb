@@ -301,6 +301,12 @@ pub(in crate::exec::vm) fn batches_of(ctx: &ExecutionContext) -> Vec<BatchRun> {
 /// A morsel was handed to a worker.
 pub(super) fn note_handed(ctx: &ExecutionContext) {
 	HANDED_TO_WORKERS.fetch_add(1, Ordering::Relaxed);
+	if let Some(faults) =
+		FAULTS.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&datastore_of(ctx))
+		&& faults.grant_refused
+	{
+		faults.handed_after_refusal += 1;
+	}
 	bump(ctx, |counts| counts.handed += 1);
 }
 
@@ -507,6 +513,10 @@ struct Faults {
 	grants_left: usize,
 	/// The reads failed since the faults were last set.
 	refused: usize,
+	/// The fan-out lease has refused a grant since the faults were last set.
+	grant_refused: bool,
+	/// The batches and workers handed on since the lease refused a grant.
+	handed_after_refusal: usize,
 }
 
 static FAULTS: LazyLock<Mutex<HashMap<usize, Faults>>> = LazyLock::new(Default::default);
@@ -526,6 +536,17 @@ impl Failing {
 			.get(&self.datastore)
 			.map_or(0, |faults| faults.refused)
 	}
+
+	/// How many batches and workers were handed on after the fan-out lease refused a grant, since
+	/// this was made. A refusal revokes the lease, so none is.
+	#[cfg(all(feature = "kv-mem", feature = "kv-surrealkv"))]
+	pub(in crate::exec::vm) fn handed_after_refusal(&self) -> usize {
+		FAULTS
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(&self.datastore)
+			.map_or(0, |faults| faults.handed_after_refusal)
+	}
 }
 
 impl Drop for Failing {
@@ -540,6 +561,8 @@ fn failing(ctx: &ExecutionContext, change: fn(&mut Faults, bool)) -> Failing {
 	let mut faults = FAULTS.lock().unwrap_or_else(|e| e.into_inner());
 	let entry = faults.entry(datastore).or_default();
 	entry.refused = 0;
+	entry.grant_refused = false;
+	entry.handed_after_refusal = 0;
 	change(entry, true);
 	drop(faults);
 	Failing {
@@ -611,6 +634,7 @@ pub(super) fn grant_fails(ctx: &ExecutionContext) -> bool {
 		return false;
 	}
 	faults.refused += 1;
+	faults.grant_refused = true;
 	true
 }
 

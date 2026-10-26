@@ -2403,7 +2403,16 @@ async fn read_shapes_run_on_workers_on_a_backend_with_a_view() {
 		"SELECT * FROM t LIMIT 10 START 5",
 		"SELECT n FROM t WHERE n > 3 LIMIT 100",
 	] {
-		let rows = worker_rows_of(&db, sql).await;
+		// A statement that needs only a few rows may be answered whole by the coordinator before a
+		// worker claims a morsel, when other tests of the process or a loaded machine keep the
+		// workers from running: run it on until workers have read rows.
+		let mut rows = None;
+		for _ in 0..5 {
+			rows = worker_rows_of(&db, sql).await;
+			if rows.is_some_and(|rows| rows > 0) {
+				break;
+			}
+		}
 		assert!(rows.is_some_and(|rows| rows > 0), "`{sql}`: workers read {rows:?} rows");
 	}
 	for sql in [

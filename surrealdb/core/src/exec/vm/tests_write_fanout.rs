@@ -1050,7 +1050,10 @@ async fn a_delete_of_a_table_that_can_hold_edges_runs_serially() {
 }
 
 /// A grant of the fan-out lease that is refused leaves the batch to the coordinator, which runs
-/// the whole body once every batch before it is applied, and the answers are the serial run's.
+/// the whole body once every batch before it is applied, and the answers are the serial run's. The
+/// refusal revokes the lease: no batch goes to a worker after it, and no worker's state is made
+/// past the grants the lease gave. The batches that went out before the refusal may outnumber
+/// those grants, since a worker's state is lent to the batches after the one it ran.
 #[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refused_grant_runs_the_rest_of_the_write_on_the_coordinator() {
@@ -1065,11 +1068,17 @@ async fn a_refused_grant_runs_the_rest_of_the_write_on_the_coordinator() {
 	let before = counts_of(&wide.exec_ctx().await);
 	let sqls = ["UPDATE t SET name = name + '!'", "DELETE t WHERE n % 3 = 0"];
 	assert_eq!(answers(&wide, &sqls, &[]).await, answers(&serial, &sqls, &[]).await);
+	assert!(failing.refused() > 0, "no grant was refused");
+	assert_eq!(
+		failing.handed_after_refusal(),
+		0,
+		"batches went to a worker after the lease refused a grant"
+	);
 	drop(failing);
 	let after = counts_of(&wide.exec_ctx().await);
-	let handed = after.handed - before.handed;
-	assert!(handed > 0, "no batch went to a worker before the refusal");
-	assert!(handed <= 3, "{handed} batches went to a worker past the grants the lease gave");
+	assert!(after.handed > before.handed, "no batch went to a worker before the refusal");
+	let states = after.states - before.states;
+	assert!(states <= 3, "{states} worker states were made past the grants the lease gave");
 }
 
 /// A batch ends after the candidate at which its candidates hold a window, and the rows it did not
