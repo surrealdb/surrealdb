@@ -22035,6 +22035,106 @@ async fn spawn_blocking_build_held_mid_scan(
 	Ok((guard, (scan, hold), task))
 }
 
+/// A datastore about to shut down lapses the owner lease of each build it is running, while it
+/// can still commit, and leaves the build as it was: its generation, owner, phase and checkpoint.
+/// The build writes nothing more, stopping as a shutdown stops it, so the lease stays lapsed, and
+/// a resume pass takes the build over at once rather than a lease later and finishes it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_lapses_the_lease_of_a_running_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; CREATE |t:1..=300| SET flag = false RETURN NONE;",
+	)
+	.await?;
+	// A committed build, scanning one record a batch, held at a batch commit once its first
+	// batch has committed.
+	let scan = super::kind::test_sink::set_scan_batch(ds.id(), 1);
+	let committed_before = super::kind::test_sink::counts(ds.id()).committed;
+	let hold = super::kind::test_sink::hold_after_commits(ds.id(), committed_before + 1);
+	let site = RetryableConflictSite::ConcurrentIndexInitialBatch;
+	let guard = inject_retryable_conflicts(site, ds.id(), REPEATED_RETRY_CONFLICTS);
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS flag CONCURRENTLY").await?;
+	wait_for_retry_conflict(site, ds.id(), REPEATED_RETRY_CONFLICTS).await?;
+	let building = ds
+		.index_builder()
+		.indexes
+		.read()
+		.await
+		.values()
+		.next()
+		.cloned()
+		.expect("the build runs on this datastore");
+	let before = durable_build_state(&ds, &building.ikb).await?;
+	assert!(
+		!super::state::build_owner_expired(&before, Utc::now()),
+		"a running build holds its lease"
+	);
+	assert_eq!(ds.index_builder().lapse_local_build_leases().await, 1);
+	let after = durable_build_state(&ds, &building.ikb).await?;
+	assert!(super::state::build_owner_expired(&after, Utc::now()), "the lease has lapsed");
+	assert_eq!(
+		(after.generation, after.owner, after.phase, after.initial_cursor.clone()),
+		(before.generation, before.owner, before.phase, before.initial_cursor.clone()),
+		"nothing but the lease changes"
+	);
+	drop(guard);
+	wait_for_finished_builder(&building).await?;
+	let left = durable_build_state(&ds, &building.ikb).await?;
+	assert!(super::state::build_owner_expired(&left, Utc::now()), "the lease stays lapsed");
+	assert_eq!(left.phase, IndexBuildPhase::Building);
+	drop((scan, hold));
+	// The in-memory store cannot be reopened; its builder forgets the shutdown as a restarted
+	// datastore's fresh builder would.
+	ds.index_builder().restart_after_shutdown();
+	let resumed = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed.items, 1, "the scan takes the build over at once");
+	let deadline = Instant::now() + Duration::from_secs(30);
+	while durable_build_state(&ds, &building.ikb).await?.phase != IndexBuildPhase::Online {
+		assert!(Instant::now() < deadline, "the resumed build did not finish");
+		sleep(Duration::from_millis(50)).await;
+	}
+	Ok(())
+}
+
+/// A build that registers once the datastore has begun to shut down, having taken its generation
+/// while the shutdown lapsed the builds it found, stops writing and has its lease lapsed as it
+/// registers, so it is left for a resume pass as those builds are.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_registered_during_shutdown_has_its_lease_lapsed() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS; CREATE |t:1..=300| SET flag = false RETURN NONE;",
+	)
+	.await?;
+	assert_eq!(ds.index_builder().lapse_local_build_leases().await, 0, "no build runs yet");
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS flag CONCURRENTLY").await?;
+	let building = ds
+		.index_builder()
+		.indexes
+		.read()
+		.await
+		.values()
+		.next()
+		.cloned()
+		.expect("the build registers on this datastore");
+	wait_for_finished_builder(&building).await?;
+	let left = durable_build_state(&ds, &building.ikb).await?;
+	assert_ne!(left.phase, IndexBuildPhase::Online, "the build stopped before publishing");
+	assert!(super::state::build_owner_expired(&left, Utc::now()), "its lease is lapsed");
+	Ok(())
+}
+
 /// An UPDATE that commits while a blocking `DEFINE INDEX` is mid-scan reaches the finished
 /// index, whether the build had already scanned the record (it holds the old value, which must
 /// go) or not (it reads the new one). The index answers the same as a scan.

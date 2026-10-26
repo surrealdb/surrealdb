@@ -391,6 +391,10 @@ impl PendingDeletes {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	pub(super) tf: TransactionFactory,
+	/// Set once the datastore has begun to shut down
+	/// ([`Self::lapse_local_build_leases`]): a build registered from then on
+	/// stops writing and has its lease lapsed as it registers.
+	shutting_down: Arc<AtomicBool>,
 	pub(super) indexes: Arc<RwLock<HashMap<SharedIndexKey, IndexBuilding>>>,
 	/// One mutex per index that a materialiser pass holds while it runs
 	/// ([`Self::materialise_lock`]). Held weakly: an entry lives only while a
@@ -636,6 +640,7 @@ impl IndexBuilder {
 	pub(in crate::kvs) fn new(tf: TransactionFactory, defers: bool, inline_batches: usize) -> Self {
 		Self {
 			tf,
+			shutting_down: Default::default(),
 			indexes: Default::default(),
 			materialising: Default::default(),
 			pending_deletes: Default::default(),
@@ -725,6 +730,44 @@ impl IndexBuilder {
 		self.tf.clone()
 	}
 
+	/// Forget a shutdown begun by [`Self::lapse_local_build_leases`], as the
+	/// fresh builder of a restarted datastore over the same store would. For a
+	/// test whose in-memory store cannot be reopened.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn restart_after_shutdown(&self) {
+		self.shutting_down.store(false, Ordering::SeqCst);
+	}
+
+	/// Lapse the owner lease of every build this process is running, ahead of
+	/// a datastore shutdown, and answer how many it lapsed.
+	///
+	/// A build left running by a shutdown makes no durable change once the
+	/// storage engine refuses commits: it stays at its last committed
+	/// checkpoint for a builder to continue once its owner's lease lapses
+	/// ([`Building::lapse_lease`]). Each build stops opening write transactions
+	/// first, so it cannot renew the lease again. Lapsing it while commits are still
+	/// accepted lets the resume scan of the restarted node, or of any other,
+	/// continue it on the scan's next pass instead of a whole lease later, and
+	/// with it a write waiting for a `Closing` build to publish.
+	pub(crate) async fn lapse_local_build_leases(&self) -> usize {
+		self.shutting_down.store(true, Ordering::SeqCst);
+		let running: Vec<IndexBuilding> = self
+			.indexes
+			.read()
+			.await
+			.values()
+			.filter(|building| !building.is_finished())
+			.cloned()
+			.collect();
+		let mut lapsed = 0;
+		for building in running {
+			if lapse_for_shutdown(&building).await {
+				lapsed += 1;
+			}
+		}
+		lapsed
+	}
+
 	/// Whether any local builder task is still running.
 	///
 	/// Used by the stalled-build resume scan to serialize recovery: while a
@@ -812,6 +855,13 @@ impl IndexBuilder {
 			existing.abort();
 		}
 		indexes.insert(Arc::clone(&building.ix_key), Arc::clone(building));
+		drop(indexes);
+		// The flag is set before the shutdown reads the registered builds, and
+		// read here after this build is registered, so a build the shutdown
+		// did not find finds the flag.
+		if self.shutting_down.load(Ordering::SeqCst) {
+			lapse_for_shutdown(building).await;
+		}
 		Ok(())
 	}
 
@@ -1617,6 +1667,31 @@ const STALE_QUEUE_DELETE_BATCH: u32 = 10_000;
 #[cfg(test)]
 const STALE_QUEUE_DELETE_BATCH: u32 = 3;
 
+/// Stop `building` writing and lapse its owner lease, as a datastore shutdown
+/// does to every build it runs ([`IndexBuilder::lapse_local_build_leases`]).
+/// Answers whether the lease was lapsed; a failure is logged and leaves the
+/// lease to run out.
+async fn lapse_for_shutdown(building: &IndexBuilding) -> bool {
+	building.shutting_down.store(true, Ordering::Release);
+	let generation = building.build_generation.load(Ordering::Acquire);
+	if generation == 0 {
+		return false;
+	}
+	match building.lapse_lease(generation).await {
+		Ok(lapsed) => lapsed,
+		Err(err) => {
+			warn!(
+				index = %building.ix.name,
+				table = %building.ix.table_name,
+				error = %err,
+				"could not lapse the lease of an index build ahead of shutdown; \
+				 it resumes once the lease runs out"
+			);
+			false
+		}
+	}
+}
+
 /// Which stalled builds [`IndexBuilder::resume_stalled`] may adopt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ResumeScope {
@@ -1717,6 +1792,10 @@ pub(super) struct Building {
 	remote_generation: AtomicU64,
 	/// Abort flag for the build process.
 	pub(super) aborted: AtomicBool,
+	/// Set once the datastore running this build has begun to shut down: from
+	/// then on the build opens no write transaction, so it cannot renew the
+	/// owner lease the shutdown lapses ([`IndexBuilder::lapse_local_build_leases`]).
+	shutting_down: AtomicBool,
 	/// Set when the spawned task exits so a later local build can start.
 	pub(super) finished: AtomicBool,
 	/// How many waits for older write transactions this build has begun
@@ -1940,6 +2019,7 @@ impl Building {
 			conflict_streak: AtomicU32::new(0),
 			awaited: false,
 			aborted: AtomicBool::new(false),
+			shutting_down: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
 			rollback: AtomicU8::new(ROLLBACK_NONE),
@@ -2030,6 +2110,66 @@ impl Building {
 			)
 			.await?;
 		Ok(handed.is_some())
+	}
+
+	/// Stop this builder from writing and lapse its owner lease on the build
+	/// of `generation`, so that any builder may take the generation over at
+	/// once as one whose owner lapsed ([`build_owner_expired`]). Answers
+	/// whether it lapsed it.
+	///
+	/// The owner stays as it is, and a takeover replaces it as any lapsed
+	/// owner is replaced. This builder opens no write transaction from here on
+	/// ([`Self::new_write_tx`]), so it cannot renew the lease; a renewal it
+	/// had already staged writes `!bs` too, so of the two the later commit
+	/// fails, and a renewal that commits first is lapsed again below. Nothing
+	/// is written where this builder no longer owns the generation, or where it
+	/// is neither `Building` nor `Closing`; a conflict is retried a few times
+	/// and then given up, leaving the lease to run out on its own.
+	pub(super) async fn lapse_lease(&self, generation: BuildGeneration) -> Result<bool> {
+		self.shutting_down.store(true, Ordering::Release);
+		let state_key = self.ikb.new_bs_key();
+		for _ in 0..=BEST_EFFORT_TRANSITION_RETRIES {
+			let tx = self
+				.tf
+				.transaction(TransactionType::Write, self.ctx.try_get_sequences()?.clone())
+				.await?;
+			let Some(current) = tx.get_key(&state_key, None).await? else {
+				tx.cancel().await?;
+				return Ok(false);
+			};
+			if current.generation != generation
+				|| current.owner != Some(self.owner)
+				|| !matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
+			{
+				tx.cancel().await?;
+				return Ok(false);
+			}
+			let lapsed = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS);
+			let mut next = current.clone();
+			next.owner_heartbeat_at = Some(lapsed);
+			if let Err(err) = tx.put_compare_key(&state_key, &next, Some(&current)).await {
+				// The write's own error decides what follows; a cancellation that
+				// fails as well leaves nothing staged to undo.
+				let _ = tx.cancel().await;
+				if is_condition_not_met(&err) {
+					continue;
+				}
+				return Err(err);
+			}
+			match tx.commit().await {
+				Ok(()) => return Ok(true),
+				// A backend that checks the compare at commit reports a renewal that
+				// committed first here, rather than at the write: read it and lapse
+				// it again.
+				Err(err)
+					if is_condition_not_met(&err) || is_retryable_transaction_conflict(&err) =>
+				{
+					continue;
+				}
+				Err(err) => return Err(err),
+			}
+		}
+		Ok(false)
 	}
 
 	/// The analyzer a blocking full-text build analyses with: the one its index
@@ -4547,13 +4687,24 @@ impl Building {
 	}
 
 	/// A write transaction of this build's own, outside any batch context.
+	///
+	/// Refused with the storage engine's shutdown error once the datastore has
+	/// begun to shut down ([`Self::shutting_down`]), which the build reports as
+	/// an interruption that leaves it to its lease.
 	pub(super) async fn new_write_tx(&self) -> Result<Transaction> {
+		self.refuse_writes_after_shutdown()?;
 		self.tf.transaction(TransactionType::Write, self.ctx.try_get_sequences()?.clone()).await
 	}
 
-	/// Creates a child context for one batch of the build, backed by a write
-	/// transaction and holding a query memory of the batch's own (see
-	/// [`Building::memory`]).
+	/// Fails with the storage engine's shutdown error once this build's
+	/// datastore has begun to shut down.
+	fn refuse_writes_after_shutdown(&self) -> Result<()> {
+		if self.shutting_down.load(Ordering::Acquire) {
+			return Err(anyhow::Error::new(crate::kvs::err::Error::Shutdown));
+		}
+		Ok(())
+	}
+
 	/// A read transaction of this build's own, in a context batch work can
 	/// evaluate the index's columns in.
 	#[cfg_attr(all(target_family = "wasm", target_os = "unknown"), allow(dead_code))]
@@ -4570,7 +4721,12 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
+	/// Creates a child context for one batch of the build, backed by a write
+	/// transaction and holding a query memory of the batch's own (see
+	/// [`Building::memory`]). Refused once the datastore has begun to shut down,
+	/// as [`Self::new_write_tx`] is.
 	pub(super) async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
+		self.refuse_writes_after_shutdown()?;
 		let tx = self
 			.tf
 			.transaction(TransactionType::Write, self.ctx.try_get_sequences()?.clone())

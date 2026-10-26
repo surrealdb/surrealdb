@@ -3630,7 +3630,11 @@ impl Datastore {
 		// `Transaction::commit` gate). An in-flight build therefore makes no
 		// durable change during shutdown and stays at its last committed
 		// checkpoint, so the periodic resume scan continues it after restart —
-		// exactly as it would after a crash.
+		// exactly as it would after a crash. Its owner lease is lapsed first,
+		// while commits are still accepted, so that scan continues it on its
+		// next pass rather than once the lease runs out: until then a write to
+		// a table whose build stopped in `Closing` would wait for it.
+		self.index_builder.lapse_local_build_leases().await;
 		// Once this node is archived, no build elsewhere waits for its writes (see
 		// `crate::kvs::write_barrier`), so no write commits after that: they are refused from
 		// here on, and those already committing are waited for, within the archive's own bound.
