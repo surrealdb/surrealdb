@@ -55,6 +55,7 @@ const ER_TABLEACCESS_DENIED_ERROR: Number = (1142, b"42000");
 const ER_TABLE_EXISTS_ERROR: Number = (1050, b"42S01");
 const ER_TRUNCATED_WRONG_VALUE_FOR_FIELD: Number = (1366, b"HY000");
 const ER_UNKNOWN_ERROR: Number = (1105, b"HY000");
+const ER_CANT_DROP_FIELD_OR_KEY: Number = (1091, b"42000");
 const ER_UNKNOWN_SYSTEM_VARIABLE: Number = (1193, b"HY000");
 const ER_WINDOW_INVALID_WINDOW_FUNC_USE: Number = (3593, b"HY000");
 const ER_WRONG_FIELD_WITH_GROUP: Number = (1055, b"42000");
@@ -106,6 +107,9 @@ fn plan_number(err: &PlanError) -> Number {
 			ER_NOT_SUPPORTED_YET
 		}
 		PlanError::UndefinedObject(_) => ER_UNKNOWN_SYSTEM_VARIABLE,
+		PlanError::UndefinedConstraint {
+			..
+		} => ER_CANT_DROP_FIELD_OR_KEY,
 		PlanError::UndefinedOperator(_)
 		| PlanError::ParameterOutOfRange(_)
 		| PlanError::NoActiveTransaction
@@ -297,6 +301,14 @@ static PLANNER_FORMS: &[(&str, &str, PlanError)] = &[
 	("unsupported statement: ", "", PlanError::UnsupportedStatement(String::new())),
 	("unsupported expression: ", "", PlanError::UnsupportedExpression(String::new())),
 	("unrecognized configuration parameter \"", "\"", PlanError::UndefinedObject(String::new())),
+	(
+		"constraint \"",
+		"\" does not exist",
+		PlanError::UndefinedConstraint {
+			constraint: String::new(),
+			table: String::new(),
+		},
+	),
 ];
 
 /// The kind of planner error that `reason` is the message of, or `None` when no form matches, as
@@ -616,6 +628,10 @@ mod tests {
 			PlanError::SavepointDoesNotExist(name()),
 			PlanError::ActiveTransactionAlreadyInProgress,
 			PlanError::UndefinedObject(name()),
+			PlanError::UndefinedConstraint {
+				constraint: name(),
+				table: name(),
+			},
 			PlanError::InvalidParameterValue("m".to_string()),
 			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
 			PlanError::ProgramLimitExceeded("dimensions".to_string()),
@@ -656,6 +672,9 @@ mod tests {
 						ER_NOT_SUPPORTED_YET
 					}
 					PlanError::UndefinedObject(_) => ER_UNKNOWN_SYSTEM_VARIABLE,
+					PlanError::UndefinedConstraint {
+						..
+					} => ER_CANT_DROP_FIELD_OR_KEY,
 					PlanError::UndefinedOperator(_)
 					| PlanError::ParameterOutOfRange(_)
 					| PlanError::NoActiveTransaction

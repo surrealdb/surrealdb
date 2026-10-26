@@ -43,6 +43,10 @@ use tokio_rustls::server::TlsStream;
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
+use super::advisory::{
+	self, AdvisoryArg, AdvisoryCall, AdvisoryKey, AdvisoryLocks, AdvisoryOp, AdvisorySession,
+	Interrupted,
+};
 use super::copy::{
 	BATCH_BYTES, BATCH_ROWS, Format, Ingest, MAX_RECORD_BYTES, Row, SLICE_BYTES, Scan, row_cost,
 };
@@ -224,6 +228,8 @@ enum Control {
 	Set(SetStatement),
 	Show(String),
 	Reset(String),
+	/// A whole-statement call of an advisory lock function; see [`advisory`].
+	Advisory(AdvisoryCall),
 }
 
 impl Control {
@@ -242,6 +248,8 @@ impl Control {
 			Control::Set(_) => "SET",
 			Control::Show(_) => "SHOW",
 			Control::Reset(_) => "RESET",
+			// The tag of a portal that has already delivered its row.
+			Control::Advisory(_) => "SELECT 0",
 		}
 	}
 }
@@ -324,6 +332,7 @@ pub(super) async fn handle(
 	shutdown: CancellationToken,
 	permit: OwnedSemaphorePermit,
 	registry: Arc<CancelRegistry>,
+	advisory_locks: Arc<AdvisoryLocks>,
 	pid: i32,
 	secret: i32,
 	acceptor: Option<Arc<TlsAcceptor>>,
@@ -368,6 +377,7 @@ pub(super) async fn handle(
 		registry: Arc::clone(&registry),
 		pid,
 		secret,
+		advisory: AdvisorySession::new(advisory_locks, pid),
 		_permit: permit,
 	};
 	if let Err(err) = conn.run().await {
@@ -539,6 +549,8 @@ struct Connection {
 	registry: Arc<CancelRegistry>,
 	pid: i32,
 	secret: i32,
+	/// The advisory locks this connection holds, released when it ends.
+	advisory: AdvisorySession,
 	/// Held for the connection's lifetime to bound concurrent connections.
 	_permit: OwnedSemaphorePermit,
 }
@@ -681,7 +693,14 @@ impl Connection {
 			self.report(&err.fatal()).await?;
 			return Ok(false);
 		}
-		let (ns, db) = parse_database_param(&user, database.as_deref());
+		let namespace = options.as_deref().and_then(|options| option_setting(options, "namespace"));
+		let (ns, db) = match parse_database_param(&user, database.as_deref(), namespace) {
+			Ok(selection) => selection,
+			Err(err) => {
+				self.report(&err.fatal()).await?;
+				return Ok(false);
+			}
+		};
 		self.session = Session::default();
 		self.session.ip = Some(self.peer.ip().to_string());
 		self.session.id = Some(uuid::Uuid::new_v4());
@@ -1279,14 +1298,21 @@ impl Connection {
 		// `SET` interception is gated by `should_intercept_set` so that in the GQL
 		// dialect a `SET` mutation clause still reaches the GQL executor.
 		if let Some(control) = self.classify_control(query) {
-			let returns_rows = matches!(control, Control::Show(_));
+			let returns_rows = matches!(control, Control::Show(_) | Control::Advisory(_));
+			let (param_count, param_types) = match &control {
+				Control::Advisory(call) => advisory_parameters(call, &param_types)?,
+				Control::Transaction(_)
+				| Control::Set(_)
+				| Control::Show(_)
+				| Control::Reset(_) => (0, Vec::new()),
+			};
 			self.insert_statement(
 				name,
 				PreparedStatement {
 					query: query.to_string(),
 					cached_plan: None,
-					param_types: Vec::new(),
-					param_count: 0,
+					param_types,
+					param_count,
 					empty: false,
 					described: false,
 					control: Some(control),
@@ -1537,28 +1563,11 @@ impl Connection {
 									}));
 								}
 							}
-							PgStatement::AlterTable(alter) => {
+							// The plan is not kept: `DROP CONSTRAINT` and `ADD FOREIGN KEY`
+							// lower against the schema when the statement runs.
+							PgStatement::AlterTable(_) => {
 								kind = StatementKind::AlterTable;
 								returns_rows = false;
-								let cur_db = self
-									.session
-									.db
-									.clone()
-									.unwrap_or_else(|| "postgres".to_string());
-								let catalog = MemoryCatalog::new().with_database(&cur_db);
-								if surrealdb_sqlplan::resolve_pgsql_table_name(
-									&alter.name.parts,
-									Some(&catalog),
-								)
-								.is_ok() && let Ok(exprs) = lower_pgsql_ddl(&stmts[0])
-								{
-									cached_plan = Some(CachedPlan::PgAst(Ast {
-										expressions: exprs
-											.into_iter()
-											.map(TopLevelExpr::Expr)
-											.collect(),
-									}));
-								}
 							}
 							PgStatement::Drop(drop) => {
 								kind = StatementKind::DropTable;
@@ -1746,6 +1755,16 @@ impl Connection {
 			DescribeTarget::Statement => {
 				let control = self.statements.get(name).map(|s| s.control.clone());
 				if let Some(Some(control)) = control {
+					if let Control::Advisory(call) = control {
+						let oids = self
+							.statements
+							.get(name)
+							.map(|s| s.param_types.clone())
+							.unwrap_or_default();
+						msg::write_parameter_description(out, &oids);
+						msg::write_row_description(out, &advisory_columns(&call), |_| FORMAT_TEXT);
+						return Ok(());
+					}
 					msg::write_parameter_description(out, &[]);
 					if let Control::Show(param) = control {
 						self.describe_show(&param, out)?;
@@ -1795,6 +1814,15 @@ impl Connection {
 				if let Some(control) = self.portal_control(name) {
 					if let Control::Show(param) = control {
 						self.describe_show(&param, out)?;
+					} else if let Control::Advisory(call) = control {
+						let formats = self
+							.portals
+							.get(name)
+							.map(|p| p.result_formats.clone())
+							.unwrap_or_default();
+						msg::write_row_description(out, &advisory_columns(&call), |i| {
+							format_at(&formats, i)
+						});
 					} else {
 						msg::write_no_data(out);
 					}
@@ -1876,6 +1904,14 @@ impl Connection {
 				Control::Set(set) => self.handle_set(set, out),
 				Control::Show(param) => self.handle_show(&param, out),
 				Control::Reset(param) => self.handle_reset(&param, out),
+				Control::Advisory(call) => {
+					let (vars, formats) = self
+						.portals
+						.get(portal_name)
+						.map(|p| (p.params.clone(), p.result_formats.clone()))
+						.unwrap_or_default();
+					self.handle_advisory(call, &vars, &formats, false, out).await
+				}
 			};
 			return Ok(result);
 		}
@@ -2831,7 +2867,10 @@ impl Connection {
 					.columns
 					.iter()
 					.map(|column| {
-						links.iter().find(|(name, _)| name == column).map(|(_, to)| to.clone())
+						links
+							.iter()
+							.find(|(name, _, _)| name == column)
+							.map(|(_, to, admits_none)| (to.clone(), *admits_none))
 					})
 					.collect();
 			}
@@ -2891,7 +2930,9 @@ impl Connection {
 				}
 				let col = ingest.columns.get(j).map(|s| s.as_str()).unwrap_or("col");
 				let literal = match ingest.links.get(j) {
-					Some(Some(target)) => link_to_surrealql(val, target),
+					Some(Some((target, admits_none))) => {
+						link_to_surrealql(val, target, *admits_none)
+					}
 					_ => value_to_surrealql(val),
 				};
 				q.push_str(&format!("{}: {}", surql_object_key(col), literal));
@@ -3611,6 +3652,9 @@ impl Connection {
 			Control::Set(set) => self.handle_set(set, out),
 			Control::Show(param) => self.handle_show(&param, out),
 			Control::Reset(param) => self.handle_reset(&param, out),
+			Control::Advisory(call) => {
+				self.handle_advisory(call, &Variables::new(), &[], true, out).await
+			}
 		}
 	}
 
@@ -3625,12 +3669,96 @@ impl Connection {
 		if let Some(reset_param) = parse_reset(query) {
 			return Some(Control::Reset(reset_param));
 		}
+		if self.dialect == Dialect::PgSql
+			&& let Some(call) = advisory::parse_call(&strip_sql_comments(query))
+		{
+			return Some(Control::Advisory(call));
+		}
 		if let Some(set) = parse_set(query)
 			&& self.should_intercept_set(&set)
 		{
 			return Some(Control::Set(set));
 		}
 		None
+	}
+
+	/// Run an advisory lock function as a whole statement and answer with its one-row result.
+	///
+	/// `vars` are the statement's bound parameters and `formats` the result formats;
+	/// `describe` is whether to precede the row with its RowDescription, as the simple
+	/// protocol does. Taking a lock waits for other sessions without holding any datastore
+	/// transaction; the wait ends, without the lock, on a CancelRequest, on server shutdown
+	/// and when the client closes the connection. A NULL key returns NULL and takes nothing,
+	/// as the strict PostgreSQL functions do.
+	async fn handle_advisory(
+		&mut self,
+		call: AdvisoryCall,
+		vars: &Variables,
+		formats: &[i16],
+		describe: bool,
+		out: &mut BytesMut,
+	) -> Result<(), PgError> {
+		self.check_current_dialect()?;
+		if self.txn_failed {
+			return Err(PgError::in_failed_transaction(
+				"current transaction is aborted, commands ignored until end of transaction block",
+			));
+		}
+		let key = advisory_key(&call, vars)?;
+		let session = self.advisory.id();
+		let locks = self.advisory.locks();
+		let outcome = match (call.op, key) {
+			(AdvisoryOp::UnlockAll, _) => {
+				locks.unlock_all(session);
+				Some(false)
+			}
+			(_, None) => None,
+			(AdvisoryOp::Lock, Some(key)) => {
+				let cancel = self.arm_cancel().token();
+				let shutdown = self.shutdown.clone();
+				let stream = &self.stream;
+				let abort = async {
+					tokio::select! {
+						() = cancel.cancelled() => {}
+						() = shutdown.cancelled() => {}
+						() = peer_closed(stream) => {}
+					}
+				};
+				match locks.lock(session, key, abort).await? {
+					Ok(()) => Some(false),
+					Err(Interrupted::Aborted) => {
+						return Err(if shutdown.is_cancelled() {
+							PgError::new(
+								"57P01",
+								"terminating connection due to administrator command",
+							)
+							.fatal()
+						} else {
+							PgError::query_canceled("canceling statement due to user request")
+						});
+					}
+				}
+			}
+			(AdvisoryOp::TryLock, Some(key)) => Some(locks.try_lock(session, key)?),
+			(AdvisoryOp::Unlock, Some(key)) => Some(locks.unlock(session, key)),
+		};
+		let column = advisory_columns(&call);
+		if describe {
+			msg::write_row_description(out, &column, |_| FORMAT_TEXT);
+		}
+		let cell = match (outcome, call.op.returns_void()) {
+			// A void result is the empty string, but a NULL key makes it NULL.
+			(Some(_), true) => {
+				Some(encode_cell(Value::None, &PgType::Void, format_at(formats, 0))?)
+			}
+			(Some(value), false) => {
+				Some(encode_cell(Value::Bool(value), &PgType::Bool, format_at(formats, 0))?)
+			}
+			(None, _) => None,
+		};
+		msg::write_data_row(out, &[cell]);
+		msg::write_command_complete(out, "SELECT 1");
+		Ok(())
 	}
 
 	/// Handle an intercepted `SET`: switch dialect, update GucStore, and emit ParameterStatus if
@@ -4260,6 +4388,96 @@ impl Connection {
 	}
 }
 
+/// The parameter count and type oids of a prepared advisory call: the oid the client declared
+/// where it declared one, and the key's type otherwise.
+fn advisory_parameters(
+	call: &AdvisoryCall,
+	declared: &[i32],
+) -> Result<(usize, Vec<i32>), PgError> {
+	let count = call.param_count().max(declared.len());
+	if count > MAX_PARAMS {
+		return Err(PgError::protocol(format!(
+			"statement references {count} parameters, exceeding the maximum of {MAX_PARAMS}"
+		)));
+	}
+	let mut types = vec![0; count];
+	for (slot, oid) in types.iter_mut().zip(declared) {
+		*slot = *oid;
+	}
+	for arg in &call.args {
+		if let AdvisoryArg::Param(n) = arg
+			&& types[*n - 1] == 0
+		{
+			types[*n - 1] = call.arg_oid();
+		}
+	}
+	Ok((count, types))
+}
+
+/// The single column an advisory call returns.
+fn advisory_columns(call: &AdvisoryCall) -> [PgColumn; 1] {
+	[PgColumn {
+		name: call.column.clone(),
+		ty: if call.op.returns_void() {
+			PgType::Void
+		} else {
+			PgType::Bool
+		},
+	}]
+}
+
+/// The lock key an advisory call names, with `$n` read from `vars`, or `None` when an argument
+/// is NULL (or for the call that takes no key). The two-key form takes two `int4`s.
+fn advisory_key(call: &AdvisoryCall, vars: &Variables) -> Result<Option<AdvisoryKey>, PgError> {
+	let mut values = Vec::with_capacity(call.args.len());
+	for arg in &call.args {
+		let value = match arg {
+			AdvisoryArg::Literal(value) => *value,
+			AdvisoryArg::Null => return Ok(None),
+			AdvisoryArg::Param(n) => match vars.get(&surrealdb_types::positional_param_name(*n)) {
+				Some(Value::Number(surrealdb_types::Number::Int(value))) => *value,
+				Some(Value::Null | Value::None) => return Ok(None),
+				Some(_) => {
+					return Err(PgError::invalid_parameter_value(format!(
+						"parameter ${n} is not an integer"
+					)));
+				}
+				None => {
+					return Err(PgError::new("42P02", format!("there is no parameter ${n}")));
+				}
+			},
+		};
+		values.push(value);
+	}
+	let out_of_range = || PgError::new("22003", "integer out of range");
+	Ok(match values.as_slice() {
+		[] => None,
+		[key] => Some(AdvisoryKey::Big(*key)),
+		[high, low] => Some(AdvisoryKey::Pair(
+			i32::try_from(*high).map_err(|_| out_of_range())?,
+			i32::try_from(*low).map_err(|_| out_of_range())?,
+		)),
+		[..] => None,
+	})
+}
+
+/// Resolves when the peer has closed its end of the connection. It resolves only on a close
+/// seen before any further bytes: a client that has already sent its next message cannot be told
+/// from one that has gone, so the wait for a lock does not end for it.
+async fn peer_closed(stream: &PgStream) {
+	let tcp = match stream {
+		Either::Left(tcp) => tcp,
+		Either::Right(tls) => tls.get_ref().0,
+	};
+	let mut byte = [0u8; 1];
+	if tcp.readable().await.is_err() {
+		return;
+	}
+	if matches!(tcp.peek(&mut byte).await, Ok(read) if read > 0) {
+		std::future::pending::<()>().await;
+	}
+}
+
 /// The number of rows a command reports in its command tag: the records its
 /// lowering answers with.
 fn affected_rows(value: &Value) -> usize {
@@ -4437,11 +4655,17 @@ fn surql_object_key(key: &str) -> String {
 
 /// A COPY field for a column declared as a link to `target`: text that reads as an integer names
 /// an integer key, and any other non-empty text, `true` and `1.5` included, names the string key
-/// it spells. NULL stays NULL, and the empty text stays the empty string, which the type check of
-/// the column refuses.
-fn link_to_surrealql(val: &Option<String>, target: &str) -> String {
+/// it spells. NULL is NONE where the column admits that (`admits_none`) and stays NULL, which the
+/// type check of the column refuses, where it does not. The empty text stays the empty string,
+/// which the type check of the column refuses.
+fn link_to_surrealql(val: &Option<String>, target: &str, admits_none: bool) -> String {
 	let Some(text) = val else {
-		return "NULL".to_string();
+		return if admits_none {
+			"NONE"
+		} else {
+			"NULL"
+		}
+		.to_string();
 	};
 	if text.is_empty() {
 		return "''".to_string();
@@ -4693,7 +4917,17 @@ fn encode_row(
 /// username, in which case it is ignored: libpq defaults the database name to
 /// the username, so `psql -U root` would otherwise silently select a
 /// namespace called `root`.
-fn parse_database_param(user: &str, database: Option<&str>) -> (Option<String>, Option<String>) {
+///
+/// With `namespace`, from an `options=-c namespace=<ns>` setting, the
+/// `database` parameter is the database name alone, so a client whose
+/// connection-string parser keeps only the first path segment can still select
+/// both. A `database` that names a namespace too (`ns/db`) is refused rather
+/// than reconciled with it.
+fn parse_database_param(
+	user: &str,
+	database: Option<&str>,
+	namespace: Option<&str>,
+) -> Result<(Option<String>, Option<String>), PgError> {
 	let non_empty = |s: &str| {
 		if s.is_empty() {
 			None
@@ -4701,14 +4935,26 @@ fn parse_database_param(user: &str, database: Option<&str>) -> (Option<String>, 
 			Some(s.to_string())
 		}
 	};
-	match database {
+	if let Some(namespace) = namespace.and_then(non_empty) {
+		return match database {
+			Some(database) if database.contains('/') => {
+				Err(PgError::invalid_parameter_value(format!(
+					"database \"{database}\" names a namespace, and options names namespace \"{namespace}\""
+				)))
+			}
+			None => Ok((Some(namespace), None)),
+			Some(database) if database == user => Ok((Some(namespace), None)),
+			Some(database) => Ok((Some(namespace), non_empty(database))),
+		};
+	}
+	Ok(match database {
 		None => (None, None),
 		Some(database) => match database.split_once('/') {
 			Some((ns, db)) => (non_empty(ns), non_empty(db)),
 			None if database == user => (None, None),
 			None => (non_empty(database), None),
 		},
-	}
+	})
 }
 
 /// The connection-terminating error for any failed authentication. Kept uniform
@@ -5401,21 +5647,30 @@ fn split_statements(sql: &str) -> Vec<&str> {
 	stmts
 }
 
-/// Parse a Postgres `options` startup string for a `-c dialect=<name>` (or
-/// bare `dialect=<name>`) setting.
-fn dialect_from_options(options: &str) -> Option<Dialect> {
-	let mut tokens = options.split_whitespace().peekable();
+/// The value of the setting `name` in a Postgres `options` startup string,
+/// given as `-c name=value`, `-cname=value` or a bare `name=value`; the first
+/// occurrence wins.
+fn option_setting<'a>(options: &'a str, name: &str) -> Option<&'a str> {
+	let mut tokens = options.split_whitespace();
 	while let Some(token) = tokens.next() {
 		let setting = if token == "-c" {
 			tokens.next()?
 		} else {
 			token.strip_prefix("-c").unwrap_or(token)
 		};
-		if let Some(value) = setting.strip_prefix("dialect=") {
-			return parse_dialect(value);
+		if let Some((key, value)) = setting.split_once('=')
+			&& key == name
+		{
+			return Some(value);
 		}
 	}
 	None
+}
+
+/// Parse a Postgres `options` startup string for a `-c dialect=<name>` (or
+/// bare `dialect=<name>`) setting.
+fn dialect_from_options(options: &str) -> Option<Dialect> {
+	option_setting(options, "dialect").and_then(parse_dialect)
 }
 
 /// Parse a dialect name (case-insensitive) as used by `options` and `SET`.
@@ -5447,8 +5702,8 @@ mod tests {
 
 	use super::{
 		Dialect, TxnOp, copy_column_lookup_query, dialect_from_options, dialect_name,
-		is_blank_pg_sql, isolation_setting, parse_database_param, parse_dialect, parse_set,
-		pg_ident, pg_string_literal, rewrite_positional_params, row_within_wire_limit,
+		is_blank_pg_sql, isolation_setting, option_setting, parse_database_param, parse_dialect,
+		parse_set, pg_ident, pg_string_literal, rewrite_positional_params, row_within_wire_limit,
 		split_statements, subject_names_record, surql_object_key, transaction_control,
 		wire_row_fits,
 	};
@@ -5756,14 +6011,37 @@ mod tests {
 	#[test]
 	fn database_param_parsing() {
 		let s = |v: &str| Some(v.to_string());
-		assert_eq!(parse_database_param("root", None), (None, None));
-		assert_eq!(parse_database_param("root", Some("root")), (None, None));
-		assert_eq!(parse_database_param("root", Some("")), (None, None));
-		assert_eq!(parse_database_param("root", Some("ns")), (s("ns"), None));
-		assert_eq!(parse_database_param("root", Some("ns/")), (s("ns"), None));
-		assert_eq!(parse_database_param("root", Some("ns/db")), (s("ns"), s("db")));
-		assert_eq!(parse_database_param("root", Some("/db")), (None, s("db")));
-		assert_eq!(parse_database_param("root", Some("root/db")), (s("root"), s("db")));
+		assert_eq!(parse_database_param("root", None, None).unwrap(), (None, None));
+		assert_eq!(parse_database_param("root", Some("root"), None).unwrap(), (None, None));
+		assert_eq!(parse_database_param("root", Some(""), None).unwrap(), (None, None));
+		assert_eq!(parse_database_param("root", Some("ns"), None).unwrap(), (s("ns"), None));
+		assert_eq!(parse_database_param("root", Some("ns/"), None).unwrap(), (s("ns"), None));
+		assert_eq!(parse_database_param("root", Some("ns/db"), None).unwrap(), (s("ns"), s("db")));
+		assert_eq!(parse_database_param("root", Some("/db"), None).unwrap(), (None, s("db")));
+		assert_eq!(
+			parse_database_param("root", Some("root/db"), None).unwrap(),
+			(s("root"), s("db"))
+		);
+		// `options=-c namespace=<ns>` names the namespace, and `database` is the database alone.
+		let ns = Some("orm");
+		assert_eq!(
+			parse_database_param("root", Some("prisma"), ns).unwrap(),
+			(s("orm"), s("prisma"))
+		);
+		assert_eq!(parse_database_param("root", None, ns).unwrap(), (s("orm"), None));
+		assert_eq!(parse_database_param("root", Some("root"), ns).unwrap(), (s("orm"), None));
+		assert_eq!(parse_database_param("root", Some(""), ns).unwrap(), (s("orm"), None));
+		assert_eq!(parse_database_param("root", Some("db"), Some("")).unwrap(), (s("db"), None));
+		assert!(parse_database_param("root", Some("other/db"), ns).is_err());
+	}
+
+	#[test]
+	fn reads_settings_from_options() {
+		assert_eq!(option_setting("-c namespace=orm -c dialect=pgsql", "namespace"), Some("orm"));
+		assert_eq!(option_setting("-cnamespace=orm", "namespace"), Some("orm"));
+		assert_eq!(option_setting("dialect=pgsql namespace=orm", "namespace"), Some("orm"));
+		assert_eq!(option_setting("-c dialect=pgsql", "namespace"), None);
+		assert_eq!(option_setting("-c namespaces=orm", "namespace"), None);
 	}
 
 	#[test]

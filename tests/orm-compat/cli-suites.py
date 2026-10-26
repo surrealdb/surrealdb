@@ -36,12 +36,17 @@ for target in ['reference', 'surrealdb']:
 
     def url(db):
         return base + db + ('' if ref else '?options=-c%20dialect%3Dpgsql')
+
+    def prisma_url(db):
+        # Prisma's schema engine keeps only the first path segment of the database, so the
+        # namespace is given as a startup option and the path names the database alone.
+        return base + db + ('' if ref else '?options=-c%20namespace%3Dorm%20-c%20dialect%3Dpgsql')
     if ref:
         code = "import pg from 'pg';const c=new pg.Client({host:'127.0.0.1',port:15433,user:'root',password:'root',database:'postgres'});await c.connect();for(const n of ['ref_prisma_migrate','ref_drizzle_migrate']){await c.query('DROP DATABASE IF EXISTS '+n);await c.query('CREATE DATABASE '+n)}await c.end();"
         subprocess.run(['node', '--input-type=module', '-e', code], check=True)
-    introspect = url('postgres' if ref else 'orm/prisma')
+    introspect = prisma_url('postgres' if ref else 'prisma')
     run(target, 'prisma', 'introspection', ['node', 'node_modules/prisma/build/index.js', 'db', 'pull', '--print'], introspect, check=lambda text: 'model CompatUser' in text and 'model CompatPost' in text)
-    migrate = url('ref_prisma_migrate' if ref else 'orm/prisma_migrate')
+    migrate = prisma_url('ref_prisma_migrate' if ref else 'prisma_migrate')
     if run(target, 'prisma', 'migration-apply', ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy'], migrate):
         run(target, 'prisma', 'migration-repeat', ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy'], migrate)
     else:

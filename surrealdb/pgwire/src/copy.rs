@@ -214,7 +214,7 @@ pub(super) struct Ingest {
 	/// For each column, the table its values are record links to, when the
 	/// column is declared as a link; a value is then inserted as the link
 	/// its text names the key of.
-	pub links: Vec<Option<String>>,
+	pub links: Vec<Option<(String, bool)>>,
 	/// How far the unconsumed bytes have been scanned.
 	pub scan: ScanState,
 	/// The rows waiting for the next INSERT.

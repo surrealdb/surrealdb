@@ -1,5 +1,9 @@
 //! Unit and integration tests for PostgreSQL Pratt expression parser.
 
+// A catch-all arm in these tests reports the expression a parse produced instead of the one
+// expected; naming every other variant of the AST would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_pgsql::ast::expr::Expr;
 use surrealdb_pgsql::ast::literal::Literal;
 use surrealdb_pgsql::ast::op::{BinaryOperator, UnaryOperator};
@@ -339,6 +343,36 @@ fn test_parse_subqueries() {
 }
 
 #[test]
+fn test_quantified_comparison_against_an_array_keeps_what_was_written() {
+	use surrealdb_pgsql::Quantifier;
+	use surrealdb_pgsql::ast::op::BinaryOperator;
+	let parsed = |sql: &str| {
+		let Expr::QuantifiedArray {
+			expr,
+			op,
+			quantifier,
+			array,
+			..
+		} = parse_expr(sql).unwrap()
+		else {
+			panic!("expected QuantifiedArray for {sql}");
+		};
+		(expr, op, quantifier, array)
+	};
+	let (expr, op, quantifier, array) = parsed("a.attnum = ANY (c.conkey)");
+	assert!(matches!(*expr, Expr::ColumnRef(col) if col.fields == ["a", "attnum"]));
+	assert!(matches!(*array, Expr::ColumnRef(col) if col.fields == ["c", "conkey"]));
+	assert_eq!((op, quantifier), (BinaryOperator::Eq, Quantifier::Any));
+	let (_, op, quantifier, array) = parsed("x <> ALL (ARRAY[1, 2])");
+	assert_eq!((op, quantifier), (BinaryOperator::NotEq, Quantifier::All));
+	assert!(matches!(*array, Expr::ArrayConstructor { .. }));
+	let (_, op, quantifier, _) = parsed("x < SOME (y)");
+	assert_eq!((op, quantifier), (BinaryOperator::Lt, Quantifier::Some));
+	// A subquery operand is still the subquery form.
+	assert!(matches!(parse_expr("x = ANY (SELECT 1)").unwrap(), Expr::Quantified { .. }));
+}
+
+#[test]
 fn test_a_based_integer_literal_that_does_not_fit_64_bits_is_refused() {
 	let beyond_a_double = format!("0x{}", "F".repeat(300));
 	for literal in [
@@ -546,5 +580,32 @@ fn test_a_json_operator_followed_by_a_negative_integer_is_one_operator_and_a_neg
 			),
 			"{sql}: {right:?}"
 		);
+	}
+}
+
+#[test]
+fn test_parse_qualified_star_with_keyword_qualifier() {
+	use surrealdb_pgsql::ast::stmt::Statement;
+	for (sql, expected) in [
+		("SELECT columns.* FROM information_schema.columns", vec!["columns", "*"]),
+		("SELECT t.*, key.* FROM t, key", vec!["t", "*"]),
+		("SELECT public.users.* FROM users", vec!["public", "users", "*"]),
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).expect(sql);
+		let Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		match &select.targets[0].expr {
+			Expr::ColumnRef(col) => assert_eq!(col.fields, expected, "{sql}"),
+			other => panic!("expected column reference, got {other:?}"),
+		}
+	}
+	let stmts = surrealdb_pgsql::parse_statements("SELECT t.*, key.* FROM t, key").unwrap();
+	let Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	match &select.targets[1].expr {
+		Expr::ColumnRef(col) => assert_eq!(col.fields, ["key", "*"]),
+		other => panic!("expected column reference, got {other:?}"),
 	}
 }

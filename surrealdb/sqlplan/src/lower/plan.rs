@@ -2,24 +2,24 @@
 
 use std::borrow::Cow;
 
-use surrealdb_expr::expr::BinaryOperator;
 use surrealdb_expr::expr::logical::{
-	EvalFrame, JoinKind, LogicalAggregate, LogicalDistinct, LogicalExpr, LogicalField,
-	LogicalFields, LogicalFilter, LogicalJoin, LogicalLimit, LogicalOp, LogicalOrdering,
-	LogicalProject, LogicalSort, LogicalSource, LogicalSubquery, LogicalUnionAll, LogicalValues,
-	OutputPath, RelationAlias, SourceRef,
+	EvalFrame, JoinKind, LogicalAggregate, LogicalCall, LogicalDistinct, LogicalExpr, LogicalField,
+	LogicalFields, LogicalFilter, LogicalIf, LogicalJoin, LogicalLimit, LogicalLiteral, LogicalOp,
+	LogicalOrdering, LogicalProject, LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery,
+	LogicalUnionAll, LogicalValues, OutputPath, RelationAlias, SourceRef,
 };
+use surrealdb_expr::expr::{BinaryOperator, Function};
 use surrealdb_strand::TableName;
 
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
-	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundOrder,
-	BoundSelect, BoundSetOpKind, BoundSetOperation, BoundTableSource, BoundTarget,
+	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundLiteral,
+	BoundOrder, BoundSelect, BoundSetOpKind, BoundSetOperation, BoundTableSource, BoundTarget,
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
-	lower_column_raw, lower_lookup_predicate,
+	lower_column_raw, lower_lookup_predicate, pg_bool_spelling,
 };
 use crate::lower::id_key::{id_column, is_key_or_link, key_of, record_of};
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
@@ -65,6 +65,437 @@ fn keyed_targets(targets: &[BoundTarget], keys: Option<Vec<String>>) -> Cow<'_, 
 	)
 }
 
+/// The hidden column a SELECT with set-returning `UNNEST` targets splits on.
+const UNNEST_COLUMN: &str = "__sql_unnest";
+
+/// A select-list target that is a bare set-returning call: its position, the array it reads and
+/// whether it yields the positions of the elements (`GENERATE_SUBSCRIPTS(array, 1)`) rather than
+/// the elements (`UNNEST(array)`).
+type SetReturningTarget<'a> = (usize, &'a BoundExpr, bool);
+
+/// The select-list targets that are a bare `UNNEST(array)` or `GENERATE_SUBSCRIPTS(array, 1)`, in
+/// order.
+fn unnest_targets(select: &BoundSelect) -> Vec<SetReturningTarget<'_>> {
+	select
+		.targets
+		.iter()
+		.enumerate()
+		.filter_map(|(index, target)| {
+			let BoundExpr::FunctionCall {
+				name,
+				args,
+				..
+			} = &target.expr
+			else {
+				return None;
+			};
+			if name == "unnest" && args.len() == 1 {
+				Some((index, &args[0], false))
+			} else if name == "generate_subscripts"
+				&& args.len() == 2
+				&& matches!(args[1], BoundExpr::Literal(BoundLiteral::Integer(1)))
+			{
+				Some((index, &args[0], true))
+			} else {
+				None
+			}
+		})
+		.collect()
+}
+
+/// The values a set-returning call over `argument` advances through: the elements of the array,
+/// or their positions from one. An argument that is not an array has none.
+fn set_returning_values(
+	argument: &BoundExpr,
+	positions: bool,
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	let array = lower_bound_expr(argument, policy)?;
+	let elements = if positions {
+		// The first position of an array is one; a vector column of the catalog is numbered
+		// from zero.
+		let first = i64::from(!matches!(
+			argument,
+			BoundExpr::Column(BoundColumnRef {
+				declared_type: crate::SqlType::Int2Vector | crate::SqlType::OidVector,
+				..
+			})
+		));
+		LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("array::range".to_string()),
+			args: vec![
+				LogicalExpr::Literal(LogicalLiteral::Integer(first)),
+				LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal("array::len".to_string()),
+						args: vec![array.clone()],
+					}))),
+					op: BinaryOperator::Add,
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(first))),
+				},
+			],
+		}))
+	} else {
+		array.clone()
+	};
+	Ok(LogicalExpr::If(Box::new(LogicalIf {
+		branches: vec![(
+			LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("type::is_array".to_string()),
+				args: vec![array],
+			})),
+			elements,
+		)],
+		otherwise: Some(LogicalExpr::Array(Vec::new())),
+	})))
+}
+
+/// Expand each row of `op` into one row per element of the arrays `unnested` names.
+///
+/// Several set-returning targets of one select list advance together, as PostgreSQL evaluates
+/// them: row `i` carries element `i` of every array, and a shorter array is padded with NULL up
+/// to the longest. The arrays are zipped into the hidden [`UNNEST_COLUMN`] and the rows are split
+/// on it. A split reads the column of the projected row it names, so the projection that carries
+/// the column and the split form a pipeline of their own, and each target then reads its position
+/// of the column from the rows it delivers ([`unnested_field`]). An argument that is not an array
+/// has no elements.
+fn split_unnested(
+	op: LogicalOp,
+	unnested: &[SetReturningTarget<'_>],
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	let mut arrays = Vec::with_capacity(unnested.len());
+	for (_, argument, positions) in unnested {
+		arrays.push(set_returning_values(argument, *positions, policy)?);
+	}
+	let zipped = match <[LogicalExpr; 1]>::try_from(arrays) {
+		Ok([array]) => array,
+		Err(arrays) => LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal("array::transpose".to_string()),
+			args: vec![LogicalExpr::Array(arrays)],
+		})),
+	};
+	let with_column = LogicalOp::Project(LogicalProject {
+		input: Box::new(op),
+		fields: LogicalFields::Select(vec![
+			LogicalField::All,
+			LogicalField::user(zipped, Some(OutputPath::field(UNNEST_COLUMN.to_owned()))),
+		]),
+		omit: vec![],
+	});
+	Ok(LogicalOp::Subquery(LogicalSubquery {
+		input: Box::new(LogicalOp::Split(LogicalSplit {
+			input: Box::new(with_column),
+			exprs: vec![LogicalExpr::Field(UNNEST_COLUMN.into())],
+		})),
+	}))
+}
+
+/// The projected field of the `slot`-th of `count` `UNNEST` targets after [`split_unnested`].
+fn unnested_field(target: &BoundTarget, slot: usize, count: usize) -> LogicalField {
+	let column = LogicalExpr::Field(UNNEST_COLUMN.into());
+	let element = if count == 1 {
+		column
+	} else {
+		LogicalExpr::Index {
+			base: Box::new(column),
+			index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(slot as i64))),
+		}
+	};
+	let alias = target.alias.clone().unwrap_or_else(|| "unnest".to_owned());
+	LogicalField::user(element, Some(OutputPath::field(alias)))
+}
+
+/// A set-returning call in the target of a `LATERAL` subquery.
+enum SetReturning<'a> {
+	/// `UNNEST(array)`: the elements of the array.
+	Unnest(&'a BoundExpr),
+	/// `GENERATE_SUBSCRIPTS(array, 1)`: the positions of the elements, from one.
+	Subscripts(&'a BoundExpr),
+}
+
+/// The hidden column of the `slot`-th set-returning call of the lateral relation `alias_idx`.
+fn lateral_slot(alias_idx: usize, slot: usize) -> String {
+	format!("__lateral{alias_idx}_{slot}")
+}
+
+/// `expr` with each set-returning call it holds replaced by the hidden column that carries the
+/// element of the call, which `calls` collects in order. Such a call may stand in an expression
+/// over other values, as in `GENERATE_SUBSCRIPTS(a, 1) + 1`; it may not stand under a call that is
+/// not an operator or a cast.
+fn replace_set_returning<'a>(
+	expr: &'a BoundExpr,
+	alias_idx: usize,
+	calls: &mut Vec<SetReturning<'a>>,
+) -> Result<BoundExpr, PlanError> {
+	let slot_column = |slot: usize| {
+		BoundExpr::Column(BoundColumnRef {
+			relation_index: 0,
+			relation_name: String::new(),
+			column: lateral_slot(alias_idx, slot),
+			declared_type: crate::SqlType::Unknown,
+			correlation_depth: 0,
+			id_table: None,
+			link_table: None,
+			aggregate_output: false,
+			also_in: Vec::new(),
+		})
+	};
+	match expr {
+		BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		} if name == "unnest" && args.len() == 1 => {
+			calls.push(SetReturning::Unnest(&args[0]));
+			Ok(slot_column(calls.len() - 1))
+		}
+		BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		} if name == "generate_subscripts"
+			&& matches!(args.get(1), Some(BoundExpr::Literal(BoundLiteral::Integer(1))))
+			&& args.len() == 2 =>
+		{
+			calls.push(SetReturning::Subscripts(&args[0]));
+			Ok(slot_column(calls.len() - 1))
+		}
+		BoundExpr::Binary {
+			left,
+			op,
+			right,
+		} => Ok(BoundExpr::Binary {
+			left: Box::new(replace_set_returning(left, alias_idx, calls)?),
+			op: *op,
+			right: Box::new(replace_set_returning(right, alias_idx, calls)?),
+		}),
+		BoundExpr::Unary {
+			op,
+			expr,
+		} => Ok(BoundExpr::Unary {
+			op: *op,
+			expr: Box::new(replace_set_returning(expr, alias_idx, calls)?),
+		}),
+		BoundExpr::Cast {
+			expr,
+			target_type,
+		} => Ok(BoundExpr::Cast {
+			expr: Box::new(replace_set_returning(expr, alias_idx, calls)?),
+			target_type: target_type.clone(),
+		}),
+		other @ (BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::FunctionCall {
+			..
+		}
+		| BoundExpr::Case {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		}) => {
+			if contains_set_returning(other) {
+				return Err(PlanError::UnsupportedExpression(
+					"a set-returning call under a function in a LATERAL target".into(),
+				));
+			}
+			Ok(other.clone())
+		}
+	}
+}
+
+/// Whether `expr` holds an `UNNEST` or `GENERATE_SUBSCRIPTS` call.
+fn contains_set_returning(expr: &BoundExpr) -> bool {
+	match expr {
+		BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		} => {
+			name == "unnest"
+				|| name == "generate_subscripts"
+				|| args.iter().any(contains_set_returning)
+		}
+		BoundExpr::Binary {
+			left,
+			right,
+			..
+		} => contains_set_returning(left) || contains_set_returning(right),
+		BoundExpr::Unary {
+			expr,
+			..
+		}
+		| BoundExpr::Cast {
+			expr,
+			..
+		} => contains_set_returning(expr),
+		BoundExpr::Case {
+			operand,
+			branches,
+			else_expr,
+		} => {
+			operand.as_deref().is_some_and(contains_set_returning)
+				|| branches.iter().any(|(when, then)| {
+					contains_set_returning(when) || contains_set_returning(then)
+				}) || else_expr.as_deref().is_some_and(contains_set_returning)
+		}
+		BoundExpr::Literal(_)
+		| BoundExpr::Column(_)
+		| BoundExpr::Access {
+			..
+		}
+		| BoundExpr::Param {
+			..
+		}
+		| BoundExpr::Between {
+			..
+		}
+		| BoundExpr::InList {
+			..
+		}
+		| BoundExpr::IsNull {
+			..
+		}
+		| BoundExpr::ScalarSubquery(_)
+		| BoundExpr::Exists(_)
+		| BoundExpr::InSubquery {
+			..
+		}
+		| BoundExpr::ArraySubquery(_)
+		| BoundExpr::WindowFunction {
+			..
+		}
+		| BoundExpr::UserVar(_)
+		| BoundExpr::SystemVar {
+			..
+		} => false,
+	}
+}
+
+/// Extend each row of `left` with the lateral relation `alias_idx` whose columns are `targets`.
+///
+/// The relation's columns are the fields of one object under the alias of the join, as a joined
+/// relation's are. A set-returning call in a target yields one row of the relation for each of its
+/// elements: the calls advance together, as in a select list, so row `i` carries element `i` of
+/// every call and a shorter call is padded with NULL. The arrays the calls name are zipped into a
+/// hidden column the rows are split on, and each call then reads its position of that column. An
+/// argument that is not an array has no elements, and a row of `left` with no element is dropped.
+fn lower_lateral(
+	left: LogicalOp,
+	targets: &[BoundTarget],
+	alias_idx: usize,
+	policy: &DialectPolicy,
+) -> Result<LogicalOp, PlanError> {
+	let alias = RelationAlias::new(alias_idx);
+	let mut calls = Vec::new();
+	let replaced = targets
+		.iter()
+		.map(|target| replace_set_returning(&target.expr, alias_idx, &mut calls))
+		.collect::<Result<Vec<_>, _>>()?;
+	let mut op = left;
+	if !calls.is_empty() {
+		let mut arrays = Vec::with_capacity(calls.len());
+		for call in &calls {
+			let (argument, positions) = match call {
+				SetReturning::Unnest(argument) => (argument, false),
+				SetReturning::Subscripts(argument) => (argument, true),
+			};
+			arrays.push(set_returning_values(argument, positions, policy)?);
+		}
+		let count = arrays.len();
+		let zipped = match <[LogicalExpr; 1]>::try_from(arrays) {
+			Ok([array]) => array,
+			Err(arrays) => LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("array::transpose".to_string()),
+				args: vec![LogicalExpr::Array(arrays)],
+			})),
+		};
+		let hidden = format!("__lateral{alias_idx}");
+		let with_column = LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Select(vec![
+				LogicalField::All,
+				LogicalField::user(zipped, Some(OutputPath::field(hidden.clone()))),
+			]),
+			omit: vec![],
+		});
+		let split = LogicalOp::Subquery(LogicalSubquery {
+			input: Box::new(LogicalOp::Split(LogicalSplit {
+				input: Box::new(with_column),
+				exprs: vec![LogicalExpr::Field(hidden.clone().into())],
+			})),
+		});
+		let mut fields = vec![LogicalField::All];
+		for slot in 0..count {
+			let column = LogicalExpr::Field(hidden.as_str().into());
+			let element = if count == 1 {
+				column
+			} else {
+				LogicalExpr::Index {
+					base: Box::new(column),
+					index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(slot as i64))),
+				}
+			};
+			fields.push(LogicalField::user(
+				element,
+				Some(OutputPath::field(lateral_slot(alias_idx, slot))),
+			));
+		}
+		// A projection does not read a projection, so each one is a subquery of its own.
+		op = LogicalOp::Subquery(LogicalSubquery {
+			input: Box::new(LogicalOp::Project(LogicalProject {
+				input: Box::new(split),
+				fields: LogicalFields::Select(fields),
+				omit: vec![],
+			})),
+		});
+	}
+	let mut members = Vec::with_capacity(targets.len());
+	for (target, expr) in targets.iter().zip(&replaced) {
+		let name = target.alias.clone().unwrap_or_default();
+		members.push((name, lower_bound_expr(expr, policy)?));
+	}
+	Ok(LogicalOp::Subquery(LogicalSubquery {
+		input: Box::new(LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Select(vec![
+				LogicalField::All,
+				LogicalField::user(
+					LogicalExpr::Object(members),
+					Some(OutputPath::field(alias.name().as_str().to_owned())),
+				),
+			]),
+			omit: vec![],
+		})),
+	}))
+}
+
 fn lower_bound_select_internal(
 	select: &BoundSelect,
 	as_value: bool,
@@ -94,6 +525,7 @@ fn lower_bound_select_internal(
 				&mut join_counter,
 				policy,
 				&select.user_tables,
+				select.database.as_deref().unwrap_or("test"),
 			)?
 		}
 	};
@@ -126,6 +558,16 @@ fn lower_bound_select_internal(
 	let has_order_agg = select.order_by.iter().any(|o| bound_expr_contains_aggregate(&o.expr));
 	let is_aggregate =
 		grouped || has_aggregates || has_having_agg || has_order_agg || select.having.is_some();
+
+	let unnested = unnest_targets(select);
+	if !unnested.is_empty() {
+		if is_aggregate {
+			return Err(PlanError::UnsupportedExpression(
+				"UNNEST in the select list of an aggregate query".into(),
+			));
+		}
+		op = split_unnested(op, &unnested, policy)?;
+	}
 
 	// The select is read by position only if it is asked to be and its columns are all listed;
 	// the queries of its set operations are read the same way.
@@ -256,7 +698,11 @@ fn lower_bound_select_internal(
 	} else {
 		let mut lowered = aggregate_targets
 			.iter()
-			.map(|t| lower_bound_target(t, policy))
+			.enumerate()
+			.map(|(index, t)| match unnested.iter().position(|(at, ..)| *at == index) {
+				Some(slot) => Ok(unnested_field(t, slot, unnested.len())),
+				None => lower_bound_target(t, policy),
+			})
 			.collect::<Result<Vec<_>, _>>()?;
 		if !is_aggregate && sole_base_table(select).is_some() {
 			let last_wildcard =
@@ -975,6 +1421,7 @@ fn lower_table_source(
 	join_counter: &mut usize,
 	policy: &DialectPolicy,
 	user_tables: &[crate::catalog::TableSchema],
+	database: &str,
 ) -> Result<LogicalOp, PlanError> {
 	match source {
 		BoundTableSource::Values => Ok(LogicalOp::Values(LogicalValues {
@@ -987,9 +1434,12 @@ fn lower_table_source(
 			schema,
 			..
 		} => {
-			if let Some(rows) =
-				crate::catalog::system::get_system_table_rows(schema.as_deref(), name, user_tables)
-			{
+			if let Some(rows) = crate::catalog::system::get_system_table_rows(
+				schema.as_deref(),
+				name,
+				user_tables,
+				database,
+			) {
 				return Ok(LogicalOp::Values(LogicalValues {
 					expr: LogicalExpr::Array(rows),
 					for_update,
@@ -1003,6 +1453,11 @@ fn lower_table_source(
 				for_update,
 			}))
 		}
+		BoundTableSource::Lateral {
+			..
+		} => Err(PlanError::UnsupportedStatement(
+			"a LATERAL subquery that is not joined to a relation on its left".into(),
+		)),
 		BoundTableSource::Subquery {
 			query,
 			..
@@ -1018,9 +1473,42 @@ fn lower_table_source(
 			right,
 			condition,
 		} => {
-			let left_op = lower_table_source(left, for_update, join_counter, policy, user_tables)?;
+			if let BoundTableSource::Lateral {
+				targets,
+				..
+			} = right.as_ref()
+			{
+				if !matches!(join_type, BoundJoinType::Inner | BoundJoinType::Cross) {
+					return Err(PlanError::UnsupportedStatement(format!(
+						"{join_type:?} join of a LATERAL subquery"
+					)));
+				}
+				let left_op = lower_table_source(
+					left,
+					for_update,
+					join_counter,
+					policy,
+					user_tables,
+					database,
+				)?;
+				let alias_idx = *join_counter;
+				*join_counter += 1;
+				let op = lower_lateral(left_op, targets, alias_idx, policy)?;
+				return match condition {
+					None => Ok(op),
+					Some(BoundJoinCondition::On(expr)) => Ok(LogicalOp::Filter(LogicalFilter {
+						input: Box::new(op),
+						predicate: lower_where(expr, policy)?,
+					})),
+					Some(BoundJoinCondition::Using(_)) => Err(PlanError::UnsupportedStatement(
+						"USING on a join of a LATERAL subquery".into(),
+					)),
+				};
+			}
+			let left_op =
+				lower_table_source(left, for_update, join_counter, policy, user_tables, database)?;
 			let right_op =
-				lower_table_source(right, for_update, join_counter, policy, user_tables)?;
+				lower_table_source(right, for_update, join_counter, policy, user_tables, database)?;
 
 			let kind = match join_type {
 				BoundJoinType::Inner | BoundJoinType::Cross => JoinKind::Inner,
@@ -1045,7 +1533,27 @@ fn lower_table_source(
 						let mut residual = Vec::new();
 						extract_equi_conditions(expr, &mut equi_pairs, &mut residual);
 
+						// An equality that compares columns of the left input with each other is
+						// not a key of the join but a condition on it: a row of the left
+						// input that fails it still appears in a left join, with the right
+						// input's columns null.
 						for (l, r) in equi_pairs {
+							let is_constant = |expr: &BoundExpr| {
+								matches!(expr, BoundExpr::Literal(_) | BoundExpr::Param { .. })
+							};
+							let within_left = !is_constant(&l)
+								&& !is_constant(&r) && matches!(
+								(expr_max_relation_index(&l), expr_max_relation_index(&r)),
+								(Some(l_max), Some(r_max)) if l_max <= alias_idx && r_max <= alias_idx
+							);
+							if within_left {
+								residual.push(BoundExpr::Binary {
+									left: Box::new(l),
+									op: BoundBinaryOp::Equal,
+									right: Box::new(r),
+								});
+								continue;
+							}
 							match probe_is_right(&l, &r, alias_idx) {
 								Some(swap) => {
 									let (probe, build) = if swap {
@@ -1276,6 +1784,9 @@ fn base_table_of(source: &BoundTableSource) -> Option<&str> {
 		| BoundTableSource::Subquery {
 			..
 		}
+		| BoundTableSource::Lateral {
+			..
+		}
 		| BoundTableSource::Join {
 			..
 		}
@@ -1299,6 +1810,9 @@ fn leftmost_base_table(source: &BoundTableSource) -> Option<&str> {
 			..
 		}
 		| other @ BoundTableSource::Subquery {
+			..
+		}
+		| other @ BoundTableSource::Lateral {
 			..
 		}
 		| other @ BoundTableSource::Values => base_table_of(other),
@@ -1407,11 +1921,13 @@ fn extract_equi_conditions(
 			extract_equi_conditions(left, on, residual);
 			extract_equi_conditions(right, on, residual);
 		}
+		// A literal that spells a boolean is read as the type of the other side, which a key
+		// comparison of the two values would not do.
 		BoundExpr::Binary {
 			left,
 			op: BoundBinaryOp::Equal,
 			right,
-		} => {
+		} if pg_bool_spelling(left).is_none() && pg_bool_spelling(right).is_none() => {
 			on.push((*left.clone(), *right.clone()));
 		}
 		other @ (BoundExpr::Literal(_)

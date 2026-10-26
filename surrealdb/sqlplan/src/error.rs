@@ -86,6 +86,12 @@ pub enum PlanError {
 	#[error("unrecognized configuration parameter \"{0}\"")]
 	UndefinedObject(String),
 
+	#[error("constraint \"{constraint}\" of relation \"{table}\" does not exist")]
+	UndefinedConstraint {
+		constraint: String,
+		table: String,
+	},
+
 	#[error("invalid parameter value: {0}")]
 	InvalidParameterValue(String),
 
@@ -146,7 +152,10 @@ impl PlanError {
 			Self::InFailedTransaction => "25P02", // in_failed_sql_transaction
 			Self::SavepointDoesNotExist(_) => "3B001", // invalid_savepoint_specification
 			Self::ActiveTransactionAlreadyInProgress => "25001", // active_sql_transaction
-			Self::UndefinedObject(_) => "42704",  // undefined_object
+			Self::UndefinedObject(_)
+			| Self::UndefinedConstraint {
+				..
+			} => "42704", // undefined_object
 			Self::InvalidParameterValue(_) => "22023", // invalid_parameter_value
 			Self::DataException(_) => "22000",    // data_exception
 			Self::ProgramLimitExceeded(_) => "54000", // program_limit_exceeded
@@ -187,6 +196,9 @@ impl PlanError {
 			Self::SavepointDoesNotExist(_) => 1305, // ER_SP_DOES_NOT_EXIST
 			Self::ActiveTransactionAlreadyInProgress => 1105, // ER_UNKNOWN_ERROR
 			Self::UndefinedObject(_) => 1193,       // ER_UNKNOWN_SYSTEM_VARIABLE
+			Self::UndefinedConstraint {
+				..
+			} => 1091, // ER_CANT_DROP_FIELD_OR_KEY
 			Self::InvalidParameterValue(_) => 1210, // ER_WRONG_ARGUMENTS
 			Self::DataException(_)
 			| Self::ProgramLimitExceeded(_)

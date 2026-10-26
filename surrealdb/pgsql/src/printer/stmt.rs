@@ -15,8 +15,8 @@ use crate::ast::stmt::{
 	CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType,
 	DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition,
 	JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
-	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
-	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
+	OnConflictClause, PrepareStmt, ReferentialAction, ResTarget, ResetStmt, SelectStmt, SetClause,
+	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
 	TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
@@ -133,10 +133,14 @@ impl ToPgSql for TableRef {
 				Ok(())
 			}
 			Self::Subquery {
+				lateral,
 				query,
 				alias,
 				..
 			} => {
+				if *lateral {
+					f.write_str("LATERAL ")?;
+				}
 				f.write_str("(")?;
 				query.to_pgsql(f)?;
 				f.write_str(")")?;
@@ -619,6 +623,7 @@ impl ToPgSql for ColumnConstraint {
 			Self::References {
 				table,
 				column,
+				on_delete,
 			} => {
 				f.write_str("REFERENCES ")?;
 				table.to_pgsql(f)?;
@@ -627,7 +632,7 @@ impl ToPgSql for ColumnConstraint {
 					print_ident(f, col)?;
 					f.write_str(")")?;
 				}
-				Ok(())
+				write_on_delete(f, *on_delete)
 			}
 		}
 	}
@@ -673,6 +678,7 @@ impl ToPgSql for TableConstraint {
 				columns,
 				ref_table,
 				ref_columns,
+				on_delete,
 			} => {
 				f.write_str("FOREIGN KEY (")?;
 				for (i, col) in columns.iter().enumerate() {
@@ -693,10 +699,19 @@ impl ToPgSql for TableConstraint {
 					}
 					f.write_str(")")?;
 				}
-				Ok(())
+				write_on_delete(f, *on_delete)
 			}
 		}
 	}
+}
+
+/// Writes ` ON DELETE <action>` unless the action is the default.
+fn write_on_delete(f: &mut fmt::Formatter<'_>, action: ReferentialAction) -> fmt::Result {
+	if action == ReferentialAction::NoAction {
+		return Ok(());
+	}
+	f.write_str(" ON DELETE ")?;
+	f.write_str(action.sql())
 }
 
 impl ToPgSql for CreateTableStmt {

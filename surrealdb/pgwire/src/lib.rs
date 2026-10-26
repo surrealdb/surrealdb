@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 #[macro_use]
 extern crate tracing;
 
+mod advisory;
 pub mod conn;
 mod copy;
 pub mod encode;
@@ -137,6 +138,7 @@ async fn accept_loop(
 ) {
 	let limiter = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 	let registry: Arc<CancelRegistry> = Arc::new(DashMap::new());
+	let advisory_locks = Arc::new(advisory::AdvisoryLocks::default());
 	loop {
 		tokio::select! {
 			biased;
@@ -163,6 +165,7 @@ async fn accept_loop(
 						shutdown.clone(),
 						permit,
 						Arc::clone(&registry),
+						Arc::clone(&advisory_locks),
 						pid,
 						secret,
 						acceptor.clone(),

@@ -18,7 +18,7 @@
       "orm": "prisma",
       "name": "connect and driver round-trip",
       "status": "pass",
-      "ms": 18,
+      "ms": 16,
       "sql": [
         "SELECT 1 AS n"
       ]
@@ -27,7 +27,7 @@
       "orm": "prisma",
       "name": "ORM initialization",
       "status": "pass",
-      "ms": 35,
+      "ms": 34,
       "sql": []
     },
     {
@@ -43,7 +43,7 @@
       "orm": "prisma",
       "name": "select scalar values",
       "status": "pass",
-      "ms": 37,
+      "ms": 36,
       "sql": [
         "SELECT \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\" FROM \"public\".\"CompatUser\" WHERE (\"public\".\"CompatUser\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3"
       ]
@@ -52,7 +52,7 @@
       "orm": "prisma",
       "name": "filter/order/pagination",
       "status": "pass",
-      "ms": 35,
+      "ms": 33,
       "sql": [
         "SELECT \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\" FROM \"public\".\"CompatUser\" WHERE \"public\".\"CompatUser\".\"age\" >= $1 ORDER BY \"public\".\"CompatUser\".\"id\" DESC LIMIT $2 OFFSET $3"
       ]
@@ -70,7 +70,7 @@
       "orm": "prisma",
       "name": "delete affected rows",
       "status": "pass",
-      "ms": 37,
+      "ms": 36,
       "sql": [
         "DELETE FROM \"public\".\"CompatUser\" WHERE \"public\".\"CompatUser\".\"id\" = $1",
         "SELECT id FROM \"CompatUser\" WHERE id = 2"
@@ -80,7 +80,7 @@
       "orm": "prisma",
       "name": "transaction commit",
       "status": "pass",
-      "ms": 37,
+      "ms": 35,
       "sql": [
         "BEGIN",
         "UPDATE \"public\".\"CompatUser\" SET \"age\" = $1 WHERE (\"public\".\"CompatUser\".\"id\" = $2 AND 1=1) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
@@ -92,7 +92,7 @@
       "orm": "prisma",
       "name": "transaction rollback",
       "status": "pass",
-      "ms": 39,
+      "ms": 36,
       "sql": [
         "BEGIN",
         "UPDATE \"public\".\"CompatUser\" SET \"age\" = $1 WHERE (\"public\".\"CompatUser\".\"id\" = $2 AND 1=1) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
@@ -104,7 +104,7 @@
       "orm": "prisma",
       "name": "relations",
       "status": "pass",
-      "ms": 36,
+      "ms": 35,
       "sql": [
         "SELECT \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\" FROM \"public\".\"CompatUser\" WHERE (\"public\".\"CompatUser\".\"id\" = $1 AND 1=1) LIMIT $2 OFFSET $3",
         "SELECT \"public\".\"CompatPost\".\"id\", \"public\".\"CompatPost\".\"title\", \"public\".\"CompatPost\".\"authorId\" FROM \"public\".\"CompatPost\" WHERE \"public\".\"CompatPost\".\"authorId\" = $1 OFFSET $2"
@@ -114,7 +114,7 @@
       "orm": "prisma",
       "name": "aggregate/group",
       "status": "pass",
-      "ms": 32,
+      "ms": 29,
       "sql": [
         "SELECT COUNT(*) AS \"_count$_all\", \"public\".\"CompatUser\".\"active\" FROM \"public\".\"CompatUser\" WHERE 1=1 GROUP BY \"public\".\"CompatUser\".\"active\" ORDER BY \"public\".\"CompatUser\".\"active\" ASC OFFSET $1"
       ]
@@ -123,7 +123,7 @@
       "orm": "prisma",
       "name": "upsert",
       "status": "pass",
-      "ms": 57,
+      "ms": 54,
       "sql": [
         "INSERT INTO \"public\".\"CompatUser\" (\"id\",\"name\",\"age\",\"active\") VALUES ($1,$2,$3,$4) ON CONFLICT (\"id\") DO UPDATE SET \"age\" = $5 WHERE (\"public\".\"CompatUser\".\"id\" = $6 AND 1=1) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
         "SELECT age FROM \"CompatUser\" WHERE id = 1"
@@ -133,7 +133,7 @@
       "orm": "prisma",
       "name": "complex values",
       "status": "pass",
-      "ms": 28,
+      "ms": 25,
       "sql": [
         "CREATE TABLE IF NOT EXISTS \"CompatValue\" (id integer PRIMARY KEY,payload jsonb NOT NULL,tags text[] NOT NULL,amount numeric(10,2) NOT NULL,\"createdAt\" timestamptz(3) NOT NULL)",
         "DELETE FROM \"CompatValue\"",
@@ -144,7 +144,7 @@
       "orm": "prisma",
       "name": "generated ids",
       "status": "pass",
-      "ms": 14,
+      "ms": 15,
       "sql": [
         "CREATE TABLE IF NOT EXISTS \"CompatGenerated\" (id serial PRIMARY KEY,name text NOT NULL)",
         "INSERT INTO \"public\".\"CompatGenerated\" (\"name\") VALUES ($1) RETURNING \"public\".\"CompatGenerated\".\"id\", \"public\".\"CompatGenerated\".\"name\""
@@ -154,7 +154,7 @@
       "orm": "prisma",
       "name": "duplicate primary key",
       "status": "pass",
-      "ms": 47,
+      "ms": 46,
       "sql": [
         "INSERT INTO \"public\".\"CompatUser\" (\"id\",\"name\",\"age\",\"active\") VALUES ($1,$2,$3,$4) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
         "SELECT name FROM \"CompatUser\" WHERE id=1"
@@ -182,7 +182,7 @@
       "orm": "drizzle",
       "name": "insert returning",
       "status": "pass",
-      "ms": 32,
+      "ms": 31,
       "sql": [
         "insert into \"CompatUser\" (\"id\", \"name\", \"age\", \"active\", \"nickname\") values ($1, $2, $3, $4, $5) returning \"id\", \"name\", \"age\", \"active\", \"nickname\""
       ]
@@ -191,7 +191,7 @@
       "orm": "drizzle",
       "name": "select scalar values",
       "status": "pass",
-      "ms": 30,
+      "ms": 28,
       "sql": [
         "select \"id\", \"name\", \"age\", \"active\", \"nickname\" from \"CompatUser\" where \"CompatUser\".\"id\" = $1"
       ]
@@ -209,7 +209,7 @@
       "orm": "drizzle",
       "name": "update returning",
       "status": "pass",
-      "ms": 34,
+      "ms": 32,
       "sql": [
         "update \"CompatUser\" set \"age\" = $1, \"nickname\" = $2 where \"CompatUser\".\"id\" = $3 returning \"id\", \"name\", \"age\", \"active\", \"nickname\""
       ]
@@ -218,7 +218,7 @@
       "orm": "drizzle",
       "name": "delete affected rows",
       "status": "pass",
-      "ms": 37,
+      "ms": 36,
       "sql": [
         "delete from \"CompatUser\" where \"CompatUser\".\"id\" = $1",
         "SELECT id FROM \"CompatUser\" WHERE id = 2"
@@ -228,7 +228,7 @@
       "orm": "drizzle",
       "name": "transaction commit",
       "status": "pass",
-      "ms": 35,
+      "ms": 32,
       "sql": [
         "begin",
         "update \"CompatUser\" set \"age\" = $1 where \"CompatUser\".\"id\" = $2",
@@ -240,7 +240,7 @@
       "orm": "drizzle",
       "name": "transaction rollback",
       "status": "pass",
-      "ms": 35,
+      "ms": 34,
       "sql": [
         "begin",
         "update \"CompatUser\" set \"age\" = $1 where \"CompatUser\".\"id\" = $2",
@@ -252,7 +252,7 @@
       "orm": "drizzle",
       "name": "relations",
       "status": "pass",
-      "ms": 33,
+      "ms": 31,
       "sql": [
         "select \"CompatUser\".\"name\", \"CompatPost\".\"title\" from \"CompatUser\" inner join \"CompatPost\" on \"CompatUser\".\"id\" = \"CompatPost\".\"authorId\" where \"CompatUser\".\"id\" = $1 order by \"CompatPost\".\"id\""
       ]
@@ -261,7 +261,7 @@
       "orm": "drizzle",
       "name": "aggregate/group",
       "status": "pass",
-      "ms": 28,
+      "ms": 26,
       "sql": [
         "select \"active\", count(*) from \"CompatUser\" group by \"CompatUser\".\"active\" order by \"CompatUser\".\"active\""
       ]
@@ -270,7 +270,7 @@
       "orm": "drizzle",
       "name": "upsert",
       "status": "pass",
-      "ms": 33,
+      "ms": 32,
       "sql": [
         "insert into \"CompatUser\" (\"id\", \"name\", \"age\", \"active\", \"nickname\") values ($1, $2, $3, $4, default) on conflict (\"id\") do update set \"age\" = $5",
         "SELECT age FROM \"CompatUser\" WHERE id = 1"
@@ -291,7 +291,7 @@
       "orm": "drizzle",
       "name": "generated ids",
       "status": "fail",
-      "ms": 13,
+      "ms": 14,
       "error": {
         "name": "AssertionError",
         "code": "ERR_ASSERTION",
@@ -306,7 +306,7 @@
       "orm": "drizzle",
       "name": "duplicate primary key",
       "status": "pass",
-      "ms": 34,
+      "ms": 31,
       "sql": [
         "insert into \"CompatUser\" (\"id\", \"name\", \"age\", \"active\", \"nickname\") values ($1, $2, $3, $4, default)",
         "SELECT name FROM \"CompatUser\" WHERE id=1"
@@ -325,7 +325,7 @@
       "orm": "typeorm",
       "name": "ORM initialization",
       "status": "pass",
-      "ms": 7,
+      "ms": 8,
       "sql": [
         "SELECT version()",
         "SELECT * FROM current_schema()"
@@ -335,7 +335,7 @@
       "orm": "typeorm",
       "name": "insert returning",
       "status": "pass",
-      "ms": 33,
+      "ms": 32,
       "sql": [
         "INSERT INTO \"CompatUser\"(\"id\", \"name\", \"age\", \"active\", \"nickname\") VALUES ($1, $2, $3, $4, $5) RETURNING \"name\", \"id\", \"active\", \"age\""
       ]
@@ -344,7 +344,7 @@
       "orm": "typeorm",
       "name": "select scalar values",
       "status": "pass",
-      "ms": 32,
+      "ms": 30,
       "sql": [
         "SELECT \"CompatUser\".\"id\" AS \"CompatUser_id\", \"CompatUser\".\"name\" AS \"CompatUser_name\", \"CompatUser\".\"age\" AS \"CompatUser_age\", \"CompatUser\".\"active\" AS \"CompatUser_active\", \"CompatUser\".\"nickname\" AS \"CompatUser_nickname\" FROM \"CompatUser\" \"CompatUser\" WHERE ((\"CompatUser\".\"id\" = $1)) LIMIT 1"
       ]
@@ -353,7 +353,7 @@
       "orm": "typeorm",
       "name": "filter/order/pagination",
       "status": "pass",
-      "ms": 31,
+      "ms": 28,
       "sql": [
         "SELECT \"u\".\"id\" AS \"u_id\", \"u\".\"name\" AS \"u_name\", \"u\".\"age\" AS \"u_age\", \"u\".\"active\" AS \"u_active\", \"u\".\"nickname\" AS \"u_nickname\" FROM \"CompatUser\" \"u\" WHERE \"u\".\"age\" >= $1 ORDER BY \"u\".\"id\" DESC LIMIT 1 OFFSET 1"
       ]
@@ -362,7 +362,7 @@
       "orm": "typeorm",
       "name": "update returning",
       "status": "pass",
-      "ms": 35,
+      "ms": 32,
       "sql": [
         "UPDATE \"CompatUser\" SET \"age\" = $1, \"nickname\" = $2 WHERE \"id\" = $3 RETURNING \"nickname\", \"id\", \"age\""
       ]
@@ -371,7 +371,7 @@
       "orm": "typeorm",
       "name": "delete affected rows",
       "status": "pass",
-      "ms": 49,
+      "ms": 36,
       "sql": [
         "DELETE FROM \"CompatUser\" WHERE \"id\" = $1",
         "SELECT id FROM \"CompatUser\" WHERE id = 2"
@@ -381,7 +381,7 @@
       "orm": "typeorm",
       "name": "transaction commit",
       "status": "pass",
-      "ms": 67,
+      "ms": 33,
       "sql": [
         "START TRANSACTION",
         "UPDATE \"CompatUser\" SET \"age\" = $1 WHERE \"id\" = $2",
@@ -393,7 +393,7 @@
       "orm": "typeorm",
       "name": "transaction rollback",
       "status": "pass",
-      "ms": 42,
+      "ms": 33,
       "sql": [
         "START TRANSACTION",
         "UPDATE \"CompatUser\" SET \"age\" = $1 WHERE \"id\" = $2",
@@ -405,7 +405,7 @@
       "orm": "typeorm",
       "name": "relations",
       "status": "fail",
-      "ms": 50,
+      "ms": 48,
       "error": {
         "name": "TypeError",
         "message": "Cannot read properties of null (reading 'posts')"
@@ -423,7 +423,7 @@
       "orm": "typeorm",
       "name": "aggregate/group",
       "status": "pass",
-      "ms": 29,
+      "ms": 27,
       "sql": [
         "SELECT \"u\".\"active\" AS \"active\", COUNT(*) AS \"n\" FROM \"CompatUser\" \"u\" GROUP BY \"u\".\"active\" ORDER BY \"u\".\"active\" ASC"
       ]
@@ -432,7 +432,7 @@
       "orm": "typeorm",
       "name": "upsert",
       "status": "pass",
-      "ms": 35,
+      "ms": 32,
       "sql": [
         "INSERT INTO \"CompatUser\"(\"id\", \"name\", \"age\", \"active\", \"nickname\") VALUES ($1, $2, $3, $4, DEFAULT) ON CONFLICT ( \"id\" ) DO UPDATE SET \"id\" = EXCLUDED.\"id\", \"name\" = EXCLUDED.\"name\", \"age\" = EXCLUDED.\"age\", \"active\" = EXCLUDED.\"active\"",
         "SELECT age FROM \"CompatUser\" WHERE id = 1"
@@ -442,7 +442,7 @@
       "orm": "typeorm",
       "name": "complex values",
       "status": "pass",
-      "ms": 25,
+      "ms": 23,
       "sql": [
         "CREATE TABLE IF NOT EXISTS \"CompatValue\" (id integer PRIMARY KEY,payload jsonb NOT NULL,tags text[] NOT NULL,amount numeric(10,2) NOT NULL,\"createdAt\" timestamptz(3) NOT NULL)",
         "DELETE FROM \"CompatValue\"",
@@ -453,7 +453,7 @@
       "orm": "typeorm",
       "name": "generated ids",
       "status": "fail",
-      "ms": 14,
+      "ms": 13,
       "error": {
         "name": "AssertionError",
         "code": "ERR_ASSERTION",
@@ -468,7 +468,7 @@
       "orm": "typeorm",
       "name": "duplicate primary key",
       "status": "pass",
-      "ms": 34,
+      "ms": 32,
       "sql": [
         "INSERT INTO \"CompatUser\"(\"id\", \"name\", \"age\", \"active\", \"nickname\") VALUES ($1, $2, $3, $4, DEFAULT)",
         "SELECT name FROM \"CompatUser\" WHERE id=1"
@@ -477,51 +477,57 @@
     {
       "orm": "typeorm",
       "name": "schema introspection",
-      "status": "fail",
-      "ms": 36,
-      "error": {
-        "name": "AssertionError",
-        "code": "ERR_ASSERTION",
-        "message": "Expected values to be strictly equal:\n\n0 !== 2\n"
-      },
+      "status": "pass",
+      "ms": 615,
       "sql": [
         "SELECT * FROM current_schema()",
         "SELECT * FROM current_database()",
-        "SELECT \"table_schema\", \"table_name\", obj_description((quote_ident(\"table_schema\") || '.' || quote_ident(\"table_name\"))::regclass, 'pg_class') AS table_comment FROM \"information_schema\".\"tables\" WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost')"
+        "SELECT \"table_schema\", \"table_name\", obj_description((quote_ident(\"table_schema\") || '.' || quote_ident(\"table_name\"))::regclass, 'pg_class') AS table_comment FROM \"information_schema\".\"tables\" WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost')",
+        "SELECT TRUE FROM information_schema.columns WHERE table_name = 'pg_class' and column_name = 'relispartition'",
+        "SELECT columns.*, pg_catalog.col_description((quote_ident(table_catalog) || '.' || quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass::oid, ordinal_position) AS description, ('\"' || \"udt_schema\" || '\".\"' || \"udt_name\" || '\"')::\"regtype\"::text AS \"regtype\", pg_catalog.format_type(\"col_attr\".\"atttypid\", \"col_attr\".\"atttypmod\") AS \"format_type\" FROM \"information_schema\".\"columns\" LEFT JOIN \"pg_catalog\".\"pg_attribute\" AS \"col_attr\" ON \"col_attr\".\"attname\" = \"columns\".\"column_name\" AND \"col_attr\".\"attrelid\" = ( SELECT \"cls\".\"oid\" FROM \"pg_catalog\".\"pg_class\" AS \"cls\" LEFT JOIN \"pg_catalog\".\"pg_namespace\" AS \"ns\" ON \"ns\".\"oid\" = \"cls\".\"relnamespace\" WHERE \"cls\".\"relname\" = \"columns\".\"table_name\" AND \"ns\".\"nspname\" = \"columns\".\"table_schema\" ) WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser')",
+        "SELECT \"ns\".\"nspname\" AS \"table_schema\", \"t\".\"relname\" AS \"table_name\", \"cnst\".\"conname\" AS \"constraint_name\", pg_get_constraintdef(\"cnst\".\"oid\") AS \"expression\", CASE \"cnst\".\"contype\" WHEN 'p' THEN 'PRIMARY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' END AS \"constraint_type\", \"a\".\"attname\" AS \"column_name\" FROM \"pg_constraint\" \"cnst\" INNER JOIN \"pg_class\" \"t\" ON \"t\".\"oid\" = \"cnst\".\"conrelid\" INNER JOIN \"pg_namespace\" \"ns\" ON \"ns\".\"oid\" = \"cnst\".\"connamespace\" LEFT JOIN \"pg_attribute\" \"a\" ON \"a\".\"attrelid\" = \"cnst\".\"conrelid\" AND \"a\".\"attnum\" = ANY (\"cnst\".\"conkey\") WHERE \"t\".\"relkind\" IN ('r', 'p') AND ((\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatUser'))",
+        "SELECT \"ns\".\"nspname\" AS \"table_schema\", \"t\".\"relname\" AS \"table_name\", \"i\".\"relname\" AS \"constraint_name\", \"a\".\"attname\" AS \"column_name\", CASE \"ix\".\"indisunique\" WHEN 't' THEN 'TRUE' ELSE'FALSE' END AS \"is_unique\", pg_get_expr(\"ix\".\"indpred\", \"ix\".\"indrelid\") AS \"condition\", \"types\".\"typname\" AS \"type_name\", \"am\".\"amname\" AS \"index_type\" FROM \"pg_class\" \"t\" INNER JOIN \"pg_index\" \"ix\" ON \"ix\".\"indrelid\" = \"t\".\"oid\" INNER JOIN \"pg_attribute\" \"a\" ON \"a\".\"attrelid\" = \"t\".\"oid\"  AND \"a\".\"attnum\" = ANY (\"ix\".\"indkey\") INNER JOIN \"pg_namespace\" \"ns\" ON \"ns\".\"oid\" = \"t\".\"relnamespace\" INNER JOIN \"pg_class\" \"i\" ON \"i\".\"oid\" = \"ix\".\"indexrelid\" INNER JOIN \"pg_type\" \"types\" ON \"types\".\"oid\" = \"a\".\"atttypid\" INNER JOIN \"pg_am\" \"am\" ON \"i\".\"relam\" = \"am\".\"oid\" LEFT JOIN \"pg_constraint\" \"cnst\" ON \"cnst\".\"conname\" = \"i\".\"relname\" WHERE \"t\".\"relkind\" IN ('r', 'p') AND \"cnst\".\"contype\" IS NULL AND ((\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatUser'))",
+        "SELECT \"con\".\"conname\" AS \"constraint_name\", \"con\".\"nspname\" AS \"table_schema\", \"con\".\"relname\" AS \"table_name\", \"att2\".\"attname\" AS \"column_name\", \"ns\".\"nspname\" AS \"referenced_table_schema\", \"cl\".\"relname\" AS \"referenced_table_name\", \"att\".\"attname\" AS \"referenced_column_name\", \"con\".\"confdeltype\" AS \"on_delete\", \"con\".\"confupdtype\" AS \"on_update\", \"con\".\"condeferrable\" AS \"deferrable\", \"con\".\"condeferred\" AS \"deferred\" FROM ( SELECT UNNEST (\"con1\".\"conkey\") AS \"parent\", UNNEST (\"con1\".\"confkey\") AS \"child\", \"con1\".\"confrelid\", \"con1\".\"conrelid\", \"con1\".\"conname\", \"con1\".\"contype\", \"ns\".\"nspname\", \"cl\".\"relname\", \"con1\".\"condeferrable\", CASE WHEN \"con1\".\"condeferred\" THEN 'INITIALLY DEFERRED' ELSE 'INITIALLY IMMEDIATE' END as condeferred, CASE \"con1\".\"confdeltype\" WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \"confdeltype\", CASE \"con1\".\"confupdtype\" WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \"confupdtype\" FROM \"pg_class\" \"cl\" INNER JOIN \"pg_namespace\" \"ns\" ON \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_constraint\" \"con1\" ON \"con1\".\"conrelid\" = \"cl\".\"oid\" WHERE \"con1\".\"contype\" = 'f' AND ((\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatUser')) ) \"con\" INNER JOIN \"pg_attribute\" \"att\" ON \"att\".\"attrelid\" = \"con\".\"confrelid\" AND \"att\".\"attnum\" = \"con\".\"child\" INNER JOIN \"pg_class\" \"cl\" ON \"cl\".\"oid\" = \"con\".\"confrelid\" INNER JOIN \"pg_namespace\" \"ns\" ON \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_attribute\" \"att2\" ON \"att2\".\"attrelid\" = \"con\".\"conrelid\" AND \"att2\".\"attnum\" = \"con\".\"parent\""
       ]
     },
     {
       "orm": "typeorm",
       "name": "schema synchronization",
       "status": "fail",
-      "ms": 219,
+      "ms": 2457,
       "error": {
         "name": "QueryFailedError",
-        "code": "42P07",
-        "message": "The table 'CompatUser' already exists",
-        "driver": "The table 'CompatUser' already exists"
+        "code": "3D000",
+        "message": "Cannot change field `age` of table `CompatUser`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the field's TYPE does not accept NONE: add MIGRATE EXISTING ROWS to say what existing rows hold",
+        "driver": "Cannot change field `age` of table `CompatUser`: the table is SCHEMAFULL in a database at compatibility level 4 and has rows, and the field's TYPE does not accept NONE: add MIGRATE EXISTING ROWS to say what existing rows hold"
       },
       "sql": [
         "START TRANSACTION",
         "SELECT * FROM current_schema()",
         "SELECT * FROM current_database()",
         "SELECT \"table_schema\", \"table_name\", obj_description((quote_ident(\"table_schema\") || '.' || quote_ident(\"table_name\"))::regclass, 'pg_class') AS table_comment FROM \"information_schema\".\"tables\" WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatValue') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatGenerated')",
+        "SELECT TRUE FROM information_schema.columns WHERE table_name = 'pg_class' and column_name = 'relispartition'",
+        "SELECT columns.*, pg_catalog.col_description((quote_ident(table_catalog) || '.' || quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass::oid, ordinal_position) AS description, ('\"' || \"udt_schema\" || '\".\"' || \"udt_name\" || '\"')::\"regtype\"::text AS \"regtype\", pg_catalog.format_type(\"col_attr\".\"atttypid\", \"col_attr\".\"atttypmod\") AS \"format_type\" FROM \"information_schema\".\"columns\" LEFT JOIN \"pg_catalog\".\"pg_attribute\" AS \"col_attr\" ON \"col_attr\".\"attname\" = \"columns\".\"column_name\" AND \"col_attr\".\"attrelid\" = ( SELECT \"cls\".\"oid\" FROM \"pg_catalog\".\"pg_class\" AS \"cls\" LEFT JOIN \"pg_catalog\".\"pg_namespace\" AS \"ns\" ON \"ns\".\"oid\" = \"cls\".\"relnamespace\" WHERE \"cls\".\"relname\" = \"columns\".\"table_name\" AND \"ns\".\"nspname\" = \"columns\".\"table_schema\" ) WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatGenerated') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatValue')",
+        "SELECT \"ns\".\"nspname\" AS \"table_schema\", \"t\".\"relname\" AS \"table_name\", \"cnst\".\"conname\" AS \"constraint_name\", pg_get_constraintdef(\"cnst\".\"oid\") AS \"expression\", CASE \"cnst\".\"contype\" WHEN 'p' THEN 'PRIMARY' WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' END AS \"constraint_type\", \"a\".\"attname\" AS \"column_name\" FROM \"pg_constraint\" \"cnst\" INNER JOIN \"pg_class\" \"t\" ON \"t\".\"oid\" = \"cnst\".\"conrelid\" INNER JOIN \"pg_namespace\" \"ns\" ON \"ns\".\"oid\" = \"cnst\".\"connamespace\" LEFT JOIN \"pg_attribute\" \"a\" ON \"a\".\"attrelid\" = \"cnst\".\"conrelid\" AND \"a\".\"attnum\" = ANY (\"cnst\".\"conkey\") WHERE \"t\".\"relkind\" IN ('r', 'p') AND ((\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatGenerated') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatUser') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatValue'))",
+        "SELECT \"ns\".\"nspname\" AS \"table_schema\", \"t\".\"relname\" AS \"table_name\", \"i\".\"relname\" AS \"constraint_name\", \"a\".\"attname\" AS \"column_name\", CASE \"ix\".\"indisunique\" WHEN 't' THEN 'TRUE' ELSE'FALSE' END AS \"is_unique\", pg_get_expr(\"ix\".\"indpred\", \"ix\".\"indrelid\") AS \"condition\", \"types\".\"typname\" AS \"type_name\", \"am\".\"amname\" AS \"index_type\" FROM \"pg_class\" \"t\" INNER JOIN \"pg_index\" \"ix\" ON \"ix\".\"indrelid\" = \"t\".\"oid\" INNER JOIN \"pg_attribute\" \"a\" ON \"a\".\"attrelid\" = \"t\".\"oid\"  AND \"a\".\"attnum\" = ANY (\"ix\".\"indkey\") INNER JOIN \"pg_namespace\" \"ns\" ON \"ns\".\"oid\" = \"t\".\"relnamespace\" INNER JOIN \"pg_class\" \"i\" ON \"i\".\"oid\" = \"ix\".\"indexrelid\" INNER JOIN \"pg_type\" \"types\" ON \"types\".\"oid\" = \"a\".\"atttypid\" INNER JOIN \"pg_am\" \"am\" ON \"i\".\"relam\" = \"am\".\"oid\" LEFT JOIN \"pg_constraint\" \"cnst\" ON \"cnst\".\"conname\" = \"i\".\"relname\" WHERE \"t\".\"relkind\" IN ('r', 'p') AND \"cnst\".\"contype\" IS NULL AND ((\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatGenerated') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatUser') OR (\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = 'CompatValue'))",
+        "SELECT \"con\".\"conname\" AS \"constraint_name\", \"con\".\"nspname\" AS \"table_schema\", \"con\".\"relname\" AS \"table_name\", \"att2\".\"attname\" AS \"column_name\", \"ns\".\"nspname\" AS \"referenced_table_schema\", \"cl\".\"relname\" AS \"referenced_table_name\", \"att\".\"attname\" AS \"referenced_column_name\", \"con\".\"confdeltype\" AS \"on_delete\", \"con\".\"confupdtype\" AS \"on_update\", \"con\".\"condeferrable\" AS \"deferrable\", \"con\".\"condeferred\" AS \"deferred\" FROM ( SELECT UNNEST (\"con1\".\"conkey\") AS \"parent\", UNNEST (\"con1\".\"confkey\") AS \"child\", \"con1\".\"confrelid\", \"con1\".\"conrelid\", \"con1\".\"conname\", \"con1\".\"contype\", \"ns\".\"nspname\", \"cl\".\"relname\", \"con1\".\"condeferrable\", CASE WHEN \"con1\".\"condeferred\" THEN 'INITIALLY DEFERRED' ELSE 'INITIALLY IMMEDIATE' END as condeferred, CASE \"con1\".\"confdeltype\" WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \"confdeltype\", CASE \"con1\".\"confupdtype\" WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \"confupdtype\" FROM \"pg_class\" \"cl\" INNER JOIN \"pg_namespace\" \"ns\" ON \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_constraint\" \"con1\" ON \"con1\".\"conrelid\" = \"cl\".\"oid\" WHERE \"con1\".\"contype\" = 'f' AND ((\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatGenerated') OR (\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatPost') OR (\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatUser') OR (\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = 'CompatValue')) ) \"con\" INNER JOIN \"pg_attribute\" \"att\" ON \"att\".\"attrelid\" = \"con\".\"confrelid\" AND \"att\".\"attnum\" = \"con\".\"child\" INNER JOIN \"pg_class\" \"cl\" ON \"cl\".\"oid\" = \"con\".\"confrelid\" INNER JOIN \"pg_namespace\" \"ns\" ON \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_attribute\" \"att2\" ON \"att2\".\"attrelid\" = \"con\".\"conrelid\" AND \"att2\".\"attnum\" = \"con\".\"parent\"",
+        "SELECT \"udt_schema\", \"udt_name\" FROM \"information_schema\".\"columns\" WHERE \"table_schema\" = 'public' AND \"table_name\" = 'CompatValue' AND \"column_name\"='tags'",
+        "SELECT \"e\".\"enumlabel\" AS \"value\" FROM \"pg_enum\" \"e\" INNER JOIN \"pg_type\" \"t\" ON \"t\".\"oid\" = \"e\".\"enumtypid\" INNER JOIN \"pg_namespace\" \"n\" ON \"n\".\"oid\" = \"t\".\"typnamespace\" WHERE \"n\".\"nspname\" = 'public' AND \"t\".\"typname\" = 'text' ORDER BY \"e\".\"enumsortorder\"",
         "SELECT * FROM \"information_schema\".\"tables\" WHERE \"table_schema\" = $1 AND \"table_name\" = $2",
-        "CREATE TABLE \"CompatUser\" (\"id\" integer NOT NULL, \"name\" text NOT NULL, \"age\" integer NOT NULL, \"active\" boolean NOT NULL, \"nickname\" text, CONSTRAINT \"PK_712209afd5766931aca7c44b7f0\" PRIMARY KEY (\"id\"))",
+        "ALTER TABLE \"CompatUser\" DROP CONSTRAINT \"CompatUser_pkey\"",
+        "ALTER TABLE \"CompatUser\" DROP COLUMN \"id\"",
+        "ALTER TABLE \"CompatUser\" ADD \"id\" integer NOT NULL",
+        "ALTER TABLE \"CompatUser\" ADD CONSTRAINT \"PK_712209afd5766931aca7c44b7f0\" PRIMARY KEY (\"id\")",
+        "ALTER TABLE \"CompatUser\" DROP COLUMN \"age\"",
+        "ALTER TABLE \"CompatUser\" ADD \"age\" integer NOT NULL",
         "ROLLBACK"
       ]
     },
     {
       "orm": "typeorm",
       "name": "migration lifecycle",
-      "status": "fail",
-      "ms": 47,
-      "error": {
-        "name": "QueryFailedError",
-        "code": "42P07",
-        "message": "The table 'migrations' already exists",
-        "driver": "The table 'migrations' already exists"
-      },
+      "status": "pass",
+      "ms": 61,
       "sql": [
         "SELECT * FROM \"information_schema\".\"tables\" WHERE \"table_schema\" = $1 AND \"table_name\" = $2",
         "CREATE TABLE \"migrations\" (\"id\" SERIAL NOT NULL, \"timestamp\" bigint NOT NULL, \"name\" character varying NOT NULL, CONSTRAINT \"PK_8c82d7f526340ab734260ea46be\" PRIMARY KEY (\"id\"))",
@@ -531,7 +537,11 @@
         "INSERT INTO \"migrations\"(\"timestamp\", \"name\") VALUES ($1, $2)",
         "COMMIT",
         "SELECT * FROM \"information_schema\".\"tables\" WHERE \"table_schema\" = $1 AND \"table_name\" = $2",
-        "CREATE TABLE \"migrations\" (\"id\" SERIAL NOT NULL, \"timestamp\" bigint NOT NULL, \"name\" character varying NOT NULL, CONSTRAINT \"PK_8c82d7f526340ab734260ea46be\" PRIMARY KEY (\"id\"))"
+        "SELECT * FROM \"migrations\" \"migrations\" ORDER BY \"id\" DESC",
+        "START TRANSACTION",
+        "DROP TABLE \"OrmMigration\"",
+        "DELETE FROM \"migrations\" WHERE \"timestamp\" = $1 AND \"name\" = $2",
+        "COMMIT"
       ]
     }
   ]

@@ -1,3 +1,8 @@
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
+use surrealdb_expr::expr::reference::ReferenceDeleteStrategy;
 use surrealdb_expr::expr::statements::define::{DefineKind, DefineStatement};
 use surrealdb_expr::expr::statements::remove::RemoveStatement;
 use surrealdb_expr::expr::{Expr, Kind};
@@ -442,7 +447,71 @@ fn test_lower_pgsql_foreign_key_column_constraint() {
 		&& let DefineStatement::Field(f) = &**d
 	{
 		assert!(f.reference.is_some(), "author_id should have a reference constraint");
+		// The column is a link to the referenced table, nullable as the column is.
+		assert_eq!(
+			f.field_kind.as_ref().map(ToSql::to_sql).as_deref(),
+			Some("none | record<users>")
+		);
+		let assert = f.assert.as_ref().expect("the link is asserted to name a row").to_sql();
+		assert!(assert.contains("record::exists($value)"), "{assert}");
+		assert!(assert.contains("= NONE"), "{assert}");
 	}
+}
+
+#[test]
+fn test_lower_pgsql_not_null_foreign_key_is_a_required_link() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE posts (id INT PRIMARY KEY, author_id INT NOT NULL REFERENCES users)",
+	)
+	.expect("parse");
+	let sql: Vec<String> =
+		lower_pgsql_ddl_definitions(&stmt).expect("lower").iter().map(ToSql::to_sql).collect();
+	let field = sql.iter().find(|s| s.contains("FIELD author_id")).expect("the field");
+	assert!(field.contains("TYPE record<users> "), "{field}");
+	assert!(field.contains("REFERENCE ON DELETE REJECT"), "{field}");
+	assert!(!field.contains("$value != NONE"), "{field}");
+	assert!(field.contains(r#"violates foreign key constraint "posts_author_id_fkey""#), "{field}");
+}
+
+#[test]
+fn test_lower_pgsql_foreign_key_to_its_own_table_accepts_the_row_itself() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE node (id INT PRIMARY KEY, parent INT REFERENCES node(id))",
+	)
+	.expect("parse");
+	let sql: Vec<String> =
+		lower_pgsql_ddl_definitions(&stmt).expect("lower").iter().map(ToSql::to_sql).collect();
+	let field = sql.iter().find(|s| s.contains("FIELD parent")).expect("the field");
+	assert!(field.contains("$value = id"), "{field}");
+}
+
+#[test]
+fn test_lower_pgsql_foreign_key_refusals() {
+	for (sql, reason) in [
+		(
+			"CREATE TABLE p (id INT PRIMARY KEY, a INT, b INT, FOREIGN KEY (a, b) REFERENCES u(id, id))",
+			"several columns",
+		),
+		(
+			"CREATE TABLE p (id INT PRIMARY KEY, a INT REFERENCES u(name))",
+			"id column of the target",
+		),
+		(
+			"CREATE TABLE p (id INT PRIMARY KEY, a INT, FOREIGN KEY (a) REFERENCES u(name))",
+			"id column of the target",
+		),
+		("CREATE TABLE p (id INT REFERENCES u(id))", "foreign key on the id column"),
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+		assert!(err.to_string().contains(reason), "{sql}: {err}");
+	}
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE p (id INT PRIMARY KEY, a INT, FOREIGN KEY (zz) REFERENCES u(id))",
+	)
+	.expect("parse");
+	assert_eq!(lower_pgsql_ddl_definitions(&stmt).unwrap_err().pg_sqlstate(), "42703");
 }
 
 #[test]
@@ -460,8 +529,26 @@ fn test_lower_pgsql_foreign_key_table_constraint() {
 	.expect("parse");
 
 	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
-	// 1 DefineTable + 1 DefineSequence (id) + 4 DefineField + 1 PK Index + 2 FK field updates
-	assert_eq!(exprs.len(), 9);
+	// 1 DefineTable + 1 DefineSequence (id) + 4 DefineField + 1 PK Index: the foreign keys are
+	// part of the definitions of their columns.
+	assert_eq!(exprs.len(), 7);
+	for column in ["post_id", "user_id"] {
+		let field = exprs
+			.iter()
+			.find_map(|e| match e {
+				Expr::Define(d) => match &**d {
+					DefineStatement::Field(f) if f.name.to_sql() == column => Some(f),
+					_ => None,
+				},
+				_ => None,
+			})
+			.expect("the column is defined");
+		assert!(field.reference.is_some(), "{column}");
+		assert!(
+			field.field_kind.as_ref().is_some_and(|k| k.to_sql().starts_with("none | record<")),
+			"{column}"
+		);
+	}
 }
 
 #[test]
@@ -538,10 +625,10 @@ fn test_lower_pgsql_alter_table_multiple_actions() {
 	assert!(matches!(&exprs[1], Expr::Remove(r) if matches!(&**r, RemoveStatement::Field(_))));
 	// Action 3: Alter balance type (DefineField)
 	assert!(matches!(&exprs[2], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
-	// Action 4: Set balance default (DefineField)
-	assert!(matches!(&exprs[3], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
-	// Action 5: Set user_id NOT NULL (DefineField)
-	assert!(matches!(&exprs[4], Expr::Define(d) if matches!(&**d, DefineStatement::Field(_))));
+	// Action 4: Set balance default (AlterField: the rest of the field is kept)
+	assert!(matches!(&exprs[3], Expr::Alter(_)));
+	// Action 5: Set user_id NOT NULL (AlterField)
+	assert!(matches!(&exprs[4], Expr::Alter(_)));
 }
 
 #[test]
@@ -942,4 +1029,646 @@ fn serial_and_auto_increment_columns_draw_from_a_sequence_of_their_own() {
 	let sql = statements_sql(&lower_mysql_ddl_definitions(&stmt).expect("lower"));
 	assert_eq!(sql.iter().filter(|s| s.contains("gen_id_seq")).count(), 2, "{sql:?}");
 	assert!(!sql.iter().any(|s| s.contains("gen_name_seq")), "{sql:?}");
+}
+
+fn delete_strategy_of(sql: &str, column: &str) -> ReferenceDeleteStrategy {
+	let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+	let exprs = lower_pgsql_ddl_definitions(&stmt).expect("lower");
+	exprs
+		.iter()
+		.rev()
+		.find_map(|e| {
+			let Expr::Define(d) = e else {
+				return None;
+			};
+			let DefineStatement::Field(f) = &**d else {
+				return None;
+			};
+			(f.name.to_sql() == column)
+				.then(|| f.reference.as_ref().map(|r| r.on_delete.clone()))?
+		})
+		.expect("the column has a reference")
+}
+
+#[test]
+fn test_lower_pgsql_foreign_key_on_delete_actions() {
+	for (action, expected) in [
+		("CASCADE", ReferenceDeleteStrategy::Cascade),
+		("SET NULL", ReferenceDeleteStrategy::Unset),
+		("NO ACTION", ReferenceDeleteStrategy::Reject),
+		("RESTRICT", ReferenceDeleteStrategy::Reject),
+	] {
+		let column = format!(
+			"CREATE TABLE posts (id INT PRIMARY KEY, author_id INT REFERENCES users(id) ON DELETE \
+			 {action} ON UPDATE CASCADE)"
+		);
+		assert_eq!(delete_strategy_of(&column, "author_id"), expected, "{action}");
+		let table = format!(
+			"CREATE TABLE posts (id INT PRIMARY KEY, author_id INT, FOREIGN KEY (author_id) \
+			 REFERENCES users(id) ON UPDATE NO ACTION ON DELETE {action})"
+		);
+		assert_eq!(delete_strategy_of(&table, "author_id"), expected, "{action}");
+	}
+	let default = "CREATE TABLE posts (id INT PRIMARY KEY, author_id INT REFERENCES users(id))";
+	assert_eq!(delete_strategy_of(default, "author_id"), ReferenceDeleteStrategy::Reject);
+}
+
+#[test]
+fn on_delete_set_default_is_refused() {
+	for sql in [
+		"CREATE TABLE posts (id INT PRIMARY KEY, author_id INT REFERENCES users(id) ON DELETE SET DEFAULT)",
+		"CREATE TABLE posts (id INT PRIMARY KEY, author_id INT, FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET DEFAULT)",
+		"ALTER TABLE posts ADD COLUMN author_id INT REFERENCES users(id) ON DELETE SET DEFAULT",
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+	}
+}
+
+mod constraints {
+	use surrealdb_expr::expr::{Expr, Kind};
+	use surrealdb_types::ToSql;
+
+	use super::super::ddl::{lower_pgsql_ddl_definitions_with, lower_pgsql_ddl_with};
+	use crate::{
+		BinderCatalog, ColumnAssert, ColumnInfo, ColumnShape, EmptyCatalog, ForeignKeyInfo,
+		IndexInfo, MemoryCatalog, PlanError, ReferentialAction, StagedCatalog, TableSchema,
+	};
+
+	fn index(name: &str, columns: &[&str]) -> IndexInfo {
+		IndexInfo {
+			name: name.to_owned(),
+			columns: columns.iter().map(|c| (*c).to_owned()).collect(),
+			unique: true,
+		}
+	}
+
+	fn columns(names: &[&str]) -> Vec<ColumnInfo> {
+		names.iter().enumerate().map(|(i, n)| ColumnInfo::new(*n, i)).collect()
+	}
+
+	/// `post` has a primary key index, a unique constraint, a plain unique index and a foreign
+	/// key; `plain` has only the record id.
+	fn catalog() -> MemoryCatalog {
+		let post = TableSchema::new("post", columns(&["id", "email", "slug", "author"]))
+			.with_schema("public")
+			.with_indexes(vec![
+				index("post_id_pk", &["id"]),
+				index("post_email_uniq", &["email"]),
+				index("by_slug", &["slug"]),
+			])
+			.with_foreign_keys(vec![ForeignKeyInfo {
+				column: "author".to_owned(),
+				target_table: "user".to_owned(),
+				on_delete: ReferentialAction::NoAction,
+			}]);
+		let plain = TableSchema::new("plain", columns(&["id", "n"])).with_schema("public");
+		MemoryCatalog::new().with_listed_tables(vec![post, plain])
+	}
+
+	fn lower(catalog: &MemoryCatalog, sql: &str) -> Result<Vec<String>, PlanError> {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		lower_pgsql_ddl_definitions_with(&stmt, catalog)
+			.map(|exprs| exprs.iter().map(Expr::to_sql).collect())
+	}
+
+	#[test]
+	fn drop_constraint_of_a_unique_constraint_removes_its_index() {
+		let sql = lower(&catalog(), "ALTER TABLE post DROP CONSTRAINT post_email_uniq").unwrap();
+		assert_eq!(sql, ["REMOVE INDEX post_email_uniq ON post"]);
+	}
+
+	#[test]
+	fn drop_constraint_of_a_foreign_key_drops_the_reference_and_keeps_the_type() {
+		let sql = lower(&catalog(), "ALTER TABLE post DROP CONSTRAINT post_author_fkey").unwrap();
+		assert_eq!(sql, ["ALTER FIELD author ON post DROP ASSERT DROP REFERENCE"]);
+	}
+
+	#[test]
+	fn drop_constraint_of_the_primary_key_removes_the_pk_index_or_is_refused() {
+		let sql = lower(&catalog(), "ALTER TABLE post DROP CONSTRAINT post_pkey").unwrap();
+		assert_eq!(sql, ["REMOVE INDEX post_id_pk ON post"]);
+		let err = lower(&catalog(), "ALTER TABLE plain DROP CONSTRAINT plain_pkey").unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+		assert!(err.to_string().contains("record id"), "{err}");
+	}
+
+	#[test]
+	fn drop_constraint_of_an_unknown_name_is_undefined_unless_if_exists() {
+		for name in ["nope", "by_slug", "post_id_pk"] {
+			let err =
+				lower(&catalog(), &format!("ALTER TABLE post DROP CONSTRAINT {name}")).unwrap_err();
+			assert_eq!(err.pg_sqlstate(), "42704", "{name}: {err}");
+			assert_eq!(
+				err.to_string(),
+				format!("constraint \"{name}\" of relation \"post\" does not exist")
+			);
+			let sql =
+				lower(&catalog(), &format!("ALTER TABLE post DROP CONSTRAINT IF EXISTS {name}"))
+					.unwrap();
+			assert!(sql.is_empty(), "{name}: {sql:?}");
+		}
+	}
+
+	#[test]
+	fn drop_constraint_of_a_table_the_catalog_does_not_list_names_an_index() {
+		let sql = lower(&catalog(), "ALTER TABLE other DROP CONSTRAINT IF EXISTS x").unwrap();
+		assert_eq!(sql, ["REMOVE INDEX IF EXISTS x ON other"]);
+		let stmt = surrealdb_pgsql::parse_statement("ALTER TABLE post DROP CONSTRAINT x").unwrap();
+		let exprs = lower_pgsql_ddl_with(&stmt, &EmptyCatalog).unwrap();
+		assert_eq!(exprs[0].to_sql(), "REMOVE INDEX x ON post");
+	}
+
+	/// The steps of the one statement that `sql` lowers to.
+	fn steps(catalog: &dyn BinderCatalog, sql: &str) -> Result<Vec<String>, PlanError> {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let exprs = lower_pgsql_ddl_with(&stmt, catalog)?;
+		let [Expr::Block(block)] = exprs.as_slice() else {
+			panic!("one block was expected: {exprs:?}");
+		};
+		Ok(block.0.iter().map(Expr::to_sql).collect())
+	}
+
+	fn shaped(table: &str, column: &str, kind: Kind, assert: ColumnAssert) -> MemoryCatalog {
+		MemoryCatalog::new().with_column_shape(
+			table,
+			column,
+			ColumnShape {
+				kind: Some(kind),
+				assert,
+				has_default: false,
+			},
+		)
+	}
+
+	fn nullable(kind: Kind) -> Kind {
+		Kind::either(vec![Kind::None, Kind::Null, kind])
+	}
+
+	#[test]
+	fn add_foreign_key_references_an_existing_link_column() {
+		let catalog = MemoryCatalog::new().with_link("post", "author", "user");
+		let sql = steps(
+			&catalog,
+			"ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (author) REFERENCES \"user\"(id) ON DELETE CASCADE",
+		)
+		.unwrap();
+		// The rows are checked, then the column is given its reference and assertion.
+		assert_eq!(sql.len(), 2, "{sql:?}");
+		assert!(sql[0].starts_with("IF array::len((SELECT VALUE id FROM post WHERE"), "{sql:?}");
+		assert!(sql[0].contains("THROW"), "{sql:?}");
+		assert!(sql[1].starts_with("ALTER FIELD author ON post"), "{sql:?}");
+		assert!(sql[1].contains("REFERENCE ON DELETE CASCADE"), "{sql:?}");
+		assert!(sql[1].contains("ASSERT $value = NONE OR"), "{sql:?}");
+		assert!(!sql[1].contains("TYPE"), "{sql:?}");
+	}
+
+	#[test]
+	fn add_foreign_key_on_a_scalar_column_converts_the_column_and_its_rows() {
+		let catalog = shaped("post", "author", nullable(Kind::Int), ColumnAssert::None);
+		let sql = steps(
+			&catalog,
+			"ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (author) REFERENCES \"user\"(id) ON DELETE SET NULL",
+		)
+		.unwrap();
+		assert_eq!(sql.len(), 5, "{sql:#?}");
+		// 1. A value that names no row fails the statement before anything changes.
+		assert!(sql[0].starts_with("IF array::len((SELECT VALUE id FROM post WHERE"), "{sql:#?}");
+		assert!(sql[0].contains("record::exists"), "{sql:#?}");
+		assert!(
+			sql[0].contains(r#"violates foreign key constraint "post_author_fkey""#),
+			"{sql:#?}"
+		);
+		// 2. The type takes links as well as the column's own values.
+		assert_eq!(sql[1], "ALTER FIELD author ON post TYPE none | null | int | record<user>");
+		// 3. The rows hold links, and `NULL` is absent.
+		assert!(
+			sql[2].starts_with("UPDATE post SET author = (IF author = NULL THEN NONE ELSE"),
+			"{sql:#?}"
+		);
+		assert!(sql[2].contains("type::record('user', author)"), "{sql:#?}");
+		assert!(sql[2].ends_with("WHERE author != NONE RETURN NONE"), "{sql:#?}");
+		// 4. The type narrows to the link, keeping what the rows hold.
+		assert!(sql[3].starts_with("ALTER FIELD author ON post TYPE none | record<user> MIGRATE EXISTING ROWS AS post_author_fkey USING"), "{sql:#?}");
+		assert!(sql[3].ends_with("FALLBACK NONE"), "{sql:#?}");
+		// 5. The reference and the assertion.
+		assert!(
+			sql[4].starts_with("ALTER FIELD author ON post ASSERT $value = NONE OR"),
+			"{sql:#?}"
+		);
+		assert!(sql[4].contains("REFERENCE ON DELETE UNSET"), "{sql:#?}");
+	}
+
+	#[test]
+	fn add_foreign_key_on_a_not_null_column_makes_a_required_link() {
+		for assert in [ColumnAssert::NotNull, ColumnAssert::None] {
+			let kind = if assert == ColumnAssert::NotNull {
+				Kind::Int
+			} else {
+				nullable(Kind::Int)
+			};
+			let catalog = shaped("post", "author", kind.clone(), assert);
+			let sql = steps(
+				&catalog,
+				"ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)",
+			)
+			.unwrap();
+			assert_eq!(sql.len(), 5, "{sql:#?}");
+			// The assertion reads `$value`, so the engine refuses to keep it over a new type.
+			assert!(!sql[1].contains("ASSERT $value != NONE"), "{sql:#?}");
+			assert!(sql[2].contains("type::record('user', author)"), "{sql:#?}");
+			let required = assert == ColumnAssert::NotNull;
+			assert_eq!(sql[3].contains("TYPE record<user>"), required, "{sql:#?}");
+			assert_eq!(sql[3].contains("FALLBACK user:0"), required, "{sql:#?}");
+		}
+	}
+
+	#[test]
+	fn add_foreign_key_on_a_column_that_cannot_become_a_link_is_refused() {
+		let refused = |catalog: MemoryCatalog, reason: &str| {
+			let err = lower(
+				&catalog,
+				"ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)",
+			)
+			.unwrap_err();
+			assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+			assert!(err.to_string().contains(reason), "{err}");
+		};
+		refused(shaped("post", "author", Kind::Bool, ColumnAssert::None), "integer, text or uuid");
+		refused(shaped("post", "author", Kind::Int, ColumnAssert::Other), "assertion of its own");
+		refused(
+			MemoryCatalog::new().with_column_shape(
+				"post",
+				"author",
+				ColumnShape {
+					kind: Some(Kind::Int),
+					assert: ColumnAssert::None,
+					has_default: true,
+				},
+			),
+			"default",
+		);
+		let err = lower(
+			&MemoryCatalog::new(),
+			"ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42703", "{err}");
+	}
+
+	#[test]
+	fn add_foreign_key_to_the_wrong_table_or_column_is_refused() {
+		let catalog = MemoryCatalog::new().with_link("post", "author", "user");
+		let err = lower(&catalog, "ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES team(id)")
+			.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+		let err =
+			lower(&catalog, "ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(name)")
+				.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+		let err = lower(
+			&catalog,
+			"ALTER TABLE post ADD FOREIGN KEY (author, editor) REFERENCES \"user\"(id, id)",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+	}
+
+	#[test]
+	fn a_table_created_if_not_exists_keeps_the_declaration_of_the_table_that_exists() {
+		let create = surrealdb_pgsql::parse_statement(
+			"CREATE TABLE IF NOT EXISTS post (id integer PRIMARY KEY, author integer NOT NULL, note text)",
+		)
+		.unwrap();
+		let alter = "ALTER TABLE post ADD FOREIGN KEY (note) REFERENCES \"user\"(id)";
+		// The table exists, and its column is a link already.
+		let existing = MemoryCatalog::new().with_link("post", "author", "user");
+		let mut staged = StagedCatalog::new(&existing);
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		assert_eq!(staged.link_table(None, "post", "author"), Some("user".to_owned()));
+		// The table is new: the statement declares the column.
+		let mut staged = StagedCatalog::new(&EmptyCatalog);
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		assert_eq!(staged.link_table(None, "post", "author"), None);
+		assert!(staged.column_shape(None, "post", "author").is_some());
+		assert_eq!(steps(&staged, alter).unwrap().len(), 5);
+		staged.stage(
+			&lower_pgsql_ddl_with(&surrealdb_pgsql::parse_statement(alter).unwrap(), &staged)
+				.unwrap(),
+		);
+		assert_eq!(staged.link_table(None, "post", "note"), Some("user".to_owned()));
+	}
+
+	#[test]
+	fn add_foreign_key_over_a_column_of_an_earlier_statement_sees_its_declaration() {
+		let create = surrealdb_pgsql::parse_statement(
+			"CREATE TABLE post (id integer PRIMARY KEY, author integer NOT NULL)",
+		)
+		.unwrap();
+		let alter = surrealdb_pgsql::parse_statement(
+			"ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)",
+		)
+		.unwrap();
+		let mut staged = StagedCatalog::new(&EmptyCatalog);
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		let sql =
+			steps(&staged, "ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)")
+				.unwrap();
+		assert_eq!(sql.len(), 5, "{sql:#?}");
+		assert!(sql[3].contains("TYPE record<user>"), "{sql:#?}");
+		// The conversion is itself staged: the column is a link now.
+		staged.stage(&lower_pgsql_ddl_with(&alter, &staged).unwrap());
+		assert_eq!(staged.link_table(None, "post", "author"), Some("user".to_owned()));
+		// A table created again forgets the columns of the one before it.
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		assert_eq!(staged.link_table(None, "post", "author"), None);
+	}
+
+	/// `post` and `user` listed, `post.author` already a foreign key to `user`.
+	fn listed_with_user() -> MemoryCatalog {
+		let tables = vec![
+			TableSchema::new("post", columns(&["id", "author", "editor"]))
+				.with_schema("public")
+				.with_foreign_keys(vec![ForeignKeyInfo {
+					column: "author".to_owned(),
+					target_table: "user".to_owned(),
+					on_delete: ReferentialAction::NoAction,
+				}]),
+			TableSchema::new("user", columns(&["id"])).with_schema("public"),
+		];
+		MemoryCatalog::new().with_listed_tables(tables)
+	}
+
+	#[test]
+	fn add_foreign_key_to_a_table_that_is_not_listed_is_undefined() {
+		let err = lower(
+			&listed_with_user(),
+			"ALTER TABLE post ADD FOREIGN KEY (editor) REFERENCES missing(id)",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42P01", "{err}");
+	}
+
+	#[test]
+	fn add_foreign_key_to_a_column_that_has_one_is_refused() {
+		let err = lower(
+			&listed_with_user(),
+			"ALTER TABLE post ADD FOREIGN KEY (author) REFERENCES \"user\"(id)",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+		assert!(err.to_string().contains("already has a foreign key"), "{err}");
+	}
+
+	#[test]
+	fn a_column_added_by_the_statement_can_take_its_foreign_key() {
+		let sql = lower(
+			&MemoryCatalog::new(),
+			"ALTER TABLE child ADD COLUMN parent_id INT, \
+			 ADD FOREIGN KEY (parent_id) REFERENCES parent(id)",
+		)
+		.unwrap();
+		assert!(sql.len() >= 2, "{sql:#?}");
+	}
+
+	#[test]
+	fn create_table_foreign_keys_must_name_a_listed_table() {
+		let catalog = listed_with_user();
+		let err = lower(
+			&catalog,
+			"CREATE TABLE note (id INT PRIMARY KEY, author INT REFERENCES missing(id))",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42P01", "{err}");
+		for sql in [
+			"CREATE TABLE note (id INT PRIMARY KEY, author INT REFERENCES \"user\"(id))",
+			"CREATE TABLE node (id INT PRIMARY KEY, parent INT REFERENCES node(id))",
+		] {
+			assert!(lower(&catalog, sql).is_ok(), "{sql}");
+		}
+		// A catalog that lists no table accepts every target.
+		assert!(
+			lower(
+				&MemoryCatalog::new(),
+				"CREATE TABLE note (id INT PRIMARY KEY, author INT REFERENCES missing(id))"
+			)
+			.is_ok()
+		);
+	}
+
+	#[test]
+	fn add_column_foreign_keys_must_name_a_listed_table() {
+		let err = lower(
+			&listed_with_user(),
+			"ALTER TABLE post ADD COLUMN reviewer INT REFERENCES missing(id)",
+		)
+		.unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "42P01", "{err}");
+		assert!(
+			lower(
+				&listed_with_user(),
+				"ALTER TABLE post ADD COLUMN reviewer INT REFERENCES \"user\"(id)"
+			)
+			.is_ok()
+		);
+	}
+
+	#[test]
+	fn a_default_set_on_a_link_column_names_the_row_it_links_to() {
+		let catalog = MemoryCatalog::new().with_link("post", "author", "user");
+		let sql = lower(&catalog, "ALTER TABLE post ALTER COLUMN author SET DEFAULT 1").unwrap();
+		assert_eq!(sql.len(), 1);
+		assert!(sql[0].contains("user"), "{sql:?}");
+		let plain =
+			lower(&MemoryCatalog::new(), "ALTER TABLE post ALTER COLUMN n SET DEFAULT 1").unwrap();
+		assert!(!plain[0].contains("user"), "{plain:?}");
+	}
+
+	#[test]
+	fn the_listing_of_an_existing_table_takes_the_constraints_the_request_adds() {
+		let base = catalog();
+		let mut staged = StagedCatalog::new(&base);
+		let alter = surrealdb_pgsql::parse_statement(
+			"ALTER TABLE plain ADD COLUMN owner INT REFERENCES post(id)",
+		)
+		.unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&alter, &staged).unwrap());
+		let plain = staged.all_tables().into_iter().find(|t| t.name == "plain").unwrap();
+		assert_eq!(plain.foreign_keys.len(), 1, "{plain:?}");
+		assert_eq!(plain.foreign_keys[0].column, "owner");
+		// What the catalog lists for another table is unchanged.
+		let post = staged.all_tables().into_iter().find(|t| t.name == "post").unwrap();
+		assert_eq!(post.foreign_keys.len(), 1);
+	}
+
+	#[test]
+	fn the_columns_of_an_existing_table_follow_the_request_that_adds_and_drops_them() {
+		let base = catalog();
+		let mut staged = StagedCatalog::new(&base);
+		for sql in ["ALTER TABLE plain ADD COLUMN extra TEXT", "ALTER TABLE plain DROP COLUMN n"] {
+			let stmt = surrealdb_pgsql::parse_statement(sql).unwrap();
+			staged.stage(&lower_pgsql_ddl_with(&stmt, &staged).unwrap());
+		}
+		let plain = staged.all_tables().into_iter().find(|t| t.name == "plain").unwrap();
+		assert_eq!(plain.column_names(), ["id", "extra"]);
+		assert_eq!(plain.columns[1].ordinal, 1);
+		assert_eq!(plain.columns[1].data_type.as_deref(), Some("text"));
+	}
+
+	#[test]
+	fn dropping_not_null_widens_a_scalar_column_that_refused_null() {
+		let catalog = shaped("t", "n", Kind::Int, ColumnAssert::None);
+		let sql = lower(&catalog, "ALTER TABLE t ALTER COLUMN n DROP NOT NULL").unwrap();
+		assert_eq!(sql.len(), 1);
+		assert!(sql[0].contains("TYPE none | null | int"), "{sql:?}");
+		let optional = shaped("t", "n", nullable(Kind::Int), ColumnAssert::NotNull);
+		let sql = lower(&optional, "ALTER TABLE t ALTER COLUMN n DROP NOT NULL").unwrap();
+		assert!(!sql[0].contains("TYPE"), "{sql:?}");
+	}
+
+	#[test]
+	fn a_foreign_key_that_would_not_name_the_id_or_would_repeat_is_refused() {
+		let others = MemoryCatalog::new().with_listed_tables(vec![
+			TableSchema::new("parent", columns(&["id", "code"]))
+				.with_schema("public")
+				.with_indexes(vec![index("parent_code_pk", &["code"])]),
+			TableSchema::new("child", columns(&["id", "p"])).with_schema("public"),
+		]);
+		for sql in [
+			"ALTER TABLE child ADD FOREIGN KEY (p) REFERENCES parent",
+			"ALTER TABLE child ADD FOREIGN KEY (p) REFERENCES parent(id) ON DELETE SET DEFAULT",
+		] {
+			let err = lower(&others, sql).unwrap_err();
+			assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+		}
+		let stmt = surrealdb_pgsql::parse_statement(
+			"CREATE TABLE t (id INT PRIMARY KEY, x INT REFERENCES a(id) REFERENCES b(id))",
+		)
+		.unwrap();
+		let err = lower_pgsql_ddl_definitions_with(&stmt, &MemoryCatalog::new()).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+	}
+
+	#[test]
+	fn a_self_reference_to_a_table_with_another_primary_key_is_refused() {
+		let stmt = surrealdb_pgsql::parse_statement(
+			"CREATE TABLE node (code INT PRIMARY KEY, parent INT REFERENCES node)",
+		)
+		.unwrap();
+		let err = lower_pgsql_ddl_definitions_with(&stmt, &listed_with_user()).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{err}");
+	}
+
+	#[test]
+	fn conditional_creations_stage_what_the_catalog_proves_absent() {
+		let base = listed_with_user();
+		let mut staged = StagedCatalog::new(&base);
+		for sql in [
+			"CREATE TABLE IF NOT EXISTS fresh (id INT PRIMARY KEY)",
+			"CREATE TABLE IF NOT EXISTS post (id INT PRIMARY KEY, other TEXT)",
+		] {
+			let stmt = surrealdb_pgsql::parse_statement(sql).unwrap();
+			staged.stage(&lower_pgsql_ddl_with(&stmt, &staged).unwrap());
+		}
+		let names: Vec<String> = staged.all_tables().into_iter().map(|t| t.name).collect();
+		assert!(names.contains(&"fresh".to_owned()), "{names:?}");
+		let post = staged.all_tables().into_iter().find(|t| t.name == "post").unwrap();
+		// The existing table keeps its columns; a column the conditional definition adds joins
+		// them.
+		assert_eq!(post.column_names()[..3], ["id", "author", "editor"]);
+	}
+
+	#[test]
+	fn an_altered_foreign_key_reaches_the_listing_of_the_next_statement() {
+		let base = listed_with_user();
+		let mut staged = StagedCatalog::new(&base);
+		let drop =
+			surrealdb_pgsql::parse_statement("ALTER TABLE post DROP CONSTRAINT post_author_fkey")
+				.unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&drop, &staged).unwrap());
+		let post = staged.all_tables().into_iter().find(|t| t.name == "post").unwrap();
+		assert!(post.foreign_keys.is_empty(), "{:?}", post.foreign_keys);
+	}
+
+	#[test]
+	fn the_listing_of_a_table_the_request_creates_carries_its_constraints() {
+		let create = surrealdb_pgsql::parse_statement(
+			"CREATE TABLE fresh (id serial PRIMARY KEY, email TEXT UNIQUE, author INT REFERENCES \"user\"(id) ON DELETE CASCADE)",
+		)
+		.unwrap();
+		let base = listed_with_user();
+		let mut staged = StagedCatalog::new(&base);
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		let fresh = staged.all_tables().into_iter().find(|t| t.name == "fresh").unwrap();
+		assert_eq!(
+			fresh.foreign_keys,
+			[ForeignKeyInfo {
+				column: "author".to_owned(),
+				target_table: "user".to_owned(),
+				on_delete: ReferentialAction::Cascade,
+			}]
+		);
+		assert!(fresh.indexes.iter().any(|index| index.unique && index.columns == ["email"]));
+		assert!(fresh.columns[0].sequence.is_some(), "{:?}", fresh.columns);
+	}
+
+	#[test]
+	fn the_listings_follow_the_tables_the_request_creates_and_removes() {
+		let create =
+			surrealdb_pgsql::parse_statement("CREATE TABLE fresh (id INT, n INT)").unwrap();
+		let drop = surrealdb_pgsql::parse_statement("DROP TABLE plain").unwrap();
+		let base = catalog();
+		let mut staged = StagedCatalog::new(&base);
+		staged.stage(&lower_pgsql_ddl_with(&create, &staged).unwrap());
+		staged.stage(&lower_pgsql_ddl_with(&drop, &staged).unwrap());
+		let names: Vec<String> = staged.all_tables().into_iter().map(|t| t.name).collect();
+		assert_eq!(names, ["post", "fresh"]);
+		let fresh = staged.all_tables().into_iter().find(|t| t.name == "fresh").unwrap();
+		assert_eq!(fresh.column_names(), ["id", "n"]);
+	}
+
+	#[test]
+	fn an_alteration_of_the_assertion_keeps_the_rest_of_the_column_for_the_next_statement() {
+		let base = shaped("post", "author", Kind::Int, ColumnAssert::None);
+		let mut staged = StagedCatalog::new(&base);
+		let alter =
+			surrealdb_pgsql::parse_statement("ALTER TABLE post ALTER COLUMN author SET NOT NULL")
+				.unwrap();
+		staged.stage(&lower_pgsql_ddl_with(&alter, &staged).unwrap());
+		let shape = staged.column_shape(None, "post", "author").unwrap();
+		assert_eq!(shape.assert, ColumnAssert::NotNull);
+		assert_eq!(shape.kind, Some(Kind::Int));
+	}
+}
+#[test]
+fn test_pgsql_time_zone_suffix_names_the_type() {
+	let stmt = surrealdb_pgsql::parse_statement(
+		"CREATE TABLE t (a TIMESTAMP(3) WITH TIME ZONE, b TIME WITHOUT TIME ZONE, c TIMESTAMP WITH TIME ZONE[])",
+	)
+	.expect("parse pgsql");
+	let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+		panic!("Expected CreateTable");
+	};
+	assert_eq!(map_pgsql_type(&ct.columns[0].data_type), Kind::Datetime);
+	assert_eq!(map_pgsql_type(&ct.columns[1].data_type), Kind::Datetime);
+	assert_eq!(
+		map_pgsql_type(&ct.columns[2].data_type),
+		Kind::Array(Box::new(Kind::Datetime), None)
+	);
+	assert!(
+		surrealdb_pgsql::parse_statement("CREATE TABLE t (a TIMESTAMP WITH TIMEZONE)").is_err()
+	);
+}
+
+#[test]
+fn a_column_with_two_foreign_keys_is_refused() {
+	for sql in [
+		"CREATE TABLE t (id INT PRIMARY KEY, x INT REFERENCES a(id), FOREIGN KEY (x) REFERENCES b(id))",
+		"CREATE TABLE t (id INT PRIMARY KEY, x INT, FOREIGN KEY (x) REFERENCES a(id), FOREIGN KEY (x) REFERENCES b(id))",
+	] {
+		let stmt = surrealdb_pgsql::parse_statement(sql).expect("parse");
+		let err = lower_pgsql_ddl_definitions(&stmt).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}: {err}");
+	}
 }

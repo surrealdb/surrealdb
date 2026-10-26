@@ -140,8 +140,13 @@ VALUES`, a positional item of `INSERT ... SELECT`, `UPDATE ... SET`, `ON CONFLIC
 - A value that is a record when evaluated is left as it is, even a record of another table, which
   the type check of the field refuses.
 - An integer, non-empty string, uuid, array or object is the record `type::record(t, <value>)` names.
-- Anything else (`NULL`, `NONE`, a float, a boolean, a datetime, the empty string) is left as it is,
-  for the type check of the field to accept or refuse.
+- `NULL` written to a link column whose type admits `NONE` (`option<record<t>>`, or a union with
+  `none`) is stored as `NONE`, which reads back as `NULL`, as PostgreSQL stores a NULL foreign key. This
+  holds for a literal, a parameter and any expression that evaluates to NULL, in `INSERT`, `UPDATE`,
+  `ON CONFLICT`, `COPY` and a `DEFAULT NULL`. A link column whose type does not admit `NONE` refuses
+  `NULL`: the type check fails, which the wire layer reports as `23502`.
+- Anything else (`NONE`, a float, a boolean, a datetime, the empty string) is left as it is, for the
+  type check of the field to accept or refuse.
 
 ```
 INSERT INTO emp (id, dept) VALUES (8, $1)
@@ -184,6 +189,39 @@ index on the column serves an equality or a membership of it, and does not serve
 The `WHERE` clause of a write is evaluated as the engine evaluates it, without SQL's three-valued
 handling of NULL, for every column: a comparison with a NULL or an absent value gives the engine's
 answer, not NULL.
+
+### SQL foreign keys
+
+A PostgreSQL foreign key makes its column a link field. `CREATE TABLE` with a column `REFERENCES
+t [(id)]` or a table `FOREIGN KEY (col) REFERENCES t [(id)]`, `ALTER TABLE ... ADD COLUMN ...
+REFERENCES t` and `ALTER TABLE ... ADD [CONSTRAINT name] FOREIGN KEY (col) REFERENCES t [(id)]` define
+the column as `record<t>` (`option<record<t>>` when the column may be NULL) with a `REFERENCE`, so a
+SQL client reads, writes and joins the column by the key of the row, as above. `ON DELETE CASCADE`
+is the `cascade` strategy, `SET NULL` is `unset`, and `NO ACTION`, `RESTRICT` and `SET DEFAULT`
+are `reject`. The catalog lists the column in `pg_constraint` as `<table>_<column>_fkey` and reports
+it with the SQL type of the key of the target table (the type of its `id`), which is `bigint` for
+an integer key. A foreign key over several columns, one to a column other than `id`, one on the `id`
+column and one over a column that is not an integer, text or uuid is refused (`0A000`).
+
+A `REFERENCE` does not check that a link names a row, so the field also carries an `ASSERT` that
+does: a write whose value names no row of the target fails as `insert or update on table "t"
+violates foreign key constraint "t_col_fkey"` (`23503`). A row that keeps its value is not judged
+again. A table that links to itself accepts the row that names itself. A delete that a `reject`
+reference refuses is `23503` too. `DROP CONSTRAINT <table>_<column>_fkey` drops the `REFERENCE` and
+the `ASSERT` and keeps the type, so the column is still a link that is written as a key.
+
+`ADD FOREIGN KEY` over a scalar column converts the column and its rows in one statement that runs
+in one transaction. It first fails with `23503` if a row holds a value that names no row of the
+target, then widens the column's type to take links, rewrites the rows to hold links (NULL becomes
+absent), narrows the type to the link with a migration that keeps them, and sets the `REFERENCE` and
+the `ASSERT`. The rows are rewritten ahead of the narrowing because the engine does not migrate the
+field of a `REFERENCE` and keeps no backlink for a row that a migration changes lazily. A column
+that has a `DEFAULT` or an assertion other than `NOT NULL` is refused (`0A000`). The column is found
+in the schema, or among the columns the earlier statements of the same request declare, so a
+migration that creates a table and alters it in one request converts the column it created.
+
+A nullable foreign key column accepts SQL NULL, stored as `NONE` as above; a `NOT NULL` one refuses
+it (`23502`).
 
 ## Numeric literals
 

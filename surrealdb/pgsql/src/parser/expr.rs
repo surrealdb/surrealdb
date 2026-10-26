@@ -35,6 +35,25 @@ impl<'a> Parser<'a> {
 		self.parse_select_stmt().map(Box::new)
 	}
 
+	/// Parse the array operand of `left <op> ANY|SOME|ALL (array)` after its opening parenthesis.
+	fn parse_quantified_array(
+		&mut self,
+		left: Expr,
+		op: BinaryOperator,
+		quantifier: Quantifier,
+	) -> ParseResult<Expr> {
+		let array = self.parse_expr()?;
+		let r_paren = self.expect(&TokenKind::RParen, "')' closing quantified array")?;
+		let span = left.span().merge(r_paren.span);
+		Ok(Expr::QuantifiedArray {
+			expr: Box::new(left),
+			op,
+			quantifier,
+			array: Box::new(array),
+			span,
+		})
+	}
+
 	/// Whether `expr`, looking through parentheses, is the decimal integer literal
 	/// 9223372036854775808 as written in the source: digits (and `_`) only, the magnitude of the
 	/// int8 minimum.
@@ -366,6 +385,13 @@ impl<'a> Parser<'a> {
 			if let Some(quantifier) = quantifier {
 				self.bump()?; // consume ANY / SOME / ALL
 				self.expect(&TokenKind::LParen, "'(' after quantifier")?;
+				if !matches!(
+					self.peek().kind,
+					TokenKind::Keyword(Keyword::Select | Keyword::With | Keyword::Values)
+				) {
+					left = self.parse_quantified_array(left, binary_op, quantifier)?;
+					continue;
+				}
 				let sub = self.parse_subquery_box()?;
 				let r_paren = self.expect(&TokenKind::RParen, "')' closing quantified subquery")?;
 				let span = left.span().merge(r_paren.span);
@@ -901,6 +927,18 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Parse the label after `AS` in a select list, where any keyword, reserved or not, names the
+	/// column.
+	pub fn parse_col_label(&mut self) -> ParseResult<(String, Span)> {
+		let tok = self.peek().clone();
+		if let TokenKind::Keyword(kw) = &tok.kind {
+			self.bump()?;
+			Ok((kw.as_str().to_lowercase(), tok.span))
+		} else {
+			self.parse_ident()
+		}
+	}
+
 	/// Parse a single string constant or dollar-quoted string token.
 	pub fn parse_string_constant(&mut self) -> ParseResult<(String, Span)> {
 		let tok = self.peek().clone();
@@ -965,6 +1003,50 @@ impl<'a> Parser<'a> {
 			}
 			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
 			end_span = end_span.merge(r_paren.span);
+		}
+
+		// `TIMESTAMP(3) WITH TIME ZONE`, `TIME WITHOUT TIME ZONE`: the zone suffix follows the
+		// modifiers and is part of the type's name.
+		if name.parts.last().is_some_and(|last| {
+			last.eq_ignore_ascii_case("timestamp") || last.eq_ignore_ascii_case("time")
+		}) {
+			let next = &self.peek().kind;
+			let suffix = if *next == TokenKind::Keyword(Keyword::With) {
+				Some(" with time zone")
+			} else if *next == TokenKind::Keyword(Keyword::Without) {
+				Some(" without time zone")
+			} else {
+				None
+			};
+			if let Some(suffix) = suffix {
+				self.bump()?;
+				for word in ["time", "zone"] {
+					let tok = self.peek().clone();
+					if !tok
+						.span
+						.slice(self.src())
+						.is_some_and(|text| text.eq_ignore_ascii_case(word))
+					{
+						return Err(ParseError::new(
+							tok.span,
+							ErrorKind::UnexpectedToken {
+								expected: if word == "time" {
+									"TIME"
+								} else {
+									"ZONE"
+								},
+								found: tok.kind.to_string(),
+							},
+						));
+					}
+					end_span = end_span.merge(tok.span);
+					self.bump()?;
+				}
+				name.span = end_span;
+				if let Some(last) = name.parts.last_mut() {
+					last.push_str(suffix);
+				}
+			}
 		}
 
 		// Check for array dimensions e.g. `[]` or `[10]`

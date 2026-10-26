@@ -31,6 +31,8 @@ pub struct BoundSelect {
 	pub for_update: bool,
 	/// User-defined tables discovered from catalog (for system catalog introspection).
 	pub user_tables: Vec<crate::catalog::TableSchema>,
+	/// The database the statement runs in, which the catalog views name as their catalog.
+	pub database: Option<String>,
 	/// The HNSW indexes over the table the select reads, when it reads one table.
 	pub hnsw_indexes: Vec<BoundHnswIndex>,
 }
@@ -116,6 +118,14 @@ pub enum BoundTableSource {
 	/// Subquery in FROM.
 	Subquery {
 		query: Box<BoundSelect>,
+		relation_index: usize,
+		alias: String,
+	},
+	/// A `LATERAL` subquery of expressions: one row of the relation for each combination of
+	/// the set-returning calls in `targets`, evaluated over each row of the relations to its left.
+	/// Each target is a column of the relation, named by its `alias`.
+	Lateral {
+		targets: Vec<BoundTarget>,
 		relation_index: usize,
 		alias: String,
 	},

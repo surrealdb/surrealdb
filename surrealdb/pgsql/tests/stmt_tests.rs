@@ -1,8 +1,8 @@
 //! Unit and integration tests for PostgreSQL statement parser.
 
 use surrealdb_pgsql::ast::stmt::{
-	DistinctClause, DropObjectType, JoinCondition, JoinType, NullsOrder, OnConflictAction,
-	OrderDirection, Statement, TableConstraint, TableRef, TransactionStmt,
+	AlterTableAction, DistinctClause, DropObjectType, JoinCondition, JoinType, NullsOrder,
+	OnConflictAction, OrderDirection, Statement, TableConstraint, TableRef, TransactionStmt,
 };
 use surrealdb_pgsql::printer::ToPgSql;
 use surrealdb_pgsql::{parse_statement, parse_statements};
@@ -58,7 +58,7 @@ fn test_parse_select_joins() {
 		..
 	} = &select.from[0]
 	else {
-		panic!("expected left join, got {:?}", &select.from[0]);
+		panic!("expected left join, got {:?}", select.from[0]);
 	};
 	assert_eq!(cols, &vec!["dept_id"]);
 	assert!(matches!(
@@ -84,7 +84,7 @@ fn test_parse_select_subquery() {
 		..
 	} = &select.from[0]
 	else {
-		panic!("expected Subquery in from, got {:?}", &select.from[0]);
+		panic!("expected Subquery in from, got {:?}", select.from[0]);
 	};
 	assert_eq!(alias.name, "u");
 }
@@ -103,7 +103,7 @@ fn test_parse_select_values_in_from() {
 		..
 	} = &select.from[0]
 	else {
-		panic!("expected Subquery in from, got {:?}", &select.from[0]);
+		panic!("expected Subquery in from, got {:?}", select.from[0]);
 	};
 	assert_eq!(alias.name, "v");
 	assert_eq!(alias.columns, vec!["n".to_string(), "l".to_string()]);
@@ -204,9 +204,10 @@ fn test_parse_create_table_comprehensive() {
 		columns,
 		ref_table,
 		ref_columns,
+		..
 	} = &create.constraints[0]
 	else {
-		panic!("expected ForeignKey table constraint, got {:?}", &create.constraints[0]);
+		panic!("expected ForeignKey table constraint, got {:?}", create.constraints[0]);
 	};
 	assert_eq!(columns, &vec!["org_id"]);
 	assert_eq!(ref_table.parts, vec!["orgs"]);
@@ -320,4 +321,113 @@ fn test_parse_insert_on_conflict_target_where_and_do_nothing() {
 	assert!(conflict.target_where.is_some());
 	assert!(conflict.where_clause.is_none());
 	assert!(matches!(conflict.action, OnConflictAction::DoNothing));
+}
+
+#[test]
+fn test_parse_foreign_key_referential_actions() {
+	use surrealdb_pgsql::ast::stmt::{ColumnConstraint, ReferentialAction};
+
+	let stmt = parse_statement(
+		"CREATE TABLE posts (author_id INT REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET \
+		 NULL, org_id INT, FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT ON UPDATE \
+		 SET DEFAULT)",
+	)
+	.expect("parse actions");
+	let Statement::CreateTable(create) = stmt else {
+		panic!("expected CreateTable");
+	};
+	let ColumnConstraint::References {
+		on_delete,
+		..
+	} = &create.columns[0].constraints[0]
+	else {
+		panic!("expected a REFERENCES constraint");
+	};
+	assert_eq!(*on_delete, ReferentialAction::SetNull);
+	let TableConstraint::ForeignKey {
+		on_delete,
+		..
+	} = &create.constraints[0]
+	else {
+		panic!("expected a foreign key");
+	};
+	assert_eq!(*on_delete, ReferentialAction::Restrict);
+
+	let stmt = parse_statement(
+		"ALTER TABLE \"CompatPost\" ADD CONSTRAINT \"fk\" FOREIGN KEY (\"authorId\") REFERENCES \
+		 \"public\".\"CompatUser\"(\"id\") ON DELETE no action ON UPDATE no action",
+	)
+	.expect("parse drizzle's foreign key");
+	let Statement::AlterTable(alter) = stmt else {
+		panic!("expected AlterTable");
+	};
+	let AlterTableAction::AddConstraint(TableConstraint::ForeignKey {
+		on_delete,
+		..
+	}) = &alter.actions[0]
+	else {
+		panic!("expected an added foreign key");
+	};
+	assert_eq!(*on_delete, ReferentialAction::NoAction);
+
+	// An action prints back, so the statement survives a round trip.
+	let sql = "CREATE TABLE t (a INT REFERENCES u(id) ON DELETE CASCADE)";
+	let printed = parse_statement(sql).unwrap().to_string();
+	assert!(printed.contains("ON DELETE CASCADE"), "{printed}");
+	assert_eq!(parse_statement(&printed).unwrap().to_string(), printed);
+
+	assert!(parse_statement("CREATE TABLE t (a INT REFERENCES u(id) ON DELETE").is_err());
+	assert!(
+		parse_statement("CREATE TABLE t (a INT REFERENCES u(id) ON TRUNCATE CASCADE)").is_err()
+	);
+	assert!(parse_statement("CREATE TABLE t (a INT REFERENCES u(id) ON DELETE SET)").is_err());
+}
+
+#[test]
+fn test_parse_lateral_subquery() {
+	let stmt =
+		parse_statement("SELECT k.a FROM t CROSS JOIN LATERAL (SELECT unnest(t.xs)) AS k(a)")
+			.expect("parse LATERAL");
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select");
+	};
+	let TableRef::Join {
+		right,
+		..
+	} = &select.from[0]
+	else {
+		panic!("expected a join");
+	};
+	assert!(matches!(
+		right.as_ref(),
+		TableRef::Subquery {
+			lateral: true,
+			..
+		}
+	));
+	let printed = Statement::Select(select).to_string();
+	assert!(printed.contains("LATERAL ("), "{printed}");
+
+	assert!(parse_statement("SELECT 1 FROM t, LATERAL generate_series(1, 2) AS g").is_err());
+	assert!(parse_statement("SELECT 1 FROM t, LATERAL (t2 JOIN t3 ON true)").is_err());
+}
+
+#[test]
+fn test_parse_empty_select_list_and_keyword_aliases() {
+	let stmt = parse_statement("SELECT FROM t WHERE true").expect("parse an empty list");
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select");
+	};
+	assert!(select.targets.is_empty());
+	assert!(parse_statement("SELECT EXISTS (SELECT FROM t)").is_ok());
+
+	let stmt = parse_statement("SELECT a AS to, b AS for, c AS using, d AS with FROM t")
+		.expect("parse keyword aliases");
+	let Statement::Select(select) = stmt else {
+		panic!("expected Select");
+	};
+	let aliases: Vec<_> = select.targets.iter().map(|t| t.alias.as_deref()).collect();
+	assert_eq!(aliases, [Some("to"), Some("for"), Some("using"), Some("with")]);
+	// Without `AS`, a reserved keyword is no alias.
+	assert!(parse_statement("SELECT a to FROM t").is_err());
 }

@@ -5,7 +5,7 @@ database = true
 imports = ["pgsql/_link_fields.surql"]
 
 [test]
-reason = "A plain key written to a column declared as a link to one table stores the link to that table: an integer or string literal, an expression, a multi-row VALUES, a column order unlike the table's, UPDATE SET, ON CONFLICT DO UPDATE and INSERT ... SELECT. A value that is not a key (a float, a boolean, NULL, the empty string), a link to another table, and a key written to a column that links to any table or to several types, reaches the engine's own type check and is refused or kept as the type says."
+reason = "A plain key written to a column declared as a link to one table stores the link to that table: an integer or string literal, an expression, a multi-row VALUES, a column order unlike the table's, UPDATE SET, ON CONFLICT DO UPDATE and INSERT ... SELECT. SQL NULL written to a link column whose type admits NONE (`option<record<t>>`) is stored as NONE and reads back as NULL; a link column whose type does not admit NONE refuses it. A value that is not a key (a float, a boolean, the empty string), a link to another table, and a key written to a column that links to any table or to several types, reaches the engine's own type check and is refused or kept as the type says."
 
 [[test.results]]
 value = "[{ dept: dept:2, id: 5, name: 'Kim' }]"
@@ -56,7 +56,10 @@ error = "Couldn't coerce value for field `dept` of `emp:3`: Expected `record<dep
 value = "[{ id: 1, owner: dept:1 }]"
 
 [[test.results]]
-error = "Couldn't coerce value for field `owner` of `project:2`: Expected `none | record<dept>` but found `NULL`"
+value = "[{ id: 2, owner: NONE }]"
+
+[[test.results]]
+value = "[{ id: 1, owner: NONE }]"
 
 [[test.results]]
 value = "[{ id: 3, owner: NONE }]"
@@ -106,7 +109,9 @@ UPDATE emp SET dept = mentor WHERE id = 3;
 
 INSERT INTO project (id, title, owner) VALUES (1, 'Alpha', 1) RETURNING id, owner;
 
-INSERT INTO project (id, title, owner) VALUES (2, 'Beta', NULL);
+INSERT INTO project (id, title, owner) VALUES (2, 'Beta', NULL) RETURNING id, owner;
+
+UPDATE project SET owner = NULL WHERE id = 1 RETURNING id, owner;
 
 INSERT INTO project (id, title) VALUES (3, 'Gamma') RETURNING id, owner;
 

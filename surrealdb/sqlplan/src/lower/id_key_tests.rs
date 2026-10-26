@@ -1,5 +1,9 @@
 //! The lowered shape of the `id` column of a base table: read as the key of the stored record id.
 
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use std::collections::BTreeSet;
 
 use surrealdb_expr::expr::logical::{
@@ -500,7 +504,10 @@ fn a_correlated_reference_to_the_id_of_an_outer_table_is_compared_with_the_recor
 #[test]
 fn system_catalog_tables_have_no_id_to_read_as_a_key() {
 	let op = pg_select("SELECT * FROM pg_catalog.pg_namespace");
-	assert!(projection(&op).iter().all(|field| field == "*"), "{:?}", projection(&op));
+	// Each column of the view is selected by name, and none is read as a record key.
+	let fields = projection(&op);
+	assert_eq!(fields.len(), 4, "{fields:?}");
+	assert!(fields.iter().all(|field| !field.contains("record::id")), "{fields:?}");
 }
 
 #[test]

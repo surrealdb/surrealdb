@@ -150,7 +150,20 @@ pub fn bind_select(
 		}
 
 		let bound_expr = bind_expr(&target.expr, &scope, catalog, policy)?;
-		let alias = target.alias.clone().map(|a| policy.fold_identifier(&a).into_owned());
+		let alias =
+			target.alias.clone().map(|a| policy.fold_identifier(&a).into_owned()).or_else(|| {
+				// A cast of a column is named after the column, as in `start_value::int8`.
+				if let BoundExpr::Cast {
+					expr: inner,
+					..
+				} = &bound_expr && let BoundExpr::Column(col) = inner.as_ref()
+					&& col.column != "*"
+				{
+					Some(col.column.clone())
+				} else {
+					None
+				}
+			});
 		targets.push(BoundTarget {
 			expr: bound_expr,
 			alias,
@@ -330,6 +343,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes,
 	})
 }
@@ -395,6 +409,233 @@ fn name_derived_columns(
 /// The names of the columns `query` answers, where each is known.
 fn derived_column_names(query: &BoundSelect) -> Option<Vec<String>> {
 	query.targets.iter().map(|t| output_name(t).map(str::to_owned)).collect()
+}
+
+/// Bind `LATERAL (SELECT targets) AS alias(columns)`: a subquery that has no `FROM` and no
+/// clause but its targets, whose targets read the relations to its left as columns of the row they
+/// extend. Each target is a column of the relation `alias`.
+/// A type named by a constant and cast to `regtype`, as the oid of the type when it is compared
+/// with a value that is one (`CASE atttypid WHEN 'int8'::regtype ...`). Any other expression is
+/// returned as it is.
+fn regtype_constant_as_oid(expr: BoundExpr) -> BoundExpr {
+	if let BoundExpr::Cast {
+		expr: inner,
+		target_type,
+	} = &expr
+		&& target_type.eq_ignore_ascii_case("regtype")
+		&& let BoundExpr::Literal(BoundLiteral::String(name)) = inner.as_ref()
+		&& let Some(oid) = crate::lower::expr::regtype_oid(name)
+	{
+		return BoundExpr::Literal(BoundLiteral::Integer(oid));
+	}
+	expr
+}
+
+fn bind_lateral(
+	query: &SelectStmt,
+	alias: &surrealdb_pgsql::ast::stmt::TableAlias,
+	scope: &mut QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundTableSource, PlanError> {
+	let plain = query.with.is_none()
+		&& query.distinct.is_none()
+		&& query.from.is_empty()
+		&& query.where_clause.is_none()
+		&& query.group_by.is_empty()
+		&& query.having.is_none()
+		&& query.window.is_empty()
+		&& query.order_by.is_empty()
+		&& query.limit.is_none()
+		&& query.offset.is_none()
+		&& query.locking.is_empty()
+		&& query.set_op.is_none();
+	if !plain || query.targets.is_empty() {
+		return Err(PlanError::UnsupportedStatement(
+			"a LATERAL subquery must be a SELECT of expressions with no other clause".into(),
+		));
+	}
+	if alias.columns.len() > query.targets.len() {
+		return Err(PlanError::UnsupportedStatement(
+			"a column alias list longer than the LATERAL subquery's targets".into(),
+		));
+	}
+	let mut targets = Vec::with_capacity(query.targets.len());
+	let mut columns = Vec::with_capacity(query.targets.len());
+	for (position, target) in query.targets.iter().enumerate() {
+		if matches!(&target.expr, Expr::ColumnRef(column) if column.fields.last().is_some_and(|f| f == "*"))
+		{
+			return Err(PlanError::UnsupportedStatement("a wildcard in a LATERAL subquery".into()));
+		}
+		let name = alias
+			.columns
+			.get(position)
+			.cloned()
+			.or_else(|| target.alias.clone())
+			.unwrap_or_else(|| format!("column{}", position + 1));
+		if columns.contains(&name) {
+			return Err(PlanError::UnsupportedStatement(format!(
+				"the LATERAL subquery names two columns \"{name}\""
+			)));
+		}
+		targets.push(BoundTarget {
+			expr: bind_expr(&target.expr, scope, catalog, policy)?,
+			alias: Some(name.clone()),
+			is_wildcard: false,
+			table_wildcard: None,
+		});
+		columns.push(name);
+	}
+	let relation_index = scope.register_subquery_with_columns(&alias.name, Some(columns), policy);
+	// The relation keeps the targets, so a column read from it has the type of its expression.
+	scope.relations[relation_index].source_query = Some(Arc::new(BoundSelect {
+		with: None,
+		from: None,
+		where_clause: None,
+		targets: targets.clone(),
+		group_by: Vec::new(),
+		having: None,
+		windows: Vec::new(),
+		order_by: Vec::new(),
+		limit: None,
+		offset: None,
+		distinct: None,
+		set_op: None,
+		for_update: false,
+		user_tables: Vec::new(),
+		database: None,
+		hnsw_indexes: Vec::new(),
+	}));
+	Ok(BoundTableSource::Lateral {
+		targets,
+		relation_index,
+		alias: alias.name.clone(),
+	})
+}
+
+/// The functions whose answer is a property of the catalog (`pg_get_indexdef`,
+/// `pg_get_constraintdef`, `pg_get_serial_sequence`): the call becomes a lookup over what the
+/// catalog lists, or `None` when `fn_name` is no such function. Kept apart from [`bind_expr`] so
+/// that its frame, which every nested expression pays for, stays small.
+#[inline(never)]
+fn bind_catalog_function(
+	fn_name: &str,
+	over_is_none: bool,
+	bound_args: &[BoundExpr],
+	catalog: &dyn BinderCatalog,
+) -> Result<Option<BoundExpr>, PlanError> {
+	if fn_name == "pg_get_indexdef" && over_is_none && bound_args.len() == 1 {
+		// The definition is a property of the index the oid names, which only the catalog
+		// knows: the call becomes a lookup over the indexes it lists, and an oid that
+		// names none is NULL.
+		let definitions =
+			crate::catalog::relations::index_definitions(&catalog.constraint_tables());
+		if definitions.is_empty() {
+			return Ok(Some(BoundExpr::Literal(BoundLiteral::Null)));
+		}
+		let Some(operand) = bound_args.first().cloned() else {
+			return Ok(Some(BoundExpr::Literal(BoundLiteral::Null)));
+		};
+		return Ok(Some(BoundExpr::Case {
+			operand: Some(Box::new(operand)),
+			branches: definitions
+				.into_iter()
+				.map(|(oid, definition)| {
+					(
+						BoundExpr::Literal(BoundLiteral::Integer(oid)),
+						BoundExpr::Literal(BoundLiteral::String(definition)),
+					)
+				})
+				.collect(),
+			else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+		}));
+	}
+
+	if fn_name == "pg_get_constraintdef" && over_is_none {
+		// The definition is a property of the constraint the oid names, which only the
+		// catalog knows: the call becomes a lookup over the constraints it lists, and
+		// an oid that names none is NULL.
+		let definitions =
+			crate::catalog::relations::constraint_definitions(&catalog.constraint_tables());
+		if definitions.is_empty() {
+			return Ok(Some(BoundExpr::Literal(BoundLiteral::Null)));
+		}
+		let mut args = bound_args.iter().cloned();
+		let operand = args.next().ok_or_else(|| PlanError::FunctionArgumentCountMismatch {
+			name: fn_name.to_owned(),
+			expected: "at least 1".into(),
+			got: 0,
+		})?;
+		return Ok(Some(BoundExpr::Case {
+			operand: Some(Box::new(operand)),
+			branches: definitions
+				.into_iter()
+				.map(|(oid, definition)| {
+					(
+						BoundExpr::Literal(BoundLiteral::Integer(oid)),
+						BoundExpr::Literal(BoundLiteral::String(definition)),
+					)
+				})
+				.collect(),
+			else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+		}));
+	}
+
+	if fn_name == "pg_get_serial_sequence" && over_is_none && bound_args.len() == 2 {
+		// The sequence is a property of a column the catalog lists, so the call becomes a
+		// lookup over the serial columns: a table is named as the SQL text of its name,
+		// qualified or not, quoted or not, or as its oid, and a column that no sequence
+		// numbers is NULL. The sequence is named as `regclass` writes it.
+		let serial = crate::catalog::relations::serial_columns(&catalog.constraint_tables());
+		if serial.is_empty() {
+			return Ok(Some(BoundExpr::Literal(BoundLiteral::Null)));
+		}
+		let text = |value: String| BoundExpr::Literal(BoundLiteral::String(value));
+		let equal = |left: BoundExpr, right: BoundExpr| BoundExpr::Binary {
+			left: Box::new(left),
+			op: BoundBinaryOp::Equal,
+			right: Box::new(right),
+		};
+		let mut args = bound_args.iter().cloned();
+		let (Some(table), Some(column)) = (args.next(), args.next()) else {
+			return Ok(Some(BoundExpr::Literal(BoundLiteral::Null)));
+		};
+		let branches = serial
+			.into_iter()
+			.map(|serial| {
+				let quoted = format!("\"{}\"", serial.table.replace('"', "\"\""));
+				let mut names = vec![
+					serial.table.clone(),
+					quoted.clone(),
+					format!("{}.{}", serial.schema, serial.table),
+					format!("{}.{quoted}", serial.schema),
+					format!("\"{}\".{}", serial.schema, serial.table),
+					format!("\"{}\".{quoted}", serial.schema),
+					serial.table_oid.to_string(),
+				];
+				names.dedup();
+				let table_matches = BoundExpr::InList {
+					expr: Box::new(table.clone()),
+					list: names.into_iter().map(text).collect(),
+					negated: false,
+				};
+				(
+					BoundExpr::Binary {
+						left: Box::new(table_matches),
+						op: BoundBinaryOp::And,
+						right: Box::new(equal(column.clone(), text(serial.column))),
+					},
+					text(crate::catalog::relations::quote_ident(&serial.sequence)),
+				)
+			})
+			.collect();
+		return Ok(Some(BoundExpr::Case {
+			operand: None,
+			branches,
+			else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+		}));
+	}
+	Ok(None)
 }
 
 fn bind_table_ref(
@@ -466,15 +707,10 @@ fn bind_table_ref(
 			let (schema, table_name) = resolve_table_qualified_name(name, policy, Some(catalog))?;
 			let alias_name = alias.as_ref().map(|a| a.name.clone());
 
-			let relation_index = scope.register_relation(
-				schema.clone(),
-				&table_name,
-				alias_name.clone(),
-				catalog,
-				policy,
-			);
+			let relation_index =
+				scope.register_relation(schema.clone(), &table_name, alias_name, catalog, policy);
 
-			let exposed_name = alias_name.unwrap_or_else(|| table_name.clone());
+			let exposed_name = scope.relations[relation_index].exposed_name.clone();
 
 			Ok(BoundTableSource::Table {
 				schema,
@@ -575,6 +811,7 @@ fn bind_table_ref(
 				set_op: None,
 				for_update: false,
 				user_tables: Vec::new(),
+				database: None,
 				hnsw_indexes: Vec::new(),
 			};
 			let relation_index =
@@ -587,6 +824,13 @@ fn bind_table_ref(
 			})
 		}
 		TableRef::Subquery {
+			lateral: true,
+			query,
+			alias,
+			..
+		} => bind_lateral(query, alias, scope, catalog, policy),
+		TableRef::Subquery {
+			lateral: false,
 			query,
 			alias,
 			..
@@ -831,8 +1075,14 @@ pub fn bind_expr(
 					BoundBinaryOp::JsonPathExtractText
 				}
 				surrealdb_pgsql::ast::op::BinaryOperator::Contains => BoundBinaryOp::JsonContains,
-				surrealdb_pgsql::ast::op::BinaryOperator::BitAnd
-				| surrealdb_pgsql::ast::op::BinaryOperator::BitOr
+				surrealdb_pgsql::ast::op::BinaryOperator::BitAnd => {
+					return Ok(BoundExpr::FunctionCall {
+						name: crate::functions::BIT_AND.to_owned(),
+						args: vec![l, r],
+						distinct: false,
+					});
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::BitOr
 				| surrealdb_pgsql::ast::op::BinaryOperator::BitXor
 				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftLeft
 				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
@@ -953,6 +1203,11 @@ pub fn bind_expr(
 				} else {
 					bound_args
 				};
+			if let Some(call) =
+				bind_catalog_function(&fn_name, over.is_none(), &bound_args, catalog)?
+			{
+				return Ok(call);
+			}
 
 			if let Some(spec) = over {
 				if bound_args.iter().any(|a| a.contains_window()) {
@@ -986,7 +1241,10 @@ pub fn bind_expr(
 				.map(Box::new);
 			let mut bound_branches = Vec::new();
 			for when in branches {
-				let cond = bind_expr(&when.when, scope, catalog, policy)?;
+				let mut cond = bind_expr(&when.when, scope, catalog, policy)?;
+				if bound_operand.is_some() {
+					cond = regtype_constant_as_oid(cond);
+				}
 				let val = bind_expr(&when.then, scope, catalog, policy)?;
 				bound_branches.push((cond, val));
 			}
@@ -1074,6 +1332,10 @@ pub fn bind_expr(
 					target_type =
 						format!("vector({})", crate::vector::check_dimensions(dimensions)?);
 				}
+			} else {
+				for _ in &data_type.array_bounds {
+					target_type.push_str("[]");
+				}
 			}
 			Ok(BoundExpr::Cast {
 				expr: Box::new(val),
@@ -1147,6 +1409,38 @@ pub fn bind_expr(
 			let bound_subquery =
 				bind_select(subquery, catalog, policy, Some(Arc::new(scope.clone())))?;
 			Ok(BoundExpr::ArraySubquery(Box::new(bound_subquery)))
+		}
+		Expr::QuantifiedArray {
+			expr,
+			op,
+			quantifier,
+			array,
+			..
+		} => {
+			use surrealdb_pgsql::Quantifier;
+			use surrealdb_pgsql::ast::op::BinaryOperator;
+
+			let (BinaryOperator::Eq | BinaryOperator::NotEq) = op else {
+				return Err(PlanError::UnsupportedExpression(format!(
+					"{op:?} {quantifier:?} (array)"
+				)));
+			};
+			let equal = *op == BinaryOperator::Eq;
+			// The comparison and the quantifier are the two literal arguments of the internal
+			// function the lowering reads three-valued.
+			Ok(BoundExpr::FunctionCall {
+				name: crate::functions::QUANTIFIED_ARRAY.to_owned(),
+				args: vec![
+					bind_expr(expr, scope, catalog, policy)?,
+					bind_expr(array, scope, catalog, policy)?,
+					BoundExpr::Literal(BoundLiteral::Boolean(equal)),
+					BoundExpr::Literal(BoundLiteral::Boolean(matches!(
+						quantifier,
+						Quantifier::All
+					))),
+				],
+				distinct: false,
+			})
 		}
 		Expr::Quantified {
 			expr,
@@ -1275,9 +1569,18 @@ pub fn bind_expr(
 			}
 		}
 		Expr::Subscript {
+			expr,
+			index,
 			..
-		}
-		| Expr::Slice {
+		} => Ok(BoundExpr::FunctionCall {
+			name: crate::functions::SUBSCRIPT.to_owned(),
+			args: vec![
+				bind_expr(expr, scope, catalog, policy)?,
+				bind_expr(index, scope, catalog, policy)?,
+			],
+			distinct: false,
+		}),
+		Expr::Slice {
 			..
 		}
 		| Expr::IsTrue {

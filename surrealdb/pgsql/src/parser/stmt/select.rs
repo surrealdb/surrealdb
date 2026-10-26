@@ -252,7 +252,15 @@ impl<'a> Parser<'a> {
 		};
 
 		// 2. Target list
-		let targets = self.parse_select_list()?;
+		let targets = if self.peek().kind == TokenKind::Keyword(Keyword::From)
+			|| self.peek().kind == TokenKind::Semi
+			|| self.peek().kind == TokenKind::RParen
+			|| self.peek().is_eof()
+		{
+			Vec::new()
+		} else {
+			self.parse_select_list()?
+		};
 
 		// 3. Optional FROM clause
 		let from = if self.eat(&TokenKind::Keyword(Keyword::From))? {
@@ -508,7 +516,11 @@ impl<'a> Parser<'a> {
 
 				// Optional AS alias or bare identifier alias
 				let has_as = self.eat(&TokenKind::Keyword(Keyword::As))?;
-				let alias = if has_as || self.is_table_or_col_alias_start() {
+				let alias = if has_as {
+					let (name, alias_span) = self.parse_col_label()?;
+					span = span.merge(alias_span);
+					Some(name)
+				} else if self.is_table_or_col_alias_start() {
 					let (name, alias_span) = self.parse_ident()?;
 					span = span.merge(alias_span);
 					Some(name)
@@ -560,6 +572,13 @@ impl<'a> Parser<'a> {
 	/// parenthesized join).
 	/// gram.y: table_ref, func_table, func_alias_clause.
 	pub fn parse_table_factor(&mut self) -> ParseResult<TableRef> {
+		let lateral = self.eat(&TokenKind::Keyword(Keyword::Lateral))?;
+		if lateral && self.peek().kind != TokenKind::LParen {
+			return Err(ParseError::new(
+				self.peek().span,
+				ErrorKind::InvalidStatement("LATERAL is supported on a subquery only"),
+			));
+		}
 		if self.eat(&TokenKind::LParen)? {
 			if matches!(self.peek().kind, TokenKind::Keyword(Keyword::Select | Keyword::Values)) {
 				// Subquery: `(SELECT ...) AS alias`, or a list of rows: `(VALUES (...), ...) AS
@@ -574,11 +593,18 @@ impl<'a> Parser<'a> {
 				})?;
 				let span = query.span.merge(alias.span);
 				Ok(TableRef::Subquery {
+					lateral,
 					query: Box::new(query),
 					alias,
 					span,
 				})
 			} else {
+				if lateral {
+					return Err(ParseError::new(
+						self.peek().span,
+						ErrorKind::InvalidStatement("LATERAL is supported on a subquery only"),
+					));
+				}
 				// Parenthesized join: `(t1 JOIN t2 ON ...)`
 				let inner = self.parse_table_ref()?;
 				self.expect(&TokenKind::RParen, "')'")?;

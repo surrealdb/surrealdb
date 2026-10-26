@@ -7,6 +7,7 @@ use surrealdb_expr::expr::field::Selector;
 use surrealdb_expr::expr::index_kind::Index;
 use surrealdb_expr::expr::operator::BinaryOperator;
 use surrealdb_expr::expr::reference::{Reference, ReferenceDeleteStrategy};
+use surrealdb_expr::expr::statements::alter::{AlterDefault, AlterKind};
 use surrealdb_expr::expr::statements::define::{
 	DefineDatabaseStatement, DefineDefault, DefineFieldStatement, DefineIndexStatement, DefineKind,
 	DefineSequenceStatement, DefineStatement, DefineTableStatement,
@@ -34,7 +35,15 @@ use surrealdb_pgsql::ast::stmt::{
 };
 use surrealdb_strand::{Strand, TableName};
 
-use super::write::{lower_mysql_expr, lower_pgsql_expr};
+use super::foreign_key::{
+	alter as alter_field, alter_column, check_create_targets, check_target_exists,
+	column_foreign_key, drop_foreign_key, existence_assertion, link_kind, lower_add_foreign_key,
+	reference, table_foreign_keys,
+};
+use super::write::{link_assignment, lower_mysql_expr, lower_pgsql_expr};
+use crate::catalog::relations::{ConstraintTarget, constraint_target};
+use crate::catalog::staged::StagedCatalog;
+use crate::catalog::{BinderCatalog, EmptyCatalog, TableSchema, kind_admits_none};
 use crate::error::PlanError;
 
 /// Map PostgreSQL TypeName to SurrealDB Kind.
@@ -64,7 +73,9 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 		| "timestamp"
 		| "timestamptz"
 		| "timestamp with time zone"
-		| "timestamp without time zone" => Kind::Datetime,
+		| "timestamp without time zone"
+		| "time with time zone"
+		| "time without time zone" => Kind::Datetime,
 		"uuid" => Kind::Uuid,
 		"json" | "jsonb" => Kind::Object,
 		"bytea" => Kind::Bytes,
@@ -194,7 +205,7 @@ fn column_sequence(table: &str, column: &str) -> (Expr, DefineDefault) {
 	(Expr::Define(Box::new(DefineStatement::Sequence(define))), DefineDefault::Set(next))
 }
 
-fn not_null_assertion() -> Expr {
+pub(crate) fn not_null_assertion() -> Expr {
 	Expr::Binary {
 		left: Box::new(Expr::Param(Param::from("value".to_string()))),
 		op: BinaryOperator::NotEqual,
@@ -202,7 +213,14 @@ fn not_null_assertion() -> Expr {
 	}
 }
 
+/// Whether `expr` is the assertion `NOT NULL` lowers to.
+pub(crate) fn is_not_null_assertion(expr: &Expr) -> bool {
+	*expr == not_null_assertion()
+}
+
 /// Lower a PostgreSQL CREATE TABLE statement into SurrealDB expressions.
+///
+/// A column with a foreign key is a link to the referenced table; see [`super::foreign_key`].
 pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>, PlanError> {
 	let (_, tbl_name_str) = crate::namespace::resolve_pgsql_table_name(&create.name.parts, None)?;
 	let tbl_name = tbl_name_str.as_str();
@@ -225,6 +243,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 	exprs.push(Expr::Define(Box::new(DefineStatement::Table(table_def))));
 
 	let mut index_counter = 0;
+	let foreign_keys = table_foreign_keys(create)?;
 
 	for col in &create.columns {
 		let is_id = col.name == "id";
@@ -243,7 +262,22 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 			.constraints
 			.iter()
 			.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
-		let field_kind = column_kind(&col.data_type, is_not_null);
+		let foreign_key = foreign_keys.get(col.name.as_str());
+		if foreign_key.is_some() && (is_id || serial) {
+			return Err(PlanError::UnsupportedStatement(format!(
+				"a foreign key on the {} column \"{}\" of \"{tbl_name}\"",
+				if is_id {
+					"id"
+				} else {
+					"serial"
+				},
+				col.name
+			)));
+		}
+		let field_kind = match foreign_key {
+			Some((target, _)) => link_kind(target, !is_not_null),
+			None => column_kind(&col.data_type, is_not_null),
+		};
 
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
@@ -261,20 +295,20 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		for con in &col.constraints {
 			match con {
 				ColumnConstraint::NotNull => {
-					field_def.assert = Some(not_null_assertion());
+					if foreign_key.is_none() {
+						field_def.assert = Some(not_null_assertion());
+					}
 				}
 				ColumnConstraint::Default(def) => {
 					let lowered = lower_pgsql_expr(def)?;
-					field_def.default = DefineDefault::Set(lowered);
+					field_def.default = DefineDefault::Set(match foreign_key {
+						Some((target, _)) => link_assignment(target, lowered, !is_not_null),
+						None => lowered,
+					});
 				}
 				ColumnConstraint::References {
 					..
-				} => {
-					field_def.reference = Some(Reference {
-						on_delete: ReferenceDeleteStrategy::Reject,
-						materialize: None,
-					});
-				}
+				} => {}
 				ColumnConstraint::PrimaryKey => {
 					index_counter += 1;
 					let idx = DefineIndexStatement {
@@ -323,6 +357,11 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				}
 				ColumnConstraint::Null => {}
 			}
+		}
+
+		if let Some((target, on_delete)) = foreign_key {
+			field_def.reference = Some(reference(*on_delete));
+			field_def.assert = Some(existence_assertion(tbl_name, &col.name, target, !is_not_null));
 		}
 
 		if serial && matches!(field_def.default, DefineDefault::None) {
@@ -381,23 +420,8 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				index_exprs.push(Expr::Define(Box::new(DefineStatement::Index(idx))));
 			}
 			PgTableConstraint::ForeignKey {
-				columns,
 				..
-			} => {
-				for col in columns {
-					let field_def = DefineFieldStatement {
-						name: Expr::Idiom(Idiom::field(col.as_str())),
-						what: Expr::Table(TableName::from(tbl_name)),
-						reference: Some(Reference {
-							on_delete: ReferenceDeleteStrategy::Reject,
-							materialize: None,
-						}),
-						kind: DefineKind::Overwrite,
-						..Default::default()
-					};
-					exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
-				}
-			}
+			} => {}
 		}
 	}
 
@@ -556,14 +580,95 @@ pub fn lower_pgsql_create_view(view: &CreateViewStmt) -> Result<Vec<Expr>, PlanE
 	Ok(vec![Expr::Define(Box::new(DefineStatement::Table(table_def)))])
 }
 
-/// Lower a PostgreSQL ALTER TABLE statement into SurrealDB expressions.
+/// Lower a PostgreSQL ALTER TABLE statement into SurrealDB expressions, with no description of the
+/// schema: see [`lower_pgsql_alter_table_with`].
 pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, PlanError> {
-	let (_, tbl_name_str) = crate::namespace::resolve_pgsql_table_name(&alter.name.parts, None)?;
+	lower_pgsql_alter_table_with(alter, &EmptyCatalog)
+}
+
+/// The table of `catalog` that an `ALTER TABLE` of the table `name` in `schema` names, when the
+/// catalog lists it.
+fn listed_table(
+	catalog: &dyn BinderCatalog,
+	schema: Option<&str>,
+	name: &str,
+) -> Option<TableSchema> {
+	if schema.is_some_and(|schema| schema != "public") {
+		return None;
+	}
+	catalog.constraint_tables().into_iter().find(|table| table.name == name)
+}
+
+/// Lower `DROP CONSTRAINT name` of table `table`.
+///
+/// The name is resolved against the constraints the catalog lists for the table
+/// ([`constraint_target`]):
+///
+/// - a `UNIQUE` constraint removes its index;
+/// - a foreign key removes the `REFERENCE` and the existence `ASSERT` of its field and keeps its
+///   type, so the column still reads and writes as a key;
+/// - the primary key removes the `<table>_<columns>_pk` index when there is one, and is refused
+///   (`0A000`) when it is the record id, which cannot be dropped;
+/// - a name the table does not have is `42704`, or nothing to do under `IF EXISTS`.
+///
+/// A table the catalog does not list (the session may not view definitions, or the table does not
+/// exist) cannot be resolved against, and the name is taken as the name of an index.
+fn lower_drop_constraint(
+	catalog: &dyn BinderCatalog,
+	schema: Option<&str>,
+	table: &str,
+	name: &str,
+	if_exists: bool,
+) -> Result<Vec<Expr>, PlanError> {
+	let remove_index = |index: &str| {
+		Expr::Remove(Box::new(RemoveStatement::Index(RemoveIndexStatement {
+			name: Expr::Idiom(Idiom::field(index)),
+			what: Expr::Table(TableName::from(table)),
+			if_exists,
+		})))
+	};
+	let Some(listed) = listed_table(catalog, schema, table) else {
+		return Ok(vec![remove_index(name)]);
+	};
+	match constraint_target(&listed, name) {
+		Some(ConstraintTarget::Index {
+			name: index,
+			..
+		}) => Ok(vec![remove_index(&index)]),
+		Some(ConstraintTarget::ForeignKey {
+			column,
+		}) => Ok(vec![drop_foreign_key(table, &column)]),
+		Some(ConstraintTarget::RecordId) => Err(PlanError::UnsupportedStatement(format!(
+			"DROP CONSTRAINT \"{name}\": the primary key of \"{table}\" is its record id, which cannot be dropped"
+		))),
+		None if if_exists => Ok(Vec::new()),
+		None => Err(PlanError::UndefinedConstraint {
+			constraint: name.to_owned(),
+			table: table.to_owned(),
+		}),
+	}
+}
+
+/// Lower a PostgreSQL ALTER TABLE statement into SurrealDB expressions.
+///
+/// `catalog` describes the schema the statement runs against. `DROP CONSTRAINT` resolves its name
+/// against the constraints the catalog lists, and `ADD FOREIGN KEY` needs to know that its column
+/// is declared; see [`lower_drop_constraint`] and [`lower_add_foreign_key`].
+pub fn lower_pgsql_alter_table_with(
+	alter: &AlterTableStmt,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
+	let (schema, tbl_name_str) =
+		crate::namespace::resolve_pgsql_table_name(&alter.name.parts, None)?;
 	let tbl_name = tbl_name_str.as_str();
 
 	let mut exprs = Vec::new();
+	// An action reads the declarations the actions before it make, as the statement runs them in
+	// order.
+	let mut staged = StagedCatalog::new(catalog);
 
 	for action in &alter.actions {
+		let staged_from = exprs.len();
 		match action {
 			AlterTableAction::AddColumn {
 				if_not_exists,
@@ -574,10 +679,17 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 					.constraints
 					.iter()
 					.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
+				let foreign_key = column_foreign_key(column)?;
+				if let Some((target, _)) = &foreign_key {
+					check_target_exists(&staged, target, tbl_name)?;
+				}
 				let mut field_def = DefineFieldStatement {
 					name: Expr::Idiom(Idiom::field(column.name.as_str())),
 					what: Expr::Table(TableName::from(tbl_name)),
-					field_kind: Some(column_kind(&column.data_type, not_null)),
+					field_kind: Some(match &foreign_key {
+						Some((target, _)) => link_kind(target, !not_null),
+						None => column_kind(&column.data_type, not_null),
+					}),
 					kind: if *if_not_exists {
 						DefineKind::IfNotExists
 					} else {
@@ -588,10 +700,16 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				for con in &column.constraints {
 					match con {
 						ColumnConstraint::NotNull => {
-							field_def.assert = Some(not_null_assertion());
+							if foreign_key.is_none() {
+								field_def.assert = Some(not_null_assertion());
+							}
 						}
 						ColumnConstraint::Default(def) => {
-							field_def.default = DefineDefault::Set(lower_pgsql_expr(def)?);
+							let lowered = lower_pgsql_expr(def)?;
+							field_def.default = DefineDefault::Set(match &foreign_key {
+								Some((target, _)) => link_assignment(target, lowered, !not_null),
+								None => lowered,
+							});
 						}
 						ColumnConstraint::PrimaryKey
 						| ColumnConstraint::Null
@@ -600,6 +718,11 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 							..
 						} => {}
 					}
+				}
+				if let Some((target, on_delete)) = &foreign_key {
+					field_def.reference = Some(reference(*on_delete));
+					field_def.assert =
+						Some(existence_assertion(tbl_name, &column.name, target, !not_null));
 				}
 				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
 			}
@@ -633,50 +756,67 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				column,
 				default,
 			} => {
-				let field_def = DefineFieldStatement {
-					name: Expr::Idiom(Idiom::field(column.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					default: DefineDefault::Set(lower_pgsql_expr(default)?),
-					kind: DefineKind::Overwrite,
-					..Default::default()
-				};
-				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+				let mut field = alter_column(tbl_name, column);
+				let lowered = lower_pgsql_expr(default)?;
+				field.default = AlterDefault::Set(
+					match staged.link_table(schema.as_deref(), tbl_name, column) {
+						// A default for a link column names the row it links to.
+						Some(target) => link_assignment(
+							&target,
+							lowered,
+							staged.link_admits_none(schema.as_deref(), tbl_name, column),
+						),
+						None => lowered,
+					},
+				);
+				exprs.push(alter_field(field));
 			}
 			AlterTableAction::DropDefault {
 				column,
 			} => {
-				let field_def = DefineFieldStatement {
-					name: Expr::Idiom(Idiom::field(column.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					default: DefineDefault::None,
-					kind: DefineKind::Overwrite,
-					..Default::default()
-				};
-				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+				let mut field = alter_column(tbl_name, column);
+				field.default = AlterDefault::Drop;
+				exprs.push(alter_field(field));
 			}
 			AlterTableAction::SetNotNull {
 				column,
 			} => {
-				let field_def = DefineFieldStatement {
-					name: Expr::Idiom(Idiom::field(column.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					assert: Some(not_null_assertion()),
-					kind: DefineKind::Overwrite,
-					..Default::default()
-				};
-				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+				let mut field = alter_column(tbl_name, column);
+				match staged.link_table(schema.as_deref(), tbl_name, column) {
+					Some(target) => {
+						field.kind = AlterKind::Set(link_kind(&target, false));
+						field.assert =
+							AlterKind::Set(existence_assertion(tbl_name, column, &target, false));
+					}
+					None => field.assert = AlterKind::Set(not_null_assertion()),
+				}
+				exprs.push(alter_field(field));
 			}
 			AlterTableAction::DropNotNull {
 				column,
 			} => {
-				let field_def = DefineFieldStatement {
-					name: Expr::Idiom(Idiom::field(column.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					assert: None,
-					kind: DefineKind::Overwrite,
-					..Default::default()
-				};
-				exprs.push(Expr::Define(Box::new(DefineStatement::Field(Box::new(field_def)))));
+				let mut field = alter_column(tbl_name, column);
+				match staged.link_table(schema.as_deref(), tbl_name, column) {
+					Some(target) => {
+						field.kind = AlterKind::Set(link_kind(&target, true));
+						field.assert =
+							AlterKind::Set(existence_assertion(tbl_name, column, &target, true));
+					}
+					None => {
+						field.assert = AlterKind::Drop;
+						// A scalar column made `NOT NULL` by its type takes `NULL` and `NONE`
+						// again.
+						if let Some(shape) =
+							staged.column_shape(schema.as_deref(), tbl_name, column)
+							&& let Some(kind) = shape.kind
+							&& !kind_admits_none(&kind)
+						{
+							field.kind =
+								AlterKind::Set(Kind::either(vec![Kind::None, Kind::Null, kind]));
+						}
+					}
+				}
+				exprs.push(alter_field(field));
 			}
 			AlterTableAction::AddConstraint(PgTableConstraint::PrimaryKey(cols)) => {
 				let idx = DefineIndexStatement {
@@ -713,21 +853,29 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				name,
 				..
 			} => {
-				let rem = RemoveIndexStatement {
-					name: Expr::Idiom(Idiom::field(name.as_str())),
-					what: Expr::Table(TableName::from(tbl_name)),
-					if_exists: *if_exists,
-				};
-				exprs.push(Expr::Remove(Box::new(RemoveStatement::Index(rem))));
+				exprs.extend(lower_drop_constraint(
+					&staged,
+					schema.as_deref(),
+					tbl_name,
+					name,
+					*if_exists,
+				)?);
 			}
-			AlterTableAction::AddConstraint(_)
-			| AlterTableAction::RenameColumn {
+			AlterTableAction::AddConstraint(
+				key @ PgTableConstraint::ForeignKey {
+					..
+				},
+			) => {
+				exprs.extend(lower_add_foreign_key(&staged, schema.as_deref(), tbl_name, key)?);
+			}
+			AlterTableAction::RenameColumn {
 				..
 			}
 			| AlterTableAction::RenameTable {
 				..
 			} => {}
 		}
+		staged.stage(&exprs[staged_from..]);
 	}
 
 	Ok(exprs)
@@ -770,26 +918,44 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 	Ok(exprs)
 }
 
-/// Lower a PostgreSQL DDL statement.
+/// Lower a PostgreSQL DDL statement against a catalog that describes no table.
 ///
 /// Returns the definitions it runs, one expression each, in the order they run.
 #[cfg(test)]
 pub(crate) fn lower_pgsql_ddl_definitions(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
-	lower_pgsql_ddl_definitions_over(stmt, &|_, _| None)
+	lower_pgsql_ddl_definitions_with(stmt, &EmptyCatalog)
 }
 
-/// Lower a PostgreSQL DDL statement as [`lower_pgsql_ddl_definitions`] does, where `dimensions`
-/// says how many dimensions a vector column has.
+/// Lower a PostgreSQL DDL statement against `catalog`, which `ALTER TABLE` reads for the
+/// constraints of the table (see [`lower_pgsql_alter_table_with`]) and which says how many
+/// dimensions a vector column has.
+///
+/// Returns the definitions it runs, one expression each, in the order they run.
+pub(crate) fn lower_pgsql_ddl_definitions_with(
+	stmt: &PgStatement,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_ddl_definitions_over(stmt, catalog, &|table, column| {
+		catalog.vector_dimension(None, table, column)
+	})
+}
+
+/// Lower a PostgreSQL DDL statement as [`lower_pgsql_ddl_definitions_with`] does, where
+/// `dimensions` says how many dimensions a vector column has.
 fn lower_pgsql_ddl_definitions_over(
 	stmt: &PgStatement,
+	catalog: &dyn BinderCatalog,
 	dimensions: VectorDimensions<'_>,
 ) -> Result<Vec<Expr>, PlanError> {
 	match stmt {
-		PgStatement::CreateTable(s) => lower_pgsql_create_table(s),
+		PgStatement::CreateTable(s) => {
+			check_create_targets(s, catalog)?;
+			lower_pgsql_create_table(s)
+		}
 		PgStatement::CreateIndex(s) => lower_pgsql_create_index_over(s, dimensions),
 		PgStatement::CreateExtension(s) => super::vector_ddl::lower_create_extension(s),
 		PgStatement::CreateView(s) => lower_pgsql_create_view(s),
-		PgStatement::AlterTable(s) => lower_pgsql_alter_table(s),
+		PgStatement::AlterTable(s) => lower_pgsql_alter_table_with(s, catalog),
 		PgStatement::Drop(s) => lower_pgsql_drop(s),
 		PgStatement::Copy(_)
 		| PgStatement::Select(_)
@@ -1409,7 +1575,17 @@ pub(crate) fn lower_mysql_ddl_definitions(stmt: &MyStatement) -> Result<Vec<Expr
 /// `DROP` of several tables) lowers to a block of them: a definition that fails fails the
 /// statement as a whole, and none of its definitions is committed.
 pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
-	lower_pgsql_ddl_over(stmt, &|_, _| None)
+	lower_pgsql_ddl_with(stmt, &EmptyCatalog)
+}
+
+/// Lower a PostgreSQL DDL statement against `catalog` into the expression that answers it, as
+/// [`lower_pgsql_ddl`] does; `ALTER TABLE` reads `catalog` for the constraints of the table.
+pub fn lower_pgsql_ddl_with(
+	stmt: &PgStatement,
+	catalog: &dyn BinderCatalog,
+) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_ddl_definitions_with(stmt, catalog)
+		.map(|definitions| vec![one_statement(definitions)])
 }
 
 /// Lower a PostgreSQL DDL statement as [`lower_pgsql_ddl`] does, where `dimensions` says how many
@@ -1418,7 +1594,7 @@ pub fn lower_pgsql_ddl_over(
 	stmt: &PgStatement,
 	dimensions: VectorDimensions<'_>,
 ) -> Result<Vec<Expr>, PlanError> {
-	lower_pgsql_ddl_definitions_over(stmt, dimensions)
+	lower_pgsql_ddl_definitions_over(stmt, &EmptyCatalog, dimensions)
 		.map(|definitions| vec![one_statement(definitions)])
 }
 

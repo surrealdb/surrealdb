@@ -3543,7 +3543,7 @@ async fn test_pgwire_information_schema() {
 	let (rows, last) =
 		run_simple_query(&mut stream, "SELECT table_name FROM information_schema.views;").await;
 	assert_eq!(last, b'C');
-	assert_eq!(rows.len(), 4);
+	assert_eq!(rows.len(), 7);
 
 	shutdown.cancel();
 }
@@ -5418,6 +5418,37 @@ async fn test_pgwire_serial_ids_are_generated_in_order() {
 }
 
 #[tokio::test]
+async fn test_pgwire_namespace_option_selects_the_namespace_of_a_bare_database() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake_with_auth(
+		addr,
+		"root",
+		"prisma",
+		None,
+		Some("-c namespace=orm -c dialect=pgsql"),
+	)
+	.await
+	.expect("handshake");
+	let (rows, last) = run_simple_query(&mut stream, "SELECT current_database() AS db;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("prisma".into())]);
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, "CREATE TABLE ns_option (id int PRIMARY KEY)").await;
+	assert!(error.is_none(), "a database is selected: {error:?}");
+
+	let refused = connect_and_handshake_with_auth(
+		addr,
+		"root",
+		"other/prisma",
+		None,
+		Some("-c namespace=orm -c dialect=pgsql"),
+	)
+	.await;
+	assert_eq!(refused.err().map(|(code, _)| code).as_deref(), Some("22023"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_pgwire_returning_metadata_preserves_order_without_executing() {
 	let ds = Datastore::new("memory").await.unwrap();
 	let (addr, shutdown) = start_test_pg_server_with_ds(Arc::clone(&ds)).await;
@@ -5822,5 +5853,1395 @@ async fn test_pgwire_on_conflict_target_predicate_is_not_supported() {
 		let (_, _, error) = run_untyped_extended(&mut stream, sql, &[b"1", b"a"]).await;
 		assert_eq!(error.expect("unsupported conflict target").0, "0A000", "{sql}");
 	}
+	shutdown.cancel();
+}
+
+async fn catalog_rows(stream: &mut TcpStream, sql: &str) -> Vec<Vec<Option<String>>> {
+	let (rows, _, error) = run_simple_query_with_err(stream, sql).await;
+	assert!(error.is_none(), "{sql}: {error:?}");
+	rows.iter().map(|row| decode_data_row(row)).collect()
+}
+
+fn strings(rows: &[Vec<Option<String>>]) -> Vec<Vec<&str>> {
+	rows.iter()
+		.map(|row| row.iter().map(|col| col.as_deref().unwrap_or("NULL")).collect())
+		.collect()
+}
+
+async fn create_compat_tables(stream: &mut TcpStream) {
+	for sql in [
+		r#"CREATE TABLE "CompatUser" (id serial PRIMARY KEY, name text NOT NULL, tags text[], payload jsonb)"#,
+		r#"CREATE TABLE "CompatPost" (id serial PRIMARY KEY, title text)"#,
+	] {
+		let (_, _, error) = run_simple_query_with_err(stream, sql).await;
+		assert!(error.is_none(), "{sql}: {error:?}");
+	}
+}
+
+#[tokio::test]
+async fn test_pgwire_information_schema_lists_the_users_tables_and_columns() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	create_compat_tables(&mut stream).await;
+
+	let rows = catalog_rows(
+		&mut stream,
+		"SELECT table_schema, table_name FROM information_schema.tables \
+		 WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_name",
+	)
+	.await;
+	assert_eq!(strings(&rows), [["public", "CompatPost"], ["public", "CompatUser"]]);
+
+	let rows = catalog_rows(
+		&mut stream,
+		"SELECT column_name, ordinal_position, data_type, is_nullable, udt_name, udt_schema \
+		 FROM information_schema.columns WHERE table_name = 'CompatUser' \
+		 ORDER BY ordinal_position",
+	)
+	.await;
+	let columns = strings(&rows);
+	assert_eq!(columns[0][..4], ["id", "1", "bigint", "NO"]);
+	assert_eq!(columns.len(), 4, "{columns:?}");
+	let find = |name: &str| columns.iter().find(|column| column[0] == name).expect(name).clone();
+	assert_eq!(find("name")[2..], ["text", "NO", "text", "pg_catalog"]);
+	assert_eq!(find("tags")[2..], ["ARRAY", "YES", "_text", "pg_catalog"]);
+	assert_eq!(find("payload")[2..], ["jsonb", "YES", "jsonb", "pg_catalog"]);
+	let mut ordinals: Vec<_> = columns.iter().map(|column| column[1]).collect();
+	ordinals.dedup();
+	assert_eq!(ordinals, ["1", "2", "3", "4"]);
+
+	let rows = catalog_rows(
+		&mut stream,
+		"SELECT relname FROM pg_catalog.pg_class WHERE relname LIKE 'Compat%' ORDER BY relname",
+	)
+	.await;
+	// The primary key of each table is an index relation of its own, and each serial column has a
+	// sequence relation, as in PostgreSQL.
+	assert_eq!(
+		strings(&rows),
+		[
+			["CompatPost"],
+			["CompatPost_id_seq"],
+			["CompatPost_pkey"],
+			["CompatUser"],
+			["CompatUser_id_seq"],
+			["CompatUser_pkey"]
+		]
+	);
+	let rows = catalog_rows(
+		&mut stream,
+		"SELECT relname FROM pg_catalog.pg_class WHERE relname LIKE 'Compat%' AND relkind = 'r' \
+		 ORDER BY relname",
+	)
+	.await;
+	assert_eq!(strings(&rows), [["CompatPost"], ["CompatUser"]]);
+
+	let rows = catalog_rows(
+		&mut stream,
+		"SELECT a.attname FROM pg_catalog.pg_attribute a \
+		 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid WHERE c.relname = 'CompatPost' \
+		 ORDER BY a.attnum",
+	)
+	.await;
+	assert_eq!(strings(&rows), [["id"], ["title"]]);
+
+	// The statement TypeORM issues to find the tables it manages.
+	let rows = catalog_rows(
+		&mut stream,
+		r#"SELECT "table_schema", "table_name", obj_description((quote_ident("table_schema") || '.' || quote_ident("table_name"))::regclass, 'pg_class') AS table_comment FROM "information_schema"."tables" WHERE ("table_schema" = 'public' AND "table_name" = 'CompatUser') OR ("table_schema" = 'public' AND "table_name" = 'CompatPost')"#,
+	)
+	.await;
+	assert_eq!(rows.len(), 2, "{rows:?}");
+
+	// The user's own tables stay readable alongside the views.
+	let (_, _, error) =
+		run_simple_query_with_err(&mut stream, r#"SELECT name FROM "CompatUser""#).await;
+	assert!(error.is_none(), "{error:?}");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_information_schema_lists_a_table_created_in_the_open_transaction() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let listing = "SELECT table_name FROM information_schema.tables WHERE table_name = 'InTx'";
+
+	let (_, last) = run_simple_query(&mut stream, "BEGIN;").await;
+	assert_eq!(last, b'C');
+	let (_, _, error) = run_simple_query_with_err(
+		&mut stream,
+		r#"CREATE TABLE "InTx" (id serial PRIMARY KEY, v text)"#,
+	)
+	.await;
+	assert!(error.is_none(), "{error:?}");
+	assert_eq!(strings(&catalog_rows(&mut stream, listing).await), [["InTx"]]);
+	let (_, last) = run_simple_query(&mut stream, "ROLLBACK;").await;
+	assert_eq!(last, b'C');
+	assert!(catalog_rows(&mut stream, listing).await.is_empty());
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_typeorm_column_introspection_query() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	for ddl in [
+		"CREATE TABLE \"CompatUser\" (id integer PRIMARY KEY, name text NOT NULL, age integer, active boolean NOT NULL, nickname text)",
+		"CREATE TABLE \"CompatPost\" (id integer PRIMARY KEY, title text NOT NULL, \"authorId\" integer NOT NULL)",
+	] {
+		let (_, last) = run_simple_query(&mut stream, ddl).await;
+		assert_eq!(last, b'C', "{ddl}");
+	}
+
+	let sql = "SELECT columns.*, pg_catalog.col_description((quote_ident(table_catalog) || '.' || quote_ident(table_schema) || '.' || quote_ident(table_name))::regclass::oid, ordinal_position) AS description, ('\"' || \"udt_schema\" || '\".\"' || \"udt_name\" || '\"')::\"regtype\"::text AS \"regtype\", pg_catalog.format_type(\"col_attr\".\"atttypid\", \"col_attr\".\"atttypmod\") AS \"format_type\" FROM \"information_schema\".\"columns\" LEFT JOIN \"pg_catalog\".\"pg_attribute\" AS \"col_attr\" ON \"col_attr\".\"attname\" = \"columns\".\"column_name\" AND \"col_attr\".\"attrelid\" = ( SELECT \"cls\".\"oid\" FROM \"pg_catalog\".\"pg_class\" AS \"cls\" LEFT JOIN \"pg_catalog\".\"pg_namespace\" AS \"ns\" ON \"ns\".\"oid\" = \"cls\".\"relnamespace\" WHERE \"cls\".\"relname\" = \"columns\".\"table_name\" AND \"ns\".\"nspname\" = \"columns\".\"table_schema\" ) WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'CompatPost') OR (\"table_schema\" = 'public' AND \"table_name\" = 'CompatUser')";
+	let (rows, last) = run_simple_query(&mut stream, sql).await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 8, "one row per column of the two tables");
+
+	// Positions in `columns.*`: table_name 2, column_name 3, is_nullable 6, data_type 7,
+	// udt_name 27; then description, regtype and format_type close the row.
+	let mut found: Vec<[String; 7]> = rows
+		.iter()
+		.map(|row| {
+			let cells = decode_data_row(row);
+			let n = cells.len();
+			let cell = |i: usize| cells[i].clone().unwrap_or_default();
+			assert_eq!(cells[n - 3], None, "col_description is NULL");
+			[cell(2), cell(3), cell(6), cell(27), cell(n - 2), cell(n - 1), cell(7)]
+		})
+		.collect();
+	found.sort();
+	let expect = |table: &str, column: &str, nullable: &str, udt: &str, regtype: &str| {
+		[
+			table.to_string(),
+			column.to_string(),
+			nullable.to_string(),
+			udt.to_string(),
+			regtype.to_string(),
+			regtype.to_string(),
+		]
+	};
+	let expected = [
+		expect("CompatPost", "authorId", "NO", "int8", "bigint"),
+		expect("CompatPost", "id", "NO", "int8", "bigint"),
+		expect("CompatPost", "title", "NO", "text", "text"),
+		expect("CompatUser", "active", "NO", "bool", "boolean"),
+		expect("CompatUser", "age", "YES", "int8", "bigint"),
+		expect("CompatUser", "id", "NO", "int8", "bigint"),
+		expect("CompatUser", "name", "NO", "text", "text"),
+		expect("CompatUser", "nickname", "YES", "text", "text"),
+	];
+	assert_eq!(found.len(), expected.len());
+	for (got, want) in found.iter().zip(expected.iter()) {
+		assert_eq!(&got[..6], &want[..], "{got:?}");
+	}
+
+	shutdown.cancel();
+}
+
+/// TypeORM's constraint query, restricted to the tables `tables` names.
+fn typeorm_constraints_query(tables: &[&str]) -> String {
+	let filter = tables
+		.iter()
+		.map(|t| format!("(\"ns\".\"nspname\" = 'public' AND \"t\".\"relname\" = '{t}')"))
+		.collect::<Vec<_>>()
+		.join(" OR ");
+	format!(
+		"SELECT \"ns\".\"nspname\" AS \"table_schema\", \"t\".\"relname\" AS \"table_name\", \
+		 \"cnst\".\"conname\" AS \"constraint_name\", pg_get_constraintdef(\"cnst\".\"oid\") AS \
+		 \"expression\", CASE \"cnst\".\"contype\" WHEN 'p' THEN 'PRIMARY' WHEN 'u' THEN \
+		 'UNIQUE' WHEN 'c' THEN 'CHECK' WHEN 'x' THEN 'EXCLUDE' END AS \"constraint_type\", \
+		 \"a\".\"attname\" AS \"column_name\" FROM \"pg_constraint\" \"cnst\" INNER JOIN \
+		 \"pg_class\" \"t\" ON \"t\".\"oid\" = \"cnst\".\"conrelid\" INNER JOIN \
+		 \"pg_namespace\" \"ns\" ON \"ns\".\"oid\" = \"cnst\".\"connamespace\" LEFT JOIN \
+		 \"pg_attribute\" \"a\" ON \"a\".\"attrelid\" = \"cnst\".\"conrelid\" AND \
+		 \"a\".\"attnum\" = ANY (\"cnst\".\"conkey\") WHERE \"t\".\"relkind\" IN ('r', 'p') \
+		 AND ({filter}) ORDER BY 2, 3"
+	)
+}
+
+/// TypeORM's foreign key query, restricted to the tables `tables` names.
+fn typeorm_foreign_keys_query(tables: &[&str]) -> String {
+	let filter = tables
+		.iter()
+		.map(|t| format!("(\"ns\".\"nspname\" = 'public' AND \"cl\".\"relname\" = '{t}')"))
+		.collect::<Vec<_>>()
+		.join(" OR ");
+	format!(
+		"SELECT \"con\".\"conname\" AS \"constraint_name\", \"con\".\"nspname\" AS \
+		 \"table_schema\", \"con\".\"relname\" AS \"table_name\", \"att2\".\"attname\" AS \
+		 \"column_name\", \"ns\".\"nspname\" AS \"referenced_table_schema\", \"cl\".\"relname\" \
+		 AS \"referenced_table_name\", \"att\".\"attname\" AS \"referenced_column_name\", \
+		 \"con\".\"confdeltype\" AS \"on_delete\", \"con\".\"confupdtype\" AS \"on_update\", \
+		 \"con\".\"condeferrable\" AS \"deferrable\", \"con\".\"condeferred\" AS \"deferred\" \
+		 FROM ( SELECT UNNEST (\"con1\".\"conkey\") AS \"parent\", UNNEST (\"con1\".\"confkey\") \
+		 AS \"child\", \"con1\".\"confrelid\", \"con1\".\"conrelid\", \"con1\".\"conname\", \
+		 \"con1\".\"contype\", \"ns\".\"nspname\", \"cl\".\"relname\", \
+		 \"con1\".\"condeferrable\", CASE WHEN \"con1\".\"condeferred\" THEN 'INITIALLY \
+		 DEFERRED' ELSE 'INITIALLY IMMEDIATE' END as condeferred, CASE \"con1\".\"confdeltype\" \
+		 WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' \
+		 THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \"confdeltype\", CASE \
+		 \"con1\".\"confupdtype\" WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' \
+		 THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' END as \
+		 \"confupdtype\" FROM \"pg_class\" \"cl\" INNER JOIN \"pg_namespace\" \"ns\" ON \
+		 \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_constraint\" \"con1\" ON \
+		 \"con1\".\"conrelid\" = \"cl\".\"oid\" WHERE \"con1\".\"contype\" = 'f' AND ({filter}) ) \
+		 \"con\" INNER JOIN \"pg_attribute\" \"att\" ON \"att\".\"attrelid\" = \
+		 \"con\".\"confrelid\" AND \"att\".\"attnum\" = \"con\".\"child\" INNER JOIN \
+		 \"pg_class\" \"cl\" ON \"cl\".\"oid\" = \"con\".\"confrelid\" AND \
+		 \"cl\".\"relispartition\" = 'f' INNER JOIN \"pg_namespace\" \"ns\" ON \
+		 \"cl\".\"relnamespace\" = \"ns\".\"oid\" INNER JOIN \"pg_attribute\" \"att2\" ON \
+		 \"att2\".\"attrelid\" = \"con\".\"conrelid\" AND \"att2\".\"attnum\" = \"con\".\"parent\""
+	)
+}
+
+/// The rows of `sql` as text, `NULL` for an absent value.
+async fn text_rows(stream: &mut TcpStream, sql: &str) -> Vec<Vec<String>> {
+	let (rows, last, err) = run_simple_query_with_err(stream, sql).await;
+	assert!(err.is_none(), "{sql}: {err:?}");
+	assert_eq!(last, b'C', "{sql}");
+	rows.iter()
+		.map(|row| {
+			decode_data_row(row)
+				.into_iter()
+				.map(|value| value.unwrap_or_else(|| "NULL".to_owned()))
+				.collect()
+		})
+		.collect()
+}
+
+#[tokio::test]
+async fn test_pgwire_typeorm_constraint_and_foreign_key_catalog_queries() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for ddl in [
+		r#"CREATE TABLE "FkUser" (id integer PRIMARY KEY, name text NOT NULL, email text UNIQUE)"#,
+		r#"CREATE TABLE "FkPost" (id integer PRIMARY KEY, title text NOT NULL, "authorId" integer NOT NULL)"#,
+	] {
+		let (_, last) = run_simple_query(&mut stream, ddl).await;
+		assert_eq!(last, b'C', "{ddl}");
+	}
+	// The column holds record links to the other table, which SurrealQL declares as a reference.
+	let mut surreal = connect_and_handshake_with_options(addr, None).await;
+	let (_, last, err) = run_simple_query_with_err(
+		&mut surreal,
+		"DEFINE FIELD OVERWRITE authorId ON FkPost TYPE record<FkUser> REFERENCE ON DELETE CASCADE",
+	)
+	.await;
+	assert!(err.is_none(), "{err:?}");
+	assert_eq!(last, b'C');
+
+	let constraints =
+		text_rows(&mut stream, &typeorm_constraints_query(&["FkPost", "FkUser"])).await;
+	let row = |table: &str, name: &str, expression: &str, kind: &str, column: &str| {
+		vec![
+			"public".to_owned(),
+			table.to_owned(),
+			name.to_owned(),
+			expression.to_owned(),
+			kind.to_owned(),
+			column.to_owned(),
+		]
+	};
+	assert_eq!(
+		constraints,
+		vec![
+			row(
+				"FkPost",
+				"FkPost_authorId_fkey",
+				"FOREIGN KEY (\"authorId\") REFERENCES \"FkUser\"(id) ON DELETE CASCADE",
+				"NULL",
+				"authorId"
+			),
+			row("FkPost", "FkPost_pkey", "PRIMARY KEY (id)", "PRIMARY", "id"),
+			row("FkUser", "FkUser_email_uniq", "UNIQUE (email)", "UNIQUE", "email"),
+			row("FkUser", "FkUser_pkey", "PRIMARY KEY (id)", "PRIMARY", "id"),
+		]
+	);
+
+	let keys = text_rows(&mut stream, &typeorm_foreign_keys_query(&["FkPost", "FkUser"])).await;
+	assert_eq!(
+		keys,
+		vec![vec![
+			"FkPost_authorId_fkey".to_owned(),
+			"public".to_owned(),
+			"FkPost".to_owned(),
+			"authorId".to_owned(),
+			"public".to_owned(),
+			"FkUser".to_owned(),
+			"id".to_owned(),
+			"CASCADE".to_owned(),
+			"NO ACTION".to_owned(),
+			"f".to_owned(),
+			"INITIALLY IMMEDIATE".to_owned(),
+		]]
+	);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_information_schema_reports_array_columns_as_array() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	let (_, last) = run_simple_query(
+		&mut stream,
+		r#"CREATE TABLE "ArrCols" (id integer PRIMARY KEY, tags text[], scores int[], big bigint[], plain text)"#,
+	)
+	.await;
+	assert_eq!(last, b'C');
+
+	let rows = text_rows(
+		&mut stream,
+		"SELECT column_name, data_type, udt_name, udt_schema FROM information_schema.columns \
+		 WHERE table_name = 'ArrCols' AND column_name <> 'id' ORDER BY ordinal_position",
+	)
+	.await;
+	assert_eq!(
+		rows,
+		vec![
+			["big", "ARRAY", "_int8", "pg_catalog"],
+			["plain", "text", "text", "pg_catalog"],
+			// SurrealQL has one integer type, so `int[]` is stored, and reported, as `_int8`.
+			["scores", "ARRAY", "_int8", "pg_catalog"],
+			["tags", "ARRAY", "_text", "pg_catalog"],
+		]
+	);
+
+	// The array type is still reachable through the other catalogs.
+	let rows = text_rows(
+		&mut stream,
+		"SELECT a.attname, a.atttypid::int, pg_catalog.format_type(a.atttypid, a.atttypmod), \
+		 a.attndims::int FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+		 WHERE c.relname = 'ArrCols' AND a.attname IN ('tags', 'scores') ORDER BY a.attnum",
+	)
+	.await;
+	assert_eq!(rows, vec![["scores", "1016", "bigint[]", "1"], ["tags", "1009", "text[]", "1"]]);
+
+	shutdown.cancel();
+}
+
+async fn sqlstate_of(stream: &mut TcpStream, sql: &str) -> Option<(String, String)> {
+	let (_, _, err) = run_simple_query_with_err(stream, sql).await;
+	err
+}
+
+#[tokio::test]
+async fn test_pgwire_alter_table_drop_constraint_resolves_the_names_the_catalog_lists() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for ddl in [
+		r#"CREATE TABLE "DcUser" (id integer PRIMARY KEY, email text UNIQUE)"#,
+		r#"CREATE TABLE "DcPost" (id integer PRIMARY KEY, title text NOT NULL, "authorId" integer NOT NULL)"#,
+		r#"CREATE TABLE "DcKeyed" (id integer, a text, b text, PRIMARY KEY (a, b))"#,
+	] {
+		let (_, last) = run_simple_query(&mut stream, ddl).await;
+		assert_eq!(last, b'C', "{ddl}");
+	}
+	let mut surreal = connect_and_handshake_with_options(addr, None).await;
+	let (_, _, err) = run_simple_query_with_err(
+		&mut surreal,
+		"DEFINE FIELD OVERWRITE authorId ON DcPost TYPE record<DcUser> REFERENCE ON DELETE CASCADE; \
+		 CREATE DcUser:1 SET email = 'a@x'; CREATE DcPost:1 SET title = 't', authorId = DcUser:1;",
+	)
+	.await;
+	assert!(err.is_none(), "{err:?}");
+
+	let names = |rows: Vec<Vec<String>>| rows.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>();
+	let constraint_names = |rows: Vec<Vec<String>>| names(rows);
+	let all = "SELECT conname FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t \
+		 ON t.oid = c.conrelid WHERE t.relname LIKE 'Dc%' ORDER BY conname";
+	assert_eq!(
+		constraint_names(text_rows(&mut stream, all).await),
+		[
+			"DcKeyed_pkey".to_owned(),
+			"DcPost_authorId_fkey".to_owned(),
+			"DcPost_pkey".to_owned(),
+			"DcUser_email_uniq".to_owned(),
+			"DcUser_pkey".to_owned(),
+		]
+	);
+
+	// An unknown name is undefined, and `IF EXISTS` makes it a no-op.
+	let (code, message) =
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcUser" DROP CONSTRAINT nope"#).await.unwrap();
+	assert_eq!(code, "42704");
+	assert!(
+		message.ends_with(r#"constraint "nope" of relation "DcUser" does not exist"#),
+		"{message}"
+	);
+	assert!(
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcUser" DROP CONSTRAINT IF EXISTS nope"#)
+			.await
+			.is_none()
+	);
+
+	// A table whose primary key is only its record id has no index to drop: the constraint is
+	// refused, not ignored.
+	let (_, _, err) =
+		run_simple_query_with_err(&mut surreal, "DEFINE TABLE DcPlain SCHEMALESS").await;
+	assert!(err.is_none(), "{err:?}");
+	let (code, message) =
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcPlain" DROP CONSTRAINT "DcPlain_pkey""#)
+			.await
+			.unwrap();
+	assert_eq!(code, "0A000", "{message}");
+	assert!(message.contains("record id"), "{message}");
+
+	// A unique constraint drops its index: a duplicate is then accepted.
+	let (_, last, err) =
+		run_simple_query_with_err(&mut surreal, "CREATE DcUser:2 SET email = 'a@x'").await;
+	assert_eq!(last, b'E', "{err:?}");
+	assert!(
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcUser" DROP CONSTRAINT "DcUser_email_uniq""#)
+			.await
+			.is_none()
+	);
+	let (_, last, err) =
+		run_simple_query_with_err(&mut surreal, "CREATE DcUser:2 SET email = 'a@x'").await;
+	assert_eq!(last, b'C', "{err:?}");
+
+	// A foreign key drops the reference and keeps the column's type.
+	let (_, last, _) = run_simple_query_with_err(&mut surreal, "DELETE DcUser:2").await;
+	assert_eq!(last, b'C');
+	assert!(
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcPost" DROP CONSTRAINT "DcPost_authorId_fkey""#)
+			.await
+			.is_none()
+	);
+	let rows = text_rows(
+		&mut stream,
+		"SELECT conname FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t \
+		 ON t.oid = c.conrelid WHERE t.relname = 'DcPost' ORDER BY conname",
+	)
+	.await;
+	assert_eq!(names(rows), ["DcPost_pkey"]);
+	let (_, last, _) =
+		run_simple_query_with_err(&mut surreal, "UPDATE DcPost:1 SET authorId = 5").await;
+	assert_eq!(last, b'E', "the column keeps its record<DcUser> type");
+	// With the reference gone, deleting the author no longer cascades.
+	let (_, last, _) = run_simple_query_with_err(&mut surreal, "DELETE DcUser:1").await;
+	assert_eq!(last, b'C');
+	let rows = text_rows(&mut stream, r#"SELECT count(*) FROM "DcPost""#).await;
+	assert_eq!(rows, vec![["1"]]);
+
+	// A primary key backed by a `_pk` index drops that index.
+	assert!(
+		sqlstate_of(&mut stream, r#"ALTER TABLE "DcKeyed" DROP CONSTRAINT "DcKeyed_pkey""#)
+			.await
+			.is_none()
+	);
+
+	shutdown.cancel();
+}
+
+/// Run each statement of `statements` on `stream`, each of which must succeed.
+async fn run_all(stream: &mut TcpStream, statements: &[&str]) {
+	for sql in statements {
+		let (_, last, err) = run_simple_query_with_err(stream, sql).await;
+		assert!(err.is_none(), "{sql}: {err:?}");
+		assert_eq!(last, b'C', "{sql}");
+	}
+}
+
+#[tokio::test]
+async fn test_pgwire_alter_table_add_foreign_key_converts_a_scalar_column_and_its_rows() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	run_all(
+		&mut stream,
+		&[
+			r#"CREATE TABLE "AfUser" (id integer PRIMARY KEY, name text)"#,
+			r#"CREATE TABLE "AfPost" (id integer PRIMARY KEY, "authorId" integer NOT NULL, "editorId" integer)"#,
+			r#"INSERT INTO "AfUser" (id, name) VALUES (1, 'a'), (2, 'b')"#,
+			r#"INSERT INTO "AfPost" (id, "authorId", "editorId") VALUES (1, 1, NULL), (2, 2, 1), (3, 99, NULL)"#,
+		],
+	)
+	.await;
+
+	// A row that names no row of the target fails the statement, as PostgreSQL's check does, and
+	// leaves the column as it was.
+	let add_author = r#"ALTER TABLE "AfPost" ADD CONSTRAINT fk_a FOREIGN KEY ("authorId") REFERENCES "AfUser"(id) ON DELETE CASCADE"#;
+	let (code, message) = sqlstate_of(&mut stream, add_author).await.unwrap();
+	assert_eq!(code, "23503", "{message}");
+	assert!(message.contains(r#"constraint "AfPost_authorId_fkey""#), "{message}");
+	run_all(&mut stream, &[r#"INSERT INTO "AfPost" (id, "authorId") VALUES (4, 98)"#]).await;
+	run_all(&mut stream, &[r#"DELETE FROM "AfPost" WHERE id IN (3, 4)"#]).await;
+
+	// Both columns become links; the rows keep reading and joining as keys.
+	run_all(
+		&mut stream,
+		&[
+			add_author,
+			r#"ALTER TABLE "AfPost" ADD FOREIGN KEY ("editorId") REFERENCES "AfUser"(id) ON DELETE RESTRICT"#,
+		],
+	)
+	.await;
+	let rows =
+		text_rows(&mut stream, r#"SELECT id, "authorId", "editorId" FROM "AfPost" ORDER BY id"#)
+			.await;
+	assert_eq!(rows, vec![["1", "1", "NULL"], ["2", "2", "1"]]);
+	let rows = text_rows(
+		&mut stream,
+		r#"SELECT p.id, u.name FROM "AfPost" p JOIN "AfUser" u ON p."authorId" = u.id ORDER BY p.id"#,
+	)
+	.await;
+	assert_eq!(rows, vec![["1", "a"], ["2", "b"]]);
+	let rows = text_rows(&mut stream, r#"SELECT id FROM "AfPost" WHERE "authorId" = 2"#).await;
+	assert_eq!(rows, vec![["2"]]);
+	let rows = text_rows(&mut stream, r#"SELECT id FROM "AfPost" WHERE "editorId" IS NULL"#).await;
+	assert_eq!(rows, vec![["1"]]);
+
+	// The catalog reports the column with the type of the key it links to, and lists the keys.
+	let rows = text_rows(
+		&mut stream,
+		"SELECT column_name, data_type, is_nullable FROM information_schema.columns \
+		 WHERE table_name = 'AfPost' AND column_name <> 'id' ORDER BY ordinal_position",
+	)
+	.await;
+	assert_eq!(rows, vec![["authorId", "bigint", "NO"], ["editorId", "bigint", "YES"]]);
+	let rows = text_rows(
+		&mut stream,
+		"SELECT conname, confdeltype FROM pg_catalog.pg_constraint \
+		 WHERE conname LIKE 'AfPost_%_fkey' ORDER BY conname",
+	)
+	.await;
+	assert_eq!(rows, vec![["AfPost_authorId_fkey", "c"], ["AfPost_editorId_fkey", "a"]]);
+
+	// A write that names no row of the target is a foreign key violation, an insert and an update.
+	for sql in [
+		r#"INSERT INTO "AfPost" (id, "authorId") VALUES (5, 99)"#,
+		r#"UPDATE "AfPost" SET "authorId" = 99 WHERE id = 1"#,
+		r#"INSERT INTO "AfPost" (id, "authorId", "editorId") VALUES (5, 1, 99)"#,
+	] {
+		let (code, message) = sqlstate_of(&mut stream, sql).await.unwrap();
+		assert_eq!(code, "23503", "{sql}: {message}");
+	}
+	run_all(
+		&mut stream,
+		&[
+			r#"INSERT INTO "AfPost" (id, "authorId", "editorId") VALUES (5, 2, 2)"#,
+			r#"UPDATE "AfPost" SET "authorId" = 1 WHERE id = 5"#,
+		],
+	)
+	.await;
+	let rows =
+		text_rows(&mut stream, r#"SELECT id FROM "AfPost" WHERE "authorId" = 1 ORDER BY id"#).await;
+	assert_eq!(rows, vec![["1"], ["5"]]);
+
+	// The actions of the keys act on the rows that were there before the conversion: the delete is
+	// refused while a row names the user as its editor, and cascades once none does.
+	let (code, _) = sqlstate_of(&mut stream, r#"DELETE FROM "AfUser" WHERE id = 1"#).await.unwrap();
+	assert_eq!(code, "23503");
+	run_all(
+		&mut stream,
+		&[r#"DELETE FROM "AfPost" WHERE id = 2"#, r#"DELETE FROM "AfUser" WHERE id = 1"#],
+	)
+	.await;
+	let rows = text_rows(&mut stream, r#"SELECT count(*) FROM "AfPost""#).await;
+	assert_eq!(rows, vec![["0"]]);
+
+	// Dropping the constraint keeps the column a link that is written as a key, and lifts the
+	// check.
+	run_all(&mut stream, &[r#"ALTER TABLE "AfPost" DROP CONSTRAINT "AfPost_authorId_fkey""#]).await;
+	run_all(&mut stream, &[r#"INSERT INTO "AfPost" (id, "authorId") VALUES (6, 77)"#]).await;
+	let rows = text_rows(&mut stream, r#"SELECT "authorId" FROM "AfPost""#).await;
+	assert_eq!(rows, vec![["77"]]);
+
+	// A composite key and a key to a column other than the id are refused, not ignored; so is a
+	// column of a type that is no record key.
+	run_all(
+		&mut stream,
+		&[r#"CREATE TABLE "AfOther" (id integer PRIMARY KEY, a integer, b boolean)"#],
+	)
+	.await;
+	for (sql, reason) in [
+		(
+			r#"ALTER TABLE "AfOther" ADD FOREIGN KEY (a, id) REFERENCES "AfUser"(id, id)"#,
+			"one column",
+		),
+		(r#"ALTER TABLE "AfOther" ADD FOREIGN KEY (a) REFERENCES "AfUser"(name)"#, "id column"),
+		(
+			r#"ALTER TABLE "AfOther" ADD FOREIGN KEY (b) REFERENCES "AfUser"(id)"#,
+			"integer, text or uuid",
+		),
+	] {
+		let (code, message) = sqlstate_of(&mut stream, sql).await.unwrap();
+		assert_eq!(code, "0A000", "{sql}: {message}");
+		assert!(message.contains(reason), "{sql}: {message}");
+	}
+	// The same over the extended protocol, which lowers against the schema as well.
+	let (_, last) = run_extended_query(
+		&mut stream,
+		r#"ALTER TABLE "AfOther" ADD FOREIGN KEY (b) REFERENCES "AfUser"(id)"#,
+		&[],
+		&[],
+	)
+	.await;
+	assert_eq!(last, b'E');
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_null_in_a_foreign_key_column_follows_the_column() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	run_all(
+		&mut stream,
+		&[
+			r#"CREATE TABLE "NfUser" (id integer PRIMARY KEY)"#,
+			r#"CREATE TABLE "NfPost" (id integer PRIMARY KEY, "authorId" integer, "ownerId" integer NOT NULL REFERENCES "NfUser"(id))"#,
+			r#"INSERT INTO "NfUser" (id) VALUES (1)"#,
+			r#"INSERT INTO "NfPost" (id, "authorId", "ownerId") VALUES (1, 1, 1)"#,
+		],
+	)
+	.await;
+	run_all(
+		&mut stream,
+		&[r#"ALTER TABLE "NfPost" ADD FOREIGN KEY ("authorId") REFERENCES "NfUser"(id)"#],
+	)
+	.await;
+
+	// Prisma disconnects an optional relation with an UPDATE of the key to NULL, over the extended
+	// protocol with the row's id as a parameter.
+	let (_, last) = run_extended_query(
+		&mut stream,
+		r#"UPDATE "NfPost" SET "authorId" = NULL WHERE id = $1"#,
+		&[20],
+		&[Some(b"1")],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	let rows = text_rows(&mut stream, r#"SELECT id, "authorId" FROM "NfPost""#).await;
+	assert_eq!(rows, vec![["1", "NULL"]]);
+	let rows = text_rows(&mut stream, r#"SELECT id FROM "NfPost" WHERE "authorId" IS NULL"#).await;
+	assert_eq!(rows, vec![["1"]]);
+
+	// An INSERT of NULL, a parameter that is NULL, and a key again.
+	run_all(
+		&mut stream,
+		&[r#"INSERT INTO "NfPost" (id, "authorId", "ownerId") VALUES (2, NULL, 1)"#],
+	)
+	.await;
+	let (_, last) = run_extended_query(
+		&mut stream,
+		r#"INSERT INTO "NfPost" (id, "authorId", "ownerId") VALUES (3, $1, 1)"#,
+		&[20],
+		&[None],
+	)
+	.await;
+	assert_eq!(last, b'C');
+	run_all(&mut stream, &[r#"UPDATE "NfPost" SET "authorId" = 1 WHERE id = 2"#]).await;
+	let rows = text_rows(&mut stream, r#"SELECT id, "authorId" FROM "NfPost" ORDER BY id"#).await;
+	assert_eq!(rows, vec![["1", "NULL"], ["2", "1"], ["3", "NULL"]]);
+
+	// A required foreign key refuses NULL, as a NOT NULL violation.
+	for sql in [
+		r#"INSERT INTO "NfPost" (id, "ownerId") VALUES (4, NULL)"#,
+		r#"UPDATE "NfPost" SET "ownerId" = NULL WHERE id = 1"#,
+	] {
+		let (code, message) = sqlstate_of(&mut stream, sql).await.unwrap();
+		assert_eq!(code, "23502", "{sql}: {message}");
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_foreign_key_in_create_table_is_a_link_column() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	run_all(
+		&mut stream,
+		&[
+			r#"CREATE TABLE "CfUser" (id integer PRIMARY KEY, name text)"#,
+			r#"CREATE TABLE "CfTag" (id text PRIMARY KEY)"#,
+			r#"CREATE TABLE "CfPost" (id integer PRIMARY KEY, "authorId" integer NOT NULL REFERENCES "CfUser"(id) ON DELETE CASCADE, tag text REFERENCES "CfTag", "editorId" integer, FOREIGN KEY ("editorId") REFERENCES "CfUser"(id) ON DELETE SET NULL)"#,
+			r#"CREATE TABLE "CfNode" (id integer PRIMARY KEY, parent integer REFERENCES "CfNode"(id))"#,
+			r#"INSERT INTO "CfUser" (id, name) VALUES (1, 'a'), (2, 'b')"#,
+			r#"INSERT INTO "CfTag" (id) VALUES ('t1')"#,
+			r#"INSERT INTO "CfPost" (id, "authorId", tag, "editorId") VALUES (1, 1, 't1', 2), (2, 2, 't1', 2)"#,
+		],
+	)
+	.await;
+	let rows = text_rows(
+		&mut stream,
+		r#"SELECT p.id, p."authorId", p.tag, u.name FROM "CfPost" p JOIN "CfUser" u ON p."editorId" = u.id ORDER BY p.id"#,
+	)
+	.await;
+	assert_eq!(rows, vec![["1", "1", "t1", "b"], ["2", "2", "t1", "b"]]);
+	let rows = text_rows(
+		&mut stream,
+		"SELECT column_name, data_type, is_nullable FROM information_schema.columns \
+		 WHERE table_name = 'CfPost' AND column_name <> 'id' ORDER BY ordinal_position",
+	)
+	.await;
+	assert_eq!(
+		rows,
+		vec![["authorId", "bigint", "NO"], ["editorId", "bigint", "YES"], ["tag", "text", "YES"]]
+	);
+	let rows = text_rows(
+		&mut stream,
+		"SELECT conname, confdeltype FROM pg_catalog.pg_constraint \
+		 WHERE conname LIKE 'CfPost_%_fkey' ORDER BY conname",
+	)
+	.await;
+	assert_eq!(
+		rows,
+		vec![
+			["CfPost_authorId_fkey", "c"],
+			["CfPost_editorId_fkey", "n"],
+			["CfPost_tag_fkey", "a"]
+		]
+	);
+
+	for sql in [
+		r#"INSERT INTO "CfPost" (id, "authorId") VALUES (3, 9)"#,
+		r#"INSERT INTO "CfPost" (id, "authorId", tag) VALUES (3, 1, 'nope')"#,
+		r#"UPDATE "CfPost" SET "editorId" = 9 WHERE id = 1"#,
+	] {
+		let (code, message) = sqlstate_of(&mut stream, sql).await.unwrap();
+		assert_eq!(code, "23503", "{sql}: {message}");
+	}
+
+	// The row of a table that links to itself may name itself, and a row that exists.
+	run_all(
+		&mut stream,
+		&[
+			r#"INSERT INTO "CfNode" (id, parent) VALUES (1, 1)"#,
+			r#"INSERT INTO "CfNode" (id, parent) VALUES (2, 1)"#,
+		],
+	)
+	.await;
+	let (code, _) = sqlstate_of(&mut stream, r#"INSERT INTO "CfNode" (id, parent) VALUES (3, 8)"#)
+		.await
+		.unwrap();
+	assert_eq!(code, "23503");
+
+	// ON DELETE: SET NULL clears the key, CASCADE deletes the row.
+	run_all(&mut stream, &[r#"DELETE FROM "CfUser" WHERE id = 2"#]).await;
+	let rows = text_rows(&mut stream, r#"SELECT id, "editorId" FROM "CfPost" ORDER BY id"#).await;
+	assert_eq!(rows, vec![["1", "NULL"]]);
+
+	// A composite key and a key to another column are refused.
+	for sql in [
+		r#"CREATE TABLE "CfBad" (a integer, b integer, FOREIGN KEY (a, b) REFERENCES "CfUser"(id, id))"#,
+		r#"CREATE TABLE "CfBad" (a integer REFERENCES "CfUser"(name))"#,
+	] {
+		let (code, message) = sqlstate_of(&mut stream, sql).await.unwrap();
+		assert_eq!(code, "0A000", "{sql}: {message}");
+	}
+
+	shutdown.cancel();
+}
+
+/// A migration sent as one query creates the tables and alters them in the same request, so the
+/// tables are in no catalog when it is lowered.
+#[tokio::test]
+async fn test_pgwire_foreign_key_added_in_the_request_that_creates_the_table() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	run_all(
+		&mut stream,
+		&[
+			r#"CREATE TABLE "MgPost" (id integer PRIMARY KEY NOT NULL, "authorId" integer NOT NULL);
+			   CREATE TABLE "MgUser" (id integer PRIMARY KEY NOT NULL, name text NOT NULL);
+			   ALTER TABLE "MgPost" ADD CONSTRAINT "MgPost_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "MgUser"("id") ON DELETE RESTRICT ON UPDATE CASCADE;"#,
+			r#"INSERT INTO "MgUser" (id, name) VALUES (1, 'a')"#,
+			r#"INSERT INTO "MgPost" (id, "authorId") VALUES (1, 1)"#,
+		],
+	)
+	.await;
+	let (code, _) =
+		sqlstate_of(&mut stream, r#"INSERT INTO "MgPost" (id, "authorId") VALUES (2, 5)"#)
+			.await
+			.unwrap();
+	assert_eq!(code, "23503");
+	let (code, _) = sqlstate_of(&mut stream, r#"DELETE FROM "MgUser" WHERE id = 1"#).await.unwrap();
+	assert_eq!(code, "23503");
+	let rows = text_rows(
+		&mut stream,
+		"SELECT conname FROM pg_catalog.pg_constraint WHERE conname LIKE 'MgPost_%_fkey'",
+	)
+	.await;
+	assert_eq!(rows, vec![["MgPost_authorId_fkey"]]);
+
+	// A transaction sees the tables an earlier statement of it created.
+	run_all(
+		&mut stream,
+		&[
+			"BEGIN",
+			r#"CREATE TABLE "TxPost" (id integer PRIMARY KEY NOT NULL, "authorId" integer NOT NULL)"#,
+			r#"CREATE TABLE "TxUser" (id integer PRIMARY KEY NOT NULL)"#,
+			r#"ALTER TABLE "TxPost" ADD CONSTRAINT x FOREIGN KEY ("authorId") REFERENCES "TxUser"(id)"#,
+			"COMMIT",
+		],
+	)
+	.await;
+	let rows = text_rows(
+		&mut stream,
+		"SELECT conname FROM pg_catalog.pg_constraint WHERE conname LIKE 'TxPost_%_fkey'",
+	)
+	.await;
+	assert_eq!(rows, vec![["TxPost_authorId_fkey"]]);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_quantified_comparisons_against_an_array_are_three_valued() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut surreal = connect_and_handshake_with_options(addr, None).await;
+	let (_, last, err) = run_simple_query_with_err(
+		&mut surreal,
+		"DEFINE TABLE qa SCHEMALESS; \
+		 CREATE qa:1 SET x = 1, arr = [1, 2]; \
+		 CREATE qa:2 SET x = 3, arr = [1, 2]; \
+		 CREATE qa:3 SET x = 3, arr = [1, NULL]; \
+		 CREATE qa:4 SET x = NULL, arr = [1]; \
+		 CREATE qa:5 SET x = 1, arr = NULL; \
+		 CREATE qa:6 SET x = 1, arr = []; \
+		 CREATE qa:7 SET x = 2, arr = [2, 2]; \
+		 CREATE qa:8 SET x = 1, arr = [1, NULL]; \
+		 CREATE qa:9 SET x = NULL, arr = []; \
+		 CREATE qa:10 SET x = 2, arr = [1, 3];",
+	)
+	.await;
+	assert!(err.is_none(), "{err:?}");
+	assert_eq!(last, b'C');
+
+	let mut stream = connect_and_handshake(addr).await;
+	// Rows 1 to 10: match, no match, no match beside a NULL item, NULL value, NULL array, empty
+	// array, all items equal, match beside a NULL item, NULL value and empty array, a differing
+	// item.
+	let cases = [
+		("x = ANY (arr)", ["t", "f", "NULL", "NULL", "NULL", "f", "t", "t", "f", "f"]),
+		("x <> ALL (arr)", ["f", "t", "NULL", "NULL", "NULL", "t", "f", "f", "t", "t"]),
+		("x = ALL (arr)", ["f", "f", "f", "NULL", "NULL", "t", "t", "NULL", "t", "f"]),
+		("x <> ANY (arr)", ["t", "t", "t", "NULL", "NULL", "f", "f", "NULL", "f", "t"]),
+		("x = SOME (arr)", ["t", "f", "NULL", "NULL", "NULL", "f", "t", "t", "f", "f"]),
+	];
+	for (predicate, expected) in cases {
+		let rows =
+			text_rows(&mut stream, &format!("SELECT ({predicate}) AS r FROM qa ORDER BY id")).await;
+		assert_eq!(rows.len(), 10, "{predicate}");
+		let got: Vec<&str> = rows.iter().map(|row| row[0].as_str()).collect();
+		assert_eq!(got, expected, "{predicate}");
+	}
+
+	// Unknown is not true: neither the predicate nor its negation selects the NULL rows.
+	let rows = text_rows(&mut stream, "SELECT 1 FROM qa WHERE NOT (x = ANY (arr))").await;
+	assert_eq!(rows.len(), 4);
+
+	let (_, _, err) = run_simple_query_with_err(&mut stream, "SELECT x < ANY (arr) FROM qa").await;
+	let (code, _) = err.expect("an unsupported operator is refused");
+	assert_eq!(code, "0A000");
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_drizzle_sequence_user_and_index_catalog_queries() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	for ddl in [
+		"CREATE TABLE \"Counter\" (id serial PRIMARY KEY, label text NOT NULL)",
+		"CREATE TABLE \"Plain\" (id integer PRIMARY KEY)",
+		"CREATE INDEX \"Counter_label_idx\" ON \"Counter\" (label)",
+	] {
+		let (_, last) = run_simple_query(&mut stream, ddl).await;
+		assert_eq!(last, b'C', "{ddl}");
+	}
+
+	// The sequences query lists the sequence of each serial column, and only those.
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"select schemaname, sequencename, start_value, min_value, max_value, increment_by, cycle, \
+		 cache_size from pg_sequences as seq WHERE schemaname = 'public';",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cells: Vec<_> =
+		decode_data_row(&rows[0]).into_iter().map(Option::unwrap_or_default).collect();
+	assert_eq!(cells, ["public", "Counter_id_seq", "1", "1", "9223372036854775807", "1", "f", "1"]);
+
+	// The schema listing joins each namespace to its owner; every namespace has one, and
+	// `public` is not listed.
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"select s.nspname as table_schema from pg_catalog.pg_namespace s join pg_catalog.pg_user u \
+		 on u.usesysid = s.nspowner where nspname not in ('information_schema', 'pg_catalog', \
+		 'public') and nspname not like 'pg_toast%' and nspname not like 'pg_temp_%' order by \
+		 table_schema;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert!(rows.is_empty());
+	let (rows, _) = run_simple_query(
+		&mut stream,
+		"select count(*) from pg_catalog.pg_namespace s join pg_catalog.pg_user u on u.usesysid = \
+		 s.nspowner",
+	)
+	.await;
+	assert_ne!(decode_data_row(&rows[0])[0].as_deref(), Some("0"));
+
+	// A serial column has a default that draws from its sequence, and the sequence is found by
+	// the name of the table, however it is written.
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT ad.adnum, pg_get_expr(ad.adbin, ad.adrelid) AS expr, \
+		 pg_get_serial_sequence('\"public\".\"Counter\"', 'id')::regclass AS seq_name, \
+		 pg_get_serial_sequence('\"public\".\"Counter\"', 'label') AS none, \
+		 20 = ANY ('{int,int8,int2}'::regtype[]) AS wide, CASE 20 WHEN 'int8'::regtype THEN \
+		 'bigserial' END AS kind FROM pg_attrdef ad",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cells = decode_data_row(&rows[0]);
+	assert_eq!(cells[0].as_deref(), Some("1"));
+	assert_eq!(cells[1].as_deref(), Some("nextval('\"Counter_id_seq\"'::regclass)"));
+	assert_eq!(cells[2].as_deref(), Some("\"Counter_id_seq\""));
+	assert_eq!(cells[3], None);
+	assert_eq!(cells[4].as_deref(), Some("t"));
+	assert_eq!(cells[5].as_deref(), Some("bigserial"));
+
+	// The index query expands the key of each index through a LATERAL subquery, and the
+	// constraint behind the primary key index is told apart from a plain index.
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT DISTINCT ON (t.relname, ic.relname, k.i) ic.relname AS indexname, i.indisunique AS \
+		 is_unique, coalesce(a.attname, pg_get_indexdef(i.indexrelid, k.i, false)) AS column_name, \
+		 i.indoption[k.i-1] & 1 = 1 AS descending, opc.opcname FROM pg_class t LEFT JOIN pg_index \
+		 i ON t.oid = i.indrelid LEFT JOIN pg_class ic ON ic.oid = i.indexrelid CROSS JOIN LATERAL \
+		 (SELECT unnest(i.indkey), generate_subscripts(i.indkey, 1) + 1) AS k(attnum, i) LEFT JOIN \
+		 pg_attribute AS a ON i.indrelid = a.attrelid AND k.attnum = a.attnum JOIN pg_namespace c \
+		 ON c.oid = t.relnamespace JOIN pg_opclass opc ON opc.oid = ANY(i.indclass) WHERE \
+		 c.nspname = 'public' AND t.relname = 'Counter' ORDER BY ic.relname",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	let found: Vec<Vec<Option<String>>> = rows.iter().map(|row| decode_data_row(row)).collect();
+	let summary: Vec<_> = found
+		.iter()
+		.map(|cells| {
+			(
+				cells[0].clone().unwrap_or_default(),
+				cells[1].clone().unwrap_or_default(),
+				cells[2].clone().unwrap_or_default(),
+				cells[3].clone().unwrap_or_default(),
+				cells[4].clone().unwrap_or_default(),
+			)
+		})
+		.collect();
+	let row = |index: &str, unique: &str, column: &str, opclass: &str| {
+		(index.into(), unique.into(), column.into(), "f".into(), opclass.into())
+	};
+	assert_eq!(
+		summary,
+		[
+			row("Counter_label_idx", "f", "label", "text_ops"),
+			row("Counter_pkey", "t", "id", "int8_ops"),
+		]
+	);
+
+	// The primary key index belongs to a constraint, the plain index does not.
+	let (rows, _) = run_simple_query(
+		&mut stream,
+		"SELECT idx.indexrelname, CASE WHEN con.conname IS NOT NULL THEN 1 ELSE 0 END AS \
+		 generated_by_constraint FROM pg_stat_user_indexes idx LEFT JOIN pg_constraint con ON \
+		 con.conindid = idx.indexrelid WHERE idx.relname = 'Counter' AND schemaname = 'public' \
+		 GROUP BY indexrelname, generated_by_constraint ORDER BY indexrelname",
+	)
+	.await;
+	let found: Vec<_> = rows
+		.iter()
+		.map(|row| {
+			let cells = decode_data_row(row);
+			(cells[0].clone().unwrap_or_default(), cells[1].clone().unwrap_or_default())
+		})
+		.collect();
+	assert_eq!(
+		found,
+		[
+			("Counter_label_idx".to_owned(), "0".to_owned()),
+			("Counter_pkey".to_owned(), "1".to_owned())
+		]
+	);
+
+	shutdown.cancel();
+}
+
+/// A connection together with the key a CancelRequest for it must carry.
+async fn connect_with_backend_key(addr: std::net::SocketAddr) -> (TcpStream, i32, i32) {
+	let mut stream = TcpStream::connect(addr).await.expect("connect");
+	let mut body = BytesMut::new();
+	body.put_i32(196608);
+	for (name, value) in
+		[("user", "root"), ("database", "test/test"), ("options", "-c dialect=pgsql")]
+	{
+		body.put_slice(name.as_bytes());
+		body.put_u8(0);
+		body.put_slice(value.as_bytes());
+		body.put_u8(0);
+	}
+	body.put_u8(0);
+	stream.write_i32((body.len() + 4) as i32).await.expect("send length");
+	stream.write_all(&body).await.expect("send startup");
+	let mut key = None;
+	timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = stream.read_u8().await.expect("read type");
+			let msg_len = stream.read_i32().await.expect("read length") as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await.expect("read payload");
+			match msg_type {
+				b'K' => {
+					key = Some((
+						i32::from_be_bytes(payload[..4].try_into().expect("process id")),
+						i32::from_be_bytes(payload[4..8].try_into().expect("secret key")),
+					));
+				}
+				b'Z' => break,
+				_ => {}
+			}
+		}
+	})
+	.await
+	.expect("handshake");
+	let (pid, secret) = key.expect("BackendKeyData");
+	(stream, pid, secret)
+}
+
+/// Ask the server to cancel the query of the connection holding `(pid, secret)`.
+async fn send_cancel_request(addr: std::net::SocketAddr, pid: i32, secret: i32) {
+	let mut side = TcpStream::connect(addr).await.expect("connect");
+	let mut packet = BytesMut::new();
+	packet.put_i32(16);
+	packet.put_i32(80877102);
+	packet.put_i32(pid);
+	packet.put_i32(secret);
+	side.write_all(&packet).await.expect("send cancel request");
+	// The server closes the side connection once it has acted on the request.
+	let mut sink = Vec::new();
+	let _ = timeout(Duration::from_secs(5), side.read_to_end(&mut sink)).await;
+}
+
+async fn send_simple_query(stream: &mut TcpStream, sql: &str) {
+	let mut query = sql.to_string();
+	query.push('\0');
+	let mut packet = BytesMut::new();
+	packet.put_u8(b'Q');
+	packet.put_i32((query.len() + 4) as i32);
+	packet.put_slice(query.as_bytes());
+	stream.write_all(&packet).await.expect("send query");
+}
+
+/// Read up to the next ReadyForQuery: the data rows and the error, if any.
+async fn read_response(
+	stream: &mut TcpStream,
+	wait: Duration,
+) -> Option<(Vec<Vec<Option<String>>>, Option<(String, String)>)> {
+	let mut rows = Vec::new();
+	let mut error = None;
+	timeout(wait, async {
+		loop {
+			let msg_type = stream.read_u8().await.expect("read type");
+			let msg_len = stream.read_i32().await.expect("read length") as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await.expect("read payload");
+			match msg_type {
+				b'D' => rows.push(decode_data_row(&payload)),
+				b'E' => error = Some(parse_pg_error_fields(&payload)),
+				b'Z' => break,
+				_ => {}
+			}
+		}
+	})
+	.await
+	.ok()?;
+	Some((rows, error))
+}
+
+/// The one cell of the one row a query returns.
+async fn one_cell(stream: &mut TcpStream, sql: &str) -> Option<String> {
+	send_simple_query(stream, sql).await;
+	let (rows, error) = read_response(stream, Duration::from_secs(5)).await.expect("response");
+	assert_eq!(error, None, "{sql}");
+	assert_eq!(rows.len(), 1, "{sql}");
+	rows[0][0].clone()
+}
+
+#[tokio::test]
+async fn test_pgwire_advisory_lock_blocks_until_the_holder_unlocks() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut holder = connect_and_handshake(addr).await;
+	let mut waiter = connect_and_handshake(addr).await;
+
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_advisory_lock(72707369)").await.as_deref(),
+		Some("")
+	);
+	assert_eq!(
+		one_cell(&mut waiter, "SELECT pg_try_advisory_lock(72707369)").await.as_deref(),
+		Some("f")
+	);
+	assert_eq!(
+		one_cell(&mut waiter, "SELECT pg_advisory_unlock(72707369)").await.as_deref(),
+		Some("f"),
+		"a lock another session holds is not the waiter's to release"
+	);
+
+	send_simple_query(&mut waiter, "SELECT pg_advisory_lock(72707369)").await;
+	assert!(
+		read_response(&mut waiter, Duration::from_millis(300)).await.is_none(),
+		"the second lock waits while the first is held"
+	);
+
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_advisory_unlock(72707369)").await.as_deref(),
+		Some("t")
+	);
+	let (rows, error) = read_response(&mut waiter, Duration::from_secs(5))
+		.await
+		.expect("the waiter takes the lock once it is released");
+	assert_eq!(error, None);
+	assert_eq!(rows, vec![vec![Some(String::new())]]);
+
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_try_advisory_lock(72707369)").await.as_deref(),
+		Some("f"),
+		"the waiter holds it now"
+	);
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_advisory_unlock(72707369)").await.as_deref(),
+		Some("f")
+	);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_advisory_locks_are_counted_per_session_and_keyed_by_form() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut a = connect_and_handshake(addr).await;
+	let mut b = connect_and_handshake(addr).await;
+
+	assert_eq!(one_cell(&mut a, "SELECT pg_try_advisory_lock(5)").await.as_deref(), Some("t"));
+	assert_eq!(one_cell(&mut a, "SELECT pg_advisory_lock(5)").await.as_deref(), Some(""));
+	assert_eq!(one_cell(&mut a, "SELECT pg_advisory_unlock(5)").await.as_deref(), Some("t"));
+	assert_eq!(
+		one_cell(&mut b, "SELECT pg_try_advisory_lock(5)").await.as_deref(),
+		Some("f"),
+		"one hold is left"
+	);
+	assert_eq!(one_cell(&mut a, "SELECT pg_advisory_unlock(5)").await.as_deref(), Some("t"));
+	assert_eq!(one_cell(&mut a, "SELECT pg_advisory_unlock(5)").await.as_deref(), Some("f"));
+	assert_eq!(one_cell(&mut b, "SELECT pg_try_advisory_lock(5)").await.as_deref(), Some("t"));
+
+	// The two-key form is a different key space from the one-key form.
+	assert_eq!(one_cell(&mut a, "SELECT pg_try_advisory_lock(0, 5)").await.as_deref(), Some("t"));
+	assert_eq!(one_cell(&mut b, "SELECT pg_try_advisory_lock(0, 5)").await.as_deref(), Some("f"));
+
+	// `pg_advisory_unlock_all` drops every hold, however often a key was taken.
+	assert_eq!(one_cell(&mut b, "SELECT pg_try_advisory_lock(5)").await.as_deref(), Some("t"));
+	assert_eq!(one_cell(&mut b, "SELECT pg_advisory_unlock_all()").await.as_deref(), Some(""));
+	assert_eq!(one_cell(&mut a, "SELECT pg_try_advisory_lock(5)").await.as_deref(), Some("t"));
+	assert_eq!(one_cell(&mut b, "SELECT pg_try_advisory_lock(0, 5)").await.as_deref(), Some("f"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_advisory_locks_are_released_when_the_connection_ends() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut holder = connect_and_handshake(addr).await;
+	let mut other = connect_and_handshake(addr).await;
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_lock(9)").await.as_deref(), Some(""));
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_lock(9)").await.as_deref(), Some(""));
+	assert_eq!(one_cell(&mut other, "SELECT pg_try_advisory_lock(9)").await.as_deref(), Some("f"));
+
+	// The client vanishes without a Terminate.
+	drop(holder);
+	let mut freed = false;
+	for _ in 0..100 {
+		if one_cell(&mut other, "SELECT pg_try_advisory_lock(9)").await.as_deref() == Some("t") {
+			freed = true;
+			break;
+		}
+		sleep(Duration::from_millis(50)).await;
+	}
+	assert!(freed, "the lock is released once its session is gone");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_a_waiting_advisory_lock_ends_on_cancel_request_and_on_disconnect() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut holder = connect_and_handshake(addr).await;
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_lock(11)").await.as_deref(), Some(""));
+
+	let (mut waiter, pid, secret) = connect_with_backend_key(addr).await;
+	send_simple_query(&mut waiter, "SELECT pg_advisory_lock(11)").await;
+	assert!(read_response(&mut waiter, Duration::from_millis(200)).await.is_none());
+	send_cancel_request(addr, pid, secret).await;
+	let (rows, error) = read_response(&mut waiter, Duration::from_secs(5))
+		.await
+		.expect("a CancelRequest ends the wait");
+	assert!(rows.is_empty());
+	assert_eq!(error.expect("canceled").0, "57014");
+	// The connection stays usable, and the cancelled wait took nothing.
+	assert_eq!(
+		one_cell(&mut waiter, "SELECT pg_try_advisory_lock(12)").await.as_deref(),
+		Some("t")
+	);
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_unlock(11)").await.as_deref(), Some("t"));
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_try_advisory_lock(11)").await.as_deref(),
+		Some("t")
+	);
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_unlock(11)").await.as_deref(), Some("t"));
+
+	// A waiter whose client goes away stops waiting, so the key goes to the next in line.
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_lock(13)").await.as_deref(), Some(""));
+	let mut abandoned = connect_and_handshake(addr).await;
+	send_simple_query(&mut abandoned, "SELECT pg_advisory_lock(13)").await;
+	sleep(Duration::from_millis(200)).await;
+	drop(abandoned);
+	sleep(Duration::from_millis(200)).await;
+	assert_eq!(one_cell(&mut holder, "SELECT pg_advisory_unlock(13)").await.as_deref(), Some("t"));
+	assert_eq!(
+		one_cell(&mut holder, "SELECT pg_try_advisory_lock(13)").await.as_deref(),
+		Some("t"),
+		"the departed waiter did not keep the key"
+	);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_advisory_lock_functions_take_parameters_and_describe_their_result() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut a = connect_and_handshake(addr).await;
+	let mut b = connect_and_handshake(addr).await;
+
+	let (rows, _) =
+		run_extended_query(&mut a, "SELECT pg_try_advisory_lock($1)", &[], &[Some(b"7")]).await;
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("t".to_string())]);
+	let (rows, _) =
+		run_extended_query(&mut b, "SELECT pg_try_advisory_lock($1)", &[], &[Some(b"7")]).await;
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("f".to_string())]);
+	let (rows, _) =
+		run_extended_query(&mut b, "SELECT pg_try_advisory_lock($1)", &[], &[None]).await;
+	assert_eq!(decode_data_row(&rows[0]), vec![None], "a NULL key returns NULL and takes nothing");
+	let (rows, _) =
+		run_extended_query(&mut a, "SELECT pg_advisory_unlock($1)", &[], &[Some(b"7")]).await;
+	assert_eq!(decode_data_row(&rows[0]), vec![Some("t".to_string())]);
+
+	// Describe: one int8 parameter, one column named for the function, of type void.
+	run_extended_batch(
+		&mut a,
+		&[build_parse("lock", "SELECT pg_advisory_lock($1)", &[]), build_sync()],
+	)
+	.await;
+	for packet in [build_desc(b'S', "lock"), build_sync()] {
+		a.write_all(&packet).await.expect("send");
+	}
+	let mut messages = Vec::new();
+	timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = a.read_u8().await.expect("type");
+			let msg_len = a.read_i32().await.expect("length") as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			a.read_exact(&mut payload).await.expect("payload");
+			messages.push((msg_type, payload));
+			if msg_type == b'Z' {
+				break;
+			}
+		}
+	})
+	.await
+	.expect("describe response");
+	let parameters = messages.iter().find(|(t, _)| *t == b't').expect("ParameterDescription");
+	let mut cur = parameters.1.as_slice();
+	assert_eq!(cur.get_i16(), 1);
+	assert_eq!(cur.get_i32(), 20, "the key is a bigint");
+	let columns = messages.iter().find(|(t, _)| *t == b'T').expect("RowDescription");
+	let mut cur = columns.1.as_slice();
+	assert_eq!(cur.get_i16(), 1);
+	let name_end = cur.iter().position(|b| *b == 0).expect("column name");
+	assert_eq!(&cur[..name_end], b"pg_advisory_lock");
+	cur.advance(name_end + 1 + 4 + 2);
+	assert_eq!(cur.get_i32(), 2278, "pg_advisory_lock returns void");
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_advisory_lock_inside_a_larger_query_is_refused() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for sql in [
+		"SELECT pg_advisory_lock(1) FROM pg_class",
+		"SELECT pg_try_advisory_lock(1), 2",
+		"SELECT 1 WHERE pg_advisory_unlock(1)",
+	] {
+		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(error.expect(sql).0, "0A000", "{sql}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_catalog_vectors_count_from_zero_and_user_tables_have_row_types() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for ddl in [
+		"CREATE TABLE \"Counter\" (id serial PRIMARY KEY, label text NOT NULL)",
+		"CREATE INDEX \"Counter_label_idx\" ON \"Counter\" (label)",
+	] {
+		let (_, last) = run_simple_query(&mut stream, ddl).await;
+		assert_eq!(last, b'C', "{ddl}");
+	}
+
+	// The key columns of an index are numbered from zero, as `int2vector` is, and an element
+	// is read at the same number.
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT ic.relname, unnest(i.indkey) AS attnum, generate_subscripts(i.indkey, 1) AS pos, \
+		 i.indkey[0] AS first FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid WHERE \
+		 ic.relname = 'Counter_label_idx'",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	let cells: Vec<_> = rows.iter().map(|row| decode_data_row(row)).collect();
+	assert_eq!(cells.len(), 1);
+	assert_eq!(cells[0][2].as_deref(), Some("0"));
+	assert_eq!(cells[0][1], cells[0][3]);
+
+	// A table's row type is the `pg_type` row its `pg_class` row names.
+	let (rows, _) = run_simple_query(
+		&mut stream,
+		"SELECT t.typname, t.typtype, t.typrelid = c.oid AS own FROM pg_class c JOIN pg_type t ON \
+		 t.oid = c.reltype WHERE c.relname = 'Counter'",
+	)
+	.await;
+	assert_eq!(rows.len(), 1);
+	assert_eq!(
+		decode_data_row(&rows[0]),
+		[Some("Counter".to_string()), Some("c".to_string()), Some("t".to_string())]
+	);
+
+	// A column compared with a column of another relation on the left of a left join does not
+	// drop the left row.
+	let (rows, _) = run_simple_query(
+		&mut stream,
+		"SELECT c.relname, d.adnum FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+		 LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND n.nspname = c.relname WHERE c.relname = \
+		 'Counter'",
+	)
+	.await;
+	assert_eq!(rows.len(), 1);
+	assert_eq!(decode_data_row(&rows[0]), [Some("Counter".to_string()), None]);
 	shutdown.cancel();
 }

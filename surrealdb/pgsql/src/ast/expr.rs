@@ -521,6 +521,20 @@ pub enum Expr {
 		/// Source span.
 		span: Span,
 	},
+
+	/// Quantified comparison against an array value (e.g. `x = ANY (arr)`).
+	QuantifiedArray {
+		/// Left operand.
+		expr: Box<Expr>,
+		/// Comparison operator.
+		op: crate::ast::op::BinaryOperator,
+		/// Quantifier: `ANY`, `SOME`, or `ALL`.
+		quantifier: Quantifier,
+		/// The array expression.
+		array: Box<Expr>,
+		/// Source span.
+		span: Span,
+	},
 }
 
 /// Quantifier for quantified comparisons: `ANY`, `SOME`, `ALL`.
@@ -657,6 +671,10 @@ impl Expr {
 				..
 			}
 			| Self::Quantified {
+				span,
+				..
+			}
+			| Self::QuantifiedArray {
 				span,
 				..
 			} => *span,
@@ -937,6 +955,16 @@ impl Expr {
 				*span = zero;
 				expr.normalize_spans();
 				subquery.normalize_spans();
+			}
+			Self::QuantifiedArray {
+				expr,
+				array,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				array.normalize_spans();
 			}
 			Self::Quantified {
 				expr,

@@ -1,3 +1,7 @@
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 #[allow(unused_imports)]
 use surrealdb_expr::expr::data::Assignment;
 #[allow(unused_imports)]

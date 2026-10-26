@@ -261,6 +261,130 @@ pub fn lower_bound_expr(
 						otherwise: Some(l_a),
 					})));
 				}
+				"unnest" => {
+					return Err(PlanError::UnsupportedExpression(
+						"UNNEST outside a select-list target".into(),
+					));
+				}
+				crate::functions::BIT_AND => {
+					let [value, BoundExpr::Literal(BoundLiteral::Integer(mask))] = args.as_slice()
+					else {
+						return Err(PlanError::UnsupportedExpression(
+							"`&` against anything but an integer constant".into(),
+						));
+					};
+					if *mask <= 0 || mask & (mask - 1) != 0 {
+						return Err(PlanError::UnsupportedExpression(
+							"`&` with a mask that is not a single bit".into(),
+						));
+					}
+					let value = lower_bound_expr(value, policy)?;
+					let integer = |n: i64| LogicalExpr::Literal(LogicalLiteral::Integer(n));
+					// The bit is `floor(value / mask) % 2`, scaled back to the mask. The remainder
+					// takes the sign of the dividend, so a negative value (two's complement in
+					// PostgreSQL) is brought to 0 or 1 by adding the divisor and taking it again.
+					let remainder = LogicalExpr::Binary {
+						left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("math::floor".to_string()),
+							args: vec![LogicalExpr::Binary {
+								left: Box::new(value.clone()),
+								op: BinaryOperator::Divide,
+								right: Box::new(integer(*mask)),
+							}],
+						}))),
+						op: BinaryOperator::Remainder,
+						right: Box::new(integer(2)),
+					};
+					let bit = LogicalExpr::Binary {
+						left: Box::new(LogicalExpr::Binary {
+							left: Box::new(remainder),
+							op: BinaryOperator::Add,
+							right: Box::new(integer(2)),
+						}),
+						op: BinaryOperator::Remainder,
+						right: Box::new(integer(2)),
+					};
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							LogicalExpr::Call(Box::new(LogicalCall {
+								receiver: Function::Normal("type::is_number".to_string()),
+								args: vec![value],
+							})),
+							LogicalExpr::Binary {
+								left: Box::new(bit),
+								op: BinaryOperator::Multiply,
+								right: Box::new(integer(*mask)),
+							},
+						)],
+						otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+					})));
+				}
+				crate::functions::SUBSCRIPT => {
+					let [array, index] = args.as_slice() else {
+						return Err(PlanError::UnsupportedExpression("an array subscript".into()));
+					};
+					// Subscripts count from one, except in a vector column of the catalog, which
+					// counts from zero; one outside the array is NULL.
+					let first = i64::from(!matches!(
+						array,
+						BoundExpr::Column(BoundColumnRef {
+							declared_type: crate::SqlType::Int2Vector | crate::SqlType::OidVector,
+							..
+						})
+					));
+					let index = lower_bound_expr(index, policy)?;
+					let null = || LogicalExpr::Literal(LogicalLiteral::Null);
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							LogicalExpr::Binary {
+								left: Box::new(index.clone()),
+								op: BinaryOperator::MoreThanEqual,
+								right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(
+									first,
+								))),
+							},
+							LogicalExpr::Binary {
+								left: Box::new(LogicalExpr::Index {
+									base: Box::new(lower_bound_expr(array, policy)?),
+									index: Box::new(LogicalExpr::Binary {
+										left: Box::new(index),
+										op: BinaryOperator::Subtract,
+										right: Box::new(LogicalExpr::Literal(
+											LogicalLiteral::Integer(first),
+										)),
+									}),
+								}),
+								op: BinaryOperator::NullCoalescing,
+								right: Box::new(null()),
+							},
+						)],
+						otherwise: Some(null()),
+					})));
+				}
+				"generate_subscripts" => {
+					return Err(PlanError::UnsupportedExpression(
+						"GENERATE_SUBSCRIPTS other than as a bare select-list target".into(),
+					));
+				}
+				crate::functions::QUANTIFIED_ARRAY => {
+					let [
+						value,
+						array,
+						BoundExpr::Literal(BoundLiteral::Boolean(equal)),
+						BoundExpr::Literal(BoundLiteral::Boolean(all)),
+					] = args.as_slice()
+					else {
+						return Err(PlanError::UnsupportedExpression(
+							"a quantified comparison against an array".into(),
+						));
+					};
+					return Ok(sql_quantified(
+						lower_bound_expr(value, policy)?,
+						lower_bound_expr(array, policy)?,
+						*equal,
+						*all,
+					));
+				}
 				"if" if args.len() == 3 => {
 					let cond = lower_bound_expr(&args[0], policy)?;
 					let then_val = lower_bound_expr(&args[1], policy)?;
@@ -436,49 +560,37 @@ pub fn lower_bound_expr(
 				"pg_get_userbyid" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from("root"))));
 				}
-				"format_type" => {
-					let type_name = match args.first() {
-						Some(BoundExpr::Literal(BoundLiteral::Integer(oid))) => match *oid {
-							16 => "boolean",
-							17 => "bytea",
-							18 => "char",
-							19 => "name",
-							20 => "bigint",
-							21 => "smallint",
-							23 => "integer",
-							25 => "text",
-							26 => "oid",
-							114 => "json",
-							700 => "real",
-							701 => "double precision",
-							1042 => "character",
-							1043 => "character varying",
-							1082 => "date",
-							1083 => "time without time zone",
-							1114 => "timestamp without time zone",
-							1184 => "timestamp with time zone",
-							1186 => "interval",
-							1700 => "numeric",
-							2950 => "uuid",
-							3802 => "jsonb",
-							1000 => "boolean[]",
-							1005 => "smallint[]",
-							1007 => "integer[]",
-							1016 => "bigint[]",
-							1009 => "text[]",
-							1015 => "character varying[]",
-							1021 => "real[]",
-							1022 => "double precision[]",
-							2951 => "uuid[]",
-							3807 => "jsonb[]",
-							oid if oid == i64::from(crate::descriptor::VECTOR_OID) => "vector",
-							_ => "text",
-						},
-						_ => "text",
-					};
-					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
-						type_name,
-					))));
+				"format_type" if !args.is_empty() => {
+					if let BoundExpr::Literal(BoundLiteral::Integer(oid)) = &args[0] {
+						let name = PG_TYPES
+							.iter()
+							.find(|(type_oid, ..)| type_oid == oid)
+							.map_or("text", |(_, _, name)| name);
+						return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from(
+							name,
+						))));
+					}
+					// A NULL or unknown oid matches no branch and yields NULL.
+					let oid = lower_bound_expr(&args[0], policy)?;
+					let branches = PG_TYPES
+						.iter()
+						.map(|(type_oid, _, name)| {
+							(
+								LogicalExpr::Binary {
+									left: Box::new(oid.clone()),
+									op: BinaryOperator::Equal,
+									right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(
+										*type_oid,
+									))),
+								},
+								LogicalExpr::Literal(LogicalLiteral::String(Strand::from(*name))),
+							)
+						})
+						.collect();
+					return Ok(LogicalExpr::If(Box::new(LogicalIf {
+						branches,
+						otherwise: None,
+					})));
 				}
 				"pg_table_is_visible"
 				| "pg_type_is_visible"
@@ -544,7 +656,30 @@ pub fn lower_bound_expr(
 						} => lower_quote_ident(lower_bound_expr(arg, policy)?),
 					});
 				}
-				"obj_description" | "col_description" | "shobj_description" | "pg_get_expr" => {
+				"obj_description" | "col_description" | "shobj_description" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+				}
+				// The catalog stores an expression as the text `pg_get_expr` answers, and lists no
+				// expression it does not store that way (`indexprs` and `indpred` are NULL).
+				"pg_get_expr" if !args.is_empty() => {
+					return lower_bound_expr(&args[0], policy);
+				}
+				// A lock waits on other sessions, which a query cannot; the wire front end runs
+				// a statement that is one call and passes nothing else here.
+				"pg_advisory_lock"
+				| "pg_try_advisory_lock"
+				| "pg_advisory_unlock"
+				| "pg_advisory_unlock_all" => {
+					return Err(PlanError::UnsupportedExpression(format!(
+						"{name} is supported only as a whole statement, `SELECT {name}(...)`"
+					)));
+				}
+				// A function listed in `pg_proc` is built in and has no source to render.
+				"pg_get_functiondef" => {
+					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
+				}
+				// Every index is over plain columns, so no index column is an expression.
+				"pg_get_indexdef" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 				}
 				"pg_relation_size" | "pg_total_relation_size" => {
@@ -747,10 +882,15 @@ pub fn lower_bound_expr(
 			let mut lower_branches = Vec::new();
 			for (cond, val) in branches {
 				let condition = if let Some(base) = operand {
+					let subject = lower_bound_expr(base, policy)?;
+					let mut candidate = lower_bound_expr(cond, policy)?;
+					if let Some(truth) = pg_bool_spelling(cond) {
+						candidate = bool_if_boolean(&subject, truth, candidate);
+					}
 					LogicalExpr::Binary {
-						left: Box::new(lower_bound_expr(base, policy)?),
+						left: Box::new(subject),
 						op: BinaryOperator::Equal,
-						right: Box::new(lower_bound_expr(cond, policy)?),
+						right: Box::new(candidate),
 					}
 				} else {
 					lower_bound_expr(cond, policy)?
@@ -820,39 +960,15 @@ pub fn lower_bound_expr(
 		} => {
 			let lowered = lower_bound_expr(expr, policy)?;
 			let clean_type = target_type.to_lowercase();
-			let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
-			if base_type == "regtype" {
-				// The type an OID names is shown as its name; the OIDs of the types the catalog
-				// holds otherwise keep to the number.
-				let shown = |oid: i32, name: &str, otherwise: LogicalExpr| {
-					LogicalExpr::If(Box::new(LogicalIf {
-						branches: vec![(
-							LogicalExpr::Binary {
-								left: Box::new(LogicalExpr::Current),
-								op: BinaryOperator::Equal,
-								right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(
-									i64::from(oid),
-								))),
-							},
-							LogicalExpr::Literal(LogicalLiteral::String(Strand::from(name))),
-						)],
-						otherwise: Some(otherwise),
-					}))
-				};
-				let number = LogicalExpr::Call(Box::new(LogicalCall {
-					receiver: Function::Normal("type::string".to_string()),
-					args: vec![LogicalExpr::Current],
-				}));
-				let named = shown(
-					crate::descriptor::VECTOR_OID,
-					"vector",
-					shown(crate::descriptor::VECTOR_ARRAY_OID, "vector[]", number),
-				);
-				return Ok(LogicalExpr::Optional {
-					base: Box::new(lowered),
-					then: Box::new(named),
-				});
+			if clean_type == "regtype" {
+				return Ok(lower_regtype(lowered));
 			}
+			if clean_type == "regtype[]"
+				&& let BoundExpr::Literal(BoundLiteral::String(text)) = expr.as_ref()
+			{
+				return lower_regtype_array_literal(text);
+			}
+			let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
 			if base_type == "vector" {
 				let dimensions = clean_type
 					.split_once('(')
@@ -1275,7 +1391,43 @@ fn lower_operands(
 			_ => {}
 		}
 	}
-	Ok((lower_bound_expr(left, policy)?, lower_bound_expr(right, policy)?))
+	let (mut l, mut r) = (lower_bound_expr(left, policy)?, lower_bound_expr(right, policy)?);
+	if matches!(op, BoundBinaryOp::Equal | BoundBinaryOp::NotEqual) {
+		if let Some(truth) = pg_bool_spelling(right) {
+			r = bool_if_boolean(&l, truth, r);
+		} else if let Some(truth) = pg_bool_spelling(left) {
+			l = bool_if_boolean(&r, truth, l);
+		}
+	}
+	Ok((l, r))
+}
+
+/// The truth value a string literal spells in PostgreSQL's boolean input (`'t'`, `'false'`, ...).
+pub(crate) fn pg_bool_spelling(expr: &BoundExpr) -> Option<bool> {
+	let BoundExpr::Literal(BoundLiteral::String(text)) = expr else {
+		return None;
+	};
+	match text.to_ascii_lowercase().as_str() {
+		"t" | "true" | "y" | "yes" | "on" => Some(true),
+		"f" | "false" | "n" | "no" | "off" => Some(false),
+		_ => None,
+	}
+}
+
+/// What a string literal that spells a boolean is compared with `subject` as: PostgreSQL reads the
+/// literal as the type of the value it is compared with, so it is that boolean where `subject` is
+/// one at run time and the text otherwise.
+fn bool_if_boolean(subject: &LogicalExpr, truth: bool, text: LogicalExpr) -> LogicalExpr {
+	LogicalExpr::If(Box::new(LogicalIf {
+		branches: vec![(
+			LogicalExpr::Call(Box::new(LogicalCall {
+				receiver: Function::Normal("type::is_bool".to_string()),
+				args: vec![subject.clone()],
+			})),
+			LogicalExpr::Literal(LogicalLiteral::Bool(truth)),
+		)],
+		otherwise: Some(text),
+	}))
 }
 
 /// The two sides of a comparison of the link column `col` to `table` with `other`: the column (or
@@ -2401,6 +2553,80 @@ fn sql_membership(value: LogicalExpr, items: LogicalExpr, negated: bool) -> Logi
 	}
 }
 
+/// `value <op> ANY|ALL (items)` for `=` (`equal`) or `<>`, three-valued as PostgreSQL has it, with
+/// `value` and `items` each evaluated once.
+///
+/// `= ANY` and `<> ALL` look for an item equal to `value`; `= ALL` and `<> ANY` look for a
+/// non-NULL item that differs from it. Finding one decides the result (`= ANY` true, `<> ALL`
+/// false, `= ALL` false, `<> ANY` true). An empty array decides it the other way (`ALL` true,
+/// `ANY` false). Otherwise the result is NULL when `items` is not an array, when `value` is NULL,
+/// or when `items` holds a NULL, and the answer of finding nothing in the remaining cases.
+fn sql_quantified(value: LogicalExpr, items: LogicalExpr, is_eq: bool, all: bool) -> LogicalExpr {
+	let null = || LogicalExpr::Literal(LogicalLiteral::Null);
+	let boolean = |value| LogicalExpr::Literal(LogicalLiteral::Bool(value));
+	let inside = |value| LogicalExpr::Binary {
+		left: Box::new(value),
+		op: BinaryOperator::Inside,
+		right: Box::new(current_item(1)),
+	};
+	let call = |name: &str, args| {
+		LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal(name.to_string()),
+			args,
+		}))
+	};
+	// The witness is an item equal to `value` for `= ANY` and `<> ALL`, and a non-NULL item that
+	// differs from it for `= ALL` and `<> ANY`.
+	let looks_for_equal = is_eq != all;
+	let found = if looks_for_equal {
+		inside(current_item(0))
+	} else {
+		LogicalExpr::Binary {
+			left: Box::new(call(
+				"array::len",
+				vec![call(
+					"array::complement",
+					vec![
+						current_item(1),
+						LogicalExpr::Array(vec![
+							current_item(0),
+							null(),
+							LogicalExpr::Literal(LogicalLiteral::None),
+						]),
+					],
+				)],
+			)),
+			op: BinaryOperator::MoreThan,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+		}
+	};
+	// Whether the quantified comparison is true when a witness is found.
+	let on_found = if looks_for_equal {
+		is_eq
+	} else {
+		!is_eq
+	};
+	LogicalExpr::Optional {
+		base: Box::new(LogicalExpr::Array(vec![value, items])),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![
+				(
+					LogicalExpr::Prefix {
+						op: PrefixOperator::Not,
+						expr: Box::new(call("type::is_array", vec![current_item(1)])),
+					},
+					null(),
+				),
+				(equal(current_item(1), LogicalExpr::Array(Vec::new())), boolean(all)),
+				(is_null_expr(current_item(0)), null()),
+				(found, boolean(on_found)),
+				(inside(null()).or(inside(LogicalExpr::Literal(LogicalLiteral::None))), null()),
+			],
+			otherwise: Some(boolean(!on_found)),
+		}))),
+	}
+}
+
 fn sql_between(
 	value: LogicalExpr,
 	low: LogicalExpr,
@@ -2437,5 +2663,132 @@ fn sql_between(
 			],
 			otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
 		}))),
+	}
+}
+
+/// The PostgreSQL types a catalog value can name: `(oid, typname, format_type name)`.
+const PG_TYPES: &[(i64, &str, &str)] = &[
+	(16, "bool", "boolean"),
+	(17, "bytea", "bytea"),
+	(18, "char", "char"),
+	(19, "name", "name"),
+	(20, "int8", "bigint"),
+	(21, "int2", "smallint"),
+	(23, "int4", "integer"),
+	(25, "text", "text"),
+	(26, "oid", "oid"),
+	(114, "json", "json"),
+	(700, "float4", "real"),
+	(701, "float8", "double precision"),
+	(1042, "bpchar", "character"),
+	(1043, "varchar", "character varying"),
+	(1082, "date", "date"),
+	(1083, "time", "time without time zone"),
+	(1114, "timestamp", "timestamp without time zone"),
+	(1184, "timestamptz", "timestamp with time zone"),
+	(1186, "interval", "interval"),
+	(1700, "numeric", "numeric"),
+	(2950, "uuid", "uuid"),
+	(3802, "jsonb", "jsonb"),
+	(1000, "_bool", "boolean[]"),
+	(1005, "_int2", "smallint[]"),
+	(1007, "_int4", "integer[]"),
+	(1016, "_int8", "bigint[]"),
+	(1009, "_text", "text[]"),
+	(1015, "_varchar", "character varying[]"),
+	(1021, "_float4", "real[]"),
+	(1022, "_float8", "double precision[]"),
+	(2951, "_uuid", "uuid[]"),
+	(3807, "_jsonb", "jsonb[]"),
+	(crate::descriptor::VECTOR_OID as i64, "vector", "vector"),
+	(crate::descriptor::VECTOR_ARRAY_OID as i64, "_vector", "vector[]"),
+];
+
+/// The oid of the type `name` names: a type name, optionally schema-qualified and quoted, or one of
+/// the SQL spellings of the integer types.
+pub(crate) fn regtype_oid(name: &str) -> Option<i64> {
+	let name = name.trim().replace('"', "");
+	let name = name.strip_prefix("pg_catalog.").unwrap_or(&name);
+	let name = match name {
+		"int" | "integer" => "int4",
+		"bigint" => "int8",
+		"smallint" => "int2",
+		other => other,
+	};
+	PG_TYPES
+		.iter()
+		.find(|(_, typname, format)| *typname == name || *format == name)
+		.map(|(oid, ..)| *oid)
+}
+
+/// Lower the array literal `text` cast to `regtype[]`: the array of the oids of the types it
+/// names, as `x = ANY (...)` compares against a type oid. A name that is no known type is kept as
+/// text.
+fn lower_regtype_array_literal(text: &str) -> Result<LogicalExpr, PlanError> {
+	let items = parse_text_array_literal(text).ok_or_else(|| {
+		PlanError::InvalidTextRepresentation(format!("malformed array literal: \"{text}\""))
+	})?;
+	Ok(LogicalExpr::Array(
+		items
+			.into_iter()
+			.map(|item| match item {
+				None => LogicalExpr::Literal(LogicalLiteral::Null),
+				Some(name) => match regtype_oid(&name) {
+					Some(oid) => LogicalExpr::Literal(LogicalLiteral::Integer(oid)),
+					None => LogicalExpr::Literal(LogicalLiteral::String(Strand::from(name))),
+				},
+			})
+			.collect(),
+	))
+}
+
+/// Lower `value::regtype` for a type named by text: a type name, optionally schema-qualified and
+/// quoted (`bigint`, `int8`, `"pg_catalog"."int8"`), renders as the name `format_type` gives it.
+/// A name that is no known type renders unchanged. The name is looked up in one object literal,
+/// so `value` is evaluated twice, not once per known type.
+fn lower_regtype(value: LogicalExpr) -> LogicalExpr {
+	let mut names: Vec<(String, LogicalExpr)> = Vec::new();
+	for (_, typname, name) in PG_TYPES {
+		for key in [
+			(*typname).to_string(),
+			format!("\"pg_catalog\".\"{typname}\""),
+			format!("pg_catalog.{typname}"),
+			(*name).to_string(),
+		] {
+			if !names.iter().any(|(existing, _)| *existing == key) {
+				names
+					.push((key, LogicalExpr::Literal(LogicalLiteral::String(Strand::from(*name)))));
+			}
+		}
+	}
+	let known = LogicalExpr::Index {
+		base: Box::new(LogicalExpr::Object(names)),
+		index: Box::new(value.clone()),
+	};
+	// An oid names the type it numbers; any other value is shown unchanged.
+	let branches = PG_TYPES
+		.iter()
+		.map(|(oid, _, name)| {
+			(
+				LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Current),
+					op: BinaryOperator::Equal,
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(*oid))),
+				},
+				LogicalExpr::Literal(LogicalLiteral::String(Strand::from(*name))),
+			)
+		})
+		.collect();
+	let by_oid = LogicalExpr::Optional {
+		base: Box::new(value),
+		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {
+			branches,
+			otherwise: Some(LogicalExpr::Current),
+		}))),
+	};
+	LogicalExpr::Binary {
+		left: Box::new(known),
+		op: BinaryOperator::NullCoalescing,
+		right: Box::new(by_oid),
 	}
 }

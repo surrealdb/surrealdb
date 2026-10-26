@@ -70,6 +70,17 @@ impl SqlFunctionDef {
 	}
 }
 
+/// The internal function a quantified comparison against an array value (`x = ANY (array)`) is
+/// bound to: `(x, array, equal, all)`, where `equal` is `true` for `=` and `false` for `<>`, and
+/// `all` is `true` for `ALL` and `false` for `ANY`/`SOME`.
+pub const QUANTIFIED_ARRAY: &str = "__quantified_array";
+
+/// The internal function the `&` operator binds to.
+pub const BIT_AND: &str = "__sql_bitand";
+
+/// The internal function an array subscript (`array[index]`) binds to.
+pub const SUBSCRIPT: &str = "__sql_subscript";
+
 /// Global registry of dialect-scoped SQL functions.
 pub struct FunctionRegistry;
 
@@ -992,6 +1003,56 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		mysql: true,
 	},
 	SqlFunctionDef {
+		name: QUANTIFIED_ARRAY,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 4,
+		max_args: Some(4),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: BIT_AND,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Int8),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: SUBSCRIPT,
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Unknown),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "generate_subscripts",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(3),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Int4),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "unnest",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(1),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Unknown),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
 		name: "generate_series",
 		kind: SqlFunctionKind::Scalar,
 		min_args: 2,
@@ -1317,6 +1378,86 @@ static FUNCTION_DEFS: &[SqlFunctionDef] = &[
 		kind: SqlFunctionKind::Scalar,
 		min_args: 2,
 		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_get_constraintdef",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_get_serial_sequence",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 2,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_advisory_lock",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Unknown),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_try_advisory_lock",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_advisory_unlock",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(2),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Bool),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_advisory_unlock_all",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 0,
+		max_args: Some(0),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Unknown),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_get_functiondef",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(1),
+		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
+		internal_name: None,
+		pgsql: true,
+		mysql: false,
+	},
+	SqlFunctionDef {
+		name: "pg_get_indexdef",
+		kind: SqlFunctionKind::Scalar,
+		min_args: 1,
+		max_args: Some(3),
 		return_type: ReturnTypeStrategy::Fixed(SqlType::Text),
 		internal_name: None,
 		pgsql: true,

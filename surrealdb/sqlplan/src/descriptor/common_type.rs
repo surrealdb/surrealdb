@@ -194,6 +194,15 @@ mod tests {
 	}
 
 	#[test]
+	fn a_column_of_a_lateral_relation_has_the_type_of_its_expression() {
+		let types = types(
+			SqlDialect::Postgres,
+			"SELECT l.x, l.y FROM pg_class c CROSS JOIN LATERAL (SELECT 1::int4 AS x, 'a'::text AS y) l",
+		);
+		assert_eq!(types, [Int4, Text]);
+	}
+
+	#[test]
 	fn a_case_is_described_by_the_type_all_its_branches_have() {
 		for dialect in [SqlDialect::Postgres, SqlDialect::MySql] {
 			assert_eq!(
@@ -201,7 +210,14 @@ mod tests {
 					dialect,
 					"SELECT CASE WHEN true THEN 1 ELSE 2.5 END, CASE WHEN true THEN 1 ELSE 2 END"
 				),
-				[Float8, Int8],
+				[
+					Float8,
+					if dialect == SqlDialect::Postgres {
+						Int4
+					} else {
+						Int8
+					}
+				],
 				"{dialect:?}"
 			);
 			assert_eq!(

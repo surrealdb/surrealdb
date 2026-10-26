@@ -436,9 +436,10 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 /// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
 /// (`PlanError::pg_sqlstate`). A feature the planner does not lower is `0A000`, a text it cannot
 /// read as a value of the type it must have is `22P02`, an operator that has no definition for
-/// its operand types is `42883` and an integer result beyond 64 bits is `22003`; a table, column,
-/// function or position the statement names wrongly has the code of that kind of error
-/// ([`NAMED_PLANNER_ERRORS`]). Any other message gives `None`.
+/// its operand types is `42883`, an integer result beyond 64 bits is `22003` and a constraint the
+/// table does not have is `42704`; a table, column, function or position the statement names
+/// wrongly has the code of that kind of error ([`NAMED_PLANNER_ERRORS`]). Any other message gives
+/// `None`.
 fn planner_sqlstate(message: &str) -> Option<&'static str> {
 	let reason = planner_message(message);
 	if unsupported_construct(message).is_some() {
@@ -449,6 +450,8 @@ fn planner_sqlstate(message: &str) -> Option<&'static str> {
 		Some("42883")
 	} else if reason == "bigint out of range" {
 		Some("22003")
+	} else if reason.starts_with("constraint \"") && reason.ends_with("\" does not exist") {
+		Some("42704")
 	} else if reason.starts_with("invalid parameter value: ") {
 		Some("22023")
 	} else if reason.starts_with("data exception: ") {
@@ -609,7 +612,11 @@ impl From<&TypesError> for PgError {
 					code
 				} else if lower.contains("division by zero") || lower.contains("divide by zero") {
 					"22012"
-				} else if lower.contains("not null") {
+				} else if lower.contains("not null")
+					|| (lower.contains("couldn't coerce value for field")
+						&& lower.ends_with("but found `null`"))
+				{
+					// A NULL written to a field whose type refuses it.
 					"23502"
 				} else if lower.contains("check constraint") || lower.contains("violates check") {
 					"23514"
@@ -625,6 +632,9 @@ impl From<&TypesError> for PgError {
 				}
 			}
 			ErrorDetails::NotAllowed(_) => "42501",
+			// A foreign key column's assertion throws the message PostgreSQL words for the
+			// violation.
+			ErrorDetails::Thrown if msg.contains("violates foreign key constraint") => "23503",
 			ErrorDetails::Thrown => "P0001",
 			ErrorDetails::Configuration(_) => "0A000",
 			ErrorDetails::Serialization(_) => "40001",
@@ -638,7 +648,9 @@ impl From<&TypesError> for PgError {
 					"23502"
 				} else if lower.contains("check constraint") || lower.contains("violates check") {
 					"23514"
-				} else if lower.contains("foreign key") {
+				} else if lower.contains("foreign key")
+					|| lower.contains("with an on delete reject clause")
+				{
 					"23503"
 				} else if lower.contains("already exists") || lower.contains("duplicate key") {
 					if lower.contains("table") || lower.contains("relation") {
@@ -754,12 +766,36 @@ mod tests {
 		let not_null_err =
 			TypesError::validation("value violates not null constraint".to_string(), None);
 		assert_eq!(PgError::from(&not_null_err).code, "23502");
+		let null_to_link = TypesError::validation(
+			"Couldn't coerce value for field `dept` of `emp:1`: Expected `record<dept>` but found `NULL`"
+				.to_string(),
+			None,
+		);
+		assert_eq!(PgError::from(&null_to_link).code, "23502");
 
 		let check_err = TypesError::validation("violates check constraint".to_string(), None);
 		assert_eq!(PgError::from(&check_err).code, "23514");
 
 		let fk_err = TypesError::validation("violates foreign key constraint".to_string(), None);
 		assert_eq!(PgError::from(&fk_err).code, "23503");
+	}
+
+	#[test]
+	fn test_foreign_key_violations_map_to_23503() {
+		// The assertion of a foreign key column throws the message PostgreSQL words.
+		let thrown = TypesError::thrown(
+			"An error occurred: insert or update on table \"p\" violates foreign key constraint \"p_a_fkey\""
+				.to_string(),
+		);
+		assert_eq!(PgError::from(&thrown).code, "23503");
+		let other = TypesError::thrown("An error occurred: boom".to_string());
+		assert_eq!(PgError::from(&other).code, "P0001");
+		// A delete that a reference refuses.
+		let reject = TypesError::internal(
+			"Cannot delete `u:1` as it is referenced by `p:1` with an ON DELETE REJECT clause"
+				.to_string(),
+		);
+		assert_eq!(PgError::from(&reject).code, "23503");
 	}
 
 	#[test]
@@ -814,6 +850,10 @@ mod tests {
 			PlanError::UnsupportedStatement("MERGE".to_string()),
 			PlanError::UnsupportedExpression("Row".to_string()),
 			PlanError::UndefinedObject(name()),
+			PlanError::UndefinedConstraint {
+				constraint: name(),
+				table: name(),
+			},
 			PlanError::InvalidParameterValue("value 1 out of bounds for option \"m\"".to_string()),
 			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
 			PlanError::ProgramLimitExceeded(
@@ -855,6 +895,9 @@ mod tests {
 						"0A000"
 					}
 					PlanError::UndefinedObject(_)
+					| PlanError::UndefinedConstraint {
+						..
+					}
 					| PlanError::UndefinedOperatorClass {
 						..
 					}

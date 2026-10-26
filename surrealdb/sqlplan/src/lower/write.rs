@@ -92,6 +92,11 @@ impl<'a> IdScope<'a> {
 			.filter(|_| !self.is_key_name(column))
 	}
 
+	/// Whether the link column `column` of the target table admits `NONE`.
+	fn link_admits_none(&self, column: &str) -> bool {
+		self.catalog.link_admits_none(self.schema.as_deref(), &self.table, column)
+	}
+
 	/// The column of the target table that the column reference `fields` names (`col`, or `col`
 	/// qualified by one of the table's names) and the table it holds record links to, if it holds
 	/// them. `None` when the reference names a column of another relation.
@@ -570,11 +575,42 @@ fn link_in(column: String, mut records: Vec<Expr>, negated: bool) -> Expr {
 	}
 }
 
-/// The `value` written to the column `column` of the target table, converted by [`link_value`] when
-/// the column is a link column.
+/// [`link_value`] for a column that admits `NONE` (`admits_none`): SQL `NULL` is stored as `NONE`,
+/// which reads back as `NULL`. A column that does not admit `NONE` keeps refusing `NULL`.
+pub(crate) fn link_assignment(table: &str, value: Expr, admits_none: bool) -> Expr {
+	if !admits_none {
+		return link_value(table, value);
+	}
+	if matches!(value, Expr::Literal(Literal::Null)) {
+		return Expr::Literal(Literal::None);
+	}
+	let converted = link_value(table, value);
+	if matches!(converted, Expr::Literal(_)) {
+		return converted;
+	}
+	evaluated_once(converted, |value| {
+		Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(
+				Expr::Binary {
+					left: Box::new(value.clone()),
+					op: BinaryOperator::Equal,
+					right: Box::new(Expr::Literal(Literal::Null)),
+				},
+				Expr::Literal(Literal::None),
+			)],
+			close: Some(value),
+		}))
+	})
+}
+
+/// The `value` written to the column `column` of the target table, converted by [`link_assignment`]
+/// when the column is a link column.
 fn assigned_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Expr {
 	match scope.link_column(column) {
-		Some(table) => link_value(&table, value),
+		Some(table) => {
+			let admits_none = scope.link_admits_none(column);
+			link_assignment(&table, value, admits_none)
+		}
 		None => value,
 	}
 }
@@ -698,7 +734,7 @@ fn wrap_positional_links(
 		}
 		if let Some(Field::Single(selector)) = items.get_mut(idx) {
 			let value = std::mem::replace(&mut selector.expr, Expr::Literal(Literal::None));
-			selector.expr = link_value(&table, value);
+			selector.expr = link_assignment(&table, value, scope.link_admits_none(column));
 			if selector.alias.is_none() {
 				selector.alias = Some(Idiom::field(column.clone()));
 			}
@@ -1049,6 +1085,9 @@ fn lower_pgsql_expr_as(
 		| surrealdb_pgsql::ast::expr::Expr::Quantified {
 			..
 		}
+		| surrealdb_pgsql::ast::expr::Expr::QuantifiedArray {
+			..
+		}
 		| surrealdb_pgsql::ast::expr::Expr::Subscript {
 			..
 		}
@@ -1253,6 +1292,9 @@ fn lower_pgsql_predicate(
 		}
 		| PgExpr::Quantified {
 			..
+		}
+		| PgExpr::QuantifiedArray {
+			..
 		} => lower_pgsql_expr_in(expr, scope),
 	}
 }
@@ -1361,6 +1403,9 @@ fn pgsql_key_operand(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<WriteKey
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::QuantifiedArray {
 			..
 		} => None,
 	}
@@ -1572,6 +1617,9 @@ fn pgsql_column_fields(expr: &surrealdb_pgsql::ast::expr::Expr) -> Option<&[Stri
 			..
 		}
 		| surrealdb_pgsql::ast::expr::Expr::Quantified {
+			..
+		}
+		| surrealdb_pgsql::ast::expr::Expr::QuantifiedArray {
 			..
 		} => None,
 	}

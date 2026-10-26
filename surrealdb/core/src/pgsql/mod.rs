@@ -57,20 +57,22 @@ pub(crate) fn parse(input: &str) -> Result<Vec<surrealdb_pgsql::ast::stmt::State
 ///
 /// `catalog` describes the tables the statements name, which decides how a
 /// column that holds a record link is compared and assigned; see
-/// [`surrealdb_sqlplan::BinderCatalog::link_table`].
+/// [`surrealdb_sqlplan::BinderCatalog::link_table`]. The statements are lowered before any of them
+/// runs, so a statement is also described the columns that the DDL before it in `stmts` declares.
 pub(crate) fn lower_statements(
 	stmts: &[surrealdb_pgsql::ast::stmt::Statement],
 	catalog: &dyn surrealdb_sqlplan::BinderCatalog,
 	capabilities: &Capabilities,
 	config: &ParserConfig,
 ) -> Result<Vec<TopLevelStatement>> {
+	let mut staged = surrealdb_sqlplan::StagedCatalog::new(catalog);
 	let mut statements = Vec::new();
 	// The vector columns that earlier statements of the request define, which the catalog, read
 	// before any of them runs, does not hold.
 	let mut defined = VectorColumns::default();
 	for stmt in stmts {
 		let batch = BatchCatalog {
-			inner: catalog,
+			inner: &staged,
 			vectors: &defined,
 		};
 		let catalog: &dyn surrealdb_sqlplan::BinderCatalog = &batch;
@@ -106,75 +108,34 @@ pub(crate) fn lower_statements(
 				statements
 					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
-			surrealdb_pgsql::ast::stmt::Statement::CreateTable(create) => {
-				let (_, table) =
-					surrealdb_sqlplan::resolve_pgsql_table_name(&create.name.parts, Some(catalog))
-						.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				// With `IF NOT EXISTS` the table may already exist; the definition is taken to
-				// apply, as the usual use of the clause is to create the table.
-				defined.add_columns(table.as_str(), create.columns.iter());
-				for expr in exprs {
-					statements
-						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
-				}
-			}
-			surrealdb_pgsql::ast::stmt::Statement::CreateIndex(idx) => {
-				let (_, table) =
-					surrealdb_sqlplan::resolve_pgsql_table_name(&idx.table.parts, Some(catalog))
-						.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				let _ = table;
-				let dimensions =
-					|table: &str, column: &str| catalog.vector_dimension(None, table, column);
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl_over(stmt, &dimensions)
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				for expr in exprs {
-					statements
-						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
-				}
-			}
-			surrealdb_pgsql::ast::stmt::Statement::CreateView(view) => {
-				surrealdb_sqlplan::resolve_pgsql_table_name(&view.name.parts, Some(catalog))
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				for tr in &view.query.from {
-					if let surrealdb_pgsql::ast::stmt::TableRef::Table {
-						name,
-						..
-					} = tr
-					{
-						surrealdb_sqlplan::resolve_pgsql_table_name(&name.parts, Some(catalog))
+			surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
+			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Drop(_) => {
+				let mut table = None;
+				for parts in ddl_table_names(stmt) {
+					let (_, name) =
+						surrealdb_sqlplan::resolve_pgsql_table_name(parts, Some(catalog))
 							.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+					table.get_or_insert(name);
+				}
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl_with(stmt, catalog)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				if let surrealdb_pgsql::ast::stmt::Statement::CreateTable(create) = stmt
+					&& let Some(table) = &table
+				{
+					// With `IF NOT EXISTS` the table may already exist; the definition is taken to
+					// apply, as the usual use of the clause is to create the table.
+					defined.add_columns(table.as_str(), create.columns.iter());
+				} else if let surrealdb_pgsql::ast::stmt::Statement::AlterTable(alter) = stmt
+					&& let Some(table) = &table
+				{
+					for action in &alter.actions {
+						defined.apply(table.as_str(), action);
 					}
 				}
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				for expr in exprs {
-					statements
-						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
-				}
-			}
-			surrealdb_pgsql::ast::stmt::Statement::AlterTable(alter) => {
-				let (_, table) =
-					surrealdb_sqlplan::resolve_pgsql_table_name(&alter.name.parts, Some(catalog))
-						.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				for action in &alter.actions {
-					defined.apply(table.as_str(), action);
-				}
-				for expr in exprs {
-					statements
-						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
-				}
-			}
-			surrealdb_pgsql::ast::stmt::Statement::Drop(drop) => {
-				for name in &drop.names {
-					surrealdb_sqlplan::resolve_pgsql_table_name(&name.parts, Some(catalog))
-						.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
-				}
-				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(stmt)
-					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				staged.stage(&exprs);
 				for expr in exprs {
 					statements
 						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
@@ -245,6 +206,50 @@ pub(crate) fn lower_statements(
 
 fn surface_statement(stmt: impl Into<surrealdb_expr::parser::TopLevelExpr>) -> TopLevelStatement {
 	TopLevelStatement::Ast(stmt.into())
+}
+
+/// The qualified names of the tables a DDL statement names, which are resolved against the
+/// catalog before the statement is lowered.
+fn ddl_table_names(stmt: &surrealdb_pgsql::ast::stmt::Statement) -> Vec<&[String]> {
+	use surrealdb_pgsql::ast::stmt::{Statement, TableRef};
+	match stmt {
+		Statement::CreateTable(create) => vec![create.name.parts.as_slice()],
+		Statement::CreateIndex(idx) => vec![idx.table.parts.as_slice()],
+		Statement::CreateView(view) => {
+			let mut names = vec![view.name.parts.as_slice()];
+			for table_ref in &view.query.from {
+				if let TableRef::Table {
+					name,
+					..
+				} = table_ref
+				{
+					names.push(name.parts.as_slice());
+				}
+			}
+			names
+		}
+		Statement::AlterTable(alter) => vec![alter.name.parts.as_slice()],
+		Statement::Drop(drop) => drop.names.iter().map(|name| name.parts.as_slice()).collect(),
+		Statement::Select(_)
+		| Statement::Insert(_)
+		| Statement::Update(_)
+		| Statement::Delete(_)
+		| Statement::Truncate(_)
+		| Statement::Copy(_)
+		| Statement::CreateSchema(_)
+		| Statement::Transaction(_)
+		| Statement::Set(_)
+		| Statement::Show(_)
+		| Statement::Reset(_)
+		| Statement::Explain(_)
+		| Statement::Prepare(_)
+		| Statement::Execute(_)
+		| Statement::Deallocate(_)
+		| Statement::CreatePropertyGraph(_)
+		| Statement::DropPropertyGraph(_)
+		| Statement::Empty
+		| Statement::CreateExtension(_) => Vec::new(),
+	}
 }
 
 /// What statements of a request say of the columns they define, by table and column: the
@@ -355,8 +360,29 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 		}
 	}
 
+	fn constraint_tables(&self) -> Vec<surrealdb_sqlplan::TableSchema> {
+		self.inner.constraint_tables()
+	}
+
+	fn defers_schema_checks(&self) -> bool {
+		self.inner.defers_schema_checks()
+	}
+
 	fn link_table(&self, schema: Option<&str>, table: &str, column: &str) -> Option<String> {
 		self.inner.link_table(schema, table, column)
+	}
+
+	fn link_admits_none(&self, schema: Option<&str>, table: &str, column: &str) -> bool {
+		self.inner.link_admits_none(schema, table, column)
+	}
+
+	fn column_shape(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> Option<surrealdb_sqlplan::ColumnShape> {
+		self.inner.column_shape(schema, table, column)
 	}
 
 	fn hnsw_indexes(

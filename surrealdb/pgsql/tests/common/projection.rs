@@ -771,6 +771,29 @@ impl ToPgQueryJson for Expr {
 					}),
 				)
 			}
+			Self::QuantifiedArray {
+				expr,
+				op,
+				quantifier,
+				array,
+				..
+			} => {
+				let kind = match quantifier {
+					surrealdb_pgsql::Quantifier::All => "AEXPR_OP_ALL",
+					surrealdb_pgsql::Quantifier::Any | surrealdb_pgsql::Quantifier::Some => {
+						"AEXPR_OP_ANY"
+					}
+				};
+				pg_node(
+					"A_Expr",
+					json!({
+						"kind": kind,
+						"name": [ pg_str(&op.to_string()) ],
+						"lexpr": expr.to_pg_query_json(),
+						"rexpr": array.to_pg_query_json()
+					}),
+				)
+			}
 		}
 	}
 }
@@ -1156,6 +1179,7 @@ impl ToPgQueryJson for ColumnConstraint {
 			Self::References {
 				table,
 				column,
+				..
 			} => {
 				obj.insert(
 					"pktable".to_string(),
@@ -1204,6 +1228,7 @@ impl ToPgQueryJson for TableConstraint {
 				columns,
 				ref_table,
 				ref_columns,
+				..
 			} => {
 				let fk_attrs: Vec<Value> = columns.iter().map(|c| pg_str(c)).collect();
 				let pk_attrs: Vec<Value> = ref_columns.iter().map(|c| pg_str(c)).collect();

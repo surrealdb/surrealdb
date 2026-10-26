@@ -149,6 +149,8 @@ pub enum TableRef {
 	},
 	/// Subquery in `FROM` clause (e.g. `(SELECT * FROM t) AS sub`).
 	Subquery {
+		/// Whether the subquery may read the relations to its left (`LATERAL`).
+		lateral: bool,
 		/// Subquery statement.
 		query: Box<SelectStmt>,
 		/// Table alias (required in PostgreSQL).
@@ -354,6 +356,35 @@ pub struct DeleteStmt {
 	pub span: Span,
 }
 
+/// What a foreign key does to a referencing row when the row it references is deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReferentialAction {
+	/// `NO ACTION`, the default.
+	#[default]
+	NoAction,
+	/// `RESTRICT`.
+	Restrict,
+	/// `CASCADE`.
+	Cascade,
+	/// `SET NULL`.
+	SetNull,
+	/// `SET DEFAULT`.
+	SetDefault,
+}
+
+impl ReferentialAction {
+	/// The action as the SQL text writes it.
+	pub const fn sql(self) -> &'static str {
+		match self {
+			Self::NoAction => "NO ACTION",
+			Self::Restrict => "RESTRICT",
+			Self::Cascade => "CASCADE",
+			Self::SetNull => "SET NULL",
+			Self::SetDefault => "SET DEFAULT",
+		}
+	}
+}
+
 /// Column constraint in `CREATE TABLE`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ColumnConstraint {
@@ -367,12 +398,14 @@ pub enum ColumnConstraint {
 	Default(Expr),
 	/// `UNIQUE`.
 	Unique,
-	/// `REFERENCES table(col)`.
+	/// `REFERENCES table(col) [ON DELETE action]`.
 	References {
 		/// Referenced table name.
 		table: QualifiedName,
 		/// Referenced column name.
 		column: Option<String>,
+		/// What deleting the referenced row does to this one.
+		on_delete: ReferentialAction,
 	},
 }
 
@@ -396,7 +429,7 @@ pub enum TableConstraint {
 	PrimaryKey(Vec<String>),
 	/// `UNIQUE (col1, col2)`.
 	Unique(Vec<String>),
-	/// `FOREIGN KEY (cols) REFERENCES ref_table (ref_cols)`.
+	/// `FOREIGN KEY (cols) REFERENCES ref_table (ref_cols) [ON DELETE action]`.
 	ForeignKey {
 		/// Local columns.
 		columns: Vec<String>,
@@ -404,6 +437,8 @@ pub enum TableConstraint {
 		ref_table: QualifiedName,
 		/// Foreign columns.
 		ref_columns: Vec<String>,
+		/// What deleting the referenced row does to a referencing row.
+		on_delete: ReferentialAction,
 	},
 }
 
@@ -1259,6 +1294,7 @@ fn normalize_table_ref(r: &mut TableRef) {
 			query,
 			alias,
 			span,
+			..
 		} => {
 			*span = zero;
 			alias.span = zero;

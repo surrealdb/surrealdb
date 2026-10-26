@@ -50,6 +50,9 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 			| surrealdb_sqlplan::PlanError::SavepointDoesNotExist(_)
 			| surrealdb_sqlplan::PlanError::ActiveTransactionAlreadyInProgress
 			| surrealdb_sqlplan::PlanError::UndefinedObject(_)
+			| surrealdb_sqlplan::PlanError::UndefinedConstraint {
+				..
+			}
 			| surrealdb_sqlplan::PlanError::InvalidParameterValue(_)
 			| surrealdb_sqlplan::PlanError::DataException(_)
 			| surrealdb_sqlplan::PlanError::ProgramLimitExceeded(_)

@@ -10509,6 +10509,9 @@ impl Datastore {
 	/// only when `columns_stay`. The statements are all lowered before any runs, so for a request
 	/// that alters, drops or creates a table those columns would be the ones the table had before
 	/// the request; it is lowered against the links alone.
+	///
+	/// A statement over a system view that lists the user's tables is lowered against a catalog
+	/// that also lists them, as [`Self::listed_tables`] allows.
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	async fn lower_linked(
 		&self,
@@ -10524,24 +10527,95 @@ impl Datastore {
 		// A statement may be refused for what only the catalog tells (the dimensions of a column
 		// an index covers), so a refusal is settled once the tables it names have been read.
 		let first = lower(&recorder);
+		let listing = recorder.asked_table_listing();
+		let deferred = recorder.deferred_schema_checks();
 		let tables = recorder.into_tables();
-		if tables.is_empty() {
+		if tables.is_empty() && !listing && !deferred {
 			return first.map_err(invalid);
 		}
-		if columns_stay {
-			let purpose = sql_links::Purpose::Lowering;
-			return match self.read_tables(session, database, transaction, &tables, purpose).await? {
-				Some(described) if described.shapes_lowering => {
-					lower(&described.catalog).map_err(invalid)
-				}
-				Some(_) | None => first.map_err(invalid),
-			};
+		let mut catalog = None;
+		if !tables.is_empty() {
+			if columns_stay {
+				let purpose = sql_links::Purpose::Lowering;
+				let described =
+					self.read_tables(session, database, transaction, &tables, purpose).await?;
+				catalog = described
+					.filter(|described| described.shapes_lowering || listing || deferred)
+					.map(|described| described.catalog);
+			} else {
+				// The column shapes are read only for a lowering that asked for them, which is
+				// one that deferred a refusal to the schema.
+				let declared =
+					self.link_columns(session, database, transaction, &tables, deferred).await?;
+				catalog = sql_links::link_catalog(&declared, active_db);
+			}
 		}
-		let links = self.link_columns(session, database, transaction, &tables).await?;
-		match sql_links::link_catalog(&links, active_db) {
+		if listing {
+			let listed = self.listed_tables(session, database, transaction).await?;
+			if !listed.is_empty() {
+				let mut listing_catalog =
+					catalog.take().unwrap_or_default().with_listed_tables(listed);
+				listing_catalog.set_database(active_db.map(str::to_owned));
+				catalog = Some(listing_catalog);
+			}
+		}
+		match catalog {
 			Some(catalog) => lower(&catalog).map_err(invalid),
+			// The schema names no link and lists no table, which is an answer to a lowering that
+			// left its refusals to the schema.
+			None if deferred => lower(&surrealdb_sqlplan::MemoryCatalog::new()).map_err(invalid),
 			None => first.map_err(invalid),
 		}
+	}
+
+	/// Every table of the selected database with its columns, for the system views that list them
+	/// (`information_schema.tables`, `pg_class`, ...), read through `transaction` when there is
+	/// one and otherwise through a read transaction of its own that ends before the statements
+	/// run.
+	///
+	/// Table and column definitions are listed only to a session that could read them with
+	/// `INFO FOR DB`: `Action::View` on `ResourceKind::Any` at the selected database, checked as
+	/// [`Self::check`] does through the session's [`Auth`], so a record-access session, or a
+	/// session whose roles do not reach the database, gets no tables and nothing is read. As for
+	/// [`Self::link_columns`]:
+	///
+	/// - A session [`Self::check_session`] refuses gets that refusal, with nothing read.
+	/// - A session with no namespace selected, or with no database selected and none given as
+	///   `database`, has no tables.
+	/// - A session whose authenticated level cannot reach the selected namespace and database
+	///   ([`Auth::can_access_ns_db`]) has no tables.
+	///
+	/// The definitions are read with the datastore's own authority; the check above is what
+	/// entitles the session to them, and table and field `PERMISSIONS` do not narrow the list, as
+	/// they do not narrow `INFO FOR DB`.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	async fn listed_tables(
+		&self,
+		session: &Session,
+		database: Option<&str>,
+		transaction: Option<&Arc<Transaction>>,
+	) -> std::result::Result<Vec<surrealdb_sqlplan::TableSchema>, TypesError> {
+		self.check_session(session)?;
+		let (Some(ns), Some(db)) = (session.ns.as_deref(), database.or(session.db.as_deref()))
+		else {
+			return Ok(Vec::new());
+		};
+		if !session.au.can_access_ns_db(ns, db)
+			|| self.check(session, Action::View, ResourceKind::Any.on_db(ns, db)).is_err()
+		{
+			return Ok(Vec::new());
+		}
+		let tables = match transaction {
+			Some(txn) => sql_links::database_tables(txn, ns, db).await,
+			None => {
+				let txn =
+					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
+				let tables = sql_links::database_tables(&txn, ns, db).await;
+				let _ = txn.cancel().await;
+				tables
+			}
+		};
+		tables.map_err(crate::err::anyhow_to_types_error)
 	}
 
 	/// The columns of `tables` that hold record links, as `(table, column,
@@ -10564,7 +10638,8 @@ impl Datastore {
 	/// the session's permissions. They decide only how a comparison or an
 	/// assignment converts the operand of a link column; none is returned to the
 	/// session, and the statement then runs under the session's table and field
-	/// permissions as any statement does.
+	/// permissions as any statement does. `shapes` also reads how each column is declared, for a
+	/// statement that gives a column a new type.
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	async fn link_columns(
 		&self,
@@ -10572,16 +10647,17 @@ impl Datastore {
 		database: Option<&str>,
 		transaction: Option<&Arc<Transaction>>,
 		tables: &[String],
-	) -> std::result::Result<Vec<(String, String, String)>, TypesError> {
+		shapes: bool,
+	) -> std::result::Result<sql_links::Declared, TypesError> {
 		let Some((ns, db)) = self.catalog_scope(session, database, tables)? else {
-			return Ok(Vec::new());
+			return Ok(sql_links::Declared::default());
 		};
 		let links = match transaction {
-			Some(txn) => sql_links::link_columns(txn, ns, db, tables).await,
+			Some(txn) => sql_links::link_columns(txn, ns, db, tables, shapes).await,
 			None => {
 				let txn =
 					self.transaction(Read).await.map_err(crate::err::anyhow_to_types_error)?;
-				let links = sql_links::link_columns(&txn, ns, db, tables).await;
+				let links = sql_links::link_columns(&txn, ns, db, tables, shapes).await;
 				let _ = txn.cancel().await;
 				links
 			}
@@ -10651,7 +10727,7 @@ impl Datastore {
 	}
 
 	/// The columns of `table` declared as a link to one table, as `(column,
-	/// target)`, for a front end that writes rows without going through
+	/// target, admits NONE)`, for a front end that writes rows without going through
 	/// the SQL lowering.
 	///
 	/// A session that [`Self::check_session`] refuses is an error, the one a
@@ -10664,9 +10740,14 @@ impl Datastore {
 		session: &Session,
 		transaction: Option<&Arc<Transaction>>,
 		table: &str,
-	) -> std::result::Result<Vec<(String, String)>, TypesError> {
-		let links = self.link_columns(session, None, transaction, &[table.to_owned()]).await?;
-		Ok(links.into_iter().map(|(_, column, target)| (column, target)).collect())
+	) -> std::result::Result<Vec<(String, String, bool)>, TypesError> {
+		let declared =
+			self.link_columns(session, None, transaction, &[table.to_owned()], false).await?;
+		Ok(declared
+			.links
+			.into_iter()
+			.map(|(_, column, target, admits_none)| (column, target, admits_none))
+			.collect())
 	}
 
 	/// The catalog a PostgreSQL SELECT is bound against to describe its result, read through the
@@ -12876,6 +12957,65 @@ pub(crate) mod test {
 	/// for a session a query would refuse, and nothing for a session that names
 	/// no database or one its level cannot reach. None of the last three reads
 	/// the catalog.
+	/// Table and column definitions are listed through the system views only to a session that
+	/// could read them with `INFO FOR DB`; every other session sees the views without user tables.
+	#[cfg(feature = "postgres")]
+	#[tokio::test]
+	async fn system_views_list_tables_only_to_a_session_that_may_view_them() -> Result<()> {
+		use surrealdb_types::ToSql;
+
+		use crate::iam::Level;
+		let (ds, _observer) = sql_link_ds(true, false).await?;
+		let in_db = |level: Level, role: Role| {
+			let mut session = Session::for_level(level, role);
+			session.ns = Some("test".to_owned());
+			session.db = Some("test".to_owned());
+			session
+		};
+		let record = Session::for_record(
+			"test",
+			"test",
+			"account",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", 1)),
+		);
+		let sessions = [
+			("owner", Session::owner().with_ns("test").with_db("test"), true),
+			("viewer", Session::viewer().with_ns("test").with_db("test"), true),
+			(
+				"database user",
+				in_db(Level::Database("test".into(), "test".into()), Role::Viewer),
+				true,
+			),
+			("namespace user", in_db(Level::Namespace("test".into()), Role::Editor), true),
+			("record", record, false),
+			(
+				"another tenant",
+				in_db(Level::Database("other".into(), "other".into()), Role::Owner),
+				false,
+			),
+		];
+		for (label, source) in sql_dialects().into_iter().filter(|(label, _)| *label == "pgsql") {
+			let views = [
+				"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+				"SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'",
+			];
+			for (what, session, may) in &sessions {
+				for text in views {
+					let results = ds.run(QueryRequest::new(source(text), session)).await?;
+					let mut shown = String::new();
+					for result in results {
+						if let Ok(value) = result.result {
+							shown.push_str(&value.to_sql());
+						}
+					}
+					let lists = shown.contains("emp") && shown.contains("dept");
+					assert_eq!(lists, *may, "{label} {what} {text}: {shown}");
+				}
+			}
+		}
+		Ok(())
+	}
+
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	#[tokio::test]
 	async fn record_link_columns_reads_the_catalog_only_for_a_session_that_may() -> Result<()> {
@@ -12886,7 +13026,7 @@ pub(crate) mod test {
 			ds: &Datastore,
 			session: &Session,
 		) -> (
-			std::result::Result<Vec<(String, String)>, TypesError>,
+			std::result::Result<Vec<(String, String, bool)>, TypesError>,
 			crate::kvs::catalog_reads::CatalogReads,
 		) {
 			let txn = Arc::new(ds.transaction(Read).await.expect("a read transaction opens"));
@@ -12899,7 +13039,7 @@ pub(crate) mod test {
 
 		let owner = Session::owner().with_ns("test").with_db("test");
 		let (found, reads) = links(&ds, &owner).await;
-		assert_eq!(found?, vec![("dept".to_owned(), "dept".to_owned())]);
+		assert_eq!(found?, vec![("dept".to_owned(), "dept".to_owned(), false)]);
 		assert!(!reads.databases.is_empty(), "the lookup of a valid session read nothing");
 
 		let mut elsewhere = Session::for_level(

@@ -370,7 +370,7 @@ async fn a_case_is_announced_as_the_type_all_its_branches_have() {
 		("SELECT CASE WHEN false THEN 1 ELSE 2.5 END", OID_FLOAT8, ["2.5"]),
 		("SELECT CASE WHEN true THEN 1 ELSE 2.5 END", OID_FLOAT8, ["1"]),
 		("SELECT CASE WHEN false THEN 1.5 ELSE 2 END", OID_FLOAT8, ["2"]),
-		("SELECT CASE WHEN true THEN 1 ELSE 2 END", OID_INT8, ["1"]),
+		("SELECT CASE WHEN true THEN 1 ELSE 2 END", OID_INT4, ["1"]),
 		("SELECT CASE WHEN false THEN 1 WHEN true THEN 2.5 ELSE 3 END", OID_FLOAT8, ["2.5"]),
 		("SELECT CASE 2 WHEN 1 THEN 1 WHEN 2 THEN 2.5 END", OID_FLOAT8, ["2.5"]),
 		// Text holds a value of any kind, so a CASE of different kinds is read as text.
@@ -382,7 +382,7 @@ async fn a_case_is_announced_as_the_type_all_its_branches_have() {
 		("SELECT CASE WHEN true THEN 1 ELSE NULL END", OID_INT8, ["1"]),
 		("SELECT CASE WHEN false THEN 1 ELSE NULL END", OID_INT8, ["NULL"]),
 		("SELECT CASE WHEN false THEN NULL ELSE 1.5 END", OID_FLOAT8, ["1.5"]),
-		("SELECT CASE WHEN false THEN 1 END", OID_INT8, ["NULL"]),
+		("SELECT CASE WHEN false THEN 1 END", OID_INT4, ["NULL"]),
 	] {
 		assert_answer(&mut stream, sql, oid, &rows).await;
 	}

@@ -86,6 +86,8 @@ const PG_EPOCH_UNIX_MICROS: i64 = 946_684_800_000_000;
 /// invariant failure, not a user error.
 pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
 	match ty {
+		// `void` is the empty string in both formats.
+		PgType::Void => Ok(Vec::new()),
 		PgType::Bool => {
 			if let Value::Bool(b) = value {
 				Ok(if b {
@@ -823,6 +825,7 @@ fn record_binary(obj: &surrealdb_types::Object) -> Result<Vec<u8>, PgError> {
 /// [`encode_text`], a type mismatch is an internal invariant failure.
 pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError> {
 	match ty {
+		PgType::Void => Ok(Vec::new()),
 		PgType::Bool => {
 			if let Value::Bool(b) = value {
 				Ok(vec![u8::from(b)])

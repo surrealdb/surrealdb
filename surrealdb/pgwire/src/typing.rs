@@ -34,6 +34,8 @@ pub(super) enum PgType {
 	Record,
 	Uuid,
 	Jsonb,
+	/// The result type of a function that returns nothing; its value is an empty string.
+	Void,
 	/// The `vector` type of the pgvector extension.
 	Vector,
 	Array(Box<PgType>),
@@ -70,6 +72,7 @@ impl PgType {
 			Self::Record => 2249,
 			Self::Uuid => 2950,
 			Self::Jsonb => 3802,
+			Self::Void => 2278,
 			Self::Vector => VECTOR_OID,
 			Self::Array(elem) => match elem.as_ref() {
 				Self::Bool => 1000,
@@ -100,7 +103,7 @@ impl PgType {
 				Self::Uuid => 2951,
 				Self::Regclass => 2210,
 				Self::Vector => VECTOR_ARRAY_OID,
-				Self::Record | Self::Array(_) => 2277, // anyarray
+				Self::Record | Self::Void | Self::Array(_) => 2277, // anyarray
 			},
 		}
 	}
@@ -110,7 +113,7 @@ impl PgType {
 		match self {
 			Self::Bool | Self::Char => 1,
 			Self::Int2 => 2,
-			Self::Int4 | Self::Float4 | Self::Date | Self::Oid | Self::Regclass => 4,
+			Self::Int4 | Self::Float4 | Self::Date | Self::Oid | Self::Regclass | Self::Void => 4,
 			Self::MacAddr => 6,
 			Self::Int8 | Self::Float8 | Self::Timestamp | Self::Timestamptz | Self::Time => 8,
 			Self::Timetz => 12,
@@ -229,6 +232,9 @@ impl PgType {
 			surrealdb_sqlplan::SqlType::Oid => Self::Oid,
 			surrealdb_sqlplan::SqlType::Regclass => Self::Regclass,
 			surrealdb_sqlplan::SqlType::Record => Self::Record,
+			// A vector is reported, and encoded, as the array of its element type.
+			surrealdb_sqlplan::SqlType::Int2Vector => Self::Array(Box::new(Self::Int2)),
+			surrealdb_sqlplan::SqlType::OidVector => Self::Array(Box::new(Self::Oid)),
 			surrealdb_sqlplan::SqlType::Vector => Self::Vector,
 			surrealdb_sqlplan::SqlType::Unknown => Self::Text,
 		}

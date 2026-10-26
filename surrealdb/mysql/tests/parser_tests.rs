@@ -1,5 +1,9 @@
 //! Parser unit tests for surrealdb-mysql.
 
+// A catch-all arm in these tests reports the node a parse produced instead of the one
+// expected; naming every other variant of the AST would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_mysql::ast::expr::Expr;
 use surrealdb_mysql::ast::literal::Literal;
 use surrealdb_mysql::ast::operator::{BinaryOperator, UnaryOperator};

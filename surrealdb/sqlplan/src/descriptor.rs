@@ -49,6 +49,10 @@ pub enum SqlType {
 	Oid,
 	Regclass,
 	Record,
+	/// `int2vector`: the values of an array of `int2`, numbered from zero.
+	Int2Vector,
+	/// `oidvector`: the values of an array of `oid`, numbered from zero.
+	OidVector,
 	/// A `vector(n)` of the pgvector extension: a fixed-length array of floats with its own wire
 	/// type and text form (`[1,2,3]`).
 	Vector,
@@ -91,6 +95,8 @@ impl SqlType {
 			1700 => Some(Self::Numeric),
 			2205 => Some(Self::Regclass),
 			2249 => Some(Self::Record),
+			22 => Some(Self::Int2Vector),
+			30 => Some(Self::OidVector),
 			2950 => Some(Self::Uuid),
 			VECTOR_OID => Some(Self::Vector),
 			_ => None,
@@ -127,6 +133,8 @@ impl SqlType {
 			Self::Numeric => 1700,
 			Self::Regclass => 2205,
 			Self::Record => 2249,
+			Self::Int2Vector => 22,
+			Self::OidVector => 30,
 			Self::Vector => VECTOR_OID,
 			Self::Array(elem) => elem.pg_array_oid(),
 			Self::Uuid => 2950,
@@ -164,6 +172,8 @@ impl SqlType {
 			Self::Uuid => 2951,
 			Self::Regclass => 2210,
 			Self::Record => 2287,
+			Self::Int2Vector => 1006,
+			Self::OidVector => 1013,
 			Self::Vector => VECTOR_ARRAY_OID,
 			Self::Unknown | Self::Array(_) => 2277,
 		}
@@ -200,7 +210,7 @@ impl SqlType {
 			Self::Regclass => &Self::Regclass,
 			Self::Record => &Self::Record,
 			Self::Vector => &Self::Vector,
-			Self::Unknown | Self::Array(_) => return None,
+			Self::Unknown | Self::Array(_) | Self::Int2Vector | Self::OidVector => return None,
 		};
 		Some(Self::Array(elem))
 	}
@@ -226,6 +236,8 @@ impl SqlType {
 			| Self::Array(_)
 			| Self::Inet
 			| Self::Cidr
+			| Self::Int2Vector
+			| Self::OidVector
 			| Self::Vector
 			| Self::Record => -1,
 		}
@@ -256,11 +268,99 @@ impl SqlType {
 			Self::Timestamp | Self::TimestampTz => 0x07,     // MYSQL_TYPE_TIMESTAMP
 			Self::Interval => 0xfd,                          // MYSQL_TYPE_VAR_STRING
 			Self::Uuid => 0xfd,                              // MYSQL_TYPE_VAR_STRING
-			Self::Json | Self::Array(_) | Self::Vector | Self::Record => 0xf5, // MYSQL_TYPE_JSON
+			Self::Json
+			| Self::Array(_)
+			| Self::Vector
+			| Self::Int2Vector
+			| Self::OidVector
+			| Self::Record => 0xf5, // MYSQL_TYPE_JSON
 		}
 	}
 
-	/// Parse SQL type from a string name (e.g. "int4", "varchar", "boolean", "text", etc.)
+	/// The name `information_schema.columns.data_type` gives this type, which
+	/// [`Self::from_name`] reads back as the same type. An array is its element's name followed
+	/// by `[]`. [`Self::Unknown`] has no name.
+	pub fn name(&self) -> Option<String> {
+		let name = match self {
+			Self::Unknown => return None,
+			Self::Array(elem) => return elem.name().map(|elem| format!("{elem}[]")),
+			Self::Bool => "boolean",
+			Self::Int2 => "smallint",
+			Self::Int4 => "integer",
+			Self::Int8 => "bigint",
+			Self::Float4 => "real",
+			Self::Float8 => "double precision",
+			Self::Numeric => "numeric",
+			Self::Text => "text",
+			Self::Bytea => "bytea",
+			Self::Date => "date",
+			Self::Time => "time without time zone",
+			Self::Timestamp => "timestamp without time zone",
+			Self::TimestampTz => "timestamp with time zone",
+			Self::Interval => "interval",
+			Self::Json => "jsonb",
+			Self::Uuid => "uuid",
+			Self::Char => "\"char\"",
+			Self::Name => "name",
+			Self::Varchar => "character varying",
+			Self::Bpchar => "character",
+			Self::Timetz => "time with time zone",
+			Self::Inet => "inet",
+			Self::Cidr => "cidr",
+			Self::MacAddr => "macaddr",
+			Self::Oid => "oid",
+			Self::Regclass => "regclass",
+			Self::Record => "record",
+			Self::Int2Vector => "int2vector",
+			Self::OidVector => "oidvector",
+			Self::Vector => "vector",
+		};
+		Some(name.to_owned())
+	}
+
+	/// PostgreSQL's internal type name (`pg_type.typname`, `information_schema.columns.udt_name`):
+	/// `int8`, `bool`, `timestamptz`, and `_text` for an array of `text`. [`Self::Unknown`] has
+	/// no name.
+	pub fn udt_name(&self) -> Option<String> {
+		let name = match self {
+			Self::Unknown => return None,
+			Self::Array(elem) => return elem.udt_name().map(|elem| format!("_{elem}")),
+			Self::Bool => "bool",
+			Self::Int2 => "int2",
+			Self::Int4 => "int4",
+			Self::Int8 => "int8",
+			Self::Float4 => "float4",
+			Self::Float8 => "float8",
+			Self::Numeric => "numeric",
+			Self::Text => "text",
+			Self::Bytea => "bytea",
+			Self::Date => "date",
+			Self::Time => "time",
+			Self::Timestamp => "timestamp",
+			Self::TimestampTz => "timestamptz",
+			Self::Interval => "interval",
+			Self::Json => "jsonb",
+			Self::Uuid => "uuid",
+			Self::Char => "char",
+			Self::Name => "name",
+			Self::Varchar => "varchar",
+			Self::Bpchar => "bpchar",
+			Self::Timetz => "timetz",
+			Self::Inet => "inet",
+			Self::Cidr => "cidr",
+			Self::MacAddr => "macaddr",
+			Self::Oid => "oid",
+			Self::Regclass => "regclass",
+			Self::Record => "record",
+			Self::Int2Vector => "int2vector",
+			Self::OidVector => "oidvector",
+			Self::Vector => "vector",
+		};
+		Some(name.to_owned())
+	}
+
+	/// Parse SQL type from a string name (e.g. "int4", "varchar", "boolean", "text", etc.). A name
+	/// followed by `[]` is an array of that type.
 	pub fn from_name(name: &str) -> Self {
 		let lower = name.to_ascii_lowercase();
 		// `vector(3)` is a vector: its dimensions do not change how it travels.
@@ -268,6 +368,9 @@ impl SqlType {
 			Some(_) => "vector".to_string(),
 			None => lower,
 		};
+		if let Some(elem) = lower.strip_suffix("[]") {
+			return Self::array_of(Self::from_name(elem)).unwrap_or(Self::Unknown);
+		}
 		match lower.as_str() {
 			"bool" | "boolean" => Self::Bool,
 			"int2" | "smallint" => Self::Int2,
@@ -297,6 +400,8 @@ impl SqlType {
 			"oid" => Self::Oid,
 			"regclass" => Self::Regclass,
 			"record" => Self::Record,
+			"int2vector" => Self::Int2Vector,
+			"oidvector" => Self::OidVector,
 			"vector" => Self::Vector,
 			_ => Self::Unknown,
 		}
@@ -475,7 +580,11 @@ impl BoundSelect {
 					}
 				},
 			};
-			let ty = self.infer_expr_type(&target.expr, catalog);
+			let mut ty = self.infer_expr_type(&target.expr, catalog);
+			if dialect.dialect == SqlDialect::Postgres && is_case_of_integer_constants(&target.expr)
+			{
+				ty = SqlType::Int4;
+			}
 			let dynamic = target.alias.is_none() && target.is_unlisted_wildcard();
 			columns.push(ResultColumn {
 				name,
@@ -752,6 +861,14 @@ impl BoundSelect {
 				self.collect_source_parameters(left, catalog, params);
 				self.collect_source_parameters(right, catalog, params);
 			}
+			BoundTableSource::Lateral {
+				targets,
+				..
+			} => {
+				for target in targets {
+					self.collect_param_types_from_expr(&target.expr, catalog, params);
+				}
+			}
 			BoundTableSource::Table {
 				..
 			}
@@ -846,6 +963,33 @@ impl BoundSelect {
 				args,
 				..
 			} => {
+				// `x op ANY/ALL ($n)`: the parameter is an array of x's type. An operand whose
+				// type the catalog cannot state is presented as text everywhere else, so its
+				// array is `text[]`.
+				if name == crate::functions::QUANTIFIED_ARRAY
+					&& let [
+						lhs,
+						BoundExpr::Param {
+							index,
+							..
+						},
+						..,
+					] = args.as_slice()
+					&& let element = self.infer_expr_type(lhs, catalog)
+					&& let Some(array_ty) = SqlType::array_of(if element == SqlType::Unknown {
+						SqlType::Text
+					} else {
+						element
+					}) {
+					params
+						.entry(*index)
+						.and_modify(|existing| {
+							if *existing == SqlType::Unknown {
+								*existing = array_ty;
+							}
+						})
+						.or_insert(array_ty);
+				}
 				// A parameter handed to a vector function is the vector it takes.
 				if crate::vector::is_distance_function(name) || name == "inner_product" {
 					for arg in args {
@@ -954,10 +1098,73 @@ impl BoundSelect {
 	}
 }
 
+/// Whether `expr` is a CASE whose every result is an integer constant that fits `integer`, which
+/// PostgreSQL types as `integer`, as it types the constants.
+fn is_case_of_integer_constants(expr: &BoundExpr) -> bool {
+	let BoundExpr::Case {
+		branches,
+		else_expr,
+		..
+	} = expr
+	else {
+		return false;
+	};
+	let fits_int4 = |expr: &BoundExpr| matches!(expr, BoundExpr::Literal(BoundLiteral::Integer(n)) if i32::try_from(*n).is_ok());
+	!branches.is_empty()
+		&& branches.iter().all(|(_, then)| fits_int4(then))
+		&& else_expr.as_deref().is_none_or(fits_int4)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::catalog::EmptyCatalog;
+
+	#[test]
+	fn a_type_name_reads_back_as_the_same_type() {
+		let scalars = [
+			SqlType::Bool,
+			SqlType::Int2,
+			SqlType::Int4,
+			SqlType::Int8,
+			SqlType::Float4,
+			SqlType::Float8,
+			SqlType::Numeric,
+			SqlType::Text,
+			SqlType::Bytea,
+			SqlType::Date,
+			SqlType::Time,
+			SqlType::Timestamp,
+			SqlType::TimestampTz,
+			SqlType::Interval,
+			SqlType::Json,
+			SqlType::Uuid,
+			SqlType::Char,
+			SqlType::Name,
+			SqlType::Varchar,
+			SqlType::Bpchar,
+			SqlType::Timetz,
+			SqlType::Inet,
+			SqlType::Cidr,
+			SqlType::MacAddr,
+			SqlType::Oid,
+			SqlType::Regclass,
+			SqlType::Record,
+		];
+		for ty in scalars {
+			let name = ty.name().expect("a scalar has a name");
+			assert_eq!(SqlType::from_name(&name), ty, "{name}");
+			let array = SqlType::array_of(ty).expect("a scalar has an array");
+			let name = array.name().expect("an array has a name");
+			assert_eq!(SqlType::from_name(&name), array, "{name}");
+		}
+		assert_eq!(SqlType::Unknown.name(), None);
+		assert_eq!(SqlType::Int8.name().as_deref(), Some("bigint"));
+		assert_eq!(
+			SqlType::array_of(SqlType::Text).and_then(|t| t.name()).as_deref(),
+			Some("text[]")
+		);
+	}
 
 	fn pg(sql: &str) -> (BoundSelect, DialectPolicy) {
 		let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse");

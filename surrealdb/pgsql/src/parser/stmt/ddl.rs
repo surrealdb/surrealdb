@@ -8,7 +8,7 @@ use crate::ast::expr::{NullsOrder, OrderDirection};
 use crate::ast::stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CreateExtensionStmt,
 	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DropObjectType, DropStmt,
-	IndexElem, RelOption, Statement, TableConstraint,
+	IndexElem, ReferentialAction, RelOption, Statement, TableConstraint,
 };
 use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::keyword::Keyword;
@@ -629,9 +629,11 @@ impl<'a> Parser<'a> {
 					None
 				};
 				col_end_span = ref_table.span;
+				let on_delete = self.parse_referential_actions()?;
 				col_constraints.push(ColumnConstraint::References {
 					table: ref_table,
 					column,
+					on_delete,
 				});
 			} else {
 				break;
@@ -644,6 +646,55 @@ impl<'a> Parser<'a> {
 			constraints: col_constraints,
 			span: col_start_span.merge(col_end_span),
 		})
+	}
+
+	/// Parse the `ON DELETE action` and `ON UPDATE action` clauses that may follow a foreign key,
+	/// in either order, and return the `ON DELETE` action (`NO ACTION` when absent). The
+	/// `ON UPDATE` action is accepted and not kept: a record's id never changes.
+	fn parse_referential_actions(&mut self) -> ParseResult<ReferentialAction> {
+		let mut on_delete = ReferentialAction::NoAction;
+		while self.eat(&TokenKind::Keyword(Keyword::On))? {
+			let is_delete = if self.eat(&TokenKind::Keyword(Keyword::Delete))? {
+				true
+			} else if self.eat(&TokenKind::Keyword(Keyword::Update))? {
+				false
+			} else {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "DELETE or UPDATE",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			};
+			let action = if self.eat(&TokenKind::Keyword(Keyword::No))? {
+				self.expect(&TokenKind::Keyword(Keyword::Action), "'ACTION'")?;
+				ReferentialAction::NoAction
+			} else if self.eat(&TokenKind::Keyword(Keyword::Restrict))? {
+				ReferentialAction::Restrict
+			} else if self.eat(&TokenKind::Keyword(Keyword::Cascade))? {
+				ReferentialAction::Cascade
+			} else if self.eat(&TokenKind::Keyword(Keyword::Set))? {
+				if self.eat(&TokenKind::Keyword(Keyword::Null))? {
+					ReferentialAction::SetNull
+				} else {
+					self.expect(&TokenKind::Keyword(Keyword::Default), "'NULL' or 'DEFAULT'")?;
+					ReferentialAction::SetDefault
+				}
+			} else {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "NO ACTION, RESTRICT, CASCADE, SET NULL or SET DEFAULT",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			};
+			if is_delete {
+				on_delete = action;
+			}
+		}
+		Ok(on_delete)
 	}
 
 	/// Parse a table constraint without the optional `CONSTRAINT name` prefix.
@@ -665,10 +716,12 @@ impl<'a> Parser<'a> {
 			} else {
 				Vec::new()
 			};
+			let on_delete = self.parse_referential_actions()?;
 			Ok(TableConstraint::ForeignKey {
 				columns: columns_list,
 				ref_table,
 				ref_columns,
+				on_delete,
 			})
 		} else {
 			Err(ParseError::new(

@@ -5,6 +5,10 @@
 //! its key. Anywhere else it is its key, so arithmetic, text, casts and the ordering of the key's
 //! own type see an integer or a string and not a record.
 
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_expr::expr::logical::{LogicalField, LogicalFields, LogicalOp, LogicalOrdering};
 use surrealdb_types::ToSql;
 

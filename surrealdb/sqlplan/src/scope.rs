@@ -80,7 +80,14 @@ impl RelationEntry {
 		BoundColumnRef {
 			relation_index: self.relation_index,
 			relation_name: self.exposed_name.clone(),
-			declared_type: if self.is_base_table {
+			declared_type: if self.is_base_table
+				|| (self.source_query.is_none()
+					&& crate::catalog::system::is_system_catalog_table(
+						self.schema.as_deref(),
+						&self.table_name,
+					)) {
+				// A system relation is described by the catalog under its own name, whatever
+				// alias the query gives it.
 				catalog.column_type(self.schema.as_deref(), &self.table_name, &column)
 			} else {
 				derived.map(|(ty, _)| ty).unwrap_or(crate::SqlType::Unknown)
@@ -308,7 +315,16 @@ impl QueryScope {
 		policy: &DialectPolicy,
 	) -> usize {
 		let relation_index = self.relations.len();
-		let exposed_name = alias.unwrap_or_else(|| table_name.to_string());
+		// An unaliased relation is exposed under its unqualified name, so `columns.*` and
+		// `columns.column_name` resolve against `information_schema.columns`.
+		let exposed_name = alias.unwrap_or_else(|| match schema.as_deref() {
+			Some(s) => table_name
+				.strip_prefix(s)
+				.and_then(|rest| rest.strip_prefix('.'))
+				.unwrap_or(table_name)
+				.to_string(),
+			None => table_name.to_string(),
+		});
 
 		// Query catalog for known columns if available
 		let described = catalog.get_table(schema.as_deref(), table_name);
@@ -562,14 +578,27 @@ impl QueryScope {
 			return Ok(rel.column_ref(policy.fold_identifier(col_name).into_owned(), catalog));
 		}
 
-		// Multiple relations in scope: check known columns across relations
+		// Multiple relations in scope: check known columns across relations. A derived table
+		// has the columns its projection names, whether or not the alias lists them.
 		let mut matching_relations = Vec::new();
 		for rel in &self.relations {
-			if rel
+			let listed = rel
 				.known_columns
 				.as_ref()
-				.is_some_and(|cols| cols.iter().any(|c| policy.idents_match(c, col_name)))
-			{
+				.is_some_and(|cols| cols.iter().any(|c| policy.idents_match(c, col_name)));
+			let projected = rel.source_query.as_ref().is_some_and(|query| {
+				query.targets.iter().any(|target| {
+					let name = match (&target.alias, &target.expr) {
+						(Some(alias), _) => Some(alias.as_str()),
+						(None, BoundExpr::Column(col)) if col.column != "*" => {
+							Some(col.column.as_str())
+						}
+						_ => None,
+					};
+					name.is_some_and(|name| policy.idents_match(name, col_name))
+				})
+			});
+			if listed || projected {
 				matching_relations.push(rel);
 			}
 		}
@@ -750,7 +779,9 @@ impl QueryScope {
 						BoundTarget {
 							expr: BoundExpr::Column(rel.column_ref(col.clone(), catalog)),
 							alias: Some(col.clone()),
-							is_wildcard: rel.source_query.is_none(),
+							// A system view has no stored record to read whole: each of its
+							// columns is selected by name.
+							is_wildcard: rel.source_query.is_none() && rel.is_base_table,
 							table_wildcard: None,
 						}
 					});

@@ -207,6 +207,9 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 		}
 		| Expr::Quantified {
 			..
+		}
+		| Expr::QuantifiedArray {
+			..
 		} => 40,
 		Expr::Collate {
 			..
@@ -743,6 +746,25 @@ impl ToPgSql for Expr {
 					Quantifier::All => f.write_str(" ALL (")?,
 				}
 				subquery.to_pgsql(f)?;
+				f.write_str(")")
+			}
+			Self::QuantifiedArray {
+				expr,
+				op,
+				quantifier,
+				array,
+				..
+			} => {
+				let parent_prec = expr_precedence(self);
+				print_sub_expr(f, expr, parent_prec, false)?;
+				f.write_str(" ")?;
+				op.to_pgsql(f)?;
+				match quantifier {
+					Quantifier::Any => f.write_str(" ANY (")?,
+					Quantifier::Some => f.write_str(" SOME (")?,
+					Quantifier::All => f.write_str(" ALL (")?,
+				}
+				array.to_pgsql(f)?;
 				f.write_str(")")
 			}
 		}

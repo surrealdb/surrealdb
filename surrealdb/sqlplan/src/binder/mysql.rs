@@ -283,6 +283,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		database: catalog.current_database().map(str::to_owned),
 		hnsw_indexes: Vec::new(),
 	})
 }

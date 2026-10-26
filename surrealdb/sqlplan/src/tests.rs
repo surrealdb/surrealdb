@@ -1,5 +1,9 @@
 //! Unit tests for surrealdb-sqlplan binder and lowering.
 
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use surrealdb_expr::expr::logical::{LogicalExpr, LogicalOp};
 
 use crate::catalog::MemoryCatalog;
@@ -408,6 +412,84 @@ fn test_parameter_type_inference() {
 	assert_eq!(params.param_types[0].to_pg_oid(), 20);
 	assert_eq!(params.param_types[1], SqlType::Text);
 	assert_eq!(params.param_types[1].to_pg_oid(), 25);
+}
+
+#[test]
+fn a_quantified_array_parameter_is_described_as_an_array_of_the_compared_type() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"users",
+			vec![
+				ColumnInfo::new("id", 0).with_type("int8"),
+				ColumnInfo::new("name", 1).with_type("text"),
+			],
+		)
+		.with_schema("public"),
+	);
+	let policy = DialectPolicy::postgres();
+	for (sql, expected_oid) in [
+		("SELECT 1 FROM users WHERE name = ANY ($1)", 1009),
+		("SELECT 1 FROM users WHERE id = ANY ($1)", 1016),
+		("SELECT 1 FROM users WHERE id <> ALL ($1)", 1016),
+		("SELECT 1 FROM users AS u WHERE u.name = ANY ($1)", 1009),
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		let params = bound.describe_parameters(&catalog);
+		assert_eq!(params.param_types.len(), 1, "{sql}");
+		assert_eq!(params.param_types[0].to_pg_oid(), expected_oid, "{sql}");
+	}
+}
+
+#[test]
+fn a_system_relation_column_keeps_its_type_under_an_alias_and_a_join() {
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	for sql in [
+		"SELECT relrowsecurity FROM pg_class",
+		"SELECT tbl.relrowsecurity FROM pg_class AS tbl",
+		"SELECT tbl.relrowsecurity FROM pg_class AS tbl JOIN pg_namespace AS ns ON ns.oid = tbl.relnamespace",
+	] {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		let described = bound.describe_static(&catalog, &policy).unwrap();
+		assert_eq!(described.columns[0].ty, SqlType::Bool, "{sql}");
+	}
+}
+
+#[test]
+fn a_cast_of_a_column_is_named_after_the_column() {
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let stmts = surrealdb_pgsql::parse_statements("SELECT relpages::int8 FROM pg_class").unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+	let described = bound.describe_static(&catalog, &policy).unwrap();
+	assert_eq!(described.columns[0].name, "relpages");
+}
+
+#[test]
+fn an_advisory_lock_inside_a_query_is_refused_as_unsupported() {
+	let catalog = MemoryCatalog::new();
+	for sql in [
+		"SELECT pg_advisory_lock(1)",
+		"SELECT pg_advisory_lock(1) FROM pg_class",
+		"SELECT pg_try_advisory_lock(1), 2",
+		"SELECT 1 WHERE pg_advisory_unlock(1, 2)",
+		"SELECT pg_advisory_unlock_all() FROM pg_class",
+	] {
+		let err = lower_pgsql_select(&catalog, sql).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}");
+	}
 }
 
 #[test]
@@ -2502,6 +2584,301 @@ fn test_collection_aggregate_forms_that_would_answer_wrongly_are_refused() {
 			matches!(refused, Err(crate::error::PlanError::UnsupportedExpression(_))),
 			"{sql}: {refused:?}"
 		);
+	}
+}
+
+#[test]
+fn test_qualified_star_over_unaliased_system_view_expands_columns() {
+	let sql = "SELECT columns.* FROM information_schema.columns WHERE columns.table_name = 'x';";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+	assert!(bound.targets.len() > 10);
+	assert!(bound.targets.iter().any(|t| t.alias.as_deref() == Some("udt_name")));
+	assert!(lower_bound_select(&bound, &policy).is_ok());
+}
+
+#[test]
+fn test_correlated_subquery_in_join_condition_binds_and_lowers() {
+	let sql = "SELECT columns.column_name FROM information_schema.columns LEFT JOIN pg_catalog.pg_attribute AS a ON a.attname = columns.column_name AND a.attrelid = (SELECT cls.oid FROM pg_catalog.pg_class AS cls WHERE cls.relname = columns.table_name);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+	assert!(lower_bound_select(&bound, &policy).is_ok());
+}
+
+#[test]
+fn test_format_type_of_a_column_and_regtype_cast_lower() {
+	let sql = "SELECT format_type(a.atttypid, a.atttypmod), ('\"' || 'pg_catalog' || '\".\"' || 'int8' || '\"')::\"regtype\"::text, format_type(NULL, NULL) FROM pg_catalog.pg_attribute AS a;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+	let op = lower_bound_select(&bound, &policy).unwrap();
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected projection");
+	};
+	let rendered = format!("{:?}", proj.fields);
+	assert!(rendered.contains("bigint") && rendered.contains("timestamp with time zone"));
+}
+
+#[test]
+fn test_udt_name_is_the_internal_type_name() {
+	use crate::SqlType;
+	for (data_type, udt) in [
+		("bigint", "int8"),
+		("integer", "int4"),
+		("boolean", "bool"),
+		("text", "text"),
+		("jsonb", "jsonb"),
+		("text[]", "_text"),
+		("timestamp with time zone", "timestamptz"),
+		("double precision", "float8"),
+		("numeric", "numeric"),
+	] {
+		assert_eq!(SqlType::from_name(data_type).udt_name().as_deref(), Some(udt), "{data_type}");
+	}
+	assert_eq!(SqlType::Unknown.udt_name(), None);
+}
+
+#[test]
+fn unnest_targets_split_a_pipeline_of_their_own_and_read_their_position() {
+	use surrealdb_expr::expr::logical::{LogicalField, LogicalFields};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let lower = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).unwrap();
+		lower_bound_select(&bound, &policy)
+	};
+	let field_exprs = |op: &LogicalOp| {
+		let LogicalOp::Project(project) = op else {
+			panic!("expected Project, got {op:?}");
+		};
+		let LogicalFields::Select(fields) = &project.fields else {
+			panic!("expected Select fields");
+		};
+		let exprs = fields
+			.iter()
+			.map(|field| {
+				let LogicalField::Single {
+					expr,
+					..
+				} = field
+				else {
+					panic!("expected a single field");
+				};
+				expr.to_string()
+			})
+			.collect::<Vec<_>>();
+		(exprs, project.input.clone())
+	};
+
+	let (exprs, input) = field_exprs(
+		&lower("SELECT UNNEST(conkey) AS parent, UNNEST(confkey) AS child FROM pg_constraint")
+			.unwrap(),
+	);
+	assert_eq!(exprs, ["__sql_unnest[0]", "__sql_unnest[1]"]);
+	let LogicalOp::Subquery(subquery) = *input else {
+		panic!("expected the split pipeline under the projection, got {input:?}");
+	};
+	let LogicalOp::Split(split) = *subquery.input else {
+		panic!("expected Split, got {:?}", subquery.input);
+	};
+	assert!(matches!(&*split.input, LogicalOp::Project(_)));
+
+	let (exprs, _) = field_exprs(&lower("SELECT UNNEST(conkey) FROM pg_constraint").unwrap());
+	assert_eq!(exprs, ["__sql_unnest"]);
+
+	assert!(lower("SELECT UNNEST(conkey) + 1 FROM pg_constraint").is_err());
+	assert!(lower("SELECT count(*), UNNEST(conkey) FROM pg_constraint").is_err());
+}
+
+#[test]
+fn a_quantified_comparison_against_an_array_binds_to_one_internal_call_and_refuses_other_operators()
+{
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bind = |sql: &str| {
+		let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+		let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+			panic!("expected SELECT");
+		};
+		binder::pgsql::bind_select(select, &catalog, &policy, None)
+	};
+	for (sql, equal, all) in [
+		("SELECT x = ANY (arr) FROM t", true, false),
+		("SELECT x = SOME (arr) FROM t", true, false),
+		("SELECT x <> ALL (arr) FROM t", false, true),
+		("SELECT x = ALL (arr) FROM t", true, true),
+		("SELECT x <> ANY (arr) FROM t", false, false),
+	] {
+		let bound = bind(sql).unwrap();
+		let BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		} = &bound.targets[0].expr
+		else {
+			panic!("{sql}: {:?}", bound.targets[0].expr);
+		};
+		assert_eq!(name, crate::functions::QUANTIFIED_ARRAY);
+		assert_eq!(args.len(), 4, "{sql}");
+		assert_eq!(args[2], BoundExpr::Literal(crate::ir::BoundLiteral::Boolean(equal)), "{sql}");
+		assert_eq!(args[3], BoundExpr::Literal(crate::ir::BoundLiteral::Boolean(all)), "{sql}");
+		assert!(lower_bound_select(&bound, &policy).is_ok(), "{sql}");
+	}
+	for sql in ["SELECT x < ANY (arr) FROM t", "SELECT x >= ALL (arr) FROM t"] {
+		let err = bind(sql).unwrap_err();
+		assert_eq!(err.pg_sqlstate(), "0A000", "{sql}");
+	}
+}
+
+fn lower_pgsql_select(
+	catalog: &dyn BinderCatalog,
+	sql: &str,
+) -> Result<LogicalOp, crate::error::PlanError> {
+	let policy = DialectPolicy::postgres();
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let bound = binder::pgsql::bind_select(select, catalog, &policy, None)?;
+	lower_bound_select(&bound, &policy)
+}
+
+#[test]
+fn a_lateral_subquery_of_set_returning_targets_splits_the_rows_it_extends() {
+	let catalog = MemoryCatalog::new();
+	let lowered = lower_pgsql_select(
+		&catalog,
+		"SELECT k.attnum, k.pos FROM pg_index i CROSS JOIN LATERAL \
+		 (SELECT unnest(i.indkey), generate_subscripts(i.indkey, 1) + 1) AS k(attnum, pos) \
+		 WHERE k.pos = 2",
+	)
+	.unwrap();
+	let plan = format!("{lowered:?}");
+	assert!(plan.contains("Split"), "{plan}");
+	assert!(plan.contains("__lateral0_0") && plan.contains("__lateral0_1"), "{plan}");
+	// The columns of the relation are read from the object under the alias of its join.
+	assert!(plan.contains("_join0"), "{plan}");
+}
+
+#[test]
+fn a_lateral_subquery_is_a_select_of_expressions_joined_inner_or_cross() {
+	let catalog = MemoryCatalog::new();
+	for sql in [
+		"SELECT 1 FROM pg_index i LEFT JOIN LATERAL (SELECT unnest(i.indkey)) AS k(a) ON true",
+		"SELECT 1 FROM pg_index i CROSS JOIN LATERAL (SELECT * FROM pg_class) AS k",
+		"SELECT 1 FROM pg_index i CROSS JOIN LATERAL (SELECT i.indkey WHERE true) AS k(a)",
+		"SELECT 1 FROM pg_index i CROSS JOIN LATERAL (SELECT lower(unnest(i.indkey))) AS k(a)",
+	] {
+		assert!(lower_pgsql_select(&catalog, sql).is_err(), "{sql}");
+	}
+	assert!(
+		lower_pgsql_select(
+			&catalog,
+			"SELECT k.a FROM pg_index i CROSS JOIN LATERAL (SELECT i.indrelid + 1) AS k(a)"
+		)
+		.is_ok()
+	);
+}
+
+#[test]
+fn a_column_a_using_clause_merged_is_not_ambiguous() {
+	let catalog = MemoryCatalog::new();
+	assert!(
+		lower_pgsql_select(
+			&catalog,
+			"SELECT constraint_name FROM information_schema.table_constraints \
+			 JOIN information_schema.constraint_column_usage USING (constraint_name)"
+		)
+		.is_ok()
+	);
+	assert!(
+		lower_pgsql_select(
+			&catalog,
+			"SELECT constraint_name FROM information_schema.table_constraints \
+			 JOIN information_schema.constraint_column_usage ON true"
+		)
+		.is_err()
+	);
+}
+
+#[test]
+fn a_bit_test_and_an_array_subscript_lower() {
+	let catalog = MemoryCatalog::new();
+	assert!(lower_pgsql_select(&catalog, "SELECT indoption[1] & 2 = 2 FROM pg_index").is_ok());
+	assert!(lower_pgsql_select(&catalog, "SELECT indoption[1] & 3 FROM pg_index").is_err());
+	assert!(lower_pgsql_select(&catalog, "SELECT indoption & indnatts FROM pg_index").is_err());
+}
+
+#[test]
+fn pg_get_indexdef_reads_the_definitions_of_the_indexes_the_catalog_lists() {
+	let listed = MemoryCatalog::new().with_listed_tables(vec![
+		TableSchema::new("Item", vec![ColumnInfo::new("id", 0), ColumnInfo::new("n", 1)])
+			.with_schema("public"),
+	]);
+	let plan =
+		format!("{:?}", lower_pgsql_select(&listed, "SELECT pg_get_indexdef(1000000)").unwrap());
+	assert!(
+		plan.contains("CREATE UNIQUE INDEX Item_pkey ON public.\\\"Item\\\" USING btree (id)")
+			|| plan.contains("CREATE UNIQUE INDEX"),
+		"{plan}"
+	);
+}
+
+#[test]
+fn pg_get_serial_sequence_reads_the_sequences_the_catalog_lists() {
+	let listed = MemoryCatalog::new().with_listed_tables(vec![
+		TableSchema::new(
+			"Item",
+			vec![ColumnInfo::new("id", 0).with_sequence("Item_id_seq"), ColumnInfo::new("n", 1)],
+		)
+		.with_schema("public"),
+	]);
+	let plan = |catalog: &dyn BinderCatalog| {
+		format!(
+			"{:?}",
+			lower_pgsql_select(
+				catalog,
+				"SELECT pg_get_serial_sequence('\"public\".\"Item\"', 'id')"
+			)
+			.unwrap()
+		)
+	};
+	let with = plan(&listed);
+	assert!(with.contains("Item_id_seq"), "{with}");
+	let without = plan(&MemoryCatalog::new());
+	assert!(!without.contains("Item_id_seq"), "{without}");
+}
+
+#[test]
+fn a_regtype_array_constant_names_the_oids_of_its_types() {
+	let catalog = MemoryCatalog::new();
+	let plan = format!(
+		"{:?}",
+		lower_pgsql_select(&catalog, "SELECT 20 = ANY ('{int,int8,int2}'::regtype[])").unwrap()
+	);
+	for oid in ["23", "20", "21"] {
+		assert!(plan.contains(oid), "{plan}");
 	}
 }
 

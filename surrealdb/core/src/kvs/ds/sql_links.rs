@@ -18,23 +18,32 @@
 //!    refusal that rests on what the catalog holds (an `hnsw` index over a column whose dimensions
 //!    are not known) is lifted by the second lowering, and one that does not is reported again.
 //!
+//! A statement over a system view that lists the user's tables (`information_schema.tables`,
+//! `pg_class`, ...) names no table of the database, so the first lowering notes none. The recorder
+//! notes that it was asked for such a view ([`RecordingCatalog::asked_table_listing`]), and the
+//! statements are then lowered against a catalog that also lists the tables of the database
+//! ([`database_tables`]), which `Datastore::listed_tables` reads for a session that may view them.
+//!
 //! A request that names no table (`SELECT 1`) reads nothing, and neither does one whose session the
 //! datastore refuses or whose level cannot reach the selected database: `Datastore::link_columns`
 //! and `Datastore::read_tables` decide whether the tables are read, and `read_tables` whether the
 //! session may be told the columns.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use anyhow::Result;
 use surrealdb_sqlplan::vector::VectorMetric;
 use surrealdb_sqlplan::{
-	BinderCatalog, ColumnInfo, EmptyCatalog, MemoryCatalog, SqlType, TableSchema,
+	BinderCatalog, ColumnInfo, ColumnShape, EmptyCatalog, ForeignKeyInfo, IndexInfo, MemoryCatalog,
+	ReferentialAction, SqlType, TableSchema,
 };
 
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
-use crate::catalog::{FieldDefinition, TableDefinition, TableType};
-use crate::expr::{Kind, Part};
+use crate::catalog::{DefineDefault, FieldDefinition, IndexDefinition, TableDefinition, TableType};
+use crate::expr::reference::ReferenceDeleteStrategy;
+use crate::expr::{Expr, Function, Kind, Literal, Part};
 use crate::kvs::Transaction;
 use crate::val::TableName;
 
@@ -44,6 +53,8 @@ use crate::val::TableName;
 pub(super) struct RecordingCatalog {
 	tables: Mutex<BTreeSet<String>>,
 	database: Option<String>,
+	listing: AtomicBool,
+	deferred: AtomicBool,
 }
 
 impl RecordingCatalog {
@@ -51,11 +62,24 @@ impl RecordingCatalog {
 		Self {
 			tables: Mutex::new(BTreeSet::new()),
 			database: database.map(str::to_owned),
+			listing: AtomicBool::new(false),
+			deferred: AtomicBool::new(false),
 		}
 	}
 
 	fn note(&self, table: &str) {
 		self.tables.lock().unwrap_or_else(PoisonError::into_inner).insert(table.to_owned());
+	}
+
+	/// Whether the lowering asked for a system view whose rows list the user's tables.
+	pub(super) fn asked_table_listing(&self) -> bool {
+		self.listing.load(Ordering::Relaxed)
+	}
+
+	/// Whether the lowering left a refusal to the schema ([`BinderCatalog::defers_schema_checks`]),
+	/// so that it must be lowered again against the schema even when the schema names no link.
+	pub(super) fn deferred_schema_checks(&self) -> bool {
+		self.deferred.load(Ordering::Relaxed)
 	}
 
 	/// Note `table` unless it is a system table, which the datastore does not hold.
@@ -81,6 +105,8 @@ impl BinderCatalog for RecordingCatalog {
 		let system = EmptyCatalog.get_table(schema, name);
 		if system.is_none() {
 			self.note(name);
+		} else if surrealdb_sqlplan::catalog::system::lists_user_tables(schema, name) {
+			self.listing.store(true, Ordering::Relaxed);
 		}
 		system
 	}
@@ -99,77 +125,57 @@ impl BinderCatalog for RecordingCatalog {
 		self.note_user_table(schema, table);
 		Vec::new()
 	}
-}
 
-/// The table a field of this type links to, when the type names exactly one
-/// table and admits nothing but a link besides `NONE` and `NULL`:
-/// `record<t>`, `option<record<t>>` and `record<t> | none`.
-fn link_target(kind: &Kind) -> Option<&str> {
-	match kind {
-		Kind::Record(tables) => match tables.as_slice() {
-			[table] => Some(table.as_str()),
-			_ => None,
-		},
-		Kind::Either(kinds) => {
-			let mut target = None;
-			for kind in kinds {
-				if matches!(kind, Kind::None | Kind::Null) {
-					continue;
-				}
-				if target.is_some() {
-					return None;
-				}
-				target = Some(link_target(kind)?);
-			}
-			target
-		}
-		Kind::Any
-		| Kind::None
-		| Kind::Null
-		| Kind::Bool
-		| Kind::Bytes
-		| Kind::Datetime
-		| Kind::Decimal
-		| Kind::Duration
-		| Kind::Float
-		| Kind::F16
-		| Kind::F32
-		| Kind::Int
-		| Kind::I8
-		| Kind::I16
-		| Kind::I32
-		| Kind::U8
-		| Kind::U16
-		| Kind::U32
-		| Kind::U64
-		| Kind::Number
-		| Kind::Object
-		| Kind::String
-		| Kind::Uuid
-		| Kind::Regex
-		| Kind::Table(_)
-		| Kind::Geometry(_)
-		| Kind::Set(..)
-		| Kind::Array(..)
-		| Kind::Function(..)
-		| Kind::Range
-		| Kind::Literal(_)
-		| Kind::File(_) => None,
+	fn column_shape(
+		&self,
+		_schema: Option<&str>,
+		table: &str,
+		_column: &str,
+	) -> Option<ColumnShape> {
+		self.note(table);
+		None
+	}
+
+	/// The lowering asks for the tables of the database to resolve a constraint name against them.
+	fn constraint_tables(&self) -> Vec<TableSchema> {
+		self.listing.store(true, Ordering::Relaxed);
+		Vec::new()
+	}
+
+	fn defers_schema_checks(&self) -> bool {
+		self.deferred.store(true, Ordering::Relaxed);
+		true
 	}
 }
 
-/// The link columns of `tables` as `(table, column, target)`, read through
-/// `txn` from the database `ns`/`db`. A database that does not exist has none.
+/// The table a field of this type links to; see [`surrealdb_sqlplan::link_target`].
+fn link_target(kind: &Kind) -> Option<&str> {
+	surrealdb_sqlplan::link_target(kind)
+}
+
+/// What the field definitions of some tables declare, for the lowering of SQL statements.
+#[derive(Default)]
+pub(super) struct Declared {
+	/// The link columns, as `(table, column, target, admits NONE)`.
+	pub(super) links: Vec<(String, String, String, bool)>,
+	/// How the columns are declared, as `(table, column, shape)`, read only when a statement asks
+	/// for them (`ALTER TABLE ... ADD FOREIGN KEY`).
+	pub(super) shapes: Vec<(String, String, ColumnShape)>,
+}
+
+/// The link columns of `tables`, and their shapes when `shapes` asks, read through `txn` from
+/// the database `ns`/`db`. A database that does not exist has none.
 pub(super) async fn link_columns(
 	txn: &Transaction,
 	ns: &str,
 	db: &str,
 	tables: &[String],
-) -> Result<Vec<(String, String, String)>> {
+	shapes: bool,
+) -> Result<Declared> {
 	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
-		return Ok(Vec::new());
+		return Ok(Declared::default());
 	};
-	let mut links = Vec::new();
+	let mut declared = Declared::default();
 	for table in tables {
 		let name = TableName::from(table.as_str());
 		let fields = txn.all_tb_fields(database.namespace_id, database.database_id, &name, None);
@@ -181,31 +187,50 @@ pub(super) async fn link_columns(
 				continue;
 			};
 			if let Some(target) = link_target(kind) {
-				links.push((table.clone(), column.to_owned(), target.to_owned()));
+				declared.links.push((
+					table.clone(),
+					column.to_owned(),
+					target.to_owned(),
+					surrealdb_sqlplan::kind_admits_none(kind),
+				));
+			}
+			if shapes {
+				let shape = ColumnShape::new(
+					Some(kind.clone()),
+					field.assert.as_ref(),
+					!matches!(field.default, DefineDefault::None),
+				);
+				declared.shapes.push((table.clone(), column.to_owned(), shape));
 			}
 		}
 	}
-	Ok(links)
+	Ok(declared)
 }
 
-/// A catalog naming `links`, as [`link_columns`] returns them, or `None` when
-/// there are none.
-pub(super) fn link_catalog(
-	links: &[(String, String, String)],
-	database: Option<&str>,
-) -> Option<MemoryCatalog> {
-	if links.is_empty() {
+/// A catalog naming what `declared` holds, as [`link_columns`] returns it, in the database
+/// `database`, or `None` when it holds nothing.
+pub(super) fn link_catalog(declared: &Declared, database: Option<&str>) -> Option<MemoryCatalog> {
+	if declared.links.is_empty() && declared.shapes.is_empty() {
 		return None;
 	}
-	let mut catalog = MemoryCatalog::new();
-	if let Some(db) = database {
-		catalog.set_database(Some(db.to_owned()));
+	let catalog = declared.links.iter().fold(
+		MemoryCatalog::new(),
+		|catalog, (table, column, target, admits_none)| {
+			let catalog = catalog.with_link(table, column, target);
+			if *admits_none {
+				catalog.with_nullable_link(table, column)
+			} else {
+				catalog
+			}
+		},
+	);
+	let mut catalog = declared.shapes.iter().fold(catalog, |catalog, (table, column, shape)| {
+		catalog.with_column_shape(table, column, shape.clone())
+	});
+	if let Some(database) = database {
+		catalog.set_database(Some(database.to_owned()));
 	}
-	Some(
-		links.iter().fold(catalog, |catalog, (table, column, target)| {
-			catalog.with_link(table, column, target)
-		}),
-	)
+	Some(catalog)
 }
 
 /// The SQL type of a field of `kind`, where it has one wire representation. Optionality does not
@@ -260,6 +285,45 @@ fn scalar_type(kind: &Kind) -> SqlType {
 		| Kind::Range
 		| Kind::Literal(_)
 		| Kind::File(_) => SqlType::Unknown,
+	}
+}
+
+/// Whether a field of `kind` can hold `NONE` or `NULL`: its type is `any`, or is, or has a member
+/// that is, `none` or `null`.
+fn admits_absence(kind: &Kind) -> bool {
+	match kind {
+		Kind::Any | Kind::None | Kind::Null => true,
+		Kind::Either(kinds) => kinds.iter().any(admits_absence),
+		Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::F16
+		| Kind::F32
+		| Kind::Int
+		| Kind::I8
+		| Kind::I16
+		| Kind::I32
+		| Kind::U8
+		| Kind::U16
+		| Kind::U32
+		| Kind::U64
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Set(..)
+		| Kind::Array(..)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => false,
 	}
 }
 
@@ -319,6 +383,191 @@ fn vector_dimension(kind: &Kind) -> Option<usize> {
 		| Kind::Literal(_)
 		| Kind::File(_) => None,
 	}
+}
+
+/// The PostgreSQL type name and nullability of a column declared as `kind`. A column with no
+/// declared type, or one with no single wire type, has no type name, and is nullable.
+fn column_type_name(kind: Option<&Kind>) -> (Option<String>, bool) {
+	let Some(kind) = kind else {
+		return (None, true);
+	};
+	(scalar_type(kind).name(), admits_absence(kind))
+}
+
+/// The sequence that numbers a column whose `DEFAULT` draws its next value from one
+/// (`sequence::nextval('name')`), as the SQL DDL defines it for a serial or auto-increment column.
+fn default_sequence(field: &FieldDefinition) -> Option<String> {
+	let DefineDefault::Set(Expr::FunctionCall(call)) = &field.default else {
+		return None;
+	};
+	match (&call.receiver, call.arguments.as_slice()) {
+		(Function::Normal(name), [Expr::Literal(Literal::String(sequence))])
+			if name == "sequence::nextval" =>
+		{
+			Some(sequence.to_string())
+		}
+		_ => None,
+	}
+}
+
+/// The SQL type name of the key of each table, by table name: the type of its `id` field, which a
+/// column that links to the table reports as its own type. A table whose `id` declares no single
+/// type has no entry value.
+type KeyTypes = std::collections::HashMap<String, Option<String>>;
+
+/// The columns [`database_tables`] lists for a table with these field definitions, `id` first.
+///
+/// A column is a top-level field: a nested path (`a.b`, `a[*]`) and the virtual definition of a
+/// record id component are not columns. `id` is always the first column and never nullable; the
+/// other columns follow in the order the definitions are given. A column that links to one table
+/// has the type of that table's key (`keys`).
+fn table_columns(fields: &[FieldDefinition], keys: &KeyTypes) -> Vec<ColumnInfo> {
+	let mut columns = Vec::with_capacity(fields.len() + 1);
+	let id = fields.iter().find(|field| field.name.field_name() == Some("id"));
+	let (data_type, _) = column_type_name(id.and_then(|field| field.field_kind.as_ref()));
+	columns.push(ColumnInfo {
+		name: "id".to_owned(),
+		ordinal: 0,
+		data_type,
+		is_nullable: false,
+		sequence: id.and_then(default_sequence),
+	});
+	for field in fields {
+		let Some(name) = field.name.field_name() else {
+			continue;
+		};
+		if field.is_key_part() || name == "id" {
+			continue;
+		}
+		let (mut data_type, mut is_nullable) = column_type_name(field.field_kind.as_ref());
+		// A `NOT NULL` assertion makes the column required whatever its type admits.
+		if surrealdb_sqlplan::ColumnShape::new(None, field.assert.as_ref(), false).assert
+			== surrealdb_sqlplan::ColumnAssert::NotNull
+		{
+			is_nullable = false;
+		}
+		// A link column is typed as the key of the table it links to.
+		if data_type.is_none()
+			&& let Some(target) = field.field_kind.as_ref().and_then(link_target)
+		{
+			data_type = keys.get(target).cloned().flatten();
+		}
+		columns.push(ColumnInfo {
+			name: name.to_owned(),
+			ordinal: columns.len(),
+			data_type,
+			is_nullable,
+			sequence: default_sequence(field),
+		});
+	}
+	columns
+}
+
+/// The indexes [`database_tables`] lists for a table: the ordered and unique indexes over plain
+/// top-level fields. An index being removed, one of another kind (full-text, vector, count) and
+/// one over a computed or nested path have no PostgreSQL counterpart and are not listed.
+fn table_indexes(definitions: &[IndexDefinition]) -> Vec<IndexInfo> {
+	definitions
+		.iter()
+		.filter(|index| !index.prepare_remove)
+		.filter_map(|index| {
+			let unique = match index.index {
+				crate::catalog::Index::Idx => false,
+				crate::catalog::Index::Uniq => true,
+				crate::catalog::Index::Hnsw(_)
+				| crate::catalog::Index::FullText(_)
+				| crate::catalog::Index::Count(_)
+				| crate::catalog::Index::DiskAnn(_)
+				| crate::catalog::Index::Spatial => return None,
+			};
+			let columns = index
+				.cols
+				.iter()
+				.map(|col| col.field_name().map(str::to_owned))
+				.collect::<Option<Vec<_>>>()?;
+			Some(IndexInfo {
+				name: index.name.as_str().to_owned(),
+				columns,
+				unique,
+			})
+		})
+		.collect()
+}
+
+/// The foreign keys [`database_tables`] lists for a table: each top-level field declared
+/// `REFERENCE` whose type is a link to one table ([`link_target`]).
+fn table_foreign_keys(fields: &[FieldDefinition]) -> Vec<ForeignKeyInfo> {
+	fields
+		.iter()
+		.filter(|field| !field.is_key_part())
+		.filter_map(|field| {
+			let reference = field.reference.as_ref()?;
+			let column = field.name.field_name()?;
+			let target = link_target(field.field_kind.as_ref()?)?;
+			let on_delete = match reference.on_delete {
+				ReferenceDeleteStrategy::Cascade => ReferentialAction::Cascade,
+				ReferenceDeleteStrategy::Unset => ReferentialAction::SetNull,
+				ReferenceDeleteStrategy::Reject
+				| ReferenceDeleteStrategy::Ignore
+				| ReferenceDeleteStrategy::Custom(_) => ReferentialAction::NoAction,
+			};
+			Some(ForeignKeyInfo {
+				column: column.to_owned(),
+				target_table: target.to_owned(),
+				on_delete,
+			})
+		})
+		.collect()
+}
+
+/// Every table of the database `ns`/`db` with its columns, in the `public` schema, read through
+/// `txn`. A database that does not exist has none.
+///
+/// Normal tables, relation tables and views are all listed as tables: [`TableSchema`] carries no
+/// kind. A table with no field definitions lists the column `id` alone. The columns follow
+/// [`table_columns`], and the types are those [`scalar_type`] derives, named as `SqlType::name`
+/// names them.
+///
+/// This reads every table definition and every field definition of the database, with the
+/// datastore's own authority, and returns them all: the caller decides whether the session may see
+/// them (`Datastore::listed_tables`).
+pub(super) async fn database_tables(
+	txn: &Transaction,
+	ns: &str,
+	db: &str,
+) -> Result<Vec<TableSchema>> {
+	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
+		return Ok(Vec::new());
+	};
+	let tables = txn.all_tb(database.namespace_id, database.database_id, None).await?;
+	let ns_id = database.namespace_id;
+	let db_id = database.database_id;
+	let definitions = futures::future::try_join_all(tables.iter().map(|table| async move {
+		let (fields, indexes) = futures::future::try_join(
+			txn.all_tb_fields(ns_id, db_id, &table.name, None),
+			txn.all_tb_indexes(ns_id, db_id, &table.name, None),
+		)
+		.await?;
+		anyhow::Ok((table.name.as_str(), fields, indexes))
+	}))
+	.await?;
+	let keys: KeyTypes = definitions
+		.iter()
+		.map(|(name, fields, _)| {
+			let id = fields.iter().find(|field| field.name.field_name() == Some("id"));
+			let (data_type, _) = column_type_name(id.and_then(|field| field.field_kind.as_ref()));
+			((*name).to_owned(), data_type)
+		})
+		.collect();
+	Ok(definitions
+		.iter()
+		.map(|(name, fields, indexes)| {
+			TableSchema::new(*name, table_columns(fields, &keys))
+				.with_schema("public")
+				.with_indexes(table_indexes(indexes))
+				.with_foreign_keys(table_foreign_keys(fields))
+		})
+		.collect())
 }
 
 /// Whether none of the PostgreSQL `stmts` can change the columns of a table, so that the tables
@@ -467,6 +716,9 @@ pub(super) async fn describe_tables(
 			};
 			if let Some(target) = link_target(kind) {
 				described.catalog.add_link(None, table, column, target);
+				if surrealdb_sqlplan::kind_admits_none(kind) {
+					described.catalog.add_nullable_link(table, column);
+				}
 				described.shapes_lowering = true;
 			}
 			if let Some(dimensions) = vector_dimension(kind) {
@@ -475,7 +727,13 @@ pub(super) async fn describe_tables(
 				has_vectors = true;
 			}
 			if types {
-				let ty = scalar_type(kind);
+				let mut ty = scalar_type(kind);
+				// A link column is typed as the key of the table it links to.
+				if ty == SqlType::Unknown
+					&& let Some(target) = link_target(kind)
+				{
+					ty = key_type(txn, &database, target).await?;
+				}
 				if ty != SqlType::Unknown {
 					described.catalog.add_column_type(table, column, ty);
 				}
@@ -554,9 +812,24 @@ fn declared_columns(definition: &TableDefinition, fields: &[FieldDefinition]) ->
 		.collect()
 }
 
+/// The SQL type of the key of `table`, which is the type of its `id` field; a column that links
+/// to the table has that type. A table with no `id` of a single type has none.
+async fn key_type(
+	txn: &Transaction,
+	database: &crate::catalog::DatabaseDefinition,
+	table: &str,
+) -> Result<SqlType> {
+	let fields = txn
+		.all_tb_fields(database.namespace_id, database.database_id, &TableName::from(table), None)
+		.await?;
+	let id = fields.iter().find(|field| field.name.field_name() == Some("id"));
+	Ok(id.and_then(|field| field.field_kind.as_ref()).map_or(SqlType::Unknown, scalar_type))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::expr::{Idiom, Part};
 
 	fn record(table: &str) -> Kind {
 		Kind::Record(vec![TableName::from(table)])
@@ -615,6 +888,7 @@ mod tests {
 
 	#[test]
 	fn an_array_of_a_scalar_is_typed_and_other_collections_are_not() {
+		use surrealdb_sqlplan::SqlType;
 		let array = |kind: Kind| Kind::Array(Box::new(kind), None);
 		assert_eq!(scalar_type(&array(Kind::String)), SqlType::Array(&SqlType::Text));
 		assert_eq!(scalar_type(&array(Kind::Int)), SqlType::Array(&SqlType::Int8));
@@ -626,6 +900,196 @@ mod tests {
 		assert_eq!(scalar_type(&array(Kind::Any)), SqlType::Unknown);
 		assert_eq!(scalar_type(&array(record("dept"))), SqlType::Unknown);
 		assert_eq!(scalar_type(&Kind::Set(Box::new(Kind::String), None)), SqlType::Unknown);
+	}
+
+	fn array(kind: Kind) -> Kind {
+		Kind::Array(Box::new(kind), None)
+	}
+
+	fn column(kind: &Kind) -> (Option<String>, bool) {
+		column_type_name(Some(kind))
+	}
+
+	fn typed(name: &str, kind: Option<Kind>) -> FieldDefinition {
+		FieldDefinition {
+			name: Idiom::field(name),
+			field_kind: kind,
+			..Default::default()
+		}
+	}
+
+	fn nested(path: &[&str]) -> Idiom {
+		Idiom(path.iter().map(|name| Part::Field((*name).into())).collect())
+	}
+
+	#[test]
+	fn a_column_is_named_by_its_scalar_type_and_nullable_unless_it_excludes_absence() {
+		let named = |name: &str, nullable: bool| (Some(name.to_owned()), nullable);
+		assert_eq!(column(&Kind::Int), named("bigint", false));
+		assert_eq!(column(&Kind::String), named("text", false));
+		assert_eq!(column(&Kind::Bool), named("boolean", false));
+		assert_eq!(column(&Kind::Float), named("double precision", false));
+		assert_eq!(column(&Kind::Decimal), named("numeric", false));
+		assert_eq!(column(&Kind::Datetime), named("timestamp with time zone", false));
+		assert_eq!(column(&Kind::Duration), named("interval", false));
+		assert_eq!(column(&Kind::Uuid), named("uuid", false));
+		assert_eq!(column(&Kind::Bytes), named("bytea", false));
+		assert_eq!(column(&Kind::Object), named("jsonb", false));
+		assert_eq!(column(&array(Kind::String)), named("text[]", false));
+		assert_eq!(
+			column(&Kind::Either(vec![Kind::None, array(Kind::Int)])),
+			named("bigint[]", true)
+		);
+		assert_eq!(column(&Kind::Either(vec![Kind::String, Kind::Null])), named("text", true));
+		assert_eq!(column(&Kind::Any), (None, true));
+		assert_eq!(column(&Kind::Either(vec![Kind::Int, Kind::String])), (None, false));
+		assert_eq!(column(&record("dept")), (None, false));
+		assert_eq!(column_type_name(None), (None, true));
+	}
+
+	#[test]
+	fn the_columns_of_a_table_are_its_top_level_fields_with_id_first() {
+		let fields = [
+			typed("name", Some(Kind::String)),
+			FieldDefinition {
+				name: nested(&["address", "city"]),
+				field_kind: Some(Kind::String),
+				..Default::default()
+			},
+			FieldDefinition {
+				name: Idiom(vec![Part::Field("tags".into()), Part::All]),
+				field_kind: Some(Kind::String),
+				..Default::default()
+			},
+			typed("id", Some(Kind::Int)),
+			typed("tags", Some(Kind::Either(vec![Kind::None, array(Kind::String)]))),
+			FieldDefinition {
+				key_part: Some(0),
+				..typed("part", Some(Kind::Int))
+			},
+		];
+		let column = |name: &str, ordinal, ty: Option<&str>, nullable| ColumnInfo {
+			name: name.to_owned(),
+			ordinal,
+			data_type: ty.map(str::to_owned),
+			is_nullable: nullable,
+			sequence: None,
+		};
+		assert_eq!(
+			table_columns(&fields, &KeyTypes::new()),
+			vec![
+				column("id", 0, Some("bigint"), false),
+				column("name", 1, Some("text"), false),
+				column("tags", 2, Some("text[]"), true),
+			]
+		);
+		assert_eq!(table_columns(&[], &KeyTypes::new()), vec![column("id", 0, None, false)]);
+	}
+
+	#[test]
+	fn a_link_column_has_the_type_of_the_key_it_links_to() {
+		let fields = [
+			typed("author", Some(record("user"))),
+			typed("editor", Some(Kind::option(record("user")))),
+			typed("owner", Some(record("team"))),
+			typed("anyone", Some(Kind::Record(Vec::new()))),
+		];
+		let keys: KeyTypes = [("user".to_owned(), Some("bigint".to_owned()))].into();
+		let columns = table_columns(&fields, &keys);
+		let typed = |name: &str| {
+			let column = columns.iter().find(|c| c.name == name).unwrap();
+			(column.data_type.clone(), column.is_nullable)
+		};
+		assert_eq!(typed("author"), (Some("bigint".to_owned()), false));
+		assert_eq!(typed("editor"), (Some("bigint".to_owned()), true));
+		assert_eq!(typed("owner"), (None, false));
+		assert_eq!(typed("anyone"), (None, false));
+	}
+
+	fn index(name: &str, cols: &[&str], kind: crate::catalog::Index) -> IndexDefinition {
+		IndexDefinition {
+			index_id: crate::catalog::IndexId(1),
+			name: name.into(),
+			table_name: TableName::from("t"),
+			cols: cols.iter().map(|col| Idiom::field(*col)).collect(),
+			index: kind,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: 1,
+			comment: None,
+			nulls_not_distinct: false,
+		}
+	}
+
+	#[test]
+	fn only_ordered_and_unique_indexes_over_plain_fields_are_listed() {
+		use crate::catalog::Index;
+		let removing = IndexDefinition {
+			prepare_remove: true,
+			..index("gone", &["a"], Index::Idx)
+		};
+		let nested = IndexDefinition {
+			cols: vec![nested(&["a", "b"])],
+			..index("deep", &["a"], Index::Idx)
+		};
+		let listed = table_indexes(&[
+			index("t_a_idx", &["a"], Index::Idx),
+			index("t_a_b_uniq", &["a", "b"], Index::Uniq),
+			index("t_count", &[], Index::Count(None)),
+			removing,
+			nested,
+		]);
+		let info = |name: &str, columns: &[&str], unique| IndexInfo {
+			name: name.to_owned(),
+			columns: columns.iter().map(|c| (*c).to_owned()).collect(),
+			unique,
+		};
+		assert_eq!(
+			listed,
+			vec![info("t_a_idx", &["a"], false), info("t_a_b_uniq", &["a", "b"], true)]
+		);
+	}
+
+	#[test]
+	fn a_reference_field_that_links_to_one_table_is_a_foreign_key() {
+		let reference = |on_delete| {
+			Some(crate::expr::reference::Reference {
+				on_delete,
+				materialize: None,
+			})
+		};
+		let fields = [
+			FieldDefinition {
+				reference: reference(ReferenceDeleteStrategy::Cascade),
+				..typed("author", Some(record("user")))
+			},
+			FieldDefinition {
+				reference: reference(ReferenceDeleteStrategy::Reject),
+				..typed("editor", Some(Kind::Either(vec![Kind::None, record("user")])))
+			},
+			FieldDefinition {
+				reference: reference(ReferenceDeleteStrategy::Unset),
+				..typed("many", Some(Kind::Record(vec!["a".into(), "b".into()])))
+			},
+			typed("plain", Some(record("user"))),
+			FieldDefinition {
+				reference: reference(ReferenceDeleteStrategy::Unset),
+				..typed("owner", Some(record("org")))
+			},
+		];
+		let key = |column: &str, target: &str, on_delete| ForeignKeyInfo {
+			column: column.to_owned(),
+			target_table: target.to_owned(),
+			on_delete,
+		};
+		assert_eq!(
+			table_foreign_keys(&fields),
+			vec![
+				key("author", "user", ReferentialAction::Cascade),
+				key("editor", "user", ReferentialAction::NoAction),
+				key("owner", "org", ReferentialAction::SetNull),
+			]
+		);
 	}
 
 	#[cfg(feature = "postgres")]
@@ -657,6 +1121,24 @@ mod tests {
 	}
 
 	#[test]
+	fn the_recording_catalog_notes_when_a_table_listing_is_asked_for() {
+		let catalog = RecordingCatalog::default();
+		assert!(catalog.get_table(Some("information_schema"), "columns").is_some());
+		assert!(catalog.asked_table_listing());
+		let catalog = RecordingCatalog::default();
+		assert!(catalog.get_table(None, "pg_catalog.pg_class").is_some());
+		assert!(catalog.asked_table_listing());
+		let catalog = RecordingCatalog::default();
+		assert!(catalog.get_table(Some("pg_catalog"), "pg_type").is_some());
+		assert!(catalog.asked_table_listing());
+		let catalog = RecordingCatalog::default();
+		assert!(catalog.get_table(Some("pg_catalog"), "pg_namespace").is_some());
+		assert!(catalog.get_table(None, "emp").is_none());
+		assert!(!catalog.asked_table_listing());
+		assert_eq!(catalog.into_tables(), vec!["emp".to_owned()]);
+	}
+
+	#[test]
 	fn the_recording_catalog_notes_tables_but_not_system_ones() {
 		let catalog = RecordingCatalog::default();
 		assert!(catalog.get_table(None, "emp").is_none());
@@ -670,6 +1152,46 @@ mod tests {
 		assert_eq!(
 			catalog.into_tables(),
 			vec!["dept".to_owned(), "doc".to_owned(), "emp".to_owned()]
+		);
+	}
+
+	#[test]
+	fn a_column_whose_default_draws_from_a_sequence_lists_it() {
+		use crate::expr::FunctionCall;
+
+		let drawing = |sequence: &str| {
+			DefineDefault::Set(Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal("sequence::nextval".to_string()),
+				arguments: vec![Expr::Literal(Literal::String(sequence.into()))],
+			})))
+		};
+		let fields = vec![
+			FieldDefinition {
+				default: drawing("t_id_seq"),
+				..typed("id", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: drawing("t_n_seq"),
+				..typed("n", Some(Kind::Int))
+			},
+			FieldDefinition {
+				default: DefineDefault::Set(Expr::Literal(Literal::Integer(1))),
+				..typed("plain", Some(Kind::Int))
+			},
+			typed("other", Some(Kind::String)),
+		];
+		let sequences: Vec<_> = table_columns(&fields, &KeyTypes::new())
+			.into_iter()
+			.map(|c| (c.name, c.sequence))
+			.collect();
+		assert_eq!(
+			sequences,
+			[
+				("id".to_owned(), Some("t_id_seq".to_owned())),
+				("n".to_owned(), Some("t_n_seq".to_owned())),
+				("plain".to_owned(), None),
+				("other".to_owned(), None),
+			]
 		);
 	}
 }

@@ -440,6 +440,9 @@ pub fn translate_expr(
 		}
 		| Expr::Quantified {
 			..
+		}
+		| Expr::QuantifiedArray {
+			..
 		} => Err(TranslationError::Unsupported("Subquery expressions".to_string())),
 	}
 }

@@ -1,5 +1,9 @@
 //! The lowered shape of a record link column read through a SQL front end.
 
+// A catch-all arm in these tests reports the value a lowering produced instead of the one
+// expected; naming every other variant would add nothing to that report.
+#![allow(clippy::wildcard_enum_match_arm)]
+
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 

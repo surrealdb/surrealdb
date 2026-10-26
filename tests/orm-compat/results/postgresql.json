@@ -18,7 +18,7 @@
       "orm": "prisma",
       "name": "connect and driver round-trip",
       "status": "pass",
-      "ms": 24,
+      "ms": 29,
       "sql": [
         "SELECT 1 AS n"
       ]
@@ -27,14 +27,14 @@
       "orm": "prisma",
       "name": "ORM initialization",
       "status": "pass",
-      "ms": 36,
+      "ms": 32,
       "sql": []
     },
     {
       "orm": "prisma",
       "name": "insert returning",
       "status": "pass",
-      "ms": 35,
+      "ms": 33,
       "sql": [
         "INSERT INTO \"public\".\"CompatUser\" (\"id\",\"name\",\"age\",\"active\",\"nickname\") VALUES ($1,$2,$3,$4,$5) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\""
       ]
@@ -80,7 +80,7 @@
       "orm": "prisma",
       "name": "transaction commit",
       "status": "pass",
-      "ms": 3,
+      "ms": 2,
       "sql": [
         "BEGIN",
         "UPDATE \"public\".\"CompatUser\" SET \"age\" = $1 WHERE (\"public\".\"CompatUser\".\"id\" = $2 AND 1=1) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
@@ -144,7 +144,7 @@
       "orm": "prisma",
       "name": "generated ids",
       "status": "pass",
-      "ms": 3,
+      "ms": 2,
       "sql": [
         "CREATE TABLE IF NOT EXISTS \"CompatGenerated\" (id serial PRIMARY KEY,name text NOT NULL)",
         "INSERT INTO \"public\".\"CompatGenerated\" (\"name\") VALUES ($1) RETURNING \"public\".\"CompatGenerated\".\"id\", \"public\".\"CompatGenerated\".\"name\""
@@ -154,7 +154,7 @@
       "orm": "prisma",
       "name": "duplicate primary key",
       "status": "pass",
-      "ms": 13,
+      "ms": 11,
       "sql": [
         "INSERT INTO \"public\".\"CompatUser\" (\"id\",\"name\",\"age\",\"active\") VALUES ($1,$2,$3,$4) RETURNING \"public\".\"CompatUser\".\"id\", \"public\".\"CompatUser\".\"name\", \"public\".\"CompatUser\".\"age\", \"public\".\"CompatUser\".\"active\", \"public\".\"CompatUser\".\"nickname\"",
         "SELECT name FROM \"CompatUser\" WHERE id=1"
@@ -164,7 +164,7 @@
       "orm": "drizzle",
       "name": "connect and driver round-trip",
       "status": "pass",
-      "ms": 12,
+      "ms": 11,
       "sql": [
         "SELECT 1 AS n"
       ]
@@ -261,7 +261,7 @@
       "orm": "drizzle",
       "name": "aggregate/group",
       "status": "pass",
-      "ms": 1,
+      "ms": 0,
       "sql": [
         "select \"active\", count(*) from \"CompatUser\" group by \"CompatUser\".\"active\" order by \"CompatUser\".\"active\""
       ]
@@ -270,7 +270,7 @@
       "orm": "drizzle",
       "name": "upsert",
       "status": "pass",
-      "ms": 0,
+      "ms": 1,
       "sql": [
         "insert into \"CompatUser\" (\"id\", \"name\", \"age\", \"active\", \"nickname\") values ($1, $2, $3, $4, default) on conflict (\"id\") do update set \"age\" = $5",
         "SELECT age FROM \"CompatUser\" WHERE id = 1"
@@ -330,7 +330,7 @@
       "orm": "typeorm",
       "name": "insert returning",
       "status": "pass",
-      "ms": 4,
+      "ms": 3,
       "sql": [
         "INSERT INTO \"CompatUser\"(\"id\", \"name\", \"age\", \"active\", \"nickname\") VALUES ($1, $2, $3, $4, $5) RETURNING \"name\", \"id\", \"active\", \"age\""
       ]
@@ -366,7 +366,7 @@
       "orm": "typeorm",
       "name": "delete affected rows",
       "status": "pass",
-      "ms": 2,
+      "ms": 1,
       "sql": [
         "DELETE FROM \"CompatUser\" WHERE \"id\" = $1",
         "SELECT id FROM \"CompatUser\" WHERE id = 2"
@@ -400,7 +400,7 @@
       "orm": "typeorm",
       "name": "relations",
       "status": "pass",
-      "ms": 2,
+      "ms": 1,
       "sql": [
         "SELECT DISTINCT \"distinctAlias\".\"CompatUser_id\" AS \"ids_CompatUser_id\" FROM (SELECT \"CompatUser\".\"id\" AS \"CompatUser_id\", \"CompatUser\".\"name\" AS \"CompatUser_name\", \"CompatUser\".\"age\" AS \"CompatUser_age\", \"CompatUser\".\"active\" AS \"CompatUser_active\", \"CompatUser\".\"nickname\" AS \"CompatUser_nickname\", \"CompatUser__CompatUser_posts\".\"id\" AS \"CompatUser__CompatUser_posts_id\", \"CompatUser__CompatUser_posts\".\"title\" AS \"CompatUser__CompatUser_posts_title\", \"CompatUser__CompatUser_posts\".\"authorId\" AS \"CompatUser__CompatUser_posts_authorId\" FROM \"CompatUser\" \"CompatUser\" LEFT JOIN \"CompatPost\" \"CompatUser__CompatUser_posts\" ON \"CompatUser__CompatUser_posts\".\"authorId\"=\"CompatUser\".\"id\" WHERE ((\"CompatUser\".\"id\" = $1))) \"distinctAlias\" ORDER BY \"CompatUser_id\" ASC LIMIT 1",
         "SELECT \"CompatUser\".\"id\" AS \"CompatUser_id\", \"CompatUser\".\"name\" AS \"CompatUser_name\", \"CompatUser\".\"age\" AS \"CompatUser_age\", \"CompatUser\".\"active\" AS \"CompatUser_active\", \"CompatUser\".\"nickname\" AS \"CompatUser_nickname\", \"CompatUser__CompatUser_posts\".\"id\" AS \"CompatUser__CompatUser_posts_id\", \"CompatUser__CompatUser_posts\".\"title\" AS \"CompatUser__CompatUser_posts_title\", \"CompatUser__CompatUser_posts\".\"authorId\" AS \"CompatUser__CompatUser_posts_authorId\" FROM \"CompatUser\" \"CompatUser\" LEFT JOIN \"CompatPost\" \"CompatUser__CompatUser_posts\" ON \"CompatUser__CompatUser_posts\".\"authorId\"=\"CompatUser\".\"id\" WHERE ( ((\"CompatUser\".\"id\" = $1)) ) AND ( \"CompatUser\".\"id\" IN (1) )"
@@ -410,7 +410,7 @@
       "orm": "typeorm",
       "name": "aggregate/group",
       "status": "pass",
-      "ms": 0,
+      "ms": 1,
       "sql": [
         "SELECT \"u\".\"active\" AS \"active\", COUNT(*) AS \"n\" FROM \"CompatUser\" \"u\" GROUP BY \"u\".\"active\" ORDER BY \"u\".\"active\" ASC"
       ]
@@ -440,7 +440,7 @@
       "orm": "typeorm",
       "name": "generated ids",
       "status": "pass",
-      "ms": 1,
+      "ms": 0,
       "sql": [
         "CREATE TABLE IF NOT EXISTS \"CompatGenerated\" (id serial PRIMARY KEY,name text NOT NULL)",
         "INSERT INTO \"CompatGenerated\"(\"name\") VALUES ($1) RETURNING *"
@@ -460,7 +460,7 @@
       "orm": "typeorm",
       "name": "schema introspection",
       "status": "pass",
-      "ms": 17,
+      "ms": 19,
       "sql": [
         "SELECT * FROM current_schema()",
         "SELECT * FROM current_database()",
@@ -476,7 +476,7 @@
       "orm": "typeorm",
       "name": "schema synchronization",
       "status": "pass",
-      "ms": 8,
+      "ms": 7,
       "sql": [
         "START TRANSACTION",
         "SELECT * FROM current_schema()",

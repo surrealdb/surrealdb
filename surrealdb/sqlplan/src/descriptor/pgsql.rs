@@ -346,6 +346,9 @@ pub fn returning_name(target: &ResTarget) -> String {
 			}
 			| Expr::Quantified {
 				..
+			}
+			| Expr::QuantifiedArray {
+				..
 			} => "?column?".into(),
 		}
 	}

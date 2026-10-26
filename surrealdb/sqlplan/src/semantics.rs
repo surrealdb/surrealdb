@@ -96,6 +96,15 @@ fn fold_table_source(
 			query,
 			..
 		} => fold_select(query, policy),
+		BoundTableSource::Lateral {
+			targets,
+			..
+		} => {
+			for target in targets {
+				target.expr = fold_expr(&target.expr, policy)?;
+			}
+			Ok(())
+		}
 		BoundTableSource::Join {
 			left,
 			right,
@@ -307,9 +316,11 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 			target_type,
 		} => {
 			let folded_inner = fold_expr(inner, policy)?;
-			// A cast to `vector` is read where the cast is lowered, which knows the vector's text
-			// form; here a literal would pass through it unchanged.
+			// A cast to an array type is read when the expression is lowered, which knows the
+			// element type, and so is a cast to `vector`, whose text form the lowering knows;
+			// there is no literal to fold either to.
 			if let BoundExpr::Literal(lit) = &folded_inner
+				&& !target_type.ends_with("[]")
 				&& !target_type.starts_with("vector")
 			{
 				let result = eval_cast(lit, target_type, policy)?;

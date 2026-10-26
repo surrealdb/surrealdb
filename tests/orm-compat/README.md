@@ -89,10 +89,12 @@ SurrealDB. It verifies that successful migration commands actually created the e
 Introspection must find the fixture models. Commands have bounded timeouts; output and driver
 SQL errors go to `cli-logs`, and results go to `cli-results.json`.
 
-Connection URLs use literal namespace/database slashes, such as
+Connection URLs for node-postgres clients use a literal namespace/database slash, such as
 `postgresql://root@127.0.0.1:15432/orm/drizzle?options=-c%20dialect%3Dpgsql`.
 The pinned node-postgres connection parser preserves a percent-encoded slash literally, which
-would select a different database name. The Prisma runtime uses `@prisma/adapter-pg`; Drizzle uses
+would select a different database name. Prisma's schema engine keeps only the first path segment,
+so its URLs name the namespace as a startup option and the database alone in the path:
+`postgresql://root@127.0.0.1:15432/prisma_migrate?options=-c%20namespace%3Dorm%20-c%20dialect%3Dpgsql`. The Prisma runtime uses `@prisma/adapter-pg`; Drizzle uses
 its node-postgres adapter. The suites do not rewrite ORM SQL or bypass TypeORM initialization; driver wrappers only record
 SQL and errors.
 
