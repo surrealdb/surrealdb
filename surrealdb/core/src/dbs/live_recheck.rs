@@ -464,6 +464,10 @@ impl CommitAction for SettleRegistration {
 		}
 		Box::pin(async {})
 	}
+
+	fn scope(&self) -> surrealdb_datastore::close::ActionScope {
+		surrealdb_datastore::close::ActionScope::SavePoint
+	}
 }
 
 impl Drop for SettleRegistration {

@@ -1380,6 +1380,8 @@ pub(super) fn emit_stage(
 		// written for the first time in its iteration is written create-only, so a caller holding
 		// `create` alone cannot overwrite one it may not update.
 		WriteStageKind::StoreRecordData => {
+			// Every gate that skips a record before it writes is behind it.
+			em.emit(Instr::Write(WriteInstr::ReachedStore));
 			let unwritten = em.label()?;
 			for fact in
 				[StorageFact::Unmodified, StorageFact::TableDropped, StorageFact::TableLightweight]
@@ -3818,16 +3820,17 @@ mod tests {
 		assert_eq!(
 			code(WriteStageKind::StoreRecordData),
 			[
-				jump(StorageFact::Unmodified, true, 7),
-				jump(StorageFact::TableDropped, true, 7),
-				jump(StorageFact::TableLightweight, true, 7),
-				jump(StorageFact::IterationInitial, false, 6),
+				Instr::Write(WriteInstr::ReachedStore),
+				jump(StorageFact::Unmodified, true, 8),
+				jump(StorageFact::TableDropped, true, 8),
+				jump(StorageFact::TableLightweight, true, 8),
+				jump(StorageFact::IterationInitial, false, 7),
 				storage(StorageInstr::Store {
 					create: true,
 					cache: true,
 				}),
 				Instr::Jump {
-					target: 7,
+					target: 8,
 				},
 				storage(StorageInstr::Store {
 					create: false,

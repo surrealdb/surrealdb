@@ -4824,7 +4824,8 @@ async fn run_body(
 			let mut pc = start;
 			// An error about the shape of the data inside an `Instr::TryNone`
 			// region is caught by the innermost, and the body resumes where it
-			// names.
+			// names, unless the region ran a nested statement
+			// ([`runs_nested_statement`]).
 			loop {
 				let attempt: FlowResult<Stretch> = async {
 					// The instruction whose closures were linked last, and not
@@ -4837,9 +4838,14 @@ async fn run_body(
 						if super::fuel::charge(1) {
 							out_of_line(|| super::fuel::yield_point(ctx)).await?;
 						}
-						match interp::run_row(program, pipeline, reader, regs, state, pc)
-							.map_err(ControlFlow::Err)?
-						{
+						// A region the body opens records the count as it stands now.
+						state.nested_mark = ctx.nested_runs();
+						let step = interp::run_row(program, pipeline, reader, regs, state, pc)
+							.map_err(ControlFlow::Err)?;
+						if runs_nested_statement(program, pipeline, &step) {
+							ctx.note_nested_run();
+						}
+						match step {
 							Step::Yield {
 								resume,
 							} => {
@@ -6258,6 +6264,12 @@ async fn run_body(
 								let Instr::Block(instr) = &pipeline.code[at] else {
 									unreachable!("a block step at a block instruction")
 								};
+								// Entering a block evaluated in place did its work when the
+								// step was counted.
+								if let super::program::BlockInstr::Enter = instr {
+									pc = at + 1;
+									continue;
+								}
 								if let super::program::BlockInstr::Nested {
 									dst,
 									caught,
@@ -6682,7 +6694,10 @@ async fn run_body(
 							Some(Region::Try {
 								catch,
 								dst,
-							}) if state.tries.len() > base && error.is_ignorable() => {
+								nested,
+							}) if state.tries.len() > base
+								&& error.is_ignorable() && ctx.nested_runs() == nested =>
+							{
 								state.tries.pop();
 								if let Some(dst) = dst {
 									regs[dst as usize] = Scalar::None;
@@ -7457,6 +7472,167 @@ async fn finish_spilled_join(
 	Ok(())
 }
 
+/// Whether host step `step` of `pipeline` starts a statement nested in the
+/// body: a subquery, a block statement, the statement an `EXPLAIN ANALYZE`
+/// runs to measure ([`super::program::BlockInstr::RunAnalyzed`]), a block
+/// evaluated in place as it is entered ([`super::program::BlockInstr::Enter`]),
+/// a nested statement of an expression,
+/// a late-bound statement, a `fn::` call (by its definition, or late-bound),
+/// an embedded script or a module export, which run statements of their own,
+/// or a builtin that runs a statement given as text or a stored endpoint
+/// (`expr::method::is_writer_builtin`). A model call runs none.
+///
+/// The host counts each one on its context before it takes the step
+/// ([`ExecutionContext::note_nested_run`]), whether it then succeeds or fails.
+/// An `Instr::TryNone` region and an aggregate's finish read an error about
+/// the shape of the data as `NONE` only where the count did not move while the
+/// value was evaluated, so a value whose evaluation ran a nested statement
+/// fails the statement around it, as it does ungrouped, and what that
+/// statement wrote is undone with it.
+pub(super) fn runs_nested_statement(program: &Program, pipeline: &Pipeline, step: &Step) -> bool {
+	use super::program::BlockInstr;
+	match step {
+		Step::Subquery {
+			..
+		} => true,
+		// A `Dive` charges the re-entry of a closure a kernel invokes, which is no
+		// `fn::` call.
+		Step::Function {
+			at,
+		} => !matches!(pipeline.code.get(*at), Some(Instr::Dive { .. })),
+		Step::Block {
+			at,
+		} => matches!(
+			pipeline.code.get(*at),
+			Some(Instr::Block(
+				BlockInstr::RunEmbedded { .. }
+					| BlockInstr::RunServed { .. }
+					| BlockInstr::RunAnalyzed { .. }
+					| BlockInstr::Nested { .. }
+					| BlockInstr::Member { .. }
+					| BlockInstr::Enter
+			))
+		),
+		Step::External {
+			at,
+		} => match pipeline.code.get(*at) {
+			Some(
+				Instr::ExternalEnter {
+					external,
+					..
+				}
+				| Instr::ExternalCall {
+					external,
+					..
+				},
+			) => program.externals.get(*external as usize).is_some_and(|spec| {
+				matches!(
+					spec.callee,
+					super::program::ExternalCallee::Script { .. }
+						| super::program::ExternalCallee::Module { .. }
+						| super::program::ExternalCallee::Function { .. }
+				)
+			}),
+			_ => false,
+		},
+		Step::Call {
+			at,
+		} => match pipeline.code.get(*at) {
+			Some(Instr::Call {
+				call,
+				..
+			}) => program
+				.calls
+				.get(*call as usize)
+				.is_some_and(|spec| crate::expr::method::is_writer_builtin(&spec.name)),
+			_ => false,
+		},
+		Step::Next
+		| Step::Stop
+		| Step::FetchRow {
+			..
+		}
+		| Step::Fetch {
+			..
+		}
+		| Step::LandRow {
+			..
+		}
+		| Step::BindRow {
+			..
+		}
+		| Step::WriteProjection {
+			..
+		}
+		| Step::Omit {
+			..
+		}
+		| Step::Access {
+			..
+		}
+		| Step::Ir {
+			..
+		}
+		| Step::Each {
+			..
+		}
+		| Step::CallAllowed {
+			..
+		}
+		| Step::Method {
+			..
+		}
+		| Step::Lookup {
+			..
+		}
+		| Step::Signal {
+			..
+		}
+		| Step::Recurse {
+			..
+		}
+		| Step::Destructure {
+			..
+		}
+		| Step::JudgeCopy {
+			..
+		}
+		| Step::Closure {
+			..
+		}
+		| Step::NeedUnit {
+			..
+		}
+		| Step::Param {
+			..
+		}
+		| Step::Store {
+			..
+		}
+		| Step::Write {
+			..
+		}
+		| Step::IndexFn {
+			..
+		}
+		| Step::Matches {
+			..
+		}
+		| Step::Degree {
+			..
+		}
+		| Step::KnnQuery {
+			..
+		}
+		| Step::Measure {
+			..
+		}
+		| Step::Yield {
+			..
+		} => false,
+	}
+}
+
 /// The rows aggregate `aggregate`'s groups finish into, as the aggregate
 /// operator finishes them: `GROUP ALL`'s one group whether or not a row
 /// reached it, `GROUP BY`'s groups in group-key order.
@@ -7472,6 +7648,7 @@ pub(super) async fn finish_groups(
 		sink,
 		ctx,
 		state: None,
+		ran_nested: false,
 	};
 	let Some(groups) = groups else {
 		return Ok(Vec::new());
@@ -7501,6 +7678,9 @@ struct Finish<'a> {
 	sink: &'a super::program::AggregateSink,
 	ctx: &'a ExecutionContext,
 	state: Option<interp::PooledState>,
+	/// Whether the last [`Self::run`] started a nested statement
+	/// ([`ExecutionContext::nested_runs`]).
+	ran_nested: bool,
 }
 
 impl Finish<'_> {
@@ -7514,11 +7694,22 @@ impl Finish<'_> {
 		state.rowless = row.is_none();
 		let code = &self.program.host_code[pipeline as usize];
 		let (program, ctx) = (self.program, self.ctx);
-		out_of_line(|| run_value_row(program, code, row.unwrap_or(Value::None), state, ctx))
-			.await?;
+		let nested = ctx.nested_runs();
+		let ran =
+			out_of_line(|| run_value_row(program, code, row.unwrap_or(Value::None), state, ctx))
+				.await;
+		self.ran_nested = ctx.nested_runs() != nested;
+		ran?;
 		state.take_output().pop().ok_or_else(|| {
 			ControlFlow::Err(anyhow::anyhow!("a host pipeline that answered nothing"))
 		})
+	}
+
+	/// Whether `error`, which the last [`Self::run`] raised, is one an
+	/// aggregate reads as `NONE`: an error about the shape of the data, from a
+	/// run that started no nested statement ([`runs_nested_statement`]).
+	fn reads_as_none(&self, error: &ControlFlow) -> bool {
+		error.is_ignorable() && !self.ran_nested
 	}
 
 	/// The document of a group's keys, each under its placeholder name.
@@ -7543,7 +7734,7 @@ impl Finish<'_> {
 			}
 			match self.run(pipeline, None).await {
 				Ok(value) => *group.first(field) = Some(value),
-				Err(error) if error.is_ignorable() => {
+				Err(error) if self.reads_as_none(&error) => {
 					tracing::debug!(error = %error, "Fallback expression evaluation failed (ignorable)");
 				}
 				Err(error) => return Err(error),
@@ -7572,7 +7763,7 @@ impl Finish<'_> {
 				for &pipeline in &call.extra_args {
 					args.push(match self.run(pipeline, Some(document.clone())).await {
 						Ok(value) => value,
-						Err(error) if error.is_ignorable() => Value::None,
+						Err(error) if self.reads_as_none(&error) => Value::None,
 						Err(error) => return Err(error),
 					});
 				}
@@ -7652,7 +7843,7 @@ impl Finish<'_> {
 		}
 		match self.run(post, Some(Value::Object(document))).await {
 			Ok(value) => Ok(value),
-			Err(error) if error.is_ignorable() => {
+			Err(error) if self.reads_as_none(&error) => {
 				tracing::debug!(error = %error, "Post-expression evaluation failed (ignorable), using Null");
 				Ok(Value::Null)
 			}

@@ -210,6 +210,7 @@ fn block(instr: &BlockInstr) -> Class {
 		| BlockInstr::CoerceKind {
 			..
 		}
+		| BlockInstr::Enter
 		| BlockInstr::CheckDepth {
 			..
 		}
@@ -624,6 +625,9 @@ fn write(instr: &WriteInstr) -> Class {
 		| WriteInstr::SavepointPush
 		| WriteInstr::SavepointRelease
 		| WriteInstr::SavepointRollback
+		| WriteInstr::SavepointEndSkipped
+		| WriteInstr::ReachedStore
+		| WriteInstr::Rethrow
 		| WriteInstr::TryBegin {
 			..
 		}

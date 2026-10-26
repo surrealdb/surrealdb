@@ -404,15 +404,20 @@ impl Lowerer<'_> {
 	/// A block whose region holds only expressions, ending in the yield of its value, in a raise
 	/// or in a `RETURN`, which the block takes as its value, binds no name and signals nothing
 	/// past itself, so it lowers in place, where it stands
-	/// ([`Lowerer::eager_region_value`]). Any other block runs as the unit its region is, in the
-	/// frame being lowered: a `LET` binds in it, and a `RETURN` it signals is its own value in any
-	/// frame. A `BREAK` or `CONTINUE` passes to the loop around it, and is an error where the code
-	/// being lowered says one is. Its expressions are evaluated against the row of the statement
-	/// that holds it.
+	/// ([`Lowerer::eager_region_value`]), after a [`BlockInstr::Enter`] that counts it as a
+	/// nested statement when it is entered: a failure of the block, or of the expression around
+	/// it, is one an aggregate does not read as `NONE`, as for a block run as a unit. It is not
+	/// folded, since a folded raise would no longer be the block's. Any other
+	/// block runs as the unit its region is, in the frame being lowered: a `LET` binds in it, and
+	/// a `RETURN` it signals is its own value in any frame. A `BREAK` or `CONTINUE` passes to the
+	/// loop around it, and is an error where the code being lowered says one is. Its expressions
+	/// are evaluated against the row of the statement that holds it.
 	pub(super) fn value_block(&mut self, data: &OpData) -> Result<Operand, IrError> {
 		exactly::<0>(data)?;
 		let region = region_at(data, 0, 1)?;
 		if holds_only_values(self.ir, region)? {
+			self.refuse_in_fold("ir_lower::fold: a block evaluated in place")?;
+			self.emit(Instr::Block(BlockInstr::Enter));
 			return self.eager_region_value(region);
 		}
 		self.refuse_in_fold("ir_lower::fold: phys.block")?;

@@ -397,6 +397,10 @@ impl CommitAction for StartStagedRebuild {
 			}
 		})
 	}
+
+	fn scope(&self) -> surrealdb_datastore::close::ActionScope {
+		surrealdb_datastore::close::ActionScope::SavePoint
+	}
 }
 
 /// Leaves, for one node, the build of a committed `REBUILD INDEX` unstarted, as a node that dies

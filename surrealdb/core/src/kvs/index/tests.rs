@@ -5967,6 +5967,50 @@ async fn a_cached_unique_admission_refuses_a_key_once_the_build_fails() -> Resul
 	Ok(())
 }
 
+/// A `DEFINE INDEX` whose save point is rolled back inside a transaction that
+/// then commits — an event that defines an index and throws, inside a row whose
+/// error a caller catches — still has its separately committed build state
+/// cleaned up: the save point rollback runs the cleanup, rather than leaving it
+/// for a transaction rollback that never comes.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn save_point_rollback_cleans_uncommitted_index_build_artifacts() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			",
+	)
+	.await?;
+	let (ns, db, table) = get_table_ids(&ds, "user").await?;
+	let ix = IndexId(43);
+	seed_uncommitted_index_build_artifacts(&ds, ns, db, &table, ix).await?;
+
+	let user_tx = ds.transaction(TransactionType::Write).await?;
+	let ctx = ds.setup_ctx()?;
+	let builder = ctx.get_index_builder().expect("index builder should exist").clone();
+	user_tx.new_save_point().await?;
+	user_tx
+		.on_rollback(CleanUncommittedBuild::boxed(
+			builder.clone(),
+			builder.transaction_factory(),
+			user_tx.sequences(),
+			ns,
+			db,
+			table.clone(),
+			ix,
+		))
+		.await;
+	user_tx.rollback_to_save_point().await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix).await?;
+	user_tx.commit().await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix).await?;
+	Ok(())
+}
+
 #[cfg(feature = "kv-mem")]
 async fn seed_build_state(
 	ds: &Datastore,
@@ -10264,6 +10308,61 @@ async fn cancelled_format_rebuild_leaves_its_layout_under_the_old_definition() -
 	})
 	.await?;
 	assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+	Ok(())
+}
+
+/// A script that catches the failure of a blocking `REBUILD INDEX` that would move a legacy
+/// index onto the current layout takes the rebuild back: the transaction still commits, every
+/// statement keeps its own result, and the index keeps the format and layout it had. The
+/// rebuild's wait for its staged generation, which the owner awaits after the commit, goes with
+/// the savepoint the failed call ran behind, so the commit does not start a generation that no
+/// longer exists.
+#[cfg(all(feature = "kv-mem", feature = "scripting"))]
+#[tokio::test(flavor = "multi_thread")]
+async fn caught_format_rebuild_leaves_no_wait_for_its_staged_generation() -> Result<()> {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_capabilities(crate::dbs::Capabilities::all())
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	seed_legacy_fulltext_index(&ds, &session, 3).await?;
+	let results = ds
+		.execute(
+			r#"BEGIN;
+			RETURN function() {
+				try {
+					await surrealdb.query(`{ REBUILD INDEX ft ON t; THROW 'boom'; }`);
+				} catch (e) {
+					return 'caught';
+				}
+				return 'not caught';
+			};
+			CREATE t:4 SET content = 'bravo 4';
+			COMMIT;"#,
+			&session,
+			None,
+		)
+		.await?;
+	let outcomes: Vec<String> = results
+		.into_iter()
+		.map(|result| match result.result {
+			Ok(value) => surrealdb_types::ToSql::to_sql(&value),
+			Err(err) => format!("error: {err}"),
+		})
+		.collect();
+	assert_eq!(
+		outcomes,
+		["NONE", "'caught'", "[{ content: 'bravo 4', id: t:4 }]", "NONE"],
+		"the statements keep their own results"
+	);
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+	assert_eq!(ix.format_version, 0, "the rolled-back rebuild leaves the legacy definition");
+	let wrong = engines_answering_otherwise(&ds, BRAVO, &bravo_carriers(4)).await;
+	assert!(wrong.is_empty(), "the legacy index still answers: {wrong:?}");
 	Ok(())
 }
 

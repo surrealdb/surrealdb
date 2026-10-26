@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use anyhow::Result;
 use js::prelude::*;
@@ -34,6 +34,8 @@ pub unsafe fn create_query_data<'a>(
 			opt,
 			doc,
 			pending: RefCell::new(None),
+			started: Cell::new(0),
+			writing: tokio::sync::RwLock::new(()),
 		})
 		.expect("userdata shouldn't be in use");
 

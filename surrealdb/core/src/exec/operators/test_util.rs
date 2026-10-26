@@ -58,6 +58,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		guard_verdicts: Default::default(),
 		writing: false,
 		caller_view_checked: false,
+		nested_runs: Default::default(),
 		session_effects: None,
 	})
 }
@@ -486,6 +487,7 @@ impl TestDb {
 			guard_verdicts: Default::default(),
 			writing: false,
 			caller_view_checked: false,
+			nested_runs: Default::default(),
 			session_effects: None,
 		};
 

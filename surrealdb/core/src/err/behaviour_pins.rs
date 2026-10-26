@@ -273,9 +273,10 @@ fn control_flow_signals_are_never_ignorable() {
 // ---------------------------------------------------------------------------
 // Schema-related failures during UPSERT
 //
-// `doc::Error::is_schema_related` is read by `doc::upsert`, which retries the
-// document as an update instead of rolling back to the save point when a
-// create fails for a schema reason. The membership is the whole contract.
+// `doc::Error::is_schema_related` is read by `classify_create_failure`, which
+// retries an `UPSERT`'s record as an update instead of rolling back to the
+// save point when a create fails for a schema reason. The membership is the
+// whole contract.
 //
 // Gap: the retry only differs from the neighbouring arm in its transaction
 // bookkeeping, which a unit test cannot observe without a datastore and a

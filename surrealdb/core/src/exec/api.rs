@@ -34,8 +34,16 @@
 //! answers with something that is not a response, answers with the error's
 //! response instead — the first stage of the chain masking an internal error,
 //! which a caller must not see, as the endpoint's outermost answer. A handler
-//! that fails answers with the error's response. A stage fails, rather than
-//! answering, only when it cannot read the request it was handed.
+//! that fails, or answers with something that is not a response, answers with
+//! the error's response. A stage fails, rather than answering, only when it
+//! cannot read the request it was handed, or cannot close the savepoint below.
+//!
+//! The transaction the chain runs in commits whatever response it answers, so
+//! a stage that answers with an error's response leaves none of what it wrote
+//! behind: a middleware's function, with the rest of the chain it called, and
+//! a handler that may write each run behind a savepoint of their own, rolled
+//! back when the stage answers with an error's response and released when it
+//! answers with its own ([`crate::exec::catch_scope`]).
 
 use std::sync::Arc;
 
@@ -52,6 +60,7 @@ use crate::catalog::{ApiDefinition, ApiSecurity, MiddlewareDefinition, Permissio
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::exe::FlowResultExt as _;
+use crate::exec::catch_scope::CatchScope;
 use crate::exec::{EvalContext, ExecutionContext};
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::fnc::args::{FromArgs, FromPublic};
@@ -327,7 +336,12 @@ async fn run_middleware(
 
 	// Each middleware runs isolated from the stage that called it.
 	let isolated = exec.with_new_ctx(Context::new_isolated(exec.ctx()).freeze());
-	let called = call_middleware(&function, args, &isolated).await.catch_return();
+	let scope = CatchScope::open(exec.try_txn().as_ref(), true).await.map_err(ControlFlow::Err)?;
+	let called = call_middleware(&function, args, &isolated)
+		.await
+		.catch_return()
+		.and_then(ApiResponse::try_from);
+	scope.end(called.is_err()).await.map_err(ControlFlow::Err)?;
 
 	let is_initial = stage == 0;
 	let failed = |e: anyhow::Error| {
@@ -343,7 +357,7 @@ async fn run_middleware(
 			ApiResponse::from_error(e, chain.request_id.clone())
 		}
 	};
-	let mut res = match called.and_then(ApiResponse::try_from) {
+	let mut res = match called {
 		Ok(mut res) => {
 			res.request_id.clone_from(&chain.request_id);
 			res
@@ -438,12 +452,12 @@ async fn run_handler(chain: &ApiChain, req: Value, exec: &ExecutionContext) -> F
 	let mut isolated = Context::new_isolated(exec.ctx());
 	isolated.add_value("request", Arc::new(req.into()));
 	let exec = exec.with_new_ctx(isolated.freeze());
-	let evaluated = evaluate_handler(&chain.handler, &exec).await;
-	let mut res = match evaluated {
-		Ok(value) => ApiResponse::try_from(value)
-			.unwrap_or_else(|e| ApiResponse::from_error(e, chain.request_id.clone())),
-		Err(e) => ApiResponse::from_error(e, chain.request_id.clone()),
-	};
+	let scope = CatchScope::open(exec.try_txn().as_ref(), !chain.handler.read_only())
+		.await
+		.map_err(ControlFlow::Err)?;
+	let answered = evaluate_handler(&chain.handler, &exec).await.and_then(ApiResponse::try_from);
+	scope.end(answered.is_err()).await.map_err(ControlFlow::Err)?;
+	let mut res = answered.unwrap_or_else(|e| ApiResponse::from_error(e, chain.request_id.clone()));
 	res.request_id.clone_from(&chain.request_id);
 	res.ensure_request_id_header();
 	Ok(Value::from(res))

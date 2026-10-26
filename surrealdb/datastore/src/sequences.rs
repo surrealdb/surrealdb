@@ -51,7 +51,7 @@ use crate::key::schema::{
 	SeqStateKey, SeqStatePrefix, SequenceKey, TbIdBatchKey, TbIdBatchPrefix, TbIdStateKey,
 };
 use crate::out_of_line::OutOfLine;
-use crate::tx::ProvisionalSequence;
+use crate::tx::{ProvisionalDraw, ProvisionalSequence};
 use crate::values::ids::DocId;
 use crate::{Transaction, TransactionType};
 
@@ -1160,7 +1160,9 @@ impl Sequences {
 		// because it goes when this transaction goes.
 		if let Some(slot) = tx.provisional_sequence(ns, db, sq).await {
 			let domain = SequenceDomain::new_user(ns, db, sq);
-			return self.next_provisional_val(ctx, tx, &slot, &domain, &seq_def).await;
+			let value = self.next_provisional_val(ctx, tx, &slot, &domain, &seq_def).await?;
+			tx.note_provisional_draw(ns, db, sq, value);
+			return Ok(value);
 		}
 		let domain = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(
@@ -1207,6 +1209,78 @@ impl Sequences {
 			.next(self, ctx, domain, seq_def.batch, Some(tx), None)
 			.await
 			.map_err(SequenceError::into_public)
+	}
+
+	/// Moves each sequence this transaction defined past the value `draws`
+	/// records it issuing.
+	///
+	/// A save point rollback restores those sequences as they stood when it
+	/// opened, so a value drawn inside the save point would be issued again.
+	/// Where the caller keeps that value past the rollback - an UPSERT whose
+	/// create attempt drew a record id and then updates the record it names -
+	/// replaying the draws stops the sequence issuing it twice. Only the
+	/// allocator advances: no expression is evaluated again, and a sequence
+	/// committed earlier, which a rollback never restores, is not drawn from.
+	/// A sequence whose definition the rollback undid is skipped. The allocator
+	/// jumps to the recorded value - claiming, at most, the one window that
+	/// holds it - and draws it, so the cost does not grow with the distance: a
+	/// DEFAULT can redefine the sequence with a far `START` before drawing. The values jumped over
+	/// are not issued, as a rollback leaves a gap in a committed sequence.
+	pub async fn replay_provisional_draws(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		tx: &Transaction,
+		draws: &[ProvisionalDraw],
+	) -> Result<()> {
+		for draw in draws {
+			let Some(slot) = tx.provisional_sequence(draw.ns, draw.db, &draw.sq).await else {
+				continue;
+			};
+			// A slot can outlive its definition (a `REMOVE SEQUENCE` leaves it),
+			// so the definition is read rather than expected.
+			let key = SequenceKey {
+				ns: draw.ns,
+				db: draw.db,
+				sq: Cow::Borrowed(&draw.sq),
+			};
+			let Some(seq_def) = tx.get_key(&key, None).await? else {
+				continue;
+			};
+			let domain = SequenceDomain::new_user(draw.ns, draw.db, &draw.sq);
+			let mut slot = slot.lock().await;
+			let allocator = match &mut *slot {
+				Some(allocator) => allocator,
+				none => none.insert(
+					Sequence::load_provisional(ctx, self, &domain, &seq_def, tx)
+						.await
+						.map_err(SequenceError::into_public)?,
+				),
+			};
+			// Past the current window, claim the window that drawing one value
+			// at a time would have reached, so its bounds are the ones the
+			// sequence's batches give; then draw the value inside it.
+			let base = allocator.to.max(allocator.st.next);
+			if draw.value >= base {
+				// In i128: the distance can exceed i64 for a sequence spanning
+				// zero. The window start lies between `base` and the value, so
+				// it fits back in i64.
+				let batch = i128::from(seq_def.batch.max(1));
+				let offset = (i128::from(draw.value) - i128::from(base)) / batch * batch;
+				allocator.st.next = i64::try_from(i128::from(base) + offset).unwrap_or(draw.value);
+				allocator
+					.next(self, ctx, &domain, seq_def.batch, Some(tx), None)
+					.await
+					.map_err(SequenceError::into_public)?;
+			}
+			if allocator.st.next <= draw.value {
+				allocator.st.next = draw.value;
+				allocator
+					.next(self, ctx, &domain, seq_def.batch, Some(tx), None)
+					.await
+					.map_err(SequenceError::into_public)?;
+			}
+		}
+		Ok(())
 	}
 
 	/// Generates the next document ID for a table's shared doc-ID space.
@@ -1672,7 +1746,7 @@ impl Sequence {
 		// transaction that has not committed, so no one else can see it, let
 		// alone reset it. A save point rollback inside that transaction restores
 		// the allocator along with the rows it wrote, so the two stay in step —
-		// see `Transaction::provisional_save_points`.
+		// see `SavePointMarks::provisional` in `tx.rs`.
 		let own = AllocatorTx::open(caller, &self.tf, TransactionType::Write, sqs).await?;
 		let tx = own.tx();
 

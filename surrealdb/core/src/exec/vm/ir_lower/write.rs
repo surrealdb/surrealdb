@@ -35,7 +35,7 @@ use crate::exec::AccessMode;
 use crate::exec::ir::error::IrError;
 use crate::exec::planner::placement::{Combine, MorselPlan, Parallel};
 use crate::exec::vm::ir_instr::{IrForm, IrInstr, WriteCutSpec, WriteResumeSpec};
-use crate::exec::vm::program::{Instr, Label, Operand, Pipeline, Program, ROW, Reg};
+use crate::exec::vm::program::{BlockInstr, Instr, Label, Operand, Pipeline, Program, ROW, Reg};
 
 /// The labels and live registers of one write body's cut.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,6 +235,8 @@ fn touched(instr: &Instr, out: &mut Vec<Touch>) -> bool {
 			..
 		}
 		| Instr::TryEnd
+		// Entering a block evaluated in place reads and writes no register.
+		| Instr::Block(BlockInstr::Enter)
 		| Instr::EndRow
 		| Instr::StopPipeline => {}
 		Instr::JumpIfCompare {

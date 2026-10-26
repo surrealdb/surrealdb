@@ -11,7 +11,7 @@ use anyhow::{Result, ensure};
 use chrono::Utc;
 use common::time::{sleep, timeout};
 use futures::channel::oneshot::{Sender, channel};
-use surrealdb_datastore::close::{CommitAction, RollbackAction};
+use surrealdb_datastore::close::{ActionScope, CommitAction, RollbackAction};
 use tokio::sync::{Notify, OnceCell, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -2355,6 +2355,7 @@ impl Building {
 			guard_verdicts: Default::default(),
 			writing: false,
 			caller_view_checked: false,
+			nested_runs: Default::default(),
 			session_effects: None,
 		};
 		Ok(ExecutionContext::Database(DatabaseContext {
@@ -5715,11 +5716,11 @@ impl CommitAction for ReleaseBuildOwnership {
 		Box::pin((*self).release(None))
 	}
 
-	/// The release is owed when the transaction ends, however it ends. It does not
-	/// depend on any write inside a save point scope: a scope rollback must leave
-	/// this half to run at the commit.
-	fn answers_to_scope(&self) -> bool {
-		false
+	/// Ownership is released however the transaction ends: this is queued as
+	/// a rollback action too, and a save point rollback inside a committing
+	/// transaction must not leave it to neither.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
 	}
 }
 
@@ -5757,6 +5758,12 @@ impl RollbackAction for ReleaseBuildOwnership {
 			(*self).release(deadline).await;
 			Ok(())
 		})
+	}
+
+	/// The commit-side twin is transaction-scoped too, so ownership is released
+	/// exactly once, when the transaction ends.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
 	}
 }
 
@@ -5837,6 +5844,12 @@ impl CommitAction for AbortLocalBuild {
 		Box::pin(async move {
 			self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await;
 		})
+	}
+
+	/// Follows the removal or redefinition that queued it: a rollback that
+	/// undoes that write leaves the index's build wanted.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
 	}
 }
 
@@ -6008,6 +6021,13 @@ impl RollbackAction for CleanUncommittedBuild {
 				}
 			}
 		})
+	}
+
+	/// Compensates for the `DEFINE INDEX` that queued it: a save point rollback
+	/// that undoes the definition cleans up the build there and then, since a
+	/// transaction that goes on to commit would discard this unrun.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
 	}
 }
 

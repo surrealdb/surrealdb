@@ -508,11 +508,14 @@ pub(super) async fn batch_state(
 /// worker never fills or serves from the coordinator's buffer, so what the coordinator buffered
 /// is not read from another thread.
 ///
-/// The clone shares the statement's context as it is; that context must hold no read buffer.
-/// Otherwise a worker would read from the coordinator's buffer, which it never may.
+/// The clone shares the statement's context as it is, but for its count of nested statements,
+/// which is the worker's own: an aggregate's catch in one worker must not see the nested
+/// statements another runs beside it ([`ExecutionContext::with_own_nested_runs`]). That context
+/// must hold no read buffer. Otherwise a worker would read from the coordinator's buffer, which
+/// it never may.
 #[cfg(not(target_family = "wasm"))]
 pub(super) fn worker_ctx(ctx: &ExecutionContext) -> ExecutionContext {
-	ctx.clone()
+	ctx.with_own_nested_runs()
 }
 
 /// Run a batch on a worker holding `place` and `grant`, the lease's cover for its copy of the

@@ -10,6 +10,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::dbs::capabilities::{Capabilities, Targets};
 use crate::doc::CursorDoc;
+use crate::exec::catch_scope::CatchScope;
 use crate::expr::function::Function;
 use crate::expr::{Expr, FunctionCall, Model};
 use crate::extension::capabilities::EffectiveCapabilities;
@@ -18,7 +19,7 @@ use crate::http::HttpClient;
 use crate::surrealism::runner::RunnerCapabilities;
 use crate::syn;
 use crate::types::{PublicObject, PublicValue};
-use crate::val::convert_value_to_public_value;
+use crate::val::{Value, convert_value_to_public_value};
 
 pub(crate) struct Host {
 	pub(crate) ctx: FrozenContext,
@@ -56,10 +57,13 @@ pub(crate) struct Host {
 
 /// A host call's place in the ordering [`Host::writes`] imposes.
 enum CallOrder<'a> {
-	/// A statement that cannot write. Overlaps other readers.
+	/// A statement that cannot write, run where it opens no savepoint.
+	/// Overlaps other readers.
 	Reading(#[allow(dead_code)] tokio::sync::RwLockReadGuard<'a, ()>),
-	/// A statement that may write, or a call whose body this crate cannot see.
-	/// Runs alone.
+	/// A statement that may write, or a call whose body this crate cannot see,
+	/// whatever the module was lent and whatever its transaction can take; or a
+	/// statement that cannot write, of a writeable module, in a transaction that
+	/// defined a sequence. Runs alone.
 	Writing(#[allow(dead_code)] tokio::sync::RwLockWriteGuard<'a, ()>),
 }
 
@@ -114,29 +118,86 @@ impl Host {
 	/// What has to be serialised is narrower than "changes something": it is
 	/// **staging a document write on the caller's transaction**, because that is
 	/// what takes a savepoint, and savepoints are a stack with no handle. The
-	/// only two calls to `new_save_point` are in `doc::insert` and
-	/// `doc::upsert`, and both are reachable only through a data-modifying
+	/// savepoints are the write path's per-record attempts, the creating
+	/// attempt of an `INSERT` or `UPSERT` and the update it retries as
+	/// (`exec::operators::write::plan` and the VM's lowering of it), and the
+	/// scopes callers that catch a failure open around the unit they catch
+	/// ([`crate::exec::catch_scope`]), this host's writing calls among them
+	/// ([`Self::caught`]). All are reachable only through a data-modifying
 	/// statement form or through a builtin that evaluates a nested one
 	/// (`expr::method::is_writer_builtin`). `Expr::read_only` reports both as
 	/// writable, so both take the exclusive lock.
 	///
 	/// Builtins that change state *without* a statement — `sequence::nextval`
 	/// advancing a counter, `file::put` writing to a bucket, a writing
-	/// `http::*` verb — are reported read-only here and share the lock. That is
-	/// correct for this ordering, because they take no savepoint: a sequence
-	/// allocates through the transaction without one, and the other two write
-	/// outside it entirely.
+	/// `http::*` verb — are reported read-only. The last two write outside the
+	/// transaction entirely, so they share the lock. A sequence draw does too,
+	/// unless the transaction defined a sequence: a draw from one is
+	/// provisional, and a savepoint rollback takes it back, so in such a
+	/// transaction a writeable module's every call runs behind a savepoint of
+	/// its own ([`crate::exec::catch_scope::CatchScope::needed`]) and holds the
+	/// exclusive lock, and no call's draw is taken back by another call's
+	/// rollback.
 	///
 	/// So: **a builtin that can stage a document write must be in
-	/// `is_writer_builtin`.** One added later that reaches `doc::upsert`
+	/// `is_writer_builtin`.** One added later that reaches the write path
 	/// without going through a statement would silently take the shared lock,
 	/// and nothing here or in the tests would notice.
+	///
+	/// A statement that may write takes the exclusive lock whether or not it
+	/// opens a savepoint of its own ([`Self::scoped`]): whether the module's
+	/// read-only frame or its transaction refuses the write is the datastore's
+	/// verdict once the call runs, so the order stays the statement's own. Only
+	/// a statement that cannot write is ordered by whether it opens one.
 	async fn order(&self, read_only: bool) -> CallOrder<'_> {
-		if read_only {
-			CallOrder::Reading(self.writes.read().await)
-		} else {
-			CallOrder::Writing(self.writes.write().await)
+		if read_only && !self.scoped(true) {
+			let reading = self.writes.read().await;
+			// A call holding the exclusive place may have defined a sequence
+			// while this one waited for its share.
+			if !self.scoped(true) {
+				return CallOrder::Reading(reading);
+			}
 		}
+		CallOrder::Writing(self.writes.write().await)
+	}
+
+	/// Whether a call whose statement is `read_only` or not runs behind a
+	/// savepoint of its own ([`Self::caught`]). A module lent a read-only frame
+	/// cannot write, nor draw from a sequence, so its calls open none: two
+	/// invocations of it may share the transaction.
+	fn scoped(&self, read_only: bool) -> bool {
+		self.opt.no_write.is_none() && CatchScope::needed(self.ctx.try_tx(), !read_only)
+	}
+
+	/// Evaluate `expr`, a call's statement, in `ctx`, in the place `order`
+	/// took for it ([`Self::order`]).
+	///
+	/// The guest is handed a failed call's error and may go on, and the
+	/// transaction it was lent commits whatever the guest made of it, so a call
+	/// that may write, or draw from a sequence the transaction defined, runs
+	/// behind a savepoint of its own, and one that fails leaves none of its
+	/// writes behind ([`crate::exec::catch_scope`]). Only a call holding the
+	/// exclusive place opens one, which keeps the savepoint the only one opened
+	/// on the transaction until it is closed.
+	async fn caught(
+		&self,
+		order: &CallOrder<'_>,
+		read_only: bool,
+		ctx: &FrozenContext,
+		expr: &Expr,
+	) -> Result<Value> {
+		let scope = match order {
+			CallOrder::Writing(_) if self.opt.no_write.is_none() => {
+				Some(CatchScope::open(self.ctx.try_tx(), !read_only).await?)
+			}
+			CallOrder::Writing(_) | CallOrder::Reading(_) => None,
+		};
+		let exec = crate::exec::entry::frame(ctx, &self.opt, self.doc.as_ref()).await;
+		let answered = crate::exec::entry::scalar(&exec, expr).await;
+		if let Some(scope) = scope {
+			scope.end(answered.is_err()).await?;
+		}
+		answered
 	}
 
 	/// Refuse a call whose caller has already given up.
@@ -262,18 +323,16 @@ impl InvocationContext for Host {
 		.map_err(|e| HostCallError::InvalidRequest(e.to_string()))?;
 		// Held for the rest of the call: a statement that may write runs alone
 		// on the caller's transaction, a read shares it with other reads.
-		let _order = self.order(expr.read_only()).await;
+		let read_only = expr.read_only();
+		let order = self.order(read_only).await;
 		self.check_caller_still_waiting()?;
 		// Everything past parsing is the datastore's verdict, including a write
 		// refused because this function was lent a read-only transaction.
 		// Under a driver of its own: the guest may await several calls at once,
 		// and calls nested under one shared driver would run one at a time.
-		let res = crate::exec::trampoline::concurrent(async {
-			let exec = crate::exec::entry::frame(&ctx, &self.opt, self.doc.as_ref()).await;
-			crate::exec::entry::scalar(&exec, &expr).await
-		})
-		.await
-		.map_err(|e| HostCallError::Datastore(e.to_string()))?;
+		let res = crate::exec::trampoline::concurrent(self.caught(&order, read_only, &ctx, &expr))
+			.await
+			.map_err(|e| HostCallError::Datastore(e.to_string()))?;
 
 		convert_value_to_public_value(res).map_err(|e| HostCallError::Other(e.to_string()))
 	}
@@ -347,16 +406,14 @@ impl InvocationContext for Host {
 		// Same ordering as `sql`. A `fn::` body and a module call are opaque to
 		// `read_only`, so they count as writing and run alone; a pure builtin
 		// overlaps.
-		let _order = self.order(expr.read_only()).await;
+		let read_only = expr.read_only();
+		let order = self.order(read_only).await;
 		self.check_caller_still_waiting()?;
 		// Under a driver of its own: the guest may await several calls at once,
 		// and calls nested under one shared driver would run one at a time.
-		let res = crate::exec::trampoline::concurrent(async {
-			let exec = crate::exec::entry::frame(&ctx, &self.opt, self.doc.as_ref()).await;
-			crate::exec::entry::scalar(&exec, &expr).await
-		})
-		.await
-		.map_err(|e| HostCallError::Datastore(e.to_string()))?;
+		let res = crate::exec::trampoline::concurrent(self.caught(&order, read_only, &ctx, &expr))
+			.await
+			.map_err(|e| HostCallError::Datastore(e.to_string()))?;
 
 		convert_value_to_public_value(res).map_err(|e| HostCallError::Other(e.to_string()))
 	}
@@ -561,16 +618,72 @@ mod tests {
 		}
 	}
 
-	/// Builtins that change something without evaluating a statement share the
-	/// lock, and that is correct here rather than an oversight: what this
-	/// ordering serialises is savepoints, and none of these take one — a
-	/// sequence allocates through the transaction without a savepoint, and the
-	/// rest write outside it entirely.
+	/// The place `Host::order` gives a call: one whose statement may write
+	/// runs alone whatever its module was lent and whatever its transaction can
+	/// take, and one whose statement cannot write shares, unless it runs behind
+	/// a savepoint of its own: a writeable module's call in a transaction that
+	/// defined a sequence.
+	#[tokio::test]
+	async fn a_call_takes_its_place_by_its_statement_and_its_savepoint() {
+		use std::sync::Arc;
+
+		use super::{CallOrder, Host, test_capabilities};
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::ctx::Context;
+		use crate::dbs::Options;
+		use crate::kvs::Datastore;
+		use crate::kvs::TransactionType::{Read, Write};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let opt = Options::new(&ds.config().exec);
+		for (kind, label, sequence) in
+			[(Write, "write", false), (Read, "read", false), (Write, "write", true)]
+		{
+			let txn = ds.transaction(kind).await.unwrap().enclose();
+			if sequence {
+				txn.sequence_defined_here(NamespaceId(1), DatabaseId(1), "sq".to_owned()).await;
+			}
+			let mut ctx = Context::new_test();
+			ctx.set_transaction(Arc::clone(&txn));
+			let ctx = ctx.freeze();
+			for writeable in [true, false] {
+				let host = Host::new(
+					&ctx,
+					&opt,
+					None,
+					writeable,
+					"m".into(),
+					Arc::new(test_capabilities()),
+				);
+				let case = format!("{label}, sequence {sequence}, writeable {writeable}");
+				assert!(
+					matches!(host.order(false).await, CallOrder::Writing(_)),
+					"a call that may write runs alone: {case}"
+				);
+				let scoped = sequence && writeable;
+				assert_eq!(
+					matches!(host.order(true).await, CallOrder::Writing(_)),
+					scoped,
+					"a read runs alone only behind a savepoint of its own: {case}"
+				);
+			}
+			drop(ctx);
+			txn.cancel().await.unwrap();
+		}
+	}
+
+	/// Builtins that change something without evaluating a statement are
+	/// read-only statements: what this ordering serialises is savepoints, and
+	/// the statement takes none, so the call shares the lock. A sequence draw
+	/// of a writeable module still takes the exclusive side in a transaction
+	/// that defined a sequence, because its call runs behind a savepoint there
+	/// (`Host::scoped`), which the statement's classification does not decide
+	/// (`a_call_takes_its_place_by_its_statement_and_its_savepoint`).
 	///
 	/// Listed explicitly so that moving one of them to the exclusive side is a
 	/// deliberate act with a failing test, not a quiet change of meaning.
 	#[test]
-	fn a_builtin_that_mutates_outside_a_statement_still_shares() {
+	fn a_builtin_that_mutates_outside_a_statement_is_a_read_only_statement() {
 		// `file::*` belongs here too, but its argument is a file literal, which
 		// needs the `files` experimental target to parse.
 		for query in ["sequence::nextval('n')", "http::post('https://example.com/', {})"] {

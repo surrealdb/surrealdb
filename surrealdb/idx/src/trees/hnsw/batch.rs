@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
 use surrealdb_datastore::Transaction;
-use surrealdb_datastore::close::{CommitAction, RollbackAction};
+use surrealdb_datastore::close::{ActionScope, CommitAction, RollbackAction};
 use tokio::sync::RwLock;
 use tracing::debug;
 use web_time::Instant;
@@ -663,6 +663,12 @@ impl CommitAction for PublishBatch {
 			}
 		})
 	}
+
+	/// Publishes writes made where it was queued; a rollback that undoes them
+	/// must not leave the resident graph holding them.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
+	}
 }
 
 /// Cleans up after a staged batch whose transaction did not commit.
@@ -704,6 +710,10 @@ impl RollbackAction for RollBackBatch {
 			Ok(())
 		})
 	}
+	/// Cleans up after writes made where it was queued.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
+	}
 }
 
 /// Invalidates the resident graph after an in-place batch whose transaction
@@ -730,6 +740,10 @@ impl RollbackAction for InvalidateResident {
 			self.elements.evict_index().await;
 			Ok(())
 		})
+	}
+	/// Cleans up after writes made where it was queued.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
 	}
 }
 

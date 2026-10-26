@@ -33,11 +33,12 @@
 //!   order when the record exists, the creating order when it does not;
 //! - a creating attempt that is rolled back on a classified failure ([`WriteBranching::Retry`]): a
 //!   record its source read takes the updating order; any other takes the creating order. When the
-//!   policy neither retries nor skips, a failed attempt fails the statement, so the creating order
-//!   runs with no savepoint. Otherwise the stages ahead of the savepoint run first, the rest of the
+//!   policy neither retries nor skips, a failed attempt fails the statement, so both orders run
+//!   with no savepoint. Otherwise the stages ahead of the savepoint run first, the rest of the
 //!   order runs inside the attempt, and a failed attempt is rolled back before its classification
 //!   either raises it, skips the record, or runs the updating order against the record the
-//!   classification chose, carrying the original failure when the policy says so.
+//!   classification chose, carrying the original failure when the policy says so. Both updating
+//!   paths of such a policy run behind a savepoint of their own.
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
@@ -289,9 +290,12 @@ pub(super) fn write_body_cut(
 			sink.stages(em, &first, skip)?;
 		}
 		// A policy that neither retries nor skips raises every failure of the creating attempt,
-		// which fails the statement, so the attempt has nothing to be undone for: it runs as a sole
-		// order does, with no savepoint, and a failure leaves what it wrote as a failed `CREATE`
-		// does.
+		// which fails the statement, so the attempt has nothing of its own to undo: it runs as a
+		// sole order does, with no savepoint. What a failed statement wrote is undone with its
+		// transaction, refused with a transaction its client owns, or rolled back by the caller
+		// that catches its error ([`crate::exec::catch_scope`]). An aggregate that reads a value's
+		// failure about the shape of the data as `NONE` never reads so a value whose evaluation ran
+		// a statement nested in it: that failure fails the statement holding it.
 		WriteBranching::Retry(retry)
 			if !retry.retry_conflict && !retry.skip_failures && !retry.carry_schema_failure =>
 		{
@@ -328,10 +332,11 @@ pub(super) fn write_body_cut(
 			em.emit(Instr::Jump {
 				target: done,
 			});
-			// An attempt that abandoned the record keeps what it wrote.
+			// An attempt that abandoned the record keeps what it wrote once the record reached its
+			// store, and none of it before then.
 			em.bind(abandoned)?;
 			em.emit(write(WriteInstr::TryEnd));
-			em.emit(write(WriteInstr::SavepointRelease));
+			em.emit(write(WriteInstr::SavepointEndSkipped));
 			em.emit(Instr::Jump {
 				target: skip,
 			});
@@ -352,12 +357,13 @@ pub(super) fn write_body_cut(
 			em.emit(write(WriteInstr::ReloadForUpdate));
 			em.emit(write(WriteInstr::CarryBegin));
 			let carried = em.label()?;
-			sink.stages(em, &second, carried)?;
+			update_attempt(em, sink, &second, carried)?;
 			em.emit(write(WriteInstr::CarryEnd));
 			em.emit(Instr::Jump {
 				target: done,
 			});
-			// An update that abandoned the record did not satisfy the failure the attempt carried.
+			// An update that abandoned the record before storing it did not satisfy the failure the
+			// attempt carried; one that stored it and then withheld its output did.
 			em.bind(carried)?;
 			em.emit(write(WriteInstr::RaiseCarried));
 			em.emit(write(WriteInstr::CarryEnd));
@@ -366,7 +372,7 @@ pub(super) fn write_body_cut(
 			});
 			// A record its source read has nothing to create.
 			em.bind(read)?;
-			sink.stages(em, &second, skip)?;
+			update_attempt(em, sink, &second, skip)?;
 		}
 	}
 	em.bind(done)?;
@@ -387,6 +393,44 @@ pub(super) fn write_body_cut(
 		settle_live(em, marks, start, cut_at, cut.is_some_and(|cut| cut.encode_at_cut));
 	}
 	Ok(marks.is_some())
+}
+
+/// Emits `stages`, the updating order of a form that retries, as an attempt behind a savepoint of
+/// its own, so an update that stops part-way leaves none of its writes behind while the statement
+/// goes on: the record is stored before its index entries and its observers run. A failure rolls
+/// the attempt back and goes on to the enclosing handler or out of the statement. A skip ends the
+/// savepoint as [`WriteInstr::SavepointEndSkipped`] decides and jumps to `skip`.
+fn update_attempt(
+	em: &mut Emitter,
+	sink: &mut dyn StageSink,
+	stages: &[WriteStageKind],
+	skip: Label,
+) -> Result<(), IrError> {
+	em.emit(write(WriteInstr::SavepointPush));
+	let attempt = em.label()?;
+	em.emit(write(WriteInstr::TryBegin {
+		handler: attempt,
+	}));
+	let abandoned = em.label()?;
+	sink.stages(em, stages, abandoned)?;
+	em.emit(write(WriteInstr::TryEnd));
+	em.emit(write(WriteInstr::SavepointRelease));
+	let kept = em.label()?;
+	em.emit(Instr::Jump {
+		target: kept,
+	});
+	em.bind(abandoned)?;
+	em.emit(write(WriteInstr::TryEnd));
+	em.emit(write(WriteInstr::SavepointEndSkipped));
+	em.emit(Instr::Jump {
+		target: skip,
+	});
+	em.bind(attempt)?;
+	em.emit(write(WriteInstr::SavepointRollback));
+	em.emit(write(WriteInstr::ClearMutated));
+	em.emit(write(WriteInstr::Rethrow));
+	em.bind(kept)?;
+	Ok(())
 }
 
 /// Emits the `WriteCut` that ends the halves ahead of the cut, answers its index, and binds the
@@ -1218,13 +1262,13 @@ mod tests {
 				gated: false,
 			},
 		);
-		let skip = 28;
+		let skip = 50;
 		assert_eq!(
 			code,
 			[
 				write(WriteInstr::Begin),
 				write(WriteInstr::JumpIfNotIterationInitial {
-					target: 25
+					target: 36
 				}),
 				marker(0, skip),
 				write(WriteInstr::SavepointPush),
@@ -1235,10 +1279,10 @@ mod tests {
 				write(WriteInstr::TryEnd),
 				write(WriteInstr::SavepointRelease),
 				Instr::Jump {
-					target: 26
+					target: 48
 				},
 				write(WriteInstr::TryEnd),
-				write(WriteInstr::SavepointRelease),
+				write(WriteInstr::SavepointEndSkipped),
 				Instr::Jump {
 					target: skip
 				},
@@ -1254,17 +1298,51 @@ mod tests {
 				}),
 				write(WriteInstr::ReloadForUpdate),
 				write(WriteInstr::CarryBegin),
-				marker(2, 22),
+				write(WriteInstr::SavepointPush),
+				write(WriteInstr::TryBegin {
+					handler: 28
+				}),
+				marker(2, 25),
+				write(WriteInstr::TryEnd),
+				write(WriteInstr::SavepointRelease),
+				Instr::Jump {
+					target: 31
+				},
+				write(WriteInstr::TryEnd),
+				write(WriteInstr::SavepointEndSkipped),
+				Instr::Jump {
+					target: 33
+				},
+				write(WriteInstr::SavepointRollback),
+				write(WriteInstr::ClearMutated),
+				write(WriteInstr::Rethrow),
 				write(WriteInstr::CarryEnd),
 				Instr::Jump {
-					target: 26
+					target: 48
 				},
 				write(WriteInstr::RaiseCarried),
 				write(WriteInstr::CarryEnd),
 				Instr::Jump {
 					target: skip
 				},
-				marker(3, skip),
+				write(WriteInstr::SavepointPush),
+				write(WriteInstr::TryBegin {
+					handler: 45
+				}),
+				marker(3, 42),
+				write(WriteInstr::TryEnd),
+				write(WriteInstr::SavepointRelease),
+				Instr::Jump {
+					target: 48
+				},
+				write(WriteInstr::TryEnd),
+				write(WriteInstr::SavepointEndSkipped),
+				Instr::Jump {
+					target: skip
+				},
+				write(WriteInstr::SavepointRollback),
+				write(WriteInstr::ClearMutated),
+				write(WriteInstr::Rethrow),
 				end(false),
 				Instr::EndRow,
 				end(true),

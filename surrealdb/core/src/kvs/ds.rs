@@ -2183,6 +2183,7 @@ impl Datastore {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			nested_runs: Default::default(),
 			session_effects: None,
 		}))
 	}

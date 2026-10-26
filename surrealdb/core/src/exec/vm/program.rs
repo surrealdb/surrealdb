@@ -806,15 +806,20 @@ pub(super) enum Instr {
 	/// [`Instr::TryEnd`] and whose error that is only about the shape of the
 	/// data ([`ControlFlow::is_ignorable`](crate::expr::ControlFlow::is_ignorable))
 	/// does not fail the row: the registers are as the region left them, `dst`
-	/// is `NONE` when set, and the body continues at `catch`. Any other
-	/// error, and any signal, leaves the region as it would leave the body.
-	/// Regions nest; an error is caught by the innermost.
+	/// is `NONE` when set, and the body continues at `catch`. A region whose
+	/// evaluation ran a nested statement — a subquery, a block, a `fn::` call,
+	/// a builtin that runs a statement, however deep beneath a closure, a
+	/// computed field or a lookup — catches nothing, whether the error came
+	/// out of that statement or after it
+	/// ([`crate::exec::ExecutionContext::nested_runs`]). Any other error, and
+	/// any signal, leaves the region as it would leave the body. Regions nest;
+	/// an error is caught by the innermost.
 	TryNone {
 		catch: Label,
 		dst: Option<Reg>,
 	},
-	/// Close the innermost region an [`Instr::TryNone`] or an
-	/// [`Instr::MethodRegion`] opened.
+	/// Close the innermost region an [`Instr::TryNone`], an
+	/// [`Instr::MethodRegion`] or an [`Instr::PermissionRegion`] opened.
 	TryEnd,
 	/// Open a region, up to the matching [`Instr::TryEnd`], over the body of
 	/// method `method` run in place: outside a write's frame, an argument error
@@ -1122,6 +1127,15 @@ pub(super) enum BlockInstr {
 		/// [`Self::RunEmbedded`] resolves it.
 		resolve: Option<ContextLevel>,
 	},
+	/// Enter a `{ … }` block evaluated in place, whose instructions follow in
+	/// the body: the host counts a nested statement of the run
+	/// ([`crate::exec::ExecutionContext::note_nested_run`]) before it takes
+	/// the step, as it does for a block run as a unit of its own, so an
+	/// [`Instr::TryNone`] region the block is in, or a finish that evaluates
+	/// it, does not read a failure that follows it, from the block or from the
+	/// expression around it, as `NONE`. The block is entered whether it then
+	/// succeeds or fails, and the instruction touches no register.
+	Enter,
 }
 
 assert_plain!(BlockInstr);
@@ -3398,6 +3412,14 @@ pub(super) enum WriteInstr {
 	/// Undo the attempt's writes to its savepoint for a held error; for a held
 	/// `BREAK`, `CONTINUE` or `RETURN`, release the savepoint, keeping them.
 	SavepointRollback,
+	/// End the savepoint of an attempt that skipped its record: release it
+	/// once the record reached its store, and roll it back before then, when
+	/// a gate skipped the record before it could write (see
+	/// `WriteRow::reached_store`).
+	SavepointEndSkipped,
+	/// The record reached its store: past every gate that skips a record
+	/// before it writes.
+	ReachedStore,
 	/// Open a region whose failure resumes the body at `handler`.
 	TryBegin {
 		handler: Label,
@@ -3409,6 +3431,9 @@ pub(super) enum WriteInstr {
 	ClearMutated,
 	/// Propagate a held `BREAK`, `CONTINUE` or `RETURN`.
 	RethrowSignal,
+	/// Propagate the held failure, error or signal, to the next open region's
+	/// handler or out of the statement.
+	Rethrow,
 	/// Classify the held error of a create attempt under `policy`: raise it,
 	/// jump to `skip`, or choose the record to retry the write as an update
 	/// of, and continue.
@@ -3428,7 +3453,8 @@ pub(super) enum WriteInstr {
 	CarryBegin,
 	/// Close the carrying region, dropping the carried failure.
 	CarryEnd,
-	/// Raise the carried failure, if there is one.
+	/// Raise the carried failure, if there is one and the update that
+	/// abandoned the record did so before storing it.
 	RaiseCarried,
 	/// Finish the record: count it as affected when it was written, as matched
 	/// when its condition accepted it, and hand its output to the statement's
@@ -3691,10 +3717,13 @@ impl Instr {
 				| WriteInstr::LoadNamedSubject
 				| WriteInstr::SavepointPush
 				| WriteInstr::SavepointRelease
+				| WriteInstr::SavepointEndSkipped
+				| WriteInstr::ReachedStore
 				| WriteInstr::SavepointRollback
 				| WriteInstr::TryEnd
 				| WriteInstr::ClearMutated
 				| WriteInstr::RethrowSignal
+				| WriteInstr::Rethrow
 				| WriteInstr::ReloadForUpdate
 				| WriteInstr::CarryBegin
 				| WriteInstr::CarryEnd

@@ -11,6 +11,9 @@
 //!   caller's snapshot, for as long as the caller holds the transaction open: its reads go around
 //!   the index, and a write that would fail the commit against the build's own is refused where it
 //!   is made, across the requests of the one transaction and the save points it rolls back.
+//! - A statement dropped while one of its records' attempts holds a save point open — a request
+//!   deadline drops the statement's future — leaves the caller nothing to commit: the commit is
+//!   refused.
 
 #![allow(clippy::unwrap_used)]
 
@@ -136,6 +139,80 @@ async fn assert_round_trips(ds: &Datastore) {
 	for (at, result) in target.import(&dump, &owner()).await.unwrap().into_iter().enumerate() {
 		if let Err(e) = result.result {
 			panic!("statement {at} of the dump was refused on import: {e}\n{dump}");
+		}
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+// A dropped statement
+// ------------------------------------------------------------------------------------------------
+
+/// What a commit refused for a save point its opener never closed answers.
+const ABANDONED_SAVE_POINT: &str = "A save point could not be closed";
+
+/// A table whose writes of a record marked `slow` run an event that writes, then waits an hour,
+/// inside the attempt the write opens a save point for.
+const SLOW_EVENT: &str = "
+	DEFINE TABLE item SCHEMALESS;
+	DEFINE TABLE marker SCHEMALESS;
+	CREATE marker:1 SET n = 0 RETURN NONE;
+	CREATE item:1 SET slow = false RETURN NONE;
+	DEFINE EVENT slow ON item WHEN $after.slow = true
+		THEN { UPDATE marker:1 SET n += 1 RETURN NONE; sleep(1h) };
+";
+
+/// Runs `sql` in `txn` until the transaction holds a write the statement made, then drops the
+/// statement's future, as a request deadline does.
+async fn drop_once_written(ds: &Datastore, txn: &Arc<Transaction>, sql: &str) {
+	let before = txn.bytes_written();
+	let session = owner();
+	let mut running =
+		std::pin::pin!(ds.run(QueryRequest::new(sql, &session).with_transaction(Arc::clone(txn))));
+	for _ in 0..12_000 {
+		if txn.bytes_written() > before {
+			return;
+		}
+		if let Ok(answered) =
+			tokio::time::timeout(std::time::Duration::from_millis(5), running.as_mut()).await
+		{
+			panic!("{sql:?} answered before it was dropped: {:?}", answered.map(|_| ()));
+		}
+	}
+	panic!("{sql:?} wrote nothing within a minute");
+}
+
+/// A statement dropped while a record's attempt holds its save point open refuses the commit:
+/// the update of a record that stands, the create of one that does not, and the update an
+/// `INSERT` makes of a duplicate. The same writes run to completion commit.
+#[tokio::test]
+async fn a_statement_dropped_inside_a_save_point_is_not_committed() {
+	for sql in [
+		"UPSERT item:1 SET slow = true RETURN NONE;",
+		"UPSERT item:2 SET slow = true RETURN NONE;",
+		"INSERT INTO item { id: item:1 } ON DUPLICATE KEY UPDATE slow = true RETURN NONE;",
+	] {
+		let ds = ds().await;
+		run(&ds, SLOW_EVENT).await;
+		let txn = Arc::new(ds.transaction(Write).await.unwrap());
+		drop_once_written(&ds, &txn, sql).await;
+		match txn.commit().await {
+			Err(e) => assert!(
+				e.to_string().contains(ABANDONED_SAVE_POINT),
+				"{sql:?}: expected {ABANDONED_SAVE_POINT:?}, got {e}"
+			),
+			Ok(()) => {
+				panic!("{sql:?}: the commit of the dropped statement's transaction succeeded")
+			}
+		}
+		assert_eq!(
+			answer(&ds, "SELECT VALUE [id, slow] FROM item ORDER BY id;").await,
+			answer(&ds, "RETURN [[item:1, false]];").await,
+			"{sql:?}",
+		);
+
+		let completed = sql.replace("slow = true", "slow = false");
+		for answer in client_answers(&ds, &owner(), &completed).await {
+			assert_ok(&answer);
 		}
 	}
 }

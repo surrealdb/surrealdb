@@ -6797,6 +6797,46 @@ pub(super) mod tests {
 		)));
 	}
 
+	/// The run of an analysed statement starts a statement nested in the body, as a block
+	/// statement does: the host counts it before it takes the step, so a region or an aggregate
+	/// that evaluates it does not read a failure that follows it as `NONE`.
+	#[test]
+	fn an_analysed_run_counts_as_a_nested_statement() {
+		use crate::exec::vm::host::runs_nested_statement;
+		use crate::exec::vm::interp::Step;
+
+		let mut b = Builder::new();
+		let explained = explained_scan(&mut b, true);
+		b.create_kind(OpKind::Phys(PhysOp::Yield), &[explained], 0);
+		let b = placed(b);
+		let program = match super::super::dispatch::lower_subquery_unit(
+			&mut LowerCx::detached(),
+			&b.ir,
+			&FactCache::new(),
+		) {
+			Ok(lowered) => lowered.program,
+			Err(error) => panic!("the unit lowers: {error}"),
+		};
+		let pipeline = &program.pipelines[1];
+		let at = pipeline
+			.code
+			.iter()
+			.position(|instr| {
+				matches!(
+					instr,
+					Instr::Block(crate::exec::vm::program::BlockInstr::RunAnalyzed { .. })
+				)
+			})
+			.expect("the unit runs the analysed group");
+		assert!(runs_nested_statement(
+			&program,
+			pipeline,
+			&Step::Block {
+				at
+			}
+		));
+	}
+
 	#[test]
 	fn rows_a_breaker_reads_that_no_op_makes_as_rows_are_an_invariant_break() {
 		let mut b = Builder::new();

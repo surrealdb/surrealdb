@@ -17,7 +17,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 use web_time::Instant;
 
 /// Work owed once a transaction has committed.
@@ -27,20 +27,33 @@ use web_time::Instant;
 /// surfaced. Discarded when the transaction is cancelled or its commit fails,
 /// because the change the action answers to never became durable.
 ///
-/// An action registered inside a save point scope answers to the writes of that scope, so a
-/// rollback of the scope discards it ([`Self::answers_to_scope`]).
+/// An action registered inside a save point scope answers to [`Self::scope`].
 pub trait CommitAction: Send + Sync + 'static {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 
-	/// Whether a rollback of the save point scope this action was registered in discards it.
-	///
-	/// True unless the action is one half of a pair registered on both outcomes
-	/// ([`RollbackAction`]), which answers to the end of the transaction rather than to any write:
-	/// the rollback half runs only when the transaction does not commit, so the commit half has to
-	/// survive a scope's rollback for one half of the pair to run in every case.
-	fn answers_to_scope(&self) -> bool {
-		true
-	}
+	/// What the action answers to, which decides whether a save point rollback
+	/// drops it. There is no default: an action dropped when it was owed leaves
+	/// cleanup undone, and one kept when it was not acts on a change that never
+	/// committed, so each action states which it is.
+	fn scope(&self) -> ActionScope;
+}
+
+/// What a [`CommitAction`] or [`RollbackAction`] answers to, which decides what
+/// a rollback to a save point opened before it was queued does with it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionScope {
+	/// A change made where the action was queued, which the save point
+	/// rollback undoes. A commit action is dropped with it: a kill
+	/// notification for a removal the rollback undid would tell a subscriber
+	/// its subscription is gone while it still exists. A rollback action runs
+	/// then, and is removed from the queue: the change it compensates for has
+	/// just been undone, and a transaction that goes on to commit would
+	/// otherwise discard it unrun.
+	SavePoint,
+	/// The transaction as a whole — cleanup owed however its writes fare, such
+	/// as releasing an index build's ownership. A save point rollback leaves it
+	/// queued, to run, or be discarded, when the transaction itself ends.
+	Transaction,
 }
 
 /// Work owed when a transaction does *not* commit.
@@ -64,6 +77,11 @@ pub trait RollbackAction: Send + Sync + 'static {
 		self: Box<Self>,
 		drain_started_at: Instant,
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+
+	/// What the action compensates for, which decides whether a save point
+	/// rollback runs it. There is no default, for the same reason as
+	/// [`CommitAction::scope`].
+	fn scope(&self) -> ActionScope;
 }
 
 /// Work a statement leaves for the owner of its transaction to await once the
@@ -133,6 +151,11 @@ pub struct AfterCommitDeadline {
 pub struct AfterCommitWaits(Arc<AfterCommitQueue>);
 
 /// The queue an [`AfterCommitWaits`] shares with its transaction.
+///
+/// A synchronous mutex, never held across an await: a save point rollback
+/// truncates the queue in the same synchronous step that pops the save point's
+/// frame, so no await separates the two. A rollback cancelled before that step
+/// poisons its transaction, whose cancel discards the queue.
 pub(crate) type AfterCommitQueue = Mutex<Vec<Box<dyn AfterCommitWait>>>;
 
 impl AfterCommitWaits {
@@ -143,19 +166,19 @@ impl AfterCommitWaits {
 	/// queue; an owner that takes the queue before committing runs nothing it
 	/// took unless the commit succeeds.
 	pub async fn take(&self) -> Vec<Box<dyn AfterCommitWait>> {
-		std::mem::take(&mut *self.0.lock().await)
+		std::mem::take(&mut *self.0.lock())
 	}
 
 	/// How many waits are queued: an owner that runs several statements in
 	/// one transaction reads it before and after each, to tell which statement
 	/// queued which wait.
 	pub async fn len(&self) -> usize {
-		self.0.lock().await.len()
+		self.0.lock().len()
 	}
 
 	/// Whether nothing is queued.
 	pub async fn is_empty(&self) -> bool {
-		self.0.lock().await.is_empty()
+		self.0.lock().is_empty()
 	}
 
 	pub(crate) fn downgrade(&self) -> Weak<AfterCommitQueue> {

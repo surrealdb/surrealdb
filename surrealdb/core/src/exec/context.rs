@@ -353,6 +353,17 @@ pub struct RootContext {
 	/// lowering emits the instructions that record into it only for a statement of the request,
 	/// never into a unit. See [`SessionSink`].
 	pub(crate) session_effects: Option<Arc<SessionSink>>,
+	/// How many statements the evaluations under this context have started
+	/// nested — subqueries, blocks, nested statements of an expression,
+	/// late-bound statements, `fn::` calls and the builtins that run a
+	/// statement — and each block evaluated in place, counted as it is
+	/// entered. Shared by every context derived from this one, so an evaluation
+	/// that reaches a nested statement through a closure, a computed field or
+	/// a lookup still counts it; a context [`ExecutionContext::with_own_nested_runs`]
+	/// or a new root starts its own. An aggregate reads a value's failure about
+	/// the shape of the data as `NONE` only where the count did not move while
+	/// the value was evaluated (`exec::vm::interp::Region::Try`).
+	pub(crate) nested_runs: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The state of a KNN query vector's evaluation.
@@ -831,6 +842,7 @@ impl ExecutionContext {
 			caller_view_checked: false,
 			forbidden_row: None,
 			inherited_knn: None,
+			nested_runs: Default::default(),
 			session_effects: None,
 		};
 		Self::Database(DatabaseContext {
@@ -855,6 +867,27 @@ impl ExecutionContext {
 			Self::Namespace(n) => &n.root,
 			Self::Database(d) => &d.ns_ctx.root,
 		}
+	}
+
+	/// How many statements the evaluations under this context have started
+	/// nested ([`RootContext::nested_runs`]).
+	pub(crate) fn nested_runs(&self) -> u64 {
+		self.root().nested_runs.load(std::sync::atomic::Ordering::Relaxed)
+	}
+
+	/// Count a statement an evaluation under this context starts nested, or a
+	/// block evaluated in place that it enters ([`RootContext::nested_runs`]).
+	pub(crate) fn note_nested_run(&self) {
+		self.root().nested_runs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	}
+
+	/// This context with a count of nested statements of its own, for work
+	/// that runs beside the evaluation that holds this one, such as a morsel's
+	/// worker, so that neither counts what the other starts.
+	pub(crate) fn with_own_nested_runs(&self) -> Self {
+		let mut own = self.clone();
+		own.root_mut().nested_runs = Default::default();
+		own
 	}
 
 	/// The sink the running statement records its session effects in: `Some` only for the
@@ -1034,6 +1067,7 @@ impl ExecutionContext {
 				guard_verdicts: Arc::clone(&r.guard_verdicts),
 				writing: r.writing,
 				caller_view_checked: r.caller_view_checked,
+				nested_runs: Arc::clone(&r.nested_runs),
 				session_effects: None,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
@@ -1057,6 +1091,7 @@ impl ExecutionContext {
 					guard_verdicts: Arc::clone(&n.root.guard_verdicts),
 					writing: n.root.writing,
 					caller_view_checked: n.root.caller_view_checked,
+					nested_runs: Arc::clone(&n.root.nested_runs),
 					session_effects: None,
 				},
 				ns: Arc::clone(&n.ns),
@@ -1083,6 +1118,7 @@ impl ExecutionContext {
 						guard_verdicts: Arc::clone(&d.ns_ctx.root.guard_verdicts),
 						writing: d.ns_ctx.root.writing,
 						caller_view_checked: d.ns_ctx.root.caller_view_checked,
+						nested_runs: Arc::clone(&d.ns_ctx.root.nested_runs),
 						session_effects: None,
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
@@ -2113,6 +2149,7 @@ pub(crate) async fn statement_context(
 		guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(writes)),
 		writing: false,
 		caller_view_checked: false,
+		nested_runs: Default::default(),
 		session_effects: None,
 	};
 

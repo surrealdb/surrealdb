@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::ops::{ControlFlow, Deref};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -67,7 +68,7 @@ use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{
-	AfterCommitQueue, AfterCommitWait, AfterCommitWaits, CommitAction, RollbackAction,
+	ActionScope, AfterCommitQueue, AfterCommitWait, AfterCommitWaits, CommitAction, RollbackAction,
 };
 use crate::feature::{FeatureLevelCell, FeatureLevelState, LevelledMode, Readable};
 use crate::index_shapes::{IndexShapes, ShapeRecorder, TableIndexShapes, ValueShape};
@@ -298,7 +299,7 @@ pub const NO_BUILD_EPOCH: u64 = u64::MAX;
 pub(crate) type ProvisionalSequence = Arc<Mutex<Option<Sequence>>>;
 
 /// A transaction's provisional slots, with what each held, at one moment. See
-/// `Transaction::provisional_save_points`.
+/// `SavePointMarks::provisional`.
 type ProvisionalSnapshot = Vec<((NamespaceId, DatabaseId, String), Option<Sequence>)>;
 
 /// What a levelled write read at its key, in the form [`Transaction::changed_definition`]
@@ -376,6 +377,10 @@ impl CommitAction for ObserveFeatureLevel {
 	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
 		Box::pin(async move { self.cell.observe(Some(&self.record)) })
 	}
+
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
+	}
 }
 
 /// Takes the stored-format ledger entry as committed in the datastore's feature level cell, once
@@ -387,6 +392,10 @@ struct ObserveStoredFormat {
 impl CommitAction for ObserveStoredFormat {
 	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
 		Box::pin(async move { self.cell.observe_stored_format() })
+	}
+
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
 	}
 }
 
@@ -490,30 +499,6 @@ enum HeldConformance {
 /// namespace and database and then by table.
 type ConformanceMemo = HashMap<(NamespaceId, DatabaseId), HashMap<TableName, HeldConformance>>;
 
-/// What a save point records when it opens, so that rolling it back undoes exactly what its scope
-/// did to the transaction's own bookkeeping.
-struct SavePointMark {
-	/// How many commit actions were queued; the rollback drops those queued after it
-	/// ([`Transaction::commit_actions`]).
-	actions: usize,
-	/// The layout epoch; a rollback finding it moved forgets the layouts the transaction holds
-	/// ([`Transaction::layout_epoch`]).
-	layout_epoch: u64,
-	/// The count of range deletes; a rollback finding it moved forgets the layouts the
-	/// transaction holds, because the delete it undoes may have removed layouts.
-	range_deletes: u64,
-	/// Whether the transaction already held the stored-format ledger entry; a rollback of a scope
-	/// that took it discards the observation ([`Transaction::admit_stored_format`]).
-	stored_format_admitted: bool,
-	/// The tables already written; a rollback returns to them, so a write it undid no longer
-	/// counts against a fence of its table ([`crate::triggers::WrittenTables`]).
-	written: crate::triggers::WrittenMark,
-	/// How many record writes had been noted; a rollback drops those noted after it.
-	written_records: usize,
-	/// The unseen-index registry as it stood when the save point opened.
-	unseen_indexes: Option<crate::unseen_indexes::UnseenIndexes>,
-}
-
 /// A record as a read answers it, with the generation its stored bytes carry: `None` for a
 /// `revision` record, stamp 0, a lightweight edge and an id that names no record.
 pub type StampedRecord = (Arc<Record>, Option<Generation>);
@@ -598,6 +583,56 @@ pub struct RecordKeys {
 	spans: Vec<(usize, usize)>,
 	/// The vector the borrowed keys of one call are built in, empty between calls.
 	keys: Vec<Key<'static>>,
+}
+
+/// A value drawn from a sequence this transaction defined, while a
+/// [`DrawRecording`] was open.
+#[derive(Clone, Debug)]
+pub struct ProvisionalDraw {
+	pub(crate) ns: NamespaceId,
+	pub(crate) db: DatabaseId,
+	pub(crate) sq: String,
+	pub(crate) value: i64,
+}
+
+/// The draws [`Transaction::provisional_draw_log`] holds, and how many
+/// [`DrawRecording`]s are open over them.
+#[derive(Default)]
+struct DrawLog {
+	recordings: usize,
+	draws: Vec<ProvisionalDraw>,
+}
+
+/// Collects the values drawn from sequences this transaction defined, from
+/// [`Transaction::record_provisional_draws`] until [`Self::finish`].
+///
+/// A save point rollback restores those sequences, and with them every value
+/// drawn inside it, while a value the caller keeps after the rollback - a
+/// record id - still names it. The draws collected here are what
+/// `Sequences::replay_provisional_draws` needs to move the sequences past
+/// those values again. Dropped without finishing, it collects nothing.
+pub struct DrawRecording<'a> {
+	tx: &'a Transaction,
+	start: usize,
+}
+
+impl DrawRecording<'_> {
+	/// The draws made since this recording opened, including those of any
+	/// recording opened inside it.
+	pub fn finish(self) -> Vec<ProvisionalDraw> {
+		let log = self.tx.provisional_draw_log.lock();
+		log.draws.get(self.start..).map(<[_]>::to_vec).unwrap_or_default()
+	}
+}
+
+impl Drop for DrawRecording<'_> {
+	fn drop(&mut self) {
+		let mut log = self.tx.provisional_draw_log.lock();
+		log.recordings -= 1;
+		if log.recordings == 0 {
+			log.draws = Vec::new();
+		}
+	}
 }
 
 pub struct Transaction {
@@ -699,9 +734,6 @@ pub struct Transaction {
 	/// with it set refuses to commit, as for the other poisons ([`Self::poisoned`]); a save point
 	/// rollback does not clear it.
 	failed_statement_poisoned: AtomicBool,
-	/// What each open save point recorded when it opened, innermost last, so that a rollback
-	/// undoes exactly what the scope did to the transaction's bookkeeping ([`SavePointMark`]).
-	save_point_marks: Mutex<Vec<SavePointMark>>,
 	/// How many times this transaction has stamped a table's catalog version
 	/// ([`Self::bump_catalog_version`]). It only grows, so a reader that saw
 	/// the same count earlier in the transaction knows no table's version has
@@ -753,6 +785,21 @@ pub struct Transaction {
 	written_records: parking_lot::Mutex<Vec<Vec<u8>>>,
 	/// The changefeed buffer.
 	changefeed: OnceLock<Changefeed>,
+	/// The state each open save point returns the transaction to, innermost
+	/// last: the changefeed, the live-event buffer, the commit- and
+	/// rollback-action queues, the after-commit waits and the provisional
+	/// sequences (see [`SavePointMarks`]). A rollback truncates the two buffers
+	/// back to their marks, drops the save-point-scoped commit actions and every
+	/// after-commit wait queued since its mark, runs the save-point-scoped
+	/// rollback actions (see [`ActionScope`]), and restores the provisional
+	/// sequences, so nothing the rollback undid is published to a change feed
+	/// or a live query, acted on or awaited at commit, left uncompensated, or
+	/// drawn from.
+	///
+	/// One frame per save point, pushed and popped under a synchronous mutex
+	/// that is never held across an await: a single stack cannot fall out of
+	/// step with itself when a task is cancelled between two awaits.
+	save_point_marks: parking_lot::Mutex<Vec<SavePointMarks>>,
 	/// The live-query event buffer (dedicated keyspace, Router engine).
 	live_events: OnceLock<LiveEventBuffer>,
 	/// Per-transaction aggregation of count-index deltas and compaction
@@ -819,9 +866,13 @@ pub struct Transaction {
 	/// rollback contract on client-owned (RPC/SDK) transactions, whose
 	/// lifecycle the executor does not manage.
 	write_guard_poisoned: AtomicBool,
-	/// Set when the storage layer could not close a save point.
+	/// Set when the storage layer could not open or close a save point, a
+	/// rollback of one was cancelled while the storage was reverting it, or the
+	/// task that opened one stopped before closing it
+	/// ([`Self::poison_abandoned_save_point`]).
 	///
-	/// Which of the scope's writes survive is then unknown, so the buffered index
+	/// Which of the scope's writes survive, or how deep the storage stack is, is
+	/// then unknown, so the buffered index
 	/// deltas can be neither kept nor dropped: keeping them risks flushing a term
 	/// change for a posting that does not exist, and dropping them risks a
 	/// posting no bitmap names. Their frames cannot be held at the storage
@@ -834,6 +885,15 @@ pub struct Transaction {
 	/// — a caller may hold a cursor, and cancel waits for every cursor to drop,
 	/// which that caller cannot do until the call it is blocked in returns.
 	save_point_poisoned: AtomicBool,
+	/// Set when a save point rollback's compensation — a save-point-scoped
+	/// rollback action, cleaning up state written outside this transaction —
+	/// failed, or did not finish because the rollback was cancelled - as was
+	/// restoring the provisional sequences ([`SavePointMarks::provisional`]).
+	/// The rollback undid the scope's writes but not everything they caused,
+	/// so the transaction must not commit as though it had; like
+	/// [`Self::save_point_poisoned`], this is checked at commit because a
+	/// client-owned transaction survives the statement error.
+	compensation_poisoned: AtomicBool,
 	/// Set when a record's write stopped part-way because its query could not
 	/// continue. See [`Self::poison_interrupted_write`].
 	interrupted_write_poisoned: AtomicBool,
@@ -910,7 +970,7 @@ pub struct Transaction {
 	/// as this transaction is open. It goes when this transaction goes,
 	/// whether that is a commit or a rollback, and a save point rollback puts
 	/// it back as it stood when the save point opened — see
-	/// [`Self::provisional_save_points`].
+	/// [`SavePointMarks::provisional`].
 	///
 	/// A name maps to an empty slot from the moment the statement defines it
 	/// until something draws from it.
@@ -922,36 +982,22 @@ pub struct Transaction {
 	/// transaction the answer is no. This answers that without taking the
 	/// lock, so the per-id path pays an atomic load rather than a mutex.
 	defines_any_sequence: AtomicBool,
-	/// [`Self::provisional_sequences`] as it stood when each open save point
-	/// opened, innermost last.
-	///
-	/// A save point rollback restores the storage it scopes, which includes
-	/// every row a provisional allocator wrote — but not the allocators, nor the
-	/// record that this transaction defined a sequence, which live here. Left
-	/// in place, a `DEFINE SEQUENCE` the rollback undid would still be served
-	/// from, on a definition that does not exist; and an allocator built
-	/// inside the scope would keep serving from a window whose claim row is
-	/// gone, leaving what it issues unfenced for other nodes, which claim past
-	/// the rows they can see. Restoring the snapshot puts both back as they
-	/// stood, which is what the storage now says too, so a value drawn inside
-	/// the scope is undone along with everything else written there.
-	///
-	/// The node's own eviction of a redefined sequence is not undone. That costs
-	/// the node one rebuild of its allocator, from the definition as committed.
-	provisional_save_points: Mutex<Vec<ProvisionalSnapshot>>,
+	/// The values drawn from sequences this transaction defined (see
+	/// [`Self::provisional_sequences`]) while a [`DrawRecording`] is open.
+	/// Empty whenever none is, so a transaction that draws without recording
+	/// keeps nothing. A save point rollback leaves it alone: it is the record
+	/// of what the rollback took back. A synchronous mutex: never held across
+	/// an await.
+	provisional_draw_log: parking_lot::Mutex<DrawLog>,
 	/// Effects owed once this transaction commits.
 	///
 	/// They are not transactional - stopping a process-local index builder, or
 	/// telling a subscriber its subscription is gone - so running them before the
 	/// commit would leave them standing after a rollback undid what they answer
 	/// to. Drained by [`Self::commit`]; discarded by [`Self::cancel`] and by a
-	/// failed commit.
-	///
-	/// An action queued inside a save point scope answers to writes of that scope: it is
-	/// discarded when the scope rolls back, unless it declares otherwise
-	/// ([`CommitAction::answers_to_scope`]), and belongs to the enclosing scope when the scope
-	/// is released ([`Self::save_point_marks`]).
-	commit_actions: Mutex<Vec<Box<dyn CommitAction>>>,
+	/// failed commit. A synchronous mutex: never held across an await, and a
+	/// save point reads its length on every row.
+	commit_actions: parking_lot::Mutex<Vec<Box<dyn CommitAction>>>,
 	/// Effects owed if this transaction does *not* commit.
 	///
 	/// Registered by callers that wrote durable state from a separate transaction
@@ -960,8 +1006,10 @@ pub struct Transaction {
 	/// the schema transaction is still open, and the builder may commit build
 	/// state and index data of its own before the schema transaction terminates.
 	/// Drained by [`Self::cancel`] and by a failed commit; discarded once the
-	/// commit succeeds.
-	rollback_actions: Mutex<Vec<Box<dyn RollbackAction>>>,
+	/// commit succeeds. A save point rollback runs the save-point-scoped ones
+	/// queued since it opened (see [`ActionScope`]). A synchronous mutex:
+	/// never held across an await.
+	rollback_actions: parking_lot::Mutex<Vec<Box<dyn RollbackAction>>>,
 	/// Work queued for this transaction's owner to await once it has committed.
 	///
 	/// `None` unless the owner promised to await it, by building the
@@ -969,7 +1017,9 @@ pub struct Transaction {
 	/// [`Self::with_materialise_waits`]: a statement that finds no queue does
 	/// its work inline, or not at all. Held weakly, because the owner holds the
 	/// queue (see [`AfterCommitWaits`]); discarded by [`Self::cancel`] and by a
-	/// failed commit.
+	/// failed commit. A save point rollback drops the waits queued since the
+	/// save point opened: a wait is work for the statement that queued it, so
+	/// unlike a transaction-scoped action, none outlives its scope.
 	after_commit_waits: Option<std::sync::Weak<AfterCommitQueue>>,
 	/// Whether a statement running in this transaction has done something outside it that its
 	/// cancel cannot undo: sent a request that may change a remote endpoint, written a bucket,
@@ -988,7 +1038,133 @@ pub struct Transaction {
 	/// delete — reuse the answer instead of re-issuing an uncached engine
 	/// read each. Cleared by [`Self::rollback_to_save_point`], which may
 	/// release the registration on rollback-scoped engines.
-	graph_doc_ids_settled: Mutex<HashMap<(NamespaceId, DatabaseId, TableName), bool>>,
+	/// A synchronous mutex: never held across an await.
+	graph_doc_ids_settled: parking_lot::Mutex<HashMap<(NamespaceId, DatabaseId, TableName), bool>>,
+}
+
+/// A storage savepoint rollback in progress. Dropped before it is done — its
+/// future cancelled while the storage reverts the scope's writes — it poisons
+/// the transaction (see [`Transaction::save_point_poisoned`]): which of the
+/// writes were undone is then unknown.
+struct StorageRollback<'a> {
+	poisoned: &'a AtomicBool,
+	done: bool,
+}
+
+impl Drop for StorageRollback<'_> {
+	fn drop(&mut self) {
+		if !self.done {
+			self.poisoned.store(true, Ordering::Relaxed);
+		}
+	}
+}
+
+/// A compensation's run, started and not yet finished.
+type CompensationRun = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+
+/// What a save point rollback still owes once its storage is rolled back:
+/// restoring the provisional sequences, and the save-point-scoped rollback
+/// actions.
+///
+/// A rollback that is cancelled before it has done all of that — its future
+/// dropped by a sibling's failure — leaves the transaction in a state no
+/// caller asked for, so it must not commit (see
+/// [`Transaction::compensation_poisoned`]). The provisional sequences cannot be
+/// restored later, since their snapshot went with the future; the transaction
+/// only ends in a rollback, which discards them. The cleanup that remains goes
+/// back on the transaction's own rollback queue, so that rollback still runs
+/// it: the run that was in progress resumes where it stopped, and the ones not
+/// yet started follow it.
+///
+/// Each goes back where it was queued, among the scope's transaction-scoped
+/// actions, which the rollback left on the queue: the queue's order is an
+/// ordering between actions (a build's cleanup runs before its ownership is
+/// released), so a compensation requeued behind actions it preceded would run
+/// after them.
+struct Compensations<'a> {
+	tx: &'a Transaction,
+	/// Where the scope's actions began on the transaction's rollback queue.
+	requeue_at: usize,
+	restoring_provisional: bool,
+	/// Each compensation with the number of the scope's transaction-scoped
+	/// actions queued before it.
+	in_flight: Option<(usize, CompensationRun)>,
+	pending: std::collections::VecDeque<(usize, Box<dyn RollbackAction>)>,
+}
+
+impl Drop for Compensations<'_> {
+	fn drop(&mut self) {
+		if !self.restoring_provisional && self.in_flight.is_none() && self.pending.is_empty() {
+			return;
+		}
+		self.tx.compensation_poisoned.store(true, Ordering::Relaxed);
+		let in_flight = self.in_flight.take().map(|(before, run)| {
+			let action: Box<dyn RollbackAction> =
+				Box::new(ResumeCompensation(parking_lot::Mutex::new(Some(run))));
+			(before, action)
+		});
+		let mut queue = self.tx.rollback_actions.lock();
+		for (requeued, (before, action)) in
+			in_flight.into_iter().chain(self.pending.drain(..)).enumerate()
+		{
+			let at = (self.requeue_at + before + requeued).min(queue.len());
+			queue.insert(at, action);
+		}
+	}
+}
+
+/// A compensation whose run was interrupted, queued to finish that run. See
+/// [`Compensations`]. The mutex only makes the run `Sync`; it is taken once.
+struct ResumeCompensation(parking_lot::Mutex<Option<CompensationRun>>);
+
+impl RollbackAction for ResumeCompensation {
+	fn run(self: Box<Self>, _drain_started_at: Instant) -> CompensationRun {
+		match self.0.into_inner() {
+			Some(run) => run,
+			None => Box::pin(async { Ok(()) }),
+		}
+	}
+
+	/// Owed however the transaction ends, though it can only end in a
+	/// rollback: the interrupted compensation poisoned it.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
+	}
+}
+
+/// What an open save point returns the transaction's buffers to; see
+/// [`Transaction::save_point_marks`].
+struct SavePointMarks {
+	commit_actions: usize,
+	rollback_actions: usize,
+	/// How many after-commit waits were queued ([`Transaction::after_commit_waits`]).
+	after_commit_waits: usize,
+	/// [`Transaction::provisional_sequences`] as it stood when the save point
+	/// opened.
+	///
+	/// A save point rollback restores the storage it scopes, which includes
+	/// every row a provisional allocator wrote — but not the allocators, nor the
+	/// record that this transaction defined a sequence, which live outside
+	/// storage. Left in place, a `DEFINE SEQUENCE` the rollback undid would
+	/// still be served from, on a definition that no longer exists; and an
+	/// allocator built inside the scope would keep serving from a window whose
+	/// claim row is gone, leaving what it issues unfenced for other nodes,
+	/// which claim past the rows they can see. Restoring the snapshot puts both
+	/// back as they stood, which is what the storage now says too, so a value
+	/// drawn inside the scope is undone along with everything else written
+	/// there.
+	///
+	/// The node's own eviction of a redefined sequence is not undone. That costs
+	/// the node one rebuild of its allocator, from the definition as committed.
+	provisional: ProvisionalSnapshot,
+	layout_epoch: u64,
+	range_deletes: u64,
+	stored_format_admitted: bool,
+	written: crate::triggers::WrittenMark,
+	/// How many record writes had been noted; a rollback drops those noted after it.
+	written_records: usize,
+	/// The unseen-index registry as it stood when the save point opened.
+	unseen_indexes: Option<crate::unseen_indexes::UnseenIndexes>,
 }
 
 /// Whether a table's shared doc-ID space is safe for a new consumer to adopt.
@@ -1426,10 +1602,9 @@ impl CommitAction for ReleaseDefinitionHold {
 	}
 
 	/// The commit half of a pair registered on both outcomes, which a rollback of a save point
-	/// must not discard, or the transaction's end would not release the hold
-	/// ([`CommitAction::answers_to_scope`]).
-	fn answers_to_scope(&self) -> bool {
-		false
+	/// must not discard, or the transaction's end would not release the hold.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
 	}
 }
 
@@ -1442,6 +1617,12 @@ impl RollbackAction for ReleaseDefinitionHold {
 			self.0.end();
 			Ok(())
 		})
+	}
+
+	/// The rollback half of the same pair: a save point rollback leaves it queued, so the hold
+	/// lasts until the transaction itself ends.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
 	}
 }
 
@@ -1817,7 +1998,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<bool> {
-		if let Some(&settled) = self.graph_doc_ids_settled.lock().await.get(&(ns, db, tb.clone())) {
+		if let Some(&settled) = self.graph_doc_ids_settled.lock().get(&(ns, db, tb.clone())) {
 			return Ok(settled);
 		}
 		let key = TableKey {
@@ -1826,7 +2007,7 @@ impl Transaction {
 			tb: Cow::Borrowed(tb),
 		};
 		let settled = self.getu_key(&key).await?.is_some_and(|stored| stored.graph_doc_ids);
-		self.graph_doc_ids_settled.lock().await.insert((ns, db, tb.clone()), settled);
+		self.graph_doc_ids_settled.lock().insert((ns, db, tb.clone()), settled);
 		Ok(settled)
 	}
 
@@ -1885,7 +2066,6 @@ impl Transaction {
 			stored_format_absent: AtomicBool::new(false),
 			catalog_write_poisoned: AtomicBool::new(false),
 			failed_statement_poisoned: AtomicBool::new(false),
-			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(0),
 			catalog_touched: AtomicBool::new(false),
 			object_stamps: AtomicU64::new(0),
@@ -1899,6 +2079,7 @@ impl Transaction {
 			state_changes: Arc::new(AtomicU64::new(0)),
 			catalog_reads: Default::default(),
 			changefeed: OnceLock::new(),
+			save_point_marks: parking_lot::Mutex::new(Vec::new()),
 			live_events: OnceLock::new(),
 			index_deltas: OnceLock::new(),
 			triggers,
@@ -1917,6 +2098,7 @@ impl Transaction {
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
+			compensation_poisoned: AtomicBool::new(false),
 			interrupted_write_poisoned: AtomicBool::new(false),
 			commit_outcome_unknown: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
@@ -1926,13 +2108,13 @@ impl Transaction {
 			unseen_indexes: OnceLock::new(),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
-			provisional_save_points: Mutex::new(Vec::new()),
-			commit_actions: Mutex::new(Vec::new()),
-			rollback_actions: Mutex::new(Vec::new()),
+			provisional_draw_log: parking_lot::Mutex::new(DrawLog::default()),
+			commit_actions: parking_lot::Mutex::new(Vec::new()),
+			rollback_actions: parking_lot::Mutex::new(Vec::new()),
 			after_commit_waits: None,
 			external_effect: AtomicBool::new(false),
 			defers_build_waits: false,
-			graph_doc_ids_settled: Mutex::new(HashMap::new()),
+			graph_doc_ids_settled: parking_lot::Mutex::new(HashMap::new()),
 		}
 	}
 
@@ -2272,7 +2454,7 @@ impl Transaction {
 	///
 	/// See [`Self::commit_actions`] for why an effect waits.
 	pub async fn on_commit(&self, action: Box<dyn CommitAction>) {
-		self.commit_actions.lock().await.push(action);
+		self.commit_actions.lock().push(action);
 	}
 
 	/// Accept work that statements leave for the owner to await after commit,
@@ -2324,24 +2506,37 @@ impl Transaction {
 	/// Hands the work back when the owner made no such promise, or has since
 	/// gone (see [`Self::accepts_after_commit_waits`]), so the caller does it
 	/// inline.
+	///
+	/// The wait belongs to the save point open when it is queued: rolling that
+	/// save point back drops it, since the writes it awaits the effect of are
+	/// undone.
 	pub async fn wait_after_commit(
 		&self,
 		wait: Box<dyn AfterCommitWait>,
 	) -> Option<Box<dyn AfterCommitWait>> {
 		match self.after_commit_waits.as_ref().and_then(std::sync::Weak::upgrade) {
 			Some(waits) => {
-				waits.lock().await.push(wait);
+				waits.lock().push(wait);
 				None
 			}
 			None => Some(wait),
 		}
 	}
 
+	/// How many after-commit waits are queued for this transaction's owner,
+	/// none when it has no queue. Read when a save point opens.
+	fn queued_after_commit_waits(&self) -> usize {
+		self.after_commit_waits
+			.as_ref()
+			.and_then(std::sync::Weak::upgrade)
+			.map_or(0, |waits| waits.lock().len())
+	}
+
 	/// Queue work to run if this transaction does not commit.
 	///
 	/// See [`Self::rollback_actions`] for what belongs here.
 	pub async fn on_rollback(&self, action: Box<dyn RollbackAction>) {
-		self.rollback_actions.lock().await.push(action);
+		self.rollback_actions.lock().push(action);
 	}
 
 	/// Records that this transaction has defined `sq`, so a draw from it is
@@ -2350,6 +2545,45 @@ impl Transaction {
 	pub async fn sequence_defined_here(&self, ns: NamespaceId, db: DatabaseId, sq: String) {
 		self.provisional_sequences.lock().await.insert((ns, db, sq), Arc::new(Mutex::new(None)));
 		self.defines_any_sequence.store(true, Ordering::Release);
+	}
+
+	/// Whether this transaction has defined a sequence, so that a draw made
+	/// through it may be a provisional one, which a save point rollback takes
+	/// back (see `SavePointMarks::provisional`). Stays `true` once set, even if a
+	/// rollback undid the definition. One atomic load.
+	pub fn defines_any_sequence(&self) -> bool {
+		self.defines_any_sequence.load(Ordering::Acquire)
+	}
+
+	/// Starts collecting the values drawn from sequences this transaction
+	/// defined. See [`DrawRecording`].
+	pub fn record_provisional_draws(&self) -> DrawRecording<'_> {
+		let mut log = self.provisional_draw_log.lock();
+		log.recordings += 1;
+		DrawRecording {
+			tx: self,
+			start: log.draws.len(),
+		}
+	}
+
+	/// Notes a value drawn from a sequence this transaction defined, for any
+	/// [`DrawRecording`] that is open.
+	pub(crate) fn note_provisional_draw(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		sq: &str,
+		value: i64,
+	) {
+		let mut log = self.provisional_draw_log.lock();
+		if log.recordings > 0 {
+			log.draws.push(ProvisionalDraw {
+				ns,
+				db,
+				sq: sq.to_owned(),
+				value,
+			});
+		}
 	}
 
 	/// Captures [`Self::provisional_sequences`] for a save point opening now.
@@ -2539,14 +2773,18 @@ impl Transaction {
 
 	/// The reason this transaction may not commit, if there is one.
 	///
-	/// Five conditions poison a transaction, and all mean its writes are a state no
+	/// Six conditions poison a transaction, and all mean its writes are a state no
 	/// caller asked for:
 	///
 	/// - A tripped write-cardinality guard leaves the writes buffered before the failing
 	///   reservation as a partial statement, so committing them would break the guard's
 	///   atomic-rollback contract.
-	/// - A save point the storage layer could not close leaves it unknown which of that scope's
-	///   writes survive. See [`Self::save_point_poisoned`].
+	/// - A save point the storage layer could not open or close, whose rollback was cancelled while
+	///   the storage reverted it, or whose opener stopped before closing it, leaves it unknown
+	///   which of that scope's writes survive. See [`Self::save_point_poisoned`].
+	/// - A save point rollback's compensation failed or was interrupted, or the rollback was
+	///   interrupted before it restored the provisional sequences, leaving state the scope caused
+	///   in place. See [`Self::compensation_poisoned`].
 	/// - A record's write stopped part-way leaves the record disagreeing with its index entries.
 	///   See [`Self::poison_interrupted_write`].
 	/// - A schema statement that failed after writing part of its change leaves a catalog change
@@ -2569,6 +2807,14 @@ impl Transaction {
 			return Err(crate::error::DatastoreError::QueryNotExecuted {
 				message: "A save point could not be closed, leaving the transaction's writes and \
 				          the index deltas describing them unreconcilable"
+					.to_string(),
+			}
+			.into());
+		}
+		if self.compensation_poisoned.load(Ordering::Relaxed) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A save point rollback's cleanup failed or did not finish, leaving \
+				          state its writes caused in place"
 					.to_string(),
 			}
 			.into());
@@ -2656,6 +2902,19 @@ impl Transaction {
 	/// retry, where committing a half-indexed record would cost a corrupt index.
 	pub fn poison_interrupted_write(&self) {
 		self.interrupted_write_poisoned.store(true, Ordering::Relaxed);
+	}
+
+	/// Refuses this transaction's COMMIT, because a save point was opened and
+	/// its opener stopped before releasing it or rolling it back: its future
+	/// was dropped while the scope was open, or while its release or rollback
+	/// was in progress.
+	///
+	/// The scope stays on the storage stack and in every buffer's frames, so
+	/// the next release or rollback would close it in place of its own, and
+	/// whether its writes were meant to stand is unknown. See
+	/// [`Self::save_point_poisoned`].
+	pub fn poison_abandoned_save_point(&self) {
+		self.save_point_poisoned.store(true, Ordering::Relaxed);
 	}
 
 	/// Whether this transaction's commit failed with an outcome the storage
@@ -2775,7 +3034,7 @@ impl Transaction {
 		drop(committing);
 		#[cfg(any(test, feature = "test-hooks"))]
 		let committed = match committed {
-			Ok(()) if !self.rollback_actions.lock().await.is_empty() => {
+			Ok(()) if !self.rollback_actions.lock().is_empty() => {
 				match self.triggers.take_commit_applied_unknown() {
 					Some(hook) => {
 						if let Some(hook) = hook {
@@ -7714,7 +7973,7 @@ impl Transaction {
 	)]
 	pub async fn put_held(&self, key: Key<'_>, val: Vec<u8>) -> Result<()> {
 		let changed = self.reserve_write_slot()?;
-		let op = if self.save_point_marks.lock().await.is_empty() {
+		let op = if self.save_point_marks.lock().is_empty() {
 			WriteOp::PutHeld
 		} else {
 			WriteOp::Put
@@ -10036,7 +10295,6 @@ impl Transaction {
 			stored_format_absent: AtomicBool::new(false),
 			catalog_write_poisoned: AtomicBool::new(false),
 			failed_statement_poisoned: AtomicBool::new(false),
-			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
 			catalog_touched: AtomicBool::new(self.catalog_touched.load(Ordering::Acquire)),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
@@ -10083,13 +10341,15 @@ impl Transaction {
 				.map_or_else(OnceLock::new, OnceLock::from),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
-			provisional_save_points: Mutex::new(Vec::new()),
-			commit_actions: Mutex::new(Vec::new()),
-			rollback_actions: Mutex::new(Vec::new()),
+			save_point_marks: parking_lot::Mutex::new(Vec::new()),
+			compensation_poisoned: AtomicBool::new(false),
+			provisional_draw_log: parking_lot::Mutex::new(DrawLog::default()),
+			commit_actions: parking_lot::Mutex::new(Vec::new()),
+			rollback_actions: parking_lot::Mutex::new(Vec::new()),
 			after_commit_waits: None,
 			external_effect: AtomicBool::new(false),
 			defers_build_waits: false,
-			graph_doc_ids_settled: Mutex::new(HashMap::new()),
+			graph_doc_ids_settled: parking_lot::Mutex::new(HashMap::new()),
 		};
 		Some(Speculation {
 			base: Arc::clone(self),
@@ -10168,16 +10428,40 @@ impl Transaction {
 	/// The buffered index deltas are scoped alongside the storage save point.
 	/// They describe writes this transaction has made, so a rollback that undoes
 	/// those writes has to undo the buffered description of them too. So are
-	/// the tables whose records it has written ([`Self::wrote_records_of`]), the
-	/// notes of the records it created ([`crate::creations`]) and the
-	/// provisional sequences — see [`Self::provisional_save_points`].
+	/// the buffered changefeed and live-query entries, the tables whose records
+	/// it has written ([`Self::wrote_records_of`]), the notes of the records it
+	/// created ([`crate::creations`]), the commit actions that answer to the
+	/// scope's writes, the after-commit waits it queued and the provisional
+	/// sequences ([`Self::save_point_marks`]), and the transaction cache.
+	///
+	/// A commit or rollback action scoped to the transaction
+	/// ([`ActionScope::Transaction`]) survives the rollback: it is cleanup owed
+	/// however the transaction ends — releasing an index build's ownership is
+	/// queued on both sides — and dropping or running it early would leave that
+	/// cleanup to neither or do it twice. A save-point-scoped rollback action
+	/// runs at the rollback, and its failure is logged rather than returned:
+	/// the storage rollback has already happened, and the row's own error is
+	/// what its caller reports.
+	///
+	/// An after-commit wait ([`Self::wait_after_commit`]) is never owed
+	/// beyond its scope, so a rollback drops every one queued since the save
+	/// point opened, and a release leaves them queued for the enclosing scope.
 	pub async fn new_save_point(&self) -> Result<()> {
+		// Everything that awaits happens before the storage save point opens,
+		// and nothing after it does: a task cancelled at an await then leaves
+		// no frame pushed on one stack and missing from another.
 		// The held creates are written below the save point, which no rollback of it undoes.
 		self.tr.flush_held().await?;
+		let provisional = self.snapshot_provisional_sequences().await;
 		// The storage save point opens first: the buffer's frames mirror its
 		// stack, so a failed open must not leave a frame behind for some outer
-		// save point's release to pop instead of its own.
-		self.inner.new_save_point().await?;
+		// save point's release to pop instead of its own. A failure leaves it
+		// unknown whether the storage pushed a save point, so the transaction
+		// cannot commit, as for a failed release or rollback.
+		if let Err(e) = self.inner.new_save_point().await {
+			Self::poison_unless_inert(&e, &self.save_point_poisoned);
+			return Err(e.into());
+		}
 		// Initialised rather than merely inspected: the save point is opened
 		// before the mutations it scopes, so waiting for the buffer to exist
 		// would leave the first mutation in the transaction's own frame, where a
@@ -10191,13 +10475,13 @@ impl Transaction {
 		self.cache.push_save_point();
 		self.tr.with_record_writes(|writes| writes.push_save_point());
 		self.creations.push_save_point();
-		let snapshot = self.snapshot_provisional_sequences().await;
-		self.provisional_save_points.lock().await.push(snapshot);
 		// The commit actions queued from here on answer to this scope's writes, and the layout
 		// state a rollback must judge is the state as it stands now.
-		let actions = self.commit_actions.lock().await.len();
-		self.save_point_marks.lock().await.push(SavePointMark {
-			actions,
+		self.save_point_marks.lock().push(SavePointMarks {
+			commit_actions: self.commit_actions.lock().len(),
+			rollback_actions: self.rollback_actions.lock().len(),
+			after_commit_waits: self.queued_after_commit_waits(),
+			provisional,
 			layout_epoch: self.layout_epoch.load(Ordering::Acquire),
 			range_deletes: self.range_deletes.load(Ordering::Acquire),
 			stored_format_admitted: self.stored_format_admitted.load(Ordering::Acquire),
@@ -10227,13 +10511,13 @@ impl Transaction {
 		self.cache.release_save_point();
 		self.tr.with_record_writes(|writes| writes.release_save_point());
 		self.creations.release_save_point();
-		// Released, the scope folds into the enclosing one, whose snapshot
-		// still describes the state an outer rollback returns to.
-		self.provisional_save_points.lock().await.pop();
-		// The scope's commit actions, and whatever it did to the layouts, belong to the enclosing
-		// scope.
-		if let Some(mut mark) = self.save_point_marks.lock().await.pop()
-			&& let Some(mut unseen) = mark.unseen_indexes.take()
+		// Released, the scope folds into the enclosing one, whose marks still
+		// describe the state an outer rollback returns to. The views the
+		// scope's snapshot of the unseen-index registry alone still holds are
+		// cancelled.
+		let marks = self.save_point_marks.lock().pop();
+		if let Some(mut marks) = marks
+			&& let Some(mut unseen) = marks.unseen_indexes.take()
 			&& !self.tr.speculating()
 		{
 			for view in unseen.drain_views() {
@@ -10249,7 +10533,16 @@ impl Transaction {
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
 		self.tr.flush_held().await?;
 		let _changed = self.state_change();
-		if let Err(e) = self.inner.rollback_to_save_point().await {
+		// An engine may undo the scope's writes one await at a time, so a
+		// rollback cancelled while the storage is reverting leaves it unknown
+		// which of them it undid.
+		let mut storage = StorageRollback {
+			poisoned: &self.save_point_poisoned,
+			done: false,
+		};
+		let rolled_back = self.inner.rollback_to_save_point().await;
+		storage.done = true;
+		if let Err(e) = rolled_back {
 			Self::poison_unless_inert(&e, &self.save_point_poisoned);
 			return Err(e.into());
 		}
@@ -10270,16 +10563,12 @@ impl Transaction {
 		// A record or definition cached since the save point may describe a
 		// write the rollback undid, and a read must not be answered from it.
 		self.cache.rollback_save_point();
-		// The caches kept for later speculations were filled by reads that saw
-		// the writes the rollback undoes, and the journal above reaches only this
-		// transaction's own cache, so none of them may outlive the rollback.
-		self.speculative_caches.lock().await.clear();
 		self.tr.with_record_writes(|writes| writes.rollback_save_point());
 		self.creations.rollback_save_point();
 		// Whether a locked read's conflict registration survives a savepoint
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.
-		self.graph_doc_ids_settled.lock().await.clear();
+		self.graph_doc_ids_settled.lock().clear();
 		// The rollback may undo a shape write and the catalog stamp beside it,
 		// and a later write of the same shape must find it unrecorded.
 		self.forget_shaped_indexes();
@@ -10287,33 +10576,42 @@ impl Transaction {
 		// and one still being read may have run alongside it: the count of forward-mapping writes
 		// moves, which empties the memo and refuses to keep a read the rollback overlapped.
 		self.tr.written.lock().note_rollback();
-		let snapshot = self.provisional_save_points.lock().await.pop();
-		if let Some(snapshot) = snapshot {
-			self.restore_provisional_sequences(snapshot).await;
-		}
-		let mark = self.save_point_marks.lock().await.pop();
-		if let Some(mark) = mark {
-			self.tr.written.lock().restore(mark.written);
-			self.written_records.lock().truncate(mark.written_records);
+		// The frame is popped, and everything synchronous it restores is
+		// restored, before the first await, so a cancelled task leaves the
+		// stacks in step with the storage save point that was just rolled back.
+		let marks = self.save_point_marks.lock().pop();
+		let mut compensations = Vec::new();
+		let mut requeue_at = 0;
+		let mut stale_unseen = None;
+		let provisional = marks.map(|marks| {
+			self.tr.written.lock().restore(marks.written);
+			self.written_records.lock().truncate(marks.written_records);
 			if let Some(registry) = self.unseen_indexes.get() {
-				let mut old = std::mem::replace(
+				stale_unseen = Some(std::mem::replace(
 					&mut *registry.lock(),
-					mark.unseen_indexes.unwrap_or_default(),
-				);
-				if !self.tr.speculating() {
-					for view in old.drain_views() {
-						if Arc::strong_count(&view) == 1 {
-							let _ = view.cancel_bare().await;
-						}
-					}
-				}
+					marks.unseen_indexes.unwrap_or_default(),
+				));
 			}
-			// An effect queued in the scope answers to writes the rollback undid, unless it
-			// answers to the end of the transaction instead.
-			let mut actions = self.commit_actions.lock().await;
-			if actions.len() > mark.actions {
-				let queued = actions.split_off(mark.actions);
-				actions.extend(queued.into_iter().filter(|action| !action.answers_to_scope()));
+			let mut actions = self.commit_actions.lock();
+			let mark = marks.commit_actions.min(actions.len());
+			let queued = actions.split_off(mark);
+			actions.extend(queued.into_iter().filter(|a| a.scope() == ActionScope::Transaction));
+			drop(actions);
+			// A wait answers to the statement that queued it, whose writes the rollback undid.
+			if let Some(waits) = self.after_commit_waits.as_ref().and_then(std::sync::Weak::upgrade)
+			{
+				let mut waits = waits.lock();
+				let mark = marks.after_commit_waits.min(waits.len());
+				waits.truncate(mark);
+			}
+			let mut actions = self.rollback_actions.lock();
+			let mark = marks.rollback_actions.min(actions.len());
+			requeue_at = mark;
+			for action in actions.split_off(mark) {
+				match action.scope() {
+					ActionScope::Transaction => actions.push(action),
+					ActionScope::SavePoint => compensations.push((actions.len() - mark, action)),
+				}
 			}
 			drop(actions);
 			// What the transaction holds of the layouts, and whether it holds the stored-format
@@ -10324,17 +10622,66 @@ impl Transaction {
 			// that did none of these, as the failed creating attempt of an upsert does not,
 			// leaves what the transaction holds describing storage as it stands, so the next
 			// write resolves nothing again.
-			let admitted_in_scope =
-				!mark.stored_format_admitted && self.stored_format_admitted.load(Ordering::Acquire);
+			let admitted_in_scope = !marks.stored_format_admitted
+				&& self.stored_format_admitted.load(Ordering::Acquire);
 			if admitted_in_scope {
 				self.stored_format_admitted.store(false, Ordering::Release);
 			}
 			if admitted_in_scope
-				|| self.layout_epoch.load(Ordering::Acquire) != mark.layout_epoch
-				|| self.range_deletes.load(Ordering::Acquire) != mark.range_deletes
+				|| self.layout_epoch.load(Ordering::Acquire) != marks.layout_epoch
+				|| self.range_deletes.load(Ordering::Acquire) != marks.range_deletes
 			{
 				self.invalidate_layouts();
 			}
+			marks.provisional
+		});
+		// What the rollback still owes is owned by the guard before the first
+		// await, so a cancellation from here on poisons the transaction and
+		// requeues the compensations not finished.
+		let mut compensations = Compensations {
+			tx: self,
+			requeue_at,
+			restoring_provisional: provisional.is_some(),
+			in_flight: None,
+			pending: compensations.into(),
+		};
+		// The caches kept for later speculations were filled by reads that saw
+		// the writes the rollback undoes, and the journal above reaches only this
+		// transaction's own cache, so none of them may outlive the rollback.
+		self.speculative_caches.lock().await.clear();
+		if let Some(provisional) = provisional {
+			self.restore_provisional_sequences(provisional).await;
+		}
+		compensations.restoring_provisional = false;
+		// The views registered inside the undone scope, and held by nothing else, are cancelled.
+		if let Some(mut unseen) = stale_unseen
+			&& !self.tr.speculating()
+		{
+			for view in unseen.drain_views() {
+				if Arc::strong_count(&view) == 1 {
+					let _ = view.cancel_bare().await;
+				}
+			}
+		}
+		// Every compensation is attempted even when one fails, and the first
+		// failure is returned, as for a transaction's own rollback actions. A
+		// failure also poisons the transaction (see
+		// [`Self::compensation_poisoned`]).
+		let drain_started_at = Instant::now();
+		let mut first_error = None;
+		while let Some((before, action)) = compensations.pending.pop_front() {
+			let (_, run) = compensations.in_flight.insert((before, action.run(drain_started_at)));
+			let result = run.await;
+			compensations.in_flight = None;
+			if let Err(err) = result
+				&& first_error.is_none()
+			{
+				first_error = Some(err);
+			}
+		}
+		if let Some(err) = first_error {
+			self.compensation_poisoned.store(true, Ordering::Relaxed);
+			return Err(err);
 		}
 		Ok(())
 	}
@@ -11886,7 +12233,7 @@ impl Transaction {
 	async fn run_rollback_actions(&self) -> Result<()> {
 		// Take the queue under the lock to detach it from concurrent registrations
 		let actions = {
-			let mut pending = self.rollback_actions.lock().await;
+			let mut pending = self.rollback_actions.lock();
 			std::mem::take(&mut *pending)
 		};
 		let drain_started_at = Instant::now();
@@ -11909,7 +12256,7 @@ impl Transaction {
 	/// Invoked once the commit has succeeded: the state they would remove is no
 	/// longer provisional.
 	async fn discard_rollback_actions(&self) {
-		self.rollback_actions.lock().await.clear();
+		self.rollback_actions.lock().clear();
 	}
 
 	/// Run every queued commit action.
@@ -11918,7 +12265,7 @@ impl Transaction {
 	/// place. Infallible by contract; an action logs its own failures.
 	async fn run_commit_actions(&self) {
 		let actions = {
-			let mut pending = self.commit_actions.lock().await;
+			let mut pending = self.commit_actions.lock();
 			std::mem::take(&mut *pending)
 		};
 		for action in actions {
@@ -11932,9 +12279,9 @@ impl Transaction {
 	/// Invoked on cancel and on commit failure: the change each answers to never
 	/// became durable, so the effect must not happen either.
 	async fn discard_commit_actions(&self) {
-		self.commit_actions.lock().await.clear();
+		self.commit_actions.lock().clear();
 		if let Some(waits) = self.after_commit_waits.as_ref().and_then(std::sync::Weak::upgrade) {
-			waits.lock().await.clear();
+			waits.lock().clear();
 		}
 	}
 
@@ -16179,6 +16526,526 @@ mod compare_swap_tests {
 			assert_eq!(tx.get_key(&StateKey, None).await.unwrap(), None, "{which}: not deleted");
 			tx.cancel().await.unwrap();
 		}
+	}
+}
+
+#[cfg(test)]
+mod save_point_scope_tests {
+	use std::future::Future;
+	use std::pin::Pin;
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+	use anyhow::Result;
+	use surrealdb_catalog::{DatabaseId, NamespaceId, Record};
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_expr::val::{RecordId, TableName, Value};
+	use surrealdb_kvs::TransactionType;
+	use surrealdb_kvs::value::KVValue;
+	use web_time::Instant;
+
+	use super::Transaction;
+	use crate::close::{
+		ActionScope, AfterCommitDeadline, AfterCommitWait, AfterCommitWaits, CommitAction,
+		RollbackAction,
+	};
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+	use crate::values::changefeed::TableMutations;
+	use crate::values::live_query::LiveEvents;
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(1);
+
+	async fn transaction() -> Transaction {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		tf.transaction(TransactionType::Write, sequences).await.unwrap()
+	}
+
+	/// Sets its flag when run, so a test can tell whether commit ran it.
+	struct SetFlag(Arc<AtomicBool>, ActionScope);
+
+	impl CommitAction for SetFlag {
+		fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+			Box::pin(async move { self.0.store(true, Ordering::SeqCst) })
+		}
+
+		fn scope(&self) -> ActionScope {
+			self.1
+		}
+	}
+
+	fn scoped(flag: &Arc<AtomicBool>) -> Box<SetFlag> {
+		Box::new(SetFlag(flag.clone(), ActionScope::SavePoint))
+	}
+
+	fn unconditional(flag: &Arc<AtomicBool>) -> Box<SetFlag> {
+		Box::new(SetFlag(flag.clone(), ActionScope::Transaction))
+	}
+
+	/// Counts how often it runs, so a test can tell it ran exactly once.
+	struct Count(Arc<AtomicUsize>, ActionScope);
+
+	impl RollbackAction for Count {
+		fn run(
+			self: Box<Self>,
+			_drain_started_at: Instant,
+		) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+			Box::pin(async move {
+				self.0.fetch_add(1, Ordering::SeqCst);
+				Ok(())
+			})
+		}
+
+		fn scope(&self) -> ActionScope {
+			self.1
+		}
+	}
+
+	fn counter() -> Arc<AtomicUsize> {
+		Arc::new(AtomicUsize::new(0))
+	}
+
+	fn runs(counter: &Arc<AtomicUsize>) -> usize {
+		counter.load(Ordering::SeqCst)
+	}
+
+	/// A save-point-scoped rollback action queued inside a rolled-back scope
+	/// runs at the rollback, once, and is gone from the queue: neither a later
+	/// commit nor a later cancel runs it again. A transaction-scoped one stays
+	/// queued until the transaction ends.
+	#[tokio::test]
+	async fn a_rollback_runs_its_scopes_rollback_actions_once() {
+		// The transaction then commits.
+		let tx = transaction().await;
+		let before = counter();
+		let scoped_inside = counter();
+		let unconditional_inside = counter();
+		tx.on_rollback(Box::new(Count(before.clone(), ActionScope::SavePoint))).await;
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Count(scoped_inside.clone(), ActionScope::SavePoint))).await;
+		tx.on_rollback(Box::new(Count(unconditional_inside.clone(), ActionScope::Transaction)))
+			.await;
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(runs(&scoped_inside), 1, "the scope's own action runs at its rollback");
+		assert_eq!(runs(&before), 0, "an action queued before the save point waits");
+		assert_eq!(runs(&unconditional_inside), 0, "a transaction-scoped action waits");
+		tx.commit().await.unwrap();
+		assert_eq!((runs(&before), runs(&scoped_inside), runs(&unconditional_inside)), (0, 1, 0));
+
+		// The transaction is then cancelled.
+		let tx = transaction().await;
+		let before = counter();
+		let scoped_inside = counter();
+		let unconditional_inside = counter();
+		tx.on_rollback(Box::new(Count(before.clone(), ActionScope::SavePoint))).await;
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Count(scoped_inside.clone(), ActionScope::SavePoint))).await;
+		tx.on_rollback(Box::new(Count(unconditional_inside.clone(), ActionScope::Transaction)))
+			.await;
+		tx.rollback_to_save_point().await.unwrap();
+		tx.cancel().await.unwrap();
+		assert_eq!((runs(&before), runs(&scoped_inside), runs(&unconditional_inside)), (1, 1, 1));
+	}
+
+	/// Never completes, standing in for a compensation whose rollback future
+	/// is dropped while it runs.
+	/// Waits for a permit on its gate, then counts its run, so a test can
+	/// interrupt it part-way and tell whether it was finished later.
+	struct Gated(Arc<tokio::sync::Semaphore>, Arc<AtomicUsize>);
+
+	impl RollbackAction for Gated {
+		fn run(
+			self: Box<Self>,
+			_drain_started_at: Instant,
+		) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+			Box::pin(async move {
+				self.0.acquire().await?.forget();
+				self.1.fetch_add(1, Ordering::SeqCst);
+				Ok(())
+			})
+		}
+
+		fn scope(&self) -> ActionScope {
+			ActionScope::SavePoint
+		}
+	}
+
+	/// A save point rollback cancelled while it runs its compensations leaves
+	/// the transaction unable to commit. The rollback the refused commit falls
+	/// back to then finishes the interrupted compensation where it stopped,
+	/// and runs the ones not started, each once.
+	#[tokio::test]
+	async fn a_cancelled_rollback_leaves_its_unfinished_compensations_to_the_transaction() {
+		let tx = transaction().await;
+		let gate = Arc::new(tokio::sync::Semaphore::new(0));
+		let interrupted = counter();
+		let after = counter();
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Gated(gate.clone(), interrupted.clone()))).await;
+		tx.on_rollback(Box::new(Count(after.clone(), ActionScope::SavePoint))).await;
+		let cancelled =
+			tokio::time::timeout(std::time::Duration::from_millis(50), tx.rollback_to_save_point())
+				.await;
+		assert!(cancelled.is_err(), "the rollback is still running its first compensation");
+		assert_eq!((runs(&interrupted), runs(&after)), (0, 0));
+		gate.add_permits(1);
+		assert!(tx.commit().await.is_err(), "the transaction refuses to commit");
+		assert_eq!(
+			(runs(&interrupted), runs(&after)),
+			(1, 1),
+			"the transaction's rollback finishes both compensations"
+		);
+	}
+
+	/// Fails when run, so a test can tell a compensation failure is surfaced.
+	struct Fail;
+
+	impl RollbackAction for Fail {
+		fn run(
+			self: Box<Self>,
+			_drain_started_at: Instant,
+		) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+			Box::pin(async move { Err(anyhow::anyhow!("compensation failed")) })
+		}
+
+		fn scope(&self) -> ActionScope {
+			ActionScope::SavePoint
+		}
+	}
+
+	/// A failing compensation does not stop the others; the rollback returns
+	/// its error, and the transaction then refuses to commit.
+	#[tokio::test]
+	async fn a_failing_compensation_is_returned_and_poisons_the_transaction() {
+		let tx = transaction().await;
+		let after = counter();
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Fail)).await;
+		tx.on_rollback(Box::new(Count(after.clone(), ActionScope::SavePoint))).await;
+		let err = tx.rollback_to_save_point().await.expect_err("the failure is returned");
+		assert!(err.to_string().contains("compensation failed"), "{err}");
+		assert_eq!(runs(&after), 1, "the next compensation still runs");
+		assert!(tx.commit().await.is_err(), "the transaction refuses to commit");
+	}
+
+	/// A save point rollback cancelled before it starts any compensation —
+	/// while it waits on one of its own locks — still requeues them all.
+	#[tokio::test]
+	async fn a_rollback_cancelled_before_its_compensations_requeues_them() {
+		let tx = transaction().await;
+		let action = counter();
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Count(action.clone(), ActionScope::SavePoint))).await;
+		// The one await before the compensations: restoring the provisional
+		// sequences, taken when the transaction defined one.
+		tx.defines_any_sequence.store(true, std::sync::atomic::Ordering::Release);
+		let held = tx.provisional_sequences.lock().await;
+		let cancelled =
+			tokio::time::timeout(std::time::Duration::from_millis(50), tx.rollback_to_save_point())
+				.await;
+		assert!(cancelled.is_err(), "the rollback waits on the held lock");
+		drop(held);
+		assert_eq!(runs(&action), 0);
+		tx.cancel().await.unwrap();
+		assert_eq!(runs(&action), 1, "the compensation runs at the transaction's rollback");
+	}
+
+	/// Appends its name to a shared log when run, after a permit on its gate
+	/// if it has one, so a test can read the order actions ran in.
+	struct Logged {
+		name: &'static str,
+		log: Arc<parking_lot::Mutex<Vec<&'static str>>>,
+		gate: Option<Arc<tokio::sync::Semaphore>>,
+		scope: ActionScope,
+	}
+
+	impl RollbackAction for Logged {
+		fn run(
+			self: Box<Self>,
+			_drain_started_at: Instant,
+		) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+			Box::pin(async move {
+				if let Some(gate) = &self.gate {
+					gate.acquire().await?.forget();
+				}
+				self.log.lock().push(self.name);
+				Ok(())
+			})
+		}
+
+		fn scope(&self) -> ActionScope {
+			self.scope
+		}
+	}
+
+	/// A save point rollback cancelled while it runs its compensations puts
+	/// each one back where it was queued among the scope's transaction-scoped
+	/// actions, so the transaction's rollback runs them all in the order they
+	/// were registered: a build's cleanup still runs before its ownership is
+	/// released.
+	#[tokio::test]
+	async fn a_cancelled_rollback_requeues_its_compensations_where_they_were_queued() {
+		let tx = transaction().await;
+		let log = Arc::new(parking_lot::Mutex::new(Vec::new()));
+		let gate = Arc::new(tokio::sync::Semaphore::new(0));
+		let logged = |name, scope, gate: Option<&Arc<tokio::sync::Semaphore>>| {
+			Box::new(Logged {
+				name,
+				log: log.clone(),
+				gate: gate.cloned(),
+				scope,
+			})
+		};
+		tx.on_rollback(logged("before", ActionScope::Transaction, None)).await;
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(logged("cleanup", ActionScope::SavePoint, Some(&gate))).await;
+		tx.on_rollback(logged("release", ActionScope::Transaction, None)).await;
+		tx.on_rollback(logged("second cleanup", ActionScope::SavePoint, None)).await;
+		tx.on_rollback(logged("last", ActionScope::Transaction, None)).await;
+		let cancelled =
+			tokio::time::timeout(std::time::Duration::from_millis(50), tx.rollback_to_save_point())
+				.await;
+		assert!(cancelled.is_err(), "the rollback is still running its first compensation");
+		assert!(log.lock().is_empty());
+		gate.add_permits(1);
+		tx.cancel().await.unwrap();
+		assert_eq!(*log.lock(), ["before", "cleanup", "release", "second cleanup", "last"]);
+	}
+
+	/// A save point rollback cancelled while it restores the provisional
+	/// sequences leaves them as the rolled-back scope left them, so the
+	/// transaction refuses to commit even with no compensation queued.
+	#[tokio::test]
+	async fn a_rollback_cancelled_before_restoring_provisional_sequences_poisons() {
+		let tx = transaction().await;
+		tx.new_save_point().await.unwrap();
+		tx.defines_any_sequence.store(true, std::sync::atomic::Ordering::Release);
+		let held = tx.provisional_sequences.lock().await;
+		let cancelled =
+			tokio::time::timeout(std::time::Duration::from_millis(50), tx.rollback_to_save_point())
+				.await;
+		assert!(cancelled.is_err(), "the rollback waits on the held lock");
+		drop(held);
+		assert!(tx.commit().await.is_err(), "the transaction refuses to commit");
+	}
+
+	/// A save point rollback that completes leaves the transaction free to
+	/// commit.
+	#[tokio::test]
+	async fn a_completed_rollback_leaves_the_transaction_committable() {
+		let tx = transaction().await;
+		tx.new_save_point().await.unwrap();
+		tx.defines_any_sequence.store(true, std::sync::atomic::Ordering::Release);
+		tx.rollback_to_save_point().await.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	/// A released save point's rollback actions fold into the enclosing scope:
+	/// they run when that scope rolls back, and are discarded by a commit.
+	#[tokio::test]
+	async fn a_released_scopes_rollback_actions_go_with_its_parent() {
+		let tx = transaction().await;
+		let inner = counter();
+		tx.new_save_point().await.unwrap();
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Count(inner.clone(), ActionScope::SavePoint))).await;
+		tx.release_last_save_point().await.unwrap();
+		assert_eq!(runs(&inner), 0);
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(runs(&inner), 1);
+		tx.commit().await.unwrap();
+		assert_eq!(runs(&inner), 1);
+
+		let tx = transaction().await;
+		let inner = counter();
+		tx.new_save_point().await.unwrap();
+		tx.on_rollback(Box::new(Count(inner.clone(), ActionScope::SavePoint))).await;
+		tx.release_last_save_point().await.unwrap();
+		tx.commit().await.unwrap();
+		assert_eq!(runs(&inner), 0, "a commit discards it unrun");
+	}
+
+	/// Counts how often it is awaited, so a test can tell which waits the
+	/// owner would run.
+	struct Await(Arc<AtomicUsize>);
+
+	impl AfterCommitWait for Await {
+		fn wait(
+			self: Box<Self>,
+			_deadline: Option<AfterCommitDeadline>,
+		) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+			Box::pin(async move {
+				self.0.fetch_add(1, Ordering::SeqCst);
+				Ok(())
+			})
+		}
+	}
+
+	async fn queue_wait(tx: &Transaction, ran: &Arc<AtomicUsize>) {
+		assert!(tx.wait_after_commit(Box::new(Await(ran.clone()))).await.is_none());
+	}
+
+	/// An after-commit wait queued inside a rolled-back save point is dropped
+	/// with it, so the owner never awaits work whose writes the rollback undid.
+	/// A wait queued before the save point stays, and one queued inside a
+	/// released save point folds into the enclosing scope, which a rollback of
+	/// that scope then drops.
+	#[tokio::test]
+	async fn a_rollback_drops_the_after_commit_waits_its_scope_queued() {
+		let waits = AfterCommitWaits::default();
+		let tx = transaction().await.with_after_commit_waits(&waits);
+		let ran = counter();
+		queue_wait(&tx, &ran).await;
+		tx.new_save_point().await.unwrap();
+		queue_wait(&tx, &ran).await;
+		tx.new_save_point().await.unwrap();
+		queue_wait(&tx, &ran).await;
+		tx.release_last_save_point().await.unwrap();
+		assert_eq!(waits.len().await, 3, "a release keeps what its scope queued");
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(waits.len().await, 1, "the rollback drops both waits queued since it opened");
+		tx.commit().await.unwrap();
+		for wait in waits.take().await {
+			wait.wait(None).await.unwrap();
+		}
+		assert_eq!(runs(&ran), 1, "only the wait queued before the save point is awaited");
+	}
+
+	fn flag() -> Arc<AtomicBool> {
+		Arc::new(AtomicBool::new(false))
+	}
+
+	/// Buffer one changefeed mutation and one live event for `tb:key`.
+	fn write(tx: &Transaction, tb: &str, key: i64) {
+		let tb = TableName::from(tb);
+		let id = RecordId::new(tb.clone(), key);
+		let previous = Arc::new(Record::new(Value::None));
+		let current = Arc::new(Record::new(Value::from(key)));
+		tx.changefeed_buffer_record_change(NS, DB, &tb, &id, previous, current, false);
+		tx.live_event_buffer_record_change(NS, DB, &tb, &id, Value::None, Value::from(key), 0);
+	}
+
+	/// The number of changefeed mutations and live events buffered per table,
+	/// sorted by table name.
+	fn buffered(tx: &Transaction) -> Vec<(String, usize, usize)> {
+		let mut cf: Vec<(String, usize)> = tx
+			.changefeed
+			.get()
+			.map(|c| c.changes().unwrap())
+			.unwrap_or_default()
+			.into_iter()
+			.map(|(_, _, tb, val)| {
+				(tb.to_string(), TableMutations::kv_decode_value(&val, ()).unwrap().1.len())
+			})
+			.collect();
+		let mut lq: Vec<(String, usize)> = tx
+			.live_events
+			.get()
+			.map(|l| l.changes().unwrap())
+			.unwrap_or_default()
+			.into_iter()
+			.map(|(_, _, tb, val)| {
+				(tb.to_string(), LiveEvents::kv_decode_value(&val, ()).unwrap().events.len())
+			})
+			.collect();
+		cf.sort();
+		lq.sort();
+		assert_eq!(
+			cf.iter().map(|(t, _)| t).collect::<Vec<_>>(),
+			lq.iter().map(|(t, _)| t).collect::<Vec<_>>(),
+			"the changefeed and the live-event buffer hold the same tables"
+		);
+		cf.into_iter().zip(lq).map(|((t, c), (_, l))| (t, c, l)).collect()
+	}
+
+	/// A rollback discards what its scope buffered and the save-point-scoped
+	/// commit actions it queued, and keeps everything from before the save
+	/// point opened, including later entries for a table that already had
+	/// some. A transaction-scoped commit action queued inside the scope still
+	/// runs: it is cleanup owed however the transaction ends.
+	#[tokio::test]
+	async fn a_rollback_discards_only_what_its_scope_buffered() {
+		let tx = transaction().await;
+		let before = flag();
+		let scoped_inside = flag();
+		let unconditional_inside = flag();
+		write(&tx, "a", 1);
+		tx.on_commit(scoped(&before)).await;
+
+		tx.new_save_point().await.unwrap();
+		write(&tx, "a", 2);
+		write(&tx, "b", 1);
+		tx.on_commit(scoped(&scoped_inside)).await;
+		tx.on_commit(unconditional(&unconditional_inside)).await;
+		tx.rollback_to_save_point().await.unwrap();
+
+		assert_eq!(buffered(&tx), vec![("a".to_string(), 1, 1)]);
+		tx.commit().await.unwrap();
+		assert!(before.load(Ordering::SeqCst), "an action queued before the save point runs");
+		assert!(
+			!scoped_inside.load(Ordering::SeqCst),
+			"a scoped action the rollback dropped never runs"
+		);
+		assert!(
+			unconditional_inside.load(Ordering::SeqCst),
+			"a transaction-scoped action still runs"
+		);
+	}
+
+	/// A buffer first created inside the scope is emptied by its rollback.
+	#[tokio::test]
+	async fn a_rollback_empties_a_buffer_created_inside_its_scope() {
+		let tx = transaction().await;
+		tx.new_save_point().await.unwrap();
+		write(&tx, "a", 1);
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(buffered(&tx), vec![]);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A released save point folds into the one enclosing it: the enclosing
+	/// rollback discards both scopes' entries, and a commit keeps them all.
+	#[tokio::test]
+	async fn a_released_save_point_folds_into_its_parent() {
+		// Rolled back by the parent.
+		let tx = transaction().await;
+		let inner = flag();
+		write(&tx, "a", 1);
+		tx.new_save_point().await.unwrap();
+		write(&tx, "a", 2);
+		tx.new_save_point().await.unwrap();
+		write(&tx, "a", 3);
+		tx.on_commit(scoped(&inner)).await;
+		tx.release_last_save_point().await.unwrap();
+		write(&tx, "a", 4);
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(buffered(&tx), vec![("a".to_string(), 1, 1)]);
+		tx.commit().await.unwrap();
+		assert!(!inner.load(Ordering::SeqCst), "a released scope's action goes with its parent");
+
+		// Released all the way out, then committed.
+		let tx = transaction().await;
+		let inner = flag();
+		tx.new_save_point().await.unwrap();
+		write(&tx, "a", 1);
+		tx.new_save_point().await.unwrap();
+		write(&tx, "b", 1);
+		tx.on_commit(scoped(&inner)).await;
+		tx.release_last_save_point().await.unwrap();
+		tx.release_last_save_point().await.unwrap();
+		assert_eq!(buffered(&tx), vec![("a".to_string(), 1, 1), ("b".to_string(), 1, 1)]);
+		tx.commit().await.unwrap();
+		assert!(inner.load(Ordering::SeqCst));
 	}
 }
 

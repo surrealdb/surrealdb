@@ -2595,6 +2595,7 @@ mod tests {
 				BlockInstr::RunEmbedded {
 					..
 				}
+				| BlockInstr::Enter
 				| BlockInstr::Save
 				| BlockInstr::Restore
 				| BlockInstr::Resolve
@@ -3397,6 +3398,7 @@ mod tests {
 				| BlockInstr::CheckDepth {
 					..
 				}
+				| BlockInstr::Enter
 				| BlockInstr::Save
 				| BlockInstr::Restore
 				| BlockInstr::Clock

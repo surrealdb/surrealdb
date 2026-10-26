@@ -230,6 +230,8 @@ pub(super) async fn step(
 		BlockInstr::CheckDepth {
 			value,
 		} => crate::val::check_value_depth(&read(regs, *value))?,
+		// The host counted the block as a nested statement before it took the step.
+		BlockInstr::Enter => {}
 		BlockInstr::Save => {
 			state.saved.push(state.frame.clone());
 			state.save_frames(state.saved.len());

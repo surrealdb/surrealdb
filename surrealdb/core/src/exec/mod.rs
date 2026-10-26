@@ -52,6 +52,7 @@ pub(crate) mod batch;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
 pub(crate) mod catalog_deps;
+pub(crate) mod catch_scope;
 pub(crate) mod clause;
 pub(crate) mod clause_effects;
 pub(crate) mod closure;

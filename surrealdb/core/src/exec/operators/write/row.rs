@@ -8,6 +8,7 @@
 
 use std::cell::OnceCell;
 
+use surrealdb_datastore::tx::ProvisionalDraw;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
@@ -213,6 +214,26 @@ pub(crate) struct WriteRow {
 	/// that runs apart from its apply ([`EncodedImage`]). `None` for every other record.
 	pub(crate) encoded: Option<EncodedImage>,
 
+	/// Whether the attempt in flight got as far as storing its record: past
+	/// every gate that skips a record before it writes, whether or not the
+	/// store then changed anything (an unchanged record, a `DROP` table). Set
+	/// by the store stage, cleared by [`Self::reset_for_update_retry`].
+	///
+	/// A creating or updating attempt runs behind a savepoint, and a skip
+	/// before this point means the attempt wrote nothing a record answers to,
+	/// so its savepoint is rolled back. A skip after it only withholds output
+	/// (`RETURN NONE`, a select permission, an import), and what the attempt
+	/// wrote stands.
+	pub(crate) reached_store: bool,
+
+	/// The values the creating attempt drew from sequences the transaction
+	/// defined while deriving this record's id: in a data clause evaluated
+	/// before the record had an id, and in the `id` field's `DEFAULT`. A
+	/// creating attempt's rollback returns them to their sequences, though the
+	/// id may go on to name the record an update retry writes;
+	/// [`Self::replay_id_draws`] moves the sequences past them again.
+	pub(crate) id_draws: Vec<ProvisionalDraw>,
+
 	/// Whether an in-flight index build deferred this record's doc-id removal.
 	/// `store_index_data` reports it; `reclaim_doc_id`, the next stage of
 	/// `DELETE`'s order, acts on it. Carried on the row rather than returned,
@@ -381,11 +402,42 @@ impl WriteRow {
 			retry: false,
 			mutated: false,
 			encoded: None,
+			reached_store: false,
+			id_draws: Vec::new(),
 			doc_id_removal_deferred: false,
 			matched: false,
 			output: None,
 			modified: OnceCell::new(),
 		}
+	}
+
+	/// After a creating attempt was rolled back, draw again from the sequences
+	/// the transaction defined the values deriving this record's id drew, when
+	/// the record is skipped or updated under that id: `target` is the record
+	/// the duplicate-id conflict or the retry names. Left returned, the next
+	/// record would draw the same id, and skip or update this record again
+	/// instead of creating the next one. A sequence committed earlier is never
+	/// restored by a rollback, so it needs nothing. Where `target` is another
+	/// record (a unique-index conflict), the id is discarded with the attempt
+	/// and its values are free to be drawn again.
+	///
+	/// Only the allocators move; see `Sequences::replay_provisional_draws`.
+	/// Nothing that derived the id is evaluated again.
+	pub(crate) async fn replay_id_draws(
+		&mut self,
+		ctx: &WriteCtx,
+		target: &RecordId,
+	) -> Result<(), ControlFlow> {
+		let draws = std::mem::take(&mut self.id_draws);
+		if draws.is_empty() || self.id.as_ref() != Some(target) {
+			return Ok(());
+		}
+		let frozen = ctx.exec().ctx();
+		let sequences = frozen.try_get_sequences().map_err(ControlFlow::Err)?;
+		sequences
+			.replay_provisional_draws(Some(frozen), &ctx.txn(), &draws)
+			.await
+			.map_err(ControlFlow::Err)
 	}
 
 	/// The table this record belongs to: the id's table once there is an id,
@@ -613,6 +665,8 @@ impl WriteRow {
 		self.generate_in = None;
 		self.retry = true;
 		self.mutated = false;
+		self.encoded = None;
+		self.reached_store = false;
 		self.doc_id_removal_deferred = false;
 		self.output = None;
 		self.initial.clone_from(&record.data);

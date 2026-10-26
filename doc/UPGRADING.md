@@ -103,6 +103,11 @@ is in, and a store may hold both side by side.
   compaction from the `f32` comparer its graph walk ranks with, rather than in
   `f64`. That distance can differ from an earlier release's in its last digits,
   and two such records at nearly equal distances can swap places. See below.
+- A failure that is caught and handled inside the same transaction undoes
+  everything the failing unit wrote: a `DEFINE API` handler or middleware that
+  fails, and a `surrealdb.query`, `surrealdb.value` or `surrealdb.functions`
+  call that a script catches. Writes that such a failure left behind before
+  are now discarded. See below.
 
 ### SurrealKV is the only embedded engine
 
@@ -630,6 +635,60 @@ transaction is cancelled or fails, as its writes are. After
 transaction bound for the first time holds nothing again. A `LET` inside a
 transaction that commits keeps its value. A client that read a parameter bound
 inside a cancelled transaction must bind it again outside the transaction.
+
+### A grouped value that ran a nested statement fails the query
+
+A grouped query reads a group key or an aggregate's argument whose value fails
+only on the shape of the data, such as `count(age + 'x')` over a row whose `age`
+is a number, as `NONE`, so a query over rows of mixed shape goes on. That reading
+now applies only to a value whose evaluation ran no nested statement. A value
+that ran a subquery, a `{ … }` block, a `fn::` call, an embedded script, a module
+export, or `eval::surql`, `eval::gql` or `api::invoke` (directly, through a
+closure, through a computed field or in a graph lookup's condition) and then
+failed fails the query with its error, as the same query does ungrouped,
+whether the failure came out of the nested statement or after it. This applies
+in a group key, an aggregate's argument, a grouped field and the expression over
+a group's answers. Before, a grouped query read such a failure as `NONE` and kept
+whatever the nested statement wrote.
+
+**Impact**:
+
+- A grouped query whose value runs a nested statement, block or `fn::` call and
+  fails, for example `SELECT array::group((CREATE t:1 RETURN 1 + 'a')) FROM s
+  GROUP ALL` or `SELECT array::group((CREATE t:1 RETURN VALUE 1)[0] + 'a') FROM s
+  GROUP ALL`, now returns the error instead of `NONE`, and leaves nothing
+  written. A query that relied on the `NONE` must guard the expression itself.
+- An error about the shape of a value computed by the expression alone, a
+  closure included, still reads as `NONE`. So does one computed by a `fn::` body
+  that the planner runs inside the caller, a body small and pure enough to
+  inline.
+
+### A caught failure leaves no writes
+
+Some failures are caught and handled while their transaction continues: a
+`DEFINE API` handler or middleware that fails, or that returns something that
+is not a response, is answered with an error response; a script can catch a
+`surrealdb.query`, `surrealdb.value` or `surrealdb.functions` call that fails;
+a Surrealism module that may write handles a failed `sql` or `run` call. Each
+such unit that may write runs inside a save point, so its failure undoes every
+write it made, including the earlier rows of a multi-row `INSERT` and the
+changefeed entries, live-query events, index entries and sequence values that
+went with them. In a transaction that has defined a sequence, every such unit
+runs inside a save point, because one that only reads may still draw from that
+sequence: a value it drew is drawn again by the next call. A sequence committed
+earlier keeps its progress. A unit that succeeds keeps its writes, and a failure inside
+`BEGIN … COMMIT`, a client-held transaction or a single statement still fails
+the whole transaction, as before.
+
+**Impact**:
+
+- A failed API handler, middleware or script call no longer leaves the rows it
+  wrote before failing. A client that relied on such partial writes must write
+  them in a unit that succeeds.
+- Each writing call, and each call in a transaction that has defined a
+  sequence, opens and closes a save point, a cost that shows on workloads
+  making many small calls in one transaction. Writes inside
+  the call do not batch their key-absence checks while the save point is open.
 
 ### Index materialisation shares the node's place pool
 

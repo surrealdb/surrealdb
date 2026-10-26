@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_channel::Sender;
 use parking_lot::RwLock;
-use surrealdb_datastore::close::CommitAction;
+use surrealdb_datastore::close::{ActionScope, CommitAction};
 use surrealdb_types::Notification;
 
 /// A live-query notification paired with the datastore node that owns the subscription.
@@ -241,6 +241,11 @@ impl CommitAction for SendKill {
 		Box::pin(async move {
 			self.broker.send(self.notification).await;
 		})
+	}
+
+	/// Announces the removal that queued it, so it goes with that removal.
+	fn scope(&self) -> ActionScope {
+		ActionScope::SavePoint
 	}
 }
 

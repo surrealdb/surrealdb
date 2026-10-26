@@ -596,6 +596,11 @@ pub(super) async fn step(
 			// The clause is evaluated against the record's content as an object,
 			// so a stored scalar is edited as the object of its id.
 			row.content_from_id();
+			// A clause evaluated before the record has an id may derive it. What
+			// it draws from sequences the transaction defined is noted for a
+			// retry of the record under that id (see `WriteRow::id_draws`).
+			let txn = (row.id.is_none() && row.generate_in.is_some()).then(|| ctx.txn());
+			let recording = txn.as_ref().map(|txn| txn.record_provisional_draws());
 			let value = match pipeline {
 				Some(pipeline) => {
 					let image = data_clause_image(row);
@@ -611,6 +616,7 @@ pub(super) async fn step(
 				}
 				None => None,
 			};
+			let draws = recording.map(|recording| recording.finish());
 			let data = statement_data(program, state)?
 				.ok_or_else(|| internal("a data clause with none"))?;
 			let computed = match (data, value) {
@@ -636,7 +642,11 @@ pub(super) async fn step(
 				}
 				_ => return Err(internal("a data clause evaluated to a shape it does not take")),
 			};
-			write_state(state)?.row()?.input = Some(computed);
+			let row = write_state(state)?.row()?;
+			row.input = Some(computed);
+			if let Some(draws) = draws {
+				row.id_draws = draws;
+			}
 			Ok(next)
 		}
 		DataInstr::ApplyInput => {
@@ -742,10 +752,17 @@ pub(super) async fn step(
 				.map_err(ControlFlow::Err)?
 				.refusing_writes(crate::dbs::NoWriteFrame::FieldDefault);
 			let doc = data::id_default_doc(row).clone();
-			let value =
-				field_clause(run_image(program, *pipeline, doc, Some(frame), state, exec).await)?;
+			// What the DEFAULT draws from sequences the transaction defined is
+			// noted for a retry of the record under this id (see
+			// `WriteRow::id_draws`).
+			let txn = ctx.txn();
+			let recording = txn.record_provisional_draws();
+			let value = run_image(program, *pipeline, doc, Some(frame), state, exec).await;
+			let draws = recording.finish();
+			let value = field_clause(value)?;
 			let row = write_state(state)?.row()?;
 			data::check_default_id(row, &ctx, &table, &value)?;
+			row.id_draws.extend(draws);
 			let id = value.generate(table, false).map_err(ControlFlow::Err)?;
 			data::finish_record_id(row, &ctx, id)?;
 			Ok(next)

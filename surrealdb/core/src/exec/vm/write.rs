@@ -27,7 +27,9 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::operators::check_cancelled;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::write::ctx::{TableExistence, WriteCtx};
-use crate::exec::operators::write::plan::{CreateFailure, WriteForm, classify_create_failure};
+use crate::exec::operators::write::plan::{
+	CreateFailure, WriteForm, classify_create_failure, duplicate_record,
+};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
 use crate::exec::operators::write::stage::{RecordImage, StageOutcome};
@@ -181,6 +183,65 @@ pub(super) struct WriteState {
 	/// The record-type marker the statement's task read for the record the compute half runs
 	/// next, taken once by the body's first instruction ([`Self::hold_stored_metadata`]).
 	stored_metadata: Option<Option<crate::catalog::Metadata>>,
+	/// The savepoints the body has opened and not yet closed.
+	savepoints: OpenSavepoints,
+}
+
+/// The savepoints a write body has opened ([`WriteInstr::SavepointPush`]) and not yet closed, and
+/// the transaction they were opened on.
+///
+/// A savepoint is counted once it is open, until its release or rollback returns. Dropped with
+/// one counted — the statement's future dropped while an attempt was open, or while its release
+/// or rollback was in progress — it refuses the transaction's commit
+/// ([`crate::kvs::Transaction::poison_abandoned_save_point`]): the savepoint stays on the stack
+/// for some other scope to close in place of its own, and the attempt may have stored its record
+/// before its index entries or observers ran. A transaction its client owns survives the dropped
+/// statement and could otherwise still commit.
+///
+/// A release or rollback that returns, with an error or without, is no longer counted: the
+/// transaction has then decided for itself whether it may commit.
+#[derive(Default)]
+struct OpenSavepoints {
+	/// The transaction of the savepoints counted, once one has been opened.
+	txn: Option<Arc<crate::kvs::Transaction>>,
+	/// How many are open.
+	open: u32,
+}
+
+impl OpenSavepoints {
+	/// Opens a savepoint on `txn`. One that fails to open is not counted: the transaction awaits
+	/// only before the storage savepoint opens, and a failure of the storage refuses its commit.
+	async fn push(&mut self, txn: Arc<crate::kvs::Transaction>) -> Result<(), ControlFlow> {
+		txn.new_save_point().await.map_err(ControlFlow::Err)?;
+		self.open += 1;
+		self.txn = Some(txn);
+		Ok(())
+	}
+
+	/// Closes the last savepoint on `txn`: rolled back when `rollback`, released otherwise.
+	async fn close(
+		&mut self,
+		txn: &crate::kvs::Transaction,
+		rollback: bool,
+	) -> Result<(), ControlFlow> {
+		let closed = if rollback {
+			txn.rollback_to_save_point().await
+		} else {
+			txn.release_last_save_point().await
+		};
+		self.open = self.open.saturating_sub(1);
+		closed.map_err(ControlFlow::Err)
+	}
+}
+
+impl Drop for OpenSavepoints {
+	fn drop(&mut self) {
+		if self.open > 0
+			&& let Some(txn) = &self.txn
+		{
+			txn.poison_abandoned_save_point();
+		}
+	}
 }
 
 /// What a write's state holds once a record has ended, for a test that compares the state of a
@@ -259,6 +320,7 @@ impl WriteState {
 			prefix_stop: None,
 			pending: None,
 			stored_metadata: None,
+			savepoints: OpenSavepoints::default(),
 		})
 	}
 
@@ -403,6 +465,7 @@ impl WriteState {
 			prefix_stop: None,
 			pending: None,
 			stored_metadata: None,
+			savepoints: OpenSavepoints::default(),
 		}
 	}
 
@@ -768,24 +831,24 @@ impl WriteState {
 				}
 			}
 			WriteInstr::SavepointPush => {
+				// A body is cut only where it opens no savepoint, so the state that opens one is
+				// the state that closes it.
+				debug_assert!(!self.prefix, "a savepoint opened by the compute half of a write");
 				let (_, ctx) = self.in_flight()?;
-				ctx.txn().new_save_point().await.map_err(ControlFlow::Err)?;
+				self.savepoints.push(ctx.txn()).await?;
 				next
 			}
 			WriteInstr::SavepointRelease => {
 				let (_, ctx) = self.in_flight()?;
-				ctx.txn().release_last_save_point().await.map_err(ControlFlow::Err)?;
+				self.savepoints.close(&ctx.txn(), false).await?;
 				next
 			}
 			WriteInstr::SavepointRollback => {
 				let (_, ctx) = self.in_flight()?;
 				// A `BREAK`, `CONTINUE` or `RETURN` the attempt signalled leaves it with what it
 				// wrote, as it leaves a write that runs with no savepoint; an error undoes it.
-				if self.holds_signal() {
-					ctx.txn().release_last_save_point().await.map_err(ControlFlow::Err)?;
-				} else {
-					ctx.txn().rollback_to_save_point().await.map_err(ControlFlow::Err)?;
-				}
+				let rollback = !self.holds_signal();
+				self.savepoints.close(&ctx.txn(), rollback).await?;
 				next
 			}
 			WriteInstr::TryBegin {
@@ -804,6 +867,20 @@ impl WriteState {
 				}
 				next
 			}
+			WriteInstr::SavepointEndSkipped => {
+				let reached_store = self.row()?.reached_store;
+				let (_, ctx) = self.in_flight()?;
+				self.savepoints.close(&ctx.txn(), !reached_store).await?;
+				next
+			}
+			WriteInstr::ReachedStore => {
+				self.row()?.reached_store = true;
+				next
+			}
+			WriteInstr::Rethrow => match self.failure.take() {
+				Some(failure) => return Err(failure),
+				None => return Err(internal("a handler resumed with no failure")),
+			},
 			WriteInstr::RethrowSignal => match self.failure.take() {
 				Some(ControlFlow::Err(err)) => {
 					self.failure = Some(ControlFlow::Err(err));
@@ -819,8 +896,15 @@ impl WriteState {
 				let Some(ControlFlow::Err(err)) = self.failure.take() else {
 					return Err(internal("a create failure to classify that is not an error"));
 				};
+				let duplicate = duplicate_record(&err);
 				match classify_create_failure(err, self.row()?, *policy) {
-					CreateFailure::Skip => *skip as usize,
+					CreateFailure::Skip => {
+						if let Some(record) = duplicate {
+							let (row, ctx) = self.in_flight()?;
+							row.replay_id_draws(&ctx, &record).await?;
+						}
+						*skip as usize
+					}
 					CreateFailure::Raise(err) => return Err(ControlFlow::Err(err)),
 					CreateFailure::RetryAsUpdate {
 						record,
@@ -864,12 +948,18 @@ impl WriteState {
 				// own evaluation wrote, as an event does — leaves nothing to update.
 				// Updating nothing would drop the statement without a word.
 				let gone = stored.data.is_nullish();
+				if !gone {
+					row.replay_id_draws(&ctx, &target).await?;
+				}
 				row.reset_for_update_retry(target, &stored, stamp);
 				row.replay_stored(ctx.exec()).await?;
-				match self.retry_cause.take() {
-					Some(cause) if gone => return Err(ControlFlow::Err(cause)),
-					_ => next,
+				// Nothing to update raises the conflict, or the failure the attempt
+				// carried, without opening the update's savepoint.
+				let cause = self.retry_cause.take();
+				if gone && let Some(cause) = cause.or_else(|| self.carried.take()) {
+					return Err(ControlFlow::Err(cause));
 				}
+				next
 			}
 			WriteInstr::CarryBegin => {
 				self.carrying = true;
@@ -917,9 +1007,11 @@ impl WriteState {
 			| WriteInstr::Permissions(_)
 			| WriteInstr::Observe(_)
 			| WriteInstr::Storage(_) => return Err(internal("a step serviced without its program")),
+			// An update that stored the record satisfied it, whatever withheld
+			// its output afterwards: the failure the attempt carried is dropped.
 			WriteInstr::RaiseCarried => match self.carried.take() {
-				Some(err) => return Err(ControlFlow::Err(err)),
-				None => next,
+				Some(err) if !self.row()?.reached_store => return Err(ControlFlow::Err(err)),
+				_ => next,
 			},
 			WriteInstr::End {
 				skipped,
@@ -1098,6 +1190,8 @@ pub(super) async fn step(
 		}
 		| WriteInstr::SavepointPush
 		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointEndSkipped
+		| WriteInstr::ReachedStore
 		| WriteInstr::SavepointRollback
 		| WriteInstr::TryBegin {
 			..
@@ -1105,6 +1199,7 @@ pub(super) async fn step(
 		| WriteInstr::TryEnd
 		| WriteInstr::ClearMutated
 		| WriteInstr::RethrowSignal
+		| WriteInstr::Rethrow
 		| WriteInstr::ClassifyCreateFailure {
 			..
 		}
@@ -1517,6 +1612,8 @@ fn show_settled(instr: &WriteInstr, write: &mut WriteState) -> FlowResult<bool> 
 		}
 		| WriteInstr::SavepointPush
 		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointEndSkipped
+		| WriteInstr::ReachedStore
 		| WriteInstr::SavepointRollback
 		| WriteInstr::TryBegin {
 			..
@@ -1524,6 +1621,7 @@ fn show_settled(instr: &WriteInstr, write: &mut WriteState) -> FlowResult<bool> 
 		| WriteInstr::TryEnd
 		| WriteInstr::ClearMutated
 		| WriteInstr::RethrowSignal
+		| WriteInstr::Rethrow
 		| WriteInstr::ClassifyCreateFailure {
 			..
 		}
@@ -1648,6 +1746,8 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 		}
 		| WriteInstr::SavepointPush
 		| WriteInstr::SavepointRelease
+		| WriteInstr::SavepointEndSkipped
+		| WriteInstr::ReachedStore
 		| WriteInstr::SavepointRollback
 		| WriteInstr::TryBegin {
 			..
@@ -1655,6 +1755,7 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 		| WriteInstr::TryEnd
 		| WriteInstr::ClearMutated
 		| WriteInstr::RethrowSignal
+		| WriteInstr::Rethrow
 		| WriteInstr::ClassifyCreateFailure {
 			..
 		}

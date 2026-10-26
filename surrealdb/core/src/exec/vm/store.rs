@@ -43,6 +43,10 @@ impl surrealdb_datastore::close::CommitAction for DeleteModelArtifactOnCommit {
 			}
 		})
 	}
+
+	fn scope(&self) -> surrealdb_datastore::close::ActionScope {
+		surrealdb_datastore::close::ActionScope::SavePoint
+	}
 }
 
 pub(super) fn read(regs: &[Scalar<'_>], reg: u16) -> Value {

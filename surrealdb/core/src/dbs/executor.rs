@@ -11,7 +11,9 @@ use async_channel::Sender;
 use futures::channel::oneshot;
 use futures::{Stream, StreamExt};
 use rand::Rng;
-use surrealdb_datastore::close::{AfterCommitDeadline, AfterCommitWaits, CommitAction};
+use surrealdb_datastore::close::{
+	ActionScope, AfterCommitDeadline, AfterCommitWaits, CommitAction,
+};
 use surrealdb_expr::parser::{BeginOptions, IsolationLevel, Staleness, TopLevelExpr};
 use surrealdb_strand::Strand;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
@@ -655,6 +657,11 @@ impl CommitAction for FlushOnCommit {
 		crate::exec::vm::out_of_line(|| async move {
 			flush_live_query_notifications(self.0);
 		})
+	}
+
+	/// Flushes the whole batch's notifications once the transaction commits.
+	fn scope(&self) -> ActionScope {
+		ActionScope::Transaction
 	}
 }
 

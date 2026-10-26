@@ -1,7 +1,7 @@
 use js::Result;
 use js::prelude::Async;
 
-use super::query::QueryContext;
+use super::query::{QueryContext, caught};
 use crate::ctx::FrozenContext;
 use crate::exec::function::timezone_at;
 use crate::expr::logical::EffectSet;
@@ -148,7 +148,16 @@ async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value>
 			let effects =
 				this.context.function_registry().get(name).map_or(EffectSet::PURE, |f| f.effects());
 			match crate::fnc::script::refuse_builtin_in_frame(this.opt.no_write, name, effects) {
-				Ok(()) => fnc::asynchronous(this.context, this.opt, this.doc, name, args).await,
+				// A builtin that writes, such as `eval::surql`, is a call the
+				// script may catch the rejection of.
+				Ok(()) => {
+					caught(
+						&this,
+						effects.contains(EffectSet::WRITES_DATA),
+						fnc::asynchronous(this.context, this.opt, this.doc, name, args),
+					)
+					.await
+				}
 				Err(err) => Err(err),
 			}
 		}

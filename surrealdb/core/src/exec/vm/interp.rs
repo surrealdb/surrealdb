@@ -282,10 +282,15 @@ pub(super) struct FunctionMemo {
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Region {
 	/// An [`Instr::TryNone`] region: where it continues when it catches an
-	/// error, and the register it sets to `NONE`.
+	/// error, the register it sets to `NONE`, and the count of nested
+	/// statements of the run's context when it opened
+	/// ([`crate::exec::ExecutionContext::nested_runs`]): it catches only while
+	/// the count stands there, so a value whose evaluation ran a nested
+	/// statement, a block or a `fn::` call is never read as `NONE`.
 	Try {
 		catch: usize,
 		dst: Option<Reg>,
+		nested: u64,
 	},
 	/// An [`Instr::MethodRegion`]: the method whose body runs in it.
 	Method {
@@ -392,6 +397,12 @@ pub(crate) struct State {
 	pub(super) aggregates: std::sync::Arc<ResolvedAggregates>,
 	/// The regions the row is in, innermost last.
 	pub(super) tries: Vec<Region>,
+	/// The count of nested statements of the context the host runs the body
+	/// in ([`crate::exec::ExecutionContext::nested_runs`]), as it stood when
+	/// the host last entered the body: an [`Instr::TryNone`] region opened in
+	/// the body records it. Nothing nested starts while the body runs, only in
+	/// a host step, so it is the count the region opened at.
+	pub(super) nested_mark: u64,
 	pub(super) output: Vec<Value>,
 	pub(super) pending: Option<Pending>,
 	/// The records a body run in the storage cursor left pending and the run decoded whole, since
@@ -1118,6 +1129,7 @@ impl State {
 			registry: _,
 			aggregates: _,
 			tries,
+			nested_mark,
 			output,
 			pending,
 			decoded,
@@ -1214,6 +1226,7 @@ impl State {
 		*spill_due = false;
 		emptied(groups);
 		emptied(tries);
+		*nested_mark = 0;
 		emptied(output);
 		*pending = None;
 		*decoded = 0;
@@ -1632,6 +1645,7 @@ impl State {
 			registry: 0,
 			aggregates: std::sync::Arc::clone(&NO_AGGREGATES),
 			tries: Vec::new(),
+			nested_mark: 0,
 			output: Vec::new(),
 			pending: None,
 			decoded: 0,
@@ -4224,6 +4238,7 @@ pub(super) fn run_row<'r>(
 				state.tries.push(Region::Try {
 					catch: *catch as usize,
 					dst: *dst,
+					nested: state.nested_mark,
 				});
 				pc += 1;
 			}

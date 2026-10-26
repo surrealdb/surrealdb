@@ -190,10 +190,10 @@ pub(crate) enum Branching {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RetryPolicy {
 	/// How many stages of the creating order run *before* the savepoint is
-	/// pushed. This is the one place a stage's position, rather than its
-	/// presence, carries a form's difference: `UPSERT` pushes after the tenant
-	/// guard alone, `INSERT` after the tenant guard and the id derivation,
-	/// because a rolled-back attempt must not derive a second id.
+	/// pushed: the tenant guard, which a retry re-runs as a no-op. Everything
+	/// else, the id derivation included, is part of the attempt; what the
+	/// derivation drew from a sequence the transaction defined is drawn again
+	/// when the record goes on under that id (`WriteRow::replay_id_draws`).
 	pub(crate) savepoint_after: usize,
 	/// Whether a failure naming an existing record may be re-run as an update.
 	/// False for `INSERT` without `ON DUPLICATE KEY UPDATE`, which has no
@@ -268,10 +268,9 @@ impl WritePlan {
 					creating: WriteOrder::InsertCreate,
 					updating: WriteOrder::InsertUpdate,
 					policy: RetryPolicy {
-						// The tenant guard and the id derivation run outside
-						// the savepoint: a rolled-back attempt must not derive
-						// a second id.
-						savepoint_after: 2,
+						// The tenant guard runs outside the savepoint; the
+						// create attempt proper begins at the id derivation.
+						savepoint_after: 1,
 						retry_conflict: facts.on_duplicate_key_update,
 						skip_failures: facts.ignore,
 						carry_schema_failure: false,
@@ -300,6 +299,17 @@ impl WritePlan {
 	/// The named order, when this form has one.
 	pub(crate) fn order(&self, which: WriteOrder) -> Option<&[StageId]> {
 		self.orders.iter().find(|(o, _)| *o == which).map(|(_, s)| s.as_slice())
+	}
+}
+
+/// The record a create failure says already holds the record's id, when the
+/// failure is a duplicate id rather than a unique-index conflict.
+pub(crate) fn duplicate_record(err: &anyhow::Error) -> Option<RecordId> {
+	match err.downcast_ref::<DocError>() {
+		Some(DocError::RecordExists {
+			record,
+		}) => Some(record.clone()),
+		_ => None,
 	}
 }
 
@@ -652,14 +662,14 @@ fn relate_update_order(facts: WriteFacts) -> Vec<StageId> {
 	order
 }
 
-/// The `INSERT` create order. Its id derivation runs on the dispatch, ahead of
-/// the savepoint, not inside `insert_create`. It is the only creating order
-/// that applies its data by merging the row's own value, and the only one that
-/// evaluates no data clause: an `INSERT`'s one clause is `ON DUPLICATE KEY
-/// UPDATE`, which belongs to the updating order and reads the stored record a
-/// collision names, so a row that collides with nothing never evaluates it. It
-/// also validates the special fields before applying the data, as the four
-/// updating orders do. The other creating orders skip that validation.
+/// The `INSERT` create order, which derives the record's id before checking
+/// the table type. It is the only creating order that applies its data by
+/// merging the row's own value, and the only one that evaluates no data clause:
+/// an `INSERT`'s one clause is `ON DUPLICATE KEY UPDATE`, which belongs to the
+/// updating order and reads the stored record a collision names, so a row that
+/// collides with nothing never evaluates it. It also validates the special
+/// fields before applying the data, as the four updating orders do. The other
+/// creating orders skip that validation.
 fn insert_create_order() -> Vec<StageId> {
 	vec![
 		StageId::CheckRecordUserAccess,
