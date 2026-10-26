@@ -228,6 +228,7 @@ mod tests {
 		let registry = FunctionRegistry::with_builtins();
 		for name in [
 			"count",
+			"count::present",
 			"math::sum",
 			"math::mean",
 			"math::sum_distinct",

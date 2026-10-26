@@ -582,12 +582,13 @@ pub fn lower_bound_expr(
 			{
 				Vec::new()
 			} else if mapped_fn == "count" && args.len() == 1 {
-				let inner = lower_stored(&args[0], policy)?;
-				let not_null = is_not_null_expr(inner);
-				vec![LogicalExpr::If(Box::new(LogicalIf {
-					branches: vec![(not_null, LogicalExpr::Literal(LogicalLiteral::Bool(true)))],
-					otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
-				}))]
+				// The engine's aggregate that counts the values that are neither NULL nor NONE,
+				// folding the argument as written: a per-row test inside the fold would keep the
+				// scan from running on the stored row.
+				return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("count::present".to_string()),
+					args: vec![lower_stored(&args[0], policy)?],
+				})));
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};

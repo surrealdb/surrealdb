@@ -539,6 +539,41 @@ async fn the_allocation_shapes_compile_to_the_path_they_measure() {
 	assert_eq!(seen[0], seen[1], "`{packed}` and `{twin}` compile alike");
 }
 
+/// A PostgreSQL `COUNT(column)`, which counts the rows whose column is neither NULL nor NONE, folds
+/// on the stored row as a grouped `count()` does.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn a_postgres_count_of_a_column_folds_on_the_stored_row() {
+	let db = serial_db(
+		"
+		DEFINE TABLE p SCHEMAFULL;
+		DEFINE FIELD b ON p TYPE option<int | null>;
+		DEFINE FIELD lo ON p TYPE int;
+		CREATE |p:1..21| SET b = 0, lo = 1;
+		CREATE |p:21..31| SET b = NULL, lo = 1;
+		CREATE |p:31..41| SET lo = 2;
+		",
+	)
+	.await;
+	let owner = TestDb::owner();
+	let sql = "SELECT lo, count(b) AS c FROM p GROUP BY lo ORDER BY lo";
+	observed::reset();
+	let results = db
+		.datastore()
+		.run(crate::kvs::QueryRequest::new(crate::kvs::QuerySource::pgsql(sql), &owner))
+		.await
+		.expect("runs");
+	let answers: Vec<_> = results
+		.into_iter()
+		.map(|response| response.result.expect("the statement answers"))
+		.collect();
+	// Zero counts and NULL does not; a missing column counts nothing.
+	let answers = format!("{answers:?}");
+	assert!(answers.contains(r#"{"c": Number(Int(20)), "lo": Number(Int(1))}"#), "{answers}");
+	assert!(answers.contains(r#"{"c": Number(Int(0)), "lo": Number(Int(2))}"#), "{answers}");
+	assert_scans_read_in_place(sql);
+}
+
 /// The filters of `packed_reads/errors_in_place.surql`, whose arithmetic over fields fails on some
 /// rows, compile to scans that read the packed row in place, so the errors they raise come from a
 /// body running on the stored row.

@@ -1026,6 +1026,7 @@ pub(crate) const FALLIBILITY: &[(FnKind, &str, Fallibility)] = &[
 	(FnKind::Aggregate, "array::max", Fallibility::INFALLIBLE),
 	(FnKind::Aggregate, "array::min", Fallibility::INFALLIBLE),
 	(FnKind::Aggregate, "count", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "count::present", Fallibility::INFALLIBLE),
 	(FnKind::Aggregate, "math::max", Fallibility::VALUE),
 	(FnKind::Aggregate, "math::mean", Fallibility::VALUE),
 	(FnKind::Aggregate, "math::mean_distinct", Fallibility::VALUE),

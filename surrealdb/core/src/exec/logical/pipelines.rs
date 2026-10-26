@@ -328,8 +328,10 @@ impl Legality {
 /// How the partial states of the aggregate function `name` combine.
 pub(crate) fn aggregate_combine(name: &str) -> AggregateCombine {
 	match name {
-		"count" | "math::min" | "math::max" | "math::median" | "time::min" | "time::max"
-		| "array::join" | "array::distinct" | "array::min" | "array::max" => AggregateCombine::Exact,
+		"count" | "count::present" | "math::min" | "math::max" | "math::median" | "time::min"
+		| "time::max" | "array::join" | "array::distinct" | "array::min" | "array::max" => {
+			AggregateCombine::Exact
+		}
 		"array::group" | "array::collect" => AggregateCombine::Appending,
 		"math::sum" | "math::mean" | "math::stddev" | "math::variance" | "vector::sum" => {
 			AggregateCombine::InexactFloat
@@ -1148,7 +1150,7 @@ impl<'a> Walker<'_, 'a> {
 		let shape = Shape {
 			counts_only: aggregate.group.is_empty()
 				&& !names.is_empty()
-				&& names.iter().all(|name| *name == "count"),
+				&& names.iter().all(|name| matches!(*name, "count" | "count::present")),
 			ordered_fold: aggregate.group.is_empty()
 				&& names.iter().all(|name| {
 					aggregate_combine(name) != AggregateCombine::InexactFloat
@@ -1162,8 +1164,8 @@ impl<'a> Walker<'_, 'a> {
 /// What the walk states about a sink besides how its parts combine.
 #[derive(Clone, Copy, Default)]
 struct Shape {
-	/// Whether the aggregate has no key and every function it calls is `count`: the arrival of its
-	/// parts is free ([`Arrival::Free`]).
+	/// Whether the aggregate has no key and every function it calls is `count` or
+	/// `count::present`: the arrival of its parts is free ([`Arrival::Free`]).
 	counts_only: bool,
 	/// [`Legality::ordered_fold`].
 	ordered_fold: bool,

@@ -4,7 +4,7 @@
 //! during GROUP BY query execution.
 //!
 //! Aggregates are organized by category:
-//! - [`count`]: Row and value counting (COUNT(), COUNT(field))
+//! - [`count`]: Row and value counting (COUNT(), COUNT(field), the SQL front ends' COUNT(column))
 //! - [`math`]: Mathematical aggregations (sum, mean, min, max, stddev, variance, median)
 //! - [`distinct`]: Sum and mean of the distinct numbers of a group
 //! - [`time`]: Datetime aggregations (min, max)
@@ -22,7 +22,7 @@ mod vector;
 
 // Re-export all aggregate functions
 pub use array::{ArrayCollect, ArrayDistinct, ArrayGroup, ArrayJoin, ArrayMax, ArrayMin};
-pub use count::{Count, CountField};
+pub use count::{Count, CountField, CountPresent};
 pub use distinct::{MathMeanDistinct, MathSumDistinct};
 pub use math::{MathMax, MathMean, MathMedian, MathMin, MathStddev, MathSum, MathVariance};
 use reject::Rejected;
@@ -43,6 +43,7 @@ use crate::val::Value;
 pub(crate) enum AccumulatorState {
 	Count(count::CountAccumulator),
 	CountField(count::CountFieldAccumulator),
+	CountPresent(count::CountPresentAccumulator),
 	Sum(math::SumAccumulator),
 	Mean(math::MeanAccumulator),
 	Min(math::MinAccumulator),
@@ -61,6 +62,7 @@ impl AccumulatorState {
 		match self {
 			Self::Count(a) => a,
 			Self::CountField(a) => a,
+			Self::CountPresent(a) => a,
 			Self::Sum(a) => a,
 			Self::Mean(a) => a,
 			Self::Min(a) => a,
@@ -74,6 +76,7 @@ impl AccumulatorState {
 		match self {
 			Self::Count(a) => a,
 			Self::CountField(a) => a,
+			Self::CountPresent(a) => a,
 			Self::Sum(a) => a,
 			Self::Mean(a) => a,
 			Self::Min(a) => a,
@@ -94,6 +97,7 @@ impl AccumulatorState {
 		match self {
 			Self::Count(a) => a.save(),
 			Self::CountField(a) => a.save(),
+			Self::CountPresent(a) => a.save(),
 			Self::Sum(a) => a.save(),
 			Self::Mean(a) => a.save(),
 			Self::Min(a) => a.save(),
@@ -130,6 +134,7 @@ impl AccumulatorState {
 		match (self, other) {
 			(Self::Count(a), Self::Count(b)) => a.absorb(&b),
 			(Self::CountField(a), Self::CountField(b)) => a.absorb(&b),
+			(Self::CountPresent(a), Self::CountPresent(b)) => a.absorb(&b),
 			(Self::Sum(a), Self::Sum(b)) => return a.absorb(&b),
 			(Self::Mean(a), Self::Mean(b)) => return a.absorb(&b),
 			(Self::Min(a), Self::Min(b)) => a.absorb(&b),
@@ -146,6 +151,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 	// Count aggregates
 	registry.register_aggregate(Count);
 	// Note: CountField is handled specially - "count" with args becomes CountField
+	registry.register_aggregate(CountPresent);
 
 	// Math aggregates
 	registry.register_aggregate(MathSum);

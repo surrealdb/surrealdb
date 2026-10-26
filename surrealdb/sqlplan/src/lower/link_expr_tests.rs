@@ -234,7 +234,7 @@ fn counting_a_link_reads_the_stored_link() {
 	let op = pg_select("SELECT COUNT(dept) AS a FROM emp");
 	let (_, fields) = aggregation(&op);
 	assert!(!fields[0].contains("record::id"), "{fields:?}");
-	assert!(fields[0].contains("dept != NULL AND dept != NONE"), "{fields:?}");
+	assert!(fields[0].contains("count::present(dept)"), "{fields:?}");
 }
 
 #[test]
