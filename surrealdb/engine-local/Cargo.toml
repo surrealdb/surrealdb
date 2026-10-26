@@ -122,5 +122,11 @@ name = "point_read"
 harness = false
 
 [[bench]]
+name = "scan"
+harness = false
+# It opens a SurrealKV store on disk.
+required-features = ["kv-surrealkv"]
+
+[[bench]]
 name = "stmt_fixed_cost"
 harness = false

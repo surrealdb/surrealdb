@@ -6001,7 +6001,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "1.0.0"
-source = "git+https://github.com/surrealdb/surrealkv?rev=2005bee#2005bee5f56b2748f0e8e6aaa6f82b900c787bab"
+source = "git+https://github.com/surrealdb/surrealkv?rev=81a5200#81a5200545a248851d235c75b5dcecbb090c1db0"
 dependencies = [
  "aes-gcm",
  "affinitypool",
@@ -6039,7 +6039,7 @@ dependencies = [
 [[package]]
 name = "surrealkv-compat-indxdb"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealkv?rev=2005bee#2005bee5f56b2748f0e8e6aaa6f82b900c787bab"
+source = "git+https://github.com/surrealdb/surrealkv?rev=81a5200#81a5200545a248851d235c75b5dcecbb090c1db0"
 dependencies = [
  "js-sys",
  "thiserror 2.0.21",
@@ -6051,7 +6051,7 @@ dependencies = [
 [[package]]
 name = "surrealkv-compat-rocksdb"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealkv?rev=2005bee#2005bee5f56b2748f0e8e6aaa6f82b900c787bab"
+source = "git+https://github.com/surrealdb/surrealkv?rev=81a5200#81a5200545a248851d235c75b5dcecbb090c1db0"
 dependencies = [
  "lz4_flex",
  "rustix",
@@ -6064,7 +6064,7 @@ dependencies = [
 [[package]]
 name = "surrealkv-compat-v1"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/surrealkv?rev=2005bee#2005bee5f56b2748f0e8e6aaa6f82b900c787bab"
+source = "git+https://github.com/surrealdb/surrealkv?rev=81a5200#81a5200545a248851d235c75b5dcecbb090c1db0"
 dependencies = [
  "crc32fast",
  "lz4_flex",

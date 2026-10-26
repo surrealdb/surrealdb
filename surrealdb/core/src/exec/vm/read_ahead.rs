@@ -27,6 +27,17 @@
 //! same transaction, and a caller that admits it holds that nothing writes the range while the scan
 //! runs.
 //!
+//! A producer only pays where a core is free to run it: it reads on a core of its own what the
+//! caller's cursor would read on the caller's, and copies each entry into a page besides. So a
+//! source starts one only while at most half as many sources are open in the process as the node
+//! has cores ([`Open`]); past that, every core already runs a scan, a producer would take a core
+//! from another scan, and its copies are pure cost. A source that may not start one reads on
+//! through its own cursor, and asks again at its next call. A producer asks again before each page
+//! it fills, so one started while cores were spare does not outlast them: once they are not, it
+//! hands the page it holds to the consumer marked as the last it reads and ends, and the source
+//! reads what is left of the range through a cursor of its own again, from just after the last
+//! entry the producer read.
+//!
 //! Two pages exist: the one the consumer visits and the one being filled, so memory is bounded by
 //! two pages of the byte budget and one entry each, plus one carried entry: the entry that did not
 //! fit the page being filled is held in buffers the producer reuses for the next page. Once those
@@ -85,6 +96,12 @@ pub(super) trait Reader: Send + Sync + 'static {
 	/// producer ([`START_AFTER`]).
 	fn start_after(&self) -> u32 {
 		START_AFTER
+	}
+
+	/// Whether a core is free for a producer to read ahead on ([`Open::spare_core`]).
+	#[cfg(not(target_family = "wasm"))]
+	fn spare_core(&self) -> bool {
+		Open::spare_core()
 	}
 }
 
@@ -188,12 +205,57 @@ pub(super) struct ChunkSource<'a> {
 	start_after: u64,
 	cut: Arc<Cut>,
 	mode: Mode<'a>,
+	/// Counts the source among the open ones while it lives.
+	#[cfg(not(target_family = "wasm"))]
+	_open: Open,
+}
+
+/// One open [`ChunkSource`], counted among the open sources of the process while it lives.
+#[cfg(not(target_family = "wasm"))]
+struct Open;
+
+/// How many [`ChunkSource`]s are open in the process.
+#[cfg(not(target_family = "wasm"))]
+static OPEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(not(target_family = "wasm"))]
+impl Open {
+	fn new() -> Self {
+		OPEN.fetch_add(1, Ordering::Relaxed);
+		Self
+	}
+
+	/// Whether a source may start a producer: whether at most half as many sources are open as
+	/// the node has cores, so that one more task reading ahead finds a core no scan is using.
+	fn spare_core() -> bool {
+		// Tests of the producer run beside each other's sources, which the count would take for
+		// load; the rule itself is tested on its own (`spare`).
+		if cfg!(test) {
+			return true;
+		}
+		spare(OPEN.load(Ordering::Relaxed), crate::exec::planner::placement::node_cores())
+	}
+}
+
+/// Whether, with `open` sources open on a node of `cores` cores, a core is free for a producer:
+/// at most half as many sources are open as there are cores.
+#[cfg(not(target_family = "wasm"))]
+fn spare(open: usize, cores: usize) -> bool {
+	open.saturating_mul(2) <= cores
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Drop for Open {
+	fn drop(&mut self) {
+		OPEN.fetch_sub(1, Ordering::Relaxed);
+	}
 }
 
 enum Mode<'a> {
 	/// Read through the caller's own cursor. `last` holds the last key visited when `budget` is
-	/// set, `visited` counts the entries visited, and `more` says the range holds entries past the
-	/// last call and `visited` has reached [`START_AFTER`].
+	/// set and `more` is (the key of a call that left the range unread), `visited` counts the
+	/// entries visited, and `more` says the range holds entries past the last call and `visited`
+	/// has reached [`START_AFTER`].
 	Direct {
 		cursor: Box<dyn ScanCursorVals + 'a>,
 		last: Vec<u8>,
@@ -232,6 +294,8 @@ impl<'a> ChunkSource<'a> {
 				visited: 0,
 				more: false,
 			},
+			#[cfg(not(target_family = "wasm"))]
+			_open: Open::new(),
 		})
 	}
 
@@ -261,13 +325,42 @@ impl<'a> ChunkSource<'a> {
 		f: &mut dyn ValVisitor,
 	) -> Result<ScanChunkStats> {
 		#[cfg(not(target_family = "wasm"))]
+		if let Mode::Ahead(ahead) = &mut self.mode {
+			#[cfg(test)]
+			probe::stalls().await;
+			let (stats, stopped) = ahead.for_each(self.reader.as_ref(), limit, f).await?;
+			if !ahead.handed_off() {
+				return Ok(stats);
+			}
+			// The producer read its last page: what is left of the range is read through a
+			// cursor of the source's own again, in this call if it has entries left to visit.
+			self.resume_direct().await?;
+			let rows = u32::try_from(stats.rows).unwrap_or(limit);
+			if stopped || rows >= limit {
+				return Ok(stats);
+			}
+			let rest = self.direct(limit - rows, f).await?;
+			return Ok(ScanChunkStats {
+				rows: stats.rows + rest.rows,
+				key_bytes: stats.key_bytes + rest.key_bytes,
+				value_bytes: stats.value_bytes + rest.value_bytes,
+			});
+		}
+		self.direct(limit, f).await
+	}
+
+	/// Visits up to `limit` entries through the source's own cursor, after starting a producer
+	/// instead when the last call left the range unread and a core is spare.
+	async fn direct(&mut self, limit: u32, f: &mut dyn ValVisitor) -> Result<ScanChunkStats> {
+		#[cfg(not(target_family = "wasm"))]
 		if matches!(
 			self.mode,
 			Mode::Direct {
 				more: true,
 				..
 			}
-		) {
+		) && self.reader.spare_core()
+		{
 			self.start();
 		}
 		let stats = match &mut self.mode {
@@ -279,14 +372,18 @@ impl<'a> ChunkSource<'a> {
 			} => {
 				let track = self.budget.is_some();
 				let mut stopped = false;
+				// A producer starts after the last entry of a call that left the range unread: the
+				// `limit`th, or the one the visitor stopped at. Only that entry's key is kept.
+				let mut seen = 0u32;
 				let stats = cursor
 					.for_each(limit, &mut |key, value| {
-						if track {
+						let flow = f(key, value)?;
+						stopped = flow.is_break();
+						seen += 1;
+						if track && (stopped || seen == limit) {
 							last.clear();
 							last.extend_from_slice(key);
 						}
-						let flow = f(key, value)?;
-						stopped = flow.is_break();
 						Ok(flow)
 					})
 					.await?;
@@ -301,7 +398,7 @@ impl<'a> ChunkSource<'a> {
 			Mode::Ahead(ahead) => {
 				#[cfg(test)]
 				probe::stalls().await;
-				return ahead.for_each(self.reader.as_ref(), limit, f).await;
+				return Ok(ahead.for_each(self.reader.as_ref(), limit, f).await?.0);
 			}
 		};
 		self.reader.record(&stats);
@@ -330,19 +427,54 @@ impl<'a> ChunkSource<'a> {
 		else {
 			return;
 		};
+		let rest = self.rest_after(last);
+		let ahead = Ahead::start(
+			Arc::clone(self.reader),
+			rest,
+			self.dir,
+			self.version,
+			budget,
+			Arc::clone(&self.cut),
+			last.clone(),
+		);
+		self.mode = Mode::Ahead(ahead);
+	}
+
+	/// What the range holds after the entry of key `last`, in the source's direction.
+	#[cfg(not(target_family = "wasm"))]
+	fn rest_after(&self, last: &[u8]) -> RawRange {
 		let (lo, hi) = self.range.bounds();
-		let rest = match self.dir {
+		match self.dir {
 			Direction::Forward => {
-				let mut start = last.clone();
+				let mut start = last.to_vec();
 				start.push(0);
 				self.range.part(&start, hi)
 			}
 			Direction::Backward => self.range.part(lo, last),
+		}
+	}
+
+	/// Replaces a producer that handed off with a cursor of the source's own over what the range
+	/// holds after the last entry it read. The source may start a producer again once a call
+	/// leaves the range unread while a core is spare.
+	#[cfg(not(target_family = "wasm"))]
+	async fn resume_direct(&mut self) -> Result<()> {
+		let Mode::Ahead(ahead) = &self.mode else {
+			return Ok(());
 		};
-		let ahead = Ahead::start(Arc::clone(self.reader), rest, self.dir, self.version, budget, {
-			Arc::clone(&self.cut)
-		});
-		self.mode = Mode::Ahead(ahead);
+		let last = ahead.last.clone();
+		let reader: &'a Arc<dyn Reader> = self.reader;
+		let cursor = reader.open(self.rest_after(&last), self.dir, self.version).await?;
+		let direct = Mode::Direct {
+			cursor,
+			last,
+			visited: self.start_after,
+			more: false,
+		};
+		if let Mode::Ahead(ahead) = std::mem::replace(&mut self.mode, direct) {
+			ahead.finish().await;
+		}
+		Ok(())
 	}
 }
 
@@ -354,6 +486,9 @@ struct PageFill {
 	error: Option<Error>,
 	/// The range holds nothing after the entries of the page.
 	ended: bool,
+	/// The producer reads nothing after the entries of the page, though the range may hold more:
+	/// no core was spare for it ([`Reader::spare_core`]).
+	handoff: bool,
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -367,6 +502,11 @@ pub(super) struct Ahead {
 	error: Option<Error>,
 	/// No fill follows `current`.
 	ended: bool,
+	/// The producer handed `current` off as the last page it reads.
+	handoff: bool,
+	/// The key of the last entry of the fills taken, and before the first, the key the producer
+	/// starts after: where a cursor resumes once the producer hands off.
+	last: Vec<u8>,
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -374,7 +514,8 @@ impl Ahead {
 	/// Starts a producer over `range`. The producer is spawned here, not as a buffered stream: its
 	/// owner awaits its handle in [`finish`](Self::finish) and hands pages back to it, and a stream
 	/// wrapper offers neither. It runs under the running-program seal, and an owner that drops
-	/// aborts it, as a buffered stream's task is.
+	/// aborts it, as a buffered stream's task is. `last` is the key of the entry `range` starts
+	/// after.
 	fn start(
 		reader: Arc<dyn Reader>,
 		range: RawRange,
@@ -382,6 +523,7 @@ impl Ahead {
 		version: Option<u64>,
 		budget: usize,
 		cut: Arc<Cut>,
+		last: Vec<u8>,
 	) -> Self {
 		let (fills_tx, fills) = async_channel::bounded(1);
 		let (free, free_rx) = async_channel::bounded(2);
@@ -401,21 +543,26 @@ impl Ahead {
 			current: None,
 			error: None,
 			ended: false,
+			handoff: false,
+			last,
 		}
 	}
 
+	/// Visits up to `limit` entries of the pages the producer fills, and says whether the visitor
+	/// stopped. Visits fewer, without a stop, when the range ends or the producer has handed off
+	/// ([`Self::handed_off`]).
 	async fn for_each(
 		&mut self,
 		reader: &dyn Reader,
 		limit: u32,
 		f: &mut dyn ValVisitor,
-	) -> Result<ScanChunkStats> {
+	) -> Result<(ScanChunkStats, bool)> {
 		let mut stats = ScanChunkStats::default();
 		let mut left = limit;
 		let mut stopped = false;
 		'visit: while left > 0 {
 			let Some((page, at)) = &mut self.current else {
-				if !self.next().await? {
+				if self.handoff || !self.next().await? {
 					break;
 				}
 				continue;
@@ -450,7 +597,13 @@ impl Ahead {
 			}
 		}
 		reader.record(&stats);
-		Ok(stats)
+		Ok((stats, stopped))
+	}
+
+	/// Whether the producer handed off and its last page has been visited: the rest of the range
+	/// is for a cursor to read, after [`Self::last`](Ahead::last).
+	fn handed_off(&self) -> bool {
+		self.handoff && self.current.is_none()
 	}
 
 	/// Takes the next fill as the page the consumer visits. `false` when the range holds
@@ -469,6 +622,12 @@ impl Ahead {
 		};
 		self.ended = fill.ended;
 		self.error = fill.error;
+		self.handoff = fill.handoff;
+		let batch = fill.page.batch();
+		if let Some((key, _)) = batch.len().checked_sub(1).and_then(|at| batch.get(at)) {
+			self.last.clear();
+			self.last.extend_from_slice(key);
+		}
 		self.current = Some((fill.page, 0));
 		Ok(true)
 	}
@@ -519,6 +678,7 @@ async fn produce(
 						page,
 						error: Some(error),
 						ended: true,
+						handoff: false,
 					})
 					.await;
 			}
@@ -548,6 +708,20 @@ async fn produce(
 		if carried {
 			page.push(&carry.0, &carry.1);
 			carried = false;
+		}
+		if !past && !reader.spare_core() {
+			// No core is spare any more, so reading ahead now takes one from another scan: the
+			// page goes out as the last this producer reads (the carried entry is in it), and the
+			// source reads on through a cursor of its own from after it.
+			let _ = fills
+				.send(PageFill {
+					page,
+					error: None,
+					ended: false,
+					handoff: true,
+				})
+				.await;
+			return;
 		}
 		let result = if past {
 			Ok(ScanChunkStats::default())
@@ -602,6 +776,7 @@ async fn produce(
 				page,
 				error,
 				ended,
+				handoff: false,
 			})
 			.await
 			.is_err() || ended
@@ -710,11 +885,23 @@ pub(super) mod probe {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
-	use std::sync::atomic::AtomicUsize;
+	use std::sync::atomic::{AtomicBool, AtomicUsize};
 
 	use tokio::sync::Semaphore;
 
 	use super::*;
+
+	/// A producer starts while at most half as many sources are open as there are cores, and not
+	/// past that.
+	#[test]
+	fn a_producer_starts_only_on_a_spare_core() {
+		assert!(spare(1, 64));
+		assert!(spare(32, 64));
+		assert!(!spare(33, 64));
+		assert!(!spare(128, 64));
+		assert!(!spare(2, 1));
+		assert!(spare(1, 2));
+	}
 
 	/// A reader over sorted entries whose cursors count what they read, and fail on a key.
 	struct Fake {
@@ -728,6 +915,8 @@ mod tests {
 		/// The entries a source visits before it may start a producer: one, so that a producer
 		/// starts after the first chunk of the small ranges these tests read.
 		start_after: u32,
+		/// Every core is taken, so no producer may read ahead.
+		busy: AtomicBool,
 	}
 
 	struct FakeCursor<'a> {
@@ -766,6 +955,10 @@ mod tests {
 
 		fn start_after(&self) -> u32 {
 			self.start_after
+		}
+
+		fn spare_core(&self) -> bool {
+			!self.busy.load(Ordering::Relaxed)
 		}
 	}
 
@@ -819,6 +1012,7 @@ mod tests {
 			gate: None,
 			recorded: AtomicUsize::new(0),
 			start_after: 1,
+			busy: AtomicBool::new(false),
 		}
 	}
 
@@ -1299,6 +1493,47 @@ mod tests {
 		source.finish().await;
 		assert_eq!((seen.len(), none), (2000, None));
 		assert_eq!(probe::started(), 1);
+	}
+
+	/// A producer that finds no core spare any more hands the rest of the range to a cursor of the
+	/// source's own: every entry is visited once and in order, and none is read twice. Once cores
+	/// are spare again, the source starts a producer again.
+	#[tokio::test]
+	async fn a_producer_hands_off_once_no_core_is_spare() {
+		for dir in [Direction::Forward, Direction::Backward] {
+			for limit in [1u32, 7, 33] {
+				probe::reset();
+				let fake = Arc::new(fake(500));
+				let reader: Arc<dyn Reader> = Arc::clone(&fake) as _;
+				let mut source = ChunkSource::open(&reader, whole(), dir, None, TEN)
+					.await
+					.expect("the source reads");
+				let mut seen = Vec::new();
+				loop {
+					// Busy from the 100th entry visited to the 300th.
+					fake.busy.store((100..300).contains(&seen.len()), Ordering::Relaxed);
+					let stats = source
+						.for_each(limit, &mut |key, _| {
+							seen.push(key.to_vec());
+							Ok(ControlFlow::Continue(()))
+						})
+						.await
+						.expect("the source reads");
+					if stats.rows < u64::from(limit) {
+						break;
+					}
+				}
+				source.finish().await;
+				let mut expected: Vec<Vec<u8>> = (0..500).map(key_of).collect();
+				if dir == Direction::Backward {
+					expected.reverse();
+				}
+				assert_eq!(seen, expected, "{dir:?} limit {limit}");
+				assert_eq!(fake.read.load(Ordering::Relaxed), 500, "no entry is read twice");
+				assert_eq!(probe::started(), 2, "{dir:?} limit {limit}: handed off, then again");
+				assert_eq!(probe::started(), probe::finished());
+			}
+		}
 	}
 
 	#[tokio::test]

@@ -117,10 +117,17 @@ impl Scan<'_> {
 		} = self;
 		let dir = *dir;
 		let mut stats = ScanChunkStats::default();
+		// Only the last entry handed on is resumed after: the `limit`th, or the one the visitor
+		// stopped at. A chunk that ends short of both has ended its range, so its last key is not
+		// needed, and no other entry's key is copied.
+		let mut visited = 0u32;
 		let mut visit = |key: &[u8], value: &[u8]| {
 			let flow = f(key, value)?;
-			last.clear();
-			last.extend_from_slice(key);
+			visited += 1;
+			if visited == limit || flow.is_break() {
+				last.clear();
+				last.extend_from_slice(key);
+			}
 			Ok(flow)
 		};
 		let mut sink = Sink::Visit(&mut visit);
