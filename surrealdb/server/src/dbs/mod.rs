@@ -622,6 +622,10 @@ impl DbsCapabilities {
 		self.deny_all
 	}
 
+	fn get_allow_all(&self) -> bool {
+		self.allow_all && !self.deny_all
+	}
+
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
@@ -753,6 +757,28 @@ impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
 		merge_capabilities(Default::default(), &caps)
 	}
+}
+
+/// Returns startup warning messages for individual capabilities that
+/// materially widen the server's attack surface.
+fn permissive_capability_warnings(capabilities: &Capabilities) -> Vec<&'static str> {
+	let mut warnings = Vec::new();
+	if capabilities.allows_guest_access() {
+		warnings.push(
+			"⚠️ Guest (anonymous) access is enabled: unauthenticated callers may reach any resource whose permissions allow guests. This is not recommended for production.",
+		);
+	}
+	if capabilities.allows_scripting() {
+		warnings.push(
+			"⚠️ Scripting is enabled: any principal permitted to run queries (including record users, and guests if guest access is enabled) can execute embedded JavaScript. Only enable this if you trust every such principal.",
+		);
+	}
+	if capabilities.allows_all_network_targets() {
+		warnings.push(
+			"⚠️ Outbound network access is unrestricted (--allow-net): queries can make requests to any network target, including internal and cloud-metadata addresses. Consider restricting to an explicit allowlist or configuring --deny-net.",
+		);
+	}
+	warnings
 }
 
 /// Retry an async operation until it succeeds or the configured timeout is reached.
@@ -981,6 +1007,12 @@ pub async fn init<C: TransactionBuilderFactory>(
 			"You are denying all capabilities by default. Although this is recommended, beware that any new capabilities will also be denied."
 		);
 	}
+	// Warn about the impact of allowing all capabilities
+	if capabilities.get_allow_all() {
+		warn!(
+			"⚠️ You are allowing all capabilities by default (--allow-all). This is not recommended for production use."
+		);
+	}
 	if let Some(v) = slow_log_threshold {
 		debug!("Slow log threshold is {v:?}");
 	}
@@ -991,9 +1023,16 @@ pub async fn init<C: TransactionBuilderFactory>(
 		debug!("Slow log param deny is {:?}", slow_log_param_deny);
 	}
 	// Convert the capabilities
-	let capabilities = capabilities.into();
-	// Log the specified server capabilities
-	debug!("Server capabilities: {capabilities}");
+	let capabilities: Capabilities = capabilities.into();
+	// Log the effective server capability posture at INFO so it is visible in the
+	// default log output, giving operators a durable record of the posture the
+	// server actually booted with.
+	info!("Server capabilities: {capabilities}");
+	// Explicitly warn about individually enabled capabilities that materially widen
+	// the attack surface, so a permissive posture is never silent at boot.
+	for warning in permissive_capability_warnings(&capabilities) {
+		warn!("{warning}");
+	}
 
 	let (send, recv) = surrealdb_core::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
@@ -3017,5 +3056,56 @@ mod tests {
 		canceller.cancel();
 		dbs.shutdown().await?;
 		Ok(())
+	}
+
+	#[test]
+	fn permissive_capability_warnings_match_posture() {
+		use std::collections::HashSet;
+		use std::str::FromStr;
+
+		assert!(
+			permissive_capability_warnings(&Capabilities::default()).is_empty(),
+			"default capabilities must not trigger permissive posture warnings"
+		);
+
+		let guest = Capabilities::default().with_guest_access(true);
+		let warnings = permissive_capability_warnings(&guest);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Guest (anonymous) access is enabled"));
+
+		let scripting = Capabilities::default().with_scripting(true);
+		let warnings = permissive_capability_warnings(&scripting);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Scripting is enabled"));
+
+		let wildcard_net = Capabilities::default().with_network_targets(Targets::All);
+		let warnings = permissive_capability_warnings(&wildcard_net);
+		assert_eq!(warnings.len(), 1);
+		assert!(warnings[0].contains("Outbound network access is unrestricted"));
+
+		let scoped_net =
+			Capabilities::default().with_network_targets(Targets::Some(HashSet::from([
+				NetTarget::from_str("api.example.com:443").unwrap(),
+			])));
+		assert!(
+			permissive_capability_warnings(&scoped_net).is_empty(),
+			"explicit network allowlist must not warn as unrestricted"
+		);
+
+		let net_with_deny =
+			Capabilities::default().with_network_targets(Targets::All).without_network_targets(
+				Targets::Some(HashSet::from([NetTarget::from_str("169.254.169.254").unwrap()])),
+			);
+		assert!(
+			permissive_capability_warnings(&net_with_deny).is_empty(),
+			"allow-net combined with a deny-net restriction must not report unrestricted network access"
+		);
+
+		let all = Capabilities::all();
+		let warnings = permissive_capability_warnings(&all);
+		assert_eq!(warnings.len(), 3);
+		assert!(warnings[0].contains("Guest (anonymous) access is enabled"));
+		assert!(warnings[1].contains("Scripting is enabled"));
+		assert!(warnings[2].contains("Outbound network access is unrestricted"));
 	}
 }

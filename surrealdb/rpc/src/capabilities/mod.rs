@@ -864,6 +864,10 @@ impl<T: Hash + Eq + PartialEq + Ord> Hash for Targets<T> {
 	}
 }
 
+fn is_all_allowed<T: Hash + Eq + Ord>(allow: &Targets<T>, deny: &Targets<T>) -> bool {
+	matches!(allow, Targets::All) && matches!(deny, Targets::None)
+}
+
 #[derive(Debug, Clone, Hash)]
 pub struct Capabilities {
 	scripting: bool,
@@ -1211,6 +1215,12 @@ impl Capabilities {
 
 	pub fn allows_network_target(&self, target: &NetTarget) -> bool {
 		self.allow_net.matches(target) && !self.deny_net.matches(target)
+	}
+
+	/// Whether every outbound network target is permitted (`allow_net` is
+	/// [`Targets::All`] and `deny_net` is [`Targets::None`]).
+	pub fn allows_all_network_targets(&self) -> bool {
+		is_all_allowed(&self.allow_net, &self.deny_net)
 	}
 
 	pub fn matches_any_allow_net(&self, target: &NetTarget) -> bool {

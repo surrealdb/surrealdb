@@ -1640,6 +1640,13 @@ Flag when changes touch:
 - JavaScript scripting must be gated by capabilities and denied by default.
 - Every function invocation must be checked against the capabilities allow/deny list.
   Deny rules override allow rules.
+- Server startup (`dbs::init` in `server/src/dbs/mod.rs`) must log the effective
+  `Capabilities` posture at `INFO` and emit explicit `WARN` diagnostics whenever
+  permissive capabilities that widen the attack surface are enabled (guest
+  access, embedded scripting, unrestricted outbound network access, or
+  `--allow-all`).
+  Verified by: `permissive_capability_warnings_match_posture`
+  (`server/src/dbs/mod.rs`).
 - Plan-time evaluation is an invocation. Whenever the planner runs a function while
   building a plan — constant folding in `exec/planner/util/literals.rs`, plan-time
   `FROM` source resolution — the capability must be checked before the call, because
