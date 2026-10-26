@@ -258,6 +258,48 @@ impl Datastore {
 		Self::table_migration_bounded(dbs, interval, canceller, SLICE_PAGES).await
 	}
 
+	/// One bounded pass of the table migration job, for a host that builds the datastore
+	/// [`without_maintenance_tasks`](super::builder::Builder::without_maintenance_tasks) and
+	/// drives the job itself: the pass [`Self::table_migration_pass`] runs, on the calling task.
+	///
+	/// - **Lease.** The pass takes the job's lease, which lasts two `interval`s, and reports
+	///   [`TaskLeaseState::Elsewhere`] with nothing done while another node holds it. A host that
+	///   runs a pass at least once every `interval` while work remains keeps the lease.
+	/// - **Bounds.** At most [`SLICE_PAGES`] pages, each one transaction of a table's work (at most
+	///   [`PAGE_ROWS`] rows), a batch of at most [`QUEUE_BATCH`] queue keys, or a page of the
+	///   catalog's lists. A pass stopped anywhere, its future dropped included, loses at most its
+	///   running page: progress is committed per page and the next pass resumes from it. A host
+	///   cancels a pass by dropping its future, as with [`Self::process_async_events`] and
+	///   [`Self::run_index_builds`].
+	/// - **Progress.** [`Pass::items`] counts the tables the pass finished. [`Progress::More`]
+	///   means the pass spent its pages with work left, and the host calls again;
+	///   [`Progress::Done`] means the pass ended its lap: every table queued when it read the
+	///   queues was visited, and each has nothing left that a pass can do now.
+	/// - **Waits.** Nothing is spawned. A page that loses a commit conflict waits [`SETTLE_POLL`]
+	///   on the engine's timer before the next. On a store this datastore writes alone, a
+	///   verification first waits up to `interval` for the transactions opened through this
+	///   datastore before it, counted until dropped, to end; one that waits it out leaves its table
+	///   for a later pass, and the pass can report [`Progress::Done`] with that table's work left.
+	///   On any other store it never waits.
+	/// - **Wakes.** Every statement that gives a table work writes a key within
+	///   [`Self::table_migration_request_bounds`] in its own commit, and
+	///   [`CommitTriggers::table_migration`](surrealdb_datastore::triggers::CommitTriggers::table_migration)
+	///   on [`Self::commit_triggers`] is notified after that commit. No other write gives the job
+	///   work, so a host runs a pass on either signal and again while a pass reports
+	///   [`Progress::More`]. On a store this datastore writes alone, a host also runs a pass at
+	///   least once every `interval` whatever the last one reported: a verification that waited out
+	///   `interval` is left for a later pass, and no write wakes the job for it.
+	pub async fn run_table_migrations(self: &Arc<Self>, interval: Duration) -> Result<Pass> {
+		Self::table_migration_pass(Arc::clone(self), interval, CancellationToken::new()).await
+	}
+
+	/// The key bounds `[start, end)` of the table migration job's requests: every statement that
+	/// gives a table work writes a key within them in its own commit, and nothing else does.
+	pub fn table_migration_request_bounds() -> Result<(Vec<u8>, Vec<u8>)> {
+		let range = TableMigrationRequestPrefix {}.range()?;
+		Ok((range.start().as_slice().to_vec(), range.end().as_slice().to_vec()))
+	}
+
 	/// [`Self::table_migration_pass`] with its page budget lowered, so a test can drive a
 	/// pass that stops part-way through a table or a queue.
 	#[cfg(test)]

@@ -1211,3 +1211,66 @@ async fn a_table_whose_database_is_gone_is_forgotten() {
 	txn.cancel().await.unwrap();
 	assert!(progress.is_none(), "the progress is deleted: {progress:?}");
 }
+
+/// A host that builds its datastore without maintenance tasks drives the job with
+/// [`Datastore::run_table_migrations`]: a migration's commit writes a request within the
+/// request bounds and notifies the job's trigger, and passes run until one reports
+/// [`Progress::Done`] leave every row rewritten and nothing queued.
+#[tokio::test]
+async fn a_host_drives_the_job_with_bounded_passes() {
+	use surrealdb_observe::TaskLeaseState;
+
+	use crate::kvs::tasks::Progress;
+
+	let ds = ds().await;
+	let mut setup = String::from(
+		"DEFINE TABLE tb SCHEMAFULL;
+		 DEFINE FIELD f ON tb TYPE string;",
+	);
+	for i in 0..5000 {
+		setup.push_str(&format!("CREATE tb:{i} SET f = '{i}' RETURN NONE;"));
+	}
+	run(&ds, &setup).await;
+	let notified = ds.commit_triggers().table_migration.notified();
+	run(
+		&ds,
+		"ALTER FIELD f ON tb TYPE int MIGRATE EXISTING ROWS AS to_int USING <int>$value FALLBACK 0;",
+	)
+	.await;
+	tokio::time::timeout(Duration::from_secs(1), notified)
+		.await
+		.expect("the migration's commit notifies the job's trigger");
+	let (ns, db) = ids(&ds).await;
+	let (start, end) = Datastore::table_migration_request_bounds().unwrap();
+	let txn = ds.transaction(Read).await.unwrap();
+	let requests =
+		txn.tb_migration_requests(ns, db, &TableName::from("tb"), u32::MAX).await.unwrap();
+	txn.cancel().await.unwrap();
+	// A transaction counts as open until dropped, and a verification waits for those older than it.
+	drop(txn);
+	assert!(!requests.is_empty(), "the migration writes a request");
+	for (key, _) in &requests {
+		assert!(start <= *key && *key < end, "{key:?} lies outside the request bounds");
+	}
+
+	let before = run(&ds, "SELECT VALUE f FROM tb:1; SELECT VALUE f FROM tb:4999;").await;
+	let progress = "(INFO FOR TABLE tb).migrations.progress;";
+	let pending = run(&ds, progress).await;
+	assert!(matches!(pending[0], Value::Object(_)), "a rewrite under way: {pending:?}");
+	let mut passes = 0;
+	loop {
+		let pass = ds.run_table_migrations(Duration::from_secs(30)).await.unwrap();
+		assert_eq!(pass.lease, TaskLeaseState::Held, "{pass:?}");
+		passes += 1;
+		if pass.progress == Progress::Done {
+			break;
+		}
+		assert!(passes < 100, "the passes did not finish the job");
+	}
+	assert!(passes > 1, "5000 rows outlast one pass's pages");
+	assert_eq!(queued_requests(&ds, (ns, db), "tb").await, 0, "the requests are folded");
+	assert_eq!(stamp(&ds, "tb", 1).await, head(&ds, "tb").await);
+	assert_eq!(stamp(&ds, "tb", 4999).await, head(&ds, "tb").await);
+	assert_eq!(run(&ds, "SELECT VALUE f FROM tb:1; SELECT VALUE f FROM tb:4999;").await, before);
+	assert_eq!(run(&ds, progress).await, vec![Value::None], "no rewrite is under way");
+}
