@@ -14,3 +14,19 @@ lines = [12413, 12826, 12860]
 supported = ["single function call", "table alias", "column aliases", "WITH ORDINALITY"]
 execution = "registered uncorrelated scalar functions"
 unsupported = ["ROWS FROM", "LATERAL correlation", "record column definitions", "set-returning functions"]
+
+[[features]]
+key = "ddl.create_extension"
+source = "postgresql-15-grammar"
+productions = ["CreateExtensionStmt", "create_extension_opt_list", "create_extension_opt_item"]
+supported = ["IF NOT EXISTS", "WITH", "SCHEMA", "VERSION", "CASCADE"]
+execution = "only the vector extension is available; naming it changes nothing"
+unsupported = ["FROM old_version"]
+
+[[features]]
+key = "ddl.index_opclass_and_reloptions"
+source = "postgresql-15-grammar"
+productions = ["index_elem", "opt_qualified_name", "opt_reloptions", "reloption_list"]
+supported = ["operator class after an index column", "WITH (name = value) storage parameters"]
+execution = "hnsw indexes over a vector column read the operator class and the m and ef_construction parameters"
+unsupported = ["COLLATE", "operator class parameters", "INCLUDE", "TABLESPACE", "reloption namespaces"]

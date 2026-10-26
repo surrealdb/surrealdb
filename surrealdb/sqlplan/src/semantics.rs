@@ -307,7 +307,11 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 			target_type,
 		} => {
 			let folded_inner = fold_expr(inner, policy)?;
-			if let BoundExpr::Literal(lit) = &folded_inner {
+			// A cast to `vector` is read where the cast is lowered, which knows the vector's text
+			// form; here a literal would pass through it unchanged.
+			if let BoundExpr::Literal(lit) = &folded_inner
+				&& !target_type.starts_with("vector")
+			{
 				let result = eval_cast(lit, target_type, policy)?;
 				Ok(BoundExpr::Literal(result))
 			} else {
@@ -472,6 +476,16 @@ pub fn eval_binary_op(
 	right: &BoundLiteral,
 	policy: &DialectPolicy,
 ) -> Result<BoundLiteral, PlanError> {
+	// A distance is NULL over a NULL; no other constant is a vector.
+	if let BoundBinaryOp::VectorDistance(_) = op {
+		return match (left, right) {
+			(BoundLiteral::Null, _) | (_, BoundLiteral::Null) => Ok(BoundLiteral::Null),
+			_ => Err(PlanError::UndefinedOperator(
+				"a vector distance over operands that are not vectors".to_string(),
+			)),
+		};
+	}
+
 	// 1. NullSafeEqual (`<=>`, `IS NOT DISTINCT FROM`)
 	if op == BoundBinaryOp::NullSafeEqual {
 		return match (left, right) {
@@ -653,7 +667,8 @@ fn eval_comparison(
 		| BoundBinaryOp::JsonExtract
 		| BoundBinaryOp::JsonExtractText
 		| BoundBinaryOp::JsonPathExtractText
-		| BoundBinaryOp::JsonContains => unreachable!(),
+		| BoundBinaryOp::JsonContains
+		| BoundBinaryOp::VectorDistance(_) => unreachable!(),
 	};
 	Ok(BoundLiteral::Boolean(result))
 }
@@ -849,7 +864,8 @@ fn eval_arithmetic(
 		| BoundBinaryOp::JsonExtract
 		| BoundBinaryOp::JsonExtractText
 		| BoundBinaryOp::JsonPathExtractText
-		| BoundBinaryOp::JsonContains => {
+		| BoundBinaryOp::JsonContains
+		| BoundBinaryOp::VectorDistance(_) => {
 			Err(PlanError::unsupported(format!("Arithmetic operation {op:?}")))
 		}
 	}

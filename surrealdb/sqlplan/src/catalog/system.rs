@@ -730,6 +730,8 @@ pub fn get_system_table_rows(
 		]),
 
 		(Some("pg_catalog") | None, "pg_type") => {
+			let vector_oid = i64::from(crate::descriptor::VECTOR_OID);
+			let vector_array_oid = i64::from(crate::descriptor::VECTOR_ARRAY_OID);
 			let types = [
 				(16, "bool", 1, true, 'b', 'B', 0, 1000),
 				(17, "bytea", -1, false, 'b', 'U', 0, 1001),
@@ -771,6 +773,8 @@ pub fn get_system_table_rows(
 				(3910, "tstzrange", -1, false, 'r', 'R', 1184, 3911),
 				(3912, "daterange", -1, false, 'r', 'R', 1082, 3913),
 				(3926, "int8range", -1, false, 'r', 'R', 20, 3927),
+				// The `vector` type of the pgvector extension, which clients find by its name.
+				(vector_oid, "vector", -1, false, 'b', 'U', 0, vector_array_oid),
 				// Array types
 				(1000, "_bool", -1, false, 'b', 'A', 16, 0),
 				(1001, "_bytea", -1, false, 'b', 'A', 17, 0),
@@ -793,6 +797,7 @@ pub fn get_system_table_rows(
 				(1231, "_numeric", -1, false, 'b', 'A', 1700, 0),
 				(2951, "_uuid", -1, false, 'b', 'A', 2950, 0),
 				(3807, "_jsonb", -1, false, 'b', 'A', 3802, 0),
+				(vector_array_oid, "_vector", -1, false, 'b', 'A', vector_oid, 0),
 			];
 
 			let rows = types
@@ -801,7 +806,15 @@ pub fn get_system_table_rows(
 					row(vec![
 						("oid", int_val(oid)),
 						("typname", str_val(name)),
-						("typnamespace", int_val(11)),
+						(
+							"typnamespace",
+							// The vector type is installed in the `public` schema.
+							int_val(if oid == vector_oid || oid == vector_array_oid {
+								2200
+							} else {
+								11
+							}),
+						),
 						("typowner", int_val(10)),
 						("typlen", int_val(len)),
 						("typbyval", bool_val(byval)),
@@ -1494,3 +1507,36 @@ pub fn get_system_table_rows(
 		_ => None,
 	}
 }
+
+/// The names `to_regtype` resolves, and the OIDs of the types they spell.
+pub(crate) const REGTYPE_NAMES: &[(&str, i32)] = &[
+	("bool", 16),
+	("boolean", 16),
+	("bytea", 17),
+	("int8", 20),
+	("bigint", 20),
+	("int2", 21),
+	("smallint", 21),
+	("int4", 23),
+	("integer", 23),
+	("int", 23),
+	("text", 25),
+	("oid", 26),
+	("json", 114),
+	("float4", 700),
+	("real", 700),
+	("float8", 701),
+	("double precision", 701),
+	("varchar", 1043),
+	("character varying", 1043),
+	("date", 1082),
+	("timestamp", 1114),
+	("timestamptz", 1184),
+	("numeric", 1700),
+	("uuid", 2950),
+	("jsonb", 3802),
+	("vector", crate::descriptor::VECTOR_OID),
+	("_vector", crate::descriptor::VECTOR_ARRAY_OID),
+	("public.vector", crate::descriptor::VECTOR_OID),
+	("public._vector", crate::descriptor::VECTOR_ARRAY_OID),
+];

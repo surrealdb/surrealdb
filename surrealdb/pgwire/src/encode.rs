@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use surrealdb_sqlplan::array_literal::{
 	ArrayElement, MAX_ARRAY_DIMENSIONS, is_array_space, parse_array_literal,
 };
+use surrealdb_sqlplan::descriptor::{VECTOR_ARRAY_OID, VECTOR_OID};
 use surrealdb_types::{Bytes, Datetime, Number, ToSql, Uuid, Value, Wide};
 
 use super::error::PgError;
@@ -42,6 +43,8 @@ const OID_RECORD: i32 = 2249;
 const OID_ANYARRAY: i32 = 2277;
 const OID_UUID: i32 = 2950;
 const OID_JSONB: i32 = 3802;
+const OID_VECTOR: i32 = VECTOR_OID;
+const OID_ARRAY_VECTOR: i32 = VECTOR_ARRAY_OID;
 
 // Array OIDs
 const OID_ARRAY_BOOL: i32 = 1000;
@@ -298,6 +301,7 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 				Err(mismatch(&value, ty))
 			}
 		}
+		PgType::Vector => crate::vector::text(value),
 		PgType::Record => {
 			if let Value::Object(obj) = value {
 				record_text(&obj)
@@ -1112,6 +1116,7 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 				Err(mismatch(&value, ty))
 			}
 		}
+		PgType::Vector => crate::vector::binary(value),
 		PgType::Record => {
 			if let Value::Object(obj) = value {
 				record_binary(&obj)
@@ -1333,6 +1338,7 @@ fn decode_text(text: &str, oid: i32) -> Result<Value, PgError> {
 				serde_json::from_str(text).map_err(|e| param_err(oid, e))?;
 			Ok(json_to_value(json))
 		}
+		OID_VECTOR => crate::vector::decode_text(text),
 		OID_INET | OID_CIDR | OID_MACADDR | OID_RECORD => Ok(Value::String(text.to_string())),
 		_ => Ok(Value::String(text.to_string())),
 	}
@@ -1392,6 +1398,7 @@ fn decode_binary_at(bytes: &[u8], oid: i32, depth: usize) -> Result<Value, PgErr
 			Ok(Value::Uuid(Uuid::from(uuid::Uuid::from_bytes(raw))))
 		}
 		OID_BYTEA => Ok(Value::Bytes(Bytes::from(bytes.to_vec()))),
+		OID_VECTOR => crate::vector::decode_binary(bytes),
 		OID_DATE => {
 			let raw: [u8; 4] = bytes.try_into().map_err(|_| param_err(oid, "wrong length"))?;
 			let days = i32::from_be_bytes(raw);
@@ -1692,6 +1699,7 @@ fn is_array_oid(oid: i32) -> Option<i32> {
 		OID_ARRAY_JSONB => Some(OID_JSONB),
 		OID_ARRAY_UUID => Some(OID_UUID),
 		OID_ARRAY_REGCLASS => Some(OID_REGCLASS),
+		OID_ARRAY_VECTOR => Some(OID_VECTOR),
 		OID_ANYARRAY => Some(OID_TEXT),
 		_ => None,
 	}

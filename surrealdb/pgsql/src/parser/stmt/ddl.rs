@@ -1,13 +1,14 @@
 //! PostgreSQL DDL statements parser (`CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `CREATE
-//! SCHEMA`, `ALTER TABLE`, `DROP`).
+//! SCHEMA`, `CREATE EXTENSION`, `ALTER TABLE`, `DROP`).
 //!
-//! gram.y: CreateStmt, IndexStmt, ViewStmt, CreateSchemaStmt, AlterTableStmt, DropStmt
+//! gram.y: CreateStmt, IndexStmt, ViewStmt, CreateSchemaStmt, CreateExtensionStmt, AlterTableStmt,
+//! DropStmt
 
 use crate::ast::expr::{NullsOrder, OrderDirection};
 use crate::ast::stmt::{
-	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CreateIndexStmt,
-	CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DropObjectType, DropStmt, IndexElem,
-	Statement, TableConstraint,
+	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CreateExtensionStmt,
+	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DropObjectType, DropStmt,
+	IndexElem, RelOption, Statement, TableConstraint,
 };
 use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::keyword::Keyword;
@@ -56,6 +57,11 @@ impl<'a> Parser<'a> {
 		if self.peek().kind == TokenKind::Keyword(Keyword::Schema) {
 			let s = self.parse_create_schema_stmt_tail(create_tok.span)?;
 			return Ok(Statement::CreateSchema(s));
+		}
+
+		if self.peek().kind == TokenKind::Keyword(Keyword::Extension) {
+			let s = self.parse_create_extension_stmt_tail(create_tok.span)?;
+			return Ok(Statement::CreateExtension(s));
 		}
 
 		if self.peek().kind == TokenKind::Keyword(Keyword::Property) {
@@ -181,6 +187,14 @@ impl<'a> Parser<'a> {
 			let expr = self.parse_expr()?;
 			let mut span = expr.span();
 
+			// gram.y: index_elem (opt_qualified_name)
+			let opclass =
+				if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::QuotedIdent(_)) {
+					Some(self.parse_qualified_name()?)
+				} else {
+					None
+				};
+
 			let direction = if self.eat(&TokenKind::Keyword(Keyword::Asc))? {
 				Some(OrderDirection::Asc)
 			} else if self.eat(&TokenKind::Keyword(Keyword::Desc))? {
@@ -210,6 +224,7 @@ impl<'a> Parser<'a> {
 			span = span.merge(self.peek().span);
 			columns.push(IndexElem {
 				expr,
+				opclass,
 				direction,
 				nulls,
 				span,
@@ -220,6 +235,34 @@ impl<'a> Parser<'a> {
 			}
 		}
 		self.expect(&TokenKind::RParen, "')'")?;
+
+		// gram.y: opt_reloptions
+		let options = if self.eat(&TokenKind::Keyword(Keyword::With))? {
+			self.expect(&TokenKind::LParen, "'('")?;
+			let mut options = Vec::new();
+			loop {
+				let (name, name_span) = self.parse_ident()?;
+				let (value, span) = if self.eat(&TokenKind::Operator("="))? {
+					let value = self.parse_expr()?;
+					let span = name_span.merge(value.span());
+					(Some(value), span)
+				} else {
+					(None, name_span)
+				};
+				options.push(RelOption {
+					name,
+					value,
+					span,
+				});
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			self.expect(&TokenKind::RParen, "')'")?;
+			options
+		} else {
+			Vec::new()
+		};
 
 		let predicate = if self.eat(&TokenKind::Keyword(Keyword::Where))? {
 			Some(self.parse_expr()?)
@@ -238,6 +281,7 @@ impl<'a> Parser<'a> {
 			table,
 			method,
 			columns,
+			options,
 			predicate,
 			span,
 		})
@@ -296,6 +340,63 @@ impl<'a> Parser<'a> {
 		Ok(CreateSchemaStmt {
 			if_not_exists,
 			name,
+			span,
+		})
+	}
+
+	/// Parse a PostgreSQL `CREATE EXTENSION` statement given an already consumed `CREATE`.
+	///
+	/// gram.y: CreateExtensionStmt
+	fn parse_create_extension_stmt_tail(
+		&mut self,
+		start_span: Span,
+	) -> ParseResult<CreateExtensionStmt> {
+		self.expect(&TokenKind::Keyword(Keyword::Extension), "'EXTENSION'")?;
+
+		let if_not_exists = if self.eat(&TokenKind::Keyword(Keyword::If))? {
+			self.expect(&TokenKind::Keyword(Keyword::Not), "'NOT'")?;
+			self.expect(&TokenKind::Keyword(Keyword::Exists), "'EXISTS'")?;
+			true
+		} else {
+			false
+		};
+
+		let (name, name_span) = self.parse_ident()?;
+		let mut span = start_span.merge(name_span);
+
+		// gram.y: opt_with create_extension_opt_list
+		self.eat(&TokenKind::Keyword(Keyword::With))?;
+		let mut schema = None;
+		let mut version = None;
+		let mut cascade = false;
+		loop {
+			if self.eat(&TokenKind::Keyword(Keyword::Schema))? {
+				let (value, value_span) = self.parse_ident()?;
+				schema = Some(value);
+				span = span.merge(value_span);
+			} else if self.eat(&TokenKind::Keyword(Keyword::Version))? {
+				let (value, value_span) =
+					if matches!(self.peek().kind, TokenKind::StringConstant(_)) {
+						self.parse_string_constant()?
+					} else {
+						self.parse_ident()?
+					};
+				version = Some(value);
+				span = span.merge(value_span);
+			} else if self.peek().kind == TokenKind::Keyword(Keyword::Cascade) {
+				span = span.merge(self.bump()?.span);
+				cascade = true;
+			} else {
+				break;
+			}
+		}
+
+		Ok(CreateExtensionStmt {
+			if_not_exists,
+			name,
+			schema,
+			version,
+			cascade,
 			span,
 		})
 	}

@@ -98,11 +98,21 @@ fn lower_bound_select_internal(
 		}
 	};
 
-	// 2. WHERE clause
-	if let Some(where_expr) = &select.where_clause {
+	// 2. WHERE clause, and the nearest-neighbour search an `ORDER BY` distance asks for
+	let predicate =
+		select.where_clause.as_ref().map(|expr| lower_where(expr, policy)).transpose()?;
+	let predicate = match (predicate, crate::lower::vector_knn::knn_predicate(select, policy)?) {
+		(Some(predicate), Some(search)) => Some(LogicalExpr::Binary {
+			left: Box::new(predicate),
+			op: BinaryOperator::And,
+			right: Box::new(search),
+		}),
+		(predicate, search) => predicate.or(search),
+	};
+	if let Some(predicate) = predicate {
 		op = LogicalOp::Filter(LogicalFilter {
 			input: Box::new(op),
-			predicate: lower_where(where_expr, policy)?,
+			predicate,
 		});
 	}
 

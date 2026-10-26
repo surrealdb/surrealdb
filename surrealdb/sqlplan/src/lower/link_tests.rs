@@ -367,6 +367,7 @@ fn a_column_of_a_table_the_catalog_does_not_describe_is_unchanged() {
 			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
 			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
 			| surrealdb_pgsql::ast::stmt::Statement::CreateSchema(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateExtension(_)
 			| surrealdb_pgsql::ast::stmt::Statement::Drop(_)
 			| surrealdb_pgsql::ast::stmt::Statement::Transaction(_)
 			| surrealdb_pgsql::ast::stmt::Statement::Set(_)

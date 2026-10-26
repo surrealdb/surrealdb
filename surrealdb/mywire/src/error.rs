@@ -112,6 +112,16 @@ fn plan_number(err: &PlanError) -> Number {
 		| PlanError::InFailedTransaction
 		| PlanError::SavepointDoesNotExist(_)
 		| PlanError::ActiveTransactionAlreadyInProgress
+		| PlanError::InvalidParameterValue(_)
+		| PlanError::DataException(_)
+		| PlanError::ProgramLimitExceeded(_)
+		| PlanError::UndefinedOperatorClass {
+			..
+		}
+		| PlanError::NoDefaultOperatorClass {
+			..
+		}
+		| PlanError::ExtensionNotAvailable(_)
 		| PlanError::Custom(_) => ER_UNKNOWN_ERROR,
 	}
 }
@@ -606,6 +616,18 @@ mod tests {
 			PlanError::SavepointDoesNotExist(name()),
 			PlanError::ActiveTransactionAlreadyInProgress,
 			PlanError::UndefinedObject(name()),
+			PlanError::InvalidParameterValue("m".to_string()),
+			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
+			PlanError::ProgramLimitExceeded("dimensions".to_string()),
+			PlanError::UndefinedOperatorClass {
+				name: name(),
+				method: "hnsw".to_string(),
+			},
+			PlanError::NoDefaultOperatorClass {
+				type_name: "vector".to_string(),
+				method: "hnsw".to_string(),
+			},
+			PlanError::ExtensionNotAvailable(name()),
 			PlanError::Custom("something".to_string()),
 		];
 		cases
@@ -640,6 +662,16 @@ mod tests {
 					| PlanError::InFailedTransaction
 					| PlanError::SavepointDoesNotExist(_)
 					| PlanError::ActiveTransactionAlreadyInProgress
+					| PlanError::InvalidParameterValue(_)
+					| PlanError::DataException(_)
+					| PlanError::ProgramLimitExceeded(_)
+					| PlanError::UndefinedOperatorClass {
+						..
+					}
+					| PlanError::NoDefaultOperatorClass {
+						..
+					}
+					| PlanError::ExtensionNotAvailable(_)
 					| PlanError::Custom(_) => ER_UNKNOWN_ERROR,
 				};
 				(err, expected)

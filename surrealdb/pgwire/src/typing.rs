@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use surrealdb_sqlplan::descriptor::{VECTOR_ARRAY_OID, VECTOR_OID};
 use surrealdb_types::{Value, Wide};
 
 /// The Postgres wire types emitted by the listener, with their catalog OIDs.
@@ -33,6 +34,8 @@ pub(super) enum PgType {
 	Record,
 	Uuid,
 	Jsonb,
+	/// The `vector` type of the pgvector extension.
+	Vector,
 	Array(Box<PgType>),
 }
 
@@ -67,6 +70,7 @@ impl PgType {
 			Self::Record => 2249,
 			Self::Uuid => 2950,
 			Self::Jsonb => 3802,
+			Self::Vector => VECTOR_OID,
 			Self::Array(elem) => match elem.as_ref() {
 				Self::Bool => 1000,
 				Self::Bytea => 1001,
@@ -95,6 +99,7 @@ impl PgType {
 				Self::Jsonb => 3807,
 				Self::Uuid => 2951,
 				Self::Regclass => 2210,
+				Self::Vector => VECTOR_ARRAY_OID,
 				Self::Record | Self::Array(_) => 2277, // anyarray
 			},
 		}
@@ -120,6 +125,7 @@ impl PgType {
 			| Self::Jsonb
 			| Self::Inet
 			| Self::Cidr
+			| Self::Vector
 			| Self::Record
 			| Self::Array(_) => -1,
 		}
@@ -156,6 +162,7 @@ impl PgType {
 			2249 => Some(Self::Record),
 			2950 => Some(Self::Uuid),
 			3802 => Some(Self::Jsonb),
+			VECTOR_OID => Some(Self::Vector),
 			// Arrays
 			1000 => Some(Self::Array(Box::new(Self::Bool))),
 			1001 => Some(Self::Array(Box::new(Self::Bytea))),
@@ -184,6 +191,7 @@ impl PgType {
 			3807 => Some(Self::Array(Box::new(Self::Jsonb))),
 			2951 => Some(Self::Array(Box::new(Self::Uuid))),
 			2210 => Some(Self::Array(Box::new(Self::Regclass))),
+			VECTOR_ARRAY_OID => Some(Self::Array(Box::new(Self::Vector))),
 			2277 => Some(Self::Array(Box::new(Self::Text))),
 			_ => None,
 		}
@@ -221,6 +229,7 @@ impl PgType {
 			surrealdb_sqlplan::SqlType::Oid => Self::Oid,
 			surrealdb_sqlplan::SqlType::Regclass => Self::Regclass,
 			surrealdb_sqlplan::SqlType::Record => Self::Record,
+			surrealdb_sqlplan::SqlType::Vector => Self::Vector,
 			surrealdb_sqlplan::SqlType::Unknown => Self::Text,
 		}
 	}

@@ -107,6 +107,7 @@ enum StatementKind {
 	CreateIndex,
 	CreateView,
 	CreateSchema,
+	CreateExtension,
 	Truncate,
 	Other,
 }
@@ -125,6 +126,7 @@ impl StatementKind {
 			PgStatement::CreateIndex(_) => Some((Self::CreateIndex, false)),
 			PgStatement::CreateView(_) => Some((Self::CreateView, false)),
 			PgStatement::CreateSchema(_) => Some((Self::CreateSchema, false)),
+			PgStatement::CreateExtension(_) => Some((Self::CreateExtension, false)),
 			PgStatement::AlterTable(_) => Some((Self::AlterTable, false)),
 			PgStatement::Drop(_) => Some((Self::DropTable, false)),
 			PgStatement::Select(_)
@@ -155,6 +157,7 @@ impl StatementKind {
 			Self::CreateIndex => "CREATE INDEX".to_string(),
 			Self::CreateView => "CREATE VIEW".to_string(),
 			Self::CreateSchema => "CREATE SCHEMA".to_string(),
+			Self::CreateExtension => "CREATE EXTENSION".to_string(),
 			Self::Truncate => "TRUNCATE TABLE".to_string(),
 			Self::Other => format!("SELECT {count}"),
 		}
@@ -1598,6 +1601,10 @@ impl Connection {
 								kind = StatementKind::Other;
 								returns_rows = false;
 							}
+							PgStatement::CreateExtension(_) => {
+								kind = StatementKind::CreateExtension;
+								returns_rows = false;
+							}
 						}
 					}
 					if let Some(statement) = stmts.first()
@@ -2484,6 +2491,7 @@ impl Connection {
 					}
 					PgStatement::Copy(_)
 					| PgStatement::CreateSchema(_)
+					| PgStatement::CreateExtension(_)
 					| PgStatement::Transaction(_)
 					| PgStatement::Set(_)
 					| PgStatement::Show(_)

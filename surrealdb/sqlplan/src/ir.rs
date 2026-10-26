@@ -31,6 +31,17 @@ pub struct BoundSelect {
 	pub for_update: bool,
 	/// User-defined tables discovered from catalog (for system catalog introspection).
 	pub user_tables: Vec<crate::catalog::TableSchema>,
+	/// The HNSW indexes over the table the select reads, when it reads one table.
+	pub hnsw_indexes: Vec<BoundHnswIndex>,
+}
+
+/// An HNSW index over a column of a table, and the distance it ranks by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundHnswIndex {
+	/// The indexed column.
+	pub column: String,
+	/// The metric the index ranks by.
+	pub metric: crate::vector::VectorMetric,
 }
 
 /// A bound WITH clause containing Common Table Expressions.
@@ -383,6 +394,8 @@ pub enum BoundBinaryOp {
 	JsonPathExtractText,
 	/// JSON containment (`@>`).
 	JsonContains,
+	/// A distance between vectors (`<->`, `<=>`, `<#>`, `<+>` in PostgreSQL).
+	VectorDistance(crate::vector::VectorMetric),
 }
 
 /// Unary operator in Bound IR.

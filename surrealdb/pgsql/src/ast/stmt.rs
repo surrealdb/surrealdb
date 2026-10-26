@@ -557,8 +557,21 @@ pub struct CreateIndexStmt {
 	pub method: Option<String>,
 	/// Indexed columns or expressions.
 	pub columns: Vec<IndexElem>,
+	/// Storage parameters of the `WITH (...)` clause, in the order written.
+	pub options: Vec<RelOption>,
 	/// Partial index `WHERE` predicate.
 	pub predicate: Option<Expr>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A storage parameter of a `WITH (name = value)` clause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelOption {
+	/// Parameter name, folded to lower case.
+	pub name: String,
+	/// Parameter value: the literal as written, or `None` for a bare name (`WITH (fillfactor)`).
+	pub value: Option<Expr>,
 	/// Source span.
 	pub span: Span,
 }
@@ -568,6 +581,8 @@ pub struct CreateIndexStmt {
 pub struct IndexElem {
 	/// Column or expression.
 	pub expr: Expr,
+	/// Operator class (`vector_l2_ops`), possibly schema-qualified.
+	pub opclass: Option<QualifiedName>,
 	/// Sort direction.
 	pub direction: Option<OrderDirection>,
 	/// Nulls ordering.
@@ -670,6 +685,23 @@ pub struct CreateSchemaStmt {
 	pub if_not_exists: bool,
 	/// Schema name.
 	pub name: String,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `CREATE EXTENSION` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateExtensionStmt {
+	/// `IF NOT EXISTS`.
+	pub if_not_exists: bool,
+	/// Extension name, folded to lower case.
+	pub name: String,
+	/// `SCHEMA` option.
+	pub schema: Option<String>,
+	/// `VERSION` option.
+	pub version: Option<String>,
+	/// `CASCADE` option.
+	pub cascade: bool,
 	/// Source span.
 	pub span: Span,
 }
@@ -792,6 +824,8 @@ pub enum Statement {
 	AlterTable(Box<AlterTableStmt>),
 	/// `CREATE SCHEMA` DDL.
 	CreateSchema(CreateSchemaStmt),
+	/// `CREATE EXTENSION` DDL.
+	CreateExtension(CreateExtensionStmt),
 	/// `DROP` DDL.
 	Drop(Box<DropStmt>),
 	/// Transaction control statement.
@@ -892,6 +926,7 @@ impl Statement {
 			Self::CreateView(s) => s.span,
 			Self::AlterTable(s) => s.span,
 			Self::CreateSchema(s) => s.span,
+			Self::CreateExtension(s) => s.span,
 			Self::Drop(s) => s.span,
 			Self::Transaction(tx) => match tx {
 				TransactionStmt::Begin {
@@ -1070,6 +1105,15 @@ impl Statement {
 				for col in &mut s.columns {
 					col.span = zero;
 					col.expr.normalize_spans();
+					if let Some(opclass) = &mut col.opclass {
+						opclass.span = zero;
+					}
+				}
+				for option in &mut s.options {
+					option.span = zero;
+					if let Some(value) = &mut option.value {
+						value.normalize_spans();
+					}
 				}
 				if let Some(pred) = &mut s.predicate {
 					pred.normalize_spans();
@@ -1112,6 +1156,7 @@ impl Statement {
 				}
 			}
 			Self::CreateSchema(s) => s.span = zero,
+			Self::CreateExtension(s) => s.span = zero,
 			Self::Drop(s) => {
 				s.span = zero;
 				for n in &mut s.names {

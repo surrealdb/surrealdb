@@ -11,9 +11,12 @@
 //! 1. The statements are lowered against a [`RecordingCatalog`], which describes nothing and notes
 //!    each table the lowering asks about.
 //! 2. When it noted tables, those tables are read: for the links alone ([`link_columns`]), or for
-//!    the links and the declared columns ([`describe_tables`]). If nothing they declare changes how
-//!    a statement lowers, the first lowering already is the answer; otherwise the statements are
-//!    lowered again against a catalog that describes the tables.
+//!    the links, the vector columns, the HNSW indexes over them and the declared columns
+//!    ([`describe_tables`]). If nothing they declare changes how a statement lowers, the first
+//!    lowering already is the answer; otherwise the statements are lowered again against a catalog
+//!    that describes the tables. A statement the first lowering refused is settled the same way: a
+//!    refusal that rests on what the catalog holds (an `hnsw` index over a column whose dimensions
+//!    are not known) is lifted by the second lowering, and one that does not is reported again.
 //!
 //! A request that names no table (`SELECT 1`) reads nothing, and neither does one whose session the
 //! datastore refuses or whose level cannot reach the selected database: `Datastore::link_columns`
@@ -24,6 +27,7 @@ use std::collections::BTreeSet;
 use std::sync::{Mutex, PoisonError};
 
 use anyhow::Result;
+use surrealdb_sqlplan::vector::VectorMetric;
 use surrealdb_sqlplan::{
 	BinderCatalog, ColumnInfo, EmptyCatalog, MemoryCatalog, SqlType, TableSchema,
 };
@@ -54,6 +58,13 @@ impl RecordingCatalog {
 		self.tables.lock().unwrap_or_else(PoisonError::into_inner).insert(table.to_owned());
 	}
 
+	/// Note `table` unless it is a system table, which the datastore does not hold.
+	fn note_user_table(&self, schema: Option<&str>, table: &str) {
+		if EmptyCatalog.get_table(schema, table).is_none() {
+			self.note(table);
+		}
+	}
+
 	/// The tables asked about, in name order.
 	pub(super) fn into_tables(self) -> Vec<String> {
 		let tables = self.tables.into_inner().unwrap_or_else(PoisonError::into_inner);
@@ -77,6 +88,16 @@ impl BinderCatalog for RecordingCatalog {
 	fn link_table(&self, _schema: Option<&str>, table: &str, _column: &str) -> Option<String> {
 		self.note(table);
 		None
+	}
+
+	fn vector_dimension(&self, schema: Option<&str>, table: &str, _column: &str) -> Option<usize> {
+		self.note_user_table(schema, table);
+		None
+	}
+
+	fn hnsw_indexes(&self, schema: Option<&str>, table: &str) -> Vec<(String, VectorMetric)> {
+		self.note_user_table(schema, table);
+		Vec::new()
 	}
 }
 
@@ -214,6 +235,7 @@ fn scalar_type(kind: &Kind) -> SqlType {
 		Kind::String => SqlType::Text,
 		Kind::Uuid => SqlType::Uuid,
 		Kind::Object => SqlType::Json,
+		Kind::Array(..) if vector_dimension(kind).is_some() => SqlType::Vector,
 		Kind::Array(elem, _) => SqlType::array_of(scalar_type(elem)).unwrap_or(SqlType::Unknown),
 		Kind::Either(kinds) => {
 			let mut types = kinds
@@ -241,6 +263,64 @@ fn scalar_type(kind: &Kind) -> SqlType {
 	}
 }
 
+/// The number of dimensions of a field of this type when it holds vectors: an array of floats of
+/// a given length, which is the type `vector(n)` is stored as. Optionality does not change it.
+fn vector_dimension(kind: &Kind) -> Option<usize> {
+	match kind {
+		Kind::Array(element, Some(count)) => {
+			matches!(**element, Kind::Float | Kind::F32 | Kind::F16)
+				.then(|| usize::try_from(*count).ok())
+				.flatten()
+		}
+		Kind::Either(kinds) => {
+			let mut found = None;
+			for kind in kinds {
+				if matches!(kind, Kind::None | Kind::Null) {
+					continue;
+				}
+				if found.is_some() {
+					return None;
+				}
+				found = Some(vector_dimension(kind)?);
+			}
+			found
+		}
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::F16
+		| Kind::F32
+		| Kind::Int
+		| Kind::I8
+		| Kind::I16
+		| Kind::I32
+		| Kind::U8
+		| Kind::U16
+		| Kind::U32
+		| Kind::U64
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::Set(..)
+		| Kind::Array(..)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => None,
+	}
+}
+
 /// Whether none of the PostgreSQL `stmts` can change the columns of a table, so that the tables
 /// read before any of them runs are the tables each of them sees.
 ///
@@ -259,6 +339,7 @@ pub(super) fn pgsql_keeps_columns(stmts: &[surrealdb_pgsql::ast::stmt::Statement
 				| Statement::Delete(_)
 				| Statement::Truncate(_)
 				| Statement::CreateIndex(_)
+				| Statement::CreateExtension(_)
 				| Statement::Transaction(_)
 				| Statement::Set(_)
 				| Statement::Show(_)
@@ -310,7 +391,8 @@ pub(super) fn mysql_keeps_columns(stmts: &[surrealdb_mysql::ast::stmt::Statement
 pub(super) struct Described {
 	pub(super) catalog: MemoryCatalog,
 	/// Whether lowering against `catalog` can differ from lowering against none: a column holds
-	/// links, or a table declares all the columns it has.
+	/// links or vectors, a vector column has an HNSW index, or a table declares all the columns it
+	/// has.
 	pub(super) shapes_lowering: bool,
 }
 
@@ -345,6 +427,12 @@ impl Purpose {
 /// operand is converted and are never answered to the reader, whereas a column that is declared
 /// reads as NONE and one that is not is an error, which tells them apart.
 ///
+/// A column that holds vectors is named with its dimensions, and the HNSW indexes over a table
+/// that has one are listed. Like the links they are read with the datastore's authority and decide
+/// how a statement lowers: how text written to the column is read, and whether a nearest-neighbour
+/// search is asked of an index. A statement that defines an index over the column is told the
+/// dimensions it needs, which only a reader who may define it learns from that statement's result.
+///
 /// The catalog names `db` as its current database, which is what the table-name resolution of both
 /// dialects checks a qualified name against: a table of another database is refused, where a
 /// catalog without a current database accepts any qualifier.
@@ -369,6 +457,7 @@ pub(super) async fn describe_tables(
 		let name = TableName::from(table.as_str());
 		let fields = txn.all_tb_fields(database.namespace_id, database.database_id, &name, None);
 		let fields = fields.await?;
+		let mut has_vectors = false;
 		for field in fields.iter() {
 			if field.is_key_part() {
 				continue;
@@ -380,11 +469,45 @@ pub(super) async fn describe_tables(
 				described.catalog.add_link(None, table, column, target);
 				described.shapes_lowering = true;
 			}
+			if let Some(dimensions) = vector_dimension(kind) {
+				described.catalog.add_vector(table, column, dimensions);
+				described.shapes_lowering = true;
+				has_vectors = true;
+			}
 			if types {
 				let ty = scalar_type(kind);
 				if ty != SqlType::Unknown {
 					described.catalog.add_column_type(table, column, ty);
 				}
+			}
+		}
+		// A table with no vector column has no search to ask an index for.
+		let indexes = if has_vectors {
+			txn.all_tb_indexes(database.namespace_id, database.database_id, &name, None).await?
+		} else {
+			Default::default()
+		};
+		for index in indexes.iter() {
+			let (crate::catalog::Index::Hnsw(params), false, [column]) =
+				(&index.index, index.prepare_remove, index.cols.as_slice())
+			else {
+				continue;
+			};
+			let metric = match params.distance {
+				crate::catalog::Distance::Euclidean => VectorMetric::L2,
+				crate::catalog::Distance::Cosine => VectorMetric::Cosine,
+				crate::catalog::Distance::InnerProduct => VectorMetric::NegativeInnerProduct,
+				crate::catalog::Distance::Manhattan => VectorMetric::L1,
+				crate::catalog::Distance::Chebyshev
+				| crate::catalog::Distance::Hamming
+				| crate::catalog::Distance::Jaccard
+				| crate::catalog::Distance::Minkowski(_)
+				| crate::catalog::Distance::Pearson
+				| crate::catalog::Distance::CosineNormalized => continue,
+			};
+			if let Some(column) = column.field_name() {
+				described.catalog.add_hnsw_index(table, column, metric);
+				described.shapes_lowering = true;
 			}
 		}
 		if !columns {
@@ -463,6 +586,34 @@ mod tests {
 	}
 
 	#[test]
+	fn an_array_of_floats_of_a_given_length_is_a_vector() {
+		let floats = |count: Option<u64>| Kind::Array(Box::new(Kind::Float), count);
+		assert_eq!(vector_dimension(&floats(Some(3))), Some(3));
+		assert_eq!(vector_dimension(&Kind::Array(Box::new(Kind::F32), Some(8))), Some(8));
+		assert_eq!(
+			vector_dimension(&Kind::Either(vec![Kind::None, Kind::Null, floats(Some(3))])),
+			Some(3)
+		);
+		assert_eq!(scalar_type(&floats(Some(3))), SqlType::Vector);
+		assert_eq!(scalar_type(&Kind::Either(vec![Kind::None, floats(Some(3))])), SqlType::Vector);
+	}
+
+	#[test]
+	fn other_arrays_are_not_vectors() {
+		let array = |kind: Kind, count: Option<u64>| Kind::Array(Box::new(kind), count);
+		assert_eq!(vector_dimension(&array(Kind::Float, None)), None);
+		assert_eq!(vector_dimension(&array(Kind::Int, Some(3))), None);
+		assert_eq!(vector_dimension(&array(array(Kind::Float, Some(3)), Some(3))), None);
+		assert_eq!(vector_dimension(&Kind::Float), None);
+		assert_eq!(
+			vector_dimension(&Kind::Either(vec![array(Kind::Float, Some(3)), Kind::String])),
+			None
+		);
+		assert_eq!(scalar_type(&array(Kind::Float, None)), SqlType::Array(&SqlType::Float8));
+		assert_eq!(scalar_type(&array(Kind::Int, Some(3))), SqlType::Array(&SqlType::Int8));
+	}
+
+	#[test]
 	fn an_array_of_a_scalar_is_typed_and_other_collections_are_not() {
 		let array = |kind: Kind| Kind::Array(Box::new(kind), None);
 		assert_eq!(scalar_type(&array(Kind::String)), SqlType::Array(&SqlType::Text));
@@ -511,6 +662,14 @@ mod tests {
 		assert!(catalog.get_table(None, "emp").is_none());
 		assert_eq!(catalog.link_table(None, "emp", "dept"), None);
 		assert_eq!(catalog.link_table(None, "dept", "boss"), None);
-		assert_eq!(catalog.into_tables(), vec!["dept".to_owned(), "emp".to_owned()]);
+		assert_eq!(catalog.vector_dimension(None, "doc", "embedding"), None);
+		assert!(catalog.hnsw_indexes(None, "doc").is_empty());
+		// A system table is not one the datastore holds, however it is asked about.
+		assert_eq!(catalog.vector_dimension(None, "pg_type", "oid"), None);
+		assert!(catalog.hnsw_indexes(None, "pg_class").is_empty());
+		assert_eq!(
+			catalog.into_tables(),
+			vec!["dept".to_owned(), "doc".to_owned(), "emp".to_owned()]
+		);
 	}
 }

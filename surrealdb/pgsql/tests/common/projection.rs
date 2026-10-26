@@ -72,6 +72,7 @@ impl ToPgQueryJson for Statement {
 			Self::CreateIndex(s) => s.to_pg_query_json(),
 			Self::CreateView(s) => s.to_pg_query_json(),
 			Self::CreateSchema(s) => s.to_pg_query_json(),
+			Self::CreateExtension(s) => s.to_pg_query_json(),
 			Self::AlterTable(s) => s.to_pg_query_json(),
 			Self::Prepare(s) => s.to_pg_query_json(),
 			Self::Execute(s) => s.to_pg_query_json(),
@@ -1358,6 +1359,9 @@ impl ToPgQueryJson for CreateIndexStmt {
 					"IndexElem",
 					json!({
 						"expr": col.expr.to_pg_query_json(),
+						"opclass": col.opclass.iter().map(|opclass| {
+							pg_str(&opclass.parts.join("."))
+						}).collect::<Vec<_>>(),
 						"ordering": match col.direction {
 							Some(OrderDirection::Asc) => "SORTBY_ASC",
 							Some(OrderDirection::Desc) => "SORTBY_DESC",
@@ -1368,6 +1372,20 @@ impl ToPgQueryJson for CreateIndexStmt {
 			})
 			.collect();
 		obj.insert("indexParams".to_string(), Value::Array(params));
+		let options: Vec<Value> = self
+			.options
+			.iter()
+			.map(|option| {
+				pg_node(
+					"DefElem",
+					json!({
+						"defname": option.name,
+						"arg": option.value.as_ref().map(|value| value.to_pg_query_json()),
+					}),
+				)
+			})
+			.collect();
+		obj.insert("options".to_string(), Value::Array(options));
 
 		pg_node("IndexStmt", Value::Object(obj))
 	}
@@ -1392,6 +1410,32 @@ impl ToPgQueryJson for CreateViewStmt {
 		}
 		obj.insert("query".to_string(), self.query.to_pg_query_json());
 		pg_node("ViewStmt", Value::Object(obj))
+	}
+}
+
+impl ToPgQueryJson for CreateExtensionStmt {
+	fn to_pg_query_json(&self) -> Value {
+		let mut options = Vec::new();
+		let mut option = |name: &str, arg: Value| {
+			options.push(pg_node("DefElem", json!({ "defname": name, "arg": arg })));
+		};
+		if let Some(schema) = &self.schema {
+			option("schema", pg_str(schema));
+		}
+		if let Some(version) = &self.version {
+			option("new_version", pg_str(version));
+		}
+		if self.cascade {
+			option("cascade", json!(null));
+		}
+		pg_node(
+			"CreateExtensionStmt",
+			json!({
+				"extname": self.name,
+				"if_not_exists": self.if_not_exists,
+				"options": options
+			}),
+		)
 	}
 }
 

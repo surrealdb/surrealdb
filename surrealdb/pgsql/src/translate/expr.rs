@@ -92,6 +92,11 @@ pub fn translate_expr(
 				BinaryOperator::RegexNotMatch => "!~",
 				BinaryOperator::RegexNotMatchCi => "!~*",
 				BinaryOperator::HashArrow | BinaryOperator::HashLongArrow => ".",
+				BinaryOperator::Custom(s) if is_vector_operator(s) => {
+					return Err(TranslationError::Unsupported(format!(
+						"the {s} vector operator must be lowered via surrealdb_sqlplan"
+					)));
+				}
 				BinaryOperator::Custom(s) => s.as_str(),
 			};
 			out.push_str(op_str);
@@ -700,4 +705,10 @@ fn is_identifier_safe(s: &str) -> bool {
 		}
 	}
 	true
+}
+
+/// Whether `op` is one of the pgvector distance operators, which SurrealQL spells differently (the
+/// same text is a graph traversal there).
+fn is_vector_operator(op: &str) -> bool {
+	matches!(op, "<->" | "<=>" | "<#>" | "<+>")
 }

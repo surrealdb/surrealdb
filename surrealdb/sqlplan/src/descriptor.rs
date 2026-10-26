@@ -49,7 +49,17 @@ pub enum SqlType {
 	Oid,
 	Regclass,
 	Record,
+	/// A `vector(n)` of the pgvector extension: a fixed-length array of floats with its own wire
+	/// type and text form (`[1,2,3]`).
+	Vector,
 }
+
+/// The wire OID of the `vector` type and of an array of it. PostgreSQL assigns an extension's type
+/// an OID when it is created, and clients find it by name in `pg_type`, so any OID outside the
+/// built-in range serves.
+pub const VECTOR_OID: i32 = 16400;
+/// The wire OID of an array of `vector`.
+pub const VECTOR_ARRAY_OID: i32 = 16401;
 
 impl SqlType {
 	/// A scalar PostgreSQL OID that this descriptor can represent exactly.
@@ -82,6 +92,7 @@ impl SqlType {
 			2205 => Some(Self::Regclass),
 			2249 => Some(Self::Record),
 			2950 => Some(Self::Uuid),
+			VECTOR_OID => Some(Self::Vector),
 			_ => None,
 		}
 	}
@@ -116,6 +127,7 @@ impl SqlType {
 			Self::Numeric => 1700,
 			Self::Regclass => 2205,
 			Self::Record => 2249,
+			Self::Vector => VECTOR_OID,
 			Self::Array(elem) => elem.pg_array_oid(),
 			Self::Uuid => 2950,
 		}
@@ -152,6 +164,7 @@ impl SqlType {
 			Self::Uuid => 2951,
 			Self::Regclass => 2210,
 			Self::Record => 2287,
+			Self::Vector => VECTOR_ARRAY_OID,
 			Self::Unknown | Self::Array(_) => 2277,
 		}
 	}
@@ -186,6 +199,7 @@ impl SqlType {
 			Self::Oid => &Self::Oid,
 			Self::Regclass => &Self::Regclass,
 			Self::Record => &Self::Record,
+			Self::Vector => &Self::Vector,
 			Self::Unknown | Self::Array(_) => return None,
 		};
 		Some(Self::Array(elem))
@@ -212,6 +226,7 @@ impl SqlType {
 			| Self::Array(_)
 			| Self::Inet
 			| Self::Cidr
+			| Self::Vector
 			| Self::Record => -1,
 		}
 	}
@@ -241,13 +256,18 @@ impl SqlType {
 			Self::Timestamp | Self::TimestampTz => 0x07,     // MYSQL_TYPE_TIMESTAMP
 			Self::Interval => 0xfd,                          // MYSQL_TYPE_VAR_STRING
 			Self::Uuid => 0xfd,                              // MYSQL_TYPE_VAR_STRING
-			Self::Json | Self::Array(_) | Self::Record => 0xf5, // MYSQL_TYPE_JSON
+			Self::Json | Self::Array(_) | Self::Vector | Self::Record => 0xf5, // MYSQL_TYPE_JSON
 		}
 	}
 
 	/// Parse SQL type from a string name (e.g. "int4", "varchar", "boolean", "text", etc.)
 	pub fn from_name(name: &str) -> Self {
 		let lower = name.to_ascii_lowercase();
+		// `vector(3)` is a vector: its dimensions do not change how it travels.
+		let lower = match lower.strip_prefix("vector(") {
+			Some(_) => "vector".to_string(),
+			None => lower,
+		};
 		match lower.as_str() {
 			"bool" | "boolean" => Self::Bool,
 			"int2" | "smallint" => Self::Int2,
@@ -277,6 +297,7 @@ impl SqlType {
 			"oid" => Self::Oid,
 			"regclass" => Self::Regclass,
 			"record" => Self::Record,
+			"vector" => Self::Vector,
 			_ => Self::Unknown,
 		}
 	}
@@ -525,6 +546,7 @@ impl BoundSelect {
 					SqlType::Text
 				}
 				BoundBinaryOp::JsonContains => SqlType::Bool,
+				BoundBinaryOp::VectorDistance(_) => SqlType::Float8,
 				BoundBinaryOp::Add
 				| BoundBinaryOp::Subtract
 				| BoundBinaryOp::Multiply
@@ -649,6 +671,10 @@ impl BoundSelect {
 			self.collect_param_types_from_expr(&target.expr, catalog, &mut param_map);
 		}
 
+		for order in &self.order_by {
+			self.collect_param_types_from_expr(&order.expr, catalog, &mut param_map);
+		}
+
 		if let Some(with) = &self.with {
 			for cte in &with.ctes {
 				if let Some(where_clause) = &cte.query.where_clause {
@@ -742,9 +768,21 @@ impl BoundSelect {
 		match expr {
 			BoundExpr::Binary {
 				left,
+				op,
 				right,
-				..
 			} => {
+				// A parameter of a distance is the vector it is the distance to.
+				if let BoundBinaryOp::VectorDistance(_) = op {
+					for operand in [left, right] {
+						if let BoundExpr::Param {
+							index,
+							..
+						} = &**operand
+						{
+							params.insert(*index, SqlType::Vector);
+						}
+					}
+				}
 				match (&**left, &**right) {
 					(
 						BoundExpr::Param {
@@ -804,9 +842,22 @@ impl BoundSelect {
 				self.collect_param_types_from_expr(expr, catalog, params);
 			}
 			BoundExpr::FunctionCall {
+				name,
 				args,
 				..
 			} => {
+				// A parameter handed to a vector function is the vector it takes.
+				if crate::vector::is_distance_function(name) || name == "inner_product" {
+					for arg in args {
+						if let BoundExpr::Param {
+							index,
+							..
+						} = arg
+						{
+							params.insert(*index, SqlType::Vector);
+						}
+					}
+				}
 				for arg in args {
 					self.collect_param_types_from_expr(arg, catalog, params);
 				}

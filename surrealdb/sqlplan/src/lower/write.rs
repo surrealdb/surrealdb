@@ -79,6 +79,11 @@ impl<'a> IdScope<'a> {
 		}
 	}
 
+	/// The dimensions of the column `column` of the target table when it holds vectors.
+	fn vector_column(&self, column: &str) -> Option<usize> {
+		self.catalog.vector_dimension(self.schema.as_deref(), &self.table, column)
+	}
+
 	/// The table the column `column` of the target table holds record links to, if it holds them.
 	/// `id` never holds links.
 	fn link_column(&self, column: &str) -> Option<String> {
@@ -574,6 +579,102 @@ fn assigned_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Expr {
 	}
 }
 
+/// The `value` written to the column `column` of the target table by a PostgreSQL statement:
+/// converted as [`assigned_value`] converts it, and read as a vector when the column holds
+/// vectors.
+fn assigned_pgsql_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Result<Expr, PlanError> {
+	match scope.vector_column(column) {
+		Some(dimensions) if scope.link_column(column).is_none() => {
+			vector_value(value, Some(dimensions))
+		}
+		Some(_) | None => Ok(assigned_value(scope, column, value)),
+	}
+}
+
+/// The `value` written to a vector column of `dimensions` dimensions, where text is the text form
+/// of a vector.
+///
+/// A text literal is read when the statement is lowered, and is refused if it is not a vector of
+/// those dimensions. A parameter or a column is read when the statement runs: text is the text
+/// form of a vector, and any other value is written as it is. Any other expression is written as
+/// it is.
+fn vector_value(value: Expr, dimensions: Option<usize>) -> Result<Expr, PlanError> {
+	if let Expr::Literal(Literal::String(text)) = &value {
+		let elements = crate::vector::parse_text(text.as_str())?;
+		if let Some(expected) = dimensions
+			&& expected != elements.len()
+		{
+			return Err(PlanError::DataException(format!(
+				"expected {expected} dimensions, not {}",
+				elements.len()
+			)));
+		}
+		return Ok(Expr::Literal(Literal::Array(
+			elements.into_iter().map(|element| Expr::Literal(Literal::Float(element))).collect(),
+		)));
+	}
+	let is_cheap_to_read_twice = match &value {
+		Expr::Param(_) => true,
+		Expr::Idiom(Idiom(parts)) => parts.iter().all(|part| matches!(part, Part::Field(_))),
+		Expr::Literal(_)
+		| Expr::Table(_)
+		| Expr::Mock(_)
+		| Expr::Block(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Postfix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Return(_)
+		| Expr::Throw(_)
+		| Expr::IfElse(_)
+		| Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_)
+		| Expr::Define(_)
+		| Expr::Remove(_)
+		| Expr::Rebuild(_)
+		| Expr::Alter(_)
+		| Expr::Info(_)
+		| Expr::Foreach(_)
+		| Expr::Let(_)
+		| Expr::Sleep(_)
+		| Expr::Explain {
+			..
+		} => false,
+	};
+	Ok(if is_cheap_to_read_twice {
+		text_or_value(value)
+	} else {
+		value
+	})
+}
+
+/// `IF type::is_string(value) THEN encoding::json::decode(value) ELSE value END`, over a value that
+/// is cheap to read twice.
+fn text_or_value(value: Expr) -> Expr {
+	Expr::IfElse(Box::new(IfelseStatement {
+		exprs: vec![(
+			call("type::is_string", vec![value.clone()]),
+			call("encoding::json::decode", vec![value.clone()]),
+		)],
+		close: Some(value),
+	}))
+}
+
 /// Convert the items of the projection `fields` of an `INSERT ... SELECT` that are written to link
 /// columns of the target table: the item at a position is written to the column of `columns` at
 /// that position, and keeps its alias, or is named by the column when it has none. With a wildcard
@@ -780,8 +881,19 @@ fn lower_pgsql_expr_as(
 				| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatch
 				| surrealdb_pgsql::ast::op::BinaryOperator::RegexNotMatchCi
 				| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
-				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
-				| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
+				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy => {
+					return Err(PlanError::UnsupportedExpression(format!(
+						"Binary operator {op:?}"
+					)));
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::Custom(custom)
+					if crate::vector::VectorMetric::from_operator(custom).is_some() =>
+				{
+					return Err(PlanError::UnsupportedExpression(format!(
+						"the {custom} operator in a write"
+					)));
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
 					return Err(PlanError::UnsupportedExpression(format!(
 						"Binary operator {op:?}"
 					)));
@@ -797,6 +909,12 @@ fn lower_pgsql_expr_as(
 		} => {
 			let kind = crate::lower::ddl::map_pgsql_type(data_type);
 			let value = lower_pgsql_expr_in(expr, scope)?;
+			if let Some(dimensions) = crate::lower::vector_cast_target(data_type)? {
+				return Ok(sql_null::unary(
+					PrefixOperator::Cast(kind),
+					vector_value(value, dimensions)?,
+				));
+			}
 			if matches!(kind, surrealdb_expr::expr::Kind::Any) {
 				Ok(value)
 			} else {
@@ -817,6 +935,11 @@ fn lower_pgsql_expr_as(
 				};
 			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::Postgres)
 				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
+			if crate::vector::is_distance_function(&fn_name) || fn_name == "inner_product" {
+				return Err(PlanError::UnsupportedExpression(format!(
+					"the {fn_name} function in a write"
+				)));
+			}
 			let mapped = func_def.internal_name.unwrap_or(func_def.name);
 			let mut lowered_args = Vec::with_capacity(args.len());
 			for a in args {
@@ -1823,7 +1946,7 @@ pub fn lower_pgsql_insert(
 					update_assignments.push(Assignment {
 						place: Idiom::field(assign.column.clone()),
 						operator: AssignOperator::Assign,
-						value: assigned_value(&scope, &assign.column, val),
+						value: assigned_pgsql_value(&scope, &assign.column, val)?,
 					});
 				}
 				update = Some(Data::UpdateExpression(update_assignments));
@@ -1851,7 +1974,8 @@ pub fn lower_pgsql_insert(
 					} else {
 						format!("_{idx}")
 					};
-					let lowered_val = assigned_value(&scope, &col_name, lower_pgsql_expr(val)?);
+					let lowered_val =
+						assigned_pgsql_value(&scope, &col_name, lower_pgsql_expr(val)?)?;
 					row_tuples.push((Idiom::field(col_name), lowered_val));
 				}
 				values_rows.push(row_tuples);
@@ -1947,7 +2071,7 @@ fn lower_pgsql_conditional_upsert(
 	let mut proposed = Vec::with_capacity(row.len());
 	let mut values = Vec::with_capacity(row.len());
 	for (column, value) in insert.columns.iter().zip(row) {
-		let lowered = assigned_value(&scope, column, lower_pgsql_expr(value)?);
+		let lowered = assigned_pgsql_value(&scope, column, lower_pgsql_expr(value)?)?;
 		let read = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(Param::from("excluded".to_string()))),
 			Part::Field(Strand::from(column.as_str())),
@@ -1965,7 +2089,7 @@ fn lower_pgsql_conditional_upsert(
 		update_assignments.push(Assignment {
 			place: Idiom::field(assign.column.clone()),
 			operator: AssignOperator::Assign,
-			value: assigned_value(&scope, &assign.column, val),
+			value: assigned_pgsql_value(&scope, &assign.column, val)?,
 		});
 	}
 	let condition = lower_pgsql_predicate(condition, Some(&scope))?;
@@ -2064,7 +2188,7 @@ pub fn lower_pgsql_update(
 		assignments.push(Assignment {
 			place: Idiom::field(assign.column.clone()),
 			operator: AssignOperator::Assign,
-			value: assigned_value(&scope, &assign.column, val),
+			value: assigned_pgsql_value(&scope, &assign.column, val)?,
 		});
 	}
 

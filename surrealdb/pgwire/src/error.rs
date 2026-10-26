@@ -428,6 +428,9 @@ const NAMED_PLANNER_ERRORS: &[(&str, &str, &str)] = &[
 	("function \"", " were provided", "42883"),
 	("function \"", "\" must be called with an OVER clause", "42809"),
 	("unrecognized configuration parameter \"", "\"", "42704"),
+	("operator class \"", "\"", "42704"),
+	("data type ", "\"", "42704"),
+	("extension \"", "\" is not available", "58P01"),
 ];
 
 /// The SQLSTATE of a refusal by the SQL planner, which is the code the planner chose for it
@@ -446,6 +449,12 @@ fn planner_sqlstate(message: &str) -> Option<&'static str> {
 		Some("42883")
 	} else if reason == "bigint out of range" {
 		Some("22003")
+	} else if reason.starts_with("invalid parameter value: ") {
+		Some("22023")
+	} else if reason.starts_with("data exception: ") {
+		Some("22000")
+	} else if reason.starts_with("program limit exceeded: ") {
+		Some("54000")
 	} else {
 		NAMED_PLANNER_ERRORS
 			.iter()
@@ -475,7 +484,9 @@ pub(super) fn unsupported_construct(message: &str) -> Option<&'static str> {
 /// - a NULL, or no value, for a field that admits neither is `23502`;
 /// - any other value that is not of the type of its field is `42804`. The engine refuses a value of
 ///   another type even when its text would read as the field's type, so the refusal is a datatype
-///   mismatch and not an invalid text representation.
+///   mismatch and not an invalid text representation;
+/// - a vector function over vectors of different dimensions is `22000`, as `different vector
+///   dimensions` is in pgvector.
 ///
 /// Any other message gives `None`.
 ///
@@ -493,6 +504,11 @@ fn engine_sqlstate(message: &str) -> Option<&'static str> {
 		} else {
 			Some("42804")
 		}
+	} else if message.starts_with("Incorrect arguments for function vector::")
+		&& message.ends_with("must be of the same dimension.")
+	{
+		// A distance between vectors of different dimensions.
+		Some("22000")
 	} else {
 		None
 	}
@@ -798,6 +814,20 @@ mod tests {
 			PlanError::UnsupportedStatement("MERGE".to_string()),
 			PlanError::UnsupportedExpression("Row".to_string()),
 			PlanError::UndefinedObject(name()),
+			PlanError::InvalidParameterValue("value 1 out of bounds for option \"m\"".to_string()),
+			PlanError::DataException("expected 3 dimensions, not 2".to_string()),
+			PlanError::ProgramLimitExceeded(
+				"column cannot have more than 2000 dimensions for hnsw index".to_string(),
+			),
+			PlanError::UndefinedOperatorClass {
+				name: name(),
+				method: "hnsw".to_string(),
+			},
+			PlanError::NoDefaultOperatorClass {
+				type_name: "vector".to_string(),
+				method: "hnsw".to_string(),
+			},
+			PlanError::ExtensionNotAvailable(name()),
 			PlanError::Custom("each query must have the same number of columns".to_string()),
 		];
 		all.into_iter()
@@ -824,7 +854,17 @@ mod tests {
 					PlanError::UnsupportedStatement(_) | PlanError::UnsupportedExpression(_) => {
 						"0A000"
 					}
-					PlanError::UndefinedObject(_) => "42704",
+					PlanError::UndefinedObject(_)
+					| PlanError::UndefinedOperatorClass {
+						..
+					}
+					| PlanError::NoDefaultOperatorClass {
+						..
+					} => "42704",
+					PlanError::InvalidParameterValue(_) => "22023",
+					PlanError::DataException(_) => "22000",
+					PlanError::ProgramLimitExceeded(_) => "54000",
+					PlanError::ExtensionNotAvailable(_) => "58P01",
 					// A planning error of no kind of its own is a syntax error.
 					PlanError::Custom(_) => "42601",
 					// No planner path raises these: the connection reports the state itself.
@@ -899,6 +939,11 @@ mod tests {
 		}
 
 		for (message, code) in [
+			// vectors of different dimensions
+			(
+				"Incorrect arguments for function vector::distance::euclidean(). The two vectors must be of the same dimension.",
+				"22000",
+			),
 			// NULL, or no value, for a field that admits neither
 			(
 				"Couldn't coerce value for field `name` of `t:1`: Expected `string` but found `NULL`",

@@ -7,6 +7,9 @@ pub(crate) mod link;
 pub mod plan;
 mod quote_ident;
 mod sql_like;
+mod vector_ddl;
+mod vector_expr;
+mod vector_knn;
 pub mod write;
 mod write_null;
 
@@ -15,6 +18,13 @@ pub use ddl::{
 	lower_pgsql_create_index, lower_pgsql_create_table, lower_pgsql_create_view, lower_pgsql_ddl,
 	lower_pgsql_drop, map_mysql_type, map_pgsql_type,
 };
+/// Whether `type_name` is a cast target that is a vector: see [`vector_ddl::cast_target`].
+pub(crate) fn vector_cast_target(
+	type_name: &surrealdb_pgsql::ast::expr::TypeName,
+) -> Result<Option<Option<usize>>, crate::error::PlanError> {
+	vector_ddl::cast_target(type_name)
+}
+
 pub use plan::{lower_bound_select, lower_bound_subquery};
 pub use write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
@@ -40,5 +50,7 @@ mod link_tests;
 mod link_write_tests;
 #[cfg(test)]
 mod scalar_subquery_tests;
+#[cfg(test)]
+mod vector_tests;
 #[cfg(test)]
 mod write_tests;

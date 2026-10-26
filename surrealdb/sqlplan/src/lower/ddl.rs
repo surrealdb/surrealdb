@@ -39,6 +39,9 @@ use crate::error::PlanError;
 
 /// Map PostgreSQL TypeName to SurrealDB Kind.
 pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind {
+	if super::vector_ddl::is_vector(type_name) {
+		return super::vector_ddl::kind(type_name);
+	}
 	let raw_name = match type_name.name.parts.last() {
 		Some(s) => s.to_ascii_lowercase(),
 		None => return Kind::Any,
@@ -232,6 +235,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				false
 			}
 		});
+		super::vector_ddl::check_column(&col.data_type)?;
 		let serial = is_serial(&col.data_type);
 		let is_not_null = is_id
 			|| is_table_pk
@@ -403,7 +407,22 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 }
 
 /// Lower a PostgreSQL CREATE INDEX statement into SurrealDB expressions.
+///
+/// An `hnsw` index needs the dimensions of the column it covers, which this lowering does not
+/// know: see [`lower_pgsql_create_index_over`].
 pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_create_index_over(idx, &|_, _| None)
+}
+
+/// A source of the dimensions of the vector column `column` of the table `table`, if it is one.
+pub type VectorDimensions<'a> = &'a dyn Fn(&str, &str) -> Option<usize>;
+
+/// Lower a PostgreSQL CREATE INDEX statement into SurrealDB expressions, where `dimensions` says
+/// how many dimensions the vector column the index covers has.
+pub fn lower_pgsql_create_index_over(
+	idx: &CreateIndexStmt,
+	dimensions: VectorDimensions<'_>,
+) -> Result<Vec<Expr>, PlanError> {
 	let (_, tbl_str) = crate::namespace::resolve_pgsql_table_name(&idx.table.parts, None)?;
 	let tbl = tbl_str.as_str();
 
@@ -435,17 +454,37 @@ pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, Plan
 		}
 	};
 
+	let method = idx.method.as_deref().map(str::to_ascii_lowercase);
+	let index = match method.as_deref() {
+		Some("hnsw") => {
+			let column = match idx.columns.first().map(|column| &column.expr) {
+				Some(surrealdb_pgsql::ast::expr::Expr::ColumnRef(column)) => {
+					column.fields.last().map(String::as_str)
+				}
+				_ => None,
+			};
+			super::vector_ddl::hnsw_index(idx, column.and_then(|column| dimensions(tbl, column)))?
+		}
+		Some("ivfflat") => {
+			return Err(PlanError::UnsupportedStatement("access method \"ivfflat\"".into()));
+		}
+		Some(_) | None => {
+			super::vector_ddl::refuse_vector_options(idx)?;
+			if idx.unique {
+				Index::Uniq {
+					nulls_not_distinct: false,
+				}
+			} else {
+				Index::Idx
+			}
+		}
+	};
+
 	let index_stmt = DefineIndexStatement {
 		name: Expr::Idiom(Idiom::field(idx_name)),
 		what: Expr::Table(TableName::from(tbl)),
 		cols,
-		index: if idx.unique {
-			Index::Uniq {
-				nulls_not_distinct: false,
-			}
-		} else {
-			Index::Idx
-		},
+		index,
 		kind: if idx.if_not_exists {
 			DefineKind::IfNotExists
 		} else {
@@ -530,6 +569,7 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				if_not_exists,
 				column,
 			} => {
+				super::vector_ddl::check_column(&column.data_type)?;
 				let not_null = column
 					.constraints
 					.iter()
@@ -579,6 +619,7 @@ pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, Plan
 				name,
 				data_type,
 			} => {
+				super::vector_ddl::check_column(data_type)?;
 				let field_def = DefineFieldStatement {
 					name: Expr::Idiom(Idiom::field(name.as_str())),
 					what: Expr::Table(TableName::from(tbl_name)),
@@ -732,10 +773,21 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 /// Lower a PostgreSQL DDL statement.
 ///
 /// Returns the definitions it runs, one expression each, in the order they run.
+#[cfg(test)]
 pub(crate) fn lower_pgsql_ddl_definitions(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_ddl_definitions_over(stmt, &|_, _| None)
+}
+
+/// Lower a PostgreSQL DDL statement as [`lower_pgsql_ddl_definitions`] does, where `dimensions`
+/// says how many dimensions a vector column has.
+fn lower_pgsql_ddl_definitions_over(
+	stmt: &PgStatement,
+	dimensions: VectorDimensions<'_>,
+) -> Result<Vec<Expr>, PlanError> {
 	match stmt {
 		PgStatement::CreateTable(s) => lower_pgsql_create_table(s),
-		PgStatement::CreateIndex(s) => lower_pgsql_create_index(s),
+		PgStatement::CreateIndex(s) => lower_pgsql_create_index_over(s, dimensions),
+		PgStatement::CreateExtension(s) => super::vector_ddl::lower_create_extension(s),
 		PgStatement::CreateView(s) => lower_pgsql_create_view(s),
 		PgStatement::AlterTable(s) => lower_pgsql_alter_table(s),
 		PgStatement::Drop(s) => lower_pgsql_drop(s),
@@ -1357,7 +1409,17 @@ pub(crate) fn lower_mysql_ddl_definitions(stmt: &MyStatement) -> Result<Vec<Expr
 /// `DROP` of several tables) lowers to a block of them: a definition that fails fails the
 /// statement as a whole, and none of its definitions is committed.
 pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
-	lower_pgsql_ddl_definitions(stmt).map(|definitions| vec![one_statement(definitions)])
+	lower_pgsql_ddl_over(stmt, &|_, _| None)
+}
+
+/// Lower a PostgreSQL DDL statement as [`lower_pgsql_ddl`] does, where `dimensions` says how many
+/// dimensions a vector column has, which an `hnsw` index needs.
+pub fn lower_pgsql_ddl_over(
+	stmt: &PgStatement,
+	dimensions: VectorDimensions<'_>,
+) -> Result<Vec<Expr>, PlanError> {
+	lower_pgsql_ddl_definitions_over(stmt, dimensions)
+		.map(|definitions| vec![one_statement(definitions)])
 }
 
 /// Lower a MySQL DDL statement into the expression that answers it.

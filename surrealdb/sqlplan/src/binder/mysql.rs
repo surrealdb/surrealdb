@@ -283,6 +283,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		hnsw_indexes: Vec::new(),
 	})
 }
 

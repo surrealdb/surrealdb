@@ -21,11 +21,11 @@ pub use literal::Literal;
 pub use op::{BinaryOperator, UnaryOperator};
 pub use stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
-	CopyFormat, CopyOptions, CopyStmt, CopyTarget, CreateIndexStmt, CreateSchemaStmt,
-	CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType,
-	DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition,
-	JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
-	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
-	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
+	CopyFormat, CopyOptions, CopyStmt, CopyTarget, CreateExtensionStmt, CreateIndexStmt,
+	CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause,
+	DropObjectType, DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel,
+	JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
+	OnConflictClause, PrepareStmt, RelOption, ResTarget, ResetStmt, SelectStmt, SetClause,
+	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
 	TransactionStmt, UpdateStmt, WindowDef, WithClause,
 };

@@ -10488,9 +10488,12 @@ impl Datastore {
 	/// Lower with a catalog that names the link columns of the tables the
 	/// lowering asks about; see [`sql_links`] for the two steps.
 	///
-	/// The first lowering reads nothing, so its errors, like those of parsing,
-	/// are reported whatever the session. The catalog is read after it, and only
-	/// as [`Self::link_columns`] allows.
+	/// The first lowering reads nothing. When it succeeds, or names no table, its result
+	/// stands unless the catalog says otherwise, and its errors, like those of parsing, are
+	/// reported whatever the session. When it is refused after naming a table, the refusal is
+	/// settled by the catalog: it is lifted if it rested on what the catalog holds, and
+	/// reported otherwise, but a session the catalog cannot be read for is told as much instead.
+	/// The catalog is read only as [`Self::link_columns`] allows.
 	///
 	/// The catalog is read through `transaction` when there is one, so a link
 	/// the caller's own transaction has defined is seen; otherwise through a
@@ -10514,10 +10517,12 @@ impl Datastore {
 		let invalid = |e: anyhow::Error| TypesError::validation(e.to_string(), None);
 		let active_db = database.or(session.db.as_deref());
 		let recorder = sql_links::RecordingCatalog::with_database(active_db);
-		let statements = lower(&recorder).map_err(invalid)?;
+		// A statement may be refused for what only the catalog tells (the dimensions of a column
+		// an index covers), so a refusal is settled once the tables it names have been read.
+		let first = lower(&recorder);
 		let tables = recorder.into_tables();
 		if tables.is_empty() {
-			return Ok(statements);
+			return first.map_err(invalid);
 		}
 		if columns_stay {
 			let purpose = sql_links::Purpose::Lowering;
@@ -10525,13 +10530,13 @@ impl Datastore {
 				Some(described) if described.shapes_lowering => {
 					lower(&described.catalog).map_err(invalid)
 				}
-				Some(_) | None => Ok(statements),
+				Some(_) | None => first.map_err(invalid),
 			};
 		}
 		let links = self.link_columns(session, database, transaction, &tables).await?;
 		match sql_links::link_catalog(&links, active_db) {
 			Some(catalog) => lower(&catalog).map_err(invalid),
-			None => Ok(statements),
+			None => first.map_err(invalid),
 		}
 	}
 

@@ -85,6 +85,7 @@ impl_display!(
 	crate::ast::stmt::AlterTableStmt,
 	crate::ast::stmt::AlterTableAction,
 	crate::ast::stmt::CreateSchemaStmt,
+	crate::ast::stmt::CreateExtensionStmt,
 	crate::ast::stmt::PrepareStmt,
 	crate::ast::stmt::ExecuteStmt,
 	crate::ast::stmt::DeallocateStmt,

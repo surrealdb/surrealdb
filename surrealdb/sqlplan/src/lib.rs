@@ -18,6 +18,7 @@ pub mod presentation;
 pub mod scope;
 pub mod semantics;
 mod system_vars;
+pub mod vector;
 
 pub use catalog::{BinderCatalog, ColumnInfo, EmptyCatalog, MemoryCatalog, TableSchema};
 pub use descriptor::{
@@ -33,8 +34,9 @@ pub use ir::{
 };
 pub use lower::ddl::{
 	lower_mysql_create_table, lower_mysql_ddl, lower_mysql_drop_table, lower_mysql_use,
-	lower_pgsql_alter_table, lower_pgsql_create_index, lower_pgsql_create_table,
-	lower_pgsql_create_view, lower_pgsql_ddl, lower_pgsql_drop, map_mysql_type, map_pgsql_type,
+	lower_pgsql_alter_table, lower_pgsql_create_index, lower_pgsql_create_index_over,
+	lower_pgsql_create_table, lower_pgsql_create_view, lower_pgsql_ddl, lower_pgsql_ddl_over,
+	lower_pgsql_drop, map_mysql_type, map_pgsql_type,
 };
 pub use lower::write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,

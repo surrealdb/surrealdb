@@ -133,6 +133,30 @@ pub trait BinderCatalog: Send + Sync {
 	fn link_table(&self, _schema: Option<&str>, _table: &str, _column: &str) -> Option<String> {
 		None
 	}
+
+	/// The number of dimensions of column `column` of table `table` when it holds vectors
+	/// (`vector(n)`, which the engine stores as `array<float, n>`), and `None` for a table or
+	/// column the catalog does not describe and for every other type.
+	///
+	/// The table and the column are named as the lowering names them, and are compared exactly.
+	fn vector_dimension(
+		&self,
+		_schema: Option<&str>,
+		_table: &str,
+		_column: &str,
+	) -> Option<usize> {
+		None
+	}
+
+	/// The HNSW indexes of table `table`, as the column each covers and the metric it ranks by.
+	/// An index that is being removed is not one.
+	fn hnsw_indexes(
+		&self,
+		_schema: Option<&str>,
+		_table: &str,
+	) -> Vec<(String, crate::vector::VectorMetric)> {
+		Vec::new()
+	}
 }
 
 /// An empty or schemaless catalog.
@@ -159,6 +183,10 @@ pub struct MemoryCatalog {
 	links: HashMap<(Option<String>, String, String), String>,
 	current_db: Option<String>,
 	column_types: HashMap<(String, String), crate::SqlType>,
+	/// The dimensions of the vector columns, by (table, column).
+	vectors: HashMap<(String, String), usize>,
+	/// The HNSW indexes, by table, as the column each covers and its metric.
+	hnsw: HashMap<String, Vec<(String, crate::vector::VectorMetric)>>,
 }
 
 impl MemoryCatalog {
@@ -168,7 +196,32 @@ impl MemoryCatalog {
 			links: HashMap::new(),
 			current_db: None,
 			column_types: HashMap::new(),
+			vectors: HashMap::new(),
+			hnsw: HashMap::new(),
 		}
+	}
+
+	/// Declare an HNSW index of table `table` over column `column`, ranking by `metric`.
+	pub fn add_hnsw_index(
+		&mut self,
+		table: &str,
+		column: &str,
+		metric: crate::vector::VectorMetric,
+	) -> &mut Self {
+		self.hnsw.entry(table.to_owned()).or_default().push((column.to_owned(), metric));
+		self
+	}
+
+	/// Declare that column `column` of table `table` holds vectors of `dimensions` dimensions.
+	pub fn add_vector(&mut self, table: &str, column: &str, dimensions: usize) -> &mut Self {
+		self.vectors.insert((table.to_owned(), column.to_owned()), dimensions);
+		self
+	}
+
+	/// Declare a vector column, as [`Self::add_vector`] does.
+	pub fn with_vector(mut self, table: &str, column: &str, dimensions: usize) -> Self {
+		self.add_vector(table, column, dimensions);
+		self
 	}
 
 	/// Supply a field's declared type without treating a schemaless table as a closed schema.
@@ -296,6 +349,18 @@ impl BinderCatalog for MemoryCatalog {
 			})
 			.map(|name| crate::SqlType::from_name(&name))
 			.unwrap_or(crate::SqlType::Unknown)
+	}
+
+	fn vector_dimension(&self, _schema: Option<&str>, table: &str, column: &str) -> Option<usize> {
+		self.vectors.get(&(table.to_owned(), column.to_owned())).copied()
+	}
+
+	fn hnsw_indexes(
+		&self,
+		_schema: Option<&str>,
+		table: &str,
+	) -> Vec<(String, crate::vector::VectorMetric)> {
+		self.hnsw.get(table).cloned().unwrap_or_default()
 	}
 
 	fn link_table(&self, schema: Option<&str>, table: &str, column: &str) -> Option<String> {

@@ -11,16 +11,16 @@ use crate::ast::graph::{
 use crate::ast::json::{JsonTable, JsonTableColumn};
 use crate::ast::stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr, CopyDirection,
-	CopyFormat, CopyStmt, CopyTarget, CreateIndexStmt, CreateSchemaStmt, CreateTableStmt,
-	CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType, DropStmt,
-	ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition, JoinType,
-	LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction, OnConflictClause,
-	PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind, SetOperation, SetStmt,
-	ShowStmt, Statement, TableAlias, TableConstraint, TableRef, TransactionStmt, TruncateStmt,
-	UpdateStmt, WindowDef, WithClause,
+	CopyFormat, CopyStmt, CopyTarget, CreateExtensionStmt, CreateIndexStmt, CreateSchemaStmt,
+	CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt, DistinctClause, DropObjectType,
+	DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt, IsolationLevel, JoinCondition,
+	JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
+	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
+	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
+	TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
-use crate::printer::expr::print_ident;
+use crate::printer::expr::{print_ident, print_string_literal};
 
 impl ToPgSql for ResTarget {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -876,6 +876,10 @@ impl ToPgSql for ExplainStmt {
 impl ToPgSql for IndexElem {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		self.expr.to_pgsql(f)?;
+		if let Some(opclass) = &self.opclass {
+			f.write_str(" ")?;
+			opclass.to_pgsql(f)?;
+		}
 		if let Some(dir) = self.direction {
 			match dir {
 				OrderDirection::Asc => f.write_str(" ASC")?,
@@ -923,6 +927,20 @@ impl ToPgSql for CreateIndexStmt {
 			elem.to_pgsql(f)?;
 		}
 		f.write_str(")")?;
+		if !self.options.is_empty() {
+			f.write_str(" WITH (")?;
+			for (i, option) in self.options.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, &option.name)?;
+				if let Some(value) = &option.value {
+					f.write_str(" = ")?;
+					value.to_pgsql(f)?;
+				}
+			}
+			f.write_str(")")?;
+		}
 		if let Some(ref pred) = self.predicate {
 			f.write_str(" WHERE ")?;
 			pred.to_pgsql(f)?;
@@ -967,6 +985,28 @@ impl ToPgSql for CreateSchemaStmt {
 			f.write_str("IF NOT EXISTS ")?;
 		}
 		print_ident(f, &self.name)
+	}
+}
+
+impl ToPgSql for CreateExtensionStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE EXTENSION ")?;
+		if self.if_not_exists {
+			f.write_str("IF NOT EXISTS ")?;
+		}
+		print_ident(f, &self.name)?;
+		if let Some(schema) = &self.schema {
+			f.write_str(" SCHEMA ")?;
+			print_ident(f, schema)?;
+		}
+		if let Some(version) = &self.version {
+			f.write_str(" VERSION ")?;
+			print_string_literal(f, version)?;
+		}
+		if self.cascade {
+			f.write_str(" CASCADE")?;
+		}
+		Ok(())
 	}
 }
 
@@ -1154,6 +1194,7 @@ impl ToPgSql for Statement {
 			Self::CreateView(s) => s.to_pgsql(f),
 			Self::AlterTable(s) => s.to_pgsql(f),
 			Self::CreateSchema(s) => s.to_pgsql(f),
+			Self::CreateExtension(s) => s.to_pgsql(f),
 			Self::Drop(s) => s.to_pgsql(f),
 			Self::Transaction(tx) => tx.to_pgsql(f),
 			Self::Set(s) => s.to_pgsql(f),

@@ -87,6 +87,7 @@ impl PgWriteAnalysis {
 			| Statement::CreateView(_)
 			| Statement::AlterTable(_)
 			| Statement::CreateSchema(_)
+			| Statement::CreateExtension(_)
 			| Statement::Drop(_)
 			| Statement::Transaction(_)
 			| Statement::Set(_)

@@ -210,6 +210,24 @@ pub fn lower_bound_expr(
 			let func_def = FunctionRegistry::lookup(name, policy.dialect)
 				.ok_or_else(|| PlanError::UndefinedFunction(name.clone()))?;
 
+			if let Some(metric) = crate::vector::VectorMetric::from_function(name)
+				&& let [a, b] = args.as_slice()
+			{
+				return Ok(super::vector_expr::lower_distance(
+					metric,
+					lower_bound_expr(a, policy)?,
+					lower_bound_expr(b, policy)?,
+				));
+			}
+			if name == "inner_product"
+				&& let [a, b] = args.as_slice()
+			{
+				return Ok(super::vector_expr::lower_inner_product(
+					lower_bound_expr(a, policy)?,
+					lower_bound_expr(b, policy)?,
+				));
+			}
+
 			// Special built-in lowering logic
 			match name.as_str() {
 				"coalesce" | "ifnull" => {
@@ -389,6 +407,32 @@ pub fn lower_bound_expr(
 				"pg_is_in_recovery" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::Bool(false)));
 				}
+				"to_regtype" if args.len() == 1 => {
+					// The OID of the type a name spells, or NULL for a name that is none the
+					// catalog lists; a name that is known only when the statement runs is looked
+					// up then.
+					let name = lower_bound_expr(&args[0], policy)?;
+					let mut lookup = LogicalExpr::Literal(LogicalLiteral::Null);
+					for (type_name, oid) in crate::catalog::system::REGTYPE_NAMES.iter().rev() {
+						lookup = LogicalExpr::If(Box::new(LogicalIf {
+							branches: vec![(
+								LogicalExpr::Binary {
+									left: Box::new(LogicalExpr::Current),
+									op: BinaryOperator::Equal,
+									right: Box::new(LogicalExpr::Literal(LogicalLiteral::String(
+										Strand::from(*type_name),
+									))),
+								},
+								LogicalExpr::Literal(LogicalLiteral::Integer(i64::from(*oid))),
+							)],
+							otherwise: Some(lookup),
+						}));
+					}
+					return Ok(LogicalExpr::Optional {
+						base: Box::new(name),
+						then: Box::new(lookup),
+					});
+				}
 				"pg_get_userbyid" => {
 					return Ok(LogicalExpr::Literal(LogicalLiteral::String(Strand::from("root"))));
 				}
@@ -427,6 +471,7 @@ pub fn lower_bound_expr(
 							1022 => "double precision[]",
 							2951 => "uuid[]",
 							3807 => "jsonb[]",
+							oid if oid == i64::from(crate::descriptor::VECTOR_OID) => "vector",
 							_ => "text",
 						},
 						_ => "text",
@@ -776,6 +821,45 @@ pub fn lower_bound_expr(
 			let lowered = lower_bound_expr(expr, policy)?;
 			let clean_type = target_type.to_lowercase();
 			let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
+			if base_type == "regtype" {
+				// The type an OID names is shown as its name; the OIDs of the types the catalog
+				// holds otherwise keep to the number.
+				let shown = |oid: i32, name: &str, otherwise: LogicalExpr| {
+					LogicalExpr::If(Box::new(LogicalIf {
+						branches: vec![(
+							LogicalExpr::Binary {
+								left: Box::new(LogicalExpr::Current),
+								op: BinaryOperator::Equal,
+								right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(
+									i64::from(oid),
+								))),
+							},
+							LogicalExpr::Literal(LogicalLiteral::String(Strand::from(name))),
+						)],
+						otherwise: Some(otherwise),
+					}))
+				};
+				let number = LogicalExpr::Call(Box::new(LogicalCall {
+					receiver: Function::Normal("type::string".to_string()),
+					args: vec![LogicalExpr::Current],
+				}));
+				let named = shown(
+					crate::descriptor::VECTOR_OID,
+					"vector",
+					shown(crate::descriptor::VECTOR_ARRAY_OID, "vector[]", number),
+				);
+				return Ok(LogicalExpr::Optional {
+					base: Box::new(lowered),
+					then: Box::new(named),
+				});
+			}
+			if base_type == "vector" {
+				let dimensions = clean_type
+					.split_once('(')
+					.and_then(|(_, rest)| rest.strip_suffix(')'))
+					.and_then(|count| count.trim().parse::<usize>().ok());
+				return super::vector_expr::lower_cast(lowered, dimensions);
+			}
 			let kind = match base_type {
 				"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed"
 				| "unsigned" => Kind::Int,
@@ -1224,6 +1308,13 @@ fn lower_binary_op(
 	) {
 		return lower_json_op(left, op, right, policy);
 	}
+	if let BoundBinaryOp::VectorDistance(metric) = op {
+		return Ok(super::vector_expr::lower_distance(
+			metric,
+			lower_bound_expr(left, policy)?,
+			lower_bound_expr(right, policy)?,
+		));
+	}
 	let (l, r) = lower_operands(left, op, right, policy)?;
 
 	match op {
@@ -1479,6 +1570,7 @@ fn lower_binary_op(
 		| BoundBinaryOp::JsonExtractText
 		| BoundBinaryOp::JsonPathExtractText
 		| BoundBinaryOp::JsonContains
+		| BoundBinaryOp::VectorDistance(_)
 		| BoundBinaryOp::Regexp
 		| BoundBinaryOp::RegexpCi => unreachable!(),
 	}
@@ -2133,12 +2225,18 @@ pub fn lower_bound_order(
 		BoundOrderDirection::Asc => true,
 		BoundOrderDirection::Desc => false,
 	};
+	// The test that puts the NULLs last or first, which a distance answers from its column rather
+	// than from itself, so that it is computed once.
+	let null_test = match super::vector_knn::null_probe(order, policy)? {
+		Some(probe) => probe,
+		None => is_null_expr(value.clone()),
+	};
 
 	if direction && !order.nulls_first {
 		// ASC NULLS LAST: false (non-null) before true (null)
 		Ok(vec![
 			LogicalOrder {
-				value: is_null_expr(value.clone()),
+				value: null_test,
 				direction: true,
 				collate: false,
 				numeric: false,
@@ -2154,7 +2252,7 @@ pub fn lower_bound_order(
 		// DESC NULLS FIRST: true (null) before false (non-null)
 		Ok(vec![
 			LogicalOrder {
-				value: is_null_expr(value.clone()),
+				value: null_test,
 				direction: false,
 				collate: false,
 				numeric: false,

@@ -13,9 +13,9 @@ use crate::dialect::{DialectPolicy, SqlDialect};
 use crate::error::PlanError;
 use crate::functions::{FunctionRegistry, SqlFunctionKind};
 use crate::ir::{
-	BoundBinaryOp, BoundColumnRef, BoundCte, BoundDistinct, BoundExpr, BoundJoinCondition,
-	BoundJoinType, BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect, BoundSetOpKind,
-	BoundSetOperation, BoundTableSource, BoundTarget, BoundUnaryOp, BoundWindowDef,
+	BoundBinaryOp, BoundColumnRef, BoundCte, BoundDistinct, BoundExpr, BoundHnswIndex,
+	BoundJoinCondition, BoundJoinType, BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect,
+	BoundSetOpKind, BoundSetOperation, BoundTableSource, BoundTarget, BoundUnaryOp, BoundWindowDef,
 	BoundWindowFrame, BoundWindowFrameBound, BoundWindowFrameExclusion, BoundWindowFrameUnits,
 	BoundWindowSpec, BoundWithClause,
 };
@@ -282,6 +282,22 @@ pub fn bind_select(
 
 	let for_update = !select.locking.is_empty();
 
+	let hnsw_indexes = match &from_source {
+		Some(BoundTableSource::Table {
+			schema,
+			name,
+			..
+		}) => catalog
+			.hnsw_indexes(schema.as_deref(), name)
+			.into_iter()
+			.map(|(column, metric)| BoundHnswIndex {
+				column,
+				metric,
+			})
+			.collect(),
+		_ => Vec::new(),
+	};
+
 	let set_op = match &select.set_op {
 		Some(so) => {
 			let bound_right = bind_select(&so.right, catalog, policy, None)?;
@@ -314,6 +330,7 @@ pub fn bind_select(
 		set_op,
 		for_update,
 		user_tables: catalog.all_tables(),
+		hnsw_indexes,
 	})
 }
 
@@ -558,6 +575,7 @@ fn bind_table_ref(
 				set_op: None,
 				for_update: false,
 				user_tables: Vec::new(),
+				hnsw_indexes: Vec::new(),
 			};
 			let relation_index =
 				scope.register_subquery_with_columns(&exposed, Some(columns), policy);
@@ -736,6 +754,15 @@ pub fn bind_expr(
 		} => {
 			let l = bind_expr(left, scope, catalog, policy)?;
 			let r = bind_expr(right, scope, catalog, policy)?;
+			if let surrealdb_pgsql::ast::op::BinaryOperator::Custom(custom) = op
+				&& let Some(metric) = crate::vector::VectorMetric::from_operator(custom)
+			{
+				return Ok(BoundExpr::Binary {
+					left: Box::new(vector_operand(l)),
+					op: BoundBinaryOp::VectorDistance(metric),
+					right: Box::new(vector_operand(r)),
+				});
+			}
 			let bound_op = match op {
 				surrealdb_pgsql::ast::op::BinaryOperator::Add => BoundBinaryOp::Add,
 				surrealdb_pgsql::ast::op::BinaryOperator::Sub => BoundBinaryOp::Subtract,
@@ -920,6 +947,13 @@ pub fn bind_expr(
 					.collect::<Result<Vec<_>, _>>()?
 			};
 
+			let bound_args =
+				if crate::vector::is_distance_function(&fn_name) || fn_name == "inner_product" {
+					bound_args.into_iter().map(vector_operand).collect()
+				} else {
+					bound_args
+				};
+
 			if let Some(spec) = over {
 				if bound_args.iter().any(|a| a.contains_window()) {
 					return Err(PlanError::WindowNotAllowed("window function arguments".into()));
@@ -1018,7 +1052,29 @@ pub fn bind_expr(
 			..
 		} => {
 			let val = bind_expr(expr, scope, catalog, policy)?;
-			let target_type = data_type.name.parts.join(".");
+			let mut target_type = data_type.name.parts.join(".");
+			if data_type.name.parts.last().is_some_and(|name| name.eq_ignore_ascii_case("vector")) {
+				if !data_type.array_bounds.is_empty() {
+					return Err(PlanError::UnsupportedExpression(
+						"a cast to an array of vector".into(),
+					));
+				}
+				target_type = "vector".to_string();
+				if data_type.modifiers.len() > 1 {
+					return Err(PlanError::InvalidParameterValue(
+						"type modifier is not allowed for type \"vector\"".into(),
+					));
+				}
+				if let Some(dimensions) = data_type.modifiers.first() {
+					let dimensions = dimensions.parse::<i64>().map_err(|_| {
+						PlanError::InvalidParameterValue(format!(
+							"invalid type modifier for type vector: {dimensions}"
+						))
+					})?;
+					target_type =
+						format!("vector({})", crate::vector::check_dimensions(dimensions)?);
+				}
+			}
 			Ok(BoundExpr::Cast {
 				expr: Box::new(val),
 				target_type,
@@ -1458,4 +1514,17 @@ fn bind_window_spec(
 		order_by,
 		frame,
 	})
+}
+
+/// An operand of a vector function: a text literal, which PostgreSQL types as the `vector` the
+/// function takes, is cast to one.
+fn vector_operand(operand: BoundExpr) -> BoundExpr {
+	if matches!(operand, BoundExpr::Literal(BoundLiteral::String(_))) {
+		BoundExpr::Cast {
+			expr: Box::new(operand),
+			target_type: "vector".to_string(),
+		}
+	} else {
+		operand
+	}
 }

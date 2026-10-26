@@ -39,6 +39,7 @@ pub fn translate_statement(
 		}
 		Statement::CreateTable(_)
 		| Statement::CreateIndex(_)
+		| Statement::CreateExtension(_)
 		| Statement::CreateView(_)
 		| Statement::AlterTable(_)
 		| Statement::Drop(_) => {

@@ -34,6 +34,7 @@ fn pg_in(sql: &str, catalog: &dyn BinderCatalog) -> Expr {
 		| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
 		| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
 		| surrealdb_pgsql::ast::stmt::Statement::CreateSchema(_)
+		| surrealdb_pgsql::ast::stmt::Statement::CreateExtension(_)
 		| surrealdb_pgsql::ast::stmt::Statement::Drop(_)
 		| surrealdb_pgsql::ast::stmt::Statement::Transaction(_)
 		| surrealdb_pgsql::ast::stmt::Statement::Set(_)

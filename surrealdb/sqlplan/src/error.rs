@@ -86,6 +86,30 @@ pub enum PlanError {
 	#[error("unrecognized configuration parameter \"{0}\"")]
 	UndefinedObject(String),
 
+	#[error("invalid parameter value: {0}")]
+	InvalidParameterValue(String),
+
+	#[error("data exception: {0}")]
+	DataException(String),
+
+	#[error("program limit exceeded: {0}")]
+	ProgramLimitExceeded(String),
+
+	#[error("operator class \"{name}\" does not exist for access method \"{method}\"")]
+	UndefinedOperatorClass {
+		name: String,
+		method: String,
+	},
+
+	#[error("data type {type_name} has no default operator class for access method \"{method}\"")]
+	NoDefaultOperatorClass {
+		type_name: String,
+		method: String,
+	},
+
+	#[error("extension \"{0}\" is not available")]
+	ExtensionNotAvailable(String),
+
 	#[error("planning error: {0}")]
 	Custom(String),
 }
@@ -123,6 +147,16 @@ impl PlanError {
 			Self::SavepointDoesNotExist(_) => "3B001", // invalid_savepoint_specification
 			Self::ActiveTransactionAlreadyInProgress => "25001", // active_sql_transaction
 			Self::UndefinedObject(_) => "42704",  // undefined_object
+			Self::InvalidParameterValue(_) => "22023", // invalid_parameter_value
+			Self::DataException(_) => "22000",    // data_exception
+			Self::ProgramLimitExceeded(_) => "54000", // program_limit_exceeded
+			Self::UndefinedOperatorClass {
+				..
+			}
+			| Self::NoDefaultOperatorClass {
+				..
+			} => "42704", /* undefined_object */
+			Self::ExtensionNotAvailable(_) => "58P01", // undefined_file
 			Self::Custom(_) => "42000",
 		}
 	}
@@ -153,6 +187,16 @@ impl PlanError {
 			Self::SavepointDoesNotExist(_) => 1305, // ER_SP_DOES_NOT_EXIST
 			Self::ActiveTransactionAlreadyInProgress => 1105, // ER_UNKNOWN_ERROR
 			Self::UndefinedObject(_) => 1193,       // ER_UNKNOWN_SYSTEM_VARIABLE
+			Self::InvalidParameterValue(_) => 1210, // ER_WRONG_ARGUMENTS
+			Self::DataException(_)
+			| Self::ProgramLimitExceeded(_)
+			| Self::UndefinedOperatorClass {
+				..
+			}
+			| Self::NoDefaultOperatorClass {
+				..
+			}
+			| Self::ExtensionNotAvailable(_) => 1105, // ER_UNKNOWN_ERROR
 			Self::UndefinedOperator(_) | Self::Custom(_) => 1064,
 		}
 	}

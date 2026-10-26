@@ -38,6 +38,7 @@ pub(crate) mod guc;
 pub mod msg;
 pub mod sasl;
 pub mod typing;
+mod vector;
 
 pub const LOG: &str = "surrealdb::pg";
 pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
