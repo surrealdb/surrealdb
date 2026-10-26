@@ -1895,7 +1895,7 @@ mod tests {
 
 		use crate::exec::context::{SessionEffect, SessionSink};
 		use crate::exec::operators::test_util::root_ctx_with_options;
-		use crate::exec::vm::scalar::Scalar;
+		use crate::exec::vm::scalar::{Held, Scalar};
 		let sink = std::sync::Arc::new(SessionSink::default());
 		let ctx = root_ctx_with_options().with_session_sink(std::sync::Arc::clone(&sink));
 		let checks = |name: &str| {
@@ -1949,7 +1949,7 @@ mod tests {
 			unreachable!("matched above")
 		};
 		let mut regs: Vec<Scalar<'_>> = (0..=*value).map(|_| Scalar::None).collect();
-		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::from(5_i64)));
+		regs[*value as usize] = Scalar::Value(Held::Owned(Value::from(5_i64)));
 		take(&program, record, &mut regs, &mut [], &ctx).await.expect("the value is recorded");
 		assert_eq!(
 			sink.take(),
@@ -2011,7 +2011,7 @@ mod tests {
 	#[tokio::test]
 	async fn a_use_operand_that_is_no_string_is_refused_before_the_next_is_evaluated() {
 		use crate::exec::operators::test_util::root_ctx_with_options;
-		use crate::exec::vm::scalar::Scalar;
+		use crate::exec::vm::scalar::{Held, Scalar};
 		let program = session_statement(
 			PhysOp::Use {
 				target: UseTarget::NsDb,
@@ -2029,11 +2029,11 @@ mod tests {
 			panic!("the namespace is read first: {:?}", stores(&program));
 		};
 		let mut regs: Vec<Scalar<'_>> = (0..=*value).map(|_| Scalar::None).collect();
-		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::from(1_i64)));
+		regs[*value as usize] = Scalar::Value(Held::Owned(Value::from(1_i64)));
 		let ctx = root_ctx_with_options();
 		let refused = take(&program, instr, &mut regs, &mut [], &ctx).await;
 		assert!(refused.is_err());
-		regs[*value as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::String("a".into())));
+		regs[*value as usize] = Scalar::Value(Held::Owned(Value::String("a".into())));
 		take(&program, instr, &mut regs, &mut [], &ctx).await.expect("a string names a namespace");
 	}
 }

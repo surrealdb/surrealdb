@@ -17,7 +17,7 @@ pub(super) use super::groups::Groups;
 use super::ir_exec::IrFlow;
 use super::program::{Instr, KeyOrder, Operand, Pipeline, Program, ROW, Reg};
 use super::row::RowReader;
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::exec::field_path::FieldPathPart;
 use crate::exec::function::{AggregateFunction, FunctionRegistry};
 use crate::exec::operators::{compare_values, first_value_needed};
@@ -468,8 +468,10 @@ pub(crate) struct State {
 	/// The write state of each block statement compiled into the program
 	/// that writes, kept across its reaches.
 	pub(super) group_writes: Vec<Option<Box<super::write::WriteState>>>,
-	/// The values a block has bound its `LET` and `FOR` names to, by slot.
-	pub(super) slots: Vec<Value>,
+	/// The values a block has bound its `LET` and `FOR` names to, and the
+	/// arguments a unit was called with, by slot. [`Instr::LoadSlot`] shares
+	/// a slot's value with the register it loads rather than copying it.
+	pub(super) slots: Vec<Held<'static>>,
 	/// What each nested statement run once has taken, by
 	/// [`Program::nested`](super::program::Program::nested) index, until the
 	/// group it is evaluated in starts again.
@@ -2396,14 +2398,14 @@ fn measure_row(
 			return Ok(Some(Scalar::Number(number)));
 		}
 	}
-	let args = measure.args(row.field(name)?.to_value(), query.clone());
+	let args = measure.args(row.field(name)?.into_value(), query.clone());
 	let weighed = args.iter().map(super::fuel::weight).fold(0, u32::saturating_add);
 	if weighed > 0 {
 		super::fuel::charge(weighed);
 	}
 	let value = function.invoke(args)?;
 	super::fuel::charge(super::fuel::weight(&value));
-	Ok(Some(Scalar::Value(std::borrow::Cow::Owned(value))))
+	Ok(Some(Scalar::Value(Held::Owned(value))))
 }
 
 /// Charge the two vectors of `a` and `b` numbers a measure or a ranking computed in the body
@@ -2432,7 +2434,29 @@ pub(super) fn read_operand(
 	Ok(match operand {
 		Operand::Reg(reg) => regs[reg as usize].to_value(),
 		Operand::Const(index) => program.consts[index as usize].clone(),
-		Operand::Field(name) => row.field(&program.fields[name as usize])?.to_value(),
+		Operand::Field(name) => row.field(&program.fields[name as usize])?.into_value(),
+	})
+}
+
+/// The value `operand` denotes, for a host step that reads it in place: a
+/// register and a constant are borrowed, as is a field the row holds whole.
+pub(super) fn operand_value<'s>(
+	regs: &'s [Scalar<'_>],
+	row: &'s dyn RowReader,
+	program: &'s Program,
+	operand: Operand,
+) -> anyhow::Result<std::borrow::Cow<'s, Value>> {
+	Ok(match operand {
+		Operand::Reg(reg) => regs[reg as usize].as_value(),
+		Operand::Const(index) => std::borrow::Cow::Borrowed(&program.consts[index as usize]),
+		Operand::Field(name) => {
+			let field = row.field(&program.fields[name as usize])?;
+			if let Scalar::Value(Held::Borrowed(value)) = field {
+				std::borrow::Cow::Borrowed(value)
+			} else {
+				std::borrow::Cow::Owned(field.into_value())
+			}
+		}
 	})
 }
 
@@ -2450,7 +2474,7 @@ pub(super) fn run_row<'r>(
 	// The [`ROW`] slot is never handed out as a body register. When the row is borrowed whole,
 	// the slot holds it, so code over row values reads the row from there.
 	if let (Some(slot), Some(whole)) = (regs.get_mut(ROW as usize), row.borrowed()) {
-		*slot = Scalar::Value(std::borrow::Cow::Borrowed(whole));
+		*slot = Scalar::Value(Held::Borrowed(whole));
 	}
 	let read = |regs: &[Scalar<'r>], operand: Operand| -> anyhow::Result<Scalar<'r>> {
 		Ok(match operand {
@@ -2465,7 +2489,7 @@ pub(super) fn run_row<'r>(
 		Ok(match operand {
 			Operand::Reg(reg) => regs[reg as usize].to_value(),
 			Operand::Const(index) => program.consts[index as usize].clone(),
-			Operand::Field(name) => row.field(&program.fields[name as usize])?.to_value(),
+			Operand::Field(name) => row.field(&program.fields[name as usize])?.into_value(),
 		})
 	};
 	// A jump to `target`. A backward one is an iteration of a loop and spends
@@ -2497,6 +2521,38 @@ pub(super) fn run_row<'r>(
 			}
 		};
 	}
+	// The scalar `operand` names, read in place: a register is borrowed
+	// rather than cloned, and a constant's or a field's scalar is held in
+	// `temp`.
+	macro_rules! scalar_at {
+		($operand:expr, $temp:ident) => {
+			match $operand {
+				Operand::Reg(reg) => &regs[reg as usize],
+				Operand::Const(index) => {
+					$temp = Scalar::of(&program.consts[index as usize]);
+					&$temp
+				}
+				Operand::Field(name) => {
+					$temp = row.field(&program.fields[name as usize])?;
+					&$temp
+				}
+			}
+		};
+	}
+	// The scalar `operand` names, read in place as `scalar_at!` reads it,
+	// with `temp` holding a constant's or a field's scalar, so that
+	// [`held_base`] can then hand the base on without copying it.
+	macro_rules! base_at {
+		($operand:expr, $temp:ident) => {
+			match $operand {
+				Operand::Reg(reg) => &regs[reg as usize],
+				Operand::Const(index) => {
+					&*$temp.insert(Scalar::of(&program.consts[index as usize]))
+				}
+				Operand::Field(name) => &*$temp.insert(row.field(&program.fields[name as usize])?),
+			}
+		};
+	}
 	loop {
 		// A body that reaches past its last instruction, on entry, on resume after a
 		// host step, or after a jump, means the program was lowered wrong. It raises an error.
@@ -2509,7 +2565,7 @@ pub(super) fn run_row<'r>(
 				kind,
 				field,
 			} => {
-				let value = std::mem::replace(&mut regs[*reg as usize], Scalar::None).to_value();
+				let value = std::mem::replace(&mut regs[*reg as usize], Scalar::None).into_value();
 				let coerced = match value.coerce_to_kind(&program.kinds[*kind as usize]) {
 					Ok(coerced) => coerced,
 					Err(error) => {
@@ -2520,7 +2576,7 @@ pub(super) fn run_row<'r>(
 						}));
 					}
 				};
-				regs[*reg as usize] = Scalar::Value(std::borrow::Cow::Owned(coerced));
+				regs[*reg as usize] = Scalar::Value(Held::Owned(coerced));
 				pc += 1;
 			}
 			Instr::BeginComputing {
@@ -2564,7 +2620,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let take = |regs: &mut [Scalar<'r>], reg: Reg| {
 					if let Value::Object(obj) =
-						std::mem::replace(&mut regs[reg as usize], Scalar::None).to_value()
+						std::mem::replace(&mut regs[reg as usize], Scalar::None).into_value()
 					{
 						obj
 					} else {
@@ -2690,9 +2746,11 @@ pub(super) fn run_row<'r>(
 				right,
 				dst,
 			} => {
-				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
-				let answer = op.apply_scalar(&left, &right)?;
-				charge_walked(&left, &right);
+				let (left_temp, right_temp);
+				let left = scalar_at!(*left, left_temp);
+				let right = scalar_at!(*right, right_temp);
+				let answer = op.apply_scalar(left, right)?;
+				charge_walked(left, right);
 				regs[*dst as usize] = answer;
 				pc += 1;
 			}
@@ -2703,9 +2761,11 @@ pub(super) fn run_row<'r>(
 				truthy,
 				target,
 			} => {
-				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
-				let answer = op.apply_scalar(&left, &right)?;
-				charge_walked(&left, &right);
+				let (left_temp, right_temp);
+				let left = scalar_at!(*left, left_temp);
+				let right = scalar_at!(*right, right_temp);
+				let answer = op.apply_scalar(left, right)?;
+				charge_walked(left, right);
 				if answer.is_truthy() == *truthy {
 					jump!(*target as usize);
 				} else {
@@ -2718,9 +2778,11 @@ pub(super) fn run_row<'r>(
 				right,
 				reject,
 			} => {
-				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
-				let answer = op.apply_scalar(&left, &right)?;
-				charge_walked(&left, &right);
+				let (left_temp, right_temp);
+				let left = scalar_at!(*left, left_temp);
+				let right = scalar_at!(*right, right_temp);
+				let answer = op.apply_scalar(left, right)?;
+				charge_walked(left, right);
 				if answer.is_truthy() == *reject {
 					state.rejected += 1;
 					return Ok(Step::Next);
@@ -2735,7 +2797,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let answer = op.apply(read_value(regs, *left)?, read_value(regs, *right)?)?;
 				super::fuel::charge(super::fuel::weight(&answer));
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(answer));
 				pc += 1;
 			}
 			Instr::Unary {
@@ -2744,14 +2806,13 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				let answer = op.apply(read_value(regs, *src)?, &program.kinds)?;
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(answer));
 				pc += 1;
 			}
 			Instr::NewArray {
 				dst,
 			} => {
-				regs[*dst as usize] =
-					Scalar::Value(std::borrow::Cow::Owned(Value::Array(Default::default())));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Array(Default::default())));
 				pc += 1;
 			}
 			Instr::ArrayPush {
@@ -2759,8 +2820,8 @@ pub(super) fn run_row<'r>(
 				value,
 			} => {
 				let value = read_value(regs, *value)?;
-				if let Scalar::Value(std::borrow::Cow::Owned(Value::Array(items))) =
-					&mut regs[*array as usize]
+				if let Scalar::Value(held) = &mut regs[*array as usize]
+					&& let Value::Array(items) = held.to_mut()
 				{
 					items.push(value);
 				} else {
@@ -2772,8 +2833,11 @@ pub(super) fn run_row<'r>(
 				slot,
 				dst,
 			} => {
-				let value = state.slots.get(*slot as usize).cloned().unwrap_or(Value::None);
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				let held = match state.slots.get_mut(*slot as usize) {
+					Some(held) => held.share(),
+					None => Held::Owned(Value::None),
+				};
+				regs[*dst as usize] = Scalar::Value(held);
 				pc += 1;
 			}
 			Instr::LoadParam {
@@ -2812,7 +2876,7 @@ pub(super) fn run_row<'r>(
 				// A flatten, or a slice by a range, walks what it answers in
 				// one go: charged whole, the row yields at its next yield point.
 				super::fuel::charge(super::fuel::weight(&answer));
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(answer));
 				pc += 1;
 			}
 			Instr::Access {
@@ -2821,13 +2885,14 @@ pub(super) fn run_row<'r>(
 				dst,
 				..
 			} => {
-				let base = read(regs, *src)?;
+				let temp;
+				let base = scalar_at!(*src, temp);
 				let name = program.fields[*field as usize].as_str();
-				// A base the row or the program owns is read in place: the
-				// answer borrows from it rather than copying the object it
-				// sits in.
+				// The base is read in place. One the row or the program owns
+				// is borrowed by the answer; from any other the field is
+				// copied out, never the object it sits in.
 				let answer = match base {
-					Scalar::Value(std::borrow::Cow::Borrowed(value)) => match value {
+					Scalar::Value(Held::Borrowed(value)) => match *value {
 						Value::Object(object) => {
 							Some(Scalar::of(object.get(name).unwrap_or(&Value::None)))
 						}
@@ -2851,7 +2916,7 @@ pub(super) fn run_row<'r>(
 						| Value::Closure(_) => Some(Scalar::None),
 					},
 					Scalar::Value(value) => match value.as_ref() {
-						Value::Object(object) => Some(Scalar::Value(std::borrow::Cow::Owned(
+						Value::Object(object) => Some(Scalar::Value(Held::Owned(
 							object.get(name).cloned().unwrap_or(Value::None),
 						))),
 						Value::RecordId(_)
@@ -2900,68 +2965,74 @@ pub(super) fn run_row<'r>(
 				dst,
 				..
 			} => {
-				let field;
-				let base = peek!(*src, field);
-				let answer = match base {
-					// The collection is copied a stretch at a time, a unit an
-					// element, yielding mid-copy once the fuel is spent.
-					Some(Value::Object(object)) => {
-						let entries = object.0.as_slice();
-						match copied(state, pipeline, pc, entries, |_| false) {
-							Copied::Done(entries) => Some(Value::Object(crate::val::Object(
-								surrealdb_collections::VecMap::from_sorted_vec_unchecked(entries),
-							))),
-							Copied::Spent => {
-								return Ok(Step::Yield {
-									resume: pc,
-								});
-							}
-							Copied::Refused => None,
+				// `.*` answers an object unchanged, and an array or a set
+				// unchanged once a walk finds no record id in it, taken a
+				// stretch at a time, a unit an element, yielding mid-walk once
+				// the fuel is spent. The answer is the base as the base is
+				// held, never a copy: a register's own collection is moved into
+				// a shared allocation it keeps holding, so the register still
+				// reads the same value and the answer shares it. A collection
+				// holding a record id is read element by element, by the host.
+				let mut temp = None;
+				let base = base_at!(*src, temp);
+				let walked = match base {
+					Scalar::Value(held) => match &**held {
+						Value::Object(_) => Some(Scan::Clear),
+						Value::Array(array) => {
+							Some(scanned(state, pipeline, pc, &array.0, |item| {
+								matches!(item, Value::RecordId(_))
+							}))
 						}
-					}
-					Some(Value::Array(array)) => {
-						match copied(state, pipeline, pc, &array.0, |item| {
-							matches!(item, Value::RecordId(_))
-						}) {
-							Copied::Done(values) => Some(Value::Array(values.into())),
-							Copied::Spent => {
-								return Ok(Step::Yield {
-									resume: pc,
-								});
-							}
-							Copied::Refused => None,
+						Value::Set(set) => {
+							Some(scanned(state, pipeline, pc, set.0.iter().as_slice(), |item| {
+								matches!(item, Value::RecordId(_))
+							}))
 						}
-					}
-					Some(Value::Set(set)) => {
-						let elements = set.0.iter().as_slice();
-						match copied(state, pipeline, pc, elements, |item| {
-							matches!(item, Value::RecordId(_))
-						}) {
-							// No element is a record id, so the copy is the set
-							// itself, in its order.
-							Copied::Done(values) => Some(Value::Set(crate::val::Set::from(
-								surrealdb_collections::VecSet::from_sorted_vec_unchecked(values),
-							))),
-							Copied::Spent => {
-								return Ok(Step::Yield {
-									resume: pc,
-								});
-							}
-							Copied::Refused => None,
-						}
-					}
-					Some(Value::RecordId(_)) => None,
-					_ => Some(Value::None),
+						Value::RecordId(_) => Some(Scan::Refused),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Geometry(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => None,
+					},
+					Scalar::None
+					| Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_) => None,
 				};
-				match answer {
-					Some(answer) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
+				match walked {
+					Some(Scan::Clear) => {
+						regs[*dst as usize] = held_base(regs, temp, *src);
 						pc += 1;
 					}
-					None => {
+					Some(Scan::Spent) => {
+						return Ok(Step::Yield {
+							resume: pc,
+						});
+					}
+					Some(Scan::Refused) => {
 						return Ok(Step::Each {
 							at: pc,
 						});
+					}
+					None => {
+						regs[*dst as usize] = Scalar::None;
+						pc += 1;
 					}
 				}
 			}
@@ -2971,37 +3042,46 @@ pub(super) fn run_row<'r>(
 				dst,
 				none,
 			} => {
-				// The elements the filter walks are copied a stretch at a
-				// time, a unit an element, yielding mid-copy once the fuel is
-				// spent; the loop it begins spends a unit an element again.
-				let field;
-				let base = peek!(*src, field);
-				let (elements, empty) = match base {
+				// An array's elements are walked in place a stretch at a time,
+				// a unit an element, yielding mid-walk once the fuel is spent,
+				// and the loop takes the array as `src` holds it
+				// ([`held_base`]); a set's elements are copied the same way
+				// into the array the loop reads. The loop spends a unit an
+				// element again.
+				let mut temp = None;
+				let begun = match base_at!(*src, temp).as_whole() {
 					Some(Value::Array(array)) => {
-						(&array.0[..], Value::Array(crate::val::Array::new()))
+						Begun::Array(walked(state, pipeline, pc, &array.0))
 					}
 					Some(Value::Set(set)) => {
-						(set.0.iter().as_slice(), Value::Set(crate::val::Set::new()))
+						Begun::Set(copied(state, pipeline, pc, set.0.iter().as_slice()))
 					}
-					_ => {
-						regs[*dst as usize] = Scalar::None;
-						jump!(*none as usize);
-						continue;
-					}
+					_ => Begun::Other,
 				};
-				match copied(state, pipeline, pc, elements, |_| false) {
-					Copied::Done(elements) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
-						regs[*items as usize] =
-							Scalar::Value(std::borrow::Cow::Owned(Value::Array(elements.into())));
+				match begun {
+					Begun::Array(true) => {
+						let held = held_base(regs, temp, *src);
+						regs[*dst as usize] =
+							Scalar::Value(Held::Owned(Value::Array(crate::val::Array::new())));
+						regs[*items as usize] = held;
 						pc += 1;
 					}
-					Copied::Spent => {
+					Begun::Set(Copied::Done(elements)) => {
+						regs[*dst as usize] =
+							Scalar::Value(Held::Owned(Value::Set(crate::val::Set::new())));
+						regs[*items as usize] =
+							Scalar::Value(Held::Owned(Value::Array(elements.into())));
+						pc += 1;
+					}
+					Begun::Array(false) | Begun::Set(Copied::Spent) => {
 						return Ok(Step::Yield {
 							resume: pc,
 						});
 					}
-					Copied::Refused => unreachable!("a copy that refuses nothing"),
+					Begun::Other => {
+						regs[*dst as usize] = Scalar::None;
+						jump!(*none as usize);
+					}
 				}
 			}
 			Instr::MapBegin {
@@ -3011,34 +3091,39 @@ pub(super) fn run_row<'r>(
 				other,
 				sets,
 			} => {
-				// As `FilterBegin`: the elements are copied a stretch at a time.
-				let field;
-				let base = peek!(*src, field);
-				let (elements, empty) = match base {
+				// As `FilterBegin`: an array is walked in place and held as
+				// `src` holds it, and a set's elements are copied.
+				let mut temp = None;
+				let begun = match base_at!(*src, temp).as_whole() {
 					Some(Value::Array(array)) => {
-						(&array.0[..], Value::Array(crate::val::Array::new()))
+						Begun::Array(walked(state, pipeline, pc, &array.0))
 					}
 					Some(Value::Set(set)) if *sets => {
-						(set.0.iter().as_slice(), Value::Set(crate::val::Set::new()))
+						Begun::Set(copied(state, pipeline, pc, set.0.iter().as_slice()))
 					}
-					_ => {
-						jump!(*other as usize);
-						continue;
-					}
+					_ => Begun::Other,
 				};
-				match copied(state, pipeline, pc, elements, |_| false) {
-					Copied::Done(elements) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
-						regs[*items as usize] =
-							Scalar::Value(std::borrow::Cow::Owned(Value::Array(elements.into())));
+				match begun {
+					Begun::Array(true) => {
+						let held = held_base(regs, temp, *src);
+						regs[*dst as usize] =
+							Scalar::Value(Held::Owned(Value::Array(crate::val::Array::new())));
+						regs[*items as usize] = held;
 						pc += 1;
 					}
-					Copied::Spent => {
+					Begun::Set(Copied::Done(elements)) => {
+						regs[*dst as usize] =
+							Scalar::Value(Held::Owned(Value::Set(crate::val::Set::new())));
+						regs[*items as usize] =
+							Scalar::Value(Held::Owned(Value::Array(elements.into())));
+						pc += 1;
+					}
+					Begun::Array(false) | Begun::Set(Copied::Spent) => {
 						return Ok(Step::Yield {
 							resume: pc,
 						});
 					}
-					Copied::Refused => unreachable!("a copy that refuses nothing"),
+					Begun::Other => jump!(*other as usize),
 				}
 			}
 			Instr::CollectPush {
@@ -3046,9 +3131,8 @@ pub(super) fn run_row<'r>(
 				value,
 			} => {
 				let value = read_value(regs, *value)?;
-				if let Scalar::Value(std::borrow::Cow::Owned(held)) =
-					&mut regs[*collection as usize]
-				{
+				if let Scalar::Value(held) = &mut regs[*collection as usize] {
+					let held = held.to_mut();
 					if let Value::Array(array) = held {
 						array.push(value);
 					} else if let Value::Set(set) = held {
@@ -3073,7 +3157,7 @@ pub(super) fn run_row<'r>(
 				let value = state.sorted_keys.get(*key as usize).cloned().ok_or_else(|| {
 					anyhow::anyhow!("a sort key read by a row the sort did not hand over")
 				})?;
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 				pc += 1;
 			}
 			Instr::Fetch {
@@ -3148,22 +3232,24 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				regs[*dst as usize] = if let Some(root) = &state.root {
-					Scalar::Value(std::borrow::Cow::Owned(root.clone()))
+					Scalar::Value(Held::Owned(root.clone()))
 				} else if state.rowless || state.undocumented {
 					if let Some(refusal) = row.forbids() {
 						return Err(refusal);
 					}
-					read(regs, *or)?
+					match *or {
+						Operand::Reg(reg) => regs[reg as usize].share(),
+						Operand::Const(_) | Operand::Field(_) => read(regs, *or)?,
+					}
 				} else {
-					Scalar::Value(std::borrow::Cow::Owned(row.record()?))
+					Scalar::Value(Held::Owned(row.record()?))
 				};
 				pc += 1;
 			}
 			Instr::NewSet {
 				dst,
 			} => {
-				regs[*dst as usize] =
-					Scalar::Value(std::borrow::Cow::Owned(Value::Set(Default::default())));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Set(Default::default())));
 				pc += 1;
 			}
 			Instr::Subquery {
@@ -3249,6 +3335,7 @@ pub(super) fn run_row<'r>(
 				// before a distance could only fail on it. The row's vector is
 				// read through its reader from the field the path starts at,
 				// so a stored record is read where it lies.
+				let temp;
 				let record = &mut state.knn_vector;
 				let read = match (src, root) {
 					(Operand::Reg(ROW), Some((field, rest))) => row.knn_vector(
@@ -3259,7 +3346,7 @@ pub(super) fn run_row<'r>(
 						query.len(),
 					)?,
 					_ => crate::exec::operators::extract_vector(
-						&read_value(regs, *src)?,
+						&scalar_at!(*src, temp).as_value(),
 						&program.paths[*path as usize],
 						record,
 						query.len(),
@@ -3274,8 +3361,7 @@ pub(super) fn run_row<'r>(
 					.flatten();
 				match ranked {
 					Some(distance) => {
-						regs[*dst as usize] =
-							Scalar::Value(std::borrow::Cow::Owned(Value::Number(distance)));
+						regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Number(distance)));
 						pc += 1;
 					}
 					None => jump!(*none as usize),
@@ -3301,9 +3387,10 @@ pub(super) fn run_row<'r>(
 				path,
 				dst,
 			} => {
-				let value = read_value(regs, *src)?;
+				let temp;
+				let value = scalar_at!(*src, temp).as_value();
 				let key = program.paths[*path as usize].extract(&value).into_owned();
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(key));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(key));
 				pc += 1;
 			}
 			Instr::Mock {
@@ -3320,8 +3407,7 @@ pub(super) fn run_row<'r>(
 					anyhow::bail!("Mock range exceeds allocation limit");
 				}
 				let ids: Vec<Value> = ids.map(Value::RecordId).collect();
-				regs[*dst as usize] =
-					Scalar::Value(std::borrow::Cow::Owned(Value::Array(ids.into())));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Array(ids.into())));
 				pc += 1;
 			}
 			Instr::MakeClosure {
@@ -3350,8 +3436,10 @@ pub(super) fn run_row<'r>(
 				recv,
 				dst,
 			} => {
-				let recv = read_value(regs, *recv)?;
-				let closure = if let Value::Object(obj) = &recv {
+				// The receiver is read in place; only the closure is copied.
+				let temp;
+				let recv = scalar_at!(*recv, temp).as_value();
+				let closure = if let Value::Object(obj) = &*recv {
 					if let Some(closure @ Value::Closure(_)) = obj.get(name.as_str()) {
 						Some(closure.clone())
 					} else {
@@ -3367,17 +3455,18 @@ pub(super) fn run_row<'r>(
 					}
 					.into());
 				};
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(closure));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(closure));
 				pc += 1;
 			}
 			Instr::RequireClosure {
 				src,
 			} => {
-				let target = read(regs, *src)?;
-				if !matches!(&target, Scalar::Value(v) if matches!(v.as_ref(), Value::Closure(_))) {
+				let temp;
+				let target = scalar_at!(*src, temp);
+				if !matches!(target, Scalar::Value(v) if matches!(v.as_ref(), Value::Closure(_))) {
 					return Err(crate::exec::Error::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
-						message: format!("'{}' is not a function", target.to_value().kind_of()),
+						message: format!("'{}' is not a function", target.as_value().kind_of()),
 					}
 					.into());
 				}
@@ -3389,24 +3478,18 @@ pub(super) fn run_row<'r>(
 				call,
 				position,
 			} => {
-				// An array is copied a stretch at a time, as `FilterBegin`
-				// copies one; anything else is converted whole.
-				let field;
-				if let Some(Value::Array(array)) = peek!(*src, field) {
-					match copied(state, pipeline, pc, &array.0, |_| false) {
-						Copied::Done(values) => {
-							regs[*dst as usize] =
-								Scalar::Value(std::borrow::Cow::Owned(Value::Array(values.into())));
-							pc += 1;
-							continue;
-						}
-						Copied::Spent => {
-							return Ok(Step::Yield {
-								resume: pc,
-							});
-						}
-						Copied::Refused => unreachable!("a copy that refuses nothing"),
+				// An array is walked in place and held as `src` holds it, as
+				// `FilterBegin` holds one; anything else is converted whole.
+				let mut temp = None;
+				if let Some(Value::Array(array)) = base_at!(*src, temp).as_whole() {
+					if !walked(state, pipeline, pc, &array.0) {
+						return Ok(Step::Yield {
+							resume: pc,
+						});
 					}
+					regs[*dst as usize] = held_base(regs, temp, *src);
+					pc += 1;
+					continue;
 				}
 				let value = read_value(regs, *src)?;
 				let array = value.coerce_to::<crate::val::Array>().map_err(|e| {
@@ -3415,7 +3498,7 @@ pub(super) fn run_row<'r>(
 						message: format!("Argument {position} was the wrong type. {e}"),
 					}
 				})?;
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Array(array)));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Array(array)));
 				pc += 1;
 			}
 			Instr::ElemNext {
@@ -3430,18 +3513,21 @@ pub(super) fn run_row<'r>(
 				} else {
 					0
 				};
-				let next = if let Scalar::Value(value) = &regs[*array as usize] {
-					if let Value::Array(items) = value.as_ref() {
-						items.get(at).cloned()
-					} else {
-						None
-					}
+				// An element of an array the row or the program owns is
+				// borrowed; one of an array the loop owns or shares is copied.
+				let next = if let Scalar::Value(Held::Borrowed(Value::Array(items))) =
+					&regs[*array as usize]
+				{
+					let items: &'r crate::val::Array = items;
+					items.get(at).map(Held::Borrowed)
+				} else if let Some(Value::Array(items)) = regs[*array as usize].as_whole() {
+					items.get(at).cloned().map(Held::Owned)
 				} else {
 					None
 				};
 				match next {
 					Some(item) => {
-						regs[*elem as usize] = Scalar::Value(std::borrow::Cow::Owned(item));
+						regs[*elem as usize] = Scalar::Value(item);
 						regs[*index as usize] = Scalar::Number(crate::val::Number::Int(at as i64));
 						regs[*pos as usize] =
 							Scalar::Number(crate::val::Number::Int(at as i64 + 1));
@@ -3462,7 +3548,7 @@ pub(super) fn run_row<'r>(
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				let bound = crate::exec::vm::calls::bind_closure_args(&spec.args, args)?;
 				for (i, value) in bound.into_iter().enumerate() {
-					regs[*params as usize + i] = Scalar::Value(std::borrow::Cow::Owned(value));
+					regs[*params as usize + i] = Scalar::Value(Held::Owned(value));
 				}
 				pc += 1;
 			}
@@ -3478,7 +3564,7 @@ pub(super) fn run_row<'r>(
 					spec.returns.as_ref(),
 					value,
 				)?;
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 				pc += 1;
 			}
 			Instr::Dive {
@@ -3510,7 +3596,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let value = program.record_ids[*record as usize]
 					.build(&mut |operand| read_value(regs, operand))?;
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 				pc += 1;
 			}
 			Instr::MethodResolve {
@@ -3519,9 +3605,10 @@ pub(super) fn run_row<'r>(
 				closure,
 			} => {
 				let spec = &program.methods[*method as usize];
-				// Only a heap value is borrowed; any other scalar is cheap to
-				// make a value of.
-				let scalar = read(regs, *recv)?;
+				// The receiver is read in place: a held value is borrowed, and
+				// any other scalar is cheap to make a value of.
+				let temp;
+				let scalar = scalar_at!(*recv, temp);
 				let value = scalar.as_value();
 				let value = value.as_ref();
 				if spec.resolves(value) {
@@ -3585,7 +3672,8 @@ pub(super) fn run_row<'r>(
 				nullish,
 				target,
 			} => {
-				if read_value(regs, *cond)?.is_nullish() == *nullish {
+				let temp;
+				if scalar_at!(*cond, temp).is_nullish() == *nullish {
 					jump!(*target as usize);
 				} else {
 					pc += 1;
@@ -3596,7 +3684,8 @@ pub(super) fn run_row<'r>(
 				none,
 				target,
 			} => {
-				if read(regs, *cond)?.is_none() == *none {
+				let temp;
+				if scalar_at!(*cond, temp).is_none() == *none {
 					jump!(*target as usize);
 				} else {
 					pc += 1;
@@ -3606,7 +3695,8 @@ pub(super) fn run_row<'r>(
 				cond,
 				target,
 			} => {
-				let record = matches!(read(regs, *cond)?, Scalar::Value(value) if matches!(value.as_ref(), Value::RecordId(_)));
+				let temp;
+				let record = matches!(scalar_at!(*cond, temp), Scalar::Value(value) if matches!(value.as_ref(), Value::RecordId(_)));
 				if record {
 					pc += 1;
 				} else {
@@ -3617,7 +3707,8 @@ pub(super) fn run_row<'r>(
 				cond,
 				target,
 			} => {
-				let object = matches!(read(regs, *cond)?, Scalar::Value(value) if matches!(value.as_ref(), Value::Object(_)));
+				let temp;
+				let object = matches!(scalar_at!(*cond, temp), Scalar::Value(value) if matches!(value.as_ref(), Value::Object(_)));
 				if object {
 					pc += 1;
 				} else {
@@ -3628,7 +3719,8 @@ pub(super) fn run_row<'r>(
 				cond,
 				target,
 			} => {
-				let projected = match read(regs, *cond)? {
+				let temp;
+				let projected = match scalar_at!(*cond, temp) {
 					Scalar::None => true,
 					Scalar::Value(value) => {
 						matches!(
@@ -3656,7 +3748,8 @@ pub(super) fn run_row<'r>(
 				truthy,
 				target,
 			} => {
-				if read(regs, *cond)?.is_truthy() == *truthy {
+				let temp;
+				if scalar_at!(*cond, temp).is_truthy() == *truthy {
 					jump!(*target as usize);
 				} else {
 					pc += 1;
@@ -3666,7 +3759,8 @@ pub(super) fn run_row<'r>(
 				cond,
 				reject,
 			} => {
-				let answer = read(regs, *cond)?.is_truthy();
+				let temp;
+				let answer = scalar_at!(*cond, temp).is_truthy();
 				if answer == *reject {
 					state.rejected += 1;
 					return Ok(Step::Next);
@@ -3708,35 +3802,55 @@ pub(super) fn run_row<'r>(
 			Instr::SeedObject {
 				dst,
 			} => {
-				let seed = match regs[*dst as usize].to_value() {
-					Value::Object(object) => object,
-					Value::Geometry(geometry) => geometry.as_object(),
-					Value::None
-					| Value::Null
-					| Value::Bool(_)
-					| Value::Number(_)
-					| Value::String(_)
-					| Value::Duration(_)
-					| Value::Datetime(_)
-					| Value::Uuid(_)
-					| Value::Array(_)
-					| Value::Set(_)
-					| Value::Bytes(_)
-					| Value::Table(_)
-					| Value::RecordId(_)
-					| Value::File(_)
-					| Value::Regex(_)
-					| Value::Range(_)
-					| Value::Closure(_) => Object::default(),
+				// An object the register owns, or is the only holder of, is
+				// moved into the seed; nothing else is copied to read it.
+				let seed = match &regs[*dst as usize] {
+					Scalar::Value(held) => match &**held {
+						Value::Object(_) => {
+							let Value::Object(object) =
+								std::mem::replace(&mut regs[*dst as usize], Scalar::None)
+									.into_value()
+							else {
+								unreachable!("the register holds an object")
+							};
+							object
+						}
+						Value::Geometry(geometry) => geometry.as_object(),
+						Value::None
+						| Value::Null
+						| Value::Bool(_)
+						| Value::Number(_)
+						| Value::String(_)
+						| Value::Duration(_)
+						| Value::Datetime(_)
+						| Value::Uuid(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Bytes(_)
+						| Value::Table(_)
+						| Value::RecordId(_)
+						| Value::File(_)
+						| Value::Regex(_)
+						| Value::Range(_)
+						| Value::Closure(_) => Object::default(),
+					},
+					Scalar::None
+					| Scalar::Null
+					| Scalar::Bool(_)
+					| Scalar::Number(_)
+					| Scalar::Str(_)
+					| Scalar::Duration(_)
+					| Scalar::Datetime(_)
+					| Scalar::Uuid(_)
+					| Scalar::Bytes(_) => Object::default(),
 				};
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Object(seed)));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Object(seed)));
 				pc += 1;
 			}
 			Instr::NewObject {
 				dst,
 			} => {
-				regs[*dst as usize] =
-					Scalar::Value(std::borrow::Cow::Owned(Value::Object(Object::default())));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(Value::Object(Object::default())));
 				pc += 1;
 			}
 			Instr::LoadPath {
@@ -3744,17 +3858,17 @@ pub(super) fn run_row<'r>(
 				field,
 				rest,
 			} => {
-				let base = row.field(&program.fields[*field as usize])?.to_value();
-				let value = program.paths[*rest as usize].extract(&base).into_owned();
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				let base = row.field(&program.fields[*field as usize])?;
+				let value = program.paths[*rest as usize].extract(&base.as_value()).into_owned();
+				regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 				pc += 1;
 			}
 			Instr::LoadRow {
 				dst,
 			} => {
 				regs[*dst as usize] = match row.borrowed() {
-					Some(value) => Scalar::Value(std::borrow::Cow::Borrowed(value)),
-					None => Scalar::Value(std::borrow::Cow::Owned(row.record()?)),
+					Some(value) => Scalar::Value(Held::Borrowed(value)),
+					None => Scalar::Value(Held::Owned(row.record()?)),
 				};
 				pc += 1;
 			}
@@ -3767,20 +3881,17 @@ pub(super) fn run_row<'r>(
 						at: pc,
 					});
 				}
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(row.record()?));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(row.record()?));
 				pc += 1;
 			}
 			Instr::RemoveField {
 				object,
 				name,
 			} => {
-				if let Scalar::Value(std::borrow::Cow::Borrowed(borrowed)) = &regs[*object as usize]
-				{
-					regs[*object as usize] =
-						Scalar::Value(std::borrow::Cow::Owned((*borrowed).clone()));
-				}
-				if let Scalar::Value(std::borrow::Cow::Owned(Value::Object(object))) =
-					&mut regs[*object as usize]
+				// A borrowed or shared object becomes the register's own
+				// before it is changed.
+				if let Scalar::Value(held) = &mut regs[*object as usize]
+					&& let Value::Object(object) = held.to_mut()
 				{
 					object.remove(program.fields[*name as usize].as_str());
 				}
@@ -3790,14 +3901,8 @@ pub(super) fn run_row<'r>(
 				object,
 				path,
 			} => {
-				if let Scalar::Value(std::borrow::Cow::Borrowed(borrowed)) = &regs[*object as usize]
-				{
-					regs[*object as usize] =
-						Scalar::Value(std::borrow::Cow::Owned((*borrowed).clone()));
-				}
-				if let Scalar::Value(std::borrow::Cow::Owned(object)) = &mut regs[*object as usize]
-				{
-					remove_path(object, &program.paths[*path as usize].0);
+				if let Scalar::Value(held) = &mut regs[*object as usize] {
+					remove_path(held.to_mut(), &program.paths[*path as usize].0);
 				}
 				pc += 1;
 			}
@@ -3807,16 +3912,11 @@ pub(super) fn run_row<'r>(
 				value,
 			} => {
 				let value = read_value(regs, *value)?;
-				// An object loaded from a constant or the row is borrowed; it
-				// becomes the register's own before it is changed.
-				if let Scalar::Value(std::borrow::Cow::Borrowed(borrowed)) = &regs[*object as usize]
-				{
-					regs[*object as usize] =
-						Scalar::Value(std::borrow::Cow::Owned((*borrowed).clone()));
-				}
-				if let Scalar::Value(std::borrow::Cow::Owned(object)) = &mut regs[*object as usize]
-				{
-					object.set_at_field_path_owned(&program.paths[*path as usize], value);
+				// An object loaded from a constant or the row is borrowed, and
+				// one loaded from a binding is shared; either becomes the
+				// register's own before it is changed.
+				if let Scalar::Value(held) = &mut regs[*object as usize] {
+					held.to_mut().set_at_field_path_owned(&program.paths[*path as usize], value);
 				}
 				pc += 1;
 			}
@@ -3824,7 +3924,12 @@ pub(super) fn run_row<'r>(
 				dst,
 				src,
 			} => {
-				let value = read(regs, *src)?;
+				// A register's held value is shared with the copy rather than
+				// copied ([`Scalar::share`]).
+				let value = match *src {
+					Operand::Reg(reg) => regs[reg as usize].share(),
+					Operand::Const(_) | Operand::Field(_) => read(regs, *src)?,
+				};
 				regs[*dst as usize] = value;
 				pc += 1;
 			}
@@ -3837,7 +3942,7 @@ pub(super) fn run_row<'r>(
 					let value = read_value(regs, *value)?;
 					object.set_at_field_path_owned(&program.paths[*path as usize], value);
 				}
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(object));
+				regs[*dst as usize] = Scalar::Value(Held::Owned(object));
 				pc += 1;
 			}
 			Instr::BuildObjectEmit {
@@ -3853,7 +3958,13 @@ pub(super) fn run_row<'r>(
 					for (at, (path, value)) in fields.iter().enumerate() {
 						match program.paths[*path as usize].0.as_slice() {
 							[FieldPathPart::Field(name)] => {
-								flat[at] = (name.as_str(), read(regs, *value)?);
+								// A register's value is lent to the frame,
+								// which only encodes it.
+								let scalar = match *value {
+									Operand::Reg(reg) => regs[reg as usize].lend(),
+									Operand::Const(_) | Operand::Field(_) => read(regs, *value)?,
+								};
+								flat[at] = (name.as_str(), scalar);
 							}
 							_ => {
 								written = false;
@@ -3956,7 +4067,7 @@ pub(super) fn run_row<'r>(
 				count,
 			} => {
 				let keys = (*keys..*keys + *count)
-					.map(|r| std::mem::replace(&mut regs[r as usize], Scalar::None).to_value())
+					.map(|r| std::mem::replace(&mut regs[r as usize], Scalar::None).into_value())
 					.collect();
 				state.pending = Some(Pending::Join {
 					join: *join,
@@ -4030,7 +4141,7 @@ pub(super) fn run_row<'r>(
 					gathered.clear();
 					gathered.reserve(*count as usize + 1);
 					gathered.extend((*keys..*keys + *count).map(|r| {
-						std::mem::replace(&mut regs[r as usize], Scalar::None).to_value()
+						std::mem::replace(&mut regs[r as usize], Scalar::None).into_value()
 					}));
 					let keys = gathered;
 					if *src == ROW {
@@ -4213,7 +4324,7 @@ pub(super) fn run_row<'r>(
 				};
 				match element {
 					Some(element) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(element));
+						regs[*dst as usize] = Scalar::Value(Held::Owned(element));
 						regs[*at as usize] =
 							Scalar::Number(crate::val::Number::Int(index as i64 + 1));
 						pc += 1;
@@ -4455,7 +4566,8 @@ fn charge_walked(left: &Scalar<'_>, right: &Scalar<'_>) {
 	}
 }
 
-/// A bulk instruction's copy of a collection, stopped where the fuel ran out.
+/// A bulk instruction's copy, or walk, of a collection, stopped where the
+/// fuel ran out.
 pub(super) struct Bulk {
 	at: BulkAt,
 	built: Built,
@@ -4490,71 +4602,31 @@ impl Bulk {
 	}
 }
 
-/// What a [`Bulk`] copy has built so far.
+/// What a [`Bulk`] copy has built so far, or how far a [`Bulk`] walk got.
 enum Built {
 	Values(Vec<Value>),
-	Entries(Vec<(surrealdb_strand::Strand, Value)>),
-}
-
-/// An element a bulk instruction copies.
-trait Bulked: Clone + Sized {
-	fn built(values: Vec<Self>) -> Built;
-	fn resumed(built: Built) -> Option<Vec<Self>>;
-}
-
-impl Bulked for Value {
-	fn built(values: Vec<Self>) -> Built {
-		Built::Values(values)
-	}
-
-	fn resumed(built: Built) -> Option<Vec<Self>> {
-		match built {
-			Built::Values(values) => Some(values),
-			Built::Entries(_) => None,
-		}
-	}
-}
-
-impl Bulked for (surrealdb_strand::Strand, Value) {
-	fn built(entries: Vec<Self>) -> Built {
-		Built::Entries(entries)
-	}
-
-	fn resumed(built: Built) -> Option<Vec<Self>> {
-		match built {
-			Built::Entries(entries) => Some(entries),
-			Built::Values(_) => None,
-		}
-	}
+	/// The elements a walk that copies nothing ([`scanned`]) has passed.
+	Scanned(usize),
 }
 
 /// How far a stretch of a bulk copy got.
-enum Copied<T> {
-	Done(T),
+enum Copied {
+	Done(Vec<Value>),
 	/// The fuel ran out: the row yields and resumes the copy.
 	Spent,
-	/// An element the instruction does not take whole was met.
-	Refused,
 }
 
 /// A copy of `source` for the bulk instruction `pc` of `pipeline`, taken a stretch at a
 /// time, a unit an element, from where an earlier stretch stopped: once a
 /// stretch spends the fuel the copy is kept in the state and the row yields,
-/// resuming here. Refused, with nothing kept, at the first element `refuse`
-/// holds for.
-fn copied<T: Bulked>(
-	state: &mut State,
-	pipeline: &Pipeline,
-	pc: usize,
-	source: &[T],
-	refuse: impl Fn(&T) -> bool,
-) -> Copied<Vec<T>> {
+/// resuming here.
+fn copied(state: &mut State, pipeline: &Pipeline, pc: usize, source: &[Value]) -> Copied {
 	let at = Bulk::at(pipeline, state, pc, source);
 	let mut built = match state.bulk.take() {
 		Some(Bulk {
 			at: held,
-			built,
-		}) if held == at => T::resumed(built).unwrap_or_else(|| Vec::with_capacity(source.len())),
+			built: Built::Values(built),
+		}) if held == at => built,
 		_ => Vec::with_capacity(source.len()),
 	};
 	while built.len() < source.len() {
@@ -4562,27 +4634,112 @@ fn copied<T: Bulked>(
 		if at.yields && super::fuel::spent() {
 			state.bulk = Some(Bulk {
 				at,
-				built: T::built(built),
+				built: Built::Values(built),
 			});
 			return Copied::Spent;
 		}
 		let from = built.len();
 		let take = surrealdb_runtime::fuel::stretch().min(source.len() - from);
-		let part = &source[from..from + take];
-		if part.iter().any(&refuse) {
-			return Copied::Refused;
-		}
-		built.extend_from_slice(part);
+		built.extend_from_slice(&source[from..from + take]);
 		if super::fuel::charge(super::fuel::units(take)) && at.yields && built.len() < source.len()
 		{
 			state.bulk = Some(Bulk {
 				at,
-				built: T::built(built),
+				built: Built::Values(built),
 			});
 			return Copied::Spent;
 		}
 	}
 	Copied::Done(built)
+}
+
+/// A walk of `source` for the bulk instruction `pc` of `pipeline` that
+/// refuses nothing ([`scanned`]): whether it reached the end, rather than
+/// spending the fuel, so that the row yields and resumes it.
+fn walked(state: &mut State, pipeline: &Pipeline, pc: usize, source: &[Value]) -> bool {
+	match scanned(state, pipeline, pc, source, |_| false) {
+		Scan::Clear => true,
+		Scan::Spent => false,
+		Scan::Refused => unreachable!("a walk that refuses nothing"),
+	}
+}
+
+/// How a loop head over a collection began: an array walked to its end, or
+/// not yet; a set's elements copied, or not yet; or any other value.
+enum Begun {
+	Array(bool),
+	Set(Copied),
+	Other,
+}
+
+/// The base a bulk instruction read in place, handed on without copying it:
+/// the scalar a constant or a field read into `temp`, or the register's
+/// value shared with it ([`Scalar::share`]), so that the register still
+/// reads the same value.
+fn held_base<'r>(regs: &mut [Scalar<'r>], temp: Option<Scalar<'r>>, src: Operand) -> Scalar<'r> {
+	match (temp, src) {
+		(Some(temp), _) => temp,
+		(None, Operand::Reg(reg)) => regs[reg as usize].share(),
+		(None, Operand::Const(_) | Operand::Field(_)) => {
+			unreachable!("a constant or a field is read into the temporary")
+		}
+	}
+}
+
+/// How far a stretch of a bulk walk got.
+enum Scan {
+	/// Every element was walked, and none refused.
+	Clear,
+	/// The fuel ran out: the row yields and resumes the walk.
+	Spent,
+	/// An element the instruction does not take whole was met.
+	Refused,
+}
+
+/// A walk of `source` for the bulk instruction `pc` of `pipeline` that copies
+/// nothing, only testing each element with `refuse`: taken a stretch at a
+/// time, a unit an element, from where an earlier stretch stopped, as
+/// [`copied`] takes its copy. Once a stretch spends the fuel the place the
+/// walk reached is kept in the state and the row yields, resuming here.
+/// Refused at the first element `refuse` holds for.
+fn scanned<T>(
+	state: &mut State,
+	pipeline: &Pipeline,
+	pc: usize,
+	source: &[T],
+	refuse: impl Fn(&T) -> bool,
+) -> Scan {
+	let at = Bulk::at(pipeline, state, pc, source);
+	let mut from = match state.bulk.take() {
+		Some(Bulk {
+			at: held,
+			built: Built::Scanned(from),
+		}) if held == at => from,
+		_ => 0,
+	};
+	while from < source.len() {
+		// A walk that finds the fuel already spent yields before it walks.
+		if at.yields && super::fuel::spent() {
+			state.bulk = Some(Bulk {
+				at,
+				built: Built::Scanned(from),
+			});
+			return Scan::Spent;
+		}
+		let take = surrealdb_runtime::fuel::stretch().min(source.len() - from);
+		if source[from..from + take].iter().any(&refuse) {
+			return Scan::Refused;
+		}
+		from += take;
+		if super::fuel::charge(super::fuel::units(take)) && at.yields && from < source.len() {
+			state.bulk = Some(Bulk {
+				at,
+				built: Built::Scanned(from),
+			});
+			return Scan::Spent;
+		}
+	}
+	Scan::Clear
 }
 
 #[cfg(test)]

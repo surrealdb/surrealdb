@@ -31,6 +31,7 @@ use super::UnitTable;
 use super::host::{admitted_unit, admitted_unit_as, gather_program, host_scalar};
 use super::interp::FunctionMemo;
 use super::program::{DefHash, FunctionSpec, GuardCode, HostScalar, ParamSpec, Program};
+use super::scalar::Held;
 use super::services::{Admission, EngineServices, Services};
 use crate::catalog::FunctionDefinition;
 use crate::ctx::Binding;
@@ -527,7 +528,7 @@ async fn call_light(
 	// forbidden row from the caller's context: a run over no row refuses a
 	// read of it there.
 	let row = ctx.value_in_scope().within_context();
-	let state = |slots: Vec<Value>| -> FlowResult<_> {
+	let state = |slots: Vec<Held<'static>>| -> FlowResult<_> {
 		let mut state = super::host::unit_state(body, limited)?;
 		state.permissions_bypassed = ctx.skip_fetch_perms;
 		state.rowless = row.is_none();
@@ -536,7 +537,7 @@ async fn call_light(
 	};
 	let row = row.map_or(Cow::Owned(Value::None), Cow::Borrowed);
 	let pipeline = &body.pipelines[0];
-	let mut inline = state(bound)?;
+	let mut inline = state(bound.into_iter().map(Held::Owned).collect())?;
 	let (row, start, mut state) =
 		match super::host::run_unit_inline(body, pipeline, row, &mut inline) {
 			Ok(_) => return Ok(inline.output.pop().unwrap_or(Value::None)),
@@ -597,17 +598,47 @@ fn entry_of(
 	}
 }
 
-/// The value of parameter `spec` in `ctx` where the frame answers it, resolved
-/// in the order the module documents; `None` where only `DEFINE PARAM` can, for
-/// [`stored_param`] to read.
-///
-/// Inside a KNN query vector's evaluation, a row parameter that would read the
-/// row being scanned per row fails instead
-/// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)).
+/// The value of parameter `spec` in `ctx` where the frame answers it, owned:
+/// [`frame_binding`]'s binding, copied.
 pub(super) fn frame_param(
 	spec: &ParamSpec,
 	ctx: &EvalContext<'_>,
 ) -> crate::expr::FlowResult<Option<Value>> {
+	Ok(frame_binding(spec, ctx)?.map(FrameBinding::into_value))
+}
+
+/// Where a frame binds a parameter's value: the value itself, never a copy
+/// of it, so a reader of a large bound value pays for what it reads of it.
+pub(super) enum FrameBinding<'c> {
+	/// A value the frame holds in place: the value in scope or the document
+	/// root, a block-local or write-path binding, or `NONE`.
+	Borrowed(&'c Value),
+	/// A parameter of the context's chain, as the allocation the context
+	/// holds it in, which a reader may keep without copying the value.
+	Shared(&'c Arc<Value>),
+}
+
+impl FrameBinding<'_> {
+	/// The bound value, copied.
+	pub(super) fn into_value(self) -> Value {
+		match self {
+			FrameBinding::Borrowed(value) => value.clone(),
+			FrameBinding::Shared(value) => Value::clone(value),
+		}
+	}
+}
+
+/// Where parameter `spec` is bound in `ctx` when the frame answers it,
+/// resolved in the order the module documents; `None` where only
+/// `DEFINE PARAM` can, for [`stored_param`] to read.
+///
+/// Inside a KNN query vector's evaluation, a row parameter that would read the
+/// row being scanned per row fails instead
+/// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)).
+pub(super) fn frame_binding<'c>(
+	spec: &ParamSpec,
+	ctx: &EvalContext<'c>,
+) -> crate::expr::FlowResult<Option<FrameBinding<'c>>> {
 	let name = spec.name.as_str();
 	// Handle special params $this and $self. When the current value is
 	// available (per-row context), use it directly. When it is not (scalar
@@ -616,49 +647,49 @@ pub(super) fn frame_param(
 	if matches!(name, "this" | "self") {
 		let in_scope = ctx.value_in_scope();
 		if let RowAccess::Present(v) = in_scope {
-			return Ok(Some(v.clone()));
+			return Ok(Some(FrameBinding::Borrowed(v)));
 		}
 		if let Some(local_params) = ctx.local_params
 			&& let Some(v) = local_params.get(name)
 		{
-			return Ok(Some(v.clone()));
+			return Ok(Some(FrameBinding::Borrowed(v)));
 		}
 		if let RowAccess::Forbidden(forbidden) = in_scope {
 			return Err(forbidden.error());
 		}
 		if let Some(v) = chain_param(ctx, name)? {
-			return Ok(Some(v));
+			return Ok(Some(FrameBinding::Shared(v)));
 		}
-		return Ok(Some(Value::None));
+		return Ok(Some(FrameBinding::Borrowed(&Value::NONE)));
 	}
 	// Block-local parameters shadow global ones.
 	if let Some(local_params) = ctx.local_params
 		&& let Some(value) = local_params.get(name)
 	{
-		return Ok(Some(value.clone()));
+		return Ok(Some(FrameBinding::Borrowed(value)));
 	}
 	// A write-path binding sits between the two: a `LET $limit = ...` in the
 	// body being evaluated is an inner scope and wins, while the binding
 	// shadows a session or database parameter of the same name.
 	if let Some(value) = ctx.write_binding(name) {
-		return Ok(Some(value.clone()));
+		return Ok(Some(FrameBinding::Borrowed(value)));
 	}
 	// The context's parameter chain as the frame reads it, including the
 	// protected `$auth`, `$access`, `$token` and `$session`: inside a function
 	// body it stops at the call boundary, then answers the row names and the
 	// request's parameters, so a caller's `LET` or `FOR` binding is not read.
 	if let Some(v) = chain_param(ctx, name)? {
-		return Ok(Some(v));
+		return Ok(Some(FrameBinding::Shared(v)));
 	}
 	// `$parent` falls back to the document root when not explicitly bound,
 	// except in code a write reaches, where an unbound `$parent` is `NONE`
 	// ([`crate::exec::context::RootContext::writing`]).
 	if name == "parent" {
 		if ctx.exec_ctx.root().writing {
-			return Ok(Some(Value::None));
+			return Ok(Some(FrameBinding::Borrowed(&Value::NONE)));
 		}
 		match ctx.root_document() {
-			RowAccess::Present(v) => return Ok(Some(v.clone())),
+			RowAccess::Present(v) => return Ok(Some(FrameBinding::Borrowed(v))),
 			RowAccess::Forbidden(forbidden) => return Err(forbidden.error()),
 			RowAccess::Absent => {}
 		}
@@ -666,14 +697,17 @@ pub(super) fn frame_param(
 	Ok(None)
 }
 
-/// The value `ctx`'s parameter chain binds `name` to as the frame reads it
-/// ([`ExecutionContext::lexical_binding`]), or `None` where it binds none: a
-/// refusal where it binds it to a KNN query vector's row being scanned, as the
-/// `$parent` or `$this` of a statement or body entered from the vector's
+/// The allocation `ctx`'s parameter chain binds `name` to as the frame reads
+/// it ([`ExecutionContext::lexical_binding`]), or `None` where it binds none:
+/// a refusal where it binds it to a KNN query vector's row being scanned, as
+/// the `$parent` or `$this` of a statement or body entered from the vector's
 /// evaluation ([`Binding::Forbidden`]).
-fn chain_param(ctx: &EvalContext<'_>, name: &str) -> crate::expr::FlowResult<Option<Value>> {
+fn chain_param<'c>(
+	ctx: &EvalContext<'c>,
+	name: &str,
+) -> crate::expr::FlowResult<Option<&'c Arc<Value>>> {
 	match ctx.exec_ctx.lexical_binding(name) {
-		Some(Binding::Value(value)) => Ok(Some(Value::clone(value))),
+		Some(Binding::Value(value)) => Ok(Some(value)),
 		Some(Binding::Forbidden(row)) => Err(row.error()),
 		None => Ok(None),
 	}

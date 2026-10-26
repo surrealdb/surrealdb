@@ -8,13 +8,11 @@
 //! lowers nothing: a statement is a run of its group's pipelines over the
 //! program's state.
 
-use std::borrow::Cow;
-
 use anyhow::{Context as _, anyhow};
 
 use super::ledger::Site;
 use super::program::{BlockInstr, Collect, Program};
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::exec::context::ContextLevel;
 use crate::exec::{Error as ExecError, ExecutionContext, FlowResult};
@@ -33,7 +31,7 @@ fn read(regs: &[Scalar<'_>], reg: u16) -> Value {
 }
 
 fn write(regs: &mut [Scalar<'_>], reg: u16, value: Value) {
-	regs[reg as usize] = Scalar::Value(Cow::Owned(value));
+	regs[reg as usize] = Scalar::Value(Held::Owned(value));
 }
 
 /// Take block instruction `instr`, answering the instruction the program
@@ -172,19 +170,38 @@ pub(super) async fn step(
 			slot,
 			frame: in_frame,
 		} => {
-			let value = read(regs, *value);
+			// The register is the binding's own: lowering loads the value into
+			// a register no later instruction reads, so the value is moved
+			// into the slot rather than copied. A value the register shares
+			// with a binding stays shared; one borrowed from the row or the
+			// program is copied, since a slot outlives both.
+			let held = match std::mem::replace(&mut regs[*value as usize], Scalar::None) {
+				Scalar::Value(Held::Shared(shared)) => Held::Shared(shared),
+				Scalar::Value(Held::Owned(value)) => Held::Owned(value),
+				other @ (Scalar::None
+				| Scalar::Null
+				| Scalar::Bool(_)
+				| Scalar::Number(_)
+				| Scalar::Str(_)
+				| Scalar::Duration(_)
+				| Scalar::Datetime(_)
+				| Scalar::Uuid(_)
+				| Scalar::Bytes(_)
+				| Scalar::Value(Held::Borrowed(_))) => Held::Owned(other.into_value()),
+			};
 			let slot = *slot as usize;
 			if state.slots.len() <= slot {
-				state.slots.resize(slot + 1, Value::None);
+				state.slots.resize(slot + 1, Held::Owned(Value::None));
 			}
-			let kept = crate::exec::memory::size::kept_bytes(&value);
+			let kept = crate::exec::memory::size::kept_bytes(&held);
 			if *in_frame {
 				let frame = state.frame.take().unwrap_or_else(|| ctx.clone());
 				let name = program.fields[*name as usize].as_str().to_owned();
-				state.slots[slot] = value.clone();
+				let value = Value::clone(&held);
+				state.slots[slot] = held;
 				state.frame = Some(frame.with_param(name, value));
 			} else {
-				state.slots[slot] = value;
+				state.slots[slot] = held;
 			}
 			if kept != 0 || state.values.is_some() || state.handed.is_some() {
 				state.keep(Site::Slot(slot), kept, ctx).await?;

@@ -25,7 +25,7 @@ use super::morsel::Rows;
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
 use super::row::{RowReader, StoredRow, ValueRow};
 use super::row_packed::PackedRowReader;
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use super::services::{EngineServices, Services};
 use super::write;
 use crate::catalog::{StoredRecord, TableLayouts};
@@ -4912,7 +4912,7 @@ async fn run_body(
 									let args = measure.args(value, query);
 									let measured =
 										out_of_line(|| call_builtin(spec, args, eval_ctx)).await?;
-									regs[*dst as usize] = Scalar::Value(Cow::Owned(measured));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(measured));
 									pc = at + 1;
 								}
 							}
@@ -4925,16 +4925,37 @@ async fn run_body(
 								let eval_ctx = frame_eval(program, state, ctx, frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
 								let spec = &program.params[param as usize];
-								let value = match super::function::frame_param(spec, &eval_ctx)? {
-									Some(value) => value,
-									None => {
+								// A bound value is held, not copied: the row is
+								// borrowed, as the registers already borrow it,
+								// `NONE` is borrowed from the constant, and a
+								// parameter of the context's chain shares the
+								// allocation the context holds it in, so a path
+								// into any of them reads it in place. Any other
+								// binding the frame holds is copied.
+								use super::function::FrameBinding;
+								let held = match super::function::frame_binding(spec, &eval_ctx)? {
+									Some(FrameBinding::Borrowed(value))
+										if std::ptr::eq(value, &*row) =>
+									{
+										Held::Borrowed(&row)
+									}
+									Some(FrameBinding::Borrowed(Value::None)) => {
+										Held::Borrowed(&Value::NONE)
+									}
+									Some(FrameBinding::Borrowed(value)) => {
+										Held::Owned(value.clone())
+									}
+									Some(FrameBinding::Shared(value)) => {
+										Held::Shared(Arc::clone(value))
+									}
+									None => Held::Owned(
 										out_of_line(|| {
 											super::function::stored_param(program, spec, &eval_ctx)
 										})
-										.await?
-									}
+										.await?,
+									),
 								};
-								regs[dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[dst as usize] = Scalar::Value(held);
 								pc = resume;
 							}
 							Step::Access {
@@ -4949,7 +4970,8 @@ async fn run_body(
 								else {
 									unreachable!("an access step at an access instruction")
 								};
-								let base = interp::read_operand(regs, reader, program, *src)
+								// The base is read in place, never copied to read it.
+								let base = interp::operand_value(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let mut eval_ctx = row_eval(state, eval_ctx, &row);
@@ -4976,7 +4998,7 @@ async fn run_body(
 									)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Each {
@@ -4990,7 +5012,8 @@ async fn run_body(
 								else {
 									unreachable!("an each step at an each instruction")
 								};
-								let base = interp::read_operand(regs, reader, program, *src)
+								// The base is read in place, never copied to read it.
+								let base = interp::operand_value(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let mut eval_ctx = row_eval(state, eval_ctx, &row);
@@ -5003,7 +5026,7 @@ async fn run_body(
 									)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::FetchRow {
@@ -5027,7 +5050,7 @@ async fn run_body(
 								if matches!(fetched, Value::None) {
 									pc = *none as usize;
 								} else {
-									regs[*dst as usize] = Scalar::Value(Cow::Owned(fetched));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(fetched));
 									pc = at + 1;
 								}
 							}
@@ -5046,7 +5069,7 @@ async fn run_body(
 									Value::clone(&row)
 								} else {
 									std::mem::replace(&mut regs[*src as usize], Scalar::None)
-										.to_value()
+										.into_value()
 								};
 								let index = ProgramIndex {
 									program,
@@ -5073,7 +5096,7 @@ async fn run_body(
 									)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(fetched));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(fetched));
 								pc = at + 1;
 							}
 							Step::CallAllowed {
@@ -5114,7 +5137,7 @@ async fn run_body(
 								let spec = &program.calls[*call as usize];
 								let value =
 									out_of_line(|| call_builtin(spec, args, eval_ctx)).await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::IndexFn {
@@ -5151,7 +5174,7 @@ async fn run_body(
 										None => false,
 									};
 									regs[*dst as usize] =
-										Scalar::Value(Cow::Owned(Value::Bool(held)));
+										Scalar::Value(Held::Owned(Value::Bool(held)));
 									pc = at + 1;
 								} else {
 									let mut args = args
@@ -5181,7 +5204,7 @@ async fn run_body(
 											.map_err(ControlFlow::Err)
 									})
 									.await?;
-									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 									pc = at + 1;
 								}
 							}
@@ -5248,7 +5271,7 @@ async fn run_body(
 									)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Method {
@@ -5295,7 +5318,7 @@ async fn run_body(
 									call_method(method, descriptor, recv, args, closure, eval_ctx)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Function {
@@ -5374,7 +5397,7 @@ async fn run_body(
 										entered.limited.check_dive().map_err(ControlFlow::Err)?;
 										for (i, value) in bound.into_iter().enumerate() {
 											regs[*params as usize + i] =
-												Scalar::Value(Cow::Owned(value));
+												Scalar::Value(Held::Owned(value));
 										}
 									}
 									Instr::FunctionReturn {
@@ -5390,7 +5413,7 @@ async fn run_body(
 											.take()
 											.expect("a function returned from after it is entered");
 										let spec = &program.functions[*function as usize];
-										regs[*dst as usize] = Scalar::Value(Cow::Owned(
+										regs[*dst as usize] = Scalar::Value(Held::Owned(
 											super::function::returned(spec, &entered, value)?,
 										));
 									}
@@ -5463,7 +5486,7 @@ async fn run_body(
 											})
 											.await?
 										};
-										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+										regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 									}
 									Instr::Dive {
 										frame,
@@ -5829,12 +5852,12 @@ async fn run_body(
 								.await;
 								match (evaluated, caught) {
 									(Ok(value), _) => {
-										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+										regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 										pc = at + 1;
 									}
 									(Err(ControlFlow::Return(value)), Some(catch)) => {
 										regs[catch.root as usize] =
-											Scalar::Value(Cow::Owned(value));
+											Scalar::Value(Held::Owned(value));
 										pc = catch.label as usize;
 									}
 									(Err(ControlFlow::Err(e)), _) => {
@@ -5991,7 +6014,7 @@ async fn run_body(
 								} else {
 									unreachable!("a closure step at a closure instruction")
 								};
-								regs[dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[dst as usize] = Scalar::Value(Held::Owned(value));
 								relinked = None;
 								pc = at + 1;
 							}
@@ -6065,7 +6088,7 @@ async fn run_body(
 									super::graph::lookup(program, spec, origin, doc, state, &frame)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Recurse {
@@ -6099,7 +6122,7 @@ async fn run_body(
 										)
 									})
 									.await?;
-									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 									pc = at + 1;
 									continue;
 								} else {
@@ -6137,7 +6160,7 @@ async fn run_body(
 									recurse(spec, units, &value, target.as_ref(), &frame)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Signal {
@@ -6169,13 +6192,13 @@ async fn run_body(
 								};
 								let mut value =
 									std::mem::replace(&mut regs[*object as usize], Scalar::None)
-										.to_value();
+										.into_value();
 								let frame = frame_ctx(state, ctx, None).clone();
 								out_of_line(|| {
 									super::omit::apply(program, walk, &mut value, state, &frame)
 								})
 								.await?;
-								regs[*object as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*object as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::Destructure {
@@ -6198,7 +6221,7 @@ async fn run_body(
 									destructure(program, fields, value, skip, state, &frame)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								pc = at + 1;
 							}
 							Step::JudgeCopy {
@@ -6226,7 +6249,7 @@ async fn run_body(
 									)
 								})
 								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(verdict));
+								regs[*dst as usize] = Scalar::Value(Held::Owned(verdict));
 								pc = at + 1;
 							}
 							Step::Block {
@@ -6269,7 +6292,7 @@ async fn run_body(
 											)
 										})
 										.await
-										.map(|value| Scalar::Value(Cow::Owned(value)))
+										.map(|value| Scalar::Value(Held::Owned(value)))
 									};
 									match (evaluated, caught) {
 										(Ok(value), _) => {
@@ -6278,7 +6301,7 @@ async fn run_body(
 										}
 										(Err(ControlFlow::Return(value)), Some(catch)) => {
 											regs[catch.root as usize] =
-												Scalar::Value(Cow::Owned(value));
+												Scalar::Value(Held::Owned(value));
 											pc = catch.label as usize;
 										}
 										(
@@ -6427,8 +6450,8 @@ async fn run_body(
 									&program.paths[*path as usize],
 									&mut writes,
 								);
-								if let Scalar::Value(cow) = &mut regs[*object as usize] {
-									let object = cow.to_mut();
+								if let Scalar::Value(held) = &mut regs[*object as usize] {
+									let object = held.to_mut();
 									for (path, value) in writes {
 										object.set_at_field_path_owned(&path, value);
 									}
@@ -6513,7 +6536,7 @@ async fn run_body(
 										state.call_units[site] = held;
 									}
 									let value = value?;
-									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 								} else {
 									unreachable!("an external step at an external instruction")
 								}
@@ -6569,7 +6592,7 @@ async fn run_body(
 								pc = match counted {
 									Some(count) => {
 										regs[*dst as usize] =
-											Scalar::Value(Cow::Owned(Value::Number(count.into())));
+											Scalar::Value(Held::Owned(Value::Number(count.into())));
 										*done as usize
 									}
 									None => at + 1,
@@ -8670,7 +8693,7 @@ async fn run_unit_in(
 	let mut state = statement_state(program, ctx)?;
 	state.units = Some(Arc::clone(units));
 	state.rowless = !head.sig.takes_row || row.is_none();
-	state.slots = args;
+	state.slots = args.into_iter().map(Held::Owned).collect();
 	state.keep_slots(ctx).await?;
 	state.recursion = recursion;
 	let row = row.cloned().unwrap_or(Value::None);

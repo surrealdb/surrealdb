@@ -18,7 +18,7 @@ use super::program::{
 	AccessCheck, ClauseConversion, ClauseObject, ColumnSource, FieldCheck, GrantSubject,
 	IdSequence, PathSource, Program, Service, StatementError, StoreInstr,
 };
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::stored::StoredField;
 use crate::ddl::grant;
 use crate::exe::FlowResultExt as _;
@@ -50,7 +50,7 @@ pub(super) fn read(regs: &[Scalar<'_>], reg: u16) -> Value {
 }
 
 pub(super) fn write(regs: &mut [Scalar<'_>], reg: u16, value: Value) {
-	regs[reg as usize] = Scalar::Value(Cow::Owned(value));
+	regs[reg as usize] = Scalar::Value(Held::Owned(value));
 }
 
 /// The sink the running statement records its session effects in, and the session's options.

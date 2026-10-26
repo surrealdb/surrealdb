@@ -6,7 +6,7 @@ use surrealdb_types::shaped::{
 };
 
 use super::row_frame::{Entry, Stored, encode_scalar, encode_value};
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::packed::{FieldRef, PackedRow};
 use crate::exec::shaped::{CopyPlan, Fill, Source};
 use crate::key::KVKeyDecode as _;
@@ -600,12 +600,12 @@ fn dynamic(
 		FieldRef::Datetime(v) => Scalar::Datetime(crate::val::Datetime(v)),
 		FieldRef::Duration(v) => Scalar::Duration(crate::val::Duration(v)),
 		FieldRef::Literal(v) => Scalar::of(v),
-		FieldRef::Point(x, y) => Scalar::Value(std::borrow::Cow::Owned(Value::Geometry(
-			crate::val::Geometry::Point((x, y).into()),
-		))),
+		FieldRef::Point(x, y) => {
+			Scalar::Value(Held::Owned(Value::Geometry(crate::val::Geometry::Point((x, y).into()))))
+		}
 		FieldRef::RecordId(table, key) => {
 			let key = crate::val::stored::decode_key_nested(key, depth)?;
-			Scalar::Value(std::borrow::Cow::Owned(Value::RecordId(crate::val::RecordId {
+			Scalar::Value(Held::Owned(Value::RecordId(crate::val::RecordId {
 				table: table.clone(),
 				key,
 			})))

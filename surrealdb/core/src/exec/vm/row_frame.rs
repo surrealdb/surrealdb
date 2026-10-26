@@ -32,7 +32,7 @@ use surrealdb_rpc::{EncodedRows, RowFormat};
 #[cfg(feature = "shaped")]
 use surrealdb_types::shaped::{Shape, ValueShaper};
 
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::packed::{FieldRef, PackedRow, PackedVisitor};
 use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::object_extract::indexed_map_walker_from_object_bytes;
@@ -1926,7 +1926,7 @@ impl<'a> PackedSink<'a, '_> {
 			FieldRef::String(v) => Scalar::Str(v),
 			FieldRef::Bytes(v) => Scalar::Bytes(v),
 			FieldRef::Literal(v) => Scalar::of(v),
-			FieldRef::Point(x, y) => Scalar::Value(std::borrow::Cow::Owned(Value::Geometry(
+			FieldRef::Point(x, y) => Scalar::Value(Held::Owned(Value::Geometry(
 				crate::val::Geometry::Point((x, y).into()),
 			))),
 		};

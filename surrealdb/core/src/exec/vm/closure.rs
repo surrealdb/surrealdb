@@ -72,6 +72,7 @@ use std::sync::{Arc, Mutex};
 
 use super::UnitTable;
 use super::program::{ClosureDigest, ClosureHead, ISA_VERSION, Program, RowBits, UnitFrame};
+use super::scalar::Held;
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
 use crate::exec::vm::calls::CompiledClosure;
@@ -959,7 +960,7 @@ async fn run_body(
 	let mut slots = Vec::with_capacity(head.slots.len());
 	let args = bound.len();
 	for name in &head.slots[args..] {
-		slots.push(captures.get(name.as_str()).cloned().unwrap_or(Value::None));
+		slots.push(Held::Owned(captures.get(name.as_str()).cloned().unwrap_or(Value::None)));
 	}
 	#[cfg(test)]
 	BODIES_RUN.with(|run| run.set(run.get() + 1));
@@ -977,9 +978,9 @@ async fn run_body(
 		if closure.dives() && exec.options().is_some_and(|options| options.dive < 1) {
 			return Err(crate::exec::Error::ComputationDepthExceeded.into());
 		}
-		slots.splice(0..0, bound.into_iter().map(|(_, value)| value));
+		slots.splice(0..0, bound.into_iter().map(|(_, value)| Held::Owned(value)));
 		let row = row.map_or(Cow::Owned(Value::None), Cow::Borrowed);
-		let state = |slots: Vec<Value>| -> FlowResult<_> {
+		let state = |slots: Vec<Held<'static>>| -> FlowResult<_> {
 			let mut state = super::host::unit_state(program, exec)?;
 			state.units = Some(Arc::clone(units));
 			state.permissions_bypassed = ctx.skip_fetch_perms;
@@ -1025,7 +1026,7 @@ async fn run_body(
 		.map(|_| state.output.pop().unwrap_or(Value::None));
 	}
 	let row = row.cloned().unwrap_or(Value::None);
-	slots.splice(0..0, bound.iter().map(|(_, value)| value.clone()));
+	slots.splice(0..0, bound.iter().map(|(_, value)| Held::Owned(value.clone())));
 	// The frame holds the unit's table, which the host code it runs — a
 	// function's guard, a nested statement — finds the units it calls in.
 	let running = closure.frame(ctx, bound, registry)?.with_vm_units(Arc::clone(units));

@@ -13,7 +13,6 @@
 //! only when `id` is read or the row is decoded. The row is decoded whole at most once, when the
 //! body leaves it pending to be settled or asks for it.
 
-use std::borrow::Cow;
 use std::cell::OnceCell;
 
 use anyhow::anyhow;
@@ -22,7 +21,7 @@ use storekey::{BorrowDecode, BorrowReader, EscapedSlice};
 use super::row::{
 	FieldName, RowReader, scalar_from_stored, scalar_numbers, stored_numbers, stored_path_vector,
 };
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::packed::{CheckedPackedRow, FieldRef};
 use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::operators::extract_vector;
@@ -566,7 +565,7 @@ impl RowReader for PackedRowReader<'_> {
 				let Some(column) = column else {
 					anyhow::bail!("a packed row's object node read without its column");
 				};
-				Scalar::Value(Cow::Owned(Value::Object(self.row.decode_node(column)?)))
+				Scalar::Value(Held::Owned(Value::Object(self.row.decode_node(column)?)))
 			}
 			FieldRef::Bool(v) => Scalar::Bool(v),
 			FieldRef::I8(v) => Scalar::Number(Number::I8(v)),
@@ -585,14 +584,14 @@ impl RowReader for PackedRowReader<'_> {
 			FieldRef::Datetime(v) => Scalar::Datetime(Datetime(v)),
 			FieldRef::Duration(v) => Scalar::Duration(Duration(v)),
 			FieldRef::Point(x, y) => {
-				Scalar::Value(Cow::Owned(Value::Geometry(Geometry::Point((x, y).into()))))
+				Scalar::Value(Held::Owned(Value::Geometry(Geometry::Point((x, y).into()))))
 			}
 			FieldRef::String(v) => Scalar::Str(v),
 			FieldRef::Bytes(v) => Scalar::Bytes(v),
 			FieldRef::Literal(v) => Scalar::of(v),
 			// A root field sits one level below the record id's.
 			FieldRef::RecordId(table, key) => {
-				Scalar::Value(Cow::Owned(Value::RecordId(RecordId {
+				Scalar::Value(Held::Owned(Value::RecordId(RecordId {
 					table: table.clone(),
 					key: stored::decode_key_nested(key, 2)?,
 				})))
@@ -723,7 +722,7 @@ impl RowReader for PackedRowReader<'_> {
 		{
 			return Ok(read);
 		}
-		Ok(extract_vector(&self.field(name)?.to_value(), rest, out, limit))
+		Ok(extract_vector(&self.field(name)?.as_value(), rest, out, limit))
 	}
 }
 
@@ -872,6 +871,7 @@ pub(in crate::exec) mod observed {
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
 	use std::collections::BTreeSet;
 	use std::ops::Bound;
 

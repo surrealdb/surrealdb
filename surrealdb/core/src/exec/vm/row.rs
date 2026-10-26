@@ -18,14 +18,13 @@
 // Runtime support that lowered programs call into.
 #![allow(dead_code)]
 
-use std::borrow::Cow;
 use std::cell::OnceCell;
 
 use revision::optimised::IndexedMapWalker;
 use revision::optimised::tag::{SizeClass, Tag};
 use surrealdb_strand::Strand;
 
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::object_extract::{
 	PathSegment, indexed_map_walker_from_object_bytes, lookup_value_bytes_in_map,
@@ -92,7 +91,7 @@ pub(super) trait RowReader {
 	) -> anyhow::Result<bool> {
 		Ok(match self.borrowed() {
 			Some(whole) => extract_vector(whole, path, out, limit),
-			None => extract_vector(&self.field(name)?.to_value(), rest, out, limit),
+			None => extract_vector(&self.field(name)?.as_value(), rest, out, limit),
 		})
 	}
 
@@ -678,7 +677,7 @@ pub(super) fn scalar_from_stored(v: ValueRef<'_>) -> anyhow::Result<Scalar<'_>> 
 		| Kind::Array
 		| Kind::Set
 		| Kind::Object
-		| Kind::Unknown => Scalar::Value(Cow::Owned(v.decode()?)),
+		| Kind::Unknown => Scalar::Value(Held::Owned(v.decode()?)),
 	})
 }
 
@@ -825,7 +824,7 @@ impl RowReader for StoredRow<'_> {
 				return Ok(read);
 			}
 		}
-		Ok(extract_vector(&self.field(name)?.to_value(), rest, out, limit))
+		Ok(extract_vector(&self.field(name)?.as_value(), rest, out, limit))
 	}
 
 	fn has_any_field(&self, names: &[Strand]) -> anyhow::Result<bool> {
@@ -976,12 +975,14 @@ pub(super) fn scalar_from_wire(bytes: &[u8]) -> anyhow::Result<Scalar<'_>> {
 		| Value::File(_)
 		| Value::Regex(_)
 		| Value::Range(_)
-		| Value::Closure(_)) => Scalar::Value(Cow::Owned(other)),
+		| Value::Closure(_)) => Scalar::Value(Held::Owned(other)),
 	})
 }
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
+
 	use super::*;
 	use crate::val::stored;
 

@@ -13,7 +13,6 @@
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -22,7 +21,7 @@ use super::interp::{self, State, Step};
 use super::ir_lower::IrExprLowering;
 use super::program::{Instr, Pipeline, Program};
 use super::row::{FieldName, RowReader};
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::err::EngineError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::core::ir::Ir;
@@ -456,7 +455,7 @@ fn serve_call<'r>(
 	let Some(slot) = regs.get_mut(usize::from(*dst)) else {
 		return Err(refused("lowering"));
 	};
-	*slot = Scalar::Value(Cow::Owned(value));
+	*slot = Scalar::Value(Held::Owned(value));
 	Ok(at + 1)
 }
 

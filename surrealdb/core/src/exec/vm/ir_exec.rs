@@ -60,7 +60,7 @@ use super::ir_instr::{
 use super::morsel::Stop;
 use super::program::{ArithOp, CompareOp, Operand, Pipeline, Program, UnaryOp};
 use super::row::RowReader;
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use super::write::WriteState;
 use crate::exec::memory::size::kept_bytes;
 use crate::exec::memory::{QueryMemory, Reservation, Verdict as Charge};
@@ -451,7 +451,7 @@ pub(super) fn scalar_of(value: Value) -> Scalar<'static> {
 		| Value::File(_)
 		| Value::Regex(_)
 		| Value::Range(_)
-		| Value::Closure(_)) => Scalar::Value(Cow::Owned(other)),
+		| Value::Closure(_)) => Scalar::Value(Held::Owned(other)),
 	}
 }
 
@@ -616,7 +616,7 @@ fn invariant(
 			None => bail!("kernel constant {index} is not in the program"),
 		},
 		Operand::Field(index) => match program.fields.get(index as usize) {
-			Some(name) => row.field(name)?.to_value(),
+			Some(name) => row.field(name)?.into_value(),
 			None => bail!("kernel field {index} is not in the program"),
 		},
 	})
@@ -682,7 +682,9 @@ fn drive<'a>(
 
 /// `ArrayPush`: appends `value` to the array `dst` holds.
 fn push_array(dst: &mut Scalar<'_>, value: Value) -> anyhow::Result<()> {
-	if let Scalar::Value(Cow::Owned(Value::Array(items))) = dst {
+	if let Scalar::Value(held) = dst
+		&& let Value::Array(items) = held.to_mut()
+	{
 		items.push(value);
 		return Ok(());
 	}
@@ -691,7 +693,8 @@ fn push_array(dst: &mut Scalar<'_>, value: Value) -> anyhow::Result<()> {
 
 /// `CollectPush`: appends `value` to the array `dst` holds, or inserts it into the set.
 fn push_collect(dst: &mut Scalar<'_>, value: Value) {
-	if let Scalar::Value(Cow::Owned(held)) = dst {
+	if let Scalar::Value(held) = dst {
+		let held = held.to_mut();
 		if let Value::Array(array) = held {
 			array.push(value);
 		} else if let Value::Set(set) = held {

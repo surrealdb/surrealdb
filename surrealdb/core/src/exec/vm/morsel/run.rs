@@ -10,6 +10,7 @@ use super::super::interp::{Arrivals, Groups, Paging, PooledState, SortRow, State
 use super::super::ir_exec::{MemoCell, install_memos, ir_state, memos_of};
 use super::super::partial::Partial;
 use super::super::program::{Pipeline, Program};
+use super::super::scalar::Held;
 use super::fold::Fold;
 use super::lease::{FanoutLease, Grant};
 use super::merge::held_bytes;
@@ -217,7 +218,7 @@ impl Under {
 	) -> FlowResult<Self> {
 		Ok(Self {
 			frames: state.frames.clone(),
-			slots: state.slots.clone(),
+			slots: state.slots.iter().map(|held| Value::clone(held)).collect(),
 			kept: state.slot_charges(),
 			covered: false,
 			verdicts: state.verdicts.clone(),
@@ -493,7 +494,7 @@ pub(super) async fn batch_state(
 	super::super::fuel::cap(super::super::fuel::quantum(ctx));
 	state.program = Some(Arc::clone(program));
 	state.frames = under.frames;
-	state.slots = under.slots;
+	state.slots = under.slots.into_iter().map(Held::Owned).collect();
 	if !under.covered {
 		state.keep_copied(under.kept, ctx).await?;
 	}

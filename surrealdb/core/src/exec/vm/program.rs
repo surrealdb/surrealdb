@@ -27,7 +27,7 @@ use super::codec::TypeId;
 use super::codec::key::RouteId;
 use super::ir_instr::IrInstr;
 use super::row::FieldName;
-use super::scalar::Scalar;
+use super::scalar::{Held, Scalar};
 use crate::ddl::define::table::TableConversion;
 use crate::exec::field_path::FieldPath;
 use crate::exec::planner::placement::Parallel;
@@ -996,7 +996,8 @@ pub(super) enum BlockInstr {
 	/// in slot `slot` of the running state, which the program's own reads of
 	/// the name take ([`Instr::LoadSlot`]), and — when `frame`, because
 	/// something the program does not lower reads its parameters — in the
-	/// current frame.
+	/// current frame. The value is taken out of `value`, which holds `NONE`
+	/// after it: nothing reads that register after the bind.
 	Bind {
 		name: u32,
 		value: Reg,
@@ -4453,7 +4454,7 @@ impl CompareOp {
 					| Value::File(_)
 					| Value::Regex(_)
 					| Value::Range(_)
-					| Value::Closure(_)) => Scalar::Value(std::borrow::Cow::Owned(other)),
+					| Value::Closure(_)) => Scalar::Value(Held::Owned(other)),
 				});
 			}
 		};
