@@ -137,7 +137,7 @@ fn test_join_table_alias_binding() {
 	assert_eq!(left, &LogicalExpr::Field("id".into()));
 	assert_eq!(
 		right.to_string(),
-		"IF _join0.user_id = '' OR !(type::is_int(_join0.user_id) OR type::is_string(_join0.user_id) OR type::is_uuid(_join0.user_id) OR type::is_array(_join0.user_id) OR type::is_object(_join0.user_id) OR type::is_record(_join0.user_id)) THEN NULL ELSE type::record('users', _join0.user_id) END"
+		"IF _join0.user_id = '' OR !(type::is_int(_join0.user_id) OR type::is_i32(_join0.user_id) OR type::is_i16(_join0.user_id) OR type::is_i8(_join0.user_id) OR type::is_u32(_join0.user_id) OR type::is_u16(_join0.user_id) OR type::is_u8(_join0.user_id) OR type::is_string(_join0.user_id) OR type::is_uuid(_join0.user_id) OR type::is_array(_join0.user_id) OR type::is_object(_join0.user_id) OR type::is_record(_join0.user_id)) THEN NULL ELSE type::record('users', _join0.user_id) END"
 	);
 }
 
@@ -2828,6 +2828,29 @@ fn a_bit_test_and_an_array_subscript_lower() {
 	assert!(lower_pgsql_select(&catalog, "SELECT indoption[1] & 2 = 2 FROM pg_index").is_ok());
 	assert!(lower_pgsql_select(&catalog, "SELECT indoption[1] & 3 FROM pg_index").is_err());
 	assert!(lower_pgsql_select(&catalog, "SELECT indoption & indnatts FROM pg_index").is_err());
+}
+
+#[test]
+fn a_mysql_arithmetic_expression_widens_its_narrow_columns() {
+	let catalog = MemoryCatalog::new()
+		.with_column_type("t", "a", crate::SqlType::Int4)
+		.with_column_type("t", "f", crate::SqlType::Float4);
+	let plan = |dialect: &str, sql: &str| {
+		if dialect == "mysql" {
+			let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+			let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+				panic!("expected SELECT");
+			};
+			let policy = DialectPolicy::mysql();
+			let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
+			format!("{:?}", lower_bound_select(&bound, &policy).unwrap())
+		} else {
+			format!("{:?}", lower_pgsql_select(&catalog, sql).unwrap())
+		}
+	};
+	assert!(plan("mysql", "SELECT a + a FROM t").contains("Cast(Int)"));
+	assert!(plan("mysql", "SELECT f + f FROM t").contains("Cast(Float)"));
+	assert!(!plan("pgsql", "SELECT a + a FROM t").contains("Cast(Int)"));
 }
 
 #[test]

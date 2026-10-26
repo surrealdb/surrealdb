@@ -219,7 +219,7 @@ async fn prepared(stream: &mut TcpStream, sql: &str) -> Reply {
 /// The `(name, MySQL type)` of the columns of `typed_cols` and `empty_cols`, which are declared
 /// `id INT PRIMARY KEY, name VARCHAR(50), score DOUBLE, ok BOOLEAN`: the key first, then by name.
 fn typed_columns() -> Vec<(String, u8)> {
-	[("id", 8), ("name", 253), ("ok", 1), ("score", 5)]
+	[("id", 3), ("name", 253), ("ok", 1), ("score", 5)]
 		.map(|(name, kind)| (name.to_owned(), kind))
 		.to_vec()
 }

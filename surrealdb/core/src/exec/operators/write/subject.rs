@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use surrealdb_types::ToSql;
 
 use crate::exec::Error as ExecError;
-use crate::val::{RecordIdKey, TableName, Value};
+use crate::val::{Number, RecordIdKey, TableName, Value};
 
 /// The table and record-id key one `INSERT` row is written at, from the row's
 /// own `id` field and the statement's `INTO` clause.
@@ -41,18 +41,16 @@ pub(crate) fn extract_table_and_rid_key(
 	};
 
 	let rid = match record.rid() {
-		// There is a floating point number for the id field. Only accept floats
-		// that round-trip exactly to an i64 (finite, no fractional part, within
-		// i64 range). Silent truncation, NaN, infinity and other lossy
-		// conversions are rejected — see `Number::as_int_lossless`.
-		Value::Number(id) if id.is_float() => match id.as_int_lossless() {
+		// There is a number for the id field. An integer of any width is the key it
+		// states. A float is accepted only if it round-trips exactly to an i64 (finite, no
+		// fractional part, within i64 range): silent truncation, NaN, infinity and other lossy
+		// conversions are rejected — see `Number::as_int_lossless`. A decimal is not a key.
+		Value::Number(id) if !matches!(id, Number::Decimal(_)) => match id.as_int_lossless() {
 			Some(i) => Some(RecordIdKey::Number(i)),
 			None => bail!(ExecError::InsertStatementId {
 				value: Value::Number(id).to_sql(),
 			}),
 		},
-		// There is an integer number for the id field
-		Value::Number(id) if id.is_int() => Some(RecordIdKey::Number(id.as_int())),
 		// There is a string for the id field
 		Value::String(id) if !id.is_empty() => Some(id.into()),
 		// There is an object for the id field

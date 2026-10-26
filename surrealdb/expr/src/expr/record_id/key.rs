@@ -44,6 +44,12 @@ impl RecordIdKeyLit {
 			Kind::Any
 			| Kind::Number
 			| Kind::Int
+			| Kind::I8
+			| Kind::U8
+			| Kind::I16
+			| Kind::U16
+			| Kind::I32
+			| Kind::U32
 			| Kind::String
 			| Kind::Uuid
 			| Kind::Array(_, _)
@@ -64,12 +70,6 @@ impl RecordIdKeyLit {
 			| Kind::Decimal
 			| Kind::Duration
 			| Kind::Float
-			| Kind::I8
-			| Kind::U8
-			| Kind::I16
-			| Kind::U16
-			| Kind::I32
-			| Kind::U32
 			| Kind::U64
 			| Kind::F16
 			| Kind::F32

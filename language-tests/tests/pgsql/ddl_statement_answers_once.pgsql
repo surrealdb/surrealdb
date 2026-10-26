@@ -22,7 +22,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ age: 40, city: 'London', id: 1, name: 'Tobie', score: 7 }]"
+value = "[{ age: 40i32, city: 'London', id: 1, name: 'Tobie', score: 7i32 }]"
 
 [[test.results]]
 error = "Database index `ddl_once_person_name_uniq` already contains 'Tobie', with record `ddl_once_person:1`"

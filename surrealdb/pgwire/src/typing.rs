@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use surrealdb_sqlplan::descriptor::{VECTOR_ARRAY_OID, VECTOR_OID};
-use surrealdb_types::{Value, Wide};
+use surrealdb_types::{Number, Value};
 
 /// The Postgres wire types emitted by the listener, with their catalog OIDs.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -260,11 +260,7 @@ pub(super) fn base_type(value: &Value) -> Option<PgType> {
 	match value {
 		Value::None | Value::Null => None,
 		Value::Bool(_) => Some(PgType::Bool),
-		Value::Number(n) => match n.wide() {
-			Wide::Int(_) => Some(PgType::Int8),
-			Wide::Float(_) => Some(PgType::Float8),
-			Wide::Decimal(_) => Some(PgType::Numeric),
-		},
+		Value::Number(n) => Some(number_type(n)),
 		Value::String(_) => Some(PgType::Text),
 		Value::Datetime(_) => Some(PgType::Timestamptz),
 		Value::Duration(_) => Some(PgType::Interval),
@@ -294,6 +290,19 @@ pub(super) fn base_type(value: &Value) -> Option<PgType> {
 	}
 }
 
+/// The wire type of a number: the width of a sized integer or float, the 64-bit types for `int`
+/// and `float`, and `numeric` for a `decimal` and a `u64`, which no integer type holds.
+fn number_type(number: &Number) -> PgType {
+	match number {
+		Number::I8(_) | Number::U8(_) | Number::I16(_) => PgType::Int2,
+		Number::U16(_) | Number::I32(_) => PgType::Int4,
+		Number::U32(_) | Number::Int(_) => PgType::Int8,
+		Number::F16(_) | Number::F32(_) => PgType::Float4,
+		Number::Float(_) => PgType::Float8,
+		Number::U64(_) | Number::Decimal(_) => PgType::Numeric,
+	}
+}
+
 /// Widen two cell types into a column type both can encode to.
 fn promote(a: PgType, b: PgType) -> PgType {
 	if a == b {
@@ -305,8 +314,12 @@ fn promote(a: PgType, b: PgType) -> PgType {
 		(Int2, Int4) | (Int4, Int2) => Int4,
 		(Int2 | Int4, Int8) | (Int8, Int2 | Int4) => Int8,
 		// Int to float
-		(Int2 | Int4, Float4) | (Float4, Int2 | Int4) => Float4,
-		(Int2 | Int4 | Int8 | Float4, Float8) | (Float8, Int2 | Int4 | Int8 | Float4) => Float8,
+		// An `integer` is not exact in a `real`, so the pair is a `double precision`.
+		(Int2, Float4) | (Float4, Int2) => Float4,
+		(Int2 | Int4 | Int8 | Float4, Float8)
+		| (Float8, Int2 | Int4 | Int8 | Float4)
+		| (Int4 | Int8, Float4)
+		| (Float4, Int4 | Int8) => Float8,
 		// Number to numeric
 		(Int2 | Int4 | Int8 | Float4 | Float8, Numeric)
 		| (Numeric, Int2 | Int4 | Int8 | Float4 | Float8) => Numeric,
@@ -345,6 +358,71 @@ fn cell(value: Value) -> Option<Value> {
 /// `value` column with one row per array element, or a single row for a
 /// scalar.
 pub(super) fn shape_result(value: Value) -> ResultShape {
+	shape_result_declared(value, &HashMap::new())
+}
+
+/// Whether every value of the number type `inferred` is exactly a value of the number type
+/// `declared`: an integer is exact in an integer or `numeric` declaration, and a float only in a
+/// float one, so a declared `real` or `double precision` never rounds an integer or a decimal.
+fn exact_in(declared: &PgType, inferred: &PgType) -> bool {
+	use PgType::*;
+	if let (Array(declared), Array(inferred)) = (declared, inferred) {
+		return exact_in(declared, inferred);
+	}
+	let integer = |ty: &PgType| matches!(ty, Int2 | Int4 | Int8);
+	let float = |ty: &PgType| matches!(ty, Float4 | Float8);
+	(integer(declared) && integer(inferred))
+		|| (*declared == Numeric && (integer(inferred) || *inferred == Numeric))
+		|| (float(declared) && float(inferred))
+}
+
+/// The type of a `*` column the schema declares `declared`, given the type `inferred` from its
+/// non-null values (`None` when it holds none). A numeric declaration types the column when it
+/// can hold every value present, so a column of declared width answers with that width whether
+/// or not its rows hold a value. A value wider than the declaration, as rows written before the
+/// column was declared or a declaration changed since the statement was prepared can hold,
+/// keeps the column typed from its values, so no value is narrowed to fit. `elementless_arrays`
+/// says the column holds arrays with no element to type, which `inferred` leaves out.
+fn declared_column_type(
+	declared: Option<&PgType>,
+	inferred: Option<PgType>,
+	elementless_arrays: bool,
+) -> PgType {
+	use PgType::*;
+	fn number(ty: &PgType) -> bool {
+		if let Array(elem) = ty {
+			number(elem)
+		} else {
+			matches!(ty, Int2 | Int4 | Int8 | Float4 | Float8 | Numeric)
+		}
+	}
+	match (declared, inferred) {
+		// A declaration that is no array cannot type a column of arrays without an element.
+		(Some(declared), None) if elementless_arrays && !matches!(declared, Array(_)) => {
+			Array(Box::new(Text))
+		}
+		(Some(declared), None) if number(declared) => declared.clone(),
+		// Arrays that are empty or hold only NULLs have no element type of their own.
+		(_, None) if elementless_arrays => Array(Box::new(Text)),
+		(Some(declared), Some(inferred))
+			if number(declared)
+				&& number(&inferred)
+				&& exact_in(declared, &inferred)
+				&& promote(declared.clone(), inferred.clone()) == *declared =>
+		{
+			declared.clone()
+		}
+		(_, inferred) => inferred.unwrap_or(Text),
+	}
+}
+
+/// [`shape_result`] for a result whose columns come from a `*` over one table: a column named in
+/// `declared` takes the type the schema declares for it when the values it holds are numbers, and
+/// every other column is typed from its values.
+pub(super) fn shape_result_declared(
+	value: Value,
+	declared: &HashMap<String, PgType>,
+) -> ResultShape {
 	let values = match value {
 		Value::Array(arr) => arr.into_inner(),
 		v @ (Value::None
@@ -390,9 +468,35 @@ pub(super) fn shape_result(value: Value) -> ResultShape {
 		let columns = names
 			.into_iter()
 			.enumerate()
-			.map(|(i, name)| PgColumn {
-				ty: column_type(rows.iter().map(|row| row[i].as_ref().and_then(base_type))),
-				name,
+			.map(|(i, name)| {
+				let elementless = |value: &Value| {
+					matches!(value, Value::Array(items)
+						if items.iter().all(|item| matches!(item, Value::None | Value::Null)))
+				};
+				let elementless_arrays =
+					rows.iter().any(|row| row[i].as_ref().is_some_and(elementless));
+				let inferred = rows
+					.iter()
+					.filter_map(|row| row[i].as_ref().filter(|value| !elementless(value)))
+					.filter_map(base_type)
+					.reduce(promote);
+				// Arrays without an element are left out of the type only beside other arrays: next
+				// to a value that is no array, the column mixes shapes and is typed from every
+				// cell.
+				let inferred = if elementless_arrays
+					&& inferred.as_ref().is_some_and(|ty| !matches!(ty, PgType::Array(_)))
+				{
+					rows.iter()
+						.filter_map(|row| row[i].as_ref().and_then(base_type))
+						.reduce(promote)
+				} else {
+					inferred
+				};
+				let ty = declared_column_type(declared.get(&name), inferred, elementless_arrays);
+				PgColumn {
+					ty,
+					name,
+				}
 			})
 			.collect();
 		ResultShape {
@@ -529,6 +633,64 @@ mod tests {
 
 	use super::*;
 
+	#[test]
+	fn a_declared_float_never_rounds_an_integer_value() {
+		let declared = HashMap::from([("f".to_owned(), PgType::Float8)]);
+		let row = |value: Value| Value::Array(vec![obj(&[("f", value)])].into());
+		let integer = shape_result_declared(
+			row(Value::Number(Number::Int(9_007_199_254_740_993))),
+			&declared,
+		);
+		assert_eq!(integer.columns[0].ty, PgType::Int8);
+		let float = shape_result_declared(row(Value::Number(Number::Float(1.5))), &declared);
+		assert_eq!(float.columns[0].ty, PgType::Float8);
+	}
+
+	#[test]
+	fn an_empty_array_beside_a_scalar_keeps_the_column_a_mix() {
+		let empty = Value::Array(Vec::<Value>::new().into());
+		let one = Value::Number(Number::Int(1));
+		let shape = shape_result_declared(
+			Value::Array(vec![obj(&[("v", empty)]), obj(&[("v", one)])].into()),
+			&HashMap::new(),
+		);
+		assert_eq!(shape.columns[0].ty, PgType::Jsonb);
+	}
+
+	#[test]
+	fn a_scalar_declaration_does_not_type_empty_arrays() {
+		let declared = HashMap::from([("n".to_owned(), PgType::Int4)]);
+		let empty = Value::Array(Vec::<Value>::new().into());
+		let shape =
+			shape_result_declared(Value::Array(vec![obj(&[("n", empty)])].into()), &declared);
+		assert_eq!(shape.columns[0].ty, PgType::Array(Box::new(PgType::Text)));
+	}
+
+	#[test]
+	fn a_text_array_is_not_taken_for_an_empty_one() {
+		let declared = HashMap::from([("n".to_owned(), PgType::Array(Box::new(PgType::Int4)))]);
+		let strings = Value::Array(vec![Value::String("a".into())].into());
+		let shape =
+			shape_result_declared(Value::Array(vec![obj(&[("n", strings)])].into()), &declared);
+		assert_eq!(shape.columns[0].ty, PgType::Array(Box::new(PgType::Text)));
+	}
+
+	#[test]
+	fn an_integer_and_a_real_widen_to_double_precision() {
+		assert_eq!(promote(PgType::Int4, PgType::Float4), PgType::Float8);
+		assert_eq!(promote(PgType::Float4, PgType::Int8), PgType::Float8);
+		assert_eq!(promote(PgType::Int2, PgType::Float4), PgType::Float4);
+	}
+
+	#[test]
+	fn a_declared_numeric_array_column_with_empty_arrays_is_typed_as_declared() {
+		let declared = HashMap::from([("n".to_owned(), PgType::Array(Box::new(PgType::Int4)))]);
+		let empty = Value::Array(Vec::<Value>::new().into());
+		let shape =
+			shape_result_declared(Value::Array(vec![obj(&[("n", empty)])].into()), &declared);
+		assert_eq!(shape.columns[0].ty, PgType::Array(Box::new(PgType::Int4)));
+	}
+
 	fn obj(entries: &[(&str, Value)]) -> Value {
 		let mut object = Object::new();
 		for (key, value) in entries {
@@ -541,6 +703,27 @@ mod tests {
 		Value::Array(
 			values.iter().map(|i| Value::Number(Number::Int(*i))).collect::<Vec<_>>().into(),
 		)
+	}
+
+	#[test]
+	fn a_declared_column_holding_only_nulls_keeps_its_declared_type() {
+		let declared = HashMap::from([("n".to_string(), PgType::Int4)]);
+		let rows =
+			Value::Array(vec![obj(&[("n", Value::Null)]), obj(&[("n", Value::Null)])].into());
+		assert_eq!(shape_result_declared(rows, &declared).columns[0].ty, PgType::Int4);
+		let rows = Value::Array(vec![obj(&[("n", Value::Number(Number::I32(7)))])].into());
+		assert_eq!(shape_result_declared(rows, &declared).columns[0].ty, PgType::Int4);
+	}
+
+	#[test]
+	fn a_declared_column_narrower_than_its_values_is_typed_from_them() {
+		let declared = HashMap::from([("n".to_string(), PgType::Int4)]);
+		let wide = Value::Number(Number::Int(i64::from(i32::MAX) + 1));
+		let rows = Value::Array(vec![obj(&[("n", wide)])].into());
+		assert_eq!(shape_result_declared(rows, &declared).columns[0].ty, PgType::Int8);
+		let declared = HashMap::from([("n".to_string(), PgType::Int8)]);
+		let rows = Value::Array(vec![obj(&[("n", Value::Number(Number::I32(7)))])].into());
+		assert_eq!(shape_result_declared(rows, &declared).columns[0].ty, PgType::Int8);
 	}
 
 	#[test]

@@ -343,6 +343,16 @@ pub trait BinderCatalog: Send + Sync {
 		self.all_tables()
 	}
 
+	/// Every column of `table` whose type is declared, in no particular order. A schemaless
+	/// table may declare only some of its columns, so this is not the table's column list.
+	fn declared_column_types(
+		&self,
+		_schema: Option<&str>,
+		_table: &str,
+	) -> Vec<(String, crate::SqlType)> {
+		Vec::new()
+	}
+
 	/// A declared column type, independent of whether the table's columns can be enumerated.
 	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
 		self.get_table(schema, table)
@@ -674,6 +684,18 @@ impl BinderCatalog for MemoryCatalog {
 			return None;
 		}
 		self.shapes.get(&(table.to_owned(), column.to_owned())).cloned()
+	}
+
+	fn declared_column_types(
+		&self,
+		_schema: Option<&str>,
+		table: &str,
+	) -> Vec<(String, crate::SqlType)> {
+		self.column_types
+			.iter()
+			.filter(|((name, _), _)| name == table)
+			.map(|((_, column), ty)| (column.clone(), *ty))
+			.collect()
 	}
 
 	fn vector_dimension(&self, _schema: Option<&str>, table: &str, column: &str) -> Option<usize> {

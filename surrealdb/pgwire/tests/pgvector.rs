@@ -21,6 +21,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 const OID_VECTOR: i32 = 16400;
 const OID_VECTOR_ARRAY: i32 = 16401;
 const OID_FLOAT8: i32 = 701;
+const OID_INT4: i32 = 23;
 const OID_INT8: i32 = 20;
 
 async fn start() -> (std::net::SocketAddr, CancellationToken) {
@@ -372,7 +373,7 @@ async fn a_distance_is_a_double_precision_value() {
 	.await;
 	assert_eq!(answer.error, None);
 	let oids: Vec<i32> = answer.columns.iter().map(|column| column.oid).collect();
-	assert_eq!(oids, [OID_INT8, OID_FLOAT8, OID_FLOAT8, OID_FLOAT8, OID_FLOAT8]);
+	assert_eq!(oids, [OID_INT4, OID_FLOAT8, OID_FLOAT8, OID_FLOAT8, OID_FLOAT8]);
 	assert_eq!(text_cells(&answer, 1)[0], "0");
 	assert_eq!(text_cells(&answer, 2)[1], "9");
 	assert_eq!(text_cells(&answer, 3)[0], "-14");

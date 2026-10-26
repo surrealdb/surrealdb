@@ -177,13 +177,26 @@ pub(crate) fn lower_id_key(col: &BoundColumnRef) -> LogicalExpr {
 	)
 }
 
-/// The functions that test for the kinds of value that are the key of a record: an integer, a
+/// The functions that test for the kinds of value that are the key of a record: an integer of any
+/// width up to 32 bits (a `serial` or `integer` column holds an `i32`) or the 64-bit `int`, a
 /// string, a uuid, an array or an object. Every other value (a float, a decimal, a boolean, a
-/// datetime, NULL, absent) is no key.
+/// datetime, NULL, absent) is no key. A `u64` is no key because only part of its domain names a
+/// record.
 ///
 /// This is the one definition of the rule, for the lowering of reads and of writes alike.
-pub(crate) const KEY_KINDS: [&str; 5] =
-	["type::is_int", "type::is_string", "type::is_uuid", "type::is_array", "type::is_object"];
+pub(crate) const KEY_KINDS: [&str; 11] = [
+	"type::is_int",
+	"type::is_i32",
+	"type::is_i16",
+	"type::is_i8",
+	"type::is_u32",
+	"type::is_u16",
+	"type::is_u8",
+	"type::is_string",
+	"type::is_uuid",
+	"type::is_array",
+	"type::is_object",
+];
 
 /// The function that tests for a record link, which names the record by its key.
 pub(crate) const RECORD_KIND: &str = "type::is_record";

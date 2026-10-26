@@ -1766,6 +1766,16 @@ impl FunctionRegistry {
 
 		match def.return_type {
 			ReturnTypeStrategy::Fixed(t) => t,
+			// A sum of `smallint` and `integer` values is a `bigint`, which holds a sum the
+			// narrower type cannot: PostgreSQL adds them as `bigint`, and MySQL sums integers
+			// wider than any column holds them.
+			ReturnTypeStrategy::FirstArg if def.name == "sum" => {
+				match arg_types.first().copied().flatten() {
+					Some(SqlType::Int2 | SqlType::Int4) => SqlType::Int8,
+					Some(other) => other,
+					None => SqlType::Unknown,
+				}
+			}
 			ReturnTypeStrategy::FirstArg => {
 				arg_types.first().copied().flatten().unwrap_or(SqlType::Unknown)
 			}

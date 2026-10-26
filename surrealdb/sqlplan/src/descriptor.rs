@@ -473,6 +473,32 @@ impl BoundSelect {
 		self.targets.iter().any(BoundTarget::is_unlisted_wildcard)
 	}
 
+	/// The declared types of the columns a `*` or `t.*` projection stands for, when the query
+	/// reads a single base table: each column the catalog declares by name. The columns the
+	/// rows hold beyond these stay typed from their values. Empty when the projection lists
+	/// its columns, or the query reads anything but one base table.
+	pub fn wildcard_column_types(
+		&self,
+		catalog: &dyn BinderCatalog,
+	) -> std::collections::HashMap<String, SqlType> {
+		let Some(BoundTableSource::Table {
+			schema,
+			name,
+			..
+		}) = &self.from
+		else {
+			return std::collections::HashMap::new();
+		};
+		if !self.has_dynamic_columns() || self.set_op.is_some() {
+			return std::collections::HashMap::new();
+		}
+		catalog
+			.declared_column_types(schema.as_deref(), name)
+			.into_iter()
+			.filter(|(_, ty)| *ty != SqlType::Unknown)
+			.collect()
+	}
+
 	/// The result descriptor, or `None` when the columns are not known before
 	/// the statement runs (see [`Self::has_dynamic_columns`]). A caller holding
 	/// `None` shapes the result from its rows.
@@ -584,6 +610,15 @@ impl BoundSelect {
 			if dialect.dialect == SqlDialect::Postgres && is_case_of_integer_constants(&target.expr)
 			{
 				ty = SqlType::Int4;
+			} else if dialect.dialect == SqlDialect::Postgres
+				&& let Some(narrow) = self.pg_narrow_integer_arithmetic(&target.expr, catalog)
+			{
+				ty = narrow;
+			} else if dialect.dialect == SqlDialect::MySql
+				&& self.is_sum_of_float(&target.expr, catalog)
+			{
+				// MySQL adds approximate values as `DOUBLE`.
+				ty = SqlType::Float8;
 			}
 			let dynamic = target.alias.is_none() && target.is_unlisted_wildcard();
 			columns.push(ResultColumn {
@@ -1094,6 +1129,175 @@ impl BoundSelect {
 			| BoundExpr::SystemVar {
 				..
 			} => {}
+		}
+	}
+}
+
+impl BoundSelect {
+	/// The type PostgreSQL gives an arithmetic expression over a `smallint` or `integer` operand
+	/// and an integer constant that fits `integer`: the constant is an `integer` there, so the
+	/// result keeps the narrow type (`smallint` only for two `smallint` operands). `None` for any
+	/// other expression.
+	fn pg_narrow_integer_arithmetic(
+		&self,
+		expr: &BoundExpr,
+		catalog: &dyn BinderCatalog,
+	) -> Option<SqlType> {
+		match expr {
+			BoundExpr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				if !matches!(
+					op,
+					BoundBinaryOp::Add
+						| BoundBinaryOp::Subtract
+						| BoundBinaryOp::Multiply
+						| BoundBinaryOp::Divide
+						| BoundBinaryOp::Remainder
+				) {
+					return None;
+				}
+				match (
+					self.pg_narrow_operand(left, catalog)?,
+					self.pg_narrow_operand(right, catalog)?,
+				) {
+					(SqlType::Int2, SqlType::Int2) => Some(SqlType::Int2),
+					(SqlType::Float4, SqlType::Float4) => Some(SqlType::Float4),
+					(SqlType::Float4, _) | (_, SqlType::Float4) => None,
+					_ => Some(SqlType::Int4),
+				}
+			}
+			BoundExpr::Unary {
+				op: BoundUnaryOp::Negate | BoundUnaryOp::Positive,
+				expr,
+			} => self.pg_narrow_operand(expr, catalog),
+			BoundExpr::Literal(_)
+			| BoundExpr::Column(_)
+			| BoundExpr::Access {
+				..
+			}
+			| BoundExpr::Param {
+				..
+			}
+			| BoundExpr::Unary {
+				..
+			}
+			| BoundExpr::FunctionCall {
+				..
+			}
+			| BoundExpr::Case {
+				..
+			}
+			| BoundExpr::Between {
+				..
+			}
+			| BoundExpr::InList {
+				..
+			}
+			| BoundExpr::IsNull {
+				..
+			}
+			| BoundExpr::Cast {
+				..
+			}
+			| BoundExpr::ScalarSubquery(_)
+			| BoundExpr::Exists(_)
+			| BoundExpr::InSubquery {
+				..
+			}
+			| BoundExpr::ArraySubquery(_)
+			| BoundExpr::WindowFunction {
+				..
+			}
+			| BoundExpr::UserVar(_)
+			| BoundExpr::SystemVar {
+				..
+			} => None,
+		}
+	}
+
+	/// Whether `expr` is a `SUM`, plain or windowed, over a single-precision column or expression.
+	fn is_sum_of_float(&self, expr: &BoundExpr, catalog: &dyn BinderCatalog) -> bool {
+		let (BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		}
+		| BoundExpr::WindowFunction {
+			name,
+			args,
+			..
+		}) = expr
+		else {
+			return false;
+		};
+		name.eq_ignore_ascii_case("sum")
+			&& matches!(args.as_slice(), [arg] if self.infer_expr_type(arg, catalog) == SqlType::Float4)
+	}
+
+	/// The narrow type of an operand of such an arithmetic expression: an integer constant that
+	/// fits `integer` is an `integer`, a `smallint`, `integer` or `real` column or expression keeps
+	/// its type, and a sign or an enclosed arithmetic expression is read through.
+	fn pg_narrow_operand(&self, expr: &BoundExpr, catalog: &dyn BinderCatalog) -> Option<SqlType> {
+		if let BoundExpr::Literal(BoundLiteral::Integer(n)) = expr
+			&& i32::try_from(*n).is_ok()
+		{
+			return Some(SqlType::Int4);
+		}
+		if is_case_of_integer_constants(expr) {
+			return Some(SqlType::Int4);
+		}
+		if let Some(ty) = self.pg_narrow_choice(expr, catalog) {
+			return Some(ty);
+		}
+		let ty = self.infer_expr_type(expr, catalog);
+		if matches!(ty, SqlType::Int2 | SqlType::Int4 | SqlType::Float4) {
+			Some(ty)
+		} else {
+			self.pg_narrow_integer_arithmetic(expr, catalog)
+		}
+	}
+}
+
+impl BoundSelect {
+	/// The narrow type of a `COALESCE`, `GREATEST` or `LEAST` whose every argument other than a
+	/// NULL constant is a narrow operand of one type family, or of a `NULLIF`, whose type is its
+	/// first argument's: PostgreSQL gives these calls the type their arguments share, so
+	/// `i + COALESCE(1, 2)` is `integer` as `i + 1` is. `None` for any other expression.
+	fn pg_narrow_choice(&self, expr: &BoundExpr, catalog: &dyn BinderCatalog) -> Option<SqlType> {
+		let BoundExpr::FunctionCall {
+			name,
+			args,
+			..
+		} = expr
+		else {
+			return None;
+		};
+		let chosen: Vec<&BoundExpr> = match name.to_ascii_lowercase().as_str() {
+			"nullif" => args.first().into_iter().collect(),
+			"coalesce" | "greatest" | "least" => args
+				.iter()
+				.filter(|arg| !matches!(arg, BoundExpr::Literal(BoundLiteral::Null)))
+				.collect(),
+			_ => return None,
+		};
+		let mut types = Vec::with_capacity(chosen.len());
+		for arg in chosen {
+			types.push(self.pg_narrow_operand(arg, catalog)?);
+		}
+		let integer = |ty: &SqlType| matches!(ty, SqlType::Int2 | SqlType::Int4);
+		if types.is_empty() {
+			None
+		} else if types.iter().all(|ty| *ty == SqlType::Int2) {
+			Some(SqlType::Int2)
+		} else if types.iter().all(integer) {
+			Some(SqlType::Int4)
+		} else if types.iter().all(|ty| *ty == SqlType::Float4) {
+			Some(SqlType::Float4)
+		} else {
+			None
 		}
 	}
 }

@@ -45,11 +45,11 @@ fn test_pgsql_type_map() {
 	);
 
 	if let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt {
-		assert_eq!(map_pgsql_type(&ct.columns[0].data_type), Kind::Int);
-		assert_eq!(map_pgsql_type(&ct.columns[1].data_type), Kind::Int);
+		assert_eq!(map_pgsql_type(&ct.columns[0].data_type), Kind::I32);
+		assert_eq!(map_pgsql_type(&ct.columns[1].data_type), Kind::I16);
 		assert_eq!(map_pgsql_type(&ct.columns[2].data_type), Kind::Int);
-		assert_eq!(map_pgsql_type(&ct.columns[3].data_type), Kind::Int);
-		assert_eq!(map_pgsql_type(&ct.columns[4].data_type), Kind::Float);
+		assert_eq!(map_pgsql_type(&ct.columns[3].data_type), Kind::I32);
+		assert_eq!(map_pgsql_type(&ct.columns[4].data_type), Kind::F32);
 		assert_eq!(map_pgsql_type(&ct.columns[5].data_type), Kind::Float);
 		assert_eq!(map_pgsql_type(&ct.columns[6].data_type), Kind::Decimal);
 		assert_eq!(map_pgsql_type(&ct.columns[7].data_type), Kind::String);
@@ -66,7 +66,7 @@ fn test_pgsql_type_map() {
 		assert_eq!(map_pgsql_type(&ct.columns[18].data_type), Kind::Bytes);
 		assert_eq!(
 			map_pgsql_type(&ct.columns[19].data_type),
-			Kind::Array(Box::new(Kind::Int), None)
+			Kind::Array(Box::new(Kind::I32), None)
 		);
 		assert_eq!(
 			map_pgsql_type(&ct.columns[20].data_type),
@@ -79,13 +79,24 @@ fn test_pgsql_type_map() {
 
 #[test]
 fn test_mysql_type_map() {
-	assert_eq!(map_mysql_type("int"), Kind::Int);
-	assert_eq!(map_mysql_type("tinyint(1)"), Kind::Int);
-	assert_eq!(map_mysql_type("smallint"), Kind::Int);
-	assert_eq!(map_mysql_type("mediumint"), Kind::Int);
+	assert_eq!(map_mysql_type("int"), Kind::I32);
+	assert_eq!(map_mysql_type("integer"), Kind::I32);
+	assert_eq!(map_mysql_type("int(10) UNSIGNED"), Kind::U32);
+	assert_eq!(map_mysql_type("tinyint(1)"), Kind::I8);
+	assert_eq!(map_mysql_type("tinyint UNSIGNED"), Kind::U8);
+	assert_eq!(map_mysql_type("smallint"), Kind::I16);
+	assert_eq!(map_mysql_type("smallint(5) UNSIGNED"), Kind::U16);
+	assert_eq!(map_mysql_type("mediumint"), Kind::I32);
+	assert_eq!(map_mysql_type("mediumint UNSIGNED"), Kind::U32);
+	assert_eq!(map_mysql_type("bigint"), Kind::Int);
 	assert_eq!(map_mysql_type("bigint unsigned"), Kind::Int);
-	assert_eq!(map_mysql_type("float"), Kind::Float);
+	assert_eq!(map_mysql_type("float"), Kind::F32);
+	assert_eq!(map_mysql_type("float(24)"), Kind::F32);
+	assert_eq!(map_mysql_type("float(25)"), Kind::Float);
+	assert_eq!(map_mysql_type("FLOAT(53) UNSIGNED"), Kind::Float);
+	assert_eq!(map_mysql_type("float(7,4)"), Kind::F32);
 	assert_eq!(map_mysql_type("double"), Kind::Float);
+	assert_eq!(map_mysql_type("double precision"), Kind::Float);
 	assert_eq!(map_mysql_type("decimal(10,2)"), Kind::Decimal);
 	assert_eq!(map_mysql_type("varchar(100)"), Kind::String);
 	assert_eq!(map_mysql_type("char(2)"), Kind::String);
@@ -129,7 +140,7 @@ fn test_lower_pgsql_create_table_simple() {
 	let DefineStatement::Field(f) = &**d else {
 		panic!("Expected DefineField id");
 	};
-	assert_eq!(f.field_kind, Some(Kind::Int));
+	assert_eq!(f.field_kind, Some(Kind::I32));
 
 	// Field name (NOT NULL)
 	let Expr::Define(d) = &exprs[2] else {
@@ -157,7 +168,7 @@ fn test_lower_pgsql_create_table_simple() {
 	let DefineStatement::Field(f) = &**d else {
 		panic!("Expected DefineField age");
 	};
-	assert_eq!(f.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::Int])));
+	assert_eq!(f.field_kind, Some(Kind::either(vec![Kind::None, Kind::Null, Kind::I32])));
 	assert!(matches!(f.default, surrealdb_expr::expr::statements::define::DefineDefault::Set(_)));
 
 	// Index 1: id primary key index
@@ -1659,6 +1670,44 @@ fn test_pgsql_time_zone_suffix_names_the_type() {
 	assert!(
 		surrealdb_pgsql::parse_statement("CREATE TABLE t (a TIMESTAMP WITH TIMEZONE)").is_err()
 	);
+}
+
+#[test]
+fn test_pgsql_sized_type_map() {
+	let kind_of = |ty: &str| -> Kind {
+		let stmt = surrealdb_pgsql::parse_statement(&format!("CREATE TABLE t (a {ty})"))
+			.expect("parse pgsql");
+		let surrealdb_pgsql::ast::stmt::Statement::CreateTable(ct) = stmt else {
+			panic!("Expected CreateTable");
+		};
+		map_pgsql_type(&ct.columns[0].data_type)
+	};
+	for (ty, want) in [
+		("smallint", Kind::I16),
+		("int2", Kind::I16),
+		("smallserial", Kind::I16),
+		("serial2", Kind::I16),
+		("integer", Kind::I32),
+		("int", Kind::I32),
+		("int4", Kind::I32),
+		("serial", Kind::I32),
+		("serial4", Kind::I32),
+		("bigint", Kind::Int),
+		("int8", Kind::Int),
+		("bigserial", Kind::Int),
+		("serial8", Kind::Int),
+		("real", Kind::F32),
+		("float4", Kind::F32),
+		("float8", Kind::Float),
+		("double precision", Kind::Float),
+		("float", Kind::Float),
+		("float(24)", Kind::F32),
+		("float(53)", Kind::Float),
+		("integer[]", Kind::Array(Box::new(Kind::I32), None)),
+		("real[]", Kind::Array(Box::new(Kind::F32), None)),
+	] {
+		assert_eq!(kind_of(ty), want, "{ty}");
+	}
 }
 
 #[test]

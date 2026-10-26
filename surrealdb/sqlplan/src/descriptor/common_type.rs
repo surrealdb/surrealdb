@@ -194,12 +194,63 @@ mod tests {
 	}
 
 	#[test]
+	fn an_integer_column_and_a_constant_add_up_to_an_integer_in_postgresql_only() {
+		let catalog = MemoryCatalog::new()
+			.with_column_type("t", "i", Int4)
+			.with_column_type("t", "s", Int2)
+			.with_column_type("t", "b", Int8)
+			.with_column_type("t", "r", Float4);
+		let sql = "SELECT i + 1, s + 1, s + s, i + b, i * 2 + 1, 2 * 3, i + (-1), -(i + 1), r + r, r + 1, i + CASE WHEN true THEN 1 ELSE 2 END FROM t";
+		assert_eq!(
+			described(SqlDialect::Postgres, sql, &catalog),
+			[Int4, Int4, Int2, Int8, Int4, Int4, Int4, Int4, Float4, Float8, Int4]
+		);
+		let mysql = described(SqlDialect::MySql, "SELECT i + 1 FROM t", &catalog);
+		assert_eq!(mysql, [Int8]);
+	}
+
+	#[test]
 	fn a_column_of_a_lateral_relation_has_the_type_of_its_expression() {
 		let types = types(
 			SqlDialect::Postgres,
 			"SELECT l.x, l.y FROM pg_class c CROSS JOIN LATERAL (SELECT 1::int4 AS x, 'a'::text AS y) l",
 		);
 		assert_eq!(types, [Int4, Text]);
+	}
+
+	#[test]
+	fn a_choice_among_narrow_operands_is_a_narrow_operand_in_postgresql() {
+		let catalog = MemoryCatalog::new()
+			.with_column_type("t", "i", Int4)
+			.with_column_type("t", "s", Int2)
+			.with_column_type("t", "b", Int8);
+		let sql = "SELECT i + COALESCE(1, 2), i + NULLIF(1, 2), i + GREATEST(1, NULL, 2), \
+			i + LEAST(s, 3), s + COALESCE(s, s), i + COALESCE(b, 1) FROM t";
+		assert_eq!(
+			described(SqlDialect::Postgres, sql, &catalog),
+			[Int4, Int4, Int4, Int4, Int2, Int8]
+		);
+	}
+
+	#[test]
+	fn a_mysql_sum_of_a_float_column_is_a_double() {
+		let catalog = MemoryCatalog::new().with_column_type("t", "f", Float4);
+		assert_eq!(described(SqlDialect::MySql, "SELECT SUM(f) FROM t", &catalog), [Float8]);
+		assert_eq!(
+			described(SqlDialect::MySql, "SELECT SUM(f) OVER (PARTITION BY f) FROM t", &catalog),
+			[Float8]
+		);
+		assert_eq!(described(SqlDialect::Postgres, "SELECT SUM(f) FROM t", &catalog), [Float4]);
+	}
+
+	#[test]
+	fn a_sum_of_narrow_integers_is_a_bigint_in_both_dialects() {
+		let catalog =
+			MemoryCatalog::new().with_column_type("t", "i", Int4).with_column_type("t", "s", Int2);
+		for dialect in [SqlDialect::Postgres, SqlDialect::MySql] {
+			let sql = "SELECT SUM(i), SUM(s), SUM(i) OVER (PARTITION BY s) FROM t";
+			assert_eq!(described(dialect, sql, &catalog), [Int8, Int8, Int8], "{dialect:?}");
+		}
 	}
 
 	#[test]
@@ -290,7 +341,7 @@ mod tests {
 			("SELECT floor(n) FROM t", Numeric),
 			("SELECT floor(f) FROM t", Float8),
 			("SELECT ceil(i) FROM t", Int4),
-			("SELECT SUM(CASE WHEN i > 1 THEN i ELSE NULL END) FROM t", Int4),
+			("SELECT SUM(CASE WHEN i > 1 THEN i ELSE NULL END) FROM t", Int8),
 		] {
 			assert_eq!(described(SqlDialect::Postgres, select, &catalog), [expected], "{select}");
 		}

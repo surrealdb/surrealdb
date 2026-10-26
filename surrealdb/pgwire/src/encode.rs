@@ -102,7 +102,7 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 		PgType::Int2 => {
 			if let Value::Number(n) = value {
 				match n.wide() {
-					Wide::Int(i) => Ok((i as i16).to_string().into_bytes()),
+					Wide::Int(i) => Ok(narrow::<i16>(i, ty)?.to_string().into_bytes()),
 					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
 				}
 			} else if let Value::String(ref s) = value
@@ -116,7 +116,7 @@ pub(super) fn encode_text(value: Value, ty: &PgType) -> Result<Vec<u8>, PgError>
 		PgType::Int4 => {
 			if let Value::Number(n) = value {
 				match n.wide() {
-					Wide::Int(i) => Ok((i as i32).to_string().into_bytes()),
+					Wide::Int(i) => Ok(narrow::<i32>(i, ty)?.to_string().into_bytes()),
 					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
 				}
 			} else if let Value::String(ref s) = value
@@ -368,6 +368,19 @@ fn bytea_hex(bytes: &[u8]) -> String {
 
 fn mismatch(value: &Value, ty: &PgType) -> PgError {
 	PgError::internal(format!("cannot encode a {} cell into a {ty:?} column", value.kind()))
+}
+
+/// An integer cell in the width of its `smallint` or `integer` column. A value the column cannot
+/// hold is refused as PostgreSQL refuses it, never wrapped.
+fn narrow<T: TryFrom<i64>>(value: i64, ty: &PgType) -> Result<T, PgError> {
+	T::try_from(value).map_err(|_| {
+		let name = if *ty == PgType::Int2 {
+			"smallint"
+		} else {
+			"integer"
+		};
+		PgError::new("22003", format!("{name} out of range"))
+	})
 }
 
 fn date_text(nd: chrono::NaiveDate) -> Vec<u8> {
@@ -836,7 +849,7 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 		PgType::Int2 => {
 			if let Value::Number(n) = value {
 				match n.wide() {
-					Wide::Int(i) => Ok((i as i16).to_be_bytes().to_vec()),
+					Wide::Int(i) => Ok(narrow::<i16>(i, ty)?.to_be_bytes().to_vec()),
 					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
 				}
 			} else if let Value::String(s) = value {
@@ -851,7 +864,7 @@ pub(super) fn encode_binary(value: Value, ty: &PgType) -> Result<Vec<u8>, PgErro
 		PgType::Int4 => {
 			if let Value::Number(n) = value {
 				match n.wide() {
-					Wide::Int(i) => Ok((i as i32).to_be_bytes().to_vec()),
+					Wide::Int(i) => Ok(narrow::<i32>(i, ty)?.to_be_bytes().to_vec()),
 					Wide::Float(_) | Wide::Decimal(_) => Err(mismatch(&value, ty)),
 				}
 			} else if let Value::String(s) = value {
@@ -2492,6 +2505,17 @@ mod tests {
 		assert_eq!(bin4, 123456i32.to_be_bytes());
 		assert_eq!(decode_param(Some(b"123456"), OID_INT4, 0).unwrap(), val4);
 		assert_eq!(decode_param(Some(&bin4), OID_INT4, 1).unwrap(), val4);
+	}
+
+	#[test]
+	fn narrow_integer_columns_refuse_wider_values() {
+		let wide = Value::Number(Number::Int(i64::from(i32::MAX) + 1));
+		for ty in [PgType::Int2, PgType::Int4] {
+			let text = encode_text(wide.clone(), &ty).unwrap_err();
+			let binary = encode_binary(wide.clone(), &ty).unwrap_err();
+			assert_eq!(text.code, "22003");
+			assert_eq!(binary.code, "22003");
+		}
 	}
 
 	#[test]

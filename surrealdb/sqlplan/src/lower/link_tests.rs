@@ -152,7 +152,7 @@ pub(super) fn join_keys(op: &LogicalOp) -> Vec<(String, String)> {
 /// The record of `table` the parameter `$_1` names, as it is lowered for a comparison.
 fn param_record(table: &str) -> String {
 	format!(
-		"IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('{table}', $_1) END"
+		"IF $_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('{table}', $_1) END"
 	)
 }
 
@@ -212,7 +212,7 @@ fn a_link_equal_to_a_column_is_compared_with_the_record_it_names() {
 	let op = pg_select("SELECT name FROM emp WHERE dept = age");
 	assert_eq!(
 		predicate(&op),
-		"dept = (IF age = '' OR !(type::is_int(age) OR type::is_string(age) OR type::is_uuid(age) OR type::is_array(age) OR type::is_object(age) OR type::is_record(age)) THEN NULL ELSE type::record('dept', age) END) AND dept != NULL AND dept != NONE"
+		"dept = (IF age = '' OR !(type::is_int(age) OR type::is_i32(age) OR type::is_i16(age) OR type::is_i8(age) OR type::is_u32(age) OR type::is_u16(age) OR type::is_u8(age) OR type::is_string(age) OR type::is_uuid(age) OR type::is_array(age) OR type::is_object(age) OR type::is_record(age)) THEN NULL ELSE type::record('dept', age) END) AND dept != NULL AND dept != NONE"
 	);
 }
 

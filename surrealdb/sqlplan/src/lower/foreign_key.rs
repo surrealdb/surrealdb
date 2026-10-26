@@ -509,7 +509,18 @@ fn scalar_to_link(
 	let Some(kind) = shape.kind.as_ref() else {
 		return Err(refuse("it has no declared type"));
 	};
-	if !matches!(base_members(kind).as_slice(), [Kind::Int | Kind::String | Kind::Uuid]) {
+	if !matches!(
+		base_members(kind).as_slice(),
+		[Kind::Int
+			| Kind::I8
+			| Kind::I16
+			| Kind::I32
+			| Kind::U8
+			| Kind::U16
+			| Kind::U32
+			| Kind::String
+			| Kind::Uuid]
+	) {
 		return Err(refuse("only an integer, text or uuid column can hold the key of a row"));
 	}
 	if shape.assert == ColumnAssert::Other {

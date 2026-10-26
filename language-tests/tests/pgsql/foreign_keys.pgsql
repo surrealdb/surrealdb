@@ -40,7 +40,7 @@ value = "[{ author: member:1, editor: member:1, id: 1 }]"
 error = 'An error occurred: insert or update on table "post" violates foreign key constraint "post_author_fkey"'
 
 [[test.results]]
-value = "[{ author: 1, editor: 2, id: 1 }, { author: 2, editor: 1, id: 2 }]"
+value = "[{ author: 1i32, editor: 2i32, id: 1 }, { author: 2i32, editor: 1i32, id: 2 }]"
 
 [[test.results]]
 value = "NONE"
@@ -76,13 +76,13 @@ value = "[{ author: member:2, editor: member:2, id: 2 }]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, ref: 5 }]"
+value = "[{ id: 1, ref: 5i32 }]"
 
 [[test.results]]
 error = 'An error occurred: insert or update on table "solo" violates foreign key constraint "solo_ref_fkey"'
 
 [[test.results]]
-value = "[{ id: 1, ref: 5 }]"
+value = "[{ id: 1, ref: 5i32 }]"
 
 [[test.results]]
 value = "[{ author: member:2, id: 5 }]"

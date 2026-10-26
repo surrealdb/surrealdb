@@ -19,7 +19,7 @@ value = "NONE"
 error = "The table 'ddl_undo_missing' does not exist"
 
 [[test.results]]
-value = "[{ x: 1 }]"
+value = "[{ x: 1i32 }]"
 
 [[test.results]]
 error = "The field 'x' already exists"

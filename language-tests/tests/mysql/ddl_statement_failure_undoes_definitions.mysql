@@ -19,7 +19,7 @@ value = "NONE"
 error = "The table 'ddl_undo_missing' does not exist"
 
 [[test.results]]
-value = "[{ id: 1, x: 10 }]"
+value = "[{ id: 1, x: 10i32 }]"
 */
 
 CREATE TABLE ddl_undo_repeated (a INT, a INT);

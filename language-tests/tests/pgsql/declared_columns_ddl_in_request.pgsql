@@ -11,25 +11,25 @@ reason = "A request that alters a table is lowered before any of it runs, so the
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, label: 'Eng', size: 10 }, { id: 2, label: 'Ops', size: 10 }]"
+value = "[{ id: 1, label: 'Eng', size: 10i32 }, { id: 2, label: 'Ops', size: 10i32 }]"
 
 [[test.results]]
-value = "[{ id: 1, size: 10 }, { id: 2, size: 10 }]"
+value = "[{ id: 1, size: 10i32 }, { id: 2, size: 10i32 }]"
 
 [[test.results]]
-value = "[{ id: 1, label: 'Eng', size: 10 }, { id: 2, label: 'Ops', size: 10 }]"
-
-[[test.results]]
-value = "NONE"
+value = "[{ id: 1, label: 'Eng', size: 10i32 }, { id: 2, label: 'Ops', size: 10i32 }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, w: 7 }]"
+value = "NONE"
 
 [[test.results]]
-value = "[{ w: 7 }]"
+value = "[{ id: 1, w: 7i32 }]"
+
+[[test.results]]
+value = "[{ w: 7i32 }]"
 */
 
 ALTER TABLE declcol_dept ADD COLUMN size INT;

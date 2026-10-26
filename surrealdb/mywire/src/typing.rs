@@ -817,8 +817,9 @@ pub fn decode_binary_param(cursor: &mut &[u8], type_code: u8, unsigned: bool) ->
 			];
 			*cursor = &cursor[8..];
 			if unsigned {
+				// An unsigned value beyond `i64::MAX` keeps its magnitude as a `u64`.
 				let v = u64::from_le_bytes(b);
-				Ok(Value::Number(Number::Int(v as i64)))
+				Ok(Value::Number(i64::try_from(v).map_or(Number::U64(v), Number::Int)))
 			} else {
 				Ok(Value::Number(Number::Int(i64::from_le_bytes(b))))
 			}
@@ -982,6 +983,17 @@ mod tests {
 		let mut cursor = &str_data[..];
 		let val = decode_binary_param(&mut cursor, MYSQL_TYPE_VAR_STRING, false).unwrap();
 		assert_eq!(val, Value::String("hello world".to_string()));
+	}
+
+	#[test]
+	fn unsigned_longlong_param_keeps_its_magnitude() {
+		let decode = |v: u64| {
+			let data = v.to_le_bytes();
+			decode_binary_param(&mut &data[..], MYSQL_TYPE_LONGLONG, true).unwrap()
+		};
+		assert_eq!(decode(7), Value::Number(Number::Int(7)));
+		assert_eq!(decode(i64::MAX as u64), Value::Number(Number::Int(i64::MAX)));
+		assert_eq!(decode(u64::MAX), Value::Number(Number::U64(u64::MAX)));
 	}
 
 	fn duration_of_hours(hours: u64) -> Value {

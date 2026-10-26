@@ -157,7 +157,7 @@ fn id_equal_to_a_parameter_reads_the_record_by_its_id() {
 	let op = pg_select("SELECT name FROM person WHERE id = $1");
 	assert_eq!(
 		predicate(&op),
-		"id = (IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)"
+		"id = (IF $_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)"
 	);
 }
 
@@ -166,7 +166,7 @@ fn id_in_literals_and_parameters_is_a_membership_of_records() {
 	let op = pg_select("SELECT name FROM person WHERE id IN (1, 2, $1)");
 	assert_eq!(
 		predicate(&op),
-		"id INSIDE [person:1, person:2, (IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)]"
+		"id INSIDE [person:1, person:2, (IF $_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)]"
 	);
 }
 
@@ -207,7 +207,7 @@ fn id_in_one_literal_or_parameter_is_the_lookup_of_its_record() {
 	let op = pg_select("SELECT name FROM person WHERE id IN ($1)");
 	assert_eq!(
 		predicate(&op),
-		"id = (IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)"
+		"id = (IF $_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record('person', $_1) END)"
 	);
 }
 
@@ -391,7 +391,7 @@ fn a_foreign_key_joined_to_the_id_of_the_left_table_is_compared_with_the_record_
 		keys,
 		vec![(
 			"id".to_string(),
-			"IF _join0.emp_id = '' OR !(type::is_int(_join0.emp_id) OR type::is_string(_join0.emp_id) OR type::is_uuid(_join0.emp_id) OR type::is_array(_join0.emp_id) OR type::is_object(_join0.emp_id) OR type::is_record(_join0.emp_id)) THEN NULL ELSE type::record('emp', _join0.emp_id) END"
+			"IF _join0.emp_id = '' OR !(type::is_int(_join0.emp_id) OR type::is_i32(_join0.emp_id) OR type::is_i16(_join0.emp_id) OR type::is_i8(_join0.emp_id) OR type::is_u32(_join0.emp_id) OR type::is_u16(_join0.emp_id) OR type::is_u8(_join0.emp_id) OR type::is_string(_join0.emp_id) OR type::is_uuid(_join0.emp_id) OR type::is_array(_join0.emp_id) OR type::is_object(_join0.emp_id) OR type::is_record(_join0.emp_id)) THEN NULL ELSE type::record('emp', _join0.emp_id) END"
 				.to_string()
 		)]
 	);
@@ -597,7 +597,7 @@ fn ordering_a_set_operation_reads_the_keys_its_operands_projected() {
 	assert!(!rendered.contains("record::id"), "{rendered}");
 }
 
-const DEPT_RECORD: &str = "IF mgr = '' OR !(type::is_int(mgr) OR type::is_string(mgr) OR type::is_uuid(mgr) OR type::is_array(mgr) OR type::is_object(mgr) OR type::is_record(mgr)) THEN NULL ELSE type::record('dept', mgr) END";
+const DEPT_RECORD: &str = "IF mgr = '' OR !(type::is_int(mgr) OR type::is_i32(mgr) OR type::is_i16(mgr) OR type::is_i8(mgr) OR type::is_u32(mgr) OR type::is_u16(mgr) OR type::is_u8(mgr) OR type::is_string(mgr) OR type::is_uuid(mgr) OR type::is_array(mgr) OR type::is_object(mgr) OR type::is_record(mgr)) THEN NULL ELSE type::record('dept', mgr) END";
 
 #[test]
 fn id_equal_to_a_column_is_compared_with_the_record_the_column_names() {
@@ -707,7 +707,7 @@ fn a_key_that_names_no_record_is_null_and_not_the_absent_id_of_an_outer_join() {
 	let op = pg_select("SELECT name FROM person WHERE id = $1");
 	let predicate = predicate(&op);
 	assert!(
-		predicate.contains("$_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record"),
+		predicate.contains("$_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NULL ELSE type::record"),
 		"{predicate}"
 	);
 }

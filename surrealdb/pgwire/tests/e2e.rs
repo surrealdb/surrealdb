@@ -4879,7 +4879,7 @@ async fn test_pgwire_declared_scalar_types_drive_results_and_parameters() {
 	.await;
 	assert_eq!(
 		described.columns,
-		vec![("id".into(), 20), ("age".into(), 20), ("enabled".into(), 16), ("name".into(), 25)]
+		vec![("id".into(), 23), ("age".into(), 23), ("enabled".into(), 16), ("name".into(), 25)]
 	);
 	assert_eq!(described.cell(0, "age").as_deref(), Some("42"));
 	assert_eq!(described.cell(1, "age"), None);
@@ -4927,9 +4927,9 @@ async fn test_pgwire_declared_scalar_types_drive_results_and_parameters() {
 	let mut body = parameters.1.as_slice();
 	assert_eq!(body.get_i16(), 2);
 	assert_eq!(body.get_i32(), 25);
-	assert_eq!(body.get_i32(), 20);
+	assert_eq!(body.get_i32(), 23);
 	let columns = messages.iter().find(|(tag, _)| *tag == b'T').expect("row description");
-	assert_eq!(parse_row_description(&columns.1), vec![("age".into(), 20), ("enabled".into(), 16)]);
+	assert_eq!(parse_row_description(&columns.1), vec![("age".into(), 23), ("enabled".into(), 16)]);
 	shutdown.cancel();
 }
 
@@ -4947,8 +4947,8 @@ async fn test_pgwire_scalar_types_use_the_current_transaction_schema() {
 		assert_eq!(last, b'C', "{sql}");
 	}
 	let desc = describe_extended(&mut stream, "SELECT id, enabled FROM transaction_types", 1).await;
-	assert_eq!(desc.columns, vec![("id".into(), 20), ("enabled".into(), 16)]);
-	assert_eq!(desc.raw(0, "id"), Some(1_i64.to_be_bytes().as_slice()));
+	assert_eq!(desc.columns, vec![("id".into(), 23), ("enabled".into(), 16)]);
+	assert_eq!(desc.raw(0, "id"), Some(1_i32.to_be_bytes().as_slice()));
 	assert_eq!(desc.raw(0, "enabled"), Some([1_u8].as_slice()));
 	let (_, last, err) = run_simple_query_with_err(&mut stream, "ROLLBACK").await;
 	assert!(err.is_none(), "{err:?}");
@@ -5063,8 +5063,8 @@ async fn test_pgwire_quoted_names_preserve_case_through_crud_and_inference() {
 	assert_eq!(
 		result.columns,
 		vec![
-			("id".into(), 20),
-			("ID".into(), 20),
+			("id".into(), 23),
+			("ID".into(), 23),
 			("createdAt".into(), 25),
 			("createdat".into(), 25)
 		]
@@ -5251,7 +5251,7 @@ async fn test_pgwire_write_parameters_use_declared_scalar_types() {
 		&[],
 	)
 	.await;
-	assert_eq!(parameters, vec![20, 20, 16, 25]);
+	assert_eq!(parameters, vec![23, 23, 16, 25]);
 	assert_eq!(columns, None);
 	let (rows, last) = run_extended_query(&mut stream,
         r#"INSERT INTO "WriteTypes" (id, age, enabled, name) VALUES ($1, $2, $3, $4) RETURNING name, id, enabled, age"#,
@@ -5268,7 +5268,7 @@ async fn test_pgwire_write_parameters_use_declared_scalar_types() {
 		&[],
 	)
 	.await;
-	assert_eq!(parameters, vec![20, 20, 16]);
+	assert_eq!(parameters, vec![23, 23, 16]);
 	let (parameters, _) = describe_write_statement(
 		&mut stream,
 		"typed_delete",
@@ -5276,7 +5276,7 @@ async fn test_pgwire_write_parameters_use_declared_scalar_types() {
 		&[],
 	)
 	.await;
-	assert_eq!(parameters, vec![25, 20]);
+	assert_eq!(parameters, vec![25, 23]);
 	shutdown.cancel();
 }
 
@@ -5297,7 +5297,7 @@ async fn test_pgwire_unspecified_array_parameters_use_declared_array_types() {
 		&[],
 	)
 	.await;
-	assert_eq!(parameters, vec![20, 1009, 1016]);
+	assert_eq!(parameters, vec![23, 1009, 1007]);
 	let (rows, last) = run_extended_query(
 		&mut stream,
 		r#"INSERT INTO "ArrayTypes" (id, tags, scores) VALUES ($1, $2, $3) RETURNING tags, scores"#,
@@ -5465,9 +5465,9 @@ async fn test_pgwire_returning_metadata_preserves_order_without_executing() {
 		columns,
 		Some(vec![
 			("name".into(), 25),
-			("id".into(), 20),
+			("id".into(), 23),
 			("enabled".into(), 16),
-			("age".into(), 20)
+			("age".into(), 23)
 		])
 	);
 	assert_eq!(
@@ -5525,7 +5525,7 @@ async fn test_pgwire_returning_metadata_preserves_order_without_executing() {
 		"UPDATE returning_order SET age = 43 RETURNING age + 1, name AS person",
 	)
 	.await;
-	assert_eq!(expression.columns, [("?column?".into(), 20), ("person".into(), 25)]);
+	assert_eq!(expression.columns, [("?column?".into(), 23), ("person".into(), 25)]);
 	assert_eq!(expression.cell(0, "?column?").as_deref(), Some("44"));
 	assert_eq!(expression.cell(0, "person").as_deref(), Some("Ada"));
 	shutdown.cancel();
@@ -5548,8 +5548,8 @@ async fn test_pgwire_write_binary_types_casts_and_command_tags() {
 	)
 	.await;
 	assert_eq!(parameters, [25], "client-declared OIDs take precedence");
-	assert_eq!(columns, Some(vec![("input".into(), 25), ("id".into(), 20)]));
-	let bytes = 7_i64.to_be_bytes();
+	assert_eq!(columns, Some(vec![("input".into(), 25), ("id".into(), 23)]));
+	let bytes = 7_i32.to_be_bytes();
 	let (rows, last) = run_extended_query_with_formats(
 		&mut stream,
 		"INSERT INTO binary_writes (id, active, name) VALUES ($1, $2, $3) RETURNING name, active, id",
@@ -5566,7 +5566,7 @@ async fn test_pgwire_write_binary_types_casts_and_command_tags() {
 		1,
 	)
 	.await;
-	assert_eq!(binary.columns, [("active".into(), 16), ("id".into(), 20)]);
+	assert_eq!(binary.columns, [("active".into(), 16), ("id".into(), 23)]);
 	assert_eq!(binary.raw(0, "active"), Some([0_u8].as_slice()));
 	assert_eq!(binary.raw(0, "id"), Some(bytes.as_slice()));
 	let (rows, last) = run_extended_query(
@@ -5765,7 +5765,7 @@ async fn test_pgwire_prisma_upsert_applies_do_update_where() {
 
 	let (parameters, columns) =
 		describe_write_statement(&mut stream, "prisma_upsert", PRISMA_UPSERT, &[]).await;
-	assert_eq!(parameters, vec![20, 25, 20, 16, 20, 20]);
+	assert_eq!(parameters, vec![23, 25, 23, 16, 23, 23]);
 	assert_eq!(columns.expect("RETURNING columns").len(), 5);
 
 	// No conflict: the row is inserted and returned, and the DO UPDATE clause is not applied.
@@ -5900,7 +5900,7 @@ async fn test_pgwire_information_schema_lists_the_users_tables_and_columns() {
 	)
 	.await;
 	let columns = strings(&rows);
-	assert_eq!(columns[0][..4], ["id", "1", "bigint", "NO"]);
+	assert_eq!(columns[0][..4], ["id", "1", "integer", "NO"]);
 	assert_eq!(columns.len(), 4, "{columns:?}");
 	let find = |name: &str| columns.iter().find(|column| column[0] == name).expect(name).clone();
 	assert_eq!(find("name")[2..], ["text", "NO", "text", "pg_catalog"]);
@@ -5915,8 +5915,8 @@ async fn test_pgwire_information_schema_lists_the_users_tables_and_columns() {
 		"SELECT relname FROM pg_catalog.pg_class WHERE relname LIKE 'Compat%' ORDER BY relname",
 	)
 	.await;
-	// The primary key of each table is an index relation of its own, and each serial column has a
-	// sequence relation, as in PostgreSQL.
+	// The primary key of each table is an index relation of its own, and the sequence behind
+	// each serial key is a relation too, as in PostgreSQL.
 	assert_eq!(
 		strings(&rows),
 		[
@@ -6023,12 +6023,12 @@ async fn test_pgwire_typeorm_column_introspection_query() {
 		]
 	};
 	let expected = [
-		expect("CompatPost", "authorId", "NO", "int8", "bigint"),
-		expect("CompatPost", "id", "NO", "int8", "bigint"),
+		expect("CompatPost", "authorId", "NO", "int4", "integer"),
+		expect("CompatPost", "id", "NO", "int4", "integer"),
 		expect("CompatPost", "title", "NO", "text", "text"),
 		expect("CompatUser", "active", "NO", "bool", "boolean"),
-		expect("CompatUser", "age", "YES", "int8", "bigint"),
-		expect("CompatUser", "id", "NO", "int8", "bigint"),
+		expect("CompatUser", "age", "YES", "int4", "integer"),
+		expect("CompatUser", "id", "NO", "int4", "integer"),
 		expect("CompatUser", "name", "NO", "text", "text"),
 		expect("CompatUser", "nickname", "YES", "text", "text"),
 	];
@@ -6203,8 +6203,7 @@ async fn test_pgwire_information_schema_reports_array_columns_as_array() {
 		vec![
 			["big", "ARRAY", "_int8", "pg_catalog"],
 			["plain", "text", "text", "pg_catalog"],
-			// SurrealQL has one integer type, so `int[]` is stored, and reported, as `_int8`.
-			["scores", "ARRAY", "_int8", "pg_catalog"],
+			["scores", "ARRAY", "_int4", "pg_catalog"],
 			["tags", "ARRAY", "_text", "pg_catalog"],
 		]
 	);
@@ -6217,7 +6216,7 @@ async fn test_pgwire_information_schema_reports_array_columns_as_array() {
 		 WHERE c.relname = 'ArrCols' AND a.attname IN ('tags', 'scores') ORDER BY a.attnum",
 	)
 	.await;
-	assert_eq!(rows, vec![["scores", "1016", "bigint[]", "1"], ["tags", "1009", "text[]", "1"]]);
+	assert_eq!(rows, vec![["scores", "1007", "integer[]", "1"], ["tags", "1009", "text[]", "1"]]);
 
 	shutdown.cancel();
 }
@@ -6400,7 +6399,7 @@ async fn test_pgwire_alter_table_add_foreign_key_converts_a_scalar_column_and_it
 		 WHERE table_name = 'AfPost' AND column_name <> 'id' ORDER BY ordinal_position",
 	)
 	.await;
-	assert_eq!(rows, vec![["authorId", "bigint", "NO"], ["editorId", "bigint", "YES"]]);
+	assert_eq!(rows, vec![["authorId", "integer", "NO"], ["editorId", "integer", "YES"]]);
 	let rows = text_rows(
 		&mut stream,
 		"SELECT conname, confdeltype FROM pg_catalog.pg_constraint \
@@ -6580,7 +6579,7 @@ async fn test_pgwire_foreign_key_in_create_table_is_a_link_column() {
 	.await;
 	assert_eq!(
 		rows,
-		vec![["authorId", "bigint", "NO"], ["editorId", "bigint", "YES"], ["tag", "text", "YES"]]
+		vec![["authorId", "integer", "NO"], ["editorId", "integer", "YES"], ["tag", "text", "YES"]]
 	);
 	let rows = text_rows(
 		&mut stream,
@@ -6845,7 +6844,7 @@ async fn test_pgwire_drizzle_sequence_user_and_index_catalog_queries() {
 		summary,
 		[
 			row("Counter_label_idx", "f", "label", "text_ops"),
-			row("Counter_pkey", "t", "id", "int8_ops"),
+			row("Counter_pkey", "t", "id", "int4_ops"),
 		]
 	);
 
@@ -7243,5 +7242,334 @@ async fn test_pgwire_catalog_vectors_count_from_zero_and_user_tables_have_row_ty
 	.await;
 	assert_eq!(rows.len(), 1);
 	assert_eq!(decode_data_row(&rows[0]), [Some("Counter".to_string()), None]);
+
+	shutdown.cancel();
+}
+
+/// Every message the server sends after `packets` until ReadyForQuery.
+async fn exchange(stream: &mut TcpStream, packets: &[BytesMut]) -> Vec<(u8, Vec<u8>)> {
+	for p in packets {
+		stream.write_all(p).await.expect("send packet");
+	}
+	let mut msgs = Vec::new();
+	let res = timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = stream.read_u8().await?;
+			let msg_len = stream.read_i32().await? as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await?;
+			let done = msg_type == b'Z';
+			msgs.push((msg_type, payload));
+			if done {
+				break;
+			}
+		}
+		Ok::<_, std::io::Error>(())
+	})
+	.await;
+	assert!(res.is_ok(), "Timed out waiting for ReadyForQuery");
+	msgs
+}
+
+fn simple_query_packet(sql: &str) -> BytesMut {
+	let mut q = BytesMut::new();
+	q.put_u8(b'Q');
+	q.put_i32((sql.len() + 5) as i32);
+	q.put_slice(sql.as_bytes());
+	q.put_u8(0);
+	q
+}
+
+/// The names and type OIDs of the first RowDescription in `msgs`.
+fn row_description_fields(msgs: &[(u8, Vec<u8>)]) -> Vec<(String, i32)> {
+	let (_, payload) = msgs.iter().find(|(t, _)| *t == b'T').expect("RowDescription");
+	let mut cur = payload.as_slice();
+	let n = cur.get_i16();
+	let mut fields = Vec::new();
+	for _ in 0..n {
+		let name_end = cur.iter().position(|b| *b == 0).expect("field name");
+		let name = String::from_utf8_lossy(&cur[..name_end]).to_string();
+		cur.advance(name_end + 1);
+		cur.advance(4 + 2);
+		fields.push((name, cur.get_i32()));
+		cur.advance(2 + 4 + 2);
+	}
+	fields
+}
+
+/// The type OIDs of the first RowDescription in `msgs`.
+fn row_description_oids(msgs: &[(u8, Vec<u8>)]) -> Vec<i32> {
+	row_description_fields(msgs).into_iter().map(|(_, oid)| oid).collect()
+}
+
+fn data_rows(msgs: &[(u8, Vec<u8>)]) -> Vec<Vec<Option<String>>> {
+	msgs.iter().filter(|(t, _)| *t == b'D').map(|(_, p)| decode_data_row(p)).collect()
+}
+
+fn error_code(msgs: &[(u8, Vec<u8>)]) -> Option<(String, String)> {
+	msgs.iter().find(|(t, _)| *t == b'E').map(|(_, p)| parse_pg_error_fields(p))
+}
+
+async fn extended(
+	stream: &mut TcpStream,
+	sql: &str,
+	param_types: &[i32],
+	formats: &[i16],
+	params: &[Option<&[u8]>],
+) -> Vec<(u8, Vec<u8>)> {
+	exchange(
+		stream,
+		&[
+			build_parse("", sql, param_types),
+			build_bind("", "", formats, params),
+			build_desc(b'P', ""),
+			build_exec("", 0),
+			build_sync(),
+		],
+	)
+	.await
+}
+
+#[tokio::test]
+async fn test_pgwire_sized_integer_columns() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet(
+			"CREATE TABLE g (id serial PRIMARY KEY, n integer, s smallint, b bigint, r real)",
+		)],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "CREATE TABLE: {:?}", error_code(&msgs));
+
+	// Column types are the declared widths.
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT id, n, s, b, r FROM g")]).await;
+	assert_eq!(row_description_oids(&msgs), vec![23, 23, 21, 20, 700]);
+
+	// Simple-query insert; the id comes from the serial column.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet(
+			"INSERT INTO g (n, s, b, r) VALUES (7, 8, 9000000000, 1.5) RETURNING id, n, s, b, r",
+		)],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "INSERT: {:?}", error_code(&msgs));
+	assert_eq!(row_description_oids(&msgs), vec![23, 23, 21, 20, 700]);
+	let rows = data_rows(&msgs);
+	assert_eq!(
+		rows,
+		vec![vec![
+			Some("1".to_string()),
+			Some("7".to_string()),
+			Some("8".to_string()),
+			Some("9000000000".to_string()),
+			Some("1.5".to_string())
+		]]
+	);
+
+	// A `*` has its columns known only from the rows, typed by the width of the values they hold.
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT * FROM g")]).await;
+	let fields: std::collections::HashMap<String, i32> =
+		row_description_fields(&msgs).into_iter().collect();
+	assert_eq!(
+		[fields["n"], fields["s"], fields["b"], fields["r"]],
+		[23, 21, 20, 700],
+		"{fields:?}"
+	);
+
+	// Untyped (OID 0) text parameters.
+	let msgs = extended(
+		&mut stream,
+		"INSERT INTO g (n, s, b, r) VALUES ($1, $2, $3, $4) RETURNING id, n, s, b, r",
+		&[0, 0, 0, 0],
+		&[],
+		&[Some(b"11"), Some(b"12"), Some(b"13"), Some(b"2.5")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "untyped INSERT: {:?}", error_code(&msgs));
+	assert_eq!(
+		data_rows(&msgs),
+		vec![vec![
+			Some("2".to_string()),
+			Some("11".to_string()),
+			Some("12".to_string()),
+			Some("13".to_string()),
+			Some("2.5".to_string())
+		]]
+	);
+
+	// Binary int4 / int2 / int8 / float4 parameters.
+	let n = 21i32.to_be_bytes();
+	let s = 22i16.to_be_bytes();
+	let b = 23i64.to_be_bytes();
+	let r = 3.5f32.to_be_bytes();
+	let msgs = extended(
+		&mut stream,
+		"INSERT INTO g (n, s, b, r) VALUES ($1, $2, $3, $4) RETURNING id, n, s, b, r",
+		&[23, 21, 20, 700],
+		&[1],
+		&[Some(&n), Some(&s), Some(&b), Some(&r)],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "typed INSERT: {:?}", error_code(&msgs));
+	assert_eq!(
+		data_rows(&msgs),
+		vec![vec![
+			Some("3".to_string()),
+			Some("21".to_string()),
+			Some("22".to_string()),
+			Some("23".to_string()),
+			Some("3.5".to_string())
+		]]
+	);
+
+	// `id = $1` finds the row, with an untyped and an int4 parameter.
+	let msgs =
+		extended(&mut stream, "SELECT n FROM g WHERE id = $1", &[0], &[], &[Some(b"2")]).await;
+	assert_eq!(data_rows(&msgs), vec![vec![Some("11".to_string())]]);
+	let id = 3i32.to_be_bytes();
+	let msgs =
+		extended(&mut stream, "SELECT n FROM g WHERE id = $1", &[23], &[1], &[Some(&id)]).await;
+	assert_eq!(data_rows(&msgs), vec![vec![Some("21".to_string())]]);
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT n FROM g WHERE id = 1")]).await;
+	assert_eq!(data_rows(&msgs), vec![vec![Some("7".to_string())]]);
+
+	// A value outside the width of the column is refused.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("INSERT INTO g (n, s, b, r) VALUES (3000000000, 1, 1, 1.0)")],
+	)
+	.await;
+	let (_, message) = error_code(&msgs).expect("out-of-range integer refused");
+	assert!(message.contains("i32"), "{message}");
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("INSERT INTO g (n, s, b, r) VALUES (1, 40000, 1, 1.0)")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_some(), "out-of-range smallint refused");
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT count(*) FROM g")]).await;
+	assert_eq!(data_rows(&msgs), vec![vec![Some("3".to_string())]]);
+
+	// An `integer` column joins to the serial key it holds, as an `id` compared with it.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("CREATE TABLE h (id serial PRIMARY KEY, g_id integer)")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "CREATE TABLE h: {:?}", error_code(&msgs));
+	let msgs =
+		exchange(&mut stream, &[simple_query_packet("INSERT INTO h (g_id) VALUES (2)")]).await;
+	assert!(error_code(&msgs).is_none(), "INSERT h: {:?}", error_code(&msgs));
+	let msgs =
+		exchange(&mut stream, &[simple_query_packet("SELECT g.n FROM h JOIN g ON g.id = h.g_id")])
+			.await;
+	assert_eq!(data_rows(&msgs), vec![vec![Some("11".to_string())]]);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_wildcard_columns_take_their_declared_types() {
+	let ds = Datastore::new("memory").await.expect("datastore");
+	ds.execute(
+		r#"
+		DEFINE NAMESPACE test;
+		DEFINE DATABASE test;
+		DEFINE TABLE loose SCHEMALESS;
+		CREATE loose:1 SET a = 5, b = 'x';
+		"#,
+		&Session::owner().with_ns("test").with_db("test"),
+		None,
+	)
+	.await
+	.expect("define a schemaless table");
+	let (addr, shutdown) = start_test_pg_server_with_ds(ds).await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("CREATE TABLE w (id serial PRIMARY KEY, n integer, t text)")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "CREATE TABLE: {:?}", error_code(&msgs));
+	let want = vec![("id".to_string(), 23), ("n".to_string(), 23), ("t".to_string(), 25)];
+	let row = vec![Some("1".to_string()), Some("7".to_string()), Some("a".to_string())];
+
+	// RETURNING * over the extended protocol, with the portal described.
+	let msgs = extended(
+		&mut stream,
+		"INSERT INTO w (n, t) VALUES ($1, $2) RETURNING *",
+		&[],
+		&[],
+		&[Some(b"7"), Some(b"a")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "RETURNING *: {:?}", error_code(&msgs));
+	assert_eq!(row_description_fields(&msgs), want);
+	assert_eq!(data_rows(&msgs), vec![row.clone()]);
+
+	// The same over the simple protocol.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("INSERT INTO w (n, t) VALUES (8, 'b') RETURNING *")],
+	)
+	.await;
+	assert_eq!(row_description_fields(&msgs), want);
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT * FROM w ORDER BY id")]).await;
+	assert_eq!(row_description_fields(&msgs), want);
+	assert_eq!(data_rows(&msgs)[0], row);
+	let msgs =
+		extended(&mut stream, "SELECT * FROM w WHERE id = $1", &[], &[], &[Some(b"1")]).await;
+	assert_eq!(row_description_fields(&msgs), want);
+	assert_eq!(data_rows(&msgs), vec![row]);
+	let msgs =
+		extended(&mut stream, "UPDATE w SET n = 9 WHERE id = 1 RETURNING *", &[], &[], &[]).await;
+	assert_eq!(row_description_fields(&msgs), want);
+	let msgs = extended(&mut stream, "DELETE FROM w WHERE id = 2 RETURNING *", &[], &[], &[]).await;
+	assert_eq!(row_description_fields(&msgs), want);
+
+	// A schemaless table declares nothing: its columns are typed from the rows.
+	let msgs = exchange(&mut stream, &[simple_query_packet("SELECT * FROM loose")]).await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let fields: std::collections::HashMap<String, i32> =
+		row_description_fields(&msgs).into_iter().collect();
+	assert_eq!(fields["a"], 20);
+	assert_eq!(fields["b"], 25);
+
+	// A column whose rows hold only NULL answers with its declared type.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("INSERT INTO w (n, t) VALUES (NULL, 'c') RETURNING *")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	assert_eq!(row_description_fields(&msgs), want);
+
+	// Several statements in one request are typed from their values, not from one statement's
+	// declarations, so a bigint beyond the range of another table's integer column survives.
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("CREATE TABLE big (id serial PRIMARY KEY, n bigint, t text)")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("INSERT INTO big (n, t) VALUES (3000000000, 'z')")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	let msgs = exchange(
+		&mut stream,
+		&[simple_query_packet("SELECT * FROM big; SELECT * FROM w WHERE id = 1")],
+	)
+	.await;
+	assert!(error_code(&msgs).is_none(), "{:?}", error_code(&msgs));
+	assert_eq!(data_rows(&msgs)[0][1], Some("3000000000".to_string()));
+
 	shutdown.cancel();
 }

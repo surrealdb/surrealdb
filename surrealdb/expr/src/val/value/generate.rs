@@ -4,16 +4,16 @@ use anyhow::Result;
 use surrealdb_types::ToSql;
 
 use crate::expr::Error;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{Number, RecordId, RecordIdKey, TableName, Value};
 
 impl Value {
 	pub fn generate(self, tb: TableName, retable: bool) -> Result<RecordId> {
 		match self {
-			// There is a floating point number for the id field. Only accept
-			// floats that round-trip exactly to an i64 (finite, whole, in
-			// range). Lossy conversions are rejected — see
-			// `Number::as_int_lossless`.
-			Value::Number(id) if id.is_float() => {
+			// There is a number for the id field. An integer of any width is the key it
+			// states. A float is accepted only if it round-trips exactly to an i64 (finite,
+			// whole, in range): lossy conversions are rejected — see
+			// `Number::as_int_lossless`. A decimal is not a key.
+			Value::Number(id) if !matches!(id, Number::Decimal(_)) => {
 				let key = id.as_int_lossless().map(RecordIdKey::Number).ok_or_else(|| {
 					anyhow::Error::new(Error::IdInvalid {
 						value: Value::Number(id).to_sql(),
@@ -24,11 +24,6 @@ impl Value {
 					key,
 				})
 			}
-			// There is an integer number for the id field
-			Value::Number(id) if id.is_int() => Ok(RecordId {
-				table: tb,
-				key: RecordIdKey::Number(id.as_int()),
-			}),
 			// There is a string for the id field
 			Value::String(id) if !id.is_empty() => Ok(RecordId {
 				table: tb,

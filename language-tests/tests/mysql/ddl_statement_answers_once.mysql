@@ -19,7 +19,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ age: 40, email: 'tobie@example.com', id: 1, name: 'Tobie' }]"
+value = "[{ age: 40i32, email: 'tobie@example.com', id: 1, name: 'Tobie' }]"
 
 [[test.results]]
 error = "Database index `ddl_once_person_email_uniq` already contains 'tobie@example.com', with record `ddl_once_person:1`"

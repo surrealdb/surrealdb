@@ -290,6 +290,6 @@ async fn a_table_created_again_in_the_request_is_read_by_its_new_columns() {
 			answers.push(result.result.unwrap_or_else(|error| panic!("{dialect}: {error}")));
 		}
 		let last = answers.pop().expect("the select answers");
-		assert_eq!(last.to_sql(), "[{ w: 7 }]", "{dialect}");
+		assert_eq!(last.to_sql(), "[{ w: 7i32 }]", "{dialect}");
 	}
 }

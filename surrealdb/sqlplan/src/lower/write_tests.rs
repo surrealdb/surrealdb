@@ -148,7 +148,7 @@ fn where_sql(stmt_cond: &Option<surrealdb_expr::expr::Cond>) -> String {
 	stmt_cond.as_ref().unwrap().0.to_sql()
 }
 
-const PARAM_RECORD: &str = "IF $_1 = '' OR !(type::is_int($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NONE ELSE type::record('users', $_1) END";
+const PARAM_RECORD: &str = "IF $_1 = '' OR !(type::is_int($_1) OR type::is_i32($_1) OR type::is_i16($_1) OR type::is_i8($_1) OR type::is_u32($_1) OR type::is_u16($_1) OR type::is_u8($_1) OR type::is_string($_1) OR type::is_uuid($_1) OR type::is_array($_1) OR type::is_object($_1) OR type::is_record($_1)) THEN NONE ELSE type::record('users', $_1) END";
 
 // ============================================================================
 // PostgreSQL DML Lowering Tests
@@ -776,7 +776,7 @@ fn mysql_update_and_delete_reject_order_by_and_limit() {
 	}
 }
 
-const PARENT_RECORD: &str = "IF parent = '' OR !(type::is_int(parent) OR type::is_string(parent) OR type::is_uuid(parent) OR type::is_array(parent) OR type::is_object(parent) OR type::is_record(parent)) THEN NONE ELSE type::record('users', parent) END";
+const PARENT_RECORD: &str = "IF parent = '' OR !(type::is_int(parent) OR type::is_i32(parent) OR type::is_i16(parent) OR type::is_i8(parent) OR type::is_u32(parent) OR type::is_u16(parent) OR type::is_u8(parent) OR type::is_string(parent) OR type::is_uuid(parent) OR type::is_array(parent) OR type::is_object(parent) OR type::is_record(parent)) THEN NONE ELSE type::record('users', parent) END";
 
 #[test]
 fn pgsql_where_id_equal_to_a_column_is_compared_with_the_record_the_column_names() {

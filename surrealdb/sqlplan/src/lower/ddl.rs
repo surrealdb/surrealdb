@@ -46,7 +46,14 @@ use crate::catalog::staged::StagedCatalog;
 use crate::catalog::{BinderCatalog, EmptyCatalog, TableSchema, kind_admits_none};
 use crate::error::PlanError;
 
-/// Map PostgreSQL TypeName to SurrealDB Kind.
+/// Whether the modifiers of a `float(p)` column request at most the 24 bits of mantissa that
+/// PostgreSQL stores as `float4`. A `float` with no precision is `float8`.
+fn has_single_precision(modifiers: &[String]) -> bool {
+	modifiers.first().and_then(|p| p.trim().parse::<u32>().ok()).is_some_and(|p| p <= 24)
+}
+
+/// Map PostgreSQL TypeName to SurrealDB Kind. Integer and float widths follow PostgreSQL's
+/// (`int2`/`int4`/`int8`, `float4`/`float8`) so a wire client sees the type it declared.
 pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind {
 	if super::vector_ddl::is_vector(type_name) {
 		return super::vector_ddl::kind(type_name);
@@ -60,9 +67,12 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 	let base_name = raw_name.trim_end_matches("[]");
 
 	let inner_kind = match base_name {
-		"int" | "integer" | "int4" | "int2" | "smallint" | "int8" | "bigint" | "serial"
-		| "serial4" | "bigserial" | "serial8" | "smallserial" | "serial2" => Kind::Int,
-		"float" | "float4" | "real" | "float8" | "double precision" | "double" => Kind::Float,
+		"int2" | "smallint" | "smallserial" | "serial2" => Kind::I16,
+		"int" | "integer" | "int4" | "serial" | "serial4" => Kind::I32,
+		"int8" | "bigint" | "bigserial" | "serial8" => Kind::Int,
+		"float4" | "real" => Kind::F32,
+		"float" if has_single_precision(&type_name.modifiers) => Kind::F32,
+		"float" | "float8" | "double precision" | "double" => Kind::Float,
 		"numeric" | "decimal" | "dec" => Kind::Decimal,
 		"text" | "varchar" | "char" | "character" | "character varying" | "bpchar" | "string" => {
 			Kind::String
@@ -89,7 +99,20 @@ pub fn map_pgsql_type(type_name: &surrealdb_pgsql::ast::expr::TypeName) -> Kind 
 	}
 }
 
-/// Map MySQL data_type string to SurrealDB Kind.
+/// Whether a MySQL `FLOAT(p)` column is stored in double precision: MySQL takes a lone precision
+/// of 25 to 53 bits as `DOUBLE`. A `FLOAT` with no precision, a precision of at most 24, or the
+/// `FLOAT(M,D)` form is single precision.
+fn mysql_float_is_double(type_str: &str) -> bool {
+	let Some((_, rest)) = type_str.split_once('(') else {
+		return false;
+	};
+	let args = rest.split(')').next().unwrap_or("");
+	!args.contains(',') && args.trim().parse::<u32>().is_ok_and(|p| p > 24)
+}
+
+/// Map MySQL data_type string to SurrealDB Kind. Integer widths follow MySQL's (`tinyint` 8 bits,
+/// `smallint` 16, `mediumint` and `int` 32, `bigint` 64) and a trailing `UNSIGNED` selects the
+/// unsigned kind of the same width.
 pub fn map_mysql_type(type_str: &str) -> Kind {
 	let lower = type_str.to_ascii_lowercase();
 	let without_paren = lower.split('(').next().unwrap_or(&lower).trim();
@@ -99,9 +122,22 @@ pub fn map_mysql_type(type_str: &str) -> Kind {
 		return Kind::Float;
 	}
 
+	let unsigned = lower.split_whitespace().any(|w| w == "unsigned");
+
 	match first_word {
-		"int" | "integer" | "tinyint" | "smallint" | "mediumint" | "bigint" => Kind::Int,
-		"float" | "double" | "real" => Kind::Float,
+		"tinyint" if unsigned => Kind::U8,
+		"tinyint" => Kind::I8,
+		"smallint" if unsigned => Kind::U16,
+		"smallint" => Kind::I16,
+		"mediumint" | "int" | "integer" if unsigned => Kind::U32,
+		"mediumint" | "int" | "integer" => Kind::I32,
+		// The values of an unsigned 64-bit column above the signed range have no exact form in a
+		// text literal or in the wire metadata, so the column holds the signed range and refuses
+		// the rest.
+		"bigint" => Kind::Int,
+		"float" if mysql_float_is_double(&lower) => Kind::Float,
+		"float" => Kind::F32,
+		"double" | "real" => Kind::Float,
 		"decimal" | "dec" | "numeric" | "fixed" => Kind::Decimal,
 		"char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" | "enum" | "set" => {
 			Kind::String

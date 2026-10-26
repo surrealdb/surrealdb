@@ -246,14 +246,14 @@ fn returned(expr: Expr) -> String {
 /// The record of `table` the value `value` names when it is written to a link column.
 fn written(table: &str, value: &str) -> String {
 	format!(
-		"IF {value} = '' OR !(type::is_int({value}) OR type::is_string({value}) OR type::is_uuid({value}) OR type::is_array({value}) OR type::is_object({value})) THEN {value} ELSE type::record('{table}', {value}) END"
+		"IF {value} = '' OR !(type::is_int({value}) OR type::is_i32({value}) OR type::is_i16({value}) OR type::is_i8({value}) OR type::is_u32({value}) OR type::is_u16({value}) OR type::is_u8({value}) OR type::is_string({value}) OR type::is_uuid({value}) OR type::is_array({value}) OR type::is_object({value})) THEN {value} ELSE type::record('{table}', {value}) END"
 	)
 }
 
 /// The record of `table` the value `value` names when it is compared with a link column.
 fn compared(table: &str, value: &str) -> String {
 	format!(
-		"(IF {value} = '' OR !(type::is_int({value}) OR type::is_string({value}) OR type::is_uuid({value}) OR type::is_array({value}) OR type::is_object({value}) OR type::is_record({value})) THEN NULL ELSE type::record('{table}', {value}) END)"
+		"(IF {value} = '' OR !(type::is_int({value}) OR type::is_i32({value}) OR type::is_i16({value}) OR type::is_i8({value}) OR type::is_u32({value}) OR type::is_u16({value}) OR type::is_u8({value}) OR type::is_string({value}) OR type::is_uuid({value}) OR type::is_array({value}) OR type::is_object({value}) OR type::is_record({value})) THEN NULL ELSE type::record('{table}', {value}) END)"
 	)
 }
 
@@ -292,7 +292,7 @@ fn an_expression_written_to_a_link_is_evaluated_once() {
 	let values = row(pg("INSERT INTO emp (id, name, dept) VALUES (8, 'Sam', abs($1))"));
 	assert_eq!(
 		values[2].1,
-		"{ LET $_link = { LET $_sql_args = [$_1]; IF $_sql_args[0] = NULL OR $_sql_args[0] = NONE THEN NULL ELSE math::abs($_sql_args[0]) END; }; IF $_link = '' OR !(type::is_int($_link) OR type::is_string($_link) OR type::is_uuid($_link) OR type::is_array($_link) OR type::is_object($_link)) THEN $_link ELSE type::record('dept', $_link) END; }"
+		"{ LET $_link = { LET $_sql_args = [$_1]; IF $_sql_args[0] = NULL OR $_sql_args[0] = NONE THEN NULL ELSE math::abs($_sql_args[0]) END; }; IF $_link = '' OR !(type::is_int($_link) OR type::is_i32($_link) OR type::is_i16($_link) OR type::is_i8($_link) OR type::is_u32($_link) OR type::is_u16($_link) OR type::is_u8($_link) OR type::is_string($_link) OR type::is_uuid($_link) OR type::is_array($_link) OR type::is_object($_link)) THEN $_link ELSE type::record('dept', $_link) END; }"
 	);
 }
 
@@ -312,7 +312,7 @@ fn a_record_written_to_a_link_is_never_retargeted() {
 	let wrapper = link_value("dept", Expr::Param(Param::from("v".to_string()))).to_sql();
 	assert_eq!(
 		wrapper,
-		"IF $v = '' OR !(type::is_int($v) OR type::is_string($v) OR type::is_uuid($v) OR type::is_array($v) OR type::is_object($v)) THEN $v ELSE type::record('dept', $v) END"
+		"IF $v = '' OR !(type::is_int($v) OR type::is_i32($v) OR type::is_i16($v) OR type::is_i8($v) OR type::is_u32($v) OR type::is_u16($v) OR type::is_u8($v) OR type::is_string($v) OR type::is_uuid($v) OR type::is_array($v) OR type::is_object($v)) THEN $v ELSE type::record('dept', $v) END"
 	);
 	assert!(!wrapper.contains("is_record"), "a record is left as it is: {wrapper}");
 }

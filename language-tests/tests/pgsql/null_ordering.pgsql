@@ -10,7 +10,7 @@ reason = "PostgreSQL NULLS FIRST and NULLS LAST ordering semantics"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: 1, score: 100 }, { id: 2, score: NULL }, { id: 3, score: 50 }]"
+value = "[{ id: 1, score: 100i32 }, { id: 2, score: NULL }, { id: 3, score: 50i32 }]"
 
 [[test.results]]
 value = "[{ id: 2 }, { id: 3 }, { id: 1 }]"

@@ -229,7 +229,7 @@ async fn extended(stream: &mut TcpStream, sql: &str) -> Reply {
 /// The `(name, type oid)` of the columns of `typed_cols` and `empty_cols`, which are declared
 /// `id INT PRIMARY KEY, name TEXT, score FLOAT, ok BOOLEAN`: the key first, then by name.
 fn typed_columns() -> Vec<(String, i32)> {
-	[("id", 20), ("name", 25), ("ok", 16), ("score", 701)]
+	[("id", 23), ("name", 25), ("ok", 16), ("score", 701)]
 		.map(|(name, oid)| (name.to_owned(), oid))
 		.to_vec()
 }

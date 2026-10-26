@@ -54,7 +54,8 @@ use super::error::{PgError, unsupported_construct};
 use super::guc::{GucStore, ShowResult, normalize_name};
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
 use super::typing::{
-	PgColumn, PgType, ResultShape, shape_result, shape_result_jsonb, shape_result_with_descriptor,
+	PgColumn, PgType, ResultShape, shape_result, shape_result_declared, shape_result_jsonb,
+	shape_result_with_descriptor,
 };
 use super::{CancelRegistry, LOG, encode, sasl};
 
@@ -194,6 +195,11 @@ struct PreparedStatement {
 	control: Option<Control>,
 	/// Static result descriptor from the query planner if available.
 	descriptor: Option<surrealdb_sqlplan::ResultDescriptor>,
+	/// The wire types the schema declares for the columns a `*` result of this statement holds,
+	/// for a statement over one base table whose columns the planner cannot list. Resolved when
+	/// the statement is parsed; a declaration that no longer holds the values is ignored when
+	/// the result is shaped.
+	wildcard_types: Arc<HashMap<String, PgType>>,
 	/// Syntactic kind of statement (Select, Insert, Update, CreateTable, etc.)
 	kind: StatementKind,
 	/// Whether this statement produces result rows (e.g. SELECT, or INSERT/UPDATE with RETURNING).
@@ -205,6 +211,11 @@ impl PreparedStatement {
 		std::mem::size_of::<Self>()
 			+ self.query.capacity()
 			+ self.param_types.capacity() * std::mem::size_of::<i32>()
+			+ self
+				.wildcard_types
+				.keys()
+				.map(|name| name.capacity() + std::mem::size_of::<(String, PgType)>())
+				.sum::<usize>()
 			+ if self.cached_plan.is_some() {
 				1024
 			} else {
@@ -1317,6 +1328,7 @@ impl Connection {
 					described: false,
 					control: Some(control),
 					descriptor: None,
+					wildcard_types: Arc::default(),
 					kind: StatementKind::Other,
 					returns_rows,
 				},
@@ -1324,6 +1336,7 @@ impl Connection {
 			msg::write_parse_complete(out);
 			return Ok(());
 		}
+		let mut wildcard_types = HashMap::new();
 		let (query, cached_plan, param_count, param_types, empty, descriptor, kind, returns_rows) =
 			match self.dialect {
 				Dialect::SurrealQl => {
@@ -1417,6 +1430,8 @@ impl Connection {
 									param_count = param_count.max(param_desc.param_types.len());
 									param_types.resize(param_count, 0);
 									descriptor = bound.describe_static(&catalog, &policy);
+									wildcard_types =
+										declared_pg_types(&bound.wildcard_column_types(&catalog));
 									for (idx, sql_ty) in param_desc.param_types.iter().enumerate() {
 										if *sql_ty != surrealdb_sqlplan::SqlType::Unknown {
 											let oid = PgType::from_sql_type(*sql_ty).oid();
@@ -1630,6 +1645,7 @@ impl Connection {
 							}
 						}
 						descriptor = metadata.result;
+						wildcard_types = declared_pg_types(&metadata.wildcard_types);
 					}
 
 					param_types.resize(param_count, 0);
@@ -1684,6 +1700,7 @@ impl Connection {
 				described: false,
 				control: None,
 				descriptor,
+				wildcard_types: Arc::new(wildcard_types),
 				kind,
 				returns_rows,
 			},
@@ -2072,6 +2089,7 @@ impl Connection {
 		};
 		let jsonb_shape = stmt.described && stmt.descriptor.is_none();
 		let descriptor = stmt.descriptor.clone();
+		let declared = Arc::clone(&stmt.wildcard_types);
 		let cached_plan = stmt.cached_plan.clone();
 		let query = stmt.query.clone();
 		let value = self.execute_query(cached_plan, &query, params).await?;
@@ -2080,7 +2098,7 @@ impl Connection {
 		} else if jsonb_shape {
 			shape_result_jsonb(value)
 		} else {
-			shape_result(value)
+			shape_result_declared(value, &declared)
 		};
 		if shape.columns.len() > msg::MAX_COLUMNS {
 			return Err(PgError::feature_not_supported(format!(
@@ -2366,6 +2384,7 @@ impl Connection {
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		global_metrics().record_query(SqlDialect::Postgres);
 		let mut descriptor = None;
+		let mut wildcard_types = HashMap::new();
 		let mut write_kind = None;
 		let mut returns_rows = true;
 		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
@@ -2381,6 +2400,7 @@ impl Connection {
 				write_kind = Some(kind);
 				returns_rows = rows;
 			}
+			let lone = stmts.len() == 1;
 			let mut catalog = MemoryCatalog::new();
 			if let Some(db) = &self.session.db {
 				catalog.set_database(Some(db.clone()));
@@ -2388,7 +2408,10 @@ impl Connection {
 			let policy = DialectPolicy::postgres();
 			for stmt in &stmts {
 				match self.describe_pgsql_write(stmt, &[]).await {
-					Ok(Some(metadata)) => descriptor = metadata.result,
+					Ok(Some(metadata)) => {
+						descriptor = metadata.result;
+						wildcard_types = declared_pg_types(&metadata.wildcard_types);
+					}
 					Ok(None) => {}
 					Err(error) => {
 						self.note_simple_error(&error, out);
@@ -2413,6 +2436,8 @@ impl Connection {
 							Ok(bound) => {
 								if descriptor.is_none() {
 									descriptor = bound.describe_static(&catalog, &policy);
+									wildcard_types =
+										declared_pg_types(&bound.wildcard_column_types(&catalog));
 								}
 							}
 							Err(e) => {
@@ -2541,6 +2566,12 @@ impl Connection {
 					| PgStatement::Empty => {}
 				}
 			}
+			// The declared types of one statement's `*` columns say nothing of another's, and the
+			// results of several are not matched to their statements, so only a lone statement's
+			// result is typed from its declarations.
+			if !lone {
+				wildcard_types.clear();
+			}
 		}
 		let cancel = self.arm_cancel();
 		let req = QueryRequest::new(QuerySource::pgsql(sql), &self.session)
@@ -2581,7 +2612,7 @@ impl Connection {
 								let shape = if let Some(desc) = &descriptor {
 									shape_result_with_descriptor(desc, value)
 								} else {
-									shape_result(value)
+									shape_result_declared(value, &wildcard_types)
 								};
 								if !self.emit_shape_with_kind(shape, kind, out).await? {
 									break;
@@ -2591,7 +2622,8 @@ impl Connection {
 							let ok = if let Some(desc) = &descriptor {
 								self.emit_result_with_descriptor(desc, value, out).await?
 							} else {
-								self.emit_result(value, out).await?
+								let shape = shape_result_declared(value, &wildcard_types);
+								self.emit_shape(shape, out).await?
 							};
 							if !ok {
 								break;
@@ -5693,6 +5725,13 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 		Dialect::PgSql => "pgsql",
 		Dialect::MySql => "mysql",
 	}
+}
+
+/// The wire types of the declared columns of a `*` result, by column name.
+fn declared_pg_types(
+	declared: &HashMap<String, surrealdb_sqlplan::SqlType>,
+) -> HashMap<String, PgType> {
+	declared.iter().map(|(name, ty)| (name.clone(), PgType::from_sql_type(*ty))).collect()
 }
 
 #[cfg(test)]

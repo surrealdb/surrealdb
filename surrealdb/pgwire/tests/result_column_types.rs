@@ -455,7 +455,7 @@ async fn a_result_over_a_table_is_announced_as_the_type_all_its_rows_have() {
 		("ceil(d)", OID_NUMERIC, ["4", "5"]),
 		("floor(f)", OID_FLOAT8, ["4", "5"]),
 		("ceiling(f)", OID_FLOAT8, ["5", "6"]),
-		("floor(i)", OID_INT8, ["2", "3"]),
+		("floor(i)", OID_INT4, ["2", "3"]),
 		// The sum of a decimal and a float is a float, as in PostgreSQL.
 		("d + f", OID_FLOAT8, ["7.75", "9.75"]),
 	] {

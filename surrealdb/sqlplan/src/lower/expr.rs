@@ -78,6 +78,8 @@ pub fn lower_bound_expr(
 		} => {
 			if matches!(op, BoundBinaryOp::Regexp | BoundBinaryOp::RegexpCi) {
 				lower_regex_match(left, right, *op == BoundBinaryOp::RegexpCi, false, policy)
+			} else if let Some((left, right)) = mysql_widened_operands(left, *op, right, policy) {
+				lower_binary_op(&left, *op, &right, policy)
 			} else {
 				lower_binary_op(left, *op, right, policy)
 			}
@@ -1442,6 +1444,56 @@ fn link_comparison(
 		LinkOperand::Record(other) | LinkOperand::Plain(other) => (lower_column_raw(col), other),
 		LinkOperand::Subquery(other) => (key_of(lower_column_raw(col), true), other),
 	})
+}
+
+/// The operands of a MySQL arithmetic expression with each narrow column cast to the width MySQL
+/// computes in, or `None` when no operand is one: an integer column is read as `BIGINT` and a
+/// single-precision one as `DOUBLE`, so the sum of two `INT` values does not overflow at 32 bits
+/// nor two `FLOAT` values round to 24 bits. Kept apart so that the frame of the caller stays small.
+#[inline(never)]
+fn mysql_widened_operands(
+	left: &BoundExpr,
+	op: BoundBinaryOp,
+	right: &BoundExpr,
+	policy: &DialectPolicy,
+) -> Option<(BoundExpr, BoundExpr)> {
+	if policy.dialect != crate::dialect::SqlDialect::MySql
+		|| !matches!(
+			op,
+			BoundBinaryOp::Add
+				| BoundBinaryOp::Subtract
+				| BoundBinaryOp::Multiply
+				| BoundBinaryOp::Divide
+				| BoundBinaryOp::IntDiv
+				| BoundBinaryOp::Remainder
+		) {
+		return None;
+	}
+	let widen = |operand: &BoundExpr| -> Option<BoundExpr> {
+		let BoundExpr::Column(column) = operand else {
+			return None;
+		};
+		let target_type =
+			if matches!(column.declared_type, crate::SqlType::Int2 | crate::SqlType::Int4) {
+				"bigint"
+			} else if column.declared_type == crate::SqlType::Float4 {
+				"double precision"
+			} else {
+				return None;
+			};
+		Some(BoundExpr::Cast {
+			expr: Box::new(operand.clone()),
+			target_type: target_type.to_owned(),
+		})
+	};
+	let (widened_left, widened_right) = (widen(left), widen(right));
+	if widened_left.is_none() && widened_right.is_none() {
+		return None;
+	}
+	Some((
+		widened_left.unwrap_or_else(|| left.clone()),
+		widened_right.unwrap_or_else(|| right.clone()),
+	))
 }
 
 /// Lower binary operations preserving SQL 3VL, NULL propagation, and dialect rules.

@@ -25,6 +25,8 @@ pub struct PgWriteAnalysis {
 pub struct PgWriteMetadata {
 	pub parameters: ParameterDescriptor,
 	pub result: Option<ResultDescriptor>,
+	/// The declared types of the columns a `RETURNING *` stands for.
+	pub wildcard_types: HashMap<String, SqlType>,
 }
 
 impl PgWriteAnalysis {
@@ -226,9 +228,15 @@ impl PgWriteAnalysis {
 				));
 			}
 		}
+		let wildcard_types = if self.returning && result.is_none() {
+			bound.wildcard_column_types(catalog)
+		} else {
+			HashMap::new()
+		};
 		Ok(PgWriteMetadata {
 			parameters,
 			result,
+			wildcard_types,
 		})
 	}
 }
