@@ -986,7 +986,7 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 mod tests {
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
-	use jsonwebtoken::{EncodingKey, encode};
+	use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 	use rand_core::OsRng;
 	use rstest::rstest;
 
@@ -1003,6 +1003,38 @@ mod tests {
 	}
 
 	const AVAILABLE_ROLES: [Role; 3] = [Role::Viewer, Role::Editor, Role::Owner];
+
+	#[test]
+	fn test_token_accepts_non_string_header_extras() {
+		let secret = b"jwt_secret";
+		let encoding_key = EncodingKey::from_secret(secret);
+		let decoding_key = DecodingKey::from_secret(secret);
+		let validation = Validation::new(Algorithm::HS256);
+		let claims = Claims {
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			..Claims::default()
+		};
+
+		for extra in [
+			serde_json::json!(1_700_000_000),
+			serde_json::json!(true),
+			serde_json::json!(["value"]),
+			serde_json::json!({ "nested": "value" }),
+		] {
+			let mut header = Header::new(Algorithm::HS256);
+			header.extras.insert("oiat", extra.clone());
+			let token = encode(&header, &claims, &encoding_key).unwrap();
+
+			assert!(
+				decode_claims_unverified(&token).is_ok(),
+				"unverified claims decode rejected header extra {extra}"
+			);
+			assert!(
+				verify_token(&token, &decoding_key, &validation).is_ok(),
+				"signature verification rejected header extra {extra}"
+			);
+		}
+	}
 
 	#[rstest]
 	#[case::without_roles_or_expiration("pass", vec![Role::Viewer], None, true)]
