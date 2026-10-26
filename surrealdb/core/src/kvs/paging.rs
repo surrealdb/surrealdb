@@ -218,6 +218,15 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 			} else {
 				None
 			};
+			#[cfg(test)]
+			if advanced.is_some()
+				&& let Err(e) = crate::kvs::testing::maybe_inject_retryable_conflict(
+					crate::kvs::testing::RetryableConflictSite::ReclaimPageCommit,
+					ds.id(),
+				) {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
 			match txn.commit().await {
 				Ok(()) => {}
 				Err(e) if super::is_conditional_write_conflict(&e) => {

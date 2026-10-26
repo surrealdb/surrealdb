@@ -30,6 +30,12 @@ use crate::kvs::{Datastore, RECLAIM_BATCH_SIZE};
 /// is renewable by the reopened one instead of having to expire first.
 async fn open(path: &str) -> Arc<Datastore> {
 	let node_id = Uuid::parse_str("6f1c9d3e-3a12-4a7b-9c4e-5b8d2f0a7e11").unwrap();
+	open_as(path, node_id).await
+}
+
+/// [`open`] as node `node_id`: a test that arms a fault injection, which is
+/// keyed by node, opens under an id of its own so no other test consumes it.
+async fn open_as(path: &str, node_id: Uuid) -> Arc<Datastore> {
 	Datastore::builder()
 		.with_id(node_id)
 		.with_capabilities(Capabilities::all())
@@ -432,4 +438,152 @@ async fn surrealkv_define_index_after_remove_index() {
 	let dir = TempDir::new().unwrap();
 	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
 	define_index_after_remove_index(&path).await;
+}
+
+/// Define `thing` with a doc-ID index over `pages` reclaim pages of records,
+/// remove the index, and land one page of the reclaim, so the table's shared
+/// doc-ID space is torn and its reclaim started but unfinished.
+async fn torn_doc_id_space(ds: &Arc<Datastore>, ses: &Session, pages: usize) {
+	let page = RECLAIM_BATCH_SIZE as usize;
+	create_tenant(ds, ses).await;
+	run_once(ds, ses, "DEFINE TABLE thing SCHEMALESS").await;
+	run_once(ds, ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	for chunk in 0..pages {
+		let rows: Vec<String> = (chunk * page..(chunk + 1) * page)
+			.map(|i| format!("{{ id: {i}, val: {} }}", i % 10))
+			.collect();
+		run_once(ds, ses, &format!("INSERT INTO thing [{}]", rows.join(","))).await;
+	}
+	index_ready(ds, ses, "idx").await;
+	run_once(ds, ses, "REMOVE INDEX idx ON thing").await;
+	Datastore::reclaim_tombstones_with_budget(
+		Arc::clone(ds),
+		Duration::from_secs(1),
+		Duration::ZERO,
+		page as u64,
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert!(
+		doc_id_reclaim_entries(ds, "thing").await > 0,
+		"one page must leave the reclaim started but unfinished"
+	);
+}
+
+/// The index over a reclaimed space agrees with a scan of the table.
+async fn index_agrees_with_scan(ds: &Datastore, ses: &Session) {
+	for v in 0..10 {
+		assert_eq!(
+			count_val(ds, ses, v, false).await,
+			count_val(ds, ses, v, true).await,
+			"the index over the reclaimed space must agree with a scan for val = {v}"
+		);
+	}
+}
+
+/// `DEFINE INDEX` over a torn doc-ID space succeeds without the client retrying
+/// while this node's reaper drains the same space.
+///
+/// The statement and the reaper page the same queue entries, and on a backend
+/// that detects write-write conflicts at commit whichever commits second loses
+/// with a retryable conflict. The statement's loss is the race's, not the
+/// client's: it must read what the winner left and carry on.
+async fn define_index_while_the_reaper_drains(path: &str) {
+	use std::sync::atomic::{AtomicBool, Ordering};
+
+	let page = RECLAIM_BATCH_SIZE as usize;
+	let ds = open_as(path, Uuid::new_v4()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	torn_doc_id_space(&ds, &ses, 24).await;
+
+	// Reaper passes back to back, as the background task runs them once the
+	// grace has passed and a pass leaves work queued.
+	let stop = Arc::new(AtomicBool::new(false));
+	let reaper = {
+		let ds = Arc::clone(&ds);
+		let stop = Arc::clone(&stop);
+		tokio::spawn(async move {
+			while !stop.load(Ordering::Relaxed) {
+				let _ = Datastore::reclaim_tombstones_with_budget(
+					Arc::clone(&ds),
+					Duration::from_secs(1),
+					Duration::ZERO,
+					page as u64,
+					CancellationToken::new(),
+				)
+				.await;
+				tokio::task::yield_now().await;
+			}
+		})
+	};
+	run_once(&ds, &ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	stop.store(true, Ordering::Relaxed);
+	reaper.await.unwrap();
+	assert_eq!(
+		doc_id_reclaim_entries(&ds, "thing").await,
+		0,
+		"the definition must have finished the reclaim"
+	);
+	index_ready(&ds, &ses, "idx").await;
+	index_agrees_with_scan(&ds, &ses).await;
+	close(ds).await;
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mem_define_index_while_the_reaper_drains() {
+	define_index_while_the_reaper_drains("memory").await;
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn surrealkv_define_index_while_the_reaper_drains() {
+	use temp_dir::TempDir;
+
+	let dir = TempDir::new().unwrap();
+	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
+	define_index_while_the_reaper_drains(&path).await;
+}
+
+/// A page of the reclaim a `DEFINE INDEX` runs that loses its commit to a
+/// concurrent page does not fail the statement: the next step reads what the
+/// winner left. The loss is injected, so it lands on every backend and on the
+/// statement's page rather than the reaper's.
+async fn define_index_survives_a_lost_reclaim_page(path: &str) {
+	use crate::kvs::testing::{
+		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
+	};
+
+	let ds = open_as(path, Uuid::new_v4()).await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+	torn_doc_id_space(&ds, &ses, 3).await;
+	let site = RetryableConflictSite::ReclaimPageCommit;
+	let _lost = inject_retryable_conflict(site, ds.id());
+	run_once(&ds, &ses, "DEFINE INDEX idx ON thing FIELDS val CONCURRENTLY").await;
+	assert_eq!(retryable_conflict_count(site, ds.id()), 0, "a reclaim page must have lost");
+	assert_eq!(
+		doc_id_reclaim_entries(&ds, "thing").await,
+		0,
+		"the definition must have finished the reclaim"
+	);
+	index_ready(&ds, &ses, "idx").await;
+	index_agrees_with_scan(&ds, &ses).await;
+	close(ds).await;
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mem_define_index_survives_a_lost_reclaim_page() {
+	define_index_survives_a_lost_reclaim_page("memory").await;
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn surrealkv_define_index_survives_a_lost_reclaim_page() {
+	use temp_dir::TempDir;
+
+	let dir = TempDir::new().unwrap();
+	let path = format!("surrealkv:{}", dir.path().to_string_lossy());
+	define_index_survives_a_lost_reclaim_page(&path).await;
 }

@@ -36,7 +36,9 @@ use crate::key::reclaim::{ALL_DOC_ID_KINDS, ReclaimState};
 use crate::key::schema::{ReclaimKey, ReclaimTbPrefix};
 use crate::key::{KVKeyDecode, KVValue, Key, Resumable};
 use crate::kvs::tasklease::TaskLeaseType;
-use crate::kvs::{Direction, RECLAIM_BATCH_SIZE, is_conditional_write_conflict};
+use crate::kvs::{
+	Direction, RECLAIM_BATCH_SIZE, is_conditional_write_conflict, is_retryable_transaction_conflict,
+};
 
 /// The table whose shared doc-ID space a refused `DEFINE INDEX` or
 /// `REBUILD INDEX` found part-way through a reclaim.
@@ -97,7 +99,13 @@ impl Datastore {
 	/// Runs under the reclaim task's lease, so a node reclaiming elsewhere is
 	/// waited for rather than raced, and through the same paged, cursor
 	/// compare-and-set deletes as the reaper, so a concurrent pass of the
-	/// reaper on this node loses a page cleanly instead of deleting twice.
+	/// reaper on this node, or another statement finishing the same reclaim,
+	/// costs a page instead of deleting twice. Where the two collide, one page
+	/// or retirement loses: as a failed compare, or, on a backend that detects
+	/// write-write conflicts at commit, as a retryable conflict. Either way it
+	/// applied nothing, and the step reports [`DocIdsReclaimStep::Progressed`]
+	/// so the next step reads what the winner left. The loss is never the
+	/// step's error: the statement waiting on it has no conflict of its own.
 	///
 	/// `canceller` stops the step, its lease check's retries included, so a
 	/// caller can hold it to the query's cancellation and deadline.
@@ -169,7 +177,15 @@ impl Datastore {
 		for (key, state) in states {
 			Self::ensure_not_cancelled(canceller)?;
 			let rc = ReclaimKey::decode_key(&key)?;
-			match self.reclaim_decoded(&rc, &state, &lh, canceller, &mut budget).await? {
+			let outcome = match self.reclaim_decoded(&rc, &state, &lh, canceller, &mut budget).await
+			{
+				// A page lost its commit to a concurrent page of the entry.
+				Err(e) if is_retryable_transaction_conflict(&e) => {
+					return Ok(DocIdsReclaimStep::Progressed);
+				}
+				outcome => outcome?,
+			};
+			match outcome {
 				ReclaimOutcome::Complete => self.retire_reclaim_entry(&key).await?,
 				ReclaimOutcome::Incomplete => return Ok(DocIdsReclaimStep::Progressed),
 				// A concurrent page advanced or retired the entry; the next step
@@ -185,7 +201,9 @@ impl Datastore {
 	}
 
 	/// Delete the reclaim queue entry at `key` whose prefix is now empty,
-	/// guarded on the value stored, as the reaper retires one.
+	/// guarded on the value stored, as the reaper retires one. A retirement that
+	/// loses to a concurrent page or retirement of the entry, by a failed
+	/// compare or a retryable conflict, is left to the next step.
 	async fn retire_reclaim_entry(&self, key: &[u8]) -> Result<()> {
 		let txn = self.transaction(Write).await?;
 		let current = match txn.get(Key::from(key), None).await {
@@ -201,7 +219,7 @@ impl Datastore {
 		};
 		if let Err(e) = txn.del_compare(Key::from(key), Some(&current)).await {
 			let _ = txn.cancel().await;
-			return if is_conditional_write_conflict(&e) {
+			return if lost_to_a_concurrent_write(&e) {
 				Ok(())
 			} else {
 				Err(e)
@@ -211,7 +229,7 @@ impl Datastore {
 			Ok(()) => Ok(()),
 			// A concurrent page or retirement changed the entry: the next step
 			// reads what it left.
-			Err(e) if is_conditional_write_conflict(&e) => {
+			Err(e) if lost_to_a_concurrent_write(&e) => {
 				let _ = txn.cancel().await;
 				Ok(())
 			}
@@ -221,4 +239,11 @@ impl Datastore {
 			}
 		}
 	}
+}
+
+/// Whether a write to a reclaim queue entry failed because a concurrent write
+/// to it landed first: a compare that no longer holds, or a conflict detected
+/// at commit.
+fn lost_to_a_concurrent_write(e: &anyhow::Error) -> bool {
+	is_conditional_write_conflict(e) || is_retryable_transaction_conflict(e)
 }

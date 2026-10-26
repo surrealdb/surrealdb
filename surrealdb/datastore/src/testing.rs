@@ -84,6 +84,11 @@ pub enum RetryableConflictSite {
 	/// Raised in place of that commit, once the build has started, discarding
 	/// the statement's writes as a real lost commit does.
 	AwaitedBuildCommit,
+	/// A conflict on the commit of one page of a reclaim queue entry's paged
+	/// delete, raised in place of that commit, as a concurrent page of the same
+	/// entry committing first raises on a backend that detects write-write
+	/// conflicts at commit.
+	ReclaimPageCommit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
