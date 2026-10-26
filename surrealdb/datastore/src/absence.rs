@@ -109,6 +109,11 @@ impl Hasher for Prints {
 
 /// A key's fingerprint: a fast multiplicative hash of its 8-byte words, compared only with
 /// another of the same transaction, so a collision only flushes the list early.
+///
+/// The fingerprint set hashes by the fingerprint itself and places it by its low bits, so the
+/// words' hash is finished with murmur3's 64-bit mix, which makes every bit depend on every other:
+/// a wrapping multiply leaves the low bits a function of the low bits of the last word, which for
+/// a key ending in a big-endian integer, a record id's, barely vary from one key to the next.
 fn print(key: &[u8]) -> u64 {
 	const K: u64 = 0x517c_c1b7_2722_0a95;
 	let mut hash = key.len() as u64;
@@ -119,7 +124,12 @@ fn print(key: &[u8]) -> u64 {
 	}
 	let mut tail = [0u8; 8];
 	tail[..words.remainder().len()].copy_from_slice(words.remainder());
-	(hash.rotate_left(5) ^ u64::from_le_bytes(tail)).wrapping_mul(K)
+	let mut hash = (hash.rotate_left(5) ^ u64::from_le_bytes(tail)).wrapping_mul(K);
+	hash ^= hash >> 33;
+	hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+	hash ^= hash >> 33;
+	hash = hash.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+	hash ^ (hash >> 33)
 }
 
 impl List {
@@ -370,5 +380,25 @@ impl Absence {
 fn violation(key: &[u8]) -> Error {
 	Error::DeferredKeyExists {
 		key: key.to_vec(),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::print;
+
+	/// Keys that differ only in a trailing big-endian integer, as consecutive record ids do,
+	/// spread over the low bits the fingerprint set places them by.
+	#[test]
+	fn consecutive_record_keys_spread_over_the_low_bits() {
+		let buckets: std::collections::HashSet<u64> = (1u64..=65_536)
+			.map(|id| {
+				let mut key = b"/*ns\0*db\0*record\0*".to_vec();
+				key.push(0x03);
+				key.extend_from_slice(&(id ^ (1 << 63)).to_be_bytes());
+				print(&key) & 0xffff
+			})
+			.collect();
+		assert!(buckets.len() > 40_000, "{} of 65536 low-bit buckets used", buckets.len());
 	}
 }

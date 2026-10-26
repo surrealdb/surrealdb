@@ -508,6 +508,10 @@ fn int_abs_diff(a: &Number, b: &Number) -> Option<u64> {
 /// `|a − b|` as a float: exact for two integers, taken in floats otherwise.
 #[inline(always)]
 fn abs_diff(a: &Number, b: &Number) -> f64 {
+	// A pair of `Float`s is answered before the per-element widening.
+	if let (Number::Float(a), Number::Float(b)) = (a, b) {
+		return (a - b).abs();
+	}
 	match (a.wide(), b.wide()) {
 		(Wide::Float(a), Wide::Float(b)) => (a - b).abs(),
 		(Wide::Int(a), Wide::Int(b)) => a.abs_diff(b) as f64,
@@ -671,6 +675,11 @@ impl<T: AsNumber> EuclideanDistance for [T] {
 		check_same_dimension("vector::distance::euclidean", self, other)?;
 		Ok(lane_sum(self, other, |a, b| {
 			let (a, b) = (a.as_number(), b.as_number());
+			// A pair of `Float`s, the shape of every stored float vector, is answered before
+			// widening: `wide()` is a match over every number kind, run for each element.
+			if let (Number::Float(a), Number::Float(b)) = (a, b) {
+				return (a - b).powi(2);
+			}
 			match (a.wide(), b.wide()) {
 				(Wide::Float(a), Wide::Float(b)) => (a - b).powi(2),
 				(Wide::Int(a), Wide::Int(b)) => (a.abs_diff(b) as f64).powi(2),

@@ -655,21 +655,18 @@ pub fn lower_bound_expr(
 			}));
 			// The engine folds no value to 0 (and 0/0 to NaN), joins none to the empty string and
 			// no value to NONE for MIN and MAX; SQL answers NULL when the group holds no value at
-			// all, and an array aggregate answers NULL over no row.
+			// all, and an array aggregate answers NULL over no row. `array::min` skips NULL and
+			// NONE and answers NONE where nothing is left, so it witnesses a group with no value
+			// while folding the argument as written: a per-row test inside the fold would keep
+			// the scan from running on the stored row.
 			let empty = match counted {
 				Some(value) => Some(LogicalExpr::Binary {
 					left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {
-						receiver: Function::Normal("count".to_string()),
-						args: vec![LogicalExpr::If(Box::new(LogicalIf {
-							branches: vec![(
-								is_not_null_expr(value),
-								LogicalExpr::Literal(LogicalLiteral::Bool(true)),
-							)],
-							otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
-						}))],
+						receiver: Function::Normal("array::min".to_string()),
+						args: vec![value],
 					}))),
 					op: BinaryOperator::Equal,
-					right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+					right: Box::new(LogicalExpr::Literal(LogicalLiteral::None)),
 				}),
 				None if mapped_fn == "array::collect" => Some(LogicalExpr::Binary {
 					left: Box::new(LogicalExpr::Call(Box::new(LogicalCall {

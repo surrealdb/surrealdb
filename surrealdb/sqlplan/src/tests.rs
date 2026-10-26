@@ -2559,3 +2559,30 @@ fn test_mysql_system_catalog_select_allowed_with_active_database() {
 	};
 	assert!(binder::mysql::bind_select(select, &catalog, &policy, None).is_err());
 }
+
+#[test]
+fn test_sum_and_avg_fold_their_column_as_written() {
+	// The empty-group witness of SUM and AVG folds the bare column: a per-row test inside an
+	// aggregate argument keeps the scan from running on the stored row.
+	let sql = "SELECT city, sum(score), avg(score) FROM record GROUP BY city;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] else {
+		panic!("expected SELECT");
+	};
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let op = lower_bound_select(&bound, &policy).expect("lower failed");
+	let LogicalOp::Project(proj) = op else {
+		panic!("expected LogicalOp::Project, got {op:?}");
+	};
+	let LogicalOp::Aggregate(agg) = &*proj.input else {
+		panic!("expected LogicalOp::Aggregate inside project, got {:?}", proj.input);
+	};
+	let fields = format!("{:?}", agg.fields);
+	assert!(fields.contains("array::min"), "no empty-group witness in {fields}");
+	assert!(
+		!fields.contains("args: [If("),
+		"a per-row test reached an aggregate argument: {fields}"
+	);
+}
