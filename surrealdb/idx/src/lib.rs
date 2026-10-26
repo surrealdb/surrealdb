@@ -1426,6 +1426,12 @@ impl IndexKeyBase {
 		tx.pending_term_change(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term)
 	}
 
+	/// What this transaction has buffered for one document's membership of one
+	/// term: its net change, −1, 0 or +1.
+	fn pending_tt_of(&self, tx: &Transaction, term: &str, doc_id: DocId) -> i64 {
+		tx.pending_term_change_of(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id)
+	}
+
 	/// Buffers one document's contribution to this index's statistics.
 	fn buffer_dx(&self, tx: &Transaction, stats: DocLengthAndCount, nid: Uuid) {
 		tx.buffer_doc_stats(self.0.ns, self.0.db, &self.0.tb, self.0.ix, stats, nid)

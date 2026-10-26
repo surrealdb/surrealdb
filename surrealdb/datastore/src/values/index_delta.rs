@@ -426,6 +426,25 @@ impl IndexDeltaBuffer {
 		(merged.added, merged.removed)
 	}
 
+	/// This transaction's own net change to document `doc_id`'s membership of one
+	/// term: +1 where it gave the document the term, −1 where it took the term
+	/// away, and 0 where it did neither or did both.
+	///
+	/// The change [`Self::pending_term_change`] names for the document, read
+	/// without merging the term's sets: the frames' changes sum in the order the
+	/// frames were opened, held to −1..=+1 at each step as that fold holds them.
+	pub fn pending_term_change_of(&self, term: &BufferedTerm, doc_id: u64) -> i64 {
+		let mut net = 0i64;
+		for frame in self.term_changes.lock().iter() {
+			if let Some(delta) = frame.get(term) {
+				let change = i64::from(delta.added.contains(doc_id))
+					- i64::from(delta.removed.contains(doc_id));
+				net = (net + change).clamp(-1, 1);
+			}
+		}
+		net
+	}
+
 	/// Add one document's length to a full-text index's running statistics.
 	pub fn buffer_doc_stats(&self, index: BufferedIndex, stats: DocLengthAndCount, nid: Uuid) {
 		let mut frames = self.doc_stats.lock();
@@ -1008,6 +1027,60 @@ mod tests {
 			let flushed = buffer.take_term_changes();
 			assert_eq!(flushed.len(), 1);
 			assert_eq!(net(&flushed[0].1, 7), Some(expected), "{parent:?} then {child:?}");
+		}
+	}
+
+	/// One document's change, read alone, is the change the merged sets name for
+	/// it, after every sequence of changes to two documents and save points
+	/// opened, released and rolled back.
+	#[test]
+	fn a_documents_change_read_alone_is_the_merged_change() {
+		#[derive(Clone, Copy, Debug)]
+		enum Step {
+			Add(u64),
+			Remove(u64),
+			Push,
+			Release,
+			Rollback,
+		}
+		const STEPS: [Step; 6] = [
+			Step::Add(7),
+			Step::Remove(7),
+			Step::Add(8),
+			Step::Push,
+			Step::Release,
+			Step::Rollback,
+		];
+		const LENGTH: u32 = 6;
+		for mut code in 0..STEPS.len().pow(LENGTH) {
+			let buffer = IndexDeltaBuffer::new();
+			let mut steps = Vec::new();
+			for _ in 0..LENGTH {
+				let step = STEPS[code % STEPS.len()];
+				code /= STEPS.len();
+				steps.push(step);
+				match step {
+					Step::Add(doc_id) => {
+						let _ = buffer.buffer_term_change(term(), doc_id, true, None, Uuid::nil());
+					}
+					Step::Remove(doc_id) => {
+						let _ = buffer.buffer_term_change(term(), doc_id, false, None, Uuid::nil());
+					}
+					Step::Push => buffer.push_save_point(),
+					Step::Release => buffer.release_save_point(),
+					Step::Rollback => buffer.rollback_save_point(),
+				}
+				let (added, removed) = buffer.pending_term_change(&term());
+				for doc_id in [7, 8, 9] {
+					let merged =
+						i64::from(added.contains(doc_id)) - i64::from(removed.contains(doc_id));
+					assert_eq!(
+						buffer.pending_term_change_of(&term(), doc_id),
+						merged,
+						"document {doc_id} after {steps:?}"
+					);
+				}
+			}
 		}
 	}
 }

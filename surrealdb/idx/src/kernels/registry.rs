@@ -53,9 +53,16 @@ kernels! {
 	DocIdDecodeRecordKey = "docids.decode_record_key";
 	/// The keys and ranges a query reads of one term.
 	FullTextTermReads = "fulltext.term_reads";
-	/// A term's signed per-document changes from its change keys, batches and
-	/// the transaction's buffered changes.
+	/// A term's signed per-document changes from its change keys and batches.
 	FullTextTermDeltas = "fulltext.term_deltas";
+	/// A term's residual added to its per-document changes.
+	FullTextAddResidual = "fulltext.add_residual";
+	/// The changes the reading transaction buffered to a term added to its
+	/// per-document changes.
+	FullTextAddPending = "fulltext.add_pending";
+	/// Whether a document carries a term, from its compacted membership and
+	/// its total change.
+	FullTextCarries = "fulltext.carries";
 	/// A term's document set from its bitmap, residual and changes.
 	FullTextTermDocs = "fulltext.term_docs";
 	/// The documents matching a query from its terms' document sets under a

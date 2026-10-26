@@ -16,10 +16,11 @@
 //!
 //! [`term_reads`] names the keys and ranges of the first three, which the
 //! caller reads; [`term_deltas`] folds the changes into signed per-document
-//! counts and [`term_docs`] applies them, with the residual, to the compacted
-//! documents. A
-//! document belongs to the term when its total is positive; only the sign of a
-//! change matters.
+//! counts, [`add_residual`] and [`add_pending`] add the residual and the
+//! buffered changes to them, and [`term_docs`] applies them to the compacted
+//! documents. A document belongs to the term when its compacted membership plus
+//! its total comes to one or more ([`carries`]); only the sign of a change
+//! matters.
 
 use ahash::HashMap;
 use anyhow::Result;
@@ -77,18 +78,13 @@ pub fn term_reads(ikb: &IndexKeyBase, term: &str, blocks: bool) -> Result<TermRe
 	})
 }
 
-/// One term's uncompacted changes, as its reads answered them and as the
-/// reading transaction buffered them.
+/// One term's uncompacted changes, as its reads answered them.
 pub struct TermChanges<'a> {
 	/// The keys of [`TermReads::changes`].
 	pub change_keys: &'a [Vec<u8>],
 	/// The keys and changes of [`TermReads::batches`], of which a query uses
 	/// the documents.
 	pub batches: &'a [(Vec<u8>, ChangeBatch)],
-	/// The documents the transaction added to the term.
-	pub pending_added: &'a RoaringTreemap,
-	/// The documents the transaction removed from the term.
-	pub pending_removed: &'a RoaringTreemap,
 }
 
 /// The signed per-document count of `changes`.
@@ -112,13 +108,37 @@ pub fn term_deltas(changes: &TermChanges<'_>) -> Result<HashMap<DocId, i64>> {
 			*deltas.entry(doc_id).or_default() += step;
 		}
 	}
-	for doc_id in changes.pending_added {
+	Ok(deltas)
+}
+
+/// Adds a term's `residual` to the per-document counts `deltas`.
+pub fn add_residual(deltas: &mut HashMap<DocId, i64>, residual: &TermDocsResidual) {
+	for (doc_id, count) in residual.counts.iter() {
+		*deltas.entry(*doc_id).or_default() += *count;
+	}
+}
+
+/// Adds the changes the reading transaction buffered to a term to the
+/// per-document counts `deltas`: one for each document it `added` to the term,
+/// minus one for each it `removed`. A document in both sets has no net change.
+pub fn add_pending(
+	deltas: &mut HashMap<DocId, i64>,
+	added: &RoaringTreemap,
+	removed: &RoaringTreemap,
+) {
+	for doc_id in added {
 		*deltas.entry(doc_id).or_default() += 1;
 	}
-	for doc_id in changes.pending_removed {
+	for doc_id in removed {
 		*deltas.entry(doc_id).or_default() -= 1;
 	}
-	Ok(deltas)
+}
+
+/// Whether a document carries a term: its `compacted` membership plus
+/// `change`, the total of its residual and its changes, comes to one or more.
+/// [`term_docs`] holds every document a term's changes name to the same rule.
+pub fn carries(compacted: bool, change: i64) -> bool {
+	i64::from(compacted) + change >= 1
 }
 
 /// The documents carrying a term: its compacted `bitmap` with its `residual`
@@ -129,9 +149,7 @@ pub fn term_docs(
 	mut deltas: HashMap<DocId, i64>,
 ) -> Option<RoaringTreemap> {
 	if let Some(residual) = residual {
-		for (doc_id, count) in residual.counts.iter() {
-			*deltas.entry(*doc_id).or_default() += *count;
-		}
+		add_residual(&mut deltas, residual);
 	}
 	// Applied in doc-id order, so the bitmap is walked forward once for the
 	// additions and once for the removals rather than in hash order.
@@ -367,6 +385,21 @@ mod tests {
 		// The bitmap holds 2, the residual takes one away and the delta puts it
 		// back: the total is zero, so the bitmap's membership stands.
 		assert_eq!(term_docs(Some(set(&[2])), Some(&residual), deltas), Some(set(&[2])));
+	}
+
+	#[test]
+	fn one_document_is_judged_as_its_terms_set_holds_it() {
+		for compacted in [false, true] {
+			for change in -3..=3 {
+				let bitmap = compacted.then(|| set(&[1]));
+				let docs = term_docs(bitmap, None, deltas([(1, change)]));
+				assert_eq!(
+					carries(compacted, change),
+					docs.is_some_and(|docs| docs.contains(1)),
+					"compacted {compacted}, change {change}"
+				);
+			}
+		}
 	}
 
 	#[test]

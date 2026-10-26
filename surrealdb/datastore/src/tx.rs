@@ -11464,6 +11464,39 @@ impl Transaction {
 		}
 	}
 
+	/// This transaction's net change to document `doc_id`'s membership of one
+	/// term, buffered but not yet written: +1 where it gave the document the term,
+	/// −1 where it took it away, 0 otherwise.
+	///
+	/// [`Self::pending_term_change`] for one document, read without building the
+	/// term's sets, so a check of one document costs the same however many the
+	/// transaction has changed.
+	pub fn pending_term_change_of(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		term: &str,
+		doc_id: u64,
+	) -> i64 {
+		match self.index_deltas.get() {
+			Some(buffer) => buffer.pending_term_change_of(
+				&BufferedTerm {
+					index: BufferedIndex {
+						ns,
+						db,
+						tb: tb.clone(),
+						ix,
+					},
+					term: term.to_string(),
+				},
+				doc_id,
+			),
+			None => 0,
+		}
+	}
+
 	/// Add one document's length to a full-text index's running statistics.
 	pub fn buffer_doc_stats(
 		&self,

@@ -20,7 +20,11 @@
 //!    [`first_unregistered_cond_matches`].
 //! 4. A registered expression resolves an index for the row's table:
 //!    - a full-text index on the row's own table whose first column is the idiom → `RecordId →
-//!      DocId` + bitmap check (`get_doc_id()` + `contains_doc()`);
+//!      DocId`, then the document's membership of the query terms as the transaction holds the
+//!      index when the row is judged (`get_doc_id()` + `contains_doc_now()`). The terms are read
+//!      once per table, and a record the statement writes after they were read — the record a
+//!      write's `RETURN` clause projects, say — is judged as its write left it, from the changes
+//!      the transaction has buffered for that document alone;
 //!    - otherwise a record-link traversal (`t.name @@ 'x'` where `t` is a `record<..>`-typed field)
 //!      to a full-text index on the link target table → the idiom's value is evaluated and analyzed
 //!      with the remote index's analyzer, then compared against the query terms
@@ -105,7 +109,8 @@ impl ExecutorTables {
 /// A resolved evaluation strategy for one row table.
 enum MatchTarget {
 	/// Full-text index on the row's own table: check via `RecordId → DocId`
-	/// and the query-term bitmaps.
+	/// and the query terms' document sets, with the changes the transaction has
+	/// buffered for the document since they were read.
 	Local(FullTextIndex, QueryTerms),
 	/// Full-text index on a record-link target table: evaluate the field's
 	/// value and analyze it with the remote index's analyzer.
@@ -447,12 +452,8 @@ impl MatchesEval {
 			// The terms are read through the node's cache, keyed by the table's
 			// catalog version, which the run reads as it reads the version a
 			// compiled unit is kept under.
-			crate::exec::compiles::seam(fti.extract_querying_terms(
-				frozen,
-				&az_fn,
-				query.to_owned(),
-			))
-			.await?
+			crate::exec::compiles::seam(fti.extract_judging_terms(frozen, &az_fn, query.to_owned()))
+				.await?
 		};
 
 		Ok((fti, query_terms))
@@ -560,9 +561,11 @@ impl MatchesEval {
 					return Ok(Value::Bool(false));
 				}
 				let tx = ctx.txn();
-				// Resolve RecordId → DocId, then bitmap check.
+				// Resolve RecordId → DocId, then judge the document as the
+				// transaction holds the index now: a record the statement wrote
+				// after the terms were read is judged as its write left it.
 				let matches = match fti.get_doc_id(&tx, &rid).await? {
-					Some(doc_id) => qt.contains_doc(doc_id, self.operator.operator),
+					Some(doc_id) => fti.contains_doc_now(&tx, qt, doc_id, self.operator.operator),
 					// Record not in the index → doesn't match
 					None => false,
 				};

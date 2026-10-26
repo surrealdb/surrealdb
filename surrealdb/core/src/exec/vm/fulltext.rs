@@ -1870,6 +1870,107 @@ mod tests {
 		);
 	}
 
+	/// A statement that writes reads the query's terms once per run, not once
+	/// per row: scoring, highlighting and locating every record a bulk write
+	/// rewrites reads the terms as often, and reads about as many bytes per
+	/// row, at two table sizes. Reading the terms per row reads each term's
+	/// compacted postings per row, which grow with the table.
+	#[tokio::test]
+	async fn a_scored_write_reads_its_terms_once_per_run() {
+		const STATEMENTS: [&str; 4] = [
+			"UPDATE d SET n = 1 WHERE body @1@ 'hello' RETURN search::score(1) AS s",
+			"UPDATE d SET s = search::score(1) WHERE body @1@ 'hello' RETURN NONE",
+			"UPDATE d SET n = 1 WHERE body @1@ 'hello' \
+			 RETURN search::highlight('<b>', '</b>', 1) AS h, search::offsets(1) AS o",
+			"UPDATE d SET body = 'hello there' WHERE body @1@ 'hello' \
+			 RETURN search::score(1) AS s, search::offsets(1) AS o",
+		];
+		const SMALL: usize = 100;
+		const LARGE: usize = 400;
+		let mut measured = Vec::new();
+		for sql in STATEMENTS {
+			let (small_terms, small) = reads_of_a_write(SMALL, sql).await;
+			let (large_terms, large) = reads_of_a_write(LARGE, sql).await;
+			println!(
+				"{sql}\n  {SMALL} rows: {small_terms} term reads, {} keys, {} bytes, {} gets, {} scans\
+				 \n  {LARGE} rows: {large_terms} term reads, {} keys, {} bytes, {} gets, {} scans",
+				small.keys_read,
+				small.total_bytes_read,
+				small.ops_get,
+				small.ops_scan,
+				large.keys_read,
+				large.total_bytes_read,
+				large.ops_get,
+				large.ops_scan,
+			);
+			measured.push((sql, small_terms, small, large_terms, large));
+		}
+		for (sql, small_terms, small, large_terms, large) in measured {
+			// The scan reads the terms once, and the calls naming the clause once
+			// between them.
+			assert_eq!(small_terms, 2, "{sql}: the terms are read once by the calls");
+			assert_eq!(large_terms, 2, "{sql}: the terms are read once by the calls");
+			// Each row reads its own record and index entries, so the bytes read
+			// grow with the rows by about what a row reads at the smaller size.
+			let per_row = small.total_bytes_read as f64 / SMALL as f64;
+			let per_added_row =
+				(large.total_bytes_read - small.total_bytes_read) as f64 / (LARGE - SMALL) as f64;
+			assert!(
+				per_added_row <= per_row * 1.25,
+				"{sql}: each row reads a bounded number of bytes: {per_row:.0} per row at \
+				 {SMALL} rows, {per_added_row:.0} per added row"
+			);
+		}
+	}
+
+	/// How many times the query's terms are read, and what the transaction
+	/// counts, running the write `sql` in a transaction of its own over `rows`
+	/// compacted documents of `d` carrying `hello` and as many carrying none of
+	/// it.
+	async fn reads_of_a_write(
+		rows: usize,
+		sql: &'static str,
+	) -> (usize, surrealdb_observe::TransactionMetricsSnapshot) {
+		let db = TestDb::quiescent(
+			&format!(
+				"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase; \
+				 DEFINE TABLE d SCHEMALESS; \
+				 DEFINE INDEX d_body ON d FIELDS body FULLTEXT ANALYZER simple BM25 HIGHLIGHTS; \
+				 FOR $i IN 0..{rows} {{ \
+					CREATE type::record('d', $i) SET body = 'hello world' RETURN NONE; \
+					CREATE type::record('d', $i + {rows}) SET body = 'other words' RETURN NONE; \
+				 }};"
+			),
+			false,
+		)
+		.await;
+		crate::kvs::Datastore::index_compaction(
+			std::sync::Arc::clone(db.datastore()),
+			std::time::Duration::from_secs(1),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await
+		.expect("compaction runs");
+		let txn = std::sync::Arc::new(
+			db.datastore()
+				.transaction(crate::kvs::TransactionType::Write)
+				.await
+				.expect("a transaction"),
+		);
+		let session = TestDb::owner();
+		let request = crate::kvs::request::QueryRequest::new(sql, &session)
+			.with_transaction(std::sync::Arc::clone(&txn));
+		crate::exec::function::TERM_READS.with(|reads| reads.set(0));
+		let responses = db.datastore().run(request).await.expect("the request runs");
+		for response in responses {
+			response.result.expect("the write succeeds");
+		}
+		let terms = crate::exec::function::TERM_READS.with(|reads| reads.get());
+		let reads = txn.metrics_snapshot_for_test();
+		txn.cancel().await.expect("the transaction ends");
+		(terms, reads)
+	}
+
 	/// On an index keeping its own doc ids (format 0), a rewrite gives the
 	/// record a new doc id, so the id the scan listed a record with no longer
 	/// names it once the record is rewritten. A statement that writes reads each

@@ -5154,27 +5154,17 @@ async fn run_body(
 										"an index-function step at an index-function instruction"
 									)
 								};
-								if let Some(super::program::IndexBinding::KnnHolds {
-									slot,
-								}) = &program.calls[*call as usize].index
+								if let Some(value) = knn_read(
+									program,
+									state,
+									ctx,
+									*frame,
+									&row,
+									&program.calls[*call as usize],
+								)
+								.await
 								{
-									let distances = state.knn_context(*slot);
-									let eval_ctx = frame_eval(program, state, ctx, *frame);
-									let eval_ctx = row_eval(state, eval_ctx, &row);
-									let record = match eval_ctx.value_in_scope().within_context() {
-										Some(Value::RecordId(rid)) => Some(rid),
-										Some(Value::Object(object)) => match object.get("id") {
-											Some(Value::RecordId(rid)) => Some(rid),
-											_ => None,
-										},
-										_ => None,
-									};
-									let held = match record {
-										Some(rid) => distances.get(rid).await.is_some(),
-										None => false,
-									};
-									regs[*dst as usize] =
-										Scalar::Value(Held::Owned(Value::Bool(held)));
+									regs[*dst as usize] = Scalar::Value(Held::Owned(value));
 									pc = at + 1;
 								} else {
 									let mut args = args
@@ -8164,6 +8154,62 @@ pub(super) async fn host_scalar_in(
 			})
 		}
 	}
+}
+
+/// What the host answers for `spec`, a call bound to a statement's KNN distances, over `row` in
+/// `frame`, or `None` where the function answers it. A `KNN` operator judged per row
+/// ([`IndexBinding::KnnHolds`](super::program::IndexBinding::KnnHolds)) is whether the record has
+/// a distance. `vector::distance::knn()` is answered here only over a row that names no record
+/// while a write has one in flight: that record's distance, or `NONE` where the search found none.
+///
+/// The record is the one the row names: the row itself, or its `id`. A row of a write that names
+/// no record — the post-image of a record a `DELETE` removes, which its `RETURN` clause projects —
+/// is read as the record in flight, so the clause reports the search's result for a record the
+/// write deletes as for any other.
+async fn knn_read(
+	program: &Program,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	frame: Option<u16>,
+	row: &Value,
+	spec: &super::program::CallSpec,
+) -> Option<Value> {
+	let (slot, holds) = match &spec.index {
+		Some(super::program::IndexBinding::KnnHolds {
+			slot,
+		}) => (*slot, true),
+		Some(super::program::IndexBinding::Knn {
+			slot,
+		}) => (*slot, false),
+		_ => return None,
+	};
+	let distances = state.knn_context(slot);
+	let eval_ctx = frame_eval(program, state, ctx, frame);
+	let eval_ctx = row_eval(state, eval_ctx, row);
+	let named = match eval_ctx.value_in_scope().within_context() {
+		Some(Value::RecordId(rid)) => Some(rid),
+		Some(Value::Object(object)) => match object.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid),
+			_ => None,
+		},
+		_ => None,
+	};
+	let record = match (named, holds) {
+		(Some(rid), true) => rid,
+		(Some(_), false) => return None,
+		(None, _) => {
+			match state.write.as_deref().and_then(super::write::WriteState::record_in_flight) {
+				Some(rid) => rid,
+				None if holds => return Some(Value::Bool(false)),
+				None => return None,
+			}
+		}
+	};
+	let distance = distances.get(record).await;
+	Some(match holds {
+		true => Value::Bool(distance.is_some()),
+		false => distance.map_or(Value::None, Value::Number),
+	})
 }
 
 /// `eval_ctx` over `row`, the row the pipeline running over `state` runs

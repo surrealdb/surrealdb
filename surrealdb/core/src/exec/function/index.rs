@@ -245,6 +245,16 @@ pub struct MatchContext {
 	/// its doc id from its mapping, since a rewrite of a record in an index's
 	/// private doc-id space gives it a new one, and its score from its stored
 	/// postings ([`QueryTerms::scored_as_stored`]).
+	///
+	/// A statement that writes reads the terms once too, to judge documents
+	/// ([`FullTextIndex::extract_judging_terms`]), and every call judges against
+	/// the index as the statement has left it when the call runs: which of the
+	/// terms the record carries, how many documents carry each (the idf), and
+	/// the index's document count and total length (the average length), each
+	/// brought up to date from the changes the transaction has buffered since
+	/// the terms were read ([`Scorer::score`]). A call so answers what terms
+	/// read afresh for it would, and scores rows the statement wrote earlier
+	/// against the corpus those writes left.
 	read_only: bool,
 }
 
@@ -424,18 +434,7 @@ impl MatchContext {
 				.await?;
 				#[cfg(test)]
 				TERM_READS.with(|reads| reads.set(reads.get() + 1));
-				let terms = {
-					let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-					// The terms are read through the node's cache, keyed by the
-					// table's catalog version, which the run reads as it reads the
-					// version a compiled unit is kept under.
-					crate::exec::compiles::seam(fti.extract_querying_terms(
-						frozen,
-						&az_fn,
-						self.query.clone(),
-					))
-					.await?
-				};
+				let terms = self.read_terms(ctx.exec_ctx, &fti, self.query.clone()).await?;
 				let extra_terms = self.extra_terms(ctx.exec_ctx, &fti).await?;
 				Ok(Some(FullTextResources {
 					index: fti,
@@ -455,20 +454,33 @@ impl MatchContext {
 		exec_ctx: &crate::exec::ExecutionContext,
 		fti: &FullTextIndex,
 	) -> Result<Vec<QueryTerms>> {
-		let frozen = exec_ctx.ctx();
 		let mut terms = Vec::with_capacity(self.extra_queries.len());
 		for query in &self.extra_queries {
-			let az_fn = StreamingAnalyzerFunction::new(exec_ctx);
-			terms.push(
-				crate::exec::compiles::seam(fti.extract_querying_terms(
-					frozen,
-					&az_fn,
-					query.clone(),
-				))
-				.await?,
-			);
+			terms.push(self.read_terms(exec_ctx, fti, query.clone()).await?);
 		}
 		Ok(terms)
+	}
+
+	/// The terms of `query` as `fti` reads them. In a statement that writes
+	/// ([`Self::read_only`]) they are read to judge documents
+	/// ([`FullTextIndex::extract_judging_terms`]), so every call reading them
+	/// judges and scores a record as the statement has left it by then.
+	async fn read_terms(
+		&self,
+		exec_ctx: &crate::exec::ExecutionContext,
+		fti: &FullTextIndex,
+		query: String,
+	) -> Result<QueryTerms> {
+		let frozen = exec_ctx.ctx();
+		let az_fn = StreamingAnalyzerFunction::new(exec_ctx);
+		// The terms are read through the node's cache, keyed by the table's
+		// catalog version, which the run reads as it reads the version a
+		// compiled unit is kept under.
+		if self.read_only {
+			crate::exec::compiles::seam(fti.extract_querying_terms(frozen, &az_fn, query)).await
+		} else {
+			crate::exec::compiles::seam(fti.extract_judging_terms(frozen, &az_fn, query)).await
+		}
 	}
 
 	/// `terms` as the context holds them: scoring each record from what it
@@ -486,8 +498,10 @@ impl MatchContext {
 	/// that the calls naming the clause read the terms the scan read.
 	///
 	/// `None` where the clause's calls are answered from another index than
-	/// the scan's, or from none ([`Self::covering_index`]): the scan then
-	/// keeps the terms `init` would make to itself, and the calls resolve
+	/// the scan's, or from none ([`Self::covering_index`]), or where the
+	/// statement writes ([`Self::read_only`]), whose calls judge each record
+	/// from terms read to judge documents, which the scan's are not: the scan
+	/// then keeps the terms `init` would make to itself, and the calls resolve
 	/// their own, as they would with no scan.
 	#[cfg_attr(
 		feature = "observability",
@@ -504,6 +518,9 @@ impl MatchContext {
 		Fut: std::future::Future<Output = std::result::Result<(FullTextIndex, QueryTerms), E>>,
 		E: From<anyhow::Error>,
 	{
+		if !self.read_only {
+			return Ok(None);
+		}
 		if let Some(resolved) = self.ft_cache.get() {
 			return Ok(resolved.as_ref().filter(|r| r.index_id == index_id));
 		}

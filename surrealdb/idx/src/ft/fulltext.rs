@@ -97,6 +97,8 @@ pub struct QueryTerms {
 	/// word under an n-gram analyzer, matches a document only when the document
 	/// carries all of them. Each entry is the term strings of one word.
 	groups: Vec<Vec<String>>,
+	/// The terms of each word of `groups`, as indices into `scored`.
+	words: Vec<Vec<usize>>,
 	/// Document sets for each word (RoaringTreemap of document IDs), in the
 	/// order of `groups`: the documents that carry every term of the word, or
 	/// `None` when the word has no document set.
@@ -118,6 +120,109 @@ pub struct QueryTerms {
 	/// The scope the terms were read at, when the node's cache may serve
 	/// this query.
 	scope: Option<crate::ft::cache::TermScope>,
+	/// What each term of `scored` was resolved from beyond its set, in the same
+	/// order, for terms read to judge documents while the reading transaction
+	/// writes ([`FullTextIndex::extract_judging_terms`]): a document it writes
+	/// after the terms were read is judged as it then stands
+	/// ([`QueryTerms::contains_doc_now`]). Empty for any other terms, and for a
+	/// transaction that cannot write, whose terms' sets answer for every
+	/// document.
+	bases: Vec<TermBasis>,
+	/// How many documents carry each term of `scored`, in the same order, as
+	/// the reading transaction held the index when a score last asked
+	/// ([`Self::docs_now`]); `None` for a term no score has asked about. Empty
+	/// until a score of terms with `bases` first asks.
+	counts: parking_lot::Mutex<Vec<Option<TermCount>>>,
+}
+
+/// How many documents carry one term, as the reading transaction held the
+/// index when the count was last brought up to date, with the changes it had
+/// buffered to the term then: a document whose buffered change has not moved
+/// since is counted as it stands now, so bringing the count up to date judges
+/// only the documents whose change has ([`QueryTerms::docs_now`]).
+struct TermCount {
+	added: RoaringTreemap,
+	removed: RoaringTreemap,
+	docs: u64,
+}
+
+/// What one term's document set was resolved from beyond the set itself:
+/// enough to judge one document's membership again once the reading
+/// transaction's buffered change to it has moved.
+///
+/// A document carries the term when its compacted membership plus its total
+/// change comes to one or more ([`kernels::fulltext::carries`]). Within a
+/// transaction only the buffered part of that total moves: the compacted
+/// documents, the residual and the uncompacted changes it reads change when a
+/// transaction commits or a compaction folds them, neither of which a running
+/// transaction observes. The buffered part is flushed when the transaction
+/// commits.
+struct TermBasis {
+	/// The documents the transaction had added to the term and removed from it
+	/// when the terms were read; a document in both had no net change.
+	pending_added: RoaringTreemap,
+	pending_removed: RoaringTreemap,
+	/// Each document's committed change: its residual and its uncompacted
+	/// changes. A document absent has none.
+	committed: ahash::HashMap<DocId, i64>,
+	/// Of the documents whose total change was not zero when the terms were
+	/// read, those the term's compacted documents hold. Every other document's
+	/// compacted membership is its membership of the term's set.
+	compacted: RoaringTreemap,
+}
+
+impl TermBasis {
+	/// The basis of a term whose compacted documents are `compacted` and whose
+	/// per-document totals were `totals`: `committed` with the buffered changes
+	/// `pending_added` and `pending_removed` added.
+	fn new(
+		pending_added: RoaringTreemap,
+		pending_removed: RoaringTreemap,
+		committed: ahash::HashMap<DocId, i64>,
+		compacted: Option<&RoaringTreemap>,
+		totals: &ahash::HashMap<DocId, i64>,
+	) -> Self {
+		let compacted = compacted
+			.map(|compacted| {
+				totals
+					.iter()
+					.filter(|(doc_id, total)| **total != 0 && compacted.contains(**doc_id))
+					.map(|(doc_id, _)| *doc_id)
+					.collect()
+			})
+			.unwrap_or_default();
+		Self {
+			pending_added,
+			pending_removed,
+			committed,
+			compacted,
+		}
+	}
+
+	/// The transaction's net change to document `doc_id`'s membership of the
+	/// term when the terms were read.
+	fn pending(&self, doc_id: DocId) -> i64 {
+		Self::net(&self.pending_added, &self.pending_removed, doc_id)
+	}
+
+	/// The net change to document `doc_id`'s membership of a term that buffered
+	/// changes adding the documents `added` and removing those `removed` name.
+	fn net(added: &RoaringTreemap, removed: &RoaringTreemap, doc_id: DocId) -> i64 {
+		i64::from(added.contains(doc_id)) - i64::from(removed.contains(doc_id))
+	}
+
+	/// Whether document `doc_id`, `resolved` its membership of the term's set,
+	/// carries the term once `pending` stands in for the transaction's net change
+	/// to it when the terms were read.
+	fn carries(&self, doc_id: DocId, pending: i64, resolved: bool) -> bool {
+		let committed = self.committed.get(&doc_id).copied().unwrap_or(0);
+		let compacted = if committed + self.pending(doc_id) == 0 {
+			resolved
+		} else {
+			self.compacted.contains(doc_id)
+		};
+		kernels::fulltext::carries(compacted, committed + pending)
+	}
 }
 
 /// A query's terms, analyzed, and what each reads of the index
@@ -207,6 +312,14 @@ impl QueryPlan {
 	/// term of [`Self::terms`] in the same order. A word's document set is the
 	/// intersection of its terms' sets.
 	pub fn resolve(self, states: Vec<TermState>) -> Result<QueryTerms> {
+		self.resolve_judging(states, false)
+	}
+
+	/// [`Self::resolve`], keeping beside each term's set what the set was
+	/// resolved from where `judging`, so that a document the reading
+	/// transaction writes after the terms were read is judged as it then stands
+	/// ([`QueryTerms::contains_doc_now`]).
+	fn resolve_judging(self, states: Vec<TermState>, judging: bool) -> Result<QueryTerms> {
 		anyhow::ensure!(
 			states.len() == self.terms.len(),
 			"{} term states for {} terms",
@@ -215,26 +328,45 @@ impl QueryPlan {
 		);
 		let mut term_docs = Vec::with_capacity(states.len());
 		let mut term_postings = Vec::with_capacity(states.len());
+		let mut bases = Vec::with_capacity(if judging {
+			states.len()
+		} else {
+			0
+		});
 		let mut bitmaps = false;
 		let mut uncompacted = RoaringTreemap::new();
 		for state in states {
-			let deltas = kernels::fulltext::term_deltas(&kernels::fulltext::TermChanges {
+			let mut committed = kernels::fulltext::term_deltas(&kernels::fulltext::TermChanges {
 				change_keys: &state.change_keys,
 				batches: &state.batches,
-				pending_added: &state.pending_added,
-				pending_removed: &state.pending_removed,
 			})?;
-			uncompacted.extend(deltas.keys().copied());
 			if let Some(residual) = &state.residual {
-				uncompacted.extend(residual.counts.iter().map(|(doc_id, _)| *doc_id));
+				kernels::fulltext::add_residual(&mut committed, residual);
 			}
+			let mut totals = if judging {
+				committed.clone()
+			} else {
+				std::mem::take(&mut committed)
+			};
+			kernels::fulltext::add_pending(
+				&mut totals,
+				&state.pending_added,
+				&state.pending_removed,
+			);
+			uncompacted.extend(totals.keys().copied());
 			bitmaps |= matches!(state.compacted, Compacted::Bitmap(_));
 			term_postings.push(state.compacted.postings());
-			term_docs.push(kernels::fulltext::term_docs(
-				state.compacted.docs(),
-				state.residual.as_ref(),
-				deltas,
-			));
+			let compacted = state.compacted.docs();
+			if judging {
+				bases.push(TermBasis::new(
+					state.pending_added,
+					state.pending_removed,
+					committed,
+					compacted.as_ref(),
+					&totals,
+				));
+			}
+			term_docs.push(kernels::fulltext::term_docs(compacted, None, totals));
 		}
 		let mut docs = Vec::with_capacity(self.groups.len());
 		let mut groups = Vec::with_capacity(self.groups.len());
@@ -270,12 +402,15 @@ impl QueryPlan {
 		Ok(QueryTerms {
 			tokens: self.tokens,
 			groups,
+			words: self.groups,
 			docs,
 			has_unknown_terms,
 			scored,
 			bitmaps,
 			uncompacted,
 			scope: None,
+			bases,
+			counts: parking_lot::Mutex::new(Vec::new()),
 		})
 	}
 }
@@ -447,6 +582,159 @@ impl QueryTerms {
 				.scored
 				.iter()
 				.any(|t| matches!(&t.docs, TermDocs::Own(Some(d)) if d.contains(doc_id)))
+	}
+
+	/// Whether document `doc_id` carries term `at` of `scored`, as its set
+	/// holds it.
+	fn carries_term(&self, at: usize, doc_id: DocId) -> bool {
+		self.docs_of(&self.scored[at]).is_some_and(|docs| docs.contains(doc_id))
+	}
+
+	/// Whether document `doc_id` matches the query under `op`
+	/// ([`Self::contains_doc`]) as the reading transaction holds the index now,
+	/// its own writes since the terms were read included. `pending` answers the
+	/// transaction's net change to the document's membership of a term
+	/// ([`FullTextIndex::contains_doc_now`]).
+	///
+	/// A term whose change stands as it did when the terms were read is judged
+	/// by its set, and any other by what its set was resolved from with the
+	/// change replaced, so the answer is the one terms read now would give, at
+	/// the cost of a lookup per term. Terms that keep nothing beyond their sets
+	/// — any [`FullTextIndex::extract_judging_terms`] did not read, or read for
+	/// a transaction that cannot write — are judged by their sets alone,
+	/// without asking `pending`.
+	pub fn contains_doc_now(
+		&self,
+		doc_id: DocId,
+		op: BooleanOperator,
+		pending: impl FnMut(&str) -> i64,
+	) -> bool {
+		let Some(now) = self.moved(doc_id, pending) else {
+			return self.contains_doc(doc_id, op);
+		};
+		let mut words = self.words_carried(&now);
+		match op {
+			BooleanOperator::And => !self.words.is_empty() && words.all(|carried| carried),
+			BooleanOperator::Or => words.any(|carried| carried),
+		}
+	}
+
+	/// Whether these are terms read to judge documents while the reading
+	/// transaction writes ([`FullTextIndex::extract_judging_terms`]), which judge
+	/// and score a document as the transaction holds the index when they are
+	/// asked about it rather than as it held it when they were read.
+	fn judging(&self) -> bool {
+		!self.bases.is_empty()
+	}
+
+	/// Whether document `doc_id` carries each term of `scored`, in the same
+	/// order, as the reading transaction holds the index now, where its
+	/// membership of any term has moved since the terms were read; `None` where
+	/// none has, so the terms' sets answer for it. `pending` answers the
+	/// transaction's net change to the document's membership of a term, and is
+	/// asked nothing for terms that keep no basis ([`Self::contains_doc_now`]).
+	fn moved(&self, doc_id: DocId, mut pending: impl FnMut(&str) -> i64) -> Option<Vec<bool>> {
+		let mut now: Option<Vec<bool>> = None;
+		for (at, (term, basis)) in self.scored.iter().zip(&self.bases).enumerate() {
+			let change = pending(&term.term);
+			if change == basis.pending(doc_id) {
+				continue;
+			}
+			let resolved = self.carries_term(at, doc_id);
+			let carried = basis.carries(doc_id, change, resolved);
+			if carried != resolved {
+				now.get_or_insert_with(|| {
+					(0..self.scored.len()).map(|at| self.carries_term(at, doc_id)).collect()
+				})[at] = carried;
+			}
+		}
+		now
+	}
+
+	/// Whether document `doc_id` carries each term of `scored`, in the same
+	/// order, as the reading transaction holds the index now ([`Self::moved`]).
+	fn carried_now(&self, doc_id: DocId, pending: impl FnMut(&str) -> i64) -> Vec<bool> {
+		self.moved(doc_id, pending).unwrap_or_else(|| {
+			(0..self.scored.len()).map(|at| self.carries_term(at, doc_id)).collect()
+		})
+	}
+
+	/// Whether a document carrying the terms `carried` marks, one flag per term
+	/// of `scored`, carries each of the query's words: every term of the word.
+	fn words_carried<'a>(&'a self, carried: &'a [bool]) -> impl Iterator<Item = bool> + 'a {
+		self.words.iter().map(move |word| word.iter().all(|at| carried[*at]))
+	}
+
+	/// [`Self::carries_any_term`] as the reading transaction holds the index now
+	/// ([`Self::moved`]).
+	fn carries_any_term_now(&self, doc_id: DocId, pending: impl FnMut(&str) -> i64) -> bool {
+		match self.moved(doc_id, pending) {
+			None => self.carries_any_term(doc_id),
+			Some(now) => now.contains(&true),
+		}
+	}
+
+	/// How many documents carry each term `carried` marks, one flag per term of
+	/// `scored`, as the reading transaction holds the index now; `None` for every
+	/// other term. `pending` answers the transaction's buffered changes to a
+	/// term: the documents it added and those it removed.
+	///
+	/// A term with no basis is counted by its set. Any other term's count is
+	/// kept between calls ([`Self::counts`]): its set's to begin with, then
+	/// brought up to date by judging again only the documents whose buffered
+	/// change has moved since it last was, each as [`Self::moved`] judges it. A
+	/// reader asking after each of a run's writes so judges each written
+	/// document once per change, rather than every document the run has
+	/// written once per ask; it still compares the term's buffered sets whole
+	/// each time, which costs a pass over their containers, not over their
+	/// documents.
+	fn docs_now(
+		&self,
+		carried: &[bool],
+		mut pending: impl FnMut(&str) -> (RoaringTreemap, RoaringTreemap),
+	) -> Vec<Option<u64>> {
+		let mut counts = self.counts.lock();
+		if counts.len() < self.scored.len() {
+			counts.resize_with(self.scored.len(), || None);
+		}
+		let mut docs = Vec::with_capacity(self.scored.len());
+		for (at, (term, carried)) in self.scored.iter().zip(carried).enumerate() {
+			if !*carried {
+				docs.push(None);
+				continue;
+			}
+			let set = self.docs_of(term).map_or(0, RoaringTreemap::len);
+			let Some(basis) = self.bases.get(at) else {
+				docs.push(Some(set));
+				continue;
+			};
+			let count = counts[at].get_or_insert_with(|| TermCount {
+				added: basis.pending_added.clone(),
+				removed: basis.pending_removed.clone(),
+				docs: set,
+			});
+			let (added, removed) = pending(&term.term);
+			let moved = (&added ^ &count.added) | (&removed ^ &count.removed);
+			for doc_id in &moved {
+				let resolved = self.carries_term(at, doc_id);
+				let before = basis.carries(
+					doc_id,
+					TermBasis::net(&count.added, &count.removed, doc_id),
+					resolved,
+				);
+				let after =
+					basis.carries(doc_id, TermBasis::net(&added, &removed, doc_id), resolved);
+				match (before, after) {
+					(false, true) => count.docs += 1,
+					(true, false) => count.docs = count.docs.saturating_sub(1),
+					_ => {}
+				}
+			}
+			count.added = added;
+			count.removed = removed;
+			docs.push(Some(count.docs));
+		}
+		docs
 	}
 
 	/// Whether `tks` holds every term of the word `terms`.
@@ -1166,6 +1454,36 @@ impl FullTextIndex {
 		az_fn: &dyn AnalyzerFunction,
 		query_string: String,
 	) -> Result<QueryTerms> {
+		self.read_terms(env, az_fn, query_string, false).await
+	}
+
+	/// [`Self::extract_querying_terms`] for a reader that judges documents one
+	/// at a time while `env`'s transaction may write to them: where it may, the
+	/// terms keep what each set was resolved from, so that a document it writes
+	/// after the read is judged as it then stands ([`Self::contains_doc_now`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all)
+	)]
+	pub async fn extract_judging_terms(
+		&self,
+		env: &dyn IndexEnv,
+		az_fn: &dyn AnalyzerFunction,
+		query_string: String,
+	) -> Result<QueryTerms> {
+		let judging = env.tx().writeable();
+		self.read_terms(env, az_fn, query_string, judging).await
+	}
+
+	/// The terms of `query_string`, read through `env`'s transaction and
+	/// resolved as [`QueryPlan::resolve_judging`] resolves them.
+	async fn read_terms(
+		&self,
+		env: &dyn IndexEnv,
+		az_fn: &dyn AnalyzerFunction,
+		query_string: String,
+		judging: bool,
+	) -> Result<QueryTerms> {
 		let plan = self.plan_query(az_fn, query_string).await?;
 		let tx = env.tx();
 		let mut states = Vec::with_capacity(plan.reads.len());
@@ -1220,7 +1538,7 @@ impl FullTextIndex {
 			cached,
 			compacted.into_iter().zip(residuals),
 		)?;
-		Ok(plan.resolve(states)?.with_scope(scope))
+		Ok(plan.resolve_judging(states, judging)?.with_scope(scope))
 	}
 
 	pub async fn matches_value(
@@ -2006,10 +2324,25 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(&self.ikb, tx, &rid.key).await
 	}
+
+	/// Whether document `doc_id` matches `qt` under `op` as `tx` holds this
+	/// index now, the changes `tx` has buffered since reading the terms
+	/// included ([`QueryTerms::contains_doc_now`]).
+	pub fn contains_doc_now(
+		&self,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_id: DocId,
+		op: BooleanOperator,
+	) -> bool {
+		qt.contains_doc_now(doc_id, op, |term| self.ikb.pending_tt_of(tx, term, doc_id))
+	}
+
 	pub async fn new_scorer(&self, env: &dyn IndexEnv) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
-			let dlc = self.compute_doc_length_and_count(&env.tx(), None).await?;
-			let sc = Scorer::new(dlc, *bm25);
+			let tx = env.tx();
+			let (committed, _) = collect_committed_doc_length_and_count_for(&tx, &self.ikb).await?;
+			let sc = Scorer::new(committed, self.ikb.pending_dx(&tx), *bm25);
 			return Ok(Some(sc));
 		}
 		Ok(None)
@@ -2017,8 +2350,10 @@ impl FullTextIndex {
 
 	/// Collects compacted root stats plus all visible `!dc` deltas.
 	///
-	/// The root and deltas share a range, so this read is used for query-time
-	/// scoring where the complete statistic is needed.
+	/// The root and deltas share a range, so this read gives the complete
+	/// statistic. Scoring reads the keyspace's part and the transaction's
+	/// buffered part apart ([`Self::new_scorer`]).
+	#[cfg(test)]
 	async fn collect_doc_length_and_count(
 		&self,
 		tx: &Transaction,
@@ -2072,6 +2407,7 @@ impl FullTextIndex {
 		Ok((dlc, deltas, batch.next.is_some() || batched_has_more))
 	}
 
+	#[cfg(test)]
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
@@ -2220,15 +2556,20 @@ impl FullTextIndex {
 	///
 	/// The hits are those of the union of the terms of `qts`: each term once,
 	/// however many of the queries name it, including a term of a word the
-	/// document carries only part of. A document in none of the terms' document
-	/// sets carries none of them, so it is answered without reading its postings.
+	/// document carries only part of. A document carrying none of the terms is
+	/// answered without reading its postings: as `tx` holds the index now for
+	/// terms read to judge documents ([`QueryTerms::carries_any_term_now`]), so a
+	/// document `tx` wrote after reading them is located as it was written, and
+	/// by the terms' document sets for any other terms.
 	async fn term_hits(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
 		qts: &[&QueryTerms],
 	) -> Result<Vec<kernels::fulltext::TermHit>> {
-		if !qts.iter().any(|qt| qt.carries_any_term(doc_id)) {
+		if !qts.iter().any(|qt| {
+			qt.carries_any_term_now(doc_id, |term| self.ikb.pending_tt_of(tx, term, doc_id))
+		}) {
 			return Ok(Vec::new());
 		}
 		let mut hits = Vec::new();
@@ -2698,23 +3039,56 @@ fn round_up(bound: f64) -> f32 {
 
 /// Implements BM25 scoring for relevance ranking of search results
 pub struct Scorer {
+	/// The statistics the scorer was built with: `committed` and `pending`
+	/// together.
 	bm25: kernels::fulltext::Bm25,
+	params: Bm25Params,
+	/// The index's document statistics as the keyspace held them, which the
+	/// reading transaction does not change before it commits.
+	committed: DocLengthAndCount,
+	/// The reading transaction's own buffered contribution to the statistics
+	/// when the scorer was built.
+	pending: DocLengthAndCount,
 }
 
 impl Scorer {
-	/// Creates a new scorer with the specified parameters
-	///
-	/// This method initializes a scorer with document statistics and BM25
-	/// parameters. It calculates the average document length for use in the
-	/// BM25 algorithm.
-	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
+	/// A scorer with the BM25 parameters `params`, weighing documents against
+	/// the statistics `committed` with the reading transaction's buffered
+	/// contribution `pending` added.
+	fn new(committed: DocLengthAndCount, pending: DocLengthAndCount, params: Bm25Params) -> Self {
 		Self {
-			bm25: kernels::fulltext::Bm25::new(
-				bm25.k1,
-				bm25.b,
-				dlc.doc_count,
-				dlc.total_docs_length,
-			),
+			bm25: Self::bm25_of(params, committed, pending),
+			params,
+			committed,
+			pending,
+		}
+	}
+
+	/// The BM25 statistics of the index whose keyspace holds `committed` and
+	/// to which the reading transaction has buffered `pending`.
+	fn bm25_of(
+		params: Bm25Params,
+		committed: DocLengthAndCount,
+		pending: DocLengthAndCount,
+	) -> kernels::fulltext::Bm25 {
+		kernels::fulltext::Bm25::new(
+			params.k1,
+			params.b,
+			committed.doc_count + pending.doc_count,
+			committed.total_docs_length + pending.total_docs_length,
+		)
+	}
+
+	/// The statistics as `tx` holds the index now: the ones the scorer was
+	/// built with, with `tx`'s buffered contribution as it stands now in place
+	/// of the one it held then. The keyspace's part is the scorer's own, as `tx`
+	/// writes none of it before it commits.
+	fn bm25_now(&self, fti: &FullTextIndex, tx: &Transaction) -> kernels::fulltext::Bm25 {
+		let pending = fti.ikb.pending_dx(tx);
+		if pending == self.pending {
+			self.bm25
+		} else {
+			Self::bm25_of(self.params, self.committed, pending)
 		}
 	}
 
@@ -2727,6 +3101,11 @@ impl Scorer {
 	/// A document carrying none of the terms scores zero, answered without
 	/// reading its length or postings: a row another clause of an `OR`
 	/// produced reaches this clause's score that way.
+	///
+	/// Terms read to judge documents while `tx` writes
+	/// ([`FullTextIndex::extract_judging_terms`]) score the document as `tx`
+	/// holds the index now ([`Self::score_now`]); any other terms, as the index
+	/// stood when they and the scorer were read.
 	pub async fn score(
 		&self,
 		fti: &FullTextIndex,
@@ -2734,6 +3113,9 @@ impl Scorer {
 		qt: &QueryTerms,
 		doc_id: DocId,
 	) -> Result<Score> {
+		if qt.judging() {
+			return self.score_now(fti, tx, qt, doc_id).await;
+		}
 		if !qt.carries_any(doc_id) {
 			return Ok(0.0);
 		}
@@ -2748,6 +3130,50 @@ impl Scorer {
 			.ok_or_else(|| anyhow::anyhow!("a document the read did not answer"))?;
 		self.score_loaded(fti, tx, qt, &idfs, doc_id, document.length, document.terms.as_ref())
 			.await
+	}
+
+	/// [`Self::score`] of document `doc_id` against terms read to judge
+	/// documents, as `tx` holds the index now, its own writes since the terms
+	/// and the scorer were read included: the terms the document carries
+	/// ([`QueryTerms::carried_now`]), how many documents carry each of them
+	/// ([`QueryTerms::docs_now`]), the index's document count and total length
+	/// ([`Self::bm25_now`]), and the document's stored length and postings. The
+	/// score is the one terms and a scorer read afresh give the document, bit
+	/// for bit, without reading the terms again.
+	///
+	/// The document is scored from what it stores, never from a posting block,
+	/// which `tx` may have rewritten it since.
+	async fn score_now(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		doc_id: DocId,
+	) -> Result<Score> {
+		let carried = qt.carried_now(doc_id, |term| fti.ikb.pending_tt_of(tx, term, doc_id));
+		if !qt.words_carried(&carried).any(|carried| carried) {
+			return Ok(0.0);
+		}
+		let bm25 = self.bm25_now(fti, tx);
+		let docs = qt.docs_now(&carried, |term| fti.pending_term_changes(tx, term));
+		let idfs: Vec<f64> =
+			docs.iter().map(|docs| docs.map_or(0.0, |docs| bm25.idf(docs as f64))).collect();
+		let documents = Self::stored_documents(fti, tx, qt, &[doc_id]).await?;
+		let document = documents
+			.first()
+			.ok_or_else(|| anyhow::anyhow!("a document the read did not answer"))?;
+		Self::score_stored(
+			&bm25,
+			fti,
+			tx,
+			qt,
+			&idfs,
+			|at| docs[at],
+			doc_id,
+			document.length,
+			document.terms.as_ref(),
+		)
+		.await
 	}
 
 	/// The inverse document frequency of each distinct term of the query, in
@@ -2775,6 +3201,15 @@ impl Scorer {
 		qt: &QueryTerms,
 		doc_ids: &[DocId],
 	) -> Result<Vec<Score>> {
+		// Terms read to judge documents score each as `tx` holds it now, one at
+		// a time.
+		if qt.judging() {
+			let mut scores = Vec::with_capacity(doc_ids.len());
+			for doc_id in doc_ids {
+				scores.push(self.score_now(fti, tx, qt, *doc_id).await?);
+			}
+			return Ok(scores);
+		}
 		let idfs = self.idfs(qt);
 		// A cursor per term into its postings, moved forward by doc ids that
 		// ascend, as a scan lists them.
@@ -2904,30 +3339,50 @@ impl Scorer {
 		doc_length: Option<DocLength>,
 		loaded: Option<&DocumentTerms>,
 	) -> Result<Score> {
+		let carried = |at: usize| {
+			qt.docs_of(&qt.scored[at]).filter(|docs| docs.contains(doc_id)).map(RoaringTreemap::len)
+		};
+		Self::score_stored(&self.bm25, fti, tx, qt, idfs, carried, doc_id, doc_length, loaded).await
+	}
+
+	/// [`Self::score_loaded`] against the statistics `bm25`, where `carried`
+	/// says of each term of [`QueryTerms::scored`], by position, how many
+	/// documents carry it when the document carries it, and `None` when it does
+	/// not. `idfs` holds the idf of each term the document carries.
+	#[allow(clippy::too_many_arguments)]
+	async fn score_stored(
+		bm25: &kernels::fulltext::Bm25,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+		idfs: &[f64],
+		carried: impl Fn(usize) -> Option<u64>,
+		doc_id: DocId,
+		doc_length: Option<DocLength>,
+		loaded: Option<&DocumentTerms>,
+	) -> Result<Score> {
 		let mut sc = 0.0;
 		let doc_length = doc_length.unwrap_or(0) as f64;
 		let Some(doc) = loaded else {
-			for term in &qt.scored {
-				if let Some(docs) = qt.docs_of(term)
-					&& docs.contains(doc_id)
-				{
+			for (at, term) in qt.scored.iter().enumerate() {
+				if let Some(docs) = carried(at) {
 					let frequency = tx
 						.get_key(&fti.ikb.new_td(&term.term, doc_id), None)
 						.await?
 						.map(|td: TermDocument| td.f);
 					if let Some(frequency) = frequency {
-						sc += self.bm25.score(frequency as f64, docs.len() as f64, doc_length)
+						sc += bm25.score(frequency as f64, docs as f64, doc_length)
 					}
 				}
 			}
 			return Ok(sc as f32);
 		};
-		for (term, idf) in qt.scored.iter().zip(idfs) {
-			if !qt.docs_of(term).is_some_and(|docs| docs.contains(doc_id)) {
+		for (at, (term, idf)) in qt.scored.iter().zip(idfs).enumerate() {
+			if carried(at).is_none() {
 				continue;
 			}
 			if let Some(td) = doc.terms.get(term.term.as_str()) {
-				sc += self.bm25.score_with_idf(*idf, td.f, doc_length);
+				sc += bm25.score_with_idf(*idf, td.f, doc_length);
 			}
 		}
 		Ok(sc as f32)
@@ -3011,6 +3466,22 @@ async fn collect_doc_length_and_count_for(
 	tx: &Transaction,
 	ikb: &IndexKeyBase,
 ) -> Result<(DocLengthAndCount, DocStatsDeltaKeys)> {
+	// The keyspace's statistic, then this transaction's own buffered
+	// contribution, which is not written until commit.
+	let (mut dlc, deltas) = collect_committed_doc_length_and_count_for(tx, ikb).await?;
+	let pending = ikb.pending_dx(tx);
+	dlc.doc_count += pending.doc_count;
+	dlc.total_docs_length += pending.total_docs_length;
+	Ok((dlc, deltas))
+}
+
+/// [`collect_doc_length_and_count_for`] without the transaction's own buffered
+/// contribution: what the keyspace holds, which a transaction does not change
+/// before it commits.
+async fn collect_committed_doc_length_and_count_for(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+) -> Result<(DocLengthAndCount, DocStatsDeltaKeys)> {
 	let mut dlc = DocLengthAndCount::default();
 	let prefix = DocStatsKey {
 		ns: ikb.ns(),
@@ -3032,16 +3503,12 @@ async fn collect_doc_length_and_count_for(
 			deltas.legacy.push(DocStatsDeltaKey::decode_key(&k)?.into_owned());
 		}
 	}
-	// The batched deltas an up-to-date server writes, then this transaction's own
-	// buffered contribution, which is not written until commit.
+	// The batched deltas an up-to-date server writes.
 	for (k, st) in tx.getr(ikb.new_dx_range()?, None).await? {
 		dlc.doc_count += st.doc_count;
 		dlc.total_docs_length += st.total_docs_length;
 		deltas.batched.push(DocStatsBatchKey::decode_key(&k)?.into_owned());
 	}
-	let pending = ikb.pending_dx(tx);
-	dlc.doc_count += pending.doc_count;
-	dlc.total_docs_length += pending.total_docs_length;
 	Ok((dlc, deltas))
 }
 
@@ -3084,6 +3551,7 @@ mod tests {
 	};
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
+	use crate::expr::operator::BooleanOperator;
 	#[cfg(feature = "cjk-embed-korean")]
 	use crate::expr::tokenizer::SegmentLanguage;
 	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
@@ -3138,6 +3606,16 @@ mod tests {
 		}
 
 		async fn build(highlight: bool, tokenizers: Vec<Tokenizer>, format_version: u16) -> Self {
+			Self::build_filtered(highlight, tokenizers, None, format_version).await
+		}
+
+		/// As [`Self::build`], with the analyzer's filters chosen by the caller.
+		async fn build_filtered(
+			highlight: bool,
+			tokenizers: Vec<Tokenizer>,
+			filters: Option<Vec<crate::expr::Filter>>,
+			format_version: u16,
+		) -> Self {
 			let ds = TestIndexStore::new().await;
 			let tx = ds.env(TransactionType::Write).await.tx();
 			// `DEFINE ANALYZER test TOKENIZERS blank`, as the definition the
@@ -3147,7 +3625,7 @@ mod tests {
 				name: "test".into(),
 				function: None,
 				tokenizers: Some(tokenizers),
-				filters: None,
+				filters,
 				comment: None,
 			});
 			let az_key = crate::key::schema::AnalyzerKey {
@@ -3466,13 +3944,25 @@ mod tests {
 		/// new document where `old` is `None`, a removal where `new` is.
 		async fn rewrite(&self, rid: &RecordId, old: Option<&str>, new: Option<&str>) {
 			let ctx = self.ds.env(TransactionType::Write).await;
-			let tx = ctx.tx();
+			self.rewrite_within(&ctx, rid, old, new).await;
+			ctx.tx().commit().await.unwrap();
+		}
+
+		/// Rewrites `rid` from `old` to `new` in the transaction `ctx` runs on,
+		/// leaving the change uncommitted.
+		async fn rewrite_within(
+			&self,
+			ctx: &TestIndexEnv,
+			rid: &RecordId,
+			old: Option<&str>,
+			new: Option<&str>,
+		) {
 			let az_fn = NoAnalyzerFunction;
 			let mut require_compaction = false;
 			if let Some(old) = old {
 				self.fti
 					.remove_content(
-						&ctx,
+						ctx,
 						&az_fn,
 						rid,
 						vec![Value::from(old)],
@@ -3484,7 +3974,7 @@ mod tests {
 			if let Some(new) = new {
 				self.fti
 					.index_content(
-						&ctx,
+						ctx,
 						&az_fn,
 						rid,
 						vec![Value::from(new)],
@@ -3493,7 +3983,6 @@ mod tests {
 					.await
 					.unwrap();
 			}
-			tx.commit().await.unwrap();
 		}
 
 		/// Every document's score for `query`, by record, as a read sees it.
@@ -5249,6 +5738,268 @@ mod tests {
 		assert!(dlc.total_docs_length > 0, "the buffered document must carry its length");
 
 		tx.cancel().await.unwrap();
+	}
+
+	/// A document the reading transaction writes after reading a query's terms
+	/// is judged as it then stands ([`FullTextIndex::contains_doc_now`]):
+	/// whatever its committed history, compacted or not, in either format, and
+	/// whatever the transaction wrote to it before the read, it matches the
+	/// query exactly where terms read afresh say it does.
+	#[test(tokio::test)]
+	async fn a_document_written_after_the_terms_were_read_is_judged_as_it_stands() {
+		let az_fn = NoAnalyzerFunction;
+		let query = "hello world";
+		let histories: [&[&str]; 5] =
+			[&[], &["hello"], &["bye"], &["hello", "bye"], &["bye", "hello world"]];
+		let befores = [None, Some("hello world"), Some("bye")];
+		let afters = ["hello", "world", "hello world", "bye"];
+		for format in [
+			crate::catalog::DOC_IDS_FORMAT_VERSION,
+			crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		] {
+			for compacted in [false, true] {
+				let test = TestContext::at_format(format).await;
+				let mut cases = Vec::new();
+				for history in histories {
+					for before in befores {
+						for after in afters {
+							let rid = RecordId::new("t".into(), format!("d{}", cases.len()));
+							cases.push((rid, history, before, after));
+						}
+					}
+				}
+				// Each document's committed history: its first content, folded
+				// into the compacted sets where the round asks, then its second,
+				// left as changes.
+				for (rid, history, ..) in &cases {
+					if let Some(&first) = history.first() {
+						test.rewrite(rid, None, Some(first)).await;
+					}
+				}
+				if compacted {
+					loop {
+						let tx = test.new_tx(TransactionType::Write).await;
+						let more = test.fti.compaction(&tx).await.unwrap();
+						tx.commit().await.unwrap();
+						if !more {
+							break;
+						}
+					}
+				}
+				for (rid, history, ..) in &cases {
+					if let &[first, second] = *history {
+						test.rewrite(rid, Some(first), Some(second)).await;
+					}
+				}
+				// The cases whose answer the write after the read changed.
+				let mut moved = 0;
+				for (rid, history, before, after) in &cases {
+					let case = format!(
+						"{history:?} committed, then {before:?} and {after:?} written, compacted \
+						 {compacted}, format {format}"
+					);
+					let ctx = test.ds.env(TransactionType::Write).await;
+					let tx = ctx.tx();
+					let mut held = history.last().copied();
+					if let Some(before) = *before {
+						test.rewrite_within(&ctx, rid, held, Some(before)).await;
+						held = Some(before);
+					}
+					let read = test
+						.fti
+						.extract_judging_terms(&ctx, &az_fn, query.to_owned())
+						.await
+						.unwrap();
+					test.rewrite_within(&ctx, rid, held, Some(*after)).await;
+					let doc_id =
+						test.fti.get_doc_id(&tx, rid).await.unwrap().expect("an indexed document");
+					let fresh = test
+						.fti
+						.extract_querying_terms(&ctx, &az_fn, query.to_owned())
+						.await
+						.unwrap();
+					for op in [BooleanOperator::And, BooleanOperator::Or] {
+						let now = fresh.contains_doc(doc_id, op);
+						assert_eq!(
+							test.fti.contains_doc_now(&tx, &read, doc_id, op),
+							now,
+							"{op:?}: {case}"
+						);
+						moved += usize::from(read.contains_doc(doc_id, op) != now);
+					}
+					tx.cancel().await.unwrap();
+				}
+				assert!(
+					moved > 0,
+					"no write changed an answer, compacted {compacted}, format {format}"
+				);
+			}
+		}
+	}
+
+	/// Terms read to judge documents score and locate a document as the reading
+	/// transaction holds the index when they are asked, its writes since the
+	/// read included ([`Scorer::score`], [`FullTextIndex::read_offsets_doc`]):
+	/// through a run of rewrites, removals, additions and save points released
+	/// and rolled back, every document gets the score, bit for bit, and the
+	/// offsets that terms and a scorer read afresh give it. So does a document
+	/// the run never writes, whose idf and length normalisation the run's
+	/// writes to others move. In either format, compacted or not, for a query
+	/// of one-term words and for one whose word an n-gram analyzer splits into
+	/// several terms, a document carrying only some of which scores nothing.
+	#[test(tokio::test)]
+	async fn terms_read_to_judge_score_a_document_as_terms_read_afresh() {
+		#[derive(Clone, Copy, Debug)]
+		enum Step {
+			Write(usize, Option<&'static str>),
+			Push,
+			Release,
+			Rollback,
+		}
+		let az_fn = NoAnalyzerFunction;
+		// Each document's committed history: its first content, folded into the
+		// compacted sets where the round asks, then its second, left as changes.
+		let histories: [&[&str]; 6] =
+			[&["hello world"], &["hello"], &["bye"], &["hello", "hello world again"], &[], &[]];
+		let steps = [
+			Step::Write(0, Some("hello")),
+			Step::Write(1, None),
+			Step::Push,
+			Step::Write(4, Some("hello there hello")),
+			Step::Write(3, Some("bye")),
+			Step::Rollback,
+			Step::Push,
+			Step::Write(5, Some("help hello world")),
+			Step::Write(2, Some("world")),
+			Step::Release,
+			Step::Write(1, Some("hello world")),
+			Step::Write(0, Some("help")),
+		];
+		let analyzers: [(Option<Vec<crate::expr::Filter>>, &str); 2] =
+			[(None, "hello world"), (Some(vec![crate::expr::Filter::Ngram(3, 3)]), "hello")];
+		for (filters, query) in analyzers {
+			for format in [
+				crate::catalog::DOC_IDS_FORMAT_VERSION,
+				crate::catalog::FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+			] {
+				for compacted in [false, true] {
+					let test = TestContext::build_filtered(
+						true,
+						vec![Tokenizer::Blank],
+						filters.clone(),
+						format,
+					)
+					.await;
+					let rids: Vec<RecordId> = (0..histories.len())
+						.map(|at| RecordId::new("t".into(), format!("d{at}")))
+						.collect();
+					let mut held: Vec<Option<&str>> = vec![None; rids.len()];
+					for (at, history) in histories.iter().enumerate() {
+						if let Some(&first) = history.first() {
+							test.rewrite(&rids[at], None, Some(first)).await;
+							held[at] = Some(first);
+						}
+					}
+					if compacted {
+						loop {
+							let tx = test.new_tx(TransactionType::Write).await;
+							let more = test.fti.compaction(&tx).await.unwrap();
+							tx.commit().await.unwrap();
+							if !more {
+								break;
+							}
+						}
+					}
+					for (at, history) in histories.iter().enumerate() {
+						if let &[first, second] = *history {
+							test.rewrite(&rids[at], Some(first), Some(second)).await;
+							held[at] = Some(second);
+						}
+					}
+					let ctx = test.ds.env(TransactionType::Write).await;
+					let tx = ctx.tx();
+					// A write before the read, which the terms read.
+					test.rewrite_within(&ctx, &rids[2], held[2], Some("hello")).await;
+					held[2] = Some("hello");
+					let read = test
+						.fti
+						.extract_judging_terms(&ctx, &az_fn, query.to_owned())
+						.await
+						.unwrap()
+						.scored_as_stored();
+					let scorer = test.fti.new_scorer(&ctx).await.unwrap().expect("a BM25 index");
+					let mut saved = Vec::new();
+					let mut first: Vec<Option<u32>> = vec![None; rids.len()];
+					let mut moved = 0;
+					for (done, step) in
+						std::iter::once(None).chain(steps.iter().map(Some)).enumerate()
+					{
+						match step {
+							None => {}
+							Some(Step::Write(at, new)) => {
+								test.rewrite_within(&ctx, &rids[*at], held[*at], *new).await;
+								held[*at] = *new;
+							}
+							Some(Step::Push) => {
+								tx.new_save_point().await.unwrap();
+								saved.push(held.clone());
+							}
+							Some(Step::Release) => {
+								tx.release_last_save_point().await.unwrap();
+								saved.pop();
+							}
+							Some(Step::Rollback) => {
+								tx.rollback_to_save_point().await.unwrap();
+								held = saved.pop().expect("a save point");
+							}
+						}
+						let fresh = test
+							.fti
+							.extract_querying_terms(&ctx, &az_fn, query.to_owned())
+							.await
+							.unwrap()
+							.scored_as_stored();
+						let fresh_scorer =
+							test.fti.new_scorer(&ctx).await.unwrap().expect("a BM25 index");
+						for (at, rid) in rids.iter().enumerate() {
+							let case = format!(
+								"{query:?} filtered by {filters:?}, document {at} holding {:?} \
+								 after {:?}, compacted {compacted}, format {format}",
+								held[at],
+								&steps[..done],
+							);
+							let Some(doc_id) = test.fti.get_doc_id(&tx, rid).await.unwrap() else {
+								continue;
+							};
+							let live = scorer.score(&test.fti, &tx, &read, doc_id).await.unwrap();
+							let now =
+								fresh_scorer.score(&test.fti, &tx, &fresh, doc_id).await.unwrap();
+							assert_eq!(live.to_bits(), now.to_bits(), "{live} vs {now}: {case}");
+							assert_eq!(
+								test.fti
+									.read_offsets_doc(&tx, doc_id, &[&read], false)
+									.await
+									.unwrap(),
+								test.fti
+									.read_offsets_doc(&tx, doc_id, &[&fresh], false)
+									.await
+									.unwrap(),
+								"offsets: {case}"
+							);
+							match first[at] {
+								None => first[at] = Some(live.to_bits()),
+								Some(first) => moved += usize::from(first != live.to_bits()),
+							}
+						}
+					}
+					assert!(
+						moved > 0,
+						"no write moved a score: {filters:?}, compacted {compacted}, format {format}"
+					);
+					tx.cancel().await.unwrap();
+				}
+			}
+		}
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]

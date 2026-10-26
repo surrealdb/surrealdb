@@ -575,7 +575,7 @@ pub(crate) struct State {
 	pub(super) methods: Vec<Option<std::sync::Arc<crate::exec::function::MethodDescriptor>>>,
 	/// The function and index context each of the program's index-function
 	/// [`CallSpec`](super::program::CallSpec)s resolved to, by index, on the
-	/// call's first use in a read-only run. A run that writes keeps none.
+	/// call's first use in the run.
 	pub(super) index_runs: Vec<Option<IndexRun>>,
 	/// The full-text context of each clause the run's index calls and
 	/// full-text scans name, shared by all of them
@@ -1425,13 +1425,13 @@ impl State {
 		if self.index_runs.len() <= at {
 			self.index_runs.resize(at + 1, None);
 		}
-		// A run that writes resolves the call afresh each time, so its context
-		// reads the index as the run's writes left it ([`Self::read_only`]).
-		if self.read_only
-			&& let Some(run) = &self.index_runs[at]
+		if let Some(run) = &self.index_runs[at]
 			&& run.query.as_deref() == query
 		{
 			return Ok(run.clone());
+		}
+		if let Some(superseded) = self.index_runs[at].take() {
+			self.release_match_context(superseded.context);
 		}
 		let function = registry.get_index_function(&spec.name).cloned().ok_or_else(|| {
 			anyhow::anyhow!(
@@ -1481,9 +1481,7 @@ impl State {
 			context,
 			query: query.map(<[String]>::to_vec),
 		};
-		if self.read_only {
-			self.index_runs[at] = Some(run.clone());
-		}
+		self.index_runs[at] = Some(run.clone());
 		Ok(run)
 	}
 
@@ -1495,12 +1493,15 @@ impl State {
 	/// Sharing it is what has the index opened, the query's terms read and the
 	/// scorer built once per run rather than once per reader: `search::score(1)`
 	/// in a projection and again in an `ORDER BY`, and the scan answering the
-	/// clause, read the index once between them.
+	/// clause, read the index once between them; in a run that writes, so do
+	/// the calls of every row it writes.
 	///
-	/// Only a read-only run shares it ([`Self::read_only`]). In a run that
-	/// writes, a reader can follow a write to the index that a context made
-	/// before it would not see, so each asker gets a context of its own, which
-	/// reads the index when it is first used.
+	/// A run that writes shares it too. A reader there can follow a write to
+	/// the index made after the context read it, so the context reads the terms
+	/// to judge documents and every reader judges a record as the run's writes
+	/// have left the index when it reads ([`Self::read_only`],
+	/// [`crate::exec::function::MatchContext`]). Only its scan keeps terms of
+	/// its own ([`Self::scan_match_context`]).
 	pub(super) fn match_context(
 		&mut self,
 		table: &crate::val::TableName,
@@ -1508,13 +1509,12 @@ impl State {
 		query: &str,
 		extra: &[String],
 	) -> std::sync::Arc<crate::exec::function::MatchContext> {
-		if self.read_only
-			&& let Some(shared) = self.match_contexts.iter().find(|ctx| {
-				ctx.table == *table
-					&& ctx.path.as_ref() == path
-					&& ctx.query == query
-					&& ctx.extra_queries == extra
-			}) {
+		if let Some(shared) = self.match_contexts.iter().find(|ctx| {
+			ctx.table == *table
+				&& ctx.path.as_ref() == path
+				&& ctx.query == query
+				&& ctx.extra_queries == extra
+		}) {
 			return std::sync::Arc::clone(shared);
 		}
 		let ctx = std::sync::Arc::new(crate::exec::function::MatchContext::of_path(
@@ -1524,10 +1524,22 @@ impl State {
 			table.clone(),
 			self.read_only,
 		));
-		if self.read_only {
-			self.match_contexts.push(std::sync::Arc::clone(&ctx));
-		}
+		self.match_contexts.push(std::sync::Arc::clone(&ctx));
 		ctx
+	}
+
+	/// Let go of `context`, the context of a call whose query read when it
+	/// runs has changed ([`Self::index_run_for`]): the run stops sharing it
+	/// once no other call, scan or batch holds it, so the run keeps only the
+	/// contexts of the queries its calls are reading now.
+	fn release_match_context(&mut self, context: crate::exec::function::IndexContext) {
+		let crate::exec::function::IndexContext::FullText(ctx) = context else {
+			return;
+		};
+		// One reference is `ctx`, the other the run's own.
+		if std::sync::Arc::strong_count(&ctx) == 2 {
+			self.match_contexts.retain(|held| !std::sync::Arc::ptr_eq(held, &ctx));
+		}
 	}
 
 	/// The context a full-text scan of `index` for `query` shares with the
@@ -1546,8 +1558,9 @@ impl State {
 		index: &crate::catalog::IndexDefinition,
 		query: &str,
 	) -> Option<ScanMatch> {
-		// A run that writes shares no context between its scan and its calls
-		// ([`Self::match_context`]).
+		// A run that writes shares no context between its scan and its calls:
+		// they judge each record from terms read to judge documents, which the
+		// scan's are not ([`crate::exec::function::MatchContext::resources_for_scan`]).
 		if !self.read_only {
 			return None;
 		}

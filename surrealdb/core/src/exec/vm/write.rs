@@ -499,6 +499,12 @@ impl WriteState {
 		self.row.as_mut().ok_or_else(|| internal("a write step with no record in flight"))
 	}
 
+	/// The id of the record in flight, once it has one: the record the write's stages and its
+	/// `RETURN` clause are run for, whatever image they are shown.
+	pub(super) fn record_in_flight(&self) -> Option<&RecordId> {
+		self.row.as_ref()?.id.as_ref()
+	}
+
 	/// The bundle of the stages `named`, a write that may reach any table,
 	/// applies to the records of `ctx`'s table, for the definitions `ctx`
 	/// read: held from an earlier record of the run whose context read the

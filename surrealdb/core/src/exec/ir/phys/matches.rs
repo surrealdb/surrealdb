@@ -446,9 +446,11 @@ pub(crate) fn run(ir: &mut Ir, registry: &FunctionRegistry) {
 
 /// Decides the `MATCHES` operators, `KNN` operators and index function calls of each write's
 /// clauses as a select loop's are decided: the write's `WHERE` is its stage, and its subjects'
-/// source names the executor tables. Only an `UPDATE`, a `DELETE` and an `UPSERT` under a `WHERE`
-/// judge their subjects this way; any other write decides none. An operator or a call a select
-/// loop already decided keeps that decision.
+/// source names the executor tables. The clauses are the regions of the loop over the subjects and
+/// the write's `RETURN` clause, a region of the write op that projects each record as the write
+/// leaves it. Only an `UPDATE`, a `DELETE` and an `UPSERT` under a `WHERE` judge their subjects
+/// this way; any other write decides none. An operator or a call a select loop already decided
+/// keeps that decision.
 fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTable) {
 	let mut writes = Vec::new();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
@@ -489,7 +491,8 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 				searched |= holds_knn(ir, *region);
 			}
 		}
-		let judged = match write_form(ir, write) {
+		let target = write_op(ir, write);
+		let judged = match target.map(|(_, form)| form) {
 			Some(WriteForm::Update | WriteForm::Delete) => true,
 			Some(WriteForm::Upsert) => !conds.is_empty(),
 			Some(WriteForm::Create | WriteForm::Insert | WriteForm::Relate) | None => false,
@@ -499,8 +502,14 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 		}
 		let executor_tables = executor_tables(ir, write, true);
 		let mut held = Held::default();
-		for region in &data.regions {
-			operators_in(ir, registry, *region, &mut held);
+		let returned = target.and_then(|(op, _)| ir.op(op)).into_iter().flat_map(|op| {
+			op.regions.iter().copied().filter(|region| {
+				ir.region(*region)
+					.is_some_and(|held| held.kind == RegionKind::Clause(ClauseRole::ReturnClause))
+			})
+		});
+		for region in data.regions.iter().copied().chain(returned) {
+			operators_in(ir, registry, region, &mut held);
 		}
 		let mut clauses: Vec<Clause> = Vec::new();
 		for op in written {
@@ -550,13 +559,13 @@ fn subjects_scopes(ir: &Ir, registry: &FunctionRegistry, table: &mut MatchesTabl
 	}
 }
 
-/// The form of the write whose loop over its subjects is `write`: the write op that reads the
-/// loop's rows names it.
-fn write_form(ir: &Ir, write: OpId) -> Option<WriteForm> {
+/// The write op that reads the rows of `write`, a write's loop over its subjects, with the form of
+/// the write it names.
+fn write_op(ir: &Ir, write: OpId) -> Option<(OpId, WriteForm)> {
 	let data = ir.op(write)?;
 	data.results.iter().flat_map(|result| ir.uses(*result)).find_map(|held| {
 		match ir.op(held.user).map(|user| &user.kind) {
-			Some(OpKind::Logical(LogOp::Write(attrs))) => Some(attrs.form),
+			Some(OpKind::Logical(LogOp::Write(attrs))) => Some((held.user, attrs.form)),
 			_ => None,
 		}
 	})
