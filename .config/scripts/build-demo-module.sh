@@ -65,6 +65,14 @@ fi
 # The tests pack the demo with the same binary if this script cannot.
 echo "SURREAL_EXT_BIN=$bin" >> "$NEXTEST_ENV"
 
+# Reuse an archive built alongside the nextest archive (placed at
+# `target/demo.surli` by `test-build` in CI) so shards do not recompile the
+# wasm32-wasip2 demo module.
+if [ -s "$root/target/demo.surli" ]; then
+	echo "SURREALISM_DEMO_SURLI=$(cd "$root/target" && pwd -P)/demo.surli" >> "$NEXTEST_ENV"
+	exit 0
+fi
+
 # One directory per run, under the cargo target directory so stale ones are
 # pruned rather than leaked into the system temp directory.
 base="$(dirname "$bin")/surrealism-demo"

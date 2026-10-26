@@ -831,6 +831,11 @@ opt-level = 3
 [profile.dev.package.regex-syntax]
 opt-level = 3
 
+# Equality saturation (`egg::Runner`) runs inside the e-graph planner and its
+# corpus equivalence suites over thousands of queries per test run.
+[profile.dev.package.egg]
+opt-level = 3
+
 # `dev` with optimised workspace code, for binaries CI builds only to execute
 # queries against: the `surreal` server the integration lanes share and the
 # language-test runner. Debug assertions, overflow checks and unwinding stay

@@ -990,12 +990,13 @@ jobs:
   test-build:
     name: Build workspace tests (${{ matrix.arch }})
     needs: changes
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        # ARM on every trigger; amd64 added on merge-queue, push, and scheduled runs.
+        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1015,29 +1016,35 @@ jobs:
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Build Surrealism demo module
+        run: target/debug/surreal-ext build --debug -o target/demo.surli surrealism/demo
+
       - name: Upload workspace test archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: workspace-tests-${{ matrix.arch }}
-          path: target/workspace-tests.tar.zst
+          path: |
+            target/workspace-tests.tar.zst
+            target/demo.surli
+          if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
   test:
-    name: Test workspace (${{ matrix.arch }}, shard ${{ matrix.shard }}/3)
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.docs_only != 'true')
+    name: Test workspace (${{ matrix.arch }}, shard ${{ matrix.shard }}/6)
+    if: (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     needs: [test-build, changes]
     env:
       RUST_MIN_STACK: "8388608" # 8 MiB — some debug tests overflow nextest's default thread stack
       CI_SHARD: ${{ matrix.shard }}
-      CI_SHARDS: "3"
-    # ARM on every trigger; amd64 added only on merge-queue and push to main.
+      CI_SHARDS: "6"
+    # ARM on every trigger; amd64 added on merge-queue, push, and scheduled runs.
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        shard: [1, 2, 3]
+        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'schedule') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1047,20 +1054,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The toolchain and the wasm target stay: the Surrealism tests build the
-      # demo module with cargo when the setup script cannot reuse one.
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
-          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
-          targets: wasm32-wasip2
+          toolchain: stable
 
       - parallel:
-          - name: Install wasm32-wasip2 target
-            run: rustup target add wasm32-wasip2
-
           - name: Install tools
             uses: ./.github/actions/install-tools
             with:

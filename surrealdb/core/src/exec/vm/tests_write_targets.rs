@@ -104,7 +104,7 @@ async fn written(
 	sql: &str,
 	session: &Session,
 ) -> (Result<Value, String>, Vec<String>) {
-	let db = TestDb::new_with_auth(schema).await;
+	let db = TestDb::quiescent(schema, true).await;
 	let results = db.datastore().execute(sql, session, None).await.expect("runs");
 	let mut answers = Vec::new();
 	for result in results {
@@ -143,49 +143,59 @@ async fn written(
 /// answers, and the same records written, guards' side effects included. The
 /// subqueries read no table, so what they name depends neither on who runs them
 /// nor on what the table's records became.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_table_beside_a_subquery_is_gated_as_each_alone() {
-	for (who, session) in principals() {
-		for table in GATED_TABLES {
-			for (mixed, alone) in [
-				// The table's records, and nothing the subquery names.
-				("UPDATE {t}, (SELECT VALUE {t}:1 FROM []) SET n += 1", "UPDATE {t} SET n += 1"),
-				(
-					"UPDATE {t}, (SELECT VALUE {t}:1 FROM []) SET n += 1 WHERE n < 5 RETURN BEFORE",
-					"UPDATE {t} SET n += 1 WHERE n < 5 RETURN BEFORE",
-				),
-				(
-					"DELETE {t}, (SELECT VALUE {t}:1 FROM []) RETURN BEFORE",
-					"DELETE {t} RETURN BEFORE",
-				),
-				// The table's records, then the record the subquery names.
-				(
-					"UPDATE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) SET n += 1",
-					"UPDATE {t} SET n += 1; UPDATE {t}:1 SET n += 1",
-				),
-				(
-					"UPDATE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) SET n += 1 WHERE n < 5 RETURN BEFORE",
-					"UPDATE {t} SET n += 1 WHERE n < 5 RETURN BEFORE;
-					UPDATE {t}:1 SET n += 1 WHERE n < 5 RETURN BEFORE",
-				),
-				(
-					"UPDATE {t}, (SELECT VALUE { id: {t}:1 } FROM ONLY 1) SET m = 1 RETURN AFTER",
-					"UPDATE {t} SET m = 1 RETURN AFTER; UPDATE {t}:1 SET m = 1 RETURN AFTER",
-				),
-				(
-					"DELETE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) RETURN BEFORE",
-					"DELETE {t} RETURN BEFORE; DELETE {t}:1 RETURN BEFORE",
-				),
-			] {
-				let (mixed, alone) = (mixed.replace("{t}", table), alone.replace("{t}", table));
-				assert_eq!(
-					written(GATED_SCHEMA, GATED_TABLES, &mixed, &session).await,
-					written(GATED_SCHEMA, GATED_TABLES, &alone, &session).await,
-					"{who}: `{mixed}` against `{alone}`"
-				);
-			}
-		}
-	}
+	use futures::StreamExt as _;
+
+	const CASES: [(&str, &str); 7] = [
+		// The table's records, and nothing the subquery names.
+		("UPDATE {t}, (SELECT VALUE {t}:1 FROM []) SET n += 1", "UPDATE {t} SET n += 1"),
+		(
+			"UPDATE {t}, (SELECT VALUE {t}:1 FROM []) SET n += 1 WHERE n < 5 RETURN BEFORE",
+			"UPDATE {t} SET n += 1 WHERE n < 5 RETURN BEFORE",
+		),
+		("DELETE {t}, (SELECT VALUE {t}:1 FROM []) RETURN BEFORE", "DELETE {t} RETURN BEFORE"),
+		// The table's records, then the record the subquery names.
+		(
+			"UPDATE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) SET n += 1",
+			"UPDATE {t} SET n += 1; UPDATE {t}:1 SET n += 1",
+		),
+		(
+			"UPDATE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) SET n += 1 WHERE n < 5 RETURN BEFORE",
+			"UPDATE {t} SET n += 1 WHERE n < 5 RETURN BEFORE;
+			UPDATE {t}:1 SET n += 1 WHERE n < 5 RETURN BEFORE",
+		),
+		(
+			"UPDATE {t}, (SELECT VALUE { id: {t}:1 } FROM ONLY 1) SET m = 1 RETURN AFTER",
+			"UPDATE {t} SET m = 1 RETURN AFTER; UPDATE {t}:1 SET m = 1 RETURN AFTER",
+		),
+		(
+			"DELETE {t}, (SELECT VALUE {t}:1 FROM ONLY 1) RETURN BEFORE",
+			"DELETE {t} RETURN BEFORE; DELETE {t}:1 RETURN BEFORE",
+		),
+	];
+
+	let jobs: Vec<_> = principals()
+		.into_iter()
+		.flat_map(|(who, session)| {
+			GATED_TABLES.iter().flat_map(move |&table| {
+				let session = session.clone();
+				CASES.iter().map(move |&(mixed, alone)| {
+					(who, session.clone(), mixed.replace("{t}", table), alone.replace("{t}", table))
+				})
+			})
+		})
+		.collect();
+
+	futures::stream::iter(jobs)
+		.for_each_concurrent(8, |(who, session, mixed, alone)| async move {
+			assert_eq!(
+				written(GATED_SCHEMA, GATED_TABLES, &mixed, &session).await,
+				written(GATED_SCHEMA, GATED_TABLES, &alone, &session).await,
+				"{who}: `{mixed}` against `{alone}`"
+			);
+		})
+		.await;
 }
 
 /// Tables whose clauses a stored record fails and an object naming it, with

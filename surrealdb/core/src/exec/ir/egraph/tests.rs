@@ -4397,13 +4397,102 @@ mod kv {
 	/// With no rule, the seeded run plans what the skip path plans, and the logical-only run
 	/// leaves the container unchanged. Each forced run reaches the planner, and the seeded run
 	/// reaches all-physical extraction: a request path with no physical layer behind it skips
+	/// Worker threads a corpus slice divides its files across. Each worker runs its own
+	/// single-threaded runtime on [`RUNNER_STACK`] so thread-local planning overrides and counters
+	/// stay isolated per worker.
+	const CORPUS_WORKERS: usize = 8;
+
+	/// Runs `step` across the items of `items` on up to [`CORPUS_WORKERS`] threads, each with a
+	/// [`RUNNER_STACK`] stack and its own single-threaded runtime, and returns each worker's
+	/// accumulated state.
+	fn par_corpus_slice<'a, T, Acc, F, Fut>(
+		items: &'a [T],
+		init: impl Fn() -> Acc + Send + Sync,
+		step: F,
+	) -> Vec<Acc>
+	where
+		T: Sync,
+		Acc: Send,
+		F: Fn(Acc, &'a T) -> Fut + Send + Sync,
+		Fut: Future<Output = Acc>,
+	{
+		use std::sync::atomic::{AtomicUsize, Ordering};
+
+		let next = AtomicUsize::new(0);
+		let workers = CORPUS_WORKERS.min(items.len()).max(1);
+		std::thread::scope(|scope| {
+			let mut handles = Vec::with_capacity(workers);
+			for _ in 0..workers {
+				let next = &next;
+				let init = &init;
+				let step = &step;
+				handles.push(
+					std::thread::Builder::new()
+						.stack_size(RUNNER_STACK)
+						.spawn_scoped(scope, move || {
+							tokio::runtime::Builder::new_current_thread()
+								.enable_all()
+								.build()
+								.expect("a runtime")
+								.block_on(async {
+									let mut acc = init();
+									loop {
+										let idx = next.fetch_add(1, Ordering::Relaxed);
+										let Some(item) = items.get(idx) else {
+											break;
+										};
+										acc = step(acc, item).await;
+									}
+									acc
+								})
+						})
+						.expect("a worker thread"),
+				);
+			}
+			handles
+				.into_iter()
+				.map(|h| h.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+				.collect()
+		})
+	}
+
 	/// seeded mode and fails here. Runs the slice `k` of the corpus.
 	fn seed_equals_skip_path(k: usize) {
-		tokio::runtime::Builder::new_current_thread()
-			.enable_all()
-			.build()
-			.expect("a runtime")
-			.block_on(seed_equals_skip_path_body(k));
+		let none = rule_set(&[]);
+		let items = slice(corpus(), k);
+		let totals = par_corpus_slice(
+			&items,
+			|| (0usize, 0usize, 0usize),
+			|(mut planned_seeded, mut planned_logical, mut extracted), (path, text)| async move {
+				let off = {
+					let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(none));
+					planned(text).await
+				};
+				for mode in [EgraphMode::ForceOnSeeded, EgraphMode::ForceOnLogicalOnly] {
+					let before = counts();
+					let on = {
+						let _forced = ForcedPlanning::new(mode, Some(none)).with_limits(UNHURRIED);
+						planned(text).await
+					};
+					let after = counts();
+					if mode == EgraphMode::ForceOnSeeded {
+						planned_seeded += after.planned - before.planned;
+						extracted += after.extracted - before.extracted;
+					} else {
+						planned_logical += after.planned - before.planned;
+					}
+					assert_eq!(on, off, "{path} under {mode:?}");
+				}
+				(planned_seeded, planned_logical, extracted)
+			},
+		);
+		let (planned_seeded, planned_logical, extracted) =
+			totals.into_iter().fold((0usize, 0usize, 0usize), |(ps, pl, ex), (dps, dpl, dex)| {
+				(ps + dps, pl + dpl, ex + dex)
+			});
+		assert!(planned_seeded > 0, "no request reached the e-graph planner in seeded mode");
+		assert!(planned_logical > 0, "no request reached the e-graph planner in logical mode");
+		assert!(extracted > 0, "no seeded run reached all-physical extraction");
 	}
 
 	sliced_tests! {
@@ -4420,35 +4509,6 @@ mod kv {
 		seed_equals_skip_path_09 => 9,
 		seed_equals_skip_path_10 => 10,
 		seed_equals_skip_path_11 => 11,
-	}
-
-	async fn seed_equals_skip_path_body(k: usize) {
-		let none = rule_set(&[]);
-		let (mut planned_seeded, mut planned_logical, mut extracted) = (0usize, 0usize, 0usize);
-		for (path, text) in slice(corpus(), k) {
-			let off = {
-				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(none));
-				planned(&text).await
-			};
-			for mode in [EgraphMode::ForceOnSeeded, EgraphMode::ForceOnLogicalOnly] {
-				let before = counts();
-				let on = {
-					let _forced = ForcedPlanning::new(mode, Some(none)).with_limits(UNHURRIED);
-					planned(&text).await
-				};
-				let after = counts();
-				if mode == EgraphMode::ForceOnSeeded {
-					planned_seeded += after.planned - before.planned;
-					extracted += after.extracted - before.extracted;
-				} else {
-					planned_logical += after.planned - before.planned;
-				}
-				assert_eq!(on, off, "{path} under {mode:?}");
-			}
-		}
-		assert!(planned_seeded > 0, "no request reached the e-graph planner in seeded mode");
-		assert!(planned_logical > 0, "no request reached the e-graph planner in logical mode");
-		assert!(extracted > 0, "no seeded run reached all-physical extraction");
 	}
 
 	/// `answers` with each value the engine generates for a run replaced, so two runs that
@@ -4529,7 +4589,29 @@ mod kv {
 	/// the deterministic corpus as the forced-off run does. A value the engine generates for a run
 	/// is not part of the answer ([`without_generated_ids`]).
 	fn forced_on_answers_equal(k: usize) {
-		on_the_runner_stack(move || forced_on_answers_equal_body(k));
+		let rules = registered();
+		let items = slice(deterministic_corpus(), k);
+		let forced_calls: usize = par_corpus_slice(
+			&items,
+			|| 0usize,
+			|mut forced_calls, (path, text)| async move {
+				let off = {
+					let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(rules));
+					run(text).await
+				};
+				let before = counts();
+				let on = {
+					let _forced = ForcedPlanning::new(EgraphMode::ForceOnLogicalOnly, Some(rules));
+					run(text).await
+				};
+				forced_calls += counts().planned - before.planned;
+				assert_eq!(without_generated_ids(&on), without_generated_ids(&off), "{path}");
+				forced_calls
+			},
+		)
+		.into_iter()
+		.sum();
+		assert!(forced_calls > 0, "no request reached the e-graph planner");
 	}
 
 	sliced_tests! {
@@ -4546,25 +4628,6 @@ mod kv {
 		forced_on_answers_equal_09 => 9,
 		forced_on_answers_equal_10 => 10,
 		forced_on_answers_equal_11 => 11,
-	}
-
-	async fn forced_on_answers_equal_body(k: usize) {
-		let rules = registered();
-		let mut forced_calls = 0usize;
-		for (path, text) in slice(deterministic_corpus(), k) {
-			let off = {
-				let _forced = ForcedPlanning::new(EgraphMode::ForceOff, Some(rules));
-				run(&text).await
-			};
-			let before = counts();
-			let on = {
-				let _forced = ForcedPlanning::new(EgraphMode::ForceOnLogicalOnly, Some(rules));
-				run(&text).await
-			};
-			forced_calls += counts().planned - before.planned;
-			assert_eq!(without_generated_ids(&on), without_generated_ids(&off), "{path}");
-		}
-		assert!(forced_calls > 0, "no request reached the e-graph planner");
 	}
 
 	/// With the registered rules, the logical-only run answers each statement they match as the

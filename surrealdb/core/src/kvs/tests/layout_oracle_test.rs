@@ -1749,7 +1749,7 @@ fn compare(a: &Run, b: &Run, upgraded_only: bool, findings: &mut Vec<Finding>) {
 }
 
 /// The worker threads a slice runs its jobs on, which is also how many jobs it runs at once.
-const WORKERS: usize = 2;
+const WORKERS: usize = 4;
 
 /// Runs the scenarios of slice `k` in every mode and requires every finding to be one [`KNOWN`]
 /// names, and every one it names to occur.

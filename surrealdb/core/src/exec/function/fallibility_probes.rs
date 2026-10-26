@@ -244,6 +244,7 @@ async fn contexts() -> Vec<Context> {
 	let mut out = Vec::new();
 	for (caps_name, caps) in sets {
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(caps)
 			.build_with_path("memory")
 			.await
@@ -363,44 +364,66 @@ fn is_excluded(subject: &Subject) -> bool {
 /// Probes every builtin of `kind` and checks each against its declared class. Fails with every
 /// violation, and with every builtin that could not be probed for want of a corpus.
 async fn probe_kind(kind: FnKind) {
+	use futures::StreamExt as _;
+
+	const WORKERS: usize = 8;
+
 	let registry = FunctionRegistry::with_builtins();
-	let contexts = contexts().await;
+	let all_subjects = subjects(&registry, kind);
+	let chunk_size = all_subjects.len().div_ceil(WORKERS).max(1);
 	let mut violations: Vec<String> = Vec::new();
 	let mut unprobed: BTreeSet<&str> = BTreeSet::new();
 
-	for subject in subjects(&registry, kind) {
-		if is_excluded(&subject) {
-			// Reaching outside the transaction or blocking is `CONTEXT | DATA` at least.
-			if !subject.class.contains(Fallibility::CONTEXT | Fallibility::DATA) {
-				violations.push(format!(
-					"{}: not executed, and its class {:?} omits CONTEXT | DATA",
-					subject.name, subject.class
-				));
-			}
-			continue;
-		}
-		let Some(tuples) = tuples(&subject.signature) else {
-			unprobed.insert(subject.name);
-			continue;
-		};
-		let nondeterministic = subject.effects.intersects(E::ENTROPY | E::CLOCK);
-		for args in tuples {
-			let sql = statement(subject.kind, subject.name, &args);
-			let mut outcomes = Vec::with_capacity(contexts.len());
-			for context in &contexts {
-				outcomes.push(run(context, &sql).await);
-			}
-			let repeat = run(&contexts[0], &sql).await;
-			let probed = Probed {
-				name: subject.name,
-				sql,
-				outcomes,
-				repeat,
-			};
-			if let Some(violation) = check(&subject, nondeterministic, &probed) {
-				violations.push(violation);
-			}
-		}
+	let results: Vec<(BTreeSet<&'static str>, Vec<String>)> =
+		futures::stream::iter(all_subjects.chunks(chunk_size))
+			.map(|chunk| async move {
+				let contexts = contexts().await;
+				let mut worker_unprobed = BTreeSet::new();
+				let mut worker_violations = Vec::new();
+				for subject in chunk {
+					if is_excluded(subject) {
+						// Reaching outside the transaction or blocking is `CONTEXT | DATA` at
+						// least.
+						if !subject.class.contains(Fallibility::CONTEXT | Fallibility::DATA) {
+							worker_violations.push(format!(
+								"{}: not executed, and its class {:?} omits CONTEXT | DATA",
+								subject.name, subject.class
+							));
+						}
+						continue;
+					}
+					let Some(tuples) = tuples(&subject.signature) else {
+						worker_unprobed.insert(subject.name);
+						continue;
+					};
+					let nondeterministic = subject.effects.intersects(E::ENTROPY | E::CLOCK);
+					for args in tuples {
+						let sql = statement(subject.kind, subject.name, &args);
+						let mut outcomes = Vec::with_capacity(contexts.len());
+						for context in &contexts {
+							outcomes.push(run(context, &sql).await);
+						}
+						let repeat = run(&contexts[0], &sql).await;
+						let probed = Probed {
+							name: subject.name,
+							sql,
+							outcomes,
+							repeat,
+						};
+						if let Some(violation) = check(subject, nondeterministic, &probed) {
+							worker_violations.push(violation);
+						}
+					}
+				}
+				(worker_unprobed, worker_violations)
+			})
+			.buffer_unordered(WORKERS)
+			.collect()
+			.await;
+
+	for (worker_unprobed, worker_violations) in results {
+		unprobed.extend(worker_unprobed);
+		violations.extend(worker_violations);
 	}
 
 	assert!(
@@ -457,7 +480,7 @@ fn check(subject: &Subject, nondeterministic: bool, probed: &Probed) -> Option<S
 	}
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scalar_builtins_match_their_declared_fallibility() {
 	probe_kind(FnKind::Scalar).await;
 }

@@ -200,6 +200,37 @@ pub(crate) struct LinkedRead {
 pub(crate) struct LinkedUnit {
 	program: Arc<Program>,
 	steps: std::sync::atomic::AtomicBool,
+	/// The table the unit reads.
+	table: TableName,
+	/// Whether deriving a record of `table` can derive a record again: a
+	/// `COMPUTED` field of it has a body that holds a statement, a closure or a
+	/// call of a user-defined function ([`needs_caller`]). Set from the table's
+	/// definitions by the first read whose body the host runs, so a read the
+	/// unit answers in place looks nothing up.
+	///
+	/// [`needs_caller`]: crate::exec::ir::logical::stages::needs_caller
+	reenters: tokio::sync::OnceCell<bool>,
+}
+
+impl LinkedUnit {
+	/// Set [`Self::reenters`] from the table's definitions, and answer it.
+	async fn learn_reenters(&self, ctx: &ExecutionContext) -> FlowResult<bool> {
+		let reenters = self
+			.reenters
+			.get_or_try_init(|| async {
+				let table = super::descriptor::table_at(ctx, &self.table, ctx.version_stamp())
+					.await
+					.map_err(ControlFlow::Err)?;
+				let reenters = table.fields.iter().any(|field| {
+					field.computed_logical().is_some_and(|body| {
+						body.is_ok_and(crate::exec::ir::logical::stages::needs_caller)
+					})
+				});
+				Ok::<_, ControlFlow>(reenters)
+			})
+			.await?;
+		Ok(*reenters)
+	}
 }
 
 /// The unit that serves a read: one the run loaded, handed on, or kept by
@@ -224,6 +255,14 @@ impl Served<'_> {
 		match self {
 			Served::Linked(linked) => &linked.steps,
 			Served::Met(linked) => &linked.steps,
+		}
+	}
+
+	/// The loaded unit.
+	fn unit(&self) -> &LinkedUnit {
+		match self {
+			Served::Linked(linked) => linked,
+			Served::Met(linked) => linked,
 		}
 	}
 }
@@ -341,6 +380,8 @@ impl Deref {
 				Arc::new(LinkedUnit {
 					program,
 					steps: std::sync::atomic::AtomicBool::new(false),
+					table: table.clone(),
+					reenters: tokio::sync::OnceCell::new(),
 				})
 			}),
 			stamps,
@@ -562,6 +603,23 @@ impl Deref {
 		};
 		#[cfg(test)]
 		HOSTED_READS.with(|hosted| hosted.set(hosted.get() + 1));
+		// A body that can derive a record again spends a unit of the computation-depth budget for
+		// the record, as deriving the fields of a record read without a unit does
+		// ([`crate::exec::operators::scan::pipeline::compute_fields_for_value`]), so a cycle of
+		// derivations ends in the computation-depth error.
+		let unit = served.unit();
+		let reenters = match unit.reenters.get() {
+			Some(reenters) => *reenters,
+			None => super::host::out_of_line(|| unit.learn_reenters(ctx)).await?,
+		};
+		let dived;
+		let ctx = match reenters {
+			true => {
+				dived = ctx.dive().map_err(ControlFlow::Err)?;
+				&dived
+			}
+			false => ctx,
+		};
 		host_frames(program, &mut state, ctx);
 		// The body derives the record's computed fields, which may dereference a link and so reach
 		// this read again. It runs as a nested evaluation of the statement's driver

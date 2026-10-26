@@ -20,24 +20,19 @@ global-timeout = "40m"
 # keyspace on entry, and their `#[serial_test::serial]` only serialises within
 # one process, which nextest does not share between tests.
 [[profile.default.overrides]]
-filter = 'test(tikv::) + test(tikv_concurrency::) + package(surrealdb-kvs-tikv)'
+filter = 'test(tikv) | package(surrealdb-kvs-tikv) | binary(kvs)'
 test-group = 'serial-kvs'
 
 # The slices of the layout oracle (`layout_oracle_00` …) each judge a share of its scenarios over
-# in-memory datastores, so they share nothing with the engine tests of `kvs::tests::` and run beside
-# the serial group, not in it. A slice runs two worker threads, so it holds two of the runner's
-# slots. The slices start ahead of the short tests so none of them is still running when the
-# shard's other tests are done. This override precedes the group's, which would claim them.
+# in-memory datastores. A slice runs four worker threads, so it holds four of the runner's slots.
+# The slices start ahead of the short tests so none of them is still running when the shard's
+# other tests are done.
 [[profile.default.overrides]]
 filter = 'test(/kvs::tests::layout_oracle_test::layout_oracle_[0-9]+$/)'
 test-group = '@global'
-threads-required = 2
+threads-required = 4
 slow-timeout = "300s"
 priority = 100
-
-[[profile.default.overrides]]
-filter = 'test(kvs::tests::)'
-test-group = 'serial-kvs'
 
 [[profile.default.overrides]]
 filter = 'test(idx::trees::hnsw::tests::)'
@@ -51,13 +46,22 @@ filter = 'test(trees::diskann::index::tests::diskann_recall_)'
 threads-required = 2
 slow-timeout = "120s"
 
-# Each slice of a corpus test runs its share of the language-test files through the planner, which
-# takes minutes in a debug build. Expected to be slow rather than stuck. The slices start ahead of
-# the short tests so none of them is still running when the shard's other tests are done.
+# Each slice of a corpus test runs its share of the language-test files through the planner across
+# worker threads. Expected to be slow rather than stuck. The slices start ahead of the short
+# tests so none of them is still running when the shard's other tests are done.
 [[profile.default.overrides]]
 filter = 'test(/(egraph::tests::kv::(seed_equals_skip_path|forced_on_answers_equal)|dbs::read_only_test::vm::access_mode_read_write_implies_not_read_only)_[0-9]+$/)'
+threads-required = 8
 slow-timeout = "300s"
-priority = 50
+priority = 100
+
+# Corpus-wide write-target gating and scalar-builtin fallibility suites fan out across worker
+# threads and start at the front of their shard.
+[[profile.default.overrides]]
+filter = 'test(/exec::(vm::tests_write_targets::a_table_beside_a_subquery_is_gated_as_each_alone|function::fallibility_probes::scalar_builtins_match_their_declared_fallibility)$/)'
+threads-required = 8
+slow-timeout = "300s"
+priority = 100
 
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'

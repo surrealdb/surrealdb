@@ -191,14 +191,14 @@ mod surrealism_integration {
 	}
 
 	fn build_demo_dir() -> DemoModuleDir {
-		let target = "wasm32-wasip2";
-		if !has_wasm_target(target) {
-			panic!("{target} target not installed — install with: rustup target add {target}");
-		}
 		let tmp = tempfile::TempDir::new().expect("Failed to create temp dir for demo module");
 		let canonical =
 			std::fs::canonicalize(tmp.path()).expect("Failed to canonicalize temp dir path");
 		if !copy_prebuilt_demo(&canonical) {
+			let target = "wasm32-wasip2";
+			if !has_wasm_target(target) {
+				panic!("{target} target not installed — install with: rustup target add {target}");
+			}
 			build_and_pack_demo(&canonical);
 		}
 		repack_without_localhost(&canonical);
