@@ -33,7 +33,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 
 use super::ctx::{TableExistence, WriteCtx};
 use crate::exec::ExecutionContext;
@@ -91,6 +91,13 @@ pub(crate) struct WriteScope {
 	/// Whether the statement's own form requires its table to exist.
 	existence: TableExistence,
 	/// The write contexts resolved so far.
+	///
+	/// Every record a statement writes looks its context up here, from the statement's task and
+	/// from every worker computing a batch of its records, all at once. The lock is held for the
+	/// lookup alone and never across an await, so it is a blocking lock. An async mutex hands
+	/// itself to the next waiter on release, and a waiter woken by a task on a runtime worker runs
+	/// only once that task yields, holding the lock meanwhile: the workers would take their
+	/// records one at a time.
 	contexts: Mutex<ResolvedContexts>,
 	/// The contexts earlier runs of the same statement resolved, whose
 	/// catalog reads this one takes; `None` for a statement run once.
@@ -152,7 +159,7 @@ impl WriteScope {
 	) -> Result<Arc<WriteCtx>, ControlFlow> {
 		// A context is resolved once per run: within one the catalog changes only by what the
 		// statement itself defines, which applies to none of the records it writes.
-		if let Some(resolved) = self.cached_ctx(table, purpose).await {
+		if let Some(resolved) = self.cached_ctx(table, purpose) {
 			return Ok(resolved);
 		}
 		let (exec, existence) = match purpose {
@@ -191,7 +198,7 @@ impl WriteScope {
 		};
 		resolved.scope = Arc::downgrade(self);
 		let resolved = Arc::new(resolved);
-		let mut contexts = self.contexts.lock().await;
+		let mut contexts = self.contexts.lock();
 		// Resolution awaits, so a nested write may have published the same
 		// entry meanwhile. Its context is as good as this one and is the one
 		// already in use, so it wins and this one is dropped.
@@ -204,8 +211,8 @@ impl WriteScope {
 		Ok(resolved)
 	}
 
-	async fn cached_ctx(&self, table: &TableName, purpose: WritePurpose) -> Option<Arc<WriteCtx>> {
-		let contexts = self.contexts.lock().await;
+	fn cached_ctx(&self, table: &TableName, purpose: WritePurpose) -> Option<Arc<WriteCtx>> {
+		let contexts = self.contexts.lock();
 		contexts
 			.iter()
 			.find(|((t, p), _)| t == table && *p == purpose)
