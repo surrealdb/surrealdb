@@ -7,7 +7,6 @@ imports = ["gql/_schema.surql"]
 
 [env.capabilities]
 allow-eval-query = ["system"]
-allow-experimental = ["gql"]
 
 [test]
 reason = "eval::gql runs an ISO GQL query from within SurrealQL, in the same transaction"

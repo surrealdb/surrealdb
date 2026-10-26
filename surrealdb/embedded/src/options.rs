@@ -382,7 +382,7 @@ mod tests {
 			r#"{"capabilities":false}"#,
 			r#"{"capabilities":{"functions":["http::get"]}}"#,
 			r#"{"capabilities":{"network_targets":{"allow":true,"deny":["example.com"]}}}"#,
-			r#"{"capabilities":{"experimental":["files","gql"]}}"#,
+			r#"{"capabilities":{"experimental":["files","surrealism"]}}"#,
 			r#"{"capabilities":{"planner_strategy":"compute-only"}}"#,
 		] {
 			capabilities_from(json).unwrap_or_else(|e| panic!("{json} should convert: {e:#}"));

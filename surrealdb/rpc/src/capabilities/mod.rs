@@ -116,7 +116,6 @@ impl std::str::FromStr for FuncTarget {
 pub enum ExperimentalTarget {
 	Files,
 	Surrealism,
-	Gql,
 	/// `POST /kvexport`, which serves the stored bytes of the whole keyspace.
 	KvExport,
 }
@@ -126,7 +125,6 @@ impl fmt::Display for ExperimentalTarget {
 		match self {
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
-			Self::Gql => write!(f, "gql"),
 			Self::KvExport => write!(f, "kvexport"),
 		}
 	}
@@ -143,7 +141,6 @@ impl Target<str> for ExperimentalTarget {
 		match self {
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
-			Self::Gql => elem.eq_ignore_ascii_case("gql"),
 			Self::KvExport => elem.eq_ignore_ascii_case("kvexport"),
 		}
 	}
@@ -172,7 +169,6 @@ impl std::str::FromStr for ExperimentalTarget {
 		match s.trim().to_ascii_lowercase().as_str() {
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
-			"gql" => Ok(ExperimentalTarget::Gql),
 			"kvexport" => Ok(ExperimentalTarget::KvExport),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
@@ -1281,22 +1277,17 @@ mod tests {
 			ExperimentalTarget::from_str("surrealism").unwrap(),
 			ExperimentalTarget::Surrealism
 		);
-		assert_eq!(ExperimentalTarget::from_str("gql").unwrap(), ExperimentalTarget::Gql);
-		assert_eq!(ExperimentalTarget::from_str("GQL").unwrap(), ExperimentalTarget::Gql);
-		// The retired `opengql` spelling must no longer parse.
+		// GQL is not an experimental target, under either spelling.
+		ExperimentalTarget::from_str("gql").unwrap_err();
 		ExperimentalTarget::from_str("opengql").unwrap_err();
 		ExperimentalTarget::from_str("").unwrap_err();
 
-		assert_eq!(ExperimentalTarget::Gql.to_string(), "gql");
+		assert_eq!(ExperimentalTarget::Files.to_string(), "files");
 		assert_eq!(
-			ExperimentalTarget::from_str(&ExperimentalTarget::Gql.to_string()).unwrap(),
-			ExperimentalTarget::Gql
+			ExperimentalTarget::from_str(&ExperimentalTarget::Surrealism.to_string()).unwrap(),
+			ExperimentalTarget::Surrealism
 		);
-
-		assert!(ExperimentalTarget::Gql.matches("gql"));
-		assert!(ExperimentalTarget::Gql.matches("GQL"));
-		assert!(!ExperimentalTarget::Gql.matches("files"));
-		assert!(!ExperimentalTarget::Files.matches("gql"));
+		assert!(!ExperimentalTarget::Files.matches("surrealism"));
 
 		assert_eq!(ExperimentalTarget::from_str("kvexport").unwrap(), ExperimentalTarget::KvExport);
 		assert_eq!(ExperimentalTarget::KvExport.to_string(), "kvexport");

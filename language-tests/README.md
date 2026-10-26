@@ -106,7 +106,7 @@ Each flag mirrors a setting in the harness's `Datastore::builder()`:
 | Server flag / env | Mirrors (embedded) | Why it's needed |
 |---|---|---|
 | `--allow-all` | `Capabilities::all()` | scripting, all functions, net, guests, arbitrary query |
-| `--allow-experimental '*'` | `.with_experimental(Targets::All)` | `files`, `surrealism`, `gql`. **Startup-only**, not implied by `--allow-all`. Without it `.gql` tests report a clear `/gql` HTTP error. |
+| `--allow-experimental '*'` | `.with_experimental(Targets::All)` | `files`, `surrealism`, `kvexport`. **Startup-only**, not implied by `--allow-all`. |
 | `--temporary-directory <dir>` | `.with_temporary_directory(..)` | `... ORDER BY .. TEMPFILES` routes through `ExternalSortByKey` |
 | `SURREAL_FILE_ALLOWLIST=<abs tests dir>` | `file_allowlist = "../tests"` | `DEFINE ANALYZER .. mapper('<path>')` and file functions reading under `tests/` |
 | `--no-defaults` | (core datastore has no default ns/db) | the embedded datastore has no `main` namespace, so `INFO FOR ROOT` matches |

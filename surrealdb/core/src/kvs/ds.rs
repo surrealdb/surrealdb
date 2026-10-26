@@ -12478,24 +12478,6 @@ pub(crate) mod test {
 
 	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn gql_is_available_without_the_experimental_capability() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ses = Session::owner().with_ns("test").with_db("test");
-		// GQL is on by default: it must not be refused as an experimental
-		// capability (any other error — e.g. missing namespace — is irrelevant).
-		if let Err(err) =
-			ds.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) RETURN n"), &ses)).await
-		{
-			assert!(
-				!err.to_string().contains("Experimental capability `gql` is not enabled"),
-				"GQL was still gated: {err}"
-			);
-		}
-		Ok(())
-	}
-
-	#[cfg(feature = "gql")]
-	#[tokio::test]
 	async fn gql_text_parses_lowers_and_executes() -> Result<()> {
 		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::builder()

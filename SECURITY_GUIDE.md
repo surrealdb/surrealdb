@@ -1251,7 +1251,7 @@ Flag when changes touch:
 - `client_ip` module (header sources, proxy validation)
 - GraphQL service, schema construction, or executor configuration
 - The `/gql` GQL endpoint (`ntw/gql.rs`: route, body-size limit, and the
-  `RouteTarget::Gql` / `ExperimentalTarget::Gql` capability gates)
+  `RouteTarget::Gql` capability gate)
 - Error formatting or `ResponseError` implementation
 - Authentication middleware (which endpoints are gated)
 - Body-size limit constants or `RequestBodyLimitLayer` application
@@ -1383,8 +1383,7 @@ Flag when changes touch:
 - CBOR deserialization path, JSON parsing, or FlatBuffers decoding
 - WebSocket serve/read/handle_message functions
 - RPC dispatch table (new methods, modified signatures)
-- The `gql` RPC method (GQL: must keep `allows_query_by_subject` and the
-  `ExperimentalTarget::Gql` gate in `Datastore::parse_gql`)
+- The `gql` RPC method (GQL: must keep `allows_query_by_subject`)
 - Transaction methods (begin/commit/cancel) or transaction map
 - The streaming driver (`rpc/streaming.rs`), the stream registry, or the
   `query_stream`/`query_cancel` methods
@@ -2181,11 +2180,6 @@ invariants.
 
   A new selection point that assigns the dialect directly, or an execution path
   that skips the per-query re-check, is a regression.
-
-  One gap in the chain is known and unclosed: GQL is **not** gated on
-  `ExperimentalTarget::Gql` — neither `Datastore::parse_gql` nor
-  `gql::parse_with_capabilities` checks it, and a test pins that GQL stays
-  reachable without it.
 - **Resource bounds.** The path-expansion and join operators must enforce row-count
   ceilings: `SURREAL_GQL_MAX_PATH_ROWS` (default 1,000,000) bounds live+emitted
   rows in `PathExpand` **per source row** (the counter resets for each input row,
@@ -2269,10 +2263,9 @@ Flag when changes touch:
 - `exec/operators/scan/fetch.rs` or any binding-fetch call site (a switch to
   `resolve_record_batch`, or a new fetch path that bypasses FieldState, is a
   field-permission leak)
-- The gate chain: `ExperimentalTarget::Gql`, `RouteTarget::Gql`, the `gql`
+- The gate chain: `RouteTarget::Gql`, the `gql`
   `MethodTarget`, `allows_query_by_subject` in the `gql` RPC method, the
-  `eval::gql` gates in `fnc/eval.rs`, or the experimental check in
-  `Datastore::parse_gql`
+  `eval::gql` gates in `fnc/eval.rs`
 - `pgwire/conn.rs` dialect gating: `Connection::select_dialect` must stay the only
   assignment to the connection's dialect, and both selection points
   (`dialect_from_options` at startup, `SET dialect` in session) must route
