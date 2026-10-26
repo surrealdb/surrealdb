@@ -1028,12 +1028,15 @@ pub(crate) enum CountShape {
 		output: CountOutput,
 	},
 	/// The records of a table a condition admits, counted from a `COUNT` index when the table has
-	/// one, else by walking the keys of `btree`, else as the exact cardinality of `bitmap`. Both
-	/// payloads are boxed, so a count of a source stays as small as its source shape.
+	/// one, else by walking the keys of the accesses of `btree`, else as the exact cardinality of
+	/// `bitmap`. The accesses of `btree` are record-disjoint, so the count is the sum of their key
+	/// counts: one access for a condition one walk covers, one per value of an `IN` list or per
+	/// branch of an `OR` whose branches no record can satisfy together. Both payloads are boxed,
+	/// so a count of a source stays as small as its source shape.
 	Indexed {
 		table: TableName,
 		output: CountOutput,
-		btree: Option<Box<(IndexRef, crate::exec::index::access_path::BTreeAccess)>>,
+		btree: Option<Box<[(IndexRef, crate::exec::index::access_path::BTreeAccess)]>>,
 		bitmap: Option<Box<BitmapShape>>,
 	},
 }
@@ -1045,6 +1048,8 @@ pub(crate) struct CountAttrs {
 	pub(crate) select: CountSelect,
 	/// The `COUNT` index whose deltas the count reads, when it reads them.
 	pub(crate) deltas: Option<IndexId>,
+	/// The paging of a subquery whose rows the count stands for, applied to what it counts.
+	pub(crate) cap: Option<crate::exec::vm::payload::CountCap>,
 }
 
 // ---------------------------------------------------------------------------------------------

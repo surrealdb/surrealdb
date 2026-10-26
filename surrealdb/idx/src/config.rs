@@ -79,6 +79,10 @@ pub struct IdxConfig {
 	/// `auto`, `serial` or a task count. Batches that remove vectors always
 	/// apply serially. (default: auto)
 	pub hnsw_build_parallelism: BuildParallelism,
+	/// How many batches the initial scan of a B-tree index build indexes at
+	/// once, each in a transaction of its own: `auto`, `serial` or a task
+	/// count. `auto` uses the available parallelism, up to 16. (default: auto)
+	pub index_build_parallelism: BuildParallelism,
 	/// The maximum total size of the DiskANN ANN cache (default: 256 MiB)
 	pub diskann_cache_size: u64,
 	/// How many search-list nodes a DiskANN kNN walk expands per hop. Each
@@ -146,6 +150,7 @@ impl Default for IdxConfig {
 			table_doc_ids_batch_size: 1000,
 			hnsw_cache_size: 256 * 1024 * 1024,
 			hnsw_build_parallelism: BuildParallelism::Auto,
+			index_build_parallelism: BuildParallelism::Auto,
 			diskann_cache_size: 256 * 1024 * 1024,
 			diskann_search_beam_width: 1,
 			diskann_quantized_search: true,
@@ -166,6 +171,7 @@ impl cnf::Config for IdxConfig {
 		map.parse_key("table_doc_ids_batch_size", &mut self.table_doc_ids_batch_size)
 			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
 			.parse_key("hnsw_build_parallelism", &mut self.hnsw_build_parallelism)
+			.parse_key("index_build_parallelism", &mut self.index_build_parallelism)
 			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
 			.parse_key("diskann_search_beam_width", &mut self.diskann_search_beam_width)
 			.parse_key("diskann_quantized_search", &mut self.diskann_quantized_search)

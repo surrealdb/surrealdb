@@ -42,8 +42,10 @@ use super::ops::{CountAttrs, CountShape, PhysOp};
 use crate::catalog::{Index, IndexId};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
-	BTreeAccess, IndexRef as AccessIndexRef, access_fans_out, range_matches_comparison,
+	AccessPath, BTreeAccess, BoundOperand, IndexRef as AccessIndexRef, access_fans_out,
+	range_matches_comparison,
 };
+use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::index::derived_columns::{guard_counts, range_is_widened};
 use crate::exec::ir::build::phys::{bitmap_shape, index_ref};
 use crate::exec::ir::core::facts::FactCache;
@@ -64,9 +66,11 @@ use crate::exec::ir::logical::ops::{
 use crate::exec::ir::op_kind::{OpKind, Terminator};
 use crate::exec::operators::scan::CountOutput;
 use crate::exec::planner::util::strip_index_conditions_in;
-use crate::exec::vm::payload::CountSelect;
+use crate::exec::vm::payload::{CountCap, CountSelect};
+use crate::expr::BinaryOperator;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::with::With;
+use crate::kvs::Direction;
 
 /// The statement shape a count replaces, found in the logical dialect.
 struct Matched {
@@ -86,6 +90,24 @@ struct Matched {
 	with: Option<With>,
 	/// The shape of the counted row.
 	output: CountOutput,
+	/// The subquery that pages the select, when the aggregate counts its rows.
+	paged: Option<Paged>,
+}
+
+/// A select paged by a subquery whose rows an aggregate counts:
+/// `SELECT count() FROM (SELECT <literals> FROM <source> [WHERE <cond>] [START s] LIMIT n) GROUP
+/// ALL`.
+///
+/// The subquery yields one row per record the select reads, up to its paging, and its projection
+/// of literals can neither fail nor drop a row, so the aggregate counts what the paging keeps of
+/// the count of the select's records.
+struct Paged {
+	/// The `logical.subquery` that holds the select, its paging and its projection.
+	subquery: OpId,
+	/// The loop that reads the subquery's rows for the aggregate.
+	outer_loop: OpId,
+	/// The literal paging.
+	cap: CountCap,
 }
 
 /// What [`offer`] decided for one statement.
@@ -123,6 +145,11 @@ pub(super) fn offer(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Resu
 			continue;
 		};
 		if let Some(decision) = decide(ir, &matched, cx)? {
+			// The plan beside a count under a conditional permission is the statement the
+			// aggregate heads, which a paged count does not copy.
+			if matched.paged.is_some() && decision.select == CountSelect::Conditional {
+				continue;
+			}
 			decided.push((matched, decision));
 		}
 	}
@@ -177,15 +204,36 @@ fn matched(ir: &Ir, aggregate: OpId) -> Option<Matched> {
 	else {
 		return None;
 	};
-	let source = producer(ir, *source_rows)?;
-	let source_data = ir.op(source)?;
-	let OpKind::Logical(LogOp::Source(attrs)) = &source_data.kind else {
-		return None;
-	};
-	if attrs.for_update || ir.uses(*source_rows).len() != 1 {
+	if ir.uses(*source_rows).len() != 1 {
 		return None;
 	}
-	let (permissions, filter) = body_nodes(ir, *body)?;
+	let source = producer(ir, *source_rows)?;
+	let (select_loop, source, body, paged) =
+		if matches!(ir.op(source)?.kind, OpKind::Logical(LogOp::Subquery)) {
+			// The loop over the subquery's rows hands each to the aggregate as it is.
+			if !matches!(body_nodes(ir, *body)?, (permissions, None) if permissions.is_empty()) {
+				return None;
+			}
+			let (inner_loop, inner_source, cap) = paged_select(ir, source)?;
+			let [inner_body] = ir.op(inner_loop)?.regions.as_slice() else {
+				return None;
+			};
+			let paged = Paged {
+				subquery: source,
+				outer_loop: select_loop,
+				cap,
+			};
+			(inner_loop, inner_source, *inner_body, Some(paged))
+		} else {
+			(select_loop, source, *body, None)
+		};
+	let OpKind::Logical(LogOp::Source(attrs)) = &ir.op(source)?.kind else {
+		return None;
+	};
+	if attrs.for_update {
+		return None;
+	}
+	let (permissions, filter) = body_nodes(ir, body)?;
 	Some(Matched {
 		aggregate,
 		select_loop,
@@ -195,7 +243,154 @@ fn matched(ir: &Ir, aggregate: OpId) -> Option<Matched> {
 		source_ref: attrs.source_ref.clone(),
 		with: attrs.with.clone(),
 		output,
+		paged,
 	})
+}
+
+/// The select loop, its source and its literal paging, when `subquery` holds a paged select of
+/// literals and nothing else: a source, a select loop over it, a `LIMIT` with an optional `START`
+/// over the loop, and optionally a select loop that projects only literals, whose rows the
+/// subquery yields.
+fn paged_select(ir: &Ir, subquery: OpId) -> Option<(OpId, OpId, CountCap)> {
+	let [region] = ir.op(subquery)?.regions.as_slice() else {
+		return None;
+	};
+	let ops: SmallVec<[OpId; 8]> = ops_in(ir, *region).collect();
+	let (&ret, held) = ops.split_last()?;
+	let ret_data = ir.op(ret)?;
+	let [yielded] = ret_data.operands.as_slice() else {
+		return None;
+	};
+	if ret_data.kind.terminator() != Some(Terminator::Yield) {
+		return None;
+	}
+	// The rows yielded, read only by the yield.
+	let single_use = |value: ValueId| ir.uses(value).len() == 1;
+	let mut paging = producer(ir, *yielded)?;
+	let mut projection = None;
+	if let OpKind::Logical(LogOp::Loop {
+		kind: LoopKind::Select,
+		sink: LoopSink::Output,
+		step: None,
+		..
+	}) = &ir.op(paging)?.kind
+	{
+		let [rows] = ir.op(paging)?.operands.as_slice() else {
+			return None;
+		};
+		if !projects_only_literals(ir, paging) || !single_use(*rows) {
+			return None;
+		}
+		projection = Some(paging);
+		paging = producer(ir, *rows)?;
+	}
+	let paging_data = ir.op(paging)?;
+	let OpKind::Logical(LogOp::Limit {
+		limit: Some(limit),
+		start,
+	}) = &paging_data.kind
+	else {
+		return None;
+	};
+	let literal_count = |slot: u16| -> Option<(OpId, u64)> {
+		let value = *paging_data.operands.get(usize::from(slot))?;
+		let op = producer(ir, value)?;
+		let OpKind::Expr(ExprOp::Literal(value)) = &ir.op(op)?.kind else {
+			return None;
+		};
+		let crate::val::Value::Number(crate::val::Number::Int(n)) = value.as_ref() else {
+			return None;
+		};
+		(single_use_of(ir, op) && *n >= 0).then_some((op, *n as u64))
+	};
+	let (limit_op, limit) = literal_count(*limit)?;
+	let (start_op, start) = match start {
+		Some(slot) => {
+			let (op, n) = literal_count(*slot)?;
+			(Some(op), n)
+		}
+		None => (None, 0),
+	};
+	let rows = *paging_data.operands.first()?;
+	if !single_use(rows) {
+		return None;
+	}
+	let select_loop = producer(ir, rows)?;
+	let loop_data = ir.op(select_loop)?;
+	let OpKind::Logical(LogOp::Loop {
+		kind: LoopKind::Select,
+		sink: LoopSink::Output,
+		step: None,
+		..
+	}) = &loop_data.kind
+	else {
+		return None;
+	};
+	let [source_rows] = loop_data.operands.as_slice() else {
+		return None;
+	};
+	if !single_use(*source_rows) {
+		return None;
+	}
+	let source = producer(ir, *source_rows)?;
+	if !matches!(ir.op(source)?.kind, OpKind::Logical(LogOp::Source(_))) {
+		return None;
+	}
+	// The subquery holds those ops and nothing else.
+	let mut expected: SmallVec<[OpId; 8]> = smallvec![source, select_loop, paging, limit_op];
+	expected.extend(start_op);
+	expected.extend(projection);
+	if held.len() != expected.len() || !held.iter().all(|op| expected.contains(op)) {
+		return None;
+	}
+	Some((
+		select_loop,
+		source,
+		CountCap {
+			limit,
+			start,
+		},
+	))
+}
+
+/// Whether `op`'s one result is read once.
+fn single_use_of(ir: &Ir, op: OpId) -> bool {
+	ir.op(op).is_some_and(
+		|data| matches!(data.results.as_slice(), [value] if ir.uses(*value).len() == 1),
+	)
+}
+
+/// Whether the select loop `select_loop` projects each row to literals and does nothing else: its
+/// body is one projection, every column of which yields a literal, and the yield of its row.
+fn projects_only_literals(ir: &Ir, select_loop: OpId) -> bool {
+	let Some([body]) = ir.op(select_loop).map(|data| data.regions.as_slice()) else {
+		return false;
+	};
+	let ops: SmallVec<[OpId; 2]> = ops_in(ir, *body).collect();
+	let [project, ret] = ops.as_slice() else {
+		return false;
+	};
+	let (Some(project_data), Some(ret_data)) = (ir.op(*project), ir.op(*ret)) else {
+		return false;
+	};
+	let OpKind::Logical(LogOp::Project(attrs)) = &project_data.kind else {
+		return false;
+	};
+	if attrs.layer || attrs.omit != 0 {
+		return false;
+	}
+	let yields_projection = ret_data.kind.terminator() == Some(Terminator::Yield)
+		&& project_data.results.first().is_some_and(|row| ret_data.operands.as_slice() == [*row]);
+	yields_projection
+		&& project_data.regions.iter().all(|column| {
+			ops_in(ir, *column).all(|op| {
+				ir.op(op).is_some_and(|data| {
+					data.regions.is_empty()
+						&& (matches!(data.kind, OpKind::Expr(ExprOp::Literal(_)))
+							|| data.kind.terminator() == Some(Terminator::Yield))
+				})
+			})
+		})
 }
 
 /// The op that defines `value`.
@@ -478,7 +673,9 @@ fn indexed(
 		shape: CountShape::Indexed {
 			table: table.clone(),
 			output: m.output.clone(),
-			btree: btree.map(|(index, access)| Box::new((index_ref(&index), access))),
+			btree: btree.map(|walks| {
+				walks.into_iter().map(|(index, access)| (index_ref(&index), access)).collect()
+			}),
 			bitmap: bitmap.as_ref().map(|plan| Box::new(bitmap_shape(plan))),
 		},
 		select: answers.select,
@@ -526,37 +723,71 @@ fn cond_counts_from_write_deltas(
 	.is_continue()
 }
 
-/// A B-tree index whose walk of keys is the count of `cond`: it covers the whole condition, and
-/// every record owns exactly one entry in the range.
+/// The B-tree walks whose key counts sum to the count of `cond`: one walk that covers the whole
+/// condition, or else one per value of a scalar `IN` list or per branch of an `OR`, when no record
+/// can be under two of them.
 ///
-/// An array value is indexed once per element, so a record holding `[3, 4]` is listed under `3`
-/// although `[3, 4] = 3` is false: the walk is chosen only for an index every column of which holds
-/// one entry per record, as recorded by the index as storing no array in it. A range
-/// widened to the seconds of its bounds counts records its predicate rejects, and so does an
-/// access naming a number the index keys apart from values equal to it
+/// Every walk counts a record once: an array value is indexed once per element, so a record holding
+/// `[3, 4]` is listed under `3` although `[3, 4] = 3` is false, and a walk is chosen only for an
+/// index every column of which holds one entry per record, as recorded by the index as storing no
+/// array in it. A range widened to the seconds of its bounds counts records its predicate rejects,
+/// and so does an access naming a number the index keys apart from values equal to it
 /// ([`range_matches_comparison`]), which may miss records its predicate accepts besides.
 fn btree_walk(
 	answers: &TableAnswers,
 	cond: &LogicalExpr,
 	with: Option<&With>,
 	registry: &FunctionRegistry,
-) -> Option<(AccessIndexRef, BTreeAccess)> {
+) -> Option<Vec<(AccessIndexRef, BTreeAccess)>> {
 	if answers.indexes.is_empty() {
 		return None;
 	}
 	let columns = answers.columns.as_ref()?;
-	let one_key_per_record =
-		|index: &AccessIndexRef| (0..index.cols.len()).all(|at| index.one_entry_per_record(at));
 	let analyzer = columns
 		.analyzer(with, registry)
 		.with_key(answers.key.clone())
 		.with_clock(answers.allows_clock);
+	if let Some(walk) = covering_walk(&analyzer, answers, cond) {
+		return Some(vec![walk]);
+	}
+	let LogicalExpr::Binary {
+		op,
+		..
+	} = cond
+	else {
+		return None;
+	};
+	let walks = if *op == BinaryOperator::Inside {
+		in_list_walks(&analyzer, cond)?
+	} else if *op == BinaryOperator::Or {
+		let mut branches = Vec::new();
+		flatten_or(cond, &mut branches);
+		branches
+			.into_iter()
+			.map(|branch| covering_walk(&analyzer, answers, branch))
+			.collect::<Option<Vec<_>>>()?
+	} else {
+		return None;
+	};
+	(walks.len() >= 2 && walks_are_disjoint(&walks)).then_some(walks)
+}
+
+/// A walk that counts each record of its range once, and only records its predicate admits.
+fn walk_counts_exactly(index: &AccessIndexRef, access: &BTreeAccess) -> bool {
+	(0..index.cols.len()).all(|at| index.one_entry_per_record(at))
+		&& range_matches_comparison(index, access)
+		&& !access_fans_out(&index.cols, access)
+		&& !range_is_widened(index, access)
+}
+
+/// One B-tree walk whose range is exactly the records `cond` admits.
+fn covering_walk(
+	analyzer: &IndexAnalyzer<'_>,
+	answers: &TableAnswers,
+	cond: &LogicalExpr,
+) -> Option<(AccessIndexRef, BTreeAccess)> {
 	for candidate in analyzer.analyze(Some(cond), None) {
-		if !one_key_per_record(&candidate.index_ref)
-			|| !range_matches_comparison(&candidate.index_ref, &candidate.access)
-			|| access_fans_out(&candidate.index_ref.cols, &candidate.access)
-			|| range_is_widened(&candidate.index_ref, &candidate.access)
-		{
+		if !walk_counts_exactly(&candidate.index_ref, &candidate.access) {
 			continue;
 		}
 		// The index consumed the whole condition. A conjunct that reads a component of the record
@@ -573,6 +804,93 @@ fn btree_walk(
 		}
 	}
 	None
+}
+
+/// The walks of `cond`, a scalar `field IN [...]` list over the leading column of an index, one per
+/// value of the list. Whether a record can be under two of them, a value listed twice, is left to
+/// the caller.
+fn in_list_walks(
+	analyzer: &IndexAnalyzer<'_>,
+	cond: &LogicalExpr,
+) -> Option<Vec<(AccessIndexRef, BTreeAccess)>> {
+	let AccessPath::Union {
+		paths,
+		dedupe: false,
+	} = analyzer.try_in_expansion(Some(cond), Direction::Forward)?
+	else {
+		return None;
+	};
+	let walks = paths
+		.into_iter()
+		.map(|path| {
+			let AccessPath::BTreeScan {
+				index_ref,
+				access,
+				..
+			} = path
+			else {
+				return None;
+			};
+			walk_counts_exactly(&index_ref, &access).then_some((index_ref, access))
+		})
+		.collect::<Option<Vec<_>>>()?;
+	// `cond` is the list itself, so the walks answer all of it: the expansion pins the list's
+	// field, the leading column, to one value per walk.
+	Some(walks)
+}
+
+/// Whether no record can be in the ranges of two of `walks`: they walk one index, each pins a
+/// prefix of its columns, and every two prefixes differ at a position where both are literals.
+fn walks_are_disjoint(walks: &[(AccessIndexRef, BTreeAccess)]) -> bool {
+	let Some((first, _)) = walks.first() else {
+		return false;
+	};
+	let Some(prefixes) = walks
+		.iter()
+		.map(|(index, access)| {
+			(index.index_id == first.index_id).then(|| pinned_prefix(access)).flatten()
+		})
+		.collect::<Option<Vec<_>>>()
+	else {
+		return false;
+	};
+	prefixes.iter().enumerate().all(|(at, a)| {
+		prefixes[at + 1..]
+			.iter()
+			.all(|b| crate::exec::index::access_path::prefixes_are_disjoint(a, b))
+	})
+}
+
+/// The leading columns `access` pins each to one value, when it pins at least one and bounds
+/// nothing past them.
+fn pinned_prefix(access: &BTreeAccess) -> Option<&[BoundOperand]> {
+	if let BTreeAccess::Equality(value) = access {
+		return Some(std::slice::from_ref(value));
+	}
+	let BTreeAccess::Compound {
+		prefix,
+		range: None,
+		upper: None,
+	} = access
+	else {
+		return None;
+	};
+	(!prefix.is_empty()).then_some(prefix.as_slice())
+}
+
+/// The branches of an `OR`, nested ORs flattened.
+fn flatten_or<'e>(expr: &'e LogicalExpr, branches: &mut Vec<&'e LogicalExpr>) {
+	if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::Or,
+		right,
+	} = expr
+	{
+		flatten_or(left, branches);
+		flatten_or(right, branches);
+	} else {
+		branches.push(expr);
+	}
 }
 
 /// An exact bitmap fusion for `cond`: an AND of index-backed predicates each exactly represented
@@ -630,6 +948,7 @@ fn replace(
 			shape: decision.shape.clone(),
 			select: decision.select,
 			deltas: decision.deltas,
+			cap: m.paged.as_ref().map(|paged| paged.cap),
 		}))),
 		operands,
 		results: smallvec![result.ty.clone()],
@@ -640,6 +959,9 @@ fn replace(
 	let mut consumed: SmallVec<[OpId; 8]> = smallvec![m.aggregate, m.select_loop, m.source];
 	consumed.extend(m.permissions.iter().copied());
 	consumed.extend(m.filter);
+	if let Some(paged) = &m.paged {
+		consumed.extend([paged.outer_loop, paged.subquery]);
+	}
 	let mut rw = Rewriter::new(ir, facts);
 	let built = rw.derived(&consumed, |rw| -> Result<Option<OpId>, IrError> {
 		let count = rw.create(InsertPoint::Before(m.aggregate), spec)?;
@@ -659,8 +981,17 @@ fn replace(
 		rw.ir().op(count).map(|data| data.results.clone()).ok_or(IrError::Stale("count"))?;
 	rw.derived(&consumed, |rw| {
 		rw.replace_op(m.aggregate, &produced)?;
-		rw.erase(m.select_loop, EliminationReason::AnsweredByAccessPath)?;
-		rw.erase(m.source, EliminationReason::AnsweredByAccessPath)
+		match &m.paged {
+			// The subquery holds the select and its source.
+			Some(paged) => {
+				rw.erase(paged.outer_loop, EliminationReason::AnsweredByAccessPath)?;
+				rw.erase(paged.subquery, EliminationReason::AnsweredByAccessPath)
+			}
+			None => {
+				rw.erase(m.select_loop, EliminationReason::AnsweredByAccessPath)?;
+				rw.erase(m.source, EliminationReason::AnsweredByAccessPath)
+			}
+		}
 	})?;
 	Ok(true)
 }

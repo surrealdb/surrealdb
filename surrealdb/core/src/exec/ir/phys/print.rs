@@ -122,7 +122,7 @@ use crate::exec::operators::{
 use crate::exec::planner::CatalogWithin;
 use crate::exec::pre_decode_filter::PreDecodeShape;
 use crate::exec::vm::payload::{
-	CoarseCutoff, CountSelect, JoinBuild, JoinMatch, Spill, TopKKey, ValuesRead,
+	CoarseCutoff, CountCap, CountSelect, JoinBuild, JoinMatch, Spill, TopKKey, ValuesRead,
 };
 use crate::exec::vm::plain::ValueData;
 use crate::expr::logical::{Emission, GuardKind, OutputPath, OutputPathPart, Schema};
@@ -2558,7 +2558,7 @@ text_enum!(CountShape {
 		Indexed {
 			table: TableName,
 			output: CountOutput,
-			btree: Option<Box<(IndexRef, BTreeAccess)>>,
+			btree: Option<Box<[(IndexRef, BTreeAccess)]>>,
 			bitmap: Option<Box<BitmapShape>>
 		}
 	]
@@ -2829,7 +2829,16 @@ text_struct!(KnnTopKAttrs {
 	k: u32,
 	distance: Distance
 });
-text_struct!(CountAttrs { shape: CountShape, select: CountSelect, deltas: Option<IndexId> });
+text_struct!(CountAttrs {
+	shape: CountShape,
+	select: CountSelect,
+	deltas: Option<IndexId>,
+	cap: Option<CountCap>
+});
+text_struct!(CountCap {
+	limit: u64,
+	start: u64
+});
 text_struct!(JoinAttrs {
 	matching: JoinMatch,
 	build: JoinBuild,
@@ -3726,17 +3735,24 @@ mod tests {
 				shape: CountShape::Indexed {
 					table: table("t"),
 					output: CountOutput::Fields(vec!["count".to_owned(), "c".to_owned()]),
-					btree: Some(Box::new((
-						index_ref(),
-						BTreeAccess::literal_range(Range {
-							start: Bound::Included(Value::from(1i64)),
-							end: Bound::Unbounded,
-						}),
-					))),
+					btree: Some(Box::new([
+						(
+							index_ref(),
+							BTreeAccess::literal_range(Range {
+								start: Bound::Included(Value::from(1i64)),
+								end: Bound::Unbounded,
+							}),
+						),
+						(index_ref(), BTreeAccess::literal_equality(Value::from(0i64))),
+					])),
 					bitmap: None,
 				},
 				select: CountSelect::Conditional,
 				deltas: Some(IndexId(7)),
+				cap: Some(CountCap {
+					limit: 1000,
+					start: 2,
+				}),
 			})),
 			PhysTag::RecordScan => PhysOp::RecordScan(Box::new(RecordScanAttrs {
 				table: TableName::new(Strand::new("t")),

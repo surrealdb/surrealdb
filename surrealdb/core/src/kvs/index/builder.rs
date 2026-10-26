@@ -58,8 +58,8 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	DatastoreError, Direction, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
-	INDEXING_PROBE_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
+	DatastoreError, Direction, INDEXING_BATCH_MAX_BYTES, INDEXING_PROBE_BATCH_SIZE,
+	INDEXING_SCAN_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
 	is_retryable_transaction_conflict, is_shutdown_error,
 };
 /// How long to wait before retrying a conflicting index-build cleanup.
@@ -3091,7 +3091,7 @@ impl Building {
 	/// they describe, so the durable state never points into an uncommitted
 	/// span. A takeover that finds a cursor resumes the scan right after it
 	/// instead of wiping the partial index data and rescanning from the start.
-	async fn checkpoint_initial_scan(
+	pub(super) async fn checkpoint_initial_scan(
 		&self,
 		tx: &Transaction,
 		generation: BuildGeneration,
@@ -4491,7 +4491,7 @@ impl Building {
 
 	/// Note a commit of this build's, which ends its run of conflicts
 	/// ([`Self::conflict_pause`]).
-	fn note_committed(&self) {
+	pub(super) fn note_committed(&self) {
 		self.conflict_streak.store(0, Ordering::Relaxed);
 	}
 
@@ -4547,13 +4547,29 @@ impl Building {
 	}
 
 	/// A write transaction of this build's own, outside any batch context.
-	async fn new_write_tx(&self) -> Result<Transaction> {
+	pub(super) async fn new_write_tx(&self) -> Result<Transaction> {
 		self.tf.transaction(TransactionType::Write, self.ctx.try_get_sequences()?.clone()).await
 	}
 
 	/// Creates a child context for one batch of the build, backed by a write
 	/// transaction and holding a query memory of the batch's own (see
 	/// [`Building::memory`]).
+	/// A read transaction of this build's own, in a context batch work can
+	/// evaluate the index's columns in.
+	#[cfg_attr(all(target_family = "wasm", target_os = "unknown"), allow(dead_code))]
+	pub(super) async fn new_read_tx_ctx(&self) -> Result<FrozenContext> {
+		let tx = self
+			.tf
+			.transaction(TransactionType::Read, self.ctx.try_get_sequences()?.clone())
+			.await?
+			.into();
+		let mut ctx = Context::new_child(&self.ctx);
+		ctx.set_transaction(tx);
+		ctx.set_index_places(self.places());
+		ctx.set_memory(self.memory.as_ref().map(MemoryHost::query));
+		Ok(ctx.freeze())
+	}
+
 	pub(super) async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
@@ -4708,7 +4724,7 @@ impl Building {
 
 	#[cfg(test)]
 	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
-	pub(super) async fn run(&self) -> Result<()> {
+	pub(super) async fn run(self: &Arc<Self>) -> Result<()> {
 		let Some(acquired) = self.acquire_build_state().await? else {
 			return Ok(());
 		};
@@ -4729,7 +4745,7 @@ impl Building {
 	/// would leave an older node's marker unmet. Takeover from `Closing`, or
 	/// from `Building` after `initial_complete`, skips the initial scan and
 	/// only drains durable appendings and reservations.
-	pub(super) async fn run_acquired(&self, acquired: AcquiredBuild) -> Result<()> {
+	pub(super) async fn run_acquired(self: &Arc<Self>, acquired: AcquiredBuild) -> Result<()> {
 		// The first batch checks whether the index was marked for removal, so a
 		// build of an index decommissioned before it started never completes;
 		// later batches check at most every few seconds.
@@ -4944,7 +4960,7 @@ impl Building {
 			// batch and then sizes each batch from the record sizes observed so
 			// far, keeping a batch's raw record data around
 			// `INDEXING_BATCH_MAX_BYTES` (small records keep using full
-			// `INDEXING_BATCH_SIZE` batches). The checkpoint protocol is
+			// `INDEXING_SCAN_BATCH_SIZE` batches). The checkpoint protocol is
 			// per-batch and does not depend on a fixed batch size.
 			let mut scan_batch_size = INDEXING_PROBE_BATCH_SIZE;
 			#[cfg(test)]
@@ -4963,6 +4979,27 @@ impl Building {
 			)
 			.await?;
 
+			// A kind whose batches commit in any order indexes them on several
+			// tasks; the serial loop below then finds nothing left to scan.
+			#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+			if count_progress.is_none() {
+				let tasks = self.initial_scan_tasks();
+				if tasks > 1
+					&& let Some(range) = next.take()
+					&& !self
+						.scan_in_parallel(
+							generation,
+							range,
+							&mut initial_count,
+							&mut last_prepare_remove_check,
+							tasks,
+							scan_batch_size,
+						)
+						.await?
+				{
+					return Ok(());
+				}
+			}
 			while let Some(rng) = next {
 				if self.is_aborted().await {
 					return Ok(());
@@ -5002,7 +5039,7 @@ impl Building {
 					let bytes: usize = batch.result.iter().map(|(k, v)| k.len() + v.len()).sum();
 					let avg = (bytes / batch.result.len()).max(1);
 					scan_batch_size = (INDEXING_BATCH_MAX_BYTES / avg)
-						.clamp(1, INDEXING_BATCH_SIZE as usize) as u32;
+						.clamp(1, INDEXING_SCAN_BATCH_SIZE as usize) as u32;
 					#[cfg(test)]
 					if let Some(n) = scan_batch_override {
 						scan_batch_size = n;
@@ -5159,17 +5196,9 @@ impl Building {
 					if consumed < values.len() {
 						next = Some(rng.resume_after(&values[consumed - 1].0, Direction::Forward));
 					}
+					// The batch's checkpoint committed the `initial` progress
+					// counter with it, so no separate report is written.
 					initial_count += indexed;
-					if !self.is_aborted().await {
-						self.mark_durable_report(
-							generation,
-							IndexBuildReportStatus::Indexing,
-							Some(initial_count),
-							Some(0),
-							None,
-						)
-						.await?;
-					}
 				}
 			}
 			if count_progress.is_some() {

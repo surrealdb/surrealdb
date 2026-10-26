@@ -37,13 +37,16 @@ pub(super) enum Counted {
 	Rows(Vec<Value>),
 }
 
-/// The answer of count source `source` read as of `version`.
+/// The answer of count source `source` read as of `version`. With `at_most`,
+/// a count of index keys stops once it reaches that many, which is then its
+/// answer.
 pub(super) async fn count(
 	program: &Program,
 	source: &CountSource,
 	version: Option<u64>,
 	units: Option<UnitTable>,
 	ctx: &ExecutionContext,
+	at_most: Option<usize>,
 ) -> FlowResult<Counted> {
 	let db_ctx = ctx.database()?;
 	let check_perms = crate::exec::permission::should_check_perms(db_ctx, Action::View)?;
@@ -141,10 +144,19 @@ pub(super) async fn count(
 				CountVia::Deltas {
 					index,
 				} => services.count_index_deltas(table, *index).await?,
-				CountVia::BTreeKeys {
-					index,
-					access,
-				} => super::entries::count(ctx, &services, index, access).await?,
+				CountVia::BTreeKeys(walks) => {
+					let mut count = 0;
+					for walk in walks.iter() {
+						let left = at_most.map(|most| most.saturating_sub(count));
+						if left == Some(0) {
+							break;
+						}
+						count +=
+							super::entries::count(ctx, &services, &walk.index, &walk.access, left)
+								.await?;
+					}
+					count
+				}
 				CountVia::Bitmap(plan) => services.bitmap_cardinality(table, plan).await?,
 			};
 			Ok(Counted::Count(count))

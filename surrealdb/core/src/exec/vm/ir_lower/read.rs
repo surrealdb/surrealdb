@@ -57,8 +57,8 @@ use surrealdb_strand::{Strand, TableName};
 use super::super::payload::{BranchRead, IndexBranch};
 use super::super::plain::ValueData;
 use super::super::program::{
-	CountSource, CountVia, CountedValue, DeferredVector, HostScalar, KnnGate, KnnPrefilterSpec,
-	ScanRange, ScanSpec, Source, TopKScan, UnionTopK, UnitId,
+	CountSource, CountVia, CountWalk, CountedValue, DeferredVector, HostScalar, KnnGate,
+	KnnPrefilterSpec, ScanRange, ScanSpec, Source, TopKScan, UnionTopK, UnitId,
 };
 use super::dispatch::phys_refusal;
 use super::emit::Emitter;
@@ -1228,13 +1228,17 @@ fn lower_count(
 				(Some(index), _, _) => CountVia::Deltas {
 					index,
 				},
-				(None, Some(btree), _) => {
-					let (index, access) = btree.as_ref();
-					CountVia::BTreeKeys {
-						index: resolve(index)?,
-						access: plain(access.clone(), "a counted index access")?,
-					}
-				}
+				(None, Some(btree), _) => CountVia::BTreeKeys(
+					btree
+						.iter()
+						.map(|(index, access)| {
+							Ok(CountWalk {
+								index: resolve(index)?,
+								access: plain(access.clone(), "a counted index access")?,
+							})
+						})
+						.collect::<Result<_, IrError>>()?,
+				),
 				(None, None, Some(shape)) => {
 					CountVia::Bitmap(plain(bitmap_plan(shape, resolve)?, "a counted bitmap plan")?)
 				}
@@ -1256,6 +1260,7 @@ fn lower_count(
 		source: Source::Count {
 			count,
 			output: output.clone(),
+			cap: attrs.cap,
 		},
 		table: Some(table),
 	})
@@ -2275,6 +2280,7 @@ pub(super) mod tests {
 				},
 				select,
 				deltas: None,
+				cap: None,
 			})),
 			operands,
 		)

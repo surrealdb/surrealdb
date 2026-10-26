@@ -955,6 +955,14 @@ impl IndexKeyBase {
 		}
 	}
 
+	/// Range covering every legacy `!ip` primary-appending marker of this
+	/// index, whatever record it names.
+	pub fn new_ip_raw_range(&self) -> Result<crate::key::RawRange> {
+		let mut prefix = self.new_idx_root().encode_bound()?.to_vec();
+		prefix.extend_from_slice(b"!ip");
+		Ok(self.new_idx_root().raw(surrealdb_kvs::Key::from(prefix).prefix_expect()))
+	}
+
 	/// Key storing durable build state for this table index.
 	pub fn new_bs_key(&self) -> BuildStateKey<'_> {
 		BuildStateKey {

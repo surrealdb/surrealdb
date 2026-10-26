@@ -1233,6 +1233,70 @@ impl Sequences {
 		Ok(id as DocId)
 	}
 
+	/// Generates `count` document IDs for a table's shared doc-ID space, as
+	/// [`Self::next_table_doc_id`] generates one each, drawing them under one
+	/// hold of the table's allocator. A window the allocator claims for them
+	/// holds at least `count` IDs, so a block that fits in no window left
+	/// claims one more window, not one per `batch` IDs.
+	pub async fn next_table_doc_ids(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		count: usize,
+		batch: u32,
+	) -> Result<Vec<DocId>> {
+		let domain = Arc::new(SequenceDomain::new_table_doc_ids(ns, db, tb));
+		let batch = batch.max(u32::try_from(count).unwrap_or(u32::MAX));
+		let mut ids = Vec::with_capacity(count);
+		while ids.len() < count {
+			match self.next_cached_vals(ctx, &domain, count - ids.len(), batch).await? {
+				Some(served) if !served.is_empty() => {
+					ids.extend(served.into_iter().map(|id| id as DocId));
+				}
+				// No allocator is cached, or the one cached was reset: drawing
+				// one ID builds it, as a single draw does.
+				_ => ids
+					.push(self.next_val(ctx, Arc::clone(&domain), 0, batch, None).await? as DocId),
+			}
+		}
+		Ok(ids)
+	}
+
+	/// Up to `count` values of `seq` drawn under one hold of its cached
+	/// allocator, or `None` when it has none cached. A reset of the sequence
+	/// evicts the allocator and ends the draw with the values drawn before it.
+	async fn next_cached_vals(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		seq: &Arc<SequenceDomain>,
+		count: usize,
+		batch: u32,
+	) -> Result<Option<Vec<i64>>> {
+		let sequence = self.sequences.read().await.get(seq).cloned();
+		let Some(s) = sequence else {
+			return Ok(None);
+		};
+		let Some(allocator) = s.sequence.get() else {
+			return Ok(None);
+		};
+		let mut held = allocator.lock().await;
+		let mut values = Vec::with_capacity(count);
+		for _ in 0..count {
+			match held.next(self, ctx, seq, batch, None, Some(&s.evicted)).await {
+				Ok(value) => values.push(value),
+				Err(SequenceError::Reset) => {
+					drop(held);
+					self.evict_this_allocator(seq, &s).await;
+					return Ok(Some(values));
+				}
+				Err(err) => return Err(err.into_public()),
+			}
+		}
+		Ok(Some(values))
+	}
+
 	/// Generates the next document ID for a legacy full-text index's private space.
 	pub async fn next_legacy_full_text_doc_id(
 		&self,

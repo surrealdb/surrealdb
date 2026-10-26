@@ -74,15 +74,16 @@ async fn shutdown_mid_concurrent_ft_build_stays_resumable() -> Result<()> {
 		.join(format!("skv-shutdown-resume-{}", std::process::id()))
 		.to_string_lossy()
 		.into_owned();
-	// Phase 1: seed 2500 records and start two concurrent FULLTEXT builds,
-	// then shut the datastore down after the first batch (250 records) has
+	// Phase 1: seed 20000 records and start two concurrent FULLTEXT builds,
+	// then shut the datastore down after the first full scan batch (up to
+	// `INDEXING_SCAN_BATCH_SIZE` records, after a 16-record probe) has
 	// committed — the exact shape of the original incident.
 	{
 		let ds = open_ds(&dir).await?;
 		new_ns_db(&ds, "test", "test").await?;
 		let sess = session();
 		ds.execute(
-			"CREATE |doc:1..2500| SET text = string::repeat('lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ', 3) + <string>id, extra = string::repeat('ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat ', 3) + <string>id RETURN NONE",
+			"CREATE |doc:1..20000| SET text = string::repeat('lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ', 3) + <string>id, extra = string::repeat('ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat ', 3) + <string>id RETURN NONE",
 			&sess,
 			None,
 		)

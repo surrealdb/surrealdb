@@ -6289,9 +6289,19 @@ pub(super) enum CountedValue {
 	Code(u16),
 }
 
+/// The entries of a B-tree index under an access, which a count walks by their
+/// keys.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CountWalk {
+	pub(super) index: crate::exec::index::access_path::IndexRef,
+	pub(super) access: super::plain::ValueData<crate::exec::index::access_path::BTreeAccess>,
+}
+
 /// How a count of the records of a table is answered when the caller's
 /// reads are not permission checked, or the table's permission admits every
 /// record.
+// `Bitmap` holds its plan inline, as `CountSource` holds its variants.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum CountVia {
 	/// The sum of the deltas of `COUNT` index `index`, and those the
@@ -6299,11 +6309,9 @@ pub(super) enum CountVia {
 	Deltas {
 		index: crate::catalog::IndexId,
 	},
-	/// The entries of a B-tree index under an access, counted by their keys.
-	BTreeKeys {
-		index: crate::exec::index::access_path::IndexRef,
-		access: super::plain::ValueData<crate::exec::index::access_path::BTreeAccess>,
-	},
+	/// The entries of B-tree indexes under record-disjoint accesses, counted by
+	/// their keys and summed.
+	BTreeKeys(Box<[CountWalk]>),
 	/// The cardinality of an exact fused bitmap, with no record read.
 	Bitmap(super::plain::ValueData<crate::exec::index::access_path::BitmapPlan>),
 }
@@ -6464,10 +6472,12 @@ pub(super) enum Source {
 		/// reads more of a row than its `id`.
 		ids_only: bool,
 	},
-	/// One row holding a count, shaped by `output`.
+	/// One row holding a count, shaped by `output`, of what `cap` keeps of
+	/// the records counted.
 	Count {
 		count: CountSource,
 		output: crate::exec::operators::CountOutput,
+		cap: Option<super::payload::CountCap>,
 	},
 	/// The rows of each source in turn, in written order.
 	Union(Vec<Source>),

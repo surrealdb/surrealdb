@@ -1419,13 +1419,23 @@ pub(super) async fn run_pipelines(
 			Source::Count {
 				count,
 				output,
+				cap,
 			} => {
 				let rows = match out_of_line(|| {
-					super::count::count(program, count, version, state.units.clone(), ctx)
+					super::count::count(
+						program,
+						count,
+						version,
+						state.units.clone(),
+						ctx,
+						cap.map(|cap| cap.reach()),
+					)
 				})
 				.await?
 				{
-					super::count::Counted::Count(n) => output.batch(n).into_values(),
+					super::count::Counted::Count(n) => {
+						output.batch(cap.map_or(n, |cap| cap.apply(n))).into_values()
+					}
 					super::count::Counted::Rows(rows) => rows,
 				};
 				for row in rows {

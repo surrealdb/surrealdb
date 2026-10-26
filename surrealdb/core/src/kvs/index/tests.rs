@@ -314,7 +314,7 @@ async fn new_building_for_index(
 	db: DatabaseId,
 	table: &TableName,
 	ix: Arc<IndexDefinition>,
-) -> Result<Building> {
+) -> Result<Arc<Building>> {
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let table_def = catch!(tx, tx.get_tb(ns, db, table, None).await).expect("table should exist");
 	let mut ctx = ds.setup_ctx()?;
@@ -331,7 +331,7 @@ async fn new_building_for_index(
 	)?
 	.signalling(&ds.index_builder().closing_settled);
 	tx.cancel().await?;
-	Ok(build)
+	Ok(Arc::new(build))
 }
 
 #[cfg(feature = "kv-mem")]
@@ -4339,16 +4339,22 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 	let read_tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 	ctx.set_transaction(Arc::clone(&read_tx));
 	let ctx = ctx.freeze();
-	let build_a = Building::new(
+	let build_a = Arc::new(Building::new(
 		&ctx,
 		ds.transaction_factory().clone(),
 		opt.clone(),
 		table_id,
 		Arc::clone(&index),
 		Arc::clone(&index_key),
-	)?;
-	let build_b =
-		Building::new(&ctx, ds.transaction_factory().clone(), opt, table_id, index, index_key)?;
+	)?);
+	let build_b = Arc::new(Building::new(
+		&ctx,
+		ds.transaction_factory().clone(),
+		opt,
+		table_id,
+		index,
+		index_key,
+	)?);
 	read_tx.cancel().await?;
 
 	let (a, b) = tokio::join!(build_a.run(), build_b.run());
@@ -18179,7 +18185,7 @@ struct CountBuild {
 	ds: Arc<Datastore>,
 	session: Session,
 	ikb: IndexKeyBase,
-	building: Building,
+	building: Arc<Building>,
 }
 
 impl CountBuild {

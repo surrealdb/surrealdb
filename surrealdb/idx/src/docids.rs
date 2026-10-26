@@ -654,6 +654,74 @@ impl TableDocIds {
 		}
 	}
 
+	/// Returns the doc-ID of each record of `ids`, in order, assigning one to
+	/// each that has none, as [`Self::resolve_or_assign`] does for one record.
+	///
+	/// The forward mappings are read in one batched read and the new IDs drawn
+	/// from the table's sequence as one block. `ids` must name each record at
+	/// most once: the claims are then of distinct mappings, so a blind claim
+	/// overwrites no claim this transaction made, and one is blind on the
+	/// condition [`Self::resolve_or_assign`] states for its own.
+	pub async fn resolve_or_assign_many(
+		&self,
+		env: &dyn IndexEnv,
+		ids: &[RecordIdKey],
+	) -> Result<Vec<DocId>> {
+		let tx = env.tx();
+		let written = tx.doc_lookup_writes();
+		let found = self.get_doc_ids_batch(&tx, ids).await?;
+		let missing = found.iter().filter(|doc_id| doc_id.is_none()).count();
+		if missing == 0 {
+			return Ok(found.into_iter().flatten().collect());
+		}
+		let fresh = env
+			.sequences()?
+			.next_table_doc_ids(
+				Some(env),
+				self.ns,
+				self.db,
+				self.tb.clone(),
+				missing,
+				env.config().table_doc_ids_batch_size,
+			)
+			.await?;
+		let blind = claim_may_be_blind(&tx, written);
+		let mut fresh = fresh.into_iter();
+		let mut out = Vec::with_capacity(ids.len());
+		for (id, found) in ids.iter().zip(found) {
+			if let Some(doc_id) = found {
+				out.push(doc_id);
+				continue;
+			}
+			let doc_id = fresh
+				.next()
+				.ok_or_else(|| anyhow::anyhow!("the sequence drew fewer doc-IDs than asked for"))?;
+			let dj = self.identity_key(id);
+			let claimed = if blind {
+				tx.set_key(&dj, &doc_id).await
+			} else {
+				tx.put_key(&dj, &doc_id).await
+			};
+			match claimed {
+				Ok(()) => {
+					tx.set_key(&self.doc_key(doc_id), id).await?;
+					out.push(doc_id);
+				}
+				Err(e)
+					if matches!(storage_error(&e), Some(KvsError::TransactionKeyAlreadyExists)) =>
+				{
+					out.push(tx.get_key(&dj, None).await?.ok_or_else(|| {
+						anyhow::anyhow!(
+							"doc-ID mapping missing after a conditional-create conflict"
+						)
+					})?);
+				}
+				Err(e) => return Err(e),
+			}
+		}
+		Ok(out)
+	}
+
 	/// Returns the record key mapped to `doc_id`, or `None` if unmapped.
 	pub async fn get_record_id(
 		&self,

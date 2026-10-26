@@ -102,6 +102,16 @@ impl<'a> Kind<'a> {
 		matches!(self.0.index, Index::Idx | Index::Uniq | Index::Spatial)
 	}
 
+	/// Whether batches of this kind's initial scan may be indexed concurrently, each in a
+	/// transaction of its own: indexing a record writes only entries for that record and its
+	/// doc-ID mapping, and indexing it again writes the same, so batches commit in any order and a
+	/// scan resumed before a batch past its checkpoint indexes that batch's records once more
+	/// without changing the index.
+	#[cfg_attr(all(target_family = "wasm", target_os = "unknown"), allow(dead_code))]
+	pub(super) fn scans_in_parallel(self) -> bool {
+		matches!(self.0.index, Index::Idx | Index::Uniq)
+	}
+
 	/// Whether this kind's initial-batch sink runs a pass over what it built once the scan ends
 	/// ([`InitialBatchSink::post_scan_step`]).
 	pub(super) fn has_post_scan_pass(self) -> bool {

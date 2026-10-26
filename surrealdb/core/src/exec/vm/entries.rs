@@ -158,18 +158,36 @@ impl EntryScan {
 /// it, at the cost of one keyspace read. A range that fills the batch has what
 /// remains of it counted by the store in place (`count_keys`), in parts the
 /// fuel bounds, so a large count copies no key out of storage.
+///
+/// With `at_most`, the count stops once it reaches that many entries, reading
+/// keys batch by batch and no further than it counts.
 pub(super) async fn count(
 	ctx: &ExecutionContext,
 	services: &impl Services,
 	index: &IndexRef,
 	access: &BTreeAccess,
+	at_most: Option<usize>,
 ) -> FlowResult<usize> {
 	let mut range = entry_range(ctx, index, access)?;
-	let most = super::fuel::batch(INDEX_BATCH_SIZE);
-	let first = services.read_range_keys(&mut range, Direction::Forward, most).await?.len();
-	super::fuel::tick(ctx, super::fuel::units(first)).await?;
-	if first < most as usize {
-		return Ok(first);
+	let Some(at_most) = at_most else {
+		let most = super::fuel::batch(INDEX_BATCH_SIZE);
+		let first = services.read_range_keys(&mut range, Direction::Forward, most).await?.len();
+		super::fuel::tick(ctx, super::fuel::units(first)).await?;
+		if first < most as usize {
+			return Ok(first);
+		}
+		return Ok(first + services.count_keys(range, None).await?);
+	};
+	let mut counted = 0;
+	while counted < at_most {
+		let left = u32::try_from(at_most - counted).unwrap_or(u32::MAX);
+		let most = super::fuel::batch(INDEX_BATCH_SIZE).min(left);
+		let read = services.read_range_keys(&mut range, Direction::Forward, most).await?.len();
+		super::fuel::tick(ctx, super::fuel::units(read)).await?;
+		counted += read;
+		if read < most as usize {
+			break;
+		}
 	}
-	Ok(first + services.count_keys(range, None).await?)
+	Ok(counted)
 }

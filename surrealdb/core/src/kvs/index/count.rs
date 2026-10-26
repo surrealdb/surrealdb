@@ -430,6 +430,7 @@ impl Building {
 				rid: &rid,
 				opt_values: appending.old_values,
 				count_cond_match,
+				doc_id: None,
 			},
 			rc,
 		)

@@ -431,6 +431,27 @@ pub(crate) struct KnnPrefilter {
 	pub(crate) uncovered_matches: bool,
 }
 
+/// The paging `START start LIMIT limit` of a subquery whose rows a count
+/// stands for: of the records counted, the count keeps those the paging keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CountCap {
+	pub(crate) limit: u64,
+	pub(crate) start: u64,
+}
+
+impl CountCap {
+	/// How many rows the paging reads at most: no count past it changes what
+	/// the paging keeps.
+	pub(crate) fn reach(self) -> usize {
+		usize::try_from(self.start.saturating_add(self.limit)).unwrap_or(usize::MAX)
+	}
+
+	/// How many of `counted` rows the paging keeps.
+	pub(crate) fn apply(self, counted: usize) -> usize {
+		(counted as u64).saturating_sub(self.start).min(self.limit) as usize
+	}
+}
+
 /// What a table's `SELECT` permission does to a caller whose reads are
 /// checked, as the count fast path needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,11 +2,20 @@ use std::time::Duration;
 
 pub const NORMAL_BATCH_SIZE: u32 = 500;
 pub const INDEXING_BATCH_SIZE: u32 = 250;
+/// Most records one initial-scan batch of an index build reads, indexes and
+/// commits in one transaction.
+///
+/// Every batch commits its index entries together with the build's
+/// continuation checkpoint, so the per-batch cost (ownership fence, checkpoint
+/// write, commit and its sync) is paid once per this many records. The byte
+/// budget [`INDEXING_BATCH_MAX_BYTES`] bounds a batch of large documents
+/// below this count.
+pub const INDEXING_SCAN_BATCH_SIZE: u32 = 8192;
 /// Soft cap on the raw record bytes an index build holds in memory per
 /// initial-scan batch.
 ///
 /// Batches are sized by record count, so without a byte budget a batch of
-/// [`INDEXING_BATCH_SIZE`] large documents can hold hundreds of megabytes at
+/// [`INDEXING_SCAN_BATCH_SIZE`] large documents can hold hundreds of megabytes at
 /// once. The builder samples the record sizes it observes and shrinks the
 /// next batch's count so it stays around this budget; small records keep
 /// using full-size batches.

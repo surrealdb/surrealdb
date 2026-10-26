@@ -45,7 +45,7 @@ use crate::val::{RecordId, RecordIdKey, RecordIdentity, Value};
 /// reads it there. A stored value may carry none, or another, so when `needed`
 /// the image is `data` with `id` set to `rid`, the key the record is stored
 /// under. Otherwise, and for data that is no object, it is `data` as it is.
-fn entry_image<'a>(data: &'a Value, rid: &RecordId, needed: bool) -> Cow<'a, Value> {
+pub(super) fn entry_image<'a>(data: &'a Value, rid: &RecordId, needed: bool) -> Cow<'a, Value> {
 	let Value::Object(object) = data else {
 		return Cow::Borrowed(data);
 	};
@@ -83,6 +83,8 @@ pub(super) struct InitialIndexValue<'a> {
 	pub(super) rid: &'a RecordId,
 	pub(super) opt_values: Option<Vec<Value>>,
 	pub(super) count_cond_match: Option<(bool, bool)>,
+	/// The record's doc-ID in the table's space, when the caller resolved it.
+	pub(super) doc_id: Option<crate::idx::docids::DocId>,
 }
 
 /// When a replay pass over the queued mutations may return.
@@ -569,9 +571,14 @@ impl Building {
 			.await
 			.map_err(crate::exec::migrate::into_error)?;
 		let result = async {
+			// Whether any record of the batch can have a queued mutation, read
+			// once on the snapshot every per-record lookup below reads: with no
+			// marker of the generation or legacy marker of the index, each
+			// lookup would miss.
+			let markers_held = self.holds_primary_markers(&lookup_tx, generation).await?;
 			// A record is baselined from its first queued mutation, which an
 			// older node may have marked under its own spelling.
-			let mut older_held = if generation != 0 {
+			let mut older_held = if markers_held && generation != 0 {
 				self.older_markers_held(&lookup_tx, generation, values, &keys).await?
 			} else {
 				Vec::new()
@@ -633,15 +640,18 @@ impl Building {
 					None => None,
 				};
 				// Is there already a queued update for this record?
-				let (opt_values, count_cond_match, queued) = if let Some(a) = self
-					.check_existing_primary_appending(
+				let existing = if markers_held {
+					self.check_existing_primary_appending(
 						&lookup_tx,
 						&rid.key,
 						older,
 						v1_appending_sentinel,
 					)
 					.await?
-				{
+				} else {
+					None
+				};
+				let (opt_values, count_cond_match, queued) = if let Some(a) = existing {
 					(a.old_values, baselined_match(a.count_cond_match), true)
 				} else {
 					// Otherwise, proceed with normal indexing.
@@ -674,6 +684,7 @@ impl Building {
 						rid: rid.as_ref(),
 						opt_values,
 						count_cond_match,
+						doc_id: None,
 					},
 					&mut rc,
 				)
@@ -737,6 +748,22 @@ impl Building {
 		})
 	}
 
+	/// Whether `tx` holds any primary-appending marker a record of this build
+	/// could be looked up by: a `!bp` marker of `generation`, in any spelling,
+	/// or a legacy `!ip` marker of the index.
+	pub(super) async fn holds_primary_markers(
+		&self,
+		tx: &Transaction,
+		generation: BuildGeneration,
+	) -> Result<bool> {
+		if generation != 0
+			&& !tx.keys(self.ikb.new_bp_range(generation)?, 1, 0, None).await?.is_empty()
+		{
+			return Ok(true);
+		}
+		Ok(!tx.keys_raw(self.ikb.new_ip_raw_range()?, 1, 0, None).await?.is_empty())
+	}
+
 	/// Index one initial-scan value.
 	pub(super) async fn index_initial_values(
 		&self,
@@ -750,6 +777,7 @@ impl Building {
 			rid,
 			opt_values,
 			count_cond_match,
+			doc_id,
 		} = value;
 		let mut io = IndexOperation::new(
 			ctx,
@@ -764,6 +792,9 @@ impl Building {
 		.within_build();
 		if let Some((old_matches, new_matches)) = count_cond_match {
 			io = io.with_count_cond_match(old_matches, new_matches);
+		}
+		if let Some(doc_id) = doc_id {
+			io = io.with_doc_id(doc_id);
 		}
 		if let Some(fulltext_index) = fulltext_index {
 			io.compute_fulltext_with_index(az_fn, fulltext_index, rc).await

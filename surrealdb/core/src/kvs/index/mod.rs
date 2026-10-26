@@ -39,6 +39,8 @@ mod doc_ids;
 mod kind;
 pub(crate) mod materialise;
 mod replay;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+mod scan;
 mod state;
 mod unseen;
 
@@ -99,7 +101,7 @@ const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
 /// ends in microseconds. The budget only binds where a single uninterruptible
 /// stretch runs long: one initial-scan or replay batch's index writes and
 /// commit, or one chunk of the doc-ID reclaim sweep, each bounded by
-/// [`INDEXING_BATCH_SIZE`](crate::kvs::INDEXING_BATCH_SIZE) records
+/// [`INDEXING_SCAN_BATCH_SIZE`](crate::kvs::INDEXING_SCAN_BATCH_SIZE) records
 /// and carrying no internal checkpoint. A build folds no compaction plan, so
 /// no vector graph apply runs inside it. Overrunning the budget falls back to
 /// the compare-and-swap on `!bs` as the only ordering against the builder,

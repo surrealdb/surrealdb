@@ -67,6 +67,9 @@ pub struct IndexOperation<'a> {
 	/// whose recording stamps the table's catalog version, or a build
 	/// ([`surrealdb_datastore::index_shapes`]).
 	shapes_by: ShapeRecorder,
+	/// The record's doc-ID in the table's space, when the caller has resolved
+	/// it ([`Self::with_doc_id`]).
+	doc_id: Option<DocId>,
 }
 
 type SingleGeometryCover = (Vec<crate::spatial::SpatialCellId>, Option<(f64, f64)>);
@@ -97,7 +100,16 @@ impl<'a> IndexOperation<'a> {
 			rid,
 			count_cond_match: None,
 			shapes_by: ShapeRecorder::Write,
+			doc_id: None,
 		}
+	}
+
+	/// The same operation for a record whose doc-ID in the table's space the
+	/// caller has resolved, or assigned, in the operation's transaction
+	/// ([`TableDocIds::resolve_or_assign_many`]): its entries carry that ID.
+	pub fn with_doc_id(mut self, doc_id: DocId) -> Self {
+		self.doc_id = Some(doc_id);
+		self
 	}
 
 	/// The same operation, applied by an index build: the value shapes it
@@ -175,11 +187,13 @@ impl<'a> IndexOperation<'a> {
 	/// assigned on first use — through the table's shared doc-ID space, so all
 	/// of a table's indexes agree on the record's doc-ID.
 	async fn entry_value(&self) -> Result<IndexEntryValue> {
-		let doc_id: Option<DocId> = if self.ix.has_entry_doc_ids() {
-			let doc_ids = TableDocIds::new(self.ns, self.db, self.table_name.clone());
-			Some(doc_ids.resolve_or_assign(self.env, &self.rid.key).await?)
-		} else {
-			None
+		let doc_id: Option<DocId> = match (self.ix.has_entry_doc_ids(), self.doc_id) {
+			(false, _) => None,
+			(true, Some(doc_id)) => Some(doc_id),
+			(true, None) => {
+				let doc_ids = TableDocIds::new(self.ns, self.db, self.table_name.clone());
+				Some(doc_ids.resolve_or_assign(self.env, &self.rid.key).await?)
+			}
 		};
 		Ok(IndexEntryValue {
 			rid: self.rid.clone(),

@@ -1770,6 +1770,7 @@ impl<'a> TreeWalk<'a> {
 			}
 			CountShape::Indexed {
 				table,
+				btree,
 				bitmap,
 				..
 			} => {
@@ -1778,12 +1779,26 @@ impl<'a> TreeWalk<'a> {
 						.first()
 						.ok_or_else(|| invariant("an indexed count has no condition"))?,
 				)?;
-				let children = match bitmap {
-					Some(shape) => {
+				let children = match (btree, bitmap) {
+					(_, Some(shape)) => {
 						let plan = self.bitmap_plan_of(shape)?;
 						self.bitmap_nodes(&plan)
 					}
-					None => vec![],
+					// The walks of a count summed over several accesses, each counted by its keys.
+					(Some(walks), None) if walks.len() > 1 => walks
+						.iter()
+						.map(|(index, access)| {
+							let mut attrs = index_scan_attrs(
+								table,
+								index.index.as_str(),
+								access,
+								Direction::Forward,
+							);
+							attrs.push(("keys_only".to_string(), "yes".to_string()));
+							self.node("IndexScan", ContextLevel::Database, attrs, vec![])
+						})
+						.collect(),
+					(_, None) => vec![],
 				};
 				Ok(self.node(
 					"IndexCountScan",
