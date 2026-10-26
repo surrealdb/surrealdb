@@ -68,6 +68,12 @@ pub struct IndexAnalyzer<'a> {
 	/// which emit no spatial index cells and would cause `geo::distance` to
 	/// raise a type error on a table scan.
 	non_geometry_spatial: Option<Arc<[bool]>>,
+	/// Per index of `indexes`, whether each column lists every record whose
+	/// value at the column's path contains a value under that value, or under
+	/// `NONE` or `NULL` (see
+	/// [`super::access_path::ElementColumns::elements_or_nullish`]); a column
+	/// past the end of its index's flags does not. `None` knows of none.
+	elements_or_nullish: Option<Arc<[super::access_path::ColumnFlags]>>,
 	/// Memoized Hilbert cell coverings and spherical area fractions computed
 	/// during this analyzer's lifetime, keyed by a 64-bit hash of
 	/// `(predicate, include_ancestors, max_ops)` and verified by equality on
@@ -104,6 +110,7 @@ impl<'a> IndexAnalyzer<'a> {
 			clock_allowed: false,
 			point_only_spatial: None,
 			non_geometry_spatial: None,
+			elements_or_nullish: None,
 			spatial_plan_cache: std::cell::RefCell::new(HashMap::new()),
 		}
 	}
@@ -113,6 +120,18 @@ impl<'a> IndexAnalyzer<'a> {
 	/// skip coarse ancestor probes.
 	pub fn with_point_only_spatial(mut self, flags: Arc<[bool]>) -> Self {
 		self.point_only_spatial = Some(flags);
+		self
+	}
+
+	/// Mark the element columns that `flags` indicates list every record
+	/// under its elements or under `NONE` or `NULL`, so a containment leaf over
+	/// the column's path that does not take each element is answered by seeking
+	/// the value and both nullish keys.
+	pub(crate) fn with_elements_or_nullish(
+		mut self,
+		flags: Arc<[super::access_path::ColumnFlags]>,
+	) -> Self {
+		self.elements_or_nullish = Some(flags);
 		self
 	}
 
@@ -245,6 +264,28 @@ impl<'a> IndexAnalyzer<'a> {
 	/// skips coercion), and nothing records it yet, so this is `false`.
 	fn element_seek_is_complete(&self, _idx: usize, _col: usize) -> bool {
 		false
+	}
+
+	/// Whether a containment leaf over `path` may be answered on column `col`
+	/// of index `idx` by seeking its value together with `NONE` and `NULL`.
+	///
+	/// The column takes every element of a path of plain fields, and the
+	/// index has recorded storing nothing whole in it. A value at the path
+	/// that contains `v` is then an array or a set holding `v` (listed under
+	/// `v`), or a value whose elements the path does not take — a scalar,
+	/// whose column value is `NONE` — while an object, the one other value
+	/// that contains a key, would have been stored whole. The seek is a
+	/// superset: the leaf is judged again over every record it yields.
+	fn seeks_containment_with_nullish(&self, idx: usize, col: usize, path: &LogicalExpr) -> bool {
+		let flagged = |flags: &Option<Arc<[super::access_path::ColumnFlags]>>| {
+			flags.as_ref().is_some_and(|flags| {
+				flags.get(idx).and_then(|f| f.get(col)).copied().unwrap_or(false)
+			})
+		};
+		!flagged(&self.no_containment)
+			&& flagged(&self.elements_or_nullish)
+			&& !path_takes_each(path)
+			&& self.indexes[idx].cols.get(col).is_some_and(|c| path_matches_containment(path, c))
 	}
 
 	/// The analyzer reading the query vector of a KNN operator whose right
@@ -1834,6 +1875,128 @@ impl<'a> IndexAnalyzer<'a> {
 		None
 	}
 
+	/// A union answering a containment conjunct of `cond` over the path of an
+	/// element column whose seek of the contained values is complete only
+	/// with the nullish keys ([`Self::seeks_containment_with_nullish`]): one
+	/// seek per value, one for `NONE` and one for `NULL`. Every record a branch
+	/// yields is judged by the whole condition again, so a record listed
+	/// under a nullish key that holds none of the values is dropped there.
+	///
+	/// Each record it yields is fetched to be judged, where a scan of the
+	/// table rejects most records before decoding them: the caller weighs
+	/// that ([`super::access_path::decide_access`]).
+	pub fn try_nullish_containment(
+		&self,
+		cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Option<AccessPath> {
+		let cond = cond?;
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return None;
+		}
+		let mut singles = Vec::new();
+		Self::collect_single_containments(cond, &mut singles);
+		if let Some(path) = singles.iter().find_map(|(path, value)| {
+			self.containment_with_nullish(path, std::slice::from_ref(value), direction)
+		}) {
+			return Some(path);
+		}
+		let mut exprs = Vec::new();
+		Self::collect_containment_expressions(cond, &mut exprs);
+		exprs.iter().find_map(|(path, values)| {
+			(!values.is_empty() && values.len() <= Self::MAX_IN_EXPANSION_SIZE)
+				.then(|| self.containment_with_nullish(path, values, direction))
+				.flatten()
+		})
+	}
+
+	/// Collect `path CONTAINS v` and `v INSIDE path` of a literal `v` from an
+	/// AND tree.
+	fn collect_single_containments(expr: &LogicalExpr, results: &mut Vec<(LogicalExpr, Value)>) {
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			Self::collect_single_containments(left, results);
+			Self::collect_single_containments(right, results);
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Contain,
+			right,
+		} = expr
+		{
+			if left.is_path()
+				&& let Some(v) = index_literal(right)
+			{
+				results.push((left.as_ref().clone(), v));
+			}
+		} else if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Inside,
+			right,
+		} = expr
+		{
+			if right.is_path()
+				&& let Some(v) = index_literal(left)
+			{
+				results.push((right.as_ref().clone(), v));
+			}
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && Self::is_truth_preserving_prefix(op, inner)
+		{
+			Self::collect_single_containments(inner, results);
+		}
+	}
+
+	/// A union answering a containment of `values` over `path` from a column
+	/// that lists every record under its elements or under `NONE` or `NULL`
+	/// ([`Self::seeks_containment_with_nullish`]): one seek per value and one
+	/// per nullish key. `None` when no such column is the leading column of an
+	/// index.
+	fn containment_with_nullish(
+		&self,
+		path: &LogicalExpr,
+		values: &[Value],
+		direction: Direction,
+	) -> Option<AccessPath> {
+		let (idx, ix_def) = self.indexes.iter().enumerate().find(|(idx, ix_def)| {
+			!ix_def.prepare_remove
+				&& matches!(ix_def.index, Index::Idx | Index::Uniq)
+				&& !matches!(self.with_hints, Some(With::Index(names))
+					if !names.iter().any(|n| n.as_str() == ix_def.name.as_str()))
+				&& self.seeks_containment_with_nullish(*idx, 0, path)
+		})?;
+		let index_ref = self.index_ref(idx);
+		let is_composite = ix_def.cols.len() > 1;
+		let mut keys: Vec<Value> = Vec::with_capacity(values.len() + 2);
+		for v in values.iter().cloned().chain([Value::None, Value::Null]) {
+			if !keys.contains(&v) {
+				keys.push(v);
+			}
+		}
+		let paths = keys
+			.into_iter()
+			.map(|v| AccessPath::BTreeScan {
+				index_ref: index_ref.clone(),
+				access: if is_composite {
+					BTreeAccess::literal_compound(vec![v], None)
+				} else {
+					BTreeAccess::literal_equality(v)
+				},
+				direction,
+			})
+			.collect();
+		// A record holding several of the values sits in several branches.
+		Some(AccessPath::Union {
+			paths,
+			dedupe: true,
+		})
+	}
+
 	/// Collect CONTAINSALL/CONTAINSANY (field path on left, array literal on
 	/// right) and ALLINSIDE/ANYINSIDE (array literal on left, field path on
 	/// right) from an AND tree.
@@ -1874,7 +2037,7 @@ impl<'a> IndexAnalyzer<'a> {
 		} else if let LogicalExpr::Prefix {
 			op,
 			expr: inner,
-		} = expr && !matches!(op, PrefixOperator::Not)
+		} = expr && Self::is_truth_preserving_prefix(op, inner)
 		{
 			Self::collect_containment_expressions(inner, results);
 		}
@@ -4947,6 +5110,126 @@ mod tests {
 			// (an array's entry fan-out would inflate the count).
 			let cond = parse_cond("a = 1 AND b = 2");
 			assert!(az.try_bitmap_count_fusion(&cond, &|_, _| false).is_none());
+		}
+	}
+
+	// ------------------------------------------------------------------
+	mod nullish_containment {
+		use super::*;
+
+		/// The keys of the union a containment expansion over `cols` answers
+		/// `cond` with, the leading column flagged as listing every record
+		/// under its elements or a nullish key (and withheld, when asked).
+		fn union_keys(
+			cols: &[&str],
+			cond: &str,
+			flagged: bool,
+			withheld: bool,
+		) -> Option<Vec<Value>> {
+			let mut a = analyzer(vec![idx_basic(1, "ix", cols)], None);
+			if flagged {
+				a = a.with_elements_or_nullish(vec![vec![true].into_boxed_slice()].into());
+			}
+			if withheld {
+				a = a.without_containment_on(vec![vec![true].into_boxed_slice()].into());
+			}
+			let cond = parse_cond(cond);
+			let Some(AccessPath::Union {
+				paths,
+				dedupe,
+			}) = a.try_nullish_containment(Some(&cond), crate::kvs::Direction::Forward)
+			else {
+				return None;
+			};
+			assert!(dedupe);
+			Some(
+				paths
+					.iter()
+					.map(|p| {
+						let AccessPath::BTreeScan {
+							access,
+							..
+						} = p
+						else {
+							panic!("unexpected branch {p:?}");
+						};
+						let operand = if let BTreeAccess::Compound {
+							prefix,
+							range: None,
+							..
+						} = access && let [operand] = prefix.as_slice()
+						{
+							operand
+						} else if let BTreeAccess::Equality(operand) = access {
+							operand
+						} else {
+							panic!("unexpected access {access:?}");
+						};
+						let BoundOperand::Literal(v) = operand else {
+							panic!("unexpected operand {operand:?}");
+						};
+						v.clone()
+					})
+					.collect(),
+			)
+		}
+
+		#[test]
+		fn a_containment_over_a_flagged_element_column_seeks_the_value_and_the_nullish_keys() {
+			let keys = vec![Value::from("x"), Value::None, Value::Null];
+			for cond in ["tags CONTAINS 'x'", "'x' INSIDE tags", "n = 1 AND tags CONTAINS 'x'"] {
+				assert_eq!(
+					union_keys(&["tags.*", "created_at"], cond, true, false),
+					Some(keys.clone()),
+					"{cond}"
+				);
+				assert_eq!(
+					union_keys(&["tags.*"], cond, true, false),
+					Some(keys.clone()),
+					"{cond}"
+				);
+			}
+		}
+
+		#[test]
+		fn a_multi_value_containment_seeks_each_value_and_the_nullish_keys() {
+			assert_eq!(
+				union_keys(&["tags.*"], "tags CONTAINSANY ['x', 'y']", true, false),
+				Some(vec![Value::from("x"), Value::from("y"), Value::None, Value::Null])
+			);
+		}
+
+		#[test]
+		fn an_unflagged_or_withheld_column_is_not_sought() {
+			for cond in ["tags CONTAINS 'x'", "'x' INSIDE tags", "tags CONTAINSANY ['x', 'y']"] {
+				assert_eq!(union_keys(&["tags.*"], cond, false, false), None, "{cond}");
+				assert_eq!(union_keys(&["tags.*"], cond, true, true), None, "{cond}");
+			}
+		}
+
+		#[test]
+		fn a_path_taking_each_element_keeps_its_plain_seek() {
+			// `tags.* CONTAINS 'x'` cannot match a scalar, so its seek needs no
+			// nullish key and stays a candidate of its own.
+			let a = analyzer(vec![idx_basic(1, "ix", &["tags.*"])], None)
+				.with_elements_or_nullish(vec![vec![true].into_boxed_slice()].into());
+			let cond = parse_cond("tags.* CONTAINS 'x'");
+			assert!(find_for(&a.analyze(Some(&cond), None), "ix").is_some());
+			assert!(
+				a.try_nullish_containment(Some(&cond), crate::kvs::Direction::Forward).is_none()
+			);
+		}
+
+		#[test]
+		fn a_negated_containment_is_not_sought() {
+			assert_eq!(union_keys(&["tags.*"], "!(tags CONTAINS 'x')", true, false), None);
+			// A cast to a string is truthy whether or not the array holds `x`.
+			assert_eq!(union_keys(&["tags.*"], "<string> (tags CONTAINS 'x')", true, false), None);
+			assert_eq!(
+				union_keys(&["tags.*"], "<string> (tags CONTAINSANY ['x', 'y'])", true, false),
+				None
+			);
+			assert_eq!(union_keys(&["tags.*"], "tags CONTAINS 'x' OR n = 1", true, false), None);
 		}
 	}
 

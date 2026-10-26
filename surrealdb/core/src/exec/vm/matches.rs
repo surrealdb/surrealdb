@@ -452,8 +452,14 @@ impl MatchesEval {
 			// The terms are read through the node's cache, keyed by the table's
 			// catalog version, which the run reads as it reads the version a
 			// compiled unit is kept under.
-			crate::exec::compiles::seam(fti.extract_judging_terms(frozen, &az_fn, query.to_owned()))
-				.await?
+			// They are only asked which documents carry them.
+			crate::exec::compiles::seam(fti.extract_membership_terms(
+				frozen,
+				&az_fn,
+				query.to_owned(),
+				true,
+			))
+			.await?
 		};
 
 		Ok((fti, query_terms))

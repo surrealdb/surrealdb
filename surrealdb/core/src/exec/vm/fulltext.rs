@@ -57,24 +57,29 @@ pub(super) async fn candidates(
 	if let Some(shared) = shared
 		&& let Some(ft) = shared
 			.resources_for_scan(ctx, index.definition().index_id, || {
-				query_terms(ctx, services, table, index, query)
+				query_terms(ctx, services, table, index, query, false)
 			})
 			.await?
 	{
 		return Ok(ft.index.new_hits_iterator(&ft.terms, operator.operator).map(FullTextHits::new));
 	}
-	let (fti, terms) = query_terms(ctx, services, table, index, query).await?;
+	// No call of the program scores from these terms: the scan lists their
+	// documents, and any score is the shared context's.
+	let (fti, terms) = query_terms(ctx, services, table, index, query, true).await?;
 	Ok(fti.new_hits_iterator(&terms, operator.operator).map(FullTextHits::new))
 }
 
 /// Full-text index `index` of `table`, opened, and `query`'s terms with the
-/// documents each carries.
+/// documents each carries; the documents alone where `docs_only`, for a
+/// caller that scores none of them from the terms
+/// ([`FullTextIndex::cached_states`]).
 async fn query_terms(
 	ctx: &ExecutionContext,
 	services: &impl Services,
 	table: &TableName,
 	index: &IndexRef,
 	query: &str,
+	docs_only: bool,
 ) -> FlowResult<(FullTextIndex, QueryTerms)> {
 	#[cfg(test)]
 	crate::exec::function::TERM_READS.with(|reads| reads.set(reads.get() + 1));
@@ -92,7 +97,9 @@ async fn query_terms(
 	// it reads the version a compiled unit is kept under.
 	let txn = ctx.txn();
 	let scope = crate::exec::compiles::seam(fti.term_scope(&txn)).await?;
-	let cached = fti.cached_states(scope.as_ref(), &plan);
+	// The first reader of a term the cache lacks reads it; the others wait for
+	// what it reads.
+	let (cached, fills) = fti.load_states(scope.as_ref(), &plan, docs_only).await;
 	// An uncached term reads its residual, and its bitmap where the index
 	// keeps one, as point keys; its posting blocks, where the index keeps
 	// those, are a range read beside its changes.
@@ -168,7 +175,7 @@ async fn query_terms(
 		};
 		read.push((compacted, residual));
 	}
-	fti.settle_states(scope.as_ref(), &plan, &mut states, cached, read)
+	fti.settle_states(scope.as_ref(), &plan, &mut states, cached, fills, read)
 		.context("Failed to extract query terms")?;
 	let terms = plan.resolve(states).context("Failed to extract query terms")?.with_scope(scope);
 	Ok((fti, terms))
@@ -235,7 +242,7 @@ impl UnionScores {
 			clause
 				.context
 				.resources_for_scan(ctx, clause.index.definition().index_id, || {
-					query_terms(ctx, services, &clause.table, &clause.index, &clause.query)
+					query_terms(ctx, services, &clause.table, &clause.index, &clause.query, false)
 				})
 				.await?;
 		}

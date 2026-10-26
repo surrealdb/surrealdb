@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "`tags CONTAINS v` through an index on `tags.*` must not miss a stored scalar that satisfies it (a string holding `v`, a range spanning it, a geometry containing it), matching NOINDEX. A declared array kind is not proof that no scalar is stored, so only a flattening query path (`tags.* CONTAINS v`) seeks the index. That spelling still keeps a stored object whole and follows a stored record link, so section (6) pins the rows the indexed read misses for them as a known gap."
+reason = "`tags CONTAINS v` through an index on `tags.*` must not miss a stored scalar that satisfies it (a string holding `v`, a range spanning it, a geometry containing it), matching NOINDEX. A declared array kind is not proof that no scalar is stored. A flattening query path (`tags.* CONTAINS v`) seeks the index for `v` alone; the plain path seeks `v`, `NONE` and `NULL`, under which the column lists a stored scalar, with the containment judged again over every record, and reads the table once the index has stored a value whole. The flattening spelling still keeps a stored object whole and follows a stored record link, so section (6) pins the rows the indexed read misses for them as a known gap."
 issue = 1375
 
 [[test.results]]
@@ -47,7 +47,11 @@ value = "[c:flat, c:longer, c:scalar]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: c, direction: Forward, predicate: tags CONTAINS 'x', pre_decode_filter: yes]
+    Filter [ctx: Db] [predicate: tags CONTAINS 'x']
+        UnionIndexScan [ctx: Db] [table: c, branches: 3]
+            IndexScan [ctx: Db] [table: c, index: by_tag, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: c, index: by_tag, access: = NONE, direction: Forward]
+            IndexScan [ctx: Db] [table: c, index: by_tag, access: = NULL, direction: Forward]
 "'''
 
 [[test.results]]
@@ -86,7 +90,11 @@ value = "[ct:flat]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: ct, direction: Forward, predicate: tags CONTAINS 'x', pre_decode_filter: yes]
+    Filter [ctx: Db] [predicate: tags CONTAINS 'x']
+        UnionIndexScan [ctx: Db] [table: ct, branches: 3]
+            IndexScan [ctx: Db] [table: ct, index: by_tag, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: ct, index: by_tag, access: = NONE, direction: Forward]
+            IndexScan [ctx: Db] [table: ct, index: by_tag, access: = NULL, direction: Forward]
 "'''
 
 [[test.results]]
@@ -206,6 +214,7 @@ value = '''
     Filter [ctx: Db] [predicate: tags… CONTAINS 'x']
         TableScan [ctx: Db] [table: cf, direction: Forward]
 "'''
+
 [[test.results]]
 value = "NONE"
 
@@ -228,7 +237,12 @@ value = "[tc:1, tc:2]"
 value = "[tc:1, tc:2]"
 
 [[test.results]]
-match = '''string::contains($result, "Filter") AND string::contains($result, "access: ['active']")'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: status = 'active' AND tags CONTAINS 'x']
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: tc, index: ix, access: ['active'], direction: Forward]
+"'''
 
 [[test.results]]
 value = "[tc:1]"
@@ -237,7 +251,10 @@ value = "[tc:1]"
 value = "[tc:1]"
 
 [[test.results]]
-match = '''string::contains($result, "access: ['active', 'x']") AND !string::contains($result, "Filter")'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: tc, index: ix, access: ['active', 'x'], direction: Forward]
+"'''
 
 [[test.results]]
 value = "NONE"
@@ -267,7 +284,13 @@ value = "[tm:1, tm:2]"
 value = "[tm:1, tm:2]"
 
 [[test.results]]
-match = '''string::contains($result, "UnionIndexScan")'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['x', 'y']]
+        UnionIndexScan [ctx: Db] [table: tm, branches: 2]
+            IndexScan [ctx: Db] [table: tm, index: ix, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: tm, index: ix, access: = 'y', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[tm:1]"
@@ -300,7 +323,10 @@ value = "[wa:1, wa:2]"
 value = "[wa:1, wa:2]"
 
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "table: wa")'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: wa, index: ix, access: = 'x', direction: Forward]
+"'''
 
 [[test.results]]
 value = "NONE"
@@ -318,7 +344,10 @@ value = "[wm:1]"
 value = "[wm:1]"
 
 [[test.results]]
-match = '''string::contains($result, "IndexScan") AND string::contains($result, "table: wm")'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: wm, index: ix, access: = ['x'], direction: Forward]
+"'''
 */
 
 -- (1) Schemaless table with wildcard index: string scalar records must not be missed
@@ -341,7 +370,7 @@ SELECT count() FROM c WITH NOINDEX WHERE tags CONTAINS 'x' GROUP ALL;
 SELECT VALUE id FROM c WHERE 'x' INSIDE tags ORDER BY id;
 SELECT VALUE id FROM c WITH NOINDEX WHERE 'x' INSIDE tags ORDER BY id;
 
--- The index is declined for tags CONTAINS 'x'
+-- tags CONTAINS 'x' seeks 'x', NONE and NULL, and filters
 EXPLAIN SELECT VALUE id FROM c WHERE tags CONTAINS 'x';
 
 -- A flattened query path excludes non-array scalars, so it uses the index
@@ -349,7 +378,8 @@ SELECT VALUE id FROM c WHERE tags.* CONTAINS 'x' ORDER BY id;
 SELECT VALUE id FROM c WITH NOINDEX WHERE tags.* CONTAINS 'x' ORDER BY id;
 EXPLAIN SELECT VALUE id FROM c WHERE tags.* CONTAINS 'x';
 
--- (2) Typed array column: the declared kind is not trusted, so the scan answers
+-- (2) Typed array column: the declared kind is not trusted, so the seek still
+-- reads the nullish keys and filters
 DEFINE TABLE ct SCHEMALESS;
 DEFINE FIELD tags ON ct TYPE array<string>;
 DEFINE INDEX by_tag ON ct FIELDS tags.*;

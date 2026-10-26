@@ -1381,43 +1381,80 @@ impl FullTextIndex {
 
 	/// The compacted state of each of `plan`'s terms, its documents and its
 	/// residual, as the node's cache holds it at `scope`, in order; `None` for a
-	/// term the caller reads and hands to [`Self::settle_states`].
-	pub fn cached_states(
+	/// term the caller reads and hands to [`Self::settle_states`], with the
+	/// fill the caller completes there where it is the one reader of the term
+	/// the others wait for ([`crate::ft::cache::TermFill`]).
+	///
+	/// Where `docs_only`, the caller scores no document from the terms'
+	/// postings, and a term whose postings the cache does not hold may be
+	/// served as its documents alone ([`Compacted::Bitmap`]); terms resolved
+	/// from those score every document from its stored postings and bound no
+	/// score, as [`QueryTerms::scored_as_stored`] does.
+	///
+	/// The fills are taken in the order of the terms' text, so two readers of
+	/// overlapping terms never each wait for a term the other fills.
+	#[allow(clippy::type_complexity)]
+	pub async fn load_states(
 		&self,
 		scope: Option<&crate::ft::cache::TermScope>,
 		plan: &QueryPlan,
-	) -> Vec<Option<(Compacted, Option<TermDocsResidual>)>> {
-		plan.terms
-			.iter()
-			.map(|term| {
-				let cached = self.cache.term(scope?, term)?;
-				Some((cached.compacted.clone(), cached.residual.clone()))
-			})
-			.collect()
+		docs_only: bool,
+	) -> (
+		Vec<Option<(Compacted, Option<TermDocsResidual>)>>,
+		Vec<Option<crate::ft::cache::TermFill<'_>>>,
+	) {
+		let mut cached: Vec<_> = plan.terms.iter().map(|_| None).collect();
+		let mut fills: Vec<_> = plan.terms.iter().map(|_| None).collect();
+		let Some(scope) = scope else {
+			return (cached, fills);
+		};
+		let mut order: Vec<usize> = (0..plan.terms.len()).collect();
+		order.sort_by(|a, b| plan.terms[*a].cmp(&plan.terms[*b]));
+		for at in order {
+			match self.cache.term_or_fill(scope, &plan.terms[at], docs_only).await {
+				Ok(term) => cached[at] = Some((term.compacted.clone(), term.residual.clone())),
+				Err(fill) => fills[at] = fill,
+			}
+		}
+		(cached, fills)
 	}
 
 	/// Gives each of `states`, one per term of `plan`, its compacted documents
-	/// and residual: the cached state where `cached` ([`Self::cached_states`])
+	/// and residual: the cached state where `cached` ([`Self::load_states`])
 	/// holds one, and otherwise the next of `read`, the uncached terms' states
-	/// in order as the caller read them, which is cached at `scope`.
+	/// in order as the caller read them, which is cached at `scope` and handed
+	/// to the readers waiting on the term's fill in `fills`.
 	pub fn settle_states(
 		&self,
 		scope: Option<&crate::ft::cache::TermScope>,
 		plan: &QueryPlan,
 		states: &mut [TermState],
 		cached: Vec<Option<(Compacted, Option<TermDocsResidual>)>>,
+		fills: Vec<Option<crate::ft::cache::TermFill<'_>>>,
 		read: impl IntoIterator<Item = (Compacted, Option<TermDocsResidual>)>,
 	) -> Result<()> {
 		let mut read = read.into_iter();
-		for ((state, cached), term) in states.iter_mut().zip(cached).zip(&plan.terms) {
+		for (((state, cached), fill), term) in
+			states.iter_mut().zip(cached).zip(fills).zip(&plan.terms)
+		{
 			let (compacted, residual) = match cached {
 				Some(cached) => cached,
 				None => {
 					let (compacted, residual) = read
 						.next()
 						.ok_or_else(|| anyhow::anyhow!("a term's state the read did not answer"))?;
-					if let Some(scope) = scope {
-						self.cache.insert_term(scope, term, compacted.clone(), residual.clone());
+					match (fill, scope) {
+						(Some(fill), Some(scope)) => fill.finish(
+							&self.cache,
+							scope,
+							term,
+							compacted.clone(),
+							residual.clone(),
+						),
+						(None, Some(scope)) => {
+							self.cache.insert_term(scope, term, compacted.clone(), residual.clone())
+						}
+						(_, None) => {}
 					}
 					(compacted, residual)
 				}
@@ -1454,7 +1491,7 @@ impl FullTextIndex {
 		az_fn: &dyn AnalyzerFunction,
 		query_string: String,
 	) -> Result<QueryTerms> {
-		self.read_terms(env, az_fn, query_string, false).await
+		self.read_terms(env, az_fn, query_string, false, false).await
 	}
 
 	/// [`Self::extract_querying_terms`] for a reader that judges documents one
@@ -1472,17 +1509,40 @@ impl FullTextIndex {
 		query_string: String,
 	) -> Result<QueryTerms> {
 		let judging = env.tx().writeable();
-		self.read_terms(env, az_fn, query_string, judging).await
+		self.read_terms(env, az_fn, query_string, judging, false).await
+	}
+
+	/// The terms of `query_string` for a reader that only asks which
+	/// documents carry them, scoring none: a term's documents may be served
+	/// from the node's cache where its postings are not
+	/// ([`crate::ft::cache::FullTextCache::term_docs`]). Read as
+	/// [`Self::extract_judging_terms`] reads them where `judging`, and as
+	/// [`Self::extract_querying_terms`] does otherwise.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::idx::fulltext", skip_all)
+	)]
+	pub async fn extract_membership_terms(
+		&self,
+		env: &dyn IndexEnv,
+		az_fn: &dyn AnalyzerFunction,
+		query_string: String,
+		judging: bool,
+	) -> Result<QueryTerms> {
+		let judging = judging && env.tx().writeable();
+		self.read_terms(env, az_fn, query_string, judging, true).await
 	}
 
 	/// The terms of `query_string`, read through `env`'s transaction and
-	/// resolved as [`QueryPlan::resolve_judging`] resolves them.
+	/// resolved as [`QueryPlan::resolve_judging`] resolves them; their
+	/// documents alone where `docs_only` ([`Self::cached_states`]).
 	async fn read_terms(
 		&self,
 		env: &dyn IndexEnv,
 		az_fn: &dyn AnalyzerFunction,
 		query_string: String,
 		judging: bool,
+		docs_only: bool,
 	) -> Result<QueryTerms> {
 		let plan = self.plan_query(az_fn, query_string).await?;
 		let tx = env.tx();
@@ -1503,7 +1563,7 @@ impl FullTextIndex {
 		// The compacted state of a term the node has cached for this snapshot's
 		// generation is taken from memory; the rest is read, and cached.
 		let scope = self.term_scope(&tx).await?;
-		let cached = self.cached_states(scope.as_ref(), &plan);
+		let (cached, fills) = self.load_states(scope.as_ref(), &plan, docs_only).await;
 		let missing: Vec<&str> = plan
 			.terms
 			.iter()
@@ -1536,6 +1596,7 @@ impl FullTextIndex {
 			&plan,
 			&mut states,
 			cached,
+			fills,
 			compacted.into_iter().zip(residuals),
 		)?;
 		Ok(plan.resolve_judging(states, judging)?.with_scope(scope))

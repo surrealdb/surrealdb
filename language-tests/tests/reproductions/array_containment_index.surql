@@ -6,7 +6,7 @@ auth = { level = "owner" }
 
 
 [test]
-reason = "An array-element index (`FIELDS tags[*]`) answers `tags[*] CONTAINS v` and `v INSIDE tags[*]` with an index seek. `tags CONTAINS v` returns the same rows here but is answered by a scan, because a stored scalar could satisfy it without holding `v` as an element."
+reason = "An array-element index (`FIELDS tags[*]`) answers `tags[*] CONTAINS v` and `v INSIDE tags[*]` with an index seek. `tags CONTAINS v` returns the same rows here; a stored scalar could satisfy it without holding `v` as an element, so it seeks `v` together with `NONE` and `NULL` (under which the column lists a scalar) and judges the predicate again over every record the seek yields."
 
 [[test.results]]
 value = "NONE"
@@ -35,7 +35,11 @@ value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name]
-    TableScan [ctx: Db] [table: organization, direction: Forward, predicate: mission_topic_tags CONTAINS 'climate', pre_decode_filter: yes]
+    Filter [ctx: Db] [predicate: mission_topic_tags CONTAINS 'climate']
+        UnionIndexScan [ctx: Db] [table: organization, branches: 3]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = 'climate', direction: Forward]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = NONE, direction: Forward]
+            IndexScan [ctx: Db] [table: organization, index: org_topics, access: = NULL, direction: Forward]
 "'''
 
 [[test.results]]

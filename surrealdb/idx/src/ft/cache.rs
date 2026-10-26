@@ -58,8 +58,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use quick_cache::sync::Cache;
-use quick_cache::{OptionsBuilder, Weighter};
+use quick_cache::sync::{Cache, DefaultLifecycle, PlaceholderGuard};
+use quick_cache::{DefaultHashBuilder, OptionsBuilder, Weighter};
 use surrealdb_datastore::Transaction;
 use uuid::Uuid;
 
@@ -132,6 +132,8 @@ pub struct StoredDocument {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Key {
 	Term(TermScope, String),
+	/// A term's documents alone, for a reader that scores none of them.
+	TermDocs(TermScope, String),
 	Document(TermScope, DocId),
 }
 
@@ -155,12 +157,109 @@ impl Weighter<Key, Weighed> for EntryWeighter {
 	fn weight(&self, key: &Key, value: &Weighed) -> u64 {
 		// The fixed key and entry fields, what the key names and the measured state.
 		let named = match key {
-			Key::Term(scope, term) => scope.table.as_str().len() + term.len(),
+			Key::Term(scope, term) | Key::TermDocs(scope, term) => {
+				scope.table.as_str().len() + term.len()
+			}
 			Key::Document(scope, _) => scope.table.as_str().len(),
 		};
 		(std::mem::size_of::<Key>() + std::mem::size_of::<Weighed>() + 32 + named) as u64
 			+ value.weight
 	}
+}
+
+/// A term one reader reads and caches while every other reader asking for it
+/// waits ([`FullTextCache::term_or_fill`]).
+///
+/// The first queries to read a term after a build or a compaction would each
+/// read and decode the whole of it, a cost that grows with the documents the
+/// term carries; one of them reads it and the others are handed what it
+/// read. A fill dropped without [`Self::finish`], by a reader that failed or
+/// was cancelled, lets the next waiter read the term in its place.
+pub struct TermFill<'a> {
+	guard: PlaceholderGuard<
+		'a,
+		Key,
+		Weighed,
+		EntryWeighter,
+		DefaultHashBuilder,
+		DefaultLifecycle<Key, Weighed>,
+	>,
+	/// Whether the readers waiting score none of the documents: they are
+	/// handed the term's documents alone.
+	docs_only: bool,
+}
+
+impl TermFill<'_> {
+	/// Caches `term`'s compacted state at `scope` in `cache`, as
+	/// [`FullTextCache::insert_term`] does, and hands it to the readers
+	/// waiting for it.
+	pub fn finish(
+		self,
+		cache: &FullTextCache,
+		scope: &TermScope,
+		term: &str,
+		compacted: Compacted,
+		residual: Option<TermDocsResidual>,
+	) {
+		let docs = docs_entry(&compacted, &residual);
+		let whole = term_entry(compacted, residual);
+		let (handed, other) = match (self.docs_only, docs) {
+			(true, Some(docs)) => (docs, Some((Key::Term(scope.clone(), term.to_owned()), whole))),
+			(false, Some(docs)) => {
+				(whole, Some((Key::TermDocs(scope.clone(), term.to_owned()), docs)))
+			}
+			// A term whose whole state is its documents serves both readers.
+			(true, None) => {
+				(whole.clone(), Some((Key::Term(scope.clone(), term.to_owned()), whole)))
+			}
+			(false, None) => (whole, None),
+		};
+		// A placeholder an insert of another reader replaced hands its waiters
+		// that reader's value instead.
+		let _ = self.guard.insert(handed);
+		if let (Some(entries), Some((key, value))) = (&cache.entries, other) {
+			entries.insert(key, value);
+		}
+	}
+}
+
+/// The cache entry of a term's whole compacted state.
+fn term_entry(compacted: Compacted, residual: Option<TermDocsResidual>) -> Weighed {
+	let held = match &compacted {
+		Compacted::Absent => 0,
+		Compacted::Bitmap(bitmap) => bitmap.serialized_size() as u64,
+		Compacted::Postings(postings) => postings.weight(),
+	};
+	Weighed {
+		weight: held + residual_weight(&residual),
+		entry: Entry::Term(Arc::new(CompactedTerm {
+			compacted,
+			residual,
+		})),
+	}
+}
+
+/// The cache entry of the documents alone of postings a term keeps in blocks;
+/// `None` for a term whose whole state is its documents.
+fn docs_entry(compacted: &Compacted, residual: &Option<TermDocsResidual>) -> Option<Weighed> {
+	let Compacted::Postings(postings) = compacted else {
+		return None;
+	};
+	let docs = postings.docs().clone();
+	Some(Weighed {
+		weight: docs.serialized_size() as u64 + residual_weight(residual),
+		entry: Entry::Term(Arc::new(CompactedTerm {
+			compacted: Compacted::Bitmap(docs),
+			residual: residual.clone(),
+		})),
+	})
+}
+
+/// What a term's residual holds.
+fn residual_weight(residual: &Option<TermDocsResidual>) -> u64 {
+	residual
+		.as_ref()
+		.map_or(0, |residual| (residual.counts.len() * std::mem::size_of::<(u64, i64)>()) as u64)
 }
 
 /// The least a shard of the cache holds.
@@ -231,7 +330,25 @@ impl FullTextCache {
 		}
 	}
 
-	/// Caches the compacted state of `term` in `scope`.
+	/// The documents of `term` in `scope` with its residual, when cached:
+	/// its whole compacted state, or the documents alone where the postings a
+	/// term keeps in blocks are not cached
+	/// ([`crate::ft::fulltext::Compacted::Bitmap`]). For a reader that scores
+	/// no document from the term's postings.
+	pub fn term_docs(&self, scope: &TermScope, term: &str) -> Option<Arc<CompactedTerm>> {
+		if let Some(term) = self.term(scope, term) {
+			return Some(term);
+		}
+		match self.entries.as_ref()?.get(&Key::TermDocs(scope.clone(), term.to_owned()))?.entry {
+			Entry::Term(term) => Some(term),
+			Entry::Document(_) => None,
+		}
+	}
+
+	/// Caches the compacted state of `term` in `scope`. Postings are also
+	/// cached as their documents alone ([`Self::term_docs`]): the documents of
+	/// a term most documents carry fit in a fraction of what its postings
+	/// hold, which may be more than the cache admits.
 	pub fn insert_term(
 		&self,
 		scope: &TermScope,
@@ -242,25 +359,46 @@ impl FullTextCache {
 		let Some(entries) = &self.entries else {
 			return;
 		};
-		let held = match &compacted {
-			Compacted::Absent => 0,
-			Compacted::Bitmap(bitmap) => bitmap.serialized_size() as u64,
-			Compacted::Postings(postings) => postings.weight(),
+		if let Some(docs) = docs_entry(&compacted, &residual) {
+			entries.insert(Key::TermDocs(scope.clone(), term.to_owned()), docs);
+		}
+		entries.insert(Key::Term(scope.clone(), term.to_owned()), term_entry(compacted, residual));
+	}
+
+	/// The compacted state of `term` in `scope` as [`Self::term`] serves it,
+	/// or as [`Self::term_docs`] does where `docs_only`; where the cache holds
+	/// none, the fill this reader is to complete once it has read the term
+	/// ([`TermFill`]), while another reader filling it is waited for and its
+	/// state taken. `Err(None)` for a cache that holds nothing.
+	pub async fn term_or_fill(
+		&self,
+		scope: &TermScope,
+		term: &str,
+		docs_only: bool,
+	) -> Result<Arc<CompactedTerm>, Option<TermFill<'_>>> {
+		let entries = self.entries.as_ref().ok_or(None)?;
+		let key = if docs_only {
+			if let Some(term) = self.term(scope, term) {
+				return Ok(term);
+			}
+			Key::TermDocs(scope.clone(), term.to_owned())
+		} else {
+			Key::Term(scope.clone(), term.to_owned())
 		};
-		let weight = held
-			+ residual.as_ref().map_or(0, |residual| {
-				(residual.counts.len() * std::mem::size_of::<(u64, i64)>()) as u64
-			});
-		entries.insert(
-			Key::Term(scope.clone(), term.to_owned()),
-			Weighed {
-				entry: Entry::Term(Arc::new(CompactedTerm {
-					compacted,
-					residual,
-				})),
-				weight,
-			},
-		);
+		match entries.get_value_or_guard_async(&key).await {
+			Ok(Weighed {
+				entry: Entry::Term(term),
+				..
+			}) => Ok(term),
+			Ok(Weighed {
+				entry: Entry::Document(_),
+				..
+			}) => Err(None),
+			Err(guard) => Err(Some(TermFill {
+				guard,
+				docs_only,
+			})),
+		}
 	}
 
 	/// The stored state of document `doc_id` in `scope`, when cached.
@@ -370,6 +508,90 @@ mod tests {
 			);
 			assert!(cache.term(&scope(1, 1), "common").is_some(), "a {mib} MiB cache refused it");
 		}
+	}
+
+	/// The postings of a term heavier than the cache admits are not kept, but
+	/// their documents are, and served to a reader of the documents alone; a
+	/// reader of the whole state finds nothing.
+	#[test]
+	fn the_documents_of_postings_too_heavy_to_keep_are_kept() {
+		let blocks: Vec<_> = (0..1000u64)
+			.map(|block| {
+				crate::ft::fulltext::PostingBlock::from_entries(
+					(0..256u64).map(|at| (block * 256 + at, 1 + at % 5, 10 + at % 30)),
+				)
+			})
+			.collect();
+		let postings =
+			Arc::new(crate::kernels::postings::TermPostings::from_blocks(&blocks).unwrap());
+		let cache = FullTextCache::new(2 * 1024 * 1024);
+		assert!(postings.weight() > 2 * 1024 * 1024, "{} bytes", postings.weight());
+		cache.insert_term(&scope(1, 1), "common", Compacted::Postings(Arc::clone(&postings)), None);
+		assert!(cache.term(&scope(1, 1), "common").is_none(), "the postings are refused");
+		let docs = cache.term_docs(&scope(1, 1), "common").expect("the documents are kept");
+		assert!(matches!(&docs.compacted, Compacted::Bitmap(cached) if cached == postings.docs()));
+		assert!(cache.term_docs(&scope(2, 1), "common").is_none(), "another generation");
+		// A term whose whole state is kept answers a reader of its documents too.
+		let bitmap: RoaringTreemap = [1u64, 2].into_iter().collect();
+		cache.insert_term(&scope(1, 1), "rare", Compacted::Bitmap(bitmap.clone()), None);
+		let docs = cache.term_docs(&scope(1, 1), "rare").expect("the state is kept");
+		assert!(matches!(&docs.compacted, Compacted::Bitmap(cached) if *cached == bitmap));
+	}
+
+	/// One reader fills a term the cache lacks while another reader of it
+	/// waits, and is handed what the first read: the documents alone to a
+	/// reader that scores none, though the postings were too heavy to keep.
+	/// A fill dropped unfinished leaves the term to the next reader.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn a_term_is_filled_by_one_reader_while_the_others_wait() {
+		let blocks: Vec<_> = (0..1000u64)
+			.map(|block| {
+				crate::ft::fulltext::PostingBlock::from_entries(
+					(0..256u64).map(|at| (block * 256 + at, 1 + at % 5, 10 + at % 30)),
+				)
+			})
+			.collect();
+		let postings =
+			Arc::new(crate::kernels::postings::TermPostings::from_blocks(&blocks).unwrap());
+		let cache = Arc::new(FullTextCache::new(2 * 1024 * 1024));
+		// A fill dropped unfinished hands the term to the next reader.
+		let Err(Some(abandoned)) = cache.term_or_fill(&scope(1, 1), "common", true).await else {
+			panic!("the first reader fills the term");
+		};
+		drop(abandoned);
+		let Err(Some(fill)) = cache.term_or_fill(&scope(1, 1), "common", true).await else {
+			panic!("the next reader fills the term");
+		};
+		let waiter = {
+			let cache = Arc::clone(&cache);
+			tokio::spawn(async move {
+				match cache.term_or_fill(&scope(1, 1), "common", true).await {
+					Ok(term) => term,
+					Err(_) => panic!("a reader waits for the fill under way"),
+				}
+			})
+		};
+		tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		assert!(!waiter.is_finished(), "the waiter waits for the fill");
+		fill.finish(
+			&cache,
+			&scope(1, 1),
+			"common",
+			Compacted::Postings(Arc::clone(&postings)),
+			None,
+		);
+		let handed = waiter.await.unwrap();
+		assert!(matches!(&handed.compacted, Compacted::Bitmap(docs) if docs == postings.docs()));
+		assert!(cache.term_docs(&scope(1, 1), "common").is_some(), "the documents are kept");
+		// A term whose whole state is its documents, filled for a reader of its
+		// documents, answers a reader of its whole state too.
+		let Err(Some(fill)) = cache.term_or_fill(&scope(1, 1), "bitmap", true).await else {
+			panic!("the reader fills the term");
+		};
+		let bitmap: RoaringTreemap = [7u64, 8].into_iter().collect();
+		fill.finish(&cache, &scope(1, 1), "bitmap", Compacted::Bitmap(bitmap.clone()), None);
+		let whole = cache.term(&scope(1, 1), "bitmap").expect("the whole state is kept");
+		assert!(matches!(&whole.compacted, Compacted::Bitmap(cached) if *cached == bitmap));
 	}
 
 	/// A cache of size zero holds nothing.

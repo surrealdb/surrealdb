@@ -1542,6 +1542,29 @@ pub(crate) fn with_array_columns_as_elements(
 		.collect();
 	let non_geometry_spatial =
 		non_geometry_spatial.contains(&true).then(|| non_geometry_spatial.into());
+	// An element column the index has recorded storing nothing whole holds
+	// every record under its elements or under `NONE` / `NULL`.
+	let elements_or_nullish: Vec<ColumnFlags> = indexes
+		.iter()
+		.map(|ix| {
+			if !matches!(ix.index, Index::Idx | Index::Uniq) {
+				return Box::default();
+			}
+			let stored = shapes.of(ix.index_id);
+			ix.cols
+				.iter()
+				.enumerate()
+				.map(|(i, col)| {
+					takes_each_of_fields(col)
+						&& stored.is_some_and(|s| !s.may_hold(i, ValueShape::Whole))
+				})
+				.collect()
+		})
+		.collect();
+	let elements_or_nullish = elements_or_nullish
+		.iter()
+		.any(|flags| flags.contains(&true))
+		.then(|| elements_or_nullish.into());
 	match changed {
 		Some((defs, masks)) => ElementColumns {
 			indexes: defs.into(),
@@ -1550,12 +1573,14 @@ pub(crate) fn with_array_columns_as_elements(
 			sets,
 			point_only_spatial,
 			non_geometry_spatial,
+			elements_or_nullish,
 		},
 		None => ElementColumns {
 			scalar,
 			sets,
 			point_only_spatial,
 			non_geometry_spatial,
+			elements_or_nullish,
 			..ElementColumns::unchanged(indexes)
 		},
 	}
@@ -1565,6 +1590,18 @@ pub(crate) fn with_array_columns_as_elements(
 /// array value in it once per element, and stores any other value whole.
 fn is_plain_column(col: &Idiom) -> bool {
 	!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
+}
+
+/// Whether `col` takes every element of a path of plain fields (`tags.*`,
+/// `a.b.*`): the writer lists an array there once per element, and any other
+/// value at the path makes the column a whole value or `NONE`.
+fn takes_each_of_fields(col: &Idiom) -> bool {
+	match col.0.split_last() {
+		Some((Part::All, path)) => {
+			!path.is_empty() && path.iter().all(|p| matches!(p, Part::Field(_)))
+		}
+		_ => false,
+	}
 }
 
 /// Whether `col` flattens (`*`) a value that may be a set: one whose declared
@@ -1814,6 +1851,35 @@ fn kind_admits_set(kind: &Kind) -> bool {
 	}
 }
 
+/// The union of seeks answering a containment over an element column with
+/// its nullish keys ([`IndexAnalyzer::try_nullish_containment`]), where it
+/// is worth reading in place of the table.
+///
+/// The union fetches every record it yields to judge it, where a scan of
+/// the table rejects most records from their stored bytes. Under a `LIMIT`
+/// with no `ORDER BY` the table scan stops as early as the union and reads
+/// sequentially, and under an `ORDER BY` the union does not deliver the
+/// sort reads every match either way; the union is taken where it delivers
+/// the `ORDER BY` (each branch pins the index's leading column, and the
+/// ordering is its next one), and where neither is asked.
+fn nullish_containment(
+	analyzer: &crate::exec::index::analysis::IndexAnalyzer<'_>,
+	cond: Option<&LogicalExpr>,
+	order: Option<&LogicalOrdering>,
+	has_limit: bool,
+	direction: Direction,
+) -> Option<AccessPath> {
+	let path = analyzer.try_nullish_containment(cond, direction)?;
+	let delivers_order = matches!(
+		&path,
+		AccessPath::Union {
+			paths,
+			..
+		} if detect_order_for_composite_union(order, paths).is_some()
+	);
+	(delivers_order || (order.is_none() && !has_limit)).then_some(path)
+}
+
 /// One index's per-column flags: whether each column was rewritten.
 pub(crate) type ColumnFlags = Box<[bool]>;
 
@@ -1847,6 +1913,14 @@ pub(crate) struct ElementColumns {
 	/// which emit no spatial index cells and would cause `geo::distance` to
 	/// raise a type error on a table scan.
 	pub(crate) non_geometry_spatial: Option<Arc<[bool]>>,
+	/// Per index, in order, whether each column takes every element of a
+	/// path of plain fields and is known from the recorded shapes to have
+	/// stored nothing whole: every record whose value at the path contains a
+	/// value is listed under that value, or under `NONE` or `NULL` when the
+	/// value at the path is a scalar, `NONE`, `NULL` or an empty array. A
+	/// column past the end of its index's flags is not. `None` when none is,
+	/// or when the shapes were not read.
+	pub(crate) elements_or_nullish: Option<Arc<[ColumnFlags]>>,
 }
 
 impl ElementColumns {
@@ -1859,6 +1933,7 @@ impl ElementColumns {
 			sets: None,
 			point_only_spatial: None,
 			non_geometry_spatial: None,
+			elements_or_nullish: None,
 		}
 	}
 
@@ -1935,6 +2010,10 @@ impl ElementColumns {
 		};
 		let analyzer = match &self.non_geometry_spatial {
 			Some(flags) => analyzer.with_non_geometry_spatial(Arc::clone(flags)),
+			None => analyzer,
+		};
+		let analyzer = match &self.elements_or_nullish {
+			Some(flags) => analyzer.with_elements_or_nullish(Arc::clone(flags)),
 			None => analyzer,
 		};
 		match (&self.rewritten, &self.sets) {
@@ -2964,6 +3043,11 @@ pub(crate) fn decide_access(
 		if let Some(path) = analyzer.try_containment_expansion(analysis_cond, direction) {
 			return Ok(Some((path, direction)));
 		}
+		if let Some(path) =
+			nullish_containment(&analyzer, analysis_cond, order, has_limit, direction)
+		{
+			return Ok(Some((path, direction)));
+		}
 		// Try expanding spatial geometry predicates (INSIDE / CONTAINS / INTERSECTS /
 		// geo::distance) into union of Hilbert cell range scans on a SPATIAL index
 		if let Some(path) = analyzer.try_spatial_expansion(analysis_cond, direction) {
@@ -3060,6 +3144,12 @@ pub(crate) fn decide_access(
 	// trailing ORDER BY column's sort order and dedupes rows that match multiple branches.
 	if path.is_full_range_scan()
 		&& let Some(union_path) = analyzer.try_containment_expansion(analysis_cond, direction)
+	{
+		return Ok(Some((union_path, direction)));
+	}
+	if path.is_full_range_scan()
+		&& let Some(union_path) =
+			nullish_containment(&analyzer, analysis_cond, order, has_limit, direction)
 	{
 		return Ok(Some((union_path, direction)));
 	}
@@ -3346,5 +3436,55 @@ mod range_comparison_tests {
 			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &non_geom_shapes);
 		assert_eq!(elem_non_geom.point_only_spatial.as_deref(), Some(&[true][..]));
 		assert_eq!(elem_non_geom.non_geometry_spatial.as_deref(), Some(&[true][..]));
+	}
+
+	#[test]
+	fn an_element_column_storing_nothing_whole_lists_every_record_by_element_or_nullish() {
+		use std::sync::Arc;
+
+		use surrealdb_datastore::index_shapes::IndexShapes;
+
+		use super::{TableIndexShapes, ValueShape, with_array_columns_as_elements};
+
+		let ix = |cols: &[&str]| IndexDefinition {
+			index_id: IndexId(1),
+			name: "ix".into(),
+			table_name: "t".into(),
+			cols: cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect(),
+			index: Index::Idx,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			nulls_not_distinct: false,
+			format_version: INDEX_FORMAT_VERSION,
+		};
+		let shapes = |tracked: bool, col0: u8| {
+			TableIndexShapes::new([(
+				IndexId(1),
+				Arc::new(IndexShapes::new(tracked, vec![col0], Vec::new())),
+			)])
+		};
+		let flags = |cols: &[&str], shapes: &TableIndexShapes| {
+			with_array_columns_as_elements(Arc::from([ix(cols)]), &[], shapes)
+				.elements_or_nullish
+				.map(|flags| flags[0].to_vec())
+		};
+		let arrays = ValueShape::Array.bit();
+		// Tracked, and only arrays stored: flagged.
+		assert_eq!(
+			flags(&["tags.*", "created_at"], &shapes(true, arrays)),
+			Some(vec![true, false])
+		);
+		assert_eq!(flags(&["a.b.*"], &shapes(true, 0)), Some(vec![true]));
+		// A whole value stored, an untracked index, or shapes not read: not flagged.
+		assert_eq!(flags(&["tags.*"], &shapes(true, arrays | ValueShape::Whole.bit())), None);
+		assert_eq!(flags(&["tags.*"], &shapes(false, arrays)), None);
+		assert_eq!(flags(&["tags.*"], &TableIndexShapes::default()), None);
+		// Only a trailing `*` over plain fields qualifies.
+		for col in ["tags", "a.*.b", "tags.*.*", "tags.*.first()"] {
+			let idiom = Idiom::from_str(col).expect("valid idiom");
+			assert!(!super::takes_each_of_fields(&idiom), "{col}");
+		}
+		assert!(super::takes_each_of_fields(&Idiom::from_str("tags[*]").expect("valid idiom")));
 	}
 }
