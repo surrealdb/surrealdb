@@ -692,23 +692,85 @@ fn vector_value(value: Expr, dimensions: Option<usize>) -> Result<Expr, PlanErro
 			..
 		} => false,
 	};
-	Ok(if is_cheap_to_read_twice {
-		text_or_value(value)
-	} else {
-		value
-	})
+	if is_cheap_to_read_twice {
+		return text_or_value(value);
+	}
+	if matches!(value, Expr::Literal(_)) {
+		return Ok(value);
+	}
+	// Any other expression is evaluated once, and its value is read as text or as it is.
+	Ok(Expr::Block(Box::new(Block(vec![
+		Expr::Let(Box::new(SetStatement {
+			name: Strand::from("_sql_vector"),
+			what: value,
+			kind: None,
+		})),
+		text_or_value(Expr::Param(Param::from("_sql_vector".to_owned())))?,
+	]))))
 }
 
-/// `IF type::is_string(value) THEN encoding::json::decode(value) ELSE value END`, over a value that
+/// Convert the items of the projection `fields` of a PostgreSQL `INSERT ... SELECT` that are
+/// written to vector columns of the target table, as [`wrap_positional_links`] does the links.
+fn wrap_positional_vectors(
+	scope: &IdScope<'_>,
+	columns: &[String],
+	has_wildcard: bool,
+	fields: &mut Fields,
+) -> Result<(), PlanError> {
+	let Fields::Select(items) = fields else {
+		return Ok(());
+	};
+	if has_wildcard {
+		return Ok(());
+	}
+	for (idx, column) in columns.iter().enumerate() {
+		let Some(dimensions) = scope.vector_column(column) else {
+			continue;
+		};
+		if scope.link_column(column).is_some() {
+			continue;
+		}
+		if let Some(Field::Single(selector)) = items.get_mut(idx) {
+			let value = std::mem::replace(&mut selector.expr, Expr::Literal(Literal::None));
+			selector.expr = vector_value(value, Some(dimensions))?;
+			if selector.alias.is_none() {
+				selector.alias = Some(Idiom::field(column.clone()));
+			}
+		}
+	}
+	Ok(())
+}
+
+/// `IF type::is_string(value) THEN <the vector the text spells> ELSE value END`, over a value that
 /// is cheap to read twice.
-fn text_or_value(value: Expr) -> Expr {
-	Expr::IfElse(Box::new(IfelseStatement {
+///
+/// The text is read as pgvector reads it, not as JSON: spaces and brackets are dropped, the rest is
+/// split at the commas, and each piece is read as a float.
+fn text_or_value(value: Expr) -> Result<Expr, PlanError> {
+	let form = crate::vector::text_form()?;
+	let text = |s: &str| Expr::Literal(Literal::String(Strand::from(s)));
+	let mut inner = value.clone();
+	for dropped in [" ", "\t", "\r", "\n", "[", "]"] {
+		inner = call("string::replace", vec![inner, text(dropped), text("")]);
+	}
+	let read = Expr::Prefix {
+		op: PrefixOperator::Cast(surrealdb_expr::expr::Kind::Array(
+			Box::new(surrealdb_expr::expr::Kind::Float),
+			None,
+		)),
+		expr: Box::new(call("string::split", vec![inner, text(",")])),
+	};
+	let checked = Expr::IfElse(Box::new(IfelseStatement {
 		exprs: vec![(
-			call("type::is_string", vec![value.clone()]),
-			call("encoding::json::decode", vec![value.clone()]),
+			call("string::matches", vec![value.clone(), Expr::Literal(Literal::Regex(form))]),
+			read,
 		)],
+		close: Some(Expr::Throw(Box::new(text(crate::vector::MALFORMED)))),
+	}));
+	Ok(Expr::IfElse(Box::new(IfelseStatement {
+		exprs: vec![(call("type::is_string", vec![value.clone()]), checked)],
 		close: Some(value),
-	}))
+	})))
 }
 
 /// Convert the items of the projection `fields` of an `INSERT ... SELECT` that are written to link
@@ -2015,6 +2077,7 @@ fn lower_pgsql_select_stmt(
 			.iter()
 			.any(|target| is_wildcard_target(target) || relation_star_qualifier(target).is_some());
 		wrap_positional_links(target, columns, has_wildcard, &mut fields);
+		wrap_positional_vectors(target, columns, has_wildcard, &mut fields)?;
 	}
 
 	let cond = match &select.where_clause {

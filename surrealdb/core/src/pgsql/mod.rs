@@ -120,6 +120,18 @@ pub(crate) fn lower_statements(
 							.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
 					table.get_or_insert(name);
 				}
+				let mut dropped = Vec::new();
+				if let surrealdb_pgsql::ast::stmt::Statement::Drop(drop) = stmt
+					&& matches!(drop.object_type, surrealdb_pgsql::ast::stmt::DropObjectType::Table)
+				{
+					for parts in ddl_table_names(stmt) {
+						if let Ok((_, name)) =
+							surrealdb_sqlplan::resolve_pgsql_table_name(parts, Some(catalog))
+						{
+							dropped.push(name);
+						}
+					}
+				}
 				let exprs = surrealdb_sqlplan::lower_pgsql_ddl_with(stmt, catalog)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
 				if let surrealdb_pgsql::ast::stmt::Statement::CreateTable(create) = stmt
@@ -134,6 +146,9 @@ pub(crate) fn lower_statements(
 					for action in &alter.actions {
 						defined.apply(table.as_str(), action);
 					}
+				}
+				for name in &dropped {
+					defined.drop_table(name.as_str());
 				}
 				staged.stage(&exprs);
 				for expr in exprs {
@@ -256,7 +271,7 @@ fn ddl_table_names(stmt: &surrealdb_pgsql::ast::stmt::Statement) -> Vec<&[String
 /// dimensions of a vector column, or `None` for a column that is not one, which the catalog may
 /// still hold as one.
 #[derive(Default)]
-struct VectorColumns(HashMap<(String, String), Option<usize>>);
+struct VectorColumns(HashMap<(String, String), Option<usize>>, std::collections::HashSet<String>);
 
 impl VectorColumns {
 	/// Note the columns of `columns`, which are added to `table`.
@@ -315,7 +330,16 @@ impl VectorColumns {
 
 	/// What the request says of `column` of `table`, if anything.
 	fn get(&self, table: &str, column: &str) -> Option<Option<usize>> {
-		self.0.get(&(table.to_owned(), column.to_owned())).copied()
+		self.0
+			.get(&(table.to_owned(), column.to_owned()))
+			.copied()
+			.or_else(|| self.1.contains(table).then_some(None))
+	}
+
+	/// Note that `table` is dropped, with every column it had.
+	fn drop_table(&mut self, table: &str) {
+		self.0.retain(|(name, _), _| name != table);
+		self.1.insert(table.to_owned());
 	}
 }
 
@@ -432,6 +456,41 @@ mod batch_tests {
 		};
 		assert_eq!(catalog.vector_dimension(None, "t", "v"), None);
 		assert_eq!(catalog.vector_dimension(None, "t", "w"), Some(3));
+	}
+
+	#[test]
+	fn a_column_the_catalog_holds_as_a_vector_is_what_the_batch_makes_it() {
+		let mut held = surrealdb_sqlplan::MemoryCatalog::new();
+		held.add_vector("t", "v", 3);
+		let defined = catalog_after("ALTER TABLE t ALTER COLUMN v TYPE text");
+		let catalog = BatchCatalog {
+			inner: &held,
+			vectors: &defined,
+		};
+		assert_eq!(catalog.vector_dimension(None, "t", "v"), None);
+		let defined = catalog_after("ALTER TABLE t ALTER COLUMN v TYPE vector(5)");
+		let catalog = BatchCatalog {
+			inner: &held,
+			vectors: &defined,
+		};
+		assert_eq!(catalog.vector_dimension(None, "t", "v"), Some(5));
+	}
+
+	#[test]
+	fn a_dropped_table_has_no_vector_columns_until_it_is_created_again() {
+		let mut held = surrealdb_sqlplan::MemoryCatalog::new();
+		held.add_vector("t", "v", 3);
+		let mut defined = VectorColumns::default();
+		defined.drop_table("t");
+		let catalog = BatchCatalog {
+			inner: &held,
+			vectors: &defined,
+		};
+		assert_eq!(catalog.vector_dimension(None, "t", "v"), None);
+		let mut defined = catalog_after("CREATE TABLE t (v vector(2))");
+		defined.drop_table("t");
+		defined.add_columns("t", std::iter::empty());
+		assert_eq!(defined.get("t", "v"), Some(None));
 	}
 
 	#[test]

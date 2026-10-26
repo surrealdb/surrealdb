@@ -5,9 +5,29 @@
 //! bound to the distance function of the same meaning, so an operator and its function are one
 //! node of the bound IR.
 
+use std::str::FromStr;
+use std::sync::LazyLock;
+
 use surrealdb_expr::expr::index::Distance;
+use surrealdb_expr::val::Regex;
 
 use crate::error::PlanError;
+
+/// The text form of a vector, which text is checked against when it is read where the statement
+/// runs: a bracketed, comma-separated list of numbers.
+pub fn text_form() -> Result<Regex, PlanError> {
+	static FORM: LazyLock<Option<Regex>> = LazyLock::new(|| {
+		let number = r"[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?";
+		Regex::from_str(&format!(
+			r"^[ \t\r\n]*\[[ \t\r\n]*{number}(?:[ \t\r\n]*,[ \t\r\n]*{number})*[ \t\r\n]*\][ \t\r\n]*$"
+		))
+		.ok()
+	});
+	FORM.clone().ok_or_else(|| PlanError::Custom("the text form of a vector".to_string()))
+}
+
+/// The error a text that is not the text form of a vector raises where it is read.
+pub const MALFORMED: &str = "invalid input syntax for type vector";
 
 /// The most dimensions a `vector` has.
 pub const MAX_DIMENSIONS: usize = 16_000;
@@ -179,5 +199,15 @@ mod tests {
 			assert_eq!(VectorMetric::from_function(metric.function()), Some(metric));
 		}
 		assert_eq!(VectorMetric::from_operator("<@"), None);
+	}
+}
+
+#[cfg(test)]
+mod form_tests {
+	use super::*;
+
+	#[test]
+	fn the_text_form_regex_compiles() {
+		assert!(text_form().is_ok());
 	}
 }

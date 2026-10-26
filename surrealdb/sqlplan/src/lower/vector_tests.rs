@@ -561,7 +561,7 @@ fn a_parameter_written_to_a_vector_column_may_be_text() {
 	};
 	let written = super::write::lower_pgsql_insert(insert, &catalog).expect("lower");
 	let text = format!("{written:?}");
-	assert!(text.contains("encoding::json::decode"), "{text}");
+	assert!(text.contains("string::split"), "{text}");
 }
 
 use surrealdb_pgsql::ast::stmt::Statement;
@@ -585,4 +585,34 @@ fn an_operator_names_its_column_as_postgresql_does_and_a_function_by_its_name() 
 	);
 	assert_eq!(column_names("SELECT l2_distance(e, '[1,2,3]') FROM items"), ["l2_distance"]);
 	assert_eq!(column_names("SELECT e <-> '[1,2,3]' AS d FROM items"), ["d"]);
+}
+
+#[test]
+fn text_selected_into_a_vector_column_is_the_vector_it_spells() {
+	let catalog = MemoryCatalog::new().with_vector("items", "e", 3);
+	let stmt = statement("INSERT INTO items (id, e) SELECT 1, '[1,2,3]'");
+	let Statement::Insert(insert) = &stmt else {
+		panic!("expected an insert");
+	};
+	let text = format!("{:?}", super::write::lower_pgsql_insert(insert, &catalog).expect("lower"));
+	assert!(text.contains("Float(2.0)"), "{text}");
+	let wrong = statement("INSERT INTO items (id, e) SELECT 1, '[1,2]'");
+	let Statement::Insert(insert) = &wrong else {
+		panic!("expected an insert");
+	};
+	assert!(matches!(
+		super::write::lower_pgsql_insert(insert, &catalog),
+		Err(PlanError::DataException(_))
+	));
+}
+
+#[test]
+fn a_computed_text_written_to_a_vector_column_is_read_once_as_a_vector() {
+	let catalog = MemoryCatalog::new().with_vector("items", "e", 3);
+	let stmt = statement("INSERT INTO items (id, e) VALUES (1, concat('[1,', '2,3]'))");
+	let Statement::Insert(insert) = &stmt else {
+		panic!("expected an insert");
+	};
+	let text = format!("{:?}", super::write::lower_pgsql_insert(insert, &catalog).expect("lower"));
+	assert!(text.contains("string::split"), "{text}");
 }

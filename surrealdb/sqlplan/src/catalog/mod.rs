@@ -491,6 +491,17 @@ impl MemoryCatalog {
 		}
 	}
 
+	/// Describe the vector columns that `other` does, besides what this catalog describes.
+	pub fn with_vectors_of(mut self, other: &MemoryCatalog) -> Self {
+		self.vectors.extend(other.vectors.iter().map(|(key, count)| (key.clone(), *count)));
+		self
+	}
+
+	/// Forget the HNSW indexes, as a catalog does that cannot say which indexes a request leaves.
+	pub fn clear_hnsw_indexes(&mut self) {
+		self.hnsw.clear();
+	}
+
 	/// Declare that the link column `column` of table `table` admits `NONE`; see
 	/// [`BinderCatalog::link_admits_none`].
 	pub fn with_nullable_link(mut self, table: &str, column: &str) -> Self {

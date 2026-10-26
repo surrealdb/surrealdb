@@ -166,7 +166,7 @@ async fn the_catalog_of_a_request_names_the_database_it_was_read_from() {
 	for (database, expected) in [(None, "test"), (Some("other"), "other")] {
 		for purpose in [Purpose::Lowering, Purpose::Describing] {
 			let described = ds
-				.read_tables(&session(), database, None, &tables, purpose)
+				.read_tables(&session(), database, None, &tables, purpose, true)
 				.await
 				.expect("the tables are read")
 				.expect("the session is served");

@@ -10513,7 +10513,7 @@ impl Datastore {
 	/// The catalog also describes the tables that declare their columns ([`Self::read_tables`])
 	/// only when `columns_stay`. The statements are all lowered before any runs, so for a request
 	/// that alters, drops or creates a table those columns would be the ones the table had before
-	/// the request; it is lowered against the links alone.
+	/// the request; it is lowered against the links and the vector columns alone, with no index.
 	///
 	/// A statement over a system view that lists the user's tables is lowered against a catalog
 	/// that also lists them, as [`Self::listed_tables`] allows.
@@ -10542,8 +10542,9 @@ impl Datastore {
 		if !tables.is_empty() {
 			if columns_stay {
 				let purpose = sql_links::Purpose::Lowering;
-				let described =
-					self.read_tables(session, database, transaction, &tables, purpose).await?;
+				let described = self
+					.read_tables(session, database, transaction, &tables, purpose, true)
+					.await?;
 				catalog = described
 					.filter(|described| described.shapes_lowering || listing || deferred)
 					.map(|described| described.catalog);
@@ -10553,6 +10554,17 @@ impl Datastore {
 				let declared =
 					self.link_columns(session, database, transaction, &tables, deferred).await?;
 				catalog = sql_links::link_catalog(&declared, active_db);
+				// The vector columns do not change in a request that holds DDL, but an index
+				// may, so none is described.
+				let purpose = sql_links::Purpose::Lowering;
+				let described = self
+					.read_tables(session, database, transaction, &tables, purpose, false)
+					.await?;
+				if let Some(described) = described
+					&& described.shapes_lowering
+				{
+					catalog = Some(catalog.unwrap_or_default().with_vectors_of(&described.catalog));
+				}
 			}
 		}
 		if listing {
@@ -10693,11 +10705,11 @@ impl Datastore {
 	/// What the catalog says of `tables`, read as [`Self::link_columns`] reads the links and with
 	/// the same refusals, or `None` when nothing is read.
 	///
-	/// Besides the links, the columns the tables declare are described, but only to a session that
-	/// may view the definitions of tables (`Action::View` on the database's tables, which
-	/// `INFO FOR DB` requires). A statement over a table that declares its columns then fails on a
-	/// name outside them and expands `*` to them, which a session that may not see them could use
-	/// to learn their names; it binds as it does against a schemaless table.
+	/// Besides the links, the columns the tables declare are described when `declared_columns`, but
+	/// only to a session that may view the definitions of tables (`Action::View` on the database's
+	/// tables, which `INFO FOR DB` requires). A statement over a table that declares its columns
+	/// then fails on a name outside them and expands `*` to them, which a session that may not see
+	/// them could use to learn their names; it binds as it does against a schemaless table.
 	#[cfg(any(feature = "postgres", feature = "mysql"))]
 	async fn read_tables(
 		&self,
@@ -10706,12 +10718,13 @@ impl Datastore {
 		transaction: Option<&Arc<Transaction>>,
 		tables: &[String],
 		purpose: sql_links::Purpose,
+		declared_columns: bool,
 	) -> std::result::Result<Option<sql_links::Described>, TypesError> {
 		let Some((ns, db)) = self.catalog_scope(session, database, tables)? else {
 			return Ok(None);
 		};
-		let columns =
-			session.au.is_allowed(Action::View, &ResourceKind::Table.on_db(ns, db)).is_ok();
+		let columns = declared_columns
+			&& session.au.is_allowed(Action::View, &ResourceKind::Table.on_db(ns, db)).is_ok();
 		let types = purpose.types_columns();
 		let described = match transaction {
 			Some(txn) => sql_links::describe_tables(txn, ns, db, tables, columns, types).await,
@@ -10816,7 +10829,7 @@ impl Datastore {
 		let described = match tables {
 			Some(tables) => {
 				let purpose = sql_links::Purpose::Describing;
-				self.read_tables(session, None, transaction, &tables, purpose).await?
+				self.read_tables(session, None, transaction, &tables, purpose, true).await?
 			}
 			None => None,
 		};

@@ -651,6 +651,72 @@ async fn a_vector_is_announced_whichever_way_it_is_selected() {
 }
 
 #[tokio::test]
+async fn a_request_with_ddl_still_reads_text_written_to_an_existing_vector_column() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	setup(&mut stream).await;
+	let batch = simple(
+		&mut stream,
+		"CREATE TABLE audit (id INT PRIMARY KEY); INSERT INTO items (id, embedding) VALUES (20, '[2,2,2]')",
+	)
+	.await;
+	assert_eq!(batch.error, None);
+	let found = simple(&mut stream, "SELECT embedding FROM items WHERE id = 20").await;
+	assert_eq!(text_cells(&found, 0), ["[2,2,2]"]);
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn text_selected_into_a_vector_column_is_a_vector_and_a_parameter_has_its_dimensions() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	setup(&mut stream).await;
+	let selected = simple(
+		&mut stream,
+		"INSERT INTO items (id, embedding) SELECT id + 29 AS id, '[3,3,3]' FROM items WHERE id = 1",
+	)
+	.await;
+	assert_eq!(selected.error, None);
+	let found = simple(&mut stream, "SELECT embedding FROM items WHERE id = 30").await;
+	assert_eq!(text_cells(&found, 0), ["[3,3,3]"]);
+
+	let sql = "INSERT INTO items (id, embedding) VALUES ($1, $2)";
+	let id = (1, Some(31i64.to_be_bytes().to_vec()));
+	let short =
+		bound(&mut stream, sql, &[OID_INT8, 0], &[id, (0, Some(b"[1,2]".to_vec()))], 0).await;
+	assert!(short.error.is_some(), "a vector of two dimensions in a column of three");
+	let none = simple(&mut stream, "SELECT id FROM items WHERE id = 31").await;
+	assert!(none.rows.is_empty());
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn computed_text_is_read_with_the_pgvector_grammar() {
+	let (addr, shutdown) = start().await;
+	let mut stream = connect(addr).await;
+	setup(&mut stream).await;
+	let write = simple(
+		&mut stream,
+		"INSERT INTO items (id, embedding) VALUES (40, concat('[+', '1, 2,3.5]')::vector(3))",
+	)
+	.await;
+	assert_eq!(write.error, None);
+	let read = simple(&mut stream, "SELECT embedding FROM items WHERE id = 40").await;
+	assert_eq!(text_cells(&read, 0), ["[1,2,3.5]"]);
+	let select = simple(&mut stream, "SELECT concat('[', '4.5,5]')::vector(2)").await;
+	assert_eq!(select.error, None);
+	assert_eq!(text_cells(&select, 0), ["[4.5,5]"]);
+	let tabbed = simple(&mut stream, "SELECT concat('[1,', E'\\t', '2]')::vector(2)").await;
+	assert_eq!(tabbed.error, None);
+	assert_eq!(text_cells(&tabbed, 0), ["[1,2]"]);
+	for malformed in ["concat('[Na', 'N,2,3]')", "concat('1,', '2,3')", "concat('[1,', '2,x]')"] {
+		let refused = simple(&mut stream, &format!("SELECT {malformed}::vector(3)")).await;
+		assert!(refused.error.is_some(), "{malformed} was accepted");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn create_extension_answers_with_its_own_tag() {
 	let (addr, shutdown) = start().await;
 	let mut stream = connect(addr).await;

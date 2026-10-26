@@ -96,11 +96,34 @@ pub(super) fn lower_cast(
 				.collect(),
 		));
 	}
-	let read = LogicalExpr::If(Box::new(LogicalIf {
+	// The text is read as pgvector reads it, not as JSON: spaces and brackets are dropped, the rest
+	// is split at the commas, and each piece is read as a float.
+	let text = |s: &str| LogicalExpr::Literal(LogicalLiteral::String(s.into()));
+	let mut inner = LogicalExpr::Current;
+	for dropped in [" ", "\t", "\r", "\n", "[", "]"] {
+		inner = call("string::replace", vec![inner, text(dropped), text("")]);
+	}
+	let split = LogicalExpr::Prefix {
+		op: PrefixOperator::Cast(Kind::Array(Box::new(Kind::Float), None)),
+		expr: Box::new(call("string::split", vec![inner, text(",")])),
+	};
+	let checked = LogicalExpr::If(Box::new(LogicalIf {
 		branches: vec![(
-			call("type::is_string", vec![LogicalExpr::Current]),
-			call("encoding::json::decode", vec![LogicalExpr::Current]),
+			call(
+				"string::matches",
+				vec![
+					LogicalExpr::Current,
+					LogicalExpr::Literal(LogicalLiteral::Regex(crate::vector::text_form()?)),
+				],
+			),
+			split,
 		)],
+		otherwise: Some(LogicalExpr::Throw(Box::new(LogicalExpr::Literal(
+			LogicalLiteral::String(crate::vector::MALFORMED.into()),
+		)))),
+	}));
+	let read = LogicalExpr::If(Box::new(LogicalIf {
+		branches: vec![(call("type::is_string", vec![LogicalExpr::Current]), checked)],
 		otherwise: Some(LogicalExpr::Current),
 	}));
 	let cast = LogicalExpr::Prefix {
