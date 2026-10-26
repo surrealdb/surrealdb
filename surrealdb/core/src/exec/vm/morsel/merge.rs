@@ -535,7 +535,7 @@ pub(super) async fn absorb(
 			.position(|p| p.spec.kind == BreakerKind::Sort && p.spec.index == sort)
 			.map(|found| spilled.swap_remove(found));
 		let Some(partial) = partial else {
-			adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at));
+			adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at))?;
 			let mut entries = std::mem::take(&mut sorts[at]);
 			// Spans into the morsel's slab are shifted by the statement's slab length, because the
 			// morsel's slab is appended after the statement's.
@@ -560,7 +560,7 @@ pub(super) async fn absorb(
 			continue;
 		};
 		seal_sort(state, at, ctx).await?;
-		adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at));
+		adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at))?;
 		state.sort_runs[at].get_or_insert_with(Default::default).append(partial.runs)?;
 		let rows: Vec<Sorted> =
 			partial.held.into_iter().map(|(keys, row)| (keys, SortRow::Value(row))).collect();
@@ -574,13 +574,13 @@ pub(super) async fn absorb(
 			.position(|p| p.spec.kind == BreakerKind::Groups && p.spec.index == aggregate)
 			.map(|found| spilled.swap_remove(found));
 		let Some(partial) = partial else {
-			adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at));
+			adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at))?;
 			let part = groups[at].take();
 			merge_groups(&mut state.groups[at], part)?;
 			continue;
 		};
 		seal_groups(state, at, ctx).await?;
-		adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at));
+		adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at))?;
 		state.group_runs[at].get_or_insert_with(Default::default).append(partial.runs)?;
 		let functions = state.aggregates.functions[at].clone();
 		let into = state.groups[at].as_mut().ok_or_else(|| {
@@ -631,7 +631,7 @@ pub(super) fn fold_into(
 	for &aggregate in &breakers.aggregates {
 		let at = aggregate as usize;
 		if let Some(mine) = earlier.group_accounts.get_mut(at) {
-			adopt_reservation(mine, later.group_accounts.get_mut(at));
+			adopt_reservation(mine, later.group_accounts.get_mut(at))?;
 		}
 		merge_groups(&mut earlier.groups[at], later.groups[at].take())?;
 	}
@@ -645,9 +645,13 @@ pub(super) fn fold_into(
 
 /// Hand a morsel's reservation for a breaker, where it has one, to the statement's account for the
 /// same breaker.
-fn adopt_reservation(statement: &mut Reservation, morsel: Option<&mut Reservation>) {
-	if let Some(morsel) = morsel {
-		statement.adopt(morsel);
+fn adopt_reservation(
+	statement: &mut Reservation,
+	morsel: Option<&mut Reservation>,
+) -> FlowResult<()> {
+	match morsel {
+		Some(morsel) => statement.adopt(morsel),
+		None => Ok(()),
 	}
 }
 

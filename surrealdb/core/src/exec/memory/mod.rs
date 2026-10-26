@@ -32,9 +32,13 @@
 //! A query fails with the memory threshold error when its own pinned bytes
 //! would pass its ceiling ([`QueryMemory::within_ceiling`], the
 //! `query_memory_max` setting), and never because of another query's use: the
-//! check reads only the query's own pinned bytes. Otherwise a statement fails
-//! only as its context does (cancelled, timed out), or as the process memory
-//! threshold or a store's quota fails it.
+//! check reads only the query's own pinned bytes. A governor with a hard limit
+//! ([`MemoryGovernor::hard_limit`]) bounds the pinned bytes of all queries
+//! together and refuses the request that would pass it ([`Admit::Refuse`]),
+//! which fails that query with the same error and leaves nothing of the request
+//! counted or reserved. Otherwise a statement fails only as its context does
+//! (cancelled, timed out), or as the process memory threshold or a store's
+//! quota fails it.
 //!
 //! The values a program holds across instructions are charged where it keeps
 //! them: its bound parameters, the frame copies of them, a `FOR` loop's
@@ -264,6 +268,7 @@ impl QueryMemory {
 			used: 0,
 			refused: false,
 			exceeded: false,
+			beyond: false,
 			pinned,
 			counted: 0,
 		}
@@ -308,17 +313,24 @@ impl QueryMemory {
 	/// check and its count.
 	pub(crate) fn within_ceiling(&self, bytes: usize) -> FlowResult<()> {
 		if self.pinned().saturating_add(bytes) > self.host.settings.max {
-			let error = anyhow::Error::new(DatastoreError::QueryBeyondMemoryThreshold);
-			return Err(ControlFlow::Err(error));
+			return Err(Self::beyond_threshold());
 		}
 		Ok(())
+	}
+
+	/// The memory threshold error, which a query's ceiling and a governor's
+	/// hard limit both raise.
+	fn beyond_threshold() -> ControlFlow {
+		ControlFlow::Err(anyhow::Error::new(DatastoreError::QueryBeyondMemoryThreshold))
 	}
 
 	/// Reserve `bytes` more from the lease for pinned bytes the caller has
 	/// counted ([`Self::count`], [`Self::within_ceiling`]): the lease grows, or
 	/// the query waits for other queries to give memory back, or the bytes are
-	/// granted past the node's limit. Fails only as the query's context fails:
-	/// cancelled, or past its deadline.
+	/// granted past the node's limit. Fails as the query's context fails
+	/// (cancelled, or past its deadline), or with the memory threshold error
+	/// where the governor refuses the bytes ([`Admit::Refuse`]), having
+	/// reserved nothing.
 	///
 	/// The waits of all a query's calls together last at most the configured
 	/// wait, and each at most half the time the context has left, so a query
@@ -341,6 +353,7 @@ impl QueryMemory {
 		loop {
 			let epoch = match governor.admit(lease, bytes, may_wait) {
 				Admit::Granted | Admit::Overcommit => return Ok(()),
+				Admit::Refuse => return Err(Self::beyond_threshold()),
 				Admit::Wait {
 					epoch,
 				} => epoch,
@@ -376,21 +389,24 @@ impl QueryMemory {
 
 	/// [`Self::insist`] without waiting, for a caller that cannot suspend: the
 	/// bytes are granted, past the node's limit where the node has no memory
-	/// for them.
+	/// for them, or refused as [`Self::insist`] refuses them.
 	pub(crate) fn insist_now(&self, bytes: usize) -> FlowResult<()> {
 		if bytes == 0 {
 			return Ok(());
 		}
 		let lease = self.lease();
 		let governor = &self.host.governor;
-		if let Admit::Wait {
-			..
-		} = governor.admit(lease, bytes, false)
-		{
-			// A governor never waits a lease that may not wait; one that does is
-			// answered by holding the bytes.
-			governor.unwait(lease);
-			lease.force_pinned(bytes);
+		match governor.admit(lease, bytes, false) {
+			Admit::Granted | Admit::Overcommit => {}
+			Admit::Refuse => return Err(Self::beyond_threshold()),
+			Admit::Wait {
+				..
+			} => {
+				// A governor never waits a lease that may not wait; one that does
+				// is answered by holding the bytes.
+				governor.unwait(lease);
+				lease.force_pinned(bytes);
+			}
 		}
 		Ok(())
 	}
@@ -616,6 +632,12 @@ pub(crate) struct Reservation {
 	/// cleared would have taken the query's pinned bytes past its ceiling. The
 	/// next [`Reservation::insist`] raises the error.
 	exceeded: bool,
+	/// Whether the governor refused to count the account's reservation as
+	/// pinned because the pinned bytes of all leases would pass its hard limit.
+	/// The next [`Reservation::insist`] raises the memory threshold error. An
+	/// account switched to pinned stays spillable in the lease and is released
+	/// as such when it is cleared, which a failing query does.
+	beyond: bool,
 	/// Whether what the account holds cannot be spilled, so the lease counts
 	/// it as pinned and the account is made good by [`Reservation::insist`].
 	pinned: bool,
@@ -692,6 +714,9 @@ impl Reservation {
 			return Ok(());
 		};
 		self.pin();
+		if std::mem::take(&mut self.beyond) {
+			return Err(QueryMemory::beyond_threshold());
+		}
 		if std::mem::take(&mut self.exceeded) {
 			memory.within_ceiling(0)?;
 		}
@@ -711,6 +736,9 @@ impl Reservation {
 			return Ok(());
 		};
 		self.pin();
+		if std::mem::take(&mut self.beyond) {
+			return Err(QueryMemory::beyond_threshold());
+		}
 		if std::mem::take(&mut self.exceeded) {
 			memory.within_ceiling(0)?;
 		}
@@ -743,12 +771,14 @@ impl Reservation {
 	/// ceiling ([`QueryMemory::counted`]) and the lease is neither opened nor
 	/// locked, so holders of many small values cost the governor nothing. The
 	/// governor's resolution of a pinned total is one chunk: it does not see
-	/// those bytes.
+	/// those bytes, unless it has a hard limit, which every pinned account then
+	/// reserves against, a chunk at a time.
 	pub(crate) fn settle(&mut self, total: usize) -> Verdict {
 		if self.pinned
 			&& self.reserved == 0
 			&& let Some(memory) = &self.memory
 			&& total <= memory.host.settings.chunk.max(1)
+			&& memory.host.governor.hard_limit().is_none()
 		{
 			self.used = total;
 			return match memory.count(&mut self.counted, total) {
@@ -799,9 +829,11 @@ impl Reservation {
 		if let Some(memory) = &self.memory
 			&& !self.pinned
 		{
+			if !memory.lease().pin(self.reserved) {
+				self.beyond = true;
+				return;
+			}
 			self.pinned = true;
-			let lease = memory.lease();
-			lease.pin(self.reserved);
 			if memory.count(&mut self.counted, self.used) {
 				self.exceeded = true;
 			}
@@ -838,23 +870,47 @@ impl Reservation {
 	/// Charges draw on what was taken before they reserve more. The bytes
 	/// stay pinned or not as they were reserved. Only accounts on the same
 	/// query's memory exchange a reservation.
-	pub(crate) fn adopt(&mut self, from: &mut Reservation) {
+	///
+	/// Where counting the bytes as pinned would take the governor's pinned
+	/// bytes past its hard limit the bytes are taken over and counted all the
+	/// same, so the lease's accounting stays whole, and the memory threshold
+	/// error is returned for the caller to fail its query with.
+	pub(crate) fn adopt(&mut self, from: &mut Reservation) -> FlowResult<()> {
 		let same = match (&self.memory, &from.memory) {
 			(Some(mine), Some(theirs)) => Arc::ptr_eq(mine, theirs),
 			_ => false,
 		};
 		if !same {
-			return;
+			return Ok(());
 		}
 		if from.pinned && !self.pinned {
 			self.pin();
+			if !self.pinned
+				&& let Some(memory) = &self.memory
+			{
+				// The bytes taken over are pinned in the lease, so the account
+				// holds them as pinned whatever the hard limit refused.
+				memory.lease().pin_counted(self.reserved);
+				self.pinned = true;
+				if memory.count(&mut self.counted, self.used) {
+					self.exceeded = true;
+				}
+			}
 		} else if self.pinned
 			&& !from.pinned
 			&& let Some(memory) = &self.memory
+			&& !memory.lease().pin(from.reserved)
 		{
-			memory.lease().pin(from.reserved);
+			// The bytes join an account the lease counts as pinned, so they are
+			// counted whatever the hard limit.
+			memory.lease().pin_counted(from.reserved);
+			self.beyond = true;
 		}
 		self.reserved += std::mem::take(&mut from.reserved);
+		match std::mem::take(&mut self.beyond) {
+			true => Err(QueryMemory::beyond_threshold()),
+			false => Ok(()),
+		}
 	}
 
 	/// Give back everything reserved: the breaker has spilled or finished.
@@ -875,6 +931,7 @@ impl Reservation {
 		self.used = 0;
 		self.refused = false;
 		self.exceeded = false;
+		self.beyond = false;
 	}
 }
 
@@ -1099,6 +1156,145 @@ mod tests {
 		memory.insist(600, &ctx).await.expect("granted without waiting");
 		assert_eq!(memory.waited.load(Ordering::Acquire), before, "a second request waited");
 		assert!(older.waiting());
+	}
+
+	/// A host whose governor bounds the pinned bytes of all queries to `hard`.
+	fn hard_host(hard: usize, max: usize) -> (Arc<FairGovernor>, MemoryHost) {
+		let governor = Arc::new(FairGovernor::new(10_000).with_hard_limit(hard));
+		let host = MemoryHost {
+			governor: Arc::clone(&governor) as Arc<dyn MemoryGovernor>,
+			store: None,
+			settings: MemorySettings {
+				floor: 100,
+				fan_in: 2,
+				chunk: 64,
+				wait: Duration::ZERO,
+				max,
+			},
+		};
+		(governor, host)
+	}
+
+	/// Two concurrent queries that each hold unspillable bytes within their own
+	/// ceiling: the second is refused with the memory threshold error once the
+	/// two would pass the governor's hard limit, holds nothing for the request,
+	/// and the first is unaffected. What the first gives back is available to
+	/// the second.
+	#[tokio::test]
+	async fn a_hard_limit_refuses_the_second_unspillable_query() {
+		let (governor, host) = hard_host(1000, usize::MAX);
+		let ctx = root_ctx();
+		let first = host.query();
+		let second = host.query();
+		first.hold_unspillable(640, &ctx).await.expect("within the hard limit");
+		second.hold_unspillable(320, &ctx).await.expect("within the hard limit");
+		let pinned = (first.lease().pinned(), second.lease().pinned());
+		assert!(is_ceiling(&second.hold_unspillable(200, &ctx).await));
+		assert_eq!(second.pinned(), 320, "a refused request counts nothing");
+		assert_eq!(*second.unspillable.lock().unwrap(), (320, 320));
+		assert_eq!(
+			(first.lease().pinned(), second.lease().pinned()),
+			pinned,
+			"a refused request reserved bytes"
+		);
+		assert!(is_ceiling(&second.insist(200, &ctx).await));
+		assert!(governor.refusals() >= 2);
+		assert!(is_ceiling(&second.insist_now(200)));
+		first.transaction_ended();
+		second.hold_unspillable(200, &ctx).await.expect("the first query's bytes are given back");
+		drop((first, second));
+		assert_eq!(governor.overcommitted(), 0);
+	}
+
+	/// A pinned account's chunk past the hard limit raises the memory threshold
+	/// error at its next `insist`, as an account past the ceiling does.
+	#[tokio::test]
+	async fn a_pinned_account_past_the_hard_limit_raises_at_its_next_insist() {
+		let (_governor, host) = hard_host(256, usize::MAX);
+		let ctx = root_ctx();
+		let memory = host.query();
+		let mut account = memory.pinned_reservation();
+		assert_eq!(account.charge(200), Verdict::Hold);
+		assert_eq!(account.charge(100), Verdict::Spill);
+		assert!(is_ceiling(&account.insist(&ctx).await));
+		account.clear();
+		assert_eq!(memory.lease().pinned(), 0);
+	}
+
+	/// Switching an account that has reserved spillable bytes to pinned past the
+	/// hard limit raises the memory threshold error at its next `insist`, though
+	/// the account then asks for no further bytes.
+	#[tokio::test]
+	async fn pinning_a_reserved_account_past_the_hard_limit_raises_at_its_next_insist() {
+		let (_governor, host) = hard_host(256, usize::MAX);
+		let ctx = root_ctx();
+		let memory = host.query();
+		let mut spillable = memory.account(false);
+		assert_eq!(spillable.charge(512), Verdict::Hold);
+		assert_eq!(memory.lease().pinned(), 0);
+		assert!(is_ceiling(&spillable.insist(&ctx).await));
+		spillable.clear();
+		assert_eq!(memory.lease().pinned(), 0);
+		let mut again = memory.account(false);
+		assert_eq!(again.charge(512), Verdict::Hold);
+		again.pin();
+		assert!(is_ceiling(&again.insist_now()));
+	}
+
+	/// Pinned accounts whose totals each fit in one chunk are counted by a
+	/// governor with a hard limit, which refuses the one that takes the pinned
+	/// bytes of all leases past it; without a hard limit they reserve nothing.
+	#[tokio::test]
+	async fn small_pinned_accounts_count_toward_the_hard_limit() {
+		let (governor, hard) = hard_host(128, usize::MAX);
+		let ctx = root_ctx();
+		let memory = hard.query();
+		let mut accounts: Vec<Reservation> = (0..3).map(|_| memory.pinned_reservation()).collect();
+		assert_eq!(accounts[0].settle(10), Verdict::Hold);
+		assert_eq!(accounts[1].settle(10), Verdict::Hold);
+		assert_eq!(memory.lease().pinned(), 128);
+		assert_eq!(accounts[2].settle(10), Verdict::Spill);
+		assert!(is_ceiling(&accounts[2].insist(&ctx).await));
+		assert!(governor.refusals() >= 1);
+
+		let (_governor, plain) = host(10_000, Duration::ZERO, usize::MAX);
+		let memory = plain.query();
+		let mut account = memory.pinned_reservation();
+		assert_eq!(account.settle(10), Verdict::Hold);
+		assert_eq!(memory.lease().pinned(), 0);
+	}
+
+	/// A pinned account adopted into a spillable one that the hard limit refuses
+	/// to pin still owns the pinned bytes it takes over: clearing it gives all of
+	/// them back, pinned count included, and the adoption returns the memory
+	/// threshold error.
+	#[tokio::test]
+	async fn adopting_a_pinned_account_past_the_hard_limit_keeps_the_pinned_count() {
+		let (_governor, host) = hard_host(256, usize::MAX);
+		let memory = host.query();
+		let mut spillable = memory.account(false);
+		assert_eq!(spillable.charge(200), Verdict::Hold);
+		let mut pinned = memory.pinned_reservation();
+		assert_eq!(pinned.charge(100), Verdict::Hold);
+		assert_eq!(memory.lease().pinned(), 128);
+		assert!(is_ceiling(&spillable.adopt(&mut pinned)));
+		spillable.clear();
+		pinned.clear();
+		assert_eq!((memory.lease().pinned(), memory.lease().held()), (0, 0));
+	}
+
+	/// With no hard limit, concurrent queries holding unspillable bytes are never
+	/// refused, however much the node holds in all.
+	#[tokio::test]
+	async fn without_a_hard_limit_no_unspillable_request_is_refused() {
+		let (governor, host) = host(1000, Duration::ZERO, usize::MAX);
+		let ctx = root_ctx();
+		let queries: Vec<_> = (0..4).map(|_| host.query()).collect();
+		for query in &queries {
+			query.hold_unspillable(5000, &ctx).await.expect("nothing refuses it");
+			query.insist_now(5000).expect("nothing refuses it");
+		}
+		assert_eq!(governor.refusals(), 0);
 	}
 
 	#[tokio::test]

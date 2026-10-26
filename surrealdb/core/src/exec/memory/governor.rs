@@ -55,7 +55,16 @@
 //! own ceiling ([`super::QueryMemory`]). Memory a borrower holds past its
 //! grant adds to what the process holds, so where the process has a memory
 //! threshold the threshold's guard, which fails whichever query checks it
-//! next, is the only node-wide bound on overcommit.
+//! next, is the only node-wide bound on overcommit, unless the governor holds a
+//! hard limit.
+//!
+//! A governor may hold a hard limit ([`MemoryGovernor::hard_limit`]): a bound
+//! on the pinned bytes of all its leases together, which a host with no
+//! process threshold of its own sets to keep the sum of what its queries
+//! cannot spill within its memory. A request that would take the sum past it
+//! is answered [`Admit::Refuse`], at once and whatever the lease's age, so the
+//! oldest waiter is no exception; the query fails with the memory threshold
+//! error. With no hard limit, no request is refused.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -84,6 +93,10 @@ pub enum Admit {
 	/// The bytes are reserved past the governor's limit; those its grant does
 	/// not cover are the lease's overcommit.
 	Overcommit,
+	/// Nothing is reserved: the bytes would take the pinned bytes of all the
+	/// governor's leases past its hard limit. Only a governor with a hard
+	/// limit answers it, whether or not the request may wait.
+	Refuse,
 }
 
 /// A node's policy for how much memory each query may hold.
@@ -102,16 +115,19 @@ pub trait MemoryGovernor: Send + Sync + 'static {
 	/// `lease` has closed: what it was granted returns to the node.
 	fn closed(&self, lease: &Lease);
 
-	/// `lease` must hold `bytes` more that it cannot spill. Never refuses:
-	/// the answer reserves the bytes on the lease (`Granted`, `Overcommit`) or
-	/// tells the query to wait. `may_wait` is false once the caller's bounded
-	/// wait has run out, and the answer is then never `Wait`.
+	/// `lease` must hold `bytes` more that it cannot spill. The answer reserves
+	/// the bytes on the lease (`Granted`, `Overcommit`), tells the query to
+	/// wait, or, only for a governor with a [hard limit](Self::hard_limit),
+	/// refuses them (`Refuse`) and reserves nothing. `may_wait` is false once
+	/// the caller's bounded wait has run out, and the answer is then never
+	/// `Wait`.
 	///
 	/// The default grows the lease and otherwise grants the bytes past the
 	/// governor's limit. A governor that never answers `Wait` needs no
-	/// [`changed`](Self::changed).
+	/// [`changed`](Self::changed). A governor with a hard limit overrides this
+	/// to enforce it: [`Lease::reserve_pinned`] asks it in place of reserving.
 	fn admit(&self, lease: &Lease, bytes: usize, _may_wait: bool) -> Admit {
-		if lease.reserve_pinned(bytes) {
+		if lease.reserve_pinned_unchecked(bytes) {
 			Admit::Granted
 		} else {
 			lease.force_pinned(bytes);
@@ -150,6 +166,24 @@ pub trait MemoryGovernor: Send + Sync + 'static {
 	/// The node limit the governor holds its leases to, if it has one.
 	fn limit(&self) -> Option<usize> {
 		None
+	}
+
+	/// The most pinned bytes all the governor's leases may hold together, if it
+	/// bounds them. A governor that answers `Some` refuses a request past it
+	/// with [`Admit::Refuse`] from [`admit`](Self::admit), through which every
+	/// reservation of pinned bytes then passes.
+	fn hard_limit(&self) -> Option<usize> {
+		None
+	}
+
+	/// `lease` asks to count `bytes` it already holds as pinned ([`Lease::pin`]),
+	/// which no [`admit`](Self::admit) request covers. A governor with a hard
+	/// limit counts them only if the pinned bytes of all its leases then stay
+	/// within it, deciding atomically with the other leases; otherwise it counts
+	/// nothing and answers `false`. The default counts them.
+	fn pin(&self, lease: &Lease, bytes: usize) -> bool {
+		lease.pin_counted(bytes);
+		true
 	}
 }
 
@@ -363,8 +397,21 @@ impl Lease {
 		}
 	}
 
-	/// [`reserve`](Self::reserve) bytes the lease cannot spill.
+	/// [`reserve`](Self::reserve) bytes the lease cannot spill. Where the
+	/// governor has a hard limit the reservation is the governor's decision
+	/// ([`MemoryGovernor::admit`], never waiting), made atomically with the
+	/// pinned bytes of every other lease; an answer of `false` is then its
+	/// refusal and reserves nothing.
 	pub(crate) fn reserve_pinned(&self, bytes: usize) -> bool {
+		if self.governor.hard_limit().is_some() {
+			return !matches!(self.governor.admit(self, bytes, false), Admit::Refuse);
+		}
+		self.reserve_pinned_unchecked(bytes)
+	}
+
+	/// [`reserve_pinned`](Self::reserve_pinned) without the governor's hard
+	/// limit.
+	fn reserve_pinned_unchecked(&self, bytes: usize) -> bool {
 		let reserved = self.reserve(bytes);
 		if reserved {
 			self.pinned.fetch_add(bytes, Ordering::AcqRel);
@@ -385,7 +432,23 @@ impl Lease {
 	/// Count `bytes` of what the lease holds as bytes it cannot spill. Pinned
 	/// bytes the grant does not cover will not come back by spilling, so they
 	/// are the lease's overcommit; the governor is told when that begins.
-	pub(crate) fn pin(&self, bytes: usize) {
+	///
+	/// Where the governor has a hard limit, the governor decides
+	/// ([`MemoryGovernor::pin`]): answers `false` and counts nothing if the
+	/// bytes would take the pinned bytes of all its leases past it, and the
+	/// caller fails its query. The lease is then unchanged and still holds the
+	/// bytes as spillable.
+	pub(crate) fn pin(&self, bytes: usize) -> bool {
+		if bytes > 0 && self.governor.hard_limit().is_some() {
+			return self.governor.pin(self, bytes);
+		}
+		self.pin_counted(bytes);
+		true
+	}
+
+	/// [`pin`](Self::pin) without the governor's hard limit: the bytes are
+	/// counted whatever the pinned bytes of all leases.
+	pub(crate) fn pin_counted(&self, bytes: usize) {
 		let before = self.overcommit();
 		self.pinned.fetch_add(bytes, Ordering::AcqRel);
 		let after = self.overcommit();
@@ -591,11 +654,17 @@ pub struct FairGovernor {
 	waiters: AtomicUsize,
 	waits: AtomicU64,
 	overcommits: AtomicU64,
+	refusals: AtomicU64,
+	/// The most pinned bytes all leases may hold together, if bounded.
+	hard_limit: Option<usize>,
 }
 
 impl std::fmt::Debug for FairGovernor {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("FairGovernor").field("limit", &self.limit).finish()
+		f.debug_struct("FairGovernor")
+			.field("limit", &self.limit)
+			.field("hard_limit", &self.hard_limit)
+			.finish()
 	}
 }
 
@@ -616,7 +685,18 @@ impl FairGovernor {
 			waiters: AtomicUsize::new(0),
 			waits: AtomicU64::new(0),
 			overcommits: AtomicU64::new(0),
+			refusals: AtomicU64::new(0),
+			hard_limit: None,
 		}
+	}
+
+	/// Bound the pinned bytes of all leases together to `bytes`: a request that
+	/// would take their sum past it is refused ([`Admit::Refuse`]) whatever the
+	/// lease's age, where without one no request is. Pinned bytes a lease holds
+	/// past its grant (its overcommit) count toward the sum like any others.
+	pub fn with_hard_limit(mut self, bytes: usize) -> Self {
+		self.hard_limit = Some(bytes);
+		self
 	}
 
 	/// The node's limit, in bytes.
@@ -639,6 +719,11 @@ impl FairGovernor {
 	/// however often its query asks again.
 	pub fn waits(&self) -> u64 {
 		self.waits.load(Ordering::Relaxed)
+	}
+
+	/// How many requests the hard limit has refused.
+	pub fn refusals(&self) -> u64 {
+		self.refusals.load(Ordering::Relaxed)
 	}
 
 	/// How many times a lease came to hold memory past its grant, counting
@@ -1061,6 +1146,15 @@ impl FairGovernor {
 		// Read before anything is weighed: a release after this moves the epoch
 		// past it, so a waiter told to wait on it is woken at once.
 		let epoch = self.epoch.load(Ordering::Acquire);
+		// The hard limit is judged first and for every request, so no branch
+		// below reserves bytes past it.
+		if let Some(hard) = self.hard_limit {
+			let pinned: usize = open.iter().map(|other| other.pinned()).sum();
+			if pinned.saturating_add(bytes) > hard {
+				self.refusals.fetch_add(1, Ordering::Relaxed);
+				return Admit::Refuse;
+			}
+		}
 		let before = lease.overcommit();
 		let fair = self.limit / open.len().max(1);
 		let claims = Self::claims(open, lease);
@@ -1276,8 +1370,10 @@ impl MemoryGovernor for FairGovernor {
 	fn admit(&self, lease: &Lease, bytes: usize, may_wait: bool) -> Admit {
 		// A lease that does not wait and whose grant, or the node's free memory
 		// while no lease waits, covers the bytes is granted them without the
-		// lock, as the decision would grant them.
-		if !lease.waiting() {
+		// lock, as the decision would grant them. A governor with a hard limit
+		// decides every request under the lock, which is the only place the
+		// pinned bytes of all leases are read together.
+		if self.hard_limit.is_none() && !lease.waiting() {
 			if lease.hold_pinned(bytes) {
 				return Admit::Granted;
 			}
@@ -1362,6 +1458,31 @@ impl MemoryGovernor for FairGovernor {
 
 	fn limit(&self) -> Option<usize> {
 		Some(self.limit)
+	}
+
+	fn hard_limit(&self) -> Option<usize> {
+		self.hard_limit
+	}
+
+	fn pin(&self, lease: &Lease, bytes: usize) -> bool {
+		let Some(hard) = self.hard_limit else {
+			lease.pin_counted(bytes);
+			return true;
+		};
+		let guard = self.lock();
+		let open = self.open();
+		let pinned: usize = open.iter().map(|other| other.pinned()).sum();
+		let counted = pinned.saturating_add(bytes) <= hard;
+		if counted {
+			let before = lease.overcommit();
+			lease.pinned.fetch_add(bytes, Ordering::AcqRel);
+			self.note(&open, lease, before);
+		} else {
+			self.refusals.fetch_add(1, Ordering::Relaxed);
+		}
+		drop(guard);
+		drop(open);
+		counted
 	}
 }
 
@@ -1969,6 +2090,86 @@ mod tests {
 		assert_eq!((c.overcommit(), c.pinned()), (500, 600));
 		assert_eq!((governor.overcommits(), governor.overcommitted()), (1, 500));
 		check(&governor, &[&c, &d]);
+	}
+
+	/// With a hard limit, a request that would take the pinned bytes of all
+	/// leases past it is refused and reserves nothing, whoever asks and however
+	/// the request is made; what a lease gives back is available again.
+	#[test]
+	fn a_hard_limit_refuses_pinned_bytes_past_the_sum() {
+		let governor = Arc::new(FairGovernor::new(10_000).with_hard_limit(1000));
+		let a = Lease::open(&dynamic(&governor), 100, 0);
+		let b = Lease::open(&dynamic(&governor), 100, 0);
+		assert_eq!(governor.admit(&a, 600, true), Admit::Granted);
+		assert_eq!(governor.admit(&b, 401, true), Admit::Refuse);
+		assert_eq!(governor.admit(&b, 401, false), Admit::Refuse);
+		assert_eq!((b.held(), b.pinned(), b.grant()), (0, 0, 100));
+		assert_eq!(governor.refusals(), 2);
+		assert!(!b.waiting());
+		assert_eq!(governor.admit(&b, 400, true), Admit::Granted);
+		// The reservation of pinned bytes without a wait is bound by it too.
+		assert!(!a.reserve_pinned(1));
+		assert_eq!(a.pinned(), 600);
+		a.release_pinned(100);
+		assert!(a.reserve_pinned(100));
+		assert!(!b.reserve_pinned(1));
+		// Spillable bytes are not pinned bytes.
+		assert!(a.reserve(2000));
+		assert_eq!(governor.overcommits(), 0);
+		check(&governor, &[&a, &b]);
+		drop(a);
+		assert_eq!(governor.admit(&b, 600, true), Admit::Granted);
+	}
+
+	/// Counting bytes a lease already holds as pinned is decided with the pinned
+	/// bytes of all leases: the conversion that would pass the hard limit counts
+	/// nothing and is refused, one that fits is counted, and a governor with no
+	/// hard limit counts every conversion.
+	#[test]
+	fn pinning_held_bytes_is_decided_against_the_hard_limit() {
+		let governor = Arc::new(FairGovernor::new(10_000).with_hard_limit(1000));
+		let a = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(a.reserve(900));
+		assert!(a.pin(900));
+		assert_eq!(a.pinned(), 900);
+		let b = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(b.reserve(200));
+		assert!(!b.pin(200));
+		assert_eq!((b.pinned(), b.held()), (0, 200));
+		assert_eq!(governor.refusals(), 1);
+		assert!(b.pin(100));
+		let unbounded = Arc::new(FairGovernor::new(10_000));
+		let c = Lease::open(&dynamic(&unbounded), 100, 0);
+		assert!(c.reserve(5000));
+		assert!(c.pin(5000));
+	}
+
+	/// The oldest waiting lease is refused like any other under a hard limit,
+	/// and a refusal ends its wait.
+	#[test]
+	fn a_hard_limit_refuses_the_oldest_waiter_and_ends_its_wait() {
+		let governor = Arc::new(FairGovernor::new(1000).with_hard_limit(1100));
+		let a = Lease::open(&dynamic(&governor), 100, 0);
+		let b = Lease::open(&dynamic(&governor), 100, 0);
+		assert!(b.reserve_pinned(500));
+		assert!(matches!(governor.admit(&a, 600, true), Admit::Wait { .. }));
+		assert!(a.waiting());
+		assert!(b.reserve_pinned(1));
+		assert_eq!(governor.admit(&a, 600, true), Admit::Refuse);
+		assert!(!a.waiting());
+		assert_eq!(governor.waiters.load(Ordering::Relaxed), 0);
+		assert_eq!(a.want.load(Ordering::Relaxed), 0);
+	}
+
+	/// With no hard limit the governor never refuses, whatever is pinned.
+	#[test]
+	fn no_hard_limit_never_refuses() {
+		let governor = Arc::new(FairGovernor::new(1000));
+		assert_eq!(governor.hard_limit(), None);
+		let a = Lease::open(&dynamic(&governor), 100, 0);
+		assert_eq!(governor.admit(&a, 5000, false), Admit::Overcommit);
+		assert_eq!(governor.admit(&a, usize::MAX / 4, false), Admit::Overcommit);
+		assert_eq!(governor.refusals(), 0);
 	}
 
 	/// A request past the asker's fair share does not take free memory an older

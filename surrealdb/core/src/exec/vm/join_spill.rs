@@ -430,7 +430,7 @@ impl SpilledJoin {
 			// cannot spill, so they stay charged, through the reservation the
 			// part's account held for them.
 			let held = probe_account.used();
-			all.regex_probe_account.adopt(&mut probe_account);
+			all.regex_probe_account.adopt(&mut probe_account)?;
 			drop(probe_account);
 			if all.regex_probe_account.charge(held) == Verdict::Spill {
 				all.regex_probe_account.insist_now()?;

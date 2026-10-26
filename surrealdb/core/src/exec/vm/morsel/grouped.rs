@@ -126,7 +126,7 @@ impl Pending {
 			let folded = folded?;
 			for result in &mut results {
 				if let Some(account) = result.group_accounts.get_mut(at) {
-					state.group_accounts[at].adopt(account);
+					state.group_accounts[at].adopt(account)?;
 					account.clear();
 				}
 			}
