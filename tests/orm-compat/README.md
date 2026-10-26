@@ -4,7 +4,26 @@ These targeted checks exercise real Prisma, Drizzle and TypeORM clients through 
 wire listener. They cover scalar CRUD, projection ordering, filters and pagination, transactions,
 relations, grouping, upserts, complex values, generated integer IDs and duplicate primary keys.
 Schema-tool checks exercise introspection, generated migration application, and repeat application.
-They are a compatibility probe, not the ORMs' upstream test suites or a performance benchmark.
+They are a compatibility probe, not a performance benchmark. The ORMs' own upstream suites run
+separately, see "Upstream suites" below.
+
+## One command
+
+```sh
+cargo make orm-compat harness             # or: tests/orm-compat/run.sh harness
+cargo make orm-compat harness --record    # also refresh results/ (needs every reference check to pass)
+cargo make orm-compat upstream            # all upstream suites; or name one: typeorm drizzle drizzle-kit prisma
+```
+
+The script builds the example listener (release profile; `ORM_COMPAT_PROFILE=dev` for a debug
+build), runs `npm ci` when `node_modules` is missing, and refuses to start if port 15432 or 15433 is
+already taken, because a second listener on a taken port fails silently. It then starts the
+SurrealDB listener and the PostgreSQL 18.4 reference, runs the runtime checks on SurrealDB, the same
+checks with `REFERENCE=1`, and the schema suites, and stops both servers on exit, including on
+Ctrl-C. Server logs go to `target/orm-compat-logs`. `run.sh services` only starts both servers.
+The `ORM compatibility` workflow runs the harness and the upstream suites nightly on `main` (and on manual dispatch) and uploads the results; it never runs on pull requests and is not a required check.
+
+The steps below are what the script does, for running them by hand.
 
 The runtime fixtures use explicit integer IDs and pre-created tables. Generated IDs and schema
 management are tested separately so failures there do not mask application-query coverage. A
@@ -87,3 +106,36 @@ reference listener is running. It requires passing reference checks, equal scena
 unique case identities before recording evidence. `SOURCE_COMMIT` and `SOURCE_TREE` can identify the product revision separately from a later
 harness-only commit. Regenerate evidence only after checking all
 reference scenarios pass.
+
+## Upstream suites
+
+`./run.sh upstream [typeorm|drizzle|drizzle-kit|prisma ...]` runs each ORM's own tests against the
+SurrealDB listener and against the PostgreSQL 18.4 reference, then classifies every test by joining the two runs:
+
+| bucket | meaning |
+|---|---|
+| `pass_both` | passes on both |
+| `surrealdb_only` | fails on SurrealDB, passes on the reference: a real gap |
+| `fail_both` | fails on both: environment or version noise |
+| `reference_only` | fails only on the reference |
+| `not_run_surrealdb` | passes on the reference but never ran on SurrealDB (a failed hook skipped it) |
+| `skipped` | skipped on either side |
+
+A listener restart between ORMs keeps runs independent. The SurrealDB pass rate reported is
+`pass_both / (tests that pass on the reference)`. Failure causes are grouped by SQLSTATE where the
+error carries one, otherwise by the first message line with numbers and quoted names removed.
+
+Upstream sources are cloned at the tags matching `package.json` into `target/orm-compat-upstream`
+(gitignored, nothing is copied into the repository) together with their own pnpm install, store and
+build output. Delete that directory to reclaim the disk; the next run fetches it again.
+`ORM_COMPAT_CACHE` relocates it. Tunables: `ORM_COMPAT_TEST_TIMEOUT_MS` (per test, default 20000,
+the same for both targets) and `ORM_COMPAT_SUITE_CAP_S` (wall clock per suite and target, default 3 hours).
+
+Scope per ORM, and what is deliberately not run:
+
+- **TypeORM 1.1.2**: `test/functional` under mocha with only a `postgres` entry in `ormconfig.json`.
+- **drizzle-orm 0.45.4**: the pg integration files that read `PG_CONNECTION_STRING` (node-postgres, postgres-js, pg-custom, pg-proxy and the relational pg files). `DOCKER_HOST` points nowhere so no file can silently start its own PostgreSQL. Vector/PostGIS (Docker only), the seeder and RLS files (in-process PGlite) cannot be pointed at a server.
+- **drizzle-kit 0.31.11**: `push/pg` and `introspect/pg`, the pg tests that execute SQL. Upstream runs them on in-process PGlite, so a vitest alias substitutes `upstream/shims/pglite.mjs`, which gives every `new PGlite()` a fresh database on the target server. The schema-diff-only pg tests never execute SQL and would pass anywhere, so they are not run. Roles are cluster-global on the reference, so the shim resets them per instance.
+- **Prisma 7.10.1**: `packages/client` functional tests with the `js_pg` adapter (code tests only; the type tests do not touch a database) and the postgres tests of `packages/migrate`, in 10 jest shards each so one capped shard loses only itself. Install skips lifecycle scripts; the schema engine downloaded by this harness's own `npm ci` is passed in `PRISMA_SCHEMA_ENGINE_BINARY`. Prisma refuses `db push --force-reset` when it detects an AI agent unless the user's own consent text is exported in `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION`. The runner never sets that variable. Blocked tests are counted as `guard_blocked`, excluded from the classification, and a suite that is mostly blocked is reported as not measured. Run the script from your own terminal, with that variable exported if you accept the reset of the isolated test databases, to measure the client suite.
+
+Outputs in `results/upstream/`: one `<orm>-<suite>-<target>.json` per run (every test with status, message and SQLSTATE), `classification.json` (per-test bucket for every test except those passing on both or skipped), `summary.json` and `summary.md` (counts and top causes). The runners and aggregator need only the Python standard library.

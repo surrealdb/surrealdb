@@ -1,0 +1,381 @@
+[
+  {
+    "orm": "drizzle",
+    "suite": "pg",
+    "version": "0.45.4",
+    "source_commit": "eab8bedbb65d5429c54e612ddbd88aa23091d398",
+    "raw": {
+      "surrealdb": {
+        "fail": 854,
+        "capped": false,
+        "wall_s": 6,
+        "exit_code": 1,
+        "guard_blocked": 0
+      },
+      "reference": {
+        "pass": 854,
+        "capped": false,
+        "wall_s": 36,
+        "exit_code": 0,
+        "guard_blocked": 0
+      }
+    },
+    "buckets": {
+      "surrealdb_only": 854,
+      "skipped": 5
+    },
+    "surrealdb_pass_rate_of_reference_passing": 0.0,
+    "not_measured": false,
+    "top_causes": {
+      "surrealdb_only": [
+        {
+          "cause": "0A000: Failed query: drop schema if exists public cascade",
+          "count": 669,
+          "example_test": "tests/pg/node-postgres.test.ts::all date and time columns without timezone first case mode string",
+          "example_query": null
+        },
+        {
+          "cause": "0A000: Failed query: drop schema public cascade",
+          "count": 184,
+          "example_test": "tests/relational/issues-schemas/wrong-mapping/pg.test.ts::Simple case from GH",
+          "example_query": null
+        },
+        {
+          "cause": "42601: Failed query: select \"\u2026\".\"\u2026\", \"\u2026\".\"\u2026\", \"\u2026\".\"\u2026\", \"\u2026\".\"\u2026\", \"\u2026\".\"\u2026\" as \"\u2026\", \"\u2026\".\"\u2026\" as \"\u2026\" from \"\u2026\" \"\u2026\" left join lateral (select coalesce(json",
+          "count": 1,
+          "example_test": "tests/relational/issues-schemas/duplicates/pg/pg.duplicates.test.ts::Simple case from GH",
+          "example_query": null
+        }
+      ],
+      "fail_both": [],
+      "not_run_surrealdb": []
+    }
+  },
+  {
+    "orm": "drizzle-kit",
+    "suite": "kit-pg",
+    "version": "0.31.11",
+    "source_commit": "eab8bedbb65d5429c54e612ddbd88aa23091d398",
+    "raw": {
+      "surrealdb": {
+        "fail": 121,
+        "pass": 1,
+        "capped": false,
+        "wall_s": 4,
+        "exit_code": 1,
+        "guard_blocked": 0
+      },
+      "reference": {
+        "pass": 121,
+        "fail": 1,
+        "capped": false,
+        "wall_s": 52,
+        "exit_code": 1,
+        "guard_blocked": 0
+      }
+    },
+    "buckets": {
+      "surrealdb_only": 120,
+      "fail_both": 1,
+      "pass_both": 1,
+      "skipped": 1
+    },
+    "surrealdb_pass_rate_of_reference_passing": 0.0083,
+    "not_measured": false,
+    "top_causes": {
+      "surrealdb_only": [
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected \"\u2026\", found keyword \"\u2026\"",
+          "count": 62,
+          "example_test": "tests/introspect/pg.test.ts::basic identity always test",
+          "example_query": null
+        },
+        {
+          "cause": "42P01: The table \"\u2026\" does not exist",
+          "count": 30,
+          "example_test": "tests/introspect/pg.test.ts::basic index test",
+          "example_query": null
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected ADD, DROP, ALTER, or RENAME, found keyword \"\u2026\"",
+          "count": 20,
+          "example_test": "tests/introspect/pg.test.ts::basic policy",
+          "example_query": null
+        },
+        {
+          "cause": "23503: PostgreSQL parse error: at N..N: unexpected token: expected PRIMARY KEY, UNIQUE, or FOREIGN KEY, found keyword \"\u2026\"",
+          "count": 4,
+          "example_test": "tests/introspect/pg.test.ts::introspect checks",
+          "example_query": null
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected ;, found keyword \"\u2026\"",
+          "count": 2,
+          "example_test": "tests/push/pg.test.ts::Altering indexes",
+          "example_query": null
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected \"\u2026\", found identifier \"\u2026\"",
+          "count": 1,
+          "example_test": "tests/push/pg.test.ts::Indexes properties that should not trigger push changes",
+          "example_query": null
+        },
+        {
+          "cause": "XX000: Cannot change field \"\u2026\" of table \"\u2026\": its DEFAULT does not coerce to \"\u2026\"",
+          "count": 1,
+          "example_test": "tests/push/pg.test.ts::add check constraint to table",
+          "example_query": null
+        }
+      ],
+      "fail_both": [
+        {
+          "cause": "42P01: The table \"\u2026\" does not exist",
+          "count": 1,
+          "example_test": "tests/push/pg.test.ts::Add not null to a column with null data. Should rollback",
+          "example_query": null
+        }
+      ],
+      "not_run_surrealdb": []
+    }
+  },
+  {
+    "orm": "prisma",
+    "suite": "client-functional",
+    "version": "7.10.1",
+    "source_commit": "97ea359250335c1a174504c9b2b7e5fe030ab937",
+    "raw": {
+      "surrealdb": {
+        "fail": 1328,
+        "pass": 10,
+        "capped": false,
+        "wall_s": 156,
+        "exit_code": 1,
+        "guard_blocked": 0
+      },
+      "reference": {
+        "fail": 5,
+        "pass": 10,
+        "capped": false,
+        "wall_s": 240,
+        "exit_code": 1,
+        "guard_blocked": 1323
+      }
+    },
+    "buckets": {
+      "surrealdb_only": 1323,
+      "fail_both": 5,
+      "pass_both": 10,
+      "skipped": 25691
+    },
+    "surrealdb_pass_rate_of_reference_passing": null,
+    "not_measured": true,
+    "top_causes": {
+      "surrealdb_only": [
+        {
+          "cause": "Error: Schema engine error:",
+          "count": 1323,
+          "example_test": "tests/functional/0-legacy-ports/aggregations/tests.ts::0-legacy-ports.aggregations (js_pg) avg",
+          "example_query": null
+        }
+      ],
+      "fail_both": [
+        {
+          "cause": "{\"\u2026\":\"\u2026\",\"\u2026\":\"ReferenceError: prisma is not defined\\n    at Object.<anonymous> (/Users/tobie/Repositories/surrealdb/.claude/worktrees/destru",
+          "count": 4,
+          "example_test": "tests/functional/decimal/scalar/tests.ts:: Test execution failure: could be caused by test hooks like 'afterAll'.",
+          "example_query": null
+        },
+        {
+          "cause": "{\"\u2026\":\"\u2026\",\"\u2026\":\"TypeError: Cannot read properties of undefined (reading \"\u2026\")\\n    at Object.<anonymous> (/Users/tobie/Repositories/surrealdb/.",
+          "count": 1,
+          "example_test": "tests/functional/issues/6578/tests.ts:: Test execution failure: could be caused by test hooks like 'afterAll'.",
+          "example_query": null
+        }
+      ],
+      "not_run_surrealdb": []
+    }
+  },
+  {
+    "orm": "prisma",
+    "suite": "migrate-postgres",
+    "version": "7.10.1",
+    "source_commit": "97ea359250335c1a174504c9b2b7e5fe030ab937",
+    "raw": {
+      "surrealdb": {
+        "fail": 29,
+        "pass": 9,
+        "capped": true,
+        "wall_s": 4498,
+        "exit_code": 1,
+        "guard_blocked": 0
+      },
+      "reference": {
+        "pass": 38,
+        "fail": 19,
+        "capped": false,
+        "wall_s": 146,
+        "exit_code": 1,
+        "guard_blocked": 1
+      }
+    },
+    "buckets": {
+      "surrealdb_only": 17,
+      "pass_both": 9,
+      "not_run_surrealdb": 13,
+      "reference_only": 7,
+      "fail_both": 12,
+      "skipped": 1
+    },
+    "surrealdb_pass_rate_of_reference_passing": 0.2308,
+    "not_measured": false,
+    "top_causes": {
+      "surrealdb_only": [
+        {
+          "cause": "Error: expect(received).resolves.toMatchInlineSnapshot()",
+          "count": 10,
+          "example_test": "src/__tests__/DbExecute.test.ts::db execute \u203a postgres should pass using a transaction with --file",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).resolves.toContain()",
+          "count": 3,
+          "example_test": "src/__tests__/rpc.test.ts::getDatabaseVersion - PostgreSQL [ConnectionString] should succeed",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).toContain(expected) // indexOf",
+          "count": 1,
+          "example_test": "src/__tests__/DbExecute.test.ts::db execute \u203a postgres should fail if DROP DATABASE is attempted",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).toEqual(expected) // deep equality",
+          "count": 1,
+          "example_test": "src/__tests__/DbExecute.test.ts::db execute \u203a postgres should fail with P1003 error when database does not exist",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).rejects.toThrowErrorMatchingInlineSnapshot(snapshot)",
+          "count": 1,
+          "example_test": "src/__tests__/DbExecute.test.ts::db execute \u203a postgres should fail with invalid SQL error from database",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).toMatchInlineSnapshot(snapshot)",
+          "count": 1,
+          "example_test": "src/__tests__/DbPull/postgresql.test.ts::postgresql \u203a empty or incomplete schema introspection with postgresql provider but schema has a sqlite provider should fail",
+          "example_query": null
+        }
+      ],
+      "fail_both": [
+        {
+          "cause": "Error: expect(received).resolves.toMatchInlineSnapshot()",
+          "count": 11,
+          "example_test": "src/__tests__/DbPush.test.ts::postgres --force-reset should succeed and display a log",
+          "example_query": null
+        },
+        {
+          "cause": "Error: expect(received).rejects.toMatchInlineSnapshot(snapshot)",
+          "count": 1,
+          "example_test": "src/__tests__/rpc.test.ts::createDatabase should succeed - Schema - postgresql",
+          "example_query": null
+        }
+      ],
+      "not_run_surrealdb": []
+    }
+  },
+  {
+    "orm": "typeorm",
+    "suite": "functional",
+    "version": "1.1.2",
+    "source_commit": "a0ea55323662dcd3cff1fa5ab6153be43ded80a7",
+    "raw": {
+      "surrealdb": {
+        "pass": 538,
+        "fail": 448,
+        "capped": false,
+        "wall_s": 12,
+        "exit_code": 255,
+        "guard_blocked": 0
+      },
+      "reference": {
+        "pass": 2317,
+        "fail": 9,
+        "capped": false,
+        "wall_s": 78,
+        "exit_code": 9,
+        "guard_blocked": 0
+      }
+    },
+    "buckets": {
+      "pass_both": 538,
+      "surrealdb_only": 443,
+      "not_run_surrealdb": 1774,
+      "fail_both": 5,
+      "reference_only": 4,
+      "skipped": 155
+    },
+    "surrealdb_pass_rate_of_reference_passing": 0.1953,
+    "not_measured": false,
+    "top_causes": {
+      "surrealdb_only": [
+        {
+          "cause": "42601: at N..N: unexpected token: expected \"\u2026\", found parameter $N",
+          "count": 436,
+          "example_test": "build/compiled/test/functional/cache/custom-cache-provider.test.js::custom cache provider \"before each\" hook for \"should be used instead of built-ins\" [hook]",
+          "example_query": "SELECT quote_ident(schemaname) || '.' || quote_ident(viewname) as \"name\" FROM \"pg_views\" WHERE \"schemaname\" = ANY($1) AND \"viewname\" NOT IN ('geography_columns', 'geometry_columns', 'raster_columns', 'raster_overviews')"
+        },
+        {
+          "cause": "Cannot read properties of undefined (reading \"\u2026\")",
+          "count": 4,
+          "example_test": "build/compiled/test/functional/commands/migration-create.test.js::commands - migration create \"after all\" hook for \"should use custom timestamp when option is passed\" [hook]",
+          "example_query": null
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected TABLE, INDEX, VIEW, SCHEMA, TYPE, or PROPERTY GRAPH, found keyword \"\u2026\"",
+          "count": 1,
+          "example_test": "build/compiled/test/functional/driver/postgres/data-source-options.test.js::driver > postgres > DataSource options > custom extension installation \"after all\" hook for \"should install specified extensions after connection\" [hook]",
+          "example_query": "DROP EXTENSION IF EXISTS tablefunc"
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected \"\u2026\", found keyword \"\u2026\"",
+          "count": 1,
+          "example_test": "build/compiled/test/functional/indices/index-types/postgresql/index-types-postgres.test.js::indices > index types > postgres \"before all\" hook for \"should support 'hash' index\" [hook]",
+          "example_query": "CREATE TABLE \"user\" (\"id\" SERIAL NOT NULL, \"bTreeColumn\" character varying(255) NOT NULL, \"hashColumn\" character varying(255) NOT NULL, \"gistColumn\" point NOT NULL, \"spgistColumn\" point NOT NULL, \"ginColumn\" text array NOT NULL, \"brinColumn\" integer NOT NULL, CONSTRAINT \"PK_cace4a159ff9f2512dd42373760\" PRIMARY KEY (\"id\"))"
+        },
+        {
+          "cause": "3D000: Internal database error: IR table full: vm registers",
+          "count": 1,
+          "example_test": "build/compiled/test/functional/query-runner/drop-table.test.js::query runner > drop table \"before all\" hook for \"should correctly drop table without relations and revert drop\" [hook]",
+          "example_query": "SELECT \"table_schema\", \"table_name\", obj_description((quote_ident(\"table_schema\") || '.' || quote_ident(\"table_name\"))::regclass, 'pg_class') AS table_comment FROM \"information_schema\".\"tables\" WHERE (\"table_schema\" = 'public' AND \"table_name\" = 'company') OR (\"table_schema\" = 'public' AND \"table_name\" = 'employee') OR (\"table_schema\" = 'public' AND \"table_name\" = 'post') OR (\"table_schema\" = 'pub"
+        }
+      ],
+      "fail_both": [
+        {
+          "cause": "42601: at N..N: unexpected token: expected \"\u2026\", found parameter $N",
+          "count": 5,
+          "example_test": "build/compiled/test/functional/database-schema/column-collation/postgres/column-collation-postgres.test.js::database schema > column collation > postgres \"before each\" hook for \"should correctly create column with collation option\" [hook]",
+          "example_query": "SELECT quote_ident(schemaname) || '.' || quote_ident(viewname) as \"name\" FROM \"pg_views\" WHERE \"schemaname\" = ANY($1) AND \"viewname\" NOT IN ('geography_columns', 'geometry_columns', 'raster_columns', 'raster_overviews')"
+        }
+      ],
+      "not_run_surrealdb": [
+        {
+          "cause": "42601: at N..N: unexpected token: expected \"\u2026\", found parameter $N",
+          "count": 1744
+        },
+        {
+          "cause": "Cannot read properties of undefined (reading \"\u2026\")",
+          "count": 18
+        },
+        {
+          "cause": "42601: PostgreSQL parse error: at N..N: unexpected token: expected \"\u2026\", found keyword \"\u2026\"",
+          "count": 9
+        },
+        {
+          "cause": "3D000: Internal database error: IR table full: vm registers",
+          "count": 3
+        }
+      ]
+    }
+  }
+]
