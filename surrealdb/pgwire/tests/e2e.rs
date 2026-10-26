@@ -413,6 +413,50 @@ async fn test_pgwire_e2e_transactions() {
 }
 
 #[tokio::test]
+async fn test_pgwire_function_errors_carry_the_sqlstate_of_the_reference_server() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for (sql, expected) in [
+		("SELECT mod(1, 0);", "22012"),
+		("SELECT substring('x', 1, -1);", "22011"),
+		("SELECT ln(0);", "2201E"),
+		("SELECT log(-1);", "2201E"),
+		("SELECT split_part('a', ',', 0);", "22023"),
+		("SELECT date_part('foo', CAST('2024-03-15T10:20:30Z' AS timestamp));", "22023"),
+		("SELECT substring('foobar' FROM 'o.b');", "0A000"),
+	] {
+		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
+		assert_eq!(last, b'E', "{sql} must fail");
+		let (code, message) = err.expect("an error carries its fields");
+		assert_eq!(code, expected, "{sql}: {message}");
+	}
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_function_values_are_sent_in_the_type_the_descriptor_declares() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+	for (sql, check) in
+		[("SELECT round(2.567, 2) AS v;", "2.57"), ("SELECT pg_typeof(true) AS v;", "boolean")]
+	{
+		let (rows, last) = run_simple_query(&mut stream, sql).await;
+		assert_eq!(last, b'C', "{sql}");
+		let cols = decode_data_row(&rows[0]);
+		assert_eq!(cols[0].as_deref(), Some(check), "{sql}");
+	}
+	let (rows, last) = run_simple_query(&mut stream, "SELECT current_date AS v;").await;
+	assert_eq!(last, b'C');
+	let day = decode_data_row(&rows[0])[0].clone().expect("a date");
+	assert_eq!(day.len(), 10, "{day}");
+	assert!(day.chars().filter(|c| *c == '-').count() == 2, "{day}");
+	let (rows, last) = run_simple_query(&mut stream, "SELECT gen_random_uuid() AS v;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(decode_data_row(&rows[0])[0].as_deref().map(str::len), Some(36));
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_pgwire_dialect_switching_and_fail_closed() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	// Connect without options: default dialect is SurrealQL

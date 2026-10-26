@@ -1,0 +1,397 @@
+//! Every function the SQL front ends register runs, and answers what the reference server does.
+//!
+//! The registry may list a function only if a statement calling it lowers and runs. A function
+//! that is registered but has no case here, fails, or answers differently from the case is a
+//! defect, which `BROKEN` names until it is fixed.
+
+use std::sync::Arc;
+
+use surrealdb_sqlplan::{FunctionRegistry, SqlDialect};
+use surrealdb_types::Value;
+
+use super::sql_function_cases::{Case, Sql};
+use crate::dbs::Session;
+use crate::kvs::{Datastore, QueryRequest, QuerySource};
+
+/// The cases that do not pass yet, as `(dialect, case)`, where a case is named by [`identity`],
+/// with ` (stored)` after it for its run over the columns of a stored row: a
+/// failure in any other case fails the test, even of a function listed here. A case leaves the
+/// list when it passes, and the test fails while a case stays on it after it passes or names no
+/// case.
+const BROKEN: &[(Dialect, &str)] = &[
+	// pgsql
+	(Dialect::Pgsql, r#"SELECT generate_series(1, 3) AS v"#),
+	(Dialect::Pgsql, r#"SELECT generate_series(1, 10, 4) AS v"#),
+	(Dialect::Pgsql, r#"SELECT generate_series(3, 1, -1) AS v"#),
+	(Dialect::Pgsql, r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT dense_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT percent_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT cume_dist() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT ntile(2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT lead(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT lag(n, 1, 0) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT first_value(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(
+		Dialect::Pgsql,
+		r#"SELECT last_value(n) OVER (ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS v FROM t ORDER BY n"#,
+	),
+	(Dialect::Pgsql, r#"SELECT nth_value(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	// mysql
+	(Dialect::Mysql, r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT dense_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT percent_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT cume_dist() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT ntile(2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT lead(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT lag(n, 1, 0) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Mysql, r#"SELECT first_value(n) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(
+		Dialect::Mysql,
+		r#"SELECT last_value(n) OVER (ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS v FROM t ORDER BY n"#,
+	),
+	(Dialect::Mysql, r#"SELECT nth_value(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	(Dialect::Pgsql, r#"SELECT pg_try_advisory_lock(1) AS v"#),
+	(Dialect::Pgsql, r#"SELECT pg_advisory_lock(1) AS v"#),
+	(Dialect::Pgsql, r#"SELECT pg_advisory_unlock(1) AS v"#),
+	(Dialect::Pgsql, r#"SELECT pg_advisory_unlock_all() AS v"#),
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Dialect {
+	Pgsql,
+	Mysql,
+}
+
+impl Dialect {
+	fn label(self) -> &'static str {
+		match self {
+			Dialect::Pgsql => "pgsql",
+			Dialect::Mysql => "mysql",
+		}
+	}
+
+	fn sql_dialect(self) -> SqlDialect {
+		match self {
+			Dialect::Pgsql => SqlDialect::Postgres,
+			Dialect::Mysql => SqlDialect::MySql,
+		}
+	}
+
+	fn source(self, text: &str) -> QuerySource<'_> {
+		match self {
+			Dialect::Pgsql => QuerySource::pgsql(text),
+			Dialect::Mysql => QuerySource::mysql(text),
+		}
+	}
+
+	fn cases(self) -> &'static [Case] {
+		match self {
+			Dialect::Pgsql => super::sql_function_cases::PGSQL,
+			Dialect::Mysql => super::sql_function_cases::MYSQL,
+		}
+	}
+}
+
+fn session() -> Session {
+	Session::owner().with_ns("test").with_db("test")
+}
+
+async fn datastore() -> Arc<Datastore> {
+	let ds = Datastore::builder()
+		.with_auth(true)
+		.build_with_path("memory")
+		.await
+		.expect("the datastore opens");
+	let setup = "DEFINE NAMESPACE test; DEFINE DATABASE test;
+		DEFINE TABLE t SCHEMALESS; DEFINE TABLE fx SCHEMALESS;";
+	for result in ds.execute(setup, &session(), None).await.expect("the setup runs") {
+		result.result.expect("a setup statement");
+	}
+	ds
+}
+
+/// What a statement answers: the `v` column of its rows joined by `|`, or `ERR:` and the message.
+async fn outcome(ds: &Datastore, dialect: Dialect, text: &str) -> String {
+	let session = session();
+	let results = match ds.run(QueryRequest::new(dialect.source(text), &session)).await {
+		Ok(results) => results,
+		Err(error) => return format!("ERR:{error}"),
+	};
+	let Some(response) = results.into_iter().next() else {
+		return "ERR:the statement answered no result".to_owned();
+	};
+	let rows = match response.result {
+		Ok(value) => value,
+		Err(error) => return format!("ERR:{error}"),
+	};
+	let Value::Array(rows) = rows else {
+		return render(dialect, &rows);
+	};
+	let cells: Vec<String> = rows
+		.iter()
+		.map(|row| {
+			if let Value::Object(object) = row {
+				object.get("v").map_or_else(|| "OK".to_owned(), |v| render(dialect, v))
+			} else {
+				render(dialect, row)
+			}
+		})
+		.collect();
+	cells.join("|")
+}
+
+fn render(dialect: Dialect, value: &Value) -> String {
+	match value {
+		Value::None | Value::Null => "NULL".to_owned(),
+		Value::Bool(b) => match (dialect, b) {
+			(Dialect::Pgsql, true) => "t".to_owned(),
+			(Dialect::Pgsql, false) => "f".to_owned(),
+			(Dialect::Mysql, true) => "1".to_owned(),
+			(Dialect::Mysql, false) => "0".to_owned(),
+		},
+		Value::Number(n) => match n.to_f64() {
+			Some(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", f as i64),
+			Some(f) => format!("{f}"),
+			None => n.to_string(),
+		},
+		Value::String(s) => s.clone(),
+		Value::Datetime(d) => d.format("%Y-%m-%d %H:%M:%S").to_string(),
+		Value::Array(items) => {
+			let items: Vec<String> = items.iter().map(|item| render(dialect, item)).collect();
+			format!("[{}]", items.join(","))
+		}
+		Value::Object(_) => json(value),
+		Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Set(_) => surrealdb_types::ToSql::to_sql(value),
+	}
+}
+
+/// The compact JSON text of a value.
+fn json(value: &Value) -> String {
+	match value {
+		Value::None | Value::Null => "null".to_owned(),
+		Value::Bool(b) => b.to_string(),
+		Value::Number(_) => render(Dialect::Pgsql, value),
+		Value::String(s) => format!("{s:?}"),
+		Value::Array(items) => {
+			format!("[{}]", items.iter().map(json).collect::<Vec<_>>().join(","))
+		}
+		Value::Object(object) => format!(
+			"{{{}}}",
+			object.iter().map(|(k, v)| format!("{k:?}:{}", json(v))).collect::<Vec<_>>().join(",")
+		),
+		Value::Datetime(_)
+		| Value::Bytes(_)
+		| Value::Duration(_)
+		| Value::Uuid(_)
+		| Value::Geometry(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Set(_) => format!("{:?}", surrealdb_types::ToSql::to_sql(value)),
+	}
+}
+
+fn is_missing_function(message: &str) -> bool {
+	message.contains("not found in function registry") || message.contains("Unknown function")
+}
+
+/// Whether the answer is the expected one. Integers agree exactly and other numbers to within a
+/// part in a billion, since the reference servers print a numeric of any scale; JSON agrees up to
+/// its spacing; an expected error agrees with any error that is not a missing function.
+fn agrees(expect: &str, got: &str) -> bool {
+	if let Some(_code) = expect.strip_prefix("ERR:") {
+		return got.starts_with("ERR:") && !is_missing_function(got);
+	}
+	if expect == got {
+		return true;
+	}
+	if let (Ok(a), Ok(b)) = (expect.parse::<i64>(), got.parse::<i64>()) {
+		return a == b;
+	}
+	if let (Ok(a), Ok(b)) = (expect.parse::<f64>(), got.parse::<f64>()) {
+		return (a - b).abs() <= 1e-9 * a.abs().max(1.0);
+	}
+	let squash = |s: &str| s.replace(' ', "");
+	// A PostgreSQL array prints in braces, and the engine's array renders in brackets.
+	let expect = match expect.strip_prefix('{').and_then(|rest| rest.strip_suffix('}')) {
+		Some(items) if !items.starts_with('"') => format!("[{items}]"),
+		_ => expect.to_owned(),
+	};
+	matches!(expect.chars().next(), Some('{' | '[')) && squash(&expect) == squash(got)
+}
+
+/// The text that names `case`: its expression with the arguments written in, or its statement.
+fn identity(case: &Case) -> String {
+	match &case.sql {
+		Sql::Stmt(sql) => (*sql).to_owned(),
+		Sql::Literal {
+			template,
+			args,
+		}
+		| Sql::Call {
+			template,
+			args,
+		} => fill(template, args),
+	}
+}
+
+fn fill(template: &str, args: &[&str]) -> String {
+	args.iter()
+		.enumerate()
+		.fold(template.to_owned(), |sql, (i, arg)| sql.replace(&format!("{{{i}}}"), arg))
+}
+
+/// Populates `t` and `fx` for `case`, and returns the statements the case runs.
+async fn statements(ds: &Datastore, dialect: Dialect, case: &Case) -> Result<Vec<String>, String> {
+	match &case.sql {
+		Sql::Stmt(sql) => Ok(vec![(*sql).to_owned()]),
+		Sql::Literal {
+			template,
+			args,
+		} => Ok(vec![format!("SELECT {} AS v", fill(template, args))]),
+		Sql::Call {
+			template,
+			args,
+		} => {
+			let mut statements = vec![format!("SELECT {} AS v", fill(template, args))];
+			if !args.is_empty() {
+				let columns: Vec<String> = (0..args.len()).map(|i| format!("a{i}")).collect();
+				let stored = args.iter().enumerate().fold((*template).to_owned(), |sql, (i, _)| {
+					sql.replace(&format!("{{{i}}}"), &format!("a{i}"))
+				});
+				let insert =
+					format!("INSERT INTO fx ({}) VALUES ({})", columns.join(", "), args.join(", "));
+				ds.execute("DELETE fx", &session(), None).await.expect("the fixture is cleared");
+				let outcome = outcome(ds, dialect, &insert).await;
+				if outcome.starts_with("ERR:") {
+					return Err(format!("`{insert}` answered `{outcome}`"));
+				}
+				statements.push(format!("SELECT {stored} AS v FROM fx"));
+			}
+			Ok(statements)
+		}
+	}
+}
+
+async fn load_fixture(ds: &Datastore, dialect: Dialect) {
+	let outcome = outcome(
+		ds,
+		dialect,
+		"INSERT INTO t (n, s, x) VALUES (1, 'a', 1.5), (2, 'b', 2.5), (3, 'c', NULL)",
+	)
+	.await;
+	assert!(!outcome.starts_with("ERR:"), "{}: the fixture loads: {outcome}", dialect.label());
+}
+
+/// The problems of every case of every registered function, one line each, with the
+/// [`identity`] of the case.
+async fn problems(dialect: Dialect) -> Vec<(String, String)> {
+	let ds = datastore().await;
+	load_fixture(&ds, dialect).await;
+	let mut problems = Vec::new();
+	for case in dialect.cases() {
+		let texts = match statements(&ds, dialect, case).await {
+			Ok(texts) => texts,
+			Err(error) => {
+				problems.push((
+					identity(case),
+					format!(
+						"{} {}: the arguments do not store: {error}",
+						dialect.label(),
+						case.name
+					),
+				));
+				continue;
+			}
+		};
+		for (run, text) in texts.into_iter().enumerate() {
+			let got = outcome(&ds, dialect, &text).await;
+			if !agrees(case.expect, &got) {
+				// The run over a stored row is a case of its own, as its lowering is.
+				let key = if run == 0 {
+					identity(case)
+				} else {
+					format!("{} (stored)", identity(case))
+				};
+				problems.push((
+					key.clone(),
+					format!(
+						"{} {} [{key}]: `{text}` answered `{got}`, expected `{}`",
+						dialect.label(),
+						case.name,
+						case.expect
+					),
+				));
+			}
+		}
+	}
+	problems
+}
+
+async fn conformance(dialect: Dialect) {
+	let registered: Vec<&str> = FunctionRegistry::defs()
+		.iter()
+		.filter(|def| def.is_registered_in(dialect.sql_dialect()))
+		.map(|def| def.name)
+		.collect();
+	let mut failures = Vec::new();
+	for name in &registered {
+		if !dialect.cases().iter().any(|case| case.name == *name) {
+			failures.push(format!("{} {name}: registered with no case", dialect.label()));
+		}
+	}
+	for case in dialect.cases() {
+		if !registered.contains(&case.name) {
+			failures.push(format!(
+				"{} {}: a case for a function that is not registered",
+				dialect.label(),
+				case.name
+			));
+		}
+	}
+	let problems = problems(dialect).await;
+	for (case, line) in &problems {
+		if BROKEN.contains(&(dialect, case.as_str())) {
+			eprintln!("still broken: {line}");
+		} else {
+			failures.push(line.clone());
+		}
+	}
+	for (listed, case) in BROKEN {
+		if *listed != dialect {
+			continue;
+		}
+		let named = case.strip_suffix(" (stored)").unwrap_or(case);
+		if !dialect.cases().iter().any(|known| identity(known) == named) {
+			failures.push(format!("{} `{case}`: in BROKEN, but names no case", dialect.label()));
+		} else if !problems.iter().any(|(failing, _)| failing == case) {
+			failures.push(format!("{} `{case}`: passes, so it leaves BROKEN", dialect.label()));
+		}
+	}
+	assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn every_function_the_pgsql_front_end_registers_runs() {
+	conformance(Dialect::Pgsql).await;
+}
+
+#[cfg(feature = "mysql")]
+#[tokio::test]
+async fn every_function_the_mysql_front_end_registers_runs() {
+	conformance(Dialect::Mysql).await;
+}

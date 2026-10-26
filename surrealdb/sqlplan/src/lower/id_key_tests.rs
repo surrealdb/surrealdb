@@ -1014,7 +1014,9 @@ fn a_key_that_reads_a_row_is_not_wrapped_in_an_optional_step() {
 fn a_key_that_is_a_call_names_no_record_unless_it_is_a_key() {
 	let text = predicate(&pg_select("SELECT id FROM emp WHERE id = lower(code)"));
 	assert!(
-		text.contains("THEN NULL ELSE type::record('emp', string::lowercase(code)) END"),
+		text.contains(
+			"THEN NULL ELSE type::record('emp', (IF code = NULL OR code = NONE THEN NULL ELSE string::lowercase(code) END)) END"
+		),
 		"{text}"
 	);
 }

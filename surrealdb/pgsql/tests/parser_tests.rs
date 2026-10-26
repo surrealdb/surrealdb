@@ -609,3 +609,54 @@ fn test_parse_qualified_star_with_keyword_qualifier() {
 		other => panic!("expected column reference, got {other:?}"),
 	}
 }
+
+/// The call a keyword form stands for: its name and the number of its arguments.
+fn call_of(sql: &str) -> (String, usize) {
+	let Expr::FunctionCall {
+		name,
+		args,
+		..
+	} = parse_expr(sql).unwrap_or_else(|e| panic!("{sql}: {e:?}"))
+	else {
+		panic!("{sql}: expected a function call");
+	};
+	(name.parts.join("."), args.len())
+}
+
+#[test]
+fn test_keyword_function_forms_are_the_ordinary_calls() {
+	for (sql, name, args) in [
+		("extract(year FROM ts)", "extract", 2),
+		("extract('month' FROM ts)", "extract", 2),
+		("position('lo' IN 'Hello')", "position", 2),
+		("substring('Hello' FROM 2)", "substring", 2),
+		("substring('Hello' FROM 2 FOR 3)", "substring", 3),
+		("substring('Hello' FOR 3)", "substring", 3),
+		("overlay('abc' PLACING 'X' FROM 2)", "overlay", 3),
+		("overlay('abc' PLACING 'X' FROM 2 FOR 1)", "overlay", 4),
+		("left('Hello', 2)", "left", 2),
+		("right('Hello', 2)", "right", 2),
+		("substring('Hello', 2, 3)", "substring", 3),
+	] {
+		assert_eq!(call_of(sql), (name.to_owned(), args), "{sql}");
+	}
+}
+
+#[test]
+fn test_the_calls_of_the_keyword_forms_print_and_read_back() {
+	use surrealdb_pgsql::printer::ToPgSql;
+	for sql in [
+		"extract(year FROM ts)",
+		"position('lo' IN 'Hello')",
+		"substring('Hello' FROM 2 FOR 3)",
+		"overlay('abc' PLACING 'X' FROM 2)",
+		"left('Hello', 2)",
+	] {
+		let select = format!("SELECT {sql}");
+		let statements = surrealdb_pgsql::parse_statements(&select).expect("parses");
+		let printed = statements[0].to_pgsql_string();
+		let again = surrealdb_pgsql::parse_statements(&printed)
+			.unwrap_or_else(|e| panic!("{sql} printed {printed}: {e:?}"));
+		assert_eq!(again[0].to_pgsql_string(), printed, "{sql}");
+	}
+}

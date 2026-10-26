@@ -522,6 +522,9 @@ pub fn bind_expr(
 			right,
 			..
 		} => {
+			if let Some((date, amount, unit, subtract)) = interval_arithmetic(left, *op, right) {
+				return bind_date_arithmetic(date, amount, unit, subtract, scope, catalog, policy);
+			}
 			let l = bind_expr(left, scope, catalog, policy)?;
 			let r = bind_expr(right, scope, catalog, policy)?;
 			let bound_op = match op {
@@ -567,6 +570,21 @@ pub fn bind_expr(
 			..
 		} => {
 			let fn_name = name.to_lowercase();
+			if let (
+				"date_add" | "date_sub" | "adddate" | "subdate",
+				[
+					date,
+					Expr::Interval {
+						expr: amount,
+						unit,
+						..
+					},
+				],
+			) = (fn_name.as_str(), args.as_slice())
+			{
+				let subtract = matches!(fn_name.as_str(), "date_sub" | "subdate");
+				return bind_date_arithmetic(date, amount, unit, subtract, scope, catalog, policy);
+			}
 			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::MySql)
 				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
 
@@ -960,6 +978,63 @@ pub fn bind_expr(
 			..
 		} => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
 	}
+}
+
+/// `date + INTERVAL n UNIT`, `INTERVAL n UNIT + date` and `date - INTERVAL n UNIT`, as the date,
+/// the amount, the unit and whether the amount is taken away.
+fn interval_arithmetic<'a>(
+	left: &'a Expr,
+	op: BinaryOperator,
+	right: &'a Expr,
+) -> Option<(&'a Expr, &'a Expr, &'a str, bool)> {
+	match (left, op, right) {
+		(
+			date,
+			BinaryOperator::Add | BinaryOperator::Sub,
+			Expr::Interval {
+				expr: amount,
+				unit,
+				..
+			},
+		) => Some((date, amount, unit, op == BinaryOperator::Sub)),
+		(
+			Expr::Interval {
+				expr: amount,
+				unit,
+				..
+			},
+			BinaryOperator::Add,
+			date,
+		) => Some((date, amount, unit, false)),
+		_ => None,
+	}
+}
+
+/// The date moved by an interval, as the call `date_add(date, amount, 'UNIT')` or
+/// `date_sub(date, amount, 'UNIT')`.
+fn bind_date_arithmetic(
+	date: &Expr,
+	amount: &Expr,
+	unit: &str,
+	subtract: bool,
+	scope: &QueryScope,
+	catalog: &dyn BinderCatalog,
+	policy: &DialectPolicy,
+) -> Result<BoundExpr, PlanError> {
+	Ok(BoundExpr::FunctionCall {
+		name: if subtract {
+			"date_sub"
+		} else {
+			"date_add"
+		}
+		.to_owned(),
+		args: vec![
+			bind_expr(date, scope, catalog, policy)?,
+			bind_expr(amount, scope, catalog, policy)?,
+			BoundExpr::Literal(BoundLiteral::String(unit.to_ascii_uppercase())),
+		],
+		distinct: false,
+	})
 }
 
 fn select_contains_table_reference(stmt: &SelectStmt, table_name: &str) -> bool {

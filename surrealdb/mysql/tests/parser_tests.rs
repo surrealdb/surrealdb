@@ -847,3 +847,26 @@ fn test_parse_qualified_wildcard_and_a_column_named_star() {
 		assert!(matches!(&items[0], SelectItem::Expr { .. }), "{sql}: {items:?}");
 	}
 }
+
+#[test]
+fn test_keyword_function_forms_are_the_ordinary_calls() {
+	for (sql, name, count) in [
+		("EXTRACT(YEAR FROM ts)", "extract", 2),
+		("POSITION('lo' IN 'Hello')", "position", 2),
+		("SUBSTRING('Hello' FROM 2)", "substring", 2),
+		("SUBSTRING('Hello' FROM 2 FOR 3)", "substring", 3),
+		("MID('Hello', 2, 3)", "mid", 3),
+		("DATE_ADD(d, INTERVAL 1 DAY)", "date_add", 2),
+		("TIMESTAMPDIFF(DAY, a, b)", "timestampdiff", 3),
+	] {
+		let Expr::FunctionCall {
+			name: parsed,
+			args,
+			..
+		} = parse_expr(sql).unwrap_or_else(|e| panic!("{sql}: {e:?}"))
+		else {
+			panic!("{sql}: expected a function call");
+		};
+		assert_eq!((parsed.to_lowercase(), args.len()), (name.to_owned(), count), "{sql}");
+	}
+}

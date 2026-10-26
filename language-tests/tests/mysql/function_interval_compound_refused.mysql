@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL date_add refuses an interval unit that joins two units"
+
+[test.results]
+request-error = "MySQL SELECT lowering error: unsupported expression: the interval unit DAY_HOUR"
+*/
+
+SELECT date_add('2024-03-15', INTERVAL '1 2' DAY_HOUR);

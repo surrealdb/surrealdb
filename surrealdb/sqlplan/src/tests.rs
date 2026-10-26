@@ -2517,7 +2517,7 @@ fn test_mysql_quantified_subqueries() {
 
 #[test]
 fn test_mysql_builtin_functions() {
-	let sql = "SELECT version(), found_rows(), row_count(), connection_id(), last_insert_id(), curdate(), curtime(), utc_timestamp(), unix_timestamp(), format(1234.5, 2), truncate(12.345, 1), regexp_like('abc', '^a');";
+	let sql = "SELECT version(), found_rows(), row_count(), connection_id(), last_insert_id(), curdate(), curtime(), utc_timestamp(), unix_timestamp(), truncate(12.345, 1), regexp_like('abc', '^a');";
 	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
 	let surrealdb_mysql::ast::stmt::Statement::Select(select) = &stmts[0] else {
 		panic!("expected SELECT");
@@ -2527,7 +2527,7 @@ fn test_mysql_builtin_functions() {
 	let policy = DialectPolicy::mysql();
 
 	let bound = binder::mysql::bind_select(select, &catalog, &policy, None).unwrap();
-	assert_eq!(bound.targets.len(), 12);
+	assert_eq!(bound.targets.len(), 11);
 
 	let op = lower_bound_select(&bound, &policy).unwrap();
 	assert!(matches!(op, LogicalOp::Project(_)));

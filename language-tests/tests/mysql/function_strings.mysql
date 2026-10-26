@@ -1,0 +1,23 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL instr, locate, left, right, ascii and char"
+
+[[test.results]]
+value = "[{ a: 4, b: 4, c: 0, d: 4, e: 7, f: 0, g: NULL }]"
+
+[[test.results]]
+value = "[{ a: 'He', b: 'lo', c: '', d: '', e: 'Hello' }]"
+
+[[test.results]]
+value = "[{ a: 65, b: 195, c: 0, d: 'Hi' }]"
+*/
+
+SELECT instr('foobar', 'bar') AS a, instr('FOOBAR', 'bar') AS b, instr('foobar', 'x') AS c, locate('bar', 'foobarbar') AS d, locate('bar', 'foobarbar', 5) AS e, locate('bar', 'foobarbar', 8) AS f, instr(NULL, 'a') AS g;
+
+SELECT left('Hello', 2) AS a, right('Hello', 2) AS b, left('Hello', 0) AS c, left('Hello', -1) AS d, right('Hello', 9) AS e;
+
+SELECT ascii('A') AS a, ascii('é') AS b, ascii('') AS c, char(72, 105) AS d;

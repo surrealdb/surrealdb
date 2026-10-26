@@ -16,6 +16,24 @@ execution = "registered uncorrelated scalar functions"
 unsupported = ["ROWS FROM", "LATERAL correlation", "record column definitions", "set-returning functions"]
 
 [[features]]
+key = "expr.keyword_function_forms"
+source = "postgresql-15-grammar"
+productions = ["func_expr_common_subexpr", "extract_list", "extract_arg", "overlay_list", "position_list", "substr_list"]
+lines = [15207, 15984, 15994, 16013, 16027, 16048]
+supported = ["EXTRACT(field FROM source)", "POSITION(needle IN haystack)", "SUBSTRING(s FROM start FOR count)", "SUBSTRING(s FOR count)", "OVERLAY(s PLACING replacement FROM start FOR count)"]
+execution = "the calls extract, position, substring and overlay of the registered functions"
+unsupported = ["SUBSTRING(s FROM pattern) regular expression", "the SIMILAR escape form of SUBSTRING"]
+
+[[features]]
+key = "expr.type_func_name_keyword_calls"
+source = "postgresql-15-grammar"
+productions = ["func_application", "func_name", "type_function_name"]
+lines = [15064, 16319, 16616]
+supported = ["left(s, n)", "right(s, n)"]
+execution = "the calls left and right of the registered functions"
+unsupported = []
+
+[[features]]
 key = "ddl.create_extension"
 source = "postgresql-15-grammar"
 productions = ["CreateExtensionStmt", "create_extension_opt_list", "create_extension_opt_item"]

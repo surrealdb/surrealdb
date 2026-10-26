@@ -321,6 +321,7 @@ pub fn fold_expr(expr: &BoundExpr, policy: &DialectPolicy) -> Result<BoundExpr, 
 			// there is no literal to fold either to.
 			if let BoundExpr::Literal(lit) = &folded_inner
 				&& !target_type.ends_with("[]")
+				&& !is_temporal_type(target_type)
 				&& !target_type.starts_with("vector")
 			{
 				let result = eval_cast(lit, target_type, policy)?;
@@ -990,6 +991,14 @@ pub fn eval_in_list(
 }
 
 /// Evaluate type cast.
+/// Whether a cast to the type yields a date or a time, which no literal is: the cast is left for
+/// the engine to run.
+fn is_temporal_type(target_type: &str) -> bool {
+	let lower = target_type.to_ascii_lowercase();
+	let base = lower.split('(').next().unwrap_or(&lower).trim();
+	base.starts_with("date") || base.starts_with("timestamp")
+}
+
 pub fn eval_cast(
 	lit: &BoundLiteral,
 	target_type: &str,

@@ -189,7 +189,10 @@ fn a_link_passed_to_a_function_is_its_key() {
 		"{text}"
 	);
 	let text = projected("SELECT upper(dept) AS n FROM emp");
-	assert_eq!(text, format!("string::uppercase({KEY}) AS n"));
+	assert!(
+		text.contains(KEY) && text.contains("string::uppercase(") && text.contains("THEN NULL"),
+		"{text}"
+	);
 }
 
 #[test]

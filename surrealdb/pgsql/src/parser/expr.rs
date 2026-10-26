@@ -627,6 +627,12 @@ impl<'a> Parser<'a> {
 			let kw = *kw;
 			let tok = self.bump()?;
 			self.parse_json_expr(kw, tok.span)
+		} else if let TokenKind::Keyword(kw @ (Keyword::Left | Keyword::Right)) = tok.kind
+			&& self.peek2()?.kind == TokenKind::LParen
+		{
+			let name_tok = self.bump()?;
+			let name = QualifiedName::single(kw.as_str().to_ascii_lowercase(), name_tok.span);
+			self.parse_ident_or_func(name)
 		} else if tok.kind == TokenKind::Keyword(Keyword::Case) {
 			self.parse_case_expr()
 		} else if matches!(tok.kind, TokenKind::Ident(_) | TokenKind::QuotedIdent(_)) {
@@ -686,8 +692,10 @@ impl<'a> Parser<'a> {
 			let distinct = self.eat(&TokenKind::Keyword(Keyword::Distinct))?;
 			let mut args = Vec::new();
 
-			// Check for `*` in COUNT(*)
-			if self.peek().kind == TokenKind::Operator("*") {
+			if let Some(special) = self.parse_special_arguments(&qname)? {
+				args = special;
+			} else if self.peek().kind == TokenKind::Operator("*") {
+				// `*` in COUNT(*)
 				let star_tok = self.bump()?;
 				args.push(Expr::ColumnRef(ColumnRef {
 					fields: vec!["*".to_string()],
@@ -734,6 +742,104 @@ impl<'a> Parser<'a> {
 				fields: qname.parts,
 				span: qname.span,
 			}))
+		}
+	}
+
+	/// gram.y: func_expr_common_subexpr (`extract_list`, `position_list`, `substr_list`,
+	/// `overlay_list`).
+	///
+	/// The arguments of the functions whose calls have their own keywords: `EXTRACT(field FROM
+	/// source)`, `POSITION(needle IN haystack)`, `SUBSTRING(s FROM start FOR count)` and
+	/// `OVERLAY(s PLACING replacement FROM start FOR count)`. They are the arguments of the
+	/// ordinary call with the same name, `extract('field', source)` and so on, which is also how
+	/// the call prints. `None` leaves the arguments to the ordinary comma list.
+	fn parse_special_arguments(&mut self, qname: &QualifiedName) -> ParseResult<Option<Vec<Expr>>> {
+		let [name] = qname.parts.as_slice() else {
+			return Ok(None);
+		};
+		let name = name.to_ascii_lowercase();
+		let literal = |value: i64, span: Span| Expr::Literal {
+			lit: Literal::Integer(value),
+			span,
+		};
+		match name.as_str() {
+			"extract" => {
+				let field = self.peek().clone();
+				let field_name = if let TokenKind::Ident(text) = &field.kind {
+					Some(text.to_ascii_lowercase())
+				} else if let TokenKind::StringConstant(text) = &field.kind {
+					Some(text.clone())
+				} else if let TokenKind::Keyword(keyword) = &field.kind {
+					Some(keyword.as_str().to_ascii_lowercase())
+				} else {
+					None
+				};
+				if let Some(name) = field_name
+					&& self.peek2()?.kind == TokenKind::Keyword(Keyword::From)
+				{
+					self.bump()?;
+					self.bump()?;
+					let source = self.parse_expr()?;
+					let field = Expr::Literal {
+						lit: Literal::String(name),
+						span: field.span,
+					};
+					return Ok(Some(vec![field, source]));
+				}
+				Ok(None)
+			}
+			"position" => {
+				let needle = self.parse_expr_bp(50)?;
+				if self.eat(&TokenKind::Keyword(Keyword::In))? {
+					let haystack = self.parse_expr_bp(50)?;
+					return Ok(Some(vec![needle, haystack]));
+				}
+				let mut args = vec![needle];
+				while self.eat(&TokenKind::Comma)? {
+					args.push(self.parse_expr()?);
+				}
+				Ok(Some(args))
+			}
+			"substring" => {
+				let string = self.parse_expr()?;
+				if self.eat(&TokenKind::Keyword(Keyword::From))? {
+					let start = self.parse_expr()?;
+					let mut args = vec![string, start];
+					if self.eat(&TokenKind::Keyword(Keyword::For))? {
+						args.push(self.parse_expr()?);
+					}
+					return Ok(Some(args));
+				}
+				if self.peek().kind == TokenKind::Keyword(Keyword::For) {
+					let for_tok = self.bump()?;
+					let count = self.parse_expr()?;
+					return Ok(Some(vec![string, literal(1, for_tok.span), count]));
+				}
+				let mut args = vec![string];
+				while self.eat(&TokenKind::Comma)? {
+					args.push(self.parse_expr()?);
+				}
+				Ok(Some(args))
+			}
+			"overlay" => {
+				let string = self.parse_expr()?;
+				if self.eat(&TokenKind::Keyword(Keyword::Placing))? {
+					let replacement = self.parse_expr()?;
+					self.expect(&TokenKind::Keyword(Keyword::From), "'FROM'")?;
+					let start = self.parse_expr()?;
+					let mut args = vec![string, replacement, start];
+					if self.eat(&TokenKind::Keyword(Keyword::For))? {
+						args.push(self.parse_expr()?);
+					}
+					return Ok(Some(args));
+				}
+				let mut args = vec![string];
+				while self.eat(&TokenKind::Comma)? {
+					args.push(self.parse_expr()?);
+				}
+				Ok(Some(args))
+			}
+			_ => Ok(None),
 		}
 	}
 

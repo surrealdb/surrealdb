@@ -544,7 +544,9 @@ impl<'a> Parser<'a> {
 					false
 				};
 				let mut args = Vec::new();
-				if self.peek().kind != TokenKind::RParen {
+				if let Some(special) = self.parse_special_arguments(&name)? {
+					args = special;
+				} else if self.peek().kind != TokenKind::RParen {
 					if self.peek().kind == TokenKind::Star {
 						let star_span = self.bump().span;
 						args.push(Expr::ColumnRef(ColumnRef {
@@ -576,6 +578,25 @@ impl<'a> Parser<'a> {
 					args,
 					over,
 					span,
+				});
+			}
+
+			// `CURRENT_TIMESTAMP` and its kin are keywords that call a function without
+			// parentheses; they cannot name a column unquoted. A quoted name is a column: its span
+			// covers the quotes as well as the name, so it is longer than the name.
+			let unquoted = name_span.end - name_span.start == name.len();
+			if unquoted
+				&& self.peek().kind != TokenKind::Dot
+				&& ["current_timestamp", "current_date", "current_time", "current_user"]
+					.iter()
+					.any(|keyword| name.eq_ignore_ascii_case(keyword))
+			{
+				return Ok(Expr::FunctionCall {
+					name: name.to_ascii_lowercase(),
+					distinct: false,
+					args: Vec::new(),
+					over: None,
+					span: name_span,
 				});
 			}
 
@@ -613,6 +634,81 @@ impl<'a> Parser<'a> {
 					found: tok.kind.to_string(),
 				},
 			))
+		}
+	}
+
+	/// The arguments of the functions whose calls have their own keywords: `EXTRACT(unit FROM
+	/// source)`, `POSITION(needle IN haystack)` and `SUBSTRING(s FROM start FOR count)`. They are
+	/// the arguments of the ordinary call with the same name, `extract('unit', source)` and so on,
+	/// which is also how the call prints. `None` leaves the arguments to the ordinary comma list.
+	fn parse_special_arguments(&mut self, name: &str) -> ParseResult<Option<Vec<Expr>>> {
+		match name.to_ascii_lowercase().as_str() {
+			"extract" => {
+				let unit = self.peek().clone();
+				if self.peek_nth(1).kind == TokenKind::Keyword(Keyword::From) {
+					let (unit_name, unit_span) = self.parse_ident()?;
+					self.bump();
+					let source = self.parse_expr()?;
+					let unit = Expr::Literal(
+						Literal::String(unit_name.to_ascii_lowercase()),
+						unit_span.merge(unit.span),
+					);
+					return Ok(Some(vec![unit, source]));
+				}
+				Ok(None)
+			}
+			"position" => {
+				let needle = self.parse_expr_bp(PREC_CMP + 1)?;
+				if self.peek_keyword() == Some(Keyword::In) {
+					self.bump();
+					let haystack = self.parse_expr_bp(PREC_CMP + 1)?;
+					return Ok(Some(vec![needle, haystack]));
+				}
+				let mut args = vec![needle];
+				while self.peek().kind == TokenKind::Comma {
+					self.bump();
+					args.push(self.parse_expr()?);
+				}
+				Ok(Some(args))
+			}
+			"timestampdiff" | "timestampadd" => {
+				let unit_token = self.peek().clone();
+				if matches!(unit_token.kind, TokenKind::Ident(_))
+					&& self.peek_nth(1).kind == TokenKind::Comma
+				{
+					let (unit, unit_span) = self.parse_ident()?;
+					self.bump();
+					let mut args =
+						vec![Expr::Literal(Literal::String(unit.to_ascii_uppercase()), unit_span)];
+					args.push(self.parse_expr()?);
+					while self.peek().kind == TokenKind::Comma {
+						self.bump();
+						args.push(self.parse_expr()?);
+					}
+					return Ok(Some(args));
+				}
+				Ok(None)
+			}
+			"substring" | "substr" | "mid" => {
+				let string = self.parse_expr()?;
+				if self.peek_keyword() == Some(Keyword::From) {
+					self.bump();
+					let start = self.parse_expr()?;
+					let mut args = vec![string, start];
+					if self.peek_keyword() == Some(Keyword::For) {
+						self.bump();
+						args.push(self.parse_expr()?);
+					}
+					return Ok(Some(args));
+				}
+				let mut args = vec![string];
+				while self.peek().kind == TokenKind::Comma {
+					self.bump();
+					args.push(self.parse_expr()?);
+				}
+				Ok(Some(args))
+			}
+			_ => Ok(None),
 		}
 	}
 

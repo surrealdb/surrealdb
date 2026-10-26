@@ -1,0 +1,24 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL datediff, from_unixtime, unix_timestamp and date_format read date and datetime text"
+
+[[test.results]]
+value = "[{ a: 5, b: 5, c: NULL }]"
+
+[[test.results]]
+value = "[{ a: 1710460800, b: 1710460800, d: '1970-01-02 00:00:00' }]"
+
+[[test.results]]
+value = "[{ a: '2024-03-15 10:20', b: '5/3/24 Mar Tue' }]"
+
+*/
+
+SELECT datediff('2024-03-15', '2024-03-10') AS a, datediff('2024-03-15 23:59:59', '2024-03-10 00:00:00') AS b, datediff(NULL, '2024-03-10') AS c;
+
+SELECT unix_timestamp('2024-03-15 00:00:00') AS a, unix_timestamp('2024-03-15') AS b, from_unixtime(86400, '%Y-%m-%d %H:%i:%s') AS d;
+
+SELECT date_format('2024-03-15 10:20:30', '%Y-%m-%d %H:%i') AS a, date_format('2024-03-05', '%e/%c/%y %b %a') AS b;

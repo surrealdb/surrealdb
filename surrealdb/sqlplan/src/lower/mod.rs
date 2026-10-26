@@ -3,6 +3,7 @@
 pub mod ddl;
 pub mod expr;
 mod foreign_key;
+mod functions;
 pub(crate) mod id_key;
 pub(crate) mod link;
 pub mod plan;

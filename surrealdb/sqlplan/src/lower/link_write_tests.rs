@@ -833,12 +833,13 @@ fn a_read_and_a_write_spell_the_key_of_a_link_alike() {
 	for item in ["abs(dept)", "upper(dept)"] {
 		let read = projection(&pg_select(&format!("SELECT {item} AS n FROM emp")));
 		let write = returned(pg(&format!("UPDATE emp SET name = 'x' RETURNING {item} AS n")));
-		if item.starts_with("abs") {
-			for text in read.iter().chain(std::iter::once(&write)) {
-				check_fragments(text, &[KEY, "math::abs", "THEN NULL"], &[]);
-			}
+		let function = if item.starts_with("abs") {
+			"math::abs"
 		} else {
-			assert_eq!(read, [write]);
+			"string::uppercase"
+		};
+		for text in read.iter().chain(std::iter::once(&write)) {
+			check_fragments(text, &[KEY, function, "THEN NULL"], &[]);
 		}
 	}
 }

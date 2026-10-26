@@ -1,0 +1,24 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL functions with keyword syntax: EXTRACT FROM, POSITION IN, SUBSTRING FROM and FOR"
+
+[[test.results]]
+value = "[{ h: 10, y: 2024 }]"
+
+[[test.results]]
+value = "[{ a: 4, b: 4 }]"
+
+[[test.results]]
+value = "[{ a: 'Wor', b: 'llo', c: 'ello' }]"
+
+*/
+
+SELECT extract(YEAR FROM '2024-03-15 10:20:30') AS y, extract(HOUR FROM CAST('2024-03-15T10:20:30Z' AS datetime)) AS h;
+
+SELECT position('lo' IN 'Hello') AS a, position('LO' IN 'Hello') AS b;
+
+SELECT substring('Hello World' FROM 7 FOR 3) AS a, substring('Hello' FROM -3) AS b, substring('Hello' FROM 2) AS c;

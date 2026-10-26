@@ -1,0 +1,13 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL trim, ltrim and rtrim remove spaces from their own end only"
+
+[[test.results]]
+value = "[{ a: 'pad', b: 'pad  ', c: '  pad', d: NULL }]"
+*/
+
+SELECT trim('  pad  ') AS a, ltrim('  pad  ') AS b, rtrim('  pad  ') AS c, ltrim(NULL) AS d;

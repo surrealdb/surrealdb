@@ -517,6 +517,25 @@ fn engine_sqlstate(message: &str) -> Option<&'static str> {
 	}
 }
 
+/// The SQLSTATE of an error a query raised with `THROW`: the code PostgreSQL gives the error a SQL
+/// function lowering throws, from the text after the engine's own prefix, and `P0001`
+/// (`raise_exception`) for any other.
+fn thrown_sqlstate(message: &str) -> &'static str {
+	let Some(thrown) = message.strip_prefix("An error occurred: ") else {
+		return "P0001";
+	};
+	match thrown {
+		"negative substring length not allowed" => "22011",
+		"division by zero" => "22012",
+		"cannot take logarithm of zero" | "cannot take logarithm of a negative number" => "2201E",
+		"field position must not be zero" => "22023",
+		unit if unit.starts_with("unit \"") && unit.contains("\" not recognized for type ") => {
+			"22023"
+		}
+		_ => "P0001",
+	}
+}
+
 impl From<&TypesError> for PgError {
 	fn from(err: &TypesError) -> Self {
 		let msg = err.message();
@@ -635,7 +654,7 @@ impl From<&TypesError> for PgError {
 			// A foreign key column's assertion throws the message PostgreSQL words for the
 			// violation.
 			ErrorDetails::Thrown if msg.contains("violates foreign key constraint") => "23503",
-			ErrorDetails::Thrown => "P0001",
+			ErrorDetails::Thrown => thrown_sqlstate(msg),
 			ErrorDetails::Configuration(_) => "0A000",
 			ErrorDetails::Serialization(_) => "40001",
 			ErrorDetails::Connection(_) | ErrorDetails::Internal | ErrorDetails::Context | _ => {
@@ -747,6 +766,16 @@ mod tests {
 		let cancel_err =
 			TypesError::query("query canceled".to_string(), Some(QueryError::Cancelled));
 		assert_eq!(PgError::from(&cancel_err).code, "57014");
+	}
+
+	#[test]
+	fn a_negative_substring_count_is_22011_and_another_throw_is_p0001() {
+		let negative = TypesError::thrown(
+			"An error occurred: negative substring length not allowed".to_string(),
+		);
+		assert_eq!(PgError::from(&negative).code, "22011");
+		let other = TypesError::thrown("An error occurred: boom".to_string());
+		assert_eq!(PgError::from(&other).code, "P0001");
 	}
 
 	#[test]

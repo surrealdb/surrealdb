@@ -751,6 +751,105 @@ pub fn lower_pgsql_expr(expr: &surrealdb_pgsql::ast::expr::Expr) -> Result<Expr,
 	lower_pgsql_expr_in(expr, None)
 }
 
+/// A datetime cast to `date`, which has no time of day: the start of its day.
+fn truncated_to_date_expr(target: &str, value: Expr) -> Expr {
+	let lower = target.to_ascii_lowercase();
+	if lower.split('(').next().unwrap_or(&lower).trim() != "date" {
+		return value;
+	}
+	Expr::FunctionCall(Box::new(FunctionCall {
+		receiver: Function::Normal("time::group".to_owned()),
+		arguments: vec![value, Expr::Literal(Literal::String(Strand::from("day")))],
+	}))
+}
+
+/// A text literal that is cast to a datetime, in the form the engine reads (see
+/// `functions::normalize_datetime_text`). Any other operand is left as it is.
+fn datetime_text_literal(kind: &surrealdb_expr::expr::Kind, value: Expr) -> Expr {
+	match (kind, &value) {
+		(surrealdb_expr::expr::Kind::Datetime, Expr::Literal(Literal::String(text))) => {
+			Expr::Literal(Literal::String(Strand::from(
+				crate::lower::functions::normalize_datetime_text(text.as_str()).as_str(),
+			)))
+		}
+		_ => value,
+	}
+}
+
+/// A call of the registered function `func_def` in an expression a write evaluates.
+///
+/// A call with fewer or more arguments than the registry allows is refused, as the binder refuses
+/// it in a read. A function whose lowering is its own (`crate::lower::functions`) is refused: the
+/// write lowering calls the engine function the registry names, which does not answer what the SQL
+/// function does. The math and string functions answer NULL for a NULL argument.
+fn lower_write_function(
+	dialect: SqlDialect,
+	func_def: &crate::functions::SqlFunctionDef,
+	fn_name: &str,
+	mapped: &str,
+	lowered_args: Vec<Expr>,
+) -> Result<Expr, PlanError> {
+	let got = lowered_args.len();
+	if got < func_def.min_args {
+		return Err(PlanError::FunctionArgumentCountMismatch {
+			name: fn_name.to_owned(),
+			expected: format!("at least {}", func_def.min_args),
+			got,
+		});
+	}
+	if let Some(max_args) = func_def.max_args
+		&& got > max_args
+	{
+		return Err(PlanError::FunctionArgumentCountMismatch {
+			name: fn_name.to_owned(),
+			expected: format!("at most {max_args}"),
+			got,
+		});
+	}
+	if func_def.name == "uuid" {
+		// The registry declares text, and a string field takes no uuid value.
+		return Ok(Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("type::string".to_owned()),
+			arguments: vec![Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal("rand::uuid::v4".to_owned()),
+				arguments: Vec::new(),
+			}))],
+		})));
+	}
+	if crate::lower::functions::has_own_lowering(func_def.name, dialect, lowered_args.len()) {
+		return Err(PlanError::UnsupportedExpression(format!("{fn_name} in a write statement")));
+	}
+	if matches!(func_def.name, "current_date" | "curdate") {
+		return Ok(crate::lower::functions::today_expr());
+	}
+	let guarded = matches!(mapped, "crypto::md5" | "crypto::sha1")
+		|| (dialect == SqlDialect::Postgres
+			&& (mapped.starts_with("math::")
+				|| matches!(
+					mapped,
+					"string::lowercase"
+						| "string::uppercase"
+						| "string::len" | "string::reverse"
+						| "string::replace"
+						| "string::repeat"
+				)));
+	let numeric =
+		|arg: &Expr| matches!(arg, Expr::Literal(Literal::Integer(_) | Literal::Float(_)));
+	let present = |arg: &Expr| matches!(arg, Expr::Literal(literal) if !matches!(literal, Literal::Null | Literal::None));
+	if func_def.is_scalar()
+		&& guarded
+		&& !lowered_args.is_empty()
+		&& !(mapped.starts_with("math::") && lowered_args.iter().all(numeric))
+		&& (mapped.starts_with("math::") || !lowered_args.iter().all(present))
+	{
+		return Ok(sql_null::strict_call(mapped, lowered_args));
+	}
+	Ok(Expr::FunctionCall(Box::new(FunctionCall {
+		receiver: Function::Normal(mapped.to_string()),
+		arguments: lowered_args,
+	})))
+}
+
 /// Lower a PostgreSQL AST expression into a SurrealDB `Expr`, reading the `id` column of the
 /// statement's target table (`scope`) as the key of the record id, and a link column of it as the
 /// key of its link.
@@ -944,7 +1043,7 @@ fn lower_pgsql_expr_as(
 			..
 		} => {
 			let kind = crate::lower::ddl::map_pgsql_type(data_type);
-			let value = lower_pgsql_expr_in(expr, scope)?;
+			let value = datetime_text_literal(&kind, lower_pgsql_expr_in(expr, scope)?);
 			if let Some(dimensions) = crate::lower::vector_cast_target(data_type)? {
 				return Ok(sql_null::unary(
 					PrefixOperator::Cast(kind),
@@ -954,7 +1053,11 @@ fn lower_pgsql_expr_as(
 			if matches!(kind, surrealdb_expr::expr::Kind::Any) {
 				Ok(value)
 			} else {
-				Ok(sql_null::unary(PrefixOperator::Cast(kind), value))
+				let target = data_type.name.parts.join(".");
+				Ok(truncated_to_date_expr(
+					&target,
+					sql_null::unary(PrefixOperator::Cast(kind), value),
+				))
 			}
 		}
 
@@ -981,18 +1084,7 @@ fn lower_pgsql_expr_as(
 			for a in args {
 				lowered_args.push(lower_pgsql_expr_in(a, scope)?);
 			}
-			if func_def.is_scalar()
-				&& mapped.starts_with("math::")
-				&& !args.is_empty()
-				&& !lowered_args.iter().all(|arg| {
-					matches!(arg, Expr::Literal(Literal::Integer(_) | Literal::Float(_)))
-				}) {
-				return Ok(sql_null::strict_call(mapped, lowered_args));
-			}
-			Ok(Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal(mapped.to_string()),
-				arguments: lowered_args,
-			})))
+			lower_write_function(SqlDialect::Postgres, func_def, &fn_name, mapped, lowered_args)
 		}
 
 		surrealdb_pgsql::ast::expr::Expr::Grouping {
@@ -2505,16 +2597,25 @@ fn lower_mysql_expr_as(
 			for a in args {
 				lowered_args.push(lower_mysql_expr_in(a, scope)?);
 			}
-			Ok(Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal(mapped.to_string()),
-				arguments: lowered_args,
-			})))
+			lower_write_function(SqlDialect::MySql, func_def, &fn_name, mapped, lowered_args)
 		}
 
 		surrealdb_mysql::ast::expr::Expr::Cast {
 			expr,
+			target_type,
 			..
-		} => lower_mysql_expr_in(expr, scope),
+		} => {
+			let kind = crate::lower::expr::cast_kind(target_type);
+			let value = datetime_text_literal(&kind, lower_mysql_expr_in(expr, scope)?);
+			if matches!(kind, surrealdb_expr::expr::Kind::Any) {
+				Ok(value)
+			} else {
+				Ok(truncated_to_date_expr(
+					target_type,
+					sql_null::unary(PrefixOperator::Cast(kind), value),
+				))
+			}
+		}
 
 		surrealdb_mysql::ast::expr::Expr::IsNull {
 			expr,

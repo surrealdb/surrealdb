@@ -162,6 +162,10 @@ mod edge;
 mod edge_tests;
 #[cfg(all(test, feature = "kv-mem", any(feature = "postgres", feature = "mysql")))]
 mod sql_declared_tests;
+#[cfg(all(test, feature = "kv-mem", any(feature = "postgres", feature = "mysql")))]
+mod sql_function_cases;
+#[cfg(all(test, feature = "kv-mem", any(feature = "postgres", feature = "mysql")))]
+mod sql_function_tests;
 #[cfg(any(feature = "postgres", feature = "mysql"))]
 mod sql_links;
 mod table_migration;

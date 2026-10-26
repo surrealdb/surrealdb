@@ -28,6 +28,23 @@ use crate::lower::sql_like::like_pattern_regex;
 use crate::semantics::sql_like_to_regex;
 use crate::system_vars::{MYSQL_SERVER_VERSION, SystemVariable, mysql_system_variable};
 
+/// The engine kind a cast to the SQL type produces, `Kind::Any` for a type the cast leaves as it
+/// is.
+pub(crate) fn cast_kind(target_type: &str) -> Kind {
+	let clean_type = target_type.to_lowercase();
+	let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
+	match base_type {
+		"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed"
+		| "unsigned" => Kind::Int,
+		"float" | "float8" | "float4" | "double" | "real" | "double precision" => Kind::Float,
+		"numeric" | "decimal" | "dec" => Kind::Decimal,
+		"text" | "varchar" | "char" | "character varying" | "bpchar" | "string" => Kind::String,
+		"bool" | "boolean" => Kind::Bool,
+		"date" | "datetime" | "timestamp" | "timestamptz" => Kind::Datetime,
+		_ => Kind::Any,
+	}
+}
+
 /// Lower a `BoundExpr` to a SurrealDB `LogicalExpr`.
 pub fn lower_bound_expr(
 	expr: &BoundExpr,
@@ -199,7 +216,8 @@ pub fn lower_bound_expr(
 						// MIN(DISTINCT x) is identical to MIN(x)
 						// MAX(DISTINCT x) is identical to MAX(x)
 					}
-					"string_agg" | "group_concat" | "array_agg" | "json_agg" | "jsonb_agg" => {
+					"string_agg" | "group_concat" | "array_agg" | "json_agg" | "jsonb_agg"
+					| "stddev" | "stddev_samp" | "variance" | "var_samp" => {
 						return Err(PlanError::UnsupportedExpression(format!(
 							"{}(DISTINCT ...)",
 							name.to_uppercase()
@@ -228,6 +246,9 @@ pub fn lower_bound_expr(
 					lower_bound_expr(a, policy)?,
 					lower_bound_expr(b, policy)?,
 				));
+			}
+			if let Some(lowered) = crate::lower::functions::lower_function(name, args, policy)? {
+				return Ok(lowered);
 			}
 
 			// Special built-in lowering logic
@@ -774,8 +795,45 @@ pub fn lower_bound_expr(
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};
+			// A string function fails on a NULL argument where SQL answers NULL. An argument that
+			// is a column, a literal or a parameter is read again in the test rather than bound,
+			// so that the call stays a plain call over the stored row, as an index key needs.
+			let string_function = func_def.is_scalar()
+				&& matches!(
+					mapped_fn,
+					"string::lowercase"
+						| "crypto::md5" | "crypto::sha1"
+						| "string::uppercase"
+						| "string::len" | "string::reverse"
+						| "string::replace"
+						| "string::repeat"
+				);
+			let present_literals = args.iter().all(
+				|arg| matches!(arg, BoundExpr::Literal(literal) if !matches!(literal, BoundLiteral::Null)),
+			);
+			let plain_arguments = args.iter().all(|arg| {
+				matches!(
+					arg,
+					BoundExpr::Column(_) | BoundExpr::Literal(_) | BoundExpr::Param { .. }
+				)
+			});
+			if string_function && !lower_args.is_empty() && !present_literals && plain_arguments {
+				let null = lower_args
+					.iter()
+					.cloned()
+					.map(is_null_expr)
+					.reduce(LogicalExpr::or)
+					.unwrap_or(LogicalExpr::Literal(LogicalLiteral::Bool(false)));
+				return Ok(LogicalExpr::If(Box::new(LogicalIf {
+					branches: vec![(null, LogicalExpr::Literal(LogicalLiteral::Null))],
+					otherwise: Some(LogicalExpr::Call(Box::new(LogicalCall {
+						receiver: Function::Normal(mapped_fn.to_string()),
+						args: lower_args,
+					}))),
+				})));
+			}
 			if func_def.is_scalar()
-				&& mapped_fn.starts_with("math::")
+				&& (mapped_fn.starts_with("math::") || (string_function && !present_literals))
 				&& !lower_args.is_empty()
 				&& !args.iter().all(|arg| {
 					matches!(
@@ -978,20 +1036,7 @@ pub fn lower_bound_expr(
 					.and_then(|count| count.trim().parse::<usize>().ok());
 				return super::vector_expr::lower_cast(lowered, dimensions);
 			}
-			let kind = match base_type {
-				"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed"
-				| "unsigned" => Kind::Int,
-				"float" | "float8" | "float4" | "double" | "real" | "double precision" => {
-					Kind::Float
-				}
-				"numeric" | "decimal" | "dec" => Kind::Decimal,
-				"text" | "varchar" | "char" | "character varying" | "bpchar" | "string" => {
-					Kind::String
-				}
-				"bool" | "boolean" => Kind::Bool,
-				"date" | "datetime" | "timestamp" | "timestamptz" => Kind::Datetime,
-				_ => Kind::Any,
-			};
+			let kind = cast_kind(target_type);
 			if matches!(kind, Kind::Any) {
 				return Ok(lowered);
 			}
@@ -999,11 +1044,19 @@ pub fn lower_bound_expr(
 			{
 				return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 			}
+			let lowered = if matches!(kind, Kind::Datetime) {
+				crate::lower::functions::datetime_cast_operand(lowered)
+			} else {
+				lowered
+			};
 			if matches!(lowered, LogicalExpr::Literal(_)) {
-				return Ok(LogicalExpr::Prefix {
-					op: PrefixOperator::Cast(kind),
-					expr: Box::new(lowered),
-				});
+				return Ok(crate::lower::functions::truncated_to_date(
+					target_type,
+					LogicalExpr::Prefix {
+						op: PrefixOperator::Cast(kind),
+						expr: Box::new(lowered),
+					},
+				));
 			}
 			// A cast of NULL or NONE is NULL. The operand is evaluated once and the cast applies to
 			// it as `Current`, so chained casts grow linearly; `??` maps the NONE that `Optional`
@@ -1011,10 +1064,13 @@ pub fn lower_bound_expr(
 			Ok(LogicalExpr::Binary {
 				left: Box::new(LogicalExpr::Optional {
 					base: Box::new(lowered),
-					then: Box::new(LogicalExpr::Prefix {
-						op: PrefixOperator::Cast(kind),
-						expr: Box::new(LogicalExpr::Current),
-					}),
+					then: Box::new(crate::lower::functions::truncated_to_date(
+						target_type,
+						LogicalExpr::Prefix {
+							op: PrefixOperator::Cast(kind),
+							expr: Box::new(LogicalExpr::Current),
+						},
+					)),
 				}),
 				op: BinaryOperator::NullCoalescing,
 				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),

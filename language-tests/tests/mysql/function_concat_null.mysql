@@ -1,0 +1,44 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = "MySQL concat answers NULL when an argument is NULL, concat_ws skips NULL arguments, and length counts bytes where char_length counts characters; a separator or a length argument that is not a string is taken as its text, and a boolean as 1 or 0"
+
+[[test.results]]
+value = "[{ a: NULL, b: 'a-b', c: NULL, d: '12.5' }]"
+
+[[test.results]]
+value = "[{ bytes: 6, chars: 5 }]"
+
+[[test.results]]
+value = "[{ a: 'a1b', b: 3, c: 3, d: NULL }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: 1, n: 42i32 }]"
+
+[[test.results]]
+value = "[{ a: 'a42i32b', b: 5 }]"
+
+[[test.results]]
+value = "[{ a: '1x0', b: '1,0', c: 1 }]"
+
+*/
+
+SELECT concat('a', NULL) AS a, concat_ws('-', 'a', NULL, 'b') AS b, concat_ws(NULL, 'a') AS c, concat(1, 2.5) AS d;
+
+SELECT length('héllo') AS bytes, char_length('héllo') AS chars;
+
+SELECT concat_ws(1, 'a', 'b') AS a, length(123) AS b, length(1.5) AS c, length(NULL) AS d;
+
+CREATE TABLE nums (id INT, n INT);
+
+INSERT INTO nums (id, n) VALUES (1, 42);
+
+SELECT concat_ws(n, 'a', 'b') AS a, length(n) AS b FROM nums;
+
+SELECT concat(TRUE, 'x', FALSE) AS a, concat_ws(',', TRUE, FALSE) AS b, length(TRUE) AS c;
