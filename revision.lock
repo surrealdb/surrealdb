@@ -89,7 +89,7 @@ HnswRecordPendingUpdateV1:1(surrealdb/core/src/kvs/compat/ann_pending.rs)(114130
 HnswRecordPendingUpdateV2:2(surrealdb/core/src/kvs/compat/ann_pending.rs)(1230210951)
 HnswState:1(surrealdb/datastore/src/values/hnsw.rs)(112060401)
 Ids64:1(surrealdb/datastore/src/values/ids.rs)(3420351559)
-Index:2(surrealdb/catalog/src/schema/index.rs)(1432277320)
+Index:3(surrealdb/catalog/src/schema/index.rs)(1025440724)
 IndexBuildBasis:1(surrealdb/datastore/src/values/index_build.rs)(2064808225)
 IndexBuildPhase:1(surrealdb/datastore/src/values/index_build.rs)(2765852459)
 IndexBuildReportStatus:1(surrealdb/datastore/src/values/index_build.rs)(1726577952)

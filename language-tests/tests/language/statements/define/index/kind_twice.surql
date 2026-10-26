@@ -9,7 +9,7 @@ UNIQUE is given twice
   --> [20:48]
    |
 20 | DEFINE INDEX email ON user FIELDS email UNIQUE UNIQUE;
-   |                                                ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+   |                                                ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL
   --> [20:41]
    |
 20 | DEFINE INDEX email ON user FIELDS email UNIQUE UNIQUE;

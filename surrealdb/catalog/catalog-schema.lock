@@ -214,6 +214,7 @@ type Index enum since=4.0 reserved=[]
   4 FullText item:FullTextParams since=4.0
   5 Count item:option<text:cond> since=4.0
   6 DiskAnn item:DiskAnnParams since=4.0
+  7 Spatial unit since=4.0
 type JwtAccess struct since=4.0 reserved=[]
   2 verify JwtAccessVerify critical since=4.0 absent=required
   4 issue option<JwtAccessIssue> critical since=4.0 absent=none

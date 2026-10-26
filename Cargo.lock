@@ -8063,6 +8063,7 @@ dependencies = [
  "diskann-vector",
  "flate2",
  "fst",
+ "geo",
  "half",
  "lindera",
  "ndarray",

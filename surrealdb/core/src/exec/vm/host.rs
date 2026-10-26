@@ -2035,6 +2035,12 @@ pub(super) async fn run_storage_source(
 			decode,
 		} => {
 			let distinct = access_repeats_records(index, access);
+			let id_only = crate::exec::index::access_path::index_scan_is_id_only(
+				distinct,
+				access,
+				version.is_some(),
+				decode.as_ref(),
+			);
 			let mut records = IndexRecords::open(
 				ctx,
 				index,
@@ -2043,7 +2049,8 @@ pub(super) async fn run_storage_source(
 				version,
 				distinct,
 				decode.as_ref(),
-			)?;
+			)?
+			.with_id_only(id_only);
 			let mut rows = Rows::of(program, pipeline, ctx);
 			let paged = super::morsel::body_breakers(&pipeline.code).paged;
 			loop {
@@ -2136,197 +2143,274 @@ pub(super) async fn run_storage_source(
 			decode,
 			topk,
 		} => {
-			let branch_distinct =
-				matches!(merge, Some(MergeMode::ById(_) | MergeMode::ByIndexKey { .. }));
-			// A merge by id follows the order its branches list records in: an
-			// index spelling its entries' ids as identities lists the records of
-			// one value as a table scan does, one stamped earlier by their ids'
-			// values.
-			let by_encoding = branches
-				.iter()
-				.all(|b| crate::catalog::spells_identity_entry_ids(b.index.format_version));
-			// Each full-text branch's clause context, shared with the program's calls on it.
-			let mut contexts: Vec<Option<super::interp::ScanMatch>> = branches
-				.iter()
-				.map(|b| match &b.read {
-					super::payload::BranchRead::FullText {
-						query,
-						..
-					} => {
-						let definition = b.index.definition();
-						state.scan_match_context(program, &definition.table_name, definition, query)
-					}
-					super::payload::BranchRead::BTree(_) => None,
-				})
-				.collect();
-			// Where the sort above orders by a sum of the branches' clause scores, every
-			// full-text branch passes over the hits whose sum cannot enter its top k. Every
-			// clause of the sum is scored in its own context, read before any branch lists
-			// a hit; a clause no call scores leaves the branches rejecting nothing.
-			let union_scores = match topk {
-				Some(topk) => {
-					let mut scored = Vec::new();
-					topk.sum.clauses(&mut scored);
-					let clauses = scored
-						.iter()
-						.map(|clause| {
-							branches.iter().zip(&contexts).find_map(|(b, context)| {
-								let super::payload::BranchRead::FullText {
-									query,
-									operator,
-								} = &b.read
-								else {
-									return None;
-								};
-								let context = context.as_ref().filter(|context| context.scored)?;
-								(operator.rf == Some(*clause)).then(|| {
-									super::fulltext::UnionClause {
-										clause: *clause,
-										table: b.index.definition().table_name.clone(),
-										index: b.index.clone(),
-										query: query.clone(),
-										context: std::sync::Arc::clone(&context.context),
-									}
+			out_of_line(|| async move {
+				let branch_distinct =
+					matches!(merge, Some(MergeMode::ById(_) | MergeMode::ByIndexKey { .. }));
+				// A merge by id follows the order its branches list records in: an
+				// index spelling its entries' ids as identities lists the records of
+				// one value as a table scan does, one stamped earlier by their ids'
+				// values.
+				let by_encoding = branches
+					.iter()
+					.all(|b| crate::catalog::spells_identity_entry_ids(b.index.format_version));
+				// Each full-text branch's clause context, shared with the program's calls on it.
+				let mut contexts: Vec<Option<super::interp::ScanMatch>> = branches
+					.iter()
+					.map(|b| match &b.read {
+						super::payload::BranchRead::FullText {
+							query,
+							..
+						} => {
+							let definition = b.index.definition();
+							state.scan_match_context(
+								program,
+								&definition.table_name,
+								definition,
+								query,
+							)
+						}
+						super::payload::BranchRead::BTree(_) => None,
+					})
+					.collect();
+				// Where the sort above orders by a sum of the branches' clause scores, every
+				// full-text branch passes over the hits whose sum cannot enter its top k. Every
+				// clause of the sum is scored in its own context, read before any branch lists
+				// a hit; a clause no call scores leaves the branches rejecting nothing.
+				let union_scores = match topk {
+					Some(topk) => {
+						let mut scored = Vec::new();
+						topk.sum.clauses(&mut scored);
+						let clauses = scored
+							.iter()
+							.map(|clause| {
+								branches.iter().zip(&contexts).find_map(|(b, context)| {
+									let super::payload::BranchRead::FullText {
+										query,
+										operator,
+									} = &b.read
+									else {
+										return None;
+									};
+									let context =
+										context.as_ref().filter(|context| context.scored)?;
+									(operator.rf == Some(*clause)).then(|| {
+										super::fulltext::UnionClause {
+											clause: *clause,
+											table: b.index.definition().table_name.clone(),
+											index: b.index.clone(),
+											query: query.clone(),
+											context: std::sync::Arc::clone(&context.context),
+										}
+									})
 								})
 							})
-						})
-						.collect::<Option<Vec<_>>>();
-					let cell = state.topk_cells.get(topk.scan.sort as usize).cloned().flatten();
-					match (clauses, cell) {
-						(Some(clauses), Some(cell)) => {
-							Some(std::sync::Arc::new(super::fulltext::UnionScores {
-								cell,
-								direction: topk.scan.direction,
-								single_key: topk.scan.single_key,
-								sum: topk.sum.clone(),
-								clauses,
-							}))
+							.collect::<Option<Vec<_>>>();
+						let cell = state.topk_cells.get(topk.scan.sort as usize).cloned().flatten();
+						match (clauses, cell) {
+							(Some(clauses), Some(cell)) => {
+								Some(std::sync::Arc::new(super::fulltext::UnionScores {
+									cell,
+									direction: topk.scan.direction,
+									single_key: topk.scan.single_key,
+									sum: topk.sum.clone(),
+									clauses,
+								}))
+							}
+							_ => None,
 						}
-						_ => None,
 					}
-				}
-				None => None,
-			};
-			if let Some(union_scores) = &union_scores {
-				let services = EngineServices::new(ctx);
-				if let Err(e) = union_scores.prepare(ctx, &services).await {
-					let mut rows = Rows::of(program, pipeline, ctx);
-					return rows.fail(e, state, ctx, yielder, flush_at).await;
-				}
-			}
-			// The first batch of a branch rejecting by the sum is as large as the sort keeps.
-			let first_batch = topk
-				.as_ref()
-				.and_then(|topk| program.sorts.get(topk.scan.sort as usize)?.keep)
-				.map_or(FULL_TEXT_BATCH_SIZE, |keep| keep.clamp(1, FULL_TEXT_BATCH_SIZE));
-			let mut branches = branches
-				.iter()
-				.zip(contexts.iter_mut())
-				.map(|(b, context)| match &b.read {
-					super::payload::BranchRead::BTree(access) => {
-						let distinct = branch_distinct && access_repeats_records(&b.index, access);
-						IndexRecords::open(
-							ctx,
-							&b.index,
-							access,
-							b.direction,
-							version,
-							distinct,
-							decode.as_ref(),
-						)
-					}
-					super::payload::BranchRead::FullText {
-						query,
-						operator,
-					} => Ok(IndexRecords::full_text(
-						ctx,
-						&b.index,
-						query,
-						operator,
-						context.take(),
-						version,
-						decode.as_ref(),
-						union_scores.clone(),
-						first_batch,
-					)),
-				})
-				.collect::<FlowResult<Vec<_>>>()?;
-			let mut rows = Rows::of(program, pipeline, ctx);
-			// A failure to read is raised after the batches before it merge.
-			macro_rules! read {
-				($read:expr) => {
-					match $read {
-						Ok(value) => value,
-						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
-					}
+					None => None,
 				};
-			}
-			// A record is passed once whichever branches list it, told apart by
-			// the record it addresses (`RecordAddress`), not by `RecordId`'s
-			// equality, under which `k:[1]` and `k:[1dec]` are one.
-			let Some(merge) = merge else {
-				let mut seen = HashSet::new();
-				for branch in &mut branches {
-					while let Some(row) = read!(branch.next(ctx).await) {
-						if let Some(rid) = record_id(&row)
-							&& !seen.insert(crate::val::RecordAddress(rid))
-						{
-							continue;
-						}
+				if let Some(union_scores) = &union_scores {
+					let services = EngineServices::new(ctx);
+					if let Err(e) = union_scores.prepare(ctx, &services).await {
+						let mut rows = Rows::of(program, pipeline, ctx);
+						return rows.fail(e, state, ctx, yielder, flush_at).await;
+					}
+				}
+				if merge.is_none()
+					&& !branches.is_empty()
+					&& branches.iter().all(|b| {
+						matches!(b.index.definition().index, crate::catalog::Index::Spatial)
+							&& matches!(b.read, super::payload::BranchRead::BTree(_))
+					}) {
+					// Point-only `SPATIAL` index union branches over the same index with
+					// strictly disjoint ascending integer cell ranges contain at most one entry
+					// per record across all branches, so cross-branch `HashSet` deduplication is
+					// unnecessary; when only `id` is needed at the current version, rows can also
+					// be constructed directly from the index's `RecordId`s.
+					let disjoint_point_ranges =
+						crate::exec::index::access_path::disjoint_spatial_point_union_filter(
+							branches.iter().map(|b| {
+								let access = match &b.read {
+									super::payload::BranchRead::BTree(access) => Some(&**access),
+									super::payload::BranchRead::FullText {
+										..
+									} => None,
+								};
+								(b.index.definition().index_id, access)
+							}),
+						)
+						.is_some();
+					let scans = branches
+						.iter()
+						.map(|b| match &b.read {
+							super::payload::BranchRead::BTree(access) => {
+								super::entries::EntryScan::open(ctx, &b.index, access, b.direction)
+							}
+							super::payload::BranchRead::FullText {
+								..
+							} => unreachable!("checked all BTree"),
+						})
+						.collect::<FlowResult<Vec<_>>>()?;
+					let id_only = crate::exec::index::access_path::spatial_union_is_id_only(
+						disjoint_point_ranges,
+						version.is_some(),
+						decode.as_ref(),
+					);
+					let mut records = IndexRecords::chain(
+						ctx,
+						scans,
+						version,
+						!disjoint_point_ranges,
+						decode.as_ref(),
+						id_only,
+					);
+					let mut rows = Rows::of(program, pipeline, ctx);
+					let paged = super::morsel::body_breakers(&pipeline.code).paged;
+					loop {
+						records.paged = rows.wanted(paged, state);
+						let row = match records.next(ctx).await {
+							Ok(Some(row)) => row,
+							Ok(None) => break,
+							Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+						};
 						if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
 							return Ok(true);
 						}
 					}
+					return rows.finish(state, ctx, yielder, flush_at).await;
 				}
-				return rows.finish(state, ctx, yielder, flush_at).await;
-			};
-			let descending = matches!(merge.direction(), SortDirection::Desc);
-			let mut last = None;
-			let mut seen = HashSet::new();
-			loop {
-				let mut best: Option<(usize, MergeKey)> = None;
-				for (i, branch) in branches.iter_mut().enumerate() {
-					// A row with no key is passed over, as the union
-					// operator passes over it.
-					let Some(key) = read!(branch.peek(ctx).await)
-						.and_then(|row| merge_key(merge, row, by_encoding))
-					else {
-						continue;
-					};
-					let better = best.as_ref().is_none_or(|(_, prev)| {
-						let ordering = key.cmp(prev);
-						if descending {
-							ordering.is_gt()
-						} else {
-							ordering.is_lt()
+				// The first batch of a branch rejecting by the sum is as large as the sort keeps.
+				let first_batch = topk
+					.as_ref()
+					.and_then(|topk| program.sorts.get(topk.scan.sort as usize)?.keep)
+					.map_or(FULL_TEXT_BATCH_SIZE, |keep| keep.clamp(1, FULL_TEXT_BATCH_SIZE));
+				let mut branches = branches
+					.iter()
+					.zip(contexts.iter_mut())
+					.map(|(b, context)| match &b.read {
+						super::payload::BranchRead::BTree(access) => {
+							let distinct =
+								branch_distinct && access_repeats_records(&b.index, access);
+							IndexRecords::open(
+								ctx,
+								&b.index,
+								access,
+								b.direction,
+								version,
+								distinct,
+								decode.as_ref(),
+							)
 						}
-					});
-					if better {
-						best = Some((i, key));
-					}
+						super::payload::BranchRead::FullText {
+							query,
+							operator,
+						} => Ok(IndexRecords::full_text(
+							ctx,
+							&b.index,
+							query,
+							operator,
+							context.take(),
+							version,
+							decode.as_ref(),
+							union_scores.clone(),
+							first_batch,
+						)),
+					})
+					.collect::<FlowResult<Vec<_>>>()?;
+				let mut rows = Rows::of(program, pipeline, ctx);
+				// A failure to read is raised after the batches before it merge.
+				macro_rules! read {
+					($read:expr) => {
+						match $read {
+							Ok(value) => value,
+							Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+						}
+					};
 				}
-				let Some((i, key)) = best else {
+				// A record is passed once whichever branches list it, told apart by
+				// the record it addresses (`RecordAddress`), not by `RecordId`'s
+				// equality, under which `k:[1]` and `k:[1dec]` are one.
+				let Some(merge) = merge else {
+					let mut seen = HashSet::new();
+					for branch in &mut branches {
+						while let Some(row) = read!(branch.next(ctx).await) {
+							if let Some(rid) = record_id(&row)
+								&& !seen.insert(crate::val::RecordAddress(rid))
+							{
+								continue;
+							}
+							if rows
+								.row(program, pipeline, row, state, ctx, yielder, flush_at)
+								.await?
+							{
+								return Ok(true);
+							}
+						}
+					}
 					return rows.finish(state, ctx, yielder, flush_at).await;
 				};
-				let row = read!(branches[i].next(ctx).await).expect("the branch's head was peeked");
-				// Merged by id, a record listed by several branches arrives
-				// once per branch in succession.
-				if let MergeKey::Rid(rid) = &key {
-					if last.as_ref() == Some(&rid.address) {
+				let descending = matches!(merge.direction(), SortDirection::Desc);
+				let mut last = None;
+				let mut seen = HashSet::new();
+				loop {
+					let mut best: Option<(usize, MergeKey)> = None;
+					for (i, branch) in branches.iter_mut().enumerate() {
+						// A row with no key is passed over, as the union
+						// operator passes over it.
+						let Some(key) = read!(branch.peek(ctx).await)
+							.and_then(|row| merge_key(merge, row, by_encoding))
+						else {
+							continue;
+						};
+						let better = best.as_ref().is_none_or(|(_, prev)| {
+							let ordering = key.cmp(prev);
+							if descending {
+								ordering.is_gt()
+							} else {
+								ordering.is_lt()
+							}
+						});
+						if better {
+							best = Some((i, key));
+						}
+					}
+					let Some((i, key)) = best else {
+						return rows.finish(state, ctx, yielder, flush_at).await;
+					};
+					let row =
+						read!(branches[i].next(ctx).await).expect("the branch's head was peeked");
+					// Merged by id, a record listed by several branches arrives
+					// once per branch in succession.
+					if let MergeKey::Rid(rid) = &key {
+						if last.as_ref() == Some(&rid.address) {
+							continue;
+						}
+						last = Some(rid.address.clone());
+					}
+					if matches!(merge, MergeMode::ByIndexKeyDedup { .. })
+						&& let Some(rid) = record_id(&row)
+						&& !seen.insert(crate::val::RecordAddress(rid))
+					{
 						continue;
 					}
-					last = Some(rid.address.clone());
+					if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+						return Ok(true);
+					}
 				}
-				if matches!(merge, MergeMode::ByIndexKeyDedup { .. })
-					&& let Some(rid) = record_id(&row)
-					&& !seen.insert(crate::val::RecordAddress(rid))
-				{
-					continue;
-				}
-				if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
-					return Ok(true);
-				}
-			}
+			})
+			.await
 		}
 		// The doc-IDs a fused plan leaves, resolved and read in batches as the
 		// bitmap resolve operator reads them; on an overflow, its fallback.
@@ -2789,6 +2873,9 @@ struct IndexRecords {
 	/// The ids listed so far, kept only by a scan that can name a record more
 	/// than once.
 	seen: Option<HashSet<crate::val::RecordAddress>>,
+	/// Whether rows can be synthesized directly as `{ id: rid }` from the
+	/// index's `RecordId`s without fetching records from storage.
+	id_only: bool,
 	/// The most rows the pipeline reading these records still takes under
 	/// its own paging, so that a B-tree read asks for no more entries than
 	/// that; `usize::MAX` where it pages nothing.
@@ -2799,6 +2886,12 @@ struct IndexRecords {
 enum Listing {
 	/// The entries of a B-tree index under an access.
 	BTree(super::entries::EntryScan),
+	/// A sequence of B-tree entry scans drained in branch order into a shared
+	/// batch.
+	Chain {
+		scans: Vec<super::entries::EntryScan>,
+		branch_idx: usize,
+	},
 	/// The hits of a full-text query, opened when the first is asked for.
 	FullText {
 		index: crate::exec::index::access_path::IndexRef,
@@ -2838,8 +2931,38 @@ impl IndexRecords {
 			rows: Default::default(),
 			exhausted: false,
 			seen: distinct.then(HashSet::new),
+			id_only: false,
 			paged: usize::MAX,
 		})
+	}
+
+	fn with_id_only(mut self, id_only: bool) -> Self {
+		self.id_only = id_only;
+		self
+	}
+
+	/// A sequence of B-tree entry scans drained in branch order into one
+	/// shared [`RecordReader`], deduplicating across branches when `distinct`.
+	fn chain(
+		ctx: &ExecutionContext,
+		scans: Vec<super::entries::EntryScan>,
+		version: Option<u64>,
+		distinct: bool,
+		decode: Option<&DecodeFields>,
+		id_only: bool,
+	) -> Self {
+		Self {
+			listing: Listing::Chain {
+				scans,
+				branch_idx: 0,
+			},
+			reader: RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.cloned()),
+			rows: Default::default(),
+			exhausted: false,
+			seen: distinct.then(HashSet::new),
+			id_only,
+			paged: usize::MAX,
+		}
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -2873,6 +2996,7 @@ impl IndexRecords {
 			rows: Default::default(),
 			exhausted: false,
 			seen: None,
+			id_only: false,
 			paged: usize::MAX,
 		}
 	}
@@ -2881,8 +3005,44 @@ impl IndexRecords {
 	async fn next_rids(&mut self, ctx: &ExecutionContext) -> FlowResult<Vec<crate::val::RecordId>> {
 		let services = EngineServices::new(ctx);
 		match &mut self.listing {
-			Listing::BTree(entries) => {
-				entries.next_batch(ctx, &services, self.reader.read_len(), self.paged).await
+			Listing::BTree(entries) => loop {
+				let mut batch =
+					entries.next_batch(ctx, &services, self.reader.read_len(), self.paged).await?;
+				if batch.is_empty() {
+					return Ok(Vec::new());
+				}
+				if let Some(seen) = &mut self.seen {
+					batch.retain(|rid| seen.insert(crate::val::RecordAddress(rid.clone())));
+					if batch.is_empty() {
+						continue;
+					}
+				}
+				return Ok(batch);
+			},
+			Listing::Chain {
+				scans,
+				branch_idx,
+			} => {
+				let target = self.reader.read_len().min(self.paged.max(1));
+				let mut batch = Vec::new();
+				while *branch_idx < scans.len() && batch.len() < target {
+					let want = target - batch.len();
+					let next =
+						scans[*branch_idx].next_batch(ctx, &services, want, self.paged).await?;
+					if next.is_empty() {
+						*branch_idx += 1;
+						continue;
+					}
+					if let Some(seen) = &mut self.seen {
+						batch.extend(
+							next.into_iter()
+								.filter(|rid| seen.insert(crate::val::RecordAddress(rid.clone()))),
+						);
+					} else {
+						batch.extend(next);
+					}
+				}
+				Ok(batch)
 			}
 			Listing::FullText {
 				index,
@@ -2950,14 +3110,24 @@ impl IndexRecords {
 	/// The next record, without taking it.
 	async fn peek(&mut self, ctx: &ExecutionContext) -> FlowResult<Option<&Value>> {
 		while self.rows.is_empty() && !self.exhausted {
-			if self.reader.is_drained() {
-				let mut batch = self.next_rids(ctx).await?;
+			if self.id_only {
+				let batch = self.next_rids(ctx).await?;
 				if batch.is_empty() {
 					self.exhausted = true;
 					break;
 				}
-				if let Some(seen) = &mut self.seen {
-					batch.retain(|rid| seen.insert(crate::val::RecordAddress(rid.clone())));
+				self.rows.extend(batch.into_iter().map(|rid| {
+					Value::Object(crate::val::Object(crate::VecMap::from_sorted_vec_unchecked(
+						vec![("id".into(), Value::RecordId(rid))],
+					)))
+				}));
+				break;
+			}
+			if self.reader.is_drained() {
+				let batch = self.next_rids(ctx).await?;
+				if batch.is_empty() {
+					self.exhausted = true;
+					break;
 				}
 				self.reader.push(batch);
 			}

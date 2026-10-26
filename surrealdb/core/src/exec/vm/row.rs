@@ -111,6 +111,29 @@ pub(super) trait RowReader {
 		Ok(scalar_numbers(&self.field(name)?, out))
 	}
 
+	/// Reads the `(lon, lat)` coordinates of field `name` of the row where the field holds a
+	/// `Geometry::Point`, and answers `None` for any other value or when the field is absent.
+	fn point_field(&self, name: &FieldName) -> anyhow::Result<Option<(f64, f64)>> {
+		Ok(match self.field(name)? {
+			Scalar::Value(v) => {
+				if let Value::Geometry(crate::val::Geometry::Point(pt)) = v.as_ref() {
+					Some((pt.x(), pt.y()))
+				} else {
+					None
+				}
+			}
+			Scalar::None
+			| Scalar::Null
+			| Scalar::Bool(_)
+			| Scalar::Number(_)
+			| Scalar::Str(_)
+			| Scalar::Duration(_)
+			| Scalar::Datetime(_)
+			| Scalar::Uuid(_)
+			| Scalar::Bytes(_) => None,
+		})
+	}
+
 	/// Whether the row is a record id rather than a record.
 	fn is_record_id(&self) -> bool {
 		false
@@ -1295,5 +1318,47 @@ mod tests {
 		let row = StoredRow::new(&key, &value);
 		assert!(matches!(row.layout, Layout::Whole), "not read in place");
 		assert!(row.field(&FieldName::new("a")).is_err(), "the read of a refuses too");
+	}
+
+	/// `RowReader::point_field` returns `Some((lon, lat))` only for a `Geometry::Point` field and
+	/// `None` for non-point geometries, scalars, `id` and absent fields across stored, revision
+	/// and in-memory rows.
+	#[test]
+	fn point_field_reads_only_points() {
+		let rid = crate::val::RecordId::new("t".into(), crate::val::RecordIdKey::Number(1));
+		let key = key_of(&rid);
+		let data = val(
+			"{ pt: (12.5, -34.25), line: { type: 'LineString', coordinates: [[0, 0], [1, 1]] }, num: 42, str: 'x', null_f: NULL }",
+		);
+		let stored_bytes =
+			crate::catalog::encode_record(DOCUMENT, None, &data, Some(&rid)).expect("encodes");
+		let rev_bytes =
+			revision::to_vec(&crate::catalog::Record::new(data.clone())).expect("encodes");
+
+		let check = |reader: &dyn RowReader| {
+			assert_eq!(
+				reader.point_field(&FieldName::new("pt")).expect("reads"),
+				Some((12.5, -34.25))
+			);
+			for non_pt in ["line", "num", "str", "null_f", "absent", "id"] {
+				assert_eq!(
+					reader.point_field(&FieldName::new(non_pt)).expect("reads"),
+					None,
+					"{non_pt}"
+				);
+			}
+		};
+
+		let stored_row = StoredRow::new(&key, &stored_bytes);
+		assert!(matches!(stored_row.layout, Layout::Stored(_)));
+		check(&stored_row);
+		assert!(stored_row.decoded.get().is_none(), "read in place without whole decode");
+
+		let rev_row = StoredRow::new(&key, &rev_bytes);
+		assert!(matches!(rev_row.layout, Layout::Revision { .. }));
+		check(&rev_row);
+
+		let value_row = ValueRow(&data);
+		check(&value_row);
 	}
 }

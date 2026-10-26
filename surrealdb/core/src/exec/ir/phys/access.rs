@@ -860,6 +860,7 @@ fn index_kind_class(index: &Index) -> IndexKindClass {
 		Index::Hnsw(_) => IndexKindClass::Hnsw,
 		Index::DiskAnn(_) => IndexKindClass::DiskAnn,
 		Index::Count(_) => IndexKindClass::Count,
+		Index::Spatial => IndexKindClass::Spatial,
 	}
 }
 

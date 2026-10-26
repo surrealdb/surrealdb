@@ -1,11 +1,9 @@
 /**
-[env]
-imports = ["bench/util/geo-points-100000.surql"]
-
 [bench]
-reason = "Geo containment full scan: point-in-polygon (INSIDE) test evaluated per row against a fixed bounding polygon (no spatial index — see #219)"
+reason = "Geo containment scan: point-in-polygon (INSIDE) against a fixed bounding polygon (unindexed full scan vs SPATIAL index)"
 run = true
 rebuild = false
+datasets = { unindexed = "bench/util/geo-points-100000.surql", indexed = "bench/util/geo-points-100000-indexed.surql" }
 warmup = "2s"
 sample-size = 50
 measurement-time = "20s"

@@ -107,6 +107,67 @@ async fn an_unchanged_overwrite_at_legacy_keeps_every_index() {
 	}
 }
 
+/// Defining a spatial index is refused while a store is held at the Legacy
+/// feature level (`3.x`), because `3.x` nodes cannot decode or maintain
+/// `Index::Spatial`. Once the store's feature level is raised (or on a store
+/// created at `4.0+`), defining the spatial index succeeds, stamps
+/// `INDEX_FORMAT_VERSION`, and plans spatial index scans.
+#[tokio::test]
+async fn a_spatial_index_is_refused_at_legacy_and_admitted_once_levelled() {
+	let legacy_ds = upgraded().await;
+	let levelled_ds = levelled().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	run(
+		&legacy_ds,
+		"DEFINE NAMESPACE IF NOT EXISTS test; \
+		 DEFINE DATABASE IF NOT EXISTS test; \
+		 CREATE t:1 SET loc = (0.5, 0.5); \
+		 CREATE t:2 SET loc = (50.0, 50.0);",
+	)
+	.await;
+	let mut legacy_res =
+		legacy_ds.execute("DEFINE INDEX sp ON t FIELDS loc SPATIAL;", &ses, None).await.unwrap();
+	let legacy_err = legacy_res
+		.pop()
+		.unwrap()
+		.result
+		.expect_err("DEFINE INDEX ... SPATIAL at Legacy level must be refused");
+	assert!(
+		legacy_err.to_string().contains("feature level 4.0"),
+		"unexpected error at Legacy level: {legacy_err}"
+	);
+
+	legacy_ds.raise_feature_level(crate::kvs::Release::FIRST_STORED).await.unwrap();
+
+	for (label, ds) in [("raised", &legacy_ds), ("levelled", &levelled_ds)] {
+		run(
+			ds,
+			"DEFINE NAMESPACE IF NOT EXISTS test; \
+			 DEFINE DATABASE IF NOT EXISTS test; \
+			 UPSERT t:1 SET loc = (0.5, 0.5); \
+			 UPSERT t:2 SET loc = (50.0, 50.0); \
+			 DEFINE INDEX sp ON t FIELDS loc SPATIAL;",
+		)
+		.await;
+		assert_eq!(stamped(ds, "sp").await, INDEX_FORMAT_VERSION, "{label} stamp");
+		let query = "LET $box = { type: 'Polygon', coordinates: [[[0,0],[1,0],[1,1],[0,1],[0,0]]] }; \
+			SELECT VALUE id FROM t WHERE loc INSIDE $box; \
+			SELECT VALUE id FROM t WHERE loc INSIDE $box EXPLAIN;";
+		let mut res = ds.execute(query, &ses, None).await.unwrap();
+		let explain = format!("{:?}", res.pop().unwrap().result.unwrap());
+		let rows = format!("{:?}", res.pop().unwrap().result.unwrap());
+		assert!(
+			explain.contains("UnionIndexScan") || explain.contains("IndexScan"),
+			"{label} store fell back to TableScan instead of spatial index scan: {explain}"
+		);
+		assert!(!explain.contains("TableScan"), "{label} store planned TableScan: {explain}");
+		assert!(rows.contains("Number(1)") && !rows.contains("Number(2)"), "{label} rows: {rows}");
+	}
+	legacy_ds.shutdown().await.unwrap();
+	levelled_ds.shutdown().await.unwrap();
+}
+
 /// Once the store is raised, an unchanged `DEFINE INDEX OVERWRITE` keeps an
 /// index whose layout the current format leaves as it is (the b-tree index), and
 /// rebuilds the full-text and HNSW indexes, whose layouts it changes.

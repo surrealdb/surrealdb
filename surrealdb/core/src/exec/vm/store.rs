@@ -2380,10 +2380,20 @@ async fn step_inner(
 					)));
 				}
 			};
-			if stamped > crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION {
+			let is_spatial =
+				matches!(object.get("index"), Some(Value::Object(m)) if m.contains_key("Spatial"));
+			if is_spatial || stamped > crate::catalog::LEGACY_LEVEL_INDEX_FORMAT_VERSION {
 				let txn = ctx.txn();
 				// The stored level, not the datastore's cell, which may lag the store.
 				let level = txn.feature_level_state().await.map_err(ControlFlow::Err)?.level;
+				if is_spatial && level.is_legacy() {
+					return Err(ControlFlow::Err(anyhow::Error::new(
+						crate::kvs::DatastoreError::FeatureNotEnabled {
+							needed: surrealdb_kvs::Release::FIRST_STORED,
+							level,
+						},
+					)));
+				}
 				let admitted =
 					crate::catalog::admitted_index_format_version(stamped, level.is_legacy());
 				if admitted == stamped {

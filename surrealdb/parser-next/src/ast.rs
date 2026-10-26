@@ -456,6 +456,7 @@ pub enum Cl {
 	Hnsw,
 	/// `a`: index into `extra` of the [`vector`] record.
 	Diskann,
+	Spatial,
 	Concurrently,
 	/// `a`: list of filter clauses ([`Cl::Filter`]).
 	Filters,

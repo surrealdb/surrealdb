@@ -242,12 +242,10 @@ async fn exact(
 		// than a move, while only the k winners are read again.
 		let rows = read_sized(ctx, &mut sizer, &rids, None, CachePolicy::ReadOnly).await?;
 		for row in rows {
-			if let Some(pipeline) = per_row
-				&& !admits(program, pipeline, ctx, &row).await.catch_return()?.is_truthy()
-			{
-				continue;
-			}
-			// The record's vector is scored in place.
+			// The record's vector is scored in place before the per-row
+			// condition is judged: once the heap holds `k` admitted records,
+			// any candidate whose vector distance cannot enter the heap is
+			// rejected without running the condition pipeline.
 			let scored = if let Value::Array(record) = field.extract(&row).as_ref() {
 				score_raw_values(&distance, vector_type, dimension, &query, &record.0)
 			} else {
@@ -259,6 +257,11 @@ async fn exact(
 			let scored = Number::Float(scored);
 			// A candidate the full heap would turn away takes no entry.
 			if !heap.admits(&scored) {
+				continue;
+			}
+			if let Some(pipeline) = per_row
+				&& !admits(program, pipeline, ctx, &row).await.catch_return()?.is_truthy()
+			{
 				continue;
 			}
 			let Value::Object(mut object) = row else {

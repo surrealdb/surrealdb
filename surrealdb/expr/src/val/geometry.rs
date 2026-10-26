@@ -464,7 +464,7 @@ impl Geometry {
 			Self::Line(v) => match other {
 				Self::Point(w) => v.contains(w),
 				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::MultiLine(w) => w.iter().all(|x| v.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				Self::Polygon(_) | Self::MultiPoint(_) | Self::MultiPolygon(_) => false,
 			},
@@ -472,13 +472,13 @@ impl Geometry {
 				Self::Point(w) => v.contains(w),
 				Self::Line(w) => v.contains(w),
 				Self::Polygon(w) => v.contains(w),
-				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
+				Self::MultiPolygon(w) => w.iter().all(|x| v.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				Self::MultiPoint(_) | Self::MultiLine(_) => false,
 			},
 			Self::MultiPoint(v) => match other {
 				Self::Point(w) => v.contains(w),
-				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
+				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				Self::Line(_) | Self::Polygon(_) | Self::MultiLine(_) | Self::MultiPolygon(_) => {
 					false
@@ -487,7 +487,7 @@ impl Geometry {
 			Self::MultiLine(v) => match other {
 				Self::Point(w) => v.contains(w),
 				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::MultiLine(w) => w.iter().all(|x| v.contains(x)),
 				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				Self::Polygon(_) | Self::MultiPoint(_) | Self::MultiPolygon(_) => false,
 			},
@@ -1390,6 +1390,52 @@ mod test {
 				],
 			),
 		])));
+	}
+
+	#[cfg(feature = "geo")]
+	#[test]
+	fn contains_checks_receiver_not_argument_tautology() {
+		let line_a = Geometry::Line(LineString::from(vec![(0.0, 0.0), (10.0, 0.0)]));
+		let ml_inside = Geometry::MultiLine(MultiLineString::new(vec![LineString::from(vec![
+			(2.0, 0.0),
+			(5.0, 0.0),
+		])]));
+		let ml_outside = Geometry::MultiLine(MultiLineString::new(vec![LineString::from(vec![
+			(20.0, 20.0),
+			(30.0, 20.0),
+		])]));
+		assert!(line_a.contains(&ml_inside));
+		assert!(!line_a.contains(&ml_outside));
+		assert!(ml_inside.contains(&ml_inside));
+		assert!(!ml_inside.contains(&ml_outside));
+
+		let poly_a = Geometry::Polygon(Polygon::new(
+			LineString::from(vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]),
+			vec![],
+		));
+		let mp_inside = Geometry::MultiPolygon(MultiPolygon::new(vec![Polygon::new(
+			LineString::from(vec![(2.0, 2.0), (5.0, 2.0), (5.0, 5.0), (2.0, 5.0), (2.0, 2.0)]),
+			vec![],
+		)]));
+		let mp_outside = Geometry::MultiPolygon(MultiPolygon::new(vec![Polygon::new(
+			LineString::from(vec![
+				(20.0, 20.0),
+				(30.0, 20.0),
+				(30.0, 30.0),
+				(20.0, 30.0),
+				(20.0, 20.0),
+			]),
+			vec![],
+		)]));
+		assert!(poly_a.contains(&mp_inside));
+		assert!(!poly_a.contains(&mp_outside));
+
+		let mpt_a =
+			Geometry::MultiPoint(MultiPoint::new(vec![Point::new(1.0, 1.0), Point::new(2.0, 2.0)]));
+		let mpt_subset = Geometry::MultiPoint(MultiPoint::new(vec![Point::new(1.0, 1.0)]));
+		let mpt_disjoint = Geometry::MultiPoint(MultiPoint::new(vec![Point::new(9.0, 9.0)]));
+		assert!(mpt_a.contains(&mpt_subset));
+		assert!(!mpt_a.contains(&mpt_disjoint));
 	}
 
 	#[test]

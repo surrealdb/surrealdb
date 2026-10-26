@@ -1,6 +1,5 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
-#[cfg(feature = "geo")]
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
@@ -635,8 +634,7 @@ impl Value {
 	/// ([`Geometry::try_from_object`]). That is the form a geometry takes as
 	/// data, such as a query parameter, so `$point INSIDE area` answers the
 	/// same whether `$point` was written as a literal or sent by a client.
-	#[cfg(feature = "geo")]
-	fn geometry_operand(&self) -> Option<Cow<'_, Geometry>> {
+	pub fn geometry_operand(&self) -> Option<Cow<'_, Geometry>> {
 		match self {
 			Value::Geometry(v) => Some(Cow::Borrowed(v)),
 			Value::Object(v) => Geometry::try_from_object(v).map(Cow::Owned),

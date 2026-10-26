@@ -9,7 +9,7 @@ Cannot combine UNIQUE with HNSW
   --> [20:53]
    |
 20 | ...MENSION 2 UNIQUE;
-   |              ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+   |              ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL
   --> [20:36]
    |
 20 | DEFINE INDEX emb ON doc FIELDS emb HNSW DIMENSION 2 UNIQUE;

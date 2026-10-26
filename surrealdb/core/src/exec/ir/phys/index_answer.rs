@@ -118,6 +118,19 @@ pub(super) fn answers_union(ir: &Ir, conjunct: ValueId, branches: &[SearchProbe<
 	probed.iter().all(|probed| *probed)
 }
 
+/// Whether the conjunct `conjunct` states the exact spatial predicate `filter` that a point-only
+/// `SPATIAL` index union's inline trailer filter already evaluates.
+pub(super) fn answers_spatial(
+	ir: &Ir,
+	conjunct: ValueId,
+	filter: &crate::exec::index::access_path::SpatialPointFilter,
+) -> bool {
+	let mut operands = Vec::new();
+	read_conjunct(ir, conjunct, &mut operands).is_ok_and(|expr| {
+		crate::exec::index::analysis::expr_matches_spatial_point_filter(&expr, filter)
+	})
+}
+
 /// The terms of `expr` read as a disjunction: the operands of every `OR` it nests, left to right.
 fn disjuncts<'a>(expr: &'a LogicalExpr, into: &mut Vec<&'a LogicalExpr>) {
 	if let LogicalExpr::Binary {

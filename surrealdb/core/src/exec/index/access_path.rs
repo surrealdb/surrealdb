@@ -143,7 +143,12 @@ impl IndexRef {
 	/// index-only count, a `NOT` subtraction, a KNN allow-list that replaces
 	/// its conjunct).
 	pub(crate) fn one_entry_per_record(&self, col: usize) -> bool {
-		self.definition.cols.get(col).is_some_and(|c| is_plain_column(c) && self.is_scalar(col))
+		matches!(self.definition.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
+			&& self
+				.definition
+				.cols
+				.get(col)
+				.is_some_and(|c| is_plain_column(c) && self.is_scalar(col))
 	}
 
 	fn is_scalar(&self, col: usize) -> bool {
@@ -292,12 +297,261 @@ impl AccessPath {
 					range: OperandRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
+						..
 					},
 				},
 				..
 			}
 		)
 	}
+}
+
+/// Exact geometric pre-filter evaluated on the inline `(lon, lat)` point
+/// coordinates stored in a `SPATIAL` index entry trailer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpatialPointFilter {
+	/// `geo::distance(field, center) < radius` or `<= radius`.
+	Cap {
+		column: crate::expr::Idiom,
+		center: (f64, f64),
+		radius: f64,
+		inclusive: bool,
+	},
+	/// `field INSIDE geom` or `geom CONTAINS field`.
+	Inside {
+		column: crate::expr::Idiom,
+		min_x: f64,
+		max_x: f64,
+		min_y: f64,
+		max_y: f64,
+		geom: crate::val::Geometry,
+	},
+	/// `field INTERSECTS geom` or `geom INTERSECTS field`.
+	Intersects {
+		column: crate::expr::Idiom,
+		min_x: f64,
+		max_x: f64,
+		min_y: f64,
+		max_y: f64,
+		geom: crate::val::Geometry,
+	},
+}
+
+impl SpatialPointFilter {
+	/// The indexed geometry column this point filter evaluates.
+	#[inline]
+	pub fn column(&self) -> &crate::expr::Idiom {
+		match self {
+			Self::Cap {
+				column,
+				..
+			}
+			| Self::Inside {
+				column,
+				..
+			}
+			| Self::Intersects {
+				column,
+				..
+			} => column,
+		}
+	}
+
+	/// Evaluate the exact geometric predicate against inline `(x, y)` = `(lon, lat)` coordinates.
+	#[inline]
+	pub fn matches(&self, x: f64, y: f64) -> bool {
+		match self {
+			Self::Cap {
+				center,
+				radius,
+				inclusive,
+				..
+			} => {
+				let Ok(Value::Number(d)) = crate::fnc::geo::distance((
+					crate::val::Geometry::Point((x, y).into()),
+					crate::val::Geometry::Point((*center).into()),
+				)) else {
+					return false;
+				};
+				let d = d.as_float();
+				if *inclusive {
+					d <= *radius
+				} else {
+					d < *radius
+				}
+			}
+			Self::Inside {
+				min_x,
+				max_x,
+				min_y,
+				max_y,
+				geom,
+				..
+			} => {
+				if x < *min_x || x > *max_x || y < *min_y || y > *max_y {
+					return false;
+				}
+				#[cfg(feature = "geo")]
+				{
+					geom.contains(&crate::val::Geometry::Point((x, y).into()))
+				}
+				#[cfg(not(feature = "geo"))]
+				{
+					let _ = geom;
+					false
+				}
+			}
+			Self::Intersects {
+				min_x,
+				max_x,
+				min_y,
+				max_y,
+				geom,
+				..
+			} => {
+				if x < *min_x || x > *max_x || y < *min_y || y > *max_y {
+					return false;
+				}
+				#[cfg(feature = "geo")]
+				{
+					crate::val::Geometry::Point((x, y).into()).intersects(geom)
+				}
+				#[cfg(not(feature = "geo"))]
+				{
+					let _ = geom;
+					false
+				}
+			}
+		}
+	}
+
+	/// Human-readable description of this point filter for `EXPLAIN` output.
+	pub(crate) fn describe(&self) -> String {
+		use surrealdb_types::ToSql;
+		match self {
+			Self::Cap {
+				column,
+				center,
+				radius,
+				inclusive,
+			} => {
+				let op = if *inclusive {
+					"<="
+				} else {
+					"<"
+				};
+				format!(
+					"geo::distance({}, ({}, {})) {op} {radius}",
+					column.to_sql(),
+					center.0,
+					center.1
+				)
+			}
+			Self::Inside {
+				column,
+				geom,
+				..
+			} => format!("{} INSIDE {}", column.to_sql(), geom.to_sql()),
+			Self::Intersects {
+				column,
+				geom,
+				..
+			} => format!("{} INTERSECTS {}", column.to_sql(), geom.to_sql()),
+		}
+	}
+}
+
+/// If `branches` all scan the same index through [`BTreeAccess::Range`] with an identical
+/// [`SpatialPointFilter`], identical prefix operands, and strictly disjoint ascending integer
+/// cell-id bounds, returns that shared [`SpatialPointFilter`].
+///
+/// Such a union is produced by a point-only `SPATIAL` index covering: every branch scans
+/// leaf-level Hilbert cell ranges (`include_ancestors == false`), each indexed point has at
+/// most one entry across all branches, and entries that pass `point_filter` satisfy the exact
+/// geometric predicate.
+pub(crate) fn disjoint_spatial_point_union_filter<'a, I, K>(
+	branches: I,
+) -> Option<&'a SpatialPointFilter>
+where
+	I: IntoIterator<Item = (K, Option<&'a BTreeAccess>)>,
+	K: PartialEq,
+{
+	let mut iter = branches.into_iter();
+	let (first_key, first_access) = iter.next()?;
+	let BTreeAccess::Range {
+		range: first_range,
+	} = first_access?
+	else {
+		return None;
+	};
+	let first_filter = first_range.point_filter.as_ref()?;
+	let (
+		Bound::Included(BoundOperand::Literal(Value::Number(Number::Int(first_min)))),
+		Bound::Included(BoundOperand::Literal(Value::Number(Number::Int(first_max)))),
+	) = (&first_range.start, &first_range.end)
+	else {
+		return None;
+	};
+	if first_min > first_max {
+		return None;
+	}
+	let mut prev_max = *first_max;
+	for (key, access) in iter {
+		if key != first_key {
+			return None;
+		}
+		let BTreeAccess::Range {
+			range,
+		} = access?
+		else {
+			return None;
+		};
+		if !range
+			.point_filter
+			.as_ref()
+			.is_some_and(|pf| Arc::ptr_eq(pf, first_filter) || **pf == **first_filter)
+		{
+			return None;
+		}
+		let (
+			Bound::Included(BoundOperand::Literal(Value::Number(Number::Int(min)))),
+			Bound::Included(BoundOperand::Literal(Value::Number(Number::Int(max)))),
+		) = (&range.start, &range.end)
+		else {
+			return None;
+		};
+		if *min > *max || prev_max >= *min {
+			return None;
+		}
+		prev_max = *max;
+	}
+	Some(first_filter.as_ref())
+}
+
+/// Returns whether an `IndexScan` over `access` can construct rows directly from the index's
+/// `RecordId`s without reading the record KVS (`id_only: yes` in `EXPLAIN`).
+pub(crate) fn index_scan_is_id_only(
+	repeats: bool,
+	access: &BTreeAccess,
+	versioned: bool,
+	decode: Option<&crate::exec::operators::scan::common::DecodeFields>,
+) -> bool {
+	!repeats
+		&& access.point_filter().is_some()
+		&& !versioned
+		&& decode.is_some_and(crate::exec::operators::scan::common::DecodeFields::is_id_only)
+}
+
+/// Returns whether a spatial `IndexUnion` with `disjoint_point_ranges` can construct rows directly
+/// from the index's `RecordId`s without reading the record KVS (`id_only: yes` in `EXPLAIN`).
+pub(crate) fn spatial_union_is_id_only(
+	disjoint_point_ranges: bool,
+	versioned: bool,
+	decode: Option<&crate::exec::operators::scan::common::DecodeFields>,
+) -> bool {
+	disjoint_point_ranges
+		&& !versioned
+		&& decode.is_some_and(crate::exec::operators::scan::common::DecodeFields::is_id_only)
 }
 
 /// Plan-level pre-filter for a KNN search.
@@ -505,6 +759,7 @@ impl BoundOperand {
 pub struct OperandRange {
 	pub start: Bound<BoundOperand>,
 	pub end: Bound<BoundOperand>,
+	pub point_filter: Option<Arc<SpatialPointFilter>>,
 }
 
 impl From<Range> for OperandRange {
@@ -517,6 +772,7 @@ impl From<Range> for OperandRange {
 		OperandRange {
 			start: bound(range.start),
 			end: bound(range.end),
+			point_filter: None,
 		}
 	}
 }
@@ -527,6 +783,7 @@ impl OperandRange {
 		OperandRange {
 			start: Bound::Unbounded,
 			end: Bound::Unbounded,
+			point_filter: None,
 		}
 	}
 
@@ -579,6 +836,7 @@ impl OperandRange {
 		Some(OperandRange {
 			start: side(&self.start, &other.start)?,
 			end: side(&self.end, &other.end)?,
+			point_filter: None,
 		})
 	}
 
@@ -692,6 +950,36 @@ impl BTreeAccess {
 		BTreeAccess::Range {
 			range: range.into(),
 		}
+	}
+
+	/// Optional pre-fetch spatial point filter attached to a range access.
+	pub(crate) fn point_filter(&self) -> Option<&Arc<SpatialPointFilter>> {
+		match self {
+			BTreeAccess::Range {
+				range,
+			} => range.point_filter.as_ref(),
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Compound {
+				..
+			}
+			| BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => None,
+		}
+	}
+
+	/// Attach an optional spatial point filter when this is a range access.
+	pub(crate) fn with_point_filter(mut self, filter: Option<Arc<SpatialPointFilter>>) -> Self {
+		if let BTreeAccess::Range {
+			range,
+		} = &mut self
+		{
+			range.point_filter = filter;
+		}
+		self
 	}
 
 	/// A compound access over literal values.
@@ -857,6 +1145,21 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 /// once per element. A column known to hold one entry per record needs no
 /// dedupe.
 pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> bool {
+	if matches!(index.definition().index, Index::Spatial) {
+		if access.point_filter().is_some() {
+			return false;
+		}
+		if matches!(
+			access,
+			BTreeAccess::Range { .. }
+				| BTreeAccess::Compound {
+					range: Some(_),
+					..
+				}
+		) {
+			return true;
+		}
+	}
 	if access_fans_out(&index.cols, access) {
 		return true;
 	}
@@ -1129,10 +1432,19 @@ pub(crate) fn with_array_columns_as_elements(
 	// are pushed together, so the two stay aligned index for index.
 	let mut changed: Option<(Vec<IndexDefinition>, Vec<ColumnFlags>)> = None;
 	for (i, ix) in indexes.iter().enumerate() {
-		let flags: Box<[bool]> = if matches!(ix.index, Index::Idx | Index::Uniq) {
-			ix.cols.iter().map(as_elements).collect()
-		} else {
-			Box::default()
+		let flags: Box<[bool]> = match ix.index {
+			Index::Idx | Index::Uniq => ix.cols.iter().map(as_elements).collect(),
+			Index::Spatial if ix.cols.len() > 1 => ix
+				.cols
+				.iter()
+				.enumerate()
+				.map(|(col_idx, col)| col_idx + 1 < ix.cols.len() && as_elements(col))
+				.collect(),
+			Index::Hnsw(_)
+			| Index::FullText(_)
+			| Index::Count(_)
+			| Index::DiskAnn(_)
+			| Index::Spatial => Box::default(),
 		};
 		if flags.contains(&true) {
 			let (defs, masks) = changed.get_or_insert_with(|| {
@@ -1158,6 +1470,9 @@ pub(crate) fn with_array_columns_as_elements(
 	let scalar: Vec<ColumnFlags> = indexes
 		.iter()
 		.map(|ix| {
+			if !matches!(ix.index, Index::Idx | Index::Uniq) {
+				return Box::default();
+			}
 			let stored = shapes.of(ix.index_id);
 			ix.cols
 				.iter()
@@ -1172,25 +1487,75 @@ pub(crate) fn with_array_columns_as_elements(
 	let scalar = scalar.iter().any(|flags| flags.contains(&true)).then(|| scalar.into());
 	let sets: Vec<ColumnFlags> = indexes
 		.iter()
-		.map(|ix| {
-			if matches!(ix.index, Index::Idx | Index::Uniq) {
+		.map(|ix| match ix.index {
+			Index::Idx | Index::Uniq => {
 				ix.cols.iter().map(|col| flattens_a_set(col, fields)).collect()
-			} else {
-				Box::default()
 			}
+			Index::Spatial if ix.cols.len() > 1 => ix
+				.cols
+				.iter()
+				.enumerate()
+				.map(|(col_idx, col)| col_idx + 1 < ix.cols.len() && flattens_a_set(col, fields))
+				.collect(),
+			Index::Hnsw(_)
+			| Index::FullText(_)
+			| Index::Count(_)
+			| Index::DiskAnn(_)
+			| Index::Spatial => Box::default(),
 		})
 		.collect();
 	let sets = sets.iter().any(|flags| flags.contains(&true)).then(|| sets.into());
+	// Derived from `shapes`, which `Planner::trusting_index_shapes(op.read_only())` supplies only
+	// for read-only programs (`SELECT` / `RETURN`): mutating statements (`UPDATE`, `DELETE`,
+	// `UPSERT`) and multi-statement write blocks intentionally receive empty `shapes` so they
+	// retain ancestor cell probes and `DistinctRecords` deduplication across concurrent writes.
+	let point_only_spatial: Vec<bool> = indexes
+		.iter()
+		.map(|ix| {
+			if !matches!(ix.index, Index::Spatial) {
+				return false;
+			}
+			let Some((last_idx, last_col)) = ix.cols.iter().enumerate().next_back() else {
+				return false;
+			};
+			let stored = shapes.of(ix.index_id);
+			is_plain_column(last_col)
+				&& stored.is_some_and(|s| {
+					!s.may_hold(last_idx, ValueShape::MultiCell)
+						&& !s.may_hold(last_idx, ValueShape::Array)
+				})
+		})
+		.collect();
+	let point_only_spatial = point_only_spatial.contains(&true).then(|| point_only_spatial.into());
+	let non_geometry_spatial: Vec<bool> = indexes
+		.iter()
+		.map(|ix| {
+			if !matches!(ix.index, Index::Spatial) {
+				return false;
+			}
+			let Some(last_idx) = ix.cols.len().checked_sub(1) else {
+				return false;
+			};
+			let stored = shapes.of(ix.index_id);
+			stored.is_some_and(|s| s.may_hold(last_idx, ValueShape::NonGeometry))
+		})
+		.collect();
+	let non_geometry_spatial =
+		non_geometry_spatial.contains(&true).then(|| non_geometry_spatial.into());
 	match changed {
 		Some((defs, masks)) => ElementColumns {
 			indexes: defs.into(),
 			rewritten: Some(masks.into()),
 			scalar,
 			sets,
+			point_only_spatial,
+			non_geometry_spatial,
 		},
 		None => ElementColumns {
 			scalar,
 			sets,
+			point_only_spatial,
+			non_geometry_spatial,
 			..ElementColumns::unchanged(indexes)
 		},
 	}
@@ -1468,6 +1833,20 @@ pub(crate) struct ElementColumns {
 	/// set; a column past the end of its index's flags does not. `None` when
 	/// none does, or when the fields were not read.
 	pub(crate) sets: Option<Arc<[ColumnFlags]>>,
+	/// Per index, in order, whether a `SPATIAL` index column is known from
+	/// recorded [`super::super::datastore::index_shapes::TableIndexShapes`] to
+	/// have stored only single-cell point geometries (neither multi-cell
+	/// coverings recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::MultiCell`] nor
+	/// array/set geometries recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::Array`]).
+	pub(crate) point_only_spatial: Option<Arc<[bool]>>,
+	/// Per index, in order, whether a `SPATIAL` index column may hold
+	/// non-geometry values (including `NONE` and `NULL`, recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::NonGeometry`]),
+	/// which emit no spatial index cells and would cause `geo::distance` to
+	/// raise a type error on a table scan.
+	pub(crate) non_geometry_spatial: Option<Arc<[bool]>>,
 }
 
 impl ElementColumns {
@@ -1478,6 +1857,8 @@ impl ElementColumns {
 			rewritten: None,
 			scalar: None,
 			sets: None,
+			point_only_spatial: None,
+			non_geometry_spatial: None,
 		}
 	}
 
@@ -1499,17 +1880,33 @@ impl ElementColumns {
 			.iter()
 			.enumerate()
 			.map(|(i, ix)| {
-				if !matches!(ix.index, Index::Idx | Index::Uniq) {
-					return Box::default();
-				}
 				let known = self.sets.as_ref().and_then(|sets| sets.get(i));
-				ix.cols
-					.iter()
-					.enumerate()
-					.map(|(c, col)| {
-						known.and_then(|flags| flags.get(c)).copied().unwrap_or(false) || at(col)
-					})
-					.collect()
+				match ix.index {
+					Index::Idx | Index::Uniq => ix
+						.cols
+						.iter()
+						.enumerate()
+						.map(|(c, col)| {
+							known.and_then(|flags| flags.get(c)).copied().unwrap_or(false)
+								|| at(col)
+						})
+						.collect(),
+					Index::Spatial if ix.cols.len() > 1 => ix
+						.cols
+						.iter()
+						.enumerate()
+						.map(|(c, col)| {
+							c + 1 < ix.cols.len()
+								&& (known.and_then(|flags| flags.get(c)).copied().unwrap_or(false)
+									|| at(col))
+						})
+						.collect(),
+					Index::Hnsw(_)
+					| Index::FullText(_)
+					| Index::Count(_)
+					| Index::DiskAnn(_)
+					| Index::Spatial => Box::default(),
+				}
 			})
 			.collect();
 		self.sets = sets.iter().any(|flags| flags.contains(&true)).then(|| sets.into());
@@ -1530,6 +1927,14 @@ impl ElementColumns {
 		);
 		let analyzer = match &self.scalar {
 			Some(scalar) => analyzer.with_scalar_columns(Arc::clone(scalar)),
+			None => analyzer,
+		};
+		let analyzer = match &self.point_only_spatial {
+			Some(flags) => analyzer.with_point_only_spatial(Arc::clone(flags)),
+			None => analyzer,
+		};
+		let analyzer = match &self.non_geometry_spatial {
+			Some(flags) => analyzer.with_non_geometry_spatial(Arc::clone(flags)),
 			None => analyzer,
 		};
 		match (&self.rewritten, &self.sets) {
@@ -1559,7 +1964,7 @@ impl ElementColumns {
 /// Callers skip reading the field list when it could not.
 pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
 	indexes.iter().any(|ix| {
-		matches!(ix.index, Index::Idx | Index::Uniq)
+		matches!(ix.index, Index::Idx | Index::Uniq | Index::Spatial)
 			&& ix.cols.iter().any(|c| {
 				c.0.iter().any(|p| matches!(p, Part::All))
 					|| !c.0.iter().any(|p| matches!(p, Part::Flatten))
@@ -1603,8 +2008,17 @@ pub(crate) async fn foreign_set_prefixes(
 		fields: std::collections::HashMap::new(),
 		definitions: std::collections::HashMap::new(),
 	};
-	for ix in indexes.iter().filter(|ix| matches!(ix.index, Index::Idx | Index::Uniq)) {
-		for col in &ix.cols {
+	for ix in indexes {
+		let cols: &[Idiom] = match ix.index {
+			Index::Idx | Index::Uniq => &ix.cols,
+			Index::Spatial if ix.cols.len() > 1 => &ix.cols[..ix.cols.len() - 1],
+			Index::Hnsw(_)
+			| Index::FullText(_)
+			| Index::Count(_)
+			| Index::DiskAnn(_)
+			| Index::Spatial => continue,
+		};
+		for col in cols {
 			for (i, part) in col.0.iter().enumerate() {
 				let prefix = &col.0[..i];
 				if !matches!(part, Part::All)
@@ -2136,6 +2550,9 @@ pub(crate) fn scan_ordering(
 	let mut ordering: Vec<SortProperty> = free
 		.clone()
 		.map_while(|(at, col)| {
+			if matches!(ix_def.index, Index::Spatial) && at + 1 == ix_def.cols.len() {
+				return None;
+			}
 			if index_ref.may_hold_array(at) {
 				return None;
 			}
@@ -2445,6 +2862,13 @@ pub(crate) fn decide_access(
 				.filter(|c| c.outranks_key_range(pinned, delivers, has_limit))
 				.collect();
 			if outranking.is_empty() {
+				if !(has_limit && delivers)
+					&& let Some((spatial_path, _, spatial_pinned)) =
+						analyzer.try_spatial_expansion_scored(analysis_cond, direction)
+					&& spatial_pinned > pinned
+				{
+					return Ok(Some((spatial_path, direction)));
+				}
 				return Ok(Some(key_range_path(access)));
 			}
 			outranking
@@ -2540,13 +2964,62 @@ pub(crate) fn decide_access(
 		if let Some(path) = analyzer.try_containment_expansion(analysis_cond, direction) {
 			return Ok(Some((path, direction)));
 		}
+		// Try expanding spatial geometry predicates (INSIDE / CONTAINS / INTERSECTS /
+		// geo::distance) into union of Hilbert cell range scans on a SPATIAL index
+		if let Some(path) = analyzer.try_spatial_expansion(analysis_cond, direction) {
+			return Ok(Some((path, direction)));
+		}
 		return Ok(Some((AccessPath::TableScan, direction)));
 	}
 
+	// If a `WITH INDEX` hint names a `SPATIAL` index before any matched candidate in
+	// `candidates` (and no KNN operator requires driving from its ANN scan), honor the
+	// spatial index hint if `try_spatial_expansion` can satisfy a WHERE conjunct on it.
+	if let Some(With::Index(names)) = with
+		&& !candidates.iter().any(|c| matches!(c.access, BTreeAccess::Knn { .. }))
+	{
+		let best_candidate_hint_pos = candidates
+			.iter()
+			.filter_map(|c| names.iter().position(|n| n.as_str() == c.index_ref.name.as_str()))
+			.min()
+			.unwrap_or(usize::MAX);
+		let best_spatial_hint_pos = analyzer
+			.indexes
+			.iter()
+			.filter(|ix| {
+				!ix.prepare_remove
+					&& matches!(ix.index, Index::Spatial)
+					&& crate::catalog::uses_current_spatial_covering(ix.format_version)
+			})
+			.filter_map(|ix| names.iter().position(|n| n.as_str() == ix.name.as_str()))
+			.min()
+			.unwrap_or(usize::MAX);
+		if best_spatial_hint_pos < best_candidate_hint_pos
+			&& let Some(spatial_path) = analyzer.try_spatial_expansion(analysis_cond, direction)
+		{
+			return Ok(Some((spatial_path, direction)));
+		}
+	}
+
 	// Rank of the best single-index driver, captured before `select_access_path_paged` consumes
-	// `candidates`. Used below to decide whether a nested-OR multi-index union would be a better
-	// driver.
+	// `candidates`. Used below to decide whether a nested-OR multi-index union or a 2D spatial
+	// index expansion would be a better driver.
 	let best_single_score = candidates.iter().map(|c| c.rank(has_limit)).max().unwrap_or(0);
+
+	// A 2D spatial covering bounds both longitude and latitude simultaneously (effective score
+	// 210–350 for single-column depending on spherical surface-area fraction, or 500 + 50 *
+	// prefix_len for a compound spatial index with pinned equality prefix columns), which for
+	// selective regions outranks an un-ordered 1D B-tree range scan (200 half-bounded, 300 bounded)
+	// or a single-column equality on a prefix column alone (500).
+	if with.is_none()
+		&& !order_covered
+		&& !candidates.iter().any(|c| matches!(c.access, BTreeAccess::Knn { .. }))
+		&& let Some((spatial_path, spatial_score, _)) =
+			analyzer.try_spatial_expansion_scored(analysis_cond, direction)
+		&& spatial_score > best_single_score
+	{
+		return Ok(Some((spatial_path, direction)));
+	}
 
 	let path = select_access_path_paged(candidates, with, direction, has_limit);
 
@@ -2587,6 +3060,11 @@ pub(crate) fn decide_access(
 	// trailing ORDER BY column's sort order and dedupes rows that match multiple branches.
 	if path.is_full_range_scan()
 		&& let Some(union_path) = analyzer.try_containment_expansion(analysis_cond, direction)
+	{
+		return Ok(Some((union_path, direction)));
+	}
+	if path.is_full_range_scan()
+		&& let Some(union_path) = analyzer.try_spatial_expansion(analysis_cond, direction)
 	{
 		return Ok(Some((union_path, direction)));
 	}
@@ -2762,5 +3240,111 @@ mod range_comparison_tests {
 		}
 		assert!(range_matches_comparison(&index, &below(Value::from("p"))));
 		assert!(range_matches_comparison(&index, &BTreeAccess::literal_equality(Value::from("a"))));
+	}
+
+	#[test]
+	fn spatial_element_columns_preserve_sets_and_track_point_only_shapes() {
+		use std::sync::Arc;
+
+		use surrealdb_datastore::index_shapes::IndexShapes;
+
+		use super::{TableIndexShapes, ValueShape, with_array_columns_as_elements};
+		use crate::catalog::FieldDefinition;
+		use crate::expr::kind::GeometryKind;
+		use crate::expr::{Kind, Part};
+
+		let make_field = |name: &str, kind: Option<Kind>| FieldDefinition {
+			name: Idiom::from_str(name).expect("valid idiom"),
+			field_kind: kind,
+			..Default::default()
+		};
+
+		let spatial_ix = IndexDefinition {
+			index_id: IndexId(1),
+			name: "idx_spatial".into(),
+			table_name: "t".into(),
+			cols: vec![
+				Idiom::from_str("tags.*").expect("valid idiom"),
+				Idiom::from_str("foreign.*").expect("valid idiom"),
+				Idiom::from_str("pts").expect("valid idiom"),
+			],
+			index: Index::Spatial,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			nulls_not_distinct: false,
+			format_version: INDEX_FORMAT_VERSION,
+		};
+		let indexes: Arc<[IndexDefinition]> = Arc::from([spatial_ix]);
+		let fields_point = vec![
+			make_field("tags", Some(Kind::Set(Box::new(Kind::String), None))),
+			make_field("pts", Some(Kind::Geometry(vec![GeometryKind::Point]))),
+		];
+
+		// 1. Without tracked `TableIndexShapes`, `DEFINE FIELD pts TYPE geometry<point>` alone must
+		//    NOT enable `point_only_spatial` (pre-existing records before `DEFINE FIELD` could hold
+		//    polygons or multipoints).
+		let untracked_shapes = TableIndexShapes::default();
+		let elem_untracked =
+			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &untracked_shapes);
+		assert!(elem_untracked.point_only_spatial.is_none());
+
+		// 2. When `TableIndexShapes` is tracked and column 2 (`pts`) has only recorded
+		//    `ValueShape::Whole` (single in-bounds points), `point_only_spatial` is `Some([true])`,
+		//    and `withholding_sets_at` preserves `tags.*` (set) while adding `foreign.*`.
+		let point_only_shapes = TableIndexShapes::new([(
+			IndexId(1),
+			Arc::new(IndexShapes::new(true, vec![0, 0, ValueShape::Whole.bit()], Vec::new())),
+		)]);
+		let elem_cols =
+			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &point_only_shapes)
+				.withholding_sets_at(&[vec![Part::Field("foreign".into())]]);
+		assert_eq!(elem_cols.point_only_spatial.as_deref(), Some(&[true][..]));
+		let sets = elem_cols.sets.as_ref().expect("sets should be populated");
+		assert_eq!(sets[0].as_ref(), &[true, true, false]);
+
+		// 3. Once column 2 records `ValueShape::MultiCell` (e.g. a Polygon, MultiPoint, or
+		//    out-of-bounds Point) or `ValueShape::Array` (an array/set of geometries),
+		//    `point_only_spatial` is disabled.
+		let multicell_shapes = TableIndexShapes::new([(
+			IndexId(1),
+			Arc::new(IndexShapes::new(
+				true,
+				vec![0, 0, ValueShape::Whole.bit() | ValueShape::MultiCell.bit()],
+				Vec::new(),
+			)),
+		)]);
+		let elem_multicell =
+			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &multicell_shapes);
+		assert!(elem_multicell.point_only_spatial.is_none());
+
+		let mixed_shapes = TableIndexShapes::new([(
+			IndexId(1),
+			Arc::new(IndexShapes::new(
+				true,
+				vec![0, 0, ValueShape::Whole.bit() | ValueShape::Array.bit()],
+				Vec::new(),
+			)),
+		)]);
+		let elem_mixed =
+			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &mixed_shapes);
+		assert!(elem_mixed.point_only_spatial.is_none());
+
+		// 4. When column 2 records `ValueShape::NonGeometry` alongside `ValueShape::Whole`,
+		//    `point_only_spatial` remains `Some([true])` (for `INSIDE` / `INTERSECTS`), while
+		//    `non_geometry_spatial` is `Some([true])` so `geo::distance` (`Cap`) declines index
+		//    pushdown and preserves table-scan type errors on non-geometry rows.
+		let non_geom_shapes = TableIndexShapes::new([(
+			IndexId(1),
+			Arc::new(IndexShapes::new(
+				true,
+				vec![0, 0, ValueShape::Whole.bit() | ValueShape::NonGeometry.bit()],
+				Vec::new(),
+			)),
+		)]);
+		let elem_non_geom =
+			with_array_columns_as_elements(Arc::clone(&indexes), &fields_point, &non_geom_shapes);
+		assert_eq!(elem_non_geom.point_only_spatial.as_deref(), Some(&[true][..]));
+		assert_eq!(elem_non_geom.non_geometry_spatial.as_deref(), Some(&[true][..]));
 	}
 }

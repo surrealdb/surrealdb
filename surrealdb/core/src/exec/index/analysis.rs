@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, BoundOperand, IndexRef, KnnPrefilterPlan, OperandRange,
-	number_keyed_as_compared, select_access_path,
+	SpatialPointFilter, number_keyed_as_compared, select_access_path,
 };
 use crate::catalog::{Index, IndexDefinition, KeyStructure, spells_normalised_decimal_keys};
 use crate::exec::planner::util::{
@@ -55,7 +55,30 @@ pub struct IndexAnalyzer<'a> {
 	/// caller denied the function is never offered the bound: its comparison
 	/// stays a filter, which raises the denial when it is evaluated.
 	clock_allowed: bool,
+	/// Per index of `indexes`, whether a `SPATIAL` index column is known from
+	/// recorded [`super::super::datastore::index_shapes::TableIndexShapes`] to
+	/// have stored only single-cell point geometries (no multi-cell covering
+	/// recorded under [`super::super::datastore::index_shapes::ValueShape::MultiCell`]
+	/// and no array recorded under [`super::super::datastore::index_shapes::ValueShape::Array`]),
+	/// allowing query coverings to omit coarse ancestor probes.
+	point_only_spatial: Option<Arc<[bool]>>,
+	/// Per index of `indexes`, whether a `SPATIAL` index column may hold
+	/// non-geometry values (including `NONE` and `NULL`, recorded under
+	/// [`super::super::datastore::index_shapes::ValueShape::NonGeometry`]),
+	/// which emit no spatial index cells and would cause `geo::distance` to
+	/// raise a type error on a table scan.
+	non_geometry_spatial: Option<Arc<[bool]>>,
+	/// Memoized Hilbert cell coverings and spherical area fractions computed
+	/// during this analyzer's lifetime, keyed by a 64-bit hash of
+	/// `(predicate, include_ancestors, max_ops)` and verified by equality on
+	/// lookup so repeated planner entry points (`try_bitmap_count_fusion`,
+	/// `try_bitmap_fusion`, `try_spatial_expansion`) do not recompute coverings
+	/// or linearly compare large geometries.
+	spatial_plan_cache: std::cell::RefCell<HashMap<u64, SpatialPlanCacheBucket>>,
 }
+
+type SpatialPlanCacheBucket =
+	Vec<(SpatialPredicate, bool, usize, Arc<[surrealdb_idx::spatial::SpatialScanOp]>, f64)>;
 
 /// The query vectors of the KNN operators whose right operand is a parameter,
 /// by parameter name. Binding leaves such a parameter in place instead of
@@ -79,7 +102,39 @@ impl<'a> IndexAnalyzer<'a> {
 			registry,
 			key: None,
 			clock_allowed: false,
+			point_only_spatial: None,
+			non_geometry_spatial: None,
+			spatial_plan_cache: std::cell::RefCell::new(HashMap::new()),
 		}
+	}
+
+	/// Mark the `SPATIAL` indexes that `flags` indicates hold only single-cell
+	/// point geometries (no coarse cell coverings recorded) so query coverings
+	/// skip coarse ancestor probes.
+	pub fn with_point_only_spatial(mut self, flags: Arc<[bool]>) -> Self {
+		self.point_only_spatial = Some(flags);
+		self
+	}
+
+	fn is_point_only_spatial(&self, idx: usize) -> bool {
+		self.point_only_spatial.as_ref().and_then(|flags| flags.get(idx)).copied().unwrap_or(false)
+	}
+
+	/// Mark the `SPATIAL` indexes that `flags` indicates may hold non-geometry
+	/// values (including `NONE` and `NULL`, recorded under
+	/// `ValueShape::NonGeometry`) so `geo::distance` (`Cap`) declines index
+	/// pushdown and preserves table-scan type errors.
+	pub fn with_non_geometry_spatial(mut self, flags: Arc<[bool]>) -> Self {
+		self.non_geometry_spatial = Some(flags);
+		self
+	}
+
+	fn has_non_geometry_spatial(&self, idx: usize) -> bool {
+		self.non_geometry_spatial
+			.as_ref()
+			.and_then(|flags| flags.get(idx))
+			.copied()
+			.unwrap_or(false)
 	}
 
 	/// Accept a comparison against `time::now()`, or `time::now() ± <duration
@@ -318,16 +373,49 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 
+		// Share the scan-op budget across OR branches so multi-branch spatial ORs coarsen
+		// per branch instead of hitting a cliff when the sum of uncoarsened branches exceeds
+		// `MAX_SPATIAL_SCAN_OPS`.
+		let per_branch_spatial_max_ops =
+			(surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS / branches.len()).max(1);
+
 		// Analyze each branch independently
 		let mut branch_paths = Vec::with_capacity(branches.len());
 		let mut min_score = u32::MAX;
+		let mut total_spatial_area = 0.0_f64;
 		for branch_expr in branches {
 			let candidates = self.analyze(Some(branch_expr), None);
+			let branch_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
+			if let Some((
+				AccessPath::Union {
+					paths,
+					..
+				},
+				spatial_score,
+				branch_area,
+				pinned_cols,
+			)) = self.try_spatial_expansion_for_or_branch(
+				Some(branch_expr),
+				direction,
+				per_branch_spatial_max_ops,
+			) && spatial_score > branch_score
+			{
+				if branch_paths.len() + paths.len() > surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS {
+					return None;
+				}
+				branch_paths.extend(paths);
+				if pinned_cols == 0 {
+					total_spatial_area = (total_spatial_area + branch_area).clamp(0.0, 1.0);
+					min_score = min_score.min(Self::single_spatial_score(total_spatial_area));
+				} else {
+					min_score = min_score.min(spatial_score);
+				}
+				continue;
+			}
 			if candidates.is_empty() {
 				// This branch has no index — cannot use union
 				return None;
 			}
-			let branch_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
 			let path = select_access_path(candidates, self.with_hints, direction);
 			match path {
 				AccessPath::TableScan => {
@@ -531,6 +619,7 @@ impl<'a> IndexAnalyzer<'a> {
 		leaves.sort_by_key(|c| std::cmp::Reverse(c.score()));
 
 		let mut and_children: Vec<BitmapPlan> = Vec::new();
+		let mut and_children_cols: Vec<Vec<Idiom>> = Vec::new();
 		let mut covered: Vec<Idiom> = Vec::new();
 		let mut anchor_at_most_one_row = false;
 		for c in leaves {
@@ -541,12 +630,13 @@ impl<'a> IndexAnalyzer<'a> {
 				// prefix): another intersection cannot narrow the result.
 				continue;
 			}
-			covered.extend(cols);
+			covered.extend(cols.clone());
 			if let Some(leaf) = Self::bitmap_leaf_from_candidate(c) {
 				if and_children.is_empty() {
 					anchor_at_most_one_row = Self::candidate_returns_at_most_one_row(c);
 				}
 				and_children.push(leaf);
+				and_children_cols.push(cols);
 			}
 		}
 
@@ -578,6 +668,37 @@ impl<'a> IndexAnalyzer<'a> {
 				&& let Some(node) = Self::bitmap_plan_from_access_path(&path)
 			{
 				and_children.push(node);
+				and_children_cols.push(Vec::new());
+			}
+		}
+
+		// Spatial conjuncts become union members when every branch is independently
+		// bitmap-capable. Skip when a unique index already pins at most one row.
+		if !anchor_at_most_one_row {
+			for (path, _, _, mut cols) in
+				self.spatial_expansions_in_context(Some(cond), Some(cond), Direction::Forward)
+			{
+				cols.pop();
+				if let Some(node) = Self::bitmap_plan_from_access_path(&path) {
+					if !cols.is_empty() {
+						// Drop any non-unique single/compound B-tree leaf whose pinned columns are
+						// already pinned by this compound spatial index's equality prefix.
+						let mut i = 0;
+						while i < and_children_cols.len() {
+							let leaf_cols = &and_children_cols[i];
+							if !leaf_cols.is_empty()
+								&& leaf_cols.iter().all(|col| cols.contains(col))
+							{
+								and_children.remove(i);
+								and_children_cols.remove(i);
+							} else {
+								i += 1;
+							}
+						}
+					}
+					and_children.push(node);
+					and_children_cols.push(Vec::new());
+				}
 			}
 		}
 
@@ -1073,8 +1194,10 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Unlike [`Self::try_bitmap_fusion`] there is no residual filter to
 	/// correct any approximation, so *every* conjunct must be exactly
 	/// represented by its branch bitmap (see [`Self::bitmap_exact_plan`]);
-	/// a single non-qualifying conjunct disqualifies the plan. Single-conjunct
-	/// WHERE clauses are left to the existing single-index key-only count.
+	/// a single non-qualifying conjunct disqualifies the plan. A single-conjunct
+	/// WHERE clause is admitted only when it is an exact point-only spatial
+	/// predicate ([`Self::try_spatial_exact_bitmap_plan`]); all other
+	/// single-conjunct WHERE clauses are left to the single-index key-only count.
 	pub(crate) fn try_bitmap_count_fusion(
 		&self,
 		cond: &LogicalExpr,
@@ -1089,15 +1212,24 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut conjuncts = Vec::new();
 		Self::flatten_and(cond, &mut conjuncts);
 		if conjuncts.len() < 2 {
+			if conjuncts.len() == 1 && Self::as_negated_expr(conjuncts[0]).is_none() {
+				return self.try_spatial_exact_bitmap_plan(conjuncts[0], None);
+			}
 			return None;
 		}
 		let mut positives: Vec<BitmapPlan> = Vec::new();
 		let mut nots: Vec<BitmapPlan> = Vec::new();
 		for conjunct in conjuncts {
 			if let Some(inner) = Self::as_negated_expr(conjunct) {
-				nots.push(self.bitmap_exact_plan(inner, exact_col)?);
+				nots.push(
+					self.bitmap_exact_plan(inner, exact_col)
+						.or_else(|| self.try_spatial_exact_bitmap_plan(inner, None))?,
+				);
 			} else {
-				positives.push(self.bitmap_exact_plan(conjunct, exact_col)?);
+				positives.push(
+					self.bitmap_exact_plan(conjunct, exact_col)
+						.or_else(|| self.try_spatial_exact_bitmap_plan(conjunct, None))?,
+				);
 			}
 		}
 		// A subtraction needs a positive base; `NOT`-only clauses would need
@@ -1171,6 +1303,51 @@ impl<'a> IndexAnalyzer<'a> {
 						.all(|col| exact_col(&c.index_ref, col))
 			}
 		})
+	}
+
+	/// Build an exact bitmap plan for a spatial predicate when the target `SPATIAL`
+	/// index is point-only and every cell range carries an inline [`SpatialPointFilter`].
+	fn try_spatial_exact_bitmap_plan(
+		&self,
+		inner: &LogicalExpr,
+		context_cond: Option<&LogicalExpr>,
+	) -> Option<BitmapPlan> {
+		if !matches!(
+			inner,
+			LogicalExpr::Binary {
+				op,
+				..
+			} if !matches!(op, BinaryOperator::And | BinaryOperator::Or)
+		) {
+			return None;
+		}
+		let (path, _, _) =
+			self.try_spatial_expansion_in_context(Some(inner), context_cond, Direction::Forward)?;
+		let AccessPath::Union {
+			paths,
+			dedupe: false,
+		} = &path
+		else {
+			return None;
+		};
+		if paths.is_empty()
+			|| !paths.iter().all(|p| {
+				matches!(
+					p,
+					AccessPath::BTreeScan {
+						access: BTreeAccess::Range {
+							range: OperandRange {
+								point_filter: Some(_),
+								..
+							},
+						},
+						..
+					}
+				)
+			}) {
+			return None;
+		}
+		Self::bitmap_plan_from_access_path(&path)
 	}
 
 	/// Whether every value `access` seeks by equality over `index` is one
@@ -1266,7 +1443,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// `[1, 2] > 'blue'`, while an empty array is stored under one key below
 	/// every string and `[1, 2]` under its numbers — and a containment by a
 	/// string holding the sought one as a substring, stored whole.
-	fn bitmap_superset_plan(&self, inner: &LogicalExpr) -> Option<BitmapPlan> {
+	fn bitmap_superset_plan(
+		&self,
+		inner: &LogicalExpr,
+		context_cond: Option<&LogicalExpr>,
+	) -> Option<BitmapPlan> {
 		if let LogicalExpr::Binary {
 			op: BinaryOperator::Or,
 			..
@@ -1276,7 +1457,7 @@ impl<'a> IndexAnalyzer<'a> {
 			Self::flatten_or(inner, &mut branches);
 			let children = branches
 				.into_iter()
-				.map(|branch| self.bitmap_superset_plan(branch))
+				.map(|branch| self.bitmap_superset_plan(branch, context_cond))
 				.collect::<Option<Vec<_>>>()?;
 			Some(BitmapPlan::Or(children))
 		} else if let LogicalExpr::Binary {
@@ -1318,6 +1499,15 @@ impl<'a> IndexAnalyzer<'a> {
 						.is_some_and(|value| Self::key_equality_covers(value, normalised))
 				}) && pinned_plain()
 			})
+		} else if matches!(
+			inner,
+			LogicalExpr::Binary {
+				op,
+				..
+			} if !matches!(op, BinaryOperator::And | BinaryOperator::Or)
+		) {
+			self.try_spatial_expansion_in_context(Some(inner), context_cond, Direction::Forward)
+				.and_then(|(path, _, _)| Self::bitmap_plan_from_access_path(&path))
 		} else {
 			None
 		}
@@ -1410,10 +1600,13 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			} else if Self::as_negated_expr(conjunct).is_some() {
 				residual.push(conjunct);
-			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
+			} else if let Some(leaf) = self
+				.bitmap_exact_plan(conjunct, exact_col)
+				.or_else(|| self.try_spatial_exact_bitmap_plan(conjunct, Some(stripped)))
+			{
 				covered.push(leaf);
 				covered_at.push(at);
-			} else if let Some(leaf) = self.bitmap_superset_plan(conjunct) {
+			} else if let Some(leaf) = self.bitmap_superset_plan(conjunct, Some(stripped)) {
 				covered.push(leaf);
 				residual.push(conjunct);
 			} else {
@@ -1717,6 +1910,743 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 	}
 
+	/// Base selectivity score for a single-column `SPATIAL` index covering.
+	///
+	/// Without table statistics, [`Self::SCORE_SPATIAL_SINGLE`] (`350`) is scaled down by up to
+	/// [`Self::MAX_SPATIAL_SCORE_PENALTY`] (`140`, reaching `210` at
+	/// [`Self::SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION`]) and then by up to an additional
+	/// [`Self::MAX_WIDE_SPATIAL_SCORE_PENALTY`] (`100`, reaching `110` at `100%` of Earth's
+	/// surface) according to the query predicate's spherical surface-area fraction so that:
+	/// - a selective spatial predicate (`< 0.35%` of Earth) outranks a 1-D bounded B-tree range
+	///   (`300`);
+	/// - a regional spatial predicate (`~0.35%..=1%` of Earth) ranks between a bounded B-tree range
+	///   (`300`) and a half-bounded B-tree range (`200`);
+	/// - a wide continental or global spatial covering (`>= 2%` of Earth) drops below a
+	///   half-bounded B-tree range (`200`), so a selective `n > ...` B-tree range is preferred over
+	///   scanning a continental/global spatial covering.
+	const SCORE_SPATIAL_SINGLE: u32 = 350;
+	/// Linear score reduction applied up to [`Self::SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION`]
+	/// (`350 - 140 = 210` at `1%` of Earth's surface).
+	const MAX_SPATIAL_SCORE_PENALTY: u32 = 140;
+	/// Additional logarithmic score reduction applied between `1%` and `100%` of Earth's surface
+	/// (`210 - 100 = 110` at `100%`).
+	const MAX_WIDE_SPATIAL_SCORE_PENALTY: u32 = 100;
+	/// Spherical surface-area fraction (`0.0..=1.0`, `1%` of Earth's surface) at which the fine
+	/// linear penalty saturates and the wide logarithmic penalty begins.
+	const SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION: f64 = 0.01;
+	/// Base selectivity score for a compound `SPATIAL` index whose equality prefix is matched.
+	const SCORE_SPATIAL_COMPOUND_BASE: u32 = 500;
+	/// Per-column score bonus for each matched equality prefix column on a compound `SPATIAL`
+	/// index.
+	const SCORE_COMPOUND_PREFIX_COL_BONUS: u32 = 50;
+	/// Maximum number of equality prefix columns that contribute to the compound score bonus.
+	const MAX_COMPOUND_PREFIX_BONUS_COLS: u32 = 6;
+
+	fn single_spatial_score(area_fraction: f64) -> u32 {
+		let f = area_fraction.clamp(0.0, 1.0);
+		let fine_penalty = (f / Self::SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION).min(1.0)
+			* (Self::MAX_SPATIAL_SCORE_PENALTY as f64);
+		let wide_penalty = if f > Self::SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION {
+			((f / Self::SPATIAL_SCORE_PENALTY_MAX_AREA_FRACTION).log10() / 2.0).clamp(0.0, 1.0)
+				* (Self::MAX_WIDE_SPATIAL_SCORE_PENALTY as f64)
+		} else {
+			0.0
+		};
+		Self::SCORE_SPATIAL_SINGLE.saturating_sub((fine_penalty + wide_penalty).round() as u32)
+	}
+
+	fn plan_spatial_scans(
+		&self,
+		predicate: &SpatialPredicate,
+		include_ancestors: bool,
+		max_ops: usize,
+	) -> (Arc<[surrealdb_idx::spatial::SpatialScanOp]>, f64) {
+		let key = predicate.cache_key(include_ancestors, max_ops);
+		if let Some(hit) = self.spatial_plan_cache.borrow().get(&key).and_then(|entries| {
+			entries.iter().find(|(p, inc, cap, _, _)| {
+				*inc == include_ancestors && *cap == max_ops && p == predicate
+			})
+		}) {
+			return (Arc::clone(&hit.3), hit.4);
+		}
+		let (ops_vec, area_frac) = predicate.plan_scans_and_area(include_ancestors, max_ops);
+		let ops: Arc<[surrealdb_idx::spatial::SpatialScanOp]> = ops_vec.into();
+		self.spatial_plan_cache.borrow_mut().entry(key).or_default().push((
+			predicate.clone(),
+			include_ancestors,
+			max_ops,
+			Arc::clone(&ops),
+			area_frac,
+		));
+		(ops, area_frac)
+	}
+
+	/// Try to expand spatial geometry predicates (`INSIDE`, `CONTAINS`, `INTERSECTS`,
+	/// `CONTAINSANY`, `CONTAINSALL`, `ANYINSIDE`, `ALLINSIDE`, and `geo::distance(field, pt) < r`)
+	/// into an `AccessPath::Union` of Hilbert cell B-Tree range/equality scans on a `SPATIAL`
+	/// index.
+	///
+	/// Because cell coverings are a superset of the true geometric intersection, the original
+	/// `WHERE` predicate remains active as the exact post-filter unless `AnsweredByUnion` proves
+	/// the union is a point-only disjoint covering where every branch carries an exact inline
+	/// [`SpatialPointFilter`].
+	pub fn try_spatial_expansion(
+		&self,
+		cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Option<AccessPath> {
+		self.try_spatial_expansion_scored(cond, direction).map(|(path, _, _)| path)
+	}
+
+	/// Expand a spatial geometry predicate into an `AccessPath::Union` of Hilbert cell B-Tree
+	/// scans alongside its selectivity score and number of equality-pinned prefix columns:
+	/// - `110..=350` ([`Self::SCORE_SPATIAL_SINGLE`] scaled down by spherical surface-area
+	///   fraction) for a single-column `SPATIAL` index (`prefix_len == 0`)
+	/// - `500 + 50 * min(prefix_len, 6)` for a compound `SPATIAL` index whose leading equality
+	///   prefix columns are all pinned by `cond`.
+	///
+	/// When multiple `SPATIAL` indexes or multiple spatial predicates in an `AND` tree match,
+	/// selects the highest-scoring candidate (tie-breaking by fewest `scan_ops`, then catalog
+	/// index order).
+	pub fn try_spatial_expansion_scored(
+		&self,
+		cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Option<(AccessPath, u32, usize)> {
+		self.try_spatial_expansion_in_context(cond, cond, direction)
+			.map(|(path, score, cols)| (path, score, cols.len().saturating_sub(1)))
+	}
+
+	fn try_spatial_expansion_for_or_branch(
+		&self,
+		cond: Option<&LogicalExpr>,
+		direction: Direction,
+		max_ops: usize,
+	) -> Option<(AccessPath, u32, f64, usize)> {
+		self.spatial_expansions_in_context_with_max_ops(cond, cond, direction, max_ops, true)
+			.into_iter()
+			.next()
+			.map(|(path, score, area, cols)| (path, score, area, cols.len().saturating_sub(1)))
+	}
+
+	fn try_spatial_expansion_in_context(
+		&self,
+		expr: Option<&LogicalExpr>,
+		context_cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Option<(AccessPath, u32, Vec<Idiom>)> {
+		self.spatial_expansions_in_context(expr, context_cond, direction)
+			.into_iter()
+			.next()
+			.map(|(path, score, _, cols)| (path, score, cols))
+	}
+
+	/// Collect the best spatial expansion per distinct indexed geometry column in `expr`,
+	/// ordered from highest-scoring / tightest covering to lowest.
+	fn spatial_expansions_in_context(
+		&self,
+		expr: Option<&LogicalExpr>,
+		context_cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Vec<(AccessPath, u32, f64, Vec<Idiom>)> {
+		self.spatial_expansions_in_context_with_max_ops(
+			expr,
+			context_cond,
+			direction,
+			surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS,
+			false,
+		)
+	}
+
+	fn spatial_expansions_in_context_with_max_ops(
+		&self,
+		expr: Option<&LogicalExpr>,
+		context_cond: Option<&LogicalExpr>,
+		direction: Direction,
+		max_ops: usize,
+		for_or_branch: bool,
+	) -> Vec<(AccessPath, u32, f64, Vec<Idiom>)> {
+		let Some(expr) = expr else {
+			return Vec::new();
+		};
+
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return Vec::new();
+		}
+
+		if !self.indexes.iter().any(|ix| {
+			!ix.prepare_remove
+				&& matches!(ix.index, crate::catalog::Index::Spatial)
+				&& crate::catalog::uses_current_spatial_covering(ix.format_version)
+		}) {
+			return Vec::new();
+		}
+
+		let mut exprs = Vec::new();
+		Self::collect_spatial_expressions(expr, &mut exprs);
+		if exprs.is_empty() {
+			return Vec::new();
+		}
+
+		let mut simple_conds = Vec::new();
+		self.collect_conditions(expr, &mut simple_conds);
+		if let Some(ctx) = context_cond
+			&& !std::ptr::eq(ctx, expr)
+		{
+			self.collect_conditions(ctx, &mut simple_conds);
+		}
+
+		struct BestSpatialMatch {
+			idx: usize,
+			prefix_values: Vec<BoundOperand>,
+			scan_ops: Arc<[surrealdb_idx::spatial::SpatialScanOp]>,
+			include_ancestors: bool,
+			point_filter: Option<Arc<SpatialPointFilter>>,
+			score: u32,
+			area_fraction: f64,
+		}
+
+		let mut best_per_geom_col: Vec<(Idiom, BestSpatialMatch)> = Vec::new();
+
+		for (path, predicate) in exprs {
+			for (idx, ix_def) in self.indexes.iter().enumerate() {
+				if ix_def.prepare_remove {
+					continue;
+				}
+				if !matches!(ix_def.index, crate::catalog::Index::Spatial) {
+					continue;
+				}
+				if !crate::catalog::uses_current_spatial_covering(ix_def.format_version) {
+					continue;
+				}
+				if let Some(With::Index(names)) = self.with_hints
+					&& !names.iter().any(|n| n.as_str() == ix_def.name.as_str())
+				{
+					continue;
+				}
+
+				let Some((geom_col, prefix_cols)) = ix_def.cols.split_last() else {
+					continue;
+				};
+				if !spatial_path_matches_column(&path, geom_col, self.key.as_deref()) {
+					continue;
+				}
+
+				let normalised = spells_normalised_decimal_keys(ix_def.format_version);
+				let mut prefix_values = Vec::with_capacity(prefix_cols.len());
+				let mut all_prefix_matched = true;
+				for (col_idx, col) in prefix_cols.iter().enumerate() {
+					let matching_eq = simple_conds.iter().find(|c| {
+						path_matches_column(&c.path, col, self.key.as_deref())
+							&& matches!(c.op, BinaryOperator::Equal | BinaryOperator::ExactEqual)
+							&& c.value
+								.as_literal()
+								.is_none_or(|v| Self::key_equality_covers(v, normalised))
+					});
+					let matching_containment = if matching_eq.is_none() {
+						simple_conds.iter().find(|c| {
+							matches!(
+								(&c.op, c.position),
+								(BinaryOperator::Contain, IdiomPosition::Left)
+									| (BinaryOperator::Inside, IdiomPosition::Right)
+							) && self.seeks_containment(idx, col_idx, &c.path)
+								&& c.value
+									.as_literal()
+									.is_none_or(|v| Self::key_equality_covers(v, normalised))
+						})
+					} else {
+						None
+					};
+					if let Some(c) = matching_eq.or(matching_containment) {
+						prefix_values.push(c.value.clone());
+					} else {
+						all_prefix_matched = false;
+						break;
+					}
+				}
+				if !all_prefix_matched {
+					continue;
+				}
+
+				let include_ancestors = !self.is_point_only_spatial(idx);
+				// `geo::distance(field, pt) < r` returns `NONE` (`NONE < r` is `true` in SurrealQL)
+				// for non-point geometries (`Polygon`, `Line`, etc.), which may lie outside the
+				// spherical cap around `pt`, and raises a runtime type error on non-geometry
+				// values (`NONE`, `NULL`, strings, numbers, non-finite points), which emit no
+				// spatial index entries. Only expand `SpatialPredicate::Cap` when the index is
+				// known to store only single-cell point geometries (`!include_ancestors`) and no
+				// non-geometry values (`!self.has_non_geometry_spatial(idx)`).
+				if (include_ancestors || self.has_non_geometry_spatial(idx))
+					&& matches!(predicate, SpatialPredicate::Cap { .. })
+				{
+					continue;
+				}
+				let (scan_ops, area_fraction) =
+					self.plan_spatial_scans(&predicate, include_ancestors, max_ops);
+				if scan_ops.is_empty() {
+					continue;
+				}
+				if for_or_branch
+					&& include_ancestors
+					&& scan_ops
+						.iter()
+						.copied()
+						.any(surrealdb_idx::spatial::SpatialScanOp::covers_root)
+				{
+					continue;
+				}
+				let point_filter = if !include_ancestors
+					&& prefix_values.is_empty()
+					&& path_matches_column(&path, geom_col, self.key.as_deref())
+				{
+					predicate.to_point_filter(geom_col.clone()).map(Arc::new)
+				} else {
+					None
+				};
+
+				let score = if prefix_values.is_empty() {
+					Self::single_spatial_score(area_fraction)
+				} else {
+					let len =
+						(prefix_values.len() as u32).min(Self::MAX_COMPOUND_PREFIX_BONUS_COLS);
+					Self::SCORE_SPATIAL_COMPOUND_BASE + len * Self::SCORE_COMPOUND_PREFIX_COL_BONUS
+				};
+
+				let candidate = BestSpatialMatch {
+					idx,
+					prefix_values,
+					scan_ops,
+					include_ancestors,
+					point_filter,
+					score,
+					area_fraction,
+				};
+
+				if let Some((_, prev)) =
+					best_per_geom_col.iter_mut().find(|(col, _)| col == geom_col)
+				{
+					let is_better = (
+						candidate.score,
+						std::cmp::Reverse(candidate.scan_ops.len()),
+						std::cmp::Reverse(candidate.idx),
+					) > (
+						prev.score,
+						std::cmp::Reverse(prev.scan_ops.len()),
+						std::cmp::Reverse(prev.idx),
+					);
+					if is_better {
+						*prev = candidate;
+					}
+				} else {
+					best_per_geom_col.push((geom_col.clone(), candidate));
+				}
+			}
+		}
+
+		best_per_geom_col.sort_by(|(_, a), (_, b)| {
+			(b.score, a.scan_ops.len(), a.idx).cmp(&(a.score, b.scan_ops.len(), b.idx))
+		});
+
+		best_per_geom_col
+			.into_iter()
+			.map(|(_, winner)| {
+				let index_ref = self.index_ref(winner.idx);
+				let branch_direction = if winner
+					.scan_ops
+					.iter()
+					.all(|op| matches!(op, surrealdb_idx::spatial::SpatialScanOp::Exact(_)))
+				{
+					direction
+				} else {
+					Direction::Forward
+				};
+				let paths: Vec<AccessPath> = winner
+					.scan_ops
+					.iter()
+					.map(|op| {
+						let access = if winner.prefix_values.is_empty() {
+							match *op {
+								surrealdb_idx::spatial::SpatialScanOp::Exact(id) => {
+									BTreeAccess::literal_equality(Value::Number(
+										crate::val::Number::Int(id),
+									))
+								}
+								surrealdb_idx::spatial::SpatialScanOp::Range {
+									min,
+									max,
+								} => BTreeAccess::literal_range(Range {
+									start: Bound::Included(Value::Number(Number::Int(min))),
+									end: Bound::Included(Value::Number(Number::Int(max))),
+								})
+								.with_point_filter(winner.point_filter.clone()),
+							}
+						} else {
+							match *op {
+								surrealdb_idx::spatial::SpatialScanOp::Exact(id) => {
+									let mut prefix = winner.prefix_values.clone();
+									prefix.push(BoundOperand::Literal(Value::Number(Number::Int(
+										id,
+									))));
+									BTreeAccess::Compound {
+										prefix,
+										range: None,
+										upper: None,
+									}
+								}
+								surrealdb_idx::spatial::SpatialScanOp::Range {
+									min,
+									max,
+								} => BTreeAccess::Compound {
+									prefix: winner.prefix_values.clone(),
+									range: Some((
+										BinaryOperator::MoreThanEqual,
+										BoundOperand::Literal(Value::Number(Number::Int(min))),
+									)),
+									upper: Some((
+										BinaryOperator::LessThanEqual,
+										BoundOperand::Literal(Value::Number(Number::Int(max))),
+									)),
+								},
+							}
+						};
+						AccessPath::BTreeScan {
+							index_ref: index_ref.clone(),
+							access,
+							direction: branch_direction,
+						}
+					})
+					.collect();
+				(
+					AccessPath::Union {
+						paths,
+						dedupe: winner.include_ancestors,
+					},
+					winner.score,
+					winner.area_fraction,
+					self.indexes[winner.idx].cols.clone(),
+				)
+			})
+			.collect()
+	}
+
+	/// Collect spatial predicates on a geometry field path from an `AND` tree.
+	fn collect_spatial_expressions(
+		expr: &LogicalExpr,
+		results: &mut Vec<(LogicalExpr, SpatialPredicate)>,
+	) {
+		if let LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} = expr
+		{
+			if matches!(op, BinaryOperator::And) {
+				Self::collect_spatial_expressions(left, results);
+				Self::collect_spatial_expressions(right, results);
+			} else if matches!(
+				op,
+				BinaryOperator::Inside
+					| BinaryOperator::Contain
+					| BinaryOperator::Intersects
+					| BinaryOperator::ContainAny
+					| BinaryOperator::ContainAll
+					| BinaryOperator::AnyInside
+					| BinaryOperator::AllInside
+			) {
+				if left.is_path()
+					&& !matches!(op, BinaryOperator::AllInside)
+					&& let Some((geom, is_single_geom)) = Self::try_eval_literal_geometry(right)
+				{
+					if matches!(op, BinaryOperator::Intersects) && !is_single_geom {
+						return;
+					}
+					let pred = match (op, geom) {
+						(BinaryOperator::ContainAll, crate::val::Geometry::Collection(items))
+							if !items.is_empty() =>
+						{
+							SpatialPredicate::CollectionAll(items)
+						}
+						(BinaryOperator::Inside, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: is_single_geom.then_some(SpatialExactKind::Inside),
+						},
+						(BinaryOperator::Intersects, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: is_single_geom.then_some(SpatialExactKind::Intersects),
+						},
+						(_, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: None,
+						},
+					};
+					results.push((left.as_ref().clone(), pred));
+				} else if right.is_path()
+					&& !matches!(op, BinaryOperator::ContainAll)
+					&& let Some((geom, is_single_geom)) = Self::try_eval_literal_geometry(left)
+				{
+					if matches!(op, BinaryOperator::Intersects) && !is_single_geom {
+						return;
+					}
+					let pred = match (op, geom) {
+						(BinaryOperator::AllInside, crate::val::Geometry::Collection(items))
+							if !items.is_empty() =>
+						{
+							SpatialPredicate::CollectionAll(items)
+						}
+						(BinaryOperator::Contain, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: is_single_geom.then_some(SpatialExactKind::Inside),
+						},
+						(BinaryOperator::Intersects, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: is_single_geom.then_some(SpatialExactKind::Intersects),
+						},
+						(_, geom) => SpatialPredicate::Geometry {
+							geom,
+							exact_kind: None,
+						},
+					};
+					results.push((right.as_ref().clone(), pred));
+				}
+			} else if matches!(op, BinaryOperator::LessThan | BinaryOperator::LessThanEqual) {
+				if let Some((path, center @ crate::val::Geometry::Point(_), radius, inclusive)) =
+					Self::extract_geo_distance_radius(
+						left,
+						right,
+						matches!(op, BinaryOperator::LessThanEqual),
+					) {
+					results.push((
+						path,
+						SpatialPredicate::Cap {
+							center,
+							radius,
+							inclusive,
+						},
+					));
+				}
+			} else if matches!(op, BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual)
+				&& let Some((path, center @ crate::val::Geometry::Point(_), radius, inclusive)) =
+					Self::extract_geo_distance_radius(
+						right,
+						left,
+						matches!(op, BinaryOperator::MoreThanEqual),
+					) {
+				results.push((
+					path,
+					SpatialPredicate::Cap {
+						center,
+						radius,
+						inclusive,
+					},
+				));
+			}
+		} else if let LogicalExpr::Prefix {
+			op,
+			expr: inner,
+		} = expr && Self::is_truth_preserving_prefix(op, inner)
+		{
+			Self::collect_spatial_expressions(inner, results);
+		}
+	}
+
+	/// Whether applying `op` to `inner` preserves the boolean truth set and error
+	/// behavior of `inner` when evaluated as a `WHERE` filter condition:
+	/// - `<any> expr` (`PrefixOperator::Cast(Kind::Any)`) is always an identity cast;
+	/// - `<bool> expr` (`PrefixOperator::Cast(Kind::Bool)`) is an identity cast when `inner` is
+	///   statically guaranteed to produce a `Value::Bool` (`inner.checked_kind(&Schema::open()) ==
+	///   Some(Kind::Bool)`);
+	/// - all other prefix operators (`!`, `+`, `-`, `..`, `..=`, and casts to other kinds such as
+	///   `<string>`) can invert truthiness, convert `false` to a truthy non-empty `Value::String`
+	///   (`'false'`) or a falsy `Value::Range`, or raise a cast/type error.
+	fn is_truth_preserving_prefix(op: &PrefixOperator, inner: &LogicalExpr) -> bool {
+		match op {
+			PrefixOperator::Cast(crate::expr::Kind::Any) => true,
+			PrefixOperator::Cast(crate::expr::Kind::Bool) => {
+				inner.checked_kind(&crate::expr::logical::Schema::open())
+					== Some(crate::expr::Kind::Bool)
+			}
+			PrefixOperator::Not
+			| PrefixOperator::Positive
+			| PrefixOperator::Negate
+			| PrefixOperator::Range
+			| PrefixOperator::RangeInclusive
+			| PrefixOperator::Cast(_) => false,
+		}
+	}
+
+	/// Extract `(field_path, center_point, radius_meters, inclusive)` from
+	/// `geo::distance(field, point) < radius` or `<= radius`.
+	///
+	/// When `radius` is a [`crate::val::Number`] (`Decimal` or `Int`) that does not
+	/// round-trip losslessly to `f64`, normalizes `(radius, inclusive)` against the
+	/// exact [`crate::val::Number`] ordering (`(f_hi, false)` where
+	/// `Number::Float(f_hi.next_down()) < n < Number::Float(f_hi)`) so that
+	/// comparing the `f64` returned by `geo::distance` against `radius` in
+	/// [`SpatialPointFilter::Cap`] is 100% equivalent to `Number::cmp` and the
+	/// covering radius is conservatively rounded up (`f_hi >= n`).
+	fn extract_geo_distance_radius(
+		dist_expr: &LogicalExpr,
+		radius_expr: &LogicalExpr,
+		inclusive: bool,
+	) -> Option<(LogicalExpr, crate::val::Geometry, f64, bool)> {
+		let Value::Number(n) = index_literal(radius_expr)? else {
+			return None;
+		};
+		if n.is_nan() || n < crate::val::Number::Float(0.0) {
+			return None;
+		}
+		let mut radius = n.as_float();
+		if !radius.is_finite() || radius < 0.0 {
+			return None;
+		}
+		for _ in 0..8 {
+			if crate::val::Number::Float(radius) >= n {
+				break;
+			}
+			let next = radius.next_up();
+			if !next.is_finite() {
+				return None;
+			}
+			radius = next;
+		}
+		for _ in 0..8 {
+			if radius == 0.0 || crate::val::Number::Float(radius) <= n {
+				break;
+			}
+			let prev = radius.next_down();
+			if crate::val::Number::Float(prev) < n {
+				break;
+			}
+			radius = prev;
+		}
+		let inclusive = match crate::val::Number::Float(radius).cmp(&n) {
+			std::cmp::Ordering::Equal => inclusive,
+			std::cmp::Ordering::Greater
+				if radius > 0.0 && crate::val::Number::Float(radius.next_down()) < n =>
+			{
+				false
+			}
+			std::cmp::Ordering::Less | std::cmp::Ordering::Greater => return None,
+		};
+		if let LogicalExpr::Call(call) = dist_expr
+			&& let Function::Normal(name) = &call.receiver
+			&& name.eq_ignore_ascii_case("geo::distance")
+			&& call.args.len() == 2
+		{
+			if call.args[0].is_path()
+				&& let Some((geom @ crate::val::Geometry::Point(_), true)) =
+					Self::try_eval_literal_geometry(&call.args[1])
+			{
+				return Some((call.args[0].clone(), geom, radius, inclusive));
+			}
+			if call.args[1].is_path()
+				&& let Some((geom @ crate::val::Geometry::Point(_), true)) =
+					Self::try_eval_literal_geometry(&call.args[0])
+			{
+				return Some((call.args[1].clone(), geom, radius, inclusive));
+			}
+		}
+		None
+	}
+
+	/// Evaluate a constant `LogicalExpr` into `(Geometry, is_single_geom)` if it is a geometry
+	/// literal or a GeoJSON object literal (`is_single_geom == true`), or an array/set of
+	/// geometries/GeoJSON objects (`is_single_geom == false`).
+	fn try_eval_literal_geometry(expr: &LogicalExpr) -> Option<(crate::val::Geometry, bool)> {
+		if let LogicalExpr::Prefix {
+			op: PrefixOperator::Cast(kind @ crate::expr::Kind::Geometry(_)),
+			expr: inner,
+		} = expr
+		{
+			if let Some(val) = try_literal_to_value(inner) {
+				return Self::value_to_geometry(val.cast_to_kind(kind).ok()?);
+			}
+			let (geom, _) = Self::try_eval_literal_geometry(inner)?;
+			return Self::value_to_geometry(Value::Geometry(geom).cast_to_kind(kind).ok()?);
+		}
+		let val = try_literal_to_value(expr)?;
+		Self::value_to_geometry(val)
+	}
+
+	fn value_to_geometry(val: Value) -> Option<(crate::val::Geometry, bool)> {
+		let collect_items = |items: Vec<Value>| -> Option<crate::val::Geometry> {
+			let mut geoms = Vec::with_capacity(items.len());
+			for item in items {
+				let g = match item {
+					Value::Geometry(g) => g,
+					Value::Object(obj) => crate::val::Geometry::try_from_object(&obj)?,
+					Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Array(_)
+					| Value::Set(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::File(_)
+					| Value::Range(_)
+					| Value::Regex(_)
+					| Value::Closure(_) => return None,
+				};
+				geoms.push(g);
+			}
+			if geoms.is_empty() {
+				None
+			} else {
+				Some(crate::val::Geometry::Collection(geoms))
+			}
+		};
+		let (geom, is_single_geom) = match val {
+			Value::Geometry(g) => (Some(g), true),
+			Value::Object(obj) => (crate::val::Geometry::try_from_object(&obj), true),
+			Value::Array(arr) => (collect_items(arr.0), false),
+			Value::Set(set) => (collect_items(set.into_iter().collect()), false),
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::RecordId(_)
+			| Value::File(_)
+			| Value::Range(_)
+			| Value::Regex(_)
+			| Value::Closure(_) => (None, false),
+		};
+		geom.filter(|g| {
+			!Self::geometry_has_empty_component(g)
+				&& surrealdb_idx::spatial::geometry_all_coords_finite(g)
+		})
+		.map(|g| (g, is_single_geom))
+	}
+
+	fn geometry_has_empty_component(geom: &crate::val::Geometry) -> bool {
+		match geom {
+			crate::val::Geometry::Point(_) => false,
+			crate::val::Geometry::Line(l) => l.0.is_empty(),
+			crate::val::Geometry::Polygon(p) => p.exterior().0.is_empty(),
+			crate::val::Geometry::MultiPoint(mp) => mp.0.is_empty(),
+			crate::val::Geometry::MultiLine(ml) => {
+				ml.0.is_empty() || ml.0.iter().any(|l| l.0.is_empty())
+			}
+			crate::val::Geometry::MultiPolygon(mp) => {
+				mp.0.is_empty() || mp.0.iter().any(|p| p.exterior().0.is_empty())
+			}
+			crate::val::Geometry::Collection(items) => {
+				items.is_empty() || items.iter().any(Self::geometry_has_empty_component)
+			}
+		}
+	}
+
 	/// Flatten nested OR expressions into a list of branches.
 	///
 	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
@@ -1801,7 +2731,7 @@ impl<'a> IndexAnalyzer<'a> {
 		} else if let LogicalExpr::Prefix {
 			op,
 			expr: inner,
-		} = expr && !matches!(op, PrefixOperator::Not)
+		} = expr && Self::is_truth_preserving_prefix(op, inner)
 		{
 			self.collect_conditions(inner, conditions);
 		}
@@ -2311,6 +3241,7 @@ impl<'a> IndexAnalyzer<'a> {
 				range: OperandRange {
 					start,
 					end,
+					point_filter: None,
 				},
 			})
 		};
@@ -2623,7 +3554,13 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 					user_ef.unwrap_or_else(|| k.max(diskann.l_build as u32))
 				}
-				Index::Idx | Index::Uniq | Index::FullText(_) | Index::Count(_) => continue,
+				Index::Idx
+				| Index::Uniq
+				| Index::FullText(_)
+				| Index::Count(_)
+				| Index::Spatial => {
+					continue;
+				}
 			};
 
 			// An ANN index is matched by its column as written, as the KNN
@@ -2815,6 +3752,7 @@ impl IndexCandidate {
 				range: OperandRange {
 					start,
 					end,
+					..
 				},
 			} => {
 				score += match (start, end) {
@@ -3122,6 +4060,268 @@ fn path_matches_column(path: &LogicalExpr, index_col: &Idiom, key: Option<&KeySt
 /// and the two paths must agree once every flatten is removed from both.
 fn path_matches_containment(path: &LogicalExpr, index_col: &Idiom) -> bool {
 	idiom_matches_containment(path, index_col)
+}
+
+/// Whether `path` in a spatial predicate matches the `SPATIAL` index column `index_col`.
+/// Matches direct columns, explicit `.*` / `[*]` element columns, and plain `SPATIAL`
+/// columns (which also index `Array` and `Set` elements individually unless flattened).
+fn spatial_path_matches_column(
+	path: &LogicalExpr,
+	index_col: &Idiom,
+	key: Option<&KeyStructure>,
+) -> bool {
+	if path_matches_column(path, index_col, key) || path_matches_containment(path, index_col) {
+		return true;
+	}
+	if !index_col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten)) {
+		let mut elem_col = index_col.clone();
+		elem_col.0.push(Part::All);
+		return idiom_matches_containment(path, &elem_col);
+	}
+	false
+}
+
+fn hash_geometry<H: std::hash::Hasher>(geom: &crate::val::Geometry, state: &mut H) {
+	use std::hash::Hash;
+	std::mem::discriminant(geom).hash(state);
+	match geom {
+		crate::val::Geometry::Point(p) => {
+			p.x().to_bits().hash(state);
+			p.y().to_bits().hash(state);
+		}
+		crate::val::Geometry::Line(l) => {
+			l.0.len().hash(state);
+			for c in &l.0 {
+				c.x.to_bits().hash(state);
+				c.y.to_bits().hash(state);
+			}
+		}
+		crate::val::Geometry::Polygon(poly) => {
+			poly.exterior().0.len().hash(state);
+			for c in &poly.exterior().0 {
+				c.x.to_bits().hash(state);
+				c.y.to_bits().hash(state);
+			}
+			poly.interiors().len().hash(state);
+			for ring in poly.interiors() {
+				ring.0.len().hash(state);
+				for c in &ring.0 {
+					c.x.to_bits().hash(state);
+					c.y.to_bits().hash(state);
+				}
+			}
+		}
+		crate::val::Geometry::MultiPoint(mp) => {
+			mp.0.len().hash(state);
+			for p in &mp.0 {
+				p.x().to_bits().hash(state);
+				p.y().to_bits().hash(state);
+			}
+		}
+		crate::val::Geometry::MultiLine(ml) => {
+			ml.0.len().hash(state);
+			for l in &ml.0 {
+				l.0.len().hash(state);
+				for c in &l.0 {
+					c.x.to_bits().hash(state);
+					c.y.to_bits().hash(state);
+				}
+			}
+		}
+		crate::val::Geometry::MultiPolygon(mp) => {
+			mp.0.len().hash(state);
+			for poly in &mp.0 {
+				poly.exterior().0.len().hash(state);
+				for c in &poly.exterior().0 {
+					c.x.to_bits().hash(state);
+					c.y.to_bits().hash(state);
+				}
+				poly.interiors().len().hash(state);
+				for ring in poly.interiors() {
+					ring.0.len().hash(state);
+					for c in &ring.0 {
+						c.x.to_bits().hash(state);
+						c.y.to_bits().hash(state);
+					}
+				}
+			}
+		}
+		crate::val::Geometry::Collection(items) => {
+			items.len().hash(state);
+			for item in items {
+				hash_geometry(item, state);
+			}
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SpatialExactKind {
+	Inside,
+	Intersects,
+}
+
+/// Extracted spatial predicate before quadtree cell covering is computed.
+#[derive(Debug, Clone, PartialEq)]
+enum SpatialPredicate {
+	/// Any record intersecting `Geometry` may match (`INSIDE`, `CONTAINS`, `INTERSECTS`,
+	/// `CONTAINSANY`, `ANYINSIDE`).
+	Geometry {
+		geom: crate::val::Geometry,
+		exact_kind: Option<SpatialExactKind>,
+	},
+	/// Every item in the collection must be contained (`CONTAINSALL` / `ALLINSIDE`), so the
+	/// single item with the tightest non-empty covering can drive the index scan.
+	CollectionAll(Vec<crate::val::Geometry>),
+	/// Spherical cap `geo::distance(field, center) < radius` or `<= radius`.
+	Cap {
+		center: crate::val::Geometry,
+		radius: f64,
+		inclusive: bool,
+	},
+}
+
+impl SpatialPredicate {
+	fn cache_key(&self, include_ancestors: bool, max_ops: usize) -> u64 {
+		use std::hash::{Hash, Hasher};
+		let mut hasher = std::collections::hash_map::DefaultHasher::new();
+		include_ancestors.hash(&mut hasher);
+		max_ops.hash(&mut hasher);
+		std::mem::discriminant(self).hash(&mut hasher);
+		match self {
+			SpatialPredicate::Geometry {
+				geom,
+				exact_kind,
+			} => {
+				exact_kind.hash(&mut hasher);
+				hash_geometry(geom, &mut hasher);
+			}
+			SpatialPredicate::CollectionAll(items) => {
+				items.len().hash(&mut hasher);
+				for item in items {
+					hash_geometry(item, &mut hasher);
+				}
+			}
+			SpatialPredicate::Cap {
+				center,
+				radius,
+				inclusive,
+			} => {
+				hash_geometry(center, &mut hasher);
+				radius.to_bits().hash(&mut hasher);
+				inclusive.hash(&mut hasher);
+			}
+		}
+		hasher.finish()
+	}
+
+	fn plan_scans_and_area(
+		&self,
+		include_ancestors: bool,
+		max_ops: usize,
+	) -> (Vec<surrealdb_idx::spatial::SpatialScanOp>, f64) {
+		use surrealdb_idx::spatial::{
+			CoverConfig, plan_cap_scans_with_area, plan_geometry_scans_with_area,
+		};
+		let config = CoverConfig::default_query();
+		match self {
+			SpatialPredicate::Geometry {
+				geom,
+				..
+			} => plan_geometry_scans_with_area(geom, &config, include_ancestors, max_ops),
+			SpatialPredicate::CollectionAll(items) => items
+				.iter()
+				.map(|item| {
+					plan_geometry_scans_with_area(item, &config, include_ancestors, max_ops)
+				})
+				.filter(|(ops, _)| !ops.is_empty())
+				.min_by(|(ops_a, area_a), (ops_b, area_b)| {
+					area_a.total_cmp(area_b).then_with(|| ops_a.len().cmp(&ops_b.len()))
+				})
+				.unwrap_or((Vec::new(), 1.0)),
+			SpatialPredicate::Cap {
+				center: crate::val::Geometry::Point(center),
+				radius,
+				..
+			} => plan_cap_scans_with_area(*center, *radius, &config, include_ancestors, max_ops),
+			SpatialPredicate::Cap {
+				..
+			} => (Vec::new(), 1.0),
+		}
+	}
+
+	fn to_point_filter(&self, column: Idiom) -> Option<SpatialPointFilter> {
+		if !cfg!(feature = "geo") {
+			return None;
+		}
+		match self {
+			SpatialPredicate::Cap {
+				center: crate::val::Geometry::Point(center),
+				radius,
+				inclusive,
+			} => Some(SpatialPointFilter::Cap {
+				column,
+				center: (center.x(), center.y()),
+				radius: *radius,
+				inclusive: *inclusive,
+			}),
+			SpatialPredicate::Geometry {
+				geom,
+				exact_kind: Some(kind),
+			} => {
+				let (min_x, max_x, min_y, max_y) =
+					surrealdb_idx::spatial::geometry_bounding_box(geom)?;
+				match kind {
+					SpatialExactKind::Inside => Some(SpatialPointFilter::Inside {
+						column,
+						min_x,
+						max_x,
+						min_y,
+						max_y,
+						geom: geom.clone(),
+					}),
+					SpatialExactKind::Intersects => Some(SpatialPointFilter::Intersects {
+						column,
+						min_x,
+						max_x,
+						min_y,
+						max_y,
+						geom: geom.clone(),
+					}),
+				}
+			}
+			SpatialPredicate::Geometry {
+				exact_kind: None,
+				..
+			}
+			| SpatialPredicate::CollectionAll(_)
+			| SpatialPredicate::Cap {
+				..
+			} => None,
+		}
+	}
+}
+
+/// Whether `expr` is a single spatial comparison that matches `filter` on its indexed column.
+pub(crate) fn expr_matches_spatial_point_filter(
+	expr: &LogicalExpr,
+	filter: &SpatialPointFilter,
+) -> bool {
+	if !matches!(
+		expr,
+		LogicalExpr::Binary {
+			op,
+			..
+		} if !matches!(op, BinaryOperator::And)
+	) {
+		return false;
+	}
+	let mut spatial = Vec::new();
+	IndexAnalyzer::collect_spatial_expressions(expr, &mut spatial);
+	spatial.into_iter().any(|(path, pred)| {
+		path_matches_column(&path, filter.column(), None)
+			&& pred.to_point_filter(filter.column().clone()).as_ref() == Some(filter)
+	})
 }
 
 /// Whether the expression path takes every element of a value (`.*` /
@@ -4639,6 +5839,7 @@ mod tests {
 					range: OperandRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
+						..
 					}
 				}
 			));
@@ -4760,6 +5961,7 @@ mod tests {
 				range: OperandRange {
 					start,
 					end,
+					..
 				},
 			} = &c.access
 			else {
@@ -5188,6 +6390,7 @@ mod tests {
 				range: OperandRange {
 					start,
 					end,
+					..
 				},
 			} = &c.access
 			else {
@@ -5873,6 +7076,1573 @@ mod tests {
 					"expected no B-tree index candidate for `{sql}`, got {cands:?}"
 				);
 			}
+		}
+	}
+
+	#[tokio::test]
+	async fn spatial_index_end_to_end_queries() {
+		use surrealdb_types::ToSql;
+
+		let ds = crate::kvs::Datastore::builder()
+			.with_capabilities(crate::dbs::Capabilities::all())
+			.with_auth(false)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
+
+		let setup_sql = r#"
+			DEFINE NAMESPACE test;
+			DEFINE DATABASE test;
+			DEFINE TABLE places;
+			DEFINE INDEX idx_places_pt ON places FIELDS pt SPATIAL;
+			CREATE places:london SET name = 'London', pt = (-0.118092, 51.509865);
+			CREATE places:paris SET name = 'Paris', pt = (2.352222, 48.856614);
+			CREATE places:tokyo SET name = 'Tokyo', pt = (139.691706, 35.689487);
+			CREATE places:ny SET name = 'New York', pt = (-74.005973, 40.712775);
+		"#;
+		let res = ds.execute(setup_sql, &ses, None).await.unwrap();
+		for r in res {
+			r.output().unwrap();
+		}
+
+		// 1. Point INSIDE Polygon (London box)
+		let inside_sql = r#"
+			SELECT VALUE id FROM places
+			WHERE pt INSIDE {
+				type: "Polygon",
+				coordinates: [[
+					[-1.0, 51.0],
+					[1.0, 51.0],
+					[1.0, 52.0],
+					[-1.0, 52.0],
+					[-1.0, 51.0]
+				]]
+			};
+		"#;
+		let mut res = ds.execute(inside_sql, &ses, None).await.unwrap();
+		let val = res.remove(0).output().unwrap();
+		assert_eq!(
+			val.to_sql(),
+			"[places:london]",
+			"Point INSIDE polygon should use SPATIAL index and return London"
+		);
+
+		// 2. EXPLAIN verifies UnionIndexScan on idx_places_pt
+		let explain_sql = r#"
+			SELECT VALUE id FROM places
+			WHERE pt INSIDE {
+				type: "Polygon",
+				coordinates: [[
+					[-1.0, 51.0],
+					[1.0, 51.0],
+					[1.0, 52.0],
+					[-1.0, 52.0],
+					[-1.0, 51.0]
+				]]
+			} EXPLAIN;
+		"#;
+		let mut explain_res = ds.execute(explain_sql, &ses, None).await.unwrap();
+		let explain_str = explain_res.remove(0).output().unwrap().to_sql();
+		assert!(
+			explain_str.contains("UnionIndexScan") && explain_str.contains("idx_places_pt"),
+			"Expected UnionIndexScan on idx_places_pt in EXPLAIN output, got: {explain_str}"
+		);
+
+		// 3. geo::distance(pt, center) < radius_meters (within 10km of London)
+		let dist_sql = r#"
+			SELECT VALUE id FROM places
+			WHERE geo::distance(pt, (-0.12, 51.51)) < 10000;
+		"#;
+		let mut dist_res = ds.execute(dist_sql, &ses, None).await.unwrap();
+		let dist_val = dist_res.remove(0).output().unwrap();
+		assert_eq!(
+			dist_val.to_sql(),
+			"[places:london]",
+			"geo::distance < 10000m should return London"
+		);
+
+		// 4. UPDATE and DELETE maintain the spatial index entries
+		let update_sql = r#"
+			UPDATE places:paris SET pt = (-0.10, 51.52);
+			DELETE places:london;
+			SELECT VALUE id FROM places
+			WHERE pt INSIDE {
+				type: "Polygon",
+				coordinates: [[
+					[-1.0, 51.0],
+					[1.0, 51.0],
+					[1.0, 52.0],
+					[-1.0, 52.0],
+					[-1.0, 51.0]
+				]]
+			};
+		"#;
+		let mut upd_res = ds.execute(update_sql, &ses, None).await.unwrap();
+		let upd_val = upd_res.remove(2).output().unwrap();
+		assert_eq!(
+			upd_val.to_sql(),
+			"[places:paris]",
+			"After moving Paris into box and deleting London, only Paris should match"
+		);
+
+		// 5. Polygon table indexed with SPATIAL queried by CONTAINS point
+		let poly_sql = r#"
+			DEFINE TABLE zones;
+			DEFINE INDEX idx_zones_area ON zones FIELDS area SPATIAL;
+			CREATE zones:uk SET area = {
+				type: "Polygon",
+				coordinates: [[
+					[-1.0, 51.0],
+					[1.0, 51.0],
+					[1.0, 52.0],
+					[-1.0, 52.0],
+					[-1.0, 51.0]
+				]]
+			};
+			CREATE zones:fr SET area = {
+				type: "Polygon",
+				coordinates: [[
+					[2.0, 48.0],
+					[3.0, 48.0],
+					[3.0, 49.0],
+					[2.0, 49.0],
+					[2.0, 48.0]
+				]]
+			};
+			SELECT VALUE id FROM zones WHERE area CONTAINS (2.35, 48.85);
+		"#;
+		let mut poly_res = ds.execute(poly_sql, &ses, None).await.unwrap();
+		let poly_val = poly_res.remove(4).output().unwrap();
+		assert_eq!(
+			poly_val.to_sql(),
+			"[zones:fr]",
+			"Polygon CONTAINS Point should match zones:fr via SPATIAL index"
+		);
+
+		// 6. Array of geometries (`FIELDS pts[*] SPATIAL`) with CONTAINSANY
+		let array_sql = r#"
+			DEFINE TABLE routes;
+			DEFINE INDEX idx_routes_pts ON routes FIELDS pts[*] SPATIAL;
+			CREATE routes:eurostar SET pts = [(-0.118092, 51.509865), (2.352222, 48.856614)];
+			CREATE routes:shinkansen SET pts = [(139.691706, 35.689487), (135.502165, 34.693738)];
+			SELECT VALUE id FROM routes WHERE pts CONTAINSANY [(-0.118092, 51.509865)];
+		"#;
+		let mut array_res = ds.execute(array_sql, &ses, None).await.unwrap();
+		let array_val = array_res.remove(4).output().unwrap();
+		assert_eq!(
+			array_val.to_sql(),
+			"[routes:eurostar]",
+			"Array SPATIAL index with CONTAINSANY should match routes:eurostar"
+		);
+
+		// 7. Set of geometries (`TYPE set<geometry>`) with `FIELDS pts[*] SPATIAL`
+		let set_sql = r#"
+			DEFINE TABLE hubs;
+			DEFINE FIELD pts ON hubs TYPE set<geometry<point>>;
+			DEFINE INDEX idx_hubs_pts ON hubs FIELDS pts[*] SPATIAL;
+			CREATE hubs:eu SET pts = [(-0.118092, 51.509865), (2.352222, 48.856614)];
+			CREATE hubs:jp SET pts = [(139.691706, 35.689487)];
+			SELECT VALUE id FROM hubs WHERE pts CONTAINS (-0.118092, 51.509865);
+		"#;
+		let mut set_res = ds.execute(set_sql, &ses, None).await.unwrap();
+		let set_val = set_res.remove(5).output().unwrap();
+		assert_eq!(
+			set_val.to_sql(),
+			"[hubs:eu]",
+			"Set SPATIAL index with CONTAINS should match hubs:eu"
+		);
+
+		// 8. OR union of two spatial predicates + WITH INDEX hint + CONTAINSALL + ORDER BY id DESC
+		//    + Hybrid HNSW + Spatial
+		let adv_sql = r#"
+			SELECT VALUE id FROM places
+				WHERE pt INSIDE {
+					type: "Polygon",
+					coordinates: [[[-0.5, 51.0], [0.5, 51.0], [0.5, 52.0], [-0.5, 52.0], [-0.5, 51.0]]]
+				}
+				OR pt INSIDE {
+					type: "Polygon",
+					coordinates: [[[139.0, 35.0], [140.0, 35.0], [140.0, 36.0], [139.0, 36.0], [139.0, 35.0]]]
+				}
+				ORDER BY id;
+			SELECT VALUE id FROM zones WITH INDEX idx_zones_area
+				WHERE area CONTAINSALL [(2.35, 48.85), (2.40, 48.90)];
+			SELECT VALUE id FROM places
+				WHERE geo::distance(pt, (0.0, 50.0)) < 500000.0
+				ORDER BY id DESC;
+			DEFINE TABLE pois SCHEMAFULL;
+			DEFINE FIELD pt ON pois TYPE geometry<point>;
+			DEFINE FIELD vec ON pois TYPE array<float>;
+			DEFINE INDEX idx_pois_pt ON pois FIELDS pt SPATIAL;
+			DEFINE INDEX idx_pois_vec ON pois FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN;
+			CREATE pois:london SET pt = (-0.12, 51.5), vec = [1.0, 0.0];
+			CREATE pois:paris SET pt = (2.35, 48.85), vec = [0.9, 0.1];
+			CREATE pois:tokyo SET pt = (139.69, 35.68), vec = [1.0, 0.0];
+			SELECT VALUE id FROM pois
+				WHERE vec <|1, 10|> [1.0, 0.0]
+				AND pt INSIDE {
+					type: "Polygon",
+					coordinates: [[[-1.0, 48.0], [3.0, 48.0], [3.0, 52.0], [-1.0, 52.0], [-1.0, 48.0]]]
+				};
+		"#;
+		let mut adv_res = ds.execute(adv_sql, &ses, None).await.unwrap();
+		let or_val = adv_res.remove(0).output().unwrap();
+		assert_eq!(
+			or_val.to_sql(),
+			"[places:paris, places:tokyo]",
+			"OR union of two spatial predicates should match paris and tokyo"
+		);
+		let contains_all_val = adv_res.remove(0).output().unwrap();
+		assert_eq!(
+			contains_all_val.to_sql(),
+			"[zones:fr]",
+			"CONTAINSALL on GeometryCollection should match zones:fr"
+		);
+		let desc_val = adv_res.remove(0).output().unwrap();
+		assert_eq!(
+			desc_val.to_sql(),
+			"[places:paris]",
+			"ORDER BY id DESC on spatial range query should return matching records in descending order"
+		);
+		let knn_spatial_val = adv_res.remove(8).output().unwrap();
+		assert_eq!(
+			knn_spatial_val.to_sql(),
+			"[pois:london]",
+			"Hybrid HNSW + SPATIAL prefilter should return pois:london"
+		);
+
+		// 9. Compound SPATIAL index (`FIELDS tenant, loc SPATIAL`) + parameterized queries
+		//    (`$origin`, `$radius`, `$poly`)
+		let compound_sql = r#"
+			DEFINE TABLE fleet SCHEMAFULL;
+			DEFINE FIELD tenant ON fleet TYPE string;
+			DEFINE FIELD loc ON fleet TYPE geometry<point>;
+			DEFINE INDEX idx_fleet_tenant_loc ON fleet FIELDS tenant, loc SPATIAL;
+			CREATE fleet:a1 SET tenant = 'acme', loc = (-0.12, 51.51);
+			CREATE fleet:b1 SET tenant = 'globex', loc = (-0.12, 51.51);
+			CREATE fleet:a2 SET tenant = 'acme', loc = (2.35, 48.85);
+			LET $origin = (-0.12, 51.51);
+			LET $radius = 10000;
+			LET $poly = {
+				type: "Polygon",
+				coordinates: [[[-1.0, 51.0], [1.0, 51.0], [1.0, 52.0], [-1.0, 52.0], [-1.0, 51.0]]]
+			};
+			SELECT VALUE id FROM fleet WHERE tenant = 'acme' AND geo::distance(loc, $origin) < $radius;
+			SELECT VALUE id FROM fleet WHERE tenant = 'acme' AND loc INSIDE $poly EXPLAIN;
+		"#;
+		let mut comp_res = ds.execute(compound_sql, &ses, None).await.unwrap();
+		let comp_dist_val = comp_res.remove(10).output().unwrap();
+		assert_eq!(
+			comp_dist_val.to_sql(),
+			"[fleet:a1]",
+			"Compound SPATIAL index + parameterized geo::distance should return [fleet:a1]"
+		);
+		let comp_explain_str = comp_res.remove(10).output().unwrap().to_sql();
+		assert!(
+			comp_explain_str.contains("UnionIndexScan")
+				&& comp_explain_str.contains("idx_fleet_tenant_loc"),
+			"Expected UnionIndexScan on compound index idx_fleet_tenant_loc for parameterized query, got: {comp_explain_str}"
+		);
+
+		// 10. Vacuous-truth and Geometry::contains correctness on indexed tables:
+		//     - Empty array `pts = []` matches `pts ALLINSIDE [...]`
+		//     - Empty `GeometryCollection([])` indexed at root level 0 matches `col INSIDE $poly`
+		//     - `Polygon CONTAINS MultiPolygon` rejects a MultiPolygon outside the polygon
+		let edge_sql = r#"
+			CREATE routes:empty SET pts = [];
+			SELECT VALUE id FROM routes
+				WHERE pts ALLINSIDE [(-0.118092, 51.509865), (2.352222, 48.856614)]
+				ORDER BY id;
+			DEFINE TABLE shapes;
+			DEFINE INDEX idx_shapes_col ON shapes FIELDS col SPATIAL;
+			CREATE shapes:empty_col SET col = { type: "GeometryCollection", geometries: [] };
+			CREATE shapes:london_col SET col = {
+				type: "GeometryCollection",
+				geometries: [{ type: "Point", coordinates: [-0.12, 51.5] }]
+			};
+			SELECT VALUE id FROM shapes
+				WHERE col INSIDE {
+					type: "Polygon",
+					coordinates: [[[2.0, 48.0], [3.0, 48.0], [3.0, 49.0], [2.0, 49.0], [2.0, 48.0]]]
+				}
+				ORDER BY id;
+			SELECT VALUE id FROM zones
+				WHERE area CONTAINS {
+					type: "MultiPolygon",
+					coordinates: [[[[139.0, 35.0], [140.0, 35.0], [140.0, 36.0], [139.0, 36.0], [139.0, 35.0]]]]
+				};
+		"#;
+		let mut edge_res = ds.execute(edge_sql, &ses, None).await.unwrap();
+		let empty_arr_val = edge_res.remove(1).output().unwrap();
+		assert_eq!(
+			empty_arr_val.to_sql(),
+			"[routes:empty, routes:eurostar]",
+			"pts ALLINSIDE [...] must include both routes:empty (vacuously true) and routes:eurostar"
+		);
+		let empty_col_val = edge_res.remove(5).output().unwrap();
+		assert_eq!(
+			empty_col_val.to_sql(),
+			"[shapes:empty_col]",
+			"Empty GeometryCollection([]) indexed at root cell must be returned when vacuously INSIDE query polygon"
+		);
+		let poly_contains_mp_val = edge_res.remove(5).output().unwrap();
+		assert_eq!(
+			poly_contains_mp_val.to_sql(),
+			"[]",
+			"Polygon CONTAINS MultiPolygon must be false when the MultiPolygon is outside the polygon"
+		);
+
+		// 11. Hybrid HNSW KNN + `geo::distance(loc, <point> $prior) < r` SPATIAL pre-filter:
+		//     verifies that `KnnScan` attaches a `BitmapOr` of `BitmapIndexScan` nodes on the
+		//     `SPATIAL` index while retaining `geo::distance` in `residual`.
+		let knn_spatial_sql = r#"
+			REMOVE TABLE places;
+			DEFINE TABLE places;
+			DEFINE FIELD loc ON places TYPE geometry<point>;
+			DEFINE FIELD vec ON places TYPE array<float>;
+			DEFINE INDEX idx_places_loc ON places FIELDS loc SPATIAL;
+			DEFINE INDEX idx_places_vec ON places FIELDS vec HNSW DIMENSION 2 DIST COSINE TYPE F32;
+			CREATE places:near_close SET loc = (6.365, 49.469), vec = [1.0, 0.0];
+			CREATE places:near_far   SET loc = (6.366, 49.469), vec = [0.6, 0.8];
+			CREATE places:far_close  SET loc = (2.352, 48.856), vec = [1.0, 0.0];
+			LET $prior = [6.365, 49.469];
+			LET $photo = [1.0, 0.0];
+			SELECT VALUE id FROM places
+				WHERE geo::distance(loc, <point> $prior) < 400 AND vec <|1, 40|> $photo;
+			SELECT VALUE id FROM places
+				WHERE geo::distance(loc, <point> $prior) < 400 AND vec <|1, 40|> $photo
+				EXPLAIN;
+		"#;
+		let mut knn_res = ds.execute(knn_spatial_sql, &ses, None).await.unwrap();
+		let knn_val = knn_res.remove(11).output().unwrap();
+		assert_eq!(
+			knn_val.to_sql(),
+			"[places:near_close]",
+			"Hybrid HNSW + SPATIAL geo::distance prefilter must return [places:near_close]"
+		);
+		let knn_explain = knn_res.remove(11).output().unwrap().to_sql();
+		assert!(
+			knn_explain.contains("KnnScan")
+				&& knn_explain.contains("idx_places_vec")
+				&& knn_explain.contains("BitmapIndexScan")
+				&& knn_explain.contains("idx_places_loc"),
+			"Expected KnnScan on idx_places_vec with BitmapIndexScan prefilter on idx_places_loc, got: {knn_explain}"
+		);
+
+		// 12. End-to-end verification on point-only SPATIAL index (`places`):
+		//     - Zero-fetch `SELECT count() ... GROUP ALL` fuses into `Count` with `BitmapIndexScan`
+		//       and inline `SpatialPointFilter` (excluding `places:far_close` and boundary false
+		//       positives without fetching records).
+		//     - `SELECT id, geo::distance(loc, <point> $prior) AS dist ... ORDER BY dist` computes
+		//       exact Haversine distances via `MeasureKind::GeoDistance` and partial row
+		//       projection.
+		//     - `DELETE` / `UPDATE` on a point-indexed record cleanly removes the old index entry
+		//       whose `IndexEntryValue` carries inline `(lon, lat)` coordinates.
+		let p2_sql = r#"
+			LET $prior = [6.365, 49.469];
+			SELECT count() FROM places WHERE geo::distance(loc, <point> $prior) < 400 GROUP ALL;
+			SELECT count() FROM places WHERE geo::distance(loc, <point> $prior) < 400 GROUP ALL EXPLAIN;
+			SELECT VALUE id FROM (
+				SELECT id, geo::distance(loc, <point> $prior) AS dist
+				FROM places
+				WHERE geo::distance(loc, <point> $prior) < 400
+				ORDER BY dist ASC
+			);
+			DELETE places:near_far;
+			SELECT count() FROM places WHERE geo::distance(loc, <point> $prior) < 400 GROUP ALL;
+		"#;
+		let mut p2_res = ds.execute(p2_sql, &ses, None).await.unwrap();
+		let count_before = p2_res.remove(1).output().unwrap();
+		assert_eq!(
+			count_before.to_sql(),
+			"[{ count: 2 }]",
+			"Point-only spatial bitmap count should return exact count 2"
+		);
+		let count_explain = p2_res.remove(1).output().unwrap().to_sql();
+		assert!(
+			count_explain.contains("Count")
+				&& count_explain.contains("BitmapIndexScan")
+				&& count_explain.contains("idx_places_loc")
+				&& count_explain.contains("point_filter"),
+			"Expected zero-fetch Count with BitmapIndexScan and point_filter on idx_places_loc, got: {count_explain}"
+		);
+		let ordered_ids = p2_res.remove(1).output().unwrap();
+		assert_eq!(
+			ordered_ids.to_sql(),
+			"[places:near_close, places:near_far]",
+			"Expected ORDER BY dist ASC via MeasureKind::GeoDistance to order near_close before near_far"
+		);
+		let count_after_delete = p2_res.remove(2).output().unwrap();
+		assert_eq!(
+			count_after_delete.to_sql(),
+			"[{ count: 1 }]",
+			"Deleting places:near_far should remove its inline-coord spatial index entry and leave count 1"
+		);
+
+		// 12b. Half-ULP decimal radius boundary on point-only SPATIAL index (`places`):
+		//      re-create `places:near_far` at `(6.366, 49.469)` and construct two decimals
+		//      `dec_lo < d < dec_hi` around the exact Haversine `f64` distance `d` that both
+		//      round to `d` as `f64` (`as_float() == d`), verifying that `< dec_hi` admits
+		//      `places:near_far` and `<= dec_lo` excludes it across both `UnionIndexScan` and
+		//      zero-fetch `BitmapIndexScan` count.
+		{
+			let mut d_res = ds
+				.execute("RETURN geo::distance((6.366, 49.469), (6.365, 49.469));", &ses, None)
+				.await
+				.unwrap();
+			let surrealdb_types::Value::Number(surrealdb_types::Number::Float(d)) =
+				d_res.remove(0).output().unwrap()
+			else {
+				panic!("Expected Float from geo::distance");
+			};
+			let step = rust_decimal::Decimal::new(1, 15);
+			let mut dec_hi = rust_decimal::Decimal::try_from(d).unwrap();
+			while crate::val::Number::Decimal(dec_hi) <= crate::val::Number::Float(d) {
+				dec_hi += step;
+			}
+			while crate::val::Number::Decimal(dec_hi - step) > crate::val::Number::Float(d) {
+				dec_hi -= step;
+			}
+			let mut dec_lo = dec_hi - step;
+			if crate::val::Number::Decimal(dec_lo) == crate::val::Number::Float(d) {
+				dec_lo -= step;
+			}
+			assert_eq!(crate::val::Number::Decimal(dec_hi).as_float(), d);
+			assert_eq!(crate::val::Number::Decimal(dec_lo).as_float(), d);
+			assert!(crate::val::Number::Float(d) < crate::val::Number::Decimal(dec_hi));
+			assert!(crate::val::Number::Float(d) > crate::val::Number::Decimal(dec_lo));
+
+			let dec_sql = format!(
+				r#"
+				CREATE places:near_far SET loc = (6.366, 49.469), vec = [0.6, 0.8];
+				SELECT VALUE id FROM places WHERE geo::distance(loc, (6.365, 49.469)) < {dec_hi}dec ORDER BY id;
+				SELECT VALUE id FROM places WHERE geo::distance(loc, (6.365, 49.469)) <= {dec_lo}dec ORDER BY id;
+				SELECT count() FROM places WHERE geo::distance(loc, (6.365, 49.469)) < {dec_hi}dec GROUP ALL;
+				SELECT count() FROM places WHERE geo::distance(loc, (6.365, 49.469)) <= {dec_lo}dec GROUP ALL;
+				DELETE places:near_far;
+				"#
+			);
+			let mut dec_res = ds.execute(&dec_sql, &ses, None).await.unwrap();
+			let lt_hi_ids = dec_res.remove(1).output().unwrap();
+			assert_eq!(
+				lt_hi_ids.to_sql(),
+				"[places:near_close, places:near_far]",
+				"geo::distance < dec_hi (within +0.5 ULP of d) must include places:near_far"
+			);
+			let le_lo_ids = dec_res.remove(1).output().unwrap();
+			assert_eq!(
+				le_lo_ids.to_sql(),
+				"[places:near_close]",
+				"geo::distance <= dec_lo (within -0.5 ULP of d) must exclude places:near_far"
+			);
+			let lt_hi_cnt = dec_res.remove(1).output().unwrap();
+			assert_eq!(lt_hi_cnt.to_sql(), "[{ count: 2 }]");
+			let le_lo_cnt = dec_res.remove(1).output().unwrap();
+			assert_eq!(le_lo_cnt.to_sql(), "[{ count: 1 }]");
+		}
+
+		// 13. Array literal on the RHS of `INSIDE` (`loc INSIDE [$disjoint_pt, $match_pt]` and
+		//     `SELECT count() ... WHERE loc INSIDE [$poly, $poly] GROUP ALL`): verifies that
+		//     `SpatialPointFilter` and index-only bitmap count are not attached to array literals
+		//     (where `Array::contains` evaluates disjunctive element equality).
+		let arr_inside_sql = r#"
+			LET $box = {
+				type: "Polygon",
+				coordinates: [[[6.0, 49.0], [7.0, 49.0], [7.0, 50.0], [6.0, 50.0], [6.0, 49.0]]]
+			};
+			SELECT VALUE id FROM places WHERE loc INSIDE [$box, (6.365, 49.469)] ORDER BY id;
+			SELECT count() FROM places WHERE loc INSIDE [$box, $box] GROUP ALL;
+		"#;
+		let mut arr_res = ds.execute(arr_inside_sql, &ses, None).await.unwrap();
+		let arr_inside_ids = arr_res.remove(1).output().unwrap();
+		assert_eq!(
+			arr_inside_ids.to_sql(),
+			"[places:near_close]",
+			"loc INSIDE [$disjoint_poly, (6.365, 49.469)] must return [places:near_close]"
+		);
+		let arr_poly_count = arr_res.remove(1).output().unwrap();
+		assert_eq!(
+			arr_poly_count.to_sql(),
+			"[{ count: 0 }]",
+			"SELECT count() FROM places WHERE loc INSIDE [$box, $box] GROUP ALL must return [{{ count: 0 }}]"
+		);
+
+		// 14. Non-truth-preserving prefix operators (`<string> (loc INSIDE $box)` and `..(loc
+		//     INSIDE $box)`) must not push the inner spatial comparison down to the spatial index,
+		//     because `<string>` casts both `true` and `false` to the non-empty strings `'true'`
+		//     and `'false'` (both truthy for every row in `places`).
+		let prefix_sql = r#"
+			LET $box = {
+				type: "Polygon",
+				coordinates: [[[6.0, 49.0], [7.0, 49.0], [7.0, 50.0], [6.0, 50.0], [6.0, 49.0]]]
+			};
+			SELECT VALUE id FROM places WHERE <string> (loc INSIDE $box) ORDER BY id;
+			SELECT VALUE id FROM places WHERE <string> (loc INSIDE $box) EXPLAIN;
+			SELECT VALUE id FROM places WHERE <bool> (loc INSIDE $box) ORDER BY id;
+		"#;
+		let mut prefix_res = ds.execute(prefix_sql, &ses, None).await.unwrap();
+		let str_cast_ids = prefix_res.remove(1).output().unwrap();
+		assert_eq!(
+			str_cast_ids.to_sql(),
+			"[places:far_close, places:near_close]",
+			"<string> (loc INSIDE $box) evaluates to 'true' or 'false' (both truthy) and must return all rows"
+		);
+		let str_cast_explain = prefix_res.remove(1).output().unwrap().to_sql();
+		assert!(
+			str_cast_explain.contains("TableScan") && !str_cast_explain.contains("UnionIndexScan"),
+			"Expected TableScan for <string> (loc INSIDE $box), got: {str_cast_explain}"
+		);
+		let bool_cast_ids = prefix_res.remove(1).output().unwrap();
+		assert_eq!(
+			bool_cast_ids.to_sql(),
+			"[places:near_close]",
+			"<bool> (loc INSIDE $box) preserves boolean truthiness and must return [places:near_close]"
+		);
+	}
+
+	#[test]
+	fn test_spatial_point_only_and_contains_all_and_or_union_analysis() {
+		let mut ix_def = idx_current(1, "idx_loc", &["loc"]);
+		ix_def.index = crate::catalog::Index::Spatial;
+
+		// 1. Point-only spatial schema (`with_point_only_spatial([true])`) emits 1 scan op
+		// (no coarse ancestor probes) for a point query.
+		let analyzer_pt =
+			analyzer(vec![ix_def], None).with_point_only_spatial(Arc::from(vec![true]));
+		let pt_cond = parse_cond("loc INSIDE (-0.12, 51.5)");
+		let path_pt =
+			analyzer_pt.try_spatial_expansion(Some(&pt_cond), Direction::Forward).unwrap();
+		let AccessPath::Union {
+			paths,
+			..
+		} = path_pt
+		else {
+			panic!("Expected AccessPath::Union, got {path_pt:?}");
+		};
+		assert_eq!(paths.len(), 1, "Point-only spatial index should emit 1 leaf scan op");
+
+		// 2. CONTAINSALL on a GeometryCollection of two points emits the single-item scan count
+		// (1 op on point-only index), not the union of both points.
+		let col_cond = parse_cond(
+			r#"loc CONTAINSALL {
+				type: "GeometryCollection",
+				geometries: [
+					{ type: "Point", coordinates: [-0.12, 51.5] },
+					{ type: "Point", coordinates: [139.69, 35.68] }
+				]
+			}"#,
+		);
+		let path_col =
+			analyzer_pt.try_spatial_expansion(Some(&col_cond), Direction::Forward).unwrap();
+		let AccessPath::Union {
+			paths,
+			..
+		} = path_col
+		else {
+			panic!("Expected AccessPath::Union, got {path_col:?}");
+		};
+		assert_eq!(
+			paths.len(),
+			1,
+			"CONTAINSALL on GeometryCollection should select a single item's covering"
+		);
+
+		// 3. OR union of two spatial predicates produces a flat AccessPath::Union
+		let or_cond = parse_cond("loc INSIDE (-0.12, 51.5) OR loc INSIDE (139.69, 35.68)");
+		let or_union = analyzer_pt
+			.try_or_union(Some(&or_cond), Direction::Forward)
+			.expect("try_or_union should succeed for OR of spatial predicates");
+		let AccessPath::Union {
+			paths,
+			..
+		} = or_union
+		else {
+			panic!("Expected flat AccessPath::Union, got {or_union:?}");
+		};
+		assert_eq!(paths.len(), 2);
+		assert!(paths.iter().all(|p| matches!(p, AccessPath::BTreeScan { .. })));
+
+		// 4. `try_spatial_expansion` forces `Direction::Forward` when any scan op is `Range`
+		// even if the caller passes `Direction::Backward` (`ORDER BY id DESC`).
+		let backward_path =
+			analyzer_pt.try_spatial_expansion(Some(&pt_cond), Direction::Backward).unwrap();
+		let AccessPath::Union {
+			paths,
+			..
+		} = backward_path
+		else {
+			panic!("Expected AccessPath::Union, got {backward_path:?}");
+		};
+		assert!(paths.iter().all(|p| matches!(
+			p,
+			AccessPath::BTreeScan {
+				direction: Direction::Forward,
+				..
+			}
+		)));
+
+		// 5. Mixed OR branches (`score > 0 AND loc INSIDE ...`) prefer the spatial index
+		// (score 350) over the 1D range index on `score` (score 200).
+		let ix_score = idx_current(2, "idx_score", &["score"]);
+		let mut ix_loc = idx_current(1, "idx_loc", &["loc"]);
+		ix_loc.index = crate::catalog::Index::Spatial;
+		let analyzer_mixed = scalar_analyzer(vec![ix_loc, ix_score], None)
+			.with_point_only_spatial(Arc::from(vec![true, false]));
+		let mixed_or = parse_cond(
+			"(score > 0 AND loc INSIDE (-0.12, 51.5)) OR (score > 0 AND loc INSIDE (139.69, 35.68))",
+		);
+		let mixed_union = analyzer_mixed
+			.try_or_union(Some(&mixed_or), Direction::Forward)
+			.expect("Mixed OR with spatial predicates should use spatial union");
+		let AccessPath::Union {
+			paths,
+			..
+		} = mixed_union
+		else {
+			panic!("Expected spatial Union, got {mixed_union:?}");
+		};
+		assert_eq!(paths.len(), 2);
+		assert!(paths.iter().all(|p| matches!(
+			p,
+			AccessPath::BTreeScan {
+				index_ref,
+				..
+			} if index_ref.name == "idx_loc"
+		)));
+
+		// 6. `try_knn_prefilter`:
+		// - On a general (non-point-only) `SPATIAL` index, uses `bitmap_superset_plan` and retains
+		//   the spatial predicate in `residual` for exact boundary verification.
+		// - On a point-only `SPATIAL` index, attaches `SpatialPointFilter` to each cell range and
+		//   produces an exact bitmap prefilter (`residual.is_none()`).
+		let mut ix_gen = idx_current(1, "idx_loc", &["loc"]);
+		ix_gen.index = crate::catalog::Index::Spatial;
+		let analyzer_gen = analyzer(vec![ix_gen], None);
+		let prefilter_gen = analyzer_gen
+			.try_knn_prefilter(&pt_cond, &|ix, col| ix.one_entry_per_record(col))
+			.expect("General spatial predicate should produce a KNN superset prefilter");
+		assert!(
+			prefilter_gen.residual.is_some(),
+			"General spatial prefilter is a cell-covering superset and must keep its residual"
+		);
+		let prefilter_pt = analyzer_pt
+			.try_knn_prefilter(&pt_cond, &|ix, col| ix.one_entry_per_record(col))
+			.expect("Point-only spatial predicate should produce an exact KNN prefilter");
+		assert!(
+			prefilter_pt.residual.is_none(),
+			"Point-only spatial prefilter evaluates exact inline coordinates and drops residual"
+		);
+
+		// 7. `access_repeats_records` is true for an unfiltered range scan on `Index::Spatial`,
+		// and false when `point_filter` is attached (point-only disjoint covering).
+		let spatial_ref = analyzer_pt.index_ref(0);
+		let dummy_range = BTreeAccess::literal_range(Range {
+			start: Bound::Included(Value::from(1i64)),
+			end: Bound::Included(Value::from(10i64)),
+		});
+		assert!(crate::exec::index::access_path::access_repeats_records(
+			&spatial_ref,
+			&dummy_range
+		));
+		let AccessPath::BTreeScan {
+			access: ref pt_branch_access,
+			..
+		} = paths[0]
+		else {
+			panic!("Expected BTreeScan branch");
+		};
+		assert!(pt_branch_access.point_filter().is_some());
+		assert!(!crate::exec::index::access_path::access_repeats_records(
+			&spatial_ref,
+			pt_branch_access
+		));
+
+		// 8. Compound SPATIAL index (`FIELDS tenant, loc SPATIAL`) outscores both a
+		// single-column B-Tree index (`FIELDS tenant`, score 500) and a single-column
+		// SPATIAL index (`FIELDS loc SPATIAL`, score 350), emitting `BTreeAccess::Compound`
+		// with score 550.
+		let mut ix_compound = idx_current(1, "idx_tenant_loc", &["tenant", "loc"]);
+		ix_compound.index = crate::catalog::Index::Spatial;
+		let mut ix_single_loc = idx_current(2, "idx_loc", &["loc"]);
+		ix_single_loc.index = crate::catalog::Index::Spatial;
+		let ix_tenant = idx_current(3, "idx_tenant", &["tenant"]);
+		let analyzer_comp = analyzer(vec![ix_single_loc, ix_compound, ix_tenant], None)
+			.with_point_only_spatial(Arc::from(vec![true, true, false]));
+		let comp_cond = parse_cond("tenant = 'acme' AND loc INSIDE (-0.12, 51.5)");
+		let (comp_path, comp_score, comp_pinned) = analyzer_comp
+			.try_spatial_expansion_scored(Some(&comp_cond), Direction::Forward)
+			.expect("Compound spatial index should match tenant = 'acme' AND loc INSIDE ...");
+		assert_eq!(
+			comp_score, 550,
+			"Compound spatial index with 1 equality prefix should score 550"
+		);
+		assert_eq!(comp_pinned, 1);
+		let AccessPath::Union {
+			paths: comp_paths,
+			..
+		} = comp_path
+		else {
+			panic!("Expected AccessPath::Union for compound spatial index, got {comp_path:?}");
+		};
+		assert_eq!(comp_paths.len(), 1);
+		assert!(matches!(
+			&comp_paths[0],
+			AccessPath::BTreeScan {
+				index_ref,
+				access: BTreeAccess::Compound { prefix, .. },
+				..
+			} if index_ref.name == "idx_tenant_loc" && prefix.len() == 1
+		));
+
+		// 9. Multi-predicate spatial selection chooses the tightest covering (fewest scan ops)
+		// when two spatial predicates appear in an AND conjunction.
+		let multi_cond = parse_cond(
+			r#"loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[-10.0, 40.0], [10.0, 40.0], [10.0, 60.0], [-10.0, 60.0], [-10.0, 40.0]]]
+			} AND loc INSIDE (-0.12, 51.5)"#,
+		);
+		let multi_path = analyzer_pt
+			.try_spatial_expansion(Some(&multi_cond), Direction::Forward)
+			.expect("Multi-predicate spatial query should succeed");
+		let AccessPath::Union {
+			paths: multi_paths,
+			..
+		} = multi_path
+		else {
+			panic!("Expected AccessPath::Union, got {multi_path:?}");
+		};
+		assert_eq!(
+			multi_paths.len(),
+			1,
+			"Planner should choose the point predicate (1 op) over the wide polygon in an AND conjunction"
+		);
+
+		// 10. `or_union_from_expr` uses compound SPATIAL index (score 550) in OR branches even
+		// when a single-column equality index (`idx_tenant`, score 500) is present.
+		let comp_or_cond = parse_cond(
+			"(tenant = 'acme' AND loc INSIDE (-0.12, 51.5)) OR (tenant = 'beta' AND loc INSIDE (2.35, 48.85))",
+		);
+		let (comp_or_path, comp_or_score) = analyzer_comp
+			.or_union_from_expr(&comp_or_cond, Direction::Forward)
+			.expect("OR of compound spatial branches should produce a Union");
+		assert_eq!(comp_or_score, 550);
+		let AccessPath::Union {
+			paths: comp_or_paths,
+			..
+		} = comp_or_path
+		else {
+			panic!("Expected AccessPath::Union for compound spatial OR, got {comp_or_path:?}");
+		};
+		assert_eq!(comp_or_paths.len(), 2);
+		assert!(comp_or_paths.iter().all(|p| matches!(
+			p,
+			AccessPath::BTreeScan {
+				index_ref,
+				access: BTreeAccess::Compound { prefix, .. },
+				..
+			} if index_ref.name == "idx_tenant_loc" && prefix.len() == 1
+		)));
+
+		// 11. `try_knn_prefilter` uses compound SPATIAL index when `stripped` contains both the
+		// prefix equality (`tenant = 'acme'`) and the spatial predicate (`loc INSIDE ...`).
+		let comp_knn_prefilter = analyzer_comp
+			.try_knn_prefilter(&comp_cond, &|ix, col| ix.one_entry_per_record(col))
+			.expect("Compound spatial predicate should produce a KNN prefilter");
+		assert!(comp_knn_prefilter.residual.is_some());
+		let has_compound_spatial_leaf = match &comp_knn_prefilter.root {
+			BitmapPlan::And(children) | BitmapPlan::Or(children) => children.iter().any(|c| {
+				matches!(
+					c,
+					BitmapPlan::BTree {
+						index_ref,
+						access: BTreeAccess::Compound { prefix, .. },
+					} if index_ref.name == "idx_tenant_loc" && prefix.len() == 1
+				) || matches!(
+					c,
+					BitmapPlan::Or(inner) if inner.iter().any(|ic| matches!(
+						ic,
+						BitmapPlan::BTree {
+							index_ref,
+							access: BTreeAccess::Compound { prefix, .. },
+						} if index_ref.name == "idx_tenant_loc" && prefix.len() == 1
+					))
+				)
+			}),
+			BitmapPlan::BTree {
+				..
+			}
+			| BitmapPlan::FullText {
+				..
+			}
+			| BitmapPlan::Graph {
+				..
+			}
+			| BitmapPlan::AndNot {
+				..
+			} => false,
+		};
+		assert!(
+			has_compound_spatial_leaf,
+			"KNN prefilter should use compound spatial index `idx_tenant_loc`, got {:?}",
+			comp_knn_prefilter.root
+		);
+
+		// 12. `access_repeats_records` is false for an exact compound cell lookup (`range: None`
+		// with scalar prefix) and true for a compound cell range (`range: Some(_)`).
+		let comp_spatial_ref =
+			analyzer_comp.index_ref(1).with_scalar_columns(vec![true, false].into_boxed_slice());
+		let exact_compound = BTreeAccess::Compound {
+			prefix: vec![
+				BoundOperand::Literal(Value::from("acme")),
+				BoundOperand::Literal(Value::from(42i64)),
+			],
+			range: None,
+			upper: None,
+		};
+		assert!(!crate::exec::index::access_path::access_repeats_records(
+			&comp_spatial_ref,
+			&exact_compound
+		));
+		let range_compound = BTreeAccess::Compound {
+			prefix: vec![BoundOperand::Literal(Value::from("acme"))],
+			range: Some((BinaryOperator::MoreThanEqual, BoundOperand::Literal(Value::from(10i64)))),
+			upper: Some((BinaryOperator::LessThanEqual, BoundOperand::Literal(Value::from(20i64)))),
+		};
+		assert!(crate::exec::index::access_path::access_repeats_records(
+			&comp_spatial_ref,
+			&range_compound
+		));
+
+		// 13. Vacuous-truth guard: `loc ALLINSIDE [pt1, pt2]` and `[pt1, pt2] CONTAINSALL loc`
+		// must NOT expand via the spatial index because an empty array/set row (`loc = []`)
+		// evaluates to `true` at runtime while emitting zero index entries.
+		let loc_all_inside_arr = parse_cond("loc ALLINSIDE [(-0.12, 51.5), (139.69, 35.68)]");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&loc_all_inside_arr), Direction::Forward)
+				.is_none()
+		);
+		let arr_contains_all_loc = parse_cond("[(-0.12, 51.5), (139.69, 35.68)] CONTAINSALL loc");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&arr_contains_all_loc), Direction::Forward)
+				.is_none()
+		);
+		// Conversely, `loc CONTAINSALL [pt1, pt2]` and `[pt1, pt2] ALLINSIDE loc` DO expand.
+		let loc_contains_all_arr = parse_cond("loc CONTAINSALL [(-0.12, 51.5), (139.69, 35.68)]");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&loc_contains_all_arr), Direction::Forward)
+				.is_some()
+		);
+		let arr_all_inside_loc = parse_cond("[(-0.12, 51.5), (139.69, 35.68)] ALLINSIDE loc");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&arr_all_inside_loc), Direction::Forward)
+				.is_some()
+		);
+
+		// 14. Query array containing an empty geometry component (`MultiPoint([])`) is rejected
+		// so `CONTAINSANY` cannot miss rows that match the empty component vacuously.
+		let contains_any_empty = parse_cond(
+			r#"loc CONTAINSANY [(-0.12, 51.5), { type: "MultiPoint", coordinates: [] }]"#,
+		);
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&contains_any_empty), Direction::Forward)
+				.is_none()
+		);
+
+		// 15. `scan_ordering` stops at the trailing Hilbert cell column of `Index::Spatial` even
+		// if `scalar` is set on the `IndexRef`.
+		let spatial_ref_all_scalar =
+			analyzer_comp.index_ref(1).with_scalar_columns(vec![true, true].into_boxed_slice());
+		let pinned_prefix_only = BTreeAccess::Compound {
+			prefix: vec![BoundOperand::Literal(Value::from("acme"))],
+			range: None,
+			upper: None,
+		};
+		assert!(
+			crate::exec::index::access_path::scan_ordering(
+				&spatial_ref_all_scalar,
+				&pinned_prefix_only,
+				Direction::Forward,
+			)
+			.is_empty()
+		);
+
+		// 16. `<point> [lon, lat]` cast on a 2-element array literal in `geo::distance` expands
+		// via the spatial index, whereas an invalid `<geometry<polygon>> (0.0, 0.0)` or
+		// `<point> [1.0, 2.0, 3.0]` cast does not.
+		let dist_cast_array = parse_cond("geo::distance(loc, <point> [6.365, 49.469]) < 400");
+		assert!(
+			analyzer_pt.try_spatial_expansion(Some(&dist_cast_array), Direction::Forward).is_some()
+		);
+		let invalid_cast_geom = parse_cond("loc INSIDE <geometry<polygon>> (0.0, 0.0)");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&invalid_cast_geom), Direction::Forward)
+				.is_none()
+		);
+		let invalid_cast_point = parse_cond("loc INSIDE <point> [1.0, 2.0, 3.0]");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&invalid_cast_point), Direction::Forward)
+				.is_none()
+		);
+
+		// 17. A regex equality on a compound prefix column (`tenant = /acme/`) must not match a
+		// compound spatial index prefix (`idx_tenant_loc`, score 550) because `=` on a regex
+		// matches any string under any key; instead it falls back to the single-column spatial
+		// index (`idx_loc`, score 350).
+		let regex_prefix_cond = parse_cond("tenant = /acme/ AND loc INSIDE (-0.12, 51.5)");
+		let (_, regex_score, regex_pinned) = analyzer_comp
+			.try_spatial_expansion_scored(Some(&regex_prefix_cond), Direction::Forward)
+			.expect("Should fall back to single-column spatial index");
+		assert_eq!(regex_score, 350);
+		assert_eq!(regex_pinned, 0);
+
+		// 17b. `geo::distance` does not expand on a non-point-only SPATIAL index (`analyzer_gen`)
+		// because `geo::distance` returns `NONE` (`NONE < r` is `true`) for non-point geometries.
+		assert!(
+			analyzer_gen
+				.try_spatial_expansion(Some(&dist_cast_array), Direction::Forward)
+				.is_none(),
+			"geo::distance must not expand on a non-point-only spatial index"
+		);
+
+		// 17c. Wide spatial coverings (continental box `[-10, 35]–[40, 70]`, `1,000 km` cap, and
+		// whole-Earth cap) still expand on a single-column SPATIAL index when uncompeted, while
+		// their spherical surface-area penalty scales down smoothly:
+		// - `1,000 km` cap (`~0.61%` of Earth) scores in `210..300` (below bounded B-tree range
+		//   `300`, above half-bounded `200`);
+		// - continental Europe box (`[-10, 35]–[40, 70]`, `~3.37%` of Earth) and whole-Earth cap
+		//   (`100%` of Earth, score `110`) drop below a half-bounded B-tree range (`200`), and are
+		//   skipped by `try_bitmap_fusion` when paired with a B-tree anchor;
+		// - `CONTAINSALL [$world, $paris]` selects and scores the `$paris` item rather than the
+		//   1-cell `$world` root covering.
+		let whole_earth_dist = parse_cond("geo::distance(loc, (0.0, 0.0)) < 25000000");
+		let (_, whole_earth_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&whole_earth_dist), Direction::Forward)
+			.expect("Whole-Earth cap should still expand on a SPATIAL index");
+		assert_eq!(whole_earth_score, 110);
+		let continental_poly = parse_cond(
+			r#"loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[-10.0, 35.0], [40.0, 35.0], [40.0, 70.0], [-10.0, 70.0], [-10.0, 35.0]]]
+			}"#,
+		);
+		let (_, continental_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&continental_poly), Direction::Forward)
+			.expect("Continental [-10,35]-[40,70] box should expand on a SPATIAL index");
+		assert!(
+			(170..200).contains(&continental_score),
+			"Continental [-10,35]-[40,70] box score ({continental_score}) should drop below a half-bounded B-tree range (200)"
+		);
+		let cap_1000km = parse_cond("geo::distance(loc, (0.0, 51.5)) < 1000000");
+		let (_, cap_1000km_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&cap_1000km), Direction::Forward)
+			.expect("1,000 km cap should expand on a SPATIAL index");
+		assert!(
+			(210..300).contains(&cap_1000km_score),
+			"1,000 km cap score ({cap_1000km_score}) should rank below a bounded B-tree range (300) and above a half-bounded range (200)"
+		);
+		// `try_bitmap_fusion` fuses a regional (`~3.37%` of Earth) spatial covering with a B-tree
+		// predicate (`score > 39900`) into `BitmapPlan::And` rather than skipping fusion above
+		// `1%`.
+		let regional_range_and_btree = parse_cond(
+			r#"score > 39900 AND loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[-10.0, 35.0], [40.0, 35.0], [40.0, 70.0], [-10.0, 70.0], [-10.0, 35.0]]]
+			}"#,
+		);
+		let regional_range_cands = analyzer_mixed.analyze(Some(&regional_range_and_btree), None);
+		assert!(
+			matches!(
+				analyzer_mixed.try_bitmap_fusion(
+					Some(&regional_range_and_btree),
+					&regional_range_cands,
+					&|ix, col| ix.one_entry_per_record(col)
+				),
+				Some(BitmapPlan::And(ref children)) if children.len() == 2
+			),
+			"Continental Europe (~3.37% area) covering should fuse into BitmapAnd with a B-tree candidate"
+		);
+		// `CONTAINSALL [$world, $paris]` chooses and scores `$paris`, whereas
+		// `CONTAINSALL [$world, $world]` scores `110 < 200`.
+		let contains_all_world_paris = parse_cond(
+			r#"loc CONTAINSALL [
+				{ type: "Polygon", coordinates: [[[-180.0, -90.0], [180.0, -90.0], [180.0, 90.0], [-180.0, 90.0], [-180.0, -90.0]]] },
+				{ type: "Polygon", coordinates: [[[2.2, 48.8], [2.4, 48.8], [2.4, 48.9], [2.2, 48.9], [2.2, 48.8]]] }
+			]"#,
+		);
+		let (_, world_paris_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&contains_all_world_paris), Direction::Forward)
+			.expect("CONTAINSALL [$world, $paris] should expand");
+		assert!(
+			world_paris_score > 340,
+			"CONTAINSALL [$world, $paris] should scan and score the selective $paris box, got {world_paris_score}"
+		);
+		let contains_all_world_world = parse_cond(
+			r#"loc CONTAINSALL [
+				{ type: "Polygon", coordinates: [[[-180.0, -90.0], [180.0, -90.0], [180.0, 90.0], [-180.0, 90.0], [-180.0, -90.0]]] },
+				{ type: "Polygon", coordinates: [[[-180.0, -90.0], [180.0, -90.0], [180.0, 90.0], [-180.0, 90.0], [-180.0, -90.0]]] }
+			]"#,
+		);
+		let (_, world_world_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&contains_all_world_world), Direction::Forward)
+			.expect("CONTAINSALL [$world, $world] should expand");
+		assert_eq!(world_world_score, 110);
+		// Zero-area query geometries spanning the globe (horizontal equator line or vertical
+		// meridian line) are scored by their covering cells' spherical surface area (`< 200`)
+		// rather than their degenerate 0.0 bounding-box area (`350`), and `CONTAINSALL` picks
+		// the selective point over the globe-spanning line.
+		let equator_line = parse_cond(
+			r#"loc INTERSECTS {
+				type: "LineString",
+				coordinates: [[-179.0, 0.0], [179.0, 0.0]]
+			}"#,
+		);
+		let (_, equator_line_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&equator_line), Direction::Forward)
+			.expect("Equator line should expand on a SPATIAL index");
+		assert!(
+			equator_line_score < 200,
+			"Globe-spanning horizontal line covering must score below half-bounded B-tree range (200), got {equator_line_score}"
+		);
+		let meridian_line = parse_cond(
+			r#"loc INTERSECTS {
+				type: "LineString",
+				coordinates: [[0.0, -89.0], [0.0, 89.0]]
+			}"#,
+		);
+		let (_, meridian_line_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&meridian_line), Direction::Forward)
+			.expect("Meridian line should expand on a SPATIAL index");
+		assert!(
+			meridian_line_score < 200,
+			"Pole-to-pole meridian line covering must score below half-bounded B-tree range (200), got {meridian_line_score}"
+		);
+		let contains_all_paris_and_line = parse_cond(
+			r#"loc CONTAINSALL [
+				(2.35, 48.85),
+				{
+					type: "LineString",
+					coordinates: [[-179.0, 0.0], [179.0, 0.0]]
+				}
+			]"#,
+		);
+		let (paris_only_path, _, _) = analyzer_pt
+			.try_spatial_expansion_scored(
+				Some(&parse_cond("loc CONTAINS (2.35, 48.85)")),
+				Direction::Forward,
+			)
+			.expect("Point CONTAINS should expand");
+		let (paris_and_line_path, paris_and_line_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&contains_all_paris_and_line), Direction::Forward)
+			.expect("CONTAINSALL [Paris, equator_line] should expand");
+		assert_eq!(paris_and_line_score, 350);
+		assert_eq!(
+			format!("{paris_and_line_path:?}"),
+			format!("{paris_only_path:?}"),
+			"CONTAINSALL [Paris, equator_line] must drive from Paris's tight covering, not equator_line's"
+		);
+		// Polar polygon spanning all 360° of longitude near the North Pole covers 16 level-4
+		// cells (`78.75°..=90°`), whose spherical surface area is ~0.96% of Earth (versus 6.25%
+		// equirectangular, which would clamp to 110), so its score (`266`) stays above 250.
+		let polar_poly = parse_cond(
+			r#"loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[-180.0, 89.0], [180.0, 89.0], [180.0, 90.0], [-180.0, 90.0], [-180.0, 89.0]]]
+			}"#,
+		);
+		let (_, polar_poly_score, _) = analyzer_pt
+			.try_spatial_expansion_scored(Some(&polar_poly), Direction::Forward)
+			.expect("Polar polygon should expand on a SPATIAL index");
+		assert!(
+			polar_poly_score > 250,
+			"Polar polygon covering spherical area is <1% so score ({polar_poly_score}) must exceed 250"
+		);
+		// Two 1,000 km caps in an OR accumulate their spherical area penalties so the combined
+		// union scores lower than either branch alone.
+		let or_two_caps = parse_cond(
+			"geo::distance(loc, (0.0, 51.5)) < 1000000 OR geo::distance(loc, (10.0, 45.0)) < 1000000",
+		);
+		let (_, or_caps_score) = analyzer_pt
+			.or_union_from_expr(&or_two_caps, Direction::Forward)
+			.expect("OR of two 1,000 km caps should expand");
+		assert!(
+			or_caps_score < cap_1000km_score && or_caps_score < 210,
+			"OR of two 1,000 km caps ({or_caps_score}) should score lower than a single 1,000 km cap ({cap_1000km_score})"
+		);
+		let compound_continental = parse_cond(
+			r#"tenant = 'acme' AND loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[-10.0, 35.0], [40.0, 35.0], [40.0, 70.0], [-10.0, 70.0], [-10.0, 35.0]]]
+			}"#,
+		);
+		let (_, comp_continental_score, comp_pinned) = analyzer_comp
+			.try_spatial_expansion_scored(Some(&compound_continental), Direction::Forward)
+			.expect(
+				"Compound spatial index with matched equality prefix should expand wide polygon",
+			);
+		assert_eq!(comp_continental_score, 550);
+		assert_eq!(comp_pinned, 1);
+
+		// 18. `try_bitmap_fusion` does not fuse two spatial conjuncts on the same spatial index
+		// with each other (`multi_cond` has no other index, so `try_bitmap_fusion` returns `None`
+		// and lets `try_spatial_expansion` stream the single tightest covering).
+		let multi_cands = analyzer_pt.analyze(Some(&multi_cond), None);
+		assert!(
+			analyzer_pt
+				.try_bitmap_fusion(Some(&multi_cond), &multi_cands, &|ix, col| {
+					ix.one_entry_per_record(col)
+				})
+				.is_none(),
+			"Two spatial conjuncts on the same spatial column without another index must not self-fuse"
+		);
+
+		// 19. When two distinct spatial columns (`pickup`, `dropoff`) each have a `SPATIAL` index,
+		// `try_bitmap_fusion` fuses both into a 2-branch `BitmapPlan::And`.
+		let mut pickup_def = idx_current(1, "idx_pickup", &["pickup"]);
+		pickup_def.index = crate::catalog::Index::Spatial;
+		let mut dropoff_def = idx_current(2, "idx_dropoff", &["dropoff"]);
+		dropoff_def.index = crate::catalog::Index::Spatial;
+		let analyzer_dual = analyzer(vec![pickup_def, dropoff_def], None)
+			.with_point_only_spatial(Arc::from(vec![true, true]));
+		let dual_cond = parse_cond("pickup INSIDE (-0.12, 51.5) AND dropoff INSIDE (2.35, 48.85)");
+		let dual_cands = analyzer_dual.analyze(Some(&dual_cond), None);
+		let dual_plan = analyzer_dual
+			.try_bitmap_fusion(Some(&dual_cond), &dual_cands, &|ix, col| {
+				ix.one_entry_per_record(col)
+			})
+			.expect(
+				"Two spatial conjuncts on distinct spatial columns should fuse via BitmapPlan::And",
+			);
+		assert!(matches!(dual_plan, BitmapPlan::And(ref children) if children.len() == 2));
+
+		// 20. `Value::Set` literal of geometries in `CONTAINSALL` / `CONTAINSANY` expands via the
+		// spatial index just like `Value::Array`.
+		let set_contains_all = parse_cond("loc CONTAINSALL {(-0.12, 51.5), (2.35, 48.85)}");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&set_contains_all), Direction::Forward)
+				.is_some()
+		);
+
+		// 21. `loc INSIDE [$g1, $g2]` (an array literal on the RHS of `INSIDE`) expands to a
+		// superset cell union without attaching an inline `SpatialPointFilter` (`point_filter` is
+		// `None`), and does not qualify for index-only `try_bitmap_count_fusion`, because runtime
+		// `INSIDE` on an array checks disjunctive element equality (`Array::contains`), not
+		// conjunctive `Geometry::Collection::contains`. `loc INTERSECTS [$g1]` is rejected
+		// outright because `Value::intersects` returns `false` on arrays.
+		let inside_array = parse_cond("loc INSIDE [(-0.12, 51.5), (2.35, 48.85)]");
+		let Some(AccessPath::Union {
+			paths: inside_arr_paths,
+			..
+		}) = analyzer_pt.try_spatial_expansion(Some(&inside_array), Direction::Forward)
+		else {
+			panic!("Expected Union access path for loc INSIDE [pt1, pt2]");
+		};
+		assert!(inside_arr_paths.iter().all(|p| {
+			matches!(
+				p,
+				AccessPath::BTreeScan {
+					access: BTreeAccess::Range {
+						range: OperandRange {
+							point_filter: None,
+							..
+						},
+					},
+					..
+				}
+			)
+		}));
+		assert!(analyzer_pt.try_bitmap_count_fusion(&inside_array, &|_, _| true).is_none());
+		let intersects_array = parse_cond("loc INTERSECTS [(-0.12, 51.5)]");
+		assert!(
+			analyzer_pt
+				.try_spatial_expansion(Some(&intersects_array), Direction::Forward)
+				.is_none()
+		);
+
+		// 22. `try_bitmap_count_fusion` admits a single exact spatial predicate on a point-only
+		// spatial index (`loc INSIDE (-0.12, 51.5)`) and `tenant = 'acme' AND !(loc INSIDE ...)`
+		// when `tenant` has an exact B-tree index, but rejects `tenant = 'acme' AND !(loc INSIDE
+		// ... AND unindexed = true)` so a negated conjunction is never partially subtracted.
+		assert!(analyzer_pt.try_bitmap_count_fusion(&pt_cond, &|_, _| true).is_some());
+		let tenant_btree = idx_current(10, "idx_tenant", &["tenant"]);
+		let mut loc_spatial = idx_current(11, "idx_loc", &["loc"]);
+		loc_spatial.index = crate::catalog::Index::Spatial;
+		let analyzer_tenant_loc = analyzer(vec![tenant_btree, loc_spatial], None)
+			.with_point_only_spatial(Arc::from(vec![false, true]));
+		let exact_and_not = parse_cond("tenant = 'acme' AND !(loc INSIDE (-0.12, 51.5))");
+		assert!(matches!(
+			analyzer_tenant_loc.try_bitmap_count_fusion(&exact_and_not, &|_, _| true),
+			Some(BitmapPlan::AndNot { .. })
+		));
+		// A regional spatial box covering ~2.5% of Earth's surface still participates in
+		// `try_bitmap_fusion` when paired with a B-tree equality leaf (`tenant = 'acme'`).
+		let regional_fusion_cond = parse_cond(
+			r#"tenant = 'acme' AND loc INSIDE {
+				type: "Polygon",
+				coordinates: [[[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0], [0.0, 0.0]]]
+			}"#,
+		);
+		let regional_cands = analyzer_tenant_loc.analyze(Some(&regional_fusion_cond), None);
+		let regional_fusion = analyzer_tenant_loc
+			.try_bitmap_fusion(Some(&regional_fusion_cond), &regional_cands, &|ix, col| {
+				ix.one_entry_per_record(col)
+			})
+			.expect("Regional (> 1% area) single-column spatial predicate should fuse with B-tree equality via BitmapPlan::And");
+		assert!(matches!(regional_fusion, BitmapPlan::And(ref children) if children.len() == 2));
+		let partial_and_not =
+			parse_cond("tenant = 'acme' AND !(loc INSIDE (-0.12, 51.5) AND unindexed = true)");
+		assert!(
+			analyzer_tenant_loc.try_bitmap_count_fusion(&partial_and_not, &|_, _| true).is_none(),
+			"Negated conjunction with an unindexed conjunct must not be partially subtracted"
+		);
+
+		// 23. A spatial `IndexDefinition` stamped below `SPATIAL_COVERING_FORMAT_VERSION` is
+		// skipped by all planner entry points (`try_spatial_expansion`, `try_bitmap_fusion`,
+		// `try_bitmap_count_fusion`, `try_knn_prefilter`, and `try_or_union`) so queries fall
+		// back to a table scan until `REBUILD INDEX` restamps the index.
+		let mut stale_spatial = idx_current(20, "idx_loc_stale", &["loc"]);
+		stale_spatial.index = crate::catalog::Index::Spatial;
+		stale_spatial.format_version = crate::catalog::SPATIAL_COVERING_FORMAT_VERSION - 1;
+		let tenant_for_stale = idx_current(21, "idx_tenant", &["tenant"]);
+		let analyzer_stale = analyzer(vec![stale_spatial, tenant_for_stale], None)
+			.with_point_only_spatial(Arc::from(vec![true, false]));
+		assert!(
+			analyzer_stale.try_spatial_expansion(Some(&pt_cond), Direction::Forward).is_none(),
+			"Stale-stamped spatial index must not be offered by try_spatial_expansion"
+		);
+		assert!(
+			analyzer_stale.try_bitmap_count_fusion(&pt_cond, &|_, _| true).is_none(),
+			"Stale-stamped spatial index must not be offered by try_bitmap_count_fusion"
+		);
+		assert!(
+			analyzer_stale
+				.try_knn_prefilter(&pt_cond, &|ix, col| ix.one_entry_per_record(col))
+				.is_none(),
+			"Stale-stamped spatial index must not be offered by try_knn_prefilter"
+		);
+		assert!(
+			analyzer_stale.try_or_union(Some(&or_cond), Direction::Forward).is_none(),
+			"Stale-stamped spatial index must not be offered by try_or_union"
+		);
+		let stale_and_cond = parse_cond("tenant = 'acme' AND loc INSIDE (-0.12, 51.5)");
+		let stale_cands = analyzer_stale.analyze(Some(&stale_and_cond), None);
+		assert!(
+			analyzer_stale
+				.try_bitmap_fusion(Some(&stale_and_cond), &stale_cands, &|ix, col| {
+					ix.one_entry_per_record(col)
+				})
+				.is_none(),
+			"Stale-stamped spatial index must not be offered by try_bitmap_fusion"
+		);
+
+		// 24. Multi-branch spatial OR queries share the `MAX_SPATIAL_SCAN_OPS` budget across
+		// branches instead of dropping to `None` (`TableScan`):
+		// - a 4-branch mixed-index (`analyzer_gen`, with ancestor probes) OR of regional boxes
+		//   produces `AccessPath::Union` within the 96-op cap;
+		// - a 16-branch point-only (`analyzer_pt`) OR of city-sized boxes (`0.4° × 0.3°`) produces
+		//   `AccessPath::Union` within the 96-op cap;
+		// - fractional area penalties across 16 boxes are summed in `f64` before rounding rather
+		//   than truncated to `0` per branch.
+		let mixed_4_or_sql = (0..4)
+			.map(|i| {
+				let lon0 = (i as f64) * 5.0;
+				let lon1 = lon0 + 0.4;
+				format!(
+					r#"loc INSIDE {{ type: "Polygon", coordinates: [[[{lon0}, 45.0], [{lon1}, 45.0], [{lon1}, 45.3], [{lon0}, 45.3], [{lon0}, 45.0]]] }}"#
+				)
+			})
+			.collect::<Vec<_>>()
+			.join(" OR ");
+		let mixed_4_or = parse_cond(&mixed_4_or_sql);
+		let (mixed_4_union, _) =
+			analyzer_gen.or_union_from_expr(&mixed_4_or, Direction::Forward).expect(
+				"4-branch mixed-index spatial OR should coarsen per branch instead of returning None",
+			);
+		let AccessPath::Union {
+			paths: mixed_4_paths,
+			..
+		} = mixed_4_union
+		else {
+			panic!("Expected AccessPath::Union for 4-branch mixed OR");
+		};
+		assert!(
+			!mixed_4_paths.is_empty()
+				&& mixed_4_paths.len() <= surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS
+		);
+
+		// An 8-branch or 24-branch mixed-index (`analyzer_gen`) OR where one box crosses `lon = 0`
+		// (`[-0.1..0.1, 51.4..51.6]`) coarsens ancestor depth without collapsing that branch to
+		// the root cell, whereas a 49-branch mixed-index OR where per-branch budget is 1 op
+		// declines the OR (`None` -> `TableScan`) instead of emitting root-cell full-index range
+		// scans, while a 49-branch point-only OR (`analyzer_pt`) still produces an
+		// `AccessPath::Union`.
+		let root_cell = surrealdb_idx::spatial::SpatialCellId::root();
+		let root_min = Value::from(root_cell.range_min().0);
+		let root_max = Value::from(root_cell.range_max().0);
+		let path_covers_root = |path: &AccessPath| -> bool {
+			let AccessPath::BTreeScan {
+				access: BTreeAccess::Range {
+					range,
+					..
+				},
+				..
+			} = path
+			else {
+				return false;
+			};
+			matches!(
+				(&range.start, &range.end),
+				(
+					Bound::Included(BoundOperand::Literal(lo)),
+					Bound::Included(BoundOperand::Literal(hi)),
+				) if *lo <= root_min && *hi >= root_max
+			)
+		};
+		for branches in [8usize, 24] {
+			let mixed_cross_meridian_sql = (0..branches)
+				.map(|i| {
+					let lon0 = -0.1 + (i as f64) * 2.0;
+					let lon1 = lon0 + 0.2;
+					format!(
+						r#"loc INSIDE {{ type: "Polygon", coordinates: [[[{lon0}, 51.4], [{lon1}, 51.4], [{lon1}, 51.6], [{lon0}, 51.6], [{lon0}, 51.4]]] }}"#
+					)
+				})
+				.collect::<Vec<_>>()
+				.join(" OR ");
+			let mixed_or = parse_cond(&mixed_cross_meridian_sql);
+			let (mixed_union, _) = analyzer_gen
+				.or_union_from_expr(&mixed_or, Direction::Forward)
+				.unwrap_or_else(|| {
+					panic!(
+						"{branches}-branch mixed-index OR crossing lon = 0 should produce AccessPath::Union without collapsing to root"
+					)
+				});
+			let AccessPath::Union {
+				paths: mixed_paths,
+				..
+			} = mixed_union
+			else {
+				panic!("Expected AccessPath::Union for {branches}-branch mixed OR");
+			};
+			assert!(
+				!mixed_paths.is_empty()
+					&& mixed_paths.len() <= surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS
+			);
+			assert!(
+				!mixed_paths.iter().any(path_covers_root),
+				"{branches}-branch mixed-index OR crossing lon = 0 must not emit a full-index root range scan"
+			);
+		}
+
+		let mixed_49_or_sql = (0..49)
+			.map(|i| {
+				let lon0 = -0.1 + (i as f64) * 2.0;
+				let lon1 = lon0 + 0.2;
+				format!(
+					r#"loc INSIDE {{ type: "Polygon", coordinates: [[[{lon0}, 51.4], [{lon1}, 51.4], [{lon1}, 51.6], [{lon0}, 51.6], [{lon0}, 51.4]]] }}"#
+				)
+			})
+			.collect::<Vec<_>>()
+			.join(" OR ");
+		let mixed_49_or = parse_cond(&mixed_49_or_sql);
+		assert!(
+			analyzer_gen.or_union_from_expr(&mixed_49_or, Direction::Forward).is_none(),
+			"49-branch mixed-index OR must decline the union and fall back to TableScan instead of scanning the root cell"
+		);
+		let (pt_49_union, _) =
+			analyzer_pt.or_union_from_expr(&mixed_49_or, Direction::Forward).expect(
+				"49-branch point-only OR crossing lon = 0 should still produce AccessPath::Union",
+			);
+		assert!(matches!(pt_49_union, AccessPath::Union { .. }));
+
+		let pt_16_or_sql = (0..16)
+			.map(|i| {
+				let lon0 = -30.0 + (i as f64) * 3.0;
+				let lon1 = lon0 + 1.2;
+				format!(
+					r#"loc INSIDE {{ type: "Polygon", coordinates: [[[{lon0}, 10.0], [{lon1}, 10.0], [{lon1}, 11.2], [{lon0}, 11.2], [{lon0}, 10.0]]] }}"#
+				)
+			})
+			.collect::<Vec<_>>()
+			.join(" OR ");
+		let pt_16_or = parse_cond(&pt_16_or_sql);
+		let (pt_16_union, pt_16_score) =
+			analyzer_pt.or_union_from_expr(&pt_16_or, Direction::Forward).expect(
+				"16-branch point-only spatial OR should coarsen per branch instead of returning None",
+			);
+		let AccessPath::Union {
+			paths: pt_16_paths,
+			..
+		} = pt_16_union
+		else {
+			panic!("Expected AccessPath::Union for 16-branch point-only OR");
+		};
+		assert!(
+			!pt_16_paths.is_empty()
+				&& pt_16_paths.len() <= surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS
+		);
+		assert!(
+			pt_16_score < 350,
+			"16-branch OR of 1.2°×1.2° boxes must accumulate fractional area penalties before rounding, got {pt_16_score}"
+		);
+
+		// 25. `spatial_plan_cache` verifies predicate equality on hash hit so a colliding hash key
+		// never returns another predicate's covering or area.
+		let pred_a = SpatialPredicate::Geometry {
+			geom: crate::val::Geometry::Point(geo_types::Point::new(-0.12, 51.5)),
+			exact_kind: Some(SpatialExactKind::Inside),
+		};
+		let pred_b = SpatialPredicate::Geometry {
+			geom: crate::val::Geometry::Point(geo_types::Point::new(139.69, 35.68)),
+			exact_kind: Some(SpatialExactKind::Inside),
+		};
+		let key_b = pred_b.cache_key(false, surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS);
+		let (ops_a, _) = analyzer_pt.plan_spatial_scans(
+			&pred_a,
+			false,
+			surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS,
+		);
+		// Force a synthetic hash collision by inserting `pred_a` under `key_b`.
+		analyzer_pt.spatial_plan_cache.borrow_mut().insert(
+			key_b,
+			vec![(
+				pred_a,
+				false,
+				surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS,
+				Arc::clone(&ops_a),
+				0.99,
+			)],
+		);
+		let (ops_b, area_b) = analyzer_pt.plan_spatial_scans(
+			&pred_b,
+			false,
+			surrealdb_idx::spatial::MAX_SPATIAL_SCAN_OPS,
+		);
+		assert_ne!(
+			ops_a.as_ref(),
+			ops_b.as_ref(),
+			"Hash collision in spatial_plan_cache must not return pred_a's covering for pred_b"
+		);
+		assert!(area_b < 0.01);
+
+		// 26. `value_to_geometry` rejects geometries containing non-finite coordinates (`inf` or
+		// `NaN`) so query predicates with non-finite vertices decline the spatial index plan.
+		let non_finite_poly = crate::val::Geometry::Polygon(geo_types::Polygon::new(
+			geo_types::LineString::from(vec![
+				(0.0, 0.0),
+				(50.0, 0.0),
+				(f64::INFINITY, 25.0),
+				(50.0, 50.0),
+				(0.0, 50.0),
+				(0.0, 0.0),
+			]),
+			vec![],
+		));
+		assert!(IndexAnalyzer::value_to_geometry(Value::Geometry(non_finite_poly)).is_none());
+
+		// 27. `index_scan_is_id_only` and `spatial_union_is_id_only` require `!versioned` and
+		// `DecodeFields::is_id_only()` so `explain.rs` and `host.rs` stay in sync under `VERSION`
+		// scopes.
+		let id_only_decode =
+			crate::exec::operators::scan::common::DecodeFields::new(std::iter::empty::<String>());
+		assert!(crate::exec::index::access_path::spatial_union_is_id_only(
+			true,
+			false,
+			Some(&id_only_decode),
+		));
+		assert!(!crate::exec::index::access_path::spatial_union_is_id_only(
+			true,
+			true,
+			Some(&id_only_decode),
+		));
+		assert!(crate::exec::index::access_path::index_scan_is_id_only(
+			false,
+			pt_branch_access,
+			false,
+			Some(&id_only_decode),
+		));
+		assert!(!crate::exec::index::access_path::index_scan_is_id_only(
+			false,
+			pt_branch_access,
+			true,
+			Some(&id_only_decode),
+		));
+
+		// 28. Non-exact decimal radii in `geo::distance(loc, center) < dec` / `<= dec` normalize
+		// against `Number::cmp` (`(f_hi, false)` where `f_hi.next_down() < dec < f_hi`) so that
+		// `SpatialPointFilter::Cap` agrees with `Number::cmp` at half-ULP boundaries.
+		let cond_lt_above =
+			parse_cond("geo::distance(loc, (0.0, 0.0)) < 100.00000000000000000000000001dec");
+		let cond_le_above =
+			parse_cond("geo::distance(loc, (0.0, 0.0)) <= 100.00000000000000000000000001dec");
+		let cond_lt_below =
+			parse_cond("geo::distance(loc, (0.0, 0.0)) < 99.99999999999999999999999999dec");
+		let cond_le_below =
+			parse_cond("geo::distance(loc, (0.0, 0.0)) <= 99.99999999999999999999999999dec");
+		for cond in [&cond_lt_above, &cond_le_above] {
+			let mut preds = Vec::new();
+			IndexAnalyzer::collect_spatial_expressions(cond, &mut preds);
+			assert_eq!(preds.len(), 1);
+			assert_eq!(
+				preds[0].1,
+				SpatialPredicate::Cap {
+					center: crate::val::Geometry::Point((0.0, 0.0).into()),
+					radius: 100.0_f64.next_up(),
+					inclusive: false,
+				}
+			);
+		}
+		for cond in [&cond_lt_below, &cond_le_below] {
+			let mut preds = Vec::new();
+			IndexAnalyzer::collect_spatial_expressions(cond, &mut preds);
+			assert_eq!(preds.len(), 1);
+			assert_eq!(
+				preds[0].1,
+				SpatialPredicate::Cap {
+					center: crate::val::Geometry::Point((0.0, 0.0).into()),
+					radius: 100.0_f64,
+					inclusive: false,
+				}
+			);
+		}
+
+		// 29. Only truth-preserving prefix operators (`<bool>` on a statically-boolean inner
+		// expression, and `<any>`) recurse into `collect_spatial_expressions` and
+		// `collect_conditions`; casts to other types (such as `<string>`) and range prefixes
+		// (`..`, `..=`) do not push the inner spatial predicate down.
+		for non_truth_preserving in [
+			"<string> (loc INSIDE (-0.12, 51.5))",
+			"<int> (loc INSIDE (-0.12, 51.5))",
+			"..(loc INSIDE (-0.12, 51.5))",
+			"..=(loc INSIDE (-0.12, 51.5))",
+			"!(loc INSIDE (-0.12, 51.5))",
+			"<bool> (NONE AND loc INSIDE (-0.12, 51.5))",
+		] {
+			let cond = parse_cond(non_truth_preserving);
+			assert!(
+				analyzer_pt.try_spatial_expansion(Some(&cond), Direction::Forward).is_none(),
+				"Non-truth-preserving prefix `{non_truth_preserving}` must not push down to spatial index"
+			);
+		}
+		for truth_preserving in [
+			"<bool> (loc INSIDE (-0.12, 51.5))",
+			"<any> (loc INSIDE (-0.12, 51.5))",
+			"<bool> (tenant = 'acme' AND loc INSIDE (-0.12, 51.5))",
+		] {
+			let cond = parse_cond(truth_preserving);
+			assert!(
+				analyzer_pt.try_spatial_expansion(Some(&cond), Direction::Forward).is_some(),
+				"Truth-preserving prefix `{truth_preserving}` should push down to spatial index"
+			);
 		}
 	}
 }

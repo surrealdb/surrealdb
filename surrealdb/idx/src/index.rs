@@ -69,6 +69,8 @@ pub struct IndexOperation<'a> {
 	shapes_by: ShapeRecorder,
 }
 
+type SingleGeometryCover = (Vec<crate::spatial::SpatialCellId>, Option<(f64, f64)>);
+
 impl<'a> IndexOperation<'a> {
 	#[expect(clippy::too_many_arguments)]
 	pub fn new(
@@ -152,6 +154,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Hnsw(p) => self.index_hnsw(p, require_compaction).await,
 			Index::DiskAnn(p) => self.index_diskann(p, require_compaction).await,
 			Index::Count(c) => self.index_count(c.as_ref(), require_compaction).await,
+			Index::Spatial => self.index_spatial().await,
 		}
 	}
 
@@ -181,6 +184,7 @@ impl<'a> IndexOperation<'a> {
 		Ok(IndexEntryValue {
 			rid: self.rid.clone(),
 			doc_id,
+			point: None,
 		})
 	}
 
@@ -211,10 +215,11 @@ impl<'a> IndexOperation<'a> {
 	{
 		match txn.del_compare_key(key, Some(expected)).await {
 			Err(e) if Self::is_condition_not_met(&e) => {
-				if expected.doc_id.is_some() {
+				if expected.doc_id.is_some() || expected.point.is_some() {
 					let bare = IndexEntryValue {
 						rid: expected.rid.clone(),
 						doc_id: None,
+						point: None,
 					};
 					match txn.del_compare_key(key, Some(&bare)).await {
 						Err(e) if Self::is_condition_not_met(&e) => {}
@@ -299,6 +304,9 @@ impl<'a> IndexOperation<'a> {
 	/// those its columns are expected to ([`recorded_shapes`]), in the
 	/// transaction that writes their entries ([`Transaction::record_index_shapes`]).
 	async fn record_shapes(&self, txn: &Transaction, n: &[Value]) -> Result<()> {
+		if recorded_shapes(n, self.ix).next().is_none() {
+			return Ok(());
+		}
 		let ix = self.ix.index_id;
 		let known = txn.index_shapes(self.ns, self.db, &self.table_name, ix).await?;
 		if known.records_all(recorded_shapes(n, self.ix)) {
@@ -348,6 +356,272 @@ impl<'a> IndexOperation<'a> {
 				let key = self.stored_key(false, &n)?;
 				txn.set_key(&key, &value).await?;
 			}
+		}
+		Ok(())
+	}
+
+	/// Stream the Hilbert covering cells for a single element of a trailing
+	/// `Array` or `Set` spatial column directly to `txn`.
+	///
+	/// Each geometry produces at most `cfg.max_cells` cells, which are written or
+	/// deleted immediately with a per-cell cancellation checkpoint; an element
+	/// that yields no cells still runs a checkpoint so a large container of
+	/// non-geometry values cannot spin unchecked.
+	#[expect(clippy::too_many_arguments)]
+	async fn apply_spatial_container_elem(
+		&self,
+		txn: &Transaction,
+		prefix: &mut Vec<Value>,
+		elem: &Value,
+		value: &IndexEntryValue,
+		cfg: &crate::spatial::CoverConfig,
+		is_delete: bool,
+		entry: &mut usize,
+	) -> Result<()> {
+		let cells = elem
+			.geometry_operand()
+			.map(|geom| crate::spatial::cover_geometry_for_index(&geom, cfg))
+			.unwrap_or_default();
+		if cells.is_empty() {
+			self.checkpoint(txn, *entry).await?;
+			*entry += 1;
+			return Ok(());
+		}
+		for cell in cells {
+			self.checkpoint(txn, *entry).await?;
+			*entry += 1;
+			prefix.push(Value::Number(crate::val::Number::Int(cell.0)));
+			let key = self.stored_key(false, prefix)?;
+			prefix.pop();
+			if is_delete {
+				Self::del_entry(txn, &key, value).await?;
+			} else {
+				txn.set_key(&key, value).await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// Extract the sorted, deduplicated covering cells (`<= cfg.max_cells`) and
+	/// optional exact `Point` coordinates when `last` is a single geometry.
+	fn extract_single_geometry_cells(
+		last: &Value,
+		cfg: &crate::spatial::CoverConfig,
+	) -> Option<SingleGeometryCover> {
+		let geom = last.geometry_operand()?;
+		let pt = match geom.as_ref() {
+			crate::val::Geometry::Point(pt) => Some((pt.x(), pt.y())),
+			crate::val::Geometry::Line(_)
+			| crate::val::Geometry::Polygon(_)
+			| crate::val::Geometry::MultiPoint(_)
+			| crate::val::Geometry::MultiLine(_)
+			| crate::val::Geometry::MultiPolygon(_)
+			| crate::val::Geometry::Collection(_) => None,
+		};
+		let cells = crate::spatial::cover_geometry_for_index(&geom, cfg);
+		Some((cells, pt))
+	}
+
+	/// Stream the Hilbert covering cells for `vals` (leading prefix columns plus
+	/// trailing spatial column) directly to `txn`, running [`Self::checkpoint`]
+	/// before each KV write/delete so neither compound prefix fan-out nor a
+	/// trailing geometry `Array`/`Set` is materialized in memory.
+	async fn apply_spatial_entries(
+		&self,
+		txn: &Transaction,
+		mut vals: Vec<Value>,
+		value: &mut IndexEntryValue,
+		cfg: &crate::spatial::CoverConfig,
+		is_delete: bool,
+	) -> Result<()> {
+		let Some(last) = vals.pop() else {
+			return Ok(());
+		};
+		let mut entry = 0usize;
+		if let Some((cells, pt)) = Self::extract_single_geometry_cells(&last, cfg) {
+			if cells.is_empty() {
+				return Ok(());
+			}
+			value.point = pt;
+			for mut prefix in Indexable::new(vals, self.ix) {
+				for cell in &cells {
+					self.checkpoint(txn, entry).await?;
+					entry += 1;
+					prefix.0.push(Value::Number(crate::val::Number::Int(cell.0)));
+					let key = self.stored_key(false, &prefix.0)?;
+					prefix.0.pop();
+					if is_delete {
+						Self::del_entry(txn, &key, value).await?;
+					} else {
+						txn.set_key(&key, value).await?;
+					}
+				}
+			}
+		} else {
+			let has_elements = match &last {
+				Value::Array(arr) => !arr.is_empty(),
+				Value::Set(set) => !set.is_empty(),
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Closure(_) => false,
+			};
+			if !has_elements {
+				return Ok(());
+			}
+			value.point = None;
+			for mut prefix in Indexable::new(vals, self.ix) {
+				match &last {
+					Value::Array(arr) => {
+						for elem in arr.iter() {
+							if let Value::Set(set) = elem {
+								if set.is_empty() {
+									self.checkpoint(txn, entry).await?;
+									entry += 1;
+								} else {
+									for sub in set.iter() {
+										self.apply_spatial_container_elem(
+											txn,
+											&mut prefix.0,
+											sub,
+											value,
+											cfg,
+											is_delete,
+											&mut entry,
+										)
+										.await?;
+									}
+								}
+							} else {
+								self.apply_spatial_container_elem(
+									txn,
+									&mut prefix.0,
+									elem,
+									value,
+									cfg,
+									is_delete,
+									&mut entry,
+								)
+								.await?;
+							}
+						}
+					}
+					Value::Set(set) => {
+						for elem in set.iter() {
+							self.apply_spatial_container_elem(
+								txn,
+								&mut prefix.0,
+								elem,
+								value,
+								cfg,
+								is_delete,
+								&mut entry,
+							)
+							.await?;
+						}
+					}
+					Value::None
+					| Value::Null
+					| Value::Bool(_)
+					| Value::Number(_)
+					| Value::String(_)
+					| Value::Duration(_)
+					| Value::Datetime(_)
+					| Value::Uuid(_)
+					| Value::Bytes(_)
+					| Value::Table(_)
+					| Value::RecordId(_)
+					| Value::Object(_)
+					| Value::Geometry(_)
+					| Value::File(_)
+					| Value::Range(_)
+					| Value::Regex(_)
+					| Value::Closure(_) => {}
+				}
+			}
+		}
+		Ok(())
+	}
+
+	async fn index_spatial(&mut self) -> Result<()> {
+		let txn = self.env.tx();
+		let mut value = self.entry_value().await?;
+		let cfg = crate::spatial::CoverConfig::default_index();
+
+		// When updating a single-geometry value whose leading prefix columns are
+		// unchanged, diff the bounded cell coverings (`<= cfg.max_cells`) so
+		// shared cells with identical trailer payloads are neither deleted nor
+		// rewritten.
+		if let (Some(o_vals), Some(n_vals)) = (&self.o, &self.n)
+			&& let (Some((o_last, o_prefix)), Some((n_last, n_prefix))) =
+				(o_vals.split_last(), n_vals.split_last())
+			&& o_prefix == n_prefix
+			&& let (Some((mut old_cells, old_pt)), Some((mut new_cells, new_pt))) = (
+				Self::extract_single_geometry_cells(o_last, &cfg),
+				Self::extract_single_geometry_cells(n_last, &cfg),
+			) {
+			let _ = self.o.take();
+			let n = self.n.take().unwrap_or_default();
+			self.record_shapes(&txn, &n).await?;
+			let same_pt = match (old_pt, new_pt) {
+				(None, None) => true,
+				(Some((ox, oy)), Some((nx, ny))) => {
+					ox.to_bits() == nx.to_bits() && oy.to_bits() == ny.to_bits()
+				}
+				_ => false,
+			};
+			if same_pt {
+				let orig_old = old_cells.clone();
+				old_cells.retain(|c| !new_cells.contains(c));
+				new_cells.retain(|c| !orig_old.contains(c));
+			}
+			let mut prefix_vals = n;
+			prefix_vals.pop();
+			if !old_cells.is_empty() || !new_cells.is_empty() {
+				let mut entry = 0usize;
+				for mut prefix in Indexable::new(prefix_vals, self.ix) {
+					value.point = old_pt;
+					for cell in &old_cells {
+						self.checkpoint(&txn, entry).await?;
+						entry += 1;
+						prefix.0.push(Value::Number(crate::val::Number::Int(cell.0)));
+						let key = self.stored_key(false, &prefix.0)?;
+						prefix.0.pop();
+						Self::del_entry(&txn, &key, &value).await?;
+					}
+					value.point = new_pt;
+					for cell in &new_cells {
+						self.checkpoint(&txn, entry).await?;
+						entry += 1;
+						prefix.0.push(Value::Number(crate::val::Number::Int(cell.0)));
+						let key = self.stored_key(false, &prefix.0)?;
+						prefix.0.pop();
+						txn.set_key(&key, &value).await?;
+					}
+				}
+			}
+			return Ok(());
+		}
+
+		if let Some(o) = self.o.take() {
+			self.apply_spatial_entries(&txn, o, &mut value, &cfg, true).await?;
+		}
+		if let Some(n) = self.n.take() {
+			self.record_shapes(&txn, &n).await?;
+			self.apply_spatial_entries(&txn, n, &mut value, &cfg, false).await?;
 		}
 		Ok(())
 	}
@@ -656,15 +930,89 @@ impl<'a> IndexOperation<'a> {
 	}
 }
 
-/// The shape the writer stores each column of `vals` in, for B-tree index
-/// `ix`, by column position ([`ValueShape`]). A column whose idiom ends in a
-/// flatten stores its value whole, an array included; any other column lists
-/// an array once per element. `NONE` and `NULL` record no shape.
+/// The shape a single geometry value stores in the trailing spatial column.
+fn spatial_geometry_shape(geom: &crate::val::Geometry) -> ValueShape {
+	match geom {
+		crate::val::Geometry::Point(pt) => {
+			if !pt.x().is_finite() || !pt.y().is_finite() {
+				ValueShape::NonGeometry
+			} else if crate::spatial::point_in_wgs84_bounds(pt.x(), pt.y()) {
+				ValueShape::Whole
+			} else {
+				ValueShape::MultiCell
+			}
+		}
+		crate::val::Geometry::Line(_)
+		| crate::val::Geometry::Polygon(_)
+		| crate::val::Geometry::MultiPoint(_)
+		| crate::val::Geometry::MultiLine(_)
+		| crate::val::Geometry::MultiPolygon(_)
+		| crate::val::Geometry::Collection(_) => ValueShape::MultiCell,
+	}
+}
+
+/// The shape a value in the trailing geometry column of a `SPATIAL` index
+/// stores.
+fn spatial_column_shape(v: &Value) -> ValueShape {
+	if let Some(geom) = v.geometry_operand() {
+		return spatial_geometry_shape(&geom);
+	}
+	match v {
+		Value::Array(_) => ValueShape::Array,
+		Value::Set(set) => {
+			let has_geom = set.iter().any(|elem| {
+				elem.geometry_operand().is_some_and(|g| {
+					matches!(spatial_geometry_shape(&g), ValueShape::Whole | ValueShape::MultiCell)
+				})
+			});
+			if has_geom {
+				ValueShape::MultiCell
+			} else {
+				ValueShape::NonGeometry
+			}
+		}
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::RecordId(_)
+		| Value::Object(_)
+		| Value::Geometry(_)
+		| Value::File(_)
+		| Value::Range(_)
+		| Value::Regex(_)
+		| Value::Closure(_) => ValueShape::NonGeometry,
+	}
+}
+
+/// The shape the writer stores each column of `vals` in, for B-tree or
+/// `SPATIAL` index `ix`, by column position ([`ValueShape`]). A column whose
+/// idiom ends in a flatten stores its value whole, an array included; any other
+/// column lists an array once per element. For the trailing geometry column of
+/// a `SPATIAL` index, a single in-bounds `Point` is stored at one leaf cell
+/// ([`ValueShape::Whole`]), any non-point geometry, out-of-bounds point, or
+/// multi-geometry set that emits multiple or coarse ancestor cells (`L < 28`)
+/// records [`ValueShape::MultiCell`], an array records [`ValueShape::Array`],
+/// and any other value (including `NONE`, `NULL`, a string, number, or
+/// non-finite point that emits no spatial cells) records
+/// [`ValueShape::NonGeometry`]. For B-tree columns, `NONE` and `NULL` record no
+/// shape.
 pub fn stored_shapes<'v>(
 	vals: &'v [Value],
 	ix: &'v IndexDefinition,
 ) -> impl Iterator<Item = (u16, ValueShape)> + 'v {
-	vals.iter().zip(ix.cols.iter()).zip(0u16..).filter_map(|((v, col), i)| {
+	let is_spatial = matches!(ix.index, Index::Spatial);
+	let last_col = ix.cols.len().saturating_sub(1);
+	vals.iter().zip(ix.cols.iter()).zip(0u16..).filter_map(move |((v, col), i)| {
+		if is_spatial && usize::from(i) == last_col {
+			return Some((i, spatial_column_shape(v)));
+		}
 		if v.is_nullish() {
 			return None;
 		}
@@ -1061,11 +1409,16 @@ mod interrupted_fan_out {
 	}
 
 	fn definition(index: Index) -> IndexDefinition {
+		let cols = if matches!(index, Index::Spatial) {
+			vec![Idiom::field("a"), Idiom::field("b"), Idiom::field("loc")]
+		} else {
+			vec![Idiom::field("a"), Idiom::field("b")]
+		};
 		IndexDefinition {
 			index_id: IndexId(4),
 			name: "ix".into(),
 			table_name: TableName::from("t"),
-			cols: vec![Idiom::field("a"), Idiom::field("b")],
+			cols,
 			index,
 			count_cond: None,
 			prepare_remove: false,
@@ -1079,10 +1432,15 @@ mod interrupted_fan_out {
 		RecordId::new(TableName::from("t"), RecordIdKey::from("doc".to_owned()))
 	}
 
-	/// The indexed values of the fixture document: two `SIDE`-element arrays.
-	fn columns() -> Vec<Value> {
+	/// The indexed values of the fixture document: two `SIDE`-element arrays
+	/// (plus a single in-bounds point when `ix` is a `SPATIAL` index).
+	fn columns_for(ix: &IndexDefinition) -> Vec<Value> {
 		let side = || Value::Array(Array::from((0..SIDE).map(Value::from).collect::<Vec<_>>()));
-		vec![side(), side()]
+		if matches!(ix.index, Index::Spatial) {
+			vec![side(), side(), Value::Geometry(crate::val::Geometry::Point((-0.12, 51.5).into()))]
+		} else {
+			vec![side(), side()]
+		}
 	}
 
 	/// Runs one document's index write: a create when `o` is `None`, a delete
@@ -1116,7 +1474,7 @@ mod interrupted_fan_out {
 	async fn committed_document(ix: &IndexDefinition) -> TestIndexStore {
 		let ds = TestIndexStore::new().await;
 		let env = ds.env(TransactionType::Write).await;
-		write(&env, ix, None, Some(columns())).await.unwrap();
+		write(&env, ix, None, Some(columns_for(ix))).await.unwrap();
 		env.tx().commit().await.unwrap();
 		assert_eq!(committed_entries(&ds, ix).await, ENTRIES, "one entry per combination");
 		ds
@@ -1146,7 +1504,7 @@ mod interrupted_fan_out {
 		let ix = definition(index);
 		let ds = TestIndexStore::new().await;
 		let env = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
-		let err = write(&env, &ix, None, Some(columns())).await.unwrap_err();
+		let err = write(&env, &ix, None, Some(columns_for(&ix))).await.unwrap_err();
 		assert_cancelled(&err);
 		assert_eq!(entries(&env.tx(), &ix).await, AT - 1, "stopped at the checkpoint that fired");
 		assert_commit_refused(&env.tx()).await;
@@ -1157,7 +1515,7 @@ mod interrupted_fan_out {
 		let ix = definition(index);
 		let ds = committed_document(&ix).await;
 		let env = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
-		let err = write(&env, &ix, Some(columns()), None).await.unwrap_err();
+		let err = write(&env, &ix, Some(columns_for(&ix)), None).await.unwrap_err();
 		assert_cancelled(&err);
 		assert_eq!(
 			entries(&env.tx(), &ix).await,
@@ -1179,6 +1537,11 @@ mod interrupted_fan_out {
 	}
 
 	#[tokio::test]
+	async fn cancelling_a_spatial_create_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_create_refuses_the_commit(Index::Spatial).await;
+	}
+
+	#[tokio::test]
 	async fn cancelling_a_unique_delete_mid_fan_out_fails_it_and_refuses_the_commit() {
 		cancelled_delete_refuses_the_commit(Index::Uniq).await;
 	}
@@ -1189,14 +1552,142 @@ mod interrupted_fan_out {
 	}
 
 	#[tokio::test]
+	async fn cancelling_a_spatial_delete_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_delete_refuses_the_commit(Index::Spatial).await;
+	}
+
+	#[tokio::test]
+	async fn cancelling_a_spatial_container_fan_out_streams_entries_and_refuses_the_commit() {
+		let ix = IndexDefinition {
+			index_id: IndexId(5),
+			name: "ix_loc".into(),
+			table_name: TableName::from("t"),
+			cols: vec![Idiom::field("loc")],
+			index: Index::Spatial,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: INDEX_FORMAT_VERSION,
+			comment: None,
+			nulls_not_distinct: false,
+		};
+		let points: Vec<Value> = (0..ENTRIES)
+			.map(|i| Value::Geometry(crate::val::Geometry::Point((i as f64, 0.0).into())))
+			.collect();
+		let containers = [
+			Value::Array(Array::from(points.clone())),
+			Value::Set(crate::val::Set::from(
+				points.into_iter().collect::<std::collections::BTreeSet<_>>(),
+			)),
+		];
+		for container in containers {
+			let cols = vec![container];
+
+			// Create: entries are streamed directly to `txn` before the
+			// cancellation checkpoint fires at `AT`.
+			let ds = TestIndexStore::new().await;
+			let env = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
+			let err = write(&env, &ix, None, Some(cols.clone())).await.unwrap_err();
+			assert_cancelled(&err);
+			assert_eq!(
+				entries(&env.tx(), &ix).await,
+				AT - 1,
+				"streamed container entries up to the checkpoint that fired"
+			);
+			assert_commit_refused(&env.tx()).await;
+			assert_eq!(committed_entries(&ds, &ix).await, 0);
+
+			// Commit the full container, then cancel mid-delete.
+			let env_ok = ds.env(TransactionType::Write).await;
+			write(&env_ok, &ix, None, Some(cols.clone())).await.unwrap();
+			env_ok.tx().commit().await.unwrap();
+			assert_eq!(committed_entries(&ds, &ix).await, ENTRIES);
+
+			let env_del = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
+			let err = write(&env_del, &ix, Some(cols), None).await.unwrap_err();
+			assert_cancelled(&err);
+			assert_eq!(
+				entries(&env_del.tx(), &ix).await,
+				ENTRIES - (AT - 1),
+				"streamed container deletes up to the checkpoint that fired"
+			);
+			assert_commit_refused(&env_del.tx()).await;
+			assert_eq!(committed_entries(&ds, &ix).await, ENTRIES);
+		}
+	}
+
+	#[tokio::test]
+	async fn updating_a_single_spatial_geometry_diffs_shared_covering_cells() {
+		let ix = IndexDefinition {
+			index_id: IndexId(6),
+			name: "ix_poly".into(),
+			table_name: TableName::from("t"),
+			cols: vec![Idiom::field("loc")],
+			index: Index::Spatial,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: INDEX_FORMAT_VERSION,
+			comment: None,
+			nulls_not_distinct: false,
+		};
+		let cfg = crate::spatial::CoverConfig::default_index();
+		let old_geom = crate::val::Geometry::Polygon(geo::Polygon::new(
+			geo::LineString::from(vec![
+				(0.0, 0.0),
+				(10.0, 0.0),
+				(10.0, 10.0),
+				(0.0, 10.0),
+				(0.0, 0.0),
+			]),
+			vec![],
+		));
+		let new_geom = crate::val::Geometry::Polygon(geo::Polygon::new(
+			geo::LineString::from(vec![
+				(0.0, 0.0),
+				(10.1, 0.0),
+				(10.1, 10.0),
+				(0.0, 10.0),
+				(0.0, 0.0),
+			]),
+			vec![],
+		));
+		let old_cells = crate::spatial::cover_geometry_for_index(&old_geom, &cfg);
+		let new_cells = crate::spatial::cover_geometry_for_index(&new_geom, &cfg);
+		let shared = old_cells.iter().filter(|c| new_cells.contains(c)).count();
+		assert!(shared > 0, "expected nudged polygons to share covering cells");
+		let diff_ops = (old_cells.len() - shared) + (new_cells.len() - shared);
+		assert!(diff_ops < old_cells.len() + new_cells.len());
+
+		let old_cols = vec![Value::Geometry(old_geom)];
+		let new_cols = vec![Value::Geometry(new_geom)];
+
+		let ds = TestIndexStore::new().await;
+		let env_create = ds.env(TransactionType::Write).await;
+		write(&env_create, &ix, None, Some(old_cols.clone())).await.unwrap();
+		env_create.tx().commit().await.unwrap();
+		assert_eq!(committed_entries(&ds, &ix).await, old_cells.len());
+
+		// Identical geometry update performs 0 KV writes/checkpoints.
+		let env_noop = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, 1);
+		write(&env_noop, &ix, Some(old_cols.clone()), Some(old_cols.clone())).await.unwrap();
+		env_noop.tx().commit().await.unwrap();
+
+		// Nudged geometry update only touches `diff_ops` cells rather than `old + new`.
+		let env_update =
+			CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, diff_ops + 1);
+		write(&env_update, &ix, Some(old_cols), Some(new_cols)).await.unwrap();
+		env_update.tx().commit().await.unwrap();
+		assert_eq!(committed_entries(&ds, &ix).await, new_cells.len());
+	}
+
+	#[tokio::test]
 	async fn a_deadline_mid_fan_out_is_reported_as_a_timeout_not_a_cancellation() {
 		let timeout = Duration::from_millis(250);
-		for index in [Index::Uniq, Index::Idx] {
+		for index in [Index::Uniq, Index::Idx, Index::Spatial] {
 			let ix = definition(index);
 			let ds = TestIndexStore::new().await;
 			let env =
 				CancelAtCheckpoint::timing_out(ds.env(TransactionType::Write).await, AT, timeout);
-			let err = write(&env, &ix, None, Some(columns())).await.unwrap_err();
+			let err = write(&env, &ix, None, Some(columns_for(&ix))).await.unwrap_err();
 			match err.downcast_ref::<EngineError>() {
 				Some(EngineError::QueryTimedout(d)) => assert_eq!(*d, timeout),
 				_ => panic!("expected a timeout, got {err:#}"),
@@ -1345,5 +1836,81 @@ mod value_shapes {
 		let ix = index(vec![with("tags", Part::Flatten)]);
 		let array = Value::Array(Array::from(vec![Value::from("x")]));
 		assert_eq!(shapes(&[array], &ix), [(0, ValueShape::Whole)]);
+	}
+
+	#[test]
+	fn spatial_trailing_column_records_whole_only_for_finite_in_bounds_points() {
+		let mut ix = index(vec![Idiom::field("loc")]);
+		ix.index = Index::Spatial;
+
+		let valid_pt = Value::Geometry(crate::val::Geometry::Point((-0.12, 51.5).into()));
+		assert_eq!(shapes(std::slice::from_ref(&valid_pt), &ix), [(0, ValueShape::Whole)]);
+
+		let oob_pt = Value::Geometry(crate::val::Geometry::Point((200.0, 51.5).into()));
+		assert_eq!(shapes(&[oob_pt], &ix), [(0, ValueShape::MultiCell)]);
+
+		let line = Value::Geometry(crate::val::Geometry::Line(geo::LineString::from(vec![
+			(0.0, 0.0),
+			(1.0, 1.0),
+		])));
+		assert_eq!(shapes(&[line], &ix), [(0, ValueShape::MultiCell)]);
+
+		let single_pt_set =
+			Value::Set(Set::from(std::collections::BTreeSet::from([valid_pt.clone()])));
+		assert_eq!(shapes(&[single_pt_set], &ix), [(0, ValueShape::MultiCell)]);
+
+		let single_pt_array = Value::Array(Array::from(vec![valid_pt]));
+		assert_eq!(shapes(std::slice::from_ref(&single_pt_array), &ix), [(0, ValueShape::Array)]);
+
+		let mut flat_ix = index(vec![with("loc", Part::Flatten)]);
+		flat_ix.index = Index::Spatial;
+		assert_eq!(shapes(&[single_pt_array], &flat_ix), [(0, ValueShape::Array)]);
+
+		let geojson_pt = Value::Object(Object::from(BTreeMap::from([
+			("type".to_owned(), Value::from("Point")),
+			(
+				"coordinates".to_owned(),
+				Value::Array(Array::from(vec![Value::from(1.0), Value::from(1.0)])),
+			),
+		])));
+		assert_eq!(shapes(&[geojson_pt], &ix), [(0, ValueShape::Whole)]);
+
+		let geojson_oob_pt = Value::Object(Object::from(BTreeMap::from([
+			("type".to_owned(), Value::from("Point")),
+			(
+				"coordinates".to_owned(),
+				Value::Array(Array::from(vec![Value::from(200.0), Value::from(1.0)])),
+			),
+		])));
+		assert_eq!(shapes(&[geojson_oob_pt], &ix), [(0, ValueShape::MultiCell)]);
+
+		let geojson_line = Value::Object(Object::from(BTreeMap::from([
+			("type".to_owned(), Value::from("LineString")),
+			(
+				"coordinates".to_owned(),
+				Value::Array(Array::from(vec![
+					Value::Array(Array::from(vec![Value::from(0.0), Value::from(0.0)])),
+					Value::Array(Array::from(vec![Value::from(1.0), Value::from(1.0)])),
+				])),
+			),
+		])));
+		assert_eq!(shapes(&[geojson_line], &ix), [(0, ValueShape::MultiCell)]);
+
+		let nan_pt = Value::Geometry(crate::val::Geometry::Point((f64::NAN, 51.5).into()));
+		assert_eq!(shapes(&[nan_pt], &ix), [(0, ValueShape::NonGeometry)]);
+
+		let non_geom = Value::from("not a point");
+		assert_eq!(shapes(&[non_geom], &ix), [(0, ValueShape::NonGeometry)]);
+
+		assert_eq!(shapes(&[Value::None], &ix), [(0, ValueShape::NonGeometry)]);
+		assert_eq!(shapes(&[Value::Null], &ix), [(0, ValueShape::NonGeometry)]);
+		assert_eq!(
+			recorded_shapes(&[Value::None], &ix).collect::<Vec<_>>(),
+			[(0, ValueShape::NonGeometry)]
+		);
+		assert_eq!(
+			recorded_shapes(&[Value::Null], &ix).collect::<Vec<_>>(),
+			[(0, ValueShape::NonGeometry)]
+		);
 	}
 }

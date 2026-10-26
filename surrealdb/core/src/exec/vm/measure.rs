@@ -24,7 +24,7 @@ use surrealdb_runtime::util::math::vector::{
 use crate::exec::function::ScalarFunction;
 use crate::val::{Number, Value};
 
-/// A two-argument `vector::*` builtin a measure answers.
+/// A two-argument `vector::*` or `geo::distance` builtin a measure answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MeasureKind {
 	Euclidean,
@@ -34,6 +34,7 @@ pub(super) enum MeasureKind {
 	Cosine,
 	Jaccard,
 	Dot,
+	GeoDistance,
 }
 
 impl MeasureKind {
@@ -47,6 +48,7 @@ impl MeasureKind {
 			"vector::similarity::cosine" => Self::Cosine,
 			"vector::similarity::jaccard" => Self::Jaccard,
 			"vector::dot" => Self::Dot,
+			"geo::distance" => Self::GeoDistance,
 			_ => return None,
 		})
 	}
@@ -62,6 +64,7 @@ impl MeasureKind {
 			Self::Cosine => a.cosine_similarity(b),
 			Self::Jaccard => a.jaccard_similarity(b),
 			Self::Dot => a.dot(b),
+			Self::GeoDistance => anyhow::bail!("geo::distance does not operate on number vectors"),
 		}
 	}
 }
@@ -102,6 +105,24 @@ impl MeasureSpec {
 			self.kind.compute(field, query)
 		}
 	}
+
+	/// The spatial distance between the row's point `field` and the query's `query`, in the
+	/// builtin's order.
+	pub(super) fn compute_point(
+		&self,
+		field: (f64, f64),
+		query: (f64, f64),
+	) -> anyhow::Result<Value> {
+		let (a, b) = if self.query_first {
+			(query, field)
+		} else {
+			(field, query)
+		};
+		crate::fnc::geo::distance((
+			crate::val::Geometry::Point(a.into()),
+			crate::val::Geometry::Point(b.into()),
+		))
+	}
 }
 
 /// Where a measure's query argument is read from.
@@ -134,6 +155,8 @@ pub(super) enum MeasureSettled {
 		query: Value,
 		/// The numbers of the query, where it is an array of numbers only.
 		numbers: Option<Box<[Number]>>,
+		/// The `(lon, lat)` coordinates of the query, where it is a geometry point.
+		point: Option<(f64, f64)>,
 	},
 }
 
@@ -155,10 +178,16 @@ impl MeasureSettled {
 		} else {
 			None
 		};
+		let point = if let Value::Geometry(crate::val::Geometry::Point(pt)) = &query {
+			Some((pt.x(), pt.y()))
+		} else {
+			None
+		};
 		Self::Allowed {
 			function,
 			query,
 			numbers,
+			point,
 		}
 	}
 }

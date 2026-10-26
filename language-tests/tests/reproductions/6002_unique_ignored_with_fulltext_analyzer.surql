@@ -14,7 +14,7 @@ Cannot combine FULLTEXT with UNIQUE
   --> [28:71]
    |
 28 | ...me UNIQUE FULLTEXT ANALYZER ascii_lcase;
-   |              ^^^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+   |              ^^^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL
   --> [28:64]
    |
 28 | ... nickname UNIQUE FULLTEXT ANALYZER ascii_lcase;

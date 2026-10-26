@@ -78,6 +78,7 @@ pub(super) fn open_probe(
 			source: Source::Nested {
 				group: build,
 			},
+			source_op: None,
 			table: None,
 			schema: None,
 			feeder: None,
@@ -95,6 +96,7 @@ pub(super) fn open_probe(
 			field: field.clone(),
 			outer,
 		},
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: None,

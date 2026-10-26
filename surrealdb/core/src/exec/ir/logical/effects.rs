@@ -1483,7 +1483,8 @@ fn define_slots(object: &DefineObject, slots: &mut Slots) {
 				| IndexSpec::Uniq
 				| IndexSpec::Hnsw(_)
 				| IndexSpec::FullText(_)
-				| IndexSpec::DiskAnn(_) => {}
+				| IndexSpec::DiskAnn(_)
+				| IndexSpec::Spatial => {}
 			}
 		}
 		DefineObject::Access(access) => {

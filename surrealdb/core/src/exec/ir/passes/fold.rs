@@ -252,6 +252,9 @@ fn is_comparison(operator: &BinaryOperator) -> bool {
 			| BinaryOperator::ContainAll
 			| BinaryOperator::ContainAny
 			| BinaryOperator::ContainNone
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::Intersects
 			| BinaryOperator::Matches(_)
 	)
 }
@@ -276,6 +279,18 @@ fn is_range_constructor(ir: &Ir, value: ValueId) -> bool {
 	})
 }
 
+/// Push `operand` into `operands` if it is a non-literal single-result value that an access path
+/// may read as a literal.
+fn push_comparison_operand(ir: &Ir, operand: ValueId, operands: &mut Vec<ValueId>) {
+	if literal_of(ir, operand).is_none()
+		&& single_result_def(ir, operand).is_some()
+		&& !is_range_constructor(ir, operand)
+		&& !operands.contains(&operand)
+	{
+		operands.push(operand);
+	}
+}
+
 /// The operands, not written as literals, of the comparisons in the predicates of `regions`.
 fn comparison_operands(ir: &Ir, regions: &[RegionId]) -> Vec<ValueId> {
 	let mut operands: Vec<ValueId> = Vec::new();
@@ -288,12 +303,18 @@ fn comparison_operands(ir: &Ir, regions: &[RegionId]) -> Vec<ValueId> {
 				&& is_comparison(operator)
 			{
 				for operand in &data.operands {
-					if literal_of(ir, *operand).is_none()
-						&& single_result_def(ir, *operand).is_some()
-						&& !is_range_constructor(ir, *operand)
-						&& !operands.contains(operand)
-					{
-						operands.push(*operand);
+					push_comparison_operand(ir, *operand, &mut operands);
+					if let Some(def) = single_result_def(ir, *operand)
+						&& let Some(call_data) = ir.op(def)
+						&& let OpKind::Expr(ExprOp::Call(attrs)) = &call_data.kind
+						&& matches!(
+							&attrs.function,
+							crate::expr::Function::Normal(name)
+								if name.eq_ignore_ascii_case("geo::distance")
+						) {
+						for arg in &call_data.operands {
+							push_comparison_operand(ir, *arg, &mut operands);
+						}
 					}
 				}
 			}

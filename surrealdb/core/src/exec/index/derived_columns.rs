@@ -445,6 +445,7 @@ mod tests {
 			range: OperandRange {
 				start: bound(start),
 				end: bound(end),
+				point_filter: None,
 			},
 		}
 	}
@@ -531,6 +532,7 @@ mod tests {
 				OperandRange {
 					start: Bound::Included(BoundOperand::Literal(Value::Datetime(start))),
 					end: Bound::Included(BoundOperand::Literal(Value::Datetime(end))),
+					..
 				},
 		} = access
 		else {

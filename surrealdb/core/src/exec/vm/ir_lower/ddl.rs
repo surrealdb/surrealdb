@@ -3661,6 +3661,9 @@ impl Ddl<'_, '_> {
 			let yes = self.constant(Value::Bool(true))?;
 			self.set_field(index, "prepare_remove", yes)?;
 		}
+		self.store(StoreInstr::AdmitIndexFormat {
+			definition: index,
+		});
 		self.store(StoreInstr::Put {
 			route: RouteId::named("IndexDefKey"),
 			key,

@@ -1,11 +1,10 @@
 /**
 # Geospatial dataset: 100k `place` rows each carrying a `location` point spread
 # uniformly across the whole globe (lng -180..180, lat -90..90). Used by the geo
-# benches to time `geo::distance` proximity / nearest-neighbour queries and
-# polygon containment as FULL SCANS — spatial indexing does not exist yet (see
-# issue #219), so every row's geometry function is evaluated. This is the baseline
-# that becomes the before/after harness once spatial indexing lands. Points are
-# built with `type::point([lng, lat])` (GeoJSON axis order). `run = false`.
+# benches to compare unindexed full scans (`geo-points-100000.surql`) against
+# `SPATIAL` index scans (`geo-points-100000-indexed.surql`) across `geo::distance`
+# proximity and polygon containment queries. Points are built with
+# `type::point([lng, lat])` (GeoJSON axis order). `run = false`.
 
 [test]
 run = false

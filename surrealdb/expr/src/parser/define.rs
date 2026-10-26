@@ -938,6 +938,8 @@ impl Lower<'_> {
 				s.index = Index::Hnsw(self.hnsw(c.a)?);
 			} else if kind == Cl::Diskann {
 				s.index = Index::DiskAnn(self.diskann(c.a)?);
+			} else if kind == Cl::Spatial {
+				s.index = Index::Spatial;
 			} else if kind == Cl::Concurrently {
 				s.concurrently = true;
 			} else {

@@ -234,6 +234,7 @@ pub(crate) enum IndexKindClass {
 	Hnsw,
 	DiskAnn,
 	Count,
+	Spatial,
 }
 
 /// When a rule runs.

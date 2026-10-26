@@ -550,6 +550,7 @@ pub(super) fn plan_define<'e>(
 						.transpose()?,
 				),
 				Index::DiskAnn(params) => IndexSpec::DiskAnn(params.clone()),
+				Index::Spatial => IndexSpec::Spatial,
 			};
 			let definition = crate::catalog::IndexDefinition {
 				index_id: crate::catalog::IndexId(0),

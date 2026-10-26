@@ -194,14 +194,16 @@ fn bitmap_tree(plan: &access_path::BitmapPlan) -> PlanNode {
 		BitmapPlan::BTree {
 			index_ref,
 			access,
-		} => node(
-			"BitmapIndexScan",
-			vec![
+		} => {
+			let mut attrs = vec![
 				("index".to_string(), index_ref.name.to_string()),
 				("access".to_string(), access.describe()),
-			],
-			vec![],
-		),
+			];
+			if let Some(pf) = access.point_filter() {
+				attrs.push(("point_filter".to_string(), pf.describe()));
+			}
+			node("BitmapIndexScan", attrs, vec![])
+		}
 		BitmapPlan::FullText {
 			index_ref,
 			query,
@@ -1244,11 +1246,21 @@ impl<'a> TreeWalk<'a> {
 		index: &IndexRef,
 		access: &BTreeAccess,
 		direction: Direction,
+		decode: Option<&crate::exec::operators::scan::common::DecodeFields>,
 	) -> Result<PlanNode, IrError> {
+		let resolved = self.resolve(index)?;
+		let repeats = access_repeats_records(&resolved, access);
 		let mut attrs = index_scan_attrs(table, index.index.as_str(), access, direction);
+		if let Some(decode) = decode {
+			if access_path::index_scan_is_id_only(repeats, access, self.versioned, Some(decode)) {
+				attrs.push(("id_only".to_string(), "yes".to_string()));
+			} else {
+				attrs.push(("decode".to_string(), decode.describe()));
+			}
+		}
 		attrs.extend(self.paging.take().unwrap_or_default());
 		let scan = self.node("IndexScan", ContextLevel::Database, attrs, vec![]);
-		Ok(if access_repeats_records(&self.resolve(index)?, access) {
+		Ok(if repeats {
 			self.node("DistinctRecords", ContextLevel::Database, vec![], vec![scan])
 		} else {
 			scan
@@ -1347,7 +1359,14 @@ impl<'a> TreeWalk<'a> {
 				Ok(self.node("KeyRangeScan", ContextLevel::Database, scan, vec![]))
 			}
 			PhysOp::IndexScan(attrs) => {
-				self.btree_scan(&attrs.table, &attrs.index, &attrs.access, attrs.direction)
+				let decode = super::pipe::spatial_source_decode(self.ir, self.scope.indexes, op)?;
+				self.btree_scan(
+					&attrs.table,
+					&attrs.index,
+					&attrs.access,
+					attrs.direction,
+					decode.as_ref(),
+				)
 			}
 			PhysOp::IndexLookup(attrs) => {
 				let key = self.text_of(self.operand(operands, 0)?);
@@ -1392,6 +1411,43 @@ impl<'a> TreeWalk<'a> {
 					}
 					None => {}
 				}
+				if let Some(decode) =
+					super::pipe::spatial_source_decode(self.ir, self.scope.indexes, op)?
+				{
+					let disjoint_point_ranges = attrs.merge.is_none()
+						&& !attrs.branches.is_empty()
+						&& attrs.branches.iter().all(|b| {
+							self.resolve(&b.index).is_ok_and(|r| {
+								matches!(r.definition().index, crate::catalog::Index::Spatial)
+							}) && matches!(b.read, BranchReadShape::BTree(_))
+						})
+						&& access_path::disjoint_spatial_point_union_filter(
+							attrs.branches.iter().map(|b| {
+								let index_id = self
+									.resolve(&b.index)
+									.map_or(crate::catalog::IndexId(0), |r| {
+										r.definition().index_id
+									});
+								let access = match &b.read {
+									BranchReadShape::BTree(access) => Some(&**access),
+									BranchReadShape::FullText {
+										..
+									} => None,
+								};
+								(index_id, access)
+							}),
+						)
+						.is_some();
+					if access_path::spatial_union_is_id_only(
+						disjoint_point_ranges,
+						self.versioned,
+						Some(&decode),
+					) {
+						union.push(("id_only".to_string(), "yes".to_string()));
+					} else {
+						union.push(("decode".to_string(), decode.describe()));
+					}
+				}
 				// The branches reject a hit whose sum of clause scores cannot enter the
 				// sort's top k.
 				if attrs.topk.as_ref().is_some_and(|(key, _)| key.rejects_entries) {
@@ -1401,7 +1457,12 @@ impl<'a> TreeWalk<'a> {
 			}
 			PhysOp::Bitmap(attrs) => {
 				let plan = self.bitmap_plan_of(&attrs.root)?;
-				let table = vec![("table".to_string(), attrs.table.to_string())];
+				let mut table = vec![("table".to_string(), attrs.table.to_string())];
+				if let Some(decode) =
+					super::pipe::spatial_source_decode(self.ir, self.scope.indexes, op)?
+				{
+					table.push(("decode".to_string(), decode.describe()));
+				}
 				if self.measure {
 					let mut node = self.node("BitmapScan", ContextLevel::Database, table, vec![]);
 					let kind = MeasureKind::Fusion {
@@ -1565,7 +1626,7 @@ impl<'a> TreeWalk<'a> {
 	) -> Result<PlanNode, IrError> {
 		match &branch.read {
 			BranchReadShape::BTree(access) => {
-				self.btree_scan(table, &branch.index, access, branch.direction)
+				self.btree_scan(table, &branch.index, access, branch.direction, None)
 			}
 			BranchReadShape::FullText {
 				query,
@@ -3222,9 +3283,12 @@ fn index_scan_attrs(
 ) -> Vec<(String, String)> {
 	let mut attrs =
 		vec![("table".to_string(), table.to_string()), ("index".to_string(), index.to_string())];
-	let access = access.describe();
-	if !access.is_empty() {
-		attrs.push(("access".to_string(), access));
+	let access_desc = access.describe();
+	if !access_desc.is_empty() {
+		attrs.push(("access".to_string(), access_desc));
+	}
+	if let Some(pf) = access.point_filter() {
+		attrs.push(("point_filter".to_string(), pf.describe()));
 	}
 	attrs.push(("direction".to_string(), format!("{direction:?}")));
 	attrs

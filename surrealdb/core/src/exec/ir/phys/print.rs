@@ -3268,9 +3268,14 @@ enum OperandBound {
 }
 
 /// The bounds of an operand range print as `{ start: Bound, end: Bound }`, as a range of values
-/// does.
+/// does; a range that carries a `SpatialPointFilter` prints `unsupported(SpatialPointFilter)` and
+/// is not read back.
 impl Text for OperandRange {
 	fn put(&self, out: &mut String) {
+		if self.point_filter.is_some() {
+			out.push_str("unsupported(SpatialPointFilter)");
+			return;
+		}
 		let of = |bound: &Bound<BoundOperand>| match bound {
 			Bound::Unbounded => OperandBound::Unbounded,
 			Bound::Included(operand) => OperandBound::Included(operand.clone()),
@@ -3284,6 +3289,9 @@ impl Text for OperandRange {
 	}
 
 	fn get(c: &mut Cursor<'_>) -> Result<Self, ParseError> {
+		if c.peek() != Some('{') {
+			return c.no_text("SpatialPointFilter");
+		}
 		let into = |bound: OperandBound| match bound {
 			OperandBound::Unbounded => Bound::Unbounded,
 			OperandBound::Included(operand) => Bound::Included(operand),
@@ -3297,6 +3305,7 @@ impl Text for OperandRange {
 		Ok(OperandRange {
 			start: into(start),
 			end: into(end),
+			point_filter: None,
 		})
 	}
 }
@@ -3523,6 +3532,7 @@ mod tests {
 										2i64,
 									))),
 									end: Bound::Unbounded,
+									point_filter: None,
 								},
 							},
 						),
@@ -4721,12 +4731,14 @@ mod tests {
 				range: OperandRange {
 					start: Bound::Excluded(clock(Some((ClockSign::Minus, 86_400)))),
 					end: Bound::Included(clock(Some((ClockSign::Plus, 3_600)))),
+					point_filter: None,
 				},
 			},
 			BTreeAccess::Range {
 				range: OperandRange {
 					start: Bound::Unbounded,
 					end: Bound::Excluded(clock(None)),
+					point_filter: None,
 				},
 			},
 			BTreeAccess::Compound {
@@ -4755,6 +4767,7 @@ mod tests {
 				range: OperandRange {
 					start: Bound::Excluded(clock(Some((ClockSign::Minus, 86_400)))),
 					end: Bound::Unbounded,
+					point_filter: None,
 				},
 			};
 		}

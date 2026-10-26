@@ -1074,7 +1074,9 @@ async fn keys_per_record(
 					None => KEYS_PER_CONTENT_INDEX_FALLBACK,
 				}
 			}
-			catalog::Index::Hnsw(_) | catalog::Index::DiskAnn(_) => KEYS_PER_CONTENT_INDEX_FALLBACK,
+			catalog::Index::Hnsw(_) | catalog::Index::DiskAnn(_) | catalog::Index::Spatial => {
+				KEYS_PER_CONTENT_INDEX_FALLBACK
+			}
 			catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Count(_) => {
 				let fan_out =
 					sample.iter().map(|data| index_fan_out(data, &ix.cols)).max().unwrap_or(1);

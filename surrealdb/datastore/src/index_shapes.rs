@@ -1,11 +1,15 @@
 //! The value shapes a B-tree index has stored, per column.
 //!
 //! The index writer lists a record holding an array once per element of it,
-//! and stores every other value whole, at the one place it sorts. Whether a
-//! column has stored either shape decides what a scan of the index may claim:
-//! an index whose column has stored no array holds each record at one entry,
-//! at the place its whole value sorts, so a scan over it orders the column,
-//! lists each record once and answers a range exactly. One whose element
+//! and stores every other value whole, at the one place it sorts. On a
+//! spatial index, a single in-bounds point is stored at one leaf cell with its
+//! exact coordinates (`Whole`), whereas non-point geometries, out-of-bounds
+//! points, and multi-geometry sets emit multiple covering or coarse ancestor
+//! cells (`MultiCell`). Whether a column has stored each shape decides what a
+//! scan of the index may claim: an index whose column has stored no array or
+//! multi-cell geometry holds each record at at most one entry, so a scan over
+//! it orders the column, lists each record once and answers a range or
+//! point-only spatial predicate without deduplication. One whose element
 //! column has stored nothing whole holds every record under its elements, so
 //! an element seek answers containment.
 //!
@@ -52,15 +56,28 @@ pub enum ValueShape {
 	/// An array, listed once per element: an empty one under `NULL`.
 	Array,
 	/// A value other than `NONE` or `NULL`, stored whole: a scalar, a set, an
-	/// object, or an array in a column the writer does not expand.
+	/// object, or an array in a column the writer does not expand. On a
+	/// spatial column, a single finite in-bounds point stored at one leaf cell
+	/// with its exact coordinate trailer.
 	Whole,
+	/// A spatial value that emits multiple cells or coarse ancestor cells
+	/// (`L < 28`): a non-point geometry, an out-of-bounds point, or a set with
+	/// multiple geometries.
+	MultiCell,
+	/// A value on a spatial column that emits no spatial cells (`NONE`, `NULL`,
+	/// a scalar string/number/object, a non-finite point, or a set with no
+	/// geometry elements).
+	NonGeometry,
 }
 
 impl ValueShape {
-	const fn bit(self) -> u8 {
+	/// Bit mask representing this value shape in the per-column bitset.
+	pub const fn bit(self) -> u8 {
 		match self {
 			ValueShape::Array => 1,
 			ValueShape::Whole => 2,
+			ValueShape::MultiCell => 4,
+			ValueShape::NonGeometry => 8,
 		}
 	}
 }
@@ -165,6 +182,11 @@ impl IndexShapes {
 pub struct TableIndexShapes(pub(crate) Arc<[(IndexId, Arc<IndexShapes>)]>);
 
 impl TableIndexShapes {
+	/// Construct a [`TableIndexShapes`] from per-index shape entries.
+	pub fn new(entries: impl Into<Arc<[(IndexId, Arc<IndexShapes>)]>>) -> Self {
+		Self(entries.into())
+	}
+
 	/// The shapes of index `ix`, or `None` for an index these were not read
 	/// for, which may hold any.
 	pub fn of(&self, ix: IndexId) -> Option<&Arc<IndexShapes>> {

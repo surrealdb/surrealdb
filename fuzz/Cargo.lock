@@ -4287,6 +4287,7 @@ dependencies = [
  "diskann-utils",
  "diskann-vector",
  "fst",
+ "geo",
  "half",
  "lindera",
  "ndarray",

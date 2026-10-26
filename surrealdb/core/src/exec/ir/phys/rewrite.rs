@@ -1734,18 +1734,26 @@ impl Pattern<PhysDialect> for AnsweredByIndex {
 		let Some(PhysOp::IndexScan(scan)) = phys(ir, chain.source) else {
 			return Ok(false);
 		};
-		if !scan.exact() {
-			return Ok(false);
-		}
-		let Some(cols) = scan.stated.as_deref() else {
-			return Ok(false);
-		};
 		let leaves = conjunct::leaves(ir, &site);
-		let answered: Vec<ValueId> = leaves
-			.iter()
-			.copied()
-			.filter(|leaf| index_answer::answers(ir, *leaf, &scan.access, cols))
-			.collect();
+		let answered: Vec<ValueId> = if let Some(point_filter) = scan.access.point_filter() {
+			leaves
+				.iter()
+				.copied()
+				.filter(|leaf| index_answer::answers_spatial(ir, *leaf, point_filter))
+				.collect()
+		} else {
+			if !scan.exact() {
+				return Ok(false);
+			}
+			let Some(cols) = scan.stated.as_deref() else {
+				return Ok(false);
+			};
+			leaves
+				.iter()
+				.copied()
+				.filter(|leaf| index_answer::answers(ir, *leaf, &scan.access, cols))
+				.collect()
+		};
 		// The scan answers the whole predicate, or the conjuncts that neither raise nor have an
 		// effect alone among those it answers.
 		let dropped: Vec<ValueId> = match answered.len() == leaves.len() {
@@ -1845,7 +1853,7 @@ impl Pattern<PhysDialect> for AnsweredByUnion {
 		let Some(PhysOp::IndexUnion(union)) = phys(ir, chain.source) else {
 			return Ok(false);
 		};
-		let Some(probes) = union
+		if let Some(probes) = union
 			.branches
 			.iter()
 			.map(|branch| match &branch.read {
@@ -1866,15 +1874,52 @@ impl Pattern<PhysDialect> for AnsweredByUnion {
 				| BranchReadShape::BTree(_) => None,
 			})
 			.collect::<Option<Vec<_>>>()
+		{
+			let leaves = conjunct::leaves(ir, &site);
+			let dropped: Vec<ValueId> = leaves
+				.iter()
+				.copied()
+				.filter(|leaf| index_answer::answers_union(ir, *leaf, &probes))
+				.collect();
+			if dropped.is_empty() {
+				return Ok(false);
+			}
+			return conjunct::drop_conjuncts(rw, &site, &leaves, &dropped);
+		}
+		// A point-only `SPATIAL` index union whose branches scan disjoint leaf-cell ranges of the
+		// same index and evaluate the same `SpatialPointFilter` against the inline `(x, y)` point
+		// trailer returns only records that satisfy that exact geometric predicate.
+		let Some(stored_chain) = beneath(ir, site.input, keeps_stored_fields) else {
+			return Ok(false);
+		};
+		if stored_chain.source != chain.source {
+			return Ok(false);
+		}
+		let Some(point_filter) =
+			crate::exec::index::access_path::disjoint_spatial_point_union_filter(
+				union.branches.iter().map(|b| {
+					let access = match &b.read {
+						BranchReadShape::BTree(access) => Some(&**access),
+						BranchReadShape::FullText {
+							..
+						} => None,
+					};
+					(&b.index, access)
+				}),
+			)
 		else {
 			return Ok(false);
 		};
 		let leaves = conjunct::leaves(ir, &site);
-		let dropped: Vec<ValueId> = leaves
+		let answered: Vec<ValueId> = leaves
 			.iter()
 			.copied()
-			.filter(|leaf| index_answer::answers_union(ir, *leaf, &probes))
+			.filter(|leaf| index_answer::answers_spatial(ir, *leaf, point_filter))
 			.collect();
+		let dropped: Vec<ValueId> = match answered.len() == leaves.len() {
+			true => answered,
+			false => answered.into_iter().filter(|leaf| conjunct::judge(ir, *leaf).total).collect(),
+		};
 		if dropped.is_empty() {
 			return Ok(false);
 		}

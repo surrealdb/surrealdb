@@ -330,6 +330,7 @@ pub(crate) enum IndexSpec {
 	/// `COUNT`, with the optional condition held as a stored region.
 	Count(Option<RegionSlot>),
 	DiskAnn(DiskAnnParams),
+	Spatial,
 }
 
 /// The operands that hold a user's token and session durations.

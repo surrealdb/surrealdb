@@ -597,6 +597,19 @@ pub fn decode_record_id(bytes: &[u8]) -> Result<RecordId> {
 	IndexEntryValue::decode_record_id(bytes)
 }
 
+/// Decodes the trailing `doc_id` segment without allocating a [`RecordId`].
+pub fn decode_trailer(bytes: &[u8]) -> Result<Option<surrealdb_datastore::values::ids::DocId>> {
+	IndexEntryValue::decode_trailer(bytes)
+}
+
+/// Decodes the trailing `(doc_id, point)` segment of a spatial index entry
+/// without allocating a [`RecordId`].
+pub fn decode_spatial_trailer(
+	bytes: &[u8],
+) -> Result<surrealdb_datastore::values::entry::EntryTrailer> {
+	IndexEntryValue::decode_spatial_trailer(bytes)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1416,14 +1429,23 @@ mod tests {
 	#[test]
 	fn an_entry_decodes_to_the_record_it_names() {
 		let rid = RecordId::new(TableName::from("t"), RecordIdKey::from(7));
-		for doc_id in [None, Some(9)] {
+		for (doc_id, point) in [(None, None), (Some(9), None), (Some(9), Some((1.25, -2.5)))] {
 			let entry = IndexEntryValue {
 				rid: rid.clone(),
 				doc_id,
+				point,
 			};
 			let bytes = entry.kv_encode_value().unwrap();
-			assert_eq!(decode_entry(&bytes).unwrap(), entry);
+			assert_eq!(IndexEntryValue::decode_spatial(&bytes).unwrap(), entry);
 			assert_eq!(decode_record_id(&bytes).unwrap(), rid);
+			assert_eq!(decode_spatial_trailer(&bytes).unwrap(), (doc_id, point));
+			if point.is_none() {
+				assert_eq!(decode_entry(&bytes).unwrap(), entry);
+				assert_eq!(decode_trailer(&bytes).unwrap(), doc_id);
+			} else {
+				assert!(decode_entry(&bytes).is_err());
+				assert!(decode_trailer(&bytes).is_err());
+			}
 		}
 	}
 }

@@ -276,6 +276,7 @@ keywords! {
 	Since = "SINCE",
 	Sleep = "SLEEP",
 	Snowball = "SNOWBALL",
+	Spatial = "SPATIAL",
 	Split = "SPLIT",
 	Start = "START",
 	Strict = "STRICT",

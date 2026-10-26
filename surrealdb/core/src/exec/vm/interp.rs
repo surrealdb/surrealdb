@@ -2371,19 +2371,30 @@ fn measure_row(
 		function,
 		query,
 		numbers,
+		point,
 	}) = state.measures.get(measure.call as usize).and_then(Option::as_deref)
 	else {
 		return Ok(None);
 	};
 	let name = &program.fields[field as usize];
-	let read = &mut state.knn_vector;
-	if let Some(numbers) = numbers
-		&& row.vector_field(name, read)?
-		&& read.len() == numbers.len()
-		&& let Ok(number) = measure.compute(read, numbers)
-	{
-		charge_vectors(read.len(), numbers.len());
-		return Ok(Some(Scalar::Number(number)));
+	if measure.kind == super::measure::MeasureKind::GeoDistance {
+		if let Some(query_pt) = *point
+			&& let Some(field_pt) = row.point_field(name)?
+			&& let Ok(Value::Number(number)) = measure.compute_point(field_pt, query_pt)
+		{
+			charge_vectors(2, 2);
+			return Ok(Some(Scalar::Number(number)));
+		}
+	} else {
+		let read = &mut state.knn_vector;
+		if let Some(numbers) = numbers
+			&& row.vector_field(name, read)?
+			&& read.len() == numbers.len()
+			&& let Ok(number) = measure.compute(read, numbers)
+		{
+			charge_vectors(read.len(), numbers.len());
+			return Ok(Some(Scalar::Number(number)));
+		}
 	}
 	let args = measure.args(row.field(name)?.to_value(), query.clone());
 	let weighed = args.iter().map(super::fuel::weight).fold(0, u32::saturating_add);

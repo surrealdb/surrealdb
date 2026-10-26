@@ -124,9 +124,23 @@ pub fn current_layout_format_version(index: &Index) -> u16 {
 		Index::Hnsw(_) => ELEMENT_DOCS_FORMAT_VERSION,
 		Index::DiskAnn(_) => ELEMENT_DOCS_FORMAT_VERSION.max(ELEMENT_CODES_FORMAT_VERSION),
 		Index::FullText(_) => FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION,
+		Index::Spatial => SPATIAL_COVERING_FORMAT_VERSION,
 		Index::Idx | Index::Uniq | Index::Count(_) => ELEMENT_DOCS_FORMAT_VERSION - 1,
 	}
 }
+
+/// Format version at which spatial indexes were introduced and their cell
+/// covering algorithm (`CoverConfig::default_index()`,
+/// `SpatialCellId::from_ij_level`, and `cover_geometry_for_index`) was
+/// established. Defining, altering, or rebuilding a [`Index::Spatial`] index is
+/// refused while the store is at the `Legacy` feature level (`3.x`), because
+/// `3.x` nodes cannot decode or maintain `Index::Spatial`. Defined as a
+/// dedicated constant rather than [`INDEX_FORMAT_VERSION`] so an unrelated bump
+/// of [`INDEX_FORMAT_VERSION`] does not invalidate existing spatial indexes; a
+/// future change to the spatial covering algorithm or cell ID encoding requires
+/// either bumping this constant with its corresponding release `admit_floor` or
+/// adding a covering-version parameter to [`Index::Spatial`].
+pub const SPATIAL_COVERING_FORMAT_VERSION: u16 = 5;
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
@@ -277,9 +291,11 @@ impl IndexDefinition {
 				nulls_not_distinct: self.nulls_not_distinct,
 			},
 			Index::Count(_) => runtime::index_kind::Index::Count(self.count_cond.clone()),
-			other @ (Index::Idx | Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)) => {
-				other.to_runtime_definition()
-			}
+			other @ (Index::Idx
+			| Index::FullText(_)
+			| Index::Hnsw(_)
+			| Index::DiskAnn(_)
+			| Index::Spatial) => other.to_runtime_definition(),
 		}
 	}
 
@@ -359,7 +375,7 @@ impl CondText {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub enum Index {
@@ -383,6 +399,10 @@ pub enum Index {
 	#[revision(start = 2)]
 	#[stored(n = 6)]
 	DiskAnn(DiskAnnParams),
+	/// Spatial geometry index (Hilbert-curve cells over the WGS84 lon/lat plane)
+	#[revision(start = 3)]
+	#[stored(n = 7)]
+	Spatial,
 }
 
 impl Index {
@@ -400,6 +420,7 @@ impl Index {
 			Self::Count(cond) => runtime::index_kind::Index::Count(
 				cond.as_ref().and_then(CondText::compile_condition),
 			),
+			Self::Spatial => runtime::index_kind::Index::Spatial,
 		}
 	}
 
@@ -419,7 +440,7 @@ impl Index {
 	pub fn queues_compaction(&self) -> bool {
 		match self {
 			Self::FullText(_) | Self::Count(_) | Self::Hnsw(_) | Self::DiskAnn(_) => true,
-			Self::Idx | Self::Uniq => false,
+			Self::Idx | Self::Uniq | Self::Spatial => false,
 		}
 	}
 }
@@ -447,6 +468,7 @@ impl From<Index> for runtime::index_kind::Index {
 			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
 			Index::Count(c) => Self::Count(c.as_ref().and_then(CondText::compile_condition)),
+			Index::Spatial => Self::Spatial,
 		}
 	}
 }
@@ -923,7 +945,7 @@ pub struct IndexDefinition {
 
 impl IndexDefinition {
 	pub fn has_entry_doc_ids(&self) -> bool {
-		matches!(self.index, Index::Idx | Index::Uniq)
+		matches!(self.index, Index::Idx | Index::Uniq | Index::Spatial)
 			&& self.format_version >= BTREE_ENTRY_DOC_IDS_FORMAT_VERSION
 	}
 
@@ -1036,6 +1058,13 @@ pub fn keeps_vector_doc_elements(format_version: u16) -> bool {
 	format_version >= VECTOR_DOC_ELEMENTS_FORMAT_VERSION
 }
 
+/// Whether a spatial index stamped with `format_version` uses the current
+/// Hilbert cell covering algorithm and `CellId` encoding. See
+/// [`SPATIAL_COVERING_FORMAT_VERSION`].
+pub fn uses_current_spatial_covering(format_version: u16) -> bool {
+	format_version >= SPATIAL_COVERING_FORMAT_VERSION
+}
+
 impl FromStored for IndexDefinition {
 	type Stored = StoredIndexDefinition;
 
@@ -1102,6 +1131,7 @@ impl From<crate::expr::index_kind::Index> for Index {
 				Self::Count(c.map(|cond| CondText(SurqlText::new(&cond))))
 			}
 			crate::expr::index_kind::Index::DiskAnn(p) => Self::DiskAnn(p.into()),
+			crate::expr::index_kind::Index::Spatial => Self::Spatial,
 		}
 	}
 }
@@ -1126,6 +1156,7 @@ mod tests {
 			current_layout_format_version(&full_text),
 			FULLTEXT_POSTING_BLOCKS_FORMAT_VERSION
 		);
+		assert_eq!(current_layout_format_version(&Index::Spatial), SPATIAL_COVERING_FORMAT_VERSION);
 		for index in [Index::Idx, Index::Uniq, Index::Count(None)] {
 			assert_eq!(
 				current_layout_format_version(&index),

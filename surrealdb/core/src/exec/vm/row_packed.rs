@@ -167,6 +167,50 @@ fn packed_numbers(
 	}
 }
 
+/// The `(lon, lat)` coordinates of root field `name` of the checked row `row`, read where the
+/// field lies, as [`RowReader::point_field`] reads them; `None` for any column other than a point.
+fn packed_point(
+	row: &CheckedPackedRow<'_>,
+	name: &FieldName,
+) -> anyhow::Result<Option<(f64, f64)>> {
+	Ok(match read_root(row, name)?.1 {
+		FieldRef::Point(x, y) => Some((x, y)),
+		FieldRef::Literal(Value::Geometry(Geometry::Point(pt))) => Some((pt.x(), pt.y())),
+		FieldRef::Stored(v) => {
+			if matches!(v.kind(), stored::Kind::Geometry)
+				&& let Value::Geometry(Geometry::Point(pt)) = v.decode()?
+			{
+				Some((pt.x(), pt.y()))
+			} else {
+				None
+			}
+		}
+		FieldRef::Absent
+		| FieldRef::Null
+		| FieldRef::Object
+		| FieldRef::Bool(_)
+		| FieldRef::I8(_)
+		| FieldRef::I16(_)
+		| FieldRef::I32(_)
+		| FieldRef::Int(_)
+		| FieldRef::U8(_)
+		| FieldRef::U16(_)
+		| FieldRef::U32(_)
+		| FieldRef::U64(_)
+		| FieldRef::F16(_)
+		| FieldRef::F32(_)
+		| FieldRef::Float(_)
+		| FieldRef::Decimal(_)
+		| FieldRef::Uuid(_)
+		| FieldRef::Datetime(_)
+		| FieldRef::Duration(_)
+		| FieldRef::String(_)
+		| FieldRef::Bytes(_)
+		| FieldRef::Literal(_)
+		| FieldRef::RecordId(..) => None,
+	})
+}
+
 /// The vector at `rest` of root field `name` of the checked row `row`, read into `out` where the
 /// field lies, as [`extract_vector`] reads it from the record decoded whole; whether there is one.
 /// `None` where the field is an object node, whose fields are columns of their own, or the path
@@ -358,6 +402,21 @@ impl RowReader for LazyPackedRow<'_> {
 			return packed_numbers(&row, name, out);
 		}
 		Ok(scalar_numbers(&self.field(name)?, out))
+	}
+
+	fn point_field(&self, name: &FieldName) -> anyhow::Result<Option<(f64, f64)>> {
+		if self.decoded.get().is_none()
+			&& name.as_str() != "id"
+			&& let Some(row) = self.checked()
+		{
+			return packed_point(&row, name);
+		}
+		if let Scalar::Value(v) = self.field(name)?
+			&& let Value::Geometry(Geometry::Point(pt)) = v.as_ref()
+		{
+			return Ok(Some((pt.x(), pt.y())));
+		}
+		Ok(None)
 	}
 
 	/// The vector is read where its column lies, from the row the scan checked or checked here,
@@ -633,6 +692,18 @@ impl RowReader for PackedRowReader<'_> {
 			return packed_numbers(&self.row, name, out);
 		}
 		Ok(scalar_numbers(&self.field(name)?, out))
+	}
+
+	fn point_field(&self, name: &FieldName) -> anyhow::Result<Option<(f64, f64)>> {
+		if self.decoded.get().is_none() && name.as_str() != "id" {
+			return packed_point(&self.row, name);
+		}
+		if let Scalar::Value(v) = self.field(name)?
+			&& let Value::Geometry(Geometry::Point(pt)) = v.as_ref()
+		{
+			return Ok(Some((pt.x(), pt.y())));
+		}
+		Ok(None)
 	}
 
 	fn knn_vector(
@@ -1127,5 +1198,107 @@ mod tests {
 			bytes[second] = other;
 			agree(&bytes);
 		}
+	}
+
+	/// `PackedRowReader::point_field` reads fixed `Point` columns and `Value`-column points in
+	/// place, and returns `None` for non-point columns, absent columns and `id`.
+	#[test]
+	fn packed_point_reads_point_columns_and_rejects_non_points() {
+		use std::sync::Arc;
+
+		use crate::catalog::layout::{
+			Column, ColumnRole, Location, PackedDescriptor, PhysicalKind, Presence,
+		};
+		use crate::catalog::packed::{Packing, pack};
+		use crate::catalog::record::RowFlags;
+		use crate::catalog::{Generation, StoredRecord};
+
+		let descriptor = PackedDescriptor {
+			columns: vec![
+				Column {
+					path: vec!["line".to_owned()],
+					kind: PhysicalKind::Value,
+					presence: Presence::Required,
+					location: Location::Var(0),
+					role: ColumnRole::Field,
+					literals: Vec::new(),
+					tables: Vec::new(),
+				},
+				Column {
+					path: vec!["num".to_owned()],
+					kind: PhysicalKind::I64,
+					presence: Presence::Required,
+					location: Location::Fixed(1),
+					role: ColumnRole::Field,
+					literals: Vec::new(),
+					tables: Vec::new(),
+				},
+				Column {
+					path: vec!["opt_pt".to_owned()],
+					kind: PhysicalKind::Point,
+					presence: Presence::Optional {
+						bit: 0,
+					},
+					location: Location::Fixed(9),
+					role: ColumnRole::Field,
+					literals: Vec::new(),
+					tables: Vec::new(),
+				},
+				Column {
+					path: vec!["pt".to_owned()],
+					kind: PhysicalKind::Point,
+					presence: Presence::Required,
+					location: Location::Fixed(25),
+					role: ColumnRole::Field,
+					literals: Vec::new(),
+					tables: Vec::new(),
+				},
+				Column {
+					path: vec!["val_pt".to_owned()],
+					kind: PhysicalKind::Value,
+					presence: Presence::Required,
+					location: Location::Var(1),
+					role: ColumnRole::Field,
+					literals: Vec::new(),
+					tables: Vec::new(),
+				},
+			],
+			presence_bits: 1,
+			bool_bits: 0,
+			fixed_size: 41,
+			var_count: 2,
+		};
+		descriptor.validate().expect("valid descriptor");
+
+		let data = object_of(vec![
+			("line", Value::Geometry(Geometry::Line(vec![(0.0, 0.0), (1.0, 1.0)].into()))),
+			("num", int(7)),
+			("pt", Value::Geometry(Geometry::Point((12.5, -34.25).into()))),
+			("val_pt", Value::Geometry(Geometry::Point((-1.5, 2.75).into()))),
+		]);
+		let Packing::Packed(bytes) =
+			pack(&descriptor, Generation::FIRST, RowFlags::NONE, &data).expect("packs")
+		else {
+			panic!("expected packed row");
+		};
+		let descriptor = Arc::new(descriptor);
+		let stored = StoredRecord::parse(&bytes).expect("parses").expect("v1 record");
+		let checked = stored.checked_packed(&descriptor).expect("checked packed row");
+		let key = key_of("t", &RecordIdKey::Number(1));
+		let reader = PackedRowReader::of(&key, checked);
+
+		assert_eq!(reader.point_field(&FieldName::new("pt")).expect("reads"), Some((12.5, -34.25)));
+		assert_eq!(
+			reader.point_field(&FieldName::new("val_pt")).expect("reads"),
+			Some((-1.5, 2.75))
+		);
+		for non_pt in ["opt_pt", "line", "num", "absent", "id"] {
+			assert_eq!(
+				reader.point_field(&FieldName::new(non_pt)).expect("reads"),
+				None,
+				"{non_pt}"
+			);
+		}
+		assert!(reader.decoded.get().is_none(), "read in place without decoding whole row");
 	}
 }

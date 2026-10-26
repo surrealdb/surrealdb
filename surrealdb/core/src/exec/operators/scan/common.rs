@@ -18,7 +18,7 @@ use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableLayouts
 use crate::err::EngineError;
 use crate::exec::migrate::{Replay, stamp_of};
 use crate::exec::object_extract::{
-	PathSegment, project_record_bytes, project_record_bytes_excluding,
+	PathSegment, project_packed_record_bytes, project_record_bytes, project_record_bytes_excluding,
 };
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::{Clause, ControlFlowExt, EvalContext, ExecutionContext};
@@ -174,6 +174,18 @@ impl DecodeFields {
 		}
 	}
 
+	/// Whether only the record id (`id`) is needed and no stored fields need to be decoded.
+	#[inline]
+	pub(crate) fn is_id_only(&self) -> bool {
+		!self.excluding && self.keys.is_empty()
+	}
+
+	/// Format the decoded field names for `EXPLAIN` output.
+	pub(crate) fn describe(&self) -> String {
+		let names: Vec<&str> = self.keys.iter().map(|k| k.as_str()).collect();
+		format!("[{}]", names.join(", "))
+	}
+
 	/// The listed fields and whether they are excluded.
 	#[cfg(test)]
 	pub(crate) fn listed(&self) -> (Vec<String>, bool) {
@@ -184,9 +196,16 @@ impl DecodeFields {
 	/// cannot be projected and must be decoded in full.
 	///
 	/// The record's generation was admitted by [`ReadAhead::read`].
-	fn project(&self, record_bytes: &[u8]) -> Option<crate::val::Object> {
+	fn project(
+		&self,
+		record_bytes: &[u8],
+		layouts: Option<&TableLayouts>,
+		table: &TableName,
+	) -> Option<crate::val::Object> {
 		if self.excluding {
 			project_record_bytes_excluding(record_bytes, &self.keys)
+		} else if StoredRecord::is_packed_bytes(record_bytes) {
+			project_packed_record_bytes(record_bytes, layouts, table, &self.keys)
 		} else {
 			project_record_bytes(record_bytes, &self.keys)
 		}
@@ -422,7 +441,7 @@ impl ReadAhead {
 					}
 					match fields
 						.filter(|_| replaying.is_none())
-						.and_then(|fields| fields.project(&bytes))
+						.and_then(|fields| fields.project(&bytes, layouts.as_deref(), &rid.table))
 					{
 						Some(mut object) => {
 							object.0.insert(Strand::new_static("id"), Value::RecordId(rid));
@@ -980,5 +999,26 @@ mod tests {
 			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo_types::Coord<f64>>(),
 			"a 5000-point polygon is sized by its coordinates"
 		);
+	}
+
+	#[test]
+	fn decode_fields_normalizes_root_keys_and_identifies_id_only() {
+		let empty = DecodeFields::new(std::iter::empty::<String>());
+		assert!(empty.is_id_only());
+		assert_eq!(empty.listed(), (vec![], false));
+
+		let id_only = DecodeFields::new(["id".to_owned()]);
+		assert!(id_only.is_id_only());
+		assert_eq!(id_only.listed(), (vec![], false));
+
+		let listed = DecodeFields::new(["b", "id", "a", "b"].map(str::to_owned));
+		assert!(!listed.is_id_only());
+		assert_eq!(listed.listed(), (vec!["a".to_owned(), "b".to_owned()], false));
+
+		assert_eq!(DecodeFields::excluding(["id".to_owned()]), None);
+		let excluded =
+			DecodeFields::excluding(["z", "id", "m", "z"].map(str::to_owned)).expect("non-empty");
+		assert!(!excluded.is_id_only());
+		assert_eq!(excluded.listed(), (vec!["m".to_owned(), "z".to_owned()], true));
 	}
 }

@@ -29,6 +29,8 @@ pub enum Index {
 	Count(Option<Cond>),
 	/// DiskANN index for distance-based metrics
 	DiskAnn(DiskAnnParams),
+	/// Spatial geometry index (Hilbert-curve cell covering over the WGS84 `(lon, lat)` plane)
+	Spatial,
 }
 
 impl ToSql for Index {
@@ -94,6 +96,7 @@ impl ToSql for Index {
 					f.push_str(" HASHED_VECTOR")
 				}
 			}
+			Self::Spatial => f.push_str("SPATIAL"),
 		}
 	}
 }

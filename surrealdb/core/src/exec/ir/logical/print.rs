@@ -2480,7 +2480,7 @@ text_enum!(IndexColumn {
 });
 
 text_enum!(IndexSpec {
-	unit [Idx, Uniq]
+	unit [Idx, Uniq, Spatial]
 	tuple [
 		Hnsw(params: HnswParams),
 		FullText(params: FullTextParams),

@@ -240,14 +240,49 @@ fn build_bitmap_plan<'a>(
 			BitmapPlan::Or(children) => {
 				// A union missing a member would silently drop rows, so
 				// every child inherits this node's anchoring; any child
-				// overflow makes the whole union overflow.
+				// overflow makes the whole union overflow. For a spatial
+				// multi-cell cover (all children scanning a spatial index),
+				// unanchored children share the union's budget so the cover
+				// is bounded by the same ceiling as a single range.
+				let shared_budget = !children.is_empty()
+					&& children.iter().all(|c| {
+						matches!(
+							c,
+							BitmapPlan::BTree { index_ref, .. }
+								if matches!(index_ref.definition().index, Index::Spatial)
+						)
+					});
 				let mut acc = RoaringTreemap::new();
 				let mut overflow = false;
 				for (i, child) in children.iter().enumerate() {
-					match build_bitmap_plan(child, bctx, anchored, node.and_then(|n| n.operand(i)))
-						.await?
+					let child_budget = if shared_budget && !anchored && bctx.budget > 0 {
+						let used = usize::try_from(acc.len()).unwrap_or(usize::MAX);
+						bctx.budget.saturating_sub(used).max(1)
+					} else {
+						bctx.budget
+					};
+					let child_bctx = BitmapBuildContext {
+						budget: child_budget,
+						..*bctx
+					};
+					match build_bitmap_plan(
+						child,
+						&child_bctx,
+						anchored,
+						node.and_then(|n| n.operand(i)),
+					)
+					.await?
 					{
-						BranchBitmap::Ready(bitmap) => acc |= bitmap,
+						BranchBitmap::Ready(bitmap) => {
+							acc |= bitmap;
+							if shared_budget
+								&& !anchored && bctx.budget > 0
+								&& usize::try_from(acc.len()).unwrap_or(usize::MAX) > bctx.budget
+							{
+								overflow = true;
+								break;
+							}
+						}
 						BranchBitmap::Overflow => {
 							overflow = true;
 							break;
@@ -334,8 +369,14 @@ async fn build_btree_bitmap(
 		if res.is_empty() {
 			break;
 		}
-		drained += decode_entry_doc_ids(res, &mut docs, &mut missing)
-			.context("Failed to decode index entry doc-IDs")?;
+		drained += decode_entry_doc_ids(
+			res,
+			&mut docs,
+			&mut missing,
+			matches!(ix.index, Index::Spatial),
+			access.point_filter().map(std::sync::Arc::as_ref),
+		)
+		.context("Failed to decode index entry doc-IDs")?;
 		if !anchored && bctx.budget > 0 && drained > bctx.budget {
 			return Ok(BranchBitmap::Overflow);
 		}

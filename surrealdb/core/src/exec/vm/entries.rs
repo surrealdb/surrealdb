@@ -13,11 +13,14 @@
 //! write path shares (`idx::kernels::btree`), so a scan reads exactly the
 //! entries a write stores for the values it admits.
 
-use crate::exec::index::access_path::{BTreeAccess, IndexRef, KeyAccess};
+use std::sync::Arc;
+
+use crate::exec::index::access_path::{BTreeAccess, IndexRef, KeyAccess, SpatialPointFilter};
 use crate::exec::index::iterator::btree::INDEX_BATCH_SIZE;
 use crate::exec::vm::services::Services;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::idx::entry::IndexEntryValue;
 use crate::idx::kernels::btree::{IndexKeyspace, decode_record_id};
 use crate::key::RawRange;
 use crate::kvs::Direction;
@@ -69,6 +72,7 @@ const MIN_ENTRY_READ: u32 = 32;
 pub(super) struct EntryScan {
 	range: RawRange,
 	direction: Direction,
+	point_filter: Option<Arc<SpatialPointFilter>>,
 }
 
 impl EntryScan {
@@ -83,6 +87,7 @@ impl EntryScan {
 		Ok(Self {
 			range: entry_range(ctx, index, access)?,
 			direction,
+			point_filter: access.point_filter().cloned(),
 		})
 	}
 
@@ -92,10 +97,12 @@ impl EntryScan {
 	/// A batch asks for about `wanted` entries, the records the reader takes
 	/// next, so the scan never reads further ahead than those records need.
 	/// The size is at least [`MIN_ENTRY_READ`], at most [`INDEX_BATCH_SIZE`]
-	/// and at most the fuel left ([`super::fuel::batch`]). It is also capped by
-	/// `paged`, the rows the reading pipeline's paging still takes, but never
-	/// falls below [`MIN_ENTRY_READ`]: under a `LIMIT`, at most that many entries
-	/// are read past the last admitted row. Each entry read spends one unit,
+	/// and at most the fuel left ([`super::fuel::batch`]). The initial probe is
+	/// also capped by `paged`, the rows the reading pipeline's paging still
+	/// takes, but never falls below [`MIN_ENTRY_READ`]: when `point_filter`
+	/// rejects every entry in a probe, subsequent probes double up to
+	/// [`INDEX_BATCH_SIZE`] so sparse boundary cells do not crawl at `paged`.
+	/// Each entry read spends one unit,
 	/// including entries that name no kept record (repeats of one record, or a
 	/// record that is gone).
 	pub(super) async fn next_batch(
@@ -107,10 +114,39 @@ impl EntryScan {
 	) -> FlowResult<Vec<RecordId>> {
 		let wanted = u32::try_from(wanted).unwrap_or(u32::MAX);
 		let paged = u32::try_from(paged).unwrap_or(u32::MAX).max(MIN_ENTRY_READ);
-		let most = super::fuel::batch(wanted.clamp(MIN_ENTRY_READ, INDEX_BATCH_SIZE).min(paged));
-		let entries = services.read_range(&mut self.range, self.direction, most).await?;
-		super::fuel::tick(ctx, super::fuel::units(entries.len())).await?;
-		entries.iter().map(|(_, value)| decode_record_id(value).map_err(ControlFlow::Err)).collect()
+		let mut most =
+			super::fuel::batch(wanted.clamp(MIN_ENTRY_READ, INDEX_BATCH_SIZE).min(paged));
+		loop {
+			let entries = services.read_range(&mut self.range, self.direction, most).await?;
+			super::fuel::tick(ctx, super::fuel::units(entries.len())).await?;
+			if entries.is_empty() {
+				return Ok(Vec::new());
+			}
+			let Some(pf) = self.point_filter.as_deref() else {
+				return entries
+					.iter()
+					.map(|(_, value)| decode_record_id(value).map_err(ControlFlow::Err))
+					.collect();
+			};
+			let mut out = Vec::with_capacity(entries.len());
+			for (_, value) in &entries {
+				let (_, point) =
+					IndexEntryValue::decode_spatial_trailer(value).map_err(ControlFlow::Err)?;
+				let Some((x, y)) = point else {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"Spatial point filter applied to index entry without embedded point coordinates"
+					)));
+				};
+				if !pf.matches(x, y) {
+					continue;
+				}
+				out.push(decode_record_id(value).map_err(ControlFlow::Err)?);
+			}
+			if !out.is_empty() {
+				return Ok(out);
+			}
+			most = super::fuel::batch(most.saturating_mul(2).min(INDEX_BATCH_SIZE));
+		}
 	}
 }
 

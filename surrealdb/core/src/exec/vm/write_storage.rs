@@ -222,6 +222,8 @@ pub(in crate::exec::vm) enum NativeIndexKind {
 	Hnsw,
 	/// A `DiskANN` index.
 	DiskAnn,
+	/// A `SPATIAL` geometry index.
+	Spatial,
 }
 
 assert_plain!(NativeIndexKind);
@@ -237,6 +239,7 @@ impl NativeIndexKind {
 			Index::FullText(_) => Some(Self::FullText),
 			Index::Hnsw(_) => Some(Self::Hnsw),
 			Index::DiskAnn(_) => Some(Self::DiskAnn),
+			Index::Spatial => Some(Self::Spatial),
 		}
 	}
 }
@@ -937,6 +940,7 @@ async fn move_entries(
 	let value = IndexEntryValue {
 		rid: rid.clone(),
 		doc_id,
+		point: None,
 	};
 	let txn = ctx.txn();
 	let keyspace = crate::idx::kernels::btree::IndexKeyspace::of(ns, db, ix);
@@ -1113,6 +1117,7 @@ async fn delete_entry(
 				let bare = IndexEntryValue {
 					rid: expected.rid.clone(),
 					doc_id: None,
+					point: None,
 				};
 				match txn.del_compare_key(key, Some(&bare)).await {
 					Err(e) if condition_not_met(&e) => {}

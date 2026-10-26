@@ -9,7 +9,7 @@ Cannot combine UNIQUE with FULLTEXT
   --> [21:82]
    |
 21 | ...IGHLIGHTS UNIQUE;
-   |              ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN
+   |              ^^^^^^ an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL
   --> [21:41]
    |
 21 | DEFINE INDEX title ON book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIG...

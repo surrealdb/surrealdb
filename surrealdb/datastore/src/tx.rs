@@ -4137,7 +4137,12 @@ impl Transaction {
 	) -> Result<TableIndexShapes> {
 		let btree: Vec<IndexId> = indexes
 			.iter()
-			.filter(|ix| matches!(ix.index, catalog::Index::Idx | catalog::Index::Uniq))
+			.filter(|ix| {
+				matches!(
+					ix.index,
+					catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Spatial
+				)
+			})
 			.map(|ix| ix.index_id)
 			.collect();
 		self.table_index_shapes_of(ns, db, tb, &btree).await
@@ -4168,7 +4173,12 @@ impl Transaction {
 	) -> Result<TableIndexShapes> {
 		let btree: Vec<IndexId> = indexes
 			.iter()
-			.filter(|ix| matches!(ix.index, catalog::Index::Idx | catalog::Index::Uniq))
+			.filter(|ix| {
+				matches!(
+					ix.index,
+					catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Spatial
+				)
+			})
 			.map(|ix| ix.index_id)
 			.collect();
 		if btree.is_empty() {

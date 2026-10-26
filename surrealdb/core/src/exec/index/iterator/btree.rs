@@ -94,12 +94,41 @@ pub(crate) fn decode_entry_doc_ids(
 	res: Vec<(Vec<u8>, Val)>,
 	docs: &mut roaring::RoaringTreemap,
 	missing: &mut Vec<RecordId>,
+	spatial: bool,
+	point_filter: Option<&crate::exec::index::access_path::SpatialPointFilter>,
 ) -> Result<usize> {
 	use crate::key::KVValue;
 
 	let count = res.len();
+	if let Some(pf) = point_filter {
+		for (_, val) in res {
+			let (doc_id, point) = IndexEntryValue::decode_spatial_trailer(&val)?;
+			let (Some(doc_id), Some((x, y))) = (doc_id, point) else {
+				anyhow::bail!(
+					"Spatial point filter applied to index entry without embedded doc-ID and point coordinates"
+				);
+			};
+			if pf.matches(x, y) {
+				docs.insert(doc_id);
+			}
+		}
+		return Ok(count);
+	}
 	for (_, val) in res {
-		let entry = IndexEntryValue::kv_decode_value(&val, ())?;
+		let fast_doc_id = if spatial {
+			IndexEntryValue::decode_spatial_trailer(&val).map(|(doc_id, _)| doc_id)
+		} else {
+			IndexEntryValue::decode_trailer(&val)
+		};
+		if let Ok(Some(doc_id)) = fast_doc_id {
+			docs.insert(doc_id);
+			continue;
+		}
+		let entry = if spatial {
+			IndexEntryValue::decode_spatial(&val)?
+		} else {
+			IndexEntryValue::kv_decode_value(&val, ())?
+		};
 		match entry.doc_id {
 			Some(doc_id) => {
 				docs.insert(doc_id);
@@ -1629,7 +1658,8 @@ mod tests {
 		let entries = scan(&mut range, &tx, INDEX_BATCH_SIZE).await.expect("drain");
 		let mut docs = roaring::RoaringTreemap::new();
 		let mut missing = Vec::new();
-		let decoded = decode_entry_doc_ids(entries, &mut docs, &mut missing).expect("decode");
+		let decoded =
+			decode_entry_doc_ids(entries, &mut docs, &mut missing, false, None).expect("decode");
 		assert_eq!(decoded, streamed.len(), "the drain sees exactly the streamed entries");
 		assert!(missing.is_empty(), "a current-format index carries a doc-ID on every entry");
 		assert_eq!(docs.len() as usize, streamed.len());

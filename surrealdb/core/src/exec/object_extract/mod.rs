@@ -22,9 +22,12 @@ use revision::{
 use surrealdb_strand::Strand;
 use wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
+use crate::catalog::packed::FieldRef;
 use crate::catalog::{Record, StoredRecord, TableLayouts};
-use crate::val::stored::{OrderedObjectRef, ValueRef};
-use crate::val::{Object, Value};
+use crate::val::stored::{OrderedObjectRef, ValueRef, decode_key_nested};
+use crate::val::{
+	Bytes, Datetime, Duration, Geometry, Number, Object, RecordId, TableName, Uuid, Value,
+};
 
 // Note: there is intentionally no bail on `metadata`. `metadata` flags the
 // record type (plain vs. edge) and carries `aggregation_stats` for
@@ -632,6 +635,70 @@ pub(crate) fn project_record_bytes(
 		SlotScanResult::Found(object) => object,
 		SlotScanResult::Missing | SlotScanResult::Bail => None,
 	}
+}
+
+/// Decode only the top-level fields `keys_sorted` of a packed `SCHEMAFULL`
+/// record, or `None` when the row is not packed or any step of the packed check
+/// refuses it (in which case the caller falls back to [`Record::decode_admitted`]
+/// to raise the refusal).
+pub(crate) fn project_packed_record_bytes(
+	record_bytes: &[u8],
+	layouts: Option<&TableLayouts>,
+	table: &TableName,
+	keys_sorted: &[PathSegment],
+) -> Option<Object> {
+	let stored = StoredRecord::parse(record_bytes).ok()??;
+	if !stored.is_packed() {
+		return None;
+	}
+	let layouts = layouts?;
+	if layouts.table() != table {
+		return None;
+	}
+	let generation = stored.generation().ok()??;
+	let packed = layouts.admit_packed(generation).ok()?;
+	let row = stored.admit_packed(packed, layouts).ok()?;
+	let mut out = Object::default();
+	for key in keys_sorted {
+		let name = key.as_str();
+		let unhinted = std::sync::atomic::AtomicU32::new(u32::MAX);
+		let (column, field) = match row.root_column(name, &unhinted) {
+			Some(index) => (Some(index), row.read_column(index).ok()?),
+			None => (None, row.read_root_remainder(name).ok()?),
+		};
+		let value = match field {
+			FieldRef::Absent => continue,
+			FieldRef::Null => Value::Null,
+			FieldRef::Object => Value::Object(row.decode_node(column?).ok()?),
+			FieldRef::Bool(v) => Value::Bool(v),
+			FieldRef::I8(v) => Value::Number(Number::I8(v)),
+			FieldRef::I16(v) => Value::Number(Number::I16(v)),
+			FieldRef::I32(v) => Value::Number(Number::I32(v)),
+			FieldRef::Int(v) => Value::Number(Number::Int(v)),
+			FieldRef::U8(v) => Value::Number(Number::U8(v)),
+			FieldRef::U16(v) => Value::Number(Number::U16(v)),
+			FieldRef::U32(v) => Value::Number(Number::U32(v)),
+			FieldRef::U64(v) => Value::Number(Number::U64(v)),
+			FieldRef::F16(v) => Value::Number(Number::F16(v)),
+			FieldRef::F32(v) => Value::Number(Number::F32(v)),
+			FieldRef::Float(v) => Value::Number(Number::Float(v)),
+			FieldRef::Decimal(v) => Value::Number(Number::Decimal(v)),
+			FieldRef::Uuid(v) => Value::Uuid(Uuid(v)),
+			FieldRef::Datetime(v) => Value::Datetime(Datetime(v)),
+			FieldRef::Duration(v) => Value::Duration(Duration(v)),
+			FieldRef::Point(x, y) => Value::Geometry(Geometry::Point((x, y).into())),
+			FieldRef::String(v) => Value::String(Strand::new(v)),
+			FieldRef::Bytes(v) => Value::Bytes(Bytes(::bytes::Bytes::copy_from_slice(v))),
+			FieldRef::Literal(v) => v.clone(),
+			FieldRef::RecordId(table, key_bytes) => Value::RecordId(RecordId {
+				table: table.clone(),
+				key: decode_key_nested(key_bytes, 2).ok()?,
+			}),
+			FieldRef::Stored(v) => v.decode().ok()?,
+		};
+		out.0.insert(key.as_strand().clone(), value);
+	}
+	Some(out)
 }
 
 /// Serialise pre-validated UTF-8 bytes to their on-wire `Strand`

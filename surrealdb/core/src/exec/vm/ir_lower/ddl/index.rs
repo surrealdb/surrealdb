@@ -76,9 +76,21 @@ impl Ddl<'_, '_> {
 			ty: TypeId::named("StoredTableDefinition"),
 			dst: prior_table,
 		});
-		let refuse_before_creating = |lowering: &mut Self| match concurrently {
-			true => Ok(()),
-			false => lowering.refuse_blocking_build((ns, db), tb, name.operand),
+		let is_spatial = matches!(index, IndexSpec::Spatial);
+		let refuse_before_creating = |lowering: &mut Self| {
+			if is_spatial {
+				let probe_tpl = lowering.constant(attrs.template.value.clone())?;
+				let probe_def = lowering.load(probe_tpl)?;
+				let fmt = lowering.constant(Value::from(crate::catalog::INDEX_FORMAT_VERSION))?;
+				lowering.set_field(probe_def, "format_version", fmt)?;
+				lowering.store(StoreInstr::AdmitIndexFormat {
+					definition: probe_def,
+				});
+			}
+			match concurrently {
+				true => Ok(()),
+				false => lowering.refuse_blocking_build((ns, db), tb, name.operand),
+			}
 		};
 		let table_def =
 			self.table_creating_with((ns, db, database), tb, tb_key, refuse_before_creating)?;
@@ -237,6 +249,14 @@ impl Ddl<'_, '_> {
 		// same writes were judged before the creation, and this judges them again.
 		if !concurrently {
 			self.refuse_blocking_build((ns, db), tb, name.operand)?;
+		}
+		if is_spatial {
+			let format_version =
+				self.constant(Value::from(crate::catalog::INDEX_FORMAT_VERSION))?;
+			self.set_field(definition, "format_version", format_version)?;
+			self.store(StoreInstr::AdmitIndexFormat {
+				definition,
+			});
 		}
 
 		// A definition that consumes the table's shared doc-id space adopts its mappings, so a

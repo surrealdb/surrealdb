@@ -147,6 +147,7 @@ pub(super) fn open_join(
 		source: Source::Join {
 			join: id,
 		},
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: Some(feeder),

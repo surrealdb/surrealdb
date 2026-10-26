@@ -80,9 +80,12 @@ impl<'a> Kind<'a> {
 	pub(super) fn baseline(self) -> BaselinePolicy {
 		match self.0.index {
 			Index::Count(_) => BaselinePolicy::MergeQueuedSpans,
-			Index::Idx | Index::Uniq | Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => {
-				BaselinePolicy::Scan
-			}
+			Index::Idx
+			| Index::Uniq
+			| Index::FullText(_)
+			| Index::Hnsw(_)
+			| Index::DiskAnn(_)
+			| Index::Spatial => BaselinePolicy::Scan,
 		}
 	}
 
@@ -96,7 +99,7 @@ impl<'a> Kind<'a> {
 	/// Whether cleaning this index before its scan starts recording the shapes of the values it
 	/// holds, so every write the scan admits records them too.
 	pub(super) fn tracks_value_shapes(self) -> bool {
-		matches!(self.0.index, Index::Idx | Index::Uniq)
+		matches!(self.0.index, Index::Idx | Index::Uniq | Index::Spatial)
 	}
 
 	/// Whether this kind's initial-batch sink runs a pass over what it built once the scan ends

@@ -26,6 +26,7 @@
 // Without `vector-index` the graph engine is left out, and without `fulltext`
 // no analyzer exists; the helpers and caches only they reach go unused.
 #![cfg_attr(not(all(feature = "vector-index", feature = "fulltext")), allow(dead_code))]
+#![recursion_limit = "256"]
 
 #[macro_use]
 mod mac;
@@ -67,6 +68,7 @@ pub mod inline_cache;
 pub mod kernels;
 pub(crate) mod parallel;
 pub mod places;
+pub mod spatial;
 #[cfg(test)]
 pub(crate) mod test_env;
 pub mod trees;
@@ -262,8 +264,8 @@ pub async fn wipe_index_data(
 		catalog::Index::DiskAnn(_) => diskann = Some(next(tx, &ikb.new_dg_key()).await?),
 		#[cfg(not(diskann))]
 		catalog::Index::DiskAnn(_) => {}
-		// A b-tree index compacts nothing, so it keeps no generation.
-		catalog::Index::Idx | catalog::Index::Uniq => {}
+		// A b-tree or spatial index compacts nothing, so it keeps no generation.
+		catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Spatial => {}
 	}
 
 	tx.del_prefix_key(&ikb.new_idx_root()).await?;

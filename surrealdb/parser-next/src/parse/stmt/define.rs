@@ -1224,8 +1224,8 @@ impl<'a, 's> Parser<'a, 's> {
 	/// that needs columns is an error at the token after the clauses, as
 	/// earlier releases report it; a column count that does not fit the index is left
 	/// to the lowering, which knows the count. An index has at most one kind, so a
-	/// second `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW` or `DISKANN` clause is an error
-	/// rather than a replacement of the first.
+	/// second `UNIQUE`, `COUNT`, `FULLTEXT`, `HNSW`, `DISKANN` or `SPATIAL` clause
+	/// is an error rather than a replacement of the first.
 	pub(crate) fn index_clauses(&mut self) -> R<()> {
 		// Whether the index kind in force needs exactly one column, and
 		// whether it needs any.
@@ -1250,6 +1250,8 @@ impl<'a, 's> Parser<'a, 's> {
 				&& self.text_of(t).eq_ignore_ascii_case("DISKANN")
 			{
 				Some(4)
+			} else if t.kw == Kw::Spatial {
+				Some(5)
 			} else {
 				None
 			};
@@ -1258,7 +1260,7 @@ impl<'a, 's> Parser<'a, 's> {
 			{
 				let d = Diag::message(t.start, t.end, INDEX_KIND_CONFLICTS[k][f])
 					.with_label(
-						"an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW or DISKANN",
+						"an index can only be one of UNIQUE, COUNT, FULLTEXT, HNSW, DISKANN or SPATIAL",
 					)
 					.with_extra(first.start, first.end, "First given here");
 				return Err(self.diag(d));
@@ -1343,6 +1345,9 @@ impl<'a, 's> Parser<'a, 's> {
 			{
 				self.vector_index(Cl::Diskann)?;
 				one_column = true;
+			} else if t.kw == Kw::Spatial {
+				self.flag_clause(Cl::Spatial)?;
+				(one_column, needs_columns) = (false, true);
 			} else {
 				if fields {
 					return Ok(());
@@ -1830,14 +1835,15 @@ impl<'a, 's> Parser<'a, 's> {
 
 /// The error for an index kind clause given after another, indexed by the
 /// later kind and then the earlier one, in the order `UNIQUE`, `COUNT`,
-/// `FULLTEXT`, `HNSW`, `DISKANN`.
-const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
+/// `FULLTEXT`, `HNSW`, `DISKANN`, `SPATIAL`.
+const INDEX_KIND_CONFLICTS: [[&str; 6]; 6] = [
 	[
 		"UNIQUE is given twice",
 		"Cannot combine UNIQUE with COUNT",
 		"Cannot combine UNIQUE with FULLTEXT",
 		"Cannot combine UNIQUE with HNSW",
 		"Cannot combine UNIQUE with DISKANN",
+		"Cannot combine UNIQUE with SPATIAL",
 	],
 	[
 		"Cannot combine COUNT with UNIQUE",
@@ -1845,6 +1851,7 @@ const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
 		"Cannot combine COUNT with FULLTEXT",
 		"Cannot combine COUNT with HNSW",
 		"Cannot combine COUNT with DISKANN",
+		"Cannot combine COUNT with SPATIAL",
 	],
 	[
 		"Cannot combine FULLTEXT with UNIQUE",
@@ -1852,6 +1859,7 @@ const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
 		"FULLTEXT is given twice",
 		"Cannot combine FULLTEXT with HNSW",
 		"Cannot combine FULLTEXT with DISKANN",
+		"Cannot combine FULLTEXT with SPATIAL",
 	],
 	[
 		"Cannot combine HNSW with UNIQUE",
@@ -1859,6 +1867,7 @@ const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
 		"Cannot combine HNSW with FULLTEXT",
 		"HNSW is given twice",
 		"Cannot combine HNSW with DISKANN",
+		"Cannot combine HNSW with SPATIAL",
 	],
 	[
 		"Cannot combine DISKANN with UNIQUE",
@@ -1866,6 +1875,15 @@ const INDEX_KIND_CONFLICTS: [[&str; 5]; 5] = [
 		"Cannot combine DISKANN with FULLTEXT",
 		"Cannot combine DISKANN with HNSW",
 		"DISKANN is given twice",
+		"Cannot combine DISKANN with SPATIAL",
+	],
+	[
+		"Cannot combine SPATIAL with UNIQUE",
+		"Cannot combine SPATIAL with COUNT",
+		"Cannot combine SPATIAL with FULLTEXT",
+		"Cannot combine SPATIAL with HNSW",
+		"Cannot combine SPATIAL with DISKANN",
+		"SPATIAL is given twice",
 	],
 ];
 

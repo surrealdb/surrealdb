@@ -583,7 +583,9 @@ fn bitmap_fusion(
 	with: Option<&With>,
 	registry: &FunctionRegistry,
 ) -> Option<crate::exec::index::access_path::BitmapPlan> {
-	if answers.indexes.len() < 2 {
+	if answers.indexes.len() < 2
+		&& !answers.indexes.iter().any(|ix| matches!(ix.index, crate::catalog::Index::Spatial))
+	{
 		return None;
 	}
 	let columns = answers.columns.as_ref()?;

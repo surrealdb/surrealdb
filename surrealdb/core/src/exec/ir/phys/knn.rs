@@ -303,7 +303,8 @@ pub(super) fn exact_at_stamp(
 				crate::catalog::Index::Idx
 				| crate::catalog::Index::Uniq
 				| crate::catalog::Index::FullText(_)
-				| crate::catalog::Index::Count(_) => return None,
+				| crate::catalog::Index::Count(_)
+				| crate::catalog::Index::Spatial => return None,
 			};
 			let column = index.cols.first()?;
 			(!index.prepare_remove

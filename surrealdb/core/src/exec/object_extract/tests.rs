@@ -9,9 +9,9 @@ use surrealdb_strand::Strand;
 
 use super::{
 	Extracted, PathSegment, SlotScanResult, TEST_DEPTH_LIMIT, descend_record_value_path,
-	descend_value_slice_path, extract_field_from_record_bytes, project_record_bytes,
-	project_record_bytes_excluding, record_data_bytes, rev2_record_data_bytes,
-	scan_record_object_at_path_with_slots,
+	descend_value_slice_path, extract_field_from_record_bytes, project_packed_record_bytes,
+	project_record_bytes, project_record_bytes_excluding, record_data_bytes,
+	rev2_record_data_bytes, scan_record_object_at_path_with_slots,
 };
 use crate::catalog::{Record, RecordFormat, RecordType, StoredRecord, encode_record};
 use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
@@ -810,4 +810,223 @@ fn project_record_bytes_excluding_matches_a_full_decode_without_the_keys() {
 			}
 		}
 	}
+}
+
+/// `project_packed_record_bytes` decodes the requested top-level columns of a packed
+/// `SCHEMAFULL` row (including fixed scalars, points, nested object nodes, record keys,
+/// literal codes, stored value columns, root remainder fields, and absent optional
+/// columns) to match `Record::decode_admitted` and declines non-packed records,
+/// mismatched tables or missing layouts.
+#[test]
+fn project_packed_record_bytes_matches_full_decode_for_packed_columns() {
+	use std::sync::Arc;
+
+	use crate::catalog::layout::{
+		Column, ColumnRole, GenerationLayout, LayoutDescriptor, Location, PackedDescriptor,
+		PhysicalKind, Presence, RowLayout,
+	};
+	use crate::catalog::packed::{Packing, pack};
+	use crate::catalog::record::RowFlags;
+	use crate::catalog::{
+		DatabaseId, Generation, GenerationRing, NamespaceId, Record, TableLayouts,
+	};
+	use crate::val::{Geometry, TableName};
+
+	let table = TableName::new("t");
+	let descriptor = PackedDescriptor {
+		columns: vec![
+			Column {
+				path: Vec::new(),
+				kind: PhysicalKind::Value,
+				presence: Presence::Optional {
+					bit: 0,
+				},
+				location: Location::Var(0),
+				role: ColumnRole::Remainder,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["addr".to_owned()],
+				kind: PhysicalKind::Object,
+				presence: Presence::Required,
+				location: Location::None,
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["addr".to_owned(), "city".to_owned()],
+				kind: PhysicalKind::String,
+				presence: Presence::Required,
+				location: Location::Var(1),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["age".to_owned()],
+				kind: PhysicalKind::I64,
+				presence: Presence::Optional {
+					bit: 1,
+				},
+				location: Location::Fixed(1),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["author".to_owned()],
+				kind: PhysicalKind::RecordKey,
+				presence: Presence::Required,
+				location: Location::Var(2),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: vec![TableName::new("user")],
+			},
+			Column {
+				path: vec!["name".to_owned()],
+				kind: PhysicalKind::String,
+				presence: Presence::Required,
+				location: Location::Var(3),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["poly".to_owned()],
+				kind: PhysicalKind::Value,
+				presence: Presence::Required,
+				location: Location::Var(4),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["pt".to_owned()],
+				kind: PhysicalKind::Point,
+				presence: Presence::Required,
+				location: Location::Fixed(9),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["score".to_owned()],
+				kind: PhysicalKind::I16,
+				presence: Presence::Required,
+				location: Location::Fixed(25),
+				role: ColumnRole::Field,
+				literals: Vec::new(),
+				tables: Vec::new(),
+			},
+			Column {
+				path: vec!["status".to_owned()],
+				kind: PhysicalKind::LiteralCode(1),
+				presence: Presence::Required,
+				location: Location::Fixed(27),
+				role: ColumnRole::Field,
+				literals: vec![
+					Value::String(Strand::from("active")),
+					Value::String(Strand::from("pending")),
+				],
+				tables: Vec::new(),
+			},
+		],
+		presence_bits: 2,
+		bool_bits: 0,
+		fixed_size: 28,
+		var_count: 5,
+	};
+	descriptor.validate().expect("valid descriptor");
+
+	let addr = Object::from(BTreeMap::from([(
+		Strand::from("city"),
+		Value::String(Strand::from("Paris")),
+	)]));
+	let data = Object::from(BTreeMap::from([
+		(Strand::from("addr"), Value::Object(addr)),
+		(
+			Strand::from("author"),
+			Value::RecordId(RecordId::new(TableName::from("user"), Strand::from("alice"))),
+		),
+		(Strand::from("extra"), Value::Number(Number::Int(42))),
+		(Strand::from("name"), Value::String(Strand::from("Ada"))),
+		(
+			Strand::from("poly"),
+			Value::Array(crate::val::Array::from(vec![
+				Value::Number(Number::Int(1)),
+				Value::Number(Number::Int(2)),
+			])),
+		),
+		(Strand::from("pt"), Value::Geometry(Geometry::Point((2.35, 48.85).into()))),
+		(Strand::from("score"), Value::Number(Number::I16(7))),
+		(Strand::from("status"), Value::String(Strand::from("pending"))),
+	]));
+	let generation = Generation::FIRST;
+	let Packing::Packed(bytes) =
+		pack(&descriptor, generation, RowFlags::NONE, &data).expect("packs")
+	else {
+		panic!("expected packed row");
+	};
+	let ring = GenerationRing::new(generation, generation, Some(generation)).expect("valid ring");
+	let layouts = TableLayouts::new(
+		NamespaceId(1),
+		DatabaseId(1),
+		table.clone(),
+		ring,
+		vec![(
+			generation,
+			GenerationLayout::Readable(Arc::new(LayoutDescriptor {
+				table: table.clone(),
+				layout: RowLayout::Packed(descriptor),
+				migration: None,
+				migrated: None,
+				verified: None,
+			})),
+		)],
+		0,
+	)
+	.expect("valid layouts");
+
+	let full = Record::decode_admitted(&bytes, Some(&layouts), RecordId::new(table.clone(), 1))
+		.expect("full decode");
+	let Value::Object(full_obj) = full.data else {
+		panic!("expected object from full decode");
+	};
+
+	for keys in [
+		&[][..],
+		&["name"][..],
+		&["addr", "age", "missing", "pt", "score"][..],
+		&["author", "extra", "poly", "status"][..],
+		&["addr", "age", "author", "extra", "missing", "name", "poly", "pt", "score", "status"][..],
+	] {
+		let segments = p(keys);
+		let projected = project_packed_record_bytes(&bytes, Some(&layouts), &table, &segments)
+			.expect("projects packed row");
+		let mut expected = Object::default();
+		for key in keys {
+			if let Some(v) = full_obj.get(key) {
+				expected.0.insert(Strand::from(*key), v.clone());
+			}
+		}
+		assert_eq!(projected, expected, "keys {keys:?}");
+	}
+
+	assert_eq!(project_packed_record_bytes(&bytes, None, &table, &p(&["name"])), None);
+	assert_eq!(
+		project_packed_record_bytes(
+			&bytes,
+			Some(&layouts),
+			&TableName::new("other"),
+			&p(&["name"])
+		),
+		None
+	);
+	let doc_bytes = wire_record_plain_object(data);
+	assert_eq!(
+		project_packed_record_bytes(&doc_bytes, Some(&layouts), &table, &p(&["name"])),
+		None
+	);
 }

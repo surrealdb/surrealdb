@@ -172,6 +172,7 @@ pub(super) fn open_step(
 		source: Source::Split {
 			split: id,
 		},
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: reads.pipelines.len().checked_sub(1),

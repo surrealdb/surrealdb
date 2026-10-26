@@ -79,6 +79,7 @@ half.workspace = true
 lindera = { workspace = true, optional = true }
 ndarray.workspace = true
 ndarray-stats.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
 parking_lot.workspace = true
 quick_cache.workspace = true
 rand.workspace = true

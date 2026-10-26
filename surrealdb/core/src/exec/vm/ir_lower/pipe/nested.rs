@@ -56,6 +56,7 @@ pub(super) fn open_nested(
 		source: Source::Nested {
 			group,
 		},
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: None,
@@ -261,6 +262,7 @@ pub(super) fn open_union(
 		objects: super::yields_records(&source),
 		ids: false,
 		source,
+		source_op: None,
 		table,
 		schema: None,
 		feeder: None,

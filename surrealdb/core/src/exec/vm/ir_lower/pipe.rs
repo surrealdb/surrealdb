@@ -1442,6 +1442,9 @@ struct EndJumps {
 /// The source a pipeline opens, with what the program that holds it records of it.
 struct Opened {
 	source: Source,
+	/// The IR source op (`PhysOp::IndexScan`, `PhysOp::IndexUnion`, `PhysOp::Bitmap`, etc.) when
+	/// the pipeline opens a leaf source directly.
+	source_op: Option<OpId>,
 	table: Option<TableName>,
 	/// What the catalog declares for the rows the source reads, when it reads one table's rows.
 	schema: Option<Arc<Schema>>,
@@ -1787,6 +1790,7 @@ fn open_source(
 			objects: yields_records(&leaf.source),
 			ids: false,
 			source: leaf.source,
+			source_op: Some(input),
 			table: leaf.table,
 			schema: schema_of(ir, input),
 			feeder: None,
@@ -2014,6 +2018,7 @@ fn open_source(
 	};
 	Ok(Opened {
 		source,
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: reads.pipelines.len().checked_sub(1),
@@ -2115,6 +2120,7 @@ fn open_cut(
 		source: Source::Split {
 			split: id,
 		},
+		source_op: None,
 		table: None,
 		schema: None,
 		feeder: reads.pipelines.len().checked_sub(1),
@@ -2535,7 +2541,8 @@ fn emit_pipeline(
 	reads.table = reads.table.take().or(opened.table);
 	let registry = cx.registry();
 	let feeder = opened.feeder;
-	let source = opened.source;
+	let mut source = opened.source;
+	let source_op = opened.source_op;
 	let schema = opened.schema;
 	let rows_are_objects = opened.objects;
 	let rows_may_be_ids = opened.ids || yields_ids(&source);
@@ -2627,6 +2634,7 @@ fn emit_pipeline(
 
 	let Body {
 		em,
+		cx,
 		reads,
 		jumps: _,
 		limit_checks: _,
@@ -2705,6 +2713,17 @@ fn emit_pipeline(
 			fed.read_ahead &= fed.limits.is_empty();
 		}
 		feeding = reads.feeders.get(input).copied().flatten();
+	}
+
+	if enforce.is_none()
+		&& !emitted.reads_record_rows
+		&& !emitted.rebound
+		&& rows_ahead.is_none()
+		&& io.frontier_rows.is_none()
+		&& let Some(source_op) = source_op
+		&& let Some(decode) = spatial_source_decode(ir, cx.indexes(), source_op)?
+	{
+		set_source_decode(&mut source, decode);
 	}
 
 	let mut pipeline = finish(em, source, enforce, pipeline_limits, parallel)?;
@@ -2819,6 +2838,440 @@ fn enforced_demand(
 	})
 }
 
+fn source_decode_fields(
+	ir: &Ir,
+	runs: &[Run<'_>],
+	sort_sink: Option<OpId>,
+	agg_sink: Option<OpId>,
+) -> Result<Option<Vec<String>>, IrError> {
+	use crate::exec::ir::analysis::liveness;
+	use crate::exec::ir::core::ir::{Walk, WalkOrder};
+	use crate::exec::ir::iface::effects::FieldSet;
+	let Some(first) = runs.first() else {
+		return Ok(None);
+	};
+	let rows = first.from;
+	let mut parts: Vec<(ValueId, &[OpId])> =
+		runs.iter().map(|part| (part.from, part.ops)).collect();
+	let sort_op;
+	let sorted;
+	if let Some(op) = sort_sink {
+		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
+		let input = *data.operands.first().ok_or_else(|| invariant("a sort with no input"))?;
+		sort_op = [op];
+		sorted = reader_runs(ir, op)?;
+		parts.push((input, &sort_op));
+		parts.extend(sorted.iter().map(|(from, ops)| (*from, ops.as_slice())));
+	}
+	let agg_op;
+	if let Some(op) = agg_sink {
+		let data = ir.op(op).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
+		let input =
+			*data.operands.first().ok_or_else(|| invariant("an aggregate with no input"))?;
+		agg_op = [op];
+		parts.push((input, &agg_op));
+	}
+	for (_, steps) in &parts {
+		for step in steps.iter().copied() {
+			let Some(data) = ir.op(step) else {
+				return Ok(None);
+			};
+			if matches!(
+				&data.kind,
+				OpKind::Phys(
+					PhysOp::Layer(_)
+						| PhysOp::Enforced { .. }
+						| PhysOp::Fetch | PhysOp::MatchStep(_)
+				)
+			) {
+				return Ok(None);
+			}
+			let mut has_implicit_row_read = false;
+			for region in data.regions.iter().copied() {
+				ir.walk(region, WalkOrder::PreOrder, &mut |op| {
+					let Some(op_data) = ir.op(op) else {
+						return Walk::Continue;
+					};
+					let reads_row_implicitly = if matches!(
+						&op_data.kind,
+						OpKind::Expr(
+							ExprOp::Subquery(_)
+								| ExprOp::ClosureCreate(_)
+								| ExprOp::Invoke | ExprOp::Dispatch(_),
+						) | OpKind::Phys(
+							PhysOp::Subquery
+								| PhysOp::Loop {
+									kind: LoopKind::Closure,
+									..
+								},
+						)
+					) {
+						true
+					} else if let OpKind::Expr(ExprOp::Call(call)) = &op_data.kind {
+						if matches!(&call.function, crate::expr::Function::Script(_)) {
+							true
+						} else if let crate::expr::Function::Normal(name) = &call.function {
+							name.as_str() == "function::call"
+						} else {
+							false
+						}
+					} else if let OpKind::Expr(ExprOp::FreeParam {
+						name,
+					}) = &op_data.kind
+					{
+						matches!(name.as_str(), "parent" | "this")
+					} else {
+						false
+					};
+					if reads_row_implicitly {
+						has_implicit_row_read = true;
+					}
+					Walk::Continue
+				});
+			}
+			if has_implicit_row_read {
+				return Ok(None);
+			}
+		}
+	}
+	let demand = liveness::pipeline_demand(ir, rows, &parts);
+	// Without a `PhysOp::Layer` step in `parts`, `pipeline_demand` never populates `computed` or
+	// `guarded`; guard explicitly so any future computed-field demand falls back to whole-record
+	// decoding.
+	debug_assert!(demand.computed.is_empty() && demand.guarded.is_empty());
+	if !demand.computed.is_empty() || !demand.guarded.is_empty() {
+		return Ok(None);
+	}
+	let FieldSet::Some(names) = demand.stored else {
+		return Ok(None);
+	};
+	Ok(Some(names.iter().map(|name| name.as_str().to_owned()).collect()))
+}
+
+fn sink_of_tail_value(
+	ir: &Ir,
+	region: RegionId,
+	value: ValueId,
+) -> Option<(Option<OpId>, Option<OpId>)> {
+	let mut sink = (None, None);
+	for read in ir.uses(value) {
+		let user = ir.op(read.user)?;
+		if matches!(
+			&user.kind,
+			OpKind::Phys(PhysOp::Yield)
+				| OpKind::Expr(ExprOp::Yield)
+				| OpKind::Phys(PhysOp::Explain { .. })
+		) && ir.enclosing_region(read.user) == region
+		{
+		} else if matches!(&user.kind, OpKind::Phys(PhysOp::Only | PhysOp::VersionScope))
+			&& ir.enclosing_region(read.user) == region
+			&& read.operand == 0
+		{
+			for wrapped in &user.results {
+				if sink_of_tail_value(ir, region, *wrapped)? != (None, None) {
+					return None;
+				}
+			}
+		} else if matches!(&user.kind, OpKind::Phys(PhysOp::Sort(_))) && read.operand == 0 {
+			if sink != (None, None) {
+				return None;
+			}
+			sink = (Some(read.user), None);
+		} else if matches!(&user.kind, OpKind::Phys(PhysOp::Aggregate(_))) && read.operand == 0 {
+			if sink != (None, None) {
+				return None;
+			}
+			sink = (None, Some(read.user));
+		} else {
+			return None;
+		}
+	}
+	Some(sink)
+}
+
+fn sink_of_tail(ir: &Ir, region: RegionId, tail_op: OpId) -> Option<(Option<OpId>, Option<OpId>)> {
+	let data = ir.op(tail_op)?;
+	let mut sink = (None, None);
+	for result in &data.results {
+		let found = sink_of_tail_value(ir, region, *result)?;
+		if found != (None, None) {
+			if sink != (None, None) {
+				return None;
+			}
+			sink = found;
+		}
+	}
+	Some(sink)
+}
+
+fn bitmap_shape_uses_spatial(
+	shape: &crate::exec::ir::phys::ops::BitmapShape,
+	indexes: &dyn super::read::IndexResolver,
+) -> bool {
+	use crate::exec::ir::phys::ops::BitmapShape;
+	match shape {
+		BitmapShape::BTree {
+			index,
+			..
+		} => indexes
+			.resolve(index)
+			.is_some_and(|r| matches!(r.definition().index, crate::catalog::Index::Spatial)),
+		BitmapShape::FullText {
+			..
+		}
+		| BitmapShape::Graph {
+			..
+		} => false,
+		BitmapShape::And(children) | BitmapShape::Or(children) => {
+			children.iter().any(|child| bitmap_shape_uses_spatial(child, indexes))
+		}
+		BitmapShape::AndNot {
+			base,
+			subtract,
+		} => {
+			bitmap_shape_uses_spatial(base, indexes) || bitmap_shape_uses_spatial(subtract, indexes)
+		}
+	}
+}
+
+fn union_merge_field(
+	merge: &Option<crate::exec::operators::scan::MergeMode>,
+) -> Option<Option<String>> {
+	if let Some(
+		crate::exec::operators::scan::MergeMode::ByIndexKey {
+			path,
+			..
+		}
+		| crate::exec::operators::scan::MergeMode::ByIndexKeyDedup {
+			path,
+			..
+		},
+	) = merge
+	{
+		if let Some(FieldPathPart::Field(name)) = path.0.first() {
+			Some(Some(name.clone()))
+		} else {
+			None
+		}
+	} else {
+		Some(None)
+	}
+}
+
+/// Computes the [`DecodeFields`](crate::exec::operators::scan::common::DecodeFields) that pipeline
+/// lowering attaches to a spatial `PhysOp::IndexScan`, `PhysOp::IndexUnion`, or `PhysOp::Bitmap`
+/// source `source_op`, shared between pipeline lowering (`emit_pipeline`) and `EXPLAIN`.
+pub(super) fn spatial_source_decode(
+	ir: &Ir,
+	indexes: &dyn super::read::IndexResolver,
+	source_op: OpId,
+) -> Result<Option<crate::exec::operators::scan::common::DecodeFields>, IrError> {
+	use crate::exec::operators::scan::common::DecodeFields;
+	if in_union(ir, source_op) {
+		return Ok(None);
+	}
+	let Some(source_data) = ir.op(source_op) else {
+		return Ok(None);
+	};
+	let merge_field = if let OpKind::Phys(PhysOp::IndexScan(attrs)) = &source_data.kind {
+		let Some(resolved) = indexes.resolve(&attrs.index) else {
+			return Ok(None);
+		};
+		if !matches!(resolved.definition().index, crate::catalog::Index::Spatial) {
+			return Ok(None);
+		}
+		None
+	} else if let OpKind::Phys(PhysOp::IndexUnion(attrs)) = &source_data.kind {
+		let has_spatial = attrs.branches.iter().any(|b| {
+			indexes
+				.resolve(&b.index)
+				.is_some_and(|r| matches!(r.definition().index, crate::catalog::Index::Spatial))
+		});
+		if !has_spatial {
+			return Ok(None);
+		}
+		let Some(merge_field) = union_merge_field(&attrs.merge) else {
+			return Ok(None);
+		};
+		merge_field
+	} else if let OpKind::Phys(PhysOp::Bitmap(attrs)) = &source_data.kind {
+		if !bitmap_shape_uses_spatial(&attrs.root, indexes) {
+			return Ok(None);
+		}
+		if let Some(&fallback_region) = source_data.regions.first()
+			&& let Some(last) = ops_in(ir, fallback_region).last()
+			&& let Some(terminator) = ir.op(last)
+			&& let (OpKind::Phys(PhysOp::Yield), [yielded]) =
+				(&terminator.kind, terminator.operands.as_slice())
+			&& let Ok(fallback_op) = producer_of(ir, *yielded)
+			&& let Some(OpKind::Phys(PhysOp::IndexUnion(fallback_attrs))) =
+				ir.op(fallback_op).map(|d| &d.kind)
+		{
+			let Some(merge_field) = union_merge_field(&fallback_attrs.merge) else {
+				return Ok(None);
+			};
+			merge_field
+		} else {
+			None
+		}
+	} else {
+		return Ok(None);
+	};
+	let region = ir.enclosing_region(source_op);
+	let before_trail = trail_of(ir, region, source_op)?;
+	let last_before = before_trail.last().copied().unwrap_or(source_op);
+	let last_before_val =
+		first_result(ir.op(last_before).ok_or(IrError::Stale("ir_lower::pipe: op"))?)?;
+
+	let mut stages = Vec::new();
+	if let [read] = ir.uses(last_before_val)
+		&& read.operand == 0
+		&& starts_pipeline_in(ir, region, read.user)
+		&& matches!(
+			ir.op(read.user).map(|d| &d.kind),
+			Some(OpKind::Phys(PhysOp::Loop {
+				kind: LoopKind::Select,
+				..
+			}))
+		) && let Some(first_pipe) = ir.parent_op(ir.enclosing_region(read.user))
+	{
+		let first_trail = trail_of(ir, region, first_pipe)?;
+		let first_stage = Stage::of(ir, first_pipe, first_trail)?;
+		if first_stage.head.input != source_op || first_stage.head.before != before_trail {
+			return Ok(None);
+		}
+		stages.push(first_stage);
+		while let Some(last_stage) = stages.last() {
+			let tail_op = last_stage.trail.last().copied().unwrap_or(last_stage.op);
+			let tail_val =
+				first_result(ir.op(tail_op).ok_or(IrError::Stale("ir_lower::pipe: op"))?)?;
+			if let [next_read] = ir.uses(tail_val)
+				&& next_read.operand == 0
+				&& starts_pipeline_in(ir, region, next_read.user)
+				&& matches!(
+					ir.op(next_read.user).map(|d| &d.kind),
+					Some(OpKind::Phys(PhysOp::Loop {
+						kind: LoopKind::Select,
+						..
+					}))
+				) && let Some(next_pipe) = ir.parent_op(ir.enclosing_region(next_read.user))
+			{
+				let next_trail = trail_of(ir, region, next_pipe)?;
+				let next_stage = Stage::of(ir, next_pipe, next_trail)?;
+				if next_stage.head.input != last_stage.op
+					|| next_stage.head.before != last_stage.trail
+				{
+					return Ok(None);
+				}
+				stages.push(next_stage);
+			} else {
+				break;
+			}
+		}
+	}
+
+	let mut fields = if !stages.is_empty() {
+		if stages.iter().any(|stage| stage.head.body.iter().any(|step| is_split(ir, *step))) {
+			return Ok(None);
+		}
+		let last_stage = stages.last().ok_or_else(|| invariant("empty stages"))?;
+		if let Some(placed) = ir.placement(last_stage.op) {
+			let io = placed.io();
+			if io.frontier_rows.is_some()
+				|| io.rows_ahead.as_ref().is_some_and(|ahead| ahead.derefs)
+			{
+				return Ok(None);
+			}
+		}
+		let tail_op = last_stage.trail.last().copied().unwrap_or(last_stage.op);
+		let Some((sort_sink, agg_sink)) = sink_of_tail(ir, region, tail_op) else {
+			return Ok(None);
+		};
+		let head = &stages[0].head;
+		let mut runs = Vec::with_capacity(3 * stages.len() + 1);
+		if !head.before.is_empty() {
+			let input = ir.op(head.input).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
+			runs.push(Run {
+				from: first_result(input)?,
+				ops: &head.before,
+				delivers: None,
+			});
+		}
+		for stage in &stages {
+			if let Some((from, delivered)) = stage.head.element {
+				runs.push(Run {
+					from,
+					ops: &stage.head.body,
+					delivers: Some(delivered),
+				});
+			}
+			runs.push(Run {
+				from: stage.head.after,
+				ops: stage.chain.get(1..).unwrap_or(&[]),
+				delivers: Some(stage.yielded),
+			});
+			let own = ir.op(stage.op).ok_or(IrError::Stale("ir_lower::pipe: op"))?;
+			runs.push(Run {
+				from: first_result(own)?,
+				ops: &stage.trail,
+				delivers: None,
+			});
+		}
+		let Some(fields) = source_decode_fields(ir, &runs, sort_sink, agg_sink)? else {
+			return Ok(None);
+		};
+		fields
+	} else {
+		let Some((sort_sink, agg_sink)) = sink_of_tail(ir, region, last_before) else {
+			return Ok(None);
+		};
+		let from = first_result(source_data)?;
+		let runs = [Run {
+			from,
+			ops: &before_trail,
+			delivers: None,
+		}];
+		let Some(fields) = source_decode_fields(ir, &runs, sort_sink, agg_sink)? else {
+			return Ok(None);
+		};
+		fields
+	};
+
+	if let Some(merge_field) = merge_field
+		&& !fields.contains(&merge_field)
+	{
+		fields.push(merge_field);
+	}
+	Ok(Some(DecodeFields::new(fields)))
+}
+
+fn set_source_decode(
+	source: &mut Source,
+	decode: crate::exec::operators::scan::common::DecodeFields,
+) {
+	if let Source::Index {
+		decode: slot @ None,
+		..
+	}
+	| Source::IndexUnion {
+		decode: slot @ None,
+		..
+	} = source
+	{
+		*slot = Some(decode);
+	} else if let Source::Bitmap {
+		decode: slot @ None,
+		fallback,
+		..
+	} = source
+	{
+		if let Some(fallback) = fallback.as_deref_mut() {
+			set_source_decode(fallback, decode.clone());
+		}
+		*slot = Some(decode);
+	}
+}
+
 /// The runs of streaming ops that read the rows of the sort `sort`: the ops that follow the sort,
 /// then, where a select loop reads what they deliver, its body, and the ops that follow it; where
 /// a pipeline reads them, its ops as [`lower_part`] runs them.
@@ -2842,7 +3295,15 @@ fn reader_runs(ir: &Ir, sort: OpId) -> Result<Vec<(ValueId, Vec<OpId>)>, IrError
 			..
 		}))
 	);
-	let (head, chain, own, follows) = if is_loop {
+	let (head, chain, own, follows) = if is_loop
+		&& starts_pipeline_in(ir, ir.enclosing_region(sort), reader)
+		&& let Some(pipe) = ir.parent_op(ir.enclosing_region(reader))
+	{
+		let follows = trail_of(ir, ir.enclosing_region(pipe), pipe)?;
+		let stage = Stage::of(ir, pipe, follows)?;
+		let chain = stage.chain.get(1..).unwrap_or(&[]).to_vec();
+		(stage.head, chain, stage.op, stage.trail)
+	} else if is_loop {
 		let head = head_of(ir, &[reader])?;
 		(head, Vec::new(), reader, trail_of(ir, ir.enclosing_region(reader), reader)?)
 	} else if is_pipeline(ir, reader) {
