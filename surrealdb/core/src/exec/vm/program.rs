@@ -7661,6 +7661,118 @@ pub(super) fn reads_row(code: &[Instr]) -> bool {
 	code.iter().fold(RowUse::Neither, |used, instr| used.and(row_use(instr))) == RowUse::Fields
 }
 
+/// Whether a body holds an instruction that reads the [`ROW`] register as a value: `$this` or
+/// `$self` loaded, compared, computed with or put into a collection or an object.
+///
+/// The interpreter fills that register only from a reader that holds the row whole, so a body
+/// that holds such an instruction never runs on a record read where it lies. The instructions
+/// that hand the row on (an emit, a sort, a split or a distinct set) or read a vector from it
+/// read it through the reader instead, and are not counted.
+pub(super) fn reads_row_register(code: &[Instr]) -> bool {
+	code.iter().any(reads_the_row_register)
+}
+
+/// Whether `instr` reads the [`ROW`] register as a value ([`reads_row_register`]).
+fn reads_the_row_register(instr: &Instr) -> bool {
+	let row = |operand: &Operand| matches!(operand, Operand::Reg(ROW));
+	if let Instr::Load {
+		src,
+		..
+	}
+	| Instr::Unary {
+		src,
+		..
+	} = instr
+	{
+		return row(src);
+	}
+	if let Instr::Compare {
+		left,
+		right,
+		..
+	}
+	| Instr::Arith {
+		left,
+		right,
+		..
+	}
+	| Instr::JumpIfCompare {
+		left,
+		right,
+		..
+	}
+	| Instr::FilterCompare {
+		left,
+		right,
+		..
+	} = instr
+	{
+		return row(left) || row(right);
+	}
+	if let Instr::Filter {
+		cond,
+		..
+	}
+	| Instr::JumpIf {
+		cond,
+		..
+	}
+	| Instr::JumpIfNullish {
+		cond,
+		..
+	}
+	| Instr::JumpIfNone {
+		cond,
+		..
+	} = instr
+	{
+		return row(cond);
+	}
+	if let Instr::ArrayPush {
+		value,
+		..
+	}
+	| Instr::CollectPush {
+		value,
+		..
+	}
+	| Instr::SetField {
+		value,
+		..
+	}
+	| Instr::GroupKey {
+		value,
+		..
+	}
+	| Instr::AccUpdate {
+		value,
+		..
+	}
+	| Instr::GroupFirstSet {
+		src: value,
+		..
+	} = instr
+	{
+		return row(value);
+	}
+	if let Instr::BuildObject {
+		fields,
+		..
+	} = instr
+	{
+		return fields.iter().any(|(_, operand)| row(operand));
+	}
+	if let Instr::KnnRank {
+		src,
+		root: None,
+		..
+	} = instr
+	{
+		return row(src);
+	}
+	false
+}
+
 impl Program {
 	/// The program a leaf runs a morsel unit as ([`super::morsel::wire`]): `pipeline`, whose body
 	/// runs in the storage cursor, and the tables its body names. It holds nothing else, reads no

@@ -31,11 +31,6 @@ where
 	s.parse().map_err(|e: T::Err| e.to_string())
 }
 
-fn exact_as<T: DecimalExt, U>(_variant: fn(T) -> U, s: &str) -> Result<T, String> {
-	let s = within_scale(s)?;
-	T::from_str_exact_scale(&s).map_err(|e| e.to_string())
-}
-
 fn normalized_exact_as<T: DecimalExt, U>(_variant: fn(T) -> U, s: &str) -> Result<T, String> {
 	let s = within_scale(s)?;
 	T::from_str_normalized_exact(&s).map_err(|e| e.to_string())
@@ -87,7 +82,9 @@ pub fn string_body(text: &str) -> R<String> {
 
 /// A decimal literal span (`1.5dec`, `-2e3dec`). A literal the decimal type
 /// cannot hold exactly (a scale or magnitude out of range) is an error, in
-/// plain and exponent notation alike.
+/// plain and exponent notation alike. The value is normalized in both
+/// notations, so `1.50dec` and `1.50e0dec` are `1.5dec`, which is how the
+/// value formats and re-parses.
 pub fn decimal(text: &str) -> R<Literal> {
 	let fail = |e: String| Reject::new(format!("Failed to parse decimal: {e}"));
 	let s: String = text.trim_end_matches("dec").chars().filter(|c| *c != '_').collect();
@@ -119,7 +116,7 @@ pub fn decimal(text: &str) -> R<Literal> {
 		} else {
 			plain
 		};
-		exact_as(Literal::Decimal, &plain)
+		normalized_exact_as(Literal::Decimal, &plain)
 	} else {
 		normalized_exact_as(Literal::Decimal, &s)
 	};
@@ -874,7 +871,7 @@ mod decimal_tests {
 		assert_eq!(shown("1e-28dec").unwrap(), "0.0000000000000000000000000001");
 		assert_eq!(shown("1e28dec").unwrap(), "10000000000000000000000000000");
 		assert_eq!(shown("1.500000000000000000000000000000dec").unwrap(), "1.5");
-		assert_eq!(shown("1.50e0dec").unwrap(), "1.50");
+		assert_eq!(shown("1.50e0dec").unwrap(), "1.5");
 		assert_eq!(shown("-2.5e1dec").unwrap(), "-25");
 	}
 

@@ -71,7 +71,7 @@ serial, serial in place
   refused: a stage the plan marks compute holds an op that only the apply half may run
   refused: the pipeline or its statement writes
 ### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
-serial, serial in place
+serial, serial
   refused: a stage the plan marks compute holds an op that only the apply half may run
   refused: the pipeline or its statement writes
 ### UPDATE person SET city = (CREATE log:1).id

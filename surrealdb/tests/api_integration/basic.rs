@@ -118,6 +118,7 @@ pub async fn signin_ns(new_db: impl CreateDb) {
 /// A handle signed in with a system user's credentials keeps working after
 /// the token issued at signin has expired: the session lasts for the user's
 /// SESSION duration, which is unbounded by default.
+#[cfg(not(feature = "protocol-http"))]
 pub async fn signin_outlives_its_token(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -143,6 +144,35 @@ pub async fn signin_outlives_its_token(new_db: impl CreateDb) {
 	let mut response = db.query("RETURN 1").await.unwrap().check().unwrap();
 	let one: Option<i64> = response.take(0).unwrap();
 	assert_eq!(one, Some(1));
+}
+
+/// HTTP holds no session between requests: each one presents the token issued
+/// at signin as a `Bearer` header, so it is a token session and ends at the
+/// token's `exp`.
+#[cfg(feature = "protocol-http")]
+pub async fn signin_outlives_its_token(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let namespace = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(Ulid::new().to_string()).await.unwrap();
+	let user = Ulid::new().to_string();
+	let pass = "password123".to_string();
+	let sql = format!(
+		"DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}' ROLES EDITOR DURATION FOR TOKEN 1s"
+	);
+	let response = db.query(sql).await.unwrap();
+	drop(permit);
+	response.check().unwrap();
+	db.signin(Namespace {
+		namespace: namespace.clone(),
+		username: user,
+		password: pass,
+	})
+	.await
+	.unwrap();
+	// Wait for the token to expire
+	tokio::time::sleep(Duration::from_secs(2)).await;
+	db.query("RETURN 1").await.unwrap_err();
 }
 
 pub async fn signin_db(new_db: impl CreateDb) {

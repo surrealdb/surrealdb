@@ -62,7 +62,7 @@ root[0] serial
 root/0[0] serial in place
 ### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
 root[0] serial
-root/0[0] serial in place
+root/0[0] serial
 ### UPDATE person SET city = (CREATE log:1).id
 root[0] serial
 root/0[0] serial

@@ -35,7 +35,7 @@ use super::super::program::{
 	BlockInstr, CALL_FRAME, CallSpec, ClosureValueSpec, DeferredVector, DegreeSpec, ExternalSpec,
 	FetchPlan, FetchStepSpec, FunctionSpec, Instr, KnnQuery, Label, LookupSpec, MatchesSpec,
 	MethodSpec, NestedSpec, ParamSpec, PermissionSpec, Pipeline, Program, ROW, RecordIdSpec, Reg,
-	Source, SubquerySpec, reads_row,
+	Source, SubquerySpec, reads_row, reads_row_register,
 };
 use super::super::row::FieldName;
 use crate::exec::field_path::FieldPath;
@@ -742,7 +742,10 @@ impl Emitter {
 	/// a record, or of a sorted row, only when its source reads storage (or is sorted) and the body
 	/// holds no backward jump and no instruction the interpreter does not answer from the row and
 	/// the program alone. The instructions that qualify are those of `runs_on_the_row`; any other
-	/// leaves both `false`, which is always correct.
+	/// leaves both `false`, which is always correct. A body that takes the row whole through the
+	/// [`ROW`] register (`$this` or `$self` as a value) leaves both `false` as well: a reader that
+	/// reads a record where it lies holds no row in that register, so the body runs over the
+	/// record decoded whole.
 	///
 	/// The emitter is left with no code, the registers of a fresh emitter and no labels, ready for
 	/// the next pipeline of the same program; its pools are kept.
@@ -759,7 +762,8 @@ impl Emitter {
 					.ok_or(IrError::Stale("ir_lower::emit: label never bound"))?;
 			}
 		}
-		let host_free = !jumps_back(&code) && code.iter().all(runs_on_the_row);
+		let host_free =
+			!jumps_back(&code) && code.iter().all(runs_on_the_row) && !reads_row_register(&code);
 		let in_place = source.reads_storage() && host_free;
 		let stored_rows = matches!(source, Source::Sorted { .. }) && host_free;
 		let reads_row = in_place && reads_row(&code);
@@ -1234,7 +1238,8 @@ mod tests {
 			]),
 			(true, false)
 		);
-		// A read of the row through its register is a read of it whole.
+		// A read of the row through its register is a read of it whole, which no reader of a
+		// record where it lies answers: the body runs over the decoded record.
 		assert_eq!(
 			reads(vec![
 				Instr::Compare {
@@ -1245,7 +1250,7 @@ mod tests {
 				},
 				Instr::EndRow,
 			]),
-			(true, false)
+			(false, false)
 		);
 		// An instruction that hands back to the host is not in place, and reads no row in place.
 		assert_eq!(

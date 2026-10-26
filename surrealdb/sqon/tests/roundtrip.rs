@@ -58,7 +58,19 @@ fn supported(value: &Value) -> bool {
 		| Value::Datetime(_)
 		| Value::Uuid(_) => true,
 		Value::Number(Number::Float(f)) => !f.is_nan(),
-		Value::Number(_) => true,
+		Value::Number(Number::Int(_) | Number::Decimal(_)) => true,
+		// SQON's grammar has no sized number kinds: `1u32` and `1f16` do not lex.
+		Value::Number(
+			Number::I8(_)
+			| Number::U8(_)
+			| Number::I16(_)
+			| Number::U16(_)
+			| Number::I32(_)
+			| Number::U32(_)
+			| Number::U64(_)
+			| Number::F16(_)
+			| Number::F32(_),
+		) => false,
 		Value::Geometry(_) | Value::Regex(_) | Value::Table(_) => false,
 		Value::File(f) => file_str_supported(&f.bucket, &[]) && file_str_supported(&f.key, &['/']),
 		Value::Array(a) => a.iter().all(supported),

@@ -100,9 +100,39 @@ fn entries(log: &str) -> Vec<&str> {
 	log.lines().filter(|line| line.contains("Slow query detected")).collect()
 }
 
+/// The duration an entry reports in its `time: …` field.
+fn entry_time(entry: &str) -> Option<Duration> {
+	let rest = entry.split("time: ").nth(1)?;
+	let value = rest.split(' ').next()?;
+	let (number, scale) = if let Some(ms) = value.strip_suffix("ms") {
+		(ms, 1e-3)
+	} else if let Some(us) = value.strip_suffix("µs") {
+		(us, 1e-6)
+	} else if let Some(ns) = value.strip_suffix("ns") {
+		(ns, 1e-9)
+	} else {
+		(value.strip_suffix('s')?, 1.0)
+	};
+	Some(Duration::from_secs_f64(number.parse::<f64>().ok()? * scale))
+}
+
+/// The batch entries of `log`, after checking that every other entry is for a
+/// statement that itself ran past the threshold. A statement that should take
+/// a fraction of the threshold can still overrun it on a starved scheduler, and
+/// its entry is then correct, so only the batch entry is counted.
+fn batch_entries(log: &str) -> Vec<&str> {
+	let (batch, statements): (Vec<&str>, Vec<&str>) =
+		entries(log).into_iter().partition(|entry| entry.contains("batch did not complete"));
+	for entry in statements {
+		assert!(entry_time(entry).is_some_and(|time| time >= SLOW), "{log}");
+	}
+	batch
+}
+
 /// Each statement takes a fraction of the threshold, so none is slow-logged
-/// on its own, and together they run well past the timeout, which itself is
-/// past the threshold. The test depends only on that ordering of the three
+/// on its own unless the scheduler starves it (see [`batch_entries`]), and
+/// together they run well past the timeout, which itself is past the
+/// threshold. The test depends only on that ordering of the three
 /// durations, not on where in the batch the timeout lands.
 fn sleeps(n: usize) -> String {
 	"SLEEP 20ms;".repeat(n)
@@ -117,7 +147,7 @@ async fn a_batch_cut_short_by_the_query_timeout_is_slow_logged_once() -> Result<
 	assert!(res.iter().any(|r| r.result.is_ok()), "the first statements run");
 	assert!(res.last().is_some_and(|r| r.result.is_err()), "the last statement is timed out");
 	let log = log.contents();
-	let entries = entries(&log);
+	let entries = batch_entries(&log);
 	assert_eq!(entries.len(), 1, "{log}");
 	assert!(entries[0].contains("batch did not complete (timed out after 1s)"), "{log}");
 	assert!(entries[0].contains("query: SLEEP 20ms"), "{log}");
@@ -132,7 +162,7 @@ async fn a_transaction_block_cut_short_by_the_query_timeout_is_slow_logged_once(
 	let res = ds.execute(&format!("BEGIN; {} COMMIT;", sleeps(100)), &ses, None).await?;
 	assert!(res.iter().skip(1).all(|r| r.result.is_err()), "the block is rolled back");
 	let log = log.contents();
-	let entries = entries(&log);
+	let entries = batch_entries(&log);
 	assert_eq!(entries.len(), 1, "{log}");
 	assert!(entries[0].contains("batch did not complete (timed out after 1s)"), "{log}");
 	Ok(())
@@ -154,7 +184,7 @@ async fn a_batch_cancelled_by_its_caller_is_slow_logged_once() -> Result<()> {
 	let res = ds.run(req).await?;
 	assert!(res.last().is_some_and(|r| r.result.is_err()), "the last statement is cancelled");
 	let log = log.contents();
-	let entries = entries(&log);
+	let entries = batch_entries(&log);
 	assert_eq!(entries.len(), 1, "{log}");
 	assert!(entries[0].contains("batch did not complete (cancelled)"), "{log}");
 	Ok(())

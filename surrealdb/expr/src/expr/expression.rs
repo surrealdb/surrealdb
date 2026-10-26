@@ -769,6 +769,14 @@ impl Expr {
 		}
 	}
 
+	/// Whether this is an unsigned sized integer literal (`1u8` ... `1u64`).
+	pub fn is_unsigned_literal(&self) -> bool {
+		matches!(
+			self,
+			Expr::Literal(Literal::U8(_) | Literal::U16(_) | Literal::U32(_) | Literal::U64(_))
+		)
+	}
+
 	pub fn has_left_minus(&self) -> bool {
 		match self {
 			Expr::Prefix {
@@ -938,6 +946,9 @@ impl ToSql for Expr {
 					// We need to avoid `--` from showing up so we need to cover if the expression
 					// has a left minus
 					|| *op == PrefixOperator::Negate && expr.has_left_minus()
+					// `-1u8` lexes as one (negative, out of range) literal, so a negated
+					// unsigned literal keeps its parentheses
+					|| *op == PrefixOperator::Negate && expr.is_unsigned_literal()
 				{
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {

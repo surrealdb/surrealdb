@@ -2192,7 +2192,7 @@ b1cb9d28928a18e8 language-tests/tests/language/primitive/files/pointer_functions
 ea97da56e1d1fab8 language-tests/tests/language/primitive/geometry/upsert_point.surql
 76583a7e7a6c265d language-tests/tests/language/primitive/geometry/upsert_polygons.surql
 5484e22f25d6e11b language-tests/tests/language/primitive/graph/select_inout_graph.surql
-050009cc0f1c8929 language-tests/tests/language/primitive/number_kinds/arithmetic.surql
+bc0881007a7175f7 language-tests/tests/language/primitive/number_kinds/arithmetic.surql
 f2f0de723521e41f language-tests/tests/language/primitive/number_kinds/casts.surql
 8df6425c3a03462c language-tests/tests/language/primitive/number_kinds/coercion.surql
 371554b2da57a08b language-tests/tests/language/primitive/number_kinds/comparison_order_group.surql
@@ -4458,7 +4458,7 @@ a8707ffc32428c0d language-tests/tests/reproductions/cycle_guard_self_referential
 986b8f1261fdf935 language-tests/tests/reproductions/data_clause_uses_reduced_view_import.surql
 2c357521067c7c38 language-tests/tests/reproductions/ddl_write_refusing_frame.surql
 97faafa72723f65e language-tests/tests/reproductions/ddl_write_refusing_frame_import.surql
-0f314099639f4d6d language-tests/tests/reproductions/decimal_literal_exact_scale_accepted.surql
+fea4b4a59632b0a7 language-tests/tests/reproductions/decimal_literal_exact_scale_accepted.surql
 773bf424194c9f93 language-tests/tests/reproductions/decimal_literal_exponent_scale_beyond_precision.surql
 7253f18dc0936bc0 language-tests/tests/reproductions/decimal_literal_exponent_underflow.surql
 ab5791d737bd30d2 language-tests/tests/reproductions/decimal_literal_plain_scale_beyond_precision.surql

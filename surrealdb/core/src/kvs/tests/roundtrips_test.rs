@@ -40,7 +40,9 @@ const BUDGET: &[(&str, u64)] = &[
 	("filter_limit", 1),
 	("id_range", 1),
 	("order_limit", 2),
-	("count_all", 2),
+	// A whole-table scan sizes its pages from the stored size of its range,
+	// which may cut its first page short of a full batch.
+	("count_all", 3),
 	("fetch_one", 2),
 	("fetch_many", 2),
 	("link_field", 4),
@@ -357,9 +359,17 @@ impl Rig {
 	}
 
 	async fn measure(&mut self, case: &Case, tracing: bool) -> Measured {
-		// One run with the window closed warms the catalog and statement caches.
+		// Two uncounted runs under the forward profile warm the catalog and
+		// statement caches and the scan's range sizing: the first compiles the
+		// statement and keeps it, and the second is the first served from the
+		// cache, which reads once what a kept statement then holds (its
+		// table's layouts at the current catalog epoch). Range sizes follow
+		// what earlier runs saw, so both run at the latency the counted run
+		// sees. The budget counts the runs after both.
 		self.stats.set_profile(Profile::Forward);
-		self.once(case, false).await;
+		self.stats.set_latency(Duration::from_millis(1));
+		self.once(case, true).await;
+		self.once(case, true).await;
 		let (fwd, fwd_trace) = self.count(case, Profile::Forward, tracing).await;
 		let (lsm, lsm_trace) = self.count(case, Profile::Lsm, tracing).await;
 		let wall_1ms = self.wall(case, Duration::from_millis(1)).await;

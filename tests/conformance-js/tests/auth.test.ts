@@ -807,7 +807,7 @@ test(
 );
 
 test(
-	"a system user's session ends when its shorter token lapses; the expired token cannot re-authenticate",
+	"a system user's signin session outlives its shorter token; the expired token cannot re-authenticate",
 	async () => {
 		const { db, namespace, database } = await rootClient(server);
 		await db.query(
@@ -843,22 +843,10 @@ test(
 		expect(tokenErr).toBeDefined();
 		expect(tokenErr!.message).toMatch(/token has expired/i);
 
-		// The already-established session ends with its token: the earlier of
-		// DURATION FOR TOKEN and DURATION FOR SESSION governs, so the one-hour
-		// session does not outlive the one-second token. Poll rather than assume
-		// the session check flips in the same instant as the token check.
-		const sessionDeadline = Date.now() + 5000;
-		let sessionErr: { code: number; message: string } | undefined;
-		while (Date.now() < sessionDeadline) {
-			const res = await rc.rpc("query", ["INFO FOR DB"]);
-			if (res.error) {
-				sessionErr = res.error;
-				break;
-			}
-			await Bun.sleep(200);
-		}
-		expect(sessionErr).toBeDefined();
-		expect(sessionErr!.message).toMatch(/session has expired/i);
+		// The session signed in with credentials is not bound by the token
+		// issued alongside it: it lasts for DURATION FOR SESSION, so it keeps
+		// answering after the token has lapsed.
+		await rc.call("query", ["INFO FOR DB"]);
 
 		await rc.close();
 		await db.close();

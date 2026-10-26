@@ -18,7 +18,7 @@ value = "1.5dec"
 value = "79228162514264337593543950335dec"
 
 [[test.results]]
-value = "1.50dec"
+value = "1.5dec"
 */
 
 RETURN 0.0000000000000000000000000001dec;

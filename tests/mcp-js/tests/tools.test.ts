@@ -311,6 +311,20 @@ describe("query, run and alternate dialects", () => {
 		expect(JSON.stringify(result)).toMatch(/invalid|error/i);
 	});
 
+	test("select rejects a WHERE clause carrying a statement separator", async () => {
+		// Clause arguments are validated as a single read-only expression before
+		// they are interpolated, so a fragment that would smuggle in a second
+		// statement is refused as invalid params instead of being run.
+		const result = await client
+			.callTool({
+				name: "select",
+				arguments: { target: "widget", where_clause: "1 = 1; RETURN 99" },
+			})
+			.catch((e: unknown) => e);
+		expect(result).toBeInstanceOf(Error);
+		expect((result as Error).message).toMatch(/Invalid WHERE clause/);
+	});
+
 	test("gql executes an ISO GQL match query", async () => {
 		await useFreshContext(client);
 		await client.callTool({ name: "create", arguments: { target: "person:gq", data: { name: "Gee" } } });
@@ -354,23 +368,6 @@ describe("query, run and alternate dialects", () => {
  * listing would pass without checking anything.
  */
 describe("output schema coverage", () => {
-	test("a CRUD clause fragment carrying a separator returns the batch shape", async () => {
-		await client.listTools();
-		await useFreshContext(client);
-		await client.callTool({ name: "create", arguments: { target: "widget:w1" } });
-		// Clause arguments are raw SurrealQL fragments, so a caller can submit
-		// more than one statement through a tool that otherwise emits exactly
-		// one, and the result arrives as a per-statement batch instead.
-		const result = await client.callTool({
-			name: "select",
-			arguments: { target: "widget", where_clause: "1 = 1; RETURN 99" },
-		});
-		const sc = expectOk(result, "select with a multi-statement clause");
-		expect(Array.isArray(sc.results), "expected the batch shape").toBe(true);
-		expect(sc.has_errors).toBe(false);
-		expect((sc.results as Array<{ index: number }>).map((r) => r.index)).toEqual([0, 1]);
-	});
-
 	test("list reports an unreadable scope as a bare error payload", async () => {
 		await client.listTools();
 		const { namespace } = await useFreshContext(client);

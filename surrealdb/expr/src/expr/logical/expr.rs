@@ -3911,7 +3911,17 @@ impl ToSql for LogicalExpr {
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 					|| *op == PrefixOperator::Negate && expr.has_left_minus()
-				{
+					// `-1u8` lexes as one (negative, out of range) literal, so a negated
+					// unsigned literal keeps its parentheses
+					|| *op == PrefixOperator::Negate
+						&& matches!(
+							expr,
+							LogicalExpr::Literal(
+								LogicalLiteral::U8(_)
+									| LogicalLiteral::U16(_) | LogicalLiteral::U32(_)
+									| LogicalLiteral::U64(_)
+							)
+						) {
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {
 					write_sql!(f, fmt, "{op}{expr}");

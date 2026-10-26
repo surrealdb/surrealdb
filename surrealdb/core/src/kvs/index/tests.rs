@@ -11164,9 +11164,14 @@ async fn a_diskann_frame_outlives_its_phase_two_wait() -> Result<()> {
 			}
 		});
 		// The definition is visible once it has committed; phase 2 is under way
-		// once phase 1 has transitioned the index to Online (`compacting`).
+		// once phase 1 has transitioned the index to Online (`ready`) with a
+		// backlog to fold (`compacting`). The backlog alone does not say so: the
+		// build's scan queues it during phase 1, and a cancellation then takes
+		// the definition back.
 		timeout(Duration::from_secs(30), async {
 			while get_table_index(&ds, "t", "dx").await.is_err()
+				|| index_building_status(&ds, &session, "t", "dx").await.ok().as_deref()
+					!= Some("ready")
 				|| !compacting(&ds, &session, "dx").await.unwrap_or(false)
 			{
 				sleep(Duration::from_millis(5)).await;

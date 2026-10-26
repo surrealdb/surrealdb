@@ -472,13 +472,21 @@ type Ws =
 	tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn connect_ws(server: &TestServer, cookie: &str, origin: &str) -> Ws {
+	try_connect_ws(server, cookie, origin).await.expect("connect")
+}
+
+async fn try_connect_ws(
+	server: &TestServer,
+	cookie: &str,
+	origin: &str,
+) -> Result<Ws, tokio_tungstenite::tungstenite::Error> {
 	let mut request =
 		format!("ws://{}/rpc", server.address).into_client_request().expect("a websocket request");
 	let headers = request.headers_mut();
 	headers.insert("Sec-WebSocket-Protocol", "json".parse().expect("header"));
 	headers.insert("Cookie", cookie.parse().expect("header"));
 	headers.insert("Origin", origin.parse().expect("header"));
-	connect_async(request).await.expect("connect").0
+	connect_async(request).await.map(|(ws, _)| ws)
 }
 
 async fn ws_query(ws: &mut Ws) -> serde_json::Value {
@@ -510,8 +518,14 @@ fn websocket_upgrade_honours_the_origin_gate() {
 	with_big_stack(|| async {
 		let server = TestServer::cookies().await;
 		let cookie = server.cookie().await;
-		let reply = ws_info(&server, &cookie, EVIL).await;
-		assert!(!ws_ran_as_root(&reply), "{reply}");
+		// An upgrade from an origin outside the allow-list is refused outright.
+		match try_connect_ws(&server, &cookie, EVIL).await {
+			Err(tokio_tungstenite::tungstenite::Error::Http(res)) => {
+				assert_eq!(res.status(), StatusCode::FORBIDDEN);
+			}
+			Err(e) => panic!("expected a 403 refusal, got {e}"),
+			Ok(_) => panic!("an upgrade from a foreign origin was accepted"),
+		}
 		let reply = ws_info(&server, &cookie, APP).await;
 		assert!(ws_ran_as_root(&reply), "{reply}");
 	});
