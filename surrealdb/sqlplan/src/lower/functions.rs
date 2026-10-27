@@ -14,6 +14,7 @@ use crate::ir::{BoundExpr, BoundLiteral};
 use crate::lower::expr::{is_not_null_expr, is_null_expr, lower_bound_expr};
 
 mod dates;
+mod strings;
 
 fn int(value: i64) -> LogicalExpr {
 	LogicalExpr::Literal(LogicalLiteral::Integer(value))
@@ -501,7 +502,12 @@ fn lower_exp(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, 
 /// MySQL `truncate(x, d)`: `x` toward zero at `d` decimal places, and at `-d` places to the left of
 /// the point when `d` is negative.
 fn lower_truncate(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
-	Ok(strict(lower_args(args, policy)?, |v| {
+	Ok(truncate_values(lower_args(args, policy)?))
+}
+
+/// `x` toward zero at `d` decimal places, for the values `[x, d]`.
+fn truncate_values(values: Vec<LogicalExpr>) -> LogicalExpr {
+	strict(values, |v| {
 		let (x, d) = (&v[0], &v[1]);
 		let magnitude = call("math::abs", vec![x.clone()]);
 		let sign = call("math::sign", vec![x.clone()]);
@@ -526,7 +532,7 @@ fn lower_truncate(args: &[BoundExpr], policy: &DialectPolicy) -> Result<LogicalE
 			kept(call("math::pow", vec![float(10.0), d.clone()]), true),
 			kept(call("math::pow", vec![float(10.0), negate(d.clone())]), false),
 		)
-	}))
+	})
 }
 
 /// `round(x, d)`, half away from zero, computed on decimals so that a halfway case is not decided
@@ -1985,6 +1991,7 @@ pub(super) fn lower_function(
 ) -> Result<Option<LogicalExpr>, PlanError> {
 	let lowered = match (name, policy.dialect) {
 		_ if dates::handles(name, policy.dialect, args.len()) => dates::lower(name, args, policy)?,
+		_ if strings::handles(name) => strings::lower(name, args, policy)?,
 		("substring" | "substr" | "mid", _) => lower_substring(args, policy)?,
 		("trim", _) => lower_trim(name, Trim::Both, args, policy)?,
 		("ltrim", _) => lower_trim(name, Trim::Leading, args, policy)?,
