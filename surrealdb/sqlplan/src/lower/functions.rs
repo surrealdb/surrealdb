@@ -13,6 +13,8 @@ use crate::error::PlanError;
 use crate::ir::{BoundExpr, BoundLiteral};
 use crate::lower::expr::{is_not_null_expr, is_null_expr, lower_bound_expr};
 
+mod dates;
+
 fn int(value: i64) -> LogicalExpr {
 	LogicalExpr::Literal(LogicalLiteral::Integer(value))
 }
@@ -1982,6 +1984,7 @@ pub(super) fn lower_function(
 	policy: &DialectPolicy,
 ) -> Result<Option<LogicalExpr>, PlanError> {
 	let lowered = match (name, policy.dialect) {
+		_ if dates::handles(name, policy.dialect, args.len()) => dates::lower(name, args, policy)?,
 		("substring" | "substr" | "mid", _) => lower_substring(args, policy)?,
 		("trim", _) => lower_trim(name, Trim::Both, args, policy)?,
 		("ltrim", _) => lower_trim(name, Trim::Leading, args, policy)?,
