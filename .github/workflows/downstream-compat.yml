@@ -195,8 +195,8 @@ jobs:
         with:
           # The kache S3 backend shared with the rest of CI.
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-access-key-id: ${{ secrets.KACHE_READONLY_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.KACHE_READONLY_SECRET_KEY }}
           workspaces: downstream
           cache-key: downstream-compat
           save-cache: ${{ github.event_name == 'push' }}
@@ -294,60 +294,41 @@ jobs:
           go-version: '1.25'
 
       # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
-      # with its `cloud`+`aws` cargo features — from the downstream's own
+      # with its `cloud`+`aws` cargo features, from the downstream's own
       # dependency graph, not this engine. Those features compile RocksDB's
       # cloud glue against the AWS C++ SDK (`#include <aws/core/Aws.h>`), and the
       # fork's build.rs expects a prebuilt SDK at $AWS_SDK_INSTALL_DIR. The runner
-      # image ships none, so without this the downstream `cargo check` aborts at
-      # the C++ stage (issue #614). Build the same components the fork's
-      # scripts/init_deps.sh does (s3;transfer;core, static) and cache them; the
-      # pinned version makes the artifact immutable, so a cache hit is ~free.
-      - name: Restore cached AWS C++ SDK
-        id: aws-sdk-cache
+      # image ships none, so without it the downstream `cargo check` aborts at
+      # the C++ stage. The SDK is never compiled here: it is pulled from the
+      # artifact aws-sdk-artifact.yml publishes for this architecture, at the
+      # version and build revision .github/scripts/aws-sdk-cpp.sh pins. That
+      # script names the tag and verifies the unpacked layout on both sides, so
+      # the publisher and this consumer cannot disagree about either.
+      #
+      # The cargo steps below link these system libraries directly (the fork's
+      # build.rs emits -lcurl -lssl -lcrypto -lz), and they live outside the SDK
+      # prefix, so they are installed here. The install is best-effort (runner
+      # images with stale apt lists 404 on package fetches); the link probe
+      # decides whether anything the build needs is actually missing, so a gap
+      # fails here with the libraries named, not half an hour later as a bare
+      # "cannot find -lcurl" from an ld invocation deep inside the cargo build.
+      - name: Install the system libraries the downstream build links
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
-        with:
-          path: ${{ runner.temp }}/aws-sdk-install
-          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
-
-      - name: Provision AWS C++ SDK for the downstream build
-        if: steps.preflight.outputs.configured == 'true'
-        env:
-          # rust-rocksdb's init_deps.sh clones aws-sdk-cpp at HEAD; pin a recent
-          # tag here so the cache key is stable and the build reproducible. Bump
-          # this (and the -vN cache suffix above) if the fork needs a newer SDK.
-          AWS_SDK_VERSION: "1.11.845"
-          AWS_SDK_INSTALL: ${{ runner.temp }}/aws-sdk-install
         run: |
           set -euo pipefail
 
           # Use sudo only when present and not already root (self-hosted runners
-          # vary). Best-effort: if apt/sudo are absent or the install fails
-          # (runner images with stale apt lists 404 on package fetches),
-          # proceed — the link probe below decides whether anything the build
-          # needs is actually missing.
+          # vary).
           SUDO=""
           if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
-
-          # Build deps (cmake + a C++ toolchain) and the SDK core's own link deps
-          # (libcurl for HTTP, openssl for crypto, zlib). curl/ssl/crypto are also
-          # what the fork's build.rs links at the `cargo nextest` step, and they
-          # live outside the cached SDK dir — so install them on cache hits too.
           if command -v apt-get >/dev/null 2>&1; then
             $SUDO apt-get -qq -y update || true
             $SUDO apt-get -qq -y install --no-install-recommends \
-              cmake g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
+              g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
           fi
 
-          # The cargo steps below link these system libraries directly (the
-          # fork's build.rs emits -lcurl -lssl -lcrypto -lz), and the install
-          # above is allowed to fail on images that already ship them — so
-          # prove the linker can resolve each one now. A gap must fail this
-          # provisioning step with the missing libraries named, not surface
-          # half an hour later as a bare "cannot find -lcurl" from an ld
-          # invocation deep inside the cargo build.
           if ! command -v cc >/dev/null 2>&1; then
-            echo "::error title=Downstream compatibility::no C compiler/linker driver (cc) on this runner, and the best-effort apt-get install above could not provide one (check its output) — the cargo steps below cannot link"
+            echo "::error title=Downstream compatibility::no C compiler/linker driver (cc) on this runner, and the best-effort apt-get install above could not provide one (check its output); the cargo steps below cannot link"
             exit 1
           fi
           probe="${RUNNER_TEMP}/link-probe.c"
@@ -357,50 +338,88 @@ jobs:
             cc "${probe}" "-l${lib}" -o /dev/null 2>/dev/null || missing="${missing} lib${lib}"
           done
           if [ -n "${missing}" ]; then
-            echo "::error title=Downstream compatibility::runner is missing system link libraries required by the downstream build:${missing} (from libcurl4-openssl-dev / libssl-dev / zlib1g-dev). The best-effort apt-get install above could not provide them (check its output for the cause) — failing here instead of at link time in the cargo steps below"
+            echo "::error title=Downstream compatibility::runner is missing system link libraries required by the downstream build:${missing} (from libcurl4-openssl-dev / libssl-dev / zlib1g-dev). The best-effort apt-get install above could not provide them (check its output for the cause); failing here instead of at link time in the cargo steps below"
             exit 1
           fi
 
-          # Reuse the cached build when present (mirrors init_deps.sh's guard;
-          # lib64/ on some distros, lib/ on others).
-          if [ -f "${AWS_SDK_INSTALL}/lib/libaws-cpp-sdk-s3.a" ] || \
-             [ -f "${AWS_SDK_INSTALL}/lib64/libaws-cpp-sdk-s3.a" ]; then
-            echo "AWS C++ SDK ${AWS_SDK_VERSION} restored from cache at ${AWS_SDK_INSTALL}"
-          else
-            echo "Building AWS C++ SDK ${AWS_SDK_VERSION} from source (cache miss)..."
-            src="${RUNNER_TEMP}/aws-sdk-cpp"
-            build="${RUNNER_TEMP}/aws-sdk-build"
-            rm -rf "$src" "$build"
-            git clone --branch "${AWS_SDK_VERSION}" --depth 1 \
-              --recurse-submodules \
-              https://github.com/aws/aws-sdk-cpp.git "$src"
-            # Match the fork's scripts/init_deps.sh: only s3;transfer;core, static.
-            cmake -S "$src" -B "$build" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX="${AWS_SDK_INSTALL}" \
-              -DBUILD_ONLY="s3;transfer;core" \
-              -DBUILD_SHARED_LIBS=OFF \
-              -DENABLE_TESTING=OFF \
-              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-              -DMINIMIZE_SIZE=ON
-            cmake --build "$build" --parallel "$(nproc)"
-            cmake --install "$build"
-            rm -rf "$src" "$build" # free disk; only the install prefix is cached
-            echo "AWS C++ SDK installed at ${AWS_SDK_INSTALL}"
-          fi
+      - name: Install oras
+        if: steps.preflight.outputs.configured == 'true'
+        uses: ./.github/actions/install-oras
 
+      # Pulled by digest: the tag is resolved once, the pull names the digest it
+      # resolved to, and oras verifies every blob against that manifest, so what
+      # is unpacked is exactly what one publish run pushed. The registry is
+      # reached through the runner's ambient IAM role, as the private pipeline's
+      # pushes are. An absent tag is the one expected failure: the publish
+      # workflow has not run for this pin (a bumped version or revision, or the
+      # first run), and the message says so. A repository that does not exist
+      # is named as its own cause when the role can tell. There is no fallback
+      # to a source build, which no CI job does for this SDK.
+      - name: Pull the AWS C++ SDK artifact
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ vars.AWS_SDK_ECR_REPOSITORY || secrets.AWS_ECR_REPOSITORY }}
+          AWS_SDK_INSTALL: ${{ runner.temp }}/aws-sdk-install
+        run: |
+          set -euo pipefail
+          if [[ -z "${ECR_REGISTRY}" ]]; then
+            echo "::error title=Downstream compatibility::AWS_ECR_REGISTRY is not configured, so the AWS C++ SDK artifact cannot be pulled."
+            exit 1
+          fi
+          if [[ -z "${ECR_REPOSITORY}" ]]; then
+            echo "::error title=Downstream compatibility::neither the AWS_SDK_ECR_REPOSITORY variable nor the AWS_ECR_REPOSITORY secret names the repository aws-sdk-artifact.yml publishes to."
+            exit 1
+          fi
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "::error title=Downstream compatibility::the aws CLI is not on this runner, so it cannot log in to the registry to pull the AWS C++ SDK artifact."
+            exit 1
+          fi
+          tag="$(.github/scripts/aws-sdk-cpp.sh tag)"
+          file="$(.github/scripts/aws-sdk-cpp.sh file)"
+          ref="${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
+          # The region is read off the registry host
+          # (<account>.dkr.ecr.<region>.amazonaws.com), so it cannot drift from it.
+          region="$(printf '%s' "${ECR_REGISTRY}" | cut -d. -f4)"
+          if ! aws ecr get-login-password --region "${region}" \
+            | oras login --username AWS --password-stdin "${ECR_REGISTRY}"; then
+            echo "::error title=Downstream compatibility::could not log in to the registry: this runner's IAM role must be able to pull from the ${ECR_REPOSITORY} repository (the private runners' role can; see aws-sdk-artifact.yml)."
+            exit 1
+          fi
+          # A missing repository would otherwise read as a missing tag. Needs
+          # ecr:DescribeRepositories; without it the resolve below still
+          # distinguishes an auth failure from an absent tag.
+          if out="$(aws ecr describe-repositories --region "${region}" --repository-names "${ECR_REPOSITORY}" --query 'repositories[0].repositoryName' --output text 2>&1)"; then
+            echo "Repository ${ECR_REPOSITORY} exists"
+          elif grep -q RepositoryNotFoundException <<<"${out}"; then
+            echo "::error title=Downstream compatibility::the repository ${ECR_REPOSITORY} does not exist in the registry; create it and run the 'AWS C++ SDK artifact' workflow, or point AWS_SDK_ECR_REPOSITORY (or AWS_ECR_REPOSITORY) at the right one."
+            exit 1
+          elif grep -qi "AccessDenied\|not authorized" <<<"${out}"; then
+            echo "Cannot confirm the repository ${ECR_REPOSITORY} exists (this role has no ecr:DescribeRepositories); resolving the tag directly."
+          else
+            echo "::error title=Downstream compatibility::could not describe the repository ${ECR_REPOSITORY}:"
+            echo "${out}"
+            exit 1
+          fi
+          if ! digest="$(oras resolve "${ref}" 2>"${RUNNER_TEMP}/resolve.err")"; then
+            if grep -q "not found" "${RUNNER_TEMP}/resolve.err"; then
+              echo "::error title=Downstream compatibility::${ECR_REPOSITORY}:${tag} is not published. Run the 'AWS C++ SDK artifact' workflow (aws-sdk-artifact.yml) on main first; it publishes the version .github/scripts/aws-sdk-cpp.sh pins for both architectures. This job never builds the SDK from source."
+            else
+              echo "::error title=Downstream compatibility::could not resolve ${ECR_REPOSITORY}:${tag}:"
+              cat "${RUNNER_TEMP}/resolve.err"
+            fi
+            exit 1
+          fi
+          echo "::notice title=Downstream compatibility::AWS C++ SDK from ${ECR_REPOSITORY}:${tag} (${digest})"
+          pulled="${RUNNER_TEMP}/aws-sdk-artifact"
+          rm -rf "${pulled}" "${AWS_SDK_INSTALL}"
+          mkdir -p "${pulled}"
+          oras pull --output "${pulled}" "${ECR_REGISTRY}/${ECR_REPOSITORY}@${digest}"
+          .github/scripts/aws-sdk-cpp.sh unpack "${pulled}/${file}" "${AWS_SDK_INSTALL}"
+          .github/scripts/aws-sdk-cpp.sh verify "${AWS_SDK_INSTALL}"
+          rm -rf "${pulled}"
           # Hand the prebuilt SDK to the fork's build.rs for the cargo steps below.
           echo "AWS_SDK_INSTALL_DIR=${AWS_SDK_INSTALL}" >> "$GITHUB_ENV"
-
-      # Save right after a successful build (inline, not a post-step) so a genuine
-      # downstream compat failure in the cargo steps below never discards the
-      # freshly-built SDK. Skipped on a cache hit.
-      - name: Save AWS C++ SDK to cache
-        if: steps.preflight.outputs.configured == 'true' && steps.aws-sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
-        with:
-          path: ${{ runner.temp }}/aws-sdk-install
-          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
 
       # Redirect every engine crate the downstream depends on DIRECTLY from
       # this repo's git source to this checkout with a Cargo `[patch]`. The

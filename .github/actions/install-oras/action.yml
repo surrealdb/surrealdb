@@ -1,0 +1,35 @@
+name: 'Install oras'
+description: >-
+  Installs the oras CLI (OCI registry client) from its GitHub release with a
+  pinned version and checksum, for the host's architecture (Linux amd64 or
+  arm64), and puts it on PATH.
+
+runs:
+  using: 'composite'
+  steps:
+    # Downloaded directly with a pinned version and per-architecture checksum
+    # (from the release's oras_<version>_checksums.txt) so the supply chain is
+    # ours to verify, in the same way the cross-build jobs install zig.
+    - name: Install oras
+      shell: bash
+      env:
+        ORAS_VERSION: 1.3.4
+        ORAS_SHA256_AMD64: f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
+        ORAS_SHA256_ARM64: 15702c6e3a4a56a8bd8ac5c17efdbcab56d9bada661ccbcf017f5b10c1d89399
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) arch=amd64; sha="${ORAS_SHA256_AMD64}" ;;
+          aarch64) arch=arm64; sha="${ORAS_SHA256_ARM64}" ;;
+          *) echo "::error::No pinned oras build for $(uname -m)"; exit 1 ;;
+        esac
+        dir="${RUNNER_TEMP}/oras-${ORAS_VERSION}"
+        mkdir -p "${dir}"
+        cd "${dir}"
+        curl -fsSL --retry 5 -o oras.tar.gz \
+          "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${arch}.tar.gz"
+        echo "${sha}  oras.tar.gz" | sha256sum -c -
+        tar -xzf oras.tar.gz oras
+        rm oras.tar.gz
+        echo "${dir}" >> "$GITHUB_PATH"
+        ./oras version

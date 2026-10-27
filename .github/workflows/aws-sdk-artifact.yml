@@ -1,0 +1,329 @@
+# AWS C++ SDK artifact
+#
+# Builds the AWS C++ SDK that the downstream's RocksDB cloud build links, once
+# per architecture, and publishes each install prefix as an OCI artifact in the
+# private registry, tagged aws-sdk-<version>-r<revision>-<arch>. The pin
+# (version, build revision, build configuration, layout, names) is
+# .github/scripts/aws-sdk-cpp.sh, which every consumer runs too, so a bump
+# there is what publishes a new artifact: a push to main that changes the
+# script publishes the tag it now names, and a dispatch publishes whatever the
+# dispatched ref's script names.
+#
+# A tag is written once. A run that finds its tag already published does not
+# rebuild it, so re-runs and repeated pushes never replace what a consumer may
+# be pulling; `force` is the explicit way to rebuild a tag. Every run ends by
+# pulling the tag as a consumer does and verifying what it holds, so a green
+# run means the tag consumers pull is valid, whether this run wrote it or not.
+#
+# Consumers pull the tag, resolve it to a manifest digest, fetch by that digest
+# (the client verifies every blob against the manifest) and verify the unpacked
+# layout with the same script. downstream-compat.yml is the consumer in this
+# repo; the downstream's own image builds are to consume the same tags.
+#
+# Runs on the private runners, which reach the registry through their ambient
+# IAM role. The repository is the engine image repository, whose tags are
+# ce-<slug>-<sha>[-dev] and which the private runner role already pushes to,
+# or the one the AWS_SDK_ECR_REPOSITORY variable names when it is set (a
+# repository dedicated to build dependencies); consumers read the same pair.
+# On the shared repository the write-once rule below is this workflow's
+# guarantee, not the registry's, and its lifecycle policy must not select
+# aws-sdk-* tags.
+
+name: AWS C++ SDK artifact
+
+run-name: "AWS C++ SDK artifact '${{ github.ref_name }}'"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/scripts/aws-sdk-cpp.sh
+      - .github/workflows/aws-sdk-artifact.yml
+      - .github/actions/install-oras/action.yml
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and overwrite the tag even when it is already published
+        type: boolean
+        default: false
+
+# Two runs publishing the same tag would race; queue them instead. A run is
+# never cancelled mid-push.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish (${{ matrix.arch }})
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
+    # Private runner per arch: the artifact is pushed with the runner's ambient
+    # IAM role. Labels come from repo/org variables.
+    runs-on: ${{ matrix.arch == 'amd64' && vars.RUNNER_AMD || vars.RUNNER_ARM }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ vars.AWS_SDK_ECR_REPOSITORY || secrets.AWS_ECR_REPOSITORY }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout the build scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/scripts
+            .github/actions/install-oras
+          persist-credentials: false
+
+      # Everything about the artifact comes from the script: the tag, the file
+      # the layer is titled, and the architecture, which must be the one this
+      # matrix entry claims (a mislabelled runner pool would otherwise publish
+      # one architecture's build under the other's tag).
+      - name: Resolve the artifact reference
+        id: ref
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ECR_REGISTRY}" ]]; then
+            echo "::error::AWS_ECR_REGISTRY is not configured; nowhere to publish."
+            exit 1
+          fi
+          if [[ -z "${ECR_REPOSITORY}" ]]; then
+            echo "::error::Neither the AWS_SDK_ECR_REPOSITORY variable nor the AWS_ECR_REPOSITORY secret names a repository; nowhere to publish."
+            exit 1
+          fi
+          host_arch="$(.github/scripts/aws-sdk-cpp.sh arch)"
+          if [[ "${host_arch}" != "${ARCH}" ]]; then
+            echo "::error::This runner is ${host_arch} but the job is publishing the ${ARCH} artifact; check the RUNNER_AMD / RUNNER_ARM pool labels."
+            exit 1
+          fi
+          version="$(.github/scripts/aws-sdk-cpp.sh version)"
+          tag="$(.github/scripts/aws-sdk-cpp.sh tag "${ARCH}")"
+          file="$(.github/scripts/aws-sdk-cpp.sh file "${ARCH}")"
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "file=${file}"
+            echo "ref=${ECR_REGISTRY}/${ECR_REPOSITORY}:${tag}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ${version} for ${ARCH} as ${ECR_REPOSITORY}:${tag}"
+
+      - name: Install oras
+        uses: ./.github/actions/install-oras
+
+      # The region is read off the registry host
+      # (<account>.dkr.ecr.<region>.amazonaws.com), so it cannot drift from it.
+      # oras holds the login itself, so the runner needs no docker daemon.
+      - name: Login to Amazon ECR
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | oras login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # A repository that does not exist would otherwise read as a tag that is
+      # not published, and the push would then fail at the end of the build.
+      # Named as its own cause here. The check needs ecr:DescribeRepositories;
+      # a role without it cannot tell, so that case is noted and the run goes
+      # on to the push, which reports the repository itself.
+      #
+      # The repository's lifecycle policy is then read, because on a shared
+      # repository a rule could expire these tags behind every consumer's
+      # back. A rule that can select this job's tag (tagStatus any, or tagged
+      # with a prefix or wildcard pattern the tag matches) is reported as a
+      # warning naming the rule; no policy, rules that cannot match, and a
+      # role without ecr:GetLifecyclePolicy are noted. This never fails the
+      # run: it answers the question for the operator on every run.
+      - name: Check the repository exists and its lifecycle policy
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          if out="$(aws ecr describe-repositories --region "${region}" --repository-names "${ECR_REPOSITORY}" --query 'repositories[0].repositoryName' --output text 2>&1)"; then
+            echo "Repository ${ECR_REPOSITORY} exists"
+          elif grep -q RepositoryNotFoundException <<<"${out}"; then
+            echo "::error::The repository ${ECR_REPOSITORY} does not exist in the registry. Create it and grant the private runner role push access, or point AWS_SDK_ECR_REPOSITORY (or AWS_ECR_REPOSITORY) at the right one."
+            exit 1
+          elif grep -qi "AccessDenied\|not authorized" <<<"${out}"; then
+            echo "::notice::Cannot confirm the repository ${ECR_REPOSITORY} exists (this role has no ecr:DescribeRepositories); the push below reports a missing repository."
+          else
+            echo "::error::Could not describe the repository ${ECR_REPOSITORY}:"
+            echo "${out}"
+            exit 1
+          fi
+
+          if policy="$(aws ecr get-lifecycle-policy --region "${region}" --repository-name "${ECR_REPOSITORY}" --query lifecyclePolicyText --output text 2>&1)"; then
+            # A rule selects the tag when its tagStatus is "any", or "tagged"
+            # with a prefix the tag starts with, a wildcard pattern the tag
+            # matches, or no prefix or pattern list at all.
+            matching="$(jq -r --arg tag "${TAG}" '
+              def glob: gsub("(?<c>[.+?^${}()|\\[\\]\\\\])"; "\\" + .c) | gsub("\\*"; ".*") | "^" + . + "$";
+              .rules[]
+              | select(
+                  .selection.tagStatus == "any"
+                  or (.selection.tagStatus == "tagged" and (
+                      ((.selection.tagPrefixList // []) | any(. as $p | $tag | startswith($p)))
+                      or ((.selection.tagPatternList // []) | any(. as $p | $tag | test($p | glob)))
+                      or (((.selection.tagPrefixList // []) + (.selection.tagPatternList // [])) | length == 0)))
+                )
+              | "rule \(.rulePriority) (\(.description // "no description"); tagStatus \(.selection.tagStatus), prefixes \(.selection.tagPrefixList // [] | if length == 0 then "none" else join(",") end), patterns \(.selection.tagPatternList // [] | if length == 0 then "none" else join(",") end))"
+            ' <<<"${policy}")"
+            if [[ -n "${matching}" ]]; then
+              while IFS= read -r rule; do
+                echo "::warning title=AWS C++ SDK artifact::The lifecycle policy on ${ECR_REPOSITORY} can expire ${TAG}: ${rule}. Exclude aws-sdk-* tags from it, or publish to a dedicated repository via AWS_SDK_ECR_REPOSITORY."
+              done <<<"${matching}"
+            else
+              echo "::notice::The lifecycle policy on ${ECR_REPOSITORY} has $(jq '.rules | length' <<<"${policy}") rule(s), none of which selects ${TAG}."
+            fi
+          elif grep -q LifecyclePolicyNotFoundException <<<"${policy}"; then
+            echo "::notice::${ECR_REPOSITORY} has no lifecycle policy; nothing expires ${TAG}."
+          elif grep -qi "AccessDenied\|not authorized" <<<"${policy}"; then
+            echo "::notice::Cannot read the lifecycle policy on ${ECR_REPOSITORY} (this role has no ecr:GetLifecyclePolicy); whether a rule can expire ${TAG} is unknown."
+          else
+            echo "::warning::Could not read the lifecycle policy on ${ECR_REPOSITORY}; whether a rule can expire ${TAG} is unknown:"
+            echo "${policy}"
+          fi
+
+      # Write-once: an already published tag is left alone unless the run was
+      # dispatched with `force`. Only "not found" means absent; any other
+      # failure (auth, network) fails the run rather than being mistaken for a
+      # missing tag and triggering a rebuild that would then fail to push.
+      - name: Check whether the tag is already published
+        id: published
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          FORCE: ${{ inputs.force == true }}
+        run: |
+          set -euo pipefail
+          published=false
+          if digest="$(oras resolve "${REF}" 2>"${RUNNER_TEMP}/resolve.err")"; then
+            published=true
+            if [[ "${FORCE}" == true ]]; then
+              echo "::warning::${REF} is already published (${digest}); rebuilding and overwriting it because force was set."
+              published=false
+            else
+              echo "::notice::${REF} is already published (${digest}); not rebuilding it, only verifying it below. Dispatch with force to replace it."
+            fi
+          elif ! grep -q "not found" "${RUNNER_TEMP}/resolve.err"; then
+            echo "::error::Could not check whether ${REF} is published:"
+            cat "${RUNNER_TEMP}/resolve.err"
+            exit 1
+          fi
+          echo "published=${published}" >> "$GITHUB_OUTPUT"
+
+      # Build deps (cmake, make, a C++ toolchain) and the SDK core's own link
+      # deps (libcurl for HTTP, openssl for crypto, zlib). Best-effort: the
+      # private runner images vary, and the build itself reports what is
+      # missing.
+      - name: Install build dependencies
+        if: steps.published.outputs.published != 'true'
+        run: |
+          set -euo pipefail
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+          if command -v apt-get >/dev/null 2>&1; then
+            $SUDO apt-get -qq -y update || true
+            $SUDO apt-get -qq -y install --no-install-recommends \
+              cmake make g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
+          fi
+
+      - name: Build the AWS C++ SDK
+        if: steps.published.outputs.published != 'true'
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/aws-sdk-install"
+          rm -rf "${prefix}"
+          .github/scripts/aws-sdk-cpp.sh build "${prefix}" "${RUNNER_TEMP}/aws-sdk-work"
+          .github/scripts/aws-sdk-cpp.sh verify "${prefix}"
+
+      - name: Pack the install prefix
+        if: steps.published.outputs.published != 'true'
+        env:
+          FILE: ${{ steps.ref.outputs.file }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/aws-sdk-artifact"
+          .github/scripts/aws-sdk-cpp.sh pack "${RUNNER_TEMP}/aws-sdk-install" "${RUNNER_TEMP}/aws-sdk-artifact/${FILE}"
+          sha256sum "${RUNNER_TEMP}/aws-sdk-artifact/${FILE}"
+
+      # One layer, titled with the file name so a pull writes it back under
+      # that name. The annotations record what was built and from where. The
+      # manifest is the OCI 1.0 form, with the artifact type as the config's
+      # media type, which every registry accepts; the 1.1 form (an artifactType
+      # field and the empty config) is not relied on by any consumer.
+      - name: Push the artifact
+        if: steps.published.outputs.published != 'true'
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          FILE: ${{ steps.ref.outputs.file }}
+          VERSION: ${{ steps.ref.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        working-directory: ${{ runner.temp }}/aws-sdk-artifact
+        run: |
+          set -euo pipefail
+          oras push \
+            --image-spec v1.0 \
+            --artifact-type application/vnd.surrealdb.aws-sdk-cpp.v1 \
+            --annotation "org.opencontainers.image.title=AWS C++ SDK ${VERSION} (s3;transfer;core, static, PIC) for linux/${ARCH}" \
+            --annotation "org.opencontainers.image.version=${VERSION}" \
+            --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            "${REF}" \
+            "${FILE}:application/vnd.oci.image.layer.v1.tar+gzip"
+          digest="$(oras resolve "${REF}")"
+          echo "::notice title=AWS C++ SDK artifact::Published ${REF} (${digest})"
+
+      # Consume the tag exactly as a consumer does, whether this run wrote it
+      # or found it: resolve the tag, pull by digest, unpack and verify. A
+      # publish that a consumer could not use fails here, not in the consumer,
+      # and a tag damaged or replaced out of band fails the next run rather
+      # than the next consumer. When this run built the artifact the pull is
+      # also compared with what was pushed and with the built prefix.
+      - name: Verify the published artifact
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          FILE: ${{ steps.ref.outputs.file }}
+          BUILT: ${{ steps.published.outputs.published != 'true' }}
+        run: |
+          set -euo pipefail
+          digest="$(oras resolve "${REF}")"
+          pulled="${RUNNER_TEMP}/aws-sdk-pulled"
+          rm -rf "${pulled}"
+          mkdir -p "${pulled}"
+          oras pull --output "${pulled}" "${ECR_REGISTRY}/${ECR_REPOSITORY}@${digest}"
+          if [[ ! -f "${pulled}/${FILE}" ]]; then
+            echo "::error::${REF} (${digest}) holds no layer titled ${FILE}; it was not published by this workflow."
+            exit 1
+          fi
+          if [[ "${BUILT}" == true ]] && ! cmp -s "${pulled}/${FILE}" "${RUNNER_TEMP}/aws-sdk-artifact/${FILE}"; then
+            echo "::error::The pulled ${FILE} differs from the one pushed."
+            exit 1
+          fi
+          .github/scripts/aws-sdk-cpp.sh unpack "${pulled}/${FILE}" "${pulled}/prefix"
+          .github/scripts/aws-sdk-cpp.sh verify "${pulled}/prefix"
+          if [[ "${BUILT}" == true ]]; then
+            if ! diff -r "${RUNNER_TEMP}/aws-sdk-install" "${pulled}/prefix" >/dev/null; then
+              echo "::error::The unpacked artifact differs from the install prefix it was packed from."
+              exit 1
+            fi
+            echo "Round trip verified: ${REF} (${digest}) unpacks to the built install prefix."
+          else
+            echo "::notice title=AWS C++ SDK artifact::Verified the published ${REF} (${digest})."
+          fi
