@@ -1071,6 +1071,9 @@ pub fn bind_expr(
 				surrealdb_pgsql::ast::op::BinaryOperator::LongArrow => {
 					BoundBinaryOp::JsonExtractText
 				}
+				surrealdb_pgsql::ast::op::BinaryOperator::HashArrow => {
+					BoundBinaryOp::JsonPathExtract
+				}
 				surrealdb_pgsql::ast::op::BinaryOperator::HashLongArrow => {
 					BoundBinaryOp::JsonPathExtractText
 				}
@@ -1088,7 +1091,6 @@ pub fn bind_expr(
 				| surrealdb_pgsql::ast::op::BinaryOperator::ShiftRight
 				| surrealdb_pgsql::ast::op::BinaryOperator::SimilarTo
 				| surrealdb_pgsql::ast::op::BinaryOperator::NotSimilarTo
-				| surrealdb_pgsql::ast::op::BinaryOperator::HashArrow
 				| surrealdb_pgsql::ast::op::BinaryOperator::ContainedBy
 				| surrealdb_pgsql::ast::op::BinaryOperator::Custom(_) => {
 					return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}")));

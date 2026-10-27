@@ -685,7 +685,7 @@ impl BoundSelect {
 				BoundBinaryOp::Power => SqlType::Float8,
 				BoundBinaryOp::Concat => SqlType::Text,
 				BoundBinaryOp::IntDiv => SqlType::Int8,
-				BoundBinaryOp::JsonExtract => SqlType::Json,
+				BoundBinaryOp::JsonExtract | BoundBinaryOp::JsonPathExtract => SqlType::Json,
 				BoundBinaryOp::JsonExtractText | BoundBinaryOp::JsonPathExtractText => {
 					SqlType::Text
 				}

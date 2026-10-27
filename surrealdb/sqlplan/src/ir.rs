@@ -400,6 +400,8 @@ pub enum BoundBinaryOp {
 	JsonExtract,
 	/// JSON object field or array element extraction as text (`->>`).
 	JsonExtractText,
+	/// JSON path extraction (`#>`).
+	JsonPathExtract,
 	/// JSON path extraction as text (`#>>`).
 	JsonPathExtractText,
 	/// JSON containment (`@>`).

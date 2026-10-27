@@ -14,6 +14,7 @@ use crate::ir::{BoundExpr, BoundLiteral};
 use crate::lower::expr::{is_not_null_expr, is_null_expr, lower_bound_expr};
 
 mod dates;
+mod json;
 mod strings;
 
 fn int(value: i64) -> LogicalExpr {
@@ -1992,6 +1993,7 @@ pub(super) fn lower_function(
 	let lowered = match (name, policy.dialect) {
 		_ if dates::handles(name, policy.dialect, args.len()) => dates::lower(name, args, policy)?,
 		_ if strings::handles(name) => strings::lower(name, args, policy)?,
+		_ if json::handles(name, policy.dialect) => json::lower(name, args, policy)?,
 		("substring" | "substr" | "mid", _) => lower_substring(args, policy)?,
 		("trim", _) => lower_trim(name, Trim::Both, args, policy)?,
 		("ltrim", _) => lower_trim(name, Trim::Leading, args, policy)?,

@@ -1307,7 +1307,7 @@ mod pg_integration {
 		let malformed = "SELECT profile #>> '{city' FROM person";
 		let err = client.simple_query(malformed).await.expect_err("a malformed path");
 		assert_eq!(err.code(), Some(&SqlState::INVALID_TEXT_REPRESENTATION), "{err:?}");
-		let err = client.simple_query("SELECT profile #> '{city}' FROM person").await.unwrap_err();
+		let err = client.simple_query("SELECT profile #> name FROM person").await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED), "{err:?}");
 		// Parse refuses a SELECT the planner cannot lower, before anything is bound.
 		let err = client.prepare(malformed).await.expect_err("a malformed path");

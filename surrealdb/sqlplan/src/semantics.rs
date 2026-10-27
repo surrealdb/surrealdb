@@ -678,6 +678,7 @@ fn eval_comparison(
 		| BoundBinaryOp::IntDiv
 		| BoundBinaryOp::JsonExtract
 		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtract
 		| BoundBinaryOp::JsonPathExtractText
 		| BoundBinaryOp::JsonContains
 		| BoundBinaryOp::VectorDistance(_) => unreachable!(),
@@ -875,6 +876,7 @@ fn eval_arithmetic(
 		| BoundBinaryOp::RegexpCi
 		| BoundBinaryOp::JsonExtract
 		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtract
 		| BoundBinaryOp::JsonPathExtractText
 		| BoundBinaryOp::JsonContains
 		| BoundBinaryOp::VectorDistance(_) => {

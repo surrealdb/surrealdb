@@ -1564,6 +1564,7 @@ fn lower_binary_op(
 		op,
 		BoundBinaryOp::JsonExtract
 			| BoundBinaryOp::JsonExtractText
+			| BoundBinaryOp::JsonPathExtract
 			| BoundBinaryOp::JsonPathExtractText
 			| BoundBinaryOp::JsonContains
 	) {
@@ -1829,6 +1830,7 @@ fn lower_binary_op(
 		}
 		BoundBinaryOp::JsonExtract
 		| BoundBinaryOp::JsonExtractText
+		| BoundBinaryOp::JsonPathExtract
 		| BoundBinaryOp::JsonPathExtractText
 		| BoundBinaryOp::JsonContains
 		| BoundBinaryOp::VectorDistance(_)
@@ -1870,7 +1872,7 @@ fn lower_json_op(
 	let Some(place) = lower_json_place(left, op, right, policy)? else {
 		return Ok(LogicalExpr::Literal(LogicalLiteral::Null));
 	};
-	Ok(if op == BoundBinaryOp::JsonExtract {
+	Ok(if matches!(op, BoundBinaryOp::JsonExtract | BoundBinaryOp::JsonPathExtract) {
 		absent_as_null(place)
 	} else {
 		json_text(place)
@@ -1889,6 +1891,7 @@ fn lower_null_test(operand: &BoundExpr, policy: &DialectPolicy) -> Result<Logica
 		op:
 			op @ (BoundBinaryOp::JsonExtract
 			| BoundBinaryOp::JsonExtractText
+			| BoundBinaryOp::JsonPathExtract
 			| BoundBinaryOp::JsonPathExtractText),
 		right,
 	} = operand
@@ -1927,10 +1930,10 @@ fn lower_json_place(
 	policy: &DialectPolicy,
 ) -> Result<Option<LogicalExpr>, PlanError> {
 	let base = lower_json_base(left, policy)?;
-	if op == BoundBinaryOp::JsonPathExtractText {
+	if matches!(op, BoundBinaryOp::JsonPathExtract | BoundBinaryOp::JsonPathExtractText) {
 		let BoundExpr::Literal(BoundLiteral::String(path)) = right else {
 			return Err(PlanError::UnsupportedExpression(
-				"the path of #>> must be a text array literal such as '{a,b}'".into(),
+				"the path of #> and #>> must be a text array literal such as '{a,b}'".into(),
 			));
 		};
 		let elements = parse_text_array_literal(path).ok_or_else(|| {
@@ -1942,7 +1945,7 @@ fn lower_json_place(
 		};
 		if steps.len() > MAX_JSON_PATH_STEPS {
 			return Err(PlanError::UnsupportedExpression(format!(
-				"the path of #>> has more than {MAX_JSON_PATH_STEPS} steps"
+				"the path of #> or #>> has more than {MAX_JSON_PATH_STEPS} steps"
 			)));
 		}
 		let mut two_sided_steps = 0;
@@ -2196,7 +2199,11 @@ fn is_literal_index(index: &LogicalExpr) -> bool {
 /// is an index when it spells an integer, and on anything else it reaches nothing.
 ///
 /// `two_sided_steps` counts the steps of the path so far that read their value twice.
-fn json_path_step(base: LogicalExpr, step: &str, two_sided_steps: &mut usize) -> LogicalExpr {
+pub(crate) fn json_path_step(
+	base: LogicalExpr,
+	step: &str,
+	two_sided_steps: &mut usize,
+) -> LogicalExpr {
 	let Some(index) = json_path_index(step) else {
 		return json_member(base, step);
 	};
@@ -2221,7 +2228,7 @@ fn json_path_step(base: LogicalExpr, step: &str, two_sided_steps: &mut usize) ->
 }
 
 /// `value` with NONE read as NULL. A member that is not there and a JSON null are both NULL.
-fn absent_as_null(value: LogicalExpr) -> LogicalExpr {
+pub(crate) fn absent_as_null(value: LogicalExpr) -> LogicalExpr {
 	LogicalExpr::Binary {
 		left: Box::new(value),
 		op: BinaryOperator::NullCoalescing,
@@ -2231,7 +2238,7 @@ fn absent_as_null(value: LogicalExpr) -> LogicalExpr {
 
 /// The text `->>` and `#>>` give an extracted JSON value: NULL when the value is absent or null,
 /// a string as itself, and anything else as its JSON text. `value` is evaluated once.
-fn json_text(value: LogicalExpr) -> LogicalExpr {
+pub(crate) fn json_text(value: LogicalExpr) -> LogicalExpr {
 	absent_as_null(LogicalExpr::Optional {
 		base: Box::new(value),
 		then: Box::new(LogicalExpr::If(Box::new(LogicalIf {

@@ -4345,7 +4345,7 @@ fn error_sqlstates(messages: &[(u8, Vec<u8>)]) -> Vec<Vec<u8>> {
 /// neither text nor a 32-bit integer is an operator that does not exist, `42883`.
 const JSON_REFUSALS: [(&str, &[u8]); 10] = [
 	("SELECT data @> '{\"a\":1}' FROM jt", b"0A000"),
-	("SELECT data #> '{a}' FROM jt", b"0A000"),
+	("SELECT data #> $1 FROM jt", b"0A000"),
 	("SELECT data #>> $1 FROM jt", b"0A000"),
 	("SELECT data #>> '{a,' FROM jt", b"22P02"),
 	("SELECT data #>> 'a' FROM jt", b"22P02"),
