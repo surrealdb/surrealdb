@@ -280,28 +280,3 @@ pub(super) fn between(value: Expr, low: Expr, high: Expr, negated: bool) -> Expr
 		}
 	})
 }
-
-/// Strict numeric functions evaluate each argument once and return NULL for any absent argument.
-pub(super) fn strict_call(name: &str, args: Vec<Expr>) -> Expr {
-	let count = args.len();
-	once(Expr::Literal(Literal::Array(args)), "_sql_args", |values| {
-		let refs: Vec<_> = (0..count)
-			.map(|index| {
-				Expr::Idiom(Idiom(vec![Part::Start(values.clone()), Part::index_int(index as i64)]))
-			})
-			.collect();
-		let nulls = refs
-			.iter()
-			.cloned()
-			.map(null_test)
-			.reduce(|left, right| raw(left, BinaryOperator::Or, right))
-			.unwrap_or(boolean(false));
-		choose(
-			vec![(nulls, null())],
-			Expr::FunctionCall(Box::new(surrealdb_expr::expr::FunctionCall {
-				receiver: surrealdb_expr::expr::Function::Normal(name.to_string()),
-				arguments: refs,
-			})),
-		)
-	})
-}

@@ -841,9 +841,9 @@ fn datetime_text_literal(kind: &surrealdb_expr::expr::Kind, value: Expr) -> Expr
 /// A call of the registered function `func_def` in an expression a write evaluates.
 ///
 /// A call with fewer or more arguments than the registry allows is refused, as the binder refuses
-/// it in a read. A function whose lowering is its own (`crate::lower::functions`) is refused: the
-/// write lowering calls the engine function the registry names, which does not answer what the SQL
-/// function does. The math and string functions answer NULL for a NULL argument.
+/// it in a read. A scalar function is lowered as a read lowers it and converted
+/// (`crate::lower::write_function`), so that it answers what it does in a read; any other kind
+/// calls the engine function the registry names.
 fn lower_write_function(
 	dialect: SqlDialect,
 	func_def: &crate::functions::SqlFunctionDef,
@@ -868,43 +868,8 @@ fn lower_write_function(
 			got,
 		});
 	}
-	if func_def.name == "uuid" {
-		// The registry declares text, and a string field takes no uuid value.
-		return Ok(Expr::FunctionCall(Box::new(FunctionCall {
-			receiver: Function::Normal("type::string".to_owned()),
-			arguments: vec![Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal("rand::uuid::v4".to_owned()),
-				arguments: Vec::new(),
-			}))],
-		})));
-	}
-	if crate::lower::functions::has_own_lowering(func_def.name, dialect, lowered_args.len()) {
-		return Err(PlanError::UnsupportedExpression(format!("{fn_name} in a write statement")));
-	}
-	if matches!(func_def.name, "current_date" | "curdate") {
-		return Ok(crate::lower::functions::today_expr());
-	}
-	let guarded = matches!(mapped, "crypto::md5" | "crypto::sha1")
-		|| (dialect == SqlDialect::Postgres
-			&& (mapped.starts_with("math::")
-				|| matches!(
-					mapped,
-					"string::lowercase"
-						| "string::uppercase"
-						| "string::len" | "string::reverse"
-						| "string::replace"
-						| "string::repeat"
-				)));
-	let numeric =
-		|arg: &Expr| matches!(arg, Expr::Literal(Literal::Integer(_) | Literal::Float(_)));
-	let present = |arg: &Expr| matches!(arg, Expr::Literal(literal) if !matches!(literal, Literal::Null | Literal::None));
-	if func_def.is_scalar()
-		&& guarded
-		&& !lowered_args.is_empty()
-		&& !(mapped.starts_with("math::") && lowered_args.iter().all(numeric))
-		&& (mapped.starts_with("math::") || !lowered_args.iter().all(present))
-	{
-		return Ok(sql_null::strict_call(mapped, lowered_args));
+	if func_def.is_scalar() {
+		return crate::lower::write_function::lower_scalar_call(dialect, fn_name, &lowered_args);
 	}
 	Ok(Expr::FunctionCall(Box::new(FunctionCall {
 		receiver: Function::Normal(mapped.to_string()),
@@ -2475,6 +2440,28 @@ pub fn lower_mysql_expr(expr: &surrealdb_mysql::ast::expr::Expr) -> Result<Expr,
 	lower_mysql_expr_in(expr, None)
 }
 
+/// The date moved by an interval, lowered as `date_add(date, amount, 'UNIT')` or
+/// `date_sub(date, amount, 'UNIT')` is.
+fn lower_mysql_date_arithmetic(
+	date: &surrealdb_mysql::ast::expr::Expr,
+	amount: &surrealdb_mysql::ast::expr::Expr,
+	unit: &str,
+	subtract: bool,
+	scope: Option<&IdScope<'_>>,
+) -> Result<Expr, PlanError> {
+	let name = if subtract {
+		"date_sub"
+	} else {
+		"date_add"
+	};
+	let args = [
+		lower_mysql_expr_in(date, scope)?,
+		lower_mysql_expr_in(amount, scope)?,
+		Expr::Literal(Literal::String(Strand::from(unit.to_ascii_uppercase()))),
+	];
+	crate::lower::write_function::lower_scalar_call(SqlDialect::MySql, name, &args)
+}
+
 /// Lower a MySQL AST expression into a SurrealDB `Expr`, reading the `id` column of the
 /// statement's target table (`scope`) as the key of the record id, and a link column of it as the
 /// key of its link.
@@ -2578,6 +2565,11 @@ fn lower_mysql_expr_as(
 			right,
 			..
 		} => {
+			if let Some((date, amount, unit, subtract)) =
+				crate::binder::mysql::interval_arithmetic(left, *op, right)
+			{
+				return lower_mysql_date_arithmetic(date, amount, unit, subtract, scope);
+			}
 			if let Some(scope) = scope.filter(|scope| !scope.deleted_row)
 				&& let Some(comparison) = mysql_link_comparison(left, *op, right, scope)?
 			{
@@ -2653,6 +2645,21 @@ fn lower_mysql_expr_as(
 			}
 
 			let fn_name = name.to_ascii_lowercase();
+			if let (
+				"date_add" | "date_sub" | "adddate" | "subdate",
+				[
+					date,
+					surrealdb_mysql::ast::expr::Expr::Interval {
+						expr: amount,
+						unit,
+						..
+					},
+				],
+			) = (fn_name.as_str(), args.as_slice())
+			{
+				let subtract = matches!(fn_name.as_str(), "date_sub" | "subdate");
+				return lower_mysql_date_arithmetic(date, amount, unit, subtract, scope);
+			}
 			let func_def = FunctionRegistry::lookup(&fn_name, SqlDialect::MySql)
 				.ok_or_else(|| PlanError::UndefinedFunction(fn_name.clone()))?;
 			let mapped = func_def.internal_name.unwrap_or(func_def.name);

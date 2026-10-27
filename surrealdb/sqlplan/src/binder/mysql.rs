@@ -982,7 +982,7 @@ pub fn bind_expr(
 
 /// `date + INTERVAL n UNIT`, `INTERVAL n UNIT + date` and `date - INTERVAL n UNIT`, as the date,
 /// the amount, the unit and whether the amount is taken away.
-fn interval_arithmetic<'a>(
+pub(crate) fn interval_arithmetic<'a>(
 	left: &'a Expr,
 	op: BinaryOperator,
 	right: &'a Expr,

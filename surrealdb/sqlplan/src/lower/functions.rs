@@ -4,9 +4,7 @@
 //! MySQL differ on the position of a string, on NULL, and on what is an error.
 
 use surrealdb_expr::expr::logical::{LogicalCall, LogicalExpr, LogicalIf, LogicalLiteral};
-use surrealdb_expr::expr::{
-	BinaryOperator, Expr, Function, FunctionCall, Kind, Literal, PrefixOperator,
-};
+use surrealdb_expr::expr::{BinaryOperator, Function, Kind, PrefixOperator};
 use surrealdb_expr::val::{Duration, Regex};
 use surrealdb_strand::Strand;
 
@@ -1933,47 +1931,6 @@ pub(crate) fn truncated_to_date(target: &str, value: LogicalExpr) -> LogicalExpr
 		call("time::group", vec![value, text("day")])
 	} else {
 		value
-	}
-}
-
-/// [`today`] as an expression a write evaluates.
-pub(crate) fn today_expr() -> Expr {
-	let call = |name: &str, arguments: Vec<Expr>| {
-		Expr::FunctionCall(Box::new(FunctionCall {
-			receiver: Function::Normal(name.to_owned()),
-			arguments,
-		}))
-	};
-	call(
-		"time::floor",
-		vec![
-			call("time::now", Vec::new()),
-			Expr::Literal(Literal::Duration(Duration::from_secs(86_400))),
-		],
-	)
-}
-
-/// Whether the function has a lowering of its own here, for a call with `arguments` arguments,
-/// that the lowering of a write expression, which calls the engine function the registry names,
-/// does not share. `trim`, the current date and time, and `uuid` are answered by the engine
-/// function the registry names.
-pub(crate) fn has_own_lowering(name: &str, dialect: SqlDialect, arguments: usize) -> bool {
-	match name {
-		"trim" | "current_date" | "curdate" | "current_time" | "curtime" | "uuid" | "now" => false,
-		"round" => arguments == 2,
-		"length" => dialect == SqlDialect::MySql,
-		"substring" | "substr" | "mid" | "ltrim" | "rtrim" | "concat" | "concat_ws" | "mod"
-		| "pi" | "exp" | "ln" | "log" | "truncate" | "left" | "right" | "split_part" | "instr"
-		| "locate" | "position" | "overlay" | "ascii" | "chr" | "char" | "date_part"
-		| "extract" | "date_trunc" | "date_format" | "date_add" | "date_sub" | "from_unixtime"
-		| "unix_timestamp" | "datediff" | "sha2" | "pg_typeof" | "to_json" | "to_jsonb"
-		| "jsonb_build_object" | "json_build_object" | "json_object" | "json_extract"
-		| "json_unquote" | "lpad" | "rpad" | "btrim" | "translate" | "strpos" | "array_length"
-		| "string_to_array" | "quote_literal" | "quote_nullable" | "to_timestamp" | "year"
-		| "month" | "day" | "dayofmonth" | "hour" | "minute" | "second" | "dayofweek"
-		| "dayofyear" | "date" | "last_day" | "strcmp" | "isnull" | "find_in_set"
-		| "timestampdiff" | "json_length" | "stddev" | "stddev_samp" | "variance" | "var_samp" => true,
-		_ => false,
 	}
 }
 

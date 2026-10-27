@@ -292,7 +292,7 @@ fn an_expression_written_to_a_link_is_evaluated_once() {
 	let values = row(pg("INSERT INTO emp (id, name, dept) VALUES (8, 'Sam', abs($1))"));
 	assert_eq!(
 		values[2].1,
-		"{ LET $_link = { LET $_sql_args = [$_1]; IF $_sql_args[0] = NULL OR $_sql_args[0] = NONE THEN NULL ELSE math::abs($_sql_args[0]) END; }; IF $_link = '' OR !(type::is_int($_link) OR type::is_i32($_link) OR type::is_i16($_link) OR type::is_i8($_link) OR type::is_u32($_link) OR type::is_u16($_link) OR type::is_u8($_link) OR type::is_string($_link) OR type::is_uuid($_link) OR type::is_array($_link) OR type::is_object($_link)) THEN $_link ELSE type::record('dept', $_link) END; }"
+		"{ LET $_link = { LET $__sql_binding_1 = [$_1]; IF $__sql_binding_1[0] = NULL OR $__sql_binding_1[0] = NONE THEN NULL ELSE math::abs($__sql_binding_1[0]) END; }; IF $_link = '' OR !(type::is_int($_link) OR type::is_i32($_link) OR type::is_i16($_link) OR type::is_i8($_link) OR type::is_u32($_link) OR type::is_u16($_link) OR type::is_u8($_link) OR type::is_string($_link) OR type::is_uuid($_link) OR type::is_array($_link) OR type::is_object($_link)) THEN $_link ELSE type::record('dept', $_link) END; }"
 	);
 }
 
@@ -768,11 +768,14 @@ const KEYED: [(&str, &str); 14] = [
 	("dept + 1 = 3", "{k} + 1 = 3"),
 	("-dept = -2", "-{k} = -2"),
 	("dept % 2 = 0", "{k} % 2 = 0"),
-	("abs(dept) = 2", "math::abs({k}) = 2"),
+	(
+		"abs(dept) = 2",
+		"{ LET $__sql_binding_1 = [{k}]; IF $__sql_binding_1[0] = NULL OR $__sql_binding_1[0] = NONE THEN NULL ELSE math::abs($__sql_binding_1[0]) END; } = 2",
+	),
 	("mentor + dept = 3", "{m} + {k} = 3"),
 	("age IN (dept, 3)", "age INSIDE [{k}, 3]"),
 	("CASE WHEN dept > 1 THEN 1 ELSE 0 END = 1", "(IF {k} > 1 THEN 1 ELSE 0 END) = 1"),
-	("COALESCE(dept, 0) = 2", "coalesce({k}, 0) = 2"),
+	("COALESCE(dept, 0) = 2", "({k} ?? 0) = 2"),
 ];
 
 fn keyed(text: &str) -> String {

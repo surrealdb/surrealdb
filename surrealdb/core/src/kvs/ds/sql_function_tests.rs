@@ -14,8 +14,10 @@ use crate::dbs::Session;
 use crate::kvs::{Datastore, QueryRequest, QuerySource};
 
 /// The cases that do not pass yet, as `(dialect, case)`, where a case is named by [`identity`],
-/// with ` (stored)` after it for its run over the columns of a stored row: a
-/// failure in any other case fails the test, even of a function listed here. A case leaves the
+/// with ` (stored)` after it for its run over the columns of a stored row, ` (inserted)` for its
+/// run in the values of an `INSERT`, and ` (updated)` for its run in the `SET` of an `UPDATE` over
+/// the columns of a written row: a failure in any other case fails the test, even of a function
+/// listed here. A case leaves the
 /// list when it passes, and the test fails while a case stays on it after it passes or names no
 /// case.
 const BROKEN: &[(Dialect, &str)] = &[
@@ -37,7 +39,10 @@ const BROKEN: &[(Dialect, &str)] = &[
 		r#"SELECT last_value(n) OVER (ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS v FROM t ORDER BY n"#,
 	),
 	(Dialect::Pgsql, r#"SELECT nth_value(n, 2) OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
+	// The `LIKE` operator is not lowered in the values of a write.
+	(Dialect::Pgsql, r#"version() LIKE 'PostgreSQL%' (inserted)"#),
 	// mysql
+	(Dialect::Mysql, r#"version() LIKE '8.%' (inserted)"#),
 	(Dialect::Mysql, r#"SELECT row_number() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
 	(Dialect::Mysql, r#"SELECT rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
 	(Dialect::Mysql, r#"SELECT dense_rank() OVER (ORDER BY n) AS v FROM t ORDER BY n"#),
@@ -105,7 +110,7 @@ async fn datastore() -> Arc<Datastore> {
 		.await
 		.expect("the datastore opens");
 	let setup = "DEFINE NAMESPACE test; DEFINE DATABASE test;
-		DEFINE TABLE t SCHEMALESS; DEFINE TABLE fx SCHEMALESS;";
+		DEFINE TABLE t SCHEMALESS; DEFINE TABLE fx SCHEMALESS; DEFINE TABLE wx SCHEMALESS;";
 	for result in ds.execute(setup, &session(), None).await.expect("the setup runs") {
 		result.result.expect("a setup statement");
 	}
@@ -254,36 +259,81 @@ fn fill(template: &str, args: &[&str]) -> String {
 		.fold(template.to_owned(), |sql, (i, arg)| sql.replace(&format!("{{{i}}}"), arg))
 }
 
-/// Populates `t` and `fx` for `case`, and returns the statements the case runs.
-async fn statements(ds: &Datastore, dialect: Dialect, case: &Case) -> Result<Vec<String>, String> {
-	match &case.sql {
-		Sql::Stmt(sql) => Ok(vec![(*sql).to_owned()]),
+/// One run of a case: the statements that write what the answer is read from, and the statement
+/// that reads it. An error answered by a statement that writes is the answer of the run.
+struct Run {
+	suffix: &'static str,
+	writes: Vec<String>,
+	read: String,
+}
+
+impl Run {
+	fn read(read: String) -> Self {
+		Run {
+			suffix: "",
+			writes: Vec::new(),
+			read,
+		}
+	}
+}
+
+/// Populates `t` and `fx` for `case`, and returns the runs of the case.
+async fn runs(ds: &Datastore, dialect: Dialect, case: &Case) -> Result<Vec<Run>, String> {
+	let (template, args) = match &case.sql {
+		Sql::Stmt(sql) => return Ok(vec![Run::read((*sql).to_owned())]),
 		Sql::Literal {
 			template,
 			args,
-		} => Ok(vec![format!("SELECT {} AS v", fill(template, args))]),
+		} => (template, args),
 		Sql::Call {
 			template,
 			args,
-		} => {
-			let mut statements = vec![format!("SELECT {} AS v", fill(template, args))];
-			if !args.is_empty() {
-				let columns: Vec<String> = (0..args.len()).map(|i| format!("a{i}")).collect();
-				let stored = args.iter().enumerate().fold((*template).to_owned(), |sql, (i, _)| {
-					sql.replace(&format!("{{{i}}}"), &format!("a{i}"))
-				});
-				let insert =
-					format!("INSERT INTO fx ({}) VALUES ({})", columns.join(", "), args.join(", "));
-				ds.execute("DELETE fx", &session(), None).await.expect("the fixture is cleared");
-				let outcome = outcome(ds, dialect, &insert).await;
-				if outcome.starts_with("ERR:") {
-					return Err(format!("`{insert}` answered `{outcome}`"));
-				}
-				statements.push(format!("SELECT {stored} AS v FROM fx"));
-			}
-			Ok(statements)
+		} => (template, args),
+	};
+	let call = fill(template, args);
+	let mut runs = vec![
+		Run::read(format!("SELECT {call} AS v")),
+		Run {
+			suffix: " (inserted)",
+			writes: vec![
+				"DELETE FROM wx".to_owned(),
+				format!("INSERT INTO wx (id, v) VALUES (1, {call})"),
+			],
+			read: "SELECT v FROM wx".to_owned(),
+		},
+	];
+	if matches!(case.sql, Sql::Call { .. }) && !args.is_empty() {
+		let columns: Vec<String> = (0..args.len()).map(|i| format!("a{i}")).collect();
+		let stored = args.iter().enumerate().fold((*template).to_owned(), |sql, (i, _)| {
+			sql.replace(&format!("{{{i}}}"), &format!("a{i}"))
+		});
+		let insert =
+			format!("INSERT INTO fx ({}) VALUES ({})", columns.join(", "), args.join(", "));
+		ds.execute("DELETE fx", &session(), None).await.expect("the fixture is cleared");
+		let outcome = outcome(ds, dialect, &insert).await;
+		if outcome.starts_with("ERR:") {
+			return Err(format!("`{insert}` answered `{outcome}`"));
 		}
+		runs.push(Run {
+			suffix: " (stored)",
+			writes: Vec::new(),
+			read: format!("SELECT {stored} AS v FROM fx"),
+		});
+		runs.push(Run {
+			suffix: " (updated)",
+			writes: vec![
+				"DELETE FROM wx".to_owned(),
+				format!(
+					"INSERT INTO wx (id, {}) VALUES (1, {})",
+					columns.join(", "),
+					args.join(", ")
+				),
+				format!("UPDATE wx SET v = {stored} WHERE id = 1"),
+			],
+			read: "SELECT v FROM wx".to_owned(),
+		});
 	}
+	Ok(runs)
 }
 
 async fn load_fixture(ds: &Datastore, dialect: Dialect) {
@@ -303,8 +353,8 @@ async fn problems(dialect: Dialect) -> Vec<(String, String)> {
 	load_fixture(&ds, dialect).await;
 	let mut problems = Vec::new();
 	for case in dialect.cases() {
-		let texts = match statements(&ds, dialect, case).await {
-			Ok(texts) => texts,
+		let runs = match runs(&ds, dialect, case).await {
+			Ok(runs) => runs,
 			Err(error) => {
 				problems.push((
 					identity(case),
@@ -317,15 +367,24 @@ async fn problems(dialect: Dialect) -> Vec<(String, String)> {
 				continue;
 			}
 		};
-		for (run, text) in texts.into_iter().enumerate() {
-			let got = outcome(&ds, dialect, &text).await;
+		for run in runs {
+			let mut text = run.read.clone();
+			let mut got = None;
+			for write in &run.writes {
+				let written = outcome(&ds, dialect, write).await;
+				if written.starts_with("ERR:") {
+					text = write.clone();
+					got = Some(written);
+					break;
+				}
+			}
+			let got = match got {
+				Some(got) => got,
+				None => outcome(&ds, dialect, &text).await,
+			};
 			if !agrees(case.expect, &got) {
-				// The run over a stored row is a case of its own, as its lowering is.
-				let key = if run == 0 {
-					identity(case)
-				} else {
-					format!("{} (stored)", identity(case))
-				};
+				// A run over a stored or written row is a case of its own, as its lowering is.
+				let key = format!("{}{}", identity(case), run.suffix);
 				problems.push((
 					key.clone(),
 					format!(
@@ -374,7 +433,10 @@ async fn conformance(dialect: Dialect) {
 		if *listed != dialect {
 			continue;
 		}
-		let named = case.strip_suffix(" (stored)").unwrap_or(case);
+		let named = [" (stored)", " (inserted)", " (updated)"]
+			.iter()
+			.find_map(|suffix| case.strip_suffix(suffix))
+			.unwrap_or(case);
 		if !dialect.cases().iter().any(|known| identity(known) == named) {
 			failures.push(format!("{} `{case}`: in BROKEN, but names no case", dialect.label()));
 		} else if !problems.iter().any(|(failing, _)| failing == case) {

@@ -13,6 +13,7 @@ mod vector_ddl;
 mod vector_expr;
 mod vector_knn;
 pub mod write;
+mod write_function;
 mod write_null;
 
 pub use ddl::{

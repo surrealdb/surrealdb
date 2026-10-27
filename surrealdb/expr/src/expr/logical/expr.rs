@@ -109,7 +109,7 @@ pub enum LogicalLiteral {
 impl LogicalLiteral {
 	/// The expression-layer literal with the same value, for rendering through
 	/// the shared formatter.
-	fn to_expr_literal(&self) -> Literal {
+	pub fn to_expr_literal(&self) -> Literal {
 		match self {
 			LogicalLiteral::None => Literal::None,
 			LogicalLiteral::Null => Literal::Null,
