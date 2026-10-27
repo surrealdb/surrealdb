@@ -1687,6 +1687,46 @@ fn lower_sample_aggregate(
 	Ok(when(binary(present, BinaryOperator::LessThan, int(2)), null(), call(engine, vec![value])))
 }
 
+/// A population `stddev_pop`/`std` or `var_pop` (MySQL's `stddev` and `variance` are these too):
+/// NULL for a group with no value, and 0 for a group with one, where the engine's sample
+/// statistics answer NaN.
+fn lower_population_aggregate(
+	name: &str,
+	args: &[BoundExpr],
+	policy: &DialectPolicy,
+) -> Result<LogicalExpr, PlanError> {
+	let value = lower_bound_expr(&args[0], policy)?;
+	let count = || {
+		call(
+			"count",
+			vec![when(
+				is_not_null_expr(value.clone()),
+				LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+				null(),
+			)],
+		)
+	};
+	let variance = binary(
+		binary(
+			call("math::variance", vec![value.clone()]),
+			BinaryOperator::Multiply,
+			binary(count(), BinaryOperator::Subtract, int(1)),
+		),
+		BinaryOperator::Divide,
+		count(),
+	);
+	let statistic = if name.starts_with("var") || name == "variance" {
+		variance
+	} else {
+		call("math::sqrt", vec![variance])
+	};
+	Ok(when(
+		binary(count(), BinaryOperator::LessThan, int(1)),
+		null(),
+		when(binary(count(), BinaryOperator::LessThan, int(2)), int(0), statistic),
+	))
+}
+
 /// MySQL `json_unquote(s)`: text that is a JSON string is the string it holds.
 fn lower_json_unquote(
 	args: &[BoundExpr],
@@ -1988,6 +2028,9 @@ pub(super) fn lower_function(
 		("find_in_set", _) => lower_find_in_set(args, policy)?,
 		("timestampdiff", _) => lower_timestampdiff(args, policy)?,
 		("json_length", _) => lower_json_length(args, policy)?,
+		("stddev" | "variance", SqlDialect::MySql) | ("std" | "stddev_pop" | "var_pop", _) => {
+			lower_population_aggregate(name, args, policy)?
+		}
 		("stddev" | "stddev_samp" | "variance" | "var_samp", _) => {
 			lower_sample_aggregate(name, args, policy)?
 		}

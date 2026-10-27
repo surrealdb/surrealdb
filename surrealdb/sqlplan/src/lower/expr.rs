@@ -217,7 +217,8 @@ pub fn lower_bound_expr(
 						// MAX(DISTINCT x) is identical to MAX(x)
 					}
 					"string_agg" | "group_concat" | "array_agg" | "json_agg" | "jsonb_agg"
-					| "stddev" | "stddev_samp" | "variance" | "var_samp" => {
+					| "stddev" | "stddev_samp" | "variance" | "var_samp" | "std" | "stddev_pop"
+					| "var_pop" | "json_arrayagg" => {
 						return Err(PlanError::UnsupportedExpression(format!(
 							"{}(DISTINCT ...)",
 							name.to_uppercase()

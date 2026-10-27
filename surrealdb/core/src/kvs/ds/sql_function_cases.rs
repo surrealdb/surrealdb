@@ -550,6 +550,14 @@ pub(super) const PGSQL: &[Case] = &[
 		r#"SELECT pg_advisory_unlock_all() AS v"#,
 		r#"REFUSED"#,
 	),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t"#, r#"0.81649658092772603273"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(x) AS v FROM t"#, r#"0.5"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t WHERE n = 1"#, r#"0"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t WHERE n > 5"#, r#"NULL"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t"#, r#"0.66666666666666666667"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(x) AS v FROM t"#, r#"0.25"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t WHERE n = 1"#, r#"0"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t WHERE n > 5"#, r#"NULL"#),
 ];
 
 pub(super) const MYSQL: &[Case] = &[
@@ -1005,4 +1013,21 @@ pub(super) const MYSQL: &[Case] = &[
 	Case::stmt(r#"sysdate"#, r#"SELECT sysdate() IS NOT NULL AS v"#, r#"1"#),
 	Case::stmt(r#"stddev_samp"#, r#"SELECT stddev_samp(n) AS v FROM t"#, r#"1"#),
 	Case::stmt(r#"var_samp"#, r#"SELECT var_samp(n) AS v FROM t"#, r#"1"#),
+	// The cases from here to the end of the list were written from the MySQL 8.4 reference manual.
+	Case::stmt(r#"stddev"#, r#"SELECT stddev(n) AS v FROM t"#, r#"0.816496580927726"#),
+	Case::stmt(r#"std"#, r#"SELECT std(n) AS v FROM t"#, r#"0.816496580927726"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t"#, r#"0.816496580927726"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(x) AS v FROM t"#, r#"0.5"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t WHERE n = 1"#, r#"0"#),
+	Case::stmt(r#"stddev_pop"#, r#"SELECT stddev_pop(n) AS v FROM t WHERE n > 5"#, r#"NULL"#),
+	Case::stmt(r#"variance"#, r#"SELECT variance(n) AS v FROM t"#, r#"0.666666666666667"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t"#, r#"0.666666666666667"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(x) AS v FROM t"#, r#"0.25"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t WHERE n = 1"#, r#"0"#),
+	Case::stmt(r#"var_pop"#, r#"SELECT var_pop(n) AS v FROM t WHERE n > 5"#, r#"NULL"#),
+	Case::stmt(
+		r#"json_arrayagg"#,
+		r#"SELECT json_arrayagg(n) AS v FROM (SELECT n, s FROM t ORDER BY n) q"#,
+		r#"[1, 2, 3]"#,
+	),
 ];
