@@ -74,10 +74,11 @@ on:
         # commit's downstream build already recorded. A branch resolves to its
         # tip; a commit/short-sha is resolved against the downstream repo. When
         # set, the release WAITS for a downstream build that pairs this commit
-        # with the engine commit (or fails telling you to run one). Versioned
-        # releases that ship the downstream side only; ignored otherwise.
+        # with the engine commit (or fails telling you to run one). Honored by a
+        # downstream release (release-type: versioned) and by a test release on any
+        # channel, including a main/nightly test; ignored otherwise.
         type: string
-        description: "Downstream commit or branch to release (empty: the pairing the engine build already recorded; a branch resolves to its tip). Versioned + downstream only."
+        description: "Downstream commit or branch to release (empty: the pairing the engine build already recorded; a branch resolves to its tip). Downstream + test releases only."
       publish:
         required: false
         type: boolean
@@ -289,7 +290,7 @@ jobs:
       # context is not available in a step-level `if:`. Mirrors check-milestones.
       - name: Downstream app configured?
         id: ds-cfg
-        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') }}
+        if: ${{ (steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true') || steps.config.outputs.test == 'true' }}
         env:
           HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
           DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
@@ -315,7 +316,7 @@ jobs:
       # so this step is skipped for them.
       - name: Generate a token for the downstream repo
         id: ds-token
-        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') && steps.ds-cfg.outputs.configured == 'true' }}
+        if: ${{ ((steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true') || steps.config.outputs.test == 'true') && steps.ds-cfg.outputs.configured == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
@@ -324,7 +325,7 @@ jobs:
 
       - name: Resolve the requested downstream ref
         id: ds-ref
-        if: ${{ inputs.downstream-git-sha != '' && steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true' }}
+        if: ${{ inputs.downstream-git-sha != '' && ((steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true') || steps.config.outputs.test == 'true') }}
         env:
           GH_TOKEN: ${{ steps.ds-token.outputs.token }}
           OWNER: ${{ github.repository_owner }}

@@ -81,7 +81,8 @@ runs:
         #     only `test` (NOT release-downstream), so it mirrors the image but does
         #     not tag the downstream repo, finalize, or prune; `test=true` also skips
         #     the engine-build wait and shifts the release name to carry build
-        #     metadata so it never collides with a public tag. Manual, versioned-only.
+        #     metadata so it never collides with a public tag. Manual; cut from a
+        #     releases/* line (versioned) or from main (nightly).
         # The scheduled nightlies set `components` themselves and never reach here as
         # a manual choice: `engine` (engine side only) and `internal` (downstream
         # side only). `engine` is not offered as a manual option.
@@ -94,10 +95,12 @@ runs:
           engine)   release_engine=true;  release_downstream=false; test=false ;;
           *) echo "::error::Unknown components value '${components}' (expected public|internal|test)"; exit 1 ;;
         esac
-        if [[ "$test" == "true" && "$channel" != "versioned" ]]; then
-          echo "::error::'test' is only valid for a versioned release (release-type: versioned), not '${channel}'."
-          exit 1
-        fi
+        # A test release may be cut from a releases/* line (release-type: versioned)
+        # or from main (release-type: nightly). On the nightly channel it still
+        # resolves and ships like a nightly (Locate walks main, the engine-build wait
+        # is skipped) but is NAMED from the crate's own version with the pairing
+        # metadata rather than as `nightly` - see prepare-release-vars. No channel
+        # restriction applies.
         {
           echo "requested-ref=${requested_ref}"
           echo "release-channel=${channel}"

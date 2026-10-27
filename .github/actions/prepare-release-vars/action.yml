@@ -53,7 +53,11 @@ runs:
           exit 1
         fi
 
-        if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
+        # A test release is excluded here even on the nightly channel: a main test
+        # release keeps main's own Cargo.toml version with the pairing metadata
+        # (v<version>-<engine>.<downstream>, the else branch below) rather than the
+        # computed `nightly` name, so its tag matches a releases/* test release.
+        if [[ "${{ inputs.nightly-release }}" == "true" && "${{ inputs.test }}" != "true" ]]; then
           # Nightly release - compute version based on main's version
           # Action-relative path: the script travels with this action's checkout
           # (.ci) instead of resolving against the released commit in the workspace.

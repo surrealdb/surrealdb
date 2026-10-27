@@ -551,13 +551,14 @@ runs:
           fi
         fi
 
-        # For a versioned release that ships a downstream image (a downstream
-        # release or a test release) we normally WAIT for its downstream.json (same
-        # rationale as the engine wait above: a freshly-pushed release tip's
-        # downstream build may still be running). Nightly never reaches here (it
-        # resolved an already-built commit).
+        # When a release ships a downstream image (a downstream release, or a test
+        # release on any channel) we normally WAIT for its downstream.json (same
+        # rationale as the engine wait above: a freshly-pushed tip's downstream
+        # build may still be running). A non-test nightly never reaches here (it
+        # resolved an already-built commit); a nightly (main) test release does, so
+        # it waits for the pairing it is about to promote.
         ds_branch_missing=false
-        if [[ "$CHANNEL" == "versioned" && ( "$REQ_DOWNSTREAM" == "true" || "${TEST:-false}" == "true" ) ]]; then
+        if [[ "${TEST:-false}" == "true" || ( "$CHANNEL" == "versioned" && "$REQ_DOWNSTREAM" == "true" ) ]]; then
           if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
             # An explicit downstream commit was named: ship THAT pairing and always
             # wait for it, regardless of the engine line's downstream branch. The
