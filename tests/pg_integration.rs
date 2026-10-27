@@ -623,7 +623,7 @@ mod pg_integration {
 
 	#[test(tokio::test)]
 	async fn extended_protocol_intercepts_set() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server_with_args(true, "--allow-experimental gql").await?;
+		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
 		// A prepared `SET` is intercepted rather than handed to the SurrealQL
 		// parser (which would reject it). Dialect switching and no-op GUCs work.
@@ -828,7 +828,7 @@ mod pg_integration {
 
 	#[test(tokio::test)]
 	async fn set_dialect_switches_language() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server_with_args(true, "--allow-experimental gql").await?;
+		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
 		client.simple_query("CREATE person:aeon SET name = 'Aeon' RETURN NONE").await?;
 		// Switch to GQL and run a MATCH; then switch back.
@@ -859,7 +859,7 @@ mod pg_integration {
 
 	#[test(tokio::test)]
 	async fn gql_in_transaction_is_rejected() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server_with_args(true, "--allow-experimental gql").await?;
+		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
 		client.simple_query("SET dialect = 'gql'").await?;
 		client.simple_query("BEGIN").await?;
@@ -917,7 +917,7 @@ mod pg_integration {
 
 	#[test(tokio::test)]
 	async fn gql_over_extended_protocol() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server_with_args(true, "--allow-experimental gql").await?;
+		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
 		client.simple_query("CREATE person:nova SET name = 'Nova' RETURN NONE").await?;
 		client.simple_query("SET dialect = 'gql'").await?;

@@ -1235,7 +1235,7 @@ mod http_integration {
 			// capability
 			("", 403),
 			("--allow-all", 403),
-			("--allow-experimental files,gql", 403),
+			("--allow-experimental files,surrealism", 403),
 			("--allow-experimental kvexport", 200),
 			("--allow-experimental kvexport --deny-experimental kvexport", 403),
 			("--allow-experimental kvexport --deny-http kvexport", 403),
