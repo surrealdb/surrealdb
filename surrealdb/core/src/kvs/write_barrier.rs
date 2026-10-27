@@ -46,7 +46,7 @@
 //! inside the transaction that defines its index above all, still raises the barrier.
 //!
 //! The build waits for every node other than its own whose heartbeat is within
-//! [`WRITE_BARRIER_EXCLUDE_AFTER`] to answer, archived or not, and for its own node's transactions
+//! [`exclude_after`] to answer, archived or not, and for its own node's transactions
 //! directly. A release with the
 //! barrier marks each heartbeat it records (`!wh{nd}`, [`WriteBarrierHeartbeatKey`]), so a node
 //! whose current heartbeat carries no mark was last refreshed by a release without it. A node whose
@@ -81,7 +81,7 @@ use crate::kvs::{
 
 /// How long a datastore that answers write barriers may go without recording a heartbeat before
 /// it refuses its own write commits, dated from before the heartbeat read the clock it records.
-/// Within [`WRITE_BARRIER_EXCLUDE_AFTER`] it leaves a margin within which the nodes' clocks must
+/// Within [`exclude_after`] it leaves a margin within which the nodes' clocks must
 /// agree and a commit admitted before the fence lapsed must land. A heartbeat that takes longer
 /// than this to commit lapses the fence: a node whose storage cannot keep its liveness refuses its
 /// writes, which is what lets a build leave it out.
@@ -96,24 +96,21 @@ pub(crate) const MAX_SHARED_STORE_HEARTBEAT_INTERVAL: Duration = Duration::from_
 pub(crate) const WRITE_BARRIER_CLOCK_MARGIN: Duration = Duration::from_secs(10);
 
 /// How old a node's heartbeat must be before a build stops waiting for its answer, archived or
-/// not. A node refuses to admit a write commit once its heartbeat is [`WRITE_FENCE_STALE_AFTER`]
-/// old; a commit it admitted returns within
-/// [`WRITE_COMMIT_BOUND`](surrealdb_datastore::triggers::WRITE_COMMIT_BOUND), or is abandoned and
-/// has landed, or never will, within
+/// not, on a store whose write commits are bounded by `commit_bound`
+/// ([`Transaction::write_commit_bound`]). A node refuses to admit a write commit once its
+/// heartbeat is [`WRITE_FENCE_STALE_AFTER`] old; a commit it admitted returns within
+/// `commit_bound`, or is abandoned and has landed, or never will, within
 /// [`ABANDONED_COMMIT_SETTLE`](surrealdb_datastore::triggers::ABANDONED_COMMIT_SETTLE) more. So
-/// this is their sum and [`WRITE_BARRIER_CLOCK_MARGIN`]. A node that shuts down drains its writes
-/// and answers every barrier before it archives itself
-/// ([`Datastore::retire_write_barrier_answer`]), so a clean exit is not waited for.
-pub(crate) const WRITE_BARRIER_EXCLUDE_AFTER: Duration = Duration::from_secs(90);
-
-/// No write a node left out of a build's wait admitted can land after it is left out.
-const _: () = assert!(
-	WRITE_FENCE_STALE_AFTER.as_secs()
-		+ surrealdb_datastore::triggers::WRITE_COMMIT_BOUND.as_secs()
-		+ surrealdb_datastore::triggers::ABANDONED_COMMIT_SETTLE.as_secs()
-		+ WRITE_BARRIER_CLOCK_MARGIN.as_secs()
-		<= WRITE_BARRIER_EXCLUDE_AFTER.as_secs()
-);
+/// this is their sum and [`WRITE_BARRIER_CLOCK_MARGIN`], and no write a node left out of a build's
+/// wait admitted can land after it is left out. A node that shuts down drains its writes and
+/// answers every barrier before it archives itself ([`Datastore::retire_write_barrier_answer`]),
+/// so a clean exit is not waited for.
+pub(crate) fn exclude_after(commit_bound: Duration) -> Duration {
+	WRITE_FENCE_STALE_AFTER
+		+ commit_bound
+		+ surrealdb_datastore::triggers::ABANDONED_COMMIT_SETTLE
+		+ WRITE_BARRIER_CLOCK_MARGIN
+}
 
 /// How long a wait waits for this datastore's write transactions older than it before it fences
 /// them: a transaction still open then is refused at commit, so a client holding a write
@@ -317,15 +314,16 @@ enum Answers {
 /// Whether every live node other than `node` last recorded its heartbeat as a release whose writes
 /// the store fences against a later change to their table's catalog (`!wf`,
 /// [`CatalogFenceHeartbeatKey`]). A node whose heartbeat is older than
-/// [`WRITE_BARRIER_EXCLUDE_AFTER`] is left out, as a build's wait leaves it out ([`answers`]).
+/// [`exclude_after`] is left out, as a build's wait leaves it out ([`answers`]).
 async fn every_live_node_fences(tx: &Transaction, node: Uuid) -> Result<bool> {
 	let now = SystemClock::new().now();
+	let excluded_before = now - exclude_after(tx.write_commit_bound());
 	let mut marks = std::collections::HashMap::new();
 	for (key, value) in tx.scan(CatalogFenceHeartbeatPrefix {}.range()?, u32::MAX, 0, None).await? {
 		marks.insert(CatalogFenceHeartbeatKey::decode_key(&key)?.nd, value);
 	}
 	for nd in tx.all_nodes().await?.iter() {
-		if nd.id == node || nd.heartbeat < now - WRITE_BARRIER_EXCLUDE_AFTER {
+		if nd.id == node || nd.heartbeat < excluded_before {
 			continue;
 		}
 		// A node last refreshed by a release without the fence reads catalog versions plainly.
@@ -338,6 +336,7 @@ async fn every_live_node_fences(tx: &Transaction, node: Uuid) -> Result<bool> {
 
 async fn answers(tx: &Transaction, node: Uuid, asked: u64) -> Result<Answers> {
 	let now = SystemClock::new().now();
+	let excluded_before = now - exclude_after(tx.write_commit_bound());
 	let mut acks = std::collections::HashMap::new();
 	for (key, value) in tx.scan(WriteBarrierAckPrefix {}.range()?, u32::MAX, 0, None).await? {
 		acks.insert(WriteBarrierAckKey::decode_key(&key)?.nd, value);
@@ -348,7 +347,7 @@ async fn answers(tx: &Transaction, node: Uuid, asked: u64) -> Result<Answers> {
 	}
 	let mut pending = false;
 	for nd in tx.all_nodes().await?.iter() {
-		if nd.id == node || nd.heartbeat < now - WRITE_BARRIER_EXCLUDE_AFTER {
+		if nd.id == node || nd.heartbeat < excluded_before {
 			continue;
 		}
 		// A node last refreshed by a release without the barrier answers none.
@@ -666,5 +665,25 @@ pub(crate) mod test_wait {
 
 	pub(super) fn bound(node: Uuid) -> Option<Duration> {
 		bounds().lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&node).copied()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::time::Duration;
+
+	use super::*;
+
+	#[test]
+	fn the_exclusion_window_covers_the_fence_the_commit_bound_the_settle_and_the_clock_margin() {
+		let default = surrealdb_datastore::triggers::WRITE_COMMIT_BOUND;
+		let longer = default + Duration::from_secs(30);
+		assert_eq!(exclude_after(longer) - exclude_after(default), Duration::from_secs(30));
+		assert_eq!(
+			exclude_after(default),
+			WRITE_FENCE_STALE_AFTER
+				+ default + surrealdb_datastore::triggers::ABANDONED_COMMIT_SETTLE
+				+ WRITE_BARRIER_CLOCK_MARGIN
+		);
 	}
 }

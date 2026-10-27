@@ -458,6 +458,10 @@ pub trait ScanCursorVals: Send + Sync {
 	) -> BoxFut<'s, Result<ScanChunkStats>>;
 }
 
+/// The write commit bound of a backend that does not report its own
+/// ([`Transactable::write_commit_bound`]).
+pub const DEFAULT_WRITE_COMMIT_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// A batch scan result returned from the [`Transaction::batch`] or
 /// [`Transactor::batch`] functions.
 #[derive(Debug)]
@@ -499,6 +503,18 @@ pub trait Transactable: Send + Sync {
 	/// both.
 	fn sole_writer(&self) -> bool {
 		false
+	}
+
+	/// The longest a write commit to a store other datastores write may run before the
+	/// datastore reports its outcome unknown and abandons it.
+	///
+	/// A node that records no heartbeat for longer than its write fence refuses new commits,
+	/// and other nodes stop waiting for it once the fence, this bound, the abandoned commit's
+	/// settling time and the clock margin have all passed, so every node of a cluster must
+	/// report the same bound. A backend whose commits legitimately run longer than the default
+	/// reports a larger one.
+	fn write_commit_bound(&self) -> std::time::Duration {
+		DEFAULT_WRITE_COMMIT_BOUND
 	}
 
 	/// Whether a write transaction commits only if no key it read, by any read

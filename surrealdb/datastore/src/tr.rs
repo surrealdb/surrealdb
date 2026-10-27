@@ -409,6 +409,13 @@ impl Transactor {
 		self.inner.sole_writer()
 	}
 
+	/// The longest a write commit may run before its outcome is reported unknown.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::write_commit_bound`].
+	pub fn write_commit_bound(&self) -> std::time::Duration {
+		self.inner.write_commit_bound()
+	}
+
 	/// Whether a write transaction's commit fails if any key it read was
 	/// written since it opened.
 	///

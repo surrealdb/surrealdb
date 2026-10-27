@@ -10136,13 +10136,14 @@ async fn a_deferred_start_records_its_barrier_support_before_it_returns() -> Res
 }
 
 /// Node cleanup keeps an archived node's row while a build may still wait for its write barrier
-/// answer — until its heartbeat is `WRITE_BARRIER_EXCLUDE_AFTER` old — since a build finds a node
+/// answer — until its heartbeat is `exclude_after` old — since a build finds a node
 /// only through its row.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn node_cleanup_keeps_an_archived_node_a_build_may_still_wait_for() -> Result<()> {
 	let (ds, _) = new_index_test_ds().await?;
-	let exclude = crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
+	let exclude =
+		crate::kvs::write_barrier::exclude_after(surrealdb_datastore::triggers::WRITE_COMMIT_BOUND);
 	let archived = |age: Duration| {
 		let ds = Arc::clone(&ds);
 		async move {

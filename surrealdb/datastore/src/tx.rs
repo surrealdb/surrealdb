@@ -7453,20 +7453,20 @@ impl Transaction {
 
 	/// [`Self::commit_store`], bounded on a store other datastores write: a build elsewhere stops
 	/// waiting for this node a bounded time after its fence lapses, so a commit that has not
-	/// returned within [`crate::triggers::WRITE_COMMIT_BOUND`] reports its outcome as unknown.
+	/// returned within the store's [`Transactor::write_commit_bound`] reports its outcome as
+	/// unknown.
 	async fn commit_store_bounded(&self) -> std::result::Result<(), KvsError> {
 		if !self.writeable() || self.sole_writer() {
 			return self.commit_store().await;
 		}
-		match common::time::timeout(crate::triggers::WRITE_COMMIT_BOUND, self.commit_store()).await
-		{
+		let bound = self.tr.write_commit_bound();
+		match common::time::timeout(bound, self.commit_store()).await {
 			Ok(committed) => committed,
 			Err(_) => {
 				self.hold_abandoned_commit(crate::triggers::ABANDONED_COMMIT_SETTLE);
 				self.end_live_write();
 				Err(KvsError::CommitOutcomeUnknown(format!(
-					"the commit did not return within {:?}",
-					crate::triggers::WRITE_COMMIT_BOUND
+					"the commit did not return within {bound:?}"
 				)))
 			}
 		}

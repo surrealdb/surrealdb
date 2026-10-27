@@ -4674,7 +4674,7 @@ impl Datastore {
 	/// node's registrations and the tables' entries for them, and then its
 	/// row, with the drain heartbeat, release record and write barrier keys
 	/// written beside it, once its heartbeat is
-	/// [`WRITE_BARRIER_EXCLUDE_AFTER`](crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER)
+	/// [`exclude_after`](crate::kvs::write_barrier::exclude_after)
 	/// old: until then a build may wait for its write barrier answer, and finds
 	/// the node only through its row. A
 	/// node's queued async events are left in place: the event adoption sweep
@@ -4819,10 +4819,10 @@ impl Datastore {
 							continue 'nodes;
 						};
 						// A build waits for an archived node's write barrier answer until its
-						// heartbeat is `WRITE_BARRIER_EXCLUDE_AFTER` old, and finds the node only
+						// heartbeat is `exclude_after` old, and finds the node only
 						// through its row, so the row stays until then.
 						let excluded_before = self.clock_now()
-							- crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER;
+							- crate::kvs::write_barrier::exclude_after(txn.write_commit_bound());
 						if node.heartbeat >= excluded_before {
 							trace!(target: TARGET, id = %id, "Keeping archived node a build may still wait for");
 							catch!(txn, txn.cancel().await);
@@ -17047,8 +17047,9 @@ pub(crate) mod test {
 	/// write barrier answer.
 	fn lapsed_heartbeat(ds: &Datastore) -> Timestamp {
 		ds.clock_now()
-			- crate::kvs::write_barrier::WRITE_BARRIER_EXCLUDE_AFTER
-			- Duration::from_secs(1)
+			- crate::kvs::write_barrier::exclude_after(
+				surrealdb_datastore::triggers::WRITE_COMMIT_BOUND,
+			) - Duration::from_secs(1)
 	}
 
 	/// Archives `id`, as the membership scan does once its heartbeat has gone

@@ -684,12 +684,14 @@ impl LiveTransactions {
 }
 
 /// The longest a write commit to a store other datastores write may run before it reports its
-/// outcome unknown. A build elsewhere leaves a node out of its wait only once the node's heartbeat
-/// is older than its write fence, this bound and the margin within which clocks must agree
-/// together, so a commit admitted just before the fence lapsed has landed, or never will, by then.
+/// outcome unknown, for a backend that reports no bound of its own
+/// ([`surrealdb_kvs::api::Transactable::write_commit_bound`]). A build elsewhere leaves a node out
+/// of its wait only once the node's heartbeat is older than its write fence, the store's bound and
+/// the margin within which clocks must agree together, so a commit admitted just before the fence
+/// lapsed has landed, or never will, by then.
 /// Abandoning the commit stops the client's retries and backoff, which are what would otherwise
 /// leave it running for any length of time.
-pub const WRITE_COMMIT_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+pub const WRITE_COMMIT_BOUND: std::time::Duration = surrealdb_kvs::api::DEFAULT_WRITE_COMMIT_BOUND;
 
 /// How long a write commit abandoned at [`WRITE_COMMIT_BOUND`] still counts as under way in its
 /// epoch ([`LiveWrites::hold_commit`]). A storage engine that commits in two phases may still

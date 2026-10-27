@@ -30,6 +30,12 @@ use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptio
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, trace, warn};
 
+/// The longest a write commit runs before its outcome is reported unknown
+/// ([`Transactable::write_commit_bound`]). A TiKV commit is a two-phase commit across every
+/// region the transaction wrote, so a transaction of many thousands of keys outlasts the default
+/// bound; this stays below a minute, the longest a statement runs by default.
+const WRITE_COMMIT_BOUND: Duration = Duration::from_secs(50);
+
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
 /// Convert a failure of `commit` into the generic KVS error type,
@@ -889,6 +895,11 @@ fn validate_tls_paths(config: &TikvConfig) -> Result<Option<TlsPaths>> {
 impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"tikv"
+	}
+
+	/// See [`WRITE_COMMIT_BOUND`].
+	fn write_commit_bound(&self) -> Duration {
+		WRITE_COMMIT_BOUND
 	}
 
 	/// Check if closed
