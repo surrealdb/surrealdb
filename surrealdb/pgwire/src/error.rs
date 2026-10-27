@@ -216,6 +216,7 @@ impl PgError {
 	}
 
 	/// `53300 too_many_connections`
+	#[cfg(feature = "listener")]
 	pub(super) fn too_many_connections() -> Self {
 		Self::new("53300", "sorry, too many clients already").fatal()
 	}

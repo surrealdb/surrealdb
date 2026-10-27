@@ -10,7 +10,14 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["listener"]
+# The TCP listener (`start`): needs a native runtime. Without it the crate serves any async byte stream
+# through `serve` and builds for `wasm32-unknown-unknown`.
+listener = ["dep:axum-server", "tokio/net"]
+
 [dependencies]
+common = { workspace = true }
 surrealdb-core = { workspace = true, features = ["mysql"] }
 surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
@@ -21,21 +28,30 @@ surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 
 anyhow = { workspace = true }
-axum-server = { workspace = true }
+axum-server = { workspace = true, optional = true }
 rand = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
+tokio = { workspace = true, features = ["sync", "io-util", "macros"] }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+# TLS on `wasm32-unknown-unknown`: ring is the crypto provider, and it and the certificate time source
+# read the host's JavaScript clock and entropy.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+rustls-pki-types = { workspace = true, features = ["web"] }
+tokio-rustls = { workspace = true, features = ["ring"] }
+
 [dev-dependencies]
+# The integration tests drive the TCP listener, whatever features the build as a whole selects.
+surrealdb-mywire = { path = ".", features = ["listener"] }
 bytes = { workspace = true }
 rcgen = { workspace = true }
 surrealdb-core = { workspace = true, features = ["kv-mem"] }
-surrealdb-pgwire = { workspace = true }
+surrealdb-pgwire = { workspace = true, features = ["listener"] }
 tempfile = { workspace = true }
 # The TLS tests install the same process-wide provider the server does.
 tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }

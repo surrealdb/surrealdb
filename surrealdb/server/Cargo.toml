@@ -110,8 +110,8 @@ surrealdb-rpc.workspace = true
 surrealml-core = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["rpc"] }
 surrealdb-types = { workspace = true, features = ["proto"] }
-surrealdb-pgwire = { workspace = true, optional = true }
-surrealdb-mywire = { workspace = true, optional = true }
+surrealdb-pgwire = { workspace = true, optional = true, features = ["listener"] }
+surrealdb-mywire = { workspace = true, optional = true, features = ["listener"] }
 parse-common.workspace = true
 
 # Crates only used by the root surrealdb crate

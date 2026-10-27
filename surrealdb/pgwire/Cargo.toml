@@ -10,8 +10,15 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["listener"]
+# The TCP listener (`start`): needs a native runtime. Without it the crate serves any async byte stream
+# through `serve` and builds for `wasm32-unknown-unknown`.
+listener = ["dep:axum-server", "tokio/net"]
+
 [dependencies]
 surrealdb-catalog = { workspace = true }
+common = { workspace = true }
 surrealdb-core = { workspace = true, features = ["postgres"] }
 surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
@@ -31,13 +38,22 @@ rust_decimal = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
+tokio = { workspace = true, features = ["sync", "io-util", "macros"] }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-axum-server = { workspace = true }
+axum-server = { workspace = true, optional = true }
+
+# TLS on `wasm32-unknown-unknown`: ring is the crypto provider, and it and the certificate time source
+# read the host's JavaScript clock and entropy.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
+rustls-pki-types = { workspace = true, features = ["web"] }
+tokio-rustls = { workspace = true, features = ["ring"] }
 
 [dev-dependencies]
+# The integration tests drive the TCP listener, whatever features the build as a whole selects.
+surrealdb-pgwire = { path = ".", features = ["listener"] }
 surrealdb-core = { workspace = true, features = ["kv-mem", "vector-index"] }
 jsonwebtoken = { workspace = true }
 rcgen = { workspace = true }

@@ -7,25 +7,35 @@
 
 #![recursion_limit = "512"]
 
+use std::future::Future;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::time::Duration;
 
-use anyhow::{Context as _, Result};
-use axum_server::tls_rustls::RustlsConfig;
 use dashmap::DashMap;
 use rand::TryRngCore;
 use rand::rngs::OsRng;
 use surrealdb_core::ctx::CancelHandle;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
-use tokio::time::sleep;
+pub use tokio;
+use tokio::io::{AsyncRead, AsyncWrite};
+pub use tokio_rustls;
 use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::ServerConfig;
+pub use tokio_util;
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "listener")]
+use {
+	anyhow::{Context as _, Result},
+	axum_server::tls_rustls::RustlsConfig,
+	std::path::PathBuf,
+	std::time::Duration,
+	tokio::net::{TcpListener, TcpStream},
+	tokio::sync::Semaphore,
+	tokio::time::sleep,
+	tokio_rustls::rustls::ServerConfig,
+};
 
 #[macro_use]
 extern crate tracing;
@@ -65,13 +75,154 @@ fn next_backend_key() -> (i32, i32) {
 	(pid, secret)
 }
 
+/// A bidirectional byte stream a connection is served over.
+///
+/// On native targets the stream is `Send` and `Sync` so a connection can run on a multi-threaded
+/// runtime; on `wasm32` it need not be, because the host's sockets are bound to one thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Io: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static {
+	/// Resolves when the peer has closed its end of the connection, if that can be seen without
+	/// consuming bytes; the default never resolves. A connection waiting for an advisory lock ends
+	/// the wait when this resolves.
+	fn peer_closed(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		Box::pin(std::future::pending())
+	}
+}
+/// A bidirectional byte stream a connection is served over (single-threaded targets).
+#[cfg(target_arch = "wasm32")]
+pub trait Io: AsyncRead + AsyncWrite + Unpin + 'static {
+	/// Resolves when the peer has closed its end of the connection, if that can be seen without
+	/// consuming bytes; the default never resolves.
+	fn peer_closed(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+		Box::pin(std::future::pending())
+	}
+}
+
+#[cfg(feature = "listener")]
+impl Io for TcpStream {
+	fn peer_closed(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		Box::pin(async move {
+			let mut byte = [0u8; 1];
+			if self.readable().await.is_err() {
+				return;
+			}
+			if matches!(self.peek(&mut byte).await, Ok(read) if read > 0) {
+				std::future::pending::<()>().await;
+			}
+		})
+	}
+}
+
+/// The type-erased stream a connection runs on.
+pub type BoxedIo = Pin<Box<dyn Io>>;
+
+/// The future an [`Authenticator`] returns.
+#[cfg(not(target_arch = "wasm32"))]
+pub type AuthFuture<'a> = Pin<Box<dyn Future<Output = Option<Session>> + Send + 'a>>;
+/// The future an [`Authenticator`] returns (single-threaded targets).
+#[cfg(target_arch = "wasm32")]
+pub type AuthFuture<'a> = Pin<Box<dyn Future<Output = Option<Session>> + 'a>>;
+
+/// What a client presented in the startup exchange.
+pub struct AuthRequest<'a> {
+	/// The user name from the startup packet.
+	pub user: &'a str,
+	/// The password the client sent in clear, which is only asked for over TLS.
+	pub password: &'a str,
+	/// The namespace the startup selected, if any.
+	pub namespace: Option<&'a str>,
+	/// The database the startup selected, if any.
+	pub database: Option<&'a str>,
+}
+
+/// Judges the credentials of a connection in place of the datastore's own users.
+///
+/// `authenticate` receives the session the connection built so far (address and id set, no
+/// authentication) and returns it with the authenticated subject, or `None` to refuse. A connection
+/// with an authenticator asks for a cleartext password and only over TLS, with no loopback
+/// exception, because the authenticator holds no SCRAM verifier.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Authenticator: Send + Sync {
+	fn authenticate<'a>(&'a self, base: &'a Session, request: AuthRequest<'a>) -> AuthFuture<'a>;
+}
+/// Judges the credentials of a connection in place of the datastore's own users (single-threaded
+/// targets).
+#[cfg(target_arch = "wasm32")]
+pub trait Authenticator {
+	fn authenticate<'a>(&'a self, base: &'a Session, request: AuthRequest<'a>) -> AuthFuture<'a>;
+}
+
+/// How the stream a connection is served over begins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+	/// A fresh connection: the client's first packet may be an `SSLRequest`, a `GSSENCRequest`, a
+	/// `CancelRequest` or the startup message.
+	Negotiate,
+	/// The client's `SSLRequest` was already answered `S` before the stream was handed over: the
+	/// next bytes are the TLS `ClientHello`. Requires a TLS acceptor.
+	Tls,
+}
+
+/// State shared by every connection served in one process: the cancellation registry and the
+/// advisory locks.
+#[derive(Default)]
+pub struct Shared {
+	registry: Arc<CancelRegistry>,
+	advisory_locks: Arc<advisory::AdvisoryLocks>,
+}
+
+/// What `serve` needs beyond the stream and the datastore.
+pub struct ServeOptions {
+	/// The client's address, used for the session and for logging.
+	pub peer: SocketAddr,
+	/// The TLS acceptor, or `None` to decline `SSLRequest`.
+	pub tls: Option<Arc<TlsAcceptor>>,
+	/// How the stream begins.
+	pub start: Start,
+	/// Whether the datastore accepts connections.
+	pub ready: Arc<AtomicBool>,
+	/// Closes the connection when cancelled.
+	pub shutdown: CancellationToken,
+	/// Judges credentials; `None` uses the datastore's users.
+	pub authenticator: Option<Arc<dyn Authenticator>>,
+	/// State shared with the other connections of this process.
+	pub shared: Arc<Shared>,
+}
+
+/// Serve one PostgreSQL connection over `stream` until it ends.
+///
+/// The caller owns admission (connection limits) and accepting; this runs the protocol: TLS
+/// negotiation, startup, authentication and the command loop, against `ds`.
+#[tracing::instrument(level = "debug", skip_all, fields(peer = %options.peer))]
+pub async fn serve<S: Io>(stream: S, ds: Arc<Datastore>, options: ServeOptions) {
+	let (pid, secret) = next_backend_key();
+	conn::handle(
+		Box::pin(stream),
+		options.peer,
+		ds,
+		options.ready,
+		options.shutdown,
+		None,
+		Arc::clone(&options.shared.registry),
+		Arc::clone(&options.shared.advisory_locks),
+		pid,
+		secret,
+		options.tls,
+		options.start,
+		options.authenticator,
+	)
+	.await;
+}
+
 /// Upper bound on concurrent Postgres connections, so a flood of clients
 /// cannot spawn unbounded connection tasks. Connections beyond this are
 /// accepted, told the server is full, and closed.
+#[cfg(feature = "listener")]
 const MAX_CONNECTIONS: usize = 1024;
 
 /// The ALPN protocol name PostgreSQL clients offer (libpq 17 and later offer it
 /// on every TLS connection, including one negotiated by `SSLRequest`).
+#[cfg(feature = "listener")]
 const ALPN_POSTGRESQL: &[u8] = b"postgresql";
 
 /// Build the TLS acceptor for the Postgres listener from the server
@@ -84,6 +235,7 @@ const ALPN_POSTGRESQL: &[u8] = b"postgresql";
 /// and later) completes, while a client that offers only other protocols (for
 /// example `h2` or `http/1.1`) is refused. A client that offers no ALPN list
 /// is unaffected.
+#[cfg(feature = "listener")]
 fn postgres_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
 	let mut server = ServerConfig::clone(&config.get_inner());
 	server.alpn_protocols = vec![ALPN_POSTGRESQL.to_vec()];
@@ -96,6 +248,7 @@ fn postgres_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
 /// is unavailable; the accept loop then runs until `shutdown` fires. When a
 /// TLS certificate and key are configured, SSLRequests are accepted and
 /// upgraded; otherwise they are declined and the connection stays plaintext.
+#[cfg(feature = "listener")]
 pub async fn start(
 	addr: SocketAddr,
 	ds: Arc<Datastore>,
@@ -129,6 +282,7 @@ pub async fn start(
 	Ok(bound_addr)
 }
 
+#[cfg(feature = "listener")]
 async fn accept_loop(
 	listener: TcpListener,
 	ds: Arc<Datastore>,
@@ -158,17 +312,19 @@ async fn accept_loop(
 					};
 					let (pid, secret) = next_backend_key();
 					tokio::spawn(conn::handle(
-						stream,
+						Box::pin(stream),
 						peer,
 						Arc::clone(&ds),
 						Arc::clone(&ready),
 						shutdown.clone(),
-						permit,
+						Some(permit),
 						Arc::clone(&registry),
 						Arc::clone(&advisory_locks),
 						pid,
 						secret,
 						acceptor.clone(),
+						Start::Negotiate,
+						None,
 					));
 				}
 				Err(err) => {

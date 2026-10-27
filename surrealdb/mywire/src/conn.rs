@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
+use common::time::timeout;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
@@ -22,25 +23,23 @@ use surrealdb_sqlplan::catalog::MemoryCatalog;
 use surrealdb_sqlplan::dialect::DialectPolicy;
 use surrealdb_sqlplan::observability::global_metrics;
 use tokio::io::{ReadHalf, WriteHalf, split};
-use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
-use tokio::time::timeout;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
-use crate::LOG;
 use crate::auth::*;
 use crate::codec::*;
 use crate::constants::*;
 use crate::msg::*;
 use crate::typing::*;
+use crate::{AuthRequest, Authenticator, BoxedIo, LOG, Start};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
 
-pub(crate) type MyStream = Either<TcpStream, TlsStream<TcpStream>>;
+pub(crate) type MyStream = Either<BoxedIo, TlsStream<BoxedIo>>;
 
 /// State of a prepared statement on this connection.
 #[derive(Debug, Clone)]
@@ -72,7 +71,7 @@ pub struct Connection {
 	transaction: Option<Arc<Transaction>>,
 	savepoints: Vec<String>,
 	autocommit: bool,
-	_permit: OwnedSemaphorePermit,
+	_permit: Option<OwnedSemaphorePermit>,
 	auth_cache: Arc<FastAuthCache>,
 	prepared_statements: HashMap<u32, PreparedStatement>,
 	next_statement_id: u32,
@@ -81,14 +80,16 @@ pub struct Connection {
 /// Handle a single incoming MySQL client connection.
 #[allow(clippy::too_many_arguments)]
 pub async fn handle(
-	stream: TcpStream,
+	stream: BoxedIo,
 	peer: SocketAddr,
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
-	permit: OwnedSemaphorePermit,
+	permit: Option<OwnedSemaphorePermit>,
 	acceptor: Option<Arc<TlsAcceptor>>,
 	auth_cache: Arc<FastAuthCache>,
+	start: Start,
+	authenticator: Option<Arc<dyn Authenticator>>,
 ) {
 	// 1. Check capability: RouteTarget::MySql
 	if !ds.allows_http_route(&RouteTarget::MySql) {
@@ -113,7 +114,18 @@ pub async fn handle(
 	// 3. Run handshake with timeout
 	let conn_res = timeout(
 		STARTUP_TIMEOUT,
-		perform_handshake(stream, peer, ds, ready, shutdown.clone(), permit, acceptor, auth_cache),
+		perform_handshake(
+			stream,
+			peer,
+			ds,
+			ready,
+			shutdown.clone(),
+			permit,
+			acceptor,
+			auth_cache,
+			start,
+			authenticator,
+		),
 	)
 	.await;
 
@@ -149,12 +161,28 @@ fn clean_password(payload: &[u8]) -> String {
 
 async fn verify_credentials(
 	ds: &Datastore,
+	authenticator: Option<&Arc<dyn Authenticator>>,
 	session: &mut Session,
 	username: &str,
 	password: &str,
 	ns_opt: Option<&str>,
 	db_opt: Option<&str>,
 ) -> bool {
+	if let Some(authenticator) = authenticator {
+		let request = AuthRequest {
+			user: username,
+			password,
+			namespace: ns_opt,
+			database: db_opt,
+		};
+		return match authenticator.authenticate(session, request).await {
+			Some(authenticated) => {
+				*session = authenticated;
+				true
+			}
+			None => false,
+		};
+	}
 	if let (Some(ns), Some(db)) = (ns_opt, db_opt)
 		&& basic(ds, session, username, password, Some(ns), Some(db)).await.is_ok()
 	{
@@ -175,7 +203,7 @@ async fn verify_fast_auth_entry(
 	db_opt: Option<&str>,
 ) -> bool {
 	if let Some(ref password) = cached.password {
-		if verify_credentials(ds, session, &cached.username, password, ns_opt, db_opt).await {
+		if verify_credentials(ds, None, session, &cached.username, password, ns_opt, db_opt).await {
 			auth_cache.insert(
 				&cached.username,
 				password,
@@ -201,17 +229,34 @@ async fn verify_fast_auth_entry(
 
 #[allow(clippy::too_many_arguments)]
 async fn perform_handshake(
-	mut stream: TcpStream,
+	mut stream: BoxedIo,
 	peer: SocketAddr,
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
-	permit: OwnedSemaphorePermit,
+	permit: Option<OwnedSemaphorePermit>,
 	acceptor: Option<Arc<TlsAcceptor>>,
 	auth_cache: Arc<FastAuthCache>,
+	start: Start,
+	authenticator: Option<Arc<dyn Authenticator>>,
 ) -> Result<Option<Connection>> {
-	let connection_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
-	let auth_salt = generate_auth_salt();
+	// A greeting sent elsewhere carries a nonce the server did not pick, so scramble-based
+	// authentication against it would rest on a static salt: only an external authenticator, which
+	// asks for the password in clear over TLS, may take such a connection.
+	if matches!(start, Start::Greeted { .. }) && authenticator.is_none() {
+		anyhow::bail!(
+			"a connection handed over after its greeting needs an external authenticator"
+		);
+	}
+	let (connection_id, auth_salt) = match start {
+		Start::Greet => (NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed), generate_auth_salt()),
+		// The greeting was sent before the stream was handed over; the salt is not needed because a
+		// connection with an authenticator only authenticates by full (cleartext, over TLS)
+		// exchange.
+		Start::Greeted {
+			connection_id,
+		} => (connection_id, crate::GREETING_NONCE),
+	};
 
 	let server_capabilities = if acceptor.is_some() {
 		DEFAULT_SERVER_CAPABILITIES | CLIENT_SSL
@@ -230,7 +275,7 @@ async fn perform_handshake(
 		auth_plugin_name: AUTH_PLUGIN_CACHING_SHA2_PASSWORD.to_string(),
 	};
 
-	{
+	if matches!(start, Start::Greet) {
 		let mut writer = PacketWriter::new(&mut stream);
 		writer.write_packet(0, &handshake.serialize()).await?;
 	}
@@ -289,7 +334,8 @@ async fn perform_handshake(
 		..Default::default()
 	};
 
-	let is_secure = is_tls || peer.ip().is_loopback();
+	let is_secure = is_tls || (authenticator.is_none() && peer.ip().is_loopback());
+	let external = authenticator.is_some();
 
 	// Parse namespace/database from response.database if present
 	let (ns_opt, db_opt) = match response.database.as_deref() {
@@ -309,6 +355,11 @@ async fn perform_handshake(
 
 	if username.is_empty() {
 		// Guest
+		if external {
+			let err = ErrPacket::access_denied("Access denied for user ''".to_string());
+			let _ = writer.write_packet(cur_seq, &err.serialize()).await;
+			return Ok(None);
+		}
 		if !ds.allows_query_by_subject(session.au.as_ref()) {
 			let err = ErrPacket::access_denied("Access denied for user ''".to_string());
 			let _ = writer.write_packet(cur_seq, &err.serialize()).await;
@@ -319,6 +370,7 @@ async fn perform_handshake(
 	} else if client_plugin == AUTH_PLUGIN_CACHING_SHA2_PASSWORD {
 		let mut fast_auth_succeeded = false;
 		if response.auth_response.len() == 32
+			&& !external
 			&& let Some(cached) = auth_cache.get(&username)
 			&& verify_caching_sha2_password_fast_auth(
 				&response.auth_response,
@@ -361,8 +413,16 @@ async fn perform_handshake(
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
-			let ok =
-				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
+			let ok = verify_credentials(
+				&ds,
+				authenticator.as_ref(),
+				&mut session,
+				&username,
+				&password,
+				ns_opt,
+				db_opt,
+			)
+			.await;
 
 			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
@@ -371,14 +431,17 @@ async fn perform_handshake(
 				return Ok(None);
 			}
 
-			auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			if !external {
+				auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			}
 
 			let ok = OkPacket::new(0, 0);
 			writer.write_packet(cur_seq, &ok.serialize()).await?;
 		}
-	} else if client_plugin == AUTH_PLUGIN_MYSQL_NATIVE_PASSWORD {
+	} else if client_plugin == AUTH_PLUGIN_MYSQL_NATIVE_PASSWORD && !external {
 		let mut fast_auth_succeeded = false;
 		if response.auth_response.len() == 20
+			&& !external
 			&& let Some(cached) = auth_cache.get(&username)
 			&& verify_mysql_native_password_fast_auth(
 				&response.auth_response,
@@ -417,8 +480,16 @@ async fn perform_handshake(
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
-			let ok =
-				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
+			let ok = verify_credentials(
+				&ds,
+				authenticator.as_ref(),
+				&mut session,
+				&username,
+				&password,
+				ns_opt,
+				db_opt,
+			)
+			.await;
 
 			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
@@ -427,7 +498,9 @@ async fn perform_handshake(
 				return Ok(None);
 			}
 
-			auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			if !external {
+				auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			}
 
 			let ok = OkPacket::new(0, 0);
 			writer.write_packet(cur_seq, &ok.serialize()).await?;
@@ -454,14 +527,25 @@ async fn perform_handshake(
 			clean_password(&pass_payload)
 		};
 
-		let ok = verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
+		let ok = verify_credentials(
+			&ds,
+			authenticator.as_ref(),
+			&mut session,
+			&username,
+			&password,
+			ns_opt,
+			db_opt,
+		)
+		.await;
 		if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 			let err = ErrPacket::access_denied(format!("Access denied for user '{}'", username));
 			let _ = writer.write_packet(cur_seq, &err.serialize()).await;
 			return Ok(None);
 		}
 
-		auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+		if !external {
+			auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+		}
 		let ok = OkPacket::new(0, 0);
 		writer.write_packet(cur_seq, &ok.serialize()).await?;
 	} else {
@@ -474,6 +558,7 @@ async fn perform_handshake(
 
 		let mut fast_auth_succeeded = false;
 		if switch_resp.len() == 32
+			&& !external
 			&& let Some(cached) = auth_cache.get(&username)
 			&& verify_caching_sha2_password_fast_auth(&switch_resp, &auth_salt, &cached.sha2_stage2)
 		{
@@ -513,8 +598,16 @@ async fn perform_handshake(
 			cur_seq = resp_seq.wrapping_add(1);
 
 			let password = clean_password(&pass_payload);
-			let ok =
-				verify_credentials(&ds, &mut session, &username, &password, ns_opt, db_opt).await;
+			let ok = verify_credentials(
+				&ds,
+				authenticator.as_ref(),
+				&mut session,
+				&username,
+				&password,
+				ns_opt,
+				db_opt,
+			)
+			.await;
 
 			if !ok || !ds.allows_query_by_subject(session.au.as_ref()) {
 				let err =
@@ -523,7 +616,9 @@ async fn perform_handshake(
 				return Ok(None);
 			}
 
-			auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			if !external {
+				auth_cache.insert(&username, &password, Some(Arc::clone(&session.au)), session.exp);
+			}
 			let ok = OkPacket::new(0, 0);
 			writer.write_packet(cur_seq, &ok.serialize()).await?;
 		}

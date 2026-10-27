@@ -276,6 +276,7 @@ fn put_cstr(buf: &mut BytesMut, s: &str) {
 	buf.put_u8(0);
 }
 
+#[cfg(feature = "listener")]
 pub(super) fn write_ssl_response(buf: &mut BytesMut, accept: bool) {
 	buf.put_u8(if accept {
 		b'S'

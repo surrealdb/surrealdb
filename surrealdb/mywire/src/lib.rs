@@ -8,21 +8,29 @@
 #[macro_use]
 extern crate tracing;
 
+use std::future::Future;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 
-use anyhow::{Context as _, Result};
-use axum_server::tls_rustls::RustlsConfig;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
-use tokio::time::sleep;
+use tokio::io::{AsyncRead, AsyncWrite};
+pub use tokio_rustls;
 use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "listener")]
+use {
+	anyhow::{Context as _, Result},
+	axum_server::tls_rustls::RustlsConfig,
+	std::path::PathBuf,
+	std::time::Duration,
+	tokio::net::{TcpListener, TcpStream},
+	tokio::sync::Semaphore,
+	tokio::time::sleep,
+	tokio_rustls::rustls::ServerConfig,
+};
 
 pub mod auth;
 pub mod codec;
@@ -38,6 +46,136 @@ pub use conn::Connection;
 pub use query::translate_query;
 
 pub const LOG: &str = "surrealdb::mywire";
+
+/// A bidirectional byte stream a connection is served over.
+///
+/// On native targets the stream is `Send` so a connection can run on a multi-threaded runtime; on
+/// `wasm32` it need not be, because the host's sockets are bound to one thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Io: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static {}
+/// A bidirectional byte stream a connection is served over (single-threaded targets).
+#[cfg(target_arch = "wasm32")]
+pub trait Io: AsyncRead + AsyncWrite + Unpin + 'static {}
+
+#[cfg(feature = "listener")]
+impl Io for TcpStream {}
+
+/// The type-erased stream a connection runs on.
+pub type BoxedIo = Pin<Box<dyn Io>>;
+
+/// The future an [`Authenticator`] returns.
+#[cfg(not(target_arch = "wasm32"))]
+pub type AuthFuture<'a> = Pin<Box<dyn Future<Output = Option<Session>> + Send + 'a>>;
+/// The future an [`Authenticator`] returns (single-threaded targets).
+#[cfg(target_arch = "wasm32")]
+pub type AuthFuture<'a> = Pin<Box<dyn Future<Output = Option<Session>> + 'a>>;
+
+/// What a client presented in the authentication exchange.
+pub struct AuthRequest<'a> {
+	/// The user name from the handshake response.
+	pub user: &'a str,
+	/// The password the client sent in clear, which is only asked for over TLS.
+	pub password: &'a str,
+	/// The namespace the handshake selected, if any.
+	pub namespace: Option<&'a str>,
+	/// The database the handshake selected, if any.
+	pub database: Option<&'a str>,
+}
+
+/// Judges the credentials of a connection in place of the datastore's own users.
+///
+/// `authenticate` receives the session the connection built so far (address and id set, no
+/// authentication) and returns it with the authenticated subject, or `None` to refuse. A connection
+/// with an authenticator authenticates only by the full exchange, with the password sent in clear
+/// over TLS (`caching_sha2_password` full authentication, or `mysql_clear_password`), accepts no
+/// loopback exception, never consults or fills the fast-authentication cache, and refuses the
+/// anonymous user.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Authenticator: Send + Sync {
+	fn authenticate<'a>(&'a self, base: &'a Session, request: AuthRequest<'a>) -> AuthFuture<'a>;
+}
+/// Judges the credentials of a connection in place of the datastore's own users (single-threaded
+/// targets).
+#[cfg(target_arch = "wasm32")]
+pub trait Authenticator {
+	fn authenticate<'a>(&'a self, base: &'a Session, request: AuthRequest<'a>) -> AuthFuture<'a>;
+}
+
+/// How the stream a connection is served over begins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Start {
+	/// A fresh connection: the server sends the initial handshake packet.
+	Greet,
+	/// The initial handshake packet was already sent, with this connection id, before the stream
+	/// was handed over; the next bytes are the client's first response (usually an `SSLRequest`).
+	Greeted {
+		connection_id: u32,
+	},
+}
+
+/// What `serve` needs beyond the stream and the datastore.
+pub struct ServeOptions {
+	/// The client's address, used for the session and for logging.
+	pub peer: SocketAddr,
+	/// The TLS acceptor, or `None` to refuse `SSLRequest`.
+	pub tls: Option<Arc<TlsAcceptor>>,
+	/// How the stream begins.
+	pub start: Start,
+	/// Whether the datastore accepts connections.
+	pub ready: Arc<AtomicBool>,
+	/// Closes the connection when cancelled.
+	pub shutdown: CancellationToken,
+	/// Judges credentials; `None` uses the datastore's users.
+	pub authenticator: Option<Arc<dyn Authenticator>>,
+}
+
+/// The authentication nonce of a greeting built by [`greeting_packet`]. A connection handed over
+/// with [`Start::Greeted`] never verifies a scramble against it, so it carries no secret.
+pub const GREETING_NONCE: [u8; 20] = *b"earth-sql-greeting-1";
+
+/// The initial handshake packet, header included (sequence 0), that a front end sends to the client
+/// before handing the connection over with [`Start::Greeted`]. It advertises TLS support, so the
+/// client answers with an `SSLRequest`.
+pub fn greeting_packet(connection_id: u32) -> Vec<u8> {
+	let handshake = msg::HandshakeV10 {
+		server_version: surrealdb_sqlplan::MYSQL_SERVER_VERSION.to_string(),
+		connection_id,
+		auth_plugin_data: GREETING_NONCE,
+		capabilities: constants::DEFAULT_SERVER_CAPABILITIES | constants::CLIENT_SSL,
+		character_set: constants::CHARSET_UTF8MB4_GENERAL_CI as u8,
+		status_flags: constants::SERVER_STATUS_AUTOCOMMIT,
+		auth_plugin_name: auth::AUTH_PLUGIN_CACHING_SHA2_PASSWORD.to_string(),
+	};
+	let payload = handshake.serialize();
+	let mut packet = Vec::with_capacity(payload.len() + 4);
+	packet.extend_from_slice(&(payload.len() as u32).to_le_bytes()[..3]);
+	packet.push(0);
+	packet.extend_from_slice(&payload);
+	packet
+}
+
+/// Serve one MySQL connection over `stream` until it ends.
+///
+/// The caller owns admission (connection limits) and accepting; this runs the protocol: handshake,
+/// TLS upgrade, authentication and the command loop, against `ds`.
+#[tracing::instrument(level = "debug", skip_all, fields(peer = %options.peer))]
+pub async fn serve<S: Io>(stream: S, ds: Arc<Datastore>, options: ServeOptions) {
+	conn::handle(
+		Box::pin(stream),
+		options.peer,
+		ds,
+		options.ready,
+		options.shutdown,
+		None,
+		options.tls,
+		Arc::new(auth::FastAuthCache::new()),
+		options.start,
+		options.authenticator,
+	)
+	.await;
+}
+
+#[cfg(feature = "listener")]
 const MAX_CONNECTIONS: usize = 1024;
 
 /// Build the TLS acceptor for the MySQL listener from the server certificate
@@ -48,6 +186,7 @@ const MAX_CONNECTIONS: usize = 1024;
 /// protocols aborts the handshake with `no_application_protocol` when the
 /// client offers a list sharing none of them; with an empty list the client's
 /// ALPN offer is ignored and the handshake completes with no protocol selected.
+#[cfg(feature = "listener")]
 fn mysql_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
 	let mut server = ServerConfig::clone(&config.get_inner());
 	server.alpn_protocols.clear();
@@ -58,6 +197,7 @@ fn mysql_tls_acceptor(config: &RustlsConfig) -> TlsAcceptor {
 ///
 /// Binding happens before returning so startup fails loudly if the address
 /// is unavailable; the accept loop then runs until `shutdown` fires.
+#[cfg(feature = "listener")]
 pub async fn start(
 	addr: SocketAddr,
 	ds: Arc<Datastore>,
@@ -70,6 +210,7 @@ pub async fn start(
 }
 
 /// Bind the MySQL wire protocol listener with a custom connection limit.
+#[cfg(feature = "listener")]
 pub async fn start_with_max_connections(
 	addr: SocketAddr,
 	ds: Arc<Datastore>,
@@ -142,14 +283,16 @@ pub async fn start_with_max_connections(
 							tokio::spawn(async move {
 								debug!(target: LOG, "Accepted MySQL connection from {peer}");
 								conn::handle(
-									stream,
+									Box::pin(stream),
 									peer,
 									conn_ds,
 									conn_ready,
 									conn_shutdown,
-									permit,
+									Some(permit),
 									conn_acceptor,
 									conn_auth_cache,
+									Start::Greet,
+									None,
 								)
 								.await;
 							});

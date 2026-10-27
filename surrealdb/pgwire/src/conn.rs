@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use bytes::BytesMut;
+use common::time::timeout;
 use surrealdb_catalog::providers::DatabaseProvider;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
@@ -35,9 +36,9 @@ use surrealdb_sqlplan::{
 };
 use surrealdb_types::{RecordIdKey, SurrealValue, ToSql, Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(feature = "listener")]
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
-use tokio::time::timeout;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 use tokio_util::either::Either;
@@ -57,12 +58,12 @@ use super::typing::{
 	PgColumn, PgType, ResultShape, shape_result, shape_result_declared, shape_result_jsonb,
 	shape_result_with_descriptor,
 };
-use super::{CancelRegistry, LOG, encode, sasl};
+use super::{AuthRequest, Authenticator, BoxedIo, CancelRegistry, LOG, Start, encode, sasl};
 
 /// A client connection stream: plaintext, or upgraded to TLS after an accepted
 /// SSLRequest. `Either` forwards `AsyncRead`/`AsyncWrite` to whichever it is,
 /// so the rest of the connection code is transport-agnostic.
-type PgStream = Either<TcpStream, TlsStream<TcpStream>>;
+type PgStream = Either<BoxedIo, TlsStream<BoxedIo>>;
 
 /// Result-format codes are jsonb-single-column for driver-prepared statements
 /// and typed for portal-described flows. `PROTOCOL 3.0` binary result flag.
@@ -336,17 +337,19 @@ const MAX_AUTH_MESSAGE_SIZE: usize = 4096;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle(
-	stream: TcpStream,
+	stream: BoxedIo,
 	peer: SocketAddr,
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
-	permit: OwnedSemaphorePermit,
+	permit: Option<OwnedSemaphorePermit>,
 	registry: Arc<CancelRegistry>,
 	advisory_locks: Arc<AdvisoryLocks>,
 	pid: i32,
 	secret: i32,
 	acceptor: Option<Arc<TlsAcceptor>>,
+	start: Start,
+	authenticator: Option<Arc<dyn Authenticator>>,
 ) {
 	let cancel = CancelHandle::new();
 	registry.insert((pid, secret), cancel.clone());
@@ -355,9 +358,11 @@ pub(super) async fn handle(
 	// Bound the whole negotiation (reads + TLS handshake) by the startup
 	// deadline so an unauthenticated peer cannot hold a connection permit
 	// open indefinitely (slow-loris).
-	let negotiated =
-		timeout(STARTUP_TIMEOUT, negotiate_tls(stream, acceptor.as_deref(), &registry, &shutdown))
-			.await;
+	let negotiated = timeout(
+		STARTUP_TIMEOUT,
+		negotiate_tls(stream, acceptor.as_deref(), start, &registry, &shutdown),
+	)
+	.await;
 	let Some((stream, prelude)) = negotiated.ok().flatten() else {
 		registry.remove(&(pid, secret));
 		return;
@@ -390,6 +395,7 @@ pub(super) async fn handle(
 		secret,
 		advisory: AdvisorySession::new(advisory_locks, pid),
 		_permit: permit,
+		authenticator,
 	};
 	if let Err(err) = conn.run().await {
 		debug!(target: LOG, "postgres connection from {peer} ended: {err}");
@@ -409,11 +415,24 @@ pub(super) async fn handle(
 /// encrypted stream so the prelude is `None`. Returns `None` to close (a
 /// CancelRequest, a declined-then-abandoned handshake, or an I/O error).
 async fn negotiate_tls(
-	mut tcp: TcpStream,
+	mut tcp: BoxedIo,
 	acceptor: Option<&TlsAcceptor>,
+	start: Start,
 	registry: &CancelRegistry,
 	shutdown: &CancellationToken,
 ) -> Option<(PgStream, Option<Vec<u8>>)> {
+	if start == Start::Tls {
+		// The SSLRequest was answered before this connection was handed over: the TLS handshake
+		// is the next thing on the stream.
+		let acceptor = acceptor?;
+		return match acceptor.accept(tcp).await {
+			Ok(tls) => Some((Either::Right(tls), None)),
+			Err(err) => {
+				debug!(target: LOG, "postgres TLS handshake failed: {err}");
+				None
+			}
+		};
+	}
 	loop {
 		let payload = read_startup_packet_raw(&mut tcp, shutdown).await?;
 		match msg::parse_startup(&payload) {
@@ -452,7 +471,7 @@ async fn negotiate_tls(
 /// Read one startup-phase packet's payload from a raw stream (length prefix
 /// consumed). Returns `None` on shutdown, clean disconnect, or a bad length.
 async fn read_startup_packet_raw(
-	tcp: &mut TcpStream,
+	tcp: &mut BoxedIo,
 	shutdown: &CancellationToken,
 ) -> Option<Vec<u8>> {
 	let len = tokio::select! {
@@ -482,10 +501,12 @@ where
 
 /// Complete just enough of the handshake to tell an over-the-limit client the
 /// server is full, then close. Runs without a connection permit.
+#[cfg(feature = "listener")]
 pub(super) async fn reject_overloaded(mut stream: TcpStream) {
 	let _ = reject_overloaded_inner(&mut stream).await;
 }
 
+#[cfg(feature = "listener")]
 async fn reject_overloaded_inner(stream: &mut TcpStream) -> Result<()> {
 	// Answer SSL/GSS probes with 'N' until the startup packet arrives, so the
 	// client reaches the point where an ErrorResponse is understood.
@@ -563,7 +584,9 @@ struct Connection {
 	/// The advisory locks this connection holds, released when it ends.
 	advisory: AdvisorySession,
 	/// Held for the connection's lifetime to bound concurrent connections.
-	_permit: OwnedSemaphorePermit,
+	_permit: Option<OwnedSemaphorePermit>,
+	/// Judges credentials in place of the datastore's own users; `None` uses the datastore.
+	authenticator: Option<Arc<dyn Authenticator>>,
 }
 
 impl Connection {
@@ -715,30 +738,42 @@ impl Connection {
 		self.session = Session::default();
 		self.session.ip = Some(self.peer.ip().to_string());
 		self.session.id = Some(uuid::Uuid::new_v4());
-		if !self.ds.is_auth_enabled() {
+		if !self.ds.is_auth_enabled() && self.authenticator.is_none() {
 			self.session.au =
 				Arc::new(Auth::new(Actor::new(user.clone(), vec![Role::Owner], Level::Root)));
 		}
-		if self.ds.is_auth_enabled() {
+		if self.ds.is_auth_enabled() || self.authenticator.is_some() {
 			// Prefer SASL/SCRAM-SHA-256 when the target user has SCRAM verifier
 			// material; fall back to cleartext-password (over TLS) for users
 			// that only carry a legacy Argon2 hash.
-			let scram =
-				match verify::scram_lookup(&self.ds, &user, ns.as_deref(), db.as_deref()).await {
-					Ok(scram) => scram,
-					Err(err) => {
-						// A lookup failure is not disclosed to the client; it is
-						// reported as a generic authentication failure.
-						debug!(target: LOG, "postgres SCRAM lookup failed for user '{user}': {err}");
-						self.report(&auth_failed(&user)).await?;
-						return Ok(false);
-					}
-				};
+			// An external authenticator holds no SCRAM verifier, so the password is asked for in
+			// cleartext, over TLS only.
+			let scram: Result<Option<ScramAuth>> = if self.authenticator.is_some() {
+				Ok(None)
+			} else {
+				verify::scram_lookup(&self.ds, &user, ns.as_deref(), db.as_deref()).await
+			};
+			let scram = match scram {
+				Ok(scram) => scram,
+				Err(err) => {
+					// A lookup failure is not disclosed to the client; it is
+					// reported as a generic authentication failure.
+					debug!(target: LOG, "postgres SCRAM lookup failed for user '{user}': {err}");
+					self.report(&auth_failed(&user)).await?;
+					return Ok(false);
+				}
+			};
 			let authenticated = match scram {
 				Some(scram) => self.authenticate_scram(&user, &scram).await?,
 				None => {
-					if self.is_tls() || self.peer.ip().is_loopback() {
+					if self.is_tls()
+						|| (self.authenticator.is_none() && self.peer.ip().is_loopback())
+					{
 						self.authenticate_cleartext(&user, ns.as_deref(), db.as_deref()).await?
+					} else if self.authenticator.is_some() {
+						// A cleartext password is never solicited outside TLS.
+						self.report(&auth_failed(&user)).await?;
+						false
 					} else {
 						self.authenticate_scram_mock(&user).await?
 					}
@@ -829,6 +864,24 @@ impl Connection {
 		db: Option<&str>,
 	) -> bool {
 		let clean_session = self.session.clone();
+		if let Some(authenticator) = self.authenticator.clone() {
+			let request = AuthRequest {
+				user,
+				password: pass,
+				namespace: ns,
+				database: db,
+			};
+			return match authenticator.authenticate(&clean_session, request).await {
+				Some(session) => {
+					self.session = session;
+					true
+				}
+				None => {
+					debug!(target: LOG, "postgres authentication failed for user '{user}'");
+					false
+				}
+			};
+		}
 		if let (Some(ns), Some(db)) = (ns, db) {
 			let mut sess = clean_session.clone();
 			if basic(&self.ds, &mut sess, user, pass, Some(ns), Some(db)).await.is_ok() {
@@ -876,7 +929,7 @@ impl Connection {
 		// Never ask for a cleartext password over an unencrypted connection (except loopback for
 		// local dev/testing). Report the standard generic authentication failure to avoid user
 		// enumeration.
-		if !self.is_tls() && !self.peer.ip().is_loopback() {
+		if !self.is_tls() && (self.authenticator.is_some() || !self.peer.ip().is_loopback()) {
 			self.report(&auth_failed(user)).await?;
 			return Ok(false);
 		}
@@ -4497,16 +4550,9 @@ fn advisory_key(call: &AdvisoryCall, vars: &Variables) -> Result<Option<Advisory
 /// seen before any further bytes: a client that has already sent its next message cannot be told
 /// from one that has gone, so the wait for a lock does not end for it.
 async fn peer_closed(stream: &PgStream) {
-	let tcp = match stream {
-		Either::Left(tcp) => tcp,
-		Either::Right(tls) => tls.get_ref().0,
-	};
-	let mut byte = [0u8; 1];
-	if tcp.readable().await.is_err() {
-		return;
-	}
-	if matches!(tcp.peek(&mut byte).await, Ok(read) if read > 0) {
-		std::future::pending::<()>().await;
+	match stream {
+		Either::Left(io) => io.as_ref().peer_closed().await,
+		Either::Right(tls) => tls.get_ref().0.as_ref().peer_closed().await,
 	}
 }
 
