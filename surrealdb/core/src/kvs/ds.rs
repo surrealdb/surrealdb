@@ -10320,11 +10320,17 @@ impl Datastore {
 			QuerySource::Text {
 				text,
 				dialect: Dialect::PgSql,
-			} => return self.parse_pgsql(text),
+			} => {
+				self.check_sql_dialect(Dialect::PgSql)?;
+				return self.parse_pgsql(text);
+			}
 			QuerySource::Text {
 				text,
 				dialect: Dialect::MySql,
-			} => return self.parse_mysql(text),
+			} => {
+				self.check_sql_dialect(Dialect::MySql)?;
+				return self.parse_mysql(text);
+			}
 			QuerySource::Ast(ast) => ast,
 			QuerySource::Plan(plans) => return Ok(planned(plans)),
 		};
@@ -10389,6 +10395,7 @@ impl Datastore {
 		session: &Session,
 		transaction: Option<&Arc<Transaction>>,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		self.check_sql_dialect(Dialect::PgSql)?;
 		let stmts =
 			crate::pgsql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
 		let capabilities = self.capabilities.load();
@@ -10421,6 +10428,7 @@ impl Datastore {
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
 		use surrealdb_mysql::ast::stmt::Statement;
 
+		self.check_sql_dialect(Dialect::MySql)?;
 		let stmts =
 			crate::mysql::parse(text).map_err(|e| TypesError::validation(e.to_string(), None))?;
 		let capabilities = self.capabilities.load();
@@ -10853,6 +10861,24 @@ impl Datastore {
 		Err(TypesError::configuration(
 			"This build does not support PostgreSQL queries".to_string(),
 			surrealdb_types::ConfigurationError::DialectNotSupported,
+		))
+	}
+
+	/// Refuse PostgreSQL or MySQL query text when the datastore's capabilities
+	/// deny the `postgres` or `mysql` route target. Evaluated on every query, so
+	/// a capability swap applies to connections that already chose the dialect.
+	fn check_sql_dialect(&self, dialect: Dialect) -> std::result::Result<(), TypesError> {
+		let (target, name) = match dialect {
+			Dialect::PgSql => (RouteTarget::Postgres, "PostgreSQL"),
+			Dialect::MySql => (RouteTarget::MySql, "MySQL"),
+			Dialect::SurrealQl | Dialect::Gql => return Ok(()),
+		};
+		if self.capabilities.load().allows_http_route(&target) {
+			return Ok(());
+		}
+		Err(TypesError::not_allowed(
+			format!("The {name} dialect is not allowed on this server"),
+			None::<surrealdb_types::NotAllowedError>,
 		))
 	}
 
@@ -12505,6 +12531,32 @@ pub(crate) mod test {
 		let err =
 			ds.run(QueryRequest::new(QuerySource::gql("MATCH RETURN"), &ses)).await.unwrap_err();
 		assert!(!err.to_string().contains("experimental"), "unexpected error: {err}");
+		Ok(())
+	}
+
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn denied_sql_dialects_are_refused_per_query() -> Result<()> {
+		use crate::dbs::capabilities::Targets;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().without_http_routes(Targets::Some(
+				[RouteTarget::Postgres, RouteTarget::MySql].into(),
+			)))
+			.build_with_path("memory")
+			.await?;
+		let sources = [
+			#[cfg(feature = "postgres")]
+			QuerySource::pgsql("SELECT 1"),
+			#[cfg(feature = "mysql")]
+			QuerySource::mysql("SELECT 1"),
+		];
+		for source in sources {
+			let err = ds.run(QueryRequest::new(source, &ses)).await.unwrap_err();
+			assert!(err.to_string().contains("not allowed"), "unexpected error: {err}");
+		}
+		let mut res = ds.run(QueryRequest::new(QuerySource::text("RETURN 1"), &ses)).await?;
+		assert_eq!(res.remove(0).result?, PublicValue::Number(surrealdb_types::Number::Int(1)));
 		Ok(())
 	}
 

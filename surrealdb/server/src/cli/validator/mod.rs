@@ -319,6 +319,12 @@ mod tests {
 			Targets::<RouteTarget>::Some(vec!["key".parse().unwrap()].into_iter().collect())
 		);
 		assert_eq!(
+			route_targets("postgres,mysql").unwrap(),
+			Targets::<RouteTarget>::Some(
+				vec![RouteTarget::Postgres, RouteTarget::MySql].into_iter().collect()
+			)
+		);
+		assert_eq!(
 			route_targets("key,sql").unwrap(),
 			Targets::<RouteTarget>::Some(
 				vec!["key".parse().unwrap(), "sql".parse().unwrap()].into_iter().collect()

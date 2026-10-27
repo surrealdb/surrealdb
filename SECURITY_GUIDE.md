@@ -2309,7 +2309,7 @@ Flag when changes touch:
 
 ### Invariants
 
-- **Capability Gating**: The wire protocol listeners (`pgwire` on port 5432 / `--pg-bind`, `mywire` on port 3306 / `--mysql-bind`) are capability-gated via `RouteTarget::Postgres` and `RouteTarget::MySql`. If disabled by capabilities, incoming connections are rejected immediately with an authentication error packet (`28000` / 1045) before any query processing.
+- **Capability Gating**: The wire protocol listeners (`pgwire` on port 5432 / `--postgres-bind`, `mywire` on port 3306 / `--mysql-bind`) are capability-gated via `RouteTarget::Postgres` and `RouteTarget::MySql`. If disabled by capabilities, incoming connections are rejected immediately with an authentication error packet (`28000` / 1045) before any query processing.
 - **Readiness Gating**: Incoming connections check datastore readiness (`ready.load(Ordering::SeqCst)`). If the database is still starting up, connections are rejected with code `08S01`.
 - **Authentication**:
   - `pgwire` authenticates clients via SASL SCRAM-SHA-256 or cleartext password over TLS/loopback against `surrealdb-iam` basic auth.

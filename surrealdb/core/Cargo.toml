@@ -30,6 +30,8 @@ default = [
     "regex-unicode",
     "graphql",
     "gql",
+    "postgres",
+    "mysql",
     "crypto-digest",
     "crypto-password",
     "html-sanitize",

@@ -238,13 +238,13 @@ pub struct StartCommandArguments {
 	//
 	// Postgres server
 	#[arg(
-		help = "The hostname or IP address to listen for Postgres wire protocol connections on",
+		help = "The hostname or IP address to listen for Postgres wire protocol connections on. No port is opened unless set. Deny the `postgres` route with --deny-http to refuse connections and PostgreSQL queries",
 		help_heading = "Postgres server"
 	)]
 	#[arg(env = "SURREAL_POSTGRES_BIND", long = "postgres-bind")]
 	postgres_bind: Option<SocketAddr>,
 	#[arg(
-		help = "The hostname or IP address to listen for MySQL wire protocol connections on",
+		help = "The hostname or IP address to listen for MySQL wire protocol connections on. No port is opened unless set. Deny the `mysql` route with --deny-http to refuse connections and MySQL queries",
 		help_heading = "MySQL server"
 	)]
 	#[arg(env = "SURREAL_MYSQL_BIND", long = "mysql-bind")]
