@@ -921,21 +921,12 @@ async fn live_field_select_permission_reads_computed_fields() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
 	use futures::StreamExt;
-	use surrealdb_core::kvs::Datastore;
-	use surrealdb_rpc::capabilities::Capabilities;
 
 	const ROUNDS: usize = 20;
 	const PER_ROUND: usize = 30;
 
-	let (send, _recv) = surrealdb_core::channel::bounded(1000);
 	let dir = temp_dir::TempDir::new()?;
-	let ds = Datastore::builder()
-		.without_maintenance_tasks()
-		.with_capabilities(Capabilities::all())
-		.with_notify(send)
-		.build_with_path(&format!("surrealkv://{}", dir.path().display()))
-		.await?;
-	crate::helpers::new_ns_db(&ds, "test", "test").await?;
+	let ds = surrealkv_ds_with(&dir, false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 	for round in 0..ROUNDS {
