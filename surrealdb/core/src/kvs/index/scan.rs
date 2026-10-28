@@ -168,37 +168,47 @@ impl Building {
 			// before an error is reported, so no batch commits after it.
 			let mut indexed = 0;
 			let mut aborted = false;
-			let mut failure = read_failure;
+			let mut task_failure = None;
 			for task in round {
 				match task.await {
 					Ok(Ok(BatchOutcome::Indexed(n))) => indexed += n,
 					Ok(Ok(BatchOutcome::Aborted)) => aborted = true,
 					Ok(Err(err)) => {
 						self.abort();
-						failure.get_or_insert(err);
+						task_failure.get_or_insert(err);
 					}
 					Err(err) => {
 						self.abort();
-						failure.get_or_insert(anyhow::anyhow!(
+						task_failure.get_or_insert(anyhow::anyhow!(
 							"an index build scan task failed: {err}"
 						));
 					}
 				}
 			}
-			if let Some(err) = failure {
-				return Err(err);
+			if let Some(err) = task_failure {
+				return Err(read_failure.unwrap_or(err));
 			}
 			if aborted || self.is_aborted().await {
 				return Ok(false);
 			}
-			let Some(last_key) = last_key else {
-				break;
-			};
-			let cursor = RecordKey::decode_key(&last_key)?.id.into_owned();
-			if !self.checkpoint_round(generation, &cursor, *initial_count + indexed).await? {
-				return Ok(false);
+			// The batches the round started were read in key order and all
+			// committed, so the checkpoint moves past them even when the round
+			// ended early: a pass that spent its budget, or met the memory
+			// threshold, hands the build back with them kept, and the next owner
+			// resumes after them instead of wiping the index and rescanning.
+			if let Some(last_key) = &last_key {
+				let cursor = RecordKey::decode_key(last_key)?.id.into_owned();
+				if !self.checkpoint_round(generation, &cursor, *initial_count + indexed).await? {
+					return Ok(false);
+				}
+				*initial_count += indexed;
 			}
-			*initial_count += indexed;
+			if let Some(err) = read_failure {
+				return Err(err);
+			}
+			if last_key.is_none() {
+				break;
+			}
 		}
 		Ok(!self.is_aborted().await)
 	}

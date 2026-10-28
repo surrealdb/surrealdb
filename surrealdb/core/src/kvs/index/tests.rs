@@ -23307,6 +23307,41 @@ async fn a_pass_stopped_after_any_batch_resumes() -> Result<()> {
 	Ok(())
 }
 
+/// A pass over a parallel initial scan that spends its budget part-way through a round keeps the
+/// batches of that round that committed: the next pass resumes after them instead of wiping the
+/// index and scanning again, so passes smaller than a round still carry the build to the end.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_pass_that_spends_its_budget_mid_round_keeps_the_round() -> Result<()> {
+	let ds = Datastore::builder()
+		.with_config(
+			surrealdb_cnf::ConfigMap::empty().with_key_value("index_build_parallelism", "4"),
+		)
+		.without_maintenance_tasks()
+		.without_index_build_tasks()
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	let _scan = super::kind::test_sink::set_scan_batch(ds.id(), 3);
+	execute_all(&ds, &session, "FOR $i IN 0..60 { CREATE type::record('t', $i) SET n = $i % 5 };")
+		.await?;
+	execute_all(&ds, &session, "DEFINE INDEX ix ON t FIELDS n CONCURRENTLY;").await?;
+	let passes = run_passes_to_end(&ds, &session, 1, |_| None).await?;
+	assert!(passes > 1, "the build ran in {passes} passes, so no pass was bounded");
+	assert_eq!(index_building_status(&ds, &session, "t", "ix").await?, "ready");
+	for n in 0..5 {
+		let sql = format!("SELECT VALUE id FROM t WHERE n = {n} ORDER BY id");
+		let unindexed = format!("SELECT VALUE id FROM t WITH NOINDEX WHERE n = {n} ORDER BY id");
+		let mut indexed = ds.execute(&sql, &session, None).await?;
+		let mut scanned = ds.execute(&unindexed, &session, None).await?;
+		assert_eq!(indexed.remove(0).result?, scanned.remove(0).result?, "n = {n}");
+	}
+	Ok(())
+}
+
 /// A statement that leaves a build to passes wakes `index_build` once it commits, and writes a
 /// key the build-state predicate matches; a record key does not match.
 #[cfg(feature = "kv-mem")]
