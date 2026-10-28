@@ -1,5 +1,5 @@
 name: 'Test Docker image'
-description: 'Standardised image gate: Trivy scan + smoke test (version, startup, HTTP health) for the engine and downstream images. With expect-start-failure it instead asserts the server refuses to start (the licence-enforcing image).'
+description: 'Standardised image gate: Trivy scan + smoke test (version, startup, HTTP health). With expect-start-failure it instead asserts the server refuses to start (a licence-enforcing image).'
 
 inputs:
   image-ref:
@@ -50,7 +50,7 @@ runs:
   using: 'composite'
   steps:
     # OS/library scan. Fail on CRITICAL/HIGH so a vulnerable image never becomes
-    # a promotable artifact (the pushed engine image / the stitched downstream manifest).
+    # a promotable artifact (the pushed image).
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
@@ -63,8 +63,8 @@ runs:
     # Functional smoke test: the entrypoint is the server binary, so `version`
     # runs it directly; then boot the server and wait for the HTTP /health
     # endpoint. Polling /health (rather than exec-ing the binary's readiness
-    # subcommand) is binary-agnostic, so the same test works for the engine and
-    # downstream images, whose entrypoint binaries and readiness subcommands differ.
+    # subcommand) is binary-agnostic, so the same test works for any image
+    # whatever its entrypoint binary and readiness subcommand.
     #
     # With expect-start-failure the startup check is inverted: the licence-enforcing
     # image must refuse to start (non-zero exit, never healthy, refusal logged) when

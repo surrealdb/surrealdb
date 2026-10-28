@@ -22,9 +22,9 @@
 # both publish. The caller's own run never counts.
 #
 # A release.yml run that releases no engine claims nothing and never counts.
-# release.yml's run-name titles it "... components: internal)", "...
-# components: test)" or "Nightly release (internal)"; a title in any other
-# format, as from an older line's release.yml, counts.
+# The release.yml of a releases/3.x line, which still carries a `components`
+# input, titles such a run "... components: internal)", "... components:
+# test)" or "Nightly release (internal)"; a title in any other format counts.
 #
 # The unfinished runs come from unfinished-runs.sh, which finds a run however
 # many came after it, and gives a workflow the Actions API does not know no

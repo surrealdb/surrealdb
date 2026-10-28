@@ -744,7 +744,7 @@ jobs:
             printf '%s' "$src_meta" | jq -r '.body // ""' > "$workdir/body.md"
             # Strip the internal-only build-provenance trailer before syncing:
             # everything from the boundary to end of file is internal-only
-            # (engine + downstream commit SHAs). The boundary is the
+            # (the engine commit SHA). The boundary is the
             # `<!-- internal-only -->` marker the promote action emits, or the
             # provenance heading itself - source bodies may carry the heading
             # without the marker, and no public body legitimately contains

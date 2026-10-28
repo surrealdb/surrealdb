@@ -1,14 +1,14 @@
 name: 'Guard against re-releasing a completed release'
 description: >-
-  Refuse to run a release whose component (engine or downstream) already
-  completed, unless overwrite is set. Completion is defined by the manifest at
-  s3://<bucket>/releases/<name>/<component>.json, which the finalize jobs
-  write only after every persistence job for that component succeeded. A
+  Refuse to run a release that already completed, unless overwrite is set.
+  Completion is defined by the manifest at
+  s3://<bucket>/releases/<name>/<component>.json, which the finalize job
+  writes only after every persistence job succeeded. A
   missing manifest means the version was never attempted or only partially
   published; the release may proceed - every publish step skips or
   idempotently rewrites artefacts that already made it out. The interface is
   the ENV VARS set on the calling step (they propagate into this composite
-  step's process environment): NAME, COMPONENT (engine|downstream), BUCKET,
+  step's process environment): NAME, COMPONENT (engine), BUCKET,
   AWS_REGION, OVERWRITE, plus ambient AWS credentials able to read the
   bucket. See the call sites in release.yml.
 

@@ -1,14 +1,12 @@
 name: 'Check release milestones'
 description: >-
   Advisory check that every PR in the release-version milestone is merged
-  and backported into the released commit(s), on the engine and (when
-  configured) the downstream repo. Extracted verbatim from release.yml; the
-  interface is the ENV VARS visible to the calling step - NAME, VERSION,
-  NIGHTLY, ENGINE_REPO, OWNER, DOWNSTREAM_REPO, ENGINE_SHA, DS_SHA,
-  DS_BUILT, ENGINE_BRANCH, DS_BRANCH (job env) plus GH_TOKEN, DS_TOKEN,
-  DS_CONFIGURED (step env) - which propagate into this composite step's
-  process environment. Expects full-history checkouts of the released
-  commits at engine/ and (optionally) downstream/. Never fails the run.
+  and backported into the released commit. Extracted verbatim from
+  release.yml; the interface is the ENV VARS visible to the calling step -
+  NAME, VERSION, NIGHTLY, ENGINE_REPO, ENGINE_SHA, ENGINE_BRANCH (job env)
+  plus GH_TOKEN (step env) - which propagate into this composite step's
+  process environment. Expects a full-history checkout of the released
+  commit at engine/. Never fails the run.
 
 outputs:
   has-unmerged:
@@ -152,7 +150,7 @@ runs:
           local titles num rows n st merged url title msha okmsg
           local unmerged=() unbackported=() unverified=false
           if ! titles="$(GH_TOKEN="$token" gh api --paginate "repos/${repo}/milestones?state=all" --jq '.[] | [.title, .number] | @tsv' 2>/dev/null)"; then
-            echo "- **${label}** (\`${repo}\`): could not read milestones — the token needs Issues: read + Pull requests: read on this repo (for the downstream repo, grant them to the Downstream App) — skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "- **${label}** (\`${repo}\`): could not read milestones - the token needs Issues: read + Pull requests: read on this repo - skipped." >> "$GITHUB_STEP_SUMMARY"
             return 0
           fi
           # Match the milestone whose title is the release name (or bare version).
@@ -210,14 +208,6 @@ runs:
         }
 
         check_repo "engine" "${ENGINE_REPO}" "${GH_TOKEN}" "engine" "${ENGINE_SHA}" "${ENGINE_BRANCH}"
-        if [[ "${DS_CONFIGURED}" == "true" ]]; then
-          # Only verify downstream backports when a downstream image is actually
-          # being released (i.e. there is a downstream commit to check against).
-          ds_dir=""; [[ "${DS_BUILT}" == "true" ]] && ds_dir="downstream"
-          check_repo "downstream" "${OWNER}/${DOWNSTREAM_REPO}" "${DS_TOKEN}" "${ds_dir}" "${DS_SHA}" "${DS_BRANCH}"
-        else
-          echo "- **downstream**: app not configured — skipped." >> "$GITHUB_STEP_SUMMARY"
-        fi
 
         # Combined, human-readable warning suffix for the approve job name.
         warning=""

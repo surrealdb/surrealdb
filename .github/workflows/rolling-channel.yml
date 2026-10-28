@@ -4,10 +4,8 @@
 # commit: the binary matrix (+ macOS universal), the multi-arch Docker images
 # (scanned before push to the registry), the npm packages that embed the engine
 # (@surrealdb/node-native + @surrealdb/wasm-native, on releases/* lines only), and
-# the rolling-builds/<slug>/<sha>/engine.json manifest that marks the engine side
-# of the commit as releasable for that channel. The downstream side records its
-# own separate downstream.json (see rolling-downstream.yml), built by the separate
-# rolling-downstream-build.yml workflow.
+# the rolling-builds/<slug>/<sha>/engine.json manifest that marks the commit as
+# releasable for that channel.
 #
 # rolling-build.yml calls this once per push for the branch's channel (the
 # `nightly` channel on main, or the line's channel on releases/*), with its
@@ -400,7 +398,7 @@ jobs:
       # vulnerable or non-booting image never reaches the registry (and hence can
       # never be promoted). amd64-only: the runtime base digest is shared across
       # arches, so arm64 findings would match. Uses the shared test-docker-image
-      # action so the engine and downstream images run the identical gate (Trivy +
+      # action so every image runs the identical gate (Trivy +
       # version + startup + HTTP health).
       - name: Test the Docker image (scan + smoke test)
         uses: ./.ci/.github/actions/test-docker-image
@@ -930,12 +928,6 @@ jobs:
   # correct image), but writes no manifest — it is never promotable — and the
   # cleanup-test job below deletes its artifacts. github.ref here is the caller's
   # triggering ref.
-  #
-  # The downstream image is built by a separate workflow
-  # (rolling-downstream-build.yml) and records its own downstream.json under the
-  # same prefix, so the two sides never share an object and finalize never waits
-  # on or records downstream state. The promote workflow decides what to release
-  # from which manifests exist for the commit.
   finalize:
     name: Finalize channel
     needs: [build, macos-universal, publish-s3, docker, check-versions, package, npm-preflight, build-node-addon, build-wasm-engine, publish-npm-s3]
@@ -982,12 +974,9 @@ jobs:
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
       # engine.json lives in the private CI bucket alongside the rolling binaries.
-      # It carries the engine side only — zero downstream metadata — and only
-      # public-safe fields (no registry/account/repo): the registry coordinates
-      # are reconstructed at promote time from secrets plus the deterministic
-      # rolling-<branch>-<sha> tag. The downstream side records its own separate
-      # downstream.json (written by rolling-downstream-build), so the two never
-      # share an object.
+      # It carries only public-safe fields (no registry/account/repo): the
+      # registry coordinates are reconstructed at promote time from secrets plus
+      # the deterministic rolling-<branch>-<sha> tag.
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:

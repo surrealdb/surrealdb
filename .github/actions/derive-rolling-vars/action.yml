@@ -1,10 +1,10 @@
 name: 'Derive rolling build vars'
 description: 'Derive the channel identity (name, slug, S3 prefix, version, build metadata) for a rolling build of the checked-out commit'
 
-# Shared by the engine and downstream rolling entry points so the two stay in
-# lockstep: both key their artifacts under the SAME rolling-builds/<slug>/<sha>/
-# prefix, computed the one way here. Assumes the caller has already checked out
-# the commit to build (needs Cargo.toml + git history on disk).
+# Every rolling entry point keys its artifacts under the same
+# rolling-builds/<slug>/<sha>/ prefix, computed the one way here. Assumes the
+# caller has already checked out the commit to build (needs Cargo.toml + git
+# history on disk).
 
 outputs:
   build-metadata:
@@ -91,10 +91,8 @@ runs:
         # what tells one nightly binary from another. A versioned line
         # (releases/*) already carries a unique version (e.g. 3.3.0-beta.3), so
         # metadata there is redundant noise: leave it empty so `surreal version`
-        # reads the clean release version. This governs both the engine binaries
-        # and the downstream image, since both compile the engine from the commit
-        # checked out here, and it is the ONLY thing build metadata affects (the
-        # artifacts are keyed by sha, not by version string).
+        # reads the clean release version. This is the ONLY thing build metadata
+        # affects (the artifacts are keyed by sha, not by version string).
         if [ "${branch}" = "main" ]; then
           build_metadata="${date}.${rev}"
         else

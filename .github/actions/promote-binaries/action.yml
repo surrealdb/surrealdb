@@ -88,9 +88,9 @@ runs:
 
     # Build a durable, release-scoped manifest and release notes from the rolling
     # manifest. The rolling manifest is pruned once a later release on the same
-    # line supersedes this commit, so without this the engine + downstream commits
-    # a release was built from would be lost. The downstream repo is no longer
-    # tagged, so this manifest is the record of what to check out to rebuild.
+    # line supersedes this commit, so without this the commit a release was
+    # built from would be lost; this manifest is the record of what to check
+    # out to rebuild.
     - name: Build release manifest and notes
       shell: bash
       env:
@@ -99,10 +99,8 @@ runs:
         GIT_REF: ${{ inputs.git-ref }}
       run: |
         set -euo pipefail
-        # The engine and downstream sides write SEPARATE rolling manifests keyed
-        # by the same engine sha. engine.json is required (this action only runs
-        # for the engine side); downstream.json is optional and its mere presence
-        # means a promotable downstream image was built for this commit.
+        # engine.json is written only once every rolling job succeeded, so it is
+        # required here.
         if [[ ! -f rolling/engine.json ]]; then
           # prepare-vars (locate) already guarantees engine.json exists for the
           # promoted SHA, so its absence here means the rolling prefix is
@@ -114,46 +112,26 @@ runs:
         fi
         engine_sha=$(jq -r '.sha // ""' rolling/engine.json)
 
-        # Optional downstream provenance, reconstructed from downstream.json.
-        ds_built=false
-        ds_sha=""
-        ds_branch=""
-        if [[ -f rolling/downstream.json ]]; then
-          ds_built=true
-          ds_sha=$(jq -r '.sha // ""' rolling/downstream.json)
-          ds_branch=$(jq -r '.branch // ""' rolling/downstream.json)
-          downstream=$(jq -nc --arg b "${ds_branch}" --arg s "${ds_sha}" '{built: true, branch: $b, sha: $s}')
-        else
-          downstream='{"built": false}'
-        fi
-
-        # Marry the two sides into one durable manifest: engine.json + a
-        # reconstructed downstream block + a release block. The release block
+        # One durable manifest: engine.json + a release block. The release block
         # stores only what isn't already present: git_ref is omitted (it always
         # equals the top-level .sha) and channel is omitted (implied by version).
         jq \
           --arg name "${NAME}" \
           --arg ver "${VERSION}" \
           --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          --argjson downstream "${downstream}" \
-          '. + {downstream: $downstream, release: {name: $name, version: $ver, released_at: $at}}' \
+          '. + {release: {name: $name, version: $ver, released_at: $at}}' \
           rolling/engine.json > release-manifest.json
 
         {
           echo "Release v${VERSION}"
           echo ""
           # Everything from this marker to end of file is internal-only build
-          # provenance (engine + downstream commit SHAs). The public release
-          # sync (sync-upstream.yml) strips from this marker down, so none of it
+          # provenance (the engine commit SHA). The public release sync
+          # (sync-upstream.yml) strips from this marker down, so none of it
           # reaches surrealdb/surrealdb.
           echo "<!-- internal-only -->"
           echo "### Build provenance"
           echo "- Engine (surrealdb) commit: \`${engine_sha}\`"
-          if [[ "${ds_built}" == "true" && -n "${ds_sha}" ]]; then
-            echo "- Downstream commit: \`${ds_branch:-unknown}@${ds_sha}\`"
-          else
-            echo "- Downstream image: not built for this release"
-          fi
         } > release-body.md
 
         echo "---- release-manifest.json ----"; cat release-manifest.json
@@ -226,14 +204,13 @@ runs:
 
     # Persist the release-scoped manifest to the PRIVATE CI bucket (not the
     # public download bucket): it's an internal rebuild/audit record, not
-    # something download clients fetch, and it names the downstream branch/sha.
-    # Written only once the layout check has passed, so a refused promotion
-    # leaves no record of a release that never happened, and before
-    # `Configure AWS`, so it uses the private runner's
+    # something download clients fetch. Written only once the layout check has
+    # passed, so a refused promotion leaves no record of a release that never
+    # happened, and before `Configure AWS`, so it uses the private runner's
     # ambient IAM role (the private bucket lives in that account); the static
     # keys configured below are for the public download bucket only. Unlike the
     # rolling manifest, this lives under releases/<name>/ and is never pruned, so
-    # the engine + downstream commits a release shipped from stay recoverable.
+    # the commit a release shipped from stays recoverable.
     # For the nightly it is also the record that keeps the nightly channel from
     # moving back: .github/scripts/nightly-record.sh reads the commit at .sha in
     # releases/nightly/release.json, so that key and field must stay.

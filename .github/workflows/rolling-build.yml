@@ -17,12 +17,6 @@
 # releasable; the promote workflow refuses to release a commit that has no
 # manifest.
 #
-# The downstream image is built by a SEPARATE workflow (rolling-downstream-build.yml)
-# that also runs on push, and can additionally be triggered on its own so a
-# downstream-only change becomes promotable without a new engine commit. The two
-# sides write separate manifests (engine.json here, downstream.json there) keyed
-# by the same commit, and are married at promote time.
-#
 # Channel (slug = the branch name):
 #   * releases/* — every push builds that line's channel at the branch's
 #     Cargo.toml version (alpha/beta/rc/stable), so any commit is promotable.
@@ -149,11 +143,10 @@ jobs:
       # rebuild a releases/3.2 commit and vice versa) and an older ancestor being
       # rebuilt still counts.
       #
-      # This is duplicated (verbatim) in rolling-downstream-build.yml's prepare on
-      # purpose. It predates the .ci tooling checkout above (a workspace-local
-      # `uses: ./…` action would be missing when an override reproduces a commit
-      # that predates it); it could now become a ./.ci/... action, but is kept
-      # inline since it is small and changes rarely.
+      # Kept inline rather than as a ./.ci/... action: it predates the .ci
+      # tooling checkout above (a workspace-local `uses: ./…` action would be
+      # missing when an override reproduces a commit that predates it), and it
+      # is small and changes rarely.
       - name: Assert built commit is on a release line
         id: promotable
         if: ${{ inputs.git-sha != '' }}

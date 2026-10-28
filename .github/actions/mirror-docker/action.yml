@@ -34,8 +34,7 @@ inputs:
   extra-stable-tags:
     description: >-
       Whether a stable release also gets the moving :<major>.<minor> and :<major>
-      tags. True for the engine image. False for the downstream licensed image,
-      which follows the downstream tag convention (<name> + optional :latest only).
+      tags. False publishes <name> plus the optional :latest only.
     required: false
     default: 'true'
   major-tag:

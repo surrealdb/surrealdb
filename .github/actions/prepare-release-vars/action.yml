@@ -6,14 +6,6 @@ inputs:
     description: 'Whether this is a nightly release'
     required: false
     default: 'true'
-  test:
-    description: 'Whether this is a test release (the release name carries build metadata so it never collides with a public tag)'
-    required: false
-    default: 'false'
-  downstream-sha:
-    description: 'Full downstream commit sha the test image was built from; its short form goes into the test release metadata so distinct engine/downstream pairings never collide'
-    required: false
-    default: ''
 
 outputs:
   name:
@@ -29,7 +21,7 @@ outputs:
     description: 'Release environment name (nightly, alpha, beta, stable)'
     value: ${{ steps.outputs.outputs.release-name }}
   build-metadata:
-    description: 'Build metadata (nightly and test releases)'
+    description: 'Build metadata (nightly releases)'
     value: ${{ steps.outputs.outputs.build-metadata }}
 
 runs:
@@ -53,11 +45,7 @@ runs:
           exit 1
         fi
 
-        # A test release is excluded here even on the nightly channel: a main test
-        # release keeps main's own Cargo.toml version with the pairing metadata
-        # (v<version>-<engine>.<downstream>, the else branch below) rather than the
-        # computed `nightly` name, so its tag matches a releases/* test release.
-        if [[ "${{ inputs.nightly-release }}" == "true" && "${{ inputs.test }}" != "true" ]]; then
+        if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
           # Nightly release - compute version based on main's version
           # Action-relative path: the script travels with this action's checkout
           # (.ci) instead of resolving against the released commit in the workspace.
@@ -74,28 +62,7 @@ runs:
         else
           # Versioned release - use version from Cargo.toml
           echo "version=${cargo_version}" >> $GITHUB_OUTPUT
-          # Test releases carry build metadata in the release name, so the git tag
-          # becomes v<version>+<metadata> and the image tag v<version>-<metadata>
-          # (the mirror sanitizer maps '+' to '-'). The metadata is the engine and
-          # downstream short shas (<engine>.<downstream>) that identify the exact
-          # pairing the test image was built from, so it is unique whichever side is
-          # iterated (back-to-back test builds against a fixed engine never collide)
-          # and stays distinct from the public v<version> tag, so a test release
-          # never claims or clobbers the real release. The binary's own version stays
-          # clean (it is the same build-once artifact the public release promotes), so
-          # the metadata lives in the tag, not in `surreal version`.
-          if [[ "${{ inputs.test }}" == "true" ]]; then
-            ds_sha="${{ inputs.downstream-sha }}"
-            if [[ -z "$ds_sha" ]]; then
-              echo "::error::test release: downstream-sha is empty, cannot build the test tag metadata."
-              exit 1
-            fi
-            build_metadata="$(git rev-parse --short HEAD).${ds_sha:0:9}"
-            echo "build-metadata=${build_metadata}" >> $GITHUB_OUTPUT
-            echo "name=v${cargo_version}+${build_metadata}" >> $GITHUB_OUTPUT
-          else
-            echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
-          fi
+          echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
           if [[ $cargo_version == *"-"* ]]; then
             echo "pre-release=true" >> $GITHUB_OUTPUT
             suffix=$(echo $cargo_version | tr "-" "\n" | sed -n 2p)
