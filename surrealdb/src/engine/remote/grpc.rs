@@ -3036,9 +3036,8 @@ mod request_compression_tests {
 	}
 
 	/// A server that does accept the encoding but has the method switched off
-	/// also answers `UNIMPLEMENTED` -- `ExportDirectory` is one, and an
-	/// operator's denied-method list produces more. Retrying those uncompressed
-	/// would not help, so only the encoding header may trigger the fallback.
+	/// also answers `UNIMPLEMENTED`, as an operator's denied-method list does. Retrying those
+	/// uncompressed would not help, so only the encoding header may trigger the fallback.
 	#[test]
 	fn a_genuinely_unimplemented_method_is_not() {
 		let status = tonic::Status::unimplemented("Directory export is not served");

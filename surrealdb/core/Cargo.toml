@@ -249,7 +249,7 @@ js = { workspace = true, features = [
 ], optional = true }
 revision = { workspace = true }
 storekey.workspace = true
-surrealdb-types = { workspace = true }
+surrealdb-types = { workspace = true, features = ["cbor"] }
 surrealdb-collections = { workspace = true }
 
 # Other crates

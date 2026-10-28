@@ -1,50 +1,31 @@
-mod convert;
+pub use surrealdb_types::cbor::{
+	TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64, encode,
+	encode_v2,
+};
+use surrealdb_types::{RecordId, Value, cbor as convert};
 
-pub use convert::{TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32, TAG_U64};
+/// A record id a client wrote as text, read with the SurrealQL parser.
+fn record_id(input: &str) -> anyhow::Result<RecordId> {
+	crate::syn::record_id(input)
+}
+
+const RECORD_ID: Option<convert::RecordIdParser> = Some(record_id);
 
 /// A decoded CBOR item as a public value.
 pub(crate) fn to_value(item: ciborium::Value) -> anyhow::Result<Value> {
-	convert::to_value(item).map_err(|e| anyhow::anyhow!(e))
+	convert::to_value(item, RECORD_ID)
 }
 
 pub(crate) fn to_value_v2(item: ciborium::Value) -> anyhow::Result<Value> {
-	convert::to_value_v2(item).map_err(|e| anyhow::anyhow!(e))
-}
-
-use surrealdb_types::Value;
-
-pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {
-	// Convert public value to internal value for encoding
-	let encoding = convert::from_value(v).map_err(|e| anyhow::anyhow!(e))?;
-	let mut res = Vec::new();
-	// `Vec<u8>` never returns an I/O error from `Write`, so the `Io` variant
-	// of `ciborium::ser::Error` is unreachable here. The `Value` variant is
-	// only constructed by ciborium's tag serializer, which our `CborValue`
-	// representation never trips. Propagate as an error rather than panic
-	// so any future ciborium change cannot crash the RPC layer.
-	ciborium::into_writer(&encoding, &mut res)
-		.map_err(|e| anyhow::anyhow!("failed to encode CBOR: {e}"))?;
-	Ok(res)
-}
-
-pub fn encode_v2(v: Value) -> anyhow::Result<Vec<u8>> {
-	let encoding = convert::from_value_v2(v).map_err(|e| anyhow::anyhow!(e))?;
-	let mut res = Vec::new();
-	ciborium::into_writer(&encoding, &mut res)
-		.map_err(|e| anyhow::anyhow!("failed to encode CBOR: {e}"))?;
-	Ok(res)
+	convert::to_value_v2(item, RECORD_ID)
 }
 
 pub fn decode(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
-	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
+	convert::decode(bytes, recursion_limit, RECORD_ID)
 }
 
 pub fn decode_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
-	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	convert::to_value_v2(encoding).map_err(|e| anyhow::anyhow!(e))
+	convert::decode_v2(bytes, recursion_limit, RECORD_ID)
 }
 
 /// A client request: the CBOR item at the start of `bytes` (trailing bytes as `decode`), where
@@ -64,8 +45,10 @@ pub fn decode_request(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Va
 			budget: surrealdb_types::shaped::Budget::new(128 * bytes.len() as u64 + (1 << 20)),
 			limit: recursion_limit,
 		};
-		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks, false))
-			.map_err(|e| anyhow::anyhow!(e))
+		convert::to_request_value(
+			encoding,
+			&mut convert::Ctx::requests(&mut blocks, false, RECORD_ID),
+		)
 	}
 	#[cfg(not(feature = "shaped"))]
 	decode(bytes, recursion_limit)
@@ -80,8 +63,10 @@ pub fn decode_request_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result
 			budget: surrealdb_types::shaped::Budget::new(128 * bytes.len() as u64 + (1 << 20)),
 			limit: recursion_limit,
 		};
-		convert::to_request_value(encoding, &mut convert::Ctx::requests(&mut blocks, true))
-			.map_err(|e| anyhow::anyhow!(e))
+		convert::to_request_value(
+			encoding,
+			&mut convert::Ctx::requests(&mut blocks, true, RECORD_ID),
+		)
 	}
 	#[cfg(not(feature = "shaped"))]
 	decode_v2(bytes, recursion_limit)
@@ -89,19 +74,11 @@ pub fn decode_request_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result
 
 /// Decode `bytes` as exactly one CBOR item: bytes after the item are an error.
 pub fn decode_exact(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
-	let mut reader = bytes;
-	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
-	convert::to_value(encoding).map_err(|e| anyhow::anyhow!(e))
+	convert::decode_exact(bytes, recursion_limit, RECORD_ID)
 }
 
 pub fn decode_exact_v2(bytes: &[u8], recursion_limit: usize) -> anyhow::Result<Value> {
-	let mut reader = bytes;
-	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
-	convert::to_value_v2(encoding).map_err(|e| anyhow::anyhow!(e))
+	convert::decode_exact_v2(bytes, recursion_limit, RECORD_ID)
 }
 
 /// The `id` of a request envelope whose decoding failed.
@@ -140,7 +117,7 @@ pub fn request_id(bytes: &[u8], recursion_limit: usize) -> Option<Value> {
 				recursion_limit,
 			)
 			.ok()?;
-			let val = convert::to_value_v2(id).ok()?;
+			let val = to_value_v2(id).ok()?;
 			return if matches!(
 				val,
 				Value::Null

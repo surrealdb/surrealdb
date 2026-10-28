@@ -5,6 +5,8 @@
 #![allow(clippy::absolute_paths)]
 #![deny(clippy::wildcard_enum_match_arm)]
 
+#[cfg(feature = "cbor")]
+pub mod cbor;
 mod error;
 mod flatbuffers;
 mod hashmap;

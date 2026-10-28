@@ -5,15 +5,16 @@ use std::ops::Bound;
 
 use anyhow::{Context, Result, anyhow};
 use ciborium::Value as CborValue;
-use common::decimal::DecimalExt;
 use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
-use crate::syn;
-use crate::types::{
-	PublicArray, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicNumber,
-	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
-	PublicSet, PublicTable, PublicUuid, PublicValue,
+use super::RecordIdParser;
+use crate::{
+	Array as PublicArray, Datetime as PublicDatetime, Duration as PublicDuration,
+	File as PublicFile, Geometry as PublicGeometry, Number as PublicNumber, Object as PublicObject,
+	Range as PublicRange, RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
+	RecordIdKeyRange as PublicRecordIdKeyRange, Set as PublicSet, Table as PublicTable,
+	Uuid as PublicUuid, Value as PublicValue,
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
@@ -37,17 +38,26 @@ const TAG_BOUND_INCLUDED: u64 = 50;
 const TAG_BOUND_EXCLUDED: u64 = 51;
 
 // A shaped block, accepted in requests only (`decode_request`)
-const TAG_SHAPED_BLOCK: u64 = surrealdb_types::shaped::CBOR_TAG;
+const TAG_SHAPED_BLOCK: u64 = crate::shaped::CBOR_TAG;
 
 // Sized number tags (IANA unassigned 180..=188)
+/// `cbor.2`: an `i8` number.
 pub const TAG_I8: u64 = 180;
+/// `cbor.2`: a `u8` number.
 pub const TAG_U8: u64 = 181;
+/// `cbor.2`: an `i16` number.
 pub const TAG_I16: u64 = 182;
+/// `cbor.2`: a `u16` number.
 pub const TAG_U16: u64 = 183;
+/// `cbor.2`: an `i32` number.
 pub const TAG_I32: u64 = 184;
+/// `cbor.2`: a `u32` number.
 pub const TAG_U32: u64 = 185;
+/// `cbor.2`: a `u64` number.
 pub const TAG_U64: u64 = 186;
+/// `cbor.2`: an `f16` number.
 pub const TAG_F16: u64 = 187;
+/// `cbor.2`: an `f32` number.
 pub const TAG_F32: u64 = 188;
 
 // Custom tags (55->60 is unassigned)
@@ -74,7 +84,6 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 		CborValue::Array(v) => Ok(PublicValue::Array(to_array(v, ctx)?)),
 		CborValue::Map(v) => Ok(PublicValue::Object(to_object(v, ctx)?)),
 		CborValue::Tag(t, v) => {
-			#[cfg(feature = "shaped")]
 			if t == TAG_SHAPED_BLOCK && ctx.blocks.is_some() {
 				return block(*v, ctx);
 			}
@@ -124,7 +133,7 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 				// A literal decimal
 				TAG_STRING_DECIMAL => {
 					if let CborValue::Text(v) = *v {
-						if let Ok(v) = Decimal::from_str_normalized(v.as_str()) {
+						if let Ok(v) = decimal_normalized(v.as_str()) {
 							Ok(PublicValue::Number(PublicNumber::Decimal(v)))
 						} else {
 							Err(anyhow!("Expected a valid Decimal value"))
@@ -171,11 +180,11 @@ fn value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 				// A literal recordid
 				TAG_RECORDID => {
 					if let CborValue::Text(v) = *v {
-						if let Ok(v) = syn::record_id(v.as_str()) {
-							Ok(PublicValue::RecordId(v))
-						} else {
-							Err(anyhow!("Expected a valid RecordID value"))
-						}
+						let parse = ctx.record_id.ok_or_else(|| {
+							anyhow!("A record id written as text is not accepted here")
+						})?;
+						let id = parse(v.as_str()).context("Expected a valid RecordID value")?;
+						Ok(PublicValue::RecordId(id))
 					} else if let CborValue::Array(v) = *v {
 						let mut v = v.into_iter();
 						let table = v.next().context(
@@ -496,9 +505,10 @@ fn unsupported_tag(tag: u64) -> anyhow::Error {
 
 /// What a request's shaped blocks may materialise: the budget they share and the recursion limit
 /// the request is decoded under.
-#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
 pub struct RequestBlocks {
-	pub budget: surrealdb_types::shaped::Budget,
+	/// What all the request's blocks together may materialise.
+	pub budget: crate::shaped::Budget,
+	/// The recursion limit the request is decoded under.
 	pub limit: usize,
 }
 
@@ -507,34 +517,35 @@ pub struct Ctx<'a> {
 	blocks: Option<&'a mut RequestBlocks>,
 	/// The number of arrays, maps and tags around the item.
 	depth: usize,
+	/// Whether the item is `cbor.2`, which reads the sized number tags.
 	pub v2: bool,
+	/// Parses a record id written as text (tag 8 around a string); without one such an id is
+	/// refused.
+	record_id: Option<RecordIdParser>,
 }
 
 impl<'a> Ctx<'a> {
 	/// The context of an item whose blocks are refused.
-	fn strict() -> Ctx<'static> {
+	fn strict(v2: bool, record_id: Option<RecordIdParser>) -> Ctx<'static> {
 		Ctx {
 			blocks: None,
 			depth: 0,
-			v2: false,
-		}
-	}
-
-	fn strict_v2() -> Ctx<'static> {
-		Ctx {
-			blocks: None,
-			depth: 0,
-			v2: true,
+			v2,
+			record_id,
 		}
 	}
 
 	/// The context of a value that accepts blocks within `blocks`.
-	#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
-	pub fn requests(blocks: &'a mut RequestBlocks, v2: bool) -> Self {
+	pub fn requests(
+		blocks: &'a mut RequestBlocks,
+		v2: bool,
+		record_id: Option<RecordIdParser>,
+	) -> Self {
 		Ctx {
 			blocks: Some(blocks),
 			depth: 0,
 			v2,
+			record_id,
 		}
 	}
 
@@ -544,6 +555,7 @@ impl<'a> Ctx<'a> {
 			blocks: self.blocks.as_deref_mut(),
 			depth: self.depth + 1,
 			v2: self.v2,
+			record_id: self.record_id,
 		}
 	}
 }
@@ -553,16 +565,17 @@ fn sub(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	value(val, &mut ctx.child())
 }
 
-pub fn to_value(val: CborValue) -> Result<PublicValue> {
-	value(val, &mut Ctx::strict())
+/// A decoded `cbor` item as a value; a shaped block is refused.
+pub fn to_value(val: CborValue, record_id: Option<RecordIdParser>) -> Result<PublicValue> {
+	value(val, &mut Ctx::strict(false, record_id))
 }
 
-pub fn to_value_v2(val: CborValue) -> Result<PublicValue> {
-	value(val, &mut Ctx::strict_v2())
+/// A decoded `cbor.2` item as a value; a shaped block is refused.
+pub fn to_value_v2(val: CborValue, record_id: Option<RecordIdParser>) -> Result<PublicValue> {
+	value(val, &mut Ctx::strict(true, record_id))
 }
 
 /// A decoded request item, where a shaped block is the array of its rows.
-#[cfg_attr(not(feature = "shaped"), allow(dead_code))]
 pub fn to_request_value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	value(val, ctx)
 }
@@ -572,7 +585,6 @@ pub fn to_request_value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 /// Every row is a value a plain CBOR request could carry, and the block can nest no deeper than
 /// the request's recursion limit: the rows add an array and an object around the shape's own
 /// object columns, and a dynamic slice decodes within what is left.
-#[cfg(feature = "shaped")]
 fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	let CborValue::Bytes(contents) = val else {
 		return Err(anyhow!("a shaped block that is not a byte string"));
@@ -583,33 +595,39 @@ fn block(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	};
 	let limit = blocks.limit;
 	// The rows' array and object sit inside the block's own item.
-	let room = limit.checked_sub(depth + 2).filter(|room| *room > 0);
+	let room =
+		depth.checked_add(2).and_then(|around| limit.checked_sub(around)).filter(|room| *room > 0);
 	blocks.budget.max_shape_depth = match room {
 		Some(room) => room - 1,
 		None => return Err(anyhow!("a shaped block nested too deep")),
 	};
 	let v2 = ctx.v2;
+	let record_id = ctx.record_id;
 	let mut dynamic = |slice: &[u8], shape_depth: usize| -> Result<PublicValue, String> {
-		let room = limit
-			.checked_sub(depth + 2 + shape_depth)
+		let room = depth
+			.checked_add(2)
+			.and_then(|around| around.checked_add(shape_depth))
+			.and_then(|around| limit.checked_sub(around))
 			.filter(|room| *room > 0)
 			.ok_or_else(|| "a shaped block nested too deep".to_owned())?;
 		if v2 {
-			super::decode_exact_v2(slice, room).map_err(|e| e.to_string())
+			super::decode_exact_v2(slice, room, record_id).map_err(|e| e.to_string())
 		} else {
-			super::decode_exact(slice, room).map_err(|e| e.to_string())
+			super::decode_exact(slice, room, record_id).map_err(|e| e.to_string())
 		}
 	};
-	let rows = surrealdb_types::shaped::BlockReader::new()
+	let rows = crate::shaped::BlockReader::new()
 		.read_block_within(&contents, &mut dynamic, &mut blocks.budget)
 		.map_err(|e| anyhow!(e))?;
 	Ok(PublicValue::Array(rows.into()))
 }
 
+/// `val` as a `cbor` item.
 pub fn from_value(val: PublicValue) -> Result<CborValue> {
 	from_value_inner(val, false)
 }
 
+/// `val` as a `cbor.2` item.
 pub fn from_value_v2(val: PublicValue) -> Result<CborValue> {
 	from_value_inner(val, true)
 }
@@ -1066,8 +1084,8 @@ fn to_u64(v: ciborium::value::Integer) -> Result<u64> {
 	u64::try_from(n).map_err(|_| anyhow!("integer {n} is outside the 64-bit unsigned range"))
 }
 
-fn to_f16(f: f64) -> Result<surrealdb_types::f16> {
-	let val = surrealdb_types::f16::from_f64(f);
+fn to_f16(f: f64) -> Result<crate::f16> {
+	let val = crate::f16::from_f64(f);
 	if f.is_nan() || val.to_f64().to_bits() == f.to_bits() {
 		Ok(val)
 	} else {
@@ -1116,4 +1134,11 @@ fn to_object(obj: Vec<(CborValue, CborValue)>, ctx: &mut Ctx) -> Result<PublicOb
 		}
 	}
 	Ok(PublicObject::from(res))
+}
+
+/// A decimal written as text, normalized.
+#[allow(clippy::disallowed_methods)]
+fn decimal_normalized(s: &str) -> std::result::Result<Decimal, rust_decimal::Error> {
+	use std::str::FromStr;
+	Ok(Decimal::from_str(s)?.normalize())
 }

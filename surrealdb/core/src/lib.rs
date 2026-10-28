@@ -131,12 +131,10 @@ pub(crate) mod types {
 
 	pub use surrealdb_types::{
 		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
-		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
-		Geometry as PublicGeometry, Notification as PublicNotification, Number as PublicNumber,
-		Object as PublicObject, Range as PublicRange, RecordId as PublicRecordId,
-		RecordIdKey as PublicRecordIdKey, RecordIdKeyRange as PublicRecordIdKeyRange,
-		Set as PublicSet, SurrealValue, Table as PublicTable, Uuid as PublicUuid,
-		Value as PublicValue, Variables as PublicVariables,
+		Datetime as PublicDatetime, Duration as PublicDuration, Notification as PublicNotification,
+		Number as PublicNumber, Object as PublicObject, RecordId as PublicRecordId,
+		RecordIdKey as PublicRecordIdKey, SurrealValue, Uuid as PublicUuid, Value as PublicValue,
+		Variables as PublicVariables,
 	};
 }
 

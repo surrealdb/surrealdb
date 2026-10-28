@@ -100,7 +100,7 @@ surrealdb-engine-local = { workspace = true, default-features = false, optional 
 surrealdb-iam = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-expr = { workspace = true, optional = true }
-surrealdb-types = { workspace = true, features = ["convert"] }
+surrealdb-types = { workspace = true, features = ["cbor", "convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)

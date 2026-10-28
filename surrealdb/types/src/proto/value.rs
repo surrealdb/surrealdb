@@ -66,6 +66,17 @@ impl TryFrom<proto::Value> for Value {
 			ValueInner::Int64(i) => Ok(Value::Number(Number::Int(i))),
 			ValueInner::Float64(f) => Ok(Value::Number(Number::Float(f))),
 			ValueInner::Decimal(d) => Ok(Value::Number(Number::Decimal(d.try_into()?))),
+			// Sized numbers. Protobuf has no 8- or 16-bit integers or 16-bit floats, so those
+			// travel widened and are refused when out of range; an `f16` is rounded to nearest.
+			ValueInner::I8(v) => Ok(Value::Number(Number::I8(i8::try_from(v)?))),
+			ValueInner::U8(v) => Ok(Value::Number(Number::U8(u8::try_from(v)?))),
+			ValueInner::I16(v) => Ok(Value::Number(Number::I16(i16::try_from(v)?))),
+			ValueInner::U16(v) => Ok(Value::Number(Number::U16(u16::try_from(v)?))),
+			ValueInner::I32(v) => Ok(Value::Number(Number::I32(v))),
+			ValueInner::U32(v) => Ok(Value::Number(Number::U32(v))),
+			ValueInner::U64(v) => Ok(Value::Number(Number::U64(v))),
+			ValueInner::F16(v) => Ok(Value::Number(Number::F16(half::f16::from_f32(v)))),
+			ValueInner::F32(v) => Ok(Value::Number(Number::F32(v))),
 			ValueInner::String(s) => Ok(Value::String(s)),
 			ValueInner::Bytes(b) => Ok(Value::Bytes(Bytes(b))),
 			ValueInner::Duration(d) => Ok(Value::Duration(Duration(d.try_into()?))),

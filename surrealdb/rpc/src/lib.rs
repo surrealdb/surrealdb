@@ -27,6 +27,7 @@ pub mod request;
 pub mod response;
 pub mod stream;
 pub mod token;
+pub mod wire;
 
 pub use encoded::{EncodedPayload, EncodedQueryResult, EncodedRows, RowDecoder, RowFormat};
 pub use framing::{OutgoingFrame, QUERY_BATCH_RECORDS, StreamFrames};

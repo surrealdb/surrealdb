@@ -43,7 +43,7 @@ use crate::val::key_read::KeyIdRef;
 use crate::val::stored::{Kind, ObjectRef, OrderedObjectRef, ValueRef};
 use crate::val::{Number, RecordIdKey, Value};
 
-// CBOR tags the RPC layer's encoder writes (`rpc::format::cbor::convert`).
+// CBOR tags the RPC layer's encoder writes (`surrealdb_types::cbor`).
 const TAG_SPEC_UUID: u64 = 37;
 const TAG_NONE: u64 = 6;
 const TAG_TABLE: u64 = 7;

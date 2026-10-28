@@ -257,7 +257,7 @@ impl SurrealValue for DbResponse {
 /// Decode a binary (flatbuffers) RPC response payload into a [`DbResponse`].
 pub fn db_response_from_bytes(bytes: &[u8]) -> Result<DbResponse, TypesError> {
 	let value: PublicValue =
-		surrealdb_types::decode(bytes).map_err(|e| TypesError::internal(e.to_string()))?;
+		crate::wire::decode(bytes).map_err(|e| TypesError::internal(e.to_string()))?;
 	DbResponse::from_value(value)
 }
 

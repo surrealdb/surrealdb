@@ -460,8 +460,8 @@ fn json_encode_str(value: Value) -> String {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS));
-	headers.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS));
+	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_rpc::wire::ACCEPT));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_rpc::wire::CONTENT_TYPE));
 	headers
 }
 
@@ -601,7 +601,8 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	};
 
 	let res = request
-		.header(ACCEPT, surrealdb_rpc::format::FLATBUFFERS)
+		// `/import` answers in `cbor`, not `cbor.2`; the wire decoder reads both.
+		.header(ACCEPT, surrealdb_rpc::format::CBOR)
 		.body(file)
 		.send()
 		.await
@@ -616,7 +617,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	// import failed is told which statement failed rather than which status the
 	// transport carried. A request rejected before execution is answered with
 	// an error document instead, and is reported from that document.
-	match surrealdb_types::decode::<Value>(&bytes) {
+	match surrealdb_rpc::wire::decode(&bytes) {
 		Ok(Value::Array(arr)) => {
 			for val in arr.into_vec() {
 				let result = QueryResult::from_value(val)
@@ -660,7 +661,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				Ok(_) => Err(Error::internal("Expected array response from import".to_string())),
 				Err(e) => Err(crate::Error::serialization(
 					format!(
-						"The server returned an unexpected response: Failed to deserialize flatbuffers payload: {e:?}"
+						"The server returned an unexpected response: Failed to deserialize CBOR payload: {e:?}"
 					),
 					SerializationError::Deserialization,
 				)),
@@ -830,8 +831,8 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
-	let body = surrealdb_types::encode(&req_value)
-		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
+	let body = surrealdb_rpc::wire::encode(req_value)
+		.map_err(|x| format!("Failed to serialize to CBOR: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!(
 				"Tried to send a value which could not be serialized: {e}"
@@ -850,8 +851,9 @@ async fn send_request(
 		.map_err(crate::std_error_to_types_error)?;
 	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let response: DbResponse = surrealdb_types::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
+	let response = surrealdb_rpc::wire::decode(&bytes)
+		.and_then(|v| Ok(DbResponse::from_value(v)?))
+		.map_err(|x| format!("Failed to deserialize CBOR payload: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
 		})?;
@@ -1544,7 +1546,7 @@ mod tests {
 	/// A successful RPC answer.
 	fn ok() -> Answer {
 		let response = DbResponse::success(None, None, DbResult::Other(Value::None));
-		(200, surrealdb_types::encode(&response.into_value()).unwrap())
+		(200, surrealdb_rpc::wire::encode(response.into_value()).unwrap())
 	}
 
 	/// Answers one request per entry in `answers`, each on its own

@@ -166,7 +166,8 @@ trait WsMessage: Sized + Clone + Unpin + Send {
 /// Serialize a router request to a WebSocket message.
 fn serialize_request<M: WsMessage>(request: RouterRequest) -> M {
 	let request_value = request.into_value();
-	let payload = surrealdb_types::encode(&request_value).expect("router request should serialize");
+	let payload =
+		surrealdb_rpc::wire::encode(request_value).expect("router request should serialize");
 	M::binary(payload)
 }
 
@@ -834,7 +835,7 @@ async fn handle_parse_error(
 		session_id: Option<Uuid>,
 	}
 
-	match surrealdb_types::decode::<ErrorResponse>(binary) {
+	match surrealdb_rpc::wire::decode(binary).and_then(|v| Ok(ErrorResponse::from_value(v)?)) {
 		Ok(ErrorResponse {
 			id,
 			session_id,
@@ -1678,7 +1679,7 @@ mod tests {
 		let mut envelope = crate::types::Object::new();
 		envelope.insert("id".to_string(), Value::None);
 		envelope.insert("session".to_string(), Value::Uuid(session_id.into()));
-		let binary = surrealdb_types::encode(&Value::Object(envelope)).unwrap();
+		let binary = surrealdb_rpc::wire::encode(Value::Object(envelope)).unwrap();
 
 		handle_parse_error(TypesError::internal("unreadable".to_string()), &binary, &sessions)
 			.await;

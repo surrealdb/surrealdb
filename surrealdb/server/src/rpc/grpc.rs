@@ -1495,23 +1495,6 @@ impl SurrealDbService for GrpcService {
 		}))))
 	}
 
-	type ExportDirectoryStream = ResponseStream<rpc::ExportDirectoryResponse>;
-
-	/// Directory-format export is not served.
-	///
-	/// The format is a multi-file layout with its own versioning, compression
-	/// and parallelism, and SurrealDB produces only the single SurrealQL
-	/// stream that `ExportSurql` serves. `GetCapabilities` does not advertise
-	/// `EXPORT_DIRECTORY`.
-	async fn export_directory(
-		&self,
-		_request: Request<rpc::ExportDirectoryRequest>,
-	) -> Result<Response<Self::ExportDirectoryStream>, Status> {
-		Err(Status::unimplemented(
-			"This server does not produce directory-format exports; use ExportSurql",
-		))
-	}
-
 	type ExportMlModelStream = ResponseStream<rpc::ExportMlModelResponse>;
 
 	async fn export_ml_model(

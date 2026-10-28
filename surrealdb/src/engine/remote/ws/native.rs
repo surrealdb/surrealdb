@@ -92,7 +92,10 @@ pub(crate) async fn connect(
 		Error::validation(format!("Invalid URL: {}", err), ValidationError::InvalidRequest)
 	})?;
 
-	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
+	request.headers_mut().insert(
+		SEC_WEBSOCKET_PROTOCOL,
+		HeaderValue::from_static(surrealdb_rpc::wire::PROTOCOLS_HEADER),
+	);
 
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(
@@ -375,15 +378,16 @@ mod tests {
 
 		let vector = Value::Array(Array::from(vector));
 
-		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
-		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
+		const CBOR: &str = "CBOR Vec<Value>";
+		const CBOR_COMPRESSED: &str = "CBOR Compressed Vec<Value>";
 		{
-			let (duration, payload) = timed(&|| surrealdb_types::encode(&vector).unwrap());
-			results.push((payload.len(), FLATBUFFERS, duration, 1.0));
+			let (duration, payload) =
+				timed(&|| surrealdb_rpc::wire::encode(vector.clone()).unwrap());
+			results.push((payload.len(), CBOR, duration, 1.0));
 
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
-			results.push((payload.len(), FLATBUFFERS_COMPRESSED, duration, 1.0));
+			results.push((payload.len(), CBOR_COMPRESSED, duration, 1.0));
 		}
 
 		results.sort_by_key(|(a, _, _, _)| *a);
@@ -392,6 +396,6 @@ mod tests {
 		}
 
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(results, vec![FLATBUFFERS_COMPRESSED, FLATBUFFERS])
+		assert_eq!(results, vec![CBOR_COMPRESSED, CBOR])
 	}
 }

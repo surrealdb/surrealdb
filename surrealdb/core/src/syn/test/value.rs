@@ -1,5 +1,7 @@
+use surrealdb_types::Table as PublicTable;
+
 use crate::syn;
-use crate::types::{PublicRecordIdKey, PublicTable, PublicValue};
+use crate::types::{PublicRecordIdKey, PublicValue};
 
 /// A record id read from a string is the whole string: the callers that read
 /// one (casts, token claims, CBOR record ids) never act on a prefix of it.

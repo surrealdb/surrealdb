@@ -25,6 +25,8 @@ convert = ["dep:async-channel", "dep:url", "dep:semver"]
 reqwest = ["dep:reqwest"]
 # Value <-> surrealdb_protocol::proto::v1::Value conversions, for gRPC engines.
 proto = ["dep:prost", "surrealdb-protocol/proto"]
+# Value <-> CBOR, the `cbor` and `cbor.2` wire formats.
+cbor = ["dep:ciborium"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -67,6 +69,7 @@ tracing.workspace = true
 ulid.workspace = true
 rand.workspace = true
 prost = { workspace = true, optional = true }
+ciborium = { workspace = true, optional = true }
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]

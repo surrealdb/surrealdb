@@ -125,10 +125,10 @@ async fn router_reconnect(state: &RouterState, endpoint: &Endpoint) {
 	loop {
 		trace!("Reconnecting...");
 
-		// Build WebSocket URL with flatbuffers protocol negotiation
+		// Build WebSocket URL with CBOR protocol negotiation
 		let ws_url = endpoint.url.as_str();
 
-		match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+		match connect_with_protocols(ws_url, &surrealdb_rpc::wire::PROTOCOLS).await {
 			Ok(socket) => {
 				let (new_sink, new_stream) = socket.split();
 				state.update_connection(new_sink, new_stream).await;
@@ -160,9 +160,9 @@ pub(crate) async fn run_router(
 	route_rx: Receiver<Route>,
 	session_rx: crate::RouterSessions,
 ) {
-	// Connect to the WebSocket server with flatbuffers protocol negotiation
+	// Connect to the WebSocket server with CBOR protocol negotiation
 	let ws_url = endpoint.url.as_str();
-	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+	let socket = match connect_with_protocols(ws_url, &surrealdb_rpc::wire::PROTOCOLS).await {
 		Ok(socket) => socket,
 		Err(error) => {
 			conn_tx

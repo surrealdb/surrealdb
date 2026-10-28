@@ -18,7 +18,7 @@ arbitrary = ["dep:arbitrary"]
 common = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-iam = { workspace = true }
-surrealdb-types = { workspace = true }
+surrealdb-types = { workspace = true, features = ["cbor"] }
 anyhow = { workspace = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 humantime = { workspace = true }

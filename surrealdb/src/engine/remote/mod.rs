@@ -116,7 +116,7 @@ use crate::types::{Array, SurrealValue, Value};
 ///
 /// This struct serializes as if it is a crate::types::Value::Object.
 ///
-/// This is the request shape of the JSON/CBOR/flatbuffers wire the WebSocket
+/// This is the request shape of the JSON/CBOR wire the WebSocket
 /// and HTTP engines speak; gRPC has its own generated messages and needs
 /// none of it.
 #[cfg(any(ws_engine, http_engine))]
@@ -510,8 +510,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| surrealdb_types::encode(i).unwrap(),
-			|b| surrealdb_types::decode(&b).unwrap(),
+			|i| surrealdb_rpc::wire::encode(i.clone()).unwrap(),
+			|b| surrealdb_rpc::wire::decode(&b).unwrap(),
 		);
 	}
 }
