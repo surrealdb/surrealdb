@@ -23819,3 +23819,54 @@ async fn a_rebuild_wipes_its_index_a_page_to_a_batch() -> Result<()> {
 	assert_eq!(index_entry_keys(&ds, "t", "ix").await?, first);
 	Ok(())
 }
+
+/// A build whose initial scan runs on several tasks reads a plain-field column
+/// off each stored record in place, and falls back to the decoded record where
+/// the record does not hold the path through objects alone. Either way the
+/// index holds exactly the entries a serial scan builds, and the ones the
+/// writes of the same records build into an index defined before them.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn a_parallel_scan_indexes_plain_fields_as_a_serial_scan_does() -> Result<()> {
+	const SEED: &str = "
+		CREATE |t:1..=300| SET a = rand::int(0, 9), n = { b: 'x', c: { d: 1 } };
+		CREATE t:missing SET n = { c: { d: 2 } };
+		CREATE t:nulls SET a = NULL, n = NULL;
+		CREATE t:array SET a = [1, 2], n = [{ b: 'y' }, { b: 'z' }];
+		CREATE t:scalar SET a = 'text', n = 'not an object';
+		CREATE t:deep SET a = { v: 1 }, n = { b: { e: [1, 2] }, c: { d: 3 } };
+		CREATE t:link SET a = 5, n = t:deep;
+	";
+	const INDEX: &str = "ix ON t FIELDS a, n.b, n.c.d";
+	let parallel = |tasks: &str| {
+		Datastore::builder()
+			.without_maintenance_tasks()
+			.with_config(
+				surrealdb_cnf::ConfigMap::empty().with_key_value("index_build_parallelism", tasks),
+			)
+			.build_with_path("memory")
+	};
+	let session = Session::owner().with_ns("test").with_db("test");
+	let mut built = Vec::new();
+	for (tasks, define_first) in [("4", false), ("serial", false), ("4", true)] {
+		let ds = parallel(tasks).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+		if define_first {
+			execute_all(&ds, &session, &format!("DEFINE INDEX {INDEX}")).await?;
+		}
+		execute_all(&ds, &session, SEED).await?;
+		// The records are the same in every datastore.
+		execute_all(&ds, &session, "UPDATE |t:1..=300| SET a = <int> record::id(id) % 10").await?;
+		if !define_first {
+			execute_all(&ds, &session, &format!("DEFINE INDEX {INDEX} CONCURRENTLY")).await?;
+			wait_for_index_ready(&ds, &session, "t", "ix").await?;
+		}
+		built.push(index_entry_keys(&ds, "t", "ix").await?);
+	}
+	assert!(built[0].len() > 300, "{}", built[0].len());
+	assert_eq!(built[0], built[1], "a parallel scan builds what a serial scan does");
+	assert_eq!(built[0], built[2], "a build holds what the writes of its records do");
+	Ok(())
+}

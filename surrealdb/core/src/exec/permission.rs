@@ -39,7 +39,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use surrealdb_strand::TableName;
+use surrealdb_strand::{Strand, TableName};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{
@@ -508,6 +508,10 @@ pub(crate) struct PhysicalIndexEntry {
 	/// definition holds them, because the values they produce are the index
 	/// key and the key's order is the definition's.
 	cols: Vec<Clause>,
+	/// For each column of `cols` that is a path of plain field names, those
+	/// names, so the column is read off the image without running its clause
+	/// ([`field_path_value`]).
+	paths: Vec<Option<Vec<Strand>>>,
 	/// A `COUNT` index's `WHERE` guard; `None` for every other index kind and
 	/// for an unguarded count index.
 	guard: Option<Clause>,
@@ -562,6 +566,7 @@ pub(crate) async fn index_entry_physical(
 	for col in columns.iter() {
 		cols.push(index_column_physical(col, planner).await?);
 	}
+	let paths = columns.iter().map(field_path).collect();
 	let guard = match &ix.count_cond {
 		Some(cond) => {
 			let logical = crate::expr::logical::lower_expr(cond.0.clone());
@@ -580,6 +585,7 @@ pub(crate) async fn index_entry_physical(
 	};
 	Ok(PhysicalIndexEntry {
 		cols,
+		paths,
 		guard,
 		reads_record_id,
 	})
@@ -617,6 +623,22 @@ impl PhysicalIndexEntry {
 		self.reads_record_id
 	}
 
+	/// The field names of each column, when every column is a path of plain
+	/// fields that does not start at the record's `id` and the index has no
+	/// guard: the values such an index holds for a record are the record's
+	/// fields at those paths, wherever every step is an object holding the next
+	/// field ([`field_path_value`]).
+	#[cfg_attr(all(target_family = "wasm", target_os = "unknown"), allow(dead_code))]
+	pub(crate) fn field_paths(&self) -> Option<Vec<&[Strand]>> {
+		if self.guard.is_some() {
+			return None;
+		}
+		self.paths
+			.iter()
+			.map(|path| path.as_deref().filter(|path| path[0].as_str() != "id"))
+			.collect()
+	}
+
 	/// The values this index holds for one image of the record, or `None` when
 	/// the image is nullish and the index holds nothing for it.
 	///
@@ -631,9 +653,14 @@ impl PhysicalIndexEntry {
 		if image.is_nullish() {
 			return Ok(None);
 		}
-		let base = index_entry_eval(exec, image);
+		let mut base = None;
 		let mut out = Vec::with_capacity(self.cols.len());
-		for col in &self.cols {
+		for (col, path) in self.cols.iter().zip(&self.paths) {
+			if let Some(value) = path.as_deref().and_then(|path| field_path_value(image, path)) {
+				out.push(value);
+				continue;
+			}
+			let base = base.get_or_insert_with(|| index_entry_eval(exec, image));
 			out.push(col.evaluate(base.with_value_and_doc(image)).await.catch_return()?);
 		}
 		Ok(Some(out))
@@ -657,6 +684,48 @@ impl PhysicalIndexEntry {
 		let v = guard.evaluate(base.with_value_and_doc(image)).await.catch_return()?;
 		Ok(Some(v.is_truthy()))
 	}
+}
+
+/// The field names of `col` when it is nothing but a path of plain fields,
+/// such as `status` or `geography.code`.
+fn field_path(col: &Idiom) -> Option<Vec<Strand>> {
+	col.0
+		.iter()
+		.map(|part| match part {
+			Part::Field(name) => Some(name.clone()),
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Where(_)
+			| Part::Lookup(_)
+			| Part::Value(_)
+			| Part::Start(_)
+			| Part::Method(..)
+			| Part::Destructure(_)
+			| Part::Optional
+			| Part::Recurse(..)
+			| Part::Doc
+			| Part::RepeatRecurse => None,
+		})
+		.collect::<Option<Vec<_>>>()
+		.filter(|path| !path.is_empty())
+}
+
+/// The value at `path` in `image`, read directly where every step of the path
+/// is an object that holds the next field, which is what the column's clause
+/// reads there too. `None` everywhere else — a missing field, an array the
+/// path fans out over, a record link it would fetch through — leaves the
+/// column to its clause.
+fn field_path_value(image: &Value, path: &[Strand]) -> Option<Value> {
+	let mut current = image;
+	for name in path {
+		let Value::Object(object) = current else {
+			return None;
+		};
+		current = object.get(name.as_str())?;
+	}
+	Some(current.clone())
 }
 
 /// The evaluation context an index's columns and `COUNT` guard read, for one

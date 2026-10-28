@@ -583,6 +583,12 @@ impl Building {
 			} else {
 				Vec::new()
 			};
+			// With no queued mutation to baseline from, and none set aside for
+			// the merge to look up among the batch's records, an unguarded COUNT
+			// index counts each record without reading what it holds.
+			let unread = !markers_held
+				&& !count_progress.as_ref().is_some_and(CountPrimaryProgress::holds_early)
+				&& self.kind().indexes_records_unread();
 			// The generations of the batch's records, checked as each is read.
 			let mut layouts = LayoutSet::new(self.ix_key.ns, self.ix_key.db, None);
 			// Index the records.
@@ -600,6 +606,29 @@ impl Building {
 					key: key.id.into_owned(),
 				}
 				.into();
+				if unread {
+					// The merge looks a record up among the live ones only for a
+					// marker, and this batch's snapshot holds none, so only the
+					// span's end is kept.
+					if count_progress.is_some() {
+						last_live_id = Some(rid.key.clone());
+					}
+					self.index_initial_values(
+						ctx,
+						&az_fn,
+						&batch.fulltext,
+						InitialIndexValue {
+							rid: rid.as_ref(),
+							opt_values: Some(Vec::new()),
+							count_cond_match: None,
+							doc_id: None,
+						},
+						&mut rc,
+					)
+					.await?;
+					count += 1;
+					continue;
+				}
 				// The record as it was written: an id its encoding left out is
 				// the key's. Its generation is admitted against the table's
 				// layouts first. Descriptors are immutable, and one is retired

@@ -54,6 +54,11 @@ impl CountPrimaryProgress {
 		}
 	}
 
+	/// Whether a marker is set aside for a record of a later span.
+	pub(super) fn holds_early(&self) -> bool {
+		!self.early.is_empty()
+	}
+
 	/// Takes the markers set aside for records up to `through`, or every one
 	/// once the scan has no live record left.
 	fn take_due(

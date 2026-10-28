@@ -112,6 +112,12 @@ impl<'a> Kind<'a> {
 		matches!(self.0.index, Index::Idx | Index::Uniq)
 	}
 
+	/// Whether the initial scan can index a record with no queued mutation without decoding it:
+	/// an unguarded COUNT index counts every record, whatever it holds.
+	pub(super) fn indexes_records_unread(self) -> bool {
+		matches!(self.0.index, Index::Count(_)) && self.0.count_cond.is_none()
+	}
+
 	/// Whether this kind's initial-batch sink runs a pass over what it built once the scan ends
 	/// ([`InitialBatchSink::post_scan_step`]).
 	pub(super) fn has_post_scan_pass(self) -> bool {

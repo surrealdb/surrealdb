@@ -22,14 +22,16 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use surrealdb_strand::Strand;
 
 use super::builder::Building;
 use super::kind::InitialBatchSink;
 use super::replay::{InitialBatch, InitialIndexValue, entry_image};
 use super::{BuildGeneration, IndexBuildPhase};
-use crate::catalog::Record;
+use crate::catalog::{Record, TableLayouts};
 use crate::ctx::FrozenContext;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
+use crate::exec::object_extract::stored_record_object_in;
 use crate::idx::config::BuildParallelism;
 use crate::idx::docids::TableDocIds;
 use crate::key::schema::RecordKey;
@@ -66,6 +68,32 @@ enum BatchOutcome {
 	Indexed(usize),
 	/// The build was aborted, and the batch committed nothing.
 	Aborted,
+}
+
+/// The values at `paths` in the stored record `bytes`, whose generation
+/// `layouts` admitted, read in place: `None` unless the record is a document
+/// that holds every path through objects alone, which is where the index's
+/// columns read the same values off the decoded record.
+fn fields_in_place(
+	bytes: &[u8],
+	layouts: Option<&TableLayouts>,
+	paths: &[&[Strand]],
+) -> Option<Vec<Value>> {
+	// No column reads nothing, so the record need not even be parsed.
+	if paths.is_empty() {
+		return Some(Vec::new());
+	}
+	let data = stored_record_object_in(bytes, layouts)??;
+	let mut values = Vec::with_capacity(paths.len());
+	for path in paths {
+		let (last, steps) = path.split_last()?;
+		let mut object = data;
+		for step in steps {
+			object = object.get(step.as_str()).ok()??.as_ordered_object().ok()??;
+		}
+		values.push(object.get(last.as_str()).ok()??.decode().ok()?);
+	}
+	Some(values)
 }
 
 impl Building {
@@ -342,6 +370,15 @@ impl Building {
 			let replay = crate::exec::migrate::replay_for(&exec, self.ikb.table(), None)
 				.await
 				.map_err(crate::exec::migrate::into_error)?;
+			// An index whose columns are plain fields reads them off each stored
+			// record in place, rather than decoding the whole record, wherever
+			// the record holds every one of them. A table with migration steps
+			// to replay is read whole.
+			let fields = if replay.is_none() {
+				entry.field_paths()
+			} else {
+				None
+			};
 			let mut layouts = LayoutSet::new(self.ix_key.ns, self.ix_key.db, None);
 			let mut records = Vec::with_capacity(values.len());
 			for (k, v) in values {
@@ -360,6 +397,17 @@ impl Building {
 				// the table's layouts, as the serial scan reads it.
 				let (stamp, admitted) =
 					layouts.admit_with_layouts(&tx, &rid.table, v.as_slice()).await?;
+				if let Some(paths) = &fields
+					&& let Some(values) =
+						fields_in_place(v.as_slice(), admitted.map(|held| &**held), paths)
+				{
+					records.push(PreparedRecord {
+						rid,
+						opt_values: Some(values),
+						count_cond_match: None,
+					});
+					continue;
+				}
 				let mut val = Record::decode_admitted_as_written(
 					v.as_slice(),
 					admitted.map(|held| &**held),
