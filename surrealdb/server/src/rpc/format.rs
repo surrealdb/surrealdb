@@ -57,6 +57,12 @@ fn encode_response(format: RowFormat, res: DbResponse) -> Result<Vec<u8>, TypesE
 	surrealdb_core::rpc::format::encoded::encode_response(format, res).map_err(|_| parse_error())
 }
 
+/// [`encode_response`] as shared bytes, written around CBOR rows where they lie.
+fn encode_response_bytes(format: RowFormat, res: DbResponse) -> Result<Bytes, TypesError> {
+	surrealdb_core::rpc::format::encoded::encode_response_bytes(format, res)
+		.map_err(|_| parse_error())
+}
+
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
 	fn req_ws(&self, msg: Message, recursion_limit: usize) -> Result<Request, TypesError>;
@@ -176,12 +182,12 @@ impl WsFormat for Format {
 				Ok((val.len(), Message::Text(val.into())))
 			}
 			Format::Cbor => {
-				let val = encode_response(RowFormat::Cbor, res)?;
-				Ok((val.len(), Message::Binary(val.into())))
+				let val = encode_response_bytes(RowFormat::Cbor, res)?;
+				Ok((val.len(), Message::Binary(val)))
 			}
 			Format::Cbor2 => {
-				let val = encode_response(RowFormat::Cbor2, res)?;
-				Ok((val.len(), Message::Binary(val.into())))
+				let val = encode_response_bytes(RowFormat::Cbor2, res)?;
+				Ok((val.len(), Message::Binary(val)))
 			}
 			Format::Shaped => {
 				let val = encode_response(RowFormat::Shaped, res)?;
@@ -251,14 +257,14 @@ impl HttpFormat for Format {
 
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: DbResponse) -> Result<AxumResponse, TypesError> {
-		let val = match self {
-			Format::Json => encode_response(RowFormat::Json, res)?,
-			Format::Cbor => encode_response(RowFormat::Cbor, res)?,
-			Format::Cbor2 => encode_response(RowFormat::Cbor2, res)?,
-			Format::Shaped => encode_response(RowFormat::Shaped, res)?,
+		let val: Bytes = match self {
+			Format::Json => encode_response(RowFormat::Json, res)?.into(),
+			Format::Cbor => encode_response_bytes(RowFormat::Cbor, res)?,
+			Format::Cbor2 => encode_response_bytes(RowFormat::Cbor2, res)?,
+			Format::Shaped => encode_response(RowFormat::Shaped, res)?.into(),
 			Format::Flatbuffers => {
 				let res_value = res.into_value();
-				surrealdb_types::encode(&res_value).map_err(|_| parse_error())?
+				surrealdb_types::encode(&res_value).map_err(|_| parse_error())?.into()
 			}
 			Format::Unsupported => return Err(invalid_request()),
 		};

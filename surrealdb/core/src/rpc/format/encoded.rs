@@ -250,8 +250,17 @@ pub struct QueryCollector {
 	#[cfg(feature = "shaped")]
 	shaper: ValueShaper,
 	/// Statements with a payload but no `Finished` yet, by index.
-	pending: Vec<(usize, EncodedPayload)>,
+	pending: Vec<(usize, Pending)>,
 	results: Vec<EncodedQueryResult>,
+}
+
+/// What a statement has answered before its `Finished` item.
+#[derive(Debug)]
+enum Pending {
+	/// Its rows, in the parts they arrived in, joined once the statement finishes.
+	Rows(Vec<EncodedRows>),
+	/// One value that is not a list of rows.
+	Value(Value),
 }
 
 impl QueryCollector {
@@ -265,24 +274,23 @@ impl QueryCollector {
 		}
 	}
 
-	fn rows_for(&mut self, index: usize) -> &mut EncodedRows {
-		let empty = || EncodedPayload::Rows(EncodedRows::empty(self.format, decode_rows));
+	fn rows_for(&mut self, index: usize) -> &mut Vec<EncodedRows> {
 		let at = match self.pending.iter().position(|(i, _)| *i == index) {
 			// A statement contributes rows or one value, never both.
 			Some(at) => {
-				if matches!(self.pending[at].1, EncodedPayload::Value(_)) {
-					self.pending[at].1 = empty();
+				if matches!(self.pending[at].1, Pending::Value(_)) {
+					self.pending[at].1 = Pending::Rows(Vec::new());
 				}
 				at
 			}
 			None => {
-				self.pending.push((index, empty()));
+				self.pending.push((index, Pending::Rows(Vec::new())));
 				self.pending.len() - 1
 			}
 		};
 		match &mut self.pending[at].1 {
-			EncodedPayload::Rows(rows) => rows,
-			EncodedPayload::Value(_) => unreachable!("a statement's payload was just made rows"),
+			Pending::Rows(rows) => rows,
+			Pending::Value(_) => unreachable!("a statement's payload was just made rows"),
 		}
 	}
 
@@ -293,11 +301,13 @@ impl QueryCollector {
 				index,
 				rows,
 			} => {
-				if rows.format() == self.format {
-					self.rows_for(index).extend(&rows)?;
-				} else {
-					let rows = self.rows_of(rows.to_values()?)?;
-					self.rows_for(index).extend(&rows)?;
+				let rows = match rows.format() == self.format {
+					true => rows,
+					false => self.rows_of(rows.to_values()?)?,
+				};
+				let parts = self.rows_for(index);
+				if !rows.is_empty() {
+					parts.push(rows);
 				}
 			}
 			QueryStreamItem::Rows {
@@ -305,14 +315,17 @@ impl QueryCollector {
 				values,
 			} => {
 				let rows = self.rows_of(values)?;
-				self.rows_for(index).extend(&rows)?;
+				let parts = self.rows_for(index);
+				if !rows.is_empty() {
+					parts.push(rows);
+				}
 			}
 			QueryStreamItem::Value {
 				index,
 				value,
 			} => {
 				self.pending.retain(|(i, _)| *i != index);
-				self.pending.push((index, EncodedPayload::Value(value)));
+				self.pending.push((index, Pending::Value(value)));
 			}
 			QueryStreamItem::Finished {
 				index,
@@ -327,10 +340,23 @@ impl QueryCollector {
 					.map(|at| self.pending.swap_remove(at).1);
 				let result = match error {
 					Some(error) => Err(error),
-					// A statement that streamed no rows answers an empty list.
-					None => Ok(payload.unwrap_or_else(|| {
-						EncodedPayload::Rows(EncodedRows::empty(self.format, decode_rows))
-					})),
+					None => Ok(match payload {
+						Some(Pending::Value(value)) => EncodedPayload::Value(value),
+						Some(Pending::Rows(parts)) => {
+							let head = match self.format {
+								RowFormat::Cbor | RowFormat::Cbor2 => ROW_HEADROOM,
+								RowFormat::Json | RowFormat::Shaped => 0,
+							};
+							EncodedPayload::Rows(EncodedRows::concat(
+								self.format,
+								decode_rows,
+								parts,
+								head,
+							)?)
+						}
+						// A statement that streamed no rows answers an empty list.
+						None => EncodedPayload::Rows(EncodedRows::empty(self.format, decode_rows)),
+					}),
 				};
 				self.results.push(EncodedQueryResult {
 					time,
@@ -359,16 +385,23 @@ impl QueryCollector {
 
 /// Write `rows` as the list they are: for shaped rows, a block whose shapes
 /// are announced in `scope`.
+///
+/// With `hole`, CBOR rows are not written: the list's head is, and `hole` is set to where the
+/// rows' bytes belong.
 fn write_rows(
 	format: RowFormat,
 	rows: &EncodedRows,
 	scope: &mut ShapeScope,
 	out: &mut Vec<u8>,
+	hole: Option<&mut Option<usize>>,
 ) -> anyhow::Result<()> {
 	match format {
 		RowFormat::Cbor | RowFormat::Cbor2 => {
 			cbor_head(out, 4, rows.len() as u64);
-			out.extend_from_slice(rows.bytes());
+			match hole {
+				Some(hole) => *hole = Some(out.len()),
+				None => out.extend_from_slice(rows.bytes()),
+			}
 		}
 		RowFormat::Json => {
 			out.push(b'[');
@@ -462,6 +495,7 @@ fn write_result(
 	format: RowFormat,
 	result: &EncodedQueryResult,
 	out: &mut Vec<u8>,
+	hole: Option<&mut Option<usize>>,
 ) -> anyhow::Result<()> {
 	let payload = match &result.result {
 		Ok(payload) => payload,
@@ -475,7 +509,9 @@ fn write_result(
 	object.key("result")?;
 	match payload {
 		// A buffered result's block is its own shape scope.
-		EncodedPayload::Rows(rows) => write_rows(format, rows, &mut ShapeScope::new(), object.out)?,
+		EncodedPayload::Rows(rows) => {
+			write_rows(format, rows, &mut ShapeScope::new(), object.out, hole)?
+		}
 		EncodedPayload::Value(value) => object.value(value.clone())?,
 	}
 	object.key("status")?;
@@ -494,6 +530,18 @@ pub fn encode_results(
 	results: &[EncodedQueryResult],
 	out: &mut Vec<u8>,
 ) -> anyhow::Result<()> {
+	write_results(format, results, out, None)
+}
+
+/// [`encode_results`], leaving the rows of a single result out where `hole` asks it to
+/// ([`write_rows`]).
+fn write_results(
+	format: RowFormat,
+	results: &[EncodedQueryResult],
+	out: &mut Vec<u8>,
+	mut hole: Option<&mut Option<usize>>,
+) -> anyhow::Result<()> {
+	debug_assert!(hole.is_none() || results.len() == 1, "a hole is left for one result's rows");
 	if format.envelope() == RowFormat::Json {
 		out.push(b'[');
 	} else {
@@ -503,7 +551,7 @@ pub fn encode_results(
 		if format == RowFormat::Json && i > 0 {
 			out.push(b',');
 		}
-		write_result(format, result, out)?;
+		write_result(format, result, out, hole.as_deref_mut())?;
 	}
 	if format == RowFormat::Json {
 		out.push(b']');
@@ -513,14 +561,17 @@ pub fn encode_results(
 
 /// Write the response envelope `{ id, result, session }`, in key order with
 /// absent keys left out, with `result` written by `result`.
+///
+/// `capacity` is what the response is expected to take, so that the rows are copied in once.
 fn write_envelope(
 	format: RowFormat,
 	id: Option<Value>,
 	session_id: Option<uuid::Uuid>,
+	capacity: usize,
 	result: impl FnOnce(&mut Vec<u8>) -> anyhow::Result<()>,
 ) -> anyhow::Result<Vec<u8>> {
 	let entries = 1 + usize::from(id.is_some()) + usize::from(session_id.is_some());
-	let mut out = Vec::new();
+	let mut out = Vec::with_capacity(capacity);
 	let mut object = ObjectWriter::open(format, &mut out, entries);
 	if let Some(id) = id {
 		object.key("id")?;
@@ -558,7 +609,59 @@ pub fn encode_response(format: RowFormat, response: DbResponse) -> anyhow::Resul
 			return Ok(out);
 		}
 	};
-	write_envelope(format, id, session_id, |out| encode_results(format, &results, out))
+	let capacity =
+		ENVELOPE_SLACK + results.iter().map(EncodedQueryResult::encoded_len).sum::<usize>();
+	write_envelope(format, id, session_id, capacity, |out| encode_results(format, &results, out))
+}
+
+/// What a response takes beyond its rows' bytes, for its envelope and each result's other fields,
+/// in most cases.
+const ENVELOPE_SLACK: usize = 256;
+
+/// The bytes left free ahead of CBOR rows as they are encoded, so that the response written
+/// around the rows of a single statement fits in front of them ([`encode_response_bytes`]).
+pub(crate) const ROW_HEADROOM: usize = 128;
+
+/// [`encode_response`] as shared bytes. The response to a query of one statement whose rows are
+/// CBOR is written around the rows where they lie, which copies none of them when the headroom
+/// ahead of them holds what comes first ([`EncodedRows::wrap`]).
+pub fn encode_response_bytes(
+	format: RowFormat,
+	response: DbResponse,
+) -> anyhow::Result<bytes::Bytes> {
+	let single_rows = matches!(format, RowFormat::Cbor | RowFormat::Cbor2)
+		&& matches!(&response.result, Ok(DbResult::Encoded(results))
+			if results.len() == 1 && matches!(results[0].result, Ok(EncodedPayload::Rows(_))));
+	if !single_rows {
+		return encode_response(format, response).map(bytes::Bytes::from);
+	}
+	let DbResponse {
+		id,
+		session_id,
+		result,
+	} = response;
+	let Ok(DbResult::Encoded(mut results)) = result else {
+		unreachable!("a single result of rows was just matched");
+	};
+	let mut hole = None;
+	let around = write_envelope(format, id, session_id, ENVELOPE_SLACK, |out| {
+		write_results(format, &results, out, Some(&mut hole))
+	})?;
+	let hole = hole.expect("the rows' place is marked");
+	let (prefix, suffix) = around.split_at(hole);
+	let Some(Ok(EncodedPayload::Rows(rows))) = results.pop().map(|r| r.result) else {
+		unreachable!("a single result of rows was just matched");
+	};
+	match rows.wrap(prefix, suffix) {
+		Ok((bytes, start)) => Ok(bytes::Bytes::from(bytes).slice(start..)),
+		Err(rows) => {
+			let mut out = Vec::with_capacity(around.len() + rows.bytes().len());
+			out.extend_from_slice(prefix);
+			out.extend_from_slice(rows.bytes());
+			out.extend_from_slice(suffix);
+			Ok(out.into())
+		}
+	}
 }
 
 #[cfg(feature = "shaped")]
@@ -612,13 +715,13 @@ pub fn encode_shaped_notification(
 		anyhow::bail!("a notification that is not an object");
 	};
 	let object = object.into_inner();
-	write_envelope(RowFormat::Cbor2, id, session_id, |out| {
+	write_envelope(RowFormat::Cbor2, id, session_id, ENVELOPE_SLACK, |out| {
 		let mut writer = ObjectWriter::open(RowFormat::Cbor2, out, object.len());
 		for (key, value) in object {
 			writer.key(&key)?;
 			if key == "result" {
 				let rows = shaped_rows_of_values(shaper, std::slice::from_ref(&value))?;
-				write_rows(RowFormat::Shaped, &rows, scope, writer.out)?;
+				write_rows(RowFormat::Shaped, &rows, scope, writer.out, None)?;
 			} else {
 				writer.value(value)?;
 			}
@@ -644,7 +747,7 @@ pub fn encode_stream_rows(
 ) -> anyhow::Result<Vec<u8>> {
 	anyhow::ensure!(rows.format() == format, "rows encoded in another format");
 	let index = i64::try_from(index)?;
-	write_envelope(format, id, session_id, |out| {
+	write_envelope(format, id, session_id, ENVELOPE_SLACK + rows.bytes().len(), |out| {
 		// `{ index, stream, values }`, in key order.
 		let mut object = ObjectWriter::open(format, out, 3);
 		object.key("index")?;
@@ -652,7 +755,7 @@ pub fn encode_stream_rows(
 		object.key("stream")?;
 		object.value(Value::String("rows".to_owned()))?;
 		object.key("values")?;
-		write_rows(format, rows, scope, object.out)?;
+		write_rows(format, rows, scope, object.out, None)?;
 		object.close();
 		Ok(())
 	})
@@ -802,7 +905,7 @@ pub(crate) mod tests {
 
 	#[cfg(feature = "shaped")]
 	use super::decode_dynamic;
-	use super::{QueryCollector, encode_response, encode_results};
+	use super::{QueryCollector, encode_response, encode_response_bytes, encode_results};
 	use crate::catalog::providers::CatalogProvider;
 	use crate::dbs::Session;
 	use crate::kvs::{Datastore, QueryRequest, TransactionType};
@@ -977,6 +1080,7 @@ pub(crate) mod tests {
 				);
 				assert_eq!(bare, expected, "{format:?} `{sql}`");
 
+				assert_bytes_match(format, &rows);
 				let id = Some(Value::from_t(7i64));
 				let session_id = Some(uuid::Uuid::nil());
 				let enveloped = encode_response(
@@ -994,6 +1098,57 @@ pub(crate) mod tests {
 				);
 				assert_eq!(enveloped, expected, "{format:?} enveloped `{sql}`");
 			}
+		}
+	}
+
+	/// [`encode_response_bytes`] answers what [`encode_response`] does for `rows`, whatever the
+	/// request id (one too long for the rows' headroom among them) and session.
+	fn assert_bytes_match(format: RowFormat, rows: &[surrealdb_rpc::EncodedQueryResult]) {
+		let long = "an id longer than the headroom kept ahead of the rows".repeat(4);
+		for id in [None, Some(Value::from_t(7i64)), Some(Value::String(long))] {
+			for session_id in [None, Some(uuid::Uuid::nil())] {
+				let response = || {
+					DbResponse::success(id.clone(), session_id, DbResult::Encoded(rows.to_vec()))
+				};
+				let expected = encode_response(format, response()).expect("encodes");
+				let bytes = encode_response_bytes(format, response()).expect("encodes");
+				assert_eq!(
+					&bytes[..],
+					&expected[..],
+					"{format:?} id {id:?} session {session_id:?}"
+				);
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn rows_of_many_frames_are_written_around_where_they_lie() {
+		let ds = datastore().await;
+		let seed = "FOR $i IN 0..2500 { CREATE many SET n = $i, s = 'row ' + <string> $i };";
+		for result in ds.execute(seed, &session(), None).await.expect("the seed runs") {
+			result.result.expect("the seed succeeds");
+		}
+		let sql = "SELECT * FROM many ORDER BY n";
+		let values = untimed(ds.execute(sql, &session(), None).await.expect("the query runs"));
+		for format in [RowFormat::Cbor, RowFormat::Cbor2, RowFormat::Json] {
+			let (rows, frames) = encoded(&ds, sql, format).await;
+			assert!(frames > 1, "{format:?}: the rows arrive in several frames");
+			assert_bytes_match(format, &rows);
+			let id = Some(Value::from_t(1i64));
+			let bytes = encode_response_bytes(
+				format,
+				DbResponse::success(id.clone(), None, DbResult::Encoded(rows)),
+			)
+			.expect("encodes");
+			let expected = encode_values(
+				format,
+				surrealdb_types::SurrealValue::into_value(DbResponse::success(
+					id,
+					None,
+					DbResult::Query(values.clone()),
+				)),
+			);
+			assert_eq!(&bytes[..], &expected[..], "{format:?}");
 		}
 	}
 

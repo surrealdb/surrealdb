@@ -8472,6 +8472,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-util",
  "jsonwebtoken",
  "nix",
  "nu-ansi-term",

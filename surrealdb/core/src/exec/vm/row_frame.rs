@@ -113,13 +113,30 @@ const SHAPED_NOT_BUILT: &str = "this build does not serve shaped frames";
 /// The record field a stored record's key supplies.
 const ID_KEY: &str = "id";
 
+/// The most a frame reserves ahead for the rows it expects ([`RowFrame::expecting`]); past it, a
+/// frame grows as its rows arrive.
+const MAX_EXPECTED_RESERVE: usize = 16 << 20;
+
 /// Rows encoded as CBOR items back to back, or as JSON texts joined by `,`,
 /// with where each ends.
 #[derive(Debug)]
 pub(crate) struct RowFrame {
 	format: RowFormat,
+	/// `head` bytes of headroom, then the rows.
 	data: Vec<u8>,
+	/// How many bytes in front of the rows are free: for CBOR rows, room for the response
+	/// written around them ([`EncodedRows::wrap`]); none for other rows.
+	head: usize,
+	/// Where each row ends, past the first row's start.
 	ends: Vec<u32>,
+	/// How many rows the frame is expected to hold before they are taken: once the first row is
+	/// written, the frame reserves room for this many rows of its size, so that a frame filled
+	/// row by row is not grown, and copied, a doubling at a time.
+	expected_rows: usize,
+	/// The capacities of `data` and `ends` when their rows were last taken, which the next row
+	/// reserves: rows taken in batches are written into buffers of the size the last batch
+	/// needed, and a frame taken for the last time leaves no buffer behind.
+	taken_capacity: (usize, usize),
 	/// A reused buffer for the text renderings JSON rows hold.
 	text: String,
 	/// An object's stored entries, as offsets into the stored value being
@@ -240,13 +257,23 @@ impl RowFrame {
 		Self {
 			format,
 			data: Vec::new(),
+			head: 0,
 			ends: Vec::new(),
+			expected_rows: 0,
+			taken_capacity: (0, 0),
 			text: String::new(),
 			scratch: Vec::new(),
 			id_text: Vec::new(),
 			#[cfg(feature = "shaped")]
 			shaped: (format == RowFormat::Shaped).then(Box::default),
 		}
+	}
+
+	/// The frame, expecting `rows` rows before they are taken: once its first row is written it
+	/// reserves room for that many rows of the size.
+	pub(crate) fn expecting(mut self, rows: usize) -> Self {
+		self.expected_rows = rows;
+		self
 	}
 
 	#[cfg(feature = "shaped")]
@@ -259,11 +286,13 @@ impl RowFrame {
 	}
 
 	/// The frame's rows, handed on as [`EncodedRows`]; the frame is left
-	/// empty, with buffers of the same capacity for the rows that follow.
+	/// empty, and its next row reserves buffers of the capacity these had.
 	pub(crate) fn take_encoded(&mut self) -> EncodedRows {
 		let (data_capacity, ends_capacity) = (self.data.capacity(), self.ends.capacity());
-		let bytes = std::mem::replace(&mut self.data, Vec::with_capacity(data_capacity));
-		let ends = std::mem::replace(&mut self.ends, Vec::with_capacity(ends_capacity));
+		self.taken_capacity = (data_capacity, ends_capacity);
+		let bytes = std::mem::take(&mut self.data);
+		let head = std::mem::take(&mut self.head);
+		let ends = std::mem::take(&mut self.ends);
 		#[cfg(feature = "shaped")]
 		if let Some(shaped) = &mut self.shaped {
 			let shapes = std::mem::take(&mut shaped.shapes);
@@ -277,7 +306,7 @@ impl RowFrame {
 				crate::rpc::format::decode_rows,
 			);
 		}
-		EncodedRows::new(self.format, bytes, ends, crate::rpc::format::decode_rows)
+		EncodedRows::with_headroom(self.format, bytes, head, ends, crate::rpc::format::decode_rows)
 	}
 
 	/// How many rows the frame holds.
@@ -293,17 +322,18 @@ impl RowFrame {
 			_ if self.format == RowFormat::Json => self.ends[at - 1] as usize + 1,
 			_ => self.ends[at - 1] as usize,
 		};
-		&self.data[start..self.ends[at] as usize]
+		&self.data()[start..self.ends[at] as usize]
 	}
 
 	/// Every row's bytes, back to back.
 	pub(crate) fn data(&self) -> &[u8] {
-		&self.data
+		&self.data[self.head..]
 	}
 
 	/// Drop every row, keeping the buffers' capacity.
 	pub(crate) fn clear(&mut self) {
 		self.data.clear();
+		self.head = 0;
 		self.ends.clear();
 		#[cfg(feature = "shaped")]
 		if let Some(shaped) = &mut self.shaped {
@@ -312,21 +342,46 @@ impl RowFrame {
 		}
 	}
 
+	/// Reserve room for the rows the frame expects, each taken to be `row` bytes long, within
+	/// [`MAX_EXPECTED_RESERVE`].
+	fn reserve_expected(&mut self, row: usize) {
+		let want = row.saturating_mul(self.expected_rows).min(MAX_EXPECTED_RESERVE);
+		let free = self.data.capacity() - self.data.len();
+		if want > free {
+			self.data.reserve(want);
+		}
+		self.ends.reserve(self.expected_rows.saturating_sub(self.ends.len()));
+	}
+
 	/// Run `write` as the next row, which it leaves whole or, on an error,
 	/// not at all.
 	fn row_with(
 		&mut self,
 		write: impl FnOnce(&mut Self) -> anyhow::Result<()>,
 	) -> anyhow::Result<()> {
+		if self.data.is_empty() {
+			if self.data.capacity() == 0 {
+				let (data, ends) = std::mem::take(&mut self.taken_capacity);
+				self.data.reserve(data);
+				self.ends.reserve(ends);
+			}
+			if matches!(self.format, RowFormat::Cbor | RowFormat::Cbor2) {
+				self.head = crate::rpc::format::encoded::ROW_HEADROOM;
+				self.data.resize(self.head, 0);
+			}
+		}
 		let start = self.data.len();
 		if self.format == RowFormat::Json && !self.ends.is_empty() {
 			self.data.push(b',');
 		}
 		match write(self) {
 			Ok(()) => {
-				let end = u32::try_from(self.data.len())
+				let end = u32::try_from(self.data.len() - self.head)
 					.map_err(|_| anyhow::anyhow!("an output frame larger than 4 GiB"))?;
 				self.ends.push(end);
+				if self.ends.len() == 1 && self.expected_rows > 1 {
+					self.reserve_expected(self.data.len() - start);
+				}
 				Ok(())
 			}
 			Err(e) => {

@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, State};
 use axum::response::IntoResponse;
 use axum::routing::options;
@@ -17,6 +16,7 @@ use surrealdb_core::mem::RefusalSite;
 use surrealdb_core::rpc::format::{Format, PROTOCOLS};
 use surrealdb_rpc::DbResponse;
 use surrealdb_rpc::capabilities::RouteTarget;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -29,6 +29,7 @@ use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
+use crate::rpc::socket::{RpcSocket, RpcUpgrade};
 use crate::rpc::websocket::Websocket;
 
 pub fn router() -> Router<Arc<RpcState>> {
@@ -39,7 +40,7 @@ pub fn router() -> Router<Arc<RpcState>> {
 }
 
 async fn get_handler(
-	ws: WebSocketUpgrade,
+	ws: RpcUpgrade,
 	Extension(state): Extension<AppState>,
 	Extension(id): Extension<RequestId>,
 	Extension(mut session): Extension<Session>,
@@ -118,34 +119,37 @@ async fn get_handler(
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(NetError::Request);
 	}
-	// Now let's upgrade the WebSocket connection with comprehensive buffer configuration
+	// The WebSocket's limits and buffers
+	let config = WebSocketConfig::default()
+		// The largest frame accepted, to prevent oversized frames
+		.max_frame_size(Some(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE))
+		// The largest message accepted, to prevent memory exhaustion
+		.max_message_size(Some(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE))
+		// The read buffer for incoming data
+		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
+		// The write buffer for outgoing data
+		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
+		// The write buffer past which backpressure applies
+		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE);
+	// Now let's upgrade the WebSocket connection
 	Ok(ws
 		// Set the potential WebSocket protocols (JSON, CBOR, etc.)
 		.protocols(PROTOCOLS)
-		// Set the maximum WebSocket frame size to prevent oversized frames
-		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Set the maximum WebSocket message size to prevent memory exhaustion
-		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Configure read buffer size for incoming data optimization
-		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
-		// Configure write buffer size for outgoing data optimization
-		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
-		// Set maximum write buffer size to apply backpressure when needed
-		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
-		// Handle WebSocket upgrade failures with appropriate logging
-		.on_failed_upgrade(|err| {
-			warn!("Failed to upgrade WebSocket connection: {err}");
-		})
 		// Handle the WebSocket upgrade and process messages
-		.on_upgrade(move |socket| {
-			handle_socket(Arc::clone(&state.datastore), rpc_state, socket, session, id)
-		}))
+		.on_upgrade(
+			config,
+			// Handle WebSocket upgrade failures with appropriate logging
+			|err| warn!("Failed to upgrade WebSocket connection: {err}"),
+			move |socket| {
+				handle_socket(Arc::clone(&state.datastore), rpc_state, socket, session, id)
+			},
+		))
 }
 
 async fn handle_socket(
 	datastore: Arc<Datastore>,
 	state: Arc<RpcState>,
-	ws: WebSocket,
+	ws: RpcSocket,
 	session: Session,
 	id: Uuid,
 ) {

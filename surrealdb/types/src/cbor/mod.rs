@@ -5,11 +5,13 @@
 //! through the [`RecordIdParser`] it is given, since parsing one needs the SurrealQL parser.
 
 mod convert;
+mod read;
 
 pub use convert::{
 	Ctx, RequestBlocks, TAG_F16, TAG_F32, TAG_I8, TAG_I16, TAG_I32, TAG_U8, TAG_U16, TAG_U32,
 	TAG_U64, from_value, from_value_v2, to_request_value, to_value, to_value_v2,
 };
+pub use read::{MapEntries, map_entries};
 
 use crate::{RecordId, Value};
 
@@ -45,9 +47,10 @@ pub fn decode(
 	recursion_limit: usize,
 	record_id: Option<RecordIdParser>,
 ) -> anyhow::Result<Value> {
-	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	to_value(encoding, record_id)
+	match read::read(bytes, recursion_limit, false, record_id) {
+		Ok((value, _)) => Ok(value),
+		Err(_) => decode_tree(bytes, recursion_limit, false, record_id, false),
+	}
 }
 
 /// The `cbor.2` item at the start of `bytes`; bytes after it are ignored.
@@ -56,9 +59,10 @@ pub fn decode_v2(
 	recursion_limit: usize,
 	record_id: Option<RecordIdParser>,
 ) -> anyhow::Result<Value> {
-	let encoding = ciborium::de::from_reader_with_recursion_limit(bytes, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	to_value_v2(encoding, record_id)
+	match read::read(bytes, recursion_limit, true, record_id) {
+		Ok((value, _)) => Ok(value),
+		Err(_) => decode_tree(bytes, recursion_limit, true, record_id, false),
+	}
 }
 
 /// `bytes` as exactly one `cbor` item: bytes after the item are an error.
@@ -67,11 +71,10 @@ pub fn decode_exact(
 	recursion_limit: usize,
 	record_id: Option<RecordIdParser>,
 ) -> anyhow::Result<Value> {
-	let mut reader = bytes;
-	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
-		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
-	to_value(encoding, record_id)
+	match read::read(bytes, recursion_limit, false, record_id) {
+		Ok((value, read)) if read == bytes.len() => Ok(value),
+		_ => decode_tree(bytes, recursion_limit, false, record_id, true),
+	}
 }
 
 /// `bytes` as exactly one `cbor.2` item: bytes after the item are an error.
@@ -80,9 +83,28 @@ pub fn decode_exact_v2(
 	recursion_limit: usize,
 	record_id: Option<RecordIdParser>,
 ) -> anyhow::Result<Value> {
+	match read::read(bytes, recursion_limit, true, record_id) {
+		Ok((value, read)) if read == bytes.len() => Ok(value),
+		_ => decode_tree(bytes, recursion_limit, true, record_id, true),
+	}
+}
+
+/// The item at the start of `bytes` decoded as a `ciborium` tree and then converted: the
+/// definition [`read::read`] answers to, and the route that words the refusal of an item it
+/// cannot read. With `exact`, bytes after the item are an error.
+fn decode_tree(
+	bytes: &[u8],
+	recursion_limit: usize,
+	v2: bool,
+	record_id: Option<RecordIdParser>,
+	exact: bool,
+) -> anyhow::Result<Value> {
 	let mut reader = bytes;
 	let encoding = ciborium::de::from_reader_with_recursion_limit(&mut reader, recursion_limit)
 		.map_err(|e| anyhow::anyhow!(e.to_string()))?;
-	anyhow::ensure!(reader.is_empty(), "bytes after the CBOR item");
-	to_value_v2(encoding, record_id)
+	anyhow::ensure!(!exact || reader.is_empty(), "bytes after the CBOR item");
+	match v2 {
+		true => to_value_v2(encoding, record_id),
+		false => to_value(encoding, record_id),
+	}
 }

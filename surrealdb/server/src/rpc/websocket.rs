@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::close_code::AGAIN;
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message};
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
@@ -210,9 +210,9 @@ impl Websocket {
 	}
 
 	/// Serve the RPC endpoint
-	pub async fn serve(
+	pub(crate) async fn serve(
 		id: Uuid,
-		ws: WebSocket,
+		ws: super::socket::RpcSocket,
 		format: Format,
 		session: Session,
 		datastore: Arc<Datastore>,

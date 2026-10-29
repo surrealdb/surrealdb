@@ -2,6 +2,7 @@ pub mod format;
 pub mod grpc;
 pub mod http;
 pub mod response;
+pub(crate) mod socket;
 pub mod streaming;
 pub mod websocket;
 

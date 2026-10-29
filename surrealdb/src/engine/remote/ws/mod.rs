@@ -617,15 +617,13 @@ where
 		return HandleResult::Ok;
 	};
 
-	// Encoded results are read as the values they encode.
-	let result = result.map(|result| match result {
-		DbResult::Encoded(results) => {
-			DbResult::Query(results.into_iter().map(|result| result.into_query_result()).collect())
-		}
-		other @ DbResult::Other(_) | other @ DbResult::Query(_) | other @ DbResult::Live(_) => {
-			other
-		}
-	});
+	// A request with nothing to replay is answered with the result as it is.
+	if pending.command.is_none() {
+		answer(pending, result).await;
+		return HandleResult::Ok;
+	}
+
+	let result = query_results(result);
 	match result {
 		Ok(DbResult::Query(results)) => {
 			if let Some(command) = pending.command {
@@ -710,6 +708,87 @@ where
 	}
 
 	HandleResult::Ok
+}
+
+/// `result` with encoded results read as the values they encode.
+fn query_results(result: Result<DbResult, TypesError>) -> Result<DbResult, TypesError> {
+	result.map(|result| match result {
+		DbResult::Encoded(results) => {
+			DbResult::Query(results.into_iter().map(|result| result.into_query_result()).collect())
+		}
+		other @ DbResult::Other(_) | other @ DbResult::Query(_) | other @ DbResult::Live(_) => {
+			other
+		}
+	})
+}
+
+/// Answer `pending`, a request with no command to replay, with `result`.
+async fn answer(pending: PendingRequest, result: Result<DbResult, TypesError>) {
+	debug_assert!(pending.command.is_none(), "a command is answered where it is replayed");
+	let answer = match query_results(result) {
+		Ok(DbResult::Query(results)) => Ok(results),
+		Ok(DbResult::Other(value)) => {
+			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
+		}
+		Ok(DbResult::Live(_)) => {
+			tracing::error!("Unexpected live query result in response");
+			return;
+		}
+		Ok(DbResult::Encoded(_)) => {
+			tracing::error!("Unexpected encoded query result in response");
+			return;
+		}
+		Err(error) => Err(error),
+	};
+	if let Err(err) = pending.response_channel.send(answer).await {
+		tracing::error!("Failed to send query results to channel: {err:?}");
+	}
+}
+
+/// How large a response must be for its result to be decoded on a task of its own, so that the
+/// router reads on while it is decoded.
+#[cfg(not(target_family = "wasm"))]
+const DECODE_APART: usize = 64 * 1024;
+
+/// The request the response `binary` answers, taken from its session to be answered apart from
+/// the router ([`answer_encoded`]): a response larger than [`DECODE_APART`] to a request with no
+/// command to replay. `None` leaves every other response, and any whose envelope does not read
+/// as one addressed to a pending request, to [`handle_response`].
+#[cfg(not(target_family = "wasm"))]
+fn take_for_decoding_apart(
+	binary: &[u8],
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+) -> Option<PendingRequest> {
+	if binary.len() <= DECODE_APART {
+		return None;
+	}
+	let route = surrealdb_rpc::wire::response_route(binary)?;
+	let Some(Value::Number(Number::Int(id))) = route.id else {
+		return None;
+	};
+	let Some(Ok(session_state)) = sessions.get(&route.session_id?) else {
+		return None;
+	};
+	if replay_cursor(&session_state).is_some_and(|cursor| cursor.awaiting == id) {
+		return None;
+	}
+	if session_state.pending_requests.get(&id)?.command.is_some() {
+		return None;
+	}
+	session_state.pending_requests.take(&id)
+}
+
+/// Answer `pending` with the response `binary` holds, decoded where this runs: the answer
+/// [`handle_response`] gives the request it takes.
+#[cfg(not(target_family = "wasm"))]
+async fn answer_encoded(binary: &[u8], pending: PendingRequest) {
+	let result = match surrealdb_rpc::db_response_from_bytes(binary) {
+		Ok(response) => response.result,
+		Err(error) => {
+			Err(Error::serialization(error.to_string(), SerializationError::Deserialization))
+		}
+	};
+	answer(pending, result).await;
 }
 
 /// Park a request behind a session's in-flight setup.
@@ -1231,19 +1310,21 @@ impl Surreal<Client> {
 mod tests {
 	use std::sync::Arc;
 
-	use surrealdb_rpc::{DbResult, QueryResult, Token};
+	use surrealdb_rpc::{DbResponse, DbResult, QueryResult, Token};
 	use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
 	use tokio::sync::RwLock;
 	use uuid::Uuid;
 
+	#[cfg(not(target_family = "wasm"))]
+	use super::{DECODE_APART, answer_encoded, take_for_decoding_apart};
 	use super::{
 		HandleResult, PendingRequest, SessionState, WsMessage, fail_all_pending_requests,
-		handle_live_notification, handle_parse_error, handle_response_with_id, handle_route,
-		handle_session_clone, handle_session_drop, replay_cursor, replay_session,
+		handle_db_response, handle_live_notification, handle_parse_error, handle_response_with_id,
+		handle_route, handle_session_clone, handle_session_drop, replay_cursor, replay_session,
 	};
 	use crate::conn::{Command, RequestData, Route};
 	use crate::engine::SessionError;
-	use crate::types::{Action, HashMap, Notification, Number, Value};
+	use crate::types::{Action, Array, HashMap, Notification, Number, SurrealValue, Value};
 
 	type Sessions = HashMap<Uuid, Result<Arc<SessionState>, SessionError>>;
 
@@ -1308,6 +1389,97 @@ mod tests {
 		// Response should have been delivered to the receiver
 		let response = receiver.recv().await.unwrap();
 		assert!(response.is_ok());
+	}
+
+	/// A response of `rows` rows, each a record with a long string, to request `id` of `session`.
+	#[cfg(not(target_family = "wasm"))]
+	fn large_response(id: i64, session: Uuid, rows: usize) -> Vec<u8> {
+		let row = Value::Object(crate::types::Object::from_iter([(
+			"s".to_owned(),
+			Value::String("x".repeat(100)),
+		)]));
+		let result = surrealdb_rpc::QueryResultBuilder::started_now()
+			.finish_with_result(Ok(Value::Array(Array::from(vec![row; rows]))));
+		let response = DbResponse::success(
+			Some(Value::Number(Number::Int(id))),
+			Some(session),
+			DbResult::Query(vec![result]),
+		);
+		surrealdb_rpc::wire::encode(response.into_value()).unwrap()
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test]
+	async fn a_large_response_is_answered_apart_as_the_router_answers_it() {
+		let session_id = Uuid::new_v4();
+		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
+		sessions.insert(session_id, Ok(Arc::clone(&session_state)));
+		let bytes = large_response(1, session_id, 2000);
+		assert!(bytes.len() > DECODE_APART);
+
+		// The router's own answer.
+		let (sender, by_router) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		let response = surrealdb_rpc::db_response_from_bytes(&bytes).unwrap();
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		handle_db_response::<MockMessage, _, _>(response, None, &sessions, &sink).await;
+		let expected = by_router.recv().await.unwrap().unwrap();
+
+		// The answer decoded apart.
+		let (sender, apart) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		let pending = take_for_decoding_apart(&bytes, &sessions).expect("taken to decode apart");
+		assert!(session_state.pending_requests.is_empty());
+		answer_encoded(&bytes, pending).await;
+		let answered = apart.recv().await.unwrap().unwrap();
+		assert_eq!(format!("{answered:?}"), format!("{expected:?}"));
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	#[tokio::test]
+	async fn the_router_keeps_what_it_must_read_itself() {
+		let session_id = Uuid::new_v4();
+		let session_state = Arc::new(SessionState::default());
+		let sessions = no_sessions();
+		sessions.insert(session_id, Ok(Arc::clone(&session_state)));
+		let (sender, _receiver) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			1,
+			PendingRequest {
+				command: Some(set_cmd("k", 1)),
+				response_channel: sender.clone(),
+			},
+		);
+		session_state.pending_requests.insert(
+			2,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		// A command to replay.
+		assert!(take_for_decoding_apart(&large_response(1, session_id, 2000), &sessions).is_none());
+		// A small response.
+		assert!(take_for_decoding_apart(&large_response(2, session_id, 1), &sessions).is_none());
+		// An unknown session, and an unknown request.
+		assert!(
+			take_for_decoding_apart(&large_response(2, Uuid::new_v4(), 2000), &sessions).is_none()
+		);
+		assert!(take_for_decoding_apart(&large_response(3, session_id, 2000), &sessions).is_none());
+		assert_eq!(session_state.pending_requests.len(), 2);
 	}
 
 	#[tokio::test]

@@ -60,7 +60,11 @@ pub type RowDecoder = fn(&EncodedRows) -> Result<Vec<Value>, Error>;
 #[derive(Clone)]
 pub struct EncodedRows {
 	format: RowFormat,
+	/// `head` bytes of headroom, then the rows.
 	bytes: Vec<u8>,
+	/// How many bytes in front of the rows are free, for what is written ahead of them
+	/// ([`Self::wrap`]).
+	head: usize,
 	ends: Vec<u32>,
 	/// For shaped rows, the shapes they are written in; boxed, so rows of
 	/// other formats carry one pointer for it.
@@ -80,7 +84,7 @@ impl std::fmt::Debug for EncodedRows {
 		f.debug_struct("EncodedRows")
 			.field("format", &self.format)
 			.field("count", &self.ends.len())
-			.field("bytes", &self.bytes.len())
+			.field("bytes", &self.bytes().len())
 			.finish()
 	}
 }
@@ -91,7 +95,7 @@ impl PartialEq for EncodedRows {
 	fn eq(&self, other: &Self) -> bool {
 		self.format == other.format
 			&& self.ends == other.ends
-			&& self.bytes == other.bytes
+			&& self.bytes() == other.bytes()
 			&& self.row_shapes().len() == other.row_shapes().len()
 			&& self
 				.row_shapes()
@@ -105,15 +109,41 @@ impl EncodedRows {
 	/// The rows in `bytes`, row `i` ending at `ends[i]`, decodable by
 	/// `decode`. `ends` ascends and its last entry is `bytes.len()`.
 	pub fn new(format: RowFormat, bytes: Vec<u8>, ends: Vec<u32>, decode: RowDecoder) -> Self {
-		debug_assert!(ends.last().is_none_or(|end| *end as usize == bytes.len()));
+		Self::with_headroom(format, bytes, 0, ends, decode)
+	}
+
+	/// The rows in `bytes` past its first `head` bytes, which are free for what is written ahead
+	/// of the rows ([`Self::wrap`]); row `i` ends `ends[i]` bytes past the first row's start.
+	pub fn with_headroom(
+		format: RowFormat,
+		bytes: Vec<u8>,
+		head: usize,
+		ends: Vec<u32>,
+		decode: RowDecoder,
+	) -> Self {
+		debug_assert!(head <= bytes.len());
+		debug_assert!(ends.last().is_none_or(|end| *end as usize == bytes.len() - head));
 		debug_assert!(format != RowFormat::Shaped || ends.is_empty(), "shaped rows name shapes");
 		Self {
 			format,
 			bytes,
+			head,
 			ends,
 			shaped: None,
 			decode,
 		}
+	}
+
+	/// The rows' bytes with `prefix` written ahead of them and `suffix` after them, and where
+	/// in the buffer they start: the rows are not copied. `Err` gives the rows back unchanged
+	/// where their headroom is shorter than `prefix`.
+	pub fn wrap(mut self, prefix: &[u8], suffix: &[u8]) -> Result<(Vec<u8>, usize), Self> {
+		let Some(start) = self.head.checked_sub(prefix.len()) else {
+			return Err(self);
+		};
+		self.bytes[start..self.head].copy_from_slice(prefix);
+		self.bytes.extend_from_slice(suffix);
+		Ok((self.bytes, start))
 	}
 
 	/// Shaped rows in `bytes`, row `i` ending at `ends[i]` and written in
@@ -131,6 +161,7 @@ impl EncodedRows {
 		Self {
 			format: RowFormat::Shaped,
 			bytes,
+			head: 0,
 			ends,
 			shaped: Some(Box::new(ShapedRows {
 				shapes,
@@ -166,7 +197,7 @@ impl EncodedRows {
 	/// The rows' encoded bytes: concatenated CBOR items or shaped rows, or
 	/// `,`-joined JSON texts.
 	pub fn bytes(&self) -> &[u8] {
-		&self.bytes
+		&self.bytes[self.head..]
 	}
 
 	/// Where each row ends.
@@ -195,7 +226,7 @@ impl EncodedRows {
 			while row_shapes.get(at) == Some(&shape) {
 				at += 1;
 			}
-			let bytes = &self.bytes[self.start(from)..self.ends[at - 1] as usize];
+			let bytes = &self.bytes()[self.start(from)..self.ends[at - 1] as usize];
 			Some((&shapes[shape as usize], (at - from) as u32, bytes))
 		})
 	}
@@ -207,6 +238,46 @@ impl EncodedRows {
 			_ if self.format == RowFormat::Json => self.ends[at - 1] as usize + 1,
 			_ => self.ends[at - 1] as usize,
 		}
+	}
+
+	/// `parts`' rows, in order, as one set of rows in `format`: the rows extending an empty set
+	/// by each part answers, with the bytes copied at most once. Rows copied from several parts
+	/// keep `head` bytes of headroom, and as many free behind them ([`Self::wrap`]); one part is
+	/// taken as it is. Every part must be in `format`.
+	pub fn concat(
+		format: RowFormat,
+		decode: RowDecoder,
+		mut parts: Vec<EncodedRows>,
+		head: usize,
+	) -> Result<Self, Error> {
+		// Shaped rows are extended part by part: extending names each shape once, in the order
+		// the rows first use it, which is what the block announces.
+		if format == RowFormat::Shaped {
+			let mut rows = Self::empty(format, decode);
+			for part in &parts {
+				rows.extend(part)?;
+			}
+			return Ok(rows);
+		}
+		if parts.len() == 1 {
+			let only = parts.pop().expect("one part");
+			debug_assert_eq!(only.format, format, "rows of one statement share a format");
+			return Ok(only);
+		}
+		let separators = match format {
+			RowFormat::Json => parts.len(),
+			RowFormat::Cbor | RowFormat::Cbor2 | RowFormat::Shaped => 0,
+		};
+		let len = parts.iter().map(|p| p.bytes().len()).sum::<usize>() + separators;
+		// As much room again behind the rows, for what is written after them.
+		let mut bytes = Vec::with_capacity(head + len + head);
+		bytes.resize(head, 0);
+		let ends = Vec::with_capacity(parts.iter().map(EncodedRows::len).sum());
+		let mut rows = Self::with_headroom(format, bytes, head, ends, decode);
+		for part in &parts {
+			rows.extend(part)?;
+		}
+		Ok(rows)
 	}
 
 	/// Append `other`'s rows, which must be in the same format.
@@ -233,7 +304,7 @@ impl EncodedRows {
 		let start = other.start(from);
 		// Each row of `other` moves by the same amount: from `start` to the
 		// current end of these bytes.
-		let base = u32::try_from(self.bytes.len()).map_err(|_| too_large())?;
+		let base = u32::try_from(self.bytes().len()).map_err(|_| too_large())?;
 		let shift = |end: u32| base as u64 + end as u64 - start as u64;
 		if shift(other.ends[to - 1]) > u32::MAX as u64 {
 			return Err(too_large());
@@ -241,7 +312,7 @@ impl EncodedRows {
 		if self.format == RowFormat::Shaped {
 			self.extend_shapes(other, from, to)?;
 		}
-		self.bytes.extend_from_slice(&other.bytes[start..other.ends[to - 1] as usize]);
+		self.bytes.extend_from_slice(&other.bytes()[start..other.ends[to - 1] as usize]);
 		self.ends.extend(other.ends[from..to].iter().map(|end| shift(*end) as u32));
 		Ok(())
 	}
@@ -307,6 +378,14 @@ pub struct EncodedQueryResult {
 }
 
 impl EncodedQueryResult {
+	/// How many bytes its encoded rows take; none for a result that is not rows.
+	pub fn encoded_len(&self) -> usize {
+		match &self.result {
+			Ok(EncodedPayload::Rows(rows)) => rows.bytes().len(),
+			_ => 0,
+		}
+	}
+
 	/// The result with its rows decoded into public values.
 	pub fn into_query_result(self) -> QueryResult {
 		let result = match self.result {
@@ -330,5 +409,67 @@ impl serde::Serialize for EncodedQueryResult {
 		S: serde::Serializer,
 	{
 		self.clone().into_query_result().serialize(serializer)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn no_decode(_: &EncodedRows) -> Result<Vec<Value>, Error> {
+		Ok(Vec::new())
+	}
+
+	/// Rows `items` of `format`, each one byte string, with `head` bytes of headroom.
+	fn rows(format: RowFormat, items: &[&[u8]], head: usize) -> EncodedRows {
+		let mut bytes = vec![0; head];
+		let mut ends = Vec::new();
+		for (i, item) in items.iter().enumerate() {
+			if format == RowFormat::Json && i > 0 {
+				bytes.push(b',');
+			}
+			bytes.extend_from_slice(item);
+			ends.push((bytes.len() - head) as u32);
+		}
+		EncodedRows::with_headroom(format, bytes, head, ends, no_decode)
+	}
+
+	#[test]
+	fn joined_parts_are_the_parts_extended_in_turn() {
+		for format in [RowFormat::Cbor, RowFormat::Json] {
+			let parts = vec![
+				rows(format, &[b"1", b"22"], 4),
+				rows(format, &[], 0),
+				rows(format, &[b"333"], 0),
+			];
+			let mut extended = EncodedRows::empty(format, no_decode);
+			for part in &parts {
+				extended.extend(part).unwrap();
+			}
+			let joined = EncodedRows::concat(format, no_decode, parts, 8).unwrap();
+			assert!(joined == extended, "{format:?}");
+			assert_eq!(joined.bytes(), extended.bytes());
+			assert_eq!(joined.ends(), extended.ends());
+		}
+	}
+
+	#[test]
+	fn one_part_is_taken_as_it_is() {
+		let part = rows(RowFormat::Cbor, &[b"ab"], 3);
+		let joined = EncodedRows::concat(RowFormat::Cbor, no_decode, vec![part], 8).unwrap();
+		assert_eq!(joined.bytes(), b"ab");
+		assert_eq!(
+			joined.wrap(b"xyz", b"!").map(|(b, at)| b[at..].to_vec()).ok(),
+			Some(b"xyzab!".to_vec())
+		);
+	}
+
+	#[test]
+	fn rows_are_wrapped_in_their_headroom_or_given_back() {
+		let wrapped = rows(RowFormat::Cbor, &[b"1", b"2"], 4).wrap(b"<<", b">>").unwrap();
+		assert_eq!(&wrapped.0[wrapped.1..], b"<<12>>");
+		let refused = rows(RowFormat::Cbor, &[b"1", b"2"], 1).wrap(b"<<", b">>").unwrap_err();
+		assert_eq!(refused.bytes(), b"12");
+		assert_eq!(refused.ends(), &[1, 2]);
 	}
 }

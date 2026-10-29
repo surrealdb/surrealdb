@@ -39,9 +39,66 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Value> {
 	surrealdb_types::cbor::decode_v2(bytes, RECURSION_LIMIT, None)
 }
 
+/// Where a response is addressed: the `id` and `session` of its envelope, read without decoding
+/// its result. `None` where the bytes are not an envelope this reads, which [`decode`] then
+/// reads as it reads any response.
+pub fn response_route(bytes: &[u8]) -> Option<ResponseRoute> {
+	let (entries, _) = surrealdb_types::cbor::map_entries(bytes, RECURSION_LIMIT)?;
+	let mut route = ResponseRoute::default();
+	for (key, value) in entries {
+		match key {
+			"id" => route.id = Some(decode(value).ok()?),
+			key if key == crate::request::SESSION_ID => {
+				let Value::Uuid(id) = decode(value).ok()? else {
+					return None;
+				};
+				route.session_id = Some(id.into());
+			}
+			_ => {}
+		}
+	}
+	Some(route)
+}
+
+/// The `id` and `session` of a response's envelope ([`response_route`]).
+#[derive(Debug, Default, PartialEq)]
+pub struct ResponseRoute {
+	pub id: Option<Value>,
+	pub session_id: Option<uuid::Uuid>,
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_route_is_the_envelope_a_whole_decode_reads() {
+		use surrealdb_types::SurrealValue;
+
+		use crate::{DbResponse, DbResult};
+		let session = uuid::Uuid::from_u128(9);
+		for (id, session_id) in [
+			(Some(Value::from_t(3i64)), Some(session)),
+			(None, Some(session)),
+			(Some(Value::from_t(4i64)), None),
+		] {
+			let result = DbResult::Other(Value::from_t("a value"));
+			let bytes =
+				encode(DbResponse::success(id.clone(), session_id, result).into_value()).unwrap();
+			let decoded = crate::db_response_from_bytes(&bytes).unwrap();
+			let route = response_route(&bytes).expect("an envelope");
+			assert_eq!(route.id, decoded.id);
+			assert_eq!(route.session_id, decoded.session_id);
+			assert_eq!(
+				route,
+				ResponseRoute {
+					id,
+					session_id
+				}
+			);
+		}
+		assert_eq!(response_route(&encode(Value::from_t(1i64)).unwrap()), None);
+	}
 
 	#[test]
 	fn the_header_offers_the_protocols() {

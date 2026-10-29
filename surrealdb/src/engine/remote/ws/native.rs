@@ -19,8 +19,9 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 use super::{
-	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,
-	handle_response, handle_route, handle_session, replay_session, reset_sessions,
+	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, answer_encoded,
+	create_ping_message, handle_response, handle_route, handle_session, replay_session,
+	reset_sessions, take_for_decoding_apart,
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
@@ -302,6 +303,15 @@ pub(crate) async fn run_router(
 
 					match result {
 						Ok(message) => {
+							// A large result is decoded on a task of its own, so that the
+							// connection's other responses are not held behind it.
+							if let Message::Binary(bytes) = &message
+								&& let Some(pending) = take_for_decoding_apart(bytes, &state.sessions)
+							{
+								let bytes = bytes.clone();
+								tokio::spawn(async move { answer_encoded(&bytes, pending).await });
+								continue;
+							}
 							match handle_response::<Message, _, _>(
 								&message, config.max_message_size, &state.sessions, &state.sink
 							).await {

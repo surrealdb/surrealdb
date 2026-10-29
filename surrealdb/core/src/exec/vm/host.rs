@@ -460,7 +460,8 @@ async fn run_untailed(
 	let version = out_of_line(|| resolve_version_stamp(ctx, None)).await?;
 	let mut state = State::new(program, paging, ctx.function_registry())?;
 	inherit_knn(program, &mut state, ctx);
-	state.row_frame = format.map(super::row_frame::RowFrame::with_format);
+	state.row_frame =
+		format.map(|format| super::row_frame::RowFrame::with_format(format).expecting(flush_at));
 	#[cfg(feature = "shaped")]
 	seed_frame(program, &mut state);
 	// A statement spends no more than its own quantum before its first yield.

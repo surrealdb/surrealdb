@@ -575,6 +575,15 @@ pub fn to_value_v2(val: CborValue, record_id: Option<RecordIdParser>) -> Result<
 	value(val, &mut Ctx::strict(true, record_id))
 }
 
+/// A decoded item as a value, in `cbor.2` where `v2`; a shaped block is refused.
+pub(super) fn convert(
+	val: CborValue,
+	v2: bool,
+	record_id: Option<RecordIdParser>,
+) -> Result<PublicValue> {
+	value(val, &mut Ctx::strict(v2, record_id))
+}
+
 /// A decoded request item, where a shaped block is the array of its rows.
 pub fn to_request_value(val: CborValue, ctx: &mut Ctx) -> Result<PublicValue> {
 	value(val, ctx)
@@ -1133,12 +1142,12 @@ fn to_object(obj: Vec<(CborValue, CborValue)>, ctx: &mut Ctx) -> Result<PublicOb
 			}
 		}
 	}
-	Ok(PublicObject::from(res))
+	Ok(PublicObject(res))
 }
 
 /// A decimal written as text, normalized.
 #[allow(clippy::disallowed_methods)]
-fn decimal_normalized(s: &str) -> std::result::Result<Decimal, rust_decimal::Error> {
+pub(super) fn decimal_normalized(s: &str) -> std::result::Result<Decimal, rust_decimal::Error> {
 	use std::str::FromStr;
 	Ok(Decimal::from_str(s)?.normalize())
 }
