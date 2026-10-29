@@ -34,8 +34,8 @@ use surrealdb_expr::parser::Query as Ast;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::value::EncodeContext;
 use surrealdb_kvs::{
-	DestroyRange, DestroyRangeHandle, FeatureLevel, Isolation, Release, SnapshotInfo,
-	TransactionType,
+	DestroyRange, DestroyRangeHandle, FeatureLevel, Isolation, Maintenance, MaintenanceHandle,
+	Release, SnapshotInfo, TransactionType,
 };
 use surrealdb_observe::TaskLeaseState;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
@@ -3734,51 +3734,41 @@ impl Datastore {
 
 	/// Advance the MVCC garbage-collection safepoint by `lifetime`.
 	///
-	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
-	/// no-op on backends other than TiKV. Background tasks call this on
-	/// `EngineOptions::tikv_gc_interval` and shutdown runs one final
-	/// advisory pass.
+	/// Resolved by capability through [`TransactionBuilder::extension`]; no-op
+	/// on backends that publish no [`Maintenance`]. Background tasks call this
+	/// on `EngineOptions::mvcc_gc_interval`.
 	pub(crate) async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return ops.run_mvcc_gc(lifetime).await.map_err(Into::into);
+		match self.maintenance_ops() {
+			Some(ops) => ops.collect_garbage(lifetime).await.map_err(Into::into),
+			None => Ok(()),
 		}
-		let _ = lifetime;
-		Ok(())
 	}
 
 	/// Resolve stale transactional locks left by crashed clients.
 	///
-	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
-	/// no-op on backends other than TiKV. Background tasks call this on
-	/// `EngineOptions::tikv_lock_cleanup_interval`.
+	/// Resolved by capability through [`TransactionBuilder::extension`]; no-op
+	/// on backends that publish no [`Maintenance`]. Background tasks call this
+	/// on `EngineOptions::lock_cleanup_interval`.
 	pub(crate) async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return ops.run_lock_cleanup(lifetime).await.map_err(Into::into);
+		match self.maintenance_ops() {
+			Some(ops) => ops.cleanup_locks(lifetime).await.map_err(Into::into),
+			None => Ok(()),
 		}
-		let _ = lifetime;
-		Ok(())
 	}
 
 	/// Number of in-flight transactions tracked by the backend, when
 	/// available. `None` indicates the backend does not track this.
 	pub fn in_flight_transaction_count(&self) -> Option<usize> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return Some(ops.in_flight_transaction_count());
-		}
-		None
+		self.maintenance_ops().and_then(|ops| ops.in_flight_transactions())
 	}
 
-	/// Resolve the TiKV operational extension handle, if the backend is
-	/// TiKV. Returns `None` for every other flavour.
-	#[cfg(feature = "kv-tikv")]
-	fn tikv_ops(&self) -> Option<Arc<surrealdb_kvs_any::tikv::TikvOpsHandle>> {
-		let ext = self
-			.transaction_factory
-			.extension(TypeId::of::<surrealdb_kvs_any::tikv::TikvOpsHandle>())?;
-		ext.downcast::<surrealdb_kvs_any::tikv::TikvOpsHandle>().ok()
+	/// The backend's maintenance capability, or `None` when it publishes none.
+	/// Resolved by capability rather than by backend name, like
+	/// [`Self::destroy_range_ops`].
+	fn maintenance_ops(&self) -> Option<Arc<dyn Maintenance>> {
+		let ext = self.transaction_factory.extension(TypeId::of::<MaintenanceHandle>())?;
+		let handle = ext.downcast::<MaintenanceHandle>().ok()?;
+		Some(Arc::clone(&handle.0))
 	}
 
 	// --------------------------------------------------
@@ -7004,7 +6994,7 @@ impl Datastore {
 	/// block). Because the task only ever reads committed entries, `observed_ms`
 	/// is always at or after the removal's commit, so `age >= grace` implies the
 	/// commit is at least `grace` old — equivalent to it having fallen behind the
-	/// MVCC GC safepoint (`now - tikv_gc_lifetime`) when `grace >= tikv_gc_lifetime`,
+	/// MVCC GC safepoint (`now - mvcc_gc_lifetime`) when `grace >= mvcc_gc_lifetime`,
 	/// by which point any transaction that could still read the data has expired.
 	/// A `grace` of zero reclaims immediately without stamping (used by tests and
 	/// the language-test harness teardown, where there are no concurrent readers).

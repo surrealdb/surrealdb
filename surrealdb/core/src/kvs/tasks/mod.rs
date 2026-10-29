@@ -212,10 +212,10 @@ pub enum Job {
 	ResumeIndexBuilds,
 	/// Purge expired durable RPC sessions.
 	RpcSessionGc,
-	/// Advance the TiKV MVCC garbage-collection safepoint.
-	TikvGc,
-	/// Resolve stale TiKV transactional locks.
-	TikvLockCleanup,
+	/// Advance the backend's MVCC garbage-collection safepoint.
+	MvccGc,
+	/// Resolve stale backend transactional locks.
+	LockCleanup,
 	/// Release the DiskANN writer leases this node no longer writes under.
 	DiskannWriterLeases,
 	/// Refresh the cached process/system utilisation metrics.
@@ -241,8 +241,8 @@ impl Job {
 		Self::ReclaimTombstones,
 		Self::ResumeIndexBuilds,
 		Self::RpcSessionGc,
-		Self::TikvGc,
-		Self::TikvLockCleanup,
+		Self::MvccGc,
+		Self::LockCleanup,
 		Self::DiskannWriterLeases,
 		Self::SystemMetricsRefresh,
 	];
@@ -292,16 +292,16 @@ impl Job {
 	/// is filled by `REMOVE` statements rather than by catalog size, and a
 	/// large removal or a long queue takes many passes to finish. The event
 	/// adoption sweep finds work only once a node has left, and what it runs is
-	/// user-defined SurrealQL. The two TiKV jobs are calls into the placement
-	/// driver whose duration the engine does not control. None of them belongs
+	/// user-defined SurrealQL. The two maintenance jobs are calls into the storage
+	/// cluster whose duration the engine does not control. None of them belongs
 	/// alongside the jobs whose pass length follows the catalog; they share a
 	/// task with each other instead.
 	const SWEEP: [Self; 5] = [
 		Self::ReclaimTombstones,
 		Self::RpcSessionGc,
 		Self::EventAdoption,
-		Self::TikvGc,
-		Self::TikvLockCleanup,
+		Self::MvccGc,
+		Self::LockCleanup,
 	];
 
 	/// Description used in log lines.
@@ -321,8 +321,8 @@ impl Job {
 			Self::ReclaimTombstones => "tombstone reclaim",
 			Self::ResumeIndexBuilds => "stalled index build recovery",
 			Self::RpcSessionGc => "expired RPC session purge",
-			Self::TikvGc => "TiKV MVCC GC",
-			Self::TikvLockCleanup => "TiKV lock cleanup",
+			Self::MvccGc => "MVCC GC",
+			Self::LockCleanup => "lock cleanup",
 			Self::DiskannWriterLeases => "idle DiskANN writer lease release",
 			Self::SystemMetricsRefresh => "system metrics refresh",
 		}
@@ -346,8 +346,8 @@ impl Job {
 			Self::ReclaimTombstones => "reclaim_tombstones",
 			Self::ResumeIndexBuilds => "resume_index_builds",
 			Self::RpcSessionGc => "rpc_session_gc",
-			Self::TikvGc => "tikv_gc",
-			Self::TikvLockCleanup => "tikv_lock_cleanup",
+			Self::MvccGc => "tikv_gc",
+			Self::LockCleanup => "tikv_lock_cleanup",
 			Self::DiskannWriterLeases => "diskann_writer_leases",
 			Self::SystemMetricsRefresh => "system_metrics_refresh",
 		}
@@ -369,8 +369,8 @@ impl Job {
 			Self::ReclaimTombstones => opts.reclaim_interval,
 			Self::ResumeIndexBuilds => opts.index_build_resume_interval,
 			Self::RpcSessionGc => opts.rpc_session_gc_interval,
-			Self::TikvGc => opts.tikv_gc_interval,
-			Self::TikvLockCleanup => opts.tikv_lock_cleanup_interval,
+			Self::MvccGc => opts.mvcc_gc_interval,
+			Self::LockCleanup => opts.lock_cleanup_interval,
 			Self::DiskannWriterLeases => opts.diskann_writer_lease_release_interval,
 			Self::SystemMetricsRefresh => opts.system_metrics_refresh_interval,
 		}
@@ -397,8 +397,8 @@ impl Job {
 			| Self::LiveQueryRouter
 			| Self::NodeExpire
 			| Self::NodeCleanup
-			| Self::TikvGc
-			| Self::TikvLockCleanup
+			| Self::MvccGc
+			| Self::LockCleanup
 			| Self::DiskannWriterLeases
 			| Self::SystemMetricsRefresh => TaskLeaseState::NotLeased,
 		}
@@ -471,8 +471,8 @@ async fn run_job(
 				.await
 		}
 		Job::RpcSessionGc => dbs.purge_expired_rpc_sessions(&opts.rpc_session_gc_interval).await,
-		Job::TikvGc => unleased(dbs.run_mvcc_gc(opts.tikv_gc_lifetime).await),
-		Job::TikvLockCleanup => unleased(dbs.run_lock_cleanup(opts.tikv_gc_lifetime).await),
+		Job::MvccGc => unleased(dbs.run_mvcc_gc(opts.mvcc_gc_lifetime).await),
+		Job::LockCleanup => unleased(dbs.run_lock_cleanup(opts.mvcc_gc_lifetime).await),
 		Job::DiskannWriterLeases => unleased(dbs.release_idle_writer_leases().await),
 		Job::SystemMetricsRefresh => {
 			// The snapshot is one cache per process, and its CPU percentage is a
@@ -564,9 +564,9 @@ struct Runner {
 	/// the heartbeat waits for before its first pass; see [`Self::migrated`].
 	migrated: tokio::sync::watch::Receiver<bool>,
 	/// The grace a tombstone must age before reclaim, clamped up to at least
-	/// the TiKV GC lifetime: the reclaim's out-of-transaction range destroy
+	/// the MVCC GC lifetime: the reclaim's out-of-transaction range destroy
 	/// bypasses MVCC, so data must not be reclaimed while a snapshot older
-	/// than the GC safepoint (`now - tikv_gc_lifetime`) could still read it.
+	/// than the GC safepoint (`now - mvcc_gc_lifetime`) could still read it.
 	/// Deriving it here means a longer `--tikv-gc-lifetime` can never be
 	/// undercut by leaving `--reclaim-grace` at its default.
 	reclaim_grace: Duration,
@@ -579,7 +579,7 @@ impl Runner {
 			canceller,
 			opts: *opts,
 			migrated: dbs.subscribe_migrated(),
-			reclaim_grace: opts.reclaim_grace.max(opts.tikv_gc_lifetime),
+			reclaim_grace: opts.reclaim_grace.max(opts.mvcc_gc_lifetime),
 		}
 	}
 
@@ -683,10 +683,10 @@ impl Tasks {
 ///   nearly always empty but whose individual entries are not bounded, or whose pass is a remote
 ///   call: reclaiming one tombstone destroys an entire namespace or database prefix, a session
 ///   purge pages the whole session keyspace opening a write transaction per expired entry, the
-///   event adoption sweep runs the user-defined events a departed node left behind, and the TiKV
-///   jobs wait on the placement driver. Keeping the groups apart means a long sweep cannot stall
-///   the short jobs — in particular it cannot leave the cached process metrics stale for its
-///   duration.
+///   event adoption sweep runs the user-defined events a departed node left behind, and the backend
+///   maintenance jobs wait on the storage cluster. Keeping the groups apart means a long sweep
+///   cannot stall the short jobs — in particular it cannot leave the cached process metrics stale
+///   for its duration.
 /// - The **live-query router** is spawned only under [`LiveQueryEngine::Router`]; under the default
 ///   inline engine it has nothing to deliver.
 ///
@@ -1533,15 +1533,15 @@ mod test {
 	#[test]
 	fn slots_skip_zero_intervals() {
 		let opts = EngineOptions::default()
-			.with_tikv_gc_interval(Duration::ZERO)
+			.with_mvcc_gc_interval(Duration::ZERO)
 			.with_rpc_session_gc_interval(Duration::ZERO);
 		let maintenance: Vec<_> = maintenance_slots(&opts).jobs().collect();
 		let sweeps: Vec<_> = sweep_slots(&opts).jobs().collect();
-		assert!(!sweeps.contains(&Job::TikvGc));
+		assert!(!sweeps.contains(&Job::MvccGc));
 		assert!(!sweeps.contains(&Job::RpcSessionGc));
 		// The rest of each schedule is unaffected.
 		assert!(maintenance.contains(&Job::NodeExpire));
-		assert!(sweeps.contains(&Job::TikvLockCleanup));
+		assert!(sweeps.contains(&Job::LockCleanup));
 		assert!(sweeps.contains(&Job::ReclaimTombstones));
 	}
 
@@ -1589,7 +1589,7 @@ mod test {
 		assert_eq!(total, Job::ALL.len());
 	}
 
-	/// The unbounded sweeps and the remote TiKV calls must not share a task
+	/// The unbounded sweeps and the remote backend calls must not share a task
 	/// with the bounded jobs: a reclaim that destroys a whole database, a purge
 	/// that pages the session keyspace, or a GC call waiting on the placement
 	/// driver would otherwise stall every short job for its duration.

@@ -22,8 +22,8 @@ use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
 use surrealdb_kvs::{
-	DestroyRange, DestroyRangeHandle, Key, KeyRange, Metrics, TransactionBuilder, TransactionType,
-	Val,
+	DestroyRange, DestroyRangeHandle, Key, KeyRange, Maintenance, MaintenanceHandle, Metrics,
+	TransactionBuilder, TransactionType, Val,
 };
 use tikv::transaction::ResolveLocksOptions;
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
@@ -252,20 +252,13 @@ fn kvs_error(e: tikv::Error) -> Error {
 	}
 }
 
-/// TiKV-specific maintenance + observability operations exposed via the
-/// [`crate::kvs::TransactionBuilder::extension`] hook.
+/// TiKV's maintenance and observability operations.
 ///
-/// Callers reach this through the top-level
-/// [`crate::kvs::Datastore::run_mvcc_gc`] /
-/// [`crate::kvs::Datastore::run_lock_cleanup`] /
-/// [`crate::kvs::Datastore::in_flight_transaction_count`] convenience
-/// methods, which look the handle up by `TypeId` so non-TiKV backends
-/// return a no-op without the generic `TransactionBuilder` trait needing
-/// to advertise these signatures.
-///
-/// The same handle also serves the backend-agnostic
-/// [`DestroyRange`] capability, published under
-/// [`DestroyRangeHandle`] so the engine resolves it without naming TiKV.
+/// The engine reaches them through the backend-agnostic [`Maintenance`]
+/// capability, published under [`MaintenanceHandle`] by
+/// [`TransactionBuilder::extension`], so it never names TiKV. The same handle
+/// also serves the [`DestroyRange`] capability, published under
+/// [`DestroyRangeHandle`].
 pub struct TikvOpsHandle {
 	/// Underlying transactional client.
 	db: Pin<Arc<TransactionClient>>,
@@ -688,8 +681,8 @@ impl TransactionBuilder for Datastore {
 	}
 
 	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		if type_id == TypeId::of::<TikvOpsHandle>() {
-			return Some(self.ops_handle() as _);
+		if type_id == TypeId::of::<MaintenanceHandle>() {
+			return Some(Arc::new(MaintenanceHandle(self.ops_handle())) as _);
 		}
 		// Offered only while garbage collection is running. The destroy bypasses
 		// MVCC, so what makes it safe is the safepoint advancing past the removal
@@ -702,6 +695,20 @@ impl TransactionBuilder for Datastore {
 			return Some(Arc::new(DestroyRangeHandle(self.ops_handle())) as _);
 		}
 		None
+	}
+}
+
+impl Maintenance for TikvOpsHandle {
+	fn collect_garbage(&self, lifetime: Duration) -> BoxFut<'_, Result<()>> {
+		Box::pin(async move { self.run_mvcc_gc(lifetime).await })
+	}
+
+	fn cleanup_locks(&self, lifetime: Duration) -> BoxFut<'_, Result<()>> {
+		Box::pin(async move { self.run_lock_cleanup(lifetime).await })
+	}
+
+	fn in_flight_transactions(&self) -> Option<usize> {
+		Some(self.in_flight_transaction_count())
 	}
 }
 

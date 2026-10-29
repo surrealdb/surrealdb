@@ -134,26 +134,26 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "10m")]
 	reclaim_grace: Duration,
 	#[arg(
-		help = "The interval at which the TiKV MVCC garbage collector runs",
+		help = "The interval at which the storage backend's MVCC garbage collector runs",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_GC_INTERVAL", long = "tikv-gc-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "10m")]
-	tikv_gc_interval: Duration,
+	mvcc_gc_interval: Duration,
 	#[arg(
-		help = "How far behind the current TSO the TiKV GC safepoint is allowed to sit",
+		help = "How far behind the current time the MVCC GC safepoint is allowed to sit",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_GC_LIFETIME", long = "tikv-gc-lifetime", value_parser = super::validator::duration)]
 	#[arg(default_value = "10m")]
-	tikv_gc_lifetime: Duration,
+	mvcc_gc_lifetime: Duration,
 	#[arg(
-		help = "The interval at which TiKV stale transactional locks are resolved",
+		help = "The interval at which stale transactional locks are resolved",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_TIKV_LOCK_CLEANUP_INTERVAL", long = "tikv-lock-cleanup-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "60s")]
-	tikv_lock_cleanup_interval: Duration,
+	lock_cleanup_interval: Duration,
 	// Accepted so deployments that still pass it keep starting: attached HTTP
 	// RPC sessions are always stored in the datastore, so it has no effect.
 	#[arg(env = "SURREAL_DURABLE_SESSIONS", long = "durable-sessions", hide = true)]
@@ -315,9 +315,9 @@ pub async fn init<
 		event_processing_interval,
 		reclaim_interval,
 		reclaim_grace,
-		tikv_gc_interval,
-		tikv_gc_lifetime,
-		tikv_lock_cleanup_interval,
+		mvcc_gc_interval,
+		mvcc_gc_lifetime,
+		lock_cleanup_interval,
 		durable_sessions,
 		durable_session_ttl,
 		durable_session_gc_interval,
@@ -358,9 +358,9 @@ pub async fn init<
 		.with_event_processing_interval(event_processing_interval)
 		.with_reclaim_interval(reclaim_interval)
 		.with_reclaim_grace(reclaim_grace)
-		.with_tikv_gc_interval(tikv_gc_interval)
-		.with_tikv_gc_lifetime(tikv_gc_lifetime)
-		.with_tikv_lock_cleanup_interval(tikv_lock_cleanup_interval)
+		.with_mvcc_gc_interval(mvcc_gc_interval)
+		.with_mvcc_gc_lifetime(mvcc_gc_lifetime)
+		.with_lock_cleanup_interval(lock_cleanup_interval)
 		.with_rpc_session_gc_interval(durable_session_gc_interval)
 		// Floor the configured value at 1s so a misconfigured zero neither
 		// produces a tight refresh loop nor unregisters the job.
