@@ -826,6 +826,9 @@ pub struct Transaction {
 	/// back once the transaction's outcome is known ([`Self::end_live_write`]); [`NO_LIVE_EPOCH`]
 	/// for a read transaction and once counted out.
 	live_write_epoch: AtomicU64,
+	/// The shard of [`crate::triggers::LiveWrites`] a write transaction is counted in, from its
+	/// opening to its last commit.
+	live_shard: crate::triggers::LiveShard,
 	/// The epoch a write transaction first counted itself into, before its snapshot was taken,
 	/// which a transaction set aside and counted back in ([`Self::park_live_write`]) keeps:
 	/// its snapshot is no later for being counted into a later epoch. [`NO_LIVE_EPOCH`] for a read
@@ -1534,13 +1537,14 @@ fn next_serial() -> u64 {
 struct LiveCommit<'a> {
 	live: &'a crate::triggers::LiveWrites,
 	epoch: u64,
+	shard: crate::triggers::LiveShard,
 	/// Whether the transaction's epoch was fenced when the commit began.
 	fenced: bool,
 }
 
 impl Drop for LiveCommit<'_> {
 	fn drop(&mut self) {
-		self.live.end_commit(self.epoch);
+		self.live.end_commit(self.epoch, self.shard);
 	}
 }
 
@@ -2089,6 +2093,7 @@ impl Transaction {
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			live_shard: crate::triggers::LiveShard::default(),
 			snapshot_live_epoch: NO_LIVE_EPOCH,
 			pins_snapshot_epoch: AtomicBool::new(false),
 			serial: next_serial(),
@@ -7399,11 +7404,12 @@ impl Transaction {
 		if epoch == NO_LIVE_EPOCH {
 			return;
 		}
-		self.triggers.live_writes.hold_commit(epoch);
+		let shard = self.live_shard;
+		self.triggers.live_writes.hold_commit(epoch, shard);
 		let triggers = Arc::clone(&self.triggers);
 		common::rt::spawn_detached(async move {
 			sleep(settle).await;
-			triggers.live_writes.end_commit(epoch);
+			triggers.live_writes.end_commit(epoch, shard);
 		});
 	}
 
@@ -8828,9 +8834,13 @@ impl Transaction {
 	/// [`crate::triggers::LiveWrites`] that `live` names, counted in before its snapshot was
 	/// taken, and opened at the instant it names; `None` for a read transaction, which is neither
 	/// counted nor dated.
-	pub(crate) fn with_live_write(mut self, live: Option<(u64, web_time::Instant)>) -> Self {
-		if let Some((epoch, opened)) = live {
+	pub(crate) fn with_live_write(
+		mut self,
+		live: Option<(u64, crate::triggers::LiveShard, web_time::Instant)>,
+	) -> Self {
+		if let Some((epoch, shard, opened)) = live {
 			self.live_write_epoch.store(epoch, Ordering::SeqCst);
+			self.live_shard = shard;
 			self.snapshot_live_epoch = epoch;
 			self.opened_at = Some(opened);
 		}
@@ -8845,11 +8855,12 @@ impl Transaction {
 			return None;
 		}
 		let live = &self.triggers.live_writes;
-		let fenced = live.begin_commit(epoch, &self.tr.written);
+		let fenced = live.begin_commit(epoch, self.live_shard, &self.tr.written);
 		Some(LiveCommit {
 			fenced,
 			live,
 			epoch,
+			shard: self.live_shard,
 		})
 	}
 
@@ -8892,7 +8903,7 @@ impl Transaction {
 	fn end_live_write(&self) {
 		let epoch = self.live_write_epoch.swap(NO_LIVE_EPOCH, Ordering::SeqCst);
 		if epoch != NO_LIVE_EPOCH {
-			self.triggers.live_writes.close(epoch);
+			self.triggers.live_writes.close(epoch, self.live_shard);
 		}
 	}
 
@@ -8943,7 +8954,7 @@ impl Transaction {
 		// Counted back into the current epoch, so a fence of the epochs before it, which the
 		// transaction's own build may set, does not refuse it. Counted in before the waits stop
 		// being recorded, so every wait either waits for it or is recorded.
-		self.live_write_epoch.store(live.open(), Ordering::SeqCst);
+		self.live_write_epoch.store(live.open(self.live_shard), Ordering::SeqCst);
 		let mut passed = live.rejoin(parked);
 		if let Some((own, table)) = own {
 			passed.credit(own, table);
@@ -10316,6 +10327,7 @@ impl Transaction {
 			trigger_table_migration: AtomicBool::new(false),
 			live_bucket: crate::triggers::NO_LIVE_BUCKET,
 			live_write_epoch: AtomicU64::new(NO_LIVE_EPOCH),
+			live_shard: crate::triggers::LiveShard::default(),
 			snapshot_live_epoch: NO_LIVE_EPOCH,
 			pins_snapshot_epoch: AtomicBool::new(false),
 			serial: next_serial(),

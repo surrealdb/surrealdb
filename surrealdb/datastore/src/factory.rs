@@ -209,8 +209,8 @@ impl TransactionFactory {
 			Ok(opened) => opened,
 			Err(e) => {
 				self.triggers.live.close(live_bucket);
-				if let Some((epoch, _)) = live_write {
-					self.triggers.live_writes.close(epoch);
+				if let Some((epoch, shard, _)) = live_write {
+					self.triggers.live_writes.close(epoch, shard);
 				}
 				return Err(e.into());
 			}
@@ -393,10 +393,14 @@ impl TransactionFactory {
 	/// Count a write transaction about to take its snapshot among the live writes, with the
 	/// instant it opens, taken before the snapshot for the heartbeat fence's judgement of when it
 	/// opened ([`crate::triggers::WriteFence`]); `None` for a read transaction, which is neither.
-	fn open_live_write(&self, write: TransactionType) -> Option<(u64, web_time::Instant)> {
+	fn open_live_write(
+		&self,
+		write: TransactionType,
+	) -> Option<(u64, crate::triggers::LiveShard, web_time::Instant)> {
 		match write {
 			TransactionType::Write => {
-				Some((self.triggers.live_writes.open(), web_time::Instant::now()))
+				let shard = crate::triggers::LiveWrites::shard();
+				Some((self.triggers.live_writes.open(shard), shard, web_time::Instant::now()))
 			}
 			TransactionType::Read => None,
 		}
@@ -416,8 +420,8 @@ impl TransactionFactory {
 			Ok(opened) => opened,
 			Err(e) => {
 				self.triggers.live.close(live_bucket);
-				if let Some((epoch, _)) = live_write {
-					self.triggers.live_writes.close(epoch);
+				if let Some((epoch, shard, _)) = live_write {
+					self.triggers.live_writes.close(epoch, shard);
 				}
 				return Err(e.into());
 			}

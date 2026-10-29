@@ -804,8 +804,13 @@ impl WriteFence {
 #[derive(Default)]
 pub struct LiveWrites {
 	epoch: AtomicU64,
-	/// Open write transactions, and commits under way, by the epoch they opened in.
-	epochs: parking_lot::Mutex<std::collections::BTreeMap<u64, EpochCounts>>,
+	/// Open write transactions, and commits under way, by the epoch they opened in, in shards a
+	/// transaction keeps from its opening to its last commit ([`Self::shard`]): every write
+	/// transaction counts itself in and out, and its commit too, four times under one lock for all
+	/// of them on a machine of many cores. A transaction stays in its shard while it is counted,
+	/// so a wait that reads the shards one after another finds it; only the rare moves of the
+	/// epoch take them all.
+	epochs: [EpochShard; EPOCH_SHARDS],
 	/// Write transactions of an epoch below this are refused at commit, whatever they write.
 	fence: AtomicU64,
 	/// Write transactions of an epoch below a table's entry that write that table are refused at
@@ -1318,19 +1323,51 @@ struct EpochCounts {
 	committing: usize,
 }
 
+/// How many shards [`LiveWrites`] counts its transactions in.
+const EPOCH_SHARDS: usize = 32;
+
+/// One shard of [`LiveWrites::epochs`], on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct EpochShard(parking_lot::Mutex<std::collections::BTreeMap<u64, EpochCounts>>);
+
+/// A shard of [`LiveWrites`] a write transaction is counted in from its opening to its last
+/// commit ([`LiveWrites::shard`]).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LiveShard(u8);
+
 impl LiveWrites {
-	/// Count a write transaction about to take its snapshot into the current epoch, answering the
-	/// epoch to hand to [`Self::close`].
-	pub(crate) fn open(&self) -> u64 {
-		let mut epochs = self.epochs.lock();
+	/// The shard a write transaction opening on this thread is counted in, which it keeps, and
+	/// passes to every count of it, until its last commit has ended. Each thread keeps to one
+	/// shard, so the transactions of a thread contend for no lock with most other threads'.
+	pub(crate) fn shard() -> LiveShard {
+		static NEXT: AtomicU64 = AtomicU64::new(0);
+		thread_local! {
+			static SHARD: LiveShard =
+				LiveShard((NEXT.fetch_add(1, Ordering::Relaxed) % EPOCH_SHARDS as u64) as u8);
+		}
+		SHARD.with(|shard| *shard)
+	}
+
+	fn counts(
+		&self,
+		shard: LiveShard,
+	) -> &parking_lot::Mutex<std::collections::BTreeMap<u64, EpochCounts>> {
+		&self.epochs[usize::from(shard.0) % EPOCH_SHARDS].0
+	}
+
+	/// Count a write transaction about to take its snapshot into the current epoch, in `shard`,
+	/// answering the epoch to hand to [`Self::close`].
+	pub(crate) fn open(&self, shard: LiveShard) -> u64 {
+		let mut epochs = self.counts(shard).lock();
 		let epoch = self.epoch.load(Ordering::SeqCst);
 		epochs.entry(epoch).or_default().open += 1;
 		epoch
 	}
 
-	/// Count a write transaction counted into `epoch` out again.
-	pub(crate) fn close(&self, epoch: u64) {
-		let mut epochs = self.epochs.lock();
+	/// Count a write transaction counted into `epoch`, in `shard`, out again.
+	pub(crate) fn close(&self, epoch: u64, shard: LiveShard) {
+		let mut epochs = self.counts(shard).lock();
 		if let Some(counts) = epochs.get_mut(&epoch) {
 			counts.open = counts.open.saturating_sub(1);
 			self.forget_if_settled(&mut epochs, epoch);
@@ -1344,9 +1381,10 @@ impl LiveWrites {
 	pub(crate) fn begin_commit(
 		&self,
 		epoch: u64,
+		shard: LiveShard,
 		written: &parking_lot::Mutex<WrittenTables>,
 	) -> bool {
-		self.epochs.lock().entry(epoch).or_default().committing += 1;
+		self.counts(shard).lock().entry(epoch).or_default().committing += 1;
 		if epoch < self.fence.load(Ordering::SeqCst) {
 			return true;
 		}
@@ -1364,13 +1402,13 @@ impl LiveWrites {
 	/// Count a commit of a transaction of `epoch`, abandoned before its outcome was known, as under
 	/// way until [`Self::end_commit`]: a wait that would pass it waits for it as for a commit still
 	/// running ([`ABANDONED_COMMIT_SETTLE`]).
-	pub(crate) fn hold_commit(&self, epoch: u64) {
-		self.epochs.lock().entry(epoch).or_default().committing += 1;
+	pub(crate) fn hold_commit(&self, epoch: u64, shard: LiveShard) {
+		self.counts(shard).lock().entry(epoch).or_default().committing += 1;
 	}
 
 	/// Count a commit counted by [`Self::begin_commit`] as no longer under way.
-	pub(crate) fn end_commit(&self, epoch: u64) {
-		let mut epochs = self.epochs.lock();
+	pub(crate) fn end_commit(&self, epoch: u64, shard: LiveShard) {
+		let mut epochs = self.counts(shard).lock();
 		if let Some(counts) = epochs.get_mut(&epoch) {
 			counts.committing = counts.committing.saturating_sub(1);
 			self.forget_if_settled(&mut epochs, epoch);
@@ -1403,23 +1441,34 @@ impl LiveWrites {
 	/// Begun under the lock a write counts itself in under, so a write counted into a later epoch
 	/// finds the hold begun, and one counted into an earlier epoch is the build's to wait for.
 	pub fn advance_holding(&self, hold: Option<&DefinitionHold>) -> u64 {
-		let mut epochs = self.epochs.lock();
+		// Every shard is held, in order, so no transaction is counted in while the epoch moves.
+		let mut shards: Vec<_> = self.epochs.iter().map(|shard| shard.0.lock()).collect();
 		let since = self.epoch.fetch_add(1, Ordering::SeqCst);
 		if let Some(hold) = hold {
 			hold.from.fetch_min(since, Ordering::SeqCst);
 		}
-		self.forget_if_settled(&mut epochs, since);
+		for epochs in &mut shards {
+			self.forget_if_settled(epochs, since);
+		}
 		since
+	}
+
+	/// Whether every shard's counts of `since` and the epochs before it satisfy `ended`. A
+	/// transaction stays in one shard while it is counted, and none is counted into an epoch the
+	/// epoch has moved past, so the shards are read one after another.
+	fn all_through(&self, since: u64, ended: impl Fn(u64, &EpochCounts) -> bool) -> bool {
+		self.epochs.iter().all(|shard| {
+			shard.0.lock().range(..=since).all(|(epoch, counts)| ended(*epoch, counts))
+		})
 	}
 
 	/// Whether every write transaction counted into `since` or an earlier epoch has ended, or, for
 	/// a fenced epoch, can no longer commit: none of its commits is under way.
 	pub fn ended_since(&self, since: u64) -> bool {
 		let fence = self.fence.load(Ordering::SeqCst);
-		self.epochs
-			.lock()
-			.range(..=since)
-			.all(|(epoch, counts)| counts.committing == 0 && (counts.open == 0 || *epoch < fence))
+		self.all_through(since, |epoch, counts| {
+			counts.committing == 0 && (counts.open == 0 || epoch < fence)
+		})
 	}
 
 	/// [`Self::ended_since`] for a wait on the writes of `targets`: an epoch every one of those
@@ -1442,10 +1491,9 @@ impl LiveWrites {
 				.unwrap_or(0)
 		};
 		let fence = fence.max(tables);
-		self.epochs
-			.lock()
-			.range(..=since)
-			.all(|(epoch, counts)| counts.committing == 0 && (counts.open == 0 || *epoch < fence))
+		self.all_through(since, |epoch, counts| {
+			counts.committing == 0 && (counts.open == 0 || epoch < fence)
+		})
 	}
 
 	/// Refuse at commit every write transaction counted into `since` or an earlier epoch, which a
@@ -1476,7 +1524,7 @@ impl LiveWrites {
 	/// Whether no commit of a transaction counted into `since` or an earlier epoch is under way:
 	/// what a wait that has fenced those epochs waits for.
 	pub fn commits_settled(&self, since: u64) -> bool {
-		self.epochs.lock().range(..=since).all(|(_, counts)| counts.committing == 0)
+		self.all_through(since, |_, counts| counts.committing == 0)
 	}
 
 	/// Count a wait that is about to read the epoch it waits past, on `tables`, or on every table
@@ -1904,6 +1952,9 @@ impl LiveRegistrations {
 mod tests {
 	use super::*;
 
+	/// The shard the tests count their transactions in.
+	const S: LiveShard = LiveShard(0);
+
 	fn named(name: &str) -> surrealdb_expr::val::TableName {
 		surrealdb_expr::val::TableName::from(name)
 	}
@@ -1918,7 +1969,7 @@ mod tests {
 		let writes = LiveWrites::default();
 		let registrations = LiveRegistrations::default();
 		let live = uuid::Uuid::from_u128(7);
-		let older = writes.open();
+		let older = writes.open(S);
 		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
 		assert_eq!(
 			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes),
@@ -1926,7 +1977,7 @@ mod tests {
 			"an undated registration may already have committed"
 		);
 		registrations.settle(token, &writes);
-		let newer = writes.open();
+		let newer = writes.open(S);
 		assert_eq!(
 			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes),
 			vec![live]
@@ -1939,8 +1990,8 @@ mod tests {
 			registrations.candidates(NS, DB, &named("other"), older, WRITER, &writes).is_empty(),
 			"another table's registration is not owed"
 		);
-		writes.close(newer);
-		writes.close(older);
+		writes.close(newer, S);
+		writes.close(older, S);
 		assert!(
 			registrations.candidates(NS, DB, &named("tb"), older, WRITER, &writes).is_empty(),
 			"once every write that could have missed it has ended, it is dropped"
@@ -1953,11 +2004,11 @@ mod tests {
 		let writes = LiveWrites::default();
 		let registrations = LiveRegistrations::default();
 		let live = uuid::Uuid::from_u128(7);
-		let write = writes.open();
+		let write = writes.open(S);
 		registrations.pin(write, WRITER);
 		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
 		registrations.settle(token, &writes);
-		writes.close(write);
+		writes.close(write, S);
 		assert_eq!(
 			registrations.candidates(NS, DB, &named("tb"), write, WRITER, &writes),
 			vec![live],
@@ -1972,14 +2023,14 @@ mod tests {
 		let writes = LiveWrites::default();
 		let registrations = LiveRegistrations::default();
 		let live = uuid::Uuid::from_u128(7);
-		let write = writes.open();
+		let write = writes.open(S);
 		// Two writers whose pins fall in different shards: the one still pinned keeps the entry.
 		let (first, second) = (WRITER, WRITER + 1);
 		registrations.pin(write, first);
 		registrations.pin(write, second);
 		let token = registrations.begin(NS, DB, &named("tb"), live, OWNER);
 		registrations.settle(token, &writes);
-		writes.close(write);
+		writes.close(write, S);
 		registrations.unpin(write, first);
 		assert_eq!(
 			registrations.candidates(NS, DB, &named("tb"), write, second, &writes),
@@ -1994,21 +2045,21 @@ mod tests {
 	fn a_transaction_is_not_answered_its_own_registration() {
 		let writes = LiveWrites::default();
 		let registrations = LiveRegistrations::default();
-		let epoch = writes.open();
+		let epoch = writes.open(S);
 		registrations.begin(NS, DB, &named("tb"), uuid::Uuid::from_u128(7), WRITER);
 		assert!(registrations.candidates(NS, DB, &named("tb"), epoch, WRITER, &writes).is_empty());
-		writes.close(epoch);
+		writes.close(epoch, S);
 	}
 
 	#[test]
 	fn an_abandoned_registration_is_dropped() {
 		let writes = LiveWrites::default();
 		let registrations = LiveRegistrations::default();
-		let epoch = writes.open();
+		let epoch = writes.open(S);
 		let token = registrations.begin(NS, DB, &named("tb"), uuid::Uuid::from_u128(7), OWNER);
 		registrations.abandon(token);
 		assert!(registrations.candidates(NS, DB, &named("tb"), epoch, WRITER, &writes).is_empty());
-		writes.close(epoch);
+		writes.close(epoch, S);
 	}
 
 	#[test]
@@ -2252,7 +2303,7 @@ mod tests {
 	fn a_later_wait_on_a_fenced_table_does_not_wait_for_its_fenced_epochs() {
 		let live = LiveWrites::default();
 		let (t, u) = (table(1, 2, "t"), table(1, 2, "u"));
-		let held = live.open();
+		let held = live.open(S);
 		let first = live.advance();
 		assert!(!live.ended_since_for(first, Some(std::slice::from_ref(&t))));
 		// The first wait on `t` runs its bound.
@@ -2268,52 +2319,55 @@ mod tests {
 		assert!(!live.ended_since_for(second, Some(&[])), "a wait on no table it can name");
 		// A commit of the fenced epoch under way still holds the wait up.
 		assert!(
-			!live.begin_commit(held, &parking_lot::Mutex::new(WrittenTables::default())),
+			!live.begin_commit(held, S, &parking_lot::Mutex::new(WrittenTables::default())),
 			"it writes no fenced table"
 		);
 		assert!(!live.ended_since_for(second, Some(std::slice::from_ref(&t))));
-		live.end_commit(held);
+		live.end_commit(held, S);
 		// A transaction of an epoch after the fence still holds a later wait up.
-		let later = live.open();
+		let later = live.open(S);
 		let third = live.advance();
 		assert!(!live.ended_since_for(third, Some(std::slice::from_ref(&t))));
-		live.close(later);
+		live.close(later, S);
 		assert!(live.ended_since_for(third, Some(std::slice::from_ref(&t))));
-		live.close(held);
+		live.close(held, S);
 	}
 
 	#[test]
 	fn the_current_epochs_counts_are_kept_until_it_is_past() {
 		let live = LiveWrites::default();
-		let epoch = live.open();
-		live.close(epoch);
-		assert!(live.epochs.lock().contains_key(&epoch), "the current epoch's entry is kept");
+		let epoch = live.open(S);
+		live.close(epoch, S);
+		assert!(live.counts(S).lock().contains_key(&epoch), "the current epoch's entry is kept");
 		assert!(live.ended_since(epoch), "and counts nothing open");
 		let since = live.advance();
 		assert_eq!(since, epoch);
-		assert!(!live.epochs.lock().contains_key(&epoch), "a past epoch's empty entry is dropped");
+		assert!(
+			!live.counts(S).lock().contains_key(&epoch),
+			"a past epoch's empty entry is dropped"
+		);
 		// A past epoch's entry is dropped once its last transaction ends.
-		let next = live.open();
+		let next = live.open(S);
 		live.advance();
-		assert!(live.epochs.lock().contains_key(&next));
-		live.close(next);
-		assert!(live.epochs.lock().is_empty());
+		assert!(live.counts(S).lock().contains_key(&next));
+		live.close(next, S);
+		assert!(live.counts(S).lock().is_empty());
 	}
 
 	#[test]
 	fn a_commit_reads_no_written_table_while_no_table_is_fenced() {
 		let live = LiveWrites::default();
-		let epoch = live.open();
+		let epoch = live.open(S);
 		let written = parking_lot::Mutex::new(written(&[&record_key(1, 2, "a")]));
 		// Held, so a commit that reads it would block.
 		let held = written.lock();
-		assert!(!live.begin_commit(epoch, &written), "no table is fenced");
-		live.end_commit(epoch);
+		assert!(!live.begin_commit(epoch, S, &written), "no table is fenced");
+		live.end_commit(epoch, S);
 		drop(held);
 		live.fence_tables_through(epoch, &[table(1, 2, "a")]);
-		assert!(live.begin_commit(epoch, &written), "the fenced table's write");
-		live.end_commit(epoch);
-		live.close(epoch);
+		assert!(live.begin_commit(epoch, S, &written), "the fenced table's write");
+		live.end_commit(epoch, S);
+		live.close(epoch, S);
 	}
 
 	#[test]
@@ -2432,8 +2486,8 @@ mod tests {
 		let epoch = live.advance();
 		live.fence_tables_through(epoch, &[table(1, 2, "a")]);
 		let refused = |written: WrittenTables| {
-			let refused = live.begin_commit(epoch, &parking_lot::Mutex::new(written));
-			live.end_commit(epoch);
+			let refused = live.begin_commit(epoch, S, &parking_lot::Mutex::new(written));
+			live.end_commit(epoch, S);
 			refused
 		};
 		assert!(refused(written(&[&record_key(1, 2, "a")])), "a write of the fenced table");
@@ -2445,10 +2499,14 @@ mod tests {
 		assert!(refused(every), "a write that may be of any table");
 		let later = live.advance();
 		assert!(
-			!live.begin_commit(later, &parking_lot::Mutex::new(written(&[&record_key(1, 2, "a")]))),
+			!live.begin_commit(
+				later,
+				S,
+				&parking_lot::Mutex::new(written(&[&record_key(1, 2, "a")]))
+			),
 			"a later epoch"
 		);
-		live.end_commit(later);
+		live.end_commit(later, S);
 	}
 
 	use std::time::Duration;
@@ -2458,8 +2516,8 @@ mod tests {
 	/// Whether a commit of a transaction of `epoch` that writes a record of table `tb` is refused.
 	fn commit_refused(live: &LiveWrites, epoch: u64, tb: &str) -> bool {
 		let writes = parking_lot::Mutex::new(written(&[&record_key(1, 2, tb)]));
-		let refused = live.begin_commit(epoch, &writes);
-		live.end_commit(epoch);
+		let refused = live.begin_commit(epoch, S, &writes);
+		live.end_commit(epoch, S);
 		refused
 	}
 
@@ -2470,7 +2528,7 @@ mod tests {
 		assert!(!live.holds_writes());
 		let (hold, registered) = live.hold_table(t.clone(), OWNER);
 		assert!(registered && live.holds_writes());
-		let older = live.open();
+		let older = live.open(S);
 		assert!(live.hold_on(&t, older, WRITER).is_none(), "no wait has begun");
 		assert!(
 			live.hold_on(&t, older + 1, WRITER).is_none(),
@@ -2478,12 +2536,12 @@ mod tests {
 		);
 		// A wait that is not the definition's build's does not begin the hold.
 		live.advance();
-		let newer = live.open();
+		let newer = live.open(S);
 		assert!(live.hold_on(&t, newer, WRITER).is_none(), "another wait did not begin it");
 		let since = live.advance_holding(Some(&hold));
 		assert!(live.hold_on(&t, older, WRITER).is_none(), "a write the wait waits for");
 		assert!(live.hold_on(&t, since, WRITER).is_none(), "the epoch the wait waits through");
-		let later = live.open();
+		let later = live.open(S);
 		assert!(later > since);
 		assert!(live.hold_on(&t, later, WRITER).is_some(), "a write that opened after it");
 		assert!(live.hold_on(&t, later, OWNER).is_none(), "the defining transaction");
@@ -2493,9 +2551,9 @@ mod tests {
 		let again = live.advance_holding(Some(&hold));
 		assert!(again > since);
 		assert!(live.hold_on(&t, later, WRITER).is_some(), "the first wait's epoch stands");
-		live.close(older);
-		live.close(newer);
-		live.close(later);
+		live.close(older, S);
+		live.close(newer, S);
+		live.close(later, S);
 	}
 
 	#[test]
@@ -2527,7 +2585,7 @@ mod tests {
 		let t = table(1, 2, "t");
 		let (hold, _) = live.hold_table(t.clone(), OWNER);
 		live.advance_holding(Some(&hold));
-		let held = live.open();
+		let held = live.open(S);
 		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "open");
 		live.begin_definition_commit(WRITER);
 		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "another transaction commits");
@@ -2536,7 +2594,7 @@ mod tests {
 		assert_eq!(hold.ended(BOUND).await, HoldVerdict::Released);
 		assert!(live.hold_on(&t, held, WRITER).is_none() && !live.holds_writes());
 		assert!(!commit_refused(&live, held, "t"), "a rollback leaves the index undefined");
-		live.close(held);
+		live.close(held, S);
 	}
 
 	#[tokio::test]
@@ -2545,7 +2603,7 @@ mod tests {
 		let t = table(1, 2, "t");
 		let (hold, _) = live.hold_table(t.clone(), OWNER);
 		live.advance_holding(Some(&hold));
-		let held = live.open();
+		let held = live.open(S);
 		live.begin_definition_commit(OWNER);
 		assert_eq!(hold.ended(BOUND).await, HoldVerdict::TimedOut, "committing is not ended");
 		live.end_hold(&hold);
@@ -2553,10 +2611,10 @@ mod tests {
 		assert_eq!(hold.ended(BOUND).await, HoldVerdict::Committing);
 		assert!(commit_refused(&live, held, "t"), "a write of the table that began before it");
 		assert!(!commit_refused(&live, held, "u"), "another table's");
-		let after = live.open();
+		let after = live.open(S);
 		assert!(!commit_refused(&live, after, "t"), "a write that began after sees the index");
-		live.close(held);
-		live.close(after);
+		live.close(held, S);
+		live.close(after, S);
 	}
 
 	#[tokio::test]

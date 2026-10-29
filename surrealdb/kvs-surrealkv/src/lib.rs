@@ -273,8 +273,11 @@ impl Datastore {
 	pub async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
 		// Create the shared blocking threadpool (idempotent)
 		surrealdb_kvs::threadpool::initialise();
-		// Configure custom options and set the data storage directory
-		let opts = Self::options(&config).with_path(path.to_string().into());
+		// Configure custom options and set the data storage directory. The active WAL segment
+		// keeps zeros written ahead of its end, so a commit's fsync writes its bytes without
+		// committing a new size of the file, which on ext4 and XFS is most of what it costs.
+		let opts =
+			Self::options(&config).with_path(path.to_string().into()).with_wal_preallocation(true);
 		// A RocksDB directory is converted in place by the build below
 		if holds_rocksdb_files(path) {
 			warn!(

@@ -44,6 +44,7 @@
 
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
@@ -51,8 +52,8 @@ use surrealdb_core::mem::{RefusalSite, refusal_count};
 use surrealdb_core::observe::process_snapshot;
 use surrealdb_observe::{
 	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
-	NetworkBytesEvent, NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent,
-	StatementEvent, TaskPassEvent, TransactionEvent,
+	NetworkBytesEvent, NetworkDirection, Outcome, QueryEvent, RpcEvent, SessionAction,
+	SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent, TransactionMetricsSnapshot,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -116,13 +117,9 @@ pub struct MetricsObserver {
 	// Transaction (scope: surrealdb.transaction)
 	transaction_total: Counter<u64>,
 	transaction_duration: Histogram<f64>,
-	transaction_kv_ops: Counter<u64>,
-	transaction_keys_read: Counter<u64>,
-	transaction_keys_written: Counter<u64>,
-	transaction_key_bytes_read: Counter<u64>,
-	transaction_value_bytes_read: Counter<u64>,
-	transaction_key_bytes_written: Counter<u64>,
-	transaction_value_bytes_written: Counter<u64>,
+	/// The KV operation, key and byte counts of the transactions, reported by observable
+	/// counters ([`TransactionTallies`]).
+	transaction_tallies: Arc<TransactionTallies>,
 	transaction_conflicts: Counter<u64>,
 	// RPC (scope: surrealdb.rpc)
 	rpc_total: Counter<u64>,
@@ -168,6 +165,171 @@ pub struct MetricsObserver {
 	task_items: Counter<u64>,
 	task_queue_age: Histogram<f64>,
 	task_backlog: Counter<u64>,
+}
+
+/// The KV operations a transaction made, by op, as the `kv_op` attribute names them.
+const KV_OPS: [&str; 5] = ["get", "scan", "put", "set", "del"];
+
+/// The outcomes a transaction ends with, in the order of [`TransactionTallies`]' counts.
+const OUTCOMES: [Outcome; 3] = [Outcome::Success, Outcome::Error, Outcome::Cancelled];
+
+/// The counts of the per-transaction KV metrics: the operations by op, and the keys and bytes read
+/// and written by outcome. Every write transaction adds to up to nine of them, and an instrument
+/// sorts and hashes its attributes and locks its aggregator on every add, which at a hundred
+/// thousand transactions a second on many cores is a lock every core contends for. So they are
+/// added to atomics, in shards that the cores mostly do not share, and the observable counters
+/// that report them sum the shards when they are collected: the same cumulative sums, under the
+/// same names, units and attributes.
+struct TransactionTallies {
+	shards: Box<[TallyShard]>,
+}
+
+/// How many shards [`TransactionTallies`] keeps.
+const TALLY_SHARDS: usize = 16;
+
+/// What a byte or key count of [`TransactionTallies`] counts.
+#[derive(Clone, Copy)]
+enum Tally {
+	KeysRead,
+	KeysWritten,
+	KeyBytesRead,
+	ValueBytesRead,
+	KeyBytesWritten,
+	ValueBytesWritten,
+}
+
+/// One shard of [`TransactionTallies`], on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct TallyShard {
+	kv_ops: [AtomicU64; KV_OPS.len()],
+	/// By [`Tally`], then by the index of the outcome in [`OUTCOMES`].
+	counts: [[AtomicU64; OUTCOMES.len()]; 6],
+}
+
+impl TransactionTallies {
+	/// The tallies, with an observable counter on `meter` for each of the seven metrics.
+	fn register(meter: &opentelemetry::metrics::Meter) -> Arc<Self> {
+		let tallies = Arc::new(Self {
+			shards: (0..TALLY_SHARDS).map(|_| TallyShard::default()).collect(),
+		});
+		let kv_ops = Arc::clone(&tallies);
+		// `build` returns the instrument, not a result. The meter keeps the callback registered
+		// once the handle is dropped, as for the process instruments in `register_process_metrics`.
+		let _kv_ops = meter
+			.u64_observable_counter(names::TRANSACTION_KV_OPS)
+			.with_description("Per-transaction KV operation counts, broken out by op type")
+			.with_callback(move |obs| {
+				for (i, op) in KV_OPS.iter().enumerate() {
+					let total = kv_ops.sum(|shard| &shard.kv_ops[i]);
+					obs.observe(total, &[KeyValue::new(attrs::KV_OP, *op)]);
+				}
+			})
+			.build();
+		let counts = [
+			(
+				Tally::KeysRead,
+				names::TRANSACTION_KEYS_READ,
+				"Total keys read across transactions",
+				None,
+			),
+			(
+				Tally::KeysWritten,
+				names::TRANSACTION_KEYS_WRITTEN,
+				"Total keys written across transactions",
+				None,
+			),
+			(
+				Tally::KeyBytesRead,
+				names::TRANSACTION_KEY_BYTES_READ,
+				"Total key bytes read across transactions",
+				Some("By"),
+			),
+			(
+				Tally::ValueBytesRead,
+				names::TRANSACTION_VALUE_BYTES_READ,
+				"Total value bytes read across transactions",
+				Some("By"),
+			),
+			(
+				Tally::KeyBytesWritten,
+				names::TRANSACTION_KEY_BYTES_WRITTEN,
+				"Total key bytes written across transactions",
+				Some("By"),
+			),
+			(
+				Tally::ValueBytesWritten,
+				names::TRANSACTION_VALUE_BYTES_WRITTEN,
+				"Total value bytes written across transactions",
+				Some("By"),
+			),
+		];
+		for (tally, name, description, unit) in counts {
+			let observed = Arc::clone(&tallies);
+			let builder = meter.u64_observable_counter(name).with_description(description);
+			let builder = match unit {
+				Some(unit) => builder.with_unit(unit),
+				None => builder,
+			};
+			// The meter keeps the callback registered once the handle is dropped, as above.
+			let _counter = builder
+				.with_callback(move |obs| {
+					for (i, outcome) in OUTCOMES.iter().enumerate() {
+						let total = observed.sum(|shard| &shard.counts[tally as usize][i]);
+						// A count never added to is not reported, as an `add` never made would not
+						// have made its series.
+						if total > 0 {
+							obs.observe(
+								total,
+								&[KeyValue::new(attrs::OUTCOME, outcome.as_label())],
+							);
+						}
+					}
+				})
+				.build();
+		}
+		tallies
+	}
+
+	/// The shard the calling thread adds to.
+	fn shard(&self) -> &TallyShard {
+		static NEXT: AtomicUsize = AtomicUsize::new(0);
+		thread_local! {
+			static SHARD: usize = NEXT.fetch_add(1, Ordering::Relaxed) % TALLY_SHARDS;
+		}
+		&self.shards[SHARD.with(|shard| *shard)]
+	}
+
+	fn sum(&self, count: impl Fn(&TallyShard) -> &AtomicU64) -> u64 {
+		self.shards.iter().map(|shard| count(shard).load(Ordering::Relaxed)).sum()
+	}
+
+	/// Adds what a transaction that ended with `outcome` did.
+	fn record(&self, outcome: Outcome, m: &TransactionMetricsSnapshot) {
+		let shard = self.shard();
+		let ops = [m.ops_get, m.ops_scan, m.ops_put, m.ops_set, m.ops_del];
+		for (count, n) in shard.kv_ops.iter().zip(ops) {
+			if n > 0 {
+				count.fetch_add(u64::from(n), Ordering::Relaxed);
+			}
+		}
+		let Some(at) = OUTCOMES.iter().position(|o| *o == outcome) else {
+			return;
+		};
+		let counts = [
+			(Tally::KeysRead, m.keys_read),
+			(Tally::KeysWritten, m.keys_written),
+			(Tally::KeyBytesRead, m.key_bytes_read),
+			(Tally::ValueBytesRead, m.value_bytes_read),
+			(Tally::KeyBytesWritten, m.key_bytes_written),
+			(Tally::ValueBytesWritten, m.value_bytes_written),
+		];
+		for (tally, n) in counts {
+			if n > 0 {
+				shard.counts[tally as usize][at].fetch_add(n, Ordering::Relaxed);
+			}
+		}
+	}
 }
 
 impl MetricsObserver {
@@ -233,38 +395,7 @@ impl MetricsObserver {
 				.with_description("Distribution of transaction lifetime at commit / cancel")
 				.with_unit("s")
 				.build(),
-			transaction_kv_ops: tx
-				.u64_counter(names::TRANSACTION_KV_OPS)
-				.with_description("Per-transaction KV operation counts, broken out by op type")
-				.build(),
-			transaction_keys_read: tx
-				.u64_counter(names::TRANSACTION_KEYS_READ)
-				.with_description("Total keys read across transactions")
-				.build(),
-			transaction_keys_written: tx
-				.u64_counter(names::TRANSACTION_KEYS_WRITTEN)
-				.with_description("Total keys written across transactions")
-				.build(),
-			transaction_key_bytes_read: tx
-				.u64_counter(names::TRANSACTION_KEY_BYTES_READ)
-				.with_description("Total key bytes read across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_value_bytes_read: tx
-				.u64_counter(names::TRANSACTION_VALUE_BYTES_READ)
-				.with_description("Total value bytes read across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_key_bytes_written: tx
-				.u64_counter(names::TRANSACTION_KEY_BYTES_WRITTEN)
-				.with_description("Total key bytes written across transactions")
-				.with_unit("By")
-				.build(),
-			transaction_value_bytes_written: tx
-				.u64_counter(names::TRANSACTION_VALUE_BYTES_WRITTEN)
-				.with_description("Total value bytes written across transactions")
-				.with_unit("By")
-				.build(),
+			transaction_tallies: TransactionTallies::register(&tx),
 			transaction_conflicts: tx
 				.u64_counter(names::TRANSACTION_CONFLICTS)
 				.with_description(
@@ -833,39 +964,7 @@ impl ExecutionObserver for MetricsObserver {
 			];
 			self.transaction_conflicts.add(1, &conflict_attrs);
 		}
-		let m = event.safe.metrics;
-		let bump = |op: &'static str, n: u32| {
-			if n > 0 {
-				self.transaction_kv_ops.add(u64::from(n), &[KeyValue::new(attrs::KV_OP, op)]);
-			}
-		};
-		bump("get", m.ops_get);
-		bump("scan", m.ops_scan);
-		bump("put", m.ops_put);
-		bump("set", m.ops_set);
-		bump("del", m.ops_del);
-		// keys / bytes counters carry the outcome dimension so success
-		// vs error cohorts can be separated. Tenant attribution lives
-		// on the per-transaction total / duration above.
-		let outcome_attrs = [KeyValue::new(attrs::OUTCOME, outcome)];
-		if m.keys_read > 0 {
-			self.transaction_keys_read.add(m.keys_read, &outcome_attrs);
-		}
-		if m.keys_written > 0 {
-			self.transaction_keys_written.add(m.keys_written, &outcome_attrs);
-		}
-		if m.key_bytes_read > 0 {
-			self.transaction_key_bytes_read.add(m.key_bytes_read, &outcome_attrs);
-		}
-		if m.value_bytes_read > 0 {
-			self.transaction_value_bytes_read.add(m.value_bytes_read, &outcome_attrs);
-		}
-		if m.key_bytes_written > 0 {
-			self.transaction_key_bytes_written.add(m.key_bytes_written, &outcome_attrs);
-		}
-		if m.value_bytes_written > 0 {
-			self.transaction_value_bytes_written.add(m.value_bytes_written, &outcome_attrs);
-		}
+		self.transaction_tallies.record(event.safe.outcome, &event.safe.metrics);
 	}
 
 	fn on_rpc_complete(&self, event: &RpcEvent) {
@@ -1422,6 +1521,92 @@ mod tests {
 				scope::TRANSACTION,
 			);
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// The `attr`-labelled data-points of the u64 counter `metric_name`, by the value of the
+	/// attribute.
+	fn u64_sums_by(
+		reader: &TestReader,
+		metric_name: &str,
+		attr: &str,
+	) -> std::collections::BTreeMap<String, u64> {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let mut out = std::collections::BTreeMap::new();
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				if metric.name() != metric_name {
+					continue;
+				}
+				let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() else {
+					panic!("{} is not a u64 sum: {:?}", metric.name(), metric.data());
+				};
+				assert!(sum.is_monotonic(), "{metric_name} is a counter");
+				for dp in sum.data_points() {
+					let label = dp
+						.attributes()
+						.find(|kv| kv.key.as_str() == attr)
+						.map(|kv| kv.value.to_string())
+						.unwrap_or_default();
+					*out.entry(label).or_default() += dp.value();
+				}
+			}
+		}
+		out
+	}
+
+	/// The per-transaction KV counts are the sums of what every transaction reported, by op and
+	/// by outcome, from whichever thread reported it.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn transaction_kv_counts_are_the_sums_of_every_transaction() {
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = Arc::new(MetricsObserver::new(&runtime).expect("observer"));
+		let event = |outcome, keys_written, ops_set| TransactionEvent {
+			safe: TransactionEventSafe {
+				outcome,
+				write: true,
+				duration: Duration::from_millis(1),
+				metrics: TransactionMetricsSnapshot {
+					keys_read: 2,
+					keys_written,
+					key_bytes_written: 10 * keys_written,
+					ops_get: 2,
+					ops_set,
+					..Default::default()
+				},
+				error_class: None,
+			},
+			ctx: TransactionEventCtx::default(),
+		};
+		let mut tasks = Vec::new();
+		for i in 0..64u64 {
+			let obs = Arc::clone(&obs);
+			let outcome = if i % 4 == 0 {
+				Outcome::Error
+			} else {
+				Outcome::Success
+			};
+			let event = event(outcome, 1, 3);
+			tasks.push(tokio::spawn(async move { obs.on_transaction_complete(&event) }));
+		}
+		for task in tasks {
+			task.await.unwrap();
+		}
+		let ops = u64_sums_by(&reader, names::TRANSACTION_KV_OPS, attrs::KV_OP);
+		assert_eq!(ops.get("get"), Some(&128));
+		assert_eq!(ops.get("set"), Some(&192));
+		assert_eq!(ops.get("del"), Some(&0));
+		let written = u64_sums_by(&reader, names::TRANSACTION_KEYS_WRITTEN, attrs::OUTCOME);
+		assert_eq!(written.get("success"), Some(&48));
+		assert_eq!(written.get("error"), Some(&16));
+		assert_eq!(written.get("cancelled"), None, "a count never added to is not reported");
+		let bytes = u64_sums_by(&reader, names::TRANSACTION_KEY_BYTES_WRITTEN, attrs::OUTCOME);
+		assert_eq!(bytes.values().sum::<u64>(), 640);
+		assert!(
+			u64_sums_by(&reader, names::TRANSACTION_VALUE_BYTES_READ, attrs::OUTCOME).is_empty()
+		);
 		provider.shutdown().expect("shutdown");
 	}
 
