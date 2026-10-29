@@ -121,7 +121,7 @@ runs:
 
         # Package
         cp target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }} ${{ inputs.binary }}
-        ./${{ inputs.binary }} version
+        ./${{ inputs.binary }} --version
         tar -zcvf ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz ${{ inputs.binary }}
         echo $(shasum -a 256 ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.tgz | cut -f1 -d' ') > ${{ inputs.binary }}-${{ inputs.name }}.darwin-${{ inputs.platform }}.txt
 

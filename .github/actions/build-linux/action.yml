@@ -204,9 +204,9 @@ runs:
         echo $(shasum -a 256 ${{ inputs.binary }}-${{ inputs.name }}.linux-${{ inputs.platform }}.tgz | cut -f1 -d' ') > ${{ inputs.binary }}-${{ inputs.name }}.linux-${{ inputs.platform }}.txt
 
         # Verify the binary is compatible with various Linux distributions
-        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} ubuntu:24.04 /${{ inputs.binary }} version
-        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} rockylinux/rockylinux:10 /${{ inputs.binary }} version
-        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} debian:12 /${{ inputs.binary }} version
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} ubuntu:24.04 /${{ inputs.binary }} --version
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} rockylinux/rockylinux:10 /${{ inputs.binary }} --version
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}:/${{ inputs.binary }} debian:12 /${{ inputs.binary }} --version
 
     - name: Upload artifacts
       if: ${{ inputs.upload == 'true' }}

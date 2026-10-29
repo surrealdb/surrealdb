@@ -104,7 +104,7 @@ runs:
         cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
 
         # Package
-        ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe version
+        ./target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe --version
         cp target/${{ inputs.arch }}/${compile_profile}/${{ inputs.binary }}.exe ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
         echo $(certutil -hashfile ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > ${{ inputs.binary }}-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
 
