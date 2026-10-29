@@ -192,7 +192,8 @@ pub struct ServeOptions {
 	pub authenticator: Option<Arc<dyn Authenticator>>,
 	/// State shared with the other connections of this process.
 	pub shared: Arc<Shared>,
-	/// The dialect a connection starts in, until its startup options or a `SET` change it.
+	/// The dialect a connection starts in, until its startup options or a `SET` change it. This
+	/// protocol speaks `PgSql` and `Gql`; any other value starts the connection in `PgSql`.
 	pub dialect: Dialect,
 }
 
@@ -217,7 +218,10 @@ pub async fn serve<S: Io>(stream: S, ds: Arc<Datastore>, options: ServeOptions) 
 		options.tls,
 		options.start,
 		options.authenticator,
-		options.dialect,
+		match options.dialect {
+			Dialect::Gql => Dialect::Gql,
+			Dialect::SurrealQl | Dialect::PgSql | Dialect::MySql => Dialect::PgSql,
+		},
 	)
 	.await;
 }
@@ -333,7 +337,7 @@ async fn accept_loop(
 						acceptor.clone(),
 						Start::Negotiate,
 						None,
-						Dialect::SurrealQl,
+						Dialect::PgSql,
 					));
 				}
 				Err(err) => {

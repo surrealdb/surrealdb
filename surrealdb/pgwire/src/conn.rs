@@ -96,7 +96,6 @@ const MAX_PARAMS: usize = i16::MAX as usize;
 /// lowered by the datastore on every execution.
 #[derive(Clone)]
 enum CachedPlan {
-	SurrealQl(syn::Query),
 	PgAst(Ast),
 }
 
@@ -1400,56 +1399,7 @@ impl Connection {
 		let mut wildcard_types = HashMap::new();
 		let (query, cached_plan, param_count, param_types, empty, descriptor, kind, returns_rows) =
 			match self.dialect {
-				Dialect::SurrealQl => {
-					// Parse once so syntax errors surface at Parse (as Postgres does)
-					// and the AST can be cached for repeated Execute without re-parsing.
-					let (rewritten, positional) = rewrite_positional_params(query);
-					let config = self.ds.parser_config();
-					let ast = syn::parse_with_capabilities(
-						&rewritten,
-						&self.ds.get_capabilities(),
-						&config,
-					)
-					.map_err(|err| PgError::syntax(err.to_string()))?;
-					if ast.num_statements() > 1 {
-						return Err(PgError::syntax(
-							"cannot insert multiple commands into a prepared statement",
-						));
-					}
-					let empty = ast.num_statements() == 0;
-					let param_count = param_types.len().max(positional);
-					let cached_plan = if empty {
-						None
-					} else {
-						Some(CachedPlan::SurrealQl(ast))
-					};
-					let trimmed = query.trim_start();
-					let (kind, returns_rows) = if trimmed.starts_with("DEFINE TABLE") {
-						(StatementKind::CreateTable, false)
-					} else if trimmed.starts_with("REMOVE TABLE") {
-						(StatementKind::DropTable, false)
-					} else if trimmed.starts_with("DEFINE INDEX") {
-						(StatementKind::CreateIndex, false)
-					} else if trimmed.starts_with("INSERT") {
-						(StatementKind::Insert, true)
-					} else if trimmed.starts_with("UPDATE") {
-						(StatementKind::Update, true)
-					} else if trimmed.starts_with("DELETE") {
-						(StatementKind::Delete, true)
-					} else {
-						(StatementKind::Select, !empty)
-					};
-					(
-						rewritten,
-						cached_plan,
-						param_count,
-						param_types,
-						empty,
-						None,
-						kind,
-						returns_rows,
-					)
-				}
+				Dialect::SurrealQl => return Err(not_over_pgwire(Dialect::SurrealQl)),
 				Dialect::PgSql => {
 					global_metrics().record_query(SqlDialect::Postgres);
 					let stmts = surrealdb_pgsql::parse_statements(query).map_err(|err| {
@@ -2248,26 +2198,7 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			(Dialect::SurrealQl, transaction, Some(CachedPlan::SurrealQl(ast))) => self
-				.ds
-				.run(
-					QueryRequest::new(ast, &self.session)
-						.with_variables(Some(params))
-						.with_optional_transaction(transaction)
-						.with_cancel(cancel),
-				)
-				.await
-				.map_err(|e| PgError::from(&e)),
-			(Dialect::SurrealQl, transaction, _) => self
-				.ds
-				.run(
-					QueryRequest::new(query, &self.session)
-						.with_variables(Some(params))
-						.with_optional_transaction(transaction)
-						.with_cancel(cancel),
-				)
-				.await
-				.map_err(|e| PgError::from(&e)),
+			(Dialect::SurrealQl, ..) => Err(not_over_pgwire(Dialect::SurrealQl)),
 		}?;
 		let mut last = Value::None;
 		for result in results {
@@ -2351,18 +2282,7 @@ impl Connection {
 
 		match self.dialect {
 			Dialect::SurrealQl => {
-				if trimmed.to_ascii_uppercase().starts_with("COPY ") {
-					let res = self.run_pgsql(trimmed, &mut out).await;
-					if res.is_err() || self.txn_failed {
-						return self.finish_query(out).await;
-					}
-					return self.finish_query(out).await;
-				}
-				if self.transaction.is_some() {
-					let _ = self.run_in_transaction(trimmed, &mut out).await;
-				} else {
-					let _ = self.run_surrealql_autocommit(trimmed, &mut out).await;
-				}
+				self.note_simple_error(&not_over_pgwire(Dialect::SurrealQl), &mut out);
 			}
 			Dialect::PgSql => {
 				let mut has_statement = false;
@@ -3233,189 +3153,6 @@ impl Connection {
 		Ok(())
 	}
 
-	/// Execute SurrealQL outside any interactive transaction: one execution
-	/// unit at a time (a single statement or a whole `BEGIN..COMMIT` block),
-	/// stopping at the first error — Postgres simple-query semantics.
-	///
-	/// DIVERGENCE: SurrealDB auto-commits each top-level statement, so units
-	/// that succeeded before the error are not rolled back (unlike Postgres,
-	/// which wraps a multi-statement simple query in an implicit transaction).
-	/// Wrap statements in an explicit `BEGIN..COMMIT` for all-or-nothing.
-	async fn run_surrealql_autocommit(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
-		let config = self.ds.parser_config();
-		let ast = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
-			Ok(ast) => ast,
-			Err(err) => {
-				msg::write_error_response(out, &PgError::syntax(err.to_string()));
-				return Ok(());
-			}
-		};
-		if ast.num_statements() == 0 {
-			msg::write_empty_query_response(out);
-			return Ok(());
-		}
-		// `unit` is left un-annotated on purpose: the core `Ast` type is
-		// crate-private, so it can only be used through its (public) methods.
-		for mut unit in ast.into_execution_units() {
-			// A stray COMMIT/CANCEL with no open transaction is a Postgres
-			// warning, not a fatal error — emit a notice and keep going rather
-			// than letting the executor abort the rest of the query.
-			if unit.is_sole_commit() {
-				msg::write_notice(out, "25P01", "there is no transaction in progress");
-				msg::write_command_complete(out, "COMMIT");
-				continue;
-			}
-			if unit.is_sole_cancel() {
-				msg::write_notice(out, "25P01", "there is no transaction in progress");
-				msg::write_command_complete(out, "ROLLBACK");
-				continue;
-			}
-			// Session persistence, matching the interactive shell
-			// (cli/sql.rs): the values of this unit's LET statements and the
-			// resulting session are appended as trailing `$param` expressions
-			// and read back from the last results after execution.
-			//
-			// Skip this for a unit that ends in `CANCEL`: a LET/USE inside a
-			// rolled-back transaction must not leak its (uncommitted) value
-			// into the persistent connection session. Committed blocks still
-			// persist their LET/USE, matching how the interactive shell behaves.
-			let capture_session = !unit.contains_cancel();
-			let has_begin = unit.expressions.iter().any(|e| matches!(e, TopLevelExpr::Begin(_)));
-			let let_vars = if capture_session {
-				let names = unit.get_let_statements();
-				for name in &names {
-					unit.add_param(name.clone());
-				}
-				unit.add_param("session".to_string());
-				names
-			} else {
-				Vec::new()
-			};
-			let cancel = self.arm_cancel();
-			let mut results =
-				match self.ds.run(QueryRequest::new(unit, &self.session).with_cancel(cancel)).await
-				{
-					Ok(results) => results,
-					Err(err) => {
-						msg::write_error_response(out, &PgError::from(&err));
-						break;
-					}
-				};
-			// The appended capture params are always the final top-level
-			// expressions and always execute, so they are the last
-			// `let_vars.len() + 1` results (or none, when capture was skipped).
-			let trailing = if capture_session && results.len() > let_vars.len() {
-				results.split_off(results.len() - (let_vars.len() + 1))
-			} else {
-				Vec::new()
-			};
-			// A block that did not commit reverts its LETs, so the appended
-			// reads return the reverted values: a block whose final result is
-			// an error contributes no LET values. The `$session` half still
-			// applies, as a `USE` is never undone.
-			let let_vars = if has_begin && results.last().is_some_and(|r| r.result.is_err()) {
-				Vec::new()
-			} else {
-				let_vars
-			};
-			let mut ok = true;
-			for result in results {
-				match result.result {
-					Ok(value) => {
-						if !self.emit_result(value, out).await? {
-							ok = false;
-							break;
-						}
-					}
-					Err(err) => {
-						msg::write_error_response(out, &PgError::from(&err));
-						ok = false;
-						break;
-					}
-				}
-			}
-			if capture_session {
-				self.apply_session_updates(let_vars, trailing);
-			}
-			if !ok {
-				break;
-			}
-		}
-		Ok(())
-	}
-
-	/// Execute SurrealQL within the open interactive transaction. On any
-	/// statement error the transaction is poisoned (25P02) until the client
-	/// ends it with COMMIT/ROLLBACK.
-	///
-	/// Text that parses as SurrealQL has a `$name` read appended for each of
-	/// its top-level `LET` statements; the successful values are held in
-	/// `txn_lets` until the transaction commits. The appended reads always
-	/// execute, so they are the last results. Text that parses only after
-	/// translation captures nothing, and `USE` is not captured.
-	async fn run_in_transaction(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
-		let tx = self.transaction.clone().expect("caller checked transaction is open");
-		let cancel = self.arm_cancel();
-		let config = self.ds.parser_config();
-		let lowered;
-		let mut let_vars = Vec::new();
-		let source = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
-			Ok(mut ast) => {
-				let_vars = ast.get_let_statements();
-				for name in &let_vars {
-					ast.add_param(name.clone());
-				}
-				QuerySource::from(ast)
-			}
-			Err(_) => match surrealdb_pgsql::translate_sql(sql) {
-				Ok(translated) => {
-					lowered = translated;
-					QuerySource::from(lowered.as_str())
-				}
-				Err(_) => QuerySource::from(sql),
-			},
-		};
-		let results = self
-			.ds
-			.run(QueryRequest::new(source, &self.session).with_transaction(tx).with_cancel(cancel))
-			.await;
-		match results {
-			Ok(mut results) => {
-				let trailing = results.split_off(results.len().saturating_sub(let_vars.len()));
-				for result in results {
-					match result.result {
-						Ok(value) => {
-							if !self.emit_result(value, out).await? {
-								self.txn_failed = true;
-								break;
-							}
-						}
-						Err(err) => {
-							msg::write_error_response(out, &PgError::from(&err));
-							self.txn_failed = true;
-							break;
-						}
-					}
-				}
-				for (name, result) in let_vars.into_iter().zip(trailing) {
-					// Protected names are never written into the session
-					// variables, as in `apply_session_updates`.
-					if surrealdb_rpc::check_protected_param(&name).is_err() {
-						continue;
-					}
-					if let Ok(value) = result.result {
-						self.txn_lets.push((name, value));
-					}
-				}
-			}
-			Err(err) => {
-				msg::write_error_response(out, &PgError::from(&err));
-				self.txn_failed = true;
-			}
-		}
-		Ok(())
-	}
-
 	/// Execute a GQL query and stream its results (as typed columns, like the
 	/// SurrealQL simple path). GQL runs against the current namespace/database.
 	async fn run_gql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
@@ -3670,7 +3407,13 @@ impl Connection {
 	/// Switch the connection to `dialect`, enforcing the capability that gates
 	/// it. Every assignment to `self.dialect` goes through here, so a dialect a
 	/// deployment has switched off cannot be entered from any selection point.
+	///
+	/// This protocol speaks PostgreSQL SQL, and GQL on request; SurrealQL and
+	/// MySQL are reachable over their own endpoints and are refused here.
 	fn select_dialect(&mut self, dialect: Dialect) -> Result<(), PgError> {
+		if matches!(dialect, Dialect::SurrealQl | Dialect::MySql) {
+			return Err(not_over_pgwire(dialect));
+		}
 		self.check_dialect(dialect)?;
 		self.dialect = dialect;
 		Ok(())
@@ -3685,7 +3428,7 @@ impl Connection {
 	/// immediately stops `/gql` (checked per request) and the `gql` RPC method
 	/// (checked per dispatch). The connection is not stranded — `SET dialect`
 	/// is intercepted before this runs, so a client can switch back to
-	/// SurrealQL. `RouteTarget::Postgres` stays connection-scoped by contrast,
+	/// PostgreSQL. `RouteTarget::Postgres` stays connection-scoped by contrast,
 	/// matching `RouteTarget::Rpc` on a WebSocket, which is checked once at
 	/// upgrade.
 	fn check_current_dialect(&self) -> Result<(), PgError> {
@@ -3716,15 +3459,14 @@ impl Connection {
 	}
 
 	/// Whether a `SET` should be intercepted rather than executed. In the
-	/// SurrealQL, PostgreSQL, and MySQL dialects every `SET` is intercepted
+	/// PostgreSQL and MySQL dialects every `SET` is intercepted
 	/// (top-level `SET` is configuration). In the GQL dialect `SET` is a mutation
 	/// clause, so only what a driver means as configuration is intercepted — the
 	/// `dialect` control knob, the known GUC allowlist, and unmodelled `SET` syntax
 	/// (empty name, e.g. `SET TIME ZONE ...`); a real `property = value` mutation reaches the
 	/// executor.
 	fn should_intercept_set(&self, set: &SetStatement) -> bool {
-		self.dialect == Dialect::SurrealQl
-			|| self.dialect == Dialect::PgSql
+		self.dialect == Dialect::PgSql
 			|| self.dialect == Dialect::MySql
 			|| set.name.is_empty()
 			|| set.name.eq_ignore_ascii_case("dialect")
@@ -4376,42 +4118,6 @@ impl Connection {
 		out: &mut BytesMut,
 	) -> Result<bool> {
 		self.emit_shape(shape_result_with_descriptor(descriptor, value), out).await
-	}
-
-	/// Fold the trailing `$param` results back into the connection session:
-	/// LET values into the session variables, and the `$session` object's
-	/// namespace/database selection (which reflects any `USE` statements the
-	/// unit executed).
-	fn apply_session_updates(
-		&mut self,
-		let_vars: Vec<String>,
-		mut trailing: Vec<surrealdb_rpc::QueryResult>,
-	) {
-		let Some(session_result) = trailing.pop() else {
-			return;
-		};
-		for (name, result) in let_vars.into_iter().zip(trailing) {
-			// Never write a protected name ($session/$auth/$token/$access)
-			// into the session variables: the executor rejects those on every
-			// subsequent query, which would poison the connection.
-			if surrealdb_rpc::check_protected_param(&name).is_err() {
-				continue;
-			}
-			if let Ok(value) = result.result {
-				self.session.variables.insert(name, value);
-			}
-		}
-		if let Ok(Value::Object(obj)) = session_result.result {
-			let mut map = obj.into_inner();
-			self.session.ns = match map.remove("ns") {
-				Some(Value::String(ns)) => Some(ns),
-				_ => None,
-			};
-			self.session.db = match map.remove("db") {
-				Some(Value::String(db)) => Some(db),
-				_ => None,
-			};
-		}
 	}
 
 	async fn finish_query(&mut self, mut out: BytesMut) -> Result<()> {
@@ -5757,6 +5463,14 @@ fn option_setting<'a>(options: &'a str, name: &str) -> Option<&'a str> {
 /// bare `dialect=<name>`) setting.
 fn dialect_from_options(options: &str) -> Option<Dialect> {
 	option_setting(options, "dialect").and_then(parse_dialect)
+}
+
+/// The refusal of a dialect that belongs to another protocol.
+fn not_over_pgwire(dialect: Dialect) -> PgError {
+	PgError::feature_not_supported(format!(
+		"the {} dialect is not available over the PostgreSQL protocol",
+		dialect_name(dialect)
+	))
 }
 
 /// Parse a dialect name (case-insensitive) as used by `options` and `SET`.

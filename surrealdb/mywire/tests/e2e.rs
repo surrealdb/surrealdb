@@ -14,6 +14,25 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
+static SERVERS: std::sync::Mutex<Vec<(std::net::SocketAddr, Arc<Datastore>)>> =
+	std::sync::Mutex::new(Vec::new());
+
+/// Runs SurrealQL in the `test`/`test` database of the datastore behind the server at `addr`.
+/// The wire speaks only MySQL, so fixtures are written in-process.
+async fn seed_surrealql(addr: std::net::SocketAddr, sql: &str) {
+	let ds = SERVERS
+		.lock()
+		.expect("lock the servers")
+		.iter()
+		.find(|(a, _)| *a == addr)
+		.map(|(_, ds)| Arc::clone(ds))
+		.expect("a server started by the test helpers");
+	let sess = Session::owner().with_ns("test").with_db("test");
+	for response in ds.execute(sql, &sess, None).await.expect("seed") {
+		response.result.unwrap_or_else(|err| panic!("{sql}: {err}"));
+	}
+}
+
 async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) {
 	let ds = Datastore::new("memory").await.expect("Failed to create datastore");
 	let session = Session::owner();
@@ -24,6 +43,7 @@ async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) 
 		))
 		.await
 		.expect("Failed to define root user");
+	let ds_for_seed = Arc::clone(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 
@@ -32,6 +52,7 @@ async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) 
 	let addr = surrealdb_mywire::start(bind_addr, ds, ready, shutdown.clone(), None, None)
 		.await
 		.expect("Failed to start mywire server");
+	SERVERS.lock().expect("lock the servers").push((addr, ds_for_seed));
 
 	(addr, shutdown)
 }
@@ -290,12 +311,7 @@ async fn test_mywire_dialect_switching_and_fail_closed() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
 
-	// In default MySQL dialect: SurrealQL query is rejected with Error packet (1064)
-	let mut fail_q = vec![COM_QUERY];
-	fail_q.extend_from_slice(b"CREATE person SET name = 'Invalid';");
-	write_packet(&mut stream, 0, &fail_q).await;
-
-	let res = read_query_response(&mut stream).await;
+	let res = query_mysql(&mut stream, "CREATE person SET name = 'Invalid';").await;
 	let QueryResult::Error {
 		code,
 		..
@@ -305,70 +321,26 @@ async fn test_mywire_dialect_switching_and_fail_closed() {
 	};
 	assert_eq!(code, 1064, "SurrealQL query must fail in MySQL dialect with 1064");
 
-	// Switch dialect to SurrealQL via SET dialect = 'surrealql'
-	let mut set_q = vec![COM_QUERY];
-	set_q.extend_from_slice(b"SET dialect = 'surrealql';");
-	write_packet(&mut stream, 0, &set_q).await;
-
-	let res = read_query_response(&mut stream).await;
-	assert!(matches!(res, QueryResult::Ok), "SET dialect = 'surrealql' must succeed");
-
-	// Now SurrealQL CREATE SET succeeds!
-	let mut surreal_q = vec![COM_QUERY];
-	surreal_q.extend_from_slice(b"CREATE person SET name = 'Surreal';");
-	write_packet(&mut stream, 0, &surreal_q).await;
-
-	let res = read_query_response(&mut stream).await;
-	match res {
-		QueryResult::ResultSet {
-			rows,
-			..
-		} => {
-			assert_eq!(rows.len(), 1, "Expected created row in SurrealQL mode");
-		}
-		QueryResult::Ok => {}
-		QueryResult::Error {
-			code,
-			message,
-		} => {
-			panic!("CREATE person SET failed in SurrealQL mode: {code} {message}");
-		}
+	for dialect in ["surrealql", "pgsql"] {
+		let res = query_mysql(&mut stream, &format!("SET dialect = '{dialect}';")).await;
+		assert!(matches!(res, QueryResult::Error { .. }), "SET dialect = '{dialect}': {res:?}");
 	}
-
-	// In SurrealQL dialect, invalid SurrealQL must fail closed without fallback to MySQL
-	let mut err_q = vec![COM_QUERY];
-	err_q.extend_from_slice(b"SELECT 1 FROM WHERE;");
-	write_packet(&mut stream, 0, &err_q).await;
-
-	let res = read_query_response(&mut stream).await;
-	assert!(
-		matches!(res, QueryResult::Error { .. }),
-		"Invalid SurrealQL must fail closed in SurrealQL dialect"
-	);
-
-	// Switch dialect back to MySQL via SET dialect = 'mysql'
-	let mut back_q = vec![COM_QUERY];
-	back_q.extend_from_slice(b"SET dialect = 'mysql';");
-	write_packet(&mut stream, 0, &back_q).await;
-
-	let res = read_query_response(&mut stream).await;
+	let res = query_mysql(&mut stream, "SET dialect = 'mysql';").await;
 	assert!(matches!(res, QueryResult::Ok), "SET dialect = 'mysql' must succeed");
 
-	// Now MySQL queries work again
-	let mut select_q = vec![COM_QUERY];
-	select_q.extend_from_slice(b"SELECT name FROM person;");
-	write_packet(&mut stream, 0, &select_q).await;
+	let res = query_mysql(&mut stream, "CREATE person SET name = 'Invalid';").await;
+	assert!(
+		matches!(
+			res,
+			QueryResult::Error {
+				code: 1064,
+				..
+			}
+		),
+		"a refused switch leaves the dialect as it was: {res:?}"
+	);
 
-	let res = read_query_response(&mut stream).await;
-	let QueryResult::ResultSet {
-		rows,
-		..
-	} = res
-	else {
-		panic!("Expected ResultSet from SELECT");
-	};
-	assert_eq!(rows.len(), 1);
-
+	write_packet(&mut stream, 0, &[COM_QUIT]).await;
 	shutdown.cancel();
 }
 
@@ -1639,27 +1611,28 @@ async fn query_text(stream: &mut TcpStream, sql: &str) -> TextResult {
 	}
 }
 
-async fn seed_person_with_json_and_arrays(stream: &mut TcpStream) {
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE person SCHEMALESS",
-		"CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], scores: [1, 2, 3], \
+async fn seed_person_with_json_and_arrays(addr: std::net::SocketAddr) {
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE TABLE person SCHEMALESS",
+			"CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], scores: [1, 2, 3], \
 		 profile: { city: 'London', langs: ['en', 'fr'], geo: { lat: 51.5, lon: -0.12 } }, \
 		 friends: [person:jaime, person:silvana], objs: [{ a: 1 }, { b: 2 }], \
 		 joined: [1, NONE, 3], grid: [[1, 2], [3, 4]], born: d'1980-01-01T00:00:00Z', \
 		 seen: d'1980-01-01T12:30:45.123456Z', took: 26h, nothing: NULL } RETURN NONE",
-	] {
-		let res = query_mysql(stream, sql).await;
-		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
-	}
+		]
+		.join("; "),
+	)
+	.await;
 }
 
 #[tokio::test]
 async fn test_mywire_composites_are_json_columns_holding_json() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_person_with_json_and_arrays(&mut stream).await;
-	let res = query_text(&mut stream, "SELECT * FROM person:tobie").await;
+	seed_person_with_json_and_arrays(addr).await;
+	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
 	assert_eq!(res.rows.len(), 1);
 	for column in ["tags", "scores", "profile", "friends", "objs", "joined", "grid"] {
 		assert_eq!(res.type_of(column), MYSQL_TYPE_JSON, "{column} is a JSON column");
@@ -1672,7 +1645,7 @@ async fn test_mywire_composites_are_json_columns_holding_json() {
 			"{\"city\":\"London\",\"geo\":{\"lat\":51.5,\"lon\":-0.12},\"langs\":[\"en\",\"fr\"]}"
 		)
 	);
-	assert_eq!(res.cell(0, "friends"), Some("[\"person:jaime\",\"person:silvana\"]"));
+	assert_eq!(res.cell(0, "friends"), Some("[\"jaime\",\"silvana\"]"));
 	assert_eq!(res.cell(0, "objs"), Some("[{\"a\":1},{\"b\":2}]"));
 	assert_eq!(res.cell(0, "joined"), Some("[1,null,3]"));
 	assert_eq!(res.cell(0, "grid"), Some("[[1,2],[3,4]]"));
@@ -1684,8 +1657,8 @@ async fn test_mywire_composites_are_json_columns_holding_json() {
 async fn test_mywire_datetimes_and_durations_use_mysql_text_forms() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_person_with_json_and_arrays(&mut stream).await;
-	let res = query_text(&mut stream, "SELECT * FROM person:tobie").await;
+	seed_person_with_json_and_arrays(addr).await;
+	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
 	assert_eq!(res.type_of("born"), MYSQL_TYPE_DATETIME);
 	assert_eq!(res.cell(0, "born"), Some("1980-01-01 00:00:00"));
 	assert_eq!(res.cell(0, "seen"), Some("1980-01-01 12:30:45.123456"));
@@ -1698,7 +1671,7 @@ async fn test_mywire_datetimes_and_durations_use_mysql_text_forms() {
 async fn test_mywire_mysql_dialect_select_star_over_a_schemaless_table_returns_its_columns() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_person_with_json_and_arrays(&mut stream).await;
+	seed_person_with_json_and_arrays(addr).await;
 	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
 	assert!(matches!(res, QueryResult::Ok));
 	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'Tobie'").await;
@@ -1719,7 +1692,7 @@ async fn test_mywire_mysql_dialect_select_star_over_a_schemaless_table_returns_i
 async fn test_mywire_mysql_dialect_reads_arrays_objects_and_datetimes() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_person_with_json_and_arrays(&mut stream).await;
+	seed_person_with_json_and_arrays(addr).await;
 	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
 	assert!(matches!(res, QueryResult::Ok));
 	for (column, text) in [
@@ -1742,18 +1715,17 @@ async fn test_mywire_mysql_dialect_reads_arrays_objects_and_datetimes() {
 async fn test_mywire_sql_dialects_show_every_record_id_as_its_key() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE emp SCHEMALESS",
-		"CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE TABLE emp SCHEMALESS",
+			"CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
 		 meta: { boss: emp:8 }, handle: emp:tobie } RETURN NONE",
-	] {
-		let res = query_mysql(&mut stream, sql).await;
-		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
-	}
-	let surreal = query_text(&mut stream, "SELECT * FROM emp:7").await;
-	assert_eq!(surreal.cell(0, "dept"), Some("dept:1"), "SurrealQL keeps the table");
-	for dialect in ["mysql", "pgsql"] {
+		]
+		.join("; "),
+	)
+	.await;
+	for dialect in ["mysql"] {
 		let res = query_mysql(&mut stream, &format!("SET dialect = '{dialect}'")).await;
 		assert!(matches!(res, QueryResult::Ok), "{dialect}: {res:?}");
 		let sql = "SELECT id, dept, friends, meta, handle FROM emp WHERE name = 'Eve'";
@@ -1772,7 +1744,7 @@ async fn test_mywire_sql_dialects_show_every_record_id_as_its_key() {
 async fn test_mywire_select_star_with_no_rows_still_answers_with_a_result_set() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_person_with_json_and_arrays(&mut stream).await;
+	seed_person_with_json_and_arrays(addr).await;
 	let res = query_mysql(&mut stream, "SET dialect = 'mysql'").await;
 	assert!(matches!(res, QueryResult::Ok));
 	let res = query_text(&mut stream, "SELECT * FROM person WHERE name = 'nobody'").await;
@@ -1788,18 +1760,19 @@ async fn test_mywire_select_star_with_no_rows_still_answers_with_a_result_set() 
 async fn test_mywire_a_column_of_mixed_kinds_is_text() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE thing SCHEMALESS",
-		"CREATE thing:1 SET n = 'a', v = 3 RETURN NONE",
-		"CREATE thing:2 SET n = 'b', v = 'three' RETURN NONE",
-		"CREATE thing:3 SET n = 'c', w = 1, x = 2 RETURN NONE",
-		"CREATE thing:4 SET n = 'd', w = 1.5, x = 2 RETURN NONE",
-	] {
-		let res = query_mysql(&mut stream, sql).await;
-		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
-	}
-	for dialect in ["surrealql", "mysql"] {
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE TABLE thing SCHEMALESS",
+			"CREATE thing:1 SET n = 'a', v = 3 RETURN NONE",
+			"CREATE thing:2 SET n = 'b', v = 'three' RETURN NONE",
+			"CREATE thing:3 SET n = 'c', w = 1, x = 2 RETURN NONE",
+			"CREATE thing:4 SET n = 'd', w = 1.5, x = 2 RETURN NONE",
+		]
+		.join("; "),
+	)
+	.await;
+	for dialect in ["mysql"] {
 		let res = query_mysql(&mut stream, &format!("SET dialect = '{dialect}'")).await;
 		assert!(matches!(res, QueryResult::Ok));
 		let sql = "SELECT * FROM thing ORDER BY n";
@@ -1825,19 +1798,19 @@ async fn test_mywire_a_column_of_mixed_kinds_is_text() {
 async fn test_mywire_a_named_column_and_select_star_show_one_text_for_a_value() {
 	let (addr, shutdown) = start_test_mysql_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE emp SCHEMALESS",
-		"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE TABLE emp SCHEMALESS",
+			"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
 		 seen: d'1980-01-01T12:30:45.123456Z', early: d'1969-12-31T23:59:59Z', took: 26h, \
 		 short: 1h30m, zero: 0s, flag: true, ratio: 1.5, price: 1.25dec, \
 		 u: u'018f6b2e-4c3d-7a11-9a52-0123456789ab', tags: ['rust', 'db'], \
 		 meta: { a: 1 } } RETURN NONE",
-		"SET dialect = 'mysql'",
-	] {
-		let res = query_mysql(&mut stream, sql).await;
-		assert!(matches!(res, QueryResult::Ok), "{sql}: {res:?}");
-	}
+		]
+		.join("; "),
+	)
+	.await;
 	let fields = [
 		"born", "seen", "early", "took", "short", "zero", "flag", "ratio", "price", "u", "tags",
 		"meta",

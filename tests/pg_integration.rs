@@ -21,6 +21,44 @@ mod pg_integration {
 
 	use super::common::{self, PASS, StartServerArguments, USER};
 
+	static HTTP_PORTS: std::sync::Mutex<Vec<(u16, u16)>> = std::sync::Mutex::new(Vec::new());
+
+	/// Runs SurrealQL in `testns`/`testdb` of the server whose Postgres listener is on `port`.
+	/// The Postgres port speaks only PostgreSQL, so SurrealQL fixtures go in over HTTP.
+	async fn seed(port: u16, sql: &str) {
+		query_http(port, sql).await;
+	}
+
+	/// Runs SurrealQL as `seed` does and returns the response body.
+	async fn query_http(port: u16, sql: &str) -> String {
+		let http = HTTP_PORTS
+			.lock()
+			.expect("lock the ports")
+			.iter()
+			.find(|(pg, _)| *pg == port)
+			.map(|(_, http)| *http)
+			.expect("a server started by start_pg_server_with_args");
+		let body = reqwest::Client::builder()
+			.timeout(Duration::from_secs(30))
+			.connect_timeout(Duration::from_secs(5))
+			.build()
+			.expect("build the HTTP client")
+			.post(format!("http://127.0.0.1:{http}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-ns", "testns")
+			.header("surreal-db", "testdb")
+			.header("accept", "application/json")
+			.body(sql.to_string())
+			.send()
+			.await
+			.expect("seed response")
+			.text()
+			.await
+			.expect("seed body");
+		assert!(!body.contains("\"status\":\"ERR\""), "{sql}: {body}");
+		body
+	}
+
 	/// The Postgres SSLRequest packet (length 8, magic code 80877103).
 	const SSL_REQUEST: [u8; 8] = {
 		let len = 8i32.to_be_bytes();
@@ -143,7 +181,11 @@ mod pg_integration {
 			})
 			.await
 			{
-				Ok((_, child)) => return Ok((port, child)),
+				Ok((addr, child)) => {
+					let http = addr.parse::<std::net::SocketAddr>()?.port();
+					HTTP_PORTS.lock().expect("lock the ports").push((port, http));
+					return Ok((port, child));
+				}
 				Err(err) => last = Some(err),
 			}
 		}
@@ -215,14 +257,14 @@ mod pg_integration {
 	async fn simple_query_returns_typed_columns() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		client.simple_query("CREATE person:tobie SET name = 'Tobie', age = 42 RETURN NONE").await?;
+		seed(port, "CREATE person:tobie SET name = 'Tobie', age = 42 RETURN NONE").await;
 		let rows = rows(client.simple_query("SELECT * FROM person").await?);
 		assert_eq!(rows.len(), 1);
 		let row = &rows[0];
 		let names: Vec<&str> = row.columns().iter().map(|c| c.name()).collect();
 		assert_eq!(names, vec!["age", "id", "name"]);
 		assert_eq!(row.get("age"), Some("42"));
-		assert_eq!(row.get("id"), Some("person:tobie"));
+		assert_eq!(row.get("id"), Some("tobie"));
 		assert_eq!(row.get("name"), Some("Tobie"));
 		Ok(())
 	}
@@ -231,29 +273,20 @@ mod pg_integration {
 	async fn values_render_in_postgres_text_formats() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let rows = rows(
-			client
-				.simple_query(
-					r#"RETURN {
-						b: true,
-						f: 1.5,
-						i: 123,
-						s: 'hello',
-						dt: d'2024-01-15T12:34:56.123456789Z',
-						du: 1d2h,
-						arr: [1, 2],
-						obj: { a: 1 }
-					}"#,
-				)
-				.await?,
-		);
+		seed(
+			port,
+			"CREATE fmt:1 CONTENT { b: true, f: 1.5, i: 123, s: 'hello', \
+			 dt: d'2024-01-15T12:34:56.123456789Z', du: 1d2h, arr: [1, 2], obj: { a: 1 } } \
+			 RETURN NONE",
+		)
+		.await;
+		let rows = rows(client.simple_query("SELECT b, f, i, s, dt, du, arr, obj FROM fmt").await?);
 		assert_eq!(rows.len(), 1);
 		let row = &rows[0];
 		assert_eq!(row.get("b"), Some("t"));
 		assert_eq!(row.get("f"), Some("1.5"));
 		assert_eq!(row.get("i"), Some("123"));
 		assert_eq!(row.get("s"), Some("hello"));
-		// Nanoseconds truncate to Postgres microsecond precision.
 		assert_eq!(row.get("dt"), Some("2024-01-15 12:34:56.123456+00"));
 		assert_eq!(row.get("du"), Some("1 day 02:00:00"));
 		assert_eq!(row.get("arr"), Some("{1,2}"));
@@ -262,25 +295,12 @@ mod pg_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn missing_fields_are_null_cells() -> Result<(), Box<dyn Error>> {
+	async fn scalar_results_are_one_cell() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let rows = rows(client.simple_query("RETURN [{ a: 1 }, { b: 2 }]").await?);
-		assert_eq!(rows.len(), 2);
-		assert_eq!(rows[0].get("a"), Some("1"));
-		assert_eq!(rows[0].get("b"), None);
-		assert_eq!(rows[1].get("a"), None);
-		assert_eq!(rows[1].get("b"), Some("2"));
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn scalar_results_use_a_value_column() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		let rows = rows(client.simple_query("RETURN 9").await?);
+		let rows = rows(client.simple_query("SELECT 9").await?);
 		assert_eq!(rows.len(), 1);
-		assert_eq!(rows[0].columns()[0].name(), "value");
+		assert_eq!(rows[0].columns().len(), 1);
 		assert_eq!(rows[0].get(0), Some("9"));
 		Ok(())
 	}
@@ -289,7 +309,7 @@ mod pg_integration {
 	async fn unicode_round_trips() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let rows = rows(client.simple_query("RETURN 'héllo 🦀'").await?);
+		let rows = rows(client.simple_query("SELECT 'héllo 🦀'").await?);
 		assert_eq!(rows[0].get(0), Some("héllo 🦀"));
 		Ok(())
 	}
@@ -298,30 +318,9 @@ mod pg_integration {
 	async fn dbname_selects_namespace_and_database() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let rows = rows(client.simple_query("RETURN [session::ns(), session::db()]").await?);
-		let values: Vec<Option<&str>> = rows.iter().map(|r| r.get(0)).collect();
-		assert_eq!(values, vec![Some("testns"), Some("testdb")]);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn use_statement_persists_across_queries() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("USE NS otherns DB otherdb").await?;
-		let rows = rows(client.simple_query("RETURN [session::ns(), session::db()]").await?);
-		let values: Vec<Option<&str>> = rows.iter().map(|r| r.get(0)).collect();
-		assert_eq!(values, vec![Some("otherns"), Some("otherdb")]);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn let_statement_persists_across_queries() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("LET $x = 42").await?;
-		let rows = rows(client.simple_query("RETURN $x + 1").await?);
-		assert_eq!(rows[0].get(0), Some("43"));
+		seed(port, "CREATE marker:1 SET n = 1 RETURN NONE").await;
+		let rows = rows(client.simple_query("SELECT n FROM marker").await?);
+		assert_eq!(rows.len(), 1, "the connection reads the database named at startup");
 		Ok(())
 	}
 
@@ -329,7 +328,7 @@ mod pg_integration {
 	async fn multiple_statements_return_multiple_results() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let messages = client.simple_query("RETURN 1; RETURN 2").await?;
+		let messages = client.simple_query("SELECT 1; SELECT 2").await?;
 		let complete =
 			messages.iter().filter(|m| matches!(m, SimpleQueryMessage::CommandComplete(_))).count();
 		assert_eq!(complete, 2);
@@ -344,7 +343,7 @@ mod pg_integration {
 		let err = client.simple_query("SELECT FROM WHERE").await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::SYNTAX_ERROR));
 		// The session survives the error.
-		let rows = rows(client.simple_query("RETURN 1").await?);
+		let rows = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(rows[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -353,10 +352,9 @@ mod pg_integration {
 	async fn runtime_errors_report_and_recover() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let err = client.simple_query("RETURN 1; THROW 'boom'").await.unwrap_err();
-		let message = err.as_db_error().map(|e| e.message().to_string()).unwrap_or_default();
-		assert!(message.contains("boom"), "unexpected error: {err:?}");
-		let rows = rows(client.simple_query("RETURN 2").await?);
+		let err = client.simple_query("SELECT 1; SELECT 1 / 0").await.unwrap_err();
+		assert_eq!(err.code(), Some(&SqlState::DIVISION_BY_ZERO), "unexpected error: {err:?}");
+		let rows = rows(client.simple_query("SELECT 2").await?);
 		assert_eq!(rows[0].get(0), Some("2"));
 		Ok(())
 	}
@@ -374,22 +372,8 @@ mod pg_integration {
 	async fn unauthenticated_server_uses_trust_auth() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(false).await?;
 		let client = connect(port, &format!("user={USER} dbname=testns/testdb")).await?;
-		let rows = rows(client.simple_query("RETURN 1").await?);
+		let rows = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(rows[0].get(0), Some("1"));
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn extended_query_returns_jsonb() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// The extended protocol (used by `query`) advertises a single `result`
-		// jsonb column for driver-prepared statements.
-		let rows = client.query("RETURN { a: 1, b: [2, 3] }", &[]).await?;
-		assert_eq!(rows.len(), 1);
-		assert_eq!(rows[0].columns()[0].name(), "result");
-		let value: serde_json::Value = rows[0].get(0);
-		assert_eq!(value, serde_json::json!({ "a": 1, "b": [2, 3] }));
 		Ok(())
 	}
 
@@ -397,15 +381,11 @@ mod pg_integration {
 	async fn extended_query_one_row_per_element() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		client.simple_query("CREATE t:1 SET n = 1 RETURN NONE").await?;
-		client.simple_query("CREATE t:2 SET n = 2 RETURN NONE").await?;
-		// An array result becomes one jsonb row per element.
+		seed(port, "CREATE t:1 SET n = 1 RETURN NONE; CREATE t:2 SET n = 2 RETURN NONE").await;
 		let rows = client.query("SELECT n FROM t ORDER BY n", &[]).await?;
 		assert_eq!(rows.len(), 2);
-		let first: serde_json::Value = rows[0].get(0);
-		let second: serde_json::Value = rows[1].get(0);
-		assert_eq!(first, serde_json::json!({ "n": 1 }));
-		assert_eq!(second, serde_json::json!({ "n": 2 }));
+		assert_eq!(rows[0].try_get::<_, String>(0)?, "1");
+		assert_eq!(rows[1].try_get::<_, String>(0)?, "2");
 		Ok(())
 	}
 
@@ -415,11 +395,11 @@ mod pg_integration {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
 		// Declaring the parameter type lets the driver bind `$1` and the
-		// server decode it into a SurrealQL Int.
-		let stmt = client.prepare_typed("RETURN $1 + 1", &[Type::INT8]).await?;
+		// server decode it into an integer.
+		let stmt = client.prepare_typed("SELECT $1::int8 + 1", &[Type::INT8]).await?;
 		let rows = client.query(&stmt, &[&41i64]).await?;
-		let value: serde_json::Value = rows[0].get(0);
-		assert_eq!(value, serde_json::json!(42));
+		let value: i64 = rows[0].get(0);
+		assert_eq!(value, 42);
 		Ok(())
 	}
 
@@ -429,10 +409,10 @@ mod pg_integration {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
 		// A text parameter cast in-query is the escape hatch for untyped binds.
-		let stmt = client.prepare_typed("RETURN <int> $1 * 2", &[Type::TEXT]).await?;
+		let stmt = client.prepare_typed("SELECT CAST($1 AS int8) * 2", &[Type::TEXT]).await?;
 		let rows = client.query(&stmt, &[&"21"]).await?;
-		let value: serde_json::Value = rows[0].get(0);
-		assert_eq!(value, serde_json::json!(42));
+		let value: i64 = rows[0].get(0);
+		assert_eq!(value, 42);
 		Ok(())
 	}
 
@@ -441,11 +421,11 @@ mod pg_integration {
 		use tokio_postgres::types::Type;
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		let stmt = client.prepare_typed("RETURN $1", &[Type::INT8]).await?;
+		let stmt = client.prepare_typed("SELECT $1::int8", &[Type::INT8]).await?;
 		for n in [1i64, 2, 3] {
 			let rows = client.query(&stmt, &[&n]).await?;
-			let value: serde_json::Value = rows[0].get(0);
-			assert_eq!(value, serde_json::json!(n));
+			let value: i64 = rows[0].get(0);
+			assert_eq!(value, n);
 		}
 		Ok(())
 	}
@@ -457,68 +437,9 @@ mod pg_integration {
 		let err = client.query("SELECT FROM WHERE", &[]).await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::SYNTAX_ERROR));
 		// The connection is usable after the error + Sync.
-		let rows = client.query("RETURN 1", &[]).await?;
-		let value: serde_json::Value = rows[0].get(0);
-		assert_eq!(value, serde_json::json!(1));
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn transaction_block_does_not_leak_session_object() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// A RETURN inside a transaction block skips later statements, so the
-		// executor returns fewer results than statements — the handler must
-		// not fall back to streaming the internal $session object.
-		let messages = client.simple_query("BEGIN; RETURN 1; RETURN 2; COMMIT").await?;
-		for row in rows(messages) {
-			// No result set may carry session-internal columns.
-			for col in row.columns() {
-				assert!(
-					!["ns", "db", "ac", "rd", "tk", "ip", "or", "id"].contains(&col.name()),
-					"leaked session column: {}",
-					col.name()
-				);
-			}
-		}
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn transaction_use_persists() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN; USE NS blockns DB blockdb; COMMIT").await?;
-		let rows = rows(client.simple_query("RETURN [session::ns(), session::db()]").await?);
-		let values: Vec<Option<&str>> = rows.iter().map(|r| r.get(0)).collect();
-		assert_eq!(values, vec![Some("blockns"), Some("blockdb")]);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn error_stops_later_statements() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// The second statement errors; the third must never execute.
-		let err =
-			client.simple_query("CREATE thing:a; THROW 'stop'; CREATE thing:c").await.unwrap_err();
-		let message = err.as_db_error().map(|e| e.message().to_string()).unwrap_or_default();
-		assert!(message.contains("stop"), "unexpected error: {err:?}");
-		let rows = rows(client.simple_query("SELECT VALUE id FROM thing").await?);
-		let ids: Vec<Option<&str>> = rows.iter().map(|r| r.get(0)).collect();
-		assert_eq!(ids, vec![Some("thing:a")], "thing:c must not have been created");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn protected_let_does_not_poison_connection() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// Attempting to LET a protected variable errors, but must not corrupt
-		// the session such that later queries fail.
-		let _ = client.simple_query("LET $session = 1").await;
-		let rows = rows(client.simple_query("RETURN 1").await?);
-		assert_eq!(rows[0].get(0), Some("1"));
+		let rows = client.query("SELECT 1::int8", &[]).await?;
+		let value: i64 = rows[0].get(0);
+		assert_eq!(value, 1);
 		Ok(())
 	}
 
@@ -528,7 +449,7 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		let messages = client.simple_query("").await?;
 		assert!(rows(messages).is_empty());
-		let rows = rows(client.simple_query("RETURN 1").await?);
+		let rows = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(rows[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -541,9 +462,9 @@ mod pg_integration {
 		let rows = client.query("", &[]).await?;
 		assert!(rows.is_empty());
 		// The connection remains usable.
-		let rows = client.query("RETURN 1", &[]).await?;
-		let value: serde_json::Value = rows[0].get(0);
-		assert_eq!(value, serde_json::json!(1));
+		let rows = client.query("SELECT 1::int8", &[]).await?;
+		let value: i64 = rows[0].get(0);
+		assert_eq!(value, 1);
 		Ok(())
 	}
 
@@ -551,12 +472,11 @@ mod pg_integration {
 	async fn interactive_transaction_commits() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		// Each statement is a separate simple-query message inside the
-		// interactive transaction opened by the standalone BEGIN.
+		client.simple_query("CREATE TABLE txn (id INT, n INT)").await?;
 		client.simple_query("BEGIN").await?;
-		client.simple_query("CREATE txn:1 SET n = 1 RETURN NONE").await?;
+		client.simple_query("INSERT INTO txn (id, n) VALUES (1, 1)").await?;
 		client.simple_query("COMMIT").await?;
-		let rows = rows(client.simple_query("SELECT VALUE n FROM txn").await?);
+		let rows = rows(client.simple_query("SELECT n FROM txn").await?);
 		assert_eq!(rows.len(), 1);
 		assert_eq!(rows[0].get(0), Some("1"));
 		Ok(())
@@ -566,14 +486,14 @@ mod pg_integration {
 	async fn interactive_transaction_rolls_back() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		// A committed baseline row so the table exists for the final SELECT.
-		client.simple_query("CREATE rb:base SET n = 0 RETURN NONE").await?;
+		client.simple_query("CREATE TABLE rb (id INT, n INT)").await?;
+		client.simple_query("INSERT INTO rb (id, n) VALUES (0, 0)").await?;
 		client.simple_query("BEGIN").await?;
-		client.simple_query("CREATE rb:1 SET n = 1 RETURN NONE").await?;
+		client.simple_query("INSERT INTO rb (id, n) VALUES (1, 1)").await?;
 		client.simple_query("ROLLBACK").await?;
-		let rows = rows(client.simple_query("SELECT VALUE id FROM rb").await?);
+		let rows = rows(client.simple_query("SELECT id FROM rb").await?);
 		assert_eq!(rows.len(), 1, "only the committed baseline row should remain");
-		assert_eq!(rows[0].get(0), Some("rb:base"));
+		assert_eq!(rows[0].get(0), Some("0"));
 		Ok(())
 	}
 
@@ -581,23 +501,20 @@ mod pg_integration {
 	async fn extended_protocol_transaction_commit_and_rollback() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		// BEGIN/CREATE/COMMIT issued through the extended protocol (execute()
-		// prepares each statement) must drive the same interactive transaction
-		// as the simple-query path.
+		client.simple_query("CREATE TABLE ext (id INT, n INT)").await?;
 		client.execute("BEGIN", &[]).await?;
-		client.execute("CREATE ext:commit SET n = 1 RETURN NONE", &[]).await?;
+		client.execute("INSERT INTO ext (id, n) VALUES (1, 1)", &[]).await?;
 		client.execute("COMMIT", &[]).await?;
 		assert_eq!(
-			rows(client.simple_query("SELECT VALUE id FROM ext:commit").await?).len(),
+			rows(client.simple_query("SELECT id FROM ext WHERE id = 1").await?).len(),
 			1,
 			"a committed extended-protocol transaction should persist"
 		);
-		// The rollback path likewise discards the row.
 		client.execute("BEGIN", &[]).await?;
-		client.execute("CREATE ext:rollback SET n = 1 RETURN NONE", &[]).await?;
+		client.execute("INSERT INTO ext (id, n) VALUES (2, 1)", &[]).await?;
 		client.execute("ROLLBACK", &[]).await?;
 		assert_eq!(
-			rows(client.simple_query("SELECT VALUE id FROM ext:rollback").await?).len(),
+			rows(client.simple_query("SELECT id FROM ext WHERE id = 2").await?).len(),
 			0,
 			"a rolled-back extended-protocol transaction should discard its writes"
 		);
@@ -613,10 +530,13 @@ mod pg_integration {
 		// protocol. ROLLBACK must then escape the failed transaction — the
 		// aborted-transaction guard must not block transaction-control statements.
 		client.execute("BEGIN", &[]).await?;
-		assert!(client.execute("THROW 'boom'", &[]).await.is_err(), "THROW should error");
+		assert!(
+			client.execute("SELECT 1 / 0", &[]).await.is_err(),
+			"division by zero should error"
+		);
 		client.execute("ROLLBACK", &[]).await?;
 		// The connection is usable again after recovery.
-		let rows = rows(client.simple_query("RETURN 1").await?);
+		let rows = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(rows.len(), 1, "connection should be usable after extended-protocol ROLLBACK");
 		Ok(())
 	}
@@ -625,147 +545,16 @@ mod pg_integration {
 	async fn extended_protocol_intercepts_set() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
-		// A prepared `SET` is intercepted rather than handed to the SurrealQL
-		// parser (which would reject it). Dialect switching and no-op GUCs work.
+		// A prepared `SET` is intercepted rather than handed to the planner. Dialect switching and
+		// no-op GUCs work.
 		client.execute("SET dialect = 'gql'", &[]).await?;
 		// A driver GUC set while in the GQL dialect is still accepted as a no-op
 		// (it must not fall through to the GQL executor and error).
 		client.execute("SET client_encoding = 'UTF8'", &[]).await?;
-		client.execute("SET dialect = 'surrealql'", &[]).await?;
+		client.execute("SET dialect = 'pgsql'", &[]).await?;
 		client.execute("SET extra_float_digits = 3", &[]).await?;
 		// An unknown GUC is still rejected.
 		assert!(client.execute("SET bogus_param = 1", &[]).await.is_err());
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn cancelled_transaction_let_does_not_leak() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// A LET inside a rolled-back (CANCEL) block must not leak into the
-		// connection session; a committed block's LET does persist. The
-		// cancelled batch itself reports a cancelled-transaction error, so
-		// ignore its result and check the session afterwards.
-		let _ = client.simple_query("BEGIN; LET $leaked = 99; CANCEL").await;
-		let leaked = rows(client.simple_query("RETURN $leaked ?? 'unset'").await?);
-		assert_eq!(leaked[0].get(0), Some("unset"), "cancelled LET must not persist");
-		client.simple_query("BEGIN; LET $kept = 7; COMMIT").await?;
-		let kept = rows(client.simple_query("RETURN $kept").await?);
-		assert_eq!(kept[0].get(0), Some("7"), "committed LET should persist");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn failed_block_let_leaves_session_untouched() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// A block that fails reverts its LETs: an earlier binding keeps its
-		// value and a name never bound stays unbound (no NONE is written).
-		client.simple_query("LET $kept = 0").await?;
-		let _ =
-			client.simple_query("BEGIN; LET $kept = 1; LET $fresh = 1; THROW 'x'; COMMIT;").await;
-		let kept = rows(client.simple_query("RETURN $kept").await?);
-		assert_eq!(kept[0].get(0), Some("0"), "failed block must not rebind an earlier LET");
-		let fresh = rows(client.simple_query("RETURN $fresh ?? 'unset'").await?);
-		assert_eq!(fresh[0].get(0), Some("unset"), "failed block must not bind a new LET");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn let_after_return_is_captured() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		// A top-level RETURN does not skip later statements, so both LETs
-		// around it persist.
-		client.simple_query("LET $a = 1; RETURN 2; LET $b = 3;").await?;
-		let joined = rows(client.simple_query("RETURN string::concat($a, '-', $b)").await?);
-		assert_eq!(joined[0].get(0), Some("1-3"));
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn interactive_transaction_let_applies_on_commit() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN").await?;
-		client.simple_query("LET $k = 1").await?;
-		client.simple_query("COMMIT").await?;
-		let k = rows(client.simple_query("RETURN $k").await?);
-		assert_eq!(
-			k[0].get(0),
-			Some("1"),
-			"a LET committed in an interactive transaction persists"
-		);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn interactive_transaction_let_is_discarded_on_rollback() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN").await?;
-		client.simple_query("LET $r = 1").await?;
-		client.simple_query("ROLLBACK").await?;
-		let r = rows(client.simple_query("RETURN $r ?? 'unset'").await?);
-		assert_eq!(r[0].get(0), Some("unset"), "a rolled-back LET must not persist");
-		// The capture does not survive into the next transaction either.
-		client.simple_query("BEGIN").await?;
-		client.simple_query("COMMIT").await?;
-		let r = rows(client.simple_query("RETURN $r ?? 'unset'").await?);
-		assert_eq!(r[0].get(0), Some("unset"), "a discarded LET must not resurface");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn interactive_transaction_let_is_discarded_on_poisoned_commit()
-	-> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN").await?;
-		client.simple_query("LET $p = 1").await?;
-		// The failing statement poisons the transaction; COMMIT then rolls it
-		// back, so the captured LET must be dropped.
-		let _ = client.simple_query("THROW 'boom'").await;
-		client.simple_query("COMMIT").await?;
-		let p = rows(client.simple_query("RETURN $p ?? 'unset'").await?);
-		assert_eq!(p[0].get(0), Some("unset"), "a LET in a poisoned transaction must not persist");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn interactive_transaction_let_after_a_rolled_back_savepoint_is_discarded()
-	-> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN").await?;
-		client.simple_query("LET $kept = 1").await?;
-		client.simple_query("SAVEPOINT sp").await?;
-		client.simple_query("LET $dropped = 2").await?;
-		client.simple_query("ROLLBACK TO SAVEPOINT sp").await?;
-		client.simple_query("COMMIT").await?;
-		let kept = rows(client.simple_query("RETURN $kept ?? 'unset'").await?);
-		assert_eq!(kept[0].get(0), Some("1"), "a LET before the savepoint persists");
-		let dropped = rows(client.simple_query("RETURN $dropped ?? 'unset'").await?);
-		assert_eq!(
-			dropped[0].get(0),
-			Some("unset"),
-			"a LET after a rolled-back savepoint must not persist"
-		);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn interactive_transaction_let_inside_a_released_savepoint_persists()
-	-> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		client.simple_query("BEGIN").await?;
-		client.simple_query("SAVEPOINT sp").await?;
-		client.simple_query("LET $inside = 3").await?;
-		client.simple_query("RELEASE SAVEPOINT sp").await?;
-		client.simple_query("COMMIT").await?;
-		let inside = rows(client.simple_query("RETURN $inside ?? 'unset'").await?);
-		assert_eq!(inside[0].get(0), Some("3"), "a LET inside a released savepoint persists");
 		Ok(())
 	}
 
@@ -775,10 +564,11 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		// A BEGIN with an isolation-level clause (as ORMs/JDBC send) opens the
 		// transaction rather than failing to parse.
+		client.simple_query("CREATE TABLE pre (id INT, n INT)").await?;
 		client.simple_query("BEGIN ISOLATION LEVEL SERIALIZABLE").await?;
-		client.simple_query("CREATE pre:1 SET n = 1 RETURN NONE").await?;
+		client.simple_query("INSERT INTO pre (id, n) VALUES (1, 1)").await?;
 		client.simple_query("COMMIT").await?;
-		let rows = rows(client.simple_query("SELECT VALUE n FROM pre").await?);
+		let rows = rows(client.simple_query("SELECT n FROM pre").await?);
 		assert_eq!(rows.len(), 1);
 		Ok(())
 	}
@@ -789,7 +579,7 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		// A stray COMMIT with no open transaction is a warning, not a fatal
 		// error — the following statement still runs (Postgres semantics).
-		let messages = client.simple_query("COMMIT; RETURN 42").await?;
+		let messages = client.simple_query("COMMIT; SELECT 42").await?;
 		let value = rows(messages).into_iter().find_map(|r| r.get(0).map(str::to_owned));
 		assert_eq!(value.as_deref(), Some("42"), "statement after stray COMMIT must run");
 		Ok(())
@@ -804,7 +594,8 @@ mod pg_integration {
 		// than silently under-run. tokio-postgres enforces the count
 		// client-side (so this may not reach the server-side guard added for
 		// drivers that don't), but the operation must error either way.
-		let stmt = client.prepare_typed("RETURN $1 + $2", &[Type::INT8, Type::INT8]).await?;
+		let stmt =
+			client.prepare_typed("SELECT $1::int8 + $2::int8", &[Type::INT8, Type::INT8]).await?;
 		assert!(client.query(&stmt, &[&1i64]).await.is_err(), "under-supplied Bind should error");
 		Ok(())
 	}
@@ -815,13 +606,13 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		client.simple_query("BEGIN").await?;
 		// A failing statement poisons the transaction.
-		let _ = client.simple_query("THROW 'boom'").await;
+		let _ = client.simple_query("SELECT 1 / 0").await;
 		// Further statements are refused with 25P02.
-		let err = client.simple_query("RETURN 1").await.unwrap_err();
+		let err = client.simple_query("SELECT 1").await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		// ROLLBACK clears the failed state and the session recovers.
 		client.simple_query("ROLLBACK").await?;
-		let rows = rows(client.simple_query("RETURN 7").await?);
+		let rows = rows(client.simple_query("SELECT 7").await?);
 		assert_eq!(rows[0].get(0), Some("7"));
 		Ok(())
 	}
@@ -830,14 +621,35 @@ mod pg_integration {
 	async fn set_dialect_switches_language() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
-		client.simple_query("CREATE person:aeon SET name = 'Aeon' RETURN NONE").await?;
-		// Switch to GQL and run a MATCH; then switch back.
+		seed(port, "CREATE person:aeon SET name = 'Aeon' RETURN NONE").await;
 		client.simple_query("SET dialect = 'gql'").await?;
 		let matched = rows(client.simple_query("MATCH (p:person) RETURN p.name").await?);
 		assert!(!matched.is_empty(), "GQL MATCH should return the created person");
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		let back = rows(client.simple_query("RETURN 1").await?);
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn other_protocols_dialects_are_refused() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		for dialect in ["surrealql", "mysql"] {
+			let err = client
+				.simple_query(&format!("SET dialect = '{dialect}'"))
+				.await
+				.expect_err("switched dialect");
+			assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED), "{dialect}");
+			let err = connect(port, &root_config(&format!("options='-c dialect={dialect}'")))
+				.await
+				.expect_err("connected");
+			assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED), "{dialect}");
+		}
+		let err = client.simple_query("CREATE person SET name = 'x'").await.unwrap_err();
+		assert_eq!(err.code(), Some(&SqlState::SYNTAX_ERROR), "SurrealQL is not PostgreSQL");
+		let back = rows(client.simple_query("SELECT 1").await?);
+		assert_eq!(back[0].get(0), Some("1"), "a refused switch leaves the connection usable");
 		Ok(())
 	}
 
@@ -848,11 +660,11 @@ mod pg_integration {
 		client.simple_query("BEGIN").await?;
 		// An extended-protocol statement error must abort the transaction, so a
 		// subsequent statement is refused with 25P02 (as in the simple path).
-		let _ = client.query("THROW 'boom'", &[]).await;
-		let err = client.simple_query("RETURN 1").await.unwrap_err();
+		let _ = client.query("SELECT 1 / 0", &[]).await;
+		let err = client.simple_query("SELECT 1").await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		client.simple_query("ROLLBACK").await?;
-		let rows = rows(client.simple_query("RETURN 5").await?);
+		let rows = rows(client.simple_query("SELECT 5").await?);
 		assert_eq!(rows[0].get(0), Some("5"));
 		Ok(())
 	}
@@ -873,9 +685,9 @@ mod pg_integration {
 		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		client.simple_query("ROLLBACK").await?;
 		// The connection is still in the GQL dialect, so switch back before
-		// checking it serves SurrealQL again.
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		let back = rows(client.simple_query("RETURN 1").await?);
+		// checking it serves PostgreSQL again.
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -890,10 +702,10 @@ mod pg_integration {
 		client.simple_query("BEGIN").await?;
 		let err = client.simple_query("SET dialect = 'gql'").await.expect_err("switched dialect");
 		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
-		let err = client.simple_query("RETURN 1").await.expect_err("ran in aborted txn");
+		let err = client.simple_query("SELECT 1").await.expect_err("ran in aborted txn");
 		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		client.simple_query("ROLLBACK").await?;
-		let back = rows(client.simple_query("RETURN 1").await?);
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -907,10 +719,10 @@ mod pg_integration {
 		client.simple_query("BEGIN").await?;
 		let err = client.simple_query("SET made_up_param = 1").await.expect_err("accepted");
 		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_OBJECT));
-		let err = client.simple_query("RETURN 1").await.expect_err("ran in aborted txn");
+		let err = client.simple_query("SELECT 1").await.expect_err("ran in aborted txn");
 		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		client.simple_query("ROLLBACK").await?;
-		let back = rows(client.simple_query("RETURN 1").await?);
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -919,10 +731,10 @@ mod pg_integration {
 	async fn gql_over_extended_protocol() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server_with_args(true, "").await?;
 		let client = connect_root(port).await?;
-		client.simple_query("CREATE person:nova SET name = 'Nova' RETURN NONE").await?;
+		seed(port, "CREATE person:nova SET name = 'Nova' RETURN NONE").await;
 		client.simple_query("SET dialect = 'gql'").await?;
 		// The extended protocol (query()) must not validate GQL with the
-		// SurrealQL parser; it returns the jsonb result shape.
+		// PostgreSQL parser; it returns the jsonb result shape.
 		let dbrows = client.query("MATCH (p:person) RETURN p.name", &[]).await?;
 		assert!(!dbrows.is_empty(), "GQL over the extended protocol should return rows");
 		Ok(())
@@ -940,8 +752,8 @@ mod pg_integration {
 		// `person` is not defined in this database.
 		let err = client.simple_query("MATCH (p:person) RETURN p").await.expect_err("matched");
 		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_TABLE));
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		let back = rows(client.simple_query("RETURN 1").await?);
+		client.simple_query("SET dialect = 'pgsql'").await?;
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -951,8 +763,8 @@ mod pg_integration {
 		// `options=-c dialect=gql` puts the connection in GQL from its first
 		// query, with no `SET`.
 		let (port, _server) = start_pg_server(true).await?;
-		let seed = connect_root(port).await?;
-		seed.simple_query("CREATE person:orion SET name = 'Orion' RETURN NONE").await?;
+		connect_root(port).await?;
+		seed(port, "CREATE person:orion SET name = 'Orion' RETURN NONE").await;
 		let client = connect(port, &root_config("options='-c dialect=gql'")).await?;
 		let matched = rows(client.simple_query("MATCH (p:person) RETURN p.name").await?);
 		assert!(!matched.is_empty(), "startup dialect selection should run the query as GQL");
@@ -963,7 +775,7 @@ mod pg_integration {
 	async fn denied_gql_capability_refuses_startup_dialect() -> Result<(), Box<dyn Error>> {
 		// `RouteTarget::Gql` gates the GQL entry surface on this port as well as
 		// the `/gql` HTTP route, so a denied dialect refuses the connection
-		// rather than silently leaving it in SurrealQL.
+		// rather than silently leaving it in PostgreSQL.
 		let (port, _server) = start_pg_server_with_args(true, "--deny-http gql").await?;
 		let err =
 			connect(port, &root_config("options='-c dialect=gql'")).await.expect_err("connected");
@@ -977,9 +789,9 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		let err = client.simple_query("SET dialect = 'gql'").await.expect_err("switched dialect");
 		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
-		// The refusal leaves the connection in SurrealQL and usable: denying
+		// The refusal leaves the connection in PostgreSQL and usable: denying
 		// `gql` must not disable the Postgres port itself.
-		let back = rows(client.simple_query("RETURN 1").await?);
+		let back = rows(client.simple_query("SELECT 1").await?);
 		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
@@ -1046,7 +858,7 @@ mod pg_integration {
 		let client = connect_root(port).await?;
 		let cancel_token = client.cancel_token();
 		// Start a slow query, then cancel it from a side connection.
-		let query = tokio::spawn(async move { client.simple_query("SLEEP 5s").await });
+		let query = tokio::spawn(async move { client.simple_query("SELECT pg_sleep(5)").await });
 		tokio::time::sleep(Duration::from_millis(500)).await;
 		cancel_token.cancel_query(NoTls).await?;
 		let result = query.await?;
@@ -1059,7 +871,6 @@ mod pg_integration {
 	async fn standard_postgres_ddl_and_dml() {
 		let (port, _server) = start_pg_server(true).await.unwrap();
 		let client = connect_root(port).await.unwrap();
-		client.simple_query("SET dialect = 'pgsql'").await.unwrap();
 		let res1 = client.simple_query("CREATE TABLE pg_users (id INT, name VARCHAR(50))").await;
 		if let Err(e) = &res1 {
 			panic!("RES1 error: {e:?}");
@@ -1102,26 +913,20 @@ mod pg_integration {
 
 	/// A schemaless `person:tobie` whose fields cover the shapes a client meets: scalars,
 	/// flat and nested arrays, objects, record links, a datetime and a NULL.
-	async fn seed_person_with_json_and_arrays(client: &Client) -> Result<(), Box<dyn Error>> {
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		client.simple_query("DEFINE TABLE person SCHEMALESS").await?;
-		client
-			.simple_query(
-				"CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], \
-				 scores: [1, 2, 3], mixed: [1, 'a', true], \
-				 profile: { city: 'London', langs: ['en', 'fr'], geo: { lat: 51.5, lon: -0.12 } }, \
-				 friends: [person:jaime, person:silvana], objs: [{ a: 1 }, { b: 2 }], \
-				 joined: [1, NONE, 3], empty: [], born: d'1980-01-01T00:00:00Z', nothing: NULL, \
-				 quoted: ['a,b', 'say \"hi\"', 'NULL', ''] } RETURN NONE",
-			)
-			.await?;
-		client
-			.simple_query(
-				"CREATE person:grid CONTENT { name: 'Grid', grid: [[1, 2], [3, 4]], \
-				 jagged: [[1], [2, 3]] } RETURN NONE",
-			)
-			.await?;
-		Ok(())
+	async fn seed_person_with_json_and_arrays(port: u16) {
+		seed(
+			port,
+			"DEFINE TABLE person SCHEMALESS; \
+			 CREATE person:tobie CONTENT { name: 'Tobie', tags: ['rust', 'db'], \
+			 scores: [1, 2, 3], mixed: [1, 'a', true], \
+			 profile: { city: 'London', langs: ['en', 'fr'], geo: { lat: 51.5, lon: -0.12 } }, \
+			 friends: [person:jaime, person:silvana], objs: [{ a: 1 }, { b: 2 }], \
+			 joined: [1, NONE, 3], empty: [], born: d'1980-01-01T00:00:00Z', nothing: NULL, \
+			 quoted: ['a,b', 'say \"hi\"', 'NULL', ''] } RETURN NONE; \
+			 CREATE person:grid CONTENT { name: 'Grid', grid: [[1, 2], [3, 4]], \
+			 jagged: [[1], [2, 3]] } RETURN NONE",
+		)
+		.await;
 	}
 
 	fn cell<'a>(row: &'a SimpleQueryRow, name: &str) -> Option<&'a str> {
@@ -1134,74 +939,11 @@ mod pg_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn surrealql_dialect_renders_a_record_with_json_and_arrays() -> Result<(), Box<dyn Error>>
-	{
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		let found = rows(client.simple_query("SELECT * FROM person:tobie").await?);
-		assert_eq!(found.len(), 1);
-		let row = &found[0];
-		assert_eq!(cell(row, "name"), Some("Tobie"));
-		assert_eq!(cell(row, "tags"), Some("{rust,db}"));
-		assert_eq!(cell(row, "scores"), Some("{1,2,3}"));
-		assert_eq!(cell(row, "empty"), Some("{}"));
-		assert_eq!(cell(row, "joined"), Some("{1,NULL,3}"));
-		assert_eq!(cell(row, "friends"), Some("{person:jaime,person:silvana}"));
-		assert_eq!(cell(row, "mixed"), Some("{1,\"\\\"a\\\"\",true}"));
-		assert_eq!(cell(row, "objs"), Some("{\"{\\\"a\\\":1}\",\"{\\\"b\\\":2}\"}"));
-		assert_eq!(cell(row, "quoted"), Some("{\"a,b\",\"say \\\"hi\\\"\",\"NULL\",\"\"}"));
-		assert_eq!(
-			cell(row, "profile"),
-			Some(
-				"{\"city\":\"London\",\"geo\":{\"lat\":51.5,\"lon\":-0.12},\"langs\":[\"en\",\"fr\"]}"
-			)
-		);
-		assert_eq!(cell(row, "born"), Some("1980-01-01 00:00:00+00"));
-		assert_eq!(cell(row, "nothing"), None);
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn surrealql_dialect_renders_nested_arrays_as_json() -> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		let found = rows(client.simple_query("SELECT * FROM person:grid").await?);
-		assert_eq!(found.len(), 1);
-		assert_eq!(cell(&found[0], "grid"), Some("[[1,2],[3,4]]"));
-		assert_eq!(cell(&found[0], "jagged"), Some("[[1],[2,3]]"));
-		let created = rows(
-			client
-				.simple_query("CREATE person:other CONTENT { name: 'O', grid: [[5, 6]] }")
-				.await?,
-		);
-		assert_eq!(cell(&created[0], "grid"), Some("[[5,6]]"));
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn surrealql_dialect_extended_protocol_returns_the_record_as_one_jsonb_document()
-	-> Result<(), Box<dyn Error>> {
-		let (port, _server) = start_pg_server(true).await?;
-		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		let found = client.query("SELECT * FROM person:grid", &[]).await?;
-		assert_eq!(found.len(), 1);
-		assert_eq!(found[0].columns().len(), 1);
-		assert_eq!(found[0].columns()[0].name(), "result");
-		let doc = jsonb_text(&found[0].try_get::<_, RawCell>(0)?);
-		assert!(doc.contains("\"grid\":[[1,2],[3,4]]"), "{doc}");
-		Ok(())
-	}
-
-	#[test(tokio::test)]
 	async fn pgsql_dialect_select_star_over_a_schemaless_table_returns_its_columns()
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		let found = rows(client.simple_query("SELECT * FROM person WHERE name = 'Tobie'").await?);
 		assert_eq!(found.len(), 1);
 		let names: Vec<&str> = found[0].columns().iter().map(|c| c.name()).collect();
@@ -1221,8 +963,7 @@ mod pg_integration {
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		let found = client.query("SELECT * FROM person WHERE name = 'Tobie'", &[]).await?;
 		assert_eq!(found.len(), 1);
 		assert_eq!(found[0].columns().len(), 1);
@@ -1239,8 +980,7 @@ mod pg_integration {
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		let expected: &[(&str, &str)] = &[
 			("tags", "{rust,db}"),
 			("scores", "{1,2,3}"),
@@ -1283,8 +1023,7 @@ mod pg_integration {
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		let err = client
 			.simple_query("SELECT name FROM person WHERE profile @> '{\"city\":\"London\"}'")
 			.await
@@ -1302,8 +1041,7 @@ mod pg_integration {
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		let malformed = "SELECT profile #>> '{city' FROM person";
 		let err = client.simple_query(malformed).await.expect_err("a malformed path");
 		assert_eq!(err.code(), Some(&SqlState::INVALID_TEXT_REPRESENTATION), "{err:?}");
@@ -1326,8 +1064,7 @@ mod pg_integration {
 	async fn pgsql_dialect_extracts_json_text_and_paths() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_person_with_json_and_arrays(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_person_with_json_and_arrays(port).await;
 		for (select, expected) in [
 			("profile ->> 'city'", Some("London")),
 			("profile #>> '{geo,lat}'", Some("51.5")),
@@ -1345,28 +1082,22 @@ mod pg_integration {
 	}
 
 	/// `dept` links to `dept:1`, `friends` and `meta.boss` link to other employees.
-	async fn seed_employees_with_record_links(client: &Client) -> Result<(), Box<dyn Error>> {
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		client.simple_query("DEFINE TABLE emp SCHEMALESS").await?;
-		client
-			.simple_query(
-				"CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
-				 meta: { boss: emp:8, tags: ['a'] }, handle: emp:tobie } RETURN NONE",
-			)
-			.await?;
-		Ok(())
+	async fn seed_employees_with_record_links(port: u16) {
+		seed(
+			port,
+			"DEFINE TABLE emp SCHEMALESS; \
+			 CREATE emp:7 CONTENT { name: 'Eve', dept: dept:1, friends: [emp:8, emp:9], \
+			 meta: { boss: emp:8, tags: ['a'] }, handle: emp:tobie } RETURN NONE",
+		)
+		.await;
 	}
 
 	#[test(tokio::test)]
 	async fn sql_dialects_show_every_record_id_as_its_key() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_employees_with_record_links(&client).await?;
-		let surreal = rows(client.simple_query("SELECT * FROM emp:7").await?);
-		assert_eq!(cell(&surreal[0], "dept"), Some("dept:1"), "SurrealQL keeps the table");
-		assert_eq!(cell(&surreal[0], "id"), Some("emp:7"));
+		seed_employees_with_record_links(port).await;
 		for dialect in ["pgsql"] {
-			client.simple_query(&format!("SET dialect = '{dialect}'")).await?;
 			let sql = "SELECT id, dept, friends, meta, handle FROM emp WHERE name = 'Eve'";
 			let found = rows(client.simple_query(sql).await?);
 			assert_eq!(found.len(), 1, "{dialect}");
@@ -1384,8 +1115,7 @@ mod pg_integration {
 	-> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_employees_with_record_links(&client).await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed_employees_with_record_links(port).await;
 		let found =
 			client.query("SELECT id, dept, friends FROM emp WHERE name = 'Eve'", &[]).await?;
 		assert_eq!(found.len(), 1);
@@ -1395,14 +1125,15 @@ mod pg_integration {
 		Ok(())
 	}
 
-	async fn seed_people_for_key_parameters(client: &Client) -> Result<(), Box<dyn Error>> {
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		client.simple_query("DEFINE TABLE person SCHEMALESS").await?;
-		client.simple_query("CREATE person:1 SET name = 'Tobie' RETURN NONE").await?;
-		client.simple_query("CREATE person:tobie SET name = 'Named' RETURN NONE").await?;
-		client.simple_query("CREATE person:3 SET name = 'Third' RETURN NONE").await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
-		Ok(())
+	async fn seed_people_for_key_parameters(port: u16) {
+		seed(
+			port,
+			"DEFINE TABLE person SCHEMALESS; \
+			 CREATE person:1 SET name = 'Tobie' RETURN NONE; \
+			 CREATE person:tobie SET name = 'Named' RETURN NONE; \
+			 CREATE person:3 SET name = 'Third' RETURN NONE",
+		)
+		.await;
 	}
 
 	#[test(tokio::test)]
@@ -1412,7 +1143,7 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_people_for_key_parameters(&client).await?;
+		seed_people_for_key_parameters(port).await;
 		let select =
 			client.prepare_typed("SELECT name FROM person WHERE id = $1", &[Type::INT8]).await?;
 		let found = client.query(&select, &[&1i64]).await?;
@@ -1448,7 +1179,7 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_people_for_key_parameters(&client).await?;
+		seed_people_for_key_parameters(port).await;
 		let select =
 			client.prepare_typed("SELECT name FROM person WHERE id = $1", &[Type::TEXT]).await?;
 		let found = client.query(&select, &[&"tobie"]).await?;
@@ -1471,15 +1202,13 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		client.simple_query("DEFINE TABLE price SCHEMALESS").await?;
-		client
-			.simple_query(
-				"CREATE price:⟨1.5⟩ SET name = 'float-looking text key' RETURN NONE; \
-				 CREATE price:⟨true⟩ SET name = 'bool-looking text key' RETURN NONE",
-			)
-			.await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
+		seed(
+			port,
+			"DEFINE TABLE price SCHEMALESS; \
+			 CREATE price:⟨1.5⟩ SET name = 'float-looking text key' RETURN NONE; \
+			 CREATE price:⟨true⟩ SET name = 'bool-looking text key' RETURN NONE",
+		)
+		.await;
 		let by_float =
 			client.prepare_typed("SELECT name FROM price WHERE id = $1", &[Type::FLOAT8]).await?;
 		assert!(client.query(&by_float, &[&1.5f64]).await?.is_empty(), "a float is no record key");
@@ -1495,20 +1224,17 @@ mod pg_integration {
 		Ok(())
 	}
 
-	async fn seed_employees_with_link_field(client: &Client) -> Result<(), Box<dyn Error>> {
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		client
-			.simple_query(
-				"DEFINE TABLE dept SCHEMALESS; \
-				 CREATE dept:1 SET dname = 'Engineering' RETURN NONE; \
-				 CREATE dept:ops SET dname = 'Operations' RETURN NONE; \
-				 DEFINE TABLE emp SCHEMAFULL; \
-				 DEFINE FIELD name ON emp TYPE string; \
-				 DEFINE FIELD dept ON emp TYPE record<dept>",
-			)
-			.await?;
-		client.simple_query("SET dialect = 'pgsql'").await?;
-		Ok(())
+	async fn seed_employees_with_link_field(port: u16) {
+		seed(
+			port,
+			"DEFINE TABLE dept SCHEMALESS; \
+			 CREATE dept:1 SET dname = 'Engineering' RETURN NONE; \
+			 CREATE dept:ops SET dname = 'Operations' RETURN NONE; \
+			 DEFINE TABLE emp SCHEMAFULL; \
+			 DEFINE FIELD name ON emp TYPE string; \
+			 DEFINE FIELD dept ON emp TYPE record<dept>",
+		)
+		.await;
 	}
 
 	#[test(tokio::test)]
@@ -1518,7 +1244,7 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_employees_with_link_field(&client).await?;
+		seed_employees_with_link_field(port).await;
 		let insert = client
 			.prepare_typed(
 				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",
@@ -1553,9 +1279,8 @@ mod pg_integration {
 		assert_eq!(client.query(&select, &[&1i64]).await?.len(), 2);
 		let shown = client.query("SELECT dept FROM emp WHERE id = 2", &[]).await?;
 		assert_eq!(shown[0].try_get::<_, String>(0)?, "1", "SQL shows the key of the link");
-		client.simple_query("SET dialect = 'surrealql'").await?;
-		let linked = rows(client.simple_query("SELECT VALUE dept.dname FROM emp:2").await?);
-		assert_eq!(linked[0].get(0), Some("Engineering"), "the stored value is a record link");
+		let linked = query_http(port, "SELECT VALUE dept.dname FROM emp:2").await;
+		assert!(linked.contains("Engineering"), "the stored value is a record link: {linked}");
 		Ok(())
 	}
 
@@ -1566,7 +1291,7 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_employees_with_link_field(&client).await?;
+		seed_employees_with_link_field(port).await;
 		client.simple_query("BEGIN").await?;
 		let insert = client
 			.prepare_typed(
@@ -1589,7 +1314,7 @@ mod pg_integration {
 
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
-		seed_employees_with_link_field(&client).await?;
+		seed_employees_with_link_field(port).await;
 		let by_float = client
 			.prepare_typed(
 				"INSERT INTO emp (id, name, dept) VALUES ($1, $2, $3)",

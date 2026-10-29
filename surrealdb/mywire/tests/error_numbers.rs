@@ -321,24 +321,18 @@ async fn a_user_who_may_not_write_has_the_number_of_a_denied_command() {
 }
 
 #[tokio::test]
-async fn a_statement_of_another_dialect_fails_under_the_same_numbers() {
+async fn the_other_protocols_dialects_are_refused_under_one_number() {
 	let (addr, shutdown) = start_server().await;
 	let mut stream = connect(addr, "root").await;
 
-	run(&mut stream, "SET dialect = 'surrealql'").await;
-	for (sql, code, state) in [
-		// `THROW` raises an error of the author's own.
-		("THROW 'boom'", 1644, "45000"),
-		("RETURN 1 +", 1064, "42000"),
-	] {
-		let answer = query(&mut stream, sql).await;
-		assert_eq!(answer.code_and_state(), (code, state), "{sql}: {answer:?}");
+	for dialect in ["surrealql", "pgsql"] {
+		let sql = format!("SET dialect = '{dialect}'");
+		let answer = query(&mut stream, &sql).await;
+		assert!(matches!(answer, Answer::Err { .. }), "{sql}: {answer:?}");
 	}
-
-	run(&mut stream, "SET dialect = 'pgsql'").await;
 	for (sql, code, state) in [
+		("THROW 'boom'", 1064, "42000"),
 		("SELEC 1", 1064, "42000"),
-		("SELECT 1 / 0", 1365, "22012"),
 		("SELECT * FROM no_such_table", 1146, "42S02"),
 	] {
 		let answer = query(&mut stream, sql).await;

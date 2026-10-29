@@ -722,9 +722,8 @@ impl Connection {
 		}
 		let allowed = match dialect {
 			Dialect::MySql => self.ds.allows_http_route(&RouteTarget::MySql),
-			Dialect::PgSql => self.ds.allows_http_route(&RouteTarget::Postgres),
 			Dialect::Gql => self.ds.allows_http_route(&RouteTarget::Gql),
-			Dialect::SurrealQl => self.ds.allows_http_route(&RouteTarget::MySql),
+			Dialect::SurrealQl | Dialect::PgSql => return Err(not_over_mywire(dialect)),
 		};
 		if !allowed {
 			anyhow::bail!("Forbidden: the {dialect:?} dialect is not allowed on this server");
@@ -732,6 +731,8 @@ impl Connection {
 		Ok(())
 	}
 
+	/// This protocol speaks MySQL SQL, and GQL on request; SurrealQL and
+	/// PostgreSQL are reachable over their own endpoints and are refused here.
 	fn select_dialect(&mut self, dialect: Dialect) -> Result<()> {
 		self.check_dialect(dialect)?;
 		self.dialect = dialect;
@@ -1399,8 +1400,7 @@ impl Connection {
 
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
-			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
-			Dialect::SurrealQl | Dialect::Gql => {}
+			Dialect::SurrealQl | Dialect::PgSql | Dialect::Gql => {}
 		}
 
 		// A statement that commits implicitly ends any active interactive transaction first
@@ -1424,8 +1424,7 @@ impl Connection {
 
 		let req = match self.dialect {
 			Dialect::MySql => QueryRequest::new(QuerySource::mysql(trimmed), &self.session),
-			Dialect::SurrealQl => QueryRequest::new(trimmed, &self.session),
-			Dialect::PgSql => QueryRequest::new(QuerySource::pgsql(trimmed), &self.session),
+			Dialect::SurrealQl | Dialect::PgSql => return Err(not_over_mywire(self.dialect)),
 			Dialect::Gql => QueryRequest::new(QuerySource::gql(trimmed), &self.session),
 		}
 		.with_optional_transaction(self.transaction.clone());
@@ -2107,8 +2106,7 @@ impl Connection {
 
 		match self.dialect {
 			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
-			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
-			Dialect::SurrealQl | Dialect::Gql => {}
+			Dialect::SurrealQl | Dialect::PgSql | Dialect::Gql => {}
 		}
 
 		let implicit_commit = self.commits_implicitly(trimmed);
@@ -2128,8 +2126,7 @@ impl Connection {
 
 		let req = match self.dialect {
 			Dialect::MySql => QueryRequest::new(QuerySource::mysql(trimmed), &self.session),
-			Dialect::SurrealQl => QueryRequest::new(trimmed, &self.session),
-			Dialect::PgSql => QueryRequest::new(QuerySource::pgsql(trimmed), &self.session),
+			Dialect::SurrealQl | Dialect::PgSql => return Err(not_over_mywire(self.dialect)),
 			Dialect::Gql => QueryRequest::new(QuerySource::gql(trimmed), &self.session),
 		}
 		.with_variables(Some(vars))
@@ -2209,6 +2206,11 @@ impl Connection {
 			}
 		}
 	}
+}
+
+/// The refusal of a dialect that belongs to another protocol.
+fn not_over_mywire(dialect: Dialect) -> anyhow::Error {
+	anyhow::anyhow!("the {dialect:?} dialect is not available over the MySQL protocol")
 }
 
 /// Parse a `SET dialect = ...` or `SET dialect TO ...` statement.

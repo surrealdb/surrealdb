@@ -314,56 +314,6 @@ macro_rules! over_each_protocol {
 	};
 }
 
-/// PostgreSQL commits nothing on DDL: the definition is part of the open transaction, so a
-/// `ROLLBACK` takes back the row written before it and the definition itself.
-async fn pgsql_ddl_stays_in_the_open_transaction(protocol: Protocol) {
-	let (addr, shutdown) = start_test_mysql_server().await;
-	let mut stream = connect_with_multi_results(addr).await;
-
-	let ddl = "CREATE TABLE pg_side (a INT)";
-	let outcome = ddl_inside_a_transaction(&mut stream, protocol, "pgsql", "pg_rows", ddl).await;
-	assert_eq!(outcome, None);
-	assert_eq!(error_of(&mut stream, "ROLLBACK").await, None);
-
-	assert_eq!(error_of(&mut stream, ddl).await, None, "the definition is undone");
-	assert_eq!(error_of(&mut stream, "SET dialect = 'mysql'").await, None);
-	let insert = "INSERT INTO pg_rows (id) VALUES (1)";
-	assert_eq!(error_of(&mut stream, insert).await, None, "the row is undone");
-
-	shutdown.cancel();
-}
-
-over_each_protocol!(
-	pgsql_ddl_stays_in_the_open_transaction,
-	test_mywire_ddl_in_the_pgsql_dialect_stays_in_the_open_transaction,
-	test_mywire_prepared_ddl_in_the_pgsql_dialect_stays_in_the_open_transaction
-);
-
-/// In SurrealQL `CREATE` writes a record. It is a statement of the open transaction, not a
-/// definition that ends it.
-async fn surrealql_create_stays_in_the_open_transaction(protocol: Protocol) {
-	let (addr, shutdown) = start_test_mysql_server().await;
-	let mut stream = connect_with_multi_results(addr).await;
-
-	let create = "CREATE surreal_rows:2 RETURN NONE";
-	let outcome =
-		ddl_inside_a_transaction(&mut stream, protocol, "surrealql", "surreal_rows", create).await;
-	assert_eq!(outcome, None);
-	assert_eq!(error_of(&mut stream, "ROLLBACK").await, None);
-
-	assert_eq!(error_of(&mut stream, create).await, None, "the record is undone");
-	let first = "CREATE surreal_rows:1 RETURN NONE";
-	assert_eq!(error_of(&mut stream, first).await, None, "the row written before it is undone");
-
-	shutdown.cancel();
-}
-
-over_each_protocol!(
-	surrealql_create_stays_in_the_open_transaction,
-	test_mywire_create_in_the_surrealql_dialect_stays_in_the_open_transaction,
-	test_mywire_prepared_create_in_the_surrealql_dialect_stays_in_the_open_transaction
-);
-
 /// MySQL commits the open transaction before a DDL statement, so a `ROLLBACK` takes back neither
 /// the row written before it nor the definition.
 async fn mysql_ddl_commits_the_open_transaction(protocol: Protocol) {

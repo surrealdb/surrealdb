@@ -7,12 +7,31 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::{Builder, QueryRequest};
+use surrealdb_core::kvs::{Builder, Datastore, QueryRequest};
 use surrealdb_mywire::auth::compute_mysql_native_password_scramble;
 use surrealdb_mywire::constants::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
+
+static SERVERS: std::sync::Mutex<Vec<(std::net::SocketAddr, Arc<Datastore>)>> =
+	std::sync::Mutex::new(Vec::new());
+
+/// Runs SurrealQL in the `test`/`test` database of the datastore behind the server at `addr`.
+/// The wire speaks only MySQL, so fixtures are written in-process.
+async fn seed_surrealql(addr: std::net::SocketAddr, sql: &str) {
+	let ds = SERVERS
+		.lock()
+		.expect("lock the servers")
+		.iter()
+		.find(|(a, _)| *a == addr)
+		.map(|(_, ds)| Arc::clone(ds))
+		.expect("a server started by the test helpers");
+	let sess = Session::owner().with_ns("test").with_db("test");
+	for response in ds.execute(sql, &sess, None).await.expect("seed") {
+		response.result.unwrap_or_else(|err| panic!("{sql}: {err}"));
+	}
+}
 
 /// A server that enforces authorization, with an owner `root` and a `viewer`, a role whose writes
 /// are held to the permissions of the tables it writes.
@@ -29,6 +48,7 @@ async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) 
 	))
 	.await
 	.expect("Failed to define the users");
+	let ds_for_seed = Arc::clone(&ds);
 	let shutdown = CancellationToken::new();
 	let bind_addr: std::net::SocketAddr =
 		"127.0.0.1:0".parse().expect("Failed to parse socket address");
@@ -42,6 +62,7 @@ async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) 
 	)
 	.await
 	.expect("Failed to start mywire server");
+	SERVERS.lock().expect("lock the servers").push((addr, ds_for_seed));
 	(addr, shutdown)
 }
 
@@ -436,16 +457,14 @@ async fn test_mywire_truncate_removes_no_row_the_table_does_not_let_the_user_del
 	let (addr, shutdown) = start_test_mysql_server().await;
 	// A table whose permissions let a checked principal read and write rows but not delete them,
 	// defined in SurrealQL.
-	let mut owner = connect(addr, "root", false).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE trunc_kept SCHEMALESS PERMISSIONS FOR select, create, update FULL, FOR delete NONE",
-		"CREATE trunc_kept:1 SET a = 7",
-		"CREATE trunc_kept:2 SET a = 8",
-	] {
-		let replies = query_all(&mut owner, sql).await;
-		assert!(!replies.iter().any(|r| matches!(r, Reply::Err { .. })), "{sql}: {replies:?}");
-	}
+	let _owner = connect(addr, "root", false).await;
+	seed_surrealql(
+		addr,
+		"DEFINE TABLE trunc_kept SCHEMALESS PERMISSIONS FOR select, create, update FULL, FOR delete NONE; \
+		 CREATE trunc_kept:1 SET a = 7; \
+		 CREATE trunc_kept:2 SET a = 8;",
+	)
+	.await;
 
 	let mut viewer = connect(addr, "viewer", false).await;
 	assert_eq!(count(&mut viewer, "trunc_kept").await, "2");

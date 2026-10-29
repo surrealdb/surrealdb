@@ -10,6 +10,7 @@ use surrealdb_mywire::auth::{
 };
 use surrealdb_mywire::constants::*;
 use surrealdb_mywire::msg::{ColumnDefinition41, StmtPrepareOk};
+use surrealdb_types::ToSql;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
@@ -25,6 +26,15 @@ async fn setup_test_datastore() -> Arc<Datastore> {
 		.await
 		.expect("Failed to define root user");
 	ds
+}
+
+/// Runs SurrealQL in the `test`/`test` database. The wire speaks only MySQL, so fixtures are
+/// written in-process.
+async fn seed_surrealql(ds: &Datastore, sql: &str) {
+	let sess = Session::owner().with_ns("test").with_db("test");
+	for response in ds.execute(sql, &sess, None).await.expect("seed") {
+		response.result.unwrap_or_else(|err| panic!("{sql}: {err}"));
+	}
 }
 
 async fn read_packet(stream: &mut TcpStream) -> (u8, Vec<u8>) {
@@ -742,6 +752,7 @@ async fn test_prepared_statement_unbound_param_rejected_in_simple_query() {
 #[tokio::test]
 async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json() {
 	let ds = setup_test_datastore().await;
+	let seed_ds = Arc::clone(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 
@@ -760,21 +771,30 @@ async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json(
 	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
 	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
 
-	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
-	execute_query(&mut stream, "DEFINE TABLE person SCHEMALESS").await;
-	execute_query(
-		&mut stream,
-		"CREATE person:tobie CONTENT { tags: ['rust', 'db'], born: d'1980-01-01T00:00:00Z', \
+	seed_surrealql(
+		&seed_ds,
+		"DEFINE TABLE person SCHEMAFULL; \
+		 DEFINE FIELD tags ON person TYPE array<string>; \
+		 DEFINE FIELD born ON person TYPE datetime; \
+		 DEFINE FIELD seen ON person TYPE datetime; \
+		 DEFINE FIELD took ON person TYPE duration; \
+		 CREATE person:tobie CONTENT { tags: ['rust', 'db'], born: d'1980-01-01T00:00:00Z', \
 		 seen: d'1980-01-01T12:30:45.123456Z', took: 26h } RETURN NONE",
 	)
 	.await;
 
 	let mut prep = vec![COM_STMT_PREPARE];
-	prep.extend_from_slice(b"SELECT born, seen, tags, took FROM person:tobie");
+	prep.extend_from_slice(b"SELECT born, seen, tags, took FROM person");
 	write_packet(&mut stream, 0, &prep).await;
 	let (_, prep_resp) = read_packet(&mut stream).await;
 	let ok_prep = StmtPrepareOk::deserialize(&prep_resp).expect("Valid StmtPrepareOk");
-	assert_eq!(ok_prep.num_columns, 0, "the columns of a SurrealQL statement are not known yet");
+	assert_eq!(
+		ok_prep.num_columns, 4,
+		"the named columns are known when the statement is prepared"
+	);
+	for _ in 0..ok_prep.num_columns {
+		read_packet(&mut stream).await;
+	}
 
 	let mut exec = vec![COM_STMT_EXECUTE];
 	exec.extend_from_slice(&ok_prep.statement_id.to_le_bytes());
@@ -793,10 +813,10 @@ async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json(
 	assert_eq!(
 		types,
 		vec![
-			("born".to_string(), MYSQL_TYPE_DATETIME),
-			("seen".to_string(), MYSQL_TYPE_DATETIME),
+			("born".to_string(), MYSQL_TYPE_TIMESTAMP),
+			("seen".to_string(), MYSQL_TYPE_TIMESTAMP),
 			("tags".to_string(), MYSQL_TYPE_JSON),
-			("took".to_string(), MYSQL_TYPE_TIME),
+			("took".to_string(), MYSQL_TYPE_VAR_STRING),
 		]
 	);
 
@@ -809,8 +829,9 @@ async fn test_prepared_statement_binary_rows_carry_datetimes_durations_and_json(
 	// tags: JSON as a length-encoded string.
 	expected.push(13);
 	expected.extend_from_slice(b"[\"rust\",\"db\"]");
-	// took: TIME of 26h is 1 day 02:00:00 (length 8, positive).
-	expected.extend_from_slice(&[8, 0, 1, 0, 0, 0, 2, 0, 0]);
+	// took: a declared duration is text in the MySQL TIME form.
+	expected.push(8);
+	expected.extend_from_slice(b"26:00:00");
 	assert_eq!(row, expected);
 
 	let (_, term) = read_packet(&mut stream).await;
@@ -858,6 +879,7 @@ async fn execute_prepared(
 async fn test_prepared_statement_mysql_dialect_shows_record_ids_as_keys_and_lists_wildcard_columns()
 {
 	let ds = setup_test_datastore().await;
+	let seed_ds = Arc::clone(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 	let addr = surrealdb_mywire::start(
@@ -874,10 +896,11 @@ async fn test_prepared_statement_mysql_dialect_shows_record_ids_as_keys_and_list
 	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
 	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
 
-	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
-	execute_query(&mut stream, "DEFINE TABLE emp SCHEMALESS").await;
-	execute_query(&mut stream, "CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE").await;
-	execute_query(&mut stream, "SET dialect = 'mysql'").await;
+	seed_surrealql(
+		&seed_ds,
+		"DEFINE TABLE emp SCHEMALESS; CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE",
+	)
+	.await;
 
 	// Named columns are typed before the statement runs, and the id and the link are keys.
 	let (prepared_columns, columns, rows) =
@@ -908,6 +931,7 @@ async fn test_prepared_statement_mysql_dialect_shows_record_ids_as_keys_and_list
 #[tokio::test]
 async fn test_prepared_statement_mysql_dialect_writes_a_key_into_a_link_field_and_finds_it_again() {
 	let ds = setup_test_datastore().await;
+	let seed_ds = Arc::clone(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 	let addr = surrealdb_mywire::start(
@@ -924,13 +948,15 @@ async fn test_prepared_statement_mysql_dialect_writes_a_key_into_a_link_field_an
 	let (_, auth_ok) = perform_handshake(&mut stream, CLIENT_DEPRECATE_EOF).await;
 	assert_eq!(auth_ok[0], OK_HEADER, "Handshake should succeed");
 
-	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
-	execute_query(&mut stream, "DEFINE TABLE dept SCHEMALESS").await;
-	execute_query(&mut stream, "CREATE dept:1 SET dname = 'Engineering' RETURN NONE").await;
-	execute_query(&mut stream, "DEFINE TABLE emp SCHEMAFULL").await;
-	execute_query(&mut stream, "DEFINE FIELD name ON emp TYPE string").await;
-	execute_query(&mut stream, "DEFINE FIELD dept ON emp TYPE record<dept>").await;
-	execute_query(&mut stream, "SET dialect = 'mysql'").await;
+	seed_surrealql(
+		&seed_ds,
+		"DEFINE TABLE dept SCHEMALESS; \
+		 CREATE dept:1 SET dname = 'Engineering' RETURN NONE; \
+		 DEFINE TABLE emp SCHEMAFULL; \
+		 DEFINE FIELD name ON emp TYPE string; \
+		 DEFINE FIELD dept ON emp TYPE record<dept>",
+	)
+	.await;
 
 	// A plain key is stored as the link to the declared table, by a simple query and by a
 	// prepared statement alike.
@@ -948,11 +974,8 @@ async fn test_prepared_statement_mysql_dialect_writes_a_key_into_a_link_field_an
 	assert_eq!(resp[0], 0xff, "a float is no key of a link");
 
 	// The stored value is a link: SurrealQL follows it.
-	execute_query(&mut stream, "SET dialect = 'surrealql'").await;
-	let mut query = vec![COM_QUERY];
-	query.extend_from_slice(b"SELECT VALUE dept.dname FROM emp:8");
-	write_packet(&mut stream, 0, &query).await;
-	let (_, count) = read_packet(&mut stream).await;
-	assert_eq!(count[0], 1, "one column");
+	let sess = Session::owner().with_ns("test").with_db("test");
+	let mut res = seed_ds.execute("SELECT VALUE dept.dname FROM emp:8", &sess, None).await.unwrap();
+	assert_eq!(res.remove(0).result.unwrap().to_sql(), "['Engineering']");
 	shutdown.cancel();
 }

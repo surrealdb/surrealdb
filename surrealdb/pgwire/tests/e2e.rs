@@ -22,9 +22,37 @@ async fn start_test_pg_server() -> (std::net::SocketAddr, CancellationToken) {
 	start_test_pg_server_with_ds(ds).await
 }
 
+static SERVERS: std::sync::Mutex<Vec<(std::net::SocketAddr, Arc<Datastore>)>> =
+	std::sync::Mutex::new(Vec::new());
+
+/// Runs SurrealQL in the `test`/`test` database of the datastore behind the server at `addr`.
+/// The wire speaks only PostgreSQL, so fixtures are written in-process.
+async fn seed_surrealql(addr: std::net::SocketAddr, sql: &str) {
+	if let Err(err) = try_surrealql(addr, sql).await {
+		panic!("{sql}: {err}");
+	}
+}
+
+/// As `seed_surrealql`, returning the first error instead of panicking.
+async fn try_surrealql(addr: std::net::SocketAddr, sql: &str) -> Result<(), String> {
+	let ds = SERVERS
+		.lock()
+		.expect("lock the servers")
+		.iter()
+		.find(|(a, _)| *a == addr)
+		.map(|(_, ds)| Arc::clone(ds))
+		.expect("a server started by the test helpers");
+	let sess = Session::owner().with_ns("test").with_db("test");
+	for response in ds.execute(sql, &sess, None).await.map_err(|err| err.to_string())? {
+		response.result.map_err(|err| err.to_string())?;
+	}
+	Ok(())
+}
+
 async fn start_test_pg_server_with_ds(
 	ds: Arc<Datastore>,
 ) -> (std::net::SocketAddr, CancellationToken) {
+	let ds_for_seed = Arc::clone(&ds);
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 
@@ -33,6 +61,7 @@ async fn start_test_pg_server_with_ds(
 	let addr = surrealdb_pgwire::start(bind_addr, ds, ready, shutdown.clone(), None, None)
 		.await
 		.expect("Failed to start pgwire server");
+	SERVERS.lock().expect("lock the servers").push((addr, ds_for_seed));
 
 	(addr, shutdown)
 }
@@ -459,29 +488,23 @@ async fn test_pgwire_function_values_are_sent_in_the_type_the_descriptor_declare
 #[tokio::test]
 async fn test_pgwire_dialect_switching_and_fail_closed() {
 	let (addr, shutdown) = start_test_pg_server().await;
-	// Connect without options: default dialect is SurrealQL
 	let mut stream = connect_and_handshake_with_options(addr, None).await;
 
-	// In default SurrealQL dialect: SurrealQL query succeeds!
-	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Surreal';").await;
-	assert_eq!(last, b'C', "SurrealQL CREATE SET must succeed in default SurrealQL dialect");
+	let (_, last) = run_simple_query(&mut stream, "CREATE TABLE person (name text);").await;
+	assert_eq!(last, b'C', "the default dialect is PostgreSQL");
+	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Invalid';").await;
+	assert_eq!(last, b'E', "SurrealQL must fail closed in the PostgreSQL dialect");
 
-	// In SurrealQL dialect, invalid SurrealQL must fail closed without fallback to PostgreSQL
-	let (_, last) = run_simple_query(&mut stream, "SELECT @@version_comment;").await;
-	assert_eq!(last, b'E', "Invalid query must fail closed in SurrealQL dialect");
-
-	// Switch dialect to PostgreSQL via SET dialect = 'pgsql'
+	for dialect in ["surrealql", "mysql"] {
+		let sql = format!("SET dialect = '{dialect}';");
+		let (_, last, err) = run_simple_query_with_err(&mut stream, &sql).await;
+		assert_eq!(last, b'E', "{sql}");
+		assert_eq!(err.expect("error fields").0, "0A000", "{sql}");
+	}
 	let (_, last) = run_simple_query(&mut stream, "SET dialect = 'pgsql';").await;
 	assert_eq!(last, b'C', "SET dialect = 'pgsql' must succeed");
-
-	// Now PostgreSQL queries work
-	let (rows, last) = run_simple_query(&mut stream, "SELECT name FROM person;").await;
-	assert_eq!(last, b'C');
-	assert_eq!(rows.len(), 1);
-
-	// In PostgreSQL dialect: SurrealQL query is rejected with error 'E'
 	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Invalid';").await;
-	assert_eq!(last, b'E', "SurrealQL CREATE SET must fail in PostgreSQL dialect");
+	assert_eq!(last, b'E', "a refused switch leaves the dialect as it was");
 
 	shutdown.cancel();
 }
@@ -1434,27 +1457,18 @@ async fn test_prepared_statement_lifecycle_and_caching() {
 }
 
 #[tokio::test]
-async fn surrealql_prepared_queries_reuse_the_parse_with_fresh_bindings() {
+async fn the_startup_options_refuse_the_surrealql_dialect() {
 	let (addr, shutdown) = start_test_pg_server().await;
-	let mut stream = connect_and_handshake_with_options(addr, Some("-c dialect=surrealql")).await;
-	let parse = build_parse("add", "RETURN $1 + $2", &[23, 23]);
-	let bind = build_bind("first", "add", &[], &[Some(b"10"), Some(b"20")]);
-	let execute = build_exec("first", 0);
-	let sync = build_sync();
-	let (rows, messages) = run_extended_batch(&mut stream, &[parse, bind, execute, sync]).await;
-	assert!(messages.contains(&b'1'));
-	assert!(messages.contains(&b'C'));
-	assert_eq!(rows.len(), 1);
-	assert_eq!(decode_data_row(&rows[0])[0].as_deref(), Some("30"));
-
-	let bind = build_bind("second", "add", &[], &[Some(b"100"), Some(b"250")]);
-	let execute = build_exec("second", 0);
-	let sync = build_sync();
-	let (rows, messages) = run_extended_batch(&mut stream, &[bind, execute, sync]).await;
-	assert!(!messages.contains(&b'1'));
-	assert!(messages.contains(&b'C'));
-	assert_eq!(rows.len(), 1);
-	assert_eq!(decode_data_row(&rows[0])[0].as_deref(), Some("350"));
+	let result = connect_and_handshake_with_auth(
+		addr,
+		"root",
+		"test/test",
+		None,
+		Some("-c dialect=surrealql"),
+	)
+	.await;
+	let (code, _) = result.expect_err("the options parameter must refuse SurrealQL");
+	assert_eq!(code, "0A000");
 	shutdown.cancel();
 }
 
@@ -3272,23 +3286,10 @@ async fn test_pgwire_copy_to_stdout_quotes_table_and_column_names() {
 }
 
 #[tokio::test]
-async fn test_pgwire_copy_to_stdout_shows_record_ids_as_keys_on_either_dialect() {
+async fn test_pgwire_copy_to_stdout_shows_record_ids_as_keys() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in
-		["SET dialect = 'surrealql'", "CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE"]
-	{
-		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
-		assert!(err.is_none(), "{sql}: {err:?}");
-		assert_eq!(last, b'C');
-	}
-	// Under the SurrealQL dialect the COPY is still a PostgreSQL statement, so it reads like one.
-	let (chunks, complete) =
-		run_copy_out(&mut stream, "COPY (SELECT id, dept FROM emp) TO STDOUT;").await;
-	assert_eq!(complete, "COPY 1");
-	assert_eq!(chunks.concat(), b"7\t1\n");
-	let (_, last, err) = run_simple_query_with_err(&mut stream, "SET dialect = 'pgsql'").await;
-	assert!(err.is_none() && last == b'C');
+	seed_surrealql(addr, "CREATE emp:7 SET name = 'Eve', dept = dept:1 RETURN NONE").await;
 	let (chunks, complete) =
 		run_copy_out(&mut stream, "COPY (SELECT id, dept FROM emp) TO STDOUT;").await;
 	assert_eq!(complete, "COPY 1");
@@ -4619,26 +4620,25 @@ async fn describe_extended(stream: &mut TcpStream, sql: &str, result_format: i16
 /// A schemaless `emp` table whose fields cover what a text column can be handed: datetimes with
 /// and without a fraction and before 1970, durations of under and over a day, a bool, arrays, a
 /// float, a decimal, a uuid, a geometry and an object.
-async fn seed_emp(stream: &mut TcpStream) {
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE TABLE emp SCHEMALESS",
-		"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
+async fn seed_emp(addr: std::net::SocketAddr) {
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE TABLE emp SCHEMALESS",
+			"CREATE emp:1 CONTENT { name: 'Ada', born: d'1980-01-01T00:00:00Z', \
 		 seen: d'2020-01-01T12:34:56.789Z', took: 1h30m, flag: true, tags: ['rust', 'db'], \
 		 ratio: 1.5, dec: 1.25dec, u: u'018f6b2e-4c3d-7a11-9a52-0123456789ab', geo: (1.0, 2.0), \
 		 meta: { a: 1, at: d'2020-01-01T00:00:00Z' } } RETURN NONE",
-		"CREATE emp:2 CONTENT { name: 'Bob', born: d'1969-12-31T23:59:59Z', \
+			"CREATE emp:2 CONTENT { name: 'Bob', born: d'1969-12-31T23:59:59Z', \
 		 seen: d'2024-01-15T12:34:56.123456Z', took: 26h, flag: false, tags: [], \
 		 ratio: 3.0 } RETURN NONE",
-		"CREATE emp:3 CONTENT { name: 'Cy', born: d'2000-02-29T00:00:00.5Z', \
+			"CREATE emp:3 CONTENT { name: 'Cy', born: d'2000-02-29T00:00:00.5Z', \
 		 seen: d'2020-06-01T00:00:00Z', took: 0s, flag: true, tags: ['a b'], \
 		 ratio: 0.25 } RETURN NONE",
-		"SET dialect = 'pgsql'",
-	] {
-		let (_, last, err) = run_simple_query_with_err(stream, sql).await;
-		assert!(err.is_none(), "{sql}: {err:?}");
-		assert_eq!(last, b'C', "{sql}");
-	}
+		]
+		.join("; "),
+	)
+	.await;
 }
 
 const EMP_FIELDS: [&str; 11] =
@@ -4722,7 +4722,7 @@ fn assert_typed_apart(star: &Described, named: &Described) {
 async fn test_pgwire_simple_query_named_columns_and_select_star_show_one_text() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_emp(&mut stream).await;
+	seed_emp(addr).await;
 	let star = describe_simple(&mut stream, "SELECT * FROM emp ORDER BY id").await;
 	let named = describe_simple(&mut stream, &emp_named_select()).await;
 	assert_typed_apart(&star, &named);
@@ -4734,7 +4734,7 @@ async fn test_pgwire_simple_query_named_columns_and_select_star_show_one_text() 
 async fn test_pgwire_extended_query_named_columns_and_select_star_show_one_text() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_emp(&mut stream).await;
+	seed_emp(addr).await;
 	let star = describe_extended(&mut stream, "SELECT * FROM emp ORDER BY id", 0).await;
 	let named = describe_extended(&mut stream, &emp_named_select(), 0).await;
 	assert_typed_apart(&star, &named);
@@ -4749,7 +4749,7 @@ async fn test_pgwire_extended_query_named_columns_and_select_star_show_one_text(
 async fn test_pgwire_extended_query_binary_text_column_is_the_text_of_the_typed_column() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_emp(&mut stream).await;
+	seed_emp(addr).await;
 	let star_text = describe_extended(&mut stream, "SELECT * FROM emp ORDER BY id", 0).await;
 	let named_binary = describe_extended(&mut stream, &emp_named_select(), 1).await;
 	assert_typed_apart(&star_text, &named_binary);
@@ -4768,7 +4768,7 @@ async fn test_pgwire_extended_query_binary_text_column_is_the_text_of_the_typed_
 async fn test_pgwire_copy_to_stdout_exports_a_text_column_as_the_typed_column_shows_it() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	seed_emp(&mut stream).await;
+	seed_emp(addr).await;
 	let select = "SELECT id, tags, born, seen, took, flag FROM emp ORDER BY id";
 
 	let (chunks, complete) =
@@ -4811,19 +4811,18 @@ async fn test_pgwire_copy_to_stdout_exports_a_text_column_as_the_typed_column_sh
 
 async fn seed_link_comparisons() -> (TcpStream, CancellationToken) {
 	let (addr, shutdown) = start_test_pg_server().await;
-	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE FIELD dept ON link_cmp TYPE option<record<dept>>",
-		"CREATE link_cmp:1 SET dept = dept:1 RETURN NONE",
-		"CREATE link_cmp:2 SET dept = dept:2 RETURN NONE",
-		"CREATE link_cmp:3 RETURN NONE",
-		"SET dialect = 'pgsql'",
-	] {
-		let (_, last, err) = run_simple_query_with_err(&mut stream, sql).await;
-		assert!(err.is_none(), "{sql}: {err:?}");
-		assert_eq!(last, b'C', "{sql}");
-	}
+	let stream = connect_and_handshake(addr).await;
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE FIELD dept ON link_cmp TYPE option<record<dept>>",
+			"CREATE link_cmp:1 SET dept = dept:1 RETURN NONE",
+			"CREATE link_cmp:2 SET dept = dept:2 RETURN NONE",
+			"CREATE link_cmp:3 RETURN NONE",
+		]
+		.join("; "),
+	)
+	.await;
 	(stream, shutdown)
 }
 
@@ -5026,18 +5025,18 @@ async fn assert_sql_ids(stream: &mut TcpStream, sql: &str, expected: &[&str]) {
 async fn test_pgwire_sql_null_predicates_select_update_and_delete_agree() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"CREATE null_pred:1 SET v = NULL, flag = NULL RETURN NONE",
-		"CREATE null_pred:2 SET v = 1, flag = true RETURN NONE",
-		"CREATE null_pred:3 SET v = 2, flag = false RETURN NONE",
-		"CREATE null_pred:4 RETURN NONE",
-		"CREATE null_pred:5 SET v = 3, flag = false RETURN NONE",
-		"SET dialect = 'pgsql'",
-	] {
-		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
-		assert!(error.is_none(), "{sql}: {error:?}");
-	}
+	seed_surrealql(
+		addr,
+		&[
+			"CREATE null_pred:1 SET v = NULL, flag = NULL RETURN NONE",
+			"CREATE null_pred:2 SET v = 1, flag = true RETURN NONE",
+			"CREATE null_pred:3 SET v = 2, flag = false RETURN NONE",
+			"CREATE null_pred:4 RETURN NONE",
+			"CREATE null_pred:5 SET v = 3, flag = false RETURN NONE",
+		]
+		.join("; "),
+	)
+	.await;
 	let cases: &[(&str, &[&str])] = &[
 		("v <> 1", &["3", "5"]),
 		("NOT (v = 1)", &["3", "5"]),
@@ -5150,18 +5149,18 @@ async fn test_pgwire_quoted_names_preserve_case_through_crud_and_inference() {
 async fn test_pgwire_nullable_link_parameters_keep_sql_unknown() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;
-	for sql in [
-		"SET dialect = 'surrealql'",
-		"DEFINE FIELD dept ON nullable_links TYPE record<dept> | null | none",
-		"CREATE nullable_links:1 SET dept = NULL RETURN NONE",
-		"CREATE nullable_links:2 SET dept = dept:1 RETURN NONE",
-		"CREATE nullable_links:3 SET dept = dept:2 RETURN NONE",
-		"CREATE nullable_links:4 RETURN NONE",
-		"SET dialect = 'pgsql'",
-	] {
-		let (_, _, error) = run_simple_query_with_err(&mut stream, sql).await;
-		assert!(error.is_none(), "{sql}: {error:?}");
-	}
+	seed_surrealql(
+		addr,
+		&[
+			"DEFINE FIELD dept ON nullable_links TYPE record<dept> | null | none",
+			"CREATE nullable_links:1 SET dept = NULL RETURN NONE",
+			"CREATE nullable_links:2 SET dept = dept:1 RETURN NONE",
+			"CREATE nullable_links:3 SET dept = dept:2 RETURN NONE",
+			"CREATE nullable_links:4 RETURN NONE",
+		]
+		.join("; "),
+	)
+	.await;
 	for (predicate, param, expected) in [
 		("dept = $1", None, vec![]),
 		("dept <> $1", None, vec![]),
@@ -6167,14 +6166,11 @@ async fn test_pgwire_typeorm_constraint_and_foreign_key_catalog_queries() {
 		assert_eq!(last, b'C', "{ddl}");
 	}
 	// The column holds record links to the other table, which SurrealQL declares as a reference.
-	let mut surreal = connect_and_handshake_with_options(addr, None).await;
-	let (_, last, err) = run_simple_query_with_err(
-		&mut surreal,
+	seed_surrealql(
+		addr,
 		"DEFINE FIELD OVERWRITE authorId ON FkPost TYPE record<FkUser> REFERENCE ON DELETE CASCADE",
 	)
 	.await;
-	assert!(err.is_none(), "{err:?}");
-	assert_eq!(last, b'C');
 
 	let constraints =
 		text_rows(&mut stream, &typeorm_constraints_query(&["FkPost", "FkUser"])).await;
@@ -6282,14 +6278,12 @@ async fn test_pgwire_alter_table_drop_constraint_resolves_the_names_the_catalog_
 		let (_, last) = run_simple_query(&mut stream, ddl).await;
 		assert_eq!(last, b'C', "{ddl}");
 	}
-	let mut surreal = connect_and_handshake_with_options(addr, None).await;
-	let (_, _, err) = run_simple_query_with_err(
-		&mut surreal,
+	seed_surrealql(
+		addr,
 		"DEFINE FIELD OVERWRITE authorId ON DcPost TYPE record<DcUser> REFERENCE ON DELETE CASCADE; \
 		 CREATE DcUser:1 SET email = 'a@x'; CREATE DcPost:1 SET title = 't', authorId = DcUser:1;",
 	)
 	.await;
-	assert!(err.is_none(), "{err:?}");
 
 	let names = |rows: Vec<Vec<String>>| rows.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>();
 	let constraint_names = |rows: Vec<Vec<String>>| names(rows);
@@ -6322,9 +6316,7 @@ async fn test_pgwire_alter_table_drop_constraint_resolves_the_names_the_catalog_
 
 	// A table whose primary key is only its record id has no index to drop: the constraint is
 	// refused, not ignored.
-	let (_, _, err) =
-		run_simple_query_with_err(&mut surreal, "DEFINE TABLE DcPlain SCHEMALESS").await;
-	assert!(err.is_none(), "{err:?}");
+	seed_surrealql(addr, "DEFINE TABLE DcPlain SCHEMALESS").await;
 	let (code, message) =
 		sqlstate_of(&mut stream, r#"ALTER TABLE "DcPlain" DROP CONSTRAINT "DcPlain_pkey""#)
 			.await
@@ -6333,21 +6325,16 @@ async fn test_pgwire_alter_table_drop_constraint_resolves_the_names_the_catalog_
 	assert!(message.contains("record id"), "{message}");
 
 	// A unique constraint drops its index: a duplicate is then accepted.
-	let (_, last, err) =
-		run_simple_query_with_err(&mut surreal, "CREATE DcUser:2 SET email = 'a@x'").await;
-	assert_eq!(last, b'E', "{err:?}");
+	assert!(try_surrealql(addr, "CREATE DcUser:2 SET email = 'a@x'").await.is_err());
 	assert!(
 		sqlstate_of(&mut stream, r#"ALTER TABLE "DcUser" DROP CONSTRAINT "DcUser_email_uniq""#)
 			.await
 			.is_none()
 	);
-	let (_, last, err) =
-		run_simple_query_with_err(&mut surreal, "CREATE DcUser:2 SET email = 'a@x'").await;
-	assert_eq!(last, b'C', "{err:?}");
+	seed_surrealql(addr, "CREATE DcUser:2 SET email = 'a@x'").await;
 
 	// A foreign key drops the reference and keeps the column's type.
-	let (_, last, _) = run_simple_query_with_err(&mut surreal, "DELETE DcUser:2").await;
-	assert_eq!(last, b'C');
+	seed_surrealql(addr, "DELETE DcUser:2").await;
 	assert!(
 		sqlstate_of(&mut stream, r#"ALTER TABLE "DcPost" DROP CONSTRAINT "DcPost_authorId_fkey""#)
 			.await
@@ -6360,12 +6347,12 @@ async fn test_pgwire_alter_table_drop_constraint_resolves_the_names_the_catalog_
 	)
 	.await;
 	assert_eq!(names(rows), ["DcPost_pkey"]);
-	let (_, last, _) =
-		run_simple_query_with_err(&mut surreal, "UPDATE DcPost:1 SET authorId = 5").await;
-	assert_eq!(last, b'E', "the column keeps its record<DcUser> type");
+	assert!(
+		try_surrealql(addr, "UPDATE DcPost:1 SET authorId = 5").await.is_err(),
+		"the column keeps its record<DcUser> type"
+	);
 	// With the reference gone, deleting the author no longer cascades.
-	let (_, last, _) = run_simple_query_with_err(&mut surreal, "DELETE DcUser:1").await;
-	assert_eq!(last, b'C');
+	seed_surrealql(addr, "DELETE DcUser:1").await;
 	let rows = text_rows(&mut stream, r#"SELECT count(*) FROM "DcPost""#).await;
 	assert_eq!(rows, vec![["1"]]);
 
@@ -6736,9 +6723,9 @@ async fn test_pgwire_foreign_key_added_in_the_request_that_creates_the_table() {
 #[tokio::test]
 async fn test_pgwire_quantified_comparisons_against_an_array_are_three_valued() {
 	let (addr, shutdown) = start_test_pg_server().await;
-	let mut surreal = connect_and_handshake_with_options(addr, None).await;
-	let (_, last, err) = run_simple_query_with_err(
-		&mut surreal,
+	let mut stream = connect_and_handshake(addr).await;
+	seed_surrealql(
+		addr,
 		"DEFINE TABLE qa SCHEMALESS; \
 		 CREATE qa:1 SET x = 1, arr = [1, 2]; \
 		 CREATE qa:2 SET x = 3, arr = [1, 2]; \
@@ -6752,10 +6739,7 @@ async fn test_pgwire_quantified_comparisons_against_an_array_are_three_valued() 
 		 CREATE qa:10 SET x = 2, arr = [1, 3];",
 	)
 	.await;
-	assert!(err.is_none(), "{err:?}");
-	assert_eq!(last, b'C');
 
-	let mut stream = connect_and_handshake(addr).await;
 	// Rows 1 to 10: match, no match, no match beside a NULL item, NULL value, NULL array, empty
 	// array, all items equal, match beside a NULL item, NULL value and empty array, a differing
 	// item.
