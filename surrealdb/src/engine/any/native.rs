@@ -67,24 +67,10 @@ impl conn::Sealed for Any {
 				}
 
 				EndpointKind::TiKv => {
-					#[cfg(feature = "kv-tikv")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						let engine = surrealdb_engine_local::connect(
-							engine::local::local_config(address),
-							session_clone.receiver.clone(),
-						)
-						.await?;
-						let router = Router::from_engine(engine, features, config);
-						let waiter = watch::channel(Some(WaitFor::Connection));
-						return Ok((router, waiter, session_clone).into());
-					}
-
-					#[cfg(not(feature = "kv-tikv"))]
-				return Err(
-					Error::configuration("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_string(), None)
-				);
+					return Err(Error::configuration(
+						"The `tikv` storage engine is not available in the SDK. Connect to a SurrealDB server built with TiKV support over `ws://` or `http://` instead".to_string(),
+						None,
+					));
 				}
 
 				EndpointKind::SurrealKv => {

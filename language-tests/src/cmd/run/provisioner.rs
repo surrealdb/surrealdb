@@ -15,12 +15,6 @@ use crate::cmd::util;
 use crate::tests::schema::{BoolOr, TestEnv};
 use crate::util::{get_timestamp, xorshift};
 
-/// The key of the store's feature-level record, which sits outside the `/` root.
-const FEATURE_LEVEL_KEY: &[u8] = b"!fl";
-
-/// The first key after the feature-level record.
-const AFTER_FEATURE_LEVEL_KEY: &[u8] = b"!fl\0";
-
 struct CreateInfo {
 	id_gen: AtomicUsize,
 	backend: Backend,
@@ -135,20 +129,9 @@ impl CreateInfo {
 				ds
 			}
 			Backend::TikV => {
-				// Opened without versioning, which this backend cannot serve; the
-				// runner filters versioned tests off it (see cmd/run).
-				let p = "127.0.0.1:2379";
-				let ds = builder.build_with_path(&format!("tikv://{p}")).await?;
-				// Every TiKV datastore in a run aliases the one physical cluster, so a
-				// freshly built handle still sees whatever earlier tests left behind.
-				// Physically drop the entire keyspace out-of-transaction, around the
-				// store's feature-level record, which the build above settled the
-				// handle's feature level against and which nothing re-seeds;
-				// `bootstrap` below then re-seeds the node keys. See `reset_storage`.
-				ds.unsafe_destroy_range((vec![0u8]..FEATURE_LEVEL_KEY.to_vec()).into()).await?;
-				ds.unsafe_destroy_range((AFTER_FEATURE_LEVEL_KEY..[0xffu8].as_slice()).into())
-					.await?;
-				ds
+				anyhow::bail!(
+					"the TiKV backend is built from surrealdb-tikv: run its server and pass --endpoint"
+				)
 			}
 			Backend::Other => {
 				anyhow::bail!("the `other` backend names a server's engine: pass --endpoint")
@@ -161,43 +144,6 @@ impl CreateInfo {
 			store: ds,
 			path,
 		})
-	}
-
-	/// Reset a reused datastore's storage between tests.
-	///
-	/// Only TiKV needs this. Every TiKV datastore in a run aliases the one
-	/// physical cluster, so the reused base datastore can observe keys left
-	/// behind by `clean`/create-path tests — whose post-run cleanup the harness
-	/// does not verify — and the next base test then fails the retained-key
-	/// check on that foreign data. Embedded backends give each datastore its
-	/// own directory, so there is nothing to reset, hence the no-op.
-	///
-	/// We physically drop the keys via `unsafe_destroy_range` rather than a
-	/// transactional `delr`: the wipe runs serially (`--jobs 1`) with no open
-	/// transaction, so the MVCC-bypass hazards do not apply, and it avoids both
-	/// the `delr` key cap and the tombstone build-up of wiping on every test.
-	///
-	/// Crucially we wipe *around* the node/bootstrap keys rather than the whole
-	/// keyspace: `/!ic` (index-compaction queue), `/!nd` (cluster membership)
-	/// and `/!nh` / `/!ni` (namespace-ID generator) live contiguously in
-	/// `[/!ic, /!ns)`, and nothing a test creates falls in that band (tests
-	/// create `/!ac`, `/!cg`, `/!eq` below it and `/!ns`, `/!tl`, `/!us` plus
-	/// the `/*` data keys at or above it). Preserving that block keeps this
-	/// long-lived datastore registered, so we skip the per-test `bootstrap`
-	/// (three node-registry transactions) that a full wipe would force —
-	/// these are the same prefixes the retained-key check whitelists.
-	///
-	/// The store's feature-level record `!fl` is preserved too. It is written once,
-	/// when the store is created, and every handle's feature level is settled
-	/// against it; a wipe that took it would leave handles writing a grammar the
-	/// store does not record.
-	async fn reset_storage(&self, ds: &Datastore) -> Result<()> {
-		if let Backend::TikV = self.backend {
-			ds.unsafe_destroy_range((vec![0u8]..FEATURE_LEVEL_KEY.to_vec()).into()).await?;
-			ds.unsafe_destroy_range((AFTER_FEATURE_LEVEL_KEY..b"/!ic".as_slice()).into()).await?;
-			ds.unsafe_destroy_range((b"/!ns".as_slice()..[0xffu8].as_slice()).into()).await?;
-		}
-		Ok(())
 	}
 
 	fn produce_path(&self) -> String {
@@ -265,11 +211,6 @@ impl Permit {
 				channel,
 			} => {
 				sender = Some(channel);
-				// The create path wipes at build time; the reused base datastore is
-				// never rebuilt, so reset it here to clear any cruft a prior test
-				// (e.g. a `clean` test defining extra namespaces) left on the shared
-				// physical cluster before handing it to this test.
-				self.info.reset_storage(ds.store.as_ref()).await?;
 				ds
 			}
 			PermitInner::Create {

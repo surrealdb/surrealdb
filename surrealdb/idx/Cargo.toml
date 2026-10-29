@@ -39,7 +39,6 @@ vector-index = []
 # add the on-disk and distributed ones so the matching KVS CI lane runs the
 # race tests against its own store. Nothing in the library reads them.
 kv-surrealkv = ["surrealdb-kvs-any/kv-surrealkv"]
-kv-tikv = ["surrealdb-kvs-any/kv-tikv"]
 
 # The `SEGMENT(<language>)` tokenizer and its lindera dependency. Without it
 # `SEGMENT` still parses, and building an analyzer that uses it fails with an

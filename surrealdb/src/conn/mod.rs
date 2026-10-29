@@ -94,12 +94,7 @@ impl Router {
 	/// Builds a router around an engine that serves [`SurrealEngine`]
 	/// directly, with no route channel behind it.
 	#[cfg_attr(
-		not(any(
-			feature = "protocol-grpc",
-			feature = "kv-mem",
-			feature = "kv-tikv",
-			feature = "kv-surrealkv",
-		)),
+		not(any(feature = "protocol-grpc", feature = "kv-mem", feature = "kv-surrealkv",)),
 		allow(dead_code)
 	)]
 	pub(crate) fn from_engine(

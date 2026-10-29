@@ -1,10 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-	feature = "protocol-http",
-))]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "protocol-http",))]
 
 // Tests for exporting and importing data
 // Supported by the storage engines and the HTTP protocol

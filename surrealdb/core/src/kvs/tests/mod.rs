@@ -6,7 +6,7 @@
 //! A module gated on `kv-mem` asserts behaviour every backend shares, so the
 //! in-memory store is enough to cover it. An ungated module carries per-backend
 //! tests, each gated on its own `kv-*` feature.
-#![cfg(any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",))]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv",))]
 
 #[cfg(feature = "kv-surrealkv")]
 mod blocking_rebuild_index_test;
@@ -26,7 +26,7 @@ mod export_implied_element_fields_test;
 mod export_legacy_extension_test;
 #[cfg(feature = "kv-mem")]
 mod export_views_test;
-#[cfg(all(feature = "search", any(feature = "kv-mem", feature = "kv-tikv")))]
+#[cfg(all(feature = "search", feature = "kv-mem"))]
 mod fulltext_nodes_test;
 #[cfg(feature = "kv-mem")]
 mod graph_degree_test;
@@ -73,8 +73,6 @@ mod roundtrips_test;
 mod rpc_session_test;
 #[cfg(feature = "kv-surrealkv")]
 mod select_for_update_test;
-#[cfg(feature = "kv-tikv")]
-mod sequences_tikv_test;
 #[cfg(all(feature = "search", feature = "kv-mem"))]
 mod shared_store_materialise_test;
 #[cfg(feature = "kv-mem")]

@@ -9,8 +9,6 @@
 //! These operations can be processed by the following storage engines:
 //! - `surrealkv`: [SurrealKV](https://github.com/surrealdb/surrealkv) an embeddable persistent
 //!   key-value store, backed by the file system or, in the browser, the Origin Private File System
-//! - `tikv`: [TiKV](https://github.com/tikv/tikv) a distributed, and transactional key-value
-//!   database
 //! - `mem`: in-memory database
 
 pub(crate) use surrealdb_kvs::{Direction, TransactionBuilder, TransactionType, Val, consts, err};

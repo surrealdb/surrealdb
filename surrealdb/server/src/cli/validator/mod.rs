@@ -48,8 +48,9 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 			},
 		}
 	}
-	// Validate the scheme. The removed `rocksdb` and `indxdb` schemes stay valid at
-	// this layer so that connecting names `surrealkv://` as their replacement.
+	// Validate the scheme. The removed `rocksdb` and `indxdb` schemes, and the `tikv` scheme
+	// of the backend built from its own repository, stay valid at this layer so that
+	// connecting names what replaces them.
 	match split_endpoint(v).0 {
 		"http" | "https" | "ws" | "wss" | "grpc" | "grpcs" | "mem" | "surrealkv" | "tikv"
 		| "rocksdb" | "indxdb" => Ok(v.to_string()),

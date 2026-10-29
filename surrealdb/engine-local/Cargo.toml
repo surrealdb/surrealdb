@@ -16,7 +16,6 @@ categories.workspace = true
 # Storage backends. At least one is required for the engine to be able to open
 # a datastore; which one is selected at runtime from the endpoint scheme.
 kv-mem = ["surrealdb-core/kv-mem"]
-kv-tikv = ["surrealdb-core/kv-tikv"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
 # Optional engine capabilities, forwarded to the database core.
 allocator = ["surrealdb-core/allocator"]

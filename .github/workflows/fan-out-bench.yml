@@ -48,9 +48,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TiKV is absent: it is the one backend whose reads are round trips and
-        # so the one that might justify overlapping, but it needs a cluster to
-        # measure against. #860 tracks that half.
+        # Only embedded backends are measured: a backend whose reads are round
+        # trips needs a cluster to measure against. #860 tracks that half.
         backend: [kv-mem, kv-surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)

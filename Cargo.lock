@@ -527,17 +527,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-recursion"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f8abc12baad266b1c8cec146854c195b5864b4221d4b2ca7296a7ae82d9e451"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "async-task"
 version = "4.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2162,17 +2151,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive-new"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cdc8d50f426189eef89dac62fabfa0abb27d5cc008f25bf4156a0203325becc"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "derive_arbitrary"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2577,17 +2555,6 @@ dependencies = [
  "rmp-serde",
  "serde",
  "tempfile",
-]
-
-[[package]]
-name = "fail"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe5e43d0f78a42ad591453aedb1d7ae631ce7ee445c7643691055a9ed8d3b01c"
-dependencies = [
- "log",
- "once_cell",
- "rand 0.8.8",
 ]
 
 [[package]]
@@ -5488,20 +5455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prometheus"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
-dependencies = [
- "cfg-if",
- "fnv",
- "lazy_static",
- "memchr",
- "parking_lot",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "proptest"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8135,7 +8088,6 @@ dependencies = [
  "surrealdb-kvs-mem",
  "surrealdb-kvs-surrealkv",
  "surrealdb-kvs-test",
- "surrealdb-kvs-tikv",
  "temp-dir",
  "tokio",
  "tokio-util",
@@ -8181,19 +8133,6 @@ dependencies = [
  "surrealdb-kvs",
  "tokio",
  "web-time",
-]
-
-[[package]]
-name = "surrealdb-kvs-tikv"
-version = "4.0.0-nightly"
-dependencies = [
- "chrono",
- "surrealdb-cnf",
- "surrealdb-kvs",
- "surrealdb-tikv-client",
- "tokio",
- "tonic",
- "tracing",
 ]
 
 [[package]]
@@ -8604,34 +8543,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-tikv-client"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd26e7f79de5ca80ede8c1d71c8b040a9c451ea6cb50a00918f8ba27472ab11b"
-dependencies = [
- "async-recursion",
- "async-trait",
- "derive-new",
- "either",
- "fail",
- "futures",
- "log",
- "pin-project",
- "prometheus",
- "prost 0.14.4",
- "rand 0.9.5",
- "regex",
- "semver",
- "serde",
- "serde_derive",
- "take_mut",
- "thiserror 2.0.21",
- "tokio",
- "tonic",
- "tonic-prost",
-]
-
-[[package]]
 name = "surrealdb-types"
 version = "4.0.0-nightly"
 dependencies = [
@@ -8996,12 +8907,6 @@ dependencies = [
  "objc2-io-kit",
  "windows",
 ]
-
-[[package]]
-name = "take_mut"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f764005d11ee5f36500a149ace24e00e3da98b0158b3e2d53a7495660d3f4d60"
 
 [[package]]
 name = "tar"

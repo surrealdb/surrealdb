@@ -435,7 +435,7 @@ come in several flavors:
 >   ships stable while `main` still rides that line (a major line); the old
 >   `update-main` / `main-version` inputs are gone.
 > - **There is no `extra-features` input.** Binaries are prebuilt at push time
->   with the standard release feature set (`storage-tikv,jwks,ml`), so the feature
+>   with the standard release feature set (`jwks,ml`), so the feature
 >   set is fixed when the rolling build runs, not at promote time.
 
 ## Retention and lifecycle

@@ -1146,7 +1146,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [mem, surrealkv, tikv]
+        engine: [mem, surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1174,11 +1174,6 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-nextest,cargo-make
-
-      - name: Setup databases
-        uses: ./.github/actions/setup-databases
-        with:
-          tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Test engine
         run: cargo make ci-kvs-${{ matrix.engine }}
@@ -1239,7 +1234,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [mem, surrealkv, tikv]
+        engine: [mem, surrealkv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1267,11 +1262,6 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-nextest,cargo-make
-
-      - name: Setup databases
-        uses: ./.github/actions/setup-databases
-        with:
-          tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Test engine
         run: cargo make ci-api-integration-${{ matrix.engine }}
@@ -1316,11 +1306,6 @@ jobs:
         with:
           tools: cargo-nextest,cargo-make
 
-      - name: Setup databases
-        uses: ./.github/actions/setup-databases
-        with:
-          tikv: ${{ matrix.engine == 'tikv' }}
-
       - name: Download server binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1350,8 +1335,8 @@ jobs:
       matrix:
         arch: ${{ github.event_name == 'push' && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
         # Pull requests and the merge queue run the mem engine on arm;
-        # surrealkv, tikv and amd64 run post-merge.
-        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "tikv"]') || fromJSON('["mem"]') }}
+        # surrealkv and amd64 run post-merge.
+        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv"]') || fromJSON('["mem"]') }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1380,11 +1365,6 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-make
-
-      - name: Setup databases
-        uses: ./.github/actions/setup-databases
-        with:
-          tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Run language tests
         run: cargo make ci-lang-test-${{ matrix.engine }}

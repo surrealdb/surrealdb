@@ -45,24 +45,6 @@ async fn surrealkv_cursor_for_each_metrics_match_next_batch() {
 	cursor_for_each_metrics_match_next_batch(ds).await;
 }
 
-#[cfg(feature = "kv-tikv")]
-#[tokio::test]
-async fn tikv_cursor_for_each_metrics_match_next_batch() {
-	let node_id = Uuid::parse_str("af71d2c0-5e6f-4a1b-8c2d-3e4f5a6b7c8d").unwrap();
-
-	// Setup the cluster connection string
-	let path = "tikv:127.0.0.1:2379";
-
-	// Setup the in-memory datastore
-	let ds = Datastore::builder()
-		.with_id(node_id)
-		.build_with_factory_path(path, CommunityComposer())
-		.await
-		.unwrap();
-
-	cursor_for_each_metrics_match_next_batch(ds).await;
-}
-
 /// `for_each` must record the same scan metrics (keys + byte counters) as
 /// draining `next_batch` — including rows the visitor ignores, since the cursor
 /// reads them from storage either way. Guards EXPLAIN ANALYZE / observability.

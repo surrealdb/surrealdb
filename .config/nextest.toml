@@ -16,13 +16,6 @@ fail-fast = false
 slow-timeout = "15s"
 global-timeout = "40m"
 
-# Tests against the shared TiKV playground. The idx ones wipe its whole
-# keyspace on entry, and their `#[serial_test::serial]` only serialises within
-# one process, which nextest does not share between tests.
-[[profile.default.overrides]]
-filter = 'test(tikv) | package(surrealdb-kvs-tikv) | binary(kvs)'
-test-group = 'serial-kvs'
-
 # The slices of the layout oracle (`layout_oracle_00` …) each judge a share of its scenarios over
 # in-memory datastores. A slice runs four worker threads, so it holds four of the runner's slots.
 # The slices start ahead of the short tests so none of them is still running when the shard's
@@ -85,6 +78,3 @@ slow-timeout = "60s"
 filter = 'package(surrealdb-mysql) | package(surrealdb-pgsql) | package(surrealdb-sqlfront-derive) | package(surrealdb-sqlfront-spec)'
 retries = 0
 
-[test-groups]
-# Ensure all KVS tests run serially
-serial-kvs = { max-threads = 1 }

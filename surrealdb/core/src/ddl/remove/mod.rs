@@ -7,7 +7,6 @@ pub(crate) mod database;
 pub(crate) mod event;
 pub(crate) mod field;
 pub(crate) mod function;
-pub(crate) mod index;
 pub(crate) mod model;
 pub(crate) mod module;
 pub(crate) mod namespace;

@@ -66,7 +66,7 @@ pub struct Root {
 #[derive(Debug, Clone, Default)]
 pub struct LocalConfig {
 	/// The datastore to open, as a scheme-prefixed path (`mem://`,
-	/// `surrealkv://path`) or, for TiKV, the cluster URL.
+	/// `surrealkv://path`).
 	pub path: String,
 	/// The root user to create when the datastore has no credentials yet.
 	/// `None` starts the datastore with authentication disabled.

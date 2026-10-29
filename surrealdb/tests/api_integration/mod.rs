@@ -760,40 +760,6 @@ mod surrealkv {
 	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
 }
 
-#[cfg(feature = "kv-tikv")]
-mod tikv {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, TiKv};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
-		drop(permit);
-	}
-
-	include_tests!(new_db => api, basic, serialisation, live, backup, session_isolation, run);
-}
-
 // --------------------------------------------------
 // Versioned storage engine tests
 // --------------------------------------------------

@@ -40,7 +40,6 @@ protocol-grpc = [
 # The `kv-*` features select a storage backend for the embedded engine. The
 # engine crate is the only route from the SDK to the database core.
 kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "tokio/time"]
-kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "tokio/time"]
 kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-engine-local/scripting"]
 http = ["surrealdb-engine-local/http"]

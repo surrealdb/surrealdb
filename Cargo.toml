@@ -25,7 +25,6 @@ members = [
     "surrealdb/kvs-mem",
     "surrealdb/kvs-surrealkv",
     "surrealdb/kvs-test",
-    "surrealdb/kvs-tikv",
     "surrealdb/mcp",
     "surrealdb/ext",
     "surrealdb/mysql",
@@ -124,7 +123,6 @@ surrealdb-pgsql = { version = "4.0.0-nightly", path = "surrealdb/pgsql" }
 surrealdb-sqlplan = { version = "4.0.0-nightly", path = "surrealdb/sqlplan" }
 surrealdb-sqlfront-derive = { version = "4.0.0-nightly", path = "surrealdb/sqlfront-derive" }
 surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
-surrealdb-kvs-tikv = { version = "4.0.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "4.0.0-nightly", path = "surrealdb/collections" }
 
 # SurrealML crates
@@ -159,7 +157,6 @@ web-time = "1.1.0"
 js = { version = "0.14.0", package = "rquickjs", features = ["rust-alloc"] }
 
 # External KV stores
-tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
@@ -422,7 +419,6 @@ scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
-storage-tikv = ["surrealdb-server/storage-tikv"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]
 # GQL (ISO/IEC 39075) API support

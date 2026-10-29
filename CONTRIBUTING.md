@@ -259,7 +259,7 @@ We also have [a blog post](https://surrealdb.com/blog/making-your-own-pr-to-the-
 
 ## Scalability and Performance
 
-SurrealDB is designed to be fast and to scale. It is built to work in both a single-node setup and as a distributed cluster. In distributed mode, SurrealDB builds upon [TiKV](https://tikv.org). Please keep in mind that SurrealDB is designed to be run in different environments, with different configurations, and at differing scales.
+SurrealDB is designed to be fast and to scale. It is built to work in both a single-node setup and as a distributed cluster. Please keep in mind that SurrealDB is designed to be run in different environments, with different configurations, and at differing scales.
 
 When contributing code, please take into account the following considerations:
 

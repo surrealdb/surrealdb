@@ -21,7 +21,7 @@ args = [
     "--package",
     "surrealdb",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
 ]
 
 [tasks.fmt]

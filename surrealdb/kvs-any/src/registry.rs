@@ -12,7 +12,7 @@ use crate::provider::{BackendProvider, ConnectContext};
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 /// A registry of storage backend providers, dispatching datastore connection
-/// paths (e.g. `memory`, `surrealkv://path`, `tikv://...`) to the provider that
+/// paths (e.g. `memory`, `surrealkv://path`) to the provider that
 /// claims the scheme.
 ///
 /// [`Backends::community`] returns the first-party engines enabled by `kv-*`
@@ -129,8 +129,14 @@ impl<'a> Backends<'a> {
 				.map(|x| format!("`{x}`"))
 				.collect::<Vec<_>>()
 				.join(",");
-			// Keep the targeted error for first-party schemes whose backend
-			// feature is not enabled in this build.
+			// The TiKV backend is built from its own repository, so a build
+			// without it names where to get it rather than reporting a
+			// datastore that could not be loaded.
+			if scheme == "tikv" {
+				return Err(Error::Datastore(
+					"The `tikv://` scheme is not enabled in this build of SurrealDB. The TiKV storage backend is built from https://github.com/surrealdb/surrealdb-tikv".into(),
+				));
+			}
 			// The datastore path is not valid
 			info!(target: TARGET, "Unable to load the specified datastore {scheme}:{path}, this build supports {schemes}", );
 			return Err(Error::Datastore("Unable to load the specified datastore".into()));
@@ -174,14 +180,15 @@ impl<'a> Backends<'a> {
 		}
 		// First-party schemes stay valid even when their feature is compiled
 		// out, so construction can report the targeted "not enabled" error.
-		// The removed `file:` and `surrealkv+versioned:` schemes are accepted here for the
-		// same reason: construction names their replacement.
+		// The removed `file:` and `surrealkv+versioned:` schemes, and the `tikv:` scheme of the
+		// backend built from its own repository, are accepted here for the same reason:
+		// construction names their replacement.
 		let (scheme, bare) =
 			match scheme_part.split_once("://").or_else(|| scheme_part.split_once(':')) {
 				Some((scheme, _)) => (scheme, false),
 				None => (scheme_part, true),
 			};
-		let known = matches!(scheme, "file" | "surrealkv+versioned")
+		let known = matches!(scheme, "file" | "surrealkv+versioned" | "tikv")
 			|| self.providers.iter().flat_map(|x| x.schemes()).any(|x| *x == scheme);
 		let bare_ok = !bare || matches!(scheme, "memory" | "mem");
 		if known && bare_ok {
@@ -309,6 +316,29 @@ mod tests {
 			panic!("expected an error for the removed `surrealkv+versioned:` scheme")
 		};
 		assert!(err.to_string().contains("versioned=true"), "got: {err}");
+	}
+
+	/// A build without the TiKV backend names where it is built from rather than
+	/// reporting a datastore that could not be loaded.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn tikv_scheme_names_its_repository() {
+		use surrealdb_cnf::ConfigMap;
+		use tokio_util::sync::CancellationToken;
+
+		let backends = Backends::community();
+		assert!(backends.path_valid("tikv://127.0.0.1:2379").is_ok());
+		let Err(err) = backends
+			.new_transaction_builder(
+				"tikv://127.0.0.1:2379",
+				CancellationToken::new(),
+				ConfigMap::empty(),
+			)
+			.await
+		else {
+			panic!("expected an error for the `tikv:` scheme")
+		};
+		assert!(err.to_string().contains("surrealdb-tikv"), "got: {err}");
 	}
 
 	/// A path parameter reaches the backend under the shared `datastore_` key

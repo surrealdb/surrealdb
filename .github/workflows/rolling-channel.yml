@@ -114,12 +114,12 @@ jobs:
       #
       # `extra-features` REPLACES the build actions' default rather than
       # extending it, so the default set is spelled out here too; dropping any of
-      # it would silently ship binaries without TiKV storage, JWKS or ML.
+      # it would silently ship binaries without JWKS or ML.
       - name: Resolve the binary feature set
         id: features
         shell: bash
         run: |
-          features="storage-tikv,jwks,ml"
+          features="jwks,ml"
           if grep -qE '^cjk = ' Cargo.toml; then
             features="${features},cjk"
           else

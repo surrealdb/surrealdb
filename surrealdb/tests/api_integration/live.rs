@@ -1,10 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(any(
-	feature = "protocol-ws",
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-))]
+#![cfg(any(feature = "protocol-ws", feature = "kv-mem", feature = "kv-surrealkv",))]
 
 // Tests for running live queries
 // Supported by the storage engines and the WS protocol

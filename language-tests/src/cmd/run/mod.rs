@@ -143,10 +143,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			Backend::SurrealKv => {}
 			#[cfg(not(feature = "backend-surrealkv"))]
 			Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-			#[cfg(feature = "backend-tikv")]
-			Backend::TikV => {}
-			#[cfg(not(feature = "backend-tikv"))]
-			Backend::TikV => bail!("TiKV backend feature is not enabled"),
+			Backend::TikV => {
+				bail!(
+					"the TiKV backend is built from surrealdb-tikv: run its server and pass --endpoint"
+				)
+			}
 			Backend::Other => bail!("the `other` backend names a server's engine: pass --endpoint"),
 		}
 	}
@@ -1469,7 +1470,7 @@ async fn cleanup_environment(dbs: &Arc<Datastore>, session: &Session) -> Result<
 	// Remove any root-level users and accesses the test (or its imports) defined.
 	// Unlike namespaces and configs, these carry test-chosen names, so enumerate
 	// them via `INFO FOR ROOT` and remove each. This matters on shared physical
-	// backends (e.g. TiKV) where every datastore aliases one cluster: a `clean`
+	// backends where every datastore aliases one cluster: a `clean`
 	// test that runs `DEFINE USER ... ON ROOT` would otherwise leave the key
 	// behind for the next test, which the retained-key check then flags.
 	let mut info = dbs

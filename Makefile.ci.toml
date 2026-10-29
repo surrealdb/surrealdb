@@ -136,7 +136,7 @@ args = [
     "--package",
     "surrealdb",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
 ]
 
 # Doctests need their own task: every other test task here runs under
@@ -157,7 +157,7 @@ args = [
     "surrealdb",
     "--doc",
     "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,kv-tikv,http,scripting,jwks",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-surrealkv,http,scripting,jwks",
 ]
 
 [tasks.ci-fmt]
@@ -426,9 +426,6 @@ args = [
     "--package",
     "surrealdb-idx",
     "--each-feature",
-    # Needs a running TiKV cluster's client stack; the `tikv` lane covers it.
-    "--exclude-features",
-    "kv-tikv",
 ]
 
 [tasks.ci-feature-check-types]
@@ -993,7 +990,6 @@ description = "Run all integration tests"
 dependencies = [
     "ci-api-integration-mem",
     "ci-api-integration-surrealkv",
-    "ci-api-integration-tikv",
     "ci-api-integration-http",
     "ci-api-integration-ws",
     "ci-api-integration-any",
@@ -1039,16 +1035,6 @@ description = "Run API integration tests with the SurrealKV engine"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = [
     "test-api-integration",
-], fork = true, parallel = false }
-
-[tasks.ci-api-integration-tikv]
-category = "CI - INTEGRATION TESTS"
-description = "Run API integration tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-api-integration",
-    "stop-tikv",
 ], fork = true, parallel = false }
 
 # --------------------------------------------------
@@ -1162,19 +1148,6 @@ run_task = { name = [
     "test-idx",
 ], fork = true, parallel = false }
 
-[tasks.ci-kvs-tikv]
-category = "CI - INTEGRATION TESTS"
-description = "Run KVS integration tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv", _TEST_CRATE = "surrealdb-kvs-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-kvs",
-    "test-kvs-any",
-    "test-kvs-crate",
-    "test-idx",
-    "stop-tikv",
-], fork = true, parallel = false }
-
 # --------------------------------------------------
 # Language tests
 # --------------------------------------------------
@@ -1193,11 +1166,7 @@ script = """
     else
         cargo build --locked --profile devopt
     fi
-    if [ "${_TEST_API_ENGINE}" = "tikv" ]; then
-        ./target/devopt/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
-    else
-        ./target/devopt/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
-    fi
+    ./target/devopt/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
 """
 
 [tasks.ci-lang-test-all]
@@ -1206,7 +1175,6 @@ description = "Run all language tests"
 dependencies = [
     "ci-lang-test-mem",
     "ci-lang-test-surrealkv",
-    "ci-lang-test-tikv",
 ]
 
 [tasks.ci-lang-test-mem]
@@ -1302,16 +1270,6 @@ for mode in --fuzz --stream --round-trip --depth-probe --logical; do
     cargo run --locked --release -p surrealdb-expr --example invariants -- "$mode"
 done
 """
-
-[tasks.ci-lang-test-tikv]
-category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-lang",
-    "stop-tikv",
-], fork = true, parallel = false }
 
 # --------------------------------------------------
 # Language tests over a remote --endpoint
@@ -1973,72 +1931,6 @@ script = """
         sleep 5
         kill -9 $(cat /tmp/${name}.pid) || true
     fi
-"""
-
-[tasks.start-tikv]
-category = "CI - SERVICES"
-description = "Start a local TiKV playground"
-script = """
-    #!/bin/bash -ex
-
-	echo "Installing TiKV playground..."
-    ${HOME}/.tiup/bin/tiup install pd tikv playground
-
-    echo "Cleaning TiKV playground..."
-    ${HOME}/.tiup/bin/tiup clean --all
-    killall -q tiup-playground || true
-    rm -rf ${HOME}/.tiup/data/testing
-
-	echo "Starting TiKV playground..."
-	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor --tag "testing" > /tmp/tiup.log &
-
-    set +e
-	tries=0
-	echo "Waiting for TiKV playground to start..."
-	while [[ $tries -lt 5 ]]; do
-		sleep 5
-		echo "Displaying playground status..."
-		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
-			tries=$((tries + 1));
-			continue
-		fi
-		exit 0;
-	done
-
-	echo "PANIC: Couldn't start TiKV playground! Here are the logs for the last attempt:"
-    cat /tmp/tiup.log
-
-    exit 1
-"""
-
-[tasks.stop-tikv]
-category = "CI - SERVICES"
-description = "Stop the local TiKV playground"
-script = """
-    #!/bin/bash -ex
-
-    echo "Cleaning TiKV playground..."
-    ${HOME}/.tiup/bin/tiup clean --all
-    killall -q tiup-playground || true
-    rm -rf ${HOME}/.tiup/data/testing
-
-    set +e
-	tries=0
-	echo "Waiting for TiKV playground to stop..."
-	while [[ $tries -lt 5 ]]; do
-		sleep 5
-		echo "Displaying playground status..."
-		if ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
-			tries=$((tries + 1));
-			continue
-		fi
-		exit 0;
-	done
-
-	echo "PANIC: Couldn't stop TiKV playground! Here are the logs for the last attempt:"
-    cat /tmp/tiup.log
-
-    exit 1
 """
 
 # --------------------------------------------------

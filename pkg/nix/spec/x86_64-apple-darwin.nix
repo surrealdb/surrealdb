@@ -3,7 +3,7 @@
 {
   inherit target;
 
-  features = with util.features; [ default storage-tikv ];
+  features = with util.features; [ default ];
 
   buildSpec = with pkgs; {
     depsBuildBuild = [ clang protobuf perl ];

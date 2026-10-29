@@ -10,6 +10,26 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
+## v4.0.0 — the TiKV storage backend is built from its own repository
+
+The TiKV storage backend, its client, and the `kv-tikv` and `storage-tikv`
+features are no longer part of this repository. The standard `surreal` binary
+and container images do not accept `tikv://` paths, and report that the
+scheme is not enabled in the build.
+
+**Impact**:
+
+- A deployment on TiKV runs `surreal-tikv`, built from
+  <https://github.com/surrealdb/surrealdb-tikv>. It opens the same data with
+  the same `tikv://` path and `SURREAL_TIKV_*` settings.
+- The `--tikv-gc-interval`, `--tikv-gc-lifetime` and
+  `--tikv-lock-cleanup-interval` flags and their environment variables keep
+  their names. They schedule the backend's garbage collection and lock
+  cleanup, which the engine now reaches through a backend-neutral
+  maintenance capability.
+- The Rust SDK no longer has the `kv-tikv` feature or the `TiKv` engine.
+  Connect to a `surreal-tikv` server over `ws://` or `http://` instead.
+
 ## v4.0.0 — the record format switch, layout generations, ledger classes and the rollback check
 
 A store records a **feature level**: the newest release whose on-disk

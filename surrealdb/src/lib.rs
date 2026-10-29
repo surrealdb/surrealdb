@@ -7,7 +7,7 @@
 //!
 //! This library can be used to start an [embedded](crate::engine::local)
 //! in-memory datastore, an embedded datastore persisted to disk, a
-//! browser-based embedded datastore backed by the origin private file system, or for connecting to a distributed [TiKV](https://tikv.org) key-value store.
+//! browser-based embedded datastore backed by the origin private file system.
 //!
 //! It also enables simple and advanced querying of a
 //! [remote](crate::engine::remote) SurrealDB server from server-side or

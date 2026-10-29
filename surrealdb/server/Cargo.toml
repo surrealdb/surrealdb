@@ -26,7 +26,6 @@ default = [
     "allocation-tracking",
     "storage-mem",
     "storage-surrealkv",
-    "storage-tikv",
     "jwks",
     "scripting",
     "http",
@@ -49,7 +48,6 @@ scripting = ["surrealdb-core/scripting"]
 surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-surrealkv = ["surrealdb/kv-surrealkv", "surrealdb-core/kv-surrealkv"]
-storage-tikv = ["surrealdb/kv-tikv", "surrealdb-core/kv-tikv"]
 # GraphQL API support
 graphql = [
     "surrealdb-core/graphql",

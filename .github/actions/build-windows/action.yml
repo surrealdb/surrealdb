@@ -26,7 +26,7 @@ inputs:
   extra-features:
     description: 'Extra features enabled in the binary'
     required: false
-    default: 'storage-tikv,jwks,ml'
+    default: 'jwks,ml'
   upload:
     description: 'Upload build artifacts'
     required: false

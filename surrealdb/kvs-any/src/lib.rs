@@ -2,8 +2,8 @@
 //!
 //! The single entry point for constructing a SurrealDB key-value store
 //! backend: a [`Backends`] registry selects and constructs the right
-//! datastore from a connection path string (e.g. `memory`, `surrealkv://path`,
-//! `tikv://...`), exposing it behind the [`TransactionBuilder`] abstraction.
+//! datastore from a connection path string (e.g. `memory`, `surrealkv://path`),
+//! exposing it behind the [`TransactionBuilder`] abstraction.
 //! Each first-party backend is gated behind a matching `kv-*` cargo feature
 //! and pre-registered by [`Backends::community`]; embedders can plug in
 //! additional backends by registering their own [`BackendProvider`].
@@ -24,8 +24,6 @@ mod registry;
 pub use surrealdb_kvs_mem as mem;
 #[cfg(feature = "kv-surrealkv")]
 pub use surrealdb_kvs_surrealkv as surrealkv;
-#[cfg(feature = "kv-tikv")]
-pub use surrealdb_kvs_tikv as tikv;
 
 pub use crate::provider::{BackendProvider, ConnectContext};
 pub use crate::registry::Backends;

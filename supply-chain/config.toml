@@ -92,9 +92,6 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 criteria = "safe-to-run"
 
-[policy.surrealdb-kvs-tikv]
-audit-as-crates-io = false
-
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 
@@ -284,10 +281,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.async-lock]]
 version = "3.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-recursion]]
-version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-trait]]
@@ -658,10 +651,6 @@ criteria = "safe-to-deploy"
 version = "0.5.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.derive-new]]
-version = "0.7.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.derive_arbitrary]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -768,10 +757,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ext-sort]]
 version = "0.1.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.fail]]
-version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.fastrand]]
@@ -1532,10 +1517,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proc-macro2]]
 version = "1.0.107"
-criteria = "safe-to-deploy"
-
-[[exemptions.prometheus]]
-version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.proptest]]

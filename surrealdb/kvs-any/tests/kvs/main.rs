@@ -67,20 +67,5 @@ fn main() -> ExitCode {
 		ds_on_disk_with("surrealkv", "?versioned=true")
 	}));
 
-	// The TiKV backend aliases one shared external cluster, so its tests run
-	// serially and each test starts by wiping the keyspace.
-	#[cfg(feature = "kv-tikv")]
-	backends.push(
-		TestBackend::new("tikv", || async {
-			let ds = ds_from_path("tikv:127.0.0.1:2379").await;
-			// Clear any previous test entries
-			let tx = ds.transaction(surrealdb_kvs::TransactionType::Write).await.unwrap();
-			tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
-			tx.commit().await.unwrap();
-			ds
-		})
-		.serial(),
-	);
-
 	surrealdb_kvs_test::run(backends)
 }

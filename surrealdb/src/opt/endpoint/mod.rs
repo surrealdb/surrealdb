@@ -9,8 +9,6 @@ mod ws;
 mod mem;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
-#[cfg(feature = "kv-tikv")]
-mod tikv;
 
 #[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 mod local;

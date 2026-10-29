@@ -5,7 +5,7 @@
 //! remotely via WebSockets or HTTP. All storage engines are supported but you
 //! have to activate their feature flags first.
 //!
-//! **NB**: Some storage engines like `TiKV` depend on non-Rust
+//! **NB**: Some storage engines depend on non-Rust
 //! libraries so you need to install those libraries before you can build this
 //! crate when you activate their feature flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
 //! for more details on how to install them. If you are on Linux and you use
@@ -158,7 +158,7 @@ use std::sync::Arc;
 
 use surrealdb_engine_local::{LocalConfig, Root};
 
-use crate::opt::{Endpoint, EndpointKind, IntoEndpoint};
+use crate::opt::{Endpoint, IntoEndpoint};
 use crate::{Connect, Surreal};
 
 /// In-memory database
@@ -199,27 +199,6 @@ use crate::{Connect, Surreal};
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-mem")))]
 #[derive(Debug)]
 pub struct Mem;
-
-/// TiKV database
-///
-/// # Examples
-///
-/// Instantiating a TiKV instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::TiKv;
-///
-/// let db = Surreal::new::<TiKv>("localhost:2379").await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-tikv")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-tikv")))]
-#[derive(Debug)]
-pub struct TiKv;
 
 /// SurrealKV database
 ///
@@ -286,14 +265,9 @@ impl Surreal<Db> {
 /// Derive the embedded engine's bootstrap parameters from the endpoint the
 /// caller connected to.
 ///
-/// TiKV addresses the cluster by URL; every other backend is a path the scheme
-/// prefix already carries.
+/// The path is the one the scheme prefix already carries.
 pub(crate) fn local_config(address: Endpoint) -> LocalConfig {
-	let path = if matches!(EndpointKind::from(address.url.scheme()), EndpointKind::TiKv) {
-		address.url.as_str().to_owned()
-	} else {
-		address.path
-	};
+	let path = address.path;
 	let config = address.config;
 	// `Level::No` means no credentials were configured, and the datastore then
 	// starts with authentication disabled.

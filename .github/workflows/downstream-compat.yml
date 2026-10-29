@@ -152,8 +152,7 @@ jobs:
             # found") that is indistinguishable from a real permission gap on a
             # single attempt. A ref that is merely absent (empty last_err) is a
             # real "no such branch", so we stop retrying and fall through to the
-            # next candidate. Fixed 5s backoff mirrors the retry style already
-            # used in .github/actions/setup-databases.
+            # next candidate. Fixed 5s backoff.
             attempt=1
             while :; do
               if last_err="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>&1 >/dev/null)"; then

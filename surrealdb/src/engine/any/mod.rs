@@ -1,10 +1,9 @@
 //! Dynamic support for any engine
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For
-//! storing data we support a number of key value stores. These are SurrealKV,
-//! TiKV and an in-memory store. We call these local engines. SurrealKV is a
-//! file-based, single node key value store. TiKV is a
-//! distributed store that can scale horizontally across multiple nodes. The
+//! storing data we support a number of key value stores. These are SurrealKV
+//! and an in-memory store. We call these local engines. SurrealKV is a
+//! file-based, single node key value store. The
 //! in-memory store does not persist your data, it only stores it in memory. All
 //! these can be embedded in your application, so you don't need to spin up a
 //! SurrealDB server first in order to use them. We also support spinning up a
@@ -133,12 +132,11 @@
 //! features.
 //!
 //! ```bash
-//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-surrealkv,surrealdb/kv-tikv --release
+//! cargo build --features surrealdb/protocol-ws,surrealdb/kv-surrealkv --release
 //! ```
 //!
 //! In this case, the binary you build will have support for accessing an
-//! external server via WebSockets, embedding the database using SurrealKV or
-//! using a distributed TiKV cluster.
+//! external server via WebSockets or embedding the database using SurrealKV.
 
 use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
@@ -365,8 +363,6 @@ impl Surreal<Any> {
 /// // Instantiate a SurrealKV-backed instance
 /// let db = connect("surrealkv://path/to/database-folder").await?;
 ///
-/// // Instantiate a TiKV-backed instance
-/// let db = connect("tikv://localhost:2379").await?;
 /// # Ok(())
 /// # }
 /// ```

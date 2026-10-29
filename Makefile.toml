@@ -11,7 +11,7 @@ default_to_workspace = false
 
 [env]
 SURREAL_NIGHTLY_RUSTFLAGS = { value = "", condition = { env_not_set = ["SURREAL_NIGHTLY_RUSTFLAGS"] } }
-ALL_FEATURES = { value = "allocator,allocation-tracking,storage-mem,storage-surrealkv,storage-tikv,scripting,http,jwks,ml,surrealism,cli,tokio-console", condition = { env_not_set = ["ALL_FEATURES"] } }
+ALL_FEATURES = { value = "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,ml,surrealism,cli,tokio-console", condition = { env_not_set = ["ALL_FEATURES"] } }
 DEV_FEATURES = { value = "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,ml,surrealism,cli,tokio-console", condition = { env_not_set = ["DEV_FEATURES"] } }
 FAST_FEATURES = { value = "storage-mem,storage-surrealkv,http,jwks,cli", condition = { env_not_set = ["FAST_FEATURES"] } }
 SURREAL_LOG = { value = "debug", condition = { env_not_set = ["SURREAL_LOG"] } }

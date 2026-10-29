@@ -1,7 +1,7 @@
 //! [`BackendProvider`] implementations for the first-party storage engines,
 //! one per enabled `kv-*` cargo feature.
 #![cfg_attr(
-	not(any(feature = "kv-mem", feature = "kv-tikv", feature = "kv-surrealkv",)),
+	not(any(feature = "kv-mem", feature = "kv-surrealkv",)),
 	allow(unused_imports, dead_code)
 )]
 
@@ -27,8 +27,6 @@ impl Backends<'static> {
 		backends.register(MemProvider);
 		#[cfg(feature = "kv-surrealkv")]
 		backends.register(SurrealKvProvider);
-		#[cfg(feature = "kv-tikv")]
-		backends.register(TikvProvider);
 		backends
 	}
 }
@@ -101,31 +99,6 @@ impl BackendProvider for SurrealKvProvider {
 			// Initialise the storage engine
 			let v = crate::surrealkv::Datastore::new(ctx.path, config).await?;
 			info!(target: TARGET, "Started surrealkv kvs store");
-			Ok(Box::new(v) as Box<dyn TransactionBuilder>)
-		})
-	}
-}
-
-/// Provider for the TiKV storage engine.
-#[cfg(feature = "kv-tikv")]
-struct TikvProvider;
-
-#[cfg(feature = "kv-tikv")]
-impl BackendProvider for TikvProvider {
-	fn schemes(&self) -> &[&'static str] {
-		&["tikv"]
-	}
-
-	fn connect<'a>(
-		&'a self,
-		ctx: ConnectContext<'a>,
-	) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
-		Box::pin(async move {
-			// Parse TiKV-specific configuration from env vars
-			// (SURREAL_TIKV_*) and query parameters.
-			let tikv_config = ctx.config.load();
-			let v = crate::tikv::Datastore::new(ctx.path, tikv_config).await?;
-			info!(target: TARGET, "Started tikv kvs store");
 			Ok(Box::new(v) as Box<dyn TransactionBuilder>)
 		})
 	}

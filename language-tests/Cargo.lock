@@ -370,17 +370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-recursion"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f8abc12baad266b1c8cec146854c195b5864b4221d4b2ca7296a7ae82d9e451"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "async-task"
 version = "4.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1310,17 +1299,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
-name = "derive-new"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cdc8d50f426189eef89dac62fabfa0abb27d5cc008f25bf4156a0203325becc"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "deunicode"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1635,17 +1613,6 @@ dependencies = [
  "rmp-serde",
  "serde",
  "tempfile",
-]
-
-[[package]]
-name = "fail"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe5e43d0f78a42ad591453aedb1d7ae631ce7ee445c7643691055a9ed8d3b01c"
-dependencies = [
- "log",
- "once_cell",
- "rand 0.8.8",
 ]
 
 [[package]]
@@ -2662,15 +2629,6 @@ name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -3837,9 +3795,9 @@ dependencies = [
  "log",
  "nix 0.26.4",
  "once_cell",
- "prost 0.12.6",
+ "prost",
  "prost-build",
- "prost-derive 0.12.6",
+ "prost-derive",
  "sha2 0.10.9",
  "smallvec",
  "spin 0.10.1",
@@ -3901,37 +3859,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "prometheus"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
-dependencies = [
- "cfg-if",
- "fnv",
- "lazy_static",
- "memchr",
- "parking_lot",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "prost"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
 dependencies = [
  "bytes",
- "prost-derive 0.12.6",
-]
-
-[[package]]
-name = "prost"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
-dependencies = [
- "bytes",
- "prost-derive 0.14.4",
+ "prost-derive",
 ]
 
 [[package]]
@@ -3948,7 +3882,7 @@ dependencies = [
  "once_cell",
  "petgraph",
  "prettyplease",
- "prost 0.12.6",
+ "prost",
  "prost-types",
  "regex",
  "syn 2.0.119",
@@ -3969,25 +3903,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-derive"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "prost-types"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9091c90b0a32608e984ff2fa4091273cbdd755d54935c51d520887f4a1dbd5b0"
 dependencies = [
- "prost 0.12.6",
+ "prost",
 ]
 
 [[package]]
@@ -5724,7 +5645,6 @@ dependencies = [
  "surrealdb-kvs",
  "surrealdb-kvs-mem",
  "surrealdb-kvs-surrealkv",
- "surrealdb-kvs-tikv",
  "tokio-util",
  "tracing",
 ]
@@ -5752,18 +5672,6 @@ dependencies = [
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealkv",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "surrealdb-kvs-tikv"
-version = "4.0.0-nightly"
-dependencies = [
- "chrono",
- "surrealdb-cnf",
- "surrealdb-kvs",
- "surrealdb-tikv-client",
  "tokio",
  "tracing",
 ]
@@ -5924,34 +5832,6 @@ dependencies = [
  "revision 0.30.0",
  "serde",
  "storekey",
-]
-
-[[package]]
-name = "surrealdb-tikv-client"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd26e7f79de5ca80ede8c1d71c8b040a9c451ea6cb50a00918f8ba27472ab11b"
-dependencies = [
- "async-recursion",
- "async-trait",
- "derive-new",
- "either",
- "fail",
- "futures",
- "log",
- "pin-project",
- "prometheus",
- "prost 0.14.4",
- "rand 0.9.5",
- "regex",
- "semver",
- "serde",
- "serde_derive",
- "take_mut",
- "thiserror 2.0.21",
- "tokio",
- "tonic",
- "tonic-prost",
 ]
 
 [[package]]
@@ -6247,12 +6127,6 @@ dependencies = [
  "objc2-io-kit",
  "windows 0.62.2",
 ]
-
-[[package]]
-name = "take_mut"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f764005d11ee5f36500a149ace24e00e3da98b0158b3e2d53a7495660d3f4d60"
 
 [[package]]
 name = "tempfile"
@@ -6614,7 +6488,6 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "rustls-native-certs",
  "socket2",
  "sync_wrapper",
  "tokio",
@@ -6625,17 +6498,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots 1.0.9",
-]
-
-[[package]]
-name = "tonic-prost"
-version = "0.14.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50849f68853be452acf590cde0b146665b8d507b3b8af17261df47e02c209ea0"
-dependencies = [
- "bytes",
- "prost 0.14.4",
- "tonic",
 ]
 
 [[package]]

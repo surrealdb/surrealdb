@@ -1086,7 +1086,7 @@ impl TransactionBuilderParts<()> {
 /// Factory that parses a datastore path and returns a concrete `TransactionBuilder`.
 ///
 /// Implementations can decide how to interpret connection strings (e.g. "memory",
-/// "surrealkv:...", "tikv:...") and which clock to use. This lets the CLI and
+/// "surrealkv:...") and which clock to use. This lets the CLI and
 /// server be generic over different storage backends without hard-coding them.
 ///
 /// The `path_valid` helper is used by the CLI to validate the path early and
@@ -1752,17 +1752,6 @@ impl Datastore {
 	/// # }
 	/// ```
 	///
-	/// Or to connect to a tikv-backed distributed store:
-	///
-	/// ```rust,no_run
-	/// # use surrealdb_core::kvs::Datastore;
-	/// # use anyhow::Error;
-	/// # #[tokio::main]
-	/// # async fn main() -> Result<(),Error> {
-	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
-	/// # Ok(())
-	/// # }
-	/// ```
 	/// The datastore is returned shared, because it starts background
 	/// maintenance tasks that hold a [`Weak`](std::sync::Weak) reference to it.
 	/// Because those tasks write, this also settles the datastore's storage

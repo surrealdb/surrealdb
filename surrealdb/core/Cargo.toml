@@ -52,12 +52,6 @@ kv-mem = [
     "dep:tempfile",
     "dep:ext-sort",
 ]
-kv-tikv = [
-    "surrealdb-kvs-any/kv-tikv",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-]
 kv-surrealkv = [
     "surrealdb-kvs-any/kv-surrealkv",
     "tokio/time",

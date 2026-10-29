@@ -31,15 +31,12 @@ the tests. By default, tests run using the in-memory storage engine (`mem` or `m
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
 - `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
-- `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
+- `tikv`: not built in. Run a server built from [surrealdb-tikv](https://github.com/surrealdb/surrealdb-tikv) and use `--endpoint`
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
 ```bash
 # Example: Running tests with SurrealKV backend
 cargo run --features backend-surrealkv run --backend surrealkv
-
-# Example: Running tests with TiKV backend (requires running TiKV cluster at 127.0.0.1:2379)
-cargo run --features backend-tikv run --backend tikv
 ```
 
 The repeatable `--config KEY=VALUE` flag sets a datastore configuration key for

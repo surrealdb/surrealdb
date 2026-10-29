@@ -10,7 +10,6 @@ members = []
 [features]
 default = []
 backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
-backend-tikv = ["surrealdb-core/kv-tikv"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 bench = ["sha2","oorandom","clap/env", "surrealdb-core/kv-surrealkv", "dep:sysinfo", "dep:num_cpus"]
 bench-remote-store = ["bench","tokio-tungstenite", "tokio-tungstenite/native-tls"]
