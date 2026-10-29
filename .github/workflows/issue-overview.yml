@@ -1,0 +1,97 @@
+# Keep the pinned issue overview up to date.
+#
+# Every Monday and Friday, and whenever it is run by hand, count the open
+# issues by type and by the `partially complete` and `has workaround` labels,
+# draw them as a chart, and rewrite the title and body of the overview issue.
+#
+# The chart's SVGs are pushed to the `automation/issue-overview` branch, which
+# holds nothing else. The branch name needs its slash: the "base branches"
+# ruleset refuses any other new top-level branch. A push made with the
+# workflow's own token starts no other workflow, so this adds nothing to CI.
+#
+# The overview issue is #7639, which is pinned and locked. To move the overview
+# to another issue, set the repository variable ISSUE_OVERVIEW_NUMBER to its
+# number.
+
+name: Issue overview
+
+on:
+  schedule:
+    # 05:17 UTC on Monday and Friday. Run it by hand from the Actions tab, or with
+    # `gh workflow run issue-overview.yml -R surrealdb/surrealdb`, to update it sooner.
+    - cron: "17 5 * * 1,5"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  overview:
+    name: Update the issue overview
+    # surrealdb-private pulls this file with main, and has issues of its own to leave alone.
+    if: github.repository == 'surrealdb/surrealdb'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the chart to the automation/issue-overview branch
+      issues: write # edit the overview issue
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OVERVIEW_ISSUE: ${{ vars.ISSUE_OVERVIEW_NUMBER || '7639' }}
+      OUT: ${{ runner.temp }}/overview
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout the generator
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/issue-overview
+          persist-credentials: false
+
+      - name: Install the generator's dependencies
+        working-directory: .github/issue-overview
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Fetch the open issues
+        run: |
+          mkdir -p "$OUT"
+          gh api graphql --paginate \
+            -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" \
+            -f query='query($owner: String!, $name: String!, $endCursor: String) {
+              repository(owner: $owner, name: $name) {
+                issues(states: OPEN, first: 100, after: $endCursor) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { number issueType { name } labels(first: 50) { nodes { name } } }
+                }
+              }
+            }' \
+            --jq '.data.repository.issues.nodes[]' | jq -s . > "$RUNNER_TEMP/issues.json"
+          echo "Fetched $(jq length "$RUNNER_TEMP/issues.json") open issues"
+
+      - name: Draw the chart and write the issue
+        working-directory: .github/issue-overview
+        run: |
+          node generate.mjs "$RUNNER_TEMP/issues.json" "$OUT" \
+            "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/automation/issue-overview" "$GITHUB_RUN_ID" "$OVERVIEW_ISSUE"
+
+      - name: Publish the chart
+        working-directory: ${{ runner.temp }}/overview
+        run: |
+          git init -q -b automation/issue-overview
+          git add issues-light.svg issues-dark.svg
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Issue overview chart, run $GITHUB_RUN_ID"
+          # One commit, replaced on every run, so the branch never grows.
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:automation/issue-overview
+
+      - name: Update the overview issue
+        run: |
+          title="$(cat "$OUT/title.txt")"
+          gh issue edit "$OVERVIEW_ISSUE" -R "$GITHUB_REPOSITORY" --title "$title" --body-file "$OUT/body.md"
+          echo "$title" >> "$GITHUB_STEP_SUMMARY"
