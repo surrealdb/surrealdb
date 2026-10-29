@@ -41,8 +41,9 @@
 //! lookup of the path below a run of hops is stated by the run's last hop
 //! ([`LookupAttrs::only_path`]): the lookup answers one value over all its origins together. The
 //! binder builds a lookup with any other clause as the statement of its clauses over the records it
-//! reaches (`ir::build::lookup`), so a hop of another form is an invariant break. A graph lookup
-//! that names a referencing field has no lowering, and is refused with an error.
+//! reaches (`ir::build::lookup`), so a hop of another form is an invariant break. A subject's
+//! referencing field is read by a reference hop alone: a graph hop reads the edges of the
+//! subject's table, whatever field it names.
 //!
 //! The hops read nothing from the catalog. A hop holds no per-table permission or field view,
 //! so each record a hop reaches is read by a scan of its table, which resolves the table's
@@ -264,31 +265,6 @@ enum Paging {
 const HOP_STATEMENT: &str =
 	"ir_lower::graph: a lookup with clauses of its own, which the binder builds as a statement";
 
-/// A graph lookup that names a referencing field. The lowering has no form for it, so it is
-/// refused with an error.
-const NO_LOWERING: &str = "a lookup with no lowering here";
-
-/// Why a hop that ends a chain is not one hop of a lookup.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NotAHop {
-	/// A lookup with clauses of its own ([`HOP_STATEMENT`]).
-	Statement,
-	/// A graph lookup that names a referencing field ([`NO_LOWERING`]).
-	ReferencingField,
-}
-
-impl NotAHop {
-	/// The error the step that ends a chain answers.
-	fn error(self) -> IrError {
-		match self {
-			NotAHop::Statement => invariant(HOP_STATEMENT),
-			NotAHop::ReferencingField => IrError::Unsupported {
-				reason: NO_LOWERING.to_owned(),
-			},
-		}
-	}
-}
-
 /// The hop the loop that defines `value` states, when it is a graph step.
 fn hop_of(ir: &Ir, value: ValueId) -> Option<Hop<'_>> {
 	hop_at(ir, defining_op(ir, value)?)
@@ -409,29 +385,26 @@ fn is_whole_record(fields: &FieldsShape) -> bool {
 	matches!(fields, FieldsShape::Select(list) if matches!(&list[..], [FieldShape::All]))
 }
 
-/// Why `hop` is not one hop of a lookup, or `None` when it is. The last hop of a chain may page.
-fn refusal(ir: &Ir, hop: Hop<'_>, last: bool) -> Option<NotAHop> {
+/// Whether `hop` is one hop of a lookup: it has no clause of its own ([`HOP_STATEMENT`]). The last
+/// hop of a chain may page.
+fn is_lookup_hop(ir: &Ir, hop: Hop<'_>, last: bool) -> bool {
 	let attrs = hop.attrs;
 	if attrs.split.is_some() || attrs.group.is_some() || attrs.order.is_some() {
-		return Some(NotAHop::Statement);
+		return false;
 	}
 	if attrs.fields.as_ref().is_some_and(|fields| !is_whole_record(fields)) {
-		return Some(NotAHop::Statement);
+		return false;
 	}
 	match paging(ir, hop) {
 		Paging::None => {}
 		Paging::Literal(_) => {
 			if !last || attrs.fields.is_some() || attrs.cond || attrs.only {
-				return Some(NotAHop::Statement);
+				return false;
 			}
 		}
-		Paging::Computed => return Some(NotAHop::Statement),
+		Paging::Computed => return false,
 	}
-	let names_a_field = attrs.subjects.iter().any(|subject| subject.referencing_field.is_some());
-	if names_a_field && !matches!(attrs.kind, LookupKind::Reference) {
-		return Some(NotAHop::ReferencingField);
-	}
-	None
+	true
 }
 
 /// `table` encoded as the leading segment of a cached entry that names it.
@@ -511,8 +484,8 @@ impl Lowerer<'_> {
 	///
 	/// The step is the last hop. Walking back through first operands, each loop that defines one
 	/// joins the chain while it stands in the same region and authority frame, is a hop
-	/// ([`refusal`]), does not end a run of its own ([`LookupAttrs::only_path`]), and, under a
-	/// page, has no `ONLY`. The first operand of the first hop is the value the lookup starts
+	/// ([`is_lookup_hop`]), does not end a run of its own ([`LookupAttrs::only_path`]), and, under
+	/// a page, has no `ONLY`. The first operand of the first hop is the value the lookup starts
 	/// from, read as a value of its own.
 	///
 	/// A hop the physical phase wraps in a pipeline of its own is a lookup of its own, so the
@@ -535,8 +508,8 @@ impl Lowerer<'_> {
 		if !std::ptr::eq(last.attrs, attrs) {
 			return Err(IrError::Stale("ir_lower::graph: a step that is not the one lowered"));
 		}
-		if let Some(not_a_hop) = refusal(ir, last, true) {
-			return Err(not_a_hop.error());
+		if !is_lookup_hop(ir, last, true) {
+			return Err(invariant(HOP_STATEMENT));
 		}
 		let page = match paging(ir, last) {
 			Paging::Literal(page) => Some(page),
@@ -547,7 +520,7 @@ impl Lowerer<'_> {
 		// `ONLY` as a statement, so a hop under a page that has `ONLY` is a value of its own.
 		let joins = |inner: Hop<'_>| {
 			inner.data.frame == last.data.frame
-				&& refusal(ir, inner, false).is_none()
+				&& is_lookup_hop(ir, inner, false)
 				&& !inner.attrs.only_path
 				&& !(page.is_some() && inner.attrs.only)
 		};
@@ -1820,13 +1793,14 @@ mod step_tests {
 	fn a_referencing_field_belongs_to_a_reference_lookup() {
 		let mut named = subject("post");
 		named.referencing_field = Some("author".to_owned());
-		let mut b = Builder::new();
-		let a = source(&mut b);
-		let result = hop(&mut b, attrs(LookupKind::Graph(Dir::Out), vec![named.clone()]), &[a]);
-		assert!(matches!(
-			lower_value(&b.ir, result),
-			Err(IrError::Unsupported { reason }) if reason == NO_LOWERING
-		));
+		let graph_read = |subject: LookupSubjectShape| {
+			let mut b = Builder::new();
+			let a = source(&mut b);
+			let result = hop(&mut b, attrs(LookupKind::Graph(Dir::Out), vec![subject]), &[a]);
+			let (program, _) = lower_value(&b.ir, result).expect("the graph lookup lowers");
+			Arc::clone(&program.lookups[0].hops[0].read)
+		};
+		assert_eq!(graph_read(named.clone()), graph_read(subject("post")));
 
 		let mut b = Builder::new();
 		let a = source(&mut b);

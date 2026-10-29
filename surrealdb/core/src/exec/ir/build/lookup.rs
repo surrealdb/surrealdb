@@ -2,10 +2,11 @@
 //! records it reaches.
 //!
 //! A lookup is a hop ([`is_hop`]) when it names only its subjects, `ONLY`, an optional `WHERE`
-//! and an optional `*` projection, and names a referencing field only in a reference lookup. The
-//! last hop of a path may also page its records with `LIMIT` and `START` written as non-negative
-//! integers, when it has no `WHERE`, projection or `ONLY`. Consecutive hops each become one
-//! `GraphStep` loop, which lowering reads as one lookup.
+//! and an optional `*` projection. A referencing field (`FIELD`) on a subject belongs to a
+//! reference lookup. A graph lookup does not read it: it neither keeps the lookup from being a hop
+//! nor is carried into the hop the binder builds. The last hop of a path may also page its records
+//! with `LIMIT` and `START` written as non-negative integers, when it has no `WHERE`, projection or
+//! `ONLY`. Consecutive hops each become one `GraphStep` loop, which lowering reads as one lookup.
 //!
 //! Any other lookup with clauses of its own is a statement over the records it reaches without
 //! them, shown whole ([`statement`]):
@@ -22,9 +23,6 @@
 //! region. The statement reads it by the name [`SOURCE`], so the path is evaluated against the row
 //! the lookup is taken over, and the statement's own `$parent` is that row.
 //!
-//! A lookup that is neither, a graph lookup naming a referencing field with no clause of its own,
-//! binds as a hop. Lowering rejects that form.
-//!
 //! `ONLY` on a lookup of the path below the hops a lookup ends ([`run_source`]) unwraps what those
 //! hops answer over all their origins together. The path below is read without it
 //! ([`unwrapped_below_run`]), and the last hop states it as
@@ -33,10 +31,9 @@
 use crate::expr::Param;
 use crate::expr::logical::{
 	LogicalAggregate, LogicalExpr, LogicalFields, LogicalFilter, LogicalLimit, LogicalLiteral,
-	LogicalLookup, LogicalLookupSubject, LogicalOnly, LogicalOp, LogicalProject, LogicalSort,
-	LogicalSplit, LogicalValues,
+	LogicalLookup, LogicalOnly, LogicalOp, LogicalProject, LogicalSort, LogicalSplit,
+	LogicalValues,
 };
-use crate::expr::lookup::LookupKind;
 
 /// The name the statement form of a lookup reads its source by. The binder declares it. No query
 /// can write a parameter with this name, so no request parameter resolves to it.
@@ -56,19 +53,6 @@ pub(crate) fn is_hop(lookup: &LogicalLookup, last: bool) -> bool {
 				&& lookup.cond.is_none()
 				&& !lookup.only
 				&& has_literal_page(lookup)))
-		&& lookup.what.iter().all(|subject| {
-			let referencing_field = match subject {
-				LogicalLookupSubject::Table {
-					referencing_field,
-					..
-				}
-				| LogicalLookupSubject::Range {
-					referencing_field,
-					..
-				} => referencing_field,
-			};
-			referencing_field.is_none() || matches!(lookup.kind, LookupKind::Reference)
-		})
 }
 
 /// Whether the lookup `lookup` over `base`, with no hop after it, binds as the statement of its
@@ -251,7 +235,8 @@ fn has_clauses(lookup: &LogicalLookup) -> bool {
 mod tests {
 	use super::*;
 	use crate::expr::Dir;
-	use crate::expr::logical::LogicalOrdering;
+	use crate::expr::logical::{LogicalLookupSubject, LogicalOrdering};
+	use crate::expr::lookup::LookupKind;
 
 	fn table(name: &str) -> LogicalLookupSubject {
 		LogicalLookupSubject::Table {
@@ -351,16 +336,16 @@ mod tests {
 	}
 
 	#[test]
-	fn a_graph_lookup_naming_a_referencing_field_alone_stays_a_hop_lowering_refuses() {
+	fn a_referencing_field_keeps_a_hop_in_either_kind_of_lookup() {
 		let mut lookup = out("post");
 		lookup.what = vec![LogicalLookupSubject::Table {
 			table: "post".into(),
 			referencing_field: Some("author".to_owned()),
 		}];
-		assert!(!is_hop(&lookup, true));
+		assert!(is_hop(&lookup, true) && is_hop(&lookup, false));
 		assert!(!is_statement(&source(), &lookup));
 		lookup.kind = LookupKind::Reference;
-		assert!(is_hop(&lookup, true));
+		assert!(is_hop(&lookup, true) && is_hop(&lookup, false));
 	}
 
 	#[test]

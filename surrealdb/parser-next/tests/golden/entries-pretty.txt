@@ -1748,6 +1748,7 @@ e2303abcd9555fae language-tests/tests/language/graph/edge_clauses.surql
 00961067b66fa270 language-tests/tests/language/graph/edge_property_access.surql
 9e92e3f828c51a1a language-tests/tests/language/graph/edge_range_syntax.surql
 65afbc672fd3074c language-tests/tests/language/graph/edge_statistics.surql
+3c25eb103b9ee810 language-tests/tests/language/graph/field_clause.surql
 93edf9f8e6f49754 language-tests/tests/language/graph/filter_combined.surql
 908b1c6d7b0a3c21 language-tests/tests/language/graph/filter_edge_properties.surql
 62a566a25e6f53e4 language-tests/tests/language/graph/filter_target_nodes.surql
@@ -4164,6 +4165,7 @@ e464696355fc4527 language-tests/tests/reproductions/a_float_record_id_component_
 4b9e243c8e94b4cb language-tests/tests/reproductions/a_function_call_with_no_database_asks_for_one.surql
 7036604ac9e57cf9 language-tests/tests/reproductions/a_function_call_with_no_namespace_asks_for_one.surql
 dd4a28cb070b4875 language-tests/tests/reproductions/a_function_called_in_a_versioned_subquery_is_read_at_the_stamp.surql
+3089e410c62cb59d language-tests/tests/reproductions/a_graph_lookup_ignores_a_field_clause.surql
 73c8fe9d0771d854 language-tests/tests/reproductions/a_group_all_view_keeps_its_row.surql
 2e0774c0df5ee95f language-tests/tests/reproductions/a_group_argument_is_drawn_once_per_group.surql
 0ff1857b59513a9d language-tests/tests/reproductions/a_grouped_effect_happens_once_per_row.surql

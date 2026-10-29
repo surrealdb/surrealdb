@@ -139,6 +139,7 @@ use crate::expr::logical::{
 	LogicalWriteStatement, OutputPath, OutputPathPart, RequestStatementKind, Schema, SourceRef,
 	lower, lower_expr, lower_fields, lower_request,
 };
+use crate::expr::lookup::LookupKind;
 use crate::expr::{BinaryOperator, Function, Idiom, Kind, Output, Part};
 
 /// What binding a statement left in the block it was bound in.
@@ -5503,6 +5504,9 @@ fn generated_bound_refusal(range: &LogicalRecordIdKeyRange) -> Option<Refusal> {
 /// whose elements are the records the lookup's subjects reach from it. `only_path` is
 /// [`LookupAttrs::only_path`].
 ///
+/// A subject keeps its referencing field (`FIELD`) only in a reference lookup. A graph lookup
+/// reads the edges of a subject's table whatever field it names, so its subjects name none.
+///
 /// The operands are bound in the order [`LookupAttrs`] lists them: the source, the operands of the
 /// bounds of each range subject, then `LIMIT` and `START`, each evaluated once before any record
 /// is read. The body yields each reached record unchanged, and the clauses of the lookup are
@@ -5520,6 +5524,7 @@ fn bind_hop(
 	};
 	let mut operands = vec![source];
 	let mut subjects = Vec::with_capacity(lookup.what.len());
+	let reads_field = matches!(lookup.kind, LookupKind::Reference);
 	for subject in &lookup.what {
 		subjects.push(match subject {
 			LogicalLookupSubject::Table {
@@ -5527,7 +5532,7 @@ fn bind_hop(
 				referencing_field,
 			} => LookupSubjectShape {
 				table: table.clone(),
-				referencing_field: referencing_field.clone(),
+				referencing_field: reads_field.then(|| referencing_field.clone()).flatten(),
 				range: None,
 			},
 			LogicalLookupSubject::Range {
@@ -5553,7 +5558,7 @@ fn bind_hop(
 				}
 				LookupSubjectShape {
 					table: table.clone(),
-					referencing_field: referencing_field.clone(),
+					referencing_field: reads_field.then(|| referencing_field.clone()).flatten(),
 					range: Some(shape),
 				}
 			}
