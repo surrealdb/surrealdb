@@ -152,7 +152,7 @@ revision = { version = "0.30.0", features = [
 ] }
 
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = { version = "1.1.1", git = "https://github.com/surrealdb/surrealkv", rev = "e9e1293" }
+surrealkv = { version = "1.1.1", git = "https://github.com/surrealdb/surrealkv", rev = "6a20e2d" }
 surrealmx = "1.0.0"
 web-time = "1.1.0"
 ## Maintained by @Delskayn
