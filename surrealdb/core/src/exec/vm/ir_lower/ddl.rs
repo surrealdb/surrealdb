@@ -219,6 +219,10 @@ pub(super) fn schema_op(ir: &Ir, region: RegionId) -> Result<Option<OpId>, IrErr
 				..
 			}) => {}
 			OpKind::Phys(PhysOp::Pipeline(_)) if super::pipe::is_value_pipeline(ir, op) => {}
+			// A `{ ... }` block read as a value is the expression of an operand too, as in
+			// `DEFINE TABLE t COMMENT { 'x' }`: the operand's read lowers it in place or runs its
+			// region as a unit of its own.
+			OpKind::Phys(PhysOp::Block) => {}
 			OpKind::Phys(_) | OpKind::Logical(_) => others = true,
 		}
 	}
@@ -3997,4 +4001,48 @@ fn changefeed_value(cf: &crate::expr::ChangeFeed) -> Value {
 	object.insert("expiry".to_owned(), Value::Duration(crate::val::Duration(cf.expiry.0)));
 	object.insert("store_diff".to_owned(), Value::Bool(cf.store_diff));
 	Value::Object(object)
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::exec::operators::test_util::TestDb;
+
+	/// The value of the one statement `sql` runs, as SurrealQL.
+	async fn answer(db: &TestDb, sql: &str) -> String {
+		use surrealdb_types::ToSql;
+		let mut responses =
+			db.datastore().execute(sql, &TestDb::owner(), None).await.expect("the query runs");
+		responses.remove(0).result.expect("the statement answers").to_sql()
+	}
+
+	/// A `{ ... }` block read as a clause's value is evaluated as the operand's expression, both
+	/// where the schema statement is the program's top statement and where it is one statement of
+	/// a block, and the definition holds its value.
+	#[tokio::test]
+	async fn a_block_is_a_clause_value_of_a_schema_statement() {
+		let db = TestDb::new("").await;
+		db.run(
+			"DEFINE TABLE a COMMENT { 'x' };
+			DEFINE TABLE b COMMENT {;};
+			DEFINE PARAM $p VALUE { LET $v = 2; $v * 3 };
+			ALTER PARAM $p VALUE { 7 };
+			{ DEFINE TABLE c COMMENT { 'y' } };
+			IF true { DEFINE FIELD f ON c DEFAULT { 1 } COMMENT { 'z' } };",
+		)
+		.await;
+		assert_eq!(
+			answer(&db, "(INFO FOR DB).tables").await,
+			"{ a: \"DEFINE TABLE a TYPE ANY SCHEMALESS COMMENT 'x' PERMISSIONS NONE\", \
+			 b: 'DEFINE TABLE b TYPE ANY SCHEMALESS PERMISSIONS NONE', \
+			 c: \"DEFINE TABLE c TYPE ANY SCHEMALESS COMMENT 'y' PERMISSIONS NONE\" }"
+		);
+		assert_eq!(
+			answer(&db, "(INFO FOR DB).params.p").await,
+			"'DEFINE PARAM $p VALUE 7 PERMISSIONS FULL'"
+		);
+		assert_eq!(
+			answer(&db, "(INFO FOR TABLE c).fields.f").await,
+			"\"DEFINE FIELD f ON c DEFAULT { 1 } COMMENT 'z' PERMISSIONS FULL\""
+		);
+	}
 }
