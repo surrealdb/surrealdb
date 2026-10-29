@@ -143,6 +143,7 @@ thread_local! {
 pub(crate) async fn yield_point(ctx: &ExecutionContext) -> FlowResult<()> {
 	interrupted(ctx)?;
 	refill(quantum(ctx));
+	crate::exec::scheduler::note_yield();
 	match ctx.ctx().scheduler() {
 		Some(scheduler) => scheduler.yield_now().await,
 		None => crate::exec::scheduler::yield_now().await,

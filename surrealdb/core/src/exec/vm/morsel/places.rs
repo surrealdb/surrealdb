@@ -18,7 +18,7 @@ use crate::exec::planner::placement::Policy;
 
 #[cfg(not(target_family = "wasm"))]
 mod pool {
-	use std::collections::BTreeMap;
+	use std::collections::{BTreeMap, BTreeSet};
 	use std::sync::{Arc, Mutex};
 
 	use super::Policy;
@@ -33,11 +33,52 @@ mod pool {
 	}
 
 	/// The pool's books: the places free and the statements registered, by arrival.
+	///
+	/// The statements marked waiting are also listed by the places each holds, so that what a
+	/// statement is owed, and whether another waits, are answered without visiting every
+	/// statement: a node under load registers a statement per query, and each asks at every
+	/// chunk of its scan.
 	#[derive(Debug)]
 	struct Books {
 		free: usize,
 		next: u64,
 		statements: BTreeMap<u64, Entry>,
+		/// The ids of the waiting statements, by the places they hold. No set is empty.
+		waiting: BTreeMap<usize, BTreeSet<u64>>,
+	}
+
+	impl Books {
+		/// Lists waiting statement `id`, which holds `held` places.
+		fn list(&mut self, id: u64, held: usize) {
+			self.waiting.entry(held).or_default().insert(id);
+		}
+
+		/// Takes statement `id`, which holds `held` places, off the waiting list.
+		fn unlist(&mut self, id: u64, held: usize) {
+			if let Some(ids) = self.waiting.get_mut(&held) {
+				ids.remove(&id);
+				if ids.is_empty() {
+					self.waiting.remove(&held);
+				}
+			}
+		}
+
+		/// The waiting statements other than `me` that a free place is owed to before `me`, which
+		/// holds `held`: those that hold fewer, and those that hold as many and came first.
+		/// Counted no further than `most`, which is all an answer is compared with.
+		fn owed_before(&self, me: u64, held: usize, most: usize) -> usize {
+			let mut owed = 0;
+			for ids in self.waiting.range(..held).map(|(_, ids)| ids) {
+				owed += ids.len();
+				if owed >= most {
+					return owed;
+				}
+			}
+			if let Some(ids) = self.waiting.get(&held) {
+				owed += ids.range(..me).take(most - owed).count();
+			}
+			owed
+		}
 	}
 
 	/// A pool of places and the statements served from it.
@@ -54,6 +95,7 @@ mod pool {
 					free: places,
 					next: 0,
 					statements: BTreeMap::new(),
+					waiting: BTreeMap::new(),
 				}),
 			})
 		}
@@ -85,7 +127,12 @@ mod pool {
 
 	impl Drop for Registration {
 		fn drop(&mut self) {
-			self.pool.books().statements.remove(&self.id);
+			let mut books = self.pool.books();
+			if let Some(entry) = books.statements.remove(&self.id)
+				&& entry.waiting
+			{
+				books.unlist(self.id, entry.held);
+			}
 		}
 	}
 
@@ -101,8 +148,14 @@ mod pool {
 		fn drop(&mut self) {
 			let mut books = self.0.pool.books();
 			books.free += 1;
-			if let Some(entry) = books.statements.get_mut(&self.0.id) {
-				entry.held = entry.held.saturating_sub(1);
+			let id = self.0.id;
+			if let Some(entry) = books.statements.get_mut(&id) {
+				let (held, waiting) = (entry.held, entry.waiting);
+				entry.held = held.saturating_sub(1);
+				if waiting {
+					books.unlist(id, held);
+					books.list(id, held.saturating_sub(1));
+				}
 			}
 		}
 	}
@@ -128,34 +181,57 @@ mod pool {
 		) -> Option<Place> {
 			let mut books = self.0.pool.books();
 			let me = self.0.id;
-			let held = books.statements.get(&me).map_or(0, |entry| entry.held);
+			// A statement is registered for as long as it can ask.
+			let &Entry {
+				held,
+				waiting,
+			} = books.statements.get(&me)?;
 			if held >= policy.place_cap() {
 				return None;
 			}
-			let owed_before = books
-				.statements
-				.iter()
-				.filter(|(id, entry)| {
-					**id != me
-						&& entry.waiting && (entry.held < held || (entry.held == held && **id < me))
-				})
-				.count();
 			let usable = books.free.saturating_sub(policy.oltp_reserve());
-			let entry = books.statements.entry(me).or_default();
-			if usable <= owed_before {
-				entry.waiting = true;
+			if usable <= books.owed_before(me, held, usable) {
+				if !waiting {
+					books.list(me, held);
+					books.statements.insert(
+						me,
+						Entry {
+							held,
+							waiting: true,
+						},
+					);
+				}
 				return None;
 			}
-			entry.held += 1;
-			entry.waiting = keep_waiting && entry.held < policy.place_cap();
+			if waiting {
+				books.unlist(me, held);
+			}
+			let held = held + 1;
+			let waiting = keep_waiting && held < policy.place_cap();
+			if waiting {
+				books.list(me, held);
+			}
+			books.statements.insert(
+				me,
+				Entry {
+					held,
+					waiting,
+				},
+			);
 			books.free -= 1;
 			Some(Place(Arc::clone(&self.0)))
 		}
 
 		/// Clears this statement's waiting mark.
 		pub(crate) fn stop_waiting(&self) {
-			if let Some(entry) = self.0.pool.books().statements.get_mut(&self.0.id) {
+			let mut books = self.0.pool.books();
+			let id = self.0.id;
+			if let Some(entry) = books.statements.get_mut(&id)
+				&& entry.waiting
+			{
 				entry.waiting = false;
+				let held = entry.held;
+				books.unlist(id, held);
 			}
 		}
 
@@ -163,11 +239,9 @@ mod pool {
 		/// one does.
 		pub(crate) fn others_wait(&self) -> bool {
 			let books = self.0.pool.books();
-			let held = books.statements.get(&self.0.id).map_or(0, |entry| entry.held);
-			books
-				.statements
-				.iter()
-				.any(|(id, entry)| *id != self.0.id && entry.waiting && entry.held <= held)
+			let me = self.0.id;
+			let held = books.statements.get(&me).map_or(0, |entry| entry.held);
+			books.waiting.range(..=held).any(|(_, ids)| ids.iter().any(|&id| id != me))
 		}
 
 		/// The places this statement holds.
@@ -203,6 +277,145 @@ mod pool {
 			Pool::new(cores.saturating_sub(1))
 		});
 		&NODE
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use std::collections::BTreeMap;
+
+		use super::{Place, Policy, Pool, Statement};
+		use crate::exec::config::ExecConfig;
+
+		/// The rules the books keep, over every statement: a free place is owed to the waiting
+		/// statement that holds the fewest, then to the one that came first.
+		#[derive(Default)]
+		struct Model {
+			free: usize,
+			/// `(held, waiting)` by statement id, which is the order of registration.
+			statements: BTreeMap<usize, (usize, bool)>,
+		}
+
+		impl Model {
+			fn acquire(&mut self, me: usize, cap: usize, reserve: usize, keep: bool) -> bool {
+				let held = self.statements[&me].0;
+				if held >= cap {
+					return false;
+				}
+				let owed = self
+					.statements
+					.iter()
+					.filter(|(id, (h, w))| {
+						**id != me && *w && (*h < held || (*h == held && **id < me))
+					})
+					.count();
+				let entry = self.statements.get_mut(&me).unwrap();
+				if self.free.saturating_sub(reserve) <= owed {
+					entry.1 = true;
+					return false;
+				}
+				entry.0 += 1;
+				entry.1 = keep && entry.0 < cap;
+				self.free -= 1;
+				true
+			}
+
+			fn others_wait(&self, me: usize) -> bool {
+				let held = self.statements[&me].0;
+				self.statements.iter().any(|(id, (h, w))| *id != me && *w && *h <= held)
+			}
+		}
+
+		/// Every grant, refusal and answer of `others_wait` is the one the rules give, over
+		/// random runs of registrations, grants, returned places and ended statements.
+		#[test]
+		fn the_books_answer_as_the_rules_over_every_statement_do() {
+			let mut seed = 0x2545_f491_4f6c_dd1du64;
+			let mut next = |n: usize| {
+				seed ^= seed << 13;
+				seed ^= seed >> 7;
+				seed ^= seed << 17;
+				(seed % n as u64) as usize
+			};
+			for round in 0..200 {
+				let places = 1 + next(12);
+				let config = ExecConfig {
+					morsel_places: 1 + next(6),
+					morsel_oltp_reserve: next(3),
+					..ExecConfig::default()
+				};
+				let policy = Policy::from_config(&config);
+				let (cap, reserve) = (policy.place_cap(), policy.oltp_reserve());
+				let pool = Pool::new(places);
+				let mut model = Model {
+					free: places,
+					..Model::default()
+				};
+				let mut statements: BTreeMap<usize, Statement> = BTreeMap::new();
+				let mut held: Vec<(usize, Place)> = Vec::new();
+				let mut ids = 0;
+				for step in 0..400 {
+					let what = format!("round {round}, step {step}");
+					match next(10) {
+						0 | 1 => {
+							statements.insert(ids, pool.register());
+							model.statements.insert(ids, (0, false));
+							ids += 1;
+						}
+						2..=5 if !statements.is_empty() => {
+							let id = *statements.keys().nth(next(statements.len())).unwrap();
+							let keep = next(4) == 0;
+							let granted = statements[&id].acquire_keeping_waiting(policy, keep);
+							assert_eq!(
+								granted.is_some(),
+								model.acquire(id, cap, reserve, keep),
+								"{what}: acquire"
+							);
+							if let Some(place) = granted {
+								held.push((id, place));
+							}
+						}
+						6 if !held.is_empty() => {
+							let (id, place) = held.swap_remove(next(held.len()));
+							drop(place);
+							model.free += 1;
+							if let Some(entry) = model.statements.get_mut(&id) {
+								entry.0 -= 1;
+							}
+						}
+						7 if !statements.is_empty() => {
+							let id = *statements.keys().nth(next(statements.len())).unwrap();
+							statements[&id].stop_waiting();
+							model.statements.get_mut(&id).unwrap().1 = false;
+						}
+						8 if !statements.is_empty() => {
+							let id = *statements.keys().nth(next(statements.len())).unwrap();
+							assert_eq!(
+								statements[&id].others_wait(),
+								model.others_wait(id),
+								"{what}: others_wait"
+							);
+						}
+						9 if !statements.is_empty() => {
+							// A statement ends; its registration goes with its last place.
+							let id = *statements.keys().nth(next(statements.len())).unwrap();
+							statements.remove(&id);
+							held.retain(|(of, _)| *of != id);
+							model.free += model.statements.remove(&id).unwrap().0;
+						}
+						_ => {}
+					}
+					for (id, statement) in &statements {
+						let (h, w) = model.statements[id];
+						assert_eq!((statement.held(), statement.waiting()), (h, w), "{what}: {id}");
+					}
+					assert_eq!(pool.free(), model.free, "{what}: free");
+				}
+				drop(held);
+				drop(statements);
+				assert_eq!(pool.registrations(), 0);
+				assert!(pool.books().waiting.is_empty(), "round {round}: a waiting list is left");
+			}
+		}
 	}
 }
 

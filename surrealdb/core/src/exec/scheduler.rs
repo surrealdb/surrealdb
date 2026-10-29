@@ -25,6 +25,24 @@ pub trait Scheduler: Send + Sync + 'static {
 	fn yield_now(&self) -> YieldFuture;
 }
 
+thread_local! {
+	/// The times a program running on this thread reached its yield point.
+	static YIELDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The times a program running on this thread has reached its yield point, which it does once it
+/// has spent a quantum of fuel. A caller that reads it before and after it polls a future learns
+/// whether the future ran a quantum's worth of work in that poll: a host can tell a long statement
+/// from a short one without timing it.
+pub fn yields_on_this_thread() -> u64 {
+	YIELDS.with(std::cell::Cell::get)
+}
+
+/// Counts a yield of a program on this thread; see [`yields_on_this_thread`].
+pub(crate) fn note_yield() {
+	YIELDS.with(|yields| yields.set(yields.get().wrapping_add(1)));
+}
+
 /// Give up the thread once, as the default scheduler does: back to the tokio
 /// runtime when the task runs on one, and otherwise through a future that is
 /// pending once and wakes its own task, so the executor driving it polls

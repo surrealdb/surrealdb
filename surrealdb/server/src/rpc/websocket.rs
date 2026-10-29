@@ -1,4 +1,5 @@
 use core::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -734,7 +735,8 @@ impl Websocket {
 		// Clone the WebSocket cancellation token (awaitable view of the
 		// shared cancel handle).
 		let canceller = rpc.cancel.token();
-		// Store spawned tasks so we can wait for them
+		// The requests in flight, each run inline until it has run its quanta of work and on a task
+		// of its own after that: see [`Dispatched`].
 		let mut tasks = FuturesUnordered::new();
 		// Loop, and listen for messages to write
 		loop {
@@ -761,8 +763,11 @@ impl Websocket {
 								// Exit out of the loop
 								break;
 							}
-							// Otherwise spawn and handle the message
-							tasks.push(Self::handle_message(&rpc, msg, chn, rec_limit));
+							// Otherwise handle the message
+							let rpc = Arc::clone(&rpc);
+							tasks.push(Dispatched::inline(async move {
+								Self::handle_message(&rpc, msg, chn, rec_limit).await
+							}));
 						}
 						Message::Close(_) => {
 							// The close frame RFC 6455 section 5.5.1 requires
@@ -806,10 +811,10 @@ impl Websocket {
 		// We have left the main loop -- either the connection canceller
 		// fired (client disconnect, socket error, close frame) or the
 		// server is gracefully shutting down. In either case we drain
-		// the `FuturesUnordered` of in-flight `handle_message` futures
-		// to completion rather than dropping it.
+		// the in-flight `handle_message` futures to completion rather
+		// than dropping them.
 		//
-		// Dropping the FuturesUnordered would drop each in-flight
+		// Dropping a request run inline would drop its
 		// handler, which would drop the executor's open transaction
 		// mid-await and trigger `Transactor::Drop`'s
 		// "A transaction was dropped without being committed or
@@ -987,9 +992,9 @@ impl Websocket {
 					// streaming driver observes the same canceller
 					// cooperatively for the same reason.
 					//
-					// The read loop drains its `FuturesUnordered` of
-					// in-flight `handle_message` futures on cancel rather
-					// than dropping it (see `read`), so this future is
+					// The read loop drains its in-flight `handle_message`
+					// futures on cancel rather
+					// than dropping them (see `read`), so this future is
 					// never dropped mid-flight in production.
 					//
 					// A streaming query is answered with a sequence of frames
@@ -1860,6 +1865,114 @@ impl Websocket {
 	}
 }
 
+/// The quanta of work a request may run inline in the read loop of its connection before it is
+/// moved to a task of its own. A program reaches its yield point once it has spent a quantum
+/// ([`yields_on_this_thread`](surrealdb_core::exec::scheduler::yields_on_this_thread)); a point
+/// read or a write ends well within one, a scan reaches it again and again.
+const INLINE_QUANTA: u32 = 2;
+
+/// A request of a WebSocket connection, run inline in the read loop's task until it has run
+/// [`INLINE_QUANTA`] quanta of work, and on a task of its own after that.
+///
+/// Most requests (a point read, a write) end within a quantum, and running them inline spares each
+/// a task and a wake-up on another thread. A request that runs longer, a scan, would hold every
+/// other request of its connection to the one core the read loop runs on: a client that multiplexes
+/// its queries over one connection would get one core however many are idle. So once it has run
+/// its quanta the future is spawned, and runs wherever a core is free. Work is counted, not time:
+/// a write waits on its commit and on locks, and the time of a poll counts whatever delayed the
+/// thread, and neither makes it long.
+///
+/// A spawned future is polled by its task before anything else of it runs, so every waker it
+/// registers from then on is its task's; a wake-up of a waker it registered while inline wakes the
+/// read loop, which finds the request moved and does nothing. Waiting on the task does not abort
+/// it when the read loop is dropped: the request runs to its end, as the read loop's drain lets
+/// an inline one do.
+enum Dispatched<F> {
+	Inline {
+		request: Pin<Box<F>>,
+		/// The quanta the request has run.
+		quanta: u32,
+	},
+	Spawned(tokio::task::JoinHandle<()>),
+	Done,
+}
+
+impl<F> Dispatched<F> {
+	fn inline(request: F) -> Self {
+		Self::Inline {
+			request: Box::pin(request),
+			quanta: 0,
+		}
+	}
+}
+
+impl<F> std::future::Future for Dispatched<F>
+where
+	F: std::future::Future<Output = ()> + Send + 'static,
+{
+	type Output = ();
+
+	fn poll(
+		mut self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Self::Output> {
+		use std::task::Poll;
+
+		use surrealdb_core::exec::scheduler::yields_on_this_thread;
+		let this = &mut *self;
+		match this {
+			Self::Inline {
+				request,
+				quanta,
+			} => {
+				let before = yields_on_this_thread();
+				if request.as_mut().poll(cx).is_ready() {
+					*this = Self::Done;
+					return Poll::Ready(());
+				}
+				// Only this request runs on the thread while it is polled.
+				*quanta = quanta.saturating_add((yields_on_this_thread() != before) as u32);
+				if *quanta < INLINE_QUANTA {
+					return Poll::Pending;
+				}
+				let Self::Inline {
+					request,
+					..
+				} = std::mem::replace(this, Self::Done)
+				else {
+					unreachable!("the request is inline");
+				};
+				*this = Self::Spawned(tokio::spawn(request));
+				this.poll_spawned(cx)
+			}
+			Self::Spawned(_) => this.poll_spawned(cx),
+			Self::Done => Poll::Ready(()),
+		}
+	}
+}
+
+impl<F> Dispatched<F> {
+	/// Waits on the task of a spawned request. A request that panicked on its task ends here as
+	/// it would have ended the read loop inline: the panic is raised again.
+	fn poll_spawned(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+		let Self::Spawned(task) = self else {
+			return std::task::Poll::Ready(());
+		};
+		match Pin::new(task).poll(cx) {
+			std::task::Poll::Pending => std::task::Poll::Pending,
+			std::task::Poll::Ready(result) => {
+				*self = Self::Done;
+				if let Err(error) = result
+					&& error.is_panic()
+				{
+					std::panic::resume_unwind(error.into_panic());
+				}
+				std::task::Poll::Ready(())
+			}
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::sync::{Arc, Mutex};
@@ -1872,6 +1985,37 @@ mod tests {
 	};
 
 	use super::*;
+
+	/// A statement that runs a quantum of work at most stays on the read loop's task; one that runs
+	/// on is moved to a task of its own and runs there to its end.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn a_request_runs_inline_until_it_has_run_its_quanta() {
+		let ds = Arc::new(Datastore::builder().build_with_path("memory").await.unwrap());
+		ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+			.await
+			.unwrap();
+		let reader = tokio::spawn(async move {
+			let own = tokio::task::id();
+			let session = Session::owner().with_ns("test").with_db("test");
+			for (sql, moves) in
+				[("RETURN 1;", false), ("FOR $i IN 0..200000 { LET $x = $i * 2; };", true)]
+			{
+				let ids = Arc::new(Mutex::new(Vec::new()));
+				let seen = Arc::clone(&ids);
+				let (ds, session) = (Arc::clone(&ds), session.clone());
+				Dispatched::inline(async move {
+					seen.lock().unwrap().push(tokio::task::id());
+					ds.execute(sql, &session, None).await.unwrap();
+					seen.lock().unwrap().push(tokio::task::id());
+				})
+				.await;
+				let ids = ids.lock().unwrap().clone();
+				assert_eq!(ids[0], own, "{sql}: it starts inline");
+				assert_eq!(ids[1] != own, moves, "{sql}: where it ends");
+			}
+		});
+		reader.await.unwrap();
+	}
 
 	/// Trivial non-noop observer used to exercise the populated-ctx
 	/// branch of `default_network_ctx`. The default `is_noop` impl
@@ -3351,15 +3495,15 @@ mod tests {
 			let msg = Message::Text(body.to_string().into());
 
 			let (chn_tx, mut chn_rx) = channel::<Message>(8);
-			// `handle_message` runs inline now -- no spawn, no JoinHandle.
-			// Awaiting it returns once the executor has finished cancelling
+			// The test awaits `handle_message` itself, as the read loop does
+			// while it runs inline. It returns once the executor has finished cancelling
 			// the transaction and the failure response has been queued.
 			Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
 
 			// PROOF OF CANCELLATION (vs. proof of "no leak"):
 			// `observer.count > 0` only proves the tx was finalised
 			// (either commit-on-success or cancel-on-race), which the
-			// FuturesUnordered drain alone is enough to achieve. To
+			// read loop's drain alone is enough to achieve. To
 			// prove that the *cancel plumbing* fired (i.e. the executor
 			// short-circuited rather than running to completion), we
 			// also assert that the response we sent back to the
