@@ -2,7 +2,7 @@
 name = "surreal-ext"
 publish = false
 edition.workspace = true
-version.workspace = true
+version = "1.0.0-nightly"
 authors.workspace = true
 description = "The Surreal CLI's extension component: develop, build, sign, inspect, run and install Surrealism extensions"
 repository.workspace = true
@@ -10,6 +10,14 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
+
+# surreal-ext ships as a binary under download.surrealdb.com/cli/extension/,
+# not to crates.io, on its own version line: its number describes this tool's
+# commands and formats, not the database's or any extension SDK's. The release
+# scripts move it with the independently-versioned crates, which they otherwise
+# select by being published.
+[package.metadata.release]
+independent = true
 
 [[bin]]
 name = "surreal-ext"

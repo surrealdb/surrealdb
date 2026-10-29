@@ -39,7 +39,7 @@ fn assert_release(text: &str) -> semver::Version {
 }
 
 #[test]
-fn version_flag_reports_the_workspace_version() {
+fn version_flag_reports_the_package_version() {
 	let output = surreal_ext(&["--version"], None);
 	assert!(output.status.success(), "{output:?}");
 	let version = assert_release(&stdout(&output));

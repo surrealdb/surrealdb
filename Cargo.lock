@@ -7537,7 +7537,7 @@ dependencies = [
 
 [[package]]
 name = "surreal-ext"
-version = "4.0.0-nightly"
+version = "1.0.0-nightly"
 dependencies = [
  "anyhow",
  "async-trait",

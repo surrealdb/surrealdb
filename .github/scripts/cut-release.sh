@@ -19,11 +19,11 @@ set -euo pipefail
 #       through the alpha/beta/rc cycle and only advances to `(X+1).1.0-nightly`
 #       once `(X+1).0.0` ships stable (see advance-main-after-release.sh).
 #
-# The independently-versioned families (surrealism, surrealml) travel with the
-# engine on their own 0.x lines. Each cut moves them in the same shape as
-# surrealdb: the release line takes their current nightly minor as its
-# pre-release (0.m.0-nightly -> 0.m.0-beta.1), and main advances one minor
-# (0.m.0-nightly -> 0.(m+1).0-nightly). A cut thus reserves one of each
+# The independently-versioned families (surrealism, surrealml, surreal-ext)
+# travel with the engine on their own lines. Each cut moves them in the same
+# shape as surrealdb: the release line takes their current nightly minor as its
+# pre-release (M.m.0-nightly -> M.m.0-beta.1), and main advances one minor
+# (M.m.0-nightly -> M.(m+1).0-nightly). A cut thus reserves one of each
 # family's minors per release line, keeping their numbers independent of
 # surrealdb's while managed by the same rule. (advance-main-after-release.sh
 # leaves them alone - they already advanced here, at cut time.)
@@ -137,12 +137,15 @@ set_workspace_version() {
 	# picked up automatically, and captured before the surrealdb rewrite below so
 	# the "version != cur_sdb" filter still sees surrealdb on its pre-cut string.
 	# publish=false members (demo, test-only crates) are excluded: the discipline
-	# only governs published lines.
+	# only governs released lines. A member released outside crates.io (a binary
+	# such as surreal-ext) opts in with `[package.metadata.release] independent`.
 	local -a independent_anchors
 	mapfile -t independent_anchors < <(
 		cargo metadata --format-version 1 --no-deps \
 			| jq -r --arg sdb "$cur_sdb" \
-				'[ .packages[] | select(.publish != []) | select(.version != $sdb) ]
+				'[ .packages[]
+				   | select(.publish != [] or .metadata.release.independent == true)
+				   | select(.version != $sdb) ]
 				 | group_by(.version) | map(.[0].name) | .[]'
 	)
 

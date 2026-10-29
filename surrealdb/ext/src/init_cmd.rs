@@ -10,7 +10,7 @@ use surrealism_runtime::config::{PACKAGE_FILE, SurrealismMeta, Target};
 use surrealism_runtime::package_config::PackageConfig;
 
 const SURREALISM_VERSION: &str = surrealism_runtime::SDK_VERSION;
-const SURREALDB_VERSION: &str = env!("CARGO_PKG_VERSION");
+const SURREALDB_VERSION: &str = surrealdb_types::SDK_VERSION;
 
 /// Initialize a new Surrealism module project.
 pub async fn init(
@@ -252,4 +252,27 @@ fn write_package_toml(path: &Path, target: Target, org: &str, name: &str) -> Res
 	)?;
 	package.save().prefix_err(|| format!("Failed to write {PACKAGE_FILE}"))?;
 	Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The scaffolded project depends on the SDK crates at their own versions,
+	/// which are independent of this tool's.
+	#[test]
+	fn the_scaffolded_manifest_names_the_sdk_versions() {
+		let dir = tempfile::tempdir().unwrap();
+		rewrite_cargo_toml(dir.path(), "demo").unwrap();
+		let manifest = fs::read_to_string(dir.path().join("Cargo.toml")).unwrap();
+		assert!(
+			manifest.contains(&format!("surrealism = \"{}\"\n", surrealism_runtime::SDK_VERSION)),
+			"{manifest}"
+		);
+		assert!(
+			manifest.contains(&format!("surrealdb-types = \"{}\"\n", surrealdb_types::SDK_VERSION)),
+			"{manifest}"
+		);
+		assert_ne!(surrealdb_types::SDK_VERSION, env!("CARGO_PKG_VERSION"));
+	}
 }

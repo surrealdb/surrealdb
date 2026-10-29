@@ -27,6 +27,10 @@ pub use utils::escape::{EscapeRecordKey, EscapeSqonIdent};
 mod value;
 mod variables;
 
+/// This crate's version, which a project depending on it names in its
+/// `Cargo.toml` (for example, the projects `surreal ext init` scaffolds).
+pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub use error::*;
 pub use flatbuffers::*;
 pub use half::f16;

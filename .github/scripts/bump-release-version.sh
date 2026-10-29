@@ -103,8 +103,10 @@ cargo set-version $PACKAGES "${NEXT_VERSION}"
 # adopts the workspace's new patch/pre-release TAIL (everything after major.minor:
 # `0-beta.5` when the workspace moves to 3.3.0-beta.5, `4` when it moves to 3.1.4),
 # so surrealism 0.6.0-beta.4 -> 0.6.0-beta.5 and a crate that fell a step behind at
-# 0.x.0-beta.3 snaps straight to 0.x.0-beta.5. Only crates.io-publishable crates
-# (`.publish == null`) are touched; a crate that inherits the workspace version was
+# 0.x.0-beta.3 snaps straight to 0.x.0-beta.5. Only released crates are touched:
+# crates.io-publishable ones (`.publish == null`) and those released another way
+# that opt in with `[package.metadata.release] independent` (surreal-ext, whose
+# 1.0.0-beta.4 moves to 1.0.0-beta.5). A crate that inherits the workspace version was
 # already bumped above, and one somehow already ahead of the target is left alone
 # rather than moved backwards.
 TAIL="${NEXT_VERSION#*.}"; TAIL="${TAIL#*.}"
@@ -123,7 +125,7 @@ while IFS=$'\t' read -r name ver manifest; do
 	echo "Bumping ${name} from ${ver} to ${target}"
 	cargo set-version --package "${name}" "${target}"
 done < <(cargo metadata --format-version 1 --no-deps | \
-	jq -r '.packages[] | select(.publish == null) | "\(.name)\t\(.version)\t\(.manifest_path)"')
+	jq -r '.packages[] | select(.publish == null or .metadata.release.independent == true) | "\(.name)\t\(.version)\t\(.manifest_path)"')
 
 # Refresh the root lockfile for every workspace member just rewritten - the
 # inherited bump and the independent crates - without touching any third-party

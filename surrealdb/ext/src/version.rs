@@ -7,14 +7,15 @@ use std::sync::LazyLock;
 use clap::{Arg, ArgAction, Command};
 use serde_json::json;
 
-/// This component's version: the database's, as the two are released together.
+/// This component's version: the package's own, on a line independent of the
+/// database's and of any extension SDK's. It describes this tool's commands and
+/// formats; which databases and SDKs it works with is not encoded in it.
 ///
-/// `SURREAL_BUILD_VERSION` and `SURREAL_BUILD_METADATA`, read at compile time,
-/// override it the same way they do for the database.
+/// `SURREAL_BUILD_METADATA`, read at compile time, appends build metadata the
+/// same way it does for the database. `SURREAL_BUILD_VERSION` is not read: it
+/// carries the database's version.
 pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
-	let version = option_env!("SURREAL_BUILD_VERSION")
-		.filter(|v| !v.trim().is_empty())
-		.unwrap_or(env!("CARGO_PKG_VERSION"));
+	let version = env!("CARGO_PKG_VERSION");
 	match option_env!("SURREAL_BUILD_METADATA") {
 		Some(metadata) if !metadata.trim().is_empty() => format!("{version}+{metadata}"),
 		_ => version.to_owned(),

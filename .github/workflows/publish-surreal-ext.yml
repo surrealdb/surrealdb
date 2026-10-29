@@ -20,8 +20,8 @@
 #   cli/extension/<alpha|beta|...>.txt                        pre-release: v<ver>
 #
 # <os>-<arch> is darwin-arm64, darwin-amd64, linux-amd64, linux-arm64 or
-# windows-amd64. The version is surreal-ext's in Cargo.toml at the built commit,
-# which is the workspace's (the database's). There are no surreal-ext nightlies:
+# windows-amd64. The version is surreal-ext's own, in surrealdb/ext/Cargo.toml
+# at the built commit, on a line independent of the database's. There are no surreal-ext nightlies:
 # a `-nightly` version is refused.
 
 name: Publish surreal-ext

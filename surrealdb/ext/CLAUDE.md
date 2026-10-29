@@ -15,10 +15,13 @@ non-zero.
 ## Contracts
 
 - `--version`, `-v` and the hidden `-V` print `<version> for <os> on <arch>`
-  and nothing else, exiting 0. The version is the workspace version (the same
-  as the database's), honouring `SURREAL_BUILD_VERSION` and
-  `SURREAL_BUILD_METADATA` at compile time; the Surreal CLI reads that first
-  token. With `--json`/`-j`, before or after it, the flag prints
+  and nothing else, exiting 0. The version is this package's own
+  (`surrealdb/ext/Cargo.toml`), on a line independent of the database's and of
+  any extension SDK's; the release scripts move it with the independently
+  versioned crates (`[package.metadata.release] independent`).
+  `SURREAL_BUILD_METADATA` appends build metadata at compile time;
+  `SURREAL_BUILD_VERSION`, which carries the database's version, is not read.
+  The Surreal CLI reads that first token. With `--json`/`-j`, before or after it, the flag prints
   `{"arch", "os", "version"}`, keys in that order. On the root, `--json` goes
   only with `--version`. There is no `version` command.
 - `info` and `sig`, the commands that return data, take `--json`/`-j`
@@ -29,6 +32,9 @@ non-zero.
   `--help`, exit 2; a command's own failure carries the `Kind` of the
   `json::Failure` it returned (`not_found`, `invalid`), else `unknown`, exit 1.
   Help stays clap's text on stdout.
+- `init` scaffolds `surrealism` and `surrealdb-types` (and the optional
+  `surrealdb`) at those crates' own versions, `surrealism_runtime::SDK_VERSION`
+  and `surrealdb_types::SDK_VERSION`, never at this package's version.
 - Help never shows an environment variable's value (`hide_env_values` on every
   argument): `SURREAL_PASS` and `SURREAL_TOKEN` hold credentials.
 - `SURREAL_INVOKED_AS`, set by the Surreal CLI, names the executable in usage
