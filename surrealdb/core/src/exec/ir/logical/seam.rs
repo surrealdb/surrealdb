@@ -24,7 +24,7 @@ use super::verify::timestamp_arg;
 use crate::catalog::{FunctionDefinition, Permission};
 use crate::exec::function::FunctionRegistry;
 pub(crate) use crate::exec::ir::build::expr::{
-	Built, Control, ExprHost, FieldRead, LoopSite, NameRef, bind_body, bind_expr,
+	Built, Control, ExprHost, FieldRead, LoopSite, NameRef, bind_body, bind_expr, bind_fetch_path,
 };
 use crate::exec::ir::build::logical::{
 	bind_closure, bind_loop_site, bind_value_statement, receives_row,

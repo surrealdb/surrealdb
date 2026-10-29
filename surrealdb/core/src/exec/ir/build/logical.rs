@@ -103,7 +103,8 @@ use crate::exec::ir::logical::ops::{
 };
 use crate::exec::ir::logical::scope::return_target;
 use crate::exec::ir::logical::seam::{
-	BindCx, BindNotes, Built, Control, ExprHost, LoopSite, NameRef, bind_body, bind_expr, invariant,
+	BindCx, BindNotes, Built, Control, ExprHost, LoopSite, NameRef, bind_body, bind_expr,
+	bind_fetch_path, invariant,
 };
 use crate::exec::ir::logical::stages::{
 	CondVerdict, Derivation, SchemaRegion, TableGates, TableIndexes, TableRepairs, TableSchema,
@@ -1138,7 +1139,7 @@ fn bind_fetch(
 ) -> Result<ValueId, IrError> {
 	let op = cx.emit(OpKind::Logical(LogOp::Fetch), &[value], &[TypeKnowledge::Unknown])?;
 	for path in fetches {
-		row_clause(cx, op, RegionKind::Clause(ClauseRole::Projection), path)?;
+		fetch_path_clause(cx, op, path)?;
 	}
 	first_result(cx, op)
 }
@@ -2520,6 +2521,17 @@ pub(super) fn row_clause(
 	expr: &LogicalExpr,
 ) -> Result<(), IrError> {
 	enter_row_region(cx, owner, kind, |cx, row| cx.with_row(row, |cx| bind_body(cx, expr)))
+}
+
+/// A `FETCH` path of the fetch `owner`: a `Clause(Projection)` region evaluated against the row,
+/// whose body [`bind_fetch_path`] binds.
+pub(super) fn fetch_path_clause(
+	cx: &mut BindCx<'_>,
+	owner: OpId,
+	path: &LogicalExpr,
+) -> Result<(), IrError> {
+	let kind = RegionKind::Clause(ClauseRole::Projection);
+	enter_row_region(cx, owner, kind, |cx, row| cx.with_row(row, |cx| bind_fetch_path(cx, path)))
 }
 
 /// [`row_clause`], with every op of the region under the frame `frame` names; `None` is the frame

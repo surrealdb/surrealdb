@@ -621,6 +621,233 @@ pub(crate) fn bind_body(host: &mut dyn ExprHost, expr: &LogicalExpr) -> Result<(
 	}
 }
 
+/// Binds the `FETCH` path `path` as the body of the current region, which the fetch walks rather
+/// than evaluates.
+///
+/// A `.@` on the steps the walk takes is no recursion: it is a step the walk does not go through,
+/// and the walk ends there. Such a path is bound as the path up to the `.@` followed by a
+/// recursion marker, the region's yielded value, so the walk takes the steps before the `.@` and
+/// ends at the marker; the steps written after the `.@` are not bound, as the walk never reaches
+/// them. Every other path is bound as [`bind_body`] binds it.
+pub(crate) fn bind_fetch_path(host: &mut dyn ExprHost, path: &LogicalExpr) -> Result<(), IrError> {
+	let Some(walked) = walked_before_recursion(path) else {
+		return bind_body(host, path);
+	};
+	let Built::Value(walked) = bind_expr(host, &walked)? else {
+		return Ok(());
+	};
+	let marker = emit(host, ExprOp::RepeatRecurse, smallvec![walked])?;
+	yield_values(host, smallvec![marker])
+}
+
+/// The steps of the `FETCH` path `path` before the first `.@` its walk reaches, root first, where
+/// the walk reaches one. The walk goes through the base of each step ([`walk_base`]), then through
+/// the body of a broadcast, which continues the path over each element; it does not go into a
+/// step's arguments or into the body of a recursion, whose `.@` binds where it is written.
+///
+/// Steps cut from the body of a broadcast whose root is the element continue the broadcast's base
+/// directly: the walk fans out over each element where a step meets an array, so the two walk
+/// alike, and a broadcast is no step the walk takes.
+fn walked_before_recursion(path: &LogicalExpr) -> Option<LogicalExpr> {
+	if let LogicalExpr::RepeatRecurse(base) = path {
+		return walked_before_recursion(base).or_else(|| Some((**base).clone()));
+	}
+	if let LogicalExpr::Broadcast {
+		base,
+		body,
+		flatten,
+	} = path
+	{
+		return walked_before_recursion(base).or_else(|| {
+			let body = walked_before_recursion(body)?;
+			rebased(body.clone(), base).or_else(|| {
+				Some(LogicalExpr::Broadcast {
+					base: base.clone(),
+					body: Box::new(body),
+					flatten: *flatten,
+				})
+			})
+		});
+	}
+	walked_before_recursion(walk_base(path)?)
+}
+
+/// `path` with `root` in place of the value its steps are taken from ([`walk_base`]), where that
+/// value is [`LogicalExpr::Current`].
+fn rebased(mut path: LogicalExpr, root: &LogicalExpr) -> Option<LogicalExpr> {
+	match walk_base_mut(&mut path) {
+		Some(base) => {
+			let taken = std::mem::replace(base, LogicalExpr::Current);
+			*base = rebased(taken, root)?;
+			Some(path)
+		}
+		None => matches!(path, LogicalExpr::Current).then(|| root.clone()),
+	}
+}
+
+/// The value the step `path` of a `FETCH` path is taken from, where `path` is a step the walk
+/// can reach through: the base of a path step, of a recursion, and of a broadcast.
+fn walk_base(path: &LogicalExpr) -> Option<&LogicalExpr> {
+	match path {
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::Index {
+			base,
+			..
+		}
+		| LogicalExpr::First(base)
+		| LogicalExpr::Last(base)
+		| LogicalExpr::Each(base)
+		| LogicalExpr::Flatten {
+			base,
+			..
+		}
+		| LogicalExpr::Filter {
+			base,
+			..
+		}
+		| LogicalExpr::Method {
+			base,
+			..
+		}
+		| LogicalExpr::Destructure {
+			base,
+			..
+		}
+		| LogicalExpr::Optional {
+			base,
+			..
+		}
+		| LogicalExpr::Lookup {
+			base,
+			..
+		}
+		| LogicalExpr::RepeatRecurse(base)
+		| LogicalExpr::Broadcast {
+			base,
+			..
+		} => Some(&**base),
+		LogicalExpr::Recurse(recurse) => Some(&recurse.base),
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => None,
+	}
+}
+
+/// [`walk_base`], mutable.
+fn walk_base_mut(path: &mut LogicalExpr) -> Option<&mut LogicalExpr> {
+	match path {
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::Index {
+			base,
+			..
+		}
+		| LogicalExpr::First(base)
+		| LogicalExpr::Last(base)
+		| LogicalExpr::Each(base)
+		| LogicalExpr::Flatten {
+			base,
+			..
+		}
+		| LogicalExpr::Filter {
+			base,
+			..
+		}
+		| LogicalExpr::Method {
+			base,
+			..
+		}
+		| LogicalExpr::Destructure {
+			base,
+			..
+		}
+		| LogicalExpr::Optional {
+			base,
+			..
+		}
+		| LogicalExpr::Lookup {
+			base,
+			..
+		}
+		| LogicalExpr::RepeatRecurse(base)
+		| LogicalExpr::Broadcast {
+			base,
+			..
+		} => Some(&mut **base),
+		LogicalExpr::Recurse(recurse) => Some(&mut recurse.base),
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => None,
+	}
+}
+
 fn yield_values(host: &mut dyn ExprHost, values: SmallVec<[ValueId; 4]>) -> Result<(), IrError> {
 	host.create(OpKind::Expr(ExprOp::Yield), values, SmallVec::new())?;
 	Ok(())

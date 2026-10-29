@@ -9,7 +9,7 @@
 //! | Id | Rule |
 //! |---|---|
 //! | V-E1 | `now` reads the first block argument of the entry block of its nearest `Statement` or isolated region |
-//! | V-E2 | `repeat_recurse` stands in the body of a `Recurse` loop |
+//! | V-E2 | `repeat_recurse` stands in the body of a `Recurse` loop, or is a step of a `FETCH` path |
 //! | V-E3 | `prefix` never holds a cast |
 //! | V-E4 | `method` and `invoke` follow their own dispatch, which has no other use |
 //! | V-E5 | a destructure's `Rest` entry stands only last in its list |
@@ -259,8 +259,12 @@ fn now_reads_statement_timestamp(ir: &Ir, op: OpId, data: &OpData) -> Rule {
 
 /// V-E2: the nearest loop that encloses `op`, with no isolated region between them, must be a
 /// `Recurse` loop. Logical and physical loops both count, because a physical loop holds the same
-/// body.
+/// body. A marker that stands directly in a `FETCH` path region is a step that path's walk does
+/// not go through, and needs no loop.
 fn repeat_recurse_in_recurse(ir: &Ir, op: OpId) -> Rule {
+	if is_fetch_path(ir, ir.enclosing_region(op)) {
+		return Ok(());
+	}
 	for (region, kind) in enclosing_regions(ir, op) {
 		let owner = ir.parent_op(region).and_then(|owner| ir.op(owner));
 		if let Some(OpData {
@@ -295,6 +299,26 @@ fn repeat_recurse_in_recurse(ir: &Ir, op: OpId) -> Rule {
 		}
 	}
 	Err("V-E2: the recursion marker stands outside the body of a Recurse loop".into())
+}
+
+/// Whether `region` is a `FETCH` path: a region of a fetch, or one of the trailing regions of a
+/// subscriber its attributes count as fetch paths.
+fn is_fetch_path(ir: &Ir, region: RegionId) -> bool {
+	let Some(owner) = ir.parent_op(region).and_then(|owner| ir.op(owner)) else {
+		return false;
+	};
+	let fetch = match &owner.kind {
+		OpKind::Logical(LogOp::Fetch) | OpKind::Phys(PhysOp::Fetch) => return true,
+		OpKind::Logical(LogOp::Subscriber(attrs)) | OpKind::Phys(PhysOp::Subscriber(attrs)) => {
+			usize::from(attrs.fetch)
+		}
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => return false,
+	};
+	owner
+		.regions
+		.iter()
+		.rposition(|held| *held == region)
+		.is_some_and(|at| at + fetch >= owner.regions.len())
 }
 
 /// V-E3: a cast is a `convert`, never a prefix operator.
@@ -605,7 +629,7 @@ mod tests {
 	};
 	use crate::exec::ir::iface::conversion::Phase;
 	use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, SnapshotId, ValueId};
-	use crate::exec::ir::iface::region_kind::{RegionKind, StatementCommit};
+	use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind, StatementCommit};
 	use crate::exec::ir::iface::statements::{Place, PlacePart};
 	use crate::exec::ir::iface::types::TypeKnowledge;
 	use crate::exec::ir::logical::ops::{LogOp, LoopKind, LoopSink, SourceOrder};
@@ -993,6 +1017,30 @@ mod tests {
 		let inner = fx.closure_body(body);
 		let value = fx.literal(inner);
 		let marker = fx.expr(inner, ExprOp::RepeatRecurse, &[value]);
+		fx.fails(marker, "V-E2");
+	}
+
+	#[test]
+	fn repeat_recurse_passes_as_a_step_of_a_fetch_path() {
+		let mut fx = Fixture::new();
+		let block = fx.statement();
+		let owner = fx.logical(block, LogOp::Fetch);
+		let (_, path) = fx.region(owner, RegionKind::Clause(ClauseRole::Projection), 1);
+		let row = fx.arg(path, 0);
+		let marker = fx.expr(path, ExprOp::RepeatRecurse, &[row]);
+		fx.passes(marker);
+	}
+
+	#[test]
+	fn repeat_recurse_fails_in_a_loop_within_a_fetch_path() {
+		let mut fx = Fixture::new();
+		let block = fx.statement();
+		let owner = fx.logical(block, LogOp::Fetch);
+		let (_, path) = fx.region(owner, RegionKind::Clause(ClauseRole::Projection), 1);
+		let each = fx.logical(path, loop_of(LoopKind::Broadcast));
+		let (_, body) = fx.region(each, RegionKind::Loop, 1);
+		let value = fx.arg(body, 0);
+		let marker = fx.expr(body, ExprOp::RepeatRecurse, &[value]);
 		fx.fails(marker, "V-E2");
 	}
 

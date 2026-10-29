@@ -20,8 +20,8 @@ use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use super::logical::{
-	Flow, Pos, Tail, bind_list, bind_projection, bind_value, enter_row_region, first_result,
-	owner_flow, raise_refused, row_clause, statements_of,
+	Flow, Pos, Tail, bind_list, bind_projection, bind_value, enter_row_region, fetch_path_clause,
+	first_result, owner_flow, raise_refused, row_clause, statements_of,
 };
 use super::match_fold;
 use crate::exec::BoxFut;
@@ -475,7 +475,7 @@ fn bind_live(cx: &mut BindCx<'_>, statement: &LiveStatement) -> Result<Flow, IrE
 			let fetch =
 				cx.emit(OpKind::Logical(LogOp::Fetch), &[row], &[TypeKnowledge::Unknown])?;
 			for path in &paths {
-				row_clause(cx, fetch, RegionKind::Clause(ClauseRole::Projection), path)?;
+				fetch_path_clause(cx, fetch, path)?;
 			}
 			let fetched = first_result(cx, fetch)?;
 			cx.yield_logical(&[fetched])

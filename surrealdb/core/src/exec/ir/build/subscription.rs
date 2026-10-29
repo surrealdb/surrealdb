@@ -55,8 +55,8 @@
 use surrealdb_strand::{Strand, TableName};
 
 use super::logical::{
-	ComputedReads, bind_derivations, columns_of, declared_computed, fields_shape, framed_clause,
-	judged_reads_of, row_clause, unaliased_names,
+	ComputedReads, bind_derivations, columns_of, declared_computed, fetch_path_clause,
+	fields_shape, framed_clause, judged_reads_of, row_clause, unaliased_names,
 };
 use crate::catalog::{CompiledSubscription, Permission, SubscriptionFields};
 use crate::exec::function::FunctionRegistry;
@@ -328,12 +328,11 @@ fn bind_body_of(cx: &mut BindCx<'_>, input: &SubscriptionInput<'_>) -> Result<()
 	if let Some(cond) = &cond {
 		row_clause(cx, op, RegionKind::Clause(ClauseRole::Where), cond)?;
 	}
-	let projected = RegionKind::Clause(ClauseRole::Projection);
 	if let Some(fields) = &columns {
 		bind_columns(cx, op, fields)?;
 	}
 	for path in input.fetch {
-		row_clause(cx, op, projected, path)?;
+		fetch_path_clause(cx, op, path)?;
 	}
 	cx.yield_logical(&[])
 }

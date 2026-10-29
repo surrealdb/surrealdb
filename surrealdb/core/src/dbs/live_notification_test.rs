@@ -311,6 +311,46 @@ async fn test_live_field_list_projects_the_record() {
 	assert!(!obj.contains_key("other"), "a field the list does not name: {obj:?}");
 }
 
+/// A subscription's `FETCH` path ends at a `.@`, as a statement's does: the
+/// link the walk stands on there is fetched into the notification.
+#[tokio::test]
+async fn test_live_fetch_path_ends_at_a_recursion() {
+	let (recv, ds) = new_ds_with_broker().await.unwrap();
+	let (ns, db, tb) = ("test", "test", "post");
+	setup_ns_db_table(&ds, ns, db, tb).await;
+
+	let ses_write = Session::owner().with_ns(ns).with_db(db);
+	let mut res = ds
+		.execute("CREATE person:1 SET name = 'a'", &ses_write, None)
+		.await
+		.expect("execute should not return an Err");
+	res.remove(0).result.expect("CREATE should succeed");
+
+	let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+	let mut res = ds.execute("LIVE SELECT * FROM post FETCH author.@", &ses, None).await.unwrap();
+	res.remove(0).result.expect("the LIVE query registers");
+	while recv.try_recv().is_ok() {}
+
+	let mut res = ds
+		.execute("CREATE post:1 SET author = person:1", &ses_write, None)
+		.await
+		.expect("execute should not return an Err");
+	res.remove(0).result.expect("CREATE should succeed");
+
+	let notif = tokio::time::timeout(tokio::time::Duration::from_secs(3), recv.recv())
+		.await
+		.expect("notification should arrive within timeout")
+		.expect("channel should not be closed");
+	assert_eq!(notif.action, PublicAction::Create);
+	let PublicValue::Object(obj) = notif.result else {
+		panic!("CREATE result should be an object, got: {:?}", notif.result);
+	};
+	let Some(PublicValue::Object(author)) = obj.get("author") else {
+		panic!("the author should be fetched, got: {obj:?}");
+	};
+	assert_eq!(author.get("name"), Some(&PublicValue::String("a".to_string())));
+}
+
 /// SECURITY: a subscription's field list runs as the subscriber, so a
 /// field its principal may not select is not reached through an alias.
 #[tokio::test]
