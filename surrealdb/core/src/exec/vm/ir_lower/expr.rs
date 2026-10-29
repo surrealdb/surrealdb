@@ -232,6 +232,7 @@ pub(super) struct Beside {
 	loop_pads: Option<LoopPads>,
 	statement_doc: Option<Reg>,
 	element: Option<Reg>,
+	each_guard: Option<(ValueId, Reg)>,
 	closure_root: Option<ValueId>,
 }
 
@@ -301,9 +302,12 @@ pub(super) struct Lowerer<'a> {
 	/// comparison of a field reads. `None` reads as an open schema.
 	pub(super) schema: Option<Arc<Schema>>,
 	access_mode: AccessMode,
-	/// The element of a broadcast whose `.*` is taken only over a record id, while the body that
-	/// reads it is lowered for the elements of a collection.
-	pub(super) each_guard: Option<ValueId>,
+	/// The element of the broadcast whose body is being lowered, where that body applies `.*` to
+	/// the element directly, and the register that is true when the broadcast runs its body once
+	/// over a lone value. A `.*` of that element is taken only over a record id while the
+	/// broadcast walks a collection, and as written over a lone value. A pipeline built beside
+	/// ([`Lowerer::beside`]) holds no guard, since the register is not one of its own.
+	pub(super) each_guard: Option<(ValueId, Reg)>,
 	/// The unit table of the compile the lowerer lowers for. A lowerer built without one answers
 	/// `NotYet` for an op that runs a unit.
 	units: Option<&'a mut dyn UnitSink>,
@@ -1223,7 +1227,8 @@ impl<'a> Lowerer<'a> {
 
 	/// Sets aside what a pipeline built beside the one being lowered must not see of it: the
 	/// values lowered, the rows bound, the region entered, the claims recorded, the scope that
-	/// takes a `RETURN`, the document of a statement and the element of a body. The claims
+	/// takes a `RETURN`, the document of a statement, the element of a body and the guard of a
+	/// broadcast's `.*`, whose register is one of the pipeline set aside. The claims
 	/// index the code of the pipeline being lowered, so those of the pipeline built beside are not
 	/// kept when [`Lowerer::rejoin`] returns.
 	pub(super) fn beside(&mut self) -> Beside {
@@ -1238,6 +1243,7 @@ impl<'a> Lowerer<'a> {
 			loop_pads: self.loop_pads.take(),
 			statement_doc: self.statement_doc.take(),
 			element: self.element.take(),
+			each_guard: self.each_guard.take(),
 			closure_root: self.closure_root.take(),
 		}
 	}
@@ -1254,6 +1260,7 @@ impl<'a> Lowerer<'a> {
 		self.loop_pads = beside.loop_pads;
 		self.statement_doc = beside.statement_doc;
 		self.element = beside.element;
+		self.each_guard = beside.each_guard;
 		self.closure_root = beside.closure_root;
 	}
 

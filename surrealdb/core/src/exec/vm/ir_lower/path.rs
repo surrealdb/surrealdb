@@ -108,22 +108,32 @@ impl Lowerer<'_> {
 	/// fetched, a record id fetched, and anything else `NONE`. The records fetched may be of any
 	/// table, so the program's reach is every table.
 	///
-	/// Where the operand is the element of a broadcast over a collection (`each_guard`), the step
+	/// Where the operand is the element of the broadcast whose body is being lowered
+	/// (`each_guard`), the step is chosen when it runs. While the broadcast walks a collection, it
 	/// is taken only over an element that is a record id, and any other element is the step's own
-	/// value.
+	/// value. Over a lone value it is taken as written. Both forms are emitted here, so the body
+	/// that holds the step is lowered once for both of the broadcast's paths.
 	pub(super) fn each(&mut self, data: &OpData) -> Result<Operand, IrError> {
 		self.refuse_in_fold("ir_lower::fold: expr.each")?;
 		self.require_frame(data)?;
 		let [base] = exactly::<1>(data)?;
 		let src = self.value(base)?;
 		self.reaches(Reach::any());
-		if self.each_guard == Some(base) {
+		if let Some((element, single)) = self.each_guard
+			&& element == base
+		{
 			let plain = self.em.reg()?;
 			self.emit(Instr::Load {
 				dst: plain,
 				src,
 			});
+			let lone = self.em.label()?;
 			let end = self.em.label()?;
+			self.emit(Instr::JumpIf {
+				cond: Operand::Reg(single),
+				truthy: true,
+				target: lone,
+			});
 			self.emit(Instr::JumpIfNotRecordId {
 				cond: src,
 				target: end,
@@ -132,6 +142,15 @@ impl Lowerer<'_> {
 				src,
 				dst: plain,
 				frame: None,
+			});
+			self.emit(Instr::Jump {
+				target: end,
+			});
+			self.em.bind(lone)?;
+			self.emit(Instr::Each {
+				src,
+				dst: plain,
+				frame: self.frame.program,
 			});
 			self.em.bind(end)?;
 			return Ok(Operand::Reg(plain));

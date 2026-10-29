@@ -14,11 +14,13 @@
 //! the arrays its results are into the collection by one level when the elements have been walked;
 //! the result of a lone value is never spliced.
 //!
-//! A body that applies `.*` to the element itself takes that step, while it walks a collection,
+//! A body that applies `.*` to the element itself, by an op that stands directly in the body,
+//! takes that step, while it walks a collection,
 //! only over an element that is a record id: any other element is its own step's value, which
 //! `expr.each` is not, because over a value that is not a record id it answers `NONE` or maps
-//! over it. Such a body is lowered for each of the two paths: for the elements, with the step
-//! guarded ([`Lowerer::each_guard`]), and for a lone value, with the step as written.
+//! over it. Over a lone value the step is taken as written. The step reads which path it is on
+//! from the register that marks a lone value ([`Lowerer::each_guard`]), so such a body is lowered
+//! once as well, and a path of `.*` steps nested in broadcasts lowers to code linear in its length.
 //!
 //! # Graph step
 //!
@@ -98,9 +100,10 @@ impl Lowerer<'_> {
 	pub(super) fn broadcast(&mut self, data: &OpData, flatten: bool) -> Result<Operand, IrError> {
 		let [source] = exactly::<1>(data)?;
 		let body = region_at(data, 0, 1)?;
-		if self.applies_each_to_the_element(body)? {
-			return self.broadcast_each(source, body, flatten);
-		}
+		let Some(&element_arg) = self.region_args(body)?.first() else {
+			return Err(IrError::Stale("ir_lower::graph: broadcast arguments"));
+		};
+		let guards_each = self.applies_each_to_the_element(body, element_arg);
 		let src = self.value(source)?;
 		let element = self.em.reg()?;
 		self.emit(Instr::Load {
@@ -144,7 +147,15 @@ impl Lowerer<'_> {
 		});
 		let body_start = self.em.label()?;
 		self.em.bind(body_start)?;
-		let mapped = self.element_value(body, element, &[Operand::Reg(index)])?;
+		// Only a body that applies `.*` to the element directly guards it; any other body leaves
+		// the guard of an enclosing broadcast in place.
+		let outer = self.each_guard;
+		if guards_each {
+			self.each_guard = Some((element_arg, single));
+		}
+		let mapped = self.element_value(body, element, &[Operand::Reg(index)]);
+		self.each_guard = outer;
+		let mapped = mapped?;
 		self.emit(Instr::JumpIf {
 			cond: Operand::Reg(single),
 			truthy: true,
@@ -188,100 +199,15 @@ impl Lowerer<'_> {
 		Ok(Operand::Reg(dst))
 	}
 
-	/// [`Lowerer::broadcast`] of a body that applies `.*` to its element: over an array or a set,
-	/// that step is taken only over an element that is a record id, and any other element is its
-	/// own step's value; over anything else, the body runs once over the value, with the step as
-	/// written. The body is lowered for each of the two paths.
-	fn broadcast_each(
-		&mut self,
-		source: ValueId,
-		body: RegionId,
-		flatten: bool,
-	) -> Result<Operand, IrError> {
-		let Some(&element_arg) = self.region_args(body)?.first() else {
-			return Err(IrError::Stale("ir_lower::graph: broadcast arguments"));
-		};
-		let src = self.value(source)?;
-		let held = self.em.reg()?;
-		self.emit(Instr::Load {
-			dst: held,
-			src,
-		});
-		let items = self.em.reg()?;
-		let dst = self.em.reg()?;
-		let other = self.em.label()?;
-		let done = self.em.label()?;
-		let end = self.em.label()?;
-		self.emit(Instr::MapBegin {
-			src: Operand::Reg(held),
-			items,
-			dst,
-			other,
-			sets: true,
-		});
-		let pos = self.em.reg()?;
-		let zero = self.em.constant(Value::from(0i64))?;
-		self.emit(Instr::Load {
-			dst: pos,
-			src: Operand::Const(zero),
-		});
-		let element = self.em.reg()?;
-		let index = self.em.reg()?;
-		let top = self.em.label()?;
-		self.em.bind(top)?;
-		self.emit(Instr::ElemNext {
-			array: items,
-			pos,
-			elem: element,
-			index,
-			done,
-		});
-		let outer = self.each_guard.replace(element_arg);
-		let mapped = self.element_value(body, element, &[Operand::Reg(index)]);
-		self.each_guard = outer;
-		self.emit(Instr::CollectPush {
-			collection: dst,
-			value: mapped?,
-		});
-		self.emit(Instr::Jump {
-			target: top,
-		});
-		self.em.bind(done)?;
-		if flatten {
-			self.emit(Instr::Nav {
-				op: NavOp::Flatten,
-				src: Operand::Reg(dst),
-				index: None,
-				dst,
-			});
-		}
-		self.emit(Instr::Jump {
-			target: end,
-		});
-		// Anything but an array or a set: the body runs once, over the value itself.
-		self.em.bind(other)?;
-		let position = self.em.reg()?;
-		let once = self.element_value(body, held, &[Operand::Reg(position)])?;
-		self.emit(Instr::Load {
-			dst,
-			src: once,
-		});
-		self.em.bind(end)?;
-		Ok(Operand::Reg(dst))
-	}
-
-	/// Whether an op of `body` applies `expr.each` to the body's first block argument, the
-	/// element.
-	fn applies_each_to_the_element(&self, body: RegionId) -> Result<bool, IrError> {
-		let Some(&element) = self.region_args(body)?.first() else {
-			return Err(IrError::Stale("ir_lower::graph: broadcast arguments"));
-		};
-		Ok(ops_in(self.ir, body).any(|op| {
+	/// Whether an op that stands directly in `body` applies `expr.each` to `element`, the body's
+	/// first block argument.
+	fn applies_each_to_the_element(&self, body: RegionId, element: ValueId) -> bool {
+		ops_in(self.ir, body).any(|op| {
 			self.ir.op(op).is_some_and(|data| {
 				matches!(data.kind, OpKind::Expr(ExprOp::Each))
 					&& data.operands.first() == Some(&element)
 			})
-		}))
+		})
 	}
 }
 
@@ -1165,8 +1091,8 @@ mod tests {
 			let (operand, program) = lower_value(&b.ir, result).expect("the broadcast lowers");
 			let code = code_of(&program);
 			let each = |i: &Instr| matches!(i, Instr::Each { .. });
-			// The body is lowered twice: once for the elements, behind the record-id test, and
-			// once for a lone value, as written.
+			// The body is lowered once. The step it holds has a form for each path: behind the
+			// record-id test for the elements, and as written for a lone value.
 			assert_eq!(code.iter().filter(|i| each(i)).count(), 2);
 			assert_eq!(
 				code.iter().filter(|i| matches!(i, Instr::JumpIfNotRecordId { .. })).count(),
@@ -1179,8 +1105,21 @@ mod tests {
 				.position(|i| matches!(i, Instr::JumpIfNotRecordId { .. }))
 				.expect("tests");
 			let first = code.iter().position(each).expect("takes the step");
-			assert!(next < test && test < first);
-			// A test that fails continues past the step, which leaves the element as it is.
+			let lone = code.iter().rposition(each).expect("takes the step as written");
+			assert!(next < test && test < first && first < lone);
+			// The step reads the register that marks a lone value, and over one jumps to the step
+			// as written.
+			let Instr::JumpIf {
+				truthy: true,
+				target: to_lone,
+				..
+			} = code[test - 1]
+			else {
+				panic!("the step chooses its path before the record-id test")
+			};
+			assert_eq!(to_lone as usize, lone);
+			// A test that fails continues past both forms of the step, which leaves the element as
+			// it is.
 			let Instr::JumpIfNotRecordId {
 				cond,
 				target,
@@ -1188,7 +1127,7 @@ mod tests {
 			else {
 				unreachable!()
 			};
-			assert_eq!(target as usize, first + 1);
+			assert_eq!(target as usize, lone + 1);
 			let Instr::ElemNext {
 				elem,
 				..
@@ -1197,6 +1136,20 @@ mod tests {
 				unreachable!()
 			};
 			assert_eq!(cond, Operand::Reg(elem));
+			let (
+				Instr::Each {
+					dst: guarded,
+					..
+				},
+				Instr::Each {
+					dst: as_written,
+					..
+				},
+			) = (&code[first], &code[lone])
+			else {
+				unreachable!()
+			};
+			assert_eq!(guarded, as_written, "both forms answer in one register");
 			// The collected value is the result, and a flattening broadcast splices it.
 			let push =
 				code.iter().position(|i| matches!(i, Instr::CollectPush { .. })).expect("pushes");
@@ -1227,6 +1180,107 @@ mod tests {
 				flatten
 			);
 		}
+	}
+
+	/// Broadcasts nested `depth` deep over `source`, each body applying `.*` to its element and
+	/// handing the result to the next broadcast, as a path such as `$x.*.*.*[1]` binds.
+	fn nested_each_broadcasts(b: &mut Builder, source: ValueId, depth: usize) -> ValueId {
+		let looped = b.add_phys_value(broadcast_op(), &[source]);
+		b.open_with(
+			looped,
+			RegionKind::Loop,
+			&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+			|b, args| {
+				let stepped = b.add(ExprOp::Each, &[args[0]]);
+				let value = if depth > 1 {
+					nested_each_broadcasts(b, stepped, depth - 1)
+				} else {
+					stepped
+				};
+				b.yield_phys(value);
+			},
+		);
+		b.result_of(looped)
+	}
+
+	#[test]
+	fn nested_broadcasts_over_each_lower_to_code_linear_in_their_depth() {
+		let lengths: Vec<usize> = (1..=10)
+			.map(|depth| {
+				let mut b = Builder::new();
+				let xs = b.add(
+					ExprOp::FreeParam {
+						name: "xs".into(),
+					},
+					&[],
+				);
+				let result = nested_each_broadcasts(&mut b, xs, depth);
+				let (_, program) = lower_value(&b.ir, result).expect("the broadcasts lower");
+				let code = code_of(&program);
+				assert_eq!(
+					code.iter().filter(|i| matches!(i, Instr::Each { .. })).count(),
+					2 * depth,
+					"each body is lowered once, at depth {depth}"
+				);
+				code.len()
+			})
+			.collect();
+		let steps: Vec<usize> = lengths.windows(2).map(|w| w[1] - w[0]).collect();
+		assert!(
+			steps.windows(2).all(|w| w[0] == w[1]),
+			"every level adds the same code: lengths {lengths:?}"
+		);
+	}
+
+	#[test]
+	fn a_broadcast_that_does_not_apply_each_to_its_element_keeps_the_enclosing_guard() {
+		let mut b = Builder::new();
+		let xs = b.add(
+			ExprOp::FreeParam {
+				name: "xs".into(),
+			},
+			&[],
+		);
+		let outer = b.add_phys_value(broadcast_op(), &[xs]);
+		b.open_with(
+			outer,
+			RegionKind::Loop,
+			&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+			|b, args| {
+				let element = args[0];
+				// The outer body applies `.*` to its element directly, so it guards it.
+				let direct = b.add(ExprOp::Each, &[element]);
+				// The inner body applies `.*` to the outer element only, so it guards nothing of
+				// its own and the outer guard holds inside it.
+				let ys = b.add(
+					ExprOp::FreeParam {
+						name: "ys".into(),
+					},
+					&[],
+				);
+				let inner = b.add_phys_value(broadcast_op(), &[ys]);
+				b.open_with(
+					inner,
+					RegionKind::Loop,
+					&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
+					|b, _| {
+						let nested = b.add(ExprOp::Each, &[element]);
+						b.yield_phys(nested);
+					},
+				);
+				let inner = b.result_of(inner);
+				let both = b.add(ExprOp::Array, &[direct, inner]);
+				b.yield_phys(both);
+			},
+		);
+		let result = b.result_of(outer);
+		let (_, program) = lower_value(&b.ir, result).expect("the broadcasts lower");
+		let code = code_of(&program);
+		assert_eq!(
+			code.iter().filter(|i| matches!(i, Instr::JumpIfNotRecordId { .. })).count(),
+			2,
+			"both steps over the outer element are guarded"
+		);
 	}
 
 	#[test]
