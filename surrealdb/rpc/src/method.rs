@@ -28,6 +28,8 @@ pub enum Method {
 	Query,
 	Gql,
 	Graphql,
+	Pgsql,
+	Mysql,
 	Relate,
 	Run,
 	InsertRelation,
@@ -90,6 +92,8 @@ impl Method {
 			"query" => Self::Query,
 			"gql" => Self::Gql,
 			"graphql" => Self::Graphql,
+			"pgsql" => Self::Pgsql,
+			"mysql" => Self::Mysql,
 			"relate" => Self::Relate,
 			"run" => Self::Run,
 			"insert_relation" => Self::InsertRelation,
@@ -140,6 +144,8 @@ impl Method {
 			Self::Query => "query",
 			Self::Gql => "gql",
 			Self::Graphql => "graphql",
+			Self::Pgsql => "pgsql",
+			Self::Mysql => "mysql",
 			Self::Relate => "relate",
 			Self::Run => "run",
 			Self::InsertRelation => "insert_relation",
@@ -223,6 +229,8 @@ mod tests {
 		assert!(!Method::Query.is_transaction_control());
 		assert!(!Method::Graphql.is_transaction_control());
 		assert!(!Method::Gql.is_transaction_control());
+		assert!(!Method::Pgsql.is_transaction_control());
+		assert!(!Method::Mysql.is_transaction_control());
 		assert!(!Method::Create.is_transaction_control());
 		assert!(!Method::Select.is_transaction_control());
 		// Auth methods are deliberately guarded too: record-access
@@ -257,5 +265,17 @@ mod tests {
 		assert!(Method::Graphql.is_valid());
 		// `gql` (GQL) and `graphql` are distinct methods.
 		assert_ne!(Method::Gql, Method::Graphql);
+	}
+
+	#[test]
+	fn sql_dialect_methods_round_trip() {
+		assert_eq!(Method::parse_case_sensitive("pgsql"), Method::Pgsql);
+		assert_eq!(Method::parse_case_insensitive("PgSql"), Method::Pgsql);
+		assert_eq!(Method::Pgsql.to_str(), "pgsql");
+		assert!(Method::Pgsql.is_valid());
+		assert_eq!(Method::parse_case_sensitive("mysql"), Method::Mysql);
+		assert_eq!(Method::parse_case_insensitive("MySQL"), Method::Mysql);
+		assert_eq!(Method::Mysql.to_str(), "mysql");
+		assert!(Method::Mysql.is_valid());
 	}
 }

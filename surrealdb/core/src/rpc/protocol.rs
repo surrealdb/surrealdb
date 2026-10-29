@@ -35,6 +35,7 @@ use crate::observe::{
 	TenantIdentity,
 };
 use crate::rpc::error::{query_timeout_error, types_error_from_anyhow};
+use crate::rpc::sql_dialect;
 use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
 };
@@ -94,6 +95,8 @@ const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
 		| Method::Query
 		| Method::Gql
 		| Method::Graphql
+		| Method::Pgsql
+		| Method::Mysql
 		| Method::Relate
 		| Method::Run
 		| Method::InsertRelation
@@ -206,7 +209,21 @@ pub async fn live_query_owner(
 /// leaves the client an id that every retry finds taken, and a delete committed
 /// but not reported leaves it a session that every retry finds gone. None of
 /// them runs user-defined SurrealQL, so exempting them opens no unbounded work.
-pub(crate) fn bounded_by_query_timeout(method: Method) -> bool {
+/// A `pgsql` or `mysql` call that holds a transaction-control entry is exempt
+/// for the same reason as `commit`.
+pub(crate) fn bounded_by_query_timeout(method: Method, params: &PublicArray) -> bool {
+	let dialect = if method == Method::Pgsql {
+		Some(Dialect::PgSql)
+	} else if method == Method::Mysql {
+		Some(Dialect::MySql)
+	} else {
+		None
+	};
+	if let Some(dialect) = dialect
+		&& sql_dialect::has_transaction_control(params, dialect)
+	{
+		return false;
+	}
 	!method.is_transaction_control() && !matches!(method, Method::Attach | Method::Detach)
 }
 
@@ -534,6 +551,7 @@ pub trait RpcProtocol {
 		method: Method,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
+		let bounded = bounded_by_query_timeout(method, &params);
 		let dispatch = async {
 			// Check if capabilities allow executing the requested RPC method
 			if !self.kvs().allows_rpc_method(&MethodTarget {
@@ -582,6 +600,8 @@ pub trait RpcProtocol {
 				Method::Query => self.query(txn, session, params).await,
 				Method::Gql => self.gql(txn, session, params).await,
 				Method::Graphql => self.graphql(txn, session, params).await,
+				Method::Pgsql => self.pgsql(txn, session, params).await,
+				Method::Mysql => self.mysql(txn, session, params).await,
 				Method::Version => self.version(txn, params).await,
 				Method::Begin => self.begin(txn, session, params).await,
 				Method::Commit => self.commit(txn, session, params).await,
@@ -648,20 +668,24 @@ pub trait RpcProtocol {
 		// the statements executed inside an explicit transaction are still
 		// guarded individually.
 		match self.kvs().query_timeout() {
-			Some(timeout) if bounded_by_query_timeout(method) => {
-				match common::time::timeout(timeout, dispatch).await {
-					Ok(inner) => inner,
-					Err(_elapsed) => {
-						warn!(
-							target: "surrealdb::core::rpc",
-							timeout = ?timeout,
-							method = method.to_str(),
-							"RPC method exceeded the configured query timeout"
-						);
-						Err(query_timeout_error(timeout))
+			Some(timeout) if bounded => match common::time::timeout(timeout, dispatch).await {
+				Ok(inner) => inner,
+				Err(_elapsed) => {
+					warn!(
+						target: "surrealdb::core::rpc",
+						timeout = ?timeout,
+						method = method.to_str(),
+						"RPC method exceeded the configured query timeout"
+					);
+					// A call that ran in an envelope transaction did not touch the session's.
+					if method == Method::Pgsql
+						&& txn.is_none() && let Ok(lock) = self.get_session(&session).await
+					{
+						sql_dialect::fail_open_transaction(&lock).await;
 					}
+					Err(query_timeout_error(timeout))
 				}
-			}
+			},
 			_ => dispatch.await,
 		}
 	}
@@ -1300,6 +1324,7 @@ pub trait RpcProtocol {
 		}
 
 		check_protected_param(&key)?;
+		sql_dialect::check_not_transaction_state(&key)?;
 		match val {
 			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
 			Some(val) => session.variables.insert(key, val),
@@ -1331,6 +1356,7 @@ pub trait RpcProtocol {
 		};
 
 		check_protected_param(&key)?;
+		sql_dialect::check_not_transaction_state(&key)?;
 
 		// Get a write lock on the session
 		let mut session = session_lock.write().await;
@@ -2330,51 +2356,33 @@ pub trait RpcProtocol {
 		}
 		#[cfg(feature = "gql")]
 		{
-			let session_lock = self.get_session(&session_id).await?;
-			let session = session_lock.read().await;
-			// Check if the user is allowed to query
-			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(method_not_allowed(Method::Gql.to_string()));
-			}
-			// Process the method arguments
-			let (query, vars) =
-				extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-					.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
-
-			let PublicValue::String(query) = query else {
-				return Err(invalid_params("Expected query to be string".to_string()));
-			};
-
-			// Specify the query variables
-			let vars = match vars {
-				Some(PublicValue::Object(v)) => {
-					let mut merged = session.variables.clone();
-					merged.extend(v.into());
-					Some(merged)
-				}
-				None | Some(PublicValue::None | PublicValue::Null) => {
-					Some(session.variables.clone())
-				}
-				unexpected => {
-					return Err(invalid_params(format!(
-						"Expected vars to be object, got {unexpected:?}"
-					)));
-				}
-			};
-
-			Ok(DbResult::Query(
-				run_query(
-					self,
-					txn,
-					session_id,
-					&session,
-					QueryForm::Text(&query, Dialect::Gql),
-					vars,
-				)
-				.await
-				.map_err(types_error_from_anyhow)?,
-			))
+			sql_dialect_query(self, txn, session_id, params, Method::Gql, Dialect::Gql).await
 		}
+	}
+
+	/// Run PostgreSQL text against the namespace and database selected on the
+	/// session, as `query` runs SurrealQL: the same variables, transactions,
+	/// live-query registration and per-subject query gate. The `postgres`
+	/// route capability is enforced by the datastore for the dialect itself,
+	/// so no other method can reach the PostgreSQL front end around it.
+	async fn pgsql(
+		&self,
+		txn: Option<Uuid>,
+		session_id: Uuid,
+		params: PublicArray,
+	) -> Result<DbResult, surrealdb_types::Error> {
+		sql_dialect_query(self, txn, session_id, params, Method::Pgsql, Dialect::PgSql).await
+	}
+
+	/// Run MySQL text against the namespace and database selected on the
+	/// session. See [`Self::pgsql`]; the capability is `mysql`.
+	async fn mysql(
+		&self,
+		txn: Option<Uuid>,
+		session_id: Uuid,
+		params: PublicArray,
+	) -> Result<DbResult, surrealdb_types::Error> {
+		sql_dialect_query(self, txn, session_id, params, Method::Mysql, Dialect::MySql).await
 	}
 
 	/// Execute a GraphQL request against the namespace and database selected on
@@ -2659,9 +2667,556 @@ pub trait RpcProtocol {
 	}
 }
 
+/// The body of the `gql`, `pgsql` and `mysql` methods: read
+/// `(statements, vars?, options?)`, layer the call's variables over the
+/// session's, and run the text in `dialect`.
+///
+/// `statements` is one string or a batch: an array of strings and
+/// `{ text, vars? }` objects, run in order with each entry's variables over the
+/// call's. `gql` answers with the results of all entries in one array. `pgsql`
+/// and `mysql` answer with the object of [`sql_dialect::response`]: a
+/// transaction-control statement or MySQL `USE` that is an entry of its own acts
+/// on the RPC session, a statement that fails is an `ERR` entry that does not
+/// stop the entries after it, and `options` selects array rows or a describe.
+async fn sql_dialect_query<T>(
+	this: &T,
+	txn: Option<Uuid>,
+	session_id: Uuid,
+	params: PublicArray,
+	method: Method,
+	dialect: Dialect,
+) -> Result<DbResult, surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+{
+	let session_lock = this.get_session(&session_id).await?;
+	{
+		let session = session_lock.read().await;
+		if !this.kvs().allows_query_by_subject(session.au.as_ref()) {
+			return Err(method_not_allowed(method.to_string()));
+		}
+	}
+	let (statements, vars, options) =
+		extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(params.into_vec())
+			.ok_or(invalid_params(
+				"Expected (statements:string|array, vars:object, options:object)".to_string(),
+			))?;
+	let options = sql_dialect::parse_options(options)?;
+	if options.atomic && options.describe {
+		return Err(invalid_params(
+			"The options `atomic` and `describe` cannot be combined".to_string(),
+		));
+	}
+	if dialect == Dialect::Gql
+		&& (options.describe || options.row_array || options.atomic || options.value_text)
+	{
+		return Err(invalid_params("The options are not supported for gql".to_string()));
+	}
+	let call_vars = match vars {
+		Some(PublicValue::Object(v)) => Some(v),
+		None | Some(PublicValue::None | PublicValue::Null) => None,
+		unexpected => {
+			return Err(invalid_params(format!("Expected vars to be object, got {unexpected:?}")));
+		}
+	};
+	let batch = if let PublicValue::Array(batch) = statements {
+		batch.into_vec()
+	} else {
+		vec![statements]
+	};
+	let mut entries: Vec<(String, Option<surrealdb_types::Object>)> = Vec::new();
+	for entry in batch {
+		if let PublicValue::String(text) = entry {
+			entries.push((text, None));
+		} else if let PublicValue::Object(mut object) = entry {
+			let Some(PublicValue::String(text)) = object.remove("text") else {
+				return Err(invalid_params(
+					"Expected a batch entry to have a `text` string".to_string(),
+				));
+			};
+			let vars = match object.remove("vars") {
+				Some(PublicValue::Object(v)) => Some(v),
+				None | Some(PublicValue::None | PublicValue::Null) => None,
+				unexpected => {
+					return Err(invalid_params(format!(
+						"Expected entry vars to be object, got {unexpected:?}"
+					)));
+				}
+			};
+			entries.push((text, vars));
+		} else {
+			return Err(invalid_params(
+				"Expected statements to be a string or an array of strings and objects".to_string(),
+			));
+		}
+	}
+	if dialect == Dialect::Gql {
+		let session = session_lock.read().await;
+		let mut results = Vec::new();
+		for (text, entry_vars) in entries {
+			let vars = Some(merge_vars(&session.variables, call_vars.as_ref(), entry_vars));
+			results.extend(
+				run_query(this, txn, session_id, &session, QueryForm::Text(&text, dialect), vars)
+					.await
+					.map_err(types_error_from_anyhow)?,
+			);
+		}
+		return Ok(DbResult::Query(results));
+	}
+	// Control statements and `describe` never reach `QuerySource`, so the dialect's
+	// capability is enforced here for every call.
+	this.kvs().check_sql_dialect(dialect)?;
+	// The session preflight a query runs (expiry, anonymous access) applies to control
+	// statements and `describe` too, which never reach the executor.
+	this.kvs().check_session(&*session_lock.read().await)?;
+	// An envelope transaction that does not exist fails the call before any entry can act on the
+	// session.
+	if let Some(id) = txn {
+		this.get_tx(id).await?;
+	}
+	sql_dialect::live_transaction(this, &session_lock).await;
+	let started = web_time::Instant::now();
+	if options.atomic {
+		if txn.is_some() {
+			return Err(invalid_params(
+				"An atomic call opens its own transaction and cannot run inside an envelope transaction"
+					.to_string(),
+			));
+		}
+		let ctx = SqlPart {
+			session_id,
+			method,
+			dialect,
+			options,
+			started,
+		};
+		return run_sql_atomic(this, &session_lock, &ctx, entries, call_vars.as_ref()).await;
+	}
+	let mut statements = Vec::new();
+	let mut described_params = None;
+	for (text, entry_vars) in entries {
+		if options.describe {
+			let (open, _) = sql_dialect::live_transaction(this, &session_lock).await;
+			let transaction = match txn.or(open) {
+				Some(id) => Some(this.get_tx(id).await?),
+				None => None,
+			};
+			let session = session_lock.read().await;
+			check_dialect_subject(this, &session, method)?;
+			let described =
+				sql_dialect::describe(this.kvs(), &session, transaction.as_ref(), dialect, &text);
+			// A describe stops when the call is cancelled, like a statement does.
+			let outcome = match CALL_CANCEL.try_with(Clone::clone) {
+				Ok(cancel) => tokio::select! {
+					biased;
+					() = cancel.cancelled() => None,
+					outcome = described => Some(outcome),
+				},
+				Err(_) => Some(described.await),
+			};
+			let Some(outcome) = outcome else {
+				statements.push(sql_dialect::cancelled_entry(dialect));
+				continue;
+			};
+			let (entry, params) = outcome?;
+			statements.push(entry);
+			described_params = Some(params);
+			continue;
+		}
+		let (open_txn, failed) = sql_dialect::live_transaction(this, &session_lock).await;
+		let control = sql_dialect::control(&text, dialect);
+		if control.is_some() {
+			check_dialect_subject(this, &*session_lock.read().await, method)?;
+		}
+		let entry = match control {
+			Some(sql_dialect::Control::Begin)
+				if open_txn.is_some() && failed && dialect == Dialect::PgSql =>
+			{
+				sql_dialect::aborted_entry()
+			}
+			Some(sql_dialect::Control::Begin) if open_txn.is_some() => {
+				sql_dialect::tagged_entry("BEGIN")
+			}
+			Some(sql_dialect::Control::Begin) => {
+				match this.begin(None, session_id, PublicArray::new()).await {
+					Ok(DbResult::Other(PublicValue::Uuid(id))) => {
+						let mut session = session_lock.write().await;
+						// The subject is checked on the guard that publishes the transaction, so a
+						// principal changed meanwhile cannot keep one it was not permitted.
+						if let Err(err) = check_dialect_subject(this, &session, method) {
+							drop(session);
+							let arg: PublicArray = vec![PublicValue::Uuid(id)].into();
+							let _ = this.cancel(None, session_id, arg).await;
+							return Err(err);
+						}
+						if session.variables.get(sql_dialect::TXN_VAR).is_some() {
+							// A concurrent call opened the session's transaction first.
+							drop(session);
+							let arg: PublicArray = vec![PublicValue::Uuid(id)].into();
+							let _ = this.cancel(None, session_id, arg).await;
+						} else {
+							session
+								.variables
+								.insert(sql_dialect::TXN_VAR.to_owned(), PublicValue::Uuid(id));
+							session.variables.remove(sql_dialect::TXN_FAILED_VAR);
+						}
+						sql_dialect::tagged_entry("BEGIN")
+					}
+					Ok(_) => sql_dialect::error_entry(
+						"the transaction could not be opened",
+						"XX000",
+						None,
+					),
+					Err(err) => sql_dialect::engine_error_entry(&err, dialect),
+				}
+			}
+			Some(control @ (sql_dialect::Control::Commit | sql_dialect::Control::Rollback)) => {
+				let tag = if matches!(control, sql_dialect::Control::Commit) {
+					"COMMIT"
+				} else {
+					"ROLLBACK"
+				};
+				let Some(id) = open_txn else {
+					statements.push(sql_dialect::tagged_entry(tag));
+					continue;
+				};
+				let arg: PublicArray = vec![PublicValue::Uuid(PublicUuid::from(id))].into();
+				let outcome = if matches!(control, sql_dialect::Control::Commit) && !failed {
+					this.commit(None, session_id, arg).await
+				} else {
+					this.cancel(None, session_id, arg).await
+				};
+				let mut session = session_lock.write().await;
+				// Only the transaction that was finalised is cleared; a concurrent call may
+				// have opened another while this one awaited storage.
+				let finalised = matches!(
+					session.variables.get(sql_dialect::TXN_VAR),
+					Some(PublicValue::Uuid(current)) if current.into_inner() == id
+				);
+				if finalised {
+					session.variables.remove(sql_dialect::TXN_VAR);
+					session.variables.remove(sql_dialect::TXN_FAILED_VAR);
+				}
+				drop(session);
+				match outcome {
+					Ok(_) => sql_dialect::tagged_entry(tag),
+					Err(err) => sql_dialect::engine_error_entry(&err, dialect),
+				}
+			}
+			Some(
+				control @ (sql_dialect::Control::Set(..)
+				| sql_dialect::Control::Show(_)
+				| sql_dialect::Control::Reset(_)),
+			) => {
+				if failed {
+					sql_dialect::aborted_entry()
+				} else {
+					let entry = sql_dialect::apply_setting(&session_lock, &control, |session| {
+						check_dialect_subject(this, session, method)
+					})
+					.await?;
+					if sql_dialect::is_error_entry(&entry)
+						&& txn.is_none() && dialect == Dialect::PgSql
+						&& let Some(open) = open_txn
+					{
+						sql_dialect::mark_failed(&session_lock, open).await;
+					}
+					entry
+				}
+			}
+			Some(sql_dialect::Control::Use(database)) => {
+				let args: PublicArray =
+					vec![PublicValue::None, PublicValue::String(database)].into();
+				match this.yuse(session_id, args).await {
+					Ok(_) => sql_dialect::tagged_entry("USE"),
+					Err(err) => sql_dialect::engine_error_entry(&err, dialect),
+				}
+			}
+			None if failed && dialect == Dialect::PgSql && txn.is_none() => {
+				sql_dialect::aborted_entry()
+			}
+			None => {
+				// Each statement of an entry runs on its own so that it answers with one entry
+				// however many engine statements it lowers to. The first failure stops the
+				// statements after it, as a failed PostgreSQL transaction or a failed
+				// multi-statement text does.
+				// An envelope transaction overrides the session's, and its failures are not the
+				// session transaction's.
+				let in_pg_txn = txn.is_none() && open_txn.is_some() && dialect == Dialect::PgSql;
+				let parts = sql_dialect::split_statements(&text, dialect)
+					.unwrap_or_else(|| vec![text.clone()]);
+				let mut aborted = false;
+				for part in parts {
+					if aborted {
+						statements.push(if in_pg_txn {
+							sql_dialect::aborted_entry()
+						} else {
+							sql_dialect::skipped_entry(dialect)
+						});
+						continue;
+					}
+					let transaction = match txn.or(open_txn) {
+						Some(id) => match this.get_tx(id).await {
+							Ok(transaction) => Some(transaction),
+							Err(err) => {
+								aborted = true;
+								statements.push(sql_dialect::engine_error_entry(&err, dialect));
+								if let Some(open) = open_txn.filter(|_| in_pg_txn) {
+									sql_dialect::mark_failed(&session_lock, open).await;
+								}
+								continue;
+							}
+						},
+						None => None,
+					};
+					let outcome = run_sql_part(
+						this,
+						&session_lock,
+						&SqlPart {
+							session_id,
+							method,
+							dialect,
+							options,
+							started,
+						},
+						transaction,
+						&part,
+						call_vars.as_ref(),
+						entry_vars.clone(),
+					)
+					.await;
+					let (entry, errored) = match (outcome, open_txn.filter(|_| in_pg_txn)) {
+						(Ok(done), _) => done,
+						(Err(err), open) => {
+							// A statement that hit the call's deadline, or was refused, leaves the
+							// PostgreSQL transaction failed.
+							if let Some(open) = open {
+								sql_dialect::mark_failed(&session_lock, open).await;
+							}
+							return Err(err);
+						}
+					};
+					aborted = errored;
+					statements.push(entry);
+					if aborted && let Some(open) = open_txn.filter(|_| in_pg_txn) {
+						sql_dialect::mark_failed(&session_lock, open).await;
+					}
+				}
+				continue;
+			}
+		};
+		statements.push(entry);
+	}
+	let session = session_lock.read().await;
+	Ok(DbResult::Other(sql_dialect::response(statements, described_params, &session)))
+}
+
+/// Run every statement of `entries` in one transaction of its own, committing only if all succeed.
+/// After the first failure the statements that follow are not run and the transaction is
+/// cancelled, so the response reports `committed: false`. A session that holds a transaction
+/// refuses the call, and control statements are not allowed inside it.
+async fn run_sql_atomic<T>(
+	this: &T,
+	session_lock: &RwLock<Session>,
+	ctx: &SqlPart,
+	entries: Vec<(String, Option<surrealdb_types::Object>)>,
+	call_vars: Option<&surrealdb_types::Object>,
+) -> Result<DbResult, surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+{
+	let (open, _) = sql_dialect::live_transaction(this, session_lock).await;
+	if open.is_some() {
+		return Err(invalid_params(
+			"A transaction is already active on the session; an atomic call opens its own"
+				.to_string(),
+		));
+	}
+	let (transaction, _) =
+		this.kvs().begin_transaction(None, None).await.map_err(types_error_from_anyhow)?;
+	let transaction = Arc::new(transaction);
+	let mut statements = Vec::new();
+	let mut failed = false;
+	for (text, entry_vars) in entries {
+		let parts =
+			sql_dialect::split_statements(&text, ctx.dialect).unwrap_or_else(|| vec![text.clone()]);
+		for part in parts {
+			if failed {
+				statements.push(sql_dialect::aborted_entry());
+				continue;
+			}
+			if sql_dialect::is_session_statement(&part, ctx.dialect) {
+				failed = true;
+				statements.push(sql_dialect::error_entry(
+					"session and transaction statements are not allowed in an atomic call",
+					"25001",
+					(ctx.dialect == Dialect::MySql).then_some(1400),
+				));
+				continue;
+			}
+			match run_sql_part(
+				this,
+				session_lock,
+				ctx,
+				Some(Arc::clone(&transaction)),
+				&part,
+				call_vars,
+				entry_vars.clone(),
+			)
+			.await
+			{
+				Ok((entry, errored)) => {
+					statements.push(entry);
+					failed = errored;
+				}
+				Err(err) => {
+					let _ = transaction.cancel().await;
+					return Err(err);
+				}
+			}
+		}
+	}
+	if failed {
+		let _ = transaction.cancel().await;
+		return Ok(DbResult::Other(sql_dialect::response_atomic(statements, false)));
+	}
+	transaction.commit().await.map_err(types_error_from_anyhow)?;
+	Ok(DbResult::Other(sql_dialect::response_atomic(statements, true)))
+}
+
+/// The variables a statement runs with: the session's, then the call's, then the entry's.
+fn merge_vars(
+	base: &PublicVariables,
+	call: Option<&surrealdb_types::Object>,
+	entry: Option<surrealdb_types::Object>,
+) -> PublicVariables {
+	let mut merged = base.clone();
+	if let Some(vars) = call {
+		merged.extend(vars.clone().into());
+	}
+	if let Some(vars) = entry {
+		merged.extend(vars.into());
+	}
+	merged
+}
+
+/// What every statement of one `pgsql` or `mysql` call shares.
+struct SqlPart {
+	session_id: Uuid,
+	method: Method,
+	dialect: Dialect,
+	options: sql_dialect::Options,
+	/// When the call started, from which the whole call's query-timeout deadline is measured.
+	started: web_time::Instant,
+}
+
+/// Await `work` within what is left of the query timeout of a call that started at `started`; the
+/// call fails with the timeout error once it is spent. Without a configured timeout it is awaited
+/// as it is.
+async fn within_deadline<T, F>(
+	this: &T,
+	started: web_time::Instant,
+	work: F,
+) -> Result<F::Output, surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+	F: std::future::Future,
+{
+	let Some(limit) = this.kvs().query_timeout() else {
+		return Ok(work.await);
+	};
+	let remaining = limit.saturating_sub(started.elapsed());
+	common::time::timeout(remaining, work).await.map_err(|_| query_timeout_error(limit))
+}
+
+/// Run one SQL statement `part` in `transaction` (or its own transaction) and shape its one
+/// entry. The flag is whether it failed. An `Err` is a failure of the call itself: a refused
+/// subject, a denied dialect or a spent deadline.
+async fn run_sql_part<T>(
+	this: &T,
+	session_lock: &RwLock<Session>,
+	ctx: &SqlPart,
+	transaction: Option<Arc<crate::kvs::Transaction>>,
+	part: &str,
+	call_vars: Option<&surrealdb_types::Object>,
+	entry_vars: Option<surrealdb_types::Object>,
+) -> Result<(PublicValue, bool), surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+{
+	let analysis = {
+		let session = session_lock.read().await;
+		check_dialect_subject(this, &session, ctx.method)?;
+		within_deadline(
+			this,
+			ctx.started,
+			sql_dialect::analyse(this.kvs(), &session, transaction.as_ref(), ctx.dialect, part),
+		)
+		.await?
+	};
+	let outcome = {
+		let session = session_lock.read().await;
+		check_dialect_subject(this, &session, ctx.method)?;
+		let vars = Some(merge_vars(&session.variables, call_vars, entry_vars));
+		let run = run_query_in(
+			this,
+			transaction,
+			ctx.session_id,
+			&session,
+			QueryForm::Text(part, ctx.dialect),
+			vars,
+			None,
+		);
+		// A call with a transaction-control entry is exempt from the method-level guard, so its
+		// other statements share one deadline measured here.
+		match within_deadline(this, ctx.started, run).await {
+			Ok(outcome) => outcome,
+			Err(err) => return Err(err),
+		}
+	};
+	match outcome {
+		Ok(results) => {
+			let (entry, errored) =
+				sql_dialect::statement_entry(results, ctx.dialect, ctx.options, analysis.as_ref());
+			let entry = if errored {
+				sql_dialect::char_position(entry, part)
+			} else {
+				entry
+			};
+			Ok((entry, errored))
+		}
+		Err(err) => {
+			let err = types_error_from_anyhow(err);
+			if err.is_not_allowed() {
+				return Err(err);
+			}
+			let entry = sql_dialect::engine_error_entry(&err, ctx.dialect);
+			Ok((sql_dialect::char_position(entry, part), true))
+		}
+	}
+}
+
+/// The subject gate and session preflight, applied to the session guard a statement is about to
+/// run with, so a principal change between the call's first check and this one cannot slip a
+/// subject the gate would refuse past it.
+fn check_dialect_subject<T>(
+	this: &T,
+	session: &Session,
+	method: Method,
+) -> Result<(), surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+{
+	if !this.kvs().allows_query_by_subject(session.au.as_ref()) {
+		return Err(method_not_allowed(method.to_string()));
+	}
+	this.kvs().check_session(session)
+}
+
 enum QueryForm<'a> {
-	/// Query text in the given dialect. The `gql` handler is the only caller
-	/// that names a dialect; every other one submits SurrealQL.
+	/// Query text in the given dialect. The `gql`, `pgsql` and `mysql`
+	/// handlers are the only callers that name one; every other one submits
+	/// SurrealQL.
 	Text(&'a str, Dialect),
 	Parsed(Ast),
 }
@@ -2858,17 +3413,36 @@ where
 		return Err(bad_lq_config().into());
 	}
 
-	let cancel = this.cancel_handle();
-	let source = match query {
-		QueryForm::Text(text, dialect) => QuerySource::in_dialect(text, dialect),
-		QueryForm::Parsed(ast) => QuerySource::Ast(ast),
-	};
 	// A transaction UUID names a client-owned transaction to run inside — fail
 	// if it is not one this connection holds. Without one the executor creates
 	// and finalises a transaction per statement.
 	let transaction = match txn {
 		Some(txn_id) => Some(this.get_tx(txn_id).await.map_err(anyhow::Error::from)?),
 		None => None,
+	};
+	run_query_in(this, transaction, session_id, session, query, vars, read_only).await
+}
+
+/// [`run_query_as`] with the transaction already in hand, for a caller that opened one itself.
+async fn run_query_in<T>(
+	this: &T,
+	transaction: Option<Arc<crate::kvs::Transaction>>,
+	session_id: Uuid,
+	session: &Session,
+	query: QueryForm<'_>,
+	vars: Option<PublicVariables>,
+	read_only: Option<ReadOnlyOptions>,
+) -> Result<Vec<QueryResult>>
+where
+	T: RpcProtocol + ?Sized,
+{
+	if !T::LQ_SUPPORT && session.rt {
+		return Err(bad_lq_config().into());
+	}
+	let cancel = CALL_CANCEL.try_with(Clone::clone).ok().or_else(|| this.cancel_handle());
+	let source = match query {
+		QueryForm::Text(text, dialect) => QuerySource::in_dialect(text, dialect),
+		QueryForm::Parsed(ast) => QuerySource::Ast(ast),
 	};
 	let res = this
 		.kvs()
@@ -2905,6 +3479,21 @@ where
 	}
 	// Return the result to the client
 	Ok(res)
+}
+
+tokio::task_local! {
+	/// The cancel handle of the `pgsql` or `mysql` call a transport is dispatching, which the
+	/// call's statements are cancelled through in place of the connection's.
+	static CALL_CANCEL: CancelHandle;
+}
+
+/// Run `dispatch`, one `pgsql` or `mysql` call, so that tripping `handle` cancels the statement
+/// it is running. A transport trips it to cancel that one request.
+pub async fn with_call_cancel<F: std::future::Future>(
+	handle: CancelHandle,
+	dispatch: F,
+) -> F::Output {
+	CALL_CANCEL.scope(handle, dispatch).await
 }
 
 tokio::task_local! {
@@ -3153,11 +3742,883 @@ mod tests {
 		let exempt =
 			[Method::Begin, Method::Commit, Method::Cancel, Method::Attach, Method::Detach];
 		for method in exempt {
-			assert!(!bounded_by_query_timeout(method), "{method} must not be cut short");
+			assert!(
+				!bounded_by_query_timeout(method, &PublicArray::new()),
+				"{method} must not be cut short"
+			);
+		}
+		let commit: PublicArray = vec![PublicValue::String("COMMIT".into())].into();
+		for method in [Method::Pgsql, Method::Mysql] {
+			assert!(!bounded_by_query_timeout(method, &commit), "{method} COMMIT must not be cut");
+			assert!(
+				bounded_by_query_timeout(method, &PublicArray::new()),
+				"{method} queries are bounded"
+			);
 		}
 		for method in [Method::Query, Method::Signin, Method::Signup, Method::Refresh, Method::Use]
 		{
-			assert!(bounded_by_query_timeout(method), "{method} must be bounded");
+			assert!(
+				bounded_by_query_timeout(method, &PublicArray::new()),
+				"{method} must be bounded"
+			);
+		}
+	}
+
+	/// The `pgsql` and `mysql` methods under test: the method, the dialect's
+	/// capability name, and a parameterised lookup in that dialect's syntax.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[allow(unused_mut, clippy::vec_init_then_push)]
+	fn sql_dialect_methods() -> Vec<(Method, &'static str, &'static str)> {
+		let mut methods = Vec::new();
+		#[cfg(feature = "postgres")]
+		methods.push((Method::Pgsql, "postgres", "SELECT name FROM person WHERE name = $1"));
+		#[cfg(feature = "mysql")]
+		methods.push((Method::Mysql, "mysql", "SELECT name FROM person WHERE name = ?"));
+		methods
+	}
+
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn text_params(text: &str, vars: Option<PublicValue>) -> PublicArray {
+		let mut params = vec![PublicValue::String(text.to_owned())];
+		params.extend(vars);
+		params.into()
+	}
+
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn number_value(n: i64) -> PublicValue {
+		PublicValue::Number(surrealdb_types::Number::Int(n))
+	}
+
+	/// The statement entries of a dialect method's response object.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn statements_of(
+		res: &Result<DbResult, surrealdb_types::Error>,
+	) -> Vec<surrealdb_types::Object> {
+		let Ok(DbResult::Other(PublicValue::Object(response))) = res else {
+			return Vec::new();
+		};
+		let Some(PublicValue::Array(statements)) = response.get("statements") else {
+			return Vec::new();
+		};
+		statements
+			.clone()
+			.into_vec()
+			.into_iter()
+			.filter_map(|entry| {
+				if let PublicValue::Object(object) = entry {
+					Some(object)
+				} else {
+					None
+				}
+			})
+			.collect()
+	}
+
+	/// The rows of one statement entry.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn rows_of(entry: &surrealdb_types::Object) -> Vec<PublicValue> {
+		match entry.get("rows") {
+			Some(PublicValue::Array(rows)) => rows.clone().into_vec(),
+			_ => Vec::new(),
+		}
+	}
+
+	/// Whether a dialect method's response holds at least one row.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	fn has_rows(res: &Result<DbResult, surrealdb_types::Error>) -> bool {
+		statements_of(res).iter().any(|entry| !rows_of(entry).is_empty())
+	}
+
+	/// Each dialect method runs text in its dialect against the session's
+	/// namespace and database, with the call's variables, and what one session
+	/// reads is confined to the database it selected.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_run_text_per_session() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let (a, b) = (Uuid::from_u128(51), Uuid::from_u128(52));
+		for (sid, db) in [(a, "a"), (b, "b")] {
+			rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+			rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", db)).await.unwrap();
+		}
+		let create = text_params("CREATE person:tobie SET name = 'Tobie'", None);
+		rpc.execute(None, a, Some(a), Method::Query, create).await.unwrap();
+		rpc.execute(
+			None,
+			b,
+			Some(b),
+			Method::Query,
+			text_params("DEFINE TABLE person SCHEMALESS", None),
+		)
+		.await
+		.unwrap();
+		for (method, _, lookup) in sql_dialect_methods() {
+			let vars = PublicValue::Object(surrealdb_types::object! { _1: "Tobie" });
+			let found = rpc
+				.execute(None, a, Some(a), method, text_params(lookup, Some(vars.clone())))
+				.await;
+			assert!(found.is_ok(), "{method} failed: {found:?}");
+			let statements = statements_of(&found);
+			assert_eq!(
+				rows_of(&statements[0]),
+				vec![PublicValue::Object(surrealdb_types::object! { name: "Tobie" })],
+				"{method} found no row"
+			);
+			let other =
+				rpc.execute(None, b, Some(b), method, text_params(lookup, Some(vars))).await;
+			assert!(!has_rows(&other), "{method} leaked a row across sessions: {other:?}");
+		}
+	}
+
+	/// Malformed text and malformed arguments are refused with an error rather
+	/// than run.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_refuse_bad_input() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(53);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		for (method, _, _) in sql_dialect_methods() {
+			let res =
+				rpc.execute(None, sid, Some(sid), method, text_params("SELEC ((", None)).await;
+			assert_eq!(
+				statements_of(&res)[0].get("status"),
+				Some(&PublicValue::String("ERR".into())),
+				"{method}: unparsable text is an error entry"
+			);
+			rpc.execute(None, sid, Some(sid), method, vec![PublicValue::None].into())
+				.await
+				.expect_err("non-string text is an error");
+			rpc.execute(None, sid, Some(sid), method, PublicArray::new())
+				.await
+				.expect_err("missing text is an error");
+			let bad_vars = Some(PublicValue::String("x".to_owned()));
+			rpc.execute(None, sid, Some(sid), method, text_params("SELECT 1", bad_vars))
+				.await
+				.expect_err("non-object vars are an error");
+		}
+	}
+
+	/// A call may carry `options` and a batch of statements: defaults are
+	/// accepted, an option asking for behaviour the body lacks is refused, and
+	/// a batch returns the results of its entries in order.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_take_options_and_batches() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(57);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let with_options = |text: &str, options: surrealdb_types::Object| -> PublicArray {
+			vec![PublicValue::String(text.into()), PublicValue::None, PublicValue::Object(options)]
+				.into()
+		};
+		for (method, _, _) in sql_dialect_methods() {
+			let res = rpc
+				.execute(
+					None,
+					sid,
+					Some(sid),
+					method,
+					with_options("SELECT 1 AS a", surrealdb_types::object! { rowMode: "array" }),
+				)
+				.await;
+			let statements = statements_of(&res);
+			assert_eq!(
+				rows_of(&statements[0]),
+				vec![PublicValue::Array(surrealdb_types::array![1])],
+				"{method} array rows"
+			);
+			for refused in [
+				surrealdb_types::object! { valueMode: "binary" },
+				surrealdb_types::object! { rowMode: "tuples" },
+				surrealdb_types::object! { nonsense: true },
+			] {
+				rpc.execute(None, sid, Some(sid), method, with_options("SELECT 1", refused))
+					.await
+					.expect_err("an unsupported option is refused");
+			}
+			let batch = PublicValue::Array(surrealdb_types::array![
+				"SELEC ((",
+				"SELECT 1",
+				surrealdb_types::object! { text: "SELECT 2" }
+			]);
+			let res = rpc.execute(None, sid, Some(sid), method, vec![batch].into()).await;
+			let statements = statements_of(&res);
+			assert_eq!(statements.len(), 3, "{method}");
+			assert_eq!(
+				statements[0].get("status"),
+				Some(&PublicValue::String("ERR".into())),
+				"{method} parse error is an entry"
+			);
+			assert!(
+				matches!(
+					statements[0].get("error"),
+					Some(PublicValue::Object(error)) if matches!(error.get("sqlstate"), Some(PublicValue::String(_)))
+				),
+				"{method} error carries a sqlstate"
+			);
+			assert!(!rows_of(&statements[1]).is_empty(), "{method} runs after a failed entry");
+			assert!(!rows_of(&statements[2]).is_empty(), "{method}");
+		}
+	}
+
+	/// Each SQL statement of a text answers with one entry, however many engine
+	/// statements it lowers to, and a failure stops the statements after it.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_answer_one_entry_per_statement() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(62);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		for (method, _, _) in sql_dialect_methods() {
+			let res = rpc
+				.execute(None, sid, Some(sid), method, text_params("SELECT 1; SELECT 2", None))
+				.await;
+			assert_eq!(statements_of(&res).len(), 2, "{method} one entry per statement");
+			let ddl = if method == Method::Pgsql {
+				"CREATE TABLE widget_pg (a int, b text, c int)"
+			} else {
+				"CREATE TABLE widget_my (a INT, b TEXT, c INT)"
+			};
+			let res = rpc.execute(None, sid, Some(sid), method, text_params(ddl, None)).await;
+			let statements = statements_of(&res);
+			assert_eq!(statements.len(), 1, "{method} DDL answers with one entry: {res:?}");
+			assert_eq!(
+				statements[0].get("status"),
+				Some(&PublicValue::String("OK".into())),
+				"{method}: {res:?}"
+			);
+			let text = "SELECT * FROM missing_table; SELECT 1";
+			let res = rpc.execute(None, sid, Some(sid), method, text_params(text, None)).await;
+			let statements = statements_of(&res);
+			if statements.len() == 2 {
+				assert_eq!(statements[0].get("status"), Some(&PublicValue::String("ERR".into())));
+				assert_eq!(
+					statements[1].get("status"),
+					Some(&PublicValue::String("ERR".into())),
+					"{method} a failure stops the statements after it"
+				);
+			}
+		}
+	}
+
+	/// A result carries its columns in projection order with their wire types, and
+	/// a command tag with the affected-row count.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_results_are_typed_and_tagged() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(63);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let seed =
+			text_params("DEFINE TABLE person SCHEMALESS; CREATE person:a SET name = 'a'", None);
+		rpc.execute(None, sid, Some(sid), Method::Query, seed).await.unwrap();
+		let array = PublicValue::Object(surrealdb_types::object! { rowMode: "array" });
+		for (method, _, _) in sql_dialect_methods() {
+			let params: PublicArray = vec![
+				PublicValue::String("SELECT 1 AS b, 2 AS a".into()),
+				PublicValue::None,
+				array.clone(),
+			]
+			.into();
+			let res = rpc.execute(None, sid, Some(sid), method, params).await;
+			let statements = statements_of(&res);
+			let Some(PublicValue::Array(columns)) = statements[0].get("columns") else {
+				panic!("{method} carries no columns: {res:?}");
+			};
+			let names: Vec<_> = columns
+				.iter()
+				.filter_map(|column| {
+					if let PublicValue::Object(column) = column
+						&& let Some(PublicValue::String(name)) = column.get("name")
+					{
+						Some(name.clone())
+					} else {
+						None
+					}
+				})
+				.collect();
+			assert_eq!(names, ["b", "a"], "{method} projection order: {res:?}");
+			assert!(
+				columns
+					.iter()
+					.all(|column| matches!(column, PublicValue::Object(c) if matches!(c.get("type"), Some(PublicValue::Object(_))))),
+				"{method} every column is typed: {res:?}"
+			);
+			assert_eq!(
+				rows_of(&statements[0]),
+				vec![PublicValue::Array(surrealdb_types::array![1, 2])],
+				"{method}"
+			);
+			let Some(PublicValue::Object(command)) = statements[0].get("command") else {
+				panic!("{method} carries no command: {res:?}");
+			};
+			let tag = if method == Method::Pgsql {
+				"SELECT 1"
+			} else {
+				"SELECT"
+			};
+			assert_eq!(command.get("tag"), Some(&PublicValue::String(tag.into())), "{method}");
+			let insert = "INSERT INTO person (name) VALUES ('z')";
+			let res = rpc.execute(None, sid, Some(sid), method, text_params(insert, None)).await;
+			let statements = statements_of(&res);
+			let Some(PublicValue::Object(command)) = statements[0].get("command") else {
+				panic!("{method} insert carries no command: {res:?}");
+			};
+			let tag = if method == Method::Pgsql {
+				"INSERT 0 1"
+			} else {
+				"INSERT"
+			};
+			assert_eq!(
+				command.get("tag"),
+				Some(&PublicValue::String(tag.into())),
+				"{method}: {res:?}"
+			);
+			assert_eq!(command.get("rows_affected"), Some(&number_value(1)), "{method}: {res:?}");
+			assert!(rows_of(&statements[0]).is_empty(), "{method} a write answers with a count");
+		}
+	}
+
+	/// `valueMode: "text"` answers every value as its text-protocol form.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_text_mode_answers_text_values() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(65);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let options =
+			PublicValue::Object(surrealdb_types::object! { valueMode: "text", rowMode: "array" });
+		for (method, _, _) in sql_dialect_methods() {
+			let params: PublicArray = vec![
+				PublicValue::String("SELECT true AS t, 12 AS n, 'x' AS s, NULL AS z".into()),
+				PublicValue::None,
+				options.clone(),
+			]
+			.into();
+			let res = rpc.execute(None, sid, Some(sid), method, params).await;
+			let truth = if method == Method::Pgsql {
+				"t"
+			} else {
+				"1"
+			};
+			assert_eq!(
+				rows_of(&statements_of(&res)[0]),
+				vec![PublicValue::Array(surrealdb_types::array![
+					truth,
+					"12",
+					"x",
+					PublicValue::Null
+				])],
+				"{method}: {res:?}"
+			);
+		}
+	}
+
+	/// PostgreSQL `SET`, `SHOW` and `RESET` act on the session's settings.
+	#[cfg(feature = "postgres")]
+	#[tokio::test]
+	async fn pgsql_settings_are_set_shown_and_reset() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(66);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let run = |text: &'static str| {
+			let rpc = &rpc;
+			async move {
+				let res =
+					rpc.execute(None, sid, Some(sid), Method::Pgsql, text_params(text, None)).await;
+				statements_of(&res)
+			}
+		};
+		let shown = |statements: &[surrealdb_types::Object]| rows_of(&statements[0]);
+		assert_eq!(
+			shown(&run("SHOW timezone").await),
+			vec![PublicValue::Object(surrealdb_types::object! { timezone: "UTC" })]
+		);
+		let set = run("SET timezone = 'Europe/Paris'").await;
+		assert_eq!(set[0].get("status"), Some(&PublicValue::String("OK".into())));
+		assert_eq!(
+			shown(&run("SHOW timezone").await),
+			vec![PublicValue::Object(surrealdb_types::object! { timezone: "Europe/Paris" })]
+		);
+		run("RESET timezone").await;
+		assert_eq!(
+			shown(&run("SHOW timezone").await),
+			vec![PublicValue::Object(surrealdb_types::object! { timezone: "UTC" })]
+		);
+		let unknown = run("SHOW no_such_setting").await;
+		assert_eq!(unknown[0].get("status"), Some(&PublicValue::String("ERR".into())));
+		// A setting named like a transaction variable cannot touch the transaction state.
+		run("SET txn = 'x'").await;
+		let lock = rpc.get_session(&sid).await.unwrap();
+		assert!(lock.read().await.variables.get("sql_txn").is_none());
+	}
+
+	/// A describe stops when its call is cancelled.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_describe_can_be_cancelled() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(70);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let options = PublicValue::Object(surrealdb_types::object! { describe: true });
+		for (method, _, _) in sql_dialect_methods() {
+			let handle = crate::ctx::CancelHandle::new();
+			handle.trip();
+			let params: PublicArray =
+				vec![PublicValue::String("SELECT 1".into()), PublicValue::None, options.clone()]
+					.into();
+			let res =
+				super::with_call_cancel(handle, rpc.execute(None, sid, Some(sid), method, params))
+					.await;
+			assert_eq!(
+				statements_of(&res)[0].get("status"),
+				Some(&PublicValue::String("ERR".into())),
+				"{method} a cancelled describe is an error: {res:?}"
+			);
+		}
+	}
+
+	/// An atomic call refuses what it cannot honour: an envelope transaction, a session
+	/// statement inside it, and (for gql) the options it does not support.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_atomic_calls_refuse_conflicts() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(68);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let atomic = PublicValue::Object(surrealdb_types::object! { atomic: true });
+		for (method, _, _) in sql_dialect_methods() {
+			let params = |text: &str| -> PublicArray {
+				vec![PublicValue::String(text.into()), PublicValue::None, atomic.clone()].into()
+			};
+			rpc.execute(Some(Uuid::from_u128(1)), sid, Some(sid), method, params("SELECT 1"))
+				.await
+				.expect_err("an envelope transaction conflicts with atomic");
+			let both =
+				PublicValue::Object(surrealdb_types::object! { atomic: true, describe: true });
+			let combined: PublicArray =
+				vec![PublicValue::String("SELECT 1".into()), PublicValue::None, both].into();
+			rpc.execute(None, sid, Some(sid), method, combined)
+				.await
+				.expect_err("atomic and describe cannot be combined");
+			// A bad envelope transaction fails the call before an entry acts on the session.
+			if method == Method::Mysql {
+				let batch = PublicValue::Array(surrealdb_types::array!["USE other", "SELECT 1"]);
+				rpc.execute(Some(Uuid::from_u128(2)), sid, Some(sid), method, vec![batch].into())
+					.await
+					.expect_err("a missing envelope transaction is a call error");
+				let lock = rpc.get_session(&sid).await.unwrap();
+				assert_eq!(lock.read().await.db.as_deref(), Some("app"));
+			}
+			let set = if method == Method::Pgsql {
+				"SET timezone = 'UTC'"
+			} else {
+				"SET autocommit = 1"
+			};
+			let res = rpc.execute(None, sid, Some(sid), method, params(set)).await;
+			let statements = statements_of(&res);
+			assert_eq!(
+				statements[0].get("status"),
+				Some(&PublicValue::String("ERR".into())),
+				"{method} SET in an atomic call: {res:?}"
+			);
+		}
+		#[cfg(feature = "gql")]
+		for options in [
+			surrealdb_types::object! { atomic: true },
+			surrealdb_types::object! { valueMode: "text" },
+		] {
+			let params: PublicArray = vec![
+				PublicValue::String("{ __typename }".into()),
+				PublicValue::None,
+				PublicValue::Object(options),
+			]
+			.into();
+			rpc.execute(None, sid, Some(sid), Method::Gql, params)
+				.await
+				.expect_err("gql refuses the SQL options");
+		}
+	}
+
+	/// A call whose cancel handle has been tripped answers with the dialect's cancellation
+	/// error, and a call that is not cancelled is unaffected.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_calls_can_be_cancelled() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(67);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		for (method, _, _) in sql_dialect_methods() {
+			let handle = crate::ctx::CancelHandle::new();
+			handle.trip();
+			let res = super::with_call_cancel(
+				handle,
+				rpc.execute(None, sid, Some(sid), method, text_params("SELECT 1", None)),
+			)
+			.await;
+			let statements = statements_of(&res);
+			assert_eq!(
+				statements[0].get("status"),
+				Some(&PublicValue::String("ERR".into())),
+				"{method} a cancelled call is an error: {res:?}"
+			);
+			let expected = if method == Method::Pgsql {
+				"57014"
+			} else {
+				"70100"
+			};
+			assert!(
+				matches!(
+					statements[0].get("error"),
+					Some(PublicValue::Object(error)) if error.get("sqlstate") == Some(&PublicValue::String(expected.into()))
+				),
+				"{method} cancellation sqlstate: {res:?}"
+			);
+			let res =
+				rpc.execute(None, sid, Some(sid), method, text_params("SELECT 1", None)).await;
+			assert_eq!(
+				statements_of(&res)[0].get("status"),
+				Some(&PublicValue::String("OK".into())),
+				"{method}"
+			);
+		}
+	}
+
+	/// An atomic call commits all its statements or none of them.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_atomic_calls_commit_all_or_nothing() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(64);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let seed = text_params("DEFINE TABLE person SCHEMALESS", None);
+		rpc.execute(None, sid, Some(sid), Method::Query, seed).await.unwrap();
+		let atomic = PublicValue::Object(surrealdb_types::object! { atomic: true });
+		let committed = |res: &Result<DbResult, surrealdb_types::Error>| {
+			let Ok(DbResult::Other(PublicValue::Object(response))) = res else {
+				panic!("not a response: {res:?}");
+			};
+			let Some(PublicValue::Object(transaction)) = response.get("transaction") else {
+				panic!("no transaction: {res:?}");
+			};
+			transaction.get("committed").cloned()
+		};
+		for (method, _, _) in sql_dialect_methods() {
+			let batch = |texts: &[&str]| -> PublicArray {
+				let entries: Vec<PublicValue> =
+					texts.iter().map(|text| PublicValue::String((*text).to_owned())).collect();
+				vec![PublicValue::Array(entries.into()), PublicValue::None, atomic.clone()].into()
+			};
+			let name = if method == Method::Pgsql {
+				"pg"
+			} else {
+				"my"
+			};
+			let failing = format!("INSERT INTO person (name) VALUES ('{name}-lost')");
+			let res = rpc
+				.execute(None, sid, Some(sid), method, batch(&[failing.as_str(), "SELEC (("]))
+				.await;
+			assert_eq!(committed(&res), Some(PublicValue::Bool(false)), "{method}: {res:?}");
+			let lookup = format!("SELECT name FROM person WHERE name = '{name}-lost'");
+			let res = rpc.execute(None, sid, Some(sid), method, text_params(&lookup, None)).await;
+			assert!(!has_rows(&res), "{method} a failed atomic call left a row: {res:?}");
+			let kept = format!("INSERT INTO person (name) VALUES ('{name}-kept')");
+			let res = rpc.execute(None, sid, Some(sid), method, batch(&[kept.as_str()])).await;
+			assert_eq!(committed(&res), Some(PublicValue::Bool(true)), "{method}: {res:?}");
+			let lookup = format!("SELECT name FROM person WHERE name = '{name}-kept'");
+			let res = rpc.execute(None, sid, Some(sid), method, text_params(&lookup, None)).await;
+			assert!(has_rows(&res), "{method} a committed atomic call left no row: {res:?}");
+		}
+	}
+
+	/// `describe` answers with the columns and parameters of a select without
+	/// running it, and only past the same gates as a run.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_describe_without_running() {
+		use crate::dbs::Capabilities;
+		use crate::dbs::capabilities::{RouteTarget, Targets};
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(58);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let ddl =
+			text_params("DEFINE TABLE person SCHEMALESS; CREATE person:tobie SET name = 'T'", None);
+		rpc.execute(None, sid, Some(sid), Method::Query, ddl).await.unwrap();
+		let options = PublicValue::Object(surrealdb_types::object! { describe: true });
+		for (method, _, lookup) in sql_dialect_methods() {
+			let params: PublicArray =
+				vec![PublicValue::String(lookup.into()), PublicValue::None, options.clone()].into();
+			let res = rpc.execute(None, sid, Some(sid), method, params).await;
+			let Ok(DbResult::Other(PublicValue::Object(response))) = &res else {
+				panic!("{method} describe failed: {res:?}");
+			};
+			let Some(PublicValue::Array(params)) = response.get("params") else {
+				panic!("{method} describe carries no params");
+			};
+			assert_eq!(params.len(), 1, "{method} parameter count");
+			let statements = statements_of(&res);
+			assert_eq!(statements[0].get("status"), Some(&PublicValue::String("OK".into())));
+			let Some(PublicValue::Array(columns)) = statements[0].get("columns") else {
+				panic!("{method} describe carries no columns");
+			};
+			let Some(PublicValue::Object(column)) = columns.first() else {
+				panic!("{method} describes no column");
+			};
+			assert_eq!(column.get("name"), Some(&PublicValue::String("name".into())));
+			assert!(rows_of(&statements[0]).is_empty(), "{method} describe ran the statement");
+		}
+		let denied = Targets::Some([RouteTarget::Postgres, RouteTarget::MySql].into());
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().without_http_routes(denied))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		for (method, _, lookup) in sql_dialect_methods() {
+			let params: PublicArray =
+				vec![PublicValue::String(lookup.into()), PublicValue::None, options.clone()].into();
+			rpc.execute(None, sid, Some(sid), method, params)
+				.await
+				.expect_err("a denied dialect cannot be described");
+		}
+	}
+
+	/// `describe` reports one parameter per placeholder of a write as well as of a select.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_describe_counts_write_parameters() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(69);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		let seed = text_params("DEFINE TABLE person SCHEMALESS", None);
+		rpc.execute(None, sid, Some(sid), Method::Query, seed).await.unwrap();
+		let options = PublicValue::Object(surrealdb_types::object! { describe: true });
+		for (method, _, _) in sql_dialect_methods() {
+			let text = if method == Method::Pgsql {
+				"INSERT INTO person (name, age) VALUES ($1, $2)"
+			} else {
+				"INSERT INTO person (name, age) VALUES (?, ?)"
+			};
+			let params: PublicArray =
+				vec![PublicValue::String(text.into()), PublicValue::None, options.clone()].into();
+			let res = rpc.execute(None, sid, Some(sid), method, params).await;
+			let Ok(DbResult::Other(PublicValue::Object(response))) = &res else {
+				panic!("{method}: {res:?}");
+			};
+			let Some(PublicValue::Array(params)) = response.get("params") else {
+				panic!("{method} describes no params: {res:?}");
+			};
+			assert_eq!(params.len(), 2, "{method}: {res:?}");
+		}
+	}
+
+	/// A transaction-control statement that cannot act on the session is an
+	/// `ERR` entry and leaves the session idle; the response always reports
+	/// the transaction status.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_report_transaction_status() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(59);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		// A transaction id the session names but nothing holds is cleared, not reported.
+		{
+			let lock = rpc.get_session(&sid).await.unwrap();
+			lock.write().await.variables.insert(
+				"sql_txn".to_owned(),
+				PublicValue::Uuid(surrealdb_types::Uuid::from(Uuid::from_u128(60))),
+			);
+		}
+		for (method, _, _) in sql_dialect_methods() {
+			let res =
+				rpc.execute(None, sid, Some(sid), method, text_params("SELECT 1", None)).await;
+			let Ok(DbResult::Other(PublicValue::Object(response))) = &res else {
+				panic!("{method}: {res:?}");
+			};
+			let Some(PublicValue::Object(transaction)) = response.get("transaction") else {
+				panic!("{method} reports no transaction");
+			};
+			assert_eq!(transaction.get("status"), Some(&PublicValue::String("idle".into())));
+			let lock = rpc.get_session(&sid).await.unwrap();
+			assert!(lock.read().await.variables.get("sql_txn").is_none());
+		}
+		for name in ["sql_txn", "sql_txn_failed"] {
+			let params: PublicArray =
+				vec![PublicValue::String(name.into()), PublicValue::Bool(true)].into();
+			rpc.execute(None, sid, Some(sid), Method::Set, params)
+				.await
+				.expect_err("a client cannot write the transaction state");
+		}
+		for (method, _, _) in sql_dialect_methods() {
+			let res = rpc.execute(None, sid, Some(sid), method, text_params("BEGIN", None)).await;
+			let statements = statements_of(&res);
+			assert_eq!(statements[0].get("status"), Some(&PublicValue::String("ERR".into())));
+			let Ok(DbResult::Other(PublicValue::Object(response))) = &res else {
+				panic!("{method}: {res:?}");
+			};
+			let Some(PublicValue::Object(transaction)) = response.get("transaction") else {
+				panic!("{method} reports no transaction");
+			};
+			assert_eq!(transaction.get("status"), Some(&PublicValue::String("idle".into())));
+		}
+	}
+
+	/// The session preflight a query runs applies to control statements and
+	/// `describe` as well: an anonymous session is refused when auth is on.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_run_the_session_preflight() {
+		let ds = Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(61);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::default())));
+		let describe = PublicValue::Object(surrealdb_types::object! { describe: true });
+		for (method, _, _) in sql_dialect_methods() {
+			for text in ["BEGIN", "SELECT 1", ""] {
+				rpc.execute(None, sid, Some(sid), method, text_params(text, None))
+					.await
+					.expect_err("an anonymous session is refused");
+			}
+			let params: PublicArray =
+				vec![PublicValue::String("SELECT 1".into()), PublicValue::None, describe.clone()]
+					.into();
+			rpc.execute(None, sid, Some(sid), method, params)
+				.await
+				.expect_err("an anonymous session cannot describe");
+		}
+	}
+
+	/// A dialect whose capability is denied is refused by name on its own
+	/// method; SurrealQL is unaffected, and a denied RPC method name refuses
+	/// the method whatever the capability.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_capability_denial_has_no_bypass() {
+		use crate::dbs::Capabilities;
+		use crate::dbs::capabilities::{MethodTarget, RouteTarget, Targets};
+		let denied_routes = Targets::Some([RouteTarget::Postgres, RouteTarget::MySql].into());
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().without_http_routes(denied_routes))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(54);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		for (method, capability, _) in sql_dialect_methods() {
+			for text in ["BEGIN", "COMMIT", "USE other"] {
+				rpc.execute(None, sid, Some(sid), method, text_params(text, None))
+					.await
+					.expect_err("a denied dialect is refused for control statements");
+			}
+			let err = rpc
+				.execute(None, sid, Some(sid), method, text_params("SELECT 1", None))
+				.await
+				.expect_err("a denied dialect is refused");
+			assert!(
+				err.to_string().contains(capability),
+				"the refusal names `{capability}`: {err}"
+			);
+		}
+		let surql = text_params("RETURN 1", None);
+		rpc.execute(None, sid, Some(sid), Method::Query, surql).await.unwrap();
+		// A denied method name refuses the method even with its capability held.
+		let denied_methods = Targets::Some(
+			[Method::Pgsql, Method::Mysql]
+				.into_iter()
+				.map(|method| MethodTarget {
+					method,
+				})
+				.collect(),
+		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().without_rpc_methods(denied_methods))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		for (method, _, _) in sql_dialect_methods() {
+			let err = rpc
+				.execute(None, sid, Some(sid), method, text_params("SELECT 1", None))
+				.await
+				.expect_err("a denied method name is refused");
+			assert!(err.is_not_allowed(), "{method}: {err}");
+		}
+	}
+
+	/// The dialect methods give a record user no more than `query` does: a
+	/// subject the arbitrary-query gate refuses is refused here too, and one
+	/// it admits is bound by the permissions on the tables it reads.
+	#[cfg(any(feature = "postgres", feature = "mysql"))]
+	#[tokio::test]
+	async fn sql_dialect_methods_follow_subject_gate_and_permissions() {
+		use crate::dbs::Capabilities;
+		use crate::dbs::capabilities::{ArbitraryQueryTarget, Targets};
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(Arc::clone(&ds));
+		let owner = Uuid::from_u128(55);
+		rpc.set_session(owner, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, owner, Some(owner), Method::Use, use_params("app", "app")).await.unwrap();
+		let ddl = "DEFINE TABLE person SCHEMALESS PERMISSIONS NONE; \
+		           CREATE person:tobie SET name = 'Tobie'";
+		rpc.execute(None, owner, Some(owner), Method::Query, text_params(ddl, None)).await.unwrap();
+		let record = Uuid::from_u128(56);
+		let session = Session::for_record("app", "app", "acc", PublicValue::String("u".into()));
+		rpc.set_session(record, Arc::new(RwLock::new(session)));
+		for (method, _, lookup) in sql_dialect_methods() {
+			let params = text_params(
+				lookup,
+				Some(PublicValue::Object(surrealdb_types::object! { _1: "Tobie" })),
+			);
+			let res = rpc.execute(None, record, Some(record), method, params).await;
+			assert!(!has_rows(&res), "{method} returned a row the record user cannot read");
+		}
+		let ds = Datastore::builder()
+			.with_capabilities(
+				Capabilities::all()
+					.without_arbitrary_query(Targets::Some([ArbitraryQueryTarget::Record].into())),
+			)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let session = Session::for_record("app", "app", "acc", PublicValue::String("u".into()));
+		rpc.set_session(record, Arc::new(RwLock::new(session)));
+		for (method, _, _) in sql_dialect_methods() {
+			rpc.execute(None, record, Some(record), method, text_params("SELECT 1", None))
+				.await
+				.expect_err("a record subject denied arbitrary queries is refused");
 		}
 	}
 

@@ -106,6 +106,12 @@ fn extract_trace_context(
 	}))
 }
 
+/// The cancel handles of the `pgsql` and `mysql` calls in flight, by connection and request id, so
+/// `query_cancel` can stop the statement such a call is running.
+static SQL_CANCELS: std::sync::LazyLock<
+	DashMap<(Uuid, String), surrealdb_core::ctx::CancelHandle>,
+> = std::sync::LazyLock::new(DashMap::new);
+
 pub struct Websocket {
 	/// The unique id of this WebSocket connection
 	pub(crate) id: Uuid,
@@ -1019,15 +1025,42 @@ impl Websocket {
 					else {
 						let client_session: Option<Uuid> = req.session_id.map(Into::into);
 						let session_id = client_session.unwrap_or(rpc.id);
-						let result = Self::process_message(
+						// A SQL dialect call is cancellable by its request id: its statements run
+						// under a handle of their own that `query_cancel` trips, which the
+						// connection's own cancellation trips as well.
+						let sql_call = matches!(req.method, Method::Pgsql | Method::Mysql);
+						let call_key = req.id.as_ref().map(|id| (rpc.id, id.to_sql()));
+						let call_cancel = (sql_call && call_key.is_some())
+							.then(surrealdb_core::ctx::CancelHandle::new);
+						let watcher =
+							call_cancel.as_ref().zip(call_key.as_ref()).map(|(handle, key)| {
+								SQL_CANCELS.insert(key.clone(), handle.clone());
+								let (handle, connection) = (handle.clone(), rpc.cancel.clone());
+								tokio::spawn(async move {
+									connection.cancelled().await;
+									handle.trip();
+								})
+							});
+						let work = Self::process_message(
 							Arc::clone(rpc),
 							session_id,
 							client_session,
 							req.txn.map(Into::into),
 							req.method,
 							req.params,
-						)
-						.await;
+						);
+						let result = match &call_cancel {
+							Some(handle) => {
+								surrealdb_core::rpc::with_call_cancel(handle.clone(), work).await
+							}
+							None => work.await,
+						};
+						if let Some(watcher) = watcher {
+							watcher.abort();
+						}
+						if let Some(key) = &call_key {
+							SQL_CANCELS.remove(key);
+						}
 						crate::rpc::response::send(
 							match result {
 								Ok(result) => DbResponse::success(
@@ -1647,6 +1680,10 @@ impl RpcProtocol for Websocket {
 		let (Some(id), None) = (params.pop(), params.pop()) else {
 			return Err(invalid_params("Expected the request id of the streaming query to cancel"));
 		};
+		if let Some(handle) = SQL_CANCELS.get(&(self.id, id.to_sql())) {
+			handle.trip();
+			return Ok(DbResult::Other(Value::None));
+		}
 		let Some(handle) = self.streams.get(&id.to_sql()) else {
 			return Err(stream_not_found());
 		};

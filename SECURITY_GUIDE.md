@@ -1384,6 +1384,16 @@ Flag when changes touch:
 - WebSocket serve/read/handle_message functions
 - RPC dispatch table (new methods, modified signatures)
 - The `gql` RPC method (GQL: must keep `allows_query_by_subject`)
+- The `pgsql` and `mysql` RPC methods (`sql_dialect_query`, `rpc/sql_dialect.rs`): must keep
+  `allows_query_by_subject`; must reach the dialect only through `QuerySource` or, for `describe`,
+  through `describe`, which calls `check_sql_dialect` itself and reads the catalog through the caller's
+  session; a `NotAllowed` error from a run must fail the call, never become a statement entry;
+  `USE` must go through the `use` method (its tenant check), never set the session's namespace or
+  database directly; a transaction-control entry must act only on the session's own transaction
+  `SET` must write only `sql_setting_`-prefixed session variables, never a protected or `sql_txn`
+  name; an `atomic` call must run every statement through `run_sql_part` (the subject gate on the
+  session guard it runs with) in a transaction it opened itself; a call's cancel handle
+  (`with_call_cancel`) must stop only that call's statements
 - Transaction methods (begin/commit/cancel) or transaction map
 - The streaming driver (`rpc/streaming.rs`), the stream registry, or the
   `query_stream`/`query_cancel` methods

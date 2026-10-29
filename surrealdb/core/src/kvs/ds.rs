@@ -10846,17 +10846,22 @@ impl Datastore {
 	/// Refuse PostgreSQL or MySQL query text when the datastore's capabilities
 	/// deny the `postgres` or `mysql` route target. Evaluated on every query, so
 	/// a capability swap applies to connections that already chose the dialect.
-	fn check_sql_dialect(&self, dialect: Dialect) -> std::result::Result<(), TypesError> {
-		let (target, name) = match dialect {
-			Dialect::PgSql => (RouteTarget::Postgres, "PostgreSQL"),
-			Dialect::MySql => (RouteTarget::MySql, "MySQL"),
+	pub(crate) fn check_sql_dialect(
+		&self,
+		dialect: Dialect,
+	) -> std::result::Result<(), TypesError> {
+		let (target, name, capability) = match dialect {
+			Dialect::PgSql => (RouteTarget::Postgres, "PostgreSQL", "postgres"),
+			Dialect::MySql => (RouteTarget::MySql, "MySQL", "mysql"),
 			Dialect::SurrealQl | Dialect::Gql => return Ok(()),
 		};
 		if self.capabilities.load().allows_http_route(&target) {
 			return Ok(());
 		}
 		Err(TypesError::not_allowed(
-			format!("The {name} dialect is not allowed on this server"),
+			format!(
+				"The {name} dialect is not allowed on this server: the `{capability}` capability is denied"
+			),
 			None::<surrealdb_types::NotAllowedError>,
 		))
 	}
@@ -10886,7 +10891,7 @@ impl Datastore {
 	/// is parsed before them, so unparsable text is reported as that whatever
 	/// the session. [`Self::execute_import`] repeats these checks inline; see
 	/// [`Self::setup_query`].
-	fn check_session(&self, sess: &Session) -> std::result::Result<(), TypesError> {
+	pub(crate) fn check_session(&self, sess: &Session) -> std::result::Result<(), TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
 			return Err(TypesError::not_allowed(
