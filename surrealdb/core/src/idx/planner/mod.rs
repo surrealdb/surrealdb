@@ -311,7 +311,7 @@ impl QueryPlanner {
 		};
 		match PlanBuilder::build(stm_ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
-				if io.require_distinct() {
+				if io.require_distinct() || stm_ctx.stm.is_mutation() {
 					self.requires_distinct = true;
 				}
 				let is_order = io.is_order();
@@ -337,6 +337,7 @@ impl QueryPlanner {
 				self.add(doc_ctx.clone(), t.clone(), None, exe, it, rs);
 			}
 			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
+				self.requires_distinct |= stm_ctx.stm.is_mutation();
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
 				if is_order {
 					self.ordering_indexes.push(ir);
