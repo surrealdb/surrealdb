@@ -75,7 +75,7 @@ mod tests {
 	#[case::record_id(Value::RecordId(RecordId::new("test_table", "test_key")))]
 	#[case::record_id(Value::RecordId(RecordId::new(
 		"test_table",
-		RecordIdKey::Object(Object(BTreeMap::from([
+		RecordIdKey::Object(Object::from(BTreeMap::from([
 			("key".to_string(), Value::String("value".to_string()))
 		])))
 	)))]

@@ -267,7 +267,7 @@ mod tests {
 	#[case::bytes(Value::Bytes(Bytes(::bytes::Bytes::from(vec![1_u8, 2, 3, 4, 5]))))]
 	#[case::thing(Value::RecordId(RecordId::new("test_table", RecordIdKey::Number(42))))] // Example Thing
 	#[case::thing_range(Value::RecordId(RecordId::new("test_table", RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })))))]
-	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::String("value".to_owned()))]))))]
+	#[case::object(Value::Object(Object::from(BTreeMap::from([("key".to_string(), Value::String("value".to_owned()))]))))]
 	#[case::array(Value::Array(Array::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))))]
 	#[case::geometry::line(Value::Geometry(Geometry::Line(geo_types::LineString(vec![geo_types::Coord { x: 1.0, y: 2.0 }, geo_types::Coord { x: 3.0, y: 4.0 }]))))]

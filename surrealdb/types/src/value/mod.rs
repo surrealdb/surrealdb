@@ -674,7 +674,7 @@ impl Index<usize> for Value {
 
 	fn index(&self, index: usize) -> &Self::Output {
 		if let Value::Array(map) = self {
-			map.0.get(index).unwrap_or(&Value::None)
+			map.get(index).unwrap_or(&Value::None)
 		} else {
 			&Value::None
 		}
@@ -686,7 +686,7 @@ impl Index<&str> for Value {
 
 	fn index(&self, index: &str) -> &Self::Output {
 		if let Value::Object(map) = self {
-			map.0.get(index).unwrap_or(&Value::None)
+			map.get(index).unwrap_or(&Value::None)
 		} else {
 			&Value::None
 		}

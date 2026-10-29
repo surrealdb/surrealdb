@@ -1142,7 +1142,7 @@ fn to_object(obj: Vec<(CborValue, CborValue)>, ctx: &mut Ctx) -> Result<PublicOb
 			}
 		}
 	}
-	Ok(PublicObject(res))
+	Ok(PublicObject(res.into_iter().collect()))
 }
 
 /// A decimal written as text, normalized.

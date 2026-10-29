@@ -222,10 +222,10 @@ impl<'a> Reader<'a> {
 					}
 					entries.push((key, value));
 				}
-				// Keys in strictly ascending order are distinct, and build the map without a
-				// search per key.
+				// Keys in strictly ascending order are distinct and are the object's entries as
+				// they are.
 				if ascending {
-					return Some(Value::Object(Object(BTreeMap::from_iter(entries))));
+					return Some(Value::Object(Object::from_sorted(entries)));
 				}
 				let mut map = BTreeMap::new();
 				for (key, value) in entries {
@@ -237,7 +237,7 @@ impl<'a> Reader<'a> {
 						Entry::Occupied(_) => return None,
 					}
 				}
-				Some(Value::Object(Object(map)))
+				Some(Value::Object(Object(map.into_iter().collect())))
 			}
 			6 => self.tag(head.arg, budget),
 			7 => match head.info {
@@ -573,7 +573,7 @@ mod tests {
 			let mut map = BTreeMap::new();
 			map.insert("a".to_owned(), value);
 			map.insert("b".to_owned(), Value::Number(Number::Int(1)));
-			let bytes = encode_v2(Value::Object(Object(map))).unwrap();
+			let bytes = encode_v2(Value::Object(Object::from(map))).unwrap();
 			let (entries, len) = super::super::map_entries(&bytes, 512).expect("a map");
 			assert_eq!(len, bytes.len());
 			assert_eq!(entries.iter().map(|(k, _)| *k).collect::<Vec<_>>(), ["a", "b"]);
@@ -581,7 +581,7 @@ mod tests {
 				panic!("a map decodes as an object");
 			};
 			let a = decode_exact_v2(entries[0].1, 512, None).unwrap();
-			assert_eq!(format!("{a:?}"), format!("{:?}", whole.0["a"]));
+			assert_eq!(format!("{a:?}"), format!("{:?}", whole["a"]));
 			assert_eq!(
 				decode_exact_v2(entries[1].1, 512, None).unwrap(),
 				Value::Number(Number::Int(1))

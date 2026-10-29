@@ -250,7 +250,7 @@ mod tests {
 	fn test_object_macro() {
 		// Test empty object
 		let empty = object! {};
-		assert_eq!(empty.0.len(), 0);
+		assert_eq!(empty.len(), 0);
 
 		let _ = Value::None.is_bool();
 
@@ -259,16 +259,16 @@ mod tests {
 			name: "John".to_string(),
 			age: 30,
 		};
-		assert_eq!(obj1.0.get("name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj1.0.get("age"), Some(&Value::Number(30.into())));
+		assert_eq!(obj1.get("name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj1.get("age"), Some(&Value::Number(30.into())));
 
 		// Test with quoted field names
 		let obj2 = object! {
 			"first-name": "John".to_string(),
 			"last-name": "Doe".to_string(),
 		};
-		assert_eq!(obj2.0.get("first-name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj2.0.get("last-name"), Some(&Value::String("Doe".to_string())));
+		assert_eq!(obj2.get("first-name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj2.get("last-name"), Some(&Value::String("Doe".to_string())));
 
 		// Test mixed field names - this now works!
 		let obj3 = object! {
@@ -278,19 +278,19 @@ mod tests {
 			"user-id": 12345,
 			active: true,
 		};
-		assert_eq!(obj3.0.get("name"), Some(&Value::String("John".to_string())));
-		assert_eq!(obj3.0.get("last-name"), Some(&Value::String("Doe".to_string())));
-		assert_eq!(obj3.0.get("age"), Some(&Value::Number(30.into())));
-		assert_eq!(obj3.0.get("user-id"), Some(&Value::Number(12345.into())));
-		assert_eq!(obj3.0.get("active"), Some(&Value::Bool(true)));
+		assert_eq!(obj3.get("name"), Some(&Value::String("John".to_string())));
+		assert_eq!(obj3.get("last-name"), Some(&Value::String("Doe".to_string())));
+		assert_eq!(obj3.get("age"), Some(&Value::Number(30.into())));
+		assert_eq!(obj3.get("user-id"), Some(&Value::Number(12345.into())));
+		assert_eq!(obj3.get("active"), Some(&Value::Bool(true)));
 
 		// Test with trailing comma
 		let obj4 = object! {
 			name: "Alice".to_string(),
 			"last-name": "Smith".to_string(),
 		};
-		assert_eq!(obj4.0.get("name"), Some(&Value::String("Alice".to_string())));
-		assert_eq!(obj4.0.get("last-name"), Some(&Value::String("Smith".to_string())));
+		assert_eq!(obj4.get("name"), Some(&Value::String("Alice".to_string())));
+		assert_eq!(obj4.get("last-name"), Some(&Value::String("Smith".to_string())));
 	}
 
 	#[test]

@@ -98,13 +98,13 @@ impl From<HashMap<String, String>> for Variables {
 
 impl From<Object> for Variables {
 	fn from(obj: Object) -> Self {
-		Self(obj.0)
+		Self(obj.into_inner())
 	}
 }
 
 impl From<Variables> for Object {
 	fn from(vars: Variables) -> Self {
-		Object(vars.0)
+		Object::from(vars.0)
 	}
 }
 

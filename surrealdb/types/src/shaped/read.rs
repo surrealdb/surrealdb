@@ -313,7 +313,7 @@ impl Row<'_> {
 				if let Value::Object(entries) =
 					decode_dynamic(slice, self.shape.depth(), dynamic, budget)?
 				{
-					object = entries.0;
+					object = entries.into_inner();
 				} else {
 					return Err(ShapedError::new("a remainder that is not an object"));
 				}
@@ -336,7 +336,7 @@ impl Row<'_> {
 				return Err(ShapedError::new("a remainder key that has a column"));
 			}
 		}
-		Ok(Object(object))
+		Ok(Object::from(object))
 	}
 
 	fn leaf(

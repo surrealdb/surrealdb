@@ -65,7 +65,7 @@ fn undynamic(bytes: &[u8]) -> Result<Value, String> {
 				r = &r[len..];
 				map.insert(key.to_owned(), item(&mut r)?);
 			}
-			Value::Object(Object(map))
+			Value::Object(Object::from(map))
 		}
 		_ => item(&mut r)?,
 	};
@@ -76,7 +76,7 @@ fn undynamic(bytes: &[u8]) -> Result<Value, String> {
 }
 
 fn obj(entries: Vec<(&str, Value)>) -> Value {
-	Value::Object(Object(entries.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()))
+	Value::Object(entries.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
 }
 
 fn rid(table: &str, key: RecordIdKey) -> Value {

@@ -928,13 +928,13 @@ impl<'v> ShapedValue<'v> for PublicShaped<'v> {
 	}
 
 	fn get(self, key: &str) -> Option<Self> {
-		self.value.as_object()?.0.get(key).map(|v| self.with(v))
+		self.value.as_object()?.get(key).map(|v| self.with(v))
 	}
 
 	fn entries(self) -> impl Iterator<Item = (&'v str, Self)> {
 		self.value
 			.as_object()
-			.map(|o| o.0.iter())
+			.map(|o| o.iter())
 			.into_iter()
 			.flatten()
 			.map(move |(k, v)| (k.as_str(), self.with(v)))

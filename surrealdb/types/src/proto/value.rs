@@ -127,7 +127,7 @@ impl TryFrom<proto::Object> for Object {
 				.ok_or_else(|| anyhow!("Missing value in Object entry for key {:?}", entry.key))?;
 			map.insert(entry.key, Value::try_from(value)?);
 		}
-		Ok(Object(map))
+		Ok(Object::from(map))
 	}
 }
 
