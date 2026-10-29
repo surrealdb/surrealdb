@@ -202,3 +202,37 @@ async fn an_external_authenticator_refuses_a_wrong_password() {
 	assert_eq!(answer[0], 0xff, "an ERR packet");
 	assert_eq!(u16::from_le_bytes([answer[1], answer[2]]), 1045);
 }
+
+/// A connection whose TLS the host ended: the handshake response arrives in clear and full
+/// authentication is still asked for.
+#[tokio::test]
+async fn a_secured_connection_takes_its_handshake_response_in_clear() {
+	let (mut client, server) = duplex(1 << 16);
+	let ds = Datastore::new("memory").await.expect("datastore");
+	tokio::spawn(serve(
+		Duplex(server),
+		ds,
+		ServeOptions {
+			peer: "203.0.113.7:3306".parse().expect("address"),
+			tls: None,
+			start: Start::Secured {
+				connection_id: 7,
+			},
+			ready: Arc::new(AtomicBool::new(true)),
+			shutdown: CancellationToken::new(),
+			authenticator: Some(Arc::new(Fixed)),
+		},
+	));
+	timeout(IO_TIMEOUT, async {
+		packet(&mut client, 2, &handshake_response("alice")).await;
+		let (seq, payload) = read_packet(&mut client).await;
+		assert_eq!(seq, 3);
+		assert_eq!(payload, vec![0x01, 0x04], "full authentication is requested");
+		packet(&mut client, 4, b"secret\0").await;
+		let (seq, payload) = read_packet(&mut client).await;
+		assert_eq!(seq, 5);
+		assert_eq!(payload[0], 0x00, "an OK packet");
+	})
+	.await
+	.expect("the exchange timed out");
+}

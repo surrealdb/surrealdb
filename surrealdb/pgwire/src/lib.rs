@@ -19,6 +19,7 @@ use rand::rngs::OsRng;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+pub use surrealdb_core::kvs::Dialect;
 pub use tokio;
 use tokio::io::{AsyncRead, AsyncWrite};
 pub use tokio_rustls;
@@ -161,6 +162,10 @@ pub enum Start {
 	/// The client's `SSLRequest` was already answered `S` before the stream was handed over: the
 	/// next bytes are the TLS `ClientHello`. Requires a TLS acceptor.
 	Tls,
+	/// The client's TLS was ended before the stream was handed over, so the next bytes are the
+	/// `StartupMessage` in clear, with no `SSLRequest`; the connection counts as encrypted, which
+	/// lets it ask for a cleartext password. For a host that terminates TLS itself.
+	Secured,
 }
 
 /// State shared by every connection served in one process: the cancellation registry and the
@@ -187,6 +192,8 @@ pub struct ServeOptions {
 	pub authenticator: Option<Arc<dyn Authenticator>>,
 	/// State shared with the other connections of this process.
 	pub shared: Arc<Shared>,
+	/// The dialect a connection starts in, until its startup options or a `SET` change it.
+	pub dialect: Dialect,
 }
 
 /// Serve one PostgreSQL connection over `stream` until it ends.
@@ -210,6 +217,7 @@ pub async fn serve<S: Io>(stream: S, ds: Arc<Datastore>, options: ServeOptions) 
 		options.tls,
 		options.start,
 		options.authenticator,
+		options.dialect,
 	)
 	.await;
 }
@@ -325,6 +333,7 @@ async fn accept_loop(
 						acceptor.clone(),
 						Start::Negotiate,
 						None,
+						Dialect::SurrealQl,
 					));
 				}
 				Err(err) => {

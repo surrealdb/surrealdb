@@ -111,6 +111,12 @@ pub enum Start {
 	Greeted {
 		connection_id: u32,
 	},
+	/// The greeting was sent and the client's TLS was ended before the stream was handed over: the
+	/// next bytes are the client's handshake response in clear, which the connection treats as
+	/// encrypted. For a host that terminates TLS itself.
+	Secured {
+		connection_id: u32,
+	},
 }
 
 /// What `serve` needs beyond the stream and the datastore.

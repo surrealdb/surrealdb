@@ -350,6 +350,7 @@ pub(super) async fn handle(
 	acceptor: Option<Arc<TlsAcceptor>>,
 	start: Start,
 	authenticator: Option<Arc<dyn Authenticator>>,
+	dialect: Dialect,
 ) {
 	let cancel = CancelHandle::new();
 	registry.insert((pid, secret), cancel.clone());
@@ -369,6 +370,7 @@ pub(super) async fn handle(
 	};
 	let mut conn = Connection {
 		stream,
+		secured: start == Start::Secured,
 		prelude,
 		peer,
 		ds,
@@ -382,7 +384,7 @@ pub(super) async fn handle(
 		portals: HashMap::new(),
 		prepared_bytes: 0,
 		portal_bytes: 0,
-		dialect: Dialect::SurrealQl,
+		dialect,
 		gucs: GucStore::new(),
 		transaction: None,
 		savepoints: Vec::new(),
@@ -421,6 +423,9 @@ async fn negotiate_tls(
 	registry: &CancelRegistry,
 	shutdown: &CancellationToken,
 ) -> Option<(PgStream, Option<Vec<u8>>)> {
+	if start == Start::Secured {
+		return Some((Either::Left(tcp), None));
+	}
 	if start == Start::Tls {
 		// The SSLRequest was answered before this connection was handed over: the TLS handshake
 		// is the next thing on the stream.
@@ -533,6 +538,9 @@ async fn reject_overloaded_inner(stream: &mut TcpStream) -> Result<()> {
 
 struct Connection {
 	stream: PgStream,
+	/// The stream is not TLS but the host that handed it over ended the client's TLS
+	/// ([`Start::Secured`]).
+	secured: bool,
 	/// A StartupMessage packet already read during TLS negotiation (plaintext
 	/// path), consumed on the first startup read.
 	prelude: Option<Vec<u8>>,
@@ -4255,7 +4263,7 @@ impl Connection {
 
 	/// Whether the connection stream has been upgraded to TLS.
 	fn is_tls(&self) -> bool {
-		matches!(self.stream, Either::Right(_))
+		self.secured || matches!(self.stream, Either::Right(_))
 	}
 
 	/// The ReadyForQuery transaction-status byte.

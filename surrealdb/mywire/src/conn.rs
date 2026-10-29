@@ -243,7 +243,7 @@ async fn perform_handshake(
 	// A greeting sent elsewhere carries a nonce the server did not pick, so scramble-based
 	// authentication against it would rest on a static salt: only an external authenticator, which
 	// asks for the password in clear over TLS, may take such a connection.
-	if matches!(start, Start::Greeted { .. }) && authenticator.is_none() {
+	if matches!(start, Start::Greeted { .. } | Start::Secured { .. }) && authenticator.is_none() {
 		anyhow::bail!(
 			"a connection handed over after its greeting needs an external authenticator"
 		);
@@ -254,6 +254,9 @@ async fn perform_handshake(
 		// connection with an authenticator only authenticates by full (cleartext, over TLS)
 		// exchange.
 		Start::Greeted {
+			connection_id,
+		}
+		| Start::Secured {
 			connection_id,
 		} => (connection_id, crate::GREETING_NONCE),
 	};
@@ -288,7 +291,7 @@ async fn perform_handshake(
 
 	// 3. Negotiate TLS upgrade if SSL requested
 	let (mut reader, mut writer, hs_payload, hs_seq, is_tls) =
-		if SslRequest::is_ssl_request(&payload) {
+		if !matches!(start, Start::Secured { .. }) && SslRequest::is_ssl_request(&payload) {
 			let Some(acceptor) = acceptor.as_ref() else {
 				let mut writer = PacketWriter::new(stream);
 				let err = ErrPacket::general(
@@ -311,7 +314,7 @@ async fn perform_handshake(
 			let (read_half, write_half) = split(my_stream);
 			let reader = PacketReader::new(read_half);
 			let writer = PacketWriter::new(write_half);
-			(reader, writer, payload, first_seq, false)
+			(reader, writer, payload, first_seq, matches!(start, Start::Secured { .. }))
 		};
 
 	let mut cur_seq = hs_seq.wrapping_add(1);

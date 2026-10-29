@@ -15,7 +15,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_iam::{Actor, Auth, Level, Role};
 use surrealdb_pgwire::{
-	AuthFuture, AuthRequest, Authenticator, Io, ServeOptions, Shared, Start, serve,
+	AuthFuture, AuthRequest, Authenticator, Dialect, Io, ServeOptions, Shared, Start, serve,
 };
 use tokio::io::{
 	AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf, duplex,
@@ -121,6 +121,7 @@ async fn start(tls: &Tls, authenticator: Option<Arc<dyn Authenticator>>) -> Dupl
 			shutdown: CancellationToken::new(),
 			authenticator,
 			shared: Arc::new(Shared::default()),
+			dialect: Dialect::PgSql,
 		},
 	));
 	client
@@ -221,10 +222,87 @@ async fn a_stream_that_starts_with_tls_needs_an_acceptor() {
 			shutdown: CancellationToken::new(),
 			authenticator: None,
 			shared: Arc::new(Shared::default()),
+			dialect: Dialect::PgSql,
 		},
 	));
 	timeout(IO_TIMEOUT, handle).await.expect("the connection ends").expect("no panic");
 	let mut rest = Vec::new();
 	client.read_to_end(&mut rest).await.expect("closed");
 	assert!(rest.is_empty());
+}
+
+#[tokio::test]
+async fn a_served_connection_starts_in_the_dialect_it_is_given() {
+	let tls = tls();
+	let client = start(&tls, Some(Arc::new(Fixed))).await;
+	timeout(IO_TIMEOUT, async {
+		let mut stream = connect(&tls, client).await;
+		send_startup(&mut stream, "alice").await;
+		let _ = read_message(&mut stream).await;
+		send_password(&mut stream, "secret").await;
+		loop {
+			if read_message(&mut stream).await.0 == b'Z' {
+				break;
+			}
+		}
+		// `SELECT 1 AS one` is a PostgreSQL statement; SurrealQL refuses it for want of a `FROM`.
+		let query = b"select 1 as one\0";
+		let mut packet = vec![b'Q'];
+		packet.extend_from_slice(&((query.len() + 4) as i32).to_be_bytes());
+		packet.extend_from_slice(query);
+		stream.write_all(&packet).await.expect("send the query");
+		let mut tags = Vec::new();
+		loop {
+			let (kind, body) = read_message(&mut stream).await;
+			match kind {
+				b'C' => {
+					tags.push(String::from_utf8_lossy(&body).trim_end_matches('\0').to_string())
+				}
+				b'E' => panic!("refused: {}", String::from_utf8_lossy(&body)),
+				b'Z' => break,
+				_ => {}
+			}
+		}
+		assert_eq!(tags, ["SELECT 1"]);
+	})
+	.await
+	.expect("the exchange timed out");
+}
+
+/// A connection whose TLS the host ended: the startup message arrives in clear and the password is
+/// still asked for, because the connection counts as encrypted.
+#[tokio::test]
+async fn a_secured_connection_takes_a_startup_message_in_clear_and_asks_for_a_password() {
+	let (mut client, server) = duplex(1 << 16);
+	let ds = Datastore::new("memory").await.expect("datastore");
+	tokio::spawn(serve(
+		Duplex(server),
+		ds,
+		ServeOptions {
+			peer: "203.0.113.7:5432".parse().expect("address"),
+			tls: None,
+			start: Start::Secured,
+			ready: Arc::new(AtomicBool::new(true)),
+			shutdown: CancellationToken::new(),
+			authenticator: Some(Arc::new(Fixed)),
+			shared: Arc::new(Shared::default()),
+			dialect: Dialect::PgSql,
+		},
+	));
+	timeout(IO_TIMEOUT, async {
+		send_startup(&mut client, "alice").await;
+		let (kind, body) = read_message(&mut client).await;
+		assert_eq!((kind, &body[..]), (b'R', &3i32.to_be_bytes()[..]), "a cleartext request");
+		send_password(&mut client, "secret").await;
+		loop {
+			let (kind, body) = read_message(&mut client).await;
+			match kind {
+				b'Z' => return,
+				b'E' => panic!("refused: {}", String::from_utf8_lossy(&body)),
+				_ => {}
+			}
+		}
+	})
+	.await
+	.expect("the exchange timed out");
 }
