@@ -784,6 +784,14 @@ impl Connection {
 
 					match cmd {
 						COM_QUIT => return Ok(()),
+						COM_STATISTICS => {
+							// The reply is one bare text packet, not an OK or result set.
+							let stats = format!(
+								"Uptime: {}  Threads: 1  Questions: 0  Slow queries: 0  Opens: 0  Flush tables: 0  Open tables: 0  Queries per second avg: 0.000",
+								crate::uptime().as_secs()
+							);
+							self.writer.write_packet(seq.wrapping_add(1), stats.as_bytes()).await?;
+						}
 						COM_PING => {
 							let ok = self.ok_packet(0, 0);
 							self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
@@ -2240,18 +2248,6 @@ fn is_mysql_driver_noise_set(sql: &str) -> bool {
 	if rest.starts_with("names ") {
 		return true;
 	}
-	let rest = rest
-		.strip_prefix("session ")
-		.or_else(|| rest.strip_prefix("global "))
-		.unwrap_or(rest)
-		.trim();
-	let rest = rest
-		.strip_prefix("@@session.")
-		.or_else(|| rest.strip_prefix("@@global."))
-		.or_else(|| rest.strip_prefix("@@"))
-		.unwrap_or(rest)
-		.trim();
-
 	const ALLOWED_VARS: &[&str] = &[
 		"autocommit",
 		"character_set_client",
@@ -2263,12 +2259,24 @@ fn is_mysql_driver_noise_set(sql: &str) -> bool {
 		"sql_mode",
 		"time_zone",
 		"max_allowed_packet",
+		"net_read_timeout",
 		"net_write_timeout",
 		"wait_timeout",
 		"interactive_timeout",
 	];
 
 	for part in rest.split(',') {
+		let part = part.trim();
+		let part = part
+			.strip_prefix("session ")
+			.or_else(|| part.strip_prefix("global "))
+			.unwrap_or(part)
+			.trim();
+		let part = part
+			.strip_prefix("@@session.")
+			.or_else(|| part.strip_prefix("@@global."))
+			.or_else(|| part.strip_prefix("@@"))
+			.unwrap_or(part);
 		let var = part.split('=').next().unwrap_or("").trim();
 		let var = var.trim_matches('`').trim();
 		if var.is_empty() || !ALLOWED_VARS.contains(&var) {
@@ -2599,6 +2607,9 @@ mod tests {
 			"SET `character_set_client` = utf8mb4, `character_set_connection` = utf8mb4"
 		));
 		// Unmodelled/unhonoured settings return false
+		assert!(is_mysql_driver_noise_set(
+			"SET SESSION NET_READ_TIMEOUT= 86400, SESSION NET_WRITE_TIMEOUT= 86400"
+		));
 		assert!(!is_mysql_driver_noise_set("SET ROLE admin"));
 		assert!(!is_mysql_driver_noise_set("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"));
 		assert!(!is_mysql_driver_noise_set("SET arbitrary_setting = 1"));

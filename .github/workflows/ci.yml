@@ -936,6 +936,43 @@ jobs:
       - name: Run wire protocol integration tests
         run: cargo make ci-wire
 
+  sql-clients:
+    name: SQL client tools (psql, mysql)
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the PostgreSQL and MySQL clients
+        run: |
+          sudo apt-get update
+          # pgbench ships in the server package on Debian and Ubuntu, so that is installed too; the
+          # cluster it creates is stopped, as nothing here talks to it.
+          sudo apt-get install -y postgresql postgresql-client mysql-client
+          sudo systemctl stop postgresql || true
+          dpkg -l postgresql-client-* mysql-client-* | awk '/^ii/ {print $2, $3}'
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Run SQL client tests
+        run: cargo make ci-sql-clients
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------
@@ -1961,6 +1998,7 @@ jobs:
       - wasm-engine
       # PostgreSQL front end
       - pgsql
+      - sql-clients
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -2012,6 +2050,7 @@ jobs:
             "${{ needs.node-engine.result }}"
             "${{ needs.wasm-engine.result }}"
             "${{ needs.pgsql.result }}"
+            "${{ needs.sql-clients.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

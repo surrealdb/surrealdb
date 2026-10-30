@@ -781,6 +781,24 @@ script = '''
     echo "✅ Wire protocol integration tests passed successfully!"
 '''
 
+[tasks.ci-sql-clients]
+category = "CI - INTEGRATION TESTS"
+description = "Drive the real psql, pg_isready, pg_dump, pgbench, mysql, mysqladmin, mysqldump and mysqlslap clients against the PostgreSQL and MySQL wire listeners"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    cargo build --locked --no-default-features --features storage-mem,http,postgres,mysql
+
+    # Version-log the clients so a client upgrade shows up next to any failure.
+    psql --version
+    mysql --version
+
+    CI=true tests/sql-clients/run.sh all
+
+    echo "✅ SQL client tests passed successfully!"
+'''
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------

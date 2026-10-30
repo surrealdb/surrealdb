@@ -11,9 +11,10 @@ extern crate tracing;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, LazyLock};
 
+use common::time::Instant;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -46,6 +47,14 @@ pub use conn::Connection;
 pub use query::translate_query;
 
 pub const LOG: &str = "surrealdb::mywire";
+
+/// Start of the listener, forced by `start`; `COM_STATISTICS` reports its elapsed time as the
+/// server uptime.
+static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+pub(crate) fn uptime() -> std::time::Duration {
+	STARTED.elapsed()
+}
 
 /// A bidirectional byte stream a connection is served over.
 ///
@@ -247,6 +256,7 @@ pub async fn start_with_max_connections(
 		.await
 		.with_context(|| format!("Failed to bind the MySQL listener on {addr}"))?;
 
+	LazyLock::force(&STARTED);
 	let bound_addr = listener.local_addr()?;
 	info!(target: LOG, "Started MySQL wire protocol server on {bound_addr}");
 
