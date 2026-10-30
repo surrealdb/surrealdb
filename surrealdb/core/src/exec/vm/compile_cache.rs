@@ -47,6 +47,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use arc_swap::ArcSwap;
 use uuid::Uuid;
 
 use super::program::{ISA_VERSION, UnitFrame};
@@ -369,40 +370,71 @@ impl<V> Flight<V> {
 /// their compilations depended on, the latest last.
 const VARIANTS: usize = 4;
 
+/// The units one frame of a key keeps, oldest first.
+type KeptUnits<V> = Arc<[Arc<Kept<V>>]>;
+
 /// One frame of a key: the flight compiling for it now or last, and the
 /// units it keeps.
 struct Slot<V> {
 	frame: UnitFrame,
 	flight: Arc<Flight<V>>,
-	kept: Vec<Arc<Kept<V>>>,
+	kept: KeptUnits<V>,
 }
 
-/// The frames of one key.
+impl<V> Clone for Slot<V> {
+	fn clone(&self) -> Self {
+		Self {
+			frame: self.frame.clone(),
+			flight: Arc::clone(&self.flight),
+			kept: Arc::clone(&self.kept),
+		}
+	}
+}
+
+/// The frames of one key. Every request for the key reads them, so they are
+/// published whole, and a request reads them without taking a lock; a change
+/// publishes them anew under `changing`.
 struct Entry<V> {
-	slots: Mutex<Vec<Slot<V>>>,
+	slots: ArcSwap<Vec<Slot<V>>>,
+	/// Held while the slots are changed, so no change is lost to another.
+	changing: Mutex<()>,
 }
 
 impl<V> Entry<V> {
-	/// Run `f` over the slot for `frame`, made where there is none.
+	fn new() -> Self {
+		Self {
+			slots: ArcSwap::from_pointee(Vec::new()),
+			changing: Mutex::new(()),
+		}
+	}
+
+	/// Run `f` over the slot for `frame`, made where there is none, and
+	/// publish the slots it leaves.
 	fn with_slot<R>(&self, frame: &UnitFrame, f: impl FnOnce(&mut Slot<V>) -> R) -> R {
-		let mut slots = self.slots.lock().unwrap_or_else(PoisonError::into_inner);
+		let _changing = self.changing.lock().unwrap_or_else(PoisonError::into_inner);
+		let mut slots: Vec<Slot<V>> = self.slots.load().iter().cloned().collect();
 		let at = match slots.iter().position(|slot| slot.frame == *frame) {
 			Some(at) => at,
 			None => {
 				slots.push(Slot {
 					frame: frame.clone(),
 					flight: Flight::new(),
-					kept: Vec::new(),
+					kept: Arc::from(Vec::new()),
 				});
 				slots.len() - 1
 			}
 		};
-		f(&mut slots[at])
+		let answer = f(&mut slots[at]);
+		self.slots.store(Arc::new(slots));
+		answer
 	}
 
 	/// The flight for `frame`, and the units it keeps.
-	fn flight(&self, frame: &UnitFrame) -> (Arc<Flight<V>>, Vec<Arc<Kept<V>>>) {
-		self.with_slot(frame, |slot| (Arc::clone(&slot.flight), slot.kept.clone()))
+	fn flight(&self, frame: &UnitFrame) -> (Arc<Flight<V>>, KeptUnits<V>) {
+		if let Some(slot) = self.slots.load().iter().find(|slot| slot.frame == *frame) {
+			return (Arc::clone(&slot.flight), Arc::clone(&slot.kept));
+		}
+		self.with_slot(frame, |slot| (Arc::clone(&slot.flight), Arc::clone(&slot.kept)))
 	}
 
 	/// Replace `stale`, the flight for `frame`, with a new one, unless another
@@ -419,10 +451,8 @@ impl<V> Entry<V> {
 	/// Keep `unit` for `frame`, dropping the oldest past [`VARIANTS`].
 	fn keep(&self, frame: &UnitFrame, unit: Arc<Kept<V>>) {
 		self.with_slot(frame, |slot| {
-			if slot.kept.len() == VARIANTS {
-				slot.kept.remove(0);
-			}
-			slot.kept.push(unit);
+			let from = (slot.kept.len() + 1).saturating_sub(VARIANTS);
+			slot.kept = slot.kept[from..].iter().cloned().chain([unit]).collect();
 		});
 	}
 }
@@ -605,11 +635,8 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 		let Some(entries) = &self.entries else {
 			return self.private(compile).await;
 		};
-		let entry = entries.get_or_insert_with(key, || {
-			Ok::<_, std::convert::Infallible>(Arc::new(Entry {
-				slots: Mutex::new(Vec::new()),
-			}))
-		});
+		let entry = entries
+			.get_or_insert_with(key, || Ok::<_, std::convert::Infallible>(Arc::new(Entry::new())));
 		let Ok(entry) = entry;
 		let (mut flight, kept) = entry.flight(frame);
 		// A unit kept for another state of what else it depends on serves a
@@ -766,13 +793,15 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 		ctx: &crate::ctx::FrozenContext,
 	) -> Option<(V, Arc<ContextDeps>)> {
 		let entry = self.entries.as_ref()?.get(key)?;
-		let (flight, mut kept) = entry.flight(frame);
-		if let Some(Some(latest)) = flight.cell.get()
-			&& !kept.iter().any(|held| Arc::ptr_eq(held, latest))
-		{
-			kept.push(Arc::clone(latest));
-		}
-		for kept in kept.iter().rev() {
+		let (flight, kept) = entry.flight(frame);
+		// The unit the flight compiled last is asked first, where it is not
+		// among those kept.
+		let latest = flight
+			.cell
+			.get()
+			.and_then(Option::as_ref)
+			.filter(|latest| !kept.iter().any(|held| Arc::ptr_eq(held, latest)));
+		for kept in latest.into_iter().chain(kept.iter().rev()) {
 			if kept.context.hold(ctx) && kept.deps.hold(txn).await {
 				self.counters.hits.fetch_add(1, Ordering::Relaxed);
 				return Some((kept.value.clone(), Arc::clone(&kept.context)));

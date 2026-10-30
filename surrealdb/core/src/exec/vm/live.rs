@@ -404,7 +404,7 @@ pub(crate) async fn compile(
 	let mut opt = Options::new(&ctx.config.exec);
 	opt.set_ns(Some(Arc::from(ns)));
 	opt.set_db(Some(Arc::from(db)));
-	let plan_session = PlanSession::new(opt.with_auth(auth), session.clone());
+	let plan_session = PlanSession::new(opt.with_auth(auth), Arc::new(session.clone()));
 	let request = SubscriptionRequest {
 		table,
 		compiled,

@@ -155,8 +155,9 @@ use crate::val::Value;
 pub(crate) struct PlanSession {
 	/// The options the session carries: import, force, and the selected namespace and database.
 	pub(crate) opt: Options,
-	/// The `$session` value, with the namespace and database a `USE` selected.
-	session: Value,
+	/// The `$session` value, with the namespace and database a `USE` selected. Shared with the
+	/// context the request runs in until a `USE` changes it.
+	session: Arc<Value>,
 	/// The constants the `LET`s before the statement bound, by name.
 	bound: HashMap<String, Value>,
 	/// The names of the `LET`s whose value only the run computes.
@@ -181,7 +182,7 @@ struct BoundContext {
 
 impl PlanSession {
 	/// The session a request starts from: `opt`, and the `$session` value `session`.
-	pub(crate) fn new(opt: Options, session: Value) -> Self {
+	pub(crate) fn new(opt: Options, session: Arc<Value>) -> Self {
 		Self {
 			opt,
 			session,
@@ -223,7 +224,7 @@ impl PlanSession {
 		}
 		let mut ctx = Context::snapshot(base);
 		ctx.set_transaction(Arc::clone(txn));
-		ctx.add_value("session", self.session.clone().into());
+		ctx.add_value("session", Arc::clone(&self.session));
 		for (name, value) in &self.bound {
 			ctx.add_value(name.clone(), value.clone().into());
 		}
@@ -264,14 +265,14 @@ impl PlanSession {
 	pub(crate) fn use_names(&mut self, ns: Option<&str>, db: Option<&str>) {
 		if let Some(ns) = ns {
 			self.opt.set_ns(Some(ns.into()));
-			self.session.put(NS.as_ref(), ns.to_owned().into());
+			Arc::make_mut(&mut self.session).put(NS.as_ref(), ns.to_owned().into());
 		}
 		if let Some(db) = db {
 			self.opt.set_db(Some(db.into()));
-			self.session.put(DB.as_ref(), db.to_owned().into());
+			Arc::make_mut(&mut self.session).put(DB.as_ref(), db.to_owned().into());
 		}
 		if ns.is_some() || db.is_some() {
-			let session = Arc::new(self.session.clone());
+			let session = Arc::clone(&self.session);
 			self.edit_context(|ctx| ctx.add_value("session", session));
 		}
 	}
@@ -3075,7 +3076,7 @@ mod tests {
 		assert!(cx.indexes().resolve(&reference_of("t", "other", 0)).is_none());
 	}
 	fn session() -> PlanSession {
-		PlanSession::new(Options::new(&ExecConfig::default()), Value::None)
+		PlanSession::new(Options::new(&ExecConfig::default()), Arc::new(Value::None))
 	}
 
 	fn use_slot(operands: UseOperands, computed: bool) -> Slot {

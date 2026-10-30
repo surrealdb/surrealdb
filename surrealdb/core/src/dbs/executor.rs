@@ -638,10 +638,7 @@ pub(crate) struct PreparedBroker {
 	delivery: Arc<OrderedBroker>,
 	/// What the transaction wrote, for the subscriptions its snapshot did not
 	/// hold, and where to read them once it commits.
-	recheck: Option<(
-		Arc<crate::dbs::live_recheck::LiveRecheck>,
-		crate::dbs::live_recheck::RecheckSource,
-	)>,
+	recheck: Option<crate::dbs::live_recheck::RecheckHandle>,
 }
 
 /// Flush a batch's buffered live-query notifications once the caller-owned
@@ -650,7 +647,19 @@ pub(crate) struct PreparedBroker {
 /// Only the owner commits such a transaction, so the executor has no commit of
 /// its own to flush after. Queued on the transaction, the notifications go out
 /// with the commit and are dropped with a cancel or a failed commit.
-pub(crate) struct FlushOnCommit(pub(crate) PreparedBroker);
+pub(crate) struct FlushOnCommit(PreparedBroker);
+
+impl FlushOnCommit {
+	/// Flush `prepared` once the transaction holding this action commits. The
+	/// transaction holds the recheck, so its write contexts are detached as
+	/// they are noted rather than held until the commit.
+	pub(crate) fn new(prepared: PreparedBroker) -> Self {
+		if let Some(recheck) = &prepared.recheck {
+			recheck.detach_at_write();
+		}
+		Self(prepared)
+	}
+}
 
 impl CommitAction for FlushOnCommit {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -1226,7 +1235,8 @@ pub(crate) fn install_broker(
 	Some(PreparedBroker {
 		receiver: recv,
 		delivery,
-		recheck: recheck.map(|recheck| (recheck, source)),
+		recheck: recheck
+			.map(|recheck| crate::dbs::live_recheck::RecheckHandle::new(recheck, source)),
 	})
 }
 
@@ -1244,12 +1254,8 @@ pub(crate) fn flush_live_query_notifications(prepared: PreparedBroker) {
 		delivery,
 		recheck,
 	} = prepared;
-	if let Some((recheck, source)) = recheck {
-		crate::dbs::live_recheck::spawn(
-			recheck,
-			source,
-			Arc::clone(&delivery) as Arc<dyn MessageBroker>,
-		);
+	if let Some(recheck) = recheck {
+		crate::dbs::live_recheck::spawn(recheck, Arc::clone(&delivery) as Arc<dyn MessageBroker>);
 	}
 	// Read before draining: once every sender is gone nothing more can arrive,
 	// so the drain below takes everything there will ever be.
@@ -4940,7 +4946,7 @@ impl Executor {
 		// whole batch: every statement runs through `execute_plan_in_transaction`, which
 		// never clears it, and the context dies with this executor.
 		if let Some(prepared) = self.prepare_broker(kvs, tx.writeable(), kvs.live_query_broker()) {
-			tx.on_commit(Box::new(FlushOnCommit(prepared))).await;
+			tx.on_commit(Box::new(FlushOnCommit::new(prepared))).await;
 		}
 		let batch_start = Instant::now();
 		self.batch_start = Some(batch_start);
@@ -5710,7 +5716,7 @@ impl Executor {
 		let mut steps: Vec<RequestStep> = Vec::with_capacity(entries.len());
 		let mut plan_session = crate::exec::vm::PlanSession::new(
 			self.opt.clone(),
-			self.ctx.value("session").cloned().unwrap_or(Value::None),
+			self.ctx.shared_value("session").cloned().unwrap_or_else(|| Arc::new(Value::None)),
 		);
 		let keep_logged = self.ctx.slow_log().is_some();
 		let mut same_txn = true;

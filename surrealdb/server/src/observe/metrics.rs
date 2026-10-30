@@ -107,32 +107,19 @@ fn error_class_label(class: Option<&'static str>) -> &'static str {
 /// for the cardinality-capped per-tenant rollups and SurrealDS cluster
 /// internals, but the primary `surrealdb.*` family lives here.
 pub struct MetricsObserver {
-	// Statement (scope: surrealdb.statement)
-	statement_total: Counter<u64>,
-	statement_duration: Histogram<f64>,
-	statement_rows: Counter<u64>,
-	// Query (scope: surrealdb.query)
-	query_total: Counter<u64>,
-	query_duration: Histogram<f64>,
-	// Transaction (scope: surrealdb.transaction)
-	transaction_total: Counter<u64>,
-	transaction_duration: Histogram<f64>,
+	/// The statement, query, transaction, RPC and network-byte families, which every request
+	/// adds to, gathered before they reach their instruments ([`Gathered`]).
+	gathered: Arc<Gathered>,
 	/// The KV operation, key and byte counts of the transactions, reported by observable
 	/// counters ([`TransactionTallies`]).
 	transaction_tallies: Arc<TransactionTallies>,
 	transaction_conflicts: Counter<u64>,
-	// RPC (scope: surrealdb.rpc)
-	rpc_total: Counter<u64>,
-	rpc_duration: Histogram<f64>,
 	// Auth (scope: surrealdb.auth)
 	auth_total: Counter<u64>,
 	// Session (scope: surrealdb.session)
 	session_total: Counter<u64>,
 	session_active: UpDownCounter<i64>,
 	session_duration: Histogram<f64>,
-	// Network (scope: surrealdb.network)
-	network_received: Counter<u64>,
-	network_sent: Counter<u64>,
 	// Bucket object storage (scope: surrealdb.bucket)
 	bucket_sent: Counter<u64>,
 	bucket_received: Counter<u64>,
@@ -209,7 +196,10 @@ struct TallyShard {
 
 impl TransactionTallies {
 	/// The tallies, with an observable counter on `meter` for each of the seven metrics.
-	fn register(meter: &opentelemetry::metrics::Meter) -> Arc<Self> {
+	///
+	/// `gathered` is handed to its instruments in the callback of the first: a collection runs
+	/// every callback before it reads any instrument, so it reads what was gathered until then.
+	fn register(meter: &opentelemetry::metrics::Meter, gathered: Arc<Gathered>) -> Arc<Self> {
 		let tallies = Arc::new(Self {
 			shards: (0..TALLY_SHARDS).map(|_| TallyShard::default()).collect(),
 		});
@@ -220,6 +210,7 @@ impl TransactionTallies {
 			.u64_observable_counter(names::TRANSACTION_KV_OPS)
 			.with_description("Per-transaction KV operation counts, broken out by op type")
 			.with_callback(move |obs| {
+				gathered.hand_over();
 				for (i, op) in KV_OPS.iter().enumerate() {
 					let total = kv_ops.sum(|shard| &shard.kv_ops[i]);
 					obs.observe(total, &[KeyValue::new(attrs::KV_OP, *op)]);
@@ -332,6 +323,289 @@ impl TransactionTallies {
 	}
 }
 
+/// The statement, query, transaction, RPC and network-byte families, which every request adds to,
+/// with what was added to them since they were last handed it.
+///
+/// An instrument sorts and hashes the attributes of every measurement, takes a read lock over its
+/// series and, for a histogram, locks the series' buckets. A request adds to these families six
+/// times over, every request of a tenant to the same series, so at a hundred thousand requests a
+/// second on many cores those locks are what the cores contend for. So each thread adds to a shard
+/// of its own, which keeps the measurements by series, and the shard hands them to the instruments
+/// once it holds [`GATHER_HOLD`] of them, and whenever the metrics are collected: the
+/// [`TransactionTallies`] callback hands every shard over before the collection reads the
+/// instruments. The instruments receive every measurement, with the attributes it was made with, so
+/// their sums, counts, buckets and bounds are those of measuring each as it is made.
+struct Gathered {
+	// Statement (scope: surrealdb.statement)
+	statement_total: Counter<u64>,
+	statement_duration: Histogram<f64>,
+	statement_rows: Counter<u64>,
+	// Query (scope: surrealdb.query)
+	query_total: Counter<u64>,
+	query_duration: Histogram<f64>,
+	// Transaction (scope: surrealdb.transaction)
+	transaction_total: Counter<u64>,
+	transaction_duration: Histogram<f64>,
+	// RPC (scope: surrealdb.rpc)
+	rpc_total: Counter<u64>,
+	rpc_duration: Histogram<f64>,
+	// Network (scope: surrealdb.network)
+	network_received: Counter<u64>,
+	network_sent: Counter<u64>,
+	shards: Box<[GatherShard]>,
+}
+
+/// How many shards [`Gathered`] keeps.
+const GATHER_SHARDS: usize = 64;
+
+/// How many measurements a shard of [`Gathered`] holds before it hands them over.
+const GATHER_HOLD: usize = 256;
+
+/// How many series a shard of [`Gathered`] keeps between hand-overs. A series is kept while it is
+/// added to, so a shard that tenants come and go through does not grow without bound.
+const GATHER_SERIES: usize = 64;
+
+/// One shard of [`Gathered`], on a cache line of its own.
+#[derive(Default)]
+#[repr(align(128))]
+struct GatherShard(std::sync::Mutex<GatherSeries>);
+
+/// The series a shard of [`Gathered`] keeps, and how many measurements they hold.
+#[derive(Default)]
+struct GatherSeries {
+	series: Vec<Series>,
+	held: usize,
+}
+
+/// The family a measurement of [`Gathered`] is made in, with the attributes only that family has.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Family {
+	/// A statement completed, of the type labelled.
+	Statement(&'static str),
+	/// A query batch completed.
+	Query,
+	/// A transaction completed; whether it could write.
+	Transaction(bool),
+	/// An RPC method of the name labelled completed.
+	Rpc(&'static str),
+	/// Bytes were received over the protocol labelled.
+	Received(&'static str),
+	/// Bytes were sent over the protocol labelled.
+	Sent(&'static str),
+}
+
+/// The labels of one measurement of [`Gathered`]. `outcome` and `error_class` are not attributes
+/// of the network-byte families.
+#[derive(Clone, Copy)]
+struct Labels<'a> {
+	family: Family,
+	outcome: &'static str,
+	error_class: &'static str,
+	namespace: Option<&'a str>,
+	database: Option<&'a str>,
+	user: Option<&'a str>,
+}
+
+/// The measurements one series of [`Gathered`] holds.
+struct Series {
+	family: Family,
+	outcome: &'static str,
+	error_class: &'static str,
+	/// The tenant labels, `None` where [`label_cow`] reports [`NONE_LABEL`].
+	namespace: Option<String>,
+	database: Option<String>,
+	user: Option<String>,
+	/// How many measurements were made.
+	count: u64,
+	/// The rows of the statements, or the bytes received or sent.
+	amount: u64,
+	/// The duration of each measurement, in seconds, for the families that have one.
+	durations: Vec<f64>,
+}
+
+/// A tenant label as [`Series`] keeps it.
+fn tenant(label: Option<&str>) -> Option<&str> {
+	label.filter(|label| !label.is_empty())
+}
+
+impl Series {
+	fn new(labels: &Labels<'_>) -> Self {
+		Self {
+			family: labels.family,
+			outcome: labels.outcome,
+			error_class: labels.error_class,
+			namespace: tenant(labels.namespace).map(str::to_owned),
+			database: tenant(labels.database).map(str::to_owned),
+			user: tenant(labels.user).map(str::to_owned),
+			count: 0,
+			amount: 0,
+			durations: Vec::new(),
+		}
+	}
+
+	/// Whether a measurement with `labels` belongs to this series.
+	fn is(&self, labels: &Labels<'_>) -> bool {
+		self.family == labels.family
+			&& self.outcome == labels.outcome
+			&& self.error_class == labels.error_class
+			&& self.namespace.as_deref() == tenant(labels.namespace)
+			&& self.database.as_deref() == tenant(labels.database)
+			&& self.user.as_deref() == tenant(labels.user)
+	}
+
+	/// The tenant attributes, as each family reports them last.
+	fn tenant_attributes(&self) -> [KeyValue; 3] {
+		[
+			KeyValue::new(attrs::NAMESPACE, label_cow(self.namespace.as_deref())),
+			KeyValue::new(attrs::DATABASE, label_cow(self.database.as_deref())),
+			KeyValue::new(attrs::USER, label_cow(self.user.as_deref())),
+		]
+	}
+
+	/// The attributes of a family whose own attribute is `first`, followed by the outcome, the
+	/// error class and the tenant.
+	fn attributes(&self, first: KeyValue, tenant: [KeyValue; 3]) -> [KeyValue; 6] {
+		let [namespace, database, user] = tenant;
+		[
+			first,
+			KeyValue::new(attrs::OUTCOME, self.outcome),
+			KeyValue::new(attrs::ERROR_CLASS, self.error_class),
+			namespace,
+			database,
+			user,
+		]
+	}
+}
+
+impl Gathered {
+	fn shards() -> Box<[GatherShard]> {
+		(0..GATHER_SHARDS).map(|_| GatherShard::default()).collect()
+	}
+
+	/// The shard the calling thread adds to.
+	fn shard(&self) -> &GatherShard {
+		static NEXT: AtomicUsize = AtomicUsize::new(0);
+		thread_local! {
+			static SHARD: usize = NEXT.fetch_add(1, Ordering::Relaxed) % GATHER_SHARDS;
+		}
+		&self.shards[SHARD.with(|shard| *shard)]
+	}
+
+	/// Add a measurement with `labels`: its duration in seconds, for the families that have one,
+	/// and the rows or bytes it counts.
+	fn gather(&self, labels: Labels<'_>, duration: Option<f64>, amount: u64) {
+		let mut held = self.shard().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+		let at = match held.series.iter().position(|series| series.is(&labels)) {
+			Some(at) => at,
+			None => {
+				held.series.push(Series::new(&labels));
+				held.series.len() - 1
+			}
+		};
+		let series = &mut held.series[at];
+		series.count += 1;
+		series.amount += amount;
+		if let Some(duration) = duration {
+			series.durations.push(duration);
+		}
+		held.held += 1;
+		if held.held >= GATHER_HOLD {
+			self.hand_over_shard(&mut held);
+		}
+	}
+
+	/// Hand what every shard holds to the instruments.
+	fn hand_over(&self) {
+		for shard in self.shards.iter() {
+			self.hand_over_shard(
+				&mut shard.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+			);
+		}
+	}
+
+	/// Hand what `held` holds to the instruments, and let go of the series nothing was added to
+	/// since the last hand-over.
+	fn hand_over_shard(&self, held: &mut GatherSeries) {
+		held.series.retain_mut(|series| {
+			if series.count == 0 {
+				return false;
+			}
+			self.hand(series);
+			series.count = 0;
+			series.amount = 0;
+			series.durations.clear();
+			true
+		});
+		if held.series.len() > GATHER_SERIES {
+			held.series.clear();
+		}
+		held.held = 0;
+	}
+
+	/// Hand the measurements `series` holds to its family's instruments.
+	fn hand(&self, series: &Series) {
+		let tenant = series.tenant_attributes();
+		match series.family {
+			Family::Statement(kind) => {
+				let attrs = series.attributes(KeyValue::new(attrs::STATEMENT_TYPE, kind), tenant);
+				self.measure(&self.statement_total, &self.statement_duration, series, &attrs);
+				if series.amount > 0 {
+					self.statement_rows.add(series.amount, &attrs);
+				}
+			}
+			Family::Query => {
+				let [namespace, database, user] = tenant;
+				let attrs = [
+					KeyValue::new(attrs::OUTCOME, series.outcome),
+					KeyValue::new(attrs::ERROR_CLASS, series.error_class),
+					namespace,
+					database,
+					user,
+				];
+				self.measure(&self.query_total, &self.query_duration, series, &attrs);
+			}
+			Family::Transaction(write) => {
+				let write = if write {
+					"true"
+				} else {
+					"false"
+				};
+				let attrs = series.attributes(KeyValue::new(attrs::WRITE, write), tenant);
+				self.measure(&self.transaction_total, &self.transaction_duration, series, &attrs);
+			}
+			Family::Rpc(method) => {
+				let attrs = series.attributes(KeyValue::new(attrs::RPC_METHOD, method), tenant);
+				self.measure(&self.rpc_total, &self.rpc_duration, series, &attrs);
+			}
+			Family::Received(protocol) => {
+				let [namespace, database, user] = tenant;
+				let attrs = [KeyValue::new(attrs::PROTOCOL, protocol), namespace, database, user];
+				self.network_received.add(series.amount, &attrs);
+			}
+			Family::Sent(protocol) => {
+				let [namespace, database, user] = tenant;
+				let attrs = [KeyValue::new(attrs::PROTOCOL, protocol), namespace, database, user];
+				self.network_sent.add(series.amount, &attrs);
+			}
+		}
+	}
+
+	/// Count the measurements of `series` in `total`, and record each one's duration in
+	/// `duration`, with `attrs`.
+	fn measure(
+		&self,
+		total: &Counter<u64>,
+		duration: &Histogram<f64>,
+		series: &Series,
+		attrs: &[KeyValue],
+	) {
+		total.add(series.count, attrs);
+		for value in &series.durations {
+			duration.record(*value, attrs);
+		}
+	}
+}
+
 impl MetricsObserver {
 	/// Construct the unified observer, lazily registering each
 	/// instrument against the supplied
@@ -359,7 +633,7 @@ impl MetricsObserver {
 		let mcp = runtime.meter(scope::MCP);
 		let task = runtime.meter(scope::TASK);
 
-		Ok(Self {
+		let gathered = Arc::new(Gathered {
 			statement_total: stmt
 				.u64_counter(names::STATEMENT_TOTAL)
 				.with_description("Cumulative count of top-level statement completions")
@@ -395,13 +669,6 @@ impl MetricsObserver {
 				.with_description("Distribution of transaction lifetime at commit / cancel")
 				.with_unit("s")
 				.build(),
-			transaction_tallies: TransactionTallies::register(&tx),
-			transaction_conflicts: tx
-				.u64_counter(names::TRANSACTION_CONFLICTS)
-				.with_description(
-					"Cumulative count of transactions that aborted due to a commit conflict",
-				)
-				.build(),
 			rpc_total: rpc
 				.u64_counter(names::RPC_TOTAL)
 				.with_description("Cumulative count of RPC method invocations")
@@ -410,6 +677,31 @@ impl MetricsObserver {
 				.f64_histogram(names::RPC_DURATION)
 				.with_description("Distribution of RPC method latency")
 				.with_unit("s")
+				.build(),
+			network_received: net
+				.u64_counter(names::NETWORK_RECEIVED)
+				.with_description(
+					"Cumulative inbound bytes observed at the HTTP / WebSocket ingress",
+				)
+				.with_unit("By")
+				.build(),
+			network_sent: net
+				.u64_counter(names::NETWORK_SENT)
+				.with_description(
+					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
+				)
+				.with_unit("By")
+				.build(),
+			shards: Gathered::shards(),
+		});
+		Ok(Self {
+			transaction_tallies: TransactionTallies::register(&tx, Arc::clone(&gathered)),
+			gathered,
+			transaction_conflicts: tx
+				.u64_counter(names::TRANSACTION_CONFLICTS)
+				.with_description(
+					"Cumulative count of transactions that aborted due to a commit conflict",
+				)
 				.build(),
 			auth_total: auth
 				.u64_counter(names::AUTH_TOTAL)
@@ -427,20 +719,6 @@ impl MetricsObserver {
 				.f64_histogram(names::SESSION_DURATION)
 				.with_description("Distribution of session lifetime at disconnect")
 				.with_unit("s")
-				.build(),
-			network_received: net
-				.u64_counter(names::NETWORK_RECEIVED)
-				.with_description(
-					"Cumulative inbound bytes observed at the HTTP / WebSocket ingress",
-				)
-				.with_unit("By")
-				.build(),
-			network_sent: net
-				.u64_counter(names::NETWORK_SENT)
-				.with_description(
-					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
-				)
-				.with_unit("By")
 				.build(),
 			bucket_sent: buc
 				.u64_counter(names::BUCKET_SENT_BYTES)
@@ -892,22 +1170,29 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 
 impl ExecutionObserver for MetricsObserver {
 	fn on_statement_complete(&self, event: &StatementEvent) {
-		let attrs = [
-			KeyValue::new(attrs::STATEMENT_TYPE, event.safe.kind.as_label()),
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.statement_total.add(1, &attrs);
-		self.statement_duration.record(event.safe.duration.as_secs_f64(), &attrs);
-		if event.safe.result_rows > 0 {
-			self.statement_rows.add(event.safe.result_rows, &attrs);
-		}
+		self.gathered.gather(
+			Labels {
+				family: Family::Statement(event.safe.kind.as_label()),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			event.safe.result_rows,
+		);
 		if self.slow_query_threshold_ms > 0 {
 			let duration_ms = event.safe.duration.as_millis() as u64;
 			if duration_ms >= self.slow_query_threshold_ms {
+				let attrs = [
+					KeyValue::new(attrs::STATEMENT_TYPE, event.safe.kind.as_label()),
+					KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+					KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
+					KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
+					KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
+					KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
+				];
 				// Slow-query counter intentionally re-uses the same labels
 				// as `surrealdb.statement.*` so dashboards can join across
 				// the two families on `statement_type` / `outcome` / tenant ctx.
@@ -917,34 +1202,33 @@ impl ExecutionObserver for MetricsObserver {
 	}
 
 	fn on_query_complete(&self, event: &QueryEvent) {
-		let attrs = [
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.query_total.add(1, &attrs);
-		self.query_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Query,
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 	}
 
 	fn on_transaction_complete(&self, event: &TransactionEvent) {
-		let outcome = event.safe.outcome.as_label();
-		let write = if event.safe.write {
-			"true"
-		} else {
-			"false"
-		};
-		let core_attrs = [
-			KeyValue::new(attrs::WRITE, write),
-			KeyValue::new(attrs::OUTCOME, outcome),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.transaction_total.add(1, &core_attrs);
-		self.transaction_duration.record(event.safe.duration.as_secs_f64(), &core_attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Transaction(event.safe.write),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 		// Each commit-conflict failure is itself a retry trigger when
 		// surrounded by an optimistic-retry loop, so the conflicts
 		// counter doubles as the retry-pressure signal. Operators alert
@@ -968,16 +1252,18 @@ impl ExecutionObserver for MetricsObserver {
 	}
 
 	fn on_rpc_complete(&self, event: &RpcEvent) {
-		let attrs = [
-			KeyValue::new(attrs::RPC_METHOD, event.safe.method.to_str()),
-			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-			KeyValue::new(attrs::ERROR_CLASS, error_class_label(event.safe.error_class)),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		self.rpc_total.add(1, &attrs);
-		self.rpc_duration.record(event.safe.duration.as_secs_f64(), &attrs);
+		self.gathered.gather(
+			Labels {
+				family: Family::Rpc(event.safe.method.to_str()),
+				outcome: event.safe.outcome.as_label(),
+				error_class: error_class_label(event.safe.error_class),
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			Some(event.safe.duration.as_secs_f64()),
+			0,
+		);
 	}
 
 	fn on_auth_event(&self, event: &AuthEvent) {
@@ -1025,16 +1311,22 @@ impl ExecutionObserver for MetricsObserver {
 		if event.safe.bytes == 0 {
 			return;
 		}
-		let attrs = [
-			KeyValue::new(attrs::PROTOCOL, event.safe.protocol.as_label()),
-			KeyValue::new(attrs::NAMESPACE, label_cow(event.ctx.namespace.as_deref())),
-			KeyValue::new(attrs::DATABASE, label_cow(event.ctx.database.as_deref())),
-			KeyValue::new(attrs::USER, label_cow(event.ctx.user.as_deref())),
-		];
-		match event.safe.direction {
-			NetworkDirection::Received => self.network_received.add(event.safe.bytes, &attrs),
-			NetworkDirection::Sent => self.network_sent.add(event.safe.bytes, &attrs),
-		}
+		let protocol = event.safe.protocol.as_label();
+		self.gathered.gather(
+			Labels {
+				family: match event.safe.direction {
+					NetworkDirection::Received => Family::Received(protocol),
+					NetworkDirection::Sent => Family::Sent(protocol),
+				},
+				outcome: NONE_LABEL,
+				error_class: NONE_LABEL,
+				namespace: event.ctx.namespace.as_deref(),
+				database: event.ctx.database.as_deref(),
+				user: event.ctx.user.as_deref(),
+			},
+			None,
+			event.safe.bytes,
+		);
 	}
 
 	fn on_bucket_operation(&self, event: &BucketOperationEvent) {
@@ -1384,6 +1676,49 @@ mod tests {
 				"missing `{instrument}` under `{expected_scope}`: {names:?}",
 			);
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	/// Measurements gathered past a shard's hand-over and those still held when
+	/// the metrics are collected all reach the instruments, each once.
+	#[tokio::test]
+	async fn gathered_measurements_reach_the_instruments_once() {
+		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		let made = 3 * GATHER_HOLD as u64 + 7;
+		for _ in 0..made {
+			obs.on_statement_complete(&statement_event(
+				StatementType::Select,
+				Some("acme"),
+				Some("alice"),
+				2,
+				Outcome::Success,
+			));
+		}
+		let mut rm = ResourceMetrics::default();
+		reader.collect(&mut rm).expect("collect");
+		let (mut total, mut rows, mut recorded) = (0, 0, 0);
+		for sm in rm.scope_metrics() {
+			for metric in sm.metrics() {
+				let name = metric.name();
+				if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
+					let sum = sum.data_points().map(|dp| dp.value()).sum::<u64>();
+					if name == names::STATEMENT_TOTAL {
+						total += sum;
+					} else if name == names::STATEMENT_ROWS {
+						rows += sum;
+					}
+				} else if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) =
+					metric.data() && name == names::STATEMENT_DURATION
+				{
+					recorded += histogram.data_points().map(|dp| dp.count()).sum::<u64>();
+				}
+			}
+		}
+		assert_eq!(total, made);
+		assert_eq!(rows, 2 * made);
+		assert_eq!(recorded, made);
 		provider.shutdown().expect("shutdown");
 	}
 

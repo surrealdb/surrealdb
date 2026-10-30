@@ -63,7 +63,10 @@ pub(super) fn session_of(planner: &Planner<'_>) -> PlanSession {
 	if let Some(auth) = &planner.auth {
 		opt = opt.with_auth(Arc::clone(auth));
 	}
-	PlanSession::new(opt, planner.frozen().value("session").cloned().unwrap_or(Value::None))
+	PlanSession::new(
+		opt,
+		planner.frozen().shared_value("session").cloned().unwrap_or_else(|| Arc::new(Value::None)),
+	)
 }
 
 /// `op`, bound by `planner`, planned as a container of the kind `unit`, with the references of

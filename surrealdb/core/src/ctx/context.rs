@@ -111,39 +111,17 @@ pub struct Context {
 	// scanned rather than to a value ([`Binding::Forbidden`]). A name is in
 	// at most one of `values` and `forbidden` at one level.
 	forbidden: Vec<(Strand, Arc<ForbiddenRow>)>,
-	// An optional datastore cache
-	cache: Option<Arc<DatastoreCache>>,
-	// The index store
-	index_stores: IndexStores,
-	// The index concurrent builders. Held behind an `Arc` so that deriving a child context
-	// is one reference-count bump rather than one per handle the builder carries.
-	index_builder: Option<Arc<IndexBuilder>>,
-	// The sequences, behind an `Arc` for the same reason.
-	sequences: Option<Arc<Sequences>>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
-	#[cfg(storage)]
-	// The temporary directory
-	temporary_directory: Option<Arc<PathBuf>>,
 	// An optional transaction
 	transaction: Option<Arc<Transaction>>,
 	// Does not read from parent `values`.
 	isolated: bool,
-	// A map of bucket connections
-	buckets: Option<BucketsManager>,
-	// The surrealism cache
-	#[cfg(feature = "surrealism")]
-	surrealism_cache: Option<Arc<SurrealismCache>>,
 	/// How many extension invocations enclose this context: zero for a query,
 	/// one inside a host call an extension made, and so on. A child context
 	/// carries its parent's.
 	#[cfg(feature = "surrealism")]
 	extension_depth: u8,
-	/// The datastore's capabilities when this context's root was created.
-	/// Unlike [`Self::capabilities`], an extension's host call never narrows
-	/// it, so it is what an extension's `CAPABILITIES` are intersected with.
-	#[cfg(feature = "surrealism")]
-	server_capabilities: Arc<Capabilities>,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
 	redact_volatile_explain_attrs: bool,
 	// Per-statement counters, shared with the executor so it can read the
@@ -176,28 +154,10 @@ pub struct Context {
 	// `*Ctx` half of every emitted [`crate::observe`] event without
 	// re-walking the session value tree on every emit.
 	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
-	/// Client for making http requests.
-	#[cfg(feature = "http")]
-	http_client: Arc<HttpClient>,
-	/// The datastore's function registry.
-	///
-	/// A function is resolved by name against one registry per datastore, so
-	/// this is the datastore's and is carried rather than rebuilt. It reaches
-	/// the context because compiling an expression needs it and not every
-	/// compiler holds an [`crate::exec::ExecutionContext`]: a schema
-	/// statement's clauses are compiled wherever the statement is reached,
-	/// which includes the evaluator that owns the catalog writes.
-	function_registry: Arc<FunctionRegistry>,
 	/// The statement families the entry that started the query serves. Set on
 	/// the root context and copied by every derivation, so stored code run
 	/// under a descendant is lowered and run under the same surface.
 	surface: &'static Surface,
-	/// The live-subscription units this node has compiled for the VM
-	/// (`crate::exec::vm::live`), carried as the function registry is.
-	live_units: Option<Arc<crate::exec::vm::live::LiveUnits>>,
-	/// The function-body units this node has compiled (`crate::exec::vm::units`),
-	/// carried as the live-subscription units are.
-	compiled_units: Option<Arc<crate::exec::vm::units::CompiledUnits>>,
 	/// The unit table of the function bundle whose body is executing around
 	/// this context: the arena a nested program with none of its own finds the
 	/// units its ids name in ([`crate::exec::vm::UnitTable`]). A child context
@@ -224,12 +184,8 @@ pub struct Context {
 	/// invocation of a closure value looks its unit up in. A child context
 	/// carries its parent's.
 	vm_closures: Option<Arc<crate::exec::vm::closure::ClosureUnits>>,
-	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
-	node_id: Uuid,
 	/// Whether authentication is required for non-anonymous access (datastore boot flag).
 	pub(crate) auth_enabled: bool,
-	/// Runtime-adjustable configuration (e.g. global query timeout).
-	dynamic_configuration: DynamicConfiguration,
 	/// Whether this session may use realtime (`LIVE` / `KILL LIVE`).
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
@@ -267,6 +223,60 @@ pub struct Context {
 	/// The per-layer configuration a running query reads. Crate-internal: these
 	/// are operator knobs, not API.
 	pub(crate) config: Arc<RuntimeConfig>,
+	/// Client for making http requests.
+	#[cfg(feature = "http")]
+	http_client: Arc<HttpClient>,
+	/// What every context of the datastore holds alike: what the datastore
+	/// was built with. Held once and shared, so a context is derived without
+	/// counting a reference to each, which every core would contend for.
+	shared: Arc<Shared>,
+}
+
+/// The parts of a [`Context`] the datastore it was built from holds, which
+/// every context derived from it shares.
+#[derive(Clone)]
+struct Shared {
+	// An optional datastore cache
+	cache: Option<Arc<DatastoreCache>>,
+	// The index store
+	index_stores: IndexStores,
+	// The index concurrent builders. Held behind an `Arc` so that deriving a child context
+	// is one reference-count bump rather than one per handle the builder carries.
+	index_builder: Option<Arc<IndexBuilder>>,
+	// The sequences, behind an `Arc` for the same reason.
+	sequences: Option<Arc<Sequences>>,
+	#[cfg(storage)]
+	// The temporary directory
+	temporary_directory: Option<Arc<PathBuf>>,
+	// A map of bucket connections
+	buckets: Option<BucketsManager>,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Option<Arc<SurrealismCache>>,
+	/// The datastore's capabilities when this context's root was created.
+	/// Unlike [`Context::capabilities`], an extension's host call never narrows
+	/// it, so it is what an extension's `CAPABILITIES` are intersected with.
+	#[cfg(feature = "surrealism")]
+	server_capabilities: Arc<Capabilities>,
+	/// The datastore's function registry.
+	///
+	/// A function is resolved by name against one registry per datastore, so
+	/// this is the datastore's and is carried rather than rebuilt. It reaches
+	/// the context because compiling an expression needs it and not every
+	/// compiler holds an [`crate::exec::ExecutionContext`]: a schema
+	/// statement's clauses are compiled wherever the statement is reached,
+	/// which includes the evaluator that owns the catalog writes.
+	function_registry: Arc<FunctionRegistry>,
+	/// The live-subscription units this node has compiled for the VM
+	/// (`crate::exec::vm::live`), carried as the function registry is.
+	live_units: Option<Arc<crate::exec::vm::live::LiveUnits>>,
+	/// The function-body units this node has compiled (`crate::exec::vm::units`),
+	/// carried as the live-subscription units are.
+	compiled_units: Option<Arc<crate::exec::vm::units::CompiledUnits>>,
+	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
+	node_id: Uuid,
+	/// Runtime-adjustable configuration (e.g. global query timeout).
+	dynamic_configuration: DynamicConfiguration,
 }
 
 impl Debug for Context {
@@ -296,42 +306,17 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities: Arc::clone(&parent.capabilities),
-			// Derived rather than new: this context is built per unit of work
-			// (one LIVE query delivery), and a segmentation dictionary is far
-			// too expensive to load and drop that often, so those are shared
-			// with the parent while the other caches stay isolated.
-			index_stores: parent.index_stores.derive(
-				parent.config.idx.hnsw_cache_size,
-				parent.config.idx.diskann_cache_size,
-				parent.config.idx.graph_resolve_cache_size,
-				parent.config.idx.fulltext_cache_size,
-			),
-			cache: None,
-			index_builder: None,
-			sequences: None,
-			#[cfg(storage)]
-			temporary_directory: None,
 			transaction: None,
 			isolated: false,
-			buckets: None,
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: None,
 			#[cfg(feature = "surrealism")]
 			extension_depth: 0,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: parent.statement_clock,
 			request_params: None,
 			call_boundary: false,
 			config: Arc::clone(&parent.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&parent.http_client),
-			function_registry: Arc::clone(&parent.function_registry),
 			surface: parent.surface,
-			live_units: parent.live_units.clone(),
-			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
@@ -339,9 +324,7 @@ impl Context {
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: None,
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
 			live_recheck: parent.live_recheck.clone(),
@@ -351,6 +334,35 @@ impl Context {
 			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::new(std::sync::OnceLock::new()),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&parent.http_client),
+			shared: Arc::new(Shared {
+				// Derived rather than new: this context is built per unit of work
+				// (one LIVE query delivery), and a segmentation dictionary is far
+				// too expensive to load and drop that often, so those are shared
+				// with the parent while the other caches stay isolated.
+				index_stores: parent.shared.index_stores.derive(
+					parent.config.idx.hnsw_cache_size,
+					parent.config.idx.diskann_cache_size,
+					parent.config.idx.graph_resolve_cache_size,
+					parent.config.idx.fulltext_cache_size,
+				),
+				cache: None,
+				index_builder: None,
+				sequences: None,
+				#[cfg(storage)]
+				temporary_directory: None,
+				buckets: None,
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: None,
+				#[cfg(feature = "surrealism")]
+				server_capabilities: Arc::clone(&parent.shared.server_capabilities),
+				function_registry: Arc::clone(&parent.shared.function_registry),
+				live_units: parent.shared.live_units.clone(),
+				compiled_units: parent.shared.compiled_units.clone(),
+				node_id: parent.shared.node_id,
+				dynamic_configuration: parent.shared.dynamic_configuration.clone(),
+			}),
 		}
 	}
 
@@ -380,22 +392,11 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities: cap,
-			index_stores: parent.index_stores.clone(),
-			cache: parent.cache.clone(),
-			index_builder: parent.index_builder.clone(),
-			sequences: parent.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: false,
 			parent: Some(Arc::clone(parent)),
-			buckets: parent.buckets.clone(),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: parent.surrealism_cache.clone(),
 			#[cfg(feature = "surrealism")]
 			extension_depth: parent.extension_depth,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			statement_clock: parent.statement_clock,
@@ -404,10 +405,7 @@ impl Context {
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
-			function_registry: Arc::clone(&parent.function_registry),
 			surface: parent.surface,
-			live_units: parent.live_units.clone(),
-			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
@@ -415,9 +413,7 @@ impl Context {
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
 			live_recheck: parent.live_recheck.clone(),
@@ -427,6 +423,7 @@ impl Context {
 			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
+			shared: Arc::clone(&parent.shared),
 		}
 	}
 
@@ -445,34 +442,18 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities: Arc::clone(&parent.capabilities),
-			index_stores: parent.index_stores.clone(),
-			cache: parent.cache.clone(),
-			index_builder: parent.index_builder.clone(),
-			sequences: parent.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
 			parent: Some(Arc::clone(parent)),
-			buckets: parent.buckets.clone(),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: parent.surrealism_cache.clone(),
 			#[cfg(feature = "surrealism")]
 			extension_depth: parent.extension_depth,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::clone(&parent.server_capabilities),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			statement_clock: parent.statement_clock,
 			request_params: None,
 			call_boundary: false,
 			config: Arc::clone(&parent.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&parent.http_client),
-			function_registry: Arc::clone(&parent.function_registry),
 			surface: parent.surface,
-			live_units: parent.live_units.clone(),
-			compiled_units: parent.compiled_units.clone(),
 			vm_units: parent.vm_units.clone(),
 			vm_deref: parent.vm_deref.clone(),
 			vm_served: parent.vm_served.clone(),
@@ -480,9 +461,7 @@ impl Context {
 			vm_edge_cascade: parent.vm_edge_cascade.clone(),
 			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
-			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
-			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
 			live_recheck: parent.live_recheck.clone(),
@@ -492,6 +471,9 @@ impl Context {
 			event_queue_node: parent.event_queue_node,
 			memory: parent.memory.clone(),
 			index_places: Arc::clone(&parent.index_places),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&parent.http_client),
+			shared: Arc::clone(&parent.shared),
 		}
 	}
 
@@ -536,34 +518,18 @@ impl Context {
 			cancelled: Arc::clone(&from.cancelled),
 			cancel_token: from.cancel_token.clone(),
 			capabilities: Arc::clone(&from.capabilities),
-			index_stores: from.index_stores.clone(),
-			cache: from.cache.clone(),
-			index_builder: from.index_builder.clone(),
-			sequences: from.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: from.temporary_directory.clone(),
 			transaction: from.transaction.clone(),
 			isolated: false,
 			parent: None, // No parent reference — fully independent
-			buckets: from.buckets.clone(),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: from.surrealism_cache.clone(),
 			#[cfg(feature = "surrealism")]
 			extension_depth: from.extension_depth,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::clone(&from.server_capabilities),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
 			statement_clock: from.statement_clock,
 			request_params: from.request_params.clone(),
 			call_boundary: in_call_body,
 			config: Arc::clone(&from.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&from.http_client),
-			function_registry: Arc::clone(&from.function_registry),
 			surface: from.surface,
-			live_units: from.live_units.clone(),
-			compiled_units: from.compiled_units.clone(),
 			vm_units: from.vm_units.clone(),
 			vm_deref: from.vm_deref.clone(),
 			vm_served: from.vm_served.clone(),
@@ -571,9 +537,7 @@ impl Context {
 			vm_edge_cascade: from.vm_edge_cascade.clone(),
 			vm_closures: from.vm_closures.clone(),
 			tenant_identity: from.tenant_identity.clone(),
-			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
-			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
 			live_recheck: from.live_recheck.clone(),
@@ -583,6 +547,9 @@ impl Context {
 			event_queue_node: from.event_queue_node,
 			memory: from.memory.clone(),
 			index_places: Arc::clone(&from.index_places),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&from.http_client),
+			shared: Arc::clone(&from.shared),
 		}
 	}
 
@@ -633,34 +600,18 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities: Arc::clone(&from.capabilities),
-			index_stores: from.index_stores.clone(),
-			cache: from.cache.clone(),
-			index_builder: None,
-			sequences: from.sequences.clone(),
-			#[cfg(storage)]
-			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
 			isolated: false,
 			parent: None,
-			buckets: from.buckets.clone(),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: from.surrealism_cache.clone(),
 			#[cfg(feature = "surrealism")]
 			extension_depth: from.extension_depth,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::clone(&from.server_capabilities),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: None,
 			statement_clock: None,
 			request_params: None,
 			call_boundary: false,
 			config: Arc::clone(&from.config),
-			#[cfg(feature = "http")]
-			http_client: Arc::clone(&from.http_client),
-			function_registry: Arc::clone(&from.function_registry),
 			surface: from.surface,
-			live_units: from.live_units.clone(),
-			compiled_units: from.compiled_units.clone(),
 			vm_units: from.vm_units.clone(),
 			vm_deref: from.vm_deref.clone(),
 			vm_served: from.vm_served.clone(),
@@ -668,9 +619,7 @@ impl Context {
 			vm_edge_cascade: from.vm_edge_cascade.clone(),
 			vm_closures: None,
 			tenant_identity: from.tenant_identity.clone(),
-			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
-			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
 			live_recheck: None,
@@ -680,6 +629,13 @@ impl Context {
 			event_queue_node: from.event_queue_node,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&from.http_client),
+			// The index builder is not carried, as above.
+			shared: Arc::new(Shared {
+				index_builder: None,
+				..Shared::clone(&from.shared)
+			}),
 		}
 	}
 
@@ -717,21 +673,10 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities,
-			index_stores,
-			cache: Some(cache),
-			index_builder: Some(Arc::new(index_builder)),
-			sequences: Some(Arc::new(sequences)),
-			#[cfg(storage)]
-			temporary_directory,
 			transaction: None,
 			isolated: false,
-			buckets: Some(buckets),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: Some(surrealism_cache),
 			#[cfg(feature = "surrealism")]
 			extension_depth: 0,
-			#[cfg(feature = "surrealism")]
-			server_capabilities,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: None,
@@ -740,10 +685,7 @@ impl Context {
 			config,
 			#[cfg(feature = "http")]
 			http_client,
-			function_registry,
 			surface,
-			live_units: Some(live_units),
-			compiled_units: Some(compiled_units),
 			vm_units: None,
 			vm_deref: None,
 			vm_served: None,
@@ -751,9 +693,7 @@ impl Context {
 			vm_edge_cascade: None,
 			vm_closures: None,
 			tenant_identity: None,
-			node_id,
 			auth_enabled,
-			dynamic_configuration,
 			live: false,
 			broker: None,
 			live_recheck: None,
@@ -763,6 +703,24 @@ impl Context {
 			event_queue_node: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
+			shared: Arc::new(Shared {
+				index_stores,
+				cache: Some(cache),
+				index_builder: Some(Arc::new(index_builder)),
+				sequences: Some(Arc::new(sequences)),
+				buckets: Some(buckets),
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: Some(surrealism_cache),
+				#[cfg(storage)]
+				temporary_directory,
+				#[cfg(feature = "surrealism")]
+				server_capabilities,
+				function_registry,
+				live_units: Some(live_units),
+				compiled_units: Some(compiled_units),
+				node_id,
+				dynamic_configuration,
+			}),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -782,46 +740,17 @@ impl Context {
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(
-				256 * 1024 * 1024,
-				256 * 1024 * 1024,
-				64 * 1024 * 1024,
-				128 * 1024 * 1024,
-				None,
-			),
-			cache: None,
-			index_builder: None,
-			sequences: None,
-			#[cfg(storage)]
-			temporary_directory: None,
 			transaction: None,
 			isolated: false,
-			buckets: None,
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: None,
 			#[cfg(feature = "surrealism")]
 			extension_depth: 0,
-			#[cfg(feature = "surrealism")]
-			server_capabilities: Arc::new(Capabilities::default()),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			statement_clock: None,
 			request_params: None,
 			call_boundary: false,
 			config: Default::default(),
-			#[cfg(feature = "http")]
-			http_client: Arc::new(
-				HttpClient::new(
-					crate::dbs::capabilities::Targets::All,
-					crate::dbs::capabilities::Targets::None,
-					&Default::default(),
-				)
-				.expect("http client to be created"),
-			),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			surface: &crate::exec::surface::FULL,
-			live_units: None,
-			compiled_units: None,
 			vm_units: None,
 			vm_deref: None,
 			vm_served: None,
@@ -829,9 +758,7 @@ impl Context {
 			vm_edge_cascade: None,
 			vm_closures: None,
 			tenant_identity: None,
-			node_id: Uuid::nil(),
 			auth_enabled: true,
-			dynamic_configuration: DynamicConfiguration::default(),
 			live: false,
 			broker: None,
 			live_recheck: None,
@@ -841,6 +768,39 @@ impl Context {
 			event_queue_node: None,
 			memory: None,
 			index_places: Arc::new(std::sync::OnceLock::new()),
+			#[cfg(feature = "http")]
+			http_client: Arc::new(
+				HttpClient::new(
+					crate::dbs::capabilities::Targets::All,
+					crate::dbs::capabilities::Targets::None,
+					&Default::default(),
+				)
+				.expect("http client to be created"),
+			),
+			shared: Arc::new(Shared {
+				index_stores: IndexStores::new(
+					256 * 1024 * 1024,
+					256 * 1024 * 1024,
+					64 * 1024 * 1024,
+					128 * 1024 * 1024,
+					None,
+				),
+				cache: None,
+				index_builder: None,
+				sequences: None,
+				#[cfg(storage)]
+				temporary_directory: None,
+				buckets: None,
+				#[cfg(feature = "surrealism")]
+				surrealism_cache: None,
+				#[cfg(feature = "surrealism")]
+				server_capabilities: Arc::new(Capabilities::default()),
+				function_registry: Arc::new(FunctionRegistry::with_builtins()),
+				live_units: None,
+				compiled_units: None,
+				node_id: Uuid::nil(),
+				dynamic_configuration: DynamicConfiguration::default(),
+			}),
 		}
 	}
 
@@ -853,7 +813,7 @@ impl Context {
 	/// The datastore's function registry, for a caller compiling an
 	/// expression that may name a function.
 	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		&self.function_registry
+		&self.shared.function_registry
 	}
 
 	/// The statement families the entry that started the query serves.
@@ -865,7 +825,7 @@ impl Context {
 	/// The live-subscription units this node has compiled for the VM, or
 	/// `None` for a context made without a datastore.
 	pub(crate) fn live_units(&self) -> Option<Arc<crate::exec::vm::live::LiveUnits>> {
-		self.live_units.clone()
+		self.shared.live_units.clone()
 	}
 
 	/// The unit table of the function bundle executing around this context,
@@ -943,11 +903,11 @@ impl Context {
 	/// The function-body units this node has compiled, or `None` for a
 	/// context made without a datastore.
 	pub(crate) fn compiled_units(&self) -> Option<&Arc<crate::exec::vm::units::CompiledUnits>> {
-		self.compiled_units.as_ref()
+		self.shared.compiled_units.as_ref()
 	}
 
 	pub fn node_id(&self) -> Uuid {
-		self.node_id
+		self.shared.node_id
 	}
 
 	#[inline]
@@ -956,7 +916,7 @@ impl Context {
 	}
 
 	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
-		&self.dynamic_configuration
+		&self.shared.dynamic_configuration
 	}
 
 	/// Whether this session may open `LIVE` queries or `KILL LIVE` (from [`Session::live`]
@@ -1029,7 +989,7 @@ impl Context {
 	/// The node whose async event queue an event queued by a write in this context joins: the
 	/// node the datastore was told to queue under, else this context's own.
 	pub(crate) fn event_queue_node(&self) -> Uuid {
-		self.event_queue_node.unwrap_or(self.node_id)
+		self.event_queue_node.unwrap_or(self.shared.node_id)
 	}
 
 	pub(crate) fn set_event_queue_node(&mut self, node: Option<Uuid>) {
@@ -1369,17 +1329,17 @@ impl Context {
 
 	/// Get the index_store for this context/ds
 	pub(crate) fn get_index_stores(&self) -> &IndexStores {
-		&self.index_stores
+		&self.shared.index_stores
 	}
 
 	/// Get the index_builder for this context/ds
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
-		self.index_builder.as_deref()
+		self.shared.index_builder.as_deref()
 	}
 
 	/// Return the sequences manager
 	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
-		self.sequences.as_deref()
+		self.shared.sequences.as_deref()
 	}
 
 	pub(crate) fn try_get_sequences(&self) -> Result<&Sequences> {
@@ -1394,7 +1354,7 @@ impl Context {
 
 	// Get the current datastore cache
 	pub(crate) fn get_cache(&self) -> Option<Arc<DatastoreCache>> {
-		self.cache.clone()
+		self.shared.cache.clone()
 	}
 
 	/// Check if the context is done. If it returns `None` the operation may
@@ -1429,7 +1389,7 @@ impl Context {
 			#[cfg(test)]
 			crate::kvs::testing::maybe_inject_non_retryable_error(
 				crate::kvs::testing::NonRetryableErrorSite::ContextDeepCheckMemoryThreshold,
-				self.node_id,
+				self.shared.node_id,
 			)?;
 			if ALLOC.is_beyond_threshold() {
 				crate::mem::record_refusal(crate::mem::RefusalSite::Query);
@@ -1505,7 +1465,7 @@ impl Context {
 	#[cfg(storage)]
 	/// Return the location of the temporary directory if any
 	pub(crate) fn temporary_directory(&self) -> Option<&Arc<PathBuf>> {
-		self.temporary_directory.as_ref()
+		self.shared.temporary_directory.as_ref()
 	}
 
 	/// Get a value from the context. If no value is stored under the
@@ -1560,7 +1520,7 @@ impl Context {
 	}
 
 	/// The allocation [`Self::value`] answers for `key`.
-	fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
+	pub(crate) fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
 		match self.binding(key) {
 			Some(Binding::Value(value)) => Some(value),
 			Some(Binding::Forbidden(_)) | None => None,
@@ -1796,7 +1756,11 @@ impl Context {
 	/// context, as request parameters ([`Self::attach_variables`]).
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.live = session.live();
-		self.add_values(session.values());
+		let values = session.values();
+		// Room for the session's values and variables at once, rather than a
+		// table grown and rehashed as they are added one by one.
+		Arc::make_mut(&mut self.values).reserve(values.len() + session.variables.len());
+		self.add_values(values);
 		// Propagate duration redaction flag from session.
 		if session.redact_volatile_explain_attrs {
 			self.redact_volatile_explain_attrs = true;
@@ -1840,6 +1804,11 @@ impl Context {
 	}
 
 	fn bind_variables(&mut self, vars: Variables, request: bool) -> Result<(), Error> {
+		Arc::make_mut(&mut self.values).reserve(vars.0.len());
+		if request {
+			Arc::make_mut(self.request_params.get_or_insert_with(Default::default))
+				.reserve(vars.0.len());
+		}
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(ExecError::InvalidParam {
@@ -1985,7 +1954,7 @@ impl Context {
 	}
 
 	pub(crate) fn get_buckets(&self) -> Option<&BucketsManager> {
-		self.buckets.as_ref()
+		self.shared.buckets.as_ref()
 	}
 
 	/// Obtain the connection for a bucket
@@ -1996,7 +1965,7 @@ impl Context {
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
-		if let Some(buckets) = &self.buckets {
+		if let Some(buckets) = &self.shared.buckets {
 			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
 		} else {
 			bail!(BucError::BucketUnavailable(bu.into()))
@@ -2005,7 +1974,7 @@ impl Context {
 
 	#[cfg(feature = "surrealism")]
 	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
-		self.surrealism_cache.as_ref().map(Arc::clone)
+		self.shared.surrealism_cache.as_ref().map(Arc::clone)
 	}
 
 	/// How many extension invocations enclose this context.
@@ -2023,7 +1992,7 @@ impl Context {
 	/// The datastore's capabilities, which no extension's host call narrows.
 	#[cfg(feature = "surrealism")]
 	pub(crate) fn server_capabilities(&self) -> &Arc<Capabilities> {
-		&self.server_capabilities
+		&self.shared.server_capabilities
 	}
 
 	/// The definition behind `lookup`, prepared, once its archive may run

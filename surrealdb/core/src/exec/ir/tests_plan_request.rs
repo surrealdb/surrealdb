@@ -39,7 +39,7 @@ pub(crate) fn test_session() -> PlanSession {
 	let mut opt = Options::new(&ExecConfig::default());
 	opt.set_ns(Some("test".into()));
 	opt.set_db(Some("test".into()));
-	PlanSession::new(opt, Value::None)
+	PlanSession::new(opt, Arc::new(Value::None))
 }
 
 /// Plans `input` over a database `setup` builds, as the owner, in a read transaction.

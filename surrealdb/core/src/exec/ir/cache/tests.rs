@@ -2076,7 +2076,7 @@ mod datastore {
 		opt.set_db(session.db.as_deref().map(Arc::from));
 		let opt = opt.with_auth(Arc::clone(&session.au));
 		let plan_session =
-			PlanSession::new(opt, ctx.value("session").cloned().unwrap_or(Value::None));
+			PlanSession::new(opt, ctx.shared_value("session").cloned().unwrap_or_default());
 		let parsed = crate::syn::parse(sql).expect("the request parses").expressions;
 		let statements = RequestStatement::of(&parsed);
 		let input = RequestInput::request(

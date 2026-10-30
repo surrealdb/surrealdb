@@ -64,6 +64,37 @@ use crate::val::{RecordId, TableName, Value};
 #[derive(Default)]
 pub(crate) struct LiveRecheck {
 	tables: Mutex<Vec<TableWrites>>,
+	/// Set once the transaction has asked, or will never ask: nothing written
+	/// after is noted.
+	closed: std::sync::atomic::AtomicBool,
+	/// Whether each table's write context is detached as the table is first
+	/// written ([`TableCtx::Detached`]) rather than once the transaction has
+	/// committed. Set for a recheck whose [`RecheckHandle`] the transaction
+	/// itself holds, which the transaction's own write contexts must not hold
+	/// in turn.
+	detach_at_write: std::sync::atomic::AtomicBool,
+}
+
+/// The write context a table's missed subscriptions are told through.
+enum TableCtx {
+	/// The context of the write that first wrote the table, held until the
+	/// transaction has asked whether any subscription was missed, and
+	/// detached ([`detach`]) only when one was. It reaches the transaction's
+	/// context, which holds the recheck, so [`RecheckHandle`] empties the
+	/// recheck once the transaction has asked or ended.
+	Live(Arc<WriteCtx>),
+	/// The context detached from the transaction.
+	Detached(Arc<WriteCtx>),
+}
+
+impl TableCtx {
+	/// The context detached from the transaction.
+	fn detached(&self) -> Arc<WriteCtx> {
+		match self {
+			Self::Live(ctx) => Arc::new(detach(ctx)),
+			Self::Detached(ctx) => Arc::clone(ctx),
+		}
+	}
 }
 
 /// The records one transaction wrote to one table.
@@ -85,10 +116,10 @@ struct TableWrites {
 	/// Holds the registrations the transaction may have missed until it has
 	/// asked for them.
 	_pin: EpochPin,
-	/// The table's write context, detached from the transaction: it carries no
-	/// transaction, no broker and no subscriptions, so holding it keeps nothing
-	/// of the transaction alive.
-	detached: Arc<WriteCtx>,
+	/// The table's write context. Once detached it carries no transaction, no
+	/// broker and no subscriptions, so holding it keeps nothing of the
+	/// transaction alive.
+	ctx: TableCtx,
 	/// Each record written, with the write's images when they were kept.
 	records: Vec<(RecordId, Action, Option<Images>)>,
 }
@@ -125,14 +156,18 @@ impl LiveRecheck {
 	/// transactions has nothing left to write, and is not noted.
 	pub(crate) fn record(
 		&self,
-		ctx: &WriteCtx,
+		ctx: &Arc<WriteCtx>,
 		rid: RecordId,
 		action: Action,
 		images: Option<Images>,
 	) {
+		use std::sync::atomic::Ordering;
 		let Some(epoch) = ctx.txn().live_write_epoch() else {
 			return;
 		};
+		if self.closed.load(Ordering::Acquire) {
+			return;
+		}
 		let ns = ctx.ns.namespace_id;
 		let db = ctx.db.database_id;
 		let mut tables = self.tables.lock();
@@ -151,7 +186,11 @@ impl LiveRecheck {
 					_pin: EpochPin::new(ctx.txn().commit_triggers(), epoch, ctx.txn().serial()),
 					seen: Vec::new(),
 					merged: None,
-					detached: Arc::new(detach(ctx)),
+					ctx: if self.detach_at_write.load(Ordering::Relaxed) {
+						TableCtx::Detached(Arc::new(detach(ctx)))
+					} else {
+						TableCtx::Live(Arc::clone(ctx))
+					},
 					records: Vec::new(),
 				});
 				tables.len() - 1
@@ -173,6 +212,48 @@ impl LiveRecheck {
 	/// owed.
 	pub(crate) fn is_empty(&self) -> bool {
 		self.tables.lock().is_empty()
+	}
+
+	/// Note nothing more, and let go of what was noted: its pins, and the
+	/// write contexts that reach the transaction.
+	fn close(&self) {
+		self.closed.store(true, std::sync::atomic::Ordering::Release);
+		// Dropped outside the lock: a context dropped here may be the last
+		// reference to the transaction's.
+		let tables = std::mem::take(&mut *self.tables.lock());
+		drop(tables);
+	}
+}
+
+/// The handle a transaction's recheck is asked through once it commits
+/// ([`spawn`]). Dropped unasked, because the transaction was cancelled or
+/// failed to commit, it closes the recheck, so the write contexts it holds,
+/// which reach the transaction's context and through it the recheck, are let
+/// go of.
+pub(crate) struct RecheckHandle {
+	recheck: Arc<LiveRecheck>,
+	source: RecheckSource,
+}
+
+impl RecheckHandle {
+	pub(crate) fn new(recheck: Arc<LiveRecheck>, source: RecheckSource) -> Self {
+		Self {
+			recheck,
+			source,
+		}
+	}
+
+	/// Detach each table's write context as the table is first written. For a
+	/// handle the transaction itself holds, as a commit action does: the
+	/// contexts would otherwise hold the transaction that holds them.
+	pub(crate) fn detach_at_write(&self) {
+		self.recheck.detach_at_write.store(true, std::sync::atomic::Ordering::Relaxed);
+	}
+}
+
+impl Drop for RecheckHandle {
+	fn drop(&mut self) {
+		self.recheck.close();
 	}
 }
 
@@ -203,28 +284,46 @@ pub(crate) struct RecheckSource {
 	pub(crate) sequences: Sequences,
 }
 
-/// Tell the subscriptions `recheck`'s transaction missed of what it wrote,
+/// Tell the subscriptions `handle`'s transaction missed of what it wrote,
 /// once it has committed. Runs in the background; the commit has answered
-/// already.
-pub(crate) fn spawn(
-	recheck: Arc<LiveRecheck>,
-	source: RecheckSource,
-	delivery: Arc<dyn MessageBroker>,
-) {
+/// already. Each table a subscription was missed on has its write context
+/// detached here, before the background task takes it.
+#[expect(
+	clippy::needless_pass_by_value,
+	reason = "the handle is taken so that dropping it, however this returns, closes the recheck"
+)]
+pub(crate) fn spawn(handle: RecheckHandle, delivery: Arc<dyn MessageBroker>) {
+	let recheck = &handle.recheck;
 	if recheck.is_empty() {
 		return;
 	}
-	let triggers = Arc::clone(source.tf.commit_triggers());
+	let triggers = Arc::clone(handle.source.tf.commit_triggers());
 	// The question is cheap and asked at once, so the common answer, that
-	// nothing was missed, spawns nothing.
-	let missed = missed(&recheck, &triggers);
+	// nothing was missed, spawns nothing. Dropping the handle releases the
+	// tables' pins and contexts.
+	let missed = missed(recheck, &triggers);
 	if missed.iter().all(Vec::is_empty) {
-		// Releases the tables' pins.
-		recheck.tables.lock().clear();
 		return;
 	}
+	let tables = std::mem::take(&mut *recheck.tables.lock());
+	let owed: Vec<(TableWrites, Vec<Uuid>)> = tables
+		.into_iter()
+		.zip(missed)
+		.filter(|(_, missed)| !missed.is_empty())
+		.map(|(table, missed)| {
+			let detached = TableCtx::Detached(table.ctx.detached());
+			(
+				TableWrites {
+					ctx: detached,
+					..table
+				},
+				missed,
+			)
+		})
+		.collect();
+	let source = handle.source.clone();
 	common::rt::spawn_detached(async move {
-		run(&recheck, missed, &source, &delivery).await;
+		run(owed, &source, &delivery).await;
 	});
 }
 
@@ -256,16 +355,11 @@ fn missed(recheck: &LiveRecheck, triggers: &CommitTriggers) -> Vec<Vec<Uuid>> {
 /// Notify each table's missed subscriptions in turn. A table that cannot be
 /// read or notified is logged and the rest are still notified.
 async fn run(
-	recheck: &LiveRecheck,
-	missed: Vec<Vec<Uuid>>,
+	owed: Vec<(TableWrites, Vec<Uuid>)>,
 	source: &RecheckSource,
 	delivery: &Arc<dyn MessageBroker>,
 ) {
-	let tables = std::mem::take(&mut *recheck.tables.lock());
-	for (table, missed) in tables.into_iter().zip(missed) {
-		if missed.is_empty() {
-			continue;
-		}
+	for (table, missed) in owed {
 		if let Err(err) = Box::pin(recheck_table(&table, &missed, source, delivery)).await {
 			tracing::warn!(
 				target: "surrealdb::core::dbs::live_recheck",
@@ -311,7 +405,7 @@ async fn notify_table(
 	if lives.is_empty() {
 		return Ok(());
 	}
-	let detached = &table.detached;
+	let detached = table.ctx.detached();
 	let mut ctx = Context::new_child(detached.exec().ctx());
 	ctx.set_transaction(Arc::clone(txn));
 	let ctx = ctx.freeze();

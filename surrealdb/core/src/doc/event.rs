@@ -1009,7 +1009,7 @@ impl AsyncEventContext {
 					)
 				}) {
 					ctx.tx()
-						.on_commit(Box::new(crate::dbs::executor::FlushOnCommit(prepared)))
+						.on_commit(Box::new(crate::dbs::executor::FlushOnCommit::new(prepared)))
 						.await;
 				}
 				ctx
