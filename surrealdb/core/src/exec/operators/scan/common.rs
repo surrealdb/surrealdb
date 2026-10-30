@@ -232,8 +232,9 @@ fn approx_key_size(key: &RecordIdKey) -> usize {
 	}
 }
 
-/// A record [`ReadAhead`] holds until a batch decodes it.
-enum ReadAheadRecord {
+/// A record [`ReadAhead`] holds until a batch decodes it, or until
+/// [`ReadAhead::take_records`] hands it on undecoded.
+pub(crate) enum ReadAheadRecord {
 	/// The record's stored bytes, with the layouts that admitted them when the
 	/// record is packed: its decode reads its descriptor from them. A document
 	/// and a `revision` record hold none.
@@ -387,6 +388,17 @@ impl ReadAhead {
 		}
 		ensure_below_memory_threshold()?;
 		Ok((read_bytes, read_rows))
+	}
+
+	/// Take every held record, in read order, undecoded: a stored record as
+	/// its bytes, admitted as [`Self::read`] admits them, and a record with no
+	/// stored value as the record [`Transaction::get_records`] resolved.
+	///
+	/// The records are neither permission-checked nor brought through their
+	/// table's migration steps: the caller reads them as stored, and owns both.
+	/// No [`ReadAheadRecord::Pending`] record is ever handed on.
+	pub(crate) fn take_records(&mut self) -> VecDeque<(RecordId, ReadAheadRecord)> {
+		std::mem::take(&mut self.records)
 	}
 
 	/// Decode held records, in read order, until the batch holds the budget

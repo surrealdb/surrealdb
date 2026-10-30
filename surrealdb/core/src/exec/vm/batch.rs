@@ -22,15 +22,18 @@
 //! next chunk from those bytes, and decodes the chunk a batch at a time: a
 //! batch holds at most the byte budget plus one record of decoded values,
 //! however much wider its records are than the ones the chunk was sized from.
-//! Such a reader decodes only the top-level fields its [`DecodeFields`] lists
-//! where the plan established that nothing reads the rest, and never puts a
-//! record in the transaction's record cache.
+//! It may instead hand each chunk on undecoded ([`RecordReader::next_stored`])
+//! to a caller that runs its rows on the stored bytes, which holds no decoded
+//! values for them. Such a reader decodes only the top-level fields its
+//! [`DecodeFields`] lists where the plan established that nothing reads the
+//! rest, and never puts a record in the transaction's record cache.
 
 use std::collections::VecDeque;
 
 use super::services::{EngineServices, Services};
 use crate::exec::operators::scan::common::{
-	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, approx_value_size, next_batch_len, probe_batch_len,
+	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, ReadAheadRecord, approx_value_size, next_batch_len,
+	probe_batch_len,
 };
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -180,6 +183,36 @@ impl RecordReader {
 			EngineServices::new(ctx).read_stored(ahead, batch, self.version).await?;
 		self.sizer.observe_bytes(bytes, rows);
 		decode_batch(ahead, ctx).await
+	}
+
+	/// For a reader of stored records, read the next batch of queued ids and
+	/// hand on the records that exist undecoded, in queue order
+	/// ([`ReadAhead::take_records`]): the caller runs its rows on their stored
+	/// bytes. The batch is sized from the stored bytes of the batch before it,
+	/// and so holds about the byte budget in stored bytes. Empty when none of
+	/// the batch exists, or the queue is drained.
+	pub(super) async fn next_stored(
+		&mut self,
+		ctx: &ExecutionContext,
+	) -> FlowResult<VecDeque<(RecordId, ReadAheadRecord)>> {
+		let Some(ahead) = &mut self.ahead else {
+			return Err(
+				anyhow::anyhow!("a reader of decoded records was asked for stored ones").into()
+			);
+		};
+		if ahead.is_empty() {
+			let take = self.sizer.len().min(self.pending.len());
+			if take == 0 {
+				return Ok(VecDeque::new());
+			}
+			let batch: Vec<RecordId> = self.pending.drain(..take).collect();
+			#[cfg(test)]
+			BATCHES.with(|batches| batches.borrow_mut().push(batch.len()));
+			let (bytes, rows) =
+				EngineServices::new(ctx).read_stored(ahead, batch, self.version).await?;
+			self.sizer.observe_bytes(bytes, rows);
+		}
+		Ok(ahead.take_records())
 	}
 }
 

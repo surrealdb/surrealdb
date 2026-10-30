@@ -186,6 +186,8 @@ mod tests_enforced;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_expression_ranges;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_index_in_place;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_link_window;

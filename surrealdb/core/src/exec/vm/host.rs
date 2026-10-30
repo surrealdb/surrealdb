@@ -37,7 +37,7 @@ use crate::exec::operators::SortDirection;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::operators::scan::common::{
-	DecodeFields, ensure_below_memory_threshold, resolve_version_stamp,
+	DecodeFields, ReadAheadRecord, ensure_below_memory_threshold, resolve_version_stamp,
 };
 use crate::exec::operators::scan::pipeline::{
 	ScalarRows, decode_record_value, kv_scan_stream, read_by_id,
@@ -2062,8 +2062,21 @@ pub(super) async fn run_storage_source(
 				decode.as_ref(),
 			)?
 			.with_id_only(id_only);
-			let mut rows = Rows::of(program, pipeline, ctx);
 			let paged = super::morsel::body_breakers(&pipeline.code).paged;
+			if !id_only && index_runs_in_place(pipeline, state) {
+				return index_in_place(
+					program,
+					pipeline,
+					&mut records,
+					paged,
+					state,
+					ctx,
+					yielder,
+					flush_at,
+				)
+				.await;
+			}
+			let mut rows = Rows::of(program, pipeline, ctx);
 			loop {
 				records.paged = rows.wanted(paged, state);
 				let row = match records.next(ctx).await {
@@ -2130,6 +2143,19 @@ pub(super) async fn run_storage_source(
 				false,
 				None,
 			)?;
+			if index_runs_in_place(pipeline, state) {
+				return index_in_place(
+					program,
+					pipeline,
+					&mut records,
+					None,
+					state,
+					ctx,
+					yielder,
+					flush_at,
+				)
+				.await;
+			}
 			let mut rows = Rows::of(program, pipeline, ctx);
 			loop {
 				let row = match records.next(ctx).await {
@@ -3156,6 +3182,221 @@ impl IndexRecords {
 		self.peek(ctx).await?;
 		Ok(self.rows.pop_front())
 	}
+
+	/// The next batch of records the index lists, undecoded, for a run whose body reads its rows
+	/// on their stored bytes ([`index_in_place`]): `None` once the index lists no more. A batch
+	/// holds at least one record. Not for a listing read as ids alone, nor once [`Self::peek`] has
+	/// decoded rows.
+	async fn next_stored(
+		&mut self,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Option<std::collections::VecDeque<(RecordId, ReadAheadRecord)>>> {
+		while !self.exhausted {
+			if self.reader.is_drained() {
+				let batch = self.next_rids(ctx).await?;
+				if batch.is_empty() {
+					self.exhausted = true;
+					break;
+				}
+				self.reader.push(batch);
+			}
+			let records = self.reader.next_stored(ctx).await?;
+			// The records read are a unit each, which a batch whose records
+			// are all gone spends too.
+			super::fuel::tick(ctx, super::fuel::units(records.len()).max(1)).await?;
+			if !records.is_empty() {
+				return Ok(Some(records));
+			}
+		}
+		Ok(None)
+	}
+}
+
+/// Whether the records an index lists run `pipeline`'s body on their stored bytes, one after
+/// another ([`index_in_place`]): where the body runs in place ([`runs_in_place`]) and the plan runs
+/// the pipeline serially, or as morsels of batches the coordinator reads for a statement whose rows
+/// leave encoded.
+///
+/// Such morsels are handed their records decoded, and hand back the rows they emit decoded, so the
+/// coordinator decodes every record and encodes every row the morsels emit, and the morsels run the
+/// body alone. Read in place, the coordinator runs the body and transcodes each record emitted
+/// unchanged from its stored bytes, which costs it less than the decode and the encode it makes
+/// either way, as the body that runs in place holds only field reads, comparisons, arithmetic and
+/// the building of rows; so the run narrows the plan's morsels to one run in place. A body holding
+/// a vector measure, whose work for a row may outweigh the row's decode, keeps its morsels. A merge
+/// of morsels answers the rows of the serial run, so the narrowed run answers what the morsels
+/// would.
+fn index_runs_in_place(pipeline: &Pipeline, state: &State) -> bool {
+	#[cfg(test)]
+	if INDEX_DECODES.with(std::cell::Cell::get) {
+		return false;
+	}
+	let in_place = runs_in_place(pipeline, state)
+		&& match &pipeline.parallel {
+			crate::exec::planner::placement::Parallel::Serial => true,
+			crate::exec::planner::placement::Parallel::Morsels(plan) => {
+				state.row_frame.is_some()
+					&& !pipeline.code.iter().any(|instr| matches!(instr, Instr::Measure { .. }))
+					&& plan.input == MorselInput::Batches
+					&& plan.combine != crate::exec::planner::placement::Combine::OrderedApply
+			}
+		};
+	#[cfg(test)]
+	if in_place {
+		INDEX_IN_PLACE.with(|runs| runs.set(runs.get() + 1));
+	}
+	in_place
+}
+
+#[cfg(test)]
+thread_local! {
+	/// Whether this thread's index reads decode their records even where their body runs in place,
+	/// for tests that hold the two paths to the same answer.
+	pub(super) static INDEX_DECODES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+	/// How many index reads on this thread ran their records on their stored bytes.
+	pub(super) static INDEX_IN_PLACE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `pipeline`, whose body runs in place ([`runs_in_place`]), over the records `records` lists,
+/// each on its stored bytes as a scan of the table's range runs its records
+/// ([`in_place_row_admitted`]), so a record the body emits into a frame unchanged is transcoded
+/// from its bytes there and never decoded. Answers whether the pipeline takes no more rows.
+///
+/// Each stored record was admitted against its table's layouts as it was read
+/// ([`ReadAhead::read`](crate::exec::operators::scan::common::ReadAhead::read)); a packed one is
+/// read through the layouts that admitted it. A record stamped below its table's newest migration
+/// step is decoded, brought through the steps it has not passed and run as a value, as is a record
+/// with no stored value that the read resolved (a lightweight edge); a resolved record with no
+/// data is no row. The records run in the order the index lists them, and the rows they leave are
+/// handed on whenever they reach `flush_at`, after each record. The body runs on this task's
+/// thread and charges its work to the thread's fuel; each record spends a unit besides, and the
+/// run yields between records once the fuel is spent.
+///
+/// `paged` is the body's own paging clause, which bounds the entries the index reads; `None` reads
+/// them unbounded.
+#[allow(clippy::too_many_arguments)]
+async fn index_in_place(
+	program: &Program,
+	pipeline: &Pipeline,
+	records: &mut IndexRecords,
+	paged: Option<u16>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	use surrealdb_kvs::key::KVKey;
+	let db_ctx = ctx.database().context("the VM requires a database context")?;
+	let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+	// The migration steps of the table the previous record belongs to, which the next record of
+	// that table reuses.
+	let mut steps: Option<(crate::val::TableName, Option<Replay>)> = None;
+	let stopped = 'scan: loop {
+		records.paged = Rows::Serial.wanted(paged, state);
+		let Some(batch) = records.next_stored(ctx).await? else {
+			break false;
+		};
+		for (rid, record) in batch {
+			let stop = match record {
+				ReadAheadRecord::Stored(value, layouts) => {
+					let replay = match &steps {
+						Some((table, replay)) if *table == rid.table => replay.clone(),
+						_ => {
+							let replay = crate::exec::migrate::replay_for(
+								ctx,
+								&rid.table,
+								ctx.version_stamp(),
+							)
+							.await?;
+							steps = Some((rid.table.clone(), replay.clone()));
+							replay
+						}
+					};
+					let key = crate::key::schema::RecordKey {
+						ns,
+						db,
+						tb: Cow::Borrowed(&rid.table),
+						id: Cow::Borrowed(&rid.key),
+					}
+					.encode_key()
+					.map_err(ControlFlow::Err)?;
+					match replay.filter(|replay| !replay.current(&value)) {
+						Some(replay) => {
+							let mut row = decode_record_value(&key, &value, layouts.as_deref())
+								.map_err(ControlFlow::Err)?;
+							replay.apply(ctx, &mut row, stamp_of(&value)).await?;
+							run_resolved(program, pipeline, row, state)?
+						}
+						None => scan_row(
+							program,
+							pipeline,
+							None,
+							None,
+							None,
+							&key,
+							&value,
+							layouts.as_deref(),
+							state,
+						)
+						.map_err(ControlFlow::Err)?,
+					}
+				}
+				ReadAheadRecord::Resolved(record) => {
+					let row = match Arc::try_unwrap(record) {
+						Ok(record) => record.data,
+						Err(record) => record.data.clone(),
+					};
+					if row.is_none() {
+						continue;
+					}
+					run_resolved(program, pipeline, row, state)?
+				}
+				ReadAheadRecord::Pending => {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						crate::err::EngineError::Internal(
+							"a read-ahead record was left unresolved".into()
+						)
+					)));
+				}
+			};
+			// The rows are handed on as each reaches `flush_at`, as a run of decoded rows hands
+			// them on, however many records the storage read took at once.
+			flush(state, yielder, flush_at, ctx).await?;
+			if stop {
+				break 'scan true;
+			}
+			// Each record run spends a unit of fuel, as a decoded row does, on the meter the body
+			// charged its own work to; once the meter is spent the run reaches a yield point,
+			// which checks the statement's deadline and cancellation, before the next record.
+			if super::fuel::charge(1) {
+				out_of_line(|| super::fuel::yield_point(ctx)).await?;
+			}
+		}
+		// A process past its memory threshold fails here rather than reading on.
+		ensure_below_memory_threshold()?;
+	};
+	if let Some(ahead) = &mut state.link_ahead {
+		ahead.clear();
+	}
+	state.frontier_rows.clear();
+	Ok(stopped)
+}
+
+/// Run `pipeline`'s in-place body over `row`, a record decoded rather than read on its stored
+/// bytes, and settle the row it leaves pending as the value. Answers whether the pipeline takes no
+/// more rows.
+fn run_resolved(
+	program: &Program,
+	pipeline: &Pipeline,
+	row: Value,
+	state: &mut State,
+) -> FlowResult<bool> {
+	let stop = finish_in_place(run_in_place(program, pipeline, &ValueRow(&row), state))
+		.map_err(ControlFlow::Err)?;
+	if state.pending.is_some() {
+		state.settle(program, row);
+	}
+	Ok(stop)
 }
 
 /// Whether the table `descriptor` names is absent and the caller's reads are
