@@ -85,8 +85,8 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 					| "pg_sequences"
 					| "pg_attrdef" | "pg_opclass"
 					| "pg_policies" | "pg_stat_user_indexes"
-					| "pg_views" | "pg_language"
-					| "pg_extension"
+					| "pg_views" | "pg_matviews"
+					| "pg_language" | "pg_extension"
 					| "pg_foreign_data_wrapper"
 					| "pg_foreign_server"
 					| "pg_collation"
@@ -117,8 +117,8 @@ pub fn is_system_catalog_table(schema: Option<&str>, name: &str) -> bool {
 					| "pg_sequences"
 					| "pg_attrdef" | "pg_opclass"
 					| "pg_policies" | "pg_stat_user_indexes"
-					| "pg_views" | "pg_language"
-					| "pg_extension"
+					| "pg_views" | "pg_matviews"
+					| "pg_language" | "pg_extension"
 					| "pg_foreign_data_wrapper"
 					| "pg_foreign_server"
 					| "pg_collation"
@@ -177,6 +177,7 @@ const BOOLEAN_COLUMNS: &[&str] = &[
 	"cycle",
 	"datallowconn",
 	"datistemplate",
+	"hasindexes",
 	"indcheckxmin",
 	"indimmediate",
 	"indisclustered",
@@ -187,6 +188,7 @@ const BOOLEAN_COLUMNS: &[&str] = &[
 	"indisreplident",
 	"indisunique",
 	"indisvalid",
+	"ispopulated",
 	"lanispl",
 	"lanpltrusted",
 	"extrelocatable",
@@ -692,6 +694,19 @@ pub fn get_system_table_schema(schema: Option<&str>, name: &str) -> Option<Table
 			Some("pg_catalog"),
 			"pg_views",
 			&["schemaname", "viewname", "viewowner", "definition"],
+		)),
+		(Some("pg_catalog") | None, "pg_matviews") => Some(make_schema(
+			Some("pg_catalog"),
+			"pg_matviews",
+			&[
+				"schemaname",
+				"matviewname",
+				"matviewowner",
+				"tablespace",
+				"hasindexes",
+				"ispopulated",
+				"definition",
+			],
 		)),
 		(Some("pg_catalog") | None, "pg_enum") => Some(make_schema(
 			Some("pg_catalog"),
@@ -1270,6 +1285,7 @@ pub fn get_system_table_rows(
 				(11106, "pg_views", 'v'),
 				(11107, "pg_extension", 'r'),
 				(11108, "pg_language", 'r'),
+				(11109, "pg_matviews", 'v'),
 			]
 			.map(|(oid, name, kind)| {
 				let natts = get_system_table_schema(Some("pg_catalog"), name)
@@ -2028,6 +2044,9 @@ pub fn get_system_table_rows(
 		// here.
 		(Some("pg_catalog") | None, "pg_views") => Some(Vec::new()),
 
+		// SurrealDB has no materialized views, so none is ever listed.
+		(Some("pg_catalog") | None, "pg_matviews") => Some(Vec::new()),
+
 		(Some("pg_catalog") | None, "pg_stat_user_indexes") => Some(
 			user_indexes(user_tables)
 				.into_iter()
@@ -2148,6 +2167,7 @@ pub fn get_system_table_rows(
 				"pg_sequences",
 				"pg_stat_user_indexes",
 				"pg_views",
+				"pg_matviews",
 			];
 			for tname in pg_catalog_names {
 				rows.push(row(vec![
@@ -2450,6 +2470,7 @@ mod tests {
 			(None, "pg_stat_user_indexes"),
 			(None, "pg_opclass"),
 			(None, "pg_policies"),
+			(None, "pg_matviews"),
 			(Some("information_schema"), "table_constraints"),
 			(Some("information_schema"), "constraint_column_usage"),
 			(None, "pg_index"),
@@ -2531,12 +2552,74 @@ mod tests {
 			assert!(rows.iter().any(|row| field(row, "datname") == &str_val(database)));
 		}
 		let classes = get_system_table_rows(None, "pg_class", &[], "test").unwrap();
-		for relation in ["pg_sequences", "pg_attrdef", "pg_opclass", "pg_views", "pg_language"] {
+		for relation in
+			["pg_sequences", "pg_attrdef", "pg_opclass", "pg_views", "pg_matviews", "pg_language"]
+		{
 			assert!(
 				classes.iter().any(|row| field(row, "relname") == &str_val(relation)),
 				"{relation}"
 			);
 		}
+	}
+
+	#[test]
+	fn pg_matviews_has_the_columns_of_postgres_and_lists_no_materialized_view() {
+		let expected = [
+			("schemaname", None),
+			("matviewname", None),
+			("matviewowner", None),
+			("tablespace", None),
+			("hasindexes", Some("boolean")),
+			("ispopulated", Some("boolean")),
+			("definition", None),
+		];
+		for schema in [None, Some("pg_catalog")] {
+			assert!(is_system_catalog_table(schema, "pg_matviews"), "{schema:?}");
+			let table = get_system_table_schema(schema, "pg_matviews").expect("a schema");
+			assert_eq!(table.schema.as_deref(), Some("pg_catalog"));
+			assert_eq!(table.columns.len(), expected.len());
+			for (position, (name, data_type)) in expected.iter().enumerate() {
+				let column = &table.columns[position];
+				assert_eq!(column.name, *name);
+				assert_eq!(column.data_type.as_deref(), *data_type, "{name}");
+			}
+		}
+
+		let tables = [
+			TableSchema::new("emp", vec![crate::ColumnInfo::new("id", 0)]),
+			TableSchema::new("dept", vec![crate::ColumnInfo::new("id", 0)]),
+		];
+		for schema in [None, Some("pg_catalog")] {
+			for user_tables in [&tables[..], &[]] {
+				let rows = get_system_table_rows(schema, "pg_matviews", user_tables, "test");
+				assert_eq!(rows, Some(Vec::new()), "{schema:?}");
+			}
+		}
+		assert_eq!(
+			get_system_table_rows(None, "pg_catalog.pg_matviews", &tables, "test"),
+			Some(vec![])
+		);
+	}
+
+	#[test]
+	fn pg_matviews_is_listed_among_the_relations_of_the_catalog() {
+		let classes = get_system_table_rows(None, "pg_class", &[], "test").unwrap();
+		let class = classes
+			.iter()
+			.find(|row| field(row, "relname") == &str_val("pg_matviews"))
+			.expect("a pg_class row");
+		assert_eq!(field(class, "relnatts"), &int_val(7));
+		assert_eq!(field(class, "relkind"), &str_val("v"));
+		let oids: Vec<_> = classes.iter().map(|row| field(row, "oid").clone()).collect();
+		let distinct: std::collections::HashSet<_> =
+			oids.iter().map(|oid| format!("{oid:?}")).collect();
+		assert_eq!(oids.len(), distinct.len(), "every pg_class oid is unique");
+		let tables =
+			get_system_table_rows(Some("information_schema"), "tables", &[], "test").unwrap();
+		assert!(tables.iter().any(|row| {
+			field(row, "table_schema") == &str_val("pg_catalog")
+				&& field(row, "table_name") == &str_val("pg_matviews")
+		}));
 	}
 
 	#[test]

@@ -2822,6 +2822,41 @@ fn a_column_a_using_clause_merged_is_not_ambiguous() {
 	);
 }
 
+/// The rows a plan reads from the one synthesised relation under its projections and filters.
+fn rows_of_the_synthesised_relation(op: &LogicalOp) -> &[LogicalExpr] {
+	match op {
+		LogicalOp::Project(project) => rows_of_the_synthesised_relation(&project.input),
+		LogicalOp::Filter(filter) => rows_of_the_synthesised_relation(&filter.input),
+		LogicalOp::Values(values) => {
+			let LogicalExpr::Array(rows) = &values.expr else {
+				panic!("expected an array of rows, got {:?}", values.expr);
+			};
+			rows
+		}
+		other => panic!("expected a synthesised relation, got {other:?}"),
+	}
+}
+
+#[test]
+fn pg_matviews_lowers_to_no_rows_however_it_is_named_and_whatever_tables_exist() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.define_table(None, "orders", &["id", "amount"]);
+	catalog.define_table(None, "typeorm_metadata", &["type", "schema", "name", "value"]);
+	for sql in [
+		"SELECT * FROM pg_matviews",
+		"SELECT * FROM \"pg_matviews\"",
+		"SELECT * FROM pg_catalog.pg_matviews",
+		"SELECT * FROM \"pg_catalog\".\"pg_matviews\"",
+		"SELECT schemaname, matviewname FROM pg_catalog.pg_matviews WHERE schemaname = 'public'",
+		"SELECT \"schemaname\", \"matviewname\", \"definition\" FROM \"pg_catalog\".\"pg_matviews\" \
+		 WHERE \"hasindexes\" AND NOT \"ispopulated\" AND \"tablespace\" IS NULL",
+		"SELECT * FROM pg_matviews AS mv WHERE mv.matviewowner = 'root'",
+	] {
+		let op = lower_pgsql_select(&catalog, sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+		assert!(rows_of_the_synthesised_relation(&op).is_empty(), "{sql}");
+	}
+}
+
 #[test]
 fn a_bit_test_and_an_array_subscript_lower() {
 	let catalog = MemoryCatalog::new();
