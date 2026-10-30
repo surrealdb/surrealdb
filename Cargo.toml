@@ -364,12 +364,12 @@ toml_edit = { version = "0.25.17", default-features = false, features = ["parse"
 wasm-encoder = "0.254"
 wasm-opt = "0.116.1"
 wasmparser = "0.254"
-wasmtime = { version = "48.0.7", default-features = false, features = ["async", "cranelift", "runtime", "std", "wat", "component-model", "component-model-async", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = { version = "48.0.7", features = ["p1", "p2"] }
-wasmtime-wasi-http = { version = "48.0.7", default-features = false, features = ["p2"] }
+wasmtime = { version = "48.0.8", default-features = false, features = ["async", "cranelift", "runtime", "std", "wat", "component-model", "component-model-async", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = { version = "48.0.8", features = ["p1", "p2"] }
+wasmtime-wasi-http = { version = "48.0.8", default-features = false, features = ["p2"] }
 # Pinned exactly: each wizer release is built against the wasmtime release of
 # the same number, so the two move together.
-wasmtime-wizer = { version = "=48.0.7", default-features = false, features = ["component-model"] }
+wasmtime-wizer = { version = "=48.0.8", default-features = false, features = ["component-model"] }
 # The version wasmtime's own `wat` feature resolves to, so tests assemble text
 # with the same parser the engine does.
 wat = "~1.254.2"
