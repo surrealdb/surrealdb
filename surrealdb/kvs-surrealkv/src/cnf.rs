@@ -24,7 +24,10 @@ pub struct SurrealKvConfig {
 	/// The value log threshold in bytes - values larger than this are stored in the value log
 	/// (default: 4 KiB)
 	pub vlog_threshold: usize,
-	/// The block cache capacity in bytes (default: dynamic based on memory)
+	/// The block cache capacity in bytes. The default is half of the system memory less 1 GiB,
+	/// and at least 16 MiB: about 30 GiB on a 62 GiB host, as for MongoDB's WiredTiger cache.
+	/// The cache holds blocks of live tables only: a compaction neither fills it nor leaves the
+	/// blocks of the tables it merged in it.
 	pub block_cache_capacity: u64,
 	/// The maximum memtable size in bytes before flushing to disk.
 	/// This is the arena of memory that holds recent writes. It bounds memtable residency, not
