@@ -51,6 +51,18 @@ pub(crate) static DML: Surface = Surface {
 	codec: &crate::exec::vm::codec::EDGE_CODEC,
 };
 
+/// No statement at all: the surface a morsel leaf runs units under
+/// ([`Datastore::run_morsel`](crate::kvs::Datastore::run_morsel)). A unit holds no statement and
+/// reads no catalog entry, so the leaf's codec serves no catalog kind.
+pub(crate) static LEAF: Surface = Surface {
+	schema_binding: None,
+	schema_lowering: None,
+	schema_steps: None,
+	explain_lowering: None,
+	match_binding: None,
+	codec: &crate::exec::vm::codec::LEAF_CODEC,
+};
+
 /// Every statement family.
 pub(crate) static FULL: Surface = Surface {
 	schema_binding: Some(&crate::exec::ir::build::stmt::FULL_SCHEMA_BINDING),

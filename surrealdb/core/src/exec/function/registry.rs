@@ -342,8 +342,8 @@ impl FunctionRegistry {
 		registry
 	}
 
-	/// Create a registry that holds the aggregate functions alone, which name the aggregates the
-	/// text form of an IR container may hold.
+	/// Create a registry that holds the aggregate functions alone: the aggregates the text form
+	/// of an IR container may hold, and the only functions a morsel unit names.
 	pub(crate) fn with_aggregates() -> Self {
 		let mut registry = Self::new();
 		builtin::aggregates::register(&mut registry);

@@ -72,9 +72,9 @@ pub struct Builder {
 	/// The batches a blocking statement runs of a deferred build itself; see
 	/// [`Builder::with_inline_index_build_batches`].
 	inline_index_build_batches: usize,
-	/// Whether building opens transactions; see
-	/// [`Builder::without_startup_transactions`].
-	startup_transactions: bool,
+	/// The steps of a build that open transactions, or `None` for a build that
+	/// opens none; see [`Builder::without_startup_transactions`].
+	startup: Option<StartupFn>,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -161,6 +161,19 @@ impl Builder {
 		builder
 	}
 
+	/// A builder for a datastore that runs the morsels of a host's places alone
+	/// ([`Datastore::run_morsel`]) and serves no statement: its function
+	/// registry holds the aggregates a morsel unit names and nothing else, it
+	/// starts no maintenance task or index build, and it opens no transaction
+	/// while it is built, since a morsel's run reads only the reader it is
+	/// handed. A build that never constructs one links none of the rest of the
+	/// function library through it.
+	pub fn for_leaf() -> Self {
+		Self::with_functions(FunctionRegistry::with_aggregates)
+			.without_startup_transactions()
+			.without_index_build_tasks()
+	}
+
 	fn with_functions(functions: fn() -> FunctionRegistry) -> Self {
 		Builder {
 			capabilities: Default::default(),
@@ -176,7 +189,7 @@ impl Builder {
 			maintenance: cfg!(feature = "maintenance-tasks"),
 			index_build_tasks: true,
 			inline_index_build_batches: 0,
-			startup_transactions: true,
+			startup: Some(start),
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
@@ -390,7 +403,7 @@ impl Builder {
 	/// before anything else opens a transaction or serves a query.
 	pub fn without_startup_transactions(mut self) -> Self {
 		self.maintenance = false;
-		self.startup_transactions = false;
+		self.startup = None;
 		self
 	}
 
@@ -661,9 +674,9 @@ impl Builder {
 		let triggers = Arc::new(surrealdb_datastore::triggers::CommitTriggers::new());
 		// Read before `self` is partially moved below.
 		let maintenance = self.maintenance;
-		let startup_transactions = self.startup_transactions;
+		let startup = self.startup;
 		let attach = self.attach;
-		if attach.is_some() && !startup_transactions {
+		if attach.is_some() && startup.is_none() {
 			bail!(
 				"an edge datastore attaches its store while it is built, so it cannot defer its startup transactions"
 			);
@@ -811,13 +824,6 @@ impl Builder {
 			parser_config: Arc::new(self.config.load::<crate::syn::ParserConfig>()),
 			config,
 		};
-		// Under the Router live-query engine, establish the router's baseline
-		// cursor now — before the datastore can accept any connection. A build
-		// that may open no transaction leaves it to `check_version`, which runs
-		// before the instance serves a query.
-		if startup_transactions {
-			datastore.establish_router_baseline().await?;
-		}
 		// Populate the system metrics cache before anyone can read it. The
 		// cache is process-wide and starts zeroed, and `INFO FOR ROOT` reports
 		// it verbatim — so without this a query arriving before the first
@@ -837,85 +843,123 @@ impl Builder {
 		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
 		// the datastore is only handed out behind this `Arc`.
 		let datastore = Arc::new(datastore);
-		// A build that may open no transaction leaves the feature level and the
-		// ledger to `check_version`, which reads both once the backend serves.
-		if !startup_transactions {
-			return Ok(datastore);
-		}
-		// Read the store's feature level into the shared cell, creating it where
-		// the store is new. A build settles it here with or without the
-		// maintenance tasks, so a datastore a test drives by hand is created at
-		// its pin too. It precedes the version stamp, as `get_version` allows.
-		datastore.settle_feature_level().await?;
-		// What the ledger allows this build to do with the store. A build asks here
-		// with or without the maintenance tasks, so that a datastore a test drives
-		// by hand is read-only on the same evidence as a served one. It follows the
-		// feature level, which a store carrying entries this build does not
-		// maintain still reads. The read waits out a backend that is still
-		// forming, as the other startup steps do.
-		let verdict = Datastore::retry_bootstrap("Read ledger", || {
-			migration::ledger_verdict(&datastore, LEDGER)
-		})
-		.await?;
-		if let Some(attach) = attach {
-			attach(&datastore, verdict).await?;
-			return Ok(datastore);
-		}
-		match verdict {
-			LedgerVerdict::Open => {}
-			LedgerVerdict::ReadOnly {
-				features,
-			} => datastore.open_read_only(features),
-			// Nothing starts against a store this build refuses, and `check_version`
-			// reports the refusal.
-			LedgerVerdict::Refused {
-				..
-			} => return Ok(datastore),
-		}
-		// A datastore without its maintenance tasks is not a working database,
-		// so starting them is the constructor's job rather than every embedder's
-		// to remember. Opt out with `without_maintenance_tasks`.
-		if maintenance {
-			// Settle the storage version first. Every maintenance task writes,
-			// and a write that reaches storage before the version key does makes
-			// a datastore this process just created read as storage from before
-			// that key existed — which `check_version` is then obliged to refuse,
-			// permanently, on this and every later open. Starting the writers is
-			// what creates that obligation, so it is this branch that owes the
-			// ordering; a caller who opts out owns both halves and settles the
-			// version itself.
-			//
-			// Only the marker, not the whole of `check_version`: the migrations
-			// that follow it run under a lease and have no bound on how long they
-			// take, which is not something a constructor may do. The caller still
-			// calls `check_version`, which finds the marker already written and
-			// reports whether *this process* created the datastore from the latch
-			// set below.
-			let (_, is_new) = datastore.settle_storage_version().await?;
-			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
-			// Every job but the heartbeat waits for the migrations `check_version`
-			// runs, so none reads persisted data while a migration rewrites it.
-			// A datastore this process created has nothing to migrate, and one
-			// already stamped at this build with every migration in its ledger
-			// has nothing left, so for those the wait is released here and the
-			// tasks run without `check_version`; any other datastore holds every
-			// job but the heartbeat until that call has run the migrations.
-			if is_new || crate::kvs::migration::settled(&datastore).await? {
-				datastore.mark_migrated();
-			}
-			// A read-only store runs the membership refresh alone: every other task
-			// writes.
-			datastore.check_heartbeat_interval(options.node_membership_refresh_interval).await?;
-			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
-			// This is the only writer, and it runs before the datastore is
-			// handed to anyone. It records tasks only where the feature started
-			// some: `maintenance` defaults to the `maintenance-tasks` feature,
-			// so a build without it never reaches here and leaves the datastore
-			// undriven, for a host to drive through `run_maintenance_slice`.
-			*datastore.maintenance.lock() = super::MaintenanceDriver::Tasks(tasks);
+		// A build that may open no transaction leaves the router baseline, the
+		// feature level and the ledger to `check_version`, which reads them once
+		// the backend serves.
+		if let Some(startup) = startup {
+			startup(
+				&datastore,
+				Startup {
+					attach,
+					maintenance,
+					options,
+				},
+			)
+			.await?;
 		}
 		Ok(datastore)
 	}
+}
+
+/// The steps of a build that open transactions, run once its datastore is
+/// shared. A builder names them unless it opens none
+/// ([`Builder::without_startup_transactions`]), so a build that only
+/// constructs datastores that open none links none of them.
+type StartupFn = for<'a> fn(&'a Arc<Datastore>, Startup) -> BoxFut<'a, Result<()>>;
+
+/// What the startup steps read of the builder.
+struct Startup {
+	attach: Option<AttachFn>,
+	maintenance: bool,
+	options: EngineOptions,
+}
+
+/// The startup steps of every builder that opens transactions while it builds.
+fn start(datastore: &Arc<Datastore>, startup: Startup) -> BoxFut<'_, Result<()>> {
+	Box::pin(run_startup(datastore, startup))
+}
+
+async fn run_startup(datastore: &Arc<Datastore>, startup: Startup) -> Result<()> {
+	let Startup {
+		attach,
+		maintenance,
+		options,
+	} = startup;
+	// Under the Router live-query engine, establish the router's baseline
+	// cursor now — before the datastore can accept any connection.
+	datastore.establish_router_baseline().await?;
+	// Read the store's feature level into the shared cell, creating it where
+	// the store is new. A build settles it here with or without the
+	// maintenance tasks, so a datastore a test drives by hand is created at
+	// its pin too. It precedes the version stamp, as `get_version` allows.
+	datastore.settle_feature_level().await?;
+	// What the ledger allows this build to do with the store. A build asks here
+	// with or without the maintenance tasks, so that a datastore a test drives
+	// by hand is read-only on the same evidence as a served one. It follows the
+	// feature level, which a store carrying entries this build does not
+	// maintain still reads. The read waits out a backend that is still
+	// forming, as the other startup steps do.
+	let verdict =
+		Datastore::retry_bootstrap("Read ledger", || migration::ledger_verdict(datastore, LEDGER))
+			.await?;
+	if let Some(attach) = attach {
+		attach(datastore, verdict).await?;
+		return Ok(());
+	}
+	match verdict {
+		LedgerVerdict::Open => {}
+		LedgerVerdict::ReadOnly {
+			features,
+		} => datastore.open_read_only(features),
+		// Nothing starts against a store this build refuses, and `check_version`
+		// reports the refusal.
+		LedgerVerdict::Refused {
+			..
+		} => return Ok(()),
+	}
+	// A datastore without its maintenance tasks is not a working database,
+	// so starting them is the constructor's job rather than every embedder's
+	// to remember. Opt out with `without_maintenance_tasks`.
+	if maintenance {
+		// Settle the storage version first. Every maintenance task writes,
+		// and a write that reaches storage before the version key does makes
+		// a datastore this process just created read as storage from before
+		// that key existed — which `check_version` is then obliged to refuse,
+		// permanently, on this and every later open. Starting the writers is
+		// what creates that obligation, so it is this branch that owes the
+		// ordering; a caller who opts out owns both halves and settles the
+		// version itself.
+		//
+		// Only the marker, not the whole of `check_version`: the migrations
+		// that follow it run under a lease and have no bound on how long they
+		// take, which is not something a constructor may do. The caller still
+		// calls `check_version`, which finds the marker already written and
+		// reports whether *this process* created the datastore from the latch
+		// set below.
+		let (_, is_new) = datastore.settle_storage_version().await?;
+		datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
+		// Every job but the heartbeat waits for the migrations `check_version`
+		// runs, so none reads persisted data while a migration rewrites it.
+		// A datastore this process created has nothing to migrate, and one
+		// already stamped at this build with every migration in its ledger
+		// has nothing left, so for those the wait is released here and the
+		// tasks run without `check_version`; any other datastore holds every
+		// job but the heartbeat until that call has run the migrations.
+		if is_new || crate::kvs::migration::settled(datastore).await? {
+			datastore.mark_migrated();
+		}
+		// A read-only store runs the membership refresh alone: every other task
+		// writes.
+		datastore.check_heartbeat_interval(options.node_membership_refresh_interval).await?;
+		let tasks = crate::kvs::tasks::init(datastore, datastore.shutdown.clone(), &options);
+		// This is the only writer, and it runs before the datastore is
+		// handed to anyone. It records tasks only where the feature started
+		// some: `maintenance` defaults to the `maintenance-tasks` feature,
+		// so a build without it never reaches here and leaves the datastore
+		// undriven, for a host to drive through `run_maintenance_slice`.
+		*datastore.maintenance.lock() = super::MaintenanceDriver::Tasks(tasks);
+	}
+	Ok(())
 }
 
 #[cfg(test)]

@@ -472,20 +472,36 @@ fn the_edge_codec_refuses_the_kinds_it_leaves_out_by_name() {
 	}
 }
 
-/// Both codecs list the catalog kinds in the same order, so a program names a type by one index
-/// for either.
+/// Every codec lists the catalog kinds in the same order, so a program names a type by one index
+/// for any of them.
 #[test]
-fn the_edge_and_full_codecs_index_every_type_alike() {
-	use crate::catalog::stored::{CATALOG_TYPES, EDGE_CATALOG_TYPES};
+fn the_edge_leaf_and_full_codecs_index_every_type_alike() {
+	use crate::catalog::stored::{CATALOG_TYPES, EDGE_CATALOG_TYPES, LEAF_CATALOG_TYPES};
 	assert_eq!(CATALOG_TYPES.len(), EDGE_CATALOG_TYPES.len());
-	for (full, edge) in CATALOG_TYPES.iter().zip(EDGE_CATALOG_TYPES) {
+	assert_eq!(CATALOG_TYPES.len(), LEAF_CATALOG_TYPES.len());
+	for ((full, edge), leaf) in CATALOG_TYPES.iter().zip(EDGE_CATALOG_TYPES).zip(LEAF_CATALOG_TYPES)
+	{
 		assert_eq!(full.name, edge.name);
+		assert_eq!(full.name, leaf.name);
 	}
 	for desc in CATALOG_TYPES {
 		let id = TypeId::named(desc.name);
 		let full = id.desc(&FULL_CODEC).unwrap().unwrap().name;
 		let edge = id.desc(&EDGE_CODEC).unwrap().unwrap().name;
+		let leaf = id.desc(&LEAF_CODEC).unwrap().unwrap().name;
 		assert_eq!(full, edge);
+		assert_eq!(full, leaf);
+	}
+}
+
+/// A leaf's codec refuses every catalog kind as unserved.
+#[test]
+fn the_leaf_codec_refuses_every_catalog_kind() {
+	use crate::catalog::stored::CATALOG_TYPES;
+	for desc in CATALOG_TYPES {
+		let id = TypeId::named(desc.name);
+		let error = decode_id(&LEAF_CODEC, id, &[]).unwrap_err();
+		assert!(error.to_string().contains("is not served"), "{}: {error}", desc.name);
 	}
 }
 

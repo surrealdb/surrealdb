@@ -3,10 +3,10 @@
 //! catalog types' generated codecs.
 //!
 //! A catalog type is not described here: its row in a catalog table
-//! (`catalog::stored::CATALOG_TYPES` or `EDGE_CATALOG_TYPES`) reads and writes its bytes through
-//! the schema its derive generates, so its codec cannot drift from its Rust type. The descriptors
-//! below are of the types no schema covers: the ids, a record and its metadata, the datastore's
-//! values.
+//! (`catalog::stored::CATALOG_TYPES`, `EDGE_CATALOG_TYPES` or `LEAF_CATALOG_TYPES`) reads and
+//! writes its bytes through the schema its derive generates, so its codec cannot drift from its
+//! Rust type. The descriptors below are of the types no schema covers: the ids, a record and its
+//! metadata, the datastore's values.
 //!
 //! A [`Codec`] pairs the hand-written descriptors with one catalog table. The entry that starts a
 //! query chooses its codec through its surface, so an entry that serves fewer catalog kinds names
@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 use anyhow::{Result, anyhow};
 
 use super::desc::{Field, Missing, Ty, TypeDesc};
-use crate::catalog::stored::{CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES};
+use crate::catalog::stored::{
+	CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES, LEAF_CATALOG_TYPES,
+};
 use crate::val::{Number, Object, Value};
 
 pub(super) fn opt(ty: Ty) -> Ty {
@@ -275,6 +277,9 @@ pub(crate) static FULL_CODEC: Codec = Codec::over(CATALOG_TYPES);
 
 /// The codec of an entry that serves the catalog kinds of [`EDGE_CATALOG_TYPES`] alone.
 pub(crate) static EDGE_CODEC: Codec = Codec::over(EDGE_CATALOG_TYPES);
+
+/// The codec of a morsel leaf, which serves no catalog kind ([`LEAF_CATALOG_TYPES`]).
+pub(crate) static LEAF_CODEC: Codec = Codec::over(LEAF_CATALOG_TYPES);
 
 type Table = (Vec<TypeDesc>, HashMap<&'static str, u16>);
 

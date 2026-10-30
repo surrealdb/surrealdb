@@ -188,6 +188,36 @@ pub static EDGE_CATALOG_TYPES: &[CatalogVTable] = &[
 	catalog_vtable!(unserved AccessGrant),
 ];
 
+/// The catalog types a morsel leaf reads: none. Every row of [`CATALOG_TYPES`] is replaced by
+/// [`catalog_vtable!`]`(unserved T)`: a leaf runs a unit over the record keys of its range and
+/// reads no catalog entry, so a key of any catalog kind is refused with [`unserved`], and the table
+/// names no decoder of a definition. A row stays at its position and keeps its name, so a type is
+/// the same index here as in the other tables.
+pub static LEAF_CATALOG_TYPES: &[CatalogVTable] = &[
+	catalog_vtable!(unserved NamespaceDefinition),
+	catalog_vtable!(unserved DatabaseDefinition),
+	catalog_vtable!(unserved StoredTableDefinition),
+	catalog_vtable!(unserved StoredFieldDefinition),
+	catalog_vtable!(unserved StoredIndexDefinition),
+	catalog_vtable!(unserved StoredEventDefinition),
+	catalog_vtable!(unserved StoredFunctionDefinition),
+	catalog_vtable!(unserved StoredParamDefinition),
+	catalog_vtable!(unserved StoredAccessDefinition),
+	catalog_vtable!(unserved UserDefinition),
+	catalog_vtable!(unserved AnalyzerDefinition),
+	catalog_vtable!(unserved SequenceDefinition),
+	catalog_vtable!(unserved StoredModuleDefinition),
+	catalog_vtable!(unserved StoredMlModelDefinition),
+	catalog_vtable!(unserved StoredBucketDefinition),
+	catalog_vtable!(unserved StoredApiDefinition),
+	catalog_vtable!(unserved StoredConfigDefinition),
+	catalog_vtable!(unserved StoredSubscriptionDefinition),
+	catalog_vtable!(unserved Node),
+	catalog_vtable!(unserved TaskLease),
+	catalog_vtable!(unserved NodeLiveQuery),
+	catalog_vtable!(unserved AccessGrant),
+];
+
 /// A value that the type's schema cannot convert, refused as [`write_error`] refuses it.
 fn convert(ty: &'static str, error: SchemaError) -> anyhow::Error {
 	write_error(EntryError::body(ty, error))

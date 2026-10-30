@@ -2150,11 +2150,13 @@ impl Datastore {
 	}
 
 	/// The root context a leaf runs a morsel in: this engine's, over a read transaction the run
-	/// never reads through.
+	/// never reads through, under the leaf's surface ([`LEAF`](crate::exec::surface::LEAF)): a unit
+	/// holds no statement and reads no catalog entry, so a leaf reaches no statement family and no
+	/// catalog decoder through it.
 	async fn leaf_context(&self) -> Result<crate::exec::ExecutionContext> {
 		use crate::exec::context::RootContext;
 		let txn = self.transaction(TransactionType::Read).await?;
-		let mut ctx = self.setup_ctx()?;
+		let mut ctx = self.setup_ctx_with(&crate::exec::surface::LEAF, &self.compiled_units)?;
 		ctx.set_transaction(Arc::new(txn));
 		Ok(crate::exec::ExecutionContext::Root(RootContext {
 			ctx: ctx.freeze(),

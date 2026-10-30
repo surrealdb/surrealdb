@@ -642,14 +642,23 @@ fn put_sort(w: &mut Writer, sort: &SortSpec) -> Option<()> {
 	Some(())
 }
 
+/// A sort of the unit. A build without the `collate` feature orders a collated key as an
+/// uncollated one, so it refuses a unit with one rather than run its sort.
 fn get_sort(r: &mut Reader<'_>) -> Result<SortSpec> {
 	let keys = (0..r.usize()?)
 		.map(|_| {
-			Ok(KeyOrder {
+			let key = KeyOrder {
 				ascending: r.bool()?,
 				collate: r.bool()?,
 				numeric: r.bool()?,
-			})
+			};
+			if key.collate && !cfg!(feature = "collate") {
+				bail!(crate::expr::Error::FeatureDisabled {
+					feature: "collate",
+					what: "Collated sorts",
+				});
+			}
+			Ok(key)
 		})
 		.collect::<Result<Vec<_>>>()?;
 	Ok(SortSpec {

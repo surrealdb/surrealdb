@@ -45,7 +45,7 @@ mod wire;
 use anyhow::{Result, bail};
 use desc::{Body, TypeDesc};
 use surrealdb_kvs::{EncodeContext, Encoded};
-pub(crate) use types::{Codec, EDGE_CODEC, FULL_CODEC, TypeId};
+pub(crate) use types::{Codec, EDGE_CODEC, FULL_CODEC, LEAF_CODEC, TypeId};
 
 use crate::catalog::{Metadata, Record, RecordFormat, RecordLayoutError, StoredRecord};
 use crate::val::{Object, Value};

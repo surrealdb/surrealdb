@@ -102,9 +102,10 @@ pub(crate) fn loopback(width: usize) -> Option<Arc<dyn MorselPlaces>> {
 }
 
 /// Places that run every morsel in a second engine of this process, as a host's leaf runs it: the
-/// unit, the morsel and every frame cross as bytes, and the leaf reads the morsel's range through
-/// the read view it is handed. What a statement answers through them is what it answers through
-/// any host's places, so a conformance run through them checks the host-place contract.
+/// unit, the morsel and every frame cross as bytes, the leaf's engine is a leaf's
+/// ([`Builder::for_leaf`](crate::kvs::Builder::for_leaf)), and the leaf reads the morsel's range
+/// through the read view it is handed. What a statement answers through them is what it answers
+/// through any host's places, so a conformance run through them checks the host-place contract.
 #[cfg(feature = "kv-mem")]
 pub struct LoopbackPlaces {
 	width: usize,
@@ -163,7 +164,7 @@ impl MorselPlaces for LoopbackPlaces {
 		let stats = Arc::clone(&self.stats);
 		let run = async move {
 			let leaf = leaf
-				.get_or_try_init(|| crate::kvs::Datastore::new("memory"))
+				.get_or_try_init(|| crate::kvs::Builder::for_leaf().build_with_path("memory"))
 				.await
 				.map_err(|e| e.context("Failed to open the loopback leaf's engine"));
 			match leaf {

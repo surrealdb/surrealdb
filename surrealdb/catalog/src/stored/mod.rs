@@ -60,7 +60,7 @@ pub(crate) use macros::impl_stored_id;
 pub use surrealdb_expr::val::stored::schema::{
 	Floor, SchemaError, Stored, StoredField, StoredType, TypeSchema,
 };
-pub use vtable::{CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES};
+pub use vtable::{CATALOG_TYPES, CatalogVTable, EDGE_CATALOG_TYPES, LEAF_CATALOG_TYPES};
 
 /// What the macros of this module name, so that the crates that use them need no further
 /// dependency.
