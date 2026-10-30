@@ -24,8 +24,6 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 pub static NET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_NET_MAX_CONCURRENT_REQUESTS", usize, 1 << 20);
 
-/// The maximum HTTP body size of the HTTP /ml endpoints (default: 4 GiB)
-
 /// The maximum HTTP body size of the HTTP /sql endpoint (default: 1 MiB)
 pub static HTTP_MAX_SQL_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SQL_BODY_SIZE", usize, 1 << 20);

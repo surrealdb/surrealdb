@@ -427,6 +427,15 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 			},
 		),
 		(
+			"StoredModels",
+			DatastoreError::StoredModels {
+				ns: "sample".to_string(),
+				db: "sample".to_string(),
+				model: "sample".to_string(),
+				version: "sample".to_string(),
+			},
+		),
+		(
 			"MigratedBeyondStorageVersion",
 			DatastoreError::MigratedBeyondStorageVersion {
 				stored: "sample".to_string(),
@@ -1811,7 +1820,8 @@ fn snapshot_covers_every_variant() {
 // (Query twin rationale:) catalog::Error carries a `Query` twin of exec::Error::Query with a
 // byte-identical message, so aggregation classification can raise it below
 // the executor; the wire output of the affected sites is unchanged.
-// 172: DatastoreError::MigratedBeyondStorageVersion, MigrationTimedOut and NotAttachable
+// 172: DatastoreError::MigratedBeyondStorageVersion, MigrationTimedOut, NotAttachable and
+// StoredModels
 // abort startup before a client can connect, so they reach an operator through the
 // logs and never travel the wire. They join InvalidStorageVersion and
 // OutdatedStorageVersion, the storage-state errors already counted here; no
@@ -1820,7 +1830,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 167;
+const UNTYPED_INTERNAL_BUDGET: usize = 168;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

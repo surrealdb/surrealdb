@@ -187,6 +187,14 @@ pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String>
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
+		// `ml` named a route this build no longer serves. It is ignored with a warning,
+		// so a configuration written for an earlier release still starts.
+		if target == "ml" {
+			eprintln!(
+				"warning: the `ml` route target is retired and ignored: this build serves no ML routes"
+			);
+			continue;
+		}
 		result.insert(RouteTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
