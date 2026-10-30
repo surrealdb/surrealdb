@@ -111,11 +111,9 @@ surrealdb-kvs = { version = "4.0.0-nightly", path = "surrealdb/kvs" }
 surrealdb-kvs-any = { version = "4.0.0-nightly", path = "surrealdb/kvs-any", default-features = false }
 surrealdb-kvs-mem = { version = "4.0.0-nightly", path = "surrealdb/kvs-mem" }
 surrealdb-kvs-surrealkv = { version = "4.0.0-nightly", path = "surrealdb/kvs-surrealkv" }
-# Dev-only, `publish = false`: declared WITHOUT a version so cargo strips it
-# from published manifests. A version here would make cargo package/publish
-# demand it from crates.io, where a publish=false crate can never appear -
-# breaking every crate that dev-depends on it (surrealdb-kvs-any).
-surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
+# The shared behaviour suite for key-value store backends. Published so that backends outside
+# this repository can run it against themselves.
+surrealdb-kvs-test = { version = "4.0.0-nightly", path = "surrealdb/kvs-test" }
 surrealdb-mysql = { version = "4.0.0-nightly", path = "surrealdb/mysql" }
 surrealdb-pgsql = { version = "4.0.0-nightly", path = "surrealdb/pgsql" }
 surrealdb-sqlplan = { version = "4.0.0-nightly", path = "surrealdb/sqlplan" }

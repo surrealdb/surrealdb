@@ -1,6 +1,6 @@
 [package]
 name = "surrealdb-kvs-test"
-publish = false
+publish = true
 readme = "README.md"
 version.workspace = true
 authors.workspace = true

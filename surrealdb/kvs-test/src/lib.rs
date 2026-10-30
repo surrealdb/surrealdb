@@ -59,6 +59,8 @@ use std::process::ExitCode;
 #[cfg(not(target_family = "wasm"))]
 use std::sync::{Arc, Mutex};
 
+// `kvs_test!` registers through this path, so callers need only this crate as a dependency.
+pub use inventory;
 #[cfg(not(target_family = "wasm"))]
 use libtest_mimic::{Arguments, Trial};
 use surrealdb_kvs::api::BoxFut;
@@ -234,7 +236,7 @@ macro_rules! kvs_test {
 				::std::boxed::Box::pin(super::$name(b))
 			}
 
-			::inventory::submit!{
+			$crate::inventory::submit!{
 				$crate::KvsTest {
 					module: ::core::module_path!(),
 					only: &[$(::core::stringify!($only)),*],
