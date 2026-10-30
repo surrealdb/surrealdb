@@ -133,6 +133,9 @@ pub(in crate::rpc) enum Kind {
 	Insert,
 	Update,
 	Delete,
+	/// MySQL `REPLACE`. PostgreSQL has no such statement, so only a build with the `mysql`
+	/// feature has this variant.
+	#[cfg(feature = "mysql")]
 	Replace,
 	/// Any other statement; its tag when it has one of its own, else a row count as a read has.
 	Other(Option<&'static str>),
@@ -140,7 +143,12 @@ pub(in crate::rpc) enum Kind {
 
 impl Kind {
 	fn writes_rows(&self) -> bool {
-		matches!(self, Self::Insert | Self::Update | Self::Delete | Self::Replace)
+		match self {
+			Self::Insert | Self::Update | Self::Delete => true,
+			#[cfg(feature = "mysql")]
+			Self::Replace => true,
+			Self::Select | Self::Other(_) => false,
+		}
 	}
 }
 
@@ -458,6 +466,7 @@ pub(super) fn command(kind: &Kind, dialect: Dialect, count: usize) -> PublicValu
 				format!("DELETE {count}")
 			}
 		}
+		#[cfg(feature = "mysql")]
 		Kind::Replace => "REPLACE".to_owned(),
 		Kind::Other(Some(tag)) => (*tag).to_owned(),
 		Kind::Other(None) => {
