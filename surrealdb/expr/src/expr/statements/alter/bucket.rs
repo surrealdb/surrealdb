@@ -13,6 +13,11 @@ pub struct AlterBucketStatement {
 	pub permissions: Option<Permission>,
 	pub readonly: AlterKind<()>,
 	pub comment: AlterKind<String>,
+	/// Whether to invalidate every presigned URL already issued for this
+	/// bucket, by replacing its `presign_nonce`.
+	///
+	/// Not an `AlterKind`: there is nothing to unset.
+	pub revoke_signatures: bool,
 }
 
 impl Default for AlterBucketStatement {
@@ -24,6 +29,7 @@ impl Default for AlterBucketStatement {
 			permissions: None,
 			readonly: AlterKind::None,
 			comment: AlterKind::None,
+			revoke_signatures: false,
 		}
 	}
 }
@@ -56,6 +62,10 @@ impl ToSql for AlterBucketStatement {
 			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
 			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
+		}
+
+		if self.revoke_signatures {
+			f.push_str(" REVOKE SIGNATURES");
 		}
 	}
 }

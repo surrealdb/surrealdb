@@ -1,21 +1,29 @@
 use std::future::Future;
+use std::io::SeekFrom;
 use std::path::{Path as OsPath, PathBuf};
 use std::pin::Pin;
 
 use bytes::Bytes;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use path_clean::PathClean;
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter};
+use tokio_util::io::ReaderStream;
 use url::Url;
+use uuid::Uuid;
 use web_time::SystemTime;
 
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use super::{
+	ByteRange, ListEntry, ListOptions, Listing, ObjectKey, ObjectMeta, ObjectStore, ObjectStream,
+	PutCondition, PutError, PutOptions, PutResult,
+};
 use crate::buc::{Config, Error};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
 pub struct FileStoreOptions {
-	root: ObjectKey,
+	root: String,
 	lowercase_paths: bool,
 }
 
@@ -133,12 +141,69 @@ impl FileStore {
 		};
 
 		Ok(Some(FileStoreOptions {
-			root: ObjectKey::new(path_from_url),
+			root: path_from_url,
 			lowercase_paths,
 		}))
 	}
 
 	/// Check if a path exists on disk
+	/// The path, name and metadata of a directory entry a listing may report
+	/// or descend into, or `None` for one it must not.
+	///
+	/// Refused: a staged write in progress, which is not an object (it lives
+	/// beside its target for the duration of an upload, and a crash mid-upload
+	/// leaves one behind); a symlink resolving outside the root, since `get`
+	/// and `head` refuse it; a symlink to a directory, which could form a
+	/// cycle; and a name that is not valid UTF-8, which no key can spell.
+	async fn listable(
+		entry: &tokio::fs::DirEntry,
+		canonical_root: &OsPath,
+	) -> Option<(PathBuf, String, std::fs::Metadata)> {
+		let path = entry.path();
+		if StagedWrite::is_staged_name(&path) {
+			return None;
+		}
+		let name = entry.file_name().into_string().ok()?;
+		let file_type = entry.file_type().await.ok()?;
+		if file_type.is_symlink() {
+			match tokio::fs::canonicalize(&path).await {
+				Ok(target) if target.starts_with(canonical_root) => {}
+				_ => return None,
+			}
+		}
+		let metadata = match tokio::fs::metadata(&path).await {
+			Ok(md) => md,
+			Err(e) => {
+				error!("Failed to get metadata for {}: {}", path.display(), e);
+				return None;
+			}
+		};
+		if file_type.is_symlink() && metadata.is_dir() {
+			return None;
+		}
+		Some((path, name, metadata))
+	}
+
+	/// Whether a directory holds at least one object a listing would report,
+	/// at any depth. Stops at the first one.
+	async fn holds_object(dir: PathBuf, canonical_root: &OsPath) -> bool {
+		let mut pending = vec![dir];
+		while let Some(dir) = pending.pop() {
+			let Ok(mut read_dir) = tokio::fs::read_dir(&dir).await else {
+				continue;
+			};
+			while let Ok(Some(entry)) = read_dir.next_entry().await {
+				if let Some((path, _, metadata)) = Self::listable(&entry, canonical_root).await {
+					if !metadata.is_dir() {
+						return true;
+					}
+					pending.push(path);
+				}
+			}
+		}
+		false
+	}
+
 	async fn path_exists(path: &OsPath) -> Result<bool, String> {
 		tokio::fs::try_exists(path)
 			.await
@@ -152,7 +217,8 @@ impl FileStore {
 	}
 
 	/// Resolve a list prefix to the host directory or file it names; see
-	/// [`Self::resolve_key`]. Unlike an object key, a prefix may end in `/`.
+	/// [`Self::resolve_key`]. Unlike an object key, a prefix may end in `/` or
+	/// resolve to the bucket root.
 	async fn to_os_prefix_path(&self, prefix: &ObjectKey) -> Result<PathBuf, String> {
 		self.resolve_key(prefix, true).await
 	}
@@ -188,6 +254,15 @@ impl FileStore {
 
 		// Combine the canonical root with the relative path
 		let full_path = canonical_root.join(&relative_path).clean();
+
+		// Refuse an object key that resolves to the bucket root, because the
+		// root names a directory rather than an object. Without that,
+		// `StagedWrite` would take the root's own *parent* as the directory to
+		// stage in and write caller bytes outside the bucket root and outside
+		// the allowlist. Only `list` (`is_prefix = true`) may resolve the root.
+		if !is_prefix && full_path == canonical_root {
+			return Err(format!("object key '{path}' does not name an object"));
+		}
 
 		// SECURITY: First ensure the resolved path stays inside *this* bucket's
 		// canonical root. `path_clean::clean` collapses `..` segments, so a key
@@ -272,6 +347,12 @@ impl FileStore {
 		})
 	}
 
+	/// Open a staged write for `os_path`, creating its parent directories.
+	async fn stage(os_path: &OsPath) -> Result<StagedWrite, String> {
+		Self::ensure_parent_dirs(os_path).await?;
+		StagedWrite::open(os_path).await
+	}
+
 	/// Create parent directories for a path if they don't exist
 	async fn ensure_parent_dirs(path: &OsPath) -> Result<(), String> {
 		if let Some(parent) = path.parent() {
@@ -280,6 +361,153 @@ impl FileStore {
 				.map_err(|e| format!("Failed to create directories: {}", e))?;
 		}
 		Ok(())
+	}
+}
+
+/// A weak entity tag for a local file, from metadata `head` already reads.
+///
+/// **Weak, and it has to be.** The mtime granularity of a filesystem varies, so
+/// two writes within one tick that produce the same size collide. A `file://`
+/// bucket also exists so an operator can place files in the directory out of
+/// band, where a restore can preserve both size and mtime while changing the
+/// content.
+///
+/// A weak validator is correct for `If-None-Match`, which is what caching
+/// needs. It must not back `If-Match` or `If-Range`, so a conditional write
+/// keeps the existence check in `put_if_not_exists` instead.
+///
+/// Reading the bytes to hash them would make it strong, and would turn every
+/// `head` into a full read of the object. That is the cost this trades away.
+fn weak_etag(metadata: &std::fs::Metadata) -> Option<String> {
+	let mtime = metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+	Some(format!("W/\"{:x}-{:x}\"", metadata.len(), mtime.as_nanos()))
+}
+
+/// Bytes read from a local object per syscall.
+///
+/// `ReaderStream` defaults to 4 KiB, and `tokio::fs` turns each read into a
+/// blocking-pool dispatch, so the default costs a round trip and an allocation
+/// per 4 KiB of a served object.
+const READ_CHUNK_SIZE: usize = 256 * 1024;
+
+/// Bytes buffered before a staged write reaches the filesystem.
+///
+/// An inbound HTTP chunk is 8-64 KiB and each `write_all` is its own
+/// blocking-pool dispatch and syscall, serialised behind the previous one.
+const WRITE_BUFFER_SIZE: usize = 1024 * 1024;
+
+/// A file being written to a temporary path in its target's own directory, to
+/// be renamed into place once it is complete.
+///
+/// The rename makes the write atomic *with respect to a concurrent reader*: a
+/// reader sees either the previous object or the whole new one, never a
+/// half-written file at a live key. It is not a durability guarantee — nothing
+/// is fsynced — and it does not need to be, since the property being protected
+/// is what `head` and `get` report, not what survives a power cut.
+///
+/// A streamed upload can be abandoned at any point: the client disconnects, or
+/// the signed size limit trips. Writing straight to the target would leave a
+/// truncated file that reads back as a complete object.
+struct StagedWrite {
+	file: BufWriter<File>,
+	temp: PathBuf,
+	target: PathBuf,
+	committed: bool,
+}
+
+impl StagedWrite {
+	async fn open(target: &OsPath) -> Result<Self, String> {
+		// A sibling of the target, so the rename stays within one filesystem and
+		// is therefore atomic. The leading dot and the uuid keep it out of the
+		// way of concurrent writers to the same key, and
+		// [`Self::is_staged_name`] recognises the shape so `list` never reports
+		// an upload in progress as an object.
+		let name = target.file_name().unwrap_or_default().to_string_lossy().into_owned();
+		let temp = match target.parent() {
+			Some(parent) => parent.join(format!(".{name}.{}.tmp", Uuid::new_v4())),
+			None => return Err(format!("Path has no parent directory: {}", target.display())),
+		};
+
+		let file =
+			File::create(&temp).await.map_err(|e| format!("Failed to create file: {}", e))?;
+
+		Ok(Self {
+			file: BufWriter::with_capacity(WRITE_BUFFER_SIZE, file),
+			temp,
+			target: target.to_path_buf(),
+			committed: false,
+		})
+	}
+
+	/// Whether a directory entry is a staged write rather than an object.
+	///
+	/// Matches the shape [`Self::open`] creates. Kept beside it so the two
+	/// cannot drift: a rename here without a rename there would publish
+	/// half-written uploads into `list`.
+	fn is_staged_name(path: &std::path::Path) -> bool {
+		path.file_name()
+			.and_then(|n| n.to_str())
+			.is_some_and(|n| n.starts_with('.') && n.ends_with(".tmp"))
+	}
+
+	async fn write_all(&mut self, data: &[u8]) -> Result<(), String> {
+		self.file.write_all(data).await.map_err(|e| format!("Failed to write to file: {}", e))
+	}
+
+	/// Flush the staged file and move it onto the target key.
+	///
+	/// The flush is what makes the buffering safe: every byte written has to
+	/// reach the file before the rename publishes it.
+	async fn commit(mut self) -> Result<(), String> {
+		self.file.flush().await.map_err(|e| format!("Failed to flush file: {}", e))?;
+		tokio::fs::rename(&self.temp, &self.target)
+			.await
+			.map_err(|e| format!("Failed to write to file: {}", e))?;
+		self.committed = true;
+		Ok(())
+	}
+
+	/// Flush and move onto the target only if the target is free.
+	///
+	/// The reservation is what makes this decidable: `create_new` fails if the
+	/// path exists, and it is one syscall, so two uploads racing for a free key
+	/// cannot both win it. The staged file is then renamed over the placeholder
+	/// this call just made, which is why the rename that follows is allowed to
+	/// clobber.
+	///
+	/// A plain `exists`-then-`rename` cannot uphold this: both writers would
+	/// observe the key free and the second would silently replace the first.
+	async fn commit_if_vacant(mut self) -> Result<(), PutError> {
+		match tokio::fs::OpenOptions::new().write(true).create_new(true).open(&self.target).await {
+			Ok(_) => {}
+			Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+				return Err(PutError::AlreadyExists);
+			}
+			Err(e) => return Err(PutError::Failed(format!("Failed to write to file: {}", e))),
+		}
+
+		self.file
+			.flush()
+			.await
+			.map_err(|e| PutError::Failed(format!("Failed to flush file: {}", e)))?;
+		tokio::fs::rename(&self.temp, &self.target)
+			.await
+			.map_err(|e| PutError::Failed(format!("Failed to write to file: {}", e)))?;
+		self.committed = true;
+		Ok(())
+	}
+}
+
+impl Drop for StagedWrite {
+	fn drop(&mut self) {
+		if self.committed {
+			return;
+		}
+		// Blocking, deliberately. The common abandonment is a cancelled request
+		// future, and a cancelled future's `Drop` cannot await. One `unlink` is
+		// cheap enough to run inline, and spawning a task to do it would leak
+		// the file whenever the runtime is already shutting down.
+		let _ = std::fs::remove_file(&self.temp);
 	}
 }
 
@@ -424,17 +652,10 @@ impl ObjectStore for FileStore {
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
-			Self::ensure_parent_dirs(&os_path).await?;
 
-			let mut file = File::create(&os_path)
-				.await
-				.map_err(|e| format!("Failed to create file: {}", e))?;
-
-			file.write_all(&data).await.map_err(|e| format!("Failed to write to file: {}", e))?;
-
-			file.flush().await.map_err(|e| format!("Failed to flush file: {}", e))?;
-
-			Ok(())
+			let mut staged = Self::stage(&os_path).await?;
+			staged.write_all(&data).await?;
+			staged.commit().await
 		})
 	}
 
@@ -451,17 +672,57 @@ impl ObjectStore for FileStore {
 				return Ok(());
 			}
 
-			Self::ensure_parent_dirs(&os_path).await?;
+			let mut staged = Self::stage(&os_path).await?;
+			staged.write_all(&data).await?;
+			staged.commit().await
+		})
+	}
 
-			let mut file = File::create(&os_path)
-				.await
-				.map_err(|e| format!("Failed to create file: {}", e))?;
+	fn supports_content_type(&self) -> bool {
+		false
+	}
 
-			file.write_all(&data).await.map_err(|e| format!("Failed to write to file: {}", e))?;
+	fn put_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		mut data: BoxStream<'static, Result<Bytes, String>>,
+		opts: PutOptions,
+	) -> Pin<Box<dyn Future<Output = Result<PutResult, PutError>> + Send + 'a>> {
+		Box::pin(async move {
+			// A filesystem has nowhere portable to keep a media type, and none
+			// is inferred from the key, so a write that names one is refused
+			// before anything is staged.
+			if opts.content_type.is_some() {
+				return Err(PutError::Failed(
+					"the file backend cannot store a content type".to_owned(),
+				));
+			}
+			let os_path = self.to_os_path(key).await?;
+			let mut staged = Self::stage(&os_path).await?;
 
-			file.flush().await.map_err(|e| format!("Failed to flush file: {}", e))?;
+			let mut size = 0u64;
+			while let Some(chunk) = data.next().await {
+				// An error aborts the write: `staged` is dropped without
+				// committing, so its temporary file is removed and the object
+				// already at `key`, if any, is untouched.
+				let chunk = chunk?;
+				size += chunk.len() as u64;
+				staged.write_all(&chunk).await?;
+			}
 
-			Ok(())
+			match opts.condition {
+				PutCondition::Overwrite => staged.commit().await?,
+				PutCondition::IfNotExists => staged.commit_if_vacant().await?,
+			}
+
+			// Stat after the rename, so the tag matches the one a later `head`
+			// derives from the same file rather than from the staged copy.
+			let etag = tokio::fs::metadata(&os_path).await.ok().as_ref().and_then(weak_etag);
+
+			Ok(PutResult {
+				size,
+				etag,
+			})
 		})
 	}
 
@@ -482,6 +743,75 @@ impl ObjectStore for FileStore {
 				.map_err(|e| format!("Failed to read file: {}", e))?;
 
 			Ok(Some(Bytes::from(data)))
+		})
+	}
+
+	fn get_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		range: Option<ByteRange>,
+	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectStream>, String>> + Send + 'a>> {
+		Box::pin(async move {
+			let os_path = self.to_os_path(key).await?;
+
+			let mut file = match File::open(&os_path).await {
+				Ok(f) => f,
+				Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+				Err(e) => return Err(format!("Failed to open file: {}", e)),
+			};
+
+			// Metadata from the open handle, not from the path. A write commits
+			// by renaming a staged file onto the target, so a `stat` taken
+			// before the `open` can describe an inode the `open` then replaces
+			// -- and the size it reported has already been promised to the
+			// client as `Content-Length`. Reading it from the descriptor
+			// describes the bytes this stream will actually yield.
+			let metadata =
+				file.metadata().await.map_err(|e| format!("Failed to get metadata: {}", e))?;
+
+			// A directory answers `metadata` but cannot be read as an object.
+			// Reporting it absent matches `get`, which reads and fails.
+			if !metadata.is_file() {
+				return Ok(None);
+			}
+
+			let size = metadata.len();
+			let range = match range {
+				Some(r) => match r.resolve(size) {
+					Some(r) => r,
+					None => return Ok(None),
+				},
+				None => 0..size,
+			};
+
+			if range.start > 0 {
+				file.seek(SeekFrom::Start(range.start))
+					.await
+					.map_err(|e| format!("Failed to seek in file: {}", e))?;
+			}
+
+			// `take` bounds the reader at the end of the range, so a file that
+			// grows after the metadata was read does not yield more bytes than
+			// the `Content-Length` already sent.
+			let reader = file.take(range.end - range.start);
+			// The default capacity is 4 KiB, which costs one blocking-pool
+			// dispatch, one read syscall and one allocation per 4 KiB served.
+			let stream = ReaderStream::with_capacity(reader, READ_CHUNK_SIZE)
+				.map_err(|e| format!("Failed to read file: {e}"));
+
+			let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
+
+			Ok(Some(ObjectStream {
+				meta: ObjectMeta {
+					size,
+					updated,
+					key: key.to_owned(),
+					etag: weak_etag(&metadata),
+					content_type: None,
+				},
+				range,
+				stream: stream.boxed(),
+			}))
 		})
 	}
 
@@ -510,6 +840,8 @@ impl ObjectStore for FileStore {
 				size,
 				updated,
 				key: key.to_owned(),
+				etag: weak_etag(&metadata),
+				content_type: None,
 			}))
 		})
 	}
@@ -668,124 +1000,90 @@ impl ObjectStore for FileStore {
 	fn list<'a>(
 		&'a self,
 		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ListEntry>, String>> + Send + 'a>> {
 		Box::pin(async move {
-			// If a prefix is provided, combine it with the store prefix
-			// If not, just use the store's prefix
-			let base_key = opts.prefix.clone().unwrap_or_default();
-			let os_path = self.to_os_prefix_path(&base_key).await?;
+			// Keys are listed as they are spelled on disk, so a bucket that
+			// lowercases its paths matches a lowercased prefix and start.
+			let lowered;
+			let opts = if self.options.lowercase_paths {
+				lowered = ListOptions {
+					start: opts.start.as_ref().map(|s| s.to_lowercase()),
+					prefix: opts.prefix.as_ref().map(|s| s.to_lowercase()),
+					..opts.clone()
+				};
+				&lowered
+			} else {
+				opts
+			};
 
-			// Check if the directory exists
-			if !Self::path_exists(&os_path).await? {
+			let directory = opts.directory().to_owned();
+			let os_path = self.to_os_prefix_path(&ObjectKey::new(directory.as_str())).await?;
+			if !Self::path_exists(&os_path).await?
+				|| !tokio::fs::metadata(&os_path)
+					.await
+					.map_err(|e| format!("Failed to get metadata: {}", e))?
+					.is_dir()
+			{
 				return Ok(Vec::new());
 			}
-
-			// Check if it's a file or directory
-			let metadata = tokio::fs::metadata(&os_path)
-				.await
-				.map_err(|e| format!("Failed to get metadata: {}", e))?;
-
-			// If it's a file, return it as a single item
-			if metadata.is_file() {
-				// If a start key is provided and our base_key is less than it, return empty
-				if let Some(ref start_key) = opts.start
-					&& base_key.to_string() < start_key.to_string()
-				{
-					return Ok(Vec::new());
-				}
-
-				let size = metadata.len();
-				let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
-				return Ok(vec![ObjectMeta {
-					key: base_key,
-					size,
-					updated,
-				}]);
-			}
-
-			// If it's a directory, read its contents
-			let mut read_dir = tokio::fs::read_dir(&os_path)
-				.await
-				.map_err(|e| format!("Failed to read directory: {}", e))?;
 
 			// An entry that is a symlink is listed only if it resolves inside the
 			// root, so the listing reports no object that `get` or `head` refuses.
 			let canonical_root = self.canonical_root().await?;
+			let prefix = opts.prefix();
 
-			// Collect all entries first so we can sort and paginate them
-			let mut all_entries = Vec::new();
-
-			// Process each entry in the directory
-			while let Ok(Some(entry)) = read_dir.next_entry().await {
-				let path = entry.path();
-				let Ok(file_type) = entry.file_type().await else {
-					continue;
-				};
-				if file_type.is_symlink() {
-					match tokio::fs::canonicalize(&path).await {
-						Ok(target) if target.starts_with(&canonical_root) => {}
-						_ => continue,
-					}
-				}
-				let metadata = match tokio::fs::metadata(&path).await {
-					Ok(md) => md,
-					Err(e) => {
-						// Skip entries we can't get metadata for
-						error!("Failed to get metadata for {}: {}", path.display(), e);
+			let mut candidates = Vec::new();
+			let mut pending = vec![(os_path, directory)];
+			while let Some((dir, dir_key)) = pending.pop() {
+				let mut read_dir = tokio::fs::read_dir(&dir)
+					.await
+					.map_err(|e| format!("Failed to read directory: {}", e))?;
+				while let Ok(Some(entry)) = read_dir.next_entry().await {
+					let Some((path, name, metadata)) =
+						Self::listable(&entry, &canonical_root).await
+					else {
+						continue;
+					};
+					if metadata.is_dir() {
+						let group = format!("{dir_key}{name}/");
+						// Skip a directory no key of the prefix can be inside.
+						if !group.starts_with(prefix) && !prefix.starts_with(group.as_str()) {
+							continue;
+						}
+						if opts.delimiter && group.starts_with(prefix) {
+							// A group stands for the objects in it, so a
+							// directory holding none is not reported.
+							if Self::holds_object(path, &canonical_root).await {
+								candidates.push(ListEntry::Prefix(group));
+							}
+						} else {
+							pending.push((path, group));
+						}
 						continue;
 					}
-				};
-
-				// Skip directories if we're only listing files
-				if metadata.is_dir() {
-					continue;
+					let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
+					candidates.push(ListEntry::Object(ObjectMeta {
+						key: ObjectKey::new(format!("{dir_key}{name}")),
+						size: metadata.len(),
+						updated,
+						etag: weak_etag(&metadata),
+						content_type: None,
+					}));
 				}
-
-				// Convert the path to a relative Key
-				let rel_path = path
-					.strip_prefix(&os_path)
-					.map_err(|e| format!("Failed to get relative path: {}", e))?;
-				let rel_str = rel_path.to_string_lossy();
-				let entry_key = base_key.join(&ObjectKey::new(rel_str.into_owned()));
-
-				all_entries.push((entry_key, metadata));
 			}
 
-			// Sort entries by key to ensure consistent ordering
-			all_entries.sort_by_key(|(key, _)| key.to_string());
-
-			// Filter by start key if provided
-			let filtered_entries = if let Some(ref start_key) = opts.start {
-				all_entries
-					.into_iter()
-					.filter(|(key, _)| key.to_string() > start_key.to_string())
-					.collect()
-			} else {
-				all_entries
-			};
-
-			// Apply limit if specified
-			let limited_entries = if let Some(limit_val) = opts.limit {
-				filtered_entries.into_iter().take(limit_val).collect::<Vec<_>>()
-			} else {
-				filtered_entries
-			};
-
-			// Convert to ObjectMeta
-			let objects = limited_entries
-				.into_iter()
-				.map(|(entry_key, metadata)| {
-					let size = metadata.len();
-					let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
-					ObjectMeta {
-						key: entry_key,
-						size,
-						updated,
-					}
-				})
-				.collect();
-
-			Ok(objects)
+			candidates.sort_by(|a, b| a.key().cmp(b.key()));
+			let mut listing = Listing::new(opts);
+			for candidate in candidates {
+				let more = match candidate {
+					ListEntry::Object(meta) => listing.push_object(meta),
+					ListEntry::Prefix(group) => listing.push_prefix(group),
+				};
+				if !more {
+					break;
+				}
+			}
+			Ok(listing.finish())
 		})
 	}
 }
@@ -822,6 +1120,43 @@ mod tests {
 			.expect("parse_url should succeed for an allowlisted path")
 			.expect("file:// URL should resolve to a FileStore");
 		(FileStore::new(opts, cfg), root)
+	}
+
+	/// The file store, and a prefixed store over it, answer listings as every
+	/// other backend does.
+	#[tokio::test]
+	async fn list_semantics_match_the_other_backends() {
+		use std::sync::Arc;
+
+		use super::super::list_conformance;
+
+		let dir = TempDir::new().unwrap();
+		list_conformance::check("file", &open_store(dir.path(), "").await.0).await;
+
+		let shared_dir = TempDir::new().unwrap();
+		let shared: Arc<dyn ObjectStore> = Arc::new(open_store(shared_dir.path(), "").await.0);
+		list_conformance::check_prefixed("prefixed file", shared).await;
+	}
+
+	/// An empty directory is not a group: a group stands for objects.
+	#[tokio::test]
+	async fn list_omits_an_empty_directory_from_groups() {
+		use super::super::ListEntry;
+
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "").await;
+		std::fs::create_dir_all(root.join("empty/deeper")).unwrap();
+		store.put(&ObjectKey::new("/full/x.txt"), Bytes::from_static(b"x")).await.unwrap();
+
+		let listed = store
+			.list(&ListOptions {
+				delimiter: true,
+				..Default::default()
+			})
+			.await
+			.unwrap();
+		let keys: Vec<&str> = listed.iter().map(ListEntry::key).collect();
+		assert_eq!(keys, vec!["/full/"]);
 	}
 
 	/// Read the raw filenames the filesystem reports inside `dir`. Going through
@@ -864,7 +1199,7 @@ mod tests {
 
 		// `list` reports the case that was written, not a folded variant.
 		let listed = store.list(&ListOptions::default()).await.unwrap();
-		let keys: Vec<_> = listed.into_iter().map(|m| m.key.to_string()).collect();
+		let keys: Vec<_> = listed.into_iter().map(|m| m.key().to_string()).collect();
 		assert_eq!(keys, vec!["/CaseProbe_XYZ.tmp"]);
 
 		// And the same casing successfully removes the file.
@@ -1054,6 +1389,73 @@ mod tests {
 		assert!(!is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
 	}
 
+	#[tokio::test]
+	async fn get_streamed_honours_the_contract() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		crate::buc::store::assert_get_streamed_contract(&store).await;
+	}
+
+	#[tokio::test]
+	async fn get_streamed_reports_a_directory_as_absent() {
+		// `metadata` succeeds on a directory, so without the file check a
+		// directory would be opened and then fail mid-stream, after the status
+		// line was already sent.
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "").await;
+		tokio::fs::create_dir(root.join("subdir")).await.unwrap();
+
+		assert!(store.get_streamed(&ObjectKey::new("/subdir"), None).await.unwrap().is_none());
+	}
+
+	#[tokio::test]
+	async fn put_streamed_honours_the_contract() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		crate::buc::store::assert_put_streamed_contract(&store).await;
+	}
+
+	#[tokio::test]
+	async fn an_aborted_write_leaves_no_temporary_file() {
+		// The partial object is staged beside its target, so a failed write that
+		// forgot to clean up would leave a hidden file in the bucket directory
+		// rather than a visible one. `list` would not show it and the disk would
+		// fill anyway.
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "").await;
+
+		let aborted: futures::stream::BoxStream<'static, Result<Bytes, String>> =
+			Box::pin(futures::stream::iter(vec![
+				Ok(Bytes::from_static(b"partial")),
+				Err("client went away".to_string()),
+			]));
+		store
+			.put_streamed(&ObjectKey::new("/doomed.bin"), aborted, PutCondition::Overwrite.into())
+			.await
+			.unwrap_err();
+
+		let left: Vec<String> = std::fs::read_dir(&root)
+			.unwrap()
+			.map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+			.collect();
+		assert!(left.is_empty(), "the bucket directory should be empty, found {left:?}");
+	}
+
+	#[tokio::test]
+	async fn a_write_is_not_visible_until_it_completes() {
+		// `put` renames a staged file into place, so a reader never observes a
+		// key that exists but holds fewer bytes than were written.
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		let key = ObjectKey::new("/nested/dir/object.bin");
+
+		store.put(&key, Bytes::from_static(b"first")).await.unwrap();
+		assert_eq!(store.get(&key).await.unwrap().as_deref(), Some(&b"first"[..]));
+
+		store.put(&key, Bytes::from_static(b"second value")).await.unwrap();
+		assert_eq!(store.get(&key).await.unwrap().as_deref(), Some(&b"second value"[..]));
+	}
+
 	/// A direct `file://` bucket reaches the backend with the raw key, so a
 	/// key crossing a logical prefix with `..` must be refused before it is
 	/// resolved; otherwise it crosses a key-based ACL boundary the permission
@@ -1132,10 +1534,11 @@ mod tests {
 		);
 	}
 
-	/// Keys that path resolution collapses onto another key are refused, so a
-	/// permission predicate that denies `/private/` cannot be sidestepped by
-	/// spelling the same file `//private/secret` or `/private/secret/`. A list
-	/// prefix may still end in `/`.
+	/// `ObjectKey::new` collapses separator aliases onto the canonical key
+	/// before permission checks or the store see it, and keys that still carry
+	/// a trailing separator (such as `prefix.join(&ObjectKey::default())`) or
+	/// resolve to the bucket root are refused as object keys while accepted as
+	/// list prefixes.
 	#[tokio::test]
 	async fn direct_bucket_rejects_an_aliased_key() {
 		let dir = TempDir::new().unwrap();
@@ -1144,14 +1547,19 @@ mod tests {
 		store.put(&canonical, Bytes::from_static(b"top secret")).await.unwrap();
 
 		for alias in ["//private/secret", "/private//secret", "/private/secret/"] {
-			let key = ObjectKey::new(alias.to_string());
-			assert!(store.get(&key).await.is_err(), "get {alias} must be refused");
-			assert!(store.head(&key).await.is_err(), "head {alias} must be refused");
+			assert_eq!(ObjectKey::new(alias), canonical, "{alias} must normalise to {canonical}");
+		}
+
+		let trailing = ObjectKey::new("/private/secret").join(&ObjectKey::default());
+		let root_key = ObjectKey::default();
+		for bad in [&trailing, &root_key] {
+			assert!(store.get(bad).await.is_err(), "get {bad} must be refused");
+			assert!(store.head(bad).await.is_err(), "head {bad} must be refused");
 			assert!(
-				store.put(&key, Bytes::from_static(b"x")).await.is_err(),
-				"put {alias} must be refused"
+				store.put(bad, Bytes::from_static(b"x")).await.is_err(),
+				"put {bad} must be refused"
 			);
-			assert!(store.copy(&canonical, &key).await.is_err(), "copy to {alias} must be refused");
+			assert!(store.copy(&canonical, bad).await.is_err(), "copy to {bad} must be refused");
 		}
 		assert_eq!(
 			store.get(&canonical).await.unwrap().unwrap(),
@@ -1159,7 +1567,7 @@ mod tests {
 		);
 
 		let opts = ListOptions {
-			prefix: Some(ObjectKey::new("/private/".to_string())),
+			prefix: Some("/private/".to_owned()),
 			..Default::default()
 		};
 		let listed = store.list(&opts).await.unwrap();
@@ -1202,7 +1610,7 @@ mod tests {
 		let (store, _root) = open_store(root_dir.path(), "").await;
 
 		let listed = store.list(&ListOptions::default()).await.unwrap();
-		let mut keys: Vec<String> = listed.iter().map(|m| m.key.to_string()).collect();
+		let mut keys: Vec<String> = listed.iter().map(|m| m.key().to_string()).collect();
 		keys.sort();
 		assert_eq!(keys, vec!["/inner.txt".to_string(), "/real.txt".to_string()]);
 	}

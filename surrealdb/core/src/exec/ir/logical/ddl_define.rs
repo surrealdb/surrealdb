@@ -106,8 +106,12 @@ const API_HOLES: &[TemplateHole] = &[
 	TemplateHole::Other("middleware"),
 	TemplateHole::AuthLimit,
 ];
-const BUCKET_HOLES: &[TemplateHole] =
-	&[TemplateHole::Name, TemplateHole::Other("backend"), TemplateHole::Comment];
+const BUCKET_HOLES: &[TemplateHole] = &[
+	TemplateHole::Name,
+	TemplateHole::Other("backend"),
+	TemplateHole::Comment,
+	TemplateHole::Other("presign_nonce"),
+];
 const SEQUENCE_HOLES: &[TemplateHole] = &[
 	TemplateHole::Name,
 	TemplateHole::Other("batch"),
@@ -883,6 +887,7 @@ pub(super) fn plan_define<'e>(
 				permissions: stmt.permissions.clone(),
 				readonly: stmt.readonly,
 				comment: comment_text(&stmt.comment),
+				presign_nonce: uuid::Uuid::nil(),
 			};
 			(
 				DdlForm::DefineBucket,

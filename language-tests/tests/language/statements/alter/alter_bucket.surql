@@ -24,6 +24,9 @@ value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: { mybucket: "
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 error = "The bucket 'nonexistent' does not exist"
 
 [env.capabilities]
@@ -42,6 +45,9 @@ INFO FOR DB;
 -- Alter: drop readonly, comment, and change permissions
 ALTER BUCKET mybucket DROP READONLY DROP COMMENT PERMISSIONS FULL;
 INFO FOR DB;
+
+-- Alter: revoke signatures
+ALTER BUCKET mybucket REVOKE SIGNATURES;
 
 -- IF EXISTS on non-existent bucket
 ALTER BUCKET IF EXISTS nonexistent COMMENT "nope";

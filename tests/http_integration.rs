@@ -5194,4 +5194,245 @@ mod http_integration {
 
 		Ok(())
 	}
+
+	/// A server for the `/bucket` route, with a presign secret and a folder a
+	/// `file://` bucket may use. Returns the base URL of the `test/app`
+	/// database's buckets; the folder lives as long as the returned guard.
+	async fn start_bucket_route_server(
+		allow_guests: bool,
+	) -> Result<
+		(String, String, common::Child, Client, tempfile::TempDir),
+		Box<dyn std::error::Error>,
+	> {
+		let dir = tempfile::tempdir()?;
+		let folder = std::fs::canonicalize(dir.path())?.to_string_lossy().into_owned();
+		let mut vars = std::collections::HashMap::new();
+		vars.insert(
+			"SURREAL_BUCKET_PRESIGN_SECRET".to_string(),
+			"http-integration-presign-secret-0000".to_string(),
+		);
+		vars.insert("SURREAL_BUCKET_FOLDER_ALLOWLIST".to_string(), folder.clone());
+		let mut args = "--allow-experimental files".to_string();
+		if allow_guests {
+			args.push_str(" --allow-guests");
+		}
+		let (addr, server) = common::start_server(StartServerArguments {
+			args,
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await?;
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", "test".parse()?);
+		headers.insert("surreal-db", "app".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder().default_headers(headers).build()?;
+
+		let body = root_sql(
+			&client,
+			&addr,
+			&format!(
+				r#"
+					DEFINE BUCKET mem BACKEND "memory";
+					DEFINE BUCKET fs BACKEND "file:{folder}";
+					DEFINE BUCKET public BACKEND "memory" PERMISSIONS FULL;
+					DEFINE BUCKET private BACKEND "memory" PERMISSIONS NONE;
+					f"public:/hi.txt".put("hello", {{ content_type: "text/plain" }});
+					f"private:/hi.txt".put("secret");
+				"#
+			),
+		)
+		.await?;
+		assert_all_sql_ok(&body, "bucket route setup");
+		let base = format!("http://{addr}/bucket/test/app");
+		Ok((addr, base, server, client, dir))
+	}
+
+	/// The stored type is served, never a guessed one, and every object
+	/// response carries the headers that keep an uploaded `text/html` from
+	/// running on the database's origin.
+	#[test(tokio::test)]
+	async fn bucket_route_serves_the_stored_content_type() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+
+		let res = client
+			.put(format!("{base}/mem/a.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "image/png")
+			.body("png")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 201);
+
+		for method in [Method::GET, Method::HEAD] {
+			let res = client
+				.request(method.clone(), format!("{base}/mem/a.png"))
+				.basic_auth(USER, Some(PASS))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "{method}");
+			assert_eq!(res.headers()[header::CONTENT_TYPE], "image/png", "{method}");
+			assert_eq!(res.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{method}");
+			assert_eq!(res.headers()[header::CONTENT_SECURITY_POLICY], "sandbox", "{method}");
+		}
+
+		// Written without a type, served as the "no type" type whatever the key.
+		let res = client
+			.put(format!("{base}/mem/b.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/octet-stream")
+			.body("png")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 201);
+		let res =
+			client.get(format!("{base}/mem/b.png")).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "application/octet-stream");
+
+		// `If-None-Match: *` never replaces an object.
+		let res = client
+			.put(format!("{base}/mem/a.png"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::IF_NONE_MATCH, "*")
+			.header(header::CONTENT_TYPE, "application/octet-stream")
+			.body("replaced")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 412);
+		Ok(())
+	}
+
+	/// The file backend has nowhere to keep a type, so it refuses one rather
+	/// than dropping it. `application/octet-stream`, or no header, is no type.
+	#[test(tokio::test)]
+	async fn bucket_route_refuses_a_content_type_the_backend_cannot_keep()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+
+		for (content_type, expected) in [
+			(Some("text/plain"), 415),
+			(Some("application/x-www-form-urlencoded"), 415),
+			(Some("application/octet-stream"), 201),
+			(None, 201),
+		] {
+			let mut req =
+				client.put(format!("{base}/fs/a.txt")).basic_auth(USER, Some(PASS)).body("x");
+			if let Some(content_type) = content_type {
+				req = req.header(header::CONTENT_TYPE, content_type);
+			}
+			let res = req.send().await?;
+			assert_eq!(res.status(), expected, "{content_type:?}");
+		}
+		Ok(())
+	}
+
+	/// An upload URL binds its type: the uploader must send exactly it.
+	#[test(tokio::test)]
+	async fn bucket_route_holds_a_presigned_upload_to_its_type()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _base, _server, client, _dir) = start_bucket_route_server(false).await?;
+		let body = root_sql(
+			&client,
+			&addr,
+			r#"RETURN file::presign_put(f"mem:/up.png", { content_type: "image/png" }).path;"#,
+		)
+		.await?;
+		let path = body[0]["result"].as_str().expect("a presigned path").to_string();
+		let anonymous = reqwest::Client::new();
+
+		for (content_type, expected) in
+			[("text/html", 403), ("application/octet-stream", 403), ("image/png", 201)]
+		{
+			let res = anonymous
+				.put(format!("http://{addr}{path}"))
+				.header(header::CONTENT_TYPE, content_type)
+				.body("x")
+				.send()
+				.await?;
+			assert_eq!(res.status(), expected, "{content_type}");
+		}
+		Ok(())
+	}
+
+	/// An anonymous request is a guest: refused unless the node allows
+	/// guests, and then judged by the bucket's clause like a guest's query.
+	#[test(tokio::test)]
+	async fn bucket_route_admits_guests_only_where_the_node_allows_them()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let anonymous = reqwest::Client::new();
+		for (allow_guests, public, private) in [(false, 403, 403), (true, 200, 403)] {
+			let (_addr, base, _server, _client, _dir) =
+				start_bucket_route_server(allow_guests).await?;
+			let res = anonymous.get(format!("{base}/public/hi.txt")).send().await?;
+			assert_eq!(res.status(), public, "public, allow_guests={allow_guests}");
+			if res.status() == 200 {
+				assert_eq!(res.headers()[header::CONTENT_TYPE], "text/plain");
+				assert_eq!(res.text().await?, "hello");
+			}
+			let res = anonymous.get(format!("{base}/private/hi.txt")).send().await?;
+			assert_eq!(res.status(), private, "private, allow_guests={allow_guests}");
+			// A guest never lists, as `file::list` refuses guests.
+			let res = anonymous.get(format!("{base}/public/")).send().await?;
+			assert_eq!(res.status(), 403, "list, allow_guests={allow_guests}");
+		}
+		Ok(())
+	}
+
+	/// `GET` on a bucket lists it with `file::list`'s options; `POST` on an
+	/// object copies or renames it.
+	#[test(tokio::test)]
+	async fn bucket_route_lists_copies_and_renames() -> Result<(), Box<dyn std::error::Error>> {
+		let (_addr, base, _server, client, _dir) = start_bucket_route_server(false).await?;
+		for key in ["/a.txt", "/b/c.txt", "/b/d.txt"] {
+			let res = client
+				.put(format!("{base}/mem{key}"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "text/plain")
+				.body("x")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 201, "{key}");
+		}
+
+		let list = |query: &str| {
+			client.get(format!("{base}/mem/?{query}")).basic_auth(USER, Some(PASS)).send()
+		};
+		let entries: serde_json::Value = list("delimiter=/").await?.json().await?;
+		let keys: Vec<&str> = entries
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|e| e["key"].as_str().or(e["prefix"].as_str()).unwrap())
+			.collect();
+		assert_eq!(keys, ["/a.txt", "/b/"]);
+		assert_eq!(list("bogus=1").await?.status(), 400);
+		assert_eq!(list("delimiter=,").await?.status(), 400);
+
+		let transfer = |key: &str, body: serde_json::Value| {
+			client
+				.post(format!("{base}/mem{key}"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(body.to_string())
+				.send()
+		};
+		let res = transfer("/a.txt", json!({ "action": "copy", "target": "/b/c.txt" })).await?;
+		assert_eq!(res.status(), 201);
+		let res = transfer(
+			"/a.txt",
+			json!({ "action": "copy", "target": "/b/c.txt", "overwrite": false }),
+		)
+		.await?;
+		assert_eq!(res.status(), 412);
+		let res = transfer("/a.txt", json!({ "action": "rename", "target": "/e.txt" })).await?;
+		assert_eq!(res.status(), 201);
+		let res = transfer("/a.txt", json!({ "action": "rename", "target": "/f.txt" })).await?;
+		assert_eq!(res.status(), 404, "the source moved");
+		let res =
+			client.get(format!("{base}/mem/e.txt")).basic_auth(USER, Some(PASS)).send().await?;
+		assert_eq!(res.headers()[header::CONTENT_TYPE], "text/plain", "a rename keeps the type");
+		Ok(())
+	}
 }

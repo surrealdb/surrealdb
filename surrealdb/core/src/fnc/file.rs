@@ -3,7 +3,8 @@ use anyhow::{Context, Result};
 use super::CursorDoc;
 use super::args::Optional;
 use crate::buc::BucketController;
-use crate::buc::store::ObjectKey;
+use crate::buc::presign::{PresignOp, PresignOptions};
+use crate::buc::store::{ObjectKey, put_content_type};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::val::{File, Object, Value};
@@ -11,10 +12,11 @@ use crate::val::{File, Object, Value};
 /// Put a file into a bucket.
 pub async fn put(
 	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
-	(file, value): (File, Value),
+	(file, value, Optional(opts)): (File, Value, Optional<Object>),
 ) -> Result<Value> {
+	let content_type = put_content_type("file::put", opts)?;
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
-	controller.put(&ObjectKey::new(file.key), value).await?;
+	controller.put(&ObjectKey::new(file.key), value, content_type).await?;
 
 	Ok(Value::None)
 }
@@ -22,10 +24,11 @@ pub async fn put(
 /// Put a file into a bucket if it does not exist.
 pub async fn put_if_not_exists(
 	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
-	(file, value): (File, Value),
+	(file, value, Optional(opts)): (File, Value, Optional<Object>),
 ) -> Result<Value> {
+	let content_type = put_content_type("file::put_if_not_exists", opts)?;
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
-	controller.put_if_not_exists(&ObjectKey::new(file.key), value).await?;
+	controller.put_if_not_exists(&ObjectKey::new(file.key), value, content_type).await?;
 
 	Ok(Value::None)
 }
@@ -78,13 +81,16 @@ pub async fn copy(
 		let dst_key = ObjectKey::new(dst.key);
 		controller.copy(&src_key, dst_key).await?;
 	} else {
-		let data = {
+		let (data, content_type) = {
 			let mut src_controller = BucketController::new(ctx, opt, doc, &src.bucket).await?;
 			let src_key = ObjectKey::new(src.key);
 			let Some(data) = src_controller.get(&src_key).await? else {
 				return Err(anyhow::anyhow!("Source file does not exist"));
 			};
-			data
+			// The source's content type travels with it. A destination that
+			// cannot hold one refuses the copy rather than dropping the type.
+			let content_type = src_controller.head(&src_key).await?.and_then(|m| m.content_type);
+			(data, content_type)
 		};
 
 		let DestinationFile {
@@ -95,7 +101,7 @@ pub async fn copy(
 
 		let dst_key = ObjectKey::new(key);
 		let mut dst_controller = BucketController::new(ctx, opt, doc, &dst_bucket).await?;
-		dst_controller.put(&dst_key, data.into()).await?;
+		dst_controller.put(&dst_key, data.into(), content_type).await?;
 	}
 
 	Ok(Value::None)
@@ -117,13 +123,16 @@ pub async fn copy_if_not_exists(
 		let dst_key = ObjectKey::new(dst.key);
 		controller.copy_if_not_exists(&src_key, dst_key).await?;
 	} else {
-		let data = {
+		let (data, content_type) = {
 			let mut src_controller = BucketController::new(ctx, opt, doc, &src.bucket).await?;
 			let src_key = ObjectKey::new(src.key);
 			let Some(data) = src_controller.get(&src_key).await? else {
 				return Err(anyhow::anyhow!("Source file does not exist"));
 			};
-			data
+			// The source's content type travels with it. A destination that
+			// cannot hold one refuses the copy rather than dropping the type.
+			let content_type = src_controller.head(&src_key).await?.and_then(|m| m.content_type);
+			(data, content_type)
 		};
 
 		let DestinationFile {
@@ -134,7 +143,7 @@ pub async fn copy_if_not_exists(
 
 		let dst_key = ObjectKey::new(key);
 		let mut dst_controller = BucketController::new(ctx, opt, doc, &dst_bucket).await?;
-		dst_controller.put_if_not_exists(&dst_key, data.into()).await?;
+		dst_controller.put_if_not_exists(&dst_key, data.into(), content_type).await?;
 	}
 
 	Ok(Value::None)
@@ -173,6 +182,46 @@ pub async fn exists(
 	let exists = controller.exists(&ObjectKey::new(file.key)).await?;
 
 	Ok(Value::Bool(exists))
+}
+
+/// Mint a URL that downloads a file without a SurrealDB session.
+///
+/// The URL is a bearer credential: until it expires it works for whoever holds
+/// it, it outlives this session, and a `PERMISSIONS` clause tightened afterwards
+/// does not reach it.
+pub async fn presign_get(
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
+	(file, Optional(opts)): (File, Optional<Object>),
+) -> Result<Value> {
+	let opts = PresignOptions::from_object(PresignOp::Get, opts.unwrap_or_default())?;
+	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
+	let url = controller.presign_get(&ObjectKey::new(file.key), opts.expires).await?;
+
+	Ok(url.into())
+}
+
+/// Mint a URL that uploads to a file without a SurrealDB session.
+///
+/// `max_size` is enforced by the node as the body streams in, not by the
+/// signature — the signature only stops the value being edited. `overwrite:
+/// false` makes the URL refuse to replace an object that already exists.
+pub async fn presign_put(
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
+	(file, Optional(opts)): (File, Optional<Object>),
+) -> Result<Value> {
+	let opts = PresignOptions::from_object(PresignOp::Put, opts.unwrap_or_default())?;
+	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
+	let url = controller
+		.presign_put(
+			&ObjectKey::new(file.key),
+			opts.expires,
+			opts.max_size()?,
+			opts.overwrite,
+			opts.content_type()?,
+		)
+		.await?;
+
+	Ok(url.into())
 }
 
 /// List files in a bucket.

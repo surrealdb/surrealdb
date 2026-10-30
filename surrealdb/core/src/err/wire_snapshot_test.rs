@@ -570,6 +570,25 @@ fn every_buc_variant() -> Vec<(&'static str, BucError)> {
 			}),
 		),
 		("FileAccessDenied", BucError::FileAccessDenied("sample".to_string())),
+		(
+			"PresignTtlTooLong",
+			BucError::PresignTtlTooLong {
+				requested: std::time::Duration::from_secs(86400),
+				allowed: std::time::Duration::from_secs(3600),
+			},
+		),
+		(
+			"PresignMaxSizeTooLarge",
+			BucError::PresignMaxSizeTooLarge {
+				requested: 99999999,
+				allowed: 5368709120,
+			},
+		),
+		("PresignNoSecret", BucError::PresignNoSecret),
+		("ContentTypeUnsupported", BucError::ContentTypeUnsupported("bucket".to_string())),
+		("PresignBadSignature", BucError::PresignBadSignature),
+		("PresignExpired", BucError::PresignExpired),
+		("Presign", BucError::Presign("sample".to_string())),
 		("NoGlobalBucket", BucError::NoGlobalBucket),
 		("BucketUnavailable", BucError::BucketUnavailable("sample".to_string())),
 		("GlobalBucketEnforced", BucError::GlobalBucketEnforced),

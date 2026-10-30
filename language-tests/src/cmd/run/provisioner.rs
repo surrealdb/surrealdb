@@ -93,7 +93,11 @@ impl CreateInfo {
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
 		let config = self.config.iter().chain(own).fold(
-			ConfigMap::empty().with_key_value("file_allowlist", "../tests"),
+			ConfigMap::empty()
+				.with_key_value("file_allowlist", "../tests")
+				// `SURREAL_BUCKET_PRESIGN_SECRET`, so `file::presign_*` can mint.
+				// Any value of the minimum length serves; no test pins a signature.
+				.with_key_value("bucket_presign_secret", "language-tests-presign-secret-0000"),
 			|config, (key, value)| config.with_key_value(key.as_str(), value.as_str()),
 		);
 		let builder = Datastore::builder()

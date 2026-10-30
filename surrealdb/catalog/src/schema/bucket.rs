@@ -3,6 +3,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
+use uuid::Uuid;
 
 use crate::catalog::{FromStored, Permission, StoredPermission};
 use crate::expr::statements::define::{DefineBucketStatement, DefineKind};
@@ -19,7 +20,7 @@ use crate::{expr as runtime, impl_kv_value_catalog};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BucketId(pub u32);
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
 #[stored(since = "4.0")]
 pub struct StoredBucketDefinition {
@@ -39,6 +40,27 @@ pub struct StoredBucketDefinition {
 		independent = "a comment is text for people and no other field reads it"
 	)]
 	pub comment: Option<String>,
+	/// Identity of this bucket definition for presigned-URL signing.
+	///
+	/// An input to the bucket's signing key derivation, so replacing it changes
+	/// that key and every URL already issued for this bucket stops verifying.
+	/// It is the only revocation that does not require waiting out the URLs'
+	/// own expiry or changing the node-wide `SURREAL_BUCKET_PRESIGN_SECRET`.
+	///
+	/// Random and never reused, rather than a counter. The value only has to be
+	/// unique -- it is an input to a PRF keyed by the presign secret, so nothing
+	/// is learned by reading it -- and a counter would need an invariant this
+	/// row cannot uphold: `REMOVE BUCKET` deletes the row, and `DEFINE BUCKET`
+	/// carries no syntax for the value, so any path that loses it must produce
+	/// a value no issued URL was signed under. A fresh random value does; a
+	/// counter restarting at zero re-validates every URL signed under zero.
+	///
+	/// Buckets written before this field existed read back as nil, which is a
+	/// valid identity: it is stable, and it is still separated from every other
+	/// bucket by the name and ids that share the derivation chain.
+	#[revision(start = 2)]
+	#[stored(n = 12, default = "Uuid::nil")]
+	pub presign_nonce: Uuid,
 }
 impl_kv_value_catalog!(StoredBucketDefinition);
 
@@ -171,6 +193,10 @@ impl InfoStructure for BucketDefinition {
 			"permissions" => redacted.permissions.structure(),
 			"backend", if let Some(backend) = redacted.backend => backend.into(),
 			"readonly" => redacted.readonly.into(),
+			// Only rendered once the bucket has an identity to show. A nil
+			// value carries no information, and omitting it keeps `INFO FOR DB`
+			// unchanged for a deployment that predates this field.
+			"presign_nonce", if !redacted.presign_nonce.is_nil() => redacted.presign_nonce.to_string().into(),
 			"comment", if let Some(comment) = redacted.comment => comment.into(),
 		})
 	}
@@ -191,6 +217,8 @@ pub struct BucketDefinition {
 	pub backend: Option<Strand>,
 	pub permissions: Permission,
 	pub comment: Option<String>,
+	/// See [`StoredBucketDefinition::presign_nonce`].
+	pub presign_nonce: Uuid,
 }
 
 impl FromStored for BucketDefinition {
@@ -205,6 +233,7 @@ impl FromStored for BucketDefinition {
 				backend: stored.backend.clone(),
 				permissions: Permission::from_stored(&stored.permissions)?,
 				comment: stored.comment.clone(),
+				presign_nonce: stored.presign_nonce,
 			})
 		}
 		build(stored).with_context(|| {
@@ -222,6 +251,7 @@ impl BucketDefinition {
 			permissions: crate::catalog::StoredPermission::from_runtime(&self.permissions),
 			readonly: self.readonly,
 			comment: self.comment.clone(),
+			presign_nonce: self.presign_nonce,
 		}
 	}
 }

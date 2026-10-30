@@ -565,6 +565,8 @@ pub enum Cl {
 	/// `MATERIALIZE INTO table.field [WHERE cond]` on a field: `a` index into
 	/// `extra` of `[table Name, field Name, cond or NONE]`.
 	Materialize,
+	/// `REVOKE SIGNATURES` on a bucket.
+	RevokeSignatures,
 }
 
 /// Slots of an HNSW or DiskANN record in `extra`. Absent parts are `NONE`.

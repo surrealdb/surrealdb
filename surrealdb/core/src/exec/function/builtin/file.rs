@@ -15,7 +15,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 
-use crate::buc::store::{ListOptions, ObjectKey, ObjectStore};
+use crate::buc::presign::{self, BucketScope, PresignOp, PresignOptions, PresignRequest};
+use crate::buc::store::{
+	ListOptions, ObjectKey, ObjectStore, PutCondition, put_bytes, put_content_type,
+};
 use crate::buc::{BucketOperation, Error as BucError};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, LogicalPermissionBody};
@@ -25,7 +28,7 @@ use crate::exec::function::ScalarFunction;
 use crate::exec::{Error as ExecError, EvalContext, ExecutionContext};
 use crate::expr::Error as ExprError;
 use crate::expr::logical::LogicalPermission;
-use crate::fnc::args::FromArgs;
+use crate::fnc::args::{FromArgs, Optional};
 use crate::val::{Bytes, File, Object, Value};
 use crate::{define_async_function, define_pure_function};
 
@@ -100,12 +103,148 @@ impl<'a> StreamingBucketOps<'a> {
 		Ok(())
 	}
 
+	/// Mint a URL that downloads this object without a session.
+	async fn presign_get(&self, key: &ObjectKey, opts: PresignOptions) -> Result<Value> {
+		self.presign(
+			key,
+			PresignRequest {
+				op: PresignOp::Get,
+				expires: opts.expires,
+				max: None,
+				overwrite: true,
+				content_type: None,
+			},
+		)
+		.await
+	}
+
+	/// Mint a URL that uploads to this object without a session.
+	async fn presign_put(&self, key: &ObjectKey, opts: PresignOptions) -> Result<Value> {
+		self.require_writeable()?;
+		let content_type = opts.content_type()?;
+		// Refused at mint time: a URL whose upload can never succeed is not
+		// worth handing out.
+		ensure!(
+			content_type.is_none() || self.store.supports_content_type(),
+			BucError::ContentTypeUnsupported(self.bucket.name.to_string())
+		);
+		let max = self.resolve_max_size(opts.max_size()?)?;
+		self.presign(
+			key,
+			PresignRequest {
+				op: PresignOp::Put,
+				expires: opts.expires,
+				max: Some(max),
+				overwrite: opts.overwrite,
+				content_type,
+			},
+		)
+		.await
+	}
+
+	/// The byte ceiling this upload URL carries.
+	///
+	/// A caller that names none gets the node's, rather than no limit at all:
+	/// `$max_size` has to be a number for a `PERMISSIONS` clause to bound it,
+	/// and the route has to have something to enforce while the body streams
+	/// in. A caller that names more than the node allows is refused, so the
+	/// value in the URL is never larger than what the node will accept.
+	fn resolve_max_size(&self, requested: Option<u64>) -> Result<u64> {
+		let allowed =
+			self.frozen_ctx.get_buckets().map(|b| b.presign_max_size()).unwrap_or_default();
+		match requested {
+			Some(max) => {
+				ensure!(
+					max <= allowed,
+					BucError::PresignMaxSizeTooLarge {
+						requested: max,
+						allowed,
+					}
+				);
+				Ok(max)
+			}
+			None => Ok(allowed),
+		}
+	}
+
+	async fn presign(&self, key: &ObjectKey, req: PresignRequest) -> Result<Value> {
+		let op = match req.op {
+			PresignOp::Get => BucketOperation::PresignGet,
+			PresignOp::Put => BucketOperation::PresignPut,
+		};
+
+		// The node's ceiling is checked before the bucket's clause, so a caller
+		// asking for more than the deployment allows is told so plainly rather
+		// than getting a permission error that names the wrong cause.
+		let allowed = self
+			.frozen_ctx
+			.get_buckets()
+			.map(|b| b.presign_max_ttl())
+			.unwrap_or(std::time::Duration::ZERO);
+		ensure!(
+			req.expires <= allowed,
+			BucError::PresignTtlTooLong {
+				requested: req.expires,
+				allowed,
+			}
+		);
+
+		self.check_permission_with(op, Some(key), None, Some(&req)).await?;
+
+		let secret = self
+			.frozen_ctx
+			.get_buckets()
+			.and_then(|b| b.presign_secret())
+			.cloned()
+			.ok_or(BucError::PresignNoSecret)?;
+		let (ns_id, db_id) = self.frozen_ctx.expect_ns_db_ids(self.opt).await?;
+		let (ns_name, db_name) = self.opt.ns_db()?;
+		let origin =
+			self.frozen_ctx.get_buckets().and_then(|b| b.public_origin()).map(str::to_owned);
+
+		let url = presign::issue(
+			&secret,
+			origin.as_deref(),
+			BucketScope {
+				ns_id,
+				db_id,
+				ns_name,
+				db_name,
+				bucket: self.bucket.name.as_str(),
+				nonce: self.bucket.presign_nonce,
+			},
+			key,
+			req,
+			chrono::Utc::now().timestamp(),
+		)
+		.map_err(|e| BucError::Presign(e.to_string()))?;
+
+		Ok(url.into())
+	}
+
 	/// Check permissions for an operation.
 	async fn check_permission(
 		&self,
 		op: BucketOperation,
 		key: Option<&ObjectKey>,
 		target: Option<&ObjectKey>,
+	) -> Result<()> {
+		self.check_permission_with(op, key, target, None).await
+	}
+
+	/// As [`check_permission`](Self::check_permission), additionally binding
+	/// `$expires` (for `presign_get` and `presign_put`) and `$max_size` and
+	/// `$overwrite` (for `presign_put` only) when `presign` is set.
+	///
+	/// Each variable is bound only for the actions it applies to, in the same
+	/// way `$target` exists only for `copy` and `rename`: the action names which
+	/// variables are in scope.
+	async fn check_permission_with(
+		&self,
+		op: BucketOperation,
+		key: Option<&ObjectKey>,
+		target: Option<&ObjectKey>,
+		presign: Option<&PresignRequest>,
 	) -> Result<()> {
 		// Permissions are checked only when the execution context and options require it.
 		if !self.skip_fetch_perms
@@ -136,9 +275,9 @@ impl<'a> StreamingBucketOps<'a> {
 				LogicalPermission::Full => (),
 				LogicalPermission::Specific(e) => {
 					// The clause is served from the compile cache, keyed by the clause as written.
-					// The names bound around it (`action`, `file`, `target`) are read when the
-					// check runs, so one compilation serves every operation and file
-					// ([`crate::exec::vm::serve`]).
+					// The names bound around it (`action`, `file`, `target`, `expires`, `max_size`,
+					// `overwrite`, `content_type`) are read when the check runs, so one compilation
+					// serves every operation and file ([`crate::exec::vm::serve`]).
 					// It is compiled without a principal, since the clause is judged with
 					// permissions off. A principal would bind guards over reads that the frame
 					// is meant to waive.
@@ -147,7 +286,17 @@ impl<'a> StreamingBucketOps<'a> {
 						e,
 						None,
 						0,
-						["action", "file", "target"].map(str::to_owned).to_vec(),
+						[
+							"action",
+							"file",
+							"target",
+							"expires",
+							"max_size",
+							"overwrite",
+							"content_type",
+						]
+						.map(str::to_owned)
+						.to_vec(),
 					)
 					.await?;
 					let mut exec_ctx =
@@ -169,6 +318,34 @@ impl<'a> StreamingBucketOps<'a> {
 								key: target.to_string(),
 							}),
 						)]);
+					}
+
+					if let Some(presign) = presign {
+						exec_ctx = exec_ctx.with_params([(
+							"expires",
+							Value::Duration(crate::val::Duration(presign.expires)),
+						)]);
+						if matches!(op, BucketOperation::PresignPut) {
+							// Always a number, never NONE. A clause reading
+							// `$max_size <= n` must refuse an upload with no
+							// limit rather than pass it, and `NONE <= n` is
+							// truthy.
+							exec_ctx = exec_ctx.with_params([
+								("max_size", Value::from(presign.max.unwrap_or_default())),
+								("overwrite", Value::Bool(presign.overwrite)),
+								// NONE when the URL binds no type: such a URL
+								// stores none, which is the type a clause
+								// restricting types should let through least.
+								(
+									"content_type",
+									presign
+										.content_type
+										.clone()
+										.map(Value::from)
+										.unwrap_or(Value::None),
+								),
+							]);
+						}
 					}
 
 					// SECURITY: the bucket predicate runs with the caller's auth. Nested permission
@@ -201,31 +378,51 @@ impl<'a> StreamingBucketOps<'a> {
 	}
 
 	/// Put a file into the bucket.
-	async fn put(&self, key: &ObjectKey, value: Value) -> Result<()> {
+	async fn put(&self, key: &ObjectKey, value: Value, content_type: Option<String>) -> Result<()> {
+		self.write(key, value, PutCondition::Overwrite, content_type).await
+	}
+
+	/// Put a file into the bucket if it doesn't exist.
+	async fn put_if_not_exists(
+		&self,
+		key: &ObjectKey,
+		value: Value,
+		content_type: Option<String>,
+	) -> Result<()> {
+		self.write(key, value, PutCondition::IfNotExists, content_type).await
+	}
+
+	async fn write(
+		&self,
+		key: &ObjectKey,
+		value: Value,
+		condition: PutCondition,
+		content_type: Option<String>,
+	) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;
+		ensure!(
+			content_type.is_none() || self.store.supports_content_type(),
+			BucError::ContentTypeUnsupported(self.bucket.name.to_string())
+		);
 		self.check_permission(BucketOperation::Put, Some(key), None).await?;
 
-		self.store
-			.put(key, payload)
+		put_bytes(self.store.as_ref(), key, payload, condition, content_type)
 			.await
 			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
 
-	/// Put a file into the bucket if it doesn't exist.
-	async fn put_if_not_exists(&self, key: &ObjectKey, value: Value) -> Result<()> {
-		let payload = accept_payload(value)?;
-		self.require_writeable()?;
-		self.check_permission(BucketOperation::Put, Some(key), None).await?;
-
-		self.store
-			.put_if_not_exists(key, payload)
+	/// The content type stored with an object, for a caller that has already
+	/// been allowed to read it.
+	async fn content_type(&self, key: &ObjectKey) -> Result<Option<String>> {
+		let meta = self
+			.store
+			.head(key)
 			.await
 			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
-
-		Ok(())
+		Ok(meta.and_then(|m| m.content_type))
 	}
 
 	/// Get a file from the bucket.
@@ -384,9 +581,11 @@ fn value_to_file(value: Value) -> Result<DestinationFile> {
 // =========================================================================
 
 async fn file_put_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let (file, value): (File, Value) = FromArgs::from_args("file::put", args)?;
+	let (file, value, Optional(opts)): (File, Value, Optional<Object>) =
+		FromArgs::from_args("file::put", args)?;
+	let content_type = put_content_type("file::put", opts)?;
 	let ops = StreamingBucketOps::new(ctx, &file.bucket).await?;
-	ops.put(&ObjectKey::new(file.key), value).await?;
+	ops.put(&ObjectKey::new(file.key), value, content_type).await?;
 	Ok(Value::None)
 }
 
@@ -395,9 +594,11 @@ async fn file_put_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 // =========================================================================
 
 async fn file_put_if_not_exists_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
-	let (file, value): (File, Value) = FromArgs::from_args("file::put_if_not_exists", args)?;
+	let (file, value, Optional(opts)): (File, Value, Optional<Object>) =
+		FromArgs::from_args("file::put_if_not_exists", args)?;
+	let content_type = put_content_type("file::put_if_not_exists", opts)?;
 	let ops = StreamingBucketOps::new(ctx, &file.bucket).await?;
-	ops.put_if_not_exists(&ObjectKey::new(file.key), value).await?;
+	ops.put_if_not_exists(&ObjectKey::new(file.key), value, content_type).await?;
 	Ok(Value::None)
 }
 
@@ -410,6 +611,26 @@ async fn file_get_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 	let ops = StreamingBucketOps::new(ctx, &file.bucket).await?;
 	let res = ops.get(&ObjectKey::new(file.key)).await?;
 	Ok(res.map(Value::Bytes).unwrap_or_default())
+}
+
+// =========================================================================
+// file::presign_get / file::presign_put
+// =========================================================================
+
+async fn file_presign_get_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	let (file, Optional(opts)): (File, Optional<Object>) =
+		FromArgs::from_args("file::presign_get", args)?;
+	let opts = PresignOptions::from_object(PresignOp::Get, opts.unwrap_or_default())?;
+	let ops = StreamingBucketOps::new(ctx, &file.bucket).await?;
+	ops.presign_get(&ObjectKey::new(file.key), opts).await
+}
+
+async fn file_presign_put_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	let (file, Optional(opts)): (File, Optional<Object>) =
+		FromArgs::from_args("file::presign_put", args)?;
+	let opts = PresignOptions::from_object(PresignOp::Put, opts.unwrap_or_default())?;
+	let ops = StreamingBucketOps::new(ctx, &file.bucket).await?;
+	ops.presign_put(&ObjectKey::new(file.key), opts).await
 }
 
 // =========================================================================
@@ -447,18 +668,21 @@ async fn file_copy_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 		ops.copy(&ObjectKey::new(src.key), ObjectKey::new(dst.key)).await?;
 	} else {
 		// Cross-bucket copy
-		let data = {
+		// The source's content type travels with it. A destination that
+		// cannot hold one refuses the copy rather than dropping the type.
+		let (data, content_type) = {
 			let src_ops = StreamingBucketOps::new(ctx, &src.bucket).await?;
-			let Some(data) = src_ops.get(&ObjectKey::new(src.key)).await? else {
+			let src_key = ObjectKey::new(src.key);
+			let Some(data) = src_ops.get(&src_key).await? else {
 				return Err(anyhow::anyhow!("Source file does not exist"));
 			};
-			data
+			(data, src_ops.content_type(&src_key).await?)
 		};
 
 		let dst_bucket =
 			dst.bucket.ok_or_else(|| anyhow::anyhow!("destination bucket must be set"))?;
 		let dst_ops = StreamingBucketOps::new(ctx, &dst_bucket).await?;
-		dst_ops.put(&ObjectKey::new(dst.key), data.into()).await?;
+		dst_ops.put(&ObjectKey::new(dst.key), data.into(), content_type).await?;
 	}
 
 	Ok(Value::None)
@@ -477,18 +701,21 @@ async fn file_copy_if_not_exists_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -
 		ops.copy_if_not_exists(&ObjectKey::new(src.key), ObjectKey::new(dst.key)).await?;
 	} else {
 		// Cross-bucket copy
-		let data = {
+		// The source's content type travels with it. A destination that
+		// cannot hold one refuses the copy rather than dropping the type.
+		let (data, content_type) = {
 			let src_ops = StreamingBucketOps::new(ctx, &src.bucket).await?;
-			let Some(data) = src_ops.get(&ObjectKey::new(src.key)).await? else {
+			let src_key = ObjectKey::new(src.key);
+			let Some(data) = src_ops.get(&src_key).await? else {
 				return Err(anyhow::anyhow!("Source file does not exist"));
 			};
-			data
+			(data, src_ops.content_type(&src_key).await?)
 		};
 
 		let dst_bucket =
 			dst.bucket.ok_or_else(|| anyhow::anyhow!("destination bucket must be set"))?;
 		let dst_ops = StreamingBucketOps::new(ctx, &dst_bucket).await?;
-		dst_ops.put_if_not_exists(&ObjectKey::new(dst.key), data.into()).await?;
+		dst_ops.put_if_not_exists(&ObjectKey::new(dst.key), data.into(), content_type).await?;
 	}
 
 	Ok(Value::None)
@@ -564,8 +791,8 @@ fn file_key_impl((file,): (File,)) -> Result<Value> {
 
 // Note: We use `Any` for file arguments in the macro signature because Kind::File takes
 // parameters (bucket types). The actual type checking happens via FromArgs::from_args.
-define_async_function!(FilePut, "file::put", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any) -> Any, file_put_impl);
-define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
+define_async_function!(FilePut, "file::put", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any, ?opts: Object) -> Any, file_put_impl);
+define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any, ?opts: Object) -> Any, file_put_if_not_exists_impl);
 define_async_function!(FileGet, "file::get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_get_impl);
 define_async_function!(FileHead, "file::head", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_head_impl);
 define_async_function!(FileDelete, "file::delete", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_delete_impl);
@@ -575,6 +802,8 @@ define_async_function!(FileRename, "file::rename", effects: EffectSet::READS_EXT
 define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", effects: EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL), fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
 define_async_function!(FileExists, "file::exists", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_exists_impl);
 define_async_function!(FileList, "file::list", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (bucket: String, ?opts: Object) -> Any, file_list_impl);
+define_async_function!(FilePresignGet, "file::presign_get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, ?opts: Object) -> Any, file_presign_get_impl);
+define_async_function!(FilePresignPut, "file::presign_put", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, ?opts: Object) -> Any, file_presign_put_impl);
 
 define_pure_function!(FileBucket, "file::bucket", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (file: Any) -> Any, file_bucket_impl);
 define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (file: Any) -> Any, file_key_impl);
@@ -588,8 +817,9 @@ define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, fallibilit
 // rule may not repeat or drop, and a grouped projection may not run it once per group.
 // The bucket keeps what a write leaves behind, so the number of effects must not depend
 // on how a query grouped its rows. A read can answer differently on either side of a
-// write. `file::bucket` and `file::key` only read two fields of the file value they are
-// given, so they are pure.
+// write. `file::presign_get` and `file::presign_put` read the bucket's signing identity
+// and do not write an object. `file::bucket` and `file::key` only read two fields of the
+// file value they are given, so they are pure.
 /// The `file::*` scalar builtins.
 pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&FilePut,
@@ -603,6 +833,8 @@ pub(super) const SCALARS: &[&dyn ScalarFunction] = &[
 	&FileRenameIfNotExists,
 	&FileExists,
 	&FileList,
+	&FilePresignGet,
+	&FilePresignPut,
 	&FileBucket,
 	&FileKey,
 ];

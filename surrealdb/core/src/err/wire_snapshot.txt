@@ -131,6 +131,13 @@ ReadSnapshotTooStale	{ cause: NONE, code: -32000, kind: 'Query', message: 'ReadS
 BucketPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to get this file in the `sample` bucket" }
 ObsError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Operation not supported: sample' }, code: -32000, kind: 'Internal', message: 'Object Store error: Operation not supported: sample' }
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
+PresignTtlTooLong	{ cause: NONE, code: -32000, kind: 'Validation', message: 'A presigned URL cannot last 86400s: this node allows at most 3600s. Raise SURREAL_BUCKET_PRESIGN_MAX_TTL to change it' }
+PresignMaxSizeTooLarge	{ cause: NONE, code: -32000, kind: 'Validation', message: 'A presigned upload cannot allow 99999999 bytes: this node allows at most 5368709120. Raise SURREAL_BUCKET_PRESIGN_MAX_SIZE to change it' }
+PresignNoSecret	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'Presigned URLs are unavailable: this node has no URL-signing secret. Set SURREAL_BUCKET_PRESIGN_SECRET to the same value of at least 32 bytes on every node' }
+ContentTypeUnsupported	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Bucket `bucket` cannot store a content type: its backend keeps none. Write without one, or as `application/octet-stream`' }
+PresignBadSignature	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: 'The presigned URL is not valid for this request' }
+PresignExpired	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The presigned URL has expired' }
+Presign	{ cause: NONE, code: -32000, kind: 'Validation', message: 'sample' }
 NoGlobalBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'No global bucket has been configured' }
 BucketUnavailable	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket `sample` is unavailable' }
 GlobalBucketEnforced	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket is unavailable' }

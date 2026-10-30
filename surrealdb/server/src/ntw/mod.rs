@@ -1,5 +1,6 @@
 pub mod api;
 mod auth;
+pub mod bucket;
 pub mod client_ip;
 pub mod error;
 pub mod export;
@@ -194,6 +195,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(signup::router())
 		.merge(key::router())
 		.merge(ml::router())
+		.merge(bucket::router())
 		.merge(api::router());
 
 	#[cfg(feature = "graphql")]

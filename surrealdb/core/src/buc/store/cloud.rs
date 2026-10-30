@@ -22,18 +22,96 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use object_store::aws::AmazonS3Builder;
 use object_store::azure::MicrosoftAzureBuilder;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::path::Path as OsPath;
 use object_store::prefix::PrefixStore;
-use object_store::{ObjectStore as OsStore, ObjectStoreExt, PutPayload};
+use object_store::{
+	Attribute, Attributes, GetOptions, GetRange, ObjectStore as OsStore, ObjectStoreExt, PutMode,
+	PutMultipartOptions, PutOptions, PutPayload, WriteMultipart,
+};
 use url::Url;
 
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use super::{
+	ByteRange, ListEntry, ListOptions, Listing, ObjectKey, ObjectMeta, ObjectStore, ObjectStream,
+	PutCondition, PutError, PutOptions as WriteOptions, PutResult,
+};
 use crate::buc::Error;
 use crate::obs::connector::BundledRootsConnector;
+
+/// Bytes buffered before a streamed upload switches to multipart.
+///
+/// 8 MiB is comfortably above S3's 5 MiB minimum part size and keeps the part
+/// count for a large object in the hundreds rather than the tens of thousands.
+const PART_SIZE: usize = 8 * 1024 * 1024;
+
+/// Parts allowed in flight at once, which bounds how much of a body is held in
+/// memory while a slow backend catches up.
+const MAX_CONCURRENT_PARTS: usize = 4;
+
+/// A multipart upload that releases its parts unless it is completed.
+///
+/// Every backend bills the parts of an upload that is neither completed nor
+/// aborted until a lifecycle rule removes them, and dropping the upload does
+/// not release them. Owning it here means one place decides that, rather than
+/// each error path remembering to.
+///
+/// [`Self::finish`] is the only way to consume it without aborting. `Drop` is
+/// what covers cancellation -- the handler future is dropped when a client
+/// disconnects mid-upload, and no error is returned to anyone -- so the abort
+/// is issued from a detached task, because `Drop` cannot await. If there is no
+/// runtime to spawn onto, the parts are left to the bucket's lifecycle rules;
+/// that is the one case this cannot cover.
+struct MultipartGuard(Option<WriteMultipart>);
+
+impl MultipartGuard {
+	fn new(writer: WriteMultipart) -> Self {
+		Self(Some(writer))
+	}
+
+	/// The live upload.
+	///
+	/// Only `None` after `finish`, which consumes `self`.
+	fn writer(&mut self) -> &mut WriteMultipart {
+		self.0.as_mut().expect("the upload is taken only by `finish`, which consumes self")
+	}
+
+	/// Complete the upload, or abort it and report why it could not complete.
+	async fn finish(mut self) -> object_store::Result<object_store::PutResult> {
+		// Taken before the await, so a failure inside `finish` does not leave
+		// `Drop` trying to abort an upload that already aborted itself.
+		let writer = self.0.take().expect("finish consumes self, so this runs once");
+		writer.finish().await
+	}
+}
+
+impl Drop for MultipartGuard {
+	fn drop(&mut self) {
+		let Some(writer) = self.0.take() else {
+			return;
+		};
+		if let Ok(handle) = tokio::runtime::Handle::try_current() {
+			handle.spawn(async move {
+				if let Err(e) = writer.abort().await {
+					warn!("Failed to abort an interrupted bucket multipart upload: {e}");
+				}
+			});
+		}
+	}
+}
+
+impl From<ByteRange> for GetRange {
+	fn from(value: ByteRange) -> Self {
+		match value {
+			ByteRange::Bounded(r) => GetRange::Bounded(r),
+			ByteRange::Offset(o) => GetRange::Offset(o),
+			ByteRange::Suffix(n) => GetRange::Suffix(n),
+		}
+	}
+}
 
 /// Attempt to connect to a cloud object-storage backend from a `BACKEND` URL.
 ///
@@ -358,6 +436,11 @@ impl ObjectStoreAdapter {
 	fn is_not_found(e: &object_store::Error) -> bool {
 		matches!(e, object_store::Error::NotFound { .. })
 	}
+
+	/// The media type a read returned, if the object has one.
+	fn content_type(attributes: &Attributes) -> Option<String> {
+		attributes.get(&Attribute::ContentType).map(|v| v.as_ref().to_owned())
+	}
 }
 
 impl ObjectStore for ObjectStoreAdapter {
@@ -396,6 +479,221 @@ impl ObjectStore for ObjectStoreAdapter {
 		})
 	}
 
+	fn get_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		range: Option<ByteRange>,
+	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectStream>, String>> + Send + 'a>> {
+		Box::pin(async move {
+			let path = Self::to_path(key);
+			let ranged = range.is_some();
+			let opts = GetOptions {
+				range: range.clone().map(Into::into),
+				..Default::default()
+			};
+
+			let res = match self.inner.get_opts(&path, opts).await {
+				Ok(res) => res,
+				// `NotModified` cannot occur: no precondition is set above.
+				// A range past the end of the object arrives as `NotFound` from
+				// some backends and as a range error from others, so both map
+				// onto the absent case the caller reports as 404 or 416.
+				Err(e) if Self::is_not_found(&e) => return Ok(None),
+				// A range past the end of the object arrives as a bare
+				// `Generic` from some backends, which is also what every
+				// transport failure arrives as -- a 5xx, a throttle, a reset,
+				// retry exhaustion. Reporting all of those as "absent" would
+				// answer an outage with `416` or `404`, both terminal statuses
+				// that stop a client retrying, and would book the request as a
+				// success in the metrics.
+				//
+				// So ask the object instead of guessing: if it is there and the
+				// range does resolve against its size, the failure was not the
+				// range and must propagate. This costs a round trip only on an
+				// error path.
+				Err(e) if ranged && matches!(e, object_store::Error::Generic { .. }) => {
+					match self.inner.head(&path).await {
+						Ok(meta)
+							if range.as_ref().is_some_and(|r| r.resolve(meta.size).is_none()) =>
+						{
+							return Ok(None);
+						}
+						_ => return Err(Self::err("get_streamed", &e)),
+					}
+				}
+				Err(e) => return Err(Self::err("get_streamed", &e)),
+			};
+
+			let meta = ObjectMeta {
+				size: res.meta.size,
+				updated: res.meta.last_modified,
+				key: key.to_owned(),
+				// Strong on every supported provider: S3 gives the content MD5
+				// for a single-part object, and `<hash>-<parts>` for a multipart
+				// one. Opaque either way, so it is echoed rather than parsed.
+				etag: res.meta.e_tag.clone(),
+				content_type: Self::content_type(&res.attributes),
+			};
+			let range = res.range.clone();
+
+			Ok(Some(ObjectStream {
+				meta,
+				range,
+				stream: res
+					.into_stream()
+					.map_err(|e| format!("object store get_streamed operation failed: {e}"))
+					.boxed(),
+			}))
+		})
+	}
+
+	fn put_streamed<'a>(
+		&'a self,
+		key: &'a ObjectKey,
+		mut data: BoxStream<'static, Result<Bytes, String>>,
+		opts: WriteOptions,
+	) -> Pin<Box<dyn Future<Output = Result<PutResult, PutError>> + Send + 'a>> {
+		Box::pin(async move {
+			let path = Self::to_path(key);
+			let condition = opts.condition;
+			// Sent as the object's `Content-Type`, which S3, GCS and Azure all
+			// store and return on every read.
+			let mut attributes = Attributes::new();
+			if let Some(content_type) = opts.content_type {
+				attributes.insert(Attribute::ContentType, content_type.into());
+			}
+
+			// Buffer up to one part before deciding how to commit. An object
+			// that fits goes out as a single `put` and never opens a multipart
+			// upload, which is both a round trip cheaper and nothing to leak.
+			let mut buffered: Vec<Bytes> = Vec::new();
+			let mut buffered_len = 0usize;
+			let mut size = 0u64;
+
+			let outgrew = loop {
+				match data.next().await {
+					None => break false,
+					Some(Err(e)) => return Err(PutError::Failed(e)),
+					Some(Ok(chunk)) => {
+						size += chunk.len() as u64;
+						buffered_len += chunk.len();
+						buffered.push(chunk);
+						if buffered_len >= PART_SIZE {
+							break true;
+						}
+					}
+				}
+			};
+
+			if !outgrew {
+				let payload = PutPayload::from_iter(buffered);
+				// `PutMode::Create` is the backend's own conditional write, so
+				// the occupancy test is part of the request rather than a
+				// separate `head` a racing upload can slip between.
+				let opts = PutOptions {
+					mode: match condition {
+						PutCondition::Overwrite => PutMode::Overwrite,
+						PutCondition::IfNotExists => PutMode::Create,
+					},
+					attributes,
+					..Default::default()
+				};
+				let res = match self.inner.put_opts(&path, payload, opts).await {
+					Ok(res) => res,
+					Err(object_store::Error::AlreadyExists {
+						..
+					}) => return Err(PutError::AlreadyExists),
+					Err(e) => return Err(PutError::Failed(Self::err("put_streamed", &e))),
+				};
+				return Ok(PutResult {
+					size,
+					etag: res.e_tag,
+				});
+			}
+
+			// The object outgrew a single request, so the rest streams as a
+			// multipart upload. `MultipartGuard` owns it from here: S3, GCS and
+			// Azure bill the parts of an upload that is never completed or
+			// aborted until a lifecycle rule removes them, and every way this
+			// can end early -- a stream error, a part that fails to upload, a
+			// completion that fails, or this future being dropped when the
+			// client disconnects -- has to release them.
+			// A multipart upload cannot carry `PutMode::Create` -- the condition
+			// applies to the completion, which `object_store` does not expose --
+			// so the key is reserved with an empty conditional `put` first. The
+			// completion then overwrites the placeholder. That makes claiming
+			// the key atomic, which is the part a racing upload could otherwise
+			// win; the window in which the key holds an empty object is the
+			// residue, and it closes when this upload completes or is aborted.
+			if condition == PutCondition::IfNotExists {
+				let opts = PutOptions {
+					mode: PutMode::Create,
+					..Default::default()
+				};
+				match self.inner.put_opts(&path, PutPayload::default(), opts).await {
+					Ok(_) => {}
+					Err(object_store::Error::AlreadyExists {
+						..
+					}) => return Err(PutError::AlreadyExists),
+					Err(e) => return Err(PutError::Failed(Self::err("put_streamed", &e))),
+				}
+			}
+
+			let upload = self
+				.inner
+				.put_multipart_opts(
+					&path,
+					PutMultipartOptions {
+						attributes,
+						..Default::default()
+					},
+				)
+				.await
+				.map_err(|e| PutError::Failed(Self::err("put_streamed", &e)))?;
+			let mut guard =
+				MultipartGuard::new(WriteMultipart::new_with_chunk_size(upload, PART_SIZE));
+
+			for chunk in buffered {
+				guard.writer().put(chunk);
+			}
+
+			while let Some(chunk) = data.next().await {
+				// Erroring the stream is how an abort is signalled -- a client
+				// disconnect and a breached size limit both arrive this way --
+				// so the guard releases the parts as it drops.
+				let chunk = chunk.map_err(PutError::Failed)?;
+				size += chunk.len() as u64;
+				// Back-pressure before buffering, so a slow backend bounds how
+				// much of the body is held at once.
+				guard
+					.writer()
+					.wait_for_capacity(MAX_CONCURRENT_PARTS)
+					.await
+					.map_err(|e| PutError::Failed(Self::err("put_streamed", &e)))?;
+				// `put` takes the owned `Bytes` refcounted; `write` would copy
+				// every byte into the part buffer.
+				guard.writer().put(chunk);
+			}
+
+			// Completes the upload and hands back its tag directly, so no
+			// `head` is needed to read back what the commit already returned.
+			// Nothing is visible at `key` before this returns.
+			let res = guard
+				.finish()
+				.await
+				.map_err(|e| PutError::Failed(Self::err("put_streamed", &e)))?;
+
+			Ok(PutResult {
+				size,
+				etag: res.e_tag,
+			})
+		})
+	}
+
+	fn supports_content_type(&self) -> bool {
+		true
+	}
+
 	fn get<'a>(
 		&'a self,
 		key: &'a ObjectKey,
@@ -419,11 +717,19 @@ impl ObjectStore for ObjectStoreAdapter {
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
 		Box::pin(async move {
 			let path = Self::to_path(key);
-			match self.inner.head(&path).await {
-				Ok(meta) => Ok(Some(ObjectMeta {
-					size: meta.size,
-					updated: meta.last_modified,
+			// A `HEAD` through `get_opts` rather than `head`: the same single
+			// request, but its result carries the attributes `head` drops.
+			let opts = GetOptions {
+				head: true,
+				..Default::default()
+			};
+			match self.inner.get_opts(&path, opts).await {
+				Ok(res) => Ok(Some(ObjectMeta {
+					size: res.meta.size,
+					updated: res.meta.last_modified,
 					key: key.to_owned(),
+					etag: res.meta.e_tag.clone(),
+					content_type: Self::content_type(&res.attributes),
 				})),
 				Err(e) if Self::is_not_found(&e) => Ok(None),
 				Err(e) => Err(Self::err("head", &e)),
@@ -544,32 +850,61 @@ impl ObjectStore for ObjectStoreAdapter {
 	fn list<'a>(
 		&'a self,
 		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+	) -> Pin<Box<dyn Future<Output = Result<Vec<ListEntry>, String>> + Send + 'a>> {
 		Box::pin(async move {
-			let prefix_path = opts.prefix.as_ref().map(Self::to_path);
-			let offset_path = opts.start.as_ref().map(Self::to_path);
-
-			let mut stream = match &offset_path {
-				Some(offset) => self.inner.list_with_offset(prefix_path.as_ref(), offset),
-				None => self.inner.list(prefix_path.as_ref()),
+			// `object_store` matches a prefix by whole path segments, so the
+			// backend is asked for the directory and the listing applies the
+			// rest of the prefix as a string.
+			let directory = opts.directory();
+			let directory = (directory != "/").then(|| Self::to_path(&ObjectKey::new(directory)));
+			let meta_of = |meta: object_store::ObjectMeta| ObjectMeta {
+				key: ObjectKey::new(meta.location.to_string()),
+				size: meta.size,
+				updated: meta.last_modified,
+				etag: meta.e_tag,
+				content_type: None,
 			};
 
-			let mut objects = Vec::new();
-			while let Some(item) = stream.next().await {
-				// Check the limit before consuming so `limit = 0` returns nothing.
-				if let Some(limit) = opts.limit
-					&& objects.len() >= limit
-				{
-					break;
+			let mut listing = Listing::new(opts);
+			if opts.delimiter {
+				let result = self
+					.inner
+					.list_with_delimiter(directory.as_ref())
+					.await
+					.map_err(|e| Self::err("list", &e))?;
+				let mut candidates: Vec<ListEntry> = result
+					.common_prefixes
+					.into_iter()
+					.map(|p| ListEntry::Prefix(format!("/{p}/")))
+					.chain(result.objects.into_iter().map(|m| ListEntry::Object(meta_of(m))))
+					.collect();
+				candidates.sort_by(|a, b| a.key().cmp(b.key()));
+				for candidate in candidates {
+					let more = match candidate {
+						ListEntry::Object(meta) => listing.push_object(meta),
+						ListEntry::Prefix(group) => listing.push_prefix(group),
+					};
+					if !more {
+						break;
+					}
 				}
-				let meta = item.map_err(|e| Self::err("list", &e))?;
-				objects.push(ObjectMeta {
-					key: ObjectKey::new(meta.location.to_string()),
-					size: meta.size,
-					updated: meta.last_modified,
-				});
+			} else {
+				let offset = opts.start.as_deref().map(|s| OsPath::from(s.trim_start_matches('/')));
+				let mut stream = match &offset {
+					Some(offset) => self.inner.list_with_offset(directory.as_ref(), offset),
+					None => self.inner.list(directory.as_ref()),
+				};
+				while !listing.is_full() {
+					let Some(item) = stream.next().await else {
+						break;
+					};
+					let meta = item.map_err(|e| Self::err("list", &e))?;
+					if !listing.push_object(meta_of(meta)) {
+						break;
+					}
+				}
 			}
-			Ok(objects)
+			Ok(listing.finish())
 		})
 	}
 }
@@ -586,6 +921,22 @@ mod tests {
 	}
 	fn azure(url: &str) -> Result<AzureParams, Error> {
 		AzureParams::parse(&Url::parse(url).expect("valid url"))
+	}
+
+	/// The cloud adapter answers listings as every other backend does.
+	/// `object_store`'s in-memory store matches a prefix by whole path
+	/// segments, as S3, GCS and Azure do through it, which is the behaviour
+	/// the adapter has to bridge to a string prefix.
+	#[tokio::test]
+	async fn list_semantics_match_the_other_backends() {
+		use super::super::list_conformance;
+
+		let adapter = || ObjectStoreAdapter {
+			inner: Arc::new(object_store::memory::InMemory::new()),
+		};
+		list_conformance::check("cloud", &adapter()).await;
+		super::super::assert_put_streamed_contract(&adapter()).await;
+		list_conformance::check_prefixed("prefixed cloud", Arc::new(adapter())).await;
 	}
 
 	/// Non-cloud schemes fall through so the memory/file backends handle them.

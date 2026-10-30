@@ -2534,6 +2534,7 @@ impl Ddl<'_, '_> {
 			ty: TypeId::named("StoredBucketDefinition"),
 			dst: existing,
 		});
+		let nonce = self.reg()?;
 		let missing = self.exists_with(
 			&attrs.mode,
 			existing,
@@ -2548,7 +2549,18 @@ impl Ddl<'_, '_> {
 			},
 			|_| Ok(()),
 		)?;
+		self.get_field(existing, "presign_nonce", nonce)?;
+		let built = self.label()?;
+		self.emit(Instr::Jump {
+			target: built,
+		});
 		self.bind(missing)?;
+		self.store(StoreInstr::NewUuid {
+			dst: nonce,
+			draw: 0,
+			reserved: None,
+		});
+		self.bind(built)?;
 		let backend = match backend {
 			Some(slot) => match self.literal(slot)? {
 				Some(Value::String(written)) => {
@@ -2564,6 +2576,7 @@ impl Ddl<'_, '_> {
 		let template = self.constant(attrs.template.value.clone())?;
 		let definition = self.load(template)?;
 		self.set_name(definition, "name", &name)?;
+		self.set_field(definition, "presign_nonce", Operand::Reg(nonce))?;
 		if let Some(backend) = backend {
 			self.set_field(definition, "backend", Operand::Reg(backend))?;
 		}
@@ -3458,8 +3471,9 @@ impl Ddl<'_, '_> {
 			} => self.alter_param(attrs, name.as_str(), *value),
 			AlterObject::Bucket {
 				name,
+				revoke_signatures,
 				..
-			} => self.alter_bucket(attrs, *name),
+			} => self.alter_bucket(attrs, *name, *revoke_signatures),
 			AlterObject::Config {
 				inner,
 				..
@@ -3832,7 +3846,12 @@ impl Ddl<'_, '_> {
 	}
 
 	/// `ALTER BUCKET`: the session's database is resolved before the name.
-	fn alter_bucket(&mut self, attrs: &AlterAttrs, name: OperandSlot) -> Result<(), IrError> {
+	fn alter_bucket(
+		&mut self,
+		attrs: &AlterAttrs,
+		name: OperandSlot,
+		revoke_signatures: bool,
+	) -> Result<(), IrError> {
 		let template = Self::alter_template(attrs)?;
 		self.guard()?;
 		let (ns, db) = self.session_ids()?;
@@ -3845,6 +3864,15 @@ impl Ddl<'_, '_> {
 			(StatementError::BuNotFound, bu),
 		)?;
 		self.replace_fields(definition, template)?;
+		if revoke_signatures {
+			let nonce = self.reg()?;
+			self.store(StoreInstr::NewUuid {
+				dst: nonce,
+				draw: 0,
+				reserved: None,
+			});
+			self.set_field(definition, "presign_nonce", Operand::Reg(nonce))?;
+		}
 		self.store(StoreInstr::Put {
 			route: RouteId::named("BucketKey"),
 			key,

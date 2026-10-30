@@ -2721,7 +2721,8 @@ text_enum!(AlterObject {
 			backend: AlterKind<String>,
 			permissions: Option<PermissionShape>,
 			readonly: AlterKind<()>,
-			comment: AlterKind<String>
+			comment: AlterKind<String>,
+			revoke_signatures: bool
 		},
 		Config { inner: Box<ConfigShape>, comment: AlterKind<String> },
 		Analyzer {

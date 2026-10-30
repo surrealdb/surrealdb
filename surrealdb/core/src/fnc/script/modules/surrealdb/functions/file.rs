@@ -22,5 +22,7 @@ impl_module_def!(
 	"rename" => fut Async,
 	"rename_if_not_exists" => fut Async,
 	"exists" => fut Async,
-	"list" => fut Async
+	"list" => fut Async,
+	"presign_get" => fut Async,
+	"presign_put" => fut Async
 );

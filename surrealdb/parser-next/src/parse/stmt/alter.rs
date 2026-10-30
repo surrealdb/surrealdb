@@ -478,6 +478,11 @@ impl<'a, 's> Parser<'a, 's> {
 			self.perm_value_clause()?;
 		} else if t.kw == Kw::Backend && is(D::Bucket) {
 			self.string_clause(Cl::Backend)?;
+		} else if t.kw == Kw::Revoke && is(D::Bucket) {
+			self.bump();
+			let first = self.ast.nodes.len();
+			self.expect_kw(Kw::Signatures, "SIGNATURES")?;
+			self.push_clause(Cl::RevokeSignatures, 0, 0, t.start, first)?;
 		} else if t.kw == Kw::Function && is(D::Analyzer) {
 			self.analyzer_function_clause()?;
 		} else if t.kw == Kw::Tokenizers && is(D::Analyzer) {

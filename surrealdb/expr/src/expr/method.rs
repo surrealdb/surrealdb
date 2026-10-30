@@ -164,6 +164,8 @@ pub const BUILTIN_METHOD_NAMES: &[&str] = &[
 	"patch",
 	"pop",
 	"prepend",
+	"presign_get",
+	"presign_put",
 	"push",
 	"put",
 	"put_if_not_exists",

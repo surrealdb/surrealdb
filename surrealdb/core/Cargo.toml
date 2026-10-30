@@ -263,10 +263,12 @@ futures.workspace = true
 geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
+hmac.workspace = true
 ipnet.workspace = true
 memchr.workspace = true
 num_cpus.workspace = true
 object_store.workspace = true
+percent-encoding.workspace = true
 parking_lot.workspace = true
 path-clean.workspace = true
 quick_cache.workspace = true

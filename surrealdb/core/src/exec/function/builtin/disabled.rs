@@ -163,6 +163,14 @@ pub(super) const FILES: &[&dyn ScalarFunction] = &[
 		feature: "files",
 	},
 	&Disabled {
+		name: "file::presign_get",
+		feature: "files",
+	},
+	&Disabled {
+		name: "file::presign_put",
+		feature: "files",
+	},
+	&Disabled {
 		name: "file::bucket",
 		feature: "files",
 	},

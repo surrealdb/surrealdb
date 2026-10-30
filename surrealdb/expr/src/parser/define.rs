@@ -1790,6 +1790,7 @@ impl Lower<'_> {
 						(Cl::Readonly, _) => s.readonly = AlterKind::Set(()),
 						(Cl::Backend, _) => s.backend = self.str_alter(c)?,
 						(Cl::PermValue, _) => s.permissions = Some(self.perm(c.a)?),
+						(Cl::RevokeSignatures, _) => s.revoke_signatures = true,
 						_ => s.comment = self.str_alter(c)?,
 					}
 				}

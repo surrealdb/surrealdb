@@ -87,6 +87,26 @@ impl BucketsManager {
 		}))
 	}
 
+	/// The origin presigned URLs are prefixed with, when one is configured.
+	pub(crate) fn public_origin(&self) -> Option<&str> {
+		self.0.config.public_origin()
+	}
+
+	/// The secret presigned URLs are signed with, when this node has one.
+	pub(crate) fn presign_secret(&self) -> Option<&crate::buc::PresignSecret> {
+		self.0.config.presign_secret()
+	}
+
+	/// The byte ceiling on a presigned upload for this node.
+	pub(crate) fn presign_max_size(&self) -> u64 {
+		self.0.config.presign_max_size()
+	}
+
+	/// The ceiling on a presigned URL's lifetime for this node.
+	pub(crate) fn presign_max_ttl(&self) -> std::time::Duration {
+		self.0.config.presign_max_ttl()
+	}
+
 	/// Wrap a freshly-connected store so its operations are reported to the
 	/// datastore observer as `surrealdb.bucket.*` metrics.
 	fn meter(&self, store: Arc<dyn ObjectStore>, url: &str) -> Arc<dyn ObjectStore> {

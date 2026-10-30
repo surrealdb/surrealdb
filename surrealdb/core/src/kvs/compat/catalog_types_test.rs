@@ -171,7 +171,8 @@ use crate::val::{Datetime, TableName, Value};
 	backend: Some("backend".into()),
 	comment: Some("comment".to_string()),
 	permissions: StoredPermission::Full,
-}, 32)]
+	presign_nonce: uuid::Uuid::nil(),
+}, 48)]
 #[case::config(StoredConfigDefinition::GraphQL(GraphQLConfig {
 	tables: GraphQLTablesConfig::default(),
 	functions: GraphQLFunctionsConfig::default(),

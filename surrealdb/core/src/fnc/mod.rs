@@ -590,6 +590,8 @@ pub async fn asynchronous(
 		exp(Files) "file::put" => file::put((ctx, opt, doc)).await,
 		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((ctx, opt, doc)).await,
 		exp(Files) "file::get" => file::get((ctx, opt, doc)).await,
+		exp(Files) "file::presign_get" => file::presign_get((ctx, opt, doc)).await,
+		exp(Files) "file::presign_put" => file::presign_put((ctx, opt, doc)).await,
 		exp(Files) "file::head" => file::head((ctx, opt, doc)).await,
 		exp(Files) "file::delete" => file::delete((ctx, opt, doc)).await,
 		exp(Files) "file::copy" => file::copy((ctx, opt, doc)).await,

@@ -460,6 +460,7 @@ type StoredBucketDefinition struct since=4.0 reserved=[]
   6 backend option<string> critical since=4.0 absent=none
   8 permissions StoredPermission critical since=4.0 absent=required
   10 readonly bool critical since=4.0 absent=required
+  12 presign_nonce uuid critical since=4.0 absent=default(Uuid::nil)
 type StoredConfigDefinition enum since=4.0 reserved=[]
   1 Default item:DefaultConfig since=4.0
   2 GraphQL item:GraphQLConfig since=4.0

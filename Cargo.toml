@@ -241,6 +241,7 @@ object_store = "0.14.2"
 p256 = { version = "0.13.2", default-features = false }
 p384 = { version = "0.13.1", default-features = false }
 papaya = "0.2.5"
+percent-encoding = "2.3.2"
 parking_lot = "0.12.5"
 paste = "1.0.15"
 path-clean = "1.0.1"

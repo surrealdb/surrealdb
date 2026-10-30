@@ -80,8 +80,10 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// `StoredFieldDefinition` gained `inline` (5 -> 6) and `conformance`
 	/// (6 -> 7), `DatabaseDefinition` gained `compatibility` (1 -> 2),
 	/// `StoredSubscriptionDefinition` gained the registration watermark
-	/// (2 -> 3), `StoredApiDefinition` gained `security` (2 -> 3), and
-	/// `StoredIndexDefinition` gained `nulls_not_distinct` (2 -> 3).
+	/// (2 -> 3) and embeds `Auth`, whose `ResourceKind` gained `Secret`
+	/// (5 -> 6), `StoredApiDefinition` gained `security` (2 -> 3),
+	/// `StoredIndexDefinition` gained `nulls_not_distinct` (2 -> 3), and
+	/// `StoredBucketDefinition` gained `presign_nonce` (1 -> 2).
 	/// Their fixtures still decode — the field defaults in — but re-encode a
 	/// revision higher. Each name drops off this list once a snapshot taken
 	/// after its bump exists to pin it, exactly as `V3_3_0_BUMPED` did at
@@ -92,6 +94,7 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 		"StoredTableDefinition",
 		"StoredFieldDefinition",
 		"StoredSubscriptionDefinition",
+		"StoredBucketDefinition",
 		"DatabaseDefinition",
 		"StoredApiDefinition",
 		"StoredIndexDefinition",

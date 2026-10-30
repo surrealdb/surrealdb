@@ -724,6 +724,7 @@ pub(super) fn plan_alter<'e>(
 				permissions: stmt.permissions.clone().unwrap_or_default(),
 				readonly: false,
 				comment: None,
+				presign_nonce: uuid::Uuid::nil(),
 			};
 			let mut fields = Vec::new();
 			match &stmt.backend {
@@ -760,6 +761,7 @@ pub(super) fn plan_alter<'e>(
 					permissions,
 					readonly: stmt.readonly.clone(),
 					comment: stmt.comment.clone(),
+					revoke_signatures: stmt.revoke_signatures,
 				},
 				stmt.if_exists,
 			)

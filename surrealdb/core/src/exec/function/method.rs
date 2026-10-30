@@ -730,6 +730,8 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 		);
 		m.register_typed("exists", ValueKind::File, get(funcs, "file::exists"));
 		m.register_typed("list", ValueKind::File, get(funcs, "file::list"));
+		m.register_typed("presign_get", ValueKind::File, get(funcs, "file::presign_get"));
+		m.register_typed("presign_put", ValueKind::File, get(funcs, "file::presign_put"));
 	}
 
 	// =====================================================================

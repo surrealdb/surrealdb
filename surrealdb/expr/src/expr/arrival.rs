@@ -917,6 +917,7 @@ impl Visitor for ArrivalVisitor {
 			permissions: _,
 			readonly: _,
 			comment: _,
+			revoke_signatures: _,
 		} []
 		visit_alter_config(AlterConfigStatement) { if_exists: _, inner: _, comment: _ } []
 		visit_alter_analyzer(AlterAnalyzerStatement) {

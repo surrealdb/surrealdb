@@ -814,6 +814,7 @@ pub(crate) enum AlterObject {
 		permissions: Option<PermissionShape>,
 		readonly: AlterKind<()>,
 		comment: AlterKind<String>,
+		revoke_signatures: bool,
 	},
 	Config {
 		inner: Box<ConfigShape>,

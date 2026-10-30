@@ -46,6 +46,17 @@ pub static HTTP_MAX_GRAPHQL_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_API_BODY_SIZE", usize, 4 << 20);
 
+/// The transport ceiling on a bucket upload, under whatever limit a presigned
+/// URL itself carries. Generous by default: a `file://` or cloud upload streams
+/// to the backend rather than being buffered, so the size does not bound the
+/// node's memory. A `memory://` bucket is the exception, and bounded by node
+/// memory by nature — the store is the memory.
+///
+/// `SURREAL_BUCKET_PRESIGN_MAX_SIZE` is the setting that bounds what a URL may
+/// allow; this one bounds every upload, signed or not.
+pub static HTTP_MAX_BUCKET_BODY_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_BUCKET_BODY_SIZE", usize, 5 << 30);
+
 /// The maximum HTTP body size of the HTTP /rpc endpoint (default: 4 MiB)
 pub static HTTP_MAX_RPC_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);

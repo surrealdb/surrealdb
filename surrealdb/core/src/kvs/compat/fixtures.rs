@@ -776,6 +776,7 @@ pub fn bucket_basic() -> StoredBucketDefinition {
 		backend: None,
 		comment: None,
 		permissions: StoredPermission::Full,
+		presign_nonce: uuid::Uuid::nil(),
 	}
 }
 
@@ -788,6 +789,9 @@ pub fn bucket_readonly() -> StoredBucketDefinition {
 		backend: Some("s3://bucket/archives".into()),
 		comment: Some("Read-only archive storage".to_string()),
 		permissions: StoredPermission::None,
+		// Nil, so the pre-revision-2 snapshots keep matching: a bucket written
+		// before this field existed must read back as the nil nonce.
+		presign_nonce: uuid::Uuid::nil(),
 	}
 }
 

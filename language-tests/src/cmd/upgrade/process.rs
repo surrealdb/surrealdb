@@ -105,6 +105,9 @@ impl SurrealProcess {
 			.args(common_args)
 			// Set the worker threads to 1 so the different processes interver less with eachother
 			.env("SURREAL_RUNTIME_WORKER_THREADS", "1")
+			// Lets the current checkout mint presigned URLs. A release that
+			// predates presigning ignores the variable.
+			.env("SURREAL_BUCKET_PRESIGN_SECRET", "language-tests-presign-secret-0000")
 			.stdin(Stdio::null())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())

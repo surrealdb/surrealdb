@@ -705,6 +705,36 @@ macro_rules! define_async_function {
 		);
 	};
 
+	// Two required + one optional: (a: Type1, b: Type2, ?opt: Type3) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		effects: $effects:expr,
+		fallibility: $fallibility:expr,
+		$(rule: $rule:expr,)?
+		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		$crate::__define_async_scalar!(
+			$struct_name,
+			$func_name,
+			effects: $effects,
+			fallibility: $fallibility,
+			sig: $crate::exec::function::Signature::new()
+				.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+				.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+				.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+				.returns($crate::expr::Kind::$ret),
+			$(rule: $rule,)?
+			exec: |ctx, args| {
+				if let Err(e) = $crate::exec::function::check_arity($func_name, &args, 2, Some(3)) {
+					return $crate::exec::function::ready_boxed(Err(e));
+				}
+				Box::pin(($impl_fn)(ctx, args))
+			}
+		);
+	};
+
 	// One required + two optional: (req: Type1, ?opt1: Type2, ?opt2: Type3) -> ReturnType
 	(
 		$struct_name:ident,

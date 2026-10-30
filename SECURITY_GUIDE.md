@@ -1890,10 +1890,92 @@ Flag when changes touch:
   paths must not appear in client-facing errors.
 - Readonly buckets must reject all write operations before any I/O.
 - File upload size must be bounded.
-- List results must have a maximum count enforced by the system.
+- A listing is bounded only by the caller's `limit`; no node-wide ceiling is applied. Guests and
+  record users cannot list at all.
 - Guest and record users must not be able to list bucket contents.
 - Backend URLs in DEFINE BUCKET must be validated against an allowlist.
 - Remote object store operations must have bounded timeouts.
+
+### Presigned URLs
+
+**Files**: `buc/presign/`, `buc/access.rs`, `server/src/ntw/bucket.rs`
+
+A presigned URL is a **bearer credential**. The bucket's `PERMISSIONS` clause is
+evaluated once, when the URL is minted, and never again. Until it expires the URL
+works for whoever holds it; it outlives the session that made it, outlives the
+removal of the user who made it, and a clause tightened afterwards does not
+reach it. That is the bargain the feature exists to make, and every invariant
+below follows from it.
+
+- The signature must cover the method, the full encoded path, and every query parameter except
+  itself. A parameter that can be added, edited *or removed* without invalidating the signature is
+  a bypass — removal is the direction an attacker wants, since it is how a limit is lifted.
+- The signing key must bind the tenant — namespace id, database id, bucket name, nonce — and
+  must do so through the *derivation*, not through a comparison in the verifier. An equality check
+  can be dropped in a refactor; a differing key cannot.
+- The path that is signed must be the path that is resolved. Both sides re-encode from the
+  normalised `ObjectKey`, because axum percent-decodes captures and `a%2Fb` and `a/b` arrive
+  identically. Signing one spelling while the store resolves another grants access to an object
+  nobody authorised.
+- Expiry is checked **after** the signature, never before, so a URL that verifies is one whose
+  expiry has not been edited.
+- A valid signature is not a safety proof. Key normalisation and traversal rejection still run, on
+  the same value the signature covered.
+- Signature comparison must be constant-time, and a failure must not report *which* part failed.
+  Distinguishing a mismatched tenant from an edited parameter is an oracle.
+- Every variable a presign clause can read must be bound to a concrete value, never to `NONE`.
+  `NONE <= n` is true in SurrealQL, so a `NONE`-bound variable satisfies every upper bound a clause
+  can write, and a clause meant to cap becomes one that permits.
+- `SURREAL_BUCKET_PRESIGN_MAX_TTL` and `SURREAL_BUCKET_PRESIGN_MAX_SIZE` bound every mint beneath
+  whatever a clause allows. They are what protects an operator who never considered presigning, and
+  a bucket with `PERMISSIONS FULL` can mint.
+- The signing secret is `SURREAL_BUCKET_PRESIGN_SECRET`, dedicated to presigning and shared by
+  every node. It must never be logged or rendered (`PresignSecret`'s `Debug` is redacted). A value
+  shorter than 32 bytes is refused, which leaves presigning disabled.
+- Minting must fail closed when the node holds no signing secret. A per-node fallback key works on
+  one node and fails intermittently behind a load balancer.
+- An **anonymous** `/bucket` request that carries no signature is a guest, and is admitted only
+  where the node allows guest access (`Datastore::check_anon`, the rule every other route applies).
+  It is then judged by the bucket's clause as a guest's `file::*` call is, so `PERMISSIONS FULL`
+  opens a bucket to guests exactly when the node opens itself to them. A listing is refused to
+  guests and record users, as `file::list` is.
+- Every response that serves object bytes or metadata carries `X-Content-Type-Options: nosniff` and
+  `Content-Security-Policy: sandbox`, whatever the stored type. Whoever may upload chooses the type
+  — a guest, or the holder of a presigned URL — and without both headers a stored `text/html` or
+  `image/svg+xml` runs its script on the database's origin with its users' cookies.
+- A content type is stored only when given and never inferred from the key. A backend that cannot
+  hold one (the file backend) refuses a write that names one, before any bytes are read, rather
+  than dropping it. `application/octet-stream` means no type, so a client's default header does not
+  fail an upload.
+- A presigned upload binds its content type, absent or present, into the signature (`ct`), and the
+  upload must declare exactly that type. Otherwise the holder of a URL minted for an image could
+  store `text/html`. `$content_type` is bound for `presign_put`, and is `NONE` for a URL with no
+  type, so a clause listing allowed types refuses an omitted one.
+- A session-authenticated `/bucket` request must additionally pass `can_access_ns_db` for the
+  namespace and database **named in the path**. Those came from the caller and have already
+  replaced whatever the session selected, so the authenticated level is the only trustworthy
+  scope, and `PERMISSIONS FULL` cannot see which tenant was asked for. A signature needs no
+  equivalent check: the ids and the nonce are inside its key derivation, so one minted for another
+  tenant derives a different key. The same gate guards `/api/{ns}/{db}` (GHSA-848m-r628-vrxw).
+- A signature the server cannot fully reconstruct — an unknown parameter, a malformed number, `sig`
+  without `exp` — must be refused, not retried as an unsigned request. Falling back lets a caller
+  strip a signature it cannot satisfy and be judged by a different rule.
+- A signed size limit must be enforced as the body streams, and breaching it must leave no object:
+  `put_streamed` treats a stream error as an abort for exactly this.
+- `sig` travels in the query string, so it reaches access logs, browser history and `Referer`
+  headers. The HTTP trace span records `url.path` and no query string; a new sink for request URLs
+  must scrub `sig` before recording one.
+- The only revocations for an issued URL are its expiry, `ALTER BUCKET ... REVOKE SIGNATURES`,
+  replacing the bucket, and changing `SURREAL_BUCKET_PRESIGN_SECRET`. Changing the secret
+  invalidates every URL on the node at once, and no rewrap is possible — the URL is in a browser,
+  not in the KV store.
+- A bucket's `presign_nonce` must be **random and never reused**, never a counter. It is an input
+  to the signing-key derivation, and the value only has to be unique, because it feeds a PRF keyed
+  by the presign secret. `REMOVE BUCKET` deletes the row that holds it and `DEFINE BUCKET` has no
+  syntax to restore it, so any path that loses it must produce a value no issued URL was signed
+  under. A counter restarting at zero re-validates every URL signed under zero, which is a
+  revocation bypass. It is carried across `DEFINE ... OVERWRITE`, the one redefinition that keeps
+  the same bucket.
 
 ### Review Triggers
 
@@ -1905,6 +1987,12 @@ Flag when changes touch:
 - Bucket permission expression evaluation
 - File upload size enforcement or list result limits
 - Error formatting in bucket operation responses
+- The presign canonical form, derivation chain, or signature comparison
+- Any variable bound into a bucket `PERMISSIONS` clause
+- The `/bucket` route's authentication, status mapping, or query parsing
+- `presign_nonce`, and anything that writes a `BucketDefinition`
+- `ObjectKey` normalisation, which is what makes one object have one key across the clause, the
+  signature and the store
 
 ---
 

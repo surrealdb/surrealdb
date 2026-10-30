@@ -269,6 +269,7 @@ keywords! {
 	Session = "SESSION",
 	Set = "SET",
 	Show = "SHOW",
+	Signatures = "SIGNATURES",
 	Signer = "SIGNER",
 	Signin = "SIGNIN",
 	Signup = "SIGNUP",

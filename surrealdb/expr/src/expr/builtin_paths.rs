@@ -158,6 +158,8 @@ pub static PATHS: phf::Map<UniCase<&'static str>, PathEntry> = phf_map! {
 		UniCase::ascii("file::rename_if_not_exists") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("file::exists") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("file::list") => (PathKind::Function, None, FIRST),
+		UniCase::ascii("file::presign_get") => (PathKind::Function, None, FIRST),
+		UniCase::ascii("file::presign_put") => (PathKind::Function, None, FIRST),
 		//
 		UniCase::ascii("geo::area") => (PathKind::Function, None, FIRST),
 		UniCase::ascii("geo::bearing") => (PathKind::Function, None, FIRST),
