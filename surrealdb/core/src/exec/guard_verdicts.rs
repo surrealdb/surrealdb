@@ -159,9 +159,9 @@ pub(crate) enum GuardKind {
 	Function,
 	Param,
 	/// A model's or a module's: only a build that can call either has one.
-	#[cfg(any(feature = "ml", feature = "surrealism"))]
+	#[cfg(feature = "surrealism")]
 	Model,
-	#[cfg(any(feature = "ml", feature = "surrealism"))]
+	#[cfg(feature = "surrealism")]
 	Module,
 }
 

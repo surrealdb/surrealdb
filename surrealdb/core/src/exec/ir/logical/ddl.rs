@@ -440,12 +440,17 @@ fn define_table_checks(stmt: &crate::expr::statements::define::DefineTableStatem
 pub(crate) enum PlanError {
 	/// A broken invariant: the statement has a shape the planner relies on never occurring.
 	Invariant(String),
+	/// A statement the planner declines to cover, with the reason it states.
+	Unsupported(String),
 }
 
 impl From<PlanError> for IrError {
 	fn from(error: PlanError) -> Self {
 		match error {
 			PlanError::Invariant(detail) => invariant(&detail),
+			PlanError::Unsupported(reason) => IrError::Unsupported {
+				reason,
+			},
 		}
 	}
 }

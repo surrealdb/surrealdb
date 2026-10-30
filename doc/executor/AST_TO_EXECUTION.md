@@ -671,7 +671,7 @@ cargo test --locked -p surrealdb-expr --lib
 cargo test --locked -p surrealdb-catalog --lib
 cargo test --locked -p surrealdb-gql
 cargo test --locked -p surrealdb-datastore
-cargo clippy --locked -p surrealdb-core --all-targets --features kv-mem,gql,scripting,http,jwks,ml,surrealism -- -D warnings
+cargo clippy --locked -p surrealdb-core --all-targets --features kv-mem,gql,scripting,http,jwks,surrealism -- -D warnings
 cargo clippy --locked -p surrealdb-core --lib --tests --no-default-features --features kv-mem -- -D warnings
 cargo clippy --locked -p surrealdb-expr --all-targets -- -D warnings
 cargo clippy --locked -p surrealdb-catalog --all-targets -- -D warnings

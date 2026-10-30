@@ -770,19 +770,10 @@ fn auth_after(command: &Command, results: &[QueryResult], auth: Option<Auth>) ->
 		| Command::ExportFile {
 			..
 		}
-		| Command::ExportMl {
-			..
-		}
 		| Command::ExportBytes {
 			..
 		}
-		| Command::ExportBytesMl {
-			..
-		}
 		| Command::ImportFile {
-			..
-		}
-		| Command::ImportMl {
 			..
 		}
 		| Command::Health
@@ -894,54 +885,6 @@ async fn refresh_token(
 		}
 	};
 	Ok((value, results))
-}
-
-/// Build the URL for the `GET /ml/export/{name}/{version}` route from the
-/// session's base URL and an attacker-controllable model name and version.
-///
-/// The fixed `ml/export/` route is resolved with [`Url::join`], the same way the
-/// health check, RPC, export, and import routes resolve theirs. A base URL whose
-/// path has no trailing slash (such as `http://host/prefix`) therefore resolves
-/// this route at the host root, keeping ML export on the same base path the rest
-/// of the client uses for that endpoint.
-///
-/// The name and version are then appended as single, percent-encoded path
-/// segments, so a value that parses as an absolute URL, or one that contains `/`
-/// or `..`, cannot redirect the authenticated request to another origin or escape
-/// the export route.
-///
-/// A value of exactly `.` or `..` is first mapped through `encode_dot_segment`,
-/// because `path_segments_mut` would otherwise drop `.` or climb the path on
-/// `..`, silently dropping the name or shifting the version into its position.
-///
-/// Not gated to a target family: the byte-stream `Command::ExportBytesMl` arm
-/// calls it on every target, including wasm.
-fn ml_export_url(base_url: &Url, name: &str, version: &str) -> Result<Url> {
-	let mut url = base_url.join("ml/export/").map_err(crate::std_error_to_types_error)?;
-	url.path_segments_mut()
-		.map_err(|()| Error::internal("The server address does not support paths".to_string()))?
-		.pop_if_empty()
-		.extend([encode_dot_segment(name), encode_dot_segment(version)]);
-	Ok(url)
-}
-
-/// Map a path segment that `url::PathSegmentsMut::extend` would not keep verbatim
-/// to a form it does, leaving every other value untouched.
-///
-/// `extend` skips a segment of exactly `.`, and treats `..` as a parent-directory
-/// reference that shortens the path, so either value would drop the model name or
-/// shift the version into the name's slot. Returning the percent-encoded `%2E` /
-/// `%2E%2E` makes `extend` emit one inert `%252E` / `%252E%252E` segment that
-/// stays in its own position under `/ml/export/` and cannot traverse. A name or
-/// version of exactly `.` / `..` therefore does not decode back to that literal
-/// server-side: the request is contained and fails cleanly instead of corrupting
-/// the route.
-fn encode_dot_segment(segment: &str) -> &str {
-	match segment {
-		"." => "%2E",
-		".." => "%2E%2E",
-		other => other,
-	}
 }
 
 async fn router(
@@ -1240,13 +1183,7 @@ async fn router(
 		Command::ExportFile {
 			..
 		}
-		| Command::ExportMl {
-			..
-		}
 		| Command::ImportFile {
-			..
-		}
-		| Command::ImportMl {
 			..
 		} => Err(Error::internal(
 			"File-based export/import is not supported on this architecture. \
@@ -1294,60 +1231,10 @@ async fn router(
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
-		Command::ExportMl {
-			path,
-			config,
-		} => {
-			let req_path = ml_export_url(base_url, &config.name, &config.version)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
-			let request = client
-				.get(req_path)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(ACCEPT, "application/octet-stream");
-			export_file(request, path).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		Command::ExportBytesMl {
-			bytes,
-			config,
-		} => {
-			let req_path = ml_export_url(base_url, &config.name, &config.version)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
-			let request = client
-				.get(req_path)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(ACCEPT, "application/octet-stream");
-			export_bytes(request, bytes).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
 			path,
 		} => {
 			let req_path = base_url.join("import").map_err(crate::std_error_to_types_error)?;
-			let headers = session_state.headers.read().await;
-			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/octet-stream");
-			import(request, path).await?;
-			Ok(vec![QueryResultBuilder::instant_none()])
-		}
-		#[cfg(not(target_family = "wasm"))]
-		Command::ImportMl {
-			path,
-		} => {
-			let req_path = base_url
-				.join("ml")
-				.map_err(crate::std_error_to_types_error)?
-				.join("import")
-				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -1399,123 +1286,6 @@ async fn router(
 			.await?;
 			Ok(res)
 		}
-	}
-}
-
-#[cfg(all(test, not(target_family = "wasm")))]
-mod ml_export_url_tests {
-	use url::Url;
-
-	use super::ml_export_url;
-
-	#[test]
-	fn builds_the_export_route() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "mymodel", "1.0.0").unwrap();
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/mymodel/1.0.0");
-	}
-
-	#[test]
-	fn keeps_a_base_path_prefix() {
-		let base = Url::parse("http://127.0.0.1:8000/surreal/").unwrap();
-		let url = ml_export_url(&base, "m", "1").unwrap();
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/surreal/ml/export/m/1");
-	}
-
-	#[test]
-	fn an_absolute_url_name_cannot_change_the_request_origin() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "https://attacker.example/ml", "1.0.0").unwrap();
-		assert_eq!(url.scheme(), "http");
-		assert_eq!(url.host_str(), Some("127.0.0.1"));
-		assert_eq!(url.port(), Some(8000));
-	}
-
-	#[test]
-	fn a_name_cannot_traverse_out_of_the_export_route() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "../../admin", "1.0.0").unwrap();
-		// The `/` separators are percent-encoded, so the whole value is one
-		// segment under `/ml/export/` and cannot climb or add path segments.
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/..%2F..%2Fadmin/1.0.0");
-	}
-
-	#[test]
-	fn a_slash_in_the_name_stays_one_segment() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "a/b", "1.0.0").unwrap();
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/a%2Fb/1.0.0");
-	}
-
-	#[test]
-	fn the_version_segment_is_encoded_too() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "m", "../../../etc/passwd").unwrap();
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/m/..%2F..%2F..%2Fetc%2Fpasswd");
-	}
-
-	#[test]
-	fn a_single_dot_name_is_kept_as_one_segment() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, ".", "1.0.0").unwrap();
-		// `.` would be dropped by `PathSegmentsMut`, collapsing the path to
-		// `/ml/export/1.0.0` and shifting the version into the name's slot. It is
-		// encoded to one inert segment that stays in the name position.
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/%252E/1.0.0");
-		let segments: Vec<&str> = url.path_segments().unwrap().collect();
-		assert_eq!(segments, ["ml", "export", "%252E", "1.0.0"]);
-	}
-
-	#[test]
-	fn a_double_dot_name_is_kept_as_one_segment_and_cannot_climb() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "..", "1.0.0").unwrap();
-		// `..` would climb out of `/ml/export/` (to `/ml/1.0.0`). It is encoded to
-		// one inert segment that stays a single level under `/ml/export/`.
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/%252E%252E/1.0.0");
-		let segments: Vec<&str> = url.path_segments().unwrap().collect();
-		assert_eq!(segments, ["ml", "export", "%252E%252E", "1.0.0"]);
-	}
-
-	#[test]
-	fn a_dot_version_is_kept_in_the_version_position() {
-		let base = Url::parse("http://127.0.0.1:8000/").unwrap();
-		let url = ml_export_url(&base, "m", "..").unwrap();
-		// The same containment applies to a `.`/`..` version segment.
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/m/%252E%252E");
-		let segments: Vec<&str> = url.path_segments().unwrap().collect();
-		assert_eq!(segments, ["ml", "export", "m", "%252E%252E"]);
-	}
-
-	#[test]
-	fn a_base_path_without_a_trailing_slash_routes_like_health_and_rpc() {
-		// An endpoint whose path has no trailing slash. The health check and the
-		// RPC request build their route with `Url::join` on a relative path, so a
-		// base of `http://host/surreal` resolves them at the host root and drops
-		// `surreal`. ML export resolves the same endpoint the same way.
-		let base = Url::parse("http://127.0.0.1:8000/surreal").unwrap();
-		assert_eq!(base.join(super::RPC_PATH).unwrap().as_str(), "http://127.0.0.1:8000/rpc");
-		assert_eq!(base.join("health").unwrap().as_str(), "http://127.0.0.1:8000/health");
-
-		let url = ml_export_url(&base, "m", "1").unwrap();
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/m/1");
-		let segments: Vec<&str> = url.path_segments().unwrap().collect();
-		assert_eq!(segments, ["ml", "export", "m", "1"]);
-	}
-
-	#[test]
-	fn a_dot_name_stays_contained_under_a_non_trailing_slash_base() {
-		// The dot-segment hardening and the no-traversal guarantee do not depend on
-		// how the base path ends: a `..` name is one inert segment one level under
-		// `/ml/export/`, on the same origin, and never climbs into or past the base.
-		let base = Url::parse("http://127.0.0.1:8000/surreal").unwrap();
-		let url = ml_export_url(&base, "..", "1.0.0").unwrap();
-		assert_eq!(url.scheme(), "http");
-		assert_eq!(url.host_str(), Some("127.0.0.1"));
-		assert_eq!(url.port(), Some(8000));
-		assert_eq!(url.as_str(), "http://127.0.0.1:8000/ml/export/%252E%252E/1.0.0");
-		let segments: Vec<&str> = url.path_segments().unwrap().collect();
-		assert_eq!(segments, ["ml", "export", "%252E%252E", "1.0.0"]);
 	}
 }
 

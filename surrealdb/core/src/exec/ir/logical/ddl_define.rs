@@ -646,35 +646,10 @@ pub(super) fn plan_define<'e>(
 				None,
 			)
 		}
-		DefineStatement::Model(stmt) => {
-			let comment = s.comment(&stmt.comment)?;
-			let permissions = s.permission(&stmt.permissions)?;
-			let definition = crate::catalog::MlModelDefinition {
-				name: stmt.name.clone(),
-				version: stmt.version.clone(),
-				hash: stmt.hash.clone(),
-				comment: comment_text(&stmt.comment),
-				permissions: stmt.permissions.clone(),
-				permissions_body: crate::catalog::LogicalPermissionBody::of(&stmt.permissions),
-			};
-			(
-				DdlForm::DefineModel,
-				(EDIT, ResourceKind::Model, Base::Db),
-				DefineObject::Model {
-					hash: stmt.hash.clone(),
-					name: stmt.name.clone(),
-					version: stmt.version.clone(),
-					comment,
-					permissions,
-				},
-				template(
-					"StoredMlModelDefinition",
-					stored_value(codec, &definition.to_stored(), "StoredMlModelDefinition")?,
-					MODEL_HOLES,
-				),
-				stmt.kind.clone(),
-				None,
-			)
+		DefineStatement::Model(_) => {
+			return Err(PlanError::Unsupported(String::from(
+				"DEFINE MODEL: this build does not run SurrealML models",
+			)));
 		}
 		DefineStatement::Module(stmt) => {
 			let comment = s.comment(&stmt.comment)?;

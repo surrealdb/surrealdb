@@ -27,7 +27,6 @@ http = ["surrealdb-core/http"]
 # see `surrealdb-idx` for what enabling one costs.
 cjk = ["surrealdb-core/cjk"]
 jwks = ["surrealdb-core/jwks"]
-ml = ["surrealdb-core/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
 
 [dependencies]
@@ -62,7 +61,6 @@ surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
-surrealml-core = { workspace = true, optional = true }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)
 anyhow.workspace = true

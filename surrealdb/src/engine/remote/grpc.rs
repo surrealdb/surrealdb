@@ -23,8 +23,8 @@ use std::time::Duration as StdDuration;
 
 use async_channel::Sender;
 use surrealdb_engine_api::{
-	DbExportConfig, EngineContext, EngineFuture, IsolationLevel, MlExportConfig, OpenedTransaction,
-	ReadOnlyBegin, SurrealEngine,
+	DbExportConfig, EngineContext, EngineFuture, IsolationLevel, OpenedTransaction, ReadOnlyBegin,
+	SurrealEngine,
 };
 use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
@@ -1519,33 +1519,6 @@ impl SurrealEngine for GrpcEngine {
 		})
 	}
 
-	fn export_ml_file(
-		&self,
-		ctx: EngineContext,
-		path: PathBuf,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let context = self.ready(ctx).await?;
-			let stream = self.export_ml(context, config).await?;
-			write_export_to_file(stream, path).await
-		})
-	}
-
-	fn export_ml_bytes(
-		&self,
-		ctx: EngineContext,
-		bytes: async_channel::Sender<Result<Vec<u8>, Error>>,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let context = self.ready(ctx).await?;
-			let stream = self.export_ml(context, config).await?;
-			tokio::spawn(pump_export_to_channel(stream, bytes));
-			Ok(())
-		})
-	}
-
 	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
@@ -1575,27 +1548,9 @@ impl SurrealEngine for GrpcEngine {
 			Ok(())
 		})
 	}
-
-	fn import_ml_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let context = self.ready(ctx).await?;
-			let file = tokio::fs::File::open(&path)
-				.await
-				.map_err(|e| Error::internal(format!("Failed to open {}: {e}", path.display())))?;
-			// The model's name and version live in its own header, which the
-			// server reads; `Begin` leaves them empty rather than guessing them
-			// from the file's path.
-			self.client()
-				.import_ml_model(ml_import_stream(context, file))
-				.await
-				.map_err(status_to_error)?;
-			Ok(())
-		})
-	}
 }
 
-/// The chunks of an export, which SurrealQL and ML-model exports share the
-/// shape of.
+/// The chunks of a SurrealQL export.
 ///
 /// Carries the `Bytes` the wire decoded into rather than a copy: the stream
 /// ends when the export's trailer says it is complete, so a consumer that runs
@@ -1623,33 +1578,12 @@ impl GrpcEngine {
 			.into_inner();
 		Ok(export_chunks(stream))
 	}
-
-	/// Starts a machine-learning model export, normalising its frames into
-	/// chunks.
-	async fn export_ml(
-		&self,
-		context: rpc::RequestContext,
-		config: MlExportConfig,
-	) -> EngineResult<ExportChunks> {
-		let stream = self
-			.client()
-			.export_ml_model(self.checked(rpc::ExportMlModelRequest {
-				context: Some(context),
-				name: config.name,
-				version: config.version,
-			})?)
-			.await
-			.map_err(status_to_error)?
-			.into_inner();
-		Ok(export_chunks(stream))
-	}
 }
 
 /// One frame of an export stream, with its wrapper message peeled off.
 ///
-/// The SurrealQL and ML-model exports carry the same three frames in two
-/// different wrappers, so unwrapping them is all that differs between them --
-/// which is what [`ExportResponse`] answers.
+/// The SurrealQL export carries three frames, so unwrapping them is all that differs between them
+/// -- which is what [`ExportResponse`] answers.
 enum ExportFrame {
 	Chunk(tonic::codegen::Bytes),
 	Trailer(rpc::DataTrailer),
@@ -1684,7 +1618,6 @@ macro_rules! export_response {
 }
 
 export_response!(rpc::ExportSurqlResponse, rpc::export_surql_response::Frame);
-export_response!(rpc::ExportMlModelResponse, rpc::export_ml_model_response::Frame);
 
 /// Normalises an export stream into the chunks it carries, failing the
 /// transfer if it does not complete.
@@ -1790,22 +1723,6 @@ impl ImportRequest for rpc::ImportSurqlRequest {
 	}
 }
 
-impl ImportRequest for rpc::ImportMlModelRequest {
-	fn chunk(data: tonic::codegen::Bytes) -> Self {
-		Self {
-			frame: Some(rpc::import_ml_model_request::Frame::Chunk(rpc::DataChunk {
-				data,
-			})),
-		}
-	}
-
-	fn trailer(trailer: rpc::DataTrailer) -> Self {
-		Self {
-			frame: Some(rpc::import_ml_model_request::Frame::Trailer(trailer)),
-		}
-	}
-}
-
 /// Frames a SurrealQL import: the opening frame carrying the context, then the
 /// file's chunks, then a trailer stating what was sent.
 fn import_stream(
@@ -1815,25 +1732,6 @@ fn import_stream(
 	let begin = rpc::ImportSurqlRequest {
 		frame: Some(rpc::import_surql_request::Frame::Begin(rpc::ImportSurqlBegin {
 			context: Some(context),
-		})),
-	};
-	frame_import(begin, file)
-}
-
-/// Frames a SurrealML import.
-///
-/// The opening frame names no model: the name and version a model is stored
-/// under come from its own header, which the server reads, so guessing them
-/// from the file's path here would only invite a disagreement.
-fn ml_import_stream(
-	context: rpc::RequestContext,
-	file: tokio::fs::File,
-) -> impl futures::Stream<Item = rpc::ImportMlModelRequest> + Send + 'static {
-	let begin = rpc::ImportMlModelRequest {
-		frame: Some(rpc::import_ml_model_request::Frame::Begin(rpc::ImportMlModelBegin {
-			context: Some(context),
-			name: String::new(),
-			version: String::new(),
 		})),
 	};
 	frame_import(begin, file)

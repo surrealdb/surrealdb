@@ -20,9 +20,6 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
-#[cfg(all(target_family = "wasm", feature = "ml"))]
-compile_error!("The `ml` feature is not supported on Wasm.");
-
 #[macro_use]
 extern crate tracing;
 

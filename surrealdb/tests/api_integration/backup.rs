@@ -127,23 +127,6 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 	}
 }
 
-#[cfg(feature = "ml")]
-pub async fn ml_export_import(new_db: impl CreateDb) {
-	let config = Config::new();
-	let (permit, db) = new_db.create_db(config).await;
-	let db_name = Ulid::new().to_string();
-	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
-	db.import(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/linear_test.surml"))
-		.ml()
-		.await
-		.unwrap();
-	drop(permit);
-	let file = format!("{db_name}.surml");
-	db.export(&file).ml("Prediction", semver::Version::new(0, 0, 1)).await.unwrap();
-	db.import(&file).ml().await.unwrap();
-	remove_file(file).await.unwrap();
-}
-
 pub async fn export_escaped_table_names(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (_, db) = new_db.create_db(config).await;
@@ -260,10 +243,6 @@ define_include_tests!(backup => {
 
 	#[tokio::test]
 	export_with_config,
-
-	#[test_log::test(tokio::test)]
-	#[cfg(feature = "ml")]
-	ml_export_import,
 
 	#[tokio::test]
 	export_escaped_table_names,

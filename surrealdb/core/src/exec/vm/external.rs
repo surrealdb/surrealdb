@@ -8,7 +8,7 @@
 //! otherwise than the one it was lowered from is an internal error and the
 //! call fails closed. Nothing here binds, plans or lowers.
 
-#[cfg(any(feature = "ml", feature = "surrealism"))]
+#[cfg(feature = "surrealism")]
 use super::program::DefHash;
 use super::program::{ExternalCallee, ExternalSpec, Program};
 use super::services::{EngineServices, ModelDefinition, ModuleExport, Services};
@@ -36,6 +36,9 @@ pub(super) async fn enter(
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<Entered> {
 	let services = EngineServices::new(ctx.exec_ctx);
+	// Only a module call judges its permissions against the program, and that needs Surrealism.
+	#[cfg(not(feature = "surrealism"))]
+	let _ = program;
 	match &spec.callee {
 		ExternalCallee::Script {
 			..
@@ -48,11 +51,6 @@ pub(super) async fn enter(
 			version,
 		} => {
 			let definition = services.read_model(name, version, ctx).await?;
-			#[cfg(feature = "ml")]
-			judge(program, spec, &definition.permissions, &definition.permissions_body, name, ctx)
-				.await?;
-			#[cfg(not(feature = "ml"))]
-			let _ = program;
 			Ok(Entered::Model(definition))
 		}
 		ExternalCallee::Module {
@@ -128,7 +126,7 @@ pub(super) async fn call(
 /// `permission` as the catalog stores it, `body` in logical form — for
 /// `ctx`, unless the call is the definer's: in a frame that skips
 /// permissions, or for a session whose reads are not checked.
-#[cfg(any(feature = "ml", feature = "surrealism"))]
+#[cfg(feature = "surrealism")]
 async fn judge(
 	program: &Program,
 	spec: &ExternalSpec,

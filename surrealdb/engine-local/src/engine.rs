@@ -10,31 +10,21 @@ use std::task::{Poll, ready};
 use std::{future::Future, path::PathBuf};
 
 use async_channel::{Receiver, Sender};
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
 use surrealdb_core::iam;
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::{
 	Datastore, Isolation, QueryRequest, ReadOnlyOptions, snapshot_description,
 };
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_engine_api::MlExportConfig;
 use surrealdb_engine_api::{
 	EngineContext, EngineFuture, IsolationLevel, OpenedTransaction, ReadOnlyBegin, SurrealEngine,
 	single_result,
 };
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_iam::{Action, ResourceKind};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_rpc::export::Config as DbExportConfig;
 use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Token};
 use surrealdb_types::{Array, Error, Notification, Object, ToSql, Value, Variables};
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealml_core::storage::surml_file::SurMlFile;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
@@ -212,43 +202,6 @@ async fn export_file(
 		}
 
 		return Err(Error::internal(error.to_string()));
-	}
-	Ok(())
-}
-
-#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-async fn export_ml(
-	kvs: &Datastore,
-	sess: &Session,
-	chn: Sender<Vec<u8>>,
-	MlExportConfig {
-		name,
-		version,
-	}: MlExportConfig,
-) -> Result<(), Error> {
-	let (nsv, dbv) = check_ns_db(sess).map_err(|e| Error::internal(e.to_string()))?;
-	// Check the permissions level
-	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
-		.map_err(|e| Error::internal(e.to_string()))?;
-
-	// Attempt to get the model definition
-	let Some(model) = kvs
-		.get_db_model(&nsv, &dbv, &name, &version)
-		.await
-		.map_err(|e| Error::internal(e.to_string()))?
-	else {
-		// Attempt to get the model definition
-		return Err(Error::not_found("Model not found".to_string(), None));
-	};
-	// Export the file data in to the store
-	let mut data = surrealdb_core::obs::stream(model.hash.to_string())
-		.await
-		.map_err(|e| Error::internal(e.to_string()))?;
-	// Process all stream values
-	while let Some(Ok(bytes)) = data.next().await {
-		if chn.send(bytes.to_vec()).await.is_err() {
-			break;
-		}
 	}
 	Ok(())
 }
@@ -816,39 +769,6 @@ impl SurrealEngine for LocalEngine {
 		})
 	}
 
-	#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-	fn export_ml_file(
-		&self,
-		ctx: EngineContext,
-		path: PathBuf,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let state = self.state(ctx).await?;
-			let session = state.session.read().await.clone();
-			export_to_file(path, |chn| export_ml(&self.kvs, &session, chn, config)).await
-		})
-	}
-
-	#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-	fn export_ml_bytes(
-		&self,
-		ctx: EngineContext,
-		bytes: Sender<Result<Vec<u8>, Error>>,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let state = self.state(ctx).await?;
-			let kvs = Arc::clone(&self.kvs);
-			let session = state.session.read().await.clone();
-			export_to_channel(
-				bytes,
-				|chn| async move { export_ml(&kvs, &session, chn, config).await },
-			);
-			Ok(())
-		})
-	}
-
 	#[cfg(not(target_family = "wasm"))]
 	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
@@ -898,70 +818,6 @@ impl SurrealEngine for LocalEngine {
 			for response in responses {
 				response.result?;
 			}
-
-			Ok(())
-		})
-	}
-
-	#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-	fn import_ml_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
-		Box::pin(async move {
-			let state = self.state(ctx).await?;
-			let mut file = match OpenOptions::new().read(true).open(&path).await {
-				Ok(file) => file,
-				Err(error) => {
-					return Err(Error::internal(format!(
-						"Failed to open `{}`: {}",
-						path.display(),
-						error
-					)));
-				}
-			};
-
-			// Ensure a NS and DB are set
-			let (nsv, dbv) =
-				check_ns_db(&*state.session.read().await).map_err(std_error_to_types_error)?;
-			// Check the permissions level
-			self.kvs
-				.check(
-					&*state.session.read().await,
-					Action::Edit,
-					ResourceKind::Model.on_db(&nsv, &dbv),
-				)
-				.map_err(std_error_to_types_error)?;
-			// Create a new buffer
-			let mut buffer = Vec::new();
-			// Load all the uploaded file chunks
-			if let Err(error) = file.read_to_end(&mut buffer).await {
-				return Err(Error::internal(format!(
-					"Failed to read `{}`: {}",
-					path.display(),
-					error
-				)));
-			}
-			// Check that the SurrealML file is valid
-			let file = match SurMlFile::from_bytes(buffer) {
-				Ok(file) => file,
-				Err(error) => {
-					return Err(Error::internal(format!(
-						"Invalid SurrealML file: {}",
-						error.message
-					)));
-				}
-			};
-			// Convert the file back in to raw bytes
-			let data = file.to_bytes();
-
-			self.kvs
-				.put_ml_model(
-					&*state.session.read().await,
-					&file.header.name.to_string(),
-					&file.header.version.to_string(),
-					&file.header.description.to_string(),
-					data,
-				)
-				.await
-				.map_err(std_error_to_types_error)?;
 
 			Ok(())
 		})

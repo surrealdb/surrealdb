@@ -1243,12 +1243,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2026-10-13"
 end = "2027-10-15"
 
-[[trusted.surrealml-core]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2023-10-31"
-end = "2026-05-06"
-
 [[trusted.surrealmx]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)

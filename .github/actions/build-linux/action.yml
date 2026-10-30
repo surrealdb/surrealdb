@@ -19,14 +19,10 @@ inputs:
     description: 'Build metadata'
     required: false
     default: ''
-  onnx-version:
-    description: 'The ONNX library version'
-    required: false
-    default: '1.23.2'
   extra-features:
     description: 'Extra features enabled in the binary'
     required: false
-    default: 'jwks,ml'
+    default: 'jwks'
   upload:
     description: 'Upload build artifacts'
     required: false
@@ -138,16 +134,6 @@ runs:
         set +e
         go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
-    - name: Determine ONNX architecture
-      id: onnx
-      shell: bash
-      run: |
-        if [[ "${{ inputs.platform }}" == "amd64" ]]; then
-          echo "arch=x64" >> $GITHUB_OUTPUT
-        else
-          echo "arch=aarch64" >> $GITHUB_OUTPUT
-        fi
-
     - name: Build binary
       shell: bash
       env:
@@ -177,15 +163,11 @@ runs:
           extra_args="${extra_args} --package ${{ inputs.package }}"
         fi
 
-        # Builder entrypoint downloads ONNX Runtime in-container when ORT_DOWNLOAD_URL is set.
-        ORT_DOWNLOAD_URL="https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz"
-
         # Do not pass `-e RUSTFLAGS=` when unset: an empty RUSTFLAGS in the container
         # disables `[build] rustflags` from `.cargo/config.toml`.
         docker_env=(
           -e "SURREAL_BUILD_VERSION=$SURREAL_BUILD_VERSION"
           -e "SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA"
-          -e "ORT_DOWNLOAD_URL=$ORT_DOWNLOAD_URL"
         )
         if [[ -n "${RUSTFLAGS:-}" ]]; then
           docker_env+=(-e "RUSTFLAGS=${RUSTFLAGS}")

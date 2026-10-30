@@ -60,7 +60,6 @@ rustls = [
     "tonic?/tls-webpki-roots",
     "tonic?/tls-aws-lc",
 ]
-ml = ["surrealdb-engine-local/ml"]
 jwks = ["surrealdb-engine-local/jwks"]
 arbitrary = ["surrealdb-engine-local/arbitrary"]
 allocation-tracking = ["surrealdb-engine-local/allocation-tracking"]

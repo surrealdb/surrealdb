@@ -3640,7 +3640,7 @@ mod http_integration {
 
 			// Check that other routes are allowed
 			// GET
-			for route in ["status", "health", "version", "sync", "ml/export/test/1.0.0"] {
+			for route in ["status", "health", "version", "sync"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -3652,7 +3652,7 @@ mod http_integration {
 				assert_ne!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in ["signin", "signup", "key/test", "ml/import"] {
+			for route in ["signin", "signup", "key/test"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -3706,7 +3706,7 @@ mod http_integration {
 
 			// Check that denied routes are disallowed
 			// GET
-			for route in ["version", "sync", "export", "ml/export/test/1.0.0"] {
+			for route in ["version", "sync", "export"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client
@@ -3718,7 +3718,7 @@ mod http_integration {
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
 			// POST
-			for route in ["sql", "signin", "signup", "key/test", "import", "ml/import"] {
+			for route in ["sql", "signin", "signup", "key/test", "import"] {
 				println!("Testing \"/{route}\" route...");
 
 				let res = client

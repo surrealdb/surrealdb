@@ -180,9 +180,6 @@ audit-as-crates-io = false
 [policy.surrealkv-compat-v1]
 audit-as-crates-io = false
 
-[policy.surrealml-core]
-audit-as-crates-io = false
-
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -1373,14 +1370,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.opentelemetry_sdk]]
 version = "0.33.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.ort]]
-version = "2.0.0-rc.15"
-criteria = "safe-to-deploy"
-
-[[exemptions.ort-sys]]
-version = "2.0.0-rc.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.p256]]

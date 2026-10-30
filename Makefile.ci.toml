@@ -845,25 +845,6 @@ args = [
     "ws_integration",
 ]
 
-[tasks.ci-ml-integration]
-category = "CI - INTEGRATION TESTS"
-description = "Run ML integration tests"
-command = "cargo"
-env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
-    "RUST_LOG",
-] } } }
-args = [
-    "test",
-    "--locked",
-    "--features",
-    "storage-mem,ml",
-    "--workspace",
-    "--test",
-    "ml_integration",
-    "--",
-    "ml_integration",
-]
-
 [tasks.ci-graphql-integration]
 category = "CI - INTEGRATION TESTS"
 description = "Run GraphQL integration tests"
@@ -936,15 +917,13 @@ args = [
     "--workspace",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,ml,graphql,gql,postgres",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,graphql,gql,postgres",
     "--test",
     "cli_integration",
     "--test",
     "http_integration",
     "--test",
     "ws_integration",
-    "--test",
-    "ml_integration",
     "--test",
     "graphql_integration",
     "--test",
@@ -1574,7 +1553,6 @@ args = [
     "--skip", "cli_integration",
     "--skip", "http_integration",
     "--skip", "ws_integration",
-    "--skip", "ml_integration",
     "--skip", "graphql_integration",
     "--skip", "gql_integration",
 ]
@@ -1628,7 +1606,7 @@ args = [
     "--config", "profile.test.package.surrealdb-mywire.debug=\"none\"",
     # Exclude the integration test binaries that `ci-workspace-test-run` skips,
     # so the archive neither compiles nor links those targets.
-    "-E", "not binary(/^(api|cli_integration|http_integration|ws_integration|ml_integration|graphql_integration|gql_integration)$/)",
+    "-E", "not binary(/^(api|cli_integration|http_integration|ws_integration|graphql_integration|gql_integration)$/)",
     "--archive-file", "target/workspace-tests.tar.zst",
 ]
 
@@ -1649,7 +1627,6 @@ args = [
     "--skip", "cli_integration",
     "--skip", "http_integration",
     "--skip", "ws_integration",
-    "--skip", "ml_integration",
     "--skip", "graphql_integration",
     "--skip", "gql_integration",
 ]
@@ -1756,12 +1733,12 @@ args = [
     "--locked",
     "--no-default-features",
     # Mirror the `ci-integration-all` feature set so the integration suites
-    # (cli/http/ws/ml/graphql/gql/pg) run under coverage, plus the coverage-only
+    # (cli/http/ws/graphql/gql/pg) run under coverage, plus the coverage-only
     # allocator features. `cli` is required for the `sql` subcommand, and
     # `postgres` for the `pg_integration` suite, which is compiled away without
     # it.
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,ml,graphql,gql,postgres",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,graphql,gql,postgres",
     "--workspace",
     # Exclude surrealism packages due to wasmtime complexity and stdin loops
     "--exclude", "surrealism-runtime",
@@ -2063,7 +2040,6 @@ dependencies = [
     "ci-cli-integration",
     "ci-http-integration",
     "ci-ws-integration",
-    "ci-ml-integration",
     # KVS tests
     "ci-kvs-mem",
     "ci-kvs-surrealkv",

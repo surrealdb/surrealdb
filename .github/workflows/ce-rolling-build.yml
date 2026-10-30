@@ -164,7 +164,7 @@ jobs:
               ;;
           esac
 
-          features="jwks,ml"
+          features="jwks"
           if grep -qE '^cjk = ' Cargo.toml; then
             features="${features},cjk"
           else

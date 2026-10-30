@@ -11,7 +11,6 @@ mod json;
 mod launcher;
 #[cfg(feature = "mcp")]
 pub(crate) mod mcp;
-mod ml;
 #[cfg(feature = "cli")]
 mod sql;
 mod start;
@@ -32,7 +31,6 @@ use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 #[cfg(feature = "mcp")]
 use mcp::McpCommandArguments;
-use ml::MlCommand;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
@@ -164,8 +162,6 @@ enum Commands {
 	#[cfg(feature = "mcp")]
 	#[command(about = "Start the MCP server over stdio for AI assistant integration")]
 	Mcp(McpCommandArguments),
-	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
-	Ml(MlCommand),
 	// The extension tooling is the Surreal CLI's `ext` component. Each spelling
 	// it has gone by is its own hidden stub, so the explanation names what was
 	// typed. No help flag on any: `--help` reaches the explanation, not a help
@@ -278,7 +274,6 @@ pub async fn init<
 	// a failure is reported as the JSON envelope
 	let stdout_is_data = json.is_some()
 		|| matches!(&args.command, Commands::Export(export) if export.writes_to_stdout())
-		|| matches!(&args.command, Commands::Ml(ml) if ml.writes_to_stdout())
 		|| is_mcp(&args.command);
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder()
@@ -328,7 +323,6 @@ pub async fn init<
 		Commands::Sql(args) => sql::init(args).await,
 		#[cfg(feature = "mcp")]
 		Commands::Mcp(args) => mcp::init::<C>(composer, args, runtime.clone()).await,
-		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(composer, args).await,

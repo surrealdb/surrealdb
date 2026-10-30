@@ -92,10 +92,6 @@ use super::opt::{CreateResource, IntoResource};
 /// code that explicitly demands `Sync` of a SurrealDB future needs changing.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`] from
-/// [`Surreal::export`](crate::Surreal::export).
-pub struct Model;
-
 /// Type-state marker for [`Export::with_config`](Export::with_config) on an [`Export`] from
 /// [`Surreal::export`](crate::Surreal::export).
 pub struct ExportConfig;
@@ -1455,7 +1451,6 @@ where
 		Export {
 			client: Cow::Borrowed(self),
 			target: target.into_export_destination(),
-			ml_config: None,
 			db_config: None,
 			response: PhantomData,
 			export_type: PhantomData,
@@ -1489,7 +1484,6 @@ where
 		Import {
 			client: Cow::Borrowed(self),
 			file: file.as_ref().to_owned(),
-			is_ml: false,
 			import_type: PhantomData,
 		}
 	}

@@ -18,7 +18,6 @@ pub mod kvexport;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub(crate) mod memory_guard;
-pub mod ml;
 pub(crate) mod output;
 mod params;
 mod rate_limit;
@@ -194,7 +193,6 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(signout::router())
 		.merge(signup::router())
 		.merge(key::router())
-		.merge(ml::router())
 		.merge(bucket::router())
 		.merge(api::router());
 

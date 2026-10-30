@@ -32,14 +32,12 @@ flags:
       - surrealdb/
       - src/
       - surrealism/
-      - surrealml/
       - tests/
     carryforward: true
   language-tests:
     paths:
       - surrealdb/
       - surrealism/
-      - surrealml/
       - tests/
     carryforward: true
 

@@ -309,11 +309,8 @@ pub(super) trait Services {
 	) -> FlowResult<Value>;
 }
 
-/// A model definition as [`Services::read_model`] finds it.
-#[cfg(feature = "ml")]
-pub(super) type ModelDefinition = Arc<crate::catalog::MlModelDefinition>;
-/// A build without the machine-learning runtime reads no model.
-#[cfg(not(feature = "ml"))]
+/// A model definition as [`Services::read_model`] finds it. Models are not
+/// executed, so no definition is ever read.
 pub(super) type ModelDefinition = std::convert::Infallible;
 
 /// A module definition as [`Services::read_module`] finds it.

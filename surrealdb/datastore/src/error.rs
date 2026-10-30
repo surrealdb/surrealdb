@@ -155,6 +155,19 @@ pub enum DatastoreError {
 		actual: u16,
 	},
 
+	/// The database holds a `DEFINE MODEL` definition. This build does not run models, so it
+	/// refuses to open a datastore that still records one.
+	#[error(
+		"The database `{ns}/{db}` holds the model `{model}<{version}>`, which this build cannot \
+		 open. Remove every DEFINE MODEL with an earlier release, then start this one again"
+	)]
+	StoredModels {
+		ns: String,
+		db: String,
+		model: String,
+		version: String,
+	},
+
 	/// The data on disk has been migrated by a newer version than this build
 	#[error(
 		"The data stored on disk was migrated by a newer version of SurrealDB \
@@ -385,6 +398,9 @@ impl LeafError for DatastoreError {
 			DatastoreError::InvalidTimeout(_)
 			| DatastoreError::QueryBeyondMemoryThreshold
 			| DatastoreError::InvalidStorageVersion
+			| DatastoreError::StoredModels {
+				..
+			}
 			| DatastoreError::OutdatedStorageVersion {
 				..
 			}

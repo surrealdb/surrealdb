@@ -834,7 +834,7 @@ jobs:
           # no-compile jobs above).
           enable-kache: "false"
 
-      # Catches PRs that change a published crate (e.g. surrealism, surrealml)
+      # Catches PRs that change a published crate (e.g. surrealism)
       # without bumping its version, so it's surfaced at review time instead of
       # only on main / at release time. Reads crates.io only (no secrets), so
       # this also runs on fork PRs.

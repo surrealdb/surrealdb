@@ -1468,9 +1468,9 @@ impl SurrealDbService for GrpcService {
 
 	async fn import_ml_model(
 		&self,
-		request: Request<tonic::Streaming<rpc::ImportMlModelRequest>>,
+		_request: Request<tonic::Streaming<rpc::ImportMlModelRequest>>,
 	) -> Result<Response<rpc::ImportMlModelResponse>, Status> {
-		self.run_ml_import(request.into_inner()).await
+		Err(Status::unimplemented("This server does not support SurrealML models"))
 	}
 
 	type ExportSurqlStream = ResponseStream<rpc::ExportSurqlResponse>;
@@ -1499,20 +1499,9 @@ impl SurrealDbService for GrpcService {
 
 	async fn export_ml_model(
 		&self,
-		request: Request<rpc::ExportMlModelRequest>,
+		_request: Request<rpc::ExportMlModelRequest>,
 	) -> Result<Response<Self::ExportMlModelStream>, Status> {
-		let request = request.into_inner();
-		let session = self.session_for(request.context.as_ref(), RouteTarget::Ml).await?;
-		let export = self.start_ml_export(session, request.name, request.version).await?;
-		Ok(Response::new(Box::pin(frame_byte_stream(export, |frame| rpc::ExportMlModelResponse {
-			frame: Some(match frame {
-				ByteFrame::Chunk(chunk) => rpc::export_ml_model_response::Frame::Chunk(chunk),
-				ByteFrame::Trailer(trailer) => {
-					rpc::export_ml_model_response::Frame::Trailer(trailer)
-				}
-				ByteFrame::Error(error) => rpc::export_ml_model_response::Frame::Error(error),
-			}),
-		}))))
+		Err(Status::unimplemented("This server does not support SurrealML models"))
 	}
 }
 
@@ -1522,8 +1511,6 @@ const ROUTE_METHODS: &[(RouteTarget, &str)] = &[
 	(RouteTarget::Health, method_names::HEALTH),
 	(RouteTarget::Export, method_names::EXPORT_SURQL),
 	(RouteTarget::Import, method_names::IMPORT_SURQL),
-	(RouteTarget::Ml, method_names::EXPORT_ML_MODEL),
-	(RouteTarget::Ml, method_names::IMPORT_ML_MODEL),
 ];
 
 /// RPC methods, paired with the RPC that reaches them, for the same reason.
@@ -1552,15 +1539,12 @@ impl GrpcService {
 	/// Reports what this build serves, so a client can gate on it rather than
 	/// discovering the answer from a failed call.
 	fn server_capabilities(&self) -> rpc::ServerCapabilities {
-		let mut capabilities = vec![
+		let capabilities = vec![
 			"SESSIONS".to_string(),
 			"TRANSACTIONS".to_string(),
 			"LIVE_QUERIES".to_string(),
 			"REFRESH_TOKENS".to_string(),
 		];
-		if cfg!(feature = "ml") {
-			capabilities.push("ML_MODELS".to_string());
-		}
 		let mut denied = Vec::new();
 		for (route, method) in ROUTE_METHODS {
 			if !self.kvs().allows_http_route(route) {
@@ -1942,109 +1926,6 @@ impl GrpcService {
 		Ok(Response::new(checked_response(rpc::ImportSurqlResponse {})?))
 	}
 
-	/// Applies a streamed SurrealML model.
-	///
-	/// Unlike the SurrealQL import this cannot be applied as it arrives: the
-	/// model's own header carries the name and version it is stored under, and
-	/// that is only readable once the whole file is in hand. The transfer is
-	/// bounded as it goes for the same reason the SurrealQL one is.
-	#[cfg(feature = "ml")]
-	async fn run_ml_import(
-		&self,
-		mut frames: tonic::Streaming<rpc::ImportMlModelRequest>,
-	) -> Result<Response<rpc::ImportMlModelResponse>, Status> {
-		use futures::StreamExt;
-
-		let Some(first) = frames.next().await.transpose()? else {
-			return Err(Status::invalid_argument("Import stream carried no frames"));
-		};
-		let Some(rpc::import_ml_model_request::Frame::Begin(begin)) = first.frame else {
-			return Err(Status::invalid_argument("Import stream must open with a begin frame"));
-		};
-		let session = self.session_for(begin.context.as_ref(), RouteTarget::Ml).await?;
-		let (namespace, database) =
-			check_ns_db(&session).map_err(|err| rejected_before_execution(err.to_string()))?;
-		self.kvs()
-			.check(
-				&session,
-				surrealdb_iam::Action::Edit,
-				surrealdb_iam::ResourceKind::Model.on_db(&namespace, &database),
-			)
-			.map_err(|err| Status::permission_denied(err.to_string()))?;
-
-		let limit = *HTTP_MAX_IMPORT_BODY_SIZE;
-		let mut hasher = blake3::Hasher::new();
-		let mut model = Vec::new();
-		let mut trailer = None;
-		while let Some(frame) = frames.next().await {
-			match frame?.frame {
-				Some(rpc::import_ml_model_request::Frame::Chunk(chunk)) => {
-					if model.len() + chunk.data.len() > limit {
-						return Err(Status::resource_exhausted(format!(
-							"Import exceeds the {limit} byte limit"
-						)));
-					}
-					hasher.update(&chunk.data);
-					model.extend_from_slice(&chunk.data);
-				}
-				Some(rpc::import_ml_model_request::Frame::Trailer(sent)) => {
-					trailer = Some(sent);
-					break;
-				}
-				Some(rpc::import_ml_model_request::Frame::Begin(_)) => {
-					return Err(Status::invalid_argument(
-						"Import stream carried a second begin frame",
-					));
-				}
-				None => {}
-			}
-		}
-		// A byte stream is complete only once its trailer arrives.
-		let trailer = trailer.ok_or_else(|| {
-			Status::data_loss("Import stream ended without a trailer; the model was not stored")
-		})?;
-		verify_trailer(&trailer, model.len() as u64, hasher.finalize())?;
-
-		let file = surrealml_core::storage::surml_file::SurMlFile::from_bytes(model)
-			.map_err(|err| Status::invalid_argument(format!("Invalid SurrealML file: {err}")))?;
-		let (name, version) = (file.header.name.to_string(), file.header.version.to_string());
-		// The name and version the model is stored under come from its header,
-		// so a file that carries neither has nowhere to go.
-		if name.is_empty() || version.is_empty() {
-			return Err(Status::invalid_argument("Model name and version must be set"));
-		}
-		// `Begin` names the model too; refusing a disagreement beats storing it
-		// under a name the caller did not ask for.
-		if !begin.name.is_empty() && begin.name != name {
-			return Err(Status::invalid_argument(format!(
-				"The request names model {} but the file carries {name}",
-				begin.name
-			)));
-		}
-		if !begin.version.is_empty() && begin.version != version {
-			return Err(Status::invalid_argument(format!(
-				"The request names version {} but the file carries {version}",
-				begin.version
-			)));
-		}
-		let description = file.header.description.to_string();
-		self.kvs()
-			.put_ml_model(&session, &name, &version, &description, file.to_bytes())
-			.await
-			.map_err(|err| Status::internal(err.to_string()))?;
-		Ok(Response::new(checked_response(rpc::ImportMlModelResponse {})?))
-	}
-
-	/// SurrealML support is a build-time feature; without it there is nowhere
-	/// to store a model. `GetCapabilities` omits `ML_MODELS` accordingly.
-	#[cfg(not(feature = "ml"))]
-	async fn run_ml_import(
-		&self,
-		_frames: tonic::Streaming<rpc::ImportMlModelRequest>,
-	) -> Result<Response<rpc::ImportMlModelResponse>, Status> {
-		Err(Status::unimplemented("This server was built without SurrealML support"))
-	}
-
 	/// Starts a SurrealQL export, handing back the channel its chunks arrive on
 	/// and the handle that reports whether it finished.
 	async fn start_export(
@@ -2079,64 +1960,6 @@ impl GrpcService {
 			chunks,
 			outcome: tokio::spawn(task),
 		})
-	}
-
-	/// Starts a SurrealML model export, handing back the channel its chunks
-	/// arrive on and the handle that reports whether it finished.
-	#[cfg(feature = "ml")]
-	async fn start_ml_export(
-		&self,
-		session: Session,
-		name: String,
-		version: String,
-	) -> Result<Export, Status> {
-		let (namespace, database) =
-			check_ns_db(&session).map_err(|err| rejected_before_execution(err.to_string()))?;
-		self.kvs()
-			.check(
-				&session,
-				surrealdb_iam::Action::View,
-				surrealdb_iam::ResourceKind::Model.on_db(&namespace, &database),
-			)
-			.map_err(|err| Status::permission_denied(err.to_string()))?;
-		let info = self
-			.kvs()
-			.get_db_model(&namespace, &database, &name, &version)
-			.await
-			.map_err(|err| Status::internal(err.to_string()))?
-			.ok_or_else(|| Status::not_found(format!("Model {name} {version} not found")))?;
-		let path = format!("ml/{namespace}/{database}/{name}-{version}-{}.surml", info.hash);
-		let mut data = surrealdb_core::obs::stream(path)
-			.await
-			.map_err(|err| Status::internal(format!("Failed to read model file: {err}")))?;
-		let (sender, chunks) = surrealdb::channel::bounded(1);
-		let outcome = tokio::spawn(async move {
-			while let Some(chunk) = data.next().await {
-				// A read failure has to reach the stream: stopping quietly
-				// would frame a partial model as a complete one.
-				let chunk = chunk.map_err(|err| anyhow::anyhow!("{err}"))?;
-				if sender.send(chunk.to_vec()).await.is_err() {
-					break;
-				}
-			}
-			Ok(())
-		});
-		Ok(Export {
-			chunks,
-			outcome,
-		})
-	}
-
-	/// SurrealML support is a build-time feature; without it there are no
-	/// models to export. `GetCapabilities` omits `ML_MODELS` accordingly.
-	#[cfg(not(feature = "ml"))]
-	async fn start_ml_export(
-		&self,
-		_session: Session,
-		_name: String,
-		_version: String,
-	) -> Result<Export, Status> {
-		Err(Status::unimplemented("This server was built without SurrealML support"))
 	}
 }
 

@@ -9,8 +9,7 @@ use async_channel::Sender;
 // Which of these a build uses depends on which engines it enables.
 #[allow(unused_imports)]
 pub(crate) use surrealdb_engine_api::{
-	Command, EngineContext, MlExportConfig, RequestData, Route, RouteChannelEngine, SurrealEngine,
-	single_result,
+	Command, EngineContext, RequestData, Route, RouteChannelEngine, SurrealEngine, single_result,
 };
 use surrealdb_rpc::QueryResult;
 use uuid::Uuid;

@@ -96,8 +96,8 @@ PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 # shellcheck disable=SC2086 # PACKAGES is an intentional list of --package args
 cargo set-version $PACKAGES "${NEXT_VERSION}"
 
-# Bump the independently-versioned publishable crates (e.g. surrealism*,
-# surrealml-core) in LOCKSTEP with the workspace, so none is left sitting at an
+# Bump the independently-versioned publishable crates (e.g. surrealism*)
+# in LOCKSTEP with the workspace, so none is left sitting at an
 # already-published version when the next release tries to publish it - the whole
 # reason for bumping after every release. Each keeps its own major.minor and
 # adopts the workspace's new patch/pre-release TAIL (everything after major.minor:

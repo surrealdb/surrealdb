@@ -79,6 +79,14 @@ pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {
 	let mut result = HashSet::new();
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
+		// `ml` named a route this build no longer serves. It is ignored with a warning,
+		// so a configuration written for an earlier release still starts.
+		if target == "ml" {
+			eprintln!(
+				"warning: the `ml` route target is retired and ignored: this build serves no ML routes"
+			);
+			continue;
+		}
 		result.insert(NetTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
@@ -309,6 +317,12 @@ mod tests {
 			Targets::<McpToolTarget>::Some(vec!["graphql".parse().unwrap()].into_iter().collect())
 		);
 		assert!(mcp_tool_targets("not_a_tool").is_err());
+	}
+
+	#[test]
+	fn retired_ml_route_target_is_accepted_and_selects_nothing() {
+		assert_eq!(route_targets("ml").unwrap(), Targets::<RouteTarget>::Some(HashSet::new()));
+		assert_eq!(route_targets("ml,key").unwrap(), route_targets("key").unwrap());
 	}
 
 	#[test]

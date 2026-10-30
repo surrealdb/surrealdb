@@ -48,8 +48,6 @@ members = [
     "surrealdb/types",
     "surrealdb/types/derive",
     "surrealdb/wasm",
-    # SurrealML crates
-    "surrealml/core",
     # Surrealism crates
     "surrealism",
     "surrealism/demo",
@@ -125,8 +123,6 @@ surrealdb-sqlfront-derive = { version = "4.0.0-nightly", path = "surrealdb/sqlfr
 surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
 surrealdb-collections = { version = "4.0.0-nightly", path = "surrealdb/collections" }
 
-# SurrealML crates
-surrealml-core = { version = "0.4.0-nightly", path = "surrealml/core" }
 # Surrealism crates
 surrealism = { version = "0.7.0-nightly", path = "surrealism" }
 surrealism-macros = { version = "0.7.0-nightly", path = "surrealism/macros", default-features = false }
@@ -360,8 +356,6 @@ tracing-subscriber = "0.3"
 wiremock = "0.6"
 libtest-mimic = "0.8.2"
 
-# SurrealML specific dependencies
-ort = { version = "2.0.0-rc.15", features = ["ndarray"] }
 
 # Surrealism specific dependencies
 tar = { version = "0.4.46", default-features = false }
@@ -415,7 +409,6 @@ http = ["surrealdb-server/http"]
 # (and so for the Docker images built from them); see the release workflow.
 cjk = ["surrealdb-server/cjk"]
 jwks = ["surrealdb-server/jwks"]
-ml = ["surrealdb-server/ml"]
 scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]

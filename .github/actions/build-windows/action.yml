@@ -19,14 +19,10 @@ inputs:
     description: 'Build metadata'
     required: false
     default: ''
-  onnx-version:
-    description: 'The ONNX library version'
-    required: false
-    default: '1.23.2'
   extra-features:
     description: 'Extra features enabled in the binary'
     required: false
-    default: 'jwks,ml'
+    default: 'jwks'
   upload:
     description: 'Upload build artifacts'
     required: false
@@ -94,12 +90,6 @@ runs:
         if [[ -n "${{ inputs.package }}" ]]; then
           extra_args="${extra_args} --package ${{ inputs.package }}"
         fi
-
-        # Download libonnxruntime's static library and tell ORT crate to use it
-        tmp_dir=$(mktemp -d)
-        curl -sSL https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx-version }}.zip -o $tmp_dir/onnxruntime.zip
-        unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
-        export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
 
         cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
 

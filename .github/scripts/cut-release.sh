@@ -19,9 +19,9 @@ set -euo pipefail
 #       through the alpha/beta/rc cycle and only advances to `(X+1).1.0-nightly`
 #       once `(X+1).0.0` ships stable (see advance-main-after-release.sh).
 #
-# The independently-versioned families (surrealism, surrealml, surreal-ext)
-# travel with the engine on their own lines. Each cut moves them in the same
-# shape as surrealdb: the release line takes their current nightly minor as its
+# The independently-versioned families (surrealism, surreal-ext) travel with the
+# engine on their own lines. Each cut moves them in the same shape as
+# surrealdb: the release line takes their current nightly minor as its
 # pre-release (M.m.0-nightly -> M.m.0-beta.1), and main advances one minor
 # (M.m.0-nightly -> M.(m+1).0-nightly). A cut thus reserves one of each
 # family's minors per release line, keeping their numbers independent of

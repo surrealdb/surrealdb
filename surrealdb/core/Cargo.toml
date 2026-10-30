@@ -156,7 +156,6 @@ encoding = []
 # digits.
 regex-unicode = ["surrealdb-types/regex-unicode"]
 http = ["dep:reqwest", "url"]
-ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
 surrealism = ["dep:surrealism-runtime", "dep:surrealism-verify", "dep:async-trait"]
 allocator = ["dep:jemallocator", "dep:jemalloc-sys", "dep:mimalloc", "dep:mimalloc-sys"]
@@ -226,7 +225,6 @@ common = { workspace = true }
 
 # External surreal crates
 surrealdb-kvs-any = { workspace = true }
-surrealml-core = { workspace = true, optional = true }
 
 arc-swap.workspace = true
 async-trait = { workspace = true, optional = true }

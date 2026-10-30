@@ -83,7 +83,6 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::timers::compile_phase;
 use crate::exec::surface::{FULL, Surface};
 use crate::expr::logical::LogicalOp;
-use crate::expr::model::get_model_path;
 use crate::expr::statements::DefineUserStatement;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::user::UserDuration;
@@ -2473,6 +2472,9 @@ impl Datastore {
 				actual: version.into(),
 			});
 		}
+		// Refused before any migration, so a refused store is left as it was found.
+		self.refuse_stored_models().await?;
+
 		// `get_version` reports a datastore as new only on the start that wrote
 		// `!v`. Everything below can fail transiently and be retried by the
 		// caller, and that retry finds the key present — so the flag is latched on
@@ -2502,6 +2504,38 @@ impl Datastore {
 		self.mark_migrated();
 		// Everything ok
 		Ok((version, is_new))
+	}
+
+	/// Refuses a datastore that still records a `DEFINE MODEL` definition: this build
+	/// does not run models, so it cannot serve a database that holds one.
+	async fn refuse_stored_models(&self) -> Result<()> {
+		let txn = self.transaction(Read).await?;
+		let found = catch!(txn, Self::first_stored_model(&txn).await);
+		txn.cancel().await?;
+		if let Some(error) = found {
+			bail!(error);
+		}
+		Ok(())
+	}
+
+	/// Finds the first `DEFINE MODEL` definition in the datastore, as the error that refuses it.
+	async fn first_stored_model(txn: &Transaction) -> Result<Option<DatastoreError>> {
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+
+		for ns in txn.all_ns(None).await?.iter() {
+			for db in txn.all_db(ns.namespace_id, None).await?.iter() {
+				let models = txn.all_db_models(ns.namespace_id, db.database_id, None).await?;
+				if let Some(model) = models.first() {
+					return Ok(Some(DatastoreError::StoredModels {
+						ns: ns.name.to_string(),
+						db: db.name.to_string(),
+						model: model.name.to_string(),
+						version: model.version.to_string(),
+					}));
+				}
+			}
+		}
+		Ok(None)
 	}
 
 	/// Attaches a store to an edge build, in place of [`Self::check_version`], which runs
@@ -2545,6 +2579,8 @@ impl Datastore {
 				actual: version.into(),
 			});
 		}
+		// Refused before the datastore is attached, as `check_version` refuses it.
+		self.refuse_stored_models().await?;
 		let is_new =
 			self.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst) || is_new;
 		if let migration::LedgerVerdict::ReadOnly {
@@ -11907,76 +11943,6 @@ impl Datastore {
 		}
 
 		res
-	}
-
-	pub async fn put_ml_model(
-		&self,
-		session: &Session,
-		name: &str,
-		version: &str,
-		description: &str,
-		data: Vec<u8>,
-	) -> Result<()> {
-		let ns = session.ns.as_ref().context("Namespace is required")?;
-		let db = session.db.as_ref().context("Database is required")?;
-
-		self.check(session, Action::Edit, ResourceKind::Model.on_db(ns, db))?;
-
-		// Calculate the hash of the model file
-		let hash = crate::obs::hash(&data);
-		// Calculate the path of the model file
-		let path = get_model_path(ns, db, name, version, &hash);
-		// Insert the file data in to the store
-		crate::obs::put(&path, data).await?;
-		// Insert the model in to the database. The statement is built in the
-		// form the parser produces, so it runs exactly as the same `DEFINE
-		// MODEL` typed by a user would.
-		let model = crate::expr::statements::DefineModelStatement {
-			name: name.to_string().into(),
-			version: version.to_string().into(),
-			comment: crate::expr::Expr::Literal(crate::expr::Literal::String(description.into())),
-			hash: hash.clone().into(),
-			kind: Default::default(),
-			permissions: Default::default(),
-		};
-		let ast = surrealdb_expr::parser::Query::single_expr(crate::expr::Expr::Define(Box::new(
-			crate::expr::statements::DefineStatement::Model(model),
-		)));
-
-		let defined: Result<()> = async {
-			let results =
-				self.run(QueryRequest::new(ast, session)).await.map_err(|e| anyhow::anyhow!(e))?;
-			for r in results {
-				r.result.map_err(|e| anyhow::anyhow!(e))?;
-			}
-			Ok(())
-		}
-		.await;
-		if let Err(e) = defined {
-			// The definition did not commit, so the artifact stored above is
-			// unreachable unless a model already defined under this name and
-			// version references the same content-addressed path.
-			// An artifact is removed only once the catalog has been read and
-			// shown not to reference it: a failed read leaves it in place.
-			let referenced = match self.get_db_model(ns, db, name, version).await {
-				Ok(model) => model.is_some_and(|m| m.hash.as_str() == hash),
-				Err(read) => {
-					tracing::warn!(
-						"keeping the model artifact `{path}` of a failed import: could not \
-						 check whether a model references it: {read}"
-					);
-					true
-				}
-			};
-			if !referenced && let Err(del) = crate::obs::del(&path).await {
-				tracing::warn!(
-					"failed to delete the model artifact `{path}` of a failed import: {del}"
-				);
-			}
-			return Err(e);
-		}
-
-		Ok(())
 	}
 
 	/// The per-layer configuration this datastore was built with. Cheap to

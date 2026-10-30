@@ -303,15 +303,6 @@ impl RemoteCommand for Command {
 			}
 			| Command::ImportFile {
 				..
-			}
-			| Command::ExportBytesMl {
-				..
-			}
-			| Command::ExportMl {
-				..
-			}
-			| Command::ImportMl {
-				..
 			} => return None,
 			Command::Health => RouterRequest {
 				id,

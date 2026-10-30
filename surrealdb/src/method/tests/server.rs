@@ -75,19 +75,10 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Run {
 					..
 				} => query_result,
-				Command::ExportMl {
-					..
-				}
-				| Command::ExportBytesMl {
-					..
-				}
-				| Command::ExportFile {
+				Command::ExportFile {
 					..
 				}
 				| Command::ExportBytes {
-					..
-				}
-				| Command::ImportMl {
 					..
 				}
 				| Command::ImportFile {

@@ -113,15 +113,6 @@ pub fn session_error_to_error(e: SessionError) -> Error {
 	}
 }
 
-/// Which machine learning model to export, by name and version.
-#[derive(Debug, Clone)]
-pub struct MlExportConfig {
-	/// The model name.
-	pub name: String,
-	/// The model version.
-	pub version: String,
-}
-
 /// The mode of a read-only transaction opened with `begin`: a snapshot no older
 /// than `max_staleness`, and whether to refuse a current read when no snapshot
 /// meets the bound.
@@ -294,13 +285,6 @@ pub enum Command {
 		/// What to include in the export.
 		config: Option<DbExportConfig>,
 	},
-	/// Export a machine learning model to a file.
-	ExportMl {
-		/// The file to write.
-		path: PathBuf,
-		/// The model to export.
-		config: MlExportConfig,
-	},
 	/// Export the database to a channel.
 	ExportBytes {
 		/// Where the export is streamed.
@@ -308,20 +292,8 @@ pub enum Command {
 		/// What to include in the export.
 		config: Option<DbExportConfig>,
 	},
-	/// Export a machine learning model to a channel.
-	ExportBytesMl {
-		/// Where the export is streamed.
-		bytes: Sender<Result<Vec<u8>, Error>>,
-		/// The model to export.
-		config: MlExportConfig,
-	},
 	/// Import a database export from a file.
 	ImportFile {
-		/// The file to read.
-		path: PathBuf,
-	},
-	/// Import a machine learning model from a file.
-	ImportMl {
 		/// The file to read.
 		path: PathBuf,
 	},
@@ -640,34 +612,9 @@ pub trait SurrealEngine: Debug + Send + Sync + 'static {
 		Box::pin(async { Err(unsupported("Export")) })
 	}
 
-	/// Exports a machine learning model to a file.
-	fn export_ml_file(
-		&self,
-		_ctx: EngineContext,
-		_path: PathBuf,
-		_config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async { Err(unsupported("Machine learning model export")) })
-	}
-
-	/// Exports a machine learning model, streaming it to a channel.
-	fn export_ml_bytes(
-		&self,
-		_ctx: EngineContext,
-		_bytes: Sender<Result<Vec<u8>, Error>>,
-		_config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(async { Err(unsupported("Machine learning model export")) })
-	}
-
 	/// Imports a database export from a file.
 	fn import_file(&self, _ctx: EngineContext, _path: PathBuf) -> EngineFuture<'_, ()> {
 		Box::pin(async { Err(unsupported("Import")) })
-	}
-
-	/// Imports a machine learning model from a file.
-	fn import_ml_file(&self, _ctx: EngineContext, _path: PathBuf) -> EngineFuture<'_, ()> {
-		Box::pin(async { Err(unsupported("Machine learning model import")) })
 	}
 }
 
@@ -1087,48 +1034,9 @@ impl SurrealEngine for RouteChannelEngine {
 		))
 	}
 
-	fn export_ml_file(
-		&self,
-		ctx: EngineContext,
-		path: PathBuf,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(self.unit(
-			Command::ExportMl {
-				path,
-				config,
-			},
-			ctx.session,
-		))
-	}
-
-	fn export_ml_bytes(
-		&self,
-		ctx: EngineContext,
-		bytes: Sender<Result<Vec<u8>, Error>>,
-		config: MlExportConfig,
-	) -> EngineFuture<'_, ()> {
-		Box::pin(self.unit(
-			Command::ExportBytesMl {
-				bytes,
-				config,
-			},
-			ctx.session,
-		))
-	}
-
 	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
 		Box::pin(self.unit(
 			Command::ImportFile {
-				path,
-			},
-			ctx.session,
-		))
-	}
-
-	fn import_ml_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
-		Box::pin(self.unit(
-			Command::ImportMl {
 				path,
 			},
 			ctx.session,
