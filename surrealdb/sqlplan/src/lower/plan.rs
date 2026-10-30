@@ -1530,9 +1530,11 @@ fn lower_table_source(
 
 			let alias_idx = *join_counter;
 			*join_counter += 1;
+			let alias = RelationAlias::new(alias_idx);
 
 			let mut on = Vec::new();
 			let mut filter = None;
+			let mut key_guards = Vec::new();
 
 			if let Some(cond) = condition {
 				match cond {
@@ -1569,7 +1571,10 @@ fn lower_table_source(
 									} else {
 										(l, r)
 									};
-									on.push(lower_join_key(&probe, &build, policy)?);
+									let (probe_key, build_key) =
+										lower_join_key(&probe, &build, policy)?;
+									key_guards.push(null_key_guard(&probe_key, &build_key, &alias));
+									on.push((probe_key, build_key));
 								}
 								None => residual.push(BoundExpr::Binary {
 									left: Box::new(l),
@@ -1599,14 +1604,34 @@ fn lower_table_source(
 						for col in cols {
 							let left_key = LogicalExpr::Field(col.clone().into());
 							let right_key = RelationAlias::new(alias_idx).access(col.clone());
-							on.push(if col == "id" {
+							let (probe_key, build_key) = if col == "id" {
 								lower_using_id_key(left, right, left_key, right_key)
 							} else {
 								(left_key, right_key)
-							});
+							};
+							key_guards.push(null_key_guard(&probe_key, &build_key, &alias));
+							on.push((probe_key, build_key));
 						}
 					}
 				}
+			}
+
+			// The engine pairs rows whose keys are equal, a NULL key with a NULL one and a NONE key
+			// with a NONE one, where in SQL a NULL equals nothing. The guards come first so that a
+			// pair that cannot match is not judged by the residual.
+			if let Some(guard) = key_guards.into_iter().reduce(|all, next| LogicalExpr::Binary {
+				left: Box::new(all),
+				op: BinaryOperator::And,
+				right: Box::new(next),
+			}) {
+				filter = Some(match filter {
+					Some(residual) => LogicalExpr::Binary {
+						left: Box::new(guard),
+						op: BinaryOperator::And,
+						right: Box::new(residual),
+					},
+					None => guard,
+				});
 			}
 
 			Ok(LogicalOp::Join(LogicalJoin::new(
@@ -1615,11 +1640,29 @@ fn lower_table_source(
 				kind,
 				on,
 				filter,
-				RelationAlias::new(alias_idx),
+				alias,
 				EvalFrame::caller(),
 			)))
 		}
 	}
+}
+
+/// The condition that the pair of keys `probe` and `build` of a join over `alias` is not a NULL
+/// key, which the engine pairs with a NULL key and a NONE key with a NONE one.
+///
+/// Rows are paired only by equal keys, so both keys of a pair are NULL, both NONE or neither, and
+/// the test of one of them serves. It tests the build key when that reads a field of the right row
+/// as it is, which is the cheapest read and is a form the engine knows to raise no error, as
+/// some plans of a join (holding a single left row) require of its condition. Otherwise it tests
+/// the probe key.
+fn null_key_guard(probe: &LogicalExpr, build: &LogicalExpr, alias: &RelationAlias) -> LogicalExpr {
+	let reads_right_field =
+		matches!(build, LogicalExpr::Access { base, .. } if **base == alias.field());
+	crate::lower::expr::is_not_null_expr(if reads_right_field {
+		build.clone()
+	} else {
+		probe.clone()
+	})
 }
 
 /// `expr` with the key read of an `id` column undone: the stored field itself.

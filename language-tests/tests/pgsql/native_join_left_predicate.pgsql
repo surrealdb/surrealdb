@@ -11,13 +11,13 @@ reason = "A WHERE predicate that reads only the left row of a join is judged ben
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Nowhere', name: 'Finn' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: NONE, name: 'Finn' }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ dname: 'Nowhere', name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }]"
+value = "[]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: NONE, name: 'Hana' }]"
@@ -26,7 +26,7 @@ value = "[{ dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Keyless', name: 'Gus' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }]"
 */
 
 SELECT e.name, d.dname FROM emp e JOIN dept d ON e.dept = d.did WHERE e.salary > 85;

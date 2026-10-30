@@ -237,7 +237,8 @@ fn a_key_of_a_join_condition_is_oriented_by_the_side_that_names_its_table() {
 	for condition in ["ja.k = w", "w = ja.k"] {
 		let op = pg_select_in(&format!("SELECT v FROM ja JOIN jb ON {condition}"), &EmptyCatalog);
 		assert_eq!(join_keys(&op), keys, "{condition}");
-		assert_eq!(join_filter(&op), None, "{condition}");
+		// The key is no residual: only the guard that the probed key is not NULL remains.
+		assert_eq!(join_filter(&op).as_deref(), Some("k != NULL AND k != NONE"), "{condition}");
 	}
 	let keys = [("v ?? _join0.v".to_string(), "_join0.k".to_string())];
 	for condition in ["v = jb.k", "jb.k = v"] {

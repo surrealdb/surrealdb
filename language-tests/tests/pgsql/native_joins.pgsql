@@ -8,22 +8,22 @@ imports = ["pgsql/_native.surql"]
 reason = "PostgreSQL joins: inner and left, key shapes, residual conditions, null and mixed keys, empty sides, chains and self joins"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: NONE, name: 'Eve' }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: NONE, name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Keyless', name: 'Gus' }, { dname: 'Legal', name: NONE }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Keyless', name: NONE }, { dname: 'Legal', name: NONE }, { dname: 'Nowhere', name: NONE }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Keyless', name: 'Gus' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops2', name: 'Dan' }, { dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: NONE, name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
 
 [[test.results]]
 value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Nowhere', name: 'Alice' }, { dname: 'Ops', name: 'Alice' }, { dname: 'Ops2', name: 'Alice' }, { dname: 'Nowhere', name: 'Bob' }, { dname: 'Ops', name: 'Bob' }, { dname: 'Ops2', name: 'Bob' }, { dname: 'Eng', name: 'Cara' }, { dname: 'Nowhere', name: 'Cara' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Nowhere', name: 'Dan' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Nowhere', name: 'Eve' }, { dname: 'Ops', name: 'Eve' }, { dname: 'Ops2', name: 'Eve' }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Ops', name: 'Finn' }, { dname: 'Nowhere', name: 'Gus' }, { dname: 'Ops', name: 'Gus' }, { dname: 'Eng', name: 'Hana' }, { dname: 'Nowhere', name: 'Hana' }, { dname: 'Ops', name: 'Hana' }, { dname: 'Ops2', name: 'Hana' }]"
@@ -53,22 +53,22 @@ value = "[{ boss: NONE, name: 'Alice' }, { boss: 'Alice', name: 'Bob' }, { boss:
 value = "[{ dname: 'Eng', hours: 10, name: 'Alice' }, { dname: 'Eng', hours: 20, name: 'Alice' }, { dname: 'Ops', hours: 5, name: 'Cara' }, { dname: 'Ops2', hours: 5, name: 'Cara' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', hours: 10, name: 'Alice' }, { dname: 'Eng', hours: 20, name: 'Alice' }, { dname: 'Eng', hours: NONE, name: 'Bob' }, { dname: 'Ops', hours: 5, name: 'Cara' }, { dname: 'Ops2', hours: 5, name: 'Cara' }, { dname: 'Ops', hours: NONE, name: 'Dan' }, { dname: 'Ops2', hours: NONE, name: 'Dan' }, { dname: NONE, hours: 40, name: 'Eve' }, { dname: 'Nowhere', hours: NONE, name: 'Finn' }, { dname: 'Keyless', hours: NONE, name: 'Gus' }, { dname: NONE, hours: NONE, name: 'Hana' }]"
+value = "[{ dname: 'Eng', hours: 10, name: 'Alice' }, { dname: 'Eng', hours: 20, name: 'Alice' }, { dname: 'Eng', hours: NONE, name: 'Bob' }, { dname: 'Ops', hours: 5, name: 'Cara' }, { dname: 'Ops2', hours: 5, name: 'Cara' }, { dname: 'Ops', hours: NONE, name: 'Dan' }, { dname: 'Ops2', hours: NONE, name: 'Dan' }, { dname: NONE, hours: 40, name: 'Eve' }, { dname: NONE, hours: NONE, name: 'Finn' }, { dname: NONE, hours: NONE, name: 'Gus' }, { dname: NONE, hours: NONE, name: 'Hana' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', hours: 10, name: 'Alice' }, { dname: 'Eng', hours: 20, name: 'Alice' }, { dname: 'Eng', hours: NONE, name: 'Bob' }, { dname: 'Ops', hours: 5, name: 'Cara' }, { dname: 'Ops2', hours: 5, name: 'Cara' }, { dname: 'Ops', hours: NONE, name: 'Dan' }, { dname: 'Ops2', hours: NONE, name: 'Dan' }, { dname: 'Nowhere', hours: NONE, name: 'Finn' }, { dname: 'Keyless', hours: NONE, name: 'Gus' }]"
+value = "[{ dname: 'Eng', hours: 10, name: 'Alice' }, { dname: 'Eng', hours: 20, name: 'Alice' }, { dname: 'Eng', hours: NONE, name: 'Bob' }, { dname: 'Ops', hours: 5, name: 'Cara' }, { dname: 'Ops2', hours: 5, name: 'Cara' }, { dname: 'Ops', hours: NONE, name: 'Dan' }, { dname: 'Ops2', hours: NONE, name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ label: 'dec one', other: 'dec one' }, { label: 'dec one', other: 'float one' }, { label: 'dec one', other: 'int one' }, { label: 'float one', other: 'dec one' }, { label: 'float one', other: 'float one' }, { label: 'float one', other: 'int one' }, { label: 'int one', other: 'dec one' }, { label: 'int one', other: 'float one' }, { label: 'int one', other: 'int one' }, { label: 'none', other: 'none' }, { label: 'null', other: 'null' }, { label: 'string one', other: 'string one' }, { label: 'two', other: 'two' }]"
+value = "[{ label: 'dec one', other: 'dec one' }, { label: 'dec one', other: 'float one' }, { label: 'dec one', other: 'int one' }, { label: 'float one', other: 'dec one' }, { label: 'float one', other: 'float one' }, { label: 'float one', other: 'int one' }, { label: 'int one', other: 'dec one' }, { label: 'int one', other: 'float one' }, { label: 'int one', other: 'int one' }, { label: 'string one', other: 'string one' }, { label: 'two', other: 'two' }]"
 
 [[test.results]]
-value = "[{ label: 'dec one', other: 'dec one' }, { label: 'dec one', other: 'float one' }, { label: 'dec one', other: 'int one' }, { label: 'float one', other: 'dec one' }, { label: 'float one', other: 'float one' }, { label: 'float one', other: 'int one' }, { label: 'int one', other: 'dec one' }, { label: 'int one', other: 'float one' }, { label: 'int one', other: 'int one' }, { label: 'none', other: 'none' }, { label: 'null', other: 'null' }, { label: 'string one', other: 'string one' }, { label: 'two', other: 'two' }]"
+value = "[{ label: 'dec one', other: 'dec one' }, { label: 'dec one', other: 'float one' }, { label: 'dec one', other: 'int one' }, { label: 'float one', other: 'dec one' }, { label: 'float one', other: 'float one' }, { label: 'float one', other: 'int one' }, { label: 'int one', other: 'dec one' }, { label: 'int one', other: 'float one' }, { label: 'int one', other: 'int one' }, { label: 'none', other: NONE }, { label: 'null', other: NONE }, { label: 'string one', other: 'string one' }, { label: 'two', other: 'two' }]"
 
 [[test.results]]
-value = "[{ label: 'dec one', name: 'Alice' }, { label: 'dec one', name: 'Bob' }, { label: 'float one', name: 'Alice' }, { label: 'float one', name: 'Bob' }, { label: 'int one', name: 'Alice' }, { label: 'int one', name: 'Bob' }, { label: 'none', name: 'Gus' }, { label: 'null', name: 'Finn' }, { label: 'two', name: 'Cara' }, { label: 'two', name: 'Dan' }]"
+value = "[{ label: 'dec one', name: 'Alice' }, { label: 'dec one', name: 'Bob' }, { label: 'float one', name: 'Alice' }, { label: 'float one', name: 'Bob' }, { label: 'int one', name: 'Alice' }, { label: 'int one', name: 'Bob' }, { label: 'two', name: 'Cara' }, { label: 'two', name: 'Dan' }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }, { dname: 'Keyless', name: 'Finn' }, { dname: 'Nowhere', name: 'Finn' }, { dname: 'Keyless', name: 'Gus' }, { dname: 'Nowhere', name: 'Gus' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Eng', name: 'Bob' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Ops', name: 'Dan' }, { dname: 'Ops2', name: 'Dan' }]"
 
 [[test.results]]
 value = "[]"
@@ -92,13 +92,13 @@ value = "[]"
 value = "[{ _join0: { city: 'London', dept: 1, id: emp:1, name: 'Alice', salary: 100 }, emp_id: 1, hours: 10, id: proj:1, pid: 1 }, { _join0: { city: 'London', dept: 1, id: emp:1, name: 'Alice', salary: 100 }, emp_id: 1, hours: 20, id: proj:2, pid: 2 }, { _join0: { city: 'London', dept: 2, id: emp:3, mgr: 1, name: 'Cara', salary: 120.5f }, emp_id: 3, hours: 5, id: proj:3, pid: 3 }, { _join0: { city: 'Paris', dept: 3, id: emp:5, mgr: 3, name: 'Eve', salary: 70 }, emp_id: 5, hours: 40, id: proj:4, pid: 4 }]"
 
 [[test.results]]
-value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }, { dname: 'Nowhere', name: 'Finn' }]"
+value = "[{ dname: 'Eng', name: 'Alice' }, { dname: 'Ops', name: 'Cara' }, { dname: 'Ops2', name: 'Cara' }]"
 
 [[test.results]]
 value = "[{ dname: 'Ops', name: 'Cara' }]"
 
 [[test.results]]
-value = "[{ dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Hana' }]"
+value = "[{ dname: NONE, name: 'Eve' }, { dname: NONE, name: 'Finn' }, { dname: NONE, name: 'Gus' }, { dname: NONE, name: 'Hana' }]"
 */
 
 SELECT e.name, d.dname FROM emp e JOIN dept d ON e.dept = d.did ORDER BY e.name, d.dname;

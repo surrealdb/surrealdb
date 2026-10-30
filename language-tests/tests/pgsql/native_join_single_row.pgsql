@@ -20,10 +20,10 @@ value = "[{ dname: 'Ops', name: 'Cara' }]"
 value = "[{ dname: NONE, name: 'Hana' }]"
 
 [[test.results]]
-value = "[{ dname: 'Nowhere', name: 'Finn' }]"
+value = "[]"
 
 [[test.results]]
-value = "[{ dname: 'Keyless', name: 'Gus' }]"
+value = "[]"
 
 [[test.results]]
 value = "[{ dname: 'Ops2', name: 'Cara' }]"
