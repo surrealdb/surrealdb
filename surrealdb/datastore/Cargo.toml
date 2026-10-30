@@ -42,7 +42,7 @@ roaring = { workspace = true, features = ["serde"] }
 parking_lot.workspace = true
 serde.workspace = true
 surrealdb-catalog.workspace = true
-surrealdb-collections.workspace = true
+surrealdb-collections = { workspace = true, features = ["revision", "storekey"] }
 surrealdb-expr.workspace = true
 surrealdb-iam.workspace = true
 semver = { workspace = true, features = ["serde"] }

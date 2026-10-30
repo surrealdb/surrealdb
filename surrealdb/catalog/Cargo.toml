@@ -30,7 +30,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 chrono = { workspace = true, features = ["serde"] }
 common = { workspace = true }
 md-5.workspace = true
-surrealdb-collections = { workspace = true }
+surrealdb-collections = { workspace = true, features = ["revision", "storekey"] }
 revision = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 sha2.workspace = true

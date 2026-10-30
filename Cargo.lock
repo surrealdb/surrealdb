@@ -7684,8 +7684,11 @@ dependencies = [
 name = "surrealdb-collections"
 version = "4.0.0-nightly"
 dependencies = [
+ "arbitrary",
  "criterion",
  "revision",
+ "serde",
+ "serde_json",
  "storekey",
 ]
 
@@ -8572,6 +8575,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "surrealdb-collections",
  "surrealdb-parse-common",
  "surrealdb-protocol",
  "surrealdb-types-derive",

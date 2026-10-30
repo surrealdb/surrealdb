@@ -1,4 +1,5 @@
-//! Sorted `Vec`-backed map and set containers used inside `surrealdb-core`.
+//! Sorted `Vec`-backed map and set containers used by the SurrealDB engine and by
+//! `surrealdb-types`, whose `Object` holds its entries in a [`VecMap`].
 //!
 //! This crate is **SurrealDB internal API** and does not promise stability.
 
@@ -6,13 +7,18 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
+#[cfg(feature = "revision")]
 pub mod bounded;
+#[cfg(feature = "revision")]
 mod revision_impl;
 mod search;
 mod vec_map;
 mod vec_set;
 
-pub use vec_map::{Entry, IntoIter as VecMapIntoIter, OccupiedEntry, VacantEntry, VecMap};
+pub use vec_map::{
+	Entry, IntoIter as VecMapIntoIter, Iter as VecMapIter, IterMut as VecMapIterMut, OccupiedEntry,
+	VacantEntry, VecMap,
+};
 pub use vec_set::{IntoIter as VecSetIntoIter, VecSet};
 
 #[cfg(test)]

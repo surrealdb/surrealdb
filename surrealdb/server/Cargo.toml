@@ -99,7 +99,7 @@ surrealdb-core = { workspace = true, features = [
 surrealdb-cnf.workspace = true
 common.workspace = true
 surrealdb-catalog.workspace = true
-surrealdb-collections.workspace = true
+surrealdb-collections = { workspace = true, features = ["revision", "storekey"] }
 surrealdb-datastore.workspace = true
 surrealdb-iam.workspace = true
 surrealdb-kvs.workspace = true

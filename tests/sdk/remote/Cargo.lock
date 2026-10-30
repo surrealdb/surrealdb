@@ -2373,6 +2373,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-collections"
+version = "4.0.0-nightly"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "surrealdb-common"
 version = "4.0.0-nightly"
 dependencies = [
@@ -2494,6 +2501,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "surrealdb-collections",
  "surrealdb-parse-common",
  "surrealdb-protocol",
  "surrealdb-types-derive",

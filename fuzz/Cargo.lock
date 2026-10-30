@@ -4055,7 +4055,9 @@ dependencies = [
 name = "surrealdb-collections"
 version = "4.0.0-nightly"
 dependencies = [
+ "arbitrary",
  "revision",
+ "serde",
  "storekey",
 ]
 
@@ -4510,6 +4512,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "surrealdb-collections",
  "surrealdb-parse-common",
  "surrealdb-protocol",
  "surrealdb-types-derive",

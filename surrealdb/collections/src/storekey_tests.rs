@@ -1,3 +1,5 @@
+#![cfg(feature = "storekey")]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use storekey::{Writer, decode_borrow, encode_vec};

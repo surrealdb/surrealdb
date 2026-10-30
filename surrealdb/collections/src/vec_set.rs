@@ -4,9 +4,9 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
 use std::iter::FromIterator;
 
+#[cfg(feature = "storekey")]
 use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::search::search_sorted_by;
@@ -481,8 +481,9 @@ impl<T: Ord> From<BTreeSet<T>> for VecSet<T> {
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<F, T: Encode<F>> Encode<F> for VecSet<T> {
-	fn encode<W: Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
+	fn encode<W: std::io::Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
 		for item in &self.entries {
 			w.mark_terminator();
 			item.encode(w)?;
@@ -491,6 +492,7 @@ impl<F, T: Encode<F>> Encode<F> for VecSet<T> {
 	}
 }
 
+#[cfg(feature = "storekey")]
 impl<'de, F, T: BorrowDecode<'de, F> + Ord> BorrowDecode<'de, F> for VecSet<T> {
 	/// Deserialises a storekey set as a sequence of items, then builds the set with
 	/// [`try_from_vec`](VecSet::try_from_vec).

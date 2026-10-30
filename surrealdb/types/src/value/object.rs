@@ -4,9 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::iter::FusedIterator;
 
-use serde::de::{MapAccess, Visitor};
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use surrealdb_collections::{VecMap, VecMapIterMut};
 
 use crate::sql::{SqlFormat, ToSql};
 use crate::{SurrealValue, Value};
@@ -14,59 +13,31 @@ use crate::{SurrealValue, Value};
 /// Represents an object with key-value pairs in SurrealDB
 ///
 /// An object is a collection of key-value pairs where keys are strings and values can be of any
-/// type. Its entries are held in a vector in ascending key order, each key once: a lookup is a
-/// binary search, iteration visits the entries in key order, and an object built from entries
-/// already in key order (as one decoded from the wire is) is built without a search per key.
+/// type. Its entries are held in a [`VecMap`], a vector in ascending key order with each key once:
+/// a lookup is a binary search, iteration visits the entries in key order, and an object built
+/// from entries already in key order (as one decoded from the wire is) is built without a search
+/// per key.
 ///
 /// Equality, ordering and hashing are those of the entries in key order, as they are for a
 /// `BTreeMap<String, Value>` holding the same entries.
 #[derive(Clone, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Object(pub(crate) Vec<(String, Value)>);
+pub struct Object(pub(crate) VecMap<String, Value>);
 
 impl Object {
 	/// Create a new empty object
 	pub fn new() -> Self {
-		Object(Vec::new())
+		Object(VecMap::new())
 	}
 
 	/// Create a new empty object with room for `capacity` entries
 	pub fn with_capacity(capacity: usize) -> Self {
-		Object(Vec::with_capacity(capacity))
+		Object(VecMap::with_capacity(capacity))
 	}
 
 	/// An object of `entries`, which must be in strictly ascending key order.
 	#[cfg(feature = "cbor")]
 	pub(crate) fn from_sorted(entries: Vec<(String, Value)>) -> Self {
-		debug_assert!(entries.windows(2).all(|w| w[0].0 < w[1].0), "keys ascend strictly");
-		Object(entries)
-	}
-
-	/// An object of `entries` in any order; of entries with the same key, the last is kept, as
-	/// inserting them in turn keeps it.
-	fn from_unsorted(mut entries: Vec<(String, Value)>) -> Self {
-		if entries.windows(2).all(|w| w[0].0 < w[1].0) {
-			return Object(entries);
-		}
-		// A stable sort keeps entries with the same key in the order given; of each run of them,
-		// the last is moved into the place of the first, which is the one kept.
-		entries.sort_by(|a, b| a.0.cmp(&b.0));
-		entries.dedup_by(|later, kept| {
-			let same = later.0 == kept.0;
-			if same {
-				std::mem::swap(later, kept);
-			}
-			same
-		});
-		Object(entries)
-	}
-
-	/// Where `key` is, or where it would be inserted.
-	fn search<Q>(&self, key: &Q) -> Result<usize, usize>
-	where
-		String: Borrow<Q>,
-		Q: Ord + ?Sized,
-	{
-		self.0.binary_search_by(|(k, _)| k.borrow().cmp(key))
+		Object(VecMap::from_sorted_vec_unchecked(entries))
 	}
 
 	/// The number of entries
@@ -81,20 +52,7 @@ impl Object {
 
 	/// Insert a key-value pair into the object, returning the value the key held before
 	pub fn insert(&mut self, key: impl Into<String>, value: impl SurrealValue) -> Option<Value> {
-		let key = key.into();
-		let value = value.into_value();
-		// A key past the last one, the common case of an object built in key order, is pushed.
-		if self.0.last().is_none_or(|(last, _)| *last < key) {
-			self.0.push((key, value));
-			return None;
-		}
-		match self.search(key.as_str()) {
-			Ok(at) => Some(std::mem::replace(&mut self.0[at].1, value)),
-			Err(at) => {
-				self.0.insert(at, (key, value));
-				None
-			}
-		}
+		self.0.insert(key.into(), value.into_value())
 	}
 
 	/// The value of `key`
@@ -103,7 +61,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.search(key).ok().map(|at| &self.0[at].1)
+		self.0.get(key)
 	}
 
 	/// The value of `key`, mutably
@@ -112,7 +70,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.search(key).ok().map(|at| &mut self.0[at].1)
+		self.0.get_mut(key)
 	}
 
 	/// The entry of `key`
@@ -121,7 +79,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.search(key).ok().map(|at| (&self.0[at].0, &self.0[at].1))
+		self.0.get_key_value(key)
 	}
 
 	/// Whether the object holds `key`
@@ -130,7 +88,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.search(key).is_ok()
+		self.0.contains_key(key)
 	}
 
 	/// Remove `key`, returning its value
@@ -139,7 +97,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.remove_entry(key).map(|(_, value)| value)
+		self.0.remove(key)
 	}
 
 	/// Remove `key`, returning its entry
@@ -148,7 +106,7 @@ impl Object {
 		String: Borrow<Q>,
 		Q: Ord + ?Sized,
 	{
-		self.search(key).ok().map(|at| self.0.remove(at))
+		self.0.remove_entry(key)
 	}
 
 	/// Remove every entry
@@ -157,33 +115,33 @@ impl Object {
 	}
 
 	/// Keep only the entries `f` accepts
-	pub fn retain(&mut self, mut f: impl FnMut(&String, &mut Value) -> bool) {
-		self.0.retain_mut(|(k, v)| f(k, v));
+	pub fn retain(&mut self, f: impl FnMut(&String, &mut Value) -> bool) {
+		self.0.retain(f);
 	}
 
 	/// The first entry, in key order
 	pub fn first_key_value(&self) -> Option<(&String, &Value)> {
-		self.0.first().map(|(k, v)| (k, v))
+		self.0.first_key_value()
 	}
 
 	/// The last entry, in key order
 	pub fn last_key_value(&self) -> Option<(&String, &Value)> {
-		self.0.last().map(|(k, v)| (k, v))
+		self.0.last_key_value()
 	}
 
 	/// Remove and return the first entry, in key order
 	pub fn pop_first(&mut self) -> Option<(String, Value)> {
-		(!self.0.is_empty()).then(|| self.0.remove(0))
+		self.0.pop_first()
 	}
 
 	/// Remove and return the last entry, in key order
 	pub fn pop_last(&mut self) -> Option<(String, Value)> {
-		self.0.pop()
+		self.0.pop_last()
 	}
 
 	/// The entries, in key order
 	pub fn iter(&self) -> Iter<'_> {
-		Iter(self.0.iter())
+		Iter(self.0.as_slice().iter())
 	}
 
 	/// The entries with their values mutable, in key order
@@ -193,12 +151,12 @@ impl Object {
 
 	/// The keys, in order
 	pub fn keys(&self) -> Keys<'_> {
-		Keys(self.0.iter())
+		Keys(self.0.as_slice().iter())
 	}
 
 	/// The values, in key order
 	pub fn values(&self) -> Values<'_> {
-		Values(self.0.iter())
+		Values(self.0.as_slice().iter())
 	}
 
 	/// The values, mutable, in key order
@@ -208,64 +166,26 @@ impl Object {
 
 	/// The keys, in order, taking the object
 	pub fn into_keys(self) -> impl DoubleEndedIterator<Item = String> + ExactSizeIterator {
-		self.0.into_iter().map(|(k, _)| k)
+		self.0.into_keys()
 	}
 
 	/// The values, in key order, taking the object
 	pub fn into_values(self) -> impl DoubleEndedIterator<Item = Value> + ExactSizeIterator {
-		self.0.into_iter().map(|(_, v)| v)
+		self.0.into_values()
 	}
 
 	/// The entry of `key`, to read or change in place
 	pub fn entry(&mut self, key: impl Into<String>) -> Entry<'_> {
-		let key = key.into();
-		match self.search(key.as_str()) {
-			Ok(at) => Entry::Occupied(OccupiedEntry {
-				entries: &mut self.0,
-				at,
-			}),
-			Err(at) => Entry::Vacant(VacantEntry {
-				entries: &mut self.0,
-				at,
-				key,
-			}),
+		match self.0.entry(key.into()) {
+			surrealdb_collections::Entry::Occupied(entry) => Entry::Occupied(OccupiedEntry(entry)),
+			surrealdb_collections::Entry::Vacant(entry) => Entry::Vacant(VacantEntry(entry)),
 		}
 	}
 
 	/// Move every entry of `other` into this object; an entry of `other` replaces one with the
 	/// same key here.
 	pub fn append(&mut self, other: &mut Object) {
-		let other = std::mem::take(&mut other.0);
-		match (self.0.last(), other.first()) {
-			(_, None) => return,
-			(None, _) => {
-				self.0 = other;
-				return;
-			}
-			// Every key of `other` sorts after every key here.
-			(Some((last, _)), Some((first, _))) if last < first => {
-				self.0.extend(other);
-				return;
-			}
-			_ => {}
-		}
-		// Both are in key order, so they merge in one pass.
-		let mut merged = Vec::with_capacity(self.0.len() + other.len());
-		let mut mine = std::mem::take(&mut self.0).into_iter().peekable();
-		let mut theirs = other.into_iter().peekable();
-		while let (Some((a, _)), Some((b, _))) = (mine.peek(), theirs.peek()) {
-			match a.cmp(b) {
-				Ordering::Less => merged.extend(mine.next()),
-				Ordering::Greater => merged.extend(theirs.next()),
-				Ordering::Equal => {
-					mine.next();
-					merged.extend(theirs.next());
-				}
-			}
-		}
-		merged.extend(mine);
-		merged.extend(theirs);
-		self.0 = merged;
+		self.0.append(&mut other.0);
 	}
 
 	/// The entries as a `BTreeMap`
@@ -287,40 +207,25 @@ impl fmt::Debug for Object {
 	}
 }
 
+/// Serialised as a map, in key order.
 impl Serialize for Object {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		let mut map = serializer.serialize_map(Some(self.len()))?;
-		for (k, v) in self.iter() {
-			map.serialize_entry(k, v)?;
-		}
-		map.end()
+		self.0.serialize(serializer)
 	}
 }
 
+/// Deserialised from a map with keys in any order; of entries with the same key, the last is
+/// kept, as inserting them in turn keeps it.
 impl<'de> Deserialize<'de> for Object {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-		struct ObjectVisitor;
-		impl<'de> Visitor<'de> for ObjectVisitor {
-			type Value = Object;
-			fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-				f.write_str("a map")
-			}
-			fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Object, A::Error> {
-				let mut entries = Vec::with_capacity(map.size_hint().unwrap_or(0).min(4096));
-				while let Some(entry) = map.next_entry()? {
-					entries.push(entry);
-				}
-				Ok(Object::from_unsorted(entries))
-			}
-		}
-		deserializer.deserialize_map(ObjectVisitor)
+		VecMap::deserialize(deserializer).map(Object)
 	}
 }
 
 #[cfg(feature = "arbitrary")]
 impl<'a> arbitrary::Arbitrary<'a> for Object {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		Ok(Object(BTreeMap::<String, Value>::arbitrary(u)?.into_iter().collect()))
+		VecMap::arbitrary(u).map(Object)
 	}
 }
 
@@ -380,15 +285,13 @@ impl From<Object> for BTreeMap<String, Value> {
 
 impl<T: SurrealValue> FromIterator<(String, T)> for Object {
 	fn from_iter<I: IntoIterator<Item = (String, T)>>(iter: I) -> Self {
-		Self::from_unsorted(iter.into_iter().map(|(k, v)| (k, v.into_value())).collect())
+		Self(iter.into_iter().map(|(k, v)| (k, v.into_value())).collect())
 	}
 }
 
 impl<T: SurrealValue> Extend<(String, T)> for Object {
 	fn extend<I: IntoIterator<Item = (String, T)>>(&mut self, iter: I) {
-		for (k, v) in iter {
-			self.insert(k, v);
-		}
+		self.0.extend(iter.into_iter().map(|(k, v)| (k, v.into_value())));
 	}
 }
 
@@ -408,7 +311,7 @@ impl IntoIterator for Object {
 	type Item = (String, Value);
 	type IntoIter = std::vec::IntoIter<(String, Value)>;
 	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
+		self.0.into_vec().into_iter()
 	}
 }
 
@@ -467,9 +370,9 @@ entry_iter!(
 entry_iter!(
 	/// An object's entries with their values mutable, in key order ([`Object::iter_mut`]).
 	IterMut<'a>,
-	std::slice::IterMut<'a, (String, Value)>,
+	VecMapIterMut<'a, String, Value>,
 	(&'a String, &'a mut Value),
-	|(k, v): &'a mut (String, Value)| (&*k, v)
+	|entry: (&'a String, &'a mut Value)| entry
 );
 entry_iter!(
 	/// An object's keys, in order ([`Object::keys`]).
@@ -488,9 +391,9 @@ entry_iter!(
 entry_iter!(
 	/// An object's values, mutable, in key order ([`Object::values_mut`]).
 	ValuesMut<'a>,
-	std::slice::IterMut<'a, (String, Value)>,
+	VecMapIterMut<'a, String, Value>,
 	&'a mut Value,
-	|(_, v): &'a mut (String, Value)| v
+	|(_, v): (&'a String, &'a mut Value)| v
 );
 
 /// An object's entry for one key ([`Object::entry`]).
@@ -502,17 +405,10 @@ pub enum Entry<'a> {
 }
 
 /// An entry the object holds.
-pub struct OccupiedEntry<'a> {
-	entries: &'a mut Vec<(String, Value)>,
-	at: usize,
-}
+pub struct OccupiedEntry<'a>(surrealdb_collections::OccupiedEntry<'a, String, Value>);
 
 /// An entry the object does not hold, and where it would go.
-pub struct VacantEntry<'a> {
-	entries: &'a mut Vec<(String, Value)>,
-	at: usize,
-	key: String,
-}
+pub struct VacantEntry<'a>(surrealdb_collections::VacantEntry<'a, String, Value>);
 
 impl<'a> Entry<'a> {
 	/// The entry's value, inserting `default` where the object does not hold the key.
@@ -553,55 +449,54 @@ impl<'a> Entry<'a> {
 impl<'a> OccupiedEntry<'a> {
 	/// The entry's key.
 	pub fn key(&self) -> &String {
-		&self.entries[self.at].0
+		self.0.key()
 	}
 
 	/// The entry's value.
 	pub fn get(&self) -> &Value {
-		&self.entries[self.at].1
+		self.0.get()
 	}
 
 	/// The entry's value, mutably.
 	pub fn get_mut(&mut self) -> &mut Value {
-		&mut self.entries[self.at].1
+		self.0.get_mut()
 	}
 
 	/// The entry's value, for as long as the object is borrowed.
 	pub fn into_mut(self) -> &'a mut Value {
-		&mut self.entries[self.at].1
+		self.0.into_mut()
 	}
 
 	/// Replace the entry's value, returning the one it held.
 	pub fn insert(&mut self, value: Value) -> Value {
-		std::mem::replace(self.get_mut(), value)
+		self.0.insert(value)
 	}
 
 	/// Remove the entry, returning its value.
 	pub fn remove(self) -> Value {
-		self.entries.remove(self.at).1
+		self.0.remove()
 	}
 
 	/// Remove the entry, returning it.
 	pub fn remove_entry(self) -> (String, Value) {
-		self.entries.remove(self.at)
+		self.0.remove_entry()
 	}
 }
 
 impl<'a> VacantEntry<'a> {
 	/// The key the entry would hold.
 	pub fn key(&self) -> &String {
-		&self.key
+		self.0.key()
 	}
 
 	/// The key the entry would hold, taken.
 	pub fn into_key(self) -> String {
-		self.key
+		self.0.into_key()
 	}
 
 	/// Insert `value` under the entry's key, returning the value in place.
 	pub fn insert(self, value: Value) -> &'a mut Value {
-		self.entries.insert(self.at, (self.key, value));
-		&mut self.entries[self.at].1
+		self.0.insert(value)
 	}
 }
 
