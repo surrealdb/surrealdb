@@ -327,6 +327,10 @@ impl Building {
 					return Err(err);
 				}
 			};
+			// Without a sync of its own: the round's checkpoint syncs once every batch of
+			// the round has committed, and makes them durable with it, so a crash never
+			// loses a batch the checkpoint covers.
+			tx.defer_sync();
 			match tx.commit().await {
 				Ok(()) => {
 					self.note_committed();

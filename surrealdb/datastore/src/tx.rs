@@ -847,6 +847,8 @@ pub struct Transaction {
 	/// Whether the heartbeat fence lets this transaction commit whatever it finds: the heartbeat's
 	/// own transaction ([`Self::exempt_from_write_fence`]).
 	write_fence_exempt: AtomicBool,
+	/// Whether the commit skips the store's own sync ([`Self::defer_sync`]).
+	sync_deferred: AtomicBool,
 	/// The waits for older write transactions, other than its own build's, that may have passed
 	/// this one while it was set aside for its own build ([`Self::rejoin_live_writes`]). Its
 	/// commit is refused if it writes one of their tables, or one of them is on every table
@@ -2099,6 +2101,7 @@ impl Transaction {
 			serial: next_serial(),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
+			sync_deferred: AtomicBool::new(false),
 			passed_waits: Default::default(),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
@@ -7390,7 +7393,11 @@ impl Transaction {
 		if self.triggers.live_writes.holds_writes() {
 			self.triggers.live_writes.begin_definition_commit(self.serial);
 		}
-		let committed = self.tr.commit().await;
+		let committed = if self.sync_deferred.load(Ordering::Relaxed) {
+			self.tr.commit_deferred().await
+		} else {
+			self.tr.commit().await
+		};
 		self.end_live_write();
 		committed
 	}
@@ -8897,6 +8904,16 @@ impl Transaction {
 		self.write_fence_exempt.store(true, Ordering::Relaxed);
 	}
 
+	/// Commit this transaction without waiting for the store's own sync
+	/// ([`surrealdb_kvs::api::Transactable::commit_unsynced`]): for a commit that a later
+	/// synced commit through the same store makes durable, such as a batch of an index
+	/// build, whose build syncs once it completes. The commit is applied and visible on
+	/// return, and is otherwise the commit [`Self::commit`] makes. A store whose commits are
+	/// not durable in the order they are applied syncs it all the same.
+	pub fn defer_sync(&self) {
+		self.sync_deferred.store(true, Ordering::Relaxed);
+	}
+
 	/// Count this transaction out of its datastore's [`crate::triggers::LiveWrites`]: once its
 	/// commit or cancel has returned, when it is dropped, or while the statement holding it awaits
 	/// a build inside it ([`Self::park_live_write`]). Idempotent.
@@ -10333,6 +10350,7 @@ impl Transaction {
 			serial: next_serial(),
 			opened_at: None,
 			write_fence_exempt: AtomicBool::new(false),
+			sync_deferred: AtomicBool::new(false),
 			passed_waits: Default::default(),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),

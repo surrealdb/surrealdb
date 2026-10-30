@@ -472,6 +472,14 @@ impl Transactor {
 	/// durable index build state.
 	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
 		debug_assert!(!self.wrote_build_state(), "an unsynced commit is not a counted commit");
+		self.commit_deferred().await
+	}
+
+	/// Commit the transaction without waiting for the store's own sync, for
+	/// [`crate::Transaction::commit`] of a transaction that deferred its sync
+	/// ([`crate::Transaction::defer_sync`]), which counts it among the
+	/// build-state commits itself.
+	pub(crate) async fn commit_deferred(&self) -> Result<()> {
 		self.absence.flush_all(self.inner.as_ref(), self.record_writes.as_deref()).await?;
 		self.inner.commit_unsynced().await
 	}

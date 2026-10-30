@@ -41,6 +41,8 @@ mod graph_semijoin_test;
 #[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 mod held_creates_bench;
 #[cfg(feature = "kv-mem")]
+mod index_build_sync_test;
+#[cfg(feature = "kv-mem")]
 mod index_format_level_test;
 #[cfg(feature = "kv-mem")]
 mod index_key_kernel_test;

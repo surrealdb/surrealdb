@@ -8,6 +8,8 @@ mod cursor;
 mod snapshot;
 
 use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -40,6 +42,30 @@ use tokio::sync::RwLock;
 use tracing::{error, info, instrument, warn};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
+
+/// Worker threads of [`BACKGROUND`]: one for each long-lived task a tree starts (the commit
+/// flusher, the memtable flush and the level compaction), and one to spare.
+#[cfg(not(target_family = "wasm"))]
+const BACKGROUND_WORKERS: usize = 4;
+
+/// The runtime that SurrealKV's background tasks run on.
+///
+/// A tree starts its background tasks on the runtime it is built on, and its memtable flush and
+/// level compaction run their merges inline, holding the worker that polls them for as long as a
+/// merge takes. Built on the runtime that serves queries, every merge took one of its workers,
+/// and the tasks woken on that worker waited with it: since the compaction runs merge after merge
+/// until nothing more moves down a level, a query or an index build running beside a write
+/// backlog lost a worker to it for minutes at a time. Every tree is built on this runtime instead,
+/// so that work stays off the workers that serve queries.
+#[cfg(not(target_family = "wasm"))]
+static BACKGROUND: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+	tokio::runtime::Builder::new_multi_thread()
+		.worker_threads(BACKGROUND_WORKERS)
+		.thread_name("surrealkv-background")
+		.enable_all()
+		.build()
+		.expect("the SurrealKV background runtime starts")
+});
 
 /// Convert a SurrealKV engine error into the generic KVS error type.
 #[expect(
@@ -288,9 +314,11 @@ impl Datastore {
 				 kept in _rocksdb_backup/"
 			);
 		}
-		// Build the database
-		let db =
-			TreeBuilder::with_options(opts).build().map_err(|e| Error::Datastore(e.to_string()))?;
+		// Build the database, on the runtime its background tasks are to run on
+		let db = {
+			let _background = BACKGROUND.enter();
+			TreeBuilder::with_options(opts).build().map_err(|e| Error::Datastore(e.to_string()))?
+		};
 
 		// Create sync components based on sync mode
 		let background_flusher = match config.sync_mode {

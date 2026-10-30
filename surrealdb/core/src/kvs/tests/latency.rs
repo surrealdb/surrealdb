@@ -218,6 +218,8 @@ pub(super) struct LatencyStats {
 	per_class: [AtomicU64; CLASSES],
 	per_category: [AtomicU64; CATEGORIES],
 	views: AtomicU64,
+	/// Commits of writable transactions that waited for the store's own sync.
+	synced_commits: AtomicU64,
 	enabled: AtomicBool,
 	lsm: AtomicBool,
 	tracing: AtomicBool,
@@ -245,6 +247,7 @@ impl LatencyStats {
 			per_class: Default::default(),
 			per_category: Default::default(),
 			views: AtomicU64::new(0),
+			synced_commits: AtomicU64::new(0),
 			enabled: AtomicBool::new(false),
 			lsm: AtomicBool::new(false),
 			tracing: AtomicBool::new(false),
@@ -258,6 +261,7 @@ impl LatencyStats {
 		self.in_flight.store(0, Ordering::SeqCst);
 		self.rounds.store(0, Ordering::SeqCst);
 		self.views.store(0, Ordering::SeqCst);
+		self.synced_commits.store(0, Ordering::SeqCst);
 		for c in &self.per_class {
 			c.store(0, Ordering::SeqCst);
 		}
@@ -274,6 +278,12 @@ impl LatencyStats {
 			per_category: std::array::from_fn(|i| self.per_category[i].load(Ordering::SeqCst)),
 			views: self.views.load(Ordering::SeqCst),
 		}
+	}
+
+	/// Commits counted as [`Class::Commit`] that waited for the store's own sync, rather than
+	/// committing through [`Transactable::commit_unsynced`].
+	pub(super) fn synced_commits(&self) -> u64 {
+		self.synced_commits.load(Ordering::SeqCst)
 	}
 
 	pub(super) fn take_trace(&self) -> Vec<TraceEntry> {
@@ -578,7 +588,12 @@ impl Transactable for LatencyTx {
 	fn commit<'a>(&'a self) -> BoxFut<'a, KvsResult<()>> {
 		Box::pin(async move {
 			match self.inner.writeable() {
-				true => self.stats.round(Class::Commit, b"", self.inner.commit(), |_| None).await,
+				true => {
+					if self.stats.enabled.load(Ordering::SeqCst) {
+						self.stats.synced_commits.fetch_add(1, Ordering::SeqCst);
+					}
+					self.stats.round(Class::Commit, b"", self.inner.commit(), |_| None).await
+				}
 				false => self.inner.commit().await,
 			}
 		})

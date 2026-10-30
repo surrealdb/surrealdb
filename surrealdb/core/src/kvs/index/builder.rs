@@ -5313,6 +5313,11 @@ impl Building {
 							super::kind::test_sink::maybe_hold_batch(self.ctx.node_id())?;
 							#[cfg(test)]
 							maybe_inject_initial_batch_commit_error(self.ctx.node_id())?;
+							// Without a sync of its own: the commit that completes the scan
+							// syncs, and makes every batch before it durable with it. A crash
+							// loses at most the batches after the last synced commit, whose
+							// checkpoints go with them, so the scan resumes before them.
+							tx.defer_sync();
 							tx.commit().await
 						}
 						.await;
