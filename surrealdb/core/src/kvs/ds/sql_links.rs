@@ -121,6 +121,11 @@ impl BinderCatalog for RecordingCatalog {
 		None
 	}
 
+	fn write_type(&self, schema: Option<&str>, table: &str, _column: &str) -> SqlType {
+		self.note_user_table(schema, table);
+		SqlType::Unknown
+	}
+
 	fn hnsw_indexes(&self, schema: Option<&str>, table: &str) -> Vec<(String, VectorMetric)> {
 		self.note_user_table(schema, table);
 		Vec::new()
@@ -640,8 +645,8 @@ pub(super) fn mysql_keeps_columns(stmts: &[surrealdb_mysql::ast::stmt::Statement
 pub(super) struct Described {
 	pub(super) catalog: MemoryCatalog,
 	/// Whether lowering against `catalog` can differ from lowering against none: a column holds
-	/// links or vectors, a vector column has an HNSW index, or a table declares all the columns it
-	/// has.
+	/// links or vectors, a vector column has an HNSW index, a column has a type that text written
+	/// to it is read as, or a table declares all the columns it has.
 	pub(super) shapes_lowering: bool,
 }
 
@@ -702,6 +707,7 @@ pub(super) async fn describe_tables(
 	let Some(database) = txn.get_db_by_name(ns, db, None).await? else {
 		return Ok(described);
 	};
+	let mut targets: BTreeSet<String> = BTreeSet::new();
 	for table in tables {
 		let name = TableName::from(table.as_str());
 		let fields = txn.all_tb_fields(database.namespace_id, database.database_id, &name, None);
@@ -715,11 +721,15 @@ pub(super) async fn describe_tables(
 				continue;
 			};
 			if let Some(target) = link_target(kind) {
+				targets.insert(target.to_owned());
 				described.catalog.add_link(None, table, column, target);
 				if surrealdb_sqlplan::kind_admits_none(kind) {
 					described.catalog.add_nullable_link(table, column);
 				}
 				described.shapes_lowering = true;
+			}
+			if !types {
+				add_write_type(&mut described, table, column, kind);
 			}
 			if let Some(dimensions) = vector_dimension(kind) {
 				described.catalog.add_vector(table, column, dimensions);
@@ -781,7 +791,45 @@ pub(super) async fn describe_tables(
 			described.shapes_lowering = true;
 		}
 	}
+	if !types {
+		// Text written to a link column names a record of the table it links to by that table's
+		// key, so the type of the key of every target is read too.
+		for target in targets.iter().filter(|target| !tables.contains(target)) {
+			let name = TableName::from(target.as_str());
+			let fields =
+				txn.all_tb_fields(database.namespace_id, database.database_id, &name, None);
+			for field in fields.await?.iter() {
+				if field.is_key_part() || field.name.field_name() != Some("id") {
+					continue;
+				}
+				if let Some(kind) = &field.field_kind {
+					add_write_type(&mut described, target, "id", kind);
+				}
+			}
+		}
+	}
 	Ok(described)
+}
+
+/// Note that text written to `column` of `table` is read as the type of `kind`, if it has one.
+fn add_write_type(described: &mut Described, table: &str, column: &str, kind: &Kind) {
+	let ty = scalar_type(kind);
+	if matches!(
+		ty,
+		SqlType::Int2
+			| SqlType::Int4
+			| SqlType::Int8
+			| SqlType::Float4
+			| SqlType::Float8
+			| SqlType::Numeric
+			| SqlType::Bool
+			| SqlType::TimestampTz
+			| SqlType::Uuid
+			| SqlType::Json
+	) {
+		described.catalog.add_write_type(table, column, ty);
+		described.shapes_lowering = true;
+	}
 }
 
 /// The columns of the `SCHEMAFULL` table `definition`, whose field definitions are `fields`: `id`

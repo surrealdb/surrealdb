@@ -22,8 +22,8 @@ use crate::error::PlanError;
 use crate::ir::{BoundColumnRef, BoundExpr, BoundLiteral};
 use crate::lower::expr::{lower_bound_expr, lower_column_raw};
 use crate::lower::id_key::{
-	contains_subquery, id_column, is_key_or_link, key_operand, record_of, record_of_operand,
-	record_or_value,
+	contains_subquery, id_column, is_key_or_link, key_operand, key_read_as, record_of,
+	record_of_operand, record_of_operand_typed, record_or_value,
 };
 
 /// The column of `expr` when it holds record links to a table, and that table.
@@ -133,28 +133,32 @@ pub(crate) enum LinkOperand {
 /// and the `id` of another table is compared by its key.
 pub(crate) fn link_operand(
 	table: &str,
+	key_read: crate::ir::KeyRead,
 	other: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<LinkOperand, PlanError> {
-	link_operand_with(table, other, policy, false)
+	link_operand_with(table, key_read, other, policy, false)
 }
 
 /// An operand converted without turning a non-null, non-key value into NULL.
 pub(crate) fn link_comparison_operand(
 	table: &str,
+	key_read: crate::ir::KeyRead,
 	other: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<LinkOperand, PlanError> {
-	link_operand_with(table, other, policy, true)
+	link_operand_with(table, key_read, other, policy, true)
 }
 
 fn link_operand_with(
 	table: &str,
+	key_read: crate::ir::KeyRead,
 	other: &BoundExpr,
 	policy: &DialectPolicy,
 	preserve_value: bool,
 ) -> Result<LinkOperand, PlanError> {
 	let record = |value| {
+		let value = key_read_as(key_read, value);
 		if preserve_value {
 			record_or_value(table, value)
 		} else {
@@ -176,7 +180,7 @@ fn link_operand_with(
 			}
 			crate::lower::id_key::KeyOperand::Int(_)
 			| crate::lower::id_key::KeyOperand::Str(_)
-			| crate::lower::id_key::KeyOperand::Param(_) => record_of_operand(table, &key),
+			| crate::lower::id_key::KeyOperand::Param(_) => record_of_operand_typed(table, &key, key_read),
 		}));
 	}
 	if let Some((col, other_table)) = stored_record_column(other) {

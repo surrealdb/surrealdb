@@ -203,6 +203,9 @@ fn message_number(message: &str) -> Option<Number> {
 	} else if message.starts_with("Found field '") {
 		// A write to a field a SCHEMAFULL table does not define.
 		Some(ER_BAD_FIELD_ERROR)
+	} else if message.starts_with("Could not cast into `") {
+		// Text written to a typed column that does not read as the column's type.
+		Some(ER_TRUNCATED_WRONG_VALUE_FOR_FIELD)
 	} else if message.starts_with("Couldn't coerce value for field `") {
 		// The value is the last thing in the message, so a NULL or a NONE is told from a string
 		// that spells it (which ends in a quote) and from an element of an array (which is

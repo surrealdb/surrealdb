@@ -21,7 +21,7 @@ use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
 	lower_column_raw, lower_lookup_predicate, pg_bool_spelling,
 };
-use crate::lower::id_key::{id_column, is_key_or_link, key_of, record_of};
+use crate::lower::id_key::{id_column, is_key_or_link, key_of, key_read_as, record_of};
 use crate::lower::link::{LinkOperand, link_column, link_operand, lower_stored, same_table_pair};
 use crate::output_keys::output_keys;
 
@@ -101,6 +101,12 @@ fn unnest_targets(select: &BoundSelect) -> Vec<SetReturningTarget<'_>> {
 			}
 		})
 		.collect()
+}
+
+/// A `LIMIT` or `OFFSET`, which is a row count: a parameter that holds text is read as the
+/// integer it spells, as a client that sends every parameter as text needs.
+fn lower_row_count(expr: &BoundExpr, policy: &DialectPolicy) -> Result<LogicalExpr, PlanError> {
+	Ok(key_read_as(crate::ir::KeyRead::Int, lower_bound_expr(expr, policy)?))
 }
 
 /// The values a set-returning call over `argument` advances through: the elements of the array,
@@ -238,6 +244,7 @@ fn replace_set_returning<'a>(
 			id_table: None,
 			link_table: None,
 			aggregate_output: false,
+			key_read: crate::ir::KeyRead::None,
 			also_in: Vec::new(),
 		})
 	};
@@ -791,8 +798,8 @@ fn lower_bound_select_internal(
 
 	// 7. LIMIT & OFFSET clause (if not deferred to set_op)
 	if select.set_op.is_none() && (select.limit.is_some() || select.offset.is_some()) {
-		let limit = select.limit.as_ref().map(|l| lower_bound_expr(l, policy)).transpose()?;
-		let start = select.offset.as_ref().map(|o| lower_bound_expr(o, policy)).transpose()?;
+		let limit = select.limit.as_ref().map(|l| lower_row_count(l, policy)).transpose()?;
+		let start = select.offset.as_ref().map(|o| lower_row_count(o, policy)).transpose()?;
 		op = LogicalOp::Limit(LogicalLimit {
 			input: Box::new(op),
 			start,
@@ -870,8 +877,8 @@ fn lower_bound_select_internal(
 
 		// Apply outer LIMIT & OFFSET after set operation
 		if select.limit.is_some() || select.offset.is_some() {
-			let limit = select.limit.as_ref().map(|l| lower_bound_expr(l, policy)).transpose()?;
-			let start = select.offset.as_ref().map(|o| lower_bound_expr(o, policy)).transpose()?;
+			let limit = select.limit.as_ref().map(|l| lower_row_count(l, policy)).transpose()?;
+			let start = select.offset.as_ref().map(|o| lower_row_count(o, policy)).transpose()?;
 			op = LogicalOp::Limit(LogicalLimit {
 				input: Box::new(op),
 				start,
@@ -1243,6 +1250,7 @@ fn rewrite_aggregates_to_columns(
 				id_table: id_column(agg).filter(|_| keep_id).map(|(_, table)| table.to_string()),
 				link_table: link_column(agg).map(|(_, table)| table.to_string()),
 				aggregate_output: keep_id,
+				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
 				declared_type: match agg {
 					BoundExpr::Column(col) => col.declared_type,
@@ -1876,12 +1884,14 @@ fn lower_join_key(
 		));
 	}
 	if let Some((build_col, build_table)) = link_column(build)
-		&& let LinkOperand::Record(record) = link_operand(build_table, probe, policy)?
+		&& let LinkOperand::Record(record) =
+			link_operand(build_table, build_col.key_read, probe, policy)?
 	{
 		return Ok((record, lower_column_raw(build_col)));
 	}
 	if let Some((probe_col, probe_table)) = link_column(probe)
-		&& let LinkOperand::Record(record) = link_operand(probe_table, build, policy)?
+		&& let LinkOperand::Record(record) =
+			link_operand(probe_table, probe_col.key_read, build, policy)?
 	{
 		return Ok((lower_column_raw(probe_col), record));
 	}

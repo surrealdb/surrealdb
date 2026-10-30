@@ -56,4 +56,6 @@ mod scalar_subquery_tests;
 #[cfg(test)]
 mod vector_tests;
 #[cfg(test)]
+mod write_coercion_tests;
+#[cfg(test)]
 mod write_tests;

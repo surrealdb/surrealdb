@@ -481,6 +481,10 @@ impl BinderCatalog for StagedCatalog<'_> {
 		self.inner.vector_dimension(schema, table, column)
 	}
 
+	fn write_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
+		self.inner.write_type(schema, table, column)
+	}
+
 	fn hnsw_indexes(
 		&self,
 		schema: Option<&str>,

@@ -508,6 +508,9 @@ fn engine_sqlstate(message: &str) -> Option<&'static str> {
 		} else {
 			Some("42804")
 		}
+	} else if message.starts_with("Could not cast into `") {
+		// Text written to a typed column that does not read as the column's type.
+		Some("42804")
 	} else if message.starts_with("Incorrect arguments for function vector::")
 		&& message.ends_with("must be of the same dimension.")
 	{

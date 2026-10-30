@@ -4,7 +4,7 @@ use crate::ast::stmt::TransactionStmt;
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
-use crate::parser::error::ParseResult;
+use crate::parser::error::{ErrorKind, ParseError, ParseResult};
 
 impl<'a> Parser<'a> {
 	/// Parse a transaction control statement.
@@ -12,21 +12,49 @@ impl<'a> Parser<'a> {
 		if self.peek_keyword() == Some(Keyword::Start) {
 			let start = self.bump().span;
 			self.expect_keyword(Keyword::Transaction, "TRANSACTION after START")?;
-			let read_only = if self.peek_keyword() == Some(Keyword::Read) {
-				self.bump();
-				if matches!(self.peek().kind, TokenKind::Ident(ref s) if s.eq_ignore_ascii_case("only"))
-				{
-					self.bump();
-					true
-				} else if self.peek_keyword() == Some(Keyword::Write) {
-					self.bump();
-					false
-				} else {
-					false
-				}
-			} else {
-				false
+			let unexpected = |parser: &Self, expected: &'static str| {
+				let tok = parser.peek();
+				ParseError::new(
+					tok.span,
+					ErrorKind::UnexpectedToken {
+						expected,
+						found: tok.kind.to_string(),
+					},
+				)
 			};
+			let word_is = |parser: &Self, word: &str| matches!(&parser.peek().kind, TokenKind::Ident(s) if s.eq_ignore_ascii_case(word));
+			let mut read_only = false;
+			// `WITH CONSISTENT SNAPSHOT` and `READ WRITE` ask for what every transaction here
+			// already has, so they are accepted and need no record.
+			loop {
+				if self.peek_keyword() == Some(Keyword::With) {
+					self.bump();
+					if !word_is(self, "consistent") {
+						return Err(unexpected(self, "CONSISTENT SNAPSHOT after WITH"));
+					}
+					self.bump();
+					if !word_is(self, "snapshot") {
+						return Err(unexpected(self, "SNAPSHOT after CONSISTENT"));
+					}
+					self.bump();
+				} else if self.peek_keyword() == Some(Keyword::Read) {
+					self.bump();
+					if word_is(self, "only") {
+						self.bump();
+						read_only = true;
+					} else if self.peek_keyword() == Some(Keyword::Write) {
+						self.bump();
+						read_only = false;
+					} else {
+						return Err(unexpected(self, "ONLY or WRITE after READ"));
+					}
+				} else {
+					break;
+				}
+				if self.peek().kind == TokenKind::Comma {
+					self.bump();
+				}
+			}
 			let end = self.peek().span;
 			Ok(TransactionStmt::StartTransaction {
 				read_only,

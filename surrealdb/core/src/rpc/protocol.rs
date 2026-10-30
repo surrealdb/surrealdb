@@ -2829,17 +2829,32 @@ where
 			check_dialect_subject(this, &*session_lock.read().await, method)?;
 		}
 		let entry = match control {
-			Some(sql_dialect::Control::Begin)
+			Some(sql_dialect::Control::Begin(_))
 				if open_txn.is_some() && failed && dialect == Dialect::PgSql =>
 			{
 				sql_dialect::aborted_entry()
 			}
-			Some(sql_dialect::Control::Begin) if open_txn.is_some() => {
-				sql_dialect::tagged_entry("BEGIN")
+			Some(sql_dialect::Control::Begin(asked)) if open_txn.is_some() => {
+				if asked == sql_dialect::TxnModes::default() {
+					sql_dialect::tagged_entry("BEGIN")
+				} else {
+					if txn.is_none()
+						&& dialect == Dialect::PgSql
+						&& let Some(open) = open_txn
+					{
+						sql_dialect::mark_failed(&session_lock, open).await;
+					}
+					sql_dialect::error_entry(
+						"a transaction is already in progress, so the isolation level and access mode it was opened with cannot be changed",
+						"25001",
+						(dialect == Dialect::MySql).then_some(1568),
+					)
+				}
 			}
-			Some(sql_dialect::Control::Begin) => {
-				match this.begin(None, session_id, PublicArray::new()).await {
-					Ok(DbResult::Other(PublicValue::Uuid(id))) => {
+			Some(sql_dialect::Control::Begin(asked)) => {
+				let modes = asked.resolve(&*session_lock.read().await);
+				match this.begin(None, session_id, modes.begin_params()).await.map(begun_id) {
+					Ok(Some(id)) => {
 						let mut session = session_lock.write().await;
 						// The subject is checked on the guard that publishes the transaction, so a
 						// principal changed meanwhile cannot keep one it was not permitted.
@@ -2859,10 +2874,11 @@ where
 								.variables
 								.insert(sql_dialect::TXN_VAR.to_owned(), PublicValue::Uuid(id));
 							session.variables.remove(sql_dialect::TXN_FAILED_VAR);
+							modes.record(&mut session);
 						}
 						sql_dialect::tagged_entry("BEGIN")
 					}
-					Ok(_) => sql_dialect::error_entry(
+					Ok(None) => sql_dialect::error_entry(
 						"the transaction could not be opened",
 						"XX000",
 						None,
@@ -2924,6 +2940,43 @@ where
 					entry
 				}
 			}
+			Some(sql_dialect::Control::SetTransaction {
+				modes,
+				session: for_session,
+			}) => {
+				if failed {
+					sql_dialect::aborted_entry()
+				} else if txn.is_some() && !for_session {
+					sql_dialect::error_entry(
+						"the characteristics of a transaction named by the call cannot be set with SET TRANSACTION",
+						"25001",
+						(dialect == Dialect::MySql).then_some(1568),
+					)
+				} else {
+					match set_transaction(
+						this,
+						&session_lock,
+						session_id,
+						open_txn.filter(|_| txn.is_none()),
+						modes,
+						for_session,
+						dialect,
+					)
+					.await
+					{
+						Ok(entry) => {
+							if sql_dialect::is_error_entry(&entry)
+								&& txn.is_none() && dialect == Dialect::PgSql
+								&& let Some(open) = open_txn
+							{
+								sql_dialect::mark_failed(&session_lock, open).await;
+							}
+							entry
+						}
+						Err(err) => return Err(err),
+					}
+				}
+			}
 			Some(sql_dialect::Control::Use(database)) => {
 				let args: PublicArray =
 					vec![PublicValue::None, PublicValue::String(database)].into();
@@ -2969,6 +3022,9 @@ where
 						},
 						None => None,
 					};
+					if txn.is_none() && open_txn.is_some() {
+						sql_dialect::mark_used(&session_lock).await;
+					}
 					let outcome = run_sql_part(
 						this,
 						&session_lock,
@@ -3032,8 +3088,15 @@ where
 				.to_string(),
 		));
 	}
-	let (transaction, _) =
-		this.kvs().begin_transaction(None, None).await.map_err(types_error_from_anyhow)?;
+	let read_only = ctx.options.read_only.then_some(ReadOnlyOptions {
+		max_staleness: std::time::Duration::ZERO,
+		strict: false,
+	});
+	let (transaction, _) = this
+		.kvs()
+		.begin_transaction(ctx.options.isolation, read_only)
+		.await
+		.map_err(types_error_from_anyhow)?;
 	let transaction = Arc::new(transaction);
 	let mut statements = Vec::new();
 	let mut failed = false;
@@ -3157,7 +3220,13 @@ where
 	let outcome = {
 		let session = session_lock.read().await;
 		check_dialect_subject(this, &session, ctx.method)?;
-		let vars = Some(merge_vars(&session.variables, call_vars, entry_vars));
+		#[cfg_attr(not(any(feature = "postgres", feature = "mysql")), allow(unused_mut))]
+		let mut merged = merge_vars(&session.variables, call_vars, entry_vars);
+		// Parameters of these methods carry no declared type, so text the lowering finds written
+		// to or compared with a typed column is read as that column's type.
+		#[cfg(any(feature = "postgres", feature = "mysql"))]
+		merged.insert(surrealdb_sqlplan::UNTYPED_PARAMS_VAR.to_owned(), PublicValue::Bool(true));
+		let vars = Some(merged);
 		let run = run_query_in(
 			this,
 			transaction,
@@ -3289,8 +3358,10 @@ fn extract_read_only(
 ///   one read-only block, over a snapshot no older than the bound (default `0s`, the current
 ///   state), exactly as if they were wrapped in `BEGIN READ ONLY MAX STALENESS <duration> [STRICT];
 ///   …; COMMIT;`.
+/// - `read_only: true` is `read_only: {}`, and `false` asks for nothing.
 /// - `isolation: "snapshot" | "serializable"` selects the isolation level of the transaction a
-///   `begin` opens. A query call does not take it: a lone statement is always `SNAPSHOT`.
+///   `begin` opens; the SQL names `repeatable read`, `read committed` and `read uncommitted` mean
+///   `snapshot`, in any case. A query call does not take it: a lone statement is always `SNAPSHOT`.
 ///
 /// A missing or null options object asks for nothing. Unknown entries are
 /// refused rather than ignored, so a misspelt option is never silently dropped.
@@ -3311,22 +3382,24 @@ fn parse_options(
 		match (key.as_str(), value) {
 			("isolation", PublicValue::None | PublicValue::Null) if allow_isolation => {}
 			("isolation", PublicValue::String(level)) if allow_isolation => {
-				isolation = Some(if level.eq_ignore_ascii_case("snapshot") {
-					crate::kvs::Isolation::Snapshot
-				} else if level.eq_ignore_ascii_case("serializable") {
-					crate::kvs::Isolation::Serializable
-				} else {
-					return Err(invalid_params(format!(
-						"Expected isolation to be `snapshot` or `serializable`, got `{level}`"
-					)));
-				});
+				isolation = Some(sql_dialect::isolation_named(level).ok_or_else(|| {
+					invalid_params(format!(
+						"Expected isolation to be `snapshot`, `serializable` or a SQL isolation level, got `{level}`"
+					))
+				})?);
 			}
 			("isolation", other) if allow_isolation => {
 				return Err(invalid_params(format!(
 					"Expected isolation to be a string, got {other:?}"
 				)));
 			}
-			("read_only", PublicValue::None | PublicValue::Null) => {}
+			("read_only", PublicValue::None | PublicValue::Null | PublicValue::Bool(false)) => {}
+			("read_only", PublicValue::Bool(true)) => {
+				read_only = Some(ReadOnlyOptions {
+					max_staleness: std::time::Duration::ZERO,
+					strict: false,
+				});
+			}
 			("read_only", PublicValue::Object(entry)) => {
 				let mut max_staleness = None;
 				let mut strict = false;
@@ -3369,6 +3442,108 @@ fn parse_options(
 		}
 	}
 	Ok((isolation, read_only))
+}
+
+/// The id of the transaction a `begin` call opened, which the method answers with bare when it
+/// took no options and as an object holding `id` when it did.
+fn begun_id(result: DbResult) -> Option<PublicUuid> {
+	let DbResult::Other(value) = result else {
+		return None;
+	};
+	if let PublicValue::Uuid(id) = value {
+		return Some(id);
+	}
+	if let PublicValue::Object(object) = &value
+		&& let Some(PublicValue::Uuid(id)) = object.get("id")
+	{
+		return Some(*id);
+	}
+	None
+}
+
+/// Carry out `SET TRANSACTION` for the session transaction `open`, or for the next or every later
+/// one when none is open. An open transaction that has run no statement is replaced by one opened
+/// with the new modes; once it has run one, only a request for the modes it already has succeeds.
+async fn set_transaction<T>(
+	this: &T,
+	session_lock: &tokio::sync::RwLock<Session>,
+	session_id: Uuid,
+	open: Option<Uuid>,
+	modes: sql_dialect::TxnModes,
+	for_session: bool,
+	dialect: Dialect,
+) -> Result<PublicValue, surrealdb_types::Error>
+where
+	T: RpcProtocol + ?Sized,
+{
+	let tag = sql_dialect::tagged_entry("SET");
+	let Some(open) = open.filter(|_| !for_session) else {
+		modes.store(&mut *session_lock.write().await, for_session);
+		return Ok(tag);
+	};
+	let (wanted, same, fresh) = {
+		let session = session_lock.read().await;
+		let wanted = modes.over_open(&session);
+		(
+			wanted,
+			wanted == sql_dialect::TxnModes::of_open(&session),
+			sql_dialect::txn_is_fresh(&session),
+		)
+	};
+	if same {
+		return Ok(tag);
+	}
+	if !fresh {
+		let (message, sqlstate, errno) = if dialect == Dialect::MySql {
+			(
+				"Transaction characteristics can't be changed while a transaction is in progress",
+				"25001",
+				Some(1568),
+			)
+		} else {
+			("SET TRANSACTION ISOLATION LEVEL must be called before any query", "25001", None)
+		};
+		return Ok(sql_dialect::error_entry(message, sqlstate, errno));
+	}
+	let replacement = this.begin(None, session_id, wanted.begin_params()).await.map(begun_id);
+	let id = match replacement {
+		Ok(Some(id)) => id,
+		Ok(None) => {
+			return Ok(sql_dialect::error_entry(
+				"the transaction could not be reopened",
+				"XX000",
+				None,
+			));
+		}
+		Err(err) => return Ok(sql_dialect::engine_error_entry(&err, dialect)),
+	};
+	// The session lock was released while the replacement opened, so a concurrent call may have
+	// run a statement in, ended or replaced the transaction. The replacement is published only if
+	// the session still holds that same unused transaction.
+	let mut session = session_lock.write().await;
+	let unchanged = matches!(
+		session.variables.get(sql_dialect::TXN_VAR),
+		Some(PublicValue::Uuid(current)) if current.into_inner() == open
+	) && sql_dialect::txn_is_fresh(&session);
+	if !unchanged {
+		drop(session);
+		let abandoned: PublicArray = vec![PublicValue::Uuid(id)].into();
+		// The replacement was never published, so a failure to cancel it is not observable.
+		let _ = this.cancel(None, session_id, abandoned).await;
+		return Ok(sql_dialect::error_entry(
+			"the transaction changed while its characteristics were being set",
+			"25001",
+			(dialect == Dialect::MySql).then_some(1568),
+		));
+	}
+	session.variables.insert(sql_dialect::TXN_VAR.to_owned(), PublicValue::Uuid(id));
+	wanted.record(&mut session);
+	drop(session);
+	let old: PublicArray = vec![PublicValue::Uuid(PublicUuid::from(open))].into();
+	// The replaced transaction held no statement and is abandoned either way, so a failure to
+	// cancel it changes nothing the client can observe.
+	let _ = this.cancel(None, session_id, old).await;
+	Ok(tag)
 }
 
 /// Runs a query against a session the caller already holds a read guard on.
@@ -5264,6 +5439,35 @@ mod read_only_option_tests {
 		] {
 			assert!(extract_read_only(options.clone()).is_err(), "{options:?}");
 		}
+	}
+
+	#[test]
+	fn begin_takes_read_only_as_a_flag_and_isolation_by_its_sql_name() {
+		let options = |entries: Vec<(&str, Value)>| {
+			let mut object = Object::new();
+			for (key, value) in entries {
+				object.insert(key, value);
+			}
+			Array::from(vec![Value::Object(object)])
+		};
+		let request =
+			extract_begin_options(options(vec![("read_only", Value::Bool(true))])).unwrap();
+		assert_eq!(
+			request.read_only,
+			Some(ReadOnlyOptions {
+				max_staleness: std::time::Duration::ZERO,
+				strict: false
+			})
+		);
+		let request =
+			extract_begin_options(options(vec![("read_only", Value::Bool(false))])).unwrap();
+		assert!(request.read_only.is_none());
+		let request = extract_begin_options(options(vec![(
+			"isolation",
+			Value::String("Repeatable Read".to_string()),
+		)]))
+		.unwrap();
+		assert_eq!(request.isolation, Some(crate::kvs::Isolation::Snapshot));
 	}
 
 	#[test]

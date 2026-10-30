@@ -77,6 +77,17 @@ impl RelationEntry {
 		} else {
 			derived.as_ref().and_then(|(_, link)| link.clone())
 		};
+		let key_read = if id_table.is_some() {
+			crate::ir::KeyRead::of(catalog.write_type(
+				self.schema.as_deref(),
+				&self.table_name,
+				"id",
+			))
+		} else if let Some(target) = link_table.as_deref() {
+			crate::ir::KeyRead::of(catalog.write_type(self.schema.as_deref(), target, "id"))
+		} else {
+			crate::ir::KeyRead::None
+		};
 		BoundColumnRef {
 			relation_index: self.relation_index,
 			relation_name: self.exposed_name.clone(),
@@ -97,6 +108,7 @@ impl RelationEntry {
 			id_table,
 			link_table,
 			aggregate_output: false,
+			key_read,
 			also_in: Vec::new(),
 		}
 	}
@@ -719,6 +731,7 @@ impl QueryScope {
 				link_table: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
+				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
 			}))
 		} else if let BoundExpr::FunctionCall {
@@ -735,6 +748,7 @@ impl QueryScope {
 				link_table: None,
 				declared_type: crate::SqlType::Unknown,
 				aggregate_output: false,
+				key_read: crate::ir::KeyRead::None,
 				also_in: Vec::new(),
 			}))
 		} else {
@@ -757,6 +771,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
 				}));
 			}
@@ -808,6 +823,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
 				}),
 				alias: None,
@@ -860,6 +876,7 @@ impl QueryScope {
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
 				}),
 				alias: None,

@@ -43,6 +43,7 @@ pub use lower::ddl::{
 	lower_pgsql_ddl, lower_pgsql_ddl_over, lower_pgsql_ddl_with, lower_pgsql_drop, map_mysql_type,
 	map_pgsql_type,
 };
+pub use lower::id_key::UNTYPED_PARAMS_VAR;
 pub use lower::write::{
 	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
 	lower_mysql_truncate, lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr,

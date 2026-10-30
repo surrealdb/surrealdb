@@ -8,14 +8,17 @@ use surrealdb_expr::expr::statements::{
 };
 use surrealdb_expr::expr::{
 	AssignOperator, BinaryOperator, Block, Cond, Data, Expr, Field, Fields, Function, FunctionCall,
-	Idiom, Literal, ObjectEntry, Output, Param, Part, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+	Idiom, Kind, Literal, ObjectEntry, Output, Param, Part, PrefixOperator, RecordIdKeyLit,
+	RecordIdLit,
 };
 use surrealdb_strand::{Strand, TableName};
 
+use crate::SqlType;
 use crate::catalog::BinderCatalog;
 use crate::dialect::SqlDialect;
 use crate::error::PlanError;
 use crate::functions::FunctionRegistry;
+use crate::ir::KeyRead;
 use crate::lower::id_key::{KEY_KINDS, NAMING_KINDS, RECORD_KIND};
 use crate::lower::write_null as sql_null;
 
@@ -82,6 +85,11 @@ impl<'a> IdScope<'a> {
 	/// The dimensions of the column `column` of the target table when it holds vectors.
 	fn vector_column(&self, column: &str) -> Option<usize> {
 		self.catalog.vector_dimension(self.schema.as_deref(), &self.table, column)
+	}
+
+	/// The type text written to the column `column` of the target table is read as.
+	fn write_type(&self, column: &str) -> SqlType {
+		self.catalog.write_type(self.schema.as_deref(), &self.table, column)
 	}
 
 	/// The table the column `column` of the target table holds record links to, if it holds them.
@@ -515,6 +523,7 @@ fn link_comparand_with(
 			return Expr::Idiom(Idiom::field(name));
 		}
 	}
+	let lowered = read_as_key(scope, table, lowered);
 	if let Some(record) = record_literal(table, &lowered) {
 		return record;
 	}
@@ -609,10 +618,111 @@ fn assigned_value(scope: &IdScope<'_>, column: &str, value: Expr) -> Expr {
 	match scope.link_column(column) {
 		Some(table) => {
 			let admits_none = scope.link_admits_none(column);
-			link_assignment(&table, value, admits_none)
+			link_assignment(&table, read_as_key(scope, &table, value), admits_none)
 		}
-		None => value,
+		None => text_assignment(scope.write_type(column), value),
 	}
+}
+
+/// The key `key` an `id` comparison names, read as the type of the table's `id` when it is text: a
+/// parameter or a text literal compared with an integer `id` names the record of that integer key.
+fn typed_key(scope: &IdScope<'_>, key: WriteKey) -> WriteKey {
+	let ty = scope.write_type("id");
+	if let WriteKey::Param(name) = &key
+		&& text_is_read_as(ty)
+	{
+		return WriteKey::Value(text_assignment(ty, Expr::Param(Param::from(name.clone()))));
+	}
+	if let WriteKey::Str(text) = &key
+		&& KeyRead::of(ty) == KeyRead::Int
+		&& let Ok(number) = text.parse::<i64>()
+	{
+		return WriteKey::Int(number);
+	}
+	key
+}
+
+/// `value`, compared with the key of `table`, read as the type of that table's `id` when it is
+/// text: an integer `id` is named by `'7'` and by a parameter that holds `'7'`.
+fn read_as_key(scope: &IdScope<'_>, table: &str, value: Expr) -> Expr {
+	let ty = scope.catalog.write_type(scope.schema.as_deref(), table, "id");
+	if let Expr::Literal(Literal::String(text)) = &value
+		&& KeyRead::of(ty) == KeyRead::Int
+		&& let Ok(number) = text.as_str().parse::<i64>()
+	{
+		return Expr::Literal(Literal::Integer(number));
+	}
+	if matches!(value, Expr::Param(_) | Expr::Literal(Literal::String(_)))
+		&& KeyRead::of(ty) == KeyRead::Uuid
+	{
+		return text_assignment(ty, value);
+	}
+	if matches!(value, Expr::Param(_)) {
+		return text_assignment(ty, value);
+	}
+	value
+}
+
+/// `text`, read as a value of the type `ty`; `None` for a type text is not read as.
+fn read_text_as(ty: SqlType, text: Expr) -> Option<Expr> {
+	if ty == SqlType::Json {
+		return Some(call("encoding::json::decode", vec![text]));
+	}
+	let kind = if matches!(ty, SqlType::Int2 | SqlType::Int4 | SqlType::Int8) {
+		Kind::Int
+	} else if matches!(ty, SqlType::Float4 | SqlType::Float8) {
+		Kind::Float
+	} else if ty == SqlType::Numeric {
+		Kind::Decimal
+	} else if ty == SqlType::Bool {
+		Kind::Bool
+	} else if ty == SqlType::TimestampTz {
+		Kind::Datetime
+	} else if ty == SqlType::Uuid {
+		Kind::Uuid
+	} else {
+		return None;
+	};
+	Some(Expr::Prefix {
+		op: PrefixOperator::Cast(kind),
+		expr: Box::new(text),
+	})
+}
+
+/// Whether text written to a column of type `ty` is read as that type.
+fn text_is_read_as(ty: SqlType) -> bool {
+	read_text_as(ty, Expr::Literal(Literal::None)).is_some()
+}
+
+/// The `value` written to a column of type `ty`, read as that type when it is text: a client that
+/// sends every parameter as text writes `'42'` to an integer column, `'{"a":1}'` to a `json`
+/// column. A value that is not text, a `NULL` and a column of any other type are written as they
+/// are.
+fn text_assignment(ty: SqlType, value: Expr) -> Expr {
+	if !matches!(value, Expr::Param(_) | Expr::Literal(Literal::String(_))) || !text_is_read_as(ty)
+	{
+		return value;
+	}
+	let is_param = matches!(value, Expr::Param(_));
+	evaluated_once(value, |value| {
+		let converted = read_text_as(ty, value.clone()).unwrap_or_else(|| value.clone());
+		let is_text = call("type::is_string", vec![value.clone()]);
+		let condition = if is_param {
+			Expr::Binary {
+				left: Box::new(is_text),
+				op: BinaryOperator::And,
+				right: Box::new(Expr::Param(Param::from(
+					crate::lower::id_key::UNTYPED_PARAMS_VAR.to_string(),
+				))),
+			}
+		} else {
+			is_text
+		};
+		Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(condition, converted)],
+			close: Some(value),
+		}))
+	})
 }
 
 /// The `value` written to the column `column` of the target table by a PostgreSQL statement:
@@ -1542,7 +1652,7 @@ fn pgsql_id_operand(
 	scope: &IdScope<'_>,
 ) -> Result<Option<WriteKey>, PlanError> {
 	if let Some(key) = pgsql_key_operand(expr) {
-		return Ok(Some(key));
+		return Ok(Some(typed_key(scope, key)));
 	}
 	if matches!(expr, surrealdb_pgsql::ast::expr::Expr::Literal { .. }) || pgsql_is_id(expr, scope)
 	{
@@ -2908,7 +3018,7 @@ fn mysql_id_operand(
 	scope: &IdScope<'_>,
 ) -> Result<Option<WriteKey>, PlanError> {
 	if let Some(key) = mysql_key_operand(expr) {
-		return Ok(Some(key));
+		return Ok(Some(typed_key(scope, key)));
 	}
 	if matches!(expr, surrealdb_mysql::ast::expr::Expr::Literal(..)) || mysql_is_id(expr, scope) {
 		return Ok(None);

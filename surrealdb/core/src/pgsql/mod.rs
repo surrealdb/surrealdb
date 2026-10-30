@@ -423,6 +423,18 @@ impl surrealdb_sqlplan::BinderCatalog for BatchCatalog<'_> {
 			None => self.inner.vector_dimension(schema, table, column),
 		}
 	}
+
+	fn write_type(
+		&self,
+		schema: Option<&str>,
+		table: &str,
+		column: &str,
+	) -> surrealdb_sqlplan::SqlType {
+		match self.vectors.get(table, column) {
+			Some(_) => surrealdb_sqlplan::SqlType::Unknown,
+			None => self.inner.write_type(schema, table, column),
+		}
+	}
 }
 
 #[cfg(test)]

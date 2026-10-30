@@ -16,8 +16,8 @@ use crate::ir::{
 	BoundTarget, BoundUnaryOp,
 };
 use crate::lower::id_key::{
-	equal, id_column, is_key_or_link, key_of, key_operand, lower_id_key, record_of,
-	record_of_operand, record_or_value,
+	equal, id_column, is_key_or_link, key_of, key_operand, key_read_as, lower_id_key, record_of,
+	record_of_operand_typed, record_or_value,
 };
 use crate::lower::link::{
 	LinkOperand, link_column, link_comparison_operand, link_operand, lower_stored, same_table_pair,
@@ -983,7 +983,8 @@ pub fn lower_bound_expr(
 			negated,
 		} => {
 			if let Some((col, table)) = id_column(expr)
-				&& let Some((records, true)) = id_member_records(table, list, policy, true)?
+				&& let Some((records, true)) =
+					id_member_records(table, col.key_read, list, policy, true)?
 			{
 				return Ok(sql_membership(
 					lower_column_raw(col),
@@ -1208,6 +1209,7 @@ fn relation_field(relation: usize, column: &str) -> LogicalExpr {
 /// neither: a literal that is no key, or an expression that holds a subquery.
 fn id_member_records(
 	table: &str,
+	ty: crate::ir::KeyRead,
 	list: &[BoundExpr],
 	policy: &DialectPolicy,
 	preserve_value: bool,
@@ -1218,14 +1220,14 @@ fn id_member_records(
 		if let Some(key) = key_operand(member) {
 			records.push(
 				if preserve_value && matches!(key, crate::lower::id_key::KeyOperand::Param(_)) {
-					record_or_value(table, lower_stored(member, policy)?)
+					record_or_value(table, key_read_as(ty, lower_stored(member, policy)?))
 				} else {
-					record_of_operand(table, &key)
+					record_of_operand_typed(table, &key, ty)
 				},
 			);
 		} else if is_key_or_link(member) {
 			has_value = true;
-			let value = lower_stored(member, policy)?;
+			let value = key_read_as(ty, lower_stored(member, policy)?);
 			records.push(if preserve_value {
 				record_or_value(table, value)
 			} else {
@@ -1277,9 +1279,12 @@ pub(crate) fn lower_lookup_predicate(
 			return Ok(None);
 		}
 		if let Some(key) = key_operand(other) {
-			Ok(Some(equal(lower_column_raw(col), record_of_operand(table, &key))))
+			Ok(Some(equal(
+				lower_column_raw(col),
+				record_of_operand_typed(table, &key, col.key_read),
+			)))
 		} else if is_key_or_link(other) {
-			let record = record_of(table, lower_stored(other, policy)?);
+			let record = record_of(table, key_read_as(col.key_read, lower_stored(other, policy)?));
 			Ok(Some(equal(lower_column_raw(col), record)))
 		} else {
 			Ok(None)
@@ -1296,7 +1301,9 @@ pub(crate) fn lower_lookup_predicate(
 			}
 			let mut records = Vec::with_capacity(list.len());
 			for member in list {
-				let LinkOperand::Record(record) = link_operand(table, member, policy)? else {
+				let LinkOperand::Record(record) =
+					link_operand(table, col.key_read, member, policy)?
+				else {
 					return Ok(None);
 				};
 				records.push(record);
@@ -1316,7 +1323,8 @@ pub(crate) fn lower_lookup_predicate(
 		if !names_scanned_record(col) {
 			return Ok(None);
 		}
-		let Some((records, _)) = id_member_records(table, list, policy, false)? else {
+		let Some((records, _)) = id_member_records(table, col.key_read, list, policy, false)?
+		else {
 			return Ok(None);
 		};
 		Ok(one_or_inside(col, records))
@@ -1339,7 +1347,7 @@ fn lower_link_lookup(
 	if !names_scanned_record(col) {
 		return Ok(None);
 	}
-	Ok(match link_operand(table, other, policy)? {
+	Ok(match link_operand(table, col.key_read, other, policy)? {
 		LinkOperand::Record(record) => {
 			let dynamic = !matches!(record, LogicalExpr::RecordId(_));
 			let predicate = equal(lower_column_raw(col), record);
@@ -1379,7 +1387,7 @@ fn lower_link_membership(
 ) -> Result<LogicalExpr, PlanError> {
 	let mut records = Vec::with_capacity(list.len());
 	for member in list {
-		match link_comparison_operand(table, member, policy)? {
+		match link_comparison_operand(table, col.key_read, member, policy)? {
 			LinkOperand::Record(record) | LinkOperand::Plain(record) => records.push(record),
 			LinkOperand::Subquery(_) => {
 				let members = list
@@ -1431,11 +1439,13 @@ fn lower_operands(
 				return Ok((lower_column_raw(l), lower_column_raw(r)));
 			}
 			(Some((col, table)), None) if is_key_or_link(right) => {
-				let record = record_or_value(table, lower_stored(right, policy)?);
+				let record =
+					record_or_value(table, key_read_as(col.key_read, lower_stored(right, policy)?));
 				return Ok((lower_column_raw(col), record));
 			}
 			(None, Some((col, table))) if is_key_or_link(left) => {
-				let record = record_or_value(table, lower_stored(left, policy)?);
+				let record =
+					record_or_value(table, key_read_as(col.key_read, lower_stored(left, policy)?));
 				return Ok((record, lower_column_raw(col)));
 			}
 			(None, None) => {
@@ -1497,7 +1507,7 @@ fn link_comparison(
 	other: &BoundExpr,
 	policy: &DialectPolicy,
 ) -> Result<(LogicalExpr, LogicalExpr), PlanError> {
-	Ok(match link_comparison_operand(table, other, policy)? {
+	Ok(match link_comparison_operand(table, col.key_read, other, policy)? {
 		LinkOperand::Record(other) | LinkOperand::Plain(other) => (lower_column_raw(col), other),
 		LinkOperand::Subquery(other) => (key_of(lower_column_raw(col), true), other),
 	})

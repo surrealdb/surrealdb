@@ -353,6 +353,16 @@ pub trait BinderCatalog: Send + Sync {
 		Vec::new()
 	}
 
+	/// The declared type of column `column` of table `table` when a text value written to it is
+	/// read as that type: the integer, float, `numeric`, boolean, timestamp, `uuid` and `json`
+	/// types. [`crate::SqlType::Unknown`] for every other column, and for a column the catalog does
+	/// not describe.
+	///
+	/// The table and the column are named as the lowering names them, and are compared exactly.
+	fn write_type(&self, _schema: Option<&str>, _table: &str, _column: &str) -> crate::SqlType {
+		crate::SqlType::Unknown
+	}
+
 	/// A declared column type, independent of whether the table's columns can be enumerated.
 	fn column_type(&self, schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
 		self.get_table(schema, table)
@@ -472,6 +482,8 @@ pub struct MemoryCatalog {
 	nullable_links: std::collections::HashSet<(String, String)>,
 	/// The dimensions of the vector columns, by (table, column).
 	vectors: HashMap<(String, String), usize>,
+	/// The types text is read as when written to a column, by (table, column).
+	write_types: HashMap<(String, String), crate::SqlType>,
 	/// The HNSW indexes, by table, as the column each covers and its metric.
 	hnsw: HashMap<String, Vec<(String, crate::vector::VectorMetric)>>,
 }
@@ -487,6 +499,7 @@ impl MemoryCatalog {
 			shapes: HashMap::new(),
 			nullable_links: std::collections::HashSet::new(),
 			vectors: HashMap::new(),
+			write_types: HashMap::new(),
 			hnsw: HashMap::new(),
 		}
 	}
@@ -529,6 +542,12 @@ impl MemoryCatalog {
 		metric: crate::vector::VectorMetric,
 	) -> &mut Self {
 		self.hnsw.entry(table.to_owned()).or_default().push((column.to_owned(), metric));
+		self
+	}
+
+	/// Declare that text written to column `column` of table `table` is read as `ty`.
+	pub fn add_write_type(&mut self, table: &str, column: &str, ty: crate::SqlType) -> &mut Self {
+		self.write_types.insert((table.to_owned(), column.to_owned()), ty);
 		self
 	}
 
@@ -711,6 +730,13 @@ impl BinderCatalog for MemoryCatalog {
 
 	fn vector_dimension(&self, _schema: Option<&str>, table: &str, column: &str) -> Option<usize> {
 		self.vectors.get(&(table.to_owned(), column.to_owned())).copied()
+	}
+
+	fn write_type(&self, _schema: Option<&str>, table: &str, column: &str) -> crate::SqlType {
+		self.write_types
+			.get(&(table.to_owned(), column.to_owned()))
+			.copied()
+			.unwrap_or(crate::SqlType::Unknown)
 	}
 
 	fn hnsw_indexes(

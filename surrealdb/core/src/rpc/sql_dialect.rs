@@ -5,6 +5,7 @@
 //! one entry per statement with its status, time and rows, or its error with a dialect error
 //! code. `transaction.status` is `idle`, `active` or `failed`.
 
+mod codes;
 mod typed;
 
 use surrealdb_rpc::QueryResult;
@@ -18,14 +19,189 @@ use crate::types::{PublicArray, PublicValue};
 pub(super) const TXN_VAR: &str = "sql_txn";
 /// The session variable that is `true` once a statement has failed in the open transaction.
 pub(super) const TXN_FAILED_VAR: &str = "sql_txn_failed";
+/// The session variable that is `true` while the open transaction has run no statement, so that
+/// `SET TRANSACTION` can still choose its isolation level and access mode.
+pub(super) const TXN_FRESH_VAR: &str = "sql_txn_fresh";
+/// The isolation level of the open transaction, as the string `snapshot` or `serializable`.
+const TXN_ISOLATION_VAR: &str = "sql_txn_isolation";
+/// Whether the open transaction is read-only.
+const TXN_READ_ONLY_VAR: &str = "sql_txn_read_only";
+/// The modes the session's later transactions open with.
+const DEFAULT_ISOLATION_VAR: &str = "sql_txn_default_isolation";
+const DEFAULT_READ_ONLY_VAR: &str = "sql_txn_default_read_only";
+/// The modes the next transaction alone opens with.
+const NEXT_ISOLATION_VAR: &str = "sql_txn_next_isolation";
+const NEXT_READ_ONLY_VAR: &str = "sql_txn_next_read_only";
 
 /// Refuse a client write to the variables that record the session's dialect transaction: only the
 /// `pgsql` and `mysql` methods may name the transaction a session holds.
 pub(super) fn check_not_transaction_state(key: &str) -> Result<(), surrealdb_types::Error> {
-	if key == TXN_VAR || key == TXN_FAILED_VAR {
+	if key.starts_with("sql_txn") {
 		return Err(invalid_params(format!("Cannot set protected variable: {key}")));
 	}
 	Ok(())
+}
+
+/// The isolation level and access mode a statement asks a transaction to have. A field that is
+/// `None` leaves the one the session defaults to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TxnModes {
+	pub isolation: Option<crate::kvs::Isolation>,
+	pub read_only: Option<bool>,
+}
+
+fn isolation_name(isolation: crate::kvs::Isolation) -> &'static str {
+	match isolation {
+		crate::kvs::Isolation::Snapshot => "snapshot",
+		crate::kvs::Isolation::Serializable => "serializable",
+	}
+}
+
+/// The isolation level a name asks for. The levels below `REPEATABLE READ` run as the engine's
+/// snapshot isolation, which the SQL standard allows because a transaction may be given a stronger
+/// level than the one it names.
+pub(super) fn isolation_named(name: &str) -> Option<crate::kvs::Isolation> {
+	let words: Vec<String> =
+		name.trim().trim_matches('\'').split_whitespace().map(str::to_ascii_lowercase).collect();
+	let words: Vec<&str> = words.iter().map(String::as_str).collect();
+	match words.as_slice() {
+		["serializable"] => Some(crate::kvs::Isolation::Serializable),
+		["snapshot"] | ["repeatable", "read"] | ["read", "committed" | "uncommitted"] => {
+			Some(crate::kvs::Isolation::Snapshot)
+		}
+		_ => None,
+	}
+}
+
+impl TxnModes {
+	/// The options object of the `begin` method that opens a transaction with these modes, or no
+	/// parameters when it asks for none.
+	pub(super) fn begin_params(self) -> PublicArray {
+		if self.isolation.is_none() && self.read_only != Some(true) {
+			return PublicArray::new();
+		}
+		let mut options = surrealdb_types::Object::new();
+		if let Some(isolation) = self.isolation {
+			options.insert("isolation", PublicValue::String(isolation_name(isolation).to_owned()));
+		}
+		if self.read_only == Some(true) {
+			options.insert("read_only", PublicValue::Object(surrealdb_types::Object::new()));
+		}
+		vec![PublicValue::Object(options)].into()
+	}
+
+	/// These modes with the one-shot modes of a `SET TRANSACTION` outside a transaction and the
+	/// session's defaults filling what they leave open, in that order.
+	pub(super) fn resolve(self, session: &Session) -> Self {
+		let isolation_of = |value: Option<&PublicValue>| match value {
+			Some(PublicValue::String(name)) => isolation_named(name),
+			_ => None,
+		};
+		let read_only_of = |value: Option<&PublicValue>| match value {
+			Some(PublicValue::Bool(on)) => Some(*on),
+			Some(PublicValue::String(text)) => {
+				Some(matches!(text.to_ascii_lowercase().as_str(), "on" | "true" | "yes" | "1"))
+			}
+			_ => None,
+		};
+		let next_isolation = isolation_of(session.variables.get(NEXT_ISOLATION_VAR));
+		let next_read_only = read_only_of(session.variables.get(NEXT_READ_ONLY_VAR));
+		Self {
+			isolation: self
+				.isolation
+				.or(next_isolation)
+				.or_else(|| isolation_of(session.variables.get(DEFAULT_ISOLATION_VAR)))
+				.or_else(|| {
+					isolation_of(
+						session
+							.variables
+							.get(setting_var("default_transaction_isolation").as_str()),
+					)
+				}),
+			read_only: self
+				.read_only
+				.or(next_read_only)
+				.or_else(|| read_only_of(session.variables.get(DEFAULT_READ_ONLY_VAR)))
+				.or_else(|| {
+					read_only_of(
+						session
+							.variables
+							.get(setting_var("default_transaction_read_only").as_str()),
+					)
+				}),
+		}
+	}
+
+	/// Record these as the modes of the transaction just opened, which has used up the one-shot
+	/// modes of a `SET TRANSACTION`.
+	pub(super) fn record(self, session: &mut Session) {
+		session.variables.remove(NEXT_ISOLATION_VAR);
+		session.variables.remove(NEXT_READ_ONLY_VAR);
+		session.variables.insert(
+			TXN_ISOLATION_VAR.to_owned(),
+			PublicValue::String(
+				isolation_name(self.isolation.unwrap_or(crate::kvs::Isolation::Snapshot))
+					.to_owned(),
+			),
+		);
+		session
+			.variables
+			.insert(TXN_READ_ONLY_VAR.to_owned(), PublicValue::Bool(self.read_only == Some(true)));
+		session.variables.insert(TXN_FRESH_VAR.to_owned(), PublicValue::Bool(true));
+	}
+
+	/// The modes the open transaction was opened with, with `self` laid over them.
+	pub(super) fn over_open(self, session: &Session) -> Self {
+		let open = Self {
+			isolation: match session.variables.get(TXN_ISOLATION_VAR) {
+				Some(PublicValue::String(name)) => isolation_named(name),
+				_ => None,
+			},
+			read_only: match session.variables.get(TXN_READ_ONLY_VAR) {
+				Some(PublicValue::Bool(on)) => Some(*on),
+				_ => None,
+			},
+		};
+		Self {
+			isolation: self.isolation.or(open.isolation),
+			read_only: self.read_only.or(open.read_only),
+		}
+	}
+
+	/// The modes the open transaction has, as `SET TRANSACTION` compares them.
+	pub(super) fn of_open(session: &Session) -> Self {
+		Self::default().over_open(session)
+	}
+
+	/// Make these the modes the session's later transactions open with, or the next one's alone.
+	pub(super) fn store(self, session: &mut Session, for_session: bool) {
+		let (isolation_var, read_only_var) = if for_session {
+			(DEFAULT_ISOLATION_VAR, DEFAULT_READ_ONLY_VAR)
+		} else {
+			(NEXT_ISOLATION_VAR, NEXT_READ_ONLY_VAR)
+		};
+		if let Some(isolation) = self.isolation {
+			session.variables.insert(
+				isolation_var.to_owned(),
+				PublicValue::String(isolation_name(isolation).to_owned()),
+			);
+		}
+		if let Some(read_only) = self.read_only {
+			session.variables.insert(read_only_var.to_owned(), PublicValue::Bool(read_only));
+		}
+	}
+}
+
+/// Whether the open transaction has run no statement.
+pub(super) fn txn_is_fresh(session: &Session) -> bool {
+	matches!(session.variables.get(TXN_FRESH_VAR), Some(PublicValue::Bool(true)))
+}
+
+/// Note that the open transaction has run a statement.
+pub(super) async fn mark_used(session_lock: &tokio::sync::RwLock<Session>) {
+	if txn_is_fresh(&*session_lock.read().await) {
+		session_lock.write().await.variables.remove(TXN_FRESH_VAR);
+	}
 }
 
 /// What the call asks of its statements.
@@ -39,6 +215,10 @@ pub(super) struct Options {
 	pub atomic: bool,
 	/// Every value as its text-protocol form, `null` for SQL NULL.
 	pub value_text: bool,
+	/// The isolation level of an atomic call's transaction.
+	pub isolation: Option<crate::kvs::Isolation>,
+	/// Whether an atomic call's transaction is read-only.
+	pub read_only: bool,
 }
 
 /// Read the `options` object. A field that asks for behaviour these methods do not provide is
@@ -64,23 +244,43 @@ pub(super) fn parse_options(
 			("valueMode", PublicValue::String(mode)) if mode == "native" => {}
 			("valueMode", PublicValue::String(mode)) if mode == "text" => parsed.value_text = true,
 			("atomic", PublicValue::Bool(on)) => parsed.atomic = *on,
+			("isolation", PublicValue::String(level)) => {
+				parsed.isolation = Some(isolation_named(level).ok_or_else(|| {
+					invalid_params(format!(
+						"Expected isolation to be `snapshot`, `serializable` or a SQL isolation level, got `{level}`"
+					))
+				})?);
+			}
+			("isolation" | "readOnly", PublicValue::None | PublicValue::Null) => {}
+			("readOnly", PublicValue::Bool(on)) => parsed.read_only = *on,
 			("valueMode", _) => {
 				return Err(invalid_params(format!(
 					"The option `{name}` is not supported with this value"
 				)));
 			}
-			("describe" | "rowMode", _) => {
+			("describe" | "rowMode" | "isolation" | "readOnly", _) => {
 				return Err(invalid_params(format!("Invalid value for the option `{name}`")));
 			}
 			_ => return Err(invalid_params(format!("Unknown option `{name}`"))),
 		}
+	}
+	if (parsed.isolation.is_some() || parsed.read_only) && !parsed.atomic {
+		return Err(invalid_params(
+			"The options `isolation` and `readOnly` apply to atomic calls only".to_string(),
+		));
 	}
 	Ok(parsed)
 }
 
 /// A statement that is the session's to carry out rather than the engine's.
 pub(super) enum Control {
-	Begin,
+	Begin(TxnModes),
+	/// `SET TRANSACTION modes` for the open or next transaction, or with `session` for every
+	/// later one (`SET SESSION CHARACTERISTICS AS TRANSACTION`, MySQL `SET SESSION TRANSACTION`).
+	SetTransaction {
+		modes: TxnModes,
+		session: bool,
+	},
 	Commit,
 	Rollback,
 	/// MySQL `USE database`.
@@ -97,9 +297,9 @@ pub(super) enum Control {
 	Reset(String),
 }
 
-/// The first keyword of `text`, lower-cased, after whitespace and comments. It is how a statement
-/// is told apart cheaply from a session statement before it is parsed.
-fn first_keyword(text: &str) -> Option<String> {
+/// `text` without the whitespace and comments that precede its first token; `None` when a block
+/// comment is never closed.
+fn without_leading_comments(text: &str) -> Option<&str> {
 	let mut rest = text;
 	loop {
 		rest = rest.trim_start();
@@ -108,9 +308,15 @@ fn first_keyword(text: &str) -> Option<String> {
 		} else if rest.starts_with("--") || rest.starts_with('#') {
 			rest = rest.split_once('\n').map_or("", |(_, tail)| tail);
 		} else {
-			break;
+			return Some(rest);
 		}
 	}
+}
+
+/// The first keyword of `text`, lower-cased, after whitespace and comments. It is how a statement
+/// is told apart cheaply from a session statement before it is parsed.
+fn first_keyword(text: &str) -> Option<String> {
+	let rest = without_leading_comments(text)?;
 	let word: String = rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
 	(!word.is_empty()).then(|| word.to_ascii_lowercase())
 }
@@ -132,20 +338,33 @@ pub(super) fn control(text: &str, dialect: Dialect) -> Option<Control> {
 	) {
 		return None;
 	}
+	if keyword == "set"
+		&& let Some(control) = without_leading_comments(text).and_then(set_transaction)
+	{
+		return Some(control);
+	}
 	#[cfg(feature = "postgres")]
 	if dialect == Dialect::PgSql
 		&& let Ok(statements) = crate::pgsql::parse(text)
 		&& let [statement] = statements.as_slice()
 	{
-		use surrealdb_pgsql::ast::stmt::{Statement, TransactionStmt};
+		use surrealdb_pgsql::ast::stmt::{IsolationLevel, Statement, TransactionStmt};
 		if let Statement::Transaction(transaction) = statement {
 			if let TransactionStmt::Begin {
-				read_only: false,
-				isolation: None,
+				read_only,
+				isolation,
 				..
 			} = transaction
 			{
-				return Some(Control::Begin);
+				return Some(Control::Begin(TxnModes {
+					isolation: isolation.map(|level| match level {
+						IsolationLevel::Serializable => crate::kvs::Isolation::Serializable,
+						IsolationLevel::RepeatableRead
+						| IsolationLevel::ReadCommitted
+						| IsolationLevel::ReadUncommitted => crate::kvs::Isolation::Snapshot,
+					}),
+					read_only: read_only.then_some(true),
+				}));
 			}
 			if let TransactionStmt::Commit {
 				..
@@ -180,13 +399,18 @@ pub(super) fn control(text: &str, dialect: Dialect) -> Option<Control> {
 			return Some(Control::Use(use_stmt.database.clone()));
 		}
 		if let Statement::Transaction(transaction) = statement {
-			if let TransactionStmt::Begin(_)
-			| TransactionStmt::StartTransaction {
-				read_only: false,
+			if let TransactionStmt::Begin(_) = transaction {
+				return Some(Control::Begin(TxnModes::default()));
+			}
+			if let TransactionStmt::StartTransaction {
+				read_only,
 				..
 			} = transaction
 			{
-				return Some(Control::Begin);
+				return Some(Control::Begin(TxnModes {
+					isolation: None,
+					read_only: read_only.then_some(true),
+				}));
 			}
 			if let TransactionStmt::Commit(_) = transaction {
 				return Some(Control::Commit);
@@ -207,7 +431,7 @@ pub(super) fn control(text: &str, dialect: Dialect) -> Option<Control> {
 		.to_ascii_uppercase();
 	match normalised.as_str() {
 		"BEGIN" | "BEGIN WORK" | "BEGIN TRANSACTION" | "START TRANSACTION" => {
-			return Some(Control::Begin);
+			return Some(Control::Begin(TxnModes::default()));
 		}
 		"COMMIT" | "COMMIT WORK" | "COMMIT TRANSACTION" | "END" | "END TRANSACTION" => {
 			return Some(Control::Commit);
@@ -218,6 +442,69 @@ pub(super) fn control(text: &str, dialect: Dialect) -> Option<Control> {
 		_ => {}
 	}
 	None
+}
+
+/// A `SET [SESSION | LOCAL | GLOBAL] TRANSACTION modes` or `SET SESSION CHARACTERISTICS AS
+/// TRANSACTION modes` statement, where `modes` are `ISOLATION LEVEL level` and `READ ONLY | READ
+/// WRITE`, separated by commas or spaces. Any other form is not one.
+fn set_transaction(text: &str) -> Option<Control> {
+	let normalised = text
+		.trim()
+		.trim_end_matches(';')
+		.replace(',', " ")
+		.split_whitespace()
+		.map(str::to_ascii_lowercase)
+		.collect::<Vec<_>>();
+	let mut words = normalised.iter().map(String::as_str).peekable();
+	words.next().filter(|word| *word == "set")?;
+	let mut session = false;
+	match words.peek().copied() {
+		Some("session") => {
+			words.next();
+			session = true;
+			if words.peek().copied() == Some("characteristics") {
+				words.next();
+				words.next().filter(|word| *word == "as")?;
+			}
+		}
+		Some("global") => {
+			words.next();
+			session = true;
+		}
+		Some("local") => {
+			words.next();
+		}
+		_ => {}
+	}
+	words.next().filter(|word| *word == "transaction")?;
+	let mut modes = TxnModes::default();
+	while let Some(word) = words.next() {
+		match word {
+			"isolation" => {
+				words.next().filter(|word| *word == "level")?;
+				let level = match words.next()? {
+					"serializable" => "serializable".to_owned(),
+					"repeatable" => {
+						words.next().filter(|word| *word == "read")?;
+						"repeatable read".to_owned()
+					}
+					"read" => format!("read {}", words.next()?),
+					_ => return None,
+				};
+				modes.isolation = Some(isolation_named(&level)?);
+			}
+			"read" => match words.next()? {
+				"only" => modes.read_only = Some(true),
+				"write" => modes.read_only = Some(false),
+				_ => return None,
+			},
+			_ => return None,
+		}
+	}
+	(modes != TxnModes::default()).then_some(Control::SetTransaction {
+		modes,
+		session,
+	})
 }
 
 /// A setting value without the quotes of a single quoted literal (`'it''s'` is `it's`); a list or
@@ -294,6 +581,7 @@ fn setting_default(name: &str) -> Option<&'static str> {
 		"statement_timeout" => "0",
 		"client_min_messages" => "notice",
 		"default_transaction_isolation" => "read committed",
+		"default_transaction_read_only" => "off",
 		"integer_datetimes" => "on",
 		"server_encoding" => "UTF8",
 		_ => return None,
@@ -382,7 +670,15 @@ pub(super) fn has_transaction_control(params: &PublicArray, dialect: Dialect) ->
 		return true;
 	}
 	let is_control = |text: &str| {
-		matches!(control(text, dialect), Some(Control::Begin | Control::Commit | Control::Rollback))
+		matches!(
+			control(text, dialect),
+			Some(
+				Control::Begin(_)
+					| Control::Commit
+					| Control::Rollback
+					| Control::SetTransaction { .. }
+			)
+		)
 	};
 	let entry_is_control = |entry: &PublicValue| {
 		if let PublicValue::String(text) = entry {
@@ -406,21 +702,7 @@ fn number(n: i64) -> PublicValue {
 
 /// The dialect error code of an engine error: the SQLSTATE, and for MySQL the error number.
 fn classify(err: &surrealdb_types::Error, dialect: Dialect) -> (&'static str, Option<i64>) {
-	if matches!(err.query_details(), Some(surrealdb_types::QueryError::Cancelled)) {
-		return if dialect == Dialect::MySql {
-			("70100", Some(1317))
-		} else {
-			("57014", None)
-		};
-	}
-	match (dialect == Dialect::MySql, err.is_validation(), err.is_not_allowed()) {
-		(false, true, _) => ("42601", None),
-		(false, _, true) => ("42501", None),
-		(false, _, _) => ("XX000", None),
-		(true, true, _) => ("42000", Some(1064)),
-		(true, _, true) => ("42000", Some(1142)),
-		(true, _, _) => ("HY000", Some(1105)),
-	}
+	codes::classify(err, dialect)
 }
 
 /// The 1-based character position a parse error names, from its `at START..END` span, which is a
@@ -530,6 +812,18 @@ pub(super) async fn analyse(
 	typed::analyse(ds, session, transaction, dialect, text).await.ok()
 }
 
+/// A result as the SQL dialects show it: a record id is its bare key, since SQL values carry no
+/// table.
+#[cfg(any(feature = "postgres", feature = "mysql"))]
+fn show_record_ids_as_keys(value: PublicValue) -> PublicValue {
+	surrealdb_sqlplan::show_record_ids_as_keys(value)
+}
+
+#[cfg(not(any(feature = "postgres", feature = "mysql")))]
+fn show_record_ids_as_keys(value: PublicValue) -> PublicValue {
+	value
+}
+
 /// The statement entry of one engine result, typed and tagged from the statement's `described`
 /// analysis when there is one.
 pub(super) fn result_entry(
@@ -539,7 +833,7 @@ pub(super) fn result_entry(
 	described: Option<&typed::Described>,
 ) -> PublicValue {
 	let time = format!("{:?}", result.time);
-	let rows = match result.result {
+	let rows = match result.result.map(show_record_ids_as_keys) {
 		Ok(PublicValue::Array(rows)) => rows.into_vec(),
 		Ok(PublicValue::None | PublicValue::Null) => Vec::new(),
 		Ok(other) => vec![other],
@@ -548,7 +842,11 @@ pub(super) fn result_entry(
 	let kind = typed::kind_of(described);
 	let count = rows.len();
 	let (columns, shaped) = if typed::answers_with_rows(described) {
-		typed::shape(rows, described.and_then(|described| described.columns.as_deref()))
+		typed::shape(
+			rows,
+			described.and_then(|described| described.columns.as_deref()),
+			described.map_or(&[][..], |described| described.returning_order.as_slice()),
+		)
 	} else {
 		(Vec::new(), Vec::new())
 	};
@@ -587,8 +885,24 @@ pub(super) fn response(
 }
 
 /// The response object of an atomic call: `committed` says whether its transaction committed,
-/// which is not so when a statement failed (the entries before the failure were rolled back).
+/// which is not so when a statement failed: the entries before the failure keep their rows and
+/// carry `rolled_back: true`.
 pub(super) fn response_atomic(statements: Vec<PublicValue>, committed: bool) -> PublicValue {
+	let statements: Vec<PublicValue> = if committed {
+		statements
+	} else {
+		statements
+			.into_iter()
+			.map(|mut entry| {
+				if let PublicValue::Object(object) = &mut entry
+					&& matches!(object.get("status"), Some(PublicValue::String(status)) if status == "OK")
+				{
+					object.insert("rolled_back", PublicValue::Bool(true));
+				}
+				entry
+			})
+			.collect()
+	};
 	let mut transaction = surrealdb_types::Object::new();
 	transaction.insert("status", PublicValue::String("idle".to_owned()));
 	transaction.insert("committed", PublicValue::Bool(committed));
@@ -818,7 +1132,7 @@ mod tests {
 		for text in
 			["BEGIN", " begin work; ", "START TRANSACTION", "BEGIN\tWORK", "start\ntransaction"]
 		{
-			assert!(matches!(control(text, Dialect::PgSql), Some(Control::Begin)), "{text}");
+			assert!(matches!(control(text, Dialect::PgSql), Some(Control::Begin(_))), "{text}");
 		}
 		for text in ["COMMIT", "end"] {
 			assert!(matches!(control(text, Dialect::MySql), Some(Control::Commit)), "{text}");
@@ -828,6 +1142,194 @@ mod tests {
 		}
 		assert!(control("SELECT 1", Dialect::PgSql).is_none());
 		assert!(control("BEGIN; SELECT 1", Dialect::PgSql).is_none());
+	}
+
+	fn modes(control: Option<Control>) -> TxnModes {
+		match control {
+			Some(Control::Begin(modes)) => modes,
+			other => panic!("not a BEGIN: {}", other.is_some()),
+		}
+	}
+
+	#[cfg(feature = "postgres")]
+	#[test]
+	fn pgsql_begin_carries_its_isolation_level_and_access_mode() {
+		use crate::kvs::Isolation;
+		let begin = |text: &str| modes(control(text, Dialect::PgSql));
+		assert_eq!(begin("BEGIN"), TxnModes::default());
+		assert_eq!(
+			begin("BEGIN ISOLATION LEVEL SERIALIZABLE"),
+			TxnModes {
+				isolation: Some(Isolation::Serializable),
+				read_only: None
+			}
+		);
+		for level in ["REPEATABLE READ", "READ COMMITTED", "READ UNCOMMITTED"] {
+			assert_eq!(
+				begin(&format!("BEGIN ISOLATION LEVEL {level}")).isolation,
+				Some(Isolation::Snapshot),
+				"{level}"
+			);
+		}
+		assert_eq!(
+			begin("START TRANSACTION READ ONLY"),
+			TxnModes {
+				isolation: None,
+				read_only: Some(true)
+			}
+		);
+		assert_eq!(
+			begin("begin transaction isolation level serializable read only"),
+			TxnModes {
+				isolation: Some(Isolation::Serializable),
+				read_only: Some(true)
+			}
+		);
+	}
+
+	#[cfg(feature = "mysql")]
+	#[test]
+	fn mysql_start_transaction_carries_its_access_mode() {
+		let begin = |text: &str| modes(control(text, Dialect::MySql));
+		assert_eq!(begin("START TRANSACTION"), TxnModes::default());
+		assert_eq!(begin("START TRANSACTION WITH CONSISTENT SNAPSHOT"), TxnModes::default());
+		for text in [
+			"START TRANSACTION READ ONLY",
+			"START TRANSACTION READ ONLY, WITH CONSISTENT SNAPSHOT",
+			"START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY",
+		] {
+			assert_eq!(begin(text).read_only, Some(true), "{text}");
+		}
+		assert_eq!(begin("START TRANSACTION READ WRITE").read_only, None);
+	}
+
+	#[test]
+	fn set_transaction_chooses_modes_for_the_open_next_or_every_later_transaction() {
+		use crate::kvs::Isolation;
+		let set = |text: &str| match control(text, Dialect::PgSql) {
+			Some(Control::SetTransaction {
+				modes,
+				session,
+			}) => (modes, session),
+			_ => panic!("{text} is not a SET TRANSACTION"),
+		};
+		assert_eq!(
+			set("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"),
+			(
+				TxnModes {
+					isolation: Some(Isolation::Serializable),
+					read_only: None
+				},
+				false
+			)
+		);
+		assert_eq!(
+			set("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"),
+			(
+				TxnModes {
+					isolation: None,
+					read_only: Some(true)
+				},
+				true
+			)
+		);
+		assert_eq!(
+			set("set session transaction isolation level read committed, read write;"),
+			(
+				TxnModes {
+					isolation: Some(Isolation::Snapshot),
+					read_only: Some(false)
+				},
+				true
+			)
+		);
+		assert!(control("SET TRANSACTION SNAPSHOT '000-1'", Dialect::PgSql).is_none());
+		assert!(control("SET TRANSACTION", Dialect::PgSql).is_none());
+		assert!(matches!(
+			control("/* client */ SET TRANSACTION READ ONLY", Dialect::PgSql),
+			Some(Control::SetTransaction { .. })
+		));
+		assert!(control("SET timezone = 'UTC'", Dialect::PgSql).is_some());
+	}
+
+	#[test]
+	fn the_sql_isolation_levels_name_the_engines_two() {
+		use crate::kvs::Isolation;
+		for (name, level) in [
+			("snapshot", Isolation::Snapshot),
+			("Repeatable  Read", Isolation::Snapshot),
+			("READ COMMITTED", Isolation::Snapshot),
+			("read uncommitted", Isolation::Snapshot),
+			("'serializable'", Isolation::Serializable),
+		] {
+			assert_eq!(isolation_named(name), Some(level), "{name}");
+		}
+		assert_eq!(isolation_named("repeatable"), None);
+		assert_eq!(isolation_named("linearizable"), None);
+	}
+
+	#[test]
+	fn an_atomic_call_takes_isolation_and_read_only_and_no_other_call_does() {
+		let parse = |isolation: Option<&str>, read_only: Option<bool>, atomic: bool| {
+			let mut options = surrealdb_types::Object::new();
+			options.insert("atomic", PublicValue::Bool(atomic));
+			if let Some(isolation) = isolation {
+				options.insert("isolation", PublicValue::String(isolation.to_owned()));
+			}
+			if let Some(read_only) = read_only {
+				options.insert("readOnly", PublicValue::Bool(read_only));
+			}
+			parse_options(Some(PublicValue::Object(options)))
+		};
+		let parsed = parse(Some("serializable"), Some(true), true).unwrap();
+		assert_eq!(parsed.isolation, Some(crate::kvs::Isolation::Serializable));
+		assert!(parsed.read_only);
+		assert!(parse(Some("serializable"), None, false).is_err());
+		assert!(parse(None, Some(true), false).is_err());
+		assert!(parse(Some("bogus"), None, true).is_err());
+		assert!(parse(None, Some(false), false).is_ok());
+	}
+
+	#[test]
+	fn a_response_marks_the_entries_an_uncommitted_call_rolled_back() {
+		let ok = || PublicValue::Object(surrealdb_types::object! { status: "OK" });
+		let err = || PublicValue::Object(surrealdb_types::object! { status: "ERR" });
+		let response = |committed| {
+			let PublicValue::Object(object) = response_atomic(vec![ok(), err()], committed) else {
+				panic!("not an object")
+			};
+			let Some(PublicValue::Array(statements)) = object.get("statements").cloned() else {
+				panic!("no statements")
+			};
+			statements.into_vec()
+		};
+		let rolled_back = |entry: &PublicValue| matches!(entry, PublicValue::Object(o) if o.get("rolled_back") == Some(&PublicValue::Bool(true)));
+		let uncommitted = response(false);
+		assert!(rolled_back(&uncommitted[0]));
+		assert!(!rolled_back(&uncommitted[1]));
+		assert!(!response(true).iter().any(rolled_back));
+	}
+
+	#[test]
+	fn returning_columns_follow_the_list_with_a_star_at_its_place() {
+		let keys = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+		let order = |entries: &[Option<&str>]| {
+			entries.iter().map(|entry| entry.map(str::to_owned)).collect::<Vec<_>>()
+		};
+		let engine = keys(&["age", "id", "name"]);
+		assert_eq!(typed::ordered(engine.clone(), &[]), engine);
+		assert_eq!(
+			typed::ordered(engine.clone(), &order(&[Some("name"), Some("id"), Some("age")])),
+			keys(&["name", "id", "age"])
+		);
+		assert_eq!(
+			typed::ordered(engine.clone(), &order(&[Some("name"), None])),
+			keys(&["name", "age", "id"])
+		);
+		assert_eq!(
+			typed::ordered(engine, &order(&[None, Some("name")])),
+			keys(&["age", "id", "name"])
+		);
 	}
 
 	#[cfg(feature = "mysql")]

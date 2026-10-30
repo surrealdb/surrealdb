@@ -626,6 +626,7 @@ pub fn bind_expr(
 					link_table: None,
 					declared_type: crate::SqlType::Unknown,
 					aggregate_output: false,
+					key_read: crate::ir::KeyRead::None,
 					also_in: Vec::new(),
 				})]
 			} else {

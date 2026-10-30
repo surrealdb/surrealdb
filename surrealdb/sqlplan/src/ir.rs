@@ -157,6 +157,31 @@ pub enum BoundJoinCondition {
 	Using(Vec<String>),
 }
 
+/// How text compared with a record key is read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum KeyRead {
+	/// As it is.
+	#[default]
+	None,
+	/// As the integer it spells.
+	Int,
+	/// As a uuid.
+	Uuid,
+}
+
+impl KeyRead {
+	/// How text is read as a key of type `ty`.
+	pub fn of(ty: crate::SqlType) -> Self {
+		if matches!(ty, crate::SqlType::Int2 | crate::SqlType::Int4 | crate::SqlType::Int8) {
+			Self::Int
+		} else if ty == crate::SqlType::Uuid {
+			Self::Uuid
+		} else {
+			Self::None
+		}
+	}
+}
+
 /// A bound column reference, resolved to a specific relation index and column name.
 ///
 /// Equality is that of every field: two references are equal when they were bound to the same
@@ -183,6 +208,10 @@ pub struct BoundColumnRef {
 	/// column, and for the `id` of a derived table, subquery alias, CTE or `VALUES` list, whose
 	/// `id` is already a plain value.
 	pub id_table: Option<String>,
+	/// How text compared with this column's key is read: the type of the `id` of the table this
+	/// column is the `id` of, or links to, when the catalog says text is read as that type
+	/// ([`crate::catalog::BinderCatalog::write_type`]). [`KeyRead::None`] for every other column.
+	pub key_read: KeyRead,
 	/// The table whose record links this column holds.
 	///
 	/// Set for a base-table field declared as a link to one table (`record<t>`) and retained
@@ -235,6 +264,7 @@ impl BoundColumnRef {
 			&& self.declared_type == other.declared_type
 			&& self.correlation_depth == other.correlation_depth
 			&& self.id_table == other.id_table
+			&& self.key_read == other.key_read
 			&& self.link_table == other.link_table
 			&& self.aggregate_output == other.aggregate_output
 	}

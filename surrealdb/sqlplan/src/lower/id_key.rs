@@ -20,7 +20,7 @@ use surrealdb_expr::expr::{BinaryOperator, Function, Param, PrefixOperator};
 use surrealdb_expr::val::Number;
 use surrealdb_strand::{Strand, TableName};
 
-use crate::ir::{BoundColumnRef, BoundExpr, BoundLiteral};
+use crate::ir::{BoundColumnRef, BoundExpr, BoundLiteral, KeyRead};
 use crate::lower::expr::lower_column_raw;
 
 /// A `BoundExpr` that names the key of a record: an integer or string literal, or a parameter.
@@ -403,6 +403,89 @@ fn record_of_with(table: &str, key: LogicalExpr, preserve_value: bool) -> Logica
 				otherwise: Some(call(other)),
 			}))
 		}
+	}
+}
+
+/// The variable the `pgsql` and `mysql` RPC methods set to `true` for the statements they run:
+/// their parameters carry no declared type, so a parameter that holds text is read as the type of
+/// the column or key it meets. A wire connection declares its parameters' types and leaves it
+/// unset, so a parameter declared as text stays text.
+pub const UNTYPED_PARAMS_VAR: &str = "sql_untyped_params";
+
+/// `is_string(value)`, and, for a parameter, that the statement's parameters are untyped.
+pub(crate) fn text_param_guard(value: LogicalExpr) -> LogicalExpr {
+	let is_text = LogicalExpr::Call(Box::new(LogicalCall {
+		receiver: Function::Normal("type::is_string".to_string()),
+		args: vec![value],
+	}));
+	LogicalExpr::Binary {
+		left: Box::new(is_text),
+		op: BinaryOperator::And,
+		right: Box::new(LogicalExpr::Param(Param::from(UNTYPED_PARAMS_VAR.to_string()))),
+	}
+}
+
+/// `key`, read as the key type `read` when it is text. An integer key column is named by `'7'` as
+/// it is by `7`; any other value is the key as it is, as is any key of a column whose text is not
+/// read.
+pub(crate) fn key_read_as(read: KeyRead, key: LogicalExpr) -> LogicalExpr {
+	let cast = if read == KeyRead::Int {
+		surrealdb_expr::expr::Kind::Int
+	} else if read == KeyRead::Uuid {
+		surrealdb_expr::expr::Kind::Uuid
+	} else {
+		return key;
+	};
+	if let LogicalExpr::Literal(LogicalLiteral::String(text)) = &key
+		&& read == KeyRead::Int
+		&& let Ok(number) = text.as_str().parse::<i64>()
+	{
+		return LogicalExpr::Literal(LogicalLiteral::Integer(number));
+	}
+	if matches!(key, LogicalExpr::Literal(LogicalLiteral::String(_))) && read == KeyRead::Uuid {
+		return LogicalExpr::Prefix {
+			op: PrefixOperator::Cast(cast),
+			expr: Box::new(key),
+		};
+	}
+	if matches!(key, LogicalExpr::Param(_)) {
+		return LogicalExpr::If(Box::new(LogicalIf {
+			branches: vec![(
+				text_param_guard(key.clone()),
+				LogicalExpr::Prefix {
+					op: PrefixOperator::Cast(cast),
+					expr: Box::new(key.clone()),
+				},
+			)],
+			otherwise: Some(key),
+		}));
+	}
+	key
+}
+
+/// The record of `table` named by the key operand `key`, read as the key type `read`.
+pub(crate) fn record_of_operand_typed(
+	table: &str,
+	key: &KeyOperand<'_>,
+	read: KeyRead,
+) -> LogicalExpr {
+	match key {
+		KeyOperand::Str(text) => {
+			let literal = LogicalExpr::Literal(LogicalLiteral::String(Strand::from(*text)));
+			let read_key = key_read_as(read, literal);
+			if let LogicalExpr::Literal(LogicalLiteral::Integer(number)) = read_key {
+				record_of_operand(table, &KeyOperand::Int(number))
+			} else if read == KeyRead::Uuid {
+				record_of(table, read_key)
+			} else {
+				record_of_operand(table, key)
+			}
+		}
+		KeyOperand::Param(name) => record_of(
+			table,
+			key_read_as(read, LogicalExpr::Param(Param::from((*name).to_string()))),
+		),
+		KeyOperand::Int(_) => record_of_operand(table, key),
 	}
 }
 
