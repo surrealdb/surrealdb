@@ -60,6 +60,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.diff.outputs.docs_only }}
       parser: ${{ steps.diff.outputs.parser }}
+      orm: ${{ steps.diff.outputs.orm }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -75,6 +76,14 @@ jobs:
       # can change a rendered error), the toolchain and the CI wiring. The crate
       # list is the closure of surrealdb-expr's workspace dependencies; extend
       # it when that closure grows. Push runs check the digests regardless.
+      #
+      # `orm` is true when the change can alter what the ORM compatibility
+      # harness observes: the SQL front ends and their wire listeners, the
+      # engine crates they execute on, the harness itself, the dependency
+      # lockfile, the toolchain and the CI wiring. Everything else skips the
+      # harness on pull requests; pushes and the merge queue run it regardless.
+      # The crate list is the workspace closure of surrealdb-pgwire plus
+      # surrealdb-mywire; extend it when that closure grows.
       - name: Classify changed files
         id: diff
         env:
@@ -83,6 +92,7 @@ jobs:
         run: |
           docs_only=false
           parser=true
+          orm=true
           if [[ -n "$PR" ]]; then
             if files=$(gh api "repos/${{ github.repository }}/pulls/$PR/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
               if [[ -n "$files" ]] && ! grep -qvE '(^(doc|docs|img)/|^LICENSE$|^[^/]+\.md$)' <<<"$files"; then
@@ -91,10 +101,16 @@ jobs:
               if [[ -n "$files" ]] && ! grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/ci\.yml$|actions/)|language-tests/tests/|surrealdb/(cnf|collections|common|expr|iam|kvs|parse-common|parser-next|stored-derive|strand|types)/)' <<<"$files"; then
                 parser=false
               fi
+              if [[ -n "$files" ]] && ! grep -qE '^(Cargo\.(toml|lock)$|rust-toolchain|\.cargo/|Makefile\.ci\.toml$|\.github/(workflows/(ci|orm-compat)\.yml$|actions/)|tests/orm-compat/|surrealdb/(catalog|cnf|collections|common|core|datastore|expr|gql|iam|idx|keyspace-macro|kvs|kvs-any|kvs-mem|kvs-surrealkv|kvs-test|mysql|mywire|observe|parse-common|parser-next|pgsql|pgwire|rpc|runtime|sqlfront-derive|sqlfront-spec|sqlplan|stored-derive|strand|types)/|surrealism/(runtime|types|verify)/)' <<<"$files"; then
+                orm=false
+              fi
             fi
           fi
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "parser=$parser" >> "$GITHUB_OUTPUT"
+          {
+            echo "docs_only=$docs_only"
+            echo "parser=$parser"
+            echo "orm=$orm"
+          } >> "$GITHUB_OUTPUT"
 
   # Every consumer of this job's binary runs on arm on pull requests, and the
   # job gates all of them, so an amd64 leg there would hold them back for a
@@ -972,6 +988,52 @@ jobs:
 
       - name: Run SQL client tests
         run: cargo make ci-sql-clients
+
+  orm-compat:
+    name: ORM compatibility (Prisma, Drizzle, TypeORM)
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.orm != 'false' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    timeout-minutes: 30
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Run the ORM compatibility subset
+        run: cargo make ci-orm-compat
+
+      - name: Save logs as artifact
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: orm-compat-pr-logs
+          path: |
+            tests/orm-compat/results.json
+            tests/orm-compat/cli-results.json
+            tests/orm-compat/cli-logs/
+            target/orm-compat-logs/
+          if-no-files-found: ignore
 
   # ----------------------------------------
   # Integration tests
@@ -1999,6 +2061,7 @@ jobs:
       # PostgreSQL front end
       - pgsql
       - sql-clients
+      - orm-compat
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -2051,6 +2114,7 @@ jobs:
             "${{ needs.wasm-engine.result }}"
             "${{ needs.pgsql.result }}"
             "${{ needs.sql-clients.result }}"
+            "${{ needs.orm-compat.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

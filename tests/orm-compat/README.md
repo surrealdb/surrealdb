@@ -12,6 +12,7 @@ separately, see "Upstream suites" below.
 ```sh
 cargo make orm-compat harness             # or: tests/orm-compat/run.sh harness
 cargo make orm-compat harness --record    # also refresh results/ (needs every reference check to pass)
+tests/orm-compat/run.sh pr                # pull-request subset: SurrealDB only, gated by expected-failures.json
 cargo make orm-compat upstream            # all upstream suites; or name one: typeorm drizzle drizzle-kit prisma
 ```
 
@@ -21,7 +22,15 @@ already taken, because a second listener on a taken port fails silently. It then
 SurrealDB listener and the PostgreSQL 18.4 reference, runs the runtime checks on SurrealDB, the same
 checks with `REFERENCE=1`, and the schema suites, and stops both servers on exit, including on
 Ctrl-C. Server logs go to `target/orm-compat-logs`. `run.sh services` only starts both servers.
-The `ORM compatibility` workflow runs the harness and the upstream suites nightly on `main` (and on manual dispatch) and uploads the results; it never runs on pull requests and is not a required check.
+The `ORM compatibility` workflow runs the harness and the upstream suites nightly on `main` (and on manual dispatch) and uploads the results; it measures and is not a required check.
+
+## Pull-request subset
+
+The `ORM compatibility (Prisma, Drizzle, TypeORM)` job in `ci.yml` runs `run.sh pr` (through `cargo make ci-orm-compat`) and is part of the required checks. It builds the listener with the dev profile, runs the runtime checks and the Prisma and Drizzle schema tools against SurrealDB only, and skips the PostgreSQL reference and the upstream suites, which stay nightly. A run takes about a minute after the build.
+
+`pr-gate.py` compares every case with `expected-failures.json`, whose entries are `runtime/<orm>/<name>` or `schema/<orm>/<name>`. The run fails on a case that does not pass and is not listed, and on a listed case that passes, so the list shrinks as gaps close. The list is empty when every case passes. Add an entry only for a gap that is understood and tracked; never to silence a regression.
+
+The job runs on pull requests that touch the SQL front ends, the wire listeners, the engine crates they execute on, this directory, the lockfile or the CI wiring (the `orm` output of the `changes` job), and on every push and merge-queue run. `ORM_COMPAT_CLI_TIMEOUT_S` bounds each schema-tool command (default 30 seconds; CI uses 120 because the dev build is slower).
 
 The steps below are what the script does, for running them by hand.
 

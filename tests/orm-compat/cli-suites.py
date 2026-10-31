@@ -3,7 +3,9 @@ root = pathlib.Path(__file__).resolve().parent
 (root / 'cli-logs').mkdir(exist_ok=True)
 results = []
 
-def run(target, orm, name, args, url, extra=None, check=None, timeout=30):
+def run(target, orm, name, args, url, extra=None, check=None, timeout=None):
+    if timeout is None:
+        timeout = int(os.environ.get('ORM_COMPAT_CLI_TIMEOUT_S', '30'))
     env = dict(os.environ, DATABASE_URL=url, PRISMA_HIDE_UPDATE_MESSAGE='1')
     env['NODE_OPTIONS'] = '--require ' + str(root / 'trace-pg.cjs')
     env['ORM_TRACE_PATH'] = str(root / 'cli-logs' / f'{target}-{orm}-{name}-sql.json')
@@ -29,7 +31,7 @@ def run(target, orm, name, args, url, extra=None, check=None, timeout=30):
     results.append(record)
     print(target, orm, name, record['status'], flush=True)
     return record['status'] == 'pass'
-for target in ['reference', 'surrealdb']:
+for target in os.environ.get('ORM_COMPAT_TARGETS', 'reference,surrealdb').split(','):
     ref = target == 'reference'
     port = 15433 if ref else 15432
     base = f'postgresql://root:root@127.0.0.1:{port}/' if ref else f'postgresql://root@127.0.0.1:{port}/'

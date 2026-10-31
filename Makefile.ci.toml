@@ -799,6 +799,22 @@ script = '''
     echo "✅ SQL client tests passed successfully!"
 '''
 
+[tasks.ci-orm-compat]
+category = "CI - INTEGRATION TESTS"
+description = "Run the targeted Prisma, Drizzle and TypeORM harness against the PostgreSQL wire listener, gated by expected-failures.json"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    node --version
+
+    # The debug build is what the other jobs cache; its schema-tool commands are slower than the
+    # release build's, so their per-command bound is raised.
+    ORM_COMPAT_PROFILE=dev ORM_COMPAT_CLI_TIMEOUT_S=120 tests/orm-compat/run.sh pr
+
+    echo "✅ ORM compatibility subset passed successfully!"
+'''
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------

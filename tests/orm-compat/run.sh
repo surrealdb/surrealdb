@@ -3,11 +3,12 @@
 #
 #   ./run.sh harness [--record]     targeted probes: SurrealDB, then the PostgreSQL control, then schema tools
 #   ./run.sh upstream [ORM...]      upstream test suites (typeorm, drizzle, drizzle-kit, prisma; default all)
+#   ./run.sh pr                     pull-request subset: the targeted probes on SurrealDB only, gated by expected-failures.json
 #   ./run.sh services               start both servers and wait, for manual use (Ctrl-C stops them)
 #
 # Ports 15432 (SurrealDB listener) and 15433 (PostgreSQL 18.4 reference) must be free. A second
 # listener on a taken port fails silently, so the script refuses to start instead.
-# Servers are always stopped on exit. Nothing here is wired into CI.
+# Servers are always stopped on exit. `pr` runs in CI on pull requests, `upstream` nightly.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,8 +28,10 @@ pids=()
 port_in_use() { (echo >/dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1; }
 
 require_free_ports() {
-	local busy=0
-	for port in 15432 15433; do
+	local busy=0 port
+	local ports=("$@")
+	[ ${#ports[@]} -gt 0 ] || ports=(15432 15433)
+	for port in "${ports[@]}"; do
 		if port_in_use "$port"; then
 			echo "port $port is already in use:" >&2
 			lsof -nP -iTCP:"$port" -sTCP:LISTEN >&2 2>/dev/null || true
@@ -75,7 +78,7 @@ ensure_npm() {
 }
 
 build_listener() {
-	(cd "$repo" && cargo build --locked "${profile_flag[@]}" -p surrealdb-pgwire --example orm_compat_server)
+	(cd "$repo" && cargo build --locked ${profile_flag[@]+"${profile_flag[@]}"} -p surrealdb-pgwire --example orm_compat_server)
 }
 
 listener_pid=""
@@ -131,6 +134,19 @@ run_harness() {
 	return "$failed"
 }
 
+# Pull-request subset: no PostgreSQL reference and no upstream suites. Every case must pass unless
+# expected-failures.json lists it, and a listed case that passes fails the run.
+run_pr() {
+	cd "$here"
+	rm -f results.json cli-results.json
+	npm run generate
+	local failed=0
+	npm test || true
+	ORM_COMPAT_TARGETS=surrealdb npm run schema-suites || true
+	python3 pr-gate.py || failed=1
+	return "$failed"
+}
+
 run_upstream() {
 	cd "$here"
 	local orms=("$@") status=0
@@ -151,6 +167,13 @@ case "$cmd" in
 harness)
 	start_services
 	run_harness "$@"
+	;;
+pr)
+	require_free_ports 15432
+	ensure_npm
+	build_listener
+	start_listener
+	run_pr
 	;;
 upstream)
 	# The reference cluster grows to gigabytes over a full run; it is cheap to recreate, so it is removed on exit.
